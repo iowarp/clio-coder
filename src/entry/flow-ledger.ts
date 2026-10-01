@@ -5,21 +5,34 @@
  * transcript, every later request from that session carries its restriction,
  * through summaries, compaction, resume and branch switches alike. The ledger
  * is one durable union per session, persisted as `custom` session entries of
- * type `flowRestriction` and rebuilt from the ledger whenever the current
- * session changes, so the model cannot erase it and an old session without
- * entries carries nothing rather than an invented history.
+ * type `clio_coder_flow_restriction` and rebuilt from the ledger whenever the
+ * current session changes, so the model cannot erase it and a session read
+ * successfully without entries carries nothing rather than an invented
+ * history.
+ *
+ * The ledger never downgrades on failure. A session whose ledger cannot be
+ * read, or a restriction that could not be persisted, leaves the ledger
+ * `unavailable`: in-memory restrictions still govern, and every outbound
+ * admission that asks `refusal()` is told to refuse until a later read or
+ * write succeeds. Persistence is retried on every later call.
  */
 
 import type { FlowRestrictionSet } from "../domains/safety/index.js";
 import { isFlowRestrictionSet, mergeFlowRestrictions } from "../domains/safety/index.js";
 import type { SessionContract, SessionEntry } from "../domains/session/index.js";
 
-export const FLOW_RESTRICTION_ENTRY_TYPE = "flowRestriction";
+export const FLOW_RESTRICTION_ENTRY_TYPE = "clio_coder_flow_restriction";
 
 export interface FlowLedger {
 	/** The union carried by the current session, or null when nothing restricted has entered it. */
 	current(): FlowRestrictionSet | null;
-	/** Record restrictions that just entered the session. Idempotent for an already-carried set. */
+	/**
+	 * Why provenance cannot be vouched for right now, or null. Non-null means
+	 * the session's ledger could not be read or a restriction could not be
+	 * persisted; an outbound transfer must be refused with this reason.
+	 */
+	refusal(): string | null;
+	/** Record restrictions that just entered the session. Persists before returning when it can. */
 	absorb(set: FlowRestrictionSet, origin: { tool?: string; toolCallId?: string }): void;
 }
 
@@ -40,53 +53,100 @@ export function createFlowLedger(deps: {
 }): FlowLedger {
 	let loadedFor: string | null = null;
 	let carried: FlowRestrictionSet | null = null;
+	let readFailure: string | null = null;
+	/** Sets absorbed in this process whose entry has not yet reached that session's ledger. */
+	const pending = new Map<string, Array<{ set: FlowRestrictionSet; origin: { tool?: string; toolCallId?: string } }>>();
+	let writeFailure: string | null = null;
 
 	const sync = (): void => {
 		const meta = deps.session?.current() ?? null;
 		const id = meta?.id ?? null;
-		if (id === loadedFor) return;
+		if (id === loadedFor && readFailure === null) return;
+		if (id !== loadedFor) {
+			// A different session: its ledger is the only authority for what it
+			// carries. Entries still pending for the old session stay queued under
+			// its id and are written when it is current again.
+			writeFailure = null;
+			carried = null;
+		}
 		loadedFor = id;
 		if (id === null) {
-			carried = null;
+			readFailure = null;
 			return;
 		}
 		try {
-			carried = flowRestrictionsFromEntries(deps.readEntries(id));
-		} catch {
-			// An unreadable ledger carries nothing; it also cannot vouch, and a
-			// later successful read of the same session replaces this.
-			carried = null;
-			loadedFor = null;
+			carried = mergeFlowRestrictions(
+				flowRestrictionsFromEntries(deps.readEntries(id)),
+				carried,
+				...(pending.get(id) ?? []).map((item) => item.set),
+			);
+			readFailure = null;
+		} catch (error) {
+			// Keep whatever is already known; the ledger stays unavailable until a
+			// later read succeeds, and every outbound admission is refused meanwhile.
+			readFailure = `information-flow provenance for session ${id} could not be read (${error instanceof Error ? error.message : String(error)}); outbound transfer is refused until the session ledger is readable`;
+		}
+	};
+
+	const flush = (): void => {
+		const session = deps.session;
+		const meta = session?.current();
+		if (!session || !meta) {
+			writeFailure = pending.size > 0 ? "information-flow restriction could not be persisted: no current session" : null;
+			return;
+		}
+		const queue = pending.get(meta.id);
+		if (queue === undefined || queue.length === 0) {
+			writeFailure = null;
+			return;
+		}
+		while (queue.length > 0) {
+			const next = queue[0];
+			if (next === undefined) break;
+			try {
+				session.appendEntry({
+					kind: "custom",
+					customType: FLOW_RESTRICTION_ENTRY_TYPE,
+					// A fact about the session's provenance, never a model message.
+					display: false,
+					parentTurnId: session.tree(meta.id).leafId ?? null,
+					data: {
+						set: next.set,
+						...(next.origin.tool !== undefined ? { tool: next.origin.tool } : {}),
+						...(next.origin.toolCallId !== undefined ? { toolCallId: next.origin.toolCallId } : {}),
+					},
+				});
+				queue.shift();
+				writeFailure = null;
+			} catch (error) {
+				writeFailure = `information-flow restriction could not be persisted to session ${meta.id} (${error instanceof Error ? error.message : String(error)}); outbound transfer is refused until it is`;
+				return;
+			}
 		}
 	};
 
 	return {
 		current() {
 			sync();
+			flush();
 			return carried;
+		},
+		refusal() {
+			sync();
+			flush();
+			return readFailure ?? writeFailure;
 		},
 		absorb(set, origin) {
 			sync();
 			const merged = mergeFlowRestrictions(carried, set);
-			if (merged === null) return;
 			const before = carried?.restrictions.length ?? 0;
 			carried = merged;
-			if (merged.restrictions.length === before) return;
-			const meta = deps.session?.current();
-			if (!meta || !deps.session) return;
-			try {
-				deps.session.appendEntry({
-					kind: "custom",
-					customType: FLOW_RESTRICTION_ENTRY_TYPE,
-					// A fact about the session's provenance, never a model message.
-					display: false,
-					parentTurnId: deps.session.tree(meta.id).leafId ?? null,
-					data: { set, ...(origin.tool !== undefined ? { tool: origin.tool } : {}), ...(origin.toolCallId !== undefined ? { toolCallId: origin.toolCallId } : {}) },
-				});
-			} catch {
-				// The in-memory union still governs this process; persistence is
-				// retried by the next absorb of a new restriction.
+			if (merged !== null && merged.restrictions.length > before && loadedFor !== null) {
+				const queue = pending.get(loadedFor) ?? [];
+				queue.push({ set, origin });
+				pending.set(loadedFor, queue);
 			}
+			flush();
 		},
 	};
 }

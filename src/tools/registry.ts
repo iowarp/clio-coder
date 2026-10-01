@@ -26,6 +26,7 @@ import type { FlowRestrictionSet } from "../domains/safety/information-flow.js";
 import {
 	EMPTY_INFORMATION_FLOW_POLICY,
 	evaluateInformationFlow,
+	isFlowRestrictionSet,
 	mergeFlowRestrictions,
 	resolveToolDestination,
 } from "../domains/safety/information-flow.js";
@@ -312,6 +313,10 @@ export interface RegistryDeps {
 	 */
 	flow?: {
 		carried(): FlowRestrictionSet | null;
+		/** Why provenance cannot be vouched for (unreadable or unpersisted ledger), or null. */
+		refusal(): string | null;
+		/** The gateway's pinned launch identity for an MCP tool, when a gateway is attached. */
+		mcpTransport?(tool: string): string | null;
 		absorb(set: FlowRestrictionSet, origin: { tool?: string; toolCallId?: string }): void;
 	};
 	/**
@@ -701,10 +706,12 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 	 * fetch loop through `flowAdmitsUrl`.
 	 */
 	const outboundFlowViolation = (spec: ToolSpec, call: ClassifierCall): string | null => {
+		const destination = resolveToolDestination(spec.name, call.args, (tool) => deps.flow?.mcpTransport?.(tool) ?? null);
+		if (destination === null) return null;
+		const refusal = deps.flow?.refusal() ?? null;
+		if (refusal !== null) return refusal;
 		const carried = deps.flow?.carried() ?? null;
 		if (carried === null) return null;
-		const destination = resolveToolDestination(spec.name, call.args);
-		if (destination === null) return null;
 		const verdict = evaluateInformationFlow({
 			restrictions: carried,
 			destination,
@@ -762,7 +769,7 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 				// What this result will carry, decided from the path or tool name
 				// before the body runs, so a link swapped in afterwards cannot
 				// unlabel it and so the label exists before any screening.
-				const sourceRestrictions = deps.safety.policy?.flowRestrictionsFor?.(call) ?? null;
+				const ruleRestrictions = deps.safety.policy?.flowRestrictionsFor?.(call) ?? null;
 				const result = await spec.run(preparedArgs, {
 					...callerOptions,
 					...(allowsObservationPath ? { allowsObservationPath } : {}),
@@ -785,17 +792,40 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 				const nestedBlocked = nestedBlockedVerdict(result);
 				if (nestedBlocked !== null) return nestedBlocked;
 				decision = nestedDecisions.get(result) ?? decision;
+				// A trusted body (dispatch, monitor) labels what it carried back from
+				// a worker's context; that label joins the source rule's own.
+				const reportedRestrictions = result.details?.[FLOW_RESTRICTIONS_DETAIL];
+				const sourceRestrictions = mergeFlowRestrictions(
+					ruleRestrictions,
+					isFlowRestrictionSet(reportedRestrictions) ? reportedRestrictions : null,
+				);
 				// The restriction enters the ledger before the result goes anywhere:
 				// not to the screening classifier, not to the hooks, not to the model.
-				if (sourceRestrictions !== null && result.kind === "ok") {
+				// An error can quote the source, so it is labeled and absorbed too.
+				if (sourceRestrictions !== null) {
 					deps.flow?.absorb(sourceRestrictions, {
 						tool: spec.name,
 						...(options?.toolCallId !== undefined ? { toolCallId: options.toolCallId } : {}),
 					});
+					// A label that did not reach the ledger must not be outlived by the
+					// content it labels: the transcript would then hold the bytes
+					// without the restriction across a restart. The content is withheld
+					// and the queued label is retried on the next ledger access.
+					const unlabeled = deps.flow?.refusal() ?? null;
+					if (unlabeled !== null) {
+						const reason = `${spec.name} result withheld: ${unlabeled}`;
+						recordRegistryDisposition(call, decision, "blocked", { reasonCode: FLOW_BLOCK_REASON_CODE, reasons: [reason] });
+						return { kind: "blocked", reason, decision };
+					}
 				}
-				const carriedForScreen =
-					result.kind === "ok" ? mergeFlowRestrictions(deps.flow?.carried() ?? null, sourceRestrictions) : null;
-				const screened = await screenExternalResult(spec, call, withFlowRestrictions(result, sourceRestrictions), options, carriedForScreen);
+				const carriedForScreen = mergeFlowRestrictions(deps.flow?.carried() ?? null, sourceRestrictions);
+				const screened = await screenExternalResult(
+					spec,
+					call,
+					withFlowRestrictions(result, sourceRestrictions),
+					options,
+					carriedForScreen,
+				);
 				const digest = toolResultDigestFor(spec, screened, resultDisposition, options);
 				const afterEffects = runToolHook("after_tool", spec, call, decision, options, screened, digest);
 				const finalResult = shapeToolResult(
@@ -807,7 +837,22 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 				return { kind: "ok", result: finalResult, decision };
 			} catch (err) {
 				const message = err instanceof Error ? err.message : String(err);
-				const result: ToolResult = { kind: "error", message };
+				// A body that threw may have read the source before failing, so
+				// its message carries the same label as a result would.
+				const thrownRestrictions = deps.safety.policy?.flowRestrictionsFor?.(call) ?? null;
+				if (thrownRestrictions !== null) {
+					deps.flow?.absorb(thrownRestrictions, {
+						tool: spec.name,
+						...(options?.toolCallId !== undefined ? { toolCallId: options.toolCallId } : {}),
+					});
+				}
+				const unlabeled = thrownRestrictions === null ? null : (deps.flow?.refusal() ?? null);
+				if (unlabeled !== null) {
+					const reason = `${spec.name} error withheld: ${unlabeled}`;
+					recordRegistryDisposition(call, decision, "blocked", { reasonCode: FLOW_BLOCK_REASON_CODE, reasons: [reason] });
+					return { kind: "blocked", reason, decision };
+				}
+				const result: ToolResult = withFlowRestrictions({ kind: "error", message }, thrownRestrictions);
 				const digest = toolResultDigestFor(spec, result, resultDisposition, options);
 				const afterEffects = runToolHook("after_tool", spec, call, decision, options, result, digest);
 				return {
@@ -1569,10 +1614,11 @@ const GUARD_BLOCK_REASON_CODE = "guard_block";
 /** Reason code of a final information-flow block, for the audit row and the panel. */
 const FLOW_BLOCK_REASON_CODE = "information-flow";
 /** Result detail that carries a restricted read's label to the host; never model text. */
-export const FLOW_RESTRICTIONS_DETAIL = "clio.flowRestrictions";
+export const FLOW_RESTRICTIONS_DETAIL = "clio_coder_flow_restrictions";
 
+/** An error message can quote the source too, so both result kinds carry the label. */
 function withFlowRestrictions(result: ToolResult, restrictions: FlowRestrictionSet | null): ToolResult {
-	if (restrictions === null || result.kind !== "ok") return result;
+	if (restrictions === null) return result;
 	return { ...result, details: { ...(result.details ?? {}), [FLOW_RESTRICTIONS_DETAIL]: restrictions } };
 }
 
@@ -1881,6 +1927,10 @@ function buildToolHookInput(
 	// Computed for before_tool only; after_tool consumers identify the call
 	// via toolCallId.
 	if (hook === "before_tool") metadata.callFingerprint = hashToolCall(spec.name, call.args ?? {});
+	// What the session already carries, so an adviser sees the restriction
+	// before any model send; the result's own label rides on toolResultDetails.
+	const carriedFlow = deps.flow?.carried() ?? null;
+	if (carriedFlow !== null) metadata.flowRuleIds = [...new Set(carriedFlow.restrictions.map((r) => r.ruleId))];
 	// A nested invocation (gateway → capability) is the model's one call seen
 	// twice by the hook layer; the loop guard counts and fingerprints only the
 	// outer occurrence. Every other hook still fires under the inner name.
