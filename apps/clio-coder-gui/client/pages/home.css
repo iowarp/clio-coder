@@ -231,7 +231,7 @@
 	padding: 0;
 	list-style: none;
 }
-.onboard > li {
+ol.onboard > li {
 	display: grid;
 	grid-template-columns: 32px minmax(0, 1fr);
 	gap: var(--space-4);
@@ -240,7 +240,7 @@
 	border-radius: 16px;
 	background: var(--wb-faint);
 }
-.onboard > li[data-done="true"] {
+ol.onboard > li[data-done="true"] {
 	border-color: var(--line);
 	background: transparent;
 }
@@ -255,7 +255,7 @@
 	font-weight: 600;
 	color: var(--ink-muted);
 }
-.onboard > li[data-done="true"] .onboard__mark {
+ol.onboard > li[data-done="true"] .onboard__mark {
 	border-color: var(--accent);
 	background: var(--accent-soft);
 	color: var(--accent);
@@ -278,7 +278,7 @@
 	line-height: 1.55;
 	color: var(--ink-muted);
 }
-.onboard > li[data-done="true"] p {
+ol.onboard > li[data-done="true"] p {
 	margin-bottom: 0;
 }
 .onboard .primary {

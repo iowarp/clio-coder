@@ -162,7 +162,7 @@
 	gap: var(--space-3);
 	min-height: 22px;
 }
-.pane-card h3 {
+.pane-card h2 {
 	margin: 0;
 	font-family: var(--font-ui);
 	font-size: 12px;

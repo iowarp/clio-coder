@@ -83,7 +83,7 @@ export function ProgressView({
 		<div className="pane-cards">
 			<section className="pane-card" aria-labelledby="pane-goal">
 				<header>
-					<h3 id="pane-goal">Task</h3>
+					<h2 id="pane-goal">Task</h2>
 					<span className="pane-card__state" data-state={state}>
 						{overview.running ? <ClioPulse size={12} /> : null}
 						{state}
@@ -95,7 +95,7 @@ export function ProgressView({
 
 			<section className="pane-card" aria-labelledby="pane-plan">
 				<header>
-					<h3 id="pane-plan">Plan</h3>
+					<h2 id="pane-plan">Plan</h2>
 					{plan && plan.rows.length > 0 ? (
 						<span className="pane-card__state">
 							{done}/{plan.rows.length}
@@ -125,7 +125,7 @@ export function ProgressView({
 
 			<section className="pane-card" aria-labelledby="pane-changes">
 				<header>
-					<h3 id="pane-changes">Changes</h3>
+					<h2 id="pane-changes">Changes</h2>
 					{changes.files.length > 0 ? (
 						<button type="button" className="pane-link" onClick={() => onOpen("changes")}>
 							Review
@@ -148,7 +148,7 @@ export function ProgressView({
 			{liveWorkers > 0 ? (
 				<section className="pane-card" aria-labelledby="pane-agents">
 					<header>
-						<h3 id="pane-agents">Agents</h3>
+						<h2 id="pane-agents">Agents</h2>
 						<button type="button" className="pane-link" onClick={() => onOpen("agents")}>
 							Open
 						</button>

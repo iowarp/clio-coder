@@ -326,25 +326,27 @@ export const SessionPane = memo(function SessionPane({
 					}}
 				/>
 			) : null}
-			<dialog
-				ref={dialog}
-				open={wide && open}
-				className="pane__dialog"
-				role={wide ? "presentation" : undefined}
-				aria-label={wide ? undefined : "Task pane"}
-				onKeyDown={(event) => {
-					if (matchesKeybinding(KEYBINDINGS.sessionPanel, event)) {
+			{wide ? (
+				<div className="pane__dialog">{content}</div>
+			) : (
+				<dialog
+					ref={dialog}
+					className="pane__dialog"
+					aria-label="Task pane"
+					onKeyDown={(event) => {
+						if (matchesKeybinding(KEYBINDINGS.sessionPanel, event)) {
+							event.preventDefault();
+							onClose();
+						}
+					}}
+					onCancel={(event) => {
 						event.preventDefault();
 						onClose();
-					}
-				}}
-				onCancel={(event) => {
-					event.preventDefault();
-					onClose();
-				}}
-			>
-				{content}
-			</dialog>
+					}}
+				>
+					{content}
+				</dialog>
+			)}
 		</aside>
 	);
 });
