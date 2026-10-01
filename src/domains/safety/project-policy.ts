@@ -3,14 +3,8 @@ import { existsSync, readFileSync, realpathSync } from "node:fs";
 import path from "node:path";
 import { parse as parseYaml } from "yaml";
 import type { ActionClass } from "./action-classifier.js";
-import {
-	EMPTY_INFORMATION_FLOW_INPUT,
-	type FlowSourceRuleInput,
-	type FlowTargetBinding,
-	flowEndpointIdentity,
-	type InformationFlowPolicyInput,
-	isFlowRecipientRef,
-} from "./information-flow.js";
+import type { FlowSourceRuleInput, FlowTargetBinding, InformationFlowPolicyInput } from "./information-flow.js";
+import { EMPTY_INFORMATION_FLOW_INPUT, flowEndpointIdentity, isFlowRecipientRef } from "./information-flow.js";
 import type { PathPolicyInput } from "./path-policy.js";
 
 export type ShellOperatorPolicy = "deny" | "allow";
@@ -296,7 +290,7 @@ function parseRecipientList(value: unknown, label: string, errors: string[]): st
 		const item = value[index];
 		if (typeof item !== "string" || !isFlowRecipientRef(item.trim())) {
 			errors.push(
-				`${label}[${index}] must be one of target:<id>, endpoint:<url>, origin:<scheme://host[:port]>, tool:<name>, group:<name>`,
+				`${label}[${index}] must be one of target:<id>, endpoint:<url>, origin:<scheme://host[:port]>, group:<name>`,
 			);
 			continue;
 		}

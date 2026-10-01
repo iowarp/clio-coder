@@ -32,12 +32,8 @@ import {
 } from "./default-path-policy.js";
 import { normalizedGitCommands } from "./git-command-normalization.js";
 import { classifyBashGit, splitGitChdir } from "./git-policy.js";
-import {
-	compileInformationFlowPolicy,
-	type FlowRestrictionSet,
-	flowRestrictionsForCall,
-	type InformationFlowPolicy,
-} from "./information-flow.js";
+import type { FlowRestrictionSet, InformationFlowPolicy } from "./information-flow.js";
+import { compileInformationFlowPolicy, flowRestrictionsForCall } from "./information-flow.js";
 import { inertQuotedMatch } from "./literal-exemption.js";
 import {
 	type CompiledPathPolicy,

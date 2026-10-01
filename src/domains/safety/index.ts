@@ -30,18 +30,20 @@ export type {
 	FinishContractReason,
 } from "./finish-contract.js";
 export { assessFinishContract, FINISH_CONTRACT_ADVISORY_MESSAGE } from "./finish-contract.js";
+export type {
+	FlowDestination,
+	FlowRestriction,
+	FlowRestrictionSet,
+	FlowVerdictKind,
+	InformationFlowInput,
+	InformationFlowPolicy,
+	InformationFlowVerdict,
+} from "./information-flow.js";
 export {
 	EMPTY_INFORMATION_FLOW_POLICY,
 	evaluateInformationFlow,
-	type FlowDestination,
-	type FlowRestriction,
-	type FlowRestrictionSet,
-	type FlowVerdictKind,
 	flowEndpointIdentity,
 	flowRestrictionsForCall,
-	type InformationFlowInput,
-	type InformationFlowPolicy,
-	type InformationFlowVerdict,
 	isFlowRestrictionSet,
 	mergeFlowRestrictions,
 	resolveModelDestination,

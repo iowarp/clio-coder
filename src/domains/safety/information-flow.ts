@@ -15,13 +15,22 @@
  * - `endpoint:<url>`: one exact outbound URL identity (see
  *   {@link flowEndpointIdentity}).
  * - `origin:<scheme://host[:port]>`: every URL on that origin.
- * - `tool:<name>`: one mediated tool by registry name (an MCP tool).
  * - `group:<name>`: a group from `informationFlow.recipients`.
+ *
+ * An MCP tool cannot be a recipient: its registry name is not pinned to the
+ * server transport behind it, so only an `endpoint:`/`origin:` identity can
+ * approve an outbound tool call, and an MCP call carrying restricted content
+ * is refused.
  *
  * An empty recipient list forbids every transfer. A restriction carried on
  * content is a reference to the rule plus the recipients it allowed when the
  * content was read, never the content. Model-inferred annotations ride along
  * as `advisory` and never produce a verdict.
+ *
+ * While the project policy is untrusted or changed, its source rules still
+ * label what they name, with no recipients: an unapproved edit can forbid
+ * more but never approve a destination. A rule an unapproved edit removed is
+ * not recoverable here; the trust notice is the operator's signal to review.
  *
  * The evaluator is pure. `permitted` never grants the underlying permission
  * to read, write, or call anything; it only says the policy does not forbid
@@ -34,7 +43,8 @@ import path from "node:path";
 import { canonicalizePath, canonicalizeRawPath, createPathWalkMemo } from "../../core/path-canonical.js";
 import { isMcpToolName, ToolNames } from "../../core/tool-names.js";
 import { expandPath } from "../../tools/path-utils.js";
-import { type CompiledPathPolicy, compilePathPolicy, evaluatePathPolicy } from "./path-policy.js";
+import type { CompiledPathPolicy } from "./path-policy.js";
+import { compilePathPolicy, evaluatePathPolicy, isSameOrDescendant } from "./path-policy.js";
 
 /** One restriction carried on content: a reference to the rule, never the content. */
 export interface FlowRestriction {
@@ -143,7 +153,7 @@ export interface InformationFlowInput {
 	readonly policy: InformationFlowPolicy;
 }
 
-const RECIPIENT_PREFIXES = ["target:", "endpoint:", "origin:", "tool:", "group:"] as const;
+const RECIPIENT_PREFIXES = ["target:", "endpoint:", "origin:", "group:"] as const;
 
 export function isFlowRecipientRef(value: string): boolean {
 	return RECIPIENT_PREFIXES.some((prefix) => value.startsWith(prefix) && value.length > prefix.length);
@@ -291,10 +301,11 @@ function expandRecipients(
 }
 
 /**
- * Compile the trusted policy once. Paths reuse the path-policy compiler so a
- * source rule matches exactly what a `zeroAccessPaths` entry would. An
- * untrusted or invalid policy compiles to no rules: it restricts nothing new
- * and cannot vouch for anything.
+ * Compile the policy once. Paths reuse the path-policy compiler so a source
+ * rule matches exactly what a `zeroAccessPaths` entry would. An untrusted
+ * policy keeps its sources and loses every recipient: it can still label a
+ * restricted read, and nothing it says approves a destination. A policy
+ * without a hash (none on disk, or unreadable) compiles to no rules.
  */
 export function compileInformationFlowPolicy(
 	input: InformationFlowPolicyInput,
@@ -302,9 +313,9 @@ export function compileInformationFlowPolicy(
 	policyHash: string | null,
 	trusted: boolean,
 ): InformationFlowPolicy {
-	if (!trusted || policyHash === null) return { policyHash, trusted: false, rules: [] };
+	if (policyHash === null) return { policyHash, trusted: false, rules: [] };
 	const rules = input.sources.map((rule): CompiledSourceRule => {
-		const expanded = expandRecipients(rule.recipients, input);
+		const expanded = trusted ? expandRecipients(rule.recipients, input) : { recipients: [], dangling: [] };
 		return {
 			id: rule.id,
 			paths: rule.paths.length === 0 ? null : compilePathPolicy({ zeroAccessPaths: rule.paths }, policyRoot),
@@ -313,7 +324,7 @@ export function compileInformationFlowPolicy(
 			dangling: expanded.dangling,
 		};
 	});
-	return { policyHash, trusted: true, rules };
+	return { policyHash, trusted, rules };
 }
 
 function toolMatches(pattern: string, tool: string): boolean {
@@ -337,6 +348,17 @@ const READ_PATH_TOOLS: ReadonlyMap<string, string> = new Map([
 	[ToolNames.Data, "path"],
 ]);
 
+/** Tools that walk a directory: a restricted entry below the walked path is read through them. */
+const WALK_TOOLS: ReadonlySet<string> = new Set([ToolNames.Ls, ToolNames.Grep, ToolNames.Find]);
+
+/** The fixed directory a compiled entry starts under; a pattern's prefix before its first wildcard. */
+function entryPrefix(entryPath: string): string {
+	const wildcard = entryPath.indexOf("*");
+	if (wildcard === -1) return entryPath;
+	const separator = entryPath.lastIndexOf(path.sep, wildcard);
+	return separator === -1 ? entryPath : entryPath.slice(0, separator);
+}
+
 export interface FlowSourceCall {
 	readonly tool: string;
 	readonly args?: Record<string, unknown> | undefined;
@@ -346,28 +368,35 @@ export interface FlowSourceCall {
 /**
  * Restrictions a tool call's result will carry, decided before the call runs.
  * Path tools are judged by the path they open, physically and lexically, the
- * way the path policy judges a read. Named tools are judged by registry name.
- * Null when no rule matches, which is the baseline for a project without
- * rules.
+ * way the path policy judges a read. A tool that walks a directory (ls, grep,
+ * find) also carries every rule whose entries sit below the walked path,
+ * conservatively: the walk may surface any of them, and the result is not
+ * split per file. Named tools are judged by registry name. Null when no rule
+ * matches, which is the baseline for a project without rules.
  */
 export function flowRestrictionsForCall(policy: InformationFlowPolicy, call: FlowSourceCall): FlowRestrictionSet | null {
-	if (!policy.trusted || policy.policyHash === null || policy.rules.length === 0) return null;
+	if (policy.policyHash === null || policy.rules.length === 0) return null;
 	const restrictions: FlowRestriction[] = [];
 	const pathField = READ_PATH_TOOLS.get(call.tool);
 	const rawPath = pathField !== undefined ? call.args?.[pathField] : undefined;
 	let target: string | null = null;
 	if (typeof rawPath === "string" && rawPath.length > 0) target = expandPath(rawPath);
-	else if (pathField !== undefined && (call.tool === ToolNames.Grep || call.tool === ToolNames.Find)) target = call.cwd;
+	else if (WALK_TOOLS.has(call.tool)) target = call.cwd;
 	const memo = createPathWalkMemo();
+	const physical =
+		target === null
+			? null
+			: (canonicalizeRawPath(target, call.cwd, memo) ??
+				canonicalizePath(path.resolve(call.cwd, target), memo) ??
+				path.resolve(call.cwd, target));
 	for (const rule of policy.rules) {
 		let evidence: string | null = null;
-		if (target !== null && rule.paths !== null) {
+		if (target !== null && physical !== null && rule.paths !== null) {
 			const decision = evaluatePathPolicy(rule.paths, "read", target, call.cwd, memo);
-			if (decision.kind === "block") {
-				evidence =
-					canonicalizeRawPath(target, call.cwd, memo) ??
-					canonicalizePath(path.resolve(call.cwd, target), memo) ??
-					path.resolve(call.cwd, target);
+			if (decision.kind === "block") evidence = physical;
+			else if (WALK_TOOLS.has(call.tool)) {
+				const below = rule.paths.entries.find((entry) => isSameOrDescendant(entryPrefix(entry.path), physical));
+				if (below !== undefined) evidence = `${physical} (walks ${below.source})`;
 			}
 		}
 		if (evidence === null && rule.tools.some((pattern) => toolMatches(pattern, call.tool))) evidence = call.tool;
@@ -393,7 +422,6 @@ function recipientAdmits(ref: string, destination: FlowDestination): boolean {
 	if (destination.kind === "model") {
 		return ref === pinnedTargetRef(destination.targetId, destination.runtime, destination.endpoint);
 	}
-	if (ref === `tool:${destination.tool}`) return true;
 	if (destination.endpoint === null) return false;
 	if (ref.startsWith("endpoint:")) return ref === `endpoint:${destination.endpoint}`;
 	if (ref.startsWith("origin:")) return ref === `origin:${flowEndpointOrigin(destination.endpoint) ?? ""}`;
@@ -410,6 +438,7 @@ function effectiveRecipients(restriction: FlowRestriction, policy: InformationFl
 	if (!policy.trusted || policy.policyHash === null || policy.policyHash === restriction.policyHash) {
 		return restriction.recipients;
 	}
+	// A restriction labeled under an untrusted policy carries no recipients and stays that way.
 	const live = policy.rules.find((rule) => rule.id === restriction.ruleId);
 	if (live === undefined) return restriction.recipients;
 	return restriction.recipients.filter((ref) => live.recipients.includes(ref));
