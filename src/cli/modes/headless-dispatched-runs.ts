@@ -59,15 +59,25 @@ export async function settleDispatchedRuns(
 	};
 }
 
+/** Roomy enough for a branch name plus the merge recovery hint, small enough for one stderr line. */
+const OUTCOME_DETAIL_MAX_CHARS = 600;
+
+function boundedOutcomeDetail(detail: string): string {
+	const clean = sanitizeCallTargetText(detail);
+	return clean.length <= OUTCOME_DETAIL_MAX_CHARS ? clean : `${clean.slice(0, OUTCOME_DETAIL_MAX_CHARS - 1)}…`;
+}
+
+/**
+ * One entry per run: `id (agent, <outcomeCode or outcome>): <detail>`. A
+ * receipt's outcomeCode and outcomeDetail carry the reason (a rejected host
+ * check, a withheld merge and its recovery hint), so a headless operator who
+ * sees only stderr gets them for every run that has them.
+ */
 export function describeRuns(runs: ReadonlyArray<RunEnvelope>): string {
 	return runs
 		.map((run) => {
-			const outcome =
-				run.outcomeCode === "merge_withheld" || run.outcomeCode === "worker_no_work" ? run.outcomeCode : run.outcome;
-			const detail =
-				(run.outcomeCode === "merge_withheld" || run.outcomeCode === "worker_no_work") && run.outcomeDetail
-					? `: ${sanitizeCallTargetText(run.outcomeDetail)}`
-					: "";
+			const outcome = run.outcomeCode ?? run.outcome;
+			const detail = run.outcomeDetail ? `: ${boundedOutcomeDetail(run.outcomeDetail)}` : "";
 			return `${run.id} (${run.agentId}${outcome ? `, ${outcome}` : ""})${detail}`;
 		})
 		.join(", ");

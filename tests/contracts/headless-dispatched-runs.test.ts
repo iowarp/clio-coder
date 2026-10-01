@@ -72,3 +72,16 @@ it("reports the no-work reason on the headless failure line", () => {
 		/idle \(coder, worker_no_work\): worker executed no tools/u,
 	);
 });
+
+it("reports the outcome code and bounded detail for any failed run", () => {
+	const description = describeRuns([
+		{
+			...run("rejected", "failed"),
+			outcomeCode: "host_verification_rejected",
+			outcomeDetail: `host verification check 'test' rejected with exit code 1; ${"x".repeat(2000)}`,
+		},
+		run("plain", "failed"),
+	]);
+	match(description, /rejected \(coder, host_verification_rejected\): host verification check 'test' rejected/u);
+	match(description, /…, plain \(coder, failed\)$/u);
+});
