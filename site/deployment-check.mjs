@@ -28,7 +28,11 @@ for (const file of manifest.files) {
 	if (hash !== file.sourceSha256) throw new Error(`Documentation input differs from the pinned commit: ${file.source}`);
 }
 const packageVersion = JSON.parse(git("show", `${source.commit}:package.json`).toString()).version;
-if (packageVersion !== product.version) throw new Error("Website version differs from the pinned product source.");
+if (
+	packageVersion !== product.version &&
+	!(source.mode === "repository" && packageVersion === `${product.version}-dev`)
+)
+	throw new Error("Website version differs from the pinned product source.");
 console.log(`Website v${product.version}: ${source.mode} documentation pinned to ${source.commit}.`);
 console.log(
 	`Recorded npm release: v${product.publishedVersion}. Website deployment does not publish a package or create a release tag.`,

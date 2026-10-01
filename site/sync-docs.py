@@ -78,7 +78,9 @@ def inputs(ref, worktree, source_ref=None, repository_snapshot=False):
         repo_version = json.loads((ROOT / "package.json").read_text())["version"]
     else:
         repo_version = json.loads(git("show", f"{commit}:package.json"))["version"]
-    if repo_version != version:
+    # A development tree carries the upcoming version with a -dev suffix. Only a
+    # release snapshot, taken at the tag, must match exactly.
+    if repo_version != version and not ((repository_snapshot or worktree) and repo_version == f"{version}-dev"):
         raise ValueError(f"repository version {repo_version} differs from site version {version}")
     manifest = {
         "schema": 2, "corpus": "public-guides", "corpusPolicy": "site/public-docs.json",
