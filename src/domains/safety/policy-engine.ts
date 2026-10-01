@@ -612,6 +612,20 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 				}
 			}
 
+			if (
+				scannedCommand !== null &&
+				posture !== "confirmed" &&
+				scanShellLikeDeep(scannedCommand).some((token) => token.hiddenContent)
+			) {
+				return askDecision(base, {
+					ruleId: "bash-hidden-quoting",
+					reasonCode: "bash-hidden-quoting",
+					reasons: ["ambiguous ANSI-C escapes or locale quoting require one-shot operator confirmation"],
+					policySource: "builtin-command-allowlist",
+					execRecognition: "unrecognized",
+				});
+			}
+
 			// Managed library changes can be authorized by the operator. Direct
 			// mutations and all hard path/trust blocks above remain non-overridable.
 			if (mutationCommand !== null && invokesClioSkillMutation(mutationCommand) && !(posture === "yolo" && askRule)) {
@@ -930,22 +944,13 @@ function evaluateBashPolicy(
 			policySource: "builtin-command-allowlist",
 		};
 	}
-	if (typeof input === "string" && scanShellLikeDeep(command).some((token) => token.hiddenContent)) {
-		return {
-			kind: "block",
-			reasonCode: "bash-hidden-quoting",
-			ruleId: "bash-hidden-quoting",
-			reasons: ["ANSI-C or locale-quoted words cannot be inspected safely; use literal shell quoting"],
-			policySource: "builtin-command-allowlist",
-			execRecognition: "unrecognized",
-		};
-	}
+
 	if (
 		typeof input === "string" &&
 		posture !== "confirmed" &&
 		(hasUnparsedShellScript(command) ||
 			(posture !== "yolo" &&
-				(/\$(?:[A-Za-z_{0-9@*#?!'"-])/.test(command) ||
+				(/\$(?:[A-Za-z_{0-9@*#?!-])/.test(command) ||
 					/(?:^|[\s;&|])(?:python[\d.]*|node|ruby|perl|php|lua)\s+(?:[^\n]*?\s)?-[ce]\b/.test(command))))
 	) {
 		return {
@@ -953,7 +958,7 @@ function evaluateBashPolicy(
 			reasonCode: "bash-hidden-content",
 			ruleId: "bash-hidden-content",
 			reasons: [
-				"shell variables, unparsed shell scripts, ANSI-C or locale quoting, or interpreter source hide paths from the safety scan and require one-shot confirmation",
+				"shell variables, unparsed shell scripts, or interpreter source hide paths from the safety scan and require one-shot confirmation",
 			],
 			policySource: "builtin-command-allowlist",
 			execRecognition: "unrecognized",
@@ -999,7 +1004,8 @@ function evaluateBashPolicy(
 	// A command that is nothing but `sh -c '<script>'` is recognized by its
 	// script. Recognition can only narrow this way: the script is what runs, and
 	// judging the wrapper instead is what let the wrapper be a bypass.
-	const recognitionCommand = inlineShellScript(command) ?? command;
+	const recognitionSource = inlineShellScript(command) ?? command;
+	const recognitionCommand = decodedAnsiCCommand(recognitionSource) ?? recognitionSource;
 	if (hasCommandSubstitution(recognitionCommand) && posture !== "confirmed" && posture !== "yolo") {
 		return {
 			kind: "ask",
@@ -2002,6 +2008,20 @@ const CONTENT_BEARING_TOOLS: ReadonlySet<string> = new Set([
  * Dispatch and task-board prose likewise does not execute; worker commands
  * are scanned when the worker calls an execute-class tool.
  */
+function decodedAnsiCCommand(command: string): string | null {
+	let decoded = "";
+	let copied = 0;
+	for (const token of scanShellLike(command)) {
+		if (!token.ansiCQuoted || token.hiddenContent) continue;
+		const literal = /^[\w./~+-]+$/u.test(token.value) ? token.value : `'${token.value.replaceAll("'", "'\\''")}'`;
+		decoded += command.slice(copied, token.start) + literal;
+		copied = token.end;
+	}
+	if (copied === 0) return null;
+	// Preserve quoted operators as literal words while giving path rules their decoded operands.
+	return decoded + command.slice(copied);
+}
+
 /**
  * Strings a damage-control rule is tested against. Joining every argument into
  * one blob put the command in the middle of it, so a rule anchored with `$`
@@ -2011,6 +2031,7 @@ const CONTENT_BEARING_TOOLS: ReadonlySet<string> = new Set([
  * block. The command is offered on its own as well. The blob stays a
  * candidate so no rule that matched before stops matching now.
  */
+
 function damageControlScans(call: ClassifierCall): string[] {
 	if (CONTENT_BEARING_TOOLS.has(call.tool)) {
 		const pathArg = call.args?.path;
@@ -2022,7 +2043,15 @@ function damageControlScans(call: ClassifierCall): string[] {
 	// so a call that carries a command is scanned as a command. `cwd` keeps its
 	// own path policy.
 	const command = call.args?.command;
-	if (typeof command === "string") return [command, ...shellCommandSegments(command), ...normalizedGitCommands(command)];
+	if (typeof command === "string") {
+		const decoded = decodedAnsiCCommand(command);
+		return [
+			command,
+			...(decoded === null ? [] : [decoded]),
+			...shellCommandSegments(command),
+			...normalizedGitCommands(command),
+		];
+	}
 	return [serializeArgs(call.args)];
 }
 
@@ -2048,6 +2077,8 @@ function shellCommandSegments(command: string, depth = 0): string[] {
 		if (start === null) return;
 		const segment = command.slice(start, end).trim();
 		if (segment !== "" && segment !== command) segments.push(segment);
+		const decoded = decodedAnsiCCommand(segment);
+		if (decoded !== null) segments.push(decoded);
 		start = null;
 	};
 	for (const token of scanShellLike(command)) {

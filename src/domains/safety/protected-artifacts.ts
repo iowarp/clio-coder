@@ -94,6 +94,7 @@ export interface ShellToken {
 	 */
 	homeRelative?: true;
 	hiddenContent?: boolean;
+	ansiCQuoted?: boolean;
 }
 
 /**
@@ -1432,6 +1433,70 @@ export function commandArgumentSegments(command: string): string[][] {
 /** The raw start of a word the shell expands to the home directory; see {@link ShellToken.homeRelative}. */
 const HOME_REFERENCE_START = /^(?:~(?=\/|$)|"?\$(?:HOME|\{HOME\})(?=\/|"|$))/u;
 
+function decodeAnsiCQuote(command: string, open: number): { value: string; end: number; hidden: boolean } {
+	const bytes: number[] = [];
+	let hidden = false;
+	let end = open + 1;
+	const escapes: Record<string, number> = {
+		a: 7,
+		b: 8,
+		e: 27,
+		E: 27,
+		f: 12,
+		n: 10,
+		r: 13,
+		t: 9,
+		v: 11,
+		"\\": 92,
+		"'": 39,
+		'"': 34,
+		"?": 63,
+	};
+	for (; end < command.length && command[end] !== "'"; end += 1) {
+		const char = command[end] ?? "";
+		if (char !== "\\") {
+			const point = command.codePointAt(end) ?? 0;
+			bytes.push(...Buffer.from(String.fromCodePoint(point)));
+			if (point > 0xffff) end += 1;
+			continue;
+		}
+		const escapeCode = command[++end] ?? "";
+		const simple = escapes[escapeCode];
+		if (simple !== undefined) bytes.push(simple);
+		else if (/[0-7]/u.test(escapeCode) && escapeCode.length === 1) {
+			let digits = escapeCode;
+			while (digits.length < 3 && /[0-7]/u.test(command[end + 1] ?? "!")) digits += command[++end];
+			bytes.push(Number.parseInt(digits, 8) & 0xff);
+		} else if (escapeCode === "x" || escapeCode === "u" || escapeCode === "U") {
+			const limit = escapeCode === "x" ? 2 : escapeCode === "u" ? 4 : 8;
+			let digits = "";
+			while (digits.length < limit && /[a-fA-F0-9]/u.test(command[end + 1] ?? "!")) digits += command[++end];
+			const point = Number.parseInt(digits, 16);
+			if (digits.length === 0 || point > 0x10ffff || (point >= 0xd800 && point <= 0xdfff)) hidden = true;
+			else if (escapeCode === "x") bytes.push(point);
+			else bytes.push(...Buffer.from(String.fromCodePoint(point)));
+		} else if (escapeCode === "c") {
+			const control = command[++end];
+			if (control === undefined || control === "'" || control.charCodeAt(0) > 0x7f) {
+				hidden = true;
+				if (control === "'") break;
+			} else {
+				bytes.push(control === "?" ? 127 : control.charCodeAt(0) & 31);
+				if (control === "\\" && command[end + 1] === "\\") end += 1;
+			}
+		} else hidden = true;
+	}
+	if (end >= command.length || bytes.includes(0)) hidden = true;
+	let value = "";
+	try {
+		value = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(new Uint8Array(bytes));
+	} catch {
+		// Invalid byte sequences cannot be represented faithfully by the string-based path scanners.
+		hidden = true;
+	}
+	return { value: hidden ? command.slice(open + 1, end) : value, end, hidden };
+}
+
 /** Literal shell words and operators only; no expansion or script execution. */
 export function scanShellLike(command: string): ShellToken[] {
 	const tokens: ShellToken[] = [];
@@ -1439,7 +1504,7 @@ export function scanShellLike(command: string): ShellToken[] {
 	let wordStart: number | null = null;
 	let quoted = false;
 	let hiddenContent = false;
-	let ansiQuote = false;
+	let ansiCQuoted = false;
 	let quote: "'" | '"' | null = null;
 
 	let substitutions: string[] = [];
@@ -1449,12 +1514,13 @@ export function scanShellLike(command: string): ShellToken[] {
 		if (substitutions.length > 0) token.substitutions = substitutions;
 		if (HOME_REFERENCE_START.test(command.slice(wordStart, end))) token.homeRelative = true;
 		if (hiddenContent) token.hiddenContent = true;
+		if (ansiCQuoted) token.ansiCQuoted = true;
 		tokens.push(token);
 		current = "";
 		wordStart = null;
 		quoted = false;
 		hiddenContent = false;
-		ansiQuote = false;
+		ansiCQuoted = false;
 		substitutions = [];
 	};
 	const appendBacktick = (open: number): number | null => {
@@ -1471,13 +1537,8 @@ export function scanShellLike(command: string): ShellToken[] {
 		const char = command[index];
 		if (char === undefined) continue;
 		if (quote !== null) {
-			if (ansiQuote && char === "\\" && index + 1 < command.length) {
-				current += char + (command[++index] ?? "");
-				continue;
-			}
 			if (char === quote) {
 				quote = null;
-				ansiQuote = false;
 				continue;
 			}
 			if (quote === '"' && char === "\\" && index + 1 < command.length) {
@@ -1510,9 +1571,17 @@ export function scanShellLike(command: string): ShellToken[] {
 		if (char === "$" && (command[index + 1] === "'" || command[index + 1] === '"')) {
 			wordStart ??= index;
 			quoted = true;
-			hiddenContent = true;
-			quote = command[++index] as "'" | '"';
-			ansiQuote = quote === "'";
+			if (command[index + 1] === "'") {
+				const decoded = decodeAnsiCQuote(command, index + 1);
+				current += decoded.value;
+				hiddenContent ||= decoded.hidden;
+				ansiCQuoted = true;
+				index = decoded.end;
+			} else {
+				hiddenContent = true;
+				quote = '"';
+				index += 1;
+			}
 			continue;
 		}
 		if (char === "'" || char === '"') {

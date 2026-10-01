@@ -81,6 +81,7 @@ describe("safety gate boundary", () => {
 			{ tool: ToolNames.Write, args: { path: "credentials.yaml", content: "secret" } },
 			{ tool: ToolNames.Bash, args: { command: ": > .env" } },
 			{ tool: ToolNames.Bash, args: { command: "cat $'\\x2eenv'" } },
+			{ tool: ToolNames.Bash, args: { command: "cat $'.env'" } },
 			{ tool: ToolNames.Bash, args: { command: 'cat $".env"' } },
 			{ tool: ToolNames.Bash, args: { command: "bash -c \"cat $'\\x2eenv'\"" } },
 			{ tool: ToolNames.Bash, args: { command: "bash -o pipefail -c 'cat .env'" } },
@@ -554,6 +555,13 @@ describe("safety gate boundary", () => {
 			["rm -rf $'\\x2f'", "block"],
 			["rm -rf $'\\u002f'", "block"],
 			["rm -rf $'\\057'", "block"],
+			["rm -rf $'\\U0000002f'", "block"],
+			["IFS=$'\\n'", "allow"],
+			["printf $'a\\tb\\n'", "allow"],
+			["echo $'x\\ny'", "allow"],
+			["read -r -d $'\\0' line", "ask"],
+			["echo $'\\x'", "ask"],
+			['echo $"hello"', "ask"],
 			['rm -rf $"/"', "block"],
 			["rm -rf $'~'", "block"],
 			["bash -o pipefail -c 'rm -rf /'", "block"],
@@ -569,6 +577,18 @@ describe("safety gate boundary", () => {
 			["gcloud iam policies", "ask"],
 		] as const) {
 			strictEqual(policy.evaluate({ tool: ToolNames.Bash, args: { command } }, "yolo").kind, kind, command);
+			if (command === "printf $'a\\tb\\n'" || command === "echo $'x\\ny'") {
+				strictEqual(policy.evaluate({ tool: ToolNames.Bash, args: { command } }).execRecognition, "recognized", command);
+				deepStrictEqual(tokenizeShellLike(command), command.startsWith("printf") ? ["printf", "a\tb\n"] : ["echo", "x\ny"]);
+			}
+			if (command === "IFS=$'\\n'") deepStrictEqual(tokenizeShellLike(command), ["IFS=\n"]);
+			if (command.startsWith("rm -rf $'") && command !== "rm -rf $'~'") {
+				strictEqual(
+					policy.evaluate({ tool: ToolNames.Bash, args: { command } }).reasonCode,
+					policy.evaluate({ tool: ToolNames.Bash, args: { command: "rm -rf /" } }).reasonCode,
+					command,
+				);
+			}
 			if (command.length > 20_000) {
 				strictEqual(redactSecretString(command), command);
 				strictEqual(describeCallTarget(ToolNames.Bash, { command }), `${command.slice(0, 119)}…`);
@@ -1100,10 +1120,40 @@ describe("safety gate boundary", () => {
 			strictEqual(policy.evaluate(call).kind, "block", command);
 			strictEqual(policy.evaluate(call, "confirmed").kind, command.includes(" library ") ? "allow" : "block", command);
 		}
-		for (const command of ["git stash drop", "truncate -s 0 server.log"]) {
+		for (const command of [
+			"git stash drop",
+			"truncate -s 0 server.log",
+			"read -r -d $'\\0' line",
+			"echo $'\\x'",
+			"echo $'\\uD800'",
+			"echo $'\\U00110000'",
+			"echo $'\\q'",
+			'echo $"hello"',
+		]) {
 			const call = { tool: ToolNames.Bash, args: { command } };
 			strictEqual(policy.evaluate(call).kind, "ask", command);
 			strictEqual(policy.evaluate(call, "confirmed").kind, "allow", command);
+			if (command.includes("$")) {
+				strictEqual(policy.evaluate(call, "yolo").kind, "ask", command);
+				strictEqual(policy.evaluate(call, "yolo").reasonCode, "bash-hidden-quoting", command);
+				const safety = createWorkerSafety({ cwd: scratch });
+				const admission = evaluateAdmission({ principal: "main", effects: [call], safety, autonomy: "yolo" });
+				strictEqual(
+					admission.kind === "ask" && `${admission.source}:${admission.approvalAuthority}`,
+					"safety-net:operator",
+				);
+				strictEqual(
+					evaluateAdmission({
+						principal: "main",
+						effects: [call],
+						safety,
+						autonomy: "yolo",
+						authorization: { issuer: "operator", actionClass: policy.evaluate(call).actionClass },
+					}).kind,
+					"allow",
+					command,
+				);
+			}
 		}
 		strictEqual(mapAutonomy("yolo", "git_destructive"), "deny");
 		strictEqual(mapAutonomy("default", "unknown"), "ask");
