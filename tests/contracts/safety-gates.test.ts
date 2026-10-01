@@ -78,6 +78,10 @@ describe("safety gate boundary", () => {
 			{ tool: ToolNames.Read, args: { path: ".env" } },
 			{ tool: ToolNames.Write, args: { path: "credentials.yaml", content: "secret" } },
 			{ tool: ToolNames.Bash, args: { command: ": > .env" } },
+			{ tool: ToolNames.Bash, args: { command: "bash -o pipefail -c 'cat .env'" } },
+			{ tool: ToolNames.Bash, args: { command: "echo ok && bash --norc -c 'cat .env'" } },
+			{ tool: ToolNames.Bash, args: { command: "dash +o errexit -c 'cat .env'" } },
+			{ tool: ToolNames.Bash, args: { command: "zsh -x -ec 'cat .env'" } },
 		]) {
 			strictEqual(policy.evaluate(call).kind, "block");
 			strictEqual(policy.evaluate(call, "confirmed").kind, "block");
@@ -540,6 +544,14 @@ describe("safety gate boundary", () => {
 			["npm run build $(cat args)", "allow"],
 			["npm run build && sudo apt update", "allow"],
 			["npm run build && rm -rf /", "block"],
+			["bash -o pipefail -c 'rm -rf /'", "block"],
+			["bash -o pipefail -c 'echo x > /etc/passwd'", "block"],
+			["bash --norc -c 'echo x > /etc/passwd'", "block"],
+			["sh -e -c 'rm -rf /'", "block"],
+			["bash --norc -c 'rm -rf /'", "block"],
+			["bash --unknown -c 'echo ok'", "ask"],
+			["bash -o", "ask"],
+			["bash -c", "ask"],
 			["npm run build && cat ~/.ssh/id_rsa", "block"],
 			["npm run build && clio-coder library install skill:example --yes", "allow"],
 			["gcloud iam policies", "ask"],
@@ -685,6 +697,8 @@ describe("safety gate boundary", () => {
 			"mv .clio-coder saved",
 			"cd .clio-coder && rm -r skills",
 			"sh -c 'cd .clio-coder && printf changed > skills/new/SKILL.md'",
+			"bash -o pipefail -c 'echo x > .clio-coder/skills/new/SKILL.md'",
+			"bash --norc -c 'echo x > .clio-coder/skills/new/SKILL.md'",
 		])
 			strictEqual(policy.evaluate({ tool: ToolNames.Bash, args: { command } }).kind, "block", command);
 	});

@@ -49,6 +49,7 @@ import {
 	commandArgumentSegments,
 	extractCommandDeleteTargets,
 	extractCommandWriteTargets,
+	hasUnparsedShellScript,
 	inlineShellScript,
 	invokesClioSkillMutation,
 	type ShellToken,
@@ -931,17 +932,18 @@ function evaluateBashPolicy(
 	}
 	if (
 		typeof input === "string" &&
-		(/\$(?:[A-Za-z_{0-9@*#?!'"-])/.test(command) ||
-			/(?:^|[\s;&|])(?:python[\d.]*|node|ruby|perl|php|lua)\s+(?:[^\n]*?\s)?-[ce]\b/.test(command)) &&
 		posture !== "confirmed" &&
-		posture !== "yolo"
+		(hasUnparsedShellScript(command) ||
+			(posture !== "yolo" &&
+				(/\$(?:[A-Za-z_{0-9@*#?!'"-])/.test(command) ||
+					/(?:^|[\s;&|])(?:python[\d.]*|node|ruby|perl|php|lua)\s+(?:[^\n]*?\s)?-[ce]\b/.test(command))))
 	) {
 		return {
 			kind: "ask",
 			reasonCode: "bash-hidden-content",
 			ruleId: "bash-hidden-content",
 			reasons: [
-				"shell variables, ANSI-C or locale quoting, or interpreter source hide paths from the safety scan and require one-shot confirmation",
+				"shell variables, unparsed shell scripts, ANSI-C or locale quoting, or interpreter source hide paths from the safety scan and require one-shot confirmation",
 			],
 			policySource: "builtin-command-allowlist",
 			execRecognition: "unrecognized",

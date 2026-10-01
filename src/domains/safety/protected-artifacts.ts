@@ -351,23 +351,43 @@ const INNER_SHELL_MAX_DEPTH = 3;
  * (REPORT-dispatch-drive-1.md S1). Flag clusters (`-lc`, `-ec`) count, since
  * the shell reads them the same way.
  */
-function segmentShellScript(segment: ReadonlyArray<string>): string | null {
+function segmentShellScript(segment: ReadonlyArray<string>): string | null | undefined {
 	const commandIndex = commandTokenIndex(segment);
 	if (commandIndex === null) return null;
 	if (!INNER_SHELLS.has(basenameToken(segment[commandIndex]))) return null;
 	for (let index = commandIndex + 1; index < segment.length; index += 1) {
 		const token = segment[index];
-		if (token === undefined) continue;
-		if (token.startsWith("-") && token.length > 1) {
-			if (!token.slice(1).includes("c")) continue;
-			const script = segment[index + 1];
-			return script !== undefined && script.length > 0 ? script : null;
+		if (token === undefined) return undefined;
+		if (token === "-o" || token === "+o" || token === "-O" || token === "+O") {
+			const option = segment[++index];
+			if (option === undefined || option.startsWith("-") || option.startsWith("+")) return undefined;
+			continue;
 		}
-		// The first operand of a shell invocation without -c is a script file,
-		// whose contents this scanner cannot see anyway.
-		return null;
+		if (["--norc", "--noprofile", "--posix", "--login", "--restricted", "--verbose"].includes(token)) continue;
+		if (token === "--rcfile" || token === "--init-file") return undefined;
+		if (/^[-+][a-zA-Z]+$/u.test(token)) {
+			if (!/^[-+][abCefhiklmnprstuvxBDEHILPTXc]+$/u.test(token)) return undefined;
+			if (token.startsWith("-") && token.slice(1).includes("c")) return segment[index + 1];
+			continue;
+		}
+		return undefined;
 	}
-	return null;
+	return undefined;
+}
+
+/** Shell source that cannot be inspected must keep the one-shot confirmation rail. */
+export function hasUnparsedShellScript(command: string, depth = 0): boolean {
+	for (const segment of splitSegments(scanShellLike(command))) {
+		const script = segmentShellScript(shellCommandArguments(segment));
+		if (script === undefined) return true;
+		if (script !== null && (depth >= INNER_SHELL_MAX_DEPTH || hasUnparsedShellScript(script, depth + 1))) return true;
+		for (const token of segment) {
+			for (const substitution of token.substitutions ?? []) {
+				if (depth >= INNER_SHELL_MAX_DEPTH || hasUnparsedShellScript(substitution, depth + 1)) return true;
+			}
+		}
+	}
+	return false;
 }
 
 /**
@@ -382,7 +402,7 @@ function expandedShellSegments(command: string, depth = 0): ShellToken[][] {
 	for (const segment of segments) {
 		out.push(segment, ...substitutionSegments(segment, depth));
 		const script = segmentShellScript(shellCommandArguments(segment));
-		if (script !== null) out.push(...expandedShellSegments(script, depth + 1));
+		if (typeof script === "string") out.push(...expandedShellSegments(script, depth + 1));
 	}
 	return out;
 }
@@ -397,7 +417,7 @@ export function inlineShellScript(command: string): string | null {
 	if (segments.length !== 1) return null;
 	const segment = segments[0];
 	if (segment === undefined) return null;
-	return segmentShellScript(shellCommandArguments(segment));
+	return segmentShellScript(shellCommandArguments(segment)) ?? null;
 }
 
 /**
@@ -651,7 +671,7 @@ function collectSegmentPathEvents(segment: ReadonlyArray<ShellToken>, depth: num
 		});
 	}
 	const script = segmentShellScript(argv);
-	if (script !== null) collectChildScript(script, depth, walk);
+	if (typeof script === "string") collectChildScript(script, depth, walk);
 	// The body starts on the next line, so this segment's own cd is real.
 	if ((depth > 0 || walk.topLevelHeredocs) && segment.some((token) => token.operator && token.value === "<<"))
 		walk.heredocSeen = true;
@@ -1610,6 +1630,12 @@ export function scanShellLikeDeep(command: string, depth = 0): ShellToken[] {
 			...scanShellLikeDeep(script, depth + 1),
 		]),
 	);
+	for (const segment of splitSegments(tokens)) {
+		const script = segmentShellScript(shellCommandArguments(segment));
+		if (typeof script === "string") {
+			inner.push({ value: ";", operator: true, quoted: false, start: 0, end: 0 }, ...scanShellLikeDeep(script, depth + 1));
+		}
+	}
 	return [...tokens, ...inner];
 }
 
