@@ -71,6 +71,8 @@ jobs:
           # A pre-release tag (vX.Y.Z-rc.N) must not take the Latest badge.
           channel=()
           case "$version" in *-*) channel=(--prerelease --latest=false) ;; esac
-          gh release create "$GITHUB_REF_NAME" "$RUNNER_TEMP/qualified-package/candidate.tgz" \
+          # install.sh rides along so `releases/latest/download/install.sh` is a
+          # stable URL for the curl installer until coder.iowarp.ai serves it.
+          gh release create "$GITHUB_REF_NAME" "$RUNNER_TEMP/qualified-package/candidate.tgz" scripts/install.sh \
             --title "Clio Coder $version" --notes-file "$RUNNER_TEMP/release-notes.md" --verify-tag \
             "${channel[@]}"
