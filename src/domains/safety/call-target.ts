@@ -285,6 +285,40 @@ function summarizeUnlistedTargetValue(value: unknown): string {
 	return `<${typeof value} 1 value>`;
 }
 
+const DISPATCH_TASK_NAMES_SHOWN = 4;
+const DISPATCH_TASK_NAME_MAX_CHARS = 24;
+
+/** Recipe ids of a dispatch batch, the one array whose item identity informs the decision. */
+function dispatchTaskNames(value: ReadonlyArray<unknown>): string[] {
+	const names: string[] = [];
+	for (const item of value) {
+		const agent = typeof item === "object" && item !== null ? (item as { agent?: unknown }).agent : undefined;
+		if (typeof agent !== "string") continue;
+		const clean = sanitizeCallTargetText(redactSecretString(agent)).slice(0, DISPATCH_TASK_NAME_MAX_CHARS);
+		if (clean.length > 0) names.push(clean);
+	}
+	return names;
+}
+
+/**
+ * A boolean or finite number cannot carry pasted content, so it renders as
+ * itself: `worktree=true` decides more than `<boolean 1 value>` did. A value
+ * under a secret-looking key stays summarized, and strings and objects stay
+ * summarized by type and size.
+ */
+function summarizeUnlistedField(tool: string, field: string, value: unknown): string {
+	if (typeof value === "boolean") return String(value);
+	if (typeof value === "number" && Number.isFinite(value) && !isSecretArgKey(field)) return String(value);
+	if (tool === "dispatch" && field === "tasks" && Array.isArray(value)) {
+		const names = dispatchTaskNames(value);
+		if (names.length > 0) {
+			const shown = names.slice(0, DISPATCH_TASK_NAMES_SHOWN).join(", ");
+			return `${value.length} (${shown}${names.length > DISPATCH_TASK_NAMES_SHOWN ? ", …" : ""})`;
+		}
+	}
+	return summarizeUnlistedTargetValue(value);
+}
+
 /** Harness-injected argument keys (`__clio_resolved_dispatch_plan`) carry no operator decision and stay off display text. */
 const HARNESS_ARG_PREFIX = "__clio_";
 
@@ -319,7 +353,7 @@ export function describeCallTarget(tool: string, args: Record<string, unknown> |
 	}
 	for (const [field, value] of Object.entries(args)) {
 		if (allowed.has(field) || field.startsWith(HARNESS_ARG_PREFIX)) continue;
-		parts.push(`${targetFieldName(field)}=${summarizeUnlistedTargetValue(value)}`);
+		parts.push(`${targetFieldName(field)}=${summarizeUnlistedField(tool, field, value)}`);
 	}
 	const target = sanitizeCallTargetText(parts.join(" · "));
 	return target.length <= CALL_TARGET_MAX_CHARS ? target : `${target.slice(0, CALL_TARGET_MAX_CHARS - 1)}…`;
