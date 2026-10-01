@@ -13,6 +13,20 @@ else and names the installer, or a newer Node given by `CLIO_CODER_NODE`.
 [HPC clusters](hpc-clusters.md) covers cluster login nodes, old glibc, proxies and
 airgapped sites.
 
+On native Windows, which is best effort, run `irm https://coder.iowarp.ai/install.ps1 | iex`
+in PowerShell. It installs the same layout under `%LOCALAPPDATA%\clio-coder\install`.
+`install.sh` run from an MSYS, MinGW or Cygwin shell stops and names that command. A
+relative path given to `install.ps1` for the install directory, the bin directory or
+`-Package` resolves against the PowerShell location, not the process directory.
+
+A checkout or other unbundled source run of a development tree reports its version as
+`0.6.0-dev (unreleased · source)`. A bundle built from a checkout reports
+`0.6.0-dev (unreleased · <sha>)`, with `-dirty` after the commit when the tree had
+uncommitted changes. A release, including a published `-rc` prerelease, reports the plain
+version. The banner, `--version`, `clio-coder doctor` and the ACP handshake all use this
+label, and extension version ranges are checked against the version without `-dev`, the release the
+development tree is becoming.
+
 ### The installer layout
 
 | Path (Linux default) | Contents |

@@ -13,7 +13,8 @@ export PATH="$HOME/.local/bin:$PATH"
 clio-coder doctor
 ```
 
-Until coder.iowarp.ai serves the script, fetch it from the latest GitHub release:
+The same script is attached to each GitHub release, which is the copy to use
+where coder.iowarp.ai is not reachable:
 `https://github.com/iowarp/clio-coder/releases/latest/download/install.sh`.
 
 The script (`scripts/install.sh`) is POSIX sh and needs `curl` or `wget`, `tar`
@@ -24,7 +25,7 @@ for the host:
 
 | Host | Node build |
 | --- | --- |
-| Linux x64 or arm64, glibc 2.28 or newer | Official `linux-x64` or `linux-arm64` from nodejs.org |
+| Linux x64 or arm64, glibc 2.28 or newer (a glibc host that also carries the musl loader, as Debian's `musl` package installs, still gets this build) | Official `linux-x64` or `linux-arm64` from nodejs.org |
 | Linux x64, glibc 2.17 to 2.27 (RHEL/CentOS 7 class) | Unofficial `linux-x64-glibc-217` from unofficial-builds.nodejs.org |
 | Linux on musl (Alpine) | `linux-x64-musl` (official) or `linux-arm64-musl` (unofficial) |
 | macOS arm64 or x64 | Official `darwin-arm64` or `darwin-x64` |
