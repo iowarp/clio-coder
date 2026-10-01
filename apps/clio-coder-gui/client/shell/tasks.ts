@@ -9,7 +9,6 @@ import { routes } from "../../contracts/routes.js";
 import { ApiProblem, type Client, emptyInput } from "../api/client.js";
 import { clock } from "../api/clock.js";
 import { sessionBuffer } from "../api/sessions.js";
-import { discardDraftStore } from "../chat/composer-model.js";
 import { type ProjectLaunch, useProjectLaunch } from "../pages/project-open.js";
 import { withRoom } from "./capacity.js";
 import { isUntouched, sessionIdFromPath } from "./shell-model.js";
@@ -136,7 +135,8 @@ export function useDeleteTask(client: Client) {
 		mutationFn: ({ sessionId, workspaceId }: { sessionId: string; workspaceId: string }) =>
 			client.call(routes.deleteSession, { params: { id: sessionId }, query: {}, body: { workspaceId } }),
 		onSuccess: (_result, { sessionId, workspaceId }) => {
-			discardDraftStore(sessionId);
+			// The composer's draft store is part of the task screen's code, which the shell does not load up front.
+			void import("../chat/composer-model.js").then((composer) => composer.discardDraftStore(sessionId));
 			queries.removeQueries({ queryKey: ["session", sessionId] });
 			void queries.invalidateQueries({ queryKey: ["session-history", workspaceId] });
 			void queries.invalidateQueries({ queryKey: ["sessions"] });

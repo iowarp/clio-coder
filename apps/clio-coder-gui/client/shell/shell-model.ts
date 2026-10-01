@@ -5,7 +5,7 @@
 // task list and a composer, not ten equally weighted destinations.
 
 import type { SessionSnapshot, SessionSummary } from "../../contracts/sessions.js";
-import { isAwaitingAnswer } from "../chat/approval-model.js";
+import { isAwaitingAnswer } from "../chat/permission-state.js";
 
 export type TaskState = "starting" | "working" | "approval" | "failed" | "idle";
 

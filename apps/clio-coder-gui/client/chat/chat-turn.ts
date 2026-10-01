@@ -27,11 +27,7 @@ export const TRUNCATION_NOTE = "Earlier turns are not shown; Clio Coder still ha
 export const EMPTY_GLYPH = "◎";
 export const EMPTY_EYEBROW = "NEW RESEARCH THREAD";
 export const EMPTY_HEADING = "What would you like to understand or change?";
-export const STARTER_PROMPTS = [
-	"Map this project and explain how its parts fit together.",
-	"Run the existing checks and summarize what the evidence shows.",
-	"Help me plan a careful change without editing anything yet.",
-] as const;
+export { STARTER_PROMPTS } from "./starter-prompts.js";
 
 /**
  * The whole reasoning affordance is its first line. Thinking is provenance, not prose, and inlining

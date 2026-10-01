@@ -5,7 +5,7 @@ import { routes } from "../../contracts/routes.js";
 import type { Workspace } from "../../contracts/sessions.js";
 import { type Client, emptyInput } from "../api/client.js";
 import { sessionBuffer } from "../api/sessions.js";
-import { STARTER_PROMPTS } from "../chat/chat-turn.js";
+import { STARTER_PROMPTS } from "../chat/starter-prompts.js";
 import { Icon } from "../design/icons.js";
 import { useDetailsDismiss } from "../interaction/use-details-dismiss.js";
 import { ClioLogo, ClioPulse, PULSE_SIZE } from "../shell/ClioMark.js";
