@@ -1485,7 +1485,9 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			emitCompactionActivity("started", "summarizing session history", "summarize");
 			summaryLifecycleStarted = true;
 		};
-		if (force) startSummaryLifecycle();
+		// Started lazily, in beforeSummaryCall, for forced runs too. Starting it here
+		// made a forced compaction with no older history fire the llm_summary hook
+		// and end its activity rail on a success tick labelled complete (p8/B2).
 		// Said before the summary call, not after it: the operator is about to wait
 		// on a destructive stage, and the reason the cheap one was skipped is only
 		// useful ahead of it.
