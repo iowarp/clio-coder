@@ -19,16 +19,19 @@ import type { PaneView } from "../chat/pane-model.js";
 import { usePaneState } from "../chat/pane-state.js";
 import { routeFacts } from "../chat/route.js";
 import { PaneToggles, SessionPane } from "../chat/SessionPane.js";
+import { ConversationBanner, TaskSkeleton, TaskUnavailable } from "../chat/SessionStates.js";
 import { type ChatTurn, groupTurns, turnStatuses } from "../chat/turns.js";
 import { Icon } from "../design/icons.js";
 import { StatusMark } from "../design/status.js";
+import { setPageTitle } from "../interaction/announcer.js";
 import { useShortcut } from "../interaction/use-shortcut.js";
 import { JumpToLatest } from "../render/FollowLatest.js";
 import { useFollowLatest } from "../render/follow-latest.js";
-import { ClioLogo, ClioPulse } from "../shell/ClioMark.js";
+import { ClioLogo, ClioPulse, PULSE_SIZE } from "../shell/ClioMark.js";
 import { Menu, MenuItem } from "../shell/Menu.js";
 import { taskTitle } from "../shell/shell-model.js";
 import { TopBar } from "../shell/TopBar.js";
+import { useRenameTask } from "../shell/tasks.js";
 import "../chat/chat-turn.css";
 import "../chat/conversation.css";
 /** The old projects page. Choosing and opening projects now lives in the rail and the Open workspace dialog. */
@@ -115,7 +118,7 @@ function SessionHealth({ summary }: { summary: HealthSummary }) {
 
 function SessionView({ client, id }: { client: Client; id: string }) {
 	const navigate = useNavigate();
-	const ids = { changes: useId(), terminal: useId(), pane: useId() };
+	const ids = { changes: useId(), pane: useId() };
 	const pane = usePaneState(ids.pane);
 	const paneActions = useMemo(() => ({ show: (view: PaneView) => pane.show(view, ids.pane) }), [pane.show, ids.pane]);
 	useShortcut("sessionPanel", () => (pane.open ? pane.close() : pane.show(pane.view, ids.pane)));
@@ -158,9 +161,17 @@ function SessionView({ client, id }: { client: Client; id: string }) {
 		},
 	});
 	const closeSession = useCallback(() => close.mutate(), [close.mutate]);
+	const renameTask = useRenameTask(client);
+	const [renaming, setRenaming] = useState(false);
 	const scroll = useRef<HTMLDivElement | null>(null);
 	const previousTurns = useRef<readonly ChatTurn[]>([]);
 	const snapshot = session.data;
+	// The tab names the task, so several open tabs can be told apart.
+	const pageTitle = snapshot ? taskTitle(snapshot) : null;
+	useEffect(() => {
+		setPageTitle(pageTitle);
+		return () => setPageTitle(null);
+	}, [pageTitle]);
 	const statuses = useMemo(() => turnStatuses(snapshot?.turns ?? []), [snapshot?.turns]);
 	const turnRows = useMemo(
 		() => new Map((snapshot?.turns ?? []).map((row) => [row.id, row] as const)),
@@ -201,28 +212,26 @@ function SessionView({ client, id }: { client: Client; id: string }) {
 	);
 	if (session.error && !snapshot)
 		return (
-			<div role="alert">
-				<h1>Session unavailable</h1>
-				<p>{session.error.message}</p>
-				<button type="button" disabled={session.isFetching} onClick={() => void session.refetch()}>
-					{session.isFetching ? "Trying again…" : "Try again"}
-				</button>
-				<Link to="/sessions">Open a workspace</Link>
-			</div>
+			<TaskUnavailable
+				message={session.error.message}
+				retrying={session.isFetching}
+				onRetry={() => void session.refetch()}
+			/>
 		);
-	if (!snapshot) return <p>Loading session…</p>;
+	if (!snapshot) return <TaskSkeleton />;
 	const turn = snapshot.turns.at(-1);
 	const pending = pendingPermission(snapshot) ?? null;
 	const workspaceRoot = workspace.data?.path;
 	const title = taskTitle(snapshot);
 	const workspaceName = workspace.data?.name ?? "Project";
-	const elapsed =
-		running && turn?.startedAt && now > 0 ? formatDuration(Math.max(0, now - Date.parse(turn.startedAt))) : null;
+	const elapsedMs = running && turn?.startedAt && now > 0 ? Math.max(0, now - Date.parse(turn.startedAt)) : 0;
+	// Sub-second figures ("0ms") say nothing; the chip shows time once it is a whole second.
+	const elapsed = elapsedMs >= 1000 ? formatDuration(elapsedMs) : null;
 	const canClose = snapshot.state === "open" && !running;
 	const paneOpen = pane.open;
 	const chip: { tone: "working" | "approval" | "failed" | "quiet"; label: string } | null = pending
 		? { tone: "approval", label: "Needs your approval" }
-		: running
+		: running && snapshot.state === "open"
 			? {
 					tone: "working",
 					label: [liveWorkers > 0 ? `Waiting on ${workerCount(liveWorkers)}` : "Working", elapsed ?? null]
@@ -242,7 +251,19 @@ function SessionView({ client, id }: { client: Client; id: string }) {
 		<PaneContext.Provider value={paneActions}>
 			<section className="conversation" data-pane={paneOpen ? "open" : "closed"}>
 				<div className="conversation__main">
-					<TopBar title={title} titleLabel={title}>
+					<TopBar
+						title={title}
+						titleLabel={title}
+						rename={{
+							active: renaming,
+							onStart: () => setRenaming(true),
+							onCancel: () => setRenaming(false),
+							onSave: (label) => {
+								setRenaming(false);
+								renameTask.mutate({ sessionId: snapshot.id, workspaceId: snapshot.workspaceId, label });
+							},
+						}}
+					>
 						<Link
 							className="wb-chip"
 							to={`/workspaces/${snapshot.workspaceId}/sessions`}
@@ -253,7 +274,7 @@ function SessionView({ client, id }: { client: Client; id: string }) {
 						</Link>
 						{chip ? (
 							<p className="wb-chip wb-chip--status" data-tone={chip.tone} role="status">
-								{chip.tone === "working" ? <ClioPulse size={14} /> : null}
+								{chip.tone === "working" ? <ClioPulse size={PULSE_SIZE.inline} /> : null}
 								<span>{chip.label}</span>
 								{snapshot.recoveredOrphan ? <span>· recovered after a server interruption</span> : null}
 							</p>
@@ -270,6 +291,9 @@ function SessionView({ client, id }: { client: Client; id: string }) {
 								onToggle={pane.toggle}
 							/>
 							<Menu label="Task actions">
+								<MenuItem icon="pencil" onClick={() => setRenaming(true)}>
+									Rename task
+								</MenuItem>
 								<MenuItem icon="sliders" onClick={() => void navigate(`/settings?workspace=${snapshot.workspaceId}`)}>
 									Harness settings
 								</MenuItem>
@@ -287,30 +311,34 @@ function SessionView({ client, id }: { client: Client; id: string }) {
 					</div>
 					<div className="conversation__approval">
 						{connection === "Reconnecting…" || connection === "Not connected" || session.error ? (
-							<div className="conversation__connection" role="status">
-								<strong>{session.error ? "Conversation refresh failed." : "Live updates are reconnecting."}</strong>
-								<span>
-									{session.error
-										? session.error.message
-										: "The conversation below is the last state received. New activity will appear when the connection returns."}
-								</span>
-								<button type="button" disabled={session.isFetching} onClick={() => void session.refetch()}>
-									{session.isFetching ? "Refreshing…" : "Refresh conversation"}
-								</button>
-							</div>
+							<ConversationBanner
+								tone="warn"
+								title={session.error ? "Could not refresh this task." : "Live updates are reconnecting."}
+								action={
+									<button type="button" disabled={session.isFetching} onClick={() => void session.refetch()}>
+										{session.isFetching ? "Refreshing…" : "Refresh"}
+									</button>
+								}
+							>
+								{session.error
+									? session.error.message
+									: "What you see is the last state received. New activity appears when the connection returns."}
+							</ConversationBanner>
 						) : null}
 						{snapshot.state === "unknown" || snapshot.state === "failed" || snapshot.state === "closed" ? (
-							<div className="conversation__recovery" role="status">
-								<strong>
-									{snapshot.state === "closed"
+							<ConversationBanner
+								tone="quiet"
+								title={
+									snapshot.state === "closed"
 										? "This task is closed."
 										: snapshot.state === "unknown"
-											? "Clio Coder is no longer connected to this session."
-											: "This session could not continue."}
-								</strong>
-								<span>The recorded conversation is still available below.</span>
-								<Link to={`/workspaces/${snapshot.workspaceId}/sessions`}>Reopen it from the task list →</Link>
-							</div>
+											? "Clio is no longer connected to this task."
+											: "This task could not continue."
+								}
+								action={<Link to={`/workspaces/${snapshot.workspaceId}/sessions`}>Reopen from the task list</Link>}
+							>
+								The recorded conversation is still available below.
+							</ConversationBanner>
 						) : null}
 						<ApprovalBanner client={client} session={snapshot} />
 					</div>
@@ -384,8 +412,6 @@ function SessionView({ client, id }: { client: Client; id: string }) {
 					nowMs={now}
 					view={pane.view}
 					onViewChange={pane.setView}
-					onCloseSession={closeSession}
-					closing={close.isPending}
 				/>
 			</section>
 		</PaneContext.Provider>

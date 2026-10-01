@@ -1,4 +1,4 @@
-/* The pane beside the conversation: Progress, Changes, Files, Terminal, and Clio's deeper views. */
+/* The pane beside the conversation: Progress, Changes, and Clio's deeper views. */
 
 .pane {
 	position: relative;
@@ -203,6 +203,46 @@
 	font-size: 12px;
 	color: var(--ink-muted);
 }
+.pane-meter {
+	display: grid;
+	gap: var(--space-1);
+}
+.pane-meter__bar {
+	appearance: none;
+	width: 100%;
+	height: 4px;
+	border: 0;
+	border-radius: var(--radius-pill);
+	background: var(--wb-active);
+	overflow: hidden;
+}
+.pane-meter__bar::-webkit-meter-bar {
+	height: 4px;
+	border: 0;
+	border-radius: var(--radius-pill);
+	background: var(--wb-active);
+}
+.pane-meter__bar::-webkit-meter-optimum-value {
+	border-radius: var(--radius-pill);
+	background: var(--accent);
+}
+.pane-meter__bar::-webkit-meter-suboptimum-value {
+	border-radius: var(--radius-pill);
+	background: var(--status-warn-line);
+}
+.pane-meter__bar::-webkit-meter-even-less-good-value {
+	border-radius: var(--radius-pill);
+	background: var(--status-fail-line);
+}
+.pane-meter__bar:-moz-meter-optimum::-moz-meter-bar {
+	background: var(--accent);
+}
+.pane-meter__bar:-moz-meter-sub-optimum::-moz-meter-bar {
+	background: var(--status-warn-line);
+}
+.pane-meter__bar:-moz-meter-sub-sub-optimum::-moz-meter-bar {
+	background: var(--status-fail-line);
+}
 .pane-empty,
 .pane-note {
 	margin: 0;
@@ -390,95 +430,61 @@
 	min-width: 0;
 }
 
-/* ---- Terminal ------------------------------------------------------------------ */
-.term {
+/* Paths a task's tools reported that no edit changed. */
+.touched {
+	margin: 0 var(--space-2) var(--space-5);
+	padding-top: var(--space-2);
+	border-top: 1px solid var(--line);
+}
+.touched > summary {
 	display: flex;
-	flex-direction: column;
-	height: 100%;
-	min-height: 0;
-}
-.term__scroll {
-	flex: 1;
-	min-height: 0;
-	overflow-y: auto;
-	margin: 0 var(--space-3);
-	border-radius: 12px;
-	background: var(--code-paper);
-	color: var(--code-ink);
-}
-.term__runs {
-	display: grid;
-	gap: var(--space-4);
-	margin: 0;
-	padding: var(--space-4);
-	list-style: none;
-	font: 12.5px / 1.55 var(--font-mono);
-}
-.term-run {
-	display: grid;
-	gap: var(--space-1);
-	min-width: 0;
-}
-.term-run__line {
-	display: flex;
-	align-items: baseline;
-	gap: var(--space-2);
-}
-.term-run__prompt {
-	color: var(--syntax-keyword);
-}
-.term-run__command {
-	flex: 1;
-	min-width: 0;
-	font: inherit;
-	color: var(--code-ink);
-	overflow-wrap: anywhere;
-}
-.term-run__status {
-	display: inline-flex;
 	align-items: center;
-	gap: 6px;
-	flex: none;
-	font-size: 11.5px;
-	color: var(--code-ink-muted);
-}
-.term-run[data-tone="success"] .term-run__status {
-	color: var(--syntax-inserted);
-}
-.term-run[data-tone="fail"] .term-run__status {
-	color: var(--syntax-deleted);
-}
-.term-run__output {
-	margin: 0;
-	padding: 0 0 0 var(--space-4);
-	max-height: 22rem;
-	overflow: auto;
-	font: inherit;
-	color: var(--code-ink-muted);
-	white-space: pre-wrap;
-	overflow-wrap: anywhere;
-}
-.term-run__more {
-	display: block;
-	margin: 0 0 var(--space-1);
-	min-height: 0;
-	padding: 0;
-	border: 0;
-	background: transparent;
-	color: var(--code-ink-muted);
-	font: inherit;
-	text-decoration: underline;
-}
-.term-run__note {
-	margin: 0;
-	font-size: 11.5px;
-	color: var(--code-ink-muted);
-}
-.term__foot {
-	margin: 0;
-	padding: var(--space-2) var(--space-4) var(--space-3);
-	font-size: 11.5px;
+	gap: var(--space-2);
+	min-height: 32px;
+	padding: 0 var(--space-2);
+	border-radius: 8px;
+	font-size: var(--text-meta);
 	color: var(--ink-muted);
+	cursor: pointer;
+	list-style: none;
+}
+.touched > summary::-webkit-details-marker {
+	display: none;
+}
+.touched > summary:hover {
+	background: var(--wb-hover);
+	color: var(--ink);
+}
+.touched > summary .icon {
+	width: 14px;
+	height: 14px;
+	transition: transform 0.12s ease;
+}
+.touched[open] > summary .icon {
+	transform: rotate(90deg);
+}
+.touched__files {
+	display: grid;
+	margin: 0;
+	padding: var(--space-1) 0 0;
+	list-style: none;
+}
+.touched__files li {
+	display: flex;
+	align-items: center;
+	gap: var(--space-3);
+	min-height: 34px;
+	padding: 2px var(--space-2);
+}
+.touched__calls {
+	flex: none;
+	font: 11.5px / 1 var(--font-mono);
+	color: var(--ink-muted);
+}
+@media (prefers-reduced-motion: reduce) {
+	.touched > summary .icon {
+		transition: none;
+	}
 }
 
 /* ---- Empty panes ----------------------------------------------------------------- */
@@ -509,13 +515,8 @@
 }
 
 /* The legacy views keep their own layout; give them the pane's gutters. */
-.pane__panel > .session-panel,
-.pane__panel > .artifact-inspector {
+.pane__panel > .session-panel {
 	padding-inline: var(--space-2);
-}
-
-.artifact-inspector__header[hidden] {
-	display: none;
 }
 
 /* ---- the card that closes a turn which changed files ------------------------------ */

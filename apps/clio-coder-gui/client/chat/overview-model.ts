@@ -2,6 +2,7 @@
 // how far its plan has come. Pure and defensive, because every field is a reported value that may be
 // absent on a replayed turn.
 
+import type { ContextLedger } from "../../contracts/context-ledger.js";
 import type { SessionSnapshot } from "../../contracts/sessions.js";
 
 export interface TaskOverview {
@@ -58,4 +59,29 @@ export function compactDuration(ms: number): string {
 	const minutes = Math.floor(seconds / 60);
 	if (minutes < 60) return `${minutes}m ${seconds % 60}s`;
 	return `${Math.floor(minutes / 60)}h ${minutes % 60}m`;
+}
+
+export interface ContextMeter {
+	/** 0 to 100, clamped for drawing. */
+	readonly percent: number;
+	readonly tone: "ok" | "warn" | "full";
+	/** "43K of 128K tokens", with "estimated" until the provider reports usage. */
+	readonly label: string;
+	/** The whole sentence for assistive technology. */
+	readonly text: string;
+}
+
+/**
+ * The window meter on the Progress view, from Clio's own accounting. Null when the window size is not
+ * reported, because a share of an unknown size would be invented.
+ */
+export function contextMeter(
+	ledger: Pick<ContextLedger, "usedTokens" | "contextWindow" | "percent" | "measured">,
+): ContextMeter | null {
+	if (ledger.contextWindow <= 0) return null;
+	const raw = ledger.percent ?? (ledger.usedTokens / ledger.contextWindow) * 100;
+	const percent = Math.min(100, Math.max(0, raw));
+	const tone = percent >= 85 ? "full" : percent >= 65 ? "warn" : "ok";
+	const label = `${compactCount(ledger.usedTokens)} of ${compactCount(ledger.contextWindow)} tokens${ledger.measured ? "" : ", estimated"}`;
+	return { percent, tone, label, text: `Context window ${Math.round(percent)}% used, ${label}` };
 }

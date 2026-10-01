@@ -8,6 +8,7 @@ import { sessionBuffer } from "../api/sessions.js";
 import { STARTER_PROMPTS } from "../chat/chat-turn.js";
 import { Icon } from "../design/icons.js";
 import { useDetailsDismiss } from "../interaction/use-details-dismiss.js";
+import { ClioPulse, PULSE_SIZE } from "../shell/ClioMark.js";
 import { ClioStage } from "../shell/ClioStage.js";
 import { withRoom } from "../shell/capacity.js";
 import { useShell } from "../shell/shell-context.js";
@@ -265,8 +266,13 @@ export function Home({ client }: { client: Client }) {
 										onOpen={() => shell?.openWorkspace()}
 									/>
 									<span className="newtask__spacer" />
-									<button className="newtask__send" type="submit" disabled={!canSend} aria-label="Start task">
-										<Icon name="arrowUp" />
+									<button
+										className="newtask__send"
+										type="submit"
+										disabled={!canSend}
+										aria-label={send.isPending ? "Starting task…" : "Start task"}
+									>
+										{send.isPending ? <ClioPulse size={PULSE_SIZE.row} /> : <Icon name="arrowUp" />}
 									</button>
 								</div>
 							</form>

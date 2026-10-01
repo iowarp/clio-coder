@@ -1,5 +1,11 @@
 import { useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
 
+/**
+ * The sizes ClioPulse is drawn at, defined once. An inline mark beside a word, a list or task row,
+ * a step in a plan, and a stage (the setup wizard, an empty state). Pass one of these, not a number.
+ */
+export const PULSE_SIZE = { inline: 12, row: 14, step: 16, stage: 24 } as const;
+
 /** One ring of the mark: a C that opens to the right, optionally cut like the maze in the logo. */
 export type Ring = { r: number; w: number; gap: number; tone: "accent" | "secondary"; cuts?: readonly number[] };
 /** `cycle` is one beat in ms; larger marks travel farther per turn, so they turn more slowly. */
@@ -127,6 +133,10 @@ function turn(direction: 1 | -1): Keyframe[] {
  * root, and while anything listens Chrome dispatches every CSS animationiteration on the main thread,
  * which measured at a style recalc per frame with a few dozen pulses on screen. Script-created
  * animations fire no iteration events and stay on the compositor.
+ *
+ * It means Clio, a worker, a tool or the setup child is doing something right now. It is never
+ * decoration and never stands for ordinary data loading. It is decorative to assistive technology
+ * unless it gets a `label`, so pair it with a word that carries the state.
  *
  * `done` resolves it: rings finish the turn they are on, the mark holds a beat, then gives way to a
  * check. A pulse mounted already done shows the check without replaying the resolve.

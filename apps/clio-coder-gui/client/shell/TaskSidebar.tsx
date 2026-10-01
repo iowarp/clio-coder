@@ -6,10 +6,12 @@ import type { SessionSnapshot, Workspace } from "../../contracts/sessions.js";
 import { type Client, emptyInput } from "../api/client.js";
 import type { ConnectionState } from "../api/events.js";
 import { Icon } from "../design/icons.js";
-import { ClioLogo, ClioPulse } from "./ClioMark.js";
+import { ClioLogo, ClioPulse, PULSE_SIZE } from "./ClioMark.js";
 import { chordHint } from "./chords.js";
+import { InlineRename } from "./InlineRename.js";
+import { Menu, MenuItem } from "./Menu.js";
 import { STATE_LABELS, sessionIdFromPath, shortAge, type TaskRow, taskRows } from "./shell-model.js";
-import { type TaskActions, useMinuteClock } from "./tasks.js";
+import { type TaskActions, useDeleteTask, useMinuteClock, useRenameTask } from "./tasks.js";
 
 const TASKS_PER_PROJECT = 6;
 const PROJECTS_SHOWN = 10;
@@ -34,10 +36,7 @@ export function TaskSidebar({
 	onNavigate: () => void;
 }) {
 	const location = useLocation();
-	const filterId = useId();
 	const now = useMinuteClock();
-	const [filter, setFilter] = useState("");
-	const [filtering, setFiltering] = useState(false);
 	const [shown, setShown] = useState(PROJECTS_SHOWN);
 	const workspaces = useQuery({ queryKey: ["workspaces"], queryFn: () => client.call(routes.workspaces, emptyInput) });
 	const sessions = useQuery({ queryKey: ["sessions"], queryFn: () => client.call(routes.sessions, emptyInput) });
@@ -50,7 +49,6 @@ export function TaskSidebar({
 			),
 		[workspaces.data, activeWorkspaceId],
 	);
-	const needle = filter.trim().toLocaleLowerCase();
 	const status =
 		connection === "Connected"
 			? { tone: "ok", label: "Connected" }
@@ -83,7 +81,7 @@ export function TaskSidebar({
 					onClick={() => activeWorkspaceId && actions.newTask(activeWorkspaceId)}
 					title={activeWorkspaceId ? "Start a new task in the current project" : "Open a project first"}
 				>
-					<Icon name="compose" />
+					{actions.launch.busy ? <ClioPulse size={PULSE_SIZE.row} /> : <Icon name="compose" />}
 					<span>{actions.launch.busy ? "Starting…" : "New task"}</span>
 					<kbd>{chordHint("newTask")}</kbd>
 				</button>
@@ -92,7 +90,7 @@ export function TaskSidebar({
 					<span>Open workspace</span>
 					<kbd>{chordHint("openWorkspace")}</kbd>
 				</button>
-				<NavLink to="/library" className="wb-action" onClick={onNavigate}>
+				<NavLink to="/skills" className="wb-action" onClick={onNavigate}>
 					<Icon name="skills" />
 					<span>Skills</span>
 				</NavLink>
@@ -100,44 +98,16 @@ export function TaskSidebar({
 
 			<div className="wb-side__heading">
 				<h2>Tasks</h2>
-				<div>
-					<button
-						type="button"
-						className="wb-icon wb-icon--small"
-						aria-label={filtering ? "Hide task filter" : "Filter tasks"}
-						aria-expanded={filtering}
-						aria-controls={filterId}
-						onClick={() => {
-							setFiltering((on) => !on);
-							setFilter("");
-						}}
-					>
-						<Icon name="search" />
-					</button>
-					<button
-						type="button"
-						className="wb-icon wb-icon--small"
-						aria-label="Command palette"
-						title={`Command palette (${chordHint("palette")})`}
-						onClick={onSearch}
-					>
-						<Icon name="listChecks" />
-					</button>
-				</div>
+				<button
+					type="button"
+					className="wb-icon wb-icon--small"
+					aria-label="Search tasks and commands"
+					title={`Search tasks and commands (${chordHint("palette")})`}
+					onClick={onSearch}
+				>
+					<Icon name="search" />
+				</button>
 			</div>
-			{filtering ? (
-				<div className="wb-side__filter" id={filterId}>
-					<input
-						type="search"
-						// biome-ignore lint/a11y/noAutofocus: the field appears because the operator asked for it.
-						autoFocus
-						value={filter}
-						onChange={(event) => setFilter(event.target.value)}
-						placeholder="Filter tasks"
-						aria-label="Filter tasks"
-					/>
-				</div>
-			) : null}
 
 			{/* biome-ignore lint/a11y/noNoninteractiveTabindex: keyboard users scroll the task list independently. */}
 			<section className="wb-side__tasks" tabIndex={0} aria-label="Tasks by project">
@@ -153,7 +123,7 @@ export function TaskSidebar({
 				{!workspaces.isPending && !workspaces.error && ordered.length === 0 ? (
 					<p className="wb-note">Open a workspace to start your first task.</p>
 				) : null}
-				{ordered.slice(0, needle ? ordered.length : shown).map((workspace) => (
+				{ordered.slice(0, shown).map((workspace) => (
 					<ProjectGroup
 						key={workspace.id}
 						client={client}
@@ -162,12 +132,11 @@ export function TaskSidebar({
 						current={workspace.id === activeWorkspaceId}
 						activeTask={activeTask}
 						actions={actions}
-						needle={needle}
 						now={now}
 						onNavigate={onNavigate}
 					/>
 				))}
-				{!needle && ordered.length > shown ? (
+				{ordered.length > shown ? (
 					<button type="button" className="wb-more" onClick={() => setShown((count) => count + PROJECTS_SHOWN)}>
 						Show {ordered.length - shown} more projects
 					</button>
@@ -200,7 +169,6 @@ function ProjectGroup({
 	current,
 	activeTask,
 	actions,
-	needle,
 	now,
 	onNavigate,
 }: {
@@ -210,7 +178,6 @@ function ProjectGroup({
 	current: boolean;
 	activeTask: string | null;
 	actions: TaskActions;
-	needle: string;
 	now: number;
 	onNavigate: () => void;
 }) {
@@ -223,21 +190,19 @@ function ProjectGroup({
 	const history = useQuery({
 		queryKey: ["session-history", workspace.id],
 		queryFn: () => client.call(routes.sessionHistory, { params: { id: workspace.id }, query: {}, body: {} }),
-		enabled: expanded || needle !== "" || hasLive,
+		enabled: expanded || hasLive,
 		retry: false,
 	});
 	const rows = useMemo(
 		() => taskRows(workspace.id, sessions, history.data ?? []),
 		[workspace.id, sessions, history.data],
 	);
-	const matching = needle ? rows.filter((row) => row.title.toLocaleLowerCase().includes(needle)) : rows;
 	// Keep the selected task visible even when it is older than the page of rows shown.
-	const visible = needle ? matching.length : Math.max(limit, matching.findIndex((row) => row.id === activeTask) + 1);
+	const visible = Math.max(limit, rows.findIndex((row) => row.id === activeTask) + 1);
 	useEffect(() => {
 		if (current) setOpen((value) => value ?? true);
 	}, [current]);
-	if (needle && matching.length === 0) return null;
-	const showing = needle ? true : expanded;
+	const showing = expanded;
 	return (
 		<section className="wb-project" data-current={current}>
 			<div className="wb-project__head">
@@ -265,19 +230,26 @@ function ProjectGroup({
 			</div>
 			{showing ? (
 				<ul className="wb-tasks" id={listId}>
-					{matching.slice(0, visible).map((row) => (
+					{rows.slice(0, visible).map((row) => (
 						<li key={row.id}>
-							<TaskItem row={row} selected={row.id === activeTask} actions={actions} now={now} onNavigate={onNavigate} />
+							<TaskItem
+								client={client}
+								row={row}
+								selected={row.id === activeTask}
+								actions={actions}
+								now={now}
+								onNavigate={onNavigate}
+							/>
 						</li>
 					))}
 					{history.isPending && history.fetchStatus !== "idle" && rows.length === 0 ? (
 						<li className="wb-note">Loading…</li>
 					) : null}
-					{!history.isPending && matching.length === 0 ? <li className="wb-note">No tasks yet.</li> : null}
-					{matching.length > visible ? (
+					{!history.isPending && rows.length === 0 ? <li className="wb-note">No tasks yet.</li> : null}
+					{rows.length > visible ? (
 						<li>
 							<button type="button" className="wb-more" onClick={() => setLimit(visible + TASKS_PER_PROJECT)}>
-								Show {matching.length - visible} more
+								Show {rows.length - visible} more
 							</button>
 						</li>
 					) : null}
@@ -288,24 +260,30 @@ function ProjectGroup({
 }
 
 function TaskItem({
+	client,
 	row,
 	selected,
 	actions,
 	now,
 	onNavigate,
 }: {
+	client: Client;
 	row: TaskRow;
 	selected: boolean;
 	actions: TaskActions;
 	now: number;
 	onNavigate: () => void;
 }) {
+	const rename = useRenameTask(client);
+	const remove = useDeleteTask(client);
+	const [editing, setEditing] = useState(false);
+	const [confirming, setConfirming] = useState(false);
 	const age = shortAge(row.at, now);
 	const label = STATE_LABELS[row.state];
 	const busy = actions.resuming === row.id || actions.closing === row.id;
 	const glyph =
-		row.state === "working" || row.state === "starting" ? (
-			<ClioPulse size={14} />
+		row.state === "working" || row.state === "starting" || actions.resuming === row.id ? (
+			<ClioPulse size={PULSE_SIZE.row} />
 		) : row.state === "approval" ? (
 			<span className="wb-dot wb-dot--approval" aria-hidden="true" />
 		) : row.state === "failed" ? (
@@ -320,9 +298,50 @@ function TaskItem({
 		</>
 	);
 	const title = `${row.title}${label ? ` · ${label}` : ""}`;
+	const working = row.state === "working" || row.state === "starting";
+	if (confirming)
+		return (
+			<div className="wb-task" data-selected={selected} data-state={row.state}>
+				<fieldset className="wb-task__confirm">
+					<legend className="sr-only">Delete {row.title}</legend>
+					<span>Delete for good?</span>
+					<button
+						type="button"
+						className="wb-task__delete"
+						disabled={remove.isPending}
+						onClick={() =>
+							remove.mutate({ sessionId: row.id, workspaceId: row.workspaceId }, { onSettled: () => setConfirming(false) })
+						}
+					>
+						{remove.isPending ? "Deleting…" : "Delete"}
+					</button>
+					<button
+						type="button"
+						onClick={() => setConfirming(false)}
+						// biome-ignore lint/a11y/noAutofocus: the operator just asked to delete; the safe answer takes focus.
+						autoFocus
+					>
+						Keep
+					</button>
+				</fieldset>
+			</div>
+		);
 	return (
-		<div className="wb-task" data-selected={selected} data-state={row.state}>
-			{row.open ? (
+		<div className="wb-task" data-selected={selected} data-state={row.state} data-editing={editing}>
+			{editing ? (
+				<div className="wb-task__main">
+					<span className="wb-task__glyph">{glyph}</span>
+					<InlineRename
+						value={row.title}
+						label={`Rename ${row.title}`}
+						onCancel={() => setEditing(false)}
+						onCommit={(next) => {
+							setEditing(false);
+							rename.mutate({ sessionId: row.id, workspaceId: row.workspaceId, label: next });
+						}}
+					/>
+				</div>
+			) : row.open ? (
 				<NavLink to={`/sessions/${row.id}`} className="wb-task__main" title={title} onClick={onNavigate}>
 					{body}
 				</NavLink>
@@ -337,18 +356,24 @@ function TaskItem({
 					{body}
 				</button>
 			)}
-			{row.open && row.state !== "working" && row.state !== "starting" ? (
-				<button
-					type="button"
-					className="wb-icon wb-icon--small wb-task__close"
-					aria-label={`Close task ${row.title}`}
-					title="Close task. Its history stays saved."
-					disabled={busy}
-					onClick={() => actions.close(row.id)}
-				>
-					<Icon name="close" />
-				</button>
-			) : null}
+			{editing ? null : (
+				<div className="wb-task__menu">
+					<Menu label={`Actions for ${row.title}`} float>
+						<MenuItem icon="pencil" disabled={busy} onClick={() => setEditing(true)}>
+							Rename
+						</MenuItem>
+						{row.open ? (
+							<MenuItem icon="close" disabled={busy || working} onClick={() => actions.close(row.id)}>
+								Close task
+							</MenuItem>
+						) : (
+							<MenuItem icon="trash" tone="danger" disabled={busy} onClick={() => setConfirming(true)}>
+								Delete…
+							</MenuItem>
+						)}
+					</Menu>
+				</div>
+			)}
 		</div>
 	);
 }

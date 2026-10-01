@@ -42,6 +42,9 @@
 
 /* The status the bar shows beside the title: only when there is something to say. */
 .wb-chip--status {
+	/* The word that carries the state never shrinks; the title gives way instead. */
+	flex: none;
+	max-width: none;
 	border-color: transparent;
 	background: transparent;
 	padding-inline: var(--space-1);

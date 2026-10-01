@@ -6,15 +6,12 @@ import { Icon } from "../design/icons.js";
 import { KEYBINDINGS, matchesKeybinding } from "../interaction/keybindings.js";
 import { useShortcutLayer } from "../interaction/use-shortcut.js";
 import { Menu, MenuItem } from "../shell/Menu.js";
-import { ArtifactInspector, type InspectorSelection } from "./ArtifactInspector.js";
 import { ChangesView } from "./ChangesView.js";
 import { changeCounts, NO_CHANGES, summarizeChanges } from "./changes-model.js";
 import { ProgressView } from "./ProgressView.js";
 import { PANE_VIEWS, type PaneView, selectPaneSession } from "./pane-model.js";
 import { SessionPanel } from "./SessionPanel.js";
 import { selectSessionPanel } from "./session-panel-model.js";
-import { TerminalView } from "./TerminalView.js";
-import { commandRuns } from "./terminal-model.js";
 import { WorkerGraph } from "./WorkerGraph.js";
 import "./pane.css";
 
@@ -45,8 +42,6 @@ export const SessionPane = memo(function SessionPane({
 	nowMs,
 	view,
 	onViewChange,
-	onCloseSession,
-	closing,
 }: {
 	open: boolean;
 	onClose: () => void;
@@ -57,8 +52,6 @@ export const SessionPane = memo(function SessionPane({
 	nowMs: number;
 	view: PaneView;
 	onViewChange: (view: PaneView) => void;
-	onCloseSession: () => void;
-	closing: boolean;
 }) {
 	const tabId = useId();
 	const aside = useRef<HTMLElement>(null);
@@ -66,7 +59,6 @@ export const SessionPane = memo(function SessionPane({
 	const [wide, setWide] = useState(() => typeof window === "undefined" || matchMedia("(min-width: 1100px)").matches);
 	const [width, setWidth] = useState<number>(() => storedWidth() ?? 420);
 	const [visited, setVisited] = useState<ReadonlySet<PaneView>>(() => new Set([view]));
-	const [selection, setSelection] = useState<InspectorSelection>({ view: "files", selectedFile: null, filter: "" });
 	useEffect(() => {
 		if (open) setVisited((previous) => (previous.has(view) ? previous : new Set([...previous, view])));
 	}, [open, view]);
@@ -91,24 +83,8 @@ export const SessionPane = memo(function SessionPane({
 		enabled: false,
 		select: selectSessionPanel,
 	}).data;
-	const files = useMemo(
-		() =>
-			pane === undefined
-				? undefined
-				: {
-						id: pane.id,
-						fleet: pane.fleet,
-						timelineTruncated: pane.timelineTruncated,
-						// The inspector lists newest first.
-						tools: [...pane.tools].reverse(),
-					},
-		[pane],
-	);
-	const counts = useMemo(
-		() => ({
-			changes: pane ? summarizeChanges(pane.tools, workspaceRoot).files.length : 0,
-			terminal: pane ? commandRuns(pane.tools, workspaceRoot).length : 0,
-		}),
+	const changeCount = useMemo(
+		() => (pane ? summarizeChanges(pane.tools, workspaceRoot).files.length : 0),
 		[pane, workspaceRoot],
 	);
 
@@ -157,7 +133,7 @@ export const SessionPane = memo(function SessionPane({
 	const extra = PANE_VIEWS.filter((entry) => !entry.primary);
 	const activeExtra = extra.find((entry) => entry.id === view);
 	const tabs = activeExtra ? [...primary, activeExtra] : primary;
-	const badge = (id: PaneView): number => (id === "changes" ? counts.changes : id === "terminal" ? counts.terminal : 0);
+	const badge = (id: PaneView): number => (id === "changes" ? changeCount : 0);
 	const mounted = (id: PaneView) => visited.has(id);
 	const tab = (id: PaneView) => `${tabId}-${id}`;
 	const content = (
@@ -220,51 +196,9 @@ export const SessionPane = memo(function SessionPane({
 							/>,
 						],
 						["changes", <ChangesView key="c" session={pane} workspaceRoot={workspaceRoot} />],
-						[
-							"files",
-							files ? (
-								<ArtifactInspector
-									key="f"
-									bare
-									client={client}
-									session={files}
-									workspaceRoot={workspaceRoot}
-									onClose={onClose}
-									selection={selection}
-									onSelectionChange={setSelection}
-								/>
-							) : null,
-						],
-						["terminal", <TerminalView key="t" session={pane} workspaceRoot={workspaceRoot} />],
 						["agents", legacy ? <WorkerGraph key="a" client={client} session={legacy} /> : null],
-						[
-							"session",
-							legacy ? (
-								<SessionPanel
-									key="s"
-									client={client}
-									session={legacy}
-									workspaceRoot={workspaceRoot}
-									tools={false}
-									onCloseSession={onCloseSession}
-									closing={closing}
-								/>
-							) : null,
-						],
-						[
-							"tools",
-							legacy ? (
-								<SessionPanel
-									key="x"
-									client={client}
-									session={legacy}
-									workspaceRoot={workspaceRoot}
-									tools
-									onCloseSession={onCloseSession}
-									closing={closing}
-								/>
-							) : null,
-						],
+						["session", legacy ? <SessionPanel key="s" client={client} session={legacy} tools={false} /> : null],
+						["tools", legacy ? <SessionPanel key="x" client={client} session={legacy} tools /> : null],
 					] as const
 				).map(([id, body]) => (
 					<div
@@ -275,6 +209,10 @@ export const SessionPane = memo(function SessionPane({
 						className="pane__panel"
 						hidden={view !== id}
 					>
+						{/* The legacy views open on h3s, so the pane names them at h2 for the outline. */}
+						{id === "session" || id === "tools" ? (
+							<h2 className="sr-only">{PANE_VIEWS.find((entry) => entry.id === id)?.label}</h2>
+						) : null}
 						{mounted(id) ? body : null}
 					</div>
 				))}
@@ -366,7 +304,7 @@ export const PaneToggles = memo(function PaneToggles({
 	workspaceRoot: string | undefined;
 	open: boolean;
 	view: PaneView;
-	ids: { changes: string; terminal: string; pane: string };
+	ids: { changes: string; pane: string };
 	onToggle: (view: PaneView, trigger: string) => void;
 }) {
 	const pane = useQuery({
@@ -392,22 +330,11 @@ export const PaneToggles = memo(function PaneToggles({
 				onClick={() => onToggle("changes", ids.changes)}
 			>
 				<Icon name="fileDiff" />
-				{changes.files.length > 0 ? (
+				{changes.applied > 0 ? (
 					<span className="diffstat" aria-hidden="true">
 						<span className="diffstat__add">+{changes.adds}</span> <span className="diffstat__del">−{changes.dels}</span>
 					</span>
 				) : null}
-			</button>
-			<button
-				id={ids.terminal}
-				type="button"
-				className="wb-icon"
-				aria-pressed={open && view === "terminal"}
-				aria-label="Terminal"
-				title="Commands Clio ran"
-				onClick={() => onToggle("terminal", ids.terminal)}
-			>
-				<Icon name="terminal" />
 			</button>
 			<button
 				id={ids.pane}

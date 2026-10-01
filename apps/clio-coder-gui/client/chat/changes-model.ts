@@ -25,6 +25,8 @@ export interface FileChange {
 	readonly dels: number;
 	/** At least one edit to this file is proposed and not yet applied. */
 	readonly pending: boolean;
+	/** At least one edit to this file landed. A file with only proposals has not changed. */
+	readonly applied: boolean;
 	readonly calls: readonly ChangeCall[];
 }
 
@@ -32,9 +34,13 @@ export interface ChangeSummary {
 	readonly files: readonly FileChange[];
 	readonly adds: number;
 	readonly dels: number;
+	/** Files an edit actually changed. */
+	readonly applied: number;
+	/** Files that only have a proposed edit so far. */
+	readonly pending: number;
 }
 
-export const NO_CHANGES: ChangeSummary = { files: [], adds: 0, dels: 0 };
+export const NO_CHANGES: ChangeSummary = { files: [], adds: 0, dels: 0, applied: 0, pending: 0 };
 
 export function relativeTo(path: string, root: string | undefined): string {
 	if (root !== undefined && root.length > 0) {
@@ -51,7 +57,10 @@ function dirname(label: string): string {
 
 /** `tools` in the order the calls were made. */
 export function summarizeChanges(tools: readonly TimelineItem[], workspaceRoot?: string): ChangeSummary {
-	const byPath = new Map<string, { adds: number; dels: number; pending: boolean; calls: ChangeCall[] }>();
+	const byPath = new Map<
+		string,
+		{ adds: number; dels: number; pending: boolean; applied: boolean; calls: ChangeCall[] }
+	>();
 	for (const item of tools) {
 		const card = presentTool(item, workspaceRoot === undefined ? {} : { workspaceRoot });
 		if (card.body !== "diff" || card.diff === null) continue;
@@ -60,8 +69,9 @@ export function summarizeChanges(tools: readonly TimelineItem[], workspaceRoot?:
 		if (provenance !== "applied" && provenance !== "proposed") continue;
 		const path = card.diff.path ?? item.locations?.[0]?.path;
 		if (path === undefined || path === null || path.trim() === "") continue;
-		const entry = byPath.get(path) ?? { adds: 0, dels: 0, pending: false, calls: [] };
+		const entry = byPath.get(path) ?? { adds: 0, dels: 0, pending: false, applied: false, calls: [] };
 		if (provenance === "applied") {
+			entry.applied = true;
 			entry.adds += card.diff.diff?.adds ?? 0;
 			entry.dels += card.diff.diff?.dels ?? 0;
 		} else entry.pending = true;
@@ -76,6 +86,8 @@ export function summarizeChanges(tools: readonly TimelineItem[], workspaceRoot?:
 		files,
 		adds: files.reduce((sum, file) => sum + file.adds, 0),
 		dels: files.reduce((sum, file) => sum + file.dels, 0),
+		applied: files.filter((file) => file.applied).length,
+		pending: files.filter((file) => !file.applied && file.pending).length,
 	};
 }
 
@@ -88,4 +100,38 @@ export function changeCounts(summary: Pick<ChangeSummary, "adds" | "dels">): str
 export function extensionBadge(name: string): string {
 	const extension = /\.([A-Za-z0-9]{1,4})$/u.exec(name)?.[1];
 	return extension ? extension.toUpperCase() : "FILE";
+}
+
+export interface TouchedFile {
+	readonly path: string;
+	readonly label: string;
+	readonly name: string;
+	readonly dir: string;
+	/** Tool calls that reported this path. */
+	readonly calls: number;
+}
+
+/**
+ * Paths tools reported that no edit changed: files Clio read, searched or ran against. Newest call
+ * first. `changed` is the set of paths `summarizeChanges` already lists.
+ */
+export function touchedFiles(
+	tools: readonly TimelineItem[],
+	workspaceRoot: string | undefined,
+	changed: ReadonlySet<string>,
+): TouchedFile[] {
+	const counts = new Map<string, number>();
+	for (const item of tools)
+		for (const location of item.locations ?? []) {
+			const path = location.path;
+			if (path.trim() === "" || changed.has(path)) continue;
+			const seen = counts.get(path) ?? 0;
+			// Re-insert so Map order tracks the most recent call.
+			counts.delete(path);
+			counts.set(path, seen + 1);
+		}
+	return [...counts.entries()].reverse().map(([path, calls]) => {
+		const label = relativeTo(path, workspaceRoot);
+		return { path, label, name: basename(label), dir: dirname(label), calls };
+	});
 }

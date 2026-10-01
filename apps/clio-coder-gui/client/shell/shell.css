@@ -324,18 +324,28 @@
 	color: var(--ink-muted);
 	font-variant-numeric: tabular-nums;
 }
-.wb-task__close {
+.wb-task__menu {
 	position: absolute;
 	right: 4px;
 	opacity: 0;
 }
-.wb-task:hover .wb-task__close,
-.wb-task:focus-within .wb-task__close {
+.wb-task:hover .wb-task__menu,
+.wb-task:focus-within .wb-task__menu,
+.wb-task__menu:has(.wb-menu[open]) {
 	opacity: 1;
 }
 .wb-task:hover .wb-task__age,
-.wb-task:focus-within:has(.wb-task__close) .wb-task__age {
+.wb-task:focus-within:has(.wb-task__menu) .wb-task__age,
+.wb-task:has(.wb-menu[open]) .wb-task__age {
 	visibility: hidden;
+}
+@media (pointer: coarse) {
+	.wb-task__menu {
+		opacity: 1;
+	}
+	.wb-task__age {
+		visibility: hidden;
+	}
 }
 .wb-dot {
 	width: 7px;
@@ -762,4 +772,86 @@ button.wb-chip:hover:not(:disabled) {
 }
 .wb-open button {
 	flex: none;
+}
+
+/* A menu inside a scrolling list opens in a fixed layer so the list cannot clip it. */
+.wb-menu[data-float="yes"] > .wb-menu__panel {
+	position: fixed;
+	right: auto;
+	top: var(--menu-top, -9999px);
+	left: var(--menu-left, 0);
+}
+
+/* ---- inline rename ---------------------------------------------------------- */
+.wb-rename {
+	flex: 1;
+	min-width: 0;
+	height: 26px;
+	min-height: 0;
+	padding: 0 8px;
+	border: 1px solid var(--accent);
+	border-radius: 6px;
+	background: var(--surface);
+	color: var(--ink);
+	font: inherit;
+}
+.wb-bar__title .wb-rename {
+	height: 28px;
+	width: min(32ch, 100%);
+	font-size: 14px;
+	font-weight: 600;
+}
+.wb-bar__rename {
+	display: block;
+	max-width: 100%;
+	min-height: 0;
+	margin: 0;
+	padding: 2px 6px;
+	margin-inline: -6px;
+	overflow: hidden;
+	border: 1px solid transparent;
+	border-radius: 6px;
+	background: transparent;
+	color: inherit;
+	font: inherit;
+	letter-spacing: inherit;
+	text-align: left;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	cursor: text;
+}
+.wb-bar__rename:hover {
+	background: var(--wb-hover);
+	border-color: transparent;
+}
+
+/* ---- delete confirmation on a task row ------------------------------------- */
+.wb-task__confirm {
+	display: flex;
+	margin: 0;
+	border: 0;
+	flex: 1;
+	align-items: center;
+	gap: var(--space-2);
+	min-width: 0;
+	height: var(--wb-row);
+	padding: 0 4px 0 12px;
+	font-size: var(--text-meta);
+}
+.wb-task__confirm span {
+	flex: 1;
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+.wb-task__confirm button {
+	min-height: 0;
+	height: 24px;
+	padding: 0 9px;
+	font-size: 12px;
+}
+.wb-task__confirm .wb-task__delete {
+	border-color: var(--status-fail-line);
+	color: var(--status-fail-fg);
 }

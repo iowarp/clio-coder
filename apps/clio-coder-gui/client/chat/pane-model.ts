@@ -1,16 +1,15 @@
 import type { SessionSnapshot, TimelineItem } from "../../contracts/sessions.js";
 
 /**
- * The right-hand pane. Four views carry the everyday questions: how is it going, what changed, which
- * files, what ran. The rest is Clio's depth, reachable from the pane's menu and never in the way.
+ * The right-hand pane. Two views carry the everyday questions: how is it going and what changed. The
+ * rest is Clio's depth, reachable from the pane's menu and never in the way. The pane has no command
+ * view: what Clio ran is in the transcript, and nothing typed in the browser reaches a process.
  */
 export const PANE_VIEWS = [
 	{ id: "progress", label: "Progress", icon: "listChecks", primary: true },
 	{ id: "changes", label: "Changes", icon: "fileDiff", primary: true },
-	{ id: "files", label: "Files", icon: "artifacts", primary: true },
-	{ id: "terminal", label: "Terminal", icon: "terminal", primary: true },
 	{ id: "agents", label: "Agents", icon: "fleet", primary: false },
-	{ id: "session", label: "Session", icon: "sliders", primary: false },
+	{ id: "session", label: "Details", icon: "sliders", primary: false },
 	{ id: "tools", label: "Tools", icon: "toolchain", primary: false },
 ] as const;
 
@@ -20,9 +19,9 @@ export function isPaneView(value: unknown): value is PaneView {
 	return PANE_VIEWS.some((view) => view.id === value);
 }
 
-/** The previous panel stored "artifacts" for what is now "files". */
+/** Earlier builds stored "artifacts" and "files" (now part of Changes) and "terminal" (removed). */
 export function migratedPaneView(value: unknown): PaneView {
-	if (value === "artifacts") return "files";
+	if (value === "artifacts" || value === "files") return "changes";
 	return isPaneView(value) ? value : "progress";
 }
 

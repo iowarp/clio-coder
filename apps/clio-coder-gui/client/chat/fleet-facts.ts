@@ -44,6 +44,10 @@ export interface FleetRun {
 	readonly updatedAt: string;
 }
 
+/**
+ * Plain-text glyphs for a run. A run that is live in an open session draws the Clio spinner instead
+ * (`isWorkingRun`); these remain for queued and settled runs and for any record read afterwards.
+ */
 export const FLEET_GLYPHS: Readonly<Record<FleetRunState, string>> = {
 	queued: "…",
 	running: "◐",
@@ -73,6 +77,9 @@ export const FLEET_STATE_TONES: Readonly<Record<FleetRunState, StatusTone>> = {
 const LIVE_STATES: ReadonlySet<FleetRunState> = new Set<FleetRunState>(["queued", "running", "progress"]);
 
 export const isLiveRun = (run: FleetRun): boolean => LIVE_STATES.has(run.state);
+
+/** A worker that is executing, as opposed to queued. Only meaningful while the session is open. */
+export const isWorkingRun = (run: FleetRun): boolean => run.state === "running" || run.state === "progress";
 
 /** The strip keeps this many runs, dropping the oldest settled one first. */
 export const FLEET_RUN_CAP = 64;

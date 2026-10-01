@@ -572,3 +572,10 @@
 .diff .code-block__copy.is-failed {
 	color: var(--status-fail-fg);
 }
+
+/* The Clio spinner in a glyph slot that was sized for one text character. */
+:is(.activity__glyph, .tool-card__glyph, .status-mark__glyph, .fleet-run__glyph) {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+}
