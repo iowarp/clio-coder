@@ -589,7 +589,7 @@ export function SettingsControlsView({
 			{checkOperation.error && <p role="alert">Model check progress is unavailable: {checkOperation.error.message}</p>}
 			{active === "targets" && (
 				<>
-					<ConnectionSetup client={client} compact={compact} />
+					<ConnectionSetup />
 					<Link to={`/settings/targets?workspace=${workspaceId}`}>Manage connections</Link>
 				</>
 			)}

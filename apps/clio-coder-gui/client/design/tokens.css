@@ -121,6 +121,14 @@
 	--syntax-deleted: #f58e85;
 	--syntax-inserted: #8fd1a7;
 
+	/* ---- the setup wizard's stage: the supplied films are authored on pure black, so the panel that
+	   holds them is black in both themes and carries the dark theme's brand colours. ------------- */
+	--stage-black: #000000;
+	--stage-ink: #f3ecdf;
+	--stage-ink-muted: #b0a594;
+	--stage-accent: #00d4db;
+	--stage-secondary: #ee852f;
+
 	/* Compatibility names used by page, Markdown and offline styles. */
 	--muted: var(--ink-muted);
 	--inset: var(--surface-sunken);

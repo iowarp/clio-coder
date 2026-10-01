@@ -65,6 +65,8 @@ const router = createBrowserRouter([
 					return { element: <LibraryPage client={client} /> };
 				},
 			},
+			// The wizard is drawn by the app shell, full window, so this route has nothing of its own to render.
+			{ path: "/setup", element: null },
 			{
 				path: "/skills",
 				lazy: async () => {
