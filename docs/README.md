@@ -26,6 +26,7 @@ architecture guides and current source for implementation decisions.
 | Goal | Guide |
 | --- | --- |
 | Install Clio and connect the first model | [Installation and Lifecycle](guide/installation-and-lifecycle.md) → [Configuration and Targets](guide/configuration-and-targets.md) |
+| Install on an HPC cluster: no root, old glibc, proxies, airgapped mirrors | [HPC clusters](guide/hpc-clusters.md) |
 | Learn the interactive session and CLI | [Commands and Modes](guide/commands-and-modes.md) |
 | Understand what Clio may read, change, or execute | [Safety Model](architecture/safety-model.md) |
 | Diagnose a problem by its exact message | [Troubleshooting](guide/troubleshooting.md) |

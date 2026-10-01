@@ -46,15 +46,34 @@ welcome; start with the [contributor guide](CONTRIBUTING.md).
 
 ## Get started
 
-Requires **Node.js 22.19 or newer** and a model with tool calling. Linux and macOS
-are the primary platforms; Windows support is best effort.
+You need a model with tool calling. Linux and macOS are the primary platforms.
+The installer brings its own Node.js 24 LTS, needs no root, and works on HPC login
+nodes with an old glibc or no usable `module load nodejs`:
 
 ```bash
-npm install -g @iowarp/clio-coder
+curl -fsSL https://coder.iowarp.ai/install.sh | sh
 cd /path/to/your/project
 clio-coder configure
 clio-coder
 ```
+
+Until coder.iowarp.ai serves it, use the copy attached to each GitHub release:
+`curl -fsSL https://github.com/iowarp/clio-coder/releases/latest/download/install.sh | sh`.
+It verifies the Node download against SHASUMS256.txt and the Node.js release keys,
+installs under `~/.local/share/clio-coder-install`, and writes the launcher to
+`~/.local/bin/clio-coder`. See [HPC clusters](docs/guide/hpc-clusters.md) for old
+glibc, proxies and airgapped sites.
+
+With your own **Node.js 22.19 or newer**, npm works too:
+
+```bash
+npm install -g @iowarp/clio-coder
+```
+
+On native Windows, which is best effort (WSL is the recommended route),
+`irm https://coder.iowarp.ai/install.ps1 | iex` installs the same way under
+`%LOCALAPPDATA%\clio-coder`. There, install, reinstall, `--version`, `doctor` and `uninstall`
+are verified; the terminal session itself is not routinely tested.
 
 1. Choose **Guided setup**, then pick the description you recognize: an app on
    this computer, a model server, an AI subscription, or a provider account.
@@ -97,8 +116,9 @@ pnpm add -g @iowarp/clio-coder
 # Run without a global install
 npx --yes @iowarp/clio-coder@latest
 
-# Install without the optional Claude Agent SDK worker dependency
-npm install -g @iowarp/clio-coder --omit=optional
+# Install without the optional Claude Agent SDK worker dependency (about 224 MB).
+# npm 11 ignores --omit=optional on global installs; the installer honors it:
+curl -fsSL https://coder.iowarp.ai/install.sh | sh -s -- --omit-optional
 ```
 
 From source, build the release tag:

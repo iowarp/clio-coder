@@ -2,10 +2,30 @@
 
 The [architecture overview](../architecture/architecture.md) explains the installed runtime and its entry points.
 
-Clio Coder installs from the npm registry as `@iowarp/clio-coder` using npm,
-pnpm, or Bun, or from a source checkout using the pinned pnpm workflow. The
-[README quick start](../../README.md#get-started) covers installing and first
-run. All routes require Node.js `>=22.19.0`, including installations managed by Bun.
+Clio Coder installs with `scripts/install.sh` (or `scripts/install.ps1` on
+Windows), which brings a private Node.js runtime; from the npm registry as
+`@iowarp/clio-coder` using npm, pnpm, or Bun; or from a source checkout using the
+pinned pnpm workflow. The [README quick start](../../README.md#get-started) covers
+installing and first run. The package routes require Node.js `>=22.19.0`,
+including installations managed by Bun; the installer satisfies that itself. On
+an older Node, the package's `clio-coder` command says so before loading anything
+else and names the installer, or a newer Node given by `CLIO_CODER_NODE`.
+[HPC clusters](hpc-clusters.md) covers cluster login nodes, old glibc, proxies and
+airgapped sites.
+
+### The installer layout
+
+| Path (Linux default) | Contents |
+| --- | --- |
+| `~/.local/share/clio-coder-install/runtime/node-v<ver>-<build>/` | The managed Node.js. macOS uses `~/Library/Application Support/clio-coder/install`, Windows `%LOCALAPPDATA%\clio-coder\install`; `--install-dir`, `CLIO_CODER_INSTALL_DIR` or `CLIO_CODER_HOME/install` override it. |
+| `.../versions/<version>/lib/node_modules/@iowarp/clio-coder/` | One package prefix per installed version: the current one and the previous one, kept for `install.sh --rollback`. |
+| `.../install.json` | Manifest naming the Node, the current and previous prefixes, the launcher and the channel. |
+| `~/.local/bin/clio-coder` (`clio-coder.cmd` on Windows) | A small launcher that runs the managed Node on the current prefix. |
+
+The install root sits beside the data root rather than inside it, so
+`clio-coder reset` and `uninstall --keep-config` never delete the Node that runs
+them. A version takes about 460 MB with the optional Claude Agent SDK and 190 MB
+without it (`--omit-optional`); the Node runtime adds about 210 MB.
 
 Repository development uses pnpm 10.34.5 and `pnpm-lock.yaml`. Registry
 consumers install the built package and do not need the repository toolchain.
@@ -42,10 +62,14 @@ credentials; reinstalling the package alone does not reset them.
 `@anthropic-ai/claude-agent-sdk` is an `optionalDependencies` entry, not a hard dependency. Its platform package carries a proprietary binary of roughly 224MB per platform, and only the `claude-sdk` runtime uses it. Skip it with:
 
 ```bash
-npm install -g @iowarp/clio-coder --omit=optional
+curl -fsSL https://coder.iowarp.ai/install.sh | sh -s -- --omit-optional
 # Or: pnpm add -g @iowarp/clio-coder --no-optional
 # Or: bun add -g @iowarp/clio-coder --omit=optional
 ```
+
+npm 11 (checked with 11.19) ignores `--omit=optional` and `--no-optional` on
+`npm install -g` and installs the binary anyway; a project install honors it,
+which is how the installer applies `--omit-optional`.
 
 Installed size depends on platform, dependency versions, and optional packages. The release tarball size excludes separately installed npm dependencies.
 
@@ -248,7 +272,15 @@ including custom prefixes, and runs post-install checks through the exact instal
 entry. Another launcher on `PATH` cannot take over those checks. An older dist-tag
 does not trigger a downgrade.
 
-Inside the TUI, `/upgrade` offers the same npm-global path. It first checks that
+For an installer install, `upgrade` runs the installer that shipped with the
+running package against the same install root. The new version lands in a new
+prefix, the launcher is switched to it atomically, and post-install checks run
+through the new entry. The managed Node stays as it is unless you pass
+`--refresh-runtime`, which moves to the newest Node LTS the installer picks. The
+previous version is kept; `sh install.sh --rollback` points the launcher back at it.
+
+Inside the TUI, `/upgrade` offers the same npm-global path, and the same
+replacement for installer installs. It first checks that
 the session is idle, then shows the current and available versions, package
 prefix, preserved user data, and post-install checks. Nothing is replaced until
 you choose **Upgrade now**. On success, a persistent restart-required notice is
@@ -397,6 +429,12 @@ clio-coder uninstall --dry-run
 clio-coder uninstall --remove-binary --force
 hash -r
 ```
+
+For an installer install, `--remove-binary` also removes the managed Node and
+every installed version: only `runtime/`, `versions/` and `install.json` inside the
+install root, then the root itself if nothing else is left in it. On Windows,
+where a running `node.exe` is locked, the launcher and runtime are removed a few
+seconds after the command exits.
 
 `--dry-run` prints the roots and the optional launcher action without changing
 anything, and enumerates the same resolved absolute paths the real run would

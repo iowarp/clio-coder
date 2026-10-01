@@ -48,7 +48,8 @@ The `environment-variable-inventory` check in [check-hygiene.ts](../../scripts/c
 | `CLIO_CODER_CONFIG_DIR`, `CLIO_CODER_DATA_DIR`, `CLIO_CODER_STATE_DIR`, `CLIO_CODER_CACHE_DIR` | XDG platform defaults | Per-role directory overrides (`src/core/xdg.ts`). |
 | `XDG_CONFIG_HOME`, `XDG_DATA_HOME`, `XDG_STATE_HOME`, `XDG_CACHE_HOME` | platform/user defaults | Linux base directories used when the corresponding `CLIO_CODER_*_DIR` and `CLIO_CODER_HOME` variables are unset (`src/core/xdg.ts`). |
 | `APPDATA`, `LOCALAPPDATA` | Windows profile defaults | Windows roaming and local base directories used when Clio-specific directory overrides are unset (`src/core/xdg.ts`). |
-| `CLIO_CODER_BIN_DIR` | `~/.local/bin` | Directory holding the `clio-coder` launcher symlink. The local install script (`scripts/install-local.sh`) creates it there and `clio-coder uninstall` looks for it there ([uninstall.ts](../../src/cli/uninstall.ts)). |
+| `CLIO_CODER_BIN_DIR` | `~/.local/bin` | Directory holding the `clio-coder` launcher. The local install script (`scripts/install-local.sh`) and the installers (`scripts/install.sh`, `scripts/install.ps1`) create it there and `clio-coder uninstall` looks for it there ([uninstall.ts](../../src/cli/uninstall.ts)). |
+| `CLIO_CODER_NODE_VERSION` | the managed runtime | Node.js version the installers install, a major such as `24` or an exact version. `clio-coder upgrade` sets it to the installed runtime's version so an upgrade keeps that Node, and clears it for `--refresh-runtime` ([upgrade.ts](../../src/cli/upgrade.ts)). The other installer variables are listed in [HPC clusters](hpc-clusters.md). |
 | `CLIO_CODER_PACKAGE_ROOT` | auto-detected | Package root for bundled-asset resolution ([package-root.ts](../../src/core/package-root.ts)). |
 
 ## Ambient provider, runtime, and terminal inputs
