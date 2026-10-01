@@ -18,12 +18,15 @@ const OSC_PATTERN = new RegExp(`${ESC_CHAR}\\][\\s\\S]*?(?:${BEL_CHAR}|${ESC_CHA
 const CSI_PATTERN = new RegExp(`${ESC_CHAR}\\[[0-9;?]*[0-9A-Za-z]`, "g");
 
 /**
- * Bidirectional controls reorder what follows them, so `rm -rf ‮gpj.txt` can
- * read as a different path on the surface that approves it. They are shown as
- * `\u{202e}` text instead of being sent to the terminal.
+ * Format controls (bidirectional marks and overrides, zero-width characters,
+ * U+061C) and C1 controls (U+009B is a CSI) change how text renders without
+ * showing, so `rm -rf ‮gpj.txt` can read as another path on the surface that
+ * approves it. They are shown as `\u{202e}` text instead of reaching the terminal.
  */
+const HIDDEN_CONTROL = /[\p{Cf}\u0080-\u009f]/u;
+
 function isBidiControl(code: number): boolean {
-	return (code >= 0x202a && code <= 0x202e) || (code >= 0x2066 && code <= 0x2069) || code === 0x200e || code === 0x200f;
+	return HIDDEN_CONTROL.test(String.fromCodePoint(code));
 }
 
 function bidiEscape(code: number): string {

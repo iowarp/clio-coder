@@ -571,7 +571,7 @@ function boundedText(value: unknown, max = GRANT_TEXT_MAX_CHARS): string | null 
 	return typeof value === "string" && value.length > 0 && value.length <= max ? value : null;
 }
 
-const GRANT_CONSEQUENCE_MAX_LINES = 4;
+const GRANT_CONSEQUENCE_MAX_LINES = 10;
 const GRANT_CONSEQUENCE_LINE_MAX_CHARS = 512;
 
 /** The display sentences of a grant request, or null when the field is absent or malformed. A bad one costs the card its line, never the request. */

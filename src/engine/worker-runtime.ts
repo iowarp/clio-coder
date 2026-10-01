@@ -118,8 +118,8 @@ import type { AgentEvent, AgentMessage, EngineModel } from "./types.js";
 import type { ClioWorkerEvent } from "./worker-events.js";
 import { createWorkerSafety, createWorkerToolRegistry, INTERNAL_HELPER_RESULT_TOOL } from "./worker-tools.js";
 
-/** Room left for the frame envelope under the 16 KiB control-lane bound. */
-const GRANT_REQUEST_FRAME_BUDGET_CHARS = 14 * 1024;
+/** Room left for the frame envelope under the 16 KiB control-lane bound, counted in the UTF-8 bytes the host limit counts. */
+const GRANT_REQUEST_FRAME_BUDGET_BYTES = 14 * 1024;
 
 /** Exact call and enforced permission conditions; never reuse an answer across asking axes. */
 export function workerPermissionCacheKey(call: ClassifierCall, decision: SafetyDecision, axis: string): string {
@@ -1563,7 +1563,7 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 			const target = describeCallTarget(call.tool, call.args);
 			// Composed here because only the worker holds the whole command: `target`
 			// is one flattened, cut line. Display text only, never read by a decision.
-			const consequence = describeBashCallConsequences(call.tool, call.args, { home: homedir() });
+			const consequence = describeBashCallConsequences(call.tool, call.args, { home: homedir });
 			const summary = `${call.tool} requires ${actionClass} confirmation`;
 			emit({
 				type: "clio_coder_permission_escalated",
@@ -1604,11 +1604,12 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 				};
 				// A descriptor too large for the control frame crosses as its digest
 				// alone; the host then refuses a main grant and only the operator decides.
-				const fits = JSON.stringify(frame).length <= GRANT_REQUEST_FRAME_BUDGET_CHARS;
+				const fits = Buffer.byteLength(JSON.stringify(frame), "utf8") <= GRANT_REQUEST_FRAME_BUDGET_BYTES;
 				// The display sentences ride along only when they leave the frame inside
 				// the budget, so card text can never be what drops a grant's effect.
 				const withConsequence = consequence.length > 0 ? { ...frame, consequence } : frame;
-				const carriesConsequence = JSON.stringify(withConsequence).length <= GRANT_REQUEST_FRAME_BUDGET_CHARS;
+				const carriesConsequence =
+					Buffer.byteLength(JSON.stringify(withConsequence), "utf8") <= GRANT_REQUEST_FRAME_BUDGET_BYTES;
 				input.emitGrantRequest?.(fits ? (carriesConsequence ? withConsequence : frame) : { ...frame, effect: null });
 			}
 			return;

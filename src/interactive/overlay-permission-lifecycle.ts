@@ -8,8 +8,9 @@ import type { DispatchContract } from "../domains/dispatch/contract.js";
 import type { ActionClass, ClassifierCall } from "../domains/safety/action-classifier.js";
 import { sanitizeCallTargetText } from "../domains/safety/call-target.js";
 import {
-	COMMAND_CONSEQUENCE_MAX_LINES,
+	COMMAND_CONSEQUENCE_MAX_SEVERE,
 	describeBashCallConsequences,
+	fitConsequenceLine,
 	type PathKind,
 } from "../domains/safety/command-consequence.js";
 import type { SafetyDecision } from "../domains/safety/contract.js";
@@ -196,12 +197,9 @@ function mainConsequence(call: ClassifierCall): string[] {
 	const cwd = typeof call.args?.cwd === "string" && call.args.cwd.length > 0 ? call.args.cwd : process.cwd();
 	return describeBashCallConsequences(call.tool, call.args, {
 		pathKind: pathKindIn(resolve(process.cwd(), cwd)),
-		home: homedir(),
+		home: homedir,
 	});
 }
-
-/** Characters of one worker-supplied sentence kept; the worker bounds its own, this bounds a hostile one. */
-const WORKER_CONSEQUENCE_LINE_CHARS = 240;
 
 /**
  * The sentences a worker wrote from its own full arguments. They cross the
@@ -212,9 +210,9 @@ const WORKER_CONSEQUENCE_LINE_CHARS = 240;
 function workerConsequenceLines(value: unknown): string[] {
 	if (!Array.isArray(value)) return [];
 	const lines: string[] = [];
-	for (const entry of value.slice(0, COMMAND_CONSEQUENCE_MAX_LINES + 1)) {
+	for (const entry of value.slice(0, COMMAND_CONSEQUENCE_MAX_SEVERE + 1)) {
 		if (typeof entry !== "string") return [];
-		const line = sanitizeCallTargetText(entry).slice(0, WORKER_CONSEQUENCE_LINE_CHARS);
+		const line = fitConsequenceLine(sanitizeCallTargetText(entry));
 		if (line.length > 0) lines.push(line);
 	}
 	return lines;
