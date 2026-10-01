@@ -85,7 +85,9 @@ Use this EXACT format:
 - [Any data, examples, or references needed to continue]
 - [Or "(none)" if not applicable]
 
-Keep each section concise. Preserve exact file paths, function names, and error messages.`;
+Keep each section concise. Preserve exact file paths, function names, and error messages.
+
+Copy every literal the user stated verbatim into Constraints & Preferences or Critical Context: codewords, passphrases, names, numbers, versions, paths, URLs, identifiers, and decisions the user made. This holds even when the assistant declined to store the value as memory or called it conversation-only. A literal the user asked to be remembered is never droppable.`;
 
 export const COMPACTION_TURN_PREFIX_PROMPT_TEMPLATE = `The messages above are the beginning of the currently active user turn. They will be removed from the live context because the retained suffix starts in the middle of that turn.
 
@@ -97,6 +99,7 @@ In addition to that carried-forward context, summarize ONLY the active-turn deta
 - tool calls already made in this turn
 - tool results, file paths, commands, errors, and decisions already observed
 - what should happen next
+- every literal the user stated verbatim (codewords, names, numbers, paths, decisions), including any the assistant declined to store as memory
 
 Do NOT answer the user. Do NOT summarize unrelated older history.`;
 
@@ -576,6 +579,57 @@ function priorCompactionContextEntries(entries: ReadonlyArray<SessionEntry>, com
 	return [compaction, ...retainedSuffix];
 }
 
+/**
+ * Sentences where the operator asked Clio to remember something. A summarizing
+ * model may drop such a value when the assistant declined to store it as
+ * memory (p6/U1: `MARBLE-OTTER` survived live replay and not a resume), so
+ * these sentences are carried verbatim next to the generated summary instead
+ * of trusting it to keep them.
+ */
+const OPERATOR_NOTE_SENTENCE = /^(?:please\s+)?(?:remember|keep in mind|don'?t forget)\b/iu;
+const OPERATOR_NOTE_MAX_CHARS = 400;
+const OPERATOR_NOTE_MAX_COUNT = 30;
+
+function operatorMessageText(entry: SessionEntry): string | null {
+	if (entry.kind !== "message" || entry.role !== "user") return null;
+	const payload = payloadObject(entry.payload);
+	if (payload === null || payload.synthetic === true) return null;
+	if (typeof payload.operatorText === "string") return payload.operatorText;
+	if (typeof payload.text === "string") return payload.text;
+	const parts = contentBlocks(payload)
+		.filter((block) => block.type === "text" && typeof block.text === "string")
+		.map((block) => block.text as string);
+	return parts.length > 0 ? parts.join("\n") : null;
+}
+
+function extractOperatorNotes(entries: ReadonlyArray<SessionEntry>): string[] {
+	const notes = new Set<string>();
+	for (const entry of entries) {
+		if (entry.kind === "compactionSummary") {
+			for (const [, body] of entry.summary.matchAll(/<operator-notes>\n([\s\S]*?)\n<\/operator-notes>/g)) {
+				for (const line of (body ?? "").split("\n")) {
+					const note = line.replace(/^- /u, "").trim();
+					if (note.length > 0) notes.add(note);
+				}
+			}
+			continue;
+		}
+		const text = operatorMessageText(entry);
+		if (text === null) continue;
+		for (const sentence of text.split(/\n+|(?<=[.!?])\s+/u)) {
+			const trimmed = sentence.trim();
+			if (!OPERATOR_NOTE_SENTENCE.test(trimmed)) continue;
+			notes.add(trimmed.length > OPERATOR_NOTE_MAX_CHARS ? `${trimmed.slice(0, OPERATOR_NOTE_MAX_CHARS)}...` : trimmed);
+		}
+	}
+	return [...notes].slice(-OPERATOR_NOTE_MAX_COUNT);
+}
+
+function formatOperatorNotes(notes: ReadonlyArray<string>): string {
+	if (notes.length === 0) return "";
+	return `\n\n<operator-notes>\n${notes.map((note) => `- ${note}`).join("\n")}\n</operator-notes>`;
+}
+
 function createFileOps(): FileOperations {
 	return { read: new Set(), modified: new Set() };
 }
@@ -1039,7 +1093,16 @@ export async function compact(input: CompactInput): Promise<CompactResult> {
 		if (text !== null) userContext = { turnId: activeUser.turnId, text };
 	}
 
-	const summary = `${summaryParts.join("\n\n---\n\n").trim()}${formatFileOperations(fileOps)}${formatRecallableRefs(
+	const operatorNotes = extractOperatorNotes([
+		...priorCompactionContextEntries(entries, prevCompactionIndex),
+		...entries.slice(boundaryStart, cut.firstKeptEntryIndex),
+	]);
+	const summary = `${summaryParts
+		.join("\n\n---\n\n")
+		// The model sees the prior block inside <previous-context> and may echo it;
+		// the extracted notes below are the one authoritative copy.
+		.replace(/\n*<operator-notes>[\s\S]*?<\/operator-notes>\n*/g, "\n\n")
+		.trim()}${formatOperatorNotes(operatorNotes)}${formatFileOperations(fileOps)}${formatRecallableRefs(
 		input.entries,
 		cut.firstKeptEntryIndex,
 		workingSet,

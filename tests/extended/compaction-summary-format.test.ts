@@ -185,4 +185,30 @@ describe("compaction checkpoint format and semantic replay", () => {
 			provider.unregister();
 		}
 	});
+	it("carries an operator Remember sentence verbatim when the summary drops it", async () => {
+		const provider = registerEngineFauxProvider({ api: "summary-format", models: [{ id: "fixture" }] });
+		try {
+			const model = provider.getModel("fixture");
+			ok(model);
+			const entries = history("Remember: the deploy codeword is MARBLE-OTTER. Then read src/ layout.");
+			entries.push({
+				kind: "message",
+				turnId: "tail",
+				parentTurnId: "user-1",
+				timestamp: "2026-09-07T00:00:00Z",
+				role: "assistant",
+				payload: { text: "tail ".repeat(2000) },
+			});
+			const result = await compact({
+				entries,
+				model,
+				keepRecentTokens: 100,
+				summarize: async () => ({ text: syntheticCompactionSummary("Read the layout.") }),
+			});
+			ok(result.summary.includes("<operator-notes>\n- Remember: the deploy codeword is MARBLE-OTTER."));
+			ok(!result.summary.includes("Then read src/ layout"));
+		} finally {
+			provider.unregister();
+		}
+	});
 });
