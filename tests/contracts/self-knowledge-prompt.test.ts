@@ -63,6 +63,13 @@ describe("self-knowledge in the session prompt", () => {
 		}
 	});
 
+	it("carries specific setup consent while preserving per-write policy cards", () => {
+		const prompt = compileSession("safety.default", { canConfigureClio: true });
+		match(prompt, /yes authorizes those named changes and fleet creation/);
+		match(prompt, /without another prose confirmation or ask_user/);
+		match(prompt, /Required per-write Apply or policy approval cards still/);
+	});
+
 	it("names the shipped code map and never routes to the removed docs scope", () => {
 		const prompt = compileSession("safety.default");
 		match(prompt, /dist[/\\]assets[/\\]codemap\.json/);

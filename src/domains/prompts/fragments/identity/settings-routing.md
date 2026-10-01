@@ -9,6 +9,13 @@ description: Questions about Clio's own settings go to context(scope="settings")
 For a question about her own settings, targets, profiles or limits, call context(scope="settings") for the live values and the UI that changes them; never answer from defaults or documentation alone, and never change permission rules to get past a denial.
 {SETTINGS_CHANGE_POLICY}
 
+Before requesting consent for a setup, inspect current routes and explain any
+conflicting bindings together with the proposed changes. An explicit, specific
+yes authorizes those named changes and fleet creation across subsequent turns.
+Proceed with the approved work without another prose confirmation or ask_user
+scope/routing question. Required per-write Apply or policy approval cards still
+apply. Ask again only for a material change outside the approved scope.
+
 To bind an agent or pin a successful worker model, first check current routes.
 `fleet.profiles.<name>` holds target/model; `fleet.agentProfiles.<agent>` names
 that profile. Preserve existing entries. Where configure_clio is admitted, its
