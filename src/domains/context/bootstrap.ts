@@ -4,6 +4,7 @@ import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "no
 import { dirname, join, parse, relative, resolve } from "node:path";
 import type { ContextActivityPayload } from "../../core/bus-events.js";
 import { readCiRunCommands } from "../../core/ci-commands.js";
+import { runCommandVector } from "../../core/safe-exec.js";
 import { safeResourceWrite } from "../../core/safe-resource-write.js";
 import { createTomlFileReader, type TomlFileReader, tomlTableAt } from "../../core/toml.js";
 import { enumerateWorkspaceFiles, enumerateWorkspaceFilesAsync } from "../../core/workspace-files.js";
@@ -1183,7 +1184,7 @@ function formatBootstrapSummary(summary: RunBootstrapSummary): string {
 	return [
 		`clio-coder context init ${summary.action} CLIO-CODER.md`,
 		`  ${contextLine}; codemap reconciled ${summary.codewikiEntries} entr${summary.codewikiEntries === 1 ? "y" : "ies"}; state refreshed; ${dirtyLine}`,
-		"  git policy: .clio-coder/ stays ignored by default; CLIO-CODER.md stays versioned and human-owned. Force-add .clio-coder assets only when you explicitly intend to share them.",
+		"  git policy: .clio-coder/ stays ignored by default; CLIO-CODER.md is human-owned and can be tracked in Git. Force-add .clio-coder assets only when you explicitly intend to share them.",
 		...(proposalLine ? [proposalLine] : []),
 		...(adoptionLine ? [adoptionLine] : []),
 		"",
@@ -1738,8 +1739,22 @@ export async function runBootstrap(input: RunBootstrapInput = {}): Promise<RunBo
 		...(proposalPath ? { proposalPath } : {}),
 	};
 	out(input.io, formatBootstrapSummary(summary));
+	if (action === "wrote" || action === "refreshed") {
+		const ignored = await runCommandVector("git", ["check-ignore", "--quiet", "--", "CLIO-CODER.md"], {
+			cwd,
+			workspaceRoot: cwd,
+			timeoutMs: 5_000,
+			maxOutputBytes: 4_096,
+		});
+		if (ignored.exitCode === 0) {
+			warn(
+				input.io,
+				"  warning: CLIO-CODER.md was written but is ignored by Git. Remove its matching ignore rule or add !CLIO-CODER.md to .gitignore if you want to version it; then git add CLIO-CODER.md. The ignore rules were not changed for this file.\n",
+			);
+		}
+	}
 	const preload = measureProjectPreload(cwd);
-	out(input.io, `  preload: ${preload.label}\n`);
+	out(input.io, `  project instructions: ${preload.label}\n`);
 	if (preload.mode === "full" && preload.nearLimit) {
 		warn(
 			input.io,
@@ -1749,7 +1764,7 @@ export async function runBootstrap(input: RunBootstrapInput = {}): Promise<RunBo
 	progress(input, {
 		phase: "done",
 		status: "completed",
-		message: `${summary.action} CLIO-CODER.md; ${summary.dirtyFiles} dirty file${summary.dirtyFiles === 1 ? "" : "s"}; preload: ${preload.label}`,
+		message: `${summary.action} CLIO-CODER.md; ${summary.dirtyFiles} dirty file${summary.dirtyFiles === 1 ? "" : "s"}; project instructions: ${preload.label}`,
 	});
 	return {
 		clioMdPath,

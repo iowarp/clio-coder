@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { it } from "node:test";
 import { BusChannels } from "../../src/core/bus-events.js";
 import { createSafeEventBus } from "../../src/core/event-bus.js";
+import { runCommandVector } from "../../src/core/safe-exec.js";
 import { loadRecipesFromDir } from "../../src/domains/agents/registry.js";
 import { runBootstrap } from "../../src/domains/context/bootstrap.js";
 import {
@@ -18,6 +19,38 @@ import { resolveDeliveryTools } from "../../src/engine/loop-guard.js";
 import { visibleWidth } from "../../src/engine/tui.js";
 import { createContextActivityStore, formatContextActivityRailLines } from "../../src/interactive/context-activity.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
+
+it("warns when the generated handbook is ignored without changing its ignore rule", async () => {
+	const isolated = await isolateClioEnv("context-ignored-handbook-");
+	try {
+		const cwd = join(isolated.dir, "repo");
+		mkdirSync(cwd);
+		assert.equal((await runCommandVector("git", ["init", "--quiet"], { cwd, workspaceRoot: cwd })).exitCode, 0);
+		const ignore = ".clio-coder/\nCLIO-CODER.md\n";
+		writeFileSync(join(cwd, ".gitignore"), ignore);
+		writeFileSync(join(cwd, "index.js"), "export const value = 1;\n");
+		let output = "";
+		const result = await runBootstrap({
+			cwd,
+			io: {
+				stdout: (text) => {
+					output += text;
+				},
+				stderr: (text) => {
+					output += text;
+				},
+			},
+		});
+		assert.equal(result.summary.action, "wrote");
+		assert.match(output, /CLIO-CODER.md was written but is ignored by Git/u);
+		assert.match(output, /!CLIO-CODER.md/u);
+		assert.match(output, /project instructions: included in full/u);
+		assert.match(output, /handbook files fully included; model tool support not checked/u);
+		assert.equal(readFileSync(join(cwd, ".gitignore"), "utf8"), ignore);
+	} finally {
+		await isolated.restore();
+	}
+});
 
 it("bounds the model input even when the enforcement inventory alone exceeds the input budget", () => {
 	const prompt = buildBootstrapPrompt({

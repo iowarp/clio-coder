@@ -80,6 +80,7 @@ export function selectProjectPreload(
 		const includedChars = text.length;
 		const includedLines = renderedLines(text);
 		const incomplete = sources.filter((source) => source.omissionReason !== null).length;
+		const coverageLabel = mode === "full" ? "included in full" : mode === "none" ? "none found" : "partly included";
 		return {
 			mode,
 			chars,
@@ -91,7 +92,7 @@ export function selectProjectPreload(
 			providerSupportsTools,
 			reason: mode !== "partial" ? null : chars > maxChars ? "size" : "lines",
 			nearLimit: mode === "full" && (chars > maxChars * 0.9 || lines > FULL_PROJECT_CONTEXT_MAX_LINES * 0.9),
-			label: `${mode} (included ${includedChars}/${chars} UTF-16 units, ${includedLines}/${lines} rendered lines; ${incomplete} of ${sources.length} handbook sources incomplete${providerSupportsTools === null ? "; tool capability unknown" : ""})`,
+			label: `${coverageLabel} (${includedChars}/${chars} text units (UTF-16), ${includedLines}/${lines} lines; ${sources.length - incomplete} of ${sources.length} handbook files fully included${providerSupportsTools === null ? "; model tool support not checked" : ""})`,
 		};
 	};
 	if (fits(context.text)) {
