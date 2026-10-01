@@ -8,6 +8,7 @@ import { taskWorktreeFindings } from "../../src/cli/doctor-task-worktrees.js";
 import {
 	applyTaskWorktree,
 	createTaskWorktree,
+	discardIdleTaskWorktree,
 	listPreservedTaskWorktrees,
 	recoverTaskWorktrees,
 	settleTaskWorktree,
@@ -200,6 +201,39 @@ describe("task worktree restart recovery", () => {
 			settled,
 			/git worktree remove --force .*run-settled && git branch -D clio-coder\/task\/run-settled && rm .*run-settled\.task-owner\.json/u,
 		);
+	});
+
+	it("discards an idle canceled worktree with its branch and claim, and keeps one that holds any work", () => {
+		const idle = createTaskWorktree(root, "run-idle");
+		strictEqual(discardIdleTaskWorktree(idle), true);
+		strictEqual(existsSync(idle.path), false);
+		strictEqual(existsSync(markerPath(idle)), false);
+		deepStrictEqual(branches(), []);
+
+		const commit = (cwd: string): void => {
+			git(cwd, "-c", "user.name=w", "-c", "user.email=w@local", "commit", "-qam", "work");
+		};
+		const held: Record<string, (task: TaskWorktree) => void> = {
+			"run-untracked": (task) => writeFileSync(join(task.path, "new.txt"), "work\n"),
+			"run-modified": (task) => writeFileSync(join(task.path, "a.txt"), "changed\n"),
+			"run-committed": (task) => {
+				writeFileSync(join(task.path, "a.txt"), "changed\n");
+				commit(task.path);
+			},
+			"run-detached": (task) => {
+				git(task.path, "checkout", "-q", "--detach");
+				writeFileSync(join(task.path, "a.txt"), "changed\n");
+				commit(task.path);
+			},
+		};
+		for (const [runId, work] of Object.entries(held)) {
+			const task = createTaskWorktree(root, runId);
+			work(task);
+			strictEqual(discardIdleTaskWorktree(task), false, runId);
+			ok(existsSync(task.path), runId);
+			ok(existsSync(markerPath(task)), runId);
+			ok(branches().includes(task.branch), runId);
+		}
 	});
 
 	it("reports none preserved in a clean checkout and nothing outside a git checkout", () => {
