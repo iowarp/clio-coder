@@ -400,7 +400,7 @@ function listNamed(values: ReadonlyArray<string>, max: number): string {
  * names the same field the predicate refused on; the predicate stays the
  * authority, this only explains its verdict.
  */
-export function describeScopeExcess(worker: ScopeSpec, orchestrator: ScopeSpec): string {
+function describeScopeExcess(worker: ScopeSpec, orchestrator: ScopeSpec): string {
 	const problems: string[] = [];
 	const extraActions = [...worker.allowedActions].filter((action) => !orchestrator.allowedActions.has(action)).sort();
 	if (extraActions.length > 0) {
