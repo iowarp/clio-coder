@@ -74,16 +74,16 @@ when the tool is, the same rule the Fleet block follows.
 
 | Fragment | Renders when | Contents |
 | --- | --- | --- |
-| `identity.clio` | The default main-session identity. | Clio's identity. Workers instead use `identity.clio-coder-worker`. |
-| `operating.contract` | The main-session operating contract and the shared contract in worker prompts. | Constitutional operating rules. |
+| `identity.clio` | The default main-session identity. | Clio's identity. Workers instead use `identity.clio-coder-worker`. A plain in-chat "Remember: <value>" is a conversation instruction: Clio acknowledges it in one line and holds it for the conversation, with no interview, decision card or memory proposal. |
+| `operating.contract` | The main-session operating contract and the shared contract in worker prompts. | Constitutional operating rules. A check that fails because declared dependencies are not installed is treated as setup: install through the normal approval and rerun the check. |
 | `operating.user-control` | Main sessions; merged into the operating contract section. | User steering, scientific uncertainty, explanations of outcomes and project state, and optional educational artifacts. |
-| `operating.coordinator` | `sessionCanDispatch` holds (provider tool support is not explicitly false, `dispatch` is on the surface and admitted by `turnAllowsTool`) and the turn mode is not `answer`. | Intent understanding, discovery before bounded delegation, dependency composition, receipts and verification. The fleet roster is discovered rather than preloaded. |
+| `operating.coordinator` | `sessionCanDispatch` holds (provider tool support is not explicitly false, `dispatch` is on the surface and admitted by `turnAllowsTool`) and the turn mode is not `answer`. | Intent understanding, discovery before bounded delegation, dependency composition, receipts and verification. An exact operator assignment goes into `task` verbatim without the delegation wording around it, and workers confined by `write_roots` are described as unable to run `bash` or `verify` only when no OS sandbox covers them. The fleet roster is discovered rather than preloaded. |
 | `operating.discovered-skills` | `sessionCanUseSkills` holds: `context` is reachable directly or through `gateway`, `skillDiscoveryEnabled` is not false, turn constraints do not disable skills, the mode is not `answer`, and `readySkillCount` is not zero. | Task-query discovery, named activation through gateway or `/skill <name>` suggestions by autonomy, dependency order and readiness constraints. |
 | `identity.self-awareness` | The selected identity is `identity.clio`. Renders in the harness-awareness section. | Installed paths, code outranks docs, configuration locations. Names no tool. |
 | `identity.docs-routing` | `identity.self-awareness` rendered, provider tool support is not explicitly false, `gateway` is on the surface, the `clio_docs` capability is present and `turnAllowsTool` admits it. | Routes questions about Clio through `gateway(op="call", capability="clio_docs", args={query: ...})`, plus `clio_library` routing when that capability is admitted. |
 | `identity.settings-routing` | `identity.self-awareness` rendered and `context` is reachable. | Routes questions about Clio's settings to `context(scope="settings")` and states how a setting change is made (`configure_clio` only where registered and autonomy lets it run). |
 | `operating.memory-guidance`, `operating.support-guidance` | Identity `identity.clio` when `identity.docs-routing` did not render, appended to the identity section. Otherwise disclosed on demand through runtime guidance. | Memory procedures, and source verification and command admission guidance for answering questions about Clio. |
-| `operating.worker` | The reader is a dispatched worker, which never sees the coordinator fragments. | The assigned-task contract. |
+| `operating.worker` | The reader is a dispatched worker, which never sees the coordinator fragments. | The assigned-task contract. A task worded as an instruction to dispatch or delegate is the worker's own assignment, and the worker does it itself. |
 | `dispatch.read-only` | A read-only dispatch. | The read-only run restriction. |
 | `safety.<level>` | Always, selected by the effective autonomy level (`safety.default`, `safety.yolo`). | What runs, what is approval-required, and what is blocked, in the safety net's action-class vocabulary and never by tool name. |
 
@@ -220,6 +220,8 @@ the mux is live. Dispatch tool profiles narrow the surface for workers:
 `minimal-local` is `read`, `grep`, `find`, `ls`, `git`, `context`, `code_nav`,
 and `ledger`; `science-local` adds `verify`; `council-read-only` is `read`, `grep`, `find`, `ls`, `code_nav` and `context`; `full-agent` keeps everything that
 the runtime registered and the recipe allows.
+
+The session prompt's turn-ending section tells the model that an explicit, specific operator instruction is its own consent and is carried out without an `ask_user` re-confirmation, because the approval cards gate the risky commands. It asks only when the target is ambiguous or lies outside the workspace.
 
 `ask_user` keeps its typed `exposure: local | outward` admission fact separate from caller prose. The registry uses exposure only in the enforced autonomy mapping. After admission, the host carries the normalized fact into the shared decision-presentation classifier; question text, headers, options, summaries, and requested color or severity words cannot select a consequence tier. The resulting presentation object contains no admission disposition and cannot grant authority.
 
