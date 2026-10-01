@@ -132,6 +132,41 @@ describe("task worktree restart recovery", () => {
 		}
 	});
 
+	it("merges only the previewed commit: a pinned merge refuses a branch that moved or a tree that changed", () => {
+		const prepare = (runId: string) => {
+			const task = createTaskWorktree(root, runId, undefined, "merge");
+			writeFileSync(join(task.path, `${runId}.txt`), "w\n");
+			const preview = applyTaskWorktree({ worktree: task, apply: "preserve" });
+			ok(preview.commit !== undefined);
+			return { task, commit: preview.commit };
+		};
+
+		const clean = prepare("run-pinned-clean");
+		const landed = applyTaskWorktree({ worktree: clean.task, apply: "merge", pinnedCommit: clean.commit });
+		strictEqual(landed.applied, true);
+		strictEqual(landed.commit, clean.commit);
+
+		const dirty = prepare("run-pinned-dirty");
+		writeFileSync(join(dirty.task.path, "late.txt"), "late\n");
+		const dirtyRefusal = applyTaskWorktree({ worktree: dirty.task, apply: "merge", pinnedCommit: dirty.commit });
+		strictEqual(dirtyRefusal.reason, "worktree_changed_since_preview");
+		strictEqual(dirtyRefusal.applied, false);
+		strictEqual(dirtyRefusal.commit, dirty.commit);
+		match(dirtyRefusal.detail ?? "", /uncommitted changes/u);
+		strictEqual(git(root, "rev-parse", dirty.task.branch), dirty.commit, "the refusal commits nothing new");
+		ok(!existsSync(join(root, `${dirty.task.runId}.txt`)), "the previewed work was not merged either");
+
+		const moved = prepare("run-pinned-moved");
+		writeFileSync(join(moved.task.path, "more.txt"), "more\n");
+		git(moved.task.path, "add", "-A");
+		git(moved.task.path, "-c", "user.name=w", "-c", "user.email=w@local", "commit", "-qm", "more");
+		const movedRefusal = applyTaskWorktree({ worktree: moved.task, apply: "merge", pinnedCommit: moved.commit });
+		strictEqual(movedRefusal.reason, "worktree_changed_since_preview");
+		strictEqual(movedRefusal.applied, false);
+		ok(!existsSync(join(root, "more.txt")));
+		ok(!existsSync(join(root, `${moved.task.runId}.txt`)));
+	});
+
 	it("never touches a live owner", () => {
 		const task = createTaskWorktree(root, "run-live");
 		deepStrictEqual(recoverTaskWorktrees(root), { removed: [], preserved: [], failed: [] });

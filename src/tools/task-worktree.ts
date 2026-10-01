@@ -90,6 +90,9 @@ export interface TaskWorktreeReceipt {
 /** Receipt reason for a task worktree whose HEAD no longer names its own task branch (F5). */
 export const WORKTREE_HEAD_MOVED = "worktree_head_moved";
 
+/** Receipt reason for a merge refused because the worktree no longer holds the commit an operator was shown. */
+export const WORKTREE_CHANGED_SINCE_PREVIEW = "worktree_changed_since_preview";
+
 const SAFE_RUN_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/u;
 const OWNER_FILE_SUFFIX = ".task-owner.json";
 const TASK_WORKTREE_KIND = "clio-coder-task-worktree";
@@ -608,34 +611,8 @@ export function snapshotTaskWorktree(worktree: TaskWorktree, apply: TaskWorktree
 	};
 }
 
-export function applyTaskWorktree(input: {
-	worktree: TaskWorktree;
-	apply: TaskWorktreeApply;
-	protectedPaths?: ReadonlyArray<string>;
-	/** The worker's validated `commitMessage`; a merge lands it on the operator's branch. */
-	commitMessage?: string | null;
-}): TaskWorktreeReceipt {
-	const { worktree } = input;
-	const before = checkTaskWorktreeHead(worktree);
-	if (!before.ok) return headMovedReceipt(worktree, input.apply, before.detail);
-	const taskLine = `Clio Coder task ${worktree.runId}`;
-	// The validated message is already stripped; this is the sink, and only
-	// Clio's managed hook may write trailers onto the operator's branch.
-	const authored =
-		input.commitMessage === undefined || input.commitMessage === null
-			? undefined
-			: stripAuthoredTrailers(input.commitMessage);
-	commitWorktreePath(
-		worktree.path,
-		COMMIT_IDENTITY,
-		authored !== undefined && authored.length > 0 ? `${authored}\n\n${taskLine}` : taskLine,
-	);
-	// Pin the commit the snapshot produced. Everything after this reads and
-	// merges that immutable id, so a branch moved later cannot swap it (F5).
-	const pinned = checkTaskWorktreeHead(worktree);
-	if (!pinned.ok) return headMovedReceipt(worktree, input.apply, pinned.detail);
-	const commit = pinned.commit;
-	const receipt: TaskWorktreeReceipt = {
+function committedReceipt(worktree: TaskWorktree, commit: string, apply: TaskWorktreeApply): TaskWorktreeReceipt {
+	return {
 		path: worktree.path,
 		branch: worktree.branch,
 		diffHash: taskWorktreeDiffHash(worktree, commit),
@@ -643,9 +620,65 @@ export function applyTaskWorktree(input: {
 			gitBytes(worktree.root, ["diff", "--name-only", "-z", `${worktree.base}..${commit}`]),
 		),
 		commit,
-		apply: input.apply,
+		apply,
 		applied: false,
 	};
+}
+
+/** Why a worktree no longer holds exactly the commit that was previewed, or null when it does. */
+function previewDrift(worktree: TaskWorktree, pinned: string, head: string): string | null {
+	const refused = (found: string): string =>
+		`${WORKTREE_CHANGED_SINCE_PREVIEW}: task worktree ${worktree.runId} ${found} since commit ${pinned} was offered for merge. Nothing was merged; the branch ${worktree.branch} is preserved.`;
+	if (head !== pinned) return refused(`is now at ${head}`);
+	// Ignored files never reach a commit, so only what a commit would take counts.
+	if (gitBytes(worktree.path, ["status", "--porcelain", "-z"]).length > 0) return refused("has uncommitted changes");
+	return null;
+}
+
+export function applyTaskWorktree(input: {
+	worktree: TaskWorktree;
+	apply: TaskWorktreeApply;
+	protectedPaths?: ReadonlyArray<string>;
+	/** The worker's validated `commitMessage`; a merge lands it on the operator's branch. */
+	commitMessage?: string | null;
+	/**
+	 * Merge exactly this commit, one an earlier pass pinned and an operator was
+	 * shown, instead of committing the working tree again. Refused unless the
+	 * branch still names it and the tree holds nothing newer, so a window
+	 * between the preview and the merge cannot land work nobody saw.
+	 */
+	pinnedCommit?: string;
+}): TaskWorktreeReceipt {
+	const { worktree } = input;
+	const before = checkTaskWorktreeHead(worktree);
+	if (!before.ok) return headMovedReceipt(worktree, input.apply, before.detail);
+	let commit: string;
+	if (input.pinnedCommit !== undefined) {
+		commit = input.pinnedCommit;
+		const drift = previewDrift(worktree, commit, before.commit);
+		if (drift !== null) {
+			return { ...committedReceipt(worktree, commit, input.apply), reason: WORKTREE_CHANGED_SINCE_PREVIEW, detail: drift };
+		}
+	} else {
+		const taskLine = `Clio Coder task ${worktree.runId}`;
+		// The validated message is already stripped; this is the sink, and only
+		// Clio's managed hook may write trailers onto the operator's branch.
+		const authored =
+			input.commitMessage === undefined || input.commitMessage === null
+				? undefined
+				: stripAuthoredTrailers(input.commitMessage);
+		commitWorktreePath(
+			worktree.path,
+			COMMIT_IDENTITY,
+			authored !== undefined && authored.length > 0 ? `${authored}\n\n${taskLine}` : taskLine,
+		);
+		// Pin the commit the snapshot produced. Everything after this reads and
+		// merges that immutable id, so a branch moved later cannot swap it (F5).
+		const pinned = checkTaskWorktreeHead(worktree);
+		if (!pinned.ok) return headMovedReceipt(worktree, input.apply, pinned.detail);
+		commit = pinned.commit;
+	}
+	const receipt = committedReceipt(worktree, commit, input.apply);
 	if (input.apply === "preserve") return receipt;
 	const protectedChanges = protectedPathsChangedByWorktreeBranch(worktree.root, commit, input.protectedPaths ?? []);
 	if (protectedChanges.length > 0) return { ...receipt, reason: "protected_artifact_changed" };

@@ -37,6 +37,12 @@ export interface MergeCardInput {
 	changedPaths: ReadonlyArray<string>;
 	/** The gate's reason clause, as `mergeGateVerdict` words it. */
 	reason: string;
+	/**
+	 * Protected paths the branch changes. A merge of such a branch fails closed,
+	 * so the card does not offer it and says why instead of offering a choice
+	 * that can only be refused afterwards.
+	 */
+	protectedPaths?: ReadonlyArray<string>;
 }
 
 export interface MergeCardDeps {
@@ -73,11 +79,17 @@ function mergeCardPresentation(title: string, authorization: string, reversibili
 	};
 }
 
-const CHOOSE_PRESENTATION = mergeCardPresentation(
-	"Merge task branch?",
-	"Merge lands the branch on your current branch through the same guarded path as an ordinary merge. Keep branch merges nothing. Discard asks once more before deleting.",
-	"Reversible: Merge and Keep branch can be undone or redone with git. Discard deletes the branch and cannot be undone.",
-);
+function choosePresentation(offerMerge: boolean): DecisionPresentation {
+	return mergeCardPresentation(
+		"Merge task branch?",
+		offerMerge
+			? "Merge lands the branch on your current branch through the same guarded path as an ordinary merge. Keep branch merges nothing. Discard asks once more before deleting."
+			: "Keep branch merges nothing. Discard asks once more before deleting. Merge is not offered because the branch changes protected paths.",
+		offerMerge
+			? "Reversible: Merge and Keep branch can be undone or redone with git. Discard deletes the branch and cannot be undone."
+			: "Reversible: Keep branch can be undone with git. Discard deletes the branch and cannot be undone.",
+	);
+}
 
 const CONFIRM_PRESENTATION = mergeCardPresentation(
 	"Discard task branch?",
@@ -85,27 +97,38 @@ const CONFIRM_PRESENTATION = mergeCardPresentation(
 	"Reversible: no. The deleted branch is not recoverable from Clio.",
 );
 
+function offersMerge(input: MergeCardInput): boolean {
+	return (input.protectedPaths?.length ?? 0) === 0;
+}
+
 function mergeCardQuestion(input: MergeCardInput): AskUserQuestion {
 	const total = input.changedPaths.length;
 	const listed = input.changedPaths.slice(0, LISTED_PATHS).map((path) => `- ${boundedCheck(path)}`);
 	const omitted = total - listed.length;
 	const noun = total === 1 ? "path" : "paths";
+	const protectedPaths = input.protectedPaths ?? [];
+	const options = [
+		...(offersMerge(input) ? [{ label: MERGE, description: "Land it on your current branch now." }] : []),
+		{ label: KEEP, description: `Leave it on ${input.branch}; \`git merge ${input.branch}\` applies it later.` },
+		{ label: DISCARD, description: "Delete the branch and its worktree after one more confirmation." },
+	];
 	return {
 		header: "Merge task branch?",
 		// Opens on Keep branch: an Enter that lands as the card appears must not merge.
-		defaultOption: 1,
+		defaultOption: options.findIndex((option) => option.label === KEEP),
 		question: [
 			`Branch ${input.branch} changes ${total} ${noun}:`,
 			...listed,
 			...(omitted > 0 ? [`- … and ${omitted} more`] : []),
 			"",
 			`The merge was held because ${input.reason}.`,
+			...(protectedPaths.length > 0
+				? [
+						`Merge is not offered: the branch changes protected ${protectedPaths.length === 1 ? "path" : "paths"} ${protectedPaths.map(boundedCheck).join(", ")}, which a merge never lands.`,
+					]
+				: []),
 		].join("\n"),
-		options: [
-			{ label: MERGE, description: "Land it on your current branch now." },
-			{ label: KEEP, description: `Leave it on ${input.branch}; \`git merge ${input.branch}\` applies it later.` },
-			{ label: DISCARD, description: "Delete the branch and its worktree after one more confirmation." },
-		],
+		options,
 	};
 }
 
@@ -173,10 +196,10 @@ export async function askMergeCard(deps: MergeCardDeps, input: MergeCardInput): 
 	};
 	try {
 		for (;;) {
-			const picked = await put(mergeCardQuestion(input), CHOOSE_PRESENTATION);
+			const picked = await put(mergeCardQuestion(input), choosePresentation(offersMerge(input)));
 			if (picked === null) return stopped();
 			if (picked.cancelled === true) return keep("escaped");
-			if (chose(picked, MERGE)) return { choice: "merge", cause: "answered" };
+			if (offersMerge(input) && chose(picked, MERGE)) return { choice: "merge", cause: "answered" };
 			if (!chose(picked, DISCARD)) return { choice: "keep", cause: "answered" };
 			const confirmed = await put(discardConfirmQuestion(input.branch), CONFIRM_PRESENTATION);
 			if (confirmed === null) return stopped();

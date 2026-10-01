@@ -66,9 +66,11 @@ import {
 	createTaskWorktree,
 	discardIdleTaskWorktree,
 	gitCheckoutRoot,
+	protectedPathsChangedByWorktreeBranch,
 	settleTaskWorktree,
 	shareTaskWorktreeDependencies,
 	snapshotTaskWorktree,
+	WORKTREE_CHANGED_SINCE_PREVIEW,
 } from "../../tools/task-worktree.js";
 import { truncateUtf8 } from "../../tools/truncate-utf8.js";
 import { diskWorktreeParent, prepareWorktreeParent, resolveWorktreeRoot } from "../../tools/worktree-root.js";
@@ -7393,14 +7395,34 @@ export function createDispatchBundle(
 						// same guarded path (head attestation, protected paths, pinned
 						// commit) rather than a second implementation of it.
 						let discardFailed = false;
+						// The commit the card describes. Merge lands this id or nothing.
+						const previewedCommit = worktreeReceipt.commit;
+						// The preserve pass does not look at protected paths, only the merge
+						// does, so the card learns of them here and withholds Merge.
+						const worktreeRoot = req.taskWorktree.root;
+						let previewedProtected: string[] | null = [];
+						try {
+							previewedProtected =
+								previewedCommit === undefined
+									? null
+									: protectedPathsChangedByWorktreeBranch(worktreeRoot, previewedCommit, protectedPaths).map(
+											(path) => relative(worktreeRoot, path) || path,
+										);
+						} catch (protectedError) {
+							// Without the check a Merge offer could land a protected path.
+							previewedProtected = null;
+							reportDispatchDiagnostic(`protected paths of ${req.taskWorktree.runId}`, protectedError);
+						}
 						const card =
 							withheldVerdict !== null &&
-							worktreeReceipt.commit !== undefined &&
+							previewedCommit !== undefined &&
+							previewedProtected !== null &&
 							(worktreeReceipt.changedPaths?.length ?? 0) > 0
 								? await askWithheldMerge(activeRun, lifecycle.settings, {
 										branch: req.taskWorktree.branch,
 										changedPaths: worktreeReceipt.changedPaths ?? [],
 										reason: withheldVerdict.reason,
+										protectedPaths: previewedProtected,
 									})
 								: null;
 						if (card?.choice === "merge") {
@@ -7409,8 +7431,17 @@ export function createDispatchBundle(
 								apply: "merge",
 								protectedPaths,
 								commitMessage: taskCommitMessage,
+								...(previewedCommit !== undefined ? { pinnedCommit: previewedCommit } : {}),
 							});
-							if (landed.reason !== undefined) {
+							if (landed.reason === WORKTREE_CHANGED_SINCE_PREVIEW) {
+								// The branch is still withheld, so it keeps the withheld outcome
+								// and the operator's Merge is the thing that was refused.
+								worktreeReceipt = { ...landed, detail: `operator merge refused: ${landed.detail ?? landed.reason}` };
+								finalOutcome = "failed";
+								outcomeCode = "merge_withheld";
+								finalDetail = `${withheldDetail ?? finalDetail}; operator merge refused: ${landed.detail ?? landed.reason}`;
+								failureMessage = finalDetail;
+							} else if (landed.reason !== undefined) {
 								worktreeReceipt = {
 									...landed,
 									detail: `operator merge: ${landed.detail ?? landed.reason}`,

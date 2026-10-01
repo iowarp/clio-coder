@@ -58,3 +58,15 @@ test("a screen another overlay holds delays the card instead of settling it", as
 	strictEqual(outcome.choice, "merge");
 	strictEqual(asked.length, 2);
 });
+
+test("a branch that changes protected paths is not offered a Merge, and the card says why", async () => {
+	const { ask, asked } = scripted([pick("Merge")]);
+	const outcome = await askMergeCard({ ask, timeoutMs: 5_000 }, { ...INPUT, protectedPaths: ["docs/policy.md"] });
+	deepStrictEqual(
+		asked[0]?.options?.map((option) => option.label),
+		["Keep branch", "Discard"],
+	);
+	strictEqual(labelAt(asked[0]), "Keep branch");
+	strictEqual(asked[0]?.question.includes("docs/policy.md"), true);
+	deepStrictEqual(outcome, { choice: "keep", cause: "answered" });
+});
