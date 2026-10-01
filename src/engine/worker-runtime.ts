@@ -667,6 +667,7 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 	);
 	const contractCwd = input.cwd ?? process.cwd();
 	let resultContractRepairsQueued = 0;
+	let toolExecutionsStarted = 0;
 	let resultContractRevisionActive = false;
 	let acceptedHelperResult: StructuredHelperResult | null = null;
 	let helperTerminalPhase = false;
@@ -1096,7 +1097,10 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 					helperTurnFailure = "Submit exactly one terminal handoff, alone; mixed or duplicate batches cannot execute work.";
 			}
 		}
-		if (event.type === "tool_execution_start") middlewareToolChoice.toolStarted(event.toolName);
+		if (event.type === "tool_execution_start") {
+			toolExecutionsStarted += 1;
+			middlewareToolChoice.toolStarted(event.toolName);
+		}
 		// Read spans this run actually observed. They ground the terminal result
 		// (a cited line has to fall inside one) and they are handed back verbatim
 		// in a repair round, so re-emitting findings never invites invention.
@@ -1191,13 +1195,24 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 			event.type === "message_end" &&
 			isTerminalAssistantMessage(event.message)
 		) {
-			const violation = terminalContractViolation(
-				contract,
-				event.message,
-				contractCwd,
-				groundingRanges(),
-				runEffects.snapshot(),
-			);
+			// A file-scoped coder sometimes ends its first reply with no tool call and a
+			// report that it has no edit tool or cannot find the file (p8/S1, p9/C3),
+			// then does the same work when asked again. The orchestrator fails every
+			// zero-call edit run as worker_no_work, so one repair round costs nothing
+			// the run had left. A second empty reply passes through to that outcome.
+			const zeroToolViolation =
+				toolExecutionsStarted === 0 &&
+				resultContractRepairsQueued === 0 &&
+				contract.kind === "mutation-report" &&
+				input.readOnly !== true &&
+				workerBudget.mode === "advisory" &&
+				!synthesisToolLock &&
+				activeWorkerTools.some((tool) => tool === ToolNames.Edit || tool === ToolNames.Write)
+					? `no tool was called, so none of the assignment was done. The admitted tools are ${activeWorkerTools.join(", ")}, and they include ${activeWorkerTools.filter((tool) => tool === ToolNames.Edit || tool === ToolNames.Write).join(" and ")}. Inspect the workspace and do the assignment with them. If a tool refuses a call, report that refusal as the limitation.`
+					: null;
+			const violation =
+				zeroToolViolation ??
+				terminalContractViolation(contract, event.message, contractCwd, groundingRanges(), runEffects.snapshot());
 			if (violation !== null) {
 				if (resultContractRepairsQueued < RESULT_CONTRACT_REPAIR_LIMIT) {
 					resultContractRepairsQueued += 1;
