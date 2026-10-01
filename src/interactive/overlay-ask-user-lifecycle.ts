@@ -119,7 +119,10 @@ export function createOverlayAskUserLifecycle(deps: OverlayAskUserLifecycleDeps)
 			signal?.removeEventListener("abort", onAbort);
 		}
 		if (result.unavailable === true) return result;
-		if (recordAnswer && !toolBacked && result.cancelled !== true && result.answers.length > 0)
+		// A harness round is stated by its own receipt, not by an interview record,
+		// whichever handler carried it (the dispatch merge card arrives through the
+		// registered one).
+		if (recordAnswer && !harnessOwned && !toolBacked && result.cancelled !== true && result.answers.length > 0)
 			deps.onRoundAnswered?.(questions, result.answers);
 		if (result.cancelled === true || !toolBacked) {
 			if (result.cancelled === true && !harnessOwned) cancelledForTurn = true;
