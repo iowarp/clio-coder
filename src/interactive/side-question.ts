@@ -63,6 +63,12 @@ export interface SideQuestionInput {
 	maxTokens?: number;
 	/** Streamed answer text, delivered as the provider produces it. */
 	onDelta?: (partialText: string) => void;
+	/**
+	 * Information-flow admission of this send: the block reason, or null. The
+	 * round sends the session's history, so it is judged like a turn would be.
+	 * Asked before `beforeRequest`, and again for a schema-free retry.
+	 */
+	admitFlow?: () => string | null;
 }
 
 /**
@@ -72,12 +78,6 @@ export interface SideQuestionInput {
  * machine. Only the system prompt and the appended message differ.
  */
 export interface OutOfTurnRoundInput extends Omit<SideQuestionInput, "question"> {
-	/**
-	 * Information-flow admission of this send: the block reason, or null. The
-	 * round sends the session's history, so it is judged like a turn would be.
-	 * Asked before `beforeRequest`, and again for a schema-free retry.
-	 */
-	admitFlow?: () => string | null;
 	systemPrompt: string;
 	/** The one message appended to the read-only copy of the history. */
 	userText: string;

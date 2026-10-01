@@ -62,6 +62,8 @@ export interface HandoffRoundInput {
 	runtimeId?: string;
 	/** Set on the second and last round, after the parser refused the first. */
 	repair?: HandoffRepairInput;
+	/** Information-flow admission of the send; forwarded to the shared round unchanged. */
+	admitFlow?: () => string | null;
 }
 
 function repairText(goal: string, repair: HandoffRepairInput): string {
