@@ -328,6 +328,38 @@ export function gitArgvCommand(argv: ReadonlyArray<string>): string {
 	].join(" ");
 }
 
+/**
+ * Splits the leading `-C <dir>` global options off a Git argv. `dirs` are the
+ * directories in the order Git changes into them, each relative to the one
+ * before; `rest` is the argv with those pairs removed and every other word,
+ * global option included, untouched so {@link classifyGitArgv} still judges
+ * it. Null when a `-C` has no value or an empty one (Git ignores an empty
+ * value, which is not worth modelling). Git reads `-C` only as a separate
+ * word, so `-Cdir` stays an unknown global option and lifts the verdict.
+ */
+export function splitGitChdir(argv: ReadonlyArray<string>): { dirs: string[]; rest: string[] } | null {
+	const dirs: string[] = [];
+	const rest: string[] = [];
+	let index = 0;
+	while (index < argv.length) {
+		const word = argv[index] ?? "";
+		if (!word.startsWith("-") || word === "-" || word === "--") break;
+		if (word === "--version" || word === "--help" || word === "-h") break;
+		if (word === "-C") {
+			const dir = argv[index + 1];
+			if (dir === undefined || dir.length === 0) return null;
+			dirs.push(dir);
+			index += 2;
+			continue;
+		}
+		const width = GLOBAL_VALUE_OPTIONS.has(word) ? 2 : 1;
+		rest.push(...argv.slice(index, index + width));
+		index += width;
+	}
+	rest.push(...argv.slice(index));
+	return { dirs, rest };
+}
+
 /** Classify the argv Git reads after its executable. */
 export function classifyGitArgv(argv: ReadonlyArray<string>): GitArgvVerdict {
 	let index = 0;

@@ -31,7 +31,7 @@ import {
 	OPERATOR_PATH_POLICY,
 } from "./default-path-policy.js";
 import { normalizedGitCommands } from "./git-command-normalization.js";
-import { classifyBashGit } from "./git-policy.js";
+import { classifyBashGit, splitGitChdir } from "./git-policy.js";
 import { inertQuotedMatch } from "./literal-exemption.js";
 import {
 	type CompiledPathPolicy,
@@ -1825,7 +1825,8 @@ const GIT_INSPECT_RULE_ID = "builtin:git-inspect";
  * `git log --oneline -3`, and a headless run denied it. The policy already
  * refuses global options, helpers and output files (`-c`, `--ext-diff`,
  * `--output`), so it decides instead of one regex per spelling. An env or
- * path prefix is not plain `git` and stays unrecognized.
+ * path prefix is not plain `git` and stays unrecognized. Leading `-C <dir>`
+ * options are the one global option accepted: see {@link gitChdirTarget}.
  */
 function isGitInspection(
 	words: ReadonlyArray<ShellToken>,
@@ -1839,7 +1840,18 @@ function isGitInspection(
 	// names files the checks below cannot see.
 	if (words.some((word) => (word.substitutions?.length ?? 0) > 0)) return false;
 	if (words.some((word) => hasUnquotedExpansion(source.slice(word.start, word.end), true))) return false;
-	const verdict = classifyBashGit(words.map((word) => word.value).join(" "));
+	// `git -C <dir> ...` runs as plain git from <dir>. The directories are held
+	// to the workspace like a read path and the rest is judged from the last one.
+	const split = splitGitChdir(words.slice(1).map((word) => word.value));
+	if (split === null) return false;
+	let gitCwd = cwd;
+	for (const dir of split.dirs) {
+		const next = gitChdirTarget(dir, gitCwd, workspaceRoot, readScope);
+		if (next === null) return false;
+		gitCwd = next;
+	}
+	const values = ["git", ...split.rest];
+	const verdict = classifyBashGit(values.join(" "));
 	if (verdict === null || verdict.class !== "inspect" || verdict.subcommand === null) return false;
 	if (GIT_UNRECOGNIZED_SUBCOMMANDS.has(verdict.subcommand)) return false;
 	// Whitespace checks keep their own standalone-only recognition above.
@@ -1848,17 +1860,31 @@ function isGitInspection(
 	// to the workspace as readOnlyInspectionRule holds an operand, so an option
 	// value that names a file (`--contents /etc/hosts`, `-S /proc/self/environ`)
 	// or a pathspec outside the tree is not recognized.
-	const operands = words.slice(words.findIndex((word) => word.value === verdict.subcommand) + 1);
-	for (const { value } of operands) {
+	const operands = values.slice(values.indexOf(verdict.subcommand) + 1);
+	for (const value of operands) {
 		if (value === "--" || value === "-") continue;
 		if (value.startsWith("-")) {
 			const attached = value.includes("=") ? value.slice(value.indexOf("=") + 1) : "";
 			if (attached.startsWith("/") || attached.startsWith("~") || attached.split("/").includes("..")) return false;
 			continue;
 		}
-		if (!operandStaysInWorkspace(value, cwd, workspaceRoot, readScope)) return false;
+		if (!operandStaysInWorkspace(value, gitCwd, workspaceRoot, readScope)) return false;
 	}
 	return true;
+}
+
+/**
+ * The physical directory a `git -C <dir>` word lands in, or null when it is not
+ * provably inside the workspace or an exempt read root. The word is a literal:
+ * a variable, backslash, glob, brace, whitespace or tilde may name something
+ * else at run time, so any of them asks. A directory that does not exist is
+ * Git's own error. The zero-access scan already covered the whole command
+ * string, so a protected path named here is blocked before this runs.
+ */
+function gitChdirTarget(dir: string, from: string, workspaceRoot: string, readScope: ReadScopeInputs): string | null {
+	if (/[*?[\]{}$`\\\s]/u.test(dir) || dir.startsWith("~")) return null;
+	if (!operandStaysInWorkspace(dir, from, workspaceRoot, readScope)) return null;
+	return canonicalizeRawPath(dir, from);
 }
 
 /**
