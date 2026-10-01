@@ -206,7 +206,10 @@ const isStringArray = (value: unknown): value is string[] =>
  * verdict and evidence, then the summary and commit line. Null when the object
  * is not that shape.
  */
-function mutationReportLines(value: Record<string, unknown>): string[] | null {
+function mutationReportLines(
+	value: Record<string, unknown>,
+	placement: WorkerReceiptSummary["placement"] | undefined,
+): string[] | null {
 	if (!isStringArray(value.mutatedPaths) || !Array.isArray(value.validations)) return null;
 	const lines: string[] = [];
 	lines.push(value.mutatedPaths.length === 0 ? "changed nothing" : `changed ${value.mutatedPaths.join(", ")}`);
@@ -221,7 +224,13 @@ function mutationReportLines(value: Record<string, unknown>): string[] | null {
 	}
 	if (typeof value.summary === "string" && value.summary.trim().length > 0) lines.push(value.summary.trim());
 	if (typeof value.commitMessage === "string" && value.commitMessage.trim().length > 0) {
-		lines.push(`commit: ${value.commitMessage.trim()}`);
+		// The message is the worker's proposal. A worktree run commits it on the
+		// task branch; a run in the current tree commits nothing (race-Q4-t2-b).
+		lines.push(
+			placement?.mode === "worktree"
+				? `commit on ${placement.branch}: ${value.commitMessage.trim()}`
+				: `proposed commit message, not committed: ${value.commitMessage.trim()}`,
+		);
 	}
 	return lines;
 }
@@ -244,7 +253,10 @@ function bodySourceLines(entry: WorkerEntryState): string[] {
 	if (structured === null) return safeWorkerAnswerText(entry.text).split("\n");
 	const presented = presentedContractAnswer(entry);
 	if (presented !== null) return presented.lines;
-	return mutationReportLines(structured)?.map(safeWorkerAnswerText) ?? safeWorkerAnswerText(entry.text).split("\n");
+	return (
+		mutationReportLines(structured, entry.receipt?.placement)?.map(safeWorkerAnswerText) ??
+		safeWorkerAnswerText(entry.text).split("\n")
+	);
 }
 
 /** Tool names only, coalesced onto one line. Arguments never cross into the transcript. */
