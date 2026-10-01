@@ -126,6 +126,34 @@ function memoKey(command: FleetCommand, judgment: string, fingerprint: string, e
 }
 
 /** Compare only quick command checks, on an isolated base checkout, once (flywheel p9/C1). */
+const DEPENDENCY_MANIFESTS = [
+	"package.json",
+	"package-lock.json",
+	"npm-shrinkwrap.json",
+	"pnpm-lock.yaml",
+	"yarn.lock",
+	"bun.lock",
+	"bun.lockb",
+];
+
+/** Each manifest is absent on both sides or has the same blob id; hashes avoid reading lockfiles into memory. */
+async function manifestsMatchBase(root: string, base: string): Promise<boolean> {
+	const git = (args: string[]) =>
+		runCommandVector("git", ["-C", root, ...args], { timeoutMs: 5_000, maxOutputBytes: 1_024 });
+	for (const name of DEPENDENCY_MANIFESTS) {
+		const atBase = await git(["rev-parse", "--verify", "-q", `${base}:${name}`]);
+		const baseId = atBase.exitCode === 0 ? atBase.stdout.trim() : null;
+		if (!existsSync(join(root, name))) {
+			if (baseId !== null) return false;
+			continue;
+		}
+		if (baseId === null) return false;
+		const inTask = await git(["hash-object", "--", name]);
+		if (inTask.exitCode !== 0 || inTask.stdout.trim() !== baseId) return false;
+	}
+	return true;
+}
+
 export async function compareHostVerificationBase(input: {
 	verification: RunHostVerification | undefined;
 	request: Pick<DispatchRequest, "resolvedVerification" | "taskWorktree">;
@@ -147,11 +175,9 @@ export async function compareHostVerificationBase(input: {
 					? "judged check cannot be replayed as a command"
 					: check.durationMs > 2_000
 						? "check exceeded the cheap comparison budget"
-						: existsSync(join(worktree.path, "node_modules"))
-							? "base dependencies were not provisioned"
-							: declared.argv.some((arg) => arg.includes(worktree.path))
-								? "command refers to the worker checkout"
-								: null;
+						: declared.argv.some((arg) => arg.includes(worktree.path))
+							? "command refers to the worker checkout"
+							: null;
 		check.baseComparison = { status: "not_compared", base: worktree.base, ...(reason ? { reason } : {}) };
 		return reason === null && declared !== undefined ? [{ check, declared }] : [];
 	});
@@ -165,6 +191,20 @@ export async function compareHostVerificationBase(input: {
 				status: "not_compared",
 				base: worktree.base,
 				reason: "isolated base comparison sandbox unavailable",
+			};
+		return;
+	}
+	// The archived base has no installed dependencies. When the manifests match,
+	// the base borrows the task's node_modules through a link inside the private
+	// tmpfs; the target sits under the read-only root mount (flywheel Q4).
+	const taskModules = join(worktree.path, "node_modules");
+	const linkModules = existsSync(taskModules);
+	if (linkModules && !(await manifestsMatchBase(worktree.path, worktree.base))) {
+		for (const { check } of candidates)
+			check.baseComparison = {
+				status: "not_compared",
+				base: worktree.base,
+				reason: "base dependencies were not provisioned: package.json or the lockfile differs from the base",
 			};
 		return;
 	}
@@ -190,6 +230,7 @@ export async function compareHostVerificationBase(input: {
 				'base_dir="$1"; source_dir="$2"; base_ref="$3"; relative_cwd="$4"; shift 4',
 				'mkdir -p "$base_dir" || exit 125',
 				'git -C "$source_dir" archive "$base_ref" | tar -x -C "$base_dir" || exit 125',
+				...(linkModules ? ['ln -s "$source_dir/node_modules" "$base_dir/node_modules" || exit 125'] : []),
 				'cd "$base_dir/$relative_cwd" || exit 125',
 				'case "$(pwd -P)/" in "$base_dir/"*) ;; *) exit 125 ;; esac',
 				'export TMPDIR="$base_dir" TMP="$base_dir" TEMP="$base_dir"',

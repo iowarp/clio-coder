@@ -819,6 +819,47 @@ for (const baseFails of [true, false]) {
 	});
 }
 
+it("links the task's node_modules into the base when the manifests match, and leaves them in place", async () => {
+	const scratch = makeScratch();
+	writeFileSync(join(scratch.project, "package.json"), "{}\n");
+	git(scratch.project, "add", "package.json");
+	git(scratch.project, "commit", "-q", "-m", "manifest");
+	const base = execFileSync("git", ["-C", scratch.project, "rev-parse", "HEAD"], { encoding: "utf8" }).trim();
+	mkdirSync(join(scratch.project, "node_modules", "dep"), { recursive: true });
+	writeFileSync(join(scratch.project, "node_modules", "dep", "index.js"), "module.exports = 0;\n");
+	writeFileSync(join(scratch.project, "src", "a.ts"), "export const a = 9;\n");
+	const declared: ResolvedCheck = {
+		check: "test",
+		cwd: scratch.project,
+		timeoutMs: 5_000,
+		argv: [
+			process.execPath,
+			"-e",
+			"process.exit(require('node:fs').readFileSync('src/a.ts','utf8').includes('9') ? 1 : require('./node_modules/dep'))",
+		],
+	};
+	const request = {
+		resolvedVerification: [declared],
+		taskWorktree: {
+			root: scratch.project,
+			path: scratch.project,
+			runId: "linked",
+			branch: "main",
+			base,
+			ownerToken: "fixture",
+		},
+	};
+	const verification = await runHostVerification({
+		runId: "linked",
+		request,
+		workerSuccessful: true,
+		stateDir: scratch.stateDir,
+	});
+	await compareHostVerificationBase({ verification, request, stateDir: scratch.stateDir });
+	strictEqual(verification?.checks[0]?.baseComparison?.status, "passed");
+	strictEqual(readFileSync(join(scratch.project, "node_modules", "dep", "index.js"), "utf8"), "module.exports = 0;\n");
+});
+
 it("states that an expensive failed host check was not compared", async () => {
 	const scratch = makeScratch();
 	const declared = check({ scratch, message: "failure", exitCode: 1 });
