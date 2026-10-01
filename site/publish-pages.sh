@@ -8,7 +8,10 @@ site_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 repo_dir=$(dirname -- "$site_dir")
 branch=gh-pages
 
-git -C "$repo_dir" diff --exit-code HEAD -- site scripts/install.sh scripts/install.ps1
+if ! git -C "$repo_dir" diff --quiet HEAD -- site scripts/install.sh scripts/install.ps1; then
+  printf '%s\n' 'Commit all site and installer changes before publishing.' >&2
+  exit 1
+fi
 if [[ -n $(git -C "$repo_dir" ls-files --others --exclude-standard -- site scripts) ]]; then
   printf '%s\n' 'Commit all site sources before publishing.' >&2
   exit 1
@@ -26,6 +29,17 @@ if git -C "$repo_dir" ls-remote --exit-code --heads origin "$branch" >/dev/null 
   git -C "$repo_dir" fetch --quiet origin "$branch:refs/remotes/origin/$branch"
 fi
 if git -C "$repo_dir" show-ref --verify --quiet "refs/heads/$branch"; then
+  # GitHub can commit to the published branch itself (a CNAME written when the
+  # custom domain is set), so build on the remote tip when it is ahead, and stop
+  # rather than produce a push that could only be forced.
+  if git -C "$repo_dir" show-ref --verify --quiet "refs/remotes/origin/$branch"; then
+    if git -C "$repo_dir" merge-base --is-ancestor "$branch" "origin/$branch"; then
+      git -C "$repo_dir" update-ref "refs/heads/$branch" "refs/remotes/origin/$branch"
+    elif ! git -C "$repo_dir" merge-base --is-ancestor "origin/$branch" "$branch"; then
+      printf 'Local %s and origin/%s have diverged; reconcile them before publishing.\n' "$branch" "$branch" >&2
+      exit 1
+    fi
+  fi
   git -C "$repo_dir" worktree add --quiet "$scratch/branch" "$branch"
 elif git -C "$repo_dir" show-ref --verify --quiet "refs/remotes/origin/$branch"; then
   git -C "$repo_dir" worktree add --quiet -b "$branch" "$scratch/branch" "origin/$branch"
