@@ -1006,11 +1006,30 @@ function renderSettledThinkingMarker(view: ReasoningUsageView, width: number): s
 	)}`;
 }
 
+/**
+ * Reasoning is markdown (`**Outlining parsing assumptions**` headings), but the
+ * rail is already one italic excerpt style, so the markers are dropped rather
+ * than rendered (p9/D4). Code spans and glob-like runs (`src/**\/*.ts`) keep
+ * their asterisks, and an opener still streaming without its closer is dropped
+ * at a line start so the heading does not flicker as the delta lands.
+ */
+const THINKING_EMPHASIS = /(?<![\p{L}\p{N}_*\/\\.])(\*{1,2})(?=[^\s*])([^\n]*?[^\s*\\])\1(?![\p{L}\p{N}*])/gu;
+const THINKING_OPEN_BOLD = /^(\s*)\*\*(?=[^\s*])/gmu;
+
+function stripThinkingEmphasis(text: string): string {
+	return text
+		.split(/(`[^`\n]*`)/u)
+		.map((part, index) =>
+			index % 2 === 1 ? part : part.replace(THINKING_EMPHASIS, "$2").replace(THINKING_OPEN_BOLD, "$1"),
+		)
+		.join("");
+}
+
 /** Wrap first, then keep the same tail both while streaming and after settlement. */
 function renderThinkingRail(thinking: string, width: number, limit: number, unbounded = false): string[] {
 	// Reasoning often ends on a newline; wrapped, that became an empty rail row.
 	// Presentation only: the provider's signed reasoning stays untouched.
-	const text = redactSecretString(sanitizeAssistantProse(thinking)).replace(/^\s*\n|\s+$/gu, "");
+	const text = stripThinkingEmphasis(redactSecretString(sanitizeAssistantProse(thinking))).replace(/^\s*\n|\s+$/gu, "");
 	if (text.length === 0) return [];
 	// A bounded excerpt spends no rows on paragraph breaks; /view keeps them.
 	const wrapped = wrapTextWithAnsi(text, Math.max(1, width - PROSE_GUTTER_WIDTH));
