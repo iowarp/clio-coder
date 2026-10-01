@@ -152,14 +152,18 @@ function unhonoredBootFlag(command: string | undefined, bootFlags: ReadonlyArray
 
 type CommandHandler = (subArgs: string[], bootOptions: CliBootOptions) => Promise<number>;
 
-function nodeVersionError(): string | null {
+function nodeVersionError(): { message: string; detail: string } | null {
 	const parts = process.versions.node.split(".").map((part) => Number.parseInt(part, 10));
 	for (let i = 0; i < MIN_NODE.length; i += 1) {
 		const actual = parts[i] ?? 0;
 		const wanted = MIN_NODE[i] ?? 0;
 		if (actual > wanted) return null;
 		if (actual < wanted) {
-			return `clio-coder requires Node.js >=${MIN_NODE.join(".")}; this is ${process.versions.node}. Upgrade Node and retry.`;
+			return {
+				message: `clio-coder requires Node.js >=${MIN_NODE.join(".")}; this is ${process.versions.node}.`,
+				detail:
+					"Distro packages such as Ubuntu's apt nodejs are often older. Install a current Node with nvm, fnm or NodeSource, then reinstall with that Node's npm: npm install -g @iowarp/clio-coder",
+			};
 		}
 	}
 	return null;
@@ -171,7 +175,7 @@ async function main(argv: string[]): Promise<number> {
 	traceBoot("cli entry");
 	const versionError = nodeVersionError();
 	if (versionError !== null) {
-		printError(versionError);
+		printError(versionError.message, versionError.detail);
 		return 1;
 	}
 	const {
