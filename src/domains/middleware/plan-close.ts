@@ -1,3 +1,4 @@
+import { isPlanOnlyRequest } from "../../core/plan-request.js";
 import { ToolNames } from "../../core/tool-names.js";
 import { dispatchMutatedParentWorkspace } from "../dispatch/workspace-mutation.js";
 import type { MiddlewareHookRegistration } from "./runtime.js";
@@ -22,6 +23,7 @@ export function createPlanCloseRegistration(deps: {
 	isPlan: () => boolean | undefined;
 }): MiddlewareHookRegistration {
 	let armed = false;
+	let planOnly = false;
 	let changed = false;
 	let asked = false;
 	let closed = false;
@@ -36,11 +38,21 @@ export function createPlanCloseRegistration(deps: {
 				asked = false;
 				closed = false;
 				if (input.metadata?.requestContinuation !== true && deps.canAsk()) {
+					planOnly = isPlanOnlyRequest(input.text ?? "");
 					armed =
+						planOnly ||
 						input.metadata?.turnMode === "proposal" ||
 						(deps.isPlan() ?? (typeof input.text === "string" && PLAN_REQUEST.test(input.text)));
 				}
-				return [];
+				return armed
+					? [
+							{
+								kind: "inject_reminder",
+								audience: "model",
+								message: `End the plan text without a question or option list; ask_user is its only close.${planOnly ? ' This is plan-only: the card must offer "Keep the plan (Recommended)" first, then any implementation choices, then "Revise the plan first".' : ""}`,
+							},
+						]
+					: [];
 			}
 			if (!armed) return [];
 			if (input.hook === "after_tool") {
@@ -77,6 +89,9 @@ export function createPlanCloseRegistration(deps: {
 				{
 					kind: "request_continuation",
 					message:
+						(planOnly
+							? 'This request is plan-only. Offer "Keep the plan (Recommended)" first; implementation is optional and is not recommended. '
+							: "") +
 						'Close this plan with ask_user "Carry out this plan?". Put any open choices in the options, with one-line descriptions and the recommended option first, and end with "Revise the plan first" so the operator can decline. Do not restate the plan.',
 				},
 			];

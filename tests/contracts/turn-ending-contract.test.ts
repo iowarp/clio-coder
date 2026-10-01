@@ -2,6 +2,7 @@ import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import type { Context } from "@earendil-works/pi-ai";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
+import { isPlanOnlyRequest, stripPlanCloseOptions } from "../../src/core/plan-request.js";
 import { ToolNames } from "../../src/core/tool-names.js";
 import type { MiddlewareContract } from "../../src/domains/middleware/contract.js";
 import { createPlanCloseRegistration } from "../../src/domains/middleware/plan-close.js";
@@ -259,4 +260,22 @@ describe("turn_end effects inside one chat-loop run", () => {
 			f.loop.dispose();
 		}
 	});
+});
+
+it("detects explicit plan-only requests and removes only a trailing duplicated close", () => {
+	const request = "Plan how to implement parseDuration. Give me the plan only; do not edit anything.";
+	strictEqual(isPlanOnlyRequest(request), true);
+	strictEqual(isPlanOnlyRequest("Plan the change and implement it."), false);
+	strictEqual(isPlanOnlyRequest("Do not edit anything; explain the parser."), false);
+	const rule = createPlanCloseRegistration({ canAsk: () => true, isPlan: () => undefined });
+	rule.evaluate({ hook: "turn_start", text: request });
+	const close = rule.evaluate({ hook: "turn_end", text: "Plan", metadata: { stopReason: "stop" } });
+	ok(close[0]?.kind === "request_continuation" && close[0].message.includes("Keep the plan (Recommended)"));
+	strictEqual(
+		stripPlanCloseOptions(
+			"Plan\n- Keep this plan (Recommended) — no files changed.\n- Revise the plan — adjust parsing.",
+		),
+		"Plan",
+	);
+	strictEqual(stripPlanCloseOptions("Plan\n- Parse input\n- Return seconds"), "Plan\n- Parse input\n- Return seconds");
 });

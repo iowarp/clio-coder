@@ -95,6 +95,34 @@ describe("ask_user tool", () => {
 		}
 	});
 
+	it("puts keeping a plan-only request first even when the model recommends implementation", async () => {
+		const f = fixture([
+			async (questions) => ({
+				answers: [
+					{
+						question: questions[0]?.question ?? "missing question",
+						answer: "Keep the plan (Recommended)",
+						options: ["Keep the plan (Recommended)"],
+					},
+				],
+			}),
+		]);
+		f.policy.planOnly = true;
+		const result = await f.call({
+			questions: [
+				{
+					question: "Carry out this plan?",
+					options: [{ label: "Proceed as planned (Recommended)" }, { label: "Revise the plan first" }],
+				},
+			],
+		});
+		deepStrictEqual(
+			f.shown[0]?.[0]?.options?.map((option) => option.label),
+			["Keep the plan (Recommended)", "Proceed as planned", "Revise the plan first"],
+		);
+		ok(result.kind === "ok" && !result.output.includes("then implement in this same turn"));
+	});
+
 	it("hides the install-offer binding tag from the surface and keeps it in the answer", async () => {
 		const tag = skillInstallOfferTag("offer-1");
 		const asked = {

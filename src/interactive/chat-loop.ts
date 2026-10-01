@@ -5,6 +5,7 @@ import type { TurnControlRunner } from "./turn-control-runner.js";
 export { runOutOfTurnRound } from "./side-question.js";
 export { createTurnControlRunner } from "./turn-control-runner.js";
 
+import { isPlanOnlyRequest, stripPlanCloseOptions } from "../core/plan-request.js";
 import type { PrecomputedRanking } from "../core/precomputed-rank.js";
 import { ToolNames } from "../core/tool-names.js";
 import type { LiveBudgetView } from "../domains/context/budget/live-view.js";
@@ -1408,6 +1409,16 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		if (event.type === "message_end") {
 			rewriteStallAbortMessage(state, event.message);
 			explainInterruptedAssistant(event.message, state.activeInterruptReason);
+			if (state.currentAskUserPolicy?.planOnly && event.message.role === "assistant") {
+				for (const block of event.message.content) {
+					if (block.type !== "text") continue;
+					const clean = stripPlanCloseOptions(block.text);
+					if (clean !== block.text) {
+						block.text = clean;
+						Object.assign(event, { lockedSynthesisSanitized: true });
+					}
+				}
+			}
 		}
 		emit(event as ChatLoopEvent);
 	};
@@ -2140,6 +2151,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				deps.toolRegistry,
 				state.currentTurnConstraints,
 			);
+			if (askUserPolicy) askUserPolicy.planOnly = isPlanOnlyRequest(text);
 			// turn_start: the prompt is accepted; registrations may inject
 			// context for this request. Accumulated reminders (turn_end
 			// advisories from the previous turn plus anything turn_start just

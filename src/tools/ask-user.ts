@@ -708,7 +708,20 @@ export function createAskUserTool(deps: AskUserToolDeps = {}): ToolSpec {
 			if (call.action === "complete") {
 				return completeInterview(policy, "complete", options, call.summary, call.decisions ?? []);
 			}
-			const questions = call.questions ?? [];
+			const questions = (call.questions ?? []).map((question) => {
+				if (!policy.planOnly || !/^carry out this plan\?/iu.test(question.question.trim())) return question;
+				return {
+					...question,
+					multi_select: false,
+					options: [
+						{ label: "Keep the plan (Recommended)", description: "Finish with the plan; make no edits." },
+						...(question.options ?? [])
+							.filter((option) => !/^(?:keep\b|revise\b)/iu.test(option.label))
+							.map((option) => ({ ...option, label: option.label.replace(/\s*\(Recommended\)/giu, "") })),
+						{ label: "Revise the plan first", description: "Adjust the plan before deciding." },
+					],
+				};
+			});
 			const exposure = mergePolicyExposure(policy, call.exposure ?? DEFAULT_AUTONOMY_EXPOSURE);
 			if (call.max_rounds !== undefined) {
 				const nextLimit = policy.callCount === 0 ? call.max_rounds : Math.max(policy.maxCalls, call.max_rounds);

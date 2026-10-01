@@ -456,6 +456,7 @@ export interface AskUserTranscriptRound {
 }
 
 export interface AskUserToolPolicy {
+	planOnly?: boolean;
 	id: string;
 	status: AskUserInterviewStatus;
 	startedAt: string;
