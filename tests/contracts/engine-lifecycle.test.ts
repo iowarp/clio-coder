@@ -33,6 +33,7 @@ import {
 	type TuiRenderObserver,
 	type TuiRenderPhase,
 } from "../../src/engine/instrumented-tui.js";
+import { guardToolArgumentStream } from "../../src/engine/tool-argument-stream.js";
 import { Text, TUI_KEYBINDINGS } from "../../src/engine/tui.js";
 import type { AgentEvent, AgentTool, EngineModel } from "../../src/engine/types.js";
 import { createInteractiveShell, type InteractiveShellTui } from "../../src/interactive/interactive-shell.js";
@@ -219,6 +220,101 @@ function buildRun(
 function eventTypes(events: ReadonlyArray<AgentEvent>): string[] {
 	return events.map((event) => event.type);
 }
+
+describe("tool argument generation bounds", () => {
+	it("stops sustained repetition across fragments with a visible abort reason", async () => {
+		const source = createAssistantMessageEventStream();
+		const partial = toolTurn("loop", { value: "partial" });
+		let observedSignal: AbortSignal | undefined;
+		let at = 0;
+		const guarded = guardToolArgumentStream(
+			{ ...MODEL, contextWindow: 131072, maxTokens: 32768 },
+			{ messages: [] },
+			undefined,
+			(options) => {
+				observedSignal = options.signal;
+				return source;
+			},
+			() => at,
+		);
+		source.push({ type: "start", partial });
+		source.push({ type: "toolcall_delta", contentIndex: 0, delta: "abc".repeat(3000), partial });
+		await new Promise((resolve) => setImmediate(resolve));
+		at = 61_000;
+		source.push({ type: "toolcall_delta", contentIndex: 0, delta: "abc".repeat(3000), partial });
+		const result = await guarded.result();
+		strictEqual(result.stopReason, "aborted");
+		ok(result.errorMessage?.includes("3-character cycle"));
+		ok(result.errorMessage?.includes("No tools from this response were executed"));
+		strictEqual(observedSignal?.aborted, true);
+		// A late provider success cannot replace the guard's terminal result.
+		source.push({ type: "done", reason: "toolUse", message: partial });
+		strictEqual(await guarded.result(), result);
+	});
+
+	it("allows large payloads, burst repetition, and slow streams with useful new content", async () => {
+		const source = createAssistantMessageEventStream();
+		const value = "x".repeat(160_000);
+		const partial = toolTurn("large", { value });
+		let at = 0;
+		const guarded = guardToolArgumentStream(
+			{ ...MODEL, contextWindow: 131072, maxTokens: 65536 },
+			{ messages: [] },
+			undefined,
+			() => source,
+			() => at,
+		);
+		source.push({ type: "start", partial });
+		source.push({ type: "toolcall_delta", contentIndex: 0, delta: JSON.stringify({ value }), partial });
+		await new Promise((resolve) => setImmediate(resolve));
+		for (let index = 0; index < 4; index++) {
+			at += 120_000;
+			source.push({ type: "toolcall_delta", contentIndex: 0, delta: `line ${index}: useful content\n`, partial });
+			await new Promise((resolve) => setImmediate(resolve));
+		}
+		source.push({ type: "done", reason: "toolUse", message: partial });
+		strictEqual((await guarded.result()).stopReason, "toolUse");
+	});
+
+	it("cancels the entire batch at the byte ceiling before any valid sibling executes", async () => {
+		let invocations = 0;
+		let observedSignal: AbortSignal | undefined;
+		const timeline: string[] = [];
+		const partial = assistant(
+			[
+				{ type: "toolCall", id: "valid", name: "echo", arguments: { value: "valid sibling" } },
+				{ type: "toolCall", id: "oversize", name: "echo", arguments: { value: "partial" } },
+			],
+			"toolUse",
+		);
+		const { agent } = createEngineAgent({
+			initialState: { model: MODEL, tools: [echoTool(timeline)] },
+			streamFn: (_model, _context, options) => {
+				invocations++;
+				observedSignal = options?.signal;
+				const source = createAssistantMessageEventStream();
+				source.push({ type: "start", partial });
+				source.push({ type: "toolcall_delta", contentIndex: 1, delta: "x".repeat(32 * MODEL.maxTokens + 1), partial });
+				source.push({ type: "done", reason: "toolUse", message: partial });
+				return source;
+			},
+		});
+		await agent.prompt("go");
+		strictEqual(invocations, 1, "an aborted response must not restart automatically");
+		strictEqual(observedSignal?.aborted, true);
+		deepStrictEqual(timeline, []);
+		const last = agent.state.messages.at(-1) as AssistantMessage;
+		strictEqual(last.stopReason, "aborted");
+		ok(last.errorMessage?.includes("byte safety ceiling"));
+	});
+
+	it("rejects oversized terminal-only tool arguments too", async () => {
+		const source = createAssistantMessageEventStream();
+		const guarded = guardToolArgumentStream(MODEL, { messages: [] }, undefined, () => source);
+		source.push({ type: "done", reason: "toolUse", message: toolTurn("large", { value: "界".repeat(12000) }) });
+		strictEqual((await guarded.result()).stopReason, "aborted");
+	});
+});
 
 describe("engine lifecycle: prepareNextTurn runs only before another assistant turn", () => {
 	it("prepares once between a tool batch and its continuation, never after the final turn", async () => {

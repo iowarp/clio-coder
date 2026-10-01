@@ -30,6 +30,7 @@ import { normalizeContext } from "./context.js";
 import { getEngineEnvApiKey } from "./env-api-keys.js";
 import { engineModels } from "./models.js";
 import { instrumentProviderCall } from "./provider-diagnostics.js";
+import { guardToolArgumentStream } from "./tool-argument-stream.js";
 
 export interface EngineRegisteredApiProvider extends ProviderStreams {
 	api: Api;
@@ -177,7 +178,9 @@ export function engineStream(
 	options?: StreamOptions,
 ): AssistantMessageEventStream {
 	return filterAssistantProseStream(
-		instrumentProviderCall(model, options, (effective) => dispatchEngineStream(model, context, effective)),
+		guardToolArgumentStream(model, context, options, (guarded) =>
+			instrumentProviderCall(model, guarded, (effective) => dispatchEngineStream(model, context, effective)),
+		),
 		model,
 	);
 }
@@ -188,7 +191,9 @@ export function engineStreamSimple(
 	options?: SimpleStreamOptions,
 ): AssistantMessageEventStream {
 	return filterAssistantProseStream(
-		instrumentProviderCall(model, options, (effective) => dispatchEngineStreamSimple(model, context, effective)),
+		guardToolArgumentStream(model, context, options, (guarded) =>
+			instrumentProviderCall(model, guarded, (effective) => dispatchEngineStreamSimple(model, context, effective)),
+		),
 		model,
 	);
 }

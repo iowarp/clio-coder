@@ -25,6 +25,7 @@ import type { AgentMessage, AgentOptions, BeforeToolCallContext, StreamFn } from
 import { Agent } from "@earendil-works/pi-agent-core";
 import { engineStreamSimple } from "./api-registry.js";
 import { filterAssistantProseStream } from "./assistant-prose-stream.js";
+import { guardToolArgumentStream } from "./tool-argument-stream.js";
 
 export type EngineStreamFn = (...args: Parameters<typeof engineStreamSimple>) => ReturnType<StreamFn>;
 
@@ -122,9 +123,11 @@ export function createEngineAgent(options: EngineAgentOptions = {}): EngineAgent
 	let activeCorrelationId: string | undefined;
 	const invoke: StreamFn = async (model, context, streamOptions) => {
 		onStreamInvocation?.();
-		const source = await (streamFn
-			? streamFn(model, resolvedRequestContext(context), streamOptions)
-			: transcriptStreamFn(model, context, streamOptions));
+		const delegate = (guarded: typeof streamOptions) =>
+			streamFn ? streamFn(model, resolvedRequestContext(context), guarded) : transcriptStreamFn(model, context, guarded);
+		const source = await (streamFn || transcriptStreamFn !== engineStreamSimple
+			? guardToolArgumentStream(model, context, streamOptions, delegate)
+			: delegate(streamOptions));
 		return filterAssistantProseStream(source, model);
 	};
 	const admit: StreamFn = (model, context, streamOptions) => {
