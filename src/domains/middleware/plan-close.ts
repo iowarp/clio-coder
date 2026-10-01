@@ -22,7 +22,9 @@ export function createPlanCloseRegistration(deps: {
 	isPlan: () => boolean | undefined;
 }): MiddlewareHookRegistration {
 	let armed = false;
-	let askedOrChanged = false;
+	let changed = false;
+	let asked = false;
+	let closed = false;
 	return {
 		id: "nudge.plan-close",
 		description: "close an unapproved plan through ask_user once",
@@ -30,7 +32,9 @@ export function createPlanCloseRegistration(deps: {
 		evaluate(input) {
 			if (input.hook === "turn_start") {
 				armed = false;
-				askedOrChanged = false;
+				changed = false;
+				asked = false;
+				closed = false;
 				if (input.metadata?.requestContinuation !== true && deps.canAsk()) {
 					armed =
 						input.metadata?.turnMode === "proposal" ||
@@ -44,17 +48,31 @@ export function createPlanCloseRegistration(deps: {
 				// reading the loop guard uses separates a worker that moved the parent's files
 				// from a read-only scout, which leaves the plan still to be approved.
 				if (
-					input.toolName === ToolNames.AskUser ||
 					input.toolName === ToolNames.Edit ||
 					input.toolName === ToolNames.Write ||
 					(input.toolName === ToolNames.Dispatch && dispatchMutatedParentWorkspace(input.toolResultDetails))
 				)
-					askedOrChanged = true;
+					changed = true;
+				if (input.toolName === ToolNames.AskUser) {
+					asked = true;
+					const questions = input.toolArgs?.questions;
+					if (Array.isArray(questions)) {
+						closed ||= questions.some(
+							(question) =>
+								question !== null &&
+								typeof question === "object" &&
+								"question" in question &&
+								typeof question.question === "string" &&
+								/^carry out this plan\?/iu.test(question.question.trim()),
+						);
+					}
+				}
 				return [];
 			}
 			if (input.hook !== "turn_end") return [];
 			armed = false;
-			if (askedOrChanged || !deps.canAsk() || input.metadata?.stopReason !== "stop") return [];
+			if (changed || closed || (asked && !input.text?.trim()) || !deps.canAsk() || input.metadata?.stopReason !== "stop")
+				return [];
 			return [
 				{
 					kind: "request_continuation",

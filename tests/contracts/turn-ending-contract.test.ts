@@ -73,11 +73,35 @@ it("continues only an armed plan that has not asked or changed files, once", () 
 	deepStrictEqual(end(), []);
 	start({ requestContinuation: true });
 	deepStrictEqual(end(), []);
-	for (const toolName of [ToolNames.AskUser, ToolNames.Edit, ToolNames.Write]) {
+	for (const toolName of [ToolNames.Edit, ToolNames.Write]) {
 		start();
 		rule.evaluate({ hook: "after_tool", toolName });
 		deepStrictEqual(end(), []);
 	}
+	start();
+	rule.evaluate({
+		hook: "after_tool",
+		toolName: ToolNames.AskUser,
+		toolArgs: { questions: [{ question: "Invalid input?" }] },
+	});
+	strictEqual(
+		rule.evaluate({
+			hook: "turn_end",
+			text: "Plan: implement the parser, then validate it.",
+			metadata: { stopReason: "stop" },
+		}).length,
+		1,
+	);
+	start();
+	rule.evaluate({ hook: "after_tool", toolName: ToolNames.AskUser });
+	deepStrictEqual(end(), []);
+	start();
+	rule.evaluate({
+		hook: "after_tool",
+		toolName: ToolNames.AskUser,
+		toolArgs: { questions: [{ question: "Carry out this plan?" }] },
+	});
+	deepStrictEqual(rule.evaluate({ hook: "turn_end", text: "No files changed.", metadata: { stopReason: "stop" } }), []);
 	start();
 	rule.evaluate({ hook: "after_tool", toolName: ToolNames.Read });
 	strictEqual(end().length, 1);
