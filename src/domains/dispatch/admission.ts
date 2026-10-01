@@ -1,4 +1,5 @@
 import { randomBytes } from "node:crypto";
+import { resolvePathBoundary, writeRootsCover } from "../../core/path-boundary.js";
 import { endpointLabel } from "../providers/endpoint-capacity.js";
 import type { ActionClass } from "../safety/action-classifier.js";
 import type { ScopeSpec } from "../safety/scope.js";
@@ -385,12 +386,57 @@ export function createCapacityAdmissionController(options: {
 	return controller;
 }
 
+const MAX_NAMED_EXCESS_ROOTS = 4;
+
+function listNamed(values: ReadonlyArray<string>, max: number): string {
+	if (values.length === 0) return "none";
+	if (values.length <= max) return values.join(", ");
+	return `${values.slice(0, max).join(", ")} and ${values.length - max} more`;
+}
+
+/**
+ * Name what a worker scope holds that the orchestrator scope does not, with the
+ * change that removes it. Mirrors the checks in safety `isSubset` so the text
+ * names the same field the predicate refused on; the predicate stays the
+ * authority, this only explains its verdict.
+ */
+export function describeScopeExcess(worker: ScopeSpec, orchestrator: ScopeSpec): string {
+	const problems: string[] = [];
+	const extraActions = [...worker.allowedActions].filter((action) => !orchestrator.allowedActions.has(action)).sort();
+	if (extraActions.length > 0) {
+		problems.push(
+			`it needs action class ${extraActions.join(", ")}, which the orchestrator scope lacks (orchestrator allows ${[...orchestrator.allowedActions].sort().join(", ")}); choose an agent or tool profile without those tools`,
+		);
+	}
+	const orchestratorRoots = orchestrator.allowedWriteRoots.map((root) => resolvePathBoundary(process.cwd(), root));
+	const outsideRoots = worker.allowedWriteRoots.filter(
+		(root) => !writeRootsCover(orchestratorRoots, resolvePathBoundary(process.cwd(), root)),
+	);
+	if (outsideRoots.length > 0) {
+		problems.push(
+			`write root ${listNamed(outsideRoots, MAX_NAMED_EXCESS_ROOTS)} lies outside the orchestrator write roots (${listNamed(orchestratorRoots, MAX_NAMED_EXCESS_ROOTS)}); declare intent.write_roots inside the workspace, or leave write_roots empty`,
+		);
+	}
+	if (worker.allowNetwork && !orchestrator.allowNetwork) {
+		problems.push("it needs network access, which the orchestrator scope denies; choose an agent without network tools");
+	}
+	if (worker.allowDispatch && !orchestrator.allowDispatch) {
+		problems.push(
+			"it may dispatch further workers, which the orchestrator scope denies; choose an agent without the dispatch tool",
+		);
+	}
+	return problems.length > 0 ? problems.join("; ") : "the subset predicate refused it without naming a field";
+}
+
 export function admit(
 	req: AdmissionRequest,
 	subsetFn: (worker: ScopeSpec, orch: ScopeSpec) => boolean,
 ): AdmissionVerdict {
 	if (!subsetFn(req.requestedScope, req.orchestratorScope)) {
-		return { admitted: false, reason: `scope ${req.agentId} is not a subset` };
+		return {
+			admitted: false,
+			reason: `scope ${req.agentId} is not a subset of the orchestrator scope: ${describeScopeExcess(req.requestedScope, req.orchestratorScope)}`,
+		};
 	}
 	for (const action of req.requestedActions) {
 		if (!req.requestedScope.allowedActions.has(action)) {
