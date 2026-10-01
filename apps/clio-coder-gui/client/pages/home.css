@@ -1,0 +1,223 @@
+/* The blank task: one column, one input, nothing else competing for the first look. */
+.newtask {
+	flex: 1;
+	min-height: 0;
+	overflow-y: auto;
+	display: grid;
+	align-items: center;
+	padding: var(--space-6) var(--space-6) var(--space-12);
+}
+.newtask__inner {
+	display: grid;
+	justify-items: center;
+	gap: var(--space-5);
+	width: min(100%, 720px);
+	margin: 0 auto;
+	padding-bottom: 6dvh;
+}
+.newtask__title {
+	margin: 0;
+	text-align: center;
+	font-family: var(--font-editorial);
+	font-weight: 500;
+	font-size: clamp(28px, 3.2vw, 40px);
+	line-height: 1.15;
+	letter-spacing: -0.5px;
+}
+.newtask__title em {
+	color: var(--accent);
+}
+.newtask__notice {
+	display: grid;
+	gap: var(--space-3);
+	width: 100%;
+	padding: var(--space-4);
+	border: 1px solid var(--line-strong);
+	border-radius: var(--radius-md);
+	background: var(--wb-faint, transparent);
+	font-size: var(--text-meta);
+}
+.newtask__notice p {
+	margin: 0;
+	color: var(--ink-muted);
+}
+
+/* The input card shared with the conversation composer. */
+.newtask__composer {
+	display: grid;
+	gap: var(--space-2);
+	width: 100%;
+	padding: var(--space-3) var(--space-3) var(--space-2);
+	border: 1px solid var(--line-strong);
+	border-radius: 18px;
+	background: color-mix(in srgb, var(--ink) 4%, var(--surface));
+	transition: border-color var(--motion-fast) var(--ease-standard);
+}
+.newtask__composer:focus-within {
+	border-color: var(--accent);
+}
+.newtask__composer textarea {
+	min-height: 60px;
+	padding: var(--space-2) var(--space-2) 0;
+	border: 0;
+	border-radius: 0;
+	background: transparent;
+	font-size: var(--text-reading);
+	line-height: 1.5;
+	resize: none;
+}
+.newtask__composer textarea:focus-visible {
+	outline: none;
+	box-shadow: none;
+}
+.newtask__row {
+	display: flex;
+	align-items: center;
+	gap: var(--space-2);
+}
+.newtask__spacer {
+	flex: 1;
+}
+.newtask__send {
+	display: inline-grid;
+	place-items: center;
+	flex: none;
+	width: 34px;
+	height: 34px;
+	min-height: 0;
+	padding: 0;
+	border: 0;
+	border-radius: 50%;
+	background: var(--primary-fill);
+	color: var(--on-primary);
+}
+.newtask__send:hover:not(:disabled) {
+	background: var(--accent);
+	color: var(--on-accent);
+}
+.newtask__send:disabled {
+	background: color-mix(in srgb, var(--ink) 14%, transparent);
+	color: var(--ink-muted);
+	opacity: 1;
+}
+.newtask__error {
+	margin: 0;
+	color: var(--status-fail-fg);
+	font-size: var(--text-meta);
+}
+.newtask__hint {
+	margin: 0;
+	text-align: center;
+	color: var(--ink-muted);
+	font-size: var(--text-meta);
+}
+
+.newtask__starters {
+	display: grid;
+	width: 100%;
+	margin: var(--space-2) 0 0;
+	padding: 0;
+	list-style: none;
+}
+.newtask__starters li + li {
+	border-top: 1px solid var(--line);
+}
+.newtask__starters button {
+	display: flex;
+	align-items: center;
+	gap: var(--space-3);
+	width: 100%;
+	min-height: 0;
+	padding: 11px var(--space-3);
+	border: 0;
+	border-radius: var(--radius-sm);
+	background: transparent;
+	color: var(--ink-muted);
+	font-size: var(--text-meta);
+	line-height: 1.4;
+	text-align: left;
+}
+.newtask__starters button::before {
+	content: "↳";
+	flex: none;
+	color: var(--accent);
+	opacity: 0.7;
+}
+.newtask__starters button:hover {
+	background: var(--wb-faint);
+	color: var(--ink);
+}
+
+/* Workspace picker, a details element used as a menu. */
+.ws-menu {
+	position: relative;
+	margin: 0;
+	font-size: inherit;
+	color: inherit;
+}
+.ws-menu > summary {
+	list-style: none;
+	cursor: pointer;
+}
+.ws-menu > summary::-webkit-details-marker {
+	display: none;
+}
+.ws-menu__panel {
+	position: absolute;
+	left: 0;
+	bottom: calc(100% + 6px);
+	z-index: 10;
+	display: grid;
+	gap: 2px;
+	min-width: 18rem;
+	max-width: min(26rem, calc(100vw - 32px));
+	max-height: 18rem;
+	overflow-y: auto;
+	padding: var(--space-1);
+	border: 1px solid var(--line-strong);
+	border-radius: var(--radius-md);
+	background: var(--overlay);
+	box-shadow: var(--shadow-panel);
+}
+.ws-menu__panel button {
+	display: flex;
+	align-items: center;
+	gap: var(--space-3);
+	width: 100%;
+	min-height: 0;
+	padding: 8px 10px;
+	border: 0;
+	border-radius: var(--radius-sm);
+	background: transparent;
+	text-align: left;
+	font-size: var(--text-meta);
+}
+.ws-menu__panel button:hover {
+	background: color-mix(in srgb, var(--ink) 8%, transparent);
+}
+.ws-menu__panel button > span {
+	display: grid;
+	min-width: 0;
+}
+.ws-menu__panel small {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	color: var(--ink-muted);
+	font-size: 11.5px;
+}
+.ws-menu__panel .icon {
+	flex: none;
+	width: 16px;
+	height: 16px;
+	color: var(--ink-muted);
+}
+.ws-menu__panel .ws-menu__open {
+	margin-top: var(--space-1);
+	border-top: 1px solid var(--line);
+	border-radius: 0 0 var(--radius-sm) var(--radius-sm);
+}
+.ws-menu .wb-chip {
+	height: 30px;
+	color: var(--ink);
+}
