@@ -193,7 +193,7 @@ export interface ProbeMerge {
  * `cache`, while health and availability (decided by the caller from `probe`)
  * reflect the failure. Only a successful nonempty catalog replaces the cached candidates.
  */
-function mergeProbeResult(
+export function mergeProbeResult(
 	desc: RuntimeDescriptor,
 	target: TargetDescriptor,
 	probe: ProbeResult | null,
@@ -233,7 +233,32 @@ function mergeProbeResult(
 			: probe.ok
 				? (probe.modelStates ?? null)
 				: null;
-	if (probe?.ok === false) {
+	// A hosted account window does not move with a network blip, and dropping it
+	// disables threshold compaction for the turn (p6/U1: `36.2K/unknown` on a
+	// 272K catalog model, 272K again one turn later). A hosted runtime that
+	// reports windows therefore keeps the last reported one through a failed or
+	// windowless read; a local server can restart at another window, so it
+	// still goes unknown.
+	const keepsReportedWindow = preserveCatalog && desc.tier === "cloud" && typeof desc.probeServingWindows === "function";
+	if (keepsReportedWindow && probe?.ok === true && previous !== undefined) {
+		const reported = (caps: Partial<CapabilityFlags> | undefined): number | undefined =>
+			typeof caps?.contextWindow === "number" && caps.contextWindow > 0 ? caps.contextWindow : undefined;
+		if (previous.probeModelCapabilities) {
+			const carried: Record<string, Partial<CapabilityFlags>> = { ...(probeModelCapabilities ?? {}) };
+			for (const [modelId, caps] of Object.entries(previous.probeModelCapabilities)) {
+				const window = reported(caps);
+				if (window !== undefined && reported(carried[modelId]) === undefined) {
+					carried[modelId] = { ...(carried[modelId] ?? {}), contextWindow: window };
+				}
+			}
+			if (Object.keys(carried).length > 0) probeModelCapabilities = carried;
+		}
+		const previousWindow = reported(previous.probeCapabilities ?? undefined);
+		if (previousWindow !== undefined && reported(probeCapabilities ?? undefined) === undefined) {
+			probeCapabilities = { ...(probeCapabilities ?? {}), contextWindow: previousWindow };
+		}
+	}
+	if (probe?.ok === false && !keepsReportedWindow) {
 		// A failed refresh cannot renew a serving-window observation. Keep
 		// selectable models and non-window hints, then let the next TTL retry.
 		if (probeCapabilities) {

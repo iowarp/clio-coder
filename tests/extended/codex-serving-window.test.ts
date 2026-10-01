@@ -3,7 +3,7 @@ import { createServer, type IncomingHttpHeaders } from "node:http";
 import type { AddressInfo } from "node:net";
 import { it } from "node:test";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
-import { createProvidersBundle } from "../../src/domains/providers/extension.js";
+import { createProvidersBundle, mergeProbeResult } from "../../src/domains/providers/extension.js";
 import { resolveModelCapabilities } from "../../src/domains/providers/model-capabilities.js";
 import { resolveRuntimeTarget } from "../../src/domains/providers/runtime-resolution.js";
 import codexRuntime, {
@@ -159,5 +159,27 @@ it("never extends an earlier window across a failed read", async () => {
 		strictEqual(backend.requests.length, 3, "the failure discarded the reusable windows");
 	} finally {
 		await backend.close();
+	}
+});
+
+it("keeps the last reported window through a failed or windowless read of a hosted route", () => {
+	const target = { id: "codex", runtime: "openai-codex", url: "http://127.0.0.1:1", defaultModel: "gpt-6-luna" };
+	const first = mergeProbeResult(
+		codexRuntime,
+		target,
+		{ ok: true, modelCapabilities: { "gpt-6-luna": { contextWindow: 272_000 } } },
+		undefined,
+	);
+	const previous = {
+		target,
+		probeCapabilities: first.probeCapabilities,
+		probeModelCapabilities: first.probeModelCapabilities,
+	};
+	for (const probe of [
+		{ ok: false, error: "down" },
+		{ ok: true, notes: ["listed no window"] },
+	]) {
+		const merged = mergeProbeResult(codexRuntime, target, probe, previous as never);
+		strictEqual(merged.probeModelCapabilities?.["gpt-6-luna"]?.contextWindow, 272_000);
 	}
 });
