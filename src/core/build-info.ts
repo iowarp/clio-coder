@@ -35,7 +35,7 @@ function readBuildProvenance(): BuildProvenance | null {
  */
 function describeVersion(version: string, build: BuildProvenance | null = readBuildProvenance()): string {
 	if (!isDevVersion(version)) return version;
-	const commit = build === null ? "" : ` · ${build.commit}${build.dirty ? "-dirty" : ""}`;
+	const commit = build === null ? " · source" : ` · ${build.commit}${build.dirty ? "-dirty" : ""}`;
 	return `${version} (unreleased${commit})`;
 }
 

@@ -1,5 +1,6 @@
 import { deepStrictEqual, match, ok, strictEqual } from "node:assert/strict";
 import { test } from "node:test";
+import { isDevVersion, readClioVersionLabel } from "../../src/core/build-info.js";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { readClioVersion } from "../../src/core/package-root.js";
 import {
@@ -230,7 +231,7 @@ test("stale project context offers refresh", () => {
 test("the welcome action never advertises a submit binding", () => {
 	const actions = ["Enter", "Ctrl+S", null].map((submitKey) => actionLine(rows(banner({ submitKey }), 80)));
 	strictEqual(new Set(actions).size, 1);
-	ok(actions[0]?.endsWith(`v${readClioVersion()}`));
+	ok(actions[0]?.endsWith(`v${readClioVersion()}${isDevVersion(readClioVersion()) ? "·source" : ""}`));
 	ok(!actions[0]?.includes("to send"), actions[0]);
 });
 
@@ -382,7 +383,7 @@ test("the session header keeps the route when everything else has to go", () => 
 	}
 	// Wide enough, identity sits next to the wordmark rather than trailing the row.
 	const wide = rows(component, 120)[0] ?? "";
-	match(wide, /^>C_ Clio Coder v\d+\.\d+\.\d+(?:-dev)? · dynamo/u);
+	match(wide, /^>C_ Clio Coder v\d+\.\d+\.\d+(?:-dev·source)? · dynamo/u);
 });
 
 test("the collapsed header drops readiness, latency and onboarding", () => {
@@ -802,7 +803,7 @@ test("the welcome keeps a quiet launchpad and the session header names the full 
 	const wide = rows(component, 120);
 	ok(wide.join("\n").includes("████"));
 	for (const label of ["Session started", "Project", "AI usage"]) ok(wide.join("\n").includes(label));
-	ok(actionLine(wide).endsWith(`v${readClioVersion()}`));
+	ok(actionLine(wide).endsWith(`v${readClioVersion()}${isDevVersion(readClioVersion()) ? "·source" : ""}`));
 	component.collapseToSessionHeader();
 	strictEqual(rows(component, 120).length, 1);
 	ok(rows(component, 120)[0]?.includes(model));
@@ -929,3 +930,8 @@ for (const width of [60, 80, 106, 160]) {
 		ok(visibleWidth(line) <= width, text);
 	});
 }
+
+test("source dev version identifies itself without bundle provenance", () => {
+	const version = readClioVersion();
+	strictEqual(readClioVersionLabel(), isDevVersion(version) ? `${version} (unreleased · source)` : version);
+});
