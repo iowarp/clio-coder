@@ -61,11 +61,11 @@ Plain doctor reports node probes without refreshing dispatch eligibility.
 clio-coder doctor --fix
 ```
 
-After you review the setup and understand the changes, this records passing preflight results. It also rewrites retired enum values and YAML `on` and `off` booleans in `settings.yaml`, so run plain `doctor` first to preview them.
+Run it from the project root after you review the setup. It records each node's preflight result for that path, and only a passing record makes a node eligible for dispatch. It also creates missing Clio directories, makes `settings.yaml` and `credentials.yaml` owner-only, and rewrites retired enum values and YAML `on` and `off` booleans in `settings.yaml`, so run plain `doctor` first to preview them.
 
 ### Upgrade together
 
-Worker specification v7 requires compatible fleet nodes, so a 0.5 client or node cannot work with a 0.6 peer. Upgrade the client and workers together when release notes say so; session format changes also affect which clients can reopen conversations.
+Every SSH node must run exactly the same Clio Coder version as your client. Preflight compares the versions, and upgrading the client invalidates each node's record until you run `clio-coder doctor --fix` again. In 0.6.0 the worker specification moved to version 7, so a 0.5 node rejects work from a 0.6 client.
 :::
 
 ::: result What doctor tells you

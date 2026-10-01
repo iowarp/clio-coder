@@ -39,7 +39,7 @@ clio-coder
 
 The terminal combines the conversation, tool calls, permissions, and worker activity. Type `/help` to see available commands, or `/model` to choose a model.
 
-During a turn, **Enter** steers the current work, **Ctrl+Q** queues a follow-up, and **Escape** interrupts. Review a permission card before allowing an action. **Deny** skips that call; **Stop** ends the turn.
+During a turn, **Enter** steers the current work, **Ctrl+Q** queues a follow-up, and **Escape** cancels the run. Review a permission card before allowing an action. **Deny** skips that call; **Stop** ends the turn.
 
 ## Choose where to begin
 

@@ -32,7 +32,7 @@ The three commands answer different needs. Pick by whether you want a recorded r
 | --- | --- | --- |
 | `/delegate <peer> <task>` | A configured ACP peer runs the task | The result and a receipt |
 | `/run --target <target> <agent> <task>` | A configured headless target runs it | The result and a receipt |
-| `/peer <peer> <brief>` | A Herdr pane opens for you to work in | No managed receipt |
+| `/peer <peer> <brief>` | A Herdr pane opens for you to work in (start Clio inside Herdr with `--with-panes`) | No managed receipt |
 :::
 
 Do not infer that a pane completed a task because it opened. Do not infer that a managed receipt contains every internal reasoning step or mediates every operation inside a peer-owned loop.
@@ -43,7 +43,7 @@ Do not infer that a pane completed a task because it opened. Do not infer that a
 Inspect the parser's handling of empty input. Identify the existing tests and propose a regression test. Do not edit files.
 :::
 
-That last sentence is a task instruction, not an enforced boundary. Where supported, select the actual read-only restriction on the dispatch and inspect the admission preview. A connector that cannot enforce a restriction is not equivalent to one that can.
+That last sentence is a task instruction, not an enforced boundary. Where the peer supports it, add `--read-only` to `/run` or `/delegate`, then confirm in the run's receipt that the restriction applied. A connector that cannot enforce a restriction is not equivalent to one that can.
 
 ## Keep worker authority separate
 

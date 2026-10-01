@@ -12,7 +12,7 @@ This guide describes v0.6.0. A working connection does not establish a model's c
 
 ## Decide where inference may run
 
-Guided setup offers four kinds of route. Choose by where the model input may go, then by what you already run.
+On first setup, Guided setup offers four kinds of route. Choose by where the model input may go, then by what you already run.
 
 ::: compare
 | Route | Where inference runs | What the wizard lists |
@@ -86,7 +86,7 @@ A worker running on your machine against a remote model server is still a local 
 
 ## Choose capabilities deliberately
 
-Clio supports more than one kind of model interaction. Its Inception Mercury runtime supports diffusion-language-model workflows. Optional, experimental System One engines answer typed questions at fixed harness decision sites. Neither replaces a chat model or is required to get started.
+Clio supports more than one kind of model interaction. Its Inception Mercury runtime serves Mercury diffusion language models as chat models with tool calling. Optional, experimental System One engines answer typed questions at fixed harness decision sites. Neither replaces a chat model or is required to get started.
 
 Vision support depends on the model and the route. A model advertised as multimodal is not enough if the bridge does not carry images: the managed Codex, Pi, OpenCode, Claude Code, and Antigravity CLI bridges are text-only. Check what the route accepts before attaching a screenshot.
 

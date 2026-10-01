@@ -79,7 +79,7 @@ On the desktop alpha, open **Artifacts**, then **Results**, beside the conversat
 :::
 
 ::: result What to look for
-The actual check, its result, and any missing evidence. A receipt is an inspectable record of the run; it is not a certificate that every scientific or operational requirement was met. Receipts from this release remain readable and verifiable.
+The actual check, its result, and any missing evidence. A receipt is an inspectable record of the run; it is not a certificate that every scientific or operational requirement was met. Receipts sealed by 0.5 releases still verify; one sealed under an older integrity format is reported as retired and is not read as evidence.
 :::
 
 ::: capture gui-trace

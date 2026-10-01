@@ -9,7 +9,7 @@ This guide describes the v0.6.0 context workflow. It does not promise that every
 
 ## Give the project a starting point
 
-A project handbook orients the model toward the repository's structure and rules. The context commands prepare a `CLIO-CODER.md` handbook and a structural code index, now called a codemap.
+A project handbook orients the model toward the repository's structure and rules. The context commands prepare a `CLIO-CODER.md` handbook and a structural code index called the codemap.
 
 ```sh
 clio-coder context init
