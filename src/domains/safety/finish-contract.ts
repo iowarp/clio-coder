@@ -20,6 +20,12 @@ import type { Rigor } from "./rigor.js";
 export const FINISH_CONTRACT_ADVISORY_MESSAGE =
 	"[Clio Coder] finish-contract advisory: you changed files this turn without recording validation evidence or a limitation receipt. Report the change as unverified. Run checks only within the operator's authorized scope; this advisory does not authorize tests, scripts, or additional tools.";
 
+export const FINISH_CONTRACT_COVERAGE_ADVISORY_MESSAGE =
+	"[Clio Coder] finish-contract advisory: checks passed; behavior coverage unverified. Passing receipts establish the recorded checks, not every changed behavior. This is a reporting advisory; finish without automatically running additional checks. It grants no additional authority.";
+
+export const FINISH_CONTRACT_EVIDENCE_SCOPE_ADVISORY_MESSAGE =
+	"[Clio Coder] finish-contract advisory: validation evidence recorded; behavior coverage unverified. This is a reporting advisory; finish without automatically running additional checks. It grants no additional authority.";
+
 /**
  * The recent-window cap (entries since the last user message). Exported so a
  * tail-scoped reader can size its read as a multiple of this and stay in lockstep
@@ -48,6 +54,14 @@ export interface FinishContractEvidence extends ValidationExecutionEvidence {
 	turnId?: string;
 }
 
+/** CLB-3: declared checks and freshness are useful evidence, but neither records runtime behavior coverage. */
+export interface FinishContractVerificationScope {
+	behaviorCoverage: "unknown";
+	passedChecks: ReadonlyArray<string>;
+	acceptance: ReadonlyArray<{ check: string; state: "passed" | "limited" | "unverified" }>;
+	limitations: ReadonlyArray<FinishContractEvidence>;
+}
+
 /** Why the contract settled. Every branch is auditable from the ledger alone. */
 export type FinishContractReason =
 	| "no_mutation"
@@ -64,6 +78,8 @@ export type FinishContractAssessment =
 			evidence: ReadonlyArray<FinishContractEvidence>;
 			mutatedPaths: ReadonlyArray<string>;
 			quality?: ReadonlyArray<QualityFinding>;
+			verificationScope?: FinishContractVerificationScope;
+			advisory?: string;
 	  }
 	| {
 			kind: "engage";
@@ -72,6 +88,7 @@ export type FinishContractAssessment =
 			evidence: ReadonlyArray<FinishContractEvidence>;
 			mutatedPaths: ReadonlyArray<string>;
 			quality?: ReadonlyArray<QualityFinding>;
+			verificationScope?: FinishContractVerificationScope;
 	  };
 
 export interface FinishContractInput {
@@ -115,7 +132,7 @@ interface MutationCandidate {
  *
  * Decision order (pure function of ledger receipts):
  *   1. no mutating receipt in the window        -> ok/no_mutation
- *   2. validation evidence present              -> ok/validation_evidence
+ *   2. validation evidence present              -> ok/validation_evidence, with bounded scope advisory
  *   3. successful `limitation` receipt present  -> ok/explicit_limitation
  *   4. otherwise                                -> engage/unvalidated_mutation
  *
@@ -125,6 +142,46 @@ interface MutationCandidate {
  * wording alone and a real limitation is never missed for its phrasing.
  */
 export function assessFinishContract(input: FinishContractInput): FinishContractAssessment {
+	const assessment = assessMutationFinishContract(input);
+	if (assessment.mutatedPaths.length === 0 || assessment.reason === "deletion_only") return assessment;
+	const limitations = assessment.evidence.filter((item) => item.kind === "limitation");
+	const passedChecks = [
+		...assessment.evidence.filter((item) => item.kind === "validation_command").map((item) => item.check ?? item.summary),
+		...(assessment.quality?.filter((finding) => finding.state === "passed").map((finding) => finding.check) ?? []),
+	];
+	const limited = new Set(limitations.flatMap((item) => item.paths ?? []));
+	const verificationScope: FinishContractVerificationScope = {
+		behaviorCoverage: "unknown",
+		passedChecks: [...new Set(passedChecks)],
+		acceptance: (input.activeAcceptance?.verification ?? []).map((required) => ({
+			check: required.check,
+			state: assessment.evidence.some((item) => acceptanceCheckPassed(item, required, input.workspaceRoot))
+				? "passed"
+				: limited.has(required.check)
+					? "limited"
+					: "unverified",
+		})),
+		limitations,
+	};
+	// CLB-3: an OK decision permits completion; it is not a correctness verdict.
+	// No current receipt describes runtime behavior coverage, including a fresh
+	// quality snapshot or a pass for an explicitly requested acceptance check.
+	const hasPassedChecks = passedChecks.length > 0;
+	const hasEvidence = hasPassedChecks || assessment.evidence.some((item) => item.kind !== "limitation");
+	return {
+		...assessment,
+		verificationScope,
+		...(assessment.kind === "ok" && hasEvidence
+			? {
+					advisory: hasPassedChecks
+						? FINISH_CONTRACT_COVERAGE_ADVISORY_MESSAGE
+						: FINISH_CONTRACT_EVIDENCE_SCOPE_ADVISORY_MESSAGE,
+				}
+			: {}),
+	};
+}
+
+function assessMutationFinishContract(input: FinishContractInput): FinishContractAssessment {
 	const sessionEntries = input.sessionEntries ?? [];
 	const assistantTurnId = input.assistantTurnId ?? null;
 	const window = recentEntries(sessionEntries, assistantTurnId, input.recentEntryLimit ?? DEFAULT_RECENT_ENTRY_LIMIT);
@@ -208,7 +265,7 @@ export function assessFinishContract(input: FinishContractInput): FinishContract
 			quality,
 		};
 	if (evidence.length > 0) {
-		return { kind: "ok", reason: "validation_evidence", evidence, mutatedPaths };
+		return { kind: "ok", reason: "validation_evidence", evidence: [...evidence, ...limitations], mutatedPaths };
 	}
 
 	if (limitations.length > 0) {

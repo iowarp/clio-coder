@@ -5620,6 +5620,7 @@ export function createDispatchBundle(
 					mutatedPaths: assessment.mutatedPaths,
 					evidenceKinds: Array.from(new Set(assessment.evidence.map((item) => item.kind))),
 					...(assessment.quality ? { quality: assessment.quality } : {}),
+					...(assessment.verificationScope ? { verificationScope: assessment.verificationScope } : {}),
 				});
 			} catch {
 				// Audit must not destabilize dispatch finalization.
@@ -7192,6 +7193,7 @@ export function createDispatchBundle(
 					mutatedPaths: assessment.mutatedPaths,
 					evidenceKinds: Array.from(new Set(assessment.evidence.map((item) => item.kind))),
 					...(assessment.quality ? { quality: assessment.quality } : {}),
+					...(assessment.verificationScope ? { verificationScope: assessment.verificationScope } : {}),
 				});
 			} catch {
 				// Audit must not destabilize dispatch finalization.

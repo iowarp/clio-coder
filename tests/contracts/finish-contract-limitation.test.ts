@@ -3,7 +3,12 @@ import { describe, it } from "node:test";
 import { ToolNames } from "../../src/core/tool-names.js";
 import { FINISH_CONTRACT_EVIDENCE_TAGS } from "../../src/domains/evidence/finish-contract-map.js";
 import { composeTrustStatus } from "../../src/domains/evidence/trust-status.js";
-import { assessFinishContract } from "../../src/domains/safety/finish-contract.js";
+import { buildCompletionContractAuditRecord } from "../../src/domains/safety/audit.js";
+import {
+	assessFinishContract,
+	FINISH_CONTRACT_COVERAGE_ADVISORY_MESSAGE,
+} from "../../src/domains/safety/finish-contract.js";
+import { createFinishContractRegistration } from "../../src/domains/safety/finish-contract-registration.js";
 import { builtin } from "../../src/tools/builtin-tool-catalog.js";
 import { limitationTool } from "../../src/tools/limitation.js";
 import { validateBuiltinToolPolicy } from "../../src/tools/policy.js";
@@ -175,6 +180,87 @@ describe("finish contract: the limitation receipt replaces the prose regex", () 
 		const assessment = assessFinishContract({ sessionEntries: entries, assistantTurnId: "assistant-1" });
 		strictEqual(assessment.kind, "ok");
 		strictEqual(assessment.reason, "validation_evidence");
+		deepStrictEqual(
+			assessment.evidence.map((item) => item.kind),
+			["validation_command", "limitation"],
+		);
+		strictEqual(
+			assessment.verificationScope?.limitations[0]?.summary,
+			"limitation recorded: lint skipped (reason=out-of-scope)",
+		);
+	});
+
+	it("reports unknown behavior coverage for unrelated or partial passing checks, irrespective of final prose", () => {
+		for (const command of ["npm run lint", "node --test unrelated.test.mjs", "node --test thing.test.mjs"]) {
+			const assessment = assessFinishContract({
+				sessionEntries: [
+					...mutationWindow(),
+					toolCall("bash-1", ToolNames.Bash, { command }),
+					toolResult("bash-1", ToolNames.Bash, false),
+					assistantMessage("assistant-1", "All changed behavior in src/thing.ts is covered by imports and tests. Done."),
+				],
+				assistantTurnId: "assistant-1",
+			});
+			strictEqual(assessment.kind, "ok");
+			strictEqual(assessment.reason, "validation_evidence");
+			strictEqual(assessment.verificationScope?.behaviorCoverage, "unknown");
+			strictEqual(assessment.verificationScope?.passedChecks.length, 1);
+			ok(assessment.kind === "ok");
+			strictEqual(assessment.advisory, FINISH_CONTRACT_COVERAGE_ADVISORY_MESSAGE);
+		}
+	});
+
+	it("retains explicitly requested check scope and limitations without turning unknown coverage into a gate", async () => {
+		const entries = [
+			...mutationWindow(),
+			toolCall("bash-1", ToolNames.Bash, { command: "npm test" }),
+			toolResult("bash-1", ToolNames.Bash, false),
+		];
+		const activeAcceptance = {
+			expectedOutputs: ["src/thing.ts"],
+			verification: [
+				{ check: "test", timeoutMs: 1000 },
+				{ check: "lint", timeoutMs: 1000 },
+			],
+		};
+		const audits: ReturnType<typeof buildCompletionContractAuditRecord>[] = [];
+		const normal = createFinishContractRegistration({
+			readSessionEntries: () => entries,
+			readActiveAcceptance: () => activeAcceptance,
+			getTurnConstraints: () => ({ mode: "proposal", allowedTools: ["read", "edit"] }),
+			recordDecision: (input) => audits.push(buildCompletionContractAuditRecord(input)),
+		});
+		const effects = await normal.evaluate({ hook: "turn_end", text: "Done." });
+		deepStrictEqual(effects, [
+			{ kind: "inject_reminder", severity: "warn", message: FINISH_CONTRACT_COVERAGE_ADVISORY_MESSAGE },
+		]);
+		strictEqual(audits[0]?.decision, "ok");
+		deepStrictEqual(audits[0]?.verificationScope?.acceptance, [
+			{ check: "test", state: "passed" },
+			{ check: "lint", state: "unverified" },
+		]);
+		entries.push(
+			toolCall("lim-1", ToolNames.Limitation, { scope: "lint not authorized", reason: "out-of-scope", paths: ["lint"] }),
+			toolResult("lim-1", ToolNames.Limitation, false),
+		);
+		const high = createFinishContractRegistration({
+			readSessionEntries: () => entries,
+			readActiveAcceptance: () => activeAcceptance,
+			resolveRigor: () => "high",
+			recordDecision: (input) => audits.push(buildCompletionContractAuditRecord(input)),
+		});
+		deepStrictEqual(await high.evaluate({ hook: "turn_end", text: "Done." }), effects);
+		strictEqual(audits[1]?.reason, "explicit_limitation");
+		deepStrictEqual(audits[1]?.verificationScope?.passedChecks, ["test"]);
+		deepStrictEqual(audits[1]?.verificationScope?.acceptance, [
+			{ check: "test", state: "passed" },
+			{ check: "lint", state: "limited" },
+		]);
+		deepStrictEqual(audits[1]?.verificationScope?.limitations[0]?.paths, ["lint"]);
+		activeAcceptance.verification.pop();
+		deepStrictEqual(await high.evaluate({ hook: "turn_end", text: "Done." }), effects);
+		strictEqual(audits[2]?.reason, "validation_evidence");
+		deepStrictEqual(audits[2]?.verificationScope?.acceptance, [{ check: "test", state: "passed" }]);
 	});
 
 	it("accepts a successful native Node test receipt after an edit but not a failed test", () => {
@@ -279,6 +365,8 @@ describe("finish contract: only a change that ran in the workspace needs validat
 		const assessment = assessFinishContract({ sessionEntries: entries, assistantTurnId: "assistant-1" });
 		strictEqual(assessment.kind, "ok");
 		strictEqual(assessment.reason, "no_mutation");
+		strictEqual(assessment.advisory, undefined);
+		strictEqual(assessment.verificationScope, undefined);
 	});
 
 	it("settles ok/no_net_mutation for a write outside the workspace", () => {
@@ -296,6 +384,7 @@ describe("finish contract: only a change that ran in the workspace needs validat
 		strictEqual(assessment.kind, "ok");
 		strictEqual(assessment.reason, "no_net_mutation");
 		deepStrictEqual(assessment.mutatedPaths, []);
+		strictEqual(assessment.advisory, undefined);
 	});
 
 	it("settles ok/deletion_only when the turn only removed tests, and engages for removed source or a write", () => {

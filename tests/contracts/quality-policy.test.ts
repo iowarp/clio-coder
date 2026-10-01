@@ -6,7 +6,10 @@ import { join } from "node:path";
 import { it, mock } from "node:test";
 import { stringify } from "yaml";
 import { buildCompletionContractAuditRecord } from "../../src/domains/safety/audit.js";
-import { assessFinishContract } from "../../src/domains/safety/finish-contract.js";
+import {
+	assessFinishContract,
+	FINISH_CONTRACT_COVERAGE_ADVISORY_MESSAGE,
+} from "../../src/domains/safety/finish-contract.js";
 import { createFinishContractRegistration } from "../../src/domains/safety/finish-contract-registration.js";
 import { rigorResolution } from "../../src/domains/safety/rigor.js";
 import type { ToolResult } from "../../src/tools/registry.js";
@@ -119,6 +122,14 @@ it("discovers required checks and requires every applicable check", async () =>
 			assessment.quality?.map((finding) => finding.state),
 			["passed", "passed"],
 		);
+		strictEqual(assessment.verificationScope?.behaviorCoverage, "unknown");
+		deepStrictEqual(assessment.verificationScope?.passedChecks, ["test:solver", "lint"]);
+		ok(assessment.kind === "ok");
+		strictEqual(assessment.advisory, FINISH_CONTRACT_COVERAGE_ADVISORY_MESSAGE);
+		const hook = createFinishContractRegistration({ readSessionEntries: () => entries, resolveRigor: () => "high" });
+		deepStrictEqual(await hook.evaluate({ hook: "turn_end", text: "Fixed solver." }), [
+			{ kind: "inject_reminder", message: FINISH_CONTRACT_COVERAGE_ADVISORY_MESSAGE, severity: "warn" },
+		]);
 	}));
 
 it("invalidates passing checks after out-of-band source changes, additions and deletions", async () =>

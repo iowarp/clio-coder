@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { writeDiagnostic } from "../../core/diagnostics.js";
 import { clioStateDir, stateRootRemoved } from "../../core/xdg.js";
 import type { QualityFinding } from "../../tools/verify/quality-policy.js";
+import type { FinishContractVerificationScope } from "./finish-contract.js";
 import type { SafetyPolicyDecision } from "./policy-engine.js";
 
 /**
@@ -168,6 +169,7 @@ export interface CompletionContractAuditRecord {
 	mutatedPaths: ReadonlyArray<string>;
 	evidenceKinds: ReadonlyArray<string>;
 	quality?: ReadonlyArray<QualityFinding>;
+	verificationScope?: FinishContractVerificationScope;
 }
 
 export interface CompletionContractAuditInput {
@@ -180,6 +182,7 @@ export interface CompletionContractAuditInput {
 	mutatedPaths: ReadonlyArray<string>;
 	evidenceKinds: ReadonlyArray<string>;
 	quality?: ReadonlyArray<QualityFinding>;
+	verificationScope?: FinishContractVerificationScope;
 	now?: Date;
 }
 
@@ -416,6 +419,8 @@ export function buildCompletionContractAuditRecord(input: CompletionContractAudi
 	if (input.sessionId !== undefined) record.sessionId = input.sessionId;
 	if (input.quality !== undefined)
 		record.quality = input.quality.map((finding) => ({ ...finding, message: redactString(finding.message) }));
+	if (input.verificationScope !== undefined)
+		record.verificationScope = redactArgs(input.verificationScope) as FinishContractVerificationScope;
 	return record;
 }
 

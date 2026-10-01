@@ -17,7 +17,11 @@ import {
 	type MiddlewareToolChoiceControl,
 } from "../domains/middleware/index.js";
 import { withPluginDiscoveryPass } from "../domains/plugins/index.js";
-import { FINISH_CONTRACT_ADVISORY_MESSAGE } from "../domains/safety/finish-contract.js";
+import {
+	FINISH_CONTRACT_ADVISORY_MESSAGE,
+	FINISH_CONTRACT_COVERAGE_ADVISORY_MESSAGE,
+	FINISH_CONTRACT_EVIDENCE_SCOPE_ADVISORY_MESSAGE,
+} from "../domains/safety/finish-contract.js";
 import type { SessionContract } from "../domains/session/contract.js";
 import type { CompactionTrigger, EvictionTrigger, RecallTrigger } from "../domains/session/entries.js";
 import type { AgentMessage } from "../engine/types.js";
@@ -202,6 +206,22 @@ export function createTurnMiddleware(deps: TurnMiddlewareDeps): TurnMiddleware {
 			// warning to the operator without posing it as a new user instruction
 			// or carrying stale advice into the next model turn.
 			deps.emitFooterNotice("warning", "change not verified; inspect the turn receipt", "finish.unverified");
+			return;
+		}
+		if (
+			severity === "warn" &&
+			(message === FINISH_CONTRACT_COVERAGE_ADVISORY_MESSAGE ||
+				message === FINISH_CONTRACT_EVIDENCE_SCOPE_ADVISORY_MESSAGE)
+		) {
+			// CLB-3: unknown coverage is operator status, never a recovery request
+			// or permission to execute another check.
+			deps.emitFooterNotice(
+				"warning",
+				message === FINISH_CONTRACT_COVERAGE_ADVISORY_MESSAGE
+					? "checks passed; behavior coverage unverified"
+					: "validation evidence recorded; behavior coverage unverified",
+				"finish.coverage-unverified",
+			);
 			return;
 		}
 		bufferReminder(message, severity);

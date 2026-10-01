@@ -4,7 +4,9 @@
  * The chat-loop fires `turn_end` with the final assistant text and this
  * registration emits an advisory `inject_reminder` (severity "warn") when the
  * turn mutated workspace state but recorded no validation evidence and no
- * `limitation` receipt. The trigger is the observed mutation, not the wording
+ * `limitation` receipt, or when validation's behavior coverage is unknown.
+ * Unknown coverage only advises; it never requests continuation, even at high rigor.
+ * The trigger is the observed mutation, not the wording
  * of the assistant's text, and the text never enters the assessment. The chat-loop's generic effect application renders the
  * notice, persists the session entry, and flushes the reminder into the next
  * model request. Every decision is also written to the audit ledger.
@@ -135,7 +137,7 @@ export function createFinishContractRegistration(
 		);
 	return {
 		id: FINISH_CONTRACT_REGISTRATION_ID,
-		description: "advise when a turn mutated files without validation evidence or a limitation receipt",
+		description: "report completion evidence and advise when a mutation's validation or behavior coverage is unverified",
 		hooks: ["turn_start", "before_tool", "turn_end"],
 		evaluate(input: MiddlewareHookInput, context): ReadonlyArray<MiddlewareEffect> {
 			if (input.hook === "turn_start") {
@@ -168,10 +170,9 @@ export function createFinishContractRegistration(
 			}
 			if (entries === null) return [];
 			const rigor = options.resolveRigor?.() ?? "normal";
-			const activeAcceptance =
-				rigor === "high"
-					? options.readActiveAcceptance?.(recentEntries(entries, input.turnId ?? null, DEFAULT_RECENT_ENTRY_LIMIT))
-					: undefined;
+			const activeAcceptance = options.readActiveAcceptance?.(
+				recentEntries(entries, input.turnId ?? null, DEFAULT_RECENT_ENTRY_LIMIT),
+			);
 			const assessment = assessFinishContract({
 				sessionEntries: entries,
 				workspaceRoot: process.cwd(),
@@ -181,7 +182,8 @@ export function createFinishContractRegistration(
 				assistantTurnId: input.turnId ?? null,
 			});
 			recordDecision(options, input.turnId ?? null, assessment, rigor);
-			if (assessment.kind !== "engage") return [];
+			if (assessment.kind === "ok")
+				return assessment.advisory ? [{ kind: "inject_reminder", message: assessment.advisory, severity: "warn" }] : [];
 			if (rigor === "high") {
 				const constraints = options.getTurnConstraints?.();
 				const names = input.metadata?.activeCapabilityNames ?? input.metadata?.activeToolNames;
@@ -247,6 +249,7 @@ function recordDecision(
 			mutatedPaths: assessment.mutatedPaths,
 			evidenceKinds,
 			...(assessment.quality ? { quality: assessment.quality } : {}),
+			...(assessment.verificationScope ? { verificationScope: assessment.verificationScope } : {}),
 		});
 	} catch {
 		// Audit must never break the hot path; a failed ledger write is silent.
