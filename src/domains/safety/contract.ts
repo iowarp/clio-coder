@@ -1,6 +1,7 @@
 import type { Classification, ClassifierCall } from "./action-classifier.js";
 import type { CompletionContractAuditInput, ToolCallAuditInput } from "./audit.js";
 import type { DamageControlMatch } from "./damage-control.js";
+import type { FlowRestrictionSet, InformationFlowPolicy } from "./information-flow.js";
 import type { LoopVerdict } from "./loop-detector.js";
 import type { SafetyPolicyDecision, SafetyPolicyMetadata } from "./policy-engine.js";
 import type { RejectionMessage } from "./rejection-feedback.js";
@@ -70,6 +71,16 @@ export interface SafetyContract {
 		allowsObservationPath?(path: string): boolean;
 		/** Block reason when a typed write would land outside the run's write roots, or null (F3). */
 		writeTargetViolation?(target: string): string | null;
+		/** Trust-gated information-flow rules, for evaluating a transfer against carried restrictions. */
+		informationFlow?(): InformationFlowPolicy;
+		/**
+		 * Restrictions a tool call's result will carry, judged before it runs.
+		 * Null for an unrestricted source. Any path a host opens directly for
+		 * model context (a consult file, a prompt attachment) must ask the same
+		 * question through `flowRestrictionsForPaths` before the bytes leave.
+		 */
+		flowRestrictionsFor?(call: ClassifierCall): FlowRestrictionSet | null;
+		flowRestrictionsForPaths?(paths: ReadonlyArray<string>, cwd?: string): FlowRestrictionSet | null;
 	};
 
 	/**

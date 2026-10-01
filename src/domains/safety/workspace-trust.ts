@@ -12,6 +12,7 @@ export {
 } from "../../core/workspace-trust.js";
 
 import { projectSurfaceTrust, safetySurfaceTrustHash } from "../../core/workspace-trust.js";
+import { EMPTY_INFORMATION_FLOW_INPUT } from "./information-flow.js";
 import type { LoadedProjectSafetyPolicy } from "./project-policy.js";
 
 /** Keep discovered provenance visible while withholding unapproved project authority. */
@@ -35,6 +36,7 @@ export function gateProjectSafetyPolicy(
 		commands: [],
 		pathPolicy: {},
 		disableDefaultPathPolicy: false,
+		informationFlow: EMPTY_INFORMATION_FLOW_INPUT,
 		errors: [
 			...policy.errors,
 			`${policy.path} is ${trustVerdict}; project safety ignored. Review with clio-coder config trust safety.`,

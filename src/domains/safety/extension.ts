@@ -24,6 +24,7 @@ import {
 	type SessionResumeVia,
 } from "./audit.js";
 import type { SafetyContract, SafetyDecision } from "./contract.js";
+import { mergeFlowRestrictions } from "./information-flow.js";
 import { createLoopState, type LoopDetectorState, observe as observeLoop } from "./loop-detector.js";
 import { createSafetyPolicyEngine, type SafetyPolicyEngine } from "./policy-engine.js";
 import { CONFIRMED_SCOPE, isSubset, READONLY_SCOPE, WORKSPACE_SCOPE } from "./scope.js";
@@ -389,6 +390,14 @@ export function createSafetyBundle(context: DomainContext): DomainBundle<SafetyC
 			metadata: (posture) => activePolicyEngine().metadata(posture),
 			allowsObservationPath: (path) =>
 				activePolicyEngine().evaluate({ tool: "read", args: { path } }).reasonCode !== "path-policy:zeroAccessPaths",
+			informationFlow: () => activePolicyEngine().informationFlow(),
+			flowRestrictionsFor: (call) => activePolicyEngine().flowRestrictionsFor(call),
+			flowRestrictionsForPaths: (paths, cwd) =>
+				mergeFlowRestrictions(
+					...paths.map((path) =>
+						activePolicyEngine().flowRestrictionsFor({ tool: "read", args: { path, ...(cwd ? { cwd } : {}) } }),
+					),
+				),
 		},
 		audit: {
 			recordCount: () => recordCount,

@@ -32,6 +32,12 @@ import {
 } from "./default-path-policy.js";
 import { normalizedGitCommands } from "./git-command-normalization.js";
 import { classifyBashGit, splitGitChdir } from "./git-policy.js";
+import {
+	compileInformationFlowPolicy,
+	type FlowRestrictionSet,
+	flowRestrictionsForCall,
+	type InformationFlowPolicy,
+} from "./information-flow.js";
 import { inertQuotedMatch } from "./literal-exemption.js";
 import {
 	type CompiledPathPolicy,
@@ -145,6 +151,13 @@ export interface SafetyPolicyEngine {
 	 */
 	writeTargetViolation(target: string): string | null;
 	metadata(posture?: string): SafetyPolicyMetadata;
+	/** Compiled, trust-gated information-flow rules of the project policy. */
+	informationFlow(): InformationFlowPolicy;
+	/**
+	 * Restrictions the result of this call will carry, judged by the path or
+	 * tool name before the call runs. Null for an unrestricted source.
+	 */
+	flowRestrictionsFor(call: ClassifierCall): FlowRestrictionSet | null;
 }
 
 export interface SafetyPolicyEngineOptions {
@@ -361,6 +374,12 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 		readOnlyPaths: [...clioSkillsRootPaths(), path.join(clioConfigDir(), "settings.yaml"), workspaceTrustDirectory()],
 	});
 	const pathPolicy = compilePathPolicy(expandedDefaults, projectPolicyRoot);
+	const informationFlow = compileInformationFlowPolicy(
+		projectPolicy.informationFlow,
+		projectPolicyRoot,
+		projectPolicy.hash,
+		projectPolicy.trustVerdict === "trusted" && projectPolicy.valid,
+	);
 	// Bash-read scanning tests argument tokens against zero-access entries only:
 	// read-only paths stay readable from bash by design, secrets do not.
 	const zeroAccessPolicy: CompiledPathPolicy = {
@@ -758,6 +777,11 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 		},
 		readablePath(target) {
 			return evaluatePathPolicy(zeroAccessPolicy, "read", target, cwd).kind === "allow";
+		},
+		informationFlow: () => informationFlow,
+		flowRestrictionsFor(rawCall) {
+			const call = normalizeCallPaths(rawCall);
+			return flowRestrictionsForCall(informationFlow, { tool: call.tool, args: call.args, cwd: cwdArg(call.args, cwd) });
 		},
 		metadata() {
 			return {

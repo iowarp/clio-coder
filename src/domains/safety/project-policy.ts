@@ -3,6 +3,14 @@ import { existsSync, readFileSync, realpathSync } from "node:fs";
 import path from "node:path";
 import { parse as parseYaml } from "yaml";
 import type { ActionClass } from "./action-classifier.js";
+import {
+	EMPTY_INFORMATION_FLOW_INPUT,
+	type FlowSourceRuleInput,
+	type FlowTargetBinding,
+	flowEndpointIdentity,
+	type InformationFlowPolicyInput,
+	isFlowRecipientRef,
+} from "./information-flow.js";
 import type { PathPolicyInput } from "./path-policy.js";
 
 export type ShellOperatorPolicy = "deny" | "allow";
@@ -37,6 +45,8 @@ export interface LoadedProjectSafetyPolicy {
 	commands: ReadonlyArray<ProjectCommandPolicy>;
 	pathPolicy: PathPolicyInput;
 	disableDefaultPathPolicy: boolean;
+	/** Source rules and recipient groups; empty without the `informationFlow` section. */
+	informationFlow: InformationFlowPolicyInput;
 }
 
 const POLICY_RELATIVE_PATH = path.join(".clio-coder", "safety.yaml");
@@ -51,7 +61,17 @@ const ACTION_CLASSES = new Set<ActionClass>([
 	"unknown",
 ]);
 const PATH_POLICY_KEYS = ["zeroAccessPaths", "readOnlyPaths", "noWritePaths", "noDeletePaths"] as const;
-const ROOT_KEYS = new Set(["version", "commands", "tasks", "disableDefaultPathPolicy", ...PATH_POLICY_KEYS]);
+const ROOT_KEYS = new Set([
+	"version",
+	"commands",
+	"tasks",
+	"disableDefaultPathPolicy",
+	"informationFlow",
+	...PATH_POLICY_KEYS,
+]);
+const INFORMATION_FLOW_KEYS = new Set(["recipients", "targets", "sources"]);
+const FLOW_TARGET_KEYS = new Set(["runtime", "endpoint"]);
+const FLOW_SOURCE_KEYS = new Set(["id", "paths", "tools", "recipients"]);
 const COMMAND_KEYS = new Set([
 	"id",
 	"command",
@@ -91,6 +111,7 @@ export function loadProjectSafetyPolicy(cwd: string = process.cwd()): LoadedProj
 			commands: [],
 			pathPolicy: {},
 			disableDefaultPathPolicy: false,
+			informationFlow: EMPTY_INFORMATION_FLOW_INPUT,
 		};
 	}
 	let raw: string;
@@ -109,6 +130,7 @@ export function loadProjectSafetyPolicy(cwd: string = process.cwd()): LoadedProj
 			commands: [],
 			pathPolicy: {},
 			disableDefaultPathPolicy: false,
+			informationFlow: EMPTY_INFORMATION_FLOW_INPUT,
 		};
 	}
 	const hash = sha256(raw);
@@ -124,6 +146,7 @@ export function loadProjectSafetyPolicy(cwd: string = process.cwd()): LoadedProj
 			commands: [],
 			pathPolicy: {},
 			disableDefaultPathPolicy: false,
+			informationFlow: EMPTY_INFORMATION_FLOW_INPUT,
 		};
 	}
 }
@@ -140,6 +163,7 @@ function validateProjectSafetyPolicy(value: unknown, policyPath: string, hash: s
 			commands: [],
 			pathPolicy: {},
 			disableDefaultPathPolicy: false,
+			informationFlow: EMPTY_INFORMATION_FLOW_INPUT,
 		};
 	}
 	for (const key of Object.keys(value)) {
@@ -153,6 +177,7 @@ function validateProjectSafetyPolicy(value: unknown, policyPath: string, hash: s
 		value.disableDefaultPathPolicy === undefined
 			? false
 			: booleanField(value, "disableDefaultPathPolicy", "policy", errors);
+	const informationFlow = parseInformationFlow(value.informationFlow, errors);
 
 	const ids = new Set<string>();
 	for (const command of commands) {
@@ -168,7 +193,183 @@ function validateProjectSafetyPolicy(value: unknown, policyPath: string, hash: s
 		commands: errors.length === 0 ? commands : [],
 		pathPolicy: errors.length === 0 ? pathPolicy : {},
 		disableDefaultPathPolicy: errors.length === 0 ? disableDefaultPathPolicy : false,
+		informationFlow: errors.length === 0 ? informationFlow : EMPTY_INFORMATION_FLOW_INPUT,
 	};
+}
+
+/**
+ * `informationFlow.targets` pins each approvable inference target to one
+ * runtime and one endpoint; `informationFlow.recipients` names groups of
+ * exact destinations; `informationFlow.sources` lists the restricted sources
+ * and who may receive their content. Paths follow the path-policy rules
+ * (relative to the policy root, no escape, `*` patterns).
+ */
+function parseInformationFlow(value: unknown, errors: string[]): InformationFlowPolicyInput {
+	if (value === undefined) return EMPTY_INFORMATION_FLOW_INPUT;
+	if (!isPlainRecord(value)) {
+		errors.push("informationFlow must be a mapping");
+		return EMPTY_INFORMATION_FLOW_INPUT;
+	}
+	for (const key of Object.keys(value)) {
+		if (!INFORMATION_FLOW_KEYS.has(key)) errors.push(`informationFlow: unknown key '${key}'`);
+	}
+	const groups: Record<string, string[]> = {};
+	if (value.recipients !== undefined) {
+		if (!isPlainRecord(value.recipients)) {
+			errors.push("informationFlow.recipients must be a mapping of group name to recipient list");
+		} else {
+			for (const [name, members] of Object.entries(value.recipients)) {
+				if (!ID_RE.test(name)) {
+					errors.push(`informationFlow.recipients group '${name}' must match ${ID_RE}`);
+					continue;
+				}
+				const parsed = parseRecipientList(members, `informationFlow.recipients.${name}`, errors);
+				if (parsed !== undefined) groups[name] = parsed;
+			}
+		}
+	}
+	const targets: Record<string, FlowTargetBinding> = {};
+	if (value.targets !== undefined) {
+		if (!isPlainRecord(value.targets)) {
+			errors.push("informationFlow.targets must be a mapping of target id to { runtime, endpoint }");
+		} else {
+			for (const [id, raw] of Object.entries(value.targets)) {
+				const label = `informationFlow.targets.${id}`;
+				if (!ID_RE.test(id)) {
+					errors.push(`${label}: target id must match ${ID_RE}`);
+					continue;
+				}
+				if (!isPlainRecord(raw)) {
+					errors.push(`${label} must be a mapping`);
+					continue;
+				}
+				for (const key of Object.keys(raw)) {
+					if (!FLOW_TARGET_KEYS.has(key)) errors.push(`${label}: unknown key '${key}'`);
+				}
+				const runtime = stringField(raw, "runtime", label, errors);
+				const endpoint = stringField(raw, "endpoint", label, errors);
+				if (endpoint !== undefined && endpoint !== "none" && flowEndpointIdentity(endpoint) === null) {
+					errors.push(`${label}.endpoint must be an absolute http(s) URL or 'none'`);
+					continue;
+				}
+				if (runtime !== undefined && endpoint !== undefined) targets[id] = { runtime, endpoint };
+			}
+		}
+	}
+	const sources: FlowSourceRuleInput[] = [];
+	if (value.sources !== undefined) {
+		if (!Array.isArray(value.sources)) {
+			errors.push("informationFlow.sources must be an array");
+		} else {
+			const ids = new Set<string>();
+			for (let index = 0; index < value.sources.length; index += 1) {
+				const rule = parseFlowSource(value.sources[index], `informationFlow.sources[${index}]`, errors);
+				if (rule === undefined) continue;
+				if (ids.has(rule.id)) errors.push(`duplicate informationFlow source id '${rule.id}'`);
+				ids.add(rule.id);
+				sources.push(rule);
+			}
+		}
+	}
+	const checkRefs = (refs: ReadonlyArray<string>, owner: string): void => {
+		for (const ref of refs) {
+			if (ref.startsWith("group:") && groups[ref.slice("group:".length)] === undefined) {
+				errors.push(`${owner} names unknown recipient group '${ref}'`);
+			}
+			if (ref.startsWith("target:") && targets[ref.slice("target:".length)] === undefined) {
+				errors.push(`${owner} names '${ref}' without an informationFlow.targets binding`);
+			}
+		}
+	};
+	for (const [name, members] of Object.entries(groups)) checkRefs(members, `informationFlow.recipients.${name}`);
+	for (const rule of sources) checkRefs(rule.recipients, `informationFlow source '${rule.id}'`);
+	return { groups, targets, sources };
+}
+
+function parseRecipientList(value: unknown, label: string, errors: string[]): string[] | undefined {
+	if (!Array.isArray(value)) {
+		errors.push(`${label} must be an array of recipient references`);
+		return undefined;
+	}
+	const out: string[] = [];
+	for (let index = 0; index < value.length; index += 1) {
+		const item = value[index];
+		if (typeof item !== "string" || !isFlowRecipientRef(item.trim())) {
+			errors.push(
+				`${label}[${index}] must be one of target:<id>, endpoint:<url>, origin:<scheme://host[:port]>, tool:<name>, group:<name>`,
+			);
+			continue;
+		}
+		out.push(item.trim());
+	}
+	return out;
+}
+
+function parseFlowSource(value: unknown, label: string, errors: string[]): FlowSourceRuleInput | undefined {
+	if (!isPlainRecord(value)) {
+		errors.push(`${label} must be a mapping`);
+		return undefined;
+	}
+	const before = errors.length;
+	for (const key of Object.keys(value)) {
+		if (!FLOW_SOURCE_KEYS.has(key)) errors.push(`${label}: unknown key '${key}'`);
+	}
+	const id = stringField(value, "id", label, errors);
+	if (id !== undefined && !ID_RE.test(id)) errors.push(`${label}.id must match ${ID_RE}`);
+	const paths = value.paths === undefined ? [] : parseRelativePathList(value.paths, `${label}.paths`, errors);
+	const tools = value.tools === undefined ? [] : parseToolRefList(value.tools, `${label}.tools`, errors);
+	if (value.recipients === undefined) errors.push(`${label}.recipients is required; use [] to forbid every transfer`);
+	const recipients = value.recipients === undefined ? [] : parseRecipientList(value.recipients, `${label}.recipients`, errors);
+	if (paths.length === 0 && tools.length === 0) errors.push(`${label} must name at least one path or tool`);
+	if (errors.length > before || id === undefined || recipients === undefined) return undefined;
+	return { id, paths, tools, recipients };
+}
+
+function parseRelativePathList(value: unknown, label: string, errors: string[]): string[] {
+	if (!Array.isArray(value)) {
+		errors.push(`${label} must be an array`);
+		return [];
+	}
+	const out: string[] = [];
+	for (let index = 0; index < value.length; index += 1) {
+		const item = value[index];
+		const entry = `${label}[${index}]`;
+		if (typeof item !== "string" || item.trim().length === 0) {
+			errors.push(`${entry} must be a non-empty string`);
+			continue;
+		}
+		const trimmed = item.trim();
+		if (path.isAbsolute(trimmed)) {
+			errors.push(`${entry} must be relative to the policy root`);
+			continue;
+		}
+		const segments = path.normalize(trimmed).split(path.sep).filter((segment) => segment.length > 0);
+		if (segments.some((segment) => segment === "..")) {
+			errors.push(`${entry} must not escape the policy root with '..'`);
+			continue;
+		}
+		out.push(trimmed);
+	}
+	return out;
+}
+
+const TOOL_REF_RE = /^(?:[a-z][a-z0-9_]*|mcp:[a-z0-9][a-z0-9_-]*(?:\/[A-Za-z0-9][A-Za-z0-9_.-]*)?)$/;
+
+function parseToolRefList(value: unknown, label: string, errors: string[]): string[] {
+	if (!Array.isArray(value)) {
+		errors.push(`${label} must be an array`);
+		return [];
+	}
+	const out: string[] = [];
+	for (let index = 0; index < value.length; index += 1) {
+		const item = value[index];
+		if (typeof item !== "string" || !TOOL_REF_RE.test(item.trim())) {
+			errors.push(`${label}[${index}] must be a tool name, mcp:<server>, or mcp:<server>/<tool>`);
+			continue;
+		}
+		out.push(item.trim());
+	}
+	return out;
 }
 
 function parsePathPolicy(value: Record<string, unknown>, errors: string[]): PathPolicyInput {

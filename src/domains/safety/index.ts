@@ -30,6 +30,23 @@ export type {
 	FinishContractReason,
 } from "./finish-contract.js";
 export { assessFinishContract, FINISH_CONTRACT_ADVISORY_MESSAGE } from "./finish-contract.js";
+export {
+	EMPTY_INFORMATION_FLOW_POLICY,
+	evaluateInformationFlow,
+	type FlowDestination,
+	type FlowRestriction,
+	type FlowRestrictionSet,
+	type FlowVerdictKind,
+	flowEndpointIdentity,
+	flowRestrictionsForCall,
+	type InformationFlowInput,
+	type InformationFlowPolicy,
+	type InformationFlowVerdict,
+	isFlowRestrictionSet,
+	mergeFlowRestrictions,
+	resolveModelDestination,
+	resolveToolDestination,
+} from "./information-flow.js";
 export { SafetyManifest } from "./manifest.js";
 export {
 	type CompiledPathPolicy,
