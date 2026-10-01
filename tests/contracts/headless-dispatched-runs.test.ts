@@ -59,3 +59,16 @@ describe("headless dispatched runs", () => {
 		);
 	});
 });
+
+it("reports the no-work reason on the headless failure line", () => {
+	match(
+		describeRuns([
+			{
+				...run("idle", "failed"),
+				outcomeCode: "worker_no_work",
+				outcomeDetail: "worker executed no tools, so it did none of its assignment",
+			},
+		]),
+		/idle \(coder, worker_no_work\): worker executed no tools/u,
+	);
+});

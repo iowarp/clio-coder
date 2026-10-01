@@ -7724,7 +7724,9 @@ export function createDispatchBundle(
 					// restart recovery from reading it as a crash.
 					try {
 						// A canceled run that never produced work leaves nothing to keep.
-						if (!(finalOutcome === "canceled" && discardIdleTaskWorktree(req.taskWorktree))) {
+						if (
+							!((finalOutcome === "canceled" || outcomeCode === "worker_no_work") && discardIdleTaskWorktree(req.taskWorktree))
+						) {
 							settleTaskWorktree(req.taskWorktree);
 						}
 					} catch (settleError) {
