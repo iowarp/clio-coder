@@ -295,6 +295,24 @@ targets:
 		deepStrictEqual((await runPending(stateDir)).applied, []);
 	});
 
+	it("doctor distinguishes satisfied settings migrations from pending work without writing receipts", () => {
+		const manifest = join(stateDir, "migrations.json");
+		writeFileSync(manifest, '{"applied":[]}\n', "utf8");
+		writeFileSync(settingsFile, "version: 2\n", "utf8");
+		const current = runDoctor().find((finding) => finding.name === "lifecycle migrations");
+		strictEqual(current?.ok, true);
+		strictEqual(current?.level, undefined);
+		ok(current?.detail.includes("already satisfy 2 unrecorded"));
+		strictEqual(readFileSync(manifest, "utf8"), '{"applied":[]}\n');
+		strictEqual(readFileSync(settingsFile, "utf8"), "version: 2\n");
+		for (const settings of ["version: 1\n", "version: 2\npanes: { agents: off }\n", "version: [\n"]) {
+			writeFileSync(settingsFile, settings, "utf8");
+			const pending = runDoctor().find((finding) => finding.name === "lifecycle migrations");
+			strictEqual(pending?.level, "warn");
+			ok(pending?.detail.includes("pending"));
+		}
+	});
+
 	it("refuses a corrupt migration manifest instead of replaying user-data changes", async () => {
 		const manifest = join(stateDir, "migrations.json");
 		writeFileSync(manifest, '{"applied":["once","once"]}\n', "utf8");

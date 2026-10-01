@@ -430,6 +430,7 @@ export function runDoctor(options: DoctorOptions = {}): DoctorFinding[] {
 	// the remedy that fits the failure. Reading it here a second time and
 	// formatting it separately is what let this row call a parse error
 	// `unreadable:` while the loader called the same file invalid YAML.
+	let currentSettingsValid = false;
 	const settings = join(config, "settings.yaml");
 	if (!existsSync(settings)) {
 		findings.push({
@@ -440,6 +441,7 @@ export function runDoctor(options: DoctorOptions = {}): DoctorFinding[] {
 	} else {
 		const validation = validateSettingsFile();
 		if (validation.issues.length === 0) {
+			currentSettingsValid = true;
 			findings.push({ ok: true, name: "settings.yaml", detail: settings });
 		} else {
 			findings.push({ ok: false, name: "settings.yaml", detail: formatSettingsIssues(validation.issues) });
@@ -579,7 +581,11 @@ export function runDoctor(options: DoctorOptions = {}): DoctorFinding[] {
 	const migrationRead = readMigrationManifestResult(dirs.state);
 	const availableMigrations = listMigrations().map((migration) => migration.id);
 	const appliedMigrations = new Set(migrationRead.manifest.applied);
-	const pendingMigrations = availableMigrations.filter((id) => !appliedMigrations.has(id));
+	const satisfiedMigrations = new Set(
+		currentSettingsValid ? ["2026-09-01-settings-v2", "2026-09-01-retire-panes-knobs"] : [],
+	);
+	const unrecordedMigrations = availableMigrations.filter((id) => !appliedMigrations.has(id));
+	const pendingMigrations = unrecordedMigrations.filter((id) => !satisfiedMigrations.has(id));
 	findings.push({
 		ok: migrationRead.problem === null,
 		...(migrationRead.problem === null && pendingMigrations.length > 0 ? { level: "warn" as const } : {}),
@@ -587,7 +593,9 @@ export function runDoctor(options: DoctorOptions = {}): DoctorFinding[] {
 		detail:
 			migrationRead.problem ??
 			(pendingMigrations.length === 0
-				? `${availableMigrations.length} registered, all recorded`
+				? unrecordedMigrations.length > 0
+					? `${availableMigrations.length} registered; current settings already satisfy ${unrecordedMigrations.length} unrecorded migrations`
+					: `${availableMigrations.length} registered, all recorded`
 				: `${pendingMigrations.length} pending: ${pendingMigrations.join(", ")} (run \`clio-coder upgrade --post-install\`)`),
 	});
 
