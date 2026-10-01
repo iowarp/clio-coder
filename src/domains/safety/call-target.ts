@@ -29,6 +29,20 @@ function isBidiControl(code: number): boolean {
 	return HIDDEN_CONTROL.test(String.fromCodePoint(code));
 }
 
+const PICTOGRAPHIC = /\p{Extended_Pictographic}/u;
+const EMOJI_JOIN_SKIPPABLE = /[\u{fe0f}\u{1f3fb}-\u{1f3ff}]/u;
+
+/**
+ * A zero-width joiner between two pictographs builds one emoji (👩‍🔬), so it
+ * renders exactly what it shows and is kept. Anywhere else it stays escaped.
+ */
+function isEmojiJoiner(chars: ReadonlyArray<string>, index: number): boolean {
+	if (chars[index] !== "\u200d") return false;
+	let before = index - 1;
+	while (before >= 0 && EMOJI_JOIN_SKIPPABLE.test(chars[before] ?? "")) before -= 1;
+	return PICTOGRAPHIC.test(chars[before] ?? "") && PICTOGRAPHIC.test(chars[index + 1] ?? "");
+}
+
 function bidiEscape(code: number): string {
 	return `\\u{${code.toString(16)}}`;
 }
@@ -37,9 +51,10 @@ function sanitizeForDisplay(value: string, preserveLines = false): string {
 	const stripped = value.replace(OSC_PATTERN, "").replace(CSI_PATTERN, "");
 	const display = preserveLines ? stripped.replace(/\r\n|\n/g, " ⏎ ") : stripped;
 	let out = "";
-	for (const ch of display) {
+	const chars = Array.from(display);
+	for (const [index, ch] of chars.entries()) {
 		const code = ch.codePointAt(0) ?? 0;
-		if (isBidiControl(code)) out += bidiEscape(code);
+		if (isBidiControl(code) && !isEmojiJoiner(chars, index)) out += bidiEscape(code);
 		else out += code < 0x20 || code === 0x7f ? " " : ch;
 	}
 	return out;
@@ -80,7 +95,8 @@ export function sanitizeMultilineDisplayText(value: string): SanitizedDisplayTex
 	const stripped = escapesStripped.replace(/\r\n/g, "\n");
 	let tabsExpanded = false;
 	let out = "";
-	for (const ch of stripped) {
+	const chars = Array.from(stripped);
+	for (const [index, ch] of chars.entries()) {
 		if (ch === "\n") {
 			out += ch;
 			continue;
@@ -96,7 +112,7 @@ export function sanitizeMultilineDisplayText(value: string): SanitizedDisplayTex
 			neutralized = true;
 			continue;
 		}
-		if (isBidiControl(code)) {
+		if (isBidiControl(code) && !isEmojiJoiner(chars, index)) {
 			out += bidiEscape(code);
 			neutralized = true;
 			continue;
