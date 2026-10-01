@@ -1075,96 +1075,15 @@ nav a:hover {
 	color: var(--ink-muted);
 	font-size: var(--text-meta);
 }
-.conversation {
-	--chat-gutter: var(--space-8);
-	height: 100%;
-	min-height: 0;
-	display: grid;
-	grid-template-rows: auto auto minmax(0, 1fr) 0 auto;
-}
 .conversation__approval,
 .conversation__dock,
 .chat-transcript__content,
-.conversation > .jump-anchor {
+.conversation__main > .jump-anchor {
 	box-sizing: border-box;
 	width: 100%;
 	max-width: calc(var(--conversation-max) + 2 * var(--chat-gutter));
 	margin-inline: auto;
 	padding-inline: var(--chat-gutter);
-}
-.session-status {
-	display: flex;
-	align-items: center;
-	flex-wrap: wrap;
-	gap: var(--space-2);
-	font-size: var(--text-meta);
-	color: var(--ink-muted);
-	margin: 0;
-}
-.conversation__header {
-	min-width: 0;
-	padding-inline: var(--space-6);
-	border-bottom: 1px solid var(--line);
-}
-/* One line: where you are, what this conversation is, whether Clio Coder is working, and one
-   control for everything else. The model sits in the composer, where the next request leaves. */
-.conversation__bar {
-	position: relative;
-	display: flex;
-	align-items: center;
-	gap: var(--space-2) var(--space-3);
-	min-width: 0;
-	min-height: 48px;
-	padding-block: var(--space-2);
-}
-.conversation__project {
-	display: inline-flex;
-	align-items: baseline;
-	gap: var(--space-2);
-	flex: 0 1 auto;
-	max-width: 14rem;
-	min-width: 0;
-	padding: var(--space-1) var(--space-2);
-	margin-left: calc(-1 * var(--space-2));
-	border-radius: var(--radius-sm);
-	color: var(--ink-muted);
-	font-size: var(--text-meta);
-	text-decoration: none;
-	white-space: nowrap;
-}
-.conversation__project:hover {
-	background: var(--surface-sunken);
-	color: var(--ink);
-}
-.conversation__project-name {
-	overflow: hidden;
-	text-overflow: ellipsis;
-}
-.conversation__title {
-	flex: 1 1 12rem;
-	min-width: 0;
-	margin: 0;
-	font-family: var(--font-ui);
-	font-size: var(--text-reading);
-	font-weight: 650;
-	line-height: var(--leading-tight);
-	letter-spacing: -0.01em;
-	color: var(--ink-strong);
-	overflow: hidden;
-	text-overflow: ellipsis;
-	white-space: nowrap;
-}
-/* The live state reads as a sentence here, not an instrument label; the glyph still carries it without colour. */
-.conversation__bar .session-status {
-	flex: none;
-}
-.conversation__bar .session-status .status-mark {
-	font-family: var(--font-ui);
-	font-size: var(--text-meta);
-	font-weight: 600;
-	letter-spacing: 0;
-	text-transform: none;
-	white-space: nowrap;
 }
 .conversation__health {
 	display: grid;
@@ -1173,100 +1092,6 @@ nav a:hover {
 }
 .conversation__health .context-banner {
 	margin: 0;
-}
-.conversation__switch {
-	display: grid;
-	gap: var(--space-2);
-	padding: var(--space-3) 0;
-	border-top: 1px solid var(--line);
-	color: var(--ink-muted);
-	font-size: var(--text-meta);
-}
-.conversation__switch select {
-	width: 100%;
-	min-height: 36px;
-	padding: var(--space-1) var(--space-2);
-	font-size: var(--text-meta);
-}
-.conversation__tools {
-	position: static;
-	flex: none;
-}
-/* A labelled control in the header's own voice; its words identify it, so it needs no frame until
-   it is pointed at or open. */
-.conversation__tools > summary {
-	display: inline-flex;
-	align-items: center;
-	gap: var(--space-2);
-	min-height: 36px;
-	padding: var(--space-1) var(--space-3);
-	border: 1px solid transparent;
-	border-radius: var(--radius-sm);
-	background: transparent;
-	font-size: var(--text-meta);
-	color: var(--ink);
-	cursor: pointer;
-	list-style: none;
-	white-space: nowrap;
-}
-.conversation__tools > summary::-webkit-details-marker {
-	display: none;
-}
-.conversation__tools > summary .icon {
-	width: 16px;
-	height: 16px;
-	color: var(--ink-muted);
-}
-.conversation__tools > summary:hover,
-.conversation__tools[open] > summary {
-	background: var(--surface-sunken);
-	border-color: var(--line-strong);
-}
-.conversation__tools-body {
-	position: absolute;
-	z-index: 6;
-	right: 0;
-	top: calc(100% + var(--space-2));
-	width: min(40rem, 100%);
-	max-height: min(75dvh, 44rem);
-	overflow: auto;
-	padding: var(--space-2) var(--space-5) var(--space-4);
-	border: 1px solid var(--line-strong);
-	border-radius: var(--radius-lg);
-	background: var(--overlay);
-	box-shadow: var(--shadow-panel);
-}
-.conversation__tools-body :is(.session-controls, .command-panel, .fleet-strip) {
-	background: transparent;
-	border: 0;
-	border-top: 1px solid var(--line);
-	border-radius: 0;
-	margin: 0;
-	padding: var(--space-3) 0;
-}
-.conversation__place {
-	display: grid;
-	gap: var(--space-1);
-	padding: var(--space-3) 0;
-}
-.conversation__place .eyebrow {
-	margin: 0;
-}
-.conversation__place code {
-	font-family: var(--font-mono);
-	font-size: var(--text-exact);
-	color: var(--ink);
-	overflow-wrap: anywhere;
-}
-.conversation__settings-link {
-	justify-self: start;
-	margin-top: var(--space-1);
-	color: var(--accent-strong);
-	font-size: var(--text-meta);
-	text-decoration: none;
-}
-.conversation__settings-link:hover {
-	text-decoration: underline;
 }
 .conversation__close {
 	display: flex;
@@ -1325,56 +1150,9 @@ nav a:hover {
 	max-height: min(38dvh, 22rem);
 	overflow-y: auto;
 }
-@media (max-width: 1050px) {
-	.conversation {
-		--chat-gutter: var(--space-6);
-	}
-}
 @media (max-width: 650px) {
-	.conversation {
-		--chat-gutter: var(--space-4);
-	}
-	.conversation__header {
-		padding-inline: var(--space-4);
-	}
 	.conversation__dock {
 		padding-bottom: var(--space-3);
-	}
-	.conversation__bar {
-		flex-wrap: wrap;
-		row-gap: var(--space-1);
-	}
-	/* The project link takes whatever the status and the tools leave, so the three share one line
-	   and the name shortens instead of pushing the tools onto a line of their own. */
-	.conversation__project {
-		flex: 1 1 0;
-		max-width: none;
-	}
-	.conversation__title {
-		order: 5;
-		flex-basis: 100%;
-		font-size: var(--text-body);
-	}
-	.conversation__bar .session-status {
-		margin-left: auto;
-	}
-	.conversation__tools-label {
-		position: absolute;
-		width: 1px;
-		height: 1px;
-		margin: -1px;
-		overflow: hidden;
-		clip-path: inset(50%);
-		white-space: nowrap;
-	}
-	.conversation__tools > summary {
-		padding-inline: var(--space-2);
-	}
-	/* Keep the menu inside the conversation gutters even when header controls wrap. */
-	.conversation__tools-body {
-		width: 100%;
-		max-height: min(70dvh, 44rem);
-		padding-inline: var(--space-4);
 	}
 }
 

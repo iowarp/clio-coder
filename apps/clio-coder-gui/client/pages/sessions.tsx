@@ -4,7 +4,7 @@ import { Link, useNavigate, useOutletContext, useParams } from "react-router";
 import { routes } from "../../contracts/routes.js";
 import type { SessionSnapshot } from "../../contracts/sessions.js";
 import { type Client, emptyInput } from "../api/client.js";
-import { clock, formatTime } from "../api/clock.js";
+import { clock, formatDuration, formatTime } from "../api/clock.js";
 import type { ConnectionState } from "../api/events.js";
 import { sessionBuffer } from "../api/sessions.js";
 import { ApprovalBanner, pendingPermission } from "../chat/Approval.js";
@@ -25,20 +25,23 @@ import { type HealthRow, type HealthSummary, summarizeHealth } from "../chat/hea
 import { InspectorDock } from "../chat/InspectorDock.js";
 import { Interview } from "../chat/Interview.js";
 import { routeFacts } from "../chat/route.js";
-import { SessionDashboard } from "../chat/SessionDashboard.js";
 import { isSessionPanelView, type SessionPanelView } from "../chat/session-panel-model.js";
 import { type ChatTurn, groupTurns, turnStatuses } from "../chat/turns.js";
 import { Icon } from "../design/icons.js";
 import { Boundary, PanelEmpty, PanelHeading } from "../design/panel.js";
 import { emptyState, PANELS } from "../design/panel-model.js";
 import { StatusMark, type StatusTone } from "../design/status.js";
-import { useWorkspaceChrome } from "../design/workspace-chrome.js";
 import { useShortcut } from "../interaction/use-shortcut.js";
 import { JumpToLatest } from "../render/FollowLatest.js";
 import { useFollowLatest } from "../render/follow-latest.js";
+import { ClioPulse } from "../shell/ClioMark.js";
+import { Menu, MenuItem } from "../shell/Menu.js";
+import { taskTitle } from "../shell/shell-model.js";
+import { TopBar } from "../shell/TopBar.js";
 import { ProjectOpenForm, useProjectLaunch } from "./project-open.js";
 import { DeleteSession } from "./session-controls.js";
 import "../chat/chat-turn.css";
+import "../chat/conversation.css";
 import "./projects.css";
 export function Workspaces({ client }: { client: Client }) {
 	const recentId = useId();
@@ -179,7 +182,7 @@ export function Sessions({ client }: { client: Client }) {
 							<li className="record-row" key={session.id}>
 								<div className="record-row__text">
 									<Link className="record-row__title" to={`/sessions/${session.id}`}>
-										{conversationTitle(session)}
+										{taskTitle(session)}
 									</Link>
 								</div>
 								<span className="record-row__status">
@@ -313,15 +316,6 @@ function EmptyTranscript({ sessionId }: { sessionId: string }) {
 	);
 }
 
-/** What the header calls the conversation: its reported label, else the first request, else nothing yet. */
-function conversationTitle(snapshot: SessionSnapshot): string {
-	if (snapshot.label) return snapshot.label;
-	const prompt =
-		snapshot.turns.find((turn) => turn.prompt.trim() !== "")?.prompt ??
-		snapshot.timeline.find((item) => item.kind === "user" && item.text.trim() !== "")?.text;
-	return prompt?.replace(/\s+/g, " ").trim() ?? "New conversation";
-}
-
 /**
  * Session health that needs a reader. A healthy target is one glyph in the route chip; anything else,
  * and every fact kind this build does not recognise, is written out here in full.
@@ -356,7 +350,6 @@ function SessionHealth({ summary }: { summary: HealthSummary }) {
 }
 
 function SessionView({ client, id }: { client: Client; id: string }) {
-	const chrome = useWorkspaceChrome();
 	const navigate = useNavigate();
 	const inspectorButton = useId();
 	const panelButton = useId();
@@ -511,63 +504,61 @@ function SessionView({ client, id }: { client: Client; id: string }) {
 	const turn = snapshot.turns.at(-1);
 	const pending = pendingPermission(snapshot) ?? null;
 	const workspaceRoot = workspace.data?.path;
-	const title = conversationTitle(snapshot);
-	const activity = pending
-		? { tone: "warn" as const, label: "Waiting for your approval" }
+	const title = taskTitle(snapshot);
+	const workspaceName = workspace.data?.name ?? "Project";
+	const elapsed =
+		running && turn?.startedAt && now > 0 ? formatDuration(Math.max(0, now - Date.parse(turn.startedAt))) : null;
+	const canClose = snapshot.state === "open" && !running;
+	const paneOpen = inspectorOpen;
+	const chip: { tone: "working" | "approval" | "failed" | "quiet"; label: string } | null = pending
+		? { tone: "approval", label: "Needs your approval" }
 		: running
 			? {
-					tone: "running" as const,
-					label: liveWorkers > 0 ? `Clio Coder is waiting on ${workerCount(liveWorkers)}` : "Clio Coder is working",
+					tone: "working",
+					label: [liveWorkers > 0 ? `Waiting on ${workerCount(liveWorkers)}` : "Working", elapsed ?? null]
+						.filter(Boolean)
+						.join(" · "),
 				}
-			: snapshot.state === "open"
-				? { tone: "success" as const, label: "Ready for your message" }
-				: snapshot.state === "starting"
-					? { tone: "running" as const, label: "Starting session" }
-					: snapshot.state === "closed"
-						? { tone: "neutral" as const, label: "Session closed" }
-						: { tone: "fail" as const, label: "Session unavailable" };
+			: snapshot.state === "starting"
+				? { tone: "working", label: "Starting" }
+				: snapshot.state === "closed"
+					? { tone: "quiet", label: "Closed" }
+					: snapshot.state === "unknown" || snapshot.state === "failed"
+						? { tone: "failed", label: "Unavailable" }
+						: turn?.status === "failed"
+							? { tone: "failed", label: "Last turn failed" }
+							: null;
 	return (
-		<section className="conversation" data-inspector={inspectorOpen ? "open" : "closed"}>
-			<header className="conversation__header">
-				<div className="conversation__bar">
+		<section
+			className="conversation"
+			data-inspector={paneOpen ? "open" : "closed"}
+			data-pane={paneOpen ? "open" : "closed"}
+		>
+			<div className="conversation__main">
+				<TopBar title={title} titleLabel={title}>
 					<Link
-						className="conversation__project"
+						className="wb-chip"
 						to={`/workspaces/${snapshot.workspaceId}/sessions`}
-						onClick={(event) => {
-							if (chrome && !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey) {
-								event.preventDefault();
-								chrome.openArea("sessions");
-							}
-						}}
-						title={workspaceRoot ? `Conversations in ${workspaceRoot}` : "Conversations in this project"}
+						title={workspaceRoot ? `All tasks in ${workspaceRoot}` : "All tasks in this project"}
 					>
-						<span aria-hidden="true">←</span>
-						<span className="conversation__project-name">{workspace.data?.name ?? "Project"}</span>
-						<span className="sr-only">: all conversations</span>
+						<Icon name="folder" />
+						<span>{workspaceName}</span>
 					</Link>
-					<h1 className="conversation__title" title={title}>
-						{title}
-					</h1>
-					<p className="session-status" role="status">
-						<StatusMark tone={activity.tone} label={activity.label} />
-						{snapshot.recoveredOrphan ? <span>Recovered after server interruption</span> : null}
-					</p>
-					<div className="conversation__workspace-controls">
-						<button
-							type="button"
-							aria-label="Configure harness"
-							title="Settings and harness configuration"
-							onClick={() =>
-								chrome ? chrome.openArea("settings") : void navigate(`/settings?workspace=${snapshot.workspaceId}`)
-							}
-						>
-							<Icon name="gear" />
-						</button>
+					{chip ? (
+						<p className="wb-chip wb-chip--status" data-tone={chip.tone} role="status">
+							{chip.tone === "working" ? <ClioPulse size={14} /> : null}
+							<span>{chip.label}</span>
+							{snapshot.recoveredOrphan ? <span>· recovered after a server interruption</span> : null}
+						</p>
+					) : null}
+					<span className="wb-bar__spacer" />
+					<div className="wb-bar__end">
 						<button
 							id={inspectorButton}
 							type="button"
+							className="wb-icon"
 							aria-label={inspectorOpen && panelView === "artifacts" ? "Hide artifacts" : "Show artifacts"}
-							aria-expanded={inspectorOpen && panelView === "artifacts"}
+							aria-pressed={inspectorOpen && panelView === "artifacts"}
 							title="Files, results and evidence"
 							onClick={() =>
 								inspectorOpen && panelView === "artifacts" ? closeInspector() : showSessionPanel("artifacts", inspectorButton)
@@ -575,113 +566,124 @@ function SessionView({ client, id }: { client: Client; id: string }) {
 						>
 							<Icon name="artifacts" />
 						</button>
-					</div>
-					<button
-						id={panelButton}
-						type="button"
-						className="conversation__session-panel-toggle"
-						aria-label="Session panel"
-						aria-expanded={inspectorOpen && panelView !== "artifacts"}
-						title="Session panel (Ctrl/⌘ Shift \)"
-						onClick={() =>
-							inspectorOpen && panelView !== "artifacts" ? closeInspector() : showSessionPanel("session", panelButton)
-						}
-					>
-						<Icon name="sidebar" />
-						<span>Session panel</span>
-					</button>
-				</div>
-				<SessionDashboard session={snapshot} health={health} workers={liveWorkers} model={route.model ?? null} />
-				<SessionHealth summary={health} />
-			</header>
-			<div className="conversation__approval">
-				{connection === "Reconnecting…" || connection === "Not connected" || session.error ? (
-					<div className="conversation__connection" role="status">
-						<strong>{session.error ? "Conversation refresh failed." : "Live updates are reconnecting."}</strong>
-						<span>
-							{session.error
-								? session.error.message
-								: "The conversation below is the last state received. New activity will appear when the connection returns."}
-						</span>
-						<button type="button" disabled={session.isFetching} onClick={() => void session.refetch()}>
-							{session.isFetching ? "Refreshing…" : "Refresh conversation"}
+						<button
+							id={panelButton}
+							type="button"
+							className="wb-icon"
+							aria-label="Session panel"
+							aria-pressed={inspectorOpen && panelView !== "artifacts"}
+							title="Session panel (Ctrl/⌘ Shift \)"
+							onClick={() =>
+								inspectorOpen && panelView !== "artifacts" ? closeInspector() : showSessionPanel("session", panelButton)
+							}
+						>
+							<Icon name="panelRight" />
 						</button>
+						<Menu label="Task actions">
+							<MenuItem icon="sliders" onClick={() => void navigate(`/settings?workspace=${snapshot.workspaceId}`)}>
+								Harness settings
+							</MenuItem>
+							<MenuItem icon="folder" onClick={() => void navigate(`/workspaces/${snapshot.workspaceId}/sessions`)}>
+								All tasks in {workspaceName}
+							</MenuItem>
+							<MenuItem icon="close" tone="danger" disabled={!canClose || close.isPending} onClick={closeSession}>
+								Close task
+							</MenuItem>
+						</Menu>
 					</div>
-				) : null}
-				{snapshot.state === "unknown" || snapshot.state === "failed" || snapshot.state === "closed" ? (
-					<div className="conversation__recovery" role="status">
-						<strong>
-							{snapshot.state === "closed"
-								? "This conversation is closed."
-								: snapshot.state === "unknown"
-									? "Clio Coder is no longer connected to this session."
-									: "This session could not continue."}
-						</strong>
-						<span>The recorded conversation is still available below.</span>
-						<Link to={`/workspaces/${snapshot.workspaceId}/sessions`}>Load or start a session →</Link>
-					</div>
-				) : null}
-				<ApprovalBanner client={client} session={snapshot} />
-			</div>
-			<div className="chat-transcript" ref={scroll}>
-				<div className="chat-transcript__content">
-					{snapshot.timelineTruncated ? <p className="trace-warning">{TRUNCATION_NOTE}</p> : null}
-					{notices.leading.length > 0 ? (
-						<ul className="turn-health">
-							{notices.leading.map((row) => (
-								<li key={row.id}>
-									<StatusMark tone={row.tone} label={row.label} {...(row.detail === null ? {} : { detail: row.detail })} />
-								</li>
-							))}
-						</ul>
+				</TopBar>
+				<div className="conversation__notices">
+					<SessionHealth summary={health} />
+				</div>
+				<div className="conversation__approval">
+					{connection === "Reconnecting…" || connection === "Not connected" || session.error ? (
+						<div className="conversation__connection" role="status">
+							<strong>{session.error ? "Conversation refresh failed." : "Live updates are reconnecting."}</strong>
+							<span>
+								{session.error
+									? session.error.message
+									: "The conversation below is the last state received. New activity will appear when the connection returns."}
+							</span>
+							<button type="button" disabled={session.isFetching} onClick={() => void session.refetch()}>
+								{session.isFetching ? "Refreshing…" : "Refresh conversation"}
+							</button>
+						</div>
 					) : null}
-					{turns.map((item) => (
-						<ChatTurnView
-							key={item.turnId}
-							turn={item}
-							row={turnRows.get(item.turnId)}
+					{snapshot.state === "unknown" || snapshot.state === "failed" || snapshot.state === "closed" ? (
+						<div className="conversation__recovery" role="status">
+							<strong>
+								{snapshot.state === "closed"
+									? "This task is closed."
+									: snapshot.state === "unknown"
+										? "Clio Coder is no longer connected to this session."
+										: "This session could not continue."}
+							</strong>
+							<span>The recorded conversation is still available below.</span>
+							<Link to={`/workspaces/${snapshot.workspaceId}/sessions`}>Reopen it from the task list →</Link>
+						</div>
+					) : null}
+					<ApprovalBanner client={client} session={snapshot} />
+				</div>
+				<div className="chat-transcript" ref={scroll}>
+					<div className="chat-transcript__content">
+						{snapshot.timelineTruncated ? <p className="trace-warning">{TRUNCATION_NOTE}</p> : null}
+						{notices.leading.length > 0 ? (
+							<ul className="turn-health">
+								{notices.leading.map((row) => (
+									<li key={row.id}>
+										<StatusMark tone={row.tone} label={row.label} {...(row.detail === null ? {} : { detail: row.detail })} />
+									</li>
+								))}
+							</ul>
+						) : null}
+						{turns.map((item) => (
+							<ChatTurnView
+								key={item.turnId}
+								turn={item}
+								row={turnRows.get(item.turnId)}
+								client={client}
+								session={snapshot}
+								pending={pending}
+								pendingPermissionId={pending?.id ?? null}
+								nowMs={item.settled ? 0 : now}
+								stopping={false}
+								notices={notices.after.get(item.turnId) ?? NO_ROWS}
+								workspaceRoot={workspaceRoot}
+								liveWorkers={item.settled ? 0 : liveWorkers}
+							/>
+						))}
+						<LiveWorkers
 							client={client}
-							session={snapshot}
-							pending={pending}
-							pendingPermissionId={pending?.id ?? null}
-							nowMs={item.settled ? 0 : now}
-							stopping={false}
-							notices={notices.after.get(item.turnId) ?? NO_ROWS}
-							workspaceRoot={workspaceRoot}
-							liveWorkers={item.settled ? 0 : liveWorkers}
+							sessionId={snapshot.id}
+							sessionOpen={snapshot.state === "open"}
+							fleet={snapshot.fleet}
 						/>
-					))}
-					<LiveWorkers
+						{turns.length === 0 ? <EmptyTranscript sessionId={snapshot.id} /> : null}
+					</div>
+				</div>
+				{/* `.jump-anchor` is the positioned, zero-height parent the pill is laid out against. Without
+				    it the pill resolves against the viewport and pushes the document sideways. */}
+				<div className="jump-anchor">
+					<JumpToLatest follow={follow} />
+				</div>
+				<div className="conversation__dock">
+					{close.error ? <p role="alert">{close.error.message}</p> : null}
+					<Composer
 						client={client}
 						sessionId={snapshot.id}
-						sessionOpen={snapshot.state === "open"}
-						fleet={snapshot.fleet}
+						sessionState={snapshot.state}
+						initialFocus={snapshot.timeline.length === 0}
+						runningTurnId={turn?.status === "running" ? turn.id : null}
+						route={route}
 					/>
-					{turns.length === 0 ? <EmptyTranscript sessionId={snapshot.id} /> : null}
 				</div>
-			</div>
-			{/* `.jump-anchor` is the positioned, zero-height parent the pill is laid out against. Without
-			    it the pill resolves against the viewport and pushes the document sideways. */}
-			<div className="jump-anchor">
-				<JumpToLatest follow={follow} />
-			</div>
-			<div className="conversation__dock">
-				{close.error ? <p role="alert">{close.error.message}</p> : null}
-				<Composer
+				<Interview
 					client={client}
 					sessionId={snapshot.id}
-					sessionState={snapshot.state}
-					initialFocus={snapshot.timeline.length === 0}
-					runningTurnId={turn?.status === "running" ? turn.id : null}
-					route={route}
+					sessionOpen={snapshot.state === "open"}
+					capabilities={capabilities.data}
 				/>
 			</div>
-			<Interview
-				client={client}
-				sessionId={snapshot.id}
-				sessionOpen={snapshot.state === "open"}
-				capabilities={capabilities.data}
-			/>
 			<InspectorDock
 				open={inspectorOpen}
 				onClose={closeInspector}
