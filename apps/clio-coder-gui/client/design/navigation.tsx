@@ -1,18 +1,6 @@
-import {
-	type ReactNode,
-	type Ref,
-	useCallback,
-	useEffect,
-	useImperativeHandle,
-	useLayoutEffect,
-	useRef,
-	useState,
-} from "react";
-import { NavLink, useLocation } from "react-router";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useLocation } from "react-router";
 import { announce, composeTitle, useLiveState } from "../interaction/announcer.js";
-import { formatKeybinding, KEYBINDINGS } from "../interaction/keybindings.js";
-import { useLayersActive } from "../interaction/use-shortcut.js";
-import { Icon } from "./icons.js";
 
 /** `--paper` from client/design/tokens.css, light and dark. Keep these two in step with it. */
 export const THEME_COLORS: Readonly<Record<"light" | "dark", string>> = {
@@ -21,12 +9,10 @@ export const THEME_COLORS: Readonly<Record<"light" | "dark", string>> = {
 };
 
 /**
- * The everyday path is the first group: home and the conversations. Everything used to inspect a run
- * or configure the installation stays one click away in the second, quieter group.
+ * The places Settings mode lists. The everyday path (tasks and the new-task screen) is the rail's
+ * own and is not a destination here, so the document title and the palette never name it.
  */
 export const navigation = [
-	{ label: "Overview", path: "/", icon: "overview", group: "work" },
-	{ label: "Sessions", path: "/sessions", icon: "sessions", group: "work" },
 	{ label: "Traces", path: "/traces", icon: "traces", group: "more" },
 	{ label: "Fleet", path: "/fleet", icon: "fleet", group: "more" },
 	{ label: "Evidence", path: "/evidence", icon: "evidence", group: "more" },
@@ -64,213 +50,7 @@ export function useSidebarCollapsed(): readonly [boolean, () => void] {
 }
 
 export const SIDEBAR_ID = "desktop-navigation";
-const SIDEBAR_CHORD = formatKeybinding(KEYBINDINGS.sidebar);
 
-/** Reachable in both states, so a collapsed rail can always be opened again. */
-export function SidebarToggle({ collapsed, toggle }: { collapsed: boolean; toggle: () => void }) {
-	const label = collapsed ? "Expand sidebar" : "Collapse sidebar";
-	return (
-		<button
-			type="button"
-			className="sidebar-toggle"
-			aria-label={label}
-			aria-expanded={!collapsed}
-			aria-controls={SIDEBAR_ID}
-			aria-keyshortcuts="Control+\\ Meta+\\"
-			data-tip={`${label} (${SIDEBAR_CHORD})`}
-			onClick={toggle}
-		>
-			<Icon name="sidebar" />
-			<span className="nav-label">{collapsed ? "Expand" : "Collapse"}</span>
-			<kbd className="nav-label">{navigator.platform.startsWith("Mac") ? "⌘\\" : "Ctrl \\"}</kbd>
-		</button>
-	);
-}
-
-/**
- * Collapsed, the labels stay in the document for assistive technology and the icon carries the
- * link visually; `data-tip` shows the name on hover and on keyboard focus.
- */
-export function Navigation({
-	close,
-	collapsed = false,
-	onHelp,
-	onSelect,
-}: {
-	close?: (() => void) | undefined;
-	collapsed?: boolean;
-	onHelp: () => void;
-	onSelect?: (path: string) => boolean;
-}) {
-	const location = useLocation();
-	const link = (item: (typeof navigation)[number]) => (
-		<NavLink
-			key={item.path}
-			to={item.path}
-			end={item.path === "/"}
-			onClick={(event) => {
-				if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
-				if (onSelect?.(item.path)) {
-					event.preventDefault();
-					return;
-				}
-				close?.();
-			}}
-			data-tip={collapsed ? item.label : undefined}
-			data-group={item.group}
-			className={({ isActive }) =>
-				isActive || (item.path === "/sessions" && location.pathname.startsWith("/workspaces/")) ? "active" : ""
-			}
-		>
-			<Icon name={item.icon} />
-			<span className="nav-label">{item.label}</span>
-		</NavLink>
-	);
-	return (
-		<>
-			<nav aria-label="Main navigation">
-				{navigation.filter((item) => item.group === "work").map(link)}
-				<p className="nav-group" aria-hidden="true">
-					<span className="nav-label">Inspect &amp; configure</span>
-				</p>
-				{navigation.filter((item) => item.group === "more").map(link)}
-			</nav>
-			<button
-				type="button"
-				className="nav-help"
-				aria-label="Help"
-				data-tip={collapsed ? "Help (Ctrl /)" : undefined}
-				onClick={() => {
-					close?.();
-					onHelp();
-				}}
-			>
-				<Icon name="docs" />
-				<span className="nav-label">Help</span>
-			</button>
-		</>
-	);
-}
-export interface MobileNavigationHandle {
-	open: () => void;
-}
-export function MobileNavigation({
-	onHelp,
-	content,
-	ref,
-}: {
-	onHelp: () => void;
-	content?: ((close: () => void) => ReactNode) | undefined;
-	ref?: Ref<MobileNavigationHandle> | undefined;
-}) {
-	const dialog = useRef<HTMLDialogElement>(null);
-	const [mounted, setMounted] = useState(false);
-	const layered = useLayersActive();
-	const open = useCallback(() => {
-		setMounted(true);
-		if (!dialog.current?.open) dialog.current?.showModal();
-		requestAnimationFrame(() => dialog.current?.querySelector<HTMLElement>(".sidebar-back")?.focus());
-	}, []);
-	useImperativeHandle(ref, () => ({ open }), [open]);
-	useEffect(() => {
-		if (layered) dialog.current?.close();
-	}, [layered]);
-	const location = useLocation();
-	const previousPath = useRef(location.pathname);
-	useEffect(() => {
-		if (previousPath.current !== location.pathname) dialog.current?.close();
-		previousPath.current = location.pathname;
-	}, [location.pathname]);
-	return (
-		<>
-			<button className="icon-button menu-toggle" type="button" onClick={open} aria-label="Open navigation">
-				<Icon name="menu" />
-			</button>
-			<dialog ref={dialog} className="navigation-dialog" aria-label="Navigation">
-				<div className="toast-heading">
-					<strong className="brand">
-						<img src="/clio-coder-logo.webp" alt="" width="32" height="32" />
-						Clio Coder
-					</strong>
-					<button
-						className="icon-button"
-						type="button"
-						onClick={() => dialog.current?.close()}
-						aria-label="Close navigation"
-					>
-						<Icon name="close" />
-					</button>
-				</div>
-				{!mounted ? null : content ? (
-					content(() => dialog.current?.close())
-				) : (
-					<Navigation close={() => dialog.current?.close()} onHelp={onHelp} />
-				)}
-			</dialog>
-		</>
-	);
-}
-type Theme = "light" | "dark";
-const THEME_KEY = "clio-coder-gui-theme";
-const DARK_QUERY = "(prefers-color-scheme: dark)";
-function chosenTheme(): Theme | null {
-	try {
-		const saved = localStorage.getItem(THEME_KEY);
-		return saved === "dark" || saved === "light" ? saved : null;
-	} catch {
-		return null;
-	}
-}
-function systemTheme(): Theme {
-	try {
-		return window.matchMedia(DARK_QUERY).matches ? "dark" : "light";
-	} catch {
-		return "light";
-	}
-}
-/**
- * An explicit choice persists and wins in both directions. Without one the page follows the system
- * preference as it changes, and nothing is saved: this toggle used to save whatever the system said
- * on the first visit, which froze that theme as if the operator had chosen it.
- */
-export function ThemeToggle() {
-	const [chosen, setChosen] = useState<Theme | null>(chosenTheme);
-	const [system, setSystem] = useState<Theme>(systemTheme);
-	useEffect(() => {
-		if (chosen) return;
-		const query = window.matchMedia(DARK_QUERY);
-		const change = () => setSystem(query.matches ? "dark" : "light");
-		query.addEventListener("change", change);
-		return () => query.removeEventListener("change", change);
-	}, [chosen]);
-	const theme = chosen ?? system;
-	useLayoutEffect(() => {
-		// Without a choice the token layer's own media query paints the theme, so no attribute is set.
-		if (chosen) document.documentElement.dataset.theme = chosen;
-		else delete document.documentElement.dataset.theme;
-		// The browser chrome must match the page ground exactly.
-		document.querySelector('meta[name="theme-color"]')?.setAttribute("content", THEME_COLORS[theme]);
-	}, [chosen, theme]);
-	const choose = (next: Theme) => {
-		setChosen(next);
-		try {
-			localStorage.setItem(THEME_KEY, next);
-		} catch {
-			/* The choice holds for this tab. */
-		}
-	};
-	return (
-		<button
-			className="icon-button theme-toggle"
-			type="button"
-			aria-label={theme === "light" ? "Dark theme" : "Light theme"}
-			title={theme === "light" ? "Switch to dark theme" : "Switch to light theme"}
-			onClick={() => choose(theme === "light" ? "dark" : "light")}
-		>
-			<Icon name={theme === "light" ? "moon" : "sun"} />
-		</button>
-	);
-}
 /**
  * The one writer of `document.title`. The route label and the approval marker compose in
  * `announcer.ts`, so a waiting approval is visible on a backgrounded tab without two effects
@@ -289,7 +69,7 @@ export function RouteFocus() {
 		return () => cancelAnimationFrame(frame);
 	}, [location.pathname]);
 	useEffect(() => {
-		const section = navigation.find((item) => item.path !== "/" && location.pathname.startsWith(item.path));
+		const section = navigation.find((item) => location.pathname.startsWith(item.path));
 		document.title = composeTitle(section?.label, approvalPending);
 	}, [location.pathname, approvalPending]);
 	return null;

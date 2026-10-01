@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Outlet, useLocation, useNavigate } from "react-router";
 import { API_VERSION } from "../contracts/meta.js";
 import { routes } from "../contracts/routes.js";
+import type { SessionSnapshot, SessionSummary } from "../contracts/sessions.js";
 import { useTokenRejected } from "./api/auth-state.js";
 import { type Client, emptyInput } from "./api/client.js";
 import { type ConnectionState, subscribe } from "./api/events.js";
@@ -14,13 +15,13 @@ import { PwaBoot } from "./design/pwa.js";
 import { Reconnect } from "./design/reconnect.js";
 import { WorkspaceChrome } from "./design/workspace-chrome.js";
 import { CommandPalette } from "./interaction/CommandPalette.js";
-import { appCommands } from "./interaction/commands.js";
+import { appCommands, type PaletteTask } from "./interaction/commands.js";
 import { HelpDialog } from "./interaction/HelpDialog.js";
 import { useLayersActive, useShortcut } from "./interaction/use-shortcut.js";
 import { OpenWorkspaceDialog } from "./shell/OpenWorkspaceDialog.js";
 import { SettingsSidebar } from "./shell/SettingsSidebar.js";
 import { type ShellApi, ShellContext } from "./shell/shell-context.js";
-import { isSettingsPath, sessionIdFromPath } from "./shell/shell-model.js";
+import { isSettingsPath, sessionIdFromPath, taskRows } from "./shell/shell-model.js";
 import { TaskSidebar } from "./shell/TaskSidebar.js";
 import { rememberedWorkspace, rememberWorkspace, useTaskActions } from "./shell/tasks.js";
 import { useApplyTheme } from "./shell/theme.js";
@@ -134,6 +135,31 @@ export function App({ client }: { client: Client }) {
 	useShortcut("newTask", startTask);
 	useShortcut("openWorkspace", openWorkspace);
 
+	// Read from what the rail already loaded, at the moment the palette opens, so Ctrl K costs no request.
+	const paletteTasks = useMemo<readonly PaletteTask[]>(() => {
+		if (!paletteOpen) return [];
+		const sessions = queries.getQueryData<SessionSnapshot[]>(["sessions"]) ?? [];
+		return (workspaces.data ?? []).flatMap((workspace) =>
+			taskRows(
+				workspace.id,
+				sessions,
+				queries.getQueryData<SessionSummary[]>(["session-history", workspace.id]) ?? [],
+			).map((row) => ({ id: row.id, title: row.title, project: workspace.name, open: row.open })),
+		);
+	}, [paletteOpen, workspaces.data, queries]);
+	const openTask = useCallback(
+		(id: string) => {
+			const sessions = queries.getQueryData<SessionSnapshot[]>(["sessions"]) ?? [];
+			if (sessions.some((session) => session.id === id && session.state !== "closed")) void navigate(`/sessions/${id}`);
+			else {
+				const workspace = (workspaces.data ?? []).find((candidate) =>
+					queries.getQueryData<SessionSummary[]>(["session-history", candidate.id])?.some((row) => row.id === id),
+				);
+				if (workspace) actions.resume(id, workspace.id);
+			}
+		},
+		[queries, navigate, workspaces.data, actions.resume],
+	);
 	const commands = useMemo(
 		() =>
 			appCommands(
@@ -142,6 +168,7 @@ export function App({ client }: { client: Client }) {
 					runningTurnId,
 					sessionOpen: snapshot?.state === "open",
 					hasNotices: notices.length > 0,
+					tasks: paletteTasks,
 				},
 				{
 					navigate: (path) => void navigate(path),
@@ -150,6 +177,7 @@ export function App({ client }: { client: Client }) {
 					dismissNotices: dismissAll,
 					newTask: startTask,
 					openWorkspace,
+					openTask,
 					cancelTurn: (turnId) => {
 						if (sessionId === null) return;
 						void client
@@ -181,6 +209,8 @@ export function App({ client }: { client: Client }) {
 			startTask,
 			openWorkspace,
 			openHelp,
+			paletteTasks,
+			openTask,
 		],
 	);
 	const shell = useMemo<ShellApi>(

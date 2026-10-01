@@ -5,7 +5,8 @@
 import type { navigation } from "../design/navigation.js";
 import { formatKeybinding, INTERVIEW_KEYBINDING_NAMESPACE, KEYBINDING_ORDER } from "./keybindings.js";
 
-type NavPath = (typeof navigation)[number]["path"];
+// The task screens are the rail's own and are not in the navigation table, but the reference still explains them.
+type NavPath = (typeof navigation)[number]["path"] | "/" | "/sessions";
 
 export interface HelpEntry {
 	readonly term: string;
@@ -29,13 +30,14 @@ export interface HelpMatch {
 /** One sentence per route. A route added without a guide entry fails to compile. */
 export const VIEW_GUIDE: Readonly<Record<NavPath, { title: string; meaning: string }>> = {
 	"/": {
-		title: "Overview",
-		meaning: "Where this installation stands right now, and the way into the work you had open.",
+		title: "New task",
+		meaning:
+			"A blank task. Choose a workspace, describe what you want, and Clio Coder starts working. Nothing runs until you send the first message.",
 	},
 	"/sessions": {
-		title: "Sessions",
+		title: "Tasks",
 		meaning:
-			"Your requests and Clio Coder's responses as readable prose, with the tools it ran folded into one activity line per stretch of work.",
+			"Each task is one conversation in one workspace, listed in the sidebar with its status. A task shows your requests and Clio Coder's responses as prose, with the tools it ran folded into one activity line, and a pane for progress, changes, files and the commands it ran.",
 	},
 	"/traces": {
 		title: "Traces",
