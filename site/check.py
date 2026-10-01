@@ -14,7 +14,8 @@ origin = product['origin']
 manifest = json.loads((root / 'content/docs-manifest.json').read_text())
 docs_source = manifest['source']
 repository = product['repository'].rstrip('/')
-source_tree = f"{repository}/tree/{docs_source['ref']}"
+link_ref = product.get('linkRef') or docs_source['ref']
+source_tree = f"{repository}/tree/{link_ref}"
 doc_sources = {item["path"]: item["source"] for item in manifest["files"]}
 errors = []
 for private in ('content/docs', 'content/doc-summaries', 'content/tutorials', 'content/drafts', 'review', 'vendor', 'cards'):
@@ -133,7 +134,7 @@ for url in urls:
     for key, value in [('og:title', page.title), ('twitter:title', page.title), ('og:description', page.description), ('twitter:description', page.description)]:
         if page.social.get(key) != value:
             errors.append(f'{path}: {key} does not match page metadata')
-    if page.doc_path and page.doc_source != f"{repository}/blob/{docs_source['ref']}/{doc_sources.get(page.doc_path)}":
+    if page.doc_path and page.doc_source != f"{repository}/blob/{link_ref}/{doc_sources.get(page.doc_path)}":
         errors.append(f'{path}: source link points to the wrong document')
     if page.doc_path and (
         page.snapshot_source != source_tree
@@ -178,6 +179,18 @@ for path, page in pages.items():
             errors.append(f'{path}: missing internal target {ref}')
         elif url.fragment and target in pages and unquote(url.fragment) not in pages[target].ids:
             errors.append(f'{path}: missing anchor {ref}')
+repository_root = site.parent
+for installer in ('install.sh', 'install.ps1'):
+    published = root / installer
+    if not published.is_file() or published.read_bytes() != (repository_root / 'scripts' / installer).read_bytes():
+        errors.append(f'{installer} is missing or differs from scripts/{installer}')
+if (root / 'CNAME').read_text().strip() != urlsplit(origin).hostname:
+    errors.append('CNAME does not name the site origin')
+if not (root / '.nojekyll').is_file():
+    errors.append('.nojekyll is missing')
+for installer in ('install.sh', 'install.ps1'):
+    if f'/{installer}' in (root / 'sitemap.xml').read_text():
+        errors.append(f'{installer} must not be listed in the sitemap')
 if errors:
     print('\n'.join(errors))
     sys.exit(1)

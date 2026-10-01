@@ -132,7 +132,10 @@ try {
 	assert.notEqual(await page.locator("html").getAttribute("data-theme"), initial, "Theme preference persists");
 	await page.locator("#start").scrollIntoViewIfNeeded();
 	await page.locator("#start .code-block .copy").first().click();
-	assert.equal(await page.evaluate(() => navigator.clipboard.readText()), "npm install -g @iowarp/clio-coder");
+	assert.equal(
+		await page.evaluate(() => navigator.clipboard.readText()),
+		"curl -fsSL https://coder.iowarp.ai/install.sh | sh",
+	);
 	await page.goto(`${values.url}/docs.html`);
 	await page.locator(".docs-menu > summary").click();
 	await page.locator("#doc-search").fill("model");
@@ -288,7 +291,7 @@ try {
 		brand.palette[brand.themes[expectedDefault].paper],
 		"No-JavaScript CSS uses the configured default",
 	);
-	assert.ok((await plainPage.locator("#doc").innerText()).includes("npm install"));
+	assert.ok((await plainPage.locator("#doc").innerText()).includes("install.sh"));
 	if ((await plainPage.locator(".docs-menu").getAttribute("open")) === null)
 		await plainPage.locator(".docs-menu > summary").click();
 	await plainPage
