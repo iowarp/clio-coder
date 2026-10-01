@@ -76,7 +76,9 @@ const FORBIDDEN = [
 		reason: "benchmarks are not part of the package",
 	},
 	{
-		test: (f) => f.startsWith("scripts/"),
+		// The installers ship: `clio-coder upgrade` re-runs the installed copy for an
+		// install.sh or install.ps1 installation (src/domains/lifecycle/install-method.ts).
+		test: (f) => f.startsWith("scripts/") && f !== "scripts/install.sh" && f !== "scripts/install.ps1",
 		reason: "repo scripts operate on a source checkout only",
 	},
 	{ test: (f) => f.endsWith(".tsbuildinfo"), reason: "typescript build cache" },
