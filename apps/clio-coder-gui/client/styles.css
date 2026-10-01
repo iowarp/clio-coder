@@ -1398,3 +1398,6 @@ main :is(pre, .table-scroll) {
 	border: 0;
 	background: transparent;
 }
+.workspace-browser__head[hidden] {
+	display: none;
+}

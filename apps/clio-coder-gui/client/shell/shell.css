@@ -725,3 +725,17 @@ button.wb-chip:hover:not(:disabled) {
 	width: auto;
 	padding: 0 8px;
 }
+
+/* ---- Open workspace dialog ---------------------------------------------------------- */
+.wb-open {
+	display: flex;
+	gap: var(--space-2);
+	margin-bottom: var(--space-4);
+}
+.wb-open input {
+	flex: 1;
+	font-family: var(--font-mono);
+}
+.wb-open button {
+	flex: none;
+}

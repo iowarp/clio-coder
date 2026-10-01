@@ -119,3 +119,44 @@
 		padding-inline: var(--space-4);
 	}
 }
+
+/* Deleting a saved task takes two presses, and the question stays beside the row it asks about. */
+.delete-session {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	justify-content: flex-end;
+	gap: var(--space-2);
+}
+.taskpage__row .delete-session__start {
+	min-height: 0;
+	padding: 4px 10px;
+	border-color: transparent;
+	background: transparent;
+	color: var(--ink-muted);
+	font-size: 12.5px;
+	opacity: 0;
+}
+.taskpage__row:hover .delete-session__start,
+.taskpage__row:focus-within .delete-session__start {
+	opacity: 1;
+}
+.taskpage__row .delete-session__start:hover {
+	border-color: var(--line-strong);
+	color: var(--ink);
+}
+.delete-session__ask {
+	font-size: var(--text-meta);
+}
+.delete-session__choices {
+	display: flex;
+	gap: var(--space-2);
+}
+.delete-session__confirm {
+	border-color: var(--status-fail-line);
+	color: var(--status-fail-fg);
+}
+.delete-session p {
+	flex-basis: 100%;
+	margin: 0;
+}
