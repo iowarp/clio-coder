@@ -45,7 +45,7 @@
 }
 .interview-dialog__header > button:hover {
 	color: var(--ink);
-	background: var(--surface-sunken);
+	background: var(--well);
 }
 .interview-dialog__layout {
 	display: grid;
@@ -86,7 +86,7 @@
 	font-size: var(--text-meta);
 }
 .interview-dialog__steps li > button[aria-current="step"] {
-	background: var(--surface-sunken);
+	background: var(--well);
 	border-color: var(--line-strong);
 	color: var(--ink);
 }
@@ -164,7 +164,7 @@
 	cursor: pointer;
 }
 .interview-dialog__choices label:hover {
-	background: var(--surface-sunken);
+	background: var(--well);
 }
 .interview-dialog__choices label[data-selected="true"] {
 	border-color: var(--accent);
@@ -254,7 +254,7 @@
 	margin: 8px 0 0;
 	padding: 12px 16px;
 	border-left: 2px solid var(--accent);
-	background: var(--surface-sunken);
+	background: var(--well);
 	white-space: pre-wrap;
 	overflow-wrap: anywhere;
 	font-size: var(--text-body);

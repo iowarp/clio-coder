@@ -166,7 +166,7 @@
 /* A reload that happened, or none that was needed, is a fact rather than a warning. */
 .library-session-note--settled {
 	border-left-color: var(--line-strong);
-	background: var(--surface-sunken);
+	background: var(--well);
 	color: var(--ink);
 }
 @media (max-width: 750px) {
@@ -198,7 +198,7 @@
 .library-package__detail {
 	grid-column: 1 / -1;
 	padding: var(--space-4);
-	background: var(--surface-sunken);
+	background: var(--well);
 	border-left: 2px solid var(--accent);
 	min-width: 0;
 }

@@ -25,7 +25,7 @@
 	display: none;
 }
 .tool-card__head:hover {
-	background: var(--surface-sunken);
+	background: var(--well);
 }
 .tool-card__head::after {
 	content: "›";
@@ -298,7 +298,7 @@
 	border: 1px solid var(--line);
 	border-radius: var(--radius-xs);
 	padding: var(--space-2);
-	background: var(--surface-sunken);
+	background: var(--well);
 }
 /* Dashed means "not confirmed on disk". Dimming was dropped: it pushed every row under 4.5:1. */
 .diff.is-proposed,

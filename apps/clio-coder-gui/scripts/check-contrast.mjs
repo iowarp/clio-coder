@@ -32,6 +32,9 @@ const CHECKS = [
 	["--ink-muted", "--paper", TEXT],
 	["--ink-muted", "--surface", TEXT],
 	["--ink-muted", "--surface-sunken", TEXT],
+	["--ink", "--well", TEXT],
+	["--ink-muted", "--well", TEXT],
+	["--accent", "--well", TEXT],
 	// --ink-subtle is a LARGE_TEXT token on purpose: it clears 3:1 but not 4.5:1
 	// in light, so it belongs on >=16px text or decoration. Axe caught it at 12px
 	// on .tool-number once already; reach for --ink-muted in a dense row.

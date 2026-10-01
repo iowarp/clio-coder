@@ -67,7 +67,7 @@
 	padding: 12px;
 	border: 1px dashed var(--line-strong);
 	border-radius: var(--radius-sm);
-	background: var(--surface-sunken);
+	background: var(--well);
 }
 .setting-control__reason {
 	color: var(--ink-muted);
@@ -142,7 +142,7 @@
 .settings-write-scope {
 	padding: var(--space-4);
 	margin-block: var(--space-5);
-	background: var(--surface-sunken);
+	background: var(--well);
 	border-left: 2px solid var(--line-strong);
 	font-size: var(--text-meta);
 	overflow-wrap: anywhere;

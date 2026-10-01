@@ -310,7 +310,7 @@
 	content: "Hide";
 }
 .markdown .md-details > summary:hover {
-	background: var(--surface-sunken);
+	background: var(--well);
 }
 .markdown .md-details__body {
 	padding: 0.3em 1em 1em;

@@ -16,6 +16,9 @@
 	--scrim: rgb(26 22 18 / 52%);
 	/* The pale highlight that passes over a ring, as in the site's closing film. */
 	--glint: var(--surface);
+	/* A sunken fill for wells, chips and inputs. The brand's paper-sunk is its line colour in light,
+	   which reads as mud when used as a fill; dark keeps the brand's graphite. */
+	--well: #efe9de;
 
 	/* ---- status ramp: neutral / running / success / warn / fail /
 	   unverified. Each tone is fg (text), tint (surface), line (boundary). */
@@ -125,7 +128,7 @@
 
 	/* Compatibility names used by page, Markdown and offline styles. */
 	--muted: var(--ink-muted);
-	--inset: var(--surface-sunken);
+	--inset: var(--well);
 
 	color-scheme: light;
 	font-family: var(--font-ui);
@@ -137,6 +140,7 @@
 :root[data-theme="dark"] {
 	--scrim: rgb(0 0 0 / 72%);
 	--glint: var(--ink);
+	--well: #151412;
 
 	--status-neutral-fg: #a89e8f;
 	--status-neutral-tint: #151412;
@@ -184,6 +188,7 @@
 	:root:not([data-theme="light"]) {
 		--scrim: rgb(0 0 0 / 72%);
 		--glint: var(--ink);
+		--well: #151412;
 
 		--status-neutral-fg: #a89e8f;
 		--status-neutral-tint: #151412;

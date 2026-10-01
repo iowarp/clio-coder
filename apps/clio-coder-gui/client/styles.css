@@ -205,7 +205,7 @@ h1 em {
 	color: var(--ink-muted);
 }
 .icon-button:hover:not(:disabled) {
-	background: var(--surface-sunken);
+	background: var(--well);
 	color: var(--ink);
 }
 .sr-only {
@@ -266,7 +266,7 @@ nav a {
 		background var(--motion-fast) var(--ease-standard);
 }
 nav a:hover {
-	background: var(--surface-sunken);
+	background: var(--well);
 	color: var(--ink);
 }
 
@@ -510,7 +510,7 @@ nav a:hover {
 	margin-left: 15px;
 }
 .operation {
-	background: var(--surface-sunken);
+	background: var(--well);
 	border-left: 3px solid var(--accent);
 	padding: 22px;
 	margin-top: 28px;
@@ -854,7 +854,7 @@ nav a:hover {
 	overflow: auto;
 	white-space: pre-wrap;
 	overflow-wrap: anywhere;
-	background: var(--surface-sunken);
+	background: var(--well);
 	padding: var(--space-4);
 	font-size: var(--text-exact);
 	line-height: 1.6;
@@ -990,7 +990,7 @@ nav a:hover {
 	height: 10px;
 	border: 1px solid var(--line-strong);
 	border-radius: var(--radius-sm);
-	background: var(--surface-sunken);
+	background: var(--well);
 	overflow: hidden;
 }
 .trace-histogram__track > i {
@@ -1044,7 +1044,7 @@ nav a:hover {
 }
 .workspace-browser__current {
 	padding: var(--space-3);
-	background: var(--surface-sunken);
+	background: var(--well);
 	border-radius: var(--radius-sm);
 }
 .workspace-browser__current code {
@@ -1075,7 +1075,7 @@ nav a:hover {
 	width: 100%;
 	min-width: 0;
 	text-align: left;
-	background: var(--surface-sunken);
+	background: var(--well);
 }
 .workspace-browser__folders button span:nth-child(2) {
 	flex: 1;
@@ -1185,7 +1185,7 @@ nav a:hover {
 	margin-block: var(--space-4);
 }
 .session-controls {
-	background: var(--surface-sunken);
+	background: var(--well);
 }
 .session-controls > h2,
 .session-settings > h2 {

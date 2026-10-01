@@ -146,7 +146,7 @@
 	margin: 0;
 	padding: var(--space-3) var(--space-4);
 	border-radius: var(--radius-lg);
-	background: var(--surface-sunken);
+	background: var(--well);
 	color: var(--ink-strong);
 	white-space: pre-wrap;
 	overflow-wrap: anywhere;
@@ -309,7 +309,7 @@
 }
 .message-actions .code-block__copy:hover {
 	color: var(--ink);
-	background: var(--surface-sunken);
+	background: var(--well);
 }
 .message-actions .code-block__copy.is-copied {
 	color: var(--status-success-fg);
@@ -354,7 +354,7 @@
 	transform: rotate(90deg);
 }
 .activity__summary:hover {
-	background: var(--surface-sunken);
+	background: var(--well);
 	color: var(--ink);
 }
 /* Only a group that is waiting on the operator is drawn as more than a line. */
