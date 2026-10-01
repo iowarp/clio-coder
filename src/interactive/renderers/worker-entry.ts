@@ -477,6 +477,7 @@ function helperRow(
 	const row = `${truncateToWidth(lead, Math.max(1, width - visibleWidth(tail)), GLYPH.ellipsis, false)}${tail}`;
 	return [
 		truncateToWidth(row, width, GLYPH.ellipsis, false),
+		...(entry.receipt?.mergeDetail ? railLines(entry.receipt.mergeDetail, "success", width) : []),
 		...previewRows(
 			[...failureLines(entry, width), ...attemptLines(entry, width)],
 			previewBudget(detail.errorRows, terminalRows),
@@ -585,6 +586,7 @@ export function renderWorkerEntryLines(
 			? previewRows(trail, budget(WORKER_ACTION_TRAIL_LIMIT + 1), safeWidth, true, meta(RAIL), RAIL_WIDTH)
 			: []),
 		...failure,
+		...(entry.receipt?.mergeDetail ? railLines(entry.receipt.mergeDetail, "success", safeWidth) : []),
 		...(presented ? railLines(presented, "body", safeWidth) : []),
 		...(entry.receipt?.abandonedDetail ? railLines(entry.receipt.abandonedDetail, "warning", safeWidth) : []),
 		...(entry.receipt?.receiptUnavailable ? railLines("receipt unavailable", "warning", safeWidth) : []),

@@ -187,7 +187,9 @@ describe("task worktree root", () => {
 		strictEqual(existsSync(`${task.path}.task-owner.json`), false);
 
 		writeFileSync(join(task.path, "a.txt"), "changed in the worktree\n");
-		strictEqual(applyTaskWorktree({ worktree: task, apply: "merge" }).applied, true);
+		const receipt = applyTaskWorktree({ worktree: task, apply: "merge" });
+		strictEqual(receipt.applied, true);
+		strictEqual(receipt.detail, `merged ${git(root, "rev-parse", "HEAD").slice(0, 7)} onto ${git(root, "branch", "--show-current")}`);
 		strictEqual(readFileSync(join(root, "a.txt"), "utf8"), "changed in the worktree\n");
 		cleanupTaskWorktree(task, true);
 		strictEqual(existsSync(task.path), false);

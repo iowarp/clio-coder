@@ -7535,7 +7535,7 @@ export function createDispatchBundle(
 							} else {
 								worktreeReceipt = {
 									...landed,
-									detail: `operator merge: merged after the gate held it because ${withheldVerdict?.reason ?? "of its report"}`,
+									detail: `${landed.detail}; operator merge accepted after the gate held it because ${withheldVerdict?.reason ?? "of its report"}`,
 								};
 							}
 						} else if (card?.choice === "discard") {

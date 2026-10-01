@@ -93,6 +93,7 @@ function workerReceiptFacts(receipt: Record<string, unknown>): WorkerReceiptFact
 	const toolCalls = optionalNumber(receipt.toolCalls);
 	const external = receipt.runtimeKind === "subprocess" || isRecord(receipt.delegation);
 	const worktree = isRecord(receipt.worktree) ? receipt.worktree : null;
+	const mergeDetail = worktree?.applied === true ? optionalString(worktree.detail) : undefined;
 	const changedPaths = Array.isArray(worktree?.changedPaths)
 		? worktree.changedPaths.filter((path): path is string => typeof path === "string")
 		: undefined;
@@ -121,6 +122,7 @@ function workerReceiptFacts(receipt: Record<string, unknown>): WorkerReceiptFact
 		outcome,
 		...(outcomeCode !== undefined ? { outcomeCode } : {}),
 		...(failureMessage !== undefined ? { failureMessage } : {}),
+		...(mergeDetail !== undefined ? { mergeDetail } : {}),
 		...(exitCode !== undefined ? { exitCode } : {}),
 		...(tokenCount !== undefined ? { tokenCount } : {}),
 		...(durationMs !== undefined ? { durationMs } : {}),

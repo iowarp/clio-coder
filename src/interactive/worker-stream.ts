@@ -92,6 +92,7 @@ export interface WorkerReceiptSummary {
 	outcomeCode?: string;
 	exitCode?: number;
 	failureMessage?: string;
+	mergeDetail?: string;
 	tokenCount?: number;
 	durationMs?: number;
 	toolCalls?: number;

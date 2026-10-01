@@ -145,6 +145,7 @@ describe("task worktree restart recovery", () => {
 		const clean = prepare("run-pinned-clean");
 		const landed = applyTaskWorktree({ worktree: clean.task, apply: "merge", pinnedCommit: clean.commit });
 		strictEqual(landed.applied, true);
+		match(landed.detail ?? "", /^merged [a-f0-9]{7} onto /);
 		strictEqual(landed.commit, clean.commit);
 
 		const dirty = prepare("run-pinned-dirty");

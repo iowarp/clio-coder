@@ -695,9 +695,11 @@ export function applyTaskWorktree(input: {
 		const detail = `${WORKTREE_HEAD_MOVED}: task branch refs/heads/${worktree.branch} moved from pinned commit ${commit} to ${branchTip ?? "nothing"} before merge; candidate commit ${commit}. Nothing was merged; the worktree and its branch are preserved.`;
 		return { ...headMovedReceipt(worktree, input.apply, detail), commit };
 	}
+	const destinationBranch = git(worktree.root, ["symbolic-ref", "--quiet", "--short", "HEAD"]);
 	const merged = mergeWorktreeBranch(worktree.root, commit, COMMIT_IDENTITY, `Merge branch '${worktree.branch}'`);
 	if (!merged.ok) return { ...receipt, reason: "worktree_merge_conflict" };
-	return { ...receipt, applied: true };
+	const landedCommit = git(worktree.root, ["rev-parse", "HEAD"]);
+	return { ...receipt, applied: true, detail: `merged ${landedCommit.slice(0, 7)} onto ${destinationBranch}` };
 }
 
 function removeWorktreeDirectory(worktree: TaskWorktree): void {

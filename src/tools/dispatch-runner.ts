@@ -460,7 +460,7 @@ async function backgroundedDispatchResult(
 function successNote(receipt: RunReceipt): string | null {
 	if (receipt.outcome !== undefined && receipt.outcome !== "succeeded") return null;
 	if (receipt.exitCode !== 0) return null;
-	return receipt.outcomeDetail ?? null;
+	return [receipt.outcomeDetail, receipt.worktree?.applied ? receipt.worktree.detail : null].filter(Boolean).join("; ") || null;
 }
 
 interface CompletedRun {
@@ -642,7 +642,7 @@ export function formatDispatchOutput(
 				!run.integrity.ok || !external
 					? ""
 					: receipt.worktree
-						? ` placement=worktree cwd=${JSON.stringify(receipt.worktree.path)} branch=${JSON.stringify(receipt.worktree.branch)} apply=${receipt.worktree.apply} diff=${receipt.worktree.diffHash}${changedSuffix}`
+						? ` placement=worktree cwd=${JSON.stringify(receipt.worktree.path)} branch=${JSON.stringify(receipt.worktree.branch)} apply=${receipt.worktree.apply}${receipt.worktree.applied && receipt.worktree.detail ? ` merge=${JSON.stringify(receipt.worktree.detail)}` : ""} diff=${receipt.worktree.diffHash}${changedSuffix}`
 						: ` placement=current cwd=${JSON.stringify(receipt.reproducibility?.cwd ?? "unknown")}${changedSuffix}${receipt.checkoutChanges ? " change_attribution=observed-delta" : ""}`;
 			// The sealed receipt is authoritative. Live summaries remain useful for
 			// monitoring but can contain transient tool-use prose and never override
