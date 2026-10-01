@@ -85,26 +85,29 @@
 	color: var(--ink-muted);
 	font-size: var(--text-meta);
 }
-.interview-dialog__steps li > button[aria-current="step"] {
-	background: var(--well);
-	border-color: var(--line-strong);
+.interview-dialog__steps li > button:hover {
+	background: var(--wb-hover);
 	color: var(--ink);
 }
+.interview-dialog__steps li > button[aria-current="step"] {
+	background: var(--wb-active);
+	border-color: transparent;
+	color: var(--ink);
+}
+/* Question numbers are copper mono, as step numbers are in the site's guides; an answered one turns
+   to the accent. */
 .interview-dialog__step-number {
 	display: flex;
 	align-items: center;
 	justify-content: center;
-	width: 26px;
-	height: 26px;
+	width: 22px;
+	height: 22px;
 	flex: none;
-	border: 1px solid var(--line-strong);
-	border-radius: var(--radius-pill);
-	font-size: var(--text-exact);
-	font-family: var(--font-mono);
+	font: 500 var(--text-exact) / 1 var(--font-mono);
+	color: var(--secondary);
 }
 .interview-dialog__step-number[data-complete="true"] {
 	color: var(--accent);
-	border-color: var(--accent);
 }
 .interview-dialog__review-link {
 	display: flex;
@@ -157,18 +160,25 @@
 	display: flex;
 	gap: 14px;
 	align-items: flex-start;
-	padding: 16px;
-	border: 1px solid var(--line-strong);
+	padding: 14px 16px;
+	border: 1px solid var(--line);
 	border-radius: var(--radius-md);
-	background: var(--paper);
+	background: transparent;
 	cursor: pointer;
+	transition:
+		border-color var(--motion-fast) var(--ease-standard),
+		background-color var(--motion-fast) var(--ease-standard);
 }
 .interview-dialog__choices label:hover {
-	background: var(--well);
+	border-color: var(--line-strong);
+}
+.interview-dialog__choices label:has(input:focus-visible) {
+	outline: 2px solid var(--focus);
+	outline-offset: 2px;
 }
 .interview-dialog__choices label[data-selected="true"] {
 	border-color: var(--accent);
-	background: color-mix(in srgb, var(--accent) 5%, var(--paper));
+	background: var(--accent-soft);
 }
 .interview-dialog__choices input {
 	margin: 4px 0 0;
