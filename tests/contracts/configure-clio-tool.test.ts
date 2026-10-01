@@ -105,3 +105,51 @@ test("configure_clio reports effect timing for live fleet settings and restart s
 		match(result.kind === "ok" ? result.output : "", expected);
 	}
 });
+
+test("configure_clio Apply cards show sanitized changed leaves without unchanged maps", async (t) => {
+	const env = await isolateClioEnv("clio-configure-card-");
+	t.after(() => env.restore());
+	updateSettings((settings) => {
+		settings.targets = [{ id: "openai-codex", runtime: "openai-codex", defaultModel: "gpt-6-sol" }];
+		settings.fleet.profiles = Object.fromEntries(
+			["old", "keep", "fast-sol"].map((name) => [
+				name,
+				{ target: settings.targets[0]?.id ?? "openai-codex", model: "gpt-6-sol", thinkingLevel: "low" },
+			]),
+		);
+		settings.fleet.agentProfiles = { coder: "old", verifier: "keep" };
+		return settings;
+	});
+	let card = "";
+	const tool = createConfigureClioTool({
+		getAutonomy: () => "default",
+		askUser: async (questions) => {
+			card = questions[0]?.question ?? "";
+			return { answers: [{ question: card, answer: "Apply", options: ["Apply"] }] };
+		},
+	});
+	const preview = await tool.run({
+		action: "preview",
+		path: "fleet.agentProfiles",
+		value: JSON.stringify({ coder: "fast-sol", verifier: "keep" }),
+	});
+	const proposalId = /proposalId="([^"]+)"/.exec(preview.kind === "ok" ? preview.output : "")?.[1];
+	ok(proposalId, JSON.stringify(preview));
+	strictEqual((await tool.run({ action: "apply", proposalId })).kind, "ok");
+	match(card, /fleet.agentProfiles.coder: old → fast-sol/);
+	ok(!card.includes("verifier"));
+	ok(!card.includes("{"));
+	const escaped = await tool.run({
+		action: "preview",
+		path: "fleet.agentProfiles",
+		value: JSON.stringify({ "coder\u001b[31m\nspoof": "fast-sol" }),
+	});
+	ok(escaped.kind === "ok", JSON.stringify(escaped));
+	ok(!escaped.output.includes("\u001b"));
+	ok(!escaped.output.includes("\nspoof"));
+	const large = Object.fromEntries(Array.from({ length: 30 }, (_, i) => [`agent${i}${"x".repeat(160)}`, "fast-sol"]));
+	const bounded = await tool.run({ action: "preview", path: "fleet.agentProfiles", value: JSON.stringify(large) });
+	ok(bounded.kind === "ok", JSON.stringify(bounded));
+	match(bounded.output, /more changed values/);
+	ok(bounded.output.length < 3600);
+});

@@ -6,6 +6,7 @@ import { applyControlValue, formatControlValue, settingControl } from "../core/s
 import { ToolNames } from "../core/tool-names.js";
 import { settingsChangeKind } from "../domains/config/classify.js";
 import type { AutonomyLevel } from "../domains/safety/autonomy.js";
+import { sanitizeCallTargetText } from "../domains/safety/call-target.js";
 import { StringEnum } from "../engine/ai.js";
 import type { AskUserHandler } from "./ask-user.js";
 import type { ToolSpec } from "./registry.js";
@@ -86,9 +87,7 @@ export function createConfigureClioTool(deps: ConfigureClioDeps): ToolSpec {
 					const before = JSON.stringify(getAtPath(saved, path));
 					const after = JSON.stringify(getAtPath(candidate, path));
 					if (before === after) return { kind: "ok", output: `${path} already has the requested value; nothing to apply.` };
-					const affected = [
-						`${path}: ${formatControlValue(getAtPath(saved, path))} → ${formatControlValue(getAtPath(candidate, path))}`,
-					];
+					const affected = changedSettingLines(path, getAtPath(saved, path), getAtPath(candidate, path));
 					if (path === "chat.target" && saved.chat.model !== candidate.chat.model) {
 						affected.push(
 							`chat.model: ${formatControlValue(saved.chat.model)} → ${formatControlValue(candidate.chat.model)}`,
@@ -99,7 +98,7 @@ export function createConfigureClioTool(deps: ConfigureClioDeps): ToolSpec {
 						path,
 						value,
 						before,
-						preview: affected.join("\n"),
+						preview: boundedSettingPreview(affected),
 						expiresAt: Date.now() + 10 * 60_000,
 					};
 					return {
@@ -165,4 +164,32 @@ function savedSettingEffect(path: string): string {
 		case "restartRequired":
 			return "Exit and start a new Clio session to apply this setting.";
 	}
+}
+
+function changedSettingLines(path: string, before: unknown, after: unknown): string[] {
+	if (JSON.stringify(before) === JSON.stringify(after)) return [];
+	const objectMap = (value: unknown): Record<string, unknown> | null =>
+		value !== null && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
+	const oldMap = objectMap(before);
+	const newMap = objectMap(after);
+	if (oldMap || newMap) {
+		const keys = new Set([...Object.keys(oldMap ?? {}), ...Object.keys(newMap ?? {})]);
+		return [...keys].flatMap((key) => changedSettingLines(`${path}.${key}`, oldMap?.[key], newMap?.[key]));
+	}
+	return [
+		after === undefined
+			? `${path}: (removed)`
+			: before === undefined
+				? `${path}: ${formatControlValue(after)}`
+				: `${path}: ${formatControlValue(before)} → ${formatControlValue(after)}`,
+	];
+}
+
+function boundedSettingPreview(lines: string[]): string {
+	const visible = lines.slice(0, 20).map((line) => {
+		const clean = sanitizeCallTargetText(line);
+		return clean.length > 160 ? `${clean.slice(0, 159)}…` : clean;
+	});
+	if (lines.length > visible.length) visible.push(`… ${lines.length - visible.length} more changed values`);
+	return visible.join("\n");
 }
