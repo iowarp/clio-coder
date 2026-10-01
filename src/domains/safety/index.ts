@@ -45,6 +45,7 @@ export {
 	flowEndpointIdentity,
 	flowRestrictionsForCall,
 	isFlowRestrictionSet,
+	mcpTransportIdentity,
 	mergeFlowRestrictions,
 	resolveModelDestination,
 	resolveToolDestination,

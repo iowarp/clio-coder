@@ -34,6 +34,8 @@ import { normalizedGitCommands } from "./git-command-normalization.js";
 import { classifyBashGit, splitGitChdir } from "./git-policy.js";
 import type { FlowRestrictionSet, InformationFlowPolicy } from "./information-flow.js";
 import { compileInformationFlowPolicy, flowRestrictionsForCall } from "./information-flow.js";
+import type { ApprovedFlowPolicy } from "./flow-policy-snapshot.js";
+import { recallApprovedFlowPolicy, rememberApprovedFlowPolicy } from "./flow-policy-snapshot.js";
 import { inertQuotedMatch } from "./literal-exemption.js";
 import {
 	type CompiledPathPolicy,
@@ -370,11 +372,33 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 		readOnlyPaths: [...clioSkillsRootPaths(), path.join(clioConfigDir(), "settings.yaml"), workspaceTrustDirectory()],
 	});
 	const pathPolicy = compilePathPolicy(expandedDefaults, projectPolicyRoot);
+	const flowTrusted = projectPolicy.trustVerdict === "trusted" && projectPolicy.valid;
+	// The approved flow section is remembered while trusted and consulted while
+	// not, so an unapproved edit cannot unlabel files an approved rule named.
+	// A snapshot that cannot be written or read is a refusal, not a fallback.
+	let flowRefusal: string | null = null;
+	let approvedFlow: ApprovedFlowPolicy | null = null;
+	if (flowTrusted && projectPolicy.hash !== null && projectPolicy.path !== null) {
+		if (projectPolicy.informationFlow.sources.length > 0) {
+			flowRefusal = rememberApprovedFlowPolicy(
+				projectPolicyRoot,
+				projectPolicy.path,
+				projectPolicy.hash,
+				projectPolicy.informationFlow,
+			);
+		}
+	} else {
+		const recalled = recallApprovedFlowPolicy(projectPolicyRoot);
+		if (recalled.kind === "approved") approvedFlow = recalled.approved;
+		else if (recalled.kind === "unavailable") flowRefusal = recalled.reason;
+	}
 	const informationFlow = compileInformationFlowPolicy(
 		projectPolicy.informationFlow,
 		projectPolicyRoot,
 		projectPolicy.hash,
-		projectPolicy.trustVerdict === "trusted" && projectPolicy.valid,
+		flowTrusted,
+		approvedFlow,
+		flowRefusal,
 	);
 	// Bash-read scanning tests argument tokens against zero-access entries only:
 	// read-only paths stay readable from bash by design, secrets do not.

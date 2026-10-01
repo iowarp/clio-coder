@@ -21,6 +21,7 @@ import {
 } from "../../domains/gateway/mcp/index.js";
 import type { ClassifierCall } from "../../domains/safety/action-classifier.js";
 import type { ImageContent } from "../../engine/types.js";
+import { mcpTransportIdentity } from "../../domains/safety/information-flow.js";
 import type { ToolRegistry, ToolResult, ToolSpec } from "../registry.js";
 
 /** An ACP client's declaration lives only for its hosted session. */
@@ -215,6 +216,8 @@ export interface McpCapabilitySource {
 	 * claims `a__b`'s capabilities for `a`.
 	 */
 	ownerIdOf(name: string): string | null;
+	/** The pinned launch identity of the declared server owning `name`, for information-flow recipients; null when unowned. */
+	transportOf(name: string): string | null;
 	/** Ids of the servers launched this session and still open. */
 	connectedIds(options?: { readyOnly?: boolean }): string[];
 	/**
@@ -871,6 +874,11 @@ export function createMcpCapabilitySource(options: McpCapabilitySourceOptions): 
 		},
 		ownerIdOf(name) {
 			return ownerOf(name)?.declaration.id ?? null;
+		},
+		transportOf(name) {
+			const declaration = ownerOf(name)?.declaration;
+			if (declaration === undefined) return null;
+			return mcpTransportIdentity(declaration.id, declaration.command, declaration.args, declaration.cwd, declaration.env);
 		},
 		connectedIds(options) {
 			return [...(states?.values() ?? [])]

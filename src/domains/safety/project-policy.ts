@@ -3,7 +3,12 @@ import { existsSync, readFileSync, realpathSync } from "node:fs";
 import path from "node:path";
 import { parse as parseYaml } from "yaml";
 import type { ActionClass } from "./action-classifier.js";
-import type { FlowSourceRuleInput, FlowTargetBinding, InformationFlowPolicyInput } from "./information-flow.js";
+import type {
+	FlowMcpBinding,
+	FlowSourceRuleInput,
+	FlowTargetBinding,
+	InformationFlowPolicyInput,
+} from "./information-flow.js";
 import { EMPTY_INFORMATION_FLOW_INPUT, flowEndpointIdentity, isFlowRecipientRef } from "./information-flow.js";
 import type { PathPolicyInput } from "./path-policy.js";
 
@@ -63,8 +68,9 @@ const ROOT_KEYS = new Set([
 	"informationFlow",
 	...PATH_POLICY_KEYS,
 ]);
-const INFORMATION_FLOW_KEYS = new Set(["recipients", "targets", "sources"]);
+const INFORMATION_FLOW_KEYS = new Set(["recipients", "targets", "mcp", "sources"]);
 const FLOW_TARGET_KEYS = new Set(["runtime", "endpoint"]);
+const FLOW_MCP_KEYS = new Set(["command", "args", "cwd", "env"]);
 const FLOW_SOURCE_KEYS = new Set(["id", "paths", "tools", "recipients"]);
 const COMMAND_KEYS = new Set([
 	"id",
@@ -250,6 +256,54 @@ function parseInformationFlow(value: unknown, errors: string[]): InformationFlow
 			}
 		}
 	}
+	const mcp: Record<string, FlowMcpBinding> = {};
+	if (value.mcp !== undefined) {
+		if (!isPlainRecord(value.mcp)) {
+			errors.push("informationFlow.mcp must be a mapping of server id to { command, args }");
+		} else {
+			for (const [id, raw] of Object.entries(value.mcp)) {
+				const label = `informationFlow.mcp.${id}`;
+				if (!ID_RE.test(id)) {
+					errors.push(`${label}: server id must match ${ID_RE}`);
+					continue;
+				}
+				if (!isPlainRecord(raw)) {
+					errors.push(`${label} must be a mapping`);
+					continue;
+				}
+				for (const key of Object.keys(raw)) {
+					if (!FLOW_MCP_KEYS.has(key)) errors.push(`${label}: unknown key '${key}'`);
+				}
+				const command = stringField(raw, "command", label, errors);
+				const args = raw.args === undefined ? [] : raw.args;
+				if (!Array.isArray(args) || args.some((arg) => typeof arg !== "string")) {
+					errors.push(`${label}.args must be an array of strings`);
+					continue;
+				}
+				const cwd = optionalStringField(raw, "cwd", label, errors);
+				if (cwd !== undefined && (path.isAbsolute(cwd) || path.normalize(cwd).split(path.sep).includes(".."))) {
+					errors.push(`${label}.cwd must be relative to the policy root and must not escape it`);
+					continue;
+				}
+				let env: Record<string, string> | undefined;
+				if (raw.env !== undefined) {
+					if (!isPlainRecord(raw.env) || Object.values(raw.env).some((item) => typeof item !== "string")) {
+						errors.push(`${label}.env must be a mapping of string to string`);
+						continue;
+					}
+					env = { ...(raw.env as Record<string, string>) };
+				}
+				if (command !== undefined) {
+					mcp[id] = {
+						command,
+						args: [...(args as string[])],
+						...(cwd !== undefined ? { cwd } : {}),
+						...(env !== undefined ? { env } : {}),
+					};
+				}
+			}
+		}
+	}
 	const sources: FlowSourceRuleInput[] = [];
 	if (value.sources !== undefined) {
 		if (!Array.isArray(value.sources)) {
@@ -267,17 +321,20 @@ function parseInformationFlow(value: unknown, errors: string[]): InformationFlow
 	}
 	const checkRefs = (refs: ReadonlyArray<string>, owner: string): void => {
 		for (const ref of refs) {
-			if (ref.startsWith("group:") && groups[ref.slice("group:".length)] === undefined) {
+			if (ref.startsWith("group:") && !Object.hasOwn(groups, ref.slice("group:".length))) {
 				errors.push(`${owner} names unknown recipient group '${ref}'`);
 			}
-			if (ref.startsWith("target:") && targets[ref.slice("target:".length)] === undefined) {
+			if (ref.startsWith("target:") && !Object.hasOwn(targets, ref.slice("target:".length))) {
 				errors.push(`${owner} names '${ref}' without an informationFlow.targets binding`);
+			}
+			if (ref.startsWith("mcp:") && !Object.hasOwn(mcp, ref.slice("mcp:".length))) {
+				errors.push(`${owner} names '${ref}' without an informationFlow.mcp binding`);
 			}
 		}
 	};
 	for (const [name, members] of Object.entries(groups)) checkRefs(members, `informationFlow.recipients.${name}`);
 	for (const rule of sources) checkRefs(rule.recipients, `informationFlow source '${rule.id}'`);
-	return { groups, targets, sources };
+	return { groups, targets, mcp, sources };
 }
 
 function parseRecipientList(value: unknown, label: string, errors: string[]): string[] | undefined {
@@ -290,7 +347,7 @@ function parseRecipientList(value: unknown, label: string, errors: string[]): st
 		const item = value[index];
 		if (typeof item !== "string" || !isFlowRecipientRef(item.trim())) {
 			errors.push(
-				`${label}[${index}] must be one of target:<id>, endpoint:<url>, origin:<scheme://host[:port]>, group:<name>`,
+				`${label}[${index}] must be one of target:<id>, endpoint:<url>, origin:<scheme://host[:port]>, mcp:<server>, group:<name>`,
 			);
 			continue;
 		}

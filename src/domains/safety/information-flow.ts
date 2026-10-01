@@ -15,12 +15,10 @@
  * - `endpoint:<url>`: one exact outbound URL identity (see
  *   {@link flowEndpointIdentity}).
  * - `origin:<scheme://host[:port]>`: every URL on that origin.
+ * - `mcp:<server>`: a declared MCP server, pinned by the policy's
+ *   `informationFlow.mcp.<server>` binding to the exact command and
+ *   arguments it is launched with. The live declaration must still match.
  * - `group:<name>`: a group from `informationFlow.recipients`.
- *
- * An MCP tool cannot be a recipient: its registry name is not pinned to the
- * server transport behind it, so only an `endpoint:`/`origin:` identity can
- * approve an outbound tool call, and an MCP call carrying restricted content
- * is refused.
  *
  * An empty recipient list forbids every transfer. A restriction carried on
  * content is a reference to the rule plus the recipients it allowed when the
@@ -40,6 +38,7 @@
  * on it, and it creates no approval.
  */
 import path from "node:path";
+import type { PathWalkMemo } from "../../core/path-canonical.js";
 import { canonicalizePath, canonicalizeRawPath, createPathWalkMemo } from "../../core/path-canonical.js";
 import { isMcpToolName, ToolNames } from "../../core/tool-names.js";
 import { expandPath } from "../../tools/path-utils.js";
@@ -90,6 +89,8 @@ export type FlowDestination =
 			/** Exact endpoint identity of the URL the tool was asked for, or null when it names none. */
 			readonly endpoint: string | null;
 			readonly endpointUnresolved?: boolean;
+			/** Pinned launch identity of the MCP server behind the tool, from {@link mcpTransportIdentity}. */
+			readonly mcp?: string | null;
 	  };
 
 export type FlowVerdictKind = "permitted" | "blocked" | "unresolved";
@@ -120,16 +121,38 @@ export interface FlowTargetBinding {
 	readonly endpoint: string;
 }
 
+/**
+ * The operator's pin of what an `mcp:<server>` recipient means: the exact
+ * launch vector. `cwd` is relative to the policy root and defaults to it;
+ * `env` defaults to none. The declaration's environment and working
+ * directory can change where a server connects, so both are part of the
+ * identity.
+ */
+export interface FlowMcpBinding {
+	readonly command: string;
+	readonly args: ReadonlyArray<string>;
+	readonly cwd?: string;
+	readonly env?: Readonly<Record<string, string>>;
+}
+
 export interface InformationFlowPolicyInput {
 	readonly groups: Readonly<Record<string, ReadonlyArray<string>>>;
 	readonly targets: Readonly<Record<string, FlowTargetBinding>>;
+	readonly mcp: Readonly<Record<string, FlowMcpBinding>>;
 	readonly sources: ReadonlyArray<FlowSourceRuleInput>;
 }
 
-export const EMPTY_INFORMATION_FLOW_INPUT: InformationFlowPolicyInput = { groups: {}, targets: {}, sources: [] };
+export const EMPTY_INFORMATION_FLOW_INPUT: InformationFlowPolicyInput = { groups: {}, targets: {}, mcp: {}, sources: [] };
+
+/** Own-property lookup so a name like `constructor` cannot resolve an inherited entry. */
+function own<T>(record: Readonly<Record<string, T>>, key: string): T | undefined {
+	return Object.hasOwn(record, key) ? record[key] : undefined;
+}
 
 interface CompiledSourceRule {
 	readonly id: string;
+	/** The policy bytes this rule was compiled from: the approved snapshot's or the live text's. */
+	readonly policyHash: string;
 	readonly paths: CompiledPathPolicy | null;
 	readonly tools: ReadonlyArray<string>;
 	/** Flattened, exact recipient identities; groups and target bindings are expanded here. */
@@ -142,9 +165,20 @@ export interface InformationFlowPolicy {
 	readonly policyHash: string | null;
 	readonly trusted: boolean;
 	readonly rules: ReadonlyArray<CompiledSourceRule>;
+	/**
+	 * Why this policy cannot vouch for any transfer right now: the approved
+	 * snapshot it depends on is unavailable, or the one it promised could not
+	 * be written. Every evaluation then refuses, whatever the rules say.
+	 */
+	readonly refusal: string | null;
 }
 
-export const EMPTY_INFORMATION_FLOW_POLICY: InformationFlowPolicy = { policyHash: null, trusted: false, rules: [] };
+export const EMPTY_INFORMATION_FLOW_POLICY: InformationFlowPolicy = {
+	policyHash: null,
+	trusted: false,
+	rules: [],
+	refusal: null,
+};
 
 export interface InformationFlowInput {
 	readonly restrictions: FlowRestrictionSet | ReadonlyArray<FlowRestrictionSet>;
@@ -153,7 +187,7 @@ export interface InformationFlowInput {
 	readonly policy: InformationFlowPolicy;
 }
 
-const RECIPIENT_PREFIXES = ["target:", "endpoint:", "origin:", "group:"] as const;
+const RECIPIENT_PREFIXES = ["target:", "endpoint:", "origin:", "mcp:", "group:"] as const;
 
 export function isFlowRecipientRef(value: string): boolean {
 	return RECIPIENT_PREFIXES.some((prefix) => value.startsWith(prefix) && value.length > prefix.length);
@@ -194,9 +228,23 @@ export function flowEndpointOrigin(identity: string): string | null {
 	}
 }
 
-/** The pinned, exact form a `target:<id>` recipient expands to. */
+/** The pinned, exact form a `target:<id>` recipient expands to: a JSON tuple, so no component can forge a delimiter. */
 export function pinnedTargetRef(targetId: string, runtime: string, endpoint: string | null): string {
-	return `target:${targetId}|${runtime}|${endpoint ?? "none"}`;
+	return `target:${JSON.stringify([targetId, runtime, endpoint])}`;
+}
+
+/** The exact launch identity of a declared MCP server, as the policy pins it and as the gateway reports it. */
+export function mcpTransportIdentity(
+	server: string,
+	command: string,
+	args: ReadonlyArray<string>,
+	cwd: string,
+	env: Readonly<Record<string, string>>,
+): string {
+	const sortedEnv = Object.keys(env)
+		.sort()
+		.map((key) => [key, env[key]]);
+	return `mcp:${JSON.stringify([server, command, [...args], cwd, sortedEnv])}`;
 }
 
 export function isFlowRestrictionSet(value: unknown): value is FlowRestrictionSet {
@@ -248,6 +296,8 @@ export function mergeFlowRestrictions(
 function expandRecipients(
 	refs: ReadonlyArray<string>,
 	input: InformationFlowPolicyInput,
+	policyRoot: string,
+	memo: PathWalkMemo,
 	visited: Set<string> = new Set(),
 ): { recipients: string[]; dangling: string[] } {
 	const recipients: string[] = [];
@@ -257,19 +307,19 @@ function expandRecipients(
 			const name = ref.slice("group:".length);
 			if (visited.has(name)) continue;
 			visited.add(name);
-			const members = input.groups[name];
+			const members = own(input.groups, name);
 			if (members === undefined) {
 				dangling.push(ref);
 				continue;
 			}
-			const nested = expandRecipients(members, input, visited);
+			const nested = expandRecipients(members, input, policyRoot, memo, visited);
 			recipients.push(...nested.recipients);
 			dangling.push(...nested.dangling);
 			continue;
 		}
 		if (ref.startsWith("target:")) {
 			const id = ref.slice("target:".length);
-			const binding = input.targets[id];
+			const binding = own(input.targets, id);
 			if (binding === undefined) {
 				dangling.push(ref);
 				continue;
@@ -280,6 +330,16 @@ function expandRecipients(
 				continue;
 			}
 			recipients.push(pinnedTargetRef(id, binding.runtime, endpoint));
+			continue;
+		}
+		if (ref.startsWith("mcp:")) {
+			const server = ref.slice("mcp:".length);
+			const binding = own(input.mcp, server);
+			if (binding === undefined) dangling.push(ref);
+			else {
+				const cwd = canonicalizePath(path.resolve(policyRoot, binding.cwd ?? "."), memo) ?? path.resolve(policyRoot, binding.cwd ?? ".");
+				recipients.push(mcpTransportIdentity(server, binding.command, binding.args, cwd, binding.env ?? {}));
+			}
 			continue;
 		}
 		if (ref.startsWith("endpoint:")) {
@@ -312,19 +372,46 @@ export function compileInformationFlowPolicy(
 	policyRoot: string,
 	policyHash: string | null,
 	trusted: boolean,
+	/** The last approved section, consulted only while the live policy is not trusted. */
+	approved?: { readonly policyHash: string; readonly informationFlow: InformationFlowPolicyInput } | null,
+	/** Why durable protection cannot be promised (snapshot unavailable or unwritable), or null. */
+	refusal: string | null = null,
 ): InformationFlowPolicy {
-	if (policyHash === null) return { policyHash, trusted: false, rules: [] };
-	const rules = input.sources.map((rule): CompiledSourceRule => {
-		const expanded = trusted ? expandRecipients(rule.recipients, input) : { recipients: [], dangling: [] };
-		return {
-			id: rule.id,
-			paths: rule.paths.length === 0 ? null : compilePathPolicy({ zeroAccessPaths: rule.paths }, policyRoot),
-			tools: rule.tools,
-			recipients: expanded.recipients,
-			dangling: expanded.dangling,
-		};
-	});
-	return { policyHash, trusted, rules };
+	const memo = createPathWalkMemo();
+	const compileRules = (
+		source: InformationFlowPolicyInput,
+		hash: string,
+		withRecipients: boolean,
+	): CompiledSourceRule[] =>
+		source.sources.map((rule): CompiledSourceRule => {
+			const expanded = withRecipients
+				? expandRecipients(rule.recipients, source, policyRoot, memo)
+				: { recipients: [], dangling: [] };
+			return {
+				id: rule.id,
+				policyHash: hash,
+				paths: rule.paths.length === 0 ? null : compilePathPolicy({ zeroAccessPaths: rule.paths }, policyRoot),
+				tools: rule.tools,
+				recipients: expanded.recipients,
+				dangling: expanded.dangling,
+			};
+		});
+	if (trusted && policyHash !== null) {
+		return { policyHash, trusted: true, rules: compileRules(input, policyHash, true), refusal };
+	}
+	// Not trusted: the approved rules govern as approved, and the unapproved
+	// text can only add sources that forbid every transfer. An approved rule the
+	// edit removed therefore still labels the files it named.
+	const approvedRules = approved ? compileRules(approved.informationFlow, approved.policyHash, true) : [];
+	const approvedIds = new Set(approvedRules.map((rule) => rule.id));
+	const unapprovedRules =
+		policyHash === null ? [] : compileRules(input, policyHash, false).filter((rule) => !approvedIds.has(rule.id));
+	return {
+		policyHash: policyHash ?? approved?.policyHash ?? null,
+		trusted: false,
+		rules: [...approvedRules, ...unapprovedRules],
+		refusal,
+	};
 }
 
 function toolMatches(pattern: string, tool: string): boolean {
@@ -375,7 +462,7 @@ export interface FlowSourceCall {
  * matches, which is the baseline for a project without rules.
  */
 export function flowRestrictionsForCall(policy: InformationFlowPolicy, call: FlowSourceCall): FlowRestrictionSet | null {
-	if (policy.policyHash === null || policy.rules.length === 0) return null;
+	if (policy.rules.length === 0) return null;
 	const restrictions: FlowRestriction[] = [];
 	const pathField = READ_PATH_TOOLS.get(call.tool);
 	const rawPath = pathField !== undefined ? call.args?.[pathField] : undefined;
@@ -403,7 +490,7 @@ export function flowRestrictionsForCall(policy: InformationFlowPolicy, call: Flo
 		if (evidence === null) continue;
 		restrictions.push({
 			ruleId: rule.id,
-			policyHash: policy.policyHash,
+			policyHash: rule.policyHash,
 			sourceRef: evidence,
 			recipients: [...rule.recipients],
 		});
@@ -422,6 +509,7 @@ function recipientAdmits(ref: string, destination: FlowDestination): boolean {
 	if (destination.kind === "model") {
 		return ref === pinnedTargetRef(destination.targetId, destination.runtime, destination.endpoint);
 	}
+	if (ref.startsWith("mcp:")) return destination.mcp !== undefined && destination.mcp !== null && ref === destination.mcp;
 	if (destination.endpoint === null) return false;
 	if (ref.startsWith("endpoint:")) return ref === `endpoint:${destination.endpoint}`;
 	if (ref.startsWith("origin:")) return ref === `origin:${flowEndpointOrigin(destination.endpoint) ?? ""}`;
@@ -456,10 +544,15 @@ export function evaluateInformationFlow(input: InformationFlowInput): Informatio
 		? mergeFlowRestrictions(...(input.restrictions as ReadonlyArray<FlowRestrictionSet>))
 		: (input.restrictions as FlowRestrictionSet);
 	const restrictions = carried?.restrictions ?? [];
+	const where = describeDestination(input.destination);
+	// A policy that cannot vouch refuses every transfer, restricted context or
+	// not: unlabeled restricted content may already be in context.
+	if (input.policy.refusal !== null) {
+		return { kind: "unresolved", reason: `${input.policy.refusal}; transfer to ${where} is refused`, ruleIds: [], evidence: [] };
+	}
 	if (restrictions.length === 0) {
 		return { kind: "permitted", reason: "no restricted source in context", ruleIds: [], evidence: [] };
 	}
-	const where = describeDestination(input.destination);
 	const ruleIds = [...new Set(restrictions.map((r) => r.ruleId))];
 	const evidence = [...new Set(restrictions.map((r) => r.sourceRef))];
 	const destinationUnresolved = input.destination.endpointUnresolved === true;
@@ -513,12 +606,17 @@ export function resolveModelDestination(input: {
  * a redirect hop is a new destination and is judged by the fetch loop with
  * the same evaluator. Null for a tool that sends nothing outward.
  */
-export function resolveToolDestination(tool: string, args: Record<string, unknown> | undefined): FlowDestination | null {
+export function resolveToolDestination(
+	tool: string,
+	args: Record<string, unknown> | undefined,
+	/** The gateway's pinned launch identity for an MCP tool, or null when it cannot name one. */
+	mcpTransport?: (tool: string) => string | null,
+): FlowDestination | null {
 	if (tool === ToolNames.WebFetch || tool === ToolNames.WebRead) {
 		const url = typeof args?.url === "string" ? args.url : null;
 		const endpoint = flowEndpointIdentity(url);
 		return { kind: "tool", tool, endpoint, ...(endpoint === null ? { endpointUnresolved: true } : {}) };
 	}
-	if (isMcpToolName(tool)) return { kind: "tool", tool, endpoint: null };
+	if (isMcpToolName(tool)) return { kind: "tool", tool, endpoint: null, mcp: mcpTransport?.(tool) ?? null };
 	return null;
 }
