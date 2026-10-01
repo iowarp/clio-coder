@@ -696,6 +696,17 @@ export const TOOL_ROWS: Readonly<Record<string, ToolRowSpec>> = {
 		object: (args) => plain(joinDefined("limitation:", text(args, "scope"))),
 		consumes: ["scope"],
 	},
+	// The proposed value is a JSON blob the model composed; the settled result
+	// states the same change as bounded `path: old → new` lines, so the row names
+	// the setting and leaves the blob out (p6/R4).
+	[ToolNames.ConfigureClio]: {
+		class: "mutate",
+		verbs: ["configuring", "configured"],
+		verbsFor: (args) => (args.action === "preview" ? ["previewing", "previewed"] : null),
+		object: (args) => plain(joinDefined("setting", text(args, "path"))),
+		consumes: ["action", "path", "value", "proposalId"],
+		nouns: ["setting", "settings"],
+	},
 	[ToolNames.Gateway]: {
 		class: "external",
 		verbs: CLASS_VERBS.external,
