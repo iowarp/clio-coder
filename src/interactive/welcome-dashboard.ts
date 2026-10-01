@@ -324,8 +324,8 @@ function actionRow(theme: ClioTheme, stats: WelcomeDashboardStats, room: number)
  * change model mid-session and an unlabeled frozen route would be read as the
  * current one. Readiness, latency and onboarding are dropped: the footer and the
  * composer rail own those, and this line's job after the first prompt is
- * identity. Identity sits next to the wordmark when it fits and is the first
- * thing dropped when it does not — display order and drop order are separate.
+ * identity. The version outlasts workspace details; the route survives even
+ * at widths too small for both.
  */
 function sessionRow(theme: ClioTheme, stats: WelcomeDashboardStats, version: string, width: number): string {
 	const mark = brandMark(theme);
@@ -333,24 +333,27 @@ function sessionRow(theme: ClioTheme, stats: WelcomeDashboardStats, version: str
 	if (width <= markWidth + 1) return truncateToWidth(mark, width, "", false);
 	const room = width - markWidth - 1;
 	const branch = workspaceBranch(stats);
+	const versionTag = theme.fg("annotation", `v${version}`);
+	const route = theme.fg(
+		"footerIdentity",
+		plainOneLine(formatTargetLabel(stats.targetLabel, stats.modelLabel, { abbreviate: false })),
+	);
+	const identity = `${theme.style("wordmark", "Clio Coder", { bold: true })} ${versionTag}`;
 	const units: Unit[] = [
 		{
-			text: `${theme.style("wordmark", "Clio Coder", { bold: true })} ${theme.fg("annotation", `v${version}`)}`,
-			rank: 3,
+			text: visibleWidth(identity) + visibleWidth(route) + 3 <= room ? identity : versionTag,
+			rank: 1,
 		},
 		{
-			text: theme.fg(
-				"footerIdentity",
-				plainOneLine(formatTargetLabel(stats.targetLabel, stats.modelLabel, { abbreviate: false })),
-			),
+			text: route,
 			rank: 0,
 		},
-		{ text: theme.fg("workspacePath", fitPathTail(workspacePath(stats), Math.max(8, Math.floor(room * 0.5)))), rank: 1 },
+		{ text: theme.fg("workspacePath", fitPathTail(workspacePath(stats), Math.max(8, Math.floor(room * 0.5)))), rank: 2 },
 		...(branch
 			? [
 					{
 						text: `${theme.fg("branch", branch)}${stats.workspace?.dirty === true ? theme.fg("warning", "*") : ""}`,
-						rank: 2,
+						rank: 3,
 					},
 				]
 			: []),
@@ -439,12 +442,15 @@ function welcomeHints(theme: ClioTheme, page: number, getKeyLabel?: WelcomeDashb
 /** Shared by the instant shell and hydrated UI: one stable, framed welcome. */
 export function buildWelcomeDashboardLines(
 	stats: WelcomeDashboardStats,
-	version: string,
+	versionLabel: string,
 	width: number,
 	mode: WelcomeDashboardMode,
 	hintPage = 0,
 	getKeyLabel?: WelcomeDashboardDeps["getKeyLabel"],
 ): string[] {
+	const version = versionLabel.replace(/ \(unreleased(?: · ([^)]+))?\)$/u, (_match, commit: string | undefined) =>
+		commit ? `·${commit}` : "",
+	);
 	const theme = clioTheme();
 	const safeWidth = Math.max(1, width);
 	if (mode === "session") return [padAnsi(sessionRow(theme, stats, version, safeWidth), safeWidth)];

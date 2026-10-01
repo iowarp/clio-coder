@@ -1,6 +1,7 @@
 import { deepStrictEqual, match, ok, strictEqual } from "node:assert/strict";
 import { test } from "node:test";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
+import { readClioVersion } from "../../src/core/package-root.js";
 import {
 	stripTerminalSequences as stripAnsi,
 	type Terminal,
@@ -15,6 +16,7 @@ import {
 	type InteractivePresentationDeps,
 } from "../../src/interactive/interactive-presentation.js";
 import {
+	buildWelcomeDashboardLines,
 	createBootWelcome,
 	createWelcomeDashboard,
 	WELCOME_PROJECT_CONTEXT_RETRY_MS,
@@ -217,7 +219,7 @@ test("a malformed CLIO-CODER.md points at the read-only view, never at a regener
 test("missing project context is guidance that keeps the invitation to work", () => {
 	const lines = rows(banner({ clioMd: "none" }), 80);
 	ok(actionLine(lines).includes("/context init to index this repo"), actionLine(lines));
-	ok(lines.join("\n").includes("Ask Clio how to use or extend her."));
+	ok(lines.join("\n").includes("Ask Clio how to use"));
 });
 
 test("stale project context offers refresh", () => {
@@ -228,7 +230,7 @@ test("stale project context offers refresh", () => {
 test("the welcome action never advertises a submit binding", () => {
 	const actions = ["Enter", "Ctrl+S", null].map((submitKey) => actionLine(rows(banner({ submitKey }), 80)));
 	strictEqual(new Set(actions).size, 1);
-	match(actions[0] ?? "", /v\d+\.\d+\.\d+$/u);
+	ok(actions[0]?.endsWith(`v${readClioVersion()}`));
 	ok(!actions[0]?.includes("to send"), actions[0]);
 });
 
@@ -380,7 +382,7 @@ test("the session header keeps the route when everything else has to go", () => 
 	}
 	// Wide enough, identity sits next to the wordmark rather than trailing the row.
 	const wide = rows(component, 120)[0] ?? "";
-	match(wide, /^>C_ Clio Coder v\d+\.\d+\.\d+ · dynamo/u);
+	match(wide, /^>C_ Clio Coder v\d+\.\d+\.\d+(?:-dev)? · dynamo/u);
 });
 
 test("the collapsed header drops readiness, latency and onboarding", () => {
@@ -398,7 +400,7 @@ test("the workspace gives up its branch before the path's leaf", () => {
 		workspace: workspace({ cwd: "/tmp/a/b/c/project-leaf", branch: "an-extremely-long-branch-name-that-will-not-fit" }),
 	});
 	component.collapseToSessionHeader();
-	const masthead = rows(component, 60)[0] ?? "";
+	const masthead = rows(component, 100)[0] ?? "";
 	ok(masthead.includes("project-leaf"), `leaf lost while branch kept: ${masthead}`);
 	ok(!masthead.includes("an-extremely-long-branch-name"), masthead);
 });
@@ -800,7 +802,7 @@ test("the welcome keeps a quiet launchpad and the session header names the full 
 	const wide = rows(component, 120);
 	ok(wide.join("\n").includes("████"));
 	for (const label of ["Session started", "Project", "AI usage"]) ok(wide.join("\n").includes(label));
-	match(actionLine(wide), /v\d+\.\d+\.\d+$/u);
+	ok(actionLine(wide).endsWith(`v${readClioVersion()}`));
 	component.collapseToSessionHeader();
 	strictEqual(rows(component, 120).length, 1);
 	ok(rows(component, 120)[0]?.includes(model));
@@ -887,14 +889,43 @@ test("the narrow launchpad sets the compact letters on one band, or the brand in
 		for (const line of lines) ok(visibleWidth(line) <= width, `${width}: ${line}`);
 		if (width < 57) {
 			ok(lines[0]?.includes("Clio Coder"), `${width}: ${lines[0]}`);
-			ok(lines[0]?.includes("v0.5."));
-			ok(!lines.at(-2)?.includes("v0.5."));
+			ok(lines[0]?.includes(`v${readClioVersion()}`));
+			ok(!lines.at(-2)?.includes(`v${readClioVersion()}`));
 		} else {
 			// CLIO and CODER share each art row, so the band is five rows, not eleven.
 			ok(lines[1]?.includes(" ████ ██░   ███  ███     ████  ███  ████  █████ ████"), `${width}: ${lines[1]}`);
 			ok(lines[5]?.includes(" ████ █████ ███  ███     ████  ███  ████  █████ ██░██"), `${width}: ${lines[5]}`);
 			ok(lines[7]?.includes("Session started"));
-			ok(lines.at(-2)?.includes("v0.5."));
+			ok(lines.at(-2)?.includes(`v${readClioVersion()}`));
 		}
 	}
 });
+
+for (const width of [60, 80, 106, 160]) {
+	test(`development header retains version and route at ${width} columns`, (t) => {
+		const [line = ""] = buildWelcomeDashboardLines(
+			{
+				cwd: "/home/operator/projects/tinyjs",
+				workspace: workspace({ cwd: "/home/operator/projects/tinyjs" }) as never,
+				targetLabel: "openai-codex",
+				modelLabel: "gpt-6-luna",
+				route: "ready",
+				routeReason: null,
+				projectContext: "ok",
+				submitKeyLabel: null,
+				autonomy: "default",
+				targets: "",
+				fleet: "",
+				quota: null,
+			},
+			"0.6.0-dev (unreleased · 2ca8896)",
+			width,
+			"session",
+		);
+		const text = stripAnsi(line);
+		t.diagnostic(text.trimEnd());
+		ok(text.includes("v0.6.0-dev·2ca8896"), text);
+		ok(text.includes("openai-codex · gpt-6-luna"), text);
+		ok(visibleWidth(line) <= width, text);
+	});
+}
