@@ -176,7 +176,7 @@ try {
 	const dialogAxe = await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa", "wcag21aa"]).analyze();
 	assert.deepEqual(dialogAxe.violations, [], "Accessible screenshot dialog");
 	await page.locator('[data-media="next"]').click();
-	assert.match(await page.locator("#media-caption").innerText(), /conversation/);
+	assert.match(await page.locator("#media-caption").innerText(), /terminal at start/);
 	await page.locator('[data-media="zoom"]').click();
 	await page.waitForFunction(() => {
 		const viewport = document.querySelector(".image-view");
@@ -185,7 +185,7 @@ try {
 	assert.equal(await page.locator('[data-media="zoom"]').getAttribute("aria-pressed"), "true");
 	await page.locator('[data-media="zoom"]').click();
 	await page.keyboard.press("ArrowRight");
-	assert.match(await page.locator("#media-caption").innerText(), /terminal/);
+	assert.match(await page.locator("#media-caption").innerText(), /through verify/);
 	await page.keyboard.press("Escape");
 	assert.equal(await page.locator(".media-dialog").evaluate((el) => el.open), false);
 	assert.equal(
