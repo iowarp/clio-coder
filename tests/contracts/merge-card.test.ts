@@ -68,5 +68,5 @@ test("a branch that changes protected paths is not offered a Merge, and the card
 	);
 	strictEqual(labelAt(asked[0]), "Keep branch");
 	strictEqual(asked[0]?.question.includes("docs/policy.md"), true);
-	deepStrictEqual(outcome, { choice: "keep", cause: "answered" });
+	deepStrictEqual(outcome, { choice: "keep", cause: "unlisted" });
 });
