@@ -64,6 +64,13 @@ export interface ConsultDeps {
 	systemOne: Pick<SystemOne, "run">;
 	/** The workspace file paths are resolved against and contained in. */
 	cwd?: () => string;
+	/**
+	 * The information-flow restrictions the evidence carries: the turn's own plus
+	 * those of the files read here, which reach the engine without passing a read
+	 * tool result. Supplied by the composition root from the safety domain; its
+	 * value is passed to System One unread. A throw withholds the call.
+	 */
+	flowFor?: (files: ReadonlyArray<string>, options: ToolInvokeOptions | undefined) => unknown;
 }
 
 const KINDS = ["yesNo", "pick", "rate"] as const;
@@ -183,6 +190,8 @@ function parseQuestion(raw: unknown): ParsedQuestion | string {
 interface EvidenceFiles {
 	readonly files: Record<string, string>;
 	readonly skipped: Array<{ path: string; reason: string }>;
+	/** Resolved real paths of every file in `files`, for the flow check. */
+	readonly realPaths?: string[];
 }
 
 function isInside(root: string, real: string): boolean {
@@ -214,6 +223,7 @@ async function readEvidenceFiles(
 	commitObservationReservation(reservation);
 	try {
 		const files: Record<string, string> = {};
+		const realPaths: string[] = [];
 		const skipped: Array<{ path: string; reason: string }> = [];
 		const filter = createObservationPathFilter(cwd, options?.allowsObservationPath);
 		const tally = createRedactionTally();
@@ -279,12 +289,13 @@ async function readEvidenceFiles(
 				}
 				const text = [...decoded].slice(0, CONSULT_LIMITS.fileChars).join("");
 				files[key] = redactSecretsText(text, tally);
+				realPaths.push(real);
 				spent += Buffer.byteLength(files[key] ?? "", "utf8");
 			} catch (err) {
 				skip(err instanceof Error ? err.message : String(err));
 			}
 		}
-		return { files, skipped };
+		return { files, skipped, realPaths };
 	} finally {
 		releaseObservation(reservation);
 	}
@@ -349,6 +360,16 @@ export function createConsultTool(deps: ConsultDeps): ToolSpec {
 				if ("kind" in read) return read;
 				evidence = read;
 			}
+			let flow: unknown;
+			if (deps.flowFor !== undefined) {
+				try {
+					flow = deps.flowFor(evidence.realPaths ?? [], options);
+				} catch (err) {
+					return refuse(
+						`the evidence's information-flow restrictions could not be resolved (${err instanceof Error ? err.message : String(err)}); nothing was sent`,
+					);
+				}
+			}
 			turn.calls += 1;
 			const remaining = CONSULT_LIMITS.callsPerTurn - turn.calls;
 			const questions = Object.fromEntries(parsed.map((entry) => [entry.id, entry.question]));
@@ -358,6 +379,7 @@ export function createConsultTool(deps: ConsultDeps): ToolSpec {
 				{
 					...(options?.toolCallId !== undefined && options.toolCallId.length > 0 ? { ref: options.toolCallId } : {}),
 					...(options?.signal !== undefined ? { signal: options.signal } : {}),
+					...(flow !== undefined ? { flow } : {}),
 				},
 			);
 			const evidenceNote = {
