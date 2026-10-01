@@ -14,7 +14,7 @@
 
 import { existsSync, readFileSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
-import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
+import { parse as parseYaml } from "yaml";
 import type { AutonomyLevel } from "../domains/safety/autonomy.js";
 import { AUTONOMY_LEVELS } from "../domains/safety/autonomy.js";
 import type { SiteId } from "../domains/system-one/types.js";
@@ -38,6 +38,7 @@ import { SANDBOX_MODES } from "./sandbox/types.js";
 import { withStateFileLockSync } from "./state-file-lock.js";
 import { MAX_TIMER_DELAY_MS } from "./timers.js";
 import { clioConfigDir, resolveClioDirs } from "./xdg.js";
+import { renderYamlPreservingLayout } from "./yaml-preserve.js";
 
 export type ClioSettings = typeof DEFAULT_SETTINGS;
 
@@ -2442,7 +2443,17 @@ export function readSettings(): ClioSettings {
  * path and it always holds the lock.
  */
 function persistSettings(document: unknown): void {
-	safeResourceWrite(settingsPath(), stringifyYaml(document), { encoding: "utf8", mode: SETTINGS_FILE_MODE });
+	const path = settingsPath();
+	let existing: string | null = null;
+	try {
+		existing = readFileSync(path, "utf8");
+	} catch {
+		// No readable file yet, so there is no layout to keep; render it fresh.
+	}
+	safeResourceWrite(path, renderYamlPreservingLayout(existing, document), {
+		encoding: "utf8",
+		mode: SETTINGS_FILE_MODE,
+	});
 }
 
 /**

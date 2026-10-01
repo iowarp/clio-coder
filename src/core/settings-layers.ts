@@ -21,7 +21,7 @@
 
 import { existsSync, lstatSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
+import { parse as parseYaml } from "yaml";
 import {
 	type AutonomyLevel,
 	autonomyRank,
@@ -46,6 +46,7 @@ import {
 	projectSurfaceTrustNotice,
 	recordProjectSurfaceTrust,
 } from "./workspace-trust.js";
+import { renderYamlPreservingLayout } from "./yaml-preserve.js";
 
 export type SettingsOrigin = "built-in" | "user" | "project" | "project.local" | "cli";
 
@@ -511,7 +512,7 @@ export function updateProjectLocalSettings(cwd: string, mutate: SettingsMutator)
 		if (stackIssues.length > 0 || !deepEquals(final, validation.settings)) {
 			throw new Error("project settings save would not produce the requested effective settings");
 		}
-		const bytes = stringifyYaml(saved);
+		const bytes = renderYamlPreservingLayout(beforeSurface.files[1]?.text ?? null, saved);
 		const teamBefore = beforeSurface.files[0]?.hash;
 		safeResourceWrite(localFile, bytes, { mode: 0o600 });
 		const afterSurface = captureProjectSurface(cwd, "settings");

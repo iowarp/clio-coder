@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import { parse } from "yaml";
@@ -158,4 +158,21 @@ test("TUI saves JSON maps with dotted user keys as whole collections", () => {
 		clear.leaves.map((leaf) => leaf.path),
 		["interface.keybindings"],
 	);
+});
+
+test("saved edits keep the operator's comments, quoting and untouched lines", async (t) => {
+	const env = await isolateClioEnv("clio-settings-layout-");
+	t.after(() => env.restore());
+	updateSettings(() => fixture());
+	const file = join(env.dir, "config", "settings.yaml");
+	const original = `# operator comment\n${readFileSync(file, "utf8").replace("target: first", "target: 'first'")}`;
+	writeFileSync(file, original);
+	saveControl("safety.limits.sessionCostUsd", "7");
+	const next = readFileSync(file, "utf8");
+	assert.ok(next.startsWith("# operator comment\n"));
+	assert.ok(next.includes("target: 'first'"));
+	assert.ok(/sessionCostUsd: 7\b/u.test(next));
+	const before = new Set(original.split("\n"));
+	const changed = next.split("\n").filter((line) => !before.has(line));
+	assert.ok(changed.length <= 3, `only the saved leaf moves, got ${JSON.stringify(changed)}`);
 });
