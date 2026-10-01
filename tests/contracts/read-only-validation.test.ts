@@ -2,6 +2,7 @@ import { deepStrictEqual, doesNotMatch, match, strictEqual } from "node:assert/s
 import { readFileSync } from "node:fs";
 import { it } from "node:test";
 import { resultContractShape, validateResultContract } from "../../src/domains/agents/result-contract.js";
+import { mergeWithheldDetail } from "../../src/domains/dispatch/merge-gate.js";
 import { typedValidationFactsFromVerifyCalls } from "../../src/domains/dispatch/receipt-findings.js";
 import { groundClaimedValidations } from "../../src/domains/dispatch/validation-grounding.js";
 import { createRunEffectsRecorder } from "../../src/domains/safety/run-effects.js";
@@ -169,4 +170,20 @@ it("editing reports distinguish lack of measured checks from execution success",
 		strictEqual(result.conformance, "pass");
 		strictEqual(result.quality, "unmeasured");
 	}
+});
+
+it("withholds requested validation even when the worker omits declaredChecks", () => {
+	const input = {
+		quality: "unmeasured",
+		hostStatus: undefined,
+		contract: { kind: "mutation-report" as const },
+		output: '{"validations":[]}',
+		branch: "clio-coder/task/check",
+		task: "Implement parseDuration. The worker runs npm test and commits.",
+		executedCheckingCalls: 0,
+	};
+	match(mergeWithheldDetail(input) ?? "", /requested validation.*executed no check/u);
+	strictEqual(mergeWithheldDetail({ ...input, hostStatus: "verified" }), null);
+	strictEqual(mergeWithheldDetail({ ...input, executedCheckingCalls: 1 }), null);
+	strictEqual(mergeWithheldDetail({ ...input, task: "Edit the parser." }), null);
 });

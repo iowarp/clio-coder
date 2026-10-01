@@ -2140,9 +2140,8 @@ function effectiveToolNames(
 	target: ResolvedTarget,
 	/**
 	 * True when this run declares write roots. The confinement rail refuses
-	 * shell, verify, and dispatch by name, so offering them would hand the
-	 * model a tool whose every call is refused; it spends budget discovering
-	 * that and reads the refusal as something to retry.
+	 * unconfined execution at admission. Keep bash and verify visible so a
+	 * sandboxed check can run and a blocked check yields explicit evidence.
 	 */
 	writeConfined = false,
 	/**
@@ -2174,7 +2173,7 @@ function effectiveToolNames(
 			tool !== ToolNames.Consult &&
 			!(networkStripped && (tool === ToolNames.WebFetch || tool === ToolNames.WebRead)) &&
 			!denied.has(tool) &&
-			!(writeConfined && WRITE_ROOT_REFUSED_TOOLS.has(tool)) &&
+			!(writeConfined && WRITE_ROOT_REFUSED_TOOLS.has(tool) && tool !== ToolNames.Bash && tool !== ToolNames.Verify) &&
 			(target.runtime.id !== "claude-sdk" || isClaudeCanonicalTool(tool)),
 	);
 	// A native worker reaches a gateway-placed capability (git, web_fetch, an
@@ -7408,6 +7407,8 @@ export function createDispatchBundle(
 								contract: appliedResultContract,
 								output: capturedOutput?.state === "final" ? capturedOutput.text : null,
 								branch: req.taskWorktree.branch,
+								task: req.task,
+								executedCheckingCalls: countCheckingCalls(toolStats),
 							}
 						: null;
 				const withheldDetail = mergeGateInput === null ? null : mergeWithheldDetail(mergeGateInput);

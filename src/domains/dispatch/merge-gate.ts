@@ -12,6 +12,8 @@ export interface MergeGateInput {
 	/** The worker's captured final answer. */
 	output: string | null;
 	branch: string;
+	task?: string;
+	executedCheckingCalls?: number;
 }
 
 export function boundedCheck(check: string): string {
@@ -45,6 +47,18 @@ export function mergeGateVerdict(input: MergeGateInput): MergeGateVerdict | null
 		return {
 			reason: "the worker's own report lists a failing validation",
 			appliesWhen: "if that failure was already there",
+		};
+	}
+	if (
+		input.executedCheckingCalls === 0 &&
+		input.task !== undefined &&
+		/\b(?:run|runs|running|execute|validate|verify|test)\b[^.\n]{0,100}\b(?:tests?|checks?|validation|npm|pnpm|pytest|vitest|jest|tsc|lint|typecheck)\b/iu.test(
+			input.task,
+		)
+	) {
+		return {
+			reason: "the task requested validation but the worker executed no check",
+			appliesWhen: "once the requested validation passes",
 		};
 	}
 	if (input.contract === null) return null;
