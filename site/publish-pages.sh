@@ -47,7 +47,9 @@ else
   git -C "$repo_dir" worktree add --quiet --orphan -b "$branch" "$scratch/branch"
 fi
 # Dotfiles other than .nojekyll are nginx and builder leftovers, not site content.
-rsync -a --delete --exclude='/.git' --exclude='/.clio-coder-*' "$scratch/public/" "$scratch/branch/"
+# --checksum: a changed file with the same size and an mtime in the same second
+# as the checkout would otherwise be skipped and stay stale on the branch.
+rsync -a --checksum --delete --exclude='/.git' --exclude='/.clio-coder-*' "$scratch/public/" "$scratch/branch/"
 git -C "$scratch/branch" add -A
 if git -C "$scratch/branch" diff --cached --quiet; then
   printf '%s\n' 'The published branch already matches this build.'
