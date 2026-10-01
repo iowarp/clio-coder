@@ -675,6 +675,7 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 	const contractCwd = input.cwd ?? process.cwd();
 	let resultContractRepairsQueued = 0;
 	let toolExecutionsStarted = 0;
+	let zeroToolRepairQueued = false;
 	let resultContractRevisionActive = false;
 	let acceptedHelperResult: StructuredHelperResult | null = null;
 	let helperTerminalPhase = false;
@@ -1209,7 +1210,7 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 			// the run had left. A second empty reply passes through to that outcome.
 			const zeroToolViolation =
 				toolExecutionsStarted === 0 &&
-				resultContractRepairsQueued === 0 &&
+				!zeroToolRepairQueued &&
 				contract.kind === "mutation-report" &&
 				input.readOnly !== true &&
 				workerBudget.mode === "advisory" &&
@@ -1217,13 +1218,18 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 				activeWorkerTools.some((tool) => tool === ToolNames.Edit || tool === ToolNames.Write)
 					? `no tool was called, so none of the assignment was done. The admitted tools are ${activeWorkerTools.join(", ")}, and they include ${activeWorkerTools.filter((tool) => tool === ToolNames.Edit || tool === ToolNames.Write).join(" and ")}. Inspect the workspace and do the assignment with them. If a tool refuses a call, report that refusal as the limitation.`
 					: null;
+			// A second no-work reply belongs to worker_no_work, even when its
+			// report is malformed. The p8/S1 recovery must not spend shape repairs.
 			const violation =
-				zeroToolViolation ??
-				terminalContractViolation(contract, event.message, contractCwd, groundingRanges(), runEffects.snapshot());
+				zeroToolRepairQueued && toolExecutionsStarted === 0
+					? null
+					: (zeroToolViolation ??
+						terminalContractViolation(contract, event.message, contractCwd, groundingRanges(), runEffects.snapshot()));
 			if (violation !== null) {
-				if (resultContractRepairsQueued < RESULT_CONTRACT_REPAIR_LIMIT) {
-					resultContractRepairsQueued += 1;
-					if (!resultContractRevisionActive && workerBudget.revision !== undefined) {
+				if (zeroToolViolation !== null || resultContractRepairsQueued < RESULT_CONTRACT_REPAIR_LIMIT) {
+					if (zeroToolViolation !== null) zeroToolRepairQueued = true;
+					else resultContractRepairsQueued += 1;
+					if (zeroToolViolation === null && !resultContractRevisionActive && workerBudget.revision !== undefined) {
 						resultContractRevisionActive = loopGuardRegistration.extendWorkerToolCallPhase(workerBudget.revision);
 						if (resultContractRevisionActive) {
 							synthesisToolLock = false;
@@ -1246,7 +1252,7 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 					const repairInput = {
 						contract,
 						reason: violation,
-						attempt: resultContractRepairsQueued,
+						attempt: zeroToolViolation !== null ? 1 : resultContractRepairsQueued,
 						anchors: observedReadAnchors(),
 						toolsAvailable: revisionToolsAvailable,
 					};

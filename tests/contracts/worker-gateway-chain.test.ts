@@ -369,6 +369,34 @@ test("a chained write the policy refused is reported as refused, not as never at
 	ok(/only write this run attempted was refused: outside\.txt/u.test(exhausted?.detail ?? ""), exhausted?.detail);
 });
 
+test("zero-tool recovery leaves both result-contract repairs available", { timeout: 20_000 }, async () => {
+	const { result, events, requests } = await runWorker(
+		[
+			{ text: "I cannot edit this file." },
+			[{ name: "write", arguments: JSON.stringify({ path: "fixed.ts", content: "export const fixed = true;\n" }) }],
+			{ text: "The edit is done." },
+			{ text: JSON.stringify({ mutatedPaths: ["fixed.ts"], validations: [{ name: "test", passed: true }] }) },
+			{ text: JSON.stringify({ mutatedPaths: ["fixed.ts"], validations: [] }) },
+		],
+		{ agentId: "coder", allowedTools: ["write", "read"], resultContract: { kind: "mutation-report" } },
+	);
+	strictEqual(result.exitCode, 0, JSON.stringify(outcomes(events)));
+	strictEqual(requests, 5, "recovery plus two independent terminal repairs");
+});
+
+test("a second zero-tool reply ends without repairing its malformed report", { timeout: 20_000 }, async () => {
+	const { result, events, requests } = await runWorker(
+		[{ text: "I cannot edit this file." }, { text: "Still cannot edit." }],
+		{ agentId: "coder", allowedTools: ["write", "read"], resultContract: { kind: "mutation-report" } },
+	);
+	strictEqual(result.exitCode, 0, "the host seals worker_no_work from the empty tool activity");
+	strictEqual(requests, 2);
+	strictEqual(
+		outcomes(events).some((event) => event.outcomeCode === "result_contract_exhausted"),
+		false,
+	);
+});
+
 const capBudget = (hardCap: number): Partial<WorkerRunInput> => ({
 	// toolCalls above the cap disables the soft phase, so the lifetime cap is the only bound.
 	budget: { mode: "enforced", toolCalls: hardCap + 1, readReserve: 0, synthesis: true, hardCap },
