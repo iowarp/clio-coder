@@ -6,6 +6,7 @@ import {
 	cancelledAskUserResult,
 	unavailableAskUserResult,
 } from "../tools/ask-user.js";
+import type { HarnessHold } from "../tools/registry.js";
 import type { OverlayState } from "./overlay-key-routing.js";
 import { type AskUserOverlaySession, openAskUserOverlay } from "./overlays/ask-user.js";
 
@@ -71,6 +72,8 @@ export function createOverlayAskUserLifecycle(deps: OverlayAskUserLifecycleDeps)
 	 * alone: the card is not the model's to cancel, close, or interleave with.
 	 */
 	let harnessHold: Promise<void> | null = null;
+	let heldBy: HarnessHold | null = null;
+	let releaseHold: () => void = () => {};
 	const openSession = deps.openAskUserOverlay ?? openAskUserOverlay;
 
 	const refresh = (): void => {
@@ -134,26 +137,50 @@ export function createOverlayAskUserLifecycle(deps: OverlayAskUserLifecycleDeps)
 		return signal?.aborted !== true;
 	};
 
+	/**
+	 * Release the screen a harness card held: close its session and let a waiting
+	 * model ask through. Idempotent, because an explicit hold ends it from the
+	 * card's owner and a one-round card from the round's own `finally`.
+	 */
+	const endHarness = (): void => {
+		if (harnessHold === null) return;
+		harnessHold = null;
+		heldBy = null;
+		const release = releaseHold;
+		releaseHold = () => {};
+		closeSession();
+		release();
+	};
+
 	const askAsHarness = async (
 		questions: Parameters<AskUserHandler>[0],
 		invokeOptions: Parameters<AskUserHandler>[1],
 	): ReturnType<AskUserHandler> => {
 		const signal = invokeOptions?.signal;
-		// The model's interview keeps the overlay open between rounds, and another
-		// card may be on screen. A card never takes over or closes a session it
-		// did not open; the caller retries once the screen is free.
-		if (session !== null || harnessHold !== null) return unavailableAskUserResult();
-		const activeSession = ensureSession();
-		if (!activeSession) return unavailableAskUserResult();
-		let release: () => void = () => {};
-		harnessHold = new Promise<void>((resolve) => {
-			release = resolve;
-		});
+		const hold = invokeOptions?.harnessHold;
+		// A card's later rounds (the discard confirm, and the card again after Back)
+		// continue the reservation its first round took, so a model question cannot
+		// take the screen between them.
+		const continuing = hold !== undefined && heldBy === hold && session !== null;
+		if (!continuing) {
+			// The model's interview keeps the overlay open between rounds, and another
+			// card may be on screen. A card never takes over or closes a session it
+			// did not open; the caller retries once the screen is free.
+			if (session !== null || harnessHold !== null) return unavailableAskUserResult();
+			if (ensureSession() === null) return unavailableAskUserResult();
+			harnessHold = new Promise<void>((resolve) => {
+				releaseHold = resolve;
+			});
+			heldBy = hold ?? null;
+			hold?.onRelease(endHarness);
+		}
+		const activeSession = session;
+		if (activeSession === null) return unavailableAskUserResult();
 		// Esc on the card answers only the card. It never marks the turn's
 		// interview cancelled.
 		pendingCancel = () => activeSession.cancel();
 		// An abort dismisses only this round: the session resolves it as cancelled
-		// and the close below takes the overlay down.
+		// and the card's owner releases the screen.
 		const onAbort = (): void => activeSession.cancel();
 		signal?.addEventListener("abort", onAbort, { once: true });
 		try {
@@ -162,9 +189,7 @@ export function createOverlayAskUserLifecycle(deps: OverlayAskUserLifecycleDeps)
 			});
 		} finally {
 			signal?.removeEventListener("abort", onAbort);
-			harnessHold = null;
-			closeSession();
-			release();
+			if (hold === undefined) endHarness();
 		}
 	};
 

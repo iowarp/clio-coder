@@ -318,9 +318,39 @@ export interface RegistryDeps {
 	gateParks?: boolean;
 }
 
+/**
+ * Keeps the operator's screen reserved across the rounds of one harness card, so
+ * a model question cannot take it between two of them. Created and released by
+ * the card's owner, never derived from model arguments.
+ */
+export interface HarnessHold {
+	/** Ends the reservation; later calls do nothing. */
+	release(): void;
+	/** Runs once when the reservation ends, immediately if it already has. */
+	onRelease(listener: () => void): void;
+}
+
+export function createHarnessHold(): HarnessHold {
+	let released = false;
+	const listeners: Array<() => void> = [];
+	return {
+		release() {
+			if (released) return;
+			released = true;
+			for (const listener of listeners.splice(0)) listener();
+		},
+		onRelease(listener) {
+			if (released) listener();
+			else listeners.push(listener);
+		},
+	};
+}
+
 export interface ToolInvokeOptions {
 	/** An invocation the harness runner makes on its own decision; never derived from model arguments. */
 	origin?: "harness";
+	/** With `origin: "harness"`, the card whose rounds this is. */
+	harnessHold?: HarnessHold;
 	/** Host-owned task scope, preserved on nested gateway calls. */
 	turnConstraints?: TurnConstraints;
 	/** Registry-owned filter bound to the active compiled safety policy. */

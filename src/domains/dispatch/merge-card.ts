@@ -1,4 +1,5 @@
 import type { AskUserHandler, AskUserQuestion, AskUserResult } from "../../tools/ask-user.js";
+import { createHarnessHold } from "../../tools/registry.js";
 import type { DecisionPresentation } from "../safety/decision-presentation.js";
 import { boundedCheck } from "./merge-gate.js";
 
@@ -166,7 +167,10 @@ export async function askMergeCard(deps: MergeCardDeps, input: MergeCardInput): 
 	const onParentAbort = (): void => controller.abort();
 	if (deps.signal?.aborted === true) controller.abort();
 	deps.signal?.addEventListener("abort", onParentAbort, { once: true });
-	const options = { origin: "harness" as const, signal: controller.signal };
+	// Both rounds of the card, and the card again after Back, hold the screen
+	// together: a waiting model question must not slip in between them.
+	const hold = createHarnessHold();
+	const options = { origin: "harness" as const, signal: controller.signal, harnessHold: hold };
 	const keep = (cause: MergeCardCause): MergeCardOutcome => ({ choice: "keep", cause });
 	const stopped = (): MergeCardOutcome => keep(timedOut ? "timeout" : "aborted");
 	const waitForScreen = (): Promise<void> =>
@@ -207,6 +211,7 @@ export async function askMergeCard(deps: MergeCardDeps, input: MergeCardInput): 
 			if (confirmed.cancelled !== true && chose(confirmed, DELETE)) return { choice: "discard", cause: "answered" };
 		}
 	} finally {
+		hold.release();
 		clearTimeout(timer);
 		deps.signal?.removeEventListener("abort", onParentAbort);
 	}

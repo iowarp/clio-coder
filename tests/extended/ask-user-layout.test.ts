@@ -10,6 +10,7 @@ import {
 	optionAsksForText,
 } from "../../src/interactive/overlays/ask-user.js";
 import type { AskUserQuestion, AskUserResult } from "../../src/tools/ask-user.js";
+import { createHarnessHold } from "../../src/tools/registry.js";
 
 const ENTER = "\r";
 const DOWN = "\u001b[B";
@@ -558,4 +559,31 @@ test("a permission prompt over an interview that ends restores nothing instead o
 	transitions.close();
 	strictEqual(transitions.state, "closed", "no key is left swallowed by an ask-user state with no session");
 	strictEqual(transitions.handle, null);
+});
+
+test("a harness card holds the screen across its rounds, so a waiting model question cannot split them", async () => {
+	const { lifecycle, sessions } = lifecycleFixture();
+	const hold = createHarnessHold();
+	const card = { origin: "harness" as const, harnessHold: hold };
+	const first = lifecycle.handler([{ question: "Merge?", options: [{ label: "Discard" }] }], card);
+	await tick();
+	sessions[0]?.answer("Discard");
+	await first;
+	const modelAsk = lifecycle.handler([{ question: "Model?", options: [{ label: "Yes" }] }], MODEL_CALL);
+	await tick();
+	const confirm = lifecycle.handler([{ question: "Delete?", options: [{ label: "Back" }] }], card);
+	await tick();
+	strictEqual(sessions.length, 1, "the confirm continues the card on its own screen");
+	deepStrictEqual(sessions[0]?.asked, ["Merge?", "Delete?"]);
+	sessions[0]?.answer("Back");
+	await confirm;
+	hold.release();
+	await tick();
+	strictEqual(sessions[0]?.closed, true);
+	strictEqual(sessions.length, 2, "the model's waiting question takes the screen once the card is done");
+	deepStrictEqual(sessions[1]?.asked, ["Model?"]);
+	sessions[1]?.answer("Yes");
+	const answered = await modelAsk;
+	strictEqual(answered.cancelled, undefined);
+	strictEqual(answered.answers[0]?.answer, "Yes");
 });
