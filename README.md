@@ -357,6 +357,8 @@ include the Clio and Node versions, reproduction steps, and relevant diagnostics
 
 Report security concerns through [SECURITY.md](SECURITY.md).
 
+General questions about Clio Coder: coder@iowarp.ai.
+
 ## Acknowledgements
 
 Clio Coder is developed by the [Gnosis Research Center](https://grc.iit.edu) at
