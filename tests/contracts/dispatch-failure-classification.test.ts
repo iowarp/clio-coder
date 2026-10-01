@@ -66,7 +66,10 @@ describe("dispatch failure classification", () => {
 			activity: { calls: 1, succeeded: 1, failed: 0, blocked: 0, mutatingSucceeded: false },
 			limitationRecorded: false,
 			mutatedPathCount: 0,
-			finalText: JSON.stringify({ mutatedPaths: [], summary: "Cannot add parseDuration because ms cannot parse compound strings. No edits made." }),
+			finalText: JSON.stringify({
+				mutatedPaths: [],
+				summary: "Cannot add parseDuration because ms cannot parse compound strings. No edits made.",
+			}),
 		};
 		match(workerNoWorkDetail(input) ?? "", /ms cannot parse compound strings/);
 		strictEqual(workerNoWorkDetail({ ...input, mutatedPathCount: 1 }), null);
