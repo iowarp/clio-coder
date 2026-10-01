@@ -59,7 +59,10 @@ async function build() {
 		// --review adds the unregistered manuscripts in content/drafts to this preview only.
 		const buildArgs = [join(site, "build.mjs"), "--out", next, ...(values.review ? ["--review"] : [])];
 		const buildLock = process.env.CLIO_CODER_SITE_BUILD_LOCK;
-		await run(buildLock ? "flock" : process.execPath, buildLock ? [buildLock, process.execPath, ...buildArgs] : buildArgs);
+		await run(
+			buildLock ? "flock" : process.execPath,
+			buildLock ? [buildLock, process.execPath, ...buildArgs] : buildArgs,
+		);
 		await rm(previous, { recursive: true, force: true });
 		try {
 			await rename(out, previous);

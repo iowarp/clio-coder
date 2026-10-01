@@ -29,6 +29,9 @@ clio-coder gui --open
 
 The command opens the local application with its access link. Select a project, start a conversation, and choose a model. You can attach files, select a model and thinking level, and inspect session activity from the workspace. Sessions groups conversations by project. Open **Artifacts** to review recorded file activity, tool results, and linked evidence beside the conversation.
 
+::: capture gui-artifacts
+:::
+
 The desktop is in alpha and covers a subset of terminal workflows. Treat it as an optional way to use Clio, and keep the terminal available for commands that the desktop does not yet expose.
 
 On Linux with a systemd user session, you can install the optional background application:

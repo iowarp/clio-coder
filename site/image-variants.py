@@ -9,6 +9,7 @@ from PIL import Image
 SITE = Path(__file__).resolve().parent
 MANIFEST = SITE / "image-variants.json"
 INPUTS = {
+    "assets/gui-artifacts.webp": [640, 960, 1280],
     "assets/tui-verify.webp": [640, 960, 1280],
     "assets/tui-boot.webp": [640, 960, 1280],
     "assets/guides/tui-configure-source.webp": [640, 1024, 1600],

@@ -248,6 +248,19 @@
 			"version": "0.6.0-dev",
 			"capturedAt": "2026-10-01",
 			"source": "clio-coder 0.6.0-dev (commit 9ade954) installed with scripts/install.sh from an npm pack of the v060 tree, in an isolated profile (user researcher) under bubblewrap. TUI in a fixed 120x44 tmux window; ANSI captured with tmux capture-pane and rendered with xterm.js. bash at 150 columns: clio-coder doctor. Cropped to rows 1-20, before the connection rows, which name a private endpoint."
+		},
+		"gui-artifacts": {
+			"image": "assets/gui-artifacts.webp",
+			"original": "assets/gui-artifacts.png",
+			"width": 1600,
+			"height": 1000,
+			"label": "Desktop results",
+			"alt": "Clio Coder desktop showing a temperature-calibration conversation, seven passing tests, and the Artifacts panel with the recorded verification output.",
+			"caption": "The desktop conversation with calibration results and the recorded verification output in Artifacts.",
+			"interface": "Desktop alpha",
+			"version": "0.5.7",
+			"capturedAt": "2026-09-27",
+			"source": "Existing repository capture assets/screenshots/gui-artifacts.png, added in 17ed2d6e89a42413399197160f94eef615010ff8 (0.5.7, 2026-09-27). Shows the recorded temperature-calibration session. Reused without altering the product UI."
 		}
 	}
 }

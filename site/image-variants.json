@@ -1,4 +1,29 @@
 {
+  "assets/gui-artifacts.webp": {
+    "width": 1600,
+    "height": 1000,
+    "sha256": "c2bbb9801aa933e142b83f74781faea1d27c7c6026a2ec8010f6e08de1492fee",
+    "variants": [
+      {
+        "path": "assets/responsive/gui-artifacts-640.webp",
+        "width": 640,
+        "height": 400,
+        "sha256": "9b3bab3233975a19967c16a46fd2a093fb4c40e93a76837b3689beda0f578001"
+      },
+      {
+        "path": "assets/responsive/gui-artifacts-960.webp",
+        "width": 960,
+        "height": 600,
+        "sha256": "6bbb4e421db4f14062ed770ddfb74b8a18533bc0a1a7088f971f28cc97181220"
+      },
+      {
+        "path": "assets/responsive/gui-artifacts-1280.webp",
+        "width": 1280,
+        "height": 800,
+        "sha256": "a9b04606544d03d09bbe1981cd66f903a7e8e57c933cc3c4714d9eefb7d53c77"
+      }
+    ]
+  },
   "assets/tui-verify.webp": {
     "width": 2240,
     "height": 1668,
