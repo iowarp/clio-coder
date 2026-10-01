@@ -8,6 +8,7 @@ import {
 } from "../prompts/memory-intervention.js";
 import type { CostProvenance } from "../providers/index.js";
 import { TASK_MEMORY_CONTENT_MAX_CHARS, type TaskMemoryBank, type TaskMemoryRenderableClass } from "./task-bank.js";
+import { rejectReminder, rejectStoredContent, stripBoundaryControlTokens } from "./task-memory-output.js";
 
 export const TASK_MEMORY_POLICY_MAX_OPERATIONS = 8;
 /**
@@ -120,6 +121,12 @@ export type TaskMemoryPolicyReason =
 	| "resolved_failure"
 	/** The reminder exceeded the token cap and was dropped rather than truncated. */
 	| "over_budget"
+	/**
+	 * The reminder was not the single short line the prompt asks for: it held a
+	 * chat-template token, JSON, deliberation, a foreign script or a repeated
+	 * sentence. It is dropped whole, never shown and never injected.
+	 */
+	| "invalid_reminder"
 	/** No envelope was found, or its operation list violated the grammar. */
 	| "unparseable"
 	/** Every operation named a verb the bank has no writer for. */
@@ -175,7 +182,10 @@ export interface TaskMemoryEnvelope {
 	bankOperations: number;
 	droppedOperations: number;
 	reminder: string | null;
-	/** Client failure message, redacted of nothing because it never carries bank text. */
+	/**
+	 * Client failure message, redacted of nothing because it never carries bank
+	 * text. On an `invalid_reminder` step it names which check the reminder failed.
+	 */
 	error: string | null;
 }
 
@@ -225,6 +235,13 @@ type TaskMemoryOperation =
 interface ParsedMemoryStep {
 	operations: TaskMemoryOperation[];
 	context: string | null;
+	/** Why a phase-two reminder was refused, or null when it was accepted or absent. */
+	contextRejection: string | null;
+}
+
+interface ReadContextResult {
+	context: string | null;
+	rejection: string | null;
 }
 
 interface ReadOperationsResult {
@@ -369,7 +386,7 @@ export async function runTaskMemoryPolicy(
 			outputTokens: nonNegativeInteger(response.outputTokens ?? stepUsage?.output),
 		};
 		if (input.signal?.aborted || input.isCurrent?.() === false) return settle("silent", "scope_changed", usage);
-		const read = readPolicyStep(rawResponse);
+		const read = readPolicyStep(rawResponse, userPrompt);
 		if (!read.ok) return settle("malformed", read.reason, { ...usage, droppedOperations: read.dropped });
 		const operations = resolveOperations(bank, read.step.operations);
 		applyOperations(bank, operations);
@@ -381,6 +398,12 @@ export async function runTaskMemoryPolicy(
 			bankOperations: operations.length,
 			droppedOperations: read.dropped + (read.step.operations.length - operations.length),
 		};
+		if (read.step.contextRejection !== null) {
+			// A bad completion is a diagnostic for the operator who traces memory, not
+			// a card. Phase one already applied; only the reminder is lost.
+			clientError = `reminder rejected: ${read.step.contextRejection}`;
+			return settle("gated", "invalid_reminder", counts);
+		}
 		if (read.step.context === null) return settle("silent", "model_silent", counts);
 		// An over-budget reminder is a phase-two policy violation, not a parse
 		// failure. Truncating it would strip the citation that earns it a voice, so
@@ -502,10 +525,10 @@ type ReadPolicyStepResult =
  * verb the bank does not have", because those two point at different fixes and
  * the boolean form of this function could not tell them apart.
  */
-function readPolicyStep(response: string): ReadPolicyStepResult {
+function readPolicyStep(response: string, reference: string): ReadPolicyStepResult {
 	const unparseable = { ok: false, reason: "unparseable", dropped: 0 } as const;
 	if (typeof response !== "string" || response.length === 0) return unparseable;
-	const text = cleanPolicyResponse(response);
+	const text = stripBoundaryControlTokens(cleanPolicyResponse(response));
 	const opensAt = text.indexOf(OPERATIONS_OPEN);
 	if (opensAt === -1) return unparseable;
 	const listAt = opensAt + OPERATIONS_OPEN.length;
@@ -522,7 +545,7 @@ function readPolicyStep(response: string): ReadPolicyStepResult {
 	} catch {
 		return unparseable;
 	}
-	const read = readOperations(rawOperations);
+	const read = readOperations(rawOperations, reference);
 	if (read === null) return unparseable;
 	// Recovering nothing is not silence. A step whose every operation was invented
 	// stays malformed so the operator can see the model answered in a shape the
@@ -530,9 +553,10 @@ function readPolicyStep(response: string): ReadPolicyStepResult {
 	if (read.operations.length === 0 && read.dropped > 0) {
 		return { ok: false, reason: "all_operations_invalid", dropped: read.dropped };
 	}
+	const context = readContext(text.slice(closesAt + OPERATIONS_CLOSE.length), reference);
 	return {
 		ok: true,
-		step: { operations: read.operations, context: readContext(text.slice(closesAt + OPERATIONS_CLOSE.length)) },
+		step: { operations: read.operations, context: context.context, contextRejection: context.rejection },
 		dropped: read.dropped,
 	};
 }
@@ -543,17 +567,22 @@ function readPolicyStep(response: string): ReadPolicyStepResult {
  * `<no_intervention/>`, so an incomplete envelope must never manufacture an
  * intervention out of a model that simply stopped writing.
  */
-function readContext(tail: string): string | null {
+function readContext(tail: string, reference: string): ReadContextResult {
+	const none = { context: null, rejection: null };
 	const contextAt = tail.indexOf(CONTEXT_OPEN);
 	const silenceAt = tail.search(/<no_intervention\s*\/?>/u);
-	if (contextAt === -1) return null;
-	if (silenceAt !== -1 && silenceAt < contextAt) return null;
+	if (contextAt === -1) return none;
+	if (silenceAt !== -1 && silenceAt < contextAt) return none;
 	const body = tail.slice(contextAt + CONTEXT_OPEN.length);
-	const closesAt = body.lastIndexOf(CONTEXT_CLOSE);
-	const context = stripTagShapes(closesAt === -1 ? body : body.slice(0, closesAt))
-		.replace(/\s+/gu, " ")
-		.trim();
-	return context.length === 0 ? null : context;
+	// The first close tag ends the reminder. Text after it is whatever the model
+	// kept writing, and a reminder with no close tag was cut off mid-thought.
+	const closesAt = body.indexOf(CONTEXT_CLOSE);
+	if (closesAt === -1) return { context: null, rejection: "no closing tag, so the completion was cut off" };
+	const raw = body.slice(0, closesAt);
+	const context = stripTagShapes(raw).replace(/\s+/gu, " ").trim();
+	if (context.length === 0) return none;
+	const rejection = rejectReminder(raw, context, reference);
+	return rejection === null ? { context, rejection: null } : { context: null, rejection };
 }
 
 /**
@@ -564,7 +593,7 @@ function readContext(tail: string): string | null {
  * Dropping it costs one operation, which is the same trade `resolveOperations`
  * already makes for an invented entry id.
  */
-function readOperations(value: unknown): ReadOperationsResult | null {
+function readOperations(value: unknown, reference: string): ReadOperationsResult | null {
 	if (!Array.isArray(value) || value.length > TASK_MEMORY_POLICY_MAX_OPERATIONS) return null;
 	const operations: TaskMemoryOperation[] = [];
 	let dropped = 0;
@@ -575,6 +604,10 @@ function readOperations(value: unknown): ReadOperationsResult | null {
 				if (!hasExactKeys(raw, ["op", "content"])) return null;
 				const content = boundedContent(raw.content);
 				if (content === null) return null;
+				if (rejectStoredContent(content, reference) !== null) {
+					dropped += 1;
+					break;
+				}
 				operations.push({ op: raw.op, content });
 				break;
 			}
@@ -584,6 +617,10 @@ function readOperations(value: unknown): ReadOperationsResult | null {
 				const content = boundedContent(raw.content);
 				if (content === null) return null;
 				if (raw.id !== undefined && !nonEmptyString(raw.id)) return null;
+				if (rejectStoredContent(content, reference) !== null) {
+					dropped += 1;
+					break;
+				}
 				const operation: Extract<TaskMemoryOperation, { op: typeof raw.op }> = { op: raw.op, content };
 				if (typeof raw.id === "string") operation.id = raw.id;
 				operations.push(operation);

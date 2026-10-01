@@ -235,6 +235,7 @@ const REASONS = new Set<TaskMemoryPolicyReason>([
 	"invalid_path",
 	"resolved_failure",
 	"over_budget",
+	"invalid_reminder",
 	"unparseable",
 	"all_operations_invalid",
 	"deadline",
