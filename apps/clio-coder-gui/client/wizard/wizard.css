@@ -1,8 +1,14 @@
-/* The setup wizard. One surface in the app is allowed to be rich, and this is it: a black stage that
-   plays the Clio films beside a calm card that asks one question at a time. Everything else here is
-   plain tokens, so the visual finish can change without touching the markup. */
+/* The setup wizard. One surface in the app is allowed to be rich, and this is it: the site's black
+   scene playing the Clio films beside a calm card that asks one question at a time. The card speaks
+   the site's field-guide language: a Newsreader title, the lede under a rule, copper mono numbers,
+   choices as rows on fine rules, accent ticks for what checked out. Everything here is a token, so
+   the finish can change without touching the markup. */
 
 .wizard {
+	/* The shell's hover tints live on .wb; the wizard is full-window and outside it. */
+	--wb-hover: color-mix(in srgb, var(--ink) 6%, transparent);
+	--wb-active: color-mix(in srgb, var(--ink) 11%, transparent);
+	--wb-faint: color-mix(in srgb, var(--ink) 4%, transparent);
 	display: grid;
 	grid-template-rows: auto minmax(0, 1fr);
 	min-height: 100dvh;
@@ -10,13 +16,15 @@
 	color: var(--ink);
 }
 
-/* ---- top bar ------------------------------------------------------------------ */
+/* ---- top bar: the stepper's numbers sit on one rule that runs the width of the window ---------- */
 .wizard__bar {
 	display: grid;
 	grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
-	align-items: center;
+	align-items: stretch;
 	gap: var(--space-4);
-	padding: var(--space-4) var(--space-8);
+	min-height: 56px;
+	padding: 0 var(--space-8);
+	border-bottom: 1px solid var(--line);
 }
 .wizard__bar-side {
 	display: flex;
@@ -36,14 +44,19 @@
 .wizard-back .icon {
 	width: 16px;
 	height: 16px;
+	transition: transform var(--motion-fast) var(--ease-standard);
 }
 .wizard-back:hover:not(:disabled) {
+	background: none;
 	color: var(--ink);
+}
+.wizard-back:hover:not(:disabled) .icon {
+	transform: translateX(-3px);
 }
 .wizard-stepper {
 	display: flex;
-	align-items: center;
-	gap: var(--space-2);
+	align-items: stretch;
+	gap: 0 var(--space-6);
 	margin: 0;
 	padding: 0;
 	list-style: none;
@@ -53,62 +66,61 @@
 	display: inline-flex;
 	align-items: center;
 	gap: var(--space-2);
+	min-height: 44px;
+	margin-bottom: -1px;
+	border-bottom: 2px solid transparent;
 	color: var(--ink-muted);
+	font-weight: 500;
+	transition:
+		color var(--motion-fast) var(--ease-standard),
+		border-color var(--motion-fast) var(--ease-standard);
 }
-.wizard-stepper li + li::before {
-	content: "";
-	width: clamp(12px, 2.4vw, 32px);
-	height: 1px;
-	margin-right: var(--space-2);
-	background: var(--line-strong);
-}
+/* Step numbers are copper mono, as in the site's guides; a finished step turns to an accent tick. */
 .wizard-stepper__mark {
-	display: inline-grid;
-	place-items: center;
-	width: 22px;
-	height: 22px;
-	border: 1px solid var(--line-strong);
-	border-radius: 50%;
-	font-size: 11px;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	min-width: 18px;
+	height: 18px;
+	white-space: nowrap;
+	font: 500 var(--text-exact) / 1 var(--font-mono);
 	font-variant-numeric: tabular-nums;
+	color: var(--secondary);
+}
+.wizard-stepper__mark:not(:has(.icon))::after {
+	content: "/";
+	margin-left: 0.3em;
 }
 .wizard-stepper__mark .icon {
-	width: 12px;
-	height: 12px;
+	width: 14px;
+	height: 14px;
+	stroke-width: 2.4;
+	color: var(--accent);
 }
 .wizard-stepper li[data-state="current"] {
+	border-bottom-color: var(--accent);
 	color: var(--ink);
 	font-weight: 600;
 }
-.wizard-stepper li[data-state="current"] .wizard-stepper__mark {
-	border-color: var(--accent);
-	background: var(--accent-soft);
-	color: var(--accent);
-}
-.wizard-stepper li[data-state="done"] .wizard-stepper__mark {
-	border-color: var(--accent);
-	background: var(--accent);
-	color: var(--on-accent);
-}
 
-/* ---- body: stage and card --------------------------------------------------------- */
+/* ---- body: scene and card ---------------------------------------------------------------------- */
 .wizard__body {
 	display: grid;
 	grid-template-columns: minmax(300px, 5fr) minmax(0, 6fr);
-	gap: var(--space-8);
+	gap: var(--space-10);
 	min-height: 0;
-	padding: var(--space-2) var(--space-8) var(--space-8);
+	padding: var(--space-8);
 }
 .wizard__stage {
 	align-self: start;
 	position: sticky;
-	top: var(--space-4);
+	top: var(--space-6);
 }
 .wizard__main {
 	display: flex;
 	flex-direction: column;
 	justify-content: center;
-	gap: var(--space-4);
+	gap: var(--space-5);
 	min-width: 0;
 	outline: none;
 }
@@ -120,20 +132,19 @@
 	max-width: 760px;
 }
 
-/* ---- the stage ------------------------------------------------------------------------ */
+/* ---- the scene: the site's .clio-scene, a black frame on a fine boundary, its caption below in
+   copper mono like the site's companion captions ------------------------------------------------ */
 .wizard-stage {
-	--accent: var(--stage-accent);
-	--secondary: var(--stage-secondary);
 	display: grid;
-	overflow: hidden;
-	border-radius: 20px;
-	background: var(--stage-black);
-	color: var(--stage-ink);
+	gap: var(--space-4);
 }
 .wizard-stage__frame {
 	position: relative;
 	aspect-ratio: 4 / 3;
-	overflow: hidden;
+	overflow: clip;
+	isolation: isolate;
+	border: 1px solid var(--line-strong);
+	border-radius: var(--radius-sm);
 	background: var(--stage-black);
 }
 .wizard-stage[data-scene="finale"] .wizard-stage__frame {
@@ -148,11 +159,11 @@
 	object-fit: contain;
 }
 .wizard-stage__poster {
-	animation: wizard-fade var(--motion-base) ease-out;
+	animation: wizard-fade var(--motion-base) var(--ease-standard);
 }
 .wizard-stage__film {
 	opacity: 0;
-	transition: opacity var(--motion-base) ease-out;
+	transition: opacity var(--motion-base) var(--ease-standard);
 }
 .wizard-stage__frame[data-playing="yes"] .wizard-stage__film {
 	opacity: 1;
@@ -160,30 +171,52 @@
 .wizard-stage__text {
 	display: grid;
 	align-items: center;
-	min-height: 64px;
-	padding: var(--space-3) var(--space-6) var(--space-5);
+	justify-items: center;
+	min-height: 44px;
+	padding: 0 var(--space-4);
 }
-.wizard-stage__caption,
-.wizard-stage__working {
+.wizard-stage__caption {
 	margin: 0;
+	max-width: 52ch;
 	text-align: center;
-	color: var(--stage-ink-muted);
-	font-size: var(--text-body);
-	line-height: 1.45;
+	text-wrap: balance;
+	color: var(--secondary);
+	font: 400 var(--text-exact) / 1.6 var(--font-mono);
 }
+/* While the child works, the scene shows the pulse alone; the card beside it carries the words, so
+   the same status is not printed twice. The text stays in the tree for the live region. */
 .wizard-stage__working {
 	display: inline-flex;
 	align-items: center;
 	justify-content: center;
-	gap: var(--space-3);
-	color: var(--stage-ink);
+	margin: 0;
+}
+.wizard-stage__working > span {
+	position: absolute;
+	width: 1px;
+	height: 1px;
+	overflow: hidden;
+	clip-path: inset(50%);
+	white-space: nowrap;
 }
 
-/* ---- a step --------------------------------------------------------------------------- */
+/* ---- a step: title, lede under a rule, then the question ------------------------------------- */
 .wizard-step {
 	display: grid;
-	gap: var(--space-4);
-	animation: wizard-in var(--motion-base) ease-out;
+	gap: var(--space-5);
+}
+/* Each part rises in on the site's entry timing, one after another; the section itself holds still. */
+.wizard-step > * {
+	animation: wizard-rise var(--motion-entry) var(--ease-standard) both;
+}
+.wizard-step > :nth-child(2) {
+	animation-delay: var(--motion-stagger);
+}
+.wizard-step > :nth-child(3) {
+	animation-delay: calc(var(--motion-stagger) * 2);
+}
+.wizard-step > :nth-child(n + 4) {
+	animation-delay: calc(var(--motion-stagger) * 3);
 }
 .wizard-step h1 {
 	margin: 0;
@@ -198,12 +231,14 @@
 .wizard-step__lede {
 	display: grid;
 	gap: var(--space-2);
-	max-width: 56ch;
+	padding-top: var(--space-4);
+	border-top: 1px solid var(--line-strong);
 	color: var(--ink-muted);
 	font-size: var(--text-reading);
 	line-height: 1.5;
 }
 .wizard-step__lede p {
+	max-width: 56ch;
 	margin: 0;
 }
 .wizard-step__actions {
@@ -211,12 +246,11 @@
 	flex-wrap: wrap;
 	align-items: center;
 	gap: var(--space-3) var(--space-4);
-	margin-top: var(--space-2);
 }
 .wizard-button {
-	min-height: 46px;
-	padding: 0 var(--space-6);
-	border-radius: 12px;
+	min-height: 44px;
+	padding: 0 var(--space-5);
+	border-radius: var(--radius-sm);
 	font-size: var(--text-body);
 	font-weight: 600;
 }
@@ -225,7 +259,7 @@
 	vertical-align: -3px;
 }
 .wizard-quiet {
-	min-height: 46px;
+	min-height: 44px;
 	padding: 0 var(--space-3);
 	border-color: transparent;
 	background: transparent;
@@ -233,15 +267,16 @@
 	font-size: var(--text-body);
 }
 .wizard-quiet:hover:not(:disabled) {
+	background: none;
 	color: var(--ink);
 }
 .wizard-link-button {
 	display: inline-flex;
 	align-items: center;
 	gap: var(--space-2);
-	min-height: 46px;
-	padding: 0 var(--space-6);
-	border-radius: 12px;
+	min-height: 44px;
+	padding: 0 var(--space-5);
+	border-radius: var(--radius-sm);
 	font-size: var(--text-body);
 	font-weight: 600;
 	text-decoration: none;
@@ -260,19 +295,18 @@
 	margin: 0;
 	color: var(--ink-muted);
 }
+/* A problem is a boundary, not a slab: the colour sits on a rule and in the words. */
 .wizard-problem {
 	margin: 0;
-	padding: var(--space-3) var(--space-4);
-	border: 1px solid var(--status-fail-line);
-	border-radius: 10px;
-	background: var(--status-fail-tint);
+	padding: var(--space-1) 0 var(--space-1) var(--space-3);
+	border-left: 2px solid var(--status-fail-line);
 	color: var(--status-fail-fg);
 	font-size: var(--text-meta);
+	line-height: 1.5;
 	overflow-wrap: anywhere;
 }
 .wizard-problem[data-tone="warn"] {
 	border-color: var(--status-warn-line);
-	background: var(--status-warn-tint);
 	color: var(--status-warn-fg);
 }
 .wizard-mono {
@@ -280,17 +314,17 @@
 }
 .wizard-code {
 	padding: 2px 8px;
-	border-radius: 6px;
-	background: var(--surface-sunken);
+	border-radius: var(--radius-xs);
+	background: var(--well);
 	font-family: var(--font-mono);
 	font-size: var(--text-body);
 	letter-spacing: 0.08em;
 }
 
-/* ---- welcome -------------------------------------------------------------------------- */
+/* ---- welcome: three promises as rows on fine rules with copper numbers ------------------------- */
 .wizard-promise {
 	display: grid;
-	gap: var(--space-3);
+	gap: 0;
 	margin: 0;
 	padding: 0;
 	list-style: none;
@@ -298,31 +332,29 @@
 }
 .wizard-promise li {
 	position: relative;
-	padding-left: 40px;
+	padding: var(--space-3) 0 var(--space-3) 40px;
+	border-top: 1px solid var(--line);
 	color: var(--ink-muted);
 	line-height: 1.45;
 	counter-increment: promise;
 }
+.wizard-promise li:last-child {
+	border-bottom: 1px solid var(--line);
+}
 .wizard-promise li::before {
-	content: counter(promise);
+	content: counter(promise) " /";
 	position: absolute;
 	left: 0;
-	top: -1px;
-	display: grid;
-	place-items: center;
-	width: 26px;
-	height: 26px;
-	border: 1px solid var(--line-strong);
-	border-radius: 50%;
-	color: var(--accent);
-	font-size: 12px;
+	top: calc(var(--space-3) + 2px);
+	color: var(--secondary);
+	font: 500 var(--text-exact) / 1.3 var(--font-mono);
 	font-variant-numeric: tabular-nums;
 }
 .wizard-promise strong {
 	color: var(--ink);
 }
 
-/* ---- category cards, provider tiles, options ----------------------------------------------- */
+/* ---- choices: rows on rules, tiles on fine boundaries, options with an accent rule ------------- */
 .wizard-cards,
 .wizard-options,
 .wizard-tiles,
@@ -335,37 +367,40 @@
 .wizard-cards,
 .wizard-options {
 	display: grid;
-	gap: var(--space-2);
+	gap: 0;
 }
 .wizard-card {
 	display: flex;
 	align-items: center;
 	gap: var(--space-4);
 	width: 100%;
-	min-height: 64px;
-	padding: var(--space-3) var(--space-4);
-	border: 1px solid var(--line);
-	border-radius: 14px;
-	background: var(--surface);
+	min-height: 60px;
+	padding: var(--space-3) var(--space-2) var(--space-3) 0;
+	border: 0;
+	border-top: 1px solid var(--line);
+	border-radius: 0;
+	background: none;
+	color: var(--ink);
 	text-align: left;
-	transition:
-		border-color var(--motion-fast) ease-out,
-		transform var(--motion-fast) ease-out;
+	transition: color var(--motion-fast) var(--ease-standard);
+}
+.wizard-cards li:last-child .wizard-card {
+	border-bottom: 1px solid var(--line);
 }
 .wizard-card:hover:not(:disabled) {
-	border-color: var(--accent);
-	background: var(--surface);
-	transform: translateY(-1px);
+	background: none;
+}
+.wizard-card:focus-visible {
+	outline-offset: -2px;
 }
 .wizard-card__icon {
 	display: grid;
 	place-items: center;
 	flex: none;
-	width: 40px;
-	height: 40px;
-	border-radius: 10px;
-	background: var(--accent-soft);
-	color: var(--accent);
+	width: 36px;
+	height: 36px;
+	color: var(--ink-muted);
+	transition: color var(--motion-fast) var(--ease-standard);
 }
 .wizard-card__icon .icon {
 	width: 20px;
@@ -385,11 +420,22 @@
 	font-size: var(--text-meta);
 	line-height: 1.4;
 }
+/* The arrow is the affordance: it moves a few pixels and takes the accent, as the site's links do. */
 .wizard-card > .icon {
 	flex: none;
 	width: 16px;
 	height: 16px;
 	color: var(--ink-muted);
+	transition:
+		transform var(--motion-fast) var(--ease-standard),
+		color var(--motion-fast) var(--ease-standard);
+}
+.wizard-card:is(:hover, :focus-visible):not(:disabled) > .icon {
+	transform: translateX(3px);
+	color: var(--accent);
+}
+.wizard-card:is(:hover, :focus-visible):not(:disabled) .wizard-card__icon {
+	color: var(--accent);
 }
 .wizard-search {
 	position: relative;
@@ -408,7 +454,7 @@
 	width: 100%;
 	min-height: 44px;
 	padding-left: 38px;
-	border-radius: 12px;
+	border-radius: var(--radius-sm);
 }
 .wizard-tiles {
 	display: grid;
@@ -426,17 +472,16 @@
 	min-height: 60px;
 	padding: var(--space-2) var(--space-3);
 	border: 1px solid var(--line);
-	border-radius: 12px;
-	background: var(--surface);
+	border-radius: var(--radius-sm);
+	background: transparent;
 	text-align: left;
 	transition:
-		border-color var(--motion-fast) ease-out,
-		transform var(--motion-fast) ease-out;
+		border-color var(--motion-fast) var(--ease-standard),
+		background var(--motion-fast) var(--ease-standard);
 }
 .wizard-tile:hover:not(:disabled) {
-	border-color: var(--accent);
-	background: var(--surface);
-	transform: translateY(-1px);
+	border-color: var(--line-strong);
+	background: var(--wb-faint);
 }
 .wizard-tile__mark {
 	display: grid;
@@ -444,12 +489,11 @@
 	flex: none;
 	width: 36px;
 	height: 36px;
-	border-radius: 9px;
-	background: var(--accent-soft);
-	color: var(--accent);
-	font-size: 13px;
-	font-weight: 700;
-	letter-spacing: 0.02em;
+	border-radius: var(--radius-xs);
+	background: var(--well);
+	color: var(--secondary);
+	font: 500 var(--text-exact) / 1 var(--font-mono);
+	letter-spacing: 0.04em;
 }
 .wizard-tile__text {
 	display: grid;
@@ -475,19 +519,26 @@
 	display: flex;
 	align-items: center;
 	gap: var(--space-3);
-	padding: var(--space-3) var(--space-4);
-	border: 1px solid var(--line);
-	border-radius: 12px;
-	background: var(--surface);
+	padding: var(--space-3) var(--space-2) var(--space-3) var(--space-3);
+	border-top: 1px solid var(--line);
 	cursor: pointer;
+	transition: box-shadow var(--motion-fast) var(--ease-standard);
+}
+.wizard-options li:last-child .wizard-option {
+	border-bottom: 1px solid var(--line);
+}
+.wizard-option:hover {
+	background: var(--wb-faint);
 }
 .wizard-option[data-checked="true"] {
-	border-color: var(--accent);
-	background: var(--accent-soft);
+	box-shadow: inset 2px 0 0 var(--accent);
+}
+.wizard-option[data-checked="true"] strong {
+	color: var(--ink);
 }
 .wizard-option:has(:focus-visible) {
 	outline: 2px solid var(--focus);
-	outline-offset: 2px;
+	outline-offset: -2px;
 }
 .wizard-option input {
 	flex: none;
@@ -496,6 +547,10 @@
 	min-height: 0;
 	margin: 0;
 	accent-color: var(--accent);
+}
+.wizard-option input:focus-visible {
+	outline: none;
+	box-shadow: none;
 }
 .wizard-option > span {
 	display: grid;
@@ -513,21 +568,18 @@
 }
 .wizard-badge {
 	flex: none;
-	padding: 2px 9px;
-	border: 1px solid var(--accent);
-	border-radius: var(--radius-pill);
-	color: var(--accent);
-	font-size: 11.5px;
+	color: var(--secondary);
+	font: 500 var(--text-instrument) / 1.6 var(--font-mono);
+	letter-spacing: var(--tracking-instrument);
+	text-transform: uppercase;
 	font-style: normal;
-	font-weight: 600;
 }
 .wizard-options--scroll {
 	max-height: min(46dvh, 380px);
-	padding: 2px;
 	overflow-y: auto;
 }
 
-/* ---- text fields ------------------------------------------------------------------------ */
+/* ---- text fields ------------------------------------------------------------------------------- */
 .wizard-field {
 	display: grid;
 	gap: var(--space-2);
@@ -543,13 +595,13 @@
 .wizard-field input {
 	flex: 1;
 	min-width: 0;
-	min-height: 46px;
+	min-height: 44px;
 	padding: 0 var(--space-4);
-	border-radius: 12px;
+	border-radius: var(--radius-sm);
 	font-size: var(--text-body);
 }
 
-/* ---- facts, checks, recap -------------------------------------------------------------- */
+/* ---- facts, checks, recap: what Clio verified, as a checklist with accent ticks --------------- */
 .wizard-facts {
 	display: grid;
 	gap: var(--space-2);
@@ -568,38 +620,39 @@
 }
 .wizard-checks {
 	display: grid;
-	gap: var(--space-2);
+	gap: 0;
 }
 .wizard-check {
-	display: grid;
-	grid-template-columns: 22px minmax(0, 1fr);
+	display: flex;
 	align-items: baseline;
 	gap: var(--space-3);
-	padding: var(--space-3) var(--space-4);
-	border: 1px solid var(--line);
-	border-radius: 12px;
-	background: var(--surface);
+	padding: var(--space-3) 0;
+	border-top: 1px solid var(--line);
 	font-size: var(--text-meta);
-	animation: wizard-in var(--motion-base) ease-out;
+	animation: wizard-rise var(--motion-entry) var(--ease-standard) both;
+}
+.wizard-check:last-child {
+	border-bottom: 1px solid var(--line);
 }
 .wizard-check__mark {
 	display: inline-grid;
 	place-items: center;
+	flex: none;
 	width: 20px;
 	height: 20px;
-	border: 1px solid var(--line-strong);
-	border-radius: 50%;
-	font-size: 11px;
-	font-weight: 700;
+	align-self: center;
+	color: var(--ink-muted);
+	font: 500 var(--text-exact) / 1 var(--font-mono);
 }
 .wizard-check__mark .icon {
-	width: 12px;
-	height: 12px;
+	width: 15px;
+	height: 15px;
+	stroke-width: 2.4;
 }
 .wizard-check__body {
 	display: flex;
 	flex-wrap: wrap;
-	gap: 2px var(--space-3);
+	gap: 0 var(--space-3);
 	min-width: 0;
 }
 .wizard-check__label {
@@ -610,24 +663,21 @@
 	overflow-wrap: anywhere;
 }
 .wizard-check[data-tone="ok"] .wizard-check__mark {
-	border-color: var(--status-success-line);
-	background: var(--status-success-tint);
-	color: var(--status-success-fg);
+	color: var(--accent);
 }
 .wizard-check[data-tone="warn"] .wizard-check__mark {
-	border-color: var(--status-warn-line);
-	background: var(--status-warn-tint);
 	color: var(--status-warn-fg);
 }
+/* The verdict takes an accent rule when it checks out and a warning rule when it does not. */
 .wizard-verdict {
 	margin: 0;
+	padding-top: var(--space-3);
+	border-top: 2px solid var(--accent);
 	font-size: var(--text-body);
 	line-height: 1.45;
 }
-.wizard-verdict[data-tone="ok"] {
-	color: var(--status-success-fg);
-}
 .wizard-verdict[data-tone="warn"] {
+	border-top-color: var(--status-warn-line);
 	color: var(--status-warn-fg);
 }
 .wizard-notes {
@@ -636,24 +686,27 @@
 	color: var(--ink-muted);
 	font-size: var(--text-meta);
 }
+/* The choices so far are a ruled row of facts, as on the site's guide pages. */
 .wizard-recap {
 	display: flex;
 	flex-wrap: wrap;
-	gap: var(--space-2);
+	gap: var(--space-1) var(--space-5);
 	max-width: 560px;
 	margin: 0;
+	padding-bottom: var(--space-3);
+	border-bottom: 1px solid var(--line);
 }
 .wizard-recap div {
 	display: inline-flex;
+	align-items: baseline;
 	gap: var(--space-2);
 	max-width: 100%;
-	padding: 3px 10px;
-	border: 1px solid var(--line);
-	border-radius: var(--radius-pill);
-	font-size: 12px;
 }
 .wizard-recap dt {
 	color: var(--ink-muted);
+	font: 500 var(--text-instrument) / 1.6 var(--font-mono);
+	letter-spacing: var(--tracking-instrument);
+	text-transform: uppercase;
 }
 .wizard-recap dd {
 	min-width: 0;
@@ -661,6 +714,7 @@
 	overflow: hidden;
 	text-overflow: ellipsis;
 	white-space: nowrap;
+	font: 400 var(--text-exact) / 1.6 var(--font-mono);
 }
 .wizard-probe {
 	display: flex;
@@ -668,25 +722,40 @@
 	gap: var(--space-2);
 	max-width: 560px;
 	margin: 0;
-	padding: var(--space-2) var(--space-4);
-	border: 1px solid var(--status-warn-line);
-	border-radius: 10px;
-	background: var(--status-warn-tint);
+	padding: var(--space-1) 0 var(--space-1) var(--space-3);
+	border-left: 2px solid var(--status-warn-line);
 	color: var(--status-warn-fg);
-	font-size: var(--text-meta);
+	font: 500 var(--text-exact) / 1.5 var(--font-mono);
 }
 .wizard-probe[data-state="reachable"] {
 	border-color: var(--status-success-line);
-	background: var(--status-success-tint);
 	color: var(--status-success-fg);
 }
 .wizard-probe .icon {
 	flex: none;
-	width: 16px;
-	height: 16px;
+	width: 14px;
+	height: 14px;
+	stroke-width: 2.4;
 }
 
-/* ---- working ------------------------------------------------------------------------------- */
+/* ---- the finish: a bigger title on an accent rule, the checks landing one after another ------- */
+.wizard-step--saved h1 {
+	font-size: clamp(34px, 3.8vw, 52px);
+}
+.wizard-step--saved .wizard-step__lede {
+	border-top: 2px solid var(--accent);
+}
+.wizard-step--saved .wizard-check:nth-child(2) {
+	animation-delay: var(--motion-stagger);
+}
+.wizard-step--saved .wizard-check:nth-child(3) {
+	animation-delay: calc(var(--motion-stagger) * 2);
+}
+.wizard-step--saved .wizard-check:nth-child(n + 4) {
+	animation-delay: calc(var(--motion-stagger) * 3);
+}
+
+/* ---- working ----------------------------------------------------------------------------------- */
 .wizard-working {
 	display: flex;
 	align-items: center;
@@ -704,11 +773,11 @@
 	margin: 0;
 }
 
-/* ---- motion -------------------------------------------------------------------------------- */
-@keyframes wizard-in {
+/* ---- motion: transform and opacity only, one entrance each, never a loop ----------------------- */
+@keyframes wizard-rise {
 	from {
 		opacity: 0;
-		transform: translateY(8px);
+		transform: translateY(var(--motion-distance));
 	}
 }
 @keyframes wizard-fade {
@@ -717,70 +786,64 @@
 	}
 }
 @media (prefers-reduced-motion: reduce) {
-	.wizard-step,
+	.wizard-step > *,
 	.wizard-check,
 	.wizard-stage__poster {
 		animation: none;
 	}
-	.wizard-card:hover:not(:disabled),
-	.wizard-tile:hover:not(:disabled) {
+	.wizard-stage__film,
+	.wizard-back .icon,
+	.wizard-card > .icon {
+		transition: none;
+	}
+	.wizard-back:hover:not(:disabled) .icon,
+	.wizard-card:is(:hover, :focus-visible):not(:disabled) > .icon {
 		transform: none;
 	}
 }
 
-/* ---- narrow windows: the stage becomes a banner above the card ----------------------------- */
+/* ---- narrow windows: the scene becomes a banner above the card ---------------------------------- */
 @media (max-width: 900px) {
 	.wizard__bar {
-		grid-template-columns: minmax(0, 1fr) auto;
-		grid-template-areas:
-			"back end"
-			"steps steps";
-		gap: var(--space-2) var(--space-4);
-		padding: var(--space-3) var(--space-4);
-	}
-	.wizard__bar > :nth-child(1) {
-		grid-area: back;
-	}
-	.wizard__bar > :nth-child(2) {
-		grid-area: steps;
-		justify-self: center;
-	}
-	.wizard__bar > :nth-child(3) {
-		grid-area: end;
+		grid-template-columns: auto minmax(0, 1fr) auto;
+		padding: 0 var(--space-4);
 	}
 	.wizard__body {
 		grid-template-columns: minmax(0, 1fr);
-		gap: var(--space-4);
-		padding: 0 var(--space-4) var(--space-8);
+		gap: var(--space-6);
+		padding: var(--space-5) var(--space-4) var(--space-8);
 	}
 	.wizard__stage {
 		position: static;
 	}
 	.wizard-stage {
-		grid-template-columns: minmax(0, 1fr);
+		gap: var(--space-3);
 	}
-	.wizard-stage__frame {
-		aspect-ratio: 16 / 7;
-	}
+	.wizard-stage__frame,
 	.wizard-stage[data-scene="finale"] .wizard-stage__frame {
 		aspect-ratio: 16 / 7;
 	}
 	.wizard-stage__text {
 		min-height: 0;
-		padding: var(--space-2) var(--space-4) var(--space-3);
 	}
 	.wizard__main {
 		justify-content: flex-start;
 	}
 }
 @media (max-width: 560px) {
+	.wizard-stepper {
+		gap: 0 var(--space-4);
+	}
 	.wizard-stepper li:not([data-state="current"]) .wizard-stepper__label {
 		display: none;
 	}
-	.wizard-stepper li + li::before {
-		width: 10px;
+	.wizard-stepper__mark:not(:has(.icon))::after {
+		content: none;
 	}
 	.wizard-tiles {
 		grid-template-columns: minmax(0, 1fr);
+	}
+	.wizard-check__label {
+		display: none;
 	}
 }

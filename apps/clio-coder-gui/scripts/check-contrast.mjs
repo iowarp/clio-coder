@@ -67,11 +67,8 @@ const CHECKS = [
 	["--action-fg", "--paper", TEXT],
 	["--action-fg", "--action-tint", TEXT],
 	["--action-line", "--paper", NON_TEXT],
-	// The setup wizard's stage is black in both themes; its ink and brand roles must clear the same bars.
-	["--stage-ink", "--stage-black", TEXT],
-	["--stage-ink-muted", "--stage-black", TEXT],
-	["--stage-accent", "--stage-black", TEXT],
-	["--stage-secondary", "--stage-black", TEXT],
+	// The setup wizard's scene is black in both themes; its boundary must still read on it.
+	["--line-strong", "--stage-black", NON_TEXT],
 	["--code-ink", "--code-paper", TEXT],
 	["--code-ink", "--code-surface", TEXT],
 	["--code-ink-muted", "--code-paper", TEXT],
