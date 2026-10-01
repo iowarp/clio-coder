@@ -5,12 +5,19 @@ import type { DispatchScopeNoticePayload } from "./bus-events.js";
  * stderr and JSON stream, the ACP event stream and the GUI each read the bus
  * payload through here, so a code one of them draws is a code all of them draw.
  */
-export const DISPATCH_SCOPE_NOTICE_CODES: ReadonlyArray<DispatchScopeNoticePayload["code"]> = [
-	"typed_scope_replaced_inferred_paths",
-	"legacy_scope_inferred",
-	"legacy_scope_empty",
-	"write_root_dot_unconfined",
-];
+// A Record keyed by the payload union, so a new notice code fails typecheck here
+// instead of being dropped by every surface at runtime.
+const SCOPE_NOTICE_CODES: Record<DispatchScopeNoticePayload["code"], true> = {
+	typed_scope_replaced_inferred_paths: true,
+	legacy_scope_inferred: true,
+	legacy_scope_empty: true,
+	write_root_dot_unconfined: true,
+	write_roots_checks_withheld: true,
+};
+
+export const DISPATCH_SCOPE_NOTICE_CODES = Object.keys(SCOPE_NOTICE_CODES) as ReadonlyArray<
+	DispatchScopeNoticePayload["code"]
+>;
 
 export interface DispatchScopeNoticeView {
 	code: DispatchScopeNoticePayload["code"];
