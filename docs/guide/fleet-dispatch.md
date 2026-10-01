@@ -435,6 +435,13 @@ verification still runs on the host in both cases. A write root of `.` sets no b
 keeps every tool, and raises `write_root_dot_unconfined` instead. The seatbelt backend
 on macOS does not count as covering the run for this purpose.
 
+Each scope notice reaches every operator surface: the terminal transcript, headless
+stderr in text mode and a `dispatch_scope_notice` event in `--json`, the ACP
+`dispatch.scopeNotice` event for a client that opted into events, and the GUI's
+**Dispatch scope** row. The transcript row for a dispatch summarizes `intent` on one line,
+such as `write: src/a.ts; checks: test`, with up to three entries per list and `(+N)` for
+the rest. A read root that is only the workspace is the default and is left out.
+
 Verification values are declared check ids, never shell commands. Admission
 resolves each id from a package script or `.clio-coder/verifiers.yaml`, clamps
 the requested timeout to the declaration, and freezes the exact argv, cwd,
