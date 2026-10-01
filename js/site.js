@@ -89,23 +89,30 @@
 	for (const button of document.querySelectorAll("[data-copy]")) {
 		button.hidden = false;
 		button.addEventListener("click", async () => {
-			const previous = button.dataset.copyLabel ?? button.textContent;
+			// Icon buttons keep their glyphs; CSS swaps them by copy state, and the
+			// tooltip and live region carry the words.
+			const icon = button.hasAttribute("data-copy-icon");
+			const previous = button.dataset.copyLabel ?? (icon ? button.title : button.textContent);
 			button.dataset.copyLabel = previous;
+			const label = (text) => {
+				if (icon) button.title = text;
+				else button.textContent = text;
+			};
 			clearTimeout(copyTimers.get(button));
 			try {
 				await navigator.clipboard.writeText(button.dataset.copy || "");
-				button.textContent = "Copied";
+				label("Copied");
 				button.dataset.copyState = "success";
 				announcement.textContent = "Copied to clipboard.";
 			} catch {
-				button.textContent = "Copy failed";
+				label("Copy failed");
 				button.dataset.copyState = "error";
 				announcement.textContent = "Copy failed. Select and copy the command text.";
 			}
 			copyTimers.set(
 				button,
 				window.setTimeout(() => {
-					button.textContent = previous;
+					label(previous);
 					delete button.dataset.copyState;
 				}, feedback),
 			);
@@ -229,6 +236,70 @@
 		sequence.prepend(tabs);
 		sequence.dataset.sequence = "ready";
 		select(0);
+	}
+	// Tab sets: install commands per method or shell. Panels are the children
+	// marked data-tab; without script every panel stays visible under its own
+	// label. Windows visitors start on the Windows panel, whose text says what
+	// works there today. A link to a heading inside a panel opens that panel.
+	const windows = /Windows/i.test(navigator.userAgentData?.platform ?? navigator.userAgent);
+	for (const [number, set] of [...document.querySelectorAll("[data-tabs]")].entries()) {
+		const panels = [...set.children].filter((child) => child.hasAttribute("data-tab"));
+		if (panels.length < 2) continue;
+		const list = document.createElement("div");
+		list.className = "tab-list";
+		list.setAttribute("role", "tablist");
+		list.setAttribute("aria-label", set.dataset.tabs);
+		const buttons = panels.map((panel, index) => {
+			panel.id ||= `tabs-${number}-panel-${index}`;
+			const button = document.createElement("button");
+			button.type = "button";
+			button.id = `${panel.id}-tab`;
+			button.setAttribute("role", "tab");
+			button.setAttribute("aria-controls", panel.id);
+			button.textContent = panel.dataset.tab;
+			if (panel.dataset.tabTag) {
+				const tag = document.createElement("span");
+				tag.className = "tag";
+				tag.textContent = panel.dataset.tabTag;
+				button.append(" ", tag);
+			}
+			panel.setAttribute("role", "tabpanel");
+			panel.setAttribute("aria-labelledby", button.id);
+			list.append(button);
+			return button;
+		});
+		const select = (index, focus = false) => {
+			for (const [position, button] of buttons.entries()) {
+				const active = position === index;
+				button.setAttribute("aria-selected", String(active));
+				button.tabIndex = active ? 0 : -1;
+				panels[position].hidden = !active;
+			}
+			if (focus) buttons[index].focus();
+		};
+		list.addEventListener("click", (event) => {
+			const button = event.target.closest("[role=tab]");
+			if (button) select(buttons.indexOf(button));
+		});
+		list.addEventListener("keydown", (event) => {
+			const current = buttons.indexOf(document.activeElement);
+			const next = { ArrowRight: current + 1, ArrowLeft: current - 1, Home: 0, End: buttons.length - 1 }[event.key];
+			if (current < 0 || next === undefined) return;
+			event.preventDefault();
+			select((next + buttons.length) % buttons.length, true);
+		});
+		const linked = () => {
+			const target = location.hash.length > 1 && document.getElementById(decodeURIComponent(location.hash.slice(1)));
+			return target ? panels.findIndex((panel) => panel.contains(target)) : -1;
+		};
+		addEventListener("hashchange", () => {
+			const index = linked();
+			if (index >= 0) select(index);
+		});
+		panels[0].before(list);
+		set.dataset.tabsReady = "";
+		const platform = windows ? panels.findIndex((panel) => panel.dataset.tabPlatform === "windows") : -1;
+		select([linked(), platform, 0].find((index) => index >= 0));
 	}
 	const wideNav = matchMedia("(min-width: 601px)");
 	wideNav.addEventListener("change", () => {

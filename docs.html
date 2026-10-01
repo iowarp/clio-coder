@@ -33,29 +33,79 @@
 <a href="/docs/guide/troubleshooting.html">Troubleshooting</a>
 <a href="/docs/guide/configuration-reference.html">Configuration essentials</a>
 <a href="/docs/guide/environment-variables.html">Environment essentials</a></details></div></div></details></aside>
-  <article class="doc-article"><div class="doc-toolbar"><p id="doc-path">Install Clio Coder</p><a id="doc-github" href="https://github.com/iowarp/clio-coder/blob/main/README.md">Read the full guide <span class="arrow arrow-diagonal" aria-hidden="true">↗</span></a></div><div class="doc" id="doc" data-doc="README.md"><details class="doc-toc-mobile"><summary>On this page</summary><a href="#install-and-open-a-project">Install and open a project</a>
+  <article class="doc-article"><div class="doc-toolbar"><p id="doc-path">Install Clio Coder</p><a id="doc-github" href="https://github.com/iowarp/clio-coder/blob/main/README.md">Read the full guide <span class="arrow arrow-diagonal" aria-hidden="true">↗</span></a></div><div class="doc" id="doc" data-doc="README.md"><details class="doc-toc-mobile"><summary>On this page</summary><a href="#install">Install</a>
+<a href="#confirm-the-installation">Confirm the installation</a>
+<a href="#open-a-project">Open a project</a>
+<a href="#update-roll-back-and-remove">Update, roll back and remove</a>
 <a href="#give-clio-a-useful-first-task">Give Clio a useful first task</a>
 <a href="#keep-going">Keep going</a>
 <a href="#when-you-need-more-detail">When you need more detail</a></details><h1 id="install-clio-coder">Install Clio Coder</h1>
 <p>Install, update, and launch Clio Coder on your machine.</p>
-<h2 id="install-and-open-a-project">Install and open a project</h2>
-<p>You need a model with tool calling. Linux and macOS are the primary platforms. The installer brings its own Node.js 24 and needs no root, including on x64 HPC login nodes with glibc 2.17 or newer.</p>
-<div class="code-block"><p class="code-label eyebrow">Shell</p><pre tabindex="0" aria-label="Code example 1"><code class="language-sh">curl -fsSL https://coder.iowarp.ai/install.sh | sh
-cd /path/to/your/project
+<h2 id="install">Install</h2>
+<p>You need a model with tool calling. Linux and macOS are the primary platforms; on Windows, use WSL. The latest release is <strong>0.5.9</strong>, and every command below installs it. Choose the tab for your system.</p>
+<div class="tab-set" data-tabs="Install method"><div class="tab-panel" id="tab-macos-linux-and-wsl" data-tab="macOS, Linux and WSL"><h3 class="tab-label" id="macos-linux-and-wsl">macOS, Linux and WSL</h3>
+<div class="code-block"><p class="code-label eyebrow">Shell</p><pre tabindex="0" aria-label="Code example 1"><code class="language-sh">curl -fsSL https://coder.iowarp.ai/install.sh | sh</code></pre></div>
+<p>The installer brings its own Node.js 24 and needs no root, including on x64 HPC login nodes with glibc 2.17 or newer. It checks the Node download against its published SHA-256 checksums, and their OpenPGP signature when <code>gpg</code> is installed. It installs under <code>~/.local/share/clio-coder-install</code> on Linux or <code>~/Library/Application Support/clio-coder/install</code> on macOS, and writes the launcher <code>~/.local/bin/clio-coder</code>.</p>
+<p>Pass options after <code>sh -s --</code>. For example, <code>--modify-path</code> adds the launcher directory to your shell profile, and <code>--omit-optional</code> skips the optional Claude Agent SDK, about 224 MB:</p>
+<div class="code-block"><p class="code-label eyebrow">Shell</p><pre tabindex="0" aria-label="Code example 2"><code class="language-sh">curl -fsSL https://coder.iowarp.ai/install.sh | sh -s -- --modify-path</code></pre></div>
+<p>On a cluster, read <a href="/docs/guide/hpc-clusters.html">Install on a cluster</a>.</p>
+</div><div class="tab-panel" id="tab-powershell" data-tab="PowerShell" data-tab-platform="windows"><h3 class="tab-label" id="powershell">PowerShell</h3>
+<p><strong>Needs Clio Coder 0.6.0, which is not released yet.</strong> With 0.5.9, this command installs the package and then stops at its post-install check. Until 0.6.0, install WSL, open its Linux terminal, and use the macOS, Linux and WSL command.</p>
+<div class="code-block"><p class="code-label eyebrow">PowerShell</p><pre tabindex="0" aria-label="Code example 3"><code class="language-powershell">irm https://coder.iowarp.ai/install.ps1 | iex</code></pre></div>
+<p>PowerShell shows <code>PS C:\&gt;</code> at the prompt. If <code>curl ... | sh</code> reports that <code>sh</code> is not recognized, you are in Windows rather than WSL.</p>
+</div><div class="tab-panel" id="tab-cmd" data-tab="CMD" data-tab-platform="windows"><h3 class="tab-label" id="cmd">CMD</h3>
+<p><strong>Needs Clio Coder 0.6.0, which is not released yet.</strong> With 0.5.9, this command installs the package and then stops at its post-install check. Until 0.6.0, use WSL.</p>
+<div class="code-block"><p class="code-label eyebrow">CMD</p><pre tabindex="0" aria-label="Code example 4"><code class="language-bat">powershell -NoProfile -Command &quot;irm https://coder.iowarp.ai/install.ps1 | iex&quot;</code></pre></div>
+<p>CMD shows <code>C:\&gt;</code> without the <code>PS</code>. If you see <code>&#39;irm&#39; is not recognized as an internal or external command</code>, you ran the PowerShell command in CMD; use the command above.</p>
+</div><div class="tab-panel" id="tab-npm" data-tab="npm"><h3 class="tab-label" id="npm">npm</h3>
+<p>With your own <strong>Node.js 22.19 or newer</strong> on <code>PATH</code>:</p>
+<div class="code-block"><p class="code-label eyebrow">Shell</p><pre tabindex="0" aria-label="Code example 5"><code class="language-sh">npm install -g @iowarp/clio-coder</code></pre></div>
+</div><div class="tab-panel" id="tab-bun" data-tab="bun"><h3 class="tab-label" id="bun">bun</h3>
+<div class="code-block"><p class="code-label eyebrow">Shell</p><pre tabindex="0" aria-label="Code example 6"><code class="language-sh">bun add -g @iowarp/clio-coder</code></pre></div>
+<p>bun installs the package, but <code>clio-coder</code> still runs on Node.js, so it needs <strong>Node.js 22.19 or newer</strong> on <code>PATH</code> too.</p>
+</div></div><h2 id="confirm-the-installation">Confirm the installation</h2>
+<p>Open a new terminal and run:</p>
+<div class="code-block"><p class="code-label eyebrow">Shell</p><pre tabindex="0" aria-label="Code example 7"><code class="language-sh">clio-coder --version</code></pre></div>
+<p>It prints the installed version. If the shell says <code>clio-coder: command not found</code>, the launcher directory is not on your <code>PATH</code> yet. Add the line the installer printed to <code>~/.bashrc</code> or <code>~/.zshrc</code>, or install again with <code>--modify-path</code>:</p>
+<div class="code-block"><p class="code-label eyebrow">Shell</p><pre tabindex="0" aria-label="Code example 8"><code class="language-sh">export PATH=&quot;$HOME/.local/bin:$PATH&quot;</code></pre></div>
+<p><code>command -v clio-coder</code> shows which file the name runs. If it is not <code>~/.local/bin/clio-coder</code>, an older install comes first on your <code>PATH</code>; remove it or reorder <code>PATH</code>. <code>clio-coder doctor</code> checks the installation and connections.</p>
+<h2 id="open-a-project">Open a project</h2>
+<div class="code-block"><p class="code-label eyebrow">Shell</p><pre tabindex="0" aria-label="Code example 9"><code class="language-sh">cd /path/to/your/project
 clio-coder configure
 clio-coder</code></pre></div>
-<p>If <code>~/.local/bin</code> is not on your <code>PATH</code>, the installer prints the line to add. It checks the Node download against its published SHA-256 checksums, and their OpenPGP signature when <code>gpg</code> is installed. Pass options after <code>sh -s --</code>, as in <code>curl -fsSL https://coder.iowarp.ai/install.sh | sh -s -- --version 0.6.0</code>.</p>
-<p>From 0.6.0 on, if this site is unreachable, the latest GitHub release carries the same script at <code>https://github.com/iowarp/clio-coder/releases/latest/download/install.sh</code>.</p>
-<p>On native Windows, which is best effort (WSL is the recommended route), run <code>irm https://coder.iowarp.ai/install.ps1 | iex</code> from 0.6.0 on. The installer, <code>--version</code>, <code>doctor</code> and <code>uninstall</code> work there; the terminal session itself is not routinely tested.</p>
-<p>With your own <strong>Node.js 22.19 or newer</strong>, npm works too: <code>npm install -g @iowarp/clio-coder</code>. From 0.6.0, an older Node stops with a message that names the installer. On a cluster, read <a href="/docs/guide/hpc-clusters.html">Install on a cluster</a>.</p>
-<blockquote>
-<p><strong>Before Clio Coder 0.6.0 is published.</strong> The installer and npm install the latest release, 0.5.9. When 0.6.0 ships, run the install command again: 0.5.9&#39;s <code>clio-coder upgrade</code> does not recognize the installer&#39;s layout. Native Windows needs 0.6.0, so use WSL until then.</p>
-<p>To remove a 0.5.9 install, run <code>clio-coder uninstall</code>, then delete <code>~/.local/bin/clio-coder</code> and the install root: <code>~/.local/share/clio-coder-install</code> on Linux, or <code>~/Library/Application Support/clio-coder/install</code> on macOS.</p>
-</blockquote>
-<p>On first launch, <strong>Guided setup</strong> helps you connect a local app, a model server, an AI subscription, or a provider account. Choose a model, review the connection, and save. You can also run <code>clio-coder configure</code> before opening a project.</p>
+<p>On first launch, <strong>Guided setup</strong> helps you connect a local app, a model server, an AI subscription, or a provider account. Choose a model, review the connection, and save. Clio Coder has no account of its own; your provider may require credentials and charge for inference.</p>
 <p>Prefer the desktop alpha? It opens locally in your browser and shares the terminal&#39;s saved connections and settings:</p>
-<div class="code-block"><p class="code-label eyebrow">Shell</p><pre tabindex="0" aria-label="Code example 2"><code class="language-sh">clio-coder gui --open</code></pre></div>
+<div class="code-block"><p class="code-label eyebrow">Shell</p><pre tabindex="0" aria-label="Code example 10"><code class="language-sh">clio-coder gui --open</code></pre></div>
 <p>The browser has its own <strong>Guided setup</strong>; configuring in the terminal first is optional.</p>
+<h2 id="update-roll-back-and-remove">Update, roll back and remove</h2>
+<p>Clio Coder 0.5.9 does not update itself. Its interactive sessions show a quiet footer hint when a newer release exists. Update with the tool that installed it:</p>
+<div class="doc-table" role="region" aria-label="Reference table 1" tabindex="0"><table>
+<thead>
+<tr>
+<th>Installed with</th>
+<th>Update</th>
+<th>Remove the program</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Installer</td>
+<td>Run the install command again. 0.5.9&#39;s <code>clio-coder upgrade</code> does not recognize the installer&#39;s layout.</td>
+<td><code>clio-coder uninstall</code>, then delete <code>~/.local/bin/clio-coder</code> and the install root above.</td>
+</tr>
+<tr>
+<td>npm</td>
+<td><code>clio-coder upgrade</code></td>
+<td><code>npm uninstall -g @iowarp/clio-coder</code></td>
+</tr>
+<tr>
+<td>bun</td>
+<td><code>bun add -g @iowarp/clio-coder@latest</code>, then <code>clio-coder upgrade --post-install</code></td>
+<td><code>bun remove -g @iowarp/clio-coder</code></td>
+</tr>
+</tbody></table></div>
+<p>The installer keeps the previous version. <code>curl -fsSL https://coder.iowarp.ai/install.sh | sh -s -- --rollback</code> points the launcher back at it.</p>
+<p><code>clio-coder uninstall</code> removes your settings, credentials, sessions and caches, so it previews what it will delete and asks first. Add <code>--keep-config</code> to keep settings and credentials, or <code>--dry-run</code> to only look. Removing the program with npm or bun keeps those files. Project <code>.clio-coder/</code> directories are never removed.</p>
+<p>If coder.iowarp.ai is unreachable, the latest GitHub release carries the same script from 0.6.0 on, at <code>https://github.com/iowarp/clio-coder/releases/latest/download/install.sh</code>.</p>
 <h2 id="give-clio-a-useful-first-task">Give Clio a useful first task</h2>
 <p>Start with a request that lets you assess its understanding of your project:</p>
 <blockquote>
@@ -70,11 +120,13 @@ clio-coder</code></pre></div>
 <li><a href="/docs/guide/tool-usage.html">Tools and permissions</a>: understand changes and review checks.</li>
 <li><a href="/docs/guide/doctor.html">Check your installation</a>: diagnose a connection or setup problem.</li>
 </ul>
-<p>For an existing installation, <code>clio-coder upgrade</code> updates an installer or npm global install and applies settings migrations. Other package managers receive update instructions. Check your installed version with <code>clio-coder --version</code>.</p>
 <h2 id="when-you-need-more-detail">When you need more detail</h2>
 <p>These web guides cover the essentials. Detailed documentation ships with Clio Coder; ask Clio to look up its bundled guide for the feature you&#39;re using. Each page also links to its full source guide.</p>
 </div><div class="doc-end"><a id="doc-snapshot-source" href="https://github.com/iowarp/clio-coder/tree/main" data-source-version="0.6.0" data-source-ref="6c148db046d4515e4de6ec1ed4fbdc405f8179db" data-source-commit="6c148db046d4515e4de6ec1ed4fbdc405f8179db">Guide to v0.6.0</a><a href="https://github.com/iowarp/clio-coder/issues">Suggest an improvement <span class="arrow arrow-diagonal" aria-hidden="true">↗</span></a></div></article>
-  <aside class="docs-toc" aria-label="On this page"><h2>On this page</h2><a href="#install-and-open-a-project">Install and open a project</a>
+  <aside class="docs-toc" aria-label="On this page"><h2>On this page</h2><a href="#install">Install</a>
+<a href="#confirm-the-installation">Confirm the installation</a>
+<a href="#open-a-project">Open a project</a>
+<a href="#update-roll-back-and-remove">Update, roll back and remove</a>
 <a href="#give-clio-a-useful-first-task">Give Clio a useful first task</a>
 <a href="#keep-going">Keep going</a>
 <a href="#when-you-need-more-detail">When you need more detail</a></aside>

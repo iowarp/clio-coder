@@ -36,6 +36,144 @@
 		color: var(--muted);
 		margin-block-start: 1.5rem;
 	}
+	/* The install panel sits in the hero. Method tabs on paper, shell tabs as a
+	   quieter second row, and each command on the dark code surface. */
+	.installer {
+		margin-block-start: 2rem;
+		max-inline-size: 42rem;
+		border: 1px solid var(--line-control);
+		border-radius: var(--radius);
+		background: var(--paper-raised);
+	}
+	.installer > :is(.installer-method, .installer-next) {
+		padding: 1rem 1.25rem;
+	}
+	.installer:not([data-tabs-ready]) .installer-method + .installer-method {
+		border-block-start: 1px solid var(--line);
+	}
+	.installer-shells:not([data-tabs-ready]) .installer-shell + .installer-shell {
+		margin-block-start: 1.25rem;
+	}
+	:is(.installer-note, .installer-next) code {
+		white-space: nowrap;
+	}
+	.installer .tab-label {
+		margin-block-end: 0.75rem;
+		font: 500 0.8rem / 1.4 var(--font-mono);
+		color: var(--ink);
+	}
+	.installer > .tab-list {
+		padding-inline: 1.25rem;
+	}
+	.installer-shells > .tab-list {
+		gap: 0 1.25rem;
+		margin-block: -0.25rem 1rem;
+	}
+	.installer-shells > .tab-list button {
+		min-block-size: 2.5rem;
+		font-size: 0.72rem;
+	}
+	.installer-command {
+		display: flex;
+		align-items: center;
+		gap: 1rem;
+		padding: 0.4rem 0.4rem 0.4rem 1rem;
+		border: 1px solid var(--code-border);
+		border-radius: var(--radius);
+		background: var(--code);
+		color: var(--code-ink);
+	}
+	.installer-command code {
+		flex: 1;
+		min-inline-size: 0;
+		padding-block: 0.35rem;
+		background: transparent;
+		color: inherit;
+		font: 0.85rem / 1.5 var(--font-mono);
+		white-space: pre-wrap;
+		overflow-wrap: anywhere;
+	}
+	.installer-prompt {
+		margin-inline-end: 0.75ch;
+		color: var(--code-muted);
+		user-select: none;
+	}
+	/* A compact icon control: the copy glyph, then a check while the copied
+	   state lasts. The tooltip and live region carry the words. */
+	.copy-icon-button {
+		display: inline-grid;
+		place-items: center;
+		align-self: start;
+		inline-size: 2.25rem;
+		block-size: 2.25rem;
+		min-inline-size: 0;
+		min-block-size: 0;
+		padding: 0;
+		border: 1px solid var(--code);
+		background: transparent;
+		border-radius: var(--radius);
+		color: var(--code-muted);
+		transition:
+			color var(--motion-fast) var(--motion-ease),
+			border-color var(--motion-fast) var(--motion-ease);
+	}
+	.copy-icon-button svg {
+		grid-area: 1 / 1;
+		fill: none;
+		stroke: currentColor;
+		stroke-width: 1.4;
+		stroke-linecap: round;
+		stroke-linejoin: round;
+	}
+	.copy-icon-button .copied-icon,
+	.copy-icon-button[data-copy-state="success"] .copy-icon {
+		visibility: hidden;
+	}
+	.copy-icon-button[data-copy-state="success"] .copied-icon {
+		visibility: visible;
+	}
+	.copy-icon-button:is(:hover, :focus-visible),
+	.copy-icon-button[data-copy-state="success"] {
+		color: var(--clio-teal);
+		border-color: var(--code-border);
+	}
+	@media (pointer: coarse) {
+		.copy-icon-button {
+			inline-size: 2.75rem;
+			block-size: 2.75rem;
+		}
+	}
+	.copy-icon-button[data-copy-state="error"] {
+		color: var(--secondary);
+		border-color: var(--secondary);
+	}
+	.installer-note,
+	.installer-next {
+		margin-block-start: 0.75rem;
+		color: var(--muted);
+		font-size: 0.8rem;
+	}
+	.installer-status {
+		margin-block-end: 0.75rem;
+		padding-inline-start: 0.75rem;
+		border-inline-start: 2px solid var(--secondary);
+		color: var(--ink-soft);
+		font-size: 0.8rem;
+	}
+	.installer-next {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: baseline;
+		gap: 0.25rem 1rem;
+		margin: 0;
+		border-block-start: 1px solid var(--line);
+	}
+	.installer-next .text-link {
+		font-size: 0.8rem;
+	}
+	.hero-copy .installer + .actions {
+		margin-block-start: 1.25rem;
+	}
 	.hero-portrait {
 		min-inline-size: 0;
 	}
