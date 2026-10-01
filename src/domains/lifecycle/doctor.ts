@@ -510,19 +510,25 @@ export function runDoctor(options: DoctorOptions = {}): DoctorFinding[] {
 	} else {
 		try {
 			accessSync(creds, constants.R_OK);
-			const st = statSync(creds);
-			const mode = st.mode & 0o777;
 			const damage = credentialsDamage();
-			findings.push({
-				ok: mode === 0o600 && damage === null,
-				name: "credentials",
-				detail:
-					damage === null
-						? isWiderThanOwnerOnly(mode)
-							? `${mode.toString(8)} (run \`clio-coder doctor --fix\` to set 600)`
-							: mode.toString(8)
-						: `${mode.toString(8)}; ${damage}`,
-			});
+			if (process.platform === "win32") {
+				// Windows reports every writable file as 666 and chmod cannot narrow
+				// it, so the mode said nothing and failed doctor on every native install.
+				// The profile directory's ACL is what protects the file there.
+				findings.push({ ok: damage === null, name: "credentials", detail: damage ?? creds });
+			} else {
+				const mode = statSync(creds).mode & 0o777;
+				findings.push({
+					ok: mode === 0o600 && damage === null,
+					name: "credentials",
+					detail:
+						damage === null
+							? isWiderThanOwnerOnly(mode)
+								? `${mode.toString(8)} (run \`clio-coder doctor --fix\` to set 600)`
+								: mode.toString(8)
+							: `${mode.toString(8)}; ${damage}`,
+				});
+			}
 		} catch (err) {
 			// `String(err)` put a raw `Error: EACCES...` in the row and named no
 			// remedy, the one shape every other failing row avoids. `--fix` chmods
