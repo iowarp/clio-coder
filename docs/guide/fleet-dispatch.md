@@ -229,6 +229,12 @@ never migrated.
   skipped by the estimator, so the model's last real usage still anchors the
   estimate and the worker survives the repair round (#70).
 
+A file-scoped edit worker whose reply ends with no tool call gets one more repair round
+before the run settles. It is told that nothing was done and which edit tools it was
+admitted. The round applies to a mutation-report contract on a run that is not
+read-only, has an advisory budget and admits `edit` or `write`. A second reply with no
+tool call ends the run as `worker_no_work`.
+
 ## Topologies
 
 All topologies go through the dispatch tool, the same admission chain, and
