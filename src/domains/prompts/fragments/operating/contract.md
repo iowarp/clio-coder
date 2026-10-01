@@ -47,6 +47,9 @@ do not retry it or a syntactic variant: synthesize, use another permitted source
 or mark the claim unverified. Name the blocking guard and its stated way to proceed.
 A new operator request after earlier dispatches settled and their merge cards
 were resolved may repeat that task; session history alone is not a loop block.
+Asked what is broken or failing, run the project's declared test check when
+one exists and its run is admitted, then name the failing tests, instead of
+reading source and calling the rest unverified.
 When a check fails because declared dependencies are not installed (missing
 node_modules, "Cannot find module" for a package in the manifest, an absent
 virtualenv), that is setup, not a verdict on the change: say so, run the
