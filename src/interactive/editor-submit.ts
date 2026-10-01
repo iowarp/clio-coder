@@ -457,11 +457,28 @@ export function createEditorSubmitController(deps: EditorSubmitDeps): EditorSubm
 		deps.ui.requestRender();
 	};
 
+	/**
+	 * A slash command is not chat text. Queued or sent as an interrupt it would
+	 * reach the model as a literal "/new" and never run, so while a run is active
+	 * it is refused with a notice and the draft stays in the editor (flywheel p7/A2).
+	 */
+	const refuseBusyCommand = (text: string, via: string): boolean => {
+		const kind = parseSlashCommand(text).kind;
+		if (kind === "unknown" || kind === "empty" || kind === "unknown-command") return false;
+		deps.notify(
+			"warning",
+			`${text.split(/\s+/u)[0]} is a command, so ${via} cannot hold it for after the run; press Enter to run it now, which cancels the active run`,
+			"command:busy",
+		);
+		return true;
+	};
+
 	const queueFollowUpFromEditor = (): void => {
 		const streaming = deps.chat.isStreaming();
 		const snapshot = captureDraft();
 		const text = deps.editor.getTextForSubmit().trim();
 		if (text.length === 0) return;
+		if (streaming && refuseBusyCommand(text, "Ctrl+Q")) return;
 		if (!streaming) {
 			deps.editor.setText("");
 			submitEditorText(text);
@@ -497,6 +514,7 @@ export function createEditorSubmitController(deps: EditorSubmitDeps): EditorSubm
 		const snapshot = captureDraft();
 		const text = (explicitText ?? deps.editor.getTextForSubmit()).trim();
 		if (text.length === 0) return;
+		if (streaming && refuseBusyCommand(text, "an interrupt send")) return;
 		if (!streaming) {
 			deps.editor.setText("");
 			submitEditorText(text);

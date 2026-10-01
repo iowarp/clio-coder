@@ -1085,13 +1085,24 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 			emitCommandNotice(slashRuntime.notice, "error", "new", "session contract unavailable");
 			return;
 		}
+		// A busy /new cancels the run first. Say so, and give back any message typed
+		// meanwhile: resetForSession drops the queues, so it vanished silently (p7/A2).
+		const wasBusy = deps.chat.isStreaming();
+		if (wasBusy) notify("info", "/new: cancelling the active run before starting a new session", "session:new");
+		const unsent = wasBusy ? deps.chat.clearQueuedFollowUps() : [];
 		const settlement = settleChatBeforeSessionSwitch(deps.chat);
 		if (settlement) await settlement;
+		unsent.push(...deps.chat.clearQueuedFollowUps());
 		deps.onNewSession();
 		deps.observability.resetSession();
 		presentation.resetForNewSession();
 		resetTranscript();
 		deps.chat.resetForSession(null);
+		if (unsent.length > 0) {
+			const current = editor.getExpandedText();
+			editor.setLiteralText([unsent.join("\n\n"), current].filter((part) => part.trim().length > 0).join("\n\n"));
+			notify("info", "a message queued behind the old run was put back in the editor", "session:new");
+		}
 		footer.refresh();
 		tui.requestRender();
 	};
