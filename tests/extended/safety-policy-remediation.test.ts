@@ -81,9 +81,13 @@ test("S1-03 chain and shell wrappers cannot bypass script approval", () => {
 		"npm run build | tee output.txt",
 		"npm run build && echo done",
 		"npm test | tee output.txt",
-		"npm test && echo done",
+		"npm test && echo done > output.txt",
 	])
 		assert.equal(admitted(policy, command), "ask", command);
+	// eba2a6ad1 recognizes a chain whose every member is recognized. `npm test`
+	// already runs without a card and `echo` is read-only, so the chain adds
+	// nothing either step lacked; only the file redirect above makes it ask.
+	assert.equal(admitted(policy, "npm test && echo done"), "allow");
 });
 test("S1 trust records and grant CLI remain operator authority", async () => {
 	const { workspaceTrustDirectory } = await import("../../src/domains/safety/workspace-trust.js");
