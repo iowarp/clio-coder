@@ -1,6 +1,7 @@
 import { deepStrictEqual, match, strictEqual } from "node:assert/strict";
 import { test } from "node:test";
 import { askMergeCard } from "../../src/domains/dispatch/merge-card.js";
+import { adaptRunReceiptValidationStatus } from "../../src/domains/evidence/trust-status.js";
 import type { AskUserHandler, AskUserQuestion, AskUserResult } from "../../src/tools/ask-user.js";
 
 const INPUT = { branch: "clio/task-1", changedPaths: ["src/a.ts"], reason: "the report claims no check" };
@@ -96,4 +97,23 @@ test("the merge card distinguishes a host failure also observed on the base", as
 	);
 	match(asked[0]?.question ?? "", /also fails on base base-sha/);
 	match(asked[0]?.question ?? "", /does not establish that the worker caused/);
+});
+
+test("a host failure also observed on the base leaves quality unknown, not failed", () => {
+	const check = {
+		check: "test",
+		argv: ["npm", "test"],
+		cwd: ".",
+		exitCode: 1,
+		durationMs: 10,
+		memo: false,
+		outputTail: "failure",
+	};
+	const status = (baseComparison: { status: "passed" | "failed"; base: string; exitCode: number }) =>
+		adaptRunReceiptValidationStatus({
+			runId: "run-1",
+			hostVerification: { status: "rejected", checks: [{ ...check, baseComparison }] },
+		}).state;
+	strictEqual(status({ status: "failed", base: "base-sha", exitCode: 1 }), "unknown");
+	strictEqual(status({ status: "passed", base: "base-sha", exitCode: 0 }), "failed");
 });
