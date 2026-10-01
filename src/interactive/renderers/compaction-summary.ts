@@ -4,7 +4,7 @@
  * Two output shapes live here:
  *   1. `renderCompactionSummaryLine` is the inline one-liner chat-loop
  *      emits after an auto-compaction or `/context compact` run. It uses the same
- *      `[context engine] <stage>:` shape as the observation-mask notice.
+ *      `[context engine] <verb>` shape as the observation-mask notice.
  *   2. `renderCompactionSummaryEntry` renders a persisted
  *      `CompactionSummaryEntry` as a framed, indented block the chat panel
  *      can splice into a replayed transcript. The block visually marks the
@@ -32,21 +32,38 @@ export interface CompactionSummaryLineInput {
 	messagesSummarized: number;
 	/** Final length in characters of the generated summary text. */
 	summaryChars: number;
-	/** Estimated context tokens before compaction. */
+	/** Context tokens the footer showed before compaction. */
 	tokensBefore: number;
+	/**
+	 * Context tokens the footer shows after compaction. This is the whole next
+	 * request (system prompt, tool schemas, summary and retained suffix), not the
+	 * summary alone, so the row and the footer name one figure.
+	 */
+	tokensAfter: number;
 	/** True when the cut fell mid-turn; callers may want to annotate. */
 	isSplitTurn?: boolean;
 }
 
+/** `36175` as `36.2K`, the footer's own reading of a token count. */
+function footerTokens(tokens: number): string {
+	if (!Number.isFinite(tokens) || tokens < 1000) return String(Math.max(0, Math.round(tokens)));
+	const thousands = tokens / 1000;
+	const fixed = thousands.toFixed(1);
+	if (thousands < 1000) return `${fixed.endsWith(".0") ? fixed.slice(0, -2) : fixed}K`;
+	const millions = (tokens / 1_000_000).toFixed(1);
+	return `${millions.endsWith(".0") ? millions.slice(0, -2) : millions}M`;
+}
+
 /**
- * One-line notice the `/context compact` handler writes to stdout. Example:
- *   [context engine] llm_summary: 42 messages summarized to 1823 chars; ~31420 tokens before
+ * The persistent transcript row an automatic or `/context compact` run leaves.
+ * Example:
+ *   [context engine] compacted 36.2K → 28.6K tokens; 42 messages summarized to 1823 chars
  * Split-turn runs carry a `(split turn)` suffix so the user knows the cut
  * landed mid-turn and upstream context may need a re-read.
  */
 export function renderCompactionSummaryLine(input: CompactionSummaryLineInput): string {
 	const tail = input.isSplitTurn ? " (split turn)" : "";
-	return `[context engine] llm_summary: ${input.messagesSummarized} messages summarized to ${input.summaryChars} chars; ~${input.tokensBefore} tokens before${tail}`;
+	return `[context engine] compacted ${footerTokens(input.tokensBefore)} → ${footerTokens(input.tokensAfter)} tokens; ${input.messagesSummarized} messages summarized to ${input.summaryChars} chars${tail}`;
 }
 
 /** Why the non-destructive stage had nothing to do before a summary ran. */

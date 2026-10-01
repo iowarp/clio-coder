@@ -1503,6 +1503,10 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			compactionThreshold,
 			snapshotMetadata,
 		);
+		// The footer's own figure, taken before the summary replaces the messages,
+		// so the transcript row and the footer name one number (p6/U1: the
+		// snapshot said 5590 beside a footer that read 28.6K).
+		const footerTokensBefore = liveContextEstimate(agentRuntime, pendingUserText).tokens;
 		let budget:
 			| Pick<
 					CompactInput,
@@ -1608,8 +1612,8 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		persistContextSnapshot(preCompactSnapshot);
 		persistContextSnapshot(postCompactSnapshot);
 
-		const tokensBefore = snapshotInputTokens(preCompactSnapshot);
-		const tokensAfter = snapshotInputTokens(postCompactSnapshot);
+		const tokensBefore = footerTokensBefore;
+		const tokensAfter = liveContextEstimate(agentRuntime, pendingUserText).tokens;
 		lastCompactionEvent = {
 			stage: "llm_summary",
 			tokensBefore,
@@ -1632,6 +1636,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 				messagesSummarized: result.messagesSummarized,
 				summaryChars: result.summary.length,
 				tokensBefore,
+				tokensAfter,
 				isSplitTurn: result.isSplitTurn,
 			}),
 		);
