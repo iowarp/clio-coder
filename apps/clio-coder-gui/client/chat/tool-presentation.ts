@@ -532,6 +532,7 @@ const KINDS: Readonly<Record<string, Kind>> = {
 	steer: { chip: "control", body: "json" },
 	panes: { chip: "control", body: "json" },
 	context: { chip: "context", body: "json" },
+	configure_clio: { chip: "settings", body: "json" },
 	ask_user: { chip: "ask", body: "ask" },
 	decide: { chip: "ask", body: "ask" },
 	evidence: { chip: "evidence", body: "json" },
@@ -558,6 +559,7 @@ const VERBS: Readonly<Record<string, string>> = {
 	dispatch: "Delegate",
 	control: "Control",
 	context: "Context",
+	settings: "Configure",
 	ask: "Ask",
 	evidence: "Evidence",
 	ledger: "Ledger",
@@ -710,6 +712,8 @@ function headlineFor(name: string, input: Record<string, unknown>, fallback: str
 			const task = str(input.task);
 			return `${agent} · ${task ?? "no task preview"}`;
 		}
+		case "configure_clio":
+			return `setting ${str(input.path) ?? ""}`.trim();
 		case "monitor":
 		case "steer":
 		case "panes":
@@ -782,7 +786,13 @@ export function presentTool(item: TimelineItem, options: PresentOptions = {}): T
 	const rawHeadline =
 		gateway.steps !== null
 			? chainHeadline(steps)
-			: headlineFor(name, wire.input, item.text.length > 0 ? item.text : (fallback as string));
+			: headlineFor(
+					name,
+					name === "configure_clio" && str(wire.input.path) === null && str(wire.details?.path) !== null
+						? { ...wire.input, path: wire.details?.path }
+						: wire.input,
+					item.text.length > 0 ? item.text : (fallback as string),
+				);
 	const headline = truncateHeadline(presentable(rawHeadline, options.workspaceRoot)) || (fallback as string);
 	const settled = isSettledStatus(item.status);
 	const failed = item.status === "failed" || wire.isError;
@@ -872,7 +882,7 @@ export function presentTool(item: TimelineItem, options: PresentOptions = {}): T
 				: { text: excerpt, tone: "fail" as const };
 	return {
 		chip: kind.chip,
-		verb: VERBS[kind.chip] ?? "Tool",
+		verb: name === "configure_clio" && wire.input.action === "preview" ? "Preview" : (VERBS[kind.chip] ?? "Tool"),
 		digest: digest.text,
 		digestTone: digest.tone,
 		name,

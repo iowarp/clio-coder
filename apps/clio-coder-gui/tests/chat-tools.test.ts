@@ -720,3 +720,31 @@ test("a delegation whose run was stopped reads Stopped with a dash, not Failed",
 	);
 	assert.deepEqual([failed.statusLabel, failed.tone, failed.ended], ["Failed", "fail", false]);
 });
+
+test("settings rows name the proposed or saved path without echoing value or stray arguments", () => {
+	const preview = presentTool(
+		toolItem({
+			title: "configure_clio",
+			text: "configure_clio",
+			toolKind: "other",
+			rawInput: { action: "preview", path: "fleet.profiles", value: "private routing blob", extra: "ignored" },
+		}),
+	);
+	assert.equal(preview.verb, "Preview");
+	assert.equal(preview.headline, "setting fleet.profiles");
+	const applied = presentTool(
+		toolItem({
+			title: "configure_clio",
+			text: "configure_clio",
+			toolKind: "other",
+			status: "completed",
+			rawInput: { action: "apply", proposalId: "opaque" },
+			rawOutput: {
+				result: { content: [{ type: "text", text: "Saved fleet.profiles." }], details: { path: "fleet.profiles" } },
+				isError: false,
+			},
+		}),
+	);
+	assert.equal(applied.verb, "Configure");
+	assert.equal(applied.headline, "setting fleet.profiles");
+});
