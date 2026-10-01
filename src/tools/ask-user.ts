@@ -67,6 +67,12 @@ export interface AskUserDecision {
 export interface AskUserResult {
 	answers: AskUserAnswer[];
 	cancelled?: true;
+	/**
+	 * Set with `cancelled` when the surface could not show the round because
+	 * another overlay owns the screen, so nobody was asked. A harness caller
+	 * retries on it; the operator's own Esc never sets it.
+	 */
+	unavailable?: true;
 }
 
 export interface AskUserCall {
@@ -310,6 +316,11 @@ function normalizeAskUserCall(args: Record<string, unknown>): { call?: AskUserCa
 
 export function cancelledAskUserResult(): AskUserResult {
 	return { answers: [], cancelled: true };
+}
+
+/** A round the surface could not put in front of the operator. */
+export function unavailableAskUserResult(): AskUserResult {
+	return { answers: [], cancelled: true, unavailable: true };
 }
 
 /** The chosen labels, dropped when the surface supplied nothing usable. */

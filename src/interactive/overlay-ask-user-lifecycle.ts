@@ -4,6 +4,7 @@ import {
 	type AskUserHandler,
 	type AskUserQuestion,
 	cancelledAskUserResult,
+	unavailableAskUserResult,
 } from "../tools/ask-user.js";
 import type { OverlayState } from "./overlay-key-routing.js";
 import { type AskUserOverlaySession, openAskUserOverlay } from "./overlays/ask-user.js";
@@ -96,15 +97,32 @@ export function createOverlayAskUserLifecycle(deps: OverlayAskUserLifecycleDeps)
 		recordAnswer: boolean,
 	): ReturnType<AskUserHandler> => {
 		const toolBacked = Boolean(invokeOptions?.turnId || invokeOptions?.toolCallId);
+		// A round the harness asks on its own decision (a dispatch merge card)
+		// is not part of the model's interview.
+		const harnessOwned = invokeOptions?.origin === "harness";
+		const signal = invokeOptions?.signal;
+		if (signal?.aborted === true) return cancelledAskUserResult();
 		if (toolBacked && cancelledForTurn) return cancelledAskUserResult();
 		const activeSession = ensureSession();
-		if (!activeSession) return cancelledAskUserResult();
-		pendingCancel = cancel;
-		const result = await activeSession.ask(questions, invokeOptions?.decisionPresentation);
+		if (!activeSession) return unavailableAskUserResult();
+		// Esc on the model's own round cancels the turn's interview. A harness
+		// round answers only itself and leaves the model's next ask_user alone.
+		pendingCancel = harnessOwned ? () => activeSession.cancel() : cancel;
+		// An abort dismisses only this round: the session resolves it as cancelled
+		// and the close below takes the overlay down.
+		const onAbort = (): void => activeSession.cancel();
+		signal?.addEventListener("abort", onAbort, { once: true });
+		let result: Awaited<ReturnType<AskUserHandler>>;
+		try {
+			result = await activeSession.ask(questions, invokeOptions?.decisionPresentation);
+		} finally {
+			signal?.removeEventListener("abort", onAbort);
+		}
+		if (result.unavailable === true) return result;
 		if (recordAnswer && !toolBacked && result.cancelled !== true && result.answers.length > 0)
 			deps.onRoundAnswered?.(questions, result.answers);
 		if (result.cancelled === true || !toolBacked) {
-			if (result.cancelled === true) cancelledForTurn = true;
+			if (result.cancelled === true && !harnessOwned) cancelledForTurn = true;
 			close();
 		} else {
 			refresh();

@@ -17,7 +17,7 @@ import {
 	wrapTextWithAnsi,
 } from "../../engine/tui.js";
 import type { AskUserAnswer, AskUserQuestion, AskUserResult } from "../../tools/ask-user.js";
-import { cancelledAskUserResult } from "../../tools/ask-user.js";
+import { cancelledAskUserResult, unavailableAskUserResult } from "../../tools/ask-user.js";
 import { dockGrowthRows } from "../dock.js";
 import { scrollTranscriptPage } from "../layout.js";
 import {
@@ -430,7 +430,8 @@ class AskUserOverlayView implements Component {
 		presentation: DecisionPresentation = DEFAULT_ASK_USER_PRESENTATION,
 	): Promise<AskUserResult> {
 		if (this.phase === "closed") return Promise.resolve(cancelledAskUserResult());
-		if (this.resolveCurrent) return Promise.resolve(cancelledAskUserResult());
+		// A round is already on screen; the caller is not the one being answered.
+		if (this.resolveCurrent) return Promise.resolve(unavailableAskUserResult());
 		this.phase = "asking";
 		this.index = 0;
 		this.status = "";
