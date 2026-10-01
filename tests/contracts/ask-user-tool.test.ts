@@ -76,6 +76,25 @@ describe("ask_user tool", () => {
 	});
 	afterEach(() => scratch.restore());
 
+	it("carries Proceed consent into implementation guidance without authorizing a revision or qualified answer", async () => {
+		const question = "Carry out this plan?";
+		for (const choice of ["Proceed with this plan (Recommended)", "Revise the plan first"]) {
+			for (const value of [undefined, "Keep this plan-only for now"]) {
+				const f = fixture([{ answers: [{ question, answer: choice, options: [choice], ...(value ? { value } : {}) }] }]);
+				const answered = await f.call({ questions: [{ question, options: [{ label: choice }] }] });
+				const completed = await f.call({ action: "complete", summary: "Plan reviewed" });
+				for (const result of [answered, completed]) {
+					if (result.kind !== "ok") throw new Error("expected ok");
+					strictEqual(
+						result.output.includes("then implement in this same turn"),
+						choice.startsWith("Proceed") && value === undefined,
+					);
+					strictEqual(result.terminate, undefined);
+				}
+			}
+		}
+	});
+
 	it("hides the install-offer binding tag from the surface and keeps it in the answer", async () => {
 		const tag = skillInstallOfferTag("offer-1");
 		const asked = {

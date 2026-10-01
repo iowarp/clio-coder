@@ -588,13 +588,32 @@ function renderAskUserState(
 	latestAnswers: ReadonlyArray<AskUserAnswer> = [],
 ): string {
 	const interview = compactInterview(policy, event, latestAnswers);
+	const planAnswer = policy.rounds
+		.flatMap((round) => round.answers)
+		.reverse()
+		.find((answer) => /^carry out this plan\?$/iu.test(answer.question.trim()));
+	const planApproved =
+		policy.status !== "cancelled" &&
+		planAnswer?.options?.length === 1 &&
+		/^proceed\b/iu.test(planAnswer.options[0] ?? "") &&
+		!planAnswer.value?.trim();
 	const guidance =
 		policy.status === "active"
 			? "The interview modal remains open. Ask only new necessary follow-up rounds. When enough information is collected, call ask_user with action=complete before final prose."
 			: policy.status === "cancelled"
 				? "The operator dismissed the interview without answering. A dismissal is not approval: make no edits, run no commands and dispatch no workers on a guessed answer. The turn ends here; wait for the operator's next message."
 				: "The interview is closed. Act on the answers now: approval means do the work. If the operator declines or says the work is enough, end in one sentence without restating earlier output. Use the compact decisions below; open the transcript only if its history is needed. End with the result, without a new question or offer.";
-	return [`ask_user result: ${event}`, guidance, "", JSON.stringify({ interview }, null, 2)].join("\n");
+	return [
+		`ask_user result: ${event}`,
+		guidance,
+		...(planApproved
+			? [
+					"The operator selected Proceed on the carry-out plan card. This authorizes implementation of the displayed plan, superseding an earlier plan-only request. Complete this interview if still open, then implement in this same turn. Do not stop at a plan-only acknowledgement or request another message. Existing safety and explicit host/tool restrictions still apply.",
+				]
+			: []),
+		"",
+		JSON.stringify({ interview }, null, 2),
+	].join("\n");
 }
 
 function okInterviewResult(
