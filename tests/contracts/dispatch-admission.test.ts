@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, it } from "node:test";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import type { AgentsContract } from "../../src/domains/agents/contract.js";
 import type { AgentSpec } from "../../src/domains/agents/spec.js";
-import { admit, foregroundEndpointBlock } from "../../src/domains/dispatch/admission.js";
+import { admit, createCapacityAdmissionController, foregroundEndpointBlock } from "../../src/domains/dispatch/admission.js";
 import {
 	type AdmissionQueueRequest,
 	createAdmissionQueue,
@@ -865,6 +865,24 @@ describe("dispatch admission boundary", () => {
 			strictEqual(bundle.contract.listRuns().length, 0);
 		} finally {
 			await bundle.extension.stop?.();
+		}
+	});
+	it("hands a slot to the next queued assignment when the holder is released early, and a second release is a no-op", async () => {
+		// A merge card waits on the operator after its worker exited; it releases the
+		// slot before waiting so other dispatches are not queued behind it.
+		const controller = createCapacityAdmissionController({
+			limits: () => ({ global: 1, nodes: { local: 1 }, endpoints: {} }),
+		});
+		try {
+			await controller.admit({ assignmentId: "holder", nodeId: "local" });
+			const next = controller.admit({ assignmentId: "next", nodeId: "local" });
+			strictEqual(controller.releaseAssignment("holder"), true);
+			const admitted = await next;
+			strictEqual(admitted.lease.assignmentId, "next");
+			strictEqual(controller.releaseAssignment("holder"), false);
+			strictEqual(controller.releaseAssignment("next"), true);
+		} finally {
+			controller.stop();
 		}
 	});
 });

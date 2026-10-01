@@ -3162,6 +3162,12 @@ export function createDispatchBundle(
 	): Promise<MergeCardOutcome | null> => {
 		const operator = options?.operatorAsk;
 		if (operator === undefined || !operator.available()) return null;
+		// The worker has exited and nothing runs on its lease, but the assignment
+		// holds a global, node, and endpoint slot until the receipt settles. A card
+		// can wait out its whole timeout, so it must not keep other dispatches
+		// queued behind a slot nothing is using. The settle that follows releases
+		// by the same assignment id and finds nothing left to release.
+		capacityAdmission.releaseAssignment(run.lineage.rootRunId);
 		const canceled = new AbortController();
 		const watch = setInterval(() => {
 			if (run.aborted) canceled.abort();
