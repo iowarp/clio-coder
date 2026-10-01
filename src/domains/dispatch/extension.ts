@@ -461,6 +461,8 @@ interface ActiveRun {
 	hostRun?: DispatchPreparationOptions["hostRun"];
 	heartbeatAt: HeartbeatStamp | null;
 	heartbeatStatus: HeartbeatStatus;
+	/** Set while the finalizer waits on the operator's merge card; the worker is gone, the orchestrator is the live party. */
+	awaitingOperator?: boolean;
 	meter: RunTokenMeter;
 	pricing: EffectivePricing["rates"];
 	costProvenance: import("../providers/index.js").CostProvenance;
@@ -3176,6 +3178,21 @@ export function createDispatchBundle(
 			if (run.aborted) canceled.abort();
 		}, 1000);
 		watch.unref?.();
+		// The worker has exited, so its heartbeat and pid say nothing about this run.
+		// Mark the run as waiting on the operator and let the orchestrator vouch for
+		// it: the watchdog stops classifying it stale or dead, and a second Clio on
+		// this state directory sees a live pid instead of an abandoned row.
+		const workerPid = ledger?.get(run.runId)?.pid ?? null;
+		run.awaitingOperator = true;
+		const vouch = (): void => {
+			ledger?.update(run.runId, {
+				status: "running",
+				pid: process.pid,
+				heartbeatAt: new Date(now()).toISOString(),
+				outcomeDetail: "awaiting operator: merge card",
+			});
+		};
+		vouch();
 		try {
 			return await mergeCardQueue(async () => {
 				// A card queued behind others can outlive its run.
@@ -3196,6 +3213,8 @@ export function createDispatchBundle(
 			return null;
 		} finally {
 			clearInterval(watch);
+			run.awaitingOperator = false;
+			ledger?.update(run.runId, { pid: workerPid, outcomeDetail: null });
 		}
 	};
 	const grantRunFallbacks = new Map<string, "deny" | "fail">();
@@ -4260,7 +4279,17 @@ export function createDispatchBundle(
 		consumeOperatorCancelRequests();
 		const tickMonotonic = monotonicNow();
 		for (const run of active.values()) {
-			if (run.aborted || run.stallKilled || !run.heartbeatAt) continue;
+			if (run.aborted || run.stallKilled) continue;
+			if (run.awaitingOperator === true) {
+				// The orchestrator is the live party; keep the row fresh and unclassified.
+				ledger.update(run.runId, {
+					status: "running",
+					pid: process.pid,
+					heartbeatAt: new Date(now()).toISOString(),
+				});
+				continue;
+			}
+			if (!run.heartbeatAt) continue;
 			// Finalizers retain active entries while awaiting ledger persistence.
 			// Their terminal status is already sealed into the receipt digest.
 			if (ledger.get(run.runId)?.endedAt !== null) continue;
