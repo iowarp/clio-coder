@@ -618,8 +618,8 @@ export function adaptRunReceiptValidationStatus(
 	if (
 		receipt.validationGrounding?.basis === "no-command-executed" &&
 		((receipt.validationGrounding?.ungrounded.length ?? 0) > 0 ||
-		(receipt.validationGrounding !== undefined &&
-			receipt.validationGrounding.claimed > receipt.validationGrounding.grounded))
+			(receipt.validationGrounding !== undefined &&
+				receipt.validationGrounding.claimed > receipt.validationGrounding.grounded))
 	) {
 		return attributed("ungrounded", receiptSource(receipt), { kind: "validator", id: "command-grounding" }, artifacts);
 	}
