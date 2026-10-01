@@ -26,9 +26,10 @@
 	--status-neutral-tint: #ebe4d7;
 	--status-neutral-line: #857a6c;
 
-	--status-running-fg: #2c5883;
-	--status-running-tint: #e4ebf2;
-	--status-running-line: #4a7cae;
+	/* Running is Clio working, so it takes the brand teal the pulse uses, with the site's teal washes. */
+	--status-running-fg: #075a60;
+	--status-running-tint: #e3f2f3;
+	--status-running-line: #3b8a8f;
 
 	--status-success-fg: #14573a;
 	--status-success-tint: #e3efe6;
@@ -146,9 +147,9 @@
 	--status-neutral-tint: #151412;
 	--status-neutral-line: #7a7064;
 
-	--status-running-fg: #8ab8e6;
-	--status-running-tint: #0b1722;
-	--status-running-line: #4a78a6;
+	--status-running-fg: #00d4db;
+	--status-running-tint: #052629;
+	--status-running-line: #2a9ea4;
 
 	--status-success-fg: #58b380;
 	--status-success-tint: #0a2517;
@@ -194,9 +195,9 @@
 		--status-neutral-tint: #151412;
 		--status-neutral-line: #7a7064;
 
-		--status-running-fg: #8ab8e6;
-		--status-running-tint: #0b1722;
-		--status-running-line: #4a78a6;
+		--status-running-fg: #00d4db;
+		--status-running-tint: #052629;
+		--status-running-line: #2a9ea4;
 
 		--status-success-fg: #58b380;
 		--status-success-tint: #0a2517;
