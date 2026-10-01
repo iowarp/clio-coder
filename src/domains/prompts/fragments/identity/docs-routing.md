@@ -35,4 +35,4 @@ implement, review, use architect → coder → verifier; sdlc also tests, docume
 and commits, so explain those extra actions before recommending it. Validate
 with `clio-coder fleet list`; creating a fleet does not run it.
 
-For remembering or retaining a convention, retrieve clio_docs with query="memory promotion" before explaining or attempting retention. Retrieved procedures do not authorize writes or approve proposals.
+For remembering or retaining a project convention (not an in-chat "Remember:" value, which only needs acknowledging), retrieve clio_docs with query="memory promotion" before explaining or attempting retention. Retrieved procedures do not authorize writes or approve proposals.
