@@ -26,6 +26,6 @@ The skill submits once, polls through the MCP server, and reports the outcome. I
 
 ## Choose approvals deliberately
 
-An undeclared action class defaults to unknown. In default autonomy, both submission and read-only polling ask for approval; headless default runs deny those asks.
+With the server declared as `slurm`, Clio classifies each tool. Listing, describing, and cluster reads run without asking. Submission and cancellation always ask for approval, in `yolo` too, and a headless run denies those asks.
 
-MCP trust classification applies to the whole server, including submission and cancellation. Review the full guide before changing that classification or enabling unattended execution. For small local changes, begin with [ordinary project checks](/docs/guide/tool-usage.html).
+A `toolActionClasses` entry in `mcp.yaml` can reclassify one tool, but submission and cancellation keep their confirmation. Review the full guide before changing a classification or enabling unattended execution. For small local changes, begin with [ordinary project checks](/docs/guide/tool-usage.html).

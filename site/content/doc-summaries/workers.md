@@ -21,7 +21,7 @@ A steering message first reports queued, then received when the worker acknowled
 
 ## Permissions, sandbox, and merges
 
-Native workers run their shell, script, and verification commands in an OS sandbox when one is available, bubblewrap on Linux. `safety.sandbox` and `safety.sandboxNetwork` control it.
+Native workers run their shell, script, and verification commands in an OS sandbox: bubblewrap on Linux, or an experimental `sandbox-exec` profile on macOS. With the default `safety.sandbox: auto`, they run unsandboxed when no sandbox works; `required` refuses them instead, and `off` disables it. `safety.sandboxNetwork: true` allows network access. Your own session's commands are not sandboxed.
 
 When a worker's task branch would merge with a failing or unrun check, the terminal asks first with a **Merge task branch?** card showing the branch, changed paths, and the check. The card opens on **Keep branch**. Headless and ACP runs always keep the branch.
 
@@ -32,6 +32,6 @@ clio-coder fleet list
 clio-coder fleet status
 ```
 
-Fleet recipes combine workers into workflows such as a review gate, competing solutions, or a council. Inspect the recipe and approval preview before starting one. Remote native workers use SSH and require the project at the same absolute path on each configured node; doctor checks that setup.
+Fleet recipes combine workers into workflows such as a review gate, competing solutions, or a council. Inspect the recipe and approval preview before starting one. Remote native workers use SSH and need the same Clio version and the project at the same absolute path on each node. `clio-coder doctor` reports those checks, and `clio-coder doctor --fix` records passing nodes for dispatch.
 
 Start locally with one worker. Use the full guide for remote-node configuration, capacity, recipe contracts, and failure recovery.

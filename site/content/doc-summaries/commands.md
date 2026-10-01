@@ -21,8 +21,8 @@ Add `--json` when you need machine-readable events. A request to avoid edits is 
 | Command | What it opens or does |
 | --- | --- |
 | `/help` | Commands and effective keybindings |
-| `/model` | Model picker for this session |
-| `/settings` | Shared Settings Center |
+| `/model` | Model picker; apply to this session or save for the project or globally |
+| `/settings` | Settings, grouped by area |
 | `/library` | Skills, prompts, agents, fleets, and plugins |
 | `/context` | Context usage and pending handoffs |
 | `/usage` | Session usage and supported subscription quotas |
@@ -43,9 +43,9 @@ Add `--json` when you need machine-readable events. A request to avoid edits is 
 | Alt+Q | Recover queued messages into the draft |
 | Alt+M | Open the model picker |
 | Alt+L | Open the Library |
-| Alt+O | Cycle Compact, Standard, and Detailed output |
+| Alt+O | Cycle the output detail level |
 | Alt+W | Open Workers |
 
 Ctrl+C closes an active overlay, cancels a running turn, or clears an idle draft. When idle with an empty draft and no queued messages, two presses within about 1.2 seconds exit.
 
-For a course correction, open **Ctrl+G → interrupt**, or use `/interrupt <text>`. Work already completed remains in the session record.
+For a course correction, type it in the composer and press **Ctrl+G i** (Interrupt with draft), or use `/interrupt <text>`. Work already completed remains in the session record.

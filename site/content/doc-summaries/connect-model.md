@@ -13,7 +13,7 @@ Already know the URL? Use `clio-coder configure --quick` for endpoint-first setu
 
 ## Settings Center
 
-Open terminal `/settings`, run `clio-coder configure --settings`, or choose **Settings** on the desktop. All three use the same sections:
+Run `clio-coder configure --settings` or choose **Settings** on the desktop. Both use these sections:
 
 | Section | What to change |
 | --- | --- |
@@ -25,6 +25,8 @@ Open terminal `/settings`, run `clio-coder configure --settings`, or choose **Se
 | Appearance | Output style and interface preferences |
 | Integrations | Agents, libraries, plugins, and Git |
 | Advanced | Diagnostics and the full settings editor |
+
+Terminal `/settings` arranges the same controls into finer areas, adding Recent & Pinned, Models & Inference, Agents & Delegation, and Workspace & Files.
 
 **Use connection default** lets a route inherit its connection's model. In the terminal, save to the session, project, or global scope where offered. Configure edits global defaults; desktop saved settings apply to new conversations. Active conversation controls have their own scope.
 
