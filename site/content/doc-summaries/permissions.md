@@ -4,13 +4,13 @@ Clio can read and search files, make edits, run shell commands, and execute decl
 
 > Fix the parser's handling of empty input. Keep the public API unchanged, add the relevant regression test, and run the project's test check. Show the diff and result.
 
-A useful sequence is **inspect → change → verify → review**. Clio's native Git inspection is read-only; inspect the actual diff before committing with your usual Git workflow.
+A useful sequence is **inspect → change → verify → review**. Inspect the actual diff before committing. The `git` tool can also run `add` and `commit`, and the safety rules judge those like the matching shell command.
 
 ## Understand permission requests
 
 **default** is the supervised mode for workspace edits and approved execution. **yolo** allows work without ordinary confirmation prompts; hard blocks and damage-control questions still apply. Set autonomy in **Permissions & Limits**.
 
-Read each requested command and its working directory before approving it. Asking for a plan or saying “do not edit” guides the task; it does not establish a technical read-only boundary. Use the explicit tool restrictions or read-only dispatch options when you need that boundary.
+Read each requested command and its working directory before approving it. A shell approval card also shows an **Effect** line that says in plain words what the command would do. It is a reading aid; admission does not depend on it. Asking for a plan or saying “do not edit” guides the task; it does not establish a technical read-only boundary. Use the explicit tool restrictions or read-only dispatch options when you need that boundary.
 
 ## Verify using your project's checks
 

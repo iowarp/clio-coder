@@ -1,4 +1,4 @@
-A useful coding result includes more than "done." You need to know what changed, which checks ran, and whether those results still apply to the files you are reviewing. Clio Coder v0.5.7 can use your repository's declared checks and a project quality policy to make those questions explicit.
+A useful coding result includes more than "done." You need to know what changed, which checks ran, and whether those results still apply to the files you are reviewing. Clio Coder v0.6.0 can use your repository's declared checks and a project quality policy to make those questions explicit.
 
 ::: note What this establishes
 Recorded verification is evidence about named checks and named inputs. It is not proof of correctness; your tests still need to cover the behavior that matters.
@@ -79,7 +79,7 @@ On the desktop alpha, open **Artifacts**, then **Results**, beside the conversat
 :::
 
 ::: result What to look for
-The actual check, its result, and any missing evidence. A receipt is an inspectable record of the run; it is not a certificate that every scientific or operational requirement was met. New receipts use a simpler schema, and older receipts remain readable and verifiable.
+The actual check, its result, and any missing evidence. A receipt is an inspectable record of the run; it is not a certificate that every scientific or operational requirement was met. Receipts from this release remain readable and verifiable.
 :::
 
 ::: capture gui-trace

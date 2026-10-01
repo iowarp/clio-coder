@@ -15,6 +15,8 @@ clio-coder paths --json
 | `CLIO_CODER_DATA_DIR` | Override the data directory |
 | `CLIO_CODER_STATE_DIR` | Override the state directory |
 | `CLIO_CODER_CACHE_DIR` | Override the cache directory |
+| `CLIO_CODER_BIN_DIR` | Choose where the installer puts the `clio-coder` launcher (default `~/.local/bin`) |
+| `CLIO_CODER_NODE_VERSION` | Choose the Node.js version the installer installs |
 
 Individual directory overrides take precedence over the shared root. Separate state is useful for an isolated evaluation or a dedicated automation environment.
 

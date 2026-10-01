@@ -1,7 +1,7 @@
 Clio Coder's Library contains skills, agents, prompts, fleets, and plugins. You can add a procedure to one project or install it for your user. Preview what will be written, inspect the resource, and load it when a task needs it.
 
 ::: note Version scope
-This guide describes v0.5.7. Library recipes and executable harness extensions have different roles, and installing either is not a grant of authority.
+This guide describes v0.6.0. Library recipes and executable harness extensions have different roles, and installing either is not a grant of authority.
 :::
 
 ::: diagram library-flow
@@ -9,7 +9,7 @@ This guide describes v0.5.7. Library recipes and executable harness extensions h
 
 ## Browse what ships with Clio
 
-Open `/library` in the terminal or press Alt+L. On the desktop alpha, the Library sits beside the conversation. **Browse** shows available content; **Installed** manages your copies.
+Open `/library` in the terminal or press Alt+L. On the desktop alpha, the Library page lists the catalog with an **Installed only** filter. In the terminal, **Browse** shows available content and **Installed** manages your copies.
 
 ::: capture tui-library-skill-tdd gui-library
 The Library in the terminal and the desktop alpha.

@@ -1,7 +1,7 @@
 Long coding work needs more than saved chat history. You need the current objective, the decisions that still apply, the relevant files, and the checks left to run. Clio Coder gives you controls for inspecting that context and continuing after a session grows.
 
 ::: note Version scope
-This guide describes the v0.5.7 context workflow. It does not promise that every detail survives summarization or that a model cannot misunderstand a handoff.
+This guide describes the v0.6.0 context workflow. It does not promise that every detail survives summarization or that a model cannot misunderstand a handoff.
 :::
 
 ::: diagram context-controls
@@ -22,7 +22,7 @@ The codemap locates structural information without reading every file into the c
 
 ## Inspect before the context fills
 
-In the terminal, `/context` shows usage, output reservation, remaining headroom, and any pending handoff. On the desktop alpha, open **Session tools** beside the conversation.
+In the terminal, `/context` shows usage, output reservation, remaining headroom, and any pending handoff. On the desktop alpha, open **Session panel**, then **Context** under **Session**. Branches and handoffs are under **Tools**.
 
 ::: capture tui-context gui-session-context gui-session-branches
 The same conversation's context in the terminal and the desktop alpha, and its branches.

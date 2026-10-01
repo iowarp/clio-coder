@@ -23,7 +23,7 @@ Find the resolved locations on your machine:
 clio-coder paths --json
 ```
 
-Objects merge by key; arrays and scalars replace the lower layer. Credential-bearing keys in project settings are ignored. Project saves require trusted project settings.
+`safety.sandbox` (`auto`, `required`, `off`) and `safety.sandboxNetwork` control the OS sandbox for dispatched native workers' commands. Objects merge by key; arrays and scalars replace the lower layer. Credential-bearing keys in project settings are ignored. Project saves require trusted project settings.
 
 Saved routes seed a new session. A settings write from another process does not redirect a conversation already running; use that session's model controls.
 

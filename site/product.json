@@ -1,7 +1,8 @@
 {
 	"name": "Clio Coder",
-	"version": "0.5.7",
+	"version": "0.6.0",
 	"origin": "https://coder.iowarp.ai",
 	"repository": "https://github.com/iowarp/clio-coder",
-	"publishedVersion": "0.5.7"
+	"publishedVersion": "0.5.9",
+	"linkRef": "main"
 }

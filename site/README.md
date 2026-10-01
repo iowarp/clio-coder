@@ -49,7 +49,7 @@ For a future release snapshot, after its matching tag exists:
 python3 site/sync-docs.py --source-ref v<VERSION>
 ```
 
-`product.json.version` describes the documentation source; `publishedVersion` describes the released npm package. They intentionally differ during development. The overview and structured source metadata use `version`, explicitly set to v0.5.7 for this website launch. The source version link points to the pinned repository snapshot. Keep `publishedVersion` accurate to the npm registry; update it only after confirming the published package. Installation always uses the actual npm package, with no link to an unpublished release tag.
+`product.json.version` describes the documentation source; `publishedVersion` describes the released npm package. They intentionally differ during development. The overview and structured source metadata use `version`, set to the upcoming release while a development tree is pinned (a `-dev` package version is accepted for repository snapshots). The source version link points to the pinned repository snapshot. Keep `publishedVersion` accurate to the npm registry; update it only after confirming the published package. Installation always uses the actual npm package, with no link to an unpublished release tag.
 
 A website can also pin the reviewed source without creating a package release:
 
@@ -82,7 +82,7 @@ node site/performance-check.mjs
 # add --paths /tutorials/<slug>.html to measure guides with captures
 ```
 
-The static checker validates the link graph, anchors, metadata, source provenance, and rendered documentation. The browser check covers both themes at 320, 390, 768, 850, 1024, and 1440px; all guides receive desktop accessibility checks. It exercises repeated copying, search keyboard navigation, active contents links, FAQ controls, screenshot viewing and zoom, menu keyboard behavior, saved themes, runtime reduced-motion changes, touch tablet rotation, redirects, 404 handling, and navigation without JavaScript. It writes screenshots and results to `/tmp/clio-site-review` by default. Pass `--url`, `--out`, or `--chrome` to override defaults; browser dependencies are reused from the GUI workspace.
+The static checker validates the link graph, anchors, metadata, source provenance, and rendered documentation. The browser check covers both themes at 320, 390, 768, 850, 1024, and 1440px; all guides receive desktop accessibility checks. It exercises repeated copying, search keyboard navigation, active contents links, FAQ controls, screenshot viewing and zoom, menu keyboard behavior, saved themes, runtime reduced-motion changes, touch tablet rotation, redirects, 404 handling, and navigation without JavaScript. It writes screenshots and results to `/tmp/clio-site-review` by default; pass `--out` elsewhere. Pass `--url`, `--out`, or `--chrome` to override defaults; browser dependencies are reused from the GUI workspace.
 
 Responsive images and square browser icons are generated from approved originals with `python3 site/image-variants.py`; `image-variants.json` records the hashes and sizes. Every build verifies these assets and adds responsive image attributes. The full-size viewer capture loads only when opened. The performance check measures cold-cache mobile FCP, LCP, layout shift, and initial asset transfers at 2Mbps download, 100ms latency, and 4x CPU slowdown. It writes `/tmp/clio-site-review/performance.json` and enforces documented budgets. Run it without another browser audit in parallel. These local measurements do not represent field Core Web Vitals.
 
@@ -90,6 +90,16 @@ Responsive images and square browser icons are generated from approved originals
 
 ## Deployment
 
-The existing production route is Cloudflare → Blade Tunnel → Traefik → Nginx. The owner authorized this website launch with v0.5.7 metadata. Website deployment is independent of npm publication, release tags, and GitHub Releases. Do not cut a package release through this workflow.
+GitHub Pages serves https://coder.iowarp.ai. Website deployment is independent of npm publication, release tags and GitHub Releases, and it never publishes the unreleased development branch.
 
-When deployment is authorized, read `/home/akougkas/dotfiles/homelab/skills/hlab/SKILL.md`, generate an immutable repository or matching release snapshot, commit the complete site, run the checks above, and use `bash site/deploy-blade.sh`. The script archives the exact committed site, validates it, saves the previous source and running image, checks the new Nginx configuration, and publishes only the site Compose service. A failed origin check restores the previous website. The running image and HTTP headers identify its Git revision. Rollback backups remain under `~/webhosting/clio-coder-site-backups/<commit>` on Blade. DNS and tunnel configuration are managed separately. The Docker build uses the checked site snapshot and does not read outside `site/`.
+While 0.6.0 is unreleased, Pages is set to deploy from the `gh-pages` branch, which holds only the built website. Run `bash site/publish-pages.sh` from a clean, committed tree. It checks the documentation snapshot, builds the site, runs `check.py`, and commits the output to the local `gh-pages` branch without pushing. Push that branch when authorized.
+
+After the release, `.github/workflows/pages.yml` takes over: it builds on a push to `main` that touches `site/**`, `scripts/install.sh`, `scripts/install.ps1` or the workflow, and on manual dispatch. Switch the Pages source to GitHub Actions at that time, then remove `linkRef` from `product.json` and re-pin the documentation to the `v0.6.0` tag with `python3 site/sync-docs.py --source-ref v0.6.0`. The `ci` and `release` workflows are untouched.
+
+`linkRef` in `product.json` points reader-facing source links at a public ref while the pinned commit is unpublished. The manifest still records the real pin.
+
+The build copies `scripts/install.sh` and `scripts/install.ps1` into the output unmodified, so `https://coder.iowarp.ai/install.sh` and `/install.ps1` serve the exact bytes of the deployed commit. `check.py` fails the build when they differ. The release workflow also attaches both scripts to each GitHub release from 0.6.0 on, which is the documented fallback.
+
+GitHub Pages cannot send response headers or HTTP redirects. The Content-Security-Policy and referrer policy ride in `<meta>` tags, and each entry in `redirects.json` becomes a small page with a meta refresh, a canonical link and a script redirect. `frame-ancestors` and `X-Frame-Options` are not available. `CNAME` and `.nojekyll` are written by the build, and `/version.json` records the site version, the documentation commit and the deployed revision.
+
+Preview the exact deployment build locally with `node site/build.mjs --out <directory>` and `python3 site/check.py <directory>`.

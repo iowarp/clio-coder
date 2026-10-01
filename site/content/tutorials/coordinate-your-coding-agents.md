@@ -1,7 +1,7 @@
 You can use Clio Coder to coordinate the coding agents you already have installed. Give a peer a focused assignment, follow a managed run where the connector supports it, and review its output before accepting the change.
 
 ::: note Version scope
-In v0.5.7 the supported peer family includes Claude Code, Codex, OpenCode, Pi, and Antigravity. Their modes and controls differ. Install and authenticate each peer's own CLI before configuring it in Clio.
+In v0.6.0 the supported peer family includes Claude Code, Codex, OpenCode, Pi, and Antigravity. Their modes and controls differ. Install and authenticate each peer's own CLI before configuring it in Clio.
 :::
 
 ::: needs
@@ -52,7 +52,7 @@ Dispatched workers and external peers run at `default`, even when the main sessi
 Each peer enforces read-only through its own mechanism. Check the mode you select instead of assuming one contract for all of them.
 
 ::: compare
-| Peer | Read-only headless run in v0.5.7 |
+| Peer | Read-only headless run in v0.6.0 |
 | --- | --- |
 | Codex | Its read-only sandbox mode |
 | Claude Code | Plan mode with read tools |
@@ -61,7 +61,7 @@ Each peer enforces read-only through its own mechanism. Check the mode you selec
 | OpenCode | Refused before launch |
 :::
 
-ACP peers may own their tools. Explicitly permitting peer-owned tools changes what Clio can observe and mediate, so read the guide's permission limits before using such a peer on sensitive work. Clio's coordination is not an operating-system sandbox.
+ACP peers may own their tools. Explicitly permitting peer-owned tools changes what Clio can observe and mediate, so read the guide's permission limits before using such a peer on sensitive work. Clio's own session is not an operating-system sandbox. Native workers run their commands in one when it is available, and external peers keep their own authority.
 
 ## Separate changes with a worktree
 

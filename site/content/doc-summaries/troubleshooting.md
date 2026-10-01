@@ -13,7 +13,7 @@ For slow first responses from a local model, check the server's load state and c
 
 ## Settings fail to load
 
-Clio uses a strict version-2 settings schema. Invalid or retired keys produce a diagnostic naming the path. `clio-coder upgrade` applies the registered migration and preserves the original version-1 settings as a backup. Doctor's repair mode is not a settings migration.
+Clio uses a strict version-2 settings schema. Invalid or retired keys produce a diagnostic naming the path. `clio-coder upgrade` applies the registered migration and preserves the original version-1 settings as a backup. Plain `clio-coder doctor` previews the fix for a retired value, and `doctor --fix` applies it. Version migrations still run through `clio-coder upgrade`.
 
 Use [Configuration essentials](/docs/guide/configuration-reference.html) to find the settings layers and the full reference.
 

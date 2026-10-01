@@ -21,7 +21,7 @@ A live model list, a cached list, and a provider catalog are distinct evidence. 
 
 ## Repair or investigate further
 
-`clio-coder doctor --fix` repairs selected installation state, including missing directories and credential permissions, and records fleet preflight results. It does not migrate old settings; use `clio-coder upgrade` for that.
+`clio-coder doctor --fix` repairs missing directories and credential permissions, rewrites retired setting values such as `safety.autonomy: auto-edit` and YAML `on` and `off` booleans while keeping your comments, and records fleet preflight results. Plain `doctor` previews the settings rewrite. Version migrations still run through `clio-coder upgrade`.
 
 For a live tool-use probe and validation-contract dry run:
 

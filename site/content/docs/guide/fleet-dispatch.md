@@ -23,6 +23,12 @@ Open **Workers** with Alt+W to inspect active runs. Select a running worker and 
 
 A steering message first reports queued, then received when the worker acknowledges it. Some external runtimes have no live steering channel; the interface identifies that limit. Review each run's recorded result before using its conclusions.
 
+## Permissions, sandbox, and merges
+
+Native workers run their shell, script, and verification commands in an OS sandbox when one is available, bubblewrap on Linux. `safety.sandbox` and `safety.sandboxNetwork` control it.
+
+When a worker's task branch would merge with a failing or unrun check, the terminal asks first with a **Merge task branch?** card showing the branch, changed paths, and the check. The card opens on **Keep branch**. Headless and ACP runs always keep the branch.
+
 ## Compose a fleet when you need one
 
 ```sh

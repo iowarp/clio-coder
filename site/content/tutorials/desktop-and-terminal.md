@@ -24,7 +24,7 @@ On Linux with a systemd user session, you can install the optional background ap
 clio-coder gui background install --open
 ```
 
-For an optional Linux desktop entry, run `clio-coder gui launcher install`. The background service and launcher each have an `uninstall` command. The [full command guide](https://github.com/iowarp/clio-coder/blob/2c99fd1d7b367ba02c2c98cf7a0b7317e164dff3/docs/guide/commands-and-modes.md#graphical-application) covers those options.
+For an optional Linux desktop entry, run `clio-coder gui launcher install`. The background service and launcher each have an `uninstall` command. The <a href="<!-- source-blob -->/docs/guide/commands-and-modes.md#graphical-application">full command guide</a> covers those options.
 
 ## Clio Coder in the terminal
 
