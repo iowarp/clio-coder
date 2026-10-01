@@ -452,10 +452,13 @@ for (const source of ["stream_cancel", "loop_guard"] as const) {
 			const live = rows.map(stripTerminalSequences).join("\n");
 			const theme = clioTheme();
 			if (source === "stream_cancel") {
-				match(live, /⊘ active response cancelled\./u);
+				// The Cancelled outcome is the one report of an Esc.
+				match(live, /⊘ Cancelled\b/u);
+				strictEqual(live.split("Cancelled").length - 1, 1, live);
+				doesNotMatch(live, /\[aborted\]|active response cancelled/u);
 				doesNotMatch(live, new RegExp(GLYPH.warn, "u"));
-				const row = rows.find((line) => stripTerminalSequences(line).includes("active response cancelled"));
-				ok(row?.includes(`${theme.fg("dim", GLYPH.cancelled)} `), row);
+				const row = rows.find((line) => stripTerminalSequences(line).includes("Cancelled"));
+				ok(row?.includes(GLYPH.cancelled), row);
 			} else {
 				match(live, /! loop guard stopped repeated calls\./u);
 				const row = rows.find((line) => stripTerminalSequences(line).includes("loop guard stopped"));
