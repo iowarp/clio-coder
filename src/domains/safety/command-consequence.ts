@@ -391,16 +391,45 @@ const GIT_PUSH_VALUE_OPTIONS: ReadonlySet<string> = new Set([
 	"--exec",
 ]);
 
+/**
+ * A push publishes unless the refspecs delete (`:branch`, or `--delete`), and
+ * it rewrites remote history for `--force*`, a `+` refspec or `--mirror`.
+ */
 function gitPush(args: ReadonlyArray<string>): string | null {
 	if (hasFlag(args, "n", ["--dry-run"])) return null;
 	const words = operands(args, GIT_PUSH_VALUE_OPTIONS);
 	const remote = words[0];
-	if (hasFlag(args, "d", ["--delete"]) && words.length > 1) {
-		return `Deletes ${list(words.slice(1))} on ${shown(remote ?? "the remote")}`;
-	}
+	const refspecs = words.slice(1);
 	const target = remote === undefined ? "the upstream remote" : shown(remote);
-	const force = hasFlag(args, "f", ["--force", "--force-with-lease", "--force-if-includes"]);
-	return force ? `Publishes to ${target} and overwrites its history` : `Publishes to ${target}`;
+	if (hasFlag(args, "", ["--mirror"])) {
+		return `Mirrors every ref to ${target}, overwriting and deleting remote refs to match`;
+	}
+	let deletes: string[];
+	let publishes: string[];
+	let forced = hasFlag(args, "f", ["--force", "--force-with-lease", "--force-if-includes"]);
+	if (hasFlag(args, "d", ["--delete"])) {
+		// `git push --delete origin` names no ref, and git refuses it.
+		if (refspecs.length === 0) return null;
+		deletes = refspecs;
+		publishes = [];
+	} else {
+		deletes = [];
+		publishes = [];
+		for (const refspec of refspecs) {
+			const plain = refspec.startsWith("+") ? refspec.slice(1) : refspec;
+			if (plain.startsWith(":")) deletes.push(plain.slice(1));
+			else {
+				publishes.push(plain);
+				if (refspec.startsWith("+")) forced = true;
+			}
+		}
+	}
+	const prunes = hasFlag(args, "", ["--prune"]);
+	const tail = prunes ? " and deletes remote refs it lacks" : "";
+	if (deletes.length > 0 && publishes.length === 0 && !prunes) return `Deletes ${list(deletes)} on ${target}`;
+	const base =
+		deletes.length > 0 ? `Publishes to ${target} and deletes ${list(deletes)} there` : `Publishes to ${target}`;
+	return `${base}${forced ? " and overwrites its history" : ""}${tail}`;
 }
 
 // ---------------------------------------------------------------------------
