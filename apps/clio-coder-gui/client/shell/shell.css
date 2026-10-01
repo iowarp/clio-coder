@@ -2,14 +2,19 @@
    Colour comes from client/design/tokens.css only. Overlays are derived with color-mix so the
    rail follows the theme (warm paper in light, black in dark) without a raw value. */
 
+/* Overlay tints derived from the ink, so a hover reads on paper, card and code alike. They live on the
+   root because dialogs are portaled to the body, outside .wb. */
+:root {
+	--wb-hover: color-mix(in srgb, var(--ink) 6%, transparent);
+	--wb-active: color-mix(in srgb, var(--ink) 11%, transparent);
+	--wb-faint: color-mix(in srgb, var(--ink) 4%, transparent);
+}
+
 .wb {
 	--wb-side: 268px;
 	--wb-gap: 8px;
 	--wb-radius: 14px;
 	--wb-row: 32px;
-	--wb-hover: color-mix(in srgb, var(--ink) 6%, transparent);
-	--wb-active: color-mix(in srgb, var(--ink) 11%, transparent);
-	--wb-faint: color-mix(in srgb, var(--ink) 4%, transparent);
 	display: grid;
 	grid-template-columns: var(--wb-side) minmax(0, 1fr);
 	height: 100dvh;
