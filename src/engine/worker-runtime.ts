@@ -1,3 +1,4 @@
+import { homedir } from "node:os";
 import type { WorkerContextSeed } from "../domains/context/worker/contract.js";
 import { createWorkerContextGuard, WorkerContextExhaustedError } from "../domains/context/worker/pressure.js";
 import { createWorkerObservationStore } from "../domains/context/worker/recall.js";
@@ -1562,7 +1563,7 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 			const target = describeCallTarget(call.tool, call.args);
 			// Composed here because only the worker holds the whole command: `target`
 			// is one flattened, cut line. Display text only, never read by a decision.
-			const consequence = describeBashCallConsequences(call.tool, call.args);
+			const consequence = describeBashCallConsequences(call.tool, call.args, { home: homedir() });
 			const summary = `${call.tool} requires ${actionClass} confirmation`;
 			emit({
 				type: "clio_coder_permission_escalated",

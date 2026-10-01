@@ -87,6 +87,12 @@ export interface ShellToken {
 	end: number;
 	/** Scripts of the `$(...)`, backtick, `<(...)`, and `>(...)` substitutions this word carries. */
 	substitutions?: string[];
+	/**
+	 * The word begins with a reference the shell expands to the home directory:
+	 * an unquoted `~`, or `$HOME` and `${HOME}` outside single quotes. `value`
+	 * still holds the literal text. Absent for `'~/x'`, `"~/x"` and `'$HOME/x'`.
+	 */
+	homeRelative?: true;
 }
 
 /**
@@ -289,7 +295,7 @@ export interface ShellCommandStep {
  * read this instead of re-tokenizing, so the words they describe are the words
  * admission already scanned.
  */
-export function shellCommandSteps(command: string): ShellCommandStep[] {
+export function shellCommandSteps(command: string, home?: string): ShellCommandStep[] {
 	const steps: ShellCommandStep[] = [];
 	for (const segment of expandedShellSegments(command)) {
 		const truncatingRedirects: string[] = [];
@@ -297,9 +303,12 @@ export function shellCommandSteps(command: string): ShellCommandStep[] {
 			const operator = segment[index];
 			if (operator === undefined || operator.value === ">>" || operator.value === "&>>") continue;
 			const target = redirectWriteTarget(operator, segment[index + 1]);
-			if (target !== null && isInterestingWriteTarget(target)) truncatingRedirects.push(target);
+			const targetToken = segment[index + 1];
+			if (target !== null && targetToken !== undefined && isInterestingWriteTarget(target)) {
+				truncatingRedirects.push(homeExpanded(targetToken, home));
+			}
 		}
-		const argv = shellCommandArguments(segment);
+		const argv = shellCommandWords(segment).map((token) => homeExpanded(token, home));
 		const commandIndex = commandTokenIndex(argv);
 		if (commandIndex === null) {
 			if (truncatingRedirects.length > 0) steps.push({ executable: "", args: [], truncatingRedirects });
@@ -894,6 +903,11 @@ export function invokesClioSkillMutation(command: string, excludeLibrary = false
 }
 
 function shellCommandArguments(segment: ReadonlyArray<ShellToken>): string[] {
+	return shellCommandWords(segment).map((token) => token.value);
+}
+
+/** {@link shellCommandArguments} with the tokens kept, for a reader that needs more than the text. */
+function shellCommandWords(segment: ReadonlyArray<ShellToken>): ShellToken[] {
 	const args: ShellToken[] = [];
 	for (let index = 0; index < segment.length; index += 1) {
 		const token = segment[index];
@@ -908,7 +922,14 @@ function shellCommandArguments(segment: ReadonlyArray<ShellToken>): string[] {
 		}
 		args.push(token);
 	}
-	return args.map((token) => token.value);
+	return args;
+}
+
+/** A word with its leading home reference replaced by `home`, when the shell would expand it. */
+function homeExpanded(token: ShellToken, home: string | undefined): string {
+	if (home === undefined || token.homeRelative !== true) return token.value;
+	const prefix = token.value.startsWith("${HOME}") ? 7 : token.value.startsWith("$HOME") ? 5 : 1;
+	return `${home.replace(/\/+$/u, "")}${token.value.slice(prefix)}`;
 }
 
 function resourceCliMutatesSkills(
@@ -1379,6 +1400,9 @@ export function commandArgumentSegments(command: string): string[][] {
 	return splitSegments(scanShellLike(command)).map(shellCommandArguments);
 }
 
+/** The raw start of a word the shell expands to the home directory; see {@link ShellToken.homeRelative}. */
+const HOME_REFERENCE_START = /^(?:~(?=\/|$)|"?\$(?:HOME|\{HOME\})(?=\/|"|$))/u;
+
 /** Literal shell words and operators only; no expansion or script execution. */
 export function scanShellLike(command: string): ShellToken[] {
 	const tokens: ShellToken[] = [];
@@ -1392,6 +1416,7 @@ export function scanShellLike(command: string): ShellToken[] {
 		if (wordStart === null) return;
 		const token: ShellToken = { value: current, operator: false, quoted, start: wordStart, end };
 		if (substitutions.length > 0) token.substitutions = substitutions;
+		if (HOME_REFERENCE_START.test(command.slice(wordStart, end))) token.homeRelative = true;
 		tokens.push(token);
 		current = "";
 		wordStart = null;

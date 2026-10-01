@@ -1,4 +1,5 @@
 import { statSync } from "node:fs";
+import { homedir } from "node:os";
 import { resolve } from "node:path";
 import { BusChannels, type PermissionRequestedPayload } from "../core/bus-events.js";
 import type { SafeEventBus } from "../core/event-bus.js";
@@ -193,7 +194,10 @@ function pathKindIn(cwd: string): (path: string) => PathKind {
  */
 function mainConsequence(call: ClassifierCall): string[] {
 	const cwd = typeof call.args?.cwd === "string" && call.args.cwd.length > 0 ? call.args.cwd : process.cwd();
-	return describeBashCallConsequences(call.tool, call.args, { pathKind: pathKindIn(resolve(process.cwd(), cwd)) });
+	return describeBashCallConsequences(call.tool, call.args, {
+		pathKind: pathKindIn(resolve(process.cwd(), cwd)),
+		home: homedir(),
+	});
 }
 
 /** Characters of one worker-supplied sentence kept; the worker bounds its own, this bounds a hostile one. */

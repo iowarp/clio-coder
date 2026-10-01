@@ -42,13 +42,42 @@ export interface CommandConsequenceOptions {
 	 * claimed, because `>` and `cp` onto a new file overwrite nothing.
 	 */
 	pathKind?: (path: string) => PathKind;
+	/**
+	 * The home directory, so `~/x` and `$HOME/x` read as the path the shell will
+	 * use. Without it, or when the command assigns HOME itself, such an operand
+	 * is shown as written and no existence claim is made for it.
+	 */
+	home?: string;
+}
+
+/** Commands that change the directory later relative paths resolve against. */
+const DIRECTORY_CHANGERS: ReadonlySet<string> = new Set(["cd", "pushd", "popd"]);
+
+/** A bare `HOME` word: an assignment, `export HOME`, `unset HOME`. `$HOME` is a read and does not match. */
+const HOME_WORD = /(?<![$\w{])HOME\b/u;
+
+/**
+ * Whether `path` is the file the shell will open. A leading `~`, a variable, a
+ * substitution, a glob or a brace list names something this module cannot
+ * resolve, and a literal lookup of it would find an unrelated entry or none.
+ */
+function resolvablePath(path: string): boolean {
+	return !path.startsWith("~") && !/[$`*?[{]/u.test(path);
 }
 
 /** The sentences for a command, capped at three and followed by `and N more` when there are more. */
 function describeCommandConsequences(command: string, options: CommandConsequenceOptions = {}): string[] {
+	const home = options.home !== undefined && !HOME_WORD.test(command) ? options.home : undefined;
+	const steps = shellCommandSteps(command, home);
+	// After a `cd` a relative path means another file, and the order a loop or a
+	// subshell runs it in is not modeled, so a command that changes directory
+	// anywhere makes no claim about what exists.
+	const look = steps.some((step) => DIRECTORY_CHANGERS.has(step.executable)) ? undefined : options.pathKind;
+	const resolved: CommandConsequenceOptions =
+		look === undefined ? {} : { pathKind: (path) => (resolvablePath(path) ? look(path) : null) };
 	const all: string[] = [];
-	for (const step of shellCommandSteps(command)) {
-		for (const line of stepConsequences(step, options)) {
+	for (const step of steps) {
+		for (const line of stepConsequences(step, resolved)) {
 			if (!all.includes(line)) all.push(line);
 		}
 	}
