@@ -163,6 +163,13 @@ export interface TurnRuntimeDeps {
 	retrySettings: () => RetrySettings;
 	/** Stable Clio session id forwarded only to gateway runtimes that understand it. */
 	sessionId?: () => string | undefined;
+	/**
+	 * Information-flow admission of one model request: the block reason when
+	 * the session's restricted context may not reach this target, or null.
+	 * Asked on every request, after ownership and before budget, so a target
+	 * whose endpoint changed is judged on what it is now.
+	 */
+	admitFlow?: (destination: { targetId: string; runtimeId: string; wireModelId: string }) => string | null;
 	emit: (event: AgentEvent | AssistantDeltaEvent) => void;
 	emitNotice: (text: string) => void;
 	/** Transport advisories belong in the footer, separate from conversation. */
@@ -600,6 +607,10 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 				if (state.activeInterruptReason !== null || state.runtime !== localRuntime) {
 					return { block: true, reason: "Request ownership changed before invocation." };
 				}
+				const flowViolation =
+					deps.admitFlow?.({ targetId: target.target.id, runtimeId: target.runtime.id, wireModelId: target.wireModelId }) ??
+					null;
+				if (flowViolation !== null) return { block: true, reason: flowViolation };
 				if (deps.hasQueuedSteering?.() && deps.continuity?.admission().block === false) {
 					const handoff = deps.continuity.admission();
 					if (!handoff.block && handoff.correlationId)

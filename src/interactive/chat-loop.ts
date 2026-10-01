@@ -757,6 +757,8 @@ export interface CreateChatLoopDeps {
 	 * session or when the session contract is absent.
 	 */
 	readSessionEntries?: () => ReadonlyArray<SessionEntry>;
+	/** Information-flow admission of each model request; see TurnRuntimeDeps.admitFlow. */
+	admitFlow?: (destination: { targetId: string; runtimeId: string; wireModelId: string }) => string | null;
 	/**
 	 * Run the compaction flow end-to-end (read entries, resolve model,
 	 * summarize, persist a compactionSummary entry) and return the result,
@@ -1441,6 +1443,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		middleware,
 		retrySettings,
 		sessionId: () => deps.session?.current()?.id,
+		...(deps.admitFlow !== undefined ? { admitFlow: deps.admitFlow } : {}),
 		emit: emitRuntimeEvent,
 		emitNotice,
 		emitFooterNotice,

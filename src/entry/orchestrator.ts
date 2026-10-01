@@ -48,7 +48,7 @@ import { captureProjectSurface, projectSurfaceTrustNotice } from "../core/worksp
 import { clioDataDir, clioStateDir } from "../core/xdg.js";
 import { renderAgentCatalogSectionsFromSpecs } from "../domains/agents/catalog.js";
 import type { AgentsContract } from "../domains/agents/contract.js";
-import { AgentsDomainModule } from "../domains/agents/index.js";
+import { AGENT_CATEGORY_PURPOSE, AgentsDomainModule } from "../domains/agents/index.js";
 import type { ConfigContract } from "../domains/config/contract.js";
 import { ConfigDomainModule, createConfigDomainModule } from "../domains/config/index.js";
 import { CLIO_KEYBINDINGS, type ClioKeybinding } from "../domains/config/keybindings.js";
@@ -167,8 +167,13 @@ import { DEFAULT_RECENT_ENTRY_LIMIT } from "../domains/safety/finish-contract.js
 import { createFinishContractRegistration } from "../domains/safety/finish-contract-registration.js";
 import type { AutonomyLevel, SafetyContract } from "../domains/safety/index.js";
 import {
+	EMPTY_INFORMATION_FLOW_POLICY,
+	evaluateInformationFlow,
+	isFlowRestrictionSet,
+	mergeFlowRestrictions,
 	modelMayActivateSkills,
 	parseRigorOverride,
+	resolveModelDestination,
 	resolveRigor,
 	SafetyDomainModule,
 } from "../domains/safety/index.js";
@@ -208,7 +213,10 @@ import { reseedSessionUsageFromLedger } from "../domains/session/usage-reseed.js
 import { latestUserImages } from "../domains/session/vision-images.js";
 import { archiveCommandHost, type ShareContract, ShareDomainModule } from "../domains/share/index.js";
 import type { LlmRequestAdmission, OneShotPort } from "../domains/system-one/index.js";
+import type { FlowRestrictionSet } from "../domains/safety/index.js";
+import type { SystemOneInstance } from "../domains/system-one/index.js";
 import { createSystemOne } from "../domains/system-one/index.js";
+import { createFlowLedger } from "./flow-ledger.js";
 import { createFollowUpTracker, observePermissionOutcomes } from "../domains/system-one/outcomes.js";
 import { createRelevanceRanker } from "../domains/system-one/rank.js";
 import { anchorSessionRows, createRecorder, SESSION_ROW_CUSTOM_TYPE } from "../domains/system-one/recorder/index.js";
@@ -373,6 +381,7 @@ interface CompactionResolution {
 	model: EngineModel;
 	costProvenance: CostProvenance;
 	targetId: string;
+	runtimeId: string;
 	endpointKey: string | null;
 	wireModelId: string;
 	headers?: Record<string, string>;
@@ -842,6 +851,7 @@ async function resolveCompactionModel(
 		model,
 		costProvenance: route.costProvenance,
 		targetId: route.targetId,
+		runtimeId: route.runtime.id,
 		wireModelId: route.wireModelId,
 		endpointKey: canonicalEndpointKey(route.target),
 		apiKey,
@@ -987,7 +997,13 @@ async function runCompactionFlow(
 		| "checkpointForSummary"
 	>,
 	summarize?: CompactInput["summarize"],
-	admission?: { scheduling?: SchedulingContract; headless?: boolean; getCeilingUsd?: () => number },
+	admission?: {
+		scheduling?: SchedulingContract;
+		headless?: boolean;
+		getCeilingUsd?: () => number;
+		/** Information-flow admission of the summarizer request; the block reason or null. */
+		admitFlow?: (destination: { targetId: string; runtimeId: string; wireModelId: string }) => string | null;
+	},
 ): Promise<CompactResult | null> {
 	const meta = session.current();
 	if (!meta) {
@@ -1050,6 +1066,13 @@ async function runCompactionFlow(
 		);
 
 	// A compaction summary is a full streamed request against its resolved target.
+	// The whole transcript goes to it, so the session's restrictions decide first.
+	const flowViolation = admission?.admitFlow?.({
+		targetId: resolved.targetId,
+		runtimeId: resolved.runtimeId,
+		wireModelId: resolved.wireModelId,
+	});
+	if (flowViolation !== undefined && flowViolation !== null) throw new Error(`compaction refused: ${flowViolation}`);
 	// Hold the same canonical endpoint slot as an ordinary turn, /btw round, or
 	// pre-warm so dispatch admission and background memory see its real usage.
 	const releaseEndpointSlot = resolved.endpointKey === null ? () => {} : registerForegroundStream(resolved.endpointKey);
@@ -1206,7 +1229,13 @@ export function createProductionAutoCompact(
 	providers: ProvidersContract,
 	observability?: BackgroundMemoryUsageSink,
 	summarize?: CompactInput["summarize"],
-	admission?: { scheduling?: SchedulingContract; headless?: boolean; getCeilingUsd?: () => number },
+	admission?: {
+		scheduling?: SchedulingContract;
+		headless?: boolean;
+		getCeilingUsd?: () => number;
+		/** Information-flow admission of the summarizer request; the block reason or null. */
+		admitFlow?: (destination: { targetId: string; runtimeId: string; wireModelId: string }) => string | null;
+	},
 ): (
 	instructions?: string,
 	trigger?: CompactionTrigger,
@@ -1439,6 +1468,8 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 
 	let effectiveSettingsForDispatch: (() => Readonly<ClioSettings>) | null = null;
 	let protectedArtifactStateForDispatch: (() => ProtectedArtifactState) | null = null;
+	// Bound once the session flow ledger exists; dispatch reads it per request.
+	let flowRestrictionsForDispatch: (() => FlowRestrictionSet | null) | null = null;
 	let sessionIdForDispatch: (() => string | null) | null = null;
 
 	// Panes are an interactive-surface projection. Headless, ACP, and worker boots
@@ -1524,6 +1555,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 					: {}),
 				getSettings: () => effectiveSettingsForDispatch?.(),
 				getProtectedArtifactState: () => protectedArtifactStateForDispatch?.() ?? { artifacts: [] },
+				getFlowRestrictions: () => flowRestrictionsForDispatch?.() ?? null,
 				// Stamps every run with the session that dispatched it, which is what
 				// keeps a sibling Clio process's runs and batches out of this one.
 				getSessionId: () => sessionIdForDispatch?.() ?? null,
@@ -1590,6 +1622,40 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	const observability = result.getContract<ObservabilityContract>("observability");
 	const safety = result.getContract<SafetyContract>("safety");
 	const session = result.getContract<SessionContract>("session");
+	// One durable union of restricted sources per session. Every model send,
+	// mediated outbound call and System One request is judged against it.
+	const flowLedger = createFlowLedger({ session, readEntries: readSessionEntriesForCompact });
+	flowRestrictionsForDispatch = () => {
+		// A worker launched while the ledger cannot vouch would carry unlabeled
+		// context; the refusal surfaces at its first model request instead.
+		const refusal = flowLedger.refusal();
+		if (refusal !== null) throw new Error(refusal);
+		return flowLedger.current();
+	};
+	/**
+	 * Block reason when the session's restricted context may not reach a
+	 * configured target as it is configured now, or null. The live target
+	 * descriptor is read at every request, so a URL changed behind the id is
+	 * judged on what it is now.
+	 */
+	const admitModelFlow = (destination: { targetId: string; runtimeId: string; wireModelId: string }): string | null => {
+		const refusal = flowLedger.refusal();
+		if (refusal !== null) return refusal;
+		const carried = flowLedger.current();
+		if (carried === null) return null;
+		const target = providers.getTarget(destination.targetId);
+		const verdict = evaluateInformationFlow({
+			restrictions: carried,
+			destination: resolveModelDestination({
+				targetId: destination.targetId,
+				runtimeId: destination.runtimeId,
+				url: target?.url ?? null,
+				model: destination.wireModelId,
+			}),
+			policy: safety.policy?.informationFlow?.() ?? EMPTY_INFORMATION_FLOW_POLICY,
+		});
+		return verdict.kind === "permitted" ? null : verdict.reason;
+	};
 	sessionIdForDispatch = () => session?.current()?.id ?? null;
 	const prompts = result.getContract<PromptsContract>("prompts");
 	const agents = result.getContract<AgentsContract>("agents");
@@ -1979,7 +2045,15 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		// surface. The gate is interactive only: headless and ACP have no operator
 		// to answer a card, so it would cost up to the site deadline per
 		// unrecognized execute call and record a verdict nobody can label.
-		screenToolResult: (source, content, ref, signal) => systemOneHost.screenToolResult(source, content, ref, signal),
+		screenToolResult: (source, content, ref, signal, restrictions) =>
+			systemOneHost.screenToolResult(source, content, ref, signal, restrictions),
+		flow: {
+			carried: () => flowLedger.current(),
+			refusal: () => flowLedger.refusal(),
+			absorb: (set, origin) => flowLedger.absorb(set, origin),
+			// The gateway is registered after this registry; the lookup runs at call time.
+			mcpTransport: (tool) => toolBootstrap.mcpCapabilities?.transportOf(tool) ?? null,
+		},
 		...(interactive ? { gateToolCall: (subject, ref, signal) => systemOneHost.gateToolCall(subject, ref, signal) } : {}),
 		gateParks: interactive,
 	});
@@ -2217,8 +2291,29 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		},
 		stateDir: clioStateDir(),
 	});
-	const systemOne = createSystemOne({
+	const systemOneCore = createSystemOne({
 		settings: () => getCurrentSettings(),
+		// Every engine request is judged against the restrictions it inherited
+		// before a byte leaves, typed and LLM engines alike. The runner treats a
+		// throw as abstention, so this only ever returns.
+		flowCheck: (request) => {
+			const refusal = flowLedger.refusal();
+			if (refusal !== null) return { allowed: false, reason: refusal };
+			const inherited = isFlowRestrictionSet(request.inherited) ? request.inherited : null;
+			const restrictions = mergeFlowRestrictions(inherited, flowLedger.current());
+			if (restrictions === null) return { allowed: true };
+			const verdict = evaluateInformationFlow({
+				restrictions,
+				destination: resolveModelDestination({
+					targetId: request.destination.targetId,
+					runtimeId: request.destination.runtime,
+					url: request.destination.url,
+					model: request.destination.model,
+				}),
+				policy: safety.policy?.informationFlow?.() ?? EMPTY_INFORMATION_FLOW_POLICY,
+			});
+			return verdict.kind === "permitted" ? { allowed: true } : { allowed: false, reason: verdict.reason };
+		},
 		providers,
 		credentialsPresent,
 		oneShot: createSystemOneOneShot(providers, admitSystemOneRequest),
@@ -2242,6 +2337,23 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		},
 		recorder: () => decisionUsage.recorder,
 	});
+	// Every caller that reaches System One through this instance inherits the
+	// session's restrictions on its request unless it already names a narrower
+	// set, so the flow check above sees them whoever asked.
+	const systemOne: SystemOneInstance = {
+		bound: (site) => systemOneCore.bound(site),
+		shadowed: (site) => systemOneCore.shadowed(site),
+		describe: () => systemOneCore.describe(),
+		settled: (maxWaitMs) => systemOneCore.settled(maxWaitMs),
+		...(systemOneCore.limits !== undefined ? { limits: (site, task) => systemOneCore.limits?.(site, task) ?? null } : {}),
+		run: (site, object, options) => {
+			const carried = flowLedger.current();
+			const given = options as { flow?: unknown } | undefined;
+			const flow = given?.flow !== undefined ? given.flow : carried;
+			const merged = { ...(options ?? {}), ...(flow !== null && flow !== undefined ? { flow } : {}) };
+			return systemOneCore.run(site, object, merged);
+		},
+	};
 	// How each approval the main agent parked was answered, joined to the card's
 	// advisory and the yolo gate by the request id both carried.
 	termination.onDrain(
@@ -2261,7 +2373,13 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 				? agents
 						.listSpecs()
 						.filter((spec) => spec.audience !== "internal")
-						.map((spec) => ({ id: spec.id, description: spec.description }))
+						.map((spec) => ({
+							id: spec.id,
+							description: spec.description,
+							...(spec.category !== "internal"
+								? { categories: [{ id: spec.category, label: spec.category, purpose: AGENT_CATEGORY_PURPOSE[spec.category] }] }
+								: {}),
+						}))
 				: null,
 		currentSession: currentSessionId,
 		recording: () => getCurrentSettings().systemOne.record,
@@ -2276,6 +2394,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	});
 	const relevanceRanker = createRelevanceRanker({
 		systemOne,
+		flow: () => flowLedger.current(),
 		task: () => systemOneHost.task(),
 		turnKey: () => systemOneHost.turnId(),
 		tracker: followUps,
@@ -2347,7 +2466,28 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		// never bound it keeps the registry, tool signature and prompt they had. A
 		// binding removed mid-session answers "no usable answer". bound() reads the
 		// effective settings view built above, which is why that block precedes this call.
-		...(systemOne.bound("consult") ? { consult: { systemOne, cwd: () => process.cwd() } } : {}),
+		...(systemOne.bound("consult")
+			? {
+					consult: {
+						systemOne,
+						cwd: () => process.cwd(),
+						// The evidence files consult reads itself never pass a read tool, so
+						// they are labeled here before the request; the runner's flow check
+						// then judges the labels. A throw makes consult send nothing.
+						flowFor: (files) => {
+							const refusal = flowLedger.refusal();
+							if (refusal !== null) throw new Error(refusal);
+							const labels = safety.policy?.flowRestrictionsForPaths?.(files, process.cwd()) ?? null;
+							if (labels !== null) {
+								flowLedger.absorb(labels, { tool: "consult" });
+								const unlabeled = flowLedger.refusal();
+								if (unlabeled !== null) throw new Error(unlabeled);
+							}
+							return mergeFlowRestrictions(labels, flowLedger.current());
+						},
+					},
+				}
+			: {}),
 		getContextBudget: () => chat.inspectLiveBudget(),
 		requestSelfCompact: (note, toolCallId, signal) => chat.requestSelfCompact(note, toolCallId, signal),
 		getSettings: () => getCurrentSettings(),
@@ -3040,10 +3180,12 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 						...(sessionScheduling ? { scheduling: sessionScheduling } : {}),
 						headless: options.headless !== undefined,
 						getCeilingUsd: () => getCurrentSettings().safety.limits.sessionCostUsd,
+						admitFlow: admitModelFlow,
 					}),
 				}
 			: {}),
 		toolRegistry,
+		admitFlow: admitModelFlow,
 		hasAttachedDispatch: () => dispatchBackground.size() > 0,
 		// The pre-warm buys latency for a person about to type the next turn. A
 		// headless `run` submits its one prompt immediately and an unattended boot

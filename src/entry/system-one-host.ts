@@ -32,7 +32,8 @@ import type {
 import { LlmAdmissionRefused } from "../domains/system-one/index.js";
 import { TOOL_CALL_GATE_SITE } from "../domains/system-one/sites/tool-call.js";
 import { TOOL_RESULT_SITE } from "../domains/system-one/sites/tool-result.js";
-import { TURN_SITE, type TurnRecipeOption, type TurnValue } from "../domains/system-one/sites/turn.js";
+import type { TurnRecipeOption, TurnValue } from "../domains/system-one/sites/turn.js";
+import { recipesInGroup, TURN_RECIPE_SITE, TURN_SITE } from "../domains/system-one/sites/turn.js";
 import { TURN_END_SITE, type TurnEndValue } from "../domains/system-one/sites/turn-end.js";
 import type { TokenSplit, TurnInterpretation } from "../domains/turn-control/index.js";
 import type { ToolCallGateSubject, ToolCallGateVerdict } from "../tools/registry.js";
@@ -259,6 +260,7 @@ export interface SystemOneHost {
 		content: string,
 		ref: string | undefined,
 		signal: AbortSignal | undefined,
+		restrictions: unknown,
 	): Promise<string | null>;
 	/** Whether an unrecognized command that yolo would run unread should go to the operator first. */
 	gateToolCall(
@@ -274,8 +276,16 @@ export interface SystemOneHost {
 	}): void;
 }
 
-function runOptions(ref: string | undefined, signal: AbortSignal | undefined): { ref?: string; signal?: AbortSignal } {
-	return { ...(ref !== undefined ? { ref } : {}), ...(signal !== undefined ? { signal } : {}) };
+function runOptions(
+	ref: string | undefined,
+	signal: AbortSignal | undefined,
+	flow?: unknown,
+): { ref?: string; signal?: AbortSignal; flow?: unknown } {
+	return {
+		...(ref !== undefined ? { ref } : {}),
+		...(signal !== undefined ? { signal } : {}),
+		...(flow !== undefined && flow !== null ? { flow } : {}),
+	};
 }
 
 /**
@@ -330,7 +340,7 @@ function priorOperatorTexts(entries: ReadonlyArray<SessionEntry>, beforeTurnId: 
 
 export function createSystemOneHost(deps: SystemOneHostDeps): SystemOneHost {
 	const { systemOne } = deps;
-	let turn: { id: string; task: string; verdict: Verdict<TurnValue> | null } | null = null;
+	let turn: { id: string; task: string; verdict: Verdict<TurnValue> | null; groupRecipe: string | null } | null = null;
 	let turnEnd: { id: string; read: Promise<Verdict<TurnEndValue> | null>; askedAt: number } | null = null;
 	/**
 	 * The operator's recent requests on the active path, newest last, so the
@@ -435,7 +445,7 @@ export function createSystemOneHost(deps: SystemOneHostDeps): SystemOneHost {
 
 	return {
 		async readTurn(input) {
-			const held: NonNullable<typeof turn> = { id: input.userTurnId, task: input.task, verdict: null };
+			const held: NonNullable<typeof turn> = { id: input.userTurnId, task: input.task, verdict: null, groupRecipe: null };
 			turn = held;
 			noteOperatorTurn(input.userTurnId, input.request);
 			// Counted and held even unbound: a catalog ranking or a consult later in the
@@ -454,11 +464,13 @@ export function createSystemOneHost(deps: SystemOneHostDeps): SystemOneHost {
 			} catch {
 				// An unreadable ledger costs the correction evidence, never the turn.
 			}
+			const recipeOptionLimit = systemOne.limits?.("turn", "recipe")?.maxOptions;
 			const object = {
 				task: input.task,
 				previous: input.previous,
 				previousTask,
 				...(recipes !== null ? { recipes } : {}),
+				...(recipeOptionLimit !== undefined ? { recipeOptionLimit } : {}),
 			};
 			// A build with no fitted cut can hint and act on nothing, so the prompt does
 			// not wait up to the site's deadline for an answer that changes no reader.
@@ -471,7 +483,21 @@ export function createSystemOneHost(deps: SystemOneHostDeps): SystemOneHost {
 			}
 			const verdict = await systemOne.run(TURN_SITE, object, { ref: input.userTurnId, signal: input.signal });
 			// A newer turn may have started while this one waited.
-			if (turn === held) held.verdict = verdict;
+			if (turn !== held) return;
+			held.verdict = verdict;
+			// A category was chosen but not its member: one bounded follow-up under
+			// its own deadline picks the recipe to hold, or nothing is held.
+			const value = verdict?.value;
+			if (value !== undefined && value.acts.prewarmPending && typeof value.recipeGroup === "string") {
+				const members = recipesInGroup(object, value.recipeGroup);
+				if (members.length === 0) return;
+				const picked = await systemOne.run(
+					TURN_RECIPE_SITE,
+					{ task: input.task, previous: input.previous, previousTask, recipes: members },
+					{ ref: input.userTurnId, signal: input.signal },
+				);
+				if (turn === held) held.groupRecipe = picked?.value.recipe ?? null;
+			}
 		},
 
 		hints: () => turn?.verdict?.value.hints ?? null,
@@ -481,17 +507,28 @@ export function createSystemOneHost(deps: SystemOneHostDeps): SystemOneHost {
 			if (value === undefined) return undefined;
 			return {
 				intent: value.intent,
-				orientation: { wanted: value.acts.orientation, breadth: value.breadth, probability: value.orientation },
+				orientation: {
+					wanted: value.acts.orientation,
+					breadth: value.breadth,
+					...(value.orientation !== null ? { probability: value.orientation } : {}),
+				},
 				direction: { requested: value.acts.direction },
-				dispatch: { expected: value.acts.dispatch, probability: value.dispatch },
+				dispatch: { expected: value.acts.dispatch, ...(value.dispatch !== null ? { probability: value.dispatch } : {}) },
 			};
 		},
 
 		prewarm() {
 			const value = turn?.verdict?.value;
-			if (value === undefined || !value.acts.prewarm || typeof value.recipe !== "string") return null;
+			if (value === undefined) return null;
+			const recipe =
+				value.acts.prewarm && typeof value.recipe === "string"
+					? value.recipe
+					: value.acts.prewarmPending
+						? (turn?.groupRecipe ?? null)
+						: null;
+			if (recipe === null) return null;
 			// Two held workers cover a parallel split; anything else is one.
-			return { agentId: value.recipe, count: value.shape === "parallel" ? 2 : 1 };
+			return { agentId: recipe, count: value.shape === "parallel" ? 2 : 1 };
 		},
 
 		clearVerdict() {
@@ -510,13 +547,16 @@ export function createSystemOneHost(deps: SystemOneHostDeps): SystemOneHost {
 			return verdict === null ? null : { asks: verdict.value.asks };
 		},
 
-		async screenToolResult(source, content, ref, signal) {
+		async screenToolResult(source, content, ref, signal, restrictions) {
 			if (!systemOne.bound("toolResult")) return null;
+			// The restrictions the result carries travel with the request, so the
+			// engine's flow check refuses the classifier call before any byte
+			// leaves: a restricted read is never redacted after being classified.
 			if (systemOne.shadowed("toolResult")) {
-				detached(() => systemOne.run(TOOL_RESULT_SITE, { source, content }, runOptions(ref, undefined)));
+				detached(() => systemOne.run(TOOL_RESULT_SITE, { source, content }, runOptions(ref, undefined, restrictions)));
 				return null;
 			}
-			const verdict = await systemOne.run(TOOL_RESULT_SITE, { source, content }, runOptions(ref, signal));
+			const verdict = await systemOne.run(TOOL_RESULT_SITE, { source, content }, runOptions(ref, signal, restrictions));
 			return verdict?.value.flagged ? verdict.value.banner : null;
 		},
 
