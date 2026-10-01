@@ -1,7 +1,6 @@
-import { getVersionInfo } from "../domains/lifecycle/version.js";
+import { readClioVersionLabel } from "../core/build-info.js";
 
 export function runVersionCommand(): number {
-	const v = getVersionInfo();
-	process.stdout.write(`Clio Coder ${v.clio}\n`);
+	process.stdout.write(`Clio Coder ${readClioVersionLabel()}\n`);
 	return 0;
 }

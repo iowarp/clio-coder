@@ -5,6 +5,7 @@ import chalk from "chalk";
 import { modelBootstrapGenerate, resolveBootstrapRoute } from "../cli/bootstrap-generate.js";
 import { runHeadlessMainAgent } from "../cli/modes/print.js";
 import { formatBootTrace } from "../core/boot-trace.js";
+import { readClioVersionLabel } from "../core/build-info.js";
 import { BusChannels, type PluginsReloadedPayload } from "../core/bus-events.js";
 import { installBusTracer } from "../core/bus-trace.js";
 import { type ClioSettings, readSettings, type SettingsMutator, updateSettings } from "../core/config.js";
@@ -74,7 +75,6 @@ import { normalizeYoloGateOutcome } from "../domains/dispatch/yolo-ids.js";
 import { type ExtensionsContract, ExtensionsDomainModule } from "../domains/extensions/index.js";
 import { type InteropContract, InteropDomainModule } from "../domains/interop/index.js";
 import { describeUpgradeNotice, ensureClioState, takeUpgradeNotice } from "../domains/lifecycle/index.js";
-import { getVersionInfo } from "../domains/lifecycle/version.js";
 import {
 	createTaskMemoryTelemetrySink,
 	createTaskMemoryTrace,
@@ -325,7 +325,7 @@ function bannerConfigurationLine(): string {
 }
 
 function buildBanner(): string {
-	const { clio } = getVersionInfo();
+	const clio = readClioVersionLabel();
 	return `
   ${chalk.cyan("Clio Coder")}
   ${chalk.dim(`v${clio} · CLIO: Context Layer for I/O · HPC & scientific software`)}
@@ -3680,7 +3680,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 					activeAcpSessionAutonomy = level;
 				},
 				cwd: process.cwd(),
-				version: getVersionInfo().clio,
+				version: readClioVersionLabel(),
 				// Stdout belongs to JSON-RPC. Text this process did not author, such
 				// as a provider's failure body, is kept off the wire and written to
 				// the unstructured stderr tail instead.

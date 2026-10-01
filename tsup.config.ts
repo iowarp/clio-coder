@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { cpSync, existsSync, mkdirSync, rmSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
@@ -7,6 +8,25 @@ import { GRAMMAR_ASSETS, type GrammarAssetSource } from "./src/domains/context/c
 
 const require = createRequire(import.meta.url);
 const buildStartedAt = performance.now();
+
+/**
+ * Commit and dirty flag of the checkout being bundled, injected as constants so
+ * no process runs git at runtime (src/core/build-info.ts reads them). A build
+ * outside a git checkout, such as from a tarball, defines nothing and shows the
+ * plain version.
+ */
+function buildProvenanceDefines(): Record<string, string> {
+	const git = (...args: string[]): string =>
+		execFileSync("git", args, { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
+	try {
+		const commit = git("rev-parse", "--short=7", "HEAD");
+		const dirty = git("status", "--porcelain").length > 0;
+		return { __CLIO_BUILD_COMMIT__: JSON.stringify(commit), __CLIO_BUILD_DIRTY__: String(dirty) };
+	} catch {
+		// No git binary or no repository: the version label simply carries no commit.
+		return {};
+	}
+}
 
 /** Where each grammar package keeps its wasm files, resolved from the checkout's devDependencies. */
 const GRAMMAR_SOURCE_DIRS: Record<GrammarAssetSource, string> = {
@@ -66,7 +86,7 @@ const entries = {
 
 export default defineConfig({
 	entry: entries,
-	define: { __CLIO_GUI_BUNDLED__: "true" },
+	define: { __CLIO_GUI_BUNDLED__: "true", ...buildProvenanceDefines() },
 	format: ["esm"],
 	target: "node22",
 	platform: "node",

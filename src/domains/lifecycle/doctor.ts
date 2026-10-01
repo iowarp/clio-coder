@@ -1,5 +1,6 @@
 import { accessSync, chmodSync, constants, type Dirent, existsSync, readdirSync, type Stats, statSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
+import { readClioVersionLabel } from "../../core/build-info.js";
 import { formatSettingsIssues, readSettings, validateSettingsFile } from "../../core/config.js";
 import { initializeClioHome } from "../../core/init.js";
 import { readLayeredSettings } from "../../core/settings-layers.js";
@@ -352,7 +353,7 @@ export function runDoctor(options: DoctorOptions = {}): DoctorFinding[] {
 		findings.push({ ok: false, name: "repair", detail: `--fix could not finish: ${repairFailure}` });
 	}
 	const version = getVersionInfo();
-	findings.push({ ok: true, name: "Clio Coder version", detail: version.clio });
+	findings.push({ ok: true, name: "Clio Coder version", detail: readClioVersionLabel() });
 	const installation = inspectInstallation();
 	findings.push({
 		ok: true,

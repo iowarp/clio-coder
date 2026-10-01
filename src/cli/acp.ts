@@ -106,15 +106,15 @@ export async function runAcpCommand(
 			});
 			process.stdin.pause();
 			try {
-				const [{ ACP_COMMANDS_CAPABILITY }, { serveDeferredAcp }, { createAcpHandshake }, { getVersionInfo }] =
+				const [{ ACP_COMMANDS_CAPABILITY }, { serveDeferredAcp }, { createAcpHandshake }, { readClioVersionLabel }] =
 					await Promise.all([
 						import("../engine/acp/commands.js"),
 						import("../engine/acp/deferred-boot.js"),
 						import("../engine/acp/server.js"),
-						import("../domains/lifecycle/version.js"),
+						import("../core/build-info.js"),
 					]);
 				const handshake = createAcpHandshake({
-					version: getVersionInfo().clio,
+					version: readClioVersionLabel(),
 					session: true,
 					loadSession: true,
 					settings: true,

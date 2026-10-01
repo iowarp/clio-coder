@@ -1,5 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import { stdin as input, stdout as output } from "node:process";
+import { readClioVersionLabel } from "../core/build-info.js";
 import {
 	bindAgentProfileInSettings,
 	type ClioSettings,
@@ -1267,7 +1268,7 @@ const DIAGNOSTICS_SECTION: SectionSpec = {
 		const dirs = resolveClioDirs();
 		const info = getVersionInfo();
 		return [
-			["Clio Coder", info.clio],
+			["Clio Coder", readClioVersionLabel()],
 			["Node.js", info.node],
 			["Platform", info.platform],
 			["Config dir", shortenPath(dirs.config)],

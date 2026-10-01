@@ -1,5 +1,5 @@
+import { readClioVersionLabel } from "../core/build-info.js";
 import type { ClioSettings } from "../core/config.js";
-import { readClioVersion } from "../core/package-root.js";
 import type { ContextState } from "../domains/context/index.js";
 import type { ProvidersContract, TargetStatus } from "../domains/providers/index.js";
 import { sanitizeCallTargetText } from "../domains/safety/call-target.js";
@@ -640,7 +640,7 @@ export class WelcomeDashboard implements WelcomeDashboardComponent {
 				}, 0);
 				this.pendingTimer.unref?.();
 			});
-		this.version = readClioVersion();
+		this.version = readClioVersionLabel();
 	}
 
 	render(width: number): string[] {
@@ -820,7 +820,7 @@ export function createBootWelcome(
 ): Component {
 	const target = settings.targets.find((entry) => entry.id === settings.chat.target);
 	const model = settings.chat.model ?? target?.defaultModel ?? null;
-	const version = readClioVersion();
+	const version = readClioVersionLabel();
 	const mode = richWelcomeEnabled(settings.interface.demo) ? "launchpad" : "session";
 	const stats: WelcomeDashboardStats = {
 		cwd: process.cwd(),
