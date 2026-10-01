@@ -50,6 +50,12 @@ export function createOverlayAskUserLifecycle(deps: OverlayAskUserLifecycleDeps)
 	let session: AskUserOverlaySession | null = null;
 	let cancelledForTurn = false;
 	let unregisterHandler: (() => void) | null = null;
+	/**
+	 * Set while a harness round (a dispatch merge card) holds the overlay. The
+	 * model's interview waits on it and the turn-level closers leave the session
+	 * alone: the card is not the model's to cancel, close, or interleave with.
+	 */
+	let harnessHold: Promise<void> | null = null;
 	const openSession = deps.openAskUserOverlay ?? openAskUserOverlay;
 
 	const refresh = (): void => {
@@ -58,7 +64,7 @@ export function createOverlayAskUserLifecycle(deps: OverlayAskUserLifecycleDeps)
 		deps.requestRender();
 	};
 
-	const close = (): void => {
+	const closeSession = (): void => {
 		pendingCancel = null;
 		const current = session;
 		session = null;
@@ -74,6 +80,13 @@ export function createOverlayAskUserLifecycle(deps: OverlayAskUserLifecycleDeps)
 		refresh();
 	};
 
+	// Turn end, a streamed assistant delta, and an interview-closing tool result
+	// all call this. None of them speaks for a harness card.
+	const close = (): void => {
+		if (harnessHold !== null) return;
+		closeSession();
+	};
+
 	const ensureSession = (): AskUserOverlaySession | null => {
 		if (deps.getOverlayState() !== "closed" && deps.getOverlayState() !== "ask-user") return null;
 		if (session) return session;
@@ -86,9 +99,55 @@ export function createOverlayAskUserLifecycle(deps: OverlayAskUserLifecycleDeps)
 	};
 
 	const cancel = (): void => {
+		if (harnessHold !== null) {
+			session?.cancel();
+			return;
+		}
 		cancelledForTurn = true;
 		session?.cancel();
-		close();
+		closeSession();
+	};
+
+	/** Resolves true once no harness round holds the overlay, false if the caller's signal fires first. */
+	const waitForHarness = async (signal: AbortSignal | undefined): Promise<boolean> => {
+		while (harnessHold !== null) {
+			if (signal?.aborted === true) return false;
+			const aborted = new Promise<void>((resolve) => signal?.addEventListener("abort", () => resolve(), { once: true }));
+			await Promise.race([harnessHold, aborted]);
+		}
+		return signal?.aborted !== true;
+	};
+
+	const askAsHarness = async (
+		questions: Parameters<AskUserHandler>[0],
+		invokeOptions: Parameters<AskUserHandler>[1],
+	): ReturnType<AskUserHandler> => {
+		const signal = invokeOptions?.signal;
+		// The model's interview keeps the overlay open between rounds, and another
+		// card may be on screen. A card never takes over or closes a session it
+		// did not open; the caller retries once the screen is free.
+		if (session !== null || harnessHold !== null) return unavailableAskUserResult();
+		const activeSession = ensureSession();
+		if (!activeSession) return unavailableAskUserResult();
+		let release: () => void = () => {};
+		harnessHold = new Promise<void>((resolve) => {
+			release = resolve;
+		});
+		// Esc on the card answers only the card. It never marks the turn's
+		// interview cancelled.
+		pendingCancel = () => activeSession.cancel();
+		// An abort dismisses only this round: the session resolves it as cancelled
+		// and the close below takes the overlay down.
+		const onAbort = (): void => activeSession.cancel();
+		signal?.addEventListener("abort", onAbort, { once: true });
+		try {
+			return await activeSession.ask(questions, invokeOptions?.decisionPresentation);
+		} finally {
+			signal?.removeEventListener("abort", onAbort);
+			harnessHold = null;
+			closeSession();
+			release();
+		}
 	};
 
 	const ask = async (
@@ -97,35 +156,28 @@ export function createOverlayAskUserLifecycle(deps: OverlayAskUserLifecycleDeps)
 		recordAnswer: boolean,
 	): ReturnType<AskUserHandler> => {
 		const toolBacked = Boolean(invokeOptions?.turnId || invokeOptions?.toolCallId);
-		// A round the harness asks on its own decision (a dispatch merge card)
-		// is not part of the model's interview.
-		const harnessOwned = invokeOptions?.origin === "harness";
 		const signal = invokeOptions?.signal;
 		if (signal?.aborted === true) return cancelledAskUserResult();
+		// A round the harness asks on its own decision (a dispatch merge card)
+		// is not part of the model's interview.
+		if (invokeOptions?.origin === "harness") return askAsHarness(questions, invokeOptions);
+		// A card on screen delays the model's question; it does not cancel it.
+		if (!(await waitForHarness(signal))) return cancelledAskUserResult();
 		if (toolBacked && cancelledForTurn) return cancelledAskUserResult();
 		const activeSession = ensureSession();
 		if (!activeSession) return unavailableAskUserResult();
-		// Esc on the model's own round cancels the turn's interview. A harness
-		// round answers only itself and leaves the model's next ask_user alone.
-		pendingCancel = harnessOwned ? () => activeSession.cancel() : cancel;
-		// An abort dismisses only this round: the session resolves it as cancelled
-		// and the close below takes the overlay down.
-		const onAbort = (): void => activeSession.cancel();
-		signal?.addEventListener("abort", onAbort, { once: true });
-		let result: Awaited<ReturnType<AskUserHandler>>;
-		try {
-			result = await activeSession.ask(questions, invokeOptions?.decisionPresentation);
-		} finally {
-			signal?.removeEventListener("abort", onAbort);
+		const previousCancel = pendingCancel;
+		pendingCancel = cancel;
+		const result = await activeSession.ask(questions, invokeOptions?.decisionPresentation);
+		if (result.unavailable === true) {
+			// A round already on screen kept its own cancel; this caller was not shown.
+			pendingCancel = previousCancel;
+			return result;
 		}
-		if (result.unavailable === true) return result;
-		// A harness round is stated by its own receipt, not by an interview record,
-		// whichever handler carried it (the dispatch merge card arrives through the
-		// registered one).
-		if (recordAnswer && !harnessOwned && !toolBacked && result.cancelled !== true && result.answers.length > 0)
+		if (recordAnswer && !toolBacked && result.cancelled !== true && result.answers.length > 0)
 			deps.onRoundAnswered?.(questions, result.answers);
 		if (result.cancelled === true || !toolBacked) {
-			if (result.cancelled === true && !harnessOwned) cancelledForTurn = true;
+			if (result.cancelled === true) cancelledForTurn = true;
 			close();
 		} else {
 			refresh();
@@ -146,7 +198,7 @@ export function createOverlayAskUserLifecycle(deps: OverlayAskUserLifecycleDeps)
 			pendingCancel();
 			return true;
 		},
-		isWaiting: () => session?.isWaiting() ?? false,
+		isWaiting: () => harnessHold === null && (session?.isWaiting() ?? false),
 		resetCancellation: () => {
 			cancelledForTurn = false;
 		},
