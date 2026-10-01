@@ -106,7 +106,7 @@ export interface RenderCompactionSummaryOptions {
 
 /**
  * Render a single header line announcing a compaction boundary. Format:
- *   [compaction summary] ~12345 tokens before → cont. at turn <id>
+ *   [compaction summary] compacted 12.3K → 9.1K tokens, cont. at turn <id>
  * Used on its own for placeholder replays and as the first line of
  * `renderCompactionSummaryEntry` when the body is included too.
  */
@@ -114,7 +114,12 @@ function renderCompactionSummaryHeader(entry: CompactionSummaryEntry, width: num
 	const label = screenTitle(theme, `[${LABEL}]`);
 	const tokens = Number.isFinite(entry.tokensBefore) ? entry.tokensBefore.toLocaleString() : "0";
 	const trigger = entry.trigger ? ` via ${entry.trigger}` : "";
-	const meta = theme.fg("toolMetadata", `~${tokens} tokens before, cont. at turn ${entry.firstKeptTurnId}${trigger}`);
+	// A resumed session states the same `compacted <before> → <after>` fact the live row did (p9/D3).
+	const reduction =
+		entry.tokensAfter !== undefined && Number.isFinite(entry.tokensBefore)
+			? `compacted ${footerTokens(entry.tokensBefore)} → ${footerTokens(entry.tokensAfter)} tokens`
+			: `~${tokens} tokens before`;
+	const meta = theme.fg("toolMetadata", `${reduction}, cont. at turn ${entry.firstKeptTurnId}${trigger}`);
 	return wrapTextWithAnsi(`${label} ${meta}`, width);
 }
 
@@ -125,7 +130,7 @@ function renderCompactionSummaryHeader(entry: CompactionSummaryEntry, width: num
  * chat.
  *
  * Layout:
- *   [compaction summary] ~12345 tokens before, cont. at turn <firstKeptTurnId>
+ *   [compaction summary] compacted 12.3K → 9.1K tokens, cont. at turn <firstKeptTurnId>
  *     <markdown body line 1>
  *     <markdown body line 2>
  *     ...
