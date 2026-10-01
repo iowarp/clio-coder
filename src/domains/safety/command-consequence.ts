@@ -318,20 +318,28 @@ function gitConsequence(args: ReadonlyArray<string>): string | null {
 		const word = args[index];
 		if (word === undefined) continue;
 		if (!word.startsWith("-")) break;
-		if (word === "-C") repoDir = args[index + 1] ?? null;
+		// Each -C is relative to the one before it.
+		if (word === "-C") {
+			const next = args[index + 1] ?? "";
+			repoDir = repoDir === null || next.startsWith("/") ? next : `${repoDir}/${next}`;
+		}
 		if (GIT_GLOBAL_VALUE_OPTIONS.has(word)) index += 1;
 	}
 	const sub = args[index];
 	if (sub === undefined) return null;
 	const rest = args.slice(index + 1);
-	const scope = repoDir !== null ? shown(repoDir) : "the workspace";
+	// checkout, restore and clean act on the directory git runs in and below it,
+	// which `-C` moves. `reset --hard` acts on the whole working tree whichever
+	// directory it runs in.
+	const scope = repoDir !== null ? shown(repoDir) : "the current directory";
+	const wholeTree = repoDir !== null ? `the whole working tree containing ${shown(repoDir)}` : "the whole working tree";
 	switch (sub) {
 		case "checkout":
 			return gitCheckout(rest, scope);
 		case "restore":
 			return gitRestore(rest);
 		case "reset":
-			return hasFlag(rest, "", ["--hard"]) ? `Discards uncommitted changes in ${scope}` : null;
+			return hasFlag(rest, "", ["--hard"]) ? `Discards uncommitted changes in ${wholeTree}` : null;
 		case "clean":
 			return gitClean(rest, scope);
 		case "branch":
