@@ -31,7 +31,7 @@ function verifiedFacts(runId: string): WorkerReceiptFacts {
 	const draft = fixtureReceiptDraft(envelope);
 	draft.output = { text, truncated: false, state: "final", bytes: Buffer.byteLength(text) };
 	const trust = inspectRunReceiptTrustStatus(withReceiptIntegrity(draft, envelope), envelope).status;
-	return { trust, outcome: "succeeded", exitCode: 0, text };
+	return { trust, outcome: "succeeded", exitCode: 0, text, mergeDetail: "merged abc1234 onto main" };
 }
 
 test("a mutation report that outgrew the live tail settles into prose, not raw JSON (BT-011)", () => {
@@ -72,6 +72,7 @@ test("a mutation report that outgrew the live tail settles into prose, not raw J
 		const rows = renderWorkerEntryLines(settled.entry, width, { detail: transcriptDetail("standard") });
 		const plain = rows.map(stripTerminalSequences).join("\n");
 		assert.doesNotMatch(plain, /\{"mutatedPaths"|"validations"/u, `${width}: ${plain}`);
+		assert.match(plain, /merged abc1234 onto main/u);
 		assert.match(plain, /changed lib\/math\.js, test\/math\.test\.js/u, `${width}: ${plain}`);
 		for (const row of rows) assert.ok(visibleWidth(row) <= width, `${width}: ${stripTerminalSequences(row)}`);
 	}

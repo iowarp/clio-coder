@@ -35,6 +35,24 @@ function run(
 	};
 }
 
+test("the coordinator receives the landing fact for automatic and operator merges", () => {
+	for (const detail of [
+		"merged abc1234 onto main",
+		"merged abc1234 onto main; operator merge accepted after the gate held it",
+	]) {
+		const envelope = fixtureEnvelope("run-merged");
+		const draft = fixtureReceiptDraft(envelope);
+		draft.worktree = { path: "/workspace/task", branch: "task", apply: "merge", applied: true, diffHash: "hash", detail };
+		const receipt = withReceiptIntegrity(draft, envelope);
+		const output = formatDispatchOutput(
+			"parallel",
+			[{ ...run("run-merged", 0, "known", 1), receipt, integrity: verifyReceiptIntegrity(receipt, envelope) }],
+			16384,
+		);
+		match(output, /merged abc1234 onto main/);
+	}
+});
+
 test("dispatch batch shows sealed tool calls and provenance-aware cost without inventing external tool counts", () => {
 	const first = run("run-a", 0.1, "known", 3);
 	const second = run("run-b", 0.2, "estimated", 4);

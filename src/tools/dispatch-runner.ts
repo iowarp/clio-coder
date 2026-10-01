@@ -460,7 +460,9 @@ async function backgroundedDispatchResult(
 function successNote(receipt: RunReceipt): string | null {
 	if (receipt.outcome !== undefined && receipt.outcome !== "succeeded") return null;
 	if (receipt.exitCode !== 0) return null;
-	return [receipt.outcomeDetail, receipt.worktree?.applied ? receipt.worktree.detail : null].filter(Boolean).join("; ") || null;
+	return (
+		[receipt.outcomeDetail, receipt.worktree?.applied ? receipt.worktree.detail : null].filter(Boolean).join("; ") || null
+	);
 }
 
 interface CompletedRun {
