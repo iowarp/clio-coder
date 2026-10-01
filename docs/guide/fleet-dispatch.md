@@ -262,8 +262,8 @@ token.
 
 A v4+ contract's per-step `writes:` declaration has two consumers. The
 write-boundary enforcer verifies the step window afterwards, which is where the
-boundary is enforced; pre-emptive confinement for declared commands would need a
-command sandbox that does not exist. The same declaration also compiles into the
+boundary is enforced. Declared commands run on the host outside the worker
+sandbox, so nothing confines them ahead of the check. The same declaration also compiles into the
 step's typed dispatch intent as `relevant_paths`, so the paths the contract
 already named select the project rules that apply to them and pin the worker's
 context instead of being reconstructed from path-like tokens in the rendered
@@ -294,15 +294,32 @@ A singular writer or an item in `tasks` may declare `worktree: true` and
 `.clio-coder/worktrees/<runId>/` on `clio-coder/task/<runId>`, maps the worker cwd and
 protected artifacts into that checkout, and runs declared host verification
 there. The approved execution snapshot renders both fields and freezes the
-parent checkout as the merge destination.
+parent checkout as the merge destination. The host commits the task worktree
+when the worker finishes. A worker in a task worktree is told to edit and
+report even when its task says "and commit", and `expected_outputs` must be
+repository-relative file paths, so a commit action or `.` is refused at admission.
 
 After a successful worker and successful host verification, merge application
 commits the task branch, rechecks protected paths, and uses the same guarded
 merge path as compete. A conflict fails closed with
-`worktree_merge_conflict` and preserves the branch and worktree. A worker whose
-own report lists a failing validation, or names a check it did not run
-(`declaredChecks`) with no validation that passed, is not merged unless host
-verification passed. In the TUI an operator is asked first with a `Merge task branch?` card
+`worktree_merge_conflict` and preserves the branch and worktree. Four cases
+withhold the merge: a worker whose own report lists a failing validation, a worker
+whose task requested validation but which executed no check, a worker that names a
+check it did not run (`declaredChecks`) with no validation that passed, and a
+diff that removes existing test cases or deletes a test file. The first three yield
+to passing host verification. The fourth does not, because a passing suite says nothing
+about a test that is gone. A test that moves to another file or is only reformatted is
+not counted as removed. A task clause that tells the worker not to validate (for
+example "do not run the tests") means an unrun check does not withhold. A merge-mode run
+whose host verification rejected the tree fails with `host_verification_rejected` and keeps
+its branch with the work committed, and the detail names the `git merge` that applies it.
+That detail, the receipt's evidence line for the check, and the merge card all say
+whether Clio ran the failing check on the task base. Only a quick command check is
+replayed, once, in a throwaway checkout of the base: one that took under two seconds,
+in a task worktree without `node_modules`. The note says the check also fails on the
+base, passes there, or was not compared and why. A failure on the base does not
+establish that the worker caused it. In the TUI an operator is
+asked first with a `Merge task branch?` card
 that shows the branch, the changed paths, and the failing or unrun check. The card opens on
 `Keep branch` and ignores keys other than Esc for a moment after it appears, so an Enter typed
 into the composer cannot answer it. `Merge` lands exactly the commit the card showed, through the
@@ -400,6 +417,17 @@ malformed entries, and values beyond the documented caps fail admission.
 Normalized `intent.writeRoots` feeds the existing worker write-boundary
 enforcement when no legacy `JobSpec.writeRoots` exists. Conflicting declarations
 are refused as `intent_write_roots_contradiction`.
+
+Narrow write roots confine a native worker one of two ways. When the OS sandbox
+covers the run (`safety.sandbox` is `auto` or `required`, a local bubblewrap backend
+is usable, the worker runs on a local HTTP runtime, and no `fleet.nodes` are
+configured), the worker keeps `bash` and `verify`, and their commands can write only
+inside the roots. A `dispatch` from that worker is still blocked. Otherwise
+the worker loses `bash`, `verify`, `run_script` and `dispatch` for the run, cannot run
+checks itself, and a `write_roots_checks_withheld` scope notice says so. Declared host
+verification still runs on the host in both cases. A write root of `.` sets no boundary,
+keeps every tool, and raises `write_root_dot_unconfined` instead. The seatbelt backend
+on macOS does not count as covering the run for this purpose.
 
 Verification values are declared check ids, never shell commands. Admission
 resolves each id from a package script or `.clio-coder/verifiers.yaml`, clamps
@@ -980,8 +1008,9 @@ include:
   without a nonempty receipt-sealed final answer and
   `host_verification_rejected` when a declared host check rejects the settled
   tree. `merge_withheld` marks a run whose task worktree was preserved instead
-  of merged because the worker's own report lists a failing validation or an unrun check. All
-  three suppress automatic retry.
+  of merged because of one of the four gate cases above, and `worker_no_work`
+  marks an edit worker that finished without doing its assignment. All four
+  suppress automatic retry.
 - `routingIntent`, `routeDecision`, and `quality`: the normalized hard bounds,
   complete current-policy decision, exact execution role, route estimate and
   readiness evidence, and authenticated quality sources.
