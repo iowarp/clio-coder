@@ -7476,7 +7476,9 @@ export function createDispatchBundle(
 								worktreeReceipt = { ...landed, detail: `operator merge refused: ${landed.detail ?? landed.reason}` };
 								finalOutcome = "failed";
 								outcomeCode = "merge_withheld";
-								finalDetail = `${withheldDetail ?? finalDetail}; operator merge refused: ${landed.detail ?? landed.reason}`;
+								// Not the withheld detail: its `git merge` command would land work
+								// nobody previewed.
+								finalDetail = `merge withheld: ${withheldVerdict?.reason ?? "its report"}; operator merge refused: ${landed.detail ?? landed.reason} Branch ${req.taskWorktree.branch} or its worktree changed after the preview, so inspect it before merging.`;
 								failureMessage = finalDetail;
 							} else if (landed.reason !== undefined) {
 								worktreeReceipt = {
