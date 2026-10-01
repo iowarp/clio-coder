@@ -153,7 +153,7 @@ const router = createBrowserRouter([
 				path: "/sessions",
 				lazy: async () => {
 					const { Workspaces } = await import("./pages/sessions.js");
-					return { element: <Workspaces client={client} /> };
+					return { element: <Workspaces /> };
 				},
 			},
 			{

@@ -1,10 +1,9 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
-import { Link, useNavigate, useOutletContext, useParams } from "react-router";
+import { Link, Navigate, useNavigate, useOutletContext, useParams } from "react-router";
 import { routes } from "../../contracts/routes.js";
-import type { SessionSnapshot } from "../../contracts/sessions.js";
-import { type Client, emptyInput } from "../api/client.js";
-import { clock, formatDuration, formatTime } from "../api/clock.js";
+import type { Client } from "../api/client.js";
+import { clock, formatDuration } from "../api/clock.js";
 import type { ConnectionState } from "../api/events.js";
 import { sessionBuffer } from "../api/sessions.js";
 import { ApprovalBanner, pendingPermission } from "../chat/Approval.js";
@@ -22,9 +21,7 @@ import { routeFacts } from "../chat/route.js";
 import { PaneToggles, SessionPane } from "../chat/SessionPane.js";
 import { type ChatTurn, groupTurns, turnStatuses } from "../chat/turns.js";
 import { Icon } from "../design/icons.js";
-import { Boundary, PanelEmpty, PanelHeading } from "../design/panel.js";
-import { emptyState, PANELS } from "../design/panel-model.js";
-import { StatusMark, type StatusTone } from "../design/status.js";
+import { StatusMark } from "../design/status.js";
 import { useShortcut } from "../interaction/use-shortcut.js";
 import { JumpToLatest } from "../render/FollowLatest.js";
 import { useFollowLatest } from "../render/follow-latest.js";
@@ -32,241 +29,13 @@ import { ClioLogo, ClioPulse } from "../shell/ClioMark.js";
 import { Menu, MenuItem } from "../shell/Menu.js";
 import { taskTitle } from "../shell/shell-model.js";
 import { TopBar } from "../shell/TopBar.js";
-import { ProjectOpenForm, useProjectLaunch } from "./project-open.js";
-import { DeleteSession } from "./session-controls.js";
 import "../chat/chat-turn.css";
 import "../chat/conversation.css";
-import "./projects.css";
-export function Workspaces({ client }: { client: Client }) {
-	const recentId = useId();
-	const launch = useProjectLaunch(client);
-	const workspaces = useQuery({ queryKey: ["workspaces"], queryFn: () => client.call(routes.workspaces, emptyInput) });
-	return (
-		<section className="projects">
-			<PanelHeading
-				panel={PANELS.sessions}
-				level={1}
-				eyebrow={false}
-				title={
-					<>
-						Sessions<span className="period">.</span>
-					</>
-				}
-			/>
-			<p className="intro">
-				Choose a project folder on the machine running Clio Coder to start or continue a conversation.
-			</p>
-			<ProjectOpenForm client={client} launch={launch} />
-			{launch.error || workspaces.error ? <p role="alert">{launch.error?.message ?? workspaces.error?.message}</p> : null}
-			<section className="projects__section" aria-labelledby={recentId}>
-				<h2 id={recentId}>Recent projects</h2>
-				{workspaces.isPending ? <p className="projects__note">Loading projects…</p> : null}
-				{(workspaces.data?.length ?? 0) > 0 ? (
-					<ul className="record-list">
-						{workspaces.data?.map((workspace) => (
-							<li className="record-row" key={workspace.id}>
-								<div className="record-row__text">
-									<Link className="record-row__title" to={`/workspaces/${workspace.id}/sessions`}>
-										{workspace.name}
-									</Link>
-									<span className="record-row__meta">
-										<span className="record-row__path" title={workspace.path}>
-											{workspace.path}
-										</span>
-										<span>Opened {formatTime(workspace.openedAt)}</span>
-									</span>
-								</div>
-								<div className="record-row__actions">
-									<button
-										type="button"
-										disabled={launch.busy}
-										onClick={() => launch.start(workspace.id)}
-										aria-label={`New conversation in ${workspace.name}`}
-									>
-										{launch.starting === workspace.id ? "Starting…" : "New conversation"}
-									</button>
-								</div>
-							</li>
-						))}
-					</ul>
-				) : null}
-				{workspaces.data?.length === 0 ? (
-					<PanelEmpty>
-						No project has been opened here yet. Choose its folder above to start the first conversation.
-					</PanelEmpty>
-				) : null}
-			</section>
-			<Boundary panel={PANELS.sessions} />
-		</section>
-	);
+/** The old projects page. Choosing and opening projects now lives in the rail and the Open workspace dialog. */
+export function Workspaces() {
+	return <Navigate to="/" replace />;
 }
-export function Sessions({ client }: { client: Client }) {
-	const { workspaceId = "" } = useParams(),
-		navigate = useNavigate(),
-		queries = useQueryClient();
-	const [historySearch, setHistorySearch] = useState("");
-	const openId = useId();
-	const historyId = useId();
-	const input = { params: { id: workspaceId }, query: {}, body: {} };
-	const workspace = useQuery({
-		queryKey: ["workspace", workspaceId],
-		queryFn: () => client.call(routes.workspace, input),
-	});
-	const history = useQuery({
-		queryKey: ["session-history", workspaceId],
-		queryFn: () => client.call(routes.sessionHistory, input),
-	});
-	const sessions = useQuery({ queryKey: ["sessions"], queryFn: () => client.call(routes.sessions, emptyInput) });
-	const open = useMutation({
-		mutationFn: (id: string | null) =>
-			id
-				? client.call(routes.loadSession, { params: { id }, query: {}, body: { workspaceId } })
-				: client.call(routes.newSession, input),
-		onSuccess: (session) => {
-			// A loaded ledger may bind a new ACP child with a different command catalog.
-			queries.removeQueries({ queryKey: ["session-capabilities", session.id] });
-			queries.removeQueries({ queryKey: ["session-commands", session.id] });
-			queries.removeQueries({ queryKey: ["session-queue", session.id] });
-			queries.removeQueries({ queryKey: ["session-settings", session.id] });
-			queries.removeQueries({ queryKey: ["session-targets", session.id] });
-			queries.removeQueries({ queryKey: ["session-autonomy", session.id] });
-			sessionBuffer(session.id).snapshot(session);
-			queries.setQueryData(["session", session.id], session);
-			void queries.invalidateQueries({ queryKey: ["sessions"] });
-			void navigate(`/sessions/${session.id}`);
-		},
-	});
-	const active =
-		sessions.data?.filter((session) => session.workspaceId === workspaceId && session.state === "open") ?? [];
-	const historyQuery = historySearch.trim().toLocaleLowerCase();
-	const activeIds = new Set(active.map((session) => session.id));
-	const saved = (history.data ?? [])
-		.filter((row) => !activeIds.has(row.id))
-		.filter(
-			(row) =>
-				historyQuery === "" ||
-				[row.name, row.firstMessagePreview, row.model, row.target].some((value) =>
-					value?.toLocaleLowerCase().includes(historyQuery),
-				),
-		)
-		.sort((a, b) => (b.lastActivityAt ?? b.createdAt).localeCompare(a.lastActivityAt ?? a.createdAt));
-	const name = workspace.data?.name ?? "This project";
-	return (
-		<section className="projects">
-			<Link className="projects__back" to="/sessions">
-				<span aria-hidden="true">←</span> All projects
-			</Link>
-			<PanelHeading panel={PANELS.sessions} level={1} eyebrow={false} title={workspace.data?.name ?? "Sessions"} />
-			<div className="projects__lead">
-				<p className="projects__path">{workspace.data?.path ?? "Reading the project path…"}</p>
-				<button className="primary" type="button" disabled={open.isPending} onClick={() => open.mutate(null)}>
-					{open.isPending && open.variables === null ? "Starting…" : "New conversation"}
-				</button>
-			</div>
-			{open.error || history.error || workspace.error || sessions.error ? (
-				<p role="alert">
-					{open.error?.message ?? history.error?.message ?? workspace.error?.message ?? sessions.error?.message}
-				</p>
-			) : null}
-			<section className="projects__section" aria-labelledby={openId}>
-				<h2 id={openId}>Open now</h2>
-				{active.length > 0 ? (
-					<ul className="record-list">
-						{active.map((session) => (
-							<li className="record-row" key={session.id}>
-								<div className="record-row__text">
-									<Link className="record-row__title" to={`/sessions/${session.id}`}>
-										{taskTitle(session)}
-									</Link>
-								</div>
-								<span className="record-row__status">
-									<StatusMark {...openSessionStatus(session)} />
-								</span>
-							</li>
-						))}
-					</ul>
-				) : (
-					<PanelEmpty>No conversation from {name} is open in this server.</PanelEmpty>
-				)}
-			</section>
-			<section className="projects__section" aria-labelledby={historyId}>
-				<div className="projects__section-head">
-					<h2 id={historyId}>Earlier conversations</h2>
-					{(history.data?.length ?? 0) > 0 ? (
-						<label className="projects__search">
-							<span className="sr-only">Find a conversation</span>
-							<input
-								type="search"
-								value={historySearch}
-								onChange={(event) => setHistorySearch(event.target.value)}
-								placeholder="Find by name, message, model or target"
-							/>
-						</label>
-					) : null}
-				</div>
-				{history.isPending ? <p className="projects__note">Reading session history…</p> : null}
-				{saved.length > 0 ? (
-					<ul className="record-list">
-						{saved.map((session) => {
-							const title = session.name ?? session.firstMessagePreview ?? session.id;
-							const loading = open.isPending && open.variables === session.id;
-							return (
-								<li className="record-row" key={session.id}>
-									<div className="record-row__text">
-										<button
-											type="button"
-											className="record-row__title"
-											disabled={open.isPending}
-											onClick={() => open.mutate(session.id)}
-											title="Load this conversation into a new Clio Coder session"
-										>
-											{title}
-										</button>
-										<span className="record-row__meta">
-											<span>{session.model ?? "Model not recorded"}</span>
-											<span>
-												{session.messageCount == null
-													? "Message count not recorded"
-													: `${session.messageCount.toLocaleString("en-US")} ${session.messageCount === 1 ? "message" : "messages"}`}
-											</span>
-											<span>{formatTime(session.lastActivityAt ?? session.createdAt)}</span>
-											<span>{loading ? "Loading…" : session.endedAt ? "Closed" : "Not closed"}</span>
-										</span>
-									</div>
-									{session.endedAt ? (
-										<div className="record-row__actions">
-											<DeleteSession client={client} id={session.id} workspaceId={workspaceId} name={title} />
-										</div>
-									) : null}
-								</li>
-							);
-						})}
-					</ul>
-				) : null}
-				{historySearch.trim() && saved.length === 0 && !history.isPending ? (
-					<PanelEmpty>No conversations match that search.</PanelEmpty>
-				) : null}
-				{!historySearch.trim() && saved.length === 0 && active.length > 0 && (history.data?.length ?? 0) > 0 ? (
-					<PanelEmpty>All saved conversations from this project are already open.</PanelEmpty>
-				) : null}
-				{history.data?.length === 0 ? (
-					<PanelEmpty>{emptyState.emptyStore("saved session", "for this workspace")}</PanelEmpty>
-				) : null}
-			</section>
-			<Boundary panel={PANELS.sessions} />
-		</section>
-	);
-}
-
-/** An open conversation's state in the list, in the conversation's own voice. */
-function openSessionStatus(session: SessionSnapshot): { tone: StatusTone; label: string } {
-	const last = session.turns.at(-1)?.status;
-	if (pendingPermission(session)) return { tone: "warn", label: "Waiting for your approval" };
-	if (last === "running") return { tone: "running", label: "Working" };
-	if (last === "failed") return { tone: "fail", label: "Last turn failed" };
-	if (last === "cancelled") return { tone: "neutral", label: "Last turn stopped" };
-	return { tone: "success", label: "Ready" };
-}
+export { Sessions } from "./tasks.js";
 
 export function Session({ client }: { client: Client }) {
 	const { id = "" } = useParams();
