@@ -89,3 +89,37 @@ export function extensionBadge(name: string): string {
 	const extension = /\.([A-Za-z0-9]{1,4})$/u.exec(name)?.[1];
 	return extension ? extension.toUpperCase() : "FILE";
 }
+
+export interface TouchedFile {
+	readonly path: string;
+	readonly label: string;
+	readonly name: string;
+	readonly dir: string;
+	/** Tool calls that reported this path. */
+	readonly calls: number;
+}
+
+/**
+ * Paths tools reported that no edit changed: files Clio read, searched or ran against. Newest call
+ * first. `changed` is the set of paths `summarizeChanges` already lists.
+ */
+export function touchedFiles(
+	tools: readonly TimelineItem[],
+	workspaceRoot: string | undefined,
+	changed: ReadonlySet<string>,
+): TouchedFile[] {
+	const counts = new Map<string, number>();
+	for (const item of tools)
+		for (const location of item.locations ?? []) {
+			const path = location.path;
+			if (path.trim() === "" || changed.has(path)) continue;
+			const seen = counts.get(path) ?? 0;
+			// Re-insert so Map order tracks the most recent call.
+			counts.delete(path);
+			counts.set(path, seen + 1);
+		}
+	return [...counts.entries()].reverse().map(([path, calls]) => {
+		const label = relativeTo(path, workspaceRoot);
+		return { path, label, name: basename(label), dir: dirname(label), calls };
+	});
+}

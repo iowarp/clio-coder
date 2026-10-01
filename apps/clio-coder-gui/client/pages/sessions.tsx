@@ -115,7 +115,7 @@ function SessionHealth({ summary }: { summary: HealthSummary }) {
 
 function SessionView({ client, id }: { client: Client; id: string }) {
 	const navigate = useNavigate();
-	const ids = { changes: useId(), terminal: useId(), pane: useId() };
+	const ids = { changes: useId(), pane: useId() };
 	const pane = usePaneState(ids.pane);
 	const paneActions = useMemo(() => ({ show: (view: PaneView) => pane.show(view, ids.pane) }), [pane.show, ids.pane]);
 	useShortcut("sessionPanel", () => (pane.open ? pane.close() : pane.show(pane.view, ids.pane)));

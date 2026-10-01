@@ -48,7 +48,6 @@ const paths = {
 	models: "M7 7h10v10H7zM10 10h4v4h-4zM9 3v4m6-4v4M9 17v4m6-4v4M3 9h4m10 0h4M3 15h4m10 0h4",
 	sliders: "M4 7h9m4 0h3M4 17h3m4 0h9M13 4v6M7 14v6",
 	usage: "M5 20V10M12 20V4M19 20v-7",
-	terminal: "M4 5h16v14H4zM8 10l3 2-3 2M13 15h4",
 	panelRight: "M4 4h16v16H4zM15 4v16",
 	check: "m5 12 4.5 4.5L19 7",
 	branch: "M6 3v12M6 15a3 3 0 1 0 0 6 3 3 0 0 0 0-6ZM18 3a3 3 0 1 0 0 6 3 3 0 0 0 0-6ZM18 9a6 6 0 0 1-6 6H9",
