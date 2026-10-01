@@ -412,8 +412,6 @@ function SessionView({ client, id }: { client: Client; id: string }) {
 					nowMs={now}
 					view={pane.view}
 					onViewChange={pane.setView}
-					onCloseSession={closeSession}
-					closing={close.isPending}
 				/>
 			</section>
 		</PaneContext.Provider>

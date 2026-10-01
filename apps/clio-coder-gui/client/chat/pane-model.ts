@@ -9,7 +9,7 @@ export const PANE_VIEWS = [
 	{ id: "progress", label: "Progress", icon: "listChecks", primary: true },
 	{ id: "changes", label: "Changes", icon: "fileDiff", primary: true },
 	{ id: "agents", label: "Agents", icon: "fleet", primary: false },
-	{ id: "session", label: "Session", icon: "sliders", primary: false },
+	{ id: "session", label: "Details", icon: "sliders", primary: false },
 	{ id: "tools", label: "Tools", icon: "toolchain", primary: false },
 ] as const;
 

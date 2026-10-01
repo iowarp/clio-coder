@@ -42,8 +42,6 @@ export const SessionPane = memo(function SessionPane({
 	nowMs,
 	view,
 	onViewChange,
-	onCloseSession,
-	closing,
 }: {
 	open: boolean;
 	onClose: () => void;
@@ -54,8 +52,6 @@ export const SessionPane = memo(function SessionPane({
 	nowMs: number;
 	view: PaneView;
 	onViewChange: (view: PaneView) => void;
-	onCloseSession: () => void;
-	closing: boolean;
 }) {
 	const tabId = useId();
 	const aside = useRef<HTMLElement>(null);
@@ -201,34 +197,8 @@ export const SessionPane = memo(function SessionPane({
 						],
 						["changes", <ChangesView key="c" session={pane} workspaceRoot={workspaceRoot} />],
 						["agents", legacy ? <WorkerGraph key="a" client={client} session={legacy} /> : null],
-						[
-							"session",
-							legacy ? (
-								<SessionPanel
-									key="s"
-									client={client}
-									session={legacy}
-									workspaceRoot={workspaceRoot}
-									tools={false}
-									onCloseSession={onCloseSession}
-									closing={closing}
-								/>
-							) : null,
-						],
-						[
-							"tools",
-							legacy ? (
-								<SessionPanel
-									key="x"
-									client={client}
-									session={legacy}
-									workspaceRoot={workspaceRoot}
-									tools
-									onCloseSession={onCloseSession}
-									closing={closing}
-								/>
-							) : null,
-						],
+						["session", legacy ? <SessionPanel key="s" client={client} session={legacy} tools={false} /> : null],
+						["tools", legacy ? <SessionPanel key="x" client={client} session={legacy} tools /> : null],
 					] as const
 				).map(([id, body]) => (
 					<div

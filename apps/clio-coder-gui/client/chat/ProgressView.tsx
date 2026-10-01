@@ -8,7 +8,7 @@ import { ClioPulse, PULSE_SIZE } from "../shell/ClioMark.js";
 import { boardView, type PlanRow } from "./board-model.js";
 import { changeCounts, summarizeChanges } from "./changes-model.js";
 import { foldFleetRuns, isLiveRun } from "./fleet-facts.js";
-import { compactCount, compactDuration, taskOverview } from "./overview-model.js";
+import { compactCount, compactDuration, contextMeter, taskOverview } from "./overview-model.js";
 import type { PaneSession, PaneView } from "./pane-model.js";
 
 function PlanGlyph({ tone, live }: { tone: PlanRow["tone"]; live: boolean }) {
@@ -65,6 +65,14 @@ export function ProgressView({
 		retry: false,
 	});
 	const plan = board.data ? boardView(board.data).plan : null;
+	// The key Session > Context uses, so opening both costs one request.
+	const ledger = useQuery({
+		queryKey: ["session-context", session.id, settled],
+		queryFn: () => client.call(routes.sessionContext, params),
+		enabled: open && !!capabilities.data?.context,
+		retry: false,
+	});
+	const meter = ledger.data ? contextMeter(ledger.data) : null;
 	const overview = useMemo(() => taskOverview(session.turns, nowMs), [session.turns, nowMs]);
 	const changes = useMemo(() => summarizeChanges(session.tools, workspaceRoot), [session.tools, workspaceRoot]);
 	const liveWorkers = useMemo(() => foldFleetRuns(session.fleet).filter(isLiveRun).length, [session.fleet]);
@@ -98,6 +106,24 @@ export function ProgressView({
 				</header>
 				<p className="pane-goal">{title}</p>
 				{overview.turns > 0 ? <p className="pane-card__facts">{facts.join(" · ")}</p> : null}
+				{meter ? (
+					<div className="pane-meter" data-tone={meter.tone}>
+						<meter
+							className="pane-meter__bar"
+							aria-label="Context window"
+							min={0}
+							max={100}
+							low={65}
+							high={85}
+							optimum={0}
+							value={Math.round(meter.percent)}
+							title={meter.text}
+						/>
+						<p className="pane-card__facts">
+							Context {Math.round(meter.percent)}% · {meter.label}
+						</p>
+					</div>
+				) : null}
 			</section>
 
 			<section className="pane-card" aria-labelledby="pane-plan">

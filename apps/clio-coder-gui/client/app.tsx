@@ -13,7 +13,6 @@ import { RouteFocus, SIDEBAR_ID, useSidebarCollapsed } from "./design/navigation
 import { dismissAll, LiveRegions, NoticeToasts, reportProblem, useNotices } from "./design/notifications.js";
 import { PwaBoot } from "./design/pwa.js";
 import { Reconnect } from "./design/reconnect.js";
-import { WorkspaceChrome } from "./design/workspace-chrome.js";
 import { CommandPalette } from "./interaction/CommandPalette.js";
 import { appCommands, type PaletteTask } from "./interaction/commands.js";
 import { HelpDialog } from "./interaction/HelpDialog.js";
@@ -245,12 +244,6 @@ export function App({ client }: { client: Client }) {
 		}),
 		[sidebarCollapsed, revealSidebar, startTask, openWorkspace, openHelp, activeWorkspaceId, actions.launch.busy],
 	);
-	const workspaceChrome = useMemo(
-		() => ({
-			openArea: (next: string) => void navigate(next === "sessions" ? "/" : `/${next}`),
-		}),
-		[navigate],
-	);
 
 	const collapsed = sidebarCollapsed && !phone;
 	const authed = !!client.token && !refused;
@@ -322,9 +315,7 @@ export function App({ client }: { client: Client }) {
 						<div role="alert">The app and server versions differ. Rebuild the client and reload.</div>
 					) : (
 						<ShellContext.Provider value={shell}>
-							<WorkspaceChrome.Provider value={workspaceChrome}>
-								<Outlet context={connection} />
-							</WorkspaceChrome.Provider>
+							<Outlet context={connection} />
 						</ShellContext.Provider>
 					)}
 				</main>
