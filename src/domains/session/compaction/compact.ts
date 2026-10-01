@@ -589,6 +589,15 @@ function priorCompactionContextEntries(entries: ReadonlyArray<SessionEntry>, com
 const OPERATOR_NOTE_SENTENCE = /^(?:please\s+)?(?:remember|keep in mind|don'?t forget)\b/iu;
 const OPERATOR_NOTE_MAX_CHARS = 400;
 const OPERATOR_NOTE_MAX_COUNT = 30;
+const OPERATOR_NOTES_BLOCK = /<operator-notes\b([^>]*)>\s*\n([\s\S]*?)\n\s*<\/operator-notes\s*>/giu;
+
+function escapeOperatorNote(note: string): string {
+	return note.replace(/&/gu, "&amp;").replace(/</gu, "&lt;").replace(/>/gu, "&gt;");
+}
+
+function unescapeOperatorNote(note: string): string {
+	return note.replace(/&lt;/gu, "<").replace(/&gt;/gu, ">").replace(/&amp;/gu, "&");
+}
 
 function operatorMessageText(entry: SessionEntry): string | null {
 	if (entry.kind !== "message" || entry.role !== "user") return null;
@@ -604,12 +613,18 @@ function operatorMessageText(entry: SessionEntry): string | null {
 
 function extractOperatorNotes(entries: ReadonlyArray<SessionEntry>): string[] {
 	const notes = new Set<string>();
+	const add = (note: string): void => {
+		const trimmed = note.trim();
+		if (trimmed.length === 0) return;
+		notes.add(trimmed.length > OPERATOR_NOTE_MAX_CHARS ? `${trimmed.slice(0, OPERATOR_NOTE_MAX_CHARS - 3)}...` : trimmed);
+	};
 	for (const entry of entries) {
 		if (entry.kind === "compactionSummary") {
-			for (const [, body] of entry.summary.matchAll(/<operator-notes>\n([\s\S]*?)\n<\/operator-notes>/g)) {
+			for (const [, attributes, body] of entry.summary.matchAll(OPERATOR_NOTES_BLOCK)) {
+				const escaped = /\bencoding=["']xml["']/iu.test(attributes ?? "");
 				for (const line of (body ?? "").split("\n")) {
 					const note = line.replace(/^- /u, "").trim();
-					if (note.length > 0) notes.add(note);
+					add(escaped ? unescapeOperatorNote(note) : note);
 				}
 			}
 			continue;
@@ -619,7 +634,7 @@ function extractOperatorNotes(entries: ReadonlyArray<SessionEntry>): string[] {
 		for (const sentence of text.split(/\n+|(?<=[.!?])\s+/u)) {
 			const trimmed = sentence.trim();
 			if (!OPERATOR_NOTE_SENTENCE.test(trimmed)) continue;
-			notes.add(trimmed.length > OPERATOR_NOTE_MAX_CHARS ? `${trimmed.slice(0, OPERATOR_NOTE_MAX_CHARS)}...` : trimmed);
+			add(trimmed);
 		}
 	}
 	return [...notes].slice(-OPERATOR_NOTE_MAX_COUNT);
@@ -627,7 +642,8 @@ function extractOperatorNotes(entries: ReadonlyArray<SessionEntry>): string[] {
 
 function formatOperatorNotes(notes: ReadonlyArray<string>): string {
 	if (notes.length === 0) return "";
-	return `\n\n<operator-notes>\n${notes.map((note) => `- ${note}`).join("\n")}\n</operator-notes>`;
+	// Encode delimiters before promoting operator text into checkpoint context (p6/U1).
+	return `\n\n<operator-notes encoding="xml">\n${notes.map((note) => `- ${escapeOperatorNote(note)}`).join("\n")}\n</operator-notes>`;
 }
 
 function createFileOps(): FileOperations {
@@ -1101,7 +1117,7 @@ export async function compact(input: CompactInput): Promise<CompactResult> {
 		.join("\n\n---\n\n")
 		// The model sees the prior block inside <previous-context> and may echo it;
 		// the extracted notes below are the one authoritative copy.
-		.replace(/\n*<operator-notes>[\s\S]*?<\/operator-notes>\n*/g, "\n\n")
+		.replace(/\n*<operator-notes\b[^>]*>[\s\S]*?(?:<\/operator-notes\s*>|$)\n*/giu, "\n\n")
 		.trim()}${formatOperatorNotes(operatorNotes)}${formatFileOperations(fileOps)}${formatRecallableRefs(
 		input.entries,
 		cut.firstKeptEntryIndex,
