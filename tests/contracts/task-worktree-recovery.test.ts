@@ -172,7 +172,7 @@ describe("task worktree restart recovery", () => {
 		const done = createTaskWorktree(root, "run-discard-done", undefined, "merge");
 		writeFileSync(join(done.path, "w.txt"), "w\n");
 		applyTaskWorktree({ worktree: done, apply: "preserve" });
-		deepStrictEqual(discardTaskWorktree(done), { outcome: "discarded" });
+		deepStrictEqual(discardTaskWorktree(done), { outcome: "discarded", claimReleased: true });
 		ok(!existsSync(done.path) && !existsSync(markerPath(done)) && !branches().includes(done.branch));
 
 		const partial = createTaskWorktree(root, "run-discard-partial", undefined, "merge");
@@ -186,6 +186,12 @@ describe("task worktree restart recovery", () => {
 		ok(!existsSync(partial.path), "the worktree is gone");
 		ok(!existsSync(markerPath(partial)), "no claim is left for restart recovery to misread");
 		ok(branches().includes(partial.branch), "the branch holding the work is preserved");
+
+		// A branch already gone needs no `git branch -D`: the outcome is what the steps did.
+		const gone = createTaskWorktree(root, "run-discard-gone", undefined, "merge");
+		git(gone.path, "checkout", "-q", "--detach");
+		git(root, "branch", "-D", gone.branch);
+		deepStrictEqual(discardTaskWorktree(gone), { outcome: "discarded", claimReleased: true });
 	});
 
 	it("never touches a live owner", () => {

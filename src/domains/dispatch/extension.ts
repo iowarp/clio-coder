@@ -7498,7 +7498,7 @@ export function createDispatchBundle(
 							const discard = discardTaskWorktree(req.taskWorktree);
 							if (discard.outcome === "discarded") {
 								worktreeDiscarded = true;
-								claimReleased = true;
+								claimReleased = discard.claimReleased;
 							} else {
 								reportDispatchDiagnostic(`discard task worktree ${req.taskWorktree.runId}`, discard.error);
 								// Either nothing was removed and this settles as a keep, or the

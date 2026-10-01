@@ -701,48 +701,76 @@ export function applyTaskWorktree(input: {
 	return { ...receipt, applied: true };
 }
 
-export function cleanupTaskWorktree(worktree: TaskWorktree, deleteBranch: boolean): void {
-	assertOwnership(worktree);
+function removeWorktreeDirectory(worktree: TaskWorktree): void {
 	try {
 		git(worktree.root, ["worktree", "remove", "--force", worktree.path]);
 	} catch {
 		if (existsSync(worktree.path)) rmSync(worktree.path, { recursive: true, force: true });
 		git(worktree.root, ["worktree", "prune"]);
 	}
+}
+
+export function cleanupTaskWorktree(worktree: TaskWorktree, deleteBranch: boolean): void {
+	assertOwnership(worktree);
+	removeWorktreeDirectory(worktree);
 	if (deleteBranch) git(worktree.root, ["branch", "-D", worktree.branch]);
 	rmSync(claimPathFor(worktree.root, worktree.runId), { force: true });
 }
 
+function branchExists(worktree: TaskWorktree): boolean {
+	try {
+		git(worktree.root, ["rev-parse", "--verify", "--quiet", `refs/heads/${worktree.branch}`]);
+		return true;
+	} catch {
+		return false;
+	}
+}
+
 /** What an operator's discard of a task worktree actually removed. */
 export type TaskWorktreeDiscard =
-	| { outcome: "discarded" }
+	/** The worktree and the branch are gone; `claimReleased` is false only when the claim file could not be removed. */
+	| { outcome: "discarded"; claimReleased: boolean }
 	/** The worktree is gone but the branch is not; `claimReleased` says whether the ownership claim went with it. */
 	| { outcome: "branch_kept"; claimReleased: boolean; error: unknown }
 	/** Nothing was removed. */
 	| { outcome: "kept"; error: unknown };
 
 /**
- * Remove a task worktree and its branch for an operator who chose to, and say
- * which half happened when it fails. `cleanupTaskWorktree` removes the worktree
- * before it deletes the branch, so a failed `git branch -D` leaves a branch
- * with no worktree; the claim is released then, because nothing of Clio's is
- * left to guard and the operator holds the branch.
+ * Remove a task worktree and its branch for an operator who chose to, and report
+ * what each step actually did. The outcome is read from the steps, never
+ * inferred from the one that failed: a claim that cannot be removed after the
+ * branch is deleted is still a discard, and a branch that is already gone needs
+ * no `git branch -D`. A worktree gone with its branch kept releases the claim,
+ * because nothing of Clio's is left to guard and the operator holds the branch.
  */
 export function discardTaskWorktree(worktree: TaskWorktree): TaskWorktreeDiscard {
 	try {
-		cleanupTaskWorktree(worktree, true);
-		return { outcome: "discarded" };
-	} catch (error) {
-		if (existsSync(worktree.path)) return { outcome: "kept", error };
-		let claimReleased = true;
+		assertOwnership(worktree);
 		try {
-			cleanupTaskWorktree(worktree, false);
-		} catch {
-			// The claim stays; the closing settle or restart recovery reads it.
-			claimReleased = false;
+			removeWorktreeDirectory(worktree);
+		} catch (error) {
+			// A failed prune after the directory went leaves nothing on disk to keep.
+			if (existsSync(worktree.path)) return { outcome: "kept", error };
 		}
-		return { outcome: "branch_kept", claimReleased, error };
+	} catch (error) {
+		return { outcome: "kept", error };
 	}
+	let branchKept: { error: unknown } | null = null;
+	try {
+		git(worktree.root, ["branch", "-D", worktree.branch]);
+	} catch (error) {
+		if (branchExists(worktree)) branchKept = { error };
+	}
+	let claimReleased = true;
+	try {
+		rmSync(claimPathFor(worktree.root, worktree.runId), { force: true });
+	} catch {
+		// The claim stays; the closing settle or restart recovery reads it.
+		claimReleased = false;
+	}
+	return branchKept === null
+		? { outcome: "discarded", claimReleased }
+		: { outcome: "branch_kept", claimReleased, error: branchKept.error };
 }
 
 /**
