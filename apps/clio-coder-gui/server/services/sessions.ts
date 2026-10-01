@@ -15,7 +15,7 @@ export class SessionService {
 			raw = await this.reads.call("sessions.list", { cwd: workspace.path });
 		if (!Array.isArray(raw)) throw new AppProblem("unavailable", "Session history is unavailable.");
 		return raw.flatMap((row) => {
-			if (!row || typeof row !== "object") return [];
+			if (!row || typeof row !== "object" || row.hasModelTurn === false) return [];
 			const projected = Value.Clean(SessionSummary, { ...row, workspaceId });
 			return Value.Check(SessionSummary, projected) ? [projected] : [];
 		});

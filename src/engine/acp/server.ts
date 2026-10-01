@@ -3945,7 +3945,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 			}
 			start = decoded.start as number;
 		}
-		const history = workspaceHistory();
+		const history = workspaceHistory().filter((meta) => meta.hasModelTurn !== false);
 		const projected: AcpSessionInfo[] = [];
 		let budgetBytes = utf8Bytes(JSON.stringify({ sessions: [] }));
 		for (const meta of history.slice(start, start + 50)) {

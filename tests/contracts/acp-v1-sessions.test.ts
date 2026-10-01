@@ -615,3 +615,22 @@ test("ACP load retains the compaction row and its operator notes as a notice", a
 		await peer.stop();
 	}
 });
+
+test("ACP session listing hides empty failed turns before pagination", async () => {
+	const peer = fixture();
+	const empty = peer.history[0];
+	if (!empty) throw new Error("missing fixture session");
+	empty.hasModelTurn = false;
+	try {
+		await peer.call("initialize", { protocolVersion: 1 });
+		const result = (await peer.call("session/list", {})) as { sessions: Array<{ sessionId: string }> };
+		strictEqual(result.sessions.length, 50);
+		strictEqual(
+			result.sessions.some((row) => row.sessionId === "session-0"),
+			false,
+		);
+		strictEqual(result.sessions[0]?.sessionId, "session-1");
+	} finally {
+		await peer.stop();
+	}
+});
