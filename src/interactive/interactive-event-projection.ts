@@ -223,6 +223,13 @@ export function createInteractiveEventProjection(deps: InteractiveEventProjectio
 	remainingUnsubscribers.push(
 		deps.chat.onEvent((event) => {
 			const showProgress = deps.getSettings?.().interface.terminalProgress ?? false;
+			// A footer hint describes the turn that raised it. Warnings persist until
+			// dismissed, so without this the last turn's interruption or unverified
+			// notice outlived the successful turn that followed.
+			if (event.type === "agent_start") {
+				deps.dismissNotification("turn.interrupted");
+				deps.dismissNotification("finish.unverified");
+			}
 			if (event.type === "agent_start" && showProgress) deps.startTerminalProgress();
 			else if (event.type === "agent_end") {
 				deps.stopTerminalProgress();
