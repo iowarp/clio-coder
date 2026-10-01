@@ -1240,11 +1240,15 @@ async function ensureGitignore(cwd: string, input: RunBootstrapInput): Promise<v
 		content = "";
 	}
 	if (hasBlanketClioIgnore(content)) {
-		if (hasDynamicOnlyClioIgnore(content)) writeFileSync(gitignorePath, migrateClioGitignore(content), "utf8");
+		if (hasDynamicOnlyClioIgnore(content)) {
+			writeFileSync(gitignorePath, migrateClioGitignore(content), "utf8");
+			out(input.io, `  .gitignore: updated '${CLIO_GITIGNORE_LINE}' rule\n`);
+		}
 		return;
 	}
 	if (hasDynamicOnlyClioIgnore(content)) {
 		writeFileSync(gitignorePath, migrateClioGitignore(content), "utf8");
+		out(input.io, `  .gitignore: updated '${CLIO_GITIGNORE_LINE}' rule\n`);
 		return;
 	}
 	const confirmed = input.confirmGitignore ? await input.confirmGitignore() : false;
@@ -1259,6 +1263,7 @@ async function ensureGitignore(cwd: string, input: RunBootstrapInput): Promise<v
 		return;
 	}
 	writeFileSync(gitignorePath, migrateClioGitignore(content), "utf8");
+	out(input.io, `  .gitignore: added '${CLIO_GITIGNORE_LINE}'\n`);
 }
 
 function serializeBootstrapOutput(output: BootstrapStructuredOutput): string {
@@ -1749,7 +1754,7 @@ export async function runBootstrap(input: RunBootstrapInput = {}): Promise<RunBo
 		if (ignored.exitCode === 0) {
 			warn(
 				input.io,
-				"  warning: CLIO-CODER.md was written but is ignored by Git. Remove its matching ignore rule or add !CLIO-CODER.md to .gitignore if you want to version it; then git add CLIO-CODER.md. The ignore rules were not changed for this file.\n",
+				"  warning: CLIO-CODER.md was written but is ignored by Git. Remove its matching ignore rule or add !CLIO-CODER.md to .gitignore if you want to version it; then git add CLIO-CODER.md. The matching handbook ignore rule was left unchanged.\n",
 			);
 		}
 	}

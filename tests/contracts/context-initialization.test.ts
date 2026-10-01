@@ -26,12 +26,13 @@ it("warns when the generated handbook is ignored without changing its ignore rul
 		const cwd = join(isolated.dir, "repo");
 		mkdirSync(cwd);
 		assert.equal((await runCommandVector("git", ["init", "--quiet"], { cwd, workspaceRoot: cwd })).exitCode, 0);
-		const ignore = ".clio-coder/\nCLIO-CODER.md\n";
+		const ignore = "CLIO-CODER.md\n";
 		writeFileSync(join(cwd, ".gitignore"), ignore);
 		writeFileSync(join(cwd, "index.js"), "export const value = 1;\n");
 		let output = "";
 		const result = await runBootstrap({
 			cwd,
+			confirmGitignore: () => true,
 			io: {
 				stdout: (text) => {
 					output += text;
@@ -46,7 +47,9 @@ it("warns when the generated handbook is ignored without changing its ignore rul
 		assert.match(output, /!CLIO-CODER.md/u);
 		assert.match(output, /project instructions: included in full/u);
 		assert.match(output, /handbook files fully included; model tool support not checked/u);
-		assert.equal(readFileSync(join(cwd, ".gitignore"), "utf8"), ignore);
+		assert.match(output, /\.gitignore: added '\.clio-coder\/'/u);
+		assert.match(output, /matching handbook ignore rule was left unchanged/u);
+		assert.equal(readFileSync(join(cwd, ".gitignore"), "utf8"), `${ignore}\n.clio-coder/\n`);
 	} finally {
 		await isolated.restore();
 	}
