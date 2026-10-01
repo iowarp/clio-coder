@@ -1,4 +1,5 @@
-import { resolve } from "node:path";
+import { homedir } from "node:os";
+import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { ToolNames } from "../../core/tool-names.js";
 import { isProjectVerifierCheckId, isVerificationScriptName } from "../../core/verification-scripts.js";
 import { effectiveToolCall, expandChainMessages } from "../../tools/surface.js";
@@ -128,7 +129,12 @@ export function assessFinishContract(input: FinishContractInput): FinishContract
 		return { kind: "ok", reason: "no_mutation", evidence: [], mutatedPaths: touchedPaths };
 	}
 	const unchanged = input.unchangedPaths;
-	const mutatedPaths = unchanged ? touchedPaths.filter((path) => !unchanged.has(path)) : touchedPaths;
+	// The contract guards workspace state. A note written outside the workspace
+	// is not a code change that needs validation evidence.
+	const inWorkspace = input.workspaceRoot
+		? touchedPaths.filter((path) => isWithinWorkspace(path, input.workspaceRoot as string))
+		: touchedPaths;
+	const mutatedPaths = unchanged ? inWorkspace.filter((path) => !unchanged.has(path)) : inWorkspace;
 	if (mutatedPaths.length === 0) {
 		return { kind: "ok", reason: "no_net_mutation", evidence: [], mutatedPaths };
 	}
@@ -209,6 +215,14 @@ export function assessFinishContract(input: FinishContractInput): FinishContract
 		evidence: [],
 		mutatedPaths,
 	};
+}
+
+/** Relative targets resolve against the workspace; `~` and absolute paths are judged where they land. */
+function isWithinWorkspace(path: string, workspaceRoot: string): boolean {
+	const root = resolve(workspaceRoot);
+	const target = path === "~" || path.startsWith("~/") ? join(homedir(), path.slice(2)) : resolve(root, path);
+	const rel = relative(root, target);
+	return rel === "" || (rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel));
 }
 
 function acceptanceCheckPassed(
@@ -604,9 +618,16 @@ function successfulToolResultId(entry: unknown): string | null {
 	const payload = asRecord(record.payload);
 	if (payload === null) return null;
 	if (payload.isError === true || payload.error === true) return null;
+	// A call the safety rails refused or the registry settled as an error ran
+	// nothing. The persisted verdict says so even when `isError` is false: a
+	// denied write is not a change, and a denied test run is not validation.
+	if (payload.outcome === "blocked" || payload.outcome === "error" || typeof payload.blockReason === "string")
+		return null;
 	const result = asRecord(payload.result);
 	const details = asRecord(result?.details);
 	if (result?.kind === "error" || details?.kind === "error") return null;
+	const chainAdmission = asRecord(details?.chainAdmission);
+	if (chainAdmission?.outcome === "blocked" || chainAdmission?.outcome === "error") return null;
 	if (typeof details?.exitCode === "number" && details.exitCode !== 0) return null;
 	return stringFromFirst(payload, ["toolCallId", "tool_call_id", "id"]);
 }
