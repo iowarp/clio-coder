@@ -611,6 +611,18 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 					return blockDecision(base, blockInput);
 				}
 			}
+			const outsideReplacement = outsideExistingTypedMutationTarget(call, cwd);
+			if (outsideReplacement !== null) {
+				const input = {
+					ruleId: "outside-file-replacement",
+					reasonCode: "outside-file-replacement",
+					reasons: [
+						`Existing file '${outsideReplacement}' lies outside the workspace; replacing its contents requires operator approval`,
+					],
+					policySource: "builtin-classifier" as const,
+				};
+				return posture === "confirmed" ? allowDecision(base, input) : askDecision(base, input);
+			}
 
 			if (
 				scannedCommand !== null &&
@@ -1975,6 +1987,20 @@ function pathArg(args: Record<string, unknown> | undefined): string | null {
 	if (!args) return null;
 	const candidate = args.path ?? args.file_path ?? args.filePath;
 	return typeof candidate === "string" && candidate.length > 0 ? candidate : null;
+}
+
+/** Write and edit can replace an existing file outside the checkout. */
+function outsideExistingTypedMutationTarget(call: ClassifierCall, workspaceRoot: string): string | null {
+	if (call.tool !== ToolNames.Write && call.tool !== ToolNames.Edit) return null;
+	const target = pathArg(call.args);
+	if (target === null) return null;
+	const resolved = canonicalizeRawPath(target, process.cwd());
+	if (resolved === null || isUnderOrSame(resolved, workspaceRoot)) return null;
+	try {
+		return statSync(resolved).isFile() ? resolved : null;
+	} catch {
+		return null;
+	}
 }
 
 function cwdArg(args: Record<string, unknown> | undefined, fallback: string): string {

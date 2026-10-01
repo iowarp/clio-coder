@@ -46,6 +46,23 @@ describe("symlink escape admission", () => {
 		deepStrictEqual(classification.reasons, [`write-path-outside-cwd: ${landing}`], path);
 	}
 
+	it("asks before a typed write or edit replaces an existing outside file at yolo", () => {
+		const outside = join(base, "existing.txt");
+		writeFileSync(outside, "keep\n");
+		symlinkSync(outside, join(root, "data", "outside.txt"));
+		const policy = createSafetyPolicyEngine({ cwd: root });
+		for (const [tool, path] of [
+			[ToolNames.Write, outside],
+			[ToolNames.Edit, "data/outside.txt"],
+		] as const) {
+			const call = { tool, args: { path } };
+			strictEqual(policy.evaluate(call, "yolo").kind, "ask", tool);
+			strictEqual(policy.evaluate(call, "yolo").reasonCode, "outside-file-replacement", tool);
+			strictEqual(policy.evaluate(call, "confirmed").kind, "allow", tool);
+		}
+		strictEqual(policy.evaluate({ tool: ToolNames.Write, args: { path: join(base, "new.txt") } }, "yolo").kind, "allow");
+	});
+
 	it("classifies a write through a dangling escaping link as out of the workspace", () => {
 		symlinkSync("../../escape.txt", join(root, "data", "out.txt"));
 		strictEqual(canonicalizePath(join(root, "data", "out.txt")), join(base, "escape.txt"));
