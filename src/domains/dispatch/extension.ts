@@ -71,6 +71,7 @@ import {
 	settleTaskWorktree,
 	shareTaskWorktreeDependencies,
 	snapshotTaskWorktree,
+	taskWorktreeBaseDiff,
 	WORKTREE_CHANGED_SINCE_PREVIEW,
 } from "../../tools/task-worktree.js";
 import { truncateUtf8 } from "../../tools/truncate-utf8.js";
@@ -276,7 +277,7 @@ import {
 	type MergeCardOutcome,
 	mergeCardCauseNote,
 } from "./merge-card.js";
-import { mergeGateVerdict, mergeWithheldDetail } from "./merge-gate.js";
+import { mergeGateVerdict, mergeWithheldDetail, removedTestCases } from "./merge-gate.js";
 import { recoverOrphanReceipts } from "./orphan-recovery.js";
 import {
 	type RunTerminationEvidence,
@@ -7418,6 +7419,7 @@ export function createDispatchBundle(
 								branch: req.taskWorktree.branch,
 								task: req.task,
 								executedCheckingCalls: countCheckingCalls(toolStats),
+								removedTests: removedTestCases(taskWorktreeBaseDiff(req.taskWorktree) ?? ""),
 							}
 						: null;
 				const withheldDetail = mergeGateInput === null ? null : mergeWithheldDetail(mergeGateInput);

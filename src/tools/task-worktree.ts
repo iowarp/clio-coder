@@ -611,6 +611,26 @@ export function snapshotTaskWorktree(worktree: TaskWorktree, apply: TaskWorktree
 	};
 }
 
+const BASE_DIFF_MAX_BYTES = 8 * 1024 * 1024;
+
+/**
+ * Zero-context text diff of the worktree's tracked changes against its base,
+ * for the merge gate to read removed lines from. Null when git cannot produce
+ * it within the byte bound, so a huge or unreadable diff never blocks a run.
+ */
+export function taskWorktreeBaseDiff(worktree: TaskWorktree): string | null {
+	try {
+		return execFileSync("git", ["-C", worktree.path, "diff", "--no-color", "--no-ext-diff", "-U0", worktree.base], {
+			stdio: ["ignore", "pipe", "pipe"],
+			timeout: 30_000,
+			maxBuffer: BASE_DIFF_MAX_BYTES,
+		}).toString("utf8");
+	} catch {
+		// Fail open: the gate is an extra signal, and its other checks still run.
+		return null;
+	}
+}
+
 function committedReceipt(worktree: TaskWorktree, commit: string, apply: TaskWorktreeApply): TaskWorktreeReceipt {
 	return {
 		path: worktree.path,

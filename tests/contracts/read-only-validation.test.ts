@@ -2,7 +2,7 @@ import { deepStrictEqual, doesNotMatch, match, strictEqual } from "node:assert/s
 import { readFileSync } from "node:fs";
 import { it } from "node:test";
 import { resultContractShape, validateResultContract } from "../../src/domains/agents/result-contract.js";
-import { mergeWithheldDetail } from "../../src/domains/dispatch/merge-gate.js";
+import { mergeWithheldDetail, removedTestCases } from "../../src/domains/dispatch/merge-gate.js";
 import { typedValidationFactsFromVerifyCalls } from "../../src/domains/dispatch/receipt-findings.js";
 import { groundClaimedValidations } from "../../src/domains/dispatch/validation-grounding.js";
 import { createRunEffectsRecorder } from "../../src/domains/safety/run-effects.js";
@@ -201,4 +201,49 @@ it("withholds requested validation even when the worker omits declaredChecks", (
 		mergeWithheldDetail({ ...input, task: "Do not run the tests, but run lint checks." }) ?? "",
 		/requested validation/u,
 	);
+});
+
+it("withholds a verified merge whose diff replaces an existing test, but not an edited body", () => {
+	const header = (path: string) => `diff --${"git"} a/${path} b/${path}`;
+	const replaced = [
+		header("test/duration.test.js"),
+		"--- a/test/duration.test.js",
+		"+++ b/test/duration.test.js",
+		"@@ -1,2 +1,2 @@",
+		'-import { formatDuration, totalDuration } from "../src/duration.js";',
+		'+import { formatDuration, parseDuration } from "../src/duration.js";',
+		"@@ -9,3 +9,3 @@",
+		'-test("totalDuration sums every part", () => {',
+		'+test("parseDuration parses concatenated units", () => {',
+	].join("\n");
+	deepStrictEqual(removedTestCases(replaced), ['test/duration.test.js: test("totalDuration sums every part", () => {']);
+	const edited = [
+		header("test/duration.test.js"),
+		"@@ -9,3 +9,3 @@",
+		"-  assert.equal(1, 1);",
+		"+  assert.equal(2, 2);",
+	].join("\n");
+	deepStrictEqual(removedTestCases(edited), []);
+	const deleted = [
+		header("tests/test_parse.py"),
+		"deleted file mode 100644",
+		"--- a/tests/test_parse.py",
+		"+++ /dev/null",
+		"@@ -1,2 +0,0 @@",
+		"-def test_parse():",
+		"-    pass",
+	].join("\n");
+	deepStrictEqual(removedTestCases(deleted), ["tests/test_parse.py (file removed)"]);
+	const input = {
+		quality: "pass",
+		hostStatus: "verified",
+		contract: null,
+		output: null,
+		branch: "clio-coder/task/dropped",
+		removedTests: removedTestCases(replaced),
+	};
+	const detail = mergeWithheldDetail(input) ?? "";
+	match(detail, /removes existing test cases.*totalDuration sums every part/u);
+	match(detail, /if removing those tests was intended/u);
+	strictEqual(mergeWithheldDetail({ ...input, removedTests: [] }), null);
 });
