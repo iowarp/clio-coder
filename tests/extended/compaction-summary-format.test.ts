@@ -205,7 +205,7 @@ describe("compaction checkpoint format and semantic replay", () => {
 				keepRecentTokens: 100,
 				summarize: async () => ({ text: syntheticCompactionSummary("Read the layout.") }),
 			});
-			ok(result.summary.includes("<operator-notes>\n- Remember: the deploy codeword is MARBLE-OTTER."));
+			ok(result.summary.includes('<operator-notes encoding="xml">\n- Remember: the deploy codeword is MARBLE-OTTER.'));
 			ok(!result.summary.includes("Then read src/ layout"));
 		} finally {
 			provider.unregister();
