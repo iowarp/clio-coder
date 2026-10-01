@@ -273,6 +273,53 @@ export function extractCommandWriteTargets(command: string): string[] {
 	return targets.filter(isInterestingWriteTarget);
 }
 
+/** One simple command: its executable, the words after it, and the files its redirects truncate. */
+export interface ShellCommandStep {
+	/** Lowercased basename of the command word, or "" for a redirect with no command. */
+	executable: string;
+	/** Literal words after the command word, redirections removed. */
+	args: string[];
+	/** Targets of `>`-style redirects that replace the file's contents. `>>` is not listed. */
+	truncatingRedirects: string[];
+}
+
+/**
+ * The simple commands of a command line in order, following `sh -c` scripts and
+ * substitutions the way the write and delete scanners do. Presentation callers
+ * read this instead of re-tokenizing, so the words they describe are the words
+ * admission already scanned.
+ */
+export function shellCommandSteps(command: string): ShellCommandStep[] {
+	const steps: ShellCommandStep[] = [];
+	for (const segment of expandedShellSegments(command)) {
+		const truncatingRedirects: string[] = [];
+		for (let index = 0; index < segment.length - 1; index += 1) {
+			const operator = segment[index];
+			if (operator === undefined || operator.value === ">>" || operator.value === "&>>") continue;
+			const target = redirectWriteTarget(operator, segment[index + 1]);
+			if (target !== null && isInterestingWriteTarget(target)) truncatingRedirects.push(target);
+		}
+		const argv = shellCommandArguments(segment);
+		const commandIndex = commandTokenIndex(argv);
+		if (commandIndex === null) {
+			if (truncatingRedirects.length > 0) steps.push({ executable: "", args: [], truncatingRedirects });
+			continue;
+		}
+		steps.push({
+			executable: basenameToken(argv[commandIndex]),
+			args: argv.slice(commandIndex + 1),
+			truncatingRedirects,
+		});
+	}
+	return steps;
+}
+
+/** File operands of `sed -i`, or null when these `sed` arguments do not edit in place. */
+export function sedInPlaceOperands(args: ReadonlyArray<string>): string[] | null {
+	const segment = ["sed", ...args];
+	return hasSedInPlaceFlag(segment, 0) ? sedFileOperands(segment, 0) : null;
+}
+
 /** Shells whose `-c` argument is a script this scanner has to read as a command line. */
 const INNER_SHELLS: ReadonlySet<string> = new Set(["sh", "bash", "zsh", "dash", "ksh"]);
 
