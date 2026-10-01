@@ -114,7 +114,11 @@ function claimedValidationNames(output: string | null): string[] {
 function isExecuted(name: string, executed: ReadonlySet<string>): boolean {
 	const claim = claimIdentity(name);
 	if (claim.length === 0) return true;
+	// A report may name the typed verifier itself. Its successful tool result
+	// is recorded separately from the resolved shell command it ran.
+	if (claim === "verify" || claim === "tool:verify") return executed.has("tool:verify");
 	for (const command of executed) {
+		if (command === "tool:verify") continue;
 		const ran = normalize(command);
 		if (ran.length === 0) continue;
 		const contains = (text: string, command: string) => {

@@ -616,9 +616,10 @@ export function adaptRunReceiptValidationStatus(
 		return attributed("failed", receiptSource(receipt), { kind: "validator", id: "receipt-quality" }, artifacts);
 	}
 	if (
-		(receipt.validationGrounding?.ungrounded.length ?? 0) > 0 ||
+		receipt.validationGrounding?.basis === "no-command-executed" &&
+		((receipt.validationGrounding?.ungrounded.length ?? 0) > 0 ||
 		(receipt.validationGrounding !== undefined &&
-			receipt.validationGrounding.claimed > receipt.validationGrounding.grounded)
+			receipt.validationGrounding.claimed > receipt.validationGrounding.grounded))
 	) {
 		return attributed("ungrounded", receiptSource(receipt), { kind: "validator", id: "command-grounding" }, artifacts);
 	}

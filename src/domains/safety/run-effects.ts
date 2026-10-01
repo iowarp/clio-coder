@@ -260,6 +260,7 @@ export function createRunEffectsRecorder(cwd: string, options: RunEffectsRecorde
 			for (const target of effects.paths) mutatedPaths.add(target);
 			if (effects.validationCommand !== null) validationCommands.add(effects.validationCommand);
 			if (effects.verificationCommand !== null) verificationCommands.add(effects.verificationCommand);
+			if (effects.tool === ToolNames.Verify) verificationCommands.add("tool:verify");
 		},
 		checkOutcome(toolCallId, outcome) {
 			if (checkingCalls.has(toolCallId)) checkingCalls.set(toolCallId, outcome);
