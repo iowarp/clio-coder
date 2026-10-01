@@ -45,6 +45,10 @@ ${font("Newsreader", "480", "news-italic-480", "italic")}
 ${theme("light")}
 	--motion-fast: ${design.motion.fast};
 	--motion-base: ${design.motion.base};
+	--motion-entry: ${design.motion.entry};
+	--motion-feedback: ${design.motion.feedback};
+	--motion-distance: ${design.motion.distance};
+	--motion-stagger: ${design.motion.stagger};
 	--ease-standard: ${design.motion.ease};
 	--ease-emphasis: ${design.motion.ease};
 }
