@@ -41,6 +41,7 @@ import type { HealthRow } from "./health.js";
 import { isLive, LIVE_GLYPHS, LIVE_TONES, type LiveStatus, livePlaceholder, liveStatus } from "./live-status.js";
 import { MessageActions, TurnOutcome } from "./message-actions.js";
 import { ReasoningDisclosure } from "./Reasoning.js";
+import { TurnChanges } from "./TurnChanges.js";
 import { describeTool } from "./tool-presentation.js";
 import { type ChatTurn, sameTurnView } from "./turns.js";
 import "./chat-turn.css";
@@ -228,6 +229,7 @@ export const ChatTurnView = memo(function ChatTurnView({
 								);
 						}
 					})}
+					{turn.settled ? <TurnChanges items={turn.items} workspaceRoot={workspaceRoot} /> : null}
 				</div>
 				{/* One quiet line closes the turn: its outcome, then what can be done with the response. */}
 				<div className="chat-response__footer">

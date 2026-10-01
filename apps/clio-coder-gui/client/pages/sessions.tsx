@@ -10,19 +10,13 @@ import { sessionBuffer } from "../api/sessions.js";
 import { ApprovalBanner, pendingPermission } from "../chat/Approval.js";
 import { ChatTurnView } from "../chat/ChatTurn.js";
 import { Composer, fillComposer } from "../chat/Composer.js";
-import {
-	CONTEXT_WARNING_LABEL,
-	EMPTY_EYEBROW,
-	EMPTY_GLYPH,
-	EMPTY_HEADING,
-	placeHealthRows,
-	STARTER_PROMPTS,
-	TRUNCATION_NOTE,
-} from "../chat/chat-turn.js";
+import { CONTEXT_WARNING_LABEL, placeHealthRows, STARTER_PROMPTS, TRUNCATION_NOTE } from "../chat/chat-turn.js";
 import { LiveWorkers, workerCount } from "../chat/FleetStrip.js";
 import { foldFleetRuns, isLiveRun } from "../chat/fleet-facts.js";
 import { type HealthRow, type HealthSummary, summarizeHealth } from "../chat/health.js";
 import { Interview } from "../chat/Interview.js";
+import { PaneContext } from "../chat/pane-context.js";
+import type { PaneView } from "../chat/pane-model.js";
 import { usePaneState } from "../chat/pane-state.js";
 import { routeFacts } from "../chat/route.js";
 import { PaneToggles, SessionPane } from "../chat/SessionPane.js";
@@ -34,7 +28,7 @@ import { StatusMark, type StatusTone } from "../design/status.js";
 import { useShortcut } from "../interaction/use-shortcut.js";
 import { JumpToLatest } from "../render/FollowLatest.js";
 import { useFollowLatest } from "../render/follow-latest.js";
-import { ClioPulse } from "../shell/ClioMark.js";
+import { ClioLogo, ClioPulse } from "../shell/ClioMark.js";
 import { Menu, MenuItem } from "../shell/Menu.js";
 import { taskTitle } from "../shell/shell-model.js";
 import { TopBar } from "../shell/TopBar.js";
@@ -300,18 +294,19 @@ const NO_ROWS: readonly HealthRow[] = [];
 function EmptyTranscript({ sessionId }: { sessionId: string }) {
 	return (
 		<div className="chat-empty">
-			<span className="chat-empty__glyph" aria-hidden="true">
-				{EMPTY_GLYPH}
-			</span>
-			<p className="eyebrow">{EMPTY_EYEBROW}</p>
-			<h2>{EMPTY_HEADING}</h2>
-			<div className="chat-empty__starters">
+			<ClioLogo size={40} />
+			<h2>
+				What are we <em>working on</em>?
+			</h2>
+			<ul className="chat-empty__starters" aria-label="Ways to start">
 				{STARTER_PROMPTS.map((prompt) => (
-					<button key={prompt} type="button" onClick={() => fillComposer(sessionId, prompt)}>
-						{prompt}
-					</button>
+					<li key={prompt}>
+						<button type="button" onClick={() => fillComposer(sessionId, prompt)}>
+							{prompt}
+						</button>
+					</li>
 				))}
-			</div>
+			</ul>
 		</div>
 	);
 }
@@ -353,6 +348,7 @@ function SessionView({ client, id }: { client: Client; id: string }) {
 	const navigate = useNavigate();
 	const ids = { changes: useId(), terminal: useId(), pane: useId() };
 	const pane = usePaneState(ids.pane);
+	const paneActions = useMemo(() => ({ show: (view: PaneView) => pane.show(view, ids.pane) }), [pane.show, ids.pane]);
 	useShortcut("sessionPanel", () => (pane.open ? pane.close() : pane.show(pane.view, ids.pane)));
 	useShortcut("focusComposer", () => document.querySelector<HTMLTextAreaElement>(".composer__field")?.focus());
 	useShortcut("agents", () => pane.show("agents", ids.pane));
@@ -474,157 +470,155 @@ function SessionView({ client, id }: { client: Client; id: string }) {
 							? { tone: "failed", label: "Last turn failed" }
 							: null;
 	return (
-		<section
-			className="conversation"
-			data-inspector={paneOpen ? "open" : "closed"}
-			data-pane={paneOpen ? "open" : "closed"}
-		>
-			<div className="conversation__main">
-				<TopBar title={title} titleLabel={title}>
-					<Link
-						className="wb-chip"
-						to={`/workspaces/${snapshot.workspaceId}/sessions`}
-						title={workspaceRoot ? `All tasks in ${workspaceRoot}` : "All tasks in this project"}
-					>
-						<Icon name="folder" />
-						<span>{workspaceName}</span>
-					</Link>
-					{chip ? (
-						<p className="wb-chip wb-chip--status" data-tone={chip.tone} role="status">
-							{chip.tone === "working" ? <ClioPulse size={14} /> : null}
-							<span>{chip.label}</span>
-							{snapshot.recoveredOrphan ? <span>· recovered after a server interruption</span> : null}
-						</p>
-					) : null}
-					<span className="wb-bar__spacer" />
-					<div className="wb-bar__end">
-						<PaneToggles
-							client={client}
-							sessionId={snapshot.id}
-							workspaceRoot={workspaceRoot}
-							open={pane.open}
-							view={pane.view}
-							ids={ids}
-							onToggle={pane.toggle}
-						/>
-						<Menu label="Task actions">
-							<MenuItem icon="sliders" onClick={() => void navigate(`/settings?workspace=${snapshot.workspaceId}`)}>
-								Harness settings
-							</MenuItem>
-							<MenuItem icon="folder" onClick={() => void navigate(`/workspaces/${snapshot.workspaceId}/sessions`)}>
-								All tasks in {workspaceName}
-							</MenuItem>
-							<MenuItem icon="close" tone="danger" disabled={!canClose || close.isPending} onClick={closeSession}>
-								Close task
-							</MenuItem>
-						</Menu>
-					</div>
-				</TopBar>
-				<div className="conversation__notices">
-					<SessionHealth summary={health} />
-				</div>
-				<div className="conversation__approval">
-					{connection === "Reconnecting…" || connection === "Not connected" || session.error ? (
-						<div className="conversation__connection" role="status">
-							<strong>{session.error ? "Conversation refresh failed." : "Live updates are reconnecting."}</strong>
-							<span>
-								{session.error
-									? session.error.message
-									: "The conversation below is the last state received. New activity will appear when the connection returns."}
-							</span>
-							<button type="button" disabled={session.isFetching} onClick={() => void session.refetch()}>
-								{session.isFetching ? "Refreshing…" : "Refresh conversation"}
-							</button>
-						</div>
-					) : null}
-					{snapshot.state === "unknown" || snapshot.state === "failed" || snapshot.state === "closed" ? (
-						<div className="conversation__recovery" role="status">
-							<strong>
-								{snapshot.state === "closed"
-									? "This task is closed."
-									: snapshot.state === "unknown"
-										? "Clio Coder is no longer connected to this session."
-										: "This session could not continue."}
-							</strong>
-							<span>The recorded conversation is still available below.</span>
-							<Link to={`/workspaces/${snapshot.workspaceId}/sessions`}>Reopen it from the task list →</Link>
-						</div>
-					) : null}
-					<ApprovalBanner client={client} session={snapshot} />
-				</div>
-				<div className="chat-transcript" ref={scroll}>
-					<div className="chat-transcript__content">
-						{snapshot.timelineTruncated ? <p className="trace-warning">{TRUNCATION_NOTE}</p> : null}
-						{notices.leading.length > 0 ? (
-							<ul className="turn-health">
-								{notices.leading.map((row) => (
-									<li key={row.id}>
-										<StatusMark tone={row.tone} label={row.label} {...(row.detail === null ? {} : { detail: row.detail })} />
-									</li>
-								))}
-							</ul>
+		<PaneContext.Provider value={paneActions}>
+			<section className="conversation" data-pane={paneOpen ? "open" : "closed"}>
+				<div className="conversation__main">
+					<TopBar title={title} titleLabel={title}>
+						<Link
+							className="wb-chip"
+							to={`/workspaces/${snapshot.workspaceId}/sessions`}
+							title={workspaceRoot ? `All tasks in ${workspaceRoot}` : "All tasks in this project"}
+						>
+							<Icon name="folder" />
+							<span>{workspaceName}</span>
+						</Link>
+						{chip ? (
+							<p className="wb-chip wb-chip--status" data-tone={chip.tone} role="status">
+								{chip.tone === "working" ? <ClioPulse size={14} /> : null}
+								<span>{chip.label}</span>
+								{snapshot.recoveredOrphan ? <span>· recovered after a server interruption</span> : null}
+							</p>
 						) : null}
-						{turns.map((item) => (
-							<ChatTurnView
-								key={item.turnId}
-								turn={item}
-								row={turnRows.get(item.turnId)}
+						<span className="wb-bar__spacer" />
+						<div className="wb-bar__end">
+							<PaneToggles
 								client={client}
-								session={snapshot}
-								pending={pending}
-								pendingPermissionId={pending?.id ?? null}
-								nowMs={item.settled ? 0 : now}
-								stopping={false}
-								notices={notices.after.get(item.turnId) ?? NO_ROWS}
+								sessionId={snapshot.id}
 								workspaceRoot={workspaceRoot}
-								liveWorkers={item.settled ? 0 : liveWorkers}
+								open={pane.open}
+								view={pane.view}
+								ids={ids}
+								onToggle={pane.toggle}
 							/>
-						))}
-						<LiveWorkers
+							<Menu label="Task actions">
+								<MenuItem icon="sliders" onClick={() => void navigate(`/settings?workspace=${snapshot.workspaceId}`)}>
+									Harness settings
+								</MenuItem>
+								<MenuItem icon="folder" onClick={() => void navigate(`/workspaces/${snapshot.workspaceId}/sessions`)}>
+									All tasks in {workspaceName}
+								</MenuItem>
+								<MenuItem icon="close" tone="danger" disabled={!canClose || close.isPending} onClick={closeSession}>
+									Close task
+								</MenuItem>
+							</Menu>
+						</div>
+					</TopBar>
+					<div className="conversation__notices">
+						<SessionHealth summary={health} />
+					</div>
+					<div className="conversation__approval">
+						{connection === "Reconnecting…" || connection === "Not connected" || session.error ? (
+							<div className="conversation__connection" role="status">
+								<strong>{session.error ? "Conversation refresh failed." : "Live updates are reconnecting."}</strong>
+								<span>
+									{session.error
+										? session.error.message
+										: "The conversation below is the last state received. New activity will appear when the connection returns."}
+								</span>
+								<button type="button" disabled={session.isFetching} onClick={() => void session.refetch()}>
+									{session.isFetching ? "Refreshing…" : "Refresh conversation"}
+								</button>
+							</div>
+						) : null}
+						{snapshot.state === "unknown" || snapshot.state === "failed" || snapshot.state === "closed" ? (
+							<div className="conversation__recovery" role="status">
+								<strong>
+									{snapshot.state === "closed"
+										? "This task is closed."
+										: snapshot.state === "unknown"
+											? "Clio Coder is no longer connected to this session."
+											: "This session could not continue."}
+								</strong>
+								<span>The recorded conversation is still available below.</span>
+								<Link to={`/workspaces/${snapshot.workspaceId}/sessions`}>Reopen it from the task list →</Link>
+							</div>
+						) : null}
+						<ApprovalBanner client={client} session={snapshot} />
+					</div>
+					<div className="chat-transcript" ref={scroll}>
+						<div className="chat-transcript__content">
+							{snapshot.timelineTruncated ? <p className="trace-warning">{TRUNCATION_NOTE}</p> : null}
+							{notices.leading.length > 0 ? (
+								<ul className="turn-health">
+									{notices.leading.map((row) => (
+										<li key={row.id}>
+											<StatusMark tone={row.tone} label={row.label} {...(row.detail === null ? {} : { detail: row.detail })} />
+										</li>
+									))}
+								</ul>
+							) : null}
+							{turns.map((item) => (
+								<ChatTurnView
+									key={item.turnId}
+									turn={item}
+									row={turnRows.get(item.turnId)}
+									client={client}
+									session={snapshot}
+									pending={pending}
+									pendingPermissionId={pending?.id ?? null}
+									nowMs={item.settled ? 0 : now}
+									stopping={false}
+									notices={notices.after.get(item.turnId) ?? NO_ROWS}
+									workspaceRoot={workspaceRoot}
+									liveWorkers={item.settled ? 0 : liveWorkers}
+								/>
+							))}
+							<LiveWorkers
+								client={client}
+								sessionId={snapshot.id}
+								sessionOpen={snapshot.state === "open"}
+								fleet={snapshot.fleet}
+							/>
+							{turns.length === 0 ? <EmptyTranscript sessionId={snapshot.id} /> : null}
+						</div>
+					</div>
+					{/* `.jump-anchor` is the positioned, zero-height parent the pill is laid out against. Without
+				    it the pill resolves against the viewport and pushes the document sideways. */}
+					<div className="jump-anchor">
+						<JumpToLatest follow={follow} />
+					</div>
+					<div className="conversation__dock">
+						{close.error ? <p role="alert">{close.error.message}</p> : null}
+						<Composer
 							client={client}
 							sessionId={snapshot.id}
-							sessionOpen={snapshot.state === "open"}
-							fleet={snapshot.fleet}
+							sessionState={snapshot.state}
+							initialFocus={snapshot.timeline.length === 0}
+							runningTurnId={turn?.status === "running" ? turn.id : null}
+							route={route}
 						/>
-						{turns.length === 0 ? <EmptyTranscript sessionId={snapshot.id} /> : null}
 					</div>
-				</div>
-				{/* `.jump-anchor` is the positioned, zero-height parent the pill is laid out against. Without
-				    it the pill resolves against the viewport and pushes the document sideways. */}
-				<div className="jump-anchor">
-					<JumpToLatest follow={follow} />
-				</div>
-				<div className="conversation__dock">
-					{close.error ? <p role="alert">{close.error.message}</p> : null}
-					<Composer
+					<Interview
 						client={client}
 						sessionId={snapshot.id}
-						sessionState={snapshot.state}
-						initialFocus={snapshot.timeline.length === 0}
-						runningTurnId={turn?.status === "running" ? turn.id : null}
-						route={route}
+						sessionOpen={snapshot.state === "open"}
+						capabilities={capabilities.data}
 					/>
 				</div>
-				<Interview
+				<SessionPane
+					open={pane.open}
+					onClose={pane.close}
 					client={client}
 					sessionId={snapshot.id}
-					sessionOpen={snapshot.state === "open"}
-					capabilities={capabilities.data}
+					title={title}
+					workspaceRoot={workspaceRoot}
+					nowMs={now}
+					view={pane.view}
+					onViewChange={pane.setView}
+					onCloseSession={closeSession}
+					closing={close.isPending}
 				/>
-			</div>
-			<SessionPane
-				open={pane.open}
-				onClose={pane.close}
-				client={client}
-				sessionId={snapshot.id}
-				title={title}
-				workspaceRoot={workspaceRoot}
-				nowMs={now}
-				view={pane.view}
-				onViewChange={pane.setView}
-				onCloseSession={closeSession}
-				closing={close.isPending}
-			/>
-		</section>
+			</section>
+		</PaneContext.Provider>
 	);
 }
