@@ -138,7 +138,7 @@ it runs detached from it.
 | Trigger | Behavior |
 | --- | --- |
 | Interval | After `context.memory.cadenceToolCalls` completed tools since the last prompted step; default 10. This is the nondeterministic/citation-gated path. |
-| Tool-error streak | Two consecutive error outcomes. A successful tool resets the streak. |
+| Tool-error streak | Two consecutive error outcomes. A successful tool resets the streak. Memory stays silent for a turn whose operator message asks for a repeat (`again`, `twice`, `retry`, `re-run`, `once more` and similar), because the repeat is the task, so that turn gets neither this trigger nor the repeated-failure annotation. |
 | Loop signal | Reuses the orchestrator loop guard's verdict; it does not infer a second competing loop detector. |
 | Repeated failure | The rules tier records failed operation fingerprints and annotates the failing tool result once the same failure appears twice in the bounded trajectory. |
 | Post-compaction | The first turn start after compaction restores status and knowledge once, without a model call, because compaction is precisely where execution facts leave the active window. |
@@ -191,6 +191,12 @@ Two consequences follow:
 
 `/memory` shows whether a step is in flight, and the footer's memory row shows
 `working` while one is running.
+
+A prompted reminder over a trajectory that contains a failed tool call needs evidence
+of a repeat: one operation fingerprint seen at least twice with an error among them, not
+counting a `read` of a guessed path that does not exist. Without that, and without
+restoring an unchanged bank fact, the step is recorded as `gated` with reason
+`no_repeated_failure` and stays invisible.
 
 The error-streak, loop, repeated-failure, and post-compaction paths are
 deterministic. A prompted reminder from one of those paths may be uncited. An
