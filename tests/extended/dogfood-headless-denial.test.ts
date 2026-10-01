@@ -66,7 +66,7 @@ test("headless denied asks preserve the actual cause/rule, final denial and boun
 		ok(error instanceof Error);
 		ok(error.message.startsWith(HEADLESS_PERMISSION_DENIED_MARKER));
 		match(error.message, /rule: bash-hidden-content/);
-		match(error.message, /shell variables or interpreter source hide paths/);
+		match(error.message, /shell variables, ANSI-C or locale quoting, or interpreter source hide paths/);
 		match(error.message, /denied|not approved/);
 		doesNotMatch(error.message, /hard block|is parked|resumeParked|awaiting approval/);
 		ok(error.message.endsWith(pivot));
