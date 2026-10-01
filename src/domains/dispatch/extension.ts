@@ -2140,8 +2140,9 @@ function effectiveToolNames(
 	target: ResolvedTarget,
 	/**
 	 * True when this run declares write roots. The confinement rail refuses
-	 * unconfined execution at admission. Keep bash and verify visible so a
-	 * sandboxed check can run and a blocked check yields explicit evidence.
+	 * shell, verify, and dispatch by name, so offering them would hand the
+	 * model a tool whose every call is refused; it spends budget discovering
+	 * that and reads the refusal as something to retry.
 	 */
 	writeConfined = false,
 	/**
@@ -2173,7 +2174,7 @@ function effectiveToolNames(
 			tool !== ToolNames.Consult &&
 			!(networkStripped && (tool === ToolNames.WebFetch || tool === ToolNames.WebRead)) &&
 			!denied.has(tool) &&
-			!(writeConfined && WRITE_ROOT_REFUSED_TOOLS.has(tool) && tool !== ToolNames.Bash && tool !== ToolNames.Verify) &&
+			!(writeConfined && WRITE_ROOT_REFUSED_TOOLS.has(tool)) &&
 			(target.runtime.id !== "claude-sdk" || isClaudeCanonicalTool(tool)),
 	);
 	// A native worker reaches a gateway-placed capability (git, web_fetch, an
@@ -4754,6 +4755,14 @@ export function createDispatchBundle(
 			effectiveToolNames(admission.allowedTools, target, writeConfined, deniedToolNames(req), req.cwd ?? process.cwd()),
 			req,
 		);
+		if (writeConfined) {
+			context.bus.emit(BusChannels.DispatchScopeNotice, {
+				code: "write_roots_checks_withheld",
+				level: "warning",
+				message:
+					"[dispatch scope] Narrow write roots have no OS sandbox enforcing them, so bash and verify are withheld and the worker cannot run checks. Enable safety.sandbox (auto or required) with a usable local bubblewrap backend to keep these tools while enforcing the write roots.",
+			});
+		}
 		assertPostRuntimeToolCompatibility(req.agentId, spec, effectiveTools, target, writeConfined);
 		assertTurnConstraintCompatibility(req, effectiveTools, target.runtime.kind === "http");
 		const permit = resolveDispatchPermit(req, recipe, spec, effectiveTools, readOnly, pathScope, settings, target);

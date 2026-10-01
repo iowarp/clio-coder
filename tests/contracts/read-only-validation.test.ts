@@ -186,4 +186,19 @@ it("withholds requested validation even when the worker omits declaredChecks", (
 	strictEqual(mergeWithheldDetail({ ...input, hostStatus: "verified" }), null);
 	strictEqual(mergeWithheldDetail({ ...input, executedCheckingCalls: 1 }), null);
 	strictEqual(mergeWithheldDetail({ ...input, task: "Edit the parser." }), null);
+	for (const task of [
+		"Do not run the tests.",
+		"No need to test.",
+		"No need to run npm test.",
+		"Don't run npm test.",
+		"Running the tests is not required.",
+		"Never run npm test.",
+		"Implement the parser without running tests.",
+	]) {
+		strictEqual(mergeWithheldDetail({ ...input, task }), null, task);
+	}
+	match(
+		mergeWithheldDetail({ ...input, task: "Do not run the tests, but run lint checks." }) ?? "",
+		/requested validation/u,
+	);
 });

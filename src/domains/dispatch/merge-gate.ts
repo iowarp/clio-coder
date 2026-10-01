@@ -33,6 +33,20 @@ export interface MergeGateVerdict {
 	appliesWhen: string;
 }
 
+function taskRequestsValidation(task: string): boolean {
+	return task.split(/[.;\n,]|\b(?:and|but|then)\b/iu).some((clause) => {
+		if (
+			/\b(?:do\s+not|don['’]t|never|skip|without|no\s+need\s+to|need\s+not)\b|\bnot\s+(?:required|needed|necessary)\b/iu.test(
+				clause,
+			)
+		)
+			return false;
+		return /\b(?:run|runs|running|execute|validate|verify|test)\b[^.\n]{0,100}\b(?:tests?|checks?|validation|npm|pnpm|pytest|vitest|jest|tsc|lint|typecheck)\b/iu.test(
+			clause,
+		);
+	});
+}
+
 /**
  * Decide whether a succeeded merge-mode task worktree is kept off the
  * operator's branch. Returns the verdict when it is withheld, null when it may
@@ -49,13 +63,7 @@ export function mergeGateVerdict(input: MergeGateInput): MergeGateVerdict | null
 			appliesWhen: "if that failure was already there",
 		};
 	}
-	if (
-		input.executedCheckingCalls === 0 &&
-		input.task !== undefined &&
-		/\b(?:run|runs|running|execute|validate|verify|test)\b[^.\n]{0,100}\b(?:tests?|checks?|validation|npm|pnpm|pytest|vitest|jest|tsc|lint|typecheck)\b/iu.test(
-			input.task,
-		)
-	) {
+	if (input.executedCheckingCalls === 0 && input.task !== undefined && taskRequestsValidation(input.task)) {
 		return {
 			reason: "the task requested validation but the worker executed no check",
 			appliesWhen: "once the requested validation passes",

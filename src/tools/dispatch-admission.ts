@@ -235,7 +235,7 @@ function announceDotWriteRoot(deps: DispatchToolDeps, rawIntent: unknown): void 
 		code: "write_root_dot_unconfined",
 		level: "warning",
 		message:
-			'[dispatch scope] intent.write_roots "." names the whole workspace, so it sets no write boundary: the worker may change any file and keeps bash, verify and git. To confine it, list the files or directories it may change; command admission enforces the roots, and unconfined execution is blocked.',
+			'[dispatch scope] intent.write_roots "." names the whole workspace, so it sets no write boundary: the worker may change any file and keeps bash, verify and git. To confine it, list the files or directories it may change; a confined run loses bash and verify.',
 	});
 }
 

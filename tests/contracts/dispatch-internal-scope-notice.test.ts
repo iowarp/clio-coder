@@ -1,7 +1,9 @@
-import { deepStrictEqual, ok, rejects, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, match, ok, rejects, strictEqual } from "node:assert/strict";
 import { it } from "node:test";
 import { BusChannels } from "../../src/core/bus-events.js";
+import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { installDiagnosticSink } from "../../src/core/diagnostics.js";
+import { ToolNames } from "../../src/core/tool-names.js";
 import { declaredScopeIntent } from "../../src/domains/dispatch/intent.js";
 import { declaredScopeReplacementDiagnostic, resolveDispatchPathScope } from "../../src/domains/dispatch/path-scope.js";
 import { makeDispatchBundle } from "../harness/dispatch.js";
@@ -73,6 +75,52 @@ it("operator bootstrap report: internal schema retries keep scope provenance wit
 	} finally {
 		unsubscribe();
 		removeSink();
+		await bundle.extension.stop?.();
+		env.restore();
+	}
+});
+
+it("announces withheld checks for narrow roots without an OS sandbox", async () => {
+	const env = await isolateClioEnv("narrow-roots-notice-");
+	const settings = structuredClone(DEFAULT_SETTINGS);
+	settings.safety.sandbox = "off";
+	const context = dispatchStubContext({ settings });
+	const notices: Array<{ code: string; message: string }> = [];
+	const unsubscribe = context.bus.on(BusChannels.DispatchScopeNotice, (notice) => {
+		notices.push(notice);
+	});
+	const tools: Array<ReadonlyArray<string>> = [];
+	const bundle = makeDispatchBundle(context, {
+		spawnWorker: (spec) => {
+			tools.push(spec.allowedTools);
+			throw new Error("fixture: scope admitted");
+		},
+	});
+	try {
+		await bundle.extension.start();
+		for (const writeRoots of [["src/duration.js"], []]) {
+			const scope = declaredScopeIntent({ writeRoots });
+			ok(scope.ok);
+			await rejects(
+				bundle.contract.dispatch({
+					agentId: "coder",
+					executionRole: "builder",
+					task: "Implement duration parsing and run npm test.",
+					cwd: env.dir,
+					intent: scope.intent,
+				}),
+				/fixture: scope admitted/u,
+			);
+		}
+		strictEqual(notices.length, 1);
+		strictEqual(notices[0]?.code, "write_roots_checks_withheld");
+		match(notices[0]?.message ?? "", /bash and verify are withheld.*cannot run checks.*safety\.sandbox/u);
+		ok(!tools[0]?.includes(ToolNames.Bash));
+		ok(!tools[0]?.includes(ToolNames.Verify));
+		ok(tools[1]?.includes(ToolNames.Bash));
+		ok(tools[1]?.includes(ToolNames.Verify));
+	} finally {
+		unsubscribe();
 		await bundle.extension.stop?.();
 		env.restore();
 	}
