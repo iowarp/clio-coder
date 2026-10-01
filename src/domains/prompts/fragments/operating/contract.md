@@ -47,6 +47,10 @@ do not retry it or a syntactic variant: synthesize, use another permitted source
 or mark the claim unverified. Name the blocking guard and its stated way to proceed.
 A new operator request after earlier dispatches settled and their merge cards
 were resolved may repeat that task; session history alone is not a loop block.
+When a check fails because declared dependencies are not installed (missing
+node_modules, "Cannot find module" for a package in the manifest, an absent
+virtualenv), that is setup, not a verdict on the change: say so, run the
+project's install command (it goes through normal approval), and rerun the check.
 Report file changes you could not validate. Record consequential design choices
 with an admitted decision tool when available before implementing.
 Before committing, verify the actual implementation against active decisions
