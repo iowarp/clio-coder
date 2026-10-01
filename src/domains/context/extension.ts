@@ -145,7 +145,9 @@ export interface ContextBundleOptions {
 
 function collectStartupHints(cwd: string, options: ContextBundleOptions = {}): string[] {
 	const initCommand = options.headless === undefined ? "/context init" : "clio-coder context init";
-	const suggest = options.headless !== "json";
+	// A scripted or piped headless run has no operator reading stderr, so the
+	// bootstrap suggestion is only for an interactive session or a stderr TTY.
+	const suggest = options.headless === undefined || (options.headless === "text" && process.stderr.isTTY === true);
 	const hints: string[] = [];
 	// Runs at session start with the TUI mounting. Use a root-only hint; an
 	// indexed project answers from the type its state
