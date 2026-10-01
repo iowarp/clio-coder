@@ -275,3 +275,23 @@ describe("contracts/acp streams a running tool's cumulative output only to a cli
 		ok(turn.updates.every((update) => update.toolCallId === undefined || update.toolCallId === "call-1"));
 	});
 });
+
+it("projects transcript notices for plain ACP clients while keeping footer state off the transcript", async () => {
+	const turn = await runTurn({
+		optIn: false,
+		script: ({ emit }) => {
+			emit({ type: "notice", surface: "footer", level: "info", text: "cold cache" });
+			emit({ type: "notice", surface: "transcript", level: "info", text: "project instructions: all 42 lines loaded" });
+			emit({ type: "notice", surface: "transcript", level: "info", text: "[context engine] compacted 8K → 4K tokens" });
+			emit({ type: "text_delta", delta: "Done." });
+		},
+	});
+	const texts = turn.updates
+		.filter((update) => update.sessionUpdate === "agent_message_chunk")
+		.map((update) => (update.content as { text: string }).text);
+	deepStrictEqual(texts, [
+		"project instructions: all 42 lines loaded\n",
+		"[context engine] compacted 8K → 4K tokens\n",
+		"Done.",
+	]);
+});

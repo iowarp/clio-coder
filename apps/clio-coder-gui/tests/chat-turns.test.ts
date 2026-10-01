@@ -797,3 +797,25 @@ test("a refused call and a stopped run end without breaking, so groups count the
 	// A real failure still outranks them.
 	assert.equal(summarizeActivity([refused, tool("c", "failed")]).label, "1 tool failed");
 });
+
+test("transcript notices stay visible between activity and the response", () => {
+	const turns = groupTurns(
+		[
+			item({ id: "u", turnId: "t", kind: "user", text: "Continue" }),
+			item({ id: "tool", turnId: "t", kind: "tool" }),
+			item({
+				id: "notice",
+				turnId: "t",
+				kind: "notice",
+				toolKind: "transcript",
+				text: "[context engine] compacted 8K → 4K tokens",
+			}),
+			item({ id: "answer", turnId: "t", kind: "text", text: "Done." }),
+		],
+		statuses({ t: "succeeded" }),
+	);
+	assert.deepEqual(
+		only(turns).segments.map((segment) => segment.kind),
+		["activity", "notice", "response"],
+	);
+});

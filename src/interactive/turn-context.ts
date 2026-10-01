@@ -2020,7 +2020,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 				// session, and again if the handbook later stops fitting (p8/B4).
 				// Headless runs keep stderr to their session line.
 				const preload = result.projectPreload;
-				if (preload && preload.mode !== "none" && !deps.headless) {
+				if (preload && preload.mode !== "none") {
 					const announced = `${sessionId}:${preload.label}`;
 					if (announcedProjectPreload !== announced) {
 						announcedProjectPreload = announced;

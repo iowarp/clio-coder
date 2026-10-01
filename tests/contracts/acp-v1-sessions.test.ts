@@ -588,3 +588,30 @@ test("a refused injecting command does not produce a successful ACP turn", async
 		await peer.stop();
 	}
 });
+
+test("ACP load retains the compaction row and its operator notes as a notice", async () => {
+	const peer = fixture([
+		{
+			kind: "compactionSummary",
+			turnId: "summary",
+			parentTurnId: null,
+			timestamp: "2026-09-25T12:00:00.000Z",
+			firstKeptTurnId: "summary",
+			tokensBefore: 8000,
+			tokensAfter: 4000,
+			summary: "Remember: preserve the output format.",
+		},
+	]);
+	try {
+		await peer.call("initialize", { protocolVersion: 1 });
+		await peer.call("session/load", { sessionId: "session-1", cwd: peer.cwd, mcpServers: [] });
+		const frame = peer.updates[0] as { update: { content: { text: string } }; _meta: Record<string, unknown> };
+		strictEqual(
+			frame.update.content.text,
+			"[context engine] compacted 8000 → 4000 tokens\nRemember: preserve the output format.",
+		);
+		deepStrictEqual(frame._meta["clio-coder/notice"], { level: "info" });
+	} finally {
+		await peer.stop();
+	}
+});

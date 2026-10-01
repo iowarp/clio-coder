@@ -1422,13 +1422,21 @@ function handleChatEvent(
 		return;
 	}
 	if (event.type === "notice") {
-		// Advisory notices have no ACP v1 equivalent and stay dropped. The one
-		// exception is an admission notice: it is the only evidence that Clio
-		// refused to start the turn, and the prompt handler fails the request
-		// with its reason instead of returning an empty success.
 		const admission = isRecord(event.admission) ? event.admission : null;
 		const reason = admission !== null && typeof admission.reason === "string" ? admission.reason : "";
 		if (reason.length > 0 && active.admissionReason === undefined) active.admissionReason = admissionReason(reason);
+		if (event.surface === "transcript" && typeof event.text === "string" && event.text.length > 0) {
+			sendUpdate(
+				transport,
+				sessionId,
+				active,
+				{
+					sessionUpdate: "agent_message_chunk",
+					content: textContent(`${safeStoredString(event.text, ACP_MAX_CHUNK_BYTES - 2)}\n`),
+				},
+				{ ...ORCHESTRATOR_UPDATE_META, "clio-coder/notice": { level: event.level } },
+			);
+		}
 		return;
 	}
 	if (event.type === "tool_execution_start") {
@@ -1678,6 +1686,7 @@ function replayTextBlocks(entry: MessageEntry): { text: string[]; thinking: stri
 
 interface AcpReplayFrame {
 	update: Record<string, unknown>;
+	meta?: Record<string, unknown>;
 }
 
 interface AcpReplayTurn {
@@ -1744,6 +1753,23 @@ function prepareAcpReplay(
 	const ids = createActivePromptState();
 	let current: AcpReplayTurn | null = null;
 	for (const entry of branch) {
+		if (entry.kind === "compactionSummary") {
+			if (current === null) {
+				current = { frames: [] };
+				turns.push(current);
+			}
+			const reduction =
+				entry.tokensAfter === undefined
+					? `${entry.tokensBefore} tokens before`
+					: `${entry.tokensBefore} → ${entry.tokensAfter} tokens`;
+			for (const chunk of chunkText(`[context engine] compacted ${reduction}\n${entry.summary}`, ACP_MAX_CHUNK_BYTES)) {
+				current.frames.push({
+					update: { sessionUpdate: "agent_message_chunk", content: textContent(chunk) },
+					meta: { "clio-coder/notice": { level: "info" } },
+				});
+			}
+			continue;
+		}
 		if (entry.kind !== "message") continue;
 		const payload = payloadRecord(entry.payload);
 		if (entry.role === "user") {
@@ -1810,7 +1836,7 @@ function prepareAcpReplay(
 		turn.frames.map((frame) => ({
 			sessionId,
 			update: frame.update,
-			_meta: { [ACP_REPLAY_META_KEY]: { turn: index + 1 } },
+			_meta: { [ACP_REPLAY_META_KEY]: { turn: index + 1 }, ...frame.meta },
 		})),
 	);
 	return { params, turns: turns.length, truncated: false };

@@ -814,6 +814,9 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 				for (const frame of frames) writeRawStdout(serializeJsonLine(frame));
 			}
 		}
+		if (mode === "text" && event.type === "notice" && event.surface === "transcript") {
+			process.stderr.write(`clio-coder run: ${event.text}\n`);
+		}
 		recordToolEnd(receiptStats, event);
 		if (event.type === "message_end") {
 			// Usage is accrued per completed assistant message, the one place a

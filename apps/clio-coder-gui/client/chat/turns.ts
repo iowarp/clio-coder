@@ -14,6 +14,7 @@ import type { TimelineItem, Turn } from "../../contracts/sessions.js";
 export type ChatSegment =
 	| Readonly<{ kind: "response"; item: TimelineItem }>
 	| Readonly<{ kind: "reasoning"; item: TimelineItem }>
+	| Readonly<{ kind: "notice"; item: TimelineItem }>
 	| Readonly<{ kind: "activity"; items: readonly TimelineItem[] }>;
 
 export interface ChatTurn {
@@ -69,9 +70,16 @@ function buildTurn(turnId: string, items: readonly TimelineItem[], status: Turn[
 				flush();
 				segments.push({ kind: "response", item });
 				break;
+			case "notice":
+				if (item.toolKind !== "transcript") {
+					pending.push(item);
+					break;
+				}
+				flush();
+				segments.push({ kind: "notice", item });
+				break;
 			case "thought":
 			case "tool":
-			case "notice":
 				pending.push(item);
 				break;
 		}

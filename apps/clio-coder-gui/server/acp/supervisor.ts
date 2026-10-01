@@ -479,6 +479,26 @@ export class Supervisor {
 			const content = record(update.content);
 			if (content.type !== "text" || typeof content.text !== "string")
 				throw new AppProblem("upstream_acp", "ACP message is not a text chunk.");
+			if (kind === "agent_message_chunk" && meta["clio-coder/notice"] !== undefined) {
+				this.publish({
+					type: "turn.tool",
+					payload: {
+						resource: entry.id,
+						revision: common.revision,
+						item: {
+							id: randomUUID(),
+							turnId: entry.turnId,
+							sequence: 0,
+							kind: "notice",
+							toolKind: "transcript",
+							text: boundedText(content.text, 16384),
+							status: "completed",
+							origin,
+						},
+					},
+				});
+				return;
+			}
 			this.publish({
 				type: kind === "agent_message_chunk" ? "turn.text" : kind === "agent_thought_chunk" ? "turn.thought" : "turn.user",
 				payload: { ...common, text: boundedText(content.text, 16384) },
