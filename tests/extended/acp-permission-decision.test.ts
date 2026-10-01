@@ -53,8 +53,9 @@ function fakeTransport(answer: (params: Record<string, unknown>) => unknown) {
 
 /**
  * Drives one turn that parks a real `bash` call on the real registry. Autonomy
- * `suggest` is what makes an execute call ask, so the presentation the bridge
- * attaches is the one the policy actually produced rather than a fixture.
+ * `default` asks for an execute call the policy does not recognize, and
+ * `npm run lint` is a repository script rather than a no-prompt runner, so the
+ * presentation the bridge attaches is the one the policy actually produced.
  */
 async function askOnce(answer: (params: Record<string, unknown>) => unknown) {
 	const safety = createWorkerSafety({ cwd: process.cwd() });
@@ -64,8 +65,8 @@ async function askOnce(answer: (params: Record<string, unknown>) => unknown) {
 	let verdictKind = "";
 	const chat: AcpServerChat = {
 		submit: async () => {
-			emit({ type: "tool_execution_start", toolCallId: "call-1", toolName: "bash", args: { command: "echo hi" } });
-			const verdict = await registry.invoke({ tool: "bash", args: { command: "echo hi" } }, { toolCallId: "call-1" });
+			emit({ type: "tool_execution_start", toolCallId: "call-1", toolName: "bash", args: { command: "npm run lint" } });
+			const verdict = await registry.invoke({ tool: "bash", args: { command: "npm run lint" } }, { toolCallId: "call-1" });
 			verdictKind = verdict.kind;
 			emit({ type: "tool_execution_end", toolCallId: "call-1", toolName: "bash", result: verdict, isError: false });
 		},
@@ -140,7 +141,7 @@ describe("contracts/acp attaches the decision facts it already computed to the p
 		ok(String(meta.consequenceCopy).length > 0);
 		ok(String(meta.reversibilityCopy).startsWith("Reversible:"));
 		ok(String(meta.requestedByCopy).includes("autonomy level (default)"));
-		ok(String(meta.target).includes("echo hi"));
+		ok(String(meta.target).includes("npm run lint"));
 	});
 
 	it("denies the whole turn on reject-and-stop instead of only the request in front of the operator", async () => {
