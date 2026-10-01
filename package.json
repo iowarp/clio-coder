@@ -56,6 +56,7 @@
 		"assets/clio-coder-logo-128.webp",
 		"bin/clio-coder.cjs",
 		"scripts/install.sh",
+		"scripts/install.ps1",
 		"!assets/README.md",
 		"!scripts/README.md",
 		"src/**",

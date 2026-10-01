@@ -183,22 +183,38 @@ async function runInstallerUpgrade(opts: UpgradeOptions, installation: Installat
 	const record = installation.installer;
 	if (installation.kind !== "installer" || record === undefined)
 		throw new Error("installer upgrade needs an install.sh installation");
-	const args = [
-		join(installation.root, "scripts", "install.sh"),
-		"--channel",
-		opts.channel,
-		"--install-dir",
-		record.root,
-		"--bin-dir",
-		dirname(record.launcher),
-		"--no-post-install",
-	];
+	const windows = process.platform === "win32";
+	const args = windows
+		? [
+				"-NoProfile",
+				"-ExecutionPolicy",
+				"Bypass",
+				"-File",
+				join(installation.root, "scripts", "install.ps1"),
+				"-Channel",
+				opts.channel,
+				"-InstallDir",
+				record.root,
+				"-BinDir",
+				dirname(record.launcher),
+				"-NoPostInstall",
+			]
+		: [
+				join(installation.root, "scripts", "install.sh"),
+				"--channel",
+				opts.channel,
+				"--install-dir",
+				record.root,
+				"--bin-dir",
+				dirname(record.launcher),
+				"--no-post-install",
+			];
 	const env: NodeJS.ProcessEnv = { ...process.env };
 	if (opts.refreshRuntime) {
 		delete env.CLIO_CODER_NODE_VERSION;
-		args.push("--refresh-runtime");
+		args.push(windows ? "-RefreshRuntime" : "--refresh-runtime");
 	} else if (record.nodeVersion) env.CLIO_CODER_NODE_VERSION = record.nodeVersion;
-	await runChild("sh", args, "install.sh", env);
+	await runChild(windows ? "powershell.exe" : "sh", args, windows ? "install.ps1" : "install.sh", env);
 	const updated = readInstallerRecord(record.root);
 	if (updated === null) throw new Error(`install.sh finished but ${join(record.root, "install.json")} is unreadable`);
 	return inspectInstallation(join(installerPackageRoot(updated.current), "dist", "cli", "index.js"));

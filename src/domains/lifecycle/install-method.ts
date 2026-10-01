@@ -163,6 +163,10 @@ export function installationCommand(
 		return `npm ${action === "upgrade" ? "install" : "uninstall"} -g --prefix ${shellQuote(installation.prefix)} ${spec}`;
 	if (installation.kind === "installer" && installation.installer) {
 		const record = installation.installer;
+		if (process.platform === "win32")
+			return action === "upgrade"
+				? `powershell -NoProfile -ExecutionPolicy Bypass -File "${join(installation.root, "scripts", "install.ps1")}" -Channel ${channel} -InstallDir "${record.root}" -BinDir "${dirname(record.launcher)}"`
+				: `Remove-Item -Recurse -Force "${record.root}", "${record.launcher}"`;
 		return action === "upgrade"
 			? `sh ${shellQuote(join(installation.root, "scripts", "install.sh"))} --channel ${channel} --install-dir ${shellQuote(record.root)} --bin-dir ${shellQuote(dirname(record.launcher))}`
 			: `rm -rf ${shellQuote(record.root)} ${shellQuote(record.launcher)}`;

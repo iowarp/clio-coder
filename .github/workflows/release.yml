@@ -71,8 +71,8 @@ jobs:
           # A pre-release tag (vX.Y.Z-rc.N) must not take the Latest badge.
           channel=()
           case "$version" in *-*) channel=(--prerelease --latest=false) ;; esac
-          # install.sh rides along so `releases/latest/download/install.sh` is a
-          # stable URL for the curl installer until coder.iowarp.ai serves it.
-          gh release create "$GITHUB_REF_NAME" "$RUNNER_TEMP/qualified-package/candidate.tgz" scripts/install.sh \
+          # The installers ride along so `releases/latest/download/install.sh` and
+          # `install.ps1` are stable URLs until coder.iowarp.ai serves them.
+          gh release create "$GITHUB_REF_NAME" "$RUNNER_TEMP/qualified-package/candidate.tgz" scripts/install.sh scripts/install.ps1 \
             --title "Clio Coder $version" --notes-file "$RUNNER_TEMP/release-notes.md" --verify-tag \
             "${channel[@]}"

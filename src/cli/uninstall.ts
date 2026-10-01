@@ -1,3 +1,4 @@
+import { spawn } from "node:child_process";
 import { existsSync, lstatSync, readdirSync, readFileSync, readlinkSync, realpathSync, rmdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { delimiter, dirname, isAbsolute, join, resolve, sep } from "node:path";
@@ -144,6 +145,25 @@ function firstRecordedCwd(hashDir: string): string | null {
 	return null;
 }
 
+/**
+ * Delete `paths`, then `emptyRoot` if nothing else is left in it, from a
+ * detached cmd.exe once this process and its .cmd launcher have exited. A
+ * one-line `cmd /c` cannot wait on a PID, so it waits a few seconds and makes a
+ * second pass for a slow exit. cmd.exe, not PowerShell: a detached PowerShell
+ * gets no console and exits before running anything.
+ */
+function scheduleRemovalAfterExit(paths: string[], emptyRoot: string | null): void {
+	const remove = paths.map((path) => `rmdir /s /q "${path}" 2>nul & del /f /q "${path}" 2>nul`).join(" & ");
+	const pass = `${remove}${emptyRoot ? ` & rmdir "${emptyRoot}" 2>nul` : ""}`;
+	const command = `ping -n 4 127.0.0.1 >nul & ${pass} & ping -n 6 127.0.0.1 >nul & ${pass}`;
+	spawn("cmd.exe", ["/d", "/c", command], {
+		detached: true,
+		stdio: "ignore",
+		windowsHide: true,
+		windowsVerbatimArguments: true,
+	}).unref();
+}
+
 function launcherLinkPath(): string {
 	const binDir = process.env.CLIO_CODER_BIN_DIR?.trim() || join(homedir(), ".local", "bin");
 	return join(binDir, "clio-coder");
@@ -169,8 +189,11 @@ function isInstallerLauncher(linkPath: string, installation: Installation): bool
 	const record = installation.installer;
 	if (record === undefined) return false;
 	try {
+		// The sh launcher carries the mark as a comment line, the Windows .cmd as a
+		// `rem` line; both name the install root they run from.
 		const text = readFileSync(linkPath, "utf8");
-		return text.split("\n")[1] === INSTALLER_LAUNCHER_MARK && text.includes(`${record.root}${sep}`);
+		const fold = (value: string) => (process.platform === "win32" ? value.toLowerCase() : value);
+		return text.includes(INSTALLER_LAUNCHER_MARK) && fold(text).includes(fold(`${record.root}${sep}`));
 	} catch {
 		return false;
 	}
@@ -533,7 +556,15 @@ export async function runUninstallCommand(argv: ReadonlyArray<string>): Promise<
 	// removal from `--remove-binary` alone announced one for a launcher the
 	// classifier had already decided to keep.
 	let launcherRemoved = false;
-	if (args.removeBinary && launcher.kind === "remove") {
+	// Windows keeps a running node.exe locked, and cmd.exe rereads the .cmd
+	// launcher after Node exits. Both go once this process and its launcher exit.
+	const deferToExit = process.platform === "win32" && installerRecord !== undefined && args.removeBinary;
+	const deferred: string[] = [];
+	if (deferToExit && launcher.kind === "remove") {
+		deferred.push(linkPath);
+		presenter.completedStep("Launcher will be removed when this command exits");
+		launcherRemoved = true;
+	} else if (args.removeBinary && launcher.kind === "remove") {
 		const failure = removePath("launcher", linkPath, false);
 		if (failure) failures.push(failure);
 		else {
@@ -545,7 +576,14 @@ export async function runUninstallCommand(argv: ReadonlyArray<string>): Promise<
 	// The running Node and package live under this root. Unlinking them is safe
 	// on Linux and macOS: the open files stay readable until this process exits.
 	let runtimeRemoved = false;
-	if (args.removeBinary && installerRecord && runtimeSize?.exists) {
+	if (deferToExit && installerRecord && runtimeSize?.exists) {
+		deferred.push(...["runtime", "versions", "install.json"].map((name) => join(installerRecord.root, name)));
+		scheduleRemovalAfterExit(deferred, installerRecord.root);
+		presenter.completedStep("Runtime and installed versions will be removed when this command exits");
+		runtimeRemoved = true;
+	} else if (deferred.length > 0) {
+		scheduleRemovalAfterExit(deferred, null);
+	} else if (args.removeBinary && installerRecord && runtimeSize?.exists) {
 		// Only what install.sh creates is removed, then the root if it is left
 		// empty: --install-dir may have named a directory that holds other files.
 		const failed = ["runtime", "versions", "install.json"].flatMap(

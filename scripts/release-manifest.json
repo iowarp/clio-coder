@@ -3,6 +3,7 @@
 	"requiredFiles": [
 		"bin/clio-coder.cjs",
 		"scripts/install.sh",
+		"scripts/install.ps1",
 		"dist/cli/index.js",
 		"dist/gui/server.js",
 		"dist/gui/reads-worker.js",
