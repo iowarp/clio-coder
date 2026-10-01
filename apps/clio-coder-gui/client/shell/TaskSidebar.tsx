@@ -172,11 +172,6 @@ export function TaskSidebar({
 						Show {ordered.length - shown} more projects
 					</button>
 				) : null}
-				{actions.error ? (
-					<p className="wb-note" role="alert">
-						{actions.error.message}
-					</p>
-				) : null}
 			</section>
 
 			<div className="wb-side__foot">

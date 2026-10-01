@@ -10,6 +10,7 @@ import { type Client, emptyInput } from "../api/client.js";
 import { clock } from "../api/clock.js";
 import { sessionBuffer } from "../api/sessions.js";
 import { type ProjectLaunch, useProjectLaunch } from "../pages/project-open.js";
+import { withRoom } from "./capacity.js";
 import { isUntouched } from "./shell-model.js";
 
 const WORKSPACE_KEY = "clio-coder-gui-workspace";
@@ -58,7 +59,9 @@ export function useTaskActions(client: Client, afterNavigate?: () => void): Task
 	const sessions = useQuery({ queryKey: ["sessions"], queryFn: () => client.call(routes.sessions, emptyInput) });
 	const resume = useMutation({
 		mutationFn: ({ sessionId, workspaceId }: { sessionId: string; workspaceId: string }) =>
-			client.call(routes.loadSession, { params: { id: sessionId }, query: {}, body: { workspaceId } }),
+			withRoom(client, queries, () =>
+				client.call(routes.loadSession, { params: { id: sessionId }, query: {}, body: { workspaceId } }),
+			),
 		onSuccess: (session) => {
 			for (const key of SESSION_CACHES) queries.removeQueries({ queryKey: [key, session.id] });
 			queries.setQueryData(["session", session.id], sessionBuffer(session.id).snapshot(session) ?? session);
