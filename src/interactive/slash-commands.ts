@@ -957,7 +957,7 @@ function isRunThinkingLevel(value: string): value is JobThinkingLevel {
 	return RUN_THINKING_LEVELS.some((level) => level === value);
 }
 
-/** `/context compact` alone keeps a free-form optional instruction tail. */
+/** Both compact spellings keep a free-form optional instruction tail. */
 const COMPACT_POSITIONALS: ReadonlyArray<CommandPositionalSpec> = [
 	{ name: "instructions", required: false, rest: true },
 ];
@@ -2625,8 +2625,25 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 ];
 
 const settingsCommand = CANONICAL_SLASH_COMMANDS.find((entry) => entry.name === "settings");
+const contextCommand = CANONICAL_SLASH_COMMANDS.find((entry) => entry.name === "context");
 export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	...CANONICAL_SLASH_COMMANDS,
+	...(contextCommand
+		? [
+				{
+					...contextCommand,
+					name: "compact",
+					kinds: [],
+					description: "Shrink session context (alias for /context compact)",
+					args: { positionals: [...COMPACT_POSITIONALS] },
+					subcommandDescriptions: {},
+					fromArgs: (parsed: ParsedArgs): SlashCommand =>
+						parsed.error
+							? { kind: "usage-error", command: "compact", reason: parsed.error }
+							: { kind: "compact", instructions: parsed.rest },
+				},
+			]
+		: []),
 	...(settingsCommand
 		? [{ ...settingsCommand, name: "config", kinds: [], description: "Open settings (alias for /settings)" }]
 		: []),
@@ -2871,6 +2888,7 @@ const COMMAND_ORDER = [
 	"interop",
 	"tasks",
 	"context",
+	"compact",
 	"memory",
 	"view",
 	"panes",

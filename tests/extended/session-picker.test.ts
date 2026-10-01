@@ -1,8 +1,12 @@
 import assert from "node:assert/strict";
+import { mkdirSync } from "node:fs";
+import { join } from "node:path";
 import { it, type TestContext } from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import type { SessionContract, SessionMeta } from "../../src/domains/session/contract.js";
+import { listSessionsForCwd } from "../../src/domains/session/history.js";
+import { appendEntry, startSession } from "../../src/domains/session/manager.js";
 import {
 	type Component,
 	getKeybindings,
@@ -15,6 +19,7 @@ import {
 import { ClioEditor } from "../../src/interactive/clio-editor.js";
 import { createKeybindingManager } from "../../src/interactive/keybinding-manager.js";
 import { openSessionOverlay, SESSION_ESCAPE_GRACE_MS } from "../../src/interactive/overlays/session-selector.js";
+import { isolateClioEnv } from "../harness/scratch-env.js";
 
 const noop = () => {};
 function session(id: string, fields: Partial<SessionMeta> = {}): SessionMeta {
@@ -140,7 +145,7 @@ it("sanitizes external task, name, route and label text before styling", (t) => 
 		assert.ok(!raw.includes("injected-title"));
 		assert.ok(!raw.includes("\x07") && !raw.includes("\x7f") && !raw.includes("\r") && !raw.includes("\t"));
 		const lines = f.lines(width);
-		assert.ok(lines.some((line) => line.includes("Task 科学 👩‍🔬")));
+		assert.ok(lines.some((line) => line.includes("Task 科学 👩\\u{200d}🔬")));
 		assert.ok(lines.some((line) => line.includes("Named test")));
 		for (const line of lines) assert.ok(visibleWidth(line) <= width);
 	}
@@ -258,7 +263,7 @@ it("keeps long Unicode identity within the frame at every supported width", (t) 
 	]);
 	for (const width of [40, 44, 60, 92, 120]) {
 		const lines = f.lines(width);
-		assert.match(f.selected(width), /科学 👩‍🔬 é/);
+		assert.match(f.selected(width), /科学 👩\\u\{200d\}🔬 é/);
 		for (const line of lines) {
 			assert.ok(visibleWidth(line) <= width);
 			assert.ok(!line.includes("\ufffd"));
@@ -289,4 +294,38 @@ it("retains searchable labels, model and workspace context", (t) => {
 	assert.match(f.selected(), /Wanted task/);
 	f.input("\r");
 	assert.deepEqual(f.resumed, ["id-wanted"]);
+});
+
+it("hides a failed user-only session but retains assistant and tool-call turns", async (t) => {
+	const isolated = await isolateClioEnv("resume-model-turn-");
+	t.after(() => isolated.restore());
+	const cwd = join(isolated.dir, "repo");
+	mkdirSync(cwd);
+	const ids: string[] = [];
+	for (const role of [null, "assistant", "tool_call"] as const) {
+		const state = startSession({ cwd, model: role === null ? "does-not-exist-model" : "fixture" });
+		ids.push(state.meta.id);
+		const user = appendEntry(state, {
+			kind: "message",
+			role: "user",
+			parentTurnId: null,
+			payload: { text: role === null ? "Failed greeting" : `Conversation ${role}` },
+		});
+		if (role !== null)
+			appendEntry(state, {
+				kind: "message",
+				role,
+				parentTurnId: user.turnId,
+				payload: role === "assistant" ? { text: "Hello" } : { name: "read", args: { path: "index.js" } },
+			});
+		await state.writer.close();
+	}
+	const history = listSessionsForCwd(cwd);
+	assert.equal(history.find((meta) => meta.id === ids[0])?.hasModelTurn, false);
+	for (const id of ids.slice(1)) assert.equal(history.find((meta) => meta.id === id)?.hasModelTurn, true);
+	const f = picker(t, history);
+	const text = f.lines().join("\n");
+	assert.doesNotMatch(text, /Failed greeting|does-not-exist-model/u);
+	assert.match(text, /Conversation assistant/u);
+	assert.match(text, /Conversation tool_call/u);
 });

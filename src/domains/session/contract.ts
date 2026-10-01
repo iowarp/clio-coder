@@ -32,6 +32,7 @@ export type ClioSessionMetaExtension = {
 	 * entries do not contribute. Discovered alongside firstMessagePreview.
 	 */
 	messageCount?: number;
+	hasModelTurn?: boolean;
 	/**
 	 * Latest entry timestamp seen in current.jsonl, falling back to the
 	 * file's mtime. Lets the picker rank sessions by last-activity rather

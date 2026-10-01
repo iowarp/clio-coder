@@ -274,7 +274,7 @@ function createSessionOverlayBox(
 }
 
 export function openSessionOverlay(tui: TUI, deps: OpenSessionOverlayDeps): OverlayHandle {
-	const sessions = deps.session.history();
+	const sessions = deps.session.history().filter((session) => session.hasModelTurn !== false);
 	const box = createSessionOverlayBox(
 		sessions,
 		(sessionId) => deps.onResume(sessionId),

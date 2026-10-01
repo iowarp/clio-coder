@@ -218,6 +218,7 @@ export function stripInjectedPreamble(text: string): string {
 }
 
 interface ScanResult {
+	hasModelTurn: boolean;
 	firstUserMessage: string | null;
 	/** The first assistant text, the preview when no turn carries operator words. */
 	firstAssistantMessage: string | null;
@@ -229,6 +230,7 @@ interface ScanResult {
 
 function scanCurrentJsonl(currentPath: string): ScanResult {
 	const result: ScanResult = {
+		hasModelTurn: false,
 		firstUserMessage: null,
 		firstAssistantMessage: null,
 		messageCount: 0,
@@ -239,6 +241,9 @@ function scanCurrentJsonl(currentPath: string): ScanResult {
 	if (!existsSync(currentPath)) return result;
 	const records = readSessionFileEntries(currentPath).filter((entry) => !isSessionHeader(entry));
 	for (const parsed of collectSessionEntries(records, currentPath)) {
+		if (parsed.kind === "message" && (parsed.role === "assistant" || parsed.role === "tool_call")) {
+			result.hasModelTurn = true;
+		}
 		if (result.lastTimestamp === null || parsed.timestamp > result.lastTimestamp) {
 			result.lastTimestamp = parsed.timestamp;
 		}
@@ -279,6 +284,7 @@ function scanCurrentJsonl(currentPath: string): ScanResult {
 
 function enrichMetaForListing(meta: SessionMeta, currentPath: string): void {
 	const scan = scanCurrentJsonl(currentPath);
+	meta.hasModelTurn = scan.hasModelTurn;
 	if (scan.name) meta.name = scan.name;
 	const labelValues = [...scan.labels.values()].map((entry) => entry.label.trim()).filter((label) => label.length > 0);
 	if (labelValues.length > 0) meta.labels = labelValues;

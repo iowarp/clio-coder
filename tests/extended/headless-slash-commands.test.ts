@@ -32,6 +32,8 @@ it("headless commands refuse interactive actions before boot while preserving sk
 	try {
 		for (const task of [
 			"/context compact retain constraints",
+			"/compact",
+			"/compact retain constraints",
 			"/context reset",
 			"/context init",
 			"/context refresh",
@@ -64,7 +66,6 @@ it("headless commands refuse interactive actions before boot while preserving sk
 			match(result.stderr, /target 'headless-slash-missing-target' not found/, task);
 			doesNotMatch(result.stderr, /interactive commands are not supported|is not a command/, task);
 		}
-		match(run("/compact").stderr, /is not a command/);
 		match(run("/not-a-real-command").stderr, /is not a command/);
 	} finally {
 		rmSync(root, { recursive: true, force: true });

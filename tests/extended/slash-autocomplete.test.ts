@@ -237,3 +237,21 @@ test("prompt templates from every resource root complete as namespaced slash com
 		"reloaded templates appear without rebuilding the provider",
 	);
 });
+
+test("compact aliases context compact including instructions and the existing handler", async () => {
+	for (const tail of ["", " retain all task constraints"]) {
+		const alias = parseSlashCommand(`/compact${tail}`);
+		deepStrictEqual(alias, parseSlashCommand(`/context compact${tail}`));
+		const calls: Array<string | undefined> = [];
+		strictEqual(
+			dispatchSlashCommand(alias, {
+				runCompact: (instructions: string | undefined) => calls.push(instructions),
+			} as unknown as SlashCommandContext),
+			"accepted",
+		);
+		deepStrictEqual(calls, [tail.trim() || undefined]);
+	}
+	const provider = createSlashCommandAutocompleteProvider({ fdPath: null });
+	const suggestions = await provider.getSuggestions(["/comp"], 0, 5, { signal: new AbortController().signal });
+	ok(suggestions?.items.some((item) => item.value === "compact" || item.value === "/compact"));
+});
