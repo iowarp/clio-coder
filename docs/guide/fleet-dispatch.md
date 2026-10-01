@@ -303,16 +303,27 @@ merge path as compete. A conflict fails closed with
 own report lists a failing validation, or names a check it did not run
 (`declaredChecks`) with no validation that passed, is not merged unless host
 verification passed. In the TUI an operator is asked first with a `Merge task branch?` card
-that shows the branch, the changed paths, and the failing or unrun check. `Merge` lands the
-branch through the same guarded path (protected paths included) and the run succeeds. `Keep branch`
-withholds: the run fails with `merge_withheld`, its work is committed on the preserved branch, and
-the detail names the `git merge` that applies it. `Discard` asks `Delete branch <b> and its worktree?
-This cannot be undone.` and, on `Delete`, removes the worktree and branch (`Back` or Esc returns to
-the card). Esc on the card, no answer within `fleet.permissions.escalation.timeoutMs`, or a cancelled
-run all keep the branch. Headless, ACP, and any surface without an operator always withhold. Cards
-for a batch appear one at a time, and members that pass the gate merge without waiting. The receipt's
-`worktree.detail` begins `operator merge:`, `operator keep:`, or `operator discard:` (with
-`worktree.reason` `operator_discarded`) when the card decided. Preserve
+that shows the branch, the changed paths, and the failing or unrun check. The card opens on
+`Keep branch` and ignores keys other than Esc for a moment after it appears, so an Enter typed
+into the composer cannot answer it. `Merge` lands exactly the commit the card showed, through the
+same guarded path with protected paths read again at that moment, and the run succeeds. `Merge`
+is not offered when the branch changes protected paths; the card names them. A conflicting
+operator merge fails the run like any other merge. If the branch or its worktree changed after
+the preview, `Merge` and `Discard` are refused: the run fails with `merge_withheld`, the branch is
+kept, and the detail says it changed after the preview and to inspect it before merging.
+`Keep branch` withholds: the run fails with `merge_withheld`, its work is committed on the
+preserved branch, and the detail names the `git merge` that applies it. `Discard` asks `Delete
+branch <b> and its worktree? This cannot be undone.` (opening on `Back`) and, on `Delete`, removes
+the worktree and branch; `Back` or Esc returns to the card. Esc on the card, no answer within
+`fleet.permissions.escalation.timeoutMs`, or a cancelled run all keep the branch. If the worktree
+is removed but the branch cannot be deleted, the receipt says so and the branch remains. A card
+behind another overlay posts a notice, and an idle model interview yields the screen to it and
+resumes afterwards. While it waits, the run shows as running, `fleet cancel` settles it as Keep,
+and a lone dispatch keeps its slot free for other work. Headless, ACP, and any surface without an
+operator always withhold. Cards for a batch appear one at a time, and members that pass the gate
+merge without waiting. The receipt's `worktree.detail` begins `operator merge:`,
+`operator keep:`, or `operator discard:` (with `worktree.reason` `operator_discarded` after a
+full discard) when the card decided. Preserve
 application never merges and reports the branch. A detached task applies when its run finalizes, so `monitor(mode="collect")` returns the sealed application receipt.
 Admission refuses a non-git checkout, a read-only agent, compete mode, or an
 explicit cwd outside the parent checkout with a named reason.
