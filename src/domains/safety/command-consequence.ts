@@ -590,21 +590,18 @@ const NODE_FILES: Readonly<Record<string, string>> = {
 	bun: "bun.lock",
 };
 
+const NODE_VALUE_OPTIONS: Readonly<Record<string, ReadonlySet<string>>> = {
+	npm: new Set(["--prefix", "-C", "--workspace", "-w", "--registry", "--tag", "--cache"]),
+	pnpm: new Set(["--dir", "-C", "--filter", "-F", "--registry", "--store-dir", "--reporter"]),
+	yarn: new Set(["--cwd", "--registry", "--cache-folder", "--modules-folder", "--mutex"]),
+	bun: new Set(["--cwd", "--registry", "--config", "-c", "--cache-dir"]),
+};
+
 function nodeInstallConsequence(manager: string, args: ReadonlyArray<string>): string | null {
-	// Leading options (`npm --prefix x install`, `pnpm -C x add`) are skipped with their values.
-	const valueOptions = new Set([
-		"--prefix",
-		"-C",
-		"--dir",
-		"--cwd",
-		"-w",
-		"--workspace",
-		"--filter",
-		"-F",
-		"--registry",
-		"--tag",
-		"--cache",
-	]);
+	// Leading options (`npm --prefix x install`, `pnpm -C x add`) are skipped with
+	// their values. `-w` takes a workspace name for npm but is pnpm's boolean
+	// `--workspace-root`, so the sets differ by manager.
+	const valueOptions = NODE_VALUE_OPTIONS[manager] ?? new Set<string>();
 	const words = operands(args, valueOptions);
 	const verb = words[0];
 	if (verb === undefined || !NODE_INSTALL_VERBS.has(verb)) return null;
