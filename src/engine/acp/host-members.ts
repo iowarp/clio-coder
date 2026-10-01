@@ -23,6 +23,7 @@
 import { randomUUID } from "node:crypto";
 import { ToolNames } from "../../core/tool-names.js";
 import { proposeTaskBankPromotion, type TaskMemorySnapshot } from "../../domains/memory/index.js";
+import { sanitizeCallTargetText } from "../../domains/safety/call-target.js";
 import type { DecisionBoardStore } from "../../domains/session/decision-board.js";
 import { formatDecisionCorrectionTurn } from "../../interactive/overlays/decisions.js";
 import type { CouncilDispatchOutcome } from "../../interactive/slash-commands.js";
@@ -171,19 +172,22 @@ function cut(value: string, max: number): string {
 
 /** The client's request shape. `defaultOption` is harness-only focus state the wire has no field for. */
 function wireQuestion(question: AskUserQuestion): WireQuestion | null {
-	const text = cut(question.question.trim(), MAX_QUESTION_CHARS);
+	const text = cut(sanitizeCallTargetText(question.question), MAX_QUESTION_CHARS);
 	if (text.length === 0) return null;
 	const options = (question.options ?? [])
-		.map((option) => ({ label: cut(option.label.trim(), MAX_LABEL_CHARS), description: option.description }))
+		.map((option) => ({
+			label: cut(sanitizeCallTargetText(option.label), MAX_LABEL_CHARS),
+			description: option.description,
+		}))
 		.filter((option) => option.label.length > 0)
 		.slice(0, MAX_OPTIONS)
 		.map((option) => ({
 			label: option.label,
 			...(option.description !== undefined && option.description.length > 0
-				? { description: cut(option.description, MAX_DESCRIPTION_CHARS) }
+				? { description: cut(sanitizeCallTargetText(option.description), MAX_DESCRIPTION_CHARS) }
 				: {}),
 		}));
-	const header = question.header !== undefined ? cut(question.header.trim(), MAX_HEADER_CHARS) : "";
+	const header = question.header !== undefined ? cut(sanitizeCallTargetText(question.header), MAX_HEADER_CHARS) : "";
 	return {
 		question: text,
 		...(header.length > 0 ? { header } : {}),

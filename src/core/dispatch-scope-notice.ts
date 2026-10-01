@@ -1,3 +1,4 @@
+import { sanitizeCallTargetText } from "../domains/safety/call-target.js";
 import type { DispatchScopeNoticePayload } from "./bus-events.js";
 
 /**
@@ -37,5 +38,7 @@ export function readDispatchScopeNotice(value: unknown): DispatchScopeNoticeView
 	) {
 		return null;
 	}
-	return { code: event.code as DispatchScopeNoticeView["code"], level: "warning", message: event.message };
+	const message = sanitizeCallTargetText(event.message).slice(0, 4096);
+	if (message.length === 0) return null;
+	return { code: event.code as DispatchScopeNoticeView["code"], level: "warning", message };
 }

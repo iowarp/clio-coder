@@ -169,6 +169,7 @@ async function forwardWorkerAsk(input: {
 	cancelPending?: boolean;
 	secondAsk?: boolean;
 	foreignSession?: boolean;
+	hostileText?: boolean;
 }) {
 	const bus = createSafeEventBus();
 	const resolved: Array<[string, string, string]> = [];
@@ -210,8 +211,8 @@ async function forwardWorkerAsk(input: {
 				origin: "worker:run-7",
 				...(input.foreignSession ? { sessionId: "another-session" } : {}),
 				agentId: "scout",
-				target: "git push origin main",
-				consequence: ["Publishes to origin"],
+				target: input.hostileText ? "git push origin \u202emain" : "git push origin main",
+				consequence: [input.hostileText ? "\u001b[31mPublishes\u001b[0m to \u009borigin" : "Publishes to origin"],
 				timeoutMs: 60_000,
 				fallback: "deny",
 				escalation: true,
@@ -302,6 +303,13 @@ test("an attended client is asked about a worker's escalation under the dispatch
 	deepStrictEqual(meta["clio-coder/decision"]?.origin, { kind: "worker", agentId: "scout", runId: "run-7" });
 	deepStrictEqual(meta["clio-coder/decision"]?.consequenceLines, ["Publishes to origin"]);
 	deepStrictEqual(turn.resolved, [["run-7", "req-1", "approve"]]);
+});
+
+test("forwarded worker approval text neutralizes display controls", async () => {
+	const turn = await forwardWorkerAsk({ advertise: true, answer: "reject-once", hostileText: true });
+	const meta = turn.asks[0]?._meta as Record<string, Record<string, unknown>>;
+	strictEqual(meta["clio-coder/decision"]?.target, "git push origin \\u{202e}main");
+	deepStrictEqual(meta["clio-coder/decision"]?.consequenceLines, ["Publishes to \\u{9b}origin"]);
 });
 
 test("denying and stopping a worker ask denies the worker and cancels the turn", async () => {

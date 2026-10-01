@@ -26,7 +26,7 @@ import { isOrchestratorEligibleRuntime } from "../../domains/providers/eligibili
 import { type CostProvenance, resolveCostProvenance } from "../../domains/providers/types/cost-provenance.js";
 import { type AutonomyLevel, DEFAULT_AUTONOMY_LEVEL, isAutonomyLevel } from "../../domains/safety/autonomy.js";
 import { describeMainCallConsequences } from "../../domains/safety/call-consequence.js";
-import { describeCallTarget } from "../../domains/safety/call-target.js";
+import { describeCallTarget, sanitizeCallTargetText } from "../../domains/safety/call-target.js";
 import { COMMAND_CONSEQUENCE_MAX_SEVERE } from "../../domains/safety/command-consequence.js";
 import type { DecisionPresentation, TrustedDecisionFacts } from "../../domains/safety/decision-presentation.js";
 import {
@@ -2210,7 +2210,7 @@ const ACP_PERMISSION_OPTION_IDS = ["allow-once", "reject-once", "reject-and-stop
 const ACP_MAX_DECISION_COPY_BYTES = 512;
 
 function decisionCopy(value: string): string {
-	return boundString(safeStoredString(value, ACP_MAX_DECISION_COPY_BYTES), ACP_MAX_DECISION_COPY_BYTES);
+	return boundString(sanitizeCallTargetText(value), ACP_MAX_DECISION_COPY_BYTES);
 }
 
 /**

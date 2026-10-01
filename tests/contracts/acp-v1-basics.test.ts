@@ -2,6 +2,7 @@ import { deepStrictEqual, rejects, strictEqual } from "node:assert/strict";
 import { once } from "node:events";
 import { PassThrough } from "node:stream";
 import { test } from "node:test";
+import { readDispatchScopeNotice } from "../../src/core/dispatch-scope-notice.js";
 import type { AcpRequestError } from "../../src/engine/acp/errors.js";
 import { createAcpInterviewChannel } from "../../src/engine/acp/host-members.js";
 import { createAcpHandshake, serveClioAcpAgent } from "../../src/engine/acp/server.js";
@@ -257,4 +258,49 @@ test("ACP interview channel maps the client's reply, its cancel and a turn abort
 	const asked = requests.length;
 	deepStrictEqual(await channel.ask([question]), { answers: [], cancelled: true });
 	strictEqual(requests.length, asked);
+});
+
+test("shared scope notice text neutralizes display controls and bounds long path prose", () => {
+	const notice = readDispatchScopeNotice({
+		code: "legacy_scope_inferred",
+		message: "\u001b[31mScope\u001b[0m \u202e" + "x".repeat(8192),
+	});
+	strictEqual(notice?.message.startsWith("Scope \\u{202e}"), true);
+	strictEqual(notice?.message.length, 4096);
+});
+
+test("ACP interview text neutralizes display controls before applying wire bounds", async () => {
+	let sent: Record<string, unknown> | undefined;
+	const channel = createAcpInterviewChannel();
+	channel.attach({
+		transport: {
+			request: async <T>(_method: string, params?: unknown) => {
+				sent = params as Record<string, unknown>;
+				return { answers: [], cancelled: true } as T;
+			},
+			notify: () => {},
+		},
+		sessionId: () => "session-1",
+		enabled: () => true,
+	});
+	await channel.ask([
+		{
+			question: "\u001b[31mDelete\u001b[0m \u202efile?",
+			header: "Choice\u009b",
+			options: [{ label: "Keep\u202e", description: "\u001b]0;spoof\u0007Leave\u200b it." }],
+		},
+		{ question: "\u202e".repeat(8192), options: [{ label: "\u202e".repeat(512) }] },
+	]);
+	const questions = sent?.questions as Array<{
+		question: string;
+		header?: string;
+		options: Array<{ label: string; description?: string }>;
+	}>;
+	deepStrictEqual(questions[0], {
+		question: "Delete \\u{202e}file?",
+		header: "Choice\\u{9b}",
+		options: [{ label: "Keep\\u{202e}", description: "Leave\\u{200b} it." }],
+	});
+	strictEqual(questions[1]?.question.length, 8192);
+	strictEqual(questions[1]?.options[0]?.label.length, 512);
 });
