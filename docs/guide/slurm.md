@@ -62,8 +62,9 @@ The server also exposes its older tool names (`submit_slurm_job`,
 
 ## How autonomy treats them
 
-An MCP server carries one action class for all of its tools, and the server's
-own annotations never choose it. A user-scope declaration gets the class
+An MCP server has a default action class, with optional `toolActionClasses`
+overrides for named tools. The server's own annotations never choose either.
+A user-scope declaration without overrides gets the class
 `unknown`, and `unknown` asks for one-shot approval in `default`, runs in
 `yolo`, and is denied on read-only dispatched runs. So with the declaration above in `default`:
 
@@ -76,12 +77,14 @@ own annotations never choose it. A user-scope declaration gets the class
 
 A project declaration can be trusted with another class:
 `clio-coder mcp trust slurm --action-class read` makes all five run without
-asking, submissions and cancellations included, because the class is per
-server. Do that only in a workspace where an unattended `sbatch` is
+asking, submissions and cancellations included, unless a named tool has an
+override. Do that only in a workspace where an unattended `sbatch` is
 acceptable. `--action-class execute` routes the server's launch command
 through the bash policy and then follows the command rows of the
-[autonomy table](../architecture/safety-model.md#autonomy). There is no
-per-tool class today.
+[autonomy table](../architecture/safety-model.md#autonomy). In `mcp.yaml`,
+`toolActionClasses: {slurm_list: read, slurm_describe: read, slurm_cluster: read}`
+can leave submissions and cancellation at the server's default class while
+allowing the named read tools to run without asking.
 
 ## The skill
 

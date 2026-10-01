@@ -35,7 +35,7 @@ For saved defaults use `clio-coder configure --settings`. Each area shows its co
 
 ## Advanced settings
 
-Configure, TUI `/settings`, and GUI Settings share the section names, section order, control labels, descriptions, and grouped control order. The GUI hides or identifies controls specific to terminal presentation. The menu reads:
+Configure and GUI Settings use the same eight sections. TUI `/settings` groups its controls into the twelve areas described in [Settings Center](#settings-center). The GUI hides or identifies controls specific to terminal presentation. Configure and GUI sections are:
 
 | Section | Owns |
 | --- | --- |
@@ -64,7 +64,7 @@ Other settings apply at the boundary shown in the inventory. The routing classif
 
 ## Settings Center
 
-Open `/settings` in the TUI, `clio-coder configure --settings`, or Settings in the GUI. All three start with **Connections**, **Chat**, **Fleet**, **Context & Memory**, **Permissions & Limits**, **Appearance**, **Integrations**, and **Advanced**, in that order. A connection is the provider/app/server entry stored as a `target`; the CLI's `targets` commands and the YAML keys keep that technical name. You do not need to learn a second settings hierarchy after onboarding.
+Open `/settings` in the TUI, `clio-coder configure --settings`, or Settings in the GUI. The TUI starts with **Recent & Pinned**, **Connections**, **Models & Inference**, **Chat**, **Agents & Delegation**, **Fleet**, **Context & Memory**, **Workspace & Files**, **Permissions & Limits**, **Appearance**, **Integrations**, and **Advanced**, in that order. Configure and GUI use the eight sections listed above. A connection is the provider/app/server entry stored as a `target`; the CLI's `targets` commands and the YAML keys keep that technical name.
 
 Use **Connections → Add a target** to reopen Guided setup inside the TUI. It runs the same setup flow as configure, including model inventories, passive checks, and review before Save. **Chat** selects the connection and model that answer you. **Fleet → Default model** selects the connection, model, and thinking level for delegated work; profiles and agent routes stay in Fleet. Worker approvals and external-agent tool permissions live in **Permissions & Limits**, alongside autonomy and spending/tool limits.
 
@@ -220,6 +220,8 @@ The safety-limit leaves have no one-process `CLIO_CODER_*` overrides in the curr
 | `safety.review.cadenceToolCalls` | unset | immediately |
 | `safety.sandbox` | `auto` | next dispatch; `auto` runs native worker bash, run_script and verify under bubblewrap on Linux when available, or under a `sandbox-exec` seatbelt profile on macOS, whose profile is unverified, `required` refuses those commands without a sandbox, `off` never sandboxes |
 | `safety.sandboxNetwork` | `false` | next dispatch; `true` gives sandboxed worker commands network access, which workers holding `web_fetch` already get |
+
+On macOS, `sandbox-exec` provides a seatbelt backend when its probe succeeds. The profile exists but remains unverified on macOS, as the availability check reports. `required` refuses worker commands if the backend is unavailable.
 
 ### Interface
 
