@@ -355,3 +355,13 @@ ol.onboard > li:not([data-done="true"]) ~ li:not([data-done="true"]) .primary:no
 		transform: scale(0.6) rotate(-20deg);
 	}
 }
+
+.onboard .wb-link-button {
+	display: inline-flex;
+	align-items: center;
+	gap: var(--space-2);
+	min-height: 34px;
+	padding: 0 14px;
+	border-radius: var(--radius-sm);
+	text-decoration: none;
+}

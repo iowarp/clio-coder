@@ -44,6 +44,22 @@ export function staticClient(app: Hono, directory: string, pwa = false) {
 		if (["index.html", "sw.js", "manifest.webmanifest"].includes(path)) context.header("Cache-Control", "no-cache");
 		if (context.req.method === "HEAD") return context.body(null);
 		const bytes = await readFile(file);
+		if (extname(file) === ".mp4") {
+			// Safari will not play a film that cannot answer a byte range.
+			context.header("Accept-Ranges", "bytes");
+			const range = /^bytes=(\d*)-(\d*)$/u.exec(context.req.header("range") ?? "");
+			if (range && (range[1] !== "" || range[2] !== "")) {
+				const size = bytes.length;
+				const start = range[1] === "" ? Math.max(0, size - Number(range[2])) : Number(range[1]);
+				const end = range[1] === "" || range[2] === "" ? size - 1 : Math.min(Number(range[2]), size - 1);
+				if (start > end || start >= size) {
+					context.header("Content-Range", `bytes */${size}`);
+					return context.body(null, 416);
+				}
+				context.header("Content-Range", `bytes ${start}-${end}/${size}`);
+				return context.body(Uint8Array.from(bytes.subarray(start, end + 1)), 206);
+			}
+		}
 		return path === "index.html" && pwa
 			? context.body(bytes.toString("utf8").replace("<head>", '<head><link rel="manifest" href="/manifest.webmanifest">'))
 			: context.body(Uint8Array.from(bytes));

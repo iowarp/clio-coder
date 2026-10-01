@@ -27,6 +27,7 @@ export const PAGE_PATHS = [
 	"/usage",
 	"/library",
 	"/skills",
+	"/setup",
 	"/system",
 	"/system/interop",
 ] as const;

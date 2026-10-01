@@ -73,7 +73,7 @@ export function TargetsPage({ client, view }: { client: Client; view: "targets" 
 					{targets.data && !targets.data.targets.length && (
 						<PanelEmpty>No model connection is configured yet. Add a connection to start a conversation.</PanelEmpty>
 					)}
-					<ConnectionSetup client={client} />
+					<ConnectionSetup />
 					{mutate.isPending && <p role="status">Sending connection request…</p>}
 					{operationId && operation.isPending && !mutate.isPending && <p role="status">Checking connection operation…</p>}
 					{operation.error && !mutate.isPending && (
@@ -139,7 +139,7 @@ export function TargetsPage({ client, view }: { client: Client; view: "targets" 
 										<PanelEmpty>{emptyState.emptyStore("model", "for this connection")}</PanelEmpty>
 									)}
 								</details>
-								<ConnectionSetup client={client} targetId={target.id} />
+								<ConnectionSetup targetId={target.id} />
 								<div className="actions">
 									<button
 										type="button"

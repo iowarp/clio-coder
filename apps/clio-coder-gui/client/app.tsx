@@ -1,6 +1,6 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Outlet, useLocation, useNavigate } from "react-router";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Outlet, useLocation, useNavigate, useSearchParams } from "react-router";
 import { API_VERSION } from "../contracts/meta.js";
 import { routes } from "../contracts/routes.js";
 import type { SessionSnapshot, SessionSummary } from "../contracts/sessions.js";
@@ -17,6 +17,7 @@ import { CommandPalette } from "./interaction/CommandPalette.js";
 import { appCommands, type PaletteTask } from "./interaction/commands.js";
 import { HelpDialog } from "./interaction/HelpDialog.js";
 import { useLayersActive, useShortcut } from "./interaction/use-shortcut.js";
+import { useSetupStatus } from "./pages/target-onboarding.js";
 import { OpenWorkspaceDialog } from "./shell/OpenWorkspaceDialog.js";
 import { SettingsSidebar } from "./shell/SettingsSidebar.js";
 import { type ShellApi, ShellContext } from "./shell/shell-context.js";
@@ -24,7 +25,12 @@ import { isSettingsPath, sessionIdFromPath, taskRows } from "./shell/shell-model
 import { TaskSidebar } from "./shell/TaskSidebar.js";
 import { rememberedWorkspace, rememberWorkspace, useTaskActions } from "./shell/tasks.js";
 import { useApplyTheme } from "./shell/theme.js";
+import type { WizardExit } from "./wizard/Wizard.js";
+import type { WizardMode } from "./wizard/wizard-model.js";
 import "./shell/shell.css";
+
+// The setup wizard, its films and its styles load only when it opens.
+const Wizard = lazy(() => import("./wizard/Wizard.js"));
 
 const PHONE = "(max-width: 760px)";
 
@@ -53,6 +59,8 @@ export function App({ client }: { client: Client }) {
 	const [drawer, setDrawer] = useState(false);
 	const [sidebarCollapsed, toggleSidebar] = useSidebarCollapsed();
 	const notices = useNotices();
+	const [search] = useSearchParams();
+	const [firstRun, setFirstRun] = useState(false);
 	// A dialog or the palette claims a keyboard layer. While one is claimed, the page behind it must
 	// not be reachable by Tab either, or the focus order silently leaves the thing that has focus.
 	const layered = useLayersActive();
@@ -65,6 +73,22 @@ export function App({ client }: { client: Client }) {
 	useEffect(() => {
 		if (client.token) return subscribe(client, queries, setConnection);
 	}, [client, queries]);
+	const setup = useSetupStatus(client, !!client.token && !refused);
+	// A machine with no connection at all opens the wizard, full window. It stays until the wizard
+	// itself finishes, because saving the connection makes the status "ready" before the last step.
+	useEffect(() => {
+		if (setup.data?.state === "unconfigured") setFirstRun(true);
+	}, [setup.data?.state]);
+	const wizardMode: WizardMode | null =
+		location.pathname === "/setup" ? (search.get("target") ? "repair" : "add") : firstRun ? "first" : null;
+	const leaveWizard = useCallback(
+		(to: WizardExit) => {
+			setFirstRun(false);
+			const from = (location.state as { from?: unknown } | null)?.from;
+			void navigate(to === "home" ? "/" : typeof from === "string" ? from : "/settings/targets", { replace: true });
+		},
+		[navigate, location.state],
+	);
 
 	const sessionId = sessionIdFromPath(location.pathname);
 	const mode = isSettingsPath(location.pathname) ? "settings" : "work";
@@ -247,6 +271,28 @@ export function App({ client }: { client: Client }) {
 
 	const collapsed = sidebarCollapsed && !phone;
 	const authed = !!client.token && !refused;
+	if (wizardMode !== null && authed && meta.data?.apiVersion === API_VERSION)
+		return (
+			<>
+				<Suspense
+					fallback={
+						<p className="route-error" role="status">
+							Opening setup…
+						</p>
+					}
+				>
+					<Wizard
+						key={wizardMode}
+						client={client}
+						mode={wizardMode}
+						targetId={search.get("target") ?? undefined}
+						onExit={leaveWizard}
+					/>
+				</Suspense>
+				<LiveRegions />
+				<NoticeToasts />
+			</>
+		);
 	return (
 		<div
 			className="wb"

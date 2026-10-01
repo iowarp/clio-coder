@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useId, useRef, useState } from "react";
-import { useNavigate } from "react-router";
+import { Link, useNavigate } from "react-router";
 import { routes } from "../../contracts/routes.js";
 import type { Workspace } from "../../contracts/sessions.js";
 import { type Client, emptyInput } from "../api/client.js";
@@ -16,7 +16,7 @@ import { isUntouched } from "../shell/shell-model.js";
 import { TopBar } from "../shell/TopBar.js";
 import { rememberWorkspace } from "../shell/tasks.js";
 import "./home.css";
-import { ConnectionSetup, useSetupStatus } from "./target-onboarding.js";
+import { setupLink, useSetupStatus } from "./target-onboarding.js";
 
 /** The project the next task lands in, with a way to switch projects or open another folder. */
 function WorkspaceMenu({
@@ -79,16 +79,17 @@ function WorkspaceMenu({
 	);
 }
 
-/** The two things a first run needs, in order. Each step marks itself done and the composer takes over. */
+/**
+ * What the new-task screen still needs before it can start work: a model connection that works, and a
+ * folder. Setting up a connection is the wizard's job, so this only names the problem and links there.
+ */
 function Onboarding({
-	client,
 	ready,
 	summary,
 	targetId,
 	hasWorkspace,
 	onOpenWorkspace,
 }: {
-	client: Client;
 	ready: boolean;
 	/** What is connected when it is, or what is wrong with the saved connection when it is not. */
 	summary: string | null;
@@ -105,7 +106,11 @@ function Onboarding({
 				<div>
 					<h2>Connect a model</h2>
 					<p>{summary ?? "Choose the app, subscription, provider or server you already use."}</p>
-					{ready ? null : <ConnectionSetup client={client} bare {...(targetId ? { targetId } : {})} />}
+					{ready ? null : (
+						<Link className="primary wb-link-button" to={setupLink(targetId)} state={{ from: "/" }}>
+							{targetId ? "Repair the connection" : "Connect a model"}
+						</Link>
+					)}
 				</div>
 			</li>
 			<li data-done={hasWorkspace}>
@@ -224,7 +229,6 @@ export function Home({ client }: { client: Client }) {
 					) : null}
 					{onboarding ? (
 						<Onboarding
-							client={client}
 							ready={ready}
 							summary={summary}
 							targetId={setup.data?.targetId ?? undefined}
