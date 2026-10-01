@@ -92,6 +92,8 @@ function mergeCardQuestion(input: MergeCardInput): AskUserQuestion {
 	const noun = total === 1 ? "path" : "paths";
 	return {
 		header: "Merge task branch?",
+		// Opens on Keep branch: an Enter that lands as the card appears must not merge.
+		defaultOption: 1,
 		question: [
 			`Branch ${input.branch} changes ${total} ${noun}:`,
 			...listed,
@@ -110,6 +112,8 @@ function mergeCardQuestion(input: MergeCardInput): AskUserQuestion {
 function discardConfirmQuestion(branch: string): AskUserQuestion {
 	return {
 		header: "Discard",
+		// Opens on Back: an Enter that lands as the confirm appears must not delete.
+		defaultOption: 1,
 		question: `Delete branch ${branch} and its worktree? This cannot be undone.`,
 		options: [
 			{ label: DELETE, description: "Remove the branch and its worktree." },

@@ -52,8 +52,22 @@ export interface OpenAskUserOverlayDeps {
 	onCancel: () => void;
 }
 
+/** How a round is put in front of the operator beyond its questions. */
+export interface AskUserRoundOptions {
+	/**
+	 * Ignore every key but Esc for this long after the round appears. A round the
+	 * harness opens unprompted can land while the operator is typing in the
+	 * composer, and a stray Enter must not answer it.
+	 */
+	inputGuardMs?: number;
+}
+
 export interface AskUserOverlaySession extends OverlayHandle {
-	ask(questions: ReadonlyArray<AskUserQuestion>, presentation?: DecisionPresentation): Promise<AskUserResult>;
+	ask(
+		questions: ReadonlyArray<AskUserQuestion>,
+		presentation?: DecisionPresentation,
+		round?: AskUserRoundOptions,
+	): Promise<AskUserResult>;
 	cancel(): void;
 	close(): void;
 	isWaiting(): boolean;
@@ -96,6 +110,8 @@ function initialMode(question: AskUserQuestion): Mode {
 }
 
 function createQuestionState(question: AskUserQuestion): QuestionState {
+	const preferred = question.defaultOption;
+	const focusable = preferred !== undefined && question.options?.[preferred] !== undefined;
 	return {
 		mode: initialMode(question),
 		selected: new Set<number>(),
@@ -104,6 +120,8 @@ function createQuestionState(question: AskUserQuestion): QuestionState {
 		inputValue: "",
 		answer: "",
 		rawValue: "",
+		// Focus only. The option is not selected until the operator presses Enter on it.
+		...(focusable ? { focusedValue: `option:${preferred}` } : {}),
 	};
 }
 
@@ -422,17 +440,21 @@ class AskUserOverlayView implements Component {
 	private ledgerExpanded = false;
 	private detailsExpanded = false;
 	private presentation: DecisionPresentation = DEFAULT_ASK_USER_PRESENTATION;
+	/** performance.now() before which input other than Esc is dropped. */
+	private inputGuardUntil = 0;
 
 	constructor(private readonly deps: AskUserOverlayViewDeps) {}
 
 	begin(
 		questions: ReadonlyArray<AskUserQuestion>,
 		presentation: DecisionPresentation = DEFAULT_ASK_USER_PRESENTATION,
+		round?: AskUserRoundOptions,
 	): Promise<AskUserResult> {
 		if (this.phase === "closed") return Promise.resolve(cancelledAskUserResult());
 		// A round is already on screen; the caller is not the one being answered.
 		if (this.resolveCurrent) return Promise.resolve(unavailableAskUserResult());
 		this.phase = "asking";
+		this.inputGuardUntil = round?.inputGuardMs !== undefined ? performance.now() + round.inputGuardMs : 0;
 		this.index = 0;
 		this.status = "";
 		this.questions = [...questions];
@@ -496,6 +518,7 @@ class AskUserOverlayView implements Component {
 		const question = this.currentQuestion();
 		const state = this.currentState();
 		if (!question || !state) return;
+		if (performance.now() < this.inputGuardUntil && !matchesKey(data, "escape")) return;
 
 		// Scrolling the question must not cost the operator their place in the
 		// options, so the region has keys of its own that neither control claims.
@@ -1285,7 +1308,11 @@ class AskUserOverlayView implements Component {
  * frame would wrap, at the width and row count the test names.
  */
 export interface AskUserViewForTesting {
-	ask(questions: ReadonlyArray<AskUserQuestion>, presentation?: DecisionPresentation): Promise<AskUserResult>;
+	ask(
+		questions: ReadonlyArray<AskUserQuestion>,
+		presentation?: DecisionPresentation,
+		round?: AskUserRoundOptions,
+	): Promise<AskUserResult>;
 	render(width: number): string[];
 	handleInput(data: string): void;
 	footerHint(): string;
@@ -1304,7 +1331,7 @@ export function createAskUserViewForTesting(deps: {
 		...(deps.tui ? { tui: deps.tui } : {}),
 	});
 	return {
-		ask: (questions, presentation) => view.begin(questions, presentation),
+		ask: (questions, presentation, round) => view.begin(questions, presentation, round),
 		render: (width) => view.render(width),
 		handleInput: (data) => view.handleInput(data),
 		footerHint: () => view.footerHint(),
@@ -1363,7 +1390,7 @@ export function openAskUserOverlay(tui: TUI, deps: OpenAskUserOverlayDeps): AskU
 		unfocus: (options) => (options ? handle.unfocus(options) : handle.unfocus()),
 		isFocused: () => (closed ? false : handle.isFocused()),
 		getBounds: () => (closed ? undefined : handle.getBounds()),
-		ask: (questions, presentation) => view.begin(questions, presentation),
+		ask: (questions, presentation, round) => view.begin(questions, presentation, round),
 		cancel: () => view.cancel(),
 		close,
 		hide: close,

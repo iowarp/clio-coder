@@ -9,6 +9,15 @@ import {
 import type { OverlayState } from "./overlay-key-routing.js";
 import { type AskUserOverlaySession, openAskUserOverlay } from "./overlays/ask-user.js";
 
+/**
+ * How long a harness round ignores keys after it appears. Time rather than
+ * "until the first navigation key": a fixed window drops the Enter of an
+ * operator mid-sentence in the composer without making a deliberate Enter on
+ * the safe default wait for an arrow press. Typing cadence puts the next
+ * keystroke well inside it, and an operator reading the card is outside it.
+ */
+const HARNESS_INPUT_GUARD_MS = 400;
+
 export interface OverlayAskUserLifecycleDeps {
 	tui: TUI;
 	getOverlayState(): OverlayState;
@@ -141,7 +150,9 @@ export function createOverlayAskUserLifecycle(deps: OverlayAskUserLifecycleDeps)
 		const onAbort = (): void => activeSession.cancel();
 		signal?.addEventListener("abort", onAbort, { once: true });
 		try {
-			return await activeSession.ask(questions, invokeOptions?.decisionPresentation);
+			return await activeSession.ask(questions, invokeOptions?.decisionPresentation, {
+				inputGuardMs: HARNESS_INPUT_GUARD_MS,
+			});
 		} finally {
 			signal?.removeEventListener("abort", onAbort);
 			harnessHold = null;

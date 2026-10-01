@@ -405,3 +405,44 @@ test("browse from choices to an empty text question and back, preserving typed d
 	strictEqual(result.answers[1]?.value, "keep my draft");
 	strictEqual(result.answers[0]?.answer, "Teal");
 });
+
+const SAFE_DEFAULT_ROUND: AskUserQuestion = {
+	question: "Merge the task branch?",
+	options: [{ label: "Merge" }, { label: "Keep branch" }, { label: "Discard" }],
+};
+
+test("a question with defaultOption opens focused on it, and one without opens on the first option", async () => {
+	const focused = createAskUserViewForTesting({ rows: 40 });
+	const focusedPending = focused.ask([{ ...SAFE_DEFAULT_ROUND, defaultOption: 1 }]);
+	focused.handleInput(ENTER);
+	deepStrictEqual((await focusedPending).answers[0]?.options, ["Keep branch"]);
+
+	const plainRound = createAskUserViewForTesting({ rows: 40 });
+	const plainPending = plainRound.ask([SAFE_DEFAULT_ROUND]);
+	plainRound.handleInput(ENTER);
+	deepStrictEqual((await plainPending).answers[0]?.options, ["Merge"]);
+});
+
+test("a harness round drops Enter inside its input guard, takes Esc, and answers after the guard", async () => {
+	const guarded = createAskUserViewForTesting({ rows: 40 });
+	const guardedPending = guarded.ask([{ ...SAFE_DEFAULT_ROUND, defaultOption: 1 }], undefined, {
+		inputGuardMs: 60_000,
+	});
+	let settled = false;
+	void guardedPending.then(() => {
+		settled = true;
+	});
+	guarded.handleInput(ENTER);
+	guarded.handleInput(DOWN);
+	guarded.handleInput(ENTER);
+	await new Promise((resolve) => setImmediate(resolve));
+	strictEqual(settled, false, "Enter inside the guard must not answer");
+	guarded.handleInput("\u001b");
+	strictEqual((await guardedPending).cancelled, true);
+
+	const elapsed = createAskUserViewForTesting({ rows: 40 });
+	const elapsedPending = elapsed.ask([{ ...SAFE_DEFAULT_ROUND, defaultOption: 1 }], undefined, { inputGuardMs: 20 });
+	await new Promise((resolve) => setTimeout(resolve, 100));
+	elapsed.handleInput(ENTER);
+	deepStrictEqual((await elapsedPending).answers[0]?.options, ["Keep branch"]);
+});

@@ -35,6 +35,12 @@ export interface AskUserQuestion {
 	header?: string;
 	options?: AskUserOption[];
 	multi_select?: boolean;
+	/**
+	 * Index into `options` the list opens focused on. Set by harness callers
+	 * only: the model's input is rebuilt field by field in `normalizeAskUserQuestions`,
+	 * which does not carry it, so a model question always opens on its first option.
+	 */
+	defaultOption?: number;
 }
 
 export interface AskUserAnswer {
