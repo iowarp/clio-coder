@@ -7409,20 +7409,19 @@ export function createDispatchBundle(
 						// The commit the card describes. Merge lands this id or nothing.
 						const previewedCommit = worktreeReceipt.commit;
 						// The preserve pass does not look at protected paths, only the merge
-						// does, so the card learns of them here and withholds Merge.
+						// does, so the card learns of them here and withholds Merge. A surface
+						// with no operator never builds a card, so it pays for no git call.
 						const worktreeRoot = req.taskWorktree.root;
-						let previewedProtected: string[] | null = [];
-						try {
-							previewedProtected =
-								previewedCommit === undefined
-									? null
-									: protectedPathsChangedByWorktreeBranch(worktreeRoot, previewedCommit, protectedPaths).map(
-											(path) => relative(worktreeRoot, path) || path,
-										);
-						} catch (protectedError) {
-							// Without the check a Merge offer could land a protected path.
-							previewedProtected = null;
-							reportDispatchDiagnostic(`protected paths of ${req.taskWorktree.runId}`, protectedError);
+						let previewedProtected: string[] | null = null;
+						if (previewedCommit !== undefined && options?.operatorAsk?.available() === true) {
+							try {
+								previewedProtected = protectedPathsChangedByWorktreeBranch(worktreeRoot, previewedCommit, protectedPaths).map(
+									(path) => relative(worktreeRoot, path) || path,
+								);
+							} catch (protectedError) {
+								// Without the check a Merge offer could land a protected path.
+								reportDispatchDiagnostic(`protected paths of ${req.taskWorktree.runId}`, protectedError);
+							}
 						}
 						const card =
 							withheldVerdict !== null &&
