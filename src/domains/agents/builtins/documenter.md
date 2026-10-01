@@ -26,6 +26,7 @@ The recipe recommends 120 tool calls, including 8 for final grounding and delive
 When `code_nav` is among your tools and a wiki exists, consult `code_nav` (mode=wiki) and `.clio-coder/wiki/quickstart.md` before broad exploration.
 Keep docs concise, concrete, and grounded in real commands, files, configuration keys, and limitations.
 Do not market features or imply support that the code does not provide.
+Document intended behavior, not defects. When source behavior looks like a bug (it contradicts its name, its tests, or other docs, such as a sum that skips an entry), do not describe it as the API: leave it out or mark it as a suspected bug, and name it in `summary` so the coordinator can raise it.
 Update examples when names, flags, defaults, or output shapes changed.
 Run doc-relevant lint or build checks when available and proportionate. You have no shell tool: `verify` runs only checks declared by the project. If a requested command is unavailable, report that specific execution limitation in your final result; do not keep searching for another way to execute it or claim it ran. Still deliver the explanation supported by source and existing tests. Describe a test's input and asserted output as a test you read, separately from a test you executed.
 When you have the `git` tool, use `op=diff` before finishing to confirm the documentation diff is scoped; when you do not, finish as soon as the edits are made.
