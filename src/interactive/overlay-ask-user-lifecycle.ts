@@ -19,6 +19,9 @@ import { type AskUserOverlaySession, openAskUserOverlay } from "./overlays/ask-u
  */
 const HARNESS_INPUT_GUARD_MS = 400;
 
+/** Stands in for the hold of a card that took none, so it too is noticed once. */
+const UNHELD_CARD = {};
+
 export interface OverlayAskUserLifecycleDeps {
 	tui: TUI;
 	getOverlayState(): OverlayState;
@@ -31,6 +34,8 @@ export interface OverlayAskUserLifecycleDeps {
 	 * is left in ask-user with nothing behind it.
 	 */
 	replaceInterruptedOverlay?(from: AskUserOverlaySession, to: AskUserOverlaySession | null): void;
+	/** A harness card could not be shown because another overlay owns the screen. Fired once per card. */
+	onHarnessWaiting?(): void;
 	renderContextIsland(): void;
 	renderTaskIsland(): void;
 	requestRender(): void;
@@ -74,6 +79,14 @@ export function createOverlayAskUserLifecycle(deps: OverlayAskUserLifecycleDeps)
 	let harnessHold: Promise<void> | null = null;
 	let heldBy: HarnessHold | null = null;
 	let releaseHold: () => void = () => {};
+	/** The harness card's own session. The model's interview, when one is open, waits hidden beneath it. */
+	let cardSession: AskUserOverlaySession | null = null;
+	/** The model interview's Esc handler, put back when the card ends. */
+	let savedCancel: (() => void) | null = null;
+	/** A turn-level close the card swallowed; the interview it asked to close is closed once the card ends. */
+	let closeRequested = false;
+	/** The card the operator was last told is waiting behind another overlay, so a retry loop notices once. */
+	let noticedFor: HarnessHold | object | null = null;
 	const openSession = deps.openAskUserOverlay ?? openAskUserOverlay;
 
 	const refresh = (): void => {
@@ -102,7 +115,10 @@ export function createOverlayAskUserLifecycle(deps: OverlayAskUserLifecycleDeps)
 	// Turn end, a streamed assistant delta, and an interview-closing tool result
 	// all call this. None of them speaks for a harness card.
 	const close = (): void => {
-		if (harnessHold !== null) return;
+		if (harnessHold !== null) {
+			closeRequested = true;
+			return;
+		}
 		closeSession();
 	};
 
@@ -119,7 +135,7 @@ export function createOverlayAskUserLifecycle(deps: OverlayAskUserLifecycleDeps)
 
 	const cancel = (): void => {
 		if (harnessHold !== null) {
-			session?.cancel();
+			cardSession?.cancel();
 			return;
 		}
 		cancelledForTurn = true;
@@ -138,9 +154,10 @@ export function createOverlayAskUserLifecycle(deps: OverlayAskUserLifecycleDeps)
 	};
 
 	/**
-	 * Release the screen a harness card held: close its session and let a waiting
-	 * model ask through. Idempotent, because an explicit hold ends it from the
-	 * card's owner and a one-round card from the round's own `finally`.
+	 * Release the screen a harness card held: close its session, bring back the
+	 * model's interview if one waited beneath it, and let a waiting model ask
+	 * through. Idempotent, because an explicit hold ends it from the card's owner
+	 * and a one-round card from the round's own `finally`.
 	 */
 	const endHarness = (): void => {
 		if (harnessHold === null) return;
@@ -148,7 +165,28 @@ export function createOverlayAskUserLifecycle(deps: OverlayAskUserLifecycleDeps)
 		heldBy = null;
 		const release = releaseHold;
 		releaseHold = () => {};
-		closeSession();
+		const card = cardSession;
+		cardSession = null;
+		pendingCancel = null;
+		if (card !== null) {
+			card.close();
+			deps.replaceInterruptedOverlay?.(card, session);
+			if (deps.getOverlayHandle() === card) deps.setOverlayHandle(session);
+		}
+		if (closeRequested) {
+			closeRequested = false;
+			closeSession();
+		} else if (session !== null) {
+			// Resumed as it was left: nothing was cancelled, answered, or recorded.
+			pendingCancel = savedCancel;
+			session.setHidden(false);
+			if (deps.getOverlayState() === "ask-user") session.focus();
+			refresh();
+		} else {
+			if (deps.getOverlayState() === "ask-user") deps.setOverlayState("closed");
+			refresh();
+		}
+		savedCancel = null;
 		release();
 	};
 
@@ -161,20 +199,38 @@ export function createOverlayAskUserLifecycle(deps: OverlayAskUserLifecycleDeps)
 		// A card's later rounds (the discard confirm, and the card again after Back)
 		// continue the reservation its first round took, so a model question cannot
 		// take the screen between them.
-		const continuing = hold !== undefined && heldBy === hold && session !== null;
+		const continuing = hold !== undefined && heldBy === hold && cardSession !== null;
 		if (!continuing) {
-			// The model's interview keeps the overlay open between rounds, and another
-			// card may be on screen. A card never takes over or closes a session it
-			// did not open; the caller retries once the screen is free.
-			if (session !== null || harnessHold !== null) return unavailableAskUserResult();
-			if (ensureSession() === null) return unavailableAskUserResult();
+			// Another card is on screen, or the model is mid-round: the caller retries.
+			if (harnessHold !== null || (session !== null && !session.isWaiting())) return unavailableAskUserResult();
+			const state = deps.getOverlayState();
+			if (state !== "closed" && state !== "ask-user") {
+				// A dispatch board or settings overlay hides the card. Say so once, or
+				// it times out unseen. A permission prompt is already asking.
+				const card = hold ?? UNHELD_CARD;
+				if (state !== "permission-confirm" && noticedFor !== card) {
+					noticedFor = card;
+					deps.onHarnessWaiting?.();
+				}
+				return unavailableAskUserResult();
+			}
+			// An interview with no round in flight yields the screen and resumes after
+			// the card. Closing it would drop its ledger and cancel nothing it owns.
+			savedCancel = pendingCancel;
+			session?.setHidden(true);
+			deps.setOverlayState("ask-user");
+			const opened = openSession(deps.tui, { onCancel: () => pendingCancel?.() });
+			cardSession = opened;
+			deps.setOverlayHandle(opened);
+			deps.onOperatorParked?.();
+			deps.requestRender();
 			harnessHold = new Promise<void>((resolve) => {
 				releaseHold = resolve;
 			});
 			heldBy = hold ?? null;
 			hold?.onRelease(endHarness);
 		}
-		const activeSession = session;
+		const activeSession = cardSession;
 		if (activeSession === null) return unavailableAskUserResult();
 		// Esc on the card answers only the card. It never marks the turn's
 		// interview cancelled.

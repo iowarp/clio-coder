@@ -454,6 +454,7 @@ test("a harness round drops Enter inside its input guard, takes Esc, and answers
 /** A lifecycle on the real overlay transitions with a scripted overlay session, no TUI. */
 function lifecycleFixture() {
 	const sessions: FakeSession[] = [];
+	const notices: string[] = [];
 	let permissionCloses = 0;
 	const transitions = createOverlayTransitions({
 		stopDispatchBoardTicker: () => {},
@@ -480,13 +481,16 @@ function lifecycleFixture() {
 		renderContextIsland: () => {},
 		renderTaskIsland: () => {},
 		requestRender: () => {},
+		onHarnessWaiting: () => {
+			notices.push("waiting");
+		},
 		openAskUserOverlay: () => {
 			const session = new FakeSession();
 			sessions.push(session);
 			return session;
 		},
 	});
-	return { lifecycle, transitions, sessions, permissionCloses: () => permissionCloses };
+	return { lifecycle, transitions, sessions, notices, permissionCloses: () => permissionCloses };
 }
 
 class FakeSession {
@@ -586,4 +590,52 @@ test("a harness card holds the screen across its rounds, so a waiting model ques
 	const answered = await modelAsk;
 	strictEqual(answered.cancelled, undefined);
 	strictEqual(answered.answers[0]?.answer, "Yes");
+});
+
+test("an idle model interview yields the screen to a card and resumes after it, cancelling nothing", async () => {
+	const { lifecycle, transitions, sessions } = lifecycleFixture();
+	const first = lifecycle.handler([{ question: "Which?", options: [{ label: "A" }] }], MODEL_CALL);
+	await tick();
+	sessions[0]?.answer("A");
+	await first;
+	// The model's next message is a foreground dispatch whose finalize asks for the card.
+	const hold = createHarnessHold();
+	const card = lifecycle.handler([{ question: "Merge?", options: [{ label: "Keep branch" }] }], {
+		origin: "harness",
+		harnessHold: hold,
+	});
+	await tick();
+	strictEqual(sessions.length, 2, "the card has a screen of its own");
+	strictEqual(sessions[0]?.hidden, true);
+	strictEqual(sessions[0]?.closed, false);
+	sessions[1]?.answer("Keep branch");
+	await card;
+	hold.release();
+	strictEqual(sessions[1]?.closed, true);
+	strictEqual(sessions[0]?.hidden, false, "the interview is back");
+	strictEqual(sessions[0]?.closed, false);
+	strictEqual(transitions.state, "ask-user");
+	strictEqual(transitions.handle, sessions[0]);
+	const second = lifecycle.handler([{ question: "Next?", options: [{ label: "B" }] }], MODEL_CALL);
+	await tick();
+	deepStrictEqual(sessions[0]?.asked, ["Which?", "Next?"]);
+	sessions[0]?.answer("B");
+	strictEqual((await second).cancelled, undefined);
+});
+
+test("a card behind another overlay tells the operator once and shows when the screen frees", async () => {
+	const { lifecycle, transitions, sessions, notices } = lifecycleFixture();
+	transitions.state = "settings";
+	const hold = createHarnessHold();
+	const options = { origin: "harness" as const, harnessHold: hold };
+	const question = [{ question: "Merge?", options: [{ label: "Keep branch" }] }];
+	strictEqual((await lifecycle.handler(question, options)).unavailable, true);
+	strictEqual((await lifecycle.handler(question, options)).unavailable, true);
+	deepStrictEqual(notices, ["waiting"]);
+	transitions.state = "closed";
+	const shown = lifecycle.handler(question, options);
+	await tick();
+	sessions[0]?.answer("Keep branch");
+	strictEqual((await shown).answers[0]?.answer, "Keep branch");
+	hold.release();
 });

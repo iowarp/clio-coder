@@ -364,6 +364,14 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 			overlayTransitions.handle = handle;
 		},
 		replaceInterruptedOverlay: (from, to) => overlayTransitions.replaceInterrupted?.(from, to),
+		onHarnessWaiting: () => {
+			appendNotice(
+				"info",
+				"Clio-Coder has a question for you, hidden behind this overlay. Close it to answer.",
+				busNoticeSink,
+			);
+			deps.onOperatorParked?.();
+		},
 		renderContextIsland: () => interactiveTickers.renderContextIsland(),
 		renderTaskIsland: () => interactiveTickers.renderTaskIsland(),
 		requestRender: () => tui.requestRender(),
