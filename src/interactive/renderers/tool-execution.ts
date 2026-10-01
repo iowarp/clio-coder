@@ -1225,6 +1225,8 @@ function dispatchIntentSummary(intent: Record<string, unknown>): string | null {
 	] as const) {
 		const values = intent[key];
 		if (!Array.isArray(values) || values.length === 0) continue;
+		// A read root that is only the workspace is the default, so the row omits it.
+		if (key === "read_roots" && values.every((value) => value === "." || value === "./")) continue;
 		const names = values
 			.slice(0, 3)
 			.map((value) =>
