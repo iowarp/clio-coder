@@ -159,12 +159,18 @@ export interface SettingsSection {
 		| "traces"
 		| "fleet"
 		| "evidence"
-		| "system";
+		| "system"
+		| "shield"
+		| "layers";
 	readonly group: "main" | "advanced";
 	/** First path segments, or full-prefix matches, that keep this section highlighted. */
 	readonly owns: readonly string[];
 }
 
+/**
+ * A few calm pages first, built from the runtime registry (General is the app's own). Everything else
+ * is under Advanced: every remaining setting with search, the raw views, and the inspection pages.
+ */
 export const SETTINGS_SECTIONS: readonly SettingsSection[] = [
 	{
 		id: "general",
@@ -177,22 +183,45 @@ export const SETTINGS_SECTIONS: readonly SettingsSection[] = [
 	{
 		id: "models",
 		label: "Models",
-		path: "/settings/targets",
+		path: "/settings/models",
 		icon: "models",
 		group: "main",
-		owns: ["/settings/targets", "/settings/routing"],
+		owns: ["/settings/models", "/settings/targets", "/settings/routing"],
 	},
 	{
-		id: "harness",
-		label: "Harness",
-		path: "/settings",
-		icon: "sliders",
+		id: "safety",
+		label: "Safety",
+		path: "/settings/safety",
+		icon: "shield",
 		group: "main",
-		owns: ["/settings", "/settings/effective", "/settings/why"],
+		owns: ["/settings/safety"],
 	},
-	{ id: "skills", label: "Skills", path: "/library", icon: "skills", group: "main", owns: ["/library"] },
-	{ id: "toolchain", label: "Toolchain", path: "/toolchain", icon: "toolchain", group: "main", owns: ["/toolchain"] },
-	{ id: "usage", label: "Usage", path: "/usage", icon: "usage", group: "main", owns: ["/usage"] },
+	{
+		id: "context",
+		label: "Context and memory",
+		path: "/settings/context",
+		icon: "layers",
+		group: "main",
+		owns: ["/settings/context"],
+	},
+	{
+		id: "all",
+		label: "All settings",
+		path: "/settings/advanced",
+		icon: "sliders",
+		group: "advanced",
+		owns: ["/settings", "/settings/advanced", "/settings/effective", "/settings/why"],
+	},
+	{ id: "library", label: "Library", path: "/library", icon: "skills", group: "advanced", owns: ["/library"] },
+	{
+		id: "toolchain",
+		label: "Toolchain",
+		path: "/toolchain",
+		icon: "toolchain",
+		group: "advanced",
+		owns: ["/toolchain"],
+	},
+	{ id: "usage", label: "Usage", path: "/usage", icon: "usage", group: "advanced", owns: ["/usage"] },
 	{ id: "traces", label: "Traces", path: "/traces", icon: "traces", group: "advanced", owns: ["/traces"] },
 	{ id: "fleet", label: "Fleet", path: "/fleet", icon: "fleet", group: "advanced", owns: ["/fleet"] },
 	{ id: "evidence", label: "Evidence", path: "/evidence", icon: "evidence", group: "advanced", owns: ["/evidence"] },

@@ -294,8 +294,8 @@ function SessionView({ client, id }: { client: Client; id: string }) {
 								<MenuItem icon="pencil" onClick={() => setRenaming(true)}>
 									Rename task
 								</MenuItem>
-								<MenuItem icon="sliders" onClick={() => void navigate(`/settings?workspace=${snapshot.workspaceId}`)}>
-									Harness settings
+								<MenuItem icon="sliders" onClick={() => void navigate(`/settings/advanced?workspace=${snapshot.workspaceId}`)}>
+									Project settings
 								</MenuItem>
 								<MenuItem icon="folder" onClick={() => void navigate(`/workspaces/${snapshot.workspaceId}/sessions`)}>
 									All tasks in {workspaceName}

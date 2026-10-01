@@ -124,3 +124,40 @@
 		grid-template-columns: repeat(3, minmax(0, 1fr));
 	}
 }
+
+/* ---- the calm settings pages ----------------------------------------------------------- */
+.settings-page {
+	max-width: 880px;
+}
+.settings-page__lede {
+	margin: var(--space-2) 0 0;
+	max-width: 62ch;
+	color: var(--ink-muted);
+	line-height: 1.5;
+}
+.settings-page__note {
+	color: var(--ink-muted);
+}
+.settings-page__links {
+	display: grid;
+	gap: var(--space-3);
+	margin: 0 0 var(--space-6);
+	padding: 0;
+	list-style: none;
+}
+.settings-page__links li {
+	display: grid;
+	gap: 2px;
+}
+.settings-page__links a {
+	color: var(--accent);
+	font-weight: 500;
+	text-decoration: none;
+}
+.settings-page__links a:hover {
+	text-decoration: underline;
+}
+.settings-page__links small {
+	color: var(--ink-muted);
+	font-size: var(--text-meta);
+}

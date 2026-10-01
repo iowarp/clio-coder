@@ -58,6 +58,8 @@ const paths = {
 	clock: "M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18ZM12 7v5l3 2",
 	circle: "M12 4a8 8 0 1 0 0 16 8 8 0 0 0 0-16Z",
 	fileDiff: "M7 3h8l4 4v14H7zM15 3v4h4M10 12h6M13 9v6M10 17h6",
+	shield: "M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6Z",
+	layers: "M12 3 3 8l9 5 9-5ZM3 13l9 5 9-5M3 17.5l9 5 9-5",
 	listChecks: "M4 6l1.5 1.5L8 5M4 12l1.5 1.5L8 11M4 18l1.5 1.5L8 17M11 6h9M11 12h9M11 18h9",
 } as const;
 

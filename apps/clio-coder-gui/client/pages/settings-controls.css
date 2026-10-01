@@ -12,7 +12,8 @@
 	background: var(--status-warn-tint);
 	color: var(--status-warn-fg);
 }
-.setting-group > h3 {
+.setting-group > h3,
+.setting-group > .setting-group__title {
 	font-size: var(--text-meta);
 	letter-spacing: 0.08em;
 	text-transform: uppercase;
@@ -151,6 +152,15 @@
 	margin-block: var(--space-2);
 	color: var(--ink-muted);
 }
+.settings-write-scope--quiet {
+	padding: 0;
+	margin-block: var(--space-2) var(--space-4);
+	background: transparent;
+	border-left: 0;
+}
+.settings-write-scope--quiet p {
+	margin: 0;
+}
 .settings-write-scope details {
 	margin-top: var(--space-3);
 }
@@ -163,10 +173,14 @@
 .setting-control .setting-control__source > code {
 	flex-basis: 100%;
 }
-.setting-control__source > span {
-	border: 1px solid var(--line-strong);
-	padding: 1px var(--space-2);
-	border-radius: var(--radius-sm);
+.setting-control__source {
+	align-items: baseline;
+	gap: var(--space-1) var(--space-2);
+	color: var(--ink-muted);
+	font-size: var(--text-meta);
+}
+.setting-control__source a {
+	color: inherit;
 }
 .settings-draft-note {
 	padding-left: var(--space-3);

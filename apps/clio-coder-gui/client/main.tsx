@@ -133,8 +133,36 @@ const router = createBrowserRouter([
 			{
 				path: "/settings",
 				lazy: async () => {
-					const { SettingsPage } = await import("./pages/settings.js");
-					return { element: <SettingsPage client={client} view="settings" /> };
+					const { AdvancedSettings } = await import("./pages/settings-sections.js");
+					return { element: <AdvancedSettings client={client} /> };
+				},
+			},
+			{
+				path: "/settings/advanced",
+				lazy: async () => {
+					const { AdvancedSettings } = await import("./pages/settings-sections.js");
+					return { element: <AdvancedSettings client={client} /> };
+				},
+			},
+			{
+				path: "/settings/models",
+				lazy: async () => {
+					const { ModelsSettings } = await import("./pages/settings-sections.js");
+					return { element: <ModelsSettings client={client} /> };
+				},
+			},
+			{
+				path: "/settings/safety",
+				lazy: async () => {
+					const { SafetySettings } = await import("./pages/settings-sections.js");
+					return { element: <SafetySettings client={client} /> };
+				},
+			},
+			{
+				path: "/settings/context",
+				lazy: async () => {
+					const { ContextSettings } = await import("./pages/settings-sections.js");
+					return { element: <ContextSettings client={client} /> };
 				},
 			},
 			{

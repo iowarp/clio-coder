@@ -13,13 +13,15 @@ import { StructuredSettingsEditor } from "./StructuredSettingsEditor.js";
 import {
 	emptyMeaning,
 	groupControls,
+	inScope,
 	matchesControl,
 	OPEN_CHOICES,
 	type OpenChoice,
+	type SettingsScopeId,
 	selectOptions,
 	sentence,
 	sourceLabel,
-	TIMING_LABEL,
+	TIMING_PHRASE,
 	TIMING_SENTENCE,
 	writtenSentences,
 } from "./settings-control-model.js";
@@ -112,7 +114,7 @@ function ControlRow({
 	expectedValue,
 	onDraft,
 	catalog,
-	compact = false,
+	showPath = true,
 }: {
 	control: SettingControl;
 	save: (write: { path: string; value: string; confirmed?: boolean; expectedValue?: string }) => Promise<SettingWritten>;
@@ -121,7 +123,8 @@ function ControlRow({
 	expectedValue: string | undefined;
 	onDraft: (value: string | null, submittedValue?: string) => void;
 	catalog?: ModelCatalog | undefined;
-	compact?: boolean;
+	/** The dotted setting path, for the Advanced page. The calm pages state the label and nothing else. */
+	showPath?: boolean;
 }) {
 	const fieldId = useId(),
 		helpId = useId();
@@ -164,11 +167,14 @@ function ControlRow({
 				{control.help && <p className="setting-control__help">{control.help}</p>}
 				{control.note && <p className="setting-control__note">{control.note}</p>}
 				<small className="setting-control__source">
-					<code>{control.path}</code>
-					<Link to={`/settings/effective?${new URLSearchParams({ workspace: workspaceId, q: control.path })}`}>
-						{sourceLabel(control.source)} · {compact ? "open effective value page" : "inspect effective value"}
+					{showPath ? <code>{control.path}</code> : null}
+					<Link
+						to={`/settings/effective?${new URLSearchParams({ workspace: workspaceId, q: control.path })}`}
+						title="Inspect the effective value and every layer that sets it"
+					>
+						{sourceLabel(control.source)}
 					</Link>
-					<span title={TIMING_SENTENCE[control.timing]}>{TIMING_LABEL[control.timing]}</span>
+					<span title={TIMING_SENTENCE[control.timing]}>· {TIMING_PHRASE[control.timing]}</span>
 				</small>
 			</div>
 			<div className="setting-control__edit">
@@ -312,10 +318,13 @@ export function SettingsControlsView({
 	client,
 	workspaceId,
 	compact = false,
+	scope,
 }: {
 	client: Client;
 	workspaceId: string;
 	compact?: boolean;
+	/** One calm page of Settings: only its controls, no section tabs, searchable on the Advanced page. */
+	scope?: SettingsScopeId;
 }) {
 	const queries = useQueryClient();
 	const selectionId = useId();
@@ -450,12 +459,17 @@ export function SettingsControlsView({
 			void queries.invalidateQueries({ queryKey: [stale] });
 		return result;
 	};
-	const { sections, controls, userFile } = report.data;
+	const { sections, controls: everything, userFile } = report.data;
+	// A search on the Advanced page reaches every control, so a link to any setting finds it.
+	const controls =
+		scope && !(scope === "advanced" && filter.trim())
+			? everything.filter((control) => inScope(scope, control))
+			: everything;
 	const unsaved = controls.filter(
 		(control) => drafts[control.path] !== undefined && drafts[control.path] !== control.value,
 	);
 	const active =
-		showDrafts || filter.trim() || (compact && section === "all")
+		scope || showDrafts || filter.trim() || (compact && section === "all")
 			? null
 			: (sections.find((candidate) => candidate.id === section)?.id ?? sections[0]?.id ?? null);
 	const visible = showDrafts
@@ -474,9 +488,9 @@ export function SettingsControlsView({
 					</button>
 				</div>
 			) : null}
-			<div className="settings-write-scope">
-				<strong>Save to your user settings</strong>
-				<p>Applies across projects. Project and command-line overrides take precedence.</p>
+			<div className={`settings-write-scope${scope && scope !== "advanced" ? " settings-write-scope--quiet" : ""}`}>
+				{scope && scope !== "advanced" ? null : <strong>Save to your user settings</strong>}
+				<p>Saved to your user settings and applied across projects. Project and command-line overrides take precedence.</p>
 				{userFile && (
 					<details>
 						<summary>Saved settings file</summary>
@@ -484,17 +498,19 @@ export function SettingsControlsView({
 					</details>
 				)}
 			</div>
-			<label className="settings-filter">
-				Find a setting
-				<input
-					type="search"
-					value={filter}
-					onChange={(event) => {
-						discover(section, event.target.value, true);
-						setShowDrafts(false);
-					}}
-				/>
-			</label>
+			{scope === undefined || scope === "advanced" ? (
+				<label className="settings-filter">
+					Find a setting
+					<input
+						type="search"
+						value={filter}
+						onChange={(event) => {
+							discover(section, event.target.value, true);
+							setShowDrafts(false);
+						}}
+					/>
+				</label>
+			) : null}
 			{compact ? (
 				<div className="sidebar-settings__selection">
 					<div className="sidebar-settings__field">
@@ -544,7 +560,7 @@ export function SettingsControlsView({
 						</button>
 					) : null}
 				</div>
-			) : (
+			) : scope ? null : (
 				<nav className="settings-tabs" aria-label="Settings sections">
 					{sections.map((candidate) => (
 						<button
@@ -573,7 +589,7 @@ export function SettingsControlsView({
 					) : null}
 				</nav>
 			)}
-			{!compact && (
+			{!compact && !scope && (
 				<h2>
 					{showDrafts ? `Unsaved changes · ${visible.length}` : current ? current.label : `Matches · ${visible.length}`}
 				</h2>
@@ -612,7 +628,8 @@ export function SettingsControlsView({
 			)}
 			{groupControls(editorControls).map(({ group, controls: rows }) => (
 				<section key={group} className="setting-group" aria-label={group}>
-					<h3>{group}</h3>
+					{/* A calm page has only its h1 above, so its groups are the next level down. */}
+					{scope ? <h2 className="setting-group__title">{group}</h2> : <h3>{group}</h3>}
 					{rows.map((control) => (
 						<ControlRow
 							key={control.path}
@@ -623,7 +640,7 @@ export function SettingsControlsView({
 							expectedValue={originalDraftValue(control.path)}
 							onDraft={(value, submittedValue) => updateDraft(control.path, value, submittedValue, control.value)}
 							catalog={catalogFor(control)}
-							compact={compact}
+							showPath={scope === undefined || scope === "advanced"}
 						/>
 					))}
 				</section>
