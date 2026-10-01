@@ -487,22 +487,36 @@ export function createEditorSubmitController(deps: EditorSubmitDeps): EditorSubm
 		}
 		if (pendingDrafts.has(snapshot.key)) return;
 		pendingDrafts.add(snapshot.key);
+		// Expansion can outlive a busy /new (flywheel p7/A2). Its captured
+		// message belongs to that session, even if a new one is now streaming.
+		const sessionId = deps.session?.current()?.id;
+		const restoreDraft = (): void => {
+			if (snapshot.owns()) return;
+			const current = deps.editor.getExpandedText?.() ?? deps.editor.getText();
+			setLiteralText([unguardPastedEditorOperator(text), current].filter((part) => part.length > 0).join("\n\n"));
+			deps.ui.requestRender();
+		};
+		let admitted = false;
 		void (async () => {
 			const submitted = await deps.expandSubmit(unguardPastedEditorOperator(text));
 			if (submitted.images.length > 0) {
+				restoreDraft();
 				deps.io.stderr("[follow-up] image references cannot be queued while a response is streaming\n");
 				return;
 			}
 			deps.beforeSemanticBoundary?.("follow-up-submit");
-			if (!deps.chat.queueFollowUp(submitted.text)) {
+			if (deps.session?.current()?.id !== sessionId || !deps.chat.queueFollowUp(submitted.text)) {
+				restoreDraft();
 				deps.io.stderr("[follow-up] no active response to queue against\n");
 				return;
 			}
+			admitted = true;
 			deps.editor.addToHistory(text);
 			if (snapshot.owns()) deps.editor.setText("");
 			deps.ui.requestRender();
 		})()
 			.catch((err) => {
+				if (!admitted) restoreDraft();
 				const msg = err instanceof Error ? err.message : String(err);
 				deps.io.stderr(`[follow-up] ${msg}\n`);
 			})

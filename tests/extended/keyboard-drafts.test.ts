@@ -81,6 +81,30 @@ function fixture(expand?: (text: string) => Promise<EditorSubmitExpansion>) {
 		},
 	};
 }
+for (const nextSessionStreaming of [false, true]) {
+	it(`recovers an expanding follow-up after /new with next session streaming=${nextSessionStreaming}`, async () => {
+		let resume!: (value: EditorSubmitExpansion) => void;
+		const f = fixture(
+			() =>
+				new Promise((resolve) => {
+					resume = resolve;
+				}),
+		);
+		let sessionId = "old-session";
+		f.deps.session = { current: () => ({ id: sessionId }) } as unknown as NonNullable<EditorSubmitDeps["session"]>;
+		f.editor.setText("old session follow-up");
+		f.controller.queueFollowUpFromEditor();
+		f.controller.queueFollowUpFromEditor();
+		f.editor.setText("new session draft");
+		f.idle();
+		sessionId = "new-session";
+		f.deps.chat.isStreaming = () => nextSessionStreaming;
+		resume({ text: "expanded old session follow-up", images: [] });
+		await new Promise((resolve) => setImmediate(resolve));
+		assert.deepEqual(f.accepted, []);
+		assert.equal(f.editor.getText(), "old session follow-up\n\nnew session draft");
+	});
+}
 for (const action of ["queueFollowUpFromEditor", "interruptFromEditor"] as const) {
 	it(`${action} owns only its accepted snapshot and rejects duplicate pending presses`, async () => {
 		let resume!: (value: EditorSubmitExpansion) => void;
