@@ -283,6 +283,14 @@
 }
 .wb-tasks > li {
 	min-width: 0;
+	animation: wb-task-arrive var(--motion-base) var(--ease-standard) both;
+}
+/* A task that appears in the rail rises into its row once; rows never move after that. */
+@keyframes wb-task-arrive {
+	from {
+		opacity: 0;
+		transform: translateY(-4px);
+	}
 }
 .wb-task {
 	position: relative;
