@@ -1002,7 +1002,7 @@ function pickOrchestratorScope(safety: SafetyContract): ScopeSpec {
  * subset check compares authority over the checkout, so each boundary is
  * mapped back onto the checkout the worktree was cut from.
  */
-function admissionWriteBoundaries(
+export function admissionWriteBoundaries(
 	req: Pick<DispatchRequest, "taskWorktree">,
 	boundaries: ReadonlyArray<string>,
 ): ReadonlyArray<string> {

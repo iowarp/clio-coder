@@ -7,13 +7,14 @@ import { afterEach, beforeEach, describe, it } from "node:test";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import type { AgentsContract } from "../../src/domains/agents/contract.js";
 import type { AgentSpec } from "../../src/domains/agents/spec.js";
-import { foregroundEndpointBlock } from "../../src/domains/dispatch/admission.js";
+import { admit, foregroundEndpointBlock } from "../../src/domains/dispatch/admission.js";
 import {
 	type AdmissionQueueRequest,
 	createAdmissionQueue,
 	orderAdmissionRequests,
 } from "../../src/domains/dispatch/admission-queue.js";
 import { assessCapabilityMismatch } from "../../src/domains/dispatch/capability-match.js";
+import { admissionWriteBoundaries } from "../../src/domains/dispatch/extension.js";
 import { isBoundedGateRolePrompt, REVIEWER_GATE_PROMPT } from "../../src/domains/dispatch/gate-role-prompts.js";
 import { normalizeDispatchIntent } from "../../src/domains/dispatch/intent.js";
 import { classifyDispatchIntentCompatibility } from "../../src/domains/dispatch/intent-compatibility.js";
@@ -35,6 +36,7 @@ import {
 	type RuntimeDescriptor,
 } from "../../src/domains/providers/index.js";
 import claudeCodeRuntime from "../../src/domains/providers/runtimes/claude/claude-code.js";
+import { isSubset, READONLY_SCOPE, WORKSPACE_SCOPE } from "../../src/domains/safety/scope.js";
 import { createDispatchTool } from "../../src/tools/dispatch.js";
 import { DISPATCH_PLAN_PREPARATION_ERROR_ARGUMENT, describeDispatchPlan } from "../../src/tools/dispatch-plan.js";
 import type { WorkerSpec } from "../../src/worker/spec-contract.js";
@@ -375,6 +377,56 @@ describe("dispatch admission boundary", () => {
 		);
 		strictEqual(capacityLimit(endpointCapacityFor({ target, runtime, discoveredSlots: 2 }, {})), 2);
 		strictEqual(capacityLimit(endpointCapacityFor({ target, runtime }, {})), 1);
+	});
+
+	it("names the root or action that exceeds the orchestrator scope in a subset denial", () => {
+		const verdict = admit(
+			{
+				requestedScope: { ...WORKSPACE_SCOPE, allowedWriteRoots: ["/elsewhere/src/a.js"] },
+				orchestratorScope: WORKSPACE_SCOPE,
+				requestedActions: [],
+				agentId: "git-master",
+			},
+			isSubset,
+		);
+		strictEqual(verdict.admitted, false);
+		match(
+			verdict.reason,
+			/^scope git-master is not a subset of the orchestrator scope: write root \/elsewhere\/src\/a\.js lies outside/,
+		);
+		match(verdict.reason, /leave write_roots empty/);
+		const actions = admit(
+			{
+				requestedScope: WORKSPACE_SCOPE,
+				orchestratorScope: READONLY_SCOPE,
+				requestedActions: [],
+				agentId: "coder",
+			},
+			isSubset,
+		);
+		match(actions.reason, /needs action class dispatch, execute, write/);
+	});
+
+	it("maps a task worktree's write boundaries back onto the checkout for the subset check", () => {
+		const root = process.cwd();
+		const worktree = { root, path: "/dev/shm/clio-test-worktrees/run1" };
+		const mapped = admissionWriteBoundaries({ taskWorktree: worktree as never }, [
+			"/dev/shm/clio-test-worktrees/run1/src/a.js",
+			"/dev/shm/clio-test-worktrees/run1/test/",
+			"/unrelated/place.js",
+		]);
+		deepStrictEqual(mapped, [join(root, "src/a.js"), `${join(root, "test")}/`, "/unrelated/place.js"]);
+		const admitted = admit(
+			{
+				requestedScope: { ...WORKSPACE_SCOPE, allowedWriteRoots: mapped.slice(0, 2) },
+				orchestratorScope: WORKSPACE_SCOPE,
+				requestedActions: [],
+				agentId: "git-master",
+			},
+			isSubset,
+		);
+		strictEqual(admitted.admitted, true);
+		deepStrictEqual(admissionWriteBoundaries({}, ["/x/y.js"]), ["/x/y.js"]);
 	});
 
 	it("reads a dot scope entry as the repository root instead of refusing the declaration", () => {

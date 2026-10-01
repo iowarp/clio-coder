@@ -1,4 +1,4 @@
-import { strictEqual } from "node:assert/strict";
+import { match, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
 import { isDeterministicOutcomeCode } from "../../src/domains/dispatch/backoff.js";
 import {
@@ -7,7 +7,7 @@ import {
 	decideRetry,
 } from "../../src/domains/dispatch/failure-classification.js";
 import type { RunTerminationEvidence } from "../../src/domains/dispatch/outcome.js";
-import { blockedWriteAttempts } from "../../src/domains/dispatch/tool-stats.js";
+import { blockedWriteAttempts, workerNoWorkDetail } from "../../src/domains/dispatch/tool-stats.js";
 import type { ToolCallStat } from "../../src/domains/dispatch/types.js";
 import type { ActionClass } from "../../src/domains/safety/action-classifier.js";
 
@@ -44,6 +44,21 @@ describe("dispatch failure classification", () => {
 		strictEqual(blockedWriteAttempts(stats(...blockedWrites, { tool: "bash", count: 1, ok: 1 }), classify), null);
 		strictEqual(blockedWriteAttempts(stats({ tool: "read", count: 3, ok: 3 }), classify), null);
 		strictEqual(isDeterministicOutcomeCode("worker_mutation_blocked"), true);
+	});
+
+	it("names an edit worker that ran no tool, or recorded a limitation and changed nothing, as having done no work", () => {
+		const activity = (calls: number) => ({ calls, succeeded: calls, failed: 0, blocked: 0, mutatingSucceeded: false });
+		match(
+			workerNoWorkDetail({ activity: activity(0), limitationRecorded: false, mutatedPathCount: 0 }) ?? "",
+			/executed no tools/,
+		);
+		match(
+			workerNoWorkDetail({ activity: activity(4), limitationRecorded: true, mutatedPathCount: 0 }) ?? "",
+			/changed nothing/,
+		);
+		strictEqual(workerNoWorkDetail({ activity: activity(4), limitationRecorded: true, mutatedPathCount: 2 }), null);
+		strictEqual(workerNoWorkDetail({ activity: activity(4), limitationRecorded: true, mutatedPathCount: null }), null);
+		strictEqual(workerNoWorkDetail({ activity: activity(4), limitationRecorded: false, mutatedPathCount: 0 }), null);
 	});
 
 	it("does not retry ACP model admission or peer HTTP 400/404 or charge the peer breaker", () => {
