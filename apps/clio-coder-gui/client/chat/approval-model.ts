@@ -228,6 +228,8 @@ export function decisionChips(decision: PermissionDecisionFacts | undefined): re
 export interface DecisionRow {
 	readonly term: string;
 	readonly value: string;
+	/** Set when the value is several sentences that a card draws one per line. */
+	readonly lines?: readonly string[];
 }
 
 /**
@@ -243,6 +245,10 @@ export function decisionRows(decision: PermissionDecisionFacts | undefined): rea
 	};
 	push("Authorization", decision.authorizationCopy);
 	push("Consequence", decision.consequenceCopy);
+	// The sentences the agent wrote from the whole command sit directly under the generic
+	// consequence, so an operator reads what this command does before the reversibility.
+	const effects = decision.consequenceLines ?? [];
+	if (effects.length > 0) rows.push({ term: "Effect", value: effects.join(" "), lines: effects });
 	push(
 		"Reversibility",
 		decision.reversibilityCopy.length > 0

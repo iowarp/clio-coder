@@ -37,6 +37,8 @@ export const PermissionDecisionFacts = Type.Object(
 		affectedScope: Type.String({ maxLength: 32 }),
 		reversibility: Type.String({ maxLength: 32 }),
 		target: Type.Optional(Type.String({ maxLength: 512 })),
+		/** What a bash command would do, one sentence per step, written by the agent from the full command. */
+		consequenceLines: Type.Optional(Type.Array(Type.String({ maxLength: 512 }), { maxItems: 9 })),
 	},
 	closed,
 );

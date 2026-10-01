@@ -319,7 +319,15 @@ function ApprovalCard({ sessionId, permission, call, answer, eyebrow, hint, vari
 					{rows.map((row) => (
 						<div key={row.term}>
 							<dt>{row.term}</dt>
-							<dd>{row.value}</dd>
+							<dd>
+								{row.lines === undefined
+									? row.value
+									: row.lines.map((line) => (
+											<span className="approval-decision__line" key={line}>
+												{line}
+											</span>
+										))}
+							</dd>
 						</div>
 					))}
 				</dl>

@@ -198,6 +198,18 @@ test("the classification is labelled from the agent's own facts and never re-der
 	assert.equal(rows[2]?.value, "reversible only in part");
 });
 
+test("the sentences the agent wrote from the whole command sit under the generic consequence", () => {
+	const lines = ["Deletes 3 files under build/.", "Overwrites notes.txt, which already exists."];
+	const rows = decisionRows({ ...DECISION, consequenceLines: lines });
+	assert.deepEqual(
+		rows.map((row) => row.term),
+		["Authorization", "Consequence", "Effect", "Reversibility", "Requested by"],
+	);
+	assert.deepEqual(rows[2]?.lines, lines);
+	// A request that carries none keeps the rows it had.
+	assert.equal(decisionRows({ ...DECISION, consequenceLines: [] }).some((row) => row.term === "Effect"), false);
+});
+
 test("an engine that announced no decision facts still yields a usable card", () => {
 	assert.deepEqual(decisionChips(undefined), []);
 	assert.deepEqual(decisionRows(undefined), []);

@@ -1,18 +1,11 @@
-import { statSync } from "node:fs";
-import { homedir } from "node:os";
-import { resolve } from "node:path";
 import { BusChannels, type PermissionRequestedPayload } from "../core/bus-events.js";
 import type { SafeEventBus } from "../core/event-bus.js";
 import { ToolNames } from "../core/tool-names.js";
 import type { DispatchContract } from "../domains/dispatch/contract.js";
 import type { ActionClass, ClassifierCall } from "../domains/safety/action-classifier.js";
+import { describeMainCallConsequences } from "../domains/safety/call-consequence.js";
 import { sanitizeCallTargetText } from "../domains/safety/call-target.js";
-import {
-	COMMAND_CONSEQUENCE_MAX_SEVERE,
-	describeBashCallConsequences,
-	fitConsequenceLine,
-	type PathKind,
-} from "../domains/safety/command-consequence.js";
+import { COMMAND_CONSEQUENCE_MAX_SEVERE, fitConsequenceLine } from "../domains/safety/command-consequence.js";
 import type { SafetyDecision } from "../domains/safety/contract.js";
 import { decisionActionClass } from "../domains/safety/decision-presentation.js";
 import { askUserExposure } from "../tools/ask-user.js";
@@ -176,31 +169,6 @@ function netReasonOf(decision: SafetyDecision): string | undefined {
 	return reason !== undefined && reason.length > 0 ? sanitizeCallTargetText(reason) : undefined;
 }
 
-/** What exists at `path` once resolved against `cwd`; null when it does not, or cannot be read. */
-function pathKindIn(cwd: string): (path: string) => PathKind {
-	return (path) => {
-		try {
-			const stat = statSync(resolve(cwd, path));
-			return stat.isDirectory() ? "dir" : stat.isFile() ? "file" : null;
-		} catch {
-			// A path that cannot be statted is not an existing file to overwrite.
-			return null;
-		}
-	};
-}
-
-/**
- * The consequence sentences for a bash ask, read from the full command. Card
- * text only: a failure here is no sentence, never a different admission.
- */
-function mainConsequence(call: ClassifierCall): string[] {
-	const cwd = typeof call.args?.cwd === "string" && call.args.cwd.length > 0 ? call.args.cwd : process.cwd();
-	return describeBashCallConsequences(call.tool, call.args, {
-		pathKind: pathKindIn(resolve(process.cwd(), cwd)),
-		home: homedir,
-	});
-}
-
 /**
  * The sentences a worker wrote from its own full arguments. They cross the
  * stdout seam as data, so each is sanitized again, and anything that is not a
@@ -237,7 +205,7 @@ function mainApprovalRequestView(
 	// Facts only. The mutation text stays in the inspector the overlay opener
 	// gets; this object reaches the transcript row and the approval-state event.
 	const mutation = mutationFacts(call.tool, call.args);
-	const consequence = mainConsequence(call);
+	const consequence = describeMainCallConsequences(call);
 	return {
 		requestId: meta?.requestId ?? "permission-pending",
 		tool: call.tool,

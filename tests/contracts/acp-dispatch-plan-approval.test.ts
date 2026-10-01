@@ -11,6 +11,7 @@ import { type AcpServerChat, serveClioAcpAgent } from "../../src/engine/acp/serv
 import type { AcpJsonRpcPeerTransport } from "../../src/engine/acp/transport.js";
 import { createWorkerSafety } from "../../src/engine/worker-tools.js";
 import { describeDispatchPlan } from "../../src/tools/dispatch-plan.js";
+import { bashTool } from "../../src/tools/bash.js";
 import { createRegistry, type PermissionRequiredMeta, type ToolSpec } from "../../src/tools/registry.js";
 
 const PLAN = {
@@ -33,11 +34,15 @@ const dispatchStub = (runs: string[]): ToolSpec => ({
 	},
 });
 
-async function askOnce(args: Record<string, unknown>, answer: "allow-once" | "reject-once") {
+async function askOnce(
+	args: Record<string, unknown>,
+	answer: "allow-once" | "reject-once",
+	toolName: "dispatch" | "bash" = "dispatch",
+) {
 	const safety = createWorkerSafety({ cwd: process.cwd() });
 	const registry = createRegistry({ safety, autonomy: () => "default" });
 	const runs: string[] = [];
-	registry.register(dispatchStub(runs));
+	registry.register(toolName === "bash" ? bashTool : dispatchStub(runs));
 	const parked: PermissionRequiredMeta[] = [];
 	registry.onPermissionRequired((_call, _decision, meta) => parked.push(meta));
 	const asks: Array<Record<string, unknown>> = [];
@@ -65,10 +70,10 @@ async function askOnce(args: Record<string, unknown>, answer: "allow-once" | "re
 	let verdict = "";
 	const chat: AcpServerChat = {
 		submit: async () => {
-			emit({ type: "tool_execution_start", toolCallId: "call-1", toolName: "dispatch", args });
-			const result = await registry.invoke({ tool: "dispatch", args }, { toolCallId: "call-1" });
+			emit({ type: "tool_execution_start", toolCallId: "call-1", toolName, args });
+			const result = await registry.invoke({ tool: toolName, args }, { toolCallId: "call-1" });
 			verdict = result.kind;
-			emit({ type: "tool_execution_end", toolCallId: "call-1", toolName: "dispatch", result, isError: false });
+			emit({ type: "tool_execution_end", toolCallId: "call-1", toolName, result, isError: false });
 		},
 		cancel: () => {},
 		onEvent: (handler) => {
@@ -116,6 +121,16 @@ test("a plan-scale dispatch ask carries the plan admission rendered, with the ha
 	);
 	ok((turn.ask?._meta as Record<string, unknown>)["clio-coder/decision"], "the decision facts still ride beside it");
 	strictEqual(turn.runs.length, 0, "a rejected plan runs nothing");
+});
+
+test("a bash ask carries the sentences the host wrote from the whole command", async () => {
+	const turn = await askOnce({ command: "git push origin main" }, "reject-once", "bash");
+	const meta = (turn.ask?._meta as Record<string, Record<string, unknown>>)["clio-coder/decision"] ?? {};
+	deepStrictEqual(meta.consequenceLines, ["Publishes to origin"]);
+	// A dispatch ask has no command to describe, so it sends no sentences.
+	const dispatch = await askOnce(PLAN, "reject-once");
+	const dispatchMeta = (dispatch.ask?._meta as Record<string, Record<string, unknown>>)["clio-coder/decision"] ?? {};
+	strictEqual("consequenceLines" in dispatchMeta, false);
 });
 
 test("an approved plan runs exactly once through the same ask", async () => {

@@ -24,7 +24,9 @@ import { isOrchestratorEligibleRuntime } from "../../domains/providers/eligibili
 import { type CostProvenance, resolveCostProvenance } from "../../domains/providers/types/cost-provenance.js";
 import type { ClassifierCall } from "../../domains/safety/action-classifier.js";
 import { type AutonomyLevel, DEFAULT_AUTONOMY_LEVEL, isAutonomyLevel } from "../../domains/safety/autonomy.js";
+import { describeMainCallConsequences } from "../../domains/safety/call-consequence.js";
 import { describeCallTarget } from "../../domains/safety/call-target.js";
+import { COMMAND_CONSEQUENCE_MAX_SEVERE } from "../../domains/safety/command-consequence.js";
 import type { DecisionPresentation, TrustedDecisionFacts } from "../../domains/safety/decision-presentation.js";
 import {
 	classifyDecisionPresentation,
@@ -1933,6 +1935,7 @@ function decisionMeta(
 	facts: TrustedDecisionFacts,
 	presentation: DecisionPresentation,
 	call: ClassifierCall,
+	consequence: ReadonlyArray<string>,
 ): Record<string, unknown> {
 	const axis =
 		facts.axis.kind === "safety-net"
@@ -1949,6 +1952,14 @@ function decisionMeta(
 				}
 			: { kind: facts.origin.kind };
 	const target = decisionCopy(describeCallTarget(call.tool, call.args));
+	// What a bash command would do, one sentence per step. The sentences are
+	// written by the host from the full command, so a client renders them beside
+	// the generic consequence copy instead of re-deriving them from `target`,
+	// which is flattened to one line and cut.
+	const consequenceLines = consequence
+		.slice(0, COMMAND_CONSEQUENCE_MAX_SEVERE + 1)
+		.map(decisionCopy)
+		.filter((line) => line.length > 0);
 	return {
 		[ACP_DECISION_META_KEY]: {
 			version: 1,
@@ -1967,6 +1978,7 @@ function decisionMeta(
 			affectedScope: facts.affectedScope,
 			reversibility: facts.reversibility,
 			...(target.length > 0 ? { target } : {}),
+			...(consequenceLines.length > 0 ? { consequenceLines } : {}),
 		},
 	};
 }
@@ -2156,7 +2168,7 @@ function installPermissionBridge(input: {
 									},
 								],
 								_meta: {
-									...decisionMeta(facts, presentation, call),
+									...decisionMeta(facts, presentation, call, describeMainCallConsequences(call)),
 									// The plan admission rendered, whose hash a plan-scale run seals.
 									...(meta.dispatchPlan !== undefined
 										? { [ACP_DISPATCH_PLAN_META_KEY]: projectDispatchPlanMeta(meta.dispatchPlan) }

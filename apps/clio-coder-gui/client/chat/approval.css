@@ -184,6 +184,9 @@
 	margin: 0;
 	overflow-wrap: anywhere;
 }
+.approval-decision__line {
+	display: block;
+}
 
 /* ---- the concrete thing being approved --------------------------------------------------- */
 
