@@ -7,7 +7,11 @@ import { afterEach, beforeEach, describe, it } from "node:test";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import type { AgentsContract } from "../../src/domains/agents/contract.js";
 import type { AgentSpec } from "../../src/domains/agents/spec.js";
-import { admit, createCapacityAdmissionController, foregroundEndpointBlock } from "../../src/domains/dispatch/admission.js";
+import {
+	admit,
+	createCapacityAdmissionController,
+	foregroundEndpointBlock,
+} from "../../src/domains/dispatch/admission.js";
 import {
 	type AdmissionQueueRequest,
 	createAdmissionQueue,
