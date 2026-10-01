@@ -70,3 +70,25 @@ export function changedCheckoutPaths(before: CheckoutSnapshot, after: CheckoutSn
 		.filter((name) => before.paths.get(name) !== after.paths.get(name))
 		.sort();
 }
+
+/**
+ * `git diff HEAD` over the paths this checkout changed since `before` that
+ * `include` admits, or "" when nothing qualifies or git fails. A path the
+ * operator had already edited before the run counts only if the run changed it again.
+ */
+export function changedCheckoutDiff(before: CheckoutSnapshot, cwd: string, include: (path: string) => boolean): string {
+	const after = snapshotCheckout(cwd);
+	if (after === null || after.root !== before.root) return "";
+	const paths = changedCheckoutPaths(before, after).filter(include);
+	if (paths.length === 0) return "";
+	try {
+		return execFileSync("git", ["-C", before.root, "diff", "--no-color", "--no-ext-diff", "HEAD", "--", ...paths], {
+			timeout: 10_000,
+			maxBuffer: 8 * 1024 * 1024,
+			stdio: ["ignore", "pipe", "pipe"],
+		}).toString("utf8");
+	} catch {
+		// A diff that cannot be produced flags nothing; the run's other evidence stands.
+		return "";
+	}
+}

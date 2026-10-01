@@ -39,6 +39,7 @@ import { sandboxAvailability } from "../../core/sandbox/availability.js";
 import type { WorkerSandboxSpec } from "../../core/sandbox/types.js";
 import { resolveWorkerSandboxSpec, workerSandboxLine, workerSandboxReceipt } from "../../core/sandbox/worker-policy.js";
 import { isSkillActivation, type SkillActivation } from "../../core/skill-activation.js";
+import { isTestFilePath } from "../../core/test-paths.js";
 import { rawDurationMs } from "../../core/timers.js";
 import { isBuiltinToolName, isHarnessExtensionToolName, type ToolName, ToolNames } from "../../core/tool-names.js";
 import {
@@ -56,7 +57,7 @@ import { isClaudeCanonicalTool } from "../../engine/claude/tool-safety.js";
 import { WORKER_RUNTIME_MEDIATES_CLIO_DISPATCH } from "../../engine/worker-runtime-capabilities.js";
 import type { AskUserHandler } from "../../tools/ask-user.js";
 import { toolPromptHintsForNames } from "../../tools/builtin-tool-catalog.js";
-import { changedCheckoutPaths, snapshotCheckout } from "../../tools/checkout-changes.js";
+import { changedCheckoutDiff, changedCheckoutPaths, snapshotCheckout } from "../../tools/checkout-changes.js";
 import { networkToolsDisabled } from "../../tools/network-policy.js";
 import { applyToolProfile, assertToolProfileEnforceable, type ToolProfileName } from "../../tools/profiles.js";
 import { effectiveToolCall, gatewayChainReceipts, withGatewayForCapabilities } from "../../tools/surface.js";
@@ -7410,6 +7411,20 @@ export function createDispatchBundle(
 					outcomeCode = hostRejection.outcomeCode;
 					finalDetail = hostRejection.detail;
 					failureMessage = finalDetail;
+				}
+				// A run in the current tree has no merge to withhold, so a change that
+				// deletes existing test cases fails the run instead; the edits stay for
+				// the operator to judge (flywheel F-D1).
+				if (checkoutBefore !== null && finalOutcome === "succeeded") {
+					const removed = removedTestCases(
+						changedCheckoutDiff(checkoutBefore, lifecycle.cwd, (path) => isTestFilePath(path) || path.endsWith(".rs")),
+					);
+					if (removed.length > 0) {
+						finalOutcome = "failed";
+						outcomeCode = "worker_removed_tests";
+						finalDetail = `the change removes existing test cases (${removed.slice(0, 2).join("; ")}${removed.length > 2 ? `; and ${removed.length - 2} more` : ""}); fix the source or restore them`;
+						failureMessage = finalDetail;
+					}
 				}
 				// A worker whose own report lists a failing check does not land on the
 				// operator's branch unless host verification passed. With no declared

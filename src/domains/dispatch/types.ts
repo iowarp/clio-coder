@@ -68,7 +68,8 @@ export type RunOutcomeCode =
 	| "host_verification_rejected"
 	| "worker_no_work"
 	| "worker_mutation_blocked"
-	| "merge_withheld";
+	| "merge_withheld"
+	| "worker_removed_tests";
 
 export function isRunOutcomeCode(value: unknown): value is RunOutcomeCode {
 	return (
@@ -81,7 +82,8 @@ export function isRunOutcomeCode(value: unknown): value is RunOutcomeCode {
 		value === "host_verification_rejected" ||
 		value === "worker_no_work" ||
 		value === "worker_mutation_blocked" ||
-		value === "merge_withheld"
+		value === "merge_withheld" ||
+		value === "worker_removed_tests"
 	);
 }
 
