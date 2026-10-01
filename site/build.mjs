@@ -74,7 +74,9 @@ if (JSON.stringify(index.map((item) => item.path)) !== JSON.stringify(catalog.ma
 	throw new Error("Documentation index differs from the public allowlist.");
 if (manifest.files.length !== catalog.length)
 	throw new Error("Documentation manifest differs from the public allowlist.");
-const ref = source.ref.split("/").map(encodeURIComponent).join("/");
+// linkRef points reader-facing source links at a public ref while the pinned
+// documentation commit is not published yet; the manifest keeps the real pin.
+const ref = (product.linkRef ?? source.ref).split("/").map(encodeURIComponent).join("/");
 const repository = product.repository.replace(/\/$/, "");
 const sourceMap = new Map(index.map((item) => [item.source, docUrl(item.path)]));
 const slug = (text) =>
@@ -128,6 +130,10 @@ function responsiveImages(html, path) {
 			.replace(/ decoding="async"(?=[\s\S]* decoding="async")/, "");
 	});
 }
+// GitHub Pages sends no custom headers, so the policy nginx used to send rides
+// in a meta tag. frame-ancestors is not honored there and cannot be restored.
+const contentSecurityPolicy =
+	"default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src 'self'; frame-src https://www.youtube-nocookie.com; object-src 'none'; base-uri 'self'; form-action 'none'";
 function head(path, title, description, type = "WebPage") {
 	const url = `${product.origin}${path}`;
 	const graph = {
@@ -186,6 +192,7 @@ function head(path, title, description, type = "WebPage") {
 			author: { "@type": "Person", name: "Anthony Kougkas" },
 		});
 	return `<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="${contentSecurityPolicy}"><meta name="referrer" content="strict-origin-when-cross-origin">
 <title>${escapeHtml(title)}</title><meta name="description" content="${escapeHtml(description)}"><meta name="color-scheme" content="dark light"><meta name="clio-default-theme" content="${escapeHtml(brand.defaultTheme)}"><meta name="theme-color" content="${escapeHtml(brand.palette[brand.themes[brand.defaultTheme === "light" ? "light" : "dark"].paper])}">
 <link rel="canonical" href="${url}"><link rel="icon" href="/assets/responsive/clio-icon-32.png" type="image/png" sizes="32x32"><link rel="apple-touch-icon" href="/assets/responsive/clio-icon-180.png" sizes="180x180">
 <link rel="preload" href="/assets/fonts/plex-sans.woff2" as="font" type="font/woff2" crossorigin><link rel="preload" href="/assets/fonts/news-normal-500.woff2" as="font" type="font/woff2" crossorigin>
@@ -582,7 +589,7 @@ for (const [path, target] of Object.entries(redirects)) {
 	await mkdir(dirname(file), { recursive: true });
 	await writeFile(
 		file,
-		`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Continue to Clio Coder</title><meta name="robots" content="noindex"><link rel="canonical" href="${product.origin}${escapeHtml(target)}"><link rel="stylesheet" href="/css/brand.css"><link rel="stylesheet" href="/css/site.css"><script src="/js/redirect.js" defer></script></head><body><main class="page page-intro"><h1>This page has moved.</h1><p><a data-redirect href="${escapeHtml(target)}">Continue to Clio Coder →</a></p></main></body></html>`,
+		`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Continue to Clio Coder</title><meta name="robots" content="noindex"><meta http-equiv="refresh" content="0; url=${escapeHtml(target)}"><link rel="canonical" href="${product.origin}${escapeHtml(target)}"><link rel="stylesheet" href="/css/brand.css"><link rel="stylesheet" href="/css/site.css"><script src="/js/redirect.js" defer></script></head><body><main class="page page-intro"><h1>This page has moved.</h1><p><a data-redirect href="${escapeHtml(target)}">Continue to Clio Coder →</a></p></main></body></html>`,
 	);
 }
 await writeFile(
@@ -592,6 +599,16 @@ await writeFile(
 await cp(join(root, "robots.txt"), join(out, "robots.txt"));
 console.log(`Built ${urls.length} public pages (${index.length} guides, ${tutorials.length} tutorials).`);
 
+// Installers are copied, never rewritten: the site must serve the exact bytes
+// of this commit's scripts, and check.py compares them.
+for (const name of ["install.sh", "install.ps1"]) await cp(join(root, "..", "scripts", name), join(out, name));
+await writeFile(join(out, "CNAME"), `${new URL(product.origin).hostname}\n`);
+await writeFile(join(out, ".nojekyll"), "");
+await writeFile(
+	join(out, "version.json"),
+	`${JSON.stringify({ site: product.version, publishedVersion: product.publishedVersion, docsCommit: source.commit, revision: values.revision ?? null }, null, 2)}\n`,
+);
+// Blade-only until its retirement: nginx consumes these, GitHub Pages ignores dotfiles.
 const nginxRedirects = Object.entries(redirects)
 	.map(([path, target]) => {
 		const url = new URL(target, product.origin);
