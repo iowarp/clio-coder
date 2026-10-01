@@ -1,6 +1,7 @@
 import { deepStrictEqual, match, ok, strictEqual } from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { afterEach, beforeEach, describe, it } from "node:test";
+import { skillInstallOfferTag } from "../../src/core/skill-activation.js";
 import { ToolNames } from "../../src/core/tool-names.js";
 import type { AutonomyLevel } from "../../src/domains/safety/autonomy.js";
 import { createWorkerSafety } from "../../src/engine/worker-tools.js";
@@ -74,6 +75,21 @@ describe("ask_user tool", () => {
 		scratch = await isolateClioEnv("clio-coder-ask-user-tool-");
 	});
 	afterEach(() => scratch.restore());
+
+	it("hides the install-offer binding tag from the surface and keeps it in the answer", async () => {
+		const tag = skillInstallOfferTag("offer-1");
+		const asked = {
+			question: `Install worktree-create? ${tag}`,
+			header: "Install skill",
+			options: [{ label: "Not now" }],
+		};
+		const f = fixture([{ answers: [{ question: "Install worktree-create?", answer: "Not now", options: ["Not now"] }] }]);
+		const answered = await f.call({ mode: "single_question", questions: [asked] });
+		strictEqual(f.shown[0]?.[0]?.question, "Install worktree-create?");
+		if (answered.kind !== "ok") throw new Error("expected ok");
+		const answers = answered.details?.answers as Array<{ question: string }>;
+		strictEqual(answers[0]?.question, asked.question);
+	});
 
 	it("asks the operator, derives a decision from the answer, and persists the interview transcript", async () => {
 		const f = fixture([

@@ -1150,6 +1150,20 @@ describe("safety gate boundary", () => {
 			"git ls-files -X /etc/passwd",
 			"git ls-files --exclude-f=/etc/passwd",
 			"git log -- /etc/passwd",
+			"git -C .. log",
+			"git -C /etc log",
+			"git -C ~ log",
+			'git -C "$HOME" log',
+			"git -C s* log",
+			"git -C src grep x",
+			"git -C src blame a.js",
+			"git -C src cat-file -p HEAD",
+			"git -C . -c core.pager=x log",
+			"git -c core.pager=x -C . log",
+			"git -C . --git-dir=/etc log",
+			"git --git-dir=.git log",
+			"git --work-tree=. status",
+			"git -C . log -- /etc/passwd",
 			'cat "a b/../.env"',
 			"cat a\\ b/../.env",
 			'sed -n 1p "a b/../.env"',
@@ -1177,9 +1191,40 @@ describe("safety gate boundary", () => {
 			'cd pkg && git branch -a && echo "---X---" && git status && cat ../src/a.js',
 			"git log | rg foo",
 			"rg -n TODO src/a.js",
+			"git -C . status",
+			`git -C ${scratch} log --oneline -5`,
+			"git -C src log --oneline -5",
+			"git -C pkg -C .. status",
+			"git -C src diff -- a.js",
+			"cd pkg && git -C .. log --oneline -3",
 		]) {
 			const decision = policy.evaluate({ tool: ToolNames.Bash, args: { command } });
 			strictEqual(decision.execRecognition, "recognized", command);
+		}
+	});
+
+	it("holds git -C to the workspace even where an exempt read root is readable", () => {
+		// A repository under an exempt root carries a .git/config the operator never
+		// vetted, and Git runs its core.fsmonitor and core.pager on inspection.
+		const exempt = mkdtempSync(join(tmpdir(), "clio-coder-safety-exempt-"));
+		try {
+			writeFileSync(join(exempt, "dep.js"), "// dep\n");
+			const policy = createSafetyPolicyEngine({
+				cwd: scratch,
+				projectPolicy: loadProjectSafetyPolicy(scratch),
+				readExemptRoots: [exempt],
+			});
+			strictEqual(
+				policy.evaluate({ tool: ToolNames.Bash, args: { command: `cat ${exempt}/dep.js` } }).execRecognition,
+				"recognized",
+				"the exempt root is readable",
+			);
+			for (const command of [`git -C ${exempt} log`, `git -C ${exempt} status`]) {
+				const decision = policy.evaluate({ tool: ToolNames.Bash, args: { command } });
+				strictEqual(decision.execRecognition !== "recognized", true, command);
+			}
+		} finally {
+			rmSync(exempt, { recursive: true, force: true });
 		}
 	});
 
