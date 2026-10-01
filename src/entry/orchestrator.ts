@@ -1,4 +1,3 @@
-import { redactSecretString } from "../domains/safety/redaction.js";
 import { randomBytes, randomUUID } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -178,6 +177,7 @@ import {
 	createProtectedArtifactsRegistration,
 	type ProtectedArtifactProtectEvent,
 } from "../domains/safety/protected-artifacts-registration.js";
+import { redactSecretString } from "../domains/safety/redaction.js";
 import type { SchedulingContract } from "../domains/scheduling/contract.js";
 import { SchedulingDomainModule } from "../domains/scheduling/index.js";
 import type { CompactionCallObservation } from "../domains/session/compaction/compact.js";
@@ -647,11 +647,15 @@ function prepareBackgroundMemoryRoute(
 
 const emitRouteFallbackNotice = declareRuntimeNoticeProducer("background-memory-route", ["route-fallback"]);
 
-/** Production callback composition shared with routing/capacity contracts. */
 function memoryRouteFailureCause(error: unknown): string {
-	return redactSecretString(error instanceof Error ? error.message : String(error)).split("\n", 1)[0]?.slice(0, 180) || "unknown route error";
+	return (
+		redactSecretString(error instanceof Error ? error.message : String(error))
+			.split("\n", 1)[0]
+			?.slice(0, 180) || "unknown route error"
+	);
 }
 
+/** Production callback composition shared with routing/capacity contracts. */
 export function createBackgroundMemoryRouting(
 	providers: ProvidersContract,
 	getSettings: () => Readonly<ClioSettings> | undefined,
@@ -693,17 +697,19 @@ export function createBackgroundMemoryRouting(
 			noteFallback();
 			clientFailure = null;
 			const client = route?.client;
-			return client ? {
-				...client,
-				complete: async (request) => {
-					try {
-						return await client.complete(request);
-					} catch (error) {
-						clientFailure = memoryRouteFailureCause(error);
-						throw error;
+			return client
+				? {
+						...client,
+						complete: async (request) => {
+							try {
+								return await client.complete(request);
+							} catch (error) {
+								clientFailure = memoryRouteFailureCause(error);
+								throw error;
+							}
+						},
 					}
-				},
-			} : null;
+				: null;
 		},
 		getFallbackModelClient: (): TaskMemoryModelClient | null => {
 			if (route?.selection !== "dedicated" || snapshot === undefined) return null;

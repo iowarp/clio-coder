@@ -238,7 +238,7 @@ test("engine text callers still reject failures rather than returning their cont
 	}
 });
 
-for (const unavailable of ["available", "down", "missing-model", "unloaded"] as const) {
+for (const unavailable of ["available", "down", "missing-model", "missing-credential", "unloaded"] as const) {
 	test(`production memory route prefers dedicated then chat for ${unavailable}`, async (t) => {
 		const env = await isolateClioEnv("clio-coder-memory-route-");
 		t.after(() => env.restore());
@@ -272,6 +272,10 @@ for (const unavailable of ["available", "down", "missing-model", "unloaded"] as 
 		const status = providers.list()[0];
 		assert.ok(status);
 		if (unavailable === "down") status.health.status = "down";
+		if (unavailable === "missing-credential") {
+			status.available = false;
+			status.reason = "No API key for provider: litellm";
+		}
 		if (unavailable === "missing-model") {
 			status.discoveredModelsSource = "probe";
 			status.discoveredModels = ["other"];
@@ -280,6 +284,8 @@ for (const unavailable of ["available", "down", "missing-model", "unloaded"] as 
 		const route = createBackgroundMemoryModelClient(providers, settings, 1000, null);
 		assert.ok(route);
 		assert.equal(route.targetId, unavailable === "available" ? "memory" : "chat");
+		if (unavailable === "missing-credential")
+			assert.match(route.fallbackReason ?? "", /No API key for provider: litellm/);
 		if (unavailable === "down") assert.match(route.fallbackReason ?? "", /endpoint unreachable/);
 		if (unavailable === "missing-model") assert.match(route.fallbackReason ?? "", /unknown model: memory-model/);
 		settings.context.memory.target = "chat";
@@ -462,6 +468,7 @@ test("production runtime fallback calls chat once and keeps failed and fallback 
 	assert.equal(endpointCapacityUsage()["http://gateway.invalid:4000"], undefined, "both per-call holds released");
 	assert.equal(bank.snapshot().knowledge.length, 1);
 	assert.match(notices[0] ?? "", /chat fallback chat\/chat-model/);
+	assert.match(notices[0] ?? "", /dedicated transport unavailable/);
 	assert.equal(result.usage?.targetId, "chat", "final result does not merge provider identities");
 	assert.equal(callbacks.getFallbackModelClient(), null, "a fallback never falls back again");
 });
