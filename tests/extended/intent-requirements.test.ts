@@ -30,6 +30,15 @@ describe("declared result requirements", () => {
 		match(block ?? "", /typecheck must pass/u);
 	});
 
+	it("drops the no-shell claim when the worker was admitted a shell", () => {
+		const block = renderDispatchIntentRequirements(
+			intent({ writeRoots: ["src/duration.js"], expectedOutputs: ["src/duration.js"] }),
+			{ shellAvailable: true },
+		);
+		doesNotMatch(block ?? "", /no bash or verify tool/u);
+		match(block ?? "", /Expected outputs:/u);
+	});
+
 	it("says nothing about confinement when no write root is declared", () => {
 		const block = renderDispatchIntentRequirements(intent({ expectedOutputs: ["REPORT.md"] }));
 		doesNotMatch(block ?? "", /no bash or verify tool/u);

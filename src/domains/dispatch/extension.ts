@@ -1407,6 +1407,8 @@ export interface WorkerDynamicContext {
 	projectReadTools?: boolean | null;
 	/** External runtimes do not promise the native read schema. */
 	projectExternalReadTools?: boolean;
+	/** True when the worker's admitted tools include bash or verify. */
+	shellToolsAdmitted?: boolean;
 	/** Render ledger call guidance only for a known, admitted native tool. */
 	ledgerToolAvailable?: boolean;
 	/** Structured CLIO-CODER.md fields; null when CLIO-CODER.md is absent or malformed. */
@@ -1561,7 +1563,9 @@ export function buildDynamicPromptMessages(
 		].join("\n\n");
 		messages.push({ id: "dispatch-read-only", body, contentHash: sha256(body) });
 	}
-	const requirements = renderDispatchIntentRequirements(req.intent);
+	const requirements = renderDispatchIntentRequirements(req.intent, {
+		shellAvailable: dynamicContext.shellToolsAdmitted === true,
+	});
 	if (requirements !== null) {
 		messages.push({ id: "dispatch-intent-requirements", body: requirements, contentHash: sha256(requirements) });
 	}
@@ -4842,6 +4846,7 @@ export function createDispatchBundle(
 						? targetToolCapability(target)
 						: false,
 			projectExternalReadTools: target.runtime.kind === "subprocess",
+			shellToolsAdmitted: effectiveTools.includes(ToolNames.Bash) || effectiveTools.includes(ToolNames.Verify),
 			ledgerToolAvailable:
 				target.runtime.kind === "http" && targetToolCapability(target) && effectiveTools.includes(ToolNames.Ledger),
 			workspace: readWorkspaceRootFacts(cwd),

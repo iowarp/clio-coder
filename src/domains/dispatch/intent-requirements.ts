@@ -1,7 +1,10 @@
 import type { DispatchIntent } from "./intent.js";
 
 /** Render intent fields that describe required results rather than observed facts. */
-export function renderDispatchIntentRequirements(intent: DispatchIntent | undefined): string | null {
+export function renderDispatchIntentRequirements(
+	intent: DispatchIntent | undefined,
+	options: { shellAvailable?: boolean } = {},
+): string | null {
 	if (intent === undefined || (intent.expectedOutputs.length === 0 && intent.verification.length === 0)) return null;
 	const lines = [
 		"# Declared Result Requirements",
@@ -11,7 +14,10 @@ export function renderDispatchIntentRequirements(intent: DispatchIntent | undefi
 	// police a shell, so it is not offered. Left unsaid, a worker told to "run
 	// the tests" spent 40 code_nav calls looking for a way to run them and
 	// exhausted its budget before touching the source (kvlog exercise, r5).
-	if (intent.writeRoots.length > 0) {
+	// Skipped when the worker was admitted bash or verify (an OS sandbox confines
+	// them to the write roots): the claim contradicts its tool contract, and a
+	// worker that reads both ends with "no edit tool" and 0 calls (p8/S1).
+	if (intent.writeRoots.length > 0 && options.shellAvailable !== true) {
 		lines.push(
 			"",
 			"This run is confined to its write roots and has no bash or verify tool, so you cannot run tests, scripts, or the checks below yourself. Write the code and the tests, re-read them, and report what you wrote; the host runs the declared checks after you finish and records the result on the receipt.",
