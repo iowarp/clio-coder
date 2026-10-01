@@ -141,19 +141,22 @@
 	display: none;
 }
 
-/* ---- Progress ------------------------------------------------------------------ */
+/* ---- Progress ------------------------------------------------------------------
+   Open sections on fine rules with small mono labels, the site's field-guide layout, rather than
+   a stack of boxed cards inside a panel. */
 .pane-cards {
 	display: grid;
-	gap: var(--space-3);
-	padding: var(--space-2) var(--space-3) var(--space-5);
+	padding: 0 var(--space-5) var(--space-6);
 }
 .pane-card {
 	display: grid;
 	gap: var(--space-2);
-	padding: var(--space-4);
-	border: 1px solid var(--line);
-	border-radius: 14px;
-	background: var(--wb-faint);
+	padding: var(--space-4) 0 var(--space-5);
+	border-top: 1px solid var(--line);
+}
+.pane-card:first-child {
+	border-top: 0;
+	padding-top: var(--space-2);
 }
 .pane-card > header {
 	display: flex;
@@ -164,10 +167,9 @@
 }
 .pane-card h2 {
 	margin: 0;
-	font-family: var(--font-ui);
-	font-size: 12px;
-	font-weight: 500;
-	letter-spacing: 0.01em;
+	font: 500 11px / 1.5 var(--font-mono);
+	letter-spacing: var(--tracking-instrument);
+	text-transform: uppercase;
 	color: var(--ink-muted);
 }
 .pane-card__state {
@@ -189,8 +191,9 @@
 }
 .pane-goal {
 	margin: 0;
-	font-size: var(--text-body);
-	font-weight: 500;
+	font-size: var(--text-reading);
+	font-weight: 600;
+	letter-spacing: -0.1px;
 	line-height: 1.4;
 	overflow-wrap: anywhere;
 	display: -webkit-box;
@@ -318,6 +321,14 @@
 	width: 10px;
 	height: 10px;
 	stroke-width: 2.4;
+	animation: pane-step-tick var(--motion-entry) var(--ease-standard) both;
+}
+/* The tick mounts when a step completes, so it lands once; a finished plan never re-animates. */
+@keyframes pane-step-tick {
+	from {
+		opacity: 0;
+		transform: scale(0.5) rotate(-25deg);
+	}
 }
 .pane-step__glyph.is-blocked {
 	border-color: var(--status-warn-line);
