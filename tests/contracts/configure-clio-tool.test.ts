@@ -26,6 +26,7 @@ test("configure_clio previews an exact change and yolo applies without another p
 	if (!proposalId) throw new Error("preview omitted proposal id");
 	const applied = await tool.run({ action: "apply", proposalId });
 	strictEqual(applied.kind, "ok");
+	match(applied.kind === "ok" ? applied.output : "", /Exit and start a new Clio session/);
 	strictEqual(asked, 0);
 	strictEqual(readSettings().chat.thinkingLevel, "high");
 	const replay = await tool.run({ action: "apply", proposalId });
@@ -87,4 +88,20 @@ test("configure_clio refuses autonomy at both levels, including padded values an
 		ok(apply.kind === "error" && /autonomy.*operator/u.test(apply.message));
 	}
 	strictEqual(readSettings().safety.autonomy, "default");
+});
+
+test("configure_clio reports effect timing for live fleet settings and restart settings", async (t) => {
+	const env = await isolateClioEnv("clio-configure-effect-");
+	t.after(() => env.restore());
+	const tool = createConfigureClioTool({ getAutonomy: () => "yolo", askUser: async () => ({ answers: [] }) });
+	for (const [path, value, expected] of [
+		["fleet.limits.toolCallsPerRun", "7", /next request or dispatch/],
+		["fleet.concurrency", "3", /Exit and start a new Clio session/],
+	] as const) {
+		const preview = await tool.run({ action: "preview", path, value });
+		const proposalId = /proposalId="([^"]+)"/.exec(preview.kind === "ok" ? preview.output : "")?.[1];
+		ok(proposalId, JSON.stringify(preview));
+		const result = await tool.run({ action: "apply", proposalId });
+		match(result.kind === "ok" ? result.output : "", expected);
+	}
 });

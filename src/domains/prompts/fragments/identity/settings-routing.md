@@ -21,8 +21,10 @@ To bind an agent or pin a successful worker model, first check current routes.
 that profile. Preserve existing entries. Where configure_clio is admitted, its
 paths are the whole `fleet.profiles` and `fleet.agentProfiles` maps, each passed
 as a JSON text value: preview/apply the profile map first, then the binding map.
-It saves global settings, not project settings; saved routing needs a reload in
-this session. Do not claim a save from a preview or a denied/cancelled apply.
+It saves global settings, not project settings. Follow the save result for effect
+timing: session-owned routing and restart-required settings need you to exit and
+start a new Clio session; live settings apply automatically or on the next
+request/dispatch. There is no `/reload` command. Do not claim a save from a preview or a denied/cancelled apply.
 
 For operator setup, create the profile in `/settings fleet` → Profiles, then
 assign the agent in `/settings agents` → Agent routes. These are two separate

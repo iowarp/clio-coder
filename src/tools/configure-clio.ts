@@ -1,9 +1,10 @@
 import { randomUUID } from "node:crypto";
 import { Type } from "typebox";
 import { readSettings, updateSettings } from "../core/config.js";
-import { getAtPath } from "../core/session-routing.js";
+import { getAtPath, isRoutingPath } from "../core/session-routing.js";
 import { applyControlValue, formatControlValue, settingControl } from "../core/settings-controls.js";
 import { ToolNames } from "../core/tool-names.js";
+import { settingsChangeKind } from "../domains/config/classify.js";
 import type { AutonomyLevel } from "../domains/safety/autonomy.js";
 import { StringEnum } from "../engine/ai.js";
 import type { AskUserHandler } from "./ask-user.js";
@@ -38,7 +39,7 @@ export function createConfigureClioTool(deps: ConfigureClioDeps): ToolSpec {
 	return {
 		name: ToolNames.ConfigureClio,
 		description:
-			"Preview a saved global Clio routing or fleet setting, then apply the exact proposal. Default asks the operator to approve; yolo applies directly. Use action=preview with a settings path and text value; action=apply with proposalId. For agent model bindings, preview/apply fleet.profiles first, then fleet.agentProfiles; each value is a complete JSON map preserving existing entries, not a nested path. Saved routing needs a session reload. Project saves use the operator's /settings UI. Autonomy is changed only by the operator through /settings, clio-coder configure, or --autonomy.",
+			"Preview a saved global Clio routing or fleet setting, then apply the exact proposal. Default asks the operator to approve; yolo applies directly. Use action=preview with a settings path and text value; action=apply with proposalId. For agent model bindings, preview/apply fleet.profiles first, then fleet.agentProfiles; each value is a complete JSON map preserving existing entries, not a nested path. The save result names when the setting takes effect; session-owned routing requires exiting and starting a new Clio session. Project saves use the operator's /settings UI. Autonomy is changed only by the operator through /settings, clio-coder configure, or --autonomy.",
 		placement: "gateway",
 		parameters: Type.Object({
 			action: StringEnum(["preview", "apply"]),
@@ -144,11 +145,24 @@ export function createConfigureClioTool(deps: ConfigureClioDeps): ToolSpec {
 				});
 				return {
 					kind: "ok",
-					output: `Saved ${proposal.path}. This session keeps its current routing; reload Clio to use saved routing here. Other settings can hot reload where supported.`,
+					output: `Saved ${proposal.path}. ${savedSettingEffect(proposal.path)}`,
 				};
 			} catch (error) {
 				return { kind: "error", message: error instanceof Error ? error.message : String(error) };
 			}
 		},
 	};
+}
+
+function savedSettingEffect(path: string): string {
+	if (isRoutingPath(path))
+		return "This session keeps its current routing. Exit and start a new Clio session to use the saved routing.";
+	switch (settingsChangeKind(path)) {
+		case "hotReload":
+			return "The running session picks this up automatically after the settings watcher reads the save.";
+		case "nextTurn":
+			return "After the settings watcher reads the save, this applies to the next request or dispatch; running workers keep their current settings.";
+		case "restartRequired":
+			return "Exit and start a new Clio session to apply this setting.";
+	}
 }
