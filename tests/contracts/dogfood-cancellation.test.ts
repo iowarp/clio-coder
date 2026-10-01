@@ -29,6 +29,9 @@ import { rehydrateChatPanelFromTurns } from "../../src/interactive/chat-renderer
 import { renderSessionHtml } from "../../src/interactive/export-html/index.js";
 import { expandInteractiveSubmitAsync } from "../../src/interactive/interactive-application.js";
 import { buildModelReplayAgentMessagesFromTurns } from "../../src/interactive/model-session-replay.js";
+import { buildSummary } from "../../src/interactive/status/summary.js";
+import { INITIAL_STATUS } from "../../src/interactive/status/types.js";
+import { resolveFooterVerb } from "../../src/interactive/status/verbs.js";
 import { clioTheme, GLYPH } from "../../src/interactive/theme/index.js";
 import { createRegistry } from "../../src/tools/registry.js";
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
@@ -48,7 +51,7 @@ const capabilities = {
 	contextWindow: 131072,
 	maxTokens: 4096,
 };
-type WireMode = "partial" | "thinking" | "empty" | "success" | "failure" | "tool";
+type WireMode = "partial" | "thinking" | "empty" | "success" | "failure" | "tool" | "guard";
 
 // Only the HTTP transport is deterministic. pi's SSE decoder, provider adapter,
 // engine Agent, chat event pipeline, renderer and session writer are real.
@@ -102,6 +105,23 @@ function transport(mode: WireMode) {
 					return;
 				}
 				signal?.addEventListener("abort", abort, { once: true });
+				if (mode === "guard") {
+					send({
+						role: "assistant",
+						tool_calls: [
+							{
+								index: 0,
+								id: "guard-tool",
+								type: "function",
+								function: {
+									name: "read",
+									arguments: JSON.stringify({ content: "x".repeat(2 * 1024 * 1024) }),
+								},
+							},
+						],
+					});
+					return;
+				}
 				send({
 					role: "assistant",
 					...(mode === "partial" ? { content: PARTIAL } : mode === "thinking" ? { reasoning_content: THOUGHT } : {}),
@@ -212,7 +232,11 @@ function fixture(
 	const runtime: RuntimeDescriptor = {
 		...litellm,
 		auth: "none",
-		defaultCapabilities: { ...capabilities, tools: initialMode === "tool", vision: visionCapable },
+		defaultCapabilities: {
+			...capabilities,
+			tools: initialMode === "tool" || initialMode === "guard",
+			vision: visionCapable,
+		},
 		synthesizeModel: () => ({
 			...model,
 			input: visionCapable ? ["text", "image"] : ["text"],
@@ -257,7 +281,7 @@ function fixture(
 		providers: context.getContract<ProvidersContract>("providers") as ProvidersContract,
 		knownTargets: () => new Set([target.id]),
 		session,
-		...(initialMode === "tool" ? { toolRegistry: registry } : {}),
+		...(initialMode === "tool" || initialMode === "guard" ? { toolRegistry: registry } : {}),
 		bus: context.bus,
 		readSessionEntries: () => {
 			const meta = session.current();
@@ -422,6 +446,54 @@ it("loop-guard interruption keeps its own reason on the single partial assistant
 		match(JSON.stringify(assistants[0]), /loop guard stopped repeated calls/u);
 		match(JSON.stringify(assistants[0]), new RegExp(PARTIAL));
 		doesNotMatch(JSON.stringify(assistants[0]), /active response cancelled|LiteLLM route/u);
+	} finally {
+		await f.close();
+	}
+});
+
+it("the argument guard remains visible live and after persistence without an operator cancel or retry", {
+	timeout: 15_000,
+}, async () => {
+	const f = fixture("guard");
+	try {
+		await f.loop.submit("Start");
+		strictEqual(f.wire().calls(), 1);
+		strictEqual(f.wire().aborted(), 1);
+		strictEqual(f.events.filter((event) => event.type === "retry_status").length, 0);
+		strictEqual(f.events.filter((event) => event.type === "tool_execution_start").length, 0);
+		const assistants = f.entries().filter((entry) => entry.kind === "message" && entry.role === "assistant");
+		strictEqual(assistants.length, 1);
+		const persisted = assistants[0];
+		ok(persisted?.kind === "message");
+		const payload = recordValue(persisted.payload);
+		ok(payload);
+		strictEqual(payload.stopReason, "aborted");
+		strictEqual(payload.clioCoderAbortReason, "tool_argument_generation");
+		match(String(payload.errorMessage), /byte safety ceiling/);
+		const replay = createChatPanel({ getOutputStyle: () => "detailed" });
+		rehydrateChatPanelFromTurns(replay, f.entries());
+		for (const panel of [f.panel, replay]) {
+			const rendered = panel.render(120).map(stripTerminalSequences).join("\n");
+			match(rendered, /Tool argument generation stopped/);
+			match(rendered, /byte safety ceiling/);
+			doesNotMatch(rendered, /Cancelled at your request|\bCancelled\b|provider retry/);
+		}
+		const end = f.events.filter((event) => event.type === "agent_end").at(-1);
+		ok(end?.type === "agent_end");
+		const summary = buildSummary({
+			startedAt: 1,
+			endedAt: 2,
+			modelId: model.id,
+			targetId: target.id,
+			messages: end.messages,
+			watchdogPeak: 0,
+			cancelled: false,
+		});
+		strictEqual(summary.stopReason, "generation_guard");
+		match(resolveFooterVerb({ ...INITIAL_STATUS, phase: "ended", summary }, 2, 120)?.text ?? "", /Generation stopped/);
+		f.next();
+		await f.loop.submit("Next prompt");
+		match(f.panel.render(120).map(stripTerminalSequences).join("\n"), /PONG/);
 	} finally {
 		await f.close();
 	}

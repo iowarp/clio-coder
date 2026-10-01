@@ -171,7 +171,10 @@ export function buildSummary(input: BuildSummaryInput): TurnSummary {
 		tally = foldMessageIntoRunTally(tally, message);
 		if (message.role === "assistant") {
 			const reason = assistantStopReason((message as { stopReason?: unknown }).stopReason);
-			if (reason && reason !== "stop") stopReason = reason;
+			if (reason && reason !== "stop") {
+				stopReason =
+					reason === "aborted" && recordAbortSource(message) === "tool_argument_generation" ? "generation_guard" : reason;
+			}
 		}
 	}
 	return summaryFromRunTally(tally, {
@@ -183,4 +186,8 @@ export function buildSummary(input: BuildSummaryInput): TurnSummary {
 		stopReason,
 		...(input.truncated !== undefined ? { truncated: input.truncated } : {}),
 	});
+}
+
+function recordAbortSource(message: AgentMessage): unknown {
+	return (message as unknown as { clioCoderAbortReason?: unknown }).clioCoderAbortReason;
 }

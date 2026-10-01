@@ -453,7 +453,7 @@ export function contextQuadrant(facts: ContextEngineFacts, options: ExpandedQuad
 function stopReasonStyle(reason: TurnSummary["stopReason"]): { glyph: string; token: ClioToken } {
 	if (reason === "error") return { glyph: GLYPH.error, token: "error" };
 	if (reason === "aborted" || reason === "cancelled") return { glyph: GLYPH.cancelled, token: "annotation" };
-	if (reason === "length") return { glyph: GLYPH.warn, token: "warning" };
+	if (reason === "length" || reason === "generation_guard") return { glyph: GLYPH.warn, token: "warning" };
 	return { glyph: GLYPH.ok, token: "success" };
 }
 
@@ -728,6 +728,8 @@ function footerPhasePresentation(status: AgentStatus, width: number, now: number
 		case "ended": {
 			const stop = status.summary?.stopReason;
 			if (stop === "error") return { glyph: GLYPH.error, label: "Failed", token: "error", live: false };
+			if (stop === "generation_guard")
+				return { glyph: GLYPH.warn, label: "Generation stopped", token: "warning", live: false };
 			if (stop === "aborted" || stop === "cancelled")
 				return { glyph: GLYPH.cancelled, label: "Cancelled", token: "counter", live: false };
 			if (stop === "length") return { glyph: GLYPH.warn, label: "Output limit", token: "warning", live: false };
@@ -795,11 +797,13 @@ export function composerPhasePresentation(status: AgentStatus, width: number, no
 			label =
 				stop === "error"
 					? "failed"
-					: stop === "cancelled" || stop === "aborted"
-						? "was cancelled"
-						: stop === "length"
-							? "reached the output limit"
-							: "finished";
+					: stop === "generation_guard"
+						? "stopped generating tool arguments"
+						: stop === "cancelled" || stop === "aborted"
+							? "was cancelled"
+							: stop === "length"
+								? "reached the output limit"
+								: "finished";
 			break;
 		}
 	}

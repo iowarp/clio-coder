@@ -83,6 +83,7 @@ function coreVerb(status: AgentStatus): { text: string; toneHint: VerbRender["to
 		case "ended": {
 			const stop = status.summary?.stopReason ?? "stop";
 			const elapsed = status.summary ? ` · ${formatStatusElapsed(status.summary.elapsedMs)}` : "";
+			if (stop === "generation_guard") return { text: `${GLYPH.warn} Generation stopped${elapsed}`, toneHint: "warn" };
 			if (stop === "cancelled" || stop === "aborted")
 				return { text: `${GLYPH.cancelled} Cancelled${elapsed}`, toneHint: "muted" };
 			if (stop === "error") return { text: `${GLYPH.error} Failed${elapsed}`, toneHint: "error" };

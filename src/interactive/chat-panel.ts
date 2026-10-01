@@ -2654,7 +2654,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 						invalidateEntryCache(target);
 						lastSettledReceipt = target;
 						const stop = event.messages.filter((message) => message.role === "assistant").at(-1) as
-							| { stopReason?: string }
+							| { stopReason?: string; clioCoderAbortReason?: string }
 							| undefined;
 						// A replayed run end brings the duration and cold reasons the
 						// ledger recorded; a live one measures its own.
@@ -2674,7 +2674,9 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 								stop?.stopReason === "error"
 									? "Failed"
 									: stop?.stopReason === "aborted"
-										? "Cancelled"
+										? stop.clioCoderAbortReason === "tool_argument_generation"
+											? "Generation stopped"
+											: "Cancelled"
 										: stop?.stopReason === "length"
 											? "Output limit"
 											: "Done",

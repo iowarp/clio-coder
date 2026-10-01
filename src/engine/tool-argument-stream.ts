@@ -95,7 +95,7 @@ export function guardToolArgumentStream<T extends StreamOptions>(
 	});
 	const stop = (detail: string): void => {
 		const reason = `Tool argument generation stopped: ${detail}. No tools from this response were executed.`;
-		const message = aborted(reason);
+		const message = { ...aborted(reason), clioCoderAbortReason: "tool_argument_generation" };
 		// Settle immediately even if a provider ignores abort or sends a late
 		// successful terminal event. "aborted" bypasses both Pi dispatch and the
 		// host transient retry ladder; this is not a retryable stream timeout.
