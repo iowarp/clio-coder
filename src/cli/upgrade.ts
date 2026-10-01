@@ -1,13 +1,15 @@
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { initializeClioHome } from "../core/init.js";
 import { clioDirLayoutProblems, resolveClioDirs } from "../core/xdg.js";
 import {
 	type Installation,
 	inspectInstallation,
 	installationCommand,
+	installerPackageRoot,
 	npmInstallArgs,
+	readInstallerRecord,
 } from "../domains/lifecycle/install-method.js";
 import { listMigrations, readMigrationManifestResult, runPending } from "../domains/lifecycle/migrations/index.js";
 import { compareReleaseVersions, fetchReleaseVersion } from "../domains/lifecycle/release-version.js";
@@ -19,15 +21,18 @@ import { printError } from "./shared.js";
 const CHANNELS = ["latest", "beta", "dev"] as const;
 type Channel = (typeof CHANNELS)[number];
 
-const HELP = `clio-coder upgrade [--dry-run] [--channel=<latest|beta|dev>] [--skip-migrations] [--restart] [--json]
+const HELP = `clio-coder upgrade [--dry-run] [--channel=<latest|beta|dev>] [--skip-migrations] [--refresh-runtime] [--restart] [--json]
 
 Upgrade Clio Coder and apply pending state migrations. An npm-installed
-binary is updated in its existing prefix. Other package managers and source
-checkouts receive update instructions for their installation method.
+binary is updated in its existing prefix. An install.sh install gets the new
+version in a new prefix beside the old one, then its launcher is switched.
+Other package managers and source checkouts receive update instructions for
+their installation method.
 
 Flags:
   --dry-run             print planned actions without changing anything
-  --channel=<chan>      npm dist-tag to install (latest|beta|dev). npm installs only.
+  --channel=<chan>      npm dist-tag to install (latest|beta|dev). npm and install.sh installs.
+  --refresh-runtime     install.sh installs: also move to the newest Node LTS the installer picks
   --skip-migrations     skip migrations after the install step
   --post-install        apply local checks after a package-manager update; skip reinstall
   --restart             after success, launch the installed CLI in this project; type /resume there
@@ -55,6 +60,7 @@ interface UpgradeOptions {
 	postInstall: boolean;
 	json: boolean;
 	restart: boolean;
+	refreshRuntime: boolean;
 }
 
 /**
@@ -71,6 +77,7 @@ function parseUpgradeArgs(argv: ReadonlyArray<string>): UpgradeOptions {
 	let postInstall = false;
 	let json = false;
 	let restart = false;
+	let refreshRuntime = false;
 
 	const toChannel = (value: string | undefined): Channel => {
 		if (value === undefined || !(CHANNELS as ReadonlyArray<string>).includes(value)) {
@@ -88,6 +95,7 @@ function parseUpgradeArgs(argv: ReadonlyArray<string>): UpgradeOptions {
 		else if (arg === "--post-install") postInstall = true;
 		else if (arg === "--json") json = true;
 		else if (arg === "--restart") restart = true;
+		else if (arg === "--refresh-runtime") refreshRuntime = true;
 		else if (arg.startsWith("--channel=")) channel = toChannel(arg.slice("--channel=".length));
 		else if (arg === "--channel") {
 			channel = toChannel(argv[i + 1]);
@@ -96,7 +104,7 @@ function parseUpgradeArgs(argv: ReadonlyArray<string>): UpgradeOptions {
 	}
 	if (!help && restart && (json || postInstall))
 		throw new Error("--restart cannot be combined with --json or --post-install");
-	return { dryRun, channel, skipMigrations, help, postInstall, json, restart };
+	return { dryRun, channel, skipMigrations, help, postInstall, json, restart, refreshRuntime };
 }
 
 /**
@@ -125,9 +133,14 @@ async function lookUpAvailableVersion(channel: Channel, method: Installation["ki
  * slow registry. Draining also gives the failure something to say beyond an
  * exit code.
  */
-async function runChild(command: string, args: ReadonlyArray<string>, label: string): Promise<string> {
+async function runChild(
+	command: string,
+	args: ReadonlyArray<string>,
+	label: string,
+	env: NodeJS.ProcessEnv = process.env,
+): Promise<string> {
 	return new Promise<string>((resolve, reject) => {
-		const child = spawn(command, [...args], { stdio: ["ignore", "pipe", "pipe"] });
+		const child = spawn(command, [...args], { stdio: ["ignore", "pipe", "pipe"], env });
 		let stdout = "";
 		let tail = "";
 		const keepTail = (chunk: Buffer): void => {
@@ -150,23 +163,60 @@ async function runChild(command: string, args: ReadonlyArray<string>, label: str
 	});
 }
 
+/** The Node that runs `installation`: its managed runtime for install.sh, else this process's. */
+function nodeFor(installation: Installation): string {
+	const node = installation.installer?.node;
+	return node !== undefined && existsSync(node) ? node : process.execPath;
+}
+
 async function runNpmInstall(channel: Channel, installation: Installation): Promise<void> {
 	await runChild("npm", npmInstallArgs(installation, channel), "npm install");
 }
 
+/**
+ * Run the installer this package shipped against the install root it came
+ * from. The runtime stays the one the manifest names unless --refresh-runtime,
+ * so an upgrade does not quietly download a new Node. Post-install checks run
+ * afterwards through the new entry, as for npm.
+ */
+async function runInstallerUpgrade(opts: UpgradeOptions, installation: Installation): Promise<Installation> {
+	const record = installation.installer;
+	if (installation.kind !== "installer" || record === undefined)
+		throw new Error("installer upgrade needs an install.sh installation");
+	const args = [
+		join(installation.root, "scripts", "install.sh"),
+		"--channel",
+		opts.channel,
+		"--install-dir",
+		record.root,
+		"--bin-dir",
+		dirname(record.launcher),
+		"--no-post-install",
+	];
+	const env: NodeJS.ProcessEnv = { ...process.env };
+	if (opts.refreshRuntime) {
+		delete env.CLIO_CODER_NODE_VERSION;
+		args.push("--refresh-runtime");
+	} else if (record.nodeVersion) env.CLIO_CODER_NODE_VERSION = record.nodeVersion;
+	await runChild("sh", args, "install.sh", env);
+	const updated = readInstallerRecord(record.root);
+	if (updated === null) throw new Error(`install.sh finished but ${join(record.root, "install.json")} is unreadable`);
+	return inspectInstallation(join(installerPackageRoot(updated.current), "dist", "cli", "index.js"));
+}
+
 async function runDoctorFixAfterInstall(installation: Installation): Promise<void> {
-	await runChild(process.execPath, [installation.entry, "doctor", "--fix"], "clio-coder doctor --fix");
+	await runChild(nodeFor(installation), [installation.entry, "doctor", "--fix"], "clio-coder doctor --fix");
 }
 
 async function runPostInstallUpgrade(opts: UpgradeOptions, installation: Installation): Promise<void> {
 	const args = [installation.entry, "upgrade", "--post-install", `--channel=${opts.channel}`];
 	if (opts.skipMigrations) args.push("--skip-migrations");
-	await runChild(process.execPath, args, "clio-coder upgrade --post-install");
+	await runChild(nodeFor(installation), args, "clio-coder upgrade --post-install");
 }
 
 async function runBackgroundRestart(installation: Installation): Promise<string> {
 	const output = await runChild(
-		process.execPath,
+		nodeFor(installation),
 		[installation.entry, "gui", "background", "restart", "--if-idle"],
 		"clio-coder gui background restart --if-idle",
 	);
@@ -177,7 +227,7 @@ async function runBackgroundRestart(installation: Installation): Promise<string>
 
 async function runRestart(installation: Installation): Promise<number> {
 	return new Promise((resolve, reject) => {
-		const child = spawn(process.execPath, [installation.entry], { stdio: "inherit" });
+		const child = spawn(nodeFor(installation), [installation.entry], { stdio: "inherit" });
 		// Both share the foreground process group. Let the new CLI own Ctrl+C.
 		const interrupt = () => {};
 		const terminate = () => {
@@ -204,6 +254,7 @@ export interface UpgradeDependencies {
 	inspectInstallation: typeof inspectInstallation;
 	lookUpAvailableVersion: typeof lookUpAvailableVersion;
 	runNpmInstall: typeof runNpmInstall;
+	runInstallerUpgrade: typeof runInstallerUpgrade;
 	runDoctorFixAfterInstall: typeof runDoctorFixAfterInstall;
 	runPostInstallUpgrade: typeof runPostInstallUpgrade;
 	runBackgroundRestart: typeof runBackgroundRestart;
@@ -216,6 +267,7 @@ const DEFAULT_DEPENDENCIES: UpgradeDependencies = {
 	inspectInstallation,
 	lookUpAvailableVersion,
 	runNpmInstall,
+	runInstallerUpgrade,
 	runDoctorFixAfterInstall,
 	runPostInstallUpgrade,
 	runBackgroundRestart,
@@ -262,6 +314,9 @@ export async function runUpgradeCommand(
 	}
 	const stateDir = dirs.state;
 	const installation = deps.inspectInstallation();
+	// An installer upgrade moves the entry to a new prefix; the relaunch and the
+	// background restart must use the new one.
+	let activeInstallation = installation;
 	const method = installation.kind;
 	const methodLabel =
 		method === "source"
@@ -270,7 +325,9 @@ export async function runUpgradeCommand(
 				? "package install"
 				: method === "npm"
 					? "npm global"
-					: method;
+					: method === "installer"
+						? "install.sh"
+						: method;
 	const updateCommand = installationCommand(installation, "upgrade", opts.channel);
 	const sourceAdvice = () => presenter.commandAdvice(SOURCE_UPGRADE_LEAD, updateCommand);
 	const backgroundOwner = join(stateDir, "gui/background/owner.json");
@@ -283,7 +340,7 @@ export async function runUpgradeCommand(
 				);
 			} else {
 				try {
-					presenter.note(await deps.runBackgroundRestart(installation));
+					presenter.note(await deps.runBackgroundRestart(activeInstallation));
 				} catch (error) {
 					presenter.warn(
 						`Upgrade succeeded, but the background app was not checked: ${error instanceof Error ? error.message : String(error)}`,
@@ -298,7 +355,7 @@ export async function runUpgradeCommand(
 		presenter.done("Done");
 		if (!opts.restart || opts.dryRun) return 0;
 		try {
-			return await deps.runRestart(installation);
+			return await deps.runRestart(activeInstallation);
 		} catch (error) {
 			printError(
 				`Upgrade complete, but relaunch failed: ${error instanceof Error ? error.message : String(error)}. To continue, ${RESUME_HINT}.`,
@@ -307,7 +364,7 @@ export async function runUpgradeCommand(
 		}
 	};
 	presenter.setMethod(methodLabel);
-	if (!opts.postInstall && method !== "npm" && method !== "source") {
+	if (!opts.postInstall && method !== "npm" && method !== "installer" && method !== "source") {
 		presenter.note(`Installation method: ${methodLabel}`);
 		presenter.note(`Package: ${installation.root}`);
 		presenter.commandAdvice("Update with the original package manager and its original global directory:", updateCommand);
@@ -335,7 +392,13 @@ export async function runUpgradeCommand(
 	if (availableVersion !== null) presenter.step(`Available version: ${availableVersion}`);
 	else if (!lookup.asked) presenter.step(`Available version: not checked (${lookup.reason})`);
 	else presenter.step("Available version: unknown (the registry could not be reached)");
-	if (method === "npm" && !opts.postInstall) presenter.step(`Channel: ${opts.channel}`);
+	if ((method === "npm" || method === "installer") && !opts.postInstall) presenter.step(`Channel: ${opts.channel}`);
+	if (installation.installer) {
+		const record = installation.installer;
+		presenter.step(
+			`Runtime: Node v${record.nodeVersion} ${record.nodeBuild}${opts.refreshRuntime ? " (refresh requested)" : ""}`,
+		);
+	}
 	presenter.step(`State dir: ${shortenPath(stateDir)}`);
 
 	const migrations = listMigrations();
@@ -407,16 +470,20 @@ export async function runUpgradeCommand(
 	} else if (comparison === null || comparison > 0) {
 		try {
 			presenter.note(`Installing with: ${updateCommand}`);
-			await deps.runNpmInstall(opts.channel, installation);
+			if (method === "installer") activeInstallation = await deps.runInstallerUpgrade(opts, installation);
+			else await deps.runNpmInstall(opts.channel, installation);
 			presenter.completedStep(`Installed @iowarp/clio-coder@${opts.channel}`);
 		} catch (err) {
-			presenter.fail("npm install failed", err instanceof Error ? err.message : String(err));
+			presenter.fail(
+				method === "installer" ? "install.sh failed" : "npm install failed",
+				err instanceof Error ? err.message : String(err),
+			);
 			presenter.commandAdvice("To upgrade by hand, run:", `${updateCommand}\nclio-coder upgrade --post-install`);
 			presenter.finish();
 			return 1;
 		}
 		try {
-			await deps.runPostInstallUpgrade(opts, installation);
+			await deps.runPostInstallUpgrade(opts, activeInstallation);
 			return finish();
 		} catch (err) {
 			presenter.fail("post-install checks failed", err instanceof Error ? err.message : String(err));

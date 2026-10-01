@@ -16,7 +16,7 @@ import type { TargetDescriptor } from "../providers/types/target-descriptor.js";
 import { loadSkills, type SkillSource } from "../resources/skills/loader.js";
 import { isSessionEntry, type SessionEntry } from "../session/entries.js";
 import { foldPromptCacheTelemetry, hasPromptCacheTelemetry, topExpectedColdReason } from "../session/prompt-cache.js";
-import { inspectInstallation } from "./install-method.js";
+import { type Installation, inspectInstallation } from "./install-method.js";
 import { listMigrations, readMigrationManifestResult } from "./migrations/index.js";
 import { readStateInfoResult } from "./state.js";
 import { getVersionInfo } from "./version.js";
@@ -328,6 +328,35 @@ export function isUninitializedHome(dirs: ReturnType<typeof resolveClioDirs> = r
 	);
 }
 
+/**
+ * The install method row. An installer install also names the Node it owns and
+ * the prefix the launcher runs, and warns when this process is not that Node
+ * (CLIO_CODER_NODE, or the package entry run by hand), since `upgrade` keeps
+ * the managed runtime rather than the one running now.
+ */
+function installMethodFinding(installation: Installation): DoctorFinding {
+	if (installation.kind === "unknown") {
+		return {
+			ok: true,
+			level: "warn",
+			name: "install method",
+			detail: `unknown (${installation.root}); automatic upgrade is unavailable; use the original package manager`,
+		};
+	}
+	const record = installation.installer;
+	if (installation.kind !== "installer" || record === undefined) {
+		return { ok: true, name: "install method", detail: `${installation.kind} (${installation.root})` };
+	}
+	const stale = record.current !== installation.prefix ? `; the launcher now runs ${record.current}` : "";
+	const foreignNode = process.execPath !== record.node ? `; this process runs ${process.execPath} instead` : "";
+	return {
+		ok: true,
+		...(stale || foreignNode ? { level: "warn" as const } : {}),
+		name: "install method",
+		detail: `installer (prefix ${installation.prefix ?? installation.root}; runtime Node v${record.nodeVersion} ${record.nodeBuild} at ${record.node}${stale}${foreignNode})`,
+	};
+}
+
 export function runDoctor(options: DoctorOptions = {}): DoctorFinding[] {
 	let repairFailure: string | null = null;
 	let settingsRepair: SettingsRepairResult | null = null;
@@ -355,14 +384,7 @@ export function runDoctor(options: DoctorOptions = {}): DoctorFinding[] {
 	const version = getVersionInfo();
 	findings.push({ ok: true, name: "Clio Coder version", detail: readClioVersionLabel() });
 	const installation = inspectInstallation();
-	findings.push({
-		ok: true,
-		...(installation.kind === "unknown" ? { level: "warn" as const } : {}),
-		name: "install method",
-		detail: `${installation.kind} (${installation.root})${
-			installation.kind === "unknown" ? "; automatic upgrade is unavailable; use the original package manager" : ""
-		}`,
-	});
+	findings.push(installMethodFinding(installation));
 	findings.push({ ok: true, name: "node version", detail: version.node });
 	findings.push({ ok: true, name: "platform", detail: version.platform });
 	const engineReady = Boolean(version.piAgentCore && version.piAi && version.piTui);

@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { type Installation, installationCommand } from "./install-method.js";
+import { type Installation, installationCommand, installerPackageRoot, readInstallerRecord } from "./install-method.js";
 import { compareReleaseVersions, fetchReleaseVersion, parseReleaseVersion } from "./release-version.js";
 
 const MAX_UPGRADE_REPORT_BYTES = 1024 * 1024;
@@ -13,6 +13,17 @@ export type SelfUpgradePlan =
 	| { status: "unavailable"; current: string; installation: Installation }
 	| { status: "manual"; current: string; installation: Installation; command: string };
 
+function selfUpgradable(installation: Installation): boolean {
+	return (installation.kind === "npm" || installation.kind === "installer") && installation.prefix !== null;
+}
+
+/** Where the package lives after the upgrade: the same root for npm, the manifest's new prefix for install.sh. */
+function installedPackageRoot(installation: Installation): string {
+	if (installation.kind !== "installer" || installation.installer === undefined) return installation.root;
+	const record = readInstallerRecord(installation.installer.root);
+	return record === null ? installation.root : installerPackageRoot(record.current);
+}
+
 export interface PlanSelfUpgradeOptions {
 	installation: Installation;
 	runningVersion: string;
@@ -22,14 +33,15 @@ export interface PlanSelfUpgradeOptions {
 
 /**
  * Resolve what an in-session upgrade may safely do. Only an identified npm
- * global install has a stable package root and prefix after replacement; pnpm
+ * global install has a stable package root and prefix after replacement, and an
+ * install.sh install records its new prefix in its manifest; pnpm
  * and Bun global stores can move their package entry during the manager call,
  * so those installations keep the explicit manager handoff rather than
  * guessing which new entry should run post-install checks.
  */
 export async function planSelfUpgrade(options: PlanSelfUpgradeOptions): Promise<SelfUpgradePlan> {
 	const { installation, runningVersion, signal } = options;
-	if (installation.kind !== "npm" || installation.prefix === null) {
+	if (!selfUpgradable(installation)) {
 		return {
 			status: "manual",
 			current: runningVersion,
@@ -86,8 +98,8 @@ export async function runApprovedSelfUpgrade(
 	options: RunApprovedSelfUpgradeOptions,
 ): Promise<ApprovedSelfUpgradeResult> {
 	const { plan, signal } = options;
-	if (plan.installation.kind !== "npm" || plan.installation.prefix === null) {
-		throw new Error("automatic replacement is available only for an identified npm global installation");
+	if (!selfUpgradable(plan.installation)) {
+		throw new Error("automatic replacement is available only for an identified npm global or install.sh installation");
 	}
 	signal?.throwIfAborted();
 	const spawnProcess = options.spawnProcess ?? spawn;
@@ -151,7 +163,7 @@ export async function runApprovedSelfUpgrade(
 
 	let installedVersion: string;
 	try {
-		const pkg = JSON.parse(await readFile(join(plan.installation.root, "package.json"), "utf8")) as {
+		const pkg = JSON.parse(await readFile(join(installedPackageRoot(plan.installation), "package.json"), "utf8")) as {
 			name?: unknown;
 			version?: unknown;
 		};

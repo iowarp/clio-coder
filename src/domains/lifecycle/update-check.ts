@@ -89,7 +89,11 @@ export function createUpdateCheck(options: UpdateCheckOptions) {
 		// A `-dev` version has no published artifact: the `beta` track would call it an rc, and
 		// `latest` is always an older stable, so neither answer is one the developer should see.
 		const running = parseReleaseVersion(runningVersion);
-		if (!["npm", "pnpm", "bun"].includes(installation.kind) || running === null || isDevVersion(runningVersion))
+		if (
+			!["npm", "pnpm", "bun", "installer"].includes(installation.kind) ||
+			running === null ||
+			isDevVersion(runningVersion)
+		)
 			return null;
 		// A pre-release install also reads `beta`, so an rc learns about the next rc
 		// as well as the final release. Stable installs never see pre-releases.
@@ -137,7 +141,7 @@ export function createUpdateCheck(options: UpdateCheckOptions) {
 		// needs the channel named, or the command would not install what was announced.
 		const beta = cache.availableTag === "beta";
 		const action =
-			installation.kind === "npm"
+			installation.kind === "npm" || installation.kind === "installer"
 				? beta
 					? "clio-coder upgrade --channel=beta to install"
 					: "/upgrade to review"

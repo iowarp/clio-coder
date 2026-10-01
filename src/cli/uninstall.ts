@@ -1,10 +1,15 @@
-import { existsSync, lstatSync, readdirSync, readFileSync, readlinkSync, realpathSync } from "node:fs";
+import { existsSync, lstatSync, readdirSync, readFileSync, readlinkSync, realpathSync, rmdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { delimiter, dirname, isAbsolute, join, resolve, sep } from "node:path";
 
 import { resolvePackageRoot } from "../core/package-root.js";
 import { clioDirLayoutProblems, resetXdgCache, resolveClioDirs } from "../core/xdg.js";
-import { type Installation, inspectInstallation, installationCommand } from "../domains/lifecycle/install-method.js";
+import {
+	INSTALLER_LAUNCHER_MARK,
+	type Installation,
+	inspectInstallation,
+	installationCommand,
+} from "../domains/lifecycle/install-method.js";
 import { GUI_UNINSTALL_ADVICE, prepareGuiUninstall } from "./gui.js";
 import { stopLegacyDocsBeforeRemoval } from "./legacy-docs-cleanup.js";
 import { createLifecyclePresenter, type LifecycleItem, measurePath, shortenPath } from "./lifecycle-presenter.js";
@@ -27,7 +32,8 @@ Flags:
   --keep-data      preserve the data root (memory, evidence, vendored tools)
   --remove-binary  also remove the launcher symlink when it points at this
                    installation. A real file, or a link into a different clio-coder
-                   installation, is kept and reported.
+                   installation, is kept and reported. For an install.sh install,
+                   also remove its launcher, its private Node and every installed version.
   --dry-run        print what would be removed without changing anything
   --force, -f      skip confirmation prompt and proceed immediately
   --json           emit machine-readable JSON output
@@ -143,19 +149,36 @@ function launcherLinkPath(): string {
 	return join(binDir, "clio-coder");
 }
 
-/** The CLI entry of the installation running this command. */
-function ownedCliEntry(): string {
-	const entry = join(resolvePackageRoot(), "dist", "cli", "index.js");
+/**
+ * The files a launcher of this installation may resolve to: the CLI entry, and
+ * the Node version guard that package managers link as the bin since #408.
+ */
+function ownedCliEntries(): string[] {
+	return [join("dist", "cli", "index.js"), join("bin", "clio-coder.cjs")].map((relative) => {
+		const entry = join(resolvePackageRoot(), relative);
+		try {
+			return realpathSync(entry);
+		} catch {
+			return entry;
+		}
+	});
+}
+
+/** A launcher file scripts/install.sh wrote for this install root. */
+function isInstallerLauncher(linkPath: string, installation: Installation): boolean {
+	const record = installation.installer;
+	if (record === undefined) return false;
 	try {
-		return realpathSync(entry);
+		const text = readFileSync(linkPath, "utf8");
+		return text.split("\n")[1] === INSTALLER_LAUNCHER_MARK && text.includes(`${record.root}${sep}`);
 	} catch {
-		return entry;
+		return false;
 	}
 }
 
 type LauncherVerdict = { kind: "absent" } | { kind: "keep"; detail: string } | { kind: "remove"; detail: string };
 
-function classifyLauncher(linkPath: string): LauncherVerdict {
+function classifyLauncher(linkPath: string, installation: Installation): LauncherVerdict {
 	let isSymlink: boolean;
 	try {
 		isSymlink = lstatSync(linkPath).isSymbolicLink();
@@ -163,10 +186,11 @@ function classifyLauncher(linkPath: string): LauncherVerdict {
 		return { kind: "absent" };
 	}
 	if (!isSymlink) {
+		if (isInstallerLauncher(linkPath, installation)) return { kind: "remove", detail: "install.sh launcher" };
 		return { kind: "keep", detail: "not a symlink; remove it via your package manager" };
 	}
 
-	const owned = ownedCliEntry();
+	const owned = ownedCliEntries();
 	let resolved: string | null = null;
 	try {
 		resolved = realpathSync(linkPath);
@@ -175,16 +199,19 @@ function classifyLauncher(linkPath: string): LauncherVerdict {
 	}
 
 	if (resolved !== null) {
-		if (resolved === owned) return { kind: "remove", detail: `-> ${resolved}` };
+		if (owned.includes(resolved)) return { kind: "remove", detail: `-> ${resolved}` };
 		return {
 			kind: "keep",
-			detail: `points at ${resolved}, not this installation (${owned}); remove it with \`rm ${linkPath}\``,
+			detail: `points at ${resolved}, not this installation (${owned[0]}); remove it with \`rm ${linkPath}\``,
 		};
 	}
 
 	const raw = readlinkSync(linkPath);
 	const danglingTarget = isAbsolute(raw) ? raw : resolve(dirname(linkPath), raw);
-	if (danglingTarget.endsWith(join(sep, "dist", "cli", "index.js"))) {
+	if (
+		danglingTarget.endsWith(join(sep, "dist", "cli", "index.js")) ||
+		danglingTarget.endsWith(join(sep, "bin", "clio-coder.cjs"))
+	) {
 		return { kind: "remove", detail: `-> ${danglingTarget} (dangling; that installation is already gone)` };
 	}
 	return {
@@ -271,6 +298,11 @@ function launcherItemDetail(verdict: LauncherVerdict, removeRequested: boolean):
 
 /** The removal command that matches how this installation was put on disk. */
 function binaryRemovalAdvice(installation: Installation, linkPath: string): { lead: string; command: string } {
+	if (installation.kind === "installer")
+		return {
+			lead: "To remove the private Node, the installed versions and the launcher, run:",
+			command: `${installationCommand(installation, "uninstall")}\nhash -r`,
+		};
 	if (installation.kind === "source")
 		return { lead: "To finish removing the launcher, run:", command: `rm "${linkPath}"\nhash -r` };
 	return {
@@ -316,17 +348,20 @@ export async function runUninstallCommand(argv: ReadonlyArray<string>): Promise<
 
 	presenter.header("Uninstall Clio Coder", "uninstall");
 	presenter.step(
-		`Installation method: ${method === "source" ? "source symlink" : method === "npm" ? "npm global" : method}`,
+		`Installation method: ${method === "source" ? "source symlink" : method === "npm" ? "npm global" : method === "installer" ? "install.sh" : method}`,
 	);
 
 	const configSize = measurePath(dirs.config);
 	const dataSize = measurePath(dirs.data);
 	const stateSize = measurePath(dirs.state);
 	const cacheSize = measurePath(dirs.cache);
+	const installerRecord = method === "installer" ? installation.installer : undefined;
 	const linkPath =
-		method === "npm" && installation.prefix ? join(installation.prefix, "bin", "clio-coder") : launcherLinkPath();
+		installerRecord?.launcher ||
+		(method === "npm" && installation.prefix ? join(installation.prefix, "bin", "clio-coder") : launcherLinkPath());
 	const linkSize = measurePath(linkPath);
-	const launcher = classifyLauncher(linkPath);
+	const launcher = classifyLauncher(linkPath, installation);
+	const runtimeSize = installerRecord ? measurePath(installerRecord.root) : null;
 	const shellEdits = detectShellRcEdits();
 	let web: Awaited<ReturnType<typeof prepareGuiUninstall>>;
 	try {
@@ -381,6 +416,17 @@ export async function runUninstallCommand(argv: ReadonlyArray<string>): Promise<
 			detail: launcherItemDetail(launcher, args.removeBinary),
 		},
 	];
+	if (installerRecord && runtimeSize) {
+		items.push({
+			label: "Runtime and versions",
+			path: installerRecord.root,
+			bytes: runtimeSize.bytes,
+			status: !runtimeSize.exists ? "absent" : args.removeBinary ? "remove" : "skip",
+			detail: args.removeBinary
+				? `Node v${installerRecord.nodeVersion} and installed versions`
+				: "kept; --remove-binary removes it",
+		});
+	}
 	for (const item of web.items) items.push({ ...item, status: "remove", detail: "verified app ownership" });
 	for (const item of web.unmanaged)
 		items.push({ ...item, status: "skip", detail: "this build has no graphical application to remove it with" });
@@ -421,7 +467,10 @@ export async function runUninstallCommand(argv: ReadonlyArray<string>): Promise<
 
 	if (args.dryRun) {
 		presenter.warn("Dry run: no changes made");
-		if (method !== "source" || (launcher.kind !== "absent" && !args.removeBinary))
+		if (
+			!(method === "installer" && args.removeBinary) &&
+			(method !== "source" || (launcher.kind !== "absent" && !args.removeBinary))
+		)
 			presenter.commandAdvice(advice.lead, advice.command);
 		if (survivor !== null)
 			presenter.warn(`Another clio-coder stays on your PATH at ${survivor}; it is a separate install`);
@@ -493,6 +542,27 @@ export async function runUninstallCommand(argv: ReadonlyArray<string>): Promise<
 		}
 	}
 
+	// The running Node and package live under this root. Unlinking them is safe
+	// on Linux and macOS: the open files stay readable until this process exits.
+	let runtimeRemoved = false;
+	if (args.removeBinary && installerRecord && runtimeSize?.exists) {
+		// Only what install.sh creates is removed, then the root if it is left
+		// empty: --install-dir may have named a directory that holds other files.
+		const failed = ["runtime", "versions", "install.json"].flatMap(
+			(name) => removePath("runtime", join(installerRecord.root, name), false) ?? [],
+		);
+		failures.push(...failed);
+		if (failed.length === 0) {
+			try {
+				rmdirSync(installerRecord.root);
+			} catch {
+				// Other files remain in a shared --install-dir; they are not ours to remove.
+			}
+			presenter.completedStep("Removed runtime and installed versions");
+			runtimeRemoved = true;
+		}
+	}
+
 	resetXdgCache();
 
 	if (failures.length > 0) {
@@ -505,7 +575,8 @@ export async function runUninstallCommand(argv: ReadonlyArray<string>): Promise<
 		return 1;
 	}
 
-	if (method !== "source" || (launcher.kind !== "absent" && !launcherRemoved))
+	const installerGone = method === "installer" && runtimeRemoved && launcher.kind !== "keep";
+	if (!installerGone && (method !== "source" || (launcher.kind !== "absent" && !launcherRemoved)))
 		presenter.commandAdvice(advice.lead, advice.command);
 	if (survivor !== null)
 		presenter.warn(`Another clio-coder stays on your PATH at ${survivor}; it is a separate install`);
