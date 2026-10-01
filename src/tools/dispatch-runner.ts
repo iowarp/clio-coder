@@ -543,6 +543,19 @@ export function nextHostValidationAction(receipt: RunReceipt, integrity: Receipt
 	return `next host validation for ${receipt.runId}: ${action}; inspect the actual exit code and output, and record that result before reporting verified completion. The worker claimed validation but executed no check.`;
 }
 
+/**
+ * A withheld merge keeps the worker's commit on its task branch. The worker's
+ * own prose can say it did not commit, so the host states where the work is
+ * (flywheel p7/A2).
+ */
+function withheldMergeNotice(receipt: RunReceipt, integrity: ReceiptIntegrityResult): string | null {
+	const worktree = receipt.worktree;
+	if (!integrity.ok || receipt.outcomeCode !== "merge_withheld" || worktree === undefined) return null;
+	if (worktree.applied || worktree.reason === "operator_discarded") return null;
+	const commit = worktree.commit !== undefined ? ` at ${worktree.commit.slice(0, 12)}` : "";
+	return `merge withheld for ${receipt.runId}: its work is committed on branch ${worktree.branch}${commit} and is not merged into the operator's branch. Report it as committed there and not merged, whatever the worker's text says about committing.`;
+}
+
 /** Totals from integrity-checked receipts, with opaque external tool use kept separate. */
 export function dispatchBatchSummary(runs: ReadonlyArray<CompletedRun>): {
 	observedToolCalls: number;
@@ -588,7 +601,10 @@ export function formatDispatchOutput(
 		.map((run) => integrityFailureBanner(run))
 		.filter((banner): banner is string => banner !== null);
 	const hostActions = runs
-		.map((run) => nextHostValidationAction(run.receipt, run.integrity))
+		.flatMap((run) => [
+			nextHostValidationAction(run.receipt, run.integrity),
+			withheldMergeNotice(run.receipt, run.integrity),
+		])
 		.filter((action): action is string => action !== null);
 	const batch = dispatchBatchSummary(runs);
 	const needsSpotCheck = runs.some((run) => {
