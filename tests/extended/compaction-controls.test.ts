@@ -69,7 +69,7 @@ describe("production compaction controls", () => {
 		faux.unregister();
 		scratch.restore();
 	});
-	function fixture(literalUsage = false) {
+	function fixture(literalUsage = false, withHistory = true) {
 		const settings = structuredClone(DEFAULT_SETTINGS);
 		settings.chat.target = "chat-target";
 		settings.chat.model = "chat";
@@ -158,7 +158,7 @@ describe("production compaction controls", () => {
 					payload: { text: `${label}-${i} ${"x".repeat(24000)}` },
 				}).id;
 		}
-		addHistory();
+		if (withHistory) addHistory();
 		const session = {
 			current: () => state.meta,
 			tree: () => ({ leafId: leaf }),
@@ -256,6 +256,46 @@ describe("production compaction controls", () => {
 			}),
 		};
 	}
+
+	it("manual compaction explains a short conversation with its context usage", async () => {
+		const f = fixture(false, false);
+		f.settings.chat.prewarm = false;
+		f.providers.getDetectedReasoning = () => false;
+		const user = appendEntry(f.state, {
+			kind: "message",
+			role: "user",
+			parentTurnId: null,
+			payload: { text: "Hello" },
+		});
+		const assistant = appendEntry(f.state, {
+			kind: "message",
+			role: "assistant",
+			parentTurnId: user.turnId,
+			payload: { text: "Hi" },
+		});
+		f.pinLeaf(assistant.turnId);
+		const notices: string[] = [];
+		const loop = createChatLoop({
+			getSettings: () => f.settings,
+			providers: f.providers,
+			knownTargets: () => new Set(["chat-target", "summary-target"]),
+			session: f.session,
+			readSessionEntries: f.entries,
+			autoCompact: f.run,
+		});
+		loop.onEvent((event) => {
+			if (event.type === "notice") notices.push(event.text);
+		});
+		try {
+			loop.resetForSession(f.entries().at(-1)?.turnId ?? null, buildModelReplayAgentMessagesFromTurns(f.entries()));
+			await loop.compact();
+			match(notices.join("\n"), /too short to compact \(.* of .* tokens used\)/u);
+			doesNotMatch(notices.join("\n"), /session is empty/u);
+			strictEqual(f.calls.length, 0);
+		} finally {
+			loop.dispose();
+		}
+	});
 
 	for (const mode of ["manual", "auto", "overflow", "acp", "reset", "dispose"] as const) {
 		it(`production ${mode} cancellation prevents checkpoint publication and chat submission`, async () => {

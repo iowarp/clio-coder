@@ -129,6 +129,7 @@ import {
 	draftTemperature,
 	runDraftWithSamplerFallback,
 } from "./drafts.js";
+import { formatFooterTokens } from "./footer-panel.js";
 import { type HandoffRepairInput, runHandoffRound } from "./handoff-round.js";
 import type { NoticeSource } from "./notice-source.js";
 import type { ApprovalRequestView } from "./permission-overlay.js";
@@ -2950,7 +2951,20 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				endPreparationCompaction();
 			}
 			if (!compacted) {
-				emitNotice("[/context compact] nothing to compact; session is empty or no cut crossed");
+				const entries = deps.readSessionEntries?.() ?? [];
+				const hasMessages =
+					entries.some((entry) => entry.kind === "message") || agentRuntime.agent.state.messages.length > 0;
+				const usage = context.contextUsage();
+				const used = usage.tokens !== null ? `${formatFooterTokens(usage.tokens)} tokens` : "unknown usage";
+				const budget =
+					usage.tokens !== null && usage.contextWindow > 0
+						? `${formatFooterTokens(usage.tokens)} of ${formatFooterTokens(usage.contextWindow)} tokens used`
+						: used;
+				emitNotice(
+					hasMessages
+						? `[/context compact] too short to compact (${budget}); no older history can be summarized yet`
+						: "[/context compact] session is empty; start a conversation first",
+				);
 			}
 		},
 	};
