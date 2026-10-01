@@ -24,6 +24,7 @@ export function createDispatchDedupRegistration(): {
 } {
 	const harnessByTurn = new Map<string, string>();
 	const successfulDispatchesByTurn = new Map<string, Set<string>>();
+	const permissionFailuresByTurn = new Map<string, Set<string>>();
 
 	const remember = (turnId: string, fingerprint: string): void => {
 		let seen = successfulDispatchesByTurn.get(turnId);
@@ -62,6 +63,44 @@ export function createDispatchDedupRegistration(): {
 							reason: `dispatch duplicate blocked: Clio already ran Scout for orientation this turn (run ${runId}); answer from the [Orientation] findings or ask a focused question.`,
 						},
 					];
+				// CLB-5: remember only attested terminal permission failures. Exact arguments
+				// leave a changed task, scope or route available to recover deliberately.
+				const permissionKey = stableJson(input.toolArgs ?? {});
+				if (input.hook === "before_tool" && permissionFailuresByTurn.get(input.turnId)?.has(permissionKey)) {
+					return [
+						{
+							kind: "block_tool",
+							severity: "hard-block",
+							reason:
+								"dispatch duplicate blocked: this exact dispatch already failed with permission_required in this user turn. Its execute approval route is unavailable; change the authorized scope or route before dispatching again.",
+						},
+					];
+				}
+				if (input.hook === "after_tool") {
+					const runs = input.toolResultDetails?.runs;
+					if (
+						Array.isArray(runs) &&
+						runs.length > 0 &&
+						runs.every((run) => {
+							const row = asRecord(run);
+							return (
+								row?.outcome === "failed" &&
+								asRecord(row.receiptIntegrity)?.ok === true &&
+								typeof row.outcomeDetail === "string" &&
+								/^permission_required(?:;|$)/u.test(row.outcomeDetail)
+							);
+						})
+					) {
+						let seen = permissionFailuresByTurn.get(input.turnId);
+						if (!seen) {
+							seen = new Set();
+							permissionFailuresByTurn.set(input.turnId, seen);
+						}
+						seen.add(permissionKey);
+						while (permissionFailuresByTurn.size > DISPATCH_GUARD_TURN_LIMIT)
+							permissionFailuresByTurn.delete(permissionFailuresByTurn.keys().next().value as string);
+					}
+				}
 				const fingerprint = dispatchFingerprint(input.toolArgs);
 				if (fingerprint === null) return [];
 				if (input.hook === "before_tool") {

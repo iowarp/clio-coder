@@ -1676,9 +1676,11 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 				reason,
 			},
 		} as ClioWorkerEvent);
-		if (onPermission === "fail") {
+		// CLB-5: changing the command cannot create an absent execute approval route.
+		if (onPermission === "fail" || actionClass === "execute") {
 			permissionFailure = true;
 			registry.cancelParkedCalls(reason);
+			process.stderr.write(`[worker] ${reason}\n`);
 			agent.abort();
 			return;
 		}

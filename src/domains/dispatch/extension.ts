@@ -6355,6 +6355,7 @@ export function createDispatchBundle(
 		let finishContractAssistantText = "";
 		let finishContractAssistantTurnId: string | null = null;
 		let failureMessage: string | undefined;
+		let permissionDenialDetail: string | null = null;
 		let providerErrorMessage: string | null = null;
 		let externalTelemetry: RunReceiptDraft["externalTelemetry"];
 		let outcomeCode: RunOutcomeCode | null = null;
@@ -6611,6 +6612,13 @@ export function createDispatchBundle(
 						providerErrorMessage = message;
 					}
 				}
+			}
+			if (
+				event.type === "clio_coder_permission_resolved" &&
+				event.payload?.source === "policy" &&
+				typeof event.payload.reason === "string"
+			) {
+				permissionDenialDetail = event.payload.reason;
 			}
 			const brokered =
 				event.type === "clio_coder_permission_resolved" &&
@@ -7256,6 +7264,10 @@ export function createDispatchBundle(
 				const { outcome, detail } = resolveRunOutcome(evidence);
 				let finalOutcome = outcome;
 				let finalDetail = detail;
+				if (detail === "permission_required" && permissionDenialDetail !== null) {
+					finalDetail = `${detail}; ${permissionDenialDetail}`;
+					failureMessage = permissionDenialDetail;
+				}
 				const finishContract = assessDispatchFinishContract();
 				if (finishContract?.rigor === "high" && finishContract.assessment.kind === "engage" && outcome === "succeeded") {
 					evidence.qualityGateFailure = true;

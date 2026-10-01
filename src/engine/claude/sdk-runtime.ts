@@ -386,6 +386,15 @@ export function createClaudeWorkerBudgetGate(
 	};
 }
 
+/** CLB-5: an execute ask with no responder is a deterministic permission failure. */
+function endsPermissionRun(decision: ClaudeToolPermissionDecision, input: PermissionGateInput): boolean {
+	return (
+		decision.kind === "deny" &&
+		decision.permissionRequired &&
+		(input.onPermission === "fail" || decision.decision.classification.actionClass === "execute")
+	);
+}
+
 function permissionResultForDecision(
 	decision: ClaudeToolPermissionDecision,
 	toolUseID: string | undefined,
@@ -399,13 +408,13 @@ function permissionResultForDecision(
 		if (toolUseID !== undefined) result.toolUseID = toolUseID;
 		return result;
 	}
-	if (decision.permissionRequired && input.onPermission === "fail") {
+	if (endsPermissionRun(decision, input)) {
 		input.onPermissionFailure();
 	}
 	const result: PermissionResult = {
 		behavior: "deny",
 		message: decision.reason,
-		interrupt: decision.permissionRequired && input.onPermission === "fail",
+		interrupt: endsPermissionRun(decision, input),
 		decisionClassification: "user_reject",
 	};
 	if (toolUseID !== undefined) result.toolUseID = toolUseID;
@@ -480,7 +489,7 @@ function buildPreToolUseHook(input: PermissionGateInput): HookCallback {
 				},
 			};
 		}
-		if (decision.permissionRequired && input.onPermission === "fail") input.onPermissionFailure();
+		if (endsPermissionRun(decision, input)) input.onPermissionFailure();
 		return {
 			continue: true,
 			hookSpecificOutput: {
