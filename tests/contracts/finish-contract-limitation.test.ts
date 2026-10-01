@@ -193,6 +193,50 @@ describe("finish contract: the limitation receipt replaces the prose regex", () 
 	});
 });
 
+describe("finish contract: only a change that ran in the workspace needs validation", () => {
+	it("settles ok/no_mutation when the only write was blocked, even though isError is false", () => {
+		const blocked = {
+			kind: "message",
+			role: "tool_result",
+			turnId: "write-1",
+			payload: {
+				toolName: ToolNames.Write,
+				toolCallId: "write-1",
+				isError: false,
+				outcome: "blocked",
+				blockReason: "write-path-outside-cwd",
+				result: { kind: "ok" },
+			},
+		};
+		const entries = [
+			userMessage("user-1"),
+			toolCall("write-1", ToolNames.Write, { path: "src/thing.ts", content: "x" }),
+			blocked,
+			assistantMessage("assistant-1", "The write was denied."),
+		];
+		const assessment = assessFinishContract({ sessionEntries: entries, assistantTurnId: "assistant-1" });
+		strictEqual(assessment.kind, "ok");
+		strictEqual(assessment.reason, "no_mutation");
+	});
+
+	it("settles ok/no_net_mutation for a write outside the workspace", () => {
+		const entries = [
+			userMessage("user-1"),
+			toolCall("write-1", ToolNames.Write, { path: "/tmp/clio-note.txt", content: "hello" }),
+			toolResult("write-1", ToolNames.Write, false),
+			assistantMessage("assistant-1", "Wrote the note."),
+		];
+		const assessment = assessFinishContract({
+			sessionEntries: entries,
+			assistantTurnId: "assistant-1",
+			workspaceRoot: "/workspace/project",
+		});
+		strictEqual(assessment.kind, "ok");
+		strictEqual(assessment.reason, "no_net_mutation");
+		deepStrictEqual(assessment.mutatedPaths, []);
+	});
+});
+
 describe("the limitation tool", () => {
 	it("rejects a reason outside the enum", async () => {
 		const result = await limitationTool.run({ scope: "tests could not run", reason: "because" });
