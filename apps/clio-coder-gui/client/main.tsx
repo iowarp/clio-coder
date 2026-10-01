@@ -66,6 +66,13 @@ const router = createBrowserRouter([
 				},
 			},
 			{
+				path: "/skills",
+				lazy: async () => {
+					const { SkillsPage } = await import("./pages/skills.js");
+					return { element: <SkillsPage client={client} /> };
+				},
+			},
+			{
 				path: "/system",
 				lazy: async () => {
 					const { SystemPage } = await import("./pages/system.js");

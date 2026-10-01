@@ -90,7 +90,7 @@ export function TaskSidebar({
 					<span>Open workspace</span>
 					<kbd>{chordHint("openWorkspace")}</kbd>
 				</button>
-				<NavLink to="/library" className="wb-action" onClick={onNavigate}>
+				<NavLink to="/skills" className="wb-action" onClick={onNavigate}>
 					<Icon name="skills" />
 					<span>Skills</span>
 				</NavLink>
