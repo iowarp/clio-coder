@@ -101,6 +101,8 @@ it("refuses a dispatch whose host check the direct verify call would not admit, 
 		heartbeatAt: { current: Date.now(), monotonic: 0 },
 		events: (async function* () {
 			await done;
+			// A builder that executes no tool seals failed, so the run needs one call.
+			yield { type: "clio_coder_tool_finish", payload: { tool: "read", outcome: "ok", durationMs: 1 } };
 			yield {
 				type: "message_end",
 				message: {
