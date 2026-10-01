@@ -45,8 +45,8 @@ it("warns when the generated handbook is ignored without changing its ignore rul
 		assert.equal(result.summary.action, "wrote");
 		assert.match(output, /CLIO-CODER.md was written but is ignored by Git/u);
 		assert.match(output, /!CLIO-CODER.md/u);
-		assert.match(output, /project instructions: included in full/u);
-		assert.match(output, /handbook files fully included; model tool support not checked/u);
+		assert.match(output, /project instructions: all \d+ lines loaded/u);
+		assert.doesNotMatch(output, /UTF-16|model tool support not checked/u);
 		assert.match(output, /\.gitignore: added '\.clio-coder\/'/u);
 		assert.match(output, /matching handbook ignore rule was left unchanged/u);
 		assert.equal(readFileSync(join(cwd, ".gitignore"), "utf8"), `${ignore}\n.clio-coder/\n`);

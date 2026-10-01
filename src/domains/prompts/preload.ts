@@ -92,7 +92,12 @@ export function selectProjectPreload(
 			providerSupportsTools,
 			reason: mode !== "partial" ? null : chars > maxChars ? "size" : "lines",
 			nearLimit: mode === "full" && (chars > maxChars * 0.9 || lines > FULL_PROJECT_CONTEXT_MAX_LINES * 0.9),
-			label: `${coverageLabel} (${includedChars}/${chars} text units (UTF-16), ${includedLines}/${lines} lines; ${sources.length - incomplete} of ${sources.length} handbook files fully included${providerSupportsTools === null ? "; model tool support not checked" : ""})`,
+			label:
+				mode === "full"
+					? `all ${lines} lines loaded`
+					: mode === "none"
+						? "none found"
+						: `${coverageLabel} (${includedChars}/${chars} text units (UTF-16), ${includedLines}/${lines} lines; ${sources.length - incomplete} of ${sources.length} handbook files fully included${providerSupportsTools === null ? "; model tool support not checked" : ""})`,
 		};
 	};
 	if (fits(context.text)) {
