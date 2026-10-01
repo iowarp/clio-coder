@@ -1,4 +1,5 @@
 import { isAbsolute, relative, resolve } from "node:path";
+import { BusChannels } from "../core/bus-events.js";
 import { ToolNames } from "../core/tool-names.js";
 import { selectWorkerContext } from "../domains/context/worker/select.js";
 import type { DispatchPlanTaskResolution, DispatchRequest } from "../domains/dispatch/contract.js";
@@ -215,6 +216,29 @@ function deepFreeze<T>(value: T): T {
 	return Object.freeze(value);
 }
 
+/** Raw intent objects already announced, so the plan preview and the run parse one call but warn once. */
+const dotWriteRootNoticed = new WeakSet<object>();
+
+/**
+ * A write root of "." or "./" is read as the whole workspace, which is what an
+ * empty list means: no boundary, and the worker keeps bash, verify and git.
+ * Normalization drops it silently, and a receipt then shows `writeRoots: []`
+ * beside a call that named a root. This says what the entry did.
+ */
+function announceDotWriteRoot(deps: DispatchToolDeps, rawIntent: unknown): void {
+	if (deps.bus === undefined || !isRecord(rawIntent) || dotWriteRootNoticed.has(rawIntent)) return;
+	const roots = rawIntent.write_roots;
+	if (!Array.isArray(roots) || !roots.some((entry) => typeof entry === "string" && /^\.\/?$/u.test(entry.trim())))
+		return;
+	dotWriteRootNoticed.add(rawIntent);
+	deps.bus.emit(BusChannels.DispatchScopeNotice, {
+		code: "write_root_dot_unconfined",
+		level: "warning",
+		message:
+			'[dispatch scope] intent.write_roots "." names the whole workspace, so it sets no write boundary: the worker may change any file and keeps bash, verify and git. To confine it, list the files or directories it may change; a confined run loses bash and verify.',
+	});
+}
+
 export function createDispatchAdmissionController(deps: DispatchToolDeps): DispatchAdmissionController {
 	const state: DispatchAdmissionState = {
 		preparedAdmissionArgs: new WeakSet<Record<string, unknown>>(),
@@ -243,6 +267,7 @@ export function createDispatchAdmissionController(deps: DispatchToolDeps): Dispa
 				const byId = new Map(declared.map((check) => [check.id, check]));
 				const normalized = normalizeDispatchIntent(rawIntent, byId);
 				if (!normalized.ok) return { ok: false, message: `${normalized.reason}: ${normalized.message}` };
+				announceDotWriteRoot(deps, rawIntent);
 				return {
 					ok: true,
 					intent: normalized.intent,

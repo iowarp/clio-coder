@@ -168,6 +168,12 @@ export interface ContextWarningPayload {
 /** A dispatch path-scope decision that must remain visible in the operator transcript. */
 export type DispatchScopeNoticePayload =
 	| {
+			/** A write root of "." names the whole workspace, so it adds no write boundary. */
+			code: "write_root_dot_unconfined";
+			level: "warning";
+			message: string;
+	  }
+	| {
 			code: "typed_scope_replaced_inferred_paths";
 			level: "warning";
 			agentId: string;
