@@ -268,7 +268,7 @@ Every headless main-agent receipt carries a `safety` summary and a `noop` flag, 
 - at least one block remains unresolved and no mutating call succeeded, or
 - the run called tools and none of them succeeded.
 
-A mutating call is one the tool registry admitted with action class `write`, which `default` runs without asking inside write roots: `write`, `edit`, and an outward `web_fetch` after its separate outward approval. A terminating result does not count. The `artifact` tool's plan, review, or report is the turn's answer written to a file, so a run whose every edit was blocked and that then wrote a report about it is still a no-op. A successful `bash` call does not count, because its `execute` class says that a command ran, not that it wrote. A run that called no tool and answered in prose is not a no-op.
+A mutating call is one the tool registry admitted with action class `write`, which `default` runs without asking inside write roots: `write`, `edit`, and an outward `web_fetch` (a method other than GET or HEAD, or any `body`) after its separate outward approval. A bodiless GET or HEAD `web_fetch` is read class: it runs without asking and does not count. A terminating result does not count. The `artifact` tool's plan, review, or report is the turn's answer written to a file, so a run whose every edit was blocked and that then wrote a report about it is still a no-op. A successful `bash` call does not count, because its `execute` class says that a command ran, not that it wrote. A run that called no tool and answered in prose is not a no-op.
 
 A later successful substantive read or command can recover a block of the same
 action class. Bookkeeping, discovery, and terminal reports do not count as that
