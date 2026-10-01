@@ -456,6 +456,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 	// ledger entry so a cold provider cache is always explainable.
 	let sessionPrompt: CompiledSessionPrompt | null = null;
 	let sessionPromptKey: string | null = null;
+	let announcedProjectPreload: string | null = null;
 	// The hash this process compiled *for the session that is current now*, and
 	// the manifest's `previousHash` whenever it is set. It is not read off
 	// `sessionPrompt`: an in-process `/resume` leaves that compile in place so
@@ -2015,6 +2016,17 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 					};
 				}
 				lastSystemPromptReused = !changed;
+				// /context init prints this line, so a session says it too: once per
+				// session, and again if the handbook later stops fitting (p8/B4).
+				// Headless runs keep stderr to their session line.
+				const preload = result.projectPreload;
+				if (preload && preload.mode !== "none" && !deps.headless) {
+					const announced = `${sessionId}:${preload.label}`;
+					if (announcedProjectPreload !== announced) {
+						announcedProjectPreload = announced;
+						deps.emitNotice(`project instructions: ${preload.label}`);
+					}
+				}
 				sessionPrompt = result;
 				sessionPromptHash = result.systemPromptHash;
 				sessionPromptKey = key;
