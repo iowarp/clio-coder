@@ -713,3 +713,10 @@ button.wb-chip:hover:not(:disabled) {
 		display: none;
 	}
 }
+
+.wb-icon.wb-icon--text {
+	display: inline-flex;
+	gap: 6px;
+	width: auto;
+	padding: 0 8px;
+}

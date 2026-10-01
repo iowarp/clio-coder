@@ -22,10 +22,10 @@ import {
 import { LiveWorkers, workerCount } from "../chat/FleetStrip.js";
 import { foldFleetRuns, isLiveRun } from "../chat/fleet-facts.js";
 import { type HealthRow, type HealthSummary, summarizeHealth } from "../chat/health.js";
-import { InspectorDock } from "../chat/InspectorDock.js";
 import { Interview } from "../chat/Interview.js";
+import { usePaneState } from "../chat/pane-state.js";
 import { routeFacts } from "../chat/route.js";
-import { isSessionPanelView, type SessionPanelView } from "../chat/session-panel-model.js";
+import { PaneToggles, SessionPane } from "../chat/SessionPane.js";
 import { type ChatTurn, groupTurns, turnStatuses } from "../chat/turns.js";
 import { Icon } from "../design/icons.js";
 import { Boundary, PanelEmpty, PanelHeading } from "../design/panel.js";
@@ -351,66 +351,11 @@ function SessionHealth({ summary }: { summary: HealthSummary }) {
 
 function SessionView({ client, id }: { client: Client; id: string }) {
 	const navigate = useNavigate();
-	const inspectorButton = useId();
-	const panelButton = useId();
-	const opener = useRef<string | null>(null);
-	const [panelView, setSessionPanelView] = useState<SessionPanelView>(() => {
-		try {
-			const saved = localStorage.getItem("clio-coder-gui-session-panel-view");
-			return isSessionPanelView(saved) ? saved : "session";
-		} catch {
-			return "session";
-		}
-	});
-	const choosePanelView = useCallback((view: SessionPanelView) => {
-		setSessionPanelView(view);
-		try {
-			localStorage.setItem("clio-coder-gui-session-panel-view", view);
-		} catch {
-			/* In-memory preference still works. */
-		}
-	}, []);
-	const [inspectorOpen, setInspectorOpen] = useState(() => {
-		try {
-			return (
-				(localStorage.getItem("clio-coder-gui-session-panel") ?? localStorage.getItem("clio-coder-gui-artifacts")) ===
-				"open"
-			);
-		} catch {
-			return false;
-		}
-	});
-	useEffect(() => {
-		try {
-			localStorage.setItem("clio-coder-gui-session-panel", inspectorOpen ? "open" : "closed");
-			localStorage.removeItem("clio-coder-gui-artifacts");
-		} catch {
-			/* Preference holds in this tab. */
-		}
-	}, [inspectorOpen]);
-	const closeInspector = useCallback(() => {
-		const dismissed = document.activeElement;
-		setInspectorOpen(false);
-		requestAnimationFrame(() => {
-			const current = document.activeElement;
-			if (current === dismissed || current === document.body || current?.closest(".session-dock"))
-				document.getElementById(opener.current ?? panelButton)?.focus();
-		});
-	}, [panelButton]);
-	const showSessionPanel = useCallback(
-		(view: SessionPanelView, trigger: string) => {
-			opener.current = trigger;
-			choosePanelView(view);
-			setInspectorOpen(true);
-		},
-		[choosePanelView],
-	);
-	useShortcut("sessionPanel", () => {
-		if (inspectorOpen) closeInspector();
-		else showSessionPanel(panelView, panelButton);
-	});
+	const ids = { changes: useId(), terminal: useId(), pane: useId() };
+	const pane = usePaneState(ids.pane);
+	useShortcut("sessionPanel", () => (pane.open ? pane.close() : pane.show(pane.view, ids.pane)));
 	useShortcut("focusComposer", () => document.querySelector<HTMLTextAreaElement>(".composer__field")?.focus());
-	useShortcut("agents", () => showSessionPanel("agents", panelButton));
+	useShortcut("agents", () => pane.show("agents", ids.pane));
 	const connection = useOutletContext<ConnectionState>();
 	const queries = useQueryClient();
 	const input = { params: { id }, query: {}, body: {} };
@@ -509,7 +454,7 @@ function SessionView({ client, id }: { client: Client; id: string }) {
 	const elapsed =
 		running && turn?.startedAt && now > 0 ? formatDuration(Math.max(0, now - Date.parse(turn.startedAt))) : null;
 	const canClose = snapshot.state === "open" && !running;
-	const paneOpen = inspectorOpen;
+	const paneOpen = pane.open;
 	const chip: { tone: "working" | "approval" | "failed" | "quiet"; label: string } | null = pending
 		? { tone: "approval", label: "Needs your approval" }
 		: running
@@ -553,32 +498,15 @@ function SessionView({ client, id }: { client: Client; id: string }) {
 					) : null}
 					<span className="wb-bar__spacer" />
 					<div className="wb-bar__end">
-						<button
-							id={inspectorButton}
-							type="button"
-							className="wb-icon"
-							aria-label={inspectorOpen && panelView === "artifacts" ? "Hide artifacts" : "Show artifacts"}
-							aria-pressed={inspectorOpen && panelView === "artifacts"}
-							title="Files, results and evidence"
-							onClick={() =>
-								inspectorOpen && panelView === "artifacts" ? closeInspector() : showSessionPanel("artifacts", inspectorButton)
-							}
-						>
-							<Icon name="artifacts" />
-						</button>
-						<button
-							id={panelButton}
-							type="button"
-							className="wb-icon"
-							aria-label="Session panel"
-							aria-pressed={inspectorOpen && panelView !== "artifacts"}
-							title="Session panel (Ctrl/⌘ Shift \)"
-							onClick={() =>
-								inspectorOpen && panelView !== "artifacts" ? closeInspector() : showSessionPanel("session", panelButton)
-							}
-						>
-							<Icon name="panelRight" />
-						</button>
+						<PaneToggles
+							client={client}
+							sessionId={snapshot.id}
+							workspaceRoot={workspaceRoot}
+							open={pane.open}
+							view={pane.view}
+							ids={ids}
+							onToggle={pane.toggle}
+						/>
 						<Menu label="Task actions">
 							<MenuItem icon="sliders" onClick={() => void navigate(`/settings?workspace=${snapshot.workspaceId}`)}>
 								Harness settings
@@ -684,14 +612,16 @@ function SessionView({ client, id }: { client: Client; id: string }) {
 					capabilities={capabilities.data}
 				/>
 			</div>
-			<InspectorDock
-				open={inspectorOpen}
-				onClose={closeInspector}
+			<SessionPane
+				open={pane.open}
+				onClose={pane.close}
 				client={client}
 				sessionId={snapshot.id}
+				title={title}
 				workspaceRoot={workspaceRoot}
-				view={panelView}
-				onViewChange={choosePanelView}
+				nowMs={now}
+				view={pane.view}
+				onViewChange={pane.setView}
 				onCloseSession={closeSession}
 				closing={close.isPending}
 			/>

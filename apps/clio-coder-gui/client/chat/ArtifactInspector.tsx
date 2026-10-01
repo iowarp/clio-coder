@@ -228,6 +228,7 @@ export const ArtifactInspector = memo(function ArtifactInspector({
 	onClose,
 	selection,
 	onSelectionChange,
+	bare = false,
 }: {
 	client: Client;
 	session: ArtifactSession;
@@ -235,6 +236,8 @@ export const ArtifactInspector = memo(function ArtifactInspector({
 	onClose: () => void;
 	selection?: InspectorSelection | undefined;
 	onSelectionChange?: ((selection: InspectorSelection) => void) | undefined;
+	/** Inside the pane, which already has a header and a close button. */
+	bare?: boolean;
 }) {
 	const [localSelection, setLocalSelection] = useState<InspectorSelection>({
 		view: "files",
@@ -265,7 +268,7 @@ export const ArtifactInspector = memo(function ArtifactInspector({
 	const selected = selectedFile === null ? undefined : files.get(selectedFile);
 	return (
 		<aside className="artifact-inspector" aria-label="Conversation artifacts">
-			<header className="artifact-inspector__header">
+			<header className="artifact-inspector__header" hidden={bare}>
 				<h2>Artifacts</h2>
 				<button type="button" aria-label="Close artifacts" title="Close artifacts" onClick={onClose}>
 					<Icon name="close" />

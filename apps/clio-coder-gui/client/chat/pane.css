@@ -1,0 +1,519 @@
+/* The pane beside the conversation: Progress, Changes, Files, Terminal, and Clio's deeper views. */
+
+.pane {
+	position: relative;
+	min-width: 0;
+	min-height: 0;
+	border-left: 1px solid var(--line);
+	background: var(--surface);
+}
+.pane[hidden] {
+	display: none;
+}
+/* A modal pane has no grid column of its own; the dialog is its own layer. */
+.pane[data-modal="true"] {
+	display: contents;
+}
+.pane__grip {
+	position: absolute;
+	inset: 0 auto 0 -3px;
+	z-index: 3;
+	width: 7px;
+	cursor: col-resize;
+	touch-action: none;
+}
+.pane__grip::after {
+	content: "";
+	position: absolute;
+	inset: 0 3px;
+	background: transparent;
+	transition: background var(--motion-fast) var(--ease-standard);
+}
+.pane__grip:hover::after,
+.pane__grip:focus-visible::after {
+	background: var(--accent);
+}
+.pane__dialog {
+	width: min(440px, 100vw);
+	height: 100dvh;
+	max-width: 100vw;
+	max-height: 100dvh;
+	margin: 0 0 0 auto;
+	padding: 0;
+	border: 0;
+	border-left: 1px solid var(--line-strong);
+	background: var(--surface);
+	color: var(--ink);
+	box-shadow: var(--shadow-float);
+}
+.pane__dialog::backdrop {
+	background: var(--scrim);
+}
+@media (min-width: 1100px) {
+	.pane__dialog {
+		position: static;
+		width: 100%;
+		height: 100%;
+		max-width: none;
+		max-height: none;
+		margin: 0;
+		border: 0;
+		box-shadow: none;
+	}
+}
+.pane__inner {
+	height: 100%;
+	min-height: 0;
+	display: flex;
+	flex-direction: column;
+}
+.pane__head {
+	display: flex;
+	align-items: center;
+	gap: var(--space-1);
+	flex: none;
+	min-height: 48px;
+	padding: 0 var(--space-2) 0 var(--space-3);
+}
+.pane__tabs {
+	display: flex;
+	flex: 1;
+	min-width: 0;
+	gap: 2px;
+	overflow-x: auto;
+	scrollbar-width: none;
+}
+.pane__tabs::-webkit-scrollbar {
+	display: none;
+}
+.pane__tabs > button {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	flex: none;
+	height: 30px;
+	min-height: 0;
+	padding: 0 8px;
+	border: 0;
+	border-radius: 8px;
+	background: transparent;
+	color: var(--ink-muted);
+	font-size: 12.5px;
+	font-weight: 500;
+	white-space: nowrap;
+}
+.pane__tabs > button:hover {
+	background: var(--wb-hover);
+	color: var(--ink);
+	border-color: transparent;
+}
+.pane__tabs > button[aria-selected="true"] {
+	background: var(--wb-active);
+	color: var(--ink);
+}
+.pane__count {
+	min-width: 18px;
+	padding: 0 5px;
+	border-radius: var(--radius-pill);
+	background: var(--wb-active);
+	color: var(--ink-muted);
+	font-size: 11px;
+	line-height: 18px;
+	text-align: center;
+	font-variant-numeric: tabular-nums;
+}
+.pane__tabs > button[aria-selected="true"] .pane__count {
+	background: var(--accent-soft);
+	color: var(--accent);
+}
+.pane__body {
+	flex: 1;
+	min-height: 0;
+	overflow-y: auto;
+	overscroll-behavior: contain;
+	scrollbar-gutter: stable;
+}
+.pane__panel {
+	min-height: 100%;
+	min-width: 0;
+}
+.pane__panel[hidden] {
+	display: none;
+}
+
+/* ---- Progress ------------------------------------------------------------------ */
+.pane-cards {
+	display: grid;
+	gap: var(--space-3);
+	padding: var(--space-2) var(--space-3) var(--space-5);
+}
+.pane-card {
+	display: grid;
+	gap: var(--space-2);
+	padding: var(--space-4);
+	border: 1px solid var(--line);
+	border-radius: 14px;
+	background: var(--wb-faint);
+}
+.pane-card > header {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: var(--space-3);
+	min-height: 22px;
+}
+.pane-card h3 {
+	margin: 0;
+	font-family: var(--font-ui);
+	font-size: 12px;
+	font-weight: 500;
+	letter-spacing: 0.01em;
+	color: var(--ink-muted);
+}
+.pane-card__state {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	font-size: 12px;
+	color: var(--ink-muted);
+	font-variant-numeric: tabular-nums;
+}
+.pane-card__state[data-state="Working"] {
+	color: var(--accent);
+}
+.pane-card__state[data-state="Complete"] {
+	color: var(--status-success-fg);
+}
+.pane-card__state[data-state="Failed"] {
+	color: var(--status-fail-fg);
+}
+.pane-goal {
+	margin: 0;
+	font-size: var(--text-body);
+	font-weight: 500;
+	line-height: 1.4;
+	overflow-wrap: anywhere;
+	display: -webkit-box;
+	-webkit-line-clamp: 3;
+	-webkit-box-orient: vertical;
+	overflow: hidden;
+}
+.pane-card__facts {
+	margin: 0;
+	font-size: 12px;
+	color: var(--ink-muted);
+}
+.pane-empty,
+.pane-note {
+	margin: 0;
+	font-size: var(--text-meta);
+	line-height: 1.5;
+	color: var(--ink-muted);
+}
+.pane-note {
+	padding: 0 var(--space-3) var(--space-2);
+}
+.pane-link {
+	min-height: 0;
+	padding: 2px 6px;
+	margin-right: -6px;
+	border: 0;
+	border-radius: 6px;
+	background: transparent;
+	color: var(--accent);
+	font-size: 12.5px;
+}
+.pane-link:hover:not(:disabled) {
+	background: var(--accent-soft);
+	border-color: transparent;
+}
+.pane-changes-line {
+	margin: 0;
+	font-size: var(--text-meta);
+}
+.pane-steps {
+	display: grid;
+	gap: var(--space-3);
+	margin: 0;
+	padding: 0;
+	list-style: none;
+}
+.pane-steps li {
+	display: flex;
+	align-items: flex-start;
+	gap: var(--space-3);
+	font-size: var(--text-meta);
+	line-height: 1.45;
+}
+.pane-steps li > span:last-child {
+	display: grid;
+	min-width: 0;
+	overflow-wrap: anywhere;
+}
+.pane-steps small {
+	color: var(--ink-muted);
+	font-size: 12px;
+}
+.pane-steps li[data-tone="success"] > span:last-child {
+	color: var(--ink-muted);
+	text-decoration: line-through;
+	text-decoration-color: color-mix(in srgb, var(--ink-muted) 60%, transparent);
+}
+.pane-step__glyph {
+	flex: none;
+	display: inline-grid;
+	place-items: center;
+	width: 16px;
+	height: 16px;
+	margin-top: 1px;
+	border: 1.5px solid var(--line-strong);
+	border-radius: 50%;
+	color: var(--accent);
+}
+.pane-step__glyph.is-done {
+	border-color: var(--accent);
+	background: var(--accent-soft);
+}
+.pane-step__glyph .icon {
+	width: 10px;
+	height: 10px;
+	stroke-width: 2.4;
+}
+.pane-step__glyph.is-blocked {
+	border-color: var(--status-warn-line);
+}
+.pane-steps .clio-pulse {
+	margin-top: 1px;
+}
+
+.diffstat {
+	font: 12px / 1 var(--font-mono);
+	white-space: nowrap;
+	font-variant-numeric: tabular-nums;
+}
+.diffstat__add {
+	color: var(--status-success-fg);
+}
+.diffstat__del {
+	color: var(--status-fail-fg);
+}
+
+/* ---- Changes ------------------------------------------------------------------- */
+.changes__head {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: var(--space-3);
+	padding: var(--space-2) var(--space-3) var(--space-2) var(--space-4);
+	font-size: var(--text-meta);
+}
+.changes__head p {
+	margin: 0;
+}
+.change-files {
+	display: grid;
+	margin: 0;
+	padding: 0 var(--space-2) var(--space-5);
+	list-style: none;
+}
+.change-file {
+	min-width: 0;
+}
+.change-file__row {
+	display: flex;
+	align-items: center;
+	gap: var(--space-3);
+	width: 100%;
+	min-height: 40px;
+	padding: 4px var(--space-2);
+	border: 0;
+	border-radius: 8px;
+	background: transparent;
+	text-align: left;
+	color: var(--ink);
+}
+.change-file__row:hover {
+	background: var(--wb-hover);
+	border-color: transparent;
+}
+.change-file__row > .icon {
+	width: 14px;
+	height: 14px;
+	flex: none;
+	color: var(--ink-muted);
+}
+.change-file__badge {
+	flex: none;
+	min-width: 30px;
+	padding: 2px 4px;
+	border: 1px solid var(--line-strong);
+	border-radius: 5px;
+	font: 500 9.5px / 1.3 var(--font-mono);
+	letter-spacing: 0.04em;
+	text-align: center;
+	color: var(--ink-muted);
+}
+.change-file__name {
+	display: grid;
+	flex: 1;
+	min-width: 0;
+	line-height: 1.25;
+}
+.change-file__name strong {
+	font-size: var(--text-meta);
+	font-weight: 500;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+.change-file__name small {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	font-size: 11.5px;
+	color: var(--ink-muted);
+	direction: rtl;
+	text-align: left;
+}
+.change-file__pending {
+	flex: none;
+	padding: 1px 7px;
+	border: 1px solid var(--status-warn-line);
+	border-radius: var(--radius-pill);
+	font-size: 11px;
+	color: var(--status-warn-fg);
+}
+.change-file__diffs {
+	display: grid;
+	gap: var(--space-2);
+	padding: var(--space-1) var(--space-1) var(--space-3) var(--space-1);
+	min-width: 0;
+}
+
+/* ---- Terminal ------------------------------------------------------------------ */
+.term {
+	display: flex;
+	flex-direction: column;
+	height: 100%;
+	min-height: 0;
+}
+.term__scroll {
+	flex: 1;
+	min-height: 0;
+	overflow-y: auto;
+	margin: 0 var(--space-3);
+	border-radius: 12px;
+	background: var(--code-paper);
+	color: var(--code-ink);
+}
+.term__runs {
+	display: grid;
+	gap: var(--space-4);
+	margin: 0;
+	padding: var(--space-4);
+	list-style: none;
+	font: 12.5px / 1.55 var(--font-mono);
+}
+.term-run {
+	display: grid;
+	gap: var(--space-1);
+	min-width: 0;
+}
+.term-run__line {
+	display: flex;
+	align-items: baseline;
+	gap: var(--space-2);
+}
+.term-run__prompt {
+	color: var(--syntax-keyword);
+}
+.term-run__command {
+	flex: 1;
+	min-width: 0;
+	font: inherit;
+	color: var(--code-ink);
+	overflow-wrap: anywhere;
+}
+.term-run__status {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	flex: none;
+	font-size: 11.5px;
+	color: var(--code-ink-muted);
+}
+.term-run[data-tone="success"] .term-run__status {
+	color: var(--syntax-inserted);
+}
+.term-run[data-tone="fail"] .term-run__status {
+	color: var(--syntax-deleted);
+}
+.term-run__output {
+	margin: 0;
+	padding: 0 0 0 var(--space-4);
+	max-height: 22rem;
+	overflow: auto;
+	font: inherit;
+	color: var(--code-ink-muted);
+	white-space: pre-wrap;
+	overflow-wrap: anywhere;
+}
+.term-run__more {
+	display: block;
+	margin: 0 0 var(--space-1);
+	min-height: 0;
+	padding: 0;
+	border: 0;
+	background: transparent;
+	color: var(--code-ink-muted);
+	font: inherit;
+	text-decoration: underline;
+}
+.term-run__note {
+	margin: 0;
+	font-size: 11.5px;
+	color: var(--code-ink-muted);
+}
+.term__foot {
+	margin: 0;
+	padding: var(--space-2) var(--space-4) var(--space-3);
+	font-size: 11.5px;
+	color: var(--ink-muted);
+}
+
+/* ---- Empty panes ----------------------------------------------------------------- */
+.pane-blank {
+	display: grid;
+	justify-items: center;
+	gap: var(--space-2);
+	padding: var(--space-12) var(--space-6);
+	text-align: center;
+	color: var(--ink-muted);
+}
+.pane-blank .icon {
+	width: 26px;
+	height: 26px;
+	margin-bottom: var(--space-2);
+	opacity: 0.7;
+}
+.pane-blank p {
+	margin: 0;
+	font-size: var(--text-body);
+	font-weight: 500;
+	color: var(--ink);
+}
+.pane-blank small {
+	font-size: var(--text-meta);
+	line-height: 1.5;
+	max-width: 26ch;
+}
+
+/* The legacy views keep their own layout; give them the pane's gutters. */
+.pane__panel > .session-panel,
+.pane__panel > .artifact-inspector {
+	padding-inline: var(--space-2);
+}
+
+.artifact-inspector__header[hidden] {
+	display: none;
+}
