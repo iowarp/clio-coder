@@ -1,3 +1,4 @@
+import { userInfo } from "node:os";
 import { sanitizeCallTargetText } from "../../domains/safety/call-target.js";
 import { stripTerminalSequences, truncateToWidth, visibleWidth } from "../../engine/tui.js";
 
@@ -196,9 +197,29 @@ export function formatContextPercent(percent: number | null | undefined): string
 	return typeof percent === "number" && Number.isFinite(percent) ? `${percent.toFixed(1)}%` : "?%";
 }
 
+/**
+ * Display only. Collapses against `$HOME` and the account's own home: test and
+ * race runs isolate `$HOME`, which left the operator's real home spelled out in
+ * the banner and footer (race-path).
+ */
 export function collapseHomePath(path: string): string {
-	const home = process.env.HOME;
-	if (!home || home.length === 0) return path;
-	if (path === home) return "~";
-	return path.startsWith(`${home}/`) ? `~/${path.slice(home.length + 1)}` : path;
+	for (const home of [process.env.HOME, accountHome()]) {
+		if (!home || home.length <= 1) continue;
+		if (path === home) return "~";
+		if (path.startsWith(`${home}/`)) return `~/${path.slice(home.length + 1)}`;
+	}
+	return path;
+}
+
+let cachedAccountHome: string | null | undefined;
+function accountHome(): string | null {
+	if (cachedAccountHome === undefined) {
+		try {
+			cachedAccountHome = userInfo().homedir;
+		} catch {
+			// No passwd entry (some containers); $HOME alone still applies.
+			cachedAccountHome = null;
+		}
+	}
+	return cachedAccountHome;
 }
