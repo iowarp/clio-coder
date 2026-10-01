@@ -8,6 +8,7 @@ import { readSettings, updateSettings } from "../../src/core/config.js";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { getAtPath, setAtPath } from "../../src/core/session-routing.js";
 import { applyControlValue, SETTING_CONTROLS } from "../../src/core/settings-controls.js";
+import { renderYamlPreservingLayout } from "../../src/core/yaml-preserve.js";
 import {
 	buildSettingItems,
 	buildSettingsSections,
@@ -175,4 +176,21 @@ test("saved edits keep the operator's comments, quoting and untouched lines", as
 	const before = new Set(original.split("\n"));
 	const changed = next.split("\n").filter((line) => !before.has(line));
 	assert.ok(changed.length <= 3, `only the saved leaf moves, got ${JSON.stringify(changed)}`);
+});
+
+test("layout-preserving YAML edits round-trip tagged values and structural changes", () => {
+	const cases: Array<[string, unknown]> = [
+		["a: !!str 1\n", { a: 2 }],
+		["a: !!int 1\n", { a: "two" }],
+		["a: !!timestamp 2001-01-01\n", { a: "two" }],
+		["a: [{name: old, enabled: true}]\n", { a: [{ name: "012", enabled: null }, {}] }],
+		["a: null\n", { a: {} }],
+		["a: {b: 1}\n", { a: {} }],
+		["a: 1\r\n# removed key\r\nb: 2\r\n", { a: "first\nsecond" }],
+		["%YAML 1.1\n---\na: one\n", { a: "012", b: "on" }],
+		["toString: old\na: 1\n", { a: 1 }],
+	];
+	for (const [existing, next] of cases) {
+		assert.deepEqual(parse(renderYamlPreservingLayout(existing, next)), next, existing);
+	}
 });

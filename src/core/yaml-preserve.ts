@@ -9,7 +9,7 @@
  */
 
 import type { Node } from "yaml";
-import { Document, isAlias, isMap, isScalar, isSeq, parseDocument, visit } from "yaml";
+import { Document, isAlias, isMap, isScalar, isSeq, parse, parseDocument, visit } from "yaml";
 
 /** Scalars a YAML 1.1 reader would resolve to a boolean. */
 const YAML11_BOOLEAN = /^(?:y|yes|n|no|on|off|true|false)$/iu;
@@ -32,7 +32,7 @@ function deepEqual(a: unknown, b: unknown): boolean {
 	if (!isPlainObject(a) || !isPlainObject(b)) return false;
 	const keys = Object.keys(a);
 	if (keys.length !== Object.keys(b).length) return false;
-	return keys.every((key) => key in b && deepEqual(a[key], b[key]));
+	return keys.every((key) => Object.hasOwn(b, key) && deepEqual(a[key], b[key]));
 }
 
 /**
@@ -76,6 +76,7 @@ function setNode(document: Document, path: ReadonlyArray<string | number>, value
 	// A scalar keeps its comment and quote style when only its value moves.
 	if (isScalar(existing) && (value === null || ["string", "number", "boolean"].includes(typeof value))) {
 		existing.value = value;
+		delete existing.tag;
 		if (typeof value === "string" && YAML11_BOOLEAN.test(value)) existing.type = "QUOTE_SINGLE";
 		return;
 	}
@@ -87,11 +88,11 @@ function applyDelta(document: Document, path: ReadonlyArray<string | number>, be
 	const node = path.length === 0 ? document.contents : document.getIn(path, true);
 	if (isPlainObject(before) && isPlainObject(after) && isMap(node)) {
 		for (const [key, value] of Object.entries(after)) {
-			if (key in before) applyDelta(document, [...path, key], before[key], value);
+			if (Object.hasOwn(before, key)) applyDelta(document, [...path, key], before[key], value);
 			else setNode(document, [...path, key], value);
 		}
 		for (const key of Object.keys(before)) {
-			if (!(key in after)) document.deleteIn([...path, key]);
+			if (!Object.hasOwn(after, key)) document.deleteIn([...path, key]);
 		}
 		return;
 	}
@@ -130,5 +131,6 @@ export function renderYamlPreservingLayout(existing: string | null | undefined, 
 		return freshText(next, options);
 	}
 	applyDelta(document, [], document.toJS(), next);
-	return document.toString(options);
+	const rendered = document.toString(options);
+	return deepEqual(parse(rendered), next) ? rendered : freshText(next, options);
 }
