@@ -796,3 +796,19 @@ describe("model skill activation by autonomy level", () => {
 		});
 	});
 });
+
+it("refuses ship in an editing worker without narrowing its editing tools", async () => {
+	const context = createContextTool({ getCwd: () => process.cwd() });
+	const policy = agentSkillToolPolicy(["ship"]);
+	ok(policy);
+	const result = await context.run(
+		{ scope: "skills", name: "ship" },
+		{ allowedTools: [ToolNames.Context, ToolNames.Edit, ToolNames.Write], pendingSkillPolicy: policy },
+	);
+	ok(result.kind === "ok" || result.kind === "error");
+	const output = result.kind === "ok" ? result.output : result.message;
+	match(output, /host commits task worktrees/);
+	strictEqual(policy.loadedSkillNames.size, 0);
+	strictEqual(evaluateSkillToolSurface(policy, ToolNames.Edit), null);
+	strictEqual(evaluateSkillToolSurface(policy, ToolNames.Write), null);
+});

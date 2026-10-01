@@ -111,7 +111,10 @@ function normalizeExpectedOutputEntry(
 	}
 	const normalized = path.posix.normalize(trimmed.replace(/^\.\//u, "").replace(/\/{2,}/gu, "/"));
 	if (normalized === "." || normalized.length === 0) {
-		return fail("intent_path_malformed", `${field}[${index}] must not normalize to an empty path`);
+		return fail(
+			"intent_path_malformed",
+			`${field}[${index}] must name an output file, not ".". expected_outputs are repository-relative file paths such as src/duration.js, never actions such as commit. The host commits worktree tasks; keep the authorized write_roots and list only the changed files.`,
+		);
 	}
 	if (normalized === ".." || normalized.startsWith("../") || normalized.split("/").includes("..")) {
 		return fail("intent_path_escapes_root", `${field}[${index}] escapes the repository root`);

@@ -444,6 +444,20 @@ describe("dispatch admission boundary", () => {
 		deepStrictEqual(scoped.intent.writeRoots, []);
 		const output = normalizeDispatchIntent({ version: 2, expected_outputs: ["."] }, new Map());
 		strictEqual(output.ok, false);
+		if (!output.ok) {
+			match(output.message, /repository-relative file paths/);
+			match(output.message, /host commits worktree tasks/);
+		}
+		const commit = normalizeDispatchIntent(
+			{ version: 2, write_roots: ["src/duration.js"], expected_outputs: ["commit"] },
+			new Map(),
+		);
+		ok(commit.ok);
+		const findings = classifyDispatchIntentCompatibility({ intent: commit.intent });
+		const refusal = findings.find((finding) => finding.code === "intent_outputs_outside_write_roots");
+		ok(refusal);
+		match(refusal.message, /actual file paths within the authorized write_roots/);
+		match(refusal.message, /host commits worktree tasks/);
 	});
 
 	it("infers a path from a briefing that quotes an import specifier instead of refusing the dispatch", () => {

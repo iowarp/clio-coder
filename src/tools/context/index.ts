@@ -597,6 +597,12 @@ function runSkillsScope(
 			...(options ? { options } : {}),
 		});
 	}
+	if (name === "ship" && options?.allowedTools?.some((tool) => tool === ToolNames.Edit || tool === ToolNames.Write)) {
+		return skillRefusal(
+			"context: ship handles finished changes and cannot replace an editing worker assignment. The host commits task worktrees. Keep your edit/write tools, make the requested file changes, and report; do not load ship or commit.",
+			{ name, kind: "recipe-bound" },
+		);
+	}
 	const policyError = pendingSkillPolicyError(name, options);
 	if (policyError) return skillRefusal(policyError.message, { name, kind: policyError.kind });
 	const list = loadSkills({ cwd: cwdFromDeps(deps), ...(deps.getSkillLoaderOptions?.() ?? {}) });

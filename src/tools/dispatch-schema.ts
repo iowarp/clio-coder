@@ -158,7 +158,11 @@ const DispatchIntentSchema = Type.Object(
 		),
 		relevant_paths: Type.Optional(Type.Array(Type.String(), { maxItems: 32 })),
 		expected_outputs: Type.Optional(
-			Type.Array(Type.String(), { maxItems: 32, description: "Output paths only, never a description of the change." }),
+			Type.Array(Type.String(), {
+				maxItems: 32,
+				description:
+					"Repository-relative file paths such as src/duration.js, never commit, a change description, or '.'. The host commits task worktrees.",
+			}),
 		),
 		verification: Type.Optional(DispatchVerificationSchema),
 	},

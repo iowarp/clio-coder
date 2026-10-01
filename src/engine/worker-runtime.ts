@@ -390,6 +390,13 @@ function taskMessage(task: string): AgentMessage {
 
 function promptMessagesForWorker(input: WorkerRunInput): AgentMessage[] {
 	const messages = (input.dynamicPromptMessages ?? []).map(promptMessage);
+	if (input.taskGit?.taskWorktree !== undefined) {
+		messages.push(
+			taskMessage(
+				"The host commits this task worktree after you finish. Even if the task says 'and commit', make the requested edits and report; do not commit or load the ship skill. Honor the task's validation instructions.",
+			),
+		);
+	}
 	messages.push(
 		taskMessage(
 			input.contextSeed

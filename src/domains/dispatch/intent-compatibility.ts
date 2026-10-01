@@ -155,7 +155,7 @@ function outputsOutsideWriteRoots(intent: DispatchIntent): DispatchIntentCompati
 	return finding(
 		"intent_outputs_outside_write_roots",
 		"refuse",
-		`expected_outputs [${outside.join(", ")}] lie outside intent.write_roots [${intent.writeRoots.join(", ")}]. The write boundary would block exactly the outputs the task is required to produce, so add each output's root to write_roots or drop the output from the declaration.`,
+		`expected_outputs [${outside.join(", ")}] lie outside intent.write_roots [${intent.writeRoots.join(", ")}]. The write boundary would block exactly the outputs the task is required to produce, so correct expected_outputs to the actual file paths within the authorized write_roots. expected_outputs are file paths, never actions such as commit or the repository marker ".". The host commits worktree tasks; the worker only edits and reports.`,
 	);
 }
 
