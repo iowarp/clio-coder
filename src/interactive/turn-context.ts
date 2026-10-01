@@ -125,6 +125,8 @@ import type { AgentRuntime, ChatTurnState } from "./turn-state.js";
 export interface TurnContextDeps {
 	memoryCommitBridge?: MemoryInterventionRegistration | undefined;
 	interactiveGuidance?: boolean;
+	/** An ACP client that advertised interviews: ask_user guidance without the TUI-only demo tips. */
+	operatorInterviews?: boolean;
 	/** True for a headless `clio-coder run`, whose approval asks are always denied. */
 	headless?: boolean;
 	state: ChatTurnState;
@@ -1917,7 +1919,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 				...(guidance ? { thinkingGuidance: guidance } : {}),
 				...(deps.toolRegistry?.get(ToolNames.ConfigureClio) ? { canConfigureClio: true } : {}),
 				...(deps.headless === true ? { headless: true } : {}),
-				...(deps.interactiveGuidance === true ? { operatorInterviews: true } : {}),
+				...(deps.interactiveGuidance === true || deps.operatorInterviews === true ? { operatorInterviews: true } : {}),
 			};
 			if (deps.getMemorySection) {
 				try {

@@ -11,6 +11,10 @@
  * resolves a route, or touches the dispatch domain; the registry admits the
  * call exactly as it admits a model's.
  *
+ * It also holds the interview channel: the host's `ask_user` handler is
+ * installed at boot, before the transport exists, so it asks through a binding
+ * the server attaches once it is serving.
+ *
  * Only the composition root imports this module (a declared seam in
  * tests/boundaries/check-boundaries.ts), so the worker-stream and oracle
  * modules it reaches stay off the ACP CLI's own import graph.
@@ -22,8 +26,10 @@ import { proposeTaskBankPromotion, type TaskMemorySnapshot } from "../../domains
 import type { DecisionBoardStore } from "../../domains/session/decision-board.js";
 import { formatDecisionCorrectionTurn } from "../../interactive/overlays/decisions.js";
 import type { CouncilDispatchOutcome } from "../../interactive/slash-commands.js";
+import type { AskUserHandler, AskUserQuestion, AskUserResult } from "../../tools/ask-user.js";
 import type { ToolRegistry } from "../../tools/registry.js";
-import type { AcpBoardActions } from "./server.js";
+import type { AcpBoardActions, AcpInterviewBinding, AcpInterviewChannel } from "./server.js";
+import { ACP_INTERVIEW_CANCEL_METHOD, ACP_INTERVIEW_REQUEST_METHOD } from "./types.js";
 
 export { draftsToJudge, judgeDraftsAtSite } from "../../interactive/drafts.js";
 export { oracleBriefingFromEntries } from "../../interactive/oracle.js";
@@ -126,6 +132,150 @@ export function bindBoardActions(deps: {
 			if (entry === undefined) throw new Error(`task-bank entry ${entryId} is not in this session`);
 			const result = await proposeTaskBankPromotion(deps.dataDir, { id: session.id, cwd: session.cwd }, entry, scope);
 			return { created: result.created, recordId: result.record.id };
+		},
+	};
+}
+
+/**
+ * `ask_user` and the harness cards (the merge card) for an ACP client that
+ * advertised `clio-coder/interviews`. The host's handler is installed once at
+ * boot, before the transport exists, so it asks through a binding the server
+ * attaches when it starts serving. With no binding, or a client that did not
+ * opt in, every round reads as the operator's cancel, which is what a surface
+ * with nobody to ask has always answered.
+ */
+// The client's own request contract bounds a round; a longer string is cut
+// rather than refused, because a refused round parks the model on a cancel.
+const MAX_QUESTIONS = 4;
+const MAX_OPTIONS = 16;
+const MAX_QUESTION_CHARS = 8192;
+const MAX_HEADER_CHARS = 128;
+const MAX_LABEL_CHARS = 512;
+const MAX_DESCRIPTION_CHARS = 2048;
+const MAX_ANSWER_CHARS = 16 * 1024;
+
+interface WireQuestion {
+	question: string;
+	header?: string;
+	options?: Array<{ label: string; description?: string }>;
+	multi_select?: boolean;
+}
+
+function cancelled(): AskUserResult {
+	return { answers: [], cancelled: true };
+}
+
+function cut(value: string, max: number): string {
+	return value.length > max ? value.slice(0, max) : value;
+}
+
+/** The client's request shape. `defaultOption` is harness-only focus state the wire has no field for. */
+function wireQuestion(question: AskUserQuestion): WireQuestion | null {
+	const text = cut(question.question.trim(), MAX_QUESTION_CHARS);
+	if (text.length === 0) return null;
+	const options = (question.options ?? [])
+		.map((option) => ({ label: cut(option.label.trim(), MAX_LABEL_CHARS), description: option.description }))
+		.filter((option) => option.label.length > 0)
+		.slice(0, MAX_OPTIONS)
+		.map((option) => ({
+			label: option.label,
+			...(option.description !== undefined && option.description.length > 0
+				? { description: cut(option.description, MAX_DESCRIPTION_CHARS) }
+				: {}),
+		}));
+	const header = question.header !== undefined ? cut(question.header.trim(), MAX_HEADER_CHARS) : "";
+	return {
+		question: text,
+		...(header.length > 0 ? { header } : {}),
+		...(options.length > 0 ? { options } : {}),
+		...(question.multi_select === true ? { multi_select: true } : {}),
+	};
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+/** The client's reply, or null when it does not carry the AskUserResult shape. */
+function readResult(value: unknown, asked: number): AskUserResult | null {
+	if (!isRecord(value)) return null;
+	if (value.cancelled === true) return cancelled();
+	if (!Array.isArray(value.answers) || value.answers.length > asked) return null;
+	const answers: AskUserResult["answers"] = [];
+	for (const raw of value.answers) {
+		if (!isRecord(raw) || typeof raw.question !== "string" || typeof raw.answer !== "string") return null;
+		const options =
+			Array.isArray(raw.options) && raw.options.every((label) => typeof label === "string")
+				? (raw.options as string[]).slice(0, MAX_OPTIONS)
+				: undefined;
+		answers.push({
+			question: cut(raw.question, MAX_QUESTION_CHARS),
+			answer: cut(raw.answer, MAX_ANSWER_CHARS),
+			...(options !== undefined && options.length > 0 ? { options } : {}),
+			...(typeof raw.value === "string" ? { value: cut(raw.value, MAX_ANSWER_CHARS) } : {}),
+		});
+	}
+	return { answers };
+}
+
+export function createAcpInterviewChannel(): AcpInterviewChannel {
+	let binding: AcpInterviewBinding | null = null;
+	const ask: AskUserHandler = async (questions, options) => {
+		const bound = binding;
+		if (bound === null || !bound.enabled()) return cancelled();
+		const sessionId = bound.sessionId();
+		const shown = questions.slice(0, MAX_QUESTIONS).map(wireQuestion);
+		const wire = shown.filter((question): question is WireQuestion => question !== null);
+		if (sessionId === null || wire.length === 0 || wire.length !== shown.length) return cancelled();
+		const signal = options?.signal;
+		if (signal?.aborted === true) return cancelled();
+		const interviewId = `interview-${randomUUID()}`;
+		let onAbort: (() => void) | undefined;
+		const aborted = new Promise<"aborted">((resolve) => {
+			onAbort = () => resolve("aborted");
+			signal?.addEventListener("abort", onAbort, { once: true });
+		});
+		try {
+			const reply = Promise.resolve()
+				.then(() =>
+					bound.transport.request<unknown>(ACP_INTERVIEW_REQUEST_METHOD, { sessionId, interviewId, questions: wire }),
+				)
+				.then(
+					(value) => ({ kind: "reply" as const, value }),
+					(err: unknown) => ({ kind: "failed" as const, err }),
+				);
+			const outcome = await Promise.race([reply, aborted]);
+			if (outcome === "aborted") {
+				// The parked request answers late into a promise nothing awaits; the
+				// notification tells a client that supports it to drop the round.
+				bound.transport.notify(ACP_INTERVIEW_CANCEL_METHOD, { sessionId, interviewId });
+				return cancelled();
+			}
+			if (outcome.kind === "failed") {
+				// A client that refuses the round (no active turn, malformed) has not
+				// answered it, so the caller sees the same cancel an Esc gives.
+				bound.diagnostics?.(
+					`interview request failed: ${outcome.err instanceof Error ? outcome.err.message : String(outcome.err)}`,
+				);
+				return cancelled();
+			}
+			const result = readResult(outcome.value, wire.length);
+			if (result === null) {
+				bound.diagnostics?.("interview reply did not match the answer contract");
+				return cancelled();
+			}
+			return result;
+		} finally {
+			if (onAbort !== undefined) signal?.removeEventListener("abort", onAbort);
+		}
+	};
+	return {
+		ask,
+		attach(next) {
+			binding = next;
+			return () => {
+				if (binding === next) binding = null;
+			};
 		},
 	};
 }

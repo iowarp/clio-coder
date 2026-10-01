@@ -219,6 +219,7 @@ import { createUserTasksStore } from "../domains/user-tasks/store.js";
 import { type AcpHostReport, acpCommandControl } from "../engine/acp/commands.js";
 import {
 	bindBoardActions,
+	createAcpInterviewChannel,
 	createHostToolEvents,
 	draftsToJudge,
 	followWorkerRuns,
@@ -1444,6 +1445,13 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	// gate detection off so they never resolve a socket path or open a descriptor.
 	// This mirrors the `interactive` predicate computed after the domains load.
 	const muxInteractive = !options.headless && options.acp === undefined && process.env.CLIO_CODER_INTERACTIVE === "1";
+	// An ACP client counts as attended only when it advertised so at initialize.
+	// The deferred front answers initialize before this boot, so the handshake is
+	// already settled here; a plain client advertises nothing and keeps the
+	// unattended behavior (no ask_user, no merge card, worker asks denied at once).
+	const acpHandshake = options.acp?.handshake;
+	const acpInterviews = acpHandshake?.initialized === true && acpHandshake.interviewsEnabled;
+	const acpInterviewChannel = acpInterviews ? createAcpInterviewChannel() : undefined;
 	// The rung is settled before the config contract loads, off the settings the
 	// interactive entry point already read strictly (`src/cli/clio.ts:31`) and
 	// the `--with-panes` / `--no-panes` flag, which wins in both directions. This
@@ -1507,9 +1515,9 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 				budgetWaitForRaise: !options.headless && !options.acp,
 				// Only the interactive overlay answers worker escalations (F9).
 				workerPermissionResponder: !options.headless && !options.acp,
-				// The merge card rides the same interactive-only gate, and asks through
-				// whichever ask_user handler the TUI has registered by then.
-				...(!options.headless && !options.acp
+				// The merge card rides the same attended gate, and asks through
+				// whichever ask_user handler the TUI or the ACP client has by then.
+				...(!options.headless && (!options.acp || acpInterviews)
 					? { operatorAsk: { available: () => askUserHandler !== null, ask: (q, o) => askUserBridge(q, o) } }
 					: {}),
 				getSettings: () => effectiveSettingsForDispatch?.(),
@@ -1989,11 +1997,12 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			...(decision.policy?.reasonCode !== undefined ? { reasonCode: decision.policy.reasonCode } : {}),
 		});
 	});
-	let askUserHandler: AskUserHandler | null = null;
-	// ask_user is interactive-only by design: it is a human interview tool and
-	// headless/ACP surfaces have no operator to interview, so the tool is not
-	// registered there at all (documented in `clio-coder run --help`). Skills that
-	// interview fall back to their stated defaults when the tool is absent.
+	let askUserHandler: AskUserHandler | null = acpInterviewChannel?.ask ?? null;
+	// ask_user is a human interview tool, so it is registered only where a person
+	// answers: the TUI, or an ACP client that advertised interviews. Headless and
+	// plain ACP surfaces have no operator, so the tool is absent there (documented
+	// in `clio-coder run --help`). Skills that interview fall back to their stated
+	// defaults when the tool is absent.
 	const askUserBridge: AskUserHandler = async (questions, invokeOptions) =>
 		askUserHandler ? await askUserHandler(questions, invokeOptions) : cancelledAskUserResult();
 	const userTasks = createUserTasksStore({ cwd: process.cwd() });
@@ -2359,7 +2368,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		userTasks,
 		dispatch,
 		bus,
-		...(interactive ? { askUser: askUserBridge } : {}),
+		...(interactive || acpInterviews ? { askUser: askUserBridge } : {}),
 		...(agents ? { getAgentCatalog: () => renderAgentCatalogSectionsFromSpecs(agents.listSpecs()).stable } : {}),
 		...(agents ? { getAgentSpecs: () => agents.listSpecs() } : {}),
 		...(agents ? { getAgentRoleFacts: agentRoleFactsResolver((id: string) => agents.getSpec(id)) } : {}),
@@ -2918,6 +2927,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		visionSidecar,
 		getReadySkillCount,
 		interactiveGuidance: !options.headless && !options.acp,
+		...(acpInterviews ? { operatorInterviews: true } : {}),
 		headless: options.headless !== undefined,
 		// The pre-warm holds one slot on its endpoint while it runs, so dispatch
 		// admission (#250) sees it exactly as it sees the orchestrator's own turn.
@@ -3261,6 +3271,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 				transport,
 				...(options.acp.handshake ? { handshake: options.acp.handshake } : {}),
 				...(options.acp.onReady ? { onReady: options.acp.onReady } : {}),
+				...(acpInterviewChannel ? { interviews: acpInterviewChannel } : {}),
 				chat,
 				...(session ? { session } : {}),
 				...(session

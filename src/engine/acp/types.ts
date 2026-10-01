@@ -39,6 +39,17 @@ export const ACP_DECISION_META_KEY = "clio-coder/decision";
 export const ACP_COMMANDS_META_KEY = "clio-coder/commands";
 export const ACP_COMMANDS_LIST_METHOD = "_clio-coder/commands/list";
 export const ACP_COMMANDS_INVOKE_METHOD = "_clio-coder/commands/invoke";
+/**
+ * Attended-surface opt-ins. A client that advertises one at initialize says a
+ * person is there to answer, which is the only thing that makes the runtime
+ * ask. A client that advertises neither keeps the unattended behavior: no
+ * `ask_user` tool, no merge card, worker permission asks denied at once.
+ * The interview names live in this leaf for the reason the commands names do.
+ */
+export const ACP_INTERVIEWS_META_KEY = "clio-coder/interviews";
+export const ACP_INTERVIEW_REQUEST_METHOD = "_clio-coder/interview/request";
+export const ACP_INTERVIEW_CANCEL_METHOD = "_clio-coder/interview/cancel";
+export const ACP_WORKER_PERMISSIONS_META_KEY = "clio-coder/workerPermissions";
 
 /**
  * Wire bounds for one prompt turn (CONTRACT C001 §3). A client renders every

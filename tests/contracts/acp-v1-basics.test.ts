@@ -3,7 +3,8 @@ import { once } from "node:events";
 import { PassThrough } from "node:stream";
 import { test } from "node:test";
 import type { AcpRequestError } from "../../src/engine/acp/errors.js";
-import { serveClioAcpAgent } from "../../src/engine/acp/server.js";
+import { createAcpInterviewChannel } from "../../src/engine/acp/host-members.js";
+import { createAcpHandshake, serveClioAcpAgent } from "../../src/engine/acp/server.js";
 import { type AcpJsonRpcPeerTransport, createStdioServerTransport } from "../../src/engine/acp/transport.js";
 
 function server() {
@@ -158,4 +159,94 @@ test("ACP transport reports unclassified handler failures as internal errors", a
 		input.destroy();
 		output.destroy();
 	}
+});
+
+test("ACP counts a client as attended only when it advertises interviews at initialize", () => {
+	const features = {
+		session: true,
+		loadSession: false,
+		settings: false,
+		providers: false,
+		steer: false,
+		dispatch: false,
+		toolRegistry: false,
+		bus: false,
+		interviews: true,
+		workerPermissions: true,
+	};
+	const request = "_clio-coder/interview/request";
+	const initialize = (meta: Record<string, unknown> | undefined) => {
+		const handshake = createAcpHandshake(features);
+		const response = handshake.initialize({
+			protocolVersion: 1,
+			...(meta !== undefined ? { clientCapabilities: { _meta: meta } } : {}),
+		});
+		return { handshake, announced: (response.agentCapabilities._meta as Record<string, unknown>)["clio-coder/interviews"] };
+	};
+	const plain = initialize(undefined);
+	strictEqual(plain.handshake.interviewsEnabled, false);
+	strictEqual(plain.handshake.workerPermissionsEnabled, false);
+	strictEqual(plain.announced, undefined);
+	const attended = initialize({
+		"clio-coder/interviews": { version: 1, request },
+		"clio-coder/workerPermissions": { version: 1 },
+	});
+	strictEqual(attended.handshake.interviewsEnabled, true);
+	strictEqual(attended.handshake.workerPermissionsEnabled, true);
+	deepStrictEqual(attended.announced, { version: 1, request, cancel: "_clio-coder/interview/cancel" });
+	// A client naming a request method this host does not speak is not attended.
+	strictEqual(initialize({ "clio-coder/interviews": { version: 1, request: "other/request" } }).handshake.interviewsEnabled, false);
+});
+
+test("ACP interview channel maps the client's reply, its cancel and a turn abort onto ask_user results", async () => {
+	const requests: Array<{ method: string; params: Record<string, unknown> }> = [];
+	const notifications: Array<{ method: string; params: Record<string, unknown> }> = [];
+	let enabled = true;
+	let reply: unknown = { answers: [{ question: "Merge?", answer: "Keep branch", options: ["Keep branch"] }] };
+	const channel = createAcpInterviewChannel();
+	channel.attach({
+		transport: {
+			request: async <T>(method: string, params?: unknown) => {
+				requests.push({ method, params: params as Record<string, unknown> });
+				return (typeof reply === "function" ? await (reply as () => Promise<unknown>)() : reply) as T;
+			},
+			notify: (method, params) => notifications.push({ method, params: params as Record<string, unknown> }),
+		},
+		sessionId: () => "session-1",
+		enabled: () => enabled,
+	});
+	const question = {
+		question: "Merge?",
+		header: "Merge task branch?",
+		defaultOption: 1,
+		options: [{ label: "Merge" }, { label: "Keep branch", description: "Leave it." }],
+	};
+	deepStrictEqual(await channel.ask([question]), reply);
+	strictEqual(requests[0]?.method, "_clio-coder/interview/request");
+	strictEqual(requests[0]?.params.sessionId, "session-1");
+	// The wire question has no field for the harness-only default focus.
+	deepStrictEqual((requests[0]?.params.questions as unknown[])[0], {
+		question: "Merge?",
+		header: "Merge task branch?",
+		options: [{ label: "Merge" }, { label: "Keep branch", description: "Leave it." }],
+	});
+
+	reply = { answers: [], cancelled: true };
+	deepStrictEqual(await channel.ask([question]), { answers: [], cancelled: true });
+	reply = { answers: "not a list" };
+	deepStrictEqual(await channel.ask([question]), { answers: [], cancelled: true });
+
+	const controller = new AbortController();
+	reply = () => new Promise(() => {});
+	const aborted = channel.ask([question], { signal: controller.signal });
+	await new Promise((resolve) => setImmediate(resolve));
+	controller.abort();
+	deepStrictEqual(await aborted, { answers: [], cancelled: true });
+	strictEqual(notifications[0]?.method, "_clio-coder/interview/cancel");
+	strictEqual(notifications[0]?.params.interviewId, requests.at(-1)?.params.interviewId);
+
+	enabled = false;
+	const asked = requests.length;
+	deepStrictEqual(await channel.ask([question]), { answers: [], cancelled: true });
+	strictEqual(requests.length, asked);
 });

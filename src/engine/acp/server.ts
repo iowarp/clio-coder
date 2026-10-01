@@ -34,7 +34,7 @@ import type { ContextLedger } from "../../domains/session/context-ledger.js";
 import type { SessionContract, SessionMeta } from "../../domains/session/contract.js";
 import type { MessageEntry, SessionEntry } from "../../domains/session/entries.js";
 import { filterEntriesToActivePath } from "../../domains/session/tree/active-path.js";
-import { askUserExposure } from "../../tools/ask-user.js";
+import { type AskUserHandler, askUserExposure } from "../../tools/ask-user.js";
 import type { McpCapabilitySource, McpClientServerSpec } from "../../tools/gateway/mcp-capabilities.js";
 import { gatewayChainPlan } from "../../tools/gateway-display.js";
 import type { ToolRegistry } from "../../tools/registry.js";
@@ -102,6 +102,9 @@ import {
 	ACP_COMMANDS_LIST_METHOD,
 	ACP_COMMANDS_META_KEY,
 	ACP_DECISION_META_KEY,
+	ACP_INTERVIEW_CANCEL_METHOD,
+	ACP_INTERVIEW_REQUEST_METHOD,
+	ACP_INTERVIEWS_META_KEY,
 	ACP_MAX_CHUNK_BYTES,
 	ACP_MAX_RAW_DIFF_BYTES,
 	ACP_MAX_RAW_RECORD_BYTES,
@@ -112,6 +115,7 @@ import {
 	ACP_SESSION_META_KEY,
 	ACP_TOOL_PROGRESS_META_KEY,
 	ACP_USAGE_META_KEY,
+	ACP_WORKER_PERMISSIONS_META_KEY,
 } from "./types.js";
 import {
 	ACP_ACCOUNTING_META_KEY,
@@ -158,6 +162,27 @@ export interface AcpHandoffControl {
 		draft: AcpHandoffDraft,
 		document: string,
 	): { ok: true; toSessionId: string; warnings: ReadonlyArray<string> } | AcpHandoffRefusal;
+}
+
+export interface AcpInterviewTransport {
+	request<T>(method: string, params?: unknown, timeoutMs?: number): Promise<T>;
+	notify(method: string, params?: unknown): void;
+}
+
+export interface AcpInterviewBinding {
+	transport: AcpInterviewTransport;
+	/** The session a round is asked on, or null when none is bound. */
+	sessionId: () => string | null;
+	/** True once the client advertised the capability at initialize. */
+	enabled: () => boolean;
+	diagnostics?: (line: string) => void;
+}
+
+export interface AcpInterviewChannel {
+	/** The handler the orchestrator installs as its ask_user handler. */
+	ask: AskUserHandler;
+	/** Returns the detach function; a later attach replaces an earlier one. */
+	attach(binding: AcpInterviewBinding): () => void;
 }
 
 /** The board's writes, bound by the composition root. */
@@ -329,6 +354,11 @@ export interface ClioAcpServerOptions {
 	autonomy?: () => AutonomyLevel;
 	/** Shared with the deferred front when the workspace binds after initialize. */
 	handshake?: AcpHandshake;
+	/**
+	 * Carries `ask_user` rounds and harness cards to a client that advertised
+	 * `clio-coder/interviews`. Absent means the host asks nobody.
+	 */
+	interviews?: AcpInterviewChannel;
 	/** Resolves the first queued workspace request after every handler is installed. */
 	onReady?: () => void;
 	/** Initial effective next-turn route captured when a session is bound. */
@@ -2328,6 +2358,10 @@ export interface AcpHandshakeFeatures {
 	usage?: boolean;
 	/** Whether prompts are expanded, which is what admits image blocks; absent reads as false. */
 	images?: boolean;
+	/** Whether the host can ask `ask_user` rounds over `_clio-coder/interview/request`; absent reads as false. */
+	interviews?: boolean;
+	/** Whether the host can forward worker permission asks over `session/request_permission`; absent reads as false. */
+	workerPermissions?: boolean;
 }
 
 /** ACP stdio declarations are client authority for one session, never saved settings. */
@@ -2383,6 +2417,10 @@ export interface AcpHandshake {
 	readonly loggedOut: boolean;
 	readonly enabledEventKinds: ReadonlySet<AcpForwardableEventKind>;
 	readonly toolProgressEnabled: boolean;
+	/** The client advertised `clio-coder/interviews` and this host can ask over it. */
+	readonly interviewsEnabled: boolean;
+	/** The client advertised `clio-coder/workerPermissions`: a person answers forwarded worker asks. */
+	readonly workerPermissionsEnabled: boolean;
 	readonly workspaceInstanceId: string;
 	initialize(params: unknown): AcpInitializeResponse;
 	authenticate(params: unknown): never;
@@ -2394,6 +2432,8 @@ export function createAcpHandshake(features: AcpHandshakeFeatures): AcpHandshake
 	let initialized = false;
 	let loggedOut = false;
 	let toolProgressEnabled = false;
+	let interviewsEnabled = false;
+	let workerPermissionsEnabled = false;
 	const enabledEventKinds = new Set<AcpForwardableEventKind>();
 	const workspaceInstanceId = randomUUID();
 	const requireInitialized = (): void => {
@@ -2418,6 +2458,12 @@ export function createAcpHandshake(features: AcpHandshakeFeatures): AcpHandshake
 		},
 		get toolProgressEnabled() {
 			return toolProgressEnabled;
+		},
+		get interviewsEnabled() {
+			return interviewsEnabled;
+		},
+		get workerPermissionsEnabled() {
+			return workerPermissionsEnabled;
 		},
 		workspaceInstanceId,
 		initialize(params) {
@@ -2455,6 +2501,24 @@ export function createAcpHandshake(features: AcpHandshakeFeatures): AcpHandshake
 					? clientMeta[ACP_TOOL_PROGRESS_META_KEY]
 					: null;
 			toolProgressEnabled = toolProgressRequest !== null && toolProgressRequest.version === 1;
+			// One switch for "a person is here": the client names the request method it
+			// will answer, so a client that advertises an older or different shape is
+			// treated as unattended instead of being sent a call it cannot read.
+			const interviewRequest =
+				clientMeta !== null && isRecord(clientMeta[ACP_INTERVIEWS_META_KEY]) ? clientMeta[ACP_INTERVIEWS_META_KEY] : null;
+			interviewsEnabled =
+				features.interviews === true &&
+				interviewRequest !== null &&
+				interviewRequest.version === 1 &&
+				interviewRequest.request === ACP_INTERVIEW_REQUEST_METHOD;
+			const workerPermissionsRequest =
+				clientMeta !== null && isRecord(clientMeta[ACP_WORKER_PERMISSIONS_META_KEY])
+					? clientMeta[ACP_WORKER_PERMISSIONS_META_KEY]
+					: null;
+			workerPermissionsEnabled =
+				features.workerPermissions === true &&
+				workerPermissionsRequest !== null &&
+				workerPermissionsRequest.version === 1;
 			const canLoadSession = features.loadSession;
 			initialized = true;
 			return {
@@ -2592,6 +2656,17 @@ export function createAcpHandshake(features: AcpHandshakeFeatures): AcpHandshake
 									},
 								}
 							: {}),
+						// Echoed only when the client opted in, so the client's own gate
+						// ("the runtime announced it") and the host's agree on one answer.
+						...(interviewsEnabled
+							? {
+									[ACP_INTERVIEWS_META_KEY]: {
+										version: 1,
+										request: ACP_INTERVIEW_REQUEST_METHOD,
+										cancel: ACP_INTERVIEW_CANCEL_METHOD,
+									},
+								}
+							: {}),
 						...(features.contextLedger ? { [ACP_CONTEXT_META_KEY]: { version: 1, ledger: ACP_CONTEXT_LEDGER_METHOD } } : {}),
 						...(features.fleet
 							? {
@@ -2683,6 +2758,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 			aside: options.aside !== undefined,
 			usage: options.usage !== undefined,
 			images: options.expandPrompt !== undefined,
+			interviews: options.interviews !== undefined,
 		});
 	const workspaceInstanceId = handshake.workspaceInstanceId;
 	const now = options.now ?? Date.now;
@@ -4798,9 +4874,16 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 		return promptResponse(active.stopReason, active);
 	});
 
+	const detachInterviews = options.interviews?.attach({
+		transport: options.transport,
+		sessionId: () => activeSessionId ?? boundSessionId,
+		enabled: () => handshake.initialized && handshake.interviewsEnabled,
+		...(options.diagnostics !== undefined ? { diagnostics: options.diagnostics } : {}),
+	});
 	options.onReady?.();
 	return await new Promise<number>((resolve) => {
 		options.transport.onClose(() => {
+			detachInterviews?.();
 			permission.unregister();
 			unsubscribeEventStream();
 			permission.cancelPending("ACP transport closed");

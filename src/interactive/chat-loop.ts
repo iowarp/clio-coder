@@ -694,6 +694,8 @@ export interface CreateChatLoopDeps {
 	outcomeDispatch?: Pick<DispatchContract, "getRun">;
 	memoryCommitBridge?: MemoryInterventionRegistration | undefined;
 	interactiveGuidance?: boolean;
+	/** An ACP client that advertised interviews: the prompt offers ask_user without the TUI-only guidance. */
+	operatorInterviews?: boolean;
 	/**
 	 * True for a headless `clio-coder run`. Its permission listener denies every
 	 * approval ask, so the session prompt says so instead of promising a pause.
@@ -1223,6 +1225,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 
 	const context = createTurnContext({
 		interactiveGuidance: deps.interactiveGuidance === true,
+		operatorInterviews: deps.operatorInterviews === true,
 		headless: deps.headless === true,
 		state,
 		getSettings: deps.getSettings,

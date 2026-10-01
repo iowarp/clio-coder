@@ -8,6 +8,12 @@ export interface DeferredAcpOptions {
 	transport: AcpBootablePeerTransport;
 	handshake: AcpHandshake;
 	launchCwd: string;
+	/**
+	 * True when the launch directory is the operator's `--cwd`: the first workspace
+	 * request must name it, as an eager boot always required. Otherwise the first
+	 * request chooses the root.
+	 */
+	pinned?: boolean;
 	/** The normal orchestrator installs every handler before calling ready. */
 	boot(cwd: string, ready: () => void): Promise<number>;
 }
@@ -33,7 +39,7 @@ function canonicalDirectory(value: unknown): string {
 export async function serveDeferredAcp(options: DeferredAcpOptions): Promise<number> {
 	const { transport, handshake } = options;
 	const launchCwd = canonicalDirectory(options.launchCwd);
-	let boundRoot: string | null = null;
+	let boundRoot: string | null = options.pinned === true ? launchCwd : null;
 	let readyResolve: (() => void) | null = null;
 	let readyReject: ((error: unknown) => void) | null = null;
 	let bootStarted = false;
