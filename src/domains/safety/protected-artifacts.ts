@@ -928,8 +928,8 @@ function shellCommandWords(segment: ReadonlyArray<ShellToken>): ShellToken[] {
 /** A word with its leading home reference replaced by `home`, when the shell would expand it. */
 function homeExpanded(token: ShellToken, home: string | undefined): string {
 	if (home === undefined || token.homeRelative !== true) return token.value;
-	const prefix = token.value.startsWith("${HOME}") ? 7 : token.value.startsWith("$HOME") ? 5 : 1;
-	return `${home.replace(/\/+$/u, "")}${token.value.slice(prefix)}`;
+	const reference = /^(?:\$\{HOME\}|\$HOME|~)/u.exec(token.value)?.[0] ?? "";
+	return `${home.replace(/\/+$/u, "")}${token.value.slice(reference.length)}`;
 }
 
 function resourceCliMutatesSkills(
