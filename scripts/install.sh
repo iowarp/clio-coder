@@ -222,7 +222,7 @@ detect_platform() {
 	case "$(uname -s 2>/dev/null || echo unknown)" in
 		Linux) os=linux ;;
 		Darwin) os=darwin ;;
-		MINGW* | MSYS* | CYGWIN*) fail "this installer targets Linux and macOS; on Windows run: npm install -g $PACKAGE" ;;
+		MINGW* | MSYS* | CYGWIN*) fail "this installer targets Linux and macOS; on Windows, run in PowerShell: irm https://coder.iowarp.ai/install.ps1 | iex" ;;
 		*) fail "unsupported operating system: $(uname -s 2>/dev/null || echo unknown). Supported: Linux and macOS." ;;
 	esac
 	case "$(uname -m 2>/dev/null || echo unknown)" in
@@ -237,15 +237,20 @@ detect_platform() {
 	libc=""
 	glibc=""
 	[ "$os" = linux ] || return 0
+	# Ask glibc first: only glibc answers GNU_LIBC_VERSION, while a glibc host
+	# can also carry the musl loader (Debian's musl package installs
+	# /lib/ld-musl-*.so.1) and must still get a glibc Node.
+	glibc="$(getconf GNU_LIBC_VERSION 2>/dev/null | awk '{print $2}')" || glibc=""
+	if [ -n "$glibc" ]; then
+		libc=glibc
+		return 0
+	fi
 	if ls /lib/ld-musl-*.so.1 >/dev/null 2>&1 || (ldd --version 2>&1 | grep -qi musl); then
 		libc=musl
 		return 0
 	fi
 	libc=glibc
-	glibc="$(getconf GNU_LIBC_VERSION 2>/dev/null | awk '{print $2}')" || glibc=""
-	if [ -z "$glibc" ]; then
-		glibc="$(ldd --version 2>&1 | head -n 1 | grep -Eo '[0-9]+\.[0-9]+' | tail -n 1)" || glibc=""
-	fi
+	glibc="$(ldd --version 2>&1 | head -n 1 | grep -Eo '[0-9]+\.[0-9]+' | tail -n 1)" || glibc=""
 	[ -n "$glibc" ] || fail "could not determine the glibc version (getconf GNU_LIBC_VERSION and ldd --version both failed); set CLIO_CODER_NODE_BUILD to pick a Node build"
 }
 
