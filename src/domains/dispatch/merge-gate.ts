@@ -14,7 +14,7 @@ export interface MergeGateInput {
 	branch: string;
 }
 
-function boundedCheck(check: string): string {
+export function boundedCheck(check: string): string {
 	// Worker prose lands in a receipt detail and a terminal line, so control
 	// characters collapse to spaces and the length is capped.
 	const flat = check.replace(/[\p{Cc}\s]+/gu, " ").trim();
@@ -23,24 +23,43 @@ function boundedCheck(check: string): string {
 		: `${flat.slice(0, DECLARED_CHECK_DETAIL_MAX_CHARS - 1)}…`;
 }
 
+/** Why a merge is held and the condition under which the preserved branch is still safe to merge. */
+export interface MergeGateVerdict {
+	/** The failing or unrun check, as a clause: what the operator is being asked to overlook. */
+	reason: string;
+	/** Completes "`git merge <branch>` applies it ...". */
+	appliesWhen: string;
+}
+
 /**
  * Decide whether a succeeded merge-mode task worktree is kept off the
- * operator's branch. Returns the receipt detail when it is withheld, null when
- * it may merge. Two reports withhold: one listing a failing validation, and one
- * that asked for a check it did not run (`declaredChecks`) without any passing
+ * operator's branch. Returns the verdict when it is withheld, null when it may
+ * merge. Two reports withhold: one listing a failing validation, and one that
+ * asked for a check it did not run (`declaredChecks`) without any passing
  * validation, unless host verification passed. The second case merged a
  * left-pad change onto a red main (flywheel 31jukrioe38d).
  */
-export function mergeWithheldDetail(input: MergeGateInput): string | null {
+export function mergeGateVerdict(input: MergeGateInput): MergeGateVerdict | null {
 	if (input.hostStatus === "verified") return null;
-	const preserved = (condition: string) =>
-		`its work is committed on the preserved branch ${input.branch}, and \`git merge ${input.branch}\` applies it ${condition}`;
 	if (input.quality === "fail") {
-		return `merge withheld: the worker's own report lists a failing validation; ${preserved("if that failure was already there")}`;
+		return {
+			reason: "the worker's own report lists a failing validation",
+			appliesWhen: "if that failure was already there",
+		};
 	}
 	if (input.contract === null) return null;
 	const reported = mutationReportChecks(input.contract, input.output);
 	const first = reported.declaredChecks[0];
 	if (first === undefined || reported.validationPassed) return null;
-	return `merge withheld: the worker asked for a check the host did not run (${boundedCheck(first)}); ${preserved("once that check passes")}`;
+	return {
+		reason: `the worker asked for a check the host did not run (${boundedCheck(first)})`,
+		appliesWhen: "once that check passes",
+	};
+}
+
+/** The receipt detail for a withheld merge, or null when the merge may proceed. */
+export function mergeWithheldDetail(input: MergeGateInput): string | null {
+	const verdict = mergeGateVerdict(input);
+	if (verdict === null) return null;
+	return `merge withheld: ${verdict.reason}; its work is committed on the preserved branch ${input.branch}, and \`git merge ${input.branch}\` applies it ${verdict.appliesWhen}`;
 }

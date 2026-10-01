@@ -1482,6 +1482,11 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 				budgetWaitForRaise: !options.headless && !options.acp,
 				// Only the interactive overlay answers worker escalations (F9).
 				workerPermissionResponder: !options.headless && !options.acp,
+				// The merge card rides the same interactive-only gate, and asks through
+				// whichever ask_user handler the TUI has registered by then.
+				...(!options.headless && !options.acp
+					? { operatorAsk: { available: () => askUserHandler !== null, ask: (q, o) => askUserBridge(q, o) } }
+					: {}),
 				getSettings: () => effectiveSettingsForDispatch?.(),
 				getProtectedArtifactState: () => protectedArtifactStateForDispatch?.() ?? { artifacts: [] },
 				// Stamps every run with the session that dispatched it, which is what

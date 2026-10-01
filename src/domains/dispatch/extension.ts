@@ -54,6 +54,7 @@ import {
 } from "../../engine/acp/adapter.js";
 import { isClaudeCanonicalTool } from "../../engine/claude/tool-safety.js";
 import { WORKER_RUNTIME_MEDIATES_CLIO_DISPATCH } from "../../engine/worker-runtime-capabilities.js";
+import type { AskUserHandler } from "../../tools/ask-user.js";
 import { toolPromptHintsForNames } from "../../tools/builtin-tool-catalog.js";
 import { changedCheckoutPaths, snapshotCheckout } from "../../tools/checkout-changes.js";
 import { networkToolsDisabled } from "../../tools/network-policy.js";
@@ -265,7 +266,14 @@ import {
 	type JointRouteResolverInput,
 	resolveJointRoute,
 } from "./joint-route-resolver.js";
-import { mergeWithheldDetail } from "./merge-gate.js";
+import {
+	askMergeCard,
+	createMergeCardQueue,
+	type MergeCardInput,
+	type MergeCardOutcome,
+	mergeCardCauseNote,
+} from "./merge-card.js";
+import { mergeGateVerdict, mergeWithheldDetail } from "./merge-gate.js";
 import { recoverOrphanReceipts } from "./orphan-recovery.js";
 import {
 	type RunTerminationEvidence,
@@ -516,6 +524,13 @@ export interface DispatchBundleOptions {
 	 * fallback at once instead of waiting out the timeout (F9).
 	 */
 	workerPermissionResponder?: boolean;
+	/**
+	 * The attached operator's ask surface, present only in the interactive TUI.
+	 * A merge-mode task worktree the gate would withhold is put to the operator
+	 * as a merge card when `available()` is true. Absent in headless and ACP, and
+	 * those surfaces keep withholding.
+	 */
+	operatorAsk?: { available(): boolean; ask: AskUserHandler };
 	/** Live hard-block state cloned into each mediated worker spec. */
 	getProtectedArtifactState?: () => ProtectedArtifactState;
 	/** Git-backed receipt provenance collector; injectable for deterministic tests. */
@@ -3133,6 +3148,42 @@ export function createDispatchBundle(
 	// Phase D: the trusted broker for worker asks routed to the main agent. It
 	// is process-local, like the workers it answers.
 	const grantAttended = options?.workerPermissionResponder === true;
+	// One merge card is on screen at a time. A batch can withhold several
+	// members, each waits its turn here while the members that merge cleanly
+	// have already landed.
+	const mergeCardQueue = createMergeCardQueue();
+	const askWithheldMerge = async (
+		run: ActiveRun,
+		settings: EffectiveSettings,
+		input: MergeCardInput,
+	): Promise<MergeCardOutcome | null> => {
+		const operator = options?.operatorAsk;
+		if (operator === undefined || !operator.available()) return null;
+		const canceled = new AbortController();
+		const watch = setInterval(() => {
+			if (run.aborted) canceled.abort();
+		}, 1000);
+		watch.unref?.();
+		try {
+			return await mergeCardQueue(() =>
+				askMergeCard(
+					{
+						ask: operator.ask,
+						// The same bound a worker permission ask lives under.
+						timeoutMs: settings?.fleet.permissions.escalation?.timeoutMs ?? DEFAULT_ESCALATION_TIMEOUT_MS,
+						signal: canceled.signal,
+					},
+					input,
+				),
+			);
+		} catch (error) {
+			// A card that cannot be shown leaves the merge withheld, the same as no operator.
+			reportDispatchDiagnostic(`merge card for ${run.runId}`, error);
+			return null;
+		} finally {
+			clearInterval(watch);
+		}
+	};
 	const grantRunFallbacks = new Map<string, "deny" | "fail">();
 	const grantPendingListeners = new Set<(view: WorkerGrantView) => void>();
 	const grantView = (record: GrantRecord): WorkerGrantView => ({
@@ -7288,16 +7339,18 @@ export function createDispatchBundle(
 				// Master's `npm test: exit 1` commit merged onto main (flywheel s5r2).
 				// The tree is still committed to its preserved branch, so a failure the
 				// operator knows was already there costs one merge command.
-				const withheldDetail =
+				const mergeGateInput =
 					req.taskWorktree !== undefined && (req.apply ?? "merge") === "merge" && finalOutcome === "succeeded"
-						? mergeWithheldDetail({
+						? {
 								quality: sealedResultContractFact?.quality,
 								hostStatus: hostVerification?.status,
 								contract: appliedResultContract,
 								output: capturedOutput?.state === "final" ? capturedOutput.text : null,
 								branch: req.taskWorktree.branch,
-							})
+							}
 						: null;
+				const withheldDetail = mergeGateInput === null ? null : mergeWithheldDetail(mergeGateInput);
+				const withheldVerdict = mergeGateInput === null ? null : mergeGateVerdict(mergeGateInput);
 				const mergeWithheld = withheldDetail !== null;
 				// A merge-mode run the worker finished but host verification rejected
 				// keeps its branch like a withheld merge, so its tree is committed there
@@ -7305,18 +7358,21 @@ export function createDispatchBundle(
 				const hostRejectedMerge =
 					req.taskWorktree !== undefined && (req.apply ?? "merge") === "merge" && hostRejection !== null && workerSucceeded;
 				let worktreeReceipt: RunReceiptDraft["worktree"];
+				// Set when the operator discarded the branch from the merge card, so the
+				// closing settle below does not look for a claim that is gone.
+				let worktreeDiscarded = false;
 				if (req.taskWorktree !== undefined && (finalOutcome === "succeeded" || hostRejectedMerge)) {
+					const taskCommitMessage =
+						appliedResultContract !== null && resultValidation?.conformance === "pass"
+							? resultContractAuthorship(appliedResultContract, capturedOutput?.state === "final" ? capturedOutput.text : null)
+									.commitMessage
+							: null;
+					const protectedPaths = getProtectedArtifactState().artifacts.map((artifact) => artifact.path);
 					worktreeReceipt = applyTaskWorktree({
 						worktree: req.taskWorktree,
 						apply: mergeWithheld || hostRejectedMerge ? "preserve" : (req.apply ?? "merge"),
-						protectedPaths: getProtectedArtifactState().artifacts.map((artifact) => artifact.path),
-						commitMessage:
-							appliedResultContract !== null && resultValidation?.conformance === "pass"
-								? resultContractAuthorship(
-										appliedResultContract,
-										capturedOutput?.state === "final" ? capturedOutput.text : null,
-									).commitMessage
-								: null,
+						protectedPaths,
+						commitMessage: taskCommitMessage,
 					});
 					if (worktreeReceipt.reason !== undefined) {
 						finalOutcome = "failed";
@@ -7332,10 +7388,71 @@ export function createDispatchBundle(
 							failureMessage = finalDetail;
 						}
 					} else if (mergeWithheld) {
-						finalOutcome = "failed";
-						outcomeCode = "merge_withheld";
-						finalDetail = withheldDetail ?? finalDetail;
-						failureMessage = finalDetail;
+						// An attached operator may overrule the gate for this one branch. The
+						// tree is already committed and pinned above, so Merge re-enters the
+						// same guarded path (head attestation, protected paths, pinned
+						// commit) rather than a second implementation of it.
+						let discardFailed = false;
+						const card =
+							withheldVerdict !== null &&
+							worktreeReceipt.commit !== undefined &&
+							(worktreeReceipt.changedPaths?.length ?? 0) > 0
+								? await askWithheldMerge(activeRun, lifecycle.settings, {
+										branch: req.taskWorktree.branch,
+										changedPaths: worktreeReceipt.changedPaths ?? [],
+										reason: withheldVerdict.reason,
+									})
+								: null;
+						if (card?.choice === "merge") {
+							const landed = applyTaskWorktree({
+								worktree: req.taskWorktree,
+								apply: "merge",
+								protectedPaths,
+								commitMessage: taskCommitMessage,
+							});
+							if (landed.reason !== undefined) {
+								worktreeReceipt = {
+									...landed,
+									detail: `operator merge: ${landed.detail ?? landed.reason}`,
+								};
+								finalOutcome = "failed";
+								finalDetail = landed.detail ?? landed.reason;
+								failureMessage = finalDetail;
+							} else {
+								worktreeReceipt = {
+									...landed,
+									detail: `operator merge: merged after the gate held it because ${withheldVerdict?.reason ?? "of its report"}`,
+								};
+							}
+						} else if (card?.choice === "discard") {
+							try {
+								cleanupTaskWorktree(req.taskWorktree, true);
+								worktreeDiscarded = true;
+							} catch (discardError) {
+								// The branch and worktree stay, so this settles as a keep.
+								discardFailed = true;
+								reportDispatchDiagnostic(`discard task worktree ${req.taskWorktree.runId}`, discardError);
+							}
+						}
+						if (card?.choice !== "merge") {
+							finalOutcome = "failed";
+							outcomeCode = "merge_withheld";
+							finalDetail = withheldDetail ?? finalDetail;
+							if (worktreeDiscarded) {
+								finalDetail = `merge withheld: ${withheldVerdict?.reason ?? "its report"}; the operator discarded branch ${req.taskWorktree.branch} and its worktree`;
+								worktreeReceipt = {
+									...worktreeReceipt,
+									reason: "operator_discarded",
+									detail: "operator discard: deleted the branch and its worktree on the merge card",
+								};
+							} else if (card !== null) {
+								worktreeReceipt = {
+									...worktreeReceipt,
+									detail: `operator keep: ${discardFailed ? "the discard failed" : mergeCardCauseNote(card.cause)}; branch preserved`,
+								};
+							}
+							failureMessage = finalDetail;
+						}
 					}
 				}
 				if (req.taskWorktree !== undefined && worktreeReceipt === undefined) {
@@ -7461,7 +7578,7 @@ export function createDispatchBundle(
 					} catch (cleanupError) {
 						reportDispatchDiagnostic(`clean applied task worktree ${req.taskWorktree.runId}`, cleanupError);
 					}
-				} else if (req.taskWorktree !== undefined) {
+				} else if (req.taskWorktree !== undefined && !worktreeDiscarded) {
 					// The run is over and its worktree stays for the operator (preserve
 					// mode, a failed run, a refused merge). Saying so on the claim keeps
 					// restart recovery from reading it as a crash.
