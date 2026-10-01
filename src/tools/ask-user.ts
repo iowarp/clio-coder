@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { Type } from "typebox";
+import { stripSkillInstallOfferTag } from "../core/skill-activation.js";
 import { ToolNames } from "../core/tool-names.js";
 import { clioStateDir } from "../core/xdg.js";
 import { type AutonomyExposure, DEFAULT_AUTONOMY_EXPOSURE } from "../domains/safety/autonomy.js";
@@ -341,6 +342,28 @@ function normalizeAskUserResult(questions: ReadonlyArray<AskUserQuestion>, resul
 		});
 	}
 	return { answers };
+}
+
+/** Puts each answered question back to the text the model sent, where a surface echoed the displayed text. */
+function restoreQuestions(
+	result: AskUserResult,
+	shown: ReadonlyArray<AskUserQuestion>,
+	original: ReadonlyArray<AskUserQuestion>,
+): AskUserResult {
+	if (result.cancelled === true) return result;
+	const originalByShown = new Map<string, string>();
+	for (const [index, question] of shown.entries()) {
+		const source = original[index]?.question;
+		if (source !== undefined && source !== question.question) originalByShown.set(question.question, source);
+	}
+	if (originalByShown.size === 0) return result;
+	return {
+		...result,
+		answers: result.answers.map((answer) => {
+			const source = originalByShown.get(answer.question);
+			return source === undefined ? answer : { ...answer, question: source };
+		}),
+	};
 }
 
 function createStandalonePolicy(options?: ToolInvokeOptions): AskUserToolPolicy {
@@ -692,13 +715,18 @@ export function createAskUserTool(deps: AskUserToolDeps = {}): ToolSpec {
 			if (call.summary) policy.summary = call.summary;
 			const handler = deps.askUser ?? defaultAskUserHandler;
 			try {
-				const result = normalizeAskUserResult(
-					questions,
-					await handler(questions, {
-						...options,
-						decisionPresentation: classifyDecisionPresentation(decisionFactsForAnswer(exposure)),
-					}),
-				);
+				// The install-offer binding marker is plumbing for the observer, not
+				// text for the operator: surfaces get the question without it and the
+				// answer gets the original back.
+				const shown = questions.map((question) => ({
+					...question,
+					question: stripSkillInstallOfferTag(question.question),
+				}));
+				const handled = await handler(shown, {
+					...options,
+					decisionPresentation: classifyDecisionPresentation(decisionFactsForAnswer(exposure)),
+				});
+				const result = normalizeAskUserResult(questions, restoreQuestions(handled, shown, questions));
 				const answeredAt = new Date().toISOString();
 				policy.callCount += 1;
 				policy.askedQuestionKeys.add(key);

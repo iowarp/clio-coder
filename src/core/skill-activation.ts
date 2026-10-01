@@ -31,6 +31,24 @@ export const SKILL_INSTALL_OFFER_OPTION_USER = "Install globally";
 export const SKILL_INSTALL_OFFER_OPTION_NOT_NOW = "Not now";
 export const SKILL_INSTALL_OFFER_OPTION_NEVER = "Never offer this skill";
 
+/**
+ * The marker the model echoes in an install-offer question so the harness binds
+ * the operator's answer to that offer. It is plumbing: the tool seam hides it
+ * from every surface that shows the question and puts it back before the
+ * answer reaches the model and the after_tool observer.
+ */
+export function skillInstallOfferTag(offerTag: string): string {
+	return `[clio-install:${offerTag}]`;
+}
+
+const SKILL_INSTALL_OFFER_TAG_PATTERN = /[ \t]*\[clio-install:[^\]\s]*\][ \t]*/gu;
+
+/** The question as an operator should read it, without the binding marker. */
+export function stripSkillInstallOfferTag(text: string): string {
+	if (!text.includes("[clio-install:")) return text;
+	return text.replace(SKILL_INSTALL_OFFER_TAG_PATTERN, " ").replace(/ +\n/gu, "\n").trim();
+}
+
 export interface PendingSkillRequest {
 	name: string;
 	args: string;

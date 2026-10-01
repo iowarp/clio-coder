@@ -4,6 +4,7 @@ import {
 	SKILL_INSTALL_OFFER_OPTION_NOT_NOW,
 	SKILL_INSTALL_OFFER_OPTION_PROJECT,
 	SKILL_INSTALL_OFFER_OPTION_USER,
+	skillInstallOfferTag,
 } from "../../core/skill-activation.js";
 import { ToolNames } from "../../core/tool-names.js";
 import type { MarketplaceSkill } from "../resources/skills/marketplace.js";
@@ -76,10 +77,12 @@ const NO_EFFECTS: ReadonlyArray<MiddlewareEffect> = [];
  * The tag the model must echo verbatim in its ask_user question so the harness
  * binds the answer to this specific offer and nothing else. The tag lives only
  * in a system reminder (a trusted channel), so prompt-injected user or file
- * content cannot forge it onto an unrelated question.
+ * content cannot forge it onto an unrelated question. The ask_user tool seam
+ * hides it from the question the operator reads and restores it in the answer
+ * the observer sees (`stripSkillInstallOfferTag`).
  */
 export function offerBindingTag(offerTag: string): string {
-	return `[clio-install:${offerTag}]`;
+	return skillInstallOfferTag(offerTag);
 }
 
 function boundedDescription(text: string): string {
