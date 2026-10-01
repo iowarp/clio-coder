@@ -203,6 +203,19 @@ it("withholds requested validation even when the worker omits declaredChecks", (
 	);
 });
 
+it("a declared unrun check holds the merge unless the task opted out of validation", () => {
+	const input = {
+		quality: "unmeasured",
+		hostStatus: undefined,
+		contract: { kind: "mutation-report" as const },
+		output: '{"validations":[],"declaredChecks":["Tests not run as requested."]}',
+		branch: "clio-coder/task/check",
+		executedCheckingCalls: 0,
+	};
+	match(mergeWithheldDetail({ ...input, task: "Edit the parser." }) ?? "", /host did not run/u);
+	strictEqual(mergeWithheldDetail({ ...input, task: "Edit the parser. Do not run the tests." }), null);
+});
+
 it("withholds a verified merge whose diff replaces an existing test, but not an edited body", () => {
 	const header = (path: string) => `diff --${"git"} a/${path} b/${path}`;
 	const replaced = [

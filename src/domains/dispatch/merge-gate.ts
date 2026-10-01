@@ -111,18 +111,27 @@ export interface MergeGateVerdict {
 	appliesWhen: string;
 }
 
+const TASK_CLAUSE_SPLIT = /[.;\n,]|\b(?:and|but|then)\b/iu;
+const VALIDATION_OPT_OUT =
+	/\b(?:do\s+not|don['’]t|never|skip|without|no\s+need\s+to|need\s+not)\b|\bnot\s+(?:required|needed|necessary)\b/iu;
+const VALIDATION_REQUEST =
+	/\b(?:run|runs|running|execute|validate|verify|test)\b[^.\n]{0,100}\b(?:tests?|checks?|validation|npm|pnpm|pytest|vitest|jest|tsc|lint|typecheck)\b/iu;
+
 function taskRequestsValidation(task: string): boolean {
-	return task.split(/[.;\n,]|\b(?:and|but|then)\b/iu).some((clause) => {
-		if (
-			/\b(?:do\s+not|don['’]t|never|skip|without|no\s+need\s+to|need\s+not)\b|\bnot\s+(?:required|needed|necessary)\b/iu.test(
-				clause,
-			)
-		)
-			return false;
-		return /\b(?:run|runs|running|execute|validate|verify|test)\b[^.\n]{0,100}\b(?:tests?|checks?|validation|npm|pnpm|pytest|vitest|jest|tsc|lint|typecheck)\b/iu.test(
-			clause,
-		);
-	});
+	return task
+		.split(TASK_CLAUSE_SPLIT)
+		.some((clause) => !VALIDATION_OPT_OUT.test(clause) && VALIDATION_REQUEST.test(clause));
+}
+
+/**
+ * True when a clause of the task tells the worker not to validate. A check the
+ * worker then reports as not run honored that instruction, so it is not a
+ * reason to hold the merge (flywheel p7/A2).
+ */
+function taskOptsOutOfValidation(task: string): boolean {
+	return task
+		.split(TASK_CLAUSE_SPLIT)
+		.some((clause) => VALIDATION_OPT_OUT.test(clause) && VALIDATION_REQUEST.test(clause));
 }
 
 /**
@@ -164,6 +173,7 @@ export function mergeGateVerdict(input: MergeGateInput): MergeGateVerdict | null
 	const reported = mutationReportChecks(input.contract, input.output);
 	const first = reported.declaredChecks[0];
 	if (first === undefined || reported.validationPassed) return null;
+	if (input.task !== undefined && taskOptsOutOfValidation(input.task)) return null;
 	return {
 		reason: `the worker asked for a check the host did not run (${boundedCheck(first)})`,
 		appliesWhen: "once that check passes",
