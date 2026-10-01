@@ -71,8 +71,11 @@ Options:
   --bin-dir <dir>       Where the clio-coder launcher goes. Default ~/.local/bin.
                         Env: CLIO_CODER_BIN_DIR
   --omit-optional       Skip the optional Claude Agent SDK dependency.
+  --no-modify-path      Keep shell startup files unchanged (default).
   --modify-path         Append a PATH line for the bin dir to your shell's
                         startup file. Without it, the installer only prints one.
+  --no-auto-update      Disable background updates. Env: CLIO_CODER_AUTO_UPDATE=0
+  --auto-update         Enable background updates (unpinned native installs only).
   --rollback            Point the launcher back at the previous installed version.
   --no-post-install     Skip `clio-coder upgrade --post-install` after installing.
   --force               Replace a clio-coder launcher this installer did not write.
@@ -409,9 +412,9 @@ install_node_runtime() {
 		gzip -dc "$work/$tarball_name" | tar -xf - -C "$unpack" || fail "could not unpack $tarball_name into $unpack (disk full or over quota?)"
 	fi
 	[ -x "$unpack/node-v$node_version-$node_build/bin/node" ] || fail "$tarball_name did not contain bin/node"
-	if [ -e "$runtime_dir" ]; then mv "$runtime_dir" "$runtime_dir.old.$$"; fi
+	if [ -e "$runtime_dir" ]; then runtime_dir="$runtime_dir-$$"; node_bin="$runtime_dir/bin/node"; fi
 	mv "$unpack/node-v$node_version-$node_build" "$runtime_dir"
-	rm -rf "$unpack" "$runtime_dir.old.$$"
+	rm -rf "$unpack"
 }
 
 check_node_runs() {
@@ -507,16 +510,6 @@ LAUNCHER
 	mv -f "$tmp" "$launcher"
 }
 
-# Keep the current and previous package prefixes and the runtimes they use.
-prune_installs() {
-	for dir in "$install_root"/versions/* "$install_root"/runtime/*; do
-		[ -e "$dir" ] || continue
-		case "$dir" in
-			"$1" | "$2" | "$3" | "$4") continue ;;
-		esac
-		rm -rf "$dir"
-	done
-}
 
 path_contains_dir() {
 	case ":${PATH:-}:" in
@@ -571,6 +564,15 @@ warn_about_shadowing_clio() {
 }
 
 print_next_steps() {
+	if version_ge "${installed_version%%-*}" "0.6.0"; then
+		upgrade_advice="clio-coder upgrade"
+		rollback_advice="clio-coder upgrade --rollback (binary only; background updates are disabled)"
+		remove_advice="clio-coder uninstall --remove-binary"
+	else
+		upgrade_advice="rerun install.sh with the same --install-dir and --bin-dir"
+		rollback_advice="rerun install.sh --rollback with the same --install-dir and --bin-dir"
+		remove_advice="this legacy package cannot remove managed binaries; after all sessions exit, remove only $install_root/runtime, $install_root/versions, $install_root/install.json and $launcher"
+	fi
 	cat <<NEXT
 
 Installed: $launcher
@@ -585,8 +587,9 @@ Verify this exact install, then configure a model target:
 Terminal (interactive TUI):
   "$launcher"
 
-Upgrade with \`clio-coder upgrade\`, undo the last upgrade with this installer's
---rollback, and remove everything with \`clio-coder uninstall --remove-binary\`.
+Upgrade: $upgrade_advice
+Rollback: $rollback_advice
+Remove: $remove_advice
 NEXT
 }
 
@@ -605,26 +608,41 @@ default_install_root() {
 	fi
 }
 
+acquire_install_lock() {
+	mkdir -p "$install_root"
+	if ! mkdir "$install_root/.install-lock" 2>/dev/null; then
+		fail "installation locked at $install_root/.install-lock (owner $(cat "$install_root/.install-lock/pid" 2>/dev/null || true)). If that process has exited, remove only that lock directory and retry."
+	fi
+	lock_owned=1
+	printf '%s\n' "$$" >"$install_root/.install-lock/pid"
+	trap cleanup EXIT
+	trap 'exit 130' INT
+	trap 'exit 143' TERM
+}
+
 do_rollback() {
 	[ -f "$install_root/install.json" ] || fail "no installer manifest at $install_root/install.json; nothing to roll back"
-	current="$(manifest_field current)"
-	previous="$(manifest_field previous)"
-	{ [ -n "$previous" ] && [ -d "$previous" ]; } || fail "no previous version is kept under $install_root/versions"
 	node_path="$(manifest_field node)"
-	[ -x "$node_path" ] || fail "the managed Node at $node_path is missing; rerun the installer"
-	entry="$previous/lib/node_modules/@iowarp/clio-coder/dist/cli/index.js"
-	[ -f "$entry" ] || fail "the previous version at $previous is incomplete"
-	if [ "$dry_run" = 1 ]; then
-		log "would point $launcher at $previous"
+	current="$(manifest_field current)"
+	helper="$current/lib/node_modules/@iowarp/clio-coder/scripts/native-install.cjs"
+	if [ ! -f "$helper" ]; then
+		previous="$(manifest_field previous)"
+		[ -n "$previous" ] && [ -f "$previous/lib/node_modules/@iowarp/clio-coder/dist/cli/index.js" ] || fail "no complete previous install"
+		if [ "$dry_run" = 1 ]; then log "would point $launcher at $previous"; return 0; fi
+		acquire_install_lock
+		"$node_path" "$previous/lib/node_modules/@iowarp/clio-coder/dist/cli/index.js" --version </dev/null || fail "previous install does not run"
+		write_launcher "$node_path" "$previous/lib/node_modules/@iowarp/clio-coder/dist/cli/index.js"
+		write_manifest "$node_path" "$(manifest_field nodeVersion)" "$(manifest_field nodeBuild)" "$previous" "$current"
+		ok "legacy rollback complete"
 		return 0
 	fi
-	check_existing_launcher
-	write_launcher "$node_path" "$entry"
-	write_manifest "$node_path" "$(manifest_field nodeVersion)" "$(manifest_field nodeBuild)" "$previous" "$current"
-	ok "launcher now runs $(basename "$previous"); run the installer again to return to the newest version"
+	if [ "$dry_run" = 1 ]; then log "would roll back $install_root"; return 0; fi
+	acquire_install_lock
+	"$node_path" "$helper" rollback "$install_root" </dev/null
 }
 
 cleanup() {
+	if [ "${lock_owned:-0}" = 1 ]; then rm -rf "$install_root/.install-lock"; fi
 	if [ -n "${work:-}" ]; then rm -rf "$work"; fi
 	if [ -n "${install_root:-}" ]; then rm -rf "$install_root/runtime/.staging.$$" "$install_root/versions/.staging.$$"; fi
 	return 0
@@ -638,7 +656,9 @@ main() {
 	install_root_arg=""
 	bin_dir_arg="${CLIO_CODER_BIN_DIR:-$HOME/.local/bin}"
 	omit_optional=0
-	modify_path=0
+	modify_path="${CLIO_CODER_MODIFY_PATH:-0}"
+	auto_update="${CLIO_CODER_AUTO_UPDATE:-preserve}"
+	lock_owned=0
 	rollback=0
 	post_install=1
 	refresh_runtime=0
@@ -670,6 +690,9 @@ main() {
 			--bin-dir=*) bin_dir_arg="${1#--bin-dir=}" ;;
 			--omit-optional) omit_optional=1 ;;
 			--modify-path) modify_path=1 ;;
+			--no-modify-path) modify_path=0 ;;
+			--no-auto-update) auto_update=0 ;;
+			--auto-update) auto_update=1 ;;
 			--rollback) rollback=1 ;;
 			--no-post-install) post_install=0 ;;
 			--refresh-runtime) refresh_runtime=1 ;;
@@ -693,6 +716,7 @@ main() {
 	else
 		version="$channel"
 	fi
+	case "$version" in latest | beta | dev) channel="$version" ;; esac
 
 	refuse_sudo
 	[ -n "${HOME:-}" ] || fail "HOME is not set"
@@ -767,6 +791,15 @@ main() {
 	check_writable_dir "install dir" "$install_root" "--install-dir or CLIO_CODER_INSTALL_DIR"
 	check_writable_dir "bin dir" "$bin_dir" "--bin-dir or CLIO_CODER_BIN_DIR"
 	check_existing_launcher
+	acquire_install_lock
+	if [ -z "$version_spec" ] && [ -z "$package_file" ]; then
+		recorded_pin="$(manifest_field versionPin)"
+		if [ -n "$recorded_pin" ]; then version_spec="$(validate_version "$recorded_pin")"; spec="$PACKAGE@$version_spec"; fi
+	fi
+	if [ ! -f "$install_root/install.json" ] && [ ! -f "$install_root/.installer-owner" ]; then
+		[ ! -e "$install_root/runtime" ] && [ ! -e "$install_root/versions" ] || fail "refusing to claim existing runtime/versions directories without installer ownership"
+	fi
+	printf '%s\n' "$MANIFEST_KIND" >"$install_root/.installer-owner"
 	mkdir -p "$install_root/runtime" "$install_root/versions" || fail "could not create $install_root"
 	available="$(free_kb "$install_root")"
 	case "$available" in
@@ -795,13 +828,10 @@ main() {
 
 	npm_cli="$runtime_dir/lib/node_modules/npm/bin/npm-cli.js"
 	[ -f "$npm_cli" ] || fail "the Node runtime at $runtime_dir has no bundled npm"
-	# The version running now becomes the rollback target; anything older goes
-	# before the new prefix is staged, so the peak is two versions, not three.
+	# All versions remain available to sessions that still lazily import their old code.
 	previous="$(manifest_field current)"
 	{ [ -n "$previous" ] && [ -d "$previous" ]; } || previous=""
-	previous_runtime=""
-	if [ -n "$previous" ]; then previous_runtime="$(dirname "$(dirname "$(manifest_field node)")")"; fi
-	prune_installs "$previous" "" "$runtime_dir" "$previous_runtime"
+	# Active sessions may still lazily read any prior package or runtime.
 	staging="$install_root/versions/.staging.$$"
 	rm -rf "$staging"
 	log "installing $spec with the npm bundled in Node v$node_version"
@@ -826,23 +856,26 @@ main() {
 	[ -f "$entry" ] || fail "the installed package has no dist/cli/index.js"
 	ok "installed $PACKAGE $installed_version"
 
-	write_launcher "$node_bin" "$entry"
-	write_manifest "$node_bin" "$node_version" "$node_build" "$final_prefix" "$previous"
-	prune_installs "$final_prefix" "$previous" "$runtime_dir" "$previous_runtime"
-
-	version_output="$("$launcher" --version 2>/dev/null </dev/null || true)"
-	if [ -n "$version_output" ]; then
-		ok "$version_output"
+	helper="$final_prefix/lib/node_modules/@iowarp/clio-coder/scripts/native-install.cjs"
+	if version_ge "${installed_version%%-*}" "0.6.0"; then
+		[ -f "$helper" ] || fail "candidate has no managed lifecycle helper; previous install remains active"
+		pin=""
+		case "$version_spec" in [0-9]* | v[0-9]*) pin="$installed_version" ;; esac
+		if [ -n "$package_file" ]; then pin="$installed_version"; fi
+		"$node_bin" "$helper" activate "$install_root" "$node_bin" "$node_version" "$node_build" "$final_prefix" "$launcher" "$channel" "$pin" "$auto_update" "$post_install" </dev/null ||
+			fail "candidate checks failed; previous install remains active"
 	else
-		warn "the launcher did not report a version; run: $launcher --version"
+		"$node_bin" "$entry" --version </dev/null || fail "candidate does not run; previous install remains active"
+		if [ -d "$install_root/launchers" ]; then fail "refusing to replace a lifecycle-capable install with a legacy package; use rollback"; fi
+		write_launcher "$node_bin" "$entry"
+		write_manifest "$node_bin" "$node_version" "$node_build" "$final_prefix" "$previous"
+		warn "Installed legacy $installed_version. Managed CLI upgrade/uninstall and background updates require 0.6.0; update by rerunning this installer. Automatic post-install was skipped; run doctor --fix explicitly for diagnostics."
+	fi
+	if [ "$post_install" = 1 ] && version_ge "${installed_version%%-*}" "0.6.0"; then
+		"$node_bin" "$entry" upgrade --post-install </dev/null || fail "package is installed, but local migrations/initialization need attention; run: $launcher upgrade --post-install. Previous binary remains available via --rollback."
 	fi
 	report_path
 	warn_about_shadowing_clio
-	if [ "$post_install" = 1 ]; then
-		log "running: $launcher upgrade --post-install"
-		"$launcher" upgrade --post-install </dev/null ||
-			fail "post-install checks did not finish; the package is installed. Run: $launcher upgrade --post-install"
-	fi
 	print_next_steps
 }
 
