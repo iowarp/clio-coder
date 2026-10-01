@@ -260,6 +260,37 @@ export function decisionRows(decision: PermissionDecisionFacts | undefined): rea
 	return rows;
 }
 
+/**
+ * Whose request a forwarded worker ask is and who may discharge it. The wording follows the
+ * terminal card, so both surfaces tell an operator the same thing about an operator-only rail and
+ * about an ordinary ask the main agent passed down. Identifiers and enums only upstream, so these
+ * are authority statements and not a worker's own words.
+ */
+export function workerAskRows(worker: Permission["worker"]): readonly DecisionRow[] {
+	if (worker === undefined) return [];
+	const rows: DecisionRow[] = [{ term: "Worker", value: `${worker.agentId} (run ${worker.requestedBy})` }];
+	if (worker.approvalAuthority === "operator") {
+		rows.push({
+			term: "Authority",
+			value: "Operator only. This rail is not the main agent's to grant; your answer decides it.",
+		});
+	} else if (worker.approvalAuthority === "main") {
+		rows.push({
+			term: "Authority",
+			value: worker.forwardedByMain
+				? "The main agent approved this worker request and, below yolo, asks you to decide."
+				: "The main agent may decide this ordinary worker request.",
+		});
+	}
+	if (worker.timeoutMs !== undefined) {
+		rows.push({
+			term: "If unanswered",
+			value: `The worker ${worker.fallback === "fail" ? "fails the call" : "is denied"} after ${Math.ceil(worker.timeoutMs / 1000)} seconds.`,
+		});
+	}
+	return rows;
+}
+
 /** Said in place of the classification when the agent announced none, so the gap is stated. */
 export const NO_DECISION_FACTS = "Clio Coder sent no classification with this request.";
 

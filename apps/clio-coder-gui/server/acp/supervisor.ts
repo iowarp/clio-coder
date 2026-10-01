@@ -31,7 +31,7 @@ import {
 	INTERVIEW_REQUEST_METHOD,
 	type InterviewSubmission,
 } from "../../contracts/interviews.js";
-import type { PermissionDecision } from "../../contracts/permissions.js";
+import { PERMISSION_WITHDRAW_METHOD, type PermissionDecision } from "../../contracts/permissions.js";
 import type { SetConfigOption } from "../../contracts/session-config.js";
 import { applySessionDelta, boundedText, emptySession } from "../../contracts/session-projection.js";
 import {
@@ -264,6 +264,10 @@ export class Supervisor {
 			transport.onNotification(INTERVIEW_CANCEL_METHOD, (params) => {
 				if (owned.client.capabilities.interviews?.cancel === INTERVIEW_CANCEL_METHOD)
 					owned.interviews?.withdraw(owned.id, params);
+			});
+			transport.onNotification(PERMISSION_WITHDRAW_METHOD, (params) => {
+				const withdrawn = record(params);
+				if (withdrawn.sessionId === owned.id) owned.permissions?.withdraw(withdrawn.requestId);
 			});
 			transport.onNotification("session/update", (params) => {
 				try {

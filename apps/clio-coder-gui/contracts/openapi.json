@@ -19908,6 +19908,56 @@
 														},
 														"additionalProperties": false
 													},
+													"worker": {
+														"type": "object",
+														"required": ["requestId", "requestedBy", "agentId", "forwardedByMain", "fallback"],
+														"properties": {
+															"requestId": {
+																"type": "string",
+																"maxLength": 128
+															},
+															"requestedBy": {
+																"type": "string",
+																"maxLength": 128
+															},
+															"agentId": {
+																"type": "string",
+																"maxLength": 128
+															},
+															"approvalAuthority": {
+																"anyOf": [
+																	{
+																		"type": "string",
+																		"const": "main"
+																	},
+																	{
+																		"type": "string",
+																		"const": "operator"
+																	}
+																]
+															},
+															"forwardedByMain": {
+																"type": "boolean"
+															},
+															"fallback": {
+																"anyOf": [
+																	{
+																		"type": "string",
+																		"const": "deny"
+																	},
+																	{
+																		"type": "string",
+																		"const": "fail"
+																	}
+																]
+															},
+															"timeoutMs": {
+																"type": "integer",
+																"minimum": 0
+															}
+														},
+														"additionalProperties": false
+													},
 													"canStopTurn": {
 														"type": "boolean"
 													}
@@ -22581,6 +22631,56 @@
 														},
 														"additionalProperties": false
 													},
+													"worker": {
+														"type": "object",
+														"required": ["requestId", "requestedBy", "agentId", "forwardedByMain", "fallback"],
+														"properties": {
+															"requestId": {
+																"type": "string",
+																"maxLength": 128
+															},
+															"requestedBy": {
+																"type": "string",
+																"maxLength": 128
+															},
+															"agentId": {
+																"type": "string",
+																"maxLength": 128
+															},
+															"approvalAuthority": {
+																"anyOf": [
+																	{
+																		"type": "string",
+																		"const": "main"
+																	},
+																	{
+																		"type": "string",
+																		"const": "operator"
+																	}
+																]
+															},
+															"forwardedByMain": {
+																"type": "boolean"
+															},
+															"fallback": {
+																"anyOf": [
+																	{
+																		"type": "string",
+																		"const": "deny"
+																	},
+																	{
+																		"type": "string",
+																		"const": "fail"
+																	}
+																]
+															},
+															"timeoutMs": {
+																"type": "integer",
+																"minimum": 0
+															}
+														},
+														"additionalProperties": false
+													},
 													"canStopTurn": {
 														"type": "boolean"
 													}
@@ -24180,6 +24280,56 @@
 														},
 														"additionalProperties": false
 													},
+													"worker": {
+														"type": "object",
+														"required": ["requestId", "requestedBy", "agentId", "forwardedByMain", "fallback"],
+														"properties": {
+															"requestId": {
+																"type": "string",
+																"maxLength": 128
+															},
+															"requestedBy": {
+																"type": "string",
+																"maxLength": 128
+															},
+															"agentId": {
+																"type": "string",
+																"maxLength": 128
+															},
+															"approvalAuthority": {
+																"anyOf": [
+																	{
+																		"type": "string",
+																		"const": "main"
+																	},
+																	{
+																		"type": "string",
+																		"const": "operator"
+																	}
+																]
+															},
+															"forwardedByMain": {
+																"type": "boolean"
+															},
+															"fallback": {
+																"anyOf": [
+																	{
+																		"type": "string",
+																		"const": "deny"
+																	},
+																	{
+																		"type": "string",
+																		"const": "fail"
+																	}
+																]
+															},
+															"timeoutMs": {
+																"type": "integer",
+																"minimum": 0
+															}
+														},
+														"additionalProperties": false
+													},
 													"canStopTurn": {
 														"type": "boolean"
 													}
@@ -25739,6 +25889,56 @@
 																},
 																"truncated": {
 																	"type": "boolean"
+																}
+															},
+															"additionalProperties": false
+														},
+														"worker": {
+															"type": "object",
+															"required": ["requestId", "requestedBy", "agentId", "forwardedByMain", "fallback"],
+															"properties": {
+																"requestId": {
+																	"type": "string",
+																	"maxLength": 128
+																},
+																"requestedBy": {
+																	"type": "string",
+																	"maxLength": 128
+																},
+																"agentId": {
+																	"type": "string",
+																	"maxLength": 128
+																},
+																"approvalAuthority": {
+																	"anyOf": [
+																		{
+																			"type": "string",
+																			"const": "main"
+																		},
+																		{
+																			"type": "string",
+																			"const": "operator"
+																		}
+																	]
+																},
+																"forwardedByMain": {
+																	"type": "boolean"
+																},
+																"fallback": {
+																	"anyOf": [
+																		{
+																			"type": "string",
+																			"const": "deny"
+																		},
+																		{
+																			"type": "string",
+																			"const": "fail"
+																		}
+																	]
+																},
+																"timeoutMs": {
+																	"type": "integer",
+																	"minimum": 0
 																}
 															},
 															"additionalProperties": false
@@ -27549,6 +27749,56 @@
 															},
 															"truncated": {
 																"type": "boolean"
+															}
+														},
+														"additionalProperties": false
+													},
+													"worker": {
+														"type": "object",
+														"required": ["requestId", "requestedBy", "agentId", "forwardedByMain", "fallback"],
+														"properties": {
+															"requestId": {
+																"type": "string",
+																"maxLength": 128
+															},
+															"requestedBy": {
+																"type": "string",
+																"maxLength": 128
+															},
+															"agentId": {
+																"type": "string",
+																"maxLength": 128
+															},
+															"approvalAuthority": {
+																"anyOf": [
+																	{
+																		"type": "string",
+																		"const": "main"
+																	},
+																	{
+																		"type": "string",
+																		"const": "operator"
+																	}
+																]
+															},
+															"forwardedByMain": {
+																"type": "boolean"
+															},
+															"fallback": {
+																"anyOf": [
+																	{
+																		"type": "string",
+																		"const": "deny"
+																	},
+																	{
+																		"type": "string",
+																		"const": "fail"
+																	}
+																]
+															},
+															"timeoutMs": {
+																"type": "integer",
+																"minimum": 0
 															}
 														},
 														"additionalProperties": false
@@ -34885,6 +35135,56 @@
 												},
 												"additionalProperties": false
 											},
+											"worker": {
+												"type": "object",
+												"required": ["requestId", "requestedBy", "agentId", "forwardedByMain", "fallback"],
+												"properties": {
+													"requestId": {
+														"type": "string",
+														"maxLength": 128
+													},
+													"requestedBy": {
+														"type": "string",
+														"maxLength": 128
+													},
+													"agentId": {
+														"type": "string",
+														"maxLength": 128
+													},
+													"approvalAuthority": {
+														"anyOf": [
+															{
+																"type": "string",
+																"const": "main"
+															},
+															{
+																"type": "string",
+																"const": "operator"
+															}
+														]
+													},
+													"forwardedByMain": {
+														"type": "boolean"
+													},
+													"fallback": {
+														"anyOf": [
+															{
+																"type": "string",
+																"const": "deny"
+															},
+															{
+																"type": "string",
+																"const": "fail"
+															}
+														]
+													},
+													"timeoutMs": {
+														"type": "integer",
+														"minimum": 0
+													}
+												},
+												"additionalProperties": false
+											},
 											"canStopTurn": {
 												"type": "boolean"
 											}
@@ -35202,6 +35502,56 @@
 													},
 													"truncated": {
 														"type": "boolean"
+													}
+												},
+												"additionalProperties": false
+											},
+											"worker": {
+												"type": "object",
+												"required": ["requestId", "requestedBy", "agentId", "forwardedByMain", "fallback"],
+												"properties": {
+													"requestId": {
+														"type": "string",
+														"maxLength": 128
+													},
+													"requestedBy": {
+														"type": "string",
+														"maxLength": 128
+													},
+													"agentId": {
+														"type": "string",
+														"maxLength": 128
+													},
+													"approvalAuthority": {
+														"anyOf": [
+															{
+																"type": "string",
+																"const": "main"
+															},
+															{
+																"type": "string",
+																"const": "operator"
+															}
+														]
+													},
+													"forwardedByMain": {
+														"type": "boolean"
+													},
+													"fallback": {
+														"anyOf": [
+															{
+																"type": "string",
+																"const": "deny"
+															},
+															{
+																"type": "string",
+																"const": "fail"
+															}
+														]
+													},
+													"timeoutMs": {
+														"type": "integer",
+														"minimum": 0
 													}
 												},
 												"additionalProperties": false
@@ -35527,6 +35877,56 @@
 												},
 												"additionalProperties": false
 											},
+											"worker": {
+												"type": "object",
+												"required": ["requestId", "requestedBy", "agentId", "forwardedByMain", "fallback"],
+												"properties": {
+													"requestId": {
+														"type": "string",
+														"maxLength": 128
+													},
+													"requestedBy": {
+														"type": "string",
+														"maxLength": 128
+													},
+													"agentId": {
+														"type": "string",
+														"maxLength": 128
+													},
+													"approvalAuthority": {
+														"anyOf": [
+															{
+																"type": "string",
+																"const": "main"
+															},
+															{
+																"type": "string",
+																"const": "operator"
+															}
+														]
+													},
+													"forwardedByMain": {
+														"type": "boolean"
+													},
+													"fallback": {
+														"anyOf": [
+															{
+																"type": "string",
+																"const": "deny"
+															},
+															{
+																"type": "string",
+																"const": "fail"
+															}
+														]
+													},
+													"timeoutMs": {
+														"type": "integer",
+														"minimum": 0
+													}
+												},
+												"additionalProperties": false
+											},
 											"canStopTurn": {
 												"type": "boolean"
 											}
@@ -35844,6 +36244,56 @@
 													},
 													"truncated": {
 														"type": "boolean"
+													}
+												},
+												"additionalProperties": false
+											},
+											"worker": {
+												"type": "object",
+												"required": ["requestId", "requestedBy", "agentId", "forwardedByMain", "fallback"],
+												"properties": {
+													"requestId": {
+														"type": "string",
+														"maxLength": 128
+													},
+													"requestedBy": {
+														"type": "string",
+														"maxLength": 128
+													},
+													"agentId": {
+														"type": "string",
+														"maxLength": 128
+													},
+													"approvalAuthority": {
+														"anyOf": [
+															{
+																"type": "string",
+																"const": "main"
+															},
+															{
+																"type": "string",
+																"const": "operator"
+															}
+														]
+													},
+													"forwardedByMain": {
+														"type": "boolean"
+													},
+													"fallback": {
+														"anyOf": [
+															{
+																"type": "string",
+																"const": "deny"
+															},
+															{
+																"type": "string",
+																"const": "fail"
+															}
+														]
+													},
+													"timeoutMs": {
+														"type": "integer",
+														"minimum": 0
 													}
 												},
 												"additionalProperties": false

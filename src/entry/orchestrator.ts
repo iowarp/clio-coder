@@ -1451,6 +1451,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	// unattended behavior (no ask_user, no merge card, worker asks denied at once).
 	const acpHandshake = options.acp?.handshake;
 	const acpInterviews = acpHandshake?.initialized === true && acpHandshake.interviewsEnabled;
+	const acpWorkerPermissions = acpHandshake?.initialized === true && acpHandshake.workerPermissionsEnabled;
 	const acpInterviewChannel = acpInterviews ? createAcpInterviewChannel() : undefined;
 	// The rung is settled before the config contract loads, off the settings the
 	// interactive entry point already read strictly (`src/cli/clio.ts:31`) and
@@ -1513,8 +1514,9 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			// contract loads); until then it falls back to the shared snapshot.
 			createDispatchDomainModule({
 				budgetWaitForRaise: !options.headless && !options.acp,
-				// Only the interactive overlay answers worker escalations (F9).
-				workerPermissionResponder: !options.headless && !options.acp,
+				// Only an operator surface answers worker escalations (F9): the TUI
+				// overlay, or an ACP client that advertised it forwards them to a person.
+				workerPermissionResponder: !options.headless && (!options.acp || acpWorkerPermissions),
 				// The merge card rides the same attended gate, and asks through
 				// whichever ask_user handler the TUI or the ACP client has by then.
 				...(!options.headless && (!options.acp || acpInterviews)
@@ -3272,6 +3274,14 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 				...(options.acp.handshake ? { handshake: options.acp.handshake } : {}),
 				...(options.acp.onReady ? { onReady: options.acp.onReady } : {}),
 				...(acpInterviewChannel ? { interviews: acpInterviewChannel } : {}),
+				...(acpWorkerPermissions && dispatch?.resolveWorkerPermission
+					? {
+							workerPermissions: {
+								resolve: (runId: string, requestId: string, decision: "approve" | "deny") =>
+									dispatch.resolveWorkerPermission?.(runId, requestId, decision),
+							},
+						}
+					: {}),
 				chat,
 				...(session ? { session } : {}),
 				...(session

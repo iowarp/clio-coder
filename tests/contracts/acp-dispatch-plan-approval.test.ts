@@ -1,6 +1,8 @@
 import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { test } from "node:test";
 import { Type } from "typebox";
+import { BusChannels } from "../../src/core/bus-events.js";
+import { createSafeEventBus } from "../../src/core/event-bus.js";
 import { ToolNames } from "../../src/core/tool-names.js";
 import {
 	ACP_DISPATCH_PLAN_MAX_TASKS,
@@ -10,8 +12,8 @@ import {
 import { type AcpServerChat, serveClioAcpAgent } from "../../src/engine/acp/server.js";
 import type { AcpJsonRpcPeerTransport } from "../../src/engine/acp/transport.js";
 import { createWorkerSafety } from "../../src/engine/worker-tools.js";
-import { describeDispatchPlan } from "../../src/tools/dispatch-plan.js";
 import { bashTool } from "../../src/tools/bash.js";
+import { describeDispatchPlan } from "../../src/tools/dispatch-plan.js";
 import { createRegistry, type PermissionRequiredMeta, type ToolSpec } from "../../src/tools/registry.js";
 
 const PLAN = {
@@ -154,4 +156,150 @@ test("the plan projection bounds tasks and strings and strips control characters
 	// biome-ignore lint/suspicious/noControlCharactersInRegex: the assertion is that none survive.
 	ok(meta.tasks.every((task) => !/[\u0000-\u0009\u000b-\u001f]/u.test(task.agent + task.task)));
 	ok(JSON.stringify(meta).length < 64 * 1024);
+});
+
+/**
+ * One turn with a running dispatch call, a worker that escalates while it runs,
+ * and a client that either answers the forwarded ask or leaves it open.
+ */
+async function forwardWorkerAsk(input: {
+	advertise: boolean;
+	answer: "allow-once" | "reject-once" | "reject-and-stop" | "never";
+	settleElsewhere?: boolean;
+}) {
+	const bus = createSafeEventBus();
+	const resolved: Array<[string, string, string]> = [];
+	const asks: Array<Record<string, unknown>> = [];
+	const notifications: Array<{ method: string; params: Record<string, unknown> }> = [];
+	const handlers = new Map<string, (params: unknown) => unknown>();
+	let close: () => void = () => {};
+	let cancelled = false;
+	const transport: AcpJsonRpcPeerTransport = {
+		closed: false,
+		request: async (_method, params) => {
+			asks.push(params as Record<string, unknown>);
+			if (input.answer === "never") return await new Promise<never>(() => {});
+			return { outcome: { outcome: "selected", optionId: input.answer } } as never;
+		},
+		notify: (method, params) => notifications.push({ method, params: params as Record<string, unknown> }),
+		onNotification: () => () => {},
+		onRequest: (method, handler) => {
+			handlers.set(method, handler);
+			return () => handlers.delete(method);
+		},
+		onClose: (handler) => {
+			close = handler;
+			return () => {};
+		},
+		close: () => close(),
+	};
+	let emit: (event: unknown) => void = () => {};
+	const chat: AcpServerChat = {
+		submit: async () => {
+			emit({ type: "tool_execution_start", toolCallId: "call-1", toolName: "dispatch", args: { agent: "scout" } });
+			bus.emit(BusChannels.PermissionRequested, {
+				tool: "bash",
+				actionClass: "execute",
+				requestedBy: "run-7",
+				requestId: "req-1",
+				origin: "worker:run-7",
+				agentId: "scout",
+				target: "git push origin main",
+				consequence: ["Publishes to origin"],
+				timeoutMs: 60_000,
+				fallback: "deny",
+				escalation: true,
+				approvalAuthority: "operator",
+			});
+			await new Promise((resolve) => setTimeout(resolve, 50));
+			if (input.settleElsewhere) {
+				bus.emit(BusChannels.PermissionResolved, { status: "expired", requestId: "req-1", decidedBy: "timeout" });
+				await new Promise((resolve) => setTimeout(resolve, 50));
+			}
+			emit({
+				type: "tool_execution_end",
+				toolCallId: "call-1",
+				toolName: "dispatch",
+				result: { kind: "ok" },
+				isError: false,
+			});
+		},
+		cancel: () => {
+			cancelled = true;
+		},
+		onEvent: (handler) => {
+			emit = handler;
+			return () => {
+				emit = () => {};
+			};
+		},
+		isStreaming: () => false,
+		getSessionId: () => null,
+	};
+	const served = serveClioAcpAgent({
+		transport,
+		chat,
+		bus,
+		cwd: process.cwd(),
+		workerPermissions: { resolve: (runId, requestId, decision) => resolved.push([runId, requestId, decision]) },
+	});
+	const call = async (method: string, params: unknown) => await handlers.get(method)?.(params);
+	await call("initialize", {
+		protocolVersion: 1,
+		...(input.advertise
+			? {
+					clientCapabilities: {
+						_meta: {
+							"clio-coder/workerPermissions": { version: 1, withdraw: "_clio-coder/permission/withdraw" },
+						},
+					},
+				}
+			: {}),
+	});
+	const session = (await call("session/new", { cwd: process.cwd(), mcpServers: [] })) as { sessionId: string };
+	await call("session/prompt", { sessionId: session.sessionId, prompt: [{ type: "text", text: "go" }] });
+	close();
+	await served;
+	return { asks, resolved, notifications, cancelled };
+}
+
+test("an attended client is asked about a worker's escalation under the dispatch call and answers the worker", async () => {
+	const turn = await forwardWorkerAsk({ advertise: true, answer: "allow-once" });
+	strictEqual(turn.asks.length, 1);
+	strictEqual((turn.asks[0]?.toolCall as { toolCallId: string }).toolCallId, "call-1");
+	const meta = turn.asks[0]?._meta as Record<string, Record<string, unknown>>;
+	deepStrictEqual(meta["clio-coder/workerAsk"], {
+		version: 1,
+		requestId: "req-1",
+		requestedBy: "run-7",
+		agentId: "scout",
+		approvalAuthority: "operator",
+		forwardedByMain: false,
+		fallback: "deny",
+		timeoutMs: 60_000,
+	});
+	strictEqual(meta["clio-coder/decision"]?.tier, "worker");
+	deepStrictEqual(meta["clio-coder/decision"]?.origin, { kind: "worker", agentId: "scout", runId: "run-7" });
+	deepStrictEqual(meta["clio-coder/decision"]?.consequenceLines, ["Publishes to origin"]);
+	deepStrictEqual(turn.resolved, [["run-7", "req-1", "approve"]]);
+});
+
+test("denying and stopping a worker ask denies the worker and cancels the turn", async () => {
+	const turn = await forwardWorkerAsk({ advertise: true, answer: "reject-and-stop" });
+	deepStrictEqual(turn.resolved, [["run-7", "req-1", "deny"]]);
+	strictEqual(turn.cancelled, true);
+});
+
+test("a worker ask the worker already settled is withdrawn from the client and never answered", async () => {
+	const turn = await forwardWorkerAsk({ advertise: true, answer: "never", settleElsewhere: true });
+	deepStrictEqual(turn.resolved, []);
+	const withdrawn = turn.notifications.filter((note) => note.method === "_clio-coder/permission/withdraw");
+	strictEqual(withdrawn.length, 1);
+	strictEqual(withdrawn[0]?.params.requestId, "req-1");
+});
+
+test("a client that did not advertise worker permissions is never asked", async () => {
+	const turn = await forwardWorkerAsk({ advertise: false, answer: "allow-once" });
+	strictEqual(turn.asks.length, 0);
+	deepStrictEqual(turn.resolved, []);
 });

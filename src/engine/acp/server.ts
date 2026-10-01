@@ -12,6 +12,7 @@ import {
 	type DispatchProgressPayload,
 	type DispatchStartedPayload,
 	type LoopBlockedPayload,
+	type PermissionRequestedPayload,
 	type ProviderHealthPayload,
 	type ToolBudgetExceededPayload,
 } from "../../core/bus-events.js";
@@ -22,7 +23,6 @@ import { ToolNames } from "../../core/tool-names.js";
 import type { ProvidersContract } from "../../domains/providers/contract.js";
 import { isOrchestratorEligibleRuntime } from "../../domains/providers/eligibility.js";
 import { type CostProvenance, resolveCostProvenance } from "../../domains/providers/types/cost-provenance.js";
-import type { ClassifierCall } from "../../domains/safety/action-classifier.js";
 import { type AutonomyLevel, DEFAULT_AUTONOMY_LEVEL, isAutonomyLevel } from "../../domains/safety/autonomy.js";
 import { describeMainCallConsequences } from "../../domains/safety/call-consequence.js";
 import { describeCallTarget } from "../../domains/safety/call-target.js";
@@ -30,6 +30,7 @@ import { COMMAND_CONSEQUENCE_MAX_SEVERE } from "../../domains/safety/command-con
 import type { DecisionPresentation, TrustedDecisionFacts } from "../../domains/safety/decision-presentation.js";
 import {
 	classifyDecisionPresentation,
+	decisionActionClass,
 	decisionFactsForPermission,
 } from "../../domains/safety/decision-presentation.js";
 import type { ContextLedger } from "../../domains/session/context-ledger.js";
@@ -114,9 +115,11 @@ import {
 	ACP_MAX_TOOL_CALL_ID_BYTES,
 	ACP_MAX_TOOL_PROGRESS_FRAMES_PER_CALL,
 	ACP_MIN_TOOL_PROGRESS_INTERVAL_MS,
+	ACP_PERMISSION_WITHDRAW_METHOD,
 	ACP_SESSION_META_KEY,
 	ACP_TOOL_PROGRESS_META_KEY,
 	ACP_USAGE_META_KEY,
+	ACP_WORKER_ASK_META_KEY,
 	ACP_WORKER_PERMISSIONS_META_KEY,
 } from "./types.js";
 import {
@@ -361,6 +364,11 @@ export interface ClioAcpServerOptions {
 	 * `clio-coder/interviews`. Absent means the host asks nobody.
 	 */
 	interviews?: AcpInterviewChannel;
+	/**
+	 * Answers a dispatched worker's permission ask on the operator's behalf. Absent
+	 * means worker asks are never forwarded, whatever the client advertises.
+	 */
+	workerPermissions?: { resolve(runId: string, requestId: string, decision: "approve" | "deny"): void };
 	/** Resolves the first queued workspace request after every handler is installed. */
 	onReady?: () => void;
 	/** Initial effective next-turn route captured when a session is bound. */
@@ -1900,6 +1908,262 @@ function safeProbeReason(
 	return status.available && reachable ? null : "unreachable";
 }
 
+/** The host side of a forwarded worker ask: the dispatch domain's answer path and the open tool call it binds to. */
+interface AcpWorkerAskPort {
+	/** True once the client advertised `clio-coder/workerPermissions` at initialize. */
+	enabled: () => boolean;
+	/** Settles the worker's parked ask. Throws when the run no longer accepts a decision. */
+	resolve: (runId: string, requestId: string, decision: "approve" | "deny") => void;
+	/** The wire id of the open tool call this run belongs to, else the newest open one, else null. */
+	bindToolCall: (runId: string) => string | null;
+	/** Tells the client an ask it still holds is no longer waiting. */
+	withdraw: (sessionId: string, requestId: string) => void;
+}
+
+/** The one client-facing ask in flight, shared by main-agent and worker asks. */
+interface AcpPermissionQueue {
+	chain: Promise<void>;
+	cancel: ((reason: string) => void) | null;
+}
+
+/** How often a worker ask retries binding to an open tool call while the model is between calls. */
+const ACP_WORKER_ASK_BIND_POLL_MS = 200;
+const ACP_MAX_WORKER_ASK_ID_BYTES = 128;
+
+interface AcpWorkerAsk {
+	requestId: string;
+	runId: string;
+	agentId: string;
+	tool: string;
+	payload: PermissionRequestedPayload;
+}
+
+/** A live worker escalation, read the way the terminal's overlay reads it. */
+function workerAskOf(payload: PermissionRequestedPayload): AcpWorkerAsk | null {
+	if (payload.escalation !== true) return null;
+	const origin = typeof payload.origin === "string" ? payload.origin : undefined;
+	const legacyWorkerEvent = origin === undefined && typeof payload.requestedBy === "string";
+	if (!(origin?.startsWith("worker:") || legacyWorkerEvent)) return null;
+	const requestId = safeStoredIdentifier(payload.requestId, ACP_MAX_WORKER_ASK_ID_BYTES);
+	const runId = safeStoredIdentifier(
+		typeof payload.requestedBy === "string" ? payload.requestedBy : origin?.slice("worker:".length),
+		ACP_MAX_WORKER_ASK_ID_BYTES,
+	);
+	if (requestId === null || runId === null) return null;
+	return {
+		requestId,
+		runId,
+		agentId: safeStoredIdentifier(payload.agentId, ACP_MAX_WORKER_ASK_ID_BYTES) ?? "worker",
+		tool: safeStoredString(payload.tool, 64, "unknown"),
+		payload,
+	};
+}
+
+function workerAskAxis(
+	payload: PermissionRequestedPayload,
+): { kind: "safety-net"; ruleId: string } | { kind: "autonomy"; level: string } {
+	const axisId = typeof payload.axis === "string" ? payload.axis : undefined;
+	if (axisId?.startsWith("net:")) return { kind: "safety-net", ruleId: axisId.slice("net:".length) || "unknown" };
+	if (axisId?.startsWith("autonomy:")) {
+		return { kind: "autonomy", level: axisId.slice("autonomy:".length) || DEFAULT_AUTONOMY_LEVEL };
+	}
+	if (typeof payload.ruleId === "string" && payload.ruleId.length > 0) {
+		return { kind: "safety-net", ruleId: payload.ruleId };
+	}
+	return { kind: "autonomy", level: DEFAULT_AUTONOMY_LEVEL };
+}
+
+/**
+ * Puts a dispatched worker's escalation in front of an attended ACP client as
+ * `session/request_permission`, bound to the tool call the run belongs to, and
+ * answers the worker with what the person chose. The ask carries the worker's
+ * provenance beside the decision facts so a client can say whose request it is
+ * and who may discharge it. An ask nobody can be shown (no open tool call
+ * before the worker's own deadline) is left to the worker's timeout fallback
+ * rather than denied in the operator's name.
+ */
+function installWorkerAskBridge(
+	input: {
+		transport: AcpJsonRpcPeerTransport;
+		bus?: SafeEventBus;
+		toolCallSnapshot: (wireId: string) => AcpToolCallSnapshot | null;
+		activeSessionId: () => string | null;
+		permissionTimeoutMs: number;
+		cancelActivePrompt: (reason: string) => void;
+		workerAsks?: AcpWorkerAskPort;
+		diagnostics?: (line: string) => void;
+	},
+	queue: AcpPermissionQueue,
+): () => void {
+	const workers = input.workerAsks;
+	const bus = input.bus;
+	if (workers === undefined || bus === undefined) return () => {};
+	// Asks still queued or on the client, each with the callback that marks it
+	// settled elsewhere (the worker timed out, the run ended, the owner revoked it).
+	const waiting = new Map<string, () => void>();
+	const unregisterRequested = bus.on(BusChannels.PermissionRequested, (payload: PermissionRequestedPayload) => {
+		if (!workers.enabled()) return;
+		const ask = workerAskOf(payload);
+		if (ask === null || waiting.has(ask.requestId)) return;
+		let settledElsewhere = false;
+		let signalSettled: () => void = () => {};
+		const settled = new Promise<{ kind: "settled" }>((resolve) => {
+			signalSettled = () => resolve({ kind: "settled" });
+		});
+		waiting.set(ask.requestId, () => {
+			settledElsewhere = true;
+			signalSettled();
+		});
+		const answerWorker = (decision: "approve" | "deny"): void => {
+			try {
+				workers.resolve(ask.runId, ask.requestId, decision);
+			} catch (err) {
+				// The run ended or the ask expired while the person was deciding; the
+				// worker already applied its fallback, so a late answer has no one to reach.
+				input.diagnostics?.(
+					`worker permission ${ask.requestId} could not be answered: ${err instanceof Error ? err.message : String(err)}`,
+				);
+			}
+		};
+		const wait = (ms: number): Promise<void> =>
+			new Promise((resolve) => {
+				const timer = setTimeout(resolve, ms);
+				timer.unref?.();
+			});
+		const run = async (): Promise<void> => {
+			try {
+				if (settledElsewhere) return;
+				const askWindowMs = Math.min(
+					input.permissionTimeoutMs,
+					typeof payload.timeoutMs === "number" && payload.timeoutMs > 0 ? payload.timeoutMs : input.permissionTimeoutMs,
+				);
+				const giveUpAt = Date.now() + askWindowMs;
+				let sessionId: string | null = null;
+				let toolCallId: string | null = null;
+				// The model is often between tool calls when a worker asks, so binding
+				// retries until the ask's own window closes instead of failing at once.
+				for (;;) {
+					sessionId = input.activeSessionId();
+					toolCallId = sessionId === null ? null : workers.bindToolCall(ask.runId);
+					if (toolCallId !== null || settledElsewhere || Date.now() >= giveUpAt) break;
+					await Promise.race([wait(ACP_WORKER_ASK_BIND_POLL_MS), settled]);
+				}
+				const snapshot = toolCallId === null ? null : input.toolCallSnapshot(toolCallId);
+				if (settledElsewhere) return;
+				if (sessionId === null || toolCallId === null || snapshot === null) {
+					input.diagnostics?.(`worker permission ${ask.requestId} had no open tool call to ask under`);
+					return;
+				}
+				const facts = decisionFactsForPermission({
+					tool: ask.tool,
+					actionClass: decisionActionClass(payload.actionClass),
+					axis: workerAskAxis(payload),
+					origin: { kind: "worker", agentId: ask.agentId, runId: ask.runId },
+				});
+				const presentation = classifyDecisionPresentation(facts);
+				const approveAction = presentation.requiredActions.find((action) => action.id === "approve-once");
+				const denyAction = presentation.requiredActions.find((action) => action.id === "deny");
+				const stopAction = presentation.requiredActions.find((action) => action.id === "stop");
+				const consequence = Array.isArray(payload.consequence)
+					? payload.consequence.filter((line): line is string => typeof line === "string")
+					: [];
+				const workerMeta = {
+					version: 1,
+					requestId: ask.requestId,
+					requestedBy: ask.runId,
+					agentId: ask.agentId,
+					...(payload.approvalAuthority === "main" || payload.approvalAuthority === "operator"
+						? { approvalAuthority: payload.approvalAuthority }
+						: {}),
+					forwardedByMain: payload.forwardedByMain === true,
+					fallback: payload.fallback === "fail" ? "fail" : "deny",
+					...(typeof payload.timeoutMs === "number" && Number.isFinite(payload.timeoutMs)
+						? { timeoutMs: Math.max(0, Math.floor(payload.timeoutMs)) }
+						: {}),
+				};
+				const cancelled = new Promise<{ kind: "cancelled"; reason: string }>((resolveCancelled) => {
+					queue.cancel = (reason: string) => resolveCancelled({ kind: "cancelled", reason });
+				});
+				const answered = Promise.resolve()
+					.then(() =>
+						input.transport.request<AcpRequestPermissionResponse>(
+							"session/request_permission",
+							{
+								sessionId,
+								toolCall: {
+									toolCallId,
+									title: snapshot.title,
+									kind: snapshot.kind,
+									status: "in_progress",
+									rawInput: snapshot.rawInput,
+									...(snapshot.locations !== undefined ? { locations: snapshot.locations } : {}),
+								},
+								options: [
+									{ optionId: "allow-once", name: approveAction?.label ?? "Approve once", kind: "allow_once" },
+									{ optionId: "reject-once", name: denyAction?.label ?? "Deny this request", kind: "reject_once" },
+									{ optionId: "reject-and-stop", name: stopAction?.label ?? "Deny and stop", kind: "reject_once" },
+								],
+								_meta: {
+									...decisionMeta(facts, presentation, typeof payload.target === "string" ? payload.target : "", consequence),
+									[ACP_WORKER_ASK_META_KEY]: workerMeta,
+								},
+							},
+							input.permissionTimeoutMs,
+						),
+					)
+					.then(
+						(response) => ({ kind: "response" as const, response }),
+						(err: unknown) => ({ kind: "failed" as const, err }),
+					);
+				try {
+					const outcome = await Promise.race([answered, cancelled, settled]);
+					if (outcome.kind === "settled") {
+						workers.withdraw(sessionId, ask.requestId);
+						return;
+					}
+					if (outcome.kind === "cancelled") {
+						answerWorker("deny");
+						return;
+					}
+					if (outcome.kind === "failed") {
+						if (outcome.err instanceof AcpTimeoutError) workers.withdraw(sessionId, ask.requestId);
+						input.diagnostics?.(
+							`worker permission ${ask.requestId} failed: ${outcome.err instanceof Error ? outcome.err.message : String(outcome.err)}`,
+						);
+						answerWorker("deny");
+						return;
+					}
+					const answer = outcome.response.outcome;
+					if (answer.outcome === "selected" && answer.optionId === "allow-once") {
+						answerWorker("approve");
+						return;
+					}
+					answerWorker("deny");
+					// The terminal's Deny and stop: the worker is denied first, then the
+					// main turn the person asked to stop being asked in is cancelled.
+					if (answer.outcome === "selected" && answer.optionId === "reject-and-stop") {
+						input.cancelActivePrompt("ACP client denied a worker request and stopped the run");
+					}
+				} finally {
+					queue.cancel = null;
+				}
+			} finally {
+				waiting.delete(ask.requestId);
+			}
+		};
+		queue.chain = queue.chain.then(run, run);
+	});
+	// Any resolution of an ask this bridge has not answered itself means the
+	// person's card is stale: the worker timed out, the run ended, or the owner revoked it.
+	const unregisterResolved = bus.on(BusChannels.PermissionResolved, (payload) => {
+		if (typeof payload.requestId === "string") waiting.get(payload.requestId)?.();
+	});
+	return () => {
+		unregisterRequested();
+		unregisterResolved();
+	};
+}
+
 interface AcpPermissionBridge {
 	unregister(): void;
 	/** Settles the outstanding permission request, if any, as cancellation. */
@@ -1934,7 +2198,7 @@ function decisionCopy(value: string): string {
 function decisionMeta(
 	facts: TrustedDecisionFacts,
 	presentation: DecisionPresentation,
-	call: ClassifierCall,
+	callTarget: string,
 	consequence: ReadonlyArray<string>,
 ): Record<string, unknown> {
 	const axis =
@@ -1951,7 +2215,7 @@ function decisionMeta(
 					runId: decisionCopy(facts.origin.runId),
 				}
 			: { kind: facts.origin.kind };
-	const target = decisionCopy(describeCallTarget(call.tool, call.args));
+	const target = decisionCopy(callTarget);
 	// What a bash command would do, one sentence per step. The sentences are
 	// written by the host from the full command, so a client renders them beside
 	// the generic consequence copy instead of re-deriving them from `target`,
@@ -2005,10 +2269,17 @@ function installPermissionBridge(input: {
 	permissionTimeoutMs: number;
 	expireActivePrompt: () => void;
 	cancelActivePrompt: (reason: string) => void;
+	/** Forwarded worker asks; absent leaves them to the worker's own timeout fallback. */
+	workerAsks?: AcpWorkerAskPort;
+	diagnostics?: (line: string) => void;
 }): AcpPermissionBridge {
-	if (!input.toolRegistry) return { unregister: () => {}, cancelPending: () => {} };
-	let pendingCancel: ((reason: string) => void) | null = null;
-	let chain = Promise.resolve();
+	// One client-facing ask at a time: a main-agent ask and a forwarded worker ask
+	// share this queue because the client holds a single pending permission.
+	const queue: AcpPermissionQueue = { chain: Promise.resolve(), cancel: null };
+	const unregisterWorkerAsks = installWorkerAskBridge(input, queue);
+	if (!input.toolRegistry) {
+		return { unregister: unregisterWorkerAsks, cancelPending: (reason) => queue.cancel?.(reason) };
+	}
 	const queuedRequestIds = new Set<string>();
 	const queuedRequestDetails = new Map<string, { tool: string; actionClass: string }>();
 	const unregister = input.toolRegistry.onPermissionRequired((call, decision, meta) => {
@@ -2127,7 +2398,7 @@ function installPermissionBridge(input: {
 			// the outstanding request against a local deferral. The client's late
 			// answer resolves a promise nothing is waiting on any more.
 			const cancelled = new Promise<{ kind: "cancelled"; reason: string }>((resolveCancelled) => {
-				pendingCancel = (reason: string) => resolveCancelled({ kind: "cancelled", reason });
+				queue.cancel = (reason: string) => resolveCancelled({ kind: "cancelled", reason });
 			});
 			try {
 				const answered = Promise.resolve()
@@ -2168,7 +2439,12 @@ function installPermissionBridge(input: {
 									},
 								],
 								_meta: {
-									...decisionMeta(facts, presentation, call, describeMainCallConsequences(call)),
+									...decisionMeta(
+										facts,
+										presentation,
+										describeCallTarget(call.tool, call.args),
+										describeMainCallConsequences(call),
+									),
 									// The plan admission rendered, whose hash a plan-scale run seals.
 									...(meta.dispatchPlan !== undefined
 										? { [ACP_DISPATCH_PLAN_META_KEY]: projectDispatchPlanMeta(meta.dispatchPlan) }
@@ -2264,17 +2540,20 @@ function installPermissionBridge(input: {
 				queuedRequestDetails.clear();
 				input.toolRegistry?.cancelParkedCalls(message);
 			} finally {
-				pendingCancel = null;
+				queue.cancel = null;
 				queuedRequestIds.delete(meta.requestId);
 				queuedRequestDetails.delete(meta.requestId);
 			}
 		};
-		chain = chain.then(run, run);
+		queue.chain = queue.chain.then(run, run);
 	});
 	return {
-		unregister,
+		unregister: () => {
+			unregister();
+			unregisterWorkerAsks();
+		},
 		cancelPending: (reason: string) => {
-			pendingCancel?.(reason);
+			queue.cancel?.(reason);
 		},
 	};
 }
@@ -2530,7 +2809,8 @@ export function createAcpHandshake(features: AcpHandshakeFeatures): AcpHandshake
 			workerPermissionsEnabled =
 				features.workerPermissions === true &&
 				workerPermissionsRequest !== null &&
-				workerPermissionsRequest.version === 1;
+				workerPermissionsRequest.version === 1 &&
+				workerPermissionsRequest.withdraw === ACP_PERMISSION_WITHDRAW_METHOD;
 			const canLoadSession = features.loadSession;
 			initialized = true;
 			return {
@@ -2771,6 +3051,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 			usage: options.usage !== undefined,
 			images: options.expandPrompt !== undefined,
 			interviews: options.interviews !== undefined,
+			workerPermissions: options.workerPermissions !== undefined,
 		});
 	const workspaceInstanceId = handshake.workspaceInstanceId;
 	const now = options.now ?? Date.now;
@@ -2829,6 +3110,28 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 		toolCallSnapshot: (wireId) =>
 			activePromptState === null ? null : (activePromptState.toolCallSnapshots.get(wireId) ?? null),
 		permissionTimeoutMs,
+		...(options.diagnostics !== undefined ? { diagnostics: options.diagnostics } : {}),
+		...(options.workerPermissions !== undefined
+			? {
+					workerAsks: {
+						enabled: () => handshake.initialized && handshake.workerPermissionsEnabled,
+						resolve: options.workerPermissions.resolve,
+						bindToolCall: (runId: string) => {
+							const active = activePromptState;
+							if (active === null) return null;
+							let attributed: string | null = null;
+							for (const wireId of active.openToolCalls) {
+								if (active.toolCallSnapshots.get(wireId)?.agents?.some((agent) => agent.runId === runId)) {
+									attributed = wireId;
+								}
+							}
+							return attributed ?? newestOpenToolCallId(active);
+						},
+						withdraw: (sessionId: string, requestId: string) =>
+							options.transport.notify(ACP_PERMISSION_WITHDRAW_METHOD, { sessionId, requestId }),
+					},
+				}
+			: {}),
 		expireActivePrompt: () => {
 			if (activePromptState === null) return;
 			activePromptState.permissionExpired = true;

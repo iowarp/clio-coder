@@ -21,7 +21,9 @@ import {
 	SAFETY_POSTURE,
 	safetyFacts,
 	waitedSentence,
+	workerAskRows,
 } from "../client/chat/approval-model.js";
+import { Permissions } from "../server/acp/permissions.js";
 import {
 	FLEET_RUN_CAP,
 	FLEET_STATE_LABELS,
@@ -564,4 +566,63 @@ test("a single-run dispatch says one approval starts one run, and an older agent
 	assert.equal(single.kind === "plan" && single.more, 0);
 	const legacy = gatedPreview({ title: "dispatch", toolKind: "other", rawInput: { agent: "scout", task: "Survey" } });
 	assert.deepEqual(legacy, { kind: "summary", label: "Dispatch", summary: "scout · Survey" });
+});
+
+// ---- a dispatched worker's ask, forwarded by the agent -----------------------------------------
+
+const WORKER = {
+	requestId: "req-1",
+	requestedBy: "run-7",
+	agentId: "scout",
+	approvalAuthority: "operator",
+	forwardedByMain: false,
+	fallback: "deny",
+	timeoutMs: 60_000,
+} as const;
+
+test("a forwarded worker ask names the worker, who may discharge it, and what happens unanswered", () => {
+	const rows = workerAskRows(WORKER);
+	assert.deepEqual(
+		rows.map((row) => row.term),
+		["Worker", "Authority", "If unanswered"],
+	);
+	assert.equal(rows[0]?.value, "scout (run run-7)");
+	assert.match(rows[1]?.value ?? "", /^Operator only\./);
+	assert.equal(rows[2]?.value, "The worker is denied after 60 seconds.");
+	const forwarded = workerAskRows({ ...WORKER, approvalAuthority: "main", forwardedByMain: true, fallback: "fail" });
+	assert.match(forwarded[1]?.value ?? "", /below yolo/);
+	assert.equal(forwarded[2]?.value, "The worker fails the call after 60 seconds.");
+	assert.deepEqual(workerAskRows(undefined), []);
+});
+
+test("a worker ask is read from the agent's meta, answered once, and withdrawn without a decision", async () => {
+	const published: Array<[string, Permission]> = [];
+	const permissions = new Permissions(
+		(type, permission) => published.push([type, permission]),
+		async () => {},
+	);
+	const call = { toolCallId: "dispatch-1", title: "dispatch", kind: "other", rawInput: { agent: "scout" } };
+	const timeline = [
+		{ turnId: "turn-1", toolCallId: "dispatch-1", status: "in_progress", title: "dispatch", toolKind: "other", rawInput: call.rawInput },
+	] as never;
+	const ask = {
+		sessionId: "s-1",
+		toolCall: { ...call, status: "in_progress" },
+		options: [
+			{ optionId: "allow-once", kind: "allow_once", name: "Approve once" },
+			{ optionId: "reject-once", kind: "reject_once", name: "Deny" },
+		],
+		_meta: { "clio-coder/workerAsk": { version: 1, ...WORKER, unknownFutureField: "ignored" } },
+	};
+	const response = permissions.request("s-1", "turn-1", ask, timeline);
+	assert.deepEqual(published[0]?.[1].worker, WORKER);
+	// A second ask while one waits is the jam a stale card would cause; withdrawing the first clears it.
+	permissions.withdraw("some-other-request");
+	assert.equal(published.length, 1);
+	permissions.withdraw("req-1");
+	assert.deepEqual(await response, { outcome: { outcome: "cancelled" } });
+	assert.equal(published.at(-1)?.[1].status, "cancelled");
+	const next = permissions.request("s-1", "turn-1", { ...ask, _meta: {} }, timeline);
+	permissions.decide(published.at(-1)?.[1].id ?? "", "allow-once");
+	assert.deepEqual(await next, { outcome: { outcome: "selected", optionId: "allow-once" } });
 });

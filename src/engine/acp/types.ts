@@ -49,7 +49,17 @@ export const ACP_COMMANDS_INVOKE_METHOD = "_clio-coder/commands/invoke";
 export const ACP_INTERVIEWS_META_KEY = "clio-coder/interviews";
 export const ACP_INTERVIEW_REQUEST_METHOD = "_clio-coder/interview/request";
 export const ACP_INTERVIEW_CANCEL_METHOD = "_clio-coder/interview/cancel";
+/**
+ * `clio-coder/workerPermissions` asks the host to forward a dispatched worker's
+ * permission ask as `session/request_permission`. The client must also name the
+ * notification it takes a withdrawn ask on, because the wire has no way to cancel
+ * one request: an ask the worker already gave up on would otherwise sit on the
+ * client and refuse the next real approval.
+ */
 export const ACP_WORKER_PERMISSIONS_META_KEY = "clio-coder/workerPermissions";
+export const ACP_PERMISSION_WITHDRAW_METHOD = "_clio-coder/permission/withdraw";
+/** Provenance a forwarded worker ask carries beside the decision facts. */
+export const ACP_WORKER_ASK_META_KEY = "clio-coder/workerAsk";
 
 /**
  * Wire bounds for one prompt turn (CONTRACT C001 §3). A client renders every

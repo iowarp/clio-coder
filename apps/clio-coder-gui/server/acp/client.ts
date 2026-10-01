@@ -19,6 +19,7 @@ import { ExtensionsCapability, LibraryCapability } from "../../contracts/extensi
 import { FleetCapability } from "../../contracts/fleet-run.js";
 import { HandoffCapability } from "../../contracts/handoff.js";
 import { INTERVIEW_CANCEL_METHOD, INTERVIEW_REQUEST_METHOD, InterviewCapability } from "../../contracts/interviews.js";
+import { PERMISSION_WITHDRAW_METHOD } from "../../contracts/permissions.js";
 import type { SessionConfig } from "../../contracts/session-config.js";
 import { ACP_EVENT_KINDS, Usage } from "../../contracts/sessions.js";
 import { UsageCapability } from "../../contracts/usage.js";
@@ -164,6 +165,9 @@ export class AcpClient {
 					// the whole reason the stream is an opt-in.
 					"clio-coder/toolProgress": { version: 1 },
 					"clio-coder/interviews": { version: 1, request: INTERVIEW_REQUEST_METHOD, cancel: INTERVIEW_CANCEL_METHOD },
+					// A dispatched worker's escalation reaches the approval card as a permission request,
+					// and a withdrawn one retires the card, because the wire cannot cancel a single ask.
+					"clio-coder/workerPermissions": { version: 1, withdraw: PERMISSION_WITHDRAW_METHOD },
 				},
 			},
 		});

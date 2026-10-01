@@ -34,6 +34,7 @@ import {
 	KEYBOARD_HINT,
 	NO_DECISION_FACTS,
 	safetyFacts,
+	workerAskRows,
 } from "./approval-model.js";
 import "./approval.css";
 
@@ -288,7 +289,7 @@ function ApprovalCard({ sessionId, permission, call, answer, eyebrow, hint, vari
 	const timings = deriveApprovalTimings(permission, now);
 	const facts = safetyFacts(permission, call?.locations, timings);
 	const chips = decisionChips(permission.decision);
-	const rows = decisionRows(permission.decision);
+	const rows = [...decisionRows(permission.decision), ...workerAskRows(permission.worker)];
 	return (
 		<article
 			className={`approval-card approval-card--${variant}`}

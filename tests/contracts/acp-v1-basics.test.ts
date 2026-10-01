@@ -181,7 +181,10 @@ test("ACP counts a client as attended only when it advertises interviews at init
 			protocolVersion: 1,
 			...(meta !== undefined ? { clientCapabilities: { _meta: meta } } : {}),
 		});
-		return { handshake, announced: (response.agentCapabilities._meta as Record<string, unknown>)["clio-coder/interviews"] };
+		return {
+			handshake,
+			announced: (response.agentCapabilities?._meta as Record<string, unknown> | undefined)?.["clio-coder/interviews"],
+		};
 	};
 	const plain = initialize(undefined);
 	strictEqual(plain.handshake.interviewsEnabled, false);
@@ -189,13 +192,18 @@ test("ACP counts a client as attended only when it advertises interviews at init
 	strictEqual(plain.announced, undefined);
 	const attended = initialize({
 		"clio-coder/interviews": { version: 1, request },
-		"clio-coder/workerPermissions": { version: 1 },
+		"clio-coder/workerPermissions": { version: 1, withdraw: "_clio-coder/permission/withdraw" },
 	});
 	strictEqual(attended.handshake.interviewsEnabled, true);
 	strictEqual(attended.handshake.workerPermissionsEnabled, true);
 	deepStrictEqual(attended.announced, { version: 1, request, cancel: "_clio-coder/interview/cancel" });
+	// A client that cannot take a withdrawn ask would be left holding a stale card, so it is not asked.
+	strictEqual(initialize({ "clio-coder/workerPermissions": { version: 1 } }).handshake.workerPermissionsEnabled, false);
 	// A client naming a request method this host does not speak is not attended.
-	strictEqual(initialize({ "clio-coder/interviews": { version: 1, request: "other/request" } }).handshake.interviewsEnabled, false);
+	strictEqual(
+		initialize({ "clio-coder/interviews": { version: 1, request: "other/request" } }).handshake.interviewsEnabled,
+		false,
+	);
 });
 
 test("ACP interview channel maps the client's reply, its cancel and a turn abort onto ask_user results", async () => {

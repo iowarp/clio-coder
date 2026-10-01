@@ -43,6 +43,25 @@ export const PermissionDecisionFacts = Type.Object(
 	closed,
 );
 export type PermissionDecisionFacts = Static<typeof PermissionDecisionFacts>;
+export const PERMISSION_WITHDRAW_METHOD = "_clio-coder/permission/withdraw";
+/**
+ * Who a forwarded worker ask is from and who may discharge it, carried under `clio-coder/workerAsk`.
+ * Identifiers and enums only: nothing the worker's model wrote crosses here, which is what lets the
+ * card state it as an authority fact.
+ */
+export const WorkerAskFacts = Type.Object(
+	{
+		requestId: Type.String({ maxLength: 128 }),
+		requestedBy: Type.String({ maxLength: 128 }),
+		agentId: Type.String({ maxLength: 128 }),
+		approvalAuthority: Type.Optional(Type.Union([Type.Literal("main"), Type.Literal("operator")])),
+		forwardedByMain: Type.Boolean(),
+		fallback: Type.Union([Type.Literal("deny"), Type.Literal("fail")]),
+		timeoutMs: Type.Optional(Type.Integer({ minimum: 0 })),
+	},
+	closed,
+);
+export type WorkerAskFacts = Static<typeof WorkerAskFacts>;
 const planField = Type.String({ maxLength: 300 });
 /**
  * The dispatch plan admission rendered, carried under `clio-coder/dispatchPlan`. A plan-scale
@@ -105,6 +124,8 @@ export const Permission = Type.Object(
 		decision: Type.Optional(PermissionDecisionFacts),
 		/** Present for a dispatch ask from an agent that reports the plan it admitted. */
 		plan: Type.Optional(DispatchPlanFacts),
+		/** Present when the ask is a dispatched worker's escalation forwarded by the agent. */
+		worker: Type.Optional(WorkerAskFacts),
 		/** True when the agent offered a third, turn-ending refusal for this ask. */
 		canStopTurn: Type.Boolean(),
 	},

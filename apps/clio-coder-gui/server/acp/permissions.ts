@@ -5,6 +5,7 @@ import {
 	type Permission,
 	type PermissionDecision,
 	PermissionDecisionFacts,
+	WorkerAskFacts,
 } from "../../contracts/permissions.js";
 import type { TimelineItem } from "../../contracts/sessions.js";
 import type { AcpRequestPermissionResponse } from "../clio/http-shims.js";
@@ -41,6 +42,13 @@ function dispatchPlan(meta: unknown): Permission["plan"] {
 	if (value === undefined) return undefined;
 	const projected = Value.Clean(DispatchPlanFacts, structuredClone(value));
 	return Value.Check(DispatchPlanFacts, projected) ? projected : undefined;
+}
+/** The forwarded worker ask's provenance, read as leniently as the decision facts. */
+function workerAsk(meta: unknown): Permission["worker"] {
+	const value = record(meta)["clio-coder/workerAsk"];
+	if (value === undefined) return undefined;
+	const projected = Value.Clean(WorkerAskFacts, structuredClone(value));
+	return Value.Check(WorkerAskFacts, projected) ? projected : undefined;
 }
 export class Permissions {
 	private pending: Pending | undefined;
@@ -94,6 +102,7 @@ export class Permissions {
 		const now = Date.now();
 		const facts = decisionFacts(params._meta);
 		const plan = dispatchPlan(params._meta);
+		const worker = workerAsk(params._meta);
 		const permission: Permission = {
 			id: randomUUID(),
 			turnId,
@@ -107,6 +116,7 @@ export class Permissions {
 			canStopTurn: stop !== undefined,
 			...(facts ? { decision: facts } : {}),
 			...(plan ? { plan } : {}),
+			...(worker ? { worker } : {}),
 		};
 		return new Promise<AcpRequestPermissionResponse>((resolve) => {
 			const pending: Pending = {
@@ -152,6 +162,16 @@ export class Permissions {
 		const optionId =
 			decision === "allow-once" ? pending.allow : decision === "reject-and-stop" ? pending.stop : pending.reject;
 		pending.resolve({ outcome: { outcome: "selected", optionId: optionId as string } });
+	}
+	/**
+	 * The agent says a forwarded worker ask stopped waiting (the worker timed out, its run ended, or
+	 * its owner revoked it). The card leaves with the same status a cancelled one has, and the parked
+	 * response settles as cancelled so the next approval is not refused as a second pending one.
+	 */
+	withdraw(requestId: unknown) {
+		const pending = this.pending;
+		if (!pending || typeof requestId !== "string" || pending.value.worker?.requestId !== requestId) return;
+		this.cancel();
 	}
 	cancel() {
 		const pending = this.pending;
