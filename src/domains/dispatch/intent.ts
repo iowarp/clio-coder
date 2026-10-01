@@ -1,5 +1,6 @@
 import path from "node:path";
 import { normalizePathBoundaryEntry, PATH_BOUNDARY_MAX_ENTRIES, PathBoundaryError } from "../../core/path-boundary.js";
+import { admissionDiagnostic } from "./admission-diagnostic.js";
 import { type DispatchPathProvenanceEntry, declaredIntentPathProvenance } from "./path-scope.js";
 
 export const DISPATCH_INTENT_PATH_LIST_CAP = PATH_BOUNDARY_MAX_ENTRIES;
@@ -56,7 +57,7 @@ function compareCodepoints(left: string, right: string): number {
 }
 
 function fail(reason: string, message: string): DispatchIntentNormalizationResult {
-	return { ok: false, reason, message };
+	return { ok: false, reason, message: admissionDiagnostic(message) };
 }
 
 function checkedPathText(value: unknown, field: string, index: number): string | DispatchIntentNormalizationResult {

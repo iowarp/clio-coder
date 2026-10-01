@@ -460,6 +460,29 @@ describe("dispatch admission boundary", () => {
 		match(refusal.message, /host commits worktree tasks/);
 	});
 
+	it("bounds admission errors and escapes control characters from declared paths", () => {
+		const normalized = normalizeDispatchIntent(
+			{ version: 2, write_roots: ["src"], expected_outputs: ["bad\u001b[2Jname\u009b31m"] },
+			new Map(),
+		);
+		ok(normalized.ok);
+		const findings = classifyDispatchIntentCompatibility({
+			intent: normalized.intent,
+			writeRoots: [`\u001b[2J${"x".repeat(20_000)}`],
+		});
+		for (const finding of findings) {
+			ok(!finding.message.includes("\u001b") && !finding.message.includes("\u009b"));
+			ok(Buffer.byteLength(finding.message, "utf8") <= 4096);
+		}
+		const outside = findings.find((finding) => finding.code === "intent_outputs_outside_write_roots");
+		ok(outside);
+		ok(outside.message.includes("\\u{1b}"));
+		const malformed = normalizeDispatchIntent({ [`\u001b[2J${"x".repeat(20_000)}`]: true }, new Map());
+		ok(!malformed.ok);
+		ok(!malformed.message.includes("\u001b"));
+		ok(Buffer.byteLength(malformed.message, "utf8") <= 4096);
+	});
+
 	it("infers a path from a briefing that quotes an import specifier instead of refusing the dispatch", () => {
 		// "./parser.js" in prose is the same repository path without the prefix;
 		// a live orchestrator lost two dispatch rounds to the dot-segment refusal.

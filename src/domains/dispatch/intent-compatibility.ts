@@ -31,6 +31,7 @@
  */
 
 import { pathBoundaryCovers, resolvePathBoundary, writeRootsCover } from "../../core/path-boundary.js";
+import { admissionDiagnostic } from "./admission-diagnostic.js";
 import { type DispatchIntent, isDispatchIntent } from "./intent.js";
 
 /** The intent shape this build speaks. Bump with the `DispatchIntent` interface. */
@@ -92,7 +93,7 @@ function finding(
 	decision: DispatchIntentCompatibilityDecision,
 	detail: string,
 ): DispatchIntentCompatibilityFinding {
-	return { code, decision, message: `${code}: ${detail}` };
+	return { code, decision, message: admissionDiagnostic(`${code}: ${detail}`) };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
