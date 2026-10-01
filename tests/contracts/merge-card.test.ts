@@ -1,6 +1,7 @@
 import { deepStrictEqual, match, strictEqual } from "node:assert/strict";
 import { test } from "node:test";
 import { askMergeCard } from "../../src/domains/dispatch/merge-card.js";
+import { validationClause } from "../../src/domains/evidence/trust-projection.js";
 import { adaptRunReceiptValidationStatus } from "../../src/domains/evidence/trust-status.js";
 import type { AskUserHandler, AskUserQuestion, AskUserResult } from "../../src/tools/ask-user.js";
 
@@ -116,4 +117,27 @@ test("a host failure also observed on the base leaves quality unknown, not faile
 		}).state;
 	strictEqual(status({ status: "failed", base: "base-sha", exitCode: 1 }), "unknown");
 	strictEqual(status({ status: "passed", base: "base-sha", exitCode: 0 }), "failed");
+});
+
+test("a confirmed baseline failure is explained by the shared validation projection", () => {
+	const validationGrounding = adaptRunReceiptValidationStatus({
+		runId: "baseline-run",
+		hostVerification: {
+			status: "rejected",
+			checks: [
+				{
+					check: "test",
+					argv: ["npm", "test"],
+					cwd: ".",
+					exitCode: 1,
+					durationMs: 10,
+					memo: false,
+					outputTail: "failure",
+					baseComparison: { status: "failed", base: "base-sha", exitCode: 1 },
+				},
+			],
+		},
+	});
+	strictEqual(validationGrounding.state, "unknown");
+	match(validationClause({ validationGrounding }), /also failed on task base; change validation unknown/);
 });

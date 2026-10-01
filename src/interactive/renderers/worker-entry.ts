@@ -12,7 +12,7 @@ import {
 
 /** Bounded worker summaries share the main transcript's output style. */
 
-import { trustStateWord } from "../../domains/evidence/trust-projection.js";
+import { trustStateWord, validationClause } from "../../domains/evidence/trust-projection.js";
 import { retiredIntegrityVersionOf } from "../../domains/evidence/trust-status.js";
 import { WORKER_ACTION_TRAIL_LIMIT, type WorkerAction } from "../../domains/observability/worker-progress.js";
 import { stripDeadToolCallMarkup } from "../../engine/loop-guard.js";
@@ -527,7 +527,7 @@ export function renderWorkerEntryLines(
 	const quality = isPending(entry)
 		? []
 		: railLines(
-				`quality ${trustStateWord("validationGrounding", entry.receipt?.trust?.validationGrounding.state ?? "unknown")}`,
+				`quality ${entry.receipt?.trust ? validationClause(entry.receipt.trust) : "validation unknown"}`,
 				"body",
 				safeWidth,
 			);

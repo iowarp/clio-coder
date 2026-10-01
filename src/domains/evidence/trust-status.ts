@@ -593,11 +593,16 @@ export function adaptRunReceiptValidationStatus(
 	if (receipt === null || receipt === undefined) return absentTrustStatus("artifact_missing");
 	const artifacts = validationArtifacts(receipt);
 	if (receipt.hostVerification?.status === "rejected") {
-		// Every failing host check also failed on the task base (927f072), so the
-		// run did not cause the failure and the validator has no verdict on it.
+		// Every failing host check also failed on the task base, so this
+		// comparison cannot establish a failure caused by the change.
 		const failing = receipt.hostVerification.checks.filter((check) => check.exitCode !== 0);
 		if (failing.length > 0 && failing.every((check) => check.baseComparison?.status === "failed"))
-			return attributed("unknown", receiptSource(receipt), { kind: "validator", id: "host-verification" }, artifacts);
+			return attributed(
+				"unknown",
+				receiptSource(receipt),
+				{ kind: "validator", id: "host-verification-baseline-failed" },
+				artifacts,
+			);
 		return attributed("failed", receiptSource(receipt), { kind: "validator", id: "host-verification" }, artifacts);
 	}
 	if (receipt.hostVerification?.status === "verified") {

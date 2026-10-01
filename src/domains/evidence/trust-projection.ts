@@ -129,9 +129,11 @@ function integrityClause(status: CanonicalTrustStatus): string {
  * The validation clause names its claimant, because "grounded" alone hides
  * the difference between a host-run check and a self-reported one.
  */
-function validationClause(status: CanonicalTrustStatus): string {
+export function validationClause(status: Pick<CanonicalTrustStatus, "validationGrounding">): string {
 	const entry = status.validationGrounding;
 	const word = trustStateWord("validationGrounding", entry.state);
+	if (entry.state === "unknown" && entry.authority.id === "host-verification-baseline-failed")
+		return "check also failed on task base; change validation unknown";
 	if (entry.state === "absent") return word;
 	if (entry.state === "validated" || entry.state === "failed") return `${word} by ${entry.authority.id}`;
 	// A named external system that could not observe the run is worth naming;
