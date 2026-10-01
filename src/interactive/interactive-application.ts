@@ -1324,6 +1324,11 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 		},
 		onShutdownArmedChange: (armed) => {
 			shutdownArmed = armed;
+			// The footer caches its composed text, and arming only requested a frame.
+			// Without a recompose the hint showed when some other refresh happened
+			// to land and the expiry left it standing, so it was never tied to the
+			// double-tap window it announces.
+			footer.refresh();
 		},
 		dispatchBoard: {
 			selectPrevious: () => {
