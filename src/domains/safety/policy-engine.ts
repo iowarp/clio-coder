@@ -930,6 +930,16 @@ function evaluateBashPolicy(
 			policySource: "builtin-command-allowlist",
 		};
 	}
+	if (typeof input === "string" && scanShellLikeDeep(command).some((token) => token.hiddenContent)) {
+		return {
+			kind: "block",
+			reasonCode: "bash-hidden-quoting",
+			ruleId: "bash-hidden-quoting",
+			reasons: ["ANSI-C or locale-quoted words cannot be inspected safely; use literal shell quoting"],
+			policySource: "builtin-command-allowlist",
+			execRecognition: "unrecognized",
+		};
+	}
 	if (
 		typeof input === "string" &&
 		posture !== "confirmed" &&

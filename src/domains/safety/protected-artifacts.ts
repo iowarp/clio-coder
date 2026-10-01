@@ -93,6 +93,7 @@ export interface ShellToken {
 	 * still holds the literal text. Absent for `'~/x'`, `"~/x"` and `'$HOME/x'`.
 	 */
 	homeRelative?: true;
+	hiddenContent?: boolean;
 }
 
 /**
@@ -1437,6 +1438,8 @@ export function scanShellLike(command: string): ShellToken[] {
 	let current = "";
 	let wordStart: number | null = null;
 	let quoted = false;
+	let hiddenContent = false;
+	let ansiQuote = false;
 	let quote: "'" | '"' | null = null;
 
 	let substitutions: string[] = [];
@@ -1445,10 +1448,13 @@ export function scanShellLike(command: string): ShellToken[] {
 		const token: ShellToken = { value: current, operator: false, quoted, start: wordStart, end };
 		if (substitutions.length > 0) token.substitutions = substitutions;
 		if (HOME_REFERENCE_START.test(command.slice(wordStart, end))) token.homeRelative = true;
+		if (hiddenContent) token.hiddenContent = true;
 		tokens.push(token);
 		current = "";
 		wordStart = null;
 		quoted = false;
+		hiddenContent = false;
+		ansiQuote = false;
 		substitutions = [];
 	};
 	const appendBacktick = (open: number): number | null => {
@@ -1465,8 +1471,13 @@ export function scanShellLike(command: string): ShellToken[] {
 		const char = command[index];
 		if (char === undefined) continue;
 		if (quote !== null) {
+			if (ansiQuote && char === "\\" && index + 1 < command.length) {
+				current += char + (command[++index] ?? "");
+				continue;
+			}
 			if (char === quote) {
 				quote = null;
+				ansiQuote = false;
 				continue;
 			}
 			if (quote === '"' && char === "\\" && index + 1 < command.length) {
@@ -1496,6 +1507,14 @@ export function scanShellLike(command: string): ShellToken[] {
 			continue;
 		}
 
+		if (char === "$" && (command[index + 1] === "'" || command[index + 1] === '"')) {
+			wordStart ??= index;
+			quoted = true;
+			hiddenContent = true;
+			quote = command[++index] as "'" | '"';
+			ansiQuote = quote === "'";
+			continue;
+		}
 		if (char === "'" || char === '"') {
 			wordStart ??= index;
 			quoted = true;
