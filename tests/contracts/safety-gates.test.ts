@@ -18,6 +18,7 @@ import { clioConfigDir } from "../../src/core/xdg.js";
 import { classify } from "../../src/domains/safety/action-classifier.js";
 import { evaluateAdmission } from "../../src/domains/safety/admission.js";
 import { mapAutonomy } from "../../src/domains/safety/autonomy.js";
+import { describeCallTarget } from "../../src/domains/safety/call-target.js";
 import type { SafetyContract, SafetyDecision } from "../../src/domains/safety/contract.js";
 import { createSafetyPolicyEngine, type SafetyPolicyEngine } from "../../src/domains/safety/policy-engine.js";
 import { loadProjectSafetyPolicy } from "../../src/domains/safety/project-policy.js";
@@ -26,6 +27,7 @@ import {
 	extractCommandWriteTargets,
 	tokenizeShellLike,
 } from "../../src/domains/safety/protected-artifacts.js";
+import { redactSecretString } from "../../src/domains/safety/redaction.js";
 import { createRunEffectsRecorder } from "../../src/domains/safety/run-effects.js";
 import { AcpToolMediator } from "../../src/engine/acp/tool-mediator.js";
 import { emitClaudeToolPermissionDecision } from "../../src/engine/claude/tool-safety.js";
@@ -544,6 +546,7 @@ describe("safety gate boundary", () => {
 			["npm run build $(cat args)", "allow"],
 			["npm run build && sudo apt update", "allow"],
 			["npm run build && rm -rf /", "block"],
+			[`rm -rf a${"--token".repeat(3000)}`, "block"],
 			["bash -o pipefail -c 'rm -rf /'", "block"],
 			["bash -o pipefail -c 'echo x > /etc/passwd'", "block"],
 			["bash --norc -c 'echo x > /etc/passwd'", "block"],
@@ -557,6 +560,10 @@ describe("safety gate boundary", () => {
 			["gcloud iam policies", "ask"],
 		] as const) {
 			strictEqual(policy.evaluate({ tool: ToolNames.Bash, args: { command } }, "yolo").kind, kind, command);
+			if (command.length > 20_000) {
+				strictEqual(redactSecretString(command), command);
+				strictEqual(describeCallTarget(ToolNames.Bash, { command }), `${command.slice(0, 119)}…`);
+			}
 		}
 	});
 

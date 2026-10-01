@@ -23,16 +23,57 @@ const SECRET_URL_PARAM_RE =
 	/([?&](?:api[-_]?key|access[-_]?token|auth(?:orization)?|credential|password|secret|token)[^=\s]*=)[^&#\s]+/giu;
 const SECRET_ASSIGNMENT_RE =
 	/(?<![A-Z0-9_])((?:[A-Z0-9_]*(?:ACCESS|API|AUTH|CREDENTIAL|KEY|PASS(?:WORD)?|PRIVATE|SECRET|TOKEN)[A-Z0-9_]*)=)[^\s;&|]+/giu;
-const SECRET_FLAG_RE =
-	/(--?(?:[a-z0-9-]*(?:api[-_]?key|access[-_]?token|auth(?:orization)?|credential|password|secret|token)[a-z0-9-]*))(=|\s+)([^\s;&|]+)/giu;
+const SECRET_FLAG_NAME_RE = /(?=(api[-_]?key|access[-_]?token|auth(?:orization)?|credential|password|secret|token))/giu;
+
+function secretFlagStart(word: string): number | null {
+	const lastUnderscore = word.lastIndexOf("_");
+	const previousUnderscore = lastUnderscore <= 0 ? -1 : word.lastIndexOf("_", lastUnderscore - 1);
+	const suffixDash = word.indexOf("-", lastUnderscore + 1);
+	const spanningDash = word.indexOf("-", previousUnderscore + 1);
+	for (const match of word.matchAll(SECRET_FLAG_NAME_RE)) {
+		const end = match.index + (match[1]?.length ?? 0);
+		if (end <= lastUnderscore) continue;
+		const dash = match.index <= lastUnderscore ? spanningDash : suffixDash;
+		if (dash >= 0 && dash < match.index) return dash;
+	}
+	return null;
+}
+
+function redactSecretFlags(value: string): string {
+	// Consume each word once so repeated --token suffixes cannot restart a failing flag match.
+	const words = /[a-z0-9_-]+/giu;
+	const whitespace = /\s+/uy;
+	const argument = /[^\s;&|]+/uy;
+	const out: string[] = [];
+	let copied = 0;
+	for (let word = words.exec(value); word !== null; word = words.exec(value)) {
+		const end = words.lastIndex;
+		let valueStart = end;
+		if (value[end] === "=") valueStart += 1;
+		else {
+			whitespace.lastIndex = end;
+			if (whitespace.exec(value) === null) continue;
+			valueStart = whitespace.lastIndex;
+		}
+		if (secretFlagStart(word[0]) === null) continue;
+		argument.lastIndex = valueStart;
+		if (argument.exec(value) === null) continue;
+		out.push(value.slice(copied, valueStart), "[redacted]");
+		copied = argument.lastIndex;
+		words.lastIndex = copied;
+	}
+	out.push(value.slice(copied));
+	return out.join("");
+}
 
 /** Scrub credentials embedded in one string: URL userinfo, query params, `KEY=value`, and `--flag value`. */
 export function redactSecretString(value: string): string {
-	return value
-		.replace(SECRET_STRING_RE, "$1[redacted]@")
-		.replace(SECRET_URL_PARAM_RE, "$1[redacted]")
-		.replace(SECRET_ASSIGNMENT_RE, "$1[redacted]")
-		.replace(SECRET_FLAG_RE, "$1$2[redacted]");
+	return redactSecretFlags(
+		value
+			.replace(SECRET_STRING_RE, "$1[redacted]@")
+			.replace(SECRET_URL_PARAM_RE, "$1[redacted]")
+			.replace(SECRET_ASSIGNMENT_RE, "$1[redacted]"),
+	);
 }
 
 /** Whether an argument key names a secret outright, so its value never renders. */
