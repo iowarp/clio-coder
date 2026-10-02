@@ -868,7 +868,10 @@ export function compile(table: FragmentTable, inputs: CompileInputs): CompiledSe
 			: "Suggest matching skills as /skill <name> (in order when several compose), then continue without them; only the operator activates skills.";
 
 	const userControl = table.byId.get("operating.user-control");
-	const mainOperatingContract = [operatingContract.body, userControl?.body].filter(Boolean).join("\n\n");
+	// Steering guidance rides the operating contract: the queue delivers several
+	// operator messages at one slot, and the model needs to know how they rank.
+	const steering = table.byId.get("operating.steering");
+	const mainOperatingContract = [operatingContract.body, userControl?.body, steering?.body].filter(Boolean).join("\n\n");
 	const identityBody = [identity.body, ...inlineGuidance.map((fragment) => fragment.body)].join("\n\n");
 	const rendered = new Map<string, string>([
 		["identity", identityBody],
@@ -897,6 +900,7 @@ export function compile(table: FragmentTable, inputs: CompileInputs): CompiledSe
 		...(docsRouting ? [docsRouting] : []),
 		operatingContract,
 		...(userControl ? [userControl] : []),
+		...(steering ? [steering] : []),
 		...(delegation ? [delegation] : []),
 		...(skills ? [skills] : []),
 		safety,
@@ -958,6 +962,8 @@ export function compileWorker(table: FragmentTable, inputs: WorkerPromptInputs):
 	const identity = lookupFragment(table, "identity.clio-coder-worker", "worker identity");
 	const operatingContract = lookupFragment(table, "operating.contract", "operating contract");
 	const workerContract = lookupFragment(table, "operating.worker", "worker contract");
+	// A worker is steered through @<agent>; the same guidance on several messages at one slot applies.
+	const steering = table.byId.get("operating.steering");
 	const safety = lookupFragment(table, "safety.default", "safety");
 
 	const parts: string[] = [];
@@ -971,6 +977,7 @@ export function compileWorker(table: FragmentTable, inputs: WorkerPromptInputs):
 
 	push("identity", identity.body);
 	push("operating-contract", renderWorkerOperatingContract(operatingContract, workerContract));
+	if (steering) push("steering", steering.body);
 	push("tool-contract", renderWorkerToolContractBlock(inputs));
 	push("safety", renderWorkerSafetySection(safety, inputs));
 	if (inputs.readOnly === true)
@@ -986,6 +993,7 @@ export function compileWorker(table: FragmentTable, inputs: WorkerPromptInputs):
 		identity,
 		operatingContract,
 		workerContract,
+		...(steering ? [steering] : []),
 		safety,
 		...(inputs.readOnly === true ? [lookupFragment(table, "dispatch.read-only", "read-only restriction")] : []),
 		inputs.persona,
