@@ -560,7 +560,7 @@ export interface ChatLoop {
 	submit(text: string, options?: ChatSubmitOptions): Promise<void>;
 	currentTurnConstraints?(): TurnConstraints | undefined;
 	steer(text: string): boolean;
-	queueFollowUp(text: string): boolean;
+	queueFollowUp(text: string, display?: { text: string; note?: string }): boolean;
 	/**
 	 * Why an interrupt would be refused right now, or null when it would
 	 * cancel the run. An attached dispatch is refused because the parent's abort
@@ -1845,7 +1845,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 
 	const api: ChatLoop = {
 		steer: (text) => queues.steer(text),
-		queueFollowUp: (text) => queues.queueFollowUp(text),
+		queueFollowUp: (text, display) => queues.queueFollowUp(text, display),
 		interruptRefusal: () => (state.streaming ? interruptRefusalReason() : null),
 		clearSkillSurface: () => {
 			const cleared = skillSurfaceNames(state.activeSkillSurface);

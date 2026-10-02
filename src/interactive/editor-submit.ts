@@ -47,6 +47,8 @@ export interface EditorSubmitExpansion {
 	workingContextPaths?: ReadonlyArray<string>;
 	/** Skill requests parsed out of the draft; the idle path hands them to the chat loop as the pending-skill policy. */
 	pendingSkillRequests?: ReadonlyArray<PendingSkillRequest>;
+	/** The typed line the transcript paints instead of `text`; see `SubmitExpansion.display`. */
+	display?: { text: string; note?: string };
 }
 
 export interface EditorSubmitEditor {
@@ -505,7 +507,7 @@ export function createEditorSubmitController(deps: EditorSubmitDeps): EditorSubm
 				return;
 			}
 			deps.beforeSemanticBoundary?.("follow-up-submit");
-			if (deps.session?.current()?.id !== sessionId || !deps.chat.queueFollowUp(submitted.text)) {
+			if (deps.session?.current()?.id !== sessionId || !deps.chat.queueFollowUp(submitted.text, submitted.display)) {
 				restoreDraft();
 				deps.io.stderr("[follow-up] no active response to queue against\n");
 				return;
@@ -563,6 +565,7 @@ export function createEditorSubmitController(deps: EditorSubmitDeps): EditorSubm
 			deps.beforeSemanticBoundary?.("interrupt-submit");
 			await deps.chat.submit(submitted.text, {
 				steering: "interrupt",
+				...(submitted.display ? { display: submitted.display } : {}),
 				...(paths.length > 0 ? { workingContextPaths: paths } : {}),
 				...(skillRequests.length > 0 ? { pendingSkillRequests: skillRequests } : {}),
 			});
