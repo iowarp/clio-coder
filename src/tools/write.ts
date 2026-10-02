@@ -27,7 +27,7 @@ function partialRewriteNote(previousContent: string, diff: EditDiffResult): stri
 export const writeTool: ToolSpec = {
 	name: ToolNames.Write,
 	description:
-		"Create a UTF-8 text file, or replace an existing file's entire contents, creating parent directories. For a partial change to an existing file use edit, which sends only the replaced text; keep write for new files and full rewrites. Publishes atomically through symlinks, preserving mode bits. In-process writes are serialized; external writers are not locked and the last rename wins.",
+		"Write a UTF-8 text file, creating parent directories and overwriting existing files. For a partial change use edit; keep write for new files and full rewrites. Publishes atomically through symlinks, preserving mode bits. External writers are not locked and the last rename wins.",
 	parameters: Type.Object({
 		path: Type.String({ description: "File path (relative or absolute)." }),
 		content: Type.String({ description: "Full UTF-8 file contents." }),
