@@ -123,6 +123,8 @@ export interface InteractiveDeps {
 	chat: ChatLoop;
 	/** Fired once after the first real TUI render transaction issued all of its terminal writes. */
 	onFirstFrameCommit?: (frameId: number) => void;
+	/** See EditorSubmitDeps.labelOperatorCommand. */
+	labelOperatorCommand?: (command: string, cwd: string) => string | null;
 	/** Existing Stage 0 owner to hydrate in place. */
 	terminalLease?: TerminalLease;
 	/** Fired after the first committed frame containing the hydrated Stage 1 root. */
@@ -932,6 +934,7 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 		collapseLaunchpadBeforeSubmit: () => presentation.collapseWelcomeDashboard(),
 		expandSubmit: (text) => expandInteractiveSubmitAsync(text, deps.resources),
 		notify,
+		...(deps.labelOperatorCommand ? { labelOperatorCommand: deps.labelOperatorCommand } : {}),
 	});
 	// The lease drains the terminal; operator shell ownership outlives that
 	// surface and must settle before the session domain stops, on every exit.

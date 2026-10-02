@@ -44,6 +44,7 @@ import { isSkillActivation } from "../core/skill-activation.js";
 import { StartupTimer } from "../core/startup-timer.js";
 import { getTerminationCoordinator, resolveShutdownHookBudgetMs } from "../core/termination.js";
 import { yieldToEventLoop } from "../core/timers.js";
+import { ToolNames } from "../core/tool-names.js";
 import { captureProjectSurface, projectSurfaceTrustNotice } from "../core/workspace-trust.js";
 import { clioDataDir, clioStateDir } from "../core/xdg.js";
 import { renderAgentCatalogSectionsFromSpecs } from "../domains/agents/catalog.js";
@@ -4120,6 +4121,16 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		toolRegistry,
 		...(session ? { session } : {}),
 		...(session ? { readSessionEntries: readCurrentSessionEntries } : {}),
+		// An operator `!` command's output joins the context the next request
+		// sends, so a source it names is labeled first, the way a bash tool call is.
+		labelOperatorCommand: (command, cwd) => {
+			const unavailable = safety?.policy?.informationFlow?.().refusal ?? null;
+			if (unavailable !== null) return unavailable;
+			const labels = safety?.policy?.flowRestrictionsFor?.({ tool: ToolNames.Bash, args: { command, cwd } }) ?? null;
+			if (labels === null) return null;
+			flowLedger.absorb(labels, { tool: "operator-bash" });
+			return flowLedger.refusal();
+		},
 		getTaskBoard: () => taskBoard.cachedSnapshot(),
 		getDecisionBoard: () => decisionBoard.snapshot(),
 		supersedeDecision: (interviewId, key, correction) => decisionBoard.supersede(interviewId, key, correction),

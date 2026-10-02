@@ -39,7 +39,7 @@ import {
 } from "./flow-policy-snapshot.js";
 import { normalizedGitCommands } from "./git-command-normalization.js";
 import { classifyBashGit, splitGitChdir } from "./git-policy.js";
-import type { FlowRestrictionSet, InformationFlowPolicy } from "./information-flow.js";
+import type { FlowRestrictionSet, FlowSourceCall, InformationFlowPolicy } from "./information-flow.js";
 import { compileInformationFlowPolicy, flowRestrictionsForCall } from "./information-flow.js";
 import { inertQuotedMatch } from "./literal-exemption.js";
 import {
@@ -841,8 +841,7 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 			// Runs on every tool call. With no rules there is nothing to label, and the
 			// cwd canonicalization below is a filesystem walk the call must not pay for.
 			if (informationFlow.rules.length === 0) return null;
-			const call = normalizeCallPaths(rawCall);
-			return flowRestrictionsForCall(informationFlow, { tool: call.tool, args: call.args, cwd: cwdArg(call.args, cwd) });
+			return flowRestrictionsForCall(informationFlow, flowSourceCallFor(rawCall, cwd));
 		},
 		metadata() {
 			return {
@@ -925,6 +924,23 @@ function bashPathTokenCandidates(command: string): string[] {
 		if (eq > 0 && eq < token.length - 1) candidates.push(token.slice(eq + 1));
 	}
 	return candidates;
+}
+
+/**
+ * What a call reads, as the information-flow evaluator judges it: the path
+ * arguments of the read-class tools, and the path operands a bash command
+ * names. The exit-code-only presence check reads no content, so it names none.
+ */
+export function flowSourceCallFor(rawCall: ClassifierCall, cwd: string): FlowSourceCall {
+	const call = normalizeCallPaths(rawCall);
+	const command = call.tool === ToolNames.Bash ? commandArg(call.args) : null;
+	const readTokens = command === null || isSafePresenceCheck(command) ? [] : bashPathTokenCandidates(command);
+	return {
+		tool: call.tool,
+		args: call.args,
+		cwd: cwdArg(call.args, cwd),
+		...(readTokens.length > 0 ? { readTokens } : {}),
+	};
 }
 
 function evaluateBashZeroAccessRead(

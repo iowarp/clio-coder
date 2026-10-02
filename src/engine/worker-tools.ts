@@ -15,7 +15,7 @@ import {
 	type MiddlewareHookRegistration,
 	type MiddlewareSnapshot,
 } from "../domains/middleware/index.js";
-import { classify as classifyAction, normalizeCallPaths } from "../domains/safety/action-classifier.js";
+import { classify as classifyAction } from "../domains/safety/action-classifier.js";
 import type { AdmissionGitContext } from "../domains/safety/admission.js";
 import { DEFAULT_AUTONOMY_LEVEL } from "../domains/safety/autonomy.js";
 import type { SafetyContract, SafetyDecision } from "../domains/safety/contract.js";
@@ -26,7 +26,7 @@ import {
 	type LoopDetectorState,
 	observe as observeLoopState,
 } from "../domains/safety/loop-detector.js";
-import { createSafetyPolicyEngine } from "../domains/safety/policy-engine.js";
+import { createSafetyPolicyEngine, flowSourceCallFor } from "../domains/safety/policy-engine.js";
 import {
 	type ProtectedArtifactState,
 	protectedArtifactMutationBlockReason,
@@ -137,14 +137,8 @@ export function createWorkerSafety(options: WorkerSafetyOptions = {}): SafetyCon
 		isSubset,
 		policy: {
 			informationFlow: () => informationFlow,
-			flowRestrictionsFor: (rawCall) => {
-				const call = normalizeCallPaths(rawCall);
-				return flowRestrictionsForCall(informationFlow, {
-					tool: call.tool,
-					args: call.args,
-					cwd: options.cwd ?? process.cwd(),
-				});
-			},
+			flowRestrictionsFor: (rawCall) =>
+				flowRestrictionsForCall(informationFlow, flowSourceCallFor(rawCall, options.cwd ?? process.cwd())),
 			metadata: (posture) => policyEngine.metadata(posture),
 			writeTargetViolation: (target) => workerReadOnlyTargetViolation(target) ?? policyEngine.writeTargetViolation(target),
 			allowsObservationPath: (path) =>

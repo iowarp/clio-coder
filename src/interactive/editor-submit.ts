@@ -105,6 +105,12 @@ export interface EditorSubmitDeps {
 	expandSubmit: (text: string) => Promise<EditorSubmitExpansion>;
 	notify: (level: "info" | "warning" | "error", text: string, key: string) => void;
 	getCwd?: () => string;
+	/**
+	 * Labels the information-flow sources a `!` command names before its output
+	 * joins the context. Returns why the label could not be recorded, and the
+	 * output then stays out of context.
+	 */
+	labelOperatorCommand?: (command: string, cwd: string) => string | null;
 	runBash?: typeof runBashCommand;
 	resolveEditor?: () => string | null;
 	editExternally?: (initialText: string, command: string) => ExternalEditResult;
@@ -191,8 +197,9 @@ export function createEditorSubmitController(deps: EditorSubmitDeps): EditorSubm
 		let settlement!: Promise<void>;
 		settlement = (async () => {
 			try {
+				const cwd = deps.getCwd?.() ?? process.cwd();
 				const result = await (deps.runBash ?? runBashCommand)(parsed.command, {
-					cwd: deps.getCwd?.() ?? process.cwd(),
+					cwd,
 					timeoutMs: EDITOR_BASH_TIMEOUT_MS,
 					signal: abort.signal,
 					onUpdate: (progress) => {
@@ -201,11 +208,13 @@ export function createEditorSubmitController(deps: EditorSubmitDeps): EditorSubm
 						deps.ui.requestRender();
 					},
 				});
+				const unlabeled = parsed.excludeFromContext ? null : (deps.labelOperatorCommand?.(parsed.command, cwd) ?? null);
+				if (unlabeled !== null) deps.io.stderr(`[bash] output kept out of context: ${unlabeled}\n`);
 				const input = bashExecutionEntryInput({
 					command: parsed.command,
 					result,
 					parentTurnId,
-					excludeFromContext: parsed.excludeFromContext,
+					excludeFromContext: parsed.excludeFromContext || unlabeled !== null,
 					timeoutMs: EDITOR_BASH_TIMEOUT_MS,
 				});
 				const entry = deps.session?.current()
