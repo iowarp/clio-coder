@@ -1425,7 +1425,15 @@ function handleChatEvent(
 		const admission = isRecord(event.admission) ? event.admission : null;
 		const reason = admission !== null && typeof admission.reason === "string" ? admission.reason : "";
 		if (reason.length > 0 && active.admissionReason === undefined) active.admissionReason = admissionReason(reason);
-		if (event.surface === "transcript" && typeof event.text === "string" && event.text.length > 0) {
+		// An admission notice is the evidence that Clio refused to start the turn:
+		// the prompt fails with its reason code, and its text names the settings
+		// path, which stays off the wire. Every other transcript notice is projected.
+		if (
+			reason.length === 0 &&
+			event.surface === "transcript" &&
+			typeof event.text === "string" &&
+			event.text.length > 0
+		) {
 			sendUpdate(
 				transport,
 				sessionId,
