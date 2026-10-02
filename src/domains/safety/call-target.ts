@@ -221,7 +221,20 @@ const CALL_TARGET_FIELDS: Readonly<Record<string, ReadonlyArray<string>>> = {
 	write: ["path"],
 	edit: ["path"],
 	bash: ["command", "cwd", "timeout_ms", "output_policy"],
-	git: ["op", "path", "cached", "stat", "name_only", "limit", "cwd", "timeout_ms", "max_output_bytes"],
+	git: [
+		"op",
+		"mode",
+		"paths",
+		"message",
+		"path",
+		"cached",
+		"stat",
+		"name_only",
+		"limit",
+		"cwd",
+		"timeout_ms",
+		"max_output_bytes",
+	],
 	verify: ["check", "path", "browser", "cwd", "timeout_ms", "max_output_bytes"],
 	dispatch: [
 		"list",
@@ -296,10 +309,23 @@ export function describeCallAction(
 	return { verb, object: bounded.object, ...(bounded.truncated ? { truncated: true } : {}) };
 }
 
+const TARGET_LIST_ITEMS_SHOWN = 4;
+
 function renderAllowedTargetValue(value: unknown): string | null {
 	if (typeof value === "string") {
 		const rendered = oneLine(sanitizeForDisplay(redactSecretString(value), true));
 		return rendered.length > 0 ? rendered : null;
+	}
+	// A list of strings in an allowlisted field (`git add` paths) decides the
+	// call as much as a single path does; `<array 1 item>` hid what gets staged.
+	if (Array.isArray(value) && value.length > 0 && value.every((item) => typeof item === "string")) {
+		const shown = value
+			.slice(0, TARGET_LIST_ITEMS_SHOWN)
+			.map((item) => renderAllowedTargetValue(item))
+			.filter((item): item is string => item !== null);
+		if (shown.length === 0) return null;
+		const more = value.length - TARGET_LIST_ITEMS_SHOWN;
+		return `${shown.join(", ")}${more > 0 ? ` (+${more} more)` : ""}`;
 	}
 	if (typeof value === "number" && Number.isFinite(value)) return String(value);
 	if (typeof value === "boolean") return String(value);
