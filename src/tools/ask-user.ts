@@ -109,7 +109,7 @@ export const askUserParameters = Type.Object({
 	mode: Type.Optional(
 		StringEnum(["round", "single_question"], {
 			description:
-				"round (default) accepts 1 to 4 tightly related questions; single_question accepts exactly one, for interviews.",
+				"round (default) accepts 1 to 4 tightly related interview questions; single_question accepts exactly one and can ask a standalone question after an interview has completed.",
 		}),
 	),
 	questions: Type.Optional(
@@ -598,11 +598,13 @@ function renderAskUserState(
 		/^proceed\b/iu.test(planAnswer.options[0] ?? "") &&
 		!planAnswer.value?.trim();
 	const guidance =
-		policy.status === "active"
-			? "The interview modal remains open. Ask only new necessary follow-up rounds. When enough information is collected, call ask_user with action=complete before final prose."
-			: policy.status === "cancelled"
-				? "The operator dismissed the interview without answering. A dismissal is not approval: make no edits, run no commands and dispatch no workers on a guessed answer. The turn ends here; wait for the operator's next message."
-				: "The interview is closed. Act on the answers now: approval means do the work. If the operator declines or says the work is enough, end in one sentence without restating earlier output. Use the compact decisions below; open the transcript only if its history is needed. End with the result, without a new question or offer.";
+		event === "standalone_answered"
+			? "The operator answered this standalone question. Act on the answer within the requested scope. The earlier completed interview and its decisions are unchanged."
+			: policy.status === "active"
+				? "The interview modal remains open. Ask only new necessary follow-up rounds. When enough information is collected, call ask_user with action=complete before final prose."
+				: policy.status === "cancelled"
+					? "The operator dismissed the interview without answering. A dismissal is not approval: make no edits, run no commands and dispatch no workers on a guessed answer. The turn ends here; wait for the operator's next message."
+					: "The interview is closed. Act on the answers now: approval means do the work. If the operator declines or says the work is enough, end in one sentence without restating earlier output. Use the compact decisions below; open the transcript only if its history is needed. End with the result, without a new question or offer.";
 	return [
 		`ask_user result: ${event}`,
 		guidance,
@@ -701,9 +703,13 @@ export function createAskUserTool(deps: AskUserToolDeps = {}): ToolSpec {
 		async run(args, options): Promise<ToolResult> {
 			const normalized = normalizeAskUserCall(args);
 			if (!normalized.call) return { kind: "error", message: `ask_user: ${normalized.error ?? "invalid input"}` };
-			const policy = options?.askUserPolicy ?? createStandalonePolicy(options);
-			hydratePolicy(policy, options);
 			const call = normalized.call;
+			const turnPolicy = options?.askUserPolicy;
+			const standalone = call.action === "ask" && call.mode === "single_question" && turnPolicy?.status === "complete";
+			const policy = standalone ? createStandalonePolicy(options) : (turnPolicy ?? createStandalonePolicy(options));
+			if (standalone && turnPolicy?.planOnly !== undefined) policy.planOnly = turnPolicy.planOnly;
+			hydratePolicy(policy, options);
+			if (policy.status === "complete") return okInterviewResult(policy, "already_complete");
 
 			if (call.action === "complete") {
 				return completeInterview(policy, "complete", options, call.summary, call.decisions ?? []);
@@ -732,10 +738,6 @@ export function createAskUserTool(deps: AskUserToolDeps = {}): ToolSpec {
 					kind: "error",
 					message: "ask_user: an operator interview round is already in progress. Wait for that answer.",
 				};
-			}
-			if (policy.status === "complete") {
-				await persistAskUserTranscript(policy, options);
-				return okInterviewResult(policy, "already_complete");
 			}
 			if (policy.status === "cancelled" || policy.cancelled === true) {
 				policy.status = "cancelled";
@@ -773,6 +775,7 @@ export function createAskUserTool(deps: AskUserToolDeps = {}): ToolSpec {
 				}));
 				const handled = await handler(shown, {
 					...options,
+					askUserPolicy: policy,
 					decisionPresentation: classifyDecisionPresentation(decisionFactsForAnswer(exposure)),
 				});
 				const result = normalizeAskUserResult(questions, restoreQuestions(handled, shown, questions));
@@ -794,8 +797,13 @@ export function createAskUserTool(deps: AskUserToolDeps = {}): ToolSpec {
 					policy.status = "cancelled";
 					policy.cancelled = true;
 					policy.endedAt = answeredAt;
-					await persistAskUserTranscript(policy, options);
+					if (!standalone) await persistAskUserTranscript(policy, options);
 					return okInterviewResult(policy, "cancelled", []);
+				}
+				if (standalone) {
+					policy.status = "complete";
+					policy.endedAt = answeredAt;
+					return okInterviewResult(policy, "standalone_answered", result.answers);
 				}
 				const derived = deriveAnswerDecisions(questions, result.answers, policy);
 				upsertDecisions(policy, derived);
