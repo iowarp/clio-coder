@@ -37,7 +37,7 @@ export interface FlowLedger {
 }
 
 /** The union of every flow-restriction entry in a session's ledger. */
-export function flowRestrictionsFromEntries(entries: ReadonlyArray<SessionEntry>): FlowRestrictionSet | null {
+function flowRestrictionsFromEntries(entries: ReadonlyArray<SessionEntry>): FlowRestrictionSet | null {
 	const sets: FlowRestrictionSet[] = [];
 	for (const entry of entries) {
 		if (entry.kind !== "custom" || entry.customType !== FLOW_RESTRICTION_ENTRY_TYPE) continue;

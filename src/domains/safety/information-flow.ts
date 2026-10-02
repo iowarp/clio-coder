@@ -222,7 +222,7 @@ export function flowEndpointIdentity(raw: string | null | undefined): string | n
 }
 
 /** `scheme://host[:port]` of an endpoint identity, for `origin:` recipients. */
-export function flowEndpointOrigin(identity: string): string | null {
+function flowEndpointOrigin(identity: string): string | null {
 	try {
 		const url = new URL(identity);
 		const defaultPort = url.protocol === "https:" ? "443" : "80";
@@ -234,7 +234,7 @@ export function flowEndpointOrigin(identity: string): string | null {
 }
 
 /** The pinned, exact form a `target:<id>` recipient expands to: a JSON tuple, so no component can forge a delimiter. */
-export function pinnedTargetRef(targetId: string, runtime: string, endpoint: string | null): string {
+function pinnedTargetRef(targetId: string, runtime: string, endpoint: string | null): string {
 	return `target:${JSON.stringify([targetId, runtime, endpoint])}`;
 }
 
