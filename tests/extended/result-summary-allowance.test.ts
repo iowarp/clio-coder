@@ -294,6 +294,7 @@ function setup(outputs: readonly string[]) {
 				pid: null,
 				promise: Promise.resolve({ exitCode: 0, signal: null }),
 				events: (async function* () {
+					yield { type: "clio_coder_tool_finish", payload: { tool: "read", outcome: "ok", durationMs: 1 } };
 					yield { type: "message_end", message: { role: "assistant", content: output, stopReason: "stop" } };
 				})(),
 				abort: () => {},

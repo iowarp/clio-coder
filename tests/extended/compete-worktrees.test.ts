@@ -160,6 +160,7 @@ for (const agent of ["scout", "coder"] as const) {
 								const args = path === "removed.txt" ? { command: "rm removed.txt" } : { path };
 								yield { type: "tool_execution_start", toolCallId: path, toolName, args };
 								yield { type: "tool_execution_end", toolCallId: path, toolName, isError: false };
+								yield { type: "clio_coder_tool_finish", payload: { tool: toolName, outcome: "ok", durationMs: 1 } };
 							}
 							yield {
 								type: "tool_execution_start",
@@ -169,6 +170,7 @@ for (const agent of ["scout", "coder"] as const) {
 							};
 							git(cwd, "diff", "--check");
 							yield { type: "tool_execution_end", toolCallId: "check", toolName: "bash", isError: false };
+							yield { type: "clio_coder_tool_finish", payload: { tool: "bash", outcome: "ok", durationMs: 1 } };
 						}
 						yield {
 							type: "message_end",

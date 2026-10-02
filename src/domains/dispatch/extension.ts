@@ -7419,6 +7419,7 @@ export function createDispatchBundle(
 				) {
 					const noWork = workerNoWorkDetail({
 						activity: summarizeToolActivity(toolStats, (tool) => safety.classify({ tool }).actionClass),
+						toolLaneObserved: lifecycle.runtimeKind !== "subprocess",
 						limitationRecorded: (toolStats.get(ToolNames.Limitation)?.ok ?? 0) > 0,
 						mutatedPathCount: finishContract?.assessment.mutatedPaths.length ?? null,
 						escalationsDenied: escalationCounts.denied,

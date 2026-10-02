@@ -158,6 +158,11 @@ export function blockedWriteAttempts(
 /** A clean process exit cannot overrule an edit worker's explicit report of inability. */
 export function workerNoWorkDetail(input: {
 	activity: ToolActivitySummary;
+	/**
+	 * False for a CLI subprocess: its tools run inside the external agent, so a zero
+	 * count says Clio saw nothing, not that the worker did nothing. Defaults to true.
+	 */
+	toolLaneObserved?: boolean;
 	limitationRecorded: boolean;
 	mutatedPathCount: number | null;
 	/** Permission asks the operator or main agent denied during the run. */
@@ -190,7 +195,9 @@ export function workerNoWorkDetail(input: {
 		const reason = input.limitationDetail?.trim() || report;
 		return `worker recorded a limitation and changed nothing, so the assignment was not done${reason ? `: ${reason}` : ""}`;
 	}
-	if (input.activity.calls === 0) return "worker executed no tools, so it did none of its assignment";
+	if (input.toolLaneObserved !== false && input.activity.calls === 0) {
+		return "worker executed no tools, so it did none of its assignment";
+	}
 	return null;
 }
 

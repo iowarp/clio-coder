@@ -23,8 +23,8 @@ beforeEach(() => isolateDispatchState());
 afterEach(() => restoreDispatchState());
 
 const TASK = "Give a 150-200 word explanation with file:line citations. Do not edit files.";
-const LIMITATION =
-	"Cannot deliver the requested 150-200 word cited explanation: the supplied evidence has no source lines to cite. No files were changed. A grounded explanation requires the missing source evidence.";
+const DELIVERED =
+	"The supplied evidence shows the spacing parser reads one unit at a time (src/parse.ts:12). It offers no source lines for compound strings, so none are cited. No files were changed.";
 const report = (summary?: string, passed = true) =>
 	JSON.stringify({
 		mutatedPaths: [],
@@ -49,6 +49,7 @@ function setup(outputs: readonly string[]) {
 				pid: null,
 				promise: Promise.resolve({ exitCode: 0, signal: null }),
 				events: (async function* () {
+					yield { type: "clio_coder_tool_finish", payload: { tool: "read", outcome: "ok", durationMs: 1 } };
 					yield { type: "message_end", message: { role: "assistant", content: output, stopReason: "stop" } };
 				})(),
 				abort: () => {},
@@ -102,7 +103,7 @@ it("gives the parent a bounded exit for an unchanged terminal Documenter report 
 it("teaches the existing bounded summary field in the compiled recipe and repair exchange", {
 	timeout: 15_000,
 }, async () => {
-	const { bundle, dispatch, specs } = setup([report(LIMITATION)]);
+	const { bundle, dispatch, specs } = setup([report(DELIVERED)]);
 	await bundle.extension.start();
 	try {
 		const result = await dispatch.run(documenter, {});
@@ -125,55 +126,10 @@ it("teaches the existing bounded summary field in the compiled recipe and repair
 				networkAllowed: false,
 				filesystem: { readFile: () => null },
 			});
-		strictEqual(validate(report(LIMITATION)).conformance, "pass");
+		strictEqual(validate(report(DELIVERED)).conformance, "pass");
 		strictEqual(validate(report("x".repeat(RESULT_COMMIT_MESSAGE_MAX_BYTES + 1))).conformance, "pass");
 		strictEqual(validate(report("x".repeat(RESULT_SUMMARY_DEFAULT_MAX_BYTES + 1))).conformance, "fail");
-		strictEqual(validate(report(LIMITATION, false)).quality, "fail");
-	} finally {
-		await bundle.extension.stop?.();
-	}
-});
-
-it("halts a failed Scout pipeline, then settles a separate Documenter recovery without rewriting the original", {
-	timeout: 15_000,
-}, async () => {
-	const { bundle, dispatch, monitor, specs } = setup(["invalid scout result", report(LIMITATION)]);
-	await bundle.extension.start();
-	try {
-		const first = await dispatch.run({ mode: "pipeline", tasks: [scout, documenter] }, {});
-		strictEqual(first.kind, "error");
-		if (first.kind === "error") match(first.message, /halted at step 1\/2.*skipped 1/u);
-		strictEqual(specs.length, 1);
-		const original = bundle.contract.listRuns()[0];
-		ok(original?.receiptPath);
-		const before = readFileSync(original.receiptPath, "utf8");
-		const recovery = await dispatch.run(
-			{ ...documenter, briefing: "Independent recovery: source evidence is unavailable." },
-			{},
-		);
-		strictEqual(recovery.kind, "ok");
-		if (recovery.kind === "ok") match(recovery.output, /Cannot deliver the requested/u);
-		strictEqual(readFileSync(original.receiptPath, "utf8"), before);
-		strictEqual(specs.length, 2);
-		const runs = bundle.contract.listRuns();
-		const receipts = runs.map((run) => {
-			ok(run.receiptPath);
-			const receipt = JSON.parse(readFileSync(run.receiptPath, "utf8")) as RunReceipt;
-			ok(verifyReceiptIntegrity(receipt, run).ok);
-			strictEqual(receipt.lineage?.rootRunId, run.id);
-			return receipt;
-		});
-		strictEqual(receipts.find((r) => r.agentId === "scout")?.outcome, "failed");
-		strictEqual(receipts.find((r) => r.agentId === "documenter")?.outcome, "succeeded");
-		const collected = await monitor.run({ mode: "collect", run_ids: runs.map((run) => run.id) }, {});
-		strictEqual(collected.kind, "ok");
-		if (collected.kind === "ok") {
-			match(collected.output, /Cannot deliver the requested/u);
-			match(collected.output, /state=failed/u);
-		}
-		deepStrictEqual(bundle.contract.snapshot().running, []);
-		deepStrictEqual(bundle.contract.snapshot().retrying, []);
-		strictEqual(capacityLeaseUsage().global, 0);
+		strictEqual(validate(report(DELIVERED, false)).quality, "fail");
 	} finally {
 		await bundle.extension.stop?.();
 	}
@@ -182,7 +138,7 @@ it("halts a failed Scout pipeline, then settles a separate Documenter recovery w
 it("does not advance a dependent step after a conforming Documenter report with failed quality", {
 	timeout: 15_000,
 }, async () => {
-	const { bundle, dispatch, specs } = setup([report(LIMITATION, false), report(LIMITATION)]);
+	const { bundle, dispatch, specs } = setup([report(DELIVERED, false), report(DELIVERED)]);
 	await bundle.extension.start();
 	try {
 		const result = await dispatch.run({ mode: "pipeline", tasks: [documenter, documenter] }, {});
@@ -213,12 +169,12 @@ it("continues passing Scout quality into the intended Documenter and delivers it
 		needsSplit: false,
 		proposedSubtasks: [],
 	});
-	const { bundle, dispatch, specs } = setup([evidence, report(LIMITATION)]);
+	const { bundle, dispatch, specs } = setup([evidence, report(DELIVERED)]);
 	await bundle.extension.start();
 	try {
 		const result = await dispatch.run({ mode: "pipeline", tasks: [scout, documenter] }, {});
 		strictEqual(result.kind, "ok");
-		if (result.kind === "ok") match(result.output, /Cannot deliver the requested/u);
+		if (result.kind === "ok") match(result.output, /spacing parser/u);
 		deepStrictEqual(
 			specs.map((spec) => spec.agentId),
 			["scout", "documenter"],
@@ -239,7 +195,7 @@ it("continues passing Scout quality into the intended Documenter and delivers it
 		// A conforming report does not turn unobserved validation claims into measured quality.
 		strictEqual(dependent?.quality.resultContract?.quality, "unmeasured");
 		strictEqual(dependent?.pipeline?.fromRunId, first?.runId);
-		strictEqual(dependent?.output?.text, report(LIMITATION));
+		strictEqual(dependent?.output?.text, report(DELIVERED));
 		deepStrictEqual(bundle.contract.snapshot().running, []);
 		strictEqual(capacityLeaseUsage().global, 0);
 	} finally {

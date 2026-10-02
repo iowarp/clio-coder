@@ -66,6 +66,7 @@ describe("active decisions on actual operator dispatch paths", () => {
 						promise: Promise.resolve({ exitCode: 0, signal: null }),
 						heartbeatAt: { current: Date.now(), monotonic: 0 },
 						events: (async function* () {
+							yield { type: "clio_coder_tool_finish", payload: { tool: "read", outcome: "ok", durationMs: 1 } };
 							yield {
 								type: "message_end",
 								message: {
