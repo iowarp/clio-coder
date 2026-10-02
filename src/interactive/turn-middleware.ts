@@ -216,10 +216,10 @@ export function createTurnMiddleware(deps: TurnMiddlewareDeps): TurnMiddleware {
 			// CLB-3: unknown coverage is operator status, never a recovery request
 			// or permission to execute another check.
 			deps.emitFooterNotice(
-				"warning",
+				"info",
 				message === FINISH_CONTRACT_COVERAGE_ADVISORY_MESSAGE
-					? "checks passed; behavior coverage unverified"
-					: "validation evidence recorded; behavior coverage unverified",
+					? "checks passed; coverage of the change not measured"
+					: "validation evidence recorded; coverage of the change not measured",
 				"finish.coverage-unverified",
 			);
 			return;

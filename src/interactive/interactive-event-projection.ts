@@ -236,6 +236,7 @@ export function createInteractiveEventProjection(deps: InteractiveEventProjectio
 			if (event.type === "agent_start") {
 				deps.dismissNotification("turn.interrupted");
 				deps.dismissNotification("finish.unverified");
+				deps.dismissNotification("finish.coverage-unverified");
 				deps.dismissHelperNotifications?.();
 			}
 			if (event.type === "agent_start" && showProgress) deps.startTerminalProgress();

@@ -109,11 +109,14 @@ function resolveTarget(raw: string, base: string): string {
 export function createFinishContractRegistration(
 	options: CreateFinishContractRegistrationOptions,
 ): MiddlewareHookRegistration {
-	// State of each mutation target before the turn first touched it, keyed by
-	// the raw path the ledger scan reports (#12 in the 0.5.8 probe: a
-	// create-then-delete probe was told its change was unverified). A target
-	// named from two directories is ambiguous and never counts as unchanged.
+	// State of each mutation target before the session first touched it, keyed
+	// by the raw path the ledger scan reports (#12 in the 0.5.8 probe: a
+	// create-then-delete probe was told its change was unverified). The baseline
+	// outlives the turn so an undo that returns a file to where the session found
+	// it is a net-empty change instead of an unverified one. A target named from
+	// two directories is ambiguous and never counts as unchanged.
 	const before = new Map<string, { abs: string; state: string; ambiguous: boolean }>();
+	let baselineSessionId: string | undefined;
 	const recordBefore = (input: MiddlewareHookInput): void => {
 		if (input.metadata?.nested === true) return;
 		const { toolName, args } = effectiveToolCall(input.toolName ?? "", input.toolArgs);
@@ -141,7 +144,10 @@ export function createFinishContractRegistration(
 		hooks: ["turn_start", "before_tool", "turn_end"],
 		evaluate(input: MiddlewareHookInput, context): ReadonlyArray<MiddlewareEffect> {
 			if (input.hook === "turn_start") {
-				before.clear();
+				if (input.sessionId !== undefined && input.sessionId !== baselineSessionId) {
+					before.clear();
+					baselineSessionId = input.sessionId;
+				}
 				return [];
 			}
 			if (input.hook === "before_tool") {

@@ -26,12 +26,12 @@ for (const [message, text, key] of [
 	[FINISH_CONTRACT_ADVISORY_MESSAGE, "change not verified; inspect the turn receipt", "finish.unverified"],
 	[
 		FINISH_CONTRACT_COVERAGE_ADVISORY_MESSAGE,
-		"checks passed; behavior coverage unverified",
+		"checks passed; coverage of the change not measured",
 		"finish.coverage-unverified",
 	],
 	[
 		FINISH_CONTRACT_EVIDENCE_SCOPE_ADVISORY_MESSAGE,
-		"validation evidence recorded; behavior coverage unverified",
+		"validation evidence recorded; coverage of the change not measured",
 		"finish.coverage-unverified",
 	],
 ] as const)
