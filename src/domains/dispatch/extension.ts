@@ -1,3 +1,4 @@
+import type { WorkerFlowPolicyInput } from "../safety/information-flow.js";
 import { writeDiagnostic } from "../../core/diagnostics.js";
 import { boundedExternalDiagnostic } from "../../core/external-diagnostic.js";
 import { readPiMonoVersion } from "../../engine/pi-mono-names.js";
@@ -551,6 +552,7 @@ export interface DispatchBundleOptions {
 	 * are judged against them; the worker's result returns under the same label.
 	 */
 	getFlowRestrictions?: () => FlowRestrictionSet | null;
+	getFlowPolicy?: () => WorkerFlowPolicyInput;
 	/** Git-backed receipt provenance collector; injectable for deterministic tests. */
 	collectReproducibility?: typeof collectReproducibilityMetadata;
 	/** Observer injection seam. Production constructs the durable observer. */
@@ -1729,6 +1731,7 @@ interface DispatchAdmissionStage {
 interface DispatchWorkerSpecInput {
 	req: DispatchRequest;
 	flowRestrictions?: FlowRestrictionSet | null;
+	flowPolicy?: WorkerFlowPolicyInput;
 	pathScope: DispatchPathScope;
 	target: ResolvedTarget;
 	admission: DispatchAdmissionStage;
@@ -2620,6 +2623,7 @@ function buildDispatchWorkerSpec(input: DispatchWorkerSpecInput, config?: Config
 		budget: input.budget,
 		middlewareSnapshot: input.middlewareSnapshot,
 		permit: input.permit,
+		...(input.flowPolicy !== undefined ? { flowPolicy: structuredClone(input.flowPolicy) } : {}),
 	};
 	const protectedArtifactState = frozenProtectedArtifactState(input.protectedArtifactState);
 	assertProtectedArtifactsEnforceable(
@@ -6159,6 +6163,7 @@ export function createDispatchBundle(
 					middlewareSnapshot: middleware.snapshot(),
 					protectedArtifactState,
 					flowRestrictions: options?.getFlowRestrictions?.() ?? null,
+					...(options?.getFlowPolicy !== undefined ? { flowPolicy: options.getFlowPolicy() } : {}),
 					apiKey: lifecycle.apiKey,
 					readOnly: lifecycle.readOnly,
 					budget: lifecycle.budget,

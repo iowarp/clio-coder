@@ -142,6 +142,57 @@ export interface InformationFlowPolicyInput {
 	readonly sources: ReadonlyArray<FlowSourceRuleInput>;
 }
 
+/** Parent-approved rule inputs with recipient identities already expanded at the parent root. */
+export interface WorkerFlowPolicyInput {
+	readonly version: 1;
+	readonly policyHash: string | null;
+	readonly trusted: boolean;
+	readonly refusal: string | null;
+	readonly rules: ReadonlyArray<{
+		readonly id: string;
+		readonly policyHash: string;
+		readonly paths: { readonly root: string; readonly sources: ReadonlyArray<string> } | null;
+		readonly tools: ReadonlyArray<string>;
+		readonly recipients: ReadonlyArray<string>;
+		readonly dangling: ReadonlyArray<string>;
+	}>;
+}
+
+export function workerFlowPolicyInput(policy: InformationFlowPolicy): WorkerFlowPolicyInput {
+	return structuredClone({
+		version: 1,
+		policyHash: policy.policyHash,
+		trusted: policy.trusted,
+		refusal: policy.refusal,
+		rules: policy.rules.map((rule) => ({
+			...rule,
+			paths:
+				rule.paths === null ? null : { root: rule.paths.root, sources: rule.paths.entries.map((entry) => entry.source) },
+		})),
+	});
+}
+
+/** Retain parent paths and also label their relative counterparts in an attested task worktree. */
+export function compileWorkerFlowPolicy(
+	input: WorkerFlowPolicyInput,
+	taskWorktreeRoot?: string,
+): InformationFlowPolicy {
+	return {
+		policyHash: input.policyHash,
+		trusted: input.trusted,
+		refusal: input.refusal,
+		rules: input.rules.map((rule) => {
+			const paths =
+				rule.paths === null ? null : compilePathPolicy({ zeroAccessPaths: rule.paths.sources }, rule.paths.root);
+			if (paths !== null && rule.paths !== null && taskWorktreeRoot !== undefined) {
+				const worktreePaths = compilePathPolicy({ zeroAccessPaths: rule.paths.sources }, taskWorktreeRoot);
+				return { ...rule, paths: { ...paths, entries: [...paths.entries, ...worktreePaths.entries] } };
+			}
+			return { ...rule, paths };
+		}),
+	};
+}
+
 export const EMPTY_INFORMATION_FLOW_INPUT: InformationFlowPolicyInput = {
 	groups: {},
 	targets: {},

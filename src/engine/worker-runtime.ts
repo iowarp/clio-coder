@@ -2,6 +2,7 @@ import { homedir } from "node:os";
 import type { WorkerContextSeed } from "../domains/context/worker/contract.js";
 import { createWorkerContextGuard, WorkerContextExhaustedError } from "../domains/context/worker/pressure.js";
 import { createWorkerObservationStore } from "../domains/context/worker/recall.js";
+import type { WorkerFlowPolicyInput } from "../domains/safety/information-flow.js";
 import { seededWorkerMessages } from "../worker/context-seed.js";
 import { engineStreamSimple } from "./api-registry.js";
 import { recommendedOutputTokens, resolvePressureOutputReserve } from "./apis/output-budget.js";
@@ -232,6 +233,7 @@ export interface WorkerRunInput {
 	 * own reads add, at the same seam the main agent uses.
 	 */
 	flowRestrictions?: FlowRestrictionSet;
+	flowPolicy?: WorkerFlowPolicyInput;
 }
 
 export interface WorkerRunResult {
@@ -572,6 +574,8 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 	// before_tool registration (engine/loop-guard.ts), so admission and
 	// repetition detection share one seam; there is no agent-loop hook anymore.
 	const safety = createWorkerSafety({
+		...(input.flowPolicy !== undefined ? { flowPolicy: input.flowPolicy } : {}),
+		...(input.taskGit?.taskWorktree !== undefined ? { taskWorktreeRoot: input.taskGit.taskWorktree.path } : {}),
 		cwd: process.cwd(),
 		...(input.writeRoots !== undefined ? { writeRoots: input.writeRoots } : {}),
 		...(input.writeRoots !== undefined && workerSandboxConfinesWrites() ? { writeRootsOsConfined: true } : {}),

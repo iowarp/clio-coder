@@ -15,10 +15,12 @@ import {
 	type MiddlewareHookRegistration,
 	type MiddlewareSnapshot,
 } from "../domains/middleware/index.js";
-import { classify as classifyAction } from "../domains/safety/action-classifier.js";
+import { classify as classifyAction, normalizeCallPaths } from "../domains/safety/action-classifier.js";
 import type { AdmissionGitContext } from "../domains/safety/admission.js";
 import { DEFAULT_AUTONOMY_LEVEL } from "../domains/safety/autonomy.js";
 import type { SafetyContract, SafetyDecision } from "../domains/safety/contract.js";
+import type { WorkerFlowPolicyInput } from "../domains/safety/information-flow.js";
+import { compileWorkerFlowPolicy, flowRestrictionsForCall } from "../domains/safety/information-flow.js";
 import {
 	createLoopState,
 	type LoopDetectorState,
@@ -56,6 +58,8 @@ export interface WorkerSafetyOptions {
 	/** Trees the worker's sandbox lets it read outside its workspace. */
 	readExemptRoots?: ReadonlyArray<string>;
 	protectedArtifactState?: ProtectedArtifactState;
+	flowPolicy?: WorkerFlowPolicyInput;
+	taskWorktreeRoot?: string;
 }
 
 export function createWorkerSafety(options: WorkerSafetyOptions = {}): SafetyContract {
@@ -66,6 +70,10 @@ export function createWorkerSafety(options: WorkerSafetyOptions = {}): SafetyCon
 		...(options.writeRootsOsConfined === true ? { writeRootsOsConfined: true } : {}),
 		...(options.readExemptRoots !== undefined ? { readExemptRoots: options.readExemptRoots } : {}),
 	});
+	const informationFlow =
+		options.flowPolicy === undefined
+			? policyEngine.informationFlow()
+			: compileWorkerFlowPolicy(options.flowPolicy, options.taskWorktreeRoot);
 	const protectedArtifactState: ProtectedArtifactState = {
 		artifacts: structuredClone(options.protectedArtifactState?.artifacts ?? []),
 	};
@@ -128,6 +136,15 @@ export function createWorkerSafety(options: WorkerSafetyOptions = {}): SafetyCon
 		scopes: { readonly: READONLY_SCOPE, workspace: WORKSPACE_SCOPE, confirmed: CONFIRMED_SCOPE },
 		isSubset,
 		policy: {
+			informationFlow: () => informationFlow,
+			flowRestrictionsFor: (rawCall) => {
+				const call = normalizeCallPaths(rawCall);
+				return flowRestrictionsForCall(informationFlow, {
+					tool: call.tool,
+					args: call.args,
+					cwd: options.cwd ?? process.cwd(),
+				});
+			},
 			metadata: (posture) => policyEngine.metadata(posture),
 			writeTargetViolation: (target) => workerReadOnlyTargetViolation(target) ?? policyEngine.writeTargetViolation(target),
 			allowsObservationPath: (path) =>

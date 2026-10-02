@@ -18,7 +18,7 @@ import type {
 	TargetDescriptor,
 	ThinkingLevel,
 } from "../domains/providers/index.js";
-import type { FlowRestrictionSet } from "../domains/safety/information-flow.js";
+import type { FlowRestrictionSet, WorkerFlowPolicyInput } from "../domains/safety/information-flow.js";
 import type { ProtectedArtifact } from "../domains/safety/protected-artifacts.js";
 import type { WorkerPermit } from "../domains/safety/worker-permit.js";
 import type { ToolProfileName } from "../tools/profiles.js";
@@ -31,8 +31,9 @@ import { INTERNAL_HELPER_RESULT_KINDS } from "./protocol.js";
  * ignore it, so the older document is refused rather than half-honored.
  * Version 7 parks main-authority asks for a live main-agent grant bound to
  * the attempt (`escalation.grant`); a version 6 worker would deny them.
+ * Version 8 carries parent-approved source rules so worker reads add flow labels.
  */
-export const WORKER_SPEC_VERSION = 7;
+export const WORKER_SPEC_VERSION = 8;
 export const WORKER_RUNTIME_DESCRIPTOR_VERSION = 2;
 export const WORKER_PROTECTED_ARTIFACT_STATE_VERSION = 1;
 
@@ -143,6 +144,7 @@ interface WorkerSpecFields {
 	protectedArtifactState?: WorkerProtectedArtifactState;
 	/** Information-flow restrictions the inherited context carries; judged on every worker model request. */
 	flowRestrictions?: FlowRestrictionSet;
+	flowPolicy?: WorkerFlowPolicyInput;
 	/**
 	 * Wire model ids the operator's configuration references, each tagged with
 	 * the role it serves (chat, memory, worker, target default). The worker
@@ -843,6 +845,31 @@ function validateWorkerSandbox(value: unknown): void {
 	if (typeof sandbox.network !== "boolean") throw new Error("WorkerSpec.sandbox.network must be a boolean");
 }
 
+function validateWorkerFlowPolicy(value: unknown): void {
+	const source = "WorkerSpec.flowPolicy";
+	const input = readRecord(value, source);
+	exactKeys(input, ["version", "policyHash", "trusted", "refusal", "rules"], source);
+	if (input.version !== 1 || typeof input.trusted !== "boolean")
+		throw new Error(`${source} has an invalid version or trust flag`);
+	if (input.policyHash !== null) readString(input.policyHash, `${source}.policyHash`);
+	if (input.refusal !== null) readString(input.refusal, `${source}.refusal`);
+	if (!Array.isArray(input.rules)) throw new Error(`${source}.rules must be an array`);
+	for (const [index, value] of input.rules.entries()) {
+		const name = `${source}.rules[${index}]`;
+		const rule = readRecord(value, name);
+		exactKeys(rule, ["id", "policyHash", "paths", "tools", "recipients", "dangling"], name);
+		readString(rule.id, `${name}.id`);
+		readString(rule.policyHash, `${name}.policyHash`);
+		for (const key of ["tools", "recipients", "dangling"]) readStringArray(rule[key], `${name}.${key}`);
+		if (rule.paths !== null) {
+			const paths = readRecord(rule.paths, `${name}.paths`);
+			exactKeys(paths, ["root", "sources"], `${name}.paths`);
+			readAbsolutePaths([paths.root], `${name}.paths.root`);
+			readStringArray(paths.sources, `${name}.paths.sources`);
+		}
+	}
+}
+
 export function parseWorkerSpec(value: unknown): WorkerSpec {
 	const spec = readRecord(value, "WorkerSpec");
 	if (spec.specVersion !== WORKER_SPEC_VERSION) {
@@ -915,6 +942,7 @@ export function parseWorkerSpec(value: unknown): WorkerSpec {
 	validateProtectedModels(spec.protectedModels);
 	validateRuntimeResolution(spec.runtimeResolution);
 	if (spec.middlewareSnapshot !== undefined) validateMiddlewareSnapshot(spec.middlewareSnapshot);
+	if (spec.flowPolicy !== undefined) validateWorkerFlowPolicy(spec.flowPolicy);
 	if (spec.protectedArtifactState !== undefined) validateProtectedArtifactState(spec.protectedArtifactState);
 	if (spec.flowRestrictions !== undefined) validateFlowRestrictions(spec.flowRestrictions);
 	if (spec.noSkills !== undefined && typeof spec.noSkills !== "boolean") {

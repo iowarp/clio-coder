@@ -521,6 +521,8 @@ export function startClaudeSdkWorkerRun(input: WorkerRunInput, emit: WorkerEvent
 	}
 
 	const safety = createWorkerSafety({
+		...(input.flowPolicy !== undefined ? { flowPolicy: input.flowPolicy } : {}),
+		...(input.taskGit?.taskWorktree !== undefined ? { taskWorktreeRoot: input.taskGit.taskWorktree.path } : {}),
 		cwd: process.cwd(),
 		...(input.writeRoots !== undefined ? { writeRoots: input.writeRoots } : {}),
 		...(input.protectedArtifactState !== undefined

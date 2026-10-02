@@ -1,3 +1,4 @@
+import { workerFlowPolicyInput } from "../domains/safety/information-flow.js";
 import { randomBytes, randomUUID } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -1554,6 +1555,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 				getSettings: () => effectiveSettingsForDispatch?.(),
 				getProtectedArtifactState: () => protectedArtifactStateForDispatch?.() ?? { artifacts: [] },
 				getFlowRestrictions: () => flowRestrictionsForDispatch?.() ?? null,
+				getFlowPolicy: () => workerFlowPolicyInput(safety?.policy?.informationFlow?.() ?? EMPTY_INFORMATION_FLOW_POLICY),
 				// Stamps every run with the session that dispatched it, which is what
 				// keeps a sibling Clio process's runs and batches out of this one.
 				getSessionId: () => sessionIdForDispatch?.() ?? null,
