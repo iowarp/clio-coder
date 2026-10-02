@@ -304,6 +304,9 @@ function fitNames(prefix: string, names: readonly string[], room: number): strin
 	return truncateToWidth(`${prefix}${names[0] ?? ""}`, Math.max(1, room), GLYPH.ellipsis);
 }
 
+/** The widest stats a row carries, `272K/272K (100.0%) | 999 tps`. */
+const STATS_RESERVE_WIDTH = 28;
+
 /** Workspace and counts above; notices and active harness facts below. */
 export function renderCompactDashboard(state: FooterDashboardRenderState, width: number): string[] {
 	const theme = clioTheme();
@@ -319,12 +322,16 @@ export function renderCompactDashboard(state: FooterDashboardRenderState, width:
 			? metricText(theme, String(rate >= 10 ? Math.round(rate) : Math.round(rate * 10) / 10), "tps")
 			: "";
 	const metrics = [counter, speed].filter(Boolean).join(theme.fg("border", " | "));
-	const values = visibleWidth(metrics) <= Math.floor(w * 0.4) ? metrics : counter;
-	const valueWidth = Math.min(Math.floor(w * 0.4), visibleWidth(values));
+	const statsCap = Math.floor(w * 0.4);
+	const values = visibleWidth(metrics) <= statsCap ? metrics : counter;
+	// Once a figure shows, the stats column keeps its widest width (and the dirty
+	// marker its two columns) whatever the turn adds or drops, so the path's cut
+	// point stays where it was. With no figure yet the path has the whole row.
+	const valueWidth = values === "" ? 0 : Math.min(statsCap, Math.max(visibleWidth(values), STATS_RESERVE_WIDTH));
 	const workspaceWidth = Math.max(1, valueWidth === 0 ? w : w - valueWidth - 3);
 	// Until the first probe lands the branch is unknown, not absent: say nothing.
 	const git = state.workspace.branchPending ? "" : clean(state.workspace.branch ?? "no Git branch");
-	const dirtyMarker = state.workspace.dirty ? theme.fg("warning", " *") : "";
+	const dirtyMarker = state.workspace.dirty ? theme.fg("warning", " *") : "  ";
 	const gitWidth =
 		git === ""
 			? 0
@@ -335,8 +342,11 @@ export function renderCompactDashboard(state: FooterDashboardRenderState, width:
 		git === ""
 			? cwdLabel
 			: `${cwdLabel}${separator}${theme.fg("branch", fitIdentityLabel(git, Math.max(1, gitWidth - visibleWidth(dirtyMarker))))}${dirtyMarker}`;
+	const statsGap = " ".repeat(Math.max(0, valueWidth - visibleWidth(values)));
 	const firstRow = fit(
-		valueWidth === 0 ? fit(workspace, workspaceWidth) : `${fit(workspace, workspaceWidth)}   ${fit(values, valueWidth)}`,
+		valueWidth === 0
+			? fit(workspace, workspaceWidth)
+			: `${fit(workspace, workspaceWidth)}   ${statsGap}${fit(values, valueWidth - statsGap.length)}`,
 	);
 
 	const feedback = topNotification(
