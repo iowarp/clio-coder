@@ -384,19 +384,14 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 	let approvedFlow: ApprovedFlowPolicy | null = null;
 	if (projectPolicy.path === null && projectPolicy.valid) {
 		// Deleting the policy disables future source labeling; carried labels stay in the session ledger.
-		flowRefusal = forgetApprovedFlowPolicy(projectPolicyRoot);
+		flowRefusal = forgetApprovedFlowPolicy(cwd);
 	} else if (flowTrusted && projectPolicy.hash !== null && projectPolicy.path !== null) {
 		flowRefusal =
 			projectPolicy.informationFlow.sources.length > 0
-				? rememberApprovedFlowPolicy(
-						projectPolicyRoot,
-						projectPolicy.path,
-						projectPolicy.hash,
-						projectPolicy.informationFlow,
-					)
-				: forgetApprovedFlowPolicy(projectPolicyRoot);
+				? rememberApprovedFlowPolicy(cwd, projectPolicy.path, projectPolicy.hash, projectPolicy.informationFlow)
+				: forgetApprovedFlowPolicy(cwd);
 	} else {
-		const recalled = recallApprovedFlowPolicy(projectPolicyRoot);
+		const recalled = recallApprovedFlowPolicy(cwd);
 		if (recalled.kind === "approved") approvedFlow = recalled.approved;
 		else if (recalled.kind === "unavailable") flowRefusal = recalled.reason;
 	}
