@@ -23,10 +23,12 @@
 	justify-content: space-between;
 	gap: var(--space-2) var(--space-4);
 	padding: var(--space-2) var(--space-2) var(--space-2) var(--space-4);
-	border: 1px solid var(--action-line);
-	border-radius: 10px;
-	background: var(--surface);
-	box-shadow: none;
+	border: 1px solid var(--line);
+	border-left: 3px solid var(--action-line);
+	border-radius: var(--radius-md);
+	background: var(--overlay);
+	box-shadow: var(--shadow-panel);
+	animation: approval-arrive var(--motion-entry) var(--ease-standard) both;
 }
 .approval-strip {
 	display: flex;
@@ -45,7 +47,8 @@
 	color: var(--action-fg);
 }
 .approval-strip__eyebrow {
-	font-weight: 500;
+	font: 500 var(--text-exact) / 1.5 var(--font-mono);
+	letter-spacing: 0.04em;
 	white-space: nowrap;
 	color: var(--action-fg);
 }
@@ -102,9 +105,10 @@
 	display: grid;
 	gap: var(--space-3);
 	padding: var(--space-4);
-	border: 1px solid var(--action-line);
-	border-radius: 14px;
-	background: var(--wb-faint);
+	border: 1px solid var(--line);
+	border-left: 3px solid var(--action-line);
+	border-radius: var(--radius-md);
+	background: var(--surface);
 	color: var(--ink);
 	box-shadow: var(--shadow-raised);
 }
@@ -118,12 +122,16 @@
 	border-color: var(--status-fail-line);
 	border-left-width: var(--space-1);
 }
+.approval-banner--strip:has([data-escalated="true"]) {
+	border-left-color: var(--status-fail-line);
+}
+/* A boundary carries a copper rule and a copper label, as boundaries do in the site's guides. */
 .approval-card__eyebrow {
 	margin: 0;
-	font-size: var(--text-instrument);
+	font: 500 11px / 1.5 var(--font-mono);
 	letter-spacing: var(--tracking-instrument);
 	text-transform: uppercase;
-	color: var(--ink-muted);
+	color: var(--action-fg);
 }
 .approval-card__title {
 	margin: 0;
@@ -355,7 +363,7 @@
 	margin-left: var(--space-2);
 	padding: 0 var(--space-2);
 	border-radius: var(--radius-pill);
-	background: var(--surface-sunken);
+	background: var(--well);
 	font-size: var(--text-instrument);
 	color: var(--ink-muted);
 }
@@ -528,5 +536,13 @@
 	}
 	.live-workers .fleet-steer[data-mode="idle"] > .fleet-steer__outcome {
 		grid-area: 4 / 2 / auto / -1;
+	}
+}
+
+/* The pinned strip slides down into place once when an approval arrives; it never repeats. */
+@keyframes approval-arrive {
+	from {
+		opacity: 0;
+		transform: translateY(calc(var(--motion-distance) * -1));
 	}
 }

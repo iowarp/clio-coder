@@ -3,6 +3,7 @@
 	flex: 1;
 	min-height: 0;
 	overflow-y: auto;
+	container-type: inline-size;
 	display: grid;
 	align-items: center;
 	padding: var(--space-6) var(--space-6) var(--space-12);
@@ -222,67 +223,137 @@
 	color: var(--ink);
 }
 
-/* First run: two numbered steps, each marked done in place. */
+/* ---- first run ----------------------------------------------------------------
+   The stage assembles the mark as setup completes; the steps sit on one rule with copper numbers,
+   like the step lists in the site's guides. Wide cards put the stage beside the steps. */
+.newtask__inner:has(> .onboard) {
+	gap: var(--space-6);
+}
+.newtask__inner:has(> .onboard) .clio-stage {
+	--stage-size: 112px;
+	margin-top: var(--space-4);
+}
+.newtask__inner:has(> .onboard) .newtask__title {
+	font-size: clamp(30px, 4vw, 44px);
+}
+/* Setup just finished: the stage keeps its size for the finale, then settles into the plain mark. */
+.newtask__inner .clio-stage[data-finale] {
+	--stage-size: 132px;
+}
+.newtask__inner:has(> .onboard) .clio-stage__halo {
+	opacity: 0.5;
+}
+@container (min-width: 960px) {
+	.newtask__inner:has(> .onboard) {
+		width: min(100%, 1080px);
+		grid-template-columns: minmax(0, 5fr) minmax(0, 7fr);
+		grid-template-rows: auto auto 1fr;
+		column-gap: clamp(var(--space-12), 7cqi, 112px);
+		row-gap: var(--space-6);
+		align-items: start;
+		justify-items: stretch;
+	}
+	.newtask__inner:has(> .onboard) .clio-stage {
+		--stage-size: 148px;
+		--stage-x: calc(var(--stage-size) / 2);
+		grid-column: 1;
+		grid-row: 1;
+		justify-items: start;
+		margin-top: 0;
+	}
+	.newtask__inner:has(> .onboard) .newtask__title {
+		grid-column: 1;
+		grid-row: 2;
+		text-align: left;
+		font-size: clamp(40px, 4.4cqi, 56px);
+		line-height: 1.08;
+	}
+	.newtask__inner:has(> .onboard) > .onboard,
+	.newtask__inner:has(> .onboard) > .newtask__notice {
+		grid-column: 2;
+		grid-row: 1 / span 3;
+	}
+}
+
 .onboard {
 	display: grid;
-	gap: var(--space-3);
 	width: 100%;
 	margin: 0;
 	padding: 0;
 	list-style: none;
+	counter-reset: none;
 }
 ol.onboard > li {
 	display: grid;
-	grid-template-columns: 32px minmax(0, 1fr);
-	gap: var(--space-4);
-	padding: var(--space-5);
-	border: 1px solid var(--line-strong);
-	border-radius: 16px;
-	background: var(--wb-faint);
+	grid-template-columns: 36px minmax(0, 1fr);
+	gap: var(--space-3);
+	padding: var(--space-5) 0;
+	border-top: 1px solid var(--line);
 }
-ol.onboard > li[data-done="true"] {
-	border-color: var(--line);
-	background: transparent;
+ol.onboard > li:last-child {
+	border-bottom: 1px solid var(--line);
 }
 .onboard__mark {
 	display: grid;
-	place-items: center;
-	width: 28px;
-	height: 28px;
-	border: 1.5px solid var(--line-strong);
-	border-radius: 50%;
-	font-size: var(--text-meta);
-	font-weight: 600;
-	color: var(--ink-muted);
+	place-items: center start;
+	height: 26px;
+	font: 500 13px / 1 var(--font-mono);
+	font-variant-numeric: tabular-nums;
+	color: var(--secondary);
 }
 ol.onboard > li[data-done="true"] .onboard__mark {
-	border-color: var(--accent);
-	background: var(--accent-soft);
 	color: var(--accent);
 }
 .onboard__mark .icon {
-	width: 15px;
-	height: 15px;
+	width: 18px;
+	height: 18px;
 	stroke-width: 2.4;
+	animation: onboard-tick var(--motion-entry) var(--ease-standard) both;
 }
 .onboard h2 {
 	margin: 2px 0 var(--space-1);
 	font-family: var(--font-ui);
-	font-size: var(--text-body);
+	font-size: var(--text-h3);
 	font-weight: 600;
-	letter-spacing: -0.1px;
+	letter-spacing: -0.2px;
+	line-height: 1.3;
+}
+ol.onboard > li[data-done="true"] h2 {
+	color: var(--ink-muted);
+	font-weight: 500;
 }
 .onboard p {
 	margin: 0 0 var(--space-3);
-	font-size: var(--text-meta);
-	line-height: 1.55;
+	max-width: 58ch;
+	font-size: var(--text-body);
+	line-height: var(--leading-body);
 	color: var(--ink-muted);
 }
 ol.onboard > li[data-done="true"] p {
 	margin-bottom: 0;
+	font-family: var(--font-mono);
+	font-size: var(--text-exact);
 }
 .onboard .primary {
 	margin-top: var(--space-1);
+}
+/* One filled action at a time: a later step waits in outline until the step before it is done. */
+ol.onboard > li:not([data-done="true"]) ~ li:not([data-done="true"]) .primary:not(:hover) {
+	border-color: var(--line-strong);
+	background: transparent;
+	color: var(--accent);
+}
+.onboard button {
+	padding: 7px 14px;
+	border-radius: var(--radius-sm);
+}
+
+/* A finished step's tick lands with the stage's ring; it never loops. */
+@keyframes onboard-tick {
+	from {
+		opacity: 0;
+		transform: scale(0.6) rotate(-20deg);
+	}
 }
 
 .onboard .wb-link-button {
@@ -290,7 +361,7 @@ ol.onboard > li[data-done="true"] p {
 	align-items: center;
 	gap: var(--space-2);
 	min-height: 34px;
-	padding: 0 13px;
-	border-radius: 8px;
+	padding: 0 14px;
+	border-radius: var(--radius-sm);
 	text-decoration: none;
 }

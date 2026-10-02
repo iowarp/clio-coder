@@ -86,7 +86,7 @@
 	padding: var(--space-2) var(--space-3);
 	border: 1px solid var(--line);
 	border-radius: var(--radius-md);
-	background: var(--surface-sunken);
+	background: var(--well);
 }
 .composer__modes legend {
 	font-size: var(--text-instrument);
@@ -440,7 +440,7 @@
 	padding: var(--space-3);
 	border: 1px solid var(--line);
 	border-radius: var(--radius-md);
-	background: var(--surface-sunken);
+	background: var(--well);
 }
 .composer__queue-summary {
 	margin: 0;
@@ -557,7 +557,7 @@
 	padding: var(--space-3);
 	border: 1px solid var(--line-strong);
 	border-radius: var(--radius-sm);
-	background: var(--surface-sunken);
+	background: var(--well);
 }
 .turn-usage__details div {
 	display: grid;
@@ -650,7 +650,7 @@
 	object-fit: cover;
 	border: 1px solid var(--line-strong);
 	border-radius: var(--radius-xs);
-	background: var(--surface-sunken);
+	background: var(--well);
 }
 .composer__attachment-file {
 	display: grid;
@@ -660,7 +660,7 @@
 	height: 48px;
 	border: 1px solid var(--line-strong);
 	border-radius: var(--radius-xs);
-	background: var(--surface-sunken);
+	background: var(--well);
 	font-family: var(--font-mono);
 	font-size: var(--text-exact);
 	color: var(--ink-muted);

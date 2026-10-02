@@ -13,12 +13,28 @@
 	padding: var(--space-10) var(--space-8);
 	box-sizing: border-box;
 }
+/* The placeholders rise in as one block, then each line breathes on opacity alone, staggered, which
+   the compositor runs without repainting; the old shimmer moved background-position and repainted
+   every frame. One animation per element: Chrome keeps an element with two animations on the main
+   thread for every frame, even after one has finished. */
+.task-skeleton__body {
+	animation: skeleton-rise var(--motion-entry) var(--ease-standard) backwards;
+}
 .task-skeleton__line {
 	height: 14px;
 	width: 72%;
 	border-radius: 7px;
-	background: linear-gradient(90deg, var(--wb-hover), var(--wb-active), var(--wb-hover)) 0 0 / 200% 100%;
-	animation: task-skeleton 1.6s ease-in-out infinite;
+	background: var(--wb-active);
+	animation: skeleton-breathe var(--motion-feedback) var(--ease-standard) var(--motion-entry) infinite alternate;
+}
+.task-skeleton__line:nth-child(2) {
+	animation-delay: calc(var(--motion-entry) + var(--motion-stagger));
+}
+.task-skeleton__line:nth-child(3) {
+	animation-delay: calc(var(--motion-entry) + var(--motion-stagger) * 2);
+}
+.task-skeleton__line:nth-child(4) {
+	animation-delay: calc(var(--motion-entry) + var(--motion-stagger) * 3);
 }
 .task-skeleton__line--request {
 	justify-self: end;
@@ -32,14 +48,15 @@
 .task-skeleton__line--short {
 	width: 46%;
 }
-@keyframes task-skeleton {
-	to {
-		background-position: -200% 0;
+@keyframes skeleton-rise {
+	from {
+		opacity: 0;
+		transform: translateY(var(--motion-distance));
 	}
 }
-@media (prefers-reduced-motion: reduce) {
-	.task-skeleton__line {
-		animation: none;
+@keyframes skeleton-breathe {
+	to {
+		opacity: 0.45;
 	}
 }
 

@@ -160,12 +160,18 @@ h1 em {
 	color: var(--accent);
 	font-weight: 400;
 }
+/* Matches the site's eyebrow: small mono capitals at regular weight. */
 .eyebrow {
-	font-size: var(--text-instrument);
-	letter-spacing: var(--tracking-instrument);
+	font-size: 11px;
+	letter-spacing: 0.1em;
 	text-transform: uppercase;
 	color: var(--ink-muted);
-	font-weight: 700;
+	font-weight: 500;
+	line-height: 1.6;
+}
+/* .trace-panel p outranks .eyebrow by one element, which set panel eyebrows at body size. */
+.trace-panel .eyebrow {
+	font-size: 11px;
 	line-height: 1.6;
 }
 .intro {
@@ -205,7 +211,7 @@ h1 em {
 	color: var(--ink-muted);
 }
 .icon-button:hover:not(:disabled) {
-	background: var(--surface-sunken);
+	background: var(--well);
 	color: var(--ink);
 }
 .sr-only {
@@ -266,7 +272,7 @@ nav a {
 		background var(--motion-fast) var(--ease-standard);
 }
 nav a:hover {
-	background: var(--surface-sunken);
+	background: var(--well);
 	color: var(--ink);
 }
 
@@ -510,7 +516,7 @@ nav a:hover {
 	margin-left: 15px;
 }
 .operation {
-	background: var(--surface-sunken);
+	background: var(--well);
 	border-left: 3px solid var(--accent);
 	padding: 22px;
 	margin-top: 28px;
@@ -806,6 +812,14 @@ nav a:hover {
 	border-radius: var(--radius-sm);
 	color: var(--accent);
 }
+/* The panel's quiet button rule outranks .primary by one element; restate the fill so a panel's
+   one important action still reads as primary. */
+.trace-panel button.primary,
+.trace-filters button.primary {
+	border-color: var(--primary-fill);
+	background: var(--primary-fill);
+	color: var(--on-primary);
+}
 .trace-panel summary {
 	cursor: pointer;
 	margin: var(--space-3) 0;
@@ -846,7 +860,7 @@ nav a:hover {
 	overflow: auto;
 	white-space: pre-wrap;
 	overflow-wrap: anywhere;
-	background: var(--surface-sunken);
+	background: var(--well);
 	padding: var(--space-4);
 	font-size: var(--text-exact);
 	line-height: 1.6;
@@ -982,7 +996,7 @@ nav a:hover {
 	height: 10px;
 	border: 1px solid var(--line-strong);
 	border-radius: var(--radius-sm);
-	background: var(--surface-sunken);
+	background: var(--well);
 	overflow: hidden;
 }
 .trace-histogram__track > i {
@@ -1036,7 +1050,7 @@ nav a:hover {
 }
 .workspace-browser__current {
 	padding: var(--space-3);
-	background: var(--surface-sunken);
+	background: var(--well);
 	border-radius: var(--radius-sm);
 }
 .workspace-browser__current code {
@@ -1067,7 +1081,7 @@ nav a:hover {
 	width: 100%;
 	min-width: 0;
 	text-align: left;
-	background: var(--surface-sunken);
+	background: var(--well);
 }
 .workspace-browser__folders button span:nth-child(2) {
 	flex: 1;
@@ -1177,7 +1191,7 @@ nav a:hover {
 	margin-block: var(--space-4);
 }
 .session-controls {
-	background: var(--surface-sunken);
+	background: var(--well);
 }
 .session-controls > h2,
 .session-settings > h2 {

@@ -49,7 +49,7 @@
 .fact__chips li {
 	border: 1px solid var(--line);
 	border-radius: var(--radius-sm);
-	background: var(--surface-sunken);
+	background: var(--well);
 	padding: 1px var(--space-2);
 	font-family: var(--font-mono);
 	font-size: var(--text-meta);
