@@ -170,6 +170,7 @@ import type { AutonomyLevel, FlowRestrictionSet, SafetyContract } from "../domai
 import {
 	EMPTY_INFORMATION_FLOW_POLICY,
 	flowTransferRefusal,
+	flowUnmediatedAgentRefusal,
 	isFlowRestrictionSet,
 	mergeFlowRestrictions,
 	modelMayActivateSkills,
@@ -2228,6 +2229,8 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 					mux,
 					getSettings: () => getCurrentSettings(),
 					getDispatchSnapshot: () => dispatch.snapshot(),
+					agentRefusal: () =>
+						flowUnmediatedAgentRefusal(safety?.policy?.informationFlow?.() ?? EMPTY_INFORMATION_FLOW_POLICY, null),
 					getCwd: () => process.cwd(),
 				})
 			: null;

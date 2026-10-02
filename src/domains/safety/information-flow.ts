@@ -147,6 +147,8 @@ export interface WorkerFlowPolicyInput {
 	readonly version: 1;
 	readonly policyHash: string | null;
 	readonly trusted: boolean;
+	/** Approved snapshot rules retained while the live policy is untrusted. */
+	readonly approvedRuleIds?: ReadonlyArray<string>;
 	readonly refusal: string | null;
 	readonly rules: ReadonlyArray<{
 		readonly id: string;
@@ -163,6 +165,7 @@ export function workerFlowPolicyInput(policy: InformationFlowPolicy): WorkerFlow
 		version: 1,
 		policyHash: policy.policyHash,
 		trusted: policy.trusted,
+		...(policy.approvedRuleIds !== undefined ? { approvedRuleIds: policy.approvedRuleIds } : {}),
 		refusal: policy.refusal,
 		rules: policy.rules.map((rule) => ({
 			...rule,
@@ -180,6 +183,7 @@ export function compileWorkerFlowPolicy(
 	return {
 		policyHash: input.policyHash,
 		trusted: input.trusted,
+		...(input.approvedRuleIds !== undefined ? { approvedRuleIds: input.approvedRuleIds } : {}),
 		refusal: input.refusal,
 		rules: input.rules.map((rule) => {
 			const paths =
@@ -220,6 +224,8 @@ interface CompiledSourceRule {
 export interface InformationFlowPolicy {
 	readonly policyHash: string | null;
 	readonly trusted: boolean;
+	/** Approved snapshot rules retained while the live policy is untrusted. */
+	readonly approvedRuleIds?: ReadonlyArray<string>;
 	readonly rules: ReadonlyArray<CompiledSourceRule>;
 	/**
 	 * Why this policy cannot vouch for any transfer right now: the approved
@@ -472,6 +478,7 @@ export function compileInformationFlowPolicy(
 	return {
 		policyHash: policyHash ?? approved?.policyHash ?? null,
 		trusted: false,
+		approvedRuleIds: approvedRules.map((rule) => rule.id),
 		rules: [...approvedRules, ...unapprovedRules],
 		refusal,
 	};
@@ -761,4 +768,29 @@ export function flowHandoffRefusal(destination: string, restrictions: FlowRestri
 	if (restrictions === null || restrictions.restrictions.length === 0) return null;
 	const rules = [...new Set(restrictions.restrictions.map((r) => r.ruleId))].join(", ");
 	return `dispatch: ${destination} cannot carry context restricted by information-flow rule ${rules}; the delegated agent's model requests are not admitted by Clio`;
+}
+
+/** Unmediated agents can read any source themselves, even before their parent has read one. */
+export function flowUnmediatedAgentRefusal(
+	policy: InformationFlowPolicy,
+	destination: FlowDestination | null,
+): string | null {
+	const rules = policy.rules.filter((rule) => policy.trusted || policy.approvedRuleIds?.includes(rule.id));
+	if (rules.length === 0) return null;
+	const denied = rules.filter((rule) => {
+		if (destination === null) return true;
+		return (
+			evaluateInformationFlow({
+				policy,
+				destination,
+				restrictions: {
+					version: 1,
+					restrictions: [{ ruleId: rule.id, policyHash: rule.policyHash, sourceRef: rule.id, recipients: rule.recipients }],
+				},
+			}).kind !== "permitted"
+		);
+	});
+	if (denied.length === 0) return null;
+	const where = destination === null ? "an agent with no pinned model destination" : describeDestination(destination);
+	return `dispatch: information-flow rules (${denied.map((rule) => rule.id).join(", ")}) do not allow ${where}; its runtime cannot admit its own model requests. Dispatch to a native HTTP target, or add the target to the rules' recipients and approve again with clio-coder config trust safety`;
 }

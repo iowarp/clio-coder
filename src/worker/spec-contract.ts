@@ -848,7 +848,8 @@ function validateWorkerSandbox(value: unknown): void {
 function validateWorkerFlowPolicy(value: unknown): void {
 	const source = "WorkerSpec.flowPolicy";
 	const input = readRecord(value, source);
-	exactKeys(input, ["version", "policyHash", "trusted", "refusal", "rules"], source);
+	exactKeys(input, ["version", "policyHash", "trusted", "approvedRuleIds", "refusal", "rules"], source);
+	if (input.approvedRuleIds !== undefined) readStringArray(input.approvedRuleIds, `${source}.approvedRuleIds`);
 	if (input.version !== 1 || typeof input.trusted !== "boolean")
 		throw new Error(`${source} has an invalid version or trust flag`);
 	if (input.policyHash !== null) readString(input.policyHash, `${source}.policyHash`);

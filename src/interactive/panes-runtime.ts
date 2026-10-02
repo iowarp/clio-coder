@@ -51,6 +51,8 @@ export interface PanesRuntimeDeps {
 	/** Live dispatch state, used to turn a fuzzy agent id into a run id. */
 	getDispatchSnapshot: () => DispatchSnapshot;
 	getCwd: () => string;
+	/** Admission before an external peer can read the workspace. */
+	agentRefusal?: () => string | null;
 	/** Injection seam for tests; production uses the toolchain ladder. */
 	resolveBinaryPath?: (name: string) => string | null;
 	/** Journal root override for tests. */
@@ -353,6 +355,8 @@ export function createPanesRuntime(deps: PanesRuntimeDeps): PanesOperations {
 		},
 
 		async handoff(request): Promise<PanesOpenResult> {
+			const refusal = deps.agentRefusal?.() ?? null;
+			if (refusal !== null) return { status: "refused", reason: refusal };
 			if (!PANE_PEER_IDS.includes(request.peer))
 				return { status: "refused", reason: `unknown coding peer: ${request.peer}` };
 			if (!deps.mux.available()) return { status: "unavailable", reason: unavailableReason(deps.mux) };

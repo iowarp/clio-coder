@@ -6,7 +6,13 @@ import { WORKER_STDIN_FRAME_MAX_BYTES } from "../../worker/protocol.js";
 import { WORKER_CONTEXT_PREAMBLE } from "../context/worker/select.js";
 import { persistWorkerContextSeed } from "../context/worker/store.js";
 import type { WorkerFlowPolicyInput } from "../safety/information-flow.js";
-import { flowHandoffRefusal } from "../safety/information-flow.js";
+import {
+	compileWorkerFlowPolicy,
+	flowHandoffRefusal,
+	flowTransferRefusal,
+	flowUnmediatedAgentRefusal,
+	resolveModelDestination,
+} from "../safety/information-flow.js";
 /**
  * Dispatch domain wire-up (post-W5).
  *
@@ -2638,15 +2644,22 @@ function buildDispatchWorkerSpec(input: DispatchWorkerSpecInput, config?: Config
 			artifacts: protectedArtifactState.artifacts,
 		};
 	}
+	if (input.target.runtime.kind !== "http") {
+		const policy = input.flowPolicy === undefined ? null : compileWorkerFlowPolicy(input.flowPolicy);
+		const destination = resolveModelDestination({
+			targetId: input.target.target.id,
+			runtimeId: input.target.runtime.id,
+			url: input.target.target.url,
+			model: input.target.wireModelId,
+		});
+		const refusal =
+			policy === null
+				? flowHandoffRefusal(input.target.runtime.id, input.flowRestrictions ?? null)
+				: (flowUnmediatedAgentRefusal(policy, destination) ??
+					flowTransferRefusal(policy, input.flowRestrictions ?? null, destination));
+		if (refusal !== null) throw new Error(refusal);
+	}
 	if (input.flowRestrictions !== undefined && input.flowRestrictions !== null) {
-		// Only the native worker runs every model request through the flow
-		// admission seam. An SDK or subprocess runtime sends on its own, so
-		// restricted context is refused rather than handed over unjudged.
-		if (input.target.runtime.kind !== "http") {
-			throw new Error(
-				`dispatch: the session context carries information-flow restrictions (${[...new Set(input.flowRestrictions.restrictions.map((r) => r.ruleId))].join(", ")}) and the ${input.target.runtime.id} runtime cannot admit its own model requests against them; dispatch to a native HTTP target or start a session without the restricted reads`,
-			);
-		}
 		spec.flowRestrictions = structuredClone(input.flowRestrictions) as FlowRestrictionSet;
 	}
 	if (input.req.responseSchema !== undefined) spec.responseSchema = input.req.responseSchema;
@@ -6026,6 +6039,11 @@ export function createDispatchBundle(
 			assertPlannedNodeIdentity(req, { id: "local", kind: "local" });
 			assertTurnConstraintCompatibility(req, [], false);
 			assertProtectedArtifactsEnforceable("acp-delegation", false, protectedArtifactState);
+			const flowPolicy = options?.getFlowPolicy?.();
+			if (flowPolicy !== undefined) {
+				const refusal = flowUnmediatedAgentRefusal(compileWorkerFlowPolicy(flowPolicy), null);
+				if (refusal !== null) throw new Error(refusal);
+			}
 			assertFlowHandoffMediated("acp-delegation", options?.getFlowRestrictions?.() ?? null);
 			if (req.responseSchema !== undefined) {
 				throw new UnsupportedResponseSchemaError(
@@ -8138,6 +8156,11 @@ export function createDispatchBundle(
 			const protectedArtifactState = getProtectedArtifactState();
 			assertTurnConstraintCompatibility(req, [], false);
 			assertProtectedArtifactsEnforceable("acp-delegation", false, protectedArtifactState);
+			const flowPolicy = options?.getFlowPolicy?.();
+			if (flowPolicy !== undefined) {
+				const refusal = flowUnmediatedAgentRefusal(compileWorkerFlowPolicy(flowPolicy), null);
+				if (refusal !== null) throw new Error(refusal);
+			}
 			assertFlowHandoffMediated("acp-delegation", options?.getFlowRestrictions?.() ?? null);
 			if (req.responseSchema !== undefined) {
 				throw new UnsupportedResponseSchemaError(
