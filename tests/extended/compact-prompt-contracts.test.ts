@@ -217,8 +217,8 @@ describe("compact prompt contracts", () => {
 			deepStrictEqual(
 				compiled.sections.map((section) => section.id),
 				readOnly
-					? ["identity", "operating-contract", "tool-contract", "safety", "dispatch.read-only", "persona"]
-					: ["identity", "operating-contract", "tool-contract", "safety", "persona"],
+					? ["identity", "operating-contract", "steering", "tool-contract", "safety", "dispatch.read-only", "persona"]
+					: ["identity", "operating-contract", "steering", "tool-contract", "safety", "persona"],
 			);
 			match(compiled.systemPrompt, /You are Clio, IOWarp's coding agent, running as one bounded worker/u);
 			match(compiled.systemPrompt, /The assigned task is authoritative/u);
