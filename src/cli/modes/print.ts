@@ -141,6 +141,12 @@ interface HeadlessMainAgentResult {
 	abortReason: string | null;
 	/** Most recent transcript notice; failure detail when the turn never answered. */
 	lastNotice: string | null;
+	/**
+	 * The chat loop refused the turn before any request (an admission notice):
+	 * no target, no model, a context window it cannot fit, an image the route
+	 * cannot read. Its notice is the failure, and text mode has already printed it.
+	 */
+	admissionRefused: boolean;
 }
 
 interface HeadlessMainAgentReceiptStats {
@@ -257,8 +263,12 @@ function resultFromEvent(event: ChatLoopEvent, current: HeadlessMainAgentResult)
 	}
 	if (event.type === "notice") {
 		if (event.surface !== "transcript") return current;
-		if (event.admission?.reason === "image-input-unsupported") {
-			return { ...current, lastNotice: event.text, error: event.text };
+		// Every admission notice ends the turn before the provider is called. Only
+		// the image case used to count as a failure, so an empty home's "not
+		// configured" notice was chased by "provider stream ended without an
+		// assistant response", which blamed a provider nobody had reached.
+		if (event.admission !== undefined) {
+			return { ...current, lastNotice: event.text, error: event.text, admissionRefused: true };
 		}
 		if (event.key === "turn.interrupted") {
 			return { ...current, lastNotice: event.text, abortReason: event.text };
@@ -268,7 +278,12 @@ function resultFromEvent(event: ChatLoopEvent, current: HeadlessMainAgentResult)
 	if (event.type !== "message_end") return current;
 	const message = event.message;
 	if (message?.role !== "assistant") return current;
-	current = { ...current, outputExhausted: message.stopReason === "length", sawTerminatingToolResult: false };
+	current = {
+		...current,
+		outputExhausted: message.stopReason === "length",
+		sawTerminatingToolResult: false,
+		admissionRefused: false,
+	};
 	const error = assistantError(message);
 	if (error) return { ...current, text: "", error };
 	const text = assistantText(message).trimEnd();
@@ -700,6 +715,7 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 		terminatingToolText: "",
 		abortReason: null,
 		lastNotice: null,
+		admissionRefused: false,
 	};
 	const receiptStats: HeadlessMainAgentReceiptStats = {
 		toolStats: new Map<string, ToolCallStat>(),
@@ -944,7 +960,9 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 			failureMessage: result.error,
 			...(budgetCeiling ? { outcomeDetail: SESSION_COST_CEILING_REASON } : {}),
 		};
-		stderrMessage = prefixHeadlessFailure(chat, result.error);
+		// Text mode printed the refusal's notice as it arrived; saying it twice
+		// reads as two failures.
+		stderrMessage = mode === "text" && result.admissionRefused ? null : prefixHeadlessFailure(chat, result.error);
 	} else if (result.outputExhausted && !result.sawTerminatingToolResult) {
 		// The provider returned normally, but generation exhausted its budget.
 		// Earlier chatter and partial prose cannot turn that terminal cause into

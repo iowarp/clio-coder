@@ -1565,7 +1565,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		} catch (err) {
 			return { ok: false, reason: err instanceof Error ? err.message : String(err) };
 		}
-		if (!agentRuntime) return { ok: false, reason: notConfiguredNotice() };
+		if (!agentRuntime) return { ok: false, reason: notConfiguredNotice(deps.getSettings().chat) };
 		const resolution = agentRuntime.runtimeResolution;
 		try {
 			if (resolution.costProvenance === "known" || resolution.costProvenance === "estimated") {
@@ -1933,7 +1933,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				return;
 			}
 			if (!agentRuntime) {
-				emitAdmissionNotice(notConfiguredNotice(), nullRuntimeAdmissionReason());
+				emitAdmissionNotice(notConfiguredNotice(deps.getSettings().chat), nullRuntimeAdmissionReason());
 				return;
 			}
 			const operatorText = text;
@@ -2956,7 +2956,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				return;
 			}
 			if (!agentRuntime) {
-				emitNotice(`[/context compact] ${notConfiguredNotice()}`);
+				emitNotice(`[/context compact] ${notConfiguredNotice(deps.getSettings().chat)}`);
 				return;
 			}
 			let compacted = false;

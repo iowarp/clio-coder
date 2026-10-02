@@ -42,12 +42,19 @@ export interface RuntimeResolutionView {
 	runtimeResolution: ResolvedRuntimeTarget;
 }
 
-export function notConfiguredNotice(): string {
+/**
+ * Why chat cannot start, in the words `clio-coder doctor` uses on its chat row,
+ * so the two surfaces name the same missing piece and the same next command.
+ */
+export function notConfiguredNotice(chat: { target?: string | null; model?: string | null } = {}): string {
+	const target = chat.target?.trim();
+	if (target && !chat.model?.trim()) {
+		return `[Clio Coder] Target '${target}' has no chat model; run \`clio-coder targets use ${target} --model <model>\`.`;
+	}
 	return [
-		"[Clio Coder] orchestrator not configured. Set one up with:",
-		"  clio-coder configure --id <id> --runtime <runtime> --url <url> --model <model> --set-orchestrator",
-		"or, when targets already exist: clio-coder targets use <id> --model <model>",
-		`(orchestrator.target + orchestrator.model live in ${settingsPath()})`,
+		"[Clio Coder] No model target is configured; run `clio-coder configure` to choose one.",
+		"Without a terminal: clio-coder configure --id <id> --runtime <runtime> --url <url> --model <model> --set-orchestrator",
+		`(chat.target and chat.model live in ${settingsPath()})`,
 	].join("\n");
 }
 
