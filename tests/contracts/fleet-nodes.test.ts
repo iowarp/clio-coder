@@ -34,7 +34,7 @@ describe("fleet node management", () => {
 		addFleetNode({ id: "builder", host: "builder.invalid", maxWorkers: 1 });
 		updateSettings((settings) => {
 			settings.targets.push({ id: "test-target", runtime: "openai-compat", url: "http://localhost:8080" });
-			settings.fleet.profiles.pinned = { node: "builder", target: "test-target" };
+			settings.fleet.profiles.pinned = { node: "builder", target: "test-target", model: null, thinkingLevel: "off" };
 		});
 		throws(() => removeFleetNode("builder"), /pinned by profiles/);
 		strictEqual(readSettings().fleet.nodes.length, 1);

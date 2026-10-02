@@ -137,7 +137,7 @@ describe("fleet lifecycle boundary", () => {
 			fleet: registry,
 			preflightVerdict: () => ({ ok: true, reason: null }),
 		});
-		strictEqual(previewBeforeStamp({ agentId: "coder", task: "build" }).node.id, "blade");
+		strictEqual(previewBeforeStamp({ agentId: "coder", executionRole: "builder", task: "build" }).node.id, "blade");
 		settings.fleet.defaultNode = null;
 		registry.recordChannelFailure("blade", "channel closed");
 		strictEqual(registry.recordChannelFailure("blade", "channel closed"), "offline");
