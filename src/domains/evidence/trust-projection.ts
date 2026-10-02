@@ -135,6 +135,7 @@ export function validationClause(status: Pick<CanonicalTrustStatus, "validationG
 	if (entry.state === "unknown" && entry.authority.id === "host-verification-baseline-failed")
 		return "check also failed on task base; change validation unknown";
 	if (entry.state === "absent") return word;
+	if (entry.state === "failed" && entry.authority.id === "receipt-quality") return "recorded validation failed";
 	if (entry.state === "validated" || entry.state === "failed") return `${word} by ${entry.authority.id}`;
 	// A named external system that could not observe the run is worth naming;
 	// the historical-format placeholder is not an authority anyone can ask.
@@ -158,9 +159,21 @@ export function formatTrustSummary(status: CanonicalTrustStatus): string {
 	].join("; ");
 }
 
+/** Human wording names the failed axis while preserving the canonical verdict for machine consumers. */
+function trustVerdictWord(status: CanonicalTrustStatus): string {
+	const verdict = trustVerdict(status);
+	if (verdict !== "compromised") return verdict;
+	if (status.artifactIntegrity.state === "failed") return trustStateWord("artifactIntegrity", "failed");
+	if (status.validationGrounding.state === "failed" || status.validationGrounding.state === "ungrounded")
+		return trustStateWord("validationGrounding", status.validationGrounding.state);
+	if (status.independentReview.state === "failed" || status.independentReview.state === "not_independent")
+		return trustStateWord("independentReview", status.independentReview.state);
+	return trustStateWord("contextProvenance", "invalid");
+}
+
 /** The tier and body under one versioned label for receipt-facing surfaces. */
 export function formatTrustSummaryLine(status: CanonicalTrustStatus): string {
-	return `trust v${TRUST_SUMMARY_VERSION}: ${trustVerdict(status)}; ${formatTrustSummary(status)}`;
+	return `trust v${TRUST_SUMMARY_VERSION}: ${trustVerdictWord(status)}; ${formatTrustSummary(status)}`;
 }
 
 /**
