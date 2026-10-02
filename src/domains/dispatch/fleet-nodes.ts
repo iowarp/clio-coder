@@ -83,15 +83,27 @@ export function removeFleetNode(id: string): void {
 	});
 }
 
-/** Read stored API keys without refreshing OAuth or writing credential state during diagnostics. */
-function fleetPreflightTargets(): FleetPreflightTarget[] {
+/**
+ * Read stored API keys without refreshing OAuth or writing credential state during diagnostics.
+ * Only targets this node is pinned to carry credentials; a dispatch sends one target's key, and
+ * a check must not send every key the operator holds. Other targets get an anonymous probe.
+ */
+function fleetPreflightTargets(nodeId: string): FleetPreflightTarget[] {
 	const registry = getRuntimeRegistry();
 	registerBuiltinRuntimes(registry);
 	const auth = openAuthStorage();
-	return readSettings().targets.map((target) => {
+	const settings = readSettings();
+	const pinned = new Set(
+		Object.values(settings.fleet.profiles)
+			.filter((profile) => profile.node === nodeId)
+			.map((profile) => profile.target),
+	);
+	if (settings.fleet.defaultNode === nodeId) pinned.add(settings.fleet.default.target);
+	return settings.targets.map((target) => {
 		const runtime = registry.get(target.runtime);
-		const headers = { ...target.auth?.headers };
-		if (runtime) {
+		const credentialed = pinned.has(target.id);
+		const headers: Record<string, string> = credentialed ? { ...target.auth?.headers } : {};
+		if (runtime && credentialed) {
 			const binding = resolveAuthTarget(target, runtime);
 			const stored = auth.get(binding.providerId);
 			const token =
@@ -126,7 +138,7 @@ export async function testFleetNode(
 	const node = fleetNode(id);
 	const result = await runFleetNodePreflight(node, resolve(projectRoot), {
 		...options,
-		targets: options.targets ?? fleetPreflightTargets(),
+		targets: options.targets ?? fleetPreflightTargets(id),
 	});
 	if (result.ok && options.verifyProject !== false) {
 		result.project = await verifyFleetProject(
