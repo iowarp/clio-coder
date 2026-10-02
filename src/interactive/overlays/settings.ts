@@ -1933,26 +1933,28 @@ const SITE_LABELS: Readonly<Record<SiteId, string>> = {
  */
 const SITE_NOTES: Readonly<Record<SiteId, { readonly does: string; readonly sends: string }>> = {
 	turn: {
-		does: "reads what your message asks for before the turn starts; it hints, and acts only under a fitted build",
+		does:
+			"reads what your message asks for without delaying it; a fitted build's hints and acts are used only when the reading lands before the prompt is built, and every other reading is only recorded",
 		sends: "your request, the tail of the last reply, your previous request and recipe descriptions",
 	},
 	toolCall: {
 		does:
-			"adds a blast-radius line to approval cards and, under a fitted build, escalates far-reaching or destructive calls to you; it never allows more",
+			"adds an advisory blast-radius line to approval cards and, in yolo, reads unrecognized commands for the record only; it never holds, parks or allows a call",
 		sends: "the call's redacted one-line target, never raw arguments",
 	},
 	toolResult: {
 		does:
-			"flags tool output that tries to instruct the agent by adding an untrusted-content banner; it never clears a result",
+			"reads web and MCP output for text that tries to instruct the agent, for the record only; the result reaches the agent unchanged and at once",
 		sends: "the head of the tool output and its source",
 	},
 	turnEnd: {
 		does:
-			"reads the final message for stalls, unproven claims and questions to you; under an unfitted build it only records",
+			"reads the final message for questions to you, stalls and unproven claims, and only records what it read; the clarification streak keeps its own reading",
 		sends: "the tail of the final message, your request, earlier requests and tool names",
 	},
 	relevance: {
-		does: "reorders long skill, capability and memory listings by meaning; it never removes an entry",
+		does:
+			"reorders long skill, capability and memory listings by meaning once a ranking has finished; a listing never waits for one and never loses an entry",
 		sends: "the need, the turn's task and entry descriptions",
 	},
 	consult: {

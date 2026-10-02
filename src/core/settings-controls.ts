@@ -517,7 +517,7 @@ const EXTRA_HELP: Record<string, [string, string]> = {
 	],
 	"turnControl.workflows": [
 		"Before Clio answers",
-		"Choose whether Clio may explore the project, check recent Git activity, recall earlier work, or collect finished background runs before answering. Project exploration and Git checks need a trained decision engine.",
+		"Choose whether Clio may explore the project, check recent Git activity, recall earlier work, or collect finished background runs before answering. Project exploration and Git checks (orientation and direction) need a fitted System One turn site, which is experimental.",
 	],
 	"turnControl.orientation.maxSplit": [
 		"Scouts per project tour",
