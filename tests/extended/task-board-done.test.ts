@@ -18,6 +18,31 @@ function ledgerEnvelope(entry: TaskLedgerEntryFields, turnId: string) {
 }
 
 describe("task board done", () => {
+	it("plans from weak-model object rows and teaches the plan action on create", async () => {
+		const board = createTaskBoardStore({ getSessionId: () => "s1", createBoardId: () => "b1" });
+		const tool = createTasksTool({ board });
+		ok(tool.prepareArguments);
+		for (const tasks of [
+			[{ id: "t1", title: "First task" }, "Second task"],
+			'[{"id":"t1","title":"First task"},"Second task"]',
+		]) {
+			const prepared = tool.prepareArguments({ action: "plan", title: "Repair", tasks });
+			deepStrictEqual(prepared.tasks, ["First task", "Second task"]);
+			strictEqual((await tool.run(prepared)).kind, "ok");
+			deepStrictEqual(
+				board.snapshot()?.tasks.map((task) => task.title),
+				["First task", "Second task"],
+			);
+		}
+		const result = await tool.run({ action: "create", title: "Repair", tasks: ["First task"] });
+		strictEqual(result.kind, "error");
+		if (result.kind === "error")
+			strictEqual(
+				result.message,
+				'tasks: unknown action \'create\'; to create a board use action="plan" with title="..." and tasks=["first task", "second task"]',
+			);
+	});
+
 	it("completes a pending task with evidence and records the implicit start", () => {
 		const store = createTaskBoardStore({ getSessionId: () => "s1", createBoardId: () => "b1" });
 		const planned = store.apply({ op: "plan", title: "issues", tasks: ["fix #12", "fix #15"] });

@@ -230,6 +230,11 @@ export function createTasksTool(deps: TasksToolDeps): ToolSpec {
 					// leave the raw string; taskTitlesArg treats it as one title
 				}
 			}
+			if (Array.isArray(prepared.tasks)) {
+				prepared.tasks = prepared.tasks.map((task: unknown) =>
+					task !== null && typeof task === "object" && "title" in task && typeof task.title === "string" ? task.title : task,
+				);
+			}
 			return prepared;
 		},
 		async run(args, options): Promise<ToolResult> {
@@ -242,7 +247,10 @@ export function createTasksTool(deps: TasksToolDeps): ToolSpec {
 			}
 			const action = typeof args.action === "string" ? args.action : "";
 			if (!(TASKS_ACTIONS as ReadonlyArray<string>).includes(action)) {
-				return { kind: "error", message: `tasks: action must be one of ${TASKS_ACTIONS.join(", ")}; got '${action}'` };
+				return {
+					kind: "error",
+					message: `tasks: unknown action '${action}'; to create a board use action="plan" with title="..." and tasks=["first task", "second task"]`,
+				};
 			}
 			const typedAction = action as TasksAction;
 			let userTasks: ReadonlyArray<UserTask>;
