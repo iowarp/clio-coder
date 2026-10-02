@@ -4314,12 +4314,38 @@ export function createDispatchBundle(
 	 * consults admission gates: a budget ceiling breach cannot prevent the
 	 * reconciler from killing a dead worker.
 	 */
+	let liveLedgerWrite: Promise<void> | null = null;
+	let liveUsageDirty = false;
+
 	function checkActiveHeartbeats(): void {
 		if (!ledger) return;
 		consumeOperatorCancelRequests();
 		const tickMonotonic = monotonicNow();
 		for (const run of active.values()) {
 			if (run.aborted || run.stallKilled) continue;
+			const row = ledger.get(run.runId);
+			// Finalizers keep active entries while persisting their sealed receipt.
+			if (!row || row.endedAt !== null) continue;
+			const meter = run.meter;
+			const tokenCount = meter.inputTokens + meter.outputTokens + meter.cacheReadTokens + meter.cacheWriteTokens;
+			const costUsd = calculateUsageCostUsd(meter, run.pricing);
+			const costProvenance = run.costProvenance === "unknown" && costUsd > 0 ? "estimated" : run.costProvenance;
+			if (
+				row.tokenCount !== tokenCount ||
+				row.inputTokenCount !== meter.inputTokens ||
+				row.outputTokenCount !== meter.outputTokens ||
+				row.costUsd !== costUsd ||
+				row.costProvenance !== costProvenance
+			) {
+				ledger.update(run.runId, {
+					tokenCount,
+					inputTokenCount: meter.inputTokens,
+					outputTokenCount: meter.outputTokens,
+					costUsd,
+					costProvenance,
+				});
+				liveUsageDirty = true;
+			}
 			if (run.awaitingOperator === true) {
 				// The orchestrator is the live party; keep the row fresh and unclassified.
 				ledger.update(run.runId, {
@@ -4370,6 +4396,20 @@ export function createDispatchBundle(
 			} catch {
 				// child may have exited between classification and reap attempt
 			}
+		}
+		// Coalesce all changed runs into one write per tick, with no growing queue.
+		// Retry on the next tick after a write failure or an update during a write.
+		if (liveUsageDirty && liveLedgerWrite === null) {
+			liveUsageDirty = false;
+			liveLedgerWrite = ledger
+				.persist()
+				.catch((error: unknown) => {
+					liveUsageDirty = true;
+					reportDispatchDiagnostic("persist live run usage", error);
+				})
+				.finally(() => {
+					liveLedgerWrite = null;
+				});
 		}
 	}
 
@@ -8756,6 +8796,7 @@ export function createDispatchBundle(
 			ownedReservations.clear();
 			publishedPathScopeRoots.clear();
 			await Promise.allSettled([...assignmentWrites]);
+			await liveLedgerWrite;
 			// After drain(), so the last run's terminal line is written before the
 			// bridge stops listening.
 			journalBridge?.stop();
@@ -8922,6 +8963,7 @@ export function createDispatchBundle(
 		}
 		await Promise.allSettled(runs.map((r) => r.finalPromise));
 		await Promise.allSettled([...assignmentWrites]);
+		await liveLedgerWrite;
 		if (ledger) await ledger.persist();
 	}
 

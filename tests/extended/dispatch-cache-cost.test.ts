@@ -1,7 +1,9 @@
 import { ok, strictEqual } from "node:assert/strict";
 import { afterEach, beforeEach, test } from "node:test";
+import { setTimeout as sleep } from "node:timers/promises";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { verifyReceiptIntegrity } from "../../src/domains/dispatch/receipt-integrity.js";
+import { openLedger } from "../../src/domains/dispatch/state.js";
 import { isolateDispatchState, makeDispatchBundle, restoreDispatchState } from "../harness/dispatch.js";
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
 
@@ -9,7 +11,8 @@ beforeEach(() => isolateDispatchState());
 afterEach(() => restoreDispatchState());
 
 for (const priced of [true, false]) {
-	test(`native dispatch retains SDK per-call cost with ${priced ? "declared" : "unknown"} flat rates`, async () => {
+	test(`native dispatch retains SDK per-call cost with ${priced ? "declared" : "unknown"} flat rates`, async (t) => {
+		t.mock.timers.enable({ apis: ["setInterval"] });
 		const settings = structuredClone(DEFAULT_SETTINGS);
 		settings.fleet.retry.maxRetries = 0;
 		settings.targets = [
@@ -79,6 +82,18 @@ for (const priced of [true, false]) {
 			await seen;
 			const expected = 0.0175 + (priced ? 0.001 : 0);
 			strictEqual(bundle.contract.snapshot().running[0]?.costUsd, expected);
+			t.mock.timers.tick(1000);
+			const deadline = Date.now() + 5000;
+			while (openLedger().get(run.runId)?.tokenCount !== 11100) {
+				ok(Date.now() < deadline, "live usage must reach the durable ledger");
+				await sleep(5);
+			}
+			const live = openLedger().get(run.runId);
+			strictEqual(live?.endedAt, null);
+			strictEqual(live?.inputTokenCount, 3000);
+			strictEqual(live?.outputTokenCount, 100);
+			strictEqual(live?.costUsd, expected);
+			strictEqual(live?.costProvenance, bundle.contract.snapshot().running[0]?.costProvenance);
 			release();
 			const receipt = await run.finalPromise;
 			strictEqual(receipt.costUsd, expected);

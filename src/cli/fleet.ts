@@ -730,7 +730,7 @@ function statusSnapshot(all = false): {
 				lineage: row.lineage ?? { parentRunId: null, rootRunId: row.id, attempt: 0, depth: 0 },
 				startedAt: row.startedAt,
 				elapsedMs: Number.isFinite(startedMs) ? Math.max(0, nowMs - startedMs) : 0,
-				tokens: { input: 0, output: 0, total: row.tokenCount },
+				tokens: { ...rowTokenSplit(row), total: row.tokenCount },
 				costUsd: row.costUsd,
 				// Absent on pre-provenance ledger rows, which readers must treat as
 				// unknown; `renderCostAmount` normalizes it rather than assuming free.
