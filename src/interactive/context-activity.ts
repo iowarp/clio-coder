@@ -16,6 +16,7 @@ export interface ContextActivitySnapshot {
 	status: ContextActivityStatus;
 	message: string;
 	startedAtMs: number;
+	phaseStartedAtMs?: number;
 	updatedAtMs: number;
 	completedAtMs: number | null;
 	current: number | null;
@@ -99,8 +100,8 @@ export function formatContextActivityRailLines(
 	// The bar measures the running stage only. Stage position is already in the
 	// trail and the step label; weighting stages equally filled 40% of the bar
 	// before a four-minute draft began (index finishes in under a second).
-	// Known counts fill the bar. Unknown work sweeps a marker across it and
-	// never suggests a percentage.
+	// Known counts fill the bar. Unknown work advances an unfilled marker
+	// monotonically within the stage without claiming a percentage (flywheel r4/1).
 	const known =
 		activity.total !== null && activity.total > 0 && activity.current !== null
 			? Math.max(0, Math.min(1, activity.current / activity.total))
@@ -108,10 +109,9 @@ export function formatContextActivityRailLines(
 				? 1
 				: null;
 	const filled = done ? width : known === null ? 0 : Math.min(width - 1, Math.floor(known * width));
-	const sweepSpan = Math.max(1, width - 1);
-	const sweepPhase = (tick * Math.max(1, Math.floor(width / 24))) % (2 * sweepSpan);
+	const stageElapsed = Math.max(0, now - (activity.phaseStartedAtMs ?? activity.startedAtMs));
 	const marker =
-		known === null && !done && !failed ? (sweepPhase <= sweepSpan ? sweepPhase : 2 * sweepSpan - sweepPhase) : filled;
+		known === null && !done && !failed ? Math.floor(((width - 1) * stageElapsed) / (stageElapsed + 30_000)) : filled;
 	const remaining = width - marker;
 	rows.push(
 		theme.fg(tone, GLYPH.barFull.repeat(known === null ? 0 : filled)) +
@@ -169,6 +169,10 @@ export function createContextActivityStore(bus: SafeEventBus): {
 			status: raw.status,
 			message: raw.message,
 			startedAtMs: startsNewRun || !current ? raw.at : current.startedAtMs,
+			phaseStartedAtMs:
+				startsNewRun || !current || current.phase !== raw.phase
+					? raw.at
+					: (current.phaseStartedAtMs ?? current.startedAtMs),
 			updatedAtMs: raw.at,
 			completedAtMs: (raw.phase === "done" && raw.status === "completed") || raw.status === "failed" ? raw.at : null,
 			current: typeof raw.current === "number" && Number.isFinite(raw.current) ? raw.current : null,
