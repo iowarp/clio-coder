@@ -1132,14 +1132,21 @@ function sublineParts(
 			? toolMeta(` · ${resourceLabel}`)
 			: "";
 	const inlineText = scalars.length > 0 ? theme.fg("toolArgument", ` · ${scalars.join(" · ")}`) : "";
-	const head = `${classMark(row.spec.class)}${isNonExecutedOutcome(finished?.outcome) ? theme.fg("warning", verb) : styledVerb(verb, row)}${object.length > 0 ? ` ${object}` : ""}${scope}${answer}${resource}${inlineText}`;
-	if (finished !== null) {
-		const ledger = ledgerTail(finished, row);
-		return { lead: `${head}${ledger.facts}`, tail: `${statusGlyph(status, meta)}${ledger.offload}` };
-	}
+	const head = (inline: string): string =>
+		`${classMark(row.spec.class)}${isNonExecutedOutcome(finished?.outcome) ? theme.fg("warning", verb) : styledVerb(verb, row)}${object.length > 0 ? ` ${object}` : ""}${scope}${answer}${resource}${inline}`;
+	const ledger = finished === null ? null : ledgerTail(finished, row);
 	const via = row.viaGateway ? toolMeta(" · via gateway") : "";
 	const local = call.excludeFromContext === true ? toolMeta(" · not sent to model") : "";
-	return { lead: `${head}${via}${local}`, tail: statusGlyph(status, meta) };
+	const compose = (inline: string): SublineParts =>
+		ledger !== null
+			? { lead: `${head(inline)}${ledger.facts}`, tail: `${statusGlyph(status, meta)}${ledger.offload}` }
+			: { lead: `${head(inline)}${via}${local}`, tail: statusGlyph(status, meta) };
+	const full = compose(inlineText);
+	if (width === undefined || inlineText.length === 0 || visibleWidth(`${full.lead}${full.tail}`) <= width) return full;
+	// A row whose status would wrap onto a second line gives up its scalar
+	// arguments first, but only when that is enough to keep the row whole.
+	const lean = compose("");
+	return visibleWidth(`${lean.lead}${lean.tail}`) <= width ? lean : full;
 }
 
 /**
