@@ -107,9 +107,10 @@ for (const width of [40, 43, 44, 60, 92, 120]) {
 			);
 		for (const line of lines) assert.ok(visibleWidth(line) <= width, `${visibleWidth(line)} exceeds ${width}`);
 		assert.match(f.selected(width), /Repair particle output/);
-		if (width >= 92) {
-			assert.ok(lines.some((line) => /3 msgs/.test(line)));
-			assert.ok(lines.some((line) => /gateway/.test(line)));
+		if (width >= 60) {
+			assert.ok(lines.some((line) => /3 turns/.test(line)));
+			assert.ok(lines.some((line) => /science/.test(line)));
+			if (width >= 92) assert.ok(lines.some((line) => /gateway/.test(line)));
 		}
 	});
 }
@@ -200,18 +201,16 @@ it("page navigation resumes the visibly selected ID and clamps at both ends", (t
 	);
 	const f = picker(t, sessions);
 	f.input("\x1b[6~");
-	assert.match(f.selected(), /Task 12 unique topic/);
-	f.input("\x1b[6~");
-	f.input("\x1b[6~");
+	assert.match(f.selected(), /Task 6 unique topic/);
+	for (let page = 0; page < 4; page++) f.input("\x1b[6~");
 	assert.match(f.selected(), /Task 27 unique topic/);
 	f.input("\x1b[5~");
-	assert.match(f.selected(), /Task 15 unique topic/);
-	f.input("\x1b[5~");
-	f.input("\x1b[5~");
+	assert.match(f.selected(), /Task 21 unique topic/);
+	for (let page = 0; page < 4; page++) f.input("\x1b[5~");
 	assert.match(f.selected(), /Task 0 unique topic/);
 	f.input("\x1b[6~");
 	f.input("\r");
-	assert.deepEqual(f.resumed, ["id-12"]);
+	assert.deepEqual(f.resumed, ["id-6"]);
 });
 
 it("keeps configured navigation and confirm keys with duplicate display names", (t) => {

@@ -1,6 +1,7 @@
 import { basename } from "node:path";
 import { sanitizeCallTargetText } from "../../domains/safety/call-target.js";
 import type { SessionContract, SessionMeta } from "../../domains/session/contract.js";
+import type { TuiMouseEvent, TuiMouseEventResult } from "../../engine/tui.js";
 import {
 	getKeybindings,
 	Input,
@@ -8,9 +9,9 @@ import {
 	type OverlayHandle,
 	type SelectItem,
 	SelectList,
-	type SelectListLayoutOptions,
 	Text,
 	type TUI,
+	truncateToWidth,
 } from "../../engine/tui.js";
 import { relative } from "../format-time.js";
 import { buildHint, DEFAULT_SELECT_THEME, FILTER_HINT, FocusBox, showClioOverlayFrame } from "../overlay-frame.js";
@@ -18,18 +19,50 @@ import { GLYPH } from "../theme/index.js";
 import { filterSessions } from "./session-selector-search.js";
 
 export const SESSION_OVERLAY_WIDTH = 110;
-const VISIBLE_ROWS = 12;
+const VISIBLE_ROWS = 6;
 export const SESSION_ESCAPE_GRACE_MS = 75;
 const ESC = String.fromCharCode(27);
 
-/**
- * Identity owns the primary column. SelectList drops the secondary metadata
- * when space is tight, so the task remains recognizable at narrow widths.
- */
-const SESSION_LAYOUT: SelectListLayoutOptions = {
-	minPrimaryColumnWidth: 32,
-	maxPrimaryColumnWidth: 52,
-};
+/** Session metadata gets its own row so a narrow picker never drops it (flywheel r4/5). */
+class SessionSelectList extends SelectList {
+	constructor(
+		private readonly sessionItems: SelectItem[],
+		private readonly visibleSessions: number,
+	) {
+		super(sessionItems, visibleSessions, DEFAULT_SELECT_THEME);
+	}
+
+	override render(width: number): string[] {
+		if (width <= 0) return [];
+		const selected = Math.max(
+			0,
+			this.sessionItems.findIndex((item) => item.value === this.getSelectedItem()?.value),
+		);
+		const start = Math.max(
+			0,
+			Math.min(selected - Math.floor(this.visibleSessions / 2), this.sessionItems.length - this.visibleSessions),
+		);
+		const end = Math.min(start + this.visibleSessions, this.sessionItems.length);
+		const rows: string[] = [];
+		for (let index = start; index < end; index++) {
+			const item = this.sessionItems[index];
+			if (!item) continue;
+			const focused = index === selected;
+			const label = truncateToWidth(`${focused ? "→ " : "  "}${item.label}`, width, "…", true);
+			rows.push(focused ? DEFAULT_SELECT_THEME.selectedText(label) : label);
+			rows.push(DEFAULT_SELECT_THEME.description(truncateToWidth(`  ${item.description ?? ""}`, width, "…", true)));
+		}
+		if (start > 0 || end < this.sessionItems.length)
+			rows.push(
+				DEFAULT_SELECT_THEME.scrollInfo(truncateToWidth(`  ${selected + 1}/${this.sessionItems.length}`, width, "…", true)),
+			);
+		return rows;
+	}
+
+	override handleMouse(event: TuiMouseEvent): TuiMouseEventResult | undefined {
+		return super.handleMouse({ ...event, y: Math.floor(event.y / 2) });
+	}
+}
 
 /**
  * Format an ISO-8601 instant as a human-relative string ("3 minutes ago",
@@ -65,8 +98,9 @@ function metaStrip(meta: SessionMeta, now: number): string {
 	const status = meta.endedAt ? GLYPH.scoped : GLYPH.running;
 	const when = formatRelativeTime(meta.lastActivityAt ?? meta.endedAt ?? meta.createdAt, now);
 	const count = typeof meta.messageCount === "number" ? meta.messageCount : 0;
-	const countLabel = count === 1 ? "1 msg" : `${count} msgs`;
-	return `${status} ${when} · ${countLabel} · ${shortTarget(meta)}`;
+	const countLabel = count === 1 ? "1 turn" : `${count} turns`;
+	const folder = sanitizeCallTargetText(meta.cwd ? basename(meta.cwd) : "") || "no folder";
+	return `${status} ${when} · ${countLabel} · ${folder} · ${shortTarget(meta)}`;
 }
 
 /**
@@ -150,7 +184,7 @@ function createSessionOverlayBox(
 	function buildList(sessions: ReadonlyArray<SessionMeta>): SelectList {
 		const items = buildSessionItems(sessions);
 		const visible = Math.min(VISIBLE_ROWS, Math.max(1, items.length || 1));
-		const list = new SelectList(items, visible, DEFAULT_SELECT_THEME, SESSION_LAYOUT);
+		const list = new SessionSelectList(items, visible);
 		list.onSelect = (item: SelectItem): void => {
 			onSelect(item.value);
 			closeOverlay();

@@ -29,6 +29,8 @@ export type {
 	Tokens,
 	TUI,
 	TuiMode,
+	TuiMouseEvent,
+	TuiMouseEventResult,
 } from "@earendil-works/pi-tui";
 
 /**

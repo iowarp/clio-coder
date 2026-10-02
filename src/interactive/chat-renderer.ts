@@ -1431,6 +1431,18 @@ function replayEntries(
 	let runStartedAtMs: number | undefined;
 	let runColdReasons: string[] = [];
 	const selected = selectReplayEntries(turns, options);
+	const runStarts = new Map<string, number>();
+	let userStartedAt: number | undefined;
+	for (const entry of filterEntriesToActivePath(turns, options.activeLeafTurnId ?? options.uptoTurnId)) {
+		if (entry.kind !== "message") continue;
+		if (entry.role === "user") {
+			const at = Date.parse(entry.timestamp);
+			userStartedAt = Number.isFinite(at) ? at : undefined;
+		} else if (entry.role === "assistant" && userStartedAt !== undefined) {
+			runStarts.set(entry.turnId, userStartedAt);
+		}
+	}
+
 	// The transcript shows the ledger, never the projection: an evicted result
 	// still renders its full body here, tagged with the reason it left the
 	// model's working set. Folded once over the same active path the replay
@@ -1475,6 +1487,9 @@ function replayEntries(
 					break;
 				}
 				if (entry.role === "assistant") {
+					// A split-turn checkpoint can hide the user row while retaining its
+					// answer; its original timestamp still owns the duration (flywheel r4/5).
+					runStartedAtMs = runStarts.get(entry.turnId) ?? runStartedAtMs;
 					const text = chatMessageText(entry);
 					const failure = messageFailure(entry);
 					const richMessage = richMessageFromEntry(entry, Number.POSITIVE_INFINITY);
