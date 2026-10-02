@@ -8,6 +8,7 @@ import {
 	compact,
 } from "../../src/domains/session/compaction/compact.js";
 import type { SessionEntry } from "../../src/domains/session/entries.js";
+import { toTaskLedgerEntryFields } from "../../src/domains/session/task-board.js";
 import { registerEngineFauxProvider } from "../../src/engine/api-registry.js";
 import { resolvedRequestContext } from "../../src/engine/context.js";
 import { buildModelReplayAgentMessagesFromTurns } from "../../src/interactive/model-session-replay.js";
@@ -88,6 +89,51 @@ describe("compaction checkpoint format and semantic replay", () => {
 		} finally {
 			provider.unregister();
 		}
+	});
+
+	it("freezes the task board at the checkpoint while later work stays in the suffix", () => {
+		const board = {
+			boardId: "b1",
+			title: "Repair",
+			tasks: [{ id: "t1", status: "pending" as const, title: "Fix exchange" }],
+			activeRunIds: [],
+		};
+		const timestamp = "2026-09-07T00:00:00Z";
+		const entries: SessionEntry[] = [
+			...history(),
+			{ ...toTaskLedgerEntryFields(board, new Date(timestamp)), turnId: "board", timestamp, parentTurnId: "user-0" },
+			{
+				kind: "compactionSummary",
+				turnId: "checkpoint",
+				parentTurnId: "user-1",
+				timestamp,
+				summary: valid,
+				firstKeptTurnId: "user-1",
+				tokensBefore: 10000,
+			},
+		];
+		const before = buildModelReplayAgentMessagesFromTurns(entries);
+		strictEqual(before[1]?.role, "user");
+		ok(JSON.stringify(before[1]).includes("[Task board as of checkpoint] Repair\\nt1 pending Fix exchange"));
+		const after = buildModelReplayAgentMessagesFromTurns([
+			...entries,
+			{
+				...toTaskLedgerEntryFields({ ...board, tasks: [{ id: "t1", title: "Fix exchange", status: "completed" }] }, new Date(timestamp)),
+				turnId: "updated-board",
+				timestamp,
+				parentTurnId: "user-1",
+			},
+			{
+				kind: "message",
+				role: "assistant",
+				turnId: "later",
+				parentTurnId: "user-1",
+				timestamp,
+				payload: { text: "Task t1 completed" },
+			},
+		]);
+		deepStrictEqual(after.slice(0, before.length), before);
+		ok(JSON.stringify(after).includes("Task t1 completed"));
 	});
 
 	it("replays the whole checkpoint beyond the ordinary replay cap", () => {

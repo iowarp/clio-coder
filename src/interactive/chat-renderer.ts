@@ -42,6 +42,7 @@ import {
 	isHandoffSeedData,
 } from "../domains/session/handoff.js";
 import { stripInjectedPreamble } from "../domains/session/history.js";
+import { foldTaskBoard } from "../domains/session/task-board.js";
 import { filterEntriesToActivePath } from "../domains/session/tree/active-path.js";
 import {
 	type BashExecutionMessage,
@@ -1284,8 +1285,16 @@ export function buildReplayAgentMessagesFromTurns(
 			case "branchSummary":
 				appendContextMessage(out, "user", branchContextText(entry), entry.timestamp);
 				break;
-			case "compactionSummary":
+			case "compactionSummary": {
 				out.push(makeTextMessage("user", compactionContextText(entry), entry.timestamp));
+				const checkpointIndex = activeEntries.findIndex((candidate) => candidate.turnId === entry.turnId);
+				const board = checkpointIndex < 0 ? null : foldTaskBoard(activeEntries.slice(0, checkpointIndex));
+				if (board) {
+					const rows = board.tasks.map((task) => `${task.id} ${task.status} ${task.title}`);
+					out.push(
+						makeTextMessage("user", [`[Task board as of checkpoint] ${board.title}`, ...rows].join("\n"), entry.timestamp),
+					);
+				}
 				if (entry.userContext && (!latestOperator || latestOperator.turnId === entry.userContext.turnId))
 					out.push(
 						makeTextMessage("user", `Active user instructions (verbatim):\n${entry.userContext.text}`, entry.timestamp),
@@ -1324,6 +1333,7 @@ export function buildReplayAgentMessagesFromTurns(
 				// describes, whether or not this summary is the one that carried it.
 				emitContinuity(entry.timestamp);
 				break;
+			}
 			case "skillActivation":
 				if (entry.activation.runId !== undefined || (skillState && !skillState.activationRefs.includes(entry.turnId)))
 					break;
