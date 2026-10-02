@@ -59,6 +59,7 @@ import {
 } from "../theme/index.js";
 import { shellCommandInk, toolOutputInk } from "./code-ink.js";
 import { renderDiffLines } from "./diff.js";
+import { LiveToolView } from "./live-tool-view.js";
 import { highlightJsonLine, tryRenderJson, tryRenderXml } from "./structured.js";
 
 // The argument projection lives in the safety domain so the worker tool seam
@@ -772,7 +773,7 @@ export function renderToolAwaitingApproval(
 	width: number,
 	view?: ApprovalRequestView,
 ): string[] {
-	const call = presentedCall(wire);
+	const call = withoutLivePayload(presentedCall(wire));
 	const parts = sublineParts(
 		{ toolCallId: call.toolCallId, toolName: call.toolName, args: call.args, viaGateway: call.viaGateway },
 		"ready",
@@ -840,6 +841,8 @@ interface StatusMeta {
 	outcome?: ToolExecutionFinished["outcome"];
 	/** Refusal reason, rendered only alongside a non-executed outcome. */
 	blockReason?: string | undefined;
+	/** What an in-flight call has produced so far (`146 lines`, `+12 −3`). */
+	live?: string | undefined;
 }
 
 /**
@@ -858,13 +861,14 @@ function blockReasonClause(reason: string): string {
 
 function statusGlyph(status: HeaderStatus, meta: StatusMeta = {}): string {
 	if (status === undefined) return "";
-	if (status === "forming") return ` ${toolMeta(GLYPH.queued)}${toolMeta(" preparing")}`;
-	if (status === "ready") return ` ${toolMeta(GLYPH.queued)}${toolMeta(" queued")}`;
+	const live = meta.live === undefined ? "" : toolMeta(` · ${meta.live}`);
+	if (status === "forming") return ` ${toolMeta(GLYPH.queued)}${toolMeta(" preparing")}${live}`;
+	if (status === "ready") return ` ${toolMeta(GLYPH.queued)}${toolMeta(" queued")}${live}`;
 	if (status === "running") {
 		// The progressive verb already says the call is running; the tail adds
 		// only the live mark and the elapsed time.
 		const elapsed = optionalCompactMs(meta.elapsedMs);
-		return ` ${theme.fg("activity", GLYPH.running)}${elapsed === null ? "" : toolMeta(` ${elapsed}`)}`;
+		return ` ${theme.fg("activity", GLYPH.running)}${elapsed === null ? "" : toolMeta(` ${elapsed}`)}${live}`;
 	}
 	const duration = optionalCompactMs(meta.durationMs);
 	const durationSuffix = duration ? toolMeta(` · ${duration}`) : "";
@@ -1670,13 +1674,13 @@ function singleActionLine(lead: string, tail: string, width: number): string {
 	return theme.base("toolSummary", releaseSpaces(`${truncateToWidth(lead, budget, GLYPH.ellipsis)}${status}`));
 }
 
-function previewActionRows(call: ToolExecutionStart | ToolExecutionFinished, width: number): string[] {
+function previewActionRows(call: ToolExecutionStart | ToolExecutionFinished, width: number, live?: string): string[] {
 	if ("result" in call && skillRefusalOf(call) !== null) return renderToolSubline(call, width);
 	const status = sublineStatus(call);
 	const meta: StatusMeta =
 		"result" in call
 			? { durationMs: call.durationMs, outcome: call.outcome, blockReason: call.blockReason }
-			: { elapsedMs: call.elapsedMs };
+			: { elapsedMs: call.elapsedMs, live };
 	let parts = sublineParts(call, status, meta, width);
 	const overflow = visibleWidth(`${parts.lead}${parts.tail}`) - width;
 	if (overflow > 0) {
@@ -1969,15 +1973,132 @@ function flattenSingleEdit(value: unknown): unknown {
 	return value[0];
 }
 
+/** One edit entry as far as the model has streamed it. */
+interface LiveEdit {
+	oldText?: string;
+	newText?: string;
+}
+
+/**
+ * A write or edit still in flight. Its payload is the part that streams, so it
+ * renders as live rows under the action and never passes through the row's
+ * identity, whose redaction and layout would otherwise read the whole file on
+ * every frame.
+ */
+interface LivePayload {
+	tool: "write" | "edit";
+	path: string | undefined;
+	content: string | undefined;
+	edits: LiveEdit[];
+}
+
+const LIVE_PAYLOAD_TOOLS: ReadonlySet<string> = new Set([ToolNames.Write, ToolNames.Edit]);
+const LIVE_PAYLOAD_FIELDS = ["content", "edits", "oldText", "newText"] as const;
+
+function livePayloadOf(call: ToolExecutionStart | ToolExecutionFinished): LivePayload | null {
+	if ("result" in call || !LIVE_PAYLOAD_TOOLS.has(call.toolName) || !isPlainObject(call.args)) return null;
+	const args = call.args;
+	const path = typeof args.path === "string" && args.path.length > 0 ? args.path : undefined;
+	if (call.toolName === ToolNames.Write) {
+		return { tool: "write", path, content: typeof args.content === "string" ? args.content : undefined, edits: [] };
+	}
+	const entries: unknown[] = Array.isArray(args.edits) ? args.edits : [args];
+	const edits: LiveEdit[] = [];
+	for (const entry of entries) {
+		if (!isPlainObject(entry)) continue;
+		const edit: LiveEdit = {};
+		if (typeof entry.oldText === "string") edit.oldText = entry.oldText;
+		if (typeof entry.newText === "string") edit.newText = entry.newText;
+		if (edit.oldText !== undefined || edit.newText !== undefined) edits.push(edit);
+	}
+	return { tool: "edit", path, content: undefined, edits };
+}
+
+function withoutLivePayload<T extends ToolExecutionStart | ToolExecutionFinished>(call: T): T {
+	if ("result" in call || !LIVE_PAYLOAD_TOOLS.has(call.toolName) || !isPlainObject(call.args)) return call;
+	const args: Record<string, unknown> = { ...call.args };
+	for (const key of LIVE_PAYLOAD_FIELDS) delete args[key];
+	return { ...call, args };
+}
+
+function lineNoun(count: number): string {
+	return `${count} ${count === 1 ? "line" : "lines"}`;
+}
+
+/** Index what has streamed and state it for the row: `146 lines`, `+12 -3`. */
+function livePayloadFact(payload: LivePayload, view: LiveToolView): string | undefined {
+	if (payload.tool === "write") {
+		if (payload.content === undefined) return undefined;
+		const tail = view.tail("content", payload.path);
+		tail.update(payload.content);
+		return tail.lineCount > 0 ? lineNoun(tail.lineCount) : undefined;
+	}
+	let added = 0;
+	let removed = 0;
+	payload.edits.forEach((edit, index) => {
+		if (edit.oldText !== undefined) {
+			const tail = view.tail(`${index}:old`, payload.path);
+			tail.update(edit.oldText);
+			removed += tail.lineCount;
+		}
+		if (edit.newText !== undefined) {
+			const tail = view.tail(`${index}:new`, payload.path);
+			tail.update(edit.newText);
+			added += tail.lineCount;
+		}
+	});
+	if (added + removed === 0) return undefined;
+	const replacements = payload.edits.length > 1 ? `${payload.edits.length} edits · ` : "";
+	return `${replacements}+${added} -${removed}`;
+}
+
+/**
+ * The newest streamed rows: a write's content, or the edit being written, its
+ * replacement as `+` rows once that starts and the text it replaces as `-`
+ * rows before.
+ */
+function livePayloadRows(payload: LivePayload, view: LiveToolView, limit: number, width: number): string[] {
+	const rail = { rail: RAIL_NORMAL, railWidth: BODY_INDENT_VISIBLE_WIDTH };
+	if (payload.tool === "write") {
+		return payload.content === undefined ? [] : view.tail("content", payload.path).rows(limit, width, rail);
+	}
+	const index = payload.edits.length - 1;
+	const edit = payload.edits[index];
+	if (edit === undefined) return [];
+	return edit.newText !== undefined
+		? view.tail(`${index}:new`, payload.path).rows(limit, width, { ...rail, sign: "+" })
+		: view.tail(`${index}:old`, payload.path).rows(limit, width, { ...rail, sign: "-" });
+}
+
+/** A running command's cumulative output as text, without reading it twice. */
+function liveCommandOutput(partial: unknown): { text: string; truncatedTotal?: string } | null {
+	if (isPlainObject(partial) && Object.keys(partial).every((key) => key === "details")) return null;
+	const unwrapped = unwrapResultEnvelope(partial);
+	const text = typeof unwrapped === "string" ? unwrapped : resultText(unwrapped, Number.POSITIVE_INFINITY);
+	const size = isPlainObject(partial) ? detailsOf(partial)?.resultSize : undefined;
+	if (!isPlainObject(size) || size.truncated !== true) return { text };
+	return typeof size.bytes === "number" ? { text, truncatedTotal: formatSize(size.bytes) } : { text };
+}
+
 /** Invocation intent stays visible in every style; /view retains the complete arguments and output. */
 export function renderToolPreview(
 	wire: ToolExecutionStart | ToolExecutionFinished,
 	width: number,
 	detail: TranscriptDetailPolicy,
-	options: ToolBodyRenderOptions & { terminalRows?: number; partialResult?: unknown; operator?: boolean } = {},
+	options: ToolBodyRenderOptions & {
+		terminalRows?: number;
+		partialResult?: unknown;
+		operator?: boolean;
+		/** The segment's live state; without one the rows are the same, only dearer per frame. */
+		live?: LiveToolView;
+	} = {},
 ): string[] {
-	const call = presentedCall(wire);
-	if (isChainCall(call)) return renderChainPreview(call, width, detail, options);
+	const presented = presentedCall(wire);
+	if (isChainCall(presented)) return renderChainPreview(presented, width, detail, options);
+	const payload = livePayloadOf(presented);
+	const view = options.live ?? new LiveToolView();
+	const liveFact = payload === null ? undefined : livePayloadFact(payload, view);
+	const call = payload === null ? presented : withoutLivePayload(presented);
 	const finished = "result" in call ? call : undefined;
 	const failure = finished?.isError === true || finished?.outcome !== undefined;
 	const row = resolveRow(call);
@@ -1994,7 +2115,7 @@ export function renderToolPreview(
 						: detail.resultRows,
 		options.terminalRows,
 	);
-	const rows = options.operator ? renderToolSubline(call, width) : previewActionRows(call, width);
+	const rows = options.operator ? renderToolSubline(call, width) : previewActionRows(call, width, liveFact);
 	if (
 		detail.style === "compact" &&
 		!options.operator &&
@@ -2014,6 +2135,23 @@ export function renderToolPreview(
 			command ? "shell" : undefined,
 		),
 	);
+	if (payload !== null) {
+		rows.push(...livePayloadRows(payload, view, limit, width));
+		return rows;
+	}
+	if (finished === undefined && command && options.partialResult !== undefined && limit > 0) {
+		const output = liveCommandOutput(options.partialResult);
+		if (output !== null) {
+			rows.push(
+				...view.outputRows(output.text, limit, width, {
+					rail: RAIL_NORMAL,
+					railWidth: BODY_INDENT_VISIBLE_WIDTH,
+					...(output.truncatedTotal !== undefined ? { truncatedTotal: output.truncatedTotal } : {}),
+				}),
+			);
+		}
+		return rows;
+	}
 	// A refused skill load states its reason on the row; its message is the
 	// model's instruction and stays in /view.
 	if (finished !== undefined && skillRefusalOf(finished) !== null) return rows;
