@@ -17,6 +17,7 @@ import {
 	EXECUTION_HANDOFF_MAX_ITEMS,
 	EXECUTION_HANDOFF_MAX_TEXT_BYTES,
 	type ExecutionHandoff,
+	executionHandoffTextBytes,
 } from "./execution-handoff.js";
 import { isExecutionRole } from "./execution-role.js";
 import { COMPETE_STANCES, type CompeteStance } from "./gate-role-prompts.js";
@@ -643,7 +644,10 @@ function isValidPredecessorHandoffs(value: unknown): value is ExecutionHandoff[]
 	if (
 		!Array.isArray(value) ||
 		value.length > EXECUTION_HANDOFF_MAX_ITEMS ||
-		Buffer.byteLength(JSON.stringify(value), "utf8") > EXECUTION_HANDOFF_MAX_TEXT_BYTES * 2
+		!value.every((candidate) => isPlainObject(candidate) && typeof candidate.output === "string") ||
+		// The cap is on the outputs themselves. Measuring the JSON encoding let
+		// escape-heavy output fail a projection that was within budget.
+		executionHandoffTextBytes(value) > EXECUTION_HANDOFF_MAX_TEXT_BYTES
 	)
 		return false;
 	return value.every((candidate) => {

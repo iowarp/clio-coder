@@ -375,14 +375,17 @@ export async function executePlan(
 	 */
 	const handoffsFor = (step: ExecutionPlanStep): ExecutionHandoff[] => {
 		const available = step.dependencies.filter((id) => results.has(id) || stepsById.get(id)?.loop === undefined);
-		const projected = projectExecutionHandoffs(available, results);
-		if (step.loop?.role !== "repair") return projected;
+		if (step.loop?.role !== "repair") return projectExecutionHandoffs(available, results);
 		// A gate's continuation findings, not its raw transcript, are what the
-		// repair attempt is answering.
+		// repair attempt is answering. They replace the transcript before
+		// projection so the handoff byte budget bounds them too.
 		const findings = loopFindings.get(`${step.loop.loopId}:${step.loop.attempt}`);
-		if (findings === undefined) return projected;
 		const checkId = loopsById.get(step.loop.loopId)?.checkStepIds[step.loop.attempt - 1];
-		return projected.map((handoff) => (handoff.stepId === checkId ? { ...handoff, output: findings } : handoff));
+		const checked = checkId === undefined ? undefined : results.get(checkId);
+		if (findings === undefined || checkId === undefined || checked === undefined) {
+			return projectExecutionHandoffs(available, results);
+		}
+		return projectExecutionHandoffs(available, new Map(results).set(checkId, { ...checked, output: findings }));
 	};
 
 	const isUnneeded = (step: ExecutionPlanStep): boolean => {
