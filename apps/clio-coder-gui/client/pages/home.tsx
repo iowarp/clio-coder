@@ -152,6 +152,11 @@ export function Home({ client }: { client: Client }) {
 	const ready = setup.data?.state === "ready";
 	const send = useMutation({
 		mutationFn: async ({ workspace, request }: { workspace: string; request: string }) => {
+			const status = await queries.fetchQuery({
+				queryKey: ["setup-status"],
+				queryFn: () => client.call(routes.setupStatus, emptyInput),
+			});
+			if (status.state !== "ready") throw new Error(status.message || "Connect a model before starting a task.");
 			const sessions = await queries.fetchQuery({
 				queryKey: ["sessions"],
 				queryFn: () => client.call(routes.sessions, emptyInput),
@@ -175,7 +180,7 @@ export function Home({ client }: { client: Client }) {
 			void navigate(`/sessions/${session.id}`);
 		},
 	});
-	const canSend = ready && workspaceId !== null && text.trim() !== "" && !send.isPending;
+	const canSend = (ready || setup.isPending) && workspaceId !== null && text.trim() !== "" && !send.isPending;
 	const submit = () => {
 		if (canSend && workspaceId) send.mutate({ workspace: workspaceId, request: text.trim() });
 	};
