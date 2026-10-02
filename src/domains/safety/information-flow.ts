@@ -810,9 +810,10 @@ export function flowUnmediatedAgentRefusal(
 	policy: InformationFlowPolicy,
 	destination: FlowDestination | null,
 ): string | null {
-	const rules = policy.rules.filter((rule) => policy.trusted || policy.approvedRuleIds?.includes(rule.id));
+	const rules = policy.rules;
 	if (rules.length === 0) return null;
 	const denied = rules.filter((rule) => {
+		if (!policy.trusted && !policy.approvedRuleIds?.includes(rule.id)) return true;
 		if (destination === null) return true;
 		return (
 			evaluateInformationFlow({
@@ -827,5 +828,10 @@ export function flowUnmediatedAgentRefusal(
 	});
 	if (denied.length === 0) return null;
 	const where = destination === null ? "an agent with no pinned model destination" : describeDestination(destination);
-	return `dispatch: information-flow rules (${denied.map((rule) => rule.id).join(", ")}) do not allow ${where}; its runtime cannot admit its own model requests. Dispatch to a native HTTP target, or add the target to the rules' recipients and approve again with clio-coder config trust safety`;
+	const unapproved = denied.filter((rule) => !policy.trusted && !policy.approvedRuleIds?.includes(rule.id));
+	const remedy =
+		unapproved.length > 0
+			? `Dispatch to a native HTTP target, or approve the policy with clio-coder config trust safety and restart; unapproved rules (${unapproved.map((rule) => rule.id).join(", ")}) admit no destination`
+			: "Dispatch to a native HTTP target, or add the target to the rules' recipients and approve again with clio-coder config trust safety";
+	return `dispatch: information-flow rules (${denied.map((rule) => rule.id).join(", ")}) do not allow ${where}; its runtime cannot admit its own model requests. ${remedy}`;
 }
