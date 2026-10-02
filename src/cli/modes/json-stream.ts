@@ -1,9 +1,9 @@
 /**
  * Projection from chat-loop events to the headless `--json` wire stream.
  *
- * The stream is append-oriented: it carries each piece of content exactly
- * once, as an increment while it streams and as one completed message when it
- * lands. It never repeats the growing snapshot of an in-progress message,
+ * The stream is append-oriented: it carries content as increments while it
+ * streams and includes the answer once more on the final `turn_end` for
+ * scripts. It never repeats the growing snapshot of an in-progress message,
  * because that is quadratic in a long turn. One tool-heavy headless turn wrote
  * 802 MB of stdout, 99.3% of it `message_update` snapshots of a message
  * whose final form is 44 KB.
@@ -23,8 +23,10 @@
  *     pass through whole, because nothing else on the stream carries them.
  *   - `agent_end` carries its segment's usage and message count, not a second
  *     copy of every message already streamed.
- *   - `turn_end` keeps its assistant message (stop reason and usage live
- *     there) and drops `toolResults`, each of which already crossed the wire
+ *   - `turn_end` keeps its assistant text, stop reason, and usage, so scripts
+ *     can read the answer from one event. Thinking remains length-only. This
+ *     adds one linear copy of the final answer, without growing snapshots.
+ *     It drops `toolResults`, each of which already crossed the wire
  *     as a `tool_execution_end`.
  *   - `tool_execution_*` frames name the capability that ran. A gateway
  *     op=call carries the capability as `toolName`, its own arguments as
@@ -68,7 +70,7 @@ export function projectHeadlessJsonEvent(event: ChatLoopEvent): unknown | null {
 	}
 	if (event.type === "agent_end") return segmentSummary(event.type, event.messages);
 	if (event.type === "turn_end") {
-		return { type: event.type, message: withoutStreamedContent(event.message) };
+		return { type: event.type, message: withoutStreamedContent(event.message, true) };
 	}
 	return event;
 }
@@ -135,19 +137,20 @@ function chainStepFrames(parentToolCallId: string, step: GatewayChainStep): unkn
  *
  * Only an assistant message streams: its `text` and `thinking` blocks arrive
  * incrementally as `text_delta` and `thinking_delta` keyed by the same
- * `contentIndex` this array is indexed by, so a reader reassembles them itself.
+ * `contentIndex` this array is indexed by. The final `turn_end` keeps text
+ * as well so a reader can consume the answer without reassembling deltas.
  * Provider replay signatures stay in the durable session, not this observation
  * stream; encrypted signatures can dwarf the actual answer on every turn.
  * `toolCall` blocks never stream and are kept whole. A `user` or `toolResult`
  * message is returned untouched, because no delta ever carried it.
  */
-function withoutStreamedContent<T>(message: T): T {
+function withoutStreamedContent<T>(message: T, keepText = false): T {
 	if (!isRecord(message) || message.role !== "assistant" || !Array.isArray(message.content)) return message;
 	const content = message.content.map((block: unknown) => {
 		if (!isRecord(block)) return block;
 		if (block.type === "text" && typeof block.text === "string") {
 			const { text: _text, textSignature: _signature, ...rest } = block;
-			return { ...rest, streamed: true, textLength: block.text.length };
+			return { ...rest, streamed: true, textLength: block.text.length, ...(keepText ? { text: block.text } : {}) };
 		}
 		if (block.type === "thinking" && typeof block.thinking === "string") {
 			const { thinking: _thinking, thinkingSignature: _signature, ...rest } = block;
