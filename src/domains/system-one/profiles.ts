@@ -32,6 +32,7 @@ export const PROFILE_IDS = [
 	"julia-1",
 	"gliner2.5-small",
 	"gliner2.5-decide",
+	"strands-decider",
 ] as const;
 export type ProfileId = (typeof PROFILE_IDS)[number];
 
@@ -91,6 +92,19 @@ const LEGACY = {
  * dedicated English Decide model is a different, larger model that its card
  * also offers for yes/no and ordinal scales. Neither declares an option bound
  * in its card, so none is invented here.
+ *
+ * The Strands Decider 2B speaks the legacy wire unchanged and reads every task.
+ * Its checkpoint (`hobson_config.json`) declares `max_length` 4096 and a
+ * pointer head, which scores each option from that option's own hidden state,
+ * so the only option ceiling is the request schema's 255 (scores 2 to 10).
+ * Its schema rejects a one-option choice; the wire answers those itself and
+ * never sends them (`postSystemOne`), so the profile does not abstain on them.
+ * Its fitting rule gives the question the window first, up to three quarters
+ * of it, and the state the rest; past that it keeps the head of the state and
+ * the tail of the question. The runner's overflow check is that rule without
+ * the cuts: state plus the longest question must fit the window, or nothing is
+ * sent. Probabilities are the head's softmax under a per-kind temperature, and
+ * a score is the expectation over its levels.
  */
 export const PROFILES: Readonly<Record<ProfileId, CapabilityProfile>> = {
 	generic: { id: "generic", ...LEGACY },
@@ -148,10 +162,38 @@ export const PROFILES: Readonly<Record<ProfileId, CapabilityProfile>> = {
 			independent: "sigmoid-independent",
 		},
 	},
+	"strands-decider": {
+		id: "strands-decider",
+		renderer: "systemone-v1",
+		tasks: ALL_TASKS,
+		kinds: ALL_KINDS,
+		minOptions: 1,
+		maxOptions: MAX_CHOICE_OPTIONS,
+		optionTokens: null,
+		headTokens: null,
+		windowCeiling: 4096,
+		readout: {
+			boolean: "softmax-binary",
+			exclusive: "softmax-exclusive",
+			ordinal: "ordinal-expectation",
+			independent: "softmax-binary",
+		},
+	},
 };
 
 export function profileFor(id: ProfileId | undefined): CapabilityProfile {
 	return PROFILES[id ?? "generic"];
+}
+
+/**
+ * The window one request may fill: what the target declares, bounded by the
+ * profile's ceiling. Neither raises the other, and a target that declares no
+ * usable window takes the ceiling. Null means no bound is known.
+ */
+export function engineWindow(profile: CapabilityProfile, declared: unknown): number | null {
+	const window = typeof declared === "number" && Number.isFinite(declared) && declared > 0 ? declared : null;
+	if (profile.windowCeiling === null) return window;
+	return window === null ? profile.windowCeiling : Math.min(window, profile.windowCeiling);
 }
 
 /**

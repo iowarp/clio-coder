@@ -11,7 +11,7 @@ import { certaintyFromMass } from "../answers.js";
 import type { DecisionTask, ReadoutKind } from "../contract.js";
 import { semanticKind } from "../contract.js";
 import type { ProfileId } from "../profiles.js";
-import { profileFor, render } from "../profiles.js";
+import { engineWindow, profileFor, render } from "../profiles.js";
 import type { Answer, DecisionEngine, EngineReply, EngineRequest, Question } from "../types.js";
 import type { EngineHost } from "./shared.js";
 import { resolveToken } from "./shared.js";
@@ -68,15 +68,10 @@ export function createSystemOneEngine(input: SystemOneEngineInput): DecisionEngi
 	if (decide === undefined) throw new Error(`runtime '${runtime.id}' does not answer typed decisions`);
 	const asked = model ?? target.defaultModel ?? null;
 	const profile = profileFor(input.profile);
-	const declared = target.capabilities?.contextWindow ?? runtime.defaultCapabilities.contextWindow;
-	const window = typeof declared === "number" && Number.isFinite(declared) && declared > 0 ? declared : null;
-	// The profile's ceiling bounds what the target claims; neither is raised by the other.
-	const windowTokens =
-		profile.windowCeiling === null
-			? window
-			: window === null
-				? profile.windowCeiling
-				: Math.min(window, profile.windowCeiling);
+	const windowTokens = engineWindow(
+		profile,
+		target.capabilities?.contextWindow ?? runtime.defaultCapabilities.contextWindow,
+	);
 	return {
 		name,
 		kind: "systemone",

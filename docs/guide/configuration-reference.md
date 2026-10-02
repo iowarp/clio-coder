@@ -137,7 +137,7 @@ Default chat settings control interactive conversation routing, reasoning effort
 | `integrations.library.sync` | `false` |
 | `integrations.git.commitAttribution` | `true` |
 
-`systemOne.*` and `fleet.speculativeDispatch` are experimental and off by default. The [System One guide](system-one.md) describes them, including the engine `profile` field and the per-site `tasks` routes, which have no default.
+`systemOne.*` and `fleet.speculativeDispatch` are experimental and off by default. The [System One guide](system-one.md) describes them, including the engine `profile` field (`generic`, `jev`, `laya`, `laya-multilingual`, `julia-1`, `gliner2.5-small`, `gliner2.5-decide` or `strands-decider`) and the per-site `tasks` routes, which have no default. A decision engine's window is the `capabilities.contextWindow` of its `systemone` target (480 when unset), bounded by the profile's ceiling. There is no placement setting: which processor an engine runs on is decided by the server behind its target, as [Placing engines](system-one.md#placing-engines) describes.
 
 | Precedence, low to high | Use |
 | --- | --- |

@@ -151,6 +151,43 @@ describe("System One engine over a /v1/systemone server", () => {
 		});
 		await rejects(engine.decide({ state, questions, signal: signal() }), /HTTP 422.*criteria for 'team' has no options/u);
 	});
+
+	it("caps a strands-decider engine at 4096 tokens and sends it every option a pointer head reads", async () => {
+		const many = Object.fromEntries(Array.from({ length: 30 }, (_, i) => [`o${i}`, `option ${i}`]));
+		const server = await started((body) => {
+			const asked = body.questions as Record<string, Question>;
+			const keys = Object.keys((asked.wide as { criteria: Record<string, string> }).criteria);
+			const probabilities = Object.fromEntries(keys.map((key) => [key, 1 / keys.length]));
+			return {
+				body: {
+					model: "strands-decider-2B-test",
+					answers: { wide: { type: "choice", choice: keys[0], probabilities, confidence: 0 } },
+				},
+			};
+		});
+		const engine = createSystemOneEngine({
+			name: "decider",
+			target: { id: "so", runtime: "systemone", url: server.url, capabilities: { contextWindow: 8192 } },
+			runtime: systemOneRuntime,
+			model: null,
+			host,
+			profile: "strands-decider",
+		});
+		strictEqual(engine.windowTokens, 4096);
+		const wide = pick("Which option?", many);
+		const only = pick("Which team?", { billing: "money" });
+		strictEqual(engine.unsupported("recipe", wide), null);
+		strictEqual(engine.unsupported("turnEnd", only), null);
+		const reply = await engine.decide({
+			state,
+			questions: { wide, only },
+			tasks: { wide: "recipe", only: "consult" },
+			signal: signal(),
+		});
+		strictEqual(Object.keys((server.requests[0]?.questions as Body) ?? {}).join(), "wide");
+		strictEqual(reply.answers.only?.choice, "billing");
+		strictEqual(reply.answers.wide?.readout, "softmax-exclusive");
+	});
 });
 
 describe("LLM engine over an OpenAI-compatible chat server", () => {

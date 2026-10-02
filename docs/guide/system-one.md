@@ -14,10 +14,26 @@ Decision engines come in four tiers. No tier turns on the next one.
 | --- | --- | --- |
 | 0. Shipped defaults | Nothing is bound. | Deterministic behavior everywhere. This is the product. |
 | 1. Base chat model | An `llm` engine over a chat target you already use. | `/draft` judging and the approval-card advisory. Both are asked only while an approval card or the `/draft` overlay is open. Every other site costs two requests per question with logprobs, or five without, and an unfitted build never acts on them. |
-| 2. Local decision model | A `systemone` engine with a `profile` (Julia-1, Laya, GLiNER) on a server you run. | Advice and recording. The card advisory, `consult` and `/draft` use its answers at once. No local build ships with fitted cuts, so every other site only records what it would have said. |
+| 2. Local decision model | A `systemone` engine with a `profile` (Strands Decider, Julia-1, Laya, GLiNER) on a server you run, placed on a processor the chat model does not use: the integrated GPU, the NPU or the CPU. | Advice and recording. The card advisory, `consult` and `/draft` use its answers at once. No local build ships with fitted cuts, so every other site only records what it would have said. |
 | 3. Hosted API engine | A `systemone` engine over the `typesafe-jev` runtime. | The shipped cuts for the `jev-1.13.0` build: turn hints and acts when the reading lands in time, and catalog rankings. The redacted state leaves the machine. |
 
-A tier 2 model costs no hosted API fee, but it still uses your hardware, and a detached call can compete with the chat model on a shared server.
+A tier 2 model costs no hosted API fee, but it still uses your hardware, and a detached call can compete with the chat model on a shared server. A decision model is small enough to run on a processor the chat model leaves idle, which is what [Placing engines](#placing-engines) is about.
+
+### Tier 2 placements, measured
+
+These are research measurements of one checkpoint, the Strands Decider 2B (`strands-decider-2B-hobson-v19`), on one Strix Halo laptop (Ryzen AI Max+ PRO 395, Radeon 8060S iGPU, XDNA2 NPU, 128 GB of unified memory), taken on 2026-10-02 with Gemma-4-26B resident on the iGPU throughout. Decisions made while Gemma was generating were not measured. The numbers describe that machine and those inputs. They are not a benchmark, and Clio ships none of these servers.
+
+| Placement | Server | Short state p50 | 1,000-token state p50 | Memory | Source |
+| --- | --- | --- | --- | --- | --- |
+| iGPU | PyTorch 2.9.1 with ROCm 7.2.1, bf16 | 128 to 138 ms | 515 to 523 ms | 4.66 GiB committed GPU memory at peak | `phase1-results.json` |
+| NPU | The FastFlowLM engine running the merged torso in Q4_K, with the pointer head on the CPU in numpy | 539 to 553 ms | 1,110 to 1,117 ms | 3.73 GiB working set | `bench_npu_skip0.json` |
+| CPU | PyTorch on the CPU cores of the same chip, float32 | 683 to 746 ms | 7.8 to 8.4 s | 7.62 GiB resident after load | `phase1-results.json`, `benchmark-meta.json` |
+
+Each row is one question (a yes/no, a three-way choice and a three-level score) after two warm-up calls, 20 samples per cell. The short state is 74 to 86 tokens with its question. On the NPU most of a short call is the engine's fixed prefill cost (prefill p50 467 to 484 ms), and the engine answers one question per prefill, so a request with six questions costs six prefills. Against the CPU PyTorch reference, the NPU build picked the same top answer for 32 of 33 questions, with a largest probability difference per question of 0.037 at the median, 0.055 at p90 and 0.096 at worst (`npu_results.json`). Over Clio's own wire, the NPU and iGPU builds picked the same top answer for 26 of 28 questions from recorded sessions and synthetic checks; both disagreements sat near 0.5.
+
+Through Clio's `systemone` runtime to the iGPU service, recorded requests from a real session took these round trips at p50 (`phase2-results.json`): `consult` with three questions 323 ms, `toolCall` with two questions 344 to 360 ms, `toolResult` at 979 to 1,591 state tokens 617 to 998 ms, `turnEnd` with six questions 768 ms, and `turn` with eight questions 2,250 ms. Every `turn` sample missed that site's 600 ms deadline, so leave `turn` unbound on these placements; the other four sites finished inside their deadlines on every sample.
+
+Each placement reports its own build (the iGPU service reports `...-pytorch2.9.1-rocm7.2.1-bf16`, the NPU server `...-merged-q4k-flm-xdna2`), and cuts are keyed by build. A cut fitted on one placement therefore never applies to another, which is right: Q4_K weights on the NPU do not produce the bf16 numbers.
 
 ## Quick start
 
@@ -38,30 +54,31 @@ systemOne:
 
 `/draft` then names the candidate to read first, and an open approval card can show one advisory line. A bound `toolCall` site also reads, at autonomy `yolo`, each command the classifier did not recognize, in the background and for the record only; those requests go to the same endpoint.
 
-**Tier 2, a local decision model.** Serve the model behind a server that answers `POST /v1/systemone` (for example the Julia adapter or `laya-serve`), add it as a target on the `systemone` runtime, and name its capability profile:
+**Tier 2, a local decision model.** Serve the model behind a server that answers `POST /v1/systemone` (for example the Julia adapter, `laya-serve` or a Strands Decider service), add it as a target on the `systemone` runtime with the window the checkpoint reads, and name its capability profile:
 
 ```yaml
 targets:
-  - id: julia
+  - id: decider-gpu
     runtime: systemone
-    url: http://127.0.0.1:8080   # where your server listens
+    url: http://127.0.0.1:13306/v1   # where your server listens
     capabilities:
-      contextWindow: 8192
+      contextWindow: 4096
 
 systemOne:
   engines:
-    julia:
+    decider:
       kind: systemone
-      target: julia
-      profile: julia-1
+      target: decider-gpu
+      profile: strands-decider
   sites:
-    toolCall: julia
-    consult: julia
-    drafts: julia
+    consult: decider
+    toolCall: decider
+    toolResult: decider
+    turnEnd: decider
   record: true
 ```
 
-The `systemone` runtime assumes a 480-token window, so raise `capabilities.contextWindow` to what the served checkpoint actually reads. A call whose state does not fit is not sent. With `record: true`, each answer and what followed it is kept in the local dataset, from which cuts can be fitted.
+The `systemone` runtime assumes a 480-token window, so raise `capabilities.contextWindow` to what the served checkpoint actually reads: 4096 for the Strands Decider, 1024 for Julia-1 at the window its published accuracy used. A call whose state and longest question do not fit is not sent. With `record: true`, each answer and what followed it is kept in the local dataset, from which cuts can be fitted.
 
 **Tier 3, the hosted engine.** The `typesafe-jev` runtime reads `TYPESAFE_API_KEY`:
 
@@ -83,6 +100,74 @@ systemOne:
 ```
 
 Then run `clio-coder doctor` and read the `system one (experimental)` rows, or run `clio-coder systemone status`. A site binding applies from the next turn. Only the `consult` site needs a restart.
+
+## Placing engines
+
+Clio does not schedule a decision engine and has no placement setting. The server you run owns its device; Clio sees a URL, a window, a profile and the build the server reports. Placement is therefore a choice you make when you start each server, and naming each target after its placement (`decider-npu`) is what makes the doctor rows read as a map of the machine.
+
+The rule is to put each model on a processor nothing else is using. A turn makes many closed decisions, each one a forward pass of a small model; the chat model makes the open-ended ones. Running both on one accelerator makes them queue behind each other, while a second accelerator that would otherwise sit idle runs the decisions for free.
+
+### Placing engines on Strix Halo
+
+A Strix Halo machine has three processors on one package: the integrated GPU, the XDNA2 NPU and the CPU cores. All three read the same 128 GB pool, so placing a model moves no weights across a bus, and the budget is the sum of what is resident.
+
+- **iGPU: the chat model.** It needs the bandwidth and the large matrix units. Gemma-4-26B held about 27 GiB of committed GPU memory while the deciders above ran beside it.
+- **NPU: the decider.** It is idle while the iGPU generates. It runs the Strands Decider 2B at about half a second per question, so bind it to sites whose deadlines allow that: `toolResult` (1500 ms), `consult` (3000 ms), `turnEnd` and the approval-card advisory (5000 ms). Leave `turn` (600 ms) unbound on it. Two engine processes serialize on the NPU, so run one decision server there.
+- **CPU: Julia-1, or nothing.** The CPU suits a small encoder such as Julia-1 (144M parameters, 550 MiB in float32), or the rules-only tier of [Proactive Memory](proactive-memory.md), which makes no model calls. The 2B decider on the CPU took 7.8 to 8.4 s at 1,000 tokens, past every site deadline. Julia-1 reads options of at most 48 tokens, which Clio proves by their byte length, so in this release it answers `turn` (whose compact wordings fit) and short `consult` questions and abstains on the other sites before sending anything.
+- **When latency matters more than isolation,** the decider on the iGPU is about four times faster than on the NPU for short states and twice as fast at 1,000 tokens, and it stayed resident beside Gemma-4-26B. It then shares the iGPU with the chat model, so a decision and a generation can wait for each other.
+
+One configuration with all three placements:
+
+```yaml
+targets:
+  - id: decider-gpu            # Strands Decider 2B on the iGPU
+    runtime: systemone
+    url: http://127.0.0.1:13306/v1
+    capabilities:
+      contextWindow: 4096
+  - id: decider-npu            # Strands Decider 2B on the NPU
+    runtime: systemone
+    url: http://127.0.0.1:13307/v1
+    capabilities:
+      contextWindow: 4096
+  - id: julia-cpu              # Julia-1 on the CPU cores
+    runtime: systemone
+    url: http://127.0.0.1:13308/v1
+    capabilities:
+      contextWindow: 1024
+
+systemOne:
+  engines:
+    gpu:
+      kind: systemone
+      target: decider-gpu
+      profile: strands-decider
+    npu:
+      kind: systemone
+      target: decider-npu
+      profile: strands-decider
+    julia:
+      kind: systemone
+      target: julia-cpu
+      profile: julia-1
+  sites:
+    turn: julia
+    consult: julia
+    toolCall: gpu
+    toolResult: npu
+    turnEnd: npu
+    drafts: npu
+```
+
+In two live Clio turns on that machine, with Gemma-4-26B driving the session from the iGPU, Julia-1 on four CPU threads answered the seven `turn` questions in 518 and 571 ms (the second while a TypeScript typecheck shared the CPU) and a `consult` call in 70 and 53 ms, and the NPU decider answered the six `turnEnd` questions in 3,932 and 3,883 ms. These are two observations per site, each inside its site's deadline.
+
+Bind any site to any engine; a site's `tasks` map can also send one of its tasks to an engine on another processor. An engine that does not answer leaves its sites behaving as if unbound, so a placement can be stopped without editing settings. `clio-coder doctor` shows one row per engine with its profile, window and round trip.
+
+The NPU numbers above come from a research harness that drives the FastFlowLM engine directly and serves `POST /v1/systemone`; it is not a product and no supported NPU server for decision models exists yet. Any server that puts a decision model on an NPU and speaks the wire is configured the same way: a `systemone` target, the window the checkpoint reads and the profile of the model.
+
+### Other machines
+
+The same placement logic applies wherever a machine has an accelerator the chat model leaves idle: Apple's Neural Engine beside the GPU that serves the chat model, or a phone's NPU beside its CPU. Nothing in Clio is specific to AMD; what is missing is a server that runs a decision model on that accelerator and answers `POST /v1/systemone`. Once one exists, it is a target with a URL, a window and a profile like any other.
 
 ## What System One is not
 
@@ -109,7 +194,7 @@ Then run `clio-coder doctor` and read the `system one (experimental)` rows, or r
 | `target` | A `targets[].id`. Required. A name that is not in `targets` is a settings error. |
 | `model` | The wire model id. Absent means the target's default model. |
 | `mode` | `auto`, `logprobs` or `answer`. Only valid on `kind: llm`. `auto` uses first-token logprobs when the server returns them and falls back to five votes when it does not. |
-| `profile` | The capability profile of the served model: `generic` (the default), `jev`, `laya`, `laya-multilingual`, `julia-1`, `gliner2.5-small` or `gliner2.5-decide`. Only valid on `kind: systemone`. It declares which decision tasks the model may be asked and the limits its publisher states, so a question the model cannot carry is abstained on before any byte leaves. It is a declaration, not a measurement: it installs nothing and makes no build fitted. |
+| `profile` | The capability profile of the served model: `generic` (the default), `jev`, `laya`, `laya-multilingual`, `julia-1`, `gliner2.5-small`, `gliner2.5-decide` or `strands-decider`. Only valid on `kind: systemone`. It declares which decision tasks the model may be asked and the limits its publisher states, so a question the model cannot carry is abstained on before any byte leaves. It is a declaration, not a measurement: it installs nothing and makes no build fitted. |
 
 `systemOne.sites` maps a site id (`turn`, `toolCall`, `toolResult`, `turnEnd`, `relevance`, `consult`, `drafts`, `steer`) to an engine name, or to `{ engine, timeoutMs, tasks }`, where both other fields are optional. `timeoutMs` replaces the site's default deadline for that binding. `tasks` routes one decision task of the site to another declared engine, for example `turn: { engine: jev, tasks: { recipe: julia } }`; the questions of that task go to the named engine and the rest to the site's own. The tasks a site asks are `intent`, `recipe` and `clusterSelect` at `turn`, `toolRisk` at `toolCall`, `injection` at `toolResult`, `turnEnd` at `turnEnd`, `relevance` and `clusterSelect` at `relevance`, `consult` at `consult`, `drafts` at `drafts` and `steer` at `steer`. A routed engine that cannot answer leaves its task unanswered rather than falling back to the site's engine. A site with no entry is off. An engine name that `systemOne.engines` does not define, or a task the site does not ask, is a settings error.
 
@@ -126,6 +211,8 @@ An engine answers typed questions for a state. Clio builds one engine per config
 ### Engine kind `systemone`
 
 The target's runtime must implement typed decisions: `typesafe-jev` (a hosted decision engine, default model `jev-latest`, credential `TYPESAFE_API_KEY`) or `systemone` (a self-hosted server, with a default 480-token window that `capabilities.contextWindow` raises). Answers are calibrated probabilities, and the engine's `profile` decides which questions it is sent. The answering build is the model name the server reports, for example `jev-1.13.0`, and every cut is keyed by that name. Clio's shipped cuts are fitted for the hosted engine's `jev-1.13.0` build. Any other build on the same wire, including a self-hosted one, is validated the same way, by fitting cuts on that exact build. Binding a chat-only runtime with `kind: systemone` is reported as a problem by doctor.
+
+The `strands-decider` profile describes the Strands Decider 2B, read from its checkpoint: every task and question type, up to 255 options because its pointer head scores each option from that option's own text, and a 4096-token ceiling. The model's own fitting rule gives the question the window first and the state the rest, and past that it keeps the head of the state and the tail of the question. Clio applies that rule without the cuts: when the state plus the longest question does not fit the window, nothing is sent. The model rejects a one-option choice, which Clio answers itself without a request.
 
 ### Engine kind `llm`
 
@@ -252,6 +339,7 @@ clio-coder systemone export --out dataset.jsonl [--since 2026-09-01] [--site too
 | `system one (experimental)` | `INFO` "off; no site is bound" when no site is bound. It is then the only System One row, unless recording is on or the dataset holds files. |
 | `system one (experimental) off` | `INFO`, when some sites are bound, listing the sites that are not. |
 | `system one (experimental) <site>` (one per bound site) | `WARN` when the binding cannot resolve (an undefined engine, an unconfigured target, an unregistered runtime, a runtime that does not answer typed decisions) with the reason and "the site stays silent". `WARN` when it resolves but `connection <target>` is not verified, since the site may stay silent. Otherwise `OK` with the engine, its kind, the target, model and any deadline, the builds whose cuts at this site are measured or operator-configured, and that any other answering build is unvalidated and only records. |
+| `system one (experimental) engine <name>` (one per bound `systemone` engine) | The engine's profile, the window one request may fill and where that window comes from, and whether its server answered the passive check, with the round trip and the build it serves. The check reads `/models` or `/health` and never asks a decision. `WARN` when the server does not answer, because every site it serves then behaves as if unbound. |
 | `system one dataset` | Whether recording is on, the day files and their range, size, and the retention and cap. `WARN` when the directory cannot be read or is over the cap. |
 
 See [Doctor](doctor.md).
