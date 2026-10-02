@@ -1624,7 +1624,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	const session = result.getContract<SessionContract>("session");
 	// One durable union of restricted sources per session. Every model send,
 	// mediated outbound call and System One request is judged against it.
-	const flowLedger = createFlowLedger({ session, readEntries: readSessionEntriesForCompact });
+	const flowLedger = createFlowLedger({ session: session ?? null, readEntries: readSessionEntriesForCompact });
 	flowRestrictionsForDispatch = () => {
 		// A worker launched while the ledger cannot vouch would carry unlabeled
 		// context; the refusal surfaces at its first model request instead.
@@ -1641,9 +1641,9 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	const admitModelFlow = (destination: { targetId: string; runtimeId: string; wireModelId: string }): string | null => {
 		const refusal = flowLedger.refusal();
 		if (refusal !== null) return refusal;
-		const target = providers.getTarget(destination.targetId);
+		const target = providers?.getTarget(destination.targetId);
 		return flowTransferRefusal(
-			safety.policy?.informationFlow?.() ?? EMPTY_INFORMATION_FLOW_POLICY,
+			safety?.policy?.informationFlow?.() ?? EMPTY_INFORMATION_FLOW_POLICY,
 			flowLedger.current(),
 			resolveModelDestination({
 				targetId: destination.targetId,
