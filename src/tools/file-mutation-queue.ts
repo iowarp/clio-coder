@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { lstat, mkdir, open, realpath, rename, stat, unlink } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
 import { canonicalizeRawPath } from "../core/path-canonical.js";
+import { type AuthoredFileIdentity, recordAuthoredPublish } from "../core/session-authored-files.js";
 
 const fileMutationQueues = new Map<string, Promise<void>>();
 
@@ -118,17 +119,20 @@ export async function publishFileAtomically(
 		tempPath = join(dirname(target), `.clio-coder-publish-${randomUUID()}.tmp`);
 		const handle = await open(tempPath, "wx", previous ? previous.mode & 0o7777 : 0o666);
 		let after: FileIdentity;
+		let published: AuthoredFileIdentity;
 		try {
 			await handle.writeFile(content);
 			if (previous) await handle.chmod(previous.mode & 0o7777);
 			await handle.sync();
 			const info = await handle.stat();
 			after = { bytes: info.size, mtimeMs: info.mtimeMs };
+			published = info;
 		} finally {
 			await handle.close();
 		}
 		await (options.rename ?? rename)(tempPath, target);
 		tempPath = undefined;
+		recordAuthoredPublish(target, previous, published);
 		const result: AtomicPublishResult = {
 			before: previous ? { bytes: previous.size, mtimeMs: previous.mtimeMs } : null,
 			after,

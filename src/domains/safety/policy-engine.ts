@@ -11,6 +11,7 @@ import {
 	createPathWalkMemo,
 	type PathWalkMemo,
 } from "../../core/path-canonical.js";
+import { isSessionAuthoredFile } from "../../core/session-authored-files.js";
 import { ToolNames } from "../../core/tool-names.js";
 import { clioConfigDir } from "../../core/xdg.js";
 import { expandPath } from "../../tools/path-utils.js";
@@ -674,7 +675,7 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 					return blockDecision(base, blockInput);
 				}
 			}
-			const outsideReplacement = outsideExistingTypedMutationTarget(call, cwd, classification);
+			const outsideReplacement = outsideExistingTypedMutationTarget(call, cwd, classification, posture);
 			if (outsideReplacement !== null) {
 				const input = {
 					ruleId: "outside-file-replacement",
@@ -2237,6 +2238,7 @@ function outsideExistingTypedMutationTarget(
 	call: ClassifierCall,
 	workspaceRoot: string,
 	classification: Classification,
+	posture: string | undefined,
 ): string | null {
 	if (call.tool !== ToolNames.Write && call.tool !== ToolNames.Edit) return null;
 	if (!classification.reasons.some((reason) => reason.startsWith("write-path-"))) return null;
@@ -2245,7 +2247,12 @@ function outsideExistingTypedMutationTarget(
 	const resolved = canonicalizeRawPath(target, process.cwd());
 	if (resolved === null || isUnderOrSame(resolved, workspaceRoot)) return null;
 	try {
-		return statSync(resolved).isFile() ? resolved : null;
+		const info = statSync(resolved);
+		if (!info.isFile()) return null;
+		// YOLO revises the session's own outside draft without asking, but only
+		// while nothing else has written it since the session's last write.
+		if (posture === "yolo" && isSessionAuthoredFile(resolved, info)) return null;
+		return resolved;
 	} catch {
 		return null;
 	}

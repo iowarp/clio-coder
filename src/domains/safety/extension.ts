@@ -8,6 +8,7 @@ import {
 	type SessionResumedPayload,
 } from "../../core/bus-events.js";
 import type { DomainBundle, DomainContext, DomainExtension } from "../../core/domain-loader.js";
+import { clearSessionAuthoredFiles } from "../../core/session-authored-files.js";
 import { classify as classifyCall } from "./action-classifier.js";
 import {
 	type AuditRecord,
@@ -227,6 +228,8 @@ export function createSafetyBundle(context: DomainContext): DomainBundle<SafetyC
 			});
 			unsubscribeSessionParked = context.bus.on(BusChannels.SessionParked, (payload) => {
 				if (!isSessionParkedPayload(payload)) return;
+				// Authorship is per session: the next session asks again for the parked one's outside files.
+				clearSessionAuthoredFiles();
 				writeAudit(buildSessionParkAuditRecord({ sessionId: payload.sessionId, reason: payload.reason }));
 			});
 			unsubscribeSessionResumed = context.bus.on(BusChannels.SessionResumed, (payload) => {
