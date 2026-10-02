@@ -131,7 +131,7 @@ export async function main(args = process.argv.slice(2)) {
 	const hub = new EventHub(),
 		operations = new OperationRegistry(hub);
 	const files = new AppFiles(scratch ? join(scratch, "state") : resolveClioDirs().state);
-	const workspaces = new WorkspaceService(files),
+	const workspaces = new WorkspaceService(files, reads),
 		supervisor = new Supervisor(workspaces, files, hub, env);
 	try {
 		await supervisor.reconcile();

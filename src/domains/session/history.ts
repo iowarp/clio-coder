@@ -41,6 +41,60 @@ export function listSessionsForCwd(cwd: string): SessionMeta[] {
 	return metas;
 }
 
+/** A workspace directory that has recorded sessions, whichever interface recorded them. */
+export interface SessionWorkspace {
+	cwd: string;
+	sessions: number;
+	/** `endedAt`, else `createdAt`, of the most recently written session record. */
+	lastActivityAt: string;
+}
+
+/**
+ * Every workspace with recorded sessions, newest first. The ledger is keyed by `cwdHash`, so a project the
+ * terminal interface used is the same project another interface opens; this is how that second interface
+ * learns which projects exist without keeping a list of its own. Only each directory's newest `meta.json` is
+ * read, and a record whose `cwd` does not hash to its directory is not trusted to name one.
+ */
+export function listSessionWorkspaces(): SessionWorkspace[] {
+	const root = join(clioStateDir(), "sessions");
+	if (!existsSync(root)) return [];
+	const found: SessionWorkspace[] = [];
+	for (const bucket of readdirSync(root, { withFileTypes: true })) {
+		if (!bucket.isDirectory()) continue;
+		const bucketDir = join(root, bucket.name);
+		let newest: { path: string; mtimeMs: number } | null = null;
+		let sessions = 0;
+		for (const session of readdirSync(bucketDir, { withFileTypes: true })) {
+			if (!session.isDirectory()) continue;
+			const path = join(bucketDir, session.name, "meta.json");
+			try {
+				const info = statSync(path);
+				if (!info.isFile()) continue;
+				sessions++;
+				if (newest === null || info.mtimeMs > newest.mtimeMs) newest = { path, mtimeMs: info.mtimeMs };
+			} catch {
+				// A directory without readable meta.json is not a recorded session.
+			}
+		}
+		if (newest === null) continue;
+		try {
+			const meta = JSON.parse(readFileSync(newest.path, "utf8")) as Partial<SessionMeta>;
+			if (typeof meta.cwd !== "string" || cwdHash(meta.cwd) !== bucket.name) continue;
+			const at = meta.endedAt ?? meta.createdAt;
+			found.push({
+				cwd: meta.cwd,
+				sessions,
+				lastActivityAt: typeof at === "string" ? at : new Date(newest.mtimeMs).toISOString(),
+			});
+		} catch {
+			// Malformed metadata cannot name a workspace.
+		}
+	}
+	return found.sort((a, b) =>
+		a.lastActivityAt === b.lastActivityAt ? 0 : a.lastActivityAt > b.lastActivityAt ? -1 : 1,
+	);
+}
+
 /** One earlier recorded session in a workspace, attributed for a session-start fact. */
 export interface PriorSessionSummary {
 	id: string;

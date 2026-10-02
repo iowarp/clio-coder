@@ -35,6 +35,7 @@ export interface Methods {
 	"settings.write": { params: { cwd: string; write: SettingWrite }; result: unknown };
 	"config.graph": { params: { cwd: string }; result: unknown };
 	"sessions.list": { params: { cwd: string }; result: unknown };
+	"sessions.workspaces": { params: Record<string, never>; result: unknown };
 	"traces.read": { params: TraceRequest; result: unknown };
 	"tools.list": { params: Record<string, never>; result: { rows: RawTool[]; threadId: number } };
 	"tools.install": { params: { id: string; force: boolean }; result: { id: string; message: string } };

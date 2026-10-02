@@ -1,6 +1,6 @@
 import { workerData } from "node:worker_threads";
 import { runtimeInfo } from "../clio/adapters/runtime.js";
-import { sessionHistory } from "../clio/adapters/sessions.js";
+import { sessionHistory, sessionWorkspaces } from "../clio/adapters/sessions.js";
 import { toolchainAdapter } from "../clio/adapters/toolchain.js";
 import { TraceAdapter } from "../clio/adapters/traces.js";
 import { restrictNetwork } from "../network-policy.js";
@@ -60,6 +60,7 @@ serveWorker(async (call) => {
 		return inspectConfigGraph(call.params.cwd);
 	}
 	if (call.method === "sessions.list") return sessionHistory(call.params.cwd);
+	if (call.method === "sessions.workspaces") return sessionWorkspaces();
 	if (call.method === "traces.read") return traces.read(call.params);
 	if (call.method !== "tools.list") throw new AppProblem("unsupported", "Method is not available in the reads worker.");
 	if (settings.fixture && settings.readDelayMs)

@@ -1,12 +1,14 @@
 import { existsSync, readdirSync, realpathSync } from "node:fs";
 import { isAbsolute, join, relative, sep } from "node:path";
 import { clioStateDir } from "../../../../../src/core/xdg.js";
-import { listSessionsForCwd } from "../../../../../src/domains/session/history.js";
+import { listSessionsForCwd, listSessionWorkspaces } from "../../../../../src/domains/session/history.js";
 import { AppProblem } from "../../services/problem.js";
-export function sessionHistory(cwd: string) {
+
+/** Fails closed when session storage links outside the state directory; false when there is no ledger yet. */
+function preflightLedger() {
 	const state = clioStateDir(),
 		directory = join(state, "sessions");
-	if (!existsSync(directory)) return [];
+	if (!existsSync(directory)) return false;
 	const root = realpathSync(state);
 	const inspect = (path: string, depth: number) => {
 		const resolved = realpathSync(path),
@@ -27,5 +29,12 @@ export function sessionHistory(cwd: string) {
 	};
 	// The domain owns cwd hashing; preflight its session tree without copying that identity algorithm.
 	inspect(directory, 3);
-	return listSessionsForCwd(cwd);
+	return true;
+}
+export function sessionHistory(cwd: string) {
+	return preflightLedger() ? listSessionsForCwd(cwd) : [];
+}
+/** Every project the ledger knows, so the app shows the terminal's projects without a list of its own. */
+export function sessionWorkspaces() {
+	return preflightLedger() ? listSessionWorkspaces() : [];
 }

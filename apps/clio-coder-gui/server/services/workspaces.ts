@@ -7,11 +7,25 @@ import { Type } from "typebox";
 import { Value } from "typebox/value";
 import { Workspace, type WorkspaceFolders } from "../../contracts/sessions.js";
 import type { AppFiles } from "../state/files.js";
+import type { WorkerHost } from "../worker/host.js";
 import { AppProblem } from "./problem.js";
 
 const Workspaces = Type.Array(Workspace);
+const LedgerWorkspaces = Type.Array(
+	Type.Object({ cwd: Type.String({ maxLength: 4096 }), lastActivityAt: Type.String() }, { additionalProperties: true }),
+);
+const RECENT_LIMIT = 40;
+const workspaceId = (path: string) => createHash("sha256").update(path).digest("hex").slice(0, 32);
+/**
+ * A workspace is a canonical directory, the same identity the terminal interface and the session ledger use.
+ * The recents file only remembers what this app opened; the ledger remembers every project any interface
+ * ran in, so both feed the list and a project started in the terminal is already here.
+ */
 export class WorkspaceService {
-	constructor(private readonly files: AppFiles) {}
+	constructor(
+		private readonly files: AppFiles,
+		private readonly ledger?: WorkerHost,
+	) {}
 	async browse(requested?: string, hidden = false): Promise<WorkspaceFolders> {
 		const start = requested ?? process.cwd();
 		if (!isAbsolute(start)) throw new AppProblem("validation", "Choose an absolute directory path.");
@@ -56,11 +70,35 @@ export class WorkspaceService {
 			truncated: directories.length > 200,
 		};
 	}
+	private async fromLedger(): Promise<Workspace[]> {
+		if (!this.ledger) return [];
+		let raw: unknown;
+		try {
+			raw = await this.ledger.call("sessions.workspaces", {});
+		} catch {
+			// The ledger is a second source; recents alone still give a usable list while it is unreadable.
+			return [];
+		}
+		if (!Value.Check(LedgerWorkspaces, raw)) return [];
+		return raw.map((row) => ({
+			id: workspaceId(row.cwd),
+			path: row.cwd,
+			name: basename(row.cwd) || row.cwd,
+			openedAt: row.lastActivityAt,
+		}));
+	}
 	async list(): Promise<Workspace[]> {
 		const value = await this.files.read("workspaces");
 		if (!Value.Check(Workspaces, value)) throw new AppProblem("unavailable", "Recent workspace state is invalid.");
+		const merged = new Map<string, Workspace>();
+		for (const row of [...value, ...(await this.fromLedger())]) {
+			const known = merged.get(row.id);
+			if (!known) merged.set(row.id, row);
+			else if (row.openedAt > known.openedAt) merged.set(row.id, { ...known, openedAt: row.openedAt });
+		}
+		// A directory that has gone away keeps its record and its history; it only stops being offered until it returns.
 		const available = await Promise.all(
-			value.map(async (row) => {
+			[...merged.values()].map(async (row) => {
 				try {
 					return (await realpath(row.path)) === row.path && (await stat(row.path)).isDirectory() ? row : null;
 				} catch {
@@ -68,7 +106,10 @@ export class WorkspaceService {
 				}
 			}),
 		);
-		return available.filter((row): row is Workspace => row !== null);
+		return available
+			.filter((row): row is Workspace => row !== null)
+			.sort((a, b) => b.openedAt.localeCompare(a.openedAt))
+			.slice(0, RECENT_LIMIT);
 	}
 	async get(id: string) {
 		const row = (await this.list()).find((item) => item.id === id);
@@ -93,14 +134,14 @@ export class WorkspaceService {
 			throw new AppProblem("validation", "Workspace must be an existing directory.");
 		}
 		const row: Workspace = {
-			id: createHash("sha256").update(canonical).digest("hex").slice(0, 32),
+			id: workspaceId(canonical),
 			path: canonical,
 			name: basename(canonical) || canonical,
 			openedAt: new Date().toISOString(),
 		};
 		return this.files.update("workspaces", (current) => {
 			if (!Value.Check(Workspaces, current)) throw new AppProblem("unavailable", "Recent workspace state is invalid.");
-			return { value: [row, ...current.filter((item) => item.id !== row.id)].slice(0, 40), result: row };
+			return { value: [row, ...current.filter((item) => item.id !== row.id)].slice(0, RECENT_LIMIT), result: row };
 		});
 	}
 }
