@@ -891,7 +891,17 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 		resultDigest?: ToolResultDigest,
 	): ReadonlyArray<MiddlewareEffect> => {
 		if (!deps.middleware) return [];
-		const input = buildToolHookInput(hook, spec, call, decision, "operating", options, result, resultDigest);
+		const input = buildToolHookInput(
+			hook,
+			spec,
+			call,
+			decision,
+			"operating",
+			options,
+			result,
+			resultDigest,
+			deps.flow?.carried() ?? null,
+		);
 		const effects = deps.middleware.runHook(input).effects;
 		try {
 			deps.onMiddlewareEffects?.(effects, input);
@@ -1935,6 +1945,7 @@ function buildToolHookInput(
 	options: ToolInvokeOptions | undefined,
 	result: ToolResult | undefined,
 	resultDigest: ToolResultDigest | undefined,
+	carriedFlow: FlowRestrictionSet | null,
 ): MiddlewareHookInput {
 	const metadata: Record<string, MiddlewareMetadataValue> = {
 		posture,
@@ -1947,8 +1958,8 @@ function buildToolHookInput(
 	if (hook === "before_tool") metadata.callFingerprint = hashToolCall(spec.name, call.args ?? {});
 	// What the session already carries, so an adviser sees the restriction
 	// before any model send; the result's own label rides on toolResultDetails.
-	const carriedFlow = deps.flow?.carried() ?? null;
-	if (carriedFlow !== null) metadata.flowRuleIds = [...new Set(carriedFlow.restrictions.map((r) => r.ruleId))];
+	if (carriedFlow !== null)
+		metadata.flowRuleIds = JSON.stringify([...new Set(carriedFlow.restrictions.map((r) => r.ruleId))]);
 	// A nested invocation (gateway → capability) is the model's one call seen
 	// twice by the hook layer; the loop guard counts and fingerprints only the
 	// outer occurrence. Every other hook still fires under the inner name.
