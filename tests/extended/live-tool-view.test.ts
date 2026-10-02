@@ -1,10 +1,6 @@
 import { deepStrictEqual, doesNotMatch, match, ok, strictEqual } from "node:assert/strict";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { describe, it } from "node:test";
 import { stripTerminalSequences } from "../../src/engine/tui.js";
-import { editPreviewDiff } from "../../src/interactive/mutation-preview.js";
 import { codeInk, codeInkLexer } from "../../src/interactive/renderers/code-ink.js";
 import { LiveToolView } from "../../src/interactive/renderers/live-tool-view.js";
 import { renderToolPreview } from "../../src/interactive/renderers/tool-execution.js";
@@ -88,25 +84,5 @@ describe("live tool views", () => {
 		let carry = lexer.start;
 		for (const line of lines.slice(0, 2)) carry = lexer.advance(line, carry);
 		deepStrictEqual(lexer.ink(lines.slice(2), carry), codeInk("ts", lines).slice(2));
-	});
-
-	it("compute an edit's diff from the file before the call runs, and nothing when it cannot apply", async () => {
-		const dir = mkdtempSync(join(tmpdir(), "clio-live-edit-"));
-		try {
-			const path = join(dir, "a.ts");
-			writeFileSync(path, "one\ntwo\nthree\n");
-			const diff = await editPreviewDiff({ path, edits: [{ oldText: "two", newText: "TWO" }] });
-			ok(diff !== null);
-			match(diff, /^-\s*2 two$/mu);
-			match(diff, /^\+\s*2 TWO$/mu);
-			const ready = { ...forming({ path, edits: [{ oldText: "two", newText: "TWO" }] }, "edit"), phase: "ready" as const };
-			const rows = plain(renderToolPreview(ready, 100, transcriptDetail("standard"), { previewDiff: diff }));
-			ok(rows.some((row) => /^ {2}│ -\s*2 two$/u.test(row)));
-			doesNotMatch(rows.join("\n"), /│ \+ TWO/u, "the computed diff replaces the streamed + rows");
-			strictEqual(await editPreviewDiff({ path, edits: [{ oldText: "absent", newText: "x" }] }), null);
-			strictEqual(await editPreviewDiff({ path, edits: [{ oldText: "two" }] }), null);
-		} finally {
-			rmSync(dir, { recursive: true, force: true });
-		}
 	});
 });

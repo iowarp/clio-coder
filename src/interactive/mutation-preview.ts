@@ -17,7 +17,6 @@
 
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
-import { readFile, stat } from "node:fs/promises";
 import { ToolNames } from "../core/tool-names.js";
 import { sanitizeCallTargetText, sanitizeMultilineDisplayText } from "../domains/safety/call-target.js";
 import {
@@ -226,35 +225,6 @@ function editPreview(facts: MutationFacts, path: string, edits: ReadonlyArray<Ed
 			`Requested replacements for ${sanitizeCallTargetText(path)} (they do not apply: ${message})`,
 			replacementListing(edits),
 		);
-	}
-}
-
-/** Files above this skip the transcript's early diff, as the edit tool skips its own. */
-const EDIT_PREVIEW_MAX_BYTES = 1024 * 1024;
-
-/**
- * The diff an edit will make, computed from the file once its arguments have
- * closed and before its result lands, for the live row (Pi shows the same).
- * Null when the edit list is incomplete, the file is large or unreadable, or
- * the replacements do not apply: the row then keeps its streamed text and the
- * tool's own result says what happened.
- */
-export async function editPreviewDiff(args: unknown): Promise<string | null> {
-	if (args === null || typeof args !== "object" || Array.isArray(args)) return null;
-	const record = args as Record<string, unknown>;
-	const path = typeof record.path === "string" ? record.path : "";
-	const edits = readEdits(record.edits);
-	if (path.length === 0 || edits === null || edits.length === 0) return null;
-	try {
-		const target = resolveToCwd(path);
-		if ((await stat(target)).size > EDIT_PREVIEW_MAX_BYTES) return null;
-		const { text } = stripBom(await readFile(target, "utf8"));
-		const applied = applyEditsToNormalizedContent(normalizeToLF(text), edits, path);
-		const diff = generateDiffString(applied.baseContent, applied.newContent).diff;
-		return diff.length > 0 ? diff : null;
-	} catch {
-		// A preview that cannot be built is not an error: the call itself reports it.
-		return null;
 	}
 }
 

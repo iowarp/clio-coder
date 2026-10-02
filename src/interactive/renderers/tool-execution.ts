@@ -2091,8 +2091,6 @@ export function renderToolPreview(
 		operator?: boolean;
 		/** The segment's live state; without one the rows are the same, only dearer per frame. */
 		live?: LiveToolView;
-		/** An edit's diff, computed from the file once its arguments closed and before its result. */
-		previewDiff?: string;
 	} = {},
 ): string[] {
 	const presented = presentedCall(wire);
@@ -2138,20 +2136,7 @@ export function renderToolPreview(
 		),
 	);
 	if (payload !== null) {
-		if (payload.tool === "edit" && options.previewDiff !== undefined && detail.diffRows > 0) {
-			rows.push(
-				...previewRows(
-					renderMutationDiffBlock(redactSecretString(options.previewDiff), width, true),
-					previewBudget(detail.diffRows, options.terminalRows),
-					width,
-					false,
-					RAIL_NORMAL,
-					BODY_INDENT_VISIBLE_WIDTH,
-				),
-			);
-		} else {
-			rows.push(...livePayloadRows(payload, view, limit, width));
-		}
+		rows.push(...livePayloadRows(payload, view, limit, width));
 		return rows;
 	}
 	if (finished === undefined && command && options.partialResult !== undefined && limit > 0) {
