@@ -515,7 +515,8 @@ cancels the underlying owner. The menu does not search as you type.
 | `Alt+W` | Toggle Workers | `w` |
 | `Alt+E` | Toggle files from Clio focus | `e` |
 | `Shift+Tab` | Cycle supported thinking effort for this session only | `t` |
-| `Ctrl+Q` | Queue draft after the whole active run; ordinary send while idle | `f` |
+| `Alt+S` | Send now: interrupt the run with the draft, or flush the queue when the draft is empty; ordinary send while idle | `i` |
+| `Alt+K` | Open the queue navigator over the queued messages | `n` |
 | `Alt+Q` | Restore both queue kinds before the current draft, once | `q` |
 | `Ctrl+D` | Delete forward with text; exit only empty and idle with no queued messages | — |
 | `Ctrl+G` | Open or close the contextual action menu | — |
@@ -568,9 +569,12 @@ both direct access and the action's default leader entry. A default-unbound
 action may still have a leader entry. Rebinding a direct key does not change its
 fixed suffix; `leader: []` disables the menu. Unknown IDs and effective conflicts
 diagnose; shipped fullscreen viewport keys that intentionally shadow unchanged editor defaults have no conflict tag, while user rebindings can still conflict. Edits reload routing, components and hints together, cancelling a
-pending menu. No preferences are rewritten. Defaults move follow-up from
-Alt+Enter to Ctrl+Q and recovery from Alt+Up to Alt+Q; Alt+B/D return to editing.
-Infrequent boards use their slash commands, and interrupt/background/external
+pending menu. No preferences are rewritten. Send now has the direct key Alt+S
+and the queue navigator Alt+K; recovery stays on Alt+Q, and Alt+B/D return to
+editing. The separate end-of-turn send key (Ctrl+Q, action
+`clio-coder.message.followUp`) is retired: a keybindings file that still names
+it gets a diagnostic saying so, and the end-of-turn slot is the navigator's `t`
+toggle. Infrequent boards use their slash commands, and background/external
 editor/dismiss use the menu or command bridges. Explicit old choices remain.
 
 **Terminal delivery.** On stock macOS Terminal.app, Option may compose text;
@@ -579,7 +583,7 @@ Use Option as Meta enabled permits direct Alt keys. Windows Terminal/WSL2 can
 retain native Alt+Enter, Alt+arrow, clipboard, Find and zoom controls. Ctrl+J
 is the portable newline. Node raw mode normally disables flow control and
 signal generation; an SSH/mux or terminal UI can still intercept keys, so menu
-`f` is available if Ctrl+Q does not arrive. Native clipboard and terminal window
+`i` is available if Alt+S does not arrive. Native clipboard and terminal window
 controls remain upstream. Clio does not own keys while Yazi, an external editor
 or the host mux holds focus. Physical Windows/macOS acceptance is separate from
 Linux PTY and protocol tests; no terminal profile is installed automatically.
@@ -619,14 +623,31 @@ hydrated first frame. The seam is [terminal-lease.ts](../../src/interactive/term
 
 ## Live Steering
 
-While a run is active, the key that submits a message chooses when it lands.
-There are three modes, chosen per message; the default is next slot.
+While a run is active, a message you submit waits in Clio's own steering
+queue, shown in the Steering Queue panel above the composer, until the engine
+reaches a slot. Every queued message bound for that slot is handed over
+together, in the order you typed them, and lands before one model call as
+separate user messages. There are three modes, chosen per message; the default
+is next slot.
 
 | Mode | Key | Delivery |
 | --- | --- | --- |
-| Next slot | `Enter` | Between tool batches, mid-run, through `agent.steer`. The agent keeps going and reads the message before its next model call. |
-| End of turn | `Ctrl+Q` | When the whole run settles and Clio would hand control back, through `agent.followUp`. A turn is the whole run, not one model round. |
-| Interrupt | `Ctrl+G`, `i` or `/interrupt <text>` | Cancels the in-flight work the way `Esc` does (generation aborts; a running bash child gets SIGTERM, then SIGKILL), waits for the cancelled run to seal its tool results in ledger order, then submits the message as a fresh prompt. Anything already queued returns to the editor. |
+| Next slot | `Enter` | Between tool batches, mid-run. The agent keeps going and reads every queued message before its next model call. A message typed during the run's final model call is handed over at the end of that call, so the run carries on with it instead of ending. |
+| End of turn | `t` on the entry in the queue navigator, or ACP mode `end-of-turn` | When the whole run settles and Clio would hand control back. A turn is the whole run, not one model round. |
+| Send now | `Alt+S`, `Ctrl+G` `i` or `/interrupt <text>` | Cancels the in-flight work the way `Esc` does (generation aborts; a running bash child gets SIGTERM, then SIGKILL), waits for the cancelled run to seal its tool results in ledger order, then submits the draft as a fresh prompt. Anything already queued stays queued and lands at the new run's first slot. With an empty draft, Alt+S flushes the queue: the first entry is the prompt and the rest land with its first model call. While a tool call is running, Alt+S asks whether to stop it or to send after it finishes; waiting queues the message ahead of everything else. |
+
+### The queue navigator
+
+`Alt+K` opens the queued messages as a list. `Up`/`Down` select, `Shift+Up`/
+`Shift+Down` move an entry, `e` takes it back to the editor, `x` removes it,
+`t` flips it between the next slot and the end of the turn, `Enter` sends the
+selected entry now and keeps the rest queued, and the restore key (`Alt+Q`)
+puts everything back in the editor. The panel shows each entry's slot word,
+how long it has waited, and advisory marks: `!` when a reading found it urgent,
+`·t` when steering triage relabeled it. Steering triage is experimental and
+off by default (`chat.steering.triage`): when on, a side model reads the queue
+once it has settled, moves an unrelated task to the end of the turn unless you
+set its slot yourself, and may interrupt the run on a confident stop.
 
 ### The same three modes against a background worker
 
@@ -635,18 +656,20 @@ modes are not symmetric:
 
 - **Steer** reaches a worker. `@<agent> <text>` sends the message across the
   worker channel; the worker acknowledges it and keeps running.
-- **Follow-up** does not. A worker has no follow-up queue, so a new goal for it
-  is a new dispatch.
-- **Interrupt** is refused while an attached dispatch is running, for the reason
+- **End of turn** does not. A worker has no follow-up queue, so a new goal for
+  it is a new dispatch.
+- **Send now** is refused while an attached dispatch is running, for the reason
   given below. Cancel the worker itself with `Esc`, which stops the run and
   still leaves a receipt.
 
-Interrupt is refused in two states and the message is queued for the next slot
-instead, with a notice saying why: while an attached dispatch is running (the
-abort would kill the worker's run with no receipt; steer it with `@<agent>` or
-cancel it with `Esc`) and while a permission ask is parked (it is already
-waiting on you). A steer that arrives as the run ends is resubmitted as a fresh
-prompt. Headless `--steer-channel` lines are always next-slot steers.
+Send now is refused in two states and the message is queued at the head of the
+queue for the next slot instead, with a notice saying why: while an attached
+dispatch is running (the abort would kill the worker's run with no receipt;
+steer it with `@<agent>` or cancel it with `Esc`) and while a permission ask is
+parked (it is already waiting on you). A message that arrives only after the
+run's final turn has settled is resubmitted as a fresh prompt, each queued
+entry as its own message. Headless `--steer-channel` lines are always next-slot
+steers.
 
 Explicitly addressed worker steering stays addressed to that worker. A stale,
 completed, ambiguous or unavailable target produces a notice and preserves the

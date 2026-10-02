@@ -111,7 +111,7 @@ Then run `clio-coder doctor` and read the `system one (experimental)` rows, or r
 | `mode` | `auto`, `logprobs` or `answer`. Only valid on `kind: llm`. `auto` uses first-token logprobs when the server returns them and falls back to five votes when it does not. |
 | `profile` | The capability profile of the served model: `generic` (the default), `jev`, `laya`, `laya-multilingual`, `julia-1`, `gliner2.5-small` or `gliner2.5-decide`. Only valid on `kind: systemone`. It declares which decision tasks the model may be asked and the limits its publisher states, so a question the model cannot carry is abstained on before any byte leaves. It is a declaration, not a measurement: it installs nothing and makes no build fitted. |
 
-`systemOne.sites` maps a site id (`turn`, `toolCall`, `toolResult`, `turnEnd`, `relevance`, `consult`, `drafts`) to an engine name, or to `{ engine, timeoutMs, tasks }`, where both other fields are optional. `timeoutMs` replaces the site's default deadline for that binding. `tasks` routes one decision task of the site to another declared engine, for example `turn: { engine: jev, tasks: { recipe: julia } }`; the questions of that task go to the named engine and the rest to the site's own. The tasks a site asks are `intent`, `recipe` and `clusterSelect` at `turn`, `toolRisk` at `toolCall`, `injection` at `toolResult`, `turnEnd` at `turnEnd`, `relevance` and `clusterSelect` at `relevance`, `consult` at `consult` and `drafts` at `drafts`. A routed engine that cannot answer leaves its task unanswered rather than falling back to the site's engine. A site with no entry is off. An engine name that `systemOne.engines` does not define, or a task the site does not ask, is a settings error.
+`systemOne.sites` maps a site id (`turn`, `toolCall`, `toolResult`, `turnEnd`, `relevance`, `consult`, `drafts`, `steer`) to an engine name, or to `{ engine, timeoutMs, tasks }`, where both other fields are optional. `timeoutMs` replaces the site's default deadline for that binding. `tasks` routes one decision task of the site to another declared engine, for example `turn: { engine: jev, tasks: { recipe: julia } }`; the questions of that task go to the named engine and the rest to the site's own. The tasks a site asks are `intent`, `recipe` and `clusterSelect` at `turn`, `toolRisk` at `toolCall`, `injection` at `toolResult`, `turnEnd` at `turnEnd`, `relevance` and `clusterSelect` at `relevance`, `consult` at `consult`, `drafts` at `drafts` and `steer` at `steer`. A routed engine that cannot answer leaves its task unanswered rather than falling back to the site's engine. A site with no entry is off. An engine name that `systemOne.engines` does not define, or a task the site does not ask, is a settings error.
 
 `systemOne.cuts` maps an answering build to fitted overrides. See [Calibration and shadow mode](#calibration-and-shadow-mode).
 
@@ -148,6 +148,7 @@ A site is named by the object it judges. One call to a site carries one bounded 
 | `relevance` | Catalog entries against a need | 1500 ms | Reorders skills, gateway capabilities and memory from a finished ranking. |
 | `consult` | Evidence the main agent supplies | 3000 ms | The `consult` tool. |
 | `drafts` | Candidate answers | 5000 ms | `/draft` judging. |
+| `steer` | A message the operator queued during a run | 3000 ms | Recorded only. |
 
 ### `turn`: hints and acts that land in time
 
@@ -178,6 +179,10 @@ Only results from `web_fetch`, `web_read` and MCP tools are read. They carry thi
 After a turn settles, the site reads the assistant's final message, detached. Its readings (whether the message asks the operator something, blocks on a decision, announced work never started, claims a passing check, finished a unit of work, stopped mid-operation or moved on from the request) are recorded beside the turn outcome. Settlement never waits for them, and the clarification streak that gates the `direction` workflow keeps its own regex reading of the closing text.
 
 The prose-question nudge has been removed. Turn-ending guidance lives in the prompt and the `ask_user` result. The plan-close registration uses explicit proposal mode, the intent of a fitted `turn` reading that landed in time, or, without one, the operator's request naming a plan; never this site's reading of the reply.
+
+### `steer`: recorded readings of queued messages
+
+When a message is queued during a run, the site reads it detached: how it relates to the work in progress (a correction, an addition, a new task, a stop, a question) and how soon it should land. Nothing reads the answer; delivery follows the operator's keys and the queue navigator. What became of the entry (delivered at which slot after how long, removed and why, relabeled by whom) is recorded as outcome rows joined to the reading by the entry id. No cut exists for this site, so no build can act on it.
 
 ### `relevance`: ranking skills, capabilities and memory
 
