@@ -631,7 +631,9 @@ describe("contracts/configure-onboarding", () => {
 		try {
 			const result = await runWizard(testEnv.env, [{ waitFor: "Where does your model come from?", keys: [ESCAPE] }]);
 			strictEqual(result.code, 130);
-			match(result.stderr, /configuration cancelled/u);
+			// A user cancel is said once, on the rail, and is not an error.
+			strictEqual(result.stderr, "");
+			ok(plainText(result.transcript()).includes("Cancelled; target settings not saved"));
 			strictEqual(existsSync(testEnv.settingsFile), false);
 		} finally {
 			testEnv.cleanup();

@@ -94,7 +94,7 @@ import {
 } from "./configure-target.js";
 import { createLifecyclePresenter, type LifecyclePresenter, shortenPath } from "./lifecycle-presenter.js";
 import { canSelect, promptSelect } from "./select.js";
-import { credentialWriteFailed, printError, printOk, printPlaintextCredentialWarning } from "./shared.js";
+import { credentialWriteFailed, printError, printNote, printOk, printPlaintextCredentialWarning } from "./shared.js";
 import { terminalColumns, wrapPlain } from "./text-layout.js";
 
 const HELP = `clio-coder configure
@@ -2042,6 +2042,16 @@ interface ConfigureStreams {
 	out: NodeJS.WritableStream;
 }
 
+/**
+ * Leaving setup before any target exists. The user chose to stop, so this is a
+ * note and not an error, and it names the way back in; 130 still tells a caller
+ * such as the bare `clio-coder` launch that nothing was configured.
+ */
+function firstRunCancelled(): number {
+	printNote("configuration cancelled; no target saved. Run `clio-coder configure` when you are ready.");
+	return 130;
+}
+
 async function runInteractive(
 	rl: ConfigurePrompts,
 	preselectedRuntime: RuntimeDescriptor | null,
@@ -2090,10 +2100,7 @@ async function runInteractive(
 	if (readSettings().targets.length === 0) {
 		// Dumb terminals retain the numbered setup path.
 		const runtime = await pickRuntimeViaCategory(rl);
-		if (!runtime) {
-			printError("configuration cancelled");
-			return 130;
-		}
+		if (!runtime) return firstRunCancelled();
 		return await runTargetSetupInteractive(rl, runtime, defaults);
 	}
 
@@ -2217,8 +2224,7 @@ export async function runConfigureCommand(
 	} catch (err) {
 		if (err instanceof ConfigureNavigation) {
 			if (readSettings().targets.length > 0) return 0;
-			printError("configuration cancelled");
-			return 130;
+			return firstRunCancelled();
 		}
 		printError(err instanceof Error ? err.message : String(err));
 		return 1;

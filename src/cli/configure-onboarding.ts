@@ -87,7 +87,7 @@ import {
 import type { LifecyclePresenter } from "./lifecycle-presenter.js";
 import { createLifecyclePresenter, shortenPath } from "./lifecycle-presenter.js";
 import { canSelect, promptSelect, promptText } from "./select.js";
-import { credentialWriteFailed, printError, printPlaintextCredentialWarning } from "./shared.js";
+import { credentialWriteFailed, printPlaintextCredentialWarning } from "./shared.js";
 import { truncate } from "./text-layout.js";
 
 export interface OnboardingStreams {
@@ -1129,7 +1129,10 @@ export async function runOnboardingWizard(
 		"configure",
 	);
 	presenter.note("Choose what you already use. Clio checks the endpoint and model list when the provider allows it.");
-	presenter.note("Escape goes back. Nothing is saved until the review, except a browser sign-in you complete.");
+	// "Nothing is saved" read as false to a first-run user who then found the
+	// settings.yaml and credentials.yaml templates the home bootstrap writes. Those
+	// hold no choice of theirs; the sentence is about the choices.
+	presenter.note("Escape goes back. Your choices are saved only at the review, except a browser sign-in you complete.");
 	presenter.note(`Saved result: ${shortenPath(settingsPath())}`);
 
 	const existing = options.mode === "edit" ? options.target : undefined;
@@ -1158,22 +1161,23 @@ export async function runOnboardingWizard(
 		presenter.fail(`Unknown runtime: ${existing.runtime}`);
 		return 2;
 	}
+	const stop = (quit = false): number => cancel(presenter, answers, { quit, advise: host === undefined });
 	const marks = new Array<number>(STEPS.length).fill(writer.mark());
 	let cursor = 0;
 	let direction = 1;
 
 	while (cursor < STEPS.length) {
-		if (host?.cancelled()) return cancel(presenter, answers, true);
+		if (host?.cancelled()) return stop(true);
 		const step = STEPS[cursor];
 		if (step === undefined) break;
 		if (!step.applies(answers)) {
 			cursor += direction;
-			if (cursor < 0) return cancel(presenter, answers);
+			if (cursor < 0) return stop();
 			continue;
 		}
 		marks[cursor] = writer.mark();
 		const outcome = await step.run(wizard, answers);
-		if (outcome === "quit" || outcome === "cancel") return cancel(presenter, answers, outcome === "quit");
+		if (outcome === "quit" || outcome === "cancel") return stop(outcome === "quit");
 		if (outcome === "credential") {
 			direction = 1;
 			cursor = STEPS.indexOf(CREDENTIAL_STEP);
@@ -1185,7 +1189,7 @@ export async function runOnboardingWizard(
 			// Rewind past the row the step we are returning to left behind, so it
 			// can ask again in the same place rather than under its own answer.
 			while (cursor >= 0 && !(STEPS[cursor]?.applies(answers) ?? false)) cursor -= 1;
-			if (cursor < 0) return cancel(presenter, answers);
+			if (cursor < 0) return stop();
 			writer.rewindTo(marks[cursor] ?? writer.mark());
 			continue;
 		}
@@ -1193,7 +1197,7 @@ export async function runOnboardingWizard(
 		cursor += 1;
 	}
 
-	if (host?.cancelled()) return cancel(presenter, answers, true);
+	if (host?.cancelled()) return stop(true);
 	const code = finish(wizard, answers);
 	if (code === 0 && answers.mode === "first") {
 		await reviewInteropAgents({ rl: null, streams, presenter, rail, quiet: true });
@@ -1201,18 +1205,26 @@ export async function runOnboardingWizard(
 	return code;
 }
 
-function cancel(presenter: LifecyclePresenter, answers: Answers, quit = false): number {
+function cancel(
+	presenter: LifecyclePresenter,
+	answers: Answers,
+	options: { quit?: boolean; advise?: boolean } = {},
+): number {
 	// A first-run cancel really does leave Clio unconfigured, which is why this
-	// exits 130 where leaving the settings menu exits 0.
+	// exits 130 where leaving the settings menu exits 0. It is still the user's
+	// choice and not a failure, so the rail says it once and nothing follows on
+	// stderr; the closing line used to be chased by `error: configuration cancelled`.
+	if (answers.mode === "first" && options.advise !== false)
+		presenter.commandAdvice("Set up later:", "clio-coder configure");
 	presenter.done("Cancelled; target settings not saved");
-	if (answers.mode === "first") printError("configuration cancelled");
-	return answers.mode === "first" || quit ? 130 : 0;
+	return answers.mode === "first" || options.quit === true ? 130 : 0;
 }
 
 function finish(wizard: Wizard, answers: Answers): number {
 	const runtime = answers.runtime;
 	const targetId = answers.targetId;
-	if (!runtime || targetId === undefined) return cancel(wizard.presenter, answers);
+	if (!runtime || targetId === undefined)
+		return cancel(wizard.presenter, answers, { advise: wizard.host === undefined });
 	const presenter = wizard.presenter;
 
 	const reasoning =
