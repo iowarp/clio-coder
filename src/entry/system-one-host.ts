@@ -4,10 +4,10 @@
  * The turn site is asked once, at submit, and nothing waits for it. Its readers
  * (the hint registration, the turn controller, the plan-close registration and
  * the prewarm) take a fitted reading that has already landed when they read,
- * and otherwise behave as if the site were unbound. The turn-end site is asked once
- * per settled turn; whether the message asks the operator feeds the
- * clarification streak and the turn outcome record that measures how turns
- * end. The relevance site ranks a catalog when a tool is asked for one.
+ * and otherwise behave as if the site were unbound. The turn-end site is asked
+ * once per settled turn, detached, and its reading is only recorded beside the
+ * turn outcome; the clarification streak keeps the regex reading. The relevance
+ * site ranks a catalog when a tool is asked for one.
  * Everything here degrades to what the harness did before System One existed:
  * an unbound, slow, failed or unfitted site hands back null and the reader
  * keeps its own answer.
@@ -35,16 +35,9 @@ import { TOOL_CALL_GATE_SITE } from "../domains/system-one/sites/tool-call.js";
 import { TOOL_RESULT_SITE } from "../domains/system-one/sites/tool-result.js";
 import type { TurnRecipeOption, TurnValue } from "../domains/system-one/sites/turn.js";
 import { recipesInGroup, TURN_RECIPE_SITE, TURN_SITE } from "../domains/system-one/sites/turn.js";
-import { TURN_END_SITE, type TurnEndValue } from "../domains/system-one/sites/turn-end.js";
+import { TURN_END_SITE } from "../domains/system-one/sites/turn-end.js";
 import type { TokenSplit, TurnInterpretation } from "../domains/turn-control/index.js";
 import type { ToolCallGateSubject } from "../tools/registry.js";
-
-/**
- * How long a turn waits for the turn-end reading, counted from the moment it
- * was first asked for. The settled turn holds the next prompt behind it, so
- * a slower answer is recorded by the runner but never waited for.
- */
-export const TURN_END_WAIT_MS = 1_200;
 
 /** Earlier operator requests the turn-end site reads beside the current one. */
 const EARLIER_REQUESTS = 3;
@@ -256,8 +249,12 @@ export interface SystemOneHost {
 	turnId(): string | null;
 	/** Drop the operator texts kept in memory. The next turn-end reading reads the ledger once. */
 	forgetOperatorTexts(): void;
-	/** The settled turn's reading of whether the message asks the operator something; null keeps the regex. */
-	readTurnEnd(input: TurnEndReadInput): Promise<{ asks: boolean | null } | null>;
+	/**
+	 * Read the settled turn's final message, detached, for the record. The
+	 * turn-end site is experimental and record-only: nothing waits for it and no
+	 * reader takes its answer.
+	 */
+	recordTurnEnd(input: TurnEndReadInput): void;
 	/**
 	 * Read a delivered tool result for instructions aimed at an agent, detached,
 	 * for the record. The classifier is experimental and never changes the result.
@@ -297,21 +294,6 @@ function detached(call: () => Promise<unknown>): void {
 	}
 }
 
-/** A promise's value, or null once `ms` passed. The answer that arrives late is still recorded by its runner. */
-async function withinDeadline<T>(promise: Promise<T | null>, ms: number): Promise<T | null> {
-	let timer: NodeJS.Timeout | undefined;
-	try {
-		return await Promise.race([
-			promise,
-			new Promise<null>((resolve) => {
-				timer = setTimeout(() => resolve(null), ms);
-			}),
-		]);
-	} finally {
-		if (timer !== undefined) clearTimeout(timer);
-	}
-}
-
 /**
  * Up to `limit` operator messages that precede the turn `beforeTurnId`, oldest
  * first. Synthetic user turns (a continuation's nudge) are not the operator's
@@ -335,7 +317,6 @@ function priorOperatorTexts(entries: ReadonlyArray<SessionEntry>, beforeTurnId: 
 export function createSystemOneHost(deps: SystemOneHostDeps): SystemOneHost {
 	const { systemOne } = deps;
 	let turn: { id: string; task: string; verdict: Verdict<TurnValue> | null; groupRecipe: string | null } | null = null;
-	let turnEnd: { id: string; read: Promise<Verdict<TurnEndValue> | null>; askedAt: number } | null = null;
 	/**
 	 * The operator's recent requests on the active path, newest last, so the
 	 * turn-end site does not reparse the whole ledger every turn. Seeded from the
@@ -391,50 +372,6 @@ export function createSystemOneHost(deps: SystemOneHostDeps): SystemOneHost {
 		kept.turns = [...earlier.map((text) => ({ id: "", text })), ...(index >= 0 ? kept.turns.slice(index) : [])];
 		kept.seeded = true;
 		return earlier;
-	}
-
-	/** One reading per settled turn, reused if its outcome is read again. */
-	function turnEndReading(input: TurnEndReadInput): Promise<Verdict<TurnEndValue> | null> {
-		if (turnEnd?.id === input.userTurnId) return turnEnd.read;
-		if (!systemOne.bound("turnEnd")) return Promise.resolve(null);
-		let earlier: string[] = [];
-		try {
-			earlier = earlierOperatorTexts(input.userTurnId);
-		} catch {
-			// The ledger is evidence for one question about switching gears; the rest stand without it.
-		}
-		const read = systemOne.run(
-			TURN_END_SITE,
-			{
-				request: input.request,
-				message: input.message,
-				earlier,
-				// The names once each, in the order the turn first used them: forty reads
-				// would otherwise fill the site's bound and hide the one edit after them.
-				tools: [...new Set(input.toolNames)],
-			},
-			{ ref: input.userTurnId },
-		);
-		turnEnd = { id: input.userTurnId, read, askedAt: performance.now() };
-		return read;
-	}
-
-	/**
-	 * The cached reading, or null once the turn's wait is spent. Repeated reads
-	 * must not spend another full interval on an engine that missed the first.
-	 */
-	function awaitTurnEnd(input: TurnEndReadInput): Promise<Verdict<TurnEndValue> | null> {
-		// Nothing a shadowed build says can move the streak, so the turn never
-		// waits for it. With recording on the call still runs, detached; with it
-		// off there is nothing to feed, so no call is made. Once the build's last
-		// answer ages out `shadowed` reads false and the call is awaited again.
-		if (systemOne.shadowed("turnEnd")) {
-			if (recordingOn()) turnEndReading(input).catch(() => {});
-			return Promise.resolve(null);
-		}
-		const read = turnEndReading(input);
-		const askedAt = turnEnd?.id === input.userTurnId ? turnEnd.askedAt : performance.now();
-		return withinDeadline(read, Math.max(0, TURN_END_WAIT_MS - (performance.now() - askedAt)));
 	}
 
 	return {
@@ -542,9 +479,31 @@ export function createSystemOneHost(deps: SystemOneHostDeps): SystemOneHost {
 			operatorTexts = { session: null, seeded: false, turns: [] };
 		},
 
-		async readTurnEnd(input) {
-			const verdict = await awaitTurnEnd(input);
-			return verdict === null ? null : { asks: verdict.value.asks };
+		recordTurnEnd(input) {
+			if (!systemOne.bound("turnEnd")) return;
+			// A shadowed build's reading can only be recorded, so with recording off
+			// there is nothing to make the call for.
+			if (systemOne.shadowed("turnEnd") && !recordingOn()) return;
+			let earlier: string[] = [];
+			try {
+				earlier = earlierOperatorTexts(input.userTurnId);
+			} catch {
+				// The ledger is evidence for one question about switching gears; the rest stand without it.
+			}
+			detached(() =>
+				systemOne.run(
+					TURN_END_SITE,
+					{
+						request: input.request,
+						message: input.message,
+						earlier,
+						// The names once each, in the order the turn first used them: forty reads
+						// would otherwise fill the site's bound and hide the one edit after them.
+						tools: [...new Set(input.toolNames)],
+					},
+					{ ref: input.userTurnId },
+				),
+			);
 		},
 
 		screenToolResult(source, content, ref, restrictions) {

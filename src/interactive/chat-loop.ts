@@ -873,17 +873,16 @@ export interface CreateChatLoopDeps {
 	 */
 	flushSystemOne?: () => void;
 	/**
-	 * Read the settled turn's final message through the `turnEnd` site. The loop
-	 * waits for it inside the site's own deadline, because the clarification
-	 * streak the next turn reads is computed from the answer. Null means the site
-	 * did not answer and the regex reading stands.
+	 * Hand the settled turn's final message to the experimental `turnEnd` site,
+	 * which reads it detached and only records. The loop never waits for it, and
+	 * the clarification streak keeps the regex reading of the closing text.
 	 */
-	readTurnEnd?: (input: {
+	recordTurnEnd?: (input: {
 		userTurnId: string;
 		request: string;
 		message: string;
 		toolNames: ReadonlyArray<string>;
-	}) => Promise<{ asks: boolean | null } | null>;
+	}) => void;
 	/** What followed a decision, joined to it by `ref` when the dataset is exported. */
 	recordOutcome?: (outcome: {
 		ref: string;
@@ -2534,21 +2533,19 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 						const matchesTrace = traced?.runId === `session:${userTurnId}`;
 						const finalAssistantText =
 							typeof finalPayload?.text === "string" ? finalPayload.text : finalMessage ? extractText(finalMessage) : "";
-						// The turn-end site reads whether the message waits on the operator.
-						// A continuation is not the operator's request, so it is not asked, and a
-						// dismissed interview already says how the turn ended.
-						let asksOperator: boolean | null = null;
-						if (!canceled && !interviewDismissed && !continuation && deps.readTurnEnd) {
+						// The turn-end site reads the message for the record only. A continuation
+						// is not the operator's request, so it is not asked, and a dismissed
+						// interview already says how the turn ended.
+						if (!canceled && !interviewDismissed && !continuation && deps.recordTurnEnd) {
 							try {
-								const read = await deps.readTurnEnd({
+								deps.recordTurnEnd({
 									userTurnId,
 									request: operatorText,
 									message: finalAssistantText,
 									toolNames: collected.toolNames,
 								});
-								asksOperator = read?.asks ?? null;
 							} catch {
-								// The regex reading of the closing text stands.
+								// Recording a reading never costs the turn it describes.
 							}
 						}
 						const workerRunIds = [...collected.dispatches.flatMap((item) => item.runIds), ...collected.harness.runIds];
@@ -2559,7 +2556,6 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 							turnIndex,
 							continuation,
 							finalAssistantText,
-							asksOperator,
 							taskEstablished: deps.getTaskEstablished?.() ?? false,
 							canceled,
 							interviewDismissed,

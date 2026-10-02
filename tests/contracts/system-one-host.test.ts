@@ -3,12 +3,11 @@
  *
  * A fake SystemOne stands where the runner would: it answers each site through
  * the real site's own reading, so the host is tested against the shapes it will
- * meet. Time is a fake clock (`performance.now` and `setTimeout` moved together),
- * so no case waits on the wall clock.
+ * meet. Nothing in the host waits on an engine, so no case needs a clock.
  */
 
 import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
-import { afterEach, beforeEach, describe, it, mock } from "node:test";
+import { describe, it } from "node:test";
 import type {
 	Answer,
 	DecisionRecorder,
@@ -21,7 +20,6 @@ import type {
 import {
 	createDecisionUsageTally,
 	createSystemOneHost,
-	TURN_END_WAIT_MS,
 	type TurnEndReadInput,
 } from "../../src/entry/system-one-host.js";
 
@@ -157,93 +155,30 @@ describe("contracts/system one host: the turn site", () => {
 	});
 });
 
-describe("contracts/system one host: the turn-end wait", () => {
-	let clock = 0;
-	beforeEach(() => {
-		clock = 0;
-		mock.timers.enable({ apis: ["setTimeout"] });
-		mock.method(performance, "now", () => clock);
-	});
-	afterEach(() => {
-		mock.timers.reset();
-		mock.restoreAll();
-	});
-
-	function advance(ms: number): void {
-		clock += ms;
-		mock.timers.tick(ms);
-	}
-
-	/** Let every already-resolved promise run its continuations. */
-	const flush = () => new Promise<void>((resolve) => setImmediate(resolve));
-
+describe("contracts/system one host: the turn-end reading", () => {
 	const input: TurnEndReadInput = {
 		userTurnId: "turn-1",
 		request: "inspect this",
 		message: "I found two choices. Which one should I use?",
-		toolNames: ["read"],
+		toolNames: ["read", "read", "edit"],
 	};
 
-	function pending(promise: Promise<unknown>): { settled: () => boolean } {
-		let done = false;
-		void promise.then(() => {
-			done = true;
-		});
-		return { settled: () => done };
-	}
-
-	it("spends one budget across repeated settled-turn reads", async () => {
-		// The engine never answers within the turn.
+	it("starts one call joined to the turn and returns before the engine answers", () => {
+		// The engine never answers: settlement must not wait on it.
 		const { calls, systemOne } = fakeSystemOne(() => new Promise(() => {}), ["turnEnd"]);
-		const host = hostOver(systemOne);
-
-		const first = pending(host.readTurnEnd(input));
-		await flush();
-		advance(TURN_END_WAIT_MS - 1);
-		await flush();
-		strictEqual(first.settled(), false, "the first read is still inside its budget");
-		advance(1);
-		await flush();
-		strictEqual(first.settled(), true, "the first read gives up when the budget is spent");
-
-		// The settled turn reads the same call and finds the budget already spent: a fresh
-		// interval would keep it waiting here.
-		const settled = pending(host.readTurnEnd(input));
-		await flush();
-		advance(1);
-		await flush();
-		strictEqual(settled.settled(), true, "the settled turn does not wait a second interval");
-		strictEqual(calls.length, 1, "repeated reads share the one call");
-		deepStrictEqual(calls[0], { site: "turnEnd", ref: "turn-1" });
+		hostOver(systemOne).recordTurnEnd(input);
+		deepStrictEqual(calls, [{ site: "turnEnd", ref: "turn-1" }]);
 	});
 
-	it("reuses a reading that arrived inside the budget", async () => {
-		let release: (answers: Readonly<Record<string, Answer>>) => void = () => {};
-		const { calls, systemOne } = fakeSystemOne(() => new Promise((resolve) => (release = resolve)), ["turnEnd"]);
-		const host = hostOver(systemOne);
-
-		const first = host.readTurnEnd(input);
-		await flush();
-		advance(800);
-		release({ asksOperator: noul(0.99), blocksOnDecision: noul(0.99) });
-		deepStrictEqual(await first, { asks: true });
-
-		// Long after the budget, the finished reading is still the answer.
-		advance(60_000);
-		deepStrictEqual(await host.readTurnEnd(input), { asks: true });
-		strictEqual(calls.length, 1);
-	});
-
-	it("asks nothing and waits for nothing when the site is unbound", async () => {
+	it("asks nothing when the site is unbound", () => {
 		const { calls, systemOne } = fakeSystemOne(() => LOUD_TURN, []);
-		strictEqual(await hostOver(systemOne).readTurnEnd(input), null);
+		hostOver(systemOne).recordTurnEnd(input);
 		strictEqual(calls.length, 0);
 	});
 });
 
 describe("contracts/system one host: a shadowed build", () => {
 	const NEVER: Script = () => new Promise(() => {});
-	const flushed = () => new Promise<"waited">((resolve) => setImmediate(() => resolve("waited")));
 	const input: TurnEndReadInput = { userTurnId: "turn-1", request: "r", message: "Which one?", toolNames: [] };
 
 	// Each row: what recording says, and how many engine calls the shadowed site makes.
@@ -262,12 +197,10 @@ describe("contracts/system one host: a shadowed build", () => {
 			strictEqual(host.hints(), null);
 		});
 
-		it(`resolves repeated outcome reads at once and makes ${made} call with ${label}`, async () => {
+		it(`makes ${made} turn-end call with ${label}`, () => {
 			const { calls, systemOne } = fakeSystemOne(NEVER, ["turnEnd"], true);
-			const host = hostOver(systemOne, recording);
-			const settled = await Promise.race([Promise.all([host.readTurnEnd(input), host.readTurnEnd(input)]), flushed()]);
-			deepStrictEqual(settled, [null, null]);
-			strictEqual(calls.length, made, "one shared call, or none");
+			hostOver(systemOne, recording).recordTurnEnd(input);
+			strictEqual(calls.length, made);
 		});
 	}
 });
