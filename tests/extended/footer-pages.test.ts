@@ -202,7 +202,12 @@ test("invocation previews omit redundant short primary values, retain options an
 		match(text, /limit.*80/);
 		match(plain(renderToolExecution(call, 100)), /path.*README.md/);
 		const long = { ...call, args: { path: `${"directory/".repeat(12)}final.ts` } };
-		match(plain(renderToolPreview(long, 100, transcriptDetail(style))), /path/);
+		// Compact is the action row alone, so a cut path keeps its tail there and
+		// the full path stays in inspection; the other styles add a `path ›` row.
+		match(
+			plain(renderToolPreview(long, 100, transcriptDetail(style))),
+			style === "compact" ? /▸ read …\/(?:directory\/)+final\.ts ✓/ : /path/,
+		);
 	}
 	doesNotMatch(plain(renderToolSubline({ toolName: "ls", toolCallId: "ls", args: {} }, 100)), /tool action/);
 });
@@ -419,7 +424,7 @@ test("footer hints resolve remapped bindings and omit unbound actions", () => {
 		doesNotMatch(hints, /Alt\+M|Alt\+L|Library/);
 		match(hints, /newline/);
 		match(hints, /Thinking effort/);
-		match(hints, /Send after the active run/);
+		match(hints, /Send now/);
 	} finally {
 		setKeybindings(previous);
 	}
