@@ -835,6 +835,20 @@ interface StatusMeta {
 	blockReason?: string | undefined;
 }
 
+/**
+ * The first sentence of a refusal reason, without its closing period. The
+ * rest of the reason is guidance for the model and stays in the expanded
+ * block. A first sentence still over the limit is cut at a word.
+ */
+function blockReasonClause(reason: string): string {
+	const first = /^[\s\S]+?[.!?](?=\s|$)/u.exec(reason)?.[0] ?? reason;
+	const clause = first.replace(/\.$/u, "");
+	if (clause.length <= BLOCK_REASON_LIMIT) return clause;
+	const head = clause.slice(0, BLOCK_REASON_LIMIT - 1);
+	const space = head.lastIndexOf(" ");
+	return `${(space > BLOCK_REASON_LIMIT / 2 ? head.slice(0, space) : head).trimEnd()}${GLYPH.ellipsis}`;
+}
+
 function statusGlyph(status: HeaderStatus, meta: StatusMeta = {}): string {
 	if (status === undefined) return "";
 	if (status === "forming") return ` ${toolMeta(GLYPH.queued)}${toolMeta(" forming call")}`;
@@ -855,7 +869,7 @@ function statusGlyph(status: HeaderStatus, meta: StatusMeta = {}): string {
 	// stopped. The reason rides the same tail as the outcome so the collapsed
 	// row and the expanded header state it identically.
 	const reason = meta.outcome !== undefined ? meta.blockReason?.trim() : undefined;
-	const reasonSuffix = reason ? toolMeta(` · ${truncate(reason, BLOCK_REASON_LIMIT)}`) : "";
+	const reasonSuffix = reason ? toolMeta(` · ${blockReasonClause(reason)}`) : "";
 	return ` ${red(STATUS_ERROR_GLYPH)}${outcomeSuffix}${reasonSuffix}${durationSuffix}`;
 }
 
@@ -2007,9 +2021,11 @@ export function renderToolPreview(
 		const shown = failure && command ? withoutCommandStatus(result) : result;
 		const { body: told, notes } = splitModelNotes(resultText(unwrapResultEnvelope(shown), Number.POSITIVE_INFINITY));
 		// A refusal's tail names it (`✗ · bash blocked: system_modify`), so its
-		// body keeps the rest of what the call was told, not that line again.
+		// body keeps the rest of what the call was told, not that line again. A
+		// reason the tail only began keeps its full line in the body.
 		const refusal = finished?.outcome !== undefined ? finished.blockReason?.trim() : undefined;
-		let text = refusal ? withoutLeadingLine(told, refusal) : told;
+		const tailStatesRefusal = refusal !== undefined && blockReasonClause(refusal) === refusal.replace(/\.$/u, "");
+		let text = refusal && tailStatesRefusal ? withoutLeadingLine(told, refusal) : told;
 		// The action row already names this run. A short monitor summary can
 		// start with the same id; keep the remainder here and the raw result in
 		// inspection, where it is useful as an exact model-facing record.
