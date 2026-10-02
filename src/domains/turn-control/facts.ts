@@ -10,11 +10,13 @@ export interface WorkspaceFingerprint {
 export interface TurnFacts {
 	/** Raw operator text, whitespace collapsed and bounded to 300 code points by the runner. */
 	readonly operatorText: string;
-	readonly turnIndex: number;
+	/** Operator turns before this one, or null when no interpretation could act on it and the ledger was not read. */
+	readonly turnIndex: number | null;
 	readonly continuation: boolean;
 	readonly explicitConstraints: boolean;
 	readonly taskEstablished: boolean;
 	readonly clarificationStreak: number;
+	/** Observed only when an interpretation could act on it; otherwise every field but `cwd` is null. */
 	readonly workspace: WorkspaceFingerprint;
 	readonly capabilities: { dispatch: boolean; scoutRecipeId: string | null; readOnlyGit: boolean; monitor: boolean };
 	readonly priorOrientation: { runId: string; receiptDigest: string; fingerprint: WorkspaceFingerprint } | null;

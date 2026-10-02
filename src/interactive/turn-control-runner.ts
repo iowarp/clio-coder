@@ -131,14 +131,26 @@ export function createTurnControlRunner(deps: TurnControlRunnerDeps): TurnContro
 				(spec) => spec.resultContract.kind === "scout-report" && spec.capabilityClass === "read-only",
 			);
 			const scoutRecipeId = scouts.find((spec) => spec.id === "scout")?.id ?? scouts[0]?.id ?? null;
+			const continuation = input.continuation ?? deps.isContinuation();
+			// A continuation carries the nudge, not the operator's request, so this
+			// turn's verdict is not about it and the record must not claim it was.
+			const interpretation = continuation ? null : (deps.readInterpretation() ?? null);
+			// Without an interpretation the controller can only collect a finished
+			// batch or do nothing, and neither reads the workspace or the turn's place
+			// in the session. Two git subprocesses, a codemap read and a ledger parse
+			// are spent only when a reading could act on them, so a turn with no
+			// System One reading pays none of it.
+			const observed = interpretation !== null;
 			const facts: TurnFacts = {
 				operatorText: Array.from(input.operatorText.replace(/\s+/gu, " ").trim()).slice(0, 300).join(""),
-				turnIndex: deps.facts.turnIndex(),
-				continuation: input.continuation ?? deps.isContinuation(),
+				turnIndex: observed ? deps.facts.turnIndex() : null,
+				continuation,
 				explicitConstraints: constraints !== undefined,
 				taskEstablished: deps.facts.taskEstablished(),
 				clarificationStreak: deps.facts.clarificationStreak(),
-				workspace: await workspaceFingerprint(deps.cwd),
+				workspace: observed
+					? await workspaceFingerprint(deps.cwd)
+					: { cwd: deps.cwd, gitHead: null, dirtyTreeHash: null, codemapHash: null },
 				capabilities: {
 					dispatch:
 						deps.dispatch !== undefined &&
@@ -152,9 +164,6 @@ export function createTurnControlRunner(deps: TurnControlRunnerDeps): TurnContro
 				finishedDetachedBatchIds: deps.facts.finishedDetachedBatchIds(),
 				autonomy: deps.getAutonomy(),
 			};
-			// A continuation carries the nudge, not the operator's request, so this
-			// turn's verdict is not about it and the record must not claim it was.
-			const interpretation = facts.continuation ? null : (deps.readInterpretation() ?? null);
 			const producer: TurnControlRecord["producer"] = interpretation === null ? null : "system-one";
 			const decision = decide(interpretation, facts, settings);
 			let record: TurnControlRecord = {
