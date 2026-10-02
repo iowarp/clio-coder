@@ -13,9 +13,7 @@ import { RouteFocus, SIDEBAR_ID, useSidebarCollapsed } from "./design/navigation
 import { dismissAll, LiveRegions, NoticeToasts, reportProblem, useNotices } from "./design/notifications.js";
 import { PwaBoot } from "./design/pwa.js";
 import { Reconnect } from "./design/reconnect.js";
-import { CommandPalette } from "./interaction/CommandPalette.js";
 import { appCommands, type PaletteTask } from "./interaction/commands.js";
-import { HelpDialog } from "./interaction/HelpDialog.js";
 import { useLayersActive, useShortcut } from "./interaction/use-shortcut.js";
 import { useSetupStatus } from "./pages/target-onboarding.js";
 import { OpenWorkspaceDialog } from "./shell/OpenWorkspaceDialog.js";
@@ -31,6 +29,10 @@ import "./shell/shell.css";
 
 // The setup wizard, its films and its styles load only when it opens.
 const Wizard = lazy(() => import("./wizard/Wizard.js"));
+const CommandPalette = lazy(() =>
+	import("./interaction/CommandPalette.js").then((module) => ({ default: module.CommandPalette })),
+);
+const HelpDialog = lazy(() => import("./interaction/HelpDialog.js").then((module) => ({ default: module.HelpDialog })));
 
 const PHONE = "(max-width: 760px)";
 
@@ -370,8 +372,12 @@ export function App({ client }: { client: Client }) {
 			{workspaceOpen ? (
 				<OpenWorkspaceDialog client={client} launch={actions.launch} onClose={() => setWorkspaceOpen(false)} />
 			) : null}
-			<CommandPalette open={paletteOpen} commands={commands} onClose={() => setPaletteOpen(false)} />
-			<HelpDialog open={helpOpen} onClose={() => setHelpOpen(false)} bundledDocsPath={meta.data?.bundledDocsPath} />
+			<Suspense fallback={null}>
+				{paletteOpen ? <CommandPalette open commands={commands} onClose={() => setPaletteOpen(false)} /> : null}
+				{helpOpen ? (
+					<HelpDialog open onClose={() => setHelpOpen(false)} bundledDocsPath={meta.data?.bundledDocsPath} />
+				) : null}
+			</Suspense>
 			<LiveRegions />
 			<NoticeToasts />
 		</div>
