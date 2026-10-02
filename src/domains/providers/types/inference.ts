@@ -89,4 +89,6 @@ export interface DecideResult {
 	model: string;
 	answers: Record<string, DecisionAnswer>;
 	tokensUsed?: { input: number; output: number };
+	/** From request send to parsed reply; excludes the caller's own preparation. */
+	roundTripMs?: number;
 }

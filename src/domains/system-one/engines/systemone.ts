@@ -139,6 +139,7 @@ export function createSystemOneEngine(input: SystemOneEngineInput): DecisionEngi
 				build,
 				answers,
 				...(result.tokensUsed !== undefined ? { usage: result.tokensUsed } : {}),
+				...(result.roundTripMs !== undefined ? { roundTripMs: result.roundTripMs } : {}),
 				...(Object.keys(abstained).length > 0 ? { abstained } : {}),
 				...(profile.renderer !== "systemone-v1" ? { rendered: sent } : {}),
 			};

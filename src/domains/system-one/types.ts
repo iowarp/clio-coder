@@ -96,6 +96,8 @@ export interface EngineReply {
 	/** Answers per question id. A missing id is an abstention on that question alone. */
 	readonly answers: Readonly<Record<string, Answer>>;
 	readonly usage?: { readonly input: number; readonly output: number };
+	/** The engine's request alone, send to reply; `latencyMs` also counts Clio's preparation. */
+	readonly roundTripMs?: number;
 	/**
 	 * Why the readout is not the one the operator configured, for the ledger and
 	 * the dataset: `downgraded: no-logprobs`, `downgraded: partial-logprobs`, or
@@ -282,6 +284,8 @@ export interface RouteRecord {
 	readonly note?: string;
 	readonly abstained?: Readonly<Record<string, string>>;
 	readonly usage?: { readonly input: number; readonly output: number };
+	/** Send to reply for this route's request, without the site's preparation or a booting session's queue. */
+	readonly roundTripMs?: number;
 	readonly rendered?: Readonly<Record<string, Question>>;
 	/** The site's compact wording version, when a bounded renderer read it. */
 	readonly compactVersion?: string;

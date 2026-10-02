@@ -299,6 +299,7 @@ export function createRunner(deps: RunnerDeps): Runner {
 						...(plan.reply?.note !== undefined ? { note: plan.reply.note } : {}),
 						...(Object.keys(abstained).length > 0 ? { abstained } : {}),
 						...(plan.reply?.usage !== undefined ? { usage: plan.reply.usage } : {}),
+						...(plan.reply?.roundTripMs !== undefined ? { roundTripMs: plan.reply.roundTripMs } : {}),
 						// What actually left, for replay and training: the semantic question is in `questions`.
 						...(plan.reply?.rendered !== undefined ? { rendered: plan.reply.rendered } : {}),
 						...(Object.keys(plan.compact).length > 0 && site.compact !== undefined

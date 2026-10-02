@@ -156,9 +156,11 @@ export async function postSystemOne(
 		body: JSON.stringify(body),
 		readErrorBody: true,
 	};
+	const sentAt = performance.now();
 	const response = await (signal
 		? probeJson<SystemOneResponse>({ ...http, signal })
 		: probeJson<SystemOneResponse>(http));
+	const roundTripMs = Math.round(performance.now() - sentAt);
 	if (!response.ok || !response.data) {
 		// Refusals, including busy 503s, throw into the runner's existing failed-call
 		// abstention path. Never retry a site decision past its deadline.
@@ -182,6 +184,7 @@ export async function postSystemOne(
 		// server that does not say which build answered must not borrow a fitted one.
 		model: typeof response.data.model === "string" ? response.data.model : "unknown",
 		answers,
+		roundTripMs,
 	};
 	const input = numberOrUndefined(response.data.usage?.input_tokens);
 	const output = numberOrUndefined(response.data.usage?.output_tokens);
