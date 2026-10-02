@@ -2021,9 +2021,12 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 				const preload = result.projectPreload;
 				if (preload && preload.mode !== "none" && !deps.headless) {
 					const announced = `${sessionId}:${preload.label}`;
+					// The first turn compiles before the session file exists, so its id is
+					// empty; the same label under the id it then receives is the same session.
+					const provisional = announcedProjectPreload === `:${preload.label}`;
 					if (announcedProjectPreload !== announced) {
 						announcedProjectPreload = announced;
-						deps.emitNotice(`project instructions: ${preload.label}`);
+						if (!provisional) deps.emitNotice(`project instructions: ${preload.label}`);
 					}
 				}
 				sessionPrompt = result;
