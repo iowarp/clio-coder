@@ -283,6 +283,7 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 	const chatPanel = factories.createChatPanel({
 		getOutputStyle: () => deps.getSettings?.().interface.outputDetail ?? "standard",
 		getTerminalRows: () => process.stdout.rows ?? 40,
+		requestRender,
 		...(renderTrace ? { onRenderMetrics: (metrics) => renderTrace.recordPanelRender(metrics) } : {}),
 		// Rendering ahead yields to input between steps and waits out a stream.
 		scheduleIdle: (step) => {

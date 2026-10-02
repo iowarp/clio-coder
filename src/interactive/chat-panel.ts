@@ -3,6 +3,7 @@ import { AssistantProseProjection, sanitizeAssistantProse } from "../core/assist
 import type { OutputStyle } from "../core/defaults.js";
 import { SKILL_SUGGESTION_PREFIX } from "../core/skill-activation.js";
 import { rawDurationMs } from "../core/timers.js";
+import { ToolNames } from "../core/tool-names.js";
 import { sanitizeCallTargetText, sanitizeMultilineDisplayText } from "../domains/safety/call-target.js";
 import { redactSecretString } from "../domains/safety/redaction.js";
 import { settledPrefixLength } from "../engine/apis/diffusion-frames.js";
@@ -21,6 +22,7 @@ import type { AgentMessage } from "../engine/types.js";
 import type { ChatLoopEvent, RetryStatusPayload, SpeculativeDispatchCounts } from "./chat-loop.js";
 import { extractText, isSelfExplainingAbort } from "./chat-loop-messages.js";
 import { coldReasonText } from "./cold-reasons.js";
+import { editPreviewDiff } from "./mutation-preview.js";
 import type { ApprovalRequestView } from "./permission-overlay.js";
 import { codeInk } from "./renderers/code-ink.js";
 import { LiveToolView } from "./renderers/live-tool-view.js";
@@ -243,6 +245,10 @@ type ToolSegment = {
 	 * in flight, so a frame paints only the rows in view. Dropped at settlement.
 	 */
 	live?: LiveToolView | undefined;
+	/** An edit's diff computed from the file once its arguments closed; live only, dropped at settlement. */
+	previewDiff?: string | undefined;
+	/** The edit preview was started for this call, so a later event does not read the file again. */
+	previewRequested?: true;
 	/**
 	 * True while the call is parked at the permission gate. Set/cleared by
 	 * `tool_approval_state` events and cleared by any settle so a denied or
@@ -446,6 +452,8 @@ export interface ChatPanelOptions {
 	 * is rendered ahead.
 	 */
 	scheduleIdle?: (step: () => boolean) => void;
+	/** Ask for a frame when the panel changes outside an event, as when an edit's diff finishes computing. */
+	requestRender?: () => void;
 }
 
 /**
@@ -1244,6 +1252,7 @@ function renderToolSegmentLines(
 		terminalRows,
 		partialResult: seg.partialResult,
 		live: seg.live,
+		...(seg.previewDiff !== undefined ? { previewDiff: seg.previewDiff } : {}),
 	});
 }
 
@@ -1670,6 +1679,24 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 	const markDirty = (): void => {
 		dirty = true;
 	};
+	/**
+	 * An edit whose arguments have closed shows the diff it will make before its
+	 * result lands. The file is read off the event path; the frame that shows
+	 * the diff is requested when it is ready. Replay never reads files: its
+	 * calls are settled and carry the tool's own diff.
+	 */
+	const startEditPreview = (seg: ToolSegment): void => {
+		if (seg.previewRequested || seg.finished || seg.name !== ToolNames.Edit || replayStampMs !== undefined) return;
+		seg.previewRequested = true;
+		void editPreviewDiff(seg.args).then((diff) => {
+			if (diff === null || seg.finished) return;
+			seg.previewDiff = diff;
+			const owner = findToolSegmentOwner(seg.id);
+			if (owner?.segment === seg) invalidateEntryCache(owner.entry);
+			markDirty();
+			options.requestRender?.();
+		});
+	};
 	const invalidateEntryCache = (entry: TranscriptEntry): void => {
 		entryRenderCache.delete(entry);
 		if (frozen === null && prerender === null) return;
@@ -1724,6 +1751,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 		seg.notRun = !seg.executionStarted || seg.awaitingApproval === true ? true : undefined;
 		seg.partialResult = undefined;
 		seg.live = undefined;
+		seg.previewDiff = undefined;
 		seg.awaitingApproval = undefined;
 		seg.approvalView = undefined;
 	};
@@ -2470,6 +2498,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 					existing.name = typeof streamed.name === "string" && streamed.name.length > 0 ? streamed.name : existing.name;
 					existing.args = streamed.arguments ?? existing.args;
 					existing.argsComplete = assistantEvent.type === "toolcall_end";
+					if (existing.argsComplete) startEditPreview(existing);
 				} else if (existing === undefined) {
 					const assistant = ensureAssistant();
 					assistant.pending = true;
@@ -2529,6 +2558,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 					streamed.executionStarted = true;
 					streamed.argsComplete = true;
 					streamed.startedAtMs = now();
+					startEditPreview(streamed);
 					markDirty();
 					return;
 				}
@@ -2659,6 +2689,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 					// denied park settles here too, so the awaiting styling must go.
 					tool.partialResult = undefined;
 					tool.live = undefined;
+					tool.previewDiff = undefined;
 					tool.awaitingApproval = undefined;
 					tool.approvalView = undefined;
 				}
