@@ -23,7 +23,6 @@ import { type AutonomyExposure, type AutonomyLevel, DEFAULT_AUTONOMY_LEVEL } fro
 import { describeCallTarget } from "../domains/safety/call-target.js";
 import type { SafetyContract, SafetyDecision } from "../domains/safety/contract.js";
 import type { DecisionPresentation } from "../domains/safety/decision-presentation.js";
-import { SYSTEM_ONE_GATE_RULE_ID } from "../domains/safety/decision-presentation.js";
 import type { FlowRestrictionSet } from "../domains/safety/information-flow.js";
 import {
 	EMPTY_INFORMATION_FLOW_POLICY,
@@ -241,14 +240,6 @@ export interface ToolCallGateSubject {
 	readonly target: string;
 }
 
-/** The gate's opinion. It can only ask for more friction, never remove any. */
-export interface ToolCallGateVerdict {
-	readonly escalate: boolean;
-	readonly reason: string;
-	/** The build that answered, as its decision record names it. The card and the transcript rows state it. */
-	readonly build?: string;
-}
-
 export interface RegistryDeps {
 	safety: SafetyContract;
 	/**
@@ -321,27 +312,14 @@ export interface RegistryDeps {
 		absorb(set: FlowRestrictionSet, origin: { tool?: string; toolCallId?: string }): void;
 	};
 	/**
-	 * Asked when autonomy is yolo and an execute-class call was admitted as
-	 * unrecognized, before it runs. An escalating verdict parks the call for a
-	 * one-shot confirmation card that shows the reason, but only where
-	 * `gateParks` is set. `ref` is the permission request id the card would
-	 * carry, so the decision joins the operator's answer. Only the interactive
-	 * TUI registry passes it. Headless and ACP pass none: they have no operator
-	 * to answer a card, so asking would cost up to the site deadline per
-	 * unrecognized execute call and record a verdict nobody can label, and
-	 * without it the call runs as it did before the gate existed. Absent in workers.
+	 * Told when autonomy is yolo and an execute-class call was admitted as
+	 * unrecognized, as it starts running. The System One gate is experimental:
+	 * it is evaluated detached and recorded under `ref`, the tool call id, and it
+	 * never waits for an answer or changes how the call is admitted. Only the
+	 * interactive TUI registry passes it; headless and ACP have nobody to label
+	 * the record. Absent in workers.
 	 */
-	gateToolCall?: (
-		subject: ToolCallGateSubject,
-		ref: string | undefined,
-		signal: AbortSignal | undefined,
-	) => Promise<ToolCallGateVerdict | null>;
-	/**
-	 * True only on the interactive session's registry, the one registry given a
-	 * `gateToolCall`. A registry that has a gate but no operator to answer it
-	 * records the verdict and lets the call proceed.
-	 */
-	gateParks?: boolean;
+	observeToolCallGate?: (subject: ToolCallGateSubject, ref: string | undefined) => void;
 }
 
 /**
@@ -574,11 +552,10 @@ export interface PermissionRequiredMeta {
 	 */
 	dispatchPlan?: DispatchPlanView;
 	/**
-	 * Set when the System One gate raised this park, to the reason it gave. That
-	 * reason is the card's whole advisory and the card asks no second site: the
-	 * gate's decision is already on the ledger under `requestId`, and a second
-	 * reading of the same command only adds latency and a line that can
-	 * contradict the reason the card exists.
+	 * Set when a System One gate raised this park, to the reason it gave. That
+	 * reason is the card's whole advisory and the card asks no second site. The
+	 * registry raises no gate park while the gate only records; the card and
+	 * the transcript keep rendering one.
 	 */
 	gateReason?: string;
 	/** The build that gave `gateReason`, so the card and the transcript rows can say whose judgment it was. */
@@ -955,11 +932,6 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 				axis: string;
 				approvalAuthority: ApprovalAuthority;
 				dispatchPlan?: DispatchPlanView;
-				/** Pre-allocated so a gate's decision and the card it raises share one id. */
-				requestId?: string;
-				/** The reason a System One gate gave for raising this park; absent for every other park. */
-				gateReason?: string;
-				gateBuild?: string;
 		  };
 
 	const admit = (call: ClassifierCall, grant?: OneShotGrant, options?: ToolInvokeOptions): AdmitOutcome => {
@@ -1252,59 +1224,38 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 
 	/**
 	 * The yolo gate. Yolo runs an unrecognized command without asking, which is
-	 * the one place where nothing has read the command at all; a System One
-	 * engine that reads it as reaching far or destroying data can turn that
-	 * silence into one confirmation. It never removes friction: a call the
-	 * classifier already parks, blocks or recognizes does not reach it.
+	 * the one place where nothing has read the command at all. A bound System One
+	 * site reads it alongside, detached, and its reading is only recorded: the
+	 * call is admitted exactly as yolo admits it and never waits for the engine.
+	 * A call the classifier already parks, blocks or recognizes does not reach it.
 	 */
-	const gateUnrecognizedExecute = async (
+	const observeUnrecognizedExecute = (
 		call: ClassifierCall,
 		decision: SafetyDecision,
 		options: ToolInvokeOptions | undefined,
-	): Promise<Extract<AdmitOutcome, { kind: "park" }> | null> => {
-		const gate = deps.gateToolCall;
-		if (gate === undefined) return null;
+	): void => {
+		const observe = deps.observeToolCallGate;
+		if (observe === undefined) return;
 		const level = deps.autonomy?.() ?? DEFAULT_AUTONOMY_LEVEL;
 		if (
 			level !== "yolo" ||
 			decision.classification.actionClass !== "execute" ||
 			decision.policy?.execRecognition !== "unrecognized"
 		) {
-			return null;
+			return;
 		}
-		const requestId = nextApprovalRequestId();
-		let verdict: ToolCallGateVerdict | null;
 		try {
-			verdict = await gate(
+			observe(
 				{
 					tool: call.tool,
 					actionClass: decision.classification.actionClass,
 					target: describeCallTarget(call.tool, call.args),
 				},
-				requestId,
-				options?.signal,
+				options?.toolCallId,
 			);
 		} catch {
-			// An unavailable gate leaves yolo exactly as permissive as it was.
-			return null;
+			// The gate only records; a failure to start it leaves the call as yolo admitted it.
 		}
-		if (verdict === null || !verdict.escalate) return null;
-		// The verdict is already on the ledger. Headless and ACP pass no gate and
-		// never reach this line; a call with nobody to answer its card (no
-		// `gateParks`, no permission listener, or an abort while the verdict was
-		// pending) proceeds.
-		if (deps.gateParks !== true || permissionListeners.size === 0 || options?.signal?.aborted === true) return null;
-		const ask = toGateAskDecision(decision, call.tool, verdict.reason);
-		return {
-			kind: "park",
-			decision: ask,
-			axis: approvalAxisId(ask, level),
-			// The System One gate speaks to the operator; no agent may answer it.
-			approvalAuthority: "operator",
-			requestId,
-			gateReason: verdict.reason,
-			...(verdict.build !== undefined ? { gateBuild: verdict.build } : {}),
-		};
 	};
 
 	const notifyPermissionRequired = (
@@ -1350,15 +1301,14 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 		listGateway: () => Array.from(tools.values()).filter((spec) => toolSpecPlacement(spec) === "gateway"),
 		async invoke(call, options) {
 			const admissionCall = prepareAdmissionCall(tools.get(call.tool as ToolName), call);
-			let outcome = admit(admissionCall, undefined, options);
+			const outcome = admit(admissionCall, undefined, options);
 			if (outcome.kind === "terminal") {
 				disposeAdmissionArgs(tools.get(admissionCall.tool as ToolName), admissionCall.args ?? {});
 				return observeBlockedAttempt(admissionCall, outcome.verdict, options) ?? outcome.verdict;
 			}
 			if (outcome.kind === "execute") {
-				const escalated = await gateUnrecognizedExecute(admissionCall, outcome.decision, options);
-				if (escalated === null) return runSpec(outcome.spec, admissionCall, outcome.decision, options);
-				outcome = escalated;
+				observeUnrecognizedExecute(admissionCall, outcome.decision, options);
+				return runSpec(outcome.spec, admissionCall, outcome.decision, options);
 			}
 			// A park settles only through a listener's answer, so with no listener
 			// the promise would never resolve. Refuse the call instead, fail closed.
@@ -1381,15 +1331,13 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 			}
 			return new Promise<RegistryVerdict>((resolve) => {
 				const meta: PermissionRequiredMeta = {
-					requestId: outcome.requestId ?? nextApprovalRequestId(),
+					requestId: nextApprovalRequestId(),
 					axis: outcome.axis,
 					approvalAuthority: outcome.approvalAuthority,
 					...(options?.sessionId !== undefined ? { sessionId: options.sessionId } : {}),
 					...(options?.turnId !== undefined ? { turnId: options.turnId } : {}),
 					...(options?.toolCallId !== undefined && options.toolCallId.length > 0 ? { toolCallId: options.toolCallId } : {}),
 					...(outcome.dispatchPlan !== undefined ? { dispatchPlan: outcome.dispatchPlan } : {}),
-					...(outcome.gateReason !== undefined ? { gateReason: outcome.gateReason } : {}),
-					...(outcome.gateBuild !== undefined ? { gateBuild: outcome.gateBuild } : {}),
 				};
 				recordRegistryDisposition(admissionCall, outcome.decision, "permission_requested", {
 					requestId: meta.requestId,
@@ -1881,38 +1829,6 @@ function readOnlyDeniedVerdict(decision: SafetyDecision, tool: string): Extract<
 }
 
 /** Tools whose results carry text somebody else wrote: a page, an MCP server's answer, a worker's report. */
-/**
- * The card a System One escalation raises: its reason is the whole message.
- * The rail id is set on the ask and on the policy it carries, because the
- * approval axis reads the first and the audit row, the bus event and the note
- * handed back to the model read the second.
- */
-function toGateAskDecision(decision: SafetyDecision, tool: string, reason: string): SafetyDecision {
-	return {
-		kind: "ask",
-		classification: decision.classification,
-		confirmationRuleId: SYSTEM_ONE_GATE_RULE_ID,
-		rejection: {
-			short: `${tool} needs operator confirmation: System One flagged this command`,
-			detail: reason,
-			hints: [
-				"Approving resumes only this call.",
-				"System One advises and never blocks; deny to have the agent take another route.",
-			],
-		},
-		...(decision.policy !== undefined
-			? {
-					policy: {
-						...decision.policy,
-						ruleId: SYSTEM_ONE_GATE_RULE_ID,
-						reasonCode: SYSTEM_ONE_GATE_RULE_ID,
-						reasons: [reason],
-					},
-				}
-			: {}),
-	};
-}
-
 /**
  * Plan-approval ask for a plan-scale dispatch call. The rejection detail IS
  * the plan artifact (topology, per-task agent/model/node), so the approval

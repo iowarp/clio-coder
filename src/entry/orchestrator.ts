@@ -2091,12 +2091,12 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		onMiddlewareEffects: (effects) => middlewareToolChoice.apply(effects),
 		autonomy: resolveEffectiveAutonomy,
 		// System One reads what the deterministic checks cannot: content other people
-		// wrote, and an unrecognized command that yolo would run unread. Both only
-		// add friction, and both are read through the host so the registry never
-		// learns which engine answered. The result screen tightens content on every
-		// surface. The gate is interactive only: headless and ACP have no operator
-		// to answer a card, so it would cost up to the site deadline per
-		// unrecognized execute call and record a verdict nobody can label.
+		// wrote, and an unrecognized command that yolo would run unread. Both are read
+		// through the host so the registry never learns which engine answered. The
+		// result screen tightens content on every surface. The gate is experimental
+		// and only records: it never holds or parks the call, and it is wired on the
+		// interactive registry alone because headless and ACP have nobody to label
+		// what it recorded.
 		screenToolResult: (source, content, ref, signal, restrictions) =>
 			systemOneHost.screenToolResult(source, content, ref, signal, restrictions),
 		flow: {
@@ -2106,8 +2106,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			// The gateway is registered after this registry; the lookup runs at call time.
 			mcpTransport: (tool) => toolBootstrap.mcpCapabilities?.transportOf(tool) ?? null,
 		},
-		...(interactive ? { gateToolCall: (subject, ref, signal) => systemOneHost.gateToolCall(subject, ref, signal) } : {}),
-		gateParks: interactive,
+		...(interactive ? { observeToolCallGate: (subject, ref) => systemOneHost.observeToolCallGate(subject, ref) } : {}),
 	});
 	const mainPermissionOrigin = acpMode ? "acp-server" : "main";
 	toolRegistry.onPermissionRequired((call, decision, meta) => {

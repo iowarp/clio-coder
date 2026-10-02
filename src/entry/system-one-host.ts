@@ -37,7 +37,7 @@ import type { TurnRecipeOption, TurnValue } from "../domains/system-one/sites/tu
 import { recipesInGroup, TURN_RECIPE_SITE, TURN_SITE } from "../domains/system-one/sites/turn.js";
 import { TURN_END_SITE, type TurnEndValue } from "../domains/system-one/sites/turn-end.js";
 import type { TokenSplit, TurnInterpretation } from "../domains/turn-control/index.js";
-import type { ToolCallGateSubject, ToolCallGateVerdict } from "../tools/registry.js";
+import type { ToolCallGateSubject } from "../tools/registry.js";
 
 /**
  * How long a turn waits for the turn-end reading, counted from the moment it
@@ -266,12 +266,11 @@ export interface SystemOneHost {
 		signal: AbortSignal | undefined,
 		restrictions: unknown,
 	): Promise<string | null>;
-	/** Whether an unrecognized command that yolo would run unread should go to the operator first. */
-	gateToolCall(
-		subject: ToolCallGateSubject,
-		ref: string | undefined,
-		signal: AbortSignal | undefined,
-	): Promise<ToolCallGateVerdict | null>;
+	/**
+	 * Read an unrecognized command yolo runs unread, detached, for the record.
+	 * The gate is experimental and never holds or parks the call.
+	 */
+	observeToolCallGate(subject: ToolCallGateSubject, ref: string | undefined): void;
 	/** What followed a decision, joined to it by `ref`. */
 	recordOutcome(outcome: {
 		ref: string;
@@ -570,16 +569,12 @@ export function createSystemOneHost(deps: SystemOneHostDeps): SystemOneHost {
 			return verdict?.value.flagged ? verdict.value.banner : null;
 		},
 
-		async gateToolCall(subject, ref, signal) {
-			if (!systemOne.bound("toolCall")) return null;
-			if (systemOne.shadowed("toolCall", "gate")) {
-				detached(() => systemOne.run(TOOL_CALL_GATE_SITE, { ...subject, moment: "gate" }, runOptions(ref, undefined)));
-				return null;
-			}
-			const verdict = await systemOne.run(TOOL_CALL_GATE_SITE, { ...subject, moment: "gate" }, runOptions(ref, signal));
-			return verdict === null
-				? null
-				: { escalate: verdict.value.escalate, reason: verdict.value.reason, build: verdict.build };
+		observeToolCallGate(subject, ref) {
+			if (!systemOne.bound("toolCall")) return;
+			// A shadowed build's reading can only be recorded, so with recording off
+			// there is nothing to make the call for.
+			if (systemOne.shadowed("toolCall", "gate") && !recordingOn()) return;
+			detached(() => systemOne.run(TOOL_CALL_GATE_SITE, { ...subject, moment: "gate" }, runOptions(ref, undefined)));
 		},
 
 		recordOutcome(outcome) {
