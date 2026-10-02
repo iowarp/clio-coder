@@ -24,13 +24,19 @@ or --log-file. --path opens a particular page. --reuse-background fails instead
 of starting a private server when the background app cannot be used.
 
 On Linux with a systemd user session, background install keeps the app at a
-stable address from login, so the browser can install it as an app. Background
-restart loads a newly installed version; --if-idle leaves it alone when work or
-a conversation is open. Stop stops it until the next login or the next
-clio-coder gui, and uninstall also removes its login and desktop entries.
-macOS and Windows run the private server only; Windows prints the link instead
-of opening it. Your CLI, terminal interface, headless runs, and
-graphical app use the same Clio Coder runtime and configuration.
+stable address from login, so the browser can install it as an app. That
+address is 127.0.0.1:4343, or 127.0.0.1:7373 while another program holds 4343;
+--port pins a different one. Background restart loads a newly installed
+version; --if-idle leaves it alone when work or a conversation is open. Stop
+stops it until the next login or the next clio-coder gui, and uninstall also
+removes its login, desktop and Windows entries.
+Under WSL, background install also adds a Clio Coder Start Menu shortcut and a
+sign-in entry on Windows. The shortcut wakes WSL, starts the app and opens it
+in a Chrome or Edge app window; the sign-in entry only wakes WSL and starts it.
+macOS and native Windows run the private server only; Windows prints the link
+instead of opening it. Your CLI, terminal interface, headless runs, and
+graphical app use the same Clio Coder runtime, configuration and sessions, and
+the graphical app lists every project the terminal interface has worked in.
 `;
 
 export async function runGuiCommand(args: string[]): Promise<number> {
