@@ -1415,6 +1415,8 @@ function validateSystemOne(issues: Issues, raw: unknown, settings: ClioSettings)
 					issues.add(path, `unknown site, expected one of ${SITE_IDS.join(", ")}`);
 					continue;
 				}
+				// A later layer writes null to unbind a site an earlier layer bound; merging keeps the null.
+				if (value === null) continue;
 				let engine: string | undefined;
 				let timeoutMs: number | undefined;
 				let tasks: Partial<Record<DecisionTask, string>> | undefined;
