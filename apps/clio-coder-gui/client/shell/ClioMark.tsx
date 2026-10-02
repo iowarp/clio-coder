@@ -155,7 +155,7 @@ export function ClioPulse({ size = 16, label, done = false }: { size?: number; l
 	// biome-ignore lint/correctness/useExhaustiveDependencies: a new lap remounts the rings and needs new turns.
 	useLayoutEffect(() => {
 		if (still || current.current !== "working") return;
-		const rings = root.current?.querySelectorAll<SVGSVGElement>(".clio-pulse__ring") ?? [];
+		const rings = root.current?.querySelectorAll<SVGSVGElement>("svg.clio-pulse__ring") ?? [];
 		turns.current = [...rings].map((ring, index) => {
 			const animation = ring.animate(turn(index % 2 === 0 ? 1 : -1), {
 				duration: shape.cycle,
