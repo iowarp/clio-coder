@@ -11,7 +11,8 @@ are, the deep checks, the in-session `/doctor`, and how to read the rows.
 
 | Command | What it does |
 | --- | --- |
-| `clio-coder doctor` | Every standard check. Read-only. |
+| `clio-coder doctor` | Every standard check. Read-only; quiet row families are folded in text output. |
+| `clio-coder doctor --verbose` | Print every finding separately in text output. JSON always retains every finding. |
 | `clio-coder doctor --fix` | Also repairs missing directories, template files, and credential permissions, rewrites retired enum values and YAML 1.1 `on`/`off` booleans in `settings.yaml` while preserving comments and formatting, and records fleet preflight results. |
 | `clio-coder doctor --json` | The same findings as JSON on stdout: `{ ok, fix, deep, findings: [{ ok, name, level, detail }] }`. |
 | `clio-coder doctor --deep` | The standard checks plus the live tool probe on every configured target and a dry run of the validation contract. |
@@ -62,15 +63,15 @@ also states that Clio did not inspect GPU/VRAM or model fit.
 
 ## Core install rows
 
-Doctor reports these rows first: `Clio Coder version`, `install method`, `node version`, `platform`, `engine runtime`, `directory layout`, `config dir`, `data dir`, `state dir`, `cache dir`, `settings.yaml`, `credentials`, `state metadata`, `lifecycle migrations`, and the session store and state storage rows. A missing directory, an invalid `settings.yaml`, a `credentials.yaml` whose mode is not `600`, or stale state metadata is an error, and `clio-coder doctor --fix` repairs the directories, template files, credential mode and state metadata.
+A `chat` row leads the report with the configured route, whether chat can run, and the recovery command when setup is incomplete. The core install checks follow: `Clio Coder version`, `install method`, `node version`, `platform`, `engine runtime`, `directory layout`, `config dir`, `data dir`, `state dir`, `cache dir`, `settings.yaml`, `credentials`, `state metadata`, `lifecycle migrations`, and the session store and state storage rows. A missing directory, an invalid `settings.yaml`, a `credentials.yaml` whose mode is not `600`, or stale state metadata is an error, and `clio-coder doctor --fix` repairs the directories, template files, credential mode and state metadata.
 
-On a home Clio has never written to, plain `doctor` prints one `installation` warning row (`not set up yet`) and exits 0. It creates nothing. `doctor --fix` creates the directories without choosing a model.
+On a home Clio has never written to, plain `doctor` prints a `chat` warning explaining that no model target is configured and an `installation` warning row (`not set up yet`) and exits 0. It creates nothing. `doctor --fix` creates the directories without choosing a model.
 
 Other rows appear when they apply: `validation contract` (valid, absent, Markdown-only or invalid; an invalid contract is an error and a valid one raises the rigor default to high), `interop <agent>` rows for detected external agents, `fleet node <id>` rows from the SSH preflight, `panes ...` rows, `external tool <id>` rows, and `naming ...` rows that count legacy `clio` history, git refs and worktree markers.
 
 ## HPC toolchain rows
 
-Every run reports one `toolchain <name>` row for each of `cc`, `c++`, `clang`,
+The full findings include one `toolchain <name>` row for each of `cc`, `c++`, `clang`,
 `gfortran`, `mpicc`, `mpicxx`, `mpirun`, `nvcc`, `cmake`, `make`, `ninja`,
 `meson`, `python3`, and `sbatch`. The `cc` row accepts `gcc` when `cc` is
 absent, and the `c++` row accepts `g++`.
@@ -101,7 +102,7 @@ its run kept on purpose and is informational. An `abandoned` row is a crashed
 run's worktree that restart recovery kept because it holds work, and it is a
 warning, as is a claim whose owner is gone or that predates recovery. Each row
 gives the branch, the age, the `git log <base>..<branch>` command to inspect
-it, and the commands to drop it. Doctor never removes one. See
+it, and the commands to drop it. A claim whose branch and worktree are both gone is reported as stale; `doctor --fix` removes that stale claim after rechecking both. Doctor never removes a surviving branch or worktree. See
 [worktree per task](fleet-dispatch.md#worktree-per-task).
 
 ## Slurm MCP rows

@@ -203,8 +203,8 @@ The input surface (`ClioEditor`) frames the operator's prompt:
 ### 4.3 Progressively Disclosed Footer
 
 The footer anchors live system telemetry across two lines:
-- **Line 1 (Activity & Model)**: Active tool or worker status, model identity, weekly quota headroom, throughput metrics, and context occupancy meter.
-- **Line 2 (Environment & Hints)**: Working directory, Git branch / dirty status, and rotating context hints.
+- **Line 1 (Workspace & Metrics)**: Working directory, Git branch / dirty status, context occupancy and throughput. Branch and context figures stay blank until known. Once metrics appear, the footer reserves their column and the dirty marker's space so changing numbers do not shift the path's cut point.
+- **Line 2 (Notices & Hints)**: Approval keys, notices, setting feedback or rotating key hints, beside active worker, skill and weekly quota facts when space permits. Key hints are shown whole; a dropped hint leads the next page.
 - **Notice Slot**: Line 2 has room for one notice. It shows the head of the notice center's order, most severe first and newest within a level, with the level's glyph and token. An armed quit or leader key outranks any notice.
 - **Narrow Terminals**: Secondary hints yield space to the context percentage and phase without wrapping; optional counts drop before a number is cut.
 
@@ -236,6 +236,7 @@ Every transcript row follows a rigid 2-column gutter format:
 - **Operator Grant**: A call that ran because the operator allowed it at a permission card keeps a rail row under its action row, `? allowed by you · safety-net rail <rule>` or `· autonomy level <level>`, with `?` in `warning`. Compact never folds such a call into its neighbors. The row is live only, because the approval facts never reach the session ledger.
 - **Worker Rows**: The origin mark (`◆` model, `◇` operator) heads the worker block; a running tool inside it shows `⚙`.
 - **Turn Settlement**: Final turn outcome closes the block with outcome in gutter (`✓ Done · 14s · 3 calls · in 100k · out 380`).
+- **Context Progress**: Known stage counts fill the bar; unknown work advances an unfilled marker monotonically within the stage without claiming a percentage. Helper timing stays live, showing elapsed seconds, the limit and the run id.
 
 ---
 

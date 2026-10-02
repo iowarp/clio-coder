@@ -328,10 +328,10 @@ in a task worktree without `node_modules`. The note says the check also fails on
 base, passes there, or was not compared and why. A failure on the base does not
 establish that the worker caused it. In the TUI an operator is
 asked first with a `Merge task branch?` card
-that shows the branch, the changed paths, and the failing or unrun check. The card opens on
+that shows the task branch, the dispatch checkout's destination branch, the changed paths, and the failing or unrun check. Worker-reported failures are named; when no matching host failure was compared on the task base, the card says whether the failure predates the worker is unknown. The card opens on
 `Keep branch` and ignores keys other than Esc for a moment after it appears, so an Enter typed
 into the composer cannot answer it. `Merge` lands exactly the commit the card showed, through the
-same guarded path with protected paths read again at that moment, and the run succeeds. `Merge`
+same guarded path with protected paths read again at that moment, and the run succeeds. The merge is withheld if the dispatch checkout has left its original branch or the task base is no longer an ancestor of its HEAD. `Merge`
 is not offered when the branch changes protected paths; the card names them. A conflicting
 operator merge fails the run like any other merge. If the branch or its worktree changed after
 the preview, `Merge` and `Discard` are refused: the run fails with `merge_withheld`, the branch is
@@ -890,7 +890,7 @@ agent/target/model/node tuples and can never leave that set. `automatic`
 failover lets typed infrastructure failures exclude only the failed route
 part. For example, an SSH channel failure can move the node while retaining the
 agent, target, and model. Cancellation, policy rejection, and permission
-refusal neither retry nor penalize infrastructure.
+refusal neither retry nor penalize infrastructure. A worker information-flow refusal ends the run with deterministic `outcomeCode: "information_flow_blocked"`; it is never retried or failed over.
 
 A worker receipt records the mode that governed its retries as
 `effectiveFailover`. That is a different fact from `routingIntent.failover`,
@@ -1159,7 +1159,7 @@ hard block.
   opens one. Detail follows the cursor rather than pinning to a run.
 - The board and the transcript worker block read one projection
   ([worker-progress.ts](../../src/domains/observability/worker-progress.ts)), so they cannot disagree about what a
-  worker is saying or touching. It keeps 40 lines and 4096 bytes of tail, 8
+  worker is saying or touching. Progress settles on `agent_end`, with the live phase shown as `finishing` until the terminal run event arrives. It keeps 40 lines and 4096 bytes of tail, 8
   distinct tool names, 4 recent actions, and accepts 16 KB of delta bytes per
   250 ms; what the bounds refuse is counted and named on the card beside the
   `/view dispatch:<runId>` deep link.

@@ -6,7 +6,7 @@ This guide covers the installed CLI, headless run behavior, interactive commands
 
 Demo presentation and guidance are on by default before 1.0. The full welcome shows the stacked cyan-to-copper wordmark, workspace and fleet facts, and shortcut hints. It reserves two subscription rows from the first paint, keeping its height and Fleet placement steady while account data hydrates. Longer summaries show an ellipsis and `/usage` for the complete account details. With `--no-demo` or `interface.demo: false`, both the instant shell and hydrated TUI open with a compact identity header: the same editor and chosen regular/fullscreen layout, without artwork or welcome-only context, subscription, and recipe reads. Optional attention animation and smooth-streaming pacing are disabled; work status and approval text remain visible. Dumb/unknown terminals and screen-reader mode also use the compact welcome.
 
-After a turn, Clio may show one `[tip]` row that fits what the turn did: a question about Clio's own settings, a side question that `/btw` would keep out of the transcript, a correction that `/tree` could rewind, a long answer that another output style would fold. The harness picks the tip. The model never sees it, and no model call is made. At most four tips appear per session, spaced several turns apart, and a tip retires once you use its feature yourself or it has been shown twice.
+After a turn, Clio may show one fading footer line beginning `tip: ...` that fits what the turn did: a question about Clio's own settings, a side question that `/btw` would keep out of the transcript, a correction that `/tree` could rewind, a long answer that another output style would fold. The harness picks the tip. The model never sees it, and no model call is made. At most one tip appears per session, and a tip retires once you use its feature yourself or it has been shown twice.
 
 Guidance keeps a small profile in the state directory (`harness-profile.json`): the tips shown, the Clio features you used, and the topics you asked Clio about. It stays on this machine and never enters a prompt.
 
@@ -31,7 +31,7 @@ Turn it off under Settings → Appearance → Demo presentation and guidance (`i
 | `clio-coder --autonomy <level>` | Start this interactive session at `default` or `yolo` without modifying `settings.yaml`. Passing `--autonomy` before a subcommand is refused with exit 2 (`clio-coder run --autonomy` remains the headless form). |
 | `clio-coder --no-skills` | Disable skill discovery for one invocation and automatic skill/marketplace prompt guidance while still honoring explicit `--skill` paths. |
 | `clio-coder --skill <path>` | Make one explicit skill file or directory available for one invocation (repeatable). Clio loads its instructions when the skill is activated through `context(scope="skills", name=...)`. |
-| `clio-coder configure` | Run the configuration wizard. Ctrl+C reports `configuration cancelled`, writes no target, and exits 130; when first-run onboarding is cancelled, startup stops instead of opening the TUI with no usable target. |
+| `clio-coder configure` | Run the configuration wizard. Ctrl+C reports `configuration cancelled` once, writes no target, and exits 130 without an additional error line; when first-run onboarding is cancelled, startup stops instead of opening the TUI with no usable target. |
 | `clio-coder configure [--quick\|--settings\|--section <name>\|--json\|--edit]` | `--quick` connects an endpoint with recommended defaults, `--settings` opens the complete settings menu, `--section <name>` opens one of `targets`, `chat`, `fleet`, `context`, `safety`, `interface`, `integrations` or `advanced` (without a terminal it prints that section's values), `--json` prints the effective settings, and `--edit` edits user settings in `VISUAL`/`EDITOR` with validation and review before saving. |
 | `clio-coder configure --interop` | Review other coding agents detected on this machine and connect one as a delegation peer. Without a TTY it prints the proposals and writes nothing. |
 | `clio-coder configure --list` | List user-facing runtime ids. |
@@ -52,7 +52,7 @@ Turn it off under Settings → Appearance → Demo presentation and guidance (`i
 | `clio-coder auth status [target-or-runtime]` | Inspect auth state. |
 | `clio-coder auth login [target-or-runtime] [--api-key <value>]` | Add credentials through the supported flow. |
 | `clio-coder auth logout [target-or-runtime]` | Remove stored credentials. |
-| `clio-coder doctor [--fix] [--json] [--deep [--tools-timeout <seconds>]]` | Diagnose state. Plain `doctor` is read-only and leaves even a partially initialized home byte-for-byte untouched. With `--fix`, create missing structure and templates, repair credential permissions, refresh install metadata, rewrite retired enum values and YAML 1.1 booleans in settings, and record fleet preflight results. Settings remain strict; lifecycle migrations belong to `upgrade`, not `doctor --fix`. `--deep` adds a live tool-call probe per target and a dry run of the validation contract. See [Doctor](doctor.md). |
+| `clio-coder doctor [--fix] [--json] [--verbose] [--deep [--tools-timeout <seconds>]]` | Diagnose state. Plain `doctor` is read-only and leaves even a partially initialized home byte-for-byte untouched. With `--fix`, create missing structure and templates, repair credential permissions, refresh install metadata, rewrite retired enum values and YAML 1.1 booleans in settings, and record fleet preflight results. Settings remain strict; lifecycle migrations belong to `upgrade`, not `doctor --fix`. `--deep` adds a live tool-call probe per target and a dry run of the validation contract. See [Doctor](doctor.md). |
 | `clio-coder mcp list\|trust\|untrust` | List configured MCP servers or manage explicit project trust with `trust <id> [--action-class read\|execute\|unknown]` and `untrust <id>`. |
 | `clio-coder tools list [--json]` | List the pinned external tool registry and whether each program resolves from `PATH`, Clio's vendored data directory, or nowhere. |
 | `clio-coder tools status <id> [--json] [--reset-profile]` | Inspect one registered tool. `--reset-profile` applies only to yazi's generated profile. |
@@ -310,12 +310,12 @@ A headless turn (`clio-coder run`) starts a fresh session unless `--session <id>
 ### JSON Event Streaming and Wire Projection Promise
 
 When `--json` or `--json-events <mode>` (`full` | `terminal`) is passed, `clio-coder run` streams structured JSONL events.
-- **Wire Projection Promise:** Each piece of turn content crosses the wire exactly once.
+- **Wire Projection Promise:** Content streams as increments without repeated growing snapshots; the final answer is also included on `turn_end` for scripts.
 - Intermediate `message_update` events are dropped to prevent quadratic snapshot duplication over stdout.
 - `text_delta` and `thinking_delta` events stream incremental text deltas rather than accumulating message snapshots.
 - A `dispatch_scope_notice` event, `{type, code, level, message}`, reports a dispatch scope entry that did something its request did not say, such as a write root of `.` that sets no boundary, or narrow write roots that cost the worker its `bash` and `verify` because no OS sandbox enforces them. Text mode writes the same message to stderr. It is absent from `--json-events terminal`.
 - `agent_end` events carry segment summary metrics (`messageCount` and a `usage` object containing `input`, `output`, `cacheRead`, `cacheWrite`, `reasoning`, `totalTokens`, `costUsd`, `apiCalls`, and `measured`) instead of duplicating the full message transcript.
-- In `full` mode, `turn_end` preserves the final assistant message while dropping `toolResults` array objects, each of which already crossed the wire in an preceding `tool_execution_end` event. In `terminal` mode, `turn_end` is synthesized and carries timing, the exit code and any error, not the answer.
+- In `full` mode, `turn_end.message.content` preserves the final assistant text blocks, with `streamed: true` and `textLength`; thinking remains length-only. It drops `toolResults` array objects, each of which already crossed the wire in a preceding `tool_execution_end` event. In `terminal` mode, `turn_end` is synthesized and carries timing, `exitCode`, the final answer in `text`, and any `error`.
 - `tool_execution_start`, `tool_execution_update` and `tool_execution_end` name the capability that ran. A `gateway` op=call carries the capability as `toolName`, the capability's own arguments as `args`, and `via: "gateway"`, so a consumer of direct calls reads it unchanged. A `gateway` chain keeps its own frames, and its `tool_execution_end` is followed by a `tool_execution_start` and `tool_execution_end` pair per settled step, each with `toolCallId` `<parent>:<step id>`, `parentToolCallId`, the step's capability, arguments, result and `isError`, and `via: "gateway"`. A step whose `$from` binding failed never ran: its start frame carries the step's requested arguments with references unresolved, and its end frame adds `bindingError`. Assistant `toolCall` blocks and `toolResult` messages keep the wire name `gateway`.
 
 Example:
@@ -384,7 +384,7 @@ The registry table below lists the available interactive slash commands. On a ba
 | `/model` | `/model [pattern]` | Open model selector or set a model |
 | `/config` | `/config [area] [group]` | Open settings; alias for `/settings`, including target setup in the dock |
 | `/settings` | `/settings [targets\|chat\|fleet\|context\|safety\|interface\|integrations\|advanced] [group]` | Open interactive settings, optionally at a durable area and UI group |
-| `/resume` | `/resume` | Resume a past session on the route it last ran on. The picker hides sessions with no model turn |
+| `/resume` | `/resume` | Resume a past session on the route it last ran on. The picker hides sessions with no model turn and gives each session a separate metadata row with status, age, turn count, folder and route; replay restores recorded turn durations |
 | `/new` | `/new` | Start a fresh session. While a run is active it cancels the run first and returns queued follow-ups to the editor |
 | `/handoff` | `/handoff <goal>` | Hand this session's working state to a fresh session for a stated goal |
 | `/tree` | `/tree` | Open session tree navigator. Press `p` to filter by current cwd, `s` to cycle tree order or most recent first, `e` to label the selected entry, and `Shift+T` to toggle timestamps. |
@@ -567,7 +567,7 @@ top-level `keybindings` remains a compatibility input. An explicit `[]` disables
 both direct access and the action's default leader entry. A default-unbound
 action may still have a leader entry. Rebinding a direct key does not change its
 fixed suffix; `leader: []` disables the menu. Unknown IDs and effective conflicts
-diagnose, and edits reload routing, components and hints together, cancelling a
+diagnose; shipped fullscreen viewport keys that intentionally shadow unchanged editor defaults have no conflict tag, while user rebindings can still conflict. Edits reload routing, components and hints together, cancelling a
 pending menu. No preferences are rewritten. Defaults move follow-up from
 Alt+Enter to Ctrl+Q and recovery from Alt+Up to Alt+Q; Alt+B/D return to editing.
 Infrequent boards use their slash commands, and interrupt/background/external

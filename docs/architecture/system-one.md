@@ -24,7 +24,7 @@ A site declares `id`, a `version`, a hard `deadlineMs`, an optional `moment`, an
 
 One call carries one state and every question about it. The `systemone` engine sends those questions in one request. The `llm` engine sends requests per question and option order or vote, with concurrency bounded by the endpoint's capacity. Every state is capped by code points in [bounds.ts](../../src/domains/system-one/sites/bounds.ts) so a fitted cut was measured on evidence of a known size and a small-window engine never truncates the part that matters.
 
-Two definitions can share the id `toolCall` and differ in `moment`: `card` (the advisory on an open approval card) and `gate` (the yolo confirmation). Each moment trips its own breaker, so a slow card never opens the gate's.
+Two definitions can share the id `toolCall` and differ in `moment`: `card` (the advisory on an open approval card) and `gate` (the detached yolo reading). Each moment trips its own breaker, so a slow card never opens the gate's.
 
 The site ids are `turn`, `toolCall`, `toolResult`, `turnEnd`, `relevance`, `consult` and `drafts`, defined one per file under `src/domains/system-one/sites/`. `consult` is a factory because the agent supplies the questions. `drafts` and `consult` have no cut and no policy.
 
@@ -47,7 +47,7 @@ An engine implements `decide(request)` and rejects on transport failure, an unus
 4. **Breaker.** Three consecutive timeouts at one (engine configuration, site, moment) open a breaker for five minutes, then exactly one call probes. Only timeouts trip it. An answer or a refusal proves the engine responds and resets it.
 5. **Deadline.** The binding's `timeoutMs` or the site's `deadlineMs` aborts the engine through a signal, and a caller's own signal cancels the call.
 6. **Read.** The answering build selects the cuts. `read` and `summarize` are wrapped, and an exception in a site's policy becomes an error on the call's record, not on the turn.
-7. **Record.** Exactly one `DecisionRecord` is emitted per call whatever its outcome (`answered`, `failed`, `timeout`, `canceled`, `overflow`, `breaker-open`), carrying the session that was current when the call started so a late answer is filed under the session that asked.
+7. **Record.** One `DecisionRecord` is emitted per evaluated call whatever its outcome (`answered`, `failed`, `timeout`, `canceled`, `overflow`, `breaker-open`), carrying the session that was current when the call started so a late answer is filed under the session that asked. If every route is skipped because a required cut is missing, no decision row is emitted.
 
 In-flight calls are tracked so shutdown can wait a bounded time for a row that a turn stopped waiting on. The runner remembers the build each engine last answered with for ten minutes, so callers can ask `shadowed(site)` cheaply.
 
@@ -57,7 +57,7 @@ In-flight calls are tracked so shutdown can wait a bounded time for a row that a
 
 A site that hints, gates or acts must stay silent when `fitted` is false. That state is **shadow mode**: the engine is still asked and the call is fully recorded, but the policy returns no hint, no gate and no act. A keyed threshold is chosen so that the classes do not overlap where the key acts or gates, and only display or hint keys may accept missed positives. Safety sites can only add friction. `FITTED_TEMPERATURES` follows the same rule for LLM builds and is empty until a build is fitted.
 
-Callers use `shadowed(site)` to detach an unfitted call instead of waiting on it. In [system-one-host.ts](../../src/entry/system-one-host.ts) the `toolCall` gate and `toolResult` screen detach whatever `systemOne.record` says. The `turn` and `turnEnd` readings detach when it is on and make no call when it is off. `relevance` in shadow is skipped entirely unless the dataset is recording, because a catalog-sized request is pure spend when nothing can reorder.
+In [system-one-host.ts](../../src/entry/system-one-host.ts), `turn`, `turnEnd`, the `toolCall` gate and the `toolResult` screen always detach. An unfitted reading is skipped when dataset recording is off; the gate and screen only record, even with fitted cuts. Callers query `shadowed(site, moment)` under the same moment that recorded the answering build. `relevance` reads a finished cached ranking synchronously and starts missing work detached; shadow requests are skipped unless the dataset is recording.
 
 ## Records
 
@@ -75,20 +75,20 @@ The composition root builds one `SystemOne`, one recorder and one host ([system-
 
 | Site | Reader | Degrades to |
 | --- | --- | --- |
-| `turn` | Asked once before the prompt is built, kept for the hint registration, the turn controller and the prewarm | No hints, previous turn-control behavior |
-| `toolCall` gate | Tool registry admission, at `yolo` on an unrecognized `execute`, interactive only | `yolo` unchanged |
+| `turn` | Started once before the prompt is built without waiting; a reading ready in time can inform hints, turn control and prewarm, and a late reading cannot enter the next continuation | No hints, previous turn-control behavior |
+| `toolCall` gate | Detached recording as an unrecognized `execute` starts at `yolo`, interactive only; never parks | `yolo` unchanged |
 | `toolCall` card | Approval overlay, polled per frame, never waited on | No advisory line |
-| `toolResult` | Tool registry, for `web_fetch`, `web_read` and MCP tool results | No banner beyond the deterministic scan |
-| `turnEnd` | Prose-question nudge and the settled turn, one shared reading with a 1.2 s wait | The regular expressions |
-| `relevance` | Skills listing, gateway `find` and memory recall through one ranker cached per turn | Local vocabulary order |
+| `toolResult` | Detached recording for `web_fetch`, `web_read` and MCP tool results; never adds a banner | No banner beyond the deterministic scan |
+| `turnEnd` | Detached record of the settled turn; no nudge or settlement waits for it | The regular expressions |
+| `relevance` | Skills listing, gateway `find` and memory recall take a finished cached ranking synchronously; a cache miss starts work without waiting | Local vocabulary order |
 | `consult` | The `consult` tool, registered at startup when bound | Tool absent |
 | `drafts` | `/draft` overlay. `Enter` on a finished draft appends it to the composer and records a `draft` outcome joined to the judging call by `ref` | Candidates shown unjudged |
 
-Every reader wraps its call so a throw degrades to the same fallback. The `toolResult` screen runs before the `after_tool` hooks, so the deterministic marker scan reads the screened result. Screening only adds a banner; it never removes the original result text.
+Every reader wraps its call so a throw degrades to the same fallback. The `toolResult` reading runs detached and preserves result delivery; the `after_tool` deterministic marker scan still judges the original result.
 
 ## Validating a Laya build
 
-A new engine or a new build of an existing engine ships in shadow. It cannot hint, gate or act until cuts are fitted for its exact build string. The procedure is:
+A new engine or a new build of an existing engine ships in shadow. It cannot hint or act until cuts are fitted for its exact build string; the gate, result screen and turn-end sites remain record-only in this release. The procedure is:
 
 1. Bind the engine to a site and run `scripts/decision-probe.ts <fixture> --engine <name>` against the labeled fixtures in `tests/fixtures/decision-cases/` (`turn`, `turn-end`, `tool-calls`, `tool-results`, `capabilities`). Each case goes through `createSystemOne` exactly as production does, with an in-memory recorder that keeps the raw answers.
 2. For each labeled key, read agreement, abstention, wrong and confidently wrong counts, the probability ranges of the positive and negative classes per run, and the suggested cut with its margin to each side. The suggestion is null when the classes overlap.

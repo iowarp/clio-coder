@@ -282,7 +282,7 @@ only tier styled as independently verified; a sealed receipt with observed
 validation is `grounded`, a sealed receipt with nothing observed is
 `unverified`, a broken seal, failed or inferred validation,
 failed or correlated review, or contradictory context record is
-`compromised`, and an unchecked or missing seal is `unknown`. The Alt+W board
+`compromised`, and an unchecked or missing seal is `unknown`. Human receipt summaries name the failed axis instead of printing `compromised`; a failure from receipt quality reads `recorded validation failed`. The machine verdict tier is unchanged. The Alt+W board
 never carries a verdict on the terminal bus event: the event is published the
 moment the receipt is sealed, before anything has read it back and
 authenticated it against the ledger row, so the board reads the receipt file

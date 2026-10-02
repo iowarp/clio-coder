@@ -560,7 +560,7 @@ whatever is left. A partial delete never reports global success.
 
 ### E. Interactive Configuration (`clio-coder configure`)
 
-The interactive launcher starts with **Guided setup**, then **Connect by
+Guided setup opens on a clean screen, without the preceding launcher menu remaining above it. The interactive launcher starts with **Guided setup**, then **Connect by
 endpoint**, **Settings**, and **Check setup**. Guided setup first asks whether
 the model comes from a local app, model server, AI subscription, provider API,
 or installed coding agent. It then shows only providers in that category,

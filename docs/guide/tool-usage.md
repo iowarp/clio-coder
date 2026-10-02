@@ -47,7 +47,7 @@ One gateway provides `find`, `describe`, `call`, and `chain`. Source: [index.ts]
 | `refresh` | Find only; explicitly connect and refresh the named server. |
 | `steps` | Chain: 1–16 operations with unique `id`, `capability`, `args`, and optional `after:[ids]`. |
 
-`find` returns bounded pages within 32 KiB; `describe` returns schema, usage, and
+`find` returns bounded pages within 32 KiB, including required argument names and bounded validated argument examples for registered capabilities. Startup capability guidance also includes a bounded argument cue and example. `describe` returns schema, usage, and
 authority notes; `call` validates against the live schema and runs under the
 capability's own authority. Direct tools are called directly, or included as
 steps in a chain. Describing `gateway` returns composition syntax; describing
@@ -556,7 +556,7 @@ Arguments:
 - `cached` (optional boolean). For `op="diff"`: staged changes (`--cached`).
 - `stat` (optional boolean). For `op="diff"`: summary only (`--stat`).
 - `name_only` (optional boolean). For `op="diff"`: file names only.
-- `mode` (optional). Alias for `op`.
+- `mode`, `action` (optional). Aliases for `op`; selection prefers `op`, then `mode`, then `action`.
 - `stat` (optional boolean). Also applies to `op="log"`, where it adds changed files per commit.
 - `limit` (optional number). For `op="log"`: commits to show (default 20, max 200).
 - `cwd` (optional). Working directory.
@@ -991,4 +991,4 @@ A turn may make 3 consult calls. The tool changes nothing. It returns `answered:
 
 ## Headless declared verifier commands
 
-Declared and derived checks pass through the conservative action classifier and autonomy policy, and are admitted exactly as `bash` admits the same command. The policy engine resolves the call with the tool's own resolver, so the argv it scans, including any model `args`, is the argv that runs. A recognized test runner such as `python -m pytest` resolved through PATH runs in both modes. An unrecognized argv, such as `uv run python -m unittest discover -s tests` or an absolute interpreter path, asks in `default`, where a headless run denies it, and runs in `yolo`. Non-bare argv and project `requireConfirmation` entries also ask in `default` and run in `yolo`; damage-control rules still ask or block in both modes. Declaring a check does not bypass those gates. Prepare the environment before the run and inspect actual verifier receipts before claiming edit-and-verify success.
+Declared and derived checks pass through the conservative action classifier and autonomy policy, and are admitted exactly as `bash` admits the same command. The policy engine resolves the call with the tool's own resolver, so the argv it scans, including any model `args`, is the argv that runs. A recognized test runner such as `python -m pytest` resolved through PATH runs in both modes. An unrecognized argv, such as `uv run python -m unittest discover -s tests` or an absolute interpreter path, asks in `default`, where a headless run denies it, and runs in `yolo`. Non-bare argv and project `requireConfirmation` entries also ask in `default` and run in `yolo`; damage-control rules still ask or block in both modes. Declaring a check does not bypass those gates. A TUI verify approval card names the resolved command beside the check id when resolution succeeds. Prepare the environment before the run and inspect actual verifier receipts before claiming edit-and-verify success.
