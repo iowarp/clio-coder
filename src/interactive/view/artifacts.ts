@@ -2,25 +2,32 @@ import { createReadStream, readFileSync, statSync } from "node:fs";
 import { readFile, realpath, stat } from "node:fs/promises";
 import { basename, isAbsolute, join, relative, resolve, sep } from "node:path";
 import type { DispatchContract } from "../../domains/dispatch/contract.js";
-import { type DispatchOwnership, dispatchOwnership } from "../../domains/dispatch/ownership.js";
+import type { DispatchOwnership } from "../../domains/dispatch/ownership.js";
+import { dispatchOwnership } from "../../domains/dispatch/ownership.js";
 import { isReceiptIntegrity, verifyReceiptIntegrity } from "../../domains/dispatch/receipt-integrity.js";
 import type { RunEnvelope, RunReceipt } from "../../domains/dispatch/types.js";
 import { evidenceDirectory, inspectEvidence, listEvidenceOverviews } from "../../domains/evidence/store.js";
 import { formatTrustSummaryLine, trustStateWord } from "../../domains/evidence/trust-projection.js";
+import type {
+	CanonicalTrustStatus,
+	ReceiptIntegrityOutcome,
+	TrustStatusAxis,
+} from "../../domains/evidence/trust-status.js";
 import {
 	inspectRunReceiptTrustStatus,
-	type ReceiptIntegrityOutcome,
+	retiredIntegrityVersionOf,
 	retiredReceiptIntegrity,
 	retiredReceiptIntegrityReason,
 	TRUST_STATUS_AXES,
-	type TrustStatusAxis,
 } from "../../domains/evidence/trust-status.js";
-import type { EvidenceFinding, EvidenceOverview, EvidenceSource } from "../../domains/evidence/types.js";
-import {
-	type AccountabilitySummary,
-	readEvidenceIndex,
-	summarizeEvidenceIndex,
-} from "../../domains/observability/index.js";
+import type {
+	EvidenceFinding,
+	EvidenceInspectable,
+	EvidenceOverview,
+	EvidenceSource,
+} from "../../domains/evidence/types.js";
+import type { AccountabilitySummary } from "../../domains/observability/index.js";
+import { readEvidenceIndex, summarizeEvidenceIndex } from "../../domains/observability/index.js";
 import type {
 	BashExecutionEntry,
 	MessageEntry,
@@ -30,17 +37,10 @@ import type {
 	TaskLedgerGoal,
 	TaskLedgerValidationEvidence,
 } from "../../domains/session/entries.js";
-import {
-	type AuditJsonRow,
-	type AuditReadResult,
-	readAuditRows,
-	type SessionMeta,
-} from "../../domains/session/index.js";
-import {
-	getPromptManifestFilePath,
-	readPromptCompileManifest,
-	type SessionPromptCompileRecord,
-} from "../../domains/session/prompt-manifest.js";
+import type { AuditJsonRow, AuditReadResult, SessionMeta } from "../../domains/session/index.js";
+import { readAuditRows } from "../../domains/session/index.js";
+import type { SessionPromptCompileRecord } from "../../domains/session/prompt-manifest.js";
+import { getPromptManifestFilePath, readPromptCompileManifest } from "../../domains/session/prompt-manifest.js";
 import { foldSessionArtifacts, resolveSessionArtifactPath } from "../../domains/session/session-artifacts.js";
 import { filterEntriesToActivePath } from "../../domains/session/tree/active-path.js";
 import { displayToolCall } from "../../tools/gateway-display.js";
@@ -49,6 +49,7 @@ import { formatUsd } from "../footer/widgets.js";
 import { formatFooterTokens } from "../footer-panel.js";
 import { clockLocal } from "../format-time.js";
 import { abbreviateModelId } from "../theme/index.js";
+import type { LiveSystemPrompt } from "../turn-context.js";
 
 export type ViewArtifactCategory =
 	| "transcript"
@@ -62,12 +63,14 @@ export type ViewArtifactCategory =
 	| "protected-artifact"
 	| "compaction"
 	| "prompt-manifest"
-	| "audit";
+	| "audit"
+	| "system-prompt";
 export type ViewArtifactFormat = "markdown" | "text" | "json";
 
 export interface ViewArtifactLoadResult {
 	lines: string[];
 	format: ViewArtifactFormat;
+	details?: { lines: string[]; format: ViewArtifactFormat };
 	/**
 	 * The same content laid out by its own renderer at a given width. A
 	 * transcript block's rows carry a hanging indent and a `│` rail, which a
@@ -102,6 +105,7 @@ export interface ArtifactProvider {
 
 export interface ArtifactProviderDeps {
 	readTranscript?: (() => ViewArtifact[]) | undefined;
+	readSystemPrompt?: (() => LiveSystemPrompt | null) | undefined;
 	stateDir: string;
 	dataDir?: string | undefined;
 	dispatch?: Pick<DispatchContract, "listRuns" | "getRun"> | undefined;
@@ -122,6 +126,7 @@ export const VIEW_ARTIFACT_CATEGORIES: readonly ViewArtifactCategory[] = [
 	"compaction",
 	"prompt-manifest",
 	"audit",
+	"system-prompt",
 ] as const;
 
 /** Cap on failure-cause tags rendered in the accountability artifact. */
@@ -142,6 +147,7 @@ export type ReceiptVerificationReport = ReceiptIntegrityOutcome & {
 	receiptPath: string;
 	sealedDigest: string | null;
 	trustSummary: string | null;
+	verificationSummary: string | null;
 	compromised: boolean;
 	checks: ReceiptVerificationCheck[];
 };
@@ -151,7 +157,9 @@ export type ReceiptVerificationReport = ReceiptIntegrityOutcome & {
  * verify because its integrity version was retired: not a pass, and not the
  * failure a tampered receipt reports.
  */
-export type ViewArtifactVerification = { ok: true; detail: string } | { ok: false; detail: string; retired?: true };
+export type ViewArtifactVerification =
+	| { ok: true; detail: string; compromised?: boolean }
+	| { ok: false; detail: string; retired?: true };
 
 const RECEIPT_REQUIRED_KEYS = [
 	"runId",
@@ -337,21 +345,6 @@ function validateToolStats(value: unknown): ReceiptVerifyResult {
 }
 
 type ReadLedgerResult = { ok: true; envelope: RunEnvelope } | { ok: false; reason: string };
-
-/**
- * The canonical trust line for a receipt the integrity verifier just accepted:
- * the same file and ledger row, projected through the shared boundary so the
- * receipt view spells its verdict exactly as the board and the CLI do.
- */
-function receiptTrustDetail(stateDir: string, runId: string): string {
-	try {
-		const receipt = JSON.parse(readFileSync(receiptFilePath(stateDir, runId), "utf8")) as RunReceipt;
-		const ledger = readRunEnvelope(stateDir, runId);
-		return formatTrustSummaryLine(inspectRunReceiptTrustStatus(receipt, ledger.ok ? ledger.envelope : null).status);
-	} catch {
-		return "integrity verified; trust status unreadable";
-	}
-}
 
 function readRunEnvelope(stateDir: string, runId: string): ReadLedgerResult {
 	const runs = readRunLedger(stateDir);
@@ -567,6 +560,7 @@ export function verifyReceiptFileReport(stateDir: string, runId: string): Receip
 		receiptPath,
 		sealedDigest,
 		trustSummary,
+		verificationSummary: inspection === null ? null : readableVerification(inspection.status),
 		compromised: compromiseAxes.length > 0,
 		checks,
 	};
@@ -744,6 +738,180 @@ function renderEvidenceMarkdown(
 	return lines;
 }
 
+function readableVerification(status: CanonicalTrustStatus): string {
+	const validation = status.validationGrounding;
+	const authority = "authority" in validation ? validation.authority.id : null;
+	const checkLabel = authority === "host-verification" ? "host checks" : "recorded checks";
+	const validationText =
+		validation.state === "validated"
+			? `${checkLabel} passed`
+			: validation.state === "failed"
+				? `${checkLabel} failed`
+				: authority === "host-verification-baseline-failed"
+					? "check also failed on the task base; change validation unknown"
+					: trustStateWord("validationGrounding", validation.state);
+	const retiredVersion = retiredIntegrityVersionOf(status.artifactIntegrity);
+	return [
+		retiredVersion !== null
+			? `receipt seal v${retiredVersion} not checked`
+			: status.artifactIntegrity.state === "verified"
+				? "receipt seal valid"
+				: trustStateWord("artifactIntegrity", status.artifactIntegrity.state),
+		validationText,
+		trustStateWord("independentReview", status.independentReview.state),
+		...(status.contextProvenance.state === "invalid" ? ["context record invalid"] : []),
+	].join("; ");
+}
+
+function renderEvidenceSummary(
+	inspected: EvidenceInspectable,
+	receipts: ReadonlyArray<RunReceipt>,
+	receiptError?: string,
+): string[] {
+	const { overview, findings, trustStatus } = inspected;
+	return [
+		...(overview.tasks.length > 1 ? overview.tasks.map((task) => `- ${task}`) : []),
+		`Agent: ${formatList(overview.agentIds, "not recorded")}`,
+		`Run: ${formatList(overview.runIds, "not recorded")}`,
+		`Model: ${formatList(overview.modelIds, "not recorded")}`,
+		"",
+		...(trustStatus.runs.length > 0
+			? trustStatus.runs.map((run) => `Recorded verification (${run.runId}): ${readableVerification(run.status)}`)
+			: ["Verification: no recorded verification for this bundle."]),
+		"",
+		"## What changed",
+		...(receipts.length > 0
+			? receipts.flatMap((receipt) => [
+					...(receipts.length > 1 ? [`### Run ${receipt.runId}`] : []),
+					...renderReceiptChanges(receipt),
+				])
+			: ["Changed paths were not recorded."]),
+		"",
+		"## Checks and findings",
+		...receipts.flatMap((receipt) => [
+			...(receipts.length > 1 ? [`### Run ${receipt.runId}`] : []),
+			...renderReceiptChecks(receipt),
+		]),
+		...(receiptError ? [receiptError] : []),
+		...(findings.length > 0
+			? findings.map(
+					(finding) => `- ${finding.message}${finding.runId && overview.runIds.length > 1 ? ` (run ${finding.runId})` : ""}`,
+				)
+			: ["No additional findings recorded."]),
+		"",
+		"## What happened",
+		`${overview.totals.runs} runs · ${overview.totals.toolCalls} tool calls · ${overview.totals.toolErrors} errors · ${overview.totals.blockedToolCalls} blocked`,
+		`${formatDurationMs(overview.totals.wallTimeMs)} · ${formatFooterTokens(overview.totals.tokens)} tokens · ${formatUsd(overview.totals.costUsd)}`,
+		"",
+		"Press i for all bundle details and backing files.",
+	];
+}
+
+function receiptVerificationLine(report: ReceiptVerificationReport): string {
+	if (!report.ok) return `Verification: ${report.retired ? "not checked" : "failed"}. ${report.reason}`;
+	return `Verification: ${report.verificationSummary ?? "receipt seal verified; result validation unknown"}`;
+}
+
+function renderReceiptChanges(receipt: RunReceipt): string[] {
+	const changed = receipt.worktree?.changedPaths ?? receipt.checkoutChanges?.changedPaths;
+	return [
+		...(changed === undefined
+			? ["Changed paths were not recorded."]
+			: changed.length === 0
+				? ["No changed paths recorded."]
+				: changed.map((path) => `- ${path}`)),
+		...(receipt.worktree
+			? [
+					receipt.worktree.applied
+						? "Changes applied to the source checkout."
+						: `Changes kept in the worktree${receipt.worktree.reason ? `: ${receipt.worktree.reason}` : "."}`,
+				]
+			: []),
+		...(receipt.checkoutChanges ? ["Observed checkout changes; concurrent edits may be included."] : []),
+	];
+}
+
+function renderReceiptChecks(receipt: RunReceipt): string[] {
+	const checks = receipt.hostVerification?.checks ?? [];
+	return [
+		...(checks.length > 0
+			? checks.map(
+					(check) =>
+						`- ${check.exitCode === 0 ? "Passed" : "Failed"}: ${check.check} (exit ${check.exitCode})${check.memo ? "; reused result" : ""}${check.baseComparison?.status === "failed" ? "; also failed on task base" : ""}`,
+				)
+			: ["No host-run checks recorded."]),
+		...(receipt.hostVerification?.reason ? [receipt.hostVerification.reason] : []),
+		...(receipt.toolStats ?? []).map(
+			(stat) => `- ${stat.tool}: ${stat.ok} succeeded, ${stat.errors} failed, ${stat.blocked} blocked`,
+		),
+	];
+}
+
+function renderReceiptSummary(receipt: RunReceipt, report: ReceiptVerificationReport): string[] {
+	return [
+		`Agent: ${receipt.agentId} · Run: ${receipt.runId}`,
+		`Model: ${receipt.wireModelId} (${receipt.targetId})`,
+		...(receipt.failureMessage ? [receipt.failureMessage] : []),
+		...(receipt.outcomeDetail ? [receipt.outcomeDetail] : []),
+		"",
+		receiptVerificationLine(report),
+		...(!report.ok ? ["The recorded claims below could not be verified."] : []),
+		"",
+		"## What changed",
+		...renderReceiptChanges(receipt),
+		"",
+		"## Checks",
+		...renderReceiptChecks(receipt),
+		"",
+		`${formatDurationMs(parseTime(receipt.endedAt) - parseTime(receipt.startedAt))} · ${formatFooterTokens(receipt.tokenCount)} tokens · ${formatUsd(receipt.costUsd)}`,
+		"",
+		...(receipt.output
+			? [
+					receipt.output.state === "partial" ? "## Partial result" : "## Result",
+					receipt.output.text,
+					...(receipt.output.truncated ? ["Stored result was truncated."] : []),
+					"",
+				]
+			: []),
+		"Press i for the full receipt and verification checks. Press v to verify again.",
+	];
+}
+
+async function loadReceiptSummary(path: string, stateDir: string, runId: string): Promise<ViewArtifactLoadResult> {
+	const details = await loadJsonFileLines(path);
+	try {
+		if ((await stat(path)).size > JSON_PRETTY_MAX_BYTES)
+			return { format: "text", lines: ["Receipt is too large to summarize. Press i for the stored content."], details };
+		const receipt = JSON.parse(await readFile(path, "utf8")) as RunReceipt;
+		const report = verifyReceiptFileReport(stateDir, runId);
+		return {
+			format: "markdown",
+			lines: renderReceiptSummary(receipt, report),
+			details: {
+				format: "text",
+				lines: [
+					receiptVerificationLine(report),
+					...(report.trustSummary ? [report.trustSummary] : []),
+					...report.checks.map((check) => `${check.ok ? "Passed" : "Failed"}: ${check.name}: ${check.evidence}`),
+					"",
+					"Full receipt",
+					"",
+					...details.lines,
+				],
+			},
+		};
+	} catch (err) {
+		return {
+			format: "text",
+			lines: [
+				`Receipt summary unavailable: ${err instanceof Error ? err.message : String(err)}`,
+				"Press i to inspect the stored receipt.",
+			],
+			details,
+		};
+	}
+}
+
 export class EvidenceArtifactProvider implements ArtifactProvider {
 	readonly category = "evidence" as const;
 
@@ -765,7 +933,10 @@ export class EvidenceArtifactProvider implements ArtifactProvider {
 			const artifact: ViewArtifact = {
 				id: overview.evidenceId,
 				category: this.category,
-				title: safeTitle(`Evidence · ${evidenceSourceTitle(overview.source)}`, "Evidence bundle"),
+				title: safeTitle(
+					`${formatList(overview.statuses, "Evidence")} · ${overview.tasks[0] ?? evidenceSourceTitle(overview.source)}`,
+					"Evidence bundle",
+				),
 				timestamp: parseTime(overview.generatedAt),
 				searchText: [
 					overview.evidenceId,
@@ -785,9 +956,32 @@ export class EvidenceArtifactProvider implements ArtifactProvider {
 				load: async () => {
 					try {
 						const inspected = await inspectEvidence(dataDir, overview.evidenceId);
+						let receipts: RunReceipt[] = [];
+						let receiptError: string | undefined;
+						try {
+							const receiptPath = join(evidenceDirectory(dataDir, overview.evidenceId), "receipt.json");
+							if ((await stat(receiptPath)).size > JSON_PRETTY_MAX_BYTES)
+								throw new Error("receipt file is too large to summarize");
+							const stored = JSON.parse(await readFile(receiptPath, "utf8")) as { receipts?: RunReceipt[] };
+							receipts = (stored.receipts ?? []).filter((receipt) => inspected.overview.runIds.includes(receipt.runId));
+						} catch (err) {
+							receiptError = `Recorded changes and checks unavailable: ${err instanceof Error ? err.message : String(err)}`;
+						}
 						return {
 							format: "markdown" as const,
-							lines: renderEvidenceMarkdown(inspected.overview, inspected.findings, path),
+							lines: renderEvidenceSummary(inspected, receipts, receiptError),
+							details: {
+								format: "markdown",
+								lines: [
+									...renderEvidenceMarkdown(inspected.overview, inspected.findings, path),
+									"",
+									"## Recorded verification",
+									"",
+									"```json",
+									JSON.stringify(inspected.trustStatus, null, 2),
+									"```",
+								],
+							},
 						};
 					} catch (err) {
 						const message = err instanceof Error ? err.message : String(err);
@@ -807,7 +1001,7 @@ export class EvidenceArtifactProvider implements ArtifactProvider {
 }
 
 function receiptTitle(env: RunEnvelope): string {
-	return safeTitle(`${env.agentId} · ${env.task}`, env.id);
+	return safeTitle(`${env.outcome ?? env.status} · ${env.agentId} · ${env.task}`, env.id);
 }
 
 export class ReceiptArtifactProvider implements ArtifactProvider {
@@ -834,15 +1028,18 @@ export class ReceiptArtifactProvider implements ArtifactProvider {
 					runId: env.id,
 					...(env.sessionId ? { sessionId: env.sessionId } : {}),
 					searchText: [env.id, env.agentId, env.task, env.targetId, env.runtimeId, env.runtimeKind, env.cwd],
-					load: () => loadJsonFileLines(path),
+					load: () => loadReceiptSummary(path, this.deps.stateDir, env.id),
 					verify: async () => {
-						const result = verifyReceiptFile(this.deps.stateDir, env.id);
+						const result = verifyReceiptFileReport(this.deps.stateDir, env.id);
 						if (!result.ok) {
 							return { ok: false, detail: result.reason, ...(result.retired !== undefined ? { retired: true } : {}) };
 						}
-						// "integrity verified" alone read as a verified result. The
-						// canonical line says what the seal proves and what it does not.
-						return { ok: true, detail: receiptTrustDetail(this.deps.stateDir, env.id) };
+						// A valid seal and a checked result are separate facts.
+						return {
+							ok: true,
+							detail: result.verificationSummary ?? "receipt seal valid; result validation unknown",
+							compromised: result.compromised,
+						};
 					},
 				};
 			});
@@ -1345,6 +1542,84 @@ export class CompactionArtifactProvider implements ArtifactProvider {
 	}
 }
 
+export class SystemPromptArtifactProvider implements ArtifactProvider {
+	readonly category = "system-prompt" as const;
+
+	constructor(private readonly deps: ArtifactProviderDeps) {}
+
+	async list(): Promise<ViewArtifact[]> {
+		const snapshot = this.deps.readSystemPrompt?.();
+		if (!this.deps.readSystemPrompt) return [];
+		if (!snapshot)
+			return [
+				{
+					id: "system-prompt:current",
+					category: this.category,
+					title: "System prompt · not compiled yet",
+					timestamp: 0,
+					load: async () => ({
+						format: "text",
+						lines: [
+							"No system prompt has been compiled for this session in this process yet.",
+							"Send a message to compile it. This entry will then show the complete live prompt.",
+							"Saved prompt manifests contain provenance, not the original prompt text.",
+						],
+					}),
+				},
+			];
+		const { compiled, compiledAt, modelId, targetId, sessionId, turnId } = snapshot;
+		const sizeBytes = Buffer.byteLength(compiled.systemPrompt, "utf8");
+		return [
+			{
+				id: "system-prompt:current",
+				category: this.category,
+				title: "System prompt · current session",
+				timestamp: parseTime(compiledAt),
+				sizeBytes,
+				...(sessionId ? { sessionId } : {}),
+				searchText: [modelId, targetId, compiled.systemPromptHash, ...compiled.fragmentManifest.map((f) => f.id)],
+				load: async () => ({
+					format: "markdown",
+					lines: [
+						`Compiled ${compiledAt} for ${modelId} (${targetId}).`,
+						`Last prepared for turn: ${turnId ?? "not sent yet"}.`,
+						`${sizeBytes.toLocaleString("en-US")} bytes · approximately ${compiled.tokenEstimate.toLocaleString("en-US")} tokens.`,
+						"",
+						`${compiled.fragmentManifest.length} fragments · press i for provenance and unformatted text.`,
+						"",
+						"---",
+						"",
+						...compiled.systemPrompt.split("\n"),
+						"",
+						"---",
+						"",
+						"## Source fragments",
+						"",
+						...compiled.fragmentManifest.map((f) => `- \`${f.id}\``),
+					],
+					details: {
+						format: "text",
+						lines: [
+							`Compiled: ${compiledAt}`,
+							`Model: ${modelId}`,
+							`Target: ${targetId}`,
+							`Session: ${sessionId ?? "not created yet"}`,
+							`Turn: ${turnId ?? "not sent yet"}`,
+							`SHA-256: ${compiled.systemPromptHash}`,
+							`Sections: ${compiled.sections.map((s) => s.id).join(", ")}`,
+							`Fragments: ${compiled.fragmentManifest.map((f) => f.id).join(", ")}`,
+							"",
+							"Exact compiled text (unformatted):",
+							"",
+							...compiled.systemPrompt.split("\n"),
+						],
+					},
+				}),
+			},
+		];
+	}
+}
+
 function promptManifestSearchText(record: SessionPromptCompileRecord): string[] {
 	return [
 		record.systemPromptHash,
@@ -1609,6 +1884,7 @@ export function createDefaultArtifactProviders(deps: ArtifactProviderDeps): Arti
 		new ProtectedArtifactProvider(deps),
 		new CompactionArtifactProvider(deps),
 		new PromptManifestArtifactProvider(deps),
+		new SystemPromptArtifactProvider(deps),
 		new SafetyAuditArtifactProvider(deps),
 	];
 }

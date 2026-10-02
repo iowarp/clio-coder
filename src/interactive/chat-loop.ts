@@ -137,7 +137,8 @@ import type { ApprovalRequestView } from "./permission-overlay.js";
 import type { runPrewarmRound } from "./prewarm.js";
 import { runOutOfTurnRound, runSideQuestion, type SideQuestionResult, sideQuestionUsage } from "./side-question.js";
 import type { AgentStatusEvent } from "./status/types.js";
-import { createTurnContext, type LiveContextUsage } from "./turn-context.js";
+import type { LiveContextUsage, LiveSystemPrompt } from "./turn-context.js";
+import { createTurnContext } from "./turn-context.js";
 import { createTurnMiddleware } from "./turn-middleware.js";
 import type { TurnOutcomeCollector } from "./turn-outcome-collector.js";
 import { createTurnOutcomeCollector } from "./turn-outcome-collector.js";
@@ -620,6 +621,7 @@ export interface ChatLoop {
 	 * messages), the autocompact reserve, and free space. Composes the live
 	 * estimate with the current turn's prompt segment manifest.
 	 */
+	liveSystemPrompt(): LiveSystemPrompt | null;
 	contextLedger(): ContextLedger;
 	/**
 	 * The published live budget for the next request: one immutable view with
@@ -2757,6 +2759,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 
 		contextUsage: () => context.contextUsage(),
 		currentTurnConstraints: () => state.currentTurnConstraints,
+		liveSystemPrompt: () => context.liveSystemPrompt(),
 		contextLedger: () => context.contextLedger(),
 		liveBudget: () => context.liveBudget(),
 		inspectLiveBudget: () => context.inspectLiveBudget(),

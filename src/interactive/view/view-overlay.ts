@@ -1,29 +1,14 @@
 import { sanitizeCallTargetText } from "../../domains/safety/call-target.js";
 import { redactSecretString } from "../../domains/safety/redaction.js";
-import {
-	type Component,
-	Input,
-	Markdown,
-	matchesKey,
-	type OverlayHandle,
-	type TUI,
-	truncateToWidth,
-	visibleWidth,
-	wrapTextWithAnsi,
-} from "../../engine/tui.js";
+import type { Component, OverlayHandle, TUI } from "../../engine/tui.js";
+import { Input, Markdown, matchesKey, truncateToWidth, visibleWidth, wrapTextWithAnsi } from "../../engine/tui.js";
 import { dockBodyRows } from "../dock.js";
 import { clockLocal } from "../format-time.js";
 import { localKey } from "../keyboard-owner.js";
 import { buildHint, fitRows, selectionMark, showClioOverlayFrame } from "../overlay-frame.js";
 import { clioTheme, GLYPH, markdownTheme, padAnsi } from "../theme/index.js";
-import {
-	type ArtifactProvider,
-	listViewArtifacts,
-	VIEW_ARTIFACT_CATEGORIES,
-	type ViewArtifact,
-	type ViewArtifactCategory,
-	type ViewArtifactFormat,
-} from "./artifacts.js";
+import type { ArtifactProvider, ViewArtifact, ViewArtifactCategory, ViewArtifactFormat } from "./artifacts.js";
+import { listViewArtifacts, VIEW_ARTIFACT_CATEGORIES } from "./artifacts.js";
 
 export const VIEW_OVERLAY_WIDTH = "100%";
 export const VIEW_OVERLAY_MAX_HEIGHT = "100%";
@@ -50,7 +35,7 @@ export type ViewNoticeLevel = "info" | "success" | "warning" | "error";
 export type ViewVerificationState =
 	| { status: "idle" }
 	| { status: "running" }
-	| { status: "ok"; detail: string }
+	| { status: "ok" | "warning"; detail: string }
 	| { status: "fail"; detail: string }
 	/** A seal this build does not verify because its version was retired: neither a pass nor a tampered-receipt failure. */
 	| { status: "retired"; detail: string };
@@ -81,6 +66,7 @@ interface LoadedContent {
 	status: "loading" | "loaded" | "error";
 	lines: string[];
 	format: ViewArtifactFormat;
+	details?: LoadedContent;
 	render?: (width: number) => string[];
 	error?: string;
 	renderWidth?: number;
@@ -127,6 +113,8 @@ function categoryLabel(category: ViewArtifactCategory): string {
 			return "Prompt manifests";
 		case "audit":
 			return "Safety audit rows";
+		case "system-prompt":
+			return "System prompt";
 	}
 }
 
@@ -138,6 +126,7 @@ const BARE_CATEGORY_FILTERS = new Set<ViewArtifactCategory>([
 	"protected-artifact",
 	"compaction",
 	"prompt-manifest",
+	"system-prompt",
 	"audit",
 ]);
 
@@ -330,10 +319,11 @@ export function nextContentScrollOffset(
 
 function verificationText(state: ViewVerificationState | undefined): string {
 	if (!state || state.status === "idle") return "";
-	if (state.status === "running") return `${GLYPH.running} verify running`;
-	if (state.status === "ok") return `${GLYPH.ok} verify ok ${state.detail}`;
-	if (state.status === "retired") return `${GLYPH.warn} verify retired ${state.detail}`;
-	return `${GLYPH.error} verify fail ${state.detail}`;
+	if (state.status === "running") return `${GLYPH.running} Verification: checking…`;
+	if (state.status === "warning") return `${GLYPH.warn} Verification: ${state.detail}`;
+	if (state.status === "ok") return `${GLYPH.ok} Verification: ${state.detail}`;
+	if (state.status === "retired") return `${GLYPH.warn} Verification: not checked. ${state.detail}`;
+	return `${GLYPH.error} Verification: failed. ${state.detail}`;
 }
 
 /** Put verification on wrapped rows so a canonical receipt verdict is never reduced to a prefix. */
@@ -372,7 +362,7 @@ function buildArtifactHeaderLines(
 			? "success"
 			: verification?.status === "fail"
 				? "error"
-				: verification?.status === "retired"
+				: verification?.status === "retired" || verification?.status === "warning"
 					? "warning"
 					: "info";
 	return [
@@ -393,7 +383,7 @@ function viewFooterHint(focus: ViewPaneFocus, canVerify: boolean, innerWidth?: n
 						"[↑↓] select · [Enter] detail · [Esc] close",
 						"[↑↓] select · [Enter] detail",
 					]
-				: ["[n/p] item · [↑↓] scroll · [Esc] back", "[n/p] item · [Esc] back"];
+				: ["[↑↓] scroll · [i] details · [Esc] back", "[i] details · [Esc] back"];
 		return tiers.find((tier) => visibleWidth(tier) <= budget) ?? (tiers.at(-1) as string);
 	}
 	if (focus === "list") {
@@ -541,6 +531,7 @@ export class ViewOverlayView implements Component {
 					status: "loaded",
 					lines: loaded.lines,
 					format: loaded.format,
+					...(loaded.details ? { details: { key, status: "loaded" as const, ...loaded.details } } : {}),
 					...(loaded.render === undefined ? {} : { render: loaded.render }),
 				};
 				this.queueContentRender(this.content, this.lastContentWidth);
@@ -567,7 +558,12 @@ export class ViewOverlayView implements Component {
 		const token = this.loadToken;
 		void Promise.resolve()
 			.then(() => {
-				if (token !== this.loadToken || this.content !== content || content.renderingWidth !== width) return;
+				if (
+					token !== this.loadToken ||
+					(this.content !== content && this.content?.details !== content) ||
+					content.renderingWidth !== width
+				)
+					return;
 				const rows =
 					content.render !== undefined
 						? content.render(Math.max(1, width))
@@ -579,7 +575,12 @@ export class ViewOverlayView implements Component {
 				this.options.requestRender?.();
 			})
 			.catch((err) => {
-				if (token !== this.loadToken || this.content !== content || content.renderingWidth !== width) return;
+				if (
+					token !== this.loadToken ||
+					(this.content !== content && this.content?.details !== content) ||
+					content.renderingWidth !== width
+				)
+					return;
 				const message = err instanceof Error ? err.message : String(err);
 				this.content = {
 					key: content.key,
@@ -596,7 +597,7 @@ export class ViewOverlayView implements Component {
 		if (this.showProvenance) {
 			const artifact = this.selectedArtifact();
 			if (!artifact) return [];
-			return [
+			const metadata = [
 				`Title: ${artifact.title}`,
 				`Category: ${artifact.category}`,
 				`ID: ${artifact.id}`,
@@ -606,6 +607,17 @@ export class ViewOverlayView implements Component {
 				...(artifact.correlationId ? [`Correlation: ${artifact.correlationId}`] : []),
 				...(artifact.description ? [`Details: ${artifact.description}`] : []),
 			].flatMap((line) => wrapTextWithAnsi(redactSecretString(sanitizeCallTargetText(line)), Math.max(1, width)));
+			const content = this.content?.details;
+			if (content) {
+				if (content.renderWidth !== width) this.queueContentRender(content, width);
+				else content.renderingWidth = width;
+				return [
+					...metadata,
+					"",
+					...(content.renderWidth === width ? (content.renderedLines ?? []) : ["Laying out details…"]),
+				];
+			}
+			return metadata;
 		}
 		const content = this.content;
 		if (!content) return [];
@@ -709,8 +721,8 @@ export class ViewOverlayView implements Component {
 		const narrowHeader = width < 50;
 		const headerLabel = this.showProvenance
 			? narrowHeader
-				? `Provenance${position} · i preview`
-				: `Provenance${position} · i preview · Esc list`
+				? `Details${position} · i preview`
+				: `Details${position} · i preview · Esc list`
 			: this.focus === "content"
 				? narrowHeader
 					? `Preview${position} · i info`
@@ -727,7 +739,8 @@ export class ViewOverlayView implements Component {
 		const bodyHeight = Math.max(0, height - header.length);
 		this.lastContentBodyHeight = Math.max(1, bodyHeight);
 		const body = this.renderedContentLines(width);
-		const layoutPending = !this.showProvenance && this.content?.status === "loaded" && this.content.renderWidth !== width;
+		const visibleContent = this.showProvenance ? this.content?.details : this.content;
+		const layoutPending = visibleContent?.status === "loaded" && visibleContent.renderWidth !== width;
 		const maxOffset = Math.max(0, body.length - Math.max(1, bodyHeight));
 		if (!layoutPending && this.contentScrollOffset > maxOffset) this.contentScrollOffset = maxOffset;
 		const visible = body
@@ -838,8 +851,8 @@ export class ViewOverlayView implements Component {
 
 	private handleContentInput(data: string): boolean {
 		const bodyHeight = this.lastContentBodyHeight;
-		if (!this.showProvenance && this.content?.status === "loaded" && this.content.renderWidth !== this.lastContentWidth)
-			return true;
+		const visibleContent = this.showProvenance ? this.content?.details : this.content;
+		if (visibleContent?.status === "loaded" && visibleContent.renderWidth !== this.lastContentWidth) return true;
 		const total = this.renderedContentLines(this.lastContentWidth).length;
 		let action: ViewScrollAction | null = null;
 		if (matchesKey(data, "up") || data === "k") action = "line-up";
@@ -868,7 +881,7 @@ export class ViewOverlayView implements Component {
 				this.verifications.set(
 					key,
 					result.ok
-						? { status: "ok", detail: result.detail }
+						? { status: result.compromised ? "warning" : "ok", detail: result.detail }
 						: { status: result.retired === true ? "retired" : "fail", detail: result.detail },
 				);
 			})
@@ -876,7 +889,15 @@ export class ViewOverlayView implements Component {
 				const detail = err instanceof Error ? err.message : String(err);
 				this.verifications.set(key, { status: "fail", detail });
 			})
-			.finally(() => this.options.requestRender?.());
+			.finally(() => {
+				const selected = this.selectedArtifact();
+				if (selected && artifactKey(selected) === key) {
+					this.loadToken += 1;
+					this.content = null;
+					this.contentScrollOffset = 0;
+				}
+				this.options.requestRender?.();
+			});
 	}
 
 	private openPathNotice(): void {

@@ -53,6 +53,7 @@ import { openViewOverlay } from "./view/view-overlay.js";
 
 export interface OverlayGeneralOpenersDeps {
 	readTranscript?: ArtifactProviderDeps["readTranscript"];
+	readSystemPrompt?: ArtifactProviderDeps["readSystemPrompt"];
 	tui: TUI;
 	transitions: OverlayTransitions;
 	observability: ObservabilityContract;
@@ -370,6 +371,7 @@ export function createOverlayGeneralOpeners(deps: OverlayGeneralOpenersDeps): Ov
 				sessionMeta: deps.getSessionMeta(),
 				readSessionEntries: deps.readSessionEntries,
 				readTranscript: deps.readTranscript,
+				readSystemPrompt: deps.readSystemPrompt,
 			}),
 			...(initialFilter ? { initialFilter } : {}),
 			notice: deps.notify,

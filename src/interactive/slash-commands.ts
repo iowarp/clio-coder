@@ -897,6 +897,7 @@ export interface SlashCommandContext {
 		receiptPath?: string;
 		sealedDigest?: string | null;
 		trustSummary?: string | null;
+		verificationSummary?: string | null;
 		compromised?: boolean;
 		checks?: ReadonlyArray<{ name: string; ok: boolean; evidence: string }>;
 	};
@@ -913,20 +914,12 @@ export interface SlashCommandContext {
 
 type SlashReceiptVerification = ReturnType<SlashCommandContext["verifyReceipt"]>;
 
-/** Compact multiline receipt verification for the composer notice surface. */
+/** The full receipt and individual checks remain in the viewer's details. */
 function formatReceiptVerificationBlock(runId: string, result: SlashReceiptVerification): string {
-	const status = result.ok ? (result.compromised ? "compromised" : "ok") : result.retired ? "retired" : "fail";
-	const lines = [
-		`verify ${status} ${runId}`,
-		`receipt  ${result.receiptPath ?? "unavailable"}`,
-		`digest   ${result.sealedDigest ?? "unavailable"}`,
-		`evidence ${result.trustSummary ?? (!result.ok ? result.reason : "trust status unavailable")}`,
-	];
-	if (result.checks && result.checks.length > 0) {
-		lines.push("checks");
-		for (const check of result.checks) lines.push(`  ${check.ok ? "✓" : "✗"} ${check.name}: ${check.evidence}`);
-	}
-	return lines.join("\n");
+	const verdict = result.ok
+		? (result.verificationSummary ?? result.trustSummary ?? "receipt seal verified; result validation unknown")
+		: `${result.retired ? "not checked" : "failed"}. ${result.reason}`;
+	return `Verification for ${runId}: ${verdict}\n/view receipt:${runId} · press i for full details and checks.`;
 }
 
 /** The verb a command performs, in the order /help lists the groups. */
