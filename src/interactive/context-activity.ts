@@ -17,6 +17,7 @@ export interface ContextActivitySnapshot {
 	message: string;
 	startedAtMs: number;
 	phaseStartedAtMs?: number;
+	timing?: ContextActivityPayload["timing"];
 	updatedAtMs: number;
 	completedAtMs: number | null;
 	current: number | null;
@@ -120,7 +121,12 @@ export function formatContextActivityRailLines(
 			theme.fg("meterFree", GLYPH.barEmpty.repeat(Math.max(0, remaining - (done ? 0 : 1)))),
 	);
 	const counts = activity.current !== null && activity.total !== null ? ` · ${activity.current}/${activity.total}` : "";
-	const detail = activity.detail ? ` · ${plain(activity.detail)}` : "";
+	const timing = activity.timing;
+	const detail = timing
+		? ` · ${Math.max(0, Math.floor(((activity.completedAtMs ?? now) - timing.startedAtMs) / 1000))}s / ${Math.round(timing.timeoutMs / 1000)}s limit · run ${plain(timing.runId)}`
+		: activity.detail
+			? ` · ${plain(activity.detail)}`
+			: "";
 	const message = theme.fg(failed ? "error" : "annotation", `${plain(activity.message)}${counts}${detail}`);
 	if (failed) rows.push(...wrapTextWithAnsi(message, Math.max(1, width)).map((line) => padAnsi(line, width)));
 	else rows.push(padAnsi(message, width, GLYPH.ellipsis));
@@ -178,6 +184,12 @@ export function createContextActivityStore(bus: SafeEventBus): {
 			current: typeof raw.current === "number" && Number.isFinite(raw.current) ? raw.current : null,
 			total: typeof raw.total === "number" && Number.isFinite(raw.total) ? raw.total : null,
 			detail: typeof raw.detail === "string" && raw.detail.length > 0 ? raw.detail : null,
+			...(raw.timing &&
+			Number.isFinite(raw.timing.startedAtMs) &&
+			Number.isFinite(raw.timing.timeoutMs) &&
+			typeof raw.timing.runId === "string"
+				? { timing: { ...raw.timing } }
+				: {}),
 			...(stages?.length ? { stages } : !startsNewRun && current?.stages ? { stages: current.stages } : {}),
 		};
 	});

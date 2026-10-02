@@ -326,16 +326,17 @@ async function attemptBootstrapDispatch(
 	const policy = BOOTSTRAP_DEPTH_POLICY[input.depth ?? "standard"];
 	const remainingMs = Math.max(1, policy.timeoutMs - (performance.now() - startedAtClock));
 	const deadline = armInternalDispatchDeadline(dispatch, handle.runId, "context bootstrap", remainingMs);
-	const heartbeat = setInterval(
-		() =>
-			input.progress?.({
-				phase: "generate",
-				status: "running",
-				message: "bootstrap model is working",
-				detail: `run ${handle.runId}; ${Math.round((performance.now() - startedAtClock) / 1000)}s elapsed; ${policy.timeoutMs / 1000}s ceiling`,
-			}),
-		10_000,
-	);
+	const startedAtMs = Date.now() - (performance.now() - startedAtClock);
+	const reportWorking = (): void =>
+		input.progress?.({
+			phase: "generate",
+			status: "running",
+			message: "bootstrap model is working",
+			detail: `run ${handle.runId}; ${Math.round((performance.now() - startedAtClock) / 1000)}s elapsed; ${policy.timeoutMs / 1000}s ceiling`,
+			timing: { runId: handle.runId, startedAtMs, timeoutMs: policy.timeoutMs },
+		});
+	reportWorking();
+	const heartbeat = setInterval(reportWorking, 10_000);
 	heartbeat.unref();
 	let text = "";
 	let receipt: RunReceipt | undefined;

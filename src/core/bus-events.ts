@@ -214,6 +214,8 @@ export type ContextActivityStatus = "started" | "running" | "completed" | "faile
 
 /** Structured progress for context operations, rendered above the composer. */
 export interface ContextActivityPayload {
+	/** Render-time elapsed and deadline facts for a dispatched context helper. */
+	timing?: { runId: string; startedAtMs: number; timeoutMs: number };
 	kind: ContextActivityKind;
 	phase: ContextActivityPhase;
 	status: ContextActivityStatus;
