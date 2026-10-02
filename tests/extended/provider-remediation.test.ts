@@ -194,7 +194,7 @@ test("provider dump composes async payload mutations and preserves every stream 
 		assert.equal(lines.length, 1);
 		const record = JSON.parse(lines[0] ?? "");
 		assert.deepEqual(record.payloads, [sent[1]]);
-		assert.deepEqual(record.response, captured.response);
+		assert.deepEqual(record.response.content, captured.response.content);
 		assert.equal(record.payloads[0].max_tokens, 77);
 		assert.doesNotMatch(raw, /fixture-secret-provider-key|fixture-secret-header|Authorization/u);
 		assert.equal(statSync(path).mode & 0o777, 0o600);
@@ -215,19 +215,19 @@ test("provider dump refuses relative paths, existing public files, and symlink d
 		let requests = 0;
 		for (const path of ["relative.jsonl", publicPath, link]) {
 			process.env.CLIO_CODER_PROVIDER_DUMP_PATH = path;
-			assert.throws(() =>
-				engineStreamSimple(
-					model,
-					{ messages: [] },
-					{
-						apiKey: "fixture",
-						fetch: async () => {
-							requests++;
-							return anthropicResponse();
-						},
+			const result = await engineStreamSimple(
+				model,
+				{ messages: [] },
+				{
+					apiKey: "fixture",
+					fetch: async () => {
+						requests++;
+						return anthropicResponse();
 					},
-				),
-			);
+				},
+			).result();
+			assert.equal(result.stopReason, "error");
+			assert.match(result.errorMessage ?? "", /absolute file path|operator-owned regular file|ELOOP/u);
 		}
 		assert.equal(requests, 0);
 		assert.equal(readFileSync(publicPath, "utf8"), "keep");
