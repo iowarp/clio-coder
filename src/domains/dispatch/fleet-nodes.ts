@@ -14,6 +14,7 @@ import {
 	recordFleetPreflight,
 	runFleetNodePreflight,
 } from "./fleet-preflight.js";
+import { verifyFleetProject } from "./fleet-project-verification.js";
 
 export type FleetNodeReadiness = "not checked" | "ready for this project" | "needs attention" | "offline";
 
@@ -118,13 +119,24 @@ export function fleetPreflightTargets(): FleetPreflightTarget[] {
 export async function testFleetNode(
 	id: string,
 	projectRoot = process.cwd(),
-	options: FleetPreflightRunOptions & { record?: boolean } = {},
+	options: FleetPreflightRunOptions & { record?: boolean; verifyProject?: boolean; sharedProbe?: boolean } = {},
 ): Promise<FleetPreflightRecord> {
 	const node = fleetNode(id);
 	const result = await runFleetNodePreflight(node, resolve(projectRoot), {
 		...options,
 		targets: options.targets ?? fleetPreflightTargets(),
 	});
+	if (result.ok && options.verifyProject !== false) {
+		result.project = await verifyFleetProject(
+			node,
+			resolve(projectRoot),
+			options.record === true || options.sharedProbe === true,
+		);
+		if (result.project.kind === "unverified") {
+			result.ok = false;
+			result.detail = result.project.reason;
+		}
+	}
 	if (options.record) recordFleetPreflight([result]);
 	return result;
 }

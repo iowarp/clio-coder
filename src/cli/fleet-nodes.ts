@@ -13,7 +13,7 @@ const HELP = `clio-coder fleet nodes <command>
   test <id> [--record] [--json]   probe without remote writes; --record updates local eligibility
 
 A registered node needs a passing recorded check before dispatch.
-Exact Clio versions and project paths must match. Labels are operator declarations.
+Exact Clio versions and project paths must match. Independent checkouts must share clean Git history and commit; mutations need shared storage. Labels are operator declarations.
 `;
 
 function parse(
@@ -167,6 +167,10 @@ export async function runFleetNodes(args: ReadonlyArray<string>): Promise<number
 				process.stdout.write(
 					`${record.nodeId}: ${record.ok ? "checks passed" : "needs attention"}${parsed.flags.has("--record") ? " (recorded)" : " (observation only)"}\n`,
 				);
+				if (record.project)
+					process.stdout.write(
+						`  project=${record.project.kind}${record.project.head ? ` commit=${record.project.head}` : ""}\n`,
+					);
 				if (record.detail) process.stdout.write(`  ${record.detail}\n`);
 				for (const fact of record.targets)
 					process.stdout.write(

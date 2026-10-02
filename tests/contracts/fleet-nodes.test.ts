@@ -48,12 +48,12 @@ describe("fleet node management", () => {
 			`#!/bin/sh\nprintf '%s\\n' 'clio-coder-preflight/1' 'cwd=ok' 'clioCoder=${readClioVersion()}' 'state=ok'\n`,
 		);
 		chmodSync(ssh, 0o755);
-		await testFleetNode("builder", process.cwd(), { sshBinary: ssh, targets: [] });
+		await testFleetNode("builder", process.cwd(), { sshBinary: ssh, targets: [], verifyProject: false });
 		strictEqual(inspectFleetNodes()[0]?.readiness, "not checked");
-		await testFleetNode("builder", process.cwd(), { sshBinary: ssh, targets: [], record: true });
+		await testFleetNode("builder", process.cwd(), { sshBinary: ssh, targets: [], verifyProject: false, record: true });
 		strictEqual(inspectFleetNodes()[0]?.readiness, "ready for this project");
 		writeFileSync(ssh, "#!/bin/sh\nexit 255\n");
-		await testFleetNode("builder", process.cwd(), { sshBinary: ssh, targets: [], record: true });
+		await testFleetNode("builder", process.cwd(), { sshBinary: ssh, targets: [], verifyProject: false, record: true });
 		strictEqual(inspectFleetNodes()[0]?.readiness, "needs attention");
 	});
 });

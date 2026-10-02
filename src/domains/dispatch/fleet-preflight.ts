@@ -4,7 +4,7 @@
  * A remote node is dispatch-eligible for a project only after one preflight
  * pass proved, over the node's real SSH channel: reachability, a
  * version-matched clio on the remote invocation path, path parity for the
- * project root (shared-filesystem assumption), and a writable remote state
+ * project root (shared storage or a matching clean checkout), and a writable remote state
  * dir. Results persist under the state dir so `clio-coder doctor` (a separate
  * process) can grant eligibility that dispatch admission later checks; a
  * record is invalidated by a different host, project root, or local clio
@@ -20,7 +20,7 @@ import { safeResourceWrite } from "../../core/safe-resource-write.js";
 import { shellQuote } from "../../core/shell-quote.js";
 import { withStateFileLockSync } from "../../core/state-file-lock.js";
 import { resolveClioDirs } from "../../core/xdg.js";
-
+import type { FleetProjectVerification } from "./fleet-project-verification.js";
 import {
 	evaluateRouteFacts,
 	type FactState,
@@ -55,6 +55,7 @@ export interface FleetPreflightTarget {
 export interface FleetPreflightRecord {
 	nodeId: string;
 	connectionHash?: string;
+	project?: FleetProjectVerification;
 	host: string;
 	projectRoot: string;
 	ok: boolean;
@@ -415,7 +416,9 @@ export async function runFleetNodePreflight(
 	}
 	const failures: string[] = [];
 	if (!checks.pathParity)
-		failures.push(`project root ${projectRoot} missing on node (disjoint filesystems are unsupported)`);
+		failures.push(
+			`project root ${projectRoot} missing on node (provide shared storage or a matching clean checkout at this path)`,
+		);
 	if (clioValue === "unverified-entry")
 		failures.push("custom worker entry needs clioCoderVersionCommand printing its exact Clio version");
 	else if (!checks.clioPresent)

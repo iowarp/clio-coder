@@ -658,7 +658,9 @@ export async function runDoctorFleetChecks(
 	if (nodes.length === 0) return [];
 	const { recordFleetPreflight, fleetPreflightVerdict } = await import("../dispatch/fleet-preflight.js");
 	const { testFleetNode } = await import("../dispatch/fleet-nodes.js");
-	const records = await Promise.all(nodes.map((node) => testFleetNode(node.id, projectRoot)));
+	const records = await Promise.all(
+		nodes.map((node) => testFleetNode(node.id, projectRoot, { sharedProbe: options.fix === true })),
+	);
 	// Placement admits a node only from a stored record. Plain doctor observes;
 	// --fix is the run that may write state, so it is the one that records.
 	let recorded = options.fix === true;
@@ -683,7 +685,7 @@ export async function runDoctorFleetChecks(
 			level: record.ok ? ("ok" as const) : ("warn" as const),
 			name: `fleet node ${record.nodeId}`,
 			detail: record.ok
-				? `checks passed; ${eligible ? "eligible from recorded preflight" : `not admitted, run fleet nodes test ${record.nodeId} --record`}${recorded ? " (recorded)" : ""}: ${record.host}, clio ${record.remoteVersion}, project path exists; ${targets}`
+				? `checks passed; ${eligible ? "eligible from recorded preflight" : `not admitted, run fleet nodes test ${record.nodeId} --record`}${recorded ? " (recorded)" : ""}: ${record.host}, clio ${record.remoteVersion}, project=${record.project?.kind ?? "not verified"}; ${targets}`
 				: `needs attention: ${record.detail ?? "preflight failed"}`,
 		};
 	});

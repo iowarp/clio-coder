@@ -260,6 +260,7 @@ import {
 	type RetryDecision,
 } from "./failure-classification.js";
 import { routeFactVerdict } from "./fleet-preflight.js";
+import { assertFleetProjectAuthority, verifyFleetProject } from "./fleet-project-verification.js";
 import { competeStanceLiner, isBoundedGateRolePrompt } from "./gate-role-prompts.js";
 import { evaluateMainGrant } from "./grant-authority.js";
 import { createGrantBroker, type GrantRecord, type GrantState } from "./grant-broker.js";
@@ -6102,6 +6103,12 @@ export function createDispatchBundle(
 		await assertBudgetAdmitsRoute(req, lifecycle.target.effectivePricing, settings, preparation?.signal);
 
 		const placement = resolveNode(req) ?? null;
+		if (placement?.node.kind === "ssh") {
+			const node = settings?.fleet.nodes.find((item) => item.id === placement.node.id);
+			if (!node) throw new Error("dispatch: node configuration disappeared before project verification");
+			const project = await verifyFleetProject(node, req.cwd ?? process.cwd(), true);
+			assertFleetProjectAuthority(project, lifecycle.readOnly);
+		}
 		assertPlannedNodeIdentity(req, placement?.node ?? { id: "local", kind: "local" });
 		const effectiveRoute = {
 			agentId: req.agentId,
