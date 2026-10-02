@@ -239,7 +239,7 @@ function renderBody(entry: AgentLedgerEntry, state: CorroborationState | undefin
 	const suffix = marks.length > 0 ? ` [${marks.join(", ")}]` : "";
 	const body = entry.body;
 	if (body.kind === "message")
-		return `${entry.id} message to ${oneLine(body.to)}${body.replyTo ? ` reply to ${body.replyTo}` : ""}: ${oneLine(body.text)}`;
+		return `${entry.id} ${entry.source === "receipt" ? "final report" : "message"} to ${oneLine(body.to)}${body.replyTo ? ` reply to ${body.replyTo}` : ""}: ${oneLine(body.text)}`;
 	if (body.kind === "claim") {
 		const conflicts =
 			entry.conflictsWith !== undefined && entry.conflictsWith.length > 0

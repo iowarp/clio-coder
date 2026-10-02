@@ -5,11 +5,18 @@ import {
 	projectReceiptFindings,
 	renderAgentLedger,
 } from "../../src/domains/dispatch/agent-ledger.js";
-import { openAgentLedger, renderAgentLedgerBoard } from "../../src/domains/dispatch/agent-ledger-store.js";
+import {
+	appendAgentLedgerReport,
+	closeAgentLedger,
+	openAgentLedger,
+	readAgentLedger,
+	renderAgentLedgerBoard,
+} from "../../src/domains/dispatch/agent-ledger-store.js";
 import { buildDynamicPromptMessages } from "../../src/domains/dispatch/extension.js";
 import { verifyReceiptIntegrity, withReceiptIntegrity } from "../../src/domains/dispatch/receipt-integrity.js";
 import { openLedger } from "../../src/domains/dispatch/state.js";
 import type { RunReceipt } from "../../src/domains/dispatch/types.js";
+import { parseAgentLedgerEntry } from "../../src/worker/protocol.js";
 import { fixtureEnvelope, fixtureReceiptDraft } from "../harness/receipt.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
 
@@ -104,6 +111,33 @@ test("projection survives run-row resume and renders an empty board and worker s
 		assert.match(text, /Your assignment and scope are already on the board/u);
 		assert.match(text, /Assignments:/u);
 		assert.doesNotMatch(text, /post your own path claim/u);
+		const restrictions = {
+			version: 1 as const,
+			restrictions: [{ ruleId: "private", policyHash: "hash", sourceRef: "runtime:claude-sdk", recipients: [] }],
+		};
+		const attribution = {
+			runId: "sdk-run",
+			assignmentId: "assignment",
+			agentId: "reviewer",
+			nodeId: "local",
+			flowRestrictions: restrictions,
+		};
+		const report = {
+			...p.receipt,
+			output: { state: "final" as const, text: `Observed ${"界".repeat(1000)}`, bytes: 3009, truncated: false },
+		};
+		const posted = await appendAgentLedgerReport("board", attribution, report);
+		assert.equal(posted.ok, true);
+		if (!posted.ok) return;
+		assert.equal(posted.entry.source, "receipt");
+		assert.deepEqual(parseAgentLedgerEntry(posted.entry)?.flowRestrictions, restrictions);
+		assert.equal(posted.entry.body.kind, "message");
+		if (posted.entry.body.kind !== "message") return;
+		assert.ok(Buffer.byteLength(posted.entry.body.text) <= 1000);
+		assert.match(renderAgentLedgerBoard("board") ?? "", /final report[\s\S]*fleet view sdk-run[\s\S]*preview truncated/u);
+		await closeAgentLedger("board");
+		assert.deepEqual(await appendAgentLedgerReport("board", attribution, report), posted);
+		assert.equal(readAgentLedger("board")?.entries.length, 1);
 	} finally {
 		env.restore();
 	}

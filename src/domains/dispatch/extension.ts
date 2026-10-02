@@ -193,6 +193,7 @@ import { publishAgentLedgerEntry, subscribeAgentLedger } from "./agent-ledger-hu
 import {
 	type AgentLedgerAttribution,
 	appendAgentLedgerEntry,
+	appendAgentLedgerReport,
 	MAX_AGENT_LEDGER_POSTS_PER_RUN,
 	readAgentLedger,
 } from "./agent-ledger-store.js";
@@ -6466,7 +6467,22 @@ export function createDispatchBundle(
 		// What the run's context carries: the inherited set, grown by the worker's
 		// own restricted reads as it reports them. Only a mediated runtime's
 		// report is believed; the inherited part is the host's own fact.
-		let trustedFlow: FlowRestrictionSet | null = spec.flowRestrictions ?? null;
+		let trustedFlow: FlowRestrictionSet | null = mergeFlowRestrictions(
+			spec.flowRestrictions,
+			// External runtimes cannot report each restricted read. Their final
+			// output conservatively carries every source rule admitted for them.
+			lifecycle.runtimeKind === "http" || spec.flowPolicy === undefined
+				? null
+				: {
+						version: 1,
+						restrictions: spec.flowPolicy.rules.map((rule) => ({
+							ruleId: rule.id,
+							policyHash: rule.policyHash,
+							sourceRef: `runtime:${lifecycle.target.runtime.id}`,
+							recipients: rule.recipients,
+						})),
+					},
+		);
 		let reportedUntrustedOutcome = false;
 		const acceptsOutcomeCodeEvents =
 			lifecycle.runtimeKind === "http" ||
@@ -6891,29 +6907,32 @@ export function createDispatchBundle(
 				agentLedgerAttribution = attribution;
 				// The hub replays the whole board on subscription, so this mirror is
 				// complete whatever this run's spawn timing was.
-				unsubscribeAgentLedger = subscribeAgentLedger(agentLedgerId, envelope.id, (entries) =>
-					sendToWorker === undefined
-						? false
-						: sendToWorker({
-								type: "ledger_delta",
-								entries: entries.filter((entry) => {
-									if ((entry.flowRestrictions?.restrictions.length ?? 0) === 0) return true;
-									if (spec.flowPolicy === undefined || lifecycle.runtimeKind !== "http") return false;
-									return (
-										flowTransferRefusal(
-											compileWorkerFlowPolicy(spec.flowPolicy),
-											entry.flowRestrictions ?? null,
-											resolveModelDestination({
-												targetId: lifecycle.target.target.id,
-												runtimeId: lifecycle.target.runtime.id,
-												url: lifecycle.target.target.url,
-												model: lifecycle.target.wireModelId,
+				unsubscribeAgentLedger =
+					lifecycle.runtimeKind !== "http"
+						? null
+						: subscribeAgentLedger(agentLedgerId, envelope.id, (entries) =>
+								sendToWorker === undefined
+									? false
+									: sendToWorker({
+											type: "ledger_delta",
+											entries: entries.filter((entry) => {
+												if ((entry.flowRestrictions?.restrictions.length ?? 0) === 0) return true;
+												if (spec.flowPolicy === undefined || lifecycle.runtimeKind !== "http") return false;
+												return (
+													flowTransferRefusal(
+														compileWorkerFlowPolicy(spec.flowPolicy),
+														entry.flowRestrictions ?? null,
+														resolveModelDestination({
+															targetId: lifecycle.target.target.id,
+															runtimeId: lifecycle.target.runtime.id,
+															url: lifecycle.target.target.url,
+															model: lifecycle.target.wireModelId,
+														}),
+													) === null
+												);
 											}),
-										) === null
-									);
-								}),
-							}),
-				);
+										}),
+							);
 				for (const post of heldLedgerPosts.splice(0)) appendLedgerPost(attribution, post.body, post.flowRestrictions);
 			}
 			identity = detectRunIdentity();
@@ -7868,6 +7887,14 @@ export function createDispatchBundle(
 				}
 				ledgerRef.update(envelope.id, ledgerPatch);
 				const receipt = ledgerRef.recordReceipt(envelope.id, sealRouteDecision(receiptDraft, routeObservation.decision));
+				if (lifecycle.runtimeKind !== "http" && agentLedgerId !== null && agentLedgerAttribution !== null) {
+					void appendAgentLedgerReport(agentLedgerId, agentLedgerAttribution, receipt)
+						.then((posted) => {
+							if (posted.ok) publishAgentLedgerEntry(agentLedgerId, posted.entry);
+							else reportDispatchDiagnostic(`publish final report for ${envelope.id}`, new Error(posted.reason));
+						})
+						.catch((error) => reportDispatchDiagnostic(`publish final report for ${envelope.id}`, error));
+				}
 				// Two independent ways a run's write record can fail to be a closed
 				// list, and either one files it as `null` rather than as an empty
 				// one. The difference decides whether the write boundary may clear a

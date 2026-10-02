@@ -24,10 +24,13 @@ import { isFlowRestrictionSet } from "../../core/flow-restrictions.js";
 import { safeResourceWrite } from "../../core/safe-resource-write.js";
 import { withStateFileLock } from "../../core/state-file-lock.js";
 import { clioStateDir } from "../../core/xdg.js";
+import { truncateUtf8 } from "../../tools/truncate-utf8.js";
 import type { AgentLedgerEntry } from "../../worker/protocol.js";
 import { parseAgentLedgerBody, parseAgentLedgerEntry } from "../../worker/protocol.js";
+import { mergeFlowRestrictions } from "../safety/information-flow.js";
 import type { RenderAgentLedgerOptions } from "./agent-ledger.js";
 import { AGENT_LEDGER_PROMPT_MAX_CHARS, claimConflicts, renderAgentLedger } from "./agent-ledger.js";
+import type { RunReceipt } from "./types.js";
 
 /** Bounded ring: newest first, oldest dropped past this count. */
 const MAX_AGENT_LEDGER_RECORDS = 50;
@@ -65,6 +68,7 @@ export interface AgentLedgerAttribution {
 	agentId: string;
 	nodeId: string;
 	flowRestrictions?: FlowRestrictionSet;
+	source?: "receipt";
 }
 
 export type AgentLedgerAppendRefusal = "invalid-body" | "per-run-cap" | "ledger-closed" | "ledger-full";
@@ -220,6 +224,14 @@ export async function appendAgentLedgerEntry(
 			return;
 		}
 
+		if (attribution.source === "receipt") {
+			const existing = record.entries.find((entry) => entry.source === "receipt" && entry.runId === attribution.runId);
+			if (existing) {
+				result = { ok: true, entry: existing };
+				return;
+			}
+		}
+
 		const refuse = (refusal: AgentLedgerAppendRefusal, reason: string): void => {
 			const current = contributionFor(record, attribution.runId);
 			record.perRun[attribution.runId] = { posted: current.posted, refused: current.refused + 1 };
@@ -279,6 +291,7 @@ export async function appendAgentLedgerEntry(
 			agentId: attribution.agentId,
 			nodeId: attribution.nodeId,
 			body: parsed.body,
+			...(attribution.source ? { source: attribution.source } : {}),
 			...(attribution.flowRestrictions ? { flowRestrictions: structuredClone(attribution.flowRestrictions) } : {}),
 			...(conflicts.length > 0 ? { conflictsWith: [...conflicts] } : {}),
 		};
@@ -293,6 +306,33 @@ export async function appendAgentLedgerEntry(
 		return { ok: false, refusal: "ledger-closed", reason: `agent ledger ${id} could not be reached` };
 	}
 	return result;
+}
+
+/** A bounded final report shares the ordinary board quota and keeps the full receipt as its authority. */
+export function appendAgentLedgerReport(
+	id: string,
+	attribution: AgentLedgerAttribution,
+	receipt: Pick<RunReceipt, "outcome" | "outcomeDetail" | "output" | "safety">,
+): Promise<AgentLedgerAppendResult> {
+	const output = receipt.output;
+	const text =
+		output?.state === "final" && output.text.trim().length > 0
+			? output.text
+			: (receipt.outcomeDetail ?? "No final output was captured.");
+	const heading = `${receipt.outcome}${output?.truncated || output?.state === "partial" ? " (incomplete output)" : ""}; full report: fleet view ${attribution.runId}. `;
+	const carried = mergeFlowRestrictions(attribution.flowRestrictions, receipt.safety?.flowRestrictions);
+	const full = heading + text;
+	const marker = "… [preview truncated]";
+	const preview = Buffer.byteLength(full) <= 1000 ? full : truncateUtf8(full, 1000 - Buffer.byteLength(marker), marker);
+	return appendAgentLedgerEntry(
+		id,
+		{
+			...attribution,
+			source: "receipt",
+			...(carried ? { flowRestrictions: carried } : {}),
+		},
+		{ kind: "message", to: "all", text: preview },
+	);
 }
 
 /** Close one ledger. Idempotent: an already-closed ledger keeps its close time. */

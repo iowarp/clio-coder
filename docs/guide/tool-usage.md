@@ -789,6 +789,10 @@ selects an owned run with `runId`, or omits it when exactly one board is active.
 Workers read only their assigned board. In 0.6.0, native workers and the main
 agent participate live. Claude SDK, Claude Code, Codex, OpenCode and Pi workers
 receive the starting board read-only; they do not have a live ledger tool.
+When an SDK or CLI run settles, the host posts one bounded final-report preview
+with its outcome and a `fleet view <runId>` reference to the full receipt.
+This uses the same board capacity; a repeated settlement does not duplicate it.
+There is no loopback MCP bridge in 0.6.0.
 
 Arguments:
 

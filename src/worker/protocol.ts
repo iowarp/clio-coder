@@ -272,6 +272,8 @@ export interface AgentLedgerEntry {
 	nodeId: string;
 	body: AgentLedgerBody;
 	flowRestrictions?: FlowRestrictionSet;
+	/** Host-stamped final receipt projection; never supplied by a worker post. */
+	source?: "receipt";
 	/** Entry ids of live peer claims this claim's scope overlaps. Orchestrator-computed. */
 	conflictsWith?: ReadonlyArray<string>;
 }
@@ -291,6 +293,7 @@ export function parseAgentLedgerEntry(value: unknown): AgentLedgerEntry | null {
 	for (const key of ["at", "runId", "assignmentId", "agentId", "nodeId"] as const) {
 		if (typeof record[key] !== "string" || (record[key] as string).length === 0) return null;
 	}
+	if (record.source !== undefined && record.source !== "receipt") return null;
 	const body = parseAgentLedgerBody(record.body);
 	if (!body.ok) return null;
 	const conflicts = record.conflictsWith;
@@ -304,6 +307,7 @@ export function parseAgentLedgerEntry(value: unknown): AgentLedgerEntry | null {
 		agentId: record.agentId as string,
 		nodeId: record.nodeId as string,
 		body: body.body,
+		...(record.source === "receipt" ? { source: "receipt" as const } : {}),
 		...(record.flowRestrictions === undefined
 			? {}
 			: { flowRestrictions: structuredClone(record.flowRestrictions as FlowRestrictionSet) }),

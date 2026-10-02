@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, test } from "node:test";
 import { setTimeout as sleep } from "node:timers/promises";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
+import { closeAgentLedger, openAgentLedger, readAgentLedger } from "../../src/domains/dispatch/agent-ledger-store.js";
 import codexCliRuntime from "../../src/domains/providers/runtimes/codex/codex-cli.js";
 import { piCliRuntime } from "../../src/domains/providers/runtimes/external-cli-peers.js";
 import { verifyReceiptFileReport } from "../../src/interactive/view/artifacts.js";
@@ -69,10 +70,30 @@ test("managed Codex CLI dispatch seals success and cancellation receipts", { tim
 			agentTools: ["read", "write"],
 			useRuntimeDefaultAgentBudget: true,
 		}),
+		{
+			getFlowPolicy: () => ({
+				version: 1,
+				policyHash: "ledger-flow",
+				trusted: true,
+				refusal: null,
+				rules: [
+					{
+						id: "private",
+						policyHash: "ledger-flow",
+						paths: { root, sources: ["private"] },
+						tools: [],
+						recipients: [`target:${JSON.stringify(["codex-test", "codex-cli", null])}`],
+						dangling: [],
+					},
+				],
+			}),
+		},
 	);
 	await bundle.extension.start();
 	try {
+		await openAgentLedger("external-board");
 		const request = {
+			ledger: { id: "external-board", sequence: 0 },
 			agentId: "coder",
 			target: "codex-test",
 			task: "Reply PONG",
@@ -119,6 +140,19 @@ test("managed Codex CLI dispatch seals success and cancellation receipts", { tim
 		equal(canceled.externalTelemetry?.exitReason, "aborted");
 		ok(verifyReceiptFileReport(stateDir, hanging.runId).ok);
 		deepStrictEqual(bundle.contract.snapshot().running, []);
+		await closeAgentLedger("external-board");
+		const reports = readAgentLedger("external-board")?.entries ?? [];
+		deepStrictEqual(
+			reports.map((entry) => [entry.runId, entry.source]),
+			[
+				[success.runId, "receipt"],
+				[hanging.runId, "receipt"],
+			],
+		);
+		match(JSON.stringify(reports[0]?.body), /succeeded[\s\S]*PONG/);
+		equal(receipt.safety?.flowRestrictions?.restrictions[0]?.ruleId, "private");
+		deepStrictEqual(reports[0]?.flowRestrictions, receipt.safety?.flowRestrictions);
+		match(JSON.stringify(reports[1]?.body), /canceled/);
 	} finally {
 		await bundle.extension.stop?.();
 	}
