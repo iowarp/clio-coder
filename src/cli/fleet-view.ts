@@ -34,6 +34,7 @@
 
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { readSettings } from "../core/config.js";
 import { clioStateDir, resetXdgCache } from "../core/xdg.js";
 import type { ExecutionStepResult } from "../domains/dispatch/execution-scheduler.js";
 import {
@@ -110,6 +111,7 @@ export interface RunViewModel {
 	/** True when the writer dropped display lines or the reader skipped a head. */
 	transcriptTruncated: boolean;
 	journalPresent: boolean;
+	journalUnavailableReason?: string;
 	journalPath: string;
 	/** Authenticated receipt status line, or the reason there is not one. */
 	evidence: string;
@@ -222,6 +224,17 @@ function resolveRunId(
 	return { candidates };
 }
 
+function journalUnavailableReason(): string {
+	try {
+		if (!readSettings().fleet.history.journal) {
+			return "event journaling is currently disabled (fleet.history.journal=false); enable it to record future runs.";
+		}
+	} catch {
+		// A settings read failure cannot establish why a historical file is missing.
+	}
+	return "the journal file is missing; this run's recording settings and any later removal are not recorded.";
+}
+
 export function loadRunViewModel(runId: string, options: LoadRunViewOptions = {}): RunViewModel | null {
 	const run = openLedger().get(runId);
 	if (run === null || (options.scope !== undefined && !options.scope.seesRun(run))) return null;
@@ -252,6 +265,7 @@ export function loadRunViewModel(runId: string, options: LoadRunViewOptions = {}
 		transcript,
 		transcriptTruncated: journal.truncated,
 		journalPresent: journal.present,
+		...(!journal.present ? { journalUnavailableReason: journalUnavailableReason() } : {}),
 		journalPath: runEventJournalPath(runId, options.journalRoot === undefined ? undefined : options.journalRoot),
 		evidence: evidence.text,
 		receiptPath: evidence.receiptPath,
@@ -310,14 +324,9 @@ function renderRunView(model: RunViewModel, width: number = DEFAULT_WIDTH): stri
 	}
 	lines.push(rule);
 	if (!model.journalPresent) {
-		lines.push("no event journal for this run.");
-		lines.push(
-			...wrapViewerValue(
-				"expected ",
-				`${model.journalPath} (fleet.history.journal may have been off when it ran)`,
-				columns,
-			),
-		);
+		lines.push("no event journal was recorded or retained for this run.");
+		lines.push(...wrapViewerValue("", model.journalUnavailableReason ?? "the journal file is missing.", columns));
+		lines.push(...wrapViewerValue("expected ", model.journalPath, columns));
 	} else if (model.transcript.length === 0) {
 		lines.push("journal is empty; no events recorded yet.");
 	} else {
