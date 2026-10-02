@@ -406,88 +406,25 @@ function inkDiffLine(line: string, theme: ReturnType<typeof clioTheme>): string 
  * fences through here and nothing post-processes the result.
  */
 export function codeInk(lang: string | undefined, lines: ReadonlyArray<string>): string[] {
-	const lexer = codeInkLexer(lang);
-	return lexer === null ? [...lines] : lexer.ink(lines, lexer.start);
-}
-
-/** The lexer's position between two lines of one fence. Opaque to callers. */
-export type CodeInkCarry = Carry;
-
-/**
- * Line-at-a-time access to the same lexer, for text that grows while it is on
- * screen. A streamed file advances the carry once per completed line and paints
- * only the rows in view from the carry recorded before the first of them, so a
- * frame costs the rows it shows, not the file it belongs to.
- */
-export interface CodeInkLexer {
-	readonly start: CodeInkCarry;
-	advance(line: string, carry: CodeInkCarry): CodeInkCarry;
-	ink(lines: ReadonlyArray<string>, carry: CodeInkCarry): string[];
-}
-
-export function codeInkLexer(lang: string | undefined): CodeInkLexer | null {
 	const spec = resolveSpec((lang ?? "").trim().toLowerCase());
-	if (spec === null) return null;
-	const start: Carry = { kind: "none" };
-	if (spec === "diff") {
-		return {
-			start,
-			advance: (_line, carry) => carry,
-			ink: (lines) => {
-				const theme = clioTheme();
-				return lines.map((line) => inkDiffLine(line, theme));
-			},
-		};
+	if (spec === null) return [...lines];
+	const theme = clioTheme();
+	if (spec === "diff") return lines.map((line) => inkDiffLine(line, theme));
+	let carry: Carry = { kind: "none" };
+	const out: string[] = [];
+	for (const line of lines) {
+		if (spec.shellPrompt && carry.kind === "none" && line.startsWith("$ ")) {
+			const rest = line.slice(2);
+			const scanned = scanLine(rest, spec, carry);
+			carry = scanned.carry;
+			out.push(`${theme.fg("toolMetadata", "$")} ${paintLine(rest, scanned.spans, theme)}`);
+			continue;
+		}
+		const scanned = scanLine(line, spec, carry);
+		carry = scanned.carry;
+		out.push(paintLine(line, scanned.spans, theme));
 	}
-	const promptLine = (line: string, carry: Carry): boolean =>
-		spec.shellPrompt && carry.kind === "none" && line.startsWith("$ ");
-	return {
-		start,
-		advance: (line, carry) => scanLine(promptLine(line, carry) ? line.slice(2) : line, spec, carry).carry,
-		ink: (lines, from) => {
-			const theme = clioTheme();
-			let carry = from;
-			const out: string[] = [];
-			for (const line of lines) {
-				if (promptLine(line, carry)) {
-					const rest = line.slice(2);
-					const scanned = scanLine(rest, spec, carry);
-					carry = scanned.carry;
-					out.push(`${theme.fg("toolMetadata", "$")} ${paintLine(rest, scanned.spans, theme)}`);
-					continue;
-				}
-				const scanned = scanLine(line, spec, carry);
-				carry = scanned.carry;
-				out.push(paintLine(line, scanned.spans, theme));
-			}
-			return out;
-		},
-	};
-}
-
-const INK_LANG_BY_EXTENSION: Readonly<Record<string, string>> = {
-	ts: "ts",
-	tsx: "ts",
-	mts: "ts",
-	cts: "ts",
-	js: "ts",
-	jsx: "ts",
-	mjs: "ts",
-	cjs: "ts",
-	json: "json",
-	sh: "bash",
-	bash: "bash",
-	zsh: "bash",
-	py: "python",
-	diff: "diff",
-	patch: "diff",
-};
-
-/** The fence language a file's extension names, when code ink knows it. */
-export function codeInkLangForPath(path: string): string | undefined {
-	const dot = path.lastIndexOf(".");
-	if (dot < 0 || dot < path.lastIndexOf("/")) return undefined;
-	return INK_LANG_BY_EXTENSION[path.slice(dot + 1).toLowerCase()];
+	return out;
 }
 
 /** Shell syntax, with Python ink for a declared `python -c` source argument. */

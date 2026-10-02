@@ -1684,15 +1684,7 @@ describe("transcript block grammar", () => {
 			stripTerminalSequences(renderToolPreview(formingEdit, 80, transcriptDetail("detailed")).join("\n")),
 			/NEW_PAYLOAD/u,
 		);
-		match(
-			stripTerminalSequences(renderToolPreview(formingEdit, 80, policy).join("\n")),
-			/^ {2}│ \+ NEW_PAYLOAD$/mu,
-			"a forming edit streams its replacement as + rows",
-		);
-		doesNotMatch(
-			stripTerminalSequences(renderToolPreview(formingEdit, 80, transcriptDetail("compact")).join("\n")),
-			/NEW_PAYLOAD/u,
-		);
+		doesNotMatch(stripTerminalSequences(renderToolPreview(formingEdit, 80, policy).join("\n")), /NEW_PAYLOAD/u);
 		const failed = stripTerminalSequences(
 			renderToolPreview({ ...edit, result: "oldText not found", isError: true }, 80, policy).join("\n"),
 		);
