@@ -132,7 +132,9 @@ export async function main(args = process.argv.slice(2)) {
 		operations = new OperationRegistry(hub);
 	const files = new AppFiles(scratch ? join(scratch, "state") : resolveClioDirs().state);
 	const workspaces = new WorkspaceService(files, reads),
-		supervisor = new Supervisor(workspaces, files, hub, env);
+		supervisor = new Supervisor(workspaces, files, hub, env, undefined, undefined, (cwd, sessionId) =>
+			ops.call("sessions.recover", { cwd, sessionId }),
+		);
 	try {
 		await supervisor.reconcile();
 	} catch (error) {

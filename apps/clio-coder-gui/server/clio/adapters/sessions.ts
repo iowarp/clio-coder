@@ -1,7 +1,11 @@
 import { existsSync, readdirSync, realpathSync } from "node:fs";
 import { isAbsolute, join, relative, sep } from "node:path";
 import { clioStateDir } from "../../../../../src/core/xdg.js";
-import { listSessionsForCwd, listSessionWorkspaces } from "../../../../../src/domains/session/history.js";
+import {
+	endAbandonedSession,
+	listSessionsForCwd,
+	listSessionWorkspaces,
+} from "../../../../../src/domains/session/history.js";
 import { AppProblem } from "../../services/problem.js";
 
 /** Fails closed when session storage links outside the state directory; false when there is no ledger yet. */
@@ -37,4 +41,8 @@ export function sessionHistory(cwd: string) {
 /** Every project the ledger knows, so the app shows the terminal's projects without a list of its own. */
 export function sessionWorkspaces() {
 	return preflightLedger() ? listSessionWorkspaces() : [];
+}
+/** Ends a session ledger record the caller has proven abandoned; the ops worker is its only caller. */
+export function recoverSession(cwd: string, sessionId: string) {
+	return preflightLedger() ? endAbandonedSession(cwd, sessionId) : false;
 }

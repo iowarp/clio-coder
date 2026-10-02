@@ -133,6 +133,7 @@ export class Supervisor {
 		private readonly env: NodeJS.ProcessEnv = process.env,
 		readonly capacity = 4,
 		private readonly permissionTimers?: PermissionTimers,
+		private readonly recover?: (cwd: string, sessionId: string) => Promise<unknown>,
 	) {
 		this.children = new ChildrenFile(files);
 		this.monitor = setInterval(() => {
@@ -190,14 +191,32 @@ export class Supervisor {
 			this.state(row.sessionId, "unknown", true);
 			const job = this.children
 				.reap(row)
-				.then((result) => {
-					if (result !== "unknown" && result !== "other-owner") this.state(row.sessionId, "closed", true);
+				.then(async (result) => {
+					if (result === "unknown" || result === "other-owner") return;
+					// A mismatch against a real birth token means the child is gone; without one it proves nothing.
+					const dead =
+						result === "closed" || (result === "identity-mismatch" && !!row.birthToken && !row.birthToken.startsWith("pid-"));
+					if (dead) await this.recoverLedger(row.workspaceId, row.sessionId);
+					this.state(row.sessionId, "closed", true);
 				})
 				.catch(() => {
 					/* Retain unknown and its durable ownership row for the next reconciliation. */
 				});
 			this.reapers.add(job);
 			void job.finally(() => this.reapers.delete(job));
+		}
+	}
+	/**
+	 * A child confirmed dead cannot close its own record, and ACP refuses an unended record as possibly open, so the
+	 * session would be stuck for every interface except a terminal resume. Only this supervisor's own dead children
+	 * reach here, which is the proof ACP lacks. Best effort: when it fails the record stays as it was.
+	 */
+	private async recoverLedger(workspaceId: string, sessionId: string) {
+		if (!this.recover) return;
+		try {
+			await this.recover((await this.workspaces.get(workspaceId)).path, sessionId);
+		} catch {
+			// The workspace may have vanished or the ledger be unreadable; the record then keeps its terminal-resume path.
 		}
 	}
 	async open(workspaceId: string, existingId?: string) {
@@ -1166,6 +1185,7 @@ export class Supervisor {
 		}
 		this.failTurn(entry, new AppProblem("upstream_acp", "ACP session closed during its turn."));
 		if (!(await childRunning(entry.row.pid))) {
+			await this.recoverLedger(entry.row.workspaceId, entry.id);
 			await this.children.remove(entry.row);
 			this.state(entry.id, "closed");
 		} else this.state(entry.id, "unknown");

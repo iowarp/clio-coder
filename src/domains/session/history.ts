@@ -95,6 +95,36 @@ export function listSessionWorkspaces(): SessionWorkspace[] {
 	);
 }
 
+/**
+ * Records the end of a session whose host process is known to be dead. A clean close writes `endedAt`; a host
+ * killed first (a WSL shutdown, a power cut, SIGKILL) never does, and ACP then refuses the record as possibly
+ * open because nothing can prove otherwise. The caller owns that proof, for example the process identity it
+ * recorded when it started the host, and this does not check it. The end is dated by the transcript's last
+ * write so history order stays truthful. Returns false for anything that is not an unended record of `cwd`.
+ */
+export function endAbandonedSession(cwd: string, sessionId: string): boolean {
+	if (!/^[\w-]{1,128}$/.test(sessionId)) return false;
+	const dir = join(clioStateDir(), "sessions", cwdHash(cwd), sessionId);
+	const metaPath = join(dir, "meta.json");
+	let meta: SessionMeta;
+	try {
+		meta = JSON.parse(readFileSync(metaPath, "utf8")) as SessionMeta;
+	} catch {
+		// No readable record means nothing to end.
+		return false;
+	}
+	if (meta.id !== sessionId || meta.cwd !== cwd || meta.endedAt !== null) return false;
+	let endedAt: string;
+	try {
+		endedAt = new Date(statSync(join(dir, "current.jsonl")).mtimeMs).toISOString();
+	} catch {
+		// A session that never wrote a transcript is dated by its own creation.
+		endedAt = meta.createdAt;
+	}
+	atomicWrite(metaPath, JSON.stringify({ ...meta, endedAt }, null, 2));
+	return true;
+}
+
 /** One earlier recorded session in a workspace, attributed for a session-start fact. */
 export interface PriorSessionSummary {
 	id: string;
