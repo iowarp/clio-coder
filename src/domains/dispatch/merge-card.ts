@@ -8,13 +8,14 @@ import type { RunHostVerification } from "./types.js";
 /**
  * The operator's answer to a withheld task-worktree merge. The gate in
  * merge-gate.ts decides that a merge is held; this card lets an attached
- * operator overrule that for one branch. Headless and ACP surfaces have no
- * operator and never build one, so they keep withholding.
+ * operator overrule that for one branch. A headless run has no operator, and an
+ * ACP session has one only when its client advertised interviews. Without one
+ * no card is built and the merge stays withheld.
  */
 export type MergeCardChoice = "merge" | "keep" | "discard";
 
 /** Why the card settled: an answer, or the fallback that applies Keep branch. */
-export type MergeCardCause = "answered" | "unlisted" | "escaped" | "timeout" | "aborted";
+export type MergeCardCause = "answered" | "unlisted" | "escaped" | "aborted";
 
 export interface MergeCardOutcome {
 	choice: MergeCardChoice;
@@ -31,8 +32,6 @@ export function mergeCardCauseNote(cause: MergeCardCause): string {
 		case "escaped":
 			// Esc, Ctrl+C, and a handler that went away all settle the round as cancelled.
 			return "the card was dismissed without an answer";
-		case "timeout":
-			return "no answer before the escalation timeout";
 		case "aborted":
 			return "the run was canceled while the card was open";
 	}
@@ -56,11 +55,7 @@ export interface MergeCardInput {
 
 export interface MergeCardDeps {
 	ask: AskUserHandler;
-	/**
-	 * Bounds the whole card, including a wait for a busy screen and the discard
-	 * confirm. Absent, the card waits for the operator, Esc, or an abort.
-	 */
-	timeoutMs?: number;
+	/** Ends the card on Keep branch. Without it the card waits for the operator or Esc. */
 	signal?: AbortSignal;
 	/** Delay between attempts while another overlay owns the screen. */
 	retryMs?: number;
@@ -172,20 +167,12 @@ function chose(result: AskUserResult, label: string): boolean {
 }
 
 /**
- * Put the merge card to the operator. Esc, a timeout, and an abort all settle
- * on Keep branch, the behavior of a surface with no operator. Esc on the
- * discard confirm is Back.
+ * Put the merge card to the operator. Esc and an abort both settle on Keep
+ * branch, the behavior of a surface with no operator. Esc on the discard
+ * confirm is Back.
  */
 export async function askMergeCard(deps: MergeCardDeps, input: MergeCardInput): Promise<MergeCardOutcome> {
 	const controller = new AbortController();
-	let timedOut = false;
-	const timer =
-		deps.timeoutMs === undefined
-			? undefined
-			: setTimeout(() => {
-					timedOut = true;
-					controller.abort();
-				}, deps.timeoutMs);
 	const onParentAbort = (): void => controller.abort();
 	if (deps.signal?.aborted === true) controller.abort();
 	deps.signal?.addEventListener("abort", onParentAbort, { once: true });
@@ -194,7 +181,7 @@ export async function askMergeCard(deps: MergeCardDeps, input: MergeCardInput): 
 	const hold = createHarnessHold();
 	const options = { origin: "harness" as const, signal: controller.signal, harnessHold: hold };
 	const keep = (cause: MergeCardCause): MergeCardOutcome => ({ choice: "keep", cause });
-	const stopped = (): MergeCardOutcome => keep(timedOut ? "timeout" : "aborted");
+	const stopped = (): MergeCardOutcome => keep("aborted");
 	const waitForScreen = (): Promise<void> =>
 		new Promise((resolve) => {
 			const wake = setTimeout(resolve, deps.retryMs ?? DEFAULT_RETRY_MS);
@@ -234,7 +221,6 @@ export async function askMergeCard(deps: MergeCardDeps, input: MergeCardInput): 
 		}
 	} finally {
 		hold.release();
-		clearTimeout(timer);
 		deps.signal?.removeEventListener("abort", onParentAbort);
 	}
 }

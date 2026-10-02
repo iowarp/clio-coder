@@ -540,10 +540,11 @@ export interface DispatchBundleOptions {
 	 */
 	workerPermissionResponder?: boolean;
 	/**
-	 * The attached operator's ask surface, present only in the interactive TUI.
-	 * A merge-mode task worktree the gate would withhold is put to the operator
-	 * as a merge card when `available()` is true. Absent in headless and ACP, and
-	 * those surfaces keep withholding.
+	 * The attached operator's ask surface: the interactive TUI, or an ACP client
+	 * that advertised interviews. A merge-mode task worktree the gate would
+	 * withhold is put to the operator as a merge card when `available()` is true.
+	 * Absent in headless runs and in an ACP session without that capability, and
+	 * those keep withholding.
 	 */
 	operatorAsk?: { available(): boolean; ask: AskUserHandler };
 	/** Live hard-block state cloned into each mediated worker spec. */
@@ -3207,8 +3208,8 @@ export function createDispatchBundle(
 		// once a second and would let one flash up first.
 		if (run.aborted) return null;
 		// The worker has exited and nothing runs on its lease, but the assignment
-		// holds a global, node, and endpoint slot until the receipt settles, and a
-		// card can wait out its whole timeout. Release it so a lone dispatch is not
+		// holds a global, node, and endpoint slot until the receipt settles, and an
+		// attended card has no deadline. Release it so a lone dispatch is not
 		// queued behind a slot nothing uses. Not when a sibling is queued or still
 		// active: releasing is what would admit it into this checkout while the
 		// operator's Merge lands (the writer lease is shared within a process, so it
@@ -7629,8 +7630,8 @@ export function createDispatchBundle(
 										protectedPaths: previewedProtected,
 									})
 								: null;
-						// The card can wait timeout x queue depth, and protection is live state
-						// that throws while it is degraded. Merge reads it again here and
+						// The card waits as long as the operator takes, once for each card queued
+						// ahead of it, and protection is live state that throws while it is degraded. Merge reads it again here and
 						// withholds when it cannot, never on the list from before the wait.
 						let mergeProtectedPaths: string[] | null = null;
 						if (card?.choice === "merge") {

@@ -28,42 +28,36 @@ function labelAt(question: AskUserQuestion | undefined): string | undefined {
 
 test("the card opens on Keep branch and the discard confirm opens on Back", async () => {
 	const { ask, asked } = scripted([pick("Discard"), pick("Back"), pick("Keep branch")]);
-	const outcome = await askMergeCard({ ask, timeoutMs: 5_000 }, INPUT);
+	const outcome = await askMergeCard({ ask }, INPUT);
 	deepStrictEqual(outcome, { choice: "keep", cause: "answered" });
 	deepStrictEqual(asked.map(labelAt), ["Keep branch", "Back", "Keep branch"]);
 });
 
 test("Merge and a confirmed Delete are the only destructive outcomes; Esc keeps the branch", async () => {
-	deepStrictEqual(await askMergeCard({ ask: scripted([pick("Merge")]).ask, timeoutMs: 5_000 }, INPUT), {
+	deepStrictEqual(await askMergeCard({ ask: scripted([pick("Merge")]).ask }, INPUT), {
 		choice: "merge",
 		cause: "answered",
 	});
-	deepStrictEqual(
-		await askMergeCard({ ask: scripted([pick("Discard"), pick("Delete")]).ask, timeoutMs: 5_000 }, INPUT),
-		{
-			choice: "discard",
-			cause: "answered",
-		},
-	);
-	deepStrictEqual(
-		await askMergeCard({ ask: scripted([{ answers: [], cancelled: true }]).ask, timeoutMs: 5_000 }, INPUT),
-		{
-			choice: "keep",
-			cause: "escaped",
-		},
-	);
+	deepStrictEqual(await askMergeCard({ ask: scripted([pick("Discard"), pick("Delete")]).ask }, INPUT), {
+		choice: "discard",
+		cause: "answered",
+	});
+	deepStrictEqual(await askMergeCard({ ask: scripted([{ answers: [], cancelled: true }]).ask }, INPUT), {
+		choice: "keep",
+		cause: "escaped",
+	});
 });
 
 test("a screen another overlay holds delays the card instead of settling it", async () => {
 	const { ask, asked } = scripted([{ answers: [], cancelled: true, unavailable: true }, pick("Merge")]);
-	const outcome = await askMergeCard({ ask, timeoutMs: 5_000, retryMs: 1 }, INPUT);
+	const outcome = await askMergeCard({ ask, retryMs: 1 }, INPUT);
 	strictEqual(outcome.choice, "merge");
 	strictEqual(asked.length, 2);
 });
 
 test("a branch that changes protected paths is not offered a Merge, and the card says why", async () => {
 	const { ask, asked } = scripted([pick("Merge")]);
-	const outcome = await askMergeCard({ ask, timeoutMs: 5_000 }, { ...INPUT, protectedPaths: ["docs/policy.md"] });
+	const outcome = await askMergeCard({ ask }, { ...INPUT, protectedPaths: ["docs/policy.md"] });
 	deepStrictEqual(
 		asked[0]?.options?.map((option) => option.label),
 		["Keep branch", "Discard"],
@@ -76,7 +70,7 @@ test("a branch that changes protected paths is not offered a Merge, and the card
 test("the merge card distinguishes a host failure also observed on the base", async () => {
 	const { ask, asked } = scripted([pick("Keep branch")]);
 	await askMergeCard(
-		{ ask, timeoutMs: 5_000 },
+		{ ask },
 		{
 			...INPUT,
 			hostVerification: {
