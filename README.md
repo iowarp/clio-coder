@@ -70,10 +70,24 @@ With your own **Node.js 22.19 or newer**, npm works too:
 npm install -g @iowarp/clio-coder
 ```
 
-On native Windows, which is best effort (WSL is the recommended route),
-`irm https://coder.iowarp.ai/install.ps1 | iex` installs the same way under
-`%LOCALAPPDATA%\clio-coder`. There, install, reinstall, `--version`, `doctor` and `uninstall`
-are verified; the terminal session itself is not routinely tested.
+Installer installs of 0.6.0 and later update in the background. An idle
+interactive session checks the install's channel at most once a day, installs a
+newer release beside the current one, and switches the launcher to it; the
+running session keeps its version until you restart and `/resume`. Opt out with
+`--no-auto-update` or `CLIO_CODER_AUTO_UPDATE=0`; an exact `--version` pins the
+install and turns background updates off. `clio-coder upgrade` updates on demand,
+and `clio-coder upgrade --rollback` returns to the previous version and turns
+background updates off. npm, pnpm and Bun installs keep updating through their
+package manager.
+
+Native Windows needs Clio Coder 0.6.0 and is best effort; WSL is the recommended
+route. In PowerShell, run `irm https://coder.iowarp.ai/install.ps1 | iex`. In CMD, run
+`curl.exe -fsSL https://coder.iowarp.ai/install.cmd -o install.cmd && install.cmd && del install.cmd`.
+Both install under `%LOCALAPPDATA%\clio-coder\install` with the launcher
+`%USERPROFILE%\.local\bin\clio-coder.cmd`, need no administrator rights, and add
+the launcher directory to your user `PATH` only with `-AddToPath`. A complete
+native Windows install of 0.6.0 has not yet been verified end to end, and the
+terminal session itself is not routinely tested there.
 
 1. Choose **Guided setup**, then pick the description you recognize: an app on
    this computer, a model server, an AI subscription, or a provider account.
@@ -112,6 +126,9 @@ connections and settings. Bare `clio-coder` still opens the terminal workspace.
 ```bash
 # pnpm
 pnpm add -g @iowarp/clio-coder
+
+# Bun; clio-coder still runs on Node.js 22.19 or newer from PATH
+bun add -g @iowarp/clio-coder
 
 # Run without a global install
 npx --yes @iowarp/clio-coder@latest

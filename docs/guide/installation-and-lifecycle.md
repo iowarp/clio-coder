@@ -13,8 +13,15 @@ else and names the installer, or a newer Node given by `CLIO_CODER_NODE`.
 [HPC clusters](hpc-clusters.md) covers cluster login nodes, old glibc, proxies and
 airgapped sites.
 
-On native Windows, which is best effort, run `irm https://coder.iowarp.ai/install.ps1 | iex`
-in PowerShell. It installs the same layout under `%LOCALAPPDATA%\clio-coder\install`.
+On native Windows, which is best effort and needs Clio Coder 0.6.0, run
+`irm https://coder.iowarp.ai/install.ps1 | iex` in PowerShell, or
+`curl.exe -fsSL https://coder.iowarp.ai/install.cmd -o install.cmd && install.cmd && del install.cmd`
+in CMD; `install.cmd` only downloads `install.ps1` and runs it with the same arguments.
+Both install the same layout under `%LOCALAPPDATA%\clio-coder\install` with the
+launcher `%USERPROFILE%\.local\bin\clio-coder.cmd`, and need no administrator
+rights. `install.ps1` refuses a version older than 0.6.0 before it changes the
+active launcher. A complete native Windows install of 0.6.0 has not yet been
+verified end to end.
 `install.sh` run from an MSYS, MinGW or Cygwin shell stops and names that command. A
 relative path given to `install.ps1` for the install directory, the bin directory or
 `-Package` resolves against the PowerShell location, not the process directory.
@@ -32,9 +39,10 @@ development tree is becoming.
 | Path (Linux default) | Contents |
 | --- | --- |
 | `~/.local/share/clio-coder-install/runtime/node-v<ver>-<build>/` | The managed Node.js. macOS uses `~/Library/Application Support/clio-coder/install`, Windows `%LOCALAPPDATA%\clio-coder\install`; `--install-dir`, `CLIO_CODER_INSTALL_DIR` or `CLIO_CODER_HOME/install` override it. |
-| `.../versions/<version>/lib/node_modules/@iowarp/clio-coder/` | One package prefix per installed version: the current one and the previous one, kept for `install.sh --rollback`. |
-| `.../install.json` | Manifest naming the Node, the current and previous prefixes, the launcher and the channel. |
-| `~/.local/bin/clio-coder` (`clio-coder.cmd` on Windows) | A small launcher that runs the managed Node on the current prefix. |
+| `.../versions/<version>/lib/node_modules/@iowarp/clio-coder/` | One package prefix per installed version. Every version and runtime stays on disk until `uninstall --remove-binary`, because a running session may still load code from the version it started with; the manifest names the current and previous ones. |
+| `.../install.json` | Manifest naming the Node, the current and previous prefixes, the launcher, the channel, any version pin, whether background updates are on, and whether the installer added the launcher directory to `PATH`. Activating a version is one atomic write of this file. |
+| `.../launchers/`, `.../.active/` | From 0.6.0: the launcher's helper script, and one receipt per running session, which `uninstall` checks before it removes anything. |
+| `~/.local/bin/clio-coder` (`%USERPROFILE%\.local\bin\clio-coder.cmd` on Windows) | A small launcher that reads the manifest on each start and runs the managed Node on the current prefix. |
 
 The install root sits beside the data root rather than inside it, so
 `clio-coder reset` and `uninstall --keep-config` never delete the Node that runs
@@ -287,11 +295,24 @@ entry. Another launcher on `PATH` cannot take over those checks. An older dist-t
 does not trigger a downgrade.
 
 For an installer install, `upgrade` runs the installer that shipped with the
-running package against the same install root. The new version lands in a new
-prefix, the launcher is switched to it atomically, and post-install checks run
-through the new entry. The managed Node stays as it is unless you pass
-`--refresh-runtime`, which moves to the newest Node LTS the installer picks. The
-previous version is kept; `sh install.sh --rollback` points the launcher back at it.
+running package against the same install root and launcher directory. The new
+version lands in a new prefix beside the old ones and must start before one
+atomic manifest write makes it current, so a candidate that fails its checks
+leaves the working version active. Post-install checks then run through the new
+entry. The managed Node stays as it is unless you pass `--refresh-runtime`, which
+moves to the newest Node LTS the installer picks.
+
+A version pin stays in force. An install made with an exact `--version` (or
+`-Version`, or a local `--package`) records that pin, and `upgrade` or a plain
+reinstall keeps installing it; `--channel` alone does not clear it. To leave a
+pin, run the installer with `--version latest`, `beta` or `dev`, and add
+`--auto-update` (`-AutoUpdate`) to turn background updates back on.
+
+`clio-coder upgrade --rollback` makes the previous version current again after
+checking that it starts, and turns background updates off until you turn them on
+with the installer's `--auto-update`. The installer's own `--rollback` does the
+same. A 0.5.9 package installed by this installer has no managed lifecycle: update
+it by rerunning the installer, and roll it back with the installer's `--rollback`.
 
 Inside the TUI, `/upgrade` offers the same npm-global path, and the same
 replacement for installer installs. It first checks that
@@ -340,23 +361,45 @@ print the migration retry command. The package remains installed;
 
 Interactive sessions start an update monitor after the first full frame and a
 five-second delay. Registry requests have a 2.5-second timeout and are cached for
-24 hours, including failed attempts. Stable npm, pnpm, and Bun installs check the
-public npm `latest` tag; source, prerelease, local/npx, and unknown installations
-skip registry checks. Installed files are also checked once a minute for a version
-change or a rebuild since this process started.
+24 hours, including failed attempts, so an offline session stays quiet. npm,
+pnpm, Bun and installer installs check the public npm `latest` tag; a prerelease
+also reads `beta`, and an installer install reads the channel it recorded instead.
+Source checkouts, local or npx copies, unknown layouts and pinned installer
+installs skip registry checks. Installed files are also checked once a minute for
+a version change or a rebuild since this process started.
 
 The result is one muted footer line, visible only when the editor is empty and
 there is no turn, worker, local command, queued message, overlay, or other
 notice. It hides during work, returns when the session is idle, and persists
 until it is dismissed or `/upgrade` confirms the installation is current or
-updated. It never opens a prompt, writes a conversation message, sends a desktop
-notification, or starts an upgrade by itself. An update hint appears at most
-once per session and once per day across sessions; the same version is suggested
-no more than once a week. Cache records live under the resolved cache directory.
+updated. It never opens a prompt, writes a conversation message, or sends a
+desktop notification. Apart from the installer's background updates below, it
+never starts an upgrade by itself. An update hint appears at most once per
+session and once per day across sessions; the same version is suggested no more
+than once a week. Cache records live under the resolved cache directory.
 
-Set `CLIO_CODER_UPDATE_CHECK=0` or `NO_UPDATE_NOTIFIER=1` to disable the monitor.
-CI, headless runs, ACP, and CLI subcommands do not start it. Explicit upgrades
-remain available when the monitor is disabled.
+Set `CLIO_CODER_UPDATE_CHECK=0` or `NO_UPDATE_NOTIFIER=1` to disable the monitor,
+and with it background updates. CI, headless runs, ACP, and CLI subcommands do
+not start it. Explicit upgrades remain available when the monitor is disabled.
+
+#### Background updates for installer installs
+
+From 0.6.0, an installer install updates itself by default. When the monitor
+finds a newer release on the install's channel and the session is idle, it runs
+the installer that shipped with the running package for that release, at most
+once a day. The new version is installed beside the current one and activated
+for the next start; the running session keeps its version, and the footer says
+`Updated to v<version> · current session preserved; restart then /resume to use it; upgrade --rollback to undo`.
+Background updates skip post-install migrations, never edit `PATH`, keep the
+managed Node, and need no administrator rights. If the install was pinned, opted
+out, moved to another channel or updated by someone else while the update ran,
+the new version is not activated.
+
+Background updates are off for a pinned install and after a rollback. Turn them
+off with the installer's `--no-auto-update` (`-NoAutoUpdate`), which is recorded
+in `install.json`, or for one process with `CLIO_CODER_AUTO_UPDATE=0`. Turn them
+back on with `--auto-update` (`-AutoUpdate`) on an unpinned install. npm, pnpm and
+Bun installs never update in the background; their package manager owns updates.
 
 #### Current migration contract
 
@@ -445,10 +488,16 @@ hash -r
 ```
 
 For an installer install, `--remove-binary` also removes the managed Node and
-every installed version: only `runtime/`, `versions/` and `install.json` inside the
-install root, then the root itself if nothing else is left in it. On Windows,
-where a running `node.exe` is locked, the launcher and runtime are removed a few
-seconds after the command exits.
+every installed version: only what the installer created inside the install root
+(`runtime/`, `versions/`, `launchers/`, `.active/`, `install.json` and its ownership
+marker), then the root itself if nothing else is left in it. It takes the
+installer's lock first and refuses while another session started from that
+install is still running. Shell startup files that mention Clio are reported,
+never edited. On Windows, where a running `node.exe` is locked, the
+launcher and runtime are removed a few seconds after the command exits. A 0.5.9
+package installed by this installer cannot remove the managed files; after every
+session exits, delete the launcher and the install root's `runtime/`,
+`versions/` and `install.json` by hand.
 
 `--dry-run` prints the roots and the optional launcher action without changing
 anything, and enumerates the same resolved absolute paths the real run would
