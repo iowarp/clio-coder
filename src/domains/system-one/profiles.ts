@@ -215,6 +215,15 @@ function fitsByteBound(text: string, tokens: number): boolean {
 	return Buffer.byteLength(text, "utf8") <= tokens - ENCODING_RESERVE_TOKENS;
 }
 
+/** A counted bound: the abstain reason, null when it fits, undefined when the counter cannot decide. */
+type ExactBound = (question: Question, options: ReadonlyArray<string>) => string | null | undefined;
+const exactBounds = new Map<ProfileId, ExactBound>();
+
+/** A profile's own tokenizer, once loaded, replaces the byte proof with the model's real count. */
+export function registerExactBound(id: ProfileId, bound: ExactBound): void {
+	exactBounds.set(id, bound);
+}
+
 function compactText(text: string): string {
 	return text.replace(/\s+/g, " ").trim();
 }
@@ -240,23 +249,26 @@ function sameShape(question: Question, compact: Question): boolean {
 export type Rendered =
 	| {
 			readonly question: Question;
-			/** `exact`: no declared bound applies. `byte-bound`: proven under the bound by UTF-8 bytes. */
-			readonly preflight: "exact" | "byte-bound";
+			/** `exact`: no declared bound applies. `byte-bound`: proven by UTF-8 bytes. `token-count`: counted by the model's tokenizer. */
+			readonly preflight: "exact" | "byte-bound" | "token-count";
 			/** True when the site's compact wording was used. */
 			readonly compact: boolean;
 	  }
 	| { readonly abstain: string };
 
-function bounded(profile: CapabilityProfile, question: Question): string | null {
+function bounded(profile: CapabilityProfile, question: Question): { problem: string | null; counted: boolean } {
 	const texts = optionTexts(question);
+	const counted = exactBounds.get(profile.id)?.(question, texts);
+	if (counted !== undefined) return { problem: counted, counted: true };
 	if (profile.optionTokens !== null) {
 		const long = texts.findIndex((text) => !fitsByteBound(text, profile.optionTokens as number));
-		if (long >= 0) return `option ${long} cannot be proven within ${profile.optionTokens} tokens`;
+		if (long >= 0)
+			return { problem: `option ${long} cannot be proven within ${profile.optionTokens} tokens`, counted: false };
 	}
 	if (profile.headTokens !== null && !fitsByteBound([question.instructions, ...texts].join(" "), profile.headTokens)) {
-		return `question head cannot be proven within ${profile.headTokens} tokens`;
+		return { problem: `question head cannot be proven within ${profile.headTokens} tokens`, counted: false };
 	}
-	return null;
+	return { problem: null, counted: false };
 }
 
 function compacted(question: Question): Question {
@@ -300,12 +312,15 @@ export function render(
 	}
 	if (profile.renderer === "systemone-v1") return { question, preflight: "exact", compact: false };
 	const declared = profile.optionTokens !== null || profile.headTokens !== null;
-	const preflight = declared ? "byte-bound" : "exact";
+	const preflightOf = (counted: boolean) => (!declared ? "exact" : counted ? "token-count" : "byte-bound");
 	if (compact !== undefined && sameShape(question, compact)) {
 		const short = compacted(compact);
-		if (bounded(profile, short) === null) return { question: short, preflight, compact: true };
+		const check = bounded(profile, short);
+		if (check.problem === null) return { question: short, preflight: preflightOf(check.counted), compact: true };
 	}
 	const full = compacted(question);
-	const problem = bounded(profile, full);
-	return problem === null ? { question: full, preflight, compact: false } : { abstain: `${problem}; not truncated` };
+	const check = bounded(profile, full);
+	return check.problem === null
+		? { question: full, preflight: preflightOf(check.counted), compact: false }
+		: { abstain: `${check.problem}; not truncated` };
 }

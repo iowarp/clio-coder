@@ -1173,6 +1173,7 @@ async function systemOneFindings(
 	const { describeBindings, formatDatasetBytes, listDatasetFiles } = await import("../system-one/recorder/index.js");
 	const { FITTED_CUTS } = await import("../system-one/calibration.js");
 	const profiles = await import("../system-one/profiles.js");
+	const juliaCounted = existsSync((await import("../system-one/julia-tokenizer.js")).juliaTokenizerPath());
 	const bindings = describeBindings(settings, runtimes);
 	const off = bindings.filter((binding) => binding.engine === null).map((binding) => binding.site);
 	const rows: DoctorFinding[] = [];
@@ -1201,7 +1202,7 @@ async function systemOneFindings(
 				(unverified ? `; connection ${binding.target} is not verified, so this site may stay silent` : ""),
 		});
 	}
-	rows.push(...systemOneEngineFindings(settings, bindings, runtimes, observations, profiles));
+	rows.push(...systemOneEngineFindings(settings, bindings, runtimes, observations, profiles, juliaCounted));
 	// With nothing bound, recording off and no files, the dataset row would only repeat the off row.
 	const quiet = off.length === bindings.length && !settings.systemOne.record;
 	const dataset = datasetFinding(settings.systemOne, () => listDatasetFiles(), formatDatasetBytes, quiet);
@@ -1222,6 +1223,7 @@ function systemOneEngineFindings(
 	runtimes: { get(id: string): RuntimeDescriptor | null },
 	observations: ReadonlyMap<string, DoctorProbeObservation | null>,
 	profiles: typeof import("../system-one/profiles.js"),
+	juliaCounted: boolean,
 ): DoctorFinding[] {
 	const { engineWindow, profileFor } = profiles;
 	const names = new Set<string>();
@@ -1246,7 +1248,13 @@ function systemOneEngineFindings(
 				: window !== declared
 					? `target ${target.id} declares ${declared}, profile ceiling ${profile.windowCeiling}`
 					: `declared on target ${target.id}`;
-		const head = `profile ${profile.id}; window ${window === null ? "unbounded" : `${window} tokens`} (${source})`;
+		const counting =
+			profile.id !== "julia-1"
+				? ""
+				: juliaCounted
+					? "; options counted with Julia-1's tokenizer"
+					: "; options byte-bounded until Julia-1's tokenizer is cached on first use";
+		const head = `profile ${profile.id}; window ${window === null ? "unbounded" : `${window} tokens`} (${source})${counting}`;
 		const where = target.url ?? `${runtime.displayName} endpoint`;
 		const observation = observations.get(target.id);
 		const rowName = `system one (experimental) engine ${name}`;

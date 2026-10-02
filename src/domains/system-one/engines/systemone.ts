@@ -68,6 +68,8 @@ export function createSystemOneEngine(input: SystemOneEngineInput): DecisionEngi
 	if (decide === undefined) throw new Error(`runtime '${runtime.id}' does not answer typed decisions`);
 	const asked = model ?? target.defaultModel ?? null;
 	const profile = profileFor(input.profile);
+	// Julia-1's options are counted with its own tokenizer once it is cached; until then the byte proof applies.
+	if (profile.id === "julia-1") void import("../julia-tokenizer.js").then((module) => module.loadJuliaTokenizer());
 	const windowTokens = engineWindow(
 		profile,
 		target.capabilities?.contextWindow ?? runtime.defaultCapabilities.contextWindow,
