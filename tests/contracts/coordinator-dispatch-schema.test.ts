@@ -75,6 +75,7 @@ describe("compact coordinator dispatch contract", () => {
 		const canonical = buildDispatchParameters();
 		const compact = coordinatorDispatchParameters();
 		const ordinary = {
+			node: "local",
 			list: false,
 			agent: "coder",
 			task: "one assignment",
@@ -94,7 +95,10 @@ describe("compact coordinator dispatch contract", () => {
 			ok(Value.Check(compact, { [field]: value }), `compact ${field}`);
 		}
 		for (const intent of [ordinary.intent, { relevant_paths: ["src/x.ts"], verification: [{ check: "test" }] }]) {
-			for (const args of [{ intent }, { tasks: [{ task: "assignment", agent: "scout", briefing: "evidence", intent }] }]) {
+			for (const args of [
+				{ intent },
+				{ tasks: [{ task: "assignment", agent: "scout", node: "mini", briefing: "evidence", intent }] },
+			]) {
 				ok(Value.Check(canonical, args));
 				ok(Value.Check(compact, args));
 			}
@@ -109,6 +113,8 @@ describe("compact coordinator dispatch contract", () => {
 			{ tasks: [{ task: false }] },
 			{ tasks: "assignment" },
 			{ agent: [] },
+			{ node: [] },
+			{ tasks: [{ task: "assignment", node: false }] },
 			{ task: {} },
 			{ list: "yes" },
 			{ briefing: [] },

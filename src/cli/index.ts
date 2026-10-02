@@ -63,7 +63,7 @@ Usage:
   clio-coder uninstall            remove all Clio Coder state; --remove-binary also unlinks the launcher
   clio-coder upgrade              upgrade Clio Coder and run pending migrations
   clio-coder agents               list discovered agent recipes
-  clio-coder fleet new|validate|graph|commands|run|status|view|verify|drain|resume  fleet authoring, execution, status, verification, and admission control
+  clio-coder fleet nodes|new|validate|graph|commands|run|status|view|verify|drain|resume  fleet authoring, execution, status, verification, and admission control
   clio-coder evidence             build, list, or inspect evidence artifacts
   clio-coder memory               list, propose, promote, approve, reject, or prune memory
   clio-coder usage report         cross-session usage facts and opportunities (experimental)
@@ -312,7 +312,13 @@ const COMMAND_HANDLERS = new Map<string, CommandHandler>([
 	],
 	["extensions", extensionsCommand],
 	["ext", extensionsCommand],
-	["fleet", async (subArgs) => (await import("./fleet.js")).runFleetCommand(subArgs)],
+	[
+		"fleet",
+		async (subArgs) =>
+			subArgs[0] === "nodes"
+				? (await import("./fleet-nodes.js")).runFleetNodes(subArgs.slice(1))
+				: (await import("./fleet.js")).runFleetCommand(subArgs),
+	],
 	["library", async (subArgs) => (await import("./library.js")).runLibraryCommand(subArgs)],
 	["tasks", async (subArgs) => (await import("./tasks.js")).runTasksCommand(subArgs)],
 	["mcp", async (subArgs) => (await import("./mcp.js")).runMcpCommand(subArgs)],

@@ -61,6 +61,7 @@ export interface SshNodeEndpoint {
 	 * entry, e.g. `/opt/clio-coder/bin/clio-coder worker`.
 	 */
 	clioCoderEntry?: string;
+	clioCoderVersionCommand?: string;
 	/**
 	 * Residency posture projected into the remote worker's target lifecycle.
 	 * Defaults to "observe": remote workers must never evict models resident on

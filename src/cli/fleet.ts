@@ -97,6 +97,7 @@ const HELP = `clio-coder fleet <subcommand>
 Repo-owned fleet contracts and the dispatch status surface.
 
 Subcommands:
+  nodes add|list|remove|test     manage SSH worker nodes and project verification
   list                          list .clio-coder/fleets/*.md contracts with validation status
   new <name> --from <builtin>   copy build-review, build-test, or sdlc into this repository
   validate <name> [--json]      run the fleet execution preflight without side effects

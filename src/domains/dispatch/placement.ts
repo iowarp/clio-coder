@@ -1,36 +1,19 @@
-/**
- * Deterministic fleet placement. Resolution order:
- *
- *   1. explicit dispatch `node` param
- *   2. fleet profile / agent-binding node pin
- *   3. least-loaded eligible remote node (fewest active workers, then
- *      declaration order)
- *   4. the implicit local node
- *
- * Eligible means: registry state online, a passing durable doctor preflight
- * for this project root, and free per-node capacity. An explicit pin on an
- * ineligible node is an admission failure with the reason spelled out; the
- * least-loaded path silently skips ineligible nodes and falls back to local.
- * No scored or learned placement authority exists here by design.
- *
- * Capacity here is advisory spreading, not authority. Durable assignment leases
- * decide admission under the state lock, so this pass only avoids sending a
- * request to a node whose slots are already taken while a sibling node is idle.
- * A pinned node that is momentarily full is still placed, because the bounded
- * admission queue is the right place to wait for its slot.
- */
+/** Deterministic placement: explicit node, profile pin, session choice, standing preference, then local. Registration alone never moves work. Durable leases own capacity admission. */
 
 import type { ClioSettings } from "../../core/config.js";
 import type { FleetNodeSettings } from "../../core/defaults.js";
 import type { FleetRegistry } from "../scheduling/cluster.js";
 import type { DispatchRequest } from "./contract.js";
 import type { DispatchNodePlacement } from "./extension.js";
-import { fleetPreflightVerdict, readFleetPreflightRecords } from "./fleet-preflight.js";
+import { sessionFleetNode } from "./fleet-placement-preference.js";
+import { fleetPreflightVerdict } from "./fleet-preflight.js";
 import { createSshWorkerTransport, LOCAL_NODE_ID, localNodeIdentity, type WorkerTransport } from "./transport.js";
 import type { RunNodeIdentity, RunNodeReroute } from "./types.js";
 
 export interface FleetPlacementDeps {
 	getSettings: () => Readonly<ClioSettings> | undefined;
+	/** Session identity is also available during plan preview, before requests are stamped. */
+	getSessionId?: (() => string | null) | undefined;
 	fleet: FleetRegistry | undefined;
 	/** Transport seam; contract tests substitute a fake ssh channel. */
 	transportForNode?: (node: FleetNodeSettings) => WorkerTransport;
@@ -69,14 +52,18 @@ function completedReroutes(
 	return reroutes.map((hop) => (hop.toNode.length === 0 ? { ...hop, toNode } : hop));
 }
 
-function requestedNodeId(req: DispatchRequest, settings: Readonly<ClioSettings> | undefined): string | null {
+function requestedNodeId(
+	req: DispatchRequest,
+	settings: Readonly<ClioSettings> | undefined,
+	sessionId: string | null | undefined,
+): string | null {
 	if (req.node !== undefined && req.node.trim().length > 0) return req.node.trim();
 	const workers = settings?.fleet;
 	if (!workers) return null;
 	const profileName = req.workerProfile ?? workers.agentProfiles?.[req.agentId];
-	if (!profileName) return null;
-	const pin = workers.profiles?.[profileName]?.node;
-	return pin !== undefined && pin.trim().length > 0 ? pin.trim() : null;
+	const pin = profileName ? workers.profiles?.[profileName]?.node : undefined;
+	if (pin !== undefined && pin.trim().length > 0) return pin.trim();
+	return sessionFleetNode(req.ownerSessionId ?? sessionId) ?? workers.defaultNode ?? null;
 }
 
 export function createFleetPlacementResolver(
@@ -95,7 +82,7 @@ export function createFleetPlacementResolver(
 		// A profile/agent-binding pin that names an excluded node is overridden by
 		// the exclusion (an explicit req.node pin is dropped by the retry path
 		// before this runs, so any surviving request is a soft pin).
-		let requested = requestedNodeId(req, settings);
+		let requested = requestedNodeId(req, settings, deps.getSessionId?.());
 		if (requested !== null && excludedNodeIds.has(requested)) requested = null;
 		// No fleet configured and nothing requested: stay on the pre-fleet
 		// local path with no node identity recorded at all.
@@ -118,7 +105,7 @@ export function createFleetPlacementResolver(
 			};
 		};
 
-		const projectRoot = req.cwd ?? process.cwd();
+		const projectRoot = req.taskWorktree?.root ?? req.cwd ?? process.cwd();
 
 		if (requested !== null) {
 			if (requested === LOCAL_NODE_ID) return localPlacement();
@@ -136,20 +123,6 @@ export function createFleetPlacementResolver(
 			return sshPlacement(node);
 		}
 
-		// Least-loaded eligible remote node; local is the fallback unless it too
-		// has been excluded by a prior failure.
-		if (fleet !== undefined && nodes.length > 0) {
-			const preflightRecords = readFleetPreflightRecords();
-			const eligible = nodes
-				.map((node, order) => ({ node, order, snapshot: fleet.get(node.id) }))
-				.filter((entry) => !excludedNodeIds.has(entry.node.id))
-				.filter((entry) => entry.snapshot !== null && entry.snapshot.state === "online")
-				.filter((entry) => (entry.snapshot?.activeWorkers ?? 0) < entry.node.maxWorkers)
-				.filter((entry) => verdictFor(entry.node, projectRoot, preflightRecords).ok)
-				.sort((a, b) => (a.snapshot?.activeWorkers ?? 0) - (b.snapshot?.activeWorkers ?? 0) || a.order - b.order);
-			const selected = eligible[0];
-			if (selected) return sshPlacement(selected.node);
-		}
 		// A node exclusion that also excludes local has no eligible node left:
 		// fail closed rather than silently re-running on the excluded local node.
 		if (excludedNodeIds.has(LOCAL_NODE_ID)) {
@@ -172,13 +145,13 @@ export function createFleetPlacementPreviewResolver(
 	return (req: DispatchRequest): FleetPlacementPreview => {
 		const settings = deps.getSettings();
 		const nodes = settings?.fleet?.nodes ?? [];
-		const requested = requestedNodeId(req, settings);
+		const requested = requestedNodeId(req, settings, deps.getSessionId?.());
 		const fleet = deps.fleet;
 		const local = (): FleetPlacementPreview => ({ node: localNodeIdentity() });
 		const remote = (node: FleetNodeSettings): FleetPlacementPreview => ({
 			node: { id: node.id, kind: "ssh", host: node.host },
 		});
-		const projectRoot = req.cwd ?? process.cwd();
+		const projectRoot = req.taskWorktree?.root ?? req.cwd ?? process.cwd();
 
 		if (requested !== null) {
 			if (requested === LOCAL_NODE_ID) return local();
@@ -196,17 +169,6 @@ export function createFleetPlacementPreviewResolver(
 			return remote(node);
 		}
 
-		if (fleet !== undefined && nodes.length > 0) {
-			const preflightRecords = readFleetPreflightRecords();
-			const eligible = nodes
-				.map((node, order) => ({ node, order, snapshot: fleet.get(node.id) }))
-				.filter((entry) => entry.snapshot !== null && entry.snapshot.state === "online")
-				.filter((entry) => (entry.snapshot?.activeWorkers ?? 0) < entry.node.maxWorkers)
-				.filter((entry) => verdictFor(entry.node, projectRoot, preflightRecords).ok)
-				.sort((a, b) => (a.snapshot?.activeWorkers ?? 0) - (b.snapshot?.activeWorkers ?? 0) || a.order - b.order);
-			const selected = eligible[0]?.node;
-			if (selected !== undefined) return remote(selected);
-		}
 		return local();
 	};
 }

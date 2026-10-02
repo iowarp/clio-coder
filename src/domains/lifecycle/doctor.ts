@@ -656,17 +656,11 @@ export async function runDoctorFleetChecks(
 	}
 	const nodes = settings.fleet?.nodes ?? [];
 	if (nodes.length === 0) return [];
-	const { recordFleetPreflight, runFleetNodePreflight } = await import("../dispatch/fleet-preflight.js");
-	// Endpoint facts are per node. Every configured target is probed from every
-	// node, because a `localhost` URL names a different machine on each one and
-	// an orchestrator-side probe would describe none of them.
-	const targets = (settings.targets ?? []).map((target) => ({
-		id: target.id,
-		runtimeId: target.runtime,
-		...(target.url !== undefined ? { url: target.url } : {}),
-		...(target.defaultModel !== undefined ? { wireModelId: target.defaultModel } : {}),
-	}));
-	const records = await Promise.all(nodes.map((node) => runFleetNodePreflight(node, projectRoot, { targets })));
+	const { recordFleetPreflight, fleetPreflightVerdict } = await import("../dispatch/fleet-preflight.js");
+	const { testFleetNode } = await import("../dispatch/fleet-nodes.js");
+	const records = await Promise.all(
+		nodes.map((node) => testFleetNode(node.id, projectRoot, { sharedProbe: options.fix === true })),
+	);
 	// Placement admits a node only from a stored record. Plain doctor observes;
 	// --fix is the run that may write state, so it is the one that records.
 	let recorded = options.fix === true;
@@ -677,17 +671,24 @@ export async function runDoctorFleetChecks(
 			recorded = false;
 		}
 	}
-	const admission = recorded ? "recorded for dispatch" : "not recorded, run doctor --fix to admit this node";
-	return records.map((record) => ({
-		ok: true,
-		level: record.ok ? "ok" : "warn",
-		name: `fleet node ${record.nodeId}`,
-		detail: record.ok
-			? `eligible (${admission}): ${record.host} clio ${record.remoteVersion ?? "(custom entry)"}, path parity for ${record.projectRoot}, ${
-					record.targets.filter((fact) => fact.reachable === "true").length
-				}/${record.targets.length} targets reachable from the node`
-			: `ineligible: ${record.detail ?? "preflight failed"}`,
-	}));
+	return records.map((record, index) => {
+		const node = nodes[index];
+		const eligible = node !== undefined && fleetPreflightVerdict(node, projectRoot).ok;
+		const targets = record.targets
+			.map(
+				(fact) =>
+					`${fact.targetId}: network=${fact.reachable}, listingAccess=${fact.authentication ?? "unknown"}, model=${fact.modelAvailable}, runtime=${fact.runtimeCompatible}`,
+			)
+			.join("; ");
+		return {
+			ok: true,
+			level: record.ok ? ("ok" as const) : ("warn" as const),
+			name: `fleet node ${record.nodeId}`,
+			detail: record.ok
+				? `checks passed; ${eligible ? "eligible from recorded preflight" : `not admitted, run fleet nodes test ${record.nodeId} --record`}${recorded ? " (recorded)" : ""}: ${record.host}, clio ${record.remoteVersion}, project=${record.project?.kind ?? "not verified"}; ${targets}`
+				: `needs attention: ${record.detail ?? "preflight failed"}`,
+		};
+	});
 }
 
 /**

@@ -24,6 +24,8 @@ import type { ResourcesContract } from "../resources/contract.js";
 import { modelVisibleSkills } from "../resources/skills/loader.js";
 import { isAutonomyLevel } from "../safety/autonomy.js";
 import { parseRigorOverride, rigorResolution } from "../safety/rigor.js";
+import type { SchedulingContract } from "../scheduling/contract.js";
+import type { SessionContract } from "../session/contract.js";
 import { latestPriorSession } from "../session/history.js";
 import { probeWorkspaceAsync, type WorkspaceSnapshot } from "../session/workspace/index.js";
 import {
@@ -35,6 +37,7 @@ import {
 	sessionHasContext,
 } from "./compiler.js";
 import type { CompileSessionPromptInput, CompileWorkerPromptInput, PromptsContract } from "./contract.js";
+import { renderFleetInventory } from "./fleet-inventory.js";
 import { type FragmentTable, loadFragments } from "./fragment-loader.js";
 import { sha256 } from "./hash.js";
 import { type ProjectPreloadClass, selectProjectPreload } from "./preload.js";
@@ -222,7 +225,17 @@ export function createPromptsBundle(
 
 	const contract: PromptsContract = {
 		inputEpoch() {
-			return `${fragmentEpoch}:${agentsDomain()?.revision() ?? 0}:${sessionSourceEpoch}`;
+			const session = context.getContract<SessionContract>("session")?.current();
+			const settings = config()?.get();
+			const inventory = settings?.fleet.nodes.length
+				? renderFleetInventory(
+						settings,
+						context.getContract<SchedulingContract>("scheduling"),
+						session?.cwd ?? process.cwd(),
+						session?.id ?? "",
+					)
+				: "";
+			return `${fragmentEpoch}:${agentsDomain()?.revision() ?? 0}:${sessionSourceEpoch}:${sha256(inventory)}`;
 		},
 		async compileSessionPrompt(input: CompileSessionPromptInput) {
 			if (!table) throw new Error("prompts domain not started");
@@ -248,6 +261,7 @@ export function createPromptsBundle(
 			}
 			const sessionInputs = {
 				...input.sessionInputs,
+				hasFleetNodes: (settings?.fleet.nodes.length ?? 0) > 0,
 				...(options.noSkills === true ? { skillDiscoveryEnabled: false } : {}),
 				...(contextFiles.length > 0 ? { contextFiles } : {}),
 			};
@@ -258,6 +272,17 @@ export function createPromptsBundle(
 				sessionInputs,
 				additionalFragments: [
 					...sources.workspaceRoot,
+					...(sessionInputs.hasFleetNodes && sessionInputs.toolNames?.includes("dispatch")
+						? (() => {
+								const body = renderFleetInventory(
+									settings,
+									context.getContract<SchedulingContract>("scheduling"),
+									cwd,
+									input.sessionId,
+								);
+								return [{ id: "context.fleet", relPath: "inline/fleet", body, contentHash: sha256(body), dynamic: true }];
+							})()
+						: []),
 					...sources.clioRepoAwareness,
 					...selfDevelopmentSkillFragments(sources.clioRepoAwareness.length > 0, sessionInputs, safety),
 					...catalogFragments(sources.catalogs, sessionInputs),

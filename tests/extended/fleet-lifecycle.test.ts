@@ -1,14 +1,17 @@
 import { deepStrictEqual, strictEqual, throws } from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, it } from "node:test";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
+import { readClioVersion } from "../../src/core/package-root.js";
 import { capacityDrain, setCapacityDraining } from "../../src/domains/dispatch/capacity-lease.js";
 import { compileExecutionPlan } from "../../src/domains/dispatch/execution-plan.js";
 import type { ExecutionStepResult } from "../../src/domains/dispatch/execution-scheduler.js";
+import { rememberSessionFleetNode } from "../../src/domains/dispatch/fleet-placement-preference.js";
 import {
+	FLEET_PREFLIGHT_MAX_AGE_MS,
 	fleetPreflightVerdict,
 	recordFleetPreflight,
 	runFleetNodePreflight,
@@ -95,7 +98,7 @@ describe("fleet lifecycle boundary", () => {
 		strictEqual(resolveSshTargetLifecycle("manage", "user-managed"), "user-managed");
 	});
 
-	it("places by durable usage and excludes a failed node on failover", () => {
+	it("keeps unpinned work local and honors standing/session pins with failover exclusions", () => {
 		const settings = structuredClone(DEFAULT_SETTINGS);
 		settings.fleet.nodes = structuredClone(NODES);
 		const usage: Record<string, number> = { blade: 0, mini: 0 };
@@ -108,10 +111,34 @@ describe("fleet lifecycle boundary", () => {
 			preflightVerdict: () => ({ ok: true, reason: null }),
 			transportForNode: (node) => transport(node.id, node.host),
 		});
-		strictEqual(place({ agentId: "coder", executionRole: "builder", task: "build" })?.node.id, "blade");
+		strictEqual(place({ agentId: "coder", executionRole: "builder", task: "build" })?.node.id, "local");
+		settings.fleet.defaultNode = "mini";
 		usage.blade = 1;
 		strictEqual(place({ agentId: "coder", executionRole: "builder", task: "build" })?.node.id, "mini");
 
+		rememberSessionFleetNode("fleet-placement-contract", "blade");
+		const sessionRequest = {
+			agentId: "coder",
+			executionRole: "builder",
+			task: "build",
+			ownerSessionId: "fleet-placement-contract",
+		} as const;
+		strictEqual(place(sessionRequest)?.node.id, "blade");
+		strictEqual(place({ ...sessionRequest, node: "local" })?.node.id, "local");
+		const preview = createFleetPlacementPreviewResolver({
+			getSettings: () => settings,
+			fleet: registry,
+			preflightVerdict: () => ({ ok: true, reason: null }),
+		});
+		strictEqual(preview(sessionRequest).node.id, "blade");
+		const previewBeforeStamp = createFleetPlacementPreviewResolver({
+			getSettings: () => settings,
+			getSessionId: () => "fleet-placement-contract",
+			fleet: registry,
+			preflightVerdict: () => ({ ok: true, reason: null }),
+		});
+		strictEqual(previewBeforeStamp({ agentId: "coder", executionRole: "builder", task: "build" }).node.id, "blade");
+		settings.fleet.defaultNode = null;
 		registry.recordChannelFailure("blade", "channel closed");
 		strictEqual(registry.recordChannelFailure("blade", "channel closed"), "offline");
 		const rerouted = place({
@@ -120,9 +147,9 @@ describe("fleet lifecycle boundary", () => {
 			task: "retry",
 			reroutes: [{ attempt: 1, fromNode: "blade", toNode: "", reason: "node classified dead" }],
 		});
-		strictEqual(rerouted?.node.id, "mini");
+		strictEqual(rerouted?.node.id, "local");
 		deepStrictEqual(rerouted?.reroutes, [
-			{ attempt: 1, fromNode: "blade", toNode: "mini", reason: "node classified dead" },
+			{ attempt: 1, fromNode: "blade", toNode: "local", reason: "node classified dead" },
 		]);
 	});
 
@@ -294,6 +321,81 @@ describe("fleet lifecycle boundary", () => {
 		cleanupCompeteGroup(markCompeteGroupCleanupReady(legacyOwnership));
 	});
 
+	it("invalidates recorded eligibility when any connection fact changes", async () => {
+		scratch = await newScratchClioHome("clio-coder-preflight-connection-");
+		const ssh = join(scratch, "ssh");
+		writeFileSync(
+			ssh,
+			`#!/bin/sh
+printf '%s\\n' 'clio-coder-preflight/1' 'cwd=ok' 'clioCoder=${readClioVersion()}' 'state=ok'
+`,
+		);
+		chmodSync(ssh, 0o755);
+		const node = { id: "test", host: "test.invalid" };
+		const record = await runFleetNodePreflight(node, scratch, { sshBinary: ssh });
+		strictEqual(fleetPreflightVerdict(node, scratch, [record]).ok, true);
+		for (const patch of [
+			{ user: "other" },
+			{ port: 2222 },
+			{ identityFile: "/other/key" },
+			{ clioCoderEntry: "other worker" },
+			{ clioCoderVersionCommand: "other --version" },
+		]) {
+			strictEqual(fleetPreflightVerdict({ ...node, ...patch }, scratch, [record]).ok, false);
+		}
+	});
+
+	it("expires recorded eligibility after a day", async () => {
+		scratch = await newScratchClioHome("clio-coder-preflight-age-");
+		const ssh = join(scratch, "ssh");
+		writeFileSync(
+			ssh,
+			`#!/bin/sh
+printf '%s\\n' 'clio-coder-preflight/1' 'cwd=ok' 'clioCoder=${readClioVersion()}' 'state=ok'
+`,
+		);
+		chmodSync(ssh, 0o755);
+		const node = { id: "test", host: "test.invalid" };
+		const record = await runFleetNodePreflight(node, scratch, { sshBinary: ssh });
+		const expired = { ...record, checkedAt: new Date(Date.now() - FLEET_PREFLIGHT_MAX_AGE_MS - 1000).toISOString() };
+		strictEqual(fleetPreflightVerdict(node, scratch, [expired]).ok, false);
+	});
+
+	it("probes an absent remote state directory without creating it", async () => {
+		scratch = await newScratchClioHome("clio-coder-preflight-readonly-");
+		const ssh = join(scratch, "ssh");
+		const remoteState = join(scratch, "absent-state");
+		writeFileSync(
+			ssh,
+			`#!/bin/sh
+for arg; do command="$arg"; done
+export XDG_STATE_HOME='${remoteState}'
+exec sh -c "$command"
+`,
+		);
+		chmodSync(ssh, 0o755);
+		await runFleetNodePreflight(
+			{ id: "test", host: "test.invalid", clioCoderVersionCommand: `printf '${readClioVersion()}'` },
+			scratch,
+			{ sshBinary: ssh },
+		);
+		strictEqual(existsSync(remoteState), false);
+	});
+
+	it("refuses custom entries without a version probe", async () => {
+		scratch = await newScratchClioHome("clio-coder-preflight-custom-");
+		const ssh = join(scratch, "ssh");
+		writeFileSync(ssh, '#!/bin/sh\nfor arg; do command="$arg"; done\nexec sh -c "$command"\n');
+		chmodSync(ssh, 0o755);
+		const record = await runFleetNodePreflight(
+			{ id: "test", host: "test.invalid", clioCoderEntry: "/custom/worker" },
+			scratch,
+			{ sshBinary: ssh },
+		);
+		strictEqual(record.ok, false);
+		strictEqual(record.detail?.includes("clioCoderVersionCommand"), true);
+	});
+
 	it("emits the canonical fleet preflight protocol and accepts the released spelling", async () => {
 		scratch = await newScratchClioHome("clio-coder-preflight-naming-");
 		const canonicalSsh = join(scratch, "canonical-ssh.sh");
@@ -304,12 +406,17 @@ case "$*" in
   *clio-coder-preflight/1*clioCoder=*) ;;
   *) exit 9 ;;
 esac
-printf '%s\\n' 'clio-coder-preflight/1' 'cwd=ok' 'clioCoder=custom-entry' 'state=ok' 'cpu=1' 'memkb=1' 'gpu=unknown' 'vrammb=unknown'
+printf '%s\\n' 'clio-coder-preflight/1' 'cwd=ok' 'clioCoder=${readClioVersion()}' 'state=ok' 'cpu=1' 'memkb=1' 'gpu=unknown' 'vrammb=unknown'
 `,
 			"utf8",
 		);
 		chmodSync(canonicalSsh, 0o755);
-		const node = { id: "canonical", host: "canonical.invalid", clioCoderEntry: "/opt/custom-worker" };
+		const node = {
+			id: "canonical",
+			host: "canonical.invalid",
+			clioCoderEntry: "/opt/custom-worker",
+			clioCoderVersionCommand: "/opt/custom-worker --version",
+		};
 		const canonical = await runFleetNodePreflight(node, scratch, { sshBinary: canonicalSsh });
 		strictEqual(canonical.ok, true);
 		deepStrictEqual(canonical.checks, {

@@ -90,6 +90,8 @@ import {
 	showClioOverlayFrame,
 } from "../overlay-frame.js";
 import { barSep, clioTheme, GLYPH, padAnsi, rule, screenTitle } from "../theme/index.js";
+import type { FleetNodeSettingsUi } from "./fleet-node-settings.js";
+import { fleetNodeSettingsSubmenu } from "./fleet-node-settings.js";
 import { modelsForTarget } from "./model-selector.js";
 
 export const SETTINGS_OVERLAY_WIDTH = "100%";
@@ -182,7 +184,7 @@ const SETTINGS_SECTION_DESCRIPTIONS = Object.fromEntries(
 
 /**
  * Entry rows (one per fleet profile field, agent binding, target, fleet node)
- * are keyed by the config path they edit; fleet node rows are read-only status.
+ * are keyed by the config path they edit; SSH node rows also open management actions.
  */
 type EntrySettingId =
 	| `setting.${string}`
@@ -282,6 +284,7 @@ export interface SettingsCenterSelection {
 }
 
 interface BuildSettingItemsOptions {
+	onFleetSettingsChanged?: (settings: ClioSettings) => void;
 	providers?: ProvidersContract;
 	/**
 	 * Live settings source for submenus. The static `settings` snapshot is
@@ -1479,7 +1482,54 @@ export function buildSettingItems(
 				: "(none)",
 			{ affordance: "edit settings.yaml", readOnly: true },
 		),
-		...fleetNodeRows(options?.getFleetNodes?.() ?? []),
+		...fleetNodeRows(
+			options?.getFleetNodes?.() ?? [],
+			options?.onFleetSettingsChanged
+				? {
+						text: textInputSubmenu,
+						pick: selectListSubmenu,
+						refresh: () => options.requestRefresh?.(),
+						changed: options.onFleetSettingsChanged,
+					}
+				: undefined,
+		),
+		...(options?.onFleetSettingsChanged
+			? [
+					settingItem("fleet.nodes.add", "Add SSH node", {
+						label: "Add SSH node",
+						presentationKind: "action",
+						submenu: fleetNodeSettingsSubmenu("add", {
+							text: textInputSubmenu,
+							pick: selectListSubmenu,
+							refresh: () => options.requestRefresh?.(),
+							changed: options.onFleetSettingsChanged,
+						}),
+						affordance: "opens guided setup",
+					}),
+					settingItem("fleet.nodes.discover", "Discover with Tailscale", {
+						label: "Discover with Tailscale",
+						presentationKind: "action",
+						submenu: fleetNodeSettingsSubmenu("discover", {
+							text: textInputSubmenu,
+							pick: selectListSubmenu,
+							refresh: () => options.requestRefresh?.(),
+							changed: options.onFleetSettingsChanged,
+						}),
+						affordance: "optional peer discovery",
+					}),
+				]
+			: []),
+		settingItem("setting.fleet.defaultNode", settings.fleet.defaultNode ?? "(unset)", {
+			label: "Standing worker node preference",
+			description:
+				"Unpinned work stays local. Leave unset to allow Clio's once-per-session placement question; explicit and profile pins take priority.",
+			submenu: selectListSubmenu("Standing worker node preference", [
+				{ value: "(unset)", label: "No standing preference (local until chosen)" },
+				{ value: "local", label: "Always prefer local" },
+				...settings.fleet.nodes.map((node) => ({ value: node.id, label: `${node.id} (${node.host})` })),
+			]),
+			affordance: "opens placement picker",
+		}),
 		...fleetEndpointRows(options?.providers),
 		settingItem("panes.enabled", panes.enabled, { values: ["auto", "off"] }),
 		settingItem("panes.notifications", panes.notifications, { values: ["failures", "all", "off"] }),
@@ -2109,22 +2159,36 @@ function targetHealthSegment(status: TargetHealth["status"]): SettingsValueSegme
 	}
 }
 
-/** Read-only placement rows: where dispatched workers run, from the live scheduler snapshot. */
-export function fleetNodeRows(nodes: ReadonlyArray<FleetNodeSnapshot>): SettingsCenterItem[] {
+/** Placement and node management share the live scheduler snapshot. */
+export function fleetNodeRows(nodes: ReadonlyArray<FleetNodeSnapshot>, ui?: FleetNodeSettingsUi): SettingsCenterItem[] {
 	return nodes.map((node) => {
 		const bound =
 			node.capacityBound === null ? null : describeLocalCapacity({ limit: node.maxWorkers, bound: node.capacityBound });
 		const busy = `${node.maxWorkers > 0 ? `${node.activeWorkers}/${node.maxWorkers} busy` : `${node.activeWorkers} busy`}${bound ? ` · ${bound}` : ""}`;
-		return settingItem(`fleet.nodes.${node.id}`, `${node.state} · ${busy}`, {
+		const readiness =
+			node.state === "offline"
+				? "offline"
+				: node.kind === "local"
+					? "ready"
+					: node.verification?.ok
+						? "ready for this project"
+						: node.verification?.reason?.includes("has not passed")
+							? "not checked"
+							: "needs attention";
+		return settingItem(`fleet.nodes.${node.id}`, `${readiness} · ${busy}`, {
 			label: `node ${node.id}`,
 			description: `${node.kind} · ${node.host}${node.stateReason ? ` · ${node.stateReason}` : ""}${node.lastSeenAt ? ` · seen ${clockLocal(node.lastSeenAt)}` : ""}`,
-			affordance: "Add remote machines in the settings file; Check setup tests their connection",
-			readOnly: true,
+			affordance:
+				node.kind === "ssh" && ui
+					? "open evidence, test, install or remove"
+					: (node.verification?.reason ?? "Local worker capacity"),
+			readOnly: node.kind === "local" || !ui,
+			...(node.kind === "ssh" && ui ? { submenu: fleetNodeSettingsSubmenu("manage", ui, node.id) } : {}),
 			presentationKind: "status",
 			valueSegments: [
 				{
-					text: `${node.state === "online" ? GLYPH.running : "○"} ${node.state}`,
-					tone: node.state === "online" ? "healthy" : "unhealthy",
+					text: `${node.state === "online" && (node.kind === "local" || node.verification?.ok) ? GLYPH.running : "○"} ${readiness}`,
+					tone: node.state === "online" && (node.kind === "local" || node.verification?.ok) ? "healthy" : "unhealthy",
 				},
 				{ text: ` · ${busy}`, tone: "neutral" },
 			],
@@ -4411,6 +4475,12 @@ export function openSettingsOverlay(tui: TUI, deps: OpenSettingsOverlayDeps): Se
 	const targetOperations = new Map<string, { operation: "connect" | "probe"; token: object }>();
 	const buildOptions: BuildSettingItemsOptions = {
 		getSettings: deps.getSettings,
+		onFleetSettingsChanged: (saved) => {
+			const next = structuredClone(deps.getSettings()) as ClioSettings;
+			next.fleet.nodes = saved.fleet.nodes;
+			if (deps.commitSetting) deps.commitSetting("fleet.nodes", next, "global");
+			else deps.writeSettings(next);
+		},
 		editTarget: (targetId) => launchWizard(targetId),
 		requestRefresh: () => refreshRows(),
 		getTargetOperation: (targetId) => {

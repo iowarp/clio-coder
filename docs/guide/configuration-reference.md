@@ -58,6 +58,7 @@ Default chat settings control interactive conversation routing, reasoning effort
 | `fleet.rosters` | `{}` |
 | `fleet.agentProfiles` | `{}` |
 | `fleet.speculativeDispatch` | `false` |
+| `fleet.defaultNode` | `null` |
 | `fleet.nodes` | `[]` |
 | `fleet.adaptiveRouting.roles` | `[]` |
 | `fleet.adaptiveRouting.postures` | `[]` |

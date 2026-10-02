@@ -60,6 +60,7 @@ export function coordinatorDispatchParameters() {
 		verification: Type.Optional(DispatchVerificationSchema),
 	});
 	return Type.Object({
+		node: Type.Optional(Type.String()),
 		list: Type.Optional(Type.Boolean({ description: "Discover available worker recipes and their tools." })),
 		agent: Type.Optional(Type.String({ description: "Recipe id from list; choose a specialist for the task." })),
 		task: Type.Optional(
@@ -73,6 +74,7 @@ export function coordinatorDispatchParameters() {
 				Type.Union([
 					Type.String(),
 					Type.Object({
+						node: Type.Optional(Type.String()),
 						agent: Type.Optional(Type.String()),
 						task: Type.String(),
 						briefing: Type.Optional(Type.String()),
