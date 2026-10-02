@@ -3252,6 +3252,10 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		toolRegistry,
 		admitFlow: admitModelFlow,
 		admitRuntimeFlow,
+		labelReferencedPaths: (paths) => {
+			const labels = safety?.policy?.flowRestrictionsForPaths?.(paths, process.cwd()) ?? null;
+			if (labels !== null) flowLedger.absorb(labels, { tool: "file-reference" });
+		},
 		hasAttachedDispatch: () => dispatchBackground.size() > 0,
 		// The pre-warm buys latency for a person about to type the next turn. A
 		// headless `run` submits its one prompt immediately and an unattended boot

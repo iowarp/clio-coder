@@ -761,6 +761,8 @@ export interface CreateChatLoopDeps {
 	admitFlow?: (destination: { targetId: string; runtimeId: string; wireModelId: string }) => string | null;
 	/** The same admission for /btw, /draft, /handoff and the pre-warm, which send the live runtime's history. */
 	admitRuntimeFlow?: (runtime: { targetId: string; runtimeId: string; wireModelId: string }) => string | null;
+	/** Labels the information-flow sources that `@file` references inlined into a submitted prompt. */
+	labelReferencedPaths?: (paths: ReadonlyArray<string>) => void;
 	/**
 	 * Run the compaction flow end-to-end (read entries, resolve model,
 	 * summarize, persist a compactionSummary entry) and return the result,
@@ -2012,7 +2014,13 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			const images = sidecarObservation === null && options.images?.length ? [...options.images] : undefined;
 			const pendingSkillRequests =
 				state.currentTurnConstraints?.skills === "disabled" ? [] : (options.pendingSkillRequests ?? []);
-			context.addWorkingContextPaths(options.workingContextPaths ?? []);
+			// Inlined @file content is part of this text, and the pre-turn decision or
+			// a preparation compaction can send it before the user turn is filed.
+			// A first turn has no session to hold the label yet, so it is recorded
+			// again once the turn below has created one.
+			const referencedPaths = options.workingContextPaths ?? [];
+			if (referencedPaths.length > 0) deps.labelReferencedPaths?.(referencedPaths);
+			context.addWorkingContextPaths(referencedPaths);
 			context.prepareMemoryTurn(agentRuntime, {
 				taskText: text,
 				continuation: options.requestContinuation === true,
@@ -2298,6 +2306,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				options.display?.text,
 				reservedUserTurnId,
 			);
+			if (referencedPaths.length > 0) deps.labelReferencedPaths?.(referencedPaths);
 			const turnIndex = operatorTurnIndex(userTurnId ?? undefined);
 			// A continuation is a synthetic user turn, which the count skips.
 			if (options.requestContinuation !== true) operatorTurnsBefore = turnIndex + 1;
