@@ -158,7 +158,11 @@ function appendCommandOutput(text: string, sink: CommandOutputSink, wrap: Comman
 	sink.appendReplayBlock((width) => {
 		const lines: string[] = [];
 		for (const rawLine of normalized.split("\n")) {
-			lines.push(...wrap(rawLine, width));
+			const leading = /^[ \t]*/u.exec(rawLine)?.[0] ?? "";
+			const indent = leading.replace(/\t/gu, "    ").slice(0, Math.max(0, width - 1));
+			lines.push(
+				...wrap(rawLine.slice(leading.length), Math.max(1, width - indent.length)).map((line) => `${indent}${line}`),
+			);
 		}
 		return lines;
 	});
