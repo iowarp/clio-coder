@@ -151,6 +151,7 @@ explains worker route selection.
 | `fleet.rosters` | `{}` | next dispatch |
 | `fleet.agentProfiles` | `{}` | next dispatch |
 | `fleet.speculativeDispatch` | `false` | next turn |
+| `fleet.defaultNode` | `null` | next dispatch |
 | `fleet.nodes` | `[]` | next dispatch |
 | `fleet.adaptiveRouting.roles` | `[]` | next dispatch |
 | `fleet.adaptiveRouting.postures` | `[]` | next dispatch |

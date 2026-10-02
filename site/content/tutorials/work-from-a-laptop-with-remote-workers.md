@@ -1,94 +1,151 @@
-Your conversation and a worker process do not have to run on the same machine. Clio Coder can coordinate native workers over SSH, so a local session directs work in a configured remote environment.
+Your conversation can stay on your laptop while a worker runs tools on another machine. Register an SSH node, install the exact Clio build if needed, verify its project and model route, then choose where the first bounded task runs.
 
 ::: note Version scope
-This guide describes the v0.6.0 fleet. The configuration below is a template, not a recorded deployment, and this workflow does not grant access to institutional systems or override their scheduler and data rules.
+This guide describes the v0.6.0 fleet. Remote workers use your existing SSH access. They do not grant access to institutional systems or replace their scheduler and data rules.
 :::
 
 ::: needs
-- SSH access to the node, under your own configuration.
-- A matching Clio runtime on the node and a writable state directory.
-- The project at the same absolute path on each node.
+- Noninteractive SSH access to a machine you may use for work.
+- Node.js 22.19 or newer and npm on its noninteractive SSH PATH.
+- The project at the same absolute path on the client and node, using shared storage or matching clean Git checkouts.
 - A model route the worker can reach from the node.
 :::
-
-A cluster login or a VPS account alone does not satisfy that setup.
 
 ## Choose where each part runs
 
 ::: diagram remote-placement
 :::
 
-Inference and execution are separate. A local worker calling a remote model endpoint still runs its tools locally; a remote native worker runs its tools on the selected node. A target URL that uses localhost resolves on the worker's machine.
+Worker placement and inference are separate. A local worker calling a remote model endpoint runs tools locally. An SSH worker runs tools on the selected node. A target URL containing `localhost` refers to the worker's machine.
 
-This matters when a project needs a particular compiler, filesystem, or dataset. It also matters for information policy: a remote worker configured with a cloud target may send model input on to that provider.
+Choose a node for the compiler, filesystem, data or capacity the task needs. Declared labels such as `gpu` help describe it, but they do not prove observed hardware or available memory. A remote worker using a cloud target can send model input to that provider under the existing information policy.
 
-## Declare one node
+## Add one SSH node
 
-Fleet nodes live under `fleet.nodes` in user settings. The local node already exists and is not declared there. **Settings**, **Fleet** chooses the default worker node for work that does not name one.
+From your project root, register an SSH alias, hostname or address:
+
+```sh
+clio-coder fleet nodes add build-node --host build-node --max-workers 1
+clio-coder fleet nodes list
+```
+
+The implicit `local` node already exists. Adding a node keeps unpinned work local. The new node starts as **not checked**.
+
+Use an existing SSH alias to select the user, port and identity. You can also pass `--user`, `--port` and `--identity-file` explicitly. `--labels cpu,build` adds operator declarations. Start with one slot until you know the node's workload and resource limits.
+
+In the terminal, open `/fleet` or **Settings → Fleet** and choose **Add SSH node**. The guided flow asks for a name and host, then offers a test or installation preview. Open a node row to see evidence and timestamps, test it, preview an install or remove its saved entry.
 
 ::: capture tui-settings-fleet
 :::
 
-```yaml title=settings.yaml
-fleet:
-  nodes:
-    - id: build-node
-      host: build-node.example.net
-      maxWorkers: 1
-```
+### Use a LAN endpoint or optional Tailscale discovery
 
-Replace the host and use your own SSH configuration, then make sure the project is at the same absolute path before admitting work. The [fleet guide](/docs/guide/fleet-dispatch.html) describes the other fields and profile pins.
-
-A remote server with a different checkout path is not automatically compatible. The transport does not synchronize an arbitrary repository or stage datasets for you; establish a supported filesystem layout deliberately.
-
-## Check the node before dispatch
-
-::: steps
-### Run the diagnostic
+If the client and node share a network, prefer a LAN endpoint you have verified with SSH. Otherwise, a reachable Tailscale address or MagicDNS name can use the same worker transport.
 
 ```sh
+clio-coder fleet nodes discover
+clio-coder fleet nodes add travel-node --host travel-node.example-tailnet.ts.net
+```
+
+Discovery is opt-in. It reads `tailscale status --json` when the CLI is installed and signed in, lists MagicDNS names and IP addresses, and leaves the selection to you. The TUI's **Discover with Tailscale** lets you pick an endpoint and name the node. A discovered peer has no proven SSH access, runtime or project readiness. You can add an SSH host directly without Tailscale.
+
+The endpoint can matter substantially. A 4 MiB SSH transfer from this project's development client to mini measured about **173 MiB/s over LAN and 1.4 MiB/s over Tailscale**. SSH setup and existing connection multiplexing affect those numbers; measure your own route. Clio uses the host you configure and does not automatically switch between addresses.
+
+## Install the exact client build
+
+If the node lacks a matching Clio runtime, preview a user-level install:
+
+```sh
+clio-coder fleet nodes install build-node
+```
+
+Review the package size, digest and destination. Then execute it:
+
+```sh
+clio-coder fleet nodes install build-node --yes
+```
+
+Clio packs the build the client actually runs, transfers it over SSH, checks its SHA-256 digest, and installs it under the node's `~/.local/share/clio-coder/workers/<digest>/`. She uses the existing Node and npm, verifies the version and updates the saved worker entry. The installer does not require sudo or modify services or shell profiles. Optional SDK dependencies are omitted.
+
+You can also manage Clio yourself. The default invocation is `clio-coder worker`. A custom `--entry` needs an explicit `--version-command` that reports its Clio version; it cannot skip version verification.
+
+## Prepare and verify the project
+
+Choose one supported arrangement:
+
+| Arrangement | What Clio verifies | Available work |
+| --- | --- | --- |
+| Shared storage at the same absolute path | A transient client-side file challenge is visible from the node. | Read-only and mutating workers use that storage. |
+| Independent checkout at the same absolute path | Both trees are clean, have the same Git HEAD and matching root history. | Read-only work; mutations through an isolated task worktree and SSH commit return. |
+
+Clio does not clone an arbitrary repository, map different paths, install project dependencies or stage datasets. Prepare those yourself. For independent checkouts, update both to the same clean baseline before testing.
+
+::: steps
+### Observe first
+
+```sh
+clio-coder fleet nodes test build-node
 clio-coder doctor
 ```
 
-Plain doctor reports node probes without refreshing dispatch eligibility.
+These commands observe the node without creating directories there or granting new dispatch eligibility. A plain test can identify a clean matching checkout; recording also permits the transient client-side challenge that proves shared storage.
+
+Model facts distinguish network reachability, access to the model listing, model presence and runtime support. Unknown remains unknown; a catalog listing is not a successful generation or proof of a resident model.
 
 ::: capture cli-doctor
 :::
 
-### Record passing preflight
+### Record readiness for this project
 
 ```sh
-clio-coder doctor --fix
+clio-coder fleet nodes test build-node --record
+clio-coder fleet nodes list
 ```
 
-Run it from the project root after you review the setup. It records each node's preflight result for that path, and only a passing record makes a node eligible for dispatch. It also creates missing Clio directories, makes `settings.yaml` and `credentials.yaml` owner-only, and rewrites retired enum values and YAML `on` and `off` booleans in `settings.yaml`, so run plain `doctor` first to preview them.
+A passing recorded check makes the node **ready for this project**. A failed recorded check revokes previous eligibility. Records expire after one day and bind the entire connection configuration and client version. Changing the host, user, port, key or worker entry requires another recorded check.
 
-### Upgrade together
+`doctor --fix` can record all node checks, along with its broader local repairs. Run plain `doctor` first to review those repairs. The node-specific test is the focused route when you only want to record one node.
 
-Every SSH node must run exactly the same Clio Coder version as your client. Preflight compares the versions, and upgrading the client invalidates each node's record until you run `clio-coder doctor --fix` again. In 0.6.0 the worker specification moved to version 7, so a 0.5 node rejects work from a 0.6 client.
+### Refresh after an upgrade or endpoint change
+
+Install the new exact client build when needed, then repeat the recorded test from the project root. A pinned task with an invalid or expired check fails with a reason; it does not silently run elsewhere.
 :::
 
-::: result What doctor tells you
-An unavailable or incompatible node can stay a warning while local work remains usable. A changed host, project root, or local runtime upgrade invalidates the node's preflight record, and a pinned task does not fall back silently to another machine.
-:::
+## Choose the first worker
 
-## Keep the first task bounded
+Keep the first task read-only and familiar. For example, ask Clio:
 
-Ask one worker to inspect a familiar part of the project or run a known check. Select its node through the supported profile or dispatch configuration and review the assignment before it runs.
+```text
+Use a read-only Scout to inspect the README and explain this project's test command.
+Before dispatching, ask me once where to run it, offering local and suitable verified fleet nodes.
+```
 
-Remote workers keep default worker authority, even when the coordinating session uses yolo. Capacity limits bound concurrent work; they do not create a scheduler allocation or permission to use another person's resources.
+When a verified node suits substantial work and no preference or pin exists, Clio asks once for the session. The choice remembers the exact node id for later unpinned work. The question does not replace the existing dispatch-plan approval. If you explicitly request `build-node`, she can pin it directly.
 
-On a university or laboratory cluster, use an approved execution environment. Do not launch a fleet on a login node merely because SSH works. The [Slurm guide](/docs/guide/slurm.html) describes separate allocation-aware tooling; SSH fleet support is not universal batch-scheduler integration.
+A **Standing worker node preference** in Fleet settings persists across sessions. Placement priority is an explicit task node, a profile pin, the session choice, the standing preference, then local. Headless runs never ask; configure a preference or explicit pin before running them.
 
-## Follow the work from your laptop
+Remote workers retain default worker authority even when the coordinator uses yolo. Worker slots limit concurrency; they do not create a scheduler allocation. On a university or laboratory cluster, use an approved execution environment. The [Slurm guide](/docs/guide/slurm.html) describes separate allocation-aware tooling.
 
-The terminal is the primary interface for the full workflow. The desktop alpha shows conversations, fleet activity, and recorded results for a subset of terminal workflows; it is a local browser interface, not a hosted control service.
+## Return edits from an independent checkout
 
-Open **Workers** with Alt+W to see queued, active, failed, and completed work, then review results and the actual project changes. Some external peers cannot receive live steering; native SSH workers and peer bridges are different execution paths.
+An editing dispatch to an independent node checkout must use `worktree: true`. Ask Clio to use an isolated task worktree, name the files she may change and declare the host checks you want before application.
+
+Clio creates a matching branch and worktree on the node at the approved baseline. After the worker exits, she commits its edits there, fetches the branch through the existing SSH connection and checks the returned baseline and permitted paths.
+
+She imports it into the owned local task worktree before the existing host verification and guarded apply flow. `apply: "preserve"` keeps the result without merging it.
+
+Transfer, verification and application failures preserve the node branch for recovery. The receipt names the node, branch, worktree and returned commit when available. Inspect preserved work before merging or deleting it. A successful guarded merge permits remote cleanup. The node's original checkout stays at its old baseline, so update it deliberately before the next dispatch that needs the new commit.
+
+## Follow the result
+
+Open **Workers** with Alt+W to see queued, active, failed and completed work with its actual node. Review the worker result, receipt and project changes. The CLI's `clio-coder fleet status` and `clio-coder fleet view <runId>` expose durable results from another terminal.
+
+SSH nodes and delegated peers are separate execution paths. A delegated peer is not an SSH machine whose resources or project access Clio has verified.
 
 ::: limits
-- SSH, a matching runtime, and the same absolute project path are prerequisites, not details.
-- Clio does not stage repositories or datasets onto a node.
+- SSH access, exact Clio version and the same absolute project path remain prerequisites.
+- Project dependencies and datasets need your own staging; there is no arbitrary repository sync or path mapping.
+- Independent-checkout edits require isolated task worktrees and the existing verification and application gates.
 - Institutional access rules and schedulers still govern where work may run.
 :::
 

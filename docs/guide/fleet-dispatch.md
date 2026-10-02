@@ -1,9 +1,9 @@
 # Fleet Dispatch
 
-Clio Coder dispatches bounded worker agents. With a fleet configured, those
-workers run on remote machines over SSH while the orchestrator keeps every
-guarantee it makes locally: one admission path, one autonomy matrix, one
-receipt chain.
+Clio Coder dispatches bounded worker agents locally or on verified SSH nodes.
+Registering a remote node keeps unpinned work local. An explicit pin, session
+choice or standing preference selects remote execution through the same
+admission, worker authority, verification and receipt paths.
 
 Source of truth: `src/domains/dispatch/**`, [cluster.ts](../../src/domains/scheduling/cluster.ts),
 [dispatch.ts](../../src/tools/dispatch.ts), [monitor.ts](../../src/tools/monitor.ts), and the contract tests under
@@ -56,11 +56,13 @@ Design decisions that shape everything else:
   node the worker runs on, so `localhost` in a worker's target means that
   node's own inference server. The orchestrator-resolved API key rides the
   WorkerSpec.
-- Shared filesystem. Remote nodes see the project at the same absolute path.
-  The doctor preflight verifies this parity per node; hosts with a disjoint
-  filesystem fail admission with a clear reason.
+- Verified project files. The project uses the same absolute path on every
+  node. Clio proves shared storage through a file challenge, or verifies
+  independent clean Git checkouts with the same HEAD and root history.
+  Independent-checkout edits return through isolated task branches over SSH.
+  There is no arbitrary repository sync, dataset staging or path mapping.
 - Deterministic placement and measured routing. Exact pins remain exact.
-  Unpinned placement prefers lower durable lease usage and declaration order;
+  Unpinned placement stays local until an operator preference selects a node;
   the cross-process lease state is the final capacity authority. Route quality
   can be activated only for named roles/postures after exact-tuple readiness,
   and hard constraints always eliminate before any score.
@@ -92,66 +94,177 @@ Admission computes one immutable envelope with the recipe policy, invocation req
 
 ## Node setup
 
-Fleet nodes are declared under `fleet.nodes` in `settings.yaml`. The implicit
-`local` node always exists and is never declared. A run's node is the host its
-worker process ran on, never the host serving the model, so a run against a
-remote target from this machine still records `node: local`.
+A fleet node is a machine where a worker process runs. It is separate from an
+inference target: a local worker using a remote model still records `node: local`.
+The implicit `local` node always exists and is never declared in `fleet.nodes`.
+
+Start from the project root with noninteractive SSH access and one worker slot:
+
+```sh
+clio-coder fleet nodes add node-a --host node-a --max-workers 1
+clio-coder fleet nodes list
+```
+
+`--host` accepts an existing SSH alias, hostname or address. User, port and
+identity default to your SSH configuration; `--user`, `--port` and
+`--identity-file` override them. `--labels cpu,build` supplies declared labels,
+not observed hardware. Node ids use letters, numbers, underscores or hyphens;
+`local` is reserved. Registration starts at **not checked** and does not change
+placement. CLI additions default to one slot and `residency: observe`.
+
+The equivalent user settings are:
 
 ```yaml
 fleet:
+  defaultNode: null             # no standing preference; unpinned work stays local
   nodes:
     - id: node-a
-      host: node-a.example.net
-      user: me                  # optional; defaults to the SSH config
+      host: node-a              # existing SSH alias, hostname or address
+      user: me                  # optional; defaults to SSH config
       port: 22                  # optional
       identityFile: ~/.ssh/id_fleet   # optional
-      labels: [cpu]             # optional operator labels
-      maxWorkers: 2             # per-node cap; defaults to 2
-      residency: observe        # observe (default) or manage
-    - id: node-b
-      host: node-b.example.net
-      maxWorkers: 1
+      labels: [cpu, build]      # declarations, distinct from resource observations
+      maxWorkers: 1             # explicit per-node cap
+      residency: observe        # default; manage requires an explicit opt-in
 ```
 
-`clioCoderEntry` may override the remote invocation (default `clio-coder worker`).
-Node ids must be unique and `local` is reserved.
+`/fleet` opens **Settings → Fleet**. **Add SSH node** asks for a name and host,
+then offers a test or installation preview. **Discover with Tailscale** offers
+peer endpoints. Each SSH row opens check evidence and timestamps plus **Test**,
+**Install** and **Remove**. Tests record project readiness; installs show the
+remote changes before confirmation. Removal affects saved configuration and
+leaves remote files in place. `clio-coder fleet nodes remove node-a` does the
+same; profile pins or a standing preference must be cleared first.
 
-Worker profiles can pin work to a node: `fleet.profiles.<name>.node` routes
-every dispatch bound to that profile. Settings → Fleet (`/fleet`) edits the
-pin on the profile's `node` row, and the dispatch tool accepts an explicit
-`node` argument per task.
+### Exact client installation
+
+The node needs Node.js >=22.19 and npm on its noninteractive SSH PATH. Clio can
+install the exact package this client runs at user level:
+
+```sh
+clio-coder fleet nodes install node-a          # preview only
+clio-coder fleet nodes install node-a --yes    # execute the reviewed operation
+```
+
+The preview names the version, SHA-256, transfer size and private destination
+under `~/.local/share/clio-coder/workers/<digest>/`. Execution packs the actual
+client package, transfers it over SSH, checks the digest, installs npm
+dependencies without optional SDKs, verifies the Clio version, then saves the
+worker entry. It uses no sudo, system packages, service changes or shell profile
+edits. Build a source checkout before packing it. Installation changes the
+connection identity, so record preflight again afterwards.
+
+For an independently managed install, the default invocation is
+`clio-coder worker`. A custom `clioCoderEntry` needs an explicit
+`clioCoderVersionCommand`; silence never proves compatibility. For example:
+
+```sh
+clio-coder fleet nodes add custom --host custom-host \
+  --entry '/home/me/.local/bin/clio-coder worker' \
+  --version-command '/home/me/.local/bin/clio-coder --version'
+```
+
+The probe must report exactly the client's Clio version. Project compilers,
+dependencies and datasets remain the operator's responsibility.
+
+### LAN endpoints and optional Tailscale discovery
+
+Prefer a verified LAN endpoint when the client and node share a network. Use
+Tailscale when it provides the reachable route, with an IP address or MagicDNS
+name as the configured SSH host. Clio does not automatically switch endpoints.
+
+A development measurement using a 4 MiB SSH stream to mini observed about
+**173 MiB/s over LAN versus 1.4 MiB/s over Tailscale**. This is guidance to check
+both routes, not a promised network rate: SSH setup overhead and existing
+connection multiplexing affect the measurement. Verify the selected endpoint
+with your SSH configuration and record its preflight.
+
+```sh
+clio-coder fleet nodes discover [--json]
+clio-coder fleet nodes add node-b --host node-b.example-tailnet.ts.net
+```
+
+Discovery explicitly reads `tailscale status --json`; Tailscale is optional.
+It shows MagicDNS names, IP addresses and reported peer state. The CLI lists
+candidates for you to select with `nodes add`; the TUI provides an endpoint
+picker. Discovery grants no SSH access, runtime compatibility or eligibility.
+An unavailable CLI or daemon produces guidance to sign in or add a host directly.
+
+### Project arrangement
+
+Every node needs the project at the same absolute path as the client. Recorded
+verification distinguishes:
+
+- **Shared storage:** a transient file written on the client is read from the
+  node. The node probe only reads it. This can support non-Git projects and
+  shared edits.
+- **Independent checkout:** both trees are clean, have identical Git HEAD and
+  the same sorted root commits. Read-only work runs there; editing work requires
+  `worktree: true` and the [SSH return path](#return-edits-from-an-independent-checkout).
+- **Unverified:** admission refuses the project with a reason. Matching directory
+  names alone establish no shared data or repository identity.
+
+There is no automatic initial clone, path mapping or dataset staging. A shared
+mount with different paths is unsupported. After applying a returned change
+locally, deliberately update the node's original checkout to the next clean
+baseline before dispatching against it again.
 
 ## Doctor preflight
 
-A remote node is dispatch-eligible only after one preflight pass proved, over
-the node's real SSH channel:
+A remote node needs a passing recorded check for the current project before
+admission. The connection probes observe batch-mode SSH, the exact Clio version,
+the project path and writable state storage (or a writable existing ancestor).
+Project verification then proves shared storage or a matching clean checkout.
 
-1. reachability (SSH connects in batch mode),
-2. a version-matched `clio-coder` on the remote invocation path,
-3. path parity for the project root (the shared-filesystem assumption),
-4. a writable remote state directory,
-5. node-scoped target reachability, runtime/model compatibility, endpoint
-   identity, and explicit resource facts where the target exposes them.
+```sh
+clio-coder fleet nodes test node-a                 # observation only
+clio-coder fleet nodes test node-a --record        # record this node for this project
+clio-coder fleet nodes list [--json]               # readiness and check age
+clio-coder doctor                                 # inspect all setup
+clio-coder doctor --fix                           # local repairs and recorded node checks
+```
 
-Run it with `clio-coder doctor`. Plain doctor is diagnostic and read-only: it
-reports the live probe rows but does not create or refresh
-`fleet-preflight.json`, and therefore does not change dispatch eligibility.
-Run `clio-coder doctor --fix` to record passing preflight results into
-`fleet-preflight.json` and make verified nodes dispatch-eligible.
-Placement still reads a pre-existing record under the state directory, keyed by
-node and project root; a changed host, changed project root, or local
-`clio-coder` upgrade invalidates that record and admission fails closed. Failing
-nodes are doctor warnings rather than a failure of the local installation.
+Plain `doctor` and plain node tests do not create remote directories or update
+local eligibility. Recording permits a transient client-side shared-storage
+challenge and stores the results in `fleet-preflight.json`. `doctor --fix` also
+performs its broader local repairs; run plain doctor first to review those.
+A failed recorded test revokes prior eligibility.
+
+`FLEET_PREFLIGHT_MAX_AGE_MS` is one day: connection and resource observations
+need periodic rechecking. Records bind the complete connection configuration
+(host, user, port, identity file, worker entry and version probe), the project
+root and client version. Any connection change, different project, upgrade or
+expired record requires a new passing recorded check. Dispatch additionally
+rechecks project authority at launch. Failed nodes can remain doctor warnings
+while local work stays usable.
+
+Target facts stay separate: network reachability, access to a supported model
+listing, presence of the configured model and runtime support. Listing success
+proves access to that listing only; it does not prove a chat request, a resident
+model or general runtime compatibility. Unsupported probes retain **unknown**.
+Credentials travel through stdin for probes and are not stored in observation
+facts. Diagnostics read stored keys without refreshing OAuth. Resource facts
+are observations; declared labels never substitute for GPU or memory evidence.
+
+Fleet settings shows **not checked**, **ready for this project**,
+**needs attention**, or **offline** alongside live capacity. Opening a node
+shows its recorded check time and age, project kind, version, resource facts,
+target observations and any refusal reason. An offline channel and a failed or
+expired recorded check are distinct facts.
 
 ## Placement and process-safe admission
 
 Placement and admission are separate, deterministic authorities:
 
-1. An explicit request pin, profile pin, or approved route envelope restricts
-   the eligible node set. Unknown, offline, stale-preflight, or incompatible
-   pins fail closed; they never silently fall back.
-2. For unpinned eligible nodes, placement prefers lower durable lease usage
-   read through the fleet registry; declaration order breaks ties.
+1. Placement honors an explicit request node, then a profile pin, then the
+   session choice, then `fleet.defaultNode`, then local. Unknown, offline,
+   stale-preflight or incompatible choices fail closed; they never silently
+   fall back. Existing approved route envelopes remain authoritative.
+2. Registration alone never moves unpinned work. When a verified node suits
+   substantial authorized work and no preference or pin exists, Clio asks once
+   with `ask_user`, offering local and suitable exact node ids with reasons.
+   The harness remembers the selection for that session. Headless runs never
+   ask and use explicit pins or configured preferences.
 3. The capacity lease store decides under one cross-process state lock (`dispatch-admission.json`).
    A stale placement preference cannot over-admit a node.
 4. If a pinned or selected node is momentarily full, the bounded admission
@@ -159,6 +272,19 @@ Placement and admission are separate, deterministic authorities:
    silently selecting another node.
 
 The durable capacity state file (`dispatch-admission.json`) uses schema version 2 and owns global and per-node leases, heartbeats, reservation transfer, retry rebinding, and the TTL-bounded operator drain (`DEFAULT_CAPACITY_DRAIN_TTL_MS` = 3,600,000 ms). A lease acts as durable expiring authority (`DEFAULT_CAPACITY_LEASE_TTL_MS` = 30,000 ms) and is reclaimed only with owner-liveness evidence when a process birth token cannot prove process death. A plan reserves its peak wave, and a retry rebinds the same assignment member to its actual node and cost bound so that an assignment retry belongs to its existing plan slot and cannot queue behind or outspend itself. Full leasing schema and locking protocols are specified in [capacity-and-scheduling.md](../architecture/capacity-and-scheduling.md).
+
+The operating prompt carries a bounded fleet inventory: local capacity and its
+binding limit, SSH node verification age and free slots, declared labels,
+observed resource and target facts, with unknown observations kept unknown.
+Delegated peers are listed separately; their presence does not verify SSH
+hardware or project access. Inference routing remains a separate choice.
+
+Set a standing preference through **Settings → Fleet → Standing worker node
+preference**, or set `fleet.defaultNode` to `local` or a configured node id.
+Leave it `null` to permit a once-per-session question when useful. Profile pins
+live at `fleet.profiles.<name>.node`; the compact dispatch surface accepts
+`node` on a singular request or an individual task. The placement question
+does not replace the existing dispatch plan approval.
 
 ### Worker limits and `fleet.concurrency: auto`
 
@@ -401,6 +527,38 @@ A live owner, an owner on another host, a claim written before recovery existed,
 and anything git cannot inspect are left alone.
 
 </details>
+
+### Return edits from an independent checkout
+
+An editing native SSH dispatch on an independent checkout requires
+`worktree: true`. The coordinator prepares the node's isolated
+`.clio-coder/worktrees/<runId>/` and `clio-coder/task/<runId>` branch at the
+approved base commit. The worker edits there; after exit, Clio commits its
+changes on that branch. The source checkout on the node is left at its base.
+
+The coordinator fetches the branch through the configured SSH host, user, port
+and identity into a private local ref. Before importing, she checks that the
+fetched commit is exactly the returned commit, descends from the approved
+baseline without merge commits, touches only permitted paths and changes no
+protected artifacts. The owned local task tree must still be clean on its
+original branch and baseline. Only that task worktree is fast-forwarded.
+Host result validation, declared verification and the existing guarded apply
+flow then run locally. The operator checkout changes only through that flow.
+`apply: "preserve"` keeps the result instead of applying it.
+
+Transfer, path, validation and application failures preserve the node branch
+and worktree. The receipt's worktree detail names the node, branch, path and
+imported commit when available. Inspect the preserved branch and any uncommitted
+files on the node before retrying, merging or deleting them. A local imported
+branch is also recoverable through the existing task-worktree guidance. Remote
+cleanup runs only after successful guarded application and checks ownership,
+commit identity and a clean tree again; a changed remote tree is preserved.
+There is no automatic remote branch recovery or deletion after a crash.
+
+The initial source checkouts must match at a clean baseline. This return path
+transfers commits from an admitted task; it does not synchronize arbitrary
+repositories. After a successful local merge, update the node's original
+checkout deliberately before the next dispatch that needs the new baseline.
 
 ### Typed intent and host-run verification
 
@@ -1176,9 +1334,12 @@ hard block.
 - The context meter renders the worker's last-message context occupancy
   against the model's context window: healthy below 80 percent, warn from 80,
   critical from 95.
-- `/fleet` opens Settings → Fleet: profiles (with the node pin), bindings,
-  and read-only node rows (state, capacity, and last-seen). Running and
-  retrying runs, with their node, live in the `Alt+W` Fleet Runs board.
+- `/fleet` opens Settings → Fleet: profiles and node pins, bindings, the
+  standing placement preference, guided SSH add and optional Tailscale
+  discovery, and node rows with readiness and capacity. Open an SSH row for
+  evidence, timestamps, a recorded test, installation preview or removal.
+  Running and retrying runs, with their actual node, live in the `Alt+W`
+  Fleet Runs board.
 - `/fleet run <name> [--var k=v ...]` compiles the contract's plan and opens
   the approval overlay before anything dispatches. The overlay lists the steps
   grouped by wave, and for each step its kind, its agent and resolved target
