@@ -108,6 +108,7 @@ export interface OverlayPermissionLifecycleDeps {
 
 export interface OverlayPermissionLifecycle {
 	confirm(): void;
+	cancel(): void;
 	/**
 	 * Deny the parked call and end the turn that keeps asking. Escape answers one
 	 * call and leaves the run going, which is the loop the operator could not get
@@ -364,6 +365,7 @@ export function createOverlayPermissionLifecycle(deps: OverlayPermissionLifecycl
 	/** Expiry notices already printed, including a decision that lost the terminal-state race. */
 	const expiredWorkerRequestIds = new Set<string>();
 	let confirmed = false;
+	let denied = false;
 	let stopping = false;
 	let withdrawingWorker = false;
 
@@ -378,6 +380,7 @@ export function createOverlayPermissionLifecycle(deps: OverlayPermissionLifecycl
 		pendingWorker = entry;
 		pendingPermission = null;
 		confirmed = false;
+		denied = false;
 		return true;
 	};
 	const maybeOpenWorker = (): void => {
@@ -478,6 +481,7 @@ export function createOverlayPermissionLifecycle(deps: OverlayPermissionLifecycl
 			pendingPermission = { call, decision, meta };
 			pendingWorker = null;
 			confirmed = false;
+			denied = false;
 		}) ?? (() => {});
 
 	const unsubscribeWorker = deps.bus.on(BusChannels.PermissionRequested, (payload) => {
@@ -515,7 +519,16 @@ export function createOverlayPermissionLifecycle(deps: OverlayPermissionLifecycl
 		pendingPermission = null;
 		pendingWorker = null;
 		const wasConfirmed = confirmed;
+		const wasDenied = denied;
 		confirmed = false;
+		denied = false;
+		// Closing a modal is not an operator decision. Re-present the parked
+		// request when another lifecycle closes its screen without an answer.
+		if (!wasConfirmed && !wasDenied && !stopping) {
+			if (worker) workerQueue.unshift(worker);
+			retryPending();
+			return;
+		}
 		if (worker) {
 			try {
 				deps.dispatch.resolveWorkerPermission?.(worker.runId, worker.requestId, wasConfirmed ? "approve" : "deny");
@@ -587,10 +600,17 @@ export function createOverlayPermissionLifecycle(deps: OverlayPermissionLifecycl
 
 	return {
 		confirm: () => {
+			if (pendingPermission === null && pendingWorker === null) return;
 			confirmed = true;
 			deps.closeOverlay();
 		},
+		cancel: () => {
+			if (pendingPermission === null && pendingWorker === null) return;
+			denied = true;
+			deps.closeOverlay();
+		},
 		stopTurn: () => {
+			if (pendingPermission === null && pendingWorker === null) return;
 			const tool = pendingPermission?.call.tool ?? pendingWorker?.agentId;
 			stopping = true;
 			confirmed = false;

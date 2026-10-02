@@ -82,6 +82,7 @@ export interface InteractiveInputRuntimeDeps {
 		getState(): OverlayState;
 		closeOverlay(): void;
 		confirmPermission(): void;
+		cancelPermission?(): void;
 		stopTurnFromPermission(): void;
 		canInspectMutation(): boolean;
 		isInspectingMutation(): boolean;
@@ -363,7 +364,8 @@ export function createInteractiveInputRuntime(deps: InteractiveInputRuntimeDeps)
 		},
 		cancelFocusedOwner: () => {
 			const state = deps.overlay.getState();
-			if (["permission-confirm", "usage", "context-view", "side-question", "dispatch-board", "auth"].includes(state))
+			if (state === "permission-confirm") deps.overlay.cancelPermission?.();
+			else if (["usage", "context-view", "side-question", "dispatch-board", "auth"].includes(state))
 				deps.overlay.closeOverlay();
 			else if (focused()?.handleInput) {
 				focused()?.handleInput?.("\x1b");
@@ -445,7 +447,7 @@ export function createInteractiveInputRuntime(deps: InteractiveInputRuntimeDeps)
 				data,
 				deps.overlay.getState(),
 				{
-					cancelPermission: () => deps.overlay.closeOverlay(),
+					cancelPermission: () => deps.overlay.cancelPermission?.(),
 					confirmPermission: () => deps.overlay.confirmPermission(),
 					stopTurnFromPermission: () => deps.overlay.stopTurnFromPermission(),
 					composerHasDraft: () => deps.editor.getText().length > 0,

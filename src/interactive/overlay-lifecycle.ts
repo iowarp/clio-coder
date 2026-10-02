@@ -184,6 +184,7 @@ export interface OverlayLifecycleController {
 	toggleDispatchBoardOverlay(): void;
 	openQueueNavigatorState(): void;
 	confirmPermission(): void;
+	cancelPermission(): void;
 	stopTurnFromPermission(): void;
 	/** Whether the live permission card has a mutation the operator can read here. */
 	canInspectMutation(): boolean;
@@ -590,6 +591,11 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 		openQueueNavigatorState,
 		confirmPermission: () => {
 			overlayPermission?.confirm();
+			footer.refresh();
+			tui.requestRender();
+		},
+		cancelPermission: () => {
+			overlayPermission?.cancel();
 			footer.refresh();
 			tui.requestRender();
 		},
