@@ -29,16 +29,18 @@ function assertTerminalArtifact(stdout: string): void {
 		.split("\n")
 		.filter(Boolean)
 		.map((line) => JSON.parse(line));
-	const results = events.filter((event) => event.type === "tool_execution_end" && event.toolName === "gateway");
+	// The wire names the capability a gateway call ran and marks it `via: "gateway"`.
+	const results = events.filter((event) => event.type === "tool_execution_end" && event.toolName === "artifact");
 	strictEqual(results.length, 1);
+	strictEqual(results[0].via, "gateway");
 	strictEqual(results[0].isError, false);
 	strictEqual(results[0].result.details.capability, "artifact");
 	strictEqual(results[0].result.terminate, true);
-	const calls = events.filter((event) => event.type === "tool_execution_start" && event.toolName === "gateway");
+	const calls = events.filter((event) => event.type === "tool_execution_start" && event.toolName === "artifact");
 	strictEqual(calls.length, 1);
 	strictEqual(calls[0].toolCallId, results[0].toolCallId);
-	strictEqual(calls[0].args.op, "call");
-	strictEqual(calls[0].args.capability, "artifact");
+	strictEqual(calls[0].via, "gateway");
+	strictEqual(calls[0].args.kind, "report");
 }
 
 function run(args: string[], cwd: string, env: NodeJS.ProcessEnv) {
