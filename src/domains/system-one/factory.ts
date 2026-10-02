@@ -292,7 +292,7 @@ export function createSystemOne(deps: SystemOneDeps): SystemOneInstance {
 				return null;
 			}
 		},
-		shadowed(site: SiteId): boolean {
+		shadowed(site: SiteId, moment?: string): boolean {
 			try {
 				const resolution = resolve(site);
 				if (resolution.usable === undefined) return false;
@@ -304,7 +304,9 @@ export function createSystemOne(deps: SystemOneDeps): SystemOneInstance {
 				// each engine last answered under, never cached with the answer.
 				const cuts = deps.settings().systemOne.cuts;
 				return usable.every((engine) => {
-					const last = runner.answeredIdentity(digestOf(engine), site);
+					// The runner files each answer under the moment it was asked at; the bare
+					// site key never matches a site that is only asked at named moments.
+					const last = runner.answeredIdentity(digestOf(engine), site, moment);
 					return last !== null && !cutsFor(last.identity, site, cuts, last.contract).fitted;
 				});
 			} catch {

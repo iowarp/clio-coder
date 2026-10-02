@@ -208,6 +208,24 @@ describe("System One runner", () => {
 		);
 	});
 
+	it("finds an answer under the moment it was asked at, not under the bare site", async () => {
+		const { runner, records } = harness();
+		const route = {
+			name: "fake",
+			engine: fakeEngine(replyAs("some-other-build")).engine,
+			digest: "gate-digest",
+			tasks: null,
+		};
+		await runner.run({ routes: [route] }, site({ id: "toolCall", moment: "gate" }), "x", {});
+		strictEqual(records[0]?.outcome, "answered");
+		strictEqual(
+			runner.answeredIdentity("gate-digest", "toolCall", "gate")?.identity.startsWith("some-other-build"),
+			true,
+		);
+		strictEqual(runner.answeredIdentity("gate-digest", "toolCall"), null);
+		strictEqual(runner.answeredIdentity("gate-digest", "toolCall", "card"), null);
+	});
+
 	it("returns null when read() throws, and still records what the engine answered", async () => {
 		const { runner, bind, records } = harness();
 		const result = await runner.run(

@@ -2401,7 +2401,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	// set, so the flow check above sees them whoever asked.
 	const systemOne: SystemOneInstance = {
 		bound: (site) => systemOneCore.bound(site),
-		shadowed: (site) => systemOneCore.shadowed(site),
+		shadowed: (site, moment) => systemOneCore.shadowed(site, moment),
 		describe: () => systemOneCore.describe(),
 		settled: (maxWaitMs) => systemOneCore.settled(maxWaitMs),
 		...(systemOneCore.limits !== undefined ? { limits: (site, task) => systemOneCore.limits?.(site, task) ?? null } : {}),

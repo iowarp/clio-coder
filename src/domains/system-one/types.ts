@@ -218,11 +218,12 @@ export interface SystemOne {
 	run<O, V>(site: SiteDefinition<O, V>, object: O, options?: RunOptions): Promise<Verdict<V> | null>;
 	/**
 	 * True when the site's binding last answered, recently, from a build with no
-	 * fitted cut for the site. Such a call can only be recorded, so a caller on a
-	 * hot path may leave it running detached instead of waiting on it. False
-	 * before any answer names the build, for a fitted build, and when unbound.
+	 * fitted cut for the site. Such a call can only be recorded, so a caller with
+	 * recording off need not make it. False before any answer names the build,
+	 * for a fitted build, and when unbound. A site asked at several moments keeps
+	 * one answer per moment, so `moment` names the definition the caller runs.
 	 */
-	shadowed(site: SiteId): boolean;
+	shadowed(site: SiteId, moment?: string): boolean;
 	/**
 	 * What the engine answering `task` at `site` can read in one request, so a
 	 * caller can choose a bounded hierarchy over a flat ask. Null when unbound.

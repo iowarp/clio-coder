@@ -111,7 +111,7 @@ export interface Runner {
 	 * a call knows the renderer and site version, so the caller recomputes cuts
 	 * from this against live settings rather than trusting a cached verdict.
 	 */
-	answeredIdentity(digest: string, site: SiteId): { identity: string; contract: CallContract } | null;
+	answeredIdentity(digest: string, site: SiteId, moment?: string): { identity: string; contract: CallContract } | null;
 }
 
 interface BreakerState {
@@ -125,8 +125,13 @@ function estimateTokens(value: unknown): number {
 	return Math.ceil(text.length / 4);
 }
 
+/** One key per engine configuration, site and moment, shared by the breaker and the answered builds. */
+function momentKey(digest: string, site: SiteId, moment: string | undefined): string {
+	return `${digest}|${site}${moment !== undefined ? `|${moment}` : ""}`;
+}
+
 function breakerKey(route: RunnerRoute, site: { readonly id: SiteId; readonly moment?: string }): string {
-	return `${route.digest}|${site.id}${site.moment !== undefined ? `|${site.moment}` : ""}`;
+	return momentKey(route.digest, site.id, site.moment);
 }
 
 function errorText(err: unknown): string {
@@ -549,7 +554,7 @@ export function createRunner(deps: RunnerDeps): Runner {
 				renderer: plan.route.engine.renderer,
 			});
 			knownBuilds.set(plan.route.digest, { build: reply.build, at: performance.now() });
-			answered.set(`${plan.route.digest}|${site.id}${site.moment === undefined ? "" : `|${site.moment}`}`, {
+			answered.set(momentKey(plan.route.digest, site.id, site.moment), {
 				identity: plan.identity,
 				contract: { siteVersion: site.version, renderer: plan.route.engine.renderer },
 				at: performance.now(),
@@ -632,8 +637,12 @@ export function createRunner(deps: RunnerDeps): Runner {
 		}
 	}
 
-	function answeredIdentity(digest: string, site: SiteId): { identity: string; contract: CallContract } | null {
-		const last = answered.get(`${digest}|${site}`);
+	function answeredIdentity(
+		digest: string,
+		site: SiteId,
+		moment?: string,
+	): { identity: string; contract: CallContract } | null {
+		const last = answered.get(momentKey(digest, site, moment));
 		return last !== undefined && performance.now() - last.at < ANSWERED_BUILD_TTL_MS
 			? { identity: last.identity, contract: last.contract }
 			: null;

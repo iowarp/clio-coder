@@ -562,7 +562,7 @@ export function createSystemOneHost(deps: SystemOneHostDeps): SystemOneHost {
 
 		async gateToolCall(subject, ref, signal) {
 			if (!systemOne.bound("toolCall")) return null;
-			if (systemOne.shadowed("toolCall")) {
+			if (systemOne.shadowed("toolCall", "gate")) {
 				detached(() => systemOne.run(TOOL_CALL_GATE_SITE, { ...subject, moment: "gate" }, runOptions(ref, undefined)));
 				return null;
 			}
