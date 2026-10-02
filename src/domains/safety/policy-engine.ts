@@ -779,6 +779,7 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 						exemptRoots: readExemptRoots,
 						memo: walkMemo,
 						readable: (target) => evaluatePathPolicy(zeroAccessPolicy, "read", target, callCwd, walkMemo).kind === "allow",
+						walkBudget: { remaining: RG_WALK_BUDGET },
 					},
 				);
 				// A typed verifier still runs through the same command safety scan.
@@ -1375,6 +1376,8 @@ interface ReadScopeInputs {
 	memo: PathWalkMemo;
 	/** False for a path a zero-access entry covers, the way `readablePath` judges it. */
 	readable(target: string): boolean;
+	/** Directory entries rg recognition may still visit in this one evaluation, across every operand and chain step. */
+	walkBudget: { remaining: number };
 }
 
 interface ChainRecognition {
@@ -1655,7 +1658,7 @@ function rgSearchStaysReadable(
 	args: ReadonlyArray<string>,
 	cwd: string,
 	piped: boolean,
-	readable: (target: string) => boolean,
+	readScope: ReadScopeInputs,
 ): boolean {
 	const parsed = parseRgArgs(args);
 	if (parsed === null) return false;
@@ -1673,7 +1676,7 @@ function rgSearchStaysReadable(
 		try {
 			const target = path.resolve(cwd, operand);
 			const stats = statSync(target);
-			return stats.isFile() || (stats.isDirectory() && directoryHoldsNoProtectedFile(target, readable));
+			return stats.isFile() || (stats.isDirectory() && directoryHoldsNoProtectedFile(target, readScope));
 		} catch {
 			// A path that cannot be stat'ed is not an existing file or directory.
 			return false;
@@ -1681,7 +1684,12 @@ function rgSearchStaysReadable(
 	});
 }
 
-/** Entries a directory walk may visit before recognition gives up and the call asks. */
+/**
+ * Entries the directory walks of one evaluation may visit in total before
+ * recognition gives up and the call asks. The walk is synchronous, so an
+ * allowance per operand would let a long argument list or a chain of rg steps
+ * multiply the time admission blocks the event loop.
+ */
 const RG_WALK_BUDGET = 10_000;
 
 /**
@@ -1694,10 +1702,9 @@ const RG_WALK_BUDGET = 10_000;
  * where it points. A tree larger than the budget, or a directory that cannot
  * be listed, is not proven and asks.
  */
-function directoryHoldsNoProtectedFile(dir: string, readable: (target: string) => boolean): boolean {
+function directoryHoldsNoProtectedFile(dir: string, { readable, walkBudget }: ReadScopeInputs): boolean {
 	if (!readable(dir)) return false;
 	const pending = [dir];
-	let visited = 0;
 	for (let current = pending.pop(); current !== undefined; current = pending.pop()) {
 		let entries: Dirent[];
 		try {
@@ -1707,8 +1714,8 @@ function directoryHoldsNoProtectedFile(dir: string, readable: (target: string) =
 			return false;
 		}
 		for (const entry of entries) {
-			visited += 1;
-			if (visited > RG_WALK_BUDGET) return false;
+			walkBudget.remaining -= 1;
+			if (walkBudget.remaining < 0) return false;
 			const full = path.join(current, entry.name);
 			if (!readable(full)) return false;
 			if (entry.isDirectory()) pending.push(full);
@@ -1861,8 +1868,7 @@ function readOnlyInspectionRule(
 	// real path, so a word carrying one is never recognized.
 	if (words.some((word) => hasUnquotedExpansion(source.slice(word.start, word.end)))) return null;
 	if (GREP_FAMILY.has(command) && recursesDirectories(args)) return null;
-	if (command === "rg" && (toolEnvSets(RG_CONFIG_ENV) || !rgSearchStaysReadable(args, cwd, piped, readScope.readable)))
-		return null;
+	if (command === "rg" && toolEnvSets(RG_CONFIG_ENV)) return null;
 	if (command === "sed") {
 		if (!args.includes("-n")) return null;
 		let sawScript = false;
@@ -1892,6 +1898,8 @@ function readOnlyInspectionRule(
 		}
 		if (!operandStaysInWorkspace(arg, cwd, workspaceRoot, readScope) || spacedPathOperand(arg)) return null;
 	}
+	// Last, so no directory is walked for an operand the workspace hold refuses.
+	if (command === "rg" && !rgSearchStaysReadable(args, cwd, piped, readScope)) return null;
 	return `builtin:read-only:${command}`;
 }
 
