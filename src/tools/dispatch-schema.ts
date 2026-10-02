@@ -60,12 +60,12 @@ export function coordinatorDispatchParameters() {
 		verification: Type.Optional(DispatchVerificationSchema),
 	});
 	return Type.Object({
+		node: Type.Optional(Type.String({ description: "Worker node id; local by default." })),
 		list: Type.Optional(Type.Boolean({ description: "Discover available worker recipes and their tools." })),
 		agent: Type.Optional(Type.String({ description: "Recipe id from list; choose a specialist for the task." })),
 		task: Type.Optional(
 			Type.String({
-				description:
-					"One self-contained assignment with outcome and constraints, never the operator's words; never combine with tasks.",
+				description: "Assignment with outcome and constraints; never combine with tasks.",
 			}),
 		),
 		tasks: Type.Optional(
@@ -73,6 +73,7 @@ export function coordinatorDispatchParameters() {
 				Type.Union([
 					Type.String(),
 					Type.Object({
+						node: Type.Optional(Type.String()),
 						agent: Type.Optional(Type.String()),
 						task: Type.String(),
 						briefing: Type.Optional(Type.String()),

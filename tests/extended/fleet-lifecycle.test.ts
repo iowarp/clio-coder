@@ -9,6 +9,7 @@ import { readClioVersion } from "../../src/core/package-root.js";
 import { capacityDrain, setCapacityDraining } from "../../src/domains/dispatch/capacity-lease.js";
 import { compileExecutionPlan } from "../../src/domains/dispatch/execution-plan.js";
 import type { ExecutionStepResult } from "../../src/domains/dispatch/execution-scheduler.js";
+import { rememberSessionFleetNode } from "../../src/domains/dispatch/fleet-placement-preference.js";
 import {
 	FLEET_PREFLIGHT_MAX_AGE_MS,
 	fleetPreflightVerdict,
@@ -97,7 +98,7 @@ describe("fleet lifecycle boundary", () => {
 		strictEqual(resolveSshTargetLifecycle("manage", "user-managed"), "user-managed");
 	});
 
-	it("places by durable usage and excludes a failed node on failover", () => {
+	it("keeps unpinned work local and honors standing/session pins with failover exclusions", () => {
 		const settings = structuredClone(DEFAULT_SETTINGS);
 		settings.fleet.nodes = structuredClone(NODES);
 		const usage: Record<string, number> = { blade: 0, mini: 0 };
@@ -110,10 +111,34 @@ describe("fleet lifecycle boundary", () => {
 			preflightVerdict: () => ({ ok: true, reason: null }),
 			transportForNode: (node) => transport(node.id, node.host),
 		});
-		strictEqual(place({ agentId: "coder", executionRole: "builder", task: "build" })?.node.id, "blade");
+		strictEqual(place({ agentId: "coder", executionRole: "builder", task: "build" })?.node.id, "local");
+		settings.fleet.defaultNode = "mini";
 		usage.blade = 1;
 		strictEqual(place({ agentId: "coder", executionRole: "builder", task: "build" })?.node.id, "mini");
 
+		rememberSessionFleetNode("fleet-placement-contract", "blade");
+		const sessionRequest = {
+			agentId: "coder",
+			executionRole: "builder",
+			task: "build",
+			ownerSessionId: "fleet-placement-contract",
+		} as const;
+		strictEqual(place(sessionRequest)?.node.id, "blade");
+		strictEqual(place({ ...sessionRequest, node: "local" })?.node.id, "local");
+		const preview = createFleetPlacementPreviewResolver({
+			getSettings: () => settings,
+			fleet: registry,
+			preflightVerdict: () => ({ ok: true, reason: null }),
+		});
+		strictEqual(preview(sessionRequest).node.id, "blade");
+		const previewBeforeStamp = createFleetPlacementPreviewResolver({
+			getSettings: () => settings,
+			getSessionId: () => "fleet-placement-contract",
+			fleet: registry,
+			preflightVerdict: () => ({ ok: true, reason: null }),
+		});
+		strictEqual(previewBeforeStamp({ agentId: "coder", task: "build" }).node.id, "blade");
+		settings.fleet.defaultNode = null;
 		registry.recordChannelFailure("blade", "channel closed");
 		strictEqual(registry.recordChannelFailure("blade", "channel closed"), "offline");
 		const rerouted = place({
@@ -122,9 +147,9 @@ describe("fleet lifecycle boundary", () => {
 			task: "retry",
 			reroutes: [{ attempt: 1, fromNode: "blade", toNode: "", reason: "node classified dead" }],
 		});
-		strictEqual(rerouted?.node.id, "mini");
+		strictEqual(rerouted?.node.id, "local");
 		deepStrictEqual(rerouted?.reroutes, [
-			{ attempt: 1, fromNode: "blade", toNode: "mini", reason: "node classified dead" },
+			{ attempt: 1, fromNode: "blade", toNode: "local", reason: "node classified dead" },
 		]);
 	});
 

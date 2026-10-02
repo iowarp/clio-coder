@@ -3178,10 +3178,19 @@ export function createDispatchBundle(
 	const spawnWorker = options?.spawnWorker ?? spawnNativeWorker;
 	const fleetRegistry = scheduling.fleet;
 	const resolveNode =
-		options?.resolveNode ?? createFleetPlacementResolver({ getSettings: getEffectiveSettings, fleet: fleetRegistry });
+		options?.resolveNode ??
+		createFleetPlacementResolver({
+			getSettings: getEffectiveSettings,
+			getSessionId: options?.getSessionId,
+			fleet: fleetRegistry,
+		});
 	const previewNode =
 		options?.previewNode ??
-		createFleetPlacementPreviewResolver({ getSettings: getEffectiveSettings, fleet: fleetRegistry });
+		createFleetPlacementPreviewResolver({
+			getSettings: getEffectiveSettings,
+			getSessionId: options?.getSessionId,
+			fleet: fleetRegistry,
+		});
 	const startAcpRun = options?.startAcpDelegationRun ?? startAcpDelegationRun;
 	const collectReproducibility = options?.collectReproducibility ?? collectReproducibilityMetadata;
 	const heartbeatSpec = options?.heartbeatSpec ?? DEFAULT_HEARTBEAT_SPEC;

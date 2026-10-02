@@ -877,7 +877,10 @@ export function compile(table: FragmentTable, inputs: CompileInputs): CompiledSe
 		["identity", identityBody],
 		["operating-contract", [mainOperatingContract, session.demo ? DEMO_GUIDANCE : ""].filter(Boolean).join("\n\n")],
 		["harness-awareness", harnessAwareness],
-		["delegation", delegation?.body ?? ""],
+		[
+			"delegation",
+			[delegation?.body, delegation ? table.byId.get("operating.fleet")?.body : undefined].filter(Boolean).join("\n\n"),
+		],
 		["skills", skills?.body.replace("{SKILL_ACTIVATION_POLICY}", resolvedSkillActivation) ?? ""],
 		["safety", renderSafetySection(safety, autonomyLevel, session.headless === true)],
 		["runtime", renderRuntimeBlock(session)],

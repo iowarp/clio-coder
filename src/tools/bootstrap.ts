@@ -7,6 +7,7 @@ import type { AgentSpec } from "../domains/agents/spec.js";
 import type { WorkerContextSnapshot } from "../domains/context/worker/contract.js";
 import type { DispatchContract } from "../domains/dispatch/contract.js";
 import type { AgentRoleFactsResolver } from "../domains/dispatch/execution-role.js";
+import { FLEET_PLACEMENT_HEADER, rememberSessionFleetNode } from "../domains/dispatch/fleet-placement-preference.js";
 import { DEFAULT_KILL_GRACE_MS, DEFAULT_TEARDOWN_BOUND_MS } from "../domains/gateway/mcp/index.js";
 import type { PanesOperations } from "../domains/mux/operations.js";
 import type { AutonomyLevel } from "../domains/safety/autonomy.js";
@@ -77,11 +78,35 @@ export interface ToolBootstrapHandle {
  * directly so their boot graph never evaluates dispatch implementations.
  */
 export function registerAllTools(registry: ToolRegistry, deps: ToolBootstrapDeps = {}): ToolBootstrapHandle {
+	const askUser = deps.askUser;
 	const cwd = deps.session?.current()?.cwd ?? process.cwd();
 	const { mcpCapabilities: requestedMcp, ...coreDeps } = deps;
 	const mcpCapabilities = requestedMcp === false ? null : (requestedMcp ?? createMcpCapabilitySource({ cwd, registry }));
 	const registration = registerCoreTools(registry, {
 		...coreDeps,
+		...(askUser
+			? {
+					askUser: async (questions, options) => {
+						const result = await askUser(questions, options);
+						const sessionId = options?.sessionId ?? deps.session?.current()?.id;
+						if (sessionId && !result.cancelled) {
+							const question = questions.find((item) => item.header === FLEET_PLACEMENT_HEADER && !item.multi_select);
+							const answer = result.answers.find((item) => item.question === question?.question);
+							const selected =
+								answer?.value?.trim() || (answer?.options?.length === 1 ? answer.options[0] : answer?.answer.trim());
+							const known = deps.getSettings?.().fleet.nodes.some((node) => node.id === selected);
+							if (
+								question &&
+								selected &&
+								(selected === "local" || known) &&
+								question.options?.some((option) => option.label === selected)
+							)
+								rememberSessionFleetNode(sessionId, selected);
+						}
+						return result;
+					},
+				}
+			: {}),
 		...(mcpCapabilities ? { mcpCapabilities } : {}),
 	});
 	if (deps.requestSelfCompact)

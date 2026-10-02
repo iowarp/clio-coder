@@ -480,6 +480,8 @@ export interface FleetWorktreesSettings {
 }
 
 export interface FleetSettings extends FleetRouteSettings {
+	/** Standing worker node preference; null leaves unpinned work local and permits a session question. */
+	defaultNode: string | null;
 	/** Experimental worker prewarm. The System One `turn` site (`systemOne.sites.turn`) is asked which recipe a dispatch would name first, and only a fitted build's answer starts a worker; off by default. */
 	speculativeDispatch: boolean;
 	nodes: FleetNodeSettings[];
@@ -635,6 +637,7 @@ export const DEFAULT_SETTINGS = {
 		} as SteeringSettings,
 	} as ChatSettings,
 	fleet: {
+		defaultNode: null as string | null,
 		default: {
 			target: null as string | null,
 			model: null as string | null,
@@ -805,6 +808,8 @@ chat:
       autoInterrupt: true
 
 fleet:
+  # null: unpinned work stays local; an interactive session may ask once.
+  defaultNode: null
   default:
     target: null
     model: null

@@ -73,6 +73,8 @@ export function addFleetNode(node: FleetNodeSettings): void {
 export function removeFleetNode(id: string): void {
 	updateSettings((settings) => {
 		if (!settings.fleet.nodes.some((node) => node.id === id)) throw new Error(`unknown fleet node '${id}'`);
+		if (settings.fleet.defaultNode === id)
+			throw new Error(`node '${id}' is the standing fleet.defaultNode preference; clear that preference first`);
 		const pins = Object.entries(settings.fleet.profiles)
 			.filter(([, profile]) => profile.node === id)
 			.map(([name]) => name);

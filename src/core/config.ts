@@ -1747,6 +1747,7 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 				"rosters",
 				"agentProfiles",
 				"speculativeDispatch",
+				"defaultNode",
 				"adaptiveRouting",
 				"nodes",
 				"permissions",
@@ -1769,6 +1770,12 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 	}
 	const fleetNodeIds = new Set(settings.fleet.nodes.map((node) => node.id));
 	if (rawFleet) {
+		if ("defaultNode" in rawFleet) {
+			const value = rawFleet.defaultNode;
+			if (value === null || (typeof value === "string" && (value === "local" || fleetNodeIds.has(value))))
+				settings.fleet.defaultNode = value;
+			else issues.add("fleet.defaultNode", "expected null, local, or a fleet.nodes id");
+		}
 		if ("default" in rawFleet) {
 			settings.fleet.default = validateRoute(
 				issues,

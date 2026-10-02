@@ -53,6 +53,7 @@ const NEXT_TURN_FIELDS = new Set<string>([
 	"fleet.adaptiveRouting",
 	"fleet.speculativeDispatch",
 	"fleet.nodes",
+	"fleet.defaultNode",
 	"fleet.permissions",
 	"fleet.retry",
 	"fleet.worktrees",
