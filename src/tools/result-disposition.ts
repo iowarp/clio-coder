@@ -248,18 +248,46 @@ function capDigestUtf8(text: string, maxBytes: number): string {
 	return `${utf8Prefix(text, maxBytes - markerBytes).trimEnd()}${marker}`;
 }
 
+/** How far an excerpt edge may move to land on a line or word boundary instead of inside a word. */
+const EXCERPT_SNAP_WINDOW_BYTES = 16;
+
+/**
+ * The head of `text` within `maxBytes`, ending on a whitespace boundary when one
+ * lies within {@link EXCERPT_SNAP_WINDOW_BYTES} of the cut, so an excerpt never
+ * ends on `ve` of `very`. Only ever shorter than the byte bound.
+ */
+function utf8WordPrefix(text: string, maxBytes: number): string {
+	const prefix = utf8Prefix(text, maxBytes);
+	if (/\s/u.test(text.charAt(prefix.length)) || /\s$/u.test(prefix)) return prefix;
+	const window = utf8Suffix(prefix, EXCERPT_SNAP_WINDOW_BYTES);
+	const boundary = window.search(/\s\S*$/u);
+	if (boundary < 0) return prefix;
+	const kept = prefix.slice(0, prefix.length - window.length + boundary).trimEnd();
+	return kept.length > 0 ? kept : prefix;
+}
+
+/** The tail of `text` within `maxBytes`, starting on a whitespace boundary when one is near; see {@link utf8WordPrefix}. */
+function utf8WordSuffix(text: string, maxBytes: number): string {
+	const suffix = utf8Suffix(text, maxBytes);
+	if (/\s/u.test(text.charAt(text.length - suffix.length - 1)) || /^\s/u.test(suffix)) return suffix;
+	const boundary = utf8Prefix(suffix, EXCERPT_SNAP_WINDOW_BYTES).search(/\s/u);
+	if (boundary < 0) return suffix;
+	const kept = suffix.slice(boundary).trimStart();
+	return kept.length > 0 ? kept : suffix;
+}
+
 /** A deterministic, UTF-8-safe excerpt whose total bytes never exceed maxBytes. */
 function boundedToolResultExcerpt(text: string, maxBytes: number, bias: ToolResultExcerptBias = "head-tail"): string {
 	if (maxBytes <= 0) return "";
 	if (byteLength(text) <= maxBytes) return text;
-	if (bias === "tail") return utf8Suffix(text, maxBytes);
+	if (bias === "tail") return utf8WordSuffix(text, maxBytes);
 	const marker = "\n[… omitted …]\n";
 	const markerBytes = byteLength(marker);
 	if (markerBytes >= maxBytes) return utf8Prefix(text, maxBytes);
 	const bodyBudget = maxBytes - markerBytes;
 	const headBudget = Math.floor(bodyBudget / 2);
 	const tailBudget = bodyBudget - headBudget;
-	return `${utf8Prefix(text, headBudget)}${marker}${utf8Suffix(text, tailBudget)}`;
+	return `${utf8WordPrefix(text, headBudget)}${marker}${utf8WordSuffix(text, tailBudget)}`;
 }
 
 function sourceLineCount(text: string): number {
