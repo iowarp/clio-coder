@@ -240,7 +240,8 @@ export function settingsPlacementForRow(id: string, path: string): SettingsPlace
 	if (under(path, "fleet.agentProfiles")) return place("agents", "Agent routes");
 	if (under(path, "fleet.default")) return place("fleet", "Default worker");
 	if (under(path, "fleet.profiles")) return place("fleet", "Profiles");
-	if (under(path, "fleet.nodes") || under(path, "fleet.endpoints")) return place("fleet", "Capacity & placement");
+	if (path === "fleet.defaultNode" || under(path, "fleet.nodes") || under(path, "fleet.endpoints"))
+		return place("fleet", "Capacity & placement");
 	if (under(path, "fleet.history")) return place("fleet", "Run history");
 	if (under(path, "fleet.permissions")) return place("safety", "Worker approvals");
 	if (under(path, "safety.review")) return place("safety", "Review");

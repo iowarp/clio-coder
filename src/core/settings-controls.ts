@@ -555,6 +555,10 @@ const EXTRA_HELP: Record<string, [string, string]> = {
 		"Fleet rosters",
 		"Named teams of worker profiles used by council and fleet runs. Edit the JSON object; each roster names its members.",
 	],
+	"fleet.defaultNode": [
+		"Standing worker node preference",
+		"Unpinned work stays local until chosen. Explicit and profile pins take priority; leave blank to allow a session placement question.",
+	],
 	"fleet.nodes": [
 		"Remote worker machines",
 		"Machines where workers may run. Edit the JSON list of machine details; adding one does not change the default model.",
