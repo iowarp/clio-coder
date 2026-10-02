@@ -251,6 +251,9 @@ export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps)
 	let latestAdmission: Promise<void> = Promise.resolve();
 	let latestLocalOperation: Promise<void> = Promise.resolve();
 	let activeAdmissionSignal: AbortSignal | undefined;
+	// True while admitCommand drains a record captured before the shell was
+	// ready (DOGFOOD-F5). Only such a record waits for the end of a live turn.
+	let activeAdmissionCaptured = false;
 	const cwd = (): string => deps.getCwd?.() ?? process.cwd();
 	const resources = deps.resources;
 	const userTasks = deps.userTasks;
@@ -270,7 +273,11 @@ export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps)
 	};
 
 	/** One expanded operator turn into the chat loop: record it, paint it, submit it. */
-	const submitExpanded = (sub: InteractiveSlashSubmitExpansion, awaitAdmission = false): Promise<void> => {
+	const submitExpanded = (
+		sub: InteractiveSlashSubmitExpansion,
+		awaitAdmission = false,
+		captured = false,
+	): Promise<void> => {
 		try {
 			// A prompt or a steer is the operator asking for what comes next.
 			deps.returnToLiveEdge?.();
@@ -306,7 +313,12 @@ export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps)
 				...(sub.images.length > 0 ? { images: sub.images } : {}),
 				...(sub.workingContextPaths.length > 0 ? { workingContextPaths: sub.workingContextPaths } : {}),
 				...(sub.pendingSkillRequests.length > 0 ? { pendingSkillRequests: sub.pendingSkillRequests } : {}),
-				...(awaitAdmission && willQueue ? { steering: "end-of-turn" as const } : {}),
+				// A captured boot record joins the live turn's FIFO follow-up queue so
+				// records keep their order as separate turns. Enter while streaming is
+				// the operator correcting the run, so it rides the next steering slot;
+				// queuing it for the end of the turn left steers undelivered through a
+				// run whose tool loop never ended.
+				...(captured && willQueue ? { steering: "end-of-turn" as const } : {}),
 				...(!willQueue
 					? {
 							onPreparationVisible: async () => {
@@ -351,7 +363,7 @@ export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps)
 		deps.recordFeature(match[1] === "context" && match[2] === "init" ? "/context init" : `/${match[1]}`);
 	};
 
-	const admitChat = async (text: string, signal?: AbortSignal): Promise<void> => {
+	const admitChat = async (text: string, signal?: AbortSignal, captured = false): Promise<void> => {
 		try {
 			signal?.throwIfAborted();
 			// submitChat can be called directly, bypassing command dispatch. Keep
@@ -413,7 +425,7 @@ export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps)
 					});
 				return;
 			}
-			await submitExpanded(submitted, true);
+			await submitExpanded(submitted, true, captured);
 		} catch (err) {
 			const msg = err instanceof Error ? err.message : String(err);
 			deps.io.stderr(`[interactive] chat failed: ${msg}\n`);
@@ -767,7 +779,7 @@ export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps)
 		// worker's output name a file the operator never mentioned.
 		submitOperatorNote: (text) => submitExpanded({ text, images: [], workingContextPaths: [], pendingSkillRequests: [] }),
 		submitChat: (text) => {
-			latestAdmission = admitChat(text, activeAdmissionSignal);
+			latestAdmission = admitChat(text, activeAdmissionSignal, activeAdmissionCaptured);
 			void latestAdmission;
 		},
 		runLocalOperation: (operation) => {
@@ -793,11 +805,14 @@ export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps)
 			const before = latestAdmission;
 			const localBefore = latestLocalOperation;
 			const previousSignal = activeAdmissionSignal;
+			const previousCaptured = activeAdmissionCaptured;
 			activeAdmissionSignal = signal;
+			activeAdmissionCaptured = true;
 			try {
 				dispatchSlashCommand(command, context);
 			} finally {
 				activeAdmissionSignal = previousSignal;
+				activeAdmissionCaptured = previousCaptured;
 			}
 			if (latestAdmission !== before) await latestAdmission;
 			if (latestLocalOperation !== localBefore) await latestLocalOperation;
