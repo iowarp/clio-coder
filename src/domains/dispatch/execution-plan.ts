@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import type { ResultContract } from "../agents/result-contract.js";
 import type { AgentAutomationAuthority } from "../agents/spec.js";
+import { EXECUTION_HANDOFF_MAX_ITEMS } from "./execution-handoff.js";
 import type { ExecutionRole } from "./execution-role.js";
 
 export type ExecutionPlanTopology = "parallel" | "sequential" | "pipeline" | "review" | "compete" | "council" | "fleet";
@@ -310,6 +311,13 @@ export function compileExecutionPlan(input: ExecutionPlanInput): ExecutionPlan {
 		throw new Error("execution plan: writers must be 1 when present");
 	}
 	const steps = canonicalSteps(input.steps);
+	for (const step of steps) {
+		if (step.dependencies.length > EXECUTION_HANDOFF_MAX_ITEMS) {
+			throw new Error(
+				`execution plan: step '${step.id}' has ${step.dependencies.length} dependencies; at most ${EXECUTION_HANDOFF_MAX_ITEMS} predecessors are allowed`,
+			);
+		}
+	}
 	const loops = (input.loops ?? []).map((loop) => ({
 		...loop,
 		checkStepIds: [...loop.checkStepIds],

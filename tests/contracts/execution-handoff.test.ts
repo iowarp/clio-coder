@@ -7,6 +7,7 @@ import {
 	executionHandoffTextBytes,
 	projectExecutionHandoffs,
 } from "../../src/domains/dispatch/execution-handoff.js";
+import { compileExecutionPlan } from "../../src/domains/dispatch/execution-plan.js";
 import { validateJobSpec } from "../../src/domains/dispatch/validation.js";
 
 function handoff(stepId: string, output: string): ExecutionHandoff {
@@ -87,8 +88,34 @@ describe("execution handoff projection", () => {
 		match(projected[0].output, /\[clio: \d+ of \d+ bytes omitted/u);
 	});
 
-	it("rejects seventeen predecessors", () => {
+	it("rejects seventeen predecessors during compilation and projection", () => {
 		const sources = Array.from({ length: EXECUTION_HANDOFF_MAX_ITEMS + 1 }, (_, index) => handoff(`step-${index}`, "ok"));
+		throws(
+			() =>
+				compileExecutionPlan({
+					topology: "fleet",
+					rootTask: "Inspect predecessor reports",
+					maxWorkers: 1,
+					onFailure: "stop",
+					steps: [
+						...sources.map(({ stepId }) => ({
+							kind: "code" as const,
+							id: stepId,
+							commandId: "inspect",
+							scope: "readonly" as const,
+							dependencies: [],
+						})),
+						{
+							kind: "code",
+							id: "collect",
+							commandId: "inspect",
+							scope: "readonly",
+							dependencies: sources.map(({ stepId }) => stepId),
+						},
+					],
+				}),
+			/execution plan: step 'collect' has 17 dependencies; at most 16 predecessors are allowed/u,
+		);
 		throws(
 			() =>
 				projectExecutionHandoffs(

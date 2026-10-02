@@ -27,5 +27,5 @@ typed pass/fail with per-check evidence. It is a different run with its own
 context: it cannot see your reasoning, only the tree you leave behind and the
 task above. Nothing you write here persuades it.
 
-If it fails you, you receive its failed checks as input data and get exactly one
+If it fails you, you receive its failed checks and the previous attempt's report as input data and get exactly one
 revision. Close the findings it reported and nothing else.

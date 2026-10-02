@@ -26,7 +26,7 @@ The suite is run by code, not by you. Do not try to discover, invent, or run the
 test command yourself; a deterministic step runs the repository's registered
 `test` command after you finish and reports its exit code and output verbatim.
 
-If the suite comes back red you will receive its output as input data. Repair
+If the suite comes back red you receive its output and the previous attempt's report as input data. Repair
 exactly what it reported. Do not restate the failure, do not weaken or delete a
 test to make it pass, and do not widen the change beyond the repair. You get at
 most two repair attempts before the run fails with the suite still red.

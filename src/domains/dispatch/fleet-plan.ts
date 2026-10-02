@@ -1,4 +1,5 @@
-import { type FleetCommandRegistry, resolveFleetCommandArgs } from "../agents/fleet-commands.js";
+import type { FleetCommandRegistry } from "../agents/fleet-commands.js";
+import { resolveFleetCommandArgs } from "../agents/fleet-commands.js";
 /**
  * Fleet contract to execution plan.
  *
@@ -16,10 +17,8 @@ import { type FleetCommandRegistry, resolveFleetCommandArgs } from "../agents/fl
  * the property fleet admission exists to deny.
  */
 
+import type { FleetContract, FleetContractStep, FleetStepScope } from "../agents/fleet-contract.js";
 import {
-	type FleetContract,
-	type FleetContractStep,
-	type FleetStepScope,
 	fleetCodeSteps,
 	fleetLoopCheckStepId,
 	fleetLoopRepairStepId,
@@ -28,12 +27,8 @@ import {
 } from "../agents/fleet-contract.js";
 import type { ResultContract } from "../agents/result-contract.js";
 import type { AgentAutomationAuthority } from "../agents/spec.js";
-import {
-	compileExecutionPlan,
-	type ExecutionPlan,
-	type ExecutionPlanLoop,
-	type ExecutionPlanStepInput,
-} from "./execution-plan.js";
+import type { ExecutionPlan, ExecutionPlanLoop, ExecutionPlanStepInput } from "./execution-plan.js";
+import { compileExecutionPlan } from "./execution-plan.js";
 import type { ExecutionRole } from "./execution-role.js";
 import { renderFleetNodeTask } from "./fleet-node-prompt.js";
 
@@ -280,7 +275,7 @@ export function compileFleetExecutionPlan(input: CompileFleetPlanInput): Executi
 			steps.push(
 				agentNode(
 					{ stepId: repairId, agentId: step.repair.agent, scope: step.repair.scope, attempt, ...routeOf(step.repair) },
-					[checkId],
+					[checkId, ...checkDependencies],
 					step.repair.writes,
 					{ loopId: loop.id, role: "repair", attempt },
 				),

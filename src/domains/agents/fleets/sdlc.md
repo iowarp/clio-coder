@@ -71,7 +71,7 @@ green suite invalidates that green, and the suite is re-run before anything is
 committed.
 
 Repair. When either question comes back negative you receive its report as
-input data and get a bounded number of attempts. Fix what was reported. Never
+input data alongside the checked work's reports and get a bounded number of attempts. Fix what was reported. Never
 weaken a test, delete a check, or edit the plan to match the code.
 
 Document. Write up the completed change. Your input includes this run's commit

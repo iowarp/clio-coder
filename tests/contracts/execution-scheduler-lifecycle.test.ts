@@ -1,13 +1,15 @@
 import { deepStrictEqual, ok, rejects, strictEqual } from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { afterEach, beforeEach, describe, it } from "node:test";
+import { parseFleetContract } from "../../src/domains/agents/fleet-contract.js";
 import { readAgentLedger } from "../../src/domains/dispatch/agent-ledger-store.js";
-import { compileExecutionPlan, type ExecutionPlanAgentStep } from "../../src/domains/dispatch/execution-plan.js";
-import {
-	type ExecutionSchedulerAdapter,
-	type ExecutionStepResult,
-	executePlan,
-} from "../../src/domains/dispatch/execution-scheduler.js";
-import { type IsolatedClioEnv, isolateClioEnv } from "../harness/scratch-env.js";
+import type { ExecutionPlanAgentStep } from "../../src/domains/dispatch/execution-plan.js";
+import { compileExecutionPlan } from "../../src/domains/dispatch/execution-plan.js";
+import type { ExecutionSchedulerAdapter, ExecutionStepResult } from "../../src/domains/dispatch/execution-scheduler.js";
+import { executePlan } from "../../src/domains/dispatch/execution-scheduler.js";
+import { compileFleetExecutionPlan } from "../../src/domains/dispatch/fleet-plan.js";
+import type { IsolatedClioEnv } from "../harness/scratch-env.js";
+import { isolateClioEnv } from "../harness/scratch-env.js";
 
 function deferred<T>() {
 	let resolve!: (value: T) => void;
@@ -385,15 +387,16 @@ describe("execution scheduler lifecycle", () => {
 				{ id: "loop", checkKind: "code", maxAttempts: 2, checkStepIds: ["check-1", "check-2"], repairStepIds: ["repair"] },
 			],
 			steps: [
+				step("build"),
 				{
 					kind: "code",
 					id: "check-1",
 					commandId: "check",
 					scope: "readonly",
-					dependencies: [],
+					dependencies: ["build"],
 					loop: { loopId: "loop", role: "check", attempt: 1 },
 				},
-				{ ...step("repair", ["check-1"]), loop: { loopId: "loop", role: "repair", attempt: 1 } },
+				{ ...step("repair", ["check-1", "build"]), loop: { loopId: "loop", role: "repair", attempt: 1 } },
 				{
 					kind: "code",
 					id: "check-2",
@@ -406,9 +409,45 @@ describe("execution scheduler lifecycle", () => {
 			],
 		});
 		const outcome = await executePlan(p, f.adapter);
-		deepStrictEqual(log, ["check-1", "repair", "check-2", "dependent"]);
+		deepStrictEqual(log, ["build", "check-1", "repair", "check-2", "dependent"]);
 		strictEqual(outcome.loops[0]?.resolved, true);
 		strictEqual(outcome.loops[0]?.attempts, 2);
+	});
+
+	it("hands a build-test repair both the failed check and the previous attempt's report", async () => {
+		const path = new URL("../../src/domains/agents/fleets/build-test.md", import.meta.url);
+		const contract = parseFleetContract(readFileSync(path, "utf8"), path.pathname);
+		const p = compileFleetExecutionPlan({
+			contract,
+			task: "Fix the parser",
+			resolveAgent: () => ({
+				requestedAuthority: "workspace-edit",
+				approvedAuthority: "workspace-edit",
+				expectedResultContract: "mutation-report",
+				executionRole: "builder",
+			}),
+		});
+		const f = fixture();
+		const repairInputs: Array<Array<[string, string]>> = [];
+		f.adapter.run = async (step, handoffs) => {
+			if (step.loop?.role === "repair") repairInputs.push(handoffs.map(({ stepId, output }) => [stepId, output]));
+			return { assignmentId: step.id, result: Promise.resolve(result(step.id)) };
+		};
+		f.adapter.runCode = async (step) => result(step.id, step.loop?.attempt === 3);
+		const outcome = await executePlan(p, f.adapter);
+		deepStrictEqual(repairInputs, [
+			[
+				["build", "output-build"],
+				["suite.check.1", "output-suite.check.1"],
+			],
+			[
+				["suite.check.2", "output-suite.check.2"],
+				["suite.repair.1", "output-suite.repair.1"],
+			],
+		]);
+		strictEqual(outcome.loops[0]?.resolved, true);
+		strictEqual(outcome.loops[0]?.attempts, 3);
+		strictEqual(outcome.loops[0]?.repairs, 2);
 	});
 
 	it("admission failure launches no work, and invalid replay releases the reservation", async () => {
