@@ -4,24 +4,32 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
 import { ToolNames } from "../../src/core/tool-names.js";
-import { type AutonomyLevel, mapAutonomy } from "../../src/domains/safety/autonomy.js";
+import type { AutonomyLevel } from "../../src/domains/safety/autonomy.js";
+import { mapAutonomy } from "../../src/domains/safety/autonomy.js";
+import type { SafetyPolicyEngine } from "../../src/domains/safety/policy-engine.js";
 import {
 	createSafetyPolicyEngine,
 	PROJECT_SCRIPT_COMMANDS,
-	type SafetyPolicyEngine,
 	TEST_RUNNER_COMMANDS,
 } from "../../src/domains/safety/policy-engine.js";
 import { loadProjectSafetyPolicy } from "../../src/domains/safety/project-policy.js";
-import {
-	detectValidationCommand,
-	VALIDATION_COMMAND_LABELS,
-	type ValidationCommandLabel,
-} from "../../src/domains/safety/protected-artifacts.js";
-import { type IsolatedClioEnv, isolateClioEnv } from "../harness/scratch-env.js";
+import type { ValidationCommandLabel } from "../../src/domains/safety/protected-artifacts.js";
+import { detectValidationCommand, VALIDATION_COMMAND_LABELS } from "../../src/domains/safety/protected-artifacts.js";
+import type { IsolatedClioEnv } from "../harness/scratch-env.js";
+import { isolateClioEnv } from "../harness/scratch-env.js";
 
 /** One canonical spelling per validation label. */
 const SPELLINGS: Record<ValidationCommandLabel, string> = {
 	"npm test": "npm test",
+	"pnpm test": "pnpm test",
+	"yarn test": "yarn run test -- tests/x.test.ts",
+	"bun test": "bun test",
+	"npm run test:<name>": "npm run test:unit -- tests/x.test.ts",
+	"pnpm run test:<name>": "pnpm run test:file -- tests/x.test.ts",
+	"yarn run test:<name>": "yarn run test:unit",
+	"bun run test:<name>": "bun run test:unit",
+	"uv run pytest": "uv run --no-sync pytest -q tests/x.py",
+	"uv run python -m pytest": "uv run --frozen --locked python -m pytest -q tests/x.py",
 	"node --test": "node --test sum.test.mjs",
 	pytest: "pytest -q tests",
 	"python -m pytest": "python3 -m pytest -q test_index_policy.py",
@@ -40,6 +48,15 @@ const SPELLINGS: Record<ValidationCommandLabel, string> = {
 /** The validation label each unattended test runner stands for. */
 const TEST_RUNNER_LABELS: Record<string, ValidationCommandLabel> = {
 	"builtin:npm-test": "npm test",
+	"builtin:pnpm-test": "pnpm test",
+	"builtin:yarn-test": "yarn test",
+	"builtin:bun-test": "bun test",
+	"builtin:npm-test-script": "npm run test:<name>",
+	"builtin:pnpm-test-script": "pnpm run test:<name>",
+	"builtin:yarn-test-script": "yarn run test:<name>",
+	"builtin:bun-test-script": "bun run test:<name>",
+	"builtin:uv-pytest": "uv run pytest",
+	"builtin:uv-python-pytest": "uv run python -m pytest",
 	"builtin:node-test": "node --test",
 	"builtin:pytest": "pytest",
 	"builtin:python-pytest": "python -m pytest",
@@ -130,6 +147,13 @@ describe("test runner vocabulary (#377)", () => {
 			"python3 -m unittest -q test_solver",
 			"ctest --output-on-failure",
 			"node --test sum.test.mjs",
+			"npm run test -- tests/x.test.ts",
+			"pnpm run test -- tests/x.test.ts",
+			"yarn test",
+			"bun run test -- tests/x.test.ts",
+			"uv run pytest -q tests/x.py",
+			"uv run --locked pytest -q tests/x.py",
+			"uv run python -m pytest -q tests/x.py",
 		]) {
 			strictEqual(disposition(policy, command, "default"), "allow", command);
 			strictEqual(disposition(policy, command, "yolo"), "allow", command);
@@ -160,6 +184,7 @@ describe("test runner vocabulary (#377)", () => {
 		// A quoted argument leaves the bare-word charset, so the command is
 		// unrecognized bash again: the autonomy level decides, as before #377.
 		strictEqual(disposition(policy, "python3 -m unittest 'test solver'", "default"), "ask");
+		strictEqual(disposition(policy, 'pnpm run test:file -- "$X"', "default"), "ask");
 	});
 
 	it("does not mistake a Node script argument or evaluation for the test runner", () => {

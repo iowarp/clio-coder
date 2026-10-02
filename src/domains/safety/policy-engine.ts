@@ -217,6 +217,33 @@ const BUILTIN_ALLOWLIST: ReadonlyArray<{ id: string; re: RegExp }> = [
  */
 export const TEST_RUNNER_COMMANDS: ReadonlyArray<{ id: string; re: RegExp }> = [
 	{ id: "builtin:npm-test", re: /^npm\s+(?:test|run\s+test)(?:\s+--\s+[\w=./:-]+(?:\s+[\w=./:-]+)*)?$/ },
+	{ id: "builtin:pnpm-test", re: /^pnpm\s+(?:test|run\s+test)(?:\s+--\s+[\w=./:-]+(?:\s+[\w=./:-]+)*)?$/ },
+	{ id: "builtin:yarn-test", re: /^yarn\s+(?:test|run\s+test)(?:\s+--\s+[\w=./:-]+(?:\s+[\w=./:-]+)*)?$/ },
+	{ id: "builtin:bun-test", re: /^bun\s+(?:test|run\s+test)(?:\s+--\s+[\w=./:-]+(?:\s+[\w=./:-]+)*)?$/ },
+	{
+		id: "builtin:npm-test-script",
+		re: /^npm\s+run\s+test:[\w=./:-]+(?:\s+--\s+[\w=./:-]+(?:\s+[\w=./:-]+)*)?$/,
+	},
+	{
+		id: "builtin:pnpm-test-script",
+		re: /^pnpm\s+run\s+test:[\w=./:-]+(?:\s+--\s+[\w=./:-]+(?:\s+[\w=./:-]+)*)?$/,
+	},
+	{
+		id: "builtin:yarn-test-script",
+		re: /^yarn\s+run\s+test:[\w=./:-]+(?:\s+--\s+[\w=./:-]+(?:\s+[\w=./:-]+)*)?$/,
+	},
+	{
+		id: "builtin:bun-test-script",
+		re: /^bun\s+run\s+test:[\w=./:-]+(?:\s+--\s+[\w=./:-]+(?:\s+[\w=./:-]+)*)?$/,
+	},
+	{
+		id: "builtin:uv-pytest",
+		re: /^uv\s+run(?:\s+--(?:no-sync|frozen|locked))*\s+pytest(?:\s+[\w=./:-]+)*$/,
+	},
+	{
+		id: "builtin:uv-python-pytest",
+		re: /^uv\s+run(?:\s+--(?:no-sync|frozen|locked))*\s+python\s+-m\s+pytest(?:\s+[\w=./:-]+)*$/,
+	},
 	{ id: "builtin:node-test", re: /^node\s+--test(?:\s+[\w=./:-]+)*$/ },
 	{ id: "builtin:pytest", re: /^pytest(?:\s+[\w=./:-]+)*$/ },
 	{ id: "builtin:python-pytest", re: /^python(?:3(?:\.\d+)?)?\s+-m\s+pytest(?:\s+[\w=./:-]+)*$/ },

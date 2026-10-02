@@ -1280,12 +1280,21 @@ function pathMatchesArtifact(commandPath: string, artifactKey: string, mode: "ta
 
 /**
  * Every fixed label `validationMatch` returns. The only other label is the
- * `npm run <verification script>` family. The policy engine's
+ * `<package manager> run <verification script>` family. The policy engine's
  * `TEST_RUNNER_COMMANDS` must run each of these without an ask in default;
  * `tests/contracts/test-runner-vocabulary.test.ts` fails when the two drift.
  */
 export const VALIDATION_COMMAND_LABELS = [
 	"npm test",
+	"pnpm test",
+	"yarn test",
+	"bun test",
+	"npm run test:<name>",
+	"pnpm run test:<name>",
+	"yarn run test:<name>",
+	"bun run test:<name>",
+	"uv run pytest",
+	"uv run python -m pytest",
 	"node --test",
 	"pytest",
 	"python -m pytest",
@@ -1306,12 +1315,23 @@ export type ValidationCommandLabel = (typeof VALIDATION_COMMAND_LABELS)[number];
 function validationMatch(
 	executable: string,
 	args: ReadonlyArray<string>,
-): ValidationCommandLabel | `${"npm" | "pnpm" | "yarn"} test` | `${"npm" | "pnpm" | "yarn"} run ${string}` | null {
+): ValidationCommandLabel | `${"npm" | "pnpm" | "yarn" | "bun"} run ${string}` | null {
 	if (executable === "node" && args[0] === "--test") return "node --test";
-	if (executable === "npm" || executable === "pnpm" || executable === "yarn") {
+	if (executable === "npm" || executable === "pnpm" || executable === "yarn" || executable === "bun") {
 		if (args[0] === "test") return `${executable} test`;
 		const script = args[0] === "run" && typeof args[1] === "string" ? args[1] : null;
+		if (script === "test") return `${executable} test`;
+		if (script !== null && /^test:[\w=./:-]+$/.test(script)) return `${executable} run test:<name>`;
 		if (script !== null && isVerificationScriptName(script)) return `${executable} run ${script}`;
+	}
+	if (executable === "uv") {
+		const invocation = args.join(" ");
+		if (/^run(?:\s+--(?:no-sync|frozen|locked))*\s+pytest(?:\s+[\w=./:-]+)*$/.test(invocation)) {
+			return "uv run pytest";
+		}
+		if (/^run(?:\s+--(?:no-sync|frozen|locked))*\s+python\s+-m\s+pytest(?:\s+[\w=./:-]+)*$/.test(invocation)) {
+			return "uv run python -m pytest";
+		}
 	}
 	if (executable === "pytest") return "pytest";
 	if (isPythonExecutable(executable) && moduleArg(args) === "pytest") return "python -m pytest";
