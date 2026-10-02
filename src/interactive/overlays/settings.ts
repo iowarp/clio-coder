@@ -2749,10 +2749,19 @@ function applyEntrySettingChange(settings: ClioSettings, id: string, value: stri
 		const key = site as SiteId;
 		if (value === SITE_OFF_CHOICE || value === "") delete settings.systemOne.sites[key];
 		else if (Object.hasOwn(settings.systemOne.engines, value)) {
-			// A deadline the operator set on the binding outlives a change of engine.
+			// A deadline and the task routes the operator set on the binding outlive a
+			// change of engine; only the site's own engine is what this row chooses.
 			const current = settings.systemOne.sites[key];
 			const timeoutMs = typeof current === "object" ? current.timeoutMs : undefined;
-			settings.systemOne.sites[key] = timeoutMs === undefined ? value : { engine: value, timeoutMs };
+			const tasks = typeof current === "object" ? current.tasks : undefined;
+			settings.systemOne.sites[key] =
+				timeoutMs === undefined && tasks === undefined
+					? value
+					: {
+							engine: value,
+							...(timeoutMs !== undefined ? { timeoutMs } : {}),
+							...(tasks !== undefined ? { tasks } : {}),
+						};
 		}
 		return true;
 	}
