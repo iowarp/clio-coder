@@ -36,6 +36,35 @@ export function supportsNamedToolChoice(api: string): boolean {
 	);
 }
 
+/**
+ * Minimum version per Claude line at which the API removed forced tool use:
+ * `tool_choice` of type `tool` or `any` answers HTTP 400 "tool_choice: type
+ * "tool" and "any" are not supported for this model", with or without
+ * thinking. Later versions in a line keep the removal.
+ */
+const FORCED_TOOL_CHOICE_REMOVED_AT: Readonly<Record<string, readonly [number, number]>> = {
+	sonnet: [5, 5],
+	opus: [5, 5],
+	fable: [5, 1],
+	mythos: [5, 1],
+};
+
+/**
+ * Whether the model rejects a forced tool choice. Matches first-party ids
+ * (`claude-sonnet-5-5`), dated snapshots and platform-prefixed ids
+ * (`anthropic.claude-opus-5-5`). The minor version is one or two digits so a
+ * date suffix on a whole-number release is never read as a minor version.
+ */
+export function rejectsForcedToolChoice(model: Pick<EngineModel, "id">): boolean {
+	const match = /claude-(sonnet|opus|fable|mythos)-(\d+)(?:-(\d{1,2}))?(?!\d)/u.exec(model.id);
+	if (!match) return false;
+	const removedAt = FORCED_TOOL_CHOICE_REMOVED_AT[match[1] ?? ""];
+	if (!removedAt) return false;
+	const major = Number(match[2]);
+	const minor = match[3] === undefined ? 0 : Number(match[3]);
+	return major > removedAt[0] || (major === removedAt[0] && minor >= removedAt[1]);
+}
+
 /** A terminal protocol round exposes one handoff tool, never the work surface. */
 export function patchTerminalToolPayload(payload: unknown, model: EngineModel, toolName: string): unknown | undefined {
 	if (!supportsNamedToolChoice(model.api)) return undefined;
@@ -46,7 +75,12 @@ export function patchTerminalToolPayload(payload: unknown, model: EngineModel, t
 	if (isAnthropicMessagesApi(model.api)) {
 		const tools = namedToolDefinitions(patched.tools, toolName);
 		if (tools === null) return undefined;
-		return { ...patched, tools, tool_choice: { type: "tool", name: toolName, disable_parallel_tool_use: true } };
+		// The handoff tool is the only one attached, so auto with one call at most
+		// is the forced round on models that reject a named choice.
+		const toolChoice = rejectsForcedToolChoice(model)
+			? { type: "auto", disable_parallel_tool_use: true }
+			: { type: "tool", name: toolName, disable_parallel_tool_use: true };
+		return { ...patched, tools, tool_choice: toolChoice };
 	}
 	if (model.api === "openai-completions" || isOpenAIResponsesApi(model.api)) {
 		return { ...patched, parallel_tool_calls: false };
@@ -176,6 +210,10 @@ export function patchToolChoiceNamedPayload(
 	if (isAnthropicMessagesApi(model.api)) {
 		const tools = namedToolDefinitions(payload.tools, toolName);
 		if (tools === null) return undefined;
+		// These models reject any forced choice and cannot turn thinking off.
+		// Narrowing the surface to the required tool under auto keeps the
+		// requirement and leaves the configured thinking in place.
+		if (rejectsForcedToolChoice(model)) return { ...payload, tools, tool_choice: { type: "auto" } };
 		// Anthropic rejects a named tool choice while extended/adaptive thinking
 		// is active. Required-tool rounds are routing rounds, so disable thinking
 		// for this request only and remove the adaptive effort knob that belongs
@@ -216,7 +254,8 @@ export function patchToolChoiceNamedPayload(
 		}
 		const tools = namedToolDefinitions(payload.toolConfig.tools, toolName);
 		if (tools === null) return undefined;
-		return { ...payload, toolConfig: { ...payload.toolConfig, tools, toolChoice: { tool: { name: toolName } } } };
+		const toolChoice = rejectsForcedToolChoice(model) ? { auto: {} } : { tool: { name: toolName } };
+		return { ...payload, toolConfig: { ...payload.toolConfig, tools, toolChoice } };
 	}
 	const tools = namedToolDefinitions(payload.tools, toolName);
 	if (tools === null) return undefined;
