@@ -40,6 +40,7 @@ import {
 	resolveToolRow,
 	type ToolClass,
 	type ToolRowPair,
+	workspaceRelative,
 } from "../../tools/presentation.js";
 import { toolResultPresentationText } from "../../tools/result-disposition.js";
 import { effectiveToolCall } from "../../tools/surface.js";
@@ -47,6 +48,7 @@ import { mutationFactsLine } from "../mutation-preview.js";
 import type { ApprovalRequestView } from "../permission-overlay.js";
 import {
 	clioTheme,
+	collapseHomePath,
 	formatCompactMs,
 	functionText,
 	GLYPH,
@@ -1870,6 +1872,25 @@ function withoutLeadingLine(text: string, line: string): string {
 	return first >= 0 && lines[first]?.trim() === line ? lines.slice(first + 1).join("\n") : text;
 }
 
+/** An absolute POSIX path inside prose: it ends at whitespace, a quote or closing punctuation. */
+const EMBEDDED_ABSOLUTE_PATH = /(?<![\w./~-])\/[^\s'"`<>|:;,()[\]{}]+/gu;
+
+/**
+ * Display only. A tool's own failure text names the absolute path it resolved
+ * (`read: ENOENT: no such file or directory, stat '/home/me/proj/test'`) while
+ * every other row abbreviates: a path in the workspace reads relative to it,
+ * one under the home directory reads `~/…`, and any other stays as written.
+ * The result the model and the audit hold keeps the canonical path.
+ */
+function displayEmbeddedPaths(text: string, cwd: string): string {
+	return text.replace(EMBEDDED_ABSOLUTE_PATH, (match) => {
+		const stem = match.replace(/\.+$/u, "");
+		const relative = workspaceRelative(stem, cwd);
+		const shown = relative !== null && relative.length > 0 ? relative : collapseHomePath(stem);
+		return `${shown}${match.slice(stem.length)}`;
+	});
+}
+
 /** One edit states its two texts as two rows; several stay the list they are. */
 function flattenSingleEdit(value: unknown): unknown {
 	if (!Array.isArray(value) || value.length !== 1 || !isPlainObject(value[0])) return value;
@@ -1988,7 +2009,10 @@ export function renderToolPreview(
 		const runId = row.toolName === "monitor" ? row.args.run_id : undefined;
 		if (typeof runId === "string" && text.startsWith(`${runId} · `)) text = text.slice(runId.length + 3);
 		if (text.trim().length > 0) {
-			const body = toolOutputInk(redactSecretString(text)).flatMap((line) => indentAndWrap(line, width, failure));
+			// A failed command's body is the command's own output, shown as it ran; a
+			// failed tool's body is the harness's error text, so its paths abbreviate.
+			const shownText = failure && !command ? displayEmbeddedPaths(text, row.context.cwd ?? process.cwd()) : text;
+			const body = toolOutputInk(redactSecretString(shownText)).flatMap((line) => indentAndWrap(line, width, failure));
 			rows.push(
 				...previewRows(
 					body,

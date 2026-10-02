@@ -377,7 +377,7 @@ function dispatchObject(args: ToolRowArgs, context: ToolRowContext): string | nu
 const LEADING_CD = /^\s*cd\s+(?:"([^"]+)"|'([^']+)'|([^\s;&|]+))\s*(?:&&|;)\s*([\s\S]+)$/u;
 
 /** `dir` relative to the workspace: "" for the workspace itself, null outside it or when unknown. */
-function workspaceRelative(dir: string, cwd: string | undefined): string | null {
+export function workspaceRelative(dir: string, cwd: string | undefined): string | null {
 	if (cwd === undefined || cwd.length === 0) return null;
 	const expanded = dir.startsWith("~") ? path.join(os.homedir(), dir.slice(1)) : dir;
 	const relative = path.relative(cwd, path.resolve(cwd, expanded));
