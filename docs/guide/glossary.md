@@ -223,7 +223,7 @@ This document defines the 56 core architectural concepts and terminology used th
 - **Owning Type**: `SiteCuts` in [types.ts](../../src/domains/system-one/types.ts); `FITTED_CUTS` and `cutsFor` in [calibration.ts](../../src/domains/system-one/calibration.ts).
 
 ### 55. Shadow Mode
-- **Definition**: What a site does under an unfitted build. The engine is still asked and the call is recorded in the session ledger, and in the dataset when `systemOne.record` is on, but the site produces no hint, no gate, no act and no ranking. Hot-path callers leave a shadowed call running detached instead of waiting on it.
+- **Definition**: What a site does under an unfitted build. The engine is still asked and the call is recorded in the session ledger, and in the dataset when `systemOne.record` is on, but the site produces no hint, no gate, no act and no ranking. With recording off, a site whose build is known to be unfitted makes no call at all. No automatic site waits on a call, shadowed or not.
 - **Owning Type**: `SystemOne.shadowed` and `SiteCuts.fitted` in [types.ts](../../src/domains/system-one/types.ts).
 
 ### 56. Laya

@@ -119,10 +119,12 @@ Doctor reports how System One is configured and never asks a decision, so a fail
 
 | Row | Level and meaning |
 | --- | --- |
-| `system one <site>` | One row for each of `turn`, `toolCall`, `toolResult`, `turnEnd`, `relevance`, `consult` and `drafts`. `INFO` says `off; no engine bound`. `WARN` names why a binding cannot answer (an engine `systemOne.engines` does not define, a target `targets` lacks, an unregistered runtime, or a `systemone` engine over a runtime that does not answer typed decisions) and says the site stays silent. `WARN` also appears when the binding resolves but `connection <target>` is not verified, because the site may fall back every turn. Otherwise the row is `OK` and shows the engine, its kind, the target, the model and any `timeoutMs` deadline. |
-| `system one dataset` | Whether `systemOne.record` is on, the number of day files with their date range, their total size, and the retention and size cap. `INFO` with no files, `WARN` when the dataset directory cannot be read or is over the cap (the next write prunes the oldest days). |
+| `system one (experimental)` | `INFO` `off; no site is bound` when no site is bound. It is then the only System One row, unless recording is on or the dataset holds files. |
+| `system one (experimental) off` | `INFO` when some sites are bound, listing the sites that are not. |
+| `system one (experimental) <site>` | One row for each bound site. `WARN` names why a binding cannot answer (an engine `systemOne.engines` does not define, a target `targets` lacks, an unregistered runtime, or a `systemone` engine over a runtime that does not answer typed decisions) and says the site stays silent. `WARN` also appears when the binding resolves but `connection <target>` is not verified, because the site may stay silent. Otherwise the row is `OK` and shows the engine, its kind, the target, the model, any `timeoutMs` deadline, the builds whose cuts at this site are measured or operator-configured, and that any other answering build is unvalidated and only records. |
+| `system one dataset` | Whether `systemOne.record` is on, the number of day files with their date range, their total size, and the retention and size cap. Shown when a site is bound, recording is on or the dataset holds files. `INFO` with no files, `WARN` when the dataset directory cannot be read or is over the cap (the next write prunes the oldest days). |
 
-A site row that is `OK` says the binding is well formed. Whether a build has fitted cuts, which decides whether a site can act or only records, is shown per call in the session ledger and by `clio-coder systemone status`, not by doctor.
+A site row that is `OK` says the binding is well formed. Doctor cannot know which build will answer, so it names the builds a site's cuts cover; the build that actually answered each call is in the session ledger and `clio-coder systemone status`.
 
 ## Deep checks
 

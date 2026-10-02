@@ -130,6 +130,8 @@ Default chat settings control interactive conversation routing, reasoning effort
 | `integrations.library.sync` | `false` |
 | `integrations.git.commitAttribution` | `true` |
 
+`systemOne.*` and `fleet.speculativeDispatch` are experimental and off by default. The [System One guide](system-one.md) describes them, including the engine `profile` field and the per-site `tasks` routes, which have no default.
+
 | Precedence, low to high | Use |
 | --- | --- |
 | Compiled defaults | Baseline values in [`src/core/defaults.ts`](../../src/core/defaults.ts). |
