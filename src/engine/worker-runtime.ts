@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { homedir } from "node:os";
 import type { WorkerContextSeed } from "../domains/context/worker/contract.js";
 import { createWorkerContextGuard, WorkerContextExhaustedError } from "../domains/context/worker/pressure.js";
@@ -1111,7 +1112,12 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 		},
 		getApiKey: async () => input.apiKey,
 	};
-	if (input.sessionId) options.sessionId = input.sessionId;
+	// Providers derive prompt-cache affinity (openai-codex prompt_cache_key,
+	// session headers) from the session ID. Without one every worker call
+	// landed cold: captured Luna workers read 48% of input from cache against
+	// the main agent's 89%. One opaque ID per invocation keeps it out of the
+	// prompt, so prompt and tool attestation hashes are unchanged.
+	options.sessionId = input.sessionId || randomUUID();
 
 	const { agent } = createEngineAgent(options);
 	// Pi adds a leading prompt/tool declaration; exclude the entire inherited baseline.

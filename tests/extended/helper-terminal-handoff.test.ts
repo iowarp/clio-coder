@@ -7,7 +7,8 @@ import { test } from "node:test";
 import litellm from "../../src/domains/providers/runtimes/protocol/litellm.js";
 import type { AgentEvent } from "../../src/engine/types.js";
 import type { ClioWorkerEvent } from "../../src/engine/worker-events.js";
-import { startWorkerRun, type WorkerRunHandle } from "../../src/engine/worker-runtime.js";
+import type { WorkerRunHandle } from "../../src/engine/worker-runtime.js";
+import { startWorkerRun } from "../../src/engine/worker-runtime.js";
 import { attestedToolSignature } from "../../src/engine/worker-tools.js";
 import { projectWorkerEventForStdout } from "../../src/worker/event-projection.js";
 import { isReceiptBearingFrame, toolSignatureOf } from "../../src/worker/protocol.js";
@@ -62,9 +63,11 @@ for (const scenario of scenarios) {
 			tool_choice?: unknown;
 			parallel_tool_calls?: unknown;
 		}> = [];
+		const sessionIds: Array<string | string[] | undefined> = [];
 		const events: Array<AgentEvent | ClioWorkerEvent> = [];
 		let worker: WorkerRunHandle | undefined;
 		const server = createServer(async (req, res) => {
+			sessionIds.push(req.headers["x-litellm-session-id"]);
 			requests.push(JSON.parse(await readRequestBody(req)));
 			const round = scenario.rounds[requests.length - 1] ?? [submit({ findings: [] })];
 			res.setHeader("content-type", "text/event-stream");
@@ -101,6 +104,10 @@ for (const scenario of scenarios) {
 			const result = await worker.promise;
 			strictEqual(result.exitCode, scenario.code, JSON.stringify(result));
 			strictEqual(requests.length, scenario.rounds.length);
+			ok(
+				typeof sessionIds[0] === "string" && sessionIds[0].length > 0 && sessionIds.every((id) => id === sessionIds[0]),
+				"provider options must carry one stable session ID across the worker's calls and repair rounds",
+			);
 			ok(requests[0]);
 			ok(
 				requests[0].tools.some((tool) => tool.function.name === "write"),
