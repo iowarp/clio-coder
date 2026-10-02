@@ -341,13 +341,14 @@ export const PaneToggles = memo(function PaneToggles({
 			<button
 				id={ids.pane}
 				type="button"
-				className="wb-icon"
+				className="wb-icon wb-icon--text"
 				aria-pressed={open}
-				aria-label={open ? "Hide pane" : "Show pane"}
+				aria-label={open ? "Hide task pane" : "Show task pane"}
 				title="Task pane (Ctrl/⌘ Shift \\)"
 				onClick={() => onToggle(view, ids.pane)}
 			>
 				<Icon name="panelRight" />
+				<span>Pane</span>
 			</button>
 		</>
 	);

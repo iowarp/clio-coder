@@ -1,4 +1,4 @@
-// Whether the pane is open and which view it shows, kept per browser like the sidebar and theme.
+// Whether the pane is open and which view it shows, with dismissal kept for the current tab.
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { migratedPaneView, type PaneView } from "./pane-model.js";
@@ -7,7 +7,7 @@ const VIEW_KEY = "clio-coder-gui-pane-view";
 const OPEN_KEY = "clio-coder-gui-pane";
 // The previous panel's keys. Read once so an existing preference survives the move.
 const OLD_VIEW_KEY = "clio-coder-gui-session-panel-view";
-const OLD_OPEN_KEY = "clio-coder-gui-session-panel";
+const DOCK_QUERY = "(min-width: 1100px)";
 
 function initialView(): PaneView {
 	try {
@@ -18,14 +18,21 @@ function initialView(): PaneView {
 }
 
 function initialOpen(): boolean {
+	if (typeof matchMedia !== "function" || !matchMedia(DOCK_QUERY).matches) return false;
 	try {
-		const saved = localStorage.getItem(OPEN_KEY) ?? localStorage.getItem(OLD_OPEN_KEY);
-		if (saved === "open" || saved === "closed") return saved === "open";
+		return sessionStorage.getItem(OPEN_KEY) !== "closed";
 	} catch {
-		// Fall through to the width-based default.
+		// A docked pane stays visible when storage is unavailable.
+		return true;
 	}
-	// With no preference, a wide window shows the pane and a narrow one keeps the conversation whole.
-	return typeof matchMedia === "function" && matchMedia("(min-width: 1280px)").matches;
+}
+
+function rememberOpen(open: boolean): void {
+	try {
+		sessionStorage.setItem(OPEN_KEY, open ? "open" : "closed");
+	} catch {
+		// The explicit choice still holds until this view unmounts.
+	}
 }
 
 export interface PaneState {
@@ -44,12 +51,11 @@ export function usePaneState(fallbackTrigger: string): PaneState {
 	const [open, setOpen] = useState(initialOpen);
 	const opener = useRef<string | null>(null);
 	useEffect(() => {
-		try {
-			localStorage.setItem(OPEN_KEY, open ? "open" : "closed");
-		} catch {
-			// The preference holds in this tab.
-		}
-	}, [open]);
+		const query = matchMedia(DOCK_QUERY);
+		const change = () => setOpen(initialOpen());
+		query.addEventListener("change", change);
+		return () => query.removeEventListener("change", change);
+	}, []);
 	const setView = useCallback((next: PaneView) => {
 		setViewState(next);
 		try {
@@ -61,6 +67,7 @@ export function usePaneState(fallbackTrigger: string): PaneState {
 	const close = useCallback(() => {
 		const dismissed = document.activeElement;
 		setOpen(false);
+		rememberOpen(false);
 		requestAnimationFrame(() => {
 			const current = document.activeElement;
 			if (current === dismissed || current === document.body || current?.closest(".pane"))
@@ -72,6 +79,7 @@ export function usePaneState(fallbackTrigger: string): PaneState {
 			opener.current = trigger;
 			setView(next);
 			setOpen(true);
+			rememberOpen(true);
 		},
 		[setView],
 	);
