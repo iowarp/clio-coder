@@ -128,6 +128,30 @@ export function isCanonicalWorktreePathInside(parent: string, candidate: string)
 	return rel.length > 0 && rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel);
 }
 
+/** The checkout's configured value for `key`, or null when it is unset. */
+function configuredGitValue(cwd: string, key: string): string | null {
+	try {
+		const value = git(cwd, ["config", "--get", key]);
+		return value.length > 0 ? value : null;
+	} catch {
+		// `git config --get` exits 1 for an unset key.
+		return null;
+	}
+}
+
+/**
+ * `-c` overrides for a commit the host makes on the operator's behalf. The
+ * checkout's own identity authors it, the same identity the main agent's
+ * commits carry; `identity` fills in only what is not configured, so a
+ * merged task never lands under a synthetic author the operator did not pick.
+ */
+function hostCommitIdentity(cwd: string, identity: string): string[] {
+	const config: string[] = [];
+	if (configuredGitValue(cwd, "user.name") === null) config.push("-c", `user.name=${identity}`);
+	if (configuredGitValue(cwd, "user.email") === null) config.push("-c", `user.email=${identity}@local`);
+	return config;
+}
+
 export function commitWorktreePath(
 	path: string,
 	identity: string,
@@ -141,16 +165,7 @@ export function commitWorktreePath(
 	}
 	git(path, ["add", "-A", "--", ".", ...excludedPaths.map((entry) => `:(top,exclude,literal)${entry}`)]);
 	if (git(path, ["diff", "--cached", "--name-only", "-z"]).length === 0) return false;
-	git(path, [
-		"-c",
-		`user.name=${identity}`,
-		"-c",
-		`user.email=${identity}@local`,
-		"commit",
-		"-m",
-		message,
-		"--no-verify",
-	]);
+	git(path, [...hostCommitIdentity(path, identity), "commit", "-m", message, "--no-verify"]);
 	return true;
 }
 
@@ -203,10 +218,7 @@ export function mergeWorktreeBranch(
 ): { ok: true } | { ok: false; reason: string } {
 	try {
 		git(root, [
-			"-c",
-			`user.name=${identity}`,
-			"-c",
-			`user.email=${identity}@local`,
+			...hostCommitIdentity(root, identity),
 			"merge",
 			"--no-edit",
 			"--no-verify",
