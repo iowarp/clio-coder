@@ -55,6 +55,7 @@ export function isDeterministicOutcomeCode(code: RunOutcomeCode | null | undefin
 		code === "worker_no_work" ||
 		code === "worker_mutation_blocked" ||
 		code === "merge_withheld" ||
-		code === "worker_removed_tests"
+		code === "worker_removed_tests" ||
+		code === "information_flow_blocked"
 	);
 }

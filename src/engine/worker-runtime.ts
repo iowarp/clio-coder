@@ -656,6 +656,7 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 	// sealed in the receipt, so the parent's session ledger absorbs it before
 	// any output of this run reaches its context.
 	let runFlow: FlowRestrictionSet | null = input.flowRestrictions ?? null;
+	let flowBlockReported = false;
 	const workerFlow: NonNullable<RegistryDeps["flow"]> = {
 		carried: () => runFlow,
 		refusal: () => null,
@@ -967,7 +968,14 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 					model: input.wireModelId,
 				}),
 			);
-			return reason === null ? { block: false } : { block: true, reason };
+			if (reason === null) return { block: false };
+			// A retry or failover on this target carries the same labels and meets
+			// the same refusal, so the parent must not spend another attempt on it.
+			if (!flowBlockReported) {
+				flowBlockReported = true;
+				emit({ type: "clio_coder_run_outcome", payload: { outcomeCode: "information_flow_blocked", detail: reason } });
+			}
+			return { block: true, reason };
 		},
 		beforeToolCall: async ({ assistantMessage, toolCall }) => {
 			if (helperSchema === null) return undefined;

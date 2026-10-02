@@ -924,6 +924,8 @@ function reportDispatchDiagnostic(scope: string, error: unknown): void {
 }
 
 const OUTCOME_CODE_SPECIFICITY: ReadonlyArray<RunOutcomeCode> = [
+	// The same restricted context meets the same target on every attempt.
+	"information_flow_blocked",
 	"worker_context_exhausted",
 	"result_contract_exhausted",
 	"loop_guard_tools_disabled_exhausted",

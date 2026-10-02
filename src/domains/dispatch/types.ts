@@ -70,7 +70,8 @@ export type RunOutcomeCode =
 	| "worker_no_work"
 	| "worker_mutation_blocked"
 	| "merge_withheld"
-	| "worker_removed_tests";
+	| "worker_removed_tests"
+	| "information_flow_blocked";
 
 export function isRunOutcomeCode(value: unknown): value is RunOutcomeCode {
 	return (
@@ -84,7 +85,8 @@ export function isRunOutcomeCode(value: unknown): value is RunOutcomeCode {
 		value === "worker_no_work" ||
 		value === "worker_mutation_blocked" ||
 		value === "merge_withheld" ||
-		value === "worker_removed_tests"
+		value === "worker_removed_tests" ||
+		value === "information_flow_blocked"
 	);
 }
 
