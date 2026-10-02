@@ -31,6 +31,7 @@ import type {
 	Verdict,
 } from "../domains/system-one/index.js";
 import { LlmAdmissionRefused } from "../domains/system-one/index.js";
+import { STEER_SITE } from "../domains/system-one/sites/steer.js";
 import { TOOL_CALL_GATE_SITE } from "../domains/system-one/sites/tool-call.js";
 import { TOOL_RESULT_SITE } from "../domains/system-one/sites/tool-result.js";
 import type { TurnRecipeOption, TurnValue } from "../domains/system-one/sites/turn.js";
@@ -223,6 +224,18 @@ export interface TurnEndReadInput {
 	toolNames: ReadonlyArray<string>;
 }
 
+export interface SteerReadInput {
+	/** The queue entry id; the outcome rows the queue writes later join on it. */
+	ref: string;
+	text: string;
+	chosen: "next-slot" | "end-of-turn";
+	/** 1-based place in the queue at enqueue time, and the queue's length then. */
+	position: number;
+	queued: number;
+	/** The assistant's latest text when the message was queued, or empty. */
+	previous: string;
+}
+
 export interface TurnPrewarmPrediction {
 	readonly agentId: string;
 	readonly count: number;
@@ -263,6 +276,12 @@ export interface SystemOneHost {
 	 * The gate is experimental and never holds or parks the call.
 	 */
 	observeToolCallGate(subject: ToolCallGateSubject, ref: string | undefined): void;
+	/**
+	 * Read a message the operator queued during a run, detached, for the record.
+	 * The steer site is experimental and record-only: delivery follows the
+	 * operator's keys, and no reader takes this answer.
+	 */
+	readSteer(input: SteerReadInput): void;
 	/** What followed a decision, joined to it by `ref`. */
 	recordOutcome(outcome: {
 		ref: string;
@@ -520,6 +539,25 @@ export function createSystemOneHost(deps: SystemOneHostDeps): SystemOneHost {
 			// there is nothing to make the call for.
 			if (systemOne.shadowed("toolCall", "gate") && !recordingOn()) return;
 			detached(() => systemOne.run(TOOL_CALL_GATE_SITE, { ...subject, moment: "gate" }, runOptions(ref)));
+		},
+
+		readSteer(input) {
+			if (!systemOne.bound("steer")) return;
+			if (systemOne.shadowed("steer") && !recordingOn()) return;
+			detached(() =>
+				systemOne.run(
+					STEER_SITE,
+					{
+						message: input.text,
+						task: turn?.task ?? "",
+						previous: input.previous,
+						position: input.position,
+						queued: input.queued,
+						chosen: input.chosen,
+					},
+					{ ref: input.ref },
+				),
+			);
 		},
 
 		recordOutcome(outcome) {

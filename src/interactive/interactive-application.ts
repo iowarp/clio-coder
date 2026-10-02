@@ -1039,12 +1039,12 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 		editor,
 		queueNavigator: {
 			toEditor: (entry) => {
-				if (deps.chat.removeQueuedEntry(entry.id) === null) return;
+				if (deps.chat.removeQueuedEntry(entry.id, "to-editor") === null) return;
 				const current = editor.getExpandedText();
 				editor.setLiteralText([entry.text, current].filter((part) => part.trim().length > 0).join("\n\n"));
 			},
 			sendNow: (entry) => {
-				if (deps.chat.removeQueuedEntry(entry.id) === null) return;
+				if (deps.chat.removeQueuedEntry(entry.id, "sent-now") === null) return;
 				editorSubmit.interruptFromEditor(entry.text);
 			},
 			restoreAll: () => editorSubmit.restoreQueuedFollowUpsToEditor(),

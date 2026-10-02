@@ -3226,6 +3226,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			}
 			systemOneHost.readTurn(input);
 		},
+		readSteer: (input) => systemOneHost.readSteer(input),
 		// Held processes a turn did not use die with the turn, cancelled or not.
 		onTurnSettled: () => {
 			// Calls made mid-turn (gateway ranking, consult, an approval card) belong

@@ -20,7 +20,16 @@
 import type { DecisionTask, ReadoutKind, RendererId } from "./contract.js";
 import type { ProfileId } from "./profiles.js";
 
-export const SITE_IDS = ["turn", "toolCall", "toolResult", "turnEnd", "relevance", "consult", "drafts"] as const;
+export const SITE_IDS = [
+	"turn",
+	"toolCall",
+	"toolResult",
+	"turnEnd",
+	"relevance",
+	"consult",
+	"drafts",
+	"steer",
+] as const;
 export type SiteId = (typeof SITE_IDS)[number];
 
 export type QuestionType = "noul" | "choice" | "score";
@@ -322,7 +331,15 @@ export interface OutcomeRecord {
 	 * `turn-tokens` amends a cancelled turn's `turn` row with the worker tokens
 	 * that sealed after it was written. Readers join it by `ref` like any other.
 	 */
-	readonly source: "turn" | "turn-tokens" | "next-operator" | "permission" | "follow-up" | "draft" | "compaction";
+	readonly source:
+		| "turn"
+		| "turn-tokens"
+		| "next-operator"
+		| "permission"
+		| "follow-up"
+		| "draft"
+		| "compaction"
+		| "steer";
 	/** ISO time the outcome was observed. */
 	readonly at: string;
 	readonly facts: Readonly<Record<string, unknown>>;

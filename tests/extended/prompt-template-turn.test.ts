@@ -91,9 +91,9 @@ test("streaming prompt injection and stranded resubmission retain presentation a
 	});
 	for (const kind of ["steer", "follow-up"] as const) {
 		strictEqual(
-			kind === "steer"
+			(kind === "steer"
 				? queues.steer(expansion.text, expansion.display)
-				: queues.queueFollowUp(expansion.text, expansion.display),
+				: queues.queueFollowUp(expansion.text, expansion.display)) !== null,
 			true,
 		);
 		// The engine receives the entry only at a slot; a final turn hands

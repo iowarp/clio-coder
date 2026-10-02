@@ -1924,6 +1924,7 @@ const SITE_LABELS: Readonly<Record<SiteId, string>> = {
 	relevance: "When sorting context",
 	consult: "When an agent asks for advice",
 	drafts: "When comparing drafts",
+	steer: "When a message is queued mid-run",
 };
 
 /**
@@ -1964,6 +1965,11 @@ const SITE_NOTES: Readonly<Record<SiteId, { readonly does: string; readonly send
 	drafts: {
 		does: "rates /draft candidates in the overlay",
 		sends: "the /draft request and the candidate answers",
+	},
+	steer: {
+		does:
+			"reads how a message typed during a run relates to the work and how soon it should land, for the record only; delivery follows your keys and the queue navigator",
+		sends: "the queued message, the request that started the run and the tail of the latest reply",
 	},
 };
 

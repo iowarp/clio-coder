@@ -13,6 +13,7 @@
  * order matches what the model saw.
  */
 
+import { randomUUID } from "node:crypto";
 import type { createEngineAgent } from "../engine/agent.js";
 import type { AgentMessage } from "../engine/types.js";
 import type { ChatTurnState } from "./turn-state.js";
@@ -53,6 +54,21 @@ export interface QueuedChatMessage {
 	referencedPaths?: ReadonlyArray<string>;
 }
 
+/** Why an entry left the queue without being delivered by the engine. */
+export type QueueRemovalReason = "removed" | "sent-now" | "to-editor" | "restored" | "cancelled" | "resubmitted";
+
+/** Where a delivered entry was handed to the engine. */
+export type QueueDeliveryPoint = "finish-turn" | "prepare-next-turn" | "prompt";
+
+/**
+ * What became of a queued entry, for the dataset that joins it to the steer
+ * site's reading by the entry id. `waitedMs` is the time it spent queued.
+ */
+export type QueueEvent =
+	| { type: "delivered"; entry: QueuedChatMessage; point: QueueDeliveryPoint; waitedMs: number }
+	| { type: "removed"; entry: QueuedChatMessage; reason: QueueRemovalReason; waitedMs: number }
+	| { type: "relabeled"; entry: QueuedChatMessage; by: "operator" | "producer" };
+
 export interface QueueEnqueueOptions {
 	front?: boolean;
 	referencedPaths?: ReadonlyArray<string>;
@@ -74,6 +90,8 @@ export interface TurnQueuesDeps {
 	 */
 	emitQueuedUserTurn: (entry: QueuedChatMessage) => void;
 	emitNotice: (text: string) => void;
+	/** What became of an entry; recording only, never consulted. */
+	onEvent?: (event: QueueEvent) => void;
 	/** Late-bound `ChatLoop.submit`; wired by the loop after API construction. */
 	submit: (
 		text: string,
@@ -83,15 +101,19 @@ export interface TurnQueuesDeps {
 }
 
 export interface TurnQueues {
-	/** `front` puts the entry at the head of the queue: a send-now the operator chose to wait with. */
-	steer(text: string, display?: QueuedChatMessage["display"], options?: QueueEnqueueOptions): boolean;
-	queueFollowUp(text: string, display?: QueuedChatMessage["display"], options?: QueueEnqueueOptions): boolean;
+	/** `front` puts the entry at the head of the queue: a send-now the operator chose to wait with. Null when nothing is running. */
+	steer(text: string, display?: QueuedChatMessage["display"], options?: QueueEnqueueOptions): QueuedChatMessage | null;
+	queueFollowUp(
+		text: string,
+		display?: QueuedChatMessage["display"],
+		options?: QueueEnqueueOptions,
+	): QueuedChatMessage | null;
 	queuedMessages(): QueuedMessagesSnapshot;
 	/** Copies of the entries still in Clio's hands, in delivery order. */
 	entries(): QueuedChatMessage[];
 	/** True while a next-slot message is queued or handed over but not yet injected. */
 	hasPendingSteer(): boolean;
-	removeEntry(id: string): QueuedChatMessage | null;
+	removeEntry(id: string, reason?: QueueRemovalReason): QueuedChatMessage | null;
 	/** Move one entry up (-1) or down (+1); false when it cannot move. */
 	moveEntry(id: string, delta: -1 | 1): boolean;
 	/** The operator's own choice of slot; pins the entry against producers. */
@@ -162,16 +184,18 @@ export function createTurnQueues(deps: TurnQueuesDeps): TurnQueues {
 		kind: QueuedMessageKind,
 		display?: QueuedChatMessage["display"],
 		options?: QueueEnqueueOptions,
-	): boolean => {
+	): QueuedChatMessage | null => {
 		// The payload crosses to the model exactly as it was submitted; only the
 		// emptiness test reads a trimmed copy. A queued turn that shortened its own
 		// text here would land in the ledger disagreeing with the expansion that
 		// produced it, which is the same defect the persisted echo had (issue #244).
-		if (text.trim().length === 0 || !state.streaming || !state.runtime) return false;
+		if (text.trim().length === 0 || !state.streaming || !state.runtime) return null;
 		sequence += 1;
 		const paths = options?.referencedPaths ?? [];
+		// Unique across sessions: the id is the join key between the steer site's
+		// reading of this entry and the outcome rows written when it leaves.
 		const entry: QueuedChatMessage = {
-			id: `q${sequence}`,
+			id: `steer_${randomUUID().slice(0, 8)}_${sequence}`,
 			text,
 			kind,
 			enqueuedAt: now(),
@@ -181,13 +205,25 @@ export function createTurnQueues(deps: TurnQueuesDeps): TurnQueues {
 		if (options?.front === true) queue.unshift(entry);
 		else queue.push(entry);
 		emitQueueUpdate();
-		return true;
+		return { ...entry };
+	};
+
+	const report = (event: QueueEvent): void => {
+		try {
+			deps.onEvent?.(event);
+		} catch {
+			// Recording never costs the queue operation it describes.
+		}
+	};
+	const waited = (entry: QueuedChatMessage): number => Math.max(0, now() - entry.enqueuedAt);
+	const removed = (entries: ReadonlyArray<QueuedChatMessage>, reason: QueueRemovalReason): void => {
+		for (const entry of entries) report({ type: "removed", entry: { ...entry }, reason, waitedMs: waited(entry) });
 	};
 
 	const find = (id: string): number => queue.findIndex((entry) => entry.id === id);
 
 	/** Hand every entry of `kind` to the engine; returns how many went. */
-	const handOver = (agent: EngineAgent, kind: QueuedMessageKind): number => {
+	const handOver = (agent: EngineAgent, kind: QueuedMessageKind, point: QueueDeliveryPoint): number => {
 		const due = queue.filter((entry) => entry.kind === kind);
 		if (due.length === 0) return 0;
 		for (const entry of due) {
@@ -195,6 +231,7 @@ export function createTurnQueues(deps: TurnQueuesDeps): TurnQueues {
 			inFlight.push(entry);
 			if (kind === "steer") agent.steer(toAgentMessage(entry));
 			else agent.followUp(toAgentMessage(entry));
+			report({ type: "delivered", entry: { ...entry }, point, waitedMs: waited(entry) });
 		}
 		emitQueueUpdate();
 		return due.length;
@@ -212,11 +249,12 @@ export function createTurnQueues(deps: TurnQueuesDeps): TurnQueues {
 		entries: () => queue.map((entry) => ({ ...entry })),
 		hasPendingSteer: () =>
 			queue.some((entry) => entry.kind === "steer") || inFlight.some((entry) => entry.kind === "steer"),
-		removeEntry(id) {
+		removeEntry(id, reason = "removed") {
 			const idx = find(id);
 			if (idx < 0) return null;
 			const [entry] = queue.splice(idx, 1);
 			emitQueueUpdate();
+			if (entry) removed([entry], reason);
 			return entry ?? null;
 		},
 		moveEntry(id, delta) {
@@ -235,6 +273,7 @@ export function createTurnQueues(deps: TurnQueuesDeps): TurnQueues {
 			entry.kind = kind;
 			entry.pinned = true;
 			emitQueueUpdate();
+			report({ type: "relabeled", entry: { ...entry }, by: "operator" });
 			return true;
 		},
 		relabel(id, labels, kind) {
@@ -243,6 +282,7 @@ export function createTurnQueues(deps: TurnQueuesDeps): TurnQueues {
 			entry.labels = { ...entry.labels, ...labels };
 			if (kind !== undefined && entry.pinned !== true) entry.kind = kind;
 			emitQueueUpdate();
+			report({ type: "relabeled", entry: { ...entry }, by: "producer" });
 			return true;
 		},
 		clearQueuedMirror(): QueuedChatMessage[] {
@@ -253,25 +293,26 @@ export function createTurnQueues(deps: TurnQueuesDeps): TurnQueues {
 				state.runtime.agent.clearAllQueues();
 			}
 			if (drained.length > 0) emitQueueUpdate();
+			removed(drained, "restored");
 			return drained;
 		},
 		handOverAtFinishTurn(final) {
 			const agent = state.runtime?.agent;
 			if (!agent || held) return;
-			const steered = handOver(agent, "steer");
-			if (final && steered === 0) handOver(agent, "follow-up");
+			const steered = handOver(agent, "steer", "finish-turn");
+			if (final && steered === 0) handOver(agent, "follow-up", "finish-turn");
 		},
 		handOverAfterPrepareNextTurn() {
 			const agent = state.runtime?.agent;
 			if (!agent || held) return;
-			handOver(agent, "steer");
+			handOver(agent, "steer", "prepare-next-turn");
 		},
 		handOverBeforePrompt(agent) {
 			held = false;
 			if (!flushNext) return;
 			flushNext = false;
-			handOver(agent, "steer");
-			handOver(agent, "follow-up");
+			handOver(agent, "steer", "prompt");
+			handOver(agent, "follow-up", "prompt");
 		},
 		flushOnNextPrompt() {
 			flushNext = true;
@@ -279,7 +320,7 @@ export function createTurnQueues(deps: TurnQueuesDeps): TurnQueues {
 		onRunCancelled({ hold }) {
 			const changed = inFlight.length > 0 || queue.length > 0;
 			queue.unshift(...inFlight.splice(0, inFlight.length));
-			if (!hold) queue.length = 0;
+			if (!hold) removed(queue.splice(0, queue.length), "cancelled");
 			held = hold && queue.length > 0;
 			state.runtime?.agent.clearAllQueues();
 			if (changed) emitQueueUpdate();
@@ -339,6 +380,7 @@ export function createTurnQueues(deps: TurnQueuesDeps): TurnQueues {
 			// this is the only place the first text can enter the transcript; the
 			// rest arrive through message_end like any handed-over message.
 			deps.emitQueuedUserTurn({ ...first });
+			removed([first], "resubmitted");
 			await deps.submit(first.text, {
 				...(first.referencedPaths && first.referencedPaths.length > 0
 					? { workingContextPaths: first.referencedPaths }

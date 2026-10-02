@@ -26,6 +26,7 @@ export const DECISION_TASKS = [
 	"clusterSelect",
 	"consult",
 	"drafts",
+	"steer",
 ] as const;
 export type DecisionTask = (typeof DECISION_TASKS)[number];
 
@@ -42,6 +43,7 @@ export const SITE_TASKS: Readonly<Record<SiteId, ReadonlyArray<DecisionTask>>> =
 	relevance: ["relevance", "clusterSelect"],
 	consult: ["consult"],
 	drafts: ["drafts"],
+	steer: ["steer"],
 };
 
 /** The task a site asks when its definition names none. */

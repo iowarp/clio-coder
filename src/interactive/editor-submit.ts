@@ -515,7 +515,7 @@ export function createEditorSubmitController(deps: EditorSubmitDeps): EditorSubm
 				deps.notify("warning", `send now refused: ${refusal}`, "steer:refused");
 				return;
 			}
-			if (deps.chat.removeQueuedEntry(first.id) === null) return;
+			if (deps.chat.removeQueuedEntry(first.id, "sent-now") === null) return;
 			deps.chat.flushQueueOnNextPrompt();
 			text = first.text;
 			flushed = first;

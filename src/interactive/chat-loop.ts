@@ -150,6 +150,7 @@ import {
 	type QueuedChatMessage,
 	type QueuedMessageKind,
 	type QueuedMessagesSnapshot,
+	type QueueRemovalReason,
 	type SteeringMode,
 } from "./turn-queues.js";
 import {
@@ -167,7 +168,13 @@ import {
 } from "./turn-state.js";
 import { isWorkerShareNote } from "./worker-share.js";
 
-export type { QueuedChatMessage, QueuedMessageKind, QueuedMessagesSnapshot, SteeringMode } from "./turn-queues.js";
+export type {
+	QueuedChatMessage,
+	QueuedMessageKind,
+	QueuedMessagesSnapshot,
+	QueueRemovalReason,
+	SteeringMode,
+} from "./turn-queues.js";
 export type { RetryStatusEvent, RetryStatusPayload, RetryStatusPhase } from "./turn-recovery.js";
 export type { AssistantDeltaEvent } from "./turn-runtime.js";
 export type { ChatLoopRunSnapshot, TurnPreparationPhase } from "./turn-state.js";
@@ -570,8 +577,8 @@ export interface ChatLoop {
 	queueFollowUp(text: string, display?: { text: string; note?: string }): boolean;
 	/** The queued entries still in Clio's hands, in delivery order. */
 	queueEntries(): QueuedChatMessage[];
-	/** Remove one queued entry; returns it, or null when it already left the queue. */
-	removeQueuedEntry(id: string): QueuedChatMessage | null;
+	/** Remove one queued entry; returns it, or null when it already left the queue. `reason` is recorded, never acted on. */
+	removeQueuedEntry(id: string, reason?: QueueRemovalReason): QueuedChatMessage | null;
 	/** Move one queued entry up (-1) or down (+1) in delivery order. */
 	moveQueuedEntry(id: string, delta: -1 | 1): boolean;
 	/** The operator's choice of slot for one entry; pins it against producers. */
@@ -876,6 +883,19 @@ export interface CreateChatLoopDeps {
 		previous: string;
 		previousTask: () => string;
 	}) => void;
+	/**
+	 * Ask the record-only `steer` site about a message the operator queued during
+	 * a run, and return without waiting. `ref` is the queue entry id, which the
+	 * outcome rows written when the entry leaves the queue join on.
+	 */
+	readSteer?: (input: {
+		ref: string;
+		text: string;
+		chosen: "next-slot" | "end-of-turn";
+		position: number;
+		queued: number;
+		previous: string;
+	}) => void;
 	/** Called once when a submitted turn settles, whether it completed, failed or was cancelled. */
 	onTurnSettled?: () => SpeculativeDispatchCounts | undefined;
 	/**
@@ -907,7 +927,7 @@ export interface CreateChatLoopDeps {
 	/** What followed a decision, joined to it by `ref` when the dataset is exported. */
 	recordOutcome?: (outcome: {
 		ref: string;
-		source: "turn" | "turn-tokens" | "next-operator";
+		source: "turn" | "turn-tokens" | "next-operator" | "steer";
 		facts: Readonly<Record<string, unknown>>;
 	}) => void;
 	getReadySkillCount?: () => number;
@@ -980,6 +1000,24 @@ function reloadProtectedArtifactsForSession(
 			`session protection history could not be read: ${error instanceof Error ? error.message : String(error)}`,
 		);
 	}
+}
+
+/** The latest assistant text in a transcript, or empty: what a mid-run steer is reacting to. */
+function lastAssistantText(messages: ReadonlyArray<AgentMessage>): string {
+	for (let index = messages.length - 1; index >= 0; index -= 1) {
+		const message = messages[index] as { role?: unknown; content?: unknown } | undefined;
+		if (!message || message.role !== "assistant") continue;
+		if (typeof message.content === "string") return message.content;
+		if (!Array.isArray(message.content)) return "";
+		return message.content
+			.filter((block): block is { type: "text"; text: string } => {
+				const candidate = block as { type?: unknown; text?: unknown };
+				return candidate?.type === "text" && typeof candidate.text === "string";
+			})
+			.map((block) => block.text)
+			.join("\n");
+	}
+	return "";
 }
 
 export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
@@ -1228,6 +1266,23 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				...(entry.display ? { display: entry.display } : {}),
 			}),
 		emitNotice,
+		// What became of each queued entry, joined by id to the steer site's reading
+		// of it. The dataset learns delivery from these rows; nothing reads them live.
+		onEvent: (event) => {
+			const facts: Record<string, unknown> = { event: event.type, kind: event.entry.kind };
+			if (event.entry.pinned === true) facts.pinned = true;
+			if (event.entry.labels !== undefined) facts.labels = event.entry.labels;
+			if (event.type === "delivered") {
+				facts.point = event.point;
+				facts.waitedMs = event.waitedMs;
+			} else if (event.type === "removed") {
+				facts.reason = event.reason;
+				facts.waitedMs = event.waitedMs;
+			} else {
+				facts.by = event.by;
+			}
+			deps.recordOutcome?.({ ref: event.entry.id, source: "steer", facts });
+		},
 		// The loop's own resubmits (stranded steers, continuation requests) run
 		// from submit's finally and bypass the admission gate: an interrupt that
 		// holds the gate while awaiting that same run would otherwise deadlock.
@@ -1875,10 +1930,10 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 	prewarm.schedule("session-start");
 
 	const api: ChatLoop = {
-		steer: (text) => queues.steer(text),
-		queueFollowUp: (text, display) => queues.queueFollowUp(text, display),
+		steer: (text) => queues.steer(text) !== null,
+		queueFollowUp: (text, display) => queues.queueFollowUp(text, display) !== null,
 		queueEntries: () => queues.entries(),
-		removeQueuedEntry: (id) => queues.removeEntry(id),
+		removeQueuedEntry: (id, reason) => queues.removeEntry(id, reason),
 		moveQueuedEntry: (id, delta) => queues.moveEntry(id, delta),
 		setQueuedEntryKind: (id, kind) => queues.setEntryKind(id, kind),
 		flushQueueOnNextPrompt: () => queues.flushOnNextPrompt(),
@@ -1955,8 +2010,21 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 						// The queue carries the submitted bytes, not the trimmed copy the
 						// guard above reads: a steer is a model-facing turn and the
 						// payload contract applies to it too (issue #244).
-						if (mode === "end-of-turn") queues.queueFollowUp(text, options.display, { referencedPaths });
-						else queues.steer(text, options.display, { front, referencedPaths });
+						const entry =
+							mode === "end-of-turn"
+								? queues.queueFollowUp(text, options.display, { referencedPaths })
+								: queues.steer(text, options.display, { front, referencedPaths });
+						if (entry !== null && deps.readSteer) {
+							const entries = queues.entries();
+							deps.readSteer({
+								ref: entry.id,
+								text,
+								chosen: mode === "end-of-turn" ? "end-of-turn" : "next-slot",
+								position: entries.findIndex((candidate) => candidate.id === entry.id) + 1,
+								queued: entries.length,
+								previous: lastAssistantText(state.runtime.agent.state.messages),
+							});
+						}
 						return;
 					}
 					emitNotice("[Clio Coder] response already in progress. Press Esc to cancel the active run.");
