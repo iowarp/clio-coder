@@ -38,12 +38,23 @@ const CHECK_FN_RE =
 
 /** A failure message that leads with a rule code: `rule6: ...`, `E501: ...`, `D14: ...`. */
 const FAILURE_RE = /[`'"]([A-Za-z]{0,12}\d{1,4}[a-z]?): ((?:[^`'"\\]|\\.){8,})/g;
+/**
+ * A failure reported through a helper that names its rule first:
+ * `fail("documentation-links", \`missing heading anchor ...\`)`. Clio's own
+ * hygiene script reports 111 failures this way, and the coded form alone
+ * handed the bootstrap model 21 check names with none of their rules.
+ */
+const FAILURE_CALL_RE =
+	/\b\w*(?:fail|error|report|violation|issue|problem)\w*\(\s*["'`]([a-z][\w.:-]{1,40})["'`]\s*,\s*["'`]((?:[^`'"\\]|\\.){8,})/gi;
 const MAX_FAILURE_CHARS = 360;
+/** One rule often fails in a few distinct ways; keep the first of each, not every variant. */
+const MAX_FAILURES_PER_CODE = 2;
 
 const MAX_CI_COMMANDS = 60;
 const MAX_CHECK_FILES = 24;
 const MAX_CHECKS_PER_FILE = 40;
-const MAX_COMMAND_CHARS = 200;
+/** A selector cut short reads as a broader glob; the full `test` script ran to 260 characters. */
+const MAX_COMMAND_CHARS = 480;
 const MAX_CHECK_FILE_BYTES = 512 * 1024;
 
 function readText(root: string, path: string, maxBytes = MAX_CHECK_FILE_BYTES): string | null {
@@ -91,16 +102,28 @@ function checkNames(text: string): string[] {
 
 function failureHeads(text: string): string[] {
 	const heads: string[] = [];
-	const seen = new Set<string>();
-	for (const match of text.matchAll(FAILURE_RE)) {
+	const perCode = new Map<string, number>();
+	const bodies = new Set<string>();
+	const matches = [...text.matchAll(FAILURE_RE), ...text.matchAll(FAILURE_CALL_RE)].sort(
+		(a, b) => (a.index ?? 0) - (b.index ?? 0),
+	);
+	for (const match of matches) {
 		const code = match[1] ?? "";
-		if (seen.has(code)) continue;
-		seen.add(code);
+		const count = perCode.get(code) ?? 0;
+		if (count >= MAX_FAILURES_PER_CODE) continue;
 		const body = (match[2] ?? "")
 			.replace(/\$\{[^}]*\}/g, "…")
-			.replace(/(?:…\s*)+/g, "… ")
+			// The capture stops at the first quote, which can fall inside an
+			// interpolation such as `${names.join(", ")}`; elide the fragment.
+			.replace(/\$\{[^}]*$/, "…")
+			.replace(/\\n/g, " ")
+			.replace(/(?:…\s*[:,]?\s*)+/g, "… ")
 			.replace(/\s+/g, " ")
 			.trim();
+		// A message that is only interpolation says nothing about the rule.
+		if (body.replace(/[…\s:,]/g, "").length < 8 || bodies.has(`${code}\0${body}`)) continue;
+		bodies.add(`${code}\0${body}`);
+		perCode.set(code, count + 1);
 		heads.push(`${code}: ${body}`.slice(0, MAX_FAILURE_CHARS));
 		if (heads.length >= MAX_CHECKS_PER_FILE) break;
 	}
