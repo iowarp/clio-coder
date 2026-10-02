@@ -23,6 +23,7 @@ import { extractText, isSelfExplainingAbort } from "./chat-loop-messages.js";
 import { coldReasonText } from "./cold-reasons.js";
 import type { ApprovalRequestView } from "./permission-overlay.js";
 import { codeInk } from "./renderers/code-ink.js";
+import { LiveToolView } from "./renderers/live-tool-view.js";
 import { createMermaidMarkdownTransform } from "./renderers/mermaid.js";
 import { renderNoticeRow } from "./renderers/notice.js";
 import { previewBudget, previewRows } from "./renderers/preview.js";
@@ -237,6 +238,11 @@ type ToolSegment = {
 	 * the clear path can re-assign `undefined` without a `delete`.
 	 */
 	partialResult?: unknown;
+	/**
+	 * Incremental state of the call's streamed arguments and output while it is
+	 * in flight, so a frame paints only the rows in view. Dropped at settlement.
+	 */
+	live?: LiveToolView | undefined;
 	/**
 	 * True while the call is parked at the permission gate. Set/cleared by
 	 * `tool_approval_state` events and cleared by any settle so a denied or
@@ -1224,10 +1230,13 @@ function renderToolSegmentLines(
 	};
 	const options = { unbounded, diffStyle: seg.replayed ? ("plain" as const) : ("color" as const) };
 	if (unbounded && seg.finished) return renderToolExecution(finished, width, options);
-	return renderToolPreview(seg.finished ? finished : call, width, detail, {
+	if (seg.finished) return renderToolPreview(finished, width, detail, { ...options, terminalRows });
+	seg.live ??= new LiveToolView();
+	return renderToolPreview(call, width, detail, {
 		...options,
 		terminalRows,
 		partialResult: seg.partialResult,
+		live: seg.live,
 	});
 }
 
@@ -1705,6 +1714,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 			seg.result = "(no result: the call did not complete; execution was aborted, blocked, or orphaned)";
 		seg.settlement = settlement;
 		seg.partialResult = undefined;
+		seg.live = undefined;
 		seg.awaitingApproval = undefined;
 		seg.approvalView = undefined;
 	};
@@ -2638,6 +2648,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 					// stable instead of churning through partial-frame layout. A
 					// denied park settles here too, so the awaiting styling must go.
 					tool.partialResult = undefined;
+					tool.live = undefined;
 					tool.awaitingApproval = undefined;
 					tool.approvalView = undefined;
 				}
