@@ -37,13 +37,13 @@ export function capabilityStarterArgs(spec: ToolSpec): Readonly<Record<string, u
 }
 
 /** Bounded schema cues and validated examples for calls made before describe. */
-export function capabilityArgumentShape(spec: ToolSpec): string {
+export function capabilityArgumentShape(spec: ToolSpec, exampleLimit = EXAMPLES_PER_TOOL): string {
 	const required = (spec.parameters as { required?: string[] }).required ?? [];
 	const requiredCue = required.length > 0 ? `Required args: ${required.join(", ")}.` : "";
 	const parts = [
 		Buffer.byteLength(requiredCue) > 512 ? `${requiredCue.slice(0, 120)}… Describe for all required args.` : requiredCue,
 	];
-	for (const { args } of validatedExamples(spec)) {
+	for (const { args } of validatedExamples(spec).slice(0, exampleLimit)) {
 		const part = `args=${JSON.stringify(args)}`;
 		if (Buffer.byteLength([...parts, part].join(" ")) > 2048) break;
 		parts.push(part);

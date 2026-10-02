@@ -36,6 +36,8 @@ export interface ToolDiscoveryHint extends ToolPromptHint {
 /** One registry-owned capability purpose, rendered into the pinned capability map. */
 export interface CapabilityMapEntry {
 	tool: string;
+	/** Required fields and one schema-validated example; the renderer budgets these across the map. */
+	argumentShape?: string;
 	/** The registry's one-line `objective` for this capability. */
 	objective: string;
 	/** The registry plane (`TOOL_PLANES`), which picks the map group. */
@@ -405,10 +407,16 @@ function renderCapabilityMap(
 		const tool = entry.tool.trim();
 		const objective = normalizePromptHint(entry.objective) ?? "";
 		if (tool.length === 0 || objective.length === 0 || byTool.has(tool) || !reachable(tool)) continue;
-		byTool.set(tool, { tool, objective, plane: entry.plane });
+		byTool.set(tool, {
+			tool,
+			objective,
+			plane: entry.plane,
+			...(entry.argumentShape ? { argumentShape: entry.argumentShape } : {}),
+		});
 	}
 	const lines: string[] = [];
 	const mapped = new Set<string>();
+	let argumentBytesRemaining = 1400;
 	for (const group of CAPABILITY_MAP_GROUPS) {
 		const members = [...byTool.values()]
 			.filter((entry) => group.planes.includes(entry.plane))
@@ -418,8 +426,15 @@ function renderCapabilityMap(
 		for (const entry of members) {
 			const route = admitted.has(entry.tool) ? "" : " (gateway)";
 			const example = starterCalls.get(entry.tool);
+			let guidance = route && entry.argumentShape ? ` ${entry.argumentShape}` : example ? ` Example: ${example}.` : "";
+			if (Buffer.byteLength(guidance) > argumentBytesRemaining) {
+				guidance =
+					route && entry.argumentShape?.startsWith("Required args:") ? ` ${entry.argumentShape.split(" args=")[0]}` : "";
+				if (Buffer.byteLength(guidance) > argumentBytesRemaining) guidance = "";
+			}
+			argumentBytesRemaining -= Buffer.byteLength(guidance);
 			mapped.add(entry.tool);
-			lines.push(`- \`${entry.tool}\`${route}: ${entry.objective}${example ? ` Example: ${example}.` : ""}`);
+			lines.push(`- \`${entry.tool}\`${route}: ${entry.objective}${guidance}`);
 		}
 	}
 	return { lines, mapped };

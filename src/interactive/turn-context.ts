@@ -1897,7 +1897,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			const builtinTools = deps.toolRegistry?.listAll().filter((spec) => isBuiltinToolName(spec.name)) ?? [];
 			const toolDiscoveryHints = builtinTools
 				.flatMap((spec) => {
-					const hint = [spec.metadata?.discoveryHint, capabilityArgumentShape(spec)].filter(Boolean).join(" ");
+					const hint = spec.metadata?.discoveryHint;
 					if (!hint) return [];
 					const starterArgs = capabilityStarterArgs(spec);
 					return [{ tool: spec.name, hint, ...(starterArgs ? { starterArgs } : {}) }];
@@ -1907,7 +1907,16 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			// The compiler filters it to what this surface reaches.
 			const capabilityMap = builtinTools.flatMap((spec) => {
 				const plane = isBuiltinToolName(spec.name) ? TOOL_PLANES[spec.name]?.plane : undefined;
-				return plane === undefined ? [] : [{ tool: spec.name, objective: spec.metadata?.objective ?? "", plane }];
+				return plane === undefined
+					? []
+					: [
+							{
+								tool: spec.name,
+								objective: spec.metadata?.objective ?? "",
+								plane,
+								argumentShape: capabilityArgumentShape(spec, 1),
+							},
+						];
 			});
 			const sessionInputs: SessionPromptInputs = {
 				...(state.currentTurnConstraints ? { turnConstraints: state.currentTurnConstraints } : {}),
