@@ -242,8 +242,10 @@ Target facts stay separate: network reachability, access to a supported model
 listing, presence of the configured model and runtime support. Listing success
 proves access to that listing only; it does not prove a chat request, a resident
 model or general runtime compatibility. Unsupported probes retain **unknown**.
-Credentials travel through stdin for probes and are not stored in observation
-facts. Diagnostics read stored keys without refreshing OAuth. Resource facts
+Only targets pinned to the node, through a profile or `fleet.defaultNode`,
+are probed with credentials; other targets get an anonymous probe and report
+listing access as unknown. Credentials travel through stdin for probes and are
+not stored in observation facts. Diagnostics read stored keys without refreshing OAuth. Resource facts
 are observations; declared labels never substitute for GPU or memory evidence.
 
 Fleet settings shows **not checked**, **ready for this project**,

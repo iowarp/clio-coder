@@ -113,7 +113,7 @@ A shell word written with ANSI-C quoting (`$'...'`) is decoded before admission,
 
 An ordinary approval card can also show one advisory sentence about the call's blast radius when a `toolCall` engine is bound. It says it is advisory, cannot delay the card and does not change what allow, deny or stop do.
 
-The card's keys are `Enter` to allow once, `s` to stop the turn, `Esc` to deny, `v` to inspect a parked `write` or `edit`, `?` to fold the standing approval terms and the arrow keys to scroll a tall card. While the composer holds a draft, `Enter` is inert and the entry becomes `Backspace` to clear the draft, so the habitual send key cannot allow a call.
+The card's keys are `Enter` to allow once, `Alt+X` to stop the turn, `Esc` or `Ctrl+C` to deny, `Alt+V` to inspect a parked `write` or `edit`, `Alt+T` to fold the standing approval terms and the arrow keys to scroll a tall card. Letters typed while the card is open go to the composer. A card that another screen closes without an answer is presented again. While the composer holds a draft, `Enter` is inert and the entry becomes `Backspace` to clear the draft, so the habitual send key cannot allow a call.
 
 ## Workers
 

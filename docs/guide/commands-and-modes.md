@@ -96,7 +96,7 @@ Turn it off under Settings → Appearance → Demo presentation and guidance (`i
 | `clio-coder dev share inspect <path> [--json]` | Inspect a share archive without importing it. Each share command refuses, with exit 2, a flag it does not use. |
 | `clio-coder export --out <path> ...` / `clio-coder import <path> ...` | Top-level aliases for `dev share export` and `dev share import`. Each `dev` command also resolves without the `dev` prefix. |
 | `clio-coder context` | Show project context status, preload class, codemap freshness, and the codemap digest when present. |
-| `clio-coder context init [--preview] [--heuristic] [--yes] [--json] [--adopt] [--global] [--propose\|--apply\|--rewrite] [--depth quick\|standard\|deep] [--target <id> [--model <id>] [--thinking <level>]]` | Explore the repo and bootstrap or update project context: `CLIO-CODER.md`, `.clio-coder/codemap.json`, and `.clio-coder/state.json`. `--depth` bounds the model's exploration: `quick` allows 8 tool calls and 2 minutes, `standard` (the default) 16 and 4, `deep` 32 and 8. Any other value exits 2. |
+| `clio-coder context init [--preview] [--heuristic] [--yes] [--json] [--adopt] [--global] [--propose\|--apply\|--rewrite] [--depth quick\|standard\|deep] [--target <id> [--model <id>] [--thinking <level>]]` | Explore the repo and bootstrap or update project context: `CLIO-CODER.md`, `.clio-coder/codemap.json`, and `.clio-coder/state.json`. `--depth` bounds the model's exploration: `quick` allows 8 tool calls and 2 minutes, `standard` (the default) 16 and 4, `deep` 32 and 8. The time limit doubles at `medium` and `high` thinking and triples at `xhigh` and `max`, and its last quarter is reserved for the model to submit its draft. Any other value exits 2. |
 | `clio-coder context refresh [--wiki]` | Rebuild the codemap and state without touching `CLIO-CODER.md`; with `--wiki`, update an existing Markdown wiki. |
 | `clio-coder context wiki [--update\|--retry-pending] [--status] [--depth auto\|simple\|medium\|detailed] [--target <id>] [--model <id>] [--thinking off\|low\|medium\|high]` | Generate, update, or inspect the agent-authored Markdown wiki under `.clio-coder/wiki/`. |
 | `clio-coder context reset [--all] [--yes]` | Clear accumulated project context artifacts; `--all` also removes `CLIO-CODER.md`. `--yes` (or `-y`) answers every confirmation and is required when stdin is not a terminal. |
@@ -595,13 +595,14 @@ first match wins (`resolveApplicationCtrlCAction`, [application-controller.ts](.
 
 | State | What Ctrl+C does |
 | --- | --- |
-| An overlay owns input (transcript search, Library, Settings, model picker, a permission card) | Closes that overlay. It does not cancel a running turn and does not exit. Any armed shutdown is disarmed. |
+| An overlay owns input (transcript search, Library, Settings, model picker) | Closes that overlay. It does not cancel a running turn and does not exit. Any armed shutdown is disarmed. |
+| A permission card | Denies the parked call, as `Esc` does. It does not cancel the running turn and does not exit. |
 | Streaming or running a tool | Cancels the in-flight run. The turn seals its partial output in ledger order and the session stays open. |
 | Idle with text in the composer | Clears the draft. The press is consumed as an editor action, so it cannot become the hidden first half of an exit. |
 | Idle with messages queued | Protects the queue and says how to recover it with the bound dequeue key (`Alt+Q` by default). |
 | Idle, empty composer, nothing queued | Arms shutdown. A second `Ctrl+C` within 1,200 ms (`APPLICATION_DOUBLE_TAP_MS`) exits. |
 
-In a permission card, `Esc` answers the one parked call and `s` stops the turn, because denying one call does not stop the model from asking again. Closing a permission card without approving it is a decision, not a dismissal:
+In a permission card, `Esc` denies the one parked call and `Alt+X` stops the turn, because denying one call does not stop the model from asking again. Letters typed while a card is open go to the composer, never to the card. Denying a permission card is a decision, not a dismissal:
 the parked call is cancelled with `User cancelled this tool call from the
 permission confirmation prompt`, and a parked *worker* permission resolves as
 `deny`. The session itself keeps running.

@@ -1,6 +1,6 @@
 # Pi SDK Boundary
 
-Clio Coder pins Pi 0.87.1 as its provider, agent-loop, and terminal SDK. This
+Clio Coder pins Pi 0.99.1 as its provider, agent-loop, and terminal SDK. This
 page describes SDK primitives and Clio-owned behavior. Review these boundaries
 when upgrading Pi.
 
