@@ -1,6 +1,6 @@
 import { doesNotMatch, match, ok, strictEqual } from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import { verifyReceiptIntegrity } from "../../src/domains/dispatch/receipt-integrity.js";
@@ -160,15 +160,18 @@ for (const scenario of ["clean", "recovered", "terminal-error"] as const) {
 // directory whose dispatch reached DispatchCompleted. The evidence auto-build
 // starts on that event and reads `<stateDir>/runs.json`, which the emitting
 // finalizer persists first. This drives that exact shape without a model: the
-// main agent dispatches one worker whose terminal text satisfies its result
-// contract, then ends the turn with the artifact tool.
+// main agent dispatches one worker that reads a file and whose terminal text
+// satisfies its result contract, then ends the turn with the artifact tool.
 test("built headless artifact: a completed dispatch builds its evidence under a fresh pinned state dir", async () => {
 	const scratch = makeScratchHome("clio-coder-headless-artifact-dispatch-");
 	const fixture = await startOpenAICompatFixture("worker done: nothing to change\n", {
-		// The worker's own conversation has no dispatch tool and gets the text
+		// The worker's own conversation has no dispatch tool. It reads once, since a
+		// worker that executes no tool seals worker_no_work, then gets the text
 		// reply, which the artifact-report contract accepts as-is.
 		toolCall: (request) => {
-			if (!hasTool(request, "dispatch")) return null;
+			if (!hasTool(request, "dispatch")) {
+				return hasToolExchange(request) ? null : { name: "read", arguments: { path: "notes.md" } };
+			}
 			if (!hasToolExchange(request)) return { name: "dispatch", arguments: { task: "Say hello", agent: "wiki-writer" } };
 			return {
 				name: "gateway",
@@ -187,6 +190,7 @@ test("built headless artifact: a completed dispatch builds its evidence under a 
 		};
 		const workspace = join(scratch.dir, "workspace");
 		mkdirSync(workspace);
+		writeFileSync(join(workspace, "notes.md"), "nothing to change\n");
 		const doctor = await run(["doctor", "--fix"], workspace, env);
 		strictEqual(doctor.code, 0, doctor.stderr);
 		seedOpenAICompatToolOrchestrator(join(scratch.dir, "config"), fixture.url, "yolo");
@@ -203,10 +207,10 @@ test("built headless artifact: a completed dispatch builds its evidence under a 
 		assertTerminalArtifact(direct.stdout);
 		strictEqual(readFileSync(join(workspace, ".clio-coder/artifacts/REPORT.md"), "utf8"), "fixture report\n");
 		const streaming = fixture.requests.filter((request) => request.stream !== false);
-		// One parent dispatch, one worker reply, and one terminal gateway call.
+		// One parent dispatch, one worker read, one worker reply, and one terminal gateway call.
 		// Repeated calls to the obsolete direct artifact surface used to grow
 		// this history until the fixture answered a checkpoint request with worker prose.
-		strictEqual(streaming.length, 3);
+		strictEqual(streaming.length, 4);
 		strictEqual(streaming.filter((request) => hasTool(request, "dispatch")).length, 2);
 		ok(streaming.every((request) => !hasTool(request, "artifact")));
 		ok(streaming.filter((request) => hasTool(request, "dispatch")).every((request) => hasTool(request, "gateway")));
