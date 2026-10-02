@@ -282,20 +282,18 @@ export interface RegistryDeps {
 	 */
 	git?: AdmissionGitContext;
 	/**
-	 * Reads external content (a fetched page, an MCP result, worker text) for
-	 * instructions aimed at an agent, and returns a banner to put in front of the
-	 * result, or null. It only tightens: the deterministic marker scan runs
-	 * regardless, and a null, a failure or a slow answer leaves the result as it
-	 * was. Awaited between the tool body and the `after_tool` hook, so its own
-	 * deadline is the most it can add to a call. Absent in workers.
+	 * Told about external content (a fetched page, an MCP result) as its result
+	 * is delivered, so an experimental System One classifier can read it for
+	 * instructions aimed at an agent, detached, and record what it read. The
+	 * result reaches the model unchanged and at once; the deterministic marker
+	 * scan is what labels it. Absent in workers.
 	 */
 	screenToolResult?: (
 		source: string,
 		content: string,
 		ref: string | undefined,
-		signal: AbortSignal | undefined,
 		restrictions: FlowRestrictionSet | null,
-	) => Promise<string | null>;
+	) => void;
 	/**
 	 * The session's information-flow ledger. `carried` is what the context
 	 * already holds, judged before a mediated outbound call (web_fetch,
@@ -808,18 +806,13 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 					}
 				}
 				const carriedForScreen = mergeFlowRestrictions(deps.flow?.carried() ?? null, sourceRestrictions);
-				const screened = await screenExternalResult(
-					spec,
-					call,
-					withFlowRestrictions(result, sourceRestrictions),
-					options,
-					carriedForScreen,
-				);
-				const digest = toolResultDigestFor(spec, screened, resultDisposition, options);
-				const afterEffects = runToolHook("after_tool", spec, call, decision, options, screened, digest);
+				const labeled = withFlowRestrictions(result, sourceRestrictions);
+				observeExternalResult(spec, call, labeled, options, carriedForScreen);
+				const digest = toolResultDigestFor(spec, labeled, resultDisposition, options);
+				const afterEffects = runToolHook("after_tool", spec, call, decision, options, labeled, digest);
 				const finalResult = shapeToolResult(
 					spec,
-					applyToolResultEffects(screened, [...beforeEffects, ...afterEffects], screened !== result),
+					applyToolResultEffects(labeled, [...beforeEffects, ...afterEffects], labeled !== result),
 					options,
 					resultDisposition,
 				);
@@ -892,34 +885,29 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 	};
 
 	/**
-	 * Put System One's banner in front of a result that carries someone else's
-	 * text. Placed before the hook so the deterministic marker scan reads the
-	 * same bytes the model will, and tighten-only: any failure returns the
-	 * result untouched.
+	 * Hand a result that carries someone else's text to System One's classifier,
+	 * which only records. Nothing is awaited and the result is never changed, so
+	 * a late reading cannot put a banner in front of content the model already read.
 	 */
-	const screenExternalResult = async (
+	const observeExternalResult = (
 		spec: ToolSpec,
 		call: ClassifierCall,
 		result: ToolResult,
 		options: ToolInvokeOptions | undefined,
 		restrictions: FlowRestrictionSet | null,
-	): Promise<ToolResult> => {
+	): void => {
 		const screen = deps.screenToolResult;
-		if (screen === undefined || result.kind !== "ok" || !screensToolResult(spec.name)) return result;
-		if (result.output.trim().length === 0) return result;
+		if (screen === undefined || result.kind !== "ok" || !screensToolResult(spec.name)) return;
+		if (result.output.trim().length === 0) return;
 		try {
-			const banner = await screen(
+			screen(
 				`${spec.name} ${describeCallTarget(spec.name, call.args)}`.trim(),
 				result.output,
 				options?.toolCallId,
-				options?.signal,
 				restrictions,
 			);
-			if (banner === null || banner.trim().length === 0) return result;
-			return { ...result, output: `${banner}\n\n${result.output}` };
 		} catch {
-			// Screening is an addition to the deterministic scan; it never fails a tool call.
-			return result;
+			// The classifier only records; a failure to start it changes no tool call.
 		}
 	};
 

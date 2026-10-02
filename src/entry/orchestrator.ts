@@ -2092,13 +2092,13 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		autonomy: resolveEffectiveAutonomy,
 		// System One reads what the deterministic checks cannot: content other people
 		// wrote, and an unrecognized command that yolo would run unread. Both are read
-		// through the host so the registry never learns which engine answered. The
-		// result screen tightens content on every surface. The gate is experimental
-		// and only records: it never holds or parks the call, and it is wired on the
+		// through the host so the registry never learns which engine answered, and
+		// both are experimental and only record: neither holds, parks or changes a
+		// call. The result screen reads on every surface. The gate is wired on the
 		// interactive registry alone because headless and ACP have nobody to label
 		// what it recorded.
-		screenToolResult: (source, content, ref, signal, restrictions) =>
-			systemOneHost.screenToolResult(source, content, ref, signal, restrictions),
+		screenToolResult: (source, content, ref, restrictions) =>
+			systemOneHost.screenToolResult(source, content, ref, restrictions),
 		flow: {
 			carried: () => flowLedger.current(),
 			refusal: () => flowLedger.refusal(),

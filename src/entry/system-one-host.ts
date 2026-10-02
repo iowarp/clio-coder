@@ -258,14 +258,11 @@ export interface SystemOneHost {
 	forgetOperatorTexts(): void;
 	/** The settled turn's reading of whether the message asks the operator something; null keeps the regex. */
 	readTurnEnd(input: TurnEndReadInput): Promise<{ asks: boolean | null } | null>;
-	/** The banner to put in front of a tool result whose content reads as directing an agent, or null. */
-	screenToolResult(
-		source: string,
-		content: string,
-		ref: string | undefined,
-		signal: AbortSignal | undefined,
-		restrictions: unknown,
-	): Promise<string | null>;
+	/**
+	 * Read a delivered tool result for instructions aimed at an agent, detached,
+	 * for the record. The classifier is experimental and never changes the result.
+	 */
+	screenToolResult(source: string, content: string, ref: string | undefined, restrictions: unknown): void;
 	/**
 	 * Read an unrecognized command yolo runs unread, detached, for the record.
 	 * The gate is experimental and never holds or parks the call.
@@ -279,23 +276,17 @@ export interface SystemOneHost {
 	}): void;
 }
 
-function runOptions(
-	ref: string | undefined,
-	signal: AbortSignal | undefined,
-	flow?: unknown,
-): { ref?: string; signal?: AbortSignal; flow?: unknown } {
+function runOptions(ref: string | undefined, flow?: unknown): { ref?: string; flow?: unknown } {
 	return {
 		...(ref !== undefined ? { ref } : {}),
-		...(signal !== undefined ? { signal } : {}),
 		...(flow !== undefined && flow !== null ? { flow } : {}),
 	};
 }
 
 /**
- * Start a call nobody waits on. An unfitted build can never flag or escalate,
- * so the tool call it would hold goes ahead at once and the answer is only
- * recorded. The tool's abort signal is not passed: the call outlives the tool
- * call it describes, and the site's own deadline bounds it.
+ * Start a call nobody waits on; the runner records its answer whenever it
+ * settles. The caller's abort signal is not passed: the call outlives the turn
+ * or tool call it describes, and the site's own deadline bounds it.
  */
 function detached(call: () => Promise<unknown>): void {
 	try {
@@ -556,17 +547,13 @@ export function createSystemOneHost(deps: SystemOneHostDeps): SystemOneHost {
 			return verdict === null ? null : { asks: verdict.value.asks };
 		},
 
-		async screenToolResult(source, content, ref, signal, restrictions) {
-			if (!systemOne.bound("toolResult")) return null;
+		screenToolResult(source, content, ref, restrictions) {
+			if (!systemOne.bound("toolResult")) return;
+			if (systemOne.shadowed("toolResult") && !recordingOn()) return;
 			// The restrictions the result carries travel with the request, so the
 			// engine's flow check refuses the classifier call before any byte
 			// leaves: a restricted read is never redacted after being classified.
-			if (systemOne.shadowed("toolResult")) {
-				detached(() => systemOne.run(TOOL_RESULT_SITE, { source, content }, runOptions(ref, undefined, restrictions)));
-				return null;
-			}
-			const verdict = await systemOne.run(TOOL_RESULT_SITE, { source, content }, runOptions(ref, signal, restrictions));
-			return verdict?.value.flagged ? verdict.value.banner : null;
+			detached(() => systemOne.run(TOOL_RESULT_SITE, { source, content }, runOptions(ref, restrictions)));
 		},
 
 		observeToolCallGate(subject, ref) {
@@ -574,7 +561,7 @@ export function createSystemOneHost(deps: SystemOneHostDeps): SystemOneHost {
 			// A shadowed build's reading can only be recorded, so with recording off
 			// there is nothing to make the call for.
 			if (systemOne.shadowed("toolCall", "gate") && !recordingOn()) return;
-			detached(() => systemOne.run(TOOL_CALL_GATE_SITE, { ...subject, moment: "gate" }, runOptions(ref, undefined)));
+			detached(() => systemOne.run(TOOL_CALL_GATE_SITE, { ...subject, moment: "gate" }, runOptions(ref)));
 		},
 
 		recordOutcome(outcome) {
