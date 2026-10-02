@@ -35,6 +35,8 @@ An engine implements `decide(request)` and rejects on transport failure, an unus
 - `systemone` posts to `POST /v1/systemone` through a runtime's `decide` verb (`typesafe-jev` and `systemone`) and converts the wire reply, dropping an answer whose type does not match its question or whose choice is not a declared key. The build is the model the server reports.
 - `llm` runs an ordinary chat target as a one-letter decider. With logprobs it reads first-token letter alternatives through a softmax whose temperature is fitted per build and question bucket (1.0 for a build nobody fitted). Without them it casts five votes with alternating option order and marks the answers uncalibrated. Questions of more than 26 options run as a tournament. Requests share one state prefix so a server's prefix cache prefills it once, and a scheduler bounds concurrency by the endpoint's capacity.
 
+A `systemone` engine's window is `engineWindow(profile, declared)` in [profiles.ts](../../src/domains/system-one/profiles.ts): the target's `capabilities.contextWindow` (or the runtime default) bounded by the profile's ceiling. An engine has no placement. The processor a decision model runs on (an integrated GPU, an NPU, the CPU or a hosted service) belongs to the server behind the target, and the server's reported build, which already keys every cut, is what distinguishes two placements of one checkpoint. Doctor reports each bound engine's profile, window and passive round trip without asking a decision.
+
 `createSystemOne` in [factory.ts](../../src/domains/system-one/factory.ts) resolves a site's binding from live settings on every call, memoizes one engine per configured name, and rebuilds it when a digest of its own configuration, target and runtime changes.
 
 ## The runner
@@ -115,6 +117,9 @@ A cut from one build says nothing about another build, another vendor, or a chat
 | Calibration | [calibration.ts](../../src/domains/system-one/calibration.ts) | `FITTED_CUTS`, `cutsFor`, `temperatureFor` |
 | Runner and factory | [runner.ts](../../src/domains/system-one/runner.ts), [factory.ts](../../src/domains/system-one/factory.ts) | `createRunner`, `createSystemOne` |
 | Engines | [systemone.ts](../../src/domains/system-one/engines/systemone.ts) and [llm.ts](../../src/domains/system-one/engines/llm.ts) | `createSystemOneEngine`, `createLlmEngine` |
+| Profiles and renderers | [profiles.ts](../../src/domains/system-one/profiles.ts), [contract.ts](../../src/domains/system-one/contract.ts) | `PROFILES`, `render`, `engineWindow`, `DECISION_TASKS`, `thresholdIdentity` |
+| Wire | [systemone-wire.ts](../../src/domains/providers/runtimes/common/systemone-wire.ts), [systemone.ts](../../src/domains/providers/runtimes/protocol/systemone.ts) | `postSystemOne`, the `systemone` runtime |
+| Doctor rows | [doctor.ts](../../src/domains/lifecycle/doctor.ts) | `systemOneFindings`, `systemOneEngineFindings` |
 | Sites | [turn.ts](../../src/domains/system-one/sites/turn.ts), [tool-call.ts](../../src/domains/system-one/sites/tool-call.ts), [tool-result.ts](../../src/domains/system-one/sites/tool-result.ts), [turn-end.ts](../../src/domains/system-one/sites/turn-end.ts), [relevance.ts](../../src/domains/system-one/sites/relevance.ts), [consult.ts](../../src/domains/system-one/sites/consult.ts), [drafts.ts](../../src/domains/system-one/sites/drafts.ts) | `TURN_SITE`, `TOOL_CALL_GATE_SITE`, `TOOL_RESULT_SITE`, `TURN_END_SITE`, `RELEVANCE_SITE`, `consultSite`, `DRAFTS_SITE` |
 | Recorder | [index.ts](../../src/domains/system-one/recorder/index.ts), [dataset.ts](../../src/domains/system-one/recorder/dataset.ts) | ledger rows, dataset writer, export, `describeBindings` |
 | Host | [system-one-host.ts](../../src/entry/system-one-host.ts) | `createSystemOneHost` |

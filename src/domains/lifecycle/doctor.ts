@@ -16,6 +16,7 @@ import type { TargetDescriptor } from "../providers/types/target-descriptor.js";
 import { loadSkills, type SkillSource } from "../resources/skills/loader.js";
 import { isSessionEntry, type SessionEntry } from "../session/entries.js";
 import { foldPromptCacheTelemetry, hasPromptCacheTelemetry, topExpectedColdReason } from "../session/prompt-cache.js";
+import type { SiteBindingInfo } from "../system-one/types.js";
 import { type Installation, inspectInstallation } from "./install-method.js";
 import { listMigrations, readMigrationManifestResult } from "./migrations/index.js";
 import { readStateInfoResult } from "./state.js";
@@ -962,6 +963,8 @@ export async function runDoctorModelChecks(): Promise<DoctorFinding[]> {
 		registerBuiltinRuntimes(registry);
 		await loadPluginRuntimes(registry, settings);
 	}
+	// Kept per target so each bound System One engine can report its own round trip.
+	const observations = new Map<string, DoctorProbeObservation | null>();
 	const results = await Promise.all(
 		settings.targets.map(async (target): Promise<DoctorFinding[]> => {
 			const runtime = registry.get(target.runtime);
@@ -1012,6 +1015,7 @@ export async function runDoctorModelChecks(): Promise<DoctorFinding[]> {
 				credentialDetail = `credential status unreadable: ${error instanceof Error ? error.message : String(error)}`;
 			}
 			const observation = await probeAdvertisedModels(target, runtime);
+			observations.set(target.id, observation);
 			const where = target.url ?? `${runtime.displayName} provider endpoint`;
 			const connection: DoctorFinding =
 				observation === null
@@ -1117,7 +1121,7 @@ export async function runDoctorModelChecks(): Promise<DoctorFinding[]> {
 		}),
 	);
 	const findings = results.flat();
-	return [...findings, ...(await systemOneFindings(registry, findings))];
+	return [...findings, ...(await systemOneFindings(registry, findings, observations))];
 }
 
 const MIB = 1024 * 1024;
@@ -1160,6 +1164,7 @@ function cutStanding(
 async function systemOneFindings(
 	runtimes: { get(id: string): RuntimeDescriptor | null },
 	connections: ReadonlyArray<DoctorFinding>,
+	observations: ReadonlyMap<string, DoctorProbeObservation | null>,
 ): Promise<DoctorFinding[]> {
 	// A session binds sites from the layered settings, so a site a trusted
 	// project file binds is live there and must not read as unbound here. An
@@ -1167,6 +1172,7 @@ async function systemOneFindings(
 	const settings = readLayeredSettings(process.cwd()).settings;
 	const { describeBindings, formatDatasetBytes, listDatasetFiles } = await import("../system-one/recorder/index.js");
 	const { FITTED_CUTS } = await import("../system-one/calibration.js");
+	const profiles = await import("../system-one/profiles.js");
 	const bindings = describeBindings(settings, runtimes);
 	const off = bindings.filter((binding) => binding.engine === null).map((binding) => binding.site);
 	const rows: DoctorFinding[] = [];
@@ -1195,10 +1201,81 @@ async function systemOneFindings(
 				(unverified ? `; connection ${binding.target} is not verified, so this site may stay silent` : ""),
 		});
 	}
+	rows.push(...systemOneEngineFindings(settings, bindings, runtimes, observations, profiles));
 	// With nothing bound, recording off and no files, the dataset row would only repeat the off row.
 	const quiet = off.length === bindings.length && !settings.systemOne.record;
 	const dataset = datasetFinding(settings.systemOne, () => listDatasetFiles(), formatDatasetBytes, quiet);
 	if (dataset !== null) rows.push(dataset);
+	return rows;
+}
+
+/**
+ * One row per bound `systemone` engine: its profile, the window a request may
+ * fill, and whether its server answered the passive check, with the round trip.
+ * The round trip is the metadata request (`/models` or `/health`), never a
+ * decision, so doctor puts no work on the accelerator the engine runs on. An
+ * engine that does not answer leaves its sites behaving as if unbound.
+ */
+function systemOneEngineFindings(
+	settings: ReturnType<typeof readSettings>,
+	bindings: ReadonlyArray<SiteBindingInfo>,
+	runtimes: { get(id: string): RuntimeDescriptor | null },
+	observations: ReadonlyMap<string, DoctorProbeObservation | null>,
+	profiles: typeof import("../system-one/profiles.js"),
+): DoctorFinding[] {
+	const { engineWindow, profileFor } = profiles;
+	const names = new Set<string>();
+	for (const binding of bindings) {
+		if (binding.engine === null || binding.problem !== undefined) continue;
+		names.add(binding.engine);
+		for (const routed of Object.values(binding.routes ?? {})) if (routed !== undefined) names.add(routed);
+	}
+	const rows: DoctorFinding[] = [];
+	for (const name of names) {
+		const engine = Object.hasOwn(settings.systemOne.engines, name) ? settings.systemOne.engines[name] : undefined;
+		if (engine === undefined || engine.kind !== "systemone") continue;
+		const target = settings.targets.find((entry) => entry.id === engine.target);
+		const runtime = target === undefined ? null : runtimes.get(target.runtime);
+		if (target === undefined || runtime === null || runtime.decide === undefined) continue;
+		const profile = profileFor(engine.profile);
+		const declared = target.capabilities?.contextWindow;
+		const window = engineWindow(profile, declared ?? runtime.defaultCapabilities.contextWindow);
+		const source =
+			declared === undefined
+				? `the ${runtime.id} runtime default; set capabilities.contextWindow on target ${target.id}`
+				: window !== declared
+					? `target ${target.id} declares ${declared}, profile ceiling ${profile.windowCeiling}`
+					: `declared on target ${target.id}`;
+		const head = `profile ${profile.id}; window ${window === null ? "unbounded" : `${window} tokens`} (${source})`;
+		const where = target.url ?? `${runtime.displayName} endpoint`;
+		const observation = observations.get(target.id);
+		const rowName = `system one (experimental) engine ${name}`;
+		if (observation === undefined || observation === null) {
+			rows.push({
+				ok: true,
+				level: "info",
+				name: rowName,
+				detail: `${head}; ${where} has no passive check, so reachability is not known until a site asks`,
+			});
+			continue;
+		}
+		if (!observation.probe.ok) {
+			rows.push({
+				ok: true,
+				level: "warn",
+				name: rowName,
+				detail: `${head}; ${where} did not answer: ${observation.probe.error ?? "no reply"}; every site it serves behaves as if unbound`,
+			});
+			continue;
+		}
+		const latency = observation.probe.latencyMs;
+		const serving = observation.advertised.length > 0 ? `; serving ${observation.advertised.join(", ")}` : "";
+		rows.push({
+			ok: true,
+			name: rowName,
+			detail: `${head}; ${where} answered${latency === undefined ? "" : `, round trip ${latency} ms`}${serving}; passive check, no decision asked`,
+		});
+	}
 	return rows;
 }
 
