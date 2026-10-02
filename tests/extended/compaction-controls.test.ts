@@ -257,6 +257,24 @@ describe("production compaction controls", () => {
 		};
 	}
 
+	it("discards a larger checkpoint while retaining its reported usage", async () => {
+		const f = fixture(true, false);
+		for (const [index, text] of ["Old work", "Continue"].entries()) {
+			const entry = appendEntry(f.state, { kind: "message", role: "user", parentTurnId: null, payload: { text } });
+			if (index === 1) f.pinLeaf(entry.turnId);
+		}
+		f.response.text = syntheticCompactionSummary("Larger checkpoint ".repeat(500));
+		const before = f.entries();
+		const result = await f.run(undefined, "force", { keepRecentTokens: 1 });
+		strictEqual(result?.noGain, true);
+		deepStrictEqual(f.entries(), before);
+		strictEqual(f.calls.length, 1);
+		const rows = readOutOfTurnUsageRows(clioStateDir()).rows;
+		strictEqual(rows.length, 1);
+		strictEqual(rows[0]?.usage.totalTokens, 15);
+		strictEqual(f.liveUsage.length, 1);
+	});
+
 	it("manual compaction explains a short conversation with its context usage", async () => {
 		const f = fixture(false, false);
 		f.settings.chat.prewarm = false;

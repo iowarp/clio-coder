@@ -320,7 +320,8 @@ describe("compaction working-set provider boundary", () => {
 			model: model(),
 			keepRecentTokens: 100,
 		});
-		strictEqual(second.userContext?.text, "Keep the exact task.");
+		strictEqual(second.summary, "");
+		strictEqual(calls.length, 1, "the small retained suffix does not justify rewriting the checkpoint");
 	});
 
 	it("retires a completed request when the next operator turn is pending outside the ledger", async () => {
@@ -566,6 +567,37 @@ describe("compaction working-set provider boundary", () => {
 		await compact({ entries, model: model(), keepRecentTokens: 10000 });
 		strictEqual(calls.length, 1);
 		doesNotMatch(calls[0]?.text ?? "", /PRIVATE_COMMAND|PRIVATE_OUTPUT/);
+	});
+
+	it("skips a checkpoint rewrite after one small exchange", async () => {
+		const entries = chain([
+			message("old", "user", { text: "Old work ".repeat(1000) }),
+			message("recent", "user", { text: "Continue" }),
+			message("answer", "assistant", { text: "Done" }),
+		]);
+		const first = await compact({ entries, model: model(), keepRecentTokens: 10000 });
+		strictEqual(calls.length, 1);
+		const checkpoint: SessionEntry = {
+			kind: "compactionSummary",
+			turnId: "checkpoint",
+			parentTurnId: null,
+			timestamp,
+			summary: first.summary,
+			firstKeptTurnId: first.firstKeptTurnId ?? "",
+			tokensBefore: first.tokensBefore,
+		};
+		const next = await compact({
+			entries: chain([
+				...entries,
+				checkpoint,
+				message("next", "user", { text: "One more" }),
+				message("next-answer", "assistant", { text: "Done again" }),
+			]),
+			model: model(),
+			keepRecentTokens: 10000,
+		});
+		strictEqual(next.summary, "");
+		strictEqual(calls.length, 1);
 	});
 
 	it("caps summary output at the resolved model limit", async () => {

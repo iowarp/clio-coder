@@ -1176,6 +1176,10 @@ async function runCompactionFlow(
 		if (calls.length > 0) throw new Error("compaction returned no summary; reported usage retained without a checkpoint");
 		return null;
 	}
+	if (estimateTokensAfterCompaction(entries, result, continuityNote.tokens) >= result.tokensBefore) {
+		preserveCalls();
+		return { ...result, noGain: true };
+	}
 	if (result.usage) {
 		result.usage = { ...result.usage, targetId: resolved.targetId, modelId: resolved.wireModelId };
 	}

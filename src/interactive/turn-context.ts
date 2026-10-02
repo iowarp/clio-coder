@@ -1572,6 +1572,16 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			summarySignal?.throwIfAborted();
 			throw error;
 		}
+		if (result?.noGain) {
+			const message = "compaction would not reduce context; checkpoint discarded (usage recorded)";
+			deps.emitNotice(message);
+			if (summaryLifecycleStarted) {
+				deps.bus?.emit(BusChannels.CompactionEnd, { trigger, at: Date.now() });
+				emitCompactionActivity("completed", message);
+			}
+			rememberEmptyAutomaticAttempt();
+			return false;
+		}
 		if (!result || result.summary.length === 0) {
 			if (summaryLifecycleStarted) {
 				deps.bus?.emit(BusChannels.CompactionEnd, { trigger, at: Date.now() });

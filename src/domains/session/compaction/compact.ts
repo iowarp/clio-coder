@@ -32,7 +32,7 @@ import {
 import { serializeConversation } from "./branch-summary.js";
 import { findCutPoint } from "./cut-point.js";
 import { DEFAULT_KEEP_RECENT_TOKENS, DEFAULT_RESERVE_TOKENS } from "./defaults.js";
-import { type ContinuityNoteCost, calculateContextTokens, getLastAssistantUsage } from "./tokens.js";
+import { type ContinuityNoteCost, calculateContextTokens, estimateTokens, getLastAssistantUsage } from "./tokens.js";
 
 interface FileOperations {
 	read: Set<string>;
@@ -199,6 +199,8 @@ export interface CompactInput {
 }
 
 export interface CompactResult {
+	/** The paid checkpoint was discarded because it would not reduce context. */
+	noGain?: boolean;
 	skillContext?: SkillContextCheckpoint;
 	userContext?: PreservedUserContext;
 	/** Generated summary text. Empty when there was nothing to summarize. */
@@ -1025,7 +1027,9 @@ export async function compact(input: CompactInput): Promise<CompactResult> {
 		turnPrefix.length === 0 &&
 		firstKept !== null &&
 		cut.firstKeptEntryIndex >= boundaryStart &&
-		priorSuffix.some((entry) => entry.kind === "message" || entry.kind === "bashExecution");
+		priorSuffix.some((entry) => entry.kind === "message" || entry.kind === "bashExecution") &&
+		priorSuffix.reduce((tokens, entry) => tokens + estimateTokens(entry), 0) >=
+			2 * (priorCheckpoint?.kind === "compactionSummary" ? estimateTokens(priorCheckpoint) : 0);
 
 	if (pre.length === 0 && turnPrefix.length === 0 && !summarizePriorSuffix) {
 		return {
