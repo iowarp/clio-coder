@@ -27,7 +27,8 @@
  *
  * While the project policy is untrusted or changed, its source rules still
  * label what they name, with no recipients: an unapproved edit can forbid
- * more but never approve a destination. A rule an unapproved edit removed is
+ * more but never approve a destination. Approving those exact bytes later
+ * gives such labels the rule's recipients. A rule an unapproved edit removed is
  * not recoverable here; the trust notice is the operator's signal to review.
  *
  * The evaluator is pure. `permitted` never grants the underlying permission
@@ -641,14 +642,18 @@ function recipientAdmits(ref: string, destination: FlowDestination): boolean {
  * by the live trusted rule of the same id when the policy has changed since.
  * A later policy can therefore tighten what already-read content may reach
  * but never widen it; widening applies to content read after the change.
+ *
+ * The one exception is approval of the exact bytes the label was minted
+ * under. A read made while those bytes were unapproved carries no
+ * recipients, and once the operator approves that same hash the rule's
+ * approved recipients apply to it; before, the session stayed unsendable
+ * even to the target the rule names. Any other policy keeps it at none.
  */
 function effectiveRecipients(restriction: FlowRestriction, policy: InformationFlowPolicy): ReadonlyArray<string> {
-	if (!policy.trusted || policy.policyHash === null || policy.policyHash === restriction.policyHash) {
-		return restriction.recipients;
-	}
-	// A restriction labeled under an untrusted policy carries no recipients and stays that way.
+	if (!policy.trusted || policy.policyHash === null) return restriction.recipients;
 	const live = policy.rules.find((rule) => rule.id === restriction.ruleId);
 	if (live === undefined) return restriction.recipients;
+	if (policy.policyHash === restriction.policyHash) return live.recipients;
 	return restriction.recipients.filter((ref) => live.recipients.includes(ref));
 }
 
