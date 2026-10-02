@@ -44,8 +44,14 @@ export function createMermaidMarkdownTransform(theme: ClioTheme): (markdown: str
 			.lexer(markdown)
 			.map((token) => {
 				if (!isMermaid(token)) return token.raw;
-				const art = render(token.text);
-				if (!art || art.width > availableWidth) return token.raw;
+				let art = render(token.text);
+				if (art && art.width > availableWidth) {
+					const stacked = token.text.replace(/^(\s*(?:flowchart|graph)\s+)LR\b/, "$1TD");
+					if (stacked !== token.text) art = render(stacked);
+				}
+				// Long routed edges can consume a screen even when the diagram fits horizontally.
+				const maxRows = Math.min(40, Math.max(24, token.text.split("\n").length * 2));
+				if (!art || art.width > availableWidth || art.styled.length > maxRows) return token.raw;
 				const lines = art.styled.map((row) => row.map((span) => styleSpan(span, theme)).join(""));
 				return `${lines.map(codeSpan).join("  \n")}\n`;
 			})

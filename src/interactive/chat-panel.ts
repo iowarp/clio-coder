@@ -78,8 +78,9 @@ import type { WorkerEntryState } from "./worker-stream.js";
 // borders and indent. Wiring code ink through that hook colors only the ink,
 // and nothing post-processes already-rendered output.
 const CHAT_MARKDOWN_THEME = markdownTheme(clioTheme(), (code, lang) => codeInk(lang, code.split("\n")));
+const mermaidTransform = createMermaidMarkdownTransform(clioTheme());
 const CHAT_MARKDOWN_OPTIONS = {
-	transform: createMermaidMarkdownTransform(clioTheme()),
+	transform: (text: string, width: number) => mermaidTransform(fitMarkdownTables(text, width), width),
 	renderLatex: true,
 } as const;
 // TuiAltScreen uses Pi's OSC 133 prompt-start marker for semantic prompt
@@ -856,6 +857,23 @@ function chunkRows(chunk: MarkdownChunk, width: number): string[] {
 	return chunk.codeRows.rows;
 }
 
+function fitMarkdownTables(text: string, width: number): string {
+	return codeBlockParser
+		.lexer(text)
+		.map((token) => {
+			if (token.type !== "table") return token.raw;
+			const table = token as Tokens.Table;
+			// Keep Pi's wrapped cells unless borders leave fewer than 12 columns per field.
+			if (width >= table.header.length * 15 + 1 || table.rows.length === 0) {
+				return token.raw;
+			}
+			return `${table.rows
+				.map((row) => row.map((cell, index) => `${table.header[index]?.text ?? ""}: ${cell.text}`).join("\n\n"))
+				.join("\n\n---\n\n")}\n\n`;
+		})
+		.join("");
+}
+
 function chatMarkdown(text: string): Markdown {
 	return new Markdown(text, 0, 0, CHAT_MARKDOWN_THEME, undefined, CHAT_MARKDOWN_OPTIONS);
 }
@@ -865,7 +883,10 @@ function chatMarkdown(text: string): Markdown {
  * unpadded, so the padding is trimmed to keep the two shapes identical.
  */
 function markdownRows(md: Markdown, width: number): string[] {
-	return md.render(width).map((line) => clioTheme().base("assistantProse", line.replace(/ +$/, "")));
+	return md
+		.render(width)
+		.flatMap((line) => (visibleWidth(line) > width ? wrapTextWithAnsi(line, width) : [line]))
+		.map((line) => clioTheme().base("assistantProse", truncateToWidth(line.replace(/ +$/, ""), width, "")));
 }
 
 /**
