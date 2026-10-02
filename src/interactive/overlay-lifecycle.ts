@@ -108,6 +108,12 @@ export interface OverlayLifecycleRuntimeDeps {
 	setLastTurnSummary?: (summary: import("./status/index.js").TurnSummary | null) => void;
 	keybindings: ReturnType<typeof import("./keybinding-manager.js").createKeybindingManager>;
 	editor: Pick<import("./clio-editor.js").ClioEditor, "getText" | "render" | "setText">;
+	/** Editor-side actions of the queue navigator; the queue itself comes from `app.chat`. */
+	queueNavigator?: {
+		toEditor(entry: import("./chat-loop.js").QueuedChatMessage): void;
+		sendNow(entry: import("./chat-loop.js").QueuedChatMessage): void;
+		restoreAll(): void;
+	};
 	getSlashContext: () => import("./slash-commands.js").SlashCommandContext;
 	/**
 	 * A worker permission or ask_user request parked waiting for the operator.
@@ -176,6 +182,7 @@ export interface OverlayLifecycleController {
 	openExtensionsOverlayState(): void;
 	openInteropOverlayState(): void;
 	toggleDispatchBoardOverlay(): void;
+	openQueueNavigatorState(): void;
 	confirmPermission(): void;
 	stopTurnFromPermission(): void;
 	/** Whether the live permission card has a mutation the operator can read here. */
@@ -492,6 +499,18 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 		startDispatchBoardTicker: () => interactiveTickers.startDispatchBoardTicker(),
 		closeOverlay,
 		showOverlayFrame,
+		...(deps.queueNavigator
+			? {
+					queueNavigator: {
+						chat: deps.app.chat,
+						toEditor: deps.queueNavigator.toEditor,
+						sendNow: deps.queueNavigator.sendNow,
+						restoreAll: deps.queueNavigator.restoreAll,
+						restoreAllLabel: () => keybindings.actionLabel("clio-coder.message.dequeue"),
+						matchesRestoreAll: (data: string) => keybindings.matches(data, "clio-coder.message.dequeue"),
+					},
+				}
+			: {}),
 		...(openUsageOverlayFactory ? { openUsageOverlay: openUsageOverlayFactory } : {}),
 		...(openContextOverlayFactory ? { openContextOverlay: openContextOverlayFactory } : {}),
 		...(openContextResetOverlayFactory ? { openContextResetOverlay: openContextResetOverlayFactory } : {}),
@@ -531,6 +550,7 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 	const startFleetRunState = overlayGeneralOpeners.startFleetRun;
 	const startHandoffState = overlaySessions.startHandoff;
 	const toggleDispatchBoardOverlay = overlayGeneralOpeners.toggleDispatchBoard;
+	const openQueueNavigatorState = overlayGeneralOpeners.openQueueNavigator;
 
 	return {
 		getState: () => overlayTransitions.state,
@@ -566,6 +586,7 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 		openExtensionPanelState: overlayResourceOpeners.openExtensionPanelState,
 		openInteropOverlayState: overlayResourceOpeners.openInteropOverlayState,
 		toggleDispatchBoardOverlay,
+		openQueueNavigatorState,
 		confirmPermission: () => {
 			overlayPermission?.confirm();
 			footer.refresh();

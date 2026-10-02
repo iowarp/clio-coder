@@ -42,6 +42,7 @@ import { contextResetOptions, openContextResetOverlay } from "./overlays/context
 import { formatDecisionCorrectionTurn, openDecisionsOverlay } from "./overlays/decisions.js";
 import { openDraftOverlay, type TakenDraft } from "./overlays/draft.js";
 import { openFleetRunApprovalOverlay } from "./overlays/fleet-run-approval.js";
+import { openQueueNavigatorOverlay } from "./overlays/queue-navigator.js";
 import { openSideQuestionOverlay } from "./overlays/side-question.js";
 import type { ContextClearCommandOptions } from "./slash-commands.js";
 import { openTasksOverlay } from "./tasks-overlay.js";
@@ -97,6 +98,22 @@ export interface OverlayGeneralOpenersDeps {
 	openViewOverlay?: typeof openViewOverlay;
 	openSideQuestionOverlay?: typeof openSideQuestionOverlay;
 	openFleetRunApprovalOverlay?: typeof openFleetRunApprovalOverlay;
+	openQueueNavigatorOverlay?: typeof openQueueNavigatorOverlay;
+	/**
+	 * The steering queue the navigator works on, and the editor-side actions
+	 * only the application can perform. Absent, the navigator is unavailable.
+	 */
+	queueNavigator?: {
+		chat: Pick<
+			import("./chat-loop.js").ChatLoop,
+			"queueEntries" | "removeQueuedEntry" | "moveQueuedEntry" | "setQueuedEntryKind"
+		>;
+		toEditor(entry: import("./chat-loop.js").QueuedChatMessage): void;
+		sendNow(entry: import("./chat-loop.js").QueuedChatMessage): void;
+		restoreAll(): void;
+		restoreAllLabel(): string;
+		matchesRestoreAll(data: string): boolean;
+	};
 	/** Recipe registry `/fleet run` resolves every step's agent against. */
 	agents?: AgentsContract;
 	/** Session budget state the run would be admitted under; absent leaves it unknown. */
@@ -164,6 +181,8 @@ export interface OverlayGeneralOpeners {
 	openMemory(): void;
 	openView(initialFilter?: string): void;
 	toggleDispatchBoard(): void;
+	/** The steering queue as a list the operator can reorder, relabel, edit, remove or send now. */
+	openQueueNavigator(): void;
 	openSideQuestion(question: string): void;
 	/** `/draft [N] <request>`: N candidates in parallel, judged by a decision model. */
 	openDraft(request: string, count: number): void;
@@ -621,6 +640,35 @@ export function createOverlayGeneralOpeners(deps: OverlayGeneralOpenersDeps): Ov
 			});
 	};
 
+	const openQueueNavigatorFactory = deps.openQueueNavigatorOverlay ?? openQueueNavigatorOverlay;
+	const openQueueNavigator = (): void => {
+		if (deps.transitions.state !== "closed") return;
+		const queue = deps.queueNavigator;
+		if (!queue) {
+			deps.notify("info", "the steering queue navigator is unavailable in this session", "queue:unavailable");
+			return;
+		}
+		if (queue.chat.queueEntries().length === 0) {
+			deps.notify("info", "nothing is queued; Enter during a run queues a message", "queue:empty");
+			return;
+		}
+		deps.transitions.state = "queue-navigator";
+		deps.transitions.handle = openQueueNavigatorFactory(deps.tui, {
+			entries: () => queue.chat.queueEntries(),
+			remove: (id) => void queue.chat.removeQueuedEntry(id),
+			move: (id, delta) => queue.chat.moveQueuedEntry(id, delta),
+			toggleKind: (entry) => void queue.chat.setQueuedEntryKind(entry.id, entry.kind === "steer" ? "follow-up" : "steer"),
+			toEditor: (entry) => queue.toEditor(entry),
+			sendNow: (entry) => queue.sendNow(entry),
+			restoreAll: () => queue.restoreAll(),
+			restoreAllLabel: () => queue.restoreAllLabel(),
+			matchesRestoreAll: (data) => queue.matchesRestoreAll(data),
+			onClose: deps.closeOverlay,
+			requestRender: deps.requestRender,
+		});
+		deps.requestRender();
+	};
+
 	return {
 		openUsage,
 		openContextView,
@@ -631,6 +679,7 @@ export function createOverlayGeneralOpeners(deps: OverlayGeneralOpenersDeps): Ov
 		openMemory,
 		openView,
 		toggleDispatchBoard,
+		openQueueNavigator,
 		openSideQuestion,
 		openDraft,
 		startFleetRun,

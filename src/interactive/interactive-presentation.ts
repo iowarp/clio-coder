@@ -301,6 +301,8 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 		getDequeueKey: () => {
 			return keybindings.actionLabel("clio-coder.message.dequeue");
 		},
+		getNavigateKey: () => keybindings.actionLabel("clio-coder.queue.open"),
+		getSendNowKey: () => keybindings.actionLabel("clio-coder.message.interrupt"),
 	});
 	const statusController = factories.createStatusController({
 		chat: deps.chat,

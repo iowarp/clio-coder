@@ -29,7 +29,8 @@ export type OverlayState =
 	| "side-question"
 	| "draft"
 	| "handoff-review"
-	| "fleet-run-approval";
+	| "fleet-run-approval"
+	| "queue-navigator";
 
 export interface PermissionOverlayKeyDeps {
 	cancelPermission: () => void;
@@ -267,6 +268,7 @@ export function routeOverlayKey(
 			(overlayState === "tree" && matches(data, "clio-coder.session.tree")) ||
 			(overlayState === "model" && matches(data, "clio-coder.model.select")) ||
 			(overlayState === "skills-hub" && matches(data, "clio-coder.library.toggle")) ||
+			(overlayState === "queue-navigator" && matches(data, "clio-coder.queue.open")) ||
 			false)
 	) {
 		deps.closeOverlay();
@@ -297,6 +299,8 @@ export function routeOverlayKey(
 	// The fleet-run approval overlay owns Enter, the arrows, and Esc itself, so
 	// every key goes to its own focus box rather than through the router.
 	if (overlayState === "fleet-run-approval") return false;
+	// The queue navigator owns its arrows, letters, Enter and Esc.
+	if (overlayState === "queue-navigator") return false;
 	if (overlayState === "context-reset") return false;
 	if (overlayState === "tasks") return false;
 	if (overlayState === "decisions") return false;

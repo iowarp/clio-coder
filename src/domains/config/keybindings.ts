@@ -39,6 +39,7 @@ export interface ClioAppKeybindings {
 	"clio-coder.message.followUp": true;
 	"clio-coder.message.interrupt": true;
 	"clio-coder.message.dequeue": true;
+	"clio-coder.queue.open": true;
 	"clio-coder.notifications.dismiss": true;
 	"clio-coder.leader": true;
 }
@@ -144,6 +145,16 @@ export const CLIO_APP_KEYBINDINGS = {
 		kind: "send",
 		repeat: false,
 		leader: "q",
+	},
+	"clio-coder.queue.open": {
+		// Not alt+up: pi-tui reads the legacy sequence ESC p as alt+up, so that
+		// default would take Alt+P from every non-Kitty terminal.
+		defaultKeys: "alt+k",
+		description: "Queue navigator: reorder, edit, remove or send queued messages",
+		scope: "composer",
+		kind: "toggle",
+		repeat: false,
+		leader: "n",
 	},
 	"clio-coder.exit": {
 		defaultKeys: "ctrl+d",

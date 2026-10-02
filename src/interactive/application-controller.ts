@@ -18,6 +18,7 @@ export const CLOSED_ACTION_ORDER = [
 	"clio-coder.message.followUp",
 	"clio-coder.message.interrupt",
 	"clio-coder.message.dequeue",
+	"clio-coder.queue.open",
 ] as const satisfies ReadonlyArray<ClioKeybinding>;
 
 export const GLOBAL_ACTION_ORDER = [

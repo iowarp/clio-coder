@@ -324,6 +324,7 @@ export interface KeyBindingDeps {
 	queueFollowUp: () => void;
 	interruptWithMessage: () => void;
 	restoreQueuedFollowUps: () => void;
+	openQueueNavigator: () => void;
 }
 
 const ACTION_FEATURES: Partial<Record<ClioKeybinding, string>> = {
@@ -357,6 +358,9 @@ export function dispatchInteractiveAction(id: ClioKeybinding, deps: KeyBindingDe
 			return true;
 		case "clio-coder.message.dequeue":
 			deps.restoreQueuedFollowUps();
+			return true;
+		case "clio-coder.queue.open":
+			deps.openQueueNavigator();
 			return true;
 		case "clio-coder.status.toggle":
 			deps.toggleStatus();
@@ -1014,6 +1018,18 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 		setLastTurnSummary: (summary) => presentation.setLastTurnSummary(summary),
 		keybindings,
 		editor,
+		queueNavigator: {
+			toEditor: (entry) => {
+				if (deps.chat.removeQueuedEntry(entry.id) === null) return;
+				const current = editor.getExpandedText();
+				editor.setLiteralText([entry.text, current].filter((part) => part.trim().length > 0).join("\n\n"));
+			},
+			sendNow: (entry) => {
+				if (deps.chat.removeQueuedEntry(entry.id) === null) return;
+				editorSubmit.interruptFromEditor(entry.text);
+			},
+			restoreAll: () => editorSubmit.restoreQueuedFollowUpsToEditor(),
+		},
 		getSlashContext: () => slashRuntime.context,
 		// One terminal owner, so the external editor a handoff review opens gets
 		// the screen the same way the composer's own `$EDITOR` opener does.
@@ -1288,6 +1304,7 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 				return true;
 			},
 			recordFeature,
+			openQueueNavigator: () => overlayLifecycle.openQueueNavigatorState(),
 			cycleOutputStyle: () => {
 				const settings = deps.getSettings?.();
 				if (!settings || !deps.commitSetting) return;

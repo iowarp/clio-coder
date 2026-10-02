@@ -130,6 +130,7 @@ function fixture(overrides: Record<string, string | string[]> = {}, scrollFooter
 			cycleScopedModelBackward: noop,
 			backgroundActiveDispatch: noop,
 			toggleFilesPane: noop,
+			openQueueNavigator: noop,
 		},
 		overlay: {
 			getState: () => state,

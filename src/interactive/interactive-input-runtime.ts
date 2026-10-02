@@ -46,6 +46,7 @@ export interface InteractiveInputKeyActionDeps {
 	queueFollowUp: () => void;
 	interruptWithMessage: () => void;
 	restoreQueuedFollowUps: () => void;
+	openQueueNavigator: () => void;
 }
 
 export interface InteractiveInputRuntimeDeps {
@@ -75,6 +76,8 @@ export interface InteractiveInputRuntimeDeps {
 		backgroundActiveDispatch(): void;
 		/** Toggle the files pane; the application decides what "inactive" says. */
 		toggleFilesPane(): void;
+		/** Open the steering queue navigator overlay. */
+		openQueueNavigator(): void;
 	};
 	overlay: {
 		getState(): OverlayState;
@@ -201,6 +204,7 @@ export function createInteractiveInputRuntime(deps: InteractiveInputRuntimeDeps)
 		queueFollowUp: deps.editorSubmit.queueFollowUpFromEditor,
 		interruptWithMessage: deps.editorSubmit.interruptFromEditor,
 		restoreQueuedFollowUps: deps.editorSubmit.restoreQueuedFollowUpsToEditor,
+		openQueueNavigator: deps.actions.openQueueNavigator,
 	});
 	const focused = () => (deps.tui ? focusedComponent(deps.tui) : null);
 	const search = () => (deps.tui instanceof TuiAltScreen && deps.tui.isSearchFocused ? deps.tui : null);
@@ -592,6 +596,7 @@ function overlayScopeLabel(state: OverlayState): string {
 		draft: "Drafts",
 		"handoff-review": "Handoff review",
 		"fleet-run-approval": "Run approval",
+		"queue-navigator": "Steering queue",
 	};
 	return names[state];
 }

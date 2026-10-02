@@ -33,10 +33,6 @@ export type SteeringMode = "interrupt" | "next-slot" | "end-of-turn";
 
 export const DEFAULT_STEERING_MODE: SteeringMode = "next-slot";
 
-export function kindForMode(mode: Exclude<SteeringMode, "interrupt">): QueuedMessageKind {
-	return mode === "end-of-turn" ? "follow-up" : "steer";
-}
-
 export interface QueuedChatMessage {
 	/** Session-local id; the navigator and the producers address an entry by it. */
 	id: string;
