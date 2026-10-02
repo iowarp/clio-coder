@@ -9,7 +9,6 @@ from PIL import Image
 SITE = Path(__file__).resolve().parent
 MANIFEST = SITE / "image-variants.json"
 INPUTS = {
-    "assets/gui-artifacts.webp": [640, 960, 1280],
     "assets/tui-verify.webp": [640, 960, 1280],
     "assets/tui-boot.webp": [640, 960, 1280],
     "assets/guides/tui-configure-source.webp": [640, 1024, 1600],
@@ -29,6 +28,10 @@ INPUTS = {
     "assets/guides/tui-interop.webp": [640, 1024, 1600],
     "assets/guides/cli-interop-inspect.webp": [640, 1024, 1600],
     "assets/guides/cli-doctor.webp": [640, 1024, 1600],
+    "assets/gui-task.webp": [640, 960, 1280],
+    "assets/guides/gui-home.webp": [640, 1024, 1600],
+    "assets/guides/gui-approval.webp": [640, 1024, 1600],
+    "assets/guides/gui-setup.webp": [640, 1024, 1600],
     "assets/brand/clio-mark.webp": [32, 64, 128],
     "assets/brand/iowarp-mark.webp": [128, 256],
 }

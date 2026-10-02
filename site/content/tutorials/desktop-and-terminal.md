@@ -27,9 +27,12 @@ From a terminal, run:
 clio-coder gui --open
 ```
 
-The command opens the local application with its access link. Select a project, start a conversation, and choose a model. You can attach files, select a model and thinking level, and inspect session activity from the workspace. Sessions groups conversations by project. Open **Artifacts** to review recorded file activity, tool results, and linked evidence beside the conversation.
+The command opens the local application with its access link. Open a workspace folder, describe a task, and choose a model and thinking level from the composer. The rail on the left groups tasks by workspace, and the Progress pane keeps the plan, changed files, and context beside the conversation.
 
-::: capture gui-artifacts
+Before Clio runs a command or edits a file, it asks. The approval names the call, what allowing it authorizes, and what it can affect. A first run with no model connection opens on guided setup, which asks the same questions as `clio-coder configure`.
+
+::: capture gui-home gui-task gui-approval gui-setup
+The desktop from a new task to a finished one: the composer, the answer with its tool calls, a parked approval, and guided setup.
 :::
 
 The desktop is in alpha and covers a subset of terminal workflows. Treat it as an optional way to use Clio, and keep the terminal available for commands that the desktop does not yet expose.
