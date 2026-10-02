@@ -40,13 +40,19 @@ function inverse(text: string, enabled: boolean): string {
 	return enabled && text.length > 0 ? `${SGR_INVERSE}${text}${SGR_INVERSE_OFF}` : text;
 }
 
-/** Changed words use inverse video inside the line's add/remove theme color. */
+/**
+ * Changed words use inverse video inside the line's add/remove theme color.
+ * `diffWords` is not usable here: it hands whitespace shared by both lines to
+ * the added side only, so the removed row loses a space the file line has.
+ * `diffWordsWithSpace` keeps every character, so the common and removed parts
+ * rebuild the old line exactly and the common and added parts the new one.
+ */
 function renderIntraLineDiff(
 	oldContent: string,
 	newContent: string,
 	color: boolean,
 ): { removedLine: string; addedLine: string } {
-	const wordDiff = Diff.diffWords(oldContent, newContent);
+	const wordDiff = Diff.diffWordsWithSpace(oldContent, newContent);
 	let removedLine = "";
 	let addedLine = "";
 	let firstRemoved = true;
