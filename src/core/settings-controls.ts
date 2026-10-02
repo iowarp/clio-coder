@@ -595,10 +595,19 @@ export const SETTING_CONTROLS: readonly SettingControl[] = (() => {
 		});
 })();
 
+/**
+ * Groups are ordered by where their first key sits in DEFAULT_SETTINGS, and `fleet` precedes `safety` there,
+ * so the worker-approval controls would open Permissions & Limits ahead of the autonomy level it exists for.
+ */
+const LEADING_GROUPS: Partial<Record<SettingsSectionId, string>> = { safety: "Autonomy" };
+
 /** Complete section catalog in the order used by configure and /settings. */
 export function orderedSectionControls(section: SettingsSectionId): Array<{ group: string; control: SettingControl }> {
 	const controls = SETTING_CONTROLS.filter((control) => settingsSectionForPath(control.path) === section);
-	const groups = [...new Set(controls.map((control) => settingsGroupForPath(control.path)))];
+	const leading = LEADING_GROUPS[section];
+	const groups = [
+		...new Set([...(leading ? [leading] : []), ...controls.map((control) => settingsGroupForPath(control.path))]),
+	];
 	return groups.flatMap((group) =>
 		controls.filter((control) => settingsGroupForPath(control.path) === group).map((control) => ({ group, control })),
 	);
