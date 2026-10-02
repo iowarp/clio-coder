@@ -290,9 +290,13 @@ const TOOL_METADATA: Readonly<Record<string, ToolMetadata>> = {
 	[ToolNames.Tasks]: {
 		objective: "Declare and track the session task board with completion claims and separate validation evidence.",
 		discoveryHint:
-			"The session task board tracks multi-step work, dependencies, and completion; it is not the worker coordination ledger. For 3+ authorized steps, describe tasks and maintain the board; reuse existing rows. Mark done only for work actually completed and name unrun checks.",
+			"The session task board tracks multi-step work, dependencies, and completion; it is not the worker coordination ledger. For 3+ authorized steps, use the advertised tasks route and maintain the board; reuse existing rows. Mark done only for work actually completed and name unrun checks.",
 		examples: [
 			{ goal: "Inspect the existing session task board without changing it", args: { action: "list" }, startup: true },
+			{
+				goal: "Plan authorized work before edits when no board exists",
+				args: { action: "plan", title: "Implement the requested change", tasks: ["Inspect", "Implement", "Verify"] },
+			},
 		],
 		uiLabel: "Tasks",
 		// A repeated plan/start/done lands on the same board state; a repeated
@@ -301,14 +305,14 @@ const TOOL_METADATA: Readonly<Record<string, ToolMetadata>> = {
 		resultSizePolicy: {
 			kind: "exact",
 			maxBytes: 8_192,
-			followUpHint: 'Call tasks with action="list" to re-read the board.',
+			followUpHint: 'Use the advertised tasks route with action="list" to re-read the board.',
 		},
 		costLatency: "local_fast",
 		promptHint:
 			"For an operator handoff, pick the intended uN before work and use its linked tN; CLI hand alone does not pick it. " +
 			"Leave unrelated inbox tasks alone. Before claiming completion, list and confirm the linked board row is completed " +
 			"and the durable operator task is done with the same session/board link; report the IDs and actual state. " +
-			'For 3+ authorized steps without a board, tasks(action="plan") before edits; add steps to an existing board to preserve pickup links. ' +
+			'For 3+ authorized steps without a board, use action="plan" before edits through the advertised tasks route; add steps to an existing board to preserve pickup links. ' +
 			"Start work; done needs a note describing the work and any failed or unrun checks. Verification receipts record observed checks separately. " +
 			"Plans/reminders grant no scope: block proposal-only implementation pending explicit operator go-ahead, or drop it. " +
 			"Skill-install choices do not authorize implementation.",

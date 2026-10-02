@@ -148,13 +148,13 @@ export interface GatewayToolDeps {
 }
 
 const DESCRIPTION =
-	'Discover and compose harness capabilities. op="find" searches task terms across builtin, extension and MCP catalogs; op="describe" returns one full schema and usage guidance; op="call" executes it with args under its own admission. op="chain" runs dependency steps, parallelizing eligible independent reads. Describe gateway for chain syntax or dispatch for advanced worker composition. Discovery never grants authority.';
+	'Discover registered builtin, extension and MCP capabilities. op="find" searches; op="describe" returns a schema; op="call" executes with args under its own admission; op="chain" runs tool steps. For chain syntax: op="describe", capability="gateway". Gateway operations are not chain capabilities. Discovery grants no authority.';
 
 export const gatewayToolSurface = {
 	name: ToolNames.Gateway,
 	description: DESCRIPTION,
 	parameters: Type.Object({
-		op: StringEnum(GATEWAY_OPS, { description: "find, describe, call, or chain." }),
+		op: StringEnum(GATEWAY_OPS, { description: `${GATEWAY_OPS.join(", ")}. Select gateway operations with op.` }),
 		capability: Type.Optional(Type.String({ description: "describe and call: the capability name from find." })),
 		query: Type.Optional(Type.String({ description: "find: task terms, capability name, or desired next step." })),
 		limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 300, description: "find: page size (default 12)." })),
@@ -172,7 +172,8 @@ export const gatewayToolSurface = {
 		steps: Type.Optional(
 			Type.Array(Type.Unknown(), {
 				maxItems: 16,
-				description: "chain: {id,capability,args,after?:[ids]}; describe gateway for result bindings.",
+				description:
+					'chain: {id,capability,args,after?:[ids]}; steps execute registered tools. Use op="describe", capability="gateway" separately for bindings.',
 			}),
 		),
 	}),
@@ -490,7 +491,7 @@ export function createGatewayTool(deps: GatewayToolDeps): ToolSpec {
 					? {
 							examples,
 							exampleNote:
-								"Examples are gateway arguments. Substitute task values; describe for other options. This catalog finds capabilities, not workspace content.",
+								'Examples are gateway arguments. Substitute task values; use op="describe", capability="<name>" for other options. This catalog finds capabilities, not workspace content.',
 						}
 					: {}),
 				...(query.length > 0 && total === 0 && !scoped
@@ -658,7 +659,7 @@ export function createGatewayTool(deps: GatewayToolDeps): ToolSpec {
 				? {
 						chain: {
 							steps:
-								"1..16 steps {id,capability,args,after?:[ids]}; unique ids, no cycles or nested gateways. Direct tools may be steps.",
+								'1..16 steps {id,capability,args,after?:[ids]}; steps execute registered tools. For schema discovery call gateway with op="describe" separately. Unique ids, no cycles or nested gateways. Direct tools may be steps.',
 							binding:
 								"In args, {$from:<step id>,path:[<keys>]} consumes output (text), json (decoded output), or details. References add dependencies. Values remain data, never evaluated code.",
 							scheduling:
@@ -779,7 +780,7 @@ export function createGatewayTool(deps: GatewayToolDeps): ToolSpec {
 					},
 					options,
 				);
-			return { kind: "error", message: `gateway: op must be find, describe, call, or chain; got '${op}'` };
+			return { kind: "error", message: `gateway: op must be ${GATEWAY_OPS.join(", ")}; got '${op}'` };
 		},
 	};
 }
