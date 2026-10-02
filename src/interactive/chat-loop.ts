@@ -2960,7 +2960,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				leavePreparation();
 				endPreparationCompaction();
 			}
-			if (!compacted) {
+			if (!compacted && !context.lastCompactionWasNoGain()) {
 				const entries = deps.readSessionEntries?.() ?? [];
 				const hasMessages =
 					entries.some((entry) => entry.kind === "message") || agentRuntime.agent.state.messages.length > 0;

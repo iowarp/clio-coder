@@ -19,6 +19,7 @@ import { foldWorkingSet } from "../../context/working-set/fold.js";
 import { projectWorkingSet } from "../../context/working-set/project.js";
 import { recallableRefListing } from "../../context/working-set/recall.js";
 import { estimateAgentContextTokens, extractReasoningTokens } from "../context-accounting.js";
+import type { CompactionSummaryEntry } from "../entries.js";
 import {
 	type CompactionUsage,
 	latestSkillContextState,
@@ -29,7 +30,6 @@ import {
 	skillContextContentHash,
 	verifiedSkillContextCheckpoint,
 } from "../entries.js";
-import type { CompactionSummaryEntry } from "../entries.js";
 import { serializeConversation } from "./branch-summary.js";
 import { findCutPoint } from "./cut-point.js";
 import { DEFAULT_KEEP_RECENT_TOKENS, DEFAULT_RESERVE_TOKENS } from "./defaults.js";

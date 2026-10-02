@@ -118,7 +118,10 @@ describe("compaction checkpoint format and semantic replay", () => {
 		const after = buildModelReplayAgentMessagesFromTurns([
 			...entries,
 			{
-				...toTaskLedgerEntryFields({ ...board, tasks: [{ id: "t1", title: "Fix exchange", status: "completed" }] }, new Date(timestamp)),
+				...toTaskLedgerEntryFields(
+					{ ...board, tasks: [{ id: "t1", title: "Fix exchange", status: "completed" }] },
+					new Date(timestamp),
+				),
 				turnId: "updated-board",
 				timestamp,
 				parentTurnId: "user-1",

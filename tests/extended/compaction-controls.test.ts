@@ -277,6 +277,34 @@ describe("production compaction controls", () => {
 		strictEqual(rows.length, 1);
 		strictEqual(rows[0]?.usage.totalTokens, 15);
 		strictEqual(f.liveUsage.length, 1);
+		f.settings.chat.prewarm = false;
+		f.providers.getDetectedReasoning = () => false;
+		const notices: string[] = [];
+		const loop = createChatLoop({
+			getSettings: () => f.settings,
+			providers: f.providers,
+			knownTargets: () => new Set(["chat-target", "summary-target"]),
+			session: f.session,
+			readSessionEntries: f.entries,
+			autoCompact: f.run,
+		});
+		loop.onEvent((event) => {
+			if (event.type === "notice") notices.push(event.text);
+		});
+		try {
+			loop.resetForSession(before.at(-1)?.turnId ?? null, buildModelReplayAgentMessagesFromTurns(before));
+			await loop.compact();
+			const message = "compaction would not reduce context; checkpoint discarded (usage recorded)";
+			strictEqual(notices.filter((notice) => notice === message).length, 1);
+			doesNotMatch(notices.join("\n"), /too short to compact/u);
+			strictEqual(f.calls.length, 2);
+			await loop.compact();
+			strictEqual(notices.filter((notice) => notice === message).length, 2);
+			strictEqual(f.calls.length, 3, "forced no-gain attempts are not memoized");
+			deepStrictEqual(f.entries(), before);
+		} finally {
+			loop.dispose();
+		}
 	});
 
 	it("manual compaction explains a short conversation with its context usage", async () => {

@@ -296,6 +296,7 @@ export interface TurnContext {
 		handoff?: ContinuityReductionHooks,
 		pendingUserIsOperator?: boolean,
 	): Promise<boolean>;
+	lastCompactionWasNoGain(): boolean;
 	cancelCompaction(): void;
 	postToolContinuationGuard(
 		agentRuntime: AgentRuntime,
@@ -440,6 +441,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		systemPromptTokens: number;
 		toolSchemaTokens: number;
 	} | null = null;
+	let lastCompactionNoGain = false;
 	let lastCompactionEvent: { stage: string; tokensBefore: number; tokensAfter: number; trigger: string } | null = null;
 	// Last settled run's provider cache usage plus whether the compiled system
 	// prompt was reused. Shown together in /context so "prompt reused" can
@@ -1179,6 +1181,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		handoff?: ContinuityReductionHooks,
 		pendingUserIsOperator = true,
 	): Promise<boolean> => {
+		lastCompactionNoGain = false;
 		if (!deps.readSessionEntries) return false;
 		const originSession = deps.session?.current()?.id;
 		const originNavigation = navigationEpoch;
@@ -1592,6 +1595,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			throw error;
 		}
 		if (result?.noGain) {
+			lastCompactionNoGain = true;
 			const message = "compaction would not reduce context; checkpoint discarded (usage recorded)";
 			deps.emitNotice(message);
 			if (summaryLifecycleStarted) {
@@ -1793,6 +1797,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		refreshLiveBudget,
 		refreshAgentMessagesFromSession,
 		runAutoCompact,
+		lastCompactionWasNoGain: () => lastCompactionNoGain,
 		navigationRevision: () => navigationEpoch,
 		cancelCompaction: () => compactionController?.abort(),
 
