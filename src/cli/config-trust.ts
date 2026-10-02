@@ -1,9 +1,11 @@
+import { realpathSync } from "node:fs";
 import {
 	captureProjectSurface,
 	type ProjectTrustSurface,
 	recordProjectSurfaceTrust,
 	revokeProjectSurfaceTrust,
 } from "../core/workspace-trust.js";
+import { forgetApprovedFlowPolicy } from "../domains/safety/flow-policy-snapshot.js";
 import { printError } from "./shared.js";
 
 const SURFACES: ReadonlyArray<ProjectTrustSurface> = ["safety", "hooks", "settings"];
@@ -26,6 +28,10 @@ export function runConfigTrustCommand(args: ReadonlyArray<string>, cwd = process
 	try {
 		if (revoke) {
 			revokeProjectSurfaceTrust(cwd, surface);
+			if (surface === "safety") {
+				const failure = forgetApprovedFlowPolicy(realpathSync(cwd));
+				if (failure !== null) throw new Error(failure);
+			}
 			process.stdout.write(
 				`Project ${surface} trust revoked. Restart to reload settings and safety; project hooks stop before their next execution.\n`,
 			);

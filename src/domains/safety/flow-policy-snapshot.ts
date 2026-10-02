@@ -17,7 +17,12 @@ import { readFileSync, unlinkSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { safeResourceWrite } from "../../core/safe-resource-write.js";
 import { withStateFileLockSync } from "../../core/state-file-lock.js";
-import { projectSurfaceTrust, safetySurfaceTrustHash, workspaceTrustDirectory } from "../../core/workspace-trust.js";
+import {
+	hasProjectSurfaceTrust,
+	projectSurfaceTrust,
+	safetySurfaceTrustHash,
+	workspaceTrustDirectory,
+} from "../../core/workspace-trust.js";
 import { clioStateDir, stateRootRemoved } from "../../core/xdg.js";
 import type { InformationFlowPolicyInput } from "./information-flow.js";
 
@@ -90,6 +95,7 @@ function isFlowInput(value: unknown): value is InformationFlowPolicyInput {
 /** The approved snapshot for a workspace: absent, approved by the trust record, or unavailable with the reason. */
 export function recallApprovedFlowPolicy(workspaceRoot: string): ApprovedFlowPolicyRecall {
 	const root = resolve(workspaceRoot);
+	if (!hasProjectSurfaceTrust(root, "safety")) return { kind: "absent" };
 	const file = snapshotPath(root);
 	let text: string;
 	try {

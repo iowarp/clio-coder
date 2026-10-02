@@ -382,7 +382,10 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 	// A snapshot that cannot be written or read is a refusal, not a fallback.
 	let flowRefusal: string | null = null;
 	let approvedFlow: ApprovedFlowPolicy | null = null;
-	if (flowTrusted && projectPolicy.hash !== null && projectPolicy.path !== null) {
+	if (projectPolicy.path === null && projectPolicy.valid) {
+		// Deleting the policy disables future source labeling; carried labels stay in the session ledger.
+		flowRefusal = forgetApprovedFlowPolicy(projectPolicyRoot);
+	} else if (flowTrusted && projectPolicy.hash !== null && projectPolicy.path !== null) {
 		flowRefusal =
 			projectPolicy.informationFlow.sources.length > 0
 				? rememberApprovedFlowPolicy(

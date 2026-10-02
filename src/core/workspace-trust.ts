@@ -74,6 +74,16 @@ function readRecord(canonicalRoot: string): WorkspaceTrustRecord | null {
 	}
 }
 
+/** Whether this workspace still carries an operator pin for the named surface. */
+export function hasProjectSurfaceTrust(workspaceRoot: string, surface: ProjectTrustSurface): boolean {
+	try {
+		return readRecord(realpathSync(resolve(workspaceRoot)))?.surfaces[surface] !== undefined;
+	} catch {
+		// A missing workspace cannot carry consent.
+		return false;
+	}
+}
+
 export function projectSurfaceTrust(
 	workspaceRoot: string,
 	surface: ProjectTrustSurface,
