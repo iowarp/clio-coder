@@ -1209,9 +1209,8 @@ function renderToolSegmentLines(
 		elapsedMs: seg.startedAtMs === undefined ? undefined : Math.max(0, rawDurationMs(seg.startedAtMs, nowMs)),
 		phase: seg.executionStarted ? ("running" as const) : seg.argsComplete ? ("ready" as const) : ("forming" as const),
 	};
-	if (!seg.finished && seg.awaitingApproval) return renderToolAwaitingApproval(call, width, seg.approvalView);
-	// Argument fragments are not separate actions. Reveal the row once the call is formed.
-	if (!seg.finished && !seg.argsComplete && !seg.executionStarted) return [];
+	if (!seg.finished && seg.awaitingApproval)
+		return renderToolAwaitingApproval(call, width, detail.style === "compact" ? undefined : seg.approvalView);
 	const finished = {
 		...call,
 		result: seg.result,

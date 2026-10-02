@@ -346,7 +346,8 @@ describe("Clio rendering invariants", () => {
 		style = "standard";
 		updateTool(panel, "accepted while paused");
 		const paused = plainRender(panel);
-		doesNotMatch(paused, /visible before pause|accepted while paused/u);
+		doesNotMatch(paused, /visible before pause/u);
+		match(paused, /accepted while paused/u);
 
 		style = "detailed";
 		const resumed = plainRender(panel);
@@ -1298,9 +1299,14 @@ it("preserves complete invocation arguments in inspection and meaningful intent 
 	for (const style of ["compact", "standard", "detailed"] as const) {
 		const rows = renderToolPreview(call, 72, transcriptDetail(style));
 		const text = stripTerminalSequences(rows.join("\n"));
-		match(text, /command/);
-		match(text, /long-command-argument/);
-		if (style !== "detailed") match(text, /\/view/);
+		if (style === "compact") {
+			strictEqual(rows.length, 1);
+			match(text, /ran `printf/u);
+		} else {
+			match(text, /command/);
+			match(text, /long-command-argument/);
+			if (style === "standard") match(text, /\/view/);
+		}
 		doesNotMatch(text, /do-not-display-me/);
 		ok(rows.every((row) => visibleWidth(row) <= 72));
 	}
@@ -1655,7 +1661,7 @@ describe("transcript block grammar", () => {
 			80,
 			policy,
 		).map(stripTerminalSequences);
-		deepStrictEqual(bash.length, 1, bash.join("\n"));
+		deepStrictEqual(bash, ["$ ran `pnpm test` ✓", "  │ ok"]);
 		const edit = {
 			toolCallId: "e",
 			toolName: "edit",
@@ -1668,6 +1674,17 @@ describe("transcript block grammar", () => {
 			match(plain, /edited src\/a\.ts · \+2 -1/u);
 			doesNotMatch(plain, /OLD_PAYLOAD|NEW_PAYLOAD/u);
 		}
+		const formingEdit = {
+			toolCallId: edit.toolCallId,
+			toolName: edit.toolName,
+			args: edit.args,
+			phase: "forming" as const,
+		};
+		match(
+			stripTerminalSequences(renderToolPreview(formingEdit, 80, transcriptDetail("detailed")).join("\n")),
+			/NEW_PAYLOAD/u,
+		);
+		doesNotMatch(stripTerminalSequences(renderToolPreview(formingEdit, 80, policy).join("\n")), /NEW_PAYLOAD/u);
 		const failed = stripTerminalSequences(
 			renderToolPreview({ ...edit, result: "oldText not found", isError: true }, 80, policy).join("\n"),
 		);
@@ -2158,7 +2175,7 @@ describe("tool classes", () => {
 		match(rows(issue, "standard", 100)[0] ?? "", /fetched github\.com\/iowarp\/clio-coder\/issues\/412 /u);
 		// At 40 columns the label shortens to the path tail instead of splitting mid-token.
 		const narrow = rows(issue, "standard", 40);
-		match(narrow.join("\n"), /github\.com\/…\/issues\/412/u);
+		match(narrow.join("\n"), /github\.com\/…\/412/u);
 		ok(
 			narrow.every((row) => !/https?:/u.test(row) && visibleWidth(row) <= 40),
 			narrow.join("\n"),
@@ -2251,7 +2268,7 @@ describe("tool classes", () => {
 			rows(
 				settled("run_script", { script: "scripts/check-flaky.ts", args: ["--runs", "50"] }, text("50/50", { exitCode: 0 })),
 			),
-			[`${GLYPH.classExecute} ran \`scripts/check-flaky.ts --runs 50\` · exit 0 ✓ · 42ms`],
+			[`${GLYPH.classExecute} ran \`scripts/check-flaky.ts --runs 50\` · exit 0 ✓ · 42ms`, "  │ 50/50"],
 		);
 	});
 
@@ -2327,13 +2344,16 @@ describe("tool classes", () => {
 				100,
 				transcriptDetail("standard"),
 			).map(stripTerminalSequences);
-		deepStrictEqual(rows({ command: `cd ${cwd} && npm test 2>&1`, timeout_ms: 30_000 }), ["$ ran `npm test 2>&1` ✓"]);
-		deepStrictEqual(rows({ command: `cd "${cwd}"; npm run lint` }), ["$ ran `npm run lint` ✓"]);
+		deepStrictEqual(rows({ command: `cd ${cwd} && npm test 2>&1`, timeout_ms: 30_000 }), [
+			"$ ran `npm test 2>&1` ✓",
+			"  │ ok",
+		]);
+		deepStrictEqual(rows({ command: `cd "${cwd}"; npm run lint` }), ["$ ran `npm run lint` ✓", "  │ ok"]);
 		// A cd into a subdirectory, or an explicit cwd, is where the command ran.
-		deepStrictEqual(rows({ command: `cd ${cwd}/src && ls` }), ["$ ran `ls` in src ✓"]);
-		deepStrictEqual(rows({ command: "npm test", cwd: `${cwd}/tests` }), ["$ ran `npm test` in tests ✓"]);
+		deepStrictEqual(rows({ command: `cd ${cwd}/src && ls` }), ["$ ran `ls` in src ✓", "  │ ok"]);
+		deepStrictEqual(rows({ command: "npm test", cwd: `${cwd}/tests` }), ["$ ran `npm test` in tests ✓", "  │ ok"]);
 		// A cd anywhere else is part of what ran.
-		deepStrictEqual(rows({ command: "cd /etc && cat hosts" }), ["$ ran `cd /etc && cat hosts` ✓"]);
+		deepStrictEqual(rows({ command: "cd /etc && cat hosts" }), ["$ ran `cd /etc && cat hosts` ✓", "  │ ok"]);
 		// A command too long for its row is cut with the ellipsis glyph, never three dots.
 		const long = rows({ command: `node scripts/${"x".repeat(200)}.js --flag` });
 		match(long[0] ?? "", /^\$ ran `node scripts\/x+…` ✓$/u);
@@ -2475,9 +2495,9 @@ describe("tool classes", () => {
 			`${GLYPH.toolHeader} read docs/retry.md ✓ · 42ms`,
 		]);
 		match(rows(settled("read", { path: "CLIO-CODER.md" }, text("x")))[0] ?? "", /read CLIO-CODER\.md · handbook ✓/u);
-		// A path that fits beside its verb stays whole, so nothing repeats it.
+		// A path leaves room for the outcome on the same row and keeps its file name.
 		const whole = rows(settled("read", { path: "library/skills/perf/SKILL.md" }, text("x")), "standard", 40);
-		match(whole[0] ?? "", /^▸ read library\/skills\/perf\/SKILL\.md/u, whole.join("\n"));
+		match(whole[0] ?? "", /^▸ read …\/perf\/SKILL\.md ✓ · 42ms$/u, whole.join("\n"));
 		doesNotMatch(whole.join("\n"), /path ›/u);
 		// A path outside the workspace that must be cut keeps its file name, on
 		// the row's first line with its outcome, and repeats in full beneath it.

@@ -9,6 +9,7 @@ export interface TranscriptDetailPolicy {
 	reasoningBeforeActionRows: number;
 	invocationRows: number;
 	resultRows: number;
+	liveResultRows: number;
 	bashRows: number;
 	operatorBashRows: number;
 	diffRows: number;
@@ -25,6 +26,7 @@ const POLICIES: Record<OutputStyle, TranscriptDetailPolicy> = {
 		reasoningRows: 0,
 		reasoningBeforeActionRows: 0,
 		resultRows: 0,
+		liveResultRows: 0,
 		bashRows: 0,
 		operatorBashRows: 3,
 		diffRows: 0,
@@ -39,7 +41,8 @@ const POLICIES: Record<OutputStyle, TranscriptDetailPolicy> = {
 		reasoningRows: 3,
 		reasoningBeforeActionRows: 0,
 		resultRows: 0,
-		bashRows: 0,
+		liveResultRows: 3,
+		bashRows: 3,
 		operatorBashRows: 6,
 		diffRows: 8,
 		workerRows: 3,
@@ -53,6 +56,7 @@ const POLICIES: Record<OutputStyle, TranscriptDetailPolicy> = {
 		reasoningRows: 12,
 		reasoningBeforeActionRows: 12,
 		resultRows: 8,
+		liveResultRows: 12,
 		bashRows: 12,
 		operatorBashRows: 12,
 		diffRows: 20,

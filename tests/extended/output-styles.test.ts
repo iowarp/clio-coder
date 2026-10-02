@@ -40,6 +40,56 @@ test("streamed tool arguments show preparation before execution and clear on ans
 		ctx,
 	);
 	strictEqual(resolveFooterVerb(state, 13_400, 100)?.text, "Running read · 12s");
+	for (const style of ["compact", "standard", "detailed"] as const) {
+		for (const width of [75, 120]) {
+			const panel = createChatPanel({ getOutputStyle: () => style, now: () => 1000 });
+			const forming = (type: string, args: Record<string, unknown>) =>
+				panel.applyEvent({
+					type: "message_update",
+					assistantMessageEvent: {
+						type,
+						contentIndex: 0,
+						partial: { content: [{ type: "toolCall", id: "stream-1", name: "bash", arguments: args }] },
+					},
+				} as never);
+			forming("toolcall_start", {});
+			match(plain(panel.render(width)), /bash.*preparing/u);
+			forming("toolcall_delta", { command: "echo target" });
+			match(plain(panel.render(width)), /bash.*echo target.*preparing/u);
+			forming("toolcall_end", { command: "echo target" });
+			match(plain(panel.render(width)), /bash.*echo target.*queued/u);
+			panel.applyEvent({
+				type: "tool_execution_start",
+				toolCallId: "stream-1",
+				toolName: "bash",
+				args: { command: `echo target ${"long-argument ".repeat(30)}` },
+			} as never);
+			panel.applyEvent({
+				type: "tool_execution_update",
+				toolCallId: "stream-1",
+				partialResult: "live first\nlive second\nlive third\nlive fourth",
+			} as never);
+			const running = panel.render(width);
+			match(plain(running), /running.*echo target/u);
+			ok(running.every((line) => visibleWidth(line) <= width));
+			if (style === "compact") {
+				strictEqual(running.length, 1);
+				doesNotMatch(plain(running), /live fourth/u);
+			} else match(plain(running), /live fourth/u);
+			forming("toolcall_delta", { command: "ignored late arguments" });
+			doesNotMatch(plain(panel.render(width)), /ignored late arguments/u);
+			panel.applyEvent({
+				type: "tool_execution_end",
+				toolCallId: "stream-1",
+				result: "settled output",
+				isError: false,
+			} as never);
+			const settled = panel.render(width);
+			doesNotMatch(plain(settled), /preparing|queued|live fourth/u);
+			match(stripTerminalSequences(settled[0] ?? ""), /✓$/u);
+			ok(settled.every((line) => visibleWidth(line) <= width));
+		}
+	}
 });
 
 test("legacy preferences normalize without changing other settings or the input", () => {
@@ -106,8 +156,8 @@ test("large successful cat output stays bounded in every style; errors and local
 		const policy = transcriptDetail(style);
 		const rendered = renderToolPreview(call, 44, policy);
 		ok(rendered.length <= 14, `${style}: ${rendered.length}`);
-		match(plain(rendered), /cat large.txt.*exit 0/u);
-		if (style !== "detailed") doesNotMatch(plain(rendered), /file contents/u);
+		match(plain(rendered), /cat large.t.*exit 0/u);
+		if (style === "compact") doesNotMatch(plain(rendered), /file contents/u);
 		else match(plain(rendered), /file contents 999/u);
 		const failed = renderToolPreview(
 			{ ...call, isError: true, result: "Missing dependency\nInstall the compiler and retry" },

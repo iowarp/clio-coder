@@ -768,11 +768,11 @@ export function renderToolAwaitingApproval(
 	const call = presentedCall(wire);
 	const parts = sublineParts(
 		{ toolCallId: call.toolCallId, toolName: call.toolName, args: call.args, viaGateway: call.viaGateway },
-		undefined,
+		"ready",
 		{},
 		width,
 	);
-	const lines = wrapSublineWithTail(parts.lead, AWAITING_APPROVAL_TAIL, width);
+	const lines = [singleActionLine(parts.lead, AWAITING_APPROVAL_TAIL, width)];
 	if (view === undefined) return lines;
 	const facts = [
 		["action", view.actionClass],
@@ -851,8 +851,8 @@ function blockReasonClause(reason: string): string {
 
 function statusGlyph(status: HeaderStatus, meta: StatusMeta = {}): string {
 	if (status === undefined) return "";
-	if (status === "forming") return ` ${toolMeta(GLYPH.queued)}${toolMeta(" forming call")}`;
-	if (status === "ready") return ` ${toolMeta(GLYPH.queued)}${toolMeta(" ready")}`;
+	if (status === "forming") return ` ${toolMeta(GLYPH.queued)}${toolMeta(" preparing")}`;
+	if (status === "ready") return ` ${toolMeta(GLYPH.queued)}${toolMeta(" queued")}`;
 	if (status === "running") {
 		// The progressive verb already says the call is running; the tail adds
 		// only the live mark and the elapsed time.
@@ -943,7 +943,12 @@ function objectLimit(toolClass: ToolClass, width?: number): number {
  * and path tail, a path as its tail when it must be cut, anything else plain;
  * an MCP or extension capability as `server › tool`. Always one sanitized line.
  */
-function rowObject(row: ResolvedToolRow, finished: ToolExecutionFinished | null, width?: number): string {
+function rowObject(
+	row: ResolvedToolRow,
+	finished: ToolExecutionFinished | null,
+	width?: number,
+	budget?: number,
+): string {
 	if (row.externalLabel !== null) {
 		const [server, capability] = sanitizeCallTargetText(row.externalLabel).split(" › ");
 		return `${theme.fg("toolMetadata", server ?? "")}${theme.fg("divider", " › ")}${theme.fg("toolCapability", capability ?? "")}`;
@@ -952,7 +957,7 @@ function rowObject(row: ResolvedToolRow, finished: ToolExecutionFinished | null,
 	if (skill !== null)
 		return `skill ${theme.fg("skillIdentity", truncate(sanitizeCallTargetText(skill.name), ARG_PREVIEW_LIMIT))}`;
 	if (row.spec.object === undefined) return sanitizeCallTargetText(row.toolName);
-	const display = objectDisplay(row, width);
+	const display = objectDisplay(row, width, budget);
 	if (display === null) return "";
 	if (display.style === "url" || display.style === "path") return theme.fg("toolTarget", display.shown);
 	const clean = display.shown.length < display.full.length ? `${display.shown}${GLYPH.ellipsis}` : display.shown;
@@ -971,19 +976,21 @@ function rowObject(row: ResolvedToolRow, finished: ToolExecutionFinished | null,
 function objectDisplay(
 	row: ResolvedToolRow,
 	width?: number,
+	budget?: number,
 ): { full: string; shown: string; style?: "code" | "url" | "path" } | null {
 	const object = row.spec.object?.(row.args, row.context) ?? null;
 	if (object === null) return null;
-	if (object.style === "url") return { full: object.text, shown: urlLabel(object.text, urlBudget(width)), style: "url" };
+	if (object.style === "url")
+		return { full: object.text, shown: urlLabel(object.text, budget ?? urlBudget(width)), style: "url" };
 	const full = displayText(object.text, object.style);
-	const limit = objectLimit(row.spec.class, width);
+	const limit = budget ?? objectLimit(row.spec.class, width);
 	if (object.style === "path") {
 		// A path that fits beside its verb stays whole, so no `path ›` row repeats
 		// it. One that must be cut leaves room for the outcome too, so its tail
 		// and the row's status share the first line.
 		if (width === undefined) return { full, shown: full.length <= limit ? full : pathTail(full, limit), style: "path" };
 		const whole = Math.min(limit, contentWidth(width) - 10);
-		const cut = Math.max(16, Math.min(limit, contentWidth(width) - 20));
+		const cut = Math.max(budget === undefined ? 16 : 1, Math.min(limit, contentWidth(width) - 20));
 		return { full, shown: full.length <= whole ? full : pathTail(full, cut), style: "path" };
 	}
 	const shown = full.length <= limit ? full : full.slice(0, Math.max(0, limit - 1));
@@ -1116,6 +1123,7 @@ function sublineParts(
 	status: HeaderStatus,
 	meta: StatusMeta,
 	width?: number,
+	objectBudget?: number,
 ): SublineParts {
 	const finished = "result" in call ? call : null;
 	if (isChainCall(call)) return chainSublineParts(call, finished, status, meta);
@@ -1128,8 +1136,16 @@ function sublineParts(
 		return { lead, tail: statusGlyph(status, meta) };
 	}
 	const settled = status === "ok" || status === "error";
-	const verb = isNonExecutedOutcome(finished?.outcome) ? "blocked" : settled ? row.spec.verbs[1] : row.spec.verbs[0];
-	const object = rowObject(row, finished, width);
+	const verb =
+		status === "forming" || status === "ready"
+			? sanitizeCallTargetText(row.toolName)
+			: isNonExecutedOutcome(finished?.outcome)
+				? "blocked"
+				: settled
+					? row.spec.verbs[1]
+					: row.spec.verbs[0];
+	const target = rowObject(row, finished, width, objectBudget);
+	const object = (status === "forming" || status === "ready") && stripTerminalSequences(target) === verb ? "" : target;
 	const scopeText = row.spec.scope?.(row.args, row.context) ?? null;
 	const scope = scopeText === null ? "" : ` in ${truncate(sanitizeCallTargetText(scopeText), ARG_PREVIEW_LIMIT)}`;
 	const inline = inlinePair(row, resolvedPairs(row, finished));
@@ -1631,6 +1647,31 @@ function sublineStatus(call: ToolExecutionStart | ToolExecutionFinished): Header
 	return call.isError ? "error" : "ok";
 }
 
+/** Live previews keep the phase beside the target even when arguments grow. */
+function singleActionLine(lead: string, tail: string, width: number): string {
+	const status = truncateToWidth(tail, Math.max(0, width - 1), GLYPH.ellipsis);
+	const budget = Math.max(1, width - visibleWidth(status));
+	return theme.base("toolSummary", releaseSpaces(`${truncateToWidth(lead, budget, GLYPH.ellipsis)}${status}`));
+}
+
+function previewActionRows(call: ToolExecutionStart | ToolExecutionFinished, width: number): string[] {
+	if ("result" in call && skillRefusalOf(call) !== null) return renderToolSubline(call, width);
+	const status = sublineStatus(call);
+	const meta: StatusMeta =
+		"result" in call
+			? { durationMs: call.durationMs, outcome: call.outcome, blockReason: call.blockReason }
+			: { elapsedMs: call.elapsedMs };
+	let parts = sublineParts(call, status, meta, width);
+	const overflow = visibleWidth(`${parts.lead}${parts.tail}`) - width;
+	if (overflow > 0) {
+		const row = resolveRow(call);
+		const finished = "result" in call ? call : null;
+		const targetWidth = visibleWidth(rowObject(row, finished, width));
+		parts = sublineParts(call, status, meta, width, Math.max(1, targetWidth - overflow - 2));
+	}
+	return [singleActionLine(parts.lead, parts.tail, width)];
+}
+
 /** Stable action identity, outcome, and captured-result metadata. */
 export function renderToolSubline(wire: ToolExecutionStart | ToolExecutionFinished, width: number): string[] {
 	const call = presentedCall(wire);
@@ -1849,7 +1890,11 @@ export function renderBashTranscriptExecution(
  * mutation's payload is inspection material; a failed one keeps it, bounded,
  * because the text that did not match is the diagnosis.
  */
-function previewArguments(call: ToolExecutionStart | ToolExecutionFinished, width: number): Record<string, unknown> {
+function previewArguments(
+	call: ToolExecutionStart | ToolExecutionFinished,
+	width: number,
+	livePayload = false,
+): Record<string, unknown> {
 	const row = resolveRow(call);
 	const finished = "result" in call ? call : null;
 	const failed = finished !== null && (finished.isError || finished.outcome !== undefined);
@@ -1860,7 +1905,7 @@ function previewArguments(call: ToolExecutionStart | ToolExecutionFinished, widt
 		if (value === undefined || value === null) continue;
 		const payload = (MUTATION_PAYLOAD_FIELDS as readonly string[]).includes(key) && row.spec.class === "mutate";
 		if (payload) {
-			if (failed) rest[key] = key === "edits" ? flattenSingleEdit(value) : value;
+			if (failed || livePayload) rest[key] = key === "edits" ? flattenSingleEdit(value) : value;
 			continue;
 		}
 		if (consumed.has(key)) {
@@ -1934,16 +1979,24 @@ export function renderToolPreview(
 	const limit = previewBudget(
 		failure
 			? detail.errorRows
-			: options.operator
-				? detail.operatorBashRows
-				: command
-					? detail.bashRows
-					: detail.resultRows,
+			: finished === undefined && !options.operator
+				? detail.liveResultRows
+				: options.operator
+					? detail.operatorBashRows
+					: command
+						? detail.bashRows
+						: detail.resultRows,
 		options.terminalRows,
 	);
-	const rows = renderToolSubline(call, width);
+	const rows = options.operator ? renderToolSubline(call, width) : previewActionRows(call, width);
+	if (
+		detail.style === "compact" &&
+		!options.operator &&
+		(finished === undefined || (!failure && row.spec.class !== "interaction" && finished.operatorGrant === undefined))
+	)
+		return rows;
 	rows.push(...operatorGrantRows(call, width, failure));
-	const args = previewArguments(call, width);
+	const args = previewArguments(call, width, detail.style === "detailed" && finished === undefined);
 	const expanded = isPlainObject(args.edits) ? { ...args, ...args.edits, edits: undefined } : args;
 	rows.push(
 		...renderToolArguments(
@@ -2019,7 +2072,14 @@ export function renderToolPreview(
 		// worker card sits under it leaves the outcome to the card.
 		// A failed command's status line is on its row as `exit N`; the body keeps the output.
 		const shown = failure && command ? withoutCommandStatus(result) : result;
-		const { body: told, notes } = splitModelNotes(resultText(unwrapResultEnvelope(shown), Number.POSITIVE_INFINITY));
+		const metadataOnly =
+			!failure &&
+			detail.style === "standard" &&
+			isPlainObject(shown) &&
+			Object.keys(shown).every((key) => key === "details");
+		const { body: told, notes } = splitModelNotes(
+			metadataOnly ? "" : resultText(unwrapResultEnvelope(shown), Number.POSITIVE_INFINITY),
+		);
 		// A refusal's tail names it (`✗ · bash blocked: system_modify`), so its
 		// body keeps the rest of what the call was told, not that line again. A
 		// reason the tail only began keeps its full line in the body.
@@ -2035,7 +2095,9 @@ export function renderToolPreview(
 			// A failed command's body is the command's own output, shown as it ran; a
 			// failed tool's body is the harness's error text, so its paths abbreviate.
 			const shownText = failure && !command ? displayEmbeddedPaths(text, row.context.cwd ?? process.cwd()) : text;
-			const body = toolOutputInk(redactSecretString(shownText)).flatMap((line) => indentAndWrap(line, width, failure));
+			const body = toolOutputInk(redactSecretString(shownText.trimEnd())).flatMap((line) =>
+				indentAndWrap(line, width, failure),
+			);
 			rows.push(
 				...previewRows(
 					body,
@@ -2081,7 +2143,12 @@ function chainSublineParts(
 	meta: StatusMeta,
 ): SublineParts {
 	const settled = status === "ok" || status === "error";
-	const verb = isNonExecutedOutcome(finished?.outcome) ? "blocked" : CHAIN_ROW.verbs[settled ? 1 : 0];
+	const verb =
+		status === "forming" || status === "ready"
+			? sanitizeCallTargetText(call.toolName)
+			: isNonExecutedOutcome(finished?.outcome)
+				? "blocked"
+				: CHAIN_ROW.verbs[settled ? 1 : 0];
 	const steps = finished === null ? [] : gatewayChainSteps(finished.toolName, finished.result);
 	const pending = finished === null ? [] : gatewayChainPending(finished.result);
 	const planned = gatewayChainPlan(call.toolName, call.args).length;
@@ -2208,7 +2275,9 @@ function renderChainPreview(
 	const finished = "result" in call ? call : undefined;
 	const failure = finished?.isError === true || finished?.outcome !== undefined;
 	const rail = failure ? RAIL_ERROR : RAIL_NORMAL;
-	const rows = renderToolSubline(call, width);
+	const rows = previewActionRows(call, width);
+	if (detail.style === "compact" && (finished === undefined || (!failure && finished.operatorGrant === undefined)))
+		return rows;
 	rows.push(...operatorGrantRows(call, width, failure));
 	rows.push(
 		...previewRows(
@@ -2220,7 +2289,10 @@ function renderChainPreview(
 			BODY_INDENT_VISIBLE_WIDTH,
 		),
 	);
-	const limit = previewBudget(failure ? detail.errorRows : detail.resultRows, options.terminalRows);
+	const limit = previewBudget(
+		failure ? detail.errorRows : finished === undefined ? detail.liveResultRows : detail.resultRows,
+		options.terminalRows,
+	);
 	if (limit <= 0) return rows;
 	let body = finished === undefined ? [] : chainOutputRows(finished, width, failure);
 	// A chain that never parsed, or one still running, has no settled steps;
