@@ -177,7 +177,7 @@ function armRunTimeout(seconds: number): HeadlessRunDeadline {
 		() => {
 			if (coordinator.getPhase() !== "idle") return;
 			expired = true;
-			process.stderr.write(`clio-coder run: --timeout ${seconds}s elapsed; shutting down\n`);
+			process.stderr.write(`clio-coder run: timed out after ${seconds}s (--timeout)\n`);
 			void coordinator.shutdown(RUN_TIMEOUT_EXIT_CODE);
 		},
 		Math.ceil(seconds * 1000),

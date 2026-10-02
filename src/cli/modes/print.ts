@@ -920,10 +920,15 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 		// hook read interruption from the coordinator, so whichever seals first
 		// seals the same canceled outcome with the status the process exits with.
 		terminal = interruptedTerminal();
+		// The deadline timer reports expiry even if shutdown precedes chat boot.
+		// Keep the receipt detail, but emit that diagnostic only at the timer.
 		stderrMessage =
 			settlement.live.length > 0
-				? `${terminal.failureMessage ?? "clio-coder run: interrupted"}\nclio-coder run: canceling ${settlement.live.length} dispatched run(s) still in flight: ${describeRuns(settlement.live)}`
-				: terminal.failureMessage;
+				? `clio-coder run: canceling ${settlement.live.length} dispatched run(s) still in flight: ${describeRuns(settlement.live)}`
+				: null;
+		if (options.deadline?.expired() !== true) {
+			stderrMessage = [terminal.failureMessage, stderrMessage].filter(Boolean).join("\n") || null;
+		}
 	} else if (result.abortReason !== null) {
 		// An interrupted turn never answered, no matter what partial text or
 		// internal error the abort left behind: nonzero exit, abort reason. It

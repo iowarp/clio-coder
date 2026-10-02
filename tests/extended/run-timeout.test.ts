@@ -111,7 +111,8 @@ describe("clio-coder run --timeout", () => {
 		ok(provider.streams >= 1, "the run must have been waiting on the model");
 		ok(turn.elapsedMs >= 2_000, `exited before the limit: ${turn.elapsedMs}ms`);
 		ok(turn.elapsedMs < 12_000, `took ${turn.elapsedMs}ms to honor a 2s limit`);
-		match(turn.stderr, /--timeout 2s elapsed/);
+		match(turn.stderr, /timed out after 2s \(--timeout\)/);
+		strictEqual(turn.stderr.split("\n").filter((line) => line.includes("--timeout")).length, 1);
 		const { receipt, envelope } = sealedReceipt(scratch.stateDir);
 		strictEqual(receipt.outcome, "timed_out");
 		strictEqual(receipt.exitCode, 124);
@@ -172,7 +173,7 @@ describe("clio-coder run --timeout", () => {
 		});
 		strictEqual(turn.code, 2, turn.stderr);
 		match(turn.stderr, /--cwd is not a directory this process can enter/);
-		doesNotMatch(turn.stderr, /--timeout 1s elapsed/);
+		doesNotMatch(turn.stderr, /timed out after 1s \(--timeout\)/);
 		ok(turn.elapsedMs >= 2000, `the hold must keep the process alive past the deadline (${turn.elapsedMs}ms)`);
 	});
 
