@@ -831,6 +831,34 @@ function groundedToken(token: string, evidence: ModelGroundingCorpus): boolean {
 	return groundedName(token, evidence) || citedNames(token).some((name) => groundedName(name, evidence));
 }
 
+// Nemotron's accurate first draft cited no names in backticks, so the citation rule dropped every line.
+// Backtick a bare name only when it reads as code and passes the same check a backticked citation faces.
+function wrapBareCitations(line: string, evidence: ModelGroundingCorpus): string {
+	return line
+		.split(/(`[^`\n]*`|\]\([^)\s]*\))/)
+		.map((part, index) => {
+			if (index % 2 === 1) return part;
+			return part.replace(
+				/\b(?:pnpm|npm|yarn|bun)\s+(?:run\s+)?[A-Za-z0-9_:@./*-]+|[A-Za-z0-9_$@.][A-Za-z0-9_$@./*?+<>-]*/g,
+				(match) => {
+					const token = match.replace(/[.,;:!?]+$/, "");
+					const punctuation = match.slice(token.length);
+					const words = token.split(/\s+/);
+					const script = words[1] === "run" && words.length === 3 ? words[2] : words.length === 2 ? words[1] : undefined;
+					const invocation =
+						words[0] === evidence.packageManager && script !== undefined && evidence.scriptBodies.has(script);
+					// A case hump marks camelCase and PascalCase; a lone capitalized word may start a sentence,
+					// and "e.g" or "bold**" must not count as a name.
+					const dotted = token.replace(/\b\w{1,2}\./g, "");
+					const codeLike =
+						/[/_@]|[a-z0-9][A-Z]/.test(token) || (dotted.includes(".") && /^\.?[\w-]+(?:\.[\w-]+)*$/.test(dotted));
+					return invocation || (codeLike && groundedToken(token, evidence)) ? `\`${token}\`${punctuation}` : match;
+				},
+			);
+		})
+		.join("");
+}
+
 // Real symbols were attributed to importing files; use indexed definitions to correct unambiguous ownership.
 function correctSymbolAttributions(line: string, evidence: ModelGroundingCorpus): string {
 	return line.replace(
@@ -885,7 +913,7 @@ function groundedModelBody(body: string, evidence: ModelGroundingCorpus, maxChar
 		// sub-steps into unrelated top-level rules.
 		const indent = inFence ? "" : (/^(\s*)[-*+]\s/.exec(rawLine)?.[1] ?? "").replace(/\t/g, "  ");
 		const line = correctSymbolAttributions(
-			inFence ? `\`${trimmed.replace(/`/g, "")}\`` : `${indent}${trimmed}`,
+			wrapBareCitations(inFence ? `\`${trimmed.replace(/`/g, "")}\`` : `${indent}${trimmed}`, evidence),
 			evidence,
 		);
 		const codeTokens = [...line.matchAll(CODE_TOKEN_RE)]
