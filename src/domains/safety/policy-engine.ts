@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { readFileSync, statSync } from "node:fs";
+import { type Dirent, readdirSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import { artifactDefaultPath } from "../../core/artifact-paths.js";
 import { asDirectoryPathBoundary, resolvePathBoundary, writeRootsCover } from "../../core/path-boundary.js";
@@ -759,7 +759,11 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 					cwd,
 					posture,
 					projectPolicy,
-					{ exemptRoots: readExemptRoots, memo: walkMemo },
+					{
+						exemptRoots: readExemptRoots,
+						memo: walkMemo,
+						readable: (target) => evaluatePathPolicy(zeroAccessPolicy, "read", target, callCwd, walkMemo).kind === "allow",
+					},
 				);
 				// A typed verifier still runs through the same command safety scan.
 				// Unrecognized checks are left to the autonomy mapping: default asks,
@@ -1351,6 +1355,8 @@ const CHAIN_MAX_SEGMENTS = 16;
 interface ReadScopeInputs {
 	exemptRoots: ReadonlyArray<ReadScopeExemptRoot>;
 	memo: PathWalkMemo;
+	/** False for a path a zero-access entry covers, the way `readablePath` judges it. */
+	readable(target: string): boolean;
 }
 
 interface ChainRecognition {
@@ -1556,12 +1562,14 @@ const RG_VALUE_LONG = new Set([
 ]);
 
 /**
- * rg recurses by default, and a directory walk reaches non-hidden zero-access
- * files (`*.pem`, `kubeconfig`). It is recognized only when it names at least
- * one operand after the pattern and every operand is an existing regular file.
- * The pattern position shifts with `-e`/`--regexp`, so only flags this parser
- * knows are accepted; any other option, `-f`, or a stdin `-` operand is
- * ambiguous and refused.
+ * rg recurses by default, and a directory walk reaches zero-access files
+ * (`*.pem`, `kubeconfig`) that naming the directory does not mention. It is
+ * recognized only when it names at least one operand after the pattern and
+ * every operand is an existing regular file, or a directory
+ * {@link directoryHoldsNoProtectedFile} proves cannot reach one. The pattern
+ * position shifts with `-e`/`--regexp`, so only flags this parser knows are
+ * accepted; any other option, `-f`, or a stdin `-` operand is ambiguous and
+ * refused.
  */
 interface RgArgs {
 	/** Non-option words with their index in the argument list. */
@@ -1625,7 +1633,12 @@ function parseRgArgs(args: ReadonlyArray<string>): RgArgs | null {
 	return { positionals, explicitPattern, listsFiles };
 }
 
-function rgSearchesOnlyFiles(args: ReadonlyArray<string>, cwd: string, piped: boolean): boolean {
+function rgSearchStaysReadable(
+	args: ReadonlyArray<string>,
+	cwd: string,
+	piped: boolean,
+	readable: (target: string) => boolean,
+): boolean {
 	const parsed = parseRgArgs(args);
 	if (parsed === null) return false;
 	const { explicitPattern, listsFiles } = parsed;
@@ -1640,12 +1653,50 @@ function rgSearchesOnlyFiles(args: ReadonlyArray<string>, cwd: string, piped: bo
 	if (operands.length === 0) return piped;
 	return operands.every((operand) => {
 		try {
-			return statSync(path.resolve(cwd, operand)).isFile();
+			const target = path.resolve(cwd, operand);
+			const stats = statSync(target);
+			return stats.isFile() || (stats.isDirectory() && directoryHoldsNoProtectedFile(target, readable));
 		} catch {
-			// A path that cannot be stat'ed is not an existing regular file.
+			// A path that cannot be stat'ed is not an existing file or directory.
 			return false;
 		}
 	});
+}
+
+/** Entries a directory walk may visit before recognition gives up and the call asks. */
+const RG_WALK_BUDGET = 10_000;
+
+/**
+ * True when every entry under `dir` is readable, so an rg walk of it cannot
+ * print a zero-access file. The walk is a superset of what rg searches: it
+ * prunes nothing. Hidden entries stay in because an ignore file's `!.env`
+ * line or a `--glob` whitelist makes rg search them without any flag this
+ * parser refuses. Symlinks are listed but not followed, as rg without `-L`
+ * (refused above) does not follow them either; `readable` still judges one by
+ * where it points. A tree larger than the budget, or a directory that cannot
+ * be listed, is not proven and asks.
+ */
+function directoryHoldsNoProtectedFile(dir: string, readable: (target: string) => boolean): boolean {
+	if (!readable(dir)) return false;
+	const pending = [dir];
+	let visited = 0;
+	for (let current = pending.pop(); current !== undefined; current = pending.pop()) {
+		let entries: Dirent[];
+		try {
+			entries = readdirSync(current, { withFileTypes: true });
+		} catch {
+			// A directory that cannot be listed cannot be proven free of protected files.
+			return false;
+		}
+		for (const entry of entries) {
+			visited += 1;
+			if (visited > RG_WALK_BUDGET) return false;
+			const full = path.join(current, entry.name);
+			if (!readable(full)) return false;
+			if (entry.isDirectory()) pending.push(full);
+		}
+	}
+	return true;
 }
 
 const GREP_FAMILY: ReadonlySet<string> = new Set(["grep", "egrep", "fgrep"]);
@@ -1792,7 +1843,7 @@ function readOnlyInspectionRule(
 	// real path, so a word carrying one is never recognized.
 	if (words.some((word) => hasUnquotedExpansion(source.slice(word.start, word.end)))) return null;
 	if (GREP_FAMILY.has(command) && recursesDirectories(args)) return null;
-	if (command === "rg" && !rgSearchesOnlyFiles(args, cwd, piped)) return null;
+	if (command === "rg" && !rgSearchStaysReadable(args, cwd, piped, readScope.readable)) return null;
 	if (command === "sed") {
 		if (!args.includes("-n")) return null;
 		let sawScript = false;
