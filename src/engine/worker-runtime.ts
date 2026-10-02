@@ -157,6 +157,8 @@ export interface WorkerRunInput {
 	thinkingLevel?: ThinkingLevel;
 	/** JSON Schema enforced by the native llama.cpp request payload. */
 	responseSchema?: Record<string, unknown>;
+	/** Generated context should not vary with local server sampling defaults. */
+	sampling?: "deterministic";
 	/** Orchestrator-resolved runtime decision carried on the WorkerSpec. */
 	runtimeResolution?: RuntimeTargetSnapshot;
 	/**
@@ -1095,6 +1097,8 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 				runtimeId: input.runtime.id,
 				thinkingLevel: effectiveThinkingLevel,
 				...(input.responseSchema !== undefined ? { responseSchema: input.responseSchema } : {}),
+				// Apply stable sampling to every context-generation round, including terminal repairs.
+				...(input.sampling !== undefined ? { sampling: input.sampling } : {}),
 				toolSurfaceLocked: synthesisToolLock,
 				...(helperToolAvailable && (synthesisToolLock || helperTerminalPhase) && supportsNamedToolChoice(currentModel.api)
 					? { terminalToolName: INTERNAL_HELPER_RESULT_TOOL }

@@ -471,7 +471,10 @@ function runStream(
 			signal?.throwIfAborted();
 			const pin = await reconcileOllamaResidency(model, headers, signal);
 			signal?.throwIfAborted();
-			const iterator = streamOllamaChat(model.baseUrl, buildRequest(model, context, options, thinkingLevel, pin), {
+			// Native Ollama must run the payload hook too, or generated context loses its temperature and seed.
+			const request = buildRequest(model, context, options, thinkingLevel, pin);
+			const patchedRequest = (await options?.onPayload?.(request, model)) ?? request;
+			const iterator = streamOllamaChat(model.baseUrl, patchedRequest as typeof request, {
 				headers,
 				signal,
 				fetch: options?.fetch,

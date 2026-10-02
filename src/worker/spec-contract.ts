@@ -115,6 +115,8 @@ interface WorkerSpecFields {
 	thinkingLevel?: ThinkingLevel;
 	/** JSON Schema enforced on the llama.cpp chat-completions request. */
 	responseSchema?: Record<string, unknown>;
+	/** Stable sampling for generated context, explicitly requested by the host. */
+	sampling?: "deterministic";
 	/**
 	 * Terminal contract from the admitted agent recipe. The worker validates its
 	 * own final result against it and spends bounded repair rounds, so the
@@ -916,6 +918,8 @@ export function parseWorkerSpec(value: unknown): WorkerSpec {
 	readOptionalString(spec, "sessionId", "WorkerSpec");
 	readOptionalString(spec, "apiKey", "WorkerSpec");
 	readOptionalEnum(spec, "thinkingLevel", "WorkerSpec", THINKING_LEVELS);
+	// A misspelled sampling policy must not silently restore the server defaults that varied handbooks.
+	readOptionalEnum(spec, "sampling", "WorkerSpec", ["deterministic"] as const);
 	if (spec.modelCapabilities !== undefined)
 		validateCapabilityPatch(spec.modelCapabilities, "WorkerSpec.modelCapabilities");
 	if (spec.responseSchema !== undefined) {

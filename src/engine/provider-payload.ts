@@ -55,7 +55,7 @@ const FORCED_TOOL_CHOICE_REMOVED_AT: Readonly<Record<string, readonly [number, n
  * (`anthropic.claude-opus-5-5`). The minor version is one or two digits so a
  * date suffix on a whole-number release is never read as a minor version.
  */
-export function rejectsForcedToolChoice(model: Pick<EngineModel, "id">): boolean {
+function rejectsForcedToolChoice(model: Pick<EngineModel, "id">): boolean {
 	const match = /claude-(sonnet|opus|fable|mythos)-(\d+)(?:-(\d{1,2}))?(?!\d)/u.exec(model.id);
 	if (!match) return false;
 	const removedAt = FORCED_TOOL_CHOICE_REMOVED_AT[match[1] ?? ""];
@@ -320,6 +320,8 @@ export function patchResponseSchemaPayloadForDialect(
 
 export interface WorkerPayloadPatchOptions {
 	runtimeId: string;
+	/** Generated context opts into stable sampling only on compatible local APIs. */
+	sampling?: "deterministic";
 	thinkingLevel?: ThinkingLevel;
 	responseSchema?: Record<string, unknown>;
 	toolChoiceNone?: boolean;
@@ -330,6 +332,39 @@ export interface WorkerPayloadPatchOptions {
 	terminalToolName?: string;
 }
 
+// Identical local handbook runs shared few rules when servers sampled at their defaults.
+const CONTEXT_GENERATION_SEED = 42;
+const DETERMINISTIC_SAMPLING_RUNTIMES = new Set([
+	"llamacpp",
+	"llamacpp-completion",
+	"lmstudio",
+	"litellm",
+	"lemonade",
+	"sglang",
+	"vllm",
+	"openai-compat",
+]);
+
+function patchDeterministicSamplingPayload(
+	payload: unknown,
+	model: EngineModel,
+	runtimeId: string,
+): unknown | undefined {
+	// Anthropic proxies reject non-default sampling even through a self-hosted gateway.
+	if (!isRecord(payload) || /claude-/i.test(model.id)) return undefined;
+	// Ollama puts sampling inside options; preserve its existing context and output limits.
+	if (model.api === "ollama-native" && runtimeId === "ollama") {
+		return {
+			...payload,
+			options: { ...(isRecord(payload.options) ? payload.options : {}), temperature: 0, seed: CONTEXT_GENERATION_SEED },
+		};
+	}
+	// Cloud dialects may reject a seed or zero temperature; only these self-hosted APIs accept both.
+	if (model.api === "openai-completions" && DETERMINISTIC_SAMPLING_RUNTIMES.has(runtimeId))
+		return { ...payload, temperature: 0, seed: CONTEXT_GENERATION_SEED };
+	return undefined;
+}
+
 /** Compose all worker-owned request mutations over one payload in a stable order. */
 export function patchWorkerRequestPayload(
 	payload: unknown,
@@ -338,6 +373,14 @@ export function patchWorkerRequestPayload(
 ): unknown | undefined {
 	let patched = payload;
 	let changed = false;
+	// Context generation explicitly opts in so ordinary worker sampling retains its configured policy.
+	if (options.sampling === "deterministic") {
+		const samplingPatched = patchDeterministicSamplingPayload(patched, model, options.runtimeId);
+		if (samplingPatched !== undefined) {
+			patched = samplingPatched;
+			changed = true;
+		}
+	}
 
 	const thinkingPatched = patchProviderThinkingPayload(patched, model, options.thinkingLevel);
 	if (thinkingPatched !== undefined) {

@@ -25,6 +25,8 @@ export function routeValidationProjection(
 	allowUnenvelopedApproval = false,
 ): { jobSpec: JobSpec; restore(validated: JobSpec): DispatchRequest } {
 	const {
+		// Generated-context sampling is host-owned, outside model-authored job arguments.
+		sampling,
 		turnConstraints,
 		contextSeed,
 		systemPrompt,
@@ -71,6 +73,7 @@ export function routeValidationProjection(
 		restore: (validated) => ({
 			...request,
 			...validated,
+			...(sampling !== undefined ? { sampling } : {}),
 			...(turnConstraints !== undefined ? { turnConstraints } : {}),
 			...(contextSeed !== undefined ? { contextSeed } : {}),
 			...(systemPrompt !== undefined ? { systemPrompt } : {}),

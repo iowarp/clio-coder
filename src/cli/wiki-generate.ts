@@ -230,6 +230,8 @@ async function runWikiDispatch(input: {
 				: {}),
 			cwd: input.cwd,
 			requestOrigin: "internal",
+			// Wiki pages are generated context too; stable local sampling reduces variation between refreshes.
+			sampling: "deterministic",
 			noSkills: true,
 			...routeFields(input.route),
 			// `git` cannot answer anything for this dispatch. The prompt already

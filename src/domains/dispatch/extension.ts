@@ -2666,6 +2666,8 @@ function buildDispatchWorkerSpec(input: DispatchWorkerSpecInput, config?: Config
 		spec.flowRestrictions = structuredClone(input.flowRestrictions) as FlowRestrictionSet;
 	}
 	if (input.req.responseSchema !== undefined) spec.responseSchema = input.req.responseSchema;
+	// Identical local context runs otherwise inherit changing server sampling defaults.
+	if (input.req.sampling !== undefined) spec.sampling = input.req.sampling;
 	// The worker repairs against exactly the contract the orchestrator will seal.
 	// A gate role that overrides the recipe contract gets no worker-side repair,
 	// for the same reason it gets no recipe validation.
