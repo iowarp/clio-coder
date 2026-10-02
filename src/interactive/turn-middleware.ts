@@ -247,7 +247,7 @@ export function createTurnMiddleware(deps: TurnMiddlewareDeps): TurnMiddleware {
 		else deps.emitNotice(message.replace(/^\[tip\]\s*/u, ""), "info", "tip");
 	};
 
-	const applyRequestContinuation = (message: string): void => {
+	const applyRequestContinuation = (message: string, note?: string): void => {
 		if (state.stalledTurnNudgeSpent) {
 			// One continuation per user prompt, and that cap is all this branch
 			// knows. It cannot tell whether the model stalled, answered, or was
@@ -262,10 +262,14 @@ export function createTurnMiddleware(deps: TurnMiddlewareDeps): TurnMiddleware {
 		// The nudge reaches the model as context inside the run, never as a
 		// persisted operator turn, so the ledger keeps it for inspection only.
 		appendMiddlewareReminderEntry(message, "info", "reminder", false);
-		// Producer-neutral wording: stalled-turn, the high-rigor finish contract,
-		// and the open-tasks nudge all arrive here, and the buffered reminder
-		// already carries each producer's specific message into the transcript.
-		deps.emitFooterNotice("info", "turn ended with open work; nudge sent", "nudge.continuation.sent");
+		// The producer's own note says what was nudged. An empty note is the plan
+		// close, whose "Carry out this plan?" card is already the announcement.
+		if (note === "") return;
+		deps.emitFooterNotice(
+			"info",
+			note === undefined ? "nudged the model to continue" : `nudged the model to continue: ${note}`,
+			"nudge.continuation.sent",
+		);
 	};
 
 	const lastAssistantMessage = (messages: ReadonlyArray<AgentMessage>): AgentMessage | null => {
@@ -411,7 +415,7 @@ export function createTurnMiddleware(deps: TurnMiddlewareDeps): TurnMiddleware {
 					continue;
 				}
 				if (effect.kind === "request_continuation" && turnAllowsContinuation(state.currentTurnConstraints)) {
-					applyRequestContinuation(effect.message);
+					applyRequestContinuation(effect.message, effect.note);
 					continue;
 				}
 				if (effect.kind === "notify_operator") notifyOperator(effect.message, effect.key);

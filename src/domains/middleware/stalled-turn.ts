@@ -147,7 +147,13 @@ export const STALLED_TURN_RULE_DEFINITION: MiddlewareRuleDefinition = {
 		hooks: ["turn_end"],
 		effectKinds: ["request_continuation"],
 	},
-	effects: [{ kind: "request_continuation", message: STALLED_TURN_REQUEST_CONTINUATION_MESSAGE }],
+	effects: [
+		{
+			kind: "request_continuation",
+			message: STALLED_TURN_REQUEST_CONTINUATION_MESSAGE,
+			note: "the reply announced an action without running it",
+		},
+	],
 	predicate: shouldRequestStalledTurnContinuation,
 };
 

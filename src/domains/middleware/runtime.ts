@@ -334,8 +334,11 @@ export function cloneMiddlewareEffect(effect: MiddlewareEffect): MiddlewareEffec
 			return { kind: "block_tool", reason: effect.reason, severity: effect.severity };
 		case "protect_path":
 			return { kind: "protect_path", path: effect.path, reason: effect.reason };
-		case "request_continuation":
-			return { kind: "request_continuation", message: effect.message };
+		case "request_continuation": {
+			const cloned: MiddlewareEffect = { kind: "request_continuation", message: effect.message };
+			if (effect.note !== undefined) cloned.note = effect.note;
+			return cloned;
+		}
 		case "require_tool":
 			return { kind: "require_tool", toolName: effect.toolName };
 		case "lock_tools":

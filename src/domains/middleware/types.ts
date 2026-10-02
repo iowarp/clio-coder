@@ -51,7 +51,12 @@ export type MiddlewareEffect =
 	| { kind: "annotate_tool_result"; message: string; severity?: MiddlewareAnnotationSeverity }
 	| { kind: "block_tool"; reason: string; severity: "hard-block" }
 	| { kind: "protect_path"; path: string; reason: string }
-	| { kind: "request_continuation"; message: string }
+	/**
+	 * `note` is what the nudge asked, in plain words, for the footer line that
+	 * says the turn was continued. An empty note marks the host's own card (the
+	 * plan close), which is already on screen and needs no announcement.
+	 */
+	| { kind: "request_continuation"; message: string; note?: string }
 	| { kind: "require_tool"; toolName: string }
 	| { kind: "lock_tools" }
 	/**

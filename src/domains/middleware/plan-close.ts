@@ -88,6 +88,8 @@ export function createPlanCloseRegistration(deps: {
 			return [
 				{
 					kind: "request_continuation",
+					// The "Carry out this plan?" card is the notice.
+					note: "",
 					message:
 						(planOnly
 							? 'This request is plan-only. Offer "Keep the plan (Recommended)" first; implementation is optional and is not recommended. '

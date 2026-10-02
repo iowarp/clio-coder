@@ -73,7 +73,7 @@ export function createTaskNudgeRegistration(options: CreateTaskNudgeRegistration
 			if (board === null || openTasks(board).length === 0) return [];
 			const message = buildOpenTasksMessage(board);
 			return [
-				{ kind: "request_continuation", message },
+				{ kind: "request_continuation", message, note: "tasks are still open" },
 				{ kind: "inject_reminder", message, severity: "warn" },
 			];
 		},

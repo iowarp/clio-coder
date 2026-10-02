@@ -163,7 +163,13 @@ export function createSkillsReminderRegistration(deps: SkillsReminderDeps): Midd
 				if (suppressed || !isSkillSuggestionWait(input)) return NO_EFFECTS;
 				try {
 					return deps.countModelVisibleSkills() > 0
-						? [{ kind: "request_continuation", message: SKILL_SUGGESTION_WAIT_CONTINUATION_MESSAGE }]
+						? [
+								{
+									kind: "request_continuation",
+									message: SKILL_SUGGESTION_WAIT_CONTINUATION_MESSAGE,
+									note: "the reply stopped on a skill suggestion",
+								},
+							]
 						: NO_EFFECTS;
 				} catch {
 					return NO_EFFECTS;

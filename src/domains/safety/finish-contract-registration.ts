@@ -225,7 +225,7 @@ export function createFinishContractRegistration(
 							: HIGH_RIGOR_REVALIDATION_MESSAGE
 						: `[Clio Coder] High-rigor finish gate: validation evidence is missing. ${verificationTools.length > 0 ? `Use an authorized check through ${verificationTools.join(" or ")}; if the operator excluded validation, report the blocker without running it.` : "Record the unavailable validation with limitation."} Do not claim checks passed without evidence.`;
 				return [
-					{ kind: "request_continuation", message },
+					{ kind: "request_continuation", message, note: "the change has no validation evidence yet" },
 					{ kind: "inject_reminder", message, severity: "warn" },
 				];
 			}
