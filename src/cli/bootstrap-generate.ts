@@ -109,6 +109,19 @@ export function resolveBootstrapRoute(settings: Readonly<ClioSettings>): Bootstr
 	};
 }
 
+/**
+ * The depth ceilings assume a model that reads without deliberating. A profile
+ * that asks for reasoning buys verified reads with latency: at xhigh, Sonnet 5.5
+ * made 17 calls where it made none at low, and gpt-6-luna spent the whole 240 s
+ * standard ceiling on 15 calls and fell back to the heuristic writer. Capping the
+ * level instead stopped both models exploring at all, so the ceiling scales.
+ */
+function bootstrapTimeoutMs(baseMs: number, level: ThinkingLevel): number {
+	if (level === "medium" || level === "high") return baseMs * 2;
+	if (level === "xhigh" || level === "max") return baseMs * 3;
+	return baseMs;
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -306,6 +319,7 @@ async function attemptBootstrapDispatch(
 	prompt: string,
 	startedAtClock: number,
 	structuredOutputMode: BootstrapRunTelemetry["structuredOutputMode"],
+	timeoutMs: number,
 	dispatchBootstrap: (nativeSchema: boolean) => ReturnType<DispatchContract["dispatch"]>,
 ): Promise<BootstrapStructuredOutput> {
 	const nativeSchema = structuredOutputMode === "native-schema";
@@ -323,8 +337,7 @@ async function attemptBootstrapDispatch(
 			bootstrapTelemetry(prompt, "", startedAtClock, structuredOutputMode),
 		);
 	}
-	const policy = BOOTSTRAP_DEPTH_POLICY[input.depth ?? "standard"];
-	const remainingMs = Math.max(1, policy.timeoutMs - (performance.now() - startedAtClock));
+	const remainingMs = Math.max(1, timeoutMs - (performance.now() - startedAtClock));
 	const deadline = armInternalDispatchDeadline(dispatch, handle.runId, "context bootstrap", remainingMs);
 	const startedAtMs = Date.now() - (performance.now() - startedAtClock);
 	const reportWorking = (): void =>
@@ -332,8 +345,8 @@ async function attemptBootstrapDispatch(
 			phase: "generate",
 			status: "running",
 			message: "bootstrap model is working",
-			detail: `run ${handle.runId}; ${Math.round((performance.now() - startedAtClock) / 1000)}s elapsed; ${policy.timeoutMs / 1000}s ceiling`,
-			timing: { runId: handle.runId, startedAtMs, timeoutMs: policy.timeoutMs },
+			detail: `run ${handle.runId}; ${Math.round((performance.now() - startedAtClock) / 1000)}s elapsed; ${timeoutMs / 1000}s ceiling`,
+			timing: { runId: handle.runId, startedAtMs, timeoutMs },
 		});
 	reportWorking();
 	const heartbeat = setInterval(reportWorking, 10_000);
@@ -419,7 +432,9 @@ async function generateBootstrapWithModel(
 	});
 	// Schema refusal happens before a worker starts, so parser fallback can reuse the same root identity.
 	const runIdHint = newRunId();
-	const assignmentDeadlineAt = Date.now() + policy.timeoutMs;
+	const thinkingLevel = route?.thinkingLevel ?? "off";
+	const timeoutMs = bootstrapTimeoutMs(policy.timeoutMs, thinkingLevel);
+	const assignmentDeadlineAt = Date.now() + timeoutMs;
 	const dispatchBootstrap = (nativeSchema: boolean) =>
 		dispatch.dispatch({
 			runIdHint,
@@ -430,7 +445,7 @@ async function generateBootstrapWithModel(
 			cwd: input.cwd,
 			requestOrigin: "internal",
 			assignmentDeadlineAt,
-			thinkingLevel: route?.thinkingLevel ?? "off",
+			thinkingLevel,
 			budget: { toolCalls: policy.toolCalls, readReserve: Math.min(3, policy.toolCalls - 1) },
 			noSkills: true,
 			...(nativeSchema ? { responseSchema: BOOTSTRAP_OUTPUT_JSON_SCHEMA } : {}),
@@ -438,7 +453,15 @@ async function generateBootstrapWithModel(
 			...(route?.model ? { model: route.model } : {}),
 		});
 	try {
-		return await attemptBootstrapDispatch(dispatch, input, prompt, startedAtClock, "native-schema", dispatchBootstrap);
+		return await attemptBootstrapDispatch(
+			dispatch,
+			input,
+			prompt,
+			startedAtClock,
+			"native-schema",
+			timeoutMs,
+			dispatchBootstrap,
+		);
 	} catch (err) {
 		const refusal = responseSchemaRefusal(err);
 		if (refusal === null) throw err;
@@ -448,7 +471,15 @@ async function generateBootstrapWithModel(
 			message: "native schema unavailable; using bounded output parser",
 			detail: refusal,
 		});
-		return await attemptBootstrapDispatch(dispatch, input, prompt, startedAtClock, "prompt-parser", dispatchBootstrap);
+		return await attemptBootstrapDispatch(
+			dispatch,
+			input,
+			prompt,
+			startedAtClock,
+			"prompt-parser",
+			timeoutMs,
+			dispatchBootstrap,
+		);
 	}
 }
 
