@@ -131,6 +131,13 @@ export interface ToolExecutionFinished {
 	/** Honest terminal outcome for synthetic/or permission-blocked calls. */
 	outcome?: "blocked" | "aborted" | "orphaned" | undefined;
 	/**
+	 * An aborted or orphaned call settled before its execution started: the
+	 * stream ended inside its arguments, or the turn stopped while it waited
+	 * for approval. It reads as not run, like a blocked call; an aborted call
+	 * that did start keeps its past-tense verb.
+	 */
+	notRun?: boolean | undefined;
+	/**
 	 * Why admission refused this call, from the registry verdict. A blocked row
 	 * that states only that something was refused leaves the operator, and the
 	 * model reading the same transcript, to guess at the rule.
@@ -695,7 +702,7 @@ function isTruncatedResult(finished: ToolExecutionFinished): boolean {
 }
 
 function structuredExitCode(finished: ToolExecutionFinished): string | null {
-	if (isNonExecutedOutcome(finished.outcome)) return null;
+	if (didNotRun(finished)) return null;
 	if (finished.exitCode !== undefined && finished.exitCode !== null) return String(finished.exitCode);
 	const exitCode = detailsOf(finished.result)?.exitCode;
 	if (typeof exitCode === "number" || typeof exitCode === "string") return String(exitCode);
@@ -709,7 +716,7 @@ function structuredExitCode(finished: ToolExecutionFinished): string | null {
  * the call and its outcome when copied.
  */
 function ledgerTail(finished: ToolExecutionFinished, row: ResolvedToolRow): { facts: string; offload: string } {
-	const executed = !isNonExecutedOutcome(finished.outcome);
+	const executed = !didNotRun(finished);
 	const parts = executed ? classFacts(finished, row) : [];
 	if (executed) {
 		if (isTruncatedResult(finished) && !parts.includes("truncated")) parts.push("truncated");
@@ -1105,8 +1112,8 @@ function headerLine(
  * did: its verb is `blocked`, and the ledger byte count is suppressed because
  * those bytes are the denial text, not output.
  */
-function isNonExecutedOutcome(outcome: ToolExecutionFinished["outcome"]): boolean {
-	return outcome === "blocked";
+function didNotRun(finished: Pick<ToolExecutionFinished, "outcome" | "notRun"> | null | undefined): boolean {
+	return finished?.outcome === "blocked" || finished?.notRun === true;
 }
 
 interface SublineParts {
@@ -1140,16 +1147,25 @@ function sublineParts(
 		return { lead, tail: statusGlyph(status, meta) };
 	}
 	const settled = status === "ok" || status === "error";
+	const notRun = didNotRun(finished);
 	const verb =
 		status === "forming" || status === "ready"
 			? sanitizeCallTargetText(row.toolName)
-			: isNonExecutedOutcome(finished?.outcome)
-				? "blocked"
+			: notRun
+				? finished?.outcome === "blocked"
+					? "blocked"
+					: "not run"
 				: settled
 					? row.spec.verbs[1]
 					: row.spec.verbs[0];
 	const target = rowObject(row, finished, width, objectBudget);
-	const object = (status === "forming" || status === "ready") && stripTerminalSequences(target) === verb ? "" : target;
+	// A call cut off before its arguments named a target still says which tool it was.
+	const object =
+		(status === "forming" || status === "ready") && stripTerminalSequences(target) === verb
+			? ""
+			: target.length === 0 && finished?.notRun === true
+				? sanitizeCallTargetText(row.toolName)
+				: target;
 	const scopeText = row.spec.scope?.(row.args, row.context) ?? null;
 	const scope = scopeText === null ? "" : ` in ${truncate(sanitizeCallTargetText(scopeText), ARG_PREVIEW_LIMIT)}`;
 	const inline = inlinePair(row, resolvedPairs(row, finished));
@@ -1167,7 +1183,7 @@ function sublineParts(
 			: "";
 	const inlineText = scalars.length > 0 ? theme.fg("toolArgument", ` · ${scalars.join(" · ")}`) : "";
 	const head = (inline: string): string =>
-		`${classMark(row.spec.class)}${isNonExecutedOutcome(finished?.outcome) ? theme.fg("warning", verb) : styledVerb(verb, row)}${object.length > 0 ? ` ${object}` : ""}${scope}${answer}${resource}${inline}`;
+		`${classMark(row.spec.class)}${notRun ? theme.fg("warning", verb) : styledVerb(verb, row)}${object.length > 0 ? ` ${object}` : ""}${scope}${answer}${resource}${inline}`;
 	const ledger = finished === null ? null : ledgerTail(finished, row);
 	const via = row.viaGateway ? toolMeta(" · via gateway") : "";
 	const local = call.excludeFromContext === true ? toolMeta(" · not sent to model") : "";
@@ -1541,7 +1557,7 @@ function toolUsageFact(result: unknown): string | null {
 
 function outputFacts(finished: ToolExecutionFinished): string[] {
 	const parts: string[] = [];
-	if (isNonExecutedOutcome(finished.outcome)) {
+	if (didNotRun(finished)) {
 		if (finished.excludeFromContext === true) parts.push("not sent to model");
 		return parts;
 	}
@@ -1590,7 +1606,7 @@ function renderOutputMeta(
 
 function renderOutputFooter(finished: ToolExecutionFinished, width: number, isError: boolean): string[] {
 	const out: string[] = [];
-	const offloadPath = isNonExecutedOutcome(finished.outcome) ? null : offloadPathOf(finished);
+	const offloadPath = didNotRun(finished) ? null : offloadPathOf(finished);
 	if (offloadPath !== null) {
 		const pointer = offloadFileMissing(finished) ? "gone after the 14-day retention sweep" : offloadPath;
 		out.push(...indentAndWrap(`${informational("full output")}  ${pointer}`, width, isError));
@@ -1749,12 +1765,7 @@ export function renderToolExecution(
 		if (bashArgs !== null) {
 			out.push(...renderToolArguments(finished.args, width, finished.isError, Number.POSITIVE_INFINITY, false, "shell"));
 			out.push(
-				...renderOutputMeta(
-					finished,
-					width,
-					finished.isError,
-					isNonExecutedOutcome(finished.outcome) ? "decision" : "output",
-				),
+				...renderOutputMeta(finished, width, finished.isError, finished.outcome === "blocked" ? "decision" : "output"),
 			);
 			out.push(...renderBashResultBlock(bashArgs, finished.result, width, finished.isError, opts));
 			out.push(...renderOutputFooter(finished, width, finished.isError));
@@ -1765,12 +1776,7 @@ export function renderToolExecution(
 	// The heading is a preview; inspection retains every redacted argument.
 	out.push(...renderToolArguments(finished.args, width, finished.isError));
 	out.push(
-		...renderOutputMeta(
-			finished,
-			width,
-			finished.isError,
-			isNonExecutedOutcome(finished.outcome) ? "decision" : "output",
-		),
+		...renderOutputMeta(finished, width, finished.isError, finished.outcome === "blocked" ? "decision" : "output"),
 	);
 	out.push(...renderResultBlock(finished.result, finished.isError, width, opts));
 	out.push(...renderOutputFooter(finished, width, finished.isError));
@@ -2299,8 +2305,10 @@ function chainSublineParts(
 	const verb =
 		status === "forming" || status === "ready"
 			? sanitizeCallTargetText(call.toolName)
-			: isNonExecutedOutcome(finished?.outcome)
-				? "blocked"
+			: didNotRun(finished)
+				? finished?.outcome === "blocked"
+					? "blocked"
+					: "not run"
 				: CHAIN_ROW.verbs[settled ? 1 : 0];
 	const steps = finished === null ? [] : gatewayChainSteps(finished.toolName, finished.result);
 	const pending = finished === null ? [] : gatewayChainPending(finished.result);
@@ -2364,11 +2372,7 @@ function settledStepLine(step: ToolExecutionFinished, width: number, unresolved 
 	const scope = scopeText === null ? "" : ` in ${truncate(sanitizeCallTargetText(scopeText), ARG_PREVIEW_LIMIT)}`;
 	// A step whose `$from` input could not be resolved never ran; its object
 	// is the unresolved request, so say so instead of implying execution.
-	const blocked = unresolved
-		? toolMeta(" · input unresolved, not run")
-		: isNonExecutedOutcome(step.outcome)
-			? toolMeta(" · blocked")
-			: "";
+	const blocked = unresolved ? toolMeta(" · input unresolved, not run") : step.outcome === "blocked" ? toolMeta(" · blocked") : "";
 	return `${glyph} ${name}${object.length > 0 ? ` ${object}` : ""}${scope}${blocked}${unresolved ? "" : ledgerTail(step, row).facts}`;
 }
 

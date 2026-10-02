@@ -262,6 +262,12 @@ type ToolSegment = {
 	operatorGrant?: string | undefined;
 	settlement?: "blocked" | "aborted" | "orphaned" | undefined;
 	/**
+	 * Settled without a result before execution started, or while it still
+	 * waited for approval, so the row says the call did not run instead of
+	 * claiming a past-tense edit. Cleared when a late end event brings a result.
+	 */
+	notRun?: boolean | undefined;
+	/**
 	 * The admission verdict's short reason, present only on a settlement the
 	 * registry actually rejected. A blocked row without it states that something
 	 * was refused and leaves the operator no way to learn why.
@@ -1232,6 +1238,7 @@ function renderToolSegmentLines(
 		durationMs: seg.durationMs,
 		resultSummary: seg.resultSummary,
 		outcome: seg.settlement,
+		notRun: seg.notRun,
 		blockReason: seg.blockReason,
 		evictedReason: seg.evictedReason,
 		operatorGrant: seg.operatorGrant,
@@ -1259,6 +1266,7 @@ function finishedCall(seg: ToolSegment): ToolExecutionFinished {
 		isError: seg.isError,
 		durationMs: seg.durationMs,
 		outcome: seg.settlement,
+		notRun: seg.notRun,
 		blockReason: seg.blockReason,
 		evictedReason: seg.evictedReason,
 		resultSummary: seg.resultSummary,
@@ -1740,6 +1748,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 		if (seg.result === undefined)
 			seg.result = "(no result: the call did not complete; execution was aborted, blocked, or orphaned)";
 		seg.settlement = settlement;
+		seg.notRun = !seg.executionStarted || seg.awaitingApproval === true ? true : undefined;
 		seg.partialResult = undefined;
 		seg.live = undefined;
 		seg.previewDiff = undefined;
@@ -2658,6 +2667,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 					// The true result replaces a synthetic settle; from here on the
 					// segment is model-finished and immutable to later end events.
 					tool.settledWithoutResult = undefined;
+					tool.notRun = undefined;
 					if (typeof enriched.durationMs === "number" && Number.isFinite(enriched.durationMs)) {
 						tool.durationMs = enriched.durationMs;
 					} else if (tool.startedAtMs !== undefined && replayStampMs === undefined) {
