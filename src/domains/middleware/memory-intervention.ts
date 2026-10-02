@@ -238,6 +238,12 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 	const failures = new Map<string, FailedAttempt>();
 	let toolStep = 0;
 	let lastTurnEndStep = 0;
+	/**
+	 * Step of the last call that changed the workspace. A failure before it
+	 * belongs to an older tree: rerunning the same check after an edit is the
+	 * verification the finish contract asks for, not a repeat.
+	 */
+	let lastWorkspaceChangeStep = 0;
 	let reactivateAfterCompaction = false;
 	let lastInjectedOperationFingerprint: string | null = null;
 	let currentTask = "(current task unavailable)";
@@ -514,6 +520,7 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 		failures.clear();
 		toolStep = 0;
 		lastTurnEndStep = 0;
+		lastWorkspaceChangeStep = 0;
 		reactivateAfterCompaction = false;
 		lastInjectedOperationFingerprint = null;
 		currentTask = "(current task unavailable)";
@@ -829,6 +836,9 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 		};
 		trajectory.push(step);
 		if (trajectory.length > live.windowSteps) trajectory.splice(0, trajectory.length - live.windowSteps);
+		if (outcome === "ok" && WORKSPACE_CHANGING_CLASSES.has(String(input.metadata?.actionClass))) {
+			lastWorkspaceChangeStep = toolStep;
+		}
 		if (input.metadata?.resultKind === "ok") {
 			// Only an explicit receipt for this exact operation closes its failure
 			// episode. Keep the bank entry and trajectory as history; this does not
@@ -856,7 +866,8 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 			(candidate) =>
 				candidate.outcome === "error" &&
 				candidate.operationFingerprint === step.operationFingerprint &&
-				candidate.step >= failure.firstStep,
+				candidate.step >= failure.firstStep &&
+				candidate.step > lastWorkspaceChangeStep,
 		).length;
 		if (occurrences < 2) return NO_EFFECTS;
 		const message = boundedReminder(
@@ -926,7 +937,8 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 					(candidate) =>
 						candidate.outcome === "error" &&
 						candidate.operationFingerprint === step.operationFingerprint &&
-						candidate.step >= failure.firstStep,
+						candidate.step >= failure.firstStep &&
+						candidate.step > lastWorkspaceChangeStep,
 				).length;
 				if (occurrences < 2) continue;
 				const message = boundedReminder(
@@ -971,6 +983,14 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 		return [{ kind: "inject_reminder", message, severity: "advisory", source: "memory", audience: "model" }];
 	}
 }
+
+/** Action classes whose successful call can change what a rerun of a failed check sees. */
+const WORKSPACE_CHANGING_CLASSES: ReadonlySet<string> = new Set([
+	"write",
+	"system_modify",
+	"git_destructive",
+	"dispatch",
+]);
 
 function prepareToolStep(input: MiddlewareHookInput): PendingToolStep | null {
 	const toolName = input.toolName?.trim();
