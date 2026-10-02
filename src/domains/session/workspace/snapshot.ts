@@ -22,6 +22,8 @@ export interface WorkspaceSnapshot {
 	remoteUrl: string | null;
 	projectType: ProjectType;
 	capturedAt: string;
+	/** Set only on the placeholder returned before the first probe lands: its Git fields are unknown, not absent. */
+	pending?: true;
 }
 
 export function emptyWorkspaceSnapshot(cwd: string): WorkspaceSnapshot {
@@ -36,6 +38,7 @@ export function emptyWorkspaceSnapshot(cwd: string): WorkspaceSnapshot {
 		remoteUrl: null,
 		projectType: "unknown",
 		capturedAt: new Date().toISOString(),
+		pending: true,
 	};
 }
 

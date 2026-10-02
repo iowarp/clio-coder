@@ -45,6 +45,8 @@ export interface ToolTallySnapshot {
 export interface WorkspaceFacts {
 	cwd: string;
 	branch: string | null;
+	/** The first probe has not landed, so a missing branch means unknown rather than no Git. */
+	branchPending?: boolean;
 	dirty: boolean | null;
 	projectType: string | null;
 	remote: string | null;
@@ -222,7 +224,10 @@ export function compactContextUsage(
 	// Before the first measured turn only the window is known; question marks
 	// read as a fault, so the row names the window alone.
 	if (used === null && window) return theme.fg("counter", `${formatFooterTokens(window).toUpperCase()} ctx`);
-	const counts = `${used === null ? "?" : formatFooterTokens(used).toUpperCase()}/${window ? formatFooterTokens(window).toUpperCase() : "unknown"}`;
+	// Neither figure is known yet (the first seconds after launch): show nothing
+	// rather than `?/unknown`.
+	if (used === null) return "";
+	const counts = `${formatFooterTokens(used).toUpperCase()}/${window ? formatFooterTokens(window).toUpperCase() : "unknown"}`;
 	const percent = contextUsagePercent(context);
 	if (!window) return theme.fg("counter", counts);
 	const full = `${theme.fg("counter", counts)} ${theme.fg(contextPercentRole(percent), `(${formatContextPercent(percent)})`)}`;

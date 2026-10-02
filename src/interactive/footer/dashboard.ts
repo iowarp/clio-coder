@@ -160,6 +160,7 @@ function workspaceFacts(deps: FooterDashboardDeps, branchSlot: string | null): W
 		return {
 			cwd: collapseHomePath(snapshot.cwd),
 			branch: snapshot.branch,
+			...(snapshot.pending ? { branchPending: true } : {}),
 			dirty: snapshot.dirty,
 			projectType: snapshot.projectType && snapshot.projectType !== "unknown" ? snapshot.projectType : null,
 			remote: snapshot.remoteUrl,

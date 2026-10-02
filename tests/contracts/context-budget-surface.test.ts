@@ -363,7 +363,8 @@ describe("native budget inspection through the registered context tool", () => {
 			resolveCurrentBranch: async () => null,
 		});
 		try {
-			match(panel.view.render(120).map(stripTerminalSequences).join("\n"), /\?\/unknown/u);
+			// Unknown stays blank, never zero and never a `?/unknown` placeholder.
+			doesNotMatch(panel.view.render(120).map(stripTerminalSequences).join("\n"), /\?\/unknown|\b0\/|\(0(?:\.0)?%\)/u);
 		} finally {
 			panel.dispose();
 		}

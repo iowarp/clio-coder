@@ -321,16 +321,23 @@ export function renderCompactDashboard(state: FooterDashboardRenderState, width:
 	const metrics = [counter, speed].filter(Boolean).join(theme.fg("border", " | "));
 	const values = visibleWidth(metrics) <= Math.floor(w * 0.4) ? metrics : counter;
 	const valueWidth = Math.min(Math.floor(w * 0.4), visibleWidth(values));
-	const workspaceWidth = Math.max(1, w - valueWidth - 3);
-	const git = clean(state.workspace.branch ?? "no Git branch");
+	const workspaceWidth = Math.max(1, valueWidth === 0 ? w : w - valueWidth - 3);
+	// Until the first probe lands the branch is unknown, not absent: say nothing.
+	const git = state.workspace.branchPending ? "" : clean(state.workspace.branch ?? "no Git branch");
 	const dirtyMarker = state.workspace.dirty ? theme.fg("warning", " *") : "";
-	const gitWidth = Math.min(
-		visibleWidth(git) + visibleWidth(dirtyMarker),
-		Math.max(4, Math.floor(workspaceWidth * 0.3)),
+	const gitWidth =
+		git === ""
+			? 0
+			: Math.min(visibleWidth(git) + visibleWidth(dirtyMarker), Math.max(4, Math.floor(workspaceWidth * 0.3)));
+	const cwdWidth = git === "" ? workspaceWidth : Math.max(1, workspaceWidth - gitWidth - 3);
+	const cwdLabel = theme.fg("workspacePath", fitIdentityLabel(clean(state.workspace.cwd), cwdWidth));
+	const workspace =
+		git === ""
+			? cwdLabel
+			: `${cwdLabel}${separator}${theme.fg("branch", fitIdentityLabel(git, Math.max(1, gitWidth - visibleWidth(dirtyMarker))))}${dirtyMarker}`;
+	const firstRow = fit(
+		valueWidth === 0 ? fit(workspace, workspaceWidth) : `${fit(workspace, workspaceWidth)}   ${fit(values, valueWidth)}`,
 	);
-	const cwdWidth = Math.max(1, workspaceWidth - gitWidth - 3);
-	const workspace = `${theme.fg("workspacePath", fitIdentityLabel(clean(state.workspace.cwd), cwdWidth))}${separator}${theme.fg("branch", fitIdentityLabel(git, Math.max(1, gitWidth - visibleWidth(dirtyMarker))))}${dirtyMarker}`;
-	const firstRow = fit(`${fit(workspace, workspaceWidth)}   ${fit(values, valueWidth)}`);
 
 	const feedback = topNotification(
 		state.notices.filter((notice) => notice.presentation === "setting"),
