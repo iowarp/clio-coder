@@ -4,6 +4,7 @@ import { homedir } from "node:os";
 import { basename, dirname, extname, join, relative, resolve, sep } from "node:path";
 import { enumerateWorkspaceFiles } from "../../core/workspace-files.js";
 import { INTEROP_AGENT_KINDS } from "../interop/registry.js";
+import { instructionUnits } from "./instruction-units.js";
 
 export type AdoptionProvider = "claude-code" | "agents" | "codex" | "gemini" | "cursor" | "copilot" | "opencode";
 export type AdoptionScope = "project" | "global";
@@ -365,19 +366,6 @@ function stripFrontmatter(text: string): string {
 	return text.slice(end + "\n---".length).replace(/^\n+/, "");
 }
 
-function stripCodeFences(text: string): string {
-	const lines: string[] = [];
-	let inFence = false;
-	for (const line of text.split("\n")) {
-		if (/^\s*```/.test(line)) {
-			inFence = !inFence;
-			continue;
-		}
-		if (!inFence) lines.push(line);
-	}
-	return lines.join("\n");
-}
-
 function isBarePathOrFileName(text: string): boolean {
 	const token = /^`([^`]+)`$/.exec(text)?.[1] ?? text;
 	if (/\s/.test(token)) return false;
@@ -385,7 +373,7 @@ function isBarePathOrFileName(text: string): boolean {
 	return token.includes("/") || extname(token).length > 1;
 }
 
-function cleanRuleText(raw: string): string | null {
+function cleanRuleText(raw: string, wholeUnit = false): string | null {
 	let text = raw
 		.replace(/<!--.*?-->/g, "")
 		.replace(/^\[[ xX]\]\s+/, "")
@@ -398,21 +386,21 @@ function cleanRuleText(raw: string): string | null {
 	if (isBarePathOrFileName(text)) return null;
 	if (!RULE_KEYWORDS.test(text)) return null;
 	if (hasSecretLikeLine(text)) return null;
-	if (text.length > 200) text = `${text.slice(0, 197).trimEnd()}…`;
+	// Imported Markdown must not turn a whole routing rule back into the observed mid-sentence fragment.
+	if (!wholeUnit && text.length > 200) text = `${text.slice(0, 197).trimEnd()}…`;
 	return text;
 }
 
 function extractMarkdownRules(content: string): string[] {
-	const text = stripCodeFences(stripFrontmatter(content));
+	const text = stripFrontmatter(content);
 	const rules: string[] = [];
 	const seen = new Set<string>();
-	for (const line of text.split("\n")) {
-		const trimmed = line.trim();
-		if (trimmed.length === 0 || trimmed.startsWith("|") || /^#{1,6}\s/.test(trimmed)) continue;
-		const bullet = /^(?:[-*+]\s+|\d+\.\s+)(.+?)\s*$/.exec(trimmed)?.[1] ?? null;
-		const candidate = bullet ?? (/^[A-Z][^.!?]{8,220}[.!?]?$/.test(trimmed) ? trimmed : null);
+	// Hard-wrapped instructions imported as physical-line fragments; evaluate bullets and paragraphs as whole units.
+	for (const unit of instructionUnits(text, 260)) {
+		// The observed "**DO NOT add** without approval:" intro remains a rule after absorbing its list.
+		const candidate = unit.listItem || /^(?:\*\*|__)?[A-Z]/.test(unit.text) ? unit.text : null;
 		if (!candidate) continue;
-		const cleaned = cleanRuleText(candidate);
+		const cleaned = cleanRuleText(candidate, true);
 		if (!cleaned) continue;
 		const key = normalizeRuleKey(cleaned);
 		if (seen.has(key)) continue;

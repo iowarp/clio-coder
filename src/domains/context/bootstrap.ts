@@ -42,7 +42,8 @@ import {
 import type { Codewiki } from "./codewiki/schema.js";
 import { collectEnforcementInventory, type EnforcementInventory } from "./enforcement-inventory.js";
 import type { Fingerprint } from "./fingerprint.js";
-import { fitGeneratedHandbook, normalizeHandbookRule } from "./handbook-budget.js";
+import { fitGeneratedHandbook, handbookBlocks, normalizeHandbookRule } from "./handbook-budget.js";
+import { instructionUnits } from "./instruction-units.js";
 import { packageManager } from "./package-manager.js";
 import { indexProgressSink } from "./progress.js";
 import { type ProjectMetadata, readProjectMetadata } from "./project-metadata.js";
@@ -94,6 +95,7 @@ export interface BootstrapGenerateInput {
 	repositoryFiles?: ReadonlyArray<string>;
 	progress?: BootstrapProgressSink;
 	reportGeneration?: BootstrapGenerationSink;
+	assessDraft?: (draft: BootstrapStructuredOutput) => string | null;
 }
 
 export type BootstrapGenerate = (
@@ -132,6 +134,8 @@ export interface BootstrapGenerationTelemetry {
 	parserOutcome: BootstrapParserOutcome;
 	fallbackReason?: string;
 	run?: BootstrapRunTelemetry;
+	repairRan?: boolean;
+	repairProducedHandbook?: boolean;
 }
 
 export type BootstrapGenerationSink = (telemetry: BootstrapGenerationTelemetry) => void;
@@ -652,11 +656,21 @@ const VERIFICATION_SECTION_RE = /\bverification\b/i;
 interface ModelGroundingCorpus {
 	lower: string;
 	indexedPaths: ReadonlySet<string>;
+	symbolDefinitions: ReadonlyMap<string, ReadonlySet<string>>;
 	/** Every visible repository path, including docs, configs and CI files the codemap does not index. */
 	repositoryPaths: ReadonlySet<string>;
 	/** Lowercased text of the visible repository files, read once on first need. */
 	repositoryText: () => string;
+	/** Opening text of each long package script body, whitespace-collapsed. */
+	scriptRecitals: ReadonlyArray<string>;
+	/** Script-specific bodies prevent test:full's smoke glob from being attributed to test. */
+	scriptBodies: ReadonlyMap<string, string>;
+	/** The repository's launcher identifies exact script invocations in model citations. */
+	packageManager: string;
 }
+
+/** Long enough that quoting it restates the script rather than naming a command. */
+const SCRIPT_RECITAL_CHARS = 40;
 
 /** Files larger than this are data, not rules; skip them when grounding citations. */
 const GROUNDING_FILE_MAX_BYTES = 1024 * 1024;
@@ -697,6 +711,15 @@ function createModelGroundingCorpus(input: BootstrapGenerateInput): ModelGroundi
 		siblingBudget -= chunk.length;
 	}
 	const indexedPaths = new Set(input.codewiki.files.map((file) => file.path));
+	const pathsById = new Map(input.codewiki.files.map((file) => [file.id, file.path]));
+	const symbolDefinitions = new Map<string, Set<string>>();
+	for (const symbol of input.codewiki.symbols) {
+		const path = pathsById.get(symbol.fileId);
+		if (path === undefined) continue;
+		const definitions = symbolDefinitions.get(symbol.name) ?? new Set<string>();
+		definitions.add(path);
+		symbolDefinitions.set(symbol.name, definitions);
+	}
 	const pm = packageManager(input.cwd);
 	const scripts = packageScripts(input.cwd);
 	const evidence = [
@@ -723,6 +746,14 @@ function createModelGroundingCorpus(input: BootstrapGenerateInput): ModelGroundi
 	return {
 		lower: evidence.toLowerCase(),
 		indexedPaths,
+		symbolDefinitions,
+		// Five models attributed test:full's glob to test; keep each script's own selector evidence.
+		scriptBodies: new Map(Object.entries(scripts)),
+		packageManager: pm,
+		scriptRecitals: Object.values(scripts)
+			.map((command) => command.replace(/\s+/g, " ").trim())
+			.filter((command) => command.length >= SCRIPT_RECITAL_CHARS)
+			.map((command) => command.slice(0, SCRIPT_RECITAL_CHARS)),
 		repositoryPaths: new Set(repositoryPaths),
 		repositoryText: () => {
 			text ??= repositoryGroundingText(input.cwd, repositoryPaths);
@@ -800,6 +831,25 @@ function groundedToken(token: string, evidence: ModelGroundingCorpus): boolean {
 	return groundedName(token, evidence) || citedNames(token).some((name) => groundedName(name, evidence));
 }
 
+// Real symbols were attributed to importing files; use indexed definitions to correct unambiguous ownership.
+function correctSymbolAttributions(line: string, evidence: ModelGroundingCorpus): string {
+	return line.replace(
+		/(`[A-Za-z_$][\w$]*(?:\(\))?`(?:\s*(?:,\s*(?:(?:and|or)\s+)?|(?:and|or)\s+)`[A-Za-z_$][\w$]*(?:\(\))?`)*)\s+(in|from|of)\s+`([^`\n]+)`/g,
+		(match, symbols: string, relation: string, citedPath: string) => {
+			const path = citedPath.replace(/^\.\//, "");
+			if (!/^[\w./-]+\.[A-Za-z0-9]+$/.test(path)) return match;
+			const owners = [...symbols.matchAll(CODE_TOKEN_RE)].map((symbol) => {
+				const definitions = evidence.symbolDefinitions.get((symbol[1] ?? "").replace(/\(\)$/, ""));
+				if (definitions?.has(path)) return path;
+				return definitions?.size === 1 ? [...definitions][0] : undefined;
+			});
+			const owner = owners[0];
+			if (owner === undefined || owner === path || !owners.every((candidate) => candidate === owner)) return match;
+			return `${symbols} ${relation} \`${owner}\``;
+		},
+	);
+}
+
 /**
  * Keep a Scout line only when it cites the repository and every citation is real.
  *
@@ -834,12 +884,33 @@ function groundedModelBody(body: string, evidence: ModelGroundingCorpus, maxChar
 		// Keep a nested bullet's indentation; flattening it turned a recipe's
 		// sub-steps into unrelated top-level rules.
 		const indent = inFence ? "" : (/^(\s*)[-*+]\s/.exec(rawLine)?.[1] ?? "").replace(/\t/g, "  ");
-		const line = inFence ? `\`${trimmed.replace(/`/g, "")}\`` : `${indent}${trimmed}`;
+		const line = correctSymbolAttributions(
+			inFence ? `\`${trimmed.replace(/`/g, "")}\`` : `${indent}${trimmed}`,
+			evidence,
+		);
 		const codeTokens = [...line.matchAll(CODE_TOKEN_RE)]
 			.map((match) => match[1]?.trim())
 			.filter((token): token is string => token !== undefined && token.length > 0);
 		if (codeTokens.length === 0) continue;
+		// Five of six models broadened test's four explicit smoke files to test:full's glob.
+		// Judge a single named script against its own body, rather than the repository-wide corpus.
+		const invokedScripts = new Set(
+			codeTokens.flatMap((token) => {
+				const words = token.split(/\s+/);
+				const name = words[1] === "run" && words.length === 3 ? words[2] : words.length === 2 ? words[1] : undefined;
+				return words[0] === evidence.packageManager && name !== undefined && evidence.scriptBodies.has(name) ? [name] : [];
+			}),
+		);
+		if (invokedScripts.size === 1) {
+			const command = evidence.scriptBodies.get([...invokedScripts][0] ?? "") ?? "";
+			if (codeTokens.some((token) => /[*?]/.test(token) && !command.includes(token))) continue;
+		}
 		if (!codeTokens.every((token) => groundedToken(token, evidence))) continue;
+		// The verification section already carries every declared script exactly.
+		// A rule that quotes a script body restates the manifest, and a small model
+		// copying a long one cut it short and then guessed at what the cut hid.
+		const collapsed = line.replace(/\s+/g, " ");
+		if (!inFence && evidence.scriptRecitals.some((recital) => collapsed.includes(recital))) continue;
 		if (line.replace(CODE_TOKEN_RE, "").trim().length === 0 && !inFence) continue;
 		kept.push(line);
 	}
@@ -865,7 +936,7 @@ function groundedModelLine(line: string, evidence: ModelGroundingCorpus | null):
 	const trimmed = line.replace(/\s+/g, " ").trim();
 	if (trimmed.length === 0) return null;
 	if (!evidence) return trimmed;
-	return groundedModelBody(trimmed, evidence) === trimmed ? trimmed : null;
+	return groundedModelBody(trimmed, evidence) || null;
 }
 
 /** Root handbooks are authored policy. A small model may summarize away a
@@ -878,41 +949,50 @@ function authoredProjectRules(input: BootstrapGenerateInput, output: BootstrapSt
 	const rules: string[] = [];
 	const operating: string[] = [];
 	const seen = new Set<string>();
-	let chars = 0;
+	const candidates: Array<{ line: string; operating: boolean; emphasized: boolean; order: number }> = [];
 	for (const file of handbookInstructionFiles(input)) {
 		const source = relative(input.cwd, file.path).split("\\").join("/");
 		// Global preferences remain separate; only project-wide handbooks become
 		// unconditional project rules, and fenced examples supply no policy.
 		if (source.startsWith("../")) continue;
-		let fence = false;
-		let operatingSection = false;
-		for (const raw of file.content.split(/\r?\n/)) {
-			if (/^\s*(`{3,}|~{3,})/.test(raw)) {
-				fence = !fence;
-				continue;
-			}
-			if (fence) continue;
-			if (/^\s*#{1,6}\s/.test(raw)) {
-				operatingSection = /\b(?:operating|development sessions|default scope|development checks)\b/i.test(raw);
-				continue;
-			}
-			if (/^\s*(?:\||<!--)/.test(raw)) continue;
-			const line = raw
-				.replace(/^\s*(?:[-*+]\s|\d+\.\s)/, "")
-				.replace(/^Project rules:\s*/i, "")
-				.trim();
+		// Hard-wrapped handbooks emitted 30+ physical-line fragments; retain complete rules with their heading scope.
+		for (const unit of instructionUnits(file.content, 600)) {
+			const operatingSection = /\b(?:operating|development sessions|default scope|development checks)\b/i.test(
+				unit.heading,
+			);
+			const line = unit.text.replace(/^Project rules:\s*/i, "").trim();
 			if (!/\b(?:never|must|forbidden|required|do not|don't|preserve|only|ask the user before)\b/i.test(line)) continue;
-			if (line.length > 1200 || chars + line.length > 10_000 || rules.length + operating.length >= 40) continue;
 			const key = normalize(line);
 			const sentences = line.split(/(?<=[.!?])\s+(?=[A-Z])/).map(normalize);
 			if (seen.has(key) || sentences.every((sentence) => generated.includes(sentence))) continue;
 			seen.add(key);
-			// Keep the whole rule with its subject and remedy; "Do not just delete
-			// it" alone loses the settings migration that the prohibition protects.
-			(operatingSection ? operating : rules).push(`- ${line} (source: ${source})`);
-			chars += line.length;
+			// Fragment-heavy handbooks hid strong policy; prefer caps or bold rule language under the cap.
+			const emphasized =
+				/\b(?:NEVER|MUST|CRITICAL|IMPORTANT)\b/.test(line) ||
+				[...line.matchAll(/\*\*([^*]+)\*\*|__([^_]+)__/g)].some((match) =>
+					/\b(?:never|must|critical|important)\b/i.test(match[1] ?? match[2] ?? ""),
+				);
+			candidates.push({
+				line: `- ${line} (source: ${source})`,
+				operating: operatingSection,
+				emphasized,
+				order: candidates.length,
+			});
 		}
 	}
+	// Bound both sections together so numerous authored rules cannot overwhelm the lean handbook.
+	const retained: typeof candidates = [];
+	let chars = 0;
+	for (const candidate of [...candidates].sort(
+		(a, b) => Number(b.emphasized) - Number(a.emphasized) || a.order - b.order,
+	)) {
+		if (retained.length >= 16 || chars + candidate.line.length + 1 > 5000) continue;
+		retained.push(candidate);
+		chars += candidate.line.length + 1;
+	}
+	// Priority decides survival, while source order keeps the retained rules readable in their original context.
+	for (const candidate of retained.sort((a, b) => a.order - b.order))
+		(candidate.operating ? operating : rules).push(candidate.line);
 	return [
 		...(operating.length ? [{ title: "Operating instructions from project handbooks", body: operating.join("\n") }] : []),
 		...(rules.length ? [{ title: "Authored project rules", body: rules.join("\n") }] : []),
@@ -924,6 +1004,25 @@ function sanitizeModelSection(section: ClioMdSection, evidence: ModelGroundingCo
 	if (body.length < 40) return null;
 	const title = section.title.replace(/\s+/g, " ").trim();
 	return title.length > 0 ? { title, body } : null;
+}
+
+// Repeated boundary rules consumed both invariant and convention slots; compare stable citation and prose tokens.
+function handbookRuleTokens(rule: string): ReadonlySet<string> {
+	return new Set(
+		[
+			...normalizeHandbookRule(rule)
+				.toLowerCase()
+				.matchAll(/`([^`\n]+)`|\b[a-z]{4,}\b/g),
+		].map((match) => match[1] ?? match[0]),
+	);
+}
+
+function restatesHandbookRule(tokens: ReadonlySet<string>, kept: ReadonlyArray<ReadonlySet<string>>): boolean {
+	return kept.some((other) => {
+		const shorter = tokens.size <= other.size ? tokens : other;
+		const longer = tokens.size <= other.size ? other : tokens;
+		return shorter.size > 0 && [...shorter].filter((token) => longer.has(token)).length / shorter.size >= 0.7;
+	});
 }
 
 function stabilizeGeneratedOutput(
@@ -961,6 +1060,13 @@ function stabilizeGeneratedOutput(
 		}
 	}
 	for (const invariant of inferInvariants(handbookInstructionFiles(input))) pushUnique(invariants, invariant);
+	// Invariants win over conventions, then both win over section bullets so boundary rules appear once.
+	const retainedInvariants = invariants.slice(0, HANDBOOK_TARGETS.invariants);
+	const invariantTokens = retainedInvariants.map(handbookRuleTokens);
+	const retainedConventions = conventions
+		.filter((rule) => !restatesHandbookRule(handbookRuleTokens(rule), invariantTokens))
+		.slice(0, HANDBOOK_TARGETS.conventions);
+	const keptRuleTokens = [...invariantTokens, ...retainedConventions.map(handbookRuleTokens)];
 
 	const verification = verificationSection(input.cwd, tomlFiles);
 	const inferredSections = inferHeuristicSections(input);
@@ -968,12 +1074,21 @@ function stabilizeGeneratedOutput(
 	const ordinarySections: ClioMdSection[] = [];
 	const modelSections = new Set<ClioMdSection>();
 	const seenSectionTitles = new Set<string>();
-	const addSection = (section: ClioMdSection): boolean => {
+	const addSection = (section: ClioMdSection, modelSection = false): boolean => {
 		if (VERIFICATION_SECTION_RE.test(section.title)) return false;
+		const body = handbookBlocks(section.body)
+			.filter(
+				(block) =>
+					!/^\s*(?:[-*+]\s|\d+[.)]\s)/.test(block) || !restatesHandbookRule(handbookRuleTokens(block), keptRuleTokens),
+			)
+			.join("\n");
+		if (!body.trim()) return false;
 		const titleKey = section.title.replace(/\s+/g, " ").trim().toLowerCase();
 		if (seenSectionTitles.has(titleKey)) return false;
 		seenSectionTitles.add(titleKey);
-		ordinarySections.push(section);
+		const retained = body === section.body ? section : { ...section, body };
+		ordinarySections.push(retained);
+		if (modelSection) modelSections.add(retained);
 		return true;
 	};
 	const authoredRules = authoredProjectRules(input, base);
@@ -983,7 +1098,7 @@ function stabilizeGeneratedOutput(
 	for (const section of existingSections) addSection(section);
 	for (const section of base.sections ?? []) {
 		const sanitized = groundingCorpus ? sanitizeModelSection(section, groundingCorpus) : section;
-		if (sanitized && addSection(sanitized)) modelSections.add(sanitized);
+		if (sanitized) addSection(sanitized, true);
 	}
 	for (const section of inferredSections) addSection(section);
 	const ordinaryLimit = verification ? HANDBOOK_TARGETS.sections - 1 : HANDBOOK_TARGETS.sections;
@@ -995,8 +1110,8 @@ function stabilizeGeneratedOutput(
 		...base,
 		projectName: existing?.projectName ?? projectName(input.cwd, tomlFiles),
 		identity: existing?.identity ?? stabilizedIdentity(input, base.identity, tomlFiles),
-		conventions: conventions.slice(0, HANDBOOK_TARGETS.conventions),
-		invariants: invariants.slice(0, HANDBOOK_TARGETS.invariants),
+		conventions: retainedConventions,
+		invariants: retainedInvariants,
 		sections: [...retainedOrdinarySections, ...(verification ? [verification] : [])],
 	};
 }
@@ -1330,6 +1445,10 @@ function durableGenerationTelemetry(telemetry: BootstrapGenerationTelemetry): Bo
 	const state: BootstrapGenerationState = {
 		mode: telemetry.mode,
 		parserOutcome: telemetry.parserOutcome,
+		...(telemetry.repairRan !== undefined ? { repairRan: telemetry.repairRan } : {}),
+		...(telemetry.repairProducedHandbook !== undefined
+			? { repairProducedHandbook: telemetry.repairProducedHandbook }
+			: {}),
 	};
 	const fallbackReason = boundedStateString(telemetry.fallbackReason, 500);
 	if (fallbackReason) state.fallbackReason = fallbackReason;
@@ -1580,7 +1699,7 @@ export async function runBootstrap(input: RunBootstrapInput = {}): Promise<RunBo
 				? "drafting CLIO-CODER.md with the bootstrap agent"
 				: "drafting CLIO-CODER.md with heuristic",
 		});
-		output = await (input.generate ?? heuristicBootstrapOutput)({
+		const generateInput: BootstrapGenerateInput = {
 			cwd,
 			expectedProjectName: projectName(cwd, tomlFiles),
 			tomlFiles,
@@ -1596,7 +1715,40 @@ export async function runBootstrap(input: RunBootstrapInput = {}): Promise<RunBo
 			...(existingClioMdText ? { existingClioMdText } : {}),
 			...(input.onProgress ? { progress: input.onProgress } : {}),
 			reportGeneration,
-		});
+			// Deterministic sampling repeats an empty draft unless a bounded repair receives grounding feedback.
+			assessDraft: (draft) => {
+				let retained = 0;
+				stabilizeGeneratedOutput(
+					generateInput,
+					draft,
+					() => {
+						retained += 1;
+					},
+					true,
+				);
+				if (retained > 0) return null;
+				const rules = [
+					...draft.invariants,
+					...draft.conventions,
+					...(draft.sections ?? []).flatMap((section) => handbookBlocks(section.body)),
+				];
+				const corpus = createModelGroundingCorpus(generateInput);
+				const tokens = rules.flatMap((rule) =>
+					[...correctSymbolAttributions(rule, corpus).matchAll(CODE_TOKEN_RE)].map((match) => match[1] ?? ""),
+				);
+				const unknown = [...new Set(tokens.filter((token) => !groundedToken(token, corpus)))].slice(0, 12);
+				const reason =
+					rules.length === 0
+						? "no rules"
+						: tokens.length === 0
+							? "no rules cited a file or symbol"
+							: unknown.length > 0
+								? `rules cited unknown tokens: ${unknown.join(", ")}`
+								: "no rules or sections passed the citation and retention filters";
+				return `The draft had ${rules.length} rules; none survived grounding (${reason}). Write the invariants, change recipes and test rules supported by the original evidence brief, each citing its file in backticks. Return the complete handbook JSON.`;
+			},
+		};
+		output = await (input.generate ?? heuristicBootstrapOutput)(generateInput);
 		generation = reportedGeneration ?? generation;
 		let retainedModelSections = 0;
 		output = stabilizeGeneratedOutput(

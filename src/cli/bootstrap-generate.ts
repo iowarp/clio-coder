@@ -417,7 +417,14 @@ async function generateBootstrapWithModel(
 	input: BootstrapGenerateInput,
 	route?: BootstrapRoute,
 ): Promise<BootstrapStructuredOutput> {
-	const prompt = buildBootstrapPrompt(input);
+	let prompt = buildBootstrapPrompt(input);
+	let attemptTelemetry: BootstrapGenerationTelemetry | undefined;
+	const attemptInput: BootstrapGenerateInput = {
+		...input,
+		reportGeneration: (telemetry) => {
+			attemptTelemetry = telemetry;
+		},
+	};
 	const policy = BOOTSTRAP_DEPTH_POLICY[input.depth ?? "standard"];
 	// The internal researcher reads this repository and returns JSON. Authored
 	// handbook text is evidence, not a source of inferred filesystem authority.
@@ -431,7 +438,8 @@ async function generateBootstrapWithModel(
 		detail: `${route?.target ?? "configured target"}/${route?.model ?? "configured model"}; ${input.depth ?? "standard"}; ${policy.toolCalls} exploration calls; ${input.evidence?.files.length ?? 0} evidence files`,
 	});
 	// Schema refusal happens before a worker starts, so parser fallback can reuse the same root identity.
-	const runIdHint = newRunId();
+	let runIdHint = newRunId();
+	let toolCalls: number = policy.toolCalls;
 	const thinkingLevel = route?.thinkingLevel ?? "off";
 	const timeoutMs = bootstrapTimeoutMs(policy.timeoutMs, thinkingLevel);
 	const assignmentDeadlineAt = Date.now() + timeoutMs;
@@ -444,18 +452,22 @@ async function generateBootstrapWithModel(
 			task: prompt,
 			cwd: input.cwd,
 			requestOrigin: "internal",
+			// Identical local bootstrap runs should not vary with the server's sampling defaults.
+			sampling: "deterministic",
 			assignmentDeadlineAt,
 			thinkingLevel,
-			budget: { toolCalls: policy.toolCalls, readReserve: Math.min(3, policy.toolCalls - 1) },
+			budget: { toolCalls, readReserve: Math.min(3, toolCalls - 1) },
 			noSkills: true,
 			...(nativeSchema ? { responseSchema: BOOTSTRAP_OUTPUT_JSON_SCHEMA } : {}),
 			...(route ? { target: route.target } : {}),
 			...(route?.model ? { model: route.model } : {}),
 		});
+	let output: BootstrapStructuredOutput;
+	let mode: BootstrapRunTelemetry["structuredOutputMode"] = "native-schema";
 	try {
-		return await attemptBootstrapDispatch(
+		output = await attemptBootstrapDispatch(
 			dispatch,
-			input,
+			attemptInput,
 			prompt,
 			startedAtClock,
 			"native-schema",
@@ -471,9 +483,10 @@ async function generateBootstrapWithModel(
 			message: "native schema unavailable; using bounded output parser",
 			detail: refusal,
 		});
-		return await attemptBootstrapDispatch(
+		mode = "prompt-parser";
+		output = await attemptBootstrapDispatch(
 			dispatch,
-			input,
+			attemptInput,
 			prompt,
 			startedAtClock,
 			"prompt-parser",
@@ -481,6 +494,39 @@ async function generateBootstrapWithModel(
 			dispatchBootstrap,
 		);
 	}
+	const feedback = input.assessDraft?.(output);
+	// An identical deterministic retry reproduces the empty draft; change its task within the original deadline.
+	if (feedback && performance.now() - startedAtClock < timeoutMs) {
+		prompt += `\n\n<bootstrap-repair-feedback>\n${feedback}\nThis repair has at most 4 exploration calls and only the remaining time under the original deadline.\n</bootstrap-repair-feedback>`;
+		runIdHint = newRunId();
+		toolCalls = 4;
+		let producedHandbook = false;
+		input.progress?.({
+			phase: "generate",
+			status: "running",
+			message: "repairing ungrounded bootstrap draft",
+			detail: feedback,
+		});
+		try {
+			const repaired = await attemptBootstrapDispatch(
+				dispatch,
+				attemptInput,
+				prompt,
+				startedAtClock,
+				mode,
+				timeoutMs,
+				dispatchBootstrap,
+			);
+			producedHandbook = input.assessDraft?.(repaired) === null;
+			if (producedHandbook) output = repaired;
+		} catch {
+			// A failed repair retains the original empty draft for the existing heuristic fallback decision.
+		}
+		if (attemptTelemetry)
+			attemptTelemetry = { ...attemptTelemetry, repairRan: true, repairProducedHandbook: producedHandbook };
+	}
+	if (attemptTelemetry) input.reportGeneration?.(attemptTelemetry);
+	return output;
 }
 
 async function loadBootstrapDispatch(): Promise<{

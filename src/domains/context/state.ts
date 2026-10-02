@@ -23,6 +23,8 @@ export type BootstrapParserOutcome = "parsed" | "rejected" | "not-run";
 export interface BootstrapGenerationState {
 	mode: BootstrapGenerationMode;
 	parserOutcome: BootstrapParserOutcome;
+	repairRan?: boolean;
+	repairProducedHandbook?: boolean;
 	fallbackReason?: string;
 	structuredOutputMode?: "native-schema" | "prompt-parser";
 	runId?: string;
@@ -61,6 +63,8 @@ const BOOTSTRAP_FALLBACK_REASON_MAX_LENGTH = 4096;
 const BOOTSTRAP_GENERATION_KEYS = new Set([
 	"mode",
 	"parserOutcome",
+	"repairRan",
+	"repairProducedHandbook",
 	"fallbackReason",
 	"structuredOutputMode",
 	"runId",
@@ -89,6 +93,8 @@ function isNonemptyString(value: unknown): value is string {
 function isBootstrapGenerationState(value: unknown): value is BootstrapGenerationState {
 	if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
 	const obj = value as Record<string, unknown>;
+	for (const key of ["repairRan", "repairProducedHandbook"])
+		if (obj[key] !== undefined && typeof obj[key] !== "boolean") return false;
 	if (!Object.keys(obj).every((key) => BOOTSTRAP_GENERATION_KEYS.has(key))) return false;
 	if (typeof obj.mode !== "string" || !BOOTSTRAP_GENERATION_MODES.has(obj.mode as BootstrapGenerationMode)) {
 		return false;
