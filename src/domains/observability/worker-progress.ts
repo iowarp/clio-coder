@@ -345,6 +345,27 @@ export function createWorkerProgressFold(): WorkerProgressFold {
 		return undefined;
 	};
 
+	const seal = (text?: string): boolean => {
+		const sealed = nonEmptyString(text) ?? nonEmptyString(durable);
+		if (sealed !== undefined) {
+			const bounded = boundSettledText(sealed);
+			tailText = bounded.text;
+			droppedLines = bounded.dropped;
+			// The counts now describe the sealed answer, not the live tail it
+			// replaced. A one-line answer longer than the tail kept the bytes the
+			// tail had cut, so the card read a whole report as truncated and drew
+			// its raw JSON.
+			droppedBytes = Math.max(0, Buffer.byteLength(sealed, "utf8") - Buffer.byteLength(bounded.text, "utf8"));
+		}
+		currentAction = null;
+		pendingActions.length = 0;
+		pendingActionsById.clear();
+		settled = true;
+		phase = "settled";
+		touch();
+		return true;
+	};
+
 	return {
 		observe(event: unknown, nowMs = Date.now()): boolean {
 			if (!isRecord(event) || settled) return false;
@@ -428,29 +449,15 @@ export function createWorkerProgressFold(): WorkerProgressFold {
 			}
 
 			if (event.type === "agent_start") changed = setPhase("starting") || changed;
+			// The worker's loop has ended, so the fold seals here whichever surface
+			// reads it. The island and the card each fold the same events; only the
+			// island settled on agent_end, and until the terminal event arrived it
+			// read `starting` beside a card still reading `writing`.
+			if (event.type === "agent_end") return seal();
 			return changed;
 		},
 
-		settle(text?: string): boolean {
-			const sealed = nonEmptyString(text) ?? nonEmptyString(durable);
-			if (sealed !== undefined) {
-				const bounded = boundSettledText(sealed);
-				tailText = bounded.text;
-				droppedLines = bounded.dropped;
-				// The counts now describe the sealed answer, not the live tail it
-				// replaced. A one-line answer longer than the tail kept the bytes the
-				// tail had cut, so the card read a whole report as truncated and drew
-				// its raw JSON.
-				droppedBytes = Math.max(0, Buffer.byteLength(sealed, "utf8") - Buffer.byteLength(bounded.text, "utf8"));
-			}
-			currentAction = null;
-			pendingActions.length = 0;
-			pendingActionsById.clear();
-			settled = true;
-			phase = "settled";
-			touch();
-			return true;
-		},
+		settle: seal,
 
 		restart(): void {
 			inputTokens = processedTokens = contextTokens = toolCalls = undefined;

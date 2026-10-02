@@ -13,6 +13,7 @@ const WORKER_PHASE_ACTIVITY: Readonly<Record<string, readonly [glyph: string, wo
 	thinking: [GLYPH.phaseThinking, "thinking"],
 	writing: [GLYPH.phaseWriting, "writing"],
 	tool: [GLYPH.phaseTool, "between calls"],
+	settled: [GLYPH.phaseWaiting, "finishing"],
 };
 
 /** The phase's glyph and words; `starting` until the stream reports a phase. */
