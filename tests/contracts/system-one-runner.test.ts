@@ -62,6 +62,11 @@ function fakeEngine(decide: (signal: AbortSignal) => Promise<EngineReply>, windo
 			target: "t",
 			model: null,
 			windowTokens,
+			runtime: "test",
+			url: null,
+			profile: null,
+			renderer: "llm-prompt",
+			unsupported: () => null,
 			decide: async ({ signal }) => {
 				calls += 1;
 				return decide(signal);
@@ -81,9 +86,7 @@ function harness(cutOverrides: Record<string, Record<string, number>> = {}) {
 		cutOverrides: () => cutOverrides,
 	});
 	const bind = (fake: Fake, timeoutMs?: number) => ({
-		name: "fake",
-		engine: fake.engine,
-		digest: `digest-${Math.random()}`,
+		routes: [{ name: "fake", engine: fake.engine, digest: `digest-${Math.random()}`, tasks: null }],
 		...(timeoutMs === undefined ? {} : { timeoutMs }),
 	});
 	return { records, runner, bind };

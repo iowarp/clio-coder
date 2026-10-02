@@ -40,6 +40,7 @@ const FITTED: SiteCuts = {
 	build: BUILD,
 	fitted: true,
 	cut: (key) => (key.endsWith("Floor") ? 0.3 : 0.5),
+	source: () => "measured",
 };
 
 const LOUD_TURN: Readonly<Record<string, Answer>> = {

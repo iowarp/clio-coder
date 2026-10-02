@@ -16,10 +16,10 @@ import type { Answer, SiteCuts } from "../../src/domains/system-one/types.js";
 
 const BUILD = "test-build-1";
 
-const UNFITTED: SiteCuts = { build: BUILD, fitted: false, cut: () => undefined };
+const UNFITTED: SiteCuts = { build: BUILD, fitted: false, cut: () => undefined, source: () => undefined };
 
 function fitted(table: Readonly<Record<string, number>>): SiteCuts {
-	return { build: BUILD, fitted: true, cut: (key) => table[key] };
+	return { build: BUILD, fitted: true, cut: (key) => table[key], source: (key) => (table[key] === undefined ? undefined : "measured") };
 }
 
 function noul(p: number): Answer {
