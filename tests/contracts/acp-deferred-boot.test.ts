@@ -157,9 +157,11 @@ test("ACP CLI boots the workspace named by its first session", { timeout: 90_000
 			{},
 			10_000,
 		);
+		// A session with no model turn is not offered for resume (293d79610), so the
+		// fresh one is absent. The refusal below is what proves the boot bound `project`.
 		strictEqual(
-			listed.sessions.some((row) => row.sessionId === created.sessionId && row.cwd === project),
-			true,
+			listed.sessions.some((row) => row.sessionId === created.sessionId),
+			false,
 		);
 		await rejects(
 			child.request("session/new", { cwd: launch, mcpServers: [] }, 10_000),
