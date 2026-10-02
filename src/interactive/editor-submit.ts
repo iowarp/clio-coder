@@ -70,8 +70,19 @@ export interface EditorSubmitUi {
 
 type EditorSubmitChat = Pick<
 	ChatLoop,
-	"clearQueuedFollowUps" | "interruptRefusal" | "isStreaming" | "submit" | "whenSettled"
+	| "clearQueuedFollowUps"
+	| "flushQueueOnNextPrompt"
+	| "interruptRefusal"
+	| "isStreaming"
+	| "queueEntries"
+	| "removeQueuedEntry"
+	| "runningToolCalls"
+	| "submit"
+	| "whenSettled"
 >;
+
+/** What the operator chose when a send-now found a tool still running. */
+export type SendNowChoice = "stop" | "wait" | "cancelled";
 type EditorSubmitDispatch = Pick<DispatchContract, "snapshot" | "steer">;
 type EditorSubmitSession = Pick<SessionContract, "appendEntry" | "current" | "tree">;
 
@@ -104,6 +115,11 @@ export interface EditorSubmitDeps {
 	collapseLaunchpadBeforeSubmit?: () => void;
 	expandSubmit: (text: string) => Promise<EditorSubmitExpansion>;
 	notify: (level: "info" | "warning" | "error", text: string, key: string) => void;
+	/**
+	 * A send-now while a tool call is running asks the operator whether to stop
+	 * the tool or wait for it. Absent, the send-now stops it, as Esc would.
+	 */
+	askSendNow?: (runningTools: number) => Promise<SendNowChoice>;
 	getCwd?: () => string;
 	/**
 	 * Labels the information-flow sources a `!` command names before its output
@@ -486,9 +502,25 @@ export function createEditorSubmitController(deps: EditorSubmitDeps): EditorSubm
 	const interruptFromEditor = (explicitText?: string): void => {
 		const streaming = deps.chat.isStreaming();
 		const snapshot = captureDraft();
-		const text = (explicitText ?? deps.editor.getTextForSubmit()).trim();
-		if (text.length === 0) return;
-		if (streaming && refuseBusyCommand(text, "an interrupt send")) return;
+		let text = (explicitText ?? deps.editor.getTextForSubmit()).trim();
+		let flushDisplay: EditorSubmitExpansion["display"] | undefined;
+		if (text.length === 0) {
+			// An empty draft with a queue means "send the queue now": the first
+			// entry becomes the fresh prompt and the rest ride the engine's opening
+			// poll, so all of them reach the first model call of the new run.
+			const [first] = streaming ? deps.chat.queueEntries() : [];
+			if (!first) return;
+			const refusal = deps.chat.interruptRefusal();
+			if (refusal !== null) {
+				deps.notify("warning", `send now refused: ${refusal}`, "steer:refused");
+				return;
+			}
+			if (deps.chat.removeQueuedEntry(first.id) === null) return;
+			deps.chat.flushQueueOnNextPrompt();
+			text = first.text;
+			flushDisplay = first.display;
+		}
+		if (streaming && refuseBusyCommand(text, "a send-now")) return;
 		if (!streaming) {
 			deps.editor.setText("");
 			submitEditorText(text);
@@ -498,35 +530,52 @@ export function createEditorSubmitController(deps: EditorSubmitDeps): EditorSubm
 		if (pendingDrafts.has(snapshot.key)) return;
 		pendingDrafts.add(snapshot.key);
 		void (async () => {
-			const submitted = await deps.expandSubmit(unguardPastedEditorOperator(text));
+			const submitted =
+				flushDisplay !== undefined
+					? { text, images: [], display: flushDisplay }
+					: await deps.expandSubmit(unguardPastedEditorOperator(text));
 			if (submitted.images.length > 0) {
 				deps.io.stderr("[interrupt] image references cannot be sent while a response is streaming\n");
 				return;
 			}
-			deps.editor.addToHistory(text);
-			// Same restore Esc performs: when the interrupt will really cancel the
-			// run, the queued steers and follow-ups come back to the editor rather
-			// than vanishing with the cancelled run. A refused interrupt cancels
-			// nothing, so the queue stays put.
-			const restored = deps.chat.interruptRefusal() === null ? deps.chat.clearQueuedFollowUps() : [];
-			const newerDraft = snapshot.owns() ? "" : (deps.editor.getExpandedText?.() ?? deps.editor.getText());
-			setLiteralText([...restored, newerDraft].filter((part) => part.length > 0).join("\n\n"));
+			if (flushDisplay === undefined) deps.editor.addToHistory(text);
+			// The queue stays queued: a send-now does not undo what the operator
+			// already asked for. Held through the cancel, it lands at the new run's
+			// first slot (or with its first model call, for a flush).
+			if (snapshot.owns()) setLiteralText("");
 			deps.ui.requestRender();
+			const paths = submitted.workingContextPaths ?? [];
+			const skillRequests = submitted.pendingSkillRequests ?? [];
+			const common = {
+				...(submitted.display ? { display: submitted.display } : {}),
+				...(paths.length > 0 ? { workingContextPaths: paths } : {}),
+				...(skillRequests.length > 0 ? { pendingSkillRequests: skillRequests } : {}),
+			};
+			// A tool call in flight is the one case where "now" has a cost the
+			// operator may not want to pay: ask whether to stop it or to wait for
+			// it. A refused interrupt never reaches the tool, so it is not asked.
+			if (deps.chat.interruptRefusal() === null && deps.chat.runningToolCalls() > 0 && deps.askSendNow) {
+				const choice = await deps.askSendNow(deps.chat.runningToolCalls());
+				if (choice === "cancelled") {
+					if (snapshot.owns()) setLiteralText(text);
+					deps.ui.requestRender();
+					return;
+				}
+				if (choice === "wait") {
+					deps.beforeSemanticBoundary?.("send-now-wait");
+					await deps.chat.submit(submitted.text, { ...common, queueFront: true });
+					deps.notify("info", "queued ahead of everything else; it lands as soon as the running tool returns", "steer:wait");
+					return;
+				}
+			}
 			// An interrupt is a fresh prompt, so it carries what the idle path
 			// carries: the launchpad collapse, the submitted-turn count, and the
 			// expansion's working-context paths and pending skill requests. Only
 			// images stay behind, rejected above, as they are for a follow-up.
 			deps.collapseLaunchpadBeforeSubmit?.();
 			deps.sessionTranscript.recordSubmittedTurn();
-			const paths = submitted.workingContextPaths ?? [];
-			const skillRequests = submitted.pendingSkillRequests ?? [];
 			deps.beforeSemanticBoundary?.("interrupt-submit");
-			await deps.chat.submit(submitted.text, {
-				steering: "interrupt",
-				...(submitted.display ? { display: submitted.display } : {}),
-				...(paths.length > 0 ? { workingContextPaths: paths } : {}),
-				...(skillRequests.length > 0 ? { pendingSkillRequests: skillRequests } : {}),
-			});
+			await deps.chat.submit(submitted.text, { steering: "interrupt", ...common });
 			await deps.settleVisibleFrame?.("interrupt-submit-return");
 		})()
 			.catch((err) => {

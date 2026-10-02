@@ -42,6 +42,10 @@ function fixture(expand?: (text: string) => Promise<EditorSubmitExpansion>) {
 		io: { stdout: noop, stderr: (text) => errors.push(text) },
 		chat: {
 			isStreaming: () => streaming,
+			runningToolCalls: () => 0,
+			queueEntries: () => [],
+			removeQueuedEntry: () => null,
+			flushQueueOnNextPrompt: noop,
 			clearQueuedFollowUps: () => {
 				const result = queue;
 				queue = [];
@@ -93,12 +97,8 @@ for (const action of ["interruptFromEditor"] as const) {
 		resume({ text: "first message", images: [] });
 		await new Promise((resolve) => setImmediate(resolve));
 		assert.deepEqual(f.accepted, ["first message"]);
-		assert.equal(
-			f.editor.getText(),
-			action === "interruptFromEditor"
-				? "prior steer\n\nprior follow-up\n\nnew draft typed while expansion waits"
-				: "new draft typed while expansion waits",
-		);
+		// The queue stays queued across a send-now; only the newer draft remains.
+		assert.equal(f.editor.getText(), "new draft typed while expansion waits");
 	});
 	it(`${action} preserves an image-bearing refused draft`, async () => {
 		const f = fixture(async (text) => ({ text, images: [{}] }));

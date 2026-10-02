@@ -934,6 +934,29 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 		collapseLaunchpadBeforeSubmit: () => presentation.collapseWelcomeDashboard(),
 		expandSubmit: (text) => expandInteractiveSubmitAsync(text, deps.resources),
 		notify,
+		askSendNow: async (runningTools) => {
+			const stop = "Stop it and send now";
+			const wait = "Send after it finishes";
+			const result = await overlayLifecycle.openTransientAskUserOverlayState([
+				{
+					header: "Send now",
+					question: `${runningTools === 1 ? "A tool call is" : `${runningTools} tool calls are`} still running. Deliver your message now?`,
+					options: [
+						{
+							label: stop,
+							description: "Cancel the run the way Esc does, seal its results, then send this as a fresh prompt.",
+						},
+						{
+							label: wait,
+							description: "Let the tool finish; the message goes ahead of the queue and lands before the next model call.",
+						},
+					],
+				},
+			]);
+			if (result.cancelled === true) return "cancelled";
+			const picked = result.answers[0]?.options?.[0];
+			return picked === wait ? "wait" : "stop";
+		},
 		...(deps.labelOperatorCommand ? { labelOperatorCommand: deps.labelOperatorCommand } : {}),
 	});
 	// The lease drains the terminal; operator shell ownership outlives that

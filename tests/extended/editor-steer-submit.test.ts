@@ -31,6 +31,10 @@ function fixture(runs: RunningDispatchRef[] = []) {
 		io: { stdout: noop, stderr: noop },
 		chat: {
 			isStreaming: () => false,
+			runningToolCalls: () => 0,
+			queueEntries: () => [],
+			removeQueuedEntry: () => null,
+			flushQueueOnNextPrompt: noop,
 			clearQueuedFollowUps: () => [],
 			interruptRefusal: () => null,
 			submit: async (text) => {

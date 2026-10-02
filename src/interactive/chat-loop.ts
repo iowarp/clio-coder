@@ -467,6 +467,11 @@ export interface ChatSubmitOptions {
 	 */
 	steering?: SteeringMode;
 	/**
+	 * Queue the message at the head of the steering queue instead of the tail:
+	 * a send-now the operator chose to wait with, or one the run refused.
+	 */
+	queueFront?: boolean;
+	/**
 	 * Commits the presentation of a consumed prompt after preparation opens and
 	 * before admission work can make the turn durable. Interactive uses this to
 	 * guarantee that even a fast probe or prompt compile paints one pending
@@ -597,6 +602,8 @@ export interface ChatLoop {
 	captureWorkerContext?(): WorkerContextSnapshot | null;
 	lastRunSnapshot?(): ChatLoopRunSnapshot | null;
 	isStreaming(): boolean;
+	/** Tool calls the run has started and not yet finished. */
+	runningToolCalls(): number;
 	/**
 	 * Where a consumed prompt currently is between the editor and the stream.
 	 * The composer and the footer read it so the window in which the prompt has
@@ -1888,12 +1895,14 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			let interrupted = false;
 			if (state.streaming) {
 				let mode: SteeringMode = options.steering ?? DEFAULT_STEERING_MODE;
+				let front = options.queueFront === true;
 				const trimmed = text.trim();
 				if (mode === "interrupt" && trimmed.length > 0) {
 					const refusal = interruptRefusalReason();
 					if (refusal !== null) {
 						emitNotice(`[Clio Coder] interrupt refused: ${refusal}. Queued for the next slot instead.`, "warning");
 						mode = "next-slot";
+						front = true;
 					} else {
 						// Cancel, then wait for the cancelled run to settle (its in-flight
 						// tool results and closing ledger turn), then fall through to the
@@ -1937,7 +1946,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 						// guard above reads: a steer is a model-facing turn and the
 						// payload contract applies to it too (issue #244).
 						if (mode === "end-of-turn") queues.queueFollowUp(text, options.display);
-						else queues.steer(text, options.display);
+						else queues.steer(text, options.display, { front });
 						return;
 					}
 					emitNotice("[Clio Coder] response already in progress. Press Esc to cancel the active run.");
@@ -2730,6 +2739,9 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 
 		isStreaming(): boolean {
 			return state.streaming;
+		},
+		runningToolCalls(): number {
+			return toolStartTimes.size;
 		},
 
 		turnPreparation() {

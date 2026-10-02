@@ -69,7 +69,8 @@ export interface TurnQueuesDeps {
 }
 
 export interface TurnQueues {
-	steer(text: string, display?: QueuedChatMessage["display"]): boolean;
+	/** `front` puts the entry at the head of the queue: a send-now the operator chose to wait with. */
+	steer(text: string, display?: QueuedChatMessage["display"], options?: { front?: boolean }): boolean;
 	queueFollowUp(text: string, display?: QueuedChatMessage["display"]): boolean;
 	queuedMessages(): QueuedMessagesSnapshot;
 	/** Copies of the entries still in Clio's hands, in delivery order. */
@@ -142,14 +143,27 @@ export function createTurnQueues(deps: TurnQueuesDeps): TurnQueues {
 	// that a message is pending, exactly as pi-coding-agent's pending container
 	// works. The former per-steer transcript notice duplicated the panel and
 	// left a permanent line for a transient state.
-	const enqueue = (text: string, kind: QueuedMessageKind, display?: QueuedChatMessage["display"]): boolean => {
+	const enqueue = (
+		text: string,
+		kind: QueuedMessageKind,
+		display?: QueuedChatMessage["display"],
+		options?: { front?: boolean },
+	): boolean => {
 		// The payload crosses to the model exactly as it was submitted; only the
 		// emptiness test reads a trimmed copy. A queued turn that shortened its own
 		// text here would land in the ledger disagreeing with the expansion that
 		// produced it, which is the same defect the persisted echo had (issue #244).
 		if (text.trim().length === 0 || !state.streaming || !state.runtime) return false;
 		sequence += 1;
-		queue.push({ id: `q${sequence}`, text, kind, enqueuedAt: now(), ...(display ? { display } : {}) });
+		const entry: QueuedChatMessage = {
+			id: `q${sequence}`,
+			text,
+			kind,
+			enqueuedAt: now(),
+			...(display ? { display } : {}),
+		};
+		if (options?.front === true) queue.unshift(entry);
+		else queue.push(entry);
 		emitQueueUpdate();
 		return true;
 	};
@@ -171,7 +185,7 @@ export function createTurnQueues(deps: TurnQueuesDeps): TurnQueues {
 	};
 
 	return {
-		steer: (text, display) => enqueue(text, "steer", display),
+		steer: (text, display, options) => enqueue(text, "steer", display, options),
 		queueFollowUp: (text, display) => enqueue(text, "follow-up", display),
 		queuedMessages(): QueuedMessagesSnapshot {
 			return {
