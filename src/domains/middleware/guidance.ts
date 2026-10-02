@@ -197,6 +197,13 @@ export const GUIDANCE_LESSONS: ReadonlyArray<GuidanceLesson> = [
 			"/context init writes a CLIO-CODER.md from this repository's conventions, so every new session starts with them.",
 	},
 	{
+		id: "agent-routes",
+		feature: "agent-routes",
+		score: (turn) => (harnessQuestionTopics(turn.prompt).includes("agents") ? 2 : used(turn, "dispatch") > 0 ? 1 : 0),
+		text: () =>
+			"Give each job its best model: /settings agents binds every agent, from context init and the wiki writer to coder and tester, to its own profile, so your local GPUs and subscriptions each take the work they do best.",
+	},
+	{
 		id: "output-style",
 		feature: "output-style",
 		score: (turn) => (turn.assistantChars >= 6_000 ? 1 : 0),
