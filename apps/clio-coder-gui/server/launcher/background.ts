@@ -4,7 +4,7 @@ import { homedir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { resolveClioDirs } from "../clio/http-shims.js";
-import { type LocalServerMeta, localServerMeta, localServerReady, waitForLocalServer } from "../local-server.js";
+import { findLocalServer, type LocalServerMeta, waitForLocalServer } from "../local-server.js";
 import { controlService, openBrowser } from "../process-policy.js";
 import {
 	type BackgroundConfig,
@@ -15,6 +15,7 @@ import {
 } from "./background-config.js";
 import { desktopEntry, type LaunchPaths } from "./desktop-entry.js";
 import { contents, installLauncher, launcherStatus, uninstallLauncher } from "./install.js";
+import { DEFAULT_GUI_PORT } from "./ports.js";
 
 const hash = (value: string) => createHash("sha256").update(value).digest("hex");
 type Control = typeof controlService;
@@ -29,6 +30,10 @@ const serverReport = (meta: unknown) => ({
 	idle:
 		meta && typeof meta === "object" && typeof (meta as LocalServerMeta).idle === "boolean"
 			? (meta as LocalServerMeta).idle
+			: undefined,
+	port:
+		meta && typeof meta === "object" && Number.isInteger((meta as LocalServerMeta).port)
+			? (meta as LocalServerMeta).port
 			: undefined,
 });
 const sameLaunch = (left: BackgroundConfig["launch"], right: BackgroundConfig["launch"]) =>
@@ -167,20 +172,28 @@ export async function installBackground(
 	await installLauncher(config.desktopPrefix, { ...config.launch, background: directory });
 	return { status: "installed", unit: files.unit, origin: `http://127.0.0.1:${config.port}`, directory };
 }
-export async function backgroundStatus(directory: string, control: Control = controlService, ready = localServerReady) {
+export async function backgroundStatus(
+	directory: string,
+	control: Control = controlService,
+	ready: (port: number, token: string) => Promise<LocalServerMeta | boolean | null> = findLocalServer,
+) {
 	const state = await owned(directory);
 	if (state.status === "absent") return { status: "absent", directory };
 	const service = await serviceState(state.files, control);
+	const found = await ready(state.config.port, state.config.token);
+	// The app may be listening on its documented fallback port; the address a person should use is the live one.
+	const port = serverReport(found).port ?? state.config.port;
 	return {
 		status: "installed",
 		directory,
 		unit: state.files.unit,
-		port: state.config.port,
-		origin: `http://127.0.0.1:${state.config.port}`,
+		port,
+		configuredPort: state.config.port,
+		origin: `http://127.0.0.1:${port}`,
 		active: service.ActiveState ?? "unknown",
 		enabled: service.UnitFileState ?? "unknown",
 		pid: Number(service.MainPID) || null,
-		ready: await ready(state.config.port, state.config.token),
+		ready: !!found,
 		desktop: (await desktopOwned(state.config, directory)) ? "installed" : "absent",
 	};
 }
@@ -209,7 +222,7 @@ async function startOwned(state: Installed, control: Control, ready: Ready, acti
 	await control(action, state.files.unit, state.files.unitFile);
 	const report = serverReport(await ready(state.config.port, state.config.token));
 	return {
-		url: `http://127.0.0.1:${state.config.port}/#token=${state.config.token}`,
+		url: `http://127.0.0.1:${report.port ?? state.config.port}/#token=${state.config.token}`,
 		...report,
 	};
 }
@@ -291,7 +304,7 @@ export async function restartBackgroundIfIdle(
 	directory: string,
 	control: Control = controlService,
 	ready: Ready = waitForLocalServer,
-	probe: typeof localServerMeta = localServerMeta,
+	probe: (port: number, token: string) => Promise<LocalServerMeta | null> = findLocalServer,
 	launch?: LaunchPaths,
 ) {
 	let state = await owned(directory);
@@ -399,9 +412,17 @@ export async function background(args: string[], launch: LaunchPaths) {
 		return;
 	}
 	if (command === "install") {
-		const port = Number(values.port ?? "4317");
-		if (!/^\d+$/.test(values.port ?? "4317") || !Number.isInteger(port) || port < 1 || port > 65535)
+		const installed = await owned(directory);
+		const requested = values.port;
+		if (requested !== undefined && (!/^\d+$/.test(requested) || Number(requested) < 1 || Number(requested) > 65535))
 			throw new Error("--port must be an integer from 1 to 65535.");
+		// Reinstalling keeps the stable address the app already has; only a first install picks the default.
+		const port =
+			requested !== undefined
+				? Number(requested)
+				: installed.status === "installed"
+					? installed.config.port
+					: DEFAULT_GUI_PORT;
 		const prefix =
 			values.prefix ??
 			(process.env.XDG_DATA_HOME && isAbsolute(process.env.XDG_DATA_HOME)

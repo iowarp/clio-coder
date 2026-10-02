@@ -1,14 +1,16 @@
 import { randomBytes } from "node:crypto";
 import { existsSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
+import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { serve } from "@hono/node-server";
+import { createAdaptorServer } from "@hono/node-server";
 import { Supervisor } from "./acp/supervisor.js";
 import { createApp } from "./app.js";
 import { getVersionInfo, resolveClioDirs, resolvePackageRoot } from "./clio/http-shims.js";
 import { backgroundEnvironment, readBackgroundConfig } from "./launcher/background-config.js";
+import { listenPorts } from "./launcher/ports.js";
 import { restrictNetwork } from "./network-policy.js";
 import { serverOptions } from "./options.js";
 import { autoOpenBrowser, openBrowser } from "./process-policy.js";
@@ -182,7 +184,14 @@ export async function main(args = process.argv.slice(2)) {
 				}
 			: {}),
 	});
-	const server = serve({ fetch: app.fetch, hostname: "127.0.0.1", port }, (info) => {
+	// The background app prefers its configured port and falls back to the next documented one when another
+	// program owns it; launchers probe the same ports in the same order. A private server never falls back,
+	// because its caller named the port or asked for any free one.
+	const candidates = persistent ? listenPorts(port) : [port];
+	const server = createAdaptorServer({ fetch: app.fetch, hostname: "127.0.0.1" });
+	// One listener for the whole sequence: a failed attempt leaves its own callback registered.
+	server.once("listening", () => {
+		const info = server.address() as AddressInfo;
 		origin = `http://127.0.0.1:${info.port}`;
 		const launchUrl = `${origin}${values.path}#token=${token}`;
 		if (scratch) console.log(`[clio-coder:gui] Fabricated tool fixture; isolated state: ${scratch}`);
@@ -205,6 +214,9 @@ export async function main(args = process.argv.slice(2)) {
 				void log.write("Could not open the browser; server remains available.").catch(fail);
 			});
 	});
+	const listen = () => {
+		server.listen(candidates[0], "127.0.0.1");
+	};
 	const idle =
 		values.idleMs === undefined
 			? undefined
@@ -252,10 +264,17 @@ export async function main(args = process.argv.slice(2)) {
 			process.exitCode = 1;
 		});
 	};
-	server.on("error", (error) => {
+	server.on("error", (error: NodeJS.ErrnoException) => {
+		if (error.code === "EADDRINUSE" && !server.listening && candidates.length > 1) {
+			const busy = candidates.shift();
+			console.error(`[clio-coder:gui] Port ${busy} is in use; trying ${candidates[0]}.`);
+			listen();
+			return;
+		}
 		console.error("[clio-coder:gui]", error.message);
 		fail();
 	});
+	listen();
 	const stop = () => {
 		void close().catch(fail);
 	};

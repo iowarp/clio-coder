@@ -1,15 +1,27 @@
 import { request } from "node:http";
 import { setTimeout } from "node:timers/promises";
+import { listenPorts } from "./launcher/ports.js";
 
 /** What a ready background app reports about itself; `clio` is the version its process loaded. */
 export interface LocalServerMeta {
 	clio: string;
 	idle?: boolean;
+	/** The port that answered, which is the fallback port when the configured one was busy. */
+	port?: number;
 }
 
 /** Readiness checks are the sole app-owned socket client: fixed loopback, fixed path, no redirects. */
 export async function localServerReady(port: number, token: string) {
-	return (await localServerMeta(port, token)) !== null;
+	return (await findLocalServer(port, token)) !== null;
+}
+
+/** The app configured for `port`, wherever it is listening: its own port first, then the documented fallback. */
+export async function findLocalServer(port: number, token: string) {
+	for (const candidate of listenPorts(port)) {
+		const meta = await localServerMeta(candidate, token);
+		if (meta) return meta;
+	}
+	return null;
 }
 
 /** The background app's own report, or null when nothing ready answers as this app with this token. */
@@ -34,6 +46,7 @@ export async function localServerMeta(port: number, token: string) {
 								? {
 										clio: typeof value.clio === "string" ? value.clio.slice(0, 64) : "unknown",
 										...(typeof value.idle === "boolean" ? { idle: value.idle } : {}),
+										port,
 									}
 								: null,
 						);
@@ -54,11 +67,11 @@ export async function localServerMeta(port: number, token: string) {
 export async function waitForLocalServer(port: number, token: string): Promise<LocalServerMeta> {
 	const deadline = performance.now() + 15_000;
 	while (performance.now() < deadline) {
-		const meta = await localServerMeta(port, token);
+		const meta = await findLocalServer(port, token);
 		if (meta) return meta;
 		await setTimeout(200);
 	}
 	throw new Error(
-		`Clio did not become ready on port ${port}. Check background status; another application may be using that port.`,
+		`Clio did not become ready on port ${listenPorts(port).join(" or ")}. Check background status; another application may be using those ports.`,
 	);
 }
