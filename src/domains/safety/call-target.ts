@@ -398,7 +398,12 @@ function targetFieldName(value: string): string {
  * or pasted document still informs the decision without disclosing content.
  * Returns an empty string when the call carries no arguments.
  */
-export function describeCallTarget(tool: string, args: Record<string, unknown> | undefined): string {
+export function describeCallTarget(
+	tool: string,
+	args: Record<string, unknown> | undefined,
+	/** The command a verify check resolved to; the card names it beside the check id. */
+	resolved?: { command: string },
+): string {
 	if (!args) return "";
 	const allowedFields = CALL_TARGET_FIELDS[tool] ?? [];
 	const allowed = new Set(allowedFields);
@@ -415,6 +420,10 @@ export function describeCallTarget(tool: string, args: Record<string, unknown> |
 			continue;
 		}
 		parts.push(parts.length === 0 ? rendered : `${targetFieldName(field)}=${rendered}`);
+		if (resolved !== undefined && parts.length === 1) {
+			const command = renderAllowedTargetValue(resolved.command);
+			if (command !== null) parts.push(`runs ${command}`);
+		}
 	}
 	for (const [field, value] of Object.entries(args)) {
 		if (allowed.has(field) || field.startsWith(HARNESS_ARG_PREFIX)) continue;

@@ -67,6 +67,26 @@ export function resolveVerifyCall(workspaceRoot: string, args: Record<string, un
 	return resolveWithDiscovery(workspaceRoot, args);
 }
 
+/**
+ * The argv a resolved verify call executes, or null when the resolution runs no
+ * command. The safety scan and the approval card both name this one command, so
+ * neither can describe a check the tool would not run.
+ */
+export function verifyResolutionArgv(resolution: VerifyResolution, args: Record<string, unknown>): string[] | null {
+	switch (resolution.kind) {
+		case "catalog":
+			return resolution.check.command;
+		case "toolchain":
+			return resolution.argv;
+		case "package": {
+			const extra = extraArgs(args);
+			return ["npm", "run", resolution.check.id, ...(extra.length > 0 ? ["--", ...extra] : [])];
+		}
+		default:
+			return null;
+	}
+}
+
 function resolveWithDiscovery(
 	workspaceRoot: string,
 	args: Record<string, unknown>,

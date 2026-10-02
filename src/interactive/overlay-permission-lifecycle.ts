@@ -10,6 +10,8 @@ import type { SafetyDecision } from "../domains/safety/contract.js";
 import { decisionActionClass } from "../domains/safety/decision-presentation.js";
 import { askUserExposure } from "../tools/ask-user.js";
 import type { PermissionRequiredMeta, ToolRegistry } from "../tools/registry.js";
+import { resolveVerifyCall, verifyResolutionArgv } from "../tools/verify/resolve.js";
+import { prepareVerifyArguments } from "../tools/verify/surface.js";
 import { approvalParkedNotice } from "./bus-notices.js";
 import type { ToolApprovalStateEvent } from "./chat-loop.js";
 import type { NoticeLevel } from "./command-output.js";
@@ -186,6 +188,23 @@ function workerConsequenceLines(value: unknown): string[] {
 	return lines;
 }
 
+/**
+ * The command a verify call will run, resolved the way the tool and the safety
+ * scan resolve it, so the card names it beside the check id as the bash card
+ * names its command. Absent when the call resolves to nothing runnable.
+ */
+function resolvedVerifyCommand(call: ClassifierCall): { command: string } | undefined {
+	if (call.tool !== ToolNames.Verify || call.args === undefined) return undefined;
+	try {
+		const args = prepareVerifyArguments(call.args);
+		const argv = verifyResolutionArgv(resolveVerifyCall(process.cwd(), args), args);
+		return argv === null ? undefined : { command: argv.join(" ") };
+	} catch {
+		// Resolution reads project files; the card falls back to the check id alone.
+		return undefined;
+	}
+}
+
 function mainApprovalRequestView(
 	call: ClassifierCall,
 	decision: SafetyDecision,
@@ -200,7 +219,7 @@ function mainApprovalRequestView(
 		(axisFromDecision.kind === "net"
 			? { kind: "net" as const, ruleId: axisFromDecision.ruleId }
 			: { kind: "autonomy" as const, level: autonomy });
-	const target = describeCallTarget(call.tool, call.args);
+	const target = describeCallTarget(call.tool, call.args, resolvedVerifyCommand(call));
 	const netReason = axis.kind === "net" ? netReasonOf(decision) : undefined;
 	// Facts only. The mutation text stays in the inspector the overlay opener
 	// gets; this object reaches the transcript row and the approval-state event.

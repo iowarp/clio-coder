@@ -15,7 +15,7 @@ import { ToolNames } from "../../core/tool-names.js";
 import { clioConfigDir } from "../../core/xdg.js";
 import { expandPath } from "../../tools/path-utils.js";
 import { resolveProjectVerifierExecutionCwd } from "../../tools/verify/catalog.js";
-import { resolveVerifyCall } from "../../tools/verify/resolve.js";
+import { resolveVerifyCall, verifyResolutionArgv } from "../../tools/verify/resolve.js";
 import { prepareVerifyArguments } from "../../tools/verify/surface.js";
 import {
 	type ActionClass,
@@ -460,17 +460,8 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 					? resolveProjectVerifierExecutionCwd(verifyResolution.check.cwd, cwd)
 					: null;
 			const callCwd = typeof resolvedCheckCwd === "string" ? resolvedCheckCwd : cwdArg(call.args, cwd);
-			const verifyExtraArgs = Array.isArray(verifyArgs?.args)
-				? verifyArgs.args.filter((arg): arg is string => typeof arg === "string")
-				: [];
 			const verifyArgv =
-				verifyResolution?.kind === "catalog"
-					? verifyResolution.check.command
-					: verifyResolution?.kind === "toolchain"
-						? verifyResolution.argv
-						: verifyResolution?.kind === "package"
-							? ["npm", "run", verifyResolution.check.id, ...(verifyExtraArgs.length > 0 ? ["--", ...verifyExtraArgs] : [])]
-							: null;
+				verifyResolution === null || verifyArgs === null ? null : verifyResolutionArgv(verifyResolution, verifyArgs);
 			const verifyCommand = verifyArgv?.join(" ") ?? null;
 			const scans = (verifyCommand !== null ? [verifyCommand] : damageControlScans(call)).filter((scan) => scan !== "");
 			const hit = scans.length > 0 ? matchSourcedRule(scans, sourcedRules) : null;
