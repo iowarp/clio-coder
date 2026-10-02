@@ -338,11 +338,25 @@ export async function executeFleetRun(input: ExecuteFleetRunInput): Promise<Flee
 			}
 			const receipt = receiptsByStep.get(stepId);
 			if (receipt === undefined) return null;
-			if (dispatch.observedRunWriteAttribution !== undefined) {
-				return dispatch.observedRunWriteAttribution(receipt.runId);
-			}
-			const recorded = dispatch.observedRunWrites?.(receipt.runId) ?? null;
-			return recorded === null ? null : { recorded, complete: true, downgrades: [] };
+			// A missing record keeps the reason the enforcer would have given it,
+			// now naming the attempt rather than only the step.
+			const unavailable = (runId: string): WriteBoundaryAttribution => ({
+				recorded: [],
+				complete: false,
+				downgrades: [{ reason: "write_record_unavailable", tool: null, toolCallId: null, runId, stepId }],
+			});
+			const attempts = (attemptRunIdsByStep.get(stepId) ?? [receipt.runId]).map((runId): WriteBoundaryAttribution => {
+				if (dispatch.observedRunWriteAttribution !== undefined) {
+					return dispatch.observedRunWriteAttribution(runId) ?? unavailable(runId);
+				}
+				const recorded = dispatch.observedRunWrites?.(runId) ?? null;
+				return recorded === null ? unavailable(runId) : { recorded, complete: true, downgrades: [] };
+			});
+			return {
+				recorded: [...new Set(attempts.flatMap((attempt) => attempt.recorded))],
+				complete: attempts.every((attempt) => attempt.complete),
+				downgrades: attempts.flatMap((attempt) => attempt.downgrades ?? []),
+			};
 		},
 		onVerdict(verdict, path) {
 			// Concurrent changes are reported too. The window did not fail for them
@@ -354,6 +368,27 @@ export async function executeFleetRun(input: ExecuteFleetRunInput): Promise<Flee
 	});
 	const receipts: RunReceipt[] = [];
 	const receiptsByStep = new Map<string, RunReceipt>();
+	const attemptRunIdsByStep = new Map<string, ReadonlyArray<string>>();
+	const collectMemberReceipts = async (
+		runId: string,
+		firstReceipt: RunReceipt,
+		stepId?: string,
+	): Promise<RunReceipt> => {
+		const member = dispatch.waitForMember
+			? await dispatch.waitForMember(runId)
+			: { receipt: firstReceipt, receipts: [firstReceipt] };
+		if (stepId !== undefined) {
+			const runIds = member.receipts.map((receipt) => receipt.runId);
+			attemptRunIdsByStep.set(stepId, runIds);
+		}
+		// #231 requires the fleet to pay for every attempt while only the final
+		// receipt determines the step's verdict and evidence handed to dependents.
+		for (const receipt of member.receipts) {
+			receipts.push(receipt);
+			await fileStepAttempt(receipt.runId);
+		}
+		return member.receipt;
+	};
 	for (const [stepId, replayedResult] of replayed) {
 		try {
 			const receipt = JSON.parse(
@@ -552,7 +587,7 @@ export async function executeFleetRun(input: ExecuteFleetRunInput): Promise<Flee
 								/* Proposal events are drained while their final answers are collected. */
 							}
 						})().catch(() => {});
-						const receipt = await proposal.finalPromise;
+						const receipt = await collectMemberReceipts(proposal.runId, await proposal.finalPromise);
 						const answer = receipt.output?.state === "final" ? receipt.output.text : "[proposal failed]";
 						proposals.push({ agent: agentId, output: answer });
 					}
@@ -574,12 +609,12 @@ export async function executeFleetRun(input: ExecuteFleetRunInput): Promise<Flee
 				})().catch(() => {});
 				return {
 					assignmentId: handle.runId,
-					result: handle.finalPromise.then(async (receipt) => {
+					result: handle.finalPromise.then(async (firstReceipt) => {
+						const receipt = await collectMemberReceipts(handle.runId, firstReceipt, step.id);
 						if (step.scope === "workspace") {
 							validationFresh = false;
 							independentReviewFresh = false;
 						}
-						receipts.push(receipt);
 						receiptsByStep.set(step.id, receipt);
 						const envelope = dispatch.getRun(receipt.runId);
 						const integrityValid = envelope !== null && verifyReceiptIntegrity(receipt, envelope).ok;

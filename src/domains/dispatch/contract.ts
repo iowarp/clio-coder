@@ -505,6 +505,14 @@ export interface DispatchContract {
 	drainMember?(runId: string): Promise<void>;
 
 	/**
+	 * Fleet steps need the terminal receipt after automatic retries, while other
+	 * lineage callers retain per-attempt handles. Receipts include every completed
+	 * attempt of this member in execution order, including the terminal receipt.
+	 * Only nested lineage attempts retain receipts, and collection releases them.
+	 */
+	waitForMember?(runId: string): Promise<{ receipt: RunReceipt; receipts: ReadonlyArray<RunReceipt> }>;
+
+	/**
 	 * Queue operator guidance on a running HTTP or SDK worker. A logical
 	 * assignment id addresses its current attempt. The text is sent as a JSON
 	 * line on the worker's open stdin and injected into its transcript at the

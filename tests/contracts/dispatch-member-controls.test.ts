@@ -1,7 +1,10 @@
 import { deepStrictEqual, match, ok, strictEqual, throws } from "node:assert/strict";
-import { afterEach, beforeEach, describe, it, type TestContext } from "node:test";
+import { join } from "node:path";
+import type { TestContext } from "node:test";
+import { afterEach, beforeEach, describe, it } from "node:test";
 import { BusChannels } from "../../src/core/bus-events.js";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
+import { runCommandVector } from "../../src/core/safe-exec.js";
 import type { AgentsContract } from "../../src/domains/agents/contract.js";
 import { readAgentLedger } from "../../src/domains/dispatch/agent-ledger-store.js";
 import type { DispatchRequest } from "../../src/domains/dispatch/contract.js";
@@ -12,7 +15,8 @@ import { getDispatchReservation } from "../../src/domains/dispatch/reservation-s
 import type { SpawnedWorker, SpawnedWorkerResult } from "../../src/domains/dispatch/worker-spawn.js";
 import { makeDispatchBundle } from "../harness/dispatch.js";
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
-import { type IsolatedClioEnv, isolateClioEnv } from "../harness/scratch-env.js";
+import type { IsolatedClioEnv } from "../harness/scratch-env.js";
+import { isolateClioEnv } from "../harness/scratch-env.js";
 
 function deferred<T>() {
 	let resolve!: (value: T) => void;
@@ -463,7 +467,7 @@ describe("dispatch member controls", () => {
 
 	it("canceling one repair's queued retry preserves its sibling's continuation", async (context) => {
 		const timers = holdRetries(context);
-		const f = await fixture(3);
+		const f = await fixture(2);
 		try {
 			const resolution = f.contract.preview?.(f.request);
 			const reservations = f.contract.reservations;
@@ -478,7 +482,7 @@ describe("dispatch member controls", () => {
 				handles.push(
 					await f.contract.dispatch({
 						...f.request,
-						lineage: { ...lineage, attempt: 1 },
+						lineage: { ...lineage, attempt: 2 },
 						reservation: { ownerId: reservation.ownerId, memberId },
 					}),
 				);
@@ -508,7 +512,7 @@ describe("dispatch member controls", () => {
 				}
 			});
 			timers.runNext();
-			await started.promise;
+			strictEqual(f.contract.getRun(await started.promise)?.lineage?.attempt, 3);
 			f.contract.steer(b.runId, "own genuine retry");
 			f.contract.abort(b.runId);
 			await drainMember(b.runId);
@@ -523,8 +527,112 @@ describe("dispatch member controls", () => {
 		}
 	});
 
+	it("production fleet settles on a successful retry, runs its dependent planner and counts attempts and proposals", async (context) => {
+		const timers = holdRetries(context);
+		const workspaceRoot = join(scratch.dir, "workspace");
+		// Dynamic tasks declare a write boundary, so #231's dependent must run
+		// in an isolated repository where that boundary can be verified.
+		const initialized = await runCommandVector("git", ["init", "--quiet", workspaceRoot], {
+			cwd: scratch.dir,
+			workspaceRoot: scratch.dir,
+		});
+		strictEqual(initialized.exitCode, 0);
+		const f = await fixture(1, (worker, count) => {
+			worker.worker.events = (async function* () {
+				const outcome = await worker.worker.promise;
+				yield {
+					type: "message_end",
+					message: {
+						role: "assistant",
+						stopReason: outcome.exitCode === 0 ? "stop" : "error",
+						usage: { input: 100, output: 10, cacheRead: 0, cacheWrite: 0, cost: { total: count } },
+						content: JSON.stringify(
+							count === 4
+								? {
+										tasks: [{ id: "inspect", agent: "verifier", description: "Inspect evidence.", depends_on: [], writes: [] }],
+									}
+								: {
+										verdict: "pass",
+										checks: [{ name: "fixture evidence", passed: true, evidence: "Controlled worker completed." }],
+									},
+						),
+					},
+				};
+			})();
+			worker.finish(
+				count === 1
+					? { exitCode: 1, signal: null, stderrTail: "HTTP 503 Service Unavailable" }
+					: { exitCode: 0, signal: null },
+			);
+		});
+		f.ctx.bus.on(BusChannels.DispatchProgress, (event) => {
+			if (isProgressEvent(event.event) && event.event.type === "retry_scheduled") timers.runNext();
+		});
+		const plan = compileExecutionPlan({
+			topology: "sequential",
+			rootTask: "retry and proposal costs",
+			maxWorkers: 1,
+			onFailure: "stop",
+			steps: ["first", "planner"].map((id) => ({
+				kind: "agent",
+				id,
+				dependencies: id === "first" ? [] : ["first"],
+				agentId: "verifier",
+				executionRole: "researcher",
+				scope: "readonly",
+				expectedResultContract: "verifier-report",
+				requestedAuthority: "verification",
+				approvedAuthority: "verification",
+				task: id,
+				...(id === "planner" ? { plan: { roster: ["verifier"], maxTasks: 1, proposals: true } } : {}),
+			})),
+		});
+		try {
+			const agents = f.ctx.getContract<AgentsContract>("agents");
+			ok(agents);
+			const outcome = await executeFleetRun({
+				plan,
+				dispatch: f.contract,
+				agents,
+				contractName: "member-retry",
+				commands: null,
+				workspaceRoot,
+				fleetRootId: "fleet-retry-success",
+				attributionEnabled: false,
+			});
+			strictEqual(outcome.result.results.get("first")?.succeeded, true);
+			strictEqual(outcome.result.results.get("planner")?.succeeded, true);
+			strictEqual(outcome.cleanRun, true);
+			deepStrictEqual(outcome.result.skipped, []);
+			strictEqual(f.workers.length, 5);
+			deepStrictEqual(
+				outcome.receipts.map((receipt) => receipt.outcome),
+				["failed", "succeeded", "succeeded", "succeeded", "succeeded"],
+			);
+			strictEqual(new Set(outcome.receipts.map((receipt) => receipt.runId)).size, 5);
+			strictEqual(outcome.result.results.get("first")?.terminalRunId, outcome.receipts[1]?.runId);
+			strictEqual(outcome.result.results.get("planner")?.terminalRunId, outcome.receipts[3]?.runId);
+			strictEqual(outcome.totalCost.calls, 5);
+			ok(
+				Math.abs(outcome.totalCost.knownUsd - 15) <= 1e-12,
+				"total cost includes both attempts and the proposal within $1e-12",
+			);
+			for (const receipt of outcome.receipts) {
+				const envelope = f.contract.getRun(receipt.runId);
+				ok(envelope);
+				strictEqual(verifyReceiptIntegrity(receipt, envelope).ok, true);
+			}
+			const stored = f.contract.assignments?.getStored(outcome.rootId);
+			ok(stored);
+			strictEqual(stored.status, "succeeded");
+			for (const receipt of outcome.receipts) ok(stored.attempts.includes(receipt.runId));
+		} finally {
+			await f.stop();
+		}
+	});
+
 	for (const phase of ["queued", "admitting", "running"] as const) {
-		it(`production fleet stops and drains its failed member's ${phase} retry before reservation and ledger release`, async (context) => {
+		it(`production fleet stops on an exhausted sibling and drains its member's ${phase} retry before reservation and ledger release`, async (context) => {
 			const timers = holdRetries(context);
 			const initial = deferred<void>();
 			const canceledPeer = deferred<void>();
@@ -533,8 +641,8 @@ describe("dispatch member controls", () => {
 			const deliverFirst = deferred<void>();
 			const cancellations: number[] = [];
 			const f = await fixture(1, (worker, count) => {
-				if (count === 2) initial.resolve();
-				if (count > 1)
+				if (count === 3) initial.resolve();
+				if (count === 2 || count > 3)
 					worker.worker.abort = () => {
 						cancellations.push(count);
 						if (count === 2) canceledPeer.resolve();
@@ -548,7 +656,10 @@ describe("dispatch member controls", () => {
 			ok(reservations);
 			f.ctx.bus.on(BusChannels.DispatchProgress, (event) => {
 				if (!isProgressEvent(event.event)) return;
-				if (event.event.type === "retry_scheduled" && phase === "admitting") timers.runNext();
+				if (event.event.type === "retry_scheduled" && phase === "admitting") {
+					timers.runNext();
+					f.workers[2]?.finish({ exitCode: 1, signal: null, stderrTail: "[worker] fatal: WorkerSpec invalid" });
+				}
 				if (event.event.type === "attempt_start") retryStarted.resolve();
 			});
 			let returned = false;
@@ -578,9 +689,9 @@ describe("dispatch member controls", () => {
 			const plan = compileExecutionPlan({
 				topology: "parallel",
 				rootTask: "retry ownership",
-				maxWorkers: 2,
+				maxWorkers: 3,
 				onFailure: "stop",
-				steps: ["first", "second"].map((id) => ({
+				steps: ["first", "second", "exhausted"].map((id) => ({
 					kind: "agent",
 					id,
 					dependencies: [],
@@ -616,13 +727,17 @@ describe("dispatch member controls", () => {
 				);
 				await initial.promise;
 				f.workers[0]?.finish({ exitCode: 1, signal: null, stderrTail: "HTTP 503 Service Unavailable" });
-				if (phase === "running") {
+				if (phase !== "admitting") {
 					const first = handles[0];
 					ok(first);
 					await first.finalPromise;
-					timers.runNext();
-					await retryStarted.promise;
-					deliverFirst.resolve();
+					strictEqual(cancellations.length, 0);
+					if (phase === "running") {
+						timers.runNext();
+						await retryStarted.promise;
+						deliverFirst.resolve();
+					}
+					f.workers[2]?.finish({ exitCode: 1, signal: null, stderrTail: "[worker] fatal: WorkerSpec invalid" });
 				}
 				await canceledPeer.promise;
 				if (phase !== "queued") await canceledRetry.promise;
@@ -640,14 +755,14 @@ describe("dispatch member controls", () => {
 					ok(peer);
 					await peer.finalPromise;
 					strictEqual(released, false);
-					f.workers[2]?.finish({ exitCode: null, signal: "SIGTERM" });
+					f.workers[3]?.finish({ exitCode: null, signal: "SIGTERM" });
 				}
 				const outcome = await pending;
 				strictEqual(outcome.cleanRun, false);
 				strictEqual(released, true);
 				strictEqual(getDispatchReservation(ownerId)?.status, "released");
 				ok(readAgentLedger(ledgerId)?.closedAt);
-				deepStrictEqual(cancellations.sort(), phase === "queued" ? [2] : [2, 3]);
+				deepStrictEqual(cancellations.sort(), phase === "queued" ? [2] : [2, 4]);
 				const first = handles[0];
 				ok(first);
 				const receipt = await first.finalPromise;

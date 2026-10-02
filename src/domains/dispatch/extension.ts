@@ -3749,7 +3749,7 @@ export function createDispatchBundle(
 		await rebindDispatchReservationMember(rebind);
 	}
 
-	/** Process-local retry queue keyed by finished run; backoff is keyed by assignment root. */
+	/** Process-local retry queue keyed by finished run; backoff is keyed by member control root. */
 	interface RetryQueueEntry {
 		runId: string;
 		agentId: string;
@@ -3770,7 +3770,10 @@ export function createDispatchBundle(
 	// Fleet lineage is shared ancestry, not control ownership. Keep each
 	// member's retry chain distinct without changing persisted lineage.
 	const controlRootsByAttempt = new Map<string, string>();
-	const controlAttempts = new Map<string, { lineage: RunLineage; reservation: DispatchRequest["reservation"] }>();
+	const controlAttempts = new Map<
+		string,
+		{ lineage: RunLineage; reservation: DispatchRequest["reservation"]; maxRetries: number; receipt?: RunReceipt }
+	>();
 	const canceledControlRoots = new Set<string>();
 	const memberWork = new Map<string, Set<Promise<unknown>>>();
 	function trackMemberWork(runId: string, operation: Promise<unknown>): void {
@@ -3828,7 +3831,11 @@ export function createDispatchBundle(
 		const priorControl =
 			continuesParent && lineage.parentRunId !== null ? controlRootsByAttempt.get(lineage.parentRunId) : undefined;
 		controlRootsByAttempt.set(runId, priorControl ?? runId);
-		controlAttempts.set(runId, { lineage, reservation: req.reservation });
+		controlAttempts.set(runId, {
+			lineage,
+			reservation: req.reservation,
+			maxRetries: continuesParent ? parent.maxRetries : assignmentPolicyFor(req).maxRetries,
+		});
 		return lineage;
 	}
 
@@ -3893,6 +3900,13 @@ export function createDispatchBundle(
 
 	type RetryScheduleResult = { scheduled: true } | { scheduled: false; settlementDetail?: string };
 
+	function memberRetryAttempt(run: ActiveRun): number {
+		const root = controlRootsByAttempt.get(run.runId) ?? run.runId;
+		// #231 gives loop repairs the same retry budget without changing the
+		// published lineage ordinal used by route observations and the ledger.
+		return run.lineage.attempt - (controlAttempts.get(root)?.lineage.attempt ?? 0);
+	}
+
 	/** A reserved plan member owns its retry chain independently of the shared fleet root assignment. */
 	function retryChainIsLive(run: ActiveRun): boolean {
 		if (run.aborted || canceledControlRoots.has(controlRootsByAttempt.get(run.runId) ?? run.lineage.rootRunId))
@@ -3920,9 +3934,10 @@ export function createDispatchBundle(
 	): RetryScheduleResult {
 		if (draining) return { scheduled: false };
 		const rootRunId = run.lineage.rootRunId;
+		const controlRoot = controlRootsByAttempt.get(run.runId) ?? rootRunId;
 		if (!retryChainIsLive(run)) return { scheduled: false };
 		if (providers.getRuntime(run.runtimeId)?.externalAgentLoop?.generatingRetry === "forbidden") {
-			retryBackoff.delete(rootRunId);
+			retryBackoff.delete(controlRoot);
 			return {
 				scheduled: false,
 				settlementDetail:
@@ -3930,11 +3945,16 @@ export function createDispatchBundle(
 			};
 		}
 		if (!RETRYABLE_OUTCOMES.has(outcome)) {
-			retryBackoff.delete(rootRunId);
+			retryBackoff.delete(controlRoot);
 			return { scheduled: false };
 		}
-		const maxRetries = assignments.get(rootRunId)?.policy.maxRetries ?? assignmentPolicyFor(run.req).maxRetries;
-		const baseDecision = decideRetry(failureClass, run.lineage.attempt, maxRetries);
+		// #231 gives each member its own configured retry budget, even when a
+		// sibling has already opened an assignment under the shared fleet root.
+		const maxRetries =
+			assignments.get(controlRoot)?.policy.maxRetries ??
+			controlAttempts.get(controlRoot)?.maxRetries ??
+			assignmentPolicyFor(run.req).maxRetries;
+		const baseDecision = decideRetry(failureClass, memberRetryAttempt(run), maxRetries);
 		// An exact manual route may be retried, but no route component may drift.
 		let decision = recovery.retryDecisionWithinFailover(baseDecision, failoverModeFor(run.req));
 		let overflowRoute: DispatchFailoverCandidate | null = null;
@@ -3942,7 +3962,7 @@ export function createDispatchBundle(
 		if (contextOverflow && !decision.retry) {
 			const plan = planOverflowRetry(run, currentRetryReason, maxRetries);
 			if ("settlementDetail" in plan) {
-				retryBackoff.delete(rootRunId);
+				retryBackoff.delete(controlRoot);
 				return { scheduled: false, settlementDetail: plan.settlementDetail };
 			}
 			overflowRoute = plan.route;
@@ -3950,14 +3970,14 @@ export function createDispatchBundle(
 			decision = { retry: true, excludedRouteParts: [], qualityEscalation: null, reasonCode: "retry-context-overflow" };
 		}
 		if (!decision.retry) {
-			retryBackoff.delete(rootRunId);
+			retryBackoff.delete(controlRoot);
 			// Deterministic outcomes are intentionally not retried. This is a normal
 			// policy decision carried by the receipt, not an operational diagnostic
 			// that should leak into an embedding command's stderr.
 			return { scheduled: false };
 		}
 		if (receipt.safety?.grants?.some((grant) => grant.execution === "unknown") === true) {
-			retryBackoff.delete(rootRunId);
+			retryBackoff.delete(controlRoot);
 			return {
 				scheduled: false,
 				settlementDetail:
@@ -3968,7 +3988,7 @@ export function createDispatchBundle(
 			receipt.toolActivity?.mutatingSucceeded === true ||
 			hasPotentiallyMutatingAttempt(receipt.toolStats, (tool) => classifyAction({ tool }).actionClass);
 		if (potentiallyMutated) {
-			retryBackoff.delete(rootRunId);
+			retryBackoff.delete(controlRoot);
 			return {
 				scheduled: false,
 				settlementDetail:
@@ -3986,16 +4006,16 @@ export function createDispatchBundle(
 					(telemetry.coverage === "partial" &&
 						(unfinishedMutation || (telemetry.ingestionErrors > 0 && telemetry.workspaceMutationPossible)));
 		if (mutationNotRuledOut) {
-			retryBackoff.delete(rootRunId);
+			retryBackoff.delete(controlRoot);
 			return {
 				scheduled: false,
 				settlementDetail:
 					"automatic retry suppressed because incomplete tool telemetry cannot prove the failed attempt left the shared workspace unchanged",
 			};
 		}
-		const backoff = retryBackoff.get(rootRunId) ?? createBackoff();
+		const backoff = retryBackoff.get(controlRoot) ?? createBackoff();
 		const { state: nextBackoff, delayMs: backoffDelayMs } = nextDelay(backoff);
-		retryBackoff.set(rootRunId, nextBackoff);
+		retryBackoff.set(controlRoot, nextBackoff);
 		// An in-flight assignment is governed by maxRetries and backoff alone. The
 		// target cooldown it just created protects new work, not this chain.
 		const delayMs = Math.max(backoffDelayMs, decision.retryAfterMs ?? 0);
@@ -4057,9 +4077,11 @@ export function createDispatchBundle(
 		failureClass: FailureClass,
 		contextOverflow = false,
 	): void {
+		const controlAttempt = controlAttempts.get(run.runId);
+		if (controlAttempt !== undefined && run.lineage.depth > 0) controlAttempt.receipt = receipt;
 		const assignment = assignments.open(run.lineage.rootRunId, assignmentPolicyFor(run.req));
 		persistAssignment(registerAssignment(assignment.id), `${assignment.id}:open`);
-		const reasonKey = retryReasonKey(run.lineage.rootRunId, run.lineage.attempt);
+		const reasonKey = retryReasonKey(controlRootFor(run.runId), run.lineage.attempt);
 		const retryReason = run.lineage.attempt > 0 ? (retryReasons.get(reasonKey) ?? "retry") : null;
 		retryReasons.delete(reasonKey);
 		assignments.recordAttempt(assignment.id, {
@@ -4106,7 +4128,7 @@ export function createDispatchBundle(
 		run: ActiveRun,
 		attempt: number,
 		reason = "retry",
-		decision: RetryDecision = decideRetry("internal", run.lineage.attempt, assignmentPolicyFor(run.req).maxRetries),
+		decision: RetryDecision = decideRetry("internal", memberRetryAttempt(run), assignmentPolicyFor(run.req).maxRetries),
 		overflowRoute: DispatchFailoverCandidate | null = null,
 	): Promise<void> {
 		if (draining || !retryChainIsLive(run)) return;
@@ -4137,7 +4159,7 @@ export function createDispatchBundle(
 		// must receive its own ledger/run identity.
 		delete retryReq.runIdHint;
 		let terminal: Promise<RunReceipt> | undefined;
-		const reasonKey = retryReasonKey(run.lineage.rootRunId, attempt);
+		const reasonKey = retryReasonKey(controlRootFor(run.runId), attempt);
 		retryReasons.set(reasonKey, reason);
 		try {
 			if (failoverModeFor(run.req) === "approved") {
@@ -4245,7 +4267,7 @@ export function createDispatchBundle(
 			});
 		} catch (err) {
 			retryReasons.delete(reasonKey);
-			retryBackoff.delete(run.lineage.rootRunId);
+			retryBackoff.delete(controlRootFor(run.runId));
 			const message = err instanceof Error ? err.message : String(err);
 			const denial = `retry attempt ${attempt} rejected: ${message}`;
 			// Keep the denial visible on headless surfaces and assignment state.
@@ -4681,7 +4703,7 @@ export function createDispatchBundle(
 		if (currentRetryReason?.startsWith(`${CONTEXT_OVERFLOW_RETRY}:`) === true) {
 			return { settlementDetail: "context overflow not retried again because this attempt was already an overflow retry" };
 		}
-		if (maxRetries <= 0 || run.lineage.attempt >= maxRetries) {
+		if (maxRetries <= 0 || memberRetryAttempt(run) >= maxRetries) {
 			return { settlementDetail: "context overflow not retried because the retry budget is spent" };
 		}
 		const failedWindow = capabilityInfoForModel(providers, run.targetId, run.wireModelId)?.contextWindow ?? 0;
@@ -9347,6 +9369,22 @@ export function createDispatchBundle(
 			}
 			if (errors.length === 1) throw errors[0];
 			if (errors.length > 1) throw new AggregateError(errors, "dispatch member drain failed", { cause: errors[0] });
+		},
+		async waitForMember(runId) {
+			const root = controlRootFor(runId);
+			await contract.drainMember?.(runId);
+			const receipts: RunReceipt[] = [];
+			for (const [attemptId, attempt] of controlAttempts) {
+				if (controlRootsByAttempt.get(attemptId) === root && attempt.receipt !== undefined) {
+					receipts.push(attempt.receipt);
+					// #231's owner now holds the evidence; session control metadata
+					// must not retain full receipts after the fleet collects them.
+					delete attempt.receipt;
+				}
+			}
+			const receipt = receipts.at(-1);
+			if (receipt === undefined) throw new Error(`dispatch: member '${runId}' has no terminal receipt`);
+			return { receipt, receipts };
 		},
 		abort(runId, reason) {
 			const rootRunId = controlRootFor(runId);
