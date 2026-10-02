@@ -1,7 +1,7 @@
 import { deepStrictEqual, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { ClioSettings } from "../../src/core/config.js";
-import { FITTED_CUTS } from "../../src/domains/system-one/calibration.js";
+import { FITTED_CONTRACTS, FITTED_CUTS } from "../../src/domains/system-one/calibration.js";
 import { createSystemOne } from "../../src/domains/system-one/factory.js";
 import { yesNo } from "../../src/domains/system-one/questions.js";
 import { BREAKER_THRESHOLD, createRunner } from "../../src/domains/system-one/runner.js";
@@ -21,6 +21,8 @@ import type {
  */
 
 const FITTED_BUILD = "jev-1.13.0";
+/** A measured cut applies only under the renderer and site version its table was fitted under. */
+const FITTED_CONTRACT = FITTED_CONTRACTS[FITTED_BUILD];
 const answer: Answer = { type: "noul", noul: 0.9, certainty: 0.8, calibrated: true };
 
 interface Seen {
@@ -31,7 +33,7 @@ interface Seen {
 function site(overrides: Partial<SiteDefinition<string, string>> = {}, seen?: Seen): SiteDefinition<string, string> {
 	return {
 		id: "turn",
-		version: "test-v1",
+		version: FITTED_CONTRACT?.sites.turn ?? "turn-v2",
 		deadlineMs: 30,
 		state: (object) => {
 			if (seen) seen.stateCalls += 1;
@@ -65,7 +67,7 @@ function fakeEngine(decide: (signal: AbortSignal) => Promise<EngineReply>, windo
 			runtime: "test",
 			url: null,
 			profile: null,
-			renderer: "llm-prompt",
+			renderer: FITTED_CONTRACT?.renderer ?? "systemone-v1",
 			unsupported: () => null,
 			decide: async ({ signal }) => {
 				calls += 1;
