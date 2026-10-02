@@ -147,6 +147,7 @@ import {
 	createTurnQueues,
 	DEFAULT_STEERING_MODE,
 	type QueuedChatMessage,
+	type QueuedMessageKind,
 	type QueuedMessagesSnapshot,
 	type SteeringMode,
 } from "./turn-queues.js";
@@ -561,6 +562,16 @@ export interface ChatLoop {
 	currentTurnConstraints?(): TurnConstraints | undefined;
 	steer(text: string): boolean;
 	queueFollowUp(text: string, display?: { text: string; note?: string }): boolean;
+	/** The queued entries still in Clio's hands, in delivery order. */
+	queueEntries(): QueuedChatMessage[];
+	/** Remove one queued entry; returns it, or null when it already left the queue. */
+	removeQueuedEntry(id: string): QueuedChatMessage | null;
+	/** Move one queued entry up (-1) or down (+1) in delivery order. */
+	moveQueuedEntry(id: string, delta: -1 | 1): boolean;
+	/** The operator's choice of slot for one entry; pins it against producers. */
+	setQueuedEntryKind(id: string, kind: QueuedMessageKind): boolean;
+	/** Arm the next fresh prompt to carry the whole queue with its first model call. */
+	flushQueueOnNextPrompt(): void;
 	/**
 	 * Why an interrupt would be refused right now, or null when it would
 	 * cancel the run. An attached dispatch is refused because the parent's abort
@@ -1200,7 +1211,13 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 	const queues = createTurnQueues({
 		state,
 		emitQueueUpdateEvent: (messages) => emit({ type: "queue_update", messages }),
-		emitQueuedUserTurn: (entry) => emit({ type: "queued_user_turn", ...entry }),
+		emitQueuedUserTurn: (entry) =>
+			emit({
+				type: "queued_user_turn",
+				text: entry.text,
+				kind: entry.kind,
+				...(entry.display ? { display: entry.display } : {}),
+			}),
 		emitNotice,
 		// The loop's own resubmits (stranded steers, continuation requests) run
 		// from submit's finally and bypass the admission gate: an interrupt that
@@ -1392,7 +1409,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		getSettings: deps.getSettings,
 		middlewareToolChoice,
 		consumePersistedEcho: (text) => queues.consumePersistedEcho(text),
-		removeQueuedMirrorEntry: (text) => queues.removeQueuedMirrorEntry(text),
+		removeQueuedMirrorEntry: (text) => queues.acknowledgeInjected(text),
 		promptCachePayloadForAssistant: (usage, backend) => context.promptCachePayloadForAssistant(usage, backend),
 		promptSideTokens: () => context.promptSideTokens(),
 		observability: deps.observability,
@@ -1439,7 +1456,11 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		headless: deps.headless,
 		createAgent,
 		continuity,
-		hasQueuedSteering: () => queues.queuedMessages().steer.length > 0,
+		hasQueuedSteering: () => queues.hasPendingSteer(),
+		queueHandOver: {
+			atFinishTurn: (final) => queues.handOverAtFinishTurn(final),
+			afterPrepareNextTurn: () => queues.handOverAfterPrepareNextTurn(),
+		},
 		middlewareToolChoice,
 		persistence,
 		context,
@@ -1847,6 +1868,11 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 	const api: ChatLoop = {
 		steer: (text) => queues.steer(text),
 		queueFollowUp: (text, display) => queues.queueFollowUp(text, display),
+		queueEntries: () => queues.entries(),
+		removeQueuedEntry: (id) => queues.removeEntry(id),
+		moveQueuedEntry: (id, delta) => queues.moveEntry(id, delta),
+		setQueuedEntryKind: (id, kind) => queues.setEntryKind(id, kind),
+		flushQueueOnNextPrompt: () => queues.flushOnNextPrompt(),
 		interruptRefusal: () => (state.streaming ? interruptRefusalReason() : null),
 		clearSkillSurface: () => {
 			const cleared = skillSurfaceNames(state.activeSkillSurface);
@@ -2395,7 +2421,12 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			state.currentPendingSkillPolicy = pendingSkillPolicy;
 			state.currentAskUserPolicy = askUserPolicy;
 			try {
-				await queues.markPersistedUserEcho(runtimePromptText, () => agentRuntime.agent.prompt(runtimePromptText, images));
+				await queues.markPersistedUserEcho(runtimePromptText, () => {
+					// A flushed queue rides Pi's opening poll, so it lands with this
+					// prompt's first model call; a held queue waits for the first slot.
+					queues.handOverBeforePrompt(agentRuntime.agent);
+					return agentRuntime.agent.prompt(runtimePromptText, images);
+				});
 				if (
 					state.synthesisToolLock &&
 					state.activeInterruptReason === null &&
@@ -2630,7 +2661,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				persistence.deferTraceClose(false);
 				// Runs on every exit path (normal settle, catch-arm returns) so
 				// a steer the engine never drained still reaches the model.
-				if (!(await queues.resubmitStrandedSteers())) await queues.resubmitRequestContinuation();
+				if (!(await queues.resubmitStranded())) await queues.resubmitRequestContinuation();
 			}
 		},
 
@@ -2641,10 +2672,11 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			const wasStreaming = state.streaming;
 			context.cancelCompaction();
 			recovery.cancelRetryCountdown();
-			// Clear both queues before the abort settles the in-flight prompt:
-			// a cancelled run must not deliver queued steers or follow-ups, and
-			// the stranded-steer fallback must find an empty mirror.
-			queues.clearQueuedMirror();
+			// Settle the queue before the abort settles the in-flight prompt: a
+			// cancelled run must not deliver queued messages on its own. An
+			// interrupt holds them for the prompt it is about to send; any other
+			// cancel drops them (Esc already returned them to the editor).
+			queues.onRunCancelled({ hold: options?.reason === INTERRUPT_CANCEL_REASON });
 			const requestedReason = options?.reason?.trim();
 			if (wasStreaming) {
 				// Keep immediate feedback in the footer. A transcript notice here

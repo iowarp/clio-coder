@@ -67,7 +67,7 @@ test("streaming prompt injection and stranded resubmission retain presentation a
 	const { createTurnQueues } = await import("../../src/interactive/turn-queues.js");
 	const expansion = await expandInteractiveSubmitAsync("/interview:daisy", fakeResources(), "/tmp");
 	const model: unknown[] = [];
-	const injected: unknown[] = [];
+	const injected: Array<{ kind: string; text: string; display?: unknown }> = [];
 	const resubmitted: string[] = [];
 	const state = {
 		streaming: true,
@@ -76,14 +76,14 @@ test("streaming prompt injection and stranded resubmission retain presentation a
 			agent: {
 				steer: (message: unknown) => model.push(message),
 				followUp: (message: unknown) => model.push(message),
-				clearSteeringQueue: () => {},
+				clearAllQueues: () => {},
 			},
 		},
 	};
 	const queues = createTurnQueues({
 		state: state as unknown as import("../../src/interactive/turn-state.js").ChatTurnState,
 		emitQueueUpdateEvent: () => {},
-		emitQueuedUserTurn: (entry) => injected.push(entry),
+		emitQueuedUserTurn: (entry) => injected.push({ kind: entry.kind, text: entry.text, display: entry.display }),
 		emitNotice: () => {},
 		submit: async (text) => {
 			resubmitted.push(text);
@@ -96,12 +96,15 @@ test("streaming prompt injection and stranded resubmission retain presentation a
 				: queues.queueFollowUp(expansion.text, expansion.display),
 			true,
 		);
-		queues.removeQueuedMirrorEntry(expansion.text);
+		// The engine receives the entry only at a slot; a final turn hands
+		// end-of-turn entries over once nothing is left to steer.
+		queues.handOverAtFinishTurn(kind === "follow-up");
+		queues.acknowledgeInjected(expansion.text);
 		deepStrictEqual(injected.at(-1), { kind, text: TEMPLATE_BODY, display: expansion.display });
 	}
 	for (const message of model) strictEqual((message as { content: string }).content, TEMPLATE_BODY);
 	queues.steer(expansion.text, expansion.display);
-	strictEqual(await queues.resubmitStrandedSteers(), true);
+	strictEqual(await queues.resubmitStranded(), true);
 	deepStrictEqual(injected.at(-1), { kind: "steer", text: TEMPLATE_BODY, display: expansion.display });
 	deepStrictEqual(resubmitted, [TEMPLATE_BODY]);
 });

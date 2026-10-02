@@ -32,7 +32,7 @@ test("footer, queue and action hints spell live keybindings consistently", () =>
 		state.demo = false;
 		state.session.leaderArmed = true;
 		const queue = createFollowUpQueuePanel({ getDequeueKey: () => manager.actionLabel("clio-coder.message.dequeue") });
-		queue.setMessages([{ kind: "follow-up", text: "inspect this" }]);
+		queue.setMessages([{ id: "q1", enqueuedAt: 0, kind: "follow-up", text: "inspect this" }]);
 		const notice = {
 			id: "warning",
 			level: "warning" as const,

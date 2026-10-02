@@ -1,14 +1,23 @@
 /**
- * Steer/follow-up queue mirror and stranded-steer resubmission.
+ * The steering queue Clio owns, and its hand-over to the engine.
  *
- * The engine owns the real steering and follow-up queues; this module keeps
- * the UI mirror in enqueue order, tracks user texts the loop already
- * persisted itself (so message_end echoes are not double-appended), and
- * resubmits steers the engine never drained once a run settles.
+ * A message submitted while a run is active waits here, in enqueue order,
+ * where the operator can still reorder, relabel or remove it. The engine's own
+ * queues receive a message only at a steering slot: the top of `finishTurn`
+ * (after a tool batch, before the next model call), the end of
+ * `prepareNextTurn` (so a message typed during compaction rides Pi's second
+ * poll), or just before a fresh prompt when the queue is flushed. Pi drains
+ * everything it was handed in one poll (`steeringMode = "all"`), so N messages
+ * land as N user messages before one model call. The transcript renders a
+ * message when Pi injects it (message_end), never at enqueue, so the chat
+ * order matches what the model saw.
  */
 
+import type { createEngineAgent } from "../engine/agent.js";
 import type { AgentMessage } from "../engine/types.js";
 import type { ChatTurnState } from "./turn-state.js";
+
+type EngineAgent = ReturnType<typeof createEngineAgent>["agent"];
 
 /** Which engine queue a queued message rides: the steering queue or the follow-up queue. */
 export type QueuedMessageKind = "steer" | "follow-up";
@@ -24,10 +33,22 @@ export type SteeringMode = "interrupt" | "next-slot" | "end-of-turn";
 
 export const DEFAULT_STEERING_MODE: SteeringMode = "next-slot";
 
+export function kindForMode(mode: Exclude<SteeringMode, "interrupt">): QueuedMessageKind {
+	return mode === "end-of-turn" ? "follow-up" : "steer";
+}
+
 export interface QueuedChatMessage {
+	/** Session-local id; the navigator and the producers address an entry by it. */
+	id: string;
 	display?: { text: string; note?: string };
 	text: string;
 	kind: QueuedMessageKind;
+	/** Epoch milliseconds the operator submitted it. */
+	enqueuedAt: number;
+	/** Advisory labels a steering producer attached (`relation`, `urgency`, `producer`). */
+	labels?: Readonly<Record<string, string>>;
+	/** True once the operator set the kind by hand; a producer never relabels a pinned entry. */
+	pinned?: boolean;
 }
 
 export interface QueuedMessagesSnapshot {
@@ -39,8 +60,8 @@ export interface TurnQueuesDeps {
 	state: ChatTurnState;
 	emitQueueUpdateEvent: (messages: QueuedChatMessage[]) => void;
 	/**
-	 * Fired at injection time, when the engine drains a queued message into the
-	 * run (or the stranded-steer fallback resubmits it). The transcript renders
+	 * Fired at injection time, when the engine drains a handed-over message into
+	 * the run (or the stranded fallback resubmits it). The transcript renders
 	 * the user turn from this event; enqueue time shows the text only in the
 	 * queue panel, so the chat order matches what the model actually saw.
 	 */
@@ -48,36 +69,78 @@ export interface TurnQueuesDeps {
 	emitNotice: (text: string) => void;
 	/** Late-bound `ChatLoop.submit`; wired by the loop after API construction. */
 	submit: (text: string, options?: { requestContinuation?: boolean }) => Promise<void>;
+	now?: () => number;
 }
 
 export interface TurnQueues {
 	steer(text: string, display?: QueuedChatMessage["display"]): boolean;
 	queueFollowUp(text: string, display?: QueuedChatMessage["display"]): boolean;
 	queuedMessages(): QueuedMessagesSnapshot;
-	/** Drain the mirror and both engine queues; returns the drained entries. */
+	/** Copies of the entries still in Clio's hands, in delivery order. */
+	entries(): QueuedChatMessage[];
+	/** True while a next-slot message is queued or handed over but not yet injected. */
+	hasPendingSteer(): boolean;
+	removeEntry(id: string): QueuedChatMessage | null;
+	/** Move one entry up (-1) or down (+1); false when it cannot move. */
+	moveEntry(id: string, delta: -1 | 1): boolean;
+	/** The operator's own choice of slot; pins the entry against producers. */
+	setEntryKind(id: string, kind: QueuedMessageKind): boolean;
+	/** A producer's advisory labels, and a new kind unless the operator pinned the entry. */
+	relabel(id: string, labels: Readonly<Record<string, string>>, kind?: QueuedMessageKind): boolean;
+	/** Drain Clio's queue, the in-flight list and both engine queues; returns the drained entries. */
 	clearQueuedMirror(): QueuedChatMessage[];
-	removeQueuedMirrorEntry(text: string): void;
+	/**
+	 * Hand next-slot entries to the engine after a tool batch, before Pi polls.
+	 * At the run's final turn with nothing left to steer, end-of-turn entries
+	 * go to the follow-up queue instead, so Pi carries the run on with them.
+	 */
+	handOverAtFinishTurn(final: boolean): void;
+	/** Hand next-slot entries typed during a long preparation to Pi's second poll. */
+	handOverAfterPrepareNextTurn(): void;
+	/** Just before `agent.prompt`: a flush hands everything over so it lands with the first model call. */
+	handOverBeforePrompt(agent: EngineAgent): void;
+	/** Arm the next prompt to carry the whole queue (Alt+S with an empty draft; the stranded fallback). */
+	flushOnNextPrompt(): void;
+	/**
+	 * The run was cancelled. Messages the engine was handed but never injected
+	 * come back to the head of the queue. An interrupt holds the queue for the
+	 * prompt that follows; any other cancel drops it, exactly as before, so a
+	 * cancelled run never delivers or resubmits queued messages on its own.
+	 */
+	onRunCancelled(options: { hold: boolean }): void;
 	/** True (and consumed) when the loop already persisted this exact user text. */
 	consumePersistedEcho(text: string): boolean;
 	markPersistedUserEcho(text: string, prompt: () => Promise<void>): Promise<void>;
-	/** Resubmit undrained steers as a fresh prompt; true when one was sent. */
-	resubmitStrandedSteers(): Promise<boolean>;
+	/** The engine injected this text: it leaves the queue panel and enters the transcript. */
+	acknowledgeInjected(text: string): void;
+	/** Resubmit entries the run never took as a fresh prompt; true when one was sent. */
+	resubmitStranded(): Promise<boolean>;
 	resubmitRequestContinuation(): Promise<void>;
 	reset(): void;
 }
 
 export function createTurnQueues(deps: TurnQueuesDeps): TurnQueues {
 	const { state } = deps;
-	// UI mirror of both engine queues, in enqueue order. Entries leave when
-	// the engine injects them into the transcript (message_end →
-	// appendQueuedUserTurn), when Alt+Q restores them to the editor, or when
-	// a cancel clears the run.
-	const queuedMirror: QueuedChatMessage[] = [];
+	const now = deps.now ?? (() => Date.now());
+	// Entries still in Clio's hands, in delivery order.
+	const queue: QueuedChatMessage[] = [];
+	// Entries handed to the engine and not yet injected. Pi polls right after
+	// each hand-over, so this is normally empty between slots; a cancel between
+	// the two puts them back.
+	const inFlight: QueuedChatMessage[] = [];
 	const persistedUserEchoes: string[] = [];
+	let sequence = 0;
+	// Set by an interrupt: the queue waits for the fresh prompt instead of
+	// being resubmitted by the cancelled run's settle.
+	let held = false;
+	let flushNext = false;
 
 	const emitQueueUpdate = (): void => {
-		deps.emitQueueUpdateEvent(queuedMirror.map((entry) => ({ ...entry })));
+		deps.emitQueueUpdateEvent(queue.map((entry) => ({ ...entry })));
 	};
+
+	const toAgentMessage = (entry: QueuedChatMessage): AgentMessage =>
+		({ role: "user", content: entry.text, timestamp: now() }) as AgentMessage;
 
 	// Enqueue is silent in the transcript: the queue panel is the one signal
 	// that a message is pending, exactly as pi-coding-agent's pending container
@@ -89,19 +152,26 @@ export function createTurnQueues(deps: TurnQueuesDeps): TurnQueues {
 		// text here would land in the ledger disagreeing with the expansion that
 		// produced it, which is the same defect the persisted echo had (issue #244).
 		if (text.trim().length === 0 || !state.streaming || !state.runtime) return false;
-		const message = {
-			role: "user",
-			content: text,
-			timestamp: Date.now(),
-		} as AgentMessage;
-		queuedMirror.push({ text, kind, ...(display ? { display } : {}) });
-		if (kind === "steer") {
-			state.runtime.agent.steer(message);
-		} else {
-			state.runtime.agent.followUp(message);
-		}
+		sequence += 1;
+		queue.push({ id: `q${sequence}`, text, kind, enqueuedAt: now(), ...(display ? { display } : {}) });
 		emitQueueUpdate();
 		return true;
+	};
+
+	const find = (id: string): number => queue.findIndex((entry) => entry.id === id);
+
+	/** Hand every entry of `kind` to the engine; returns how many went. */
+	const handOver = (agent: EngineAgent, kind: QueuedMessageKind): number => {
+		const due = queue.filter((entry) => entry.kind === kind);
+		if (due.length === 0) return 0;
+		for (const entry of due) {
+			queue.splice(queue.indexOf(entry), 1);
+			inFlight.push(entry);
+			if (kind === "steer") agent.steer(toAgentMessage(entry));
+			else agent.followUp(toAgentMessage(entry));
+		}
+		emitQueueUpdate();
+		return due.length;
 	};
 
 	return {
@@ -109,26 +179,84 @@ export function createTurnQueues(deps: TurnQueuesDeps): TurnQueues {
 		queueFollowUp: (text, display) => enqueue(text, "follow-up", display),
 		queuedMessages(): QueuedMessagesSnapshot {
 			return {
-				steer: queuedMirror.filter((entry) => entry.kind === "steer").map((entry) => entry.text),
-				followUp: queuedMirror.filter((entry) => entry.kind === "follow-up").map((entry) => entry.text),
+				steer: queue.filter((entry) => entry.kind === "steer").map((entry) => entry.text),
+				followUp: queue.filter((entry) => entry.kind === "follow-up").map((entry) => entry.text),
 			};
 		},
+		entries: () => queue.map((entry) => ({ ...entry })),
+		hasPendingSteer: () =>
+			queue.some((entry) => entry.kind === "steer") || inFlight.some((entry) => entry.kind === "steer"),
+		removeEntry(id) {
+			const idx = find(id);
+			if (idx < 0) return null;
+			const [entry] = queue.splice(idx, 1);
+			emitQueueUpdate();
+			return entry ?? null;
+		},
+		moveEntry(id, delta) {
+			const idx = find(id);
+			const target = idx + delta;
+			if (idx < 0 || target < 0 || target >= queue.length) return false;
+			const [entry] = queue.splice(idx, 1);
+			if (!entry) return false;
+			queue.splice(target, 0, entry);
+			emitQueueUpdate();
+			return true;
+		},
+		setEntryKind(id, kind) {
+			const entry = queue[find(id)];
+			if (!entry) return false;
+			entry.kind = kind;
+			entry.pinned = true;
+			emitQueueUpdate();
+			return true;
+		},
+		relabel(id, labels, kind) {
+			const entry = queue[find(id)];
+			if (!entry) return false;
+			entry.labels = { ...entry.labels, ...labels };
+			if (kind !== undefined && entry.pinned !== true) entry.kind = kind;
+			emitQueueUpdate();
+			return true;
+		},
 		clearQueuedMirror(): QueuedChatMessage[] {
-			const drained = queuedMirror.splice(0, queuedMirror.length);
+			const drained = [...inFlight.splice(0, inFlight.length), ...queue.splice(0, queue.length)];
+			held = false;
+			flushNext = false;
 			if (state.runtime) {
 				state.runtime.agent.clearAllQueues();
 			}
 			if (drained.length > 0) emitQueueUpdate();
 			return drained;
 		},
-		removeQueuedMirrorEntry(text: string): void {
-			const idx = queuedMirror.findIndex((entry) => entry.text === text);
-			if (idx < 0) return;
-			const [entry] = queuedMirror.splice(idx, 1);
-			emitQueueUpdate();
-			// The engine just injected this message into the run: this is the
-			// moment it moves from the queue panel into the transcript.
-			if (entry) deps.emitQueuedUserTurn({ ...entry });
+		handOverAtFinishTurn(final) {
+			const agent = state.runtime?.agent;
+			if (!agent || held) return;
+			const steered = handOver(agent, "steer");
+			if (final && steered === 0) handOver(agent, "follow-up");
+		},
+		handOverAfterPrepareNextTurn() {
+			const agent = state.runtime?.agent;
+			if (!agent || held) return;
+			handOver(agent, "steer");
+		},
+		handOverBeforePrompt(agent) {
+			held = false;
+			if (!flushNext) return;
+			flushNext = false;
+			handOver(agent, "steer");
+			handOver(agent, "follow-up");
+		},
+		flushOnNextPrompt() {
+			flushNext = true;
+		},
+		onRunCancelled({ hold }) {
+			const changed = inFlight.length > 0 || queue.length > 0;
+			queue.unshift(...inFlight.splice(0, inFlight.length));
+			if (!hold) queue.length = 0;
+			held = hold && queue.length > 0;
+			state.runtime?.agent.clearAllQueues();
+			if (changed) emitQueueUpdate();
 		},
 		consumePersistedEcho(text: string): boolean {
 			const idx = persistedUserEchoes.indexOf(text);
@@ -145,30 +273,47 @@ export function createTurnQueues(deps: TurnQueuesDeps): TurnQueues {
 				if (idx >= 0) persistedUserEchoes.splice(idx, 1);
 			}
 		},
-		/**
-		 * Stranded-steer fallback. The engine inner loop drains steering messages
-		 * after every tool batch, but the outer loop polls only follow-ups before
-		 * `agent_end`, so a steer enqueued in the run's final moments (or during
-		 * an error stop) is never injected. When the run settles with unconsumed
-		 * steer mirror entries, clear them and resubmit the texts as a fresh
-		 * prompt: exactly today's end-of-run delivery. Esc cancel clears both
-		 * queues first, so a cancelled run never resubmits.
-		 */
-		async resubmitStrandedSteers(): Promise<boolean> {
-			const stranded = queuedMirror.filter((entry) => entry.kind === "steer");
-			if (stranded.length === 0) return false;
-			for (const entry of stranded) {
-				const idx = queuedMirror.indexOf(entry);
-				if (idx >= 0) queuedMirror.splice(idx, 1);
+		acknowledgeInjected(text: string): void {
+			let idx = inFlight.findIndex((entry) => entry.text === text);
+			let entry: QueuedChatMessage | undefined;
+			if (idx >= 0) {
+				[entry] = inFlight.splice(idx, 1);
+			} else {
+				// Defensive: a text the engine produced from the queue without a
+				// hand-over this module saw still leaves the panel.
+				idx = queue.findIndex((candidate) => candidate.text === text);
+				if (idx < 0) return;
+				[entry] = queue.splice(idx, 1);
+				emitQueueUpdate();
 			}
+			// The engine just injected this message into the run: this is the
+			// moment it moves from the queue panel into the transcript.
+			if (entry) deps.emitQueuedUserTurn({ ...entry });
+		},
+		/**
+		 * Stranded fallback. Hand-over happens at `finishTurn`, so a message can
+		 * still be left behind only when it arrived after the run's final turn
+		 * settled or when that turn ended in an error or an abort, where nothing
+		 * is handed over. The entries become one fresh prompt: the first is the
+		 * prompt text, the rest are handed to the engine just before it starts,
+		 * so Pi's opening poll lands them with the same first model call, each as
+		 * its own user message. A held queue (an interrupt is about to prompt)
+		 * waits for that prompt instead.
+		 */
+		async resubmitStranded(): Promise<boolean> {
+			if (held || queue.length === 0) return false;
+			const first = queue.shift();
+			if (!first) return false;
 			state.pendingRequestContinuation = false;
-			state.runtime?.agent.clearSteeringQueue();
+			state.runtime?.agent.clearAllQueues();
+			flushNext = queue.length > 0;
 			emitQueueUpdate();
 			deps.emitNotice("[Clio Coder] steering arrived as the run ended; resubmitting as a fresh prompt.");
 			// The resubmit's own user echo is suppressed (markPersistedUserEcho), so
-			// this is the only place the stranded texts can enter the transcript.
-			for (const entry of stranded) deps.emitQueuedUserTurn({ ...entry });
-			await deps.submit(stranded.map((entry) => entry.text).join("\n\n"));
+			// this is the only place the first text can enter the transcript; the
+			// rest arrive through message_end like any handed-over message.
+			deps.emitQueuedUserTurn({ ...first });
+			await deps.submit(first.text);
 			return true;
 		},
 		async resubmitRequestContinuation(): Promise<void> {
@@ -177,8 +322,11 @@ export function createTurnQueues(deps: TurnQueuesDeps): TurnQueues {
 			await deps.submit("", { requestContinuation: true });
 		},
 		reset(): void {
-			queuedMirror.length = 0;
+			queue.length = 0;
+			inFlight.length = 0;
 			persistedUserEchoes.length = 0;
+			held = false;
+			flushNext = false;
 			emitQueueUpdate();
 		},
 	};

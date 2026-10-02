@@ -159,6 +159,15 @@ export interface TurnRuntimeDeps {
 	context: TurnContext;
 	continuity?: ContinuityController;
 	hasQueuedSteering?: () => boolean;
+	/**
+	 * Clio's steering queue hands operator messages to the engine only at a
+	 * slot: the top of `finishTurn`, before Pi's poll, and the end of
+	 * `prepareNextTurn`, before Pi's second poll.
+	 */
+	queueHandOver?: {
+		atFinishTurn(final: boolean): void;
+		afterPrepareNextTurn(): void;
+	};
 	middleware: TurnMiddleware;
 	retrySettings: () => RetrySettings;
 	/** Stable Clio session id forwarded only to gateway runtimes that understand it. */
@@ -591,6 +600,10 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 				messages: priorMessages,
 			},
 			maxRetryDelayMs: deps.retrySettings().maxDelayMs,
+			// Everything Clio hands over at a slot lands before one model call, as
+			// separate user messages; Pi's default would spend one call per message.
+			steeringMode: "all",
+			followUpMode: "all",
 			...(gatewaySessionId ? { sessionId: gatewaySessionId } : {}),
 			beforeToolBatch: ({ assistantMessage }) => {
 				const calls = assistantMessage.content.filter((block) => block.type === "toolCall");
@@ -794,6 +807,9 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 				const update = await context.postToolContinuationGuard(localRuntime, signal, contextChanged);
 				const restored = context.installMemoryRestoration(localRuntime);
 				if (signal?.aborted || state.activeInterruptReason !== null) return undefined;
+				// Preparation can be long (compaction). A message typed during it is
+				// handed over now so Pi's poll right after this hook takes it.
+				deps.queueHandOver?.afterPrepareNextTurn();
 				// Compaction owns any replacement snapshot. Without one, publish the
 				// already-accounted reminder through context, not message events that
 				// would manufacture a new operator turn and reset task authority.
@@ -826,6 +842,17 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 			// A tool batch that did not terminate, or an operator message already
 			// queued, carries the run on: this is not its final turn.
 			const final = !hasStructuredToolCall(turn.message) || pendingTerminalToolResult !== null;
+			// Operator messages waiting in Clio's queue reach the engine here, after
+			// the tool batch and before Pi's steering poll, so the check below sees
+			// them and the run carries on with them instead of ending around them.
+			// An errored or aborted turn hands nothing over; the settle path decides.
+			if (
+				turn.message.stopReason !== "error" &&
+				turn.message.stopReason !== "aborted" &&
+				state.activeInterruptReason === null
+			) {
+				deps.queueHandOver?.atFinishTurn(final);
+			}
 			if (!final || localRuntime.agent.hasQueuedMessages?.() === true) return undefined;
 			const terminal = pendingTerminalToolResult;
 			pendingTerminalToolResult = null;

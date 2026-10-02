@@ -1106,8 +1106,10 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 	// Pi adds a leading prompt/tool declaration; exclude the entire inherited baseline.
 	const inheritedCount = agent.state.messages.length;
 	// The result-contract repair queues a call/result pair that must land in
-	// one drain, or the provider sees a lone assistant tool call.
+	// one drain, or the provider sees a lone assistant tool call. Operator
+	// steers batch the same way the main agent's do: all at the next slot.
 	agent.followUpMode = "all";
+	agent.steeringMode = "all";
 	abortWorkerForBound = () => agent.abort();
 	const repairHelperResult = (reason: string): void => {
 		if (!input.resultContract || acceptedHelperResult !== null || workerBoundFailure !== null) return;
