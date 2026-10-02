@@ -83,6 +83,7 @@ export interface InteractiveInputRuntimeDeps {
 		closeOverlay(): void;
 		confirmPermission(): void;
 		cancelPermission?(): void;
+		retryPendingPermission?(): boolean;
 		stopTurnFromPermission(): void;
 		canInspectMutation(): boolean;
 		isInspectingMutation(): boolean;
@@ -386,7 +387,11 @@ export function createInteractiveInputRuntime(deps: InteractiveInputRuntimeDeps)
 				matchesKey(data, "escape")
 			)
 				return false;
-			const editable = deps.overlay.getState() === "closed" || search() !== null || owner().keyboardScope === "edit";
+			const editable =
+				deps.overlay.getState() === "closed" ||
+				deps.overlay.getState() === "permission-confirm" ||
+				search() !== null ||
+				owner().keyboardScope === "edit";
 			if (editable && (decodePrintableKey(data) !== undefined || deps.keybindings.matches(data, "tui.input.newLine")))
 				return true;
 			const navigation = ["up", "down", "left", "right", "home", "end", "pageUp", "pageDown"] as const;
@@ -451,6 +456,10 @@ export function createInteractiveInputRuntime(deps: InteractiveInputRuntimeDeps)
 					confirmPermission: () => deps.overlay.confirmPermission(),
 					stopTurnFromPermission: () => deps.overlay.stopTurnFromPermission(),
 					composerHasDraft: () => deps.editor.getText().length > 0,
+					editComposer: (data) => {
+						deps.editor.handleInput?.(data);
+						deps.requestRender();
+					},
 					canInspectMutation: () => deps.overlay.canInspectMutation(),
 					isInspectingMutation: () => deps.overlay.isInspectingMutation(),
 					toggleMutationInspection: () => deps.overlay.toggleMutationInspection(),
@@ -541,7 +550,9 @@ export function createInteractiveInputRuntime(deps: InteractiveInputRuntimeDeps)
 	});
 	deps.registerInputListener((data) => {
 		deps.onInputIngress?.(classifyInputAction(data, deps), data);
-
+		// Enter arriving before the parked card mounts must neither submit a
+		// steer nor approve a card the operator has not yet seen.
+		if (deps.overlay.retryPendingPermission?.() && matchesKey(data, "enter")) return { consume: true };
 		return controller.handleInput(data);
 	});
 	return controller;

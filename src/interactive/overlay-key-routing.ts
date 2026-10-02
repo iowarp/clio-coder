@@ -1,6 +1,6 @@
 import type { ClioKeybinding } from "../domains/config/keybindings.js";
-import { isKeyRelease, isKeyRepeat, matchesKey } from "../engine/tui.js";
-import { MUTATION_PREVIEW_KEY, PERMISSION_TERMS_KEY } from "./permission-hint.js";
+import { decodePrintableKey, isKeyRelease, isKeyRepeat, matchesKey } from "../engine/tui.js";
+import { MUTATION_PREVIEW_KEY, PERMISSION_STOP_KEY, PERMISSION_TERMS_KEY } from "./permission-hint.js";
 
 export type OverlayState =
 	| "closed"
@@ -49,6 +49,8 @@ export interface PermissionOverlayKeyDeps {
 	 * the call. Only the deletion keys in `isDraftEditKey` arrive here.
 	 */
 	editDraft?: (operation: DraftEditOperation) => void;
+	/** Literal text stays in the composer while the approval owns the screen. */
+	editComposer?: (data: string) => void;
 	/** Whether this card has a mutation the operator can read locally (issue #254). */
 	canInspectMutation?: () => boolean;
 	isInspectingMutation?: () => boolean;
@@ -136,8 +138,8 @@ function routePermissionOverlayKey(data: string, deps: PermissionOverlayKeyDeps)
 		return true;
 	}
 	// Reading the mutation is the one thing this dialog does that is not an
-	// answer, so it toggles rather than navigating away: Enter, `s`, and Esc keep
-	// their meanings the whole time the mutation is on screen, and `v` is what
+	// answer, so it toggles rather than navigating away: Enter, Alt+X, and Esc keep
+	// their meanings the whole time the mutation is on screen, and Alt+V is what
 	// puts it away. A card with nothing local to inspect leaves the key inert.
 	if (
 		matchesKey(data, MUTATION_PREVIEW_KEY) &&
@@ -178,10 +180,17 @@ function routePermissionOverlayKey(data: string, deps: PermissionOverlayKeyDeps)
 		return true;
 	}
 	// Denying one call does not stop the model asking again, and it re-asked six
-	// times with the command mutated each time. Escape answers this call; `s`
+	// times with the command mutated each time. Escape answers this call; Alt+X
 	// answers the turn.
-	if (matchesKey(data, "s") && !isKeyRelease(data)) {
+	if (matchesKey(data, PERMISSION_STOP_KEY) && !isKeyRelease(data)) {
 		deps.stopTurnFromPermission();
+		return true;
+	}
+	if (
+		decodePrintableKey(data) !== undefined ||
+		(data.length > 0 && [...data].every((char) => char.charCodeAt(0) >= 32 && char.charCodeAt(0) !== 127))
+	) {
+		deps.editComposer?.(data);
 		return true;
 	}
 	return false;
@@ -259,7 +268,16 @@ export function routeOverlayKey(
 ): boolean {
 	if (overlayState === "closed") return false;
 	if (isKeyRelease(data)) return true;
-	if (data.includes("\x1b[200~") && overlayState === "permission-confirm") return true;
+	if (overlayState === "permission-confirm") {
+		if (data.includes("\x1b[200~")) {
+			deps.editComposer?.(data);
+			return true;
+		}
+		if (isKeyRepeat(data)) {
+			if (decodePrintableKey(data) !== undefined) deps.editComposer?.(data);
+			return true;
+		}
+	}
 	if (
 		!isKeyRepeat(data) &&
 		(deps.canToggleOwner?.() ?? true) &&

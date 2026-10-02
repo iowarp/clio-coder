@@ -81,11 +81,11 @@ function fixture(overrides: Record<string, string | string[]> = {}, scrollFooter
 		overlays.push({ component, handle });
 		return handle;
 	};
-	const active = { streaming: true, queued: false };
+	const active = { streaming: true, queued: false, parked: false };
 	const editor = new ClioEditor(tui, { getModelLabel: () => "fixture", getThinkingLabel: () => "off" });
 	let state: OverlayState = "closed";
 	let handle: ReturnType<typeof tui.showOverlay> | null = null;
-	const counts = { library: 0, cancel: 0, submit: 0, status: 0, allow: 0, dismiss: 0, shutdown: 0 };
+	const counts = { library: 0, cancel: 0, submit: 0, status: 0, allow: 0, stop: 0, dismiss: 0, shutdown: 0 };
 	editor.onSubmit = () => {
 		counts.submit++;
 	};
@@ -135,10 +135,19 @@ function fixture(overrides: Record<string, string | string[]> = {}, scrollFooter
 		overlay: {
 			getState: () => state,
 			closeOverlay: close,
+			cancelPermission: close,
+			retryPendingPermission: () => {
+				if (state !== "closed" || !active.parked) return false;
+				active.parked = false;
+				open("permission-confirm");
+				return true;
+			},
 			confirmPermission: () => {
 				counts.allow++;
 			},
-			stopTurnFromPermission: noop,
+			stopTurnFromPermission: () => {
+				counts.stop++;
+			},
 			canInspectMutation: () => false,
 			isInspectingMutation: () => false,
 			toggleMutationInspection: noop,
@@ -274,11 +283,26 @@ it("keeps search focused ahead of globals and Ctrl+C leaves the active run alive
 	f.terminal.input("\x1b[200~s\nv\n\x03\x1b[201~");
 	assert.equal(f.counts.allow, 0);
 	assert.equal(f.counts.cancel, 0);
+	assert.equal(f.editor.getText(), "drafts\nv\n");
+	f.editor.setText("");
+	for (const key of "make it shorter?") f.terminal.input(key);
+	assert.equal(f.editor.getText(), "make it shorter?");
+	assert.equal(f.state(), "permission-confirm");
+	for (const key of ["\x1b[120;3:2u", "\x1b[120;3:3u", "\x1b[13;1:2u", "\x1b[27;1:2u"]) f.terminal.input(key);
+	assert.equal(f.counts.stop, 0);
+	assert.equal(f.counts.allow, 0);
+	assert.equal(f.state(), "permission-confirm");
+	f.terminal.input("\x1bx");
+	assert.equal(f.counts.stop, 1);
 });
 it("permission deletion bypasses submit overrides and leaves nonempty Enter inert", () => {
 	const f = fixture({ "tui.input.submit": "ctrl+u", "tui.editor.deleteToLineStart": "ctrl+x" });
 	f.editor.setText("draft");
-	f.open("permission-confirm");
+	f.active.parked = true;
+	f.terminal.input("\r");
+	assert.equal(f.state(), "permission-confirm");
+	assert.equal(f.counts.submit, 0);
+	assert.equal(f.editor.getText(), "draft");
 	f.terminal.input("\r");
 	assert.equal(f.counts.allow, 0);
 	f.terminal.input("\x15");

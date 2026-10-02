@@ -185,6 +185,8 @@ export interface OverlayLifecycleController {
 	openQueueNavigatorState(): void;
 	confirmPermission(): void;
 	cancelPermission(): void;
+	/** Re-present a parked call before composer input can submit through a mount gap. */
+	retryPendingPermission(): boolean;
 	stopTurnFromPermission(): void;
 	/** Whether the live permission card has a mutation the operator can read here. */
 	canInspectMutation(): boolean;
@@ -598,6 +600,11 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 			overlayPermission?.cancel();
 			footer.refresh();
 			tui.requestRender();
+		},
+		retryPendingPermission: () => {
+			if (overlayTransitions.state !== "closed" || !deps.app.toolRegistry?.hasParkedCalls()) return false;
+			overlayPermission?.retryPending();
+			return true;
 		},
 		stopTurnFromPermission: () => {
 			overlayPermission?.stopTurn();

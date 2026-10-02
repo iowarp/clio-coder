@@ -44,7 +44,7 @@ test("open terms that overflow the frame scroll inside it and every row is reach
 	ok(body.isCardScrollable(), "the open terms do not fit, so the card scrolls");
 	doesNotMatch(screen.join("\n"), /more rows/u, "the frame never has to cut the card");
 	match(screen[1] ?? "", /Tool: bash · Action: execute/u, "the call's identity stays at the top");
-	match(screen.join("\n"), /↑↓ scroll · \? back/u, "the card names its scroll keys");
+	match(screen.join("\n"), /↑↓ scroll · alt\+t back/u, "the card names its scroll keys");
 	for (const row of inner(screen)) seen.add(row);
 
 	for (let step = 0; step < 20; step++) {

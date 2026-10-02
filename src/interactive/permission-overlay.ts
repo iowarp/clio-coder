@@ -231,7 +231,7 @@ class PermissionOverlayBody implements PermissionOverlayBodyHandle {
 				...wrapTextWithAnsi(
 					clioTheme().fg(
 						"annotation",
-						`${this.scroll + 1}–${Math.min(rows.length, this.scroll + MUTATION_PREVIEW_VISIBLE_ROWS)} of ${rows.length} rows · ↑↓ scroll · v back`,
+						`${this.scroll + 1}–${Math.min(rows.length, this.scroll + MUTATION_PREVIEW_VISIBLE_ROWS)} of ${rows.length} rows · ↑↓ scroll · ${MUTATION_PREVIEW_KEY} back`,
 					),
 					width,
 				),
@@ -241,7 +241,10 @@ class PermissionOverlayBody implements PermissionOverlayBodyHandle {
 			const { facts, rest } = permissionCardSections(this.view, width, this.terms, this.readAdvisory());
 			const tail =
 				this.invocation && !this.inspect
-					? wrapTextWithAnsi(clioTheme().fg("annotation", "v · inspect the complete invocation before deciding"), width)
+					? wrapTextWithAnsi(
+							clioTheme().fg("annotation", `${MUTATION_PREVIEW_KEY} · inspect the complete invocation before deciding`),
+							width,
+						)
 					: [];
 			return this.windowCard(facts, rest, tail, width);
 		}

@@ -5,7 +5,7 @@ import type { HintEntry } from "./overlay-frame.js";
  * here rather than beside the preview builder so the composer rail can name it
  * without pulling the diff machinery into the Stage 0 boot shell closure.
  */
-export const MUTATION_PREVIEW_KEY = "v";
+export const MUTATION_PREVIEW_KEY = "alt+v";
 
 /**
  * Whether this card has a mutation to read, and whether it is open.
@@ -15,7 +15,10 @@ export const MUTATION_PREVIEW_KEY = "v";
 export type PermissionInspectionHint = "none" | "closed" | "open";
 
 /** The key that folds and unfolds the standing approval terms on the card. */
-export const PERMISSION_TERMS_KEY = "?";
+export const PERMISSION_TERMS_KEY = "alt+t";
+
+/** Alt+S belongs to send-now; this chord is free in the default keybinding registry. */
+export const PERMISSION_STOP_KEY = "alt+x";
 
 /** Whether the terms are open. The composer rail never shows this key, so it defaults closed there. */
 export type PermissionTermsHint = "closed" | "open";
@@ -28,13 +31,13 @@ export type PermissionTermsHint = "closed" | "open";
  * and the permission overlay is not: importing the overlay from the editor
  * pulled the safety domain's approval modules into the instant-shell closure.
  *
- * At 40 columns the old positional elider removed `[s] stop turn` and left
+ * At 40 columns the old positional elider removed `[Alt+X] stop turn` and left
  * "allow once" and an ambiguous "close" in front of an operator trying to
  * refuse. The key kept working, so the layout was hiding a live safety action.
  * Allow and stop are marked critical, Esc is marked droppable, and
  * `fitHintEntries` shortens every label before it drops anything.
  *
- * Esc says `deny`, not `close`: closing the dialog denies the call, and on the
+ * Esc says `deny`, not `close`: the operator explicitly denies the call, and on the
  * one surface where a misread is a wrong decision about a tool call the key
  * names its effect. It keeps that meaning while the mutation is open, so the
  * inspect key is what puts the mutation away again.
@@ -76,7 +79,7 @@ export function permissionHintEntries(
 						{ key: MUTATION_PREVIEW_KEY, verb: "hide details", short: "hide", critical: false },
 					]
 				: [{ key: MUTATION_PREVIEW_KEY, verb: "inspect details", short: "inspect", critical: false }]),
-		{ key: "s", verb: "stop turn", short: "stop", critical: true },
+		{ key: PERMISSION_STOP_KEY, verb: "stop turn", short: "stop", critical: true },
 		// With a draft, deny and stop are the only immediate answers, so Esc
 		// outranks the narrowing that would otherwise drop it first.
 		{ key: "Esc", verb: "deny", critical: composerHasDraft },

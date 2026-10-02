@@ -77,7 +77,7 @@ for (const columns of [80, 120, 160]) {
 		ok(!joined.includes("Hard-blocked actions remain blocked"), "standing terms are folded");
 		ok(!joined.includes("Consequence:"), "standing terms are folded");
 		match(joined, /Allow runs this one write call/u);
-		match(joined, /Press \? for the full terms/u);
+		match(joined, /Press alt\+t for the full terms/u);
 		match(joined, /Requested by: main agent through autonomy level \(default\)/u);
 
 		body.toggleTerms();
@@ -111,31 +111,28 @@ test("worker terms disclose approval and denial reuse within the same run", () =
 
 test("the footer names the terms key and drops it before any answer key", () => {
 	const wide = permissionOverlayHint(100, false, "closed", "closed");
-	match(wide, /\[\?\] terms/u);
+	match(wide, /\[alt\+t\] terms/u);
 	match(wide, /\[Enter\] allow/u);
 	doesNotMatch(wide, /allow once/u);
-	match(wide, /\[s\] stop turn/u);
+	match(wide, /\[alt\+x\] stop turn/u);
 	const open = permissionOverlayHint(100, false, "closed", "open");
-	match(open, /\[\?\] hide terms/u);
-	// At the 80-column box the neutral allow label leaves room for full labels.
+	match(open, /\[alt\+t\] hide terms/u);
+	// The longer modifier labels shorten at the 80-column box.
 	strictEqual(
 		permissionOverlayHint(80, false, "closed", "closed"),
-		"[Enter] allow · [?] terms · [v] inspect details · [s] stop turn · [Esc] deny",
+		"[Enter] allow · [alt+t] terms · [alt+v] inspect · [alt+x] stop · [Esc] deny",
 	);
-	// Narrower still, the terms key is the first to go and the inspect key stays.
-	strictEqual(
-		permissionOverlayHint(60, false, "closed", "closed"),
-		"[Enter] allow · [v] inspect · [s] stop · [Esc] deny",
-	);
+	// Narrower still, both reading keys yield to the decision keys.
+	strictEqual(permissionOverlayHint(60, false, "closed", "closed"), "[Enter] allow · [alt+x] stop · [Esc] deny");
 	const narrow = permissionOverlayHint(36, false, "closed", "closed");
 	doesNotMatch(narrow, /terms/u);
 	match(narrow, /allow/u);
 	match(narrow, /stop/u);
 	// The composer rail asks without a terms state and stays as it was.
-	ok(!permissionHintEntries(false, "closed").some((entry) => entry.key === "?"));
+	ok(!permissionHintEntries(false, "closed").some((entry) => entry.key === "alt+t"));
 });
 
-test("? folds the terms while the card owns the keys and yields while the mutation is open", () => {
+test("Alt+T folds the terms while the card owns the keys and yields while the mutation is open", () => {
 	const calls: string[] = [];
 	const deps = {
 		cancelPermission: () => calls.push("cancel"),
@@ -146,10 +143,10 @@ test("? folds the terms while the card owns the keys and yields while the mutati
 		closeOverlay: () => calls.push("close"),
 	};
 	const matches = () => false;
-	ok(routeOverlayKey("?", "permission-confirm", deps as never, matches));
+	ok(routeOverlayKey("\x1bt", "permission-confirm", deps as never, matches));
 	ok(routeOverlayKey("\r", "permission-confirm", deps as never, matches));
 	deps.isInspectingMutation = () => true;
-	routeOverlayKey("?", "permission-confirm", deps as never, matches);
+	routeOverlayKey("\x1bt", "permission-confirm", deps as never, matches);
 	strictEqual(calls.filter((call) => call === "terms").length, 1, "the key is inert while the mutation is open");
 	ok(calls.includes("confirm"));
 });
