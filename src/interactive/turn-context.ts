@@ -1631,7 +1631,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			snapshotIdAfter: postCompactSnapshot.snapshotId,
 			at: Date.now(),
 		} satisfies ContextPrunedPayload);
-		emitCompactionActivity("completed", `compacted ~${tokensBefore} -> ~${tokensAfter} tokens`);
+		emitCompactionActivity("completed", "context compaction complete");
 
 		deps.emitNotice(
 			renderCompactionSummaryLine({

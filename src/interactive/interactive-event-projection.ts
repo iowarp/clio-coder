@@ -1,7 +1,6 @@
 import {
 	BusChannels,
 	type ConfigReloadFailedPayload,
-	type ContextPrunedPayload,
 	type ContextWarningPayload,
 	type LoopBlockedPayload,
 	type RuntimeNoticePayload,
@@ -263,21 +262,9 @@ export function createInteractiveEventProjection(deps: InteractiveEventProjectio
 			deps.refreshFooter();
 			deps.requestRender();
 		}),
-		deps.bus.on(BusChannels.ContextPruned, (payload) => {
-			const event = payload as ContextPrunedPayload | null | undefined;
-			if (
-				event &&
-				typeof event === "object" &&
-				typeof event.tokensBefore === "number" &&
-				typeof event.tokensAfter === "number"
-			) {
-				const outcome = event.tokensAfter < event.tokensBefore ? "Reclaimed context" : "Context updated";
-				deps.notify(
-					"info",
-					`[Compaction] ${outcome}: ${event.tokensBefore} -> ${event.tokensAfter} tokens (${event.stage})`,
-					"compaction-notice",
-				);
-			}
+		deps.bus.on(BusChannels.ContextPruned, () => {
+			// The compaction producer emits the canonical receipt once; this accounting
+			// event only refreshes the live context counters (flywheel r4/4).
 			deps.refreshFooter();
 			deps.requestRender();
 		}),
