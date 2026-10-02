@@ -226,12 +226,15 @@ export function createPromptsBundle(
 	const contract: PromptsContract = {
 		inputEpoch() {
 			const session = context.getContract<SessionContract>("session")?.current();
-			const inventory = renderFleetInventory(
-				config()?.get(),
-				context.getContract<SchedulingContract>("scheduling"),
-				session?.cwd ?? process.cwd(),
-				session?.id ?? "",
-			);
+			const settings = config()?.get();
+			const inventory = settings?.fleet.nodes.length
+				? renderFleetInventory(
+						settings,
+						context.getContract<SchedulingContract>("scheduling"),
+						session?.cwd ?? process.cwd(),
+						session?.id ?? "",
+					)
+				: "";
 			return `${fragmentEpoch}:${agentsDomain()?.revision() ?? 0}:${sessionSourceEpoch}:${sha256(inventory)}`;
 		},
 		async compileSessionPrompt(input: CompileSessionPromptInput) {
@@ -258,6 +261,7 @@ export function createPromptsBundle(
 			}
 			const sessionInputs = {
 				...input.sessionInputs,
+				hasFleetNodes: (settings?.fleet.nodes.length ?? 0) > 0,
 				...(options.noSkills === true ? { skillDiscoveryEnabled: false } : {}),
 				...(contextFiles.length > 0 ? { contextFiles } : {}),
 			};
@@ -268,7 +272,7 @@ export function createPromptsBundle(
 				sessionInputs,
 				additionalFragments: [
 					...sources.workspaceRoot,
-					...(sessionInputs.toolNames?.includes("dispatch")
+					...(sessionInputs.hasFleetNodes && sessionInputs.toolNames?.includes("dispatch")
 						? (() => {
 								const body = renderFleetInventory(
 									settings,

@@ -836,7 +836,6 @@ function runAdmissionControl(command: "drain" | "resume", args: ReadonlyArray<st
 
 export async function runFleetCommand(args: ReadonlyArray<string>): Promise<number> {
 	const sub = args[0];
-	if (sub === "nodes") return (await import("./fleet-nodes.js")).runFleetNodes(args.slice(1));
 	if (sub === "view" && (args.includes("--help") || args.includes("-h"))) {
 		return (await import("./fleet-view.js")).runFleetView(args.slice(1));
 	}

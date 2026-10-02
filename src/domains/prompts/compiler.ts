@@ -45,6 +45,8 @@ export interface CapabilityMapEntry {
 }
 
 export interface SessionPromptInputs {
+	/** Fleet guidance is useful only when the operator configured SSH nodes. */
+	hasFleetNodes?: boolean;
 	/** Descriptive view of host-enforced scope; never a source of authorization. */
 	turnConstraints?: TurnConstraints;
 	/** Ready, model-visible skills. Undefined means the inventory is unknown. */
@@ -879,7 +881,9 @@ export function compile(table: FragmentTable, inputs: CompileInputs): CompiledSe
 		["harness-awareness", harnessAwareness],
 		[
 			"delegation",
-			[delegation?.body, delegation ? table.byId.get("operating.fleet")?.body : undefined].filter(Boolean).join("\n\n"),
+			[delegation?.body, delegation && session.hasFleetNodes ? table.byId.get("operating.fleet")?.body : undefined]
+				.filter(Boolean)
+				.join("\n\n"),
 		],
 		["skills", skills?.body.replace("{SKILL_ACTIVATION_POLICY}", resolvedSkillActivation) ?? ""],
 		["safety", renderSafetySection(safety, autonomyLevel, session.headless === true)],
