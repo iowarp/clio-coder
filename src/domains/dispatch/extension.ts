@@ -21,6 +21,7 @@ import { type Dirent, readdirSync } from "node:fs";
 import { isAbsolute, relative, resolve as resolvePath, sep } from "node:path";
 import { performance } from "node:perf_hooks";
 import { BusChannels, type DispatchCompletedPayload, type DispatchRunIdentity } from "../../core/bus-events.js";
+import { taskCommitSubject } from "../../core/commit-message.js";
 import { DEFAULT_SETTINGS } from "../../core/defaults.js";
 import type { DomainBundle, DomainContext, DomainExtension } from "../../core/domain-loader.js";
 import { gatewayRoutingObservationFromRecord } from "../../core/gateway-routing.js";
@@ -147,9 +148,9 @@ import { type ActionClass, classify as classifyAction } from "../safety/action-c
 import type { AutonomyLevel } from "../safety/autonomy.js";
 import type { SafetyContract } from "../safety/contract.js";
 import { assessFinishContract, type FinishContractAssessment } from "../safety/finish-contract.js";
+import type { FlowRestrictionSet } from "../safety/information-flow.js";
 import { isFlowRestrictionSet, mergeFlowRestrictions } from "../safety/information-flow.js";
 import { WRITE_ROOT_REFUSED_TOOLS } from "../safety/policy-engine.js";
-import type { FlowRestrictionSet } from "../safety/information-flow.js";
 import type { ProtectedArtifactState } from "../safety/protected-artifacts.js";
 import { parseRigorOverride, type Rigor, resolveRigor } from "../safety/rigor.js";
 import {
@@ -7517,11 +7518,14 @@ export function createDispatchBundle(
 				// releases the claim too: nothing of Clio's is left to guard.
 				let claimReleased = false;
 				if (req.taskWorktree !== undefined && (finalOutcome === "succeeded" || hostRejectedMerge)) {
-					const taskCommitMessage =
+					const authorship =
 						appliedResultContract !== null && resultValidation?.conformance === "pass"
 							? resultContractAuthorship(appliedResultContract, capturedOutput?.state === "final" ? capturedOutput.text : null)
-									.commitMessage
 							: null;
+					// A report without a commitMessage still lands a readable subject: the
+					// worker's summary, else the task it was given, never only the run id.
+					const taskCommitMessage =
+						authorship?.commitMessage ?? taskCommitSubject(authorship?.summary ?? null) ?? taskCommitSubject(req.task);
 					const protectedPaths = getProtectedArtifactState().artifacts.map((artifact) => artifact.path);
 					worktreeReceipt = applyTaskWorktree({
 						worktree: req.taskWorktree,

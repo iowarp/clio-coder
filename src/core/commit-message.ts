@@ -58,3 +58,22 @@ export function stripAuthoredTrailers(message: string): string {
 	}
 	return out.join("\n\n").trim();
 }
+
+const COMMIT_SUBJECT_MAX_CHARS = 72;
+
+/**
+ * A one-line commit subject drawn from prose such as a worker's summary or its
+ * task: the first sentence of the first nonblank line, without its closing
+ * punctuation, cut at a word boundary under 72 characters. Null when nothing
+ * is left, so the caller keeps its own fallback.
+ */
+export function taskCommitSubject(text: string | null | undefined): string | null {
+	if (typeof text !== "string") return null;
+	const line = text.split(/\r?\n/u).find((candidate) => candidate.trim().length > 0) ?? "";
+	const sentence = (line.trim().split(/(?<=[.!?])\s+/u)[0] ?? "").replace(/[.!?]+$/u, "").trim();
+	if (sentence.length === 0) return null;
+	if (sentence.length <= COMMIT_SUBJECT_MAX_CHARS) return sentence;
+	const cut = sentence.slice(0, COMMIT_SUBJECT_MAX_CHARS - 1);
+	const space = cut.lastIndexOf(" ");
+	return `${(space > 40 ? cut.slice(0, space) : cut).trimEnd()}…`;
+}
