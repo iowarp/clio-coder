@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { type Dirent, readdirSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import { artifactDefaultPath } from "../../core/artifact-paths.js";
-import { toolEnvSets } from "../../core/bash-exec.js";
+import { probeToolEnv } from "../../core/bash-exec.js";
 import { asDirectoryPathBoundary, resolvePathBoundary, writeRootsCover } from "../../core/path-boundary.js";
 import {
 	canonicalizeExistingPath,
@@ -264,16 +264,28 @@ const BASH_RECOGNIZED_FORM_HINT =
  * that file can add `--follow`, `--pre` and `-z`, which {@link parseRgArgs}
  * refuses on the command line. Admission judges from the command text alone,
  * so an rg that would run with a config is never recognized. The variable is
- * left in the tool environment so the operator's rg keeps working.
+ * left in the tool environment so the operator's rg keeps working. Until the
+ * login profile has been captured the tool environment is unknown, and that
+ * asks the same way.
  */
 const RG_CONFIG_ENV = "RIPGREP_CONFIG_PATH";
 
-const RG_CONFIG_REASON = `ripgrep reads options from the file ${RG_CONFIG_ENV} names, which can add --follow, --pre or -z behind the command text; with it set rg is not recognized as read-only`;
+const RG_CONFIG_REASONS = {
+	set: `ripgrep reads options from the file ${RG_CONFIG_ENV} names, which can add --follow, --pre or -z behind the command text; with it set rg is not recognized as read-only`,
+	pending: `the login environment has not been captured yet, so whether ${RG_CONFIG_ENV} names a ripgrep config that can add --follow, --pre or -z is unknown; rg is not recognized as read-only until it is`,
+} as const;
+
+/** Why rg cannot be recognized under the tool environment it would run with, or null when it can. */
+function rgConfigRefusal(): string | null {
+	const probe = probeToolEnv(RG_CONFIG_ENV);
+	return probe === "unset" ? null : RG_CONFIG_REASONS[probe];
+}
 
 /** The reason a command with an `rg` step is not recognized because of the ripgrep config variable, or none. */
 function rgConfigReasons(command: string): string[] {
-	if (!toolEnvSets(RG_CONFIG_ENV)) return [];
-	return commandArgumentSegments(command).some((args) => args[0] === "rg") ? [RG_CONFIG_REASON] : [];
+	if (!commandArgumentSegments(command).some((args) => args[0] === "rg")) return [];
+	const refusal = rgConfigRefusal();
+	return refusal === null ? [] : [refusal];
 }
 
 const EXECUTION_TOOLS = new Set<string>([ToolNames.Bash, ToolNames.Verify]);
@@ -1868,7 +1880,7 @@ function readOnlyInspectionRule(
 	// real path, so a word carrying one is never recognized.
 	if (words.some((word) => hasUnquotedExpansion(source.slice(word.start, word.end)))) return null;
 	if (GREP_FAMILY.has(command) && recursesDirectories(args)) return null;
-	if (command === "rg" && toolEnvSets(RG_CONFIG_ENV)) return null;
+	if (command === "rg" && rgConfigRefusal() !== null) return null;
 	if (command === "sed") {
 		if (!args.includes("-n")) return null;
 		let sawScript = false;

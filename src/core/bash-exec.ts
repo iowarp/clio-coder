@@ -224,18 +224,26 @@ function buildToolEnv(source: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEn
 const LOGIN_ENV_CAPTURE_TIMEOUT_MS = 10_000;
 
 let loginEnvCapture: Promise<NodeJS.ProcessEnv | null> | null = null;
-/** The settled login capture. Null until the first command has run, and when the capture failed. */
+/** The settled login capture. Null when the capture failed, and meaningful only once {@link loginEnvSettled}. */
 let loginEnvSnapshot: NodeJS.ProcessEnv | null = null;
+let loginEnvSettled = false;
+
+/** `pending` means the login profile has not been captured yet, so what it exports is unknown. */
+export type ToolEnvProbe = "set" | "unset" | "pending";
 
 /**
- * True when the environment a bash command will run with sets `key` to a
- * non-empty value. Admission is synchronous, so it sees the login profile only
- * after the first command has captured it; before that it reads the process
- * environment alone.
+ * Whether the environment a bash command will run with sets `key` to a
+ * non-empty value. Admission is synchronous and the login profile can export
+ * the key, so until the capture has settled an unset key reads `pending`
+ * rather than `unset`. A probe starts the capture, so the answer firms up
+ * without waiting for a first command to run.
  */
-export function toolEnvSets(key: string): boolean {
+export function probeToolEnv(key: string): ToolEnvProbe {
 	const value = buildToolEnv({ ...process.env, ...loginEnvSnapshot })[key];
-	return value !== undefined && value !== "";
+	if (value !== undefined && value !== "") return "set";
+	if (loginEnvSettled) return "unset";
+	void captureLoginEnvOnce();
+	return "pending";
 }
 
 /** NUL-delimited `env -0` output to an env map; null when unusable (no PATH). */
@@ -281,12 +289,17 @@ interface BashSpawnPlan {
 	env: NodeJS.ProcessEnv;
 }
 
-async function bashSpawnPlan(): Promise<BashSpawnPlan> {
+function captureLoginEnvOnce(): Promise<NodeJS.ProcessEnv | null> {
 	loginEnvCapture ??= captureLoginEnv().then((env) => {
 		loginEnvSnapshot = env;
+		loginEnvSettled = true;
 		return env;
 	});
-	const captured = await loginEnvCapture;
+	return loginEnvCapture;
+}
+
+async function bashSpawnPlan(): Promise<BashSpawnPlan> {
+	const captured = await captureLoginEnvOnce();
 	if (captured === null) return { mode: "-c", env: buildToolEnv() };
 	// Captured (login-transformed) values win; keys added to process.env after
 	// the capture still flow through; the CLIO control keys are re-stripped

@@ -12,7 +12,8 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, it } from "node:test";
+import { afterEach, before, beforeEach, describe, it } from "node:test";
+import { runBashCommand } from "../../src/core/bash-exec.js";
 import { ToolNames } from "../../src/core/tool-names.js";
 import { clioConfigDir } from "../../src/core/xdg.js";
 import { classify } from "../../src/domains/safety/action-classifier.js";
@@ -39,7 +40,40 @@ import { createRegistry, type PermissionRequiredMeta } from "../../src/tools/reg
 import { writeTool } from "../../src/tools/write.js";
 import { type IsolatedClioEnv, isolateClioEnv } from "../harness/scratch-env.js";
 
+// First in the file on purpose: the login capture settles once per process, and the
+// describe below settles it before its own rg cases.
+describe("rg recognition before the login environment is captured", () => {
+	it("asks until the capture settles, then follows what the environment holds", async () => {
+		const dir = mkdtempSync(join(tmpdir(), "clio-coder-safety-pending-"));
+		const saved = process.env.RIPGREP_CONFIG_PATH;
+		delete process.env.RIPGREP_CONFIG_PATH;
+		try {
+			writeFileSync(join(dir, "a.txt"), "x\n");
+			const policy = createSafetyPolicyEngine({ cwd: dir, projectPolicy: loadProjectSafetyPolicy(dir) });
+			const evaluate = () => policy.evaluate({ tool: ToolNames.Bash, args: { command: "rg x a.txt" } });
+			const pending = evaluate();
+			strictEqual(pending.execRecognition !== "recognized", true, "an uncaptured login profile may export the variable");
+			strictEqual(
+				pending.reasons?.some((reason) => reason.includes("not been captured")),
+				true,
+			);
+			await runBashCommand("true", { cwd: dir });
+			strictEqual(
+				evaluate().reasons?.some((reason) => reason.includes("not been captured")),
+				false,
+			);
+		} finally {
+			if (saved !== undefined) process.env.RIPGREP_CONFIG_PATH = saved;
+			rmSync(dir, { recursive: true, force: true });
+		}
+	});
+});
+
 describe("safety gate boundary", () => {
+	before(async () => {
+		await runBashCommand("true");
+	});
+
 	let originalCwd: string;
 	let scratch: string;
 	let isolated: IsolatedClioEnv;
