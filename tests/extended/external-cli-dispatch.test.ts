@@ -63,7 +63,12 @@ test("managed Codex CLI dispatch seals success and cancellation receipts", { tim
 	settings.fleet.retry.maxRetries = 0;
 	settings.safety.autonomy = "default";
 	const bundle = makeDispatchBundle(
-		dispatchStubContext({ settings, runtime: codexCliRuntime, agentTools: [], useRuntimeDefaultAgentBudget: true }),
+		dispatchStubContext({
+			settings,
+			runtime: codexCliRuntime,
+			agentTools: ["read", "write"],
+			useRuntimeDefaultAgentBudget: true,
+		}),
 	);
 	await bundle.extension.start();
 	try {
@@ -146,7 +151,12 @@ for (const event of [
 	settings.fleet.retry.maxRetries = 0;
 	settings.safety.autonomy = "default";
 	const bundle = makeDispatchBundle(
-		dispatchStubContext({ settings, runtime: piCliRuntime, agentTools: [], useRuntimeDefaultAgentBudget: true }),
+		dispatchStubContext({
+			settings,
+			runtime: piCliRuntime,
+			agentTools: ["read", "write"],
+			useRuntimeDefaultAgentBudget: true,
+		}),
 	);
 	await bundle.extension.start();
 	try {
@@ -226,7 +236,12 @@ test("external edits distinguish current checkout, preserved worktree, and faile
 	settings.fleet.retry.maxRetries = 0;
 	settings.safety.autonomy = "default";
 	const bundle = makeDispatchBundle(
-		dispatchStubContext({ settings, runtime: codexCliRuntime, agentTools: [], useRuntimeDefaultAgentBudget: true }),
+		dispatchStubContext({
+			settings,
+			runtime: codexCliRuntime,
+			agentTools: ["read", "write"],
+			useRuntimeDefaultAgentBudget: true,
+		}),
 	);
 	await bundle.extension.start();
 	try {
