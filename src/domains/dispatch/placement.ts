@@ -105,7 +105,7 @@ export function createFleetPlacementResolver(
 			};
 		};
 
-		const projectRoot = req.cwd ?? process.cwd();
+		const projectRoot = req.taskWorktree?.root ?? req.cwd ?? process.cwd();
 
 		if (requested !== null) {
 			if (requested === LOCAL_NODE_ID) return localPlacement();
@@ -151,7 +151,7 @@ export function createFleetPlacementPreviewResolver(
 		const remote = (node: FleetNodeSettings): FleetPlacementPreview => ({
 			node: { id: node.id, kind: "ssh", host: node.host },
 		});
-		const projectRoot = req.cwd ?? process.cwd();
+		const projectRoot = req.taskWorktree?.root ?? req.cwd ?? process.cwd();
 
 		if (requested !== null) {
 			if (requested === LOCAL_NODE_ID) return local();

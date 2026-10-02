@@ -62,7 +62,11 @@ export async function verifyFleetProject(
 			lines.includes(`roots=${identity}`) &&
 			lines.includes("clean=yes")
 		) {
-			return { kind: "independent", head, reason: "matching clean checkout; remote mutations cannot be returned yet" };
+			return {
+				kind: "independent",
+				head,
+				reason: "matching clean checkout; mutations require an isolated task worktree and SSH return",
+			};
 		}
 		return {
 			kind: "unverified",
@@ -75,10 +79,14 @@ export async function verifyFleetProject(
 	}
 }
 
-export function assertFleetProjectAuthority(project: FleetProjectVerification, readOnly: boolean): void {
+export function assertFleetProjectAuthority(
+	project: FleetProjectVerification,
+	readOnly: boolean,
+	isolatedWorktree = false,
+): void {
 	if (project.kind === "unverified") throw new Error(`dispatch: admission denied: ${project.reason}`);
-	if (project.kind === "independent" && !readOnly)
+	if (project.kind === "independent" && !readOnly && !isolatedWorktree)
 		throw new Error(
-			"dispatch: admission denied: this node has an independent checkout; mutating workers require verified shared storage until the SSH change return path is supported. Use a read-only worker or node 'local'.",
+			"dispatch: admission denied: this node has an independent checkout; mutating workers require worktree: true for verified SSH change return. Use an isolated task worktree, a read-only worker or node 'local'.",
 		);
 }

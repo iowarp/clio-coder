@@ -13,7 +13,7 @@ const HELP = `clio-coder fleet nodes <command>
   test <id> [--record] [--json]   probe without remote writes; --record updates local eligibility
 
 A registered node needs a passing recorded check before dispatch.
-Exact Clio versions and project paths must match. Independent checkouts must share clean Git history and commit; mutations need shared storage. Labels are operator declarations.
+Exact Clio versions and project paths must match. Independent checkouts must share clean Git history and commit; independent-checkout mutations require worktree: true and return commits through SSH into guarded application. Labels are operator declarations.
 `;
 
 function parse(

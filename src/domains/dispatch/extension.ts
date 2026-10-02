@@ -259,6 +259,12 @@ import {
 	isInfrastructureFailure,
 	type RetryDecision,
 } from "./failure-classification.js";
+import {
+	cleanupFleetChangeReturn,
+	type FleetChangeReturn,
+	importFleetChanges,
+	prepareFleetChangeReturn,
+} from "./fleet-change-return.js";
 import { routeFactVerdict } from "./fleet-preflight.js";
 import { assertFleetProjectAuthority, verifyFleetProject } from "./fleet-project-verification.js";
 import { competeStanceLiner, isBoundedGateRolePrompt } from "./gate-role-prompts.js";
@@ -6112,11 +6118,14 @@ export function createDispatchBundle(
 		await assertBudgetAdmitsRoute(req, lifecycle.target.effectivePricing, settings, preparation?.signal);
 
 		const placement = resolveNode(req) ?? null;
+		let remoteReturn: FleetChangeReturn | undefined;
+		let returnedCommit: string | undefined;
 		if (placement?.node.kind === "ssh") {
 			const node = settings?.fleet.nodes.find((item) => item.id === placement.node.id);
 			if (!node) throw new Error("dispatch: node configuration disappeared before project verification");
-			const project = await verifyFleetProject(node, req.cwd ?? process.cwd(), true);
-			assertFleetProjectAuthority(project, lifecycle.readOnly);
+			const project = await verifyFleetProject(node, req.taskWorktree?.root ?? req.cwd ?? process.cwd(), true);
+			assertFleetProjectAuthority(project, lifecycle.readOnly, req.taskWorktree !== undefined);
+			if (project.kind === "independent" && req.taskWorktree) remoteReturn = { node, worktree: req.taskWorktree };
 		}
 		assertPlannedNodeIdentity(req, placement?.node ?? { id: "local", kind: "local" });
 		const effectiveRoute = {
@@ -6393,6 +6402,7 @@ export function createDispatchBundle(
 					: null;
 			const adopted = held?.adopt(spec, spawnOptions) ?? null;
 			adoptedHeldWorker = adopted !== null;
+			if (remoteReturn) await prepareFleetChangeReturn(remoteReturn.node, remoteReturn.worktree);
 			worker = adopted ?? (placement?.spawn ?? spawnWorker)(spec, spawnOptions);
 		} catch (error) {
 			leaseSlot.release();
@@ -7435,6 +7445,23 @@ export function createDispatchBundle(
 					finalDetail = `${detail}; ${permissionDenialDetail}`;
 					failureMessage = permissionDenialDetail;
 				}
+				if (remoteReturn && finalOutcome === "succeeded") {
+					try {
+						returnedCommit = await importFleetChanges(
+							remoteReturn,
+							lifecycle.pathScope.writeBoundaries,
+							getProtectedArtifactState().artifacts.map((artifact) => {
+								const root = remoteReturn.worktree.root;
+								const rel = relative(root, artifact.path);
+								return rel.startsWith("..") || isAbsolute(rel) ? artifact.path : resolvePath(remoteReturn.worktree.path, rel);
+							}),
+						);
+					} catch (error) {
+						finalOutcome = "failed";
+						finalDetail = `SSH change return failed: ${error instanceof Error ? error.message : String(error)}. Remote ${placed.id} branch ${remoteReturn.worktree.branch} at ${remoteReturn.worktree.path} is preserved.`;
+						failureMessage = finalDetail;
+					}
+				}
 				const finishContract = assessDispatchFinishContract();
 				if (finishContract?.rigor === "high" && finishContract.assessment.kind === "engage" && outcome === "succeeded") {
 					evidence.qualityGateFailure = true;
@@ -7871,6 +7898,16 @@ export function createDispatchBundle(
 					}
 				}
 				if (hostVerification !== undefined) receiptDraft.hostVerification = hostVerification;
+				if (remoteReturn && worktreeReceipt)
+					worktreeReceipt = {
+						...worktreeReceipt,
+						detail: [
+							worktreeReceipt.detail,
+							`SSH return from ${placed.id}: branch ${remoteReturn.worktree.branch}, path ${remoteReturn.worktree.path}, commit ${returnedCommit ?? "not imported"}; remote work preserved unless the guarded local application succeeds`,
+						]
+							.filter(Boolean)
+							.join("; "),
+					};
 				if (worktreeReceipt !== undefined) receiptDraft.worktree = worktreeReceipt;
 				const ledgerPatch: Partial<RunEnvelope> = {
 					status,
@@ -7952,6 +7989,7 @@ export function createDispatchBundle(
 				await ledgerRef.persist();
 				if (worktreeReceipt?.applied === true && req.taskWorktree !== undefined) {
 					try {
+						if (remoteReturn && returnedCommit) await cleanupFleetChangeReturn(remoteReturn, returnedCommit);
 						cleanupTaskWorktree(req.taskWorktree, true);
 					} catch (cleanupError) {
 						reportDispatchDiagnostic(`clean applied task worktree ${req.taskWorktree.runId}`, cleanupError);
