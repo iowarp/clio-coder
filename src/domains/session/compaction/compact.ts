@@ -34,6 +34,8 @@ import { findCutPoint } from "./cut-point.js";
 import { DEFAULT_KEEP_RECENT_TOKENS, DEFAULT_RESERVE_TOKENS } from "./defaults.js";
 import { type ContinuityNoteCost, calculateContextTokens, estimateTokens, getLastAssistantUsage } from "./tokens.js";
 
+export const COMPACTION_SUMMARY_MAX_TOKENS = 8192;
+
 interface FileOperations {
 	read: Set<string>;
 	modified: Set<string>;
@@ -1050,7 +1052,11 @@ export async function compact(input: CompactInput): Promise<CompactResult> {
 	// decides; refusing it would leave a reactive overflow compaction with no way out.
 	const maxTokens =
 		Number.isFinite(input.model.maxTokens) && input.model.maxTokens >= 1
-			? Math.min(Math.floor(input.model.maxTokens), Math.max(1024, Math.floor(reserveTokens * 0.8)))
+			? Math.min(
+					COMPACTION_SUMMARY_MAX_TOKENS,
+					Math.floor(input.model.maxTokens),
+					Math.max(1024, Math.floor(reserveTokens * 0.8)),
+				)
 			: undefined;
 	const summaryParts: string[] = [];
 	let usage: CompactionUsage | undefined;

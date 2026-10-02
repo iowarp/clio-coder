@@ -600,6 +600,16 @@ describe("compaction working-set provider boundary", () => {
 		strictEqual(calls.length, 1);
 	});
 
+	it("caps generated summaries at 8192 tokens on a large-output route", async () => {
+		await compact({
+			entries: evictedHistory(),
+			model: model(131072, 32768),
+			reserveTokens: 65536,
+			keepRecentTokens: 10000,
+		});
+		strictEqual(calls[0]?.maxTokens, 8192);
+	});
+
 	it("caps summary output at the resolved model limit", async () => {
 		await compact({ entries: evictedHistory(), model: model(32768, 512), reserveTokens: 16384, keepRecentTokens: 10000 });
 		strictEqual(calls[0]?.maxTokens, 512);

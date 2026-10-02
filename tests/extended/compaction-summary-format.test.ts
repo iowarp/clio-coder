@@ -90,6 +90,24 @@ describe("compaction checkpoint format and semantic replay", () => {
 		}
 	});
 
+	it("replays the whole checkpoint beyond the ordinary replay cap", () => {
+		const summary = `${valid}\n${"x".repeat(25000)}\nEND_CHECKPOINT_SENTINEL`;
+		const messages = buildModelReplayAgentMessagesFromTurns([
+			{
+				kind: "compactionSummary",
+				turnId: "checkpoint",
+				parentTurnId: null,
+				timestamp: "2026-09-07T00:00:00Z",
+				summary,
+				firstKeptTurnId: "",
+				tokensBefore: 10000,
+			},
+		]);
+		const replay = JSON.stringify(messages);
+		ok(replay.includes("END_CHECKPOINT_SENTINEL"));
+		ok(replay.includes("x".repeat(25000)));
+	});
+
 	it("replays an archived checkpoint through the actual prompt and preserves its named facts", async () => {
 		const fixture = JSON.parse(
 			readFileSync(new URL("../fixtures/compaction/recorded-checkpoint.json", import.meta.url), "utf8"),

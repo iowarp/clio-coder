@@ -1285,7 +1285,7 @@ export function buildReplayAgentMessagesFromTurns(
 				appendContextMessage(out, "user", branchContextText(entry), entry.timestamp);
 				break;
 			case "compactionSummary":
-				appendContextMessage(out, "user", compactionContextText(entry), entry.timestamp);
+				out.push(makeTextMessage("user", compactionContextText(entry), entry.timestamp));
 				if (entry.userContext && (!latestOperator || latestOperator.turnId === entry.userContext.turnId))
 					out.push(
 						makeTextMessage("user", `Active user instructions (verbatim):\n${entry.userContext.text}`, entry.timestamp),
