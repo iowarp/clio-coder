@@ -2372,7 +2372,11 @@ function settledStepLine(step: ToolExecutionFinished, width: number, unresolved 
 	const scope = scopeText === null ? "" : ` in ${truncate(sanitizeCallTargetText(scopeText), ARG_PREVIEW_LIMIT)}`;
 	// A step whose `$from` input could not be resolved never ran; its object
 	// is the unresolved request, so say so instead of implying execution.
-	const blocked = unresolved ? toolMeta(" · input unresolved, not run") : step.outcome === "blocked" ? toolMeta(" · blocked") : "";
+	const blocked = unresolved
+		? toolMeta(" · input unresolved, not run")
+		: step.outcome === "blocked"
+			? toolMeta(" · blocked")
+			: "";
 	return `${glyph} ${name}${object.length > 0 ? ` ${object}` : ""}${scope}${blocked}${unresolved ? "" : ledgerTail(step, row).facts}`;
 }
 
