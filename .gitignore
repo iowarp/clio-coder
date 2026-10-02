@@ -19,8 +19,8 @@ __pycache__/
 .env.local
 .DS_Store
 
-# Agent and tool state. Handbooks for local agents stay local; site/.gitignore
-# re-includes the site's own AGENTS.md.
+# Agent and tool state. Agent handbooks (AGENTS.md, CLAUDE.md, CLIO-CODER.md) stay
+# local everywhere in the tree and are never tracked.
 .claude/
 .clio-coder/
 .clio/
