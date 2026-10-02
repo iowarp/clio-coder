@@ -109,7 +109,13 @@ for (const scenario of ["first-pass", "repaired", "exhausted"] as const) {
 							? null
 							: { name: "dispatch", arguments: fixture.dispatch, id: "pipeline" };
 					}
-					if (!isScout(request) || repairs(request).length > 0) return null;
+					// A dependent Documenter that executes no tool seals worker_no_work.
+					if (!isScout(request)) {
+						return messages(request).some((message) => message.role === "tool")
+							? null
+							: { name: "read", arguments: { path: "findiff/grids.py" }, id: "read-dependent" };
+					}
+					if (repairs(request).length > 0) return null;
 					for (const [id, path] of [
 						["read-grids", "findiff/grids.py"],
 						["read-interface", "findiff/interface.py"],
@@ -143,7 +149,8 @@ for (const scenario of ["first-pass", "repaired", "exhausted"] as const) {
 			settings.fleet.default.model = "mock-model";
 			writeFileSync(settingsPath, stringify(settings));
 			const result = await run(["run", "--json", "--autonomy", "yolo", fixture.prompt], workspace, env);
-			strictEqual(result.code, 0, result.stderr);
+			// A Scout that exhausts its repairs is a dispatched worker that did not deliver.
+			strictEqual(result.code, scenario === "exhausted" ? 1 : 0, result.stderr);
 			const requests = server.requests.filter((request) => request.stream !== false);
 			const scoutRequests = requests.filter(isScout);
 			ok(scoutRequests.length > 0, result.stdout);
@@ -167,7 +174,7 @@ for (const scenario of ["first-pass", "repaired", "exhausted"] as const) {
 			if (feedback.length > 0) {
 				match(
 					String(feedback[1]?.content),
-					/not grounded in a live read: findiff\/interface.py:64 \(this run read only 1-63\)/u,
+					/Scout citation is past end of file: findiff\/interface.py:64; current file has 63 lines/u,
 				);
 				match(String(feedback[1]?.content), /Observed read ranges:/u);
 				match(String(feedback[1]?.content), /Required arguments schema:/u);
@@ -197,7 +204,7 @@ for (const scenario of ["first-pass", "repaired", "exhausted"] as const) {
 			const dependentRequests = requests.filter((request) => !isMain(request) && !isScout(request));
 			strictEqual(
 				dependentRequests.length,
-				succeeded ? 1 : 0,
+				succeeded ? 2 : 0,
 				"dependent must really execute only after successful Scout validation",
 			);
 			if (succeeded) {
