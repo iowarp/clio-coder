@@ -112,7 +112,7 @@ The rule is to put each model on a processor nothing else is using. A turn makes
 A Strix Halo machine has three processors on one package: the integrated GPU, the XDNA2 NPU and the CPU cores. All three read the same 128 GB pool, so placing a model moves no weights across a bus, and the budget is the sum of what is resident.
 
 - **iGPU: the chat model.** It needs the bandwidth and the large matrix units. Gemma-4-26B held about 27 GiB of committed GPU memory while the deciders above ran beside it.
-- **NPU: the decider.** It is idle while the iGPU generates. It runs the Strands Decider 2B at about half a second per question, so bind it to sites whose deadlines allow that: `toolResult` (1500 ms), `consult` (3000 ms), `turnEnd` and the approval-card advisory (5000 ms). Leave `turn` (600 ms) unbound on it. Two engine processes serialize on the NPU, so run one decision server there.
+- **NPU: the decider.** It is idle while the iGPU generates. It runs the Strands Decider 2B at about half a second per question, so bind it to sites whose deadlines allow that: `toolResult` (1500 ms), `consult` (3000 ms), `turnEnd` and the approval-card advisory (5000 ms). Leave `turn` (600 ms) unbound on it. Two engine processes serialize on the NPU, so run one decision server there. The research server answers one question per prefill, so the six `turnEnd` questions took 3.6 to 5.0 s; nothing waits on `turnEnd`, so give that binding a longer `timeoutMs` rather than let a reading time out at the 5000 ms default.
 - **CPU: Julia-1, or nothing.** The CPU suits a small encoder such as Julia-1 (144M parameters, 550 MiB in float32), or the rules-only tier of [Proactive Memory](proactive-memory.md), which makes no model calls. The 2B decider on the CPU took 7.8 to 8.4 s at 1,000 tokens, past every site deadline. Julia-1 reads options of at most 48 tokens, which Clio proves by their byte length, so in this release it answers `turn` (whose compact wordings fit) and short `consult` questions and abstains on the other sites before sending anything.
 - **When latency matters more than isolation,** the decider on the iGPU is about four times faster than on the NPU for short states and twice as fast at 1,000 tokens, and it stayed resident beside Gemma-4-26B. It then shares the iGPU with the chat model, so a decision and a generation can wait for each other.
 
@@ -155,7 +155,7 @@ systemOne:
     consult: julia
     toolCall: gpu
     toolResult: npu
-    turnEnd: npu
+    turnEnd: { engine: npu, timeoutMs: 8000 }
     drafts: npu
 ```
 
