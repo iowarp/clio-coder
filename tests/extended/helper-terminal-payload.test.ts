@@ -33,6 +33,31 @@ test("Anthropic terminal handoff disables thinking and parallel calls", () => {
 		{ tools: [{ name }], tool_choice: { type: "tool", name, disable_parallel_tool_use: true } },
 	);
 });
+for (const id of ["claude-sonnet-5-5", "claude-opus-5-5", "claude-fable-5-1", "claude-mythos-5-1"]) {
+	test(`${id} terminal handoff uses auto and preserves Anthropic thinking`, () => {
+		deepStrictEqual(
+			patchTerminalToolPayload(
+				{ tools: [{ name: "write" }, { name }], thinking: { type: "adaptive" }, output_config: { effort: "high" } },
+				{ ...model("anthropic-messages"), id },
+				name,
+			),
+			{
+				tools: [{ name }],
+				thinking: { type: "adaptive" },
+				output_config: { effort: "high" },
+				tool_choice: { type: "auto", disable_parallel_tool_use: true },
+			},
+		);
+		deepStrictEqual(
+			patchTerminalToolPayload(
+				{ toolConfig: { tools: [{ toolSpec: { name: "write" } }, { toolSpec: { name } }] } },
+				{ ...model("bedrock-converse-stream"), id: `anthropic.${id}` },
+				name,
+			),
+			{ toolConfig: { tools: [{ toolSpec: { name } }], toolChoice: { auto: {} } } },
+		);
+	});
+}
 test("Responses terminal handoff uses native function choice", () => {
 	deepStrictEqual(
 		patchTerminalToolPayload(

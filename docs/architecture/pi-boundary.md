@@ -1,6 +1,6 @@
 # Pi SDK Boundary
 
-Clio Coder pins Pi 0.99.1 as its provider, agent-loop, and terminal SDK. This
+Clio Coder pins Pi 1.0.0 as its provider, agent-loop, and terminal SDK. This
 page describes SDK primitives and Clio-owned behavior. Review these boundaries
 when upgrading Pi.
 
@@ -8,15 +8,15 @@ when upgrading Pi.
 
 | Pi export or surface | Clio file or function | Action | Reason |
 | --- | --- | --- | --- |
-| pi-agent-core `truncateHead`, `truncateTail`, `truncateLine`, and `formatSize` | [truncate.ts](../../src/tools/truncate.ts) | Route through Pi. | Pi owns UTF-8-safe truncation. Clio retains its 16 KiB default and `splitLinesForCounting`, which Pi does not export. |
+| Former pi-agent-core `truncateHead`, `truncateTail`, `truncateLine`, and `formatSize` | [truncate.ts](../../src/engine/truncate.ts) and [truncate.ts](../../src/tools/truncate.ts) | Keep the v0.99.1 leaf code in the engine. | Pi 1.0.0 removed these exports with its experimental harness. The attributed MIT copy preserves UTF-8 behavior and its 50 KiB leaf default; Clio tools continue to supply their own 64 KiB default and line counting. |
 | pi-ai `StringEnum` | [ai.ts](../../src/engine/ai.ts) | Route through Pi. | Tools import Pi's compact provider-safe schema through the engine boundary. |
-| pi-agent-core `COMPACTION_SUMMARY_PREFIX`, `COMPACTION_SUMMARY_SUFFIX`, `BRANCH_SUMMARY_PREFIX`, `BRANCH_SUMMARY_SUFFIX`, and `bashExecutionToText` | [chat-renderer.ts](../../src/interactive/chat-renderer.ts) through [messages.ts](../../src/engine/messages.ts) | Route through Pi. | Replay text must match Pi's `convertToLlm` wording while Clio keeps its `SessionEntry` mapping and replay bounds. |
+| Former pi-agent-core summary markers and `bashExecutionToText` | [chat-renderer.ts](../../src/interactive/chat-renderer.ts) through [messages.ts](../../src/engine/messages.ts) | Keep the exact v0.99.1 replay wording. | Pi 1.0.0 removed these exports. The attributed MIT leaf copy preserves stored-session replay while Clio keeps its `SessionEntry` mapping and replay bounds. |
 | pi-tui `stripTerminalSequences` | [preview.ts](../../src/domains/session/tree/preview.ts) | Keep the Clio sanitizer. | Pi removes SGR and OSC sequences but intentionally leaves private-mode CSI and character-set escapes that may occur in captured tool output. |
 | pi-ai `isRetryableAssistantError` and `retryDelayMs` | [retry.ts](../../src/domains/session/retry.ts) | Route generic classification and capped exponential backoff through Pi; keep the Clio delta. | Clio additionally recognizes self-hosted model loading and enforces its separate 15-second floor. |
-| pi-ai `retryAssistantCall` and pi-agent-core `AgentHarness` retry | [chat-loop.ts](../../src/interactive/chat-loop.ts) and [turn-recovery.ts](../../src/interactive/turn-recovery.ts) | Keep Clio orchestration. | Clio retries `agent.continue()` with a visible cancellable countdown. `retryAssistantCall` wraps one completion, and `AgentHarness` requires Pi's session repository. |
+| pi-ai `retryAssistantCall`; former pi-agent-core `AgentHarness` retry | [chat-loop.ts](../../src/interactive/chat-loop.ts) and [turn-recovery.ts](../../src/interactive/turn-recovery.ts) | Keep Clio orchestration. | Clio retries `agent.continue()` with a visible cancellable countdown. `retryAssistantCall` wraps one completion; Pi 1.0.0 removed `AgentHarness`. |
 | pi-ai `StreamOptions.samplingParams`, `OpenAICompletionsOptions.thinkingBudgets`, and `supportsThinkingTokenBudget` | [openai-completions.ts](../../src/engine/apis/openai-completions.ts) | Route request controls through Pi. | Clio retains only catalog-to-option selection and runtime-specific payload fields. |
 | pi-ai `compat.thinkingFormat` | `src/engine/apis/openai-completions.ts` payload adapters | Keep the LM Studio and llama.cpp deltas. | Pi has no LM Studio TTL or draft-model field and no llama.cpp `cache_prompt` field. |
-| pi-agent-core `validateToolArguments` | `src/engine/apis/openai-completions.ts` malformed-call guard | Keep the Clio diagnostic. | Pi returns a validation result so a model can retry. Clio stops a turn from a repeatedly malformed local server and gives the operator a runtime-specific remedy. |
+| pi-ai `validateToolArguments` | `src/engine/apis/openai-completions.ts` malformed-call guard | Keep the Clio diagnostic. | Pi returns a validation result so a model can retry. Clio stops a turn from a repeatedly malformed local server and gives the operator a runtime-specific remedy. |
 | pi-ai `Usage.reasoning` | `src/engine/apis/openai-completions.ts` reasoning estimate | Keep the Clio fallback. | Some self-hosted servers stream thinking but report no reasoning usage. Clio fills only an absent value. |
 | No Pi equivalent | `src/engine/apis/openai-completions.ts` sentinel filters, [harmony-response.ts](../../src/engine/harmony-response.ts), and [gemma-channel-filter.ts](../../src/engine/gemma-channel-filter.ts) | Keep Clio ownership. | Pi has no Harmony or Gemma channel parser and no tokenizer-sentinel stream filter. |
 | pi-ai `clampMaxTokensToContext` | [output-budget.ts](../../src/engine/apis/output-budget.ts) | Keep the Clio outer budget. | Clio adds its default output budget, a llama.cpp tool-turn cap, and the loaded context window. Pi's conservative clamp still runs underneath. |
@@ -24,19 +24,19 @@ when upgrading Pi.
 | pi-ai `OpenAIResponsesOptions.reasoningSummary` | `src/engine/provider-payload.ts` OpenAI reasoning-summary patch | Keep the Clio patch. | Pi's `Agent` path calls `streamSimple`, which fixes this field to `auto` and exposes no caller option. |
 | No Pi equivalent | [ollama-native.ts](../../src/engine/apis/ollama-native.ts), [lmstudio.ts](../../src/engine/apis/lmstudio.ts), and [llamacpp-residency.ts](../../src/engine/apis/llamacpp-residency.ts) | Keep Clio ownership. | Pi's Ollama provider uses OpenAI completions and has no target residency manager. |
 | pi-ai `CredentialStore` and `Models.getAuth` | [storage.ts](../../src/domains/providers/auth/storage.ts) | Keep Clio ownership. | Clio's locked YAML store, damage control, target-first registry, and runtime overrides are product boundaries. |
-| pi-ai `createModels`, `createProvider`, and `ModelsStore` | `src/domains/providers/**` | Keep Clio ownership. | Targets, nodes, probing, residency, ALCF, and fleet placement are Clio concepts rather than provider-keyed SDK state. |
+| pi-ai `createModels` from `/models`, `createProvider`, and `ModelsStore` | [models.ts](../../src/engine/models.ts) and `src/domains/providers/**` | Adopt the lightweight entry point; keep Clio target policy. | The engine creates the SDK catalog without evaluating its root entry point. Targets, nodes, probing, residency, ALCF, and fleet placement remain Clio concepts. |
 | pi-ai `Provider.auth.oauth` | [oauth.ts](../../src/engine/oauth.ts) | Route built-in OAuth through Pi and keep ALCF. | Pi owns provider OAuth implementations. Clio adds the ALCF science-provider flow. |
-| pi-agent-core `findCutPoint` and `findTurnStartIndex` | [cut-point.ts](../../src/domains/session/compaction/cut-point.ts) | Keep Clio ownership. | These public root exports accept Pi v4 `Entry[]`; Clio uses its own `SessionEntry` union, ledger indexes, tool-batch boundaries, and small-session fallback. Reuse requires preserving those contracts through an entry/index projection, not a direct import substitution. |
-| pi-agent-core `estimateTokens` and `estimateContextTokens` | [tokens.ts](../../src/domains/session/compaction/tokens.ts) and [context-accounting.ts](../../src/domains/session/context-accounting.ts) | Keep Clio's outer accounting. | Pi also anchors estimates to provider usage. Clio additionally accounts for framing, system prompts, tool schemas, pending input, usage invalidation, and the greater of projected and anchored totals. Both use heuristics for unmeasured content; neither character estimate guarantees an upper bound for every tokenizer. |
-| pi-agent-core `generateSummary`, `generateSummaryWithUsage`, and `serializeConversation` | [compact.ts](../../src/domains/session/compaction/compact.ts) and [branch-summary.ts](../../src/domains/session/compaction/branch-summary.ts) | Keep the current summary boundary pending a tested adapter. | The public summary generators accept `AgentMessage[]`, `Models`, and Pi harness context; `serializeConversation` accepts provider messages. Clio additionally owns bounded cumulative checkpoints, turn-prefix summaries, cancellation, usage settlement, and publication checks. The internal `SUMMARIZATION_SYSTEM_PROMPT` constant is not a public root export. |
-| pi-agent-core `JsonlSessionRepo`, v4 `Session`, and `AgentHarness` | [session.ts](../../src/engine/session.ts) and `src/domains/session/**` | Keep Clio ownership. | The on-disk ledger, active tree, fork behavior, receipts, and evidence are Clio's durable spine. |
-| pi-agent-core `loadSkills`, `loadPromptTemplates`, `parseCommandArgs`, `substituteArgs`, and `formatSkillsForSystemPrompt` | [loader.ts](../../src/domains/resources/skills/loader.ts) and [loader.ts](../../src/domains/resources/prompts/loader.ts) | Keep Clio loaders and reuse leaf primitives when compatible. | Clio owns marketplace pinning, trust, activation records, and prompt-source policy. Argument substitution can use Pi without replacing the loader. |
-| pi-agent-core harness tools, `executeShellWithCapture`, and `sanitizeBinaryOutput` | `src/tools/**` | Keep Clio ownership. | Tool admission, observation budgets, safety rails, and result shaping apply across interactive, headless, ACP, and worker runs. |
+| Former pi-agent-core `findCutPoint` and `findTurnStartIndex` | [cut-point.ts](../../src/domains/session/compaction/cut-point.ts) | Keep Clio ownership. | Pi 1.0.0 removed the experimental harness exports. Clio owns its `SessionEntry` union, ledger indexes, tool-batch boundaries, and small-session fallback. Reference-agent code is an application implementation, not an SDK replacement. |
+| Former pi-agent-core `estimateTokens` and `estimateContextTokens` | [tokens.ts](../../src/domains/session/compaction/tokens.ts) and [context-accounting.ts](../../src/domains/session/context-accounting.ts) | Keep Clio's outer accounting. | Pi 1.0.0 removed these harness exports. Clio anchors estimates to provider usage and additionally accounts for framing, system prompts, tool schemas, pending input, usage invalidation, and the greater of projected and anchored totals. Unmeasured content remains heuristic; a character estimate does not guarantee an upper bound for every tokenizer. |
+| Former pi-agent-core `generateSummary`, `generateSummaryWithUsage`, and `serializeConversation` | [compact.ts](../../src/domains/session/compaction/compact.ts) and [branch-summary.ts](../../src/domains/session/compaction/branch-summary.ts) | Keep Clio summary ownership. | Pi 1.0.0 removed these harness exports. Clio owns bounded cumulative checkpoints, turn-prefix summaries, cancellation, usage settlement, and publication checks. The reference agent provides design examples, not a direct public SDK adapter. |
+| Former pi-agent-core `JsonlSessionRepo`, v4 `Session`, and `AgentHarness` | [session.ts](../../src/engine/session.ts) and `src/domains/session/**` | Keep Clio ownership. | Pi 1.0.0 removed the experimental harness; pi-durable is not a Clio dependency. The on-disk ledger, active tree, fork behavior, receipts, and evidence remain Clio's durable spine. |
+| Former pi-agent-core skill and prompt loaders, `parseCommandArgs`, and `substituteArgs` | [loader.ts](../../src/domains/resources/skills/loader.ts), [loader.ts](../../src/domains/resources/prompts/loader.ts), and [prompt-templates.ts](../../src/engine/prompt-templates.ts) | Keep Clio loaders and the v0.99.1 argument leaves. | Pi 1.0.0 removed these exports. Clio owns marketplace pinning, trust, activation records, and prompt-source policy. The attributed MIT leaf copy retains positional and quoted parsing; Clio's raw `$ARGUMENTS` wrapper preserves exact user text. |
+| Former pi-agent-core harness tools, `executeShellWithCapture`, and `sanitizeBinaryOutput` | `src/tools/**` | Keep Clio ownership. | Pi 1.0.0 removed these harness exports. Clio tool admission, observation budgets, safety rails, and result shaping apply across interactive, headless, ACP, and worker runs. |
 | No Pi equivalent | [loop-guard.ts](../../src/engine/loop-guard.ts), `src/domains/safety/**`, `src/domains/dispatch/**`, and `src/domains/evidence/**` | Keep Clio ownership. | These surfaces enforce Clio's safety, fleet, receipt, and evidence contracts. |
 | pi-tui `wrapTextWithAnsi` | [termination.ts](../../src/core/termination.ts) | Keep the small ASCII wrapper. | Core cannot import Pi across the engine boundary, and the shutdown notice does not justify another adapter. |
 | No pi-tui transcript model | [chat-panel.ts](../../src/interactive/chat-panel.ts) and [worker-stream.ts](../../src/interactive/worker-stream.ts) | Keep Clio ownership. | Transcript folding, worker cards, and tool-output collapse are application policy. |
 | pi-tui `CombinedAutocompleteProvider` | [slash-autocomplete.ts](../../src/interactive/slash-autocomplete.ts) | Keep Clio command composition. | Clio's declarative slash specification owns parsing, help, and completion consistency. |
-| pi-tui `KeybindingsManager`, `TUI_KEYBINDINGS`, and `Editor.addToHistory` | [keybindings.ts](../../src/domains/config/keybindings.ts) and interactive editor wiring | Route terminal actions through Pi. | Pi owns editor behavior while Clio owns the configured bindings and accepted-input policy. |
+| pi-tui `KeybindingsManager`, `TUI_KEYBINDINGS`, and `Editor.addToHistory` | [keybindings.ts](../../src/domains/config/keybindings.ts) and interactive editor wiring | Route terminal actions through Pi. | Pi owns editor behavior while Clio owns the configured bindings and accepted-input policy. The ambient type-only augmentation lives in [tui-keybindings.d.ts](../../src/engine/tui-keybindings.d.ts); domain action IDs remain Clio-owned. |
 | pi-tui `Markdown`, `renderLatex`, `visibleWidth`, `truncateToWidth`, `wrapTextWithAnsi`, and `stripTerminalSequences` | Interactive Markdown, Mermaid, layout, and width wiring | Route terminal primitives through Pi. | Clio retains theme tokens, Mermaid span styling, and application layout only. |
 | pi-agent-core `prepareNextTurn` / `prepareNextTurnWithContext` (runs only before another assistant turn) | [turn-runtime.ts](../../src/interactive/turn-runtime.ts) continuation guard and [turn-context.ts](../../src/interactive/turn-context.ts) `postToolContinuationGuard` | Keep `prepareNextTurn`; no adaptation. | The guard runs only when the transcript tail is a tool result and the loop will continue. End-of-run work runs on `agent_end`. |
 | pi-agent-core `Agent.reset()` (rejects during an active run) | `src/interactive/chat-loop.ts` `resetForSession` and [session-switch-settlement.ts](../../src/interactive/session-switch-settlement.ts) | Keep Clio's settle-then-replace reset. | Clio never calls `Agent.reset()`. Every session reset caller cancels and awaits `whenSettled()` first, then replaces `agent.state.messages`; the bang-command path waits on `isStreaming()` before refreshing. |
@@ -52,7 +52,7 @@ when upgrading Pi.
 
 ## Agent-loop and provider interfaces
 
-The three direct Pi dependencies share the exact 0.87.1 pin. Pi's agent core and
+The three direct Pi dependencies share the exact 1.0.0 pin. Pi's agent core and
 AI providers run stock JavaScript; only pi-tui has a Clio-owned patch. See
 [patch ownership and alternatives](../../patches/README.md).
 
@@ -64,6 +64,22 @@ AI providers run stock JavaScript; only pi-tui has a Clio-owned patch. See
 | Catalog: Claude Opus 5.5, GPT-6 Sol, GPT-6 Luna | Inherited through `listCatalogModelsForRuntime`, so `targets use` and the model picker accept them. Opus 5.5 refuses disabled thinking; select a thinking level for it. |
 | Unknown OpenAI-compatible endpoints default to `supportsStrictMode: false` | Clio declares no constrained sampling, so tool entries only lose their `"strict": false` field. Local runtimes already set the flag explicitly. |
 | Per-model image input limits (`inputLimits.images`) | Inherited from catalog entries; Clio configures none of its own. |
+
+## Pi 1.0.0 adoption and retained deltas
+
+| Upstream change | Clio behavior |
+| --- | --- |
+| Experimental harness removal | Clio keeps `Agent`, agent-loop hooks, and public provider adapters. Sessions, compaction, tools, skills, prompts, and safety stay Clio-owned. Only the consumed v0.99.1 utility leaves were copied; neither pi-coding-agent nor pi-durable is a dependency. |
+| Lightweight `pi-ai/models` | The engine uses the new entry point for `createModels`; provider selection stays explicit. |
+| Anthropic federation adapter | Inherited in Pi, but Clio auth, preflight, and credential discovery are deferred. Clio exposes no federation setup flow in this upgrade. |
+| Copy-code OAuth flow and OAuth logo update | Inherited through Pi's provider OAuth implementation and Clio's existing callback UI. |
+| Strict-preferred schema fallback | Inherited; Clio declares no constrained sampling, so this path is inert for her tools. |
+| Malformed `Retry-After` and z.ai overflow fixes | Inherited through Pi's adapters and public retry/overflow helpers. Clio retains the local-model loading floor and recovery UI. |
+| OpenAI Responses `ctc` replay | Inherited through the provider adapter; Clio persists raw reasoning signatures. |
+| pi-tui `getScreenLines` and Apple Terminal detection | Available upstream; Clio adds no consumer or parallel screen state. |
+| pi-tui ANSI search highlighting, weak token/flatten caches, and slash `trimStart` completion | Inherited while retaining every required patch seam. |
+| Claude Sonnet/Opus 5.5 and Fable/Mythos 5.1 forced-tool rejection | Keep Clio's single-tool automatic-choice fallback for Anthropic and Bedrock. Pi has no equivalent terminal handoff policy. |
+| Deterministic worker sampling | Keep Clio's runtime policy, mapped onto Pi's public sampling options. |
 
 ## Transcript ownership
 
@@ -105,16 +121,15 @@ models that do not support strict sampling.
 | `AssistantMessage.providerThinkingLevel` and Anthropic `supportsMidConvoEffort` | Clio persists historical provider effort with raw assistant content and restores it through rich replay. Pi owns request assembly and signed-thinking recovery. |
 | Scroll styling callbacks and `OverlayHandle.getBounds()` | Clio uses public track/thumb styling callbacks and delegates bounds to the mounted frame. |
 | Component mouse handling and alt-screen controls | Clio composes compatible Pi components and supplies mouse wiring for its custom components. `clearOnShrink` defaults to false. |
-| `AgentTool.replay` | Clio leaves the optional policy unset and uses `Agent` rather than Pi's durable harness. |
+| `AgentTool.replay` | Clio leaves the optional replay policy unset and uses `Agent` with her own durable session spine. |
 | OpenAI-compatible `vllmPriority` | Available through Pi's compatibility setting; Clio has no scheduler-priority setting. |
 
 Environment-key parity includes `qwen-token-plan-individual` →
 `QWEN_TOKEN_PLAN_API_KEY`; Clio has no built-in Qwen runtime.
 
 Clio uses its own session persistence. Worker event projection strips cumulative
-snapshots from deltas while retaining terminal messages. Pi's internal compaction
-file-list helpers are not exported through a supported package subpath, so Clio
-owns its file-list formatter.
+snapshots from deltas while retaining terminal messages. The reference agent's compaction file-list helpers are not public SDK exports, so Clio owns her
+file-list formatter.
 
 ## Thin-wrapper watch list
 
@@ -122,12 +137,12 @@ Review these files first when Pi changes. They intentionally contain little
 behavior and should not grow another implementation of an SDK primitive.
 
 - [api-registry.ts](../../src/engine/api-registry.ts) owns Clio's ordered dispatcher using Pi's public lazy API factories and the provider catalogs selected in [models.ts](../../src/engine/models.ts) for Clio's built-in runtimes. Its dynamic `/compat` bridge exists only for configured out-of-tree runtime plugins that require Pi's process-global registry identity.
-- [env-api-keys.ts](../../src/engine/env-api-keys.ts) pins Pi 0.87.1's synchronous environment-key and ambient-credential discovery behind a parity contract; revisit it on every Pi upgrade until Pi exports that helper directly.
+- [env-api-keys.ts](../../src/engine/env-api-keys.ts) keeps synchronous environment-key and ambient-credential discovery behind a parity contract reviewed against Pi 1.0.0; revisit it on every Pi upgrade until Pi exports that helper directly.
 - [openai-completions.ts](../../src/engine/apis/openai-completions.ts) maps compatibility flags, sampling parameters, and thinking budgets. Its Clio deltas are the local-runtime guards and sentinel, Harmony, and Gemma filters.
 - [provider-payload.ts](../../src/engine/provider-payload.ts) holds the OpenAI Responses reasoning-summary patch and the tool-choice and response-schema payload patches. It does not patch Anthropic thinking.
 - [types.ts](../../src/engine/types.ts) and [ai.ts](../../src/engine/ai.ts) expose erased Pi types and `StringEnum` behind the engine boundary.
 - [retry.ts](../../src/domains/session/retry.ts) wraps `isRetryableAssistantError` and adds the local-model loading rule.
-- [chat-renderer.ts](../../src/interactive/chat-renderer.ts) consumes Pi's compaction, branch, and bash replay wording through [messages.ts](../../src/engine/messages.ts).
+- [chat-renderer.ts](../../src/interactive/chat-renderer.ts) consumes the frozen Pi v0.99.1 compaction, branch, and bash replay wording through [messages.ts](../../src/engine/messages.ts).
 - Interactive Markdown, Mermaid, LaTeX, fullscreen, alternate-screen, and keybinding glue should continue to compose pi-tui primitives.
 
 ## Architecture boundary enforcement and tests
