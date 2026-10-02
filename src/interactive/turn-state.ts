@@ -39,6 +39,8 @@ export interface AgentRuntime {
 }
 
 export interface ChatLoopRunSnapshot {
+	/** Deterministic request refusal, retained for the main-agent receipt. */
+	outcomeCode?: "information_flow_blocked";
 	targetId: string;
 	targetUrl: string | null;
 	runtimeId: string;

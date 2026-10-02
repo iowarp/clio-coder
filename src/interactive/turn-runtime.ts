@@ -610,7 +610,11 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 				const flowViolation =
 					deps.admitFlow?.({ targetId: target.target.id, runtimeId: target.runtime.id, wireModelId: target.wireModelId }) ??
 					null;
-				if (flowViolation !== null) return { block: true, reason: flowViolation };
+				if (flowViolation !== null) {
+					if (state.lastRunSnapshot) state.lastRunSnapshot.outcomeCode = "information_flow_blocked";
+					return { block: true, reason: flowViolation };
+				}
+				if (state.lastRunSnapshot) delete state.lastRunSnapshot.outcomeCode;
 				if (deps.hasQueuedSteering?.() && deps.continuity?.admission().block === false) {
 					const handoff = deps.continuity.admission();
 					if (!handoff.block && handoff.correlationId)

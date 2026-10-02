@@ -584,6 +584,7 @@ async function recordHeadlessMainAgentReceipt(input: {
 	const costUsd = usage?.costUsd ?? 0;
 	const { exitCode, outcome, status } = input.terminal;
 	const outcomeDetail = input.terminal.outcomeDetail ?? input.terminal.failureMessage;
+	const outcomeCode = outcome === "failed" ? snapshot.outcomeCode : undefined;
 	const ledger = openLedger();
 	const envelope = ledger.create({
 		id: input.runId,
@@ -610,6 +611,7 @@ async function recordHeadlessMainAgentReceipt(input: {
 		status,
 		outcome,
 		outcomeDetail,
+		...(outcomeCode === undefined ? {} : { outcomeCode }),
 		lineage,
 		exitCode,
 		tokenCount,
@@ -637,6 +639,7 @@ async function recordHeadlessMainAgentReceipt(input: {
 		runtimeKind: snapshot.runtimeKind,
 		outcome,
 		outcomeDetail,
+		...(outcomeCode === undefined ? {} : { outcomeCode }),
 		lineage,
 		// Host checks belong to this run, independently of any worker it dispatched.
 		verification: deriveReceiptVerification({ toolStats, typedValidations }),
