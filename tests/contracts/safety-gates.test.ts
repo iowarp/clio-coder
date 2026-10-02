@@ -1309,6 +1309,33 @@ describe("safety gate boundary", () => {
 		strictEqual(recognition("rg x ."), "unrecognized", "the root kubeconfig is zero-access");
 	});
 
+	it("asks for rg while the tool environment names a ripgrep config", () => {
+		// The config file can add --follow, --pre and -z, which the recognizer refuses on the command line.
+		writeInspectionFixture();
+		const policy = engine();
+		const evaluate = (command: string) => policy.evaluate({ tool: ToolNames.Bash, args: { command } });
+		const saved = process.env.RIPGREP_CONFIG_PATH;
+		try {
+			process.env.RIPGREP_CONFIG_PATH = join(scratch, "ripgreprc");
+			for (const command of ["rg x src", "rg -n TODO src/a.js", "rg --files", "git log | rg foo"]) {
+				const decision = evaluate(command);
+				strictEqual(decision.execRecognition !== "recognized", true, command);
+				strictEqual(
+					decision.reasons?.some((reason) => reason.includes("RIPGREP_CONFIG_PATH")),
+					true,
+					command,
+				);
+			}
+			strictEqual(evaluate("cat a.txt").execRecognition, "recognized", "only rg depends on the variable");
+			// An empty value is ignored by ripgrep.
+			process.env.RIPGREP_CONFIG_PATH = "";
+			strictEqual(evaluate("rg x src").execRecognition, "recognized");
+		} finally {
+			if (saved === undefined) delete process.env.RIPGREP_CONFIG_PATH;
+			else process.env.RIPGREP_CONFIG_PATH = saved;
+		}
+	});
+
 	it("holds git -C to the workspace even where an exempt read root is readable", () => {
 		// A repository under an exempt root carries a .git/config the operator never
 		// vetted, and Git runs its core.fsmonitor and core.pager on inspection.

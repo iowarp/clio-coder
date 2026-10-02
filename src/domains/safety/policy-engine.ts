@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { type Dirent, readdirSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import { artifactDefaultPath } from "../../core/artifact-paths.js";
+import { toolEnvSets } from "../../core/bash-exec.js";
 import { asDirectoryPathBoundary, resolvePathBoundary, writeRootsCover } from "../../core/path-boundary.js";
 import {
 	canonicalizeExistingPath,
@@ -257,6 +258,23 @@ function matchesRepositoryCommand(command: string): boolean {
  */
 const BASH_RECOGNIZED_FORM_HINT =
 	"Recognized forms run without asking: read-only inspection (cat, head, tail, grep, rg, find, ls, wc, sed -n, git log and the like) on workspace paths, joined by &&, ||, ; or | and redirected only to /dev/null, and && chains of recognized steps, with cwd passed as the cwd argument instead of a leading cd.";
+
+/**
+ * ripgrep reads extra options from the file `RIPGREP_CONFIG_PATH` names, and
+ * that file can add `--follow`, `--pre` and `-z`, which {@link parseRgArgs}
+ * refuses on the command line. Admission judges from the command text alone,
+ * so an rg that would run with a config is never recognized. The variable is
+ * left in the tool environment so the operator's rg keeps working.
+ */
+const RG_CONFIG_ENV = "RIPGREP_CONFIG_PATH";
+
+const RG_CONFIG_REASON = `ripgrep reads options from the file ${RG_CONFIG_ENV} names, which can add --follow, --pre or -z behind the command text; with it set rg is not recognized as read-only`;
+
+/** The reason a command with an `rg` step is not recognized because of the ripgrep config variable, or none. */
+function rgConfigReasons(command: string): string[] {
+	if (!toolEnvSets(RG_CONFIG_ENV)) return [];
+	return commandArgumentSegments(command).some((args) => args[0] === "rg") ? [RG_CONFIG_REASON] : [];
+}
 
 const EXECUTION_TOOLS = new Set<string>([ToolNames.Bash, ToolNames.Verify]);
 
@@ -1163,6 +1181,7 @@ function evaluateBashPolicy(
 			reasonCode: "bash-shell-operators",
 			reasons: [
 				"shell operators defeat per-command recognition; the autonomy level decides admission",
+				...rgConfigReasons(recognitionCommand),
 				BASH_RECOGNIZED_FORM_HINT,
 				...scriptSegments.map((part) => projectScriptPreview(part, callCwd)),
 			],
@@ -1202,6 +1221,7 @@ function evaluateBashPolicy(
 		reasonCode: "bash-unrecognized",
 		reasons: [
 			"bash command is outside the no-prompt set; the autonomy level decides admission",
+			...rgConfigReasons(recognitionCommand),
 			BASH_RECOGNIZED_FORM_HINT,
 		],
 		policySource: "builtin-command-allowlist",
@@ -1841,7 +1861,8 @@ function readOnlyInspectionRule(
 	// real path, so a word carrying one is never recognized.
 	if (words.some((word) => hasUnquotedExpansion(source.slice(word.start, word.end)))) return null;
 	if (GREP_FAMILY.has(command) && recursesDirectories(args)) return null;
-	if (command === "rg" && !rgSearchStaysReadable(args, cwd, piped, readScope.readable)) return null;
+	if (command === "rg" && (toolEnvSets(RG_CONFIG_ENV) || !rgSearchStaysReadable(args, cwd, piped, readScope.readable)))
+		return null;
 	if (command === "sed") {
 		if (!args.includes("-n")) return null;
 		let sawScript = false;

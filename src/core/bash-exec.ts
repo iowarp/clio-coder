@@ -224,6 +224,19 @@ function buildToolEnv(source: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEn
 const LOGIN_ENV_CAPTURE_TIMEOUT_MS = 10_000;
 
 let loginEnvCapture: Promise<NodeJS.ProcessEnv | null> | null = null;
+/** The settled login capture. Null until the first command has run, and when the capture failed. */
+let loginEnvSnapshot: NodeJS.ProcessEnv | null = null;
+
+/**
+ * True when the environment a bash command will run with sets `key` to a
+ * non-empty value. Admission is synchronous, so it sees the login profile only
+ * after the first command has captured it; before that it reads the process
+ * environment alone.
+ */
+export function toolEnvSets(key: string): boolean {
+	const value = buildToolEnv({ ...process.env, ...loginEnvSnapshot })[key];
+	return value !== undefined && value !== "";
+}
 
 /** NUL-delimited `env -0` output to an env map; null when unusable (no PATH). */
 function parseNullDelimitedEnv(raw: string): NodeJS.ProcessEnv | null {
@@ -269,7 +282,10 @@ interface BashSpawnPlan {
 }
 
 async function bashSpawnPlan(): Promise<BashSpawnPlan> {
-	loginEnvCapture ??= captureLoginEnv();
+	loginEnvCapture ??= captureLoginEnv().then((env) => {
+		loginEnvSnapshot = env;
+		return env;
+	});
 	const captured = await loginEnvCapture;
 	if (captured === null) return { mode: "-c", env: buildToolEnv() };
 	// Captured (login-transformed) values win; keys added to process.env after
