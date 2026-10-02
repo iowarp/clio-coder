@@ -18,9 +18,10 @@ import { formatColumns, printError, printNote } from "./shared.js";
 const HELP = `clio-coder systemone status
 clio-coder systemone export --out <file> [--since <YYYY-MM-DD>] [--site <site>]
 
-System One answers typed questions about the operator's request, tool calls, tool
-results and finished turns. With systemOne.record on, every call and what followed
-it is kept under the state directory as a redacted local dataset.
+System One is experimental. Its decision engines answer typed questions about the
+operator's request, tool calls, tool results and finished turns; sites, keys and
+cuts may change between releases. With systemOne.record on, every call and what
+followed it is kept under the state directory as a redacted local dataset.
 
 status   whether recording is on, what the dataset holds, and where each site is bound
 export   write one JSON line per decision to a local file, joined with the full text

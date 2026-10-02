@@ -13,6 +13,7 @@ import { StructuredSettingsEditor } from "./StructuredSettingsEditor.js";
 import {
 	emptyMeaning,
 	groupControls,
+	groupNote,
 	inScope,
 	matchesControl,
 	OPEN_CHOICES,
@@ -626,25 +627,29 @@ export function SettingsControlsView({
 			{!visible.length && active !== "targets" && active !== "advanced" && (
 				<p>{showDrafts ? "No unsaved changes." : "No settings match."}</p>
 			)}
-			{groupControls(editorControls).map(({ group, controls: rows }) => (
-				<section key={group} className="setting-group" aria-label={group}>
-					{/* A calm page has only its h1 above, so its groups are the next level down. */}
-					{scope ? <h2 className="setting-group__title">{group}</h2> : <h3>{group}</h3>}
-					{rows.map((control) => (
-						<ControlRow
-							key={control.path}
-							control={control}
-							save={save}
-							workspaceId={workspaceId}
-							draft={drafts[control.path] ?? null}
-							expectedValue={originalDraftValue(control.path)}
-							onDraft={(value, submittedValue) => updateDraft(control.path, value, submittedValue, control.value)}
-							catalog={catalogFor(control)}
-							showPath={scope === undefined || scope === "advanced"}
-						/>
-					))}
-				</section>
-			))}
+			{groupControls(editorControls).map(({ group, controls: rows }) => {
+				const note = groupNote(rows);
+				return (
+					<section key={group} className="setting-group" aria-label={group}>
+						{/* A calm page has only its h1 above, so its groups are the next level down. */}
+						{scope ? <h2 className="setting-group__title">{group}</h2> : <h3>{group}</h3>}
+						{note !== null ? <p className="setting-group__note">{note}</p> : null}
+						{rows.map((control) => (
+							<ControlRow
+								key={control.path}
+								control={control}
+								save={save}
+								workspaceId={workspaceId}
+								draft={drafts[control.path] ?? null}
+								expectedValue={originalDraftValue(control.path)}
+								onDraft={(value, submittedValue) => updateDraft(control.path, value, submittedValue, control.value)}
+								catalog={catalogFor(control)}
+								showPath={scope === undefined || scope === "advanced"}
+							/>
+						))}
+					</section>
+				);
+			})}
 		</>
 	);
 }

@@ -38,7 +38,7 @@ export const SYSTEM_ONE_GATE_RULE_ID = "system-one-gate";
  */
 export function systemOneGateText(build?: string): string {
 	const named = build === undefined ? "" : sanitizeCallTargetText(build);
-	return named === "" ? "System One gate" : `System One gate (${named})`;
+	return named === "" ? "System One gate (experimental)" : `System One gate (experimental, ${named})`;
 }
 
 /**
@@ -185,7 +185,11 @@ function tierIdentity(
 			// The gate is System One's judgment of one command, not a standing
 			// rail, so the card is titled for who asked.
 			return isSystemOneGate(facts)
-				? { tierLabel: "System One confirmation", title: "System One confirmation", semanticToken: "warning" }
+				? {
+						tierLabel: "System One confirmation (experimental)",
+						title: "System One confirmation (experimental)",
+						semanticToken: "warning",
+					}
 				: { tierLabel: "Safety-net confirmation", title: "Safety-net confirmation", semanticToken: "warning" };
 		case "system":
 			return { tierLabel: "System change", title: "Approve system change", semanticToken: "warning" };

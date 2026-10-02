@@ -67,7 +67,7 @@ Usage:
   clio-coder evidence             build, list, or inspect evidence artifacts
   clio-coder memory               list, propose, promote, approve, reject, or prune memory
   clio-coder usage report         cross-session usage facts and opportunities (experimental)
-  clio-coder systemone status|export  System One decision dataset: what it holds, and export it as JSONL
+  clio-coder systemone status|export  System One decision dataset: what it holds, and export it as JSONL (experimental)
   clio-coder trace                query or view the durable dispatch trace mirror
   clio-coder extensions           install, list, enable, disable, or remove extension packages
   clio-coder library              register, install, update, import, inspect, and manage packages of every kind

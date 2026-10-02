@@ -49,6 +49,16 @@ export function matchesControl(control: SettingControl, query: string): boolean 
 	);
 }
 
+/**
+ * A line under a group whose settings this page shows only in part. System One's
+ * engines, sites and cuts are maps the controls cannot edit, so the decision
+ * engine group says where they are set.
+ */
+export function groupNote(controls: ReadonlyArray<Pick<SettingControl, "path">>): string | null {
+	if (!controls.some((control) => control.path.startsWith("systemOne."))) return null;
+	return "Experimental. Engines and the sites they answer are declared under systemOne in the settings file, and the terminal's /settings (Advanced, Experimental) binds a site to a declared engine. This page sets only the decision dataset.";
+}
+
 /** Groups in first-seen order, which is the engine's registry order. */
 export function groupControls(controls: SettingControl[]): Array<{ group: string; controls: SettingControl[] }> {
 	const groups = new Map<string, SettingControl[]>();

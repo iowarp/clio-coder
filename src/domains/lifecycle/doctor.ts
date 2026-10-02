@@ -1121,12 +1121,40 @@ export async function runDoctorModelChecks(): Promise<DoctorFinding[]> {
 
 const MIB = 1024 * 1024;
 
+/** The builds whose cuts cover a site, from a cut table keyed by build identity. */
+function buildsWithCuts(site: string, table: Readonly<Record<string, Readonly<Record<string, number>>>>): string[] {
+	return Object.entries(table)
+		.filter(([, cuts]) => Object.keys(cuts).some((key) => key.startsWith(`${site}.`)))
+		.map(([build]) => build);
+}
+
 /**
- * Where each System One site is bound, which sites are off, which bindings
- * cannot resolve, and what the decision dataset holds. A silent site is
- * otherwise indistinguishable from a broken one. Built from settings and the
- * connection rows above: doctor never asks a decision, so a failing site here
- * is a broken binding or an unverified target.
+ * Doctor never asks a decision, so it cannot know which build will answer. It
+ * states which builds a bound site's readings would be validated for: measured
+ * cuts that ship, cuts the operator wrote, and everything else unvalidated.
+ */
+function cutStanding(
+	site: string,
+	measured: Readonly<Record<string, Readonly<Record<string, number>>>>,
+	operator: Readonly<Record<string, Readonly<Record<string, number>>>>,
+): string {
+	const fitted = buildsWithCuts(site, measured);
+	const written = buildsWithCuts(site, operator);
+	const parts = [
+		...(fitted.length > 0 ? [`measured for ${fitted.join(", ")}`] : []),
+		...(written.length > 0 ? [`operator-configured for ${written.join(", ")}`] : []),
+	];
+	return parts.length === 0
+		? "no build has cuts at this site, so every answer is unvalidated"
+		: `cuts ${parts.join(", ")}; any other answering build is unvalidated and only records`;
+}
+
+/**
+ * Where each System One site is bound, which bindings cannot resolve, and what
+ * the decision dataset holds. System One is experimental and off by default, so
+ * an install with nothing bound gets one row saying so. Built from settings and
+ * the connection rows above: doctor never asks a decision, so a failing site
+ * here is a broken binding or an unverified target.
  */
 async function systemOneFindings(
 	runtimes: { get(id: string): RuntimeDescriptor | null },
@@ -1137,13 +1165,18 @@ async function systemOneFindings(
 	// untrusted project layer contributes nothing, exactly as in a session.
 	const settings = readLayeredSettings(process.cwd()).settings;
 	const { describeBindings, formatDatasetBytes, listDatasetFiles } = await import("../system-one/recorder/index.js");
+	const { FITTED_CUTS } = await import("../system-one/calibration.js");
+	const bindings = describeBindings(settings, runtimes);
+	const off = bindings.filter((binding) => binding.engine === null).map((binding) => binding.site);
 	const rows: DoctorFinding[] = [];
-	for (const binding of describeBindings(settings, runtimes)) {
-		const name = `system one ${binding.site}`;
-		if (binding.engine === null) {
-			rows.push({ ok: true, level: "info", name, detail: "off; no engine bound" });
-			continue;
-		}
+	if (off.length === bindings.length) {
+		rows.push({ ok: true, level: "info", name: "system one (experimental)", detail: "off; no site is bound" });
+	} else if (off.length > 0) {
+		rows.push({ ok: true, level: "info", name: "system one (experimental) off", detail: off.join(", ") });
+	}
+	for (const binding of bindings) {
+		if (binding.engine === null) continue;
+		const name = `system one (experimental) ${binding.site}`;
 		if (binding.problem !== undefined) {
 			rows.push({ ok: true, level: "warn", name, detail: `${binding.problem}; the site stays silent` });
 			continue;
@@ -1157,10 +1190,14 @@ async function systemOneFindings(
 			detail:
 				`${binding.engine} (${binding.kind}) → ${binding.target}/${binding.model ?? "target default"}` +
 				(binding.deadlineMs === undefined ? "" : `; deadline ${binding.deadlineMs} ms`) +
-				(unverified ? `; connection ${binding.target} is not verified, so this site may fall back every turn` : ""),
+				`; ${cutStanding(binding.site, FITTED_CUTS, settings.systemOne.cuts)}` +
+				(unverified ? `; connection ${binding.target} is not verified, so this site may stay silent` : ""),
 		});
 	}
-	rows.push(datasetFinding(settings.systemOne, () => listDatasetFiles(), formatDatasetBytes));
+	// With nothing bound, recording off and no files, the dataset row would only repeat the off row.
+	const quiet = off.length === bindings.length && !settings.systemOne.record;
+	const dataset = datasetFinding(settings.systemOne, () => listDatasetFiles(), formatDatasetBytes, quiet);
+	if (dataset !== null) rows.push(dataset);
 	return rows;
 }
 
@@ -1168,7 +1205,8 @@ function datasetFinding(
 	systemOne: ReturnType<typeof readSettings>["systemOne"],
 	listDatasetFiles: () => ReadonlyArray<{ day: string; bytes: number }>,
 	formatBytes: (bytes: number) => string,
-): DoctorFinding {
+	quietWhenEmpty: boolean,
+): DoctorFinding | null {
 	const name = "system one dataset";
 	const record = systemOne.record ? "record on" : "record off";
 	let files: ReadonlyArray<{ day: string; bytes: number }>;
@@ -1183,7 +1221,8 @@ function datasetFinding(
 		};
 	}
 	const limits = `retention ${systemOne.retentionDays} days, cap ${systemOne.maxMiB} MiB`;
-	if (files.length === 0) return { ok: true, level: "info", name, detail: `${record}; no files; ${limits}` };
+	if (files.length === 0)
+		return quietWhenEmpty ? null : { ok: true, level: "info", name, detail: `${record}; no files; ${limits}` };
 	const bytes = files.reduce((sum, file) => sum + file.bytes, 0);
 	const over = bytes > systemOne.maxMiB * MIB;
 	return {

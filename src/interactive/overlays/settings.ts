@@ -1985,7 +1985,7 @@ function systemOneSiteRows(settings: Readonly<ClioSettings>, live: () => Readonl
 		const selectable = engineNames.length > 0;
 		return settingItem(`systemOne.sites.${site}`, engine ?? SITE_OFF_CHOICE, {
 			label: SITE_LABELS[site],
-			description: `${state} It ${note.does}. Sends ${note.sends}.${selectable ? "" : " Add a decision engine in the settings file first."}`,
+			description: `Experimental. ${state} It ${note.does}. Sends ${note.sends}.${selectable ? "" : " Add a decision engine in the settings file first."}`,
 			...(selectable
 				? {
 						submenu: selectListSubmenu(`Decision engine: ${SITE_LABELS[site]}`, [

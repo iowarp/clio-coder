@@ -102,7 +102,7 @@ export function settingsGroupForPath(path: string): string {
 	if (path.startsWith("fleet.default")) return "Default model";
 	if (path.startsWith("fleet.profiles")) return "Profiles";
 	if (path.startsWith("fleet.agentProfiles")) return "Agent routes";
-	if (path === "systemOne" || path.startsWith("systemOne.")) return "Decision engines";
+	if (path === "systemOne" || path.startsWith("systemOne.")) return "Decision engines (experimental)";
 	if (path.startsWith("turnControl")) return "Turn preparation";
 	if (path.startsWith("fleet.adaptiveRouting")) return "Automatic routing";
 	if (path.startsWith("fleet.nodes") || path.startsWith("fleet.endpoints")) return "Placement & capacity";

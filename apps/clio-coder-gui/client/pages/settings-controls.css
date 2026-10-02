@@ -22,6 +22,10 @@
 	padding-bottom: var(--space-2);
 	margin: 0;
 }
+.setting-group__note {
+	color: var(--ink-muted);
+	margin-block: var(--space-3) 0;
+}
 .setting-control {
 	display: grid;
 	grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr);

@@ -133,7 +133,7 @@ function normalizedRadius(score: number): number {
 function advisoryLine(label: ToolCallRung, outside: boolean | null, build: string): string {
 	const reach =
 		outside === true ? " It reaches outside the workspace." : outside === false ? " It stays inside the workspace." : "";
-	return `Advisory only, nothing below is gated on it: blast radius reads as ${label}.${reach} Judged by ${build}.`;
+	return `Experimental advisory only, nothing below is gated on it: blast radius reads as ${label}.${reach} Judged by ${build}.`;
 }
 
 export const TOOL_CALL_CARD_SITE: SiteDefinition<ToolCallObject, ToolCallCardValue> = {

@@ -767,6 +767,7 @@ fleet:
   profiles: {}
   rosters: {}
   agentProfiles: {}
+  # Experimental: start the worker a fitted System One turn reading predicts.
   speculativeDispatch: false
   adaptiveRouting:
     roles: []
@@ -815,6 +816,9 @@ context:
     maxOutputTokens: 2000
     timeoutMs: 60000
 
+# Experimental. System One decision engines stay off until a site is bound to an
+# engine declared here; nothing waits for an engine's answer. Sites, keys and cuts
+# may change between releases.
 systemOne:
   engines: {}
   sites: {}
