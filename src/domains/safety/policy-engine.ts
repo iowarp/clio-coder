@@ -655,7 +655,7 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 					return blockDecision(base, blockInput);
 				}
 			}
-			const outsideReplacement = outsideExistingTypedMutationTarget(call, cwd);
+			const outsideReplacement = outsideExistingTypedMutationTarget(call, cwd, classification);
 			if (outsideReplacement !== null) {
 				const input = {
 					ruleId: "outside-file-replacement",
@@ -2126,9 +2126,20 @@ function pathArg(args: Record<string, unknown> | undefined): string | null {
 	return typeof candidate === "string" && candidate.length > 0 ? candidate : null;
 }
 
-/** Write and edit can replace an existing file outside the checkout. */
-function outsideExistingTypedMutationTarget(call: ClassifierCall, workspaceRoot: string): string | null {
+/**
+ * Write and edit can replace an existing file outside the checkout. The
+ * classifier has already resolved where the write lands and files every target
+ * outside the workspace under a `write-path-*` reason, so a call it left
+ * unmarked is inside and pays no second canonicalization: the admission
+ * filesystem-call counts are pinned per call (admission-fs-ops).
+ */
+function outsideExistingTypedMutationTarget(
+	call: ClassifierCall,
+	workspaceRoot: string,
+	classification: Classification,
+): string | null {
 	if (call.tool !== ToolNames.Write && call.tool !== ToolNames.Edit) return null;
+	if (!classification.reasons.some((reason) => reason.startsWith("write-path-"))) return null;
 	const target = pathArg(call.args);
 	if (target === null) return null;
 	const resolved = canonicalizeRawPath(target, process.cwd());
