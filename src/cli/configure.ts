@@ -2011,6 +2011,9 @@ async function runConfigLauncher(rl: ConfigurePrompts, streams: ConfigureStreams
 		selected = choice.index;
 		if (selected === 0) {
 			const first = readSettings().targets.length === 0;
+			// Every other launcher entry opens on a clean screen. Without this the
+			// launcher's banner stayed stacked above the wizard's own header.
+			rl.clearScreen();
 			const code = await runOnboardingWizard(streams, { mode: first ? "first" : "add" });
 			if (code === 0 && first) return 0;
 			if (code === 130 && first) return exitCode();
