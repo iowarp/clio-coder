@@ -317,7 +317,7 @@ export async function collectDoctorFindings(options: DoctorCollectOptions = {}):
 	const contractChecks = [validationContractFinding(workspaceRoot)];
 	// Task worktrees live in the workspace too. The sweep reads claims and asks
 	// git; it removes nothing.
-	const worktreeChecks = taskWorktreeFindings(workspaceRoot);
+	const worktreeChecks = taskWorktreeFindings(workspaceRoot, { fix });
 	const deepChecks = options.deep ? await deepFindings(untouched, workspaceRoot, options.deep) : [];
 	return [
 		chatReadinessFinding(untouched, modelChecks),

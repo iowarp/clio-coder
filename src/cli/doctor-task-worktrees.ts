@@ -3,7 +3,12 @@ import { readSettings } from "../core/config.js";
 import { shellQuote } from "../core/shell-quote.js";
 import { rawDurationMs } from "../core/timers.js";
 import type { DoctorFinding } from "../domains/lifecycle/doctor.js";
-import { gitCheckoutRoot, listPreservedTaskWorktrees, type PreservedTaskWorktree } from "../tools/task-worktree.js";
+import {
+	clearStaleTaskClaim,
+	gitCheckoutRoot,
+	listPreservedTaskWorktrees,
+	type PreservedTaskWorktree,
+} from "../tools/task-worktree.js";
 import {
 	allowedWorktreeParents,
 	HOST_WORKTREE_ROOT_FACTS,
@@ -46,6 +51,8 @@ export interface TaskWorktreeFindingOptions {
 	rootSetting?: string;
 	remoteEligible?: boolean;
 	facts?: WorktreeRootFacts;
+	/** `doctor --fix`: remove claim files whose branch and worktree are already gone. */
+	fix?: boolean;
 }
 
 function configuredRoot(): { setting: string; remoteEligible: boolean } {
@@ -63,8 +70,11 @@ function formatGiB(bytes: number | null): string {
 
 /**
  * Task worktrees (`worktree: true` dispatch): where the next one would be
- * created, and every one that outlived its run. Doctor only reads: it never
- * removes one, because each may hold the only copy of a worker's changes.
+ * created, and every one that outlived its run. Doctor never removes a
+ * worktree or a branch, because each may hold the only copy of a worker's
+ * changes. A claim whose branch and worktree were both removed by hand holds
+ * nothing; it used to be listed as a kept worktree with a drop command that
+ * failed on the missing branch. It is reported as stale, and `--fix` removes it.
  */
 export function taskWorktreeFindings(workspaceRoot: string, options: TaskWorktreeFindingOptions = {}): DoctorFinding[] {
 	const root = gitCheckoutRoot(workspaceRoot);
@@ -90,7 +100,19 @@ export function taskWorktreeFindings(workspaceRoot: string, options: TaskWorktre
 	}
 	return [
 		rootFinding,
-		...preserved.map((entry) => {
+		...preserved.map((entry): DoctorFinding => {
+			const name = `task worktree ${entry.runId}`;
+			if (entry.stale) {
+				if (options.fix === true && clearStaleTaskClaim(root, entry)) {
+					return { ok: true, name, detail: `removed the stale claim; ${entry.branch} and its worktree were already gone` };
+				}
+				return {
+					ok: true,
+					level: "warn",
+					name,
+					detail: `stale claim: ${entry.branch} and its worktree are gone; clear with rm ${shellWord(entry.claimPath)} or clio-coder doctor --fix`,
+				};
+			}
 			// Nothing removes a preserved worktree, so one on tmpfs keeps its
 			// files in memory until the operator drops it or the host reboots.
 			const inRam = existsSync(entry.path) && facts.filesystemType(entry.path) === "tmpfs";
@@ -98,7 +120,7 @@ export function taskWorktreeFindings(workspaceRoot: string, options: TaskWorktre
 				ok: true,
 				// A run keeps its worktree on purpose; a crash leaving work behind wants a look.
 				level: entry.state === "settled" ? ("info" as const) : ("warn" as const),
-				name: `task worktree ${entry.runId}`,
+				name,
 				detail: describe(entry, now, root, inRam),
 			};
 		}),

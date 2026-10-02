@@ -68,6 +68,11 @@ export interface PreservedTaskWorktree {
 	createdAt: string | null;
 	/** Why recovery kept it rather than removing it. */
 	reason: string;
+	/**
+	 * Its branch and its working tree are both gone, removed by hand, so the
+	 * claim file is all that is left and nothing of the run can be lost with it.
+	 */
+	stale: boolean;
 }
 
 export interface TaskWorktreeRecoveryResult {
@@ -1036,7 +1041,12 @@ export function taskWorktreeHoldsWork(worktree: TaskWorktree): boolean {
 	return workHeldBy(worktree.root, worktree) !== null;
 }
 
-function preservedView(claim: TaskClaim, state: TaskWorktreeState, reason: string): PreservedTaskWorktree {
+function preservedView(
+	claim: TaskClaim,
+	state: TaskWorktreeState,
+	reason: string,
+	canonical: string,
+): PreservedTaskWorktree {
 	return {
 		runId: claim.runId,
 		path: claim.path,
@@ -1046,7 +1056,42 @@ function preservedView(claim: TaskClaim, state: TaskWorktreeState, reason: strin
 		state,
 		createdAt: claim.createdAt,
 		reason,
+		stale: claimIsStale(canonical, claim),
 	};
+}
+
+/**
+ * A claim whose branch and working tree are both gone. Either one surviving
+ * may hold the run's only copy of its work, and a git failure is not proof of
+ * absence, so both count as not stale.
+ */
+function claimIsStale(canonical: string, claim: Pick<TaskClaim, "branch" | "path">): boolean {
+	if (existsSync(claim.path)) return false;
+	try {
+		git(canonical, ["rev-parse", "--verify", "--quiet", `refs/heads/${claim.branch}`]);
+		return false;
+	} catch (error) {
+		// `--verify --quiet` exits 1 with no output for a missing ref; any other
+		// failure leaves the question open.
+		return (error as { status?: unknown }).status === 1;
+	}
+}
+
+/**
+ * Remove a stale claim file for `doctor --fix`, after checking again that its
+ * branch and working tree are still gone. Returns whether it was removed.
+ */
+export function clearStaleTaskClaim(root: string, entry: PreservedTaskWorktree): boolean {
+	let canonical: string;
+	try {
+		canonical = realpathSync(root);
+	} catch {
+		return false;
+	}
+	const claim = readTaskClaims(canonical, [dirname(entry.path)]).find((candidate) => candidate.runId === entry.runId);
+	if (claim === undefined || claim.ownerPath !== entry.claimPath || !claimIsStale(canonical, claim)) return false;
+	rmSync(claim.ownerPath, { force: true });
+	return true;
 }
 
 /**
@@ -1077,7 +1122,7 @@ export function recoverTaskWorktrees(
 			const held = workHeldBy(canonical, claim);
 			if (held !== null) {
 				replaceMarker(claim.ownerPath, { ...claim.marker, state: "abandoned" satisfies TaskWorktreeState });
-				result.preserved.push(preservedView(claim, "abandoned", held));
+				result.preserved.push(preservedView(claim, "abandoned", held, canonical));
 				continue;
 			}
 			if (existsSync(claim.path)) git(canonical, ["worktree", "remove", "--force", claim.path]);
@@ -1109,11 +1154,13 @@ export function listPreservedTaskWorktrees(
 	}
 	const out: PreservedTaskWorktree[] = [];
 	for (const claim of readTaskClaims(canonical, allowedParents ?? [diskWorktreeParent(canonical)])) {
-		if (claim.state === "settled") out.push(preservedView(claim, "settled", "kept by its run"));
-		else if (claim.state === "abandoned") out.push(preservedView(claim, "abandoned", "its owner died holding work"));
-		else if (claim.owner === null) out.push(preservedView(claim, "active", "its claim predates restart recovery"));
+		if (claim.state === "settled") out.push(preservedView(claim, "settled", "kept by its run", canonical));
+		else if (claim.state === "abandoned")
+			out.push(preservedView(claim, "abandoned", "its owner died holding work", canonical));
+		else if (claim.owner === null)
+			out.push(preservedView(claim, "active", "its claim predates restart recovery", canonical));
 		else if (!ownerIsAlive(claim.owner))
-			out.push(preservedView(claim, "active", "its owner is gone; the next start recovers it"));
+			out.push(preservedView(claim, "active", "its owner is gone; the next start recovers it", canonical));
 	}
 	return out;
 }
