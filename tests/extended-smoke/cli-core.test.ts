@@ -319,7 +319,10 @@ describe("smoke/built CLI core", { concurrency: false }, () => {
 		try {
 			const version = await runCli(["--version"], { env: scratch.env });
 			strictEqual(version.code, 0);
-			strictEqual(version.stdout, `Clio Coder ${VERSION}\n`);
+			// A development build names its commit (3d4ae7621); a release prints the plain version.
+			if (/-dev(?:[.+]|$)/.test(VERSION))
+				match(version.stdout, new RegExp(`^Clio Coder ${VERSION.replaceAll(".", "\\.")} \\(unreleased · [^)]+\\)\n$`));
+			else strictEqual(version.stdout, `Clio Coder ${VERSION}\n`);
 			strictEqual(version.stderr, "");
 
 			const help = await runCli(["--help"], { env: scratch.env });
