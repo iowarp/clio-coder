@@ -1,5 +1,5 @@
 diff --git a/dist/alt-screen-search.d.ts b/dist/alt-screen-search.d.ts
-index 7bdab98..3e9bf40 100644
+index 7bdab98c0..3e9bf40e6 100644
 --- a/dist/alt-screen-search.d.ts
 +++ b/dist/alt-screen-search.d.ts
 @@ -39,6 +39,7 @@ export declare class AltScreenSearchComponent implements Component, Focusable {
@@ -11,7 +11,7 @@ index 7bdab98..3e9bf40 100644
      invalidate(): void;
      render(width: number): string[];
 diff --git a/dist/alt-screen-search.js b/dist/alt-screen-search.js
-index 29318b3..b11f8b3 100644
+index 29318b322..b11f8b3bb 100644
 --- a/dist/alt-screen-search.js
 +++ b/dist/alt-screen-search.js
 @@ -205,6 +205,10 @@ export class AltScreenSearchComponent {
@@ -26,7 +26,7 @@ index 29318b3..b11f8b3 100644
          const previous = this.input.getValue();
          this.input.handleInput(data);
 diff --git a/dist/components/editor.d.ts b/dist/components/editor.d.ts
-index 445c818..26569ef 100644
+index 445c8184e..26569efa2 100644
 --- a/dist/components/editor.d.ts
 +++ b/dist/components/editor.d.ts
 @@ -98,6 +98,7 @@ export declare class Editor implements Component, Focusable {
@@ -38,7 +38,7 @@ index 445c818..26569ef 100644
      private layoutText;
      getText(): string;
 diff --git a/dist/components/editor.js b/dist/components/editor.js
-index f02bf7f..c39760f 100644
+index f02bf7f5a..c39760f36 100644
 --- a/dist/components/editor.js
 +++ b/dist/components/editor.js
 @@ -545,6 +545,18 @@ export class Editor {
@@ -61,7 +61,7 @@ index f02bf7f..c39760f 100644
          const kb = getKeybindings();
          // Handle character jump mode (awaiting next character to jump to)
 diff --git a/dist/components/input.d.ts b/dist/components/input.d.ts
-index 982a3d9..4df94e9 100644
+index 982a3d988..4df94e925 100644
 --- a/dist/components/input.d.ts
 +++ b/dist/components/input.d.ts
 @@ -26,6 +26,7 @@ export declare class Input implements Component, Focusable {
@@ -73,7 +73,7 @@ index 982a3d9..4df94e9 100644
      handleMouse(event: TuiMouseEvent): TuiMouseEventResult | undefined;
      private insertCharacter;
 diff --git a/dist/components/input.js b/dist/components/input.js
-index 5e7fffa..73428b2 100644
+index 5e7fffa20..73428b2ee 100644
 --- a/dist/components/input.js
 +++ b/dist/components/input.js
 @@ -40,6 +40,26 @@ export class Input {
@@ -104,7 +104,7 @@ index 5e7fffa..73428b2 100644
          // Handle bracketed paste mode
          // Start of paste: \x1b[200~
 diff --git a/dist/components/markdown.d.ts b/dist/components/markdown.d.ts
-index 7dfee59..acf81ef 100644
+index 7dfee5979..acf81ef09 100644
 --- a/dist/components/markdown.d.ts
 +++ b/dist/components/markdown.d.ts
 @@ -50,6 +50,11 @@ export interface MarkdownOptions {
@@ -120,7 +120,7 @@ index 7dfee59..acf81ef 100644
      private text;
      private paddingX;
 diff --git a/dist/components/markdown.js b/dist/components/markdown.js
-index 0cb1b0d..6c215f1 100644
+index 28709ba45..d498da33f 100644
 --- a/dist/components/markdown.js
 +++ b/dist/components/markdown.js
 @@ -147,6 +147,16 @@ markdownParser.setOptions({
@@ -141,7 +141,7 @@ index 0cb1b0d..6c215f1 100644
      text;
      paddingX; // Left/right padding
 diff --git a/dist/index.d.ts b/dist/index.d.ts
-index 3595809..c6e77b4 100644
+index 9893b73e6..d4ae94291 100644
 --- a/dist/index.d.ts
 +++ b/dist/index.d.ts
 @@ -8,7 +8,7 @@ export { HStack } from "./components/h-stack.ts";
@@ -154,7 +154,7 @@ index 3595809..c6e77b4 100644
  export { ScrollView, type ScrollViewOptions, type ScrollViewScrollbar, type ScrollViewScrollToOptions, } from "./components/scroll-view.ts";
  export { type SelectItem, SelectList, type SelectListLayoutOptions, type SelectListTheme, type SelectListTruncatePrimaryContext, } from "./components/select-list.ts";
 diff --git a/dist/index.js b/dist/index.js
-index 4e8d552..ccf1c61 100644
+index 25599ecb8..6dc26857c 100644
 --- a/dist/index.js
 +++ b/dist/index.js
 @@ -12,7 +12,7 @@ export { HStack } from "./components/h-stack.js";
@@ -167,10 +167,10 @@ index 4e8d552..ccf1c61 100644
  export { ScrollView, } from "./components/scroll-view.js";
  export { SelectList, } from "./components/select-list.js";
 diff --git a/dist/tui-alt-screen.d.ts b/dist/tui-alt-screen.d.ts
-index cedb4ae..707f247 100644
+index f9a115092..7df22fde6 100644
 --- a/dist/tui-alt-screen.d.ts
 +++ b/dist/tui-alt-screen.d.ts
-@@ -103,11 +103,13 @@ export declare class TuiAltScreen extends TuiBase implements ViewportTUI {
+@@ -105,11 +105,13 @@ export declare class TuiAltScreen extends TuiBase implements ViewportTUI {
      scrollBy(lines: number): void;
      scrollToTop(): void;
      scrollToBottom(): void;
@@ -189,10 +189,10 @@ index cedb4ae..707f247 100644
      private handleSearchMouseEvent;
      private refreshSearch;
 diff --git a/dist/tui-alt-screen.js b/dist/tui-alt-screen.js
-index 10f9943..ce01e58 100644
+index 2789a1155..ab2a96498 100644
 --- a/dist/tui-alt-screen.js
 +++ b/dist/tui-alt-screen.js
-@@ -305,6 +305,13 @@ export class TuiAltScreen extends TuiBase {
+@@ -309,6 +309,13 @@ export class TuiAltScreen extends TuiBase {
              return;
          }
      }
@@ -207,7 +207,7 @@ index 10f9943..ce01e58 100644
          if (this.activeSearch) {
              this.closeSearch();
 diff --git a/dist/tui-main-screen.js b/dist/tui-main-screen.js
-index 896bb50..c30b6bb 100644
+index 896bb501f..c30b6bbdb 100644
 --- a/dist/tui-main-screen.js
 +++ b/dist/tui-main-screen.js
 @@ -3,7 +3,8 @@ import * as os from "node:os";
@@ -323,7 +323,7 @@ index 896bb50..c30b6bb 100644
              const imageReservedRows = isImage ? this.getKittyImageReservedRows(newLines, i, renderEnd) : 1;
              if (imageReservedRows > 1) {
 diff --git a/dist/tui.d.ts b/dist/tui.d.ts
-index acc5229..4b1fa8e 100644
+index acc522954..4b1fa8ec7 100644
 --- a/dist/tui.d.ts
 +++ b/dist/tui.d.ts
 @@ -231,6 +231,8 @@ export interface TUI extends Component {
@@ -345,7 +345,7 @@ index acc5229..4b1fa8e 100644
      removeInputListener(listener: TuiInputListener): void;
      onTerminalColorSchemeChange(listener: (scheme: TerminalColorScheme) => void): () => void;
 diff --git a/dist/tui.js b/dist/tui.js
-index 9f8123f..4b63133 100644
+index 9f8123fb0..4b6313324 100644
 --- a/dist/tui.js
 +++ b/dist/tui.js
 @@ -127,17 +127,19 @@ export class Container {
@@ -410,10 +410,10 @@ index 9f8123f..4b63133 100644
              let current = data;
              for (const listener of this.inputListeners) {
 diff --git a/dist/utils.js b/dist/utils.js
-index bfc6585..6c2d880 100644
+index e6b878c52..55903d69b 100644
 --- a/dist/utils.js
 +++ b/dist/utils.js
-@@ -847,7 +847,9 @@ function wrapSingleLine(line, width) {
+@@ -856,7 +856,9 @@ function wrapSingleLine(line, width) {
      let currentVisibleLength = 0;
      for (const token of tokens) {
          const tokenVisibleLength = visibleWidth(token);
@@ -424,7 +424,7 @@ index bfc6585..6c2d880 100644
          // Token itself is too long - break it character by character
          if (tokenVisibleLength > width && !isWhitespace) {
              if (currentLine) {
-@@ -880,9 +882,12 @@ function wrapSingleLine(line, width) {
+@@ -889,9 +891,12 @@ function wrapSingleLine(line, width) {
              }
              wrapped.push(lineToWrap);
              if (isWhitespace) {
