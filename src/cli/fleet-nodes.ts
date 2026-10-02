@@ -6,6 +6,7 @@ const HELP = `clio-coder fleet nodes <command>
   add <id> --host <SSH alias or address> [--user <name>] [--port <number>]
       [--identity-file <path>] [--entry <worker command>] [--version-command <command>]
       [--labels <comma-separated labels>] [--max-workers <number>] [--test] [--record]
+  discover [--json]             list Tailscale peers; select a name or address to add
   install <id> [--yes]            preview a user-level install of this exact client; --yes executes
   list [--json]                  show recorded readiness for this project and check age
   remove <id>                    remove a node without deleting remote files
@@ -110,6 +111,27 @@ export async function runFleetNodes(args: ReadonlyArray<string>): Promise<number
 			if (parsed.flags.has("--test") || parsed.flags.has("--record"))
 				return runFleetNodes(["test", node.id, ...(parsed.flags.has("--record") ? ["--record"] : [])]);
 			process.stdout.write(`Next: clio-coder fleet nodes test ${node.id} --record\n`);
+			return 0;
+		}
+		if (sub === "discover") {
+			const parsed = parse(args.slice(1), ["--json"], []);
+			if (parsed.positional.length) throw new Error("discover takes no node id; select a candidate with nodes add");
+			const { discoverTailscaleNodes } = await import("../domains/dispatch/fleet-node-discovery.js");
+			const candidates = await discoverTailscaleNodes();
+			if (parsed.flags.has("--json"))
+				process.stdout.write(`${JSON.stringify({ candidates, readiness: "not checked" }, null, 2)}\n`);
+			else {
+				process.stdout.write("Tailscale peers (SSH and worker readiness are not checked):\n");
+				for (const peer of candidates)
+					process.stdout.write(
+						`${peer.name}  MagicDNS=${peer.magicDns ?? "unavailable"}  addresses=${peer.addresses.join(", ") || "unavailable"}  ${peer.online === true ? "Tailscale online" : peer.online === false ? "Tailscale offline" : "Tailscale state unknown"}\n`,
+					);
+				if (!candidates.length)
+					process.stdout.write("No peers reported. You can still add an SSH alias or address directly.\n");
+				process.stdout.write(
+					"Choose a host: clio-coder fleet nodes add <id> --host <MagicDNS name or address>\nIf a known LAN address is reachable on your network, you can choose it instead.\n",
+				);
+			}
 			return 0;
 		}
 		if (sub === "install") {
