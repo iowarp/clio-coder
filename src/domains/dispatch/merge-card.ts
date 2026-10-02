@@ -54,8 +54,11 @@ export interface MergeCardInput {
 
 export interface MergeCardDeps {
 	ask: AskUserHandler;
-	/** Bounds the whole card, including a wait for a busy screen and the discard confirm. */
-	timeoutMs: number;
+	/**
+	 * Bounds the whole card, including a wait for a busy screen and the discard
+	 * confirm. Absent, the card waits for the operator, Esc, or an abort.
+	 */
+	timeoutMs?: number;
 	signal?: AbortSignal;
 	/** Delay between attempts while another overlay owns the screen. */
 	retryMs?: number;
@@ -169,10 +172,13 @@ function chose(result: AskUserResult, label: string): boolean {
 export async function askMergeCard(deps: MergeCardDeps, input: MergeCardInput): Promise<MergeCardOutcome> {
 	const controller = new AbortController();
 	let timedOut = false;
-	const timer = setTimeout(() => {
-		timedOut = true;
-		controller.abort();
-	}, deps.timeoutMs);
+	const timer =
+		deps.timeoutMs === undefined
+			? undefined
+			: setTimeout(() => {
+					timedOut = true;
+					controller.abort();
+				}, deps.timeoutMs);
 	const onParentAbort = (): void => controller.abort();
 	if (deps.signal?.aborted === true) controller.abort();
 	deps.signal?.addEventListener("abort", onParentAbort, { once: true });

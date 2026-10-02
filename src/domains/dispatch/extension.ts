@@ -3196,11 +3196,7 @@ export function createDispatchBundle(
 	// members, each waits its turn here while the members that merge cleanly
 	// have already landed.
 	const mergeCardQueue = createMergeCardQueue();
-	const askWithheldMerge = async (
-		run: ActiveRun,
-		settings: EffectiveSettings,
-		input: MergeCardInput,
-	): Promise<MergeCardOutcome | null> => {
+	const askWithheldMerge = async (run: ActiveRun, input: MergeCardInput): Promise<MergeCardOutcome | null> => {
 		const operator = options?.operatorAsk;
 		if (operator === undefined || !operator.available()) return null;
 		// A run canceled before its turn never shows a card; the watch below polls
@@ -3242,15 +3238,10 @@ export function createDispatchBundle(
 			return await mergeCardQueue(async () => {
 				// A card queued behind others can outlive its run.
 				if (run.aborted) return null;
-				return askMergeCard(
-					{
-						ask: operator.ask,
-						// The same bound a worker permission ask lives under.
-						timeoutMs: settings?.fleet.permissions.escalation?.timeoutMs ?? DEFAULT_ESCALATION_TIMEOUT_MS,
-						signal: canceled.signal,
-					},
-					input,
-				);
+				// An attended operator decides in their own time, like a permission
+				// prompt: a card that settled itself after two minutes vanished with
+				// no word on screen. Esc and a run cancel still settle on Keep branch.
+				return askMergeCard({ ask: operator.ask, signal: canceled.signal }, input);
 			});
 		} catch (error) {
 			// A card that cannot be shown leaves the merge withheld, the same as no operator.
@@ -7581,7 +7572,7 @@ export function createDispatchBundle(
 							previewedCommit !== undefined &&
 							previewedProtected !== null &&
 							(worktreeReceipt.changedPaths?.length ?? 0) > 0
-								? await askWithheldMerge(activeRun, lifecycle.settings, {
+								? await askWithheldMerge(activeRun, {
 										branch: req.taskWorktree.branch,
 										changedPaths: worktreeReceipt.changedPaths ?? [],
 										reason: withheldVerdict.reason,
