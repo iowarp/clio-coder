@@ -33,6 +33,12 @@ main#main:focus-visible {
 	outline: none;
 	box-shadow: none;
 }
+/* The same holds for a heading that a step or dialog focuses so a screen reader starts there
+   (tabindex -1): it cannot be reached by Tab, so a ring around a 40px title is only noise. */
+:is(h1, h2, h3)[tabindex="-1"]:focus-visible {
+	outline: none;
+	box-shadow: none;
+}
 
 @media (forced-colors: active) {
 	*,

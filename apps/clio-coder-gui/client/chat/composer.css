@@ -7,14 +7,15 @@
 	display: grid;
 	gap: var(--space-1);
 	margin-top: 0;
-	padding: var(--space-4) var(--space-3) var(--space-2) var(--space-4);
-	background: var(--surface);
-	border: 1px solid var(--line);
-	border-radius: var(--space-6);
+	padding: var(--space-3) var(--space-3) var(--space-2) var(--space-4);
+	background: color-mix(in srgb, var(--ink) 4%, var(--surface));
+	border: 1px solid var(--line-strong);
+	border-radius: 18px;
 	box-shadow: var(--shadow-none);
+	transition: border-color var(--motion-fast) var(--ease-standard);
 }
 .composer:focus-within {
-	border-color: var(--line-strong);
+	border-color: var(--accent);
 }
 .composer__label {
 	font-size: var(--text-meta);
@@ -85,7 +86,7 @@
 	padding: var(--space-2) var(--space-3);
 	border: 1px solid var(--line);
 	border-radius: var(--radius-md);
-	background: var(--surface-sunken);
+	background: var(--well);
 }
 .composer__modes legend {
 	font-size: var(--text-instrument);
@@ -142,11 +143,11 @@
 	flex: none;
 	align-items: center;
 	justify-content: center;
-	min-width: 44px;
-	min-height: 44px;
-	padding: var(--space-2);
+	min-width: 32px;
+	min-height: 32px;
+	padding: 6px;
 	border: 0;
-	border-radius: var(--radius-pill);
+	border-radius: 8px;
 	background: transparent;
 	color: var(--ink-muted);
 	cursor: pointer;
@@ -154,12 +155,12 @@
 .composer__icon-button:hover:not(:disabled),
 .composer__options > summary:hover,
 .composer__options[open] > summary {
-	background: var(--paper);
+	background: var(--wb-active);
 	color: var(--ink);
 }
 .composer__icon-button .icon {
-	width: 20px;
-	height: 20px;
+	width: 18px;
+	height: 18px;
 }
 .composer__options > summary {
 	gap: var(--space-2);
@@ -258,11 +259,11 @@
 }
 .route-picker > summary {
 	align-items: center;
-	min-height: 44px;
+	min-height: 32px;
 	max-width: 24rem;
-	padding: var(--space-2);
+	padding: 4px 10px;
 	border: 0;
-	border-radius: var(--radius-pill);
+	border-radius: 8px;
 	cursor: pointer;
 	list-style: none;
 	transition:
@@ -275,7 +276,7 @@
 .route-picker > summary:hover,
 .route-picker[open] > summary {
 	color: var(--ink);
-	background: var(--paper);
+	background: var(--wb-active);
 }
 .route-chip__caret {
 	flex: none;
@@ -360,23 +361,57 @@
 	display: grid;
 	place-items: center;
 	flex: none;
-	width: 44px;
-	min-height: 44px;
+	width: 34px;
+	min-height: 34px;
+	height: 34px;
 	padding: 0;
 	border: 0;
-	border-radius: var(--radius-pill);
-	background: var(--ink);
-	color: var(--paper);
+	border-radius: 50%;
 	cursor: pointer;
 }
-.composer__submit.primary:hover:not(:disabled),
+.composer__submit.primary {
+	background: var(--primary-fill);
+	color: var(--on-primary);
+}
+.composer__stop {
+	background: var(--ink);
+	color: var(--paper);
+}
+.composer__submit.primary:hover:not(:disabled) {
+	background: var(--accent);
+	color: var(--on-accent);
+}
 .composer__stop:hover:not(:disabled) {
 	background: var(--ink-muted);
 	color: var(--paper);
 }
-.composer__submit .icon {
-	width: 22px;
-	height: 22px;
+.composer__submit.primary:disabled {
+	background: color-mix(in srgb, var(--ink) 14%, transparent);
+	color: var(--ink-muted);
+	opacity: 1;
+}
+/* A turn is running: the stop control carries the Clio spinner and the word, not a bare square. */
+.composer__stop.composer__stop--live {
+	display: inline-flex;
+	gap: var(--space-2);
+	align-items: center;
+	width: auto;
+	padding: 0 var(--space-3) 0 var(--space-2);
+	border: 1px solid var(--line-strong);
+	border-radius: var(--radius-pill);
+	background: var(--paper);
+	color: var(--ink);
+	font-size: var(--text-meta);
+	font-weight: 600;
+}
+.composer__stop.composer__stop--live:hover:not(:disabled) {
+	background: var(--wb-hover);
+	color: var(--ink);
+}
+.composer__submit .icon,
+.composer__stop .icon {
+	width: 18px;
+	height: 18px;
 }
 .composer__submit:disabled,
 .composer__secondary:disabled,
@@ -405,7 +440,7 @@
 	padding: var(--space-3);
 	border: 1px solid var(--line);
 	border-radius: var(--radius-md);
-	background: var(--surface-sunken);
+	background: var(--well);
 }
 .composer__queue-summary {
 	margin: 0;
@@ -522,7 +557,7 @@
 	padding: var(--space-3);
 	border: 1px solid var(--line-strong);
 	border-radius: var(--radius-sm);
-	background: var(--surface-sunken);
+	background: var(--well);
 }
 .turn-usage__details div {
 	display: grid;
@@ -615,7 +650,7 @@
 	object-fit: cover;
 	border: 1px solid var(--line-strong);
 	border-radius: var(--radius-xs);
-	background: var(--surface-sunken);
+	background: var(--well);
 }
 .composer__attachment-file {
 	display: grid;
@@ -625,7 +660,7 @@
 	height: 48px;
 	border: 1px solid var(--line-strong);
 	border-radius: var(--radius-xs);
-	background: var(--surface-sunken);
+	background: var(--well);
 	font-family: var(--font-mono);
 	font-size: var(--text-exact);
 	color: var(--ink-muted);
@@ -685,4 +720,127 @@
 	flex-wrap: wrap;
 	gap: 8px;
 	margin-top: 10px;
+}
+
+/* ---- working freedom: the pill beside the attach button ---------------------------- */
+.autonomy {
+	position: relative;
+	margin: 0;
+	font-size: var(--text-meta);
+	color: var(--ink-muted);
+}
+.autonomy > summary {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	min-height: 32px;
+	padding: 4px 10px;
+	border-radius: 8px;
+	list-style: none;
+	cursor: pointer;
+	white-space: nowrap;
+}
+.autonomy > summary::-webkit-details-marker {
+	display: none;
+}
+.autonomy > summary:hover,
+.autonomy[open] > summary {
+	background: var(--wb-active);
+	color: var(--ink);
+}
+.autonomy > summary .icon {
+	width: 15px;
+	height: 15px;
+}
+.autonomy[data-level="yolo"] > summary {
+	color: var(--status-warn-fg);
+}
+.autonomy__panel {
+	position: absolute;
+	left: 0;
+	bottom: calc(100% + var(--space-2));
+	z-index: 6;
+	display: grid;
+	gap: var(--space-1);
+	width: min(22rem, calc(100vw - 32px));
+	min-width: 0;
+	margin: 0;
+	padding: var(--space-2);
+	border: 1px solid var(--line-strong);
+	border-radius: var(--radius-lg);
+	background: var(--overlay);
+	box-shadow: var(--shadow-panel);
+	color: var(--ink);
+}
+.autonomy__title {
+	float: left;
+	width: 100%;
+	margin: 0;
+	padding: var(--space-1) var(--space-2);
+	font-size: 12px;
+	color: var(--ink-muted);
+}
+.autonomy__option {
+	display: flex;
+	align-items: flex-start;
+	gap: var(--space-3);
+	width: 100%;
+	min-height: 0;
+	padding: 8px var(--space-2);
+	border: 0;
+	border-radius: var(--radius-sm);
+	background: transparent;
+	text-align: left;
+}
+.autonomy__option:hover:not(:disabled) {
+	background: var(--wb-hover);
+}
+.autonomy__option[aria-pressed="true"] {
+	background: var(--wb-active);
+}
+.autonomy__option .icon {
+	flex: none;
+	width: 16px;
+	height: 16px;
+	margin-top: 2px;
+	color: var(--ink-muted);
+}
+.autonomy__option[aria-pressed="true"] .icon {
+	color: var(--accent);
+}
+.autonomy__option span {
+	display: grid;
+	gap: 2px;
+	min-width: 0;
+}
+.autonomy__option small {
+	font-size: 12px;
+	line-height: 1.45;
+	color: var(--ink-muted);
+}
+.autonomy__confirm {
+	display: grid;
+	gap: var(--space-2);
+	margin-top: var(--space-1);
+	padding: var(--space-3);
+	border: 1px solid var(--status-warn-line);
+	border-radius: var(--radius-md);
+	background: var(--status-warn-tint);
+	color: var(--status-warn-fg);
+}
+.autonomy__confirm p {
+	margin: 0;
+	font-size: 12.5px;
+	line-height: 1.5;
+}
+.autonomy__confirm > div {
+	display: flex;
+	flex-wrap: wrap;
+	gap: var(--space-2);
+}
+.autonomy__note {
+	margin: 0;
+	padding: var(--space-1) var(--space-2);
+	font-size: 12px;
+	color: var(--ink-muted);
 }

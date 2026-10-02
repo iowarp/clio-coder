@@ -1,0 +1,867 @@
+/* The workbench shell: a task rail on the left, one inset card for the work, no masthead.
+   Colour comes from client/design/tokens.css only. Overlays are derived with color-mix so the
+   rail follows the theme (warm paper in light, black in dark) without a raw value. */
+
+/* Overlay tints derived from the ink, so a hover reads on paper, card and code alike. They live on the
+   root because dialogs are portaled to the body, outside .wb. */
+:root {
+	--wb-hover: color-mix(in srgb, var(--ink) 6%, transparent);
+	--wb-active: color-mix(in srgb, var(--ink) 11%, transparent);
+	--wb-faint: color-mix(in srgb, var(--ink) 4%, transparent);
+}
+
+.wb {
+	--wb-side: 268px;
+	--wb-gap: 8px;
+	--wb-radius: 14px;
+	--wb-row: 32px;
+	display: grid;
+	grid-template-columns: var(--wb-side) minmax(0, 1fr);
+	height: 100dvh;
+	background: var(--paper);
+	color: var(--ink);
+	transition: grid-template-columns var(--motion-base) var(--ease-standard);
+}
+.wb[data-sidebar="collapsed"] {
+	grid-template-columns: 0 minmax(0, 1fr);
+}
+
+/* ---- rail ---------------------------------------------------------------- */
+.wb-sidebar {
+	min-width: 0;
+	overflow: hidden;
+	font-size: var(--text-meta);
+}
+.wb[data-sidebar="collapsed"] .wb-sidebar {
+	visibility: hidden;
+}
+.wb-side {
+	width: var(--wb-side);
+	height: 100%;
+	display: flex;
+	flex-direction: column;
+	padding: var(--space-2) var(--space-2) 0;
+}
+.wb-side__top {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: var(--space-2);
+	min-height: 40px;
+	padding: 0 var(--space-1) 0 var(--space-2);
+	margin-bottom: var(--space-2);
+}
+.wb-brand,
+.wb-back {
+	display: inline-flex;
+	align-items: center;
+	gap: 10px;
+	min-width: 0;
+	color: var(--ink);
+	text-decoration: none;
+	font-weight: 650;
+	font-size: 15px;
+	letter-spacing: -0.2px;
+}
+.wb-back {
+	font-weight: 500;
+	font-size: var(--text-meta);
+	color: var(--ink-muted);
+	padding: 6px 8px;
+	margin-left: -8px;
+	border-radius: 8px;
+}
+.wb-back:hover {
+	background: var(--wb-hover);
+	color: var(--ink);
+}
+.wb-brand img {
+	display: block;
+	object-fit: contain;
+}
+
+/* One reset for every control in the rail, so the global bordered `button` never leaks in. */
+.wb-icon,
+.wb-action,
+.wb-task__main,
+.wb-project__toggle,
+.wb-more,
+.wb-link {
+	min-height: 0;
+	margin: 0;
+	border: 0;
+	border-radius: 8px;
+	background: transparent;
+	color: var(--ink);
+	font: inherit;
+	text-decoration: none;
+	cursor: pointer;
+}
+.wb-icon {
+	display: inline-grid;
+	place-items: center;
+	flex: none;
+	width: 30px;
+	height: 30px;
+	padding: 0;
+	color: var(--ink-muted);
+}
+.wb-icon .icon {
+	width: 17px;
+	height: 17px;
+}
+.wb-icon--small {
+	width: 26px;
+	height: 26px;
+}
+.wb-icon--small .icon {
+	width: 15px;
+	height: 15px;
+}
+.wb-icon:hover:not(:disabled),
+.wb-action:hover:not(:disabled),
+.wb-task__main:hover:not(:disabled),
+.wb-project__toggle:hover:not(:disabled),
+.wb-more:hover:not(:disabled) {
+	background: var(--wb-hover);
+	border-color: transparent;
+	color: var(--ink);
+}
+.wb-icon:disabled,
+.wb-action:disabled {
+	opacity: 0.45;
+}
+
+.wb-side__actions {
+	display: grid;
+	gap: 2px;
+	margin: 0;
+}
+.wb-action {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	height: 34px;
+	padding: 0 10px;
+	width: 100%;
+	text-align: left;
+}
+.wb-action .icon {
+	width: 17px;
+	height: 17px;
+	color: var(--ink-muted);
+}
+.wb-action--primary .icon {
+	color: var(--accent);
+}
+.wb-action > span {
+	flex: 1;
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+.wb-action kbd {
+	font: inherit;
+	font-size: 11.5px;
+	color: var(--ink-muted);
+	letter-spacing: 0.02em;
+}
+.wb-action[data-active="true"] {
+	background: var(--wb-active);
+}
+.wb-action[data-active="true"] .icon {
+	color: var(--accent);
+}
+
+.wb-side__heading {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	margin: var(--space-4) 0 var(--space-1);
+	padding: 0 var(--space-1) 0 10px;
+}
+.wb-side__heading h2,
+.wb-side__label {
+	margin: 0;
+	font-size: 12px;
+	font-weight: 500;
+	letter-spacing: 0.01em;
+	color: var(--ink-muted);
+}
+.wb-side__label {
+	padding: var(--space-4) 10px var(--space-1);
+}
+.wb-side__label:first-child {
+	padding-top: var(--space-2);
+}
+.wb-side__heading > div {
+	display: flex;
+	gap: 2px;
+}
+.wb-side__filter {
+	padding: 0 var(--space-1) var(--space-2);
+}
+.wb-side__filter input {
+	height: 30px;
+	padding: 0 10px;
+	font-size: var(--text-meta);
+	border: 1px solid var(--line);
+	border-radius: 8px;
+	background: var(--wb-faint);
+}
+.wb-side__sections {
+	display: grid;
+	gap: 2px;
+	align-content: start;
+	flex: 1;
+	min-height: 0;
+	overflow-y: auto;
+}
+
+/* ---- tasks ---------------------------------------------------------------- */
+.wb-side__tasks {
+	flex: 1;
+	min-height: 0;
+	overflow-y: auto;
+	margin: 0 calc(var(--space-1) * -1);
+	padding: 0 var(--space-1) var(--space-3);
+	scrollbar-gutter: stable;
+}
+.wb-side__tasks:focus-visible {
+	outline-offset: -2px;
+}
+.wb-project {
+	margin-bottom: var(--space-1);
+}
+.wb-project__head {
+	position: relative;
+	display: flex;
+	align-items: center;
+}
+.wb-project__toggle {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	flex: 1;
+	min-width: 0;
+	height: var(--wb-row);
+	padding: 0 10px;
+	text-align: left;
+	color: var(--ink-muted);
+	font-weight: 500;
+}
+.wb-project[data-current="true"] .wb-project__toggle {
+	color: var(--ink);
+}
+.wb-project__toggle .icon {
+	width: 16px;
+	height: 16px;
+	flex: none;
+}
+.wb-project__toggle span {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+.wb-project__new {
+	position: absolute;
+	right: 2px;
+	opacity: 0;
+}
+.wb-project__head:hover .wb-project__new,
+.wb-project__new:focus-visible {
+	opacity: 1;
+}
+.wb-tasks {
+	list-style: none;
+	margin: 0;
+	padding: 0;
+	display: grid;
+	grid-template-columns: minmax(0, 1fr);
+	gap: 1px;
+}
+.wb-tasks > li {
+	min-width: 0;
+	animation: wb-task-arrive var(--motion-base) var(--ease-standard) both;
+}
+/* A task that appears in the rail rises into its row once; rows never move after that. */
+@keyframes wb-task-arrive {
+	from {
+		opacity: 0;
+		transform: translateY(-4px);
+	}
+}
+.wb-task {
+	position: relative;
+	display: flex;
+	align-items: center;
+	border-radius: 8px;
+}
+.wb-task__main {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	flex: 1;
+	min-width: 0;
+	height: var(--wb-row);
+	padding: 0 10px 0 12px;
+	text-align: left;
+	color: var(--ink);
+}
+.wb-task[data-selected="true"] .wb-task__main {
+	background: var(--wb-active);
+}
+.wb-task__glyph {
+	display: inline-grid;
+	place-items: center;
+	flex: none;
+	width: 14px;
+	height: 14px;
+}
+.wb-task__title {
+	flex: 1;
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+.wb-task__age {
+	flex: none;
+	font-size: 12px;
+	color: var(--ink-muted);
+	font-variant-numeric: tabular-nums;
+}
+.wb-task__menu {
+	position: absolute;
+	right: 4px;
+	opacity: 0;
+}
+.wb-task:hover .wb-task__menu,
+.wb-task:focus-within .wb-task__menu,
+.wb-task__menu:has(.wb-menu[open]) {
+	opacity: 1;
+}
+.wb-task:hover .wb-task__age,
+.wb-task:focus-within:has(.wb-task__menu) .wb-task__age,
+.wb-task:has(.wb-menu[open]) .wb-task__age {
+	visibility: hidden;
+}
+@media (pointer: coarse) {
+	.wb-task__menu {
+		opacity: 1;
+	}
+	.wb-task__age {
+		visibility: hidden;
+	}
+}
+.wb-dot {
+	width: 7px;
+	height: 7px;
+	border-radius: 50%;
+}
+.wb-dot--approval {
+	background: var(--action-line);
+	box-shadow: 0 0 0 3px color-mix(in srgb, var(--action-line) 24%, transparent);
+}
+.wb-dot--failed {
+	background: var(--status-fail-line);
+}
+.wb-more,
+.wb-link {
+	display: block;
+	width: 100%;
+	height: 28px;
+	padding: 0 10px 0 34px;
+	text-align: left;
+	font-size: 12px;
+	color: var(--ink-muted);
+}
+.wb-link {
+	display: inline;
+	width: auto;
+	height: auto;
+	padding: 0;
+	text-decoration: underline;
+}
+.wb-note {
+	margin: 0;
+	padding: 6px 10px 6px 34px;
+	font-size: 12px;
+	color: var(--ink-muted);
+	list-style: none;
+}
+.wb-side__tasks > .wb-note {
+	padding-left: 10px;
+}
+
+/* ---- footer --------------------------------------------------------------- */
+.wb-side__foot {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	padding: var(--space-2) var(--space-1) var(--space-3) var(--space-2);
+	border-top: 1px solid var(--line);
+}
+.wb-side__foot--plain {
+	display: block;
+	padding: var(--space-2) 0 var(--space-3);
+}
+.wb-me {
+	display: grid;
+	place-items: center;
+	flex: none;
+	width: 30px;
+	height: 30px;
+	border-radius: 50%;
+	background: var(--wb-active);
+}
+.wb-side__who {
+	display: grid;
+	flex: 1;
+	min-width: 0;
+	line-height: 1.25;
+}
+.wb-side__who strong {
+	font-weight: 600;
+	font-size: var(--text-meta);
+}
+.wb-status {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	font-size: 11.5px;
+	color: var(--ink-muted);
+}
+.wb-status__dot {
+	width: 6px;
+	height: 6px;
+	border-radius: 50%;
+	background: var(--status-unverified-line);
+}
+.wb-status[data-tone="ok"] .wb-status__dot {
+	background: var(--accent);
+}
+.wb-status[data-tone="warn"] .wb-status__dot {
+	background: var(--status-warn-line);
+}
+.wb-status[data-tone="off"] .wb-status__dot {
+	background: var(--status-fail-line);
+}
+
+/* ---- the Clio mark as an activity indicator -------------------------------
+   ClioMark.tsx turns the rings with the Web Animations API (the reason is written there). This sheet
+   draws the rest pose, which is the logo, and the resolve from mark to check. */
+.clio-pulse {
+	position: relative;
+	display: inline-block;
+	flex: none;
+	vertical-align: middle;
+	contain: layout paint style;
+}
+.clio-pulse__mark,
+.clio-pulse__ring,
+.clio-pulse__check {
+	position: absolute;
+	inset: 0;
+	width: 100%;
+	height: 100%;
+}
+.clio-pulse__mark {
+	transition:
+		opacity var(--motion-base) var(--ease-standard),
+		transform var(--motion-base) var(--ease-standard);
+}
+.clio-pulse__ring {
+	overflow: visible;
+	fill: none;
+}
+.clio-pulse__ring--accent {
+	stroke: var(--accent);
+}
+.clio-pulse__ring--secondary {
+	stroke: var(--secondary);
+}
+.clio-pulse__check {
+	fill: none;
+	stroke: var(--accent);
+	stroke-linecap: round;
+	stroke-linejoin: round;
+	opacity: 0;
+	transform: scale(0.6);
+	transition:
+		opacity var(--motion-base) var(--ease-standard),
+		transform var(--motion-base) var(--ease-standard);
+}
+/* Resolve: the settled mark holds for a beat, then gives way to the check. */
+.clio-pulse[data-phase="done"] .clio-pulse__mark {
+	opacity: 0;
+	transform: scale(0.7);
+	transition-delay: var(--motion-fast);
+}
+.clio-pulse[data-phase="done"] .clio-pulse__check {
+	opacity: 1;
+	transform: none;
+	transition-delay: var(--motion-fast);
+}
+
+/* ---- stage: the inset card that holds the work ---------------------------- */
+.wb-stage {
+	position: relative;
+	display: flex;
+	min-width: 0;
+	min-height: 0;
+	margin: var(--wb-gap) var(--wb-gap) var(--wb-gap) 0;
+	border: 1px solid var(--line);
+	border-radius: var(--wb-radius);
+	background: var(--surface);
+	overflow: hidden;
+}
+.wb[data-sidebar="collapsed"] .wb-stage {
+	margin-left: var(--wb-gap);
+}
+.wb-main {
+	flex: 1;
+	min-width: 0;
+	min-height: 0;
+	width: 100%;
+	display: flex;
+	flex-direction: column;
+	overflow: hidden;
+	scroll-margin-top: 0;
+}
+/* Settings and inspection pages keep their document-style layout inside the card. */
+.wb-main[data-mode="settings"] {
+	display: block;
+	overflow-y: auto;
+	padding: var(--space-10) var(--space-10) var(--space-16);
+	scrollbar-gutter: stable;
+}
+.wb-main[data-mode="settings"] > * {
+	max-width: 1120px;
+	margin-inline: auto;
+}
+/* The rail's toggle, floating on the card while the rail is collapsed. */
+.wb-float {
+	position: absolute;
+	top: 8px;
+	left: 8px;
+	z-index: 4;
+	display: none;
+}
+.wb[data-sidebar="collapsed"] .wb-stage[data-mode="settings"] .wb-float {
+	display: block;
+}
+
+/* ---- top bar used by task screens ------------------------------------------ */
+.wb-bar {
+	display: flex;
+	align-items: center;
+	gap: var(--space-2);
+	flex: none;
+	min-height: 48px;
+	padding: 0 var(--space-3);
+}
+.wb-bar__lead {
+	display: none;
+	gap: 2px;
+}
+.wb[data-sidebar="collapsed"] .wb-bar__lead {
+	display: flex;
+}
+.wb-bar__title {
+	margin: 0;
+	flex: 0 1 auto;
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	font-family: var(--font-ui);
+	font-size: 14px;
+	font-weight: 600;
+	letter-spacing: -0.1px;
+	line-height: 1.3;
+}
+.wb-bar__spacer {
+	flex: 1;
+}
+.wb-bar__end {
+	display: flex;
+	align-items: center;
+	gap: 2px;
+}
+.wb-bar .wb-icon[aria-pressed="true"],
+.wb-bar .wb-icon[aria-expanded="true"] {
+	background: var(--wb-active);
+	color: var(--ink);
+}
+.wb-chip {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	height: 26px;
+	min-height: 0;
+	max-width: 14rem;
+	padding: 0 10px;
+	border: 1px solid var(--line);
+	border-radius: var(--radius-pill);
+	background: var(--wb-faint);
+	color: var(--ink-muted);
+	font-size: 12.5px;
+	text-decoration: none;
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+.wb-chip .icon {
+	width: 14px;
+	height: 14px;
+}
+a.wb-chip:hover,
+button.wb-chip:hover:not(:disabled) {
+	color: var(--ink);
+	border-color: var(--line-strong);
+}
+.wb-chip[data-tone="working"] {
+	color: var(--accent);
+}
+/* A pending approval is an action waiting on the operator, so the chip and the rail dot take the
+   action tokens the approval strip uses, not the warning ramp. */
+.wb-chip[data-tone="approval"] {
+	color: var(--action-fg);
+	border-color: var(--action-line);
+}
+
+/* ---- phones: the rail becomes a drawer ------------------------------------- */
+.wb-scrim {
+	display: none;
+}
+@media (max-width: 760px) {
+	.wb {
+		display: block;
+	}
+	.wb-sidebar,
+	.wb[data-sidebar="collapsed"] .wb-sidebar {
+		position: fixed;
+		inset: 0 auto 0 0;
+		z-index: 30;
+		width: min(86vw, 320px);
+		background: var(--paper);
+		border-right: 1px solid var(--line);
+		visibility: hidden;
+		transform: translateX(-100%);
+		transition:
+			transform var(--motion-base) var(--ease-standard),
+			visibility 0s linear var(--motion-base);
+	}
+	.wb[data-drawer="open"] .wb-sidebar {
+		visibility: visible;
+		transform: none;
+		transition: transform var(--motion-base) var(--ease-standard);
+	}
+	.wb-side {
+		width: 100%;
+	}
+	.wb[data-drawer="open"] .wb-scrim {
+		display: block;
+		position: fixed;
+		inset: 0;
+		z-index: 20;
+		min-height: 0;
+		border: 0;
+		border-radius: 0;
+		background: var(--scrim);
+	}
+	.wb-stage,
+	.wb[data-sidebar="collapsed"] .wb-stage {
+		height: 100dvh;
+		margin: 0;
+		border: 0;
+		border-radius: 0;
+	}
+	.wb-bar__lead {
+		display: flex;
+	}
+	.wb-main[data-mode="settings"] {
+		padding: var(--space-8) var(--space-4) var(--space-12);
+	}
+	.wb-stage[data-mode="settings"] .wb-float {
+		display: block;
+	}
+}
+
+/* ---- action menu (a details element) ---------------------------------------- */
+.wb-menu {
+	position: relative;
+	margin: 0;
+	font-size: var(--text-meta);
+	color: var(--ink);
+}
+.wb-menu > summary {
+	list-style: none;
+}
+.wb-menu > summary::-webkit-details-marker {
+	display: none;
+}
+.wb-menu[open] > summary {
+	background: var(--wb-active);
+	color: var(--ink);
+}
+.wb-menu__panel {
+	position: absolute;
+	right: 0;
+	top: calc(100% + 6px);
+	z-index: 20;
+	display: grid;
+	gap: 1px;
+	min-width: 13rem;
+	padding: var(--space-1);
+	border: 1px solid var(--line-strong);
+	border-radius: var(--radius-md);
+	background: var(--overlay);
+	box-shadow: var(--shadow-panel);
+}
+.wb-menu__item {
+	display: flex;
+	align-items: center;
+	gap: var(--space-3);
+	width: 100%;
+	min-height: 0;
+	padding: 8px 10px;
+	border: 0;
+	border-radius: var(--radius-sm);
+	background: transparent;
+	color: var(--ink);
+	text-align: left;
+	font-size: var(--text-meta);
+}
+.wb-menu__item:hover:not(:disabled) {
+	background: var(--wb-hover);
+	border-color: transparent;
+}
+.wb-menu__item .icon {
+	width: 16px;
+	height: 16px;
+	color: var(--ink-muted);
+}
+.wb-menu__item[data-tone="danger"] {
+	color: var(--status-fail-fg);
+}
+.wb-menu__item[data-tone="danger"] .icon {
+	color: inherit;
+}
+
+/* Touch screens have no chords to print, and a narrow bar keeps the title rather than the project chip. */
+@media (pointer: coarse) {
+	.wb-action kbd {
+		display: none;
+	}
+}
+@media (max-width: 560px) {
+	.wb-bar .wb-chip:not(.wb-chip--status) {
+		display: none;
+	}
+}
+
+.wb-icon.wb-icon--text {
+	display: inline-flex;
+	gap: 6px;
+	width: auto;
+	padding: 0 8px;
+}
+
+/* ---- Open workspace dialog ---------------------------------------------------------- */
+.wb-open {
+	display: flex;
+	gap: var(--space-2);
+	margin-bottom: var(--space-4);
+}
+.wb-open input {
+	flex: 1;
+	font-family: var(--font-mono);
+}
+.wb-open button {
+	flex: none;
+}
+
+/* A menu inside a scrolling list opens in a fixed layer so the list cannot clip it. */
+.wb-menu[data-float="yes"] > .wb-menu__panel {
+	position: fixed;
+	right: auto;
+	top: var(--menu-top, -9999px);
+	left: var(--menu-left, 0);
+}
+
+/* ---- inline rename ---------------------------------------------------------- */
+.wb-rename {
+	flex: 1;
+	min-width: 0;
+	height: 26px;
+	min-height: 0;
+	padding: 0 8px;
+	border: 1px solid var(--accent);
+	border-radius: 6px;
+	background: var(--surface);
+	color: var(--ink);
+	font: inherit;
+}
+.wb-bar__title .wb-rename {
+	height: 28px;
+	width: min(32ch, 100%);
+	font-size: 14px;
+	font-weight: 600;
+}
+.wb-bar__rename {
+	display: block;
+	max-width: 100%;
+	min-height: 0;
+	margin: 0;
+	padding: 2px 6px;
+	margin-inline: -6px;
+	overflow: hidden;
+	border: 1px solid transparent;
+	border-radius: 6px;
+	background: transparent;
+	color: inherit;
+	font: inherit;
+	letter-spacing: inherit;
+	text-align: left;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	cursor: text;
+}
+.wb-bar__rename:hover {
+	background: var(--wb-hover);
+	border-color: transparent;
+}
+
+/* ---- delete confirmation on a task row ------------------------------------- */
+.wb-task__confirm {
+	display: flex;
+	margin: 0;
+	border: 0;
+	flex: 1;
+	align-items: center;
+	gap: var(--space-2);
+	min-width: 0;
+	height: var(--wb-row);
+	padding: 0 4px 0 12px;
+	font-size: var(--text-meta);
+}
+.wb-task__confirm span {
+	flex: 1;
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+.wb-task__confirm button {
+	min-height: 0;
+	height: 24px;
+	padding: 0 9px;
+	font-size: 12px;
+}
+.wb-task__confirm .wb-task__delete {
+	border-color: var(--status-fail-line);
+	color: var(--status-fail-fg);
+}

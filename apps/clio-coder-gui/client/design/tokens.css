@@ -14,6 +14,11 @@
 
 	/* Canonical surfaces, ink, interaction roles and focus live in brand.css. */
 	--scrim: rgb(26 22 18 / 52%);
+	/* The pale highlight that passes over a ring, as in the site's closing film. */
+	--glint: var(--surface);
+	/* A sunken fill for wells, chips and inputs. The brand's paper-sunk is its line colour in light,
+	   which reads as mud when used as a fill; dark keeps the brand's graphite. */
+	--well: #efe9de;
 
 	/* ---- status ramp: neutral / running / success / warn / fail /
 	   unverified. Each tone is fg (text), tint (surface), line (boundary). */
@@ -21,9 +26,10 @@
 	--status-neutral-tint: #ebe4d7;
 	--status-neutral-line: #857a6c;
 
-	--status-running-fg: #2c5883;
-	--status-running-tint: #e4ebf2;
-	--status-running-line: #4a7cae;
+	/* Running is Clio working, so it takes the brand teal the pulse uses, with the site's teal washes. */
+	--status-running-fg: #075a60;
+	--status-running-tint: #e3f2f3;
+	--status-running-line: #3b8a8f;
 
 	--status-success-fg: #14573a;
 	--status-success-tint: #e3efe6;
@@ -121,9 +127,13 @@
 	--syntax-deleted: #f58e85;
 	--syntax-inserted: #8fd1a7;
 
+	/* ---- the setup wizard's scene: the supplied films are authored on pure black, so the frame that
+	   holds them is black in both themes, like the site's scenes. Its caption sits outside, on paper. */
+	--stage-black: #000000;
+
 	/* Compatibility names used by page, Markdown and offline styles. */
 	--muted: var(--ink-muted);
-	--inset: var(--surface-sunken);
+	--inset: var(--well);
 
 	color-scheme: light;
 	font-family: var(--font-ui);
@@ -134,14 +144,16 @@
 
 :root[data-theme="dark"] {
 	--scrim: rgb(0 0 0 / 72%);
+	--glint: var(--ink);
+	--well: #151412;
 
 	--status-neutral-fg: #a89e8f;
 	--status-neutral-tint: #151412;
 	--status-neutral-line: #7a7064;
 
-	--status-running-fg: #8ab8e6;
-	--status-running-tint: #0b1722;
-	--status-running-line: #4a78a6;
+	--status-running-fg: #00d4db;
+	--status-running-tint: #052629;
+	--status-running-line: #2a9ea4;
 
 	--status-success-fg: #58b380;
 	--status-success-tint: #0a2517;
@@ -180,14 +192,16 @@
 @media (prefers-color-scheme: dark) {
 	:root:not([data-theme="light"]) {
 		--scrim: rgb(0 0 0 / 72%);
+		--glint: var(--ink);
+		--well: #151412;
 
 		--status-neutral-fg: #a89e8f;
 		--status-neutral-tint: #151412;
 		--status-neutral-line: #7a7064;
 
-		--status-running-fg: #8ab8e6;
-		--status-running-tint: #0b1722;
-		--status-running-line: #4a78a6;
+		--status-running-fg: #00d4db;
+		--status-running-tint: #052629;
+		--status-running-line: #2a9ea4;
 
 		--status-success-fg: #58b380;
 		--status-success-tint: #0a2517;

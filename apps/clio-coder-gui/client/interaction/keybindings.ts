@@ -133,6 +133,22 @@ export const KEYBINDINGS = {
 		action: "Collapse or expand the sidebar",
 		where: "Anywhere except inside a dialog. The sidebar has a button too",
 	},
+	newTask: {
+		id: "newTask",
+		key: "o",
+		modifiers: ["primary", "shift"],
+		scope: "global",
+		action: "Start a new task in the current project",
+		where: "Anywhere except inside a dialog",
+	},
+	openWorkspace: {
+		id: "openWorkspace",
+		key: "o",
+		modifiers: ["primary"],
+		scope: "global",
+		action: "Open a workspace folder",
+		where: "Anywhere except inside a dialog",
+	},
 	sessionPanel: {
 		id: "sessionPanel",
 		key: "|",

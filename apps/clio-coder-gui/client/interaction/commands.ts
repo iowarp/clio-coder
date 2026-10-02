@@ -41,14 +41,22 @@ export interface Destination {
  * routed views with no navigation entry, which is precisely the set a launcher earns its place on.
  */
 export const DESTINATIONS: readonly Destination[] = [
-	{ label: "Overview", path: "/", keywords: ["home", "start"] },
-	{ label: "Sessions", path: "/sessions", keywords: ["chat", "conversation", "workspace"] },
 	{ label: "Traces", path: "/traces", keywords: ["runs", "forensics"] },
 	{ label: "Toolchain", path: "/toolchain", keywords: ["tools", "install"] },
 	{ label: "Settings", path: "/settings", keywords: ["configuration", "preferences"] },
+	{ label: "General settings", path: "/settings/general", keywords: ["theme", "appearance", "install", "app"] },
+	{ label: "Model settings", path: "/settings/models", keywords: ["model", "default", "thinking", "connection"] },
+	{
+		label: "Safety settings",
+		path: "/settings/safety",
+		keywords: ["approval", "permissions", "limits", "autonomy", "spending"],
+	},
+	{ label: "Context and memory settings", path: "/settings/context", keywords: ["compaction", "memory", "window"] },
+	{ label: "All settings", path: "/settings/advanced", keywords: ["advanced", "registry", "search", "everything"] },
 	{ label: "Fleet", path: "/fleet", keywords: ["dispatch", "workers", "runs"] },
 	{ label: "Evidence", path: "/evidence", keywords: ["receipts", "trust"] },
-	{ label: "Library", path: "/library", keywords: ["packages", "skills", "recipes"] },
+	{ label: "Skills", path: "/skills", keywords: ["instructions", "recipes", "capabilities"] },
+	{ label: "Library", path: "/library", keywords: ["packages", "skills", "recipes", "agents", "extensions"] },
 	{ label: "System", path: "/system", keywords: ["doctor", "health", "paths"] },
 	{ label: "Usage report", path: "/usage", keywords: ["tokens", "cost", "spend"] },
 	{ label: "Targets", path: "/settings/targets", keywords: ["providers", "models"] },
@@ -67,7 +75,20 @@ export interface CommandSituation {
 	readonly sessionOpen: boolean;
 	/** True while at least one notice is on screen. */
 	readonly hasNotices: boolean;
+	/** Tasks the palette can jump to: open ones and the saved ones this shell already loaded. */
+	readonly tasks?: readonly PaletteTask[];
 }
+
+export interface PaletteTask {
+	readonly id: string;
+	readonly title: string;
+	/** The project it belongs to, searched but printed small. */
+	readonly project: string;
+	readonly open: boolean;
+}
+
+/** The palette stays a launcher, not a list of everything ever saved. */
+export const PALETTE_TASK_LIMIT = 40;
 
 export interface CommandHandlers {
 	navigate(path: string): void;
@@ -76,6 +97,10 @@ export interface CommandHandlers {
 	dismissNotices(): void;
 	cancelTurn(turnId: string): void;
 	closeSession(): void;
+	/** Offered only by a shell that has a project to start in. */
+	newTask?(): void;
+	openWorkspace?(): void;
+	openTask?(id: string): void;
 }
 
 export const NO_SITUATION: CommandSituation = {
@@ -92,6 +117,37 @@ export const NO_SITUATION: CommandSituation = {
 export function appCommands(situation: CommandSituation, handlers: CommandHandlers): readonly Command[] {
 	const commands: Command[] = [];
 	const { runningTurnId, sessionId, sessionOpen } = situation;
+	const { newTask, openWorkspace, openTask } = handlers;
+	if (newTask)
+		commands.push({
+			id: "task.new",
+			title: "New task",
+			group: "Task",
+			keywords: ["start", "conversation", "chat", "session", "compose"],
+			binding: "newTask",
+			available: true,
+			run: newTask,
+		});
+	if (openWorkspace)
+		commands.push({
+			id: "workspace.open",
+			title: "Open workspace",
+			group: "Task",
+			keywords: ["project", "folder", "directory", "add"],
+			binding: "openWorkspace",
+			available: true,
+			run: openWorkspace,
+		});
+	if (openTask)
+		for (const task of (situation.tasks ?? []).slice(0, PALETTE_TASK_LIMIT))
+			commands.push({
+				id: `task.${task.id}`,
+				title: task.title,
+				group: task.project,
+				keywords: [task.project, task.open ? "open" : "saved", "task", "conversation"],
+				available: task.id !== sessionId,
+				run: () => openTask(task.id),
+			});
 	if (sessionId !== null) {
 		commands.push({
 			id: "session.cancel",

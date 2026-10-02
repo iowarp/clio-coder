@@ -1,275 +1,45 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
-import { Link, useNavigate, useOutletContext, useParams } from "react-router";
+import { Link, Navigate, useNavigate, useOutletContext, useParams } from "react-router";
 import { routes } from "../../contracts/routes.js";
-import type { SessionSnapshot } from "../../contracts/sessions.js";
-import { type Client, emptyInput } from "../api/client.js";
-import { clock, formatTime } from "../api/clock.js";
+import type { Client } from "../api/client.js";
+import { clock, formatDuration } from "../api/clock.js";
 import type { ConnectionState } from "../api/events.js";
 import { sessionBuffer } from "../api/sessions.js";
 import { ApprovalBanner, pendingPermission } from "../chat/Approval.js";
 import { ChatTurnView } from "../chat/ChatTurn.js";
 import { Composer, fillComposer } from "../chat/Composer.js";
-import {
-	CONTEXT_WARNING_LABEL,
-	EMPTY_EYEBROW,
-	EMPTY_GLYPH,
-	EMPTY_HEADING,
-	placeHealthRows,
-	STARTER_PROMPTS,
-	TRUNCATION_NOTE,
-} from "../chat/chat-turn.js";
+import { CONTEXT_WARNING_LABEL, placeHealthRows, STARTER_PROMPTS, TRUNCATION_NOTE } from "../chat/chat-turn.js";
 import { LiveWorkers, workerCount } from "../chat/FleetStrip.js";
 import { foldFleetRuns, isLiveRun } from "../chat/fleet-facts.js";
 import { type HealthRow, type HealthSummary, summarizeHealth } from "../chat/health.js";
-import { InspectorDock } from "../chat/InspectorDock.js";
 import { Interview } from "../chat/Interview.js";
+import { PaneContext } from "../chat/pane-context.js";
+import type { PaneView } from "../chat/pane-model.js";
+import { usePaneState } from "../chat/pane-state.js";
 import { routeFacts } from "../chat/route.js";
-import { SessionDashboard } from "../chat/SessionDashboard.js";
-import { isSessionPanelView, type SessionPanelView } from "../chat/session-panel-model.js";
+import { PaneToggles, SessionPane } from "../chat/SessionPane.js";
+import { ConversationBanner, TaskSkeleton, TaskUnavailable } from "../chat/SessionStates.js";
 import { type ChatTurn, groupTurns, turnStatuses } from "../chat/turns.js";
 import { Icon } from "../design/icons.js";
-import { Boundary, PanelEmpty, PanelHeading } from "../design/panel.js";
-import { emptyState, PANELS } from "../design/panel-model.js";
-import { StatusMark, type StatusTone } from "../design/status.js";
-import { useWorkspaceChrome } from "../design/workspace-chrome.js";
+import { StatusMark } from "../design/status.js";
+import { setPageTitle } from "../interaction/announcer.js";
 import { useShortcut } from "../interaction/use-shortcut.js";
 import { JumpToLatest } from "../render/FollowLatest.js";
 import { useFollowLatest } from "../render/follow-latest.js";
-import { ProjectOpenForm, useProjectLaunch } from "./project-open.js";
-import { DeleteSession } from "./session-controls.js";
+import { countRender } from "../render/render-probe.js";
+import { ClioLogo, ClioPulse, PULSE_SIZE } from "../shell/ClioMark.js";
+import { Menu, MenuItem } from "../shell/Menu.js";
+import { taskTitle } from "../shell/shell-model.js";
+import { TopBar } from "../shell/TopBar.js";
+import { useRenameTask } from "../shell/tasks.js";
 import "../chat/chat-turn.css";
-import "./projects.css";
-export function Workspaces({ client }: { client: Client }) {
-	const recentId = useId();
-	const launch = useProjectLaunch(client);
-	const workspaces = useQuery({ queryKey: ["workspaces"], queryFn: () => client.call(routes.workspaces, emptyInput) });
-	return (
-		<section className="projects">
-			<PanelHeading
-				panel={PANELS.sessions}
-				level={1}
-				eyebrow={false}
-				title={
-					<>
-						Sessions<span className="period">.</span>
-					</>
-				}
-			/>
-			<p className="intro">
-				Choose a project folder on the machine running Clio Coder to start or continue a conversation.
-			</p>
-			<ProjectOpenForm client={client} launch={launch} />
-			{launch.error || workspaces.error ? <p role="alert">{launch.error?.message ?? workspaces.error?.message}</p> : null}
-			<section className="projects__section" aria-labelledby={recentId}>
-				<h2 id={recentId}>Recent projects</h2>
-				{workspaces.isPending ? <p className="projects__note">Loading projects…</p> : null}
-				{(workspaces.data?.length ?? 0) > 0 ? (
-					<ul className="record-list">
-						{workspaces.data?.map((workspace) => (
-							<li className="record-row" key={workspace.id}>
-								<div className="record-row__text">
-									<Link className="record-row__title" to={`/workspaces/${workspace.id}/sessions`}>
-										{workspace.name}
-									</Link>
-									<span className="record-row__meta">
-										<span className="record-row__path" title={workspace.path}>
-											{workspace.path}
-										</span>
-										<span>Opened {formatTime(workspace.openedAt)}</span>
-									</span>
-								</div>
-								<div className="record-row__actions">
-									<button
-										type="button"
-										disabled={launch.busy}
-										onClick={() => launch.start(workspace.id)}
-										aria-label={`New conversation in ${workspace.name}`}
-									>
-										{launch.starting === workspace.id ? "Starting…" : "New conversation"}
-									</button>
-								</div>
-							</li>
-						))}
-					</ul>
-				) : null}
-				{workspaces.data?.length === 0 ? (
-					<PanelEmpty>
-						No project has been opened here yet. Choose its folder above to start the first conversation.
-					</PanelEmpty>
-				) : null}
-			</section>
-			<Boundary panel={PANELS.sessions} />
-		</section>
-	);
+import "../chat/conversation.css";
+/** The old projects page. Choosing and opening projects now lives in the rail and the Open workspace dialog. */
+export function Workspaces() {
+	return <Navigate to="/" replace />;
 }
-export function Sessions({ client }: { client: Client }) {
-	const { workspaceId = "" } = useParams(),
-		navigate = useNavigate(),
-		queries = useQueryClient();
-	const [historySearch, setHistorySearch] = useState("");
-	const openId = useId();
-	const historyId = useId();
-	const input = { params: { id: workspaceId }, query: {}, body: {} };
-	const workspace = useQuery({
-		queryKey: ["workspace", workspaceId],
-		queryFn: () => client.call(routes.workspace, input),
-	});
-	const history = useQuery({
-		queryKey: ["session-history", workspaceId],
-		queryFn: () => client.call(routes.sessionHistory, input),
-	});
-	const sessions = useQuery({ queryKey: ["sessions"], queryFn: () => client.call(routes.sessions, emptyInput) });
-	const open = useMutation({
-		mutationFn: (id: string | null) =>
-			id
-				? client.call(routes.loadSession, { params: { id }, query: {}, body: { workspaceId } })
-				: client.call(routes.newSession, input),
-		onSuccess: (session) => {
-			// A loaded ledger may bind a new ACP child with a different command catalog.
-			queries.removeQueries({ queryKey: ["session-capabilities", session.id] });
-			queries.removeQueries({ queryKey: ["session-commands", session.id] });
-			queries.removeQueries({ queryKey: ["session-queue", session.id] });
-			queries.removeQueries({ queryKey: ["session-settings", session.id] });
-			queries.removeQueries({ queryKey: ["session-targets", session.id] });
-			queries.removeQueries({ queryKey: ["session-autonomy", session.id] });
-			sessionBuffer(session.id).snapshot(session);
-			queries.setQueryData(["session", session.id], session);
-			void queries.invalidateQueries({ queryKey: ["sessions"] });
-			void navigate(`/sessions/${session.id}`);
-		},
-	});
-	const active =
-		sessions.data?.filter((session) => session.workspaceId === workspaceId && session.state === "open") ?? [];
-	const historyQuery = historySearch.trim().toLocaleLowerCase();
-	const activeIds = new Set(active.map((session) => session.id));
-	const saved = (history.data ?? [])
-		.filter((row) => !activeIds.has(row.id))
-		.filter(
-			(row) =>
-				historyQuery === "" ||
-				[row.name, row.firstMessagePreview, row.model, row.target].some((value) =>
-					value?.toLocaleLowerCase().includes(historyQuery),
-				),
-		)
-		.sort((a, b) => (b.lastActivityAt ?? b.createdAt).localeCompare(a.lastActivityAt ?? a.createdAt));
-	const name = workspace.data?.name ?? "This project";
-	return (
-		<section className="projects">
-			<Link className="projects__back" to="/sessions">
-				<span aria-hidden="true">←</span> All projects
-			</Link>
-			<PanelHeading panel={PANELS.sessions} level={1} eyebrow={false} title={workspace.data?.name ?? "Sessions"} />
-			<div className="projects__lead">
-				<p className="projects__path">{workspace.data?.path ?? "Reading the project path…"}</p>
-				<button className="primary" type="button" disabled={open.isPending} onClick={() => open.mutate(null)}>
-					{open.isPending && open.variables === null ? "Starting…" : "New conversation"}
-				</button>
-			</div>
-			{open.error || history.error || workspace.error || sessions.error ? (
-				<p role="alert">
-					{open.error?.message ?? history.error?.message ?? workspace.error?.message ?? sessions.error?.message}
-				</p>
-			) : null}
-			<section className="projects__section" aria-labelledby={openId}>
-				<h2 id={openId}>Open now</h2>
-				{active.length > 0 ? (
-					<ul className="record-list">
-						{active.map((session) => (
-							<li className="record-row" key={session.id}>
-								<div className="record-row__text">
-									<Link className="record-row__title" to={`/sessions/${session.id}`}>
-										{conversationTitle(session)}
-									</Link>
-								</div>
-								<span className="record-row__status">
-									<StatusMark {...openSessionStatus(session)} />
-								</span>
-							</li>
-						))}
-					</ul>
-				) : (
-					<PanelEmpty>No conversation from {name} is open in this server.</PanelEmpty>
-				)}
-			</section>
-			<section className="projects__section" aria-labelledby={historyId}>
-				<div className="projects__section-head">
-					<h2 id={historyId}>Earlier conversations</h2>
-					{(history.data?.length ?? 0) > 0 ? (
-						<label className="projects__search">
-							<span className="sr-only">Find a conversation</span>
-							<input
-								type="search"
-								value={historySearch}
-								onChange={(event) => setHistorySearch(event.target.value)}
-								placeholder="Find by name, message, model or target"
-							/>
-						</label>
-					) : null}
-				</div>
-				{history.isPending ? <p className="projects__note">Reading session history…</p> : null}
-				{saved.length > 0 ? (
-					<ul className="record-list">
-						{saved.map((session) => {
-							const title = session.name ?? session.firstMessagePreview ?? session.id;
-							const loading = open.isPending && open.variables === session.id;
-							return (
-								<li className="record-row" key={session.id}>
-									<div className="record-row__text">
-										<button
-											type="button"
-											className="record-row__title"
-											disabled={open.isPending}
-											onClick={() => open.mutate(session.id)}
-											title="Load this conversation into a new Clio Coder session"
-										>
-											{title}
-										</button>
-										<span className="record-row__meta">
-											<span>{session.model ?? "Model not recorded"}</span>
-											<span>
-												{session.messageCount == null
-													? "Message count not recorded"
-													: `${session.messageCount.toLocaleString("en-US")} ${session.messageCount === 1 ? "message" : "messages"}`}
-											</span>
-											<span>{formatTime(session.lastActivityAt ?? session.createdAt)}</span>
-											<span>{loading ? "Loading…" : session.endedAt ? "Closed" : "Not closed"}</span>
-										</span>
-									</div>
-									{session.endedAt ? (
-										<div className="record-row__actions">
-											<DeleteSession client={client} id={session.id} workspaceId={workspaceId} name={title} />
-										</div>
-									) : null}
-								</li>
-							);
-						})}
-					</ul>
-				) : null}
-				{historySearch.trim() && saved.length === 0 && !history.isPending ? (
-					<PanelEmpty>No conversations match that search.</PanelEmpty>
-				) : null}
-				{!historySearch.trim() && saved.length === 0 && active.length > 0 && (history.data?.length ?? 0) > 0 ? (
-					<PanelEmpty>All saved conversations from this project are already open.</PanelEmpty>
-				) : null}
-				{history.data?.length === 0 ? (
-					<PanelEmpty>{emptyState.emptyStore("saved session", "for this workspace")}</PanelEmpty>
-				) : null}
-			</section>
-			<Boundary panel={PANELS.sessions} />
-		</section>
-	);
-}
-
-/** An open conversation's state in the list, in the conversation's own voice. */
-function openSessionStatus(session: SessionSnapshot): { tone: StatusTone; label: string } {
-	const last = session.turns.at(-1)?.status;
-	if (pendingPermission(session)) return { tone: "warn", label: "Waiting for your approval" };
-	if (last === "running") return { tone: "running", label: "Working" };
-	if (last === "failed") return { tone: "fail", label: "Last turn failed" };
-	if (last === "cancelled") return { tone: "neutral", label: "Last turn stopped" };
-	return { tone: "success", label: "Ready" };
-}
+export { Sessions } from "./tasks.js";
 
 export function Session({ client }: { client: Client }) {
 	const { id = "" } = useParams();
@@ -297,29 +67,21 @@ const NO_ROWS: readonly HealthRow[] = [];
 function EmptyTranscript({ sessionId }: { sessionId: string }) {
 	return (
 		<div className="chat-empty">
-			<span className="chat-empty__glyph" aria-hidden="true">
-				{EMPTY_GLYPH}
-			</span>
-			<p className="eyebrow">{EMPTY_EYEBROW}</p>
-			<h2>{EMPTY_HEADING}</h2>
-			<div className="chat-empty__starters">
+			<ClioLogo size={40} />
+			<h2>
+				What are we <em>working on</em>?
+			</h2>
+			<ul className="chat-empty__starters" aria-label="Ways to start">
 				{STARTER_PROMPTS.map((prompt) => (
-					<button key={prompt} type="button" onClick={() => fillComposer(sessionId, prompt)}>
-						{prompt}
-					</button>
+					<li key={prompt}>
+						<button type="button" onClick={() => fillComposer(sessionId, prompt)}>
+							{prompt}
+						</button>
+					</li>
 				))}
-			</div>
+			</ul>
 		</div>
 	);
-}
-
-/** What the header calls the conversation: its reported label, else the first request, else nothing yet. */
-function conversationTitle(snapshot: SessionSnapshot): string {
-	if (snapshot.label) return snapshot.label;
-	const prompt =
-		snapshot.turns.find((turn) => turn.prompt.trim() !== "")?.prompt ??
-		snapshot.timeline.find((item) => item.kind === "user" && item.text.trim() !== "")?.text;
-	return prompt?.replace(/\s+/g, " ").trim() ?? "New conversation";
 }
 
 /**
@@ -356,68 +118,14 @@ function SessionHealth({ summary }: { summary: HealthSummary }) {
 }
 
 function SessionView({ client, id }: { client: Client; id: string }) {
-	const chrome = useWorkspaceChrome();
+	countRender("session-view");
 	const navigate = useNavigate();
-	const inspectorButton = useId();
-	const panelButton = useId();
-	const opener = useRef<string | null>(null);
-	const [panelView, setSessionPanelView] = useState<SessionPanelView>(() => {
-		try {
-			const saved = localStorage.getItem("clio-coder-gui-session-panel-view");
-			return isSessionPanelView(saved) ? saved : "session";
-		} catch {
-			return "session";
-		}
-	});
-	const choosePanelView = useCallback((view: SessionPanelView) => {
-		setSessionPanelView(view);
-		try {
-			localStorage.setItem("clio-coder-gui-session-panel-view", view);
-		} catch {
-			/* In-memory preference still works. */
-		}
-	}, []);
-	const [inspectorOpen, setInspectorOpen] = useState(() => {
-		try {
-			return (
-				(localStorage.getItem("clio-coder-gui-session-panel") ?? localStorage.getItem("clio-coder-gui-artifacts")) ===
-				"open"
-			);
-		} catch {
-			return false;
-		}
-	});
-	useEffect(() => {
-		try {
-			localStorage.setItem("clio-coder-gui-session-panel", inspectorOpen ? "open" : "closed");
-			localStorage.removeItem("clio-coder-gui-artifacts");
-		} catch {
-			/* Preference holds in this tab. */
-		}
-	}, [inspectorOpen]);
-	const closeInspector = useCallback(() => {
-		const dismissed = document.activeElement;
-		setInspectorOpen(false);
-		requestAnimationFrame(() => {
-			const current = document.activeElement;
-			if (current === dismissed || current === document.body || current?.closest(".session-dock"))
-				document.getElementById(opener.current ?? panelButton)?.focus();
-		});
-	}, [panelButton]);
-	const showSessionPanel = useCallback(
-		(view: SessionPanelView, trigger: string) => {
-			opener.current = trigger;
-			choosePanelView(view);
-			setInspectorOpen(true);
-		},
-		[choosePanelView],
-	);
-	useShortcut("sessionPanel", () => {
-		if (inspectorOpen) closeInspector();
-		else showSessionPanel(panelView, panelButton);
-	});
+	const ids = { changes: useId(), pane: useId() };
+	const pane = usePaneState(ids.pane);
+	const paneActions = useMemo(() => ({ show: (view: PaneView) => pane.show(view, ids.pane) }), [pane.show, ids.pane]);
+	useShortcut("sessionPanel", () => (pane.open ? pane.close() : pane.show(pane.view, ids.pane)));
 	useShortcut("focusComposer", () => document.querySelector<HTMLTextAreaElement>(".composer__field")?.focus());
-	useShortcut("agents", () => showSessionPanel("agents", panelButton));
+	useShortcut("agents", () => pane.show("agents", ids.pane));
 	const connection = useOutletContext<ConnectionState>();
 	const queries = useQueryClient();
 	const input = { params: { id }, query: {}, body: {} };
@@ -455,9 +163,17 @@ function SessionView({ client, id }: { client: Client; id: string }) {
 		},
 	});
 	const closeSession = useCallback(() => close.mutate(), [close.mutate]);
+	const renameTask = useRenameTask(client);
+	const [renaming, setRenaming] = useState(false);
 	const scroll = useRef<HTMLDivElement | null>(null);
 	const previousTurns = useRef<readonly ChatTurn[]>([]);
 	const snapshot = session.data;
+	// The tab names the task, so several open tabs can be told apart.
+	const pageTitle = snapshot ? taskTitle(snapshot) : null;
+	useEffect(() => {
+		setPageTitle(pageTitle);
+		return () => setPageTitle(null);
+	}, [pageTitle]);
 	const statuses = useMemo(() => turnStatuses(snapshot?.turns ?? []), [snapshot?.turns]);
 	const turnRows = useMemo(
 		() => new Map((snapshot?.turns ?? []).map((row) => [row.id, row] as const)),
@@ -498,201 +214,208 @@ function SessionView({ client, id }: { client: Client; id: string }) {
 	);
 	if (session.error && !snapshot)
 		return (
-			<div role="alert">
-				<h1>Session unavailable</h1>
-				<p>{session.error.message}</p>
-				<button type="button" disabled={session.isFetching} onClick={() => void session.refetch()}>
-					{session.isFetching ? "Trying again…" : "Try again"}
-				</button>
-				<Link to="/sessions">Open a workspace</Link>
-			</div>
+			<TaskUnavailable
+				message={session.error.message}
+				retrying={session.isFetching}
+				onRetry={() => void session.refetch()}
+			/>
 		);
-	if (!snapshot) return <p>Loading session…</p>;
+	if (!snapshot) return <TaskSkeleton />;
 	const turn = snapshot.turns.at(-1);
 	const pending = pendingPermission(snapshot) ?? null;
 	const workspaceRoot = workspace.data?.path;
-	const title = conversationTitle(snapshot);
-	const activity = pending
-		? { tone: "warn" as const, label: "Waiting for your approval" }
-		: running
+	const title = taskTitle(snapshot);
+	const workspaceName = workspace.data?.name ?? "Project";
+	const elapsedMs = running && turn?.startedAt && now > 0 ? Math.max(0, now - Date.parse(turn.startedAt)) : 0;
+	// Sub-second figures ("0ms") say nothing; the chip shows time once it is a whole second.
+	const elapsed = elapsedMs >= 1000 ? formatDuration(elapsedMs) : null;
+	const canClose = snapshot.state === "open" && !running;
+	const paneOpen = pane.open;
+	const chip: { tone: "working" | "approval" | "failed" | "quiet"; label: string } | null = pending
+		? { tone: "approval", label: "Needs your approval" }
+		: running && snapshot.state === "open"
 			? {
-					tone: "running" as const,
-					label: liveWorkers > 0 ? `Clio Coder is waiting on ${workerCount(liveWorkers)}` : "Clio Coder is working",
+					tone: "working",
+					label: [liveWorkers > 0 ? `Waiting on ${workerCount(liveWorkers)}` : "Working", elapsed ?? null]
+						.filter(Boolean)
+						.join(" · "),
 				}
-			: snapshot.state === "open"
-				? { tone: "success" as const, label: "Ready for your message" }
-				: snapshot.state === "starting"
-					? { tone: "running" as const, label: "Starting session" }
-					: snapshot.state === "closed"
-						? { tone: "neutral" as const, label: "Session closed" }
-						: { tone: "fail" as const, label: "Session unavailable" };
+			: snapshot.state === "starting"
+				? { tone: "working", label: "Starting" }
+				: snapshot.state === "closed"
+					? { tone: "quiet", label: "Closed" }
+					: snapshot.state === "unknown" || snapshot.state === "failed"
+						? { tone: "failed", label: "Unavailable" }
+						: turn?.status === "failed"
+							? { tone: "failed", label: "Last turn failed" }
+							: null;
 	return (
-		<section className="conversation" data-inspector={inspectorOpen ? "open" : "closed"}>
-			<header className="conversation__header">
-				<div className="conversation__bar">
-					<Link
-						className="conversation__project"
-						to={`/workspaces/${snapshot.workspaceId}/sessions`}
-						onClick={(event) => {
-							if (chrome && !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey) {
-								event.preventDefault();
-								chrome.openArea("sessions");
-							}
+		<PaneContext.Provider value={paneActions}>
+			<section className="conversation" data-pane={paneOpen ? "open" : "closed"}>
+				<div className="conversation__main">
+					<TopBar
+						title={title}
+						titleLabel={title}
+						rename={{
+							active: renaming,
+							onStart: () => setRenaming(true),
+							onCancel: () => setRenaming(false),
+							onSave: (label) => {
+								setRenaming(false);
+								renameTask.mutate({ sessionId: snapshot.id, workspaceId: snapshot.workspaceId, label });
+							},
 						}}
-						title={workspaceRoot ? `Conversations in ${workspaceRoot}` : "Conversations in this project"}
 					>
-						<span aria-hidden="true">←</span>
-						<span className="conversation__project-name">{workspace.data?.name ?? "Project"}</span>
-						<span className="sr-only">: all conversations</span>
-					</Link>
-					<h1 className="conversation__title" title={title}>
-						{title}
-					</h1>
-					<p className="session-status" role="status">
-						<StatusMark tone={activity.tone} label={activity.label} />
-						{snapshot.recoveredOrphan ? <span>Recovered after server interruption</span> : null}
-					</p>
-					<div className="conversation__workspace-controls">
-						<button
-							type="button"
-							aria-label="Configure harness"
-							title="Settings and harness configuration"
-							onClick={() =>
-								chrome ? chrome.openArea("settings") : void navigate(`/settings?workspace=${snapshot.workspaceId}`)
-							}
+						<Link
+							className="wb-chip"
+							to={`/workspaces/${snapshot.workspaceId}/sessions`}
+							title={workspaceRoot ? `All tasks in ${workspaceRoot}` : "All tasks in this project"}
 						>
-							<Icon name="gear" />
-						</button>
-						<button
-							id={inspectorButton}
-							type="button"
-							aria-label={inspectorOpen && panelView === "artifacts" ? "Hide artifacts" : "Show artifacts"}
-							aria-expanded={inspectorOpen && panelView === "artifacts"}
-							title="Files, results and evidence"
-							onClick={() =>
-								inspectorOpen && panelView === "artifacts" ? closeInspector() : showSessionPanel("artifacts", inspectorButton)
-							}
-						>
-							<Icon name="artifacts" />
-						</button>
+							<Icon name="folder" />
+							<span>{workspaceName}</span>
+						</Link>
+						{chip ? (
+							<p className="wb-chip wb-chip--status" data-tone={chip.tone} role="status">
+								{chip.tone === "working" ? <ClioPulse size={PULSE_SIZE.inline} /> : null}
+								<span>{chip.label}</span>
+								{snapshot.recoveredOrphan ? <span>· recovered after a server interruption</span> : null}
+							</p>
+						) : null}
+						<span className="wb-bar__spacer" />
+						<div className="wb-bar__end">
+							<PaneToggles
+								client={client}
+								sessionId={snapshot.id}
+								workspaceRoot={workspaceRoot}
+								open={pane.open}
+								view={pane.view}
+								ids={ids}
+								onToggle={pane.toggle}
+							/>
+							<Menu label="Task actions">
+								<MenuItem icon="pencil" onClick={() => setRenaming(true)}>
+									Rename task
+								</MenuItem>
+								<MenuItem icon="sliders" onClick={() => void navigate(`/settings/advanced?workspace=${snapshot.workspaceId}`)}>
+									Project settings
+								</MenuItem>
+								<MenuItem icon="folder" onClick={() => void navigate(`/workspaces/${snapshot.workspaceId}/sessions`)}>
+									All tasks in {workspaceName}
+								</MenuItem>
+								<MenuItem icon="close" tone="danger" disabled={!canClose || close.isPending} onClick={closeSession}>
+									Close task
+								</MenuItem>
+							</Menu>
+						</div>
+					</TopBar>
+					<div className="conversation__notices">
+						<SessionHealth summary={health} />
 					</div>
-					<button
-						id={panelButton}
-						type="button"
-						className="conversation__session-panel-toggle"
-						aria-label="Session panel"
-						aria-expanded={inspectorOpen && panelView !== "artifacts"}
-						title="Session panel (Ctrl/⌘ Shift \)"
-						onClick={() =>
-							inspectorOpen && panelView !== "artifacts" ? closeInspector() : showSessionPanel("session", panelButton)
-						}
-					>
-						<Icon name="sidebar" />
-						<span>Session panel</span>
-					</button>
-				</div>
-				<SessionDashboard session={snapshot} health={health} workers={liveWorkers} model={route.model ?? null} />
-				<SessionHealth summary={health} />
-			</header>
-			<div className="conversation__approval">
-				{connection === "Reconnecting…" || connection === "Not connected" || session.error ? (
-					<div className="conversation__connection" role="status">
-						<strong>{session.error ? "Conversation refresh failed." : "Live updates are reconnecting."}</strong>
-						<span>
-							{session.error
-								? session.error.message
-								: "The conversation below is the last state received. New activity will appear when the connection returns."}
-						</span>
-						<button type="button" disabled={session.isFetching} onClick={() => void session.refetch()}>
-							{session.isFetching ? "Refreshing…" : "Refresh conversation"}
-						</button>
+					<div className="conversation__approval">
+						{connection === "Reconnecting…" || connection === "Not connected" || session.error ? (
+							<ConversationBanner
+								tone="warn"
+								title={session.error ? "Could not refresh this task." : "Live updates are reconnecting."}
+								action={
+									<button type="button" disabled={session.isFetching} onClick={() => void session.refetch()}>
+										{session.isFetching ? "Refreshing…" : "Refresh"}
+									</button>
+								}
+							>
+								{session.error
+									? session.error.message
+									: "What you see is the last state received. New activity appears when the connection returns."}
+							</ConversationBanner>
+						) : null}
+						{snapshot.state === "unknown" || snapshot.state === "failed" || snapshot.state === "closed" ? (
+							<ConversationBanner
+								tone="quiet"
+								title={
+									snapshot.state === "closed"
+										? "This task is closed."
+										: snapshot.state === "unknown"
+											? "Clio is no longer connected to this task."
+											: "This task could not continue."
+								}
+								action={<Link to={`/workspaces/${snapshot.workspaceId}/sessions`}>Reopen from the task list</Link>}
+							>
+								The recorded conversation is still available below.
+							</ConversationBanner>
+						) : null}
+						<ApprovalBanner client={client} session={snapshot} />
 					</div>
-				) : null}
-				{snapshot.state === "unknown" || snapshot.state === "failed" || snapshot.state === "closed" ? (
-					<div className="conversation__recovery" role="status">
-						<strong>
-							{snapshot.state === "closed"
-								? "This conversation is closed."
-								: snapshot.state === "unknown"
-									? "Clio Coder is no longer connected to this session."
-									: "This session could not continue."}
-						</strong>
-						<span>The recorded conversation is still available below.</span>
-						<Link to={`/workspaces/${snapshot.workspaceId}/sessions`}>Load or start a session →</Link>
-					</div>
-				) : null}
-				<ApprovalBanner client={client} session={snapshot} />
-			</div>
-			<div className="chat-transcript" ref={scroll}>
-				<div className="chat-transcript__content">
-					{snapshot.timelineTruncated ? <p className="trace-warning">{TRUNCATION_NOTE}</p> : null}
-					{notices.leading.length > 0 ? (
-						<ul className="turn-health">
-							{notices.leading.map((row) => (
-								<li key={row.id}>
-									<StatusMark tone={row.tone} label={row.label} {...(row.detail === null ? {} : { detail: row.detail })} />
-								</li>
+					<div className="chat-transcript" ref={scroll}>
+						<div className="chat-transcript__content">
+							{snapshot.timelineTruncated ? <p className="trace-warning">{TRUNCATION_NOTE}</p> : null}
+							{notices.leading.length > 0 ? (
+								<ul className="turn-health">
+									{notices.leading.map((row) => (
+										<li key={row.id}>
+											<StatusMark tone={row.tone} label={row.label} {...(row.detail === null ? {} : { detail: row.detail })} />
+										</li>
+									))}
+								</ul>
+							) : null}
+							{turns.map((item) => (
+								<ChatTurnView
+									key={item.turnId}
+									turn={item}
+									row={turnRows.get(item.turnId)}
+									client={client}
+									session={snapshot}
+									pending={pending}
+									pendingPermissionId={pending?.id ?? null}
+									nowMs={item.settled ? 0 : now}
+									stopping={false}
+									notices={notices.after.get(item.turnId) ?? NO_ROWS}
+									workspaceRoot={workspaceRoot}
+									liveWorkers={item.settled ? 0 : liveWorkers}
+								/>
 							))}
-						</ul>
-					) : null}
-					{turns.map((item) => (
-						<ChatTurnView
-							key={item.turnId}
-							turn={item}
-							row={turnRows.get(item.turnId)}
+							<LiveWorkers
+								client={client}
+								sessionId={snapshot.id}
+								sessionOpen={snapshot.state === "open"}
+								fleet={snapshot.fleet}
+							/>
+							{turns.length === 0 ? <EmptyTranscript sessionId={snapshot.id} /> : null}
+						</div>
+					</div>
+					{/* `.jump-anchor` is the positioned, zero-height parent the pill is laid out against. Without
+				    it the pill resolves against the viewport and pushes the document sideways. */}
+					<div className="jump-anchor">
+						<JumpToLatest follow={follow} />
+					</div>
+					<div className="conversation__dock">
+						{close.error ? <p role="alert">{close.error.message}</p> : null}
+						<Composer
 							client={client}
-							session={snapshot}
-							pending={pending}
-							pendingPermissionId={pending?.id ?? null}
-							nowMs={item.settled ? 0 : now}
-							stopping={false}
-							notices={notices.after.get(item.turnId) ?? NO_ROWS}
-							workspaceRoot={workspaceRoot}
-							liveWorkers={item.settled ? 0 : liveWorkers}
+							sessionId={snapshot.id}
+							sessionState={snapshot.state}
+							initialFocus={snapshot.timeline.length === 0}
+							runningTurnId={turn?.status === "running" ? turn.id : null}
+							route={route}
 						/>
-					))}
-					<LiveWorkers
+					</div>
+					<Interview
 						client={client}
 						sessionId={snapshot.id}
 						sessionOpen={snapshot.state === "open"}
-						fleet={snapshot.fleet}
+						capabilities={capabilities.data}
 					/>
-					{turns.length === 0 ? <EmptyTranscript sessionId={snapshot.id} /> : null}
 				</div>
-			</div>
-			{/* `.jump-anchor` is the positioned, zero-height parent the pill is laid out against. Without
-			    it the pill resolves against the viewport and pushes the document sideways. */}
-			<div className="jump-anchor">
-				<JumpToLatest follow={follow} />
-			</div>
-			<div className="conversation__dock">
-				{close.error ? <p role="alert">{close.error.message}</p> : null}
-				<Composer
+				<SessionPane
+					open={pane.open}
+					onClose={pane.close}
 					client={client}
 					sessionId={snapshot.id}
-					sessionState={snapshot.state}
-					initialFocus={snapshot.timeline.length === 0}
-					runningTurnId={turn?.status === "running" ? turn.id : null}
-					route={route}
+					title={title}
+					workspaceRoot={workspaceRoot}
+					nowMs={now}
+					view={pane.view}
+					onViewChange={pane.setView}
 				/>
-			</div>
-			<Interview
-				client={client}
-				sessionId={snapshot.id}
-				sessionOpen={snapshot.state === "open"}
-				capabilities={capabilities.data}
-			/>
-			<InspectorDock
-				open={inspectorOpen}
-				onClose={closeInspector}
-				client={client}
-				sessionId={snapshot.id}
-				workspaceRoot={workspaceRoot}
-				view={panelView}
-				onViewChange={choosePanelView}
-				onCloseSession={closeSession}
-				closing={close.isPending}
-			/>
-		</section>
+			</section>
+		</PaneContext.Provider>
 	);
 }

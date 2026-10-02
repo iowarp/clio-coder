@@ -1,25 +1,46 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import { forgetBrowser, rememberBrowser, rememberedTokenKey } from "../api/token.js";
 
-import { Icon } from "./icons.js";
-
 type InstallPrompt = Event & { prompt(): Promise<unknown>; userChoice: Promise<{ outcome: "accepted" | "dismissed" }> };
-function PwaControls({ enabled, token }: { enabled: boolean; token: string }) {
-	const [prompt, setPrompt] = useState<InstallPrompt | null>(null);
-	const [installed, setInstalled] = useState(false);
-	const [storage, setStorage] = useState(true);
-	const [message, setMessage] = useState("");
+
+/**
+ * The browser fires `beforeinstallprompt` once, early, so it is captured here at the shell and not
+ * where the Install button lives. A page that mounted late would never see it.
+ */
+interface PwaState {
+	readonly prompt: InstallPrompt | null;
+	readonly installed: boolean;
+	readonly storage: boolean;
+	readonly message: string;
+}
+let state: PwaState = { prompt: null, installed: false, storage: true, message: "" };
+const listeners = new Set<() => void>();
+function update(next: Partial<PwaState>): void {
+	state = { ...state, ...next };
+	for (const listener of listeners) listener();
+}
+const subscribe = (listener: () => void) => {
+	listeners.add(listener);
+	return () => {
+		listeners.delete(listener);
+	};
+};
+const read = () => state;
+
+/** Mounted once by the shell: install prompt capture, token memory, offline recovery and cross-tab sign-out. */
+export function PwaBoot({ enabled, token }: { enabled: boolean; token: string }) {
 	useEffect(() => {
-		setInstalled(window.matchMedia("(display-mode: standalone)").matches);
+		update({ installed: window.matchMedia("(display-mode: standalone)").matches });
 		const ready = (event: Event) => {
 			event.preventDefault();
-			setPrompt(event as InstallPrompt);
+			update({ prompt: event as InstallPrompt });
 		};
-		const completed = () => {
-			setInstalled(true);
-			setPrompt(null);
-			setMessage("Clio Coder is installed. Open it from your applications whenever you need it.");
-		};
+		const completed = () =>
+			update({
+				installed: true,
+				prompt: null,
+				message: "Clio Coder is installed. Open it from your applications whenever you need it.",
+			});
 		const changed = (event: StorageEvent) => {
 			if (event.key === rememberedTokenKey && event.newValue !== token) {
 				try {
@@ -41,116 +62,89 @@ function PwaControls({ enabled, token }: { enabled: boolean; token: string }) {
 	}, [token]);
 	useEffect(() => {
 		if (!enabled || !token) return;
-		setStorage(rememberBrowser(token));
+		update({ storage: rememberBrowser(token) });
 		if ("serviceWorker" in navigator)
-			void navigator.serviceWorker
-				.register("/sw.js", { scope: "/", updateViaCache: "none" })
-				.catch(() =>
-					setMessage(
-						"Offline recovery could not be prepared. The connected app is still available; try reloading this page.",
-					),
-				);
+			void navigator.serviceWorker.register("/sw.js", { scope: "/", updateViaCache: "none" }).catch(() =>
+				update({
+					message: "Offline recovery could not be prepared. The connected app is still available; try reloading this page.",
+				}),
+			);
 	}, [enabled, token]);
-	if (!enabled) return null;
-	return (
-		<details className="pwa-controls">
-			<summary>{installed ? "Installed app preferences" : "Install Clio Coder"}</summary>
-			<p>Keep Clio Coder beside your other apps. It uses the same projects and conversations as this browser.</p>
-			{!storage ? (
-				<p role="alert">
-					This browser cannot save your connection. Allow site storage before installing so Clio can reconnect when reopened.
-				</p>
-			) : prompt ? (
-				<button
-					type="button"
-					onClick={() => {
-						const current = prompt;
-						setPrompt(null);
-						void current
-							.prompt()
-							.then(() => current.userChoice)
-							.then((choice) => {
-								if (choice.outcome === "dismissed")
-									setMessage("Installation was dismissed. You can install later from your browser's app menu.");
-							})
-							.catch(() => setMessage("Use your browser's app menu to install Clio Coder."));
-					}}
-				>
-					Install app
-				</button>
-			) : (
-				!installed && (
-					<p>Use your browser’s Install app or Add to Home Screen command. Installation options depend on your browser.</p>
-				)
-			)}
-			<p>
-				This browser stays connected on this device. Forgetting it keeps saved conversations in Clio, removes unsent drafts
-				from this tab, and requires a fresh launch link to reconnect.
-			</p>
-			<button type="button" onClick={forgetBrowser}>
-				Forget this browser
-			</button>
-			{message && <p role="status">{message}</p>}
-		</details>
-	);
+	return null;
 }
 
-export function AppPreferences({
+/** The install and sign-out controls shown in General settings. */
+export function AppPreferencesPanel({
 	enabled,
-	token,
 	version,
 	platform,
 }: {
 	enabled: boolean;
-	token: string;
 	version: string | undefined;
 	/** The server's `process.platform-arch`, which decides whether background setup exists at all. */
 	platform: string | undefined;
 }) {
-	const dialog = useRef<HTMLDialogElement>(null);
+	const pwa = useSyncExternalStore(subscribe, read, read);
+	const [note, setNote] = useState("");
+	const message = note || pwa.message;
 	return (
-		<>
-			<button
-				className="icon-button"
-				type="button"
-				aria-label="App preferences"
-				title="App preferences"
-				onClick={() => dialog.current?.showModal()}
-			>
-				<Icon name="more" />
-			</button>
-			<dialog ref={dialog} className="app-dialog" aria-label="App preferences">
-				<div className="toast-heading">
-					<strong className="brand">
-						<img src="/clio-coder-logo.webp" alt="" width="36" height="36" />
-						Clio Coder
-					</strong>
-					<button
-						className="icon-button"
-						type="button"
-						aria-label="Close app preferences"
-						onClick={() => dialog.current?.close()}
-					>
-						<Icon name="close" />
+		<div className="pwa-controls">
+			<p className="app-version">{version ? `Version ${version}` : "Connecting to Clio…"}</p>
+			{enabled ? (
+				<>
+					<p>Keep Clio Coder beside your other apps. It uses the same projects and tasks as this browser.</p>
+					{!pwa.storage ? (
+						<p role="alert">
+							This browser cannot save your connection. Allow site storage before installing so Clio can reconnect when
+							reopened.
+						</p>
+					) : pwa.prompt ? (
+						<button
+							type="button"
+							onClick={() => {
+								const current = pwa.prompt;
+								if (!current) return;
+								update({ prompt: null });
+								void current
+									.prompt()
+									.then(() => current.userChoice)
+									.then((choice) => {
+										if (choice.outcome === "dismissed")
+											setNote("Installation was dismissed. You can install later from your browser's app menu.");
+									})
+									.catch(() => setNote("Use your browser's app menu to install Clio Coder."));
+							}}
+						>
+							Install app
+						</button>
+					) : (
+						!pwa.installed && (
+							<p>Use your browser’s Install app or Add to Home Screen command. Installation options depend on your browser.</p>
+						)
+					)}
+					<p>
+						This browser stays connected on this device. Forgetting it keeps saved tasks in Clio, removes unsent drafts from
+						this tab, and requires a fresh launch link to reconnect.
+					</p>
+					<button type="button" onClick={forgetBrowser}>
+						Forget this browser
 					</button>
+				</>
+			) : (
+				<div className="app-dialog__launch">
+					<p>This window's server belongs to the terminal that started it, and its address changes each time it starts.</p>
+					{platform?.startsWith("linux") ? (
+						<p>
+							For one address from login that this browser can install as an app, run{" "}
+							<code>clio-coder gui background install --open</code> in a terminal. Afterwards <code>clio-coder gui</code>{" "}
+							reopens it.
+						</p>
+					) : (
+						<p>Keeping Clio Coder at one address from login currently needs Linux with a systemd user session.</p>
+					)}
 				</div>
-				<p className="app-version">{version ? `Version ${version}` : "Connecting to Clio…"}</p>
-				<PwaControls enabled={enabled} token={token} />
-				{!enabled && (
-					<div className="app-dialog__launch">
-						<p>This window's server belongs to the terminal that started it, and its address changes each time it starts.</p>
-						{platform?.startsWith("linux") ? (
-							<p>
-								For one address from login that this browser can install as an app, run{" "}
-								<code>clio-coder gui background install --open</code> in a terminal. Afterwards <code>clio-coder gui</code>{" "}
-								reopens it.
-							</p>
-						) : (
-							<p>Keeping Clio Coder at one address from login currently needs Linux with a systemd user session.</p>
-						)}
-					</div>
-				)}
-			</dialog>
-		</>
+			)}
+			{message && <p role="status">{message}</p>}
+		</div>
 	);
 }

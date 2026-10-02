@@ -1,6 +1,7 @@
 import { MutationCache, QueryCache, QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { useEffect } from "react";
 import { createRoot } from "react-dom/client";
-import { createBrowserRouter, RouterProvider } from "react-router";
+import { createBrowserRouter, RouterProvider, useRouteError } from "react-router";
 import { createClient } from "./api/client.js";
 import { launchToken } from "./api/token.js";
 import { App } from "./app.js";
@@ -12,11 +13,15 @@ import "./render/markdown.css";
 
 const client = createClient(launchToken());
 const queries = new QueryClient({
-	defaultOptions: { queries: { retry: false } },
+	// A few seconds of freshness stops two views that mount together from asking for the same thing twice.
+	defaultOptions: { queries: { retry: false, staleTime: 5_000 } },
 	queryCache: new QueryCache({ onError: reportProblem }),
 	mutationCache: new MutationCache({ onError: reportProblem }),
 });
 function RouteError() {
+	const error = useRouteError();
+	// The boundary swallows the cause; without this line a broken view is a blank apology with no lead.
+	useEffect(() => console.error("Route failed to render:", error), [error]);
 	return (
 		<main className="route-error" role="alert">
 			<p className="eyebrow">Clio Coder</p>
@@ -59,6 +64,15 @@ const router = createBrowserRouter([
 				lazy: async () => {
 					const { LibraryPage } = await import("./pages/library.js");
 					return { element: <LibraryPage client={client} /> };
+				},
+			},
+			// The wizard is drawn by the app shell, full window, so this route has nothing of its own to render.
+			{ path: "/setup", element: null },
+			{
+				path: "/skills",
+				lazy: async () => {
+					const { SkillsPage } = await import("./pages/skills.js");
+					return { element: <SkillsPage client={client} /> };
 				},
 			},
 			{
@@ -111,10 +125,45 @@ const router = createBrowserRouter([
 				},
 			},
 			{
+				path: "/settings/general",
+				lazy: async () => {
+					const { GeneralPage } = await import("./pages/general.js");
+					return { element: <GeneralPage client={client} /> };
+				},
+			},
+			{
 				path: "/settings",
 				lazy: async () => {
-					const { SettingsPage } = await import("./pages/settings.js");
-					return { element: <SettingsPage client={client} view="settings" /> };
+					const { AdvancedSettings } = await import("./pages/settings-sections.js");
+					return { element: <AdvancedSettings client={client} /> };
+				},
+			},
+			{
+				path: "/settings/advanced",
+				lazy: async () => {
+					const { AdvancedSettings } = await import("./pages/settings-sections.js");
+					return { element: <AdvancedSettings client={client} /> };
+				},
+			},
+			{
+				path: "/settings/models",
+				lazy: async () => {
+					const { ModelsSettings } = await import("./pages/settings-sections.js");
+					return { element: <ModelsSettings client={client} /> };
+				},
+			},
+			{
+				path: "/settings/safety",
+				lazy: async () => {
+					const { SafetySettings } = await import("./pages/settings-sections.js");
+					return { element: <SafetySettings client={client} /> };
+				},
+			},
+			{
+				path: "/settings/context",
+				lazy: async () => {
+					const { ContextSettings } = await import("./pages/settings-sections.js");
+					return { element: <ContextSettings client={client} /> };
 				},
 			},
 			{
@@ -142,7 +191,7 @@ const router = createBrowserRouter([
 				path: "/sessions",
 				lazy: async () => {
 					const { Workspaces } = await import("./pages/sessions.js");
-					return { element: <Workspaces client={client} /> };
+					return { element: <Workspaces /> };
 				},
 			},
 			{

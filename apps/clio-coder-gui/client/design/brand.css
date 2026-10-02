@@ -57,6 +57,10 @@
 	--secondary: #9a4812;
 	--motion-fast: 160ms;
 	--motion-base: 240ms;
+	--motion-entry: 640ms;
+	--motion-feedback: 1800ms;
+	--motion-distance: 12px;
+	--motion-stagger: 80ms;
 	--ease-standard: cubic-bezier(0.2, 0.7, 0.2, 1);
 	--ease-emphasis: cubic-bezier(0.2, 0.7, 0.2, 1);
 }

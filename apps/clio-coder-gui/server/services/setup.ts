@@ -32,11 +32,15 @@ export class SetupService {
 	}
 	async start(input: SetupStart, key: string): Promise<SetupState> {
 		if (this.running?.keys.has(key)) return this.snapshot(this.running.state.id);
-		if (this.busy) throw new AppProblem("conflict", "Setup is already open in another view. Finish or cancel it first.");
+		if (this.starting) throw new AppProblem("conflict", "Setup is already starting. Wait a moment and try again.");
 		this.starting = true;
 		try {
+			// The newest view wins. A page that was reloaded or closed mid-setup leaves its child running, and
+			// refusing the next start would strand the person on a button that can never work. The older
+			// view's next read answers "no longer available", which it already shows as a recoverable error.
 			if (this.running) {
-				this.stop(this.running);
+				if (["working", "prompt"].includes(this.running.state.status)) this.cancel(this.running.state.id);
+				else this.stop(this.running);
 				await this.running.done;
 			}
 			const child = await startConfigureChild(this.env);

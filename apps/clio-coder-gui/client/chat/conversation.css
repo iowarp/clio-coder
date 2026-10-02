@@ -1,0 +1,88 @@
+/* The task screen: the conversation column and, when open, the pane beside it. Everything the
+   conversation shows stays in one centred reading column; the pane never narrows it below a
+   comfortable measure, it overlays instead. */
+
+.conversation {
+	--chat-gutter: var(--space-8);
+	--pane-w: clamp(360px, 30vw, 480px);
+	flex: 1;
+	min-width: 0;
+	min-height: 0;
+	display: grid;
+	grid-template-columns: minmax(0, 1fr);
+}
+@media (min-width: 1100px) {
+	.conversation[data-pane="open"] {
+		grid-template-columns: minmax(0, 1fr) var(--pane-w);
+	}
+}
+.conversation__main {
+	min-width: 0;
+	min-height: 0;
+	display: grid;
+	grid-template-columns: minmax(0, 1fr);
+	/* bar, notices, approval, transcript, jump anchor, composer */
+	grid-template-rows: auto auto auto minmax(0, 1fr) 0 auto;
+}
+.conversation__notices {
+	min-width: 0;
+}
+.conversation__health {
+	display: grid;
+	gap: var(--space-2);
+	padding: 0 var(--chat-gutter) var(--space-2);
+	max-width: calc(var(--conversation-max) + 2 * var(--chat-gutter));
+	width: 100%;
+	margin-inline: auto;
+	box-sizing: border-box;
+}
+.conversation__health .context-banner {
+	margin: 0;
+}
+
+/* The status the bar shows beside the title: only when there is something to say. */
+.wb-chip--status {
+	/* The word that carries the state never shrinks; the title gives way instead. */
+	flex: none;
+	max-width: none;
+	border-color: transparent;
+	background: transparent;
+	padding-inline: var(--space-1);
+	gap: var(--space-2);
+}
+.wb-chip--status[data-tone="approval"] {
+	border-color: var(--status-warn-line);
+	background: var(--status-warn-tint);
+	padding-inline: 10px;
+}
+.wb-chip--status[data-tone="failed"] {
+	color: var(--status-fail-fg);
+}
+
+@media (max-width: 1050px) {
+	.conversation {
+		--chat-gutter: var(--space-6);
+	}
+}
+@media (max-width: 650px) {
+	.conversation {
+		--chat-gutter: var(--space-4);
+	}
+	.conversation__dock {
+		padding-bottom: var(--space-3);
+	}
+}
+
+/* Transcript text slides under the bar through a short fade in the card's own colour, so nothing
+   is sliced by a hard edge and no divider line is needed. */
+.conversation__main > .chat-transcript::before {
+	content: "";
+	position: sticky;
+	top: 0;
+	z-index: 2;
+	display: block;
+	height: 18px;
+	margin-bottom: -18px;
+	background: linear-gradient(to bottom, var(--surface), transparent);
+	pointer-events: none;
+}

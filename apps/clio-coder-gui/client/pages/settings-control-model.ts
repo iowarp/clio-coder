@@ -13,6 +13,12 @@ export const TIMING_LABEL: Record<SettingControl["timing"], string> = {
 	nextTurn: "Next request",
 	restartRequired: "Next session",
 };
+/** The classification as a phrase that reads after "·", for the quiet line under a control. */
+export const TIMING_PHRASE: Record<SettingControl["timing"], string> = {
+	hotReload: "applies now",
+	nextTurn: "applies on the next request",
+	restartRequired: "applies in the next session",
+};
 const SOURCE: Record<SettingControl["source"], string> = {
 	"built-in": "Default",
 	user: "Your settings",
@@ -115,4 +121,29 @@ export function sentence(text: string): string {
 	if (!trimmed) return "";
 	const capital = `${trimmed[0]?.toLocaleUpperCase("en-US")}${trimmed.slice(1)}`;
 	return /[.!?]$/.test(capital) ? capital : `${capital}.`;
+}
+
+/**
+ * The calm pages of Settings. Each takes the runtime registry's own controls by section and group, so
+ * nothing here is a setting of the app's own. Whatever no calm page claims is on the Advanced page.
+ */
+export type SettingsScopeId = "models" | "safety" | "context" | "advanced";
+
+const MODEL_GROUPS: ReadonlySet<string> = new Set([
+	"chat/Model & responses",
+	"chat/Model picker",
+	"fleet/Default model",
+]);
+const keyOf = (control: Pick<SettingControl, "section" | "group">) => `${control.section}/${control.group}`;
+
+const CALM: Readonly<Record<Exclude<SettingsScopeId, "advanced">, (control: SettingControl) => boolean>> = {
+	models: (control) => MODEL_GROUPS.has(keyOf(control)),
+	safety: (control) => control.section === "safety",
+	context: (control) => control.section === "context",
+};
+
+/** Whether a control belongs on a page. Advanced is everything the calm pages leave out. */
+export function inScope(scope: SettingsScopeId, control: SettingControl): boolean {
+	if (scope !== "advanced") return CALM[scope](control);
+	return !Object.values(CALM).some((claims) => claims(control));
 }

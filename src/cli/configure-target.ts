@@ -8,6 +8,7 @@
  * and the alternative to a shared module was a circular import between the two
  * files that prompt.
  */
+import { createConnection } from "node:net";
 import chalk from "chalk";
 
 import type { ClioSettings } from "../core/config.js";
@@ -212,12 +213,59 @@ export function validateContextWindowOverride(
 	return true;
 }
 
+async function loopbackConnectionFailure(target: TargetDescriptor): Promise<ProbeResult | null> {
+	if (!target.url) return null;
+	let url: URL;
+	try {
+		url = new URL(target.url);
+	} catch {
+		// The runtime still owns validation of its address.
+		return null;
+	}
+	if (!/^https?:$/.test(url.protocol)) return null;
+	const host = url.hostname;
+	if (!/^127(?:\.\d{1,3}){3}$/.test(host) && host !== "[::1]") return null;
+	const port = Number(url.port || (url.protocol === "https:" ? 443 : 80));
+	const started = performance.now();
+	// An absent local listener can silently drop SYNs on WSL rather than refuse them. Bound the
+	// TCP check before the runtime repeats HTTP discovery; a listener still gets its full checks.
+	return new Promise((resolve) => {
+		const socket = createConnection({ host: host === "[::1]" ? "::1" : host, port });
+		const finish = (error: string | null) => {
+			socket.destroy();
+			resolve(
+				error
+					? {
+							ok: false,
+							failureKind: "missing",
+							latencyMs: Math.round(performance.now() - started),
+							error,
+						}
+					: null,
+			);
+		};
+		socket.setTimeout(750, () =>
+			finish(`Connection timed out at ${host}:${port}. Start the server or check its address.`),
+		);
+		socket.once("connect", () => finish(null));
+		socket.once("error", (error: NodeJS.ErrnoException) =>
+			finish(
+				error.code === "ECONNREFUSED"
+					? `Connection refused at ${host}:${port}. Start the server or check its address.`
+					: null,
+			),
+		);
+	});
+}
+
 export async function runtimeProbe(
 	runtime: RuntimeDescriptor,
 	target: TargetDescriptor,
 	authToken?: string,
 ): Promise<ProbeResult | null> {
 	if (typeof runtime.probe !== "function") return null;
+	const refused = await loopbackConnectionFailure(target);
+	if (refused) return refused;
 	try {
 		const context = await buildProbeContext(runtime, target);
 		return await runtime.probe(target, authToken === undefined ? context : { ...context, authToken });
@@ -232,6 +280,7 @@ async function runtimeProbeModels(
 	authToken?: string,
 ): Promise<string[]> {
 	if (typeof runtime.probeModels !== "function") return [];
+	if (await loopbackConnectionFailure(target)) return [];
 	try {
 		const context = await buildProbeContext(runtime, target);
 		return await runtime.probeModels(target, authToken === undefined ? context : { ...context, authToken });

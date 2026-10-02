@@ -93,7 +93,7 @@ export function SettingsPage({ client, view }: { client: Client; view: "settings
 			<PanelHeading panel={panel} level={1} />
 			<WorkspacePicker selection={selection} />
 			{view !== "settings" && <ConfigurationTabs id={id} active={view} />}
-			{!id && view === "settings" && <ConnectionSetup client={client} />}
+			{!id && view === "settings" && <ConnectionSetup />}
 			{!id && view !== "settings" && !selection.workspaces.isPending && (
 				<PanelEmpty>{emptyState.unread("configuration of a workspace")}</PanelEmpty>
 			)}

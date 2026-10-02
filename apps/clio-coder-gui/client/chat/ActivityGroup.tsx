@@ -14,6 +14,7 @@ import { useState } from "react";
 import type { SessionSnapshot, TimelineItem } from "../../contracts/sessions.js";
 import type { Client } from "../api/client.js";
 import { formatDuration } from "../api/clock.js";
+import { ClioPulse, PULSE_SIZE } from "../shell/ClioMark.js";
 import { AnchoredApproval } from "./Approval.js";
 import {
 	activityDigest,
@@ -42,9 +43,11 @@ export interface ActivityGroupProps {
 	readonly workspaceRoot: string | undefined;
 	/** The shared second. Zero for a settled turn, so the clock cannot invalidate it. */
 	readonly nowMs: number;
+	/** Clio is actively working this turn in an open session. Running calls draw the Clio spinner only then. */
+	readonly working?: boolean;
 }
 
-function ActivityRow({ item, client, session, workspaceRoot, nowMs }: ActivityRowProps) {
+function ActivityRow({ item, client, session, workspaceRoot, nowMs, live }: ActivityRowProps) {
 	const startedAtMs = observeStart(item.id, nowMs);
 	const elapsedMs = nowMs === 0 ? 0 : Math.max(0, nowMs - startedAtMs);
 	return (
@@ -61,6 +64,7 @@ function ActivityRow({ item, client, session, workspaceRoot, nowMs }: ActivityRo
 					}}
 					agent={workerLabel(item.provenance)}
 					elapsed={showElapsed(item, elapsedMs) ? formatDuration(elapsedMs) : null}
+					live={live}
 				/>
 			) : (
 				<p className="activity__notice">
@@ -83,14 +87,24 @@ interface ActivityRowProps {
 	readonly session: SessionSnapshot;
 	readonly workspaceRoot: string | undefined;
 	readonly nowMs: number;
+	readonly live: boolean;
 }
 
-export function ActivityGroup({ items, settled, client, session, workspaceRoot, nowMs }: ActivityGroupProps) {
+export function ActivityGroup({
+	items,
+	settled,
+	client,
+	session,
+	workspaceRoot,
+	nowMs,
+	working = false,
+}: ActivityGroupProps) {
 	// Null means "nobody has touched this". Once the operator toggles, their choice wins forever.
 	const [userOpen, setUserOpen] = useState<boolean | null>(null);
 	const summary = summarizeActivity(items);
 	const open = activityOpen(userOpen, settled, summary);
 	const running = runningItem(items);
+	const live = working && !settled;
 	const detail =
 		summary.waiting > 0 ? null : running !== null ? describeTool(running, workspaceRoot) : activityDigest(items);
 	return (
@@ -103,7 +117,11 @@ export function ActivityGroup({ items, settled, client, session, workspaceRoot, 
 		>
 			<summary className="activity__summary">
 				<span className="activity__glyph" aria-hidden="true">
-					{activityGlyph(summary)}
+					{live && summary.running > 0 && summary.waiting === 0 ? (
+						<ClioPulse size={PULSE_SIZE.inline} />
+					) : (
+						activityGlyph(summary)
+					)}
 				</span>
 				<span className="activity__label">{summary.label}</span>
 				{detail ? <span className="activity__current">{detail}</span> : null}
@@ -118,6 +136,7 @@ export function ActivityGroup({ items, settled, client, session, workspaceRoot, 
 							session={session}
 							workspaceRoot={workspaceRoot}
 							nowMs={nowMs}
+							live={live}
 						/>
 					))}
 				</ul>

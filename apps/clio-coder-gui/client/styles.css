@@ -16,10 +16,6 @@
 	--scroll-thumb-hover: color-mix(in srgb, var(--ink-muted) 85%, transparent);
 	scrollbar-gutter: stable;
 }
-/* The conversation never scrolls the document; its transcript scrolls itself at the pane's edge. */
-:root:has(main > .conversation) {
-	scrollbar-gutter: auto;
-}
 /* Code and diagrams are dark in both themes, so their thumb follows the code ink. */
 pre,
 .code-block,
@@ -91,19 +87,21 @@ textarea {
 }
 button {
 	cursor: pointer;
-	min-height: 38px;
-	padding: 9px 13px;
+	min-height: 34px;
+	padding: 6px 13px;
 	border: 1px solid var(--line-strong);
-	border-radius: var(--radius-sm);
+	border-radius: 8px;
 	color: var(--ink);
-	background: var(--surface);
+	background: transparent;
+	font-size: var(--text-meta);
+	line-height: 1.3;
 	transition:
 		border-color var(--motion-fast) var(--ease-standard),
 		color var(--motion-fast) var(--ease-standard),
 		background var(--motion-fast) var(--ease-standard);
 }
 button:hover:not(:disabled) {
-	border-color: var(--accent);
+	background: var(--wb-hover);
 }
 button:disabled {
 	opacity: 0.5;
@@ -114,11 +112,12 @@ select,
 textarea {
 	min-width: 0;
 	width: 100%;
-	padding: 12px;
+	padding: 8px 12px;
 	border: 1px solid var(--line-strong);
-	border-radius: var(--radius-sm);
+	border-radius: 8px;
 	color: var(--ink);
-	background: var(--surface);
+	background: var(--wb-faint);
+	font-size: var(--text-meta);
 }
 details {
 	font-size: var(--text-exact);
@@ -161,12 +160,18 @@ h1 em {
 	color: var(--accent);
 	font-weight: 400;
 }
+/* Matches the site's eyebrow: small mono capitals at regular weight. */
 .eyebrow {
-	font-size: var(--text-instrument);
-	letter-spacing: var(--tracking-instrument);
+	font-size: 11px;
+	letter-spacing: 0.1em;
 	text-transform: uppercase;
 	color: var(--ink-muted);
-	font-weight: 700;
+	font-weight: 500;
+	line-height: 1.6;
+}
+/* .trace-panel p outranks .eyebrow by one element, which set panel eyebrows at body size. */
+.trace-panel .eyebrow {
+	font-size: 11px;
 	line-height: 1.6;
 }
 .intro {
@@ -187,51 +192,6 @@ h1 em {
 	font-size: var(--text-exact);
 	overflow-wrap: anywhere;
 }
-
-/* Shell */
-.shell {
-	min-height: 100dvh;
-	display: flex;
-	flex-direction: column;
-}
-main {
-	padding: var(--space-12) var(--space-12) var(--space-16);
-	scroll-margin-top: 74px;
-	max-width: 1440px;
-	width: 100%;
-	min-width: 0;
-}
-.masthead {
-	height: var(--masthead-height);
-	flex-shrink: 0;
-	padding: 0 var(--space-6);
-	border-bottom: 1px solid var(--line);
-	display: flex;
-	align-items: center;
-	justify-content: space-between;
-	background: var(--paper);
-	position: sticky;
-	top: 0;
-	z-index: 5;
-}
-.header-controls {
-	display: flex;
-	align-items: center;
-	gap: var(--space-1);
-}
-.brand {
-	font-size: 19px;
-	font-weight: 650;
-	letter-spacing: -0.5px;
-	text-decoration: none;
-	display: inline-flex;
-	align-items: center;
-	gap: 10px;
-}
-.brand img {
-	object-fit: contain;
-	flex-shrink: 0;
-}
 .icon {
 	width: 18px;
 	height: 18px;
@@ -251,32 +211,8 @@ main {
 	color: var(--ink-muted);
 }
 .icon-button:hover:not(:disabled) {
-	background: var(--surface-sunken);
+	background: var(--well);
 	color: var(--ink);
-}
-.connection {
-	display: flex;
-	align-items: center;
-	gap: var(--space-2);
-	padding: var(--space-3);
-	color: var(--ink-muted);
-	font-size: var(--text-exact);
-}
-.connection-dot {
-	width: 7px;
-	height: 7px;
-	flex: none;
-	border-radius: 50%;
-	background: var(--status-unverified-line);
-}
-.connection[data-connected="true"] .connection-dot {
-	background: var(--accent);
-}
-.connection[data-state="Reconnecting…"] .connection-dot {
-	background: var(--status-warn-line);
-}
-.connection[data-state="Not connected"] .connection-dot {
-	background: var(--status-fail-line);
 }
 .sr-only {
 	position: absolute;
@@ -301,80 +237,10 @@ main {
 .skip-link:focus {
 	top: var(--space-3);
 }
-
-/* Navigation */
-.menu-toggle {
-	display: none;
-}
-.workspace {
-	display: grid;
-	grid-template-columns: var(--rail-width) minmax(0, 1fr);
-	flex: 1;
-	transition: grid-template-columns var(--motion-base) var(--ease-standard);
-}
-.workspace[data-sidebar="collapsed"] {
-	grid-template-columns: var(--rail-collapsed-width) minmax(0, 1fr);
-}
-.desktop-navigation {
-	border-right: 1px solid var(--line);
-	padding: var(--space-5) var(--space-3);
-}
 nav {
 	display: grid;
 	gap: var(--space-1);
 	margin: 0;
-}
-.sidebar {
-	position: sticky;
-	top: 78px;
-	display: grid;
-	gap: var(--space-2);
-}
-/* Sidebar toggle: the same footprint as a navigation link, so both states read as one rail. */
-.sidebar .sidebar-toggle {
-	display: flex;
-	align-items: center;
-	gap: var(--space-3);
-	width: 100%;
-	min-height: 0;
-	padding: 11px 14px;
-	border: 0;
-	border-radius: var(--radius-sm);
-	background: transparent;
-	color: var(--ink-muted);
-	font-size: 14px;
-	text-align: left;
-}
-.sidebar .sidebar-toggle:hover:not(:disabled) {
-	background: var(--surface-sunken);
-	color: var(--ink);
-}
-.sidebar-toggle kbd {
-	margin-left: auto;
-	font: 11px var(--font-mono);
-	color: var(--ink-muted);
-}
-.sidebar-toggle + nav {
-	padding-top: var(--space-2);
-	border-top: 1px solid var(--line);
-}
-/* Collapsed rail: icons only. Labels stay in the document for assistive technology. */
-.workspace[data-sidebar="collapsed"] .nav-label {
-	position: absolute;
-	width: 1px;
-	height: 1px;
-	margin: -1px;
-	overflow: hidden;
-	clip-path: inset(50%);
-	white-space: nowrap;
-}
-.workspace[data-sidebar="collapsed"] .sidebar :is(nav a, .sidebar-toggle, .nav-help) {
-	position: relative;
-	justify-content: center;
-	padding-inline: 0;
-}
-.workspace[data-sidebar="collapsed"] .desktop-navigation {
-	padding-inline: var(--space-2);
 }
 .workspace[data-sidebar="collapsed"] .sidebar :is(nav a, .sidebar-toggle, .nav-help):is(:hover, :focus-visible)::after {
 	content: attr(data-tip);
@@ -406,39 +272,8 @@ nav a {
 		background var(--motion-fast) var(--ease-standard);
 }
 nav a:hover {
-	background: var(--surface-sunken);
+	background: var(--well);
 	color: var(--ink);
-}
-nav a.active {
-	background: var(--surface-sunken);
-	color: var(--ink);
-	font-weight: 600;
-}
-nav a.active .icon {
-	color: var(--accent);
-}
-/* The second group is reference material: same targets, less weight. */
-nav a[data-group="more"] {
-	padding-block: 7px;
-	font-size: var(--text-meta);
-}
-nav a[data-group="more"] .icon {
-	width: 16px;
-	height: 16px;
-}
-.nav-group {
-	margin: var(--space-4) 0 var(--space-1);
-	padding: var(--space-3) 14px 0;
-	border-top: 1px solid var(--line);
-	font-family: var(--font-mono);
-	font-size: var(--text-instrument);
-	letter-spacing: var(--tracking-instrument);
-	text-transform: uppercase;
-	color: var(--ink-muted);
-}
-.workspace[data-sidebar="collapsed"] .nav-group {
-	padding-inline: 0;
-	margin-block: var(--space-2);
 }
 
 /* Controls */
@@ -453,12 +288,13 @@ nav a[data-group="more"] .icon {
 	background: var(--primary-fill);
 	color: var(--on-primary);
 	border: 1px solid var(--primary-fill);
-	padding: 11px 14px;
+	padding: 7px 14px;
 	font-size: var(--text-meta);
+	font-weight: 500;
 	text-decoration: none;
 	display: inline-flex;
 	align-items: center;
-	gap: 25px;
+	gap: 12px;
 	justify-content: space-between;
 }
 .primary:hover:not(:disabled) {
@@ -583,18 +419,6 @@ nav a[data-group="more"] .icon {
 .navigation-dialog::backdrop {
 	background: var(--scrim);
 }
-.navigation-dialog {
-	border: 1px solid var(--line-strong);
-	border-radius: var(--radius-lg);
-	background: var(--overlay);
-	color: var(--ink);
-	padding: var(--space-6);
-	width: min(340px, calc(100vw - 32px));
-	max-height: calc(100dvh - 32px);
-}
-.navigation-dialog nav {
-	display: grid;
-}
 .toast-region {
 	position: fixed;
 	right: var(--space-5);
@@ -692,7 +516,7 @@ nav a[data-group="more"] .icon {
 	margin-left: 15px;
 }
 .operation {
-	background: var(--surface-sunken);
+	background: var(--well);
 	border-left: 3px solid var(--accent);
 	padding: 22px;
 	margin-top: 28px;
@@ -988,6 +812,14 @@ nav a[data-group="more"] .icon {
 	border-radius: var(--radius-sm);
 	color: var(--accent);
 }
+/* The panel's quiet button rule outranks .primary by one element; restate the fill so a panel's
+   one important action still reads as primary. */
+.trace-panel button.primary,
+.trace-filters button.primary {
+	border-color: var(--primary-fill);
+	background: var(--primary-fill);
+	color: var(--on-primary);
+}
 .trace-panel summary {
 	cursor: pointer;
 	margin: var(--space-3) 0;
@@ -1028,7 +860,7 @@ nav a[data-group="more"] .icon {
 	overflow: auto;
 	white-space: pre-wrap;
 	overflow-wrap: anywhere;
-	background: var(--surface-sunken);
+	background: var(--well);
 	padding: var(--space-4);
 	font-size: var(--text-exact);
 	line-height: 1.6;
@@ -1164,7 +996,7 @@ nav a[data-group="more"] .icon {
 	height: 10px;
 	border: 1px solid var(--line-strong);
 	border-radius: var(--radius-sm);
-	background: var(--surface-sunken);
+	background: var(--well);
 	overflow: hidden;
 }
 .trace-histogram__track > i {
@@ -1218,7 +1050,7 @@ nav a[data-group="more"] .icon {
 }
 .workspace-browser__current {
 	padding: var(--space-3);
-	background: var(--surface-sunken);
+	background: var(--well);
 	border-radius: var(--radius-sm);
 }
 .workspace-browser__current code {
@@ -1249,7 +1081,7 @@ nav a[data-group="more"] .icon {
 	width: 100%;
 	min-width: 0;
 	text-align: left;
-	background: var(--surface-sunken);
+	background: var(--well);
 }
 .workspace-browser__folders button span:nth-child(2) {
 	flex: 1;
@@ -1261,114 +1093,15 @@ nav a[data-group="more"] .icon {
 	color: var(--ink-muted);
 	font-size: var(--text-meta);
 }
-/* Only the conversation uses a viewport workspace. Other pages keep their document scroll. */
-.workspace:has(> main > .conversation) {
-	height: calc(100dvh - var(--masthead-height));
-	min-height: 0;
-	flex: 1 1 0;
-}
-/* The conversation takes the whole pane. The transcript scrolls at the pane's edge, where a scrollbar
-   belongs, and its content, the approval region and the composer share one centred reading column. A
-   capped main or a capped conversation box left dead space beside the window and drew a scrollbar in
-   the middle of the page. */
-main:has(> .conversation) {
-	height: 100%;
-	max-width: none;
-	min-height: 0;
-	/* clip does not create a second, programmatically scrollable main viewport. */
-	overflow: clip;
-	padding: 0;
-}
-.conversation {
-	--chat-gutter: var(--space-8);
-	height: 100%;
-	min-height: 0;
-	display: grid;
-	grid-template-rows: auto auto minmax(0, 1fr) 0 auto;
-}
 .conversation__approval,
 .conversation__dock,
 .chat-transcript__content,
-.conversation > .jump-anchor {
+.conversation__main > .jump-anchor {
 	box-sizing: border-box;
 	width: 100%;
 	max-width: calc(var(--conversation-max) + 2 * var(--chat-gutter));
 	margin-inline: auto;
 	padding-inline: var(--chat-gutter);
-}
-.session-status {
-	display: flex;
-	align-items: center;
-	flex-wrap: wrap;
-	gap: var(--space-2);
-	font-size: var(--text-meta);
-	color: var(--ink-muted);
-	margin: 0;
-}
-.conversation__header {
-	min-width: 0;
-	padding-inline: var(--space-6);
-	border-bottom: 1px solid var(--line);
-}
-/* One line: where you are, what this conversation is, whether Clio Coder is working, and one
-   control for everything else. The model sits in the composer, where the next request leaves. */
-.conversation__bar {
-	position: relative;
-	display: flex;
-	align-items: center;
-	gap: var(--space-2) var(--space-3);
-	min-width: 0;
-	min-height: 48px;
-	padding-block: var(--space-2);
-}
-.conversation__project {
-	display: inline-flex;
-	align-items: baseline;
-	gap: var(--space-2);
-	flex: 0 1 auto;
-	max-width: 14rem;
-	min-width: 0;
-	padding: var(--space-1) var(--space-2);
-	margin-left: calc(-1 * var(--space-2));
-	border-radius: var(--radius-sm);
-	color: var(--ink-muted);
-	font-size: var(--text-meta);
-	text-decoration: none;
-	white-space: nowrap;
-}
-.conversation__project:hover {
-	background: var(--surface-sunken);
-	color: var(--ink);
-}
-.conversation__project-name {
-	overflow: hidden;
-	text-overflow: ellipsis;
-}
-.conversation__title {
-	flex: 1 1 12rem;
-	min-width: 0;
-	margin: 0;
-	font-family: var(--font-ui);
-	font-size: var(--text-reading);
-	font-weight: 650;
-	line-height: var(--leading-tight);
-	letter-spacing: -0.01em;
-	color: var(--ink-strong);
-	overflow: hidden;
-	text-overflow: ellipsis;
-	white-space: nowrap;
-}
-/* The live state reads as a sentence here, not an instrument label; the glyph still carries it without colour. */
-.conversation__bar .session-status {
-	flex: none;
-}
-.conversation__bar .session-status .status-mark {
-	font-family: var(--font-ui);
-	font-size: var(--text-meta);
-	font-weight: 600;
-	letter-spacing: 0;
-	text-transform: none;
-	white-space: nowrap;
 }
 .conversation__health {
 	display: grid;
@@ -1377,100 +1110,6 @@ main:has(> .conversation) {
 }
 .conversation__health .context-banner {
 	margin: 0;
-}
-.conversation__switch {
-	display: grid;
-	gap: var(--space-2);
-	padding: var(--space-3) 0;
-	border-top: 1px solid var(--line);
-	color: var(--ink-muted);
-	font-size: var(--text-meta);
-}
-.conversation__switch select {
-	width: 100%;
-	min-height: 36px;
-	padding: var(--space-1) var(--space-2);
-	font-size: var(--text-meta);
-}
-.conversation__tools {
-	position: static;
-	flex: none;
-}
-/* A labelled control in the header's own voice; its words identify it, so it needs no frame until
-   it is pointed at or open. */
-.conversation__tools > summary {
-	display: inline-flex;
-	align-items: center;
-	gap: var(--space-2);
-	min-height: 36px;
-	padding: var(--space-1) var(--space-3);
-	border: 1px solid transparent;
-	border-radius: var(--radius-sm);
-	background: transparent;
-	font-size: var(--text-meta);
-	color: var(--ink);
-	cursor: pointer;
-	list-style: none;
-	white-space: nowrap;
-}
-.conversation__tools > summary::-webkit-details-marker {
-	display: none;
-}
-.conversation__tools > summary .icon {
-	width: 16px;
-	height: 16px;
-	color: var(--ink-muted);
-}
-.conversation__tools > summary:hover,
-.conversation__tools[open] > summary {
-	background: var(--surface-sunken);
-	border-color: var(--line-strong);
-}
-.conversation__tools-body {
-	position: absolute;
-	z-index: 6;
-	right: 0;
-	top: calc(100% + var(--space-2));
-	width: min(40rem, 100%);
-	max-height: min(75dvh, 44rem);
-	overflow: auto;
-	padding: var(--space-2) var(--space-5) var(--space-4);
-	border: 1px solid var(--line-strong);
-	border-radius: var(--radius-lg);
-	background: var(--overlay);
-	box-shadow: var(--shadow-panel);
-}
-.conversation__tools-body :is(.session-controls, .command-panel, .fleet-strip) {
-	background: transparent;
-	border: 0;
-	border-top: 1px solid var(--line);
-	border-radius: 0;
-	margin: 0;
-	padding: var(--space-3) 0;
-}
-.conversation__place {
-	display: grid;
-	gap: var(--space-1);
-	padding: var(--space-3) 0;
-}
-.conversation__place .eyebrow {
-	margin: 0;
-}
-.conversation__place code {
-	font-family: var(--font-mono);
-	font-size: var(--text-exact);
-	color: var(--ink);
-	overflow-wrap: anywhere;
-}
-.conversation__settings-link {
-	justify-self: start;
-	margin-top: var(--space-1);
-	color: var(--accent-strong);
-	font-size: var(--text-meta);
-	text-decoration: none;
-}
-.conversation__settings-link:hover {
-	text-decoration: underline;
 }
 .conversation__close {
 	display: flex;
@@ -1529,56 +1168,9 @@ main:has(> .conversation) {
 	max-height: min(38dvh, 22rem);
 	overflow-y: auto;
 }
-@media (max-width: 1050px) {
-	.conversation {
-		--chat-gutter: var(--space-6);
-	}
-}
 @media (max-width: 650px) {
-	.conversation {
-		--chat-gutter: var(--space-4);
-	}
-	.conversation__header {
-		padding-inline: var(--space-4);
-	}
 	.conversation__dock {
 		padding-bottom: var(--space-3);
-	}
-	.conversation__bar {
-		flex-wrap: wrap;
-		row-gap: var(--space-1);
-	}
-	/* The project link takes whatever the status and the tools leave, so the three share one line
-	   and the name shortens instead of pushing the tools onto a line of their own. */
-	.conversation__project {
-		flex: 1 1 0;
-		max-width: none;
-	}
-	.conversation__title {
-		order: 5;
-		flex-basis: 100%;
-		font-size: var(--text-body);
-	}
-	.conversation__bar .session-status {
-		margin-left: auto;
-	}
-	.conversation__tools-label {
-		position: absolute;
-		width: 1px;
-		height: 1px;
-		margin: -1px;
-		overflow: hidden;
-		clip-path: inset(50%);
-		white-space: nowrap;
-	}
-	.conversation__tools > summary {
-		padding-inline: var(--space-2);
-	}
-	/* Keep the menu inside the conversation gutters even when header controls wrap. */
-	.conversation__tools-body {
-		width: 100%;
-		max-height: min(70dvh, 44rem);
-		padding-inline: var(--space-4);
 	}
 }
 
@@ -1599,7 +1191,7 @@ main:has(> .conversation) {
 	margin-block: var(--space-4);
 }
 .session-controls {
-	background: var(--surface-sunken);
+	background: var(--well);
 }
 .session-controls > h2,
 .session-settings > h2 {
@@ -1682,9 +1274,6 @@ main:has(> .conversation) {
 	.home-hero {
 		grid-template-columns: minmax(0, 1fr);
 	}
-	main {
-		padding: var(--space-8) var(--space-6);
-	}
 	.tool {
 		gap: var(--space-5);
 	}
@@ -1697,41 +1286,9 @@ main:has(> .conversation) {
 	}
 }
 @media (max-width: 750px) {
-	.workspace {
-		display: block;
-	}
-	.desktop-navigation {
-		display: none;
-	}
-	.menu-toggle {
-		display: inline-flex;
-	}
-	.masthead {
-		padding-inline: var(--space-3);
-	}
-	.header-controls {
-		gap: 0;
-	}
-	.connection {
-		padding: var(--space-2);
-	}
-	.connection[data-connected="true"] .connection-label {
-		position: absolute;
-		width: 1px;
-		height: 1px;
-		padding: 0;
-		margin: -1px;
-		overflow: hidden;
-		clip-path: inset(50%);
-		white-space: nowrap;
-	}
 	.icon-button {
 		width: 40px;
 		height: 44px;
-	}
-	.brand {
-		font-size: 19px;
-		gap: var(--space-2);
 	}
 	.page-heading {
 		gap: 14px;
@@ -1758,9 +1315,6 @@ main:has(> .conversation) {
 	}
 }
 @media (max-width: 650px) {
-	main {
-		padding: var(--space-6) var(--space-5);
-	}
 	.tool {
 		grid-template-columns: 1fr;
 		gap: var(--space-4);
@@ -1843,43 +1397,21 @@ main :is(pre, .table-scroll) {
 		min-height: 44px;
 	}
 }
-@media (max-width: 360px) {
-	.brand {
-		font-size: 16px;
-		gap: var(--space-1);
-	}
-	.brand img {
-		width: 30px;
-	}
-	.connection {
-		padding-inline: var(--space-1);
-	}
-	main {
-		padding-inline: var(--space-4);
-	}
-}
-
-.nav-help {
-	display: flex;
-	align-items: center;
-	gap: var(--space-3);
-	padding: 11px 14px;
-	min-height: 44px;
-	border: 0;
-	border-top: 1px solid var(--line);
-	border-radius: 0;
-	background: transparent;
-	font-size: var(--text-meta);
-	color: var(--ink-muted);
-	text-align: left;
-}
-.nav-help:hover {
-	background: var(--surface-sunken);
-	color: var(--ink);
-}
 
 .trace-filters .primary {
 	background: var(--primary-fill);
 	color: var(--on-primary);
 	border-color: var(--primary-fill);
+}
+
+/* Inside the Open workspace dialog the browser drops its own frame; the dialog supplies it. */
+.workspace-browser[data-embedded="true"] {
+	max-width: none;
+	margin: 0;
+	padding: 0;
+	border: 0;
+	background: transparent;
+}
+.workspace-browser__head[hidden] {
+	display: none;
 }

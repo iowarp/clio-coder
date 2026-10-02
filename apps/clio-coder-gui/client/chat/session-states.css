@@ -1,0 +1,139 @@
+/* The task screen's states that are not the conversation: loading, unavailable, and the notices above it. */
+
+.task-skeleton {
+	grid-template-rows: auto minmax(0, 1fr);
+}
+.task-skeleton__body {
+	display: grid;
+	align-content: start;
+	gap: var(--space-4);
+	width: 100%;
+	max-width: calc(var(--conversation-max, 760px) + 2 * var(--space-8));
+	margin-inline: auto;
+	padding: var(--space-10) var(--space-8);
+	box-sizing: border-box;
+}
+/* The placeholders rise in as one block, then each line breathes on opacity alone, staggered, which
+   the compositor runs without repainting; the old shimmer moved background-position and repainted
+   every frame. One animation per element: Chrome keeps an element with two animations on the main
+   thread for every frame, even after one has finished. */
+.task-skeleton__body {
+	animation: skeleton-rise var(--motion-entry) var(--ease-standard) backwards;
+}
+.task-skeleton__line {
+	height: 14px;
+	width: 72%;
+	border-radius: 7px;
+	background: var(--wb-active);
+	animation: skeleton-breathe var(--motion-feedback) var(--ease-standard) var(--motion-entry) infinite alternate;
+}
+.task-skeleton__line:nth-child(2) {
+	animation-delay: calc(var(--motion-entry) + var(--motion-stagger));
+}
+.task-skeleton__line:nth-child(3) {
+	animation-delay: calc(var(--motion-entry) + var(--motion-stagger) * 2);
+}
+.task-skeleton__line:nth-child(4) {
+	animation-delay: calc(var(--motion-entry) + var(--motion-stagger) * 3);
+}
+.task-skeleton__line--request {
+	justify-self: end;
+	width: 38%;
+	height: 38px;
+	border-radius: 14px;
+}
+.task-skeleton__line--wide {
+	width: 92%;
+}
+.task-skeleton__line--short {
+	width: 46%;
+}
+@keyframes skeleton-rise {
+	from {
+		opacity: 0;
+		transform: translateY(var(--motion-distance));
+	}
+}
+@keyframes skeleton-breathe {
+	to {
+		opacity: 0.45;
+	}
+}
+
+.task-state {
+	display: grid;
+	justify-items: center;
+	align-content: center;
+	gap: var(--space-3);
+	flex: 1;
+	padding: var(--space-12) var(--space-6);
+	text-align: center;
+}
+.task-state .icon {
+	width: 28px;
+	height: 28px;
+	color: var(--status-fail-fg);
+}
+.task-state h1 {
+	margin: 0;
+	font-size: var(--text-title, 18px);
+}
+.task-state p {
+	max-width: 52ch;
+	margin: 0;
+	color: var(--ink-muted);
+	overflow-wrap: anywhere;
+}
+.task-state__actions {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	justify-content: center;
+	gap: var(--space-4);
+	margin-top: var(--space-2);
+}
+
+.conv-banner {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	justify-content: space-between;
+	gap: var(--space-2) var(--space-4);
+	width: calc(100% - 2 * var(--space-4));
+	max-width: var(--conversation-max, 760px);
+	margin: 0 auto var(--space-2);
+	padding: var(--space-2) var(--space-3);
+	border: 1px solid var(--line);
+	border-radius: 10px;
+	background: var(--wb-faint);
+	font-size: var(--text-meta);
+	box-sizing: border-box;
+}
+.conv-banner p {
+	flex: 1 1 18rem;
+	min-width: 0;
+	margin: 0;
+	color: var(--ink-muted);
+	overflow-wrap: anywhere;
+}
+.conv-banner strong {
+	color: var(--ink);
+}
+.conv-banner[data-tone="warn"] {
+	border-color: var(--status-warn-line);
+	background: var(--status-warn-tint);
+}
+.conv-banner button,
+.conv-banner a {
+	min-height: 0;
+	padding: 4px 10px;
+	font-size: 12.5px;
+	white-space: nowrap;
+}
+
+/* A turn that has run for a while says so once, quietly. */
+.chat-response__long {
+	margin: var(--space-2) 0 0;
+	font-size: var(--text-meta);
+	color: var(--ink-muted);
+}
