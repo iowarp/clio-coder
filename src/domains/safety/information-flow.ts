@@ -509,15 +509,36 @@ function entryPrefix(entryPath: string): string {
 	return separator === -1 ? entryPath : entryPath.slice(0, separator);
 }
 
+/** `<walked> (walks <source>)` when a source entry lies below the walked directory, or null. */
+function walkEvidence(paths: CompiledPathPolicy, walked: string): string | null {
+	const below = paths.entries.find((entry) => isSameOrDescendant(entryPrefix(entry.path), walked));
+	return below === undefined ? null : `${walked} (walks ${below.source})`;
+}
+
+/**
+ * The directory a shell glob operand expands under: `secrets/x*` walks
+ * `secrets`, and `*.md` or a leading `**` walks the cwd. Only an operand
+ * holding a separator or starting with `*` is a glob; `foo.*bar` and
+ * `[0-9]+` are grep patterns, not paths. Anything else is returned unchanged.
+ */
+function shellGlobBase(operand: string): string {
+	const wildcard = operand.search(/[*?[]/);
+	if (wildcard === -1 || (!operand.startsWith("*") && !operand.includes("/"))) return operand;
+	const separator = operand.lastIndexOf("/", wildcard);
+	return separator <= 0 ? (separator === 0 ? "/" : ".") : operand.slice(0, separator);
+}
+
 export interface FlowSourceCall {
 	readonly tool: string;
 	readonly args?: Record<string, unknown> | undefined;
 	readonly cwd: string;
 	/**
 	 * Path operands of an opaque shell command, each judged as a read of that
-	 * path. `cat secrets/x` carried the file into context unlabeled. A shell
-	 * that reaches a source without naming it (a glob, a recursive walk of the
-	 * cwd) stays outside what the evaluator can see.
+	 * path and as a walk of the directory or glob prefix it names. `cat
+	 * secrets/x` carried the file into context unlabeled. A shell that reaches
+	 * a source without naming a path to it stays outside what the evaluator can
+	 * see: a script, a variable, a command substitution, a cd chain, or a
+	 * search with no path operand (`rg x`).
 	 */
 	readonly readTokens?: ReadonlyArray<string>;
 }
@@ -549,25 +570,30 @@ export function flowRestrictionsForCall(
 			: (canonicalizeRawPath(target, call.cwd, memo) ??
 				canonicalizePath(path.resolve(call.cwd, target), memo) ??
 				path.resolve(call.cwd, target));
+	const resolve = (operand: string): string =>
+		canonicalizeRawPath(operand, call.cwd, memo) ??
+		canonicalizePath(path.resolve(call.cwd, operand), memo) ??
+		path.resolve(call.cwd, operand);
+	// A shell operand is a read of that path, and a walk of what lies below the
+	// directory it names or the fixed prefix of the glob it is.
+	const operands = (call.readTokens ?? []).map((token) => {
+		const operand = expandPath(token);
+		const base = shellGlobBase(operand);
+		return { operand, physical: resolve(operand), walked: base === operand ? null : resolve(base) };
+	});
 	for (const rule of policy.rules) {
 		let evidence: string | null = null;
 		if (target !== null && physical !== null && rule.paths !== null) {
 			const decision = evaluatePathPolicy(rule.paths, "read", target, call.cwd, memo);
 			if (decision.kind === "block") evidence = physical;
-			else if (WALK_TOOLS.has(call.tool)) {
-				const below = rule.paths.entries.find((entry) => isSameOrDescendant(entryPrefix(entry.path), physical));
-				if (below !== undefined) evidence = `${physical} (walks ${below.source})`;
-			}
+			else if (WALK_TOOLS.has(call.tool)) evidence = walkEvidence(rule.paths, physical);
 		}
 		if (evidence === null && rule.paths !== null) {
-			for (const token of call.readTokens ?? []) {
-				const operand = expandPath(token);
-				if (evaluatePathPolicy(rule.paths, "read", operand, call.cwd, memo).kind !== "block") continue;
-				evidence =
-					canonicalizeRawPath(operand, call.cwd, memo) ??
-					canonicalizePath(path.resolve(call.cwd, operand), memo) ??
-					path.resolve(call.cwd, operand);
-				break;
+			for (const shell of operands) {
+				if (evaluatePathPolicy(rule.paths, "read", shell.operand, call.cwd, memo).kind === "block")
+					evidence = shell.physical;
+				else evidence = walkEvidence(rule.paths, shell.walked ?? shell.physical);
+				if (evidence !== null) break;
 			}
 		}
 		if (evidence === null && rule.tools.some((pattern) => toolMatches(pattern, call.tool))) evidence = call.tool;
