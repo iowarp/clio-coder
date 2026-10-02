@@ -194,12 +194,23 @@ interface ValidationResult {
  * entries are dropped from the returned `valid` config so pi-tui keeps
  * the default binding in effect; callers render `invalid` as a diagnostic.
  */
+/**
+ * Action ids a settings file may still name after the action itself is gone.
+ * The diagnostic says what replaced it, so the operator edits the right line
+ * instead of hunting for a typo in a key that was spelled correctly.
+ */
+const RETIRED_KEYBINDINGS: Readonly<Record<string, string>> = {
+	"clio-coder.message.followUp":
+		"retired in 0.6.0: Enter queues for the next slot; end-of-turn is the queue navigator's t toggle (clio-coder.queue.open)",
+};
+
 export function validateKeybindings(raw: Readonly<Record<string, string | string[]>>): ValidationResult {
 	const valid: KeybindingsConfig = {};
 	const invalid: InvalidKeybinding[] = [];
 	for (const [id, value] of Object.entries(raw)) {
 		if (!Object.hasOwn(CLIO_KEYBINDINGS, id)) {
-			invalid.push({ id, keys: ["unknown action ID; use /help"] });
+			const retired = RETIRED_KEYBINDINGS[id];
+			invalid.push({ id, keys: [retired ?? "unknown action ID; use /help"] });
 			continue;
 		}
 		if (typeof value === "string") {
