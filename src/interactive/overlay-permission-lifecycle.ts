@@ -600,8 +600,8 @@ export function createOverlayPermissionLifecycle(deps: OverlayPermissionLifecycl
 			deps.closeOverlay();
 			deps.stopActiveTurn(
 				tool === undefined
-					? "[Clio Coder] turn stopped: you denied the tool call and asked to stop being asked."
-					: `[Clio Coder] turn stopped: you denied ${tool} and asked to stop being asked.`,
+					? "[Clio Coder] turn stopped: you denied the tool call at its approval card."
+					: `[Clio Coder] turn stopped: you denied ${tool} at its approval card.`,
 			);
 		},
 		onPermissionOverlayClosed,
