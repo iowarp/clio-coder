@@ -625,6 +625,36 @@ function describeDestination(destination: FlowDestination): string {
 	return `target ${destination.targetId} (${destination.runtime}, ${destination.endpoint ?? "no endpoint"})`;
 }
 
+/** A pinned recipient in the words the destination is described with; other references as written. */
+function describeRecipient(ref: string): string {
+	if (!ref.startsWith("target:[") && !ref.startsWith("mcp:[")) return ref;
+	try {
+		const tuple = JSON.parse(ref.slice(ref.indexOf(":") + 1)) as unknown[];
+		if (ref.startsWith("mcp:")) return `mcp server ${String(tuple[0])}`;
+		return `target ${String(tuple[0])} (${String(tuple[1])}, ${tuple[2] === null ? "no endpoint" : String(tuple[2])})`;
+	} catch {
+		return ref;
+	}
+}
+
+/**
+ * What the operator can do about a restriction that admits nothing. A rule
+ * that names no recipient keeps what was read in this session. A label
+ * minted while its rule was unapproved opens when those same bytes are
+ * approved; after any other change only a new session leaves it behind.
+ */
+function noRecipientRemedy(restriction: FlowRestriction, policy: InformationFlowPolicy): string {
+	if (policy.policyHash === restriction.policyHash) {
+		if (!policy.trusted) {
+			return "The rule was not approved when this was read; approve the policy with clio-coder config trust safety and restart";
+		}
+		if (policy.rules.some((rule) => rule.id === restriction.ruleId)) {
+			return "The rule names no recipient, so what was read stays in this session; start a new session for work that must leave it";
+		}
+	}
+	return "The policy has changed since this was read and admits it nowhere now; start a new session to continue without it";
+}
+
 function recipientAdmits(ref: string, destination: FlowDestination): boolean {
 	if (destination.kind === "model") {
 		return ref === pinnedTargetRef(destination.targetId, destination.runtime, destination.endpoint);
@@ -691,7 +721,7 @@ export function evaluateInformationFlow(input: InformationFlowInput): Informatio
 	for (const restriction of restrictions) {
 		const recipients = effectiveRecipients(restriction, input.policy);
 		if (recipients.length === 0) {
-			blocked ??= `information-flow rule '${restriction.ruleId}' forbids any transfer of ${restriction.sourceRef}; destination ${where}`;
+			blocked ??= `information-flow rule '${restriction.ruleId}' allows no destination for ${restriction.sourceRef}, so ${where} is refused. ${noRecipientRemedy(restriction, input.policy)}`;
 			continue;
 		}
 		if (recipients.some((ref) => recipientAdmits(ref, input.destination))) continue;
@@ -699,7 +729,7 @@ export function evaluateInformationFlow(input: InformationFlowInput): Informatio
 			unresolved ??= `information-flow rule '${restriction.ruleId}' restricts ${restriction.sourceRef} and the endpoint of ${where} could not be identified; transfer is not approved`;
 			continue;
 		}
-		blocked ??= `information-flow rule '${restriction.ruleId}' restricts ${restriction.sourceRef} to ${recipients.join(", ")}; destination ${where} is not among them`;
+		blocked ??= `information-flow rule '${restriction.ruleId}' restricts ${restriction.sourceRef} to ${recipients.map(describeRecipient).join(", ")}; destination ${where} is not among them. Switch to a destination the rule allows, or start a new session for work that must reach it`;
 	}
 	if (blocked !== null) return { kind: "blocked", reason: blocked, ruleIds, evidence };
 	if (unresolved !== null) return { kind: "unresolved", reason: unresolved, ruleIds, evidence };
