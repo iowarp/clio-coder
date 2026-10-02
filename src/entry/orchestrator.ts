@@ -431,12 +431,19 @@ interface BackgroundMemoryRoute {
 	modelMaxTokens(configuredMaxTokens: number): number;
 }
 
+type AdmitBackgroundModelFlow = (destination: {
+	targetId: string;
+	runtimeId: string;
+	wireModelId: string;
+}) => string | null;
+
 export function createBackgroundMemoryModelClient(
 	providers: ProvidersContract,
 	settings: Readonly<ClioSettings>,
 	timeoutMs: number,
 	bus: Pick<SafeEventBus, "emit"> | null,
 	fallbackOnly = false,
+	admitModelFlow?: AdmitBackgroundModelFlow,
 ): BackgroundMemoryRoute | null {
 	const configuredTarget = settings.context.memory.target?.trim();
 	const configuredModel = settings.context.memory.model?.trim();
@@ -448,7 +455,15 @@ export function createBackgroundMemoryModelClient(
 	let fallbackReason: string | undefined;
 	if (!fallbackOnly) {
 		try {
-			return prepareBackgroundMemoryRoute(providers, configuredTarget, configuredModel, timeoutMs, bus, "dedicated");
+			return prepareBackgroundMemoryRoute(
+				providers,
+				configuredTarget,
+				configuredModel,
+				timeoutMs,
+				bus,
+				"dedicated",
+				admitModelFlow,
+			);
 		} catch (error) {
 			fallbackReason = `configured route unavailable: ${memoryRouteFailureCause(error)}`;
 		}
@@ -459,7 +474,7 @@ export function createBackgroundMemoryModelClient(
 	}
 	try {
 		return {
-			...prepareBackgroundMemoryRoute(providers, chatTarget, chatModel, timeoutMs, bus, "chat-fallback"),
+			...prepareBackgroundMemoryRoute(providers, chatTarget, chatModel, timeoutMs, bus, "chat-fallback", admitModelFlow),
 			fallbackReason,
 		};
 	} catch {
@@ -568,6 +583,7 @@ function prepareBackgroundMemoryRoute(
 	timeoutMs: number,
 	bus: Pick<SafeEventBus, "emit"> | null,
 	selection: BackgroundMemoryRoute["selection"],
+	admitModelFlow?: AdmitBackgroundModelFlow,
 ): BackgroundMemoryRoute {
 	const initial = prepareBackgroundMemoryModel(providers, targetId, wireModelId);
 	const { refined } = initial;
@@ -607,6 +623,9 @@ function prepareBackgroundMemoryRoute(
 				if (backgroundMemoryEndpointBusy(providers, endpointKey, [refined.target])) {
 					throw new TaskMemoryEndpointBusyError("background memory endpoint is busy");
 				}
+				const refusal =
+					admitModelFlow?.({ targetId, runtimeId: refined.runtimeId, wireModelId: refined.wireModelId }) ?? null;
+				if (refusal !== null) throw new Error(refusal);
 				return announceMemoryStepEndpoint({ bus, endpointKey, targetId }, async () => {
 					const startedAt = Date.now();
 					let observedUsage: TaskMemoryStepUsage | undefined;
@@ -669,6 +688,7 @@ export function createBackgroundMemoryRouting(
 	providers: ProvidersContract,
 	getSettings: () => Readonly<ClioSettings> | undefined,
 	bus: Pick<SafeEventBus, "emit"> | null,
+	admitModelFlow?: AdmitBackgroundModelFlow,
 ) {
 	let route: BackgroundMemoryRoute | null = null;
 	let snapshot: Readonly<ClioSettings> | undefined;
@@ -702,7 +722,14 @@ export function createBackgroundMemoryRouting(
 			route =
 				snapshot === undefined
 					? null
-					: createBackgroundMemoryModelClient(providers, snapshot, snapshot.context.memory.timeoutMs, bus);
+					: createBackgroundMemoryModelClient(
+							providers,
+							snapshot,
+							snapshot.context.memory.timeoutMs,
+							bus,
+							false,
+							admitModelFlow,
+						);
 			noteFallback();
 			clientFailure = null;
 			const client = route?.client;
@@ -722,7 +749,14 @@ export function createBackgroundMemoryRouting(
 		},
 		getFallbackModelClient: (): TaskMemoryModelClient | null => {
 			if (route?.selection !== "dedicated" || snapshot === undefined) return null;
-			route = createBackgroundMemoryModelClient(providers, snapshot, snapshot.context.memory.timeoutMs, bus, true);
+			route = createBackgroundMemoryModelClient(
+				providers,
+				snapshot,
+				snapshot.context.memory.timeoutMs,
+				bus,
+				true,
+				admitModelFlow,
+			);
 			if (route && clientFailure) route.fallbackReason = `configured route client error: ${clientFailure}`;
 			noteFallback();
 			return route?.client ?? null;
@@ -1908,7 +1942,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 				timeoutMs: memory.timeoutMs,
 			};
 		},
-		...createBackgroundMemoryRouting(providers, () => effectiveSettingsForDispatch?.(), bus),
+		...createBackgroundMemoryRouting(providers, () => effectiveSettingsForDispatch?.(), bus, admitModelFlow),
 		captureStepUsage: captureBackgroundMemoryUsage,
 		onInjectedEntries: (entries) => proposeInjectedMemoryEntries(entries),
 	});
