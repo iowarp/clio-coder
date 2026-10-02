@@ -1551,8 +1551,16 @@ const RG_VALUE_LONG = new Set([
  * knows are accepted; any other option, `-f`, or a stdin `-` operand is
  * ambiguous and refused.
  */
-function rgSearchesOnlyFiles(args: ReadonlyArray<string>, cwd: string, piped: boolean): boolean {
-	const positionals: string[] = [];
+interface RgArgs {
+	/** Non-option words with their index in the argument list. */
+	positionals: ReadonlyArray<{ arg: string; index: number }>;
+	explicitPattern: boolean;
+	listsFiles: boolean;
+}
+
+/** Only the options this parser knows; any other option, or a stdin `-` operand, is null. */
+function parseRgArgs(args: ReadonlyArray<string>): RgArgs | null {
+	const positionals: Array<{ arg: string; index: number }> = [];
 	let explicitPattern = false;
 	let listsFiles = false;
 	let optionsEnded = false;
@@ -1563,8 +1571,8 @@ function rgSearchesOnlyFiles(args: ReadonlyArray<string>, cwd: string, piped: bo
 			continue;
 		}
 		if (optionsEnded || !arg.startsWith("-") || arg === "-") {
-			if (arg === "-") return false;
-			positionals.push(arg);
+			if (arg === "-") return null;
+			positionals.push({ arg, index });
 			continue;
 		}
 		if (arg === "--") {
@@ -1575,10 +1583,10 @@ function rgSearchesOnlyFiles(args: ReadonlyArray<string>, cwd: string, piped: bo
 			const eq = arg.indexOf("=");
 			const name = eq === -1 ? arg : arg.slice(0, eq);
 			if (RG_FLAGS.has(arg)) continue;
-			if (!RG_VALUE_LONG.has(name)) return false;
+			if (!RG_VALUE_LONG.has(name)) return null;
 			if (name === "--regexp") explicitPattern = true;
 			if (eq === -1) {
-				if (index + 1 >= args.length) return false;
+				if (index + 1 >= args.length) return null;
 				index += 1;
 			}
 			continue;
@@ -1588,20 +1596,28 @@ function rgSearchesOnlyFiles(args: ReadonlyArray<string>, cwd: string, piped: bo
 		if (flag === "-e") {
 			explicitPattern = true;
 			if (arg.length === 2) {
-				if (index + 1 >= args.length) return false;
+				if (index + 1 >= args.length) return null;
 				index += 1;
 			}
 			continue;
 		}
 		if (RG_VALUE_SHORT.has(flag)) {
 			if (arg.length === 2) {
-				if (index + 1 >= args.length) return false;
+				if (index + 1 >= args.length) return null;
 				index += 1;
 			}
 			continue;
 		}
-		return false;
+		return null;
 	}
+	return { positionals, explicitPattern, listsFiles };
+}
+
+function rgSearchesOnlyFiles(args: ReadonlyArray<string>, cwd: string, piped: boolean): boolean {
+	const parsed = parseRgArgs(args);
+	if (parsed === null) return false;
+	const { explicitPattern, listsFiles } = parsed;
+	const positionals = parsed.positionals.map((entry) => entry.arg);
 	// `--files` prints the paths rg would search and opens no file, so it lists
 	// like `find` does. Its operands are walk roots; the caller holds them to
 	// the workspace.
@@ -1621,6 +1637,74 @@ function rgSearchesOnlyFiles(args: ReadonlyArray<string>, cwd: string, piped: bo
 }
 
 const GREP_FAMILY: ReadonlySet<string> = new Set(["grep", "egrep", "fgrep"]);
+
+const GREP_VALUELESS_LONG: ReadonlySet<string> = new Set([
+	"--line-number",
+	"--ignore-case",
+	"--word-regexp",
+	"--line-regexp",
+	"--invert-match",
+	"--count",
+	"--files-with-matches",
+	"--files-without-match",
+	"--only-matching",
+	"--no-messages",
+	"--quiet",
+	"--silent",
+	"--text",
+	"--extended-regexp",
+	"--fixed-strings",
+	"--perl-regexp",
+	"--basic-regexp",
+	"--with-filename",
+	"--no-filename",
+]);
+const GREP_ATTACHED_LONG: ReadonlySet<string> = new Set([
+	"--include",
+	"--exclude",
+	"--exclude-dir",
+	"--color",
+	"--colour",
+	"--max-count",
+	"--context",
+	"--after-context",
+	"--before-context",
+]);
+
+/**
+ * Where the search pattern sits in the arguments of `rg` or a grep-family
+ * command, or null when the form is not read with certainty. The pattern is a
+ * regular expression, never opened as a path, so the operand checks skip it.
+ * A pattern such as `"balance\(|income statement"` carries whitespace and a
+ * backslash, which `spacedPathOperand` reads as a path hiding a traversal. An
+ * `-e`/`-f`/`--regexp` form has no positional pattern, and any option this
+ * parse does not know could take a value that shifts the position, so those
+ * stay null and every word keeps the path checks.
+ */
+function searchPatternIndex(command: string, args: ReadonlyArray<string>): number | null {
+	if (command === "rg") {
+		const parsed = parseRgArgs(args);
+		if (parsed === null || parsed.explicitPattern || parsed.listsFiles) return null;
+		return parsed.positionals[0]?.index ?? null;
+	}
+	if (!GREP_FAMILY.has(command)) return null;
+	const valueLetters = SHORT_VALUE_LETTERS.get(command) ?? "";
+	let optionsEnded = false;
+	for (const [index, arg] of args.entries()) {
+		if (!optionsEnded && arg === "--") {
+			optionsEnded = true;
+			continue;
+		}
+		if (optionsEnded || !arg.startsWith("-") || arg === "-") return arg === "-" ? null : index;
+		if (arg.startsWith("--")) {
+			const eq = arg.indexOf("=");
+			if (eq === -1 ? GREP_VALUELESS_LONG.has(arg) : GREP_ATTACHED_LONG.has(arg.slice(0, eq))) continue;
+			return null;
+		}
+		if (!/^-[A-Za-z]+$/u.test(arg) || [...arg.slice(1)].some((letter) => valueLetters.includes(letter))) return null;
+	}
+	return null;
+}
 
 /**
  * grep walks directories with `-r`, `-R`, `--recursive` and `-d recurse`
@@ -1673,10 +1757,12 @@ function refusedOption(arg: string, refused: ReadonlyArray<string>, valueLetters
 /**
  * The rule id for a read-only inspection segment, or null. Every operand is
  * held to the workspace the way `read` holds its path (readScopeEscape), so
- * `cat ../x` or `grep -r key ~/` asks exactly where `read` would. A grep
- * pattern is checked as if it were a path; one that looks like an outside
- * path only costs an ask. Zero-access paths were already refused for the
- * whole command string before recognition.
+ * `cat ../x` or `grep -r key ~/` asks exactly where `read` would. The search
+ * pattern of `rg` and grep is not an operand when {@link searchPatternIndex}
+ * places it with certainty; in any form it cannot place, the pattern is
+ * checked as if it were a path, and one that looks like an outside path only
+ * costs an ask. Zero-access paths were already refused for the whole command
+ * string before recognition.
  */
 function readOnlyInspectionRule(
 	words: ReadonlyArray<ShellToken>,
@@ -1712,7 +1798,9 @@ function readOnlyInspectionRule(
 	}
 	const refused = READ_ONLY_INSPECTORS.get(command);
 	if (refused === undefined) return null;
-	for (const arg of args) {
+	const patternAt = searchPatternIndex(command, args);
+	for (const [index, arg] of args.entries()) {
+		if (index === patternAt) continue;
 		if (arg === "-" || arg === "--") continue;
 		if (arg.startsWith("-")) {
 			if (refusedOption(arg, refused, SHORT_VALUE_LETTERS.get(command) ?? "")) return null;
