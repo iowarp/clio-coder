@@ -383,6 +383,10 @@ export function createRunner(deps: RunnerDeps): Runner {
 		} catch {
 			// Unreadable overrides grant no operator cut.
 		}
+		// Routes skipped because the identity has no cut the site requires. A call
+		// that no route could send for that reason was never a decision: it leaves no
+		// row, or every large listing would file one while the cut does not exist.
+		let missingCut = 0;
 		for (const plan of live) {
 			const { route } = plan;
 			if (site.requiredCut !== undefined) {
@@ -402,6 +406,7 @@ export function createRunner(deps: RunnerDeps): Runner {
 				if (cut === undefined) {
 					plan.outcome = "unsupported";
 					plan.error = `decision ${site.id}/${site.moment ?? "main"} requires a ${site.requiredCut} cut for the engine identity`;
+					missingCut += 1;
 					continue;
 				}
 			}
@@ -461,6 +466,7 @@ export function createRunner(deps: RunnerDeps): Runner {
 		}
 		const sending = live.filter((plan) => plan.outcome === "answered");
 		if (sending.length === 0) {
+			if (missingCut === live.length) return null;
 			const first = live[0] as RoutePlan;
 			finish(first.outcome, { questions, error: first.error });
 			return null;
