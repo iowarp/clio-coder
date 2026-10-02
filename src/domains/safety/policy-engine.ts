@@ -464,7 +464,9 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 			const verifyArgv =
 				verifyResolution === null || verifyArgs === null ? null : verifyResolutionArgv(verifyResolution, verifyArgs);
 			const verifyCommand = verifyArgv?.join(" ") ?? null;
-			const scans = (verifyCommand !== null ? [verifyCommand] : damageControlScans(call)).filter((scan) => scan !== "");
+			const scans = (verifyCommand !== null ? [verifyCommand] : damageControlScans(call, rawClassification)).filter(
+				(scan) => scan !== "",
+			);
 			const hit = scans.length > 0 ? matchSourcedRule(scans, sourcedRules) : null;
 			const classification = effectiveClassification(rawClassification, hit?.match);
 
@@ -2322,11 +2324,14 @@ function decodedAnsiCCommand(command: string): string | null {
  * candidate so no rule that matched before stops matching now.
  */
 
-function damageControlScans(call: ClassifierCall): string[] {
+function damageControlScans(call: ClassifierCall, classification: Classification): string[] {
 	if (CONTENT_BEARING_TOOLS.has(call.tool)) {
 		const pathArg = call.args?.path;
 		return typeof pathArg === "string" ? [pathArg] : [];
 	}
+	// Read payloads describe data, not executable commands.
+	// Gateway capabilities and trusted argv projections receive their own admission.
+	if (classification.actionClass === "read") return [];
 	// `bash` is the only tool with a `command` argument, and its others (`cwd`,
 	// `timeout_ms`, `output_policy`) are not commands. Scanning the blob as well
 	// would let a bare `cwd: "."` complete a pathspec the command did not write,
