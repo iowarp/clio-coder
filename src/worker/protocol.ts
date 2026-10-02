@@ -1,3 +1,5 @@
+import type { FlowRestrictionSet } from "../core/flow-restrictions.js";
+import { isFlowRestrictionSet } from "../core/flow-restrictions.js";
 /**
  * Worker wire protocol: lanes, bounds, and the attestation frame schema.
  *
@@ -111,15 +113,15 @@ export interface WorkerAttestation {
  * workers share. Its wire shapes live here because both the worker and the
  * orchestrator validate them and src/worker may not value-import src/domains.
  *
- * The taxonomy is closed on purpose. A worker contributes a typed artifact or
- * nothing: a claim stakes a scope so peers stop colliding, a finding carries a
- * citation so a peer can corroborate it, and a review targets another entry so
- * peer review reaches the board.
+ * A claim stakes a scope, a finding carries a citation, a review targets an
+ * existing entry, and a bounded message carries an intended recipient and an
+ * optional reply reference. None of these entries grant execution authority.
  */
 export type AgentLedgerBody =
 	| { kind: "claim"; scope: ReadonlyArray<string>; intent: string }
 	| { kind: "finding"; claim: string; path?: string; line?: number }
-	| { kind: "review"; target: string; passed: boolean; evidence: string };
+	| { kind: "review"; target: string; passed: boolean; evidence: string }
+	| { kind: "message"; to: string; text: string; replyTo?: string };
 
 /** Bounds on one posted body. Out-of-bounds input is refused, never truncated. */
 export const AGENT_LEDGER_SCOPE_MAX_ENTRIES = 8;
@@ -162,6 +164,23 @@ export function parseAgentLedgerBody(value: unknown): AgentLedgerBodyParse {
 	}
 	const record = value as Record<string, unknown>;
 	switch (record.kind) {
+		case "message": {
+			if (!boundedString(record.to, 200) || !boundedString(record.text, 1000)) {
+				return { ok: false, reason: "message requires to (1..200 characters) and text (1..1000 characters)" };
+			}
+			if (record.replyTo !== undefined && !isAgentLedgerEntryId(record.replyTo)) {
+				return { ok: false, reason: "message replyTo must be an entry id such as e3" };
+			}
+			return {
+				ok: true,
+				body: {
+					kind: "message",
+					to: record.to,
+					text: record.text,
+					...(record.replyTo === undefined ? {} : { replyTo: record.replyTo as string }),
+				},
+			};
+		}
 		case "claim": {
 			const scope = record.scope;
 			if (!Array.isArray(scope) || scope.length === 0) {
@@ -252,6 +271,7 @@ export interface AgentLedgerEntry {
 	agentId: string;
 	nodeId: string;
 	body: AgentLedgerBody;
+	flowRestrictions?: FlowRestrictionSet;
 	/** Entry ids of live peer claims this claim's scope overlaps. Orchestrator-computed. */
 	conflictsWith?: ReadonlyArray<string>;
 }
@@ -266,7 +286,8 @@ export function parseAgentLedgerEntry(value: unknown): AgentLedgerEntry | null {
 	const record = value as Record<string, unknown>;
 	const sequence = record.sequence;
 	if (typeof sequence !== "number" || !Number.isSafeInteger(sequence) || sequence <= 0) return null;
-	if (!isAgentLedgerEntryId(record.id)) return null;
+	if (!isAgentLedgerEntryId(record.id) || record.id !== `e${sequence}`) return null;
+	if (record.flowRestrictions !== undefined && !isFlowRestrictionSet(record.flowRestrictions)) return null;
 	for (const key of ["at", "runId", "assignmentId", "agentId", "nodeId"] as const) {
 		if (typeof record[key] !== "string" || (record[key] as string).length === 0) return null;
 	}
@@ -283,6 +304,9 @@ export function parseAgentLedgerEntry(value: unknown): AgentLedgerEntry | null {
 		agentId: record.agentId as string,
 		nodeId: record.nodeId as string,
 		body: body.body,
+		...(record.flowRestrictions === undefined
+			? {}
+			: { flowRestrictions: structuredClone(record.flowRestrictions as FlowRestrictionSet) }),
 		...(conflicts === undefined ? {} : { conflictsWith: [...(conflicts as string[])] }),
 	};
 }
@@ -299,7 +323,10 @@ export interface AgentLedgerDeltaFrame {
  * mirror and returns null when this run has no ledger at all.
  */
 export interface AgentLedgerPort {
-	post(body: AgentLedgerBody): { ok: true } | { ok: false; reason: string };
+	post(
+		body: AgentLedgerBody,
+		flowRestrictions?: FlowRestrictionSet,
+	): { ok: true } | { ok: false; reason: string } | Promise<{ ok: true } | { ok: false; reason: string }>;
 	read(): { open: boolean; watermark: number; entries: ReadonlyArray<AgentLedgerEntry> } | null;
 }
 
@@ -354,7 +381,7 @@ export type WorkerControlFrame =
 	| { kind: "announce"; attestation: WorkerAttestation }
 	| { kind: "heartbeat" }
 	| { kind: "cancel_ack"; at: number }
-	| { kind: "ledger_post"; body: AgentLedgerBody }
+	| { kind: "ledger_post"; body: AgentLedgerBody; flowRestrictions?: FlowRestrictionSet }
 	| { kind: "model_loaded"; load: WorkerModelLoad }
 	| { kind: "grant_request"; request: WorkerGrantRequestFrame };
 
@@ -679,7 +706,19 @@ export function parseControlFrame(line: string): FrameParseResult<WorkerControlF
 		case "ledger_post": {
 			const body = parseAgentLedgerBody(record.body);
 			if (!body.ok) return { ok: false, reason: `ledger_post frame rejected: ${body.reason}` };
-			return { ok: true, value: { kind: "ledger_post", body: body.body } };
+			if (record.flowRestrictions !== undefined && !isFlowRestrictionSet(record.flowRestrictions)) {
+				return { ok: false, reason: "ledger_post has invalid flow restrictions" };
+			}
+			return {
+				ok: true,
+				value: {
+					kind: "ledger_post",
+					body: body.body,
+					...(record.flowRestrictions === undefined
+						? {}
+						: { flowRestrictions: structuredClone(record.flowRestrictions as FlowRestrictionSet) }),
+				},
+			};
 		}
 		case "model_loaded": {
 			const load = parseModelLoad(record.load);

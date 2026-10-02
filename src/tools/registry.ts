@@ -107,6 +107,8 @@ export interface ToolResultSizePolicy {
 }
 
 export interface ToolMetadata {
+	/** False keeps a contextual capability discoverable without adding it to the session startup prompt. */
+	startupPrompt?: boolean;
 	/** Short statement of the tool's purpose for audit/UI surfaces. */
 	objective: string;
 	/** Stable UI label shown in compact renderers. */

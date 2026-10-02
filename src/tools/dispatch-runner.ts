@@ -10,7 +10,12 @@ import { turnAllowsTool } from "../core/turn-constraints.js";
 import { clioStateDir } from "../core/xdg.js";
 import type { CouncilReport, CouncilReportMember } from "../domains/agents/result-contract.js";
 import { projectLedgerAssignments, projectReceiptFindings } from "../domains/dispatch/agent-ledger.js";
-import { closeAgentLedger, openAgentLedger, renderAgentLedgerBoard } from "../domains/dispatch/agent-ledger-store.js";
+import {
+	closeAgentLedger,
+	openAgentLedger,
+	readAgentLedger,
+	renderAgentLedgerBoard,
+} from "../domains/dispatch/agent-ledger-store.js";
 import type { DetachedBatchRun } from "../domains/dispatch/batch-store.js";
 import type { AbortReason, DispatchContract, DispatchRequest, WorkerGrantView } from "../domains/dispatch/contract.js";
 import { durableAssistantTextFromEvent } from "../domains/dispatch/event-pump.js";
@@ -610,6 +615,7 @@ export function formatDispatchOutput(
 		])
 		.filter((action): action is string => action !== null);
 	const batch = dispatchBatchSummary(runs);
+
 	const needsSpotCheck = runs.some((run) => {
 		if (receiptHelperResult(run.receipt, run.integrity) !== null) return false;
 		const state = adaptRunReceiptTrustStatus(run.receipt, { integrity: run.integrity }).validationGrounding.state;
@@ -705,6 +711,15 @@ function dispatchDetails(
 ): ToolResultDetails {
 	const failed = runs.filter((run) => run.receipt.exitCode !== 0);
 	const batch = dispatchBatchSummary(runs);
+	const carried = mergeFlowRestrictions(
+		flowRestrictionsOfRuns(runs.map((run) => run.receipt)),
+		...(board === null
+			? []
+			: runs.flatMap((run) => {
+					const id = deps.dispatch.getRun(run.receipt.runId)?.projection?.ledgerId;
+					return id ? (readAgentLedger(id)?.entries ?? []).map((entry) => entry.flowRestrictions) : [];
+				})),
+	);
 	let transition: ReturnType<typeof scoutTransitionDetail> = null;
 	for (const run of runs) {
 		const envelope = deps.dispatch.getRun(run.receipt.runId);
@@ -728,9 +743,7 @@ function dispatchDetails(
 				run.receipt.runId,
 		),
 		terminalRunIds: runs.map((run) => run.receipt.runId),
-		...(flowRestrictionsOfRuns(runs.map((run) => run.receipt)) !== null
-			? { [FLOW_RESTRICTIONS_DETAIL]: flowRestrictionsOfRuns(runs.map((run) => run.receipt)) }
-			: {}),
+		...(carried !== null ? { [FLOW_RESTRICTIONS_DETAIL]: carried } : {}),
 		receiptCount: runs.length,
 		failedCount: failed.length,
 		batchSummary: batch,
@@ -1766,8 +1779,8 @@ async function runCompete(
 	await Promise.allSettled(ownedRuns.map((run) => run.settlement));
 	// Every worker has settled, so no further post can be admitted. The board is
 	// read here, on the way past, for the model that started the compete.
-	const board = renderAgentLedgerBoard(ledgerId, ledgerProjectionFor(deps, ledgerId));
 	await closeAgentLedger(ledgerId);
+	const board = renderAgentLedgerBoard(ledgerId, ledgerProjectionFor(deps, ledgerId));
 	finalizationErrors.push(...abortErrors);
 
 	// Losers are always cleaned; the winner's worktree and branch survive
@@ -2978,9 +2991,8 @@ async function runBatch(
 			);
 		}
 		const { summaries, receipts } = settled.value;
-		// Every worker has settled and the board has not closed yet, so this is
-		// the whole board the peers built, read once for the model that started
-		// them.
+		await closeAgentLedger(ledgerId);
+		// Closing drains queued admissions before the final snapshot is rendered.
 		const board = renderAgentLedgerBoard(ledgerId, ledgerProjectionFor(deps, ledgerId));
 		return {
 			runs: receipts.map((receipt) =>
@@ -3040,6 +3052,7 @@ async function runWriterLimitedBatch(
 		const readerPromises = readers.map((request) => start(request));
 		for (const writer of writers) await start(writer);
 		await Promise.all(readerPromises);
+		await closeAgentLedger(ledgerId);
 		return {
 			runs: requests.flatMap((request) => {
 				const run = completed.get(request);

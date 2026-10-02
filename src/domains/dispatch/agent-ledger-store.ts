@@ -19,10 +19,13 @@
 
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import type { FlowRestrictionSet } from "../../core/flow-restrictions.js";
+import { isFlowRestrictionSet } from "../../core/flow-restrictions.js";
+import { safeResourceWrite } from "../../core/safe-resource-write.js";
 import { withStateFileLock } from "../../core/state-file-lock.js";
 import { clioStateDir } from "../../core/xdg.js";
-import { atomicWrite } from "../../engine/session.js";
-import { type AgentLedgerEntry, parseAgentLedgerBody } from "../../worker/protocol.js";
+import type { AgentLedgerEntry } from "../../worker/protocol.js";
+import { parseAgentLedgerBody, parseAgentLedgerEntry } from "../../worker/protocol.js";
 import type { RenderAgentLedgerOptions } from "./agent-ledger.js";
 import { AGENT_LEDGER_PROMPT_MAX_CHARS, claimConflicts, renderAgentLedger } from "./agent-ledger.js";
 
@@ -61,6 +64,7 @@ export interface AgentLedgerAttribution {
 	assignmentId: string;
 	agentId: string;
 	nodeId: string;
+	flowRestrictions?: FlowRestrictionSet;
 }
 
 export type AgentLedgerAppendRefusal = "invalid-body" | "per-run-cap" | "ledger-closed" | "ledger-full";
@@ -76,18 +80,61 @@ function storePath(): string {
 function readStore(): AgentLedgerRecord[] {
 	const path = storePath();
 	if (!existsSync(path)) return [];
-	try {
-		const parsed = JSON.parse(readFileSync(path, "utf8")) as AgentLedgerStoreFile;
-		if (parsed?.version !== 1 || !Array.isArray(parsed.ledgers)) return [];
-		return parsed.ledgers;
-	} catch {
-		return [];
+	const parsed = JSON.parse(readFileSync(path, "utf8")) as AgentLedgerStoreFile;
+	if (parsed?.version !== 1 || !Array.isArray(parsed.ledgers)) throw new Error("invalid agent ledger store");
+	for (const record of parsed.ledgers) {
+		if (
+			!record ||
+			typeof record.id !== "string" ||
+			!Array.isArray(record.entries) ||
+			record.entries.length > MAX_AGENT_LEDGER_ENTRIES ||
+			!Number.isSafeInteger(record.sequence) ||
+			!record.perRun ||
+			typeof record.perRun !== "object" ||
+			!(record.closedAt === null || typeof record.closedAt === "string")
+		) {
+			throw new Error("invalid agent ledger record");
+		}
+		let previous = 0;
+		for (const entry of record.entries) {
+			if (parseAgentLedgerEntry(entry) === null || entry.sequence <= previous || entry.sequence > record.sequence) {
+				throw new Error("invalid agent ledger entry");
+			}
+			previous = entry.sequence;
+		}
 	}
+	return parsed.ledgers;
 }
 
 function writeStore(ledgers: ReadonlyArray<AgentLedgerRecord>): void {
-	const file: AgentLedgerStoreFile = { version: 1, ledgers: [...ledgers].slice(0, MAX_AGENT_LEDGER_RECORDS) };
-	atomicWrite(storePath(), JSON.stringify(file, null, 2));
+	const active = ledgers.filter((ledger) => ledger.closedAt === null);
+	const closed = ledgers.filter((ledger) => ledger.closedAt !== null);
+	const file: AgentLedgerStoreFile = {
+		version: 1,
+		ledgers: [...active, ...closed.slice(0, Math.max(0, MAX_AGENT_LEDGER_RECORDS - active.length))],
+	};
+	safeResourceWrite(storePath(), JSON.stringify(file), { mode: 0o600 });
+}
+
+const pendingWrites = new Map<string, Promise<unknown>>();
+
+function orderedWrite<T>(write: () => T): Promise<T> {
+	const path = storePath();
+	const previous = pendingWrites.get(path) ?? Promise.resolve();
+	const next = previous
+		.catch(() => {
+			// A failed mutation must not poison subsequent admissions.
+		})
+		.then(() => withStateFileLock(path, write));
+	pendingWrites.set(path, next);
+	void next
+		.finally(() => {
+			if (pendingWrites.get(path) === next) pendingWrites.delete(path);
+		})
+		.catch(() => {
+			// The caller owns the original rejection; cleanup cannot create another.
+		});
+	return next;
 }
 
 function contributionFor(record: AgentLedgerRecord, runId: string): AgentLedgerRunContribution {
@@ -97,12 +144,15 @@ function contributionFor(record: AgentLedgerRecord, runId: string): AgentLedgerR
 /** Open one ledger for one multi-worker dispatch unit. Idempotent by id. */
 export async function openAgentLedger(id: string): Promise<AgentLedgerRecord> {
 	let opened: AgentLedgerRecord | null = null;
-	await withStateFileLock(storePath(), () => {
+	await orderedWrite(() => {
 		const ledgers = readStore();
 		const existing = ledgers.find((ledger) => ledger.id === id);
 		if (existing !== undefined) {
 			opened = existing;
 			return;
+		}
+		if (ledgers.filter((ledger) => ledger.closedAt === null).length >= MAX_AGENT_LEDGER_RECORDS) {
+			throw new Error("too many active agent ledgers; close a dispatch before opening another");
 		}
 		const record: AgentLedgerRecord = {
 			id,
@@ -161,7 +211,7 @@ export async function appendAgentLedgerEntry(
 	body: unknown,
 ): Promise<AgentLedgerAppendResult> {
 	let result: AgentLedgerAppendResult | null = null;
-	await withStateFileLock(storePath(), () => {
+	await orderedWrite(() => {
 		const ledgers = readStore();
 		const index = ledgers.findIndex((ledger) => ledger.id === id);
 		const record = index === -1 ? undefined : ledgers[index];
@@ -197,6 +247,24 @@ export async function appendAgentLedgerEntry(
 			return;
 		}
 
+		const target =
+			parsed.body.kind === "review"
+				? parsed.body.target
+				: parsed.body.kind === "message"
+					? parsed.body.replyTo
+					: undefined;
+		if (target !== undefined && !record.entries.some((entry) => entry.id === target)) {
+			refuse("invalid-body", `entry ${target} does not exist on this board`);
+			return;
+		}
+		if (
+			attribution.flowRestrictions !== undefined &&
+			(!isFlowRestrictionSet(attribution.flowRestrictions) ||
+				Buffer.byteLength(JSON.stringify(attribution.flowRestrictions), "utf8") > 12000)
+		) {
+			refuse("invalid-body", "ledger flow restrictions are invalid or exceed 12000 bytes");
+			return;
+		}
 		const sequence = record.sequence + 1;
 		const conflicts = claimConflicts(parsed.body, record.entries, attribution.runId);
 		// Attribution is stamped here and nowhere else. The worker supplies the
@@ -211,6 +279,7 @@ export async function appendAgentLedgerEntry(
 			agentId: attribution.agentId,
 			nodeId: attribution.nodeId,
 			body: parsed.body,
+			...(attribution.flowRestrictions ? { flowRestrictions: structuredClone(attribution.flowRestrictions) } : {}),
 			...(conflicts.length > 0 ? { conflictsWith: [...conflicts] } : {}),
 		};
 		record.sequence = sequence;
@@ -229,7 +298,7 @@ export async function appendAgentLedgerEntry(
 /** Close one ledger. Idempotent: an already-closed ledger keeps its close time. */
 export async function closeAgentLedger(id: string): Promise<AgentLedgerRecord | null> {
 	let closed: AgentLedgerRecord | null = null;
-	await withStateFileLock(storePath(), () => {
+	await orderedWrite(() => {
 		const ledgers = readStore();
 		const index = ledgers.findIndex((ledger) => ledger.id === id);
 		const current = index === -1 ? undefined : ledgers[index];

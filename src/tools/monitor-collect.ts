@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { projectLedgerAssignments, projectReceiptFindings } from "../domains/dispatch/agent-ledger.js";
-import { renderAgentLedgerBoard } from "../domains/dispatch/agent-ledger-store.js";
+import { readAgentLedger, renderAgentLedgerBoard } from "../domains/dispatch/agent-ledger-store.js";
 import type { DurableAssignmentRecord } from "../domains/dispatch/assignment-store.js";
 import type { DispatchOwnership } from "../domains/dispatch/ownership.js";
 import { UNVERIFIABLE_RECEIPT_VERIFICATION } from "../domains/dispatch/receipt-findings.js";
@@ -10,6 +10,7 @@ import { isTerminalRunEnvelope } from "../domains/dispatch/types.js";
 import type { CanonicalTrustStatus } from "../domains/evidence/trust-status.js";
 import { adaptRunReceiptTrustStatus, inspectRunReceiptTrustStatus } from "../domains/evidence/trust-status.js";
 import { COST_NOT_MEASURED, costAggregateForAmount, formatCostAggregate } from "../domains/observability/index.js";
+import { mergeFlowRestrictions } from "../domains/safety/information-flow.js";
 import { flowRestrictionsOfRuns } from "./dispatch-runner.js";
 import type { MonitorToolDeps } from "./monitor.js";
 import type { ToolResult } from "./registry.js";
@@ -335,7 +336,10 @@ export async function collectRuns(
 		details: {
 			mode: "collect",
 			...(() => {
-				const carried = flowRestrictionsOfRuns(collectedRows.map((row) => row.evidence.receipt));
+				const carried = mergeFlowRestrictions(
+					flowRestrictionsOfRuns(collectedRows.map((row) => row.evidence.receipt)),
+					...(ledgerId ? (readAgentLedger(ledgerId)?.entries ?? []).map((entry) => entry.flowRestrictions) : []),
+				);
 				return carried !== null ? { [FLOW_RESTRICTIONS_DETAIL]: carried } : {};
 			})(),
 			...(batchId.length > 0 ? { batchId, collected } : {}),

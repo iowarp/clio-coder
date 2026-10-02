@@ -1,7 +1,7 @@
 /**
  * Agent ledger fan-out inside one orchestrator process.
  *
- * Deltas are pushed, never polled. A worker keeps a local mirror fed by
+ * Local commits push immediately; a background refresh observes other processes. A worker keeps a local mirror fed by
  * `ledger_delta` stdin frames and answers its own reads from it, so no tool
  * call ever blocks on a round trip and no worker has a reason to spin.
  *
@@ -18,6 +18,7 @@ export type AgentLedgerDeliver = (entries: ReadonlyArray<AgentLedgerEntry>) => b
 interface Subscriber {
 	runId: string;
 	deliver: AgentLedgerDeliver;
+	watermark: number;
 }
 
 const subscribers = new Map<string, Set<Subscriber>>();
@@ -27,24 +28,20 @@ const subscribers = new Map<string, Set<Subscriber>>();
  * mirror is complete regardless of when it spawned. Returns the unsubscribe.
  */
 export function subscribeAgentLedger(ledgerId: string, runId: string, deliver: AgentLedgerDeliver): () => void {
-	const subscriber: Subscriber = { runId, deliver };
+	const subscriber: Subscriber = { runId, deliver, watermark: 0 };
 	const existing = subscribers.get(ledgerId) ?? new Set<Subscriber>();
 	existing.add(subscriber);
 	subscribers.set(ledgerId, existing);
 
-	const record = readAgentLedger(ledgerId);
-	if (record !== null && record.entries.length > 0) {
-		if (!deliver(record.entries)) {
-			existing.delete(subscriber);
-			return () => {};
-		}
-	}
+	refreshLedger(ledgerId);
+	startRefresh();
 
 	return () => {
 		const set = subscribers.get(ledgerId);
 		if (set === undefined) return;
 		set.delete(subscriber);
 		if (set.size === 0) subscribers.delete(ledgerId);
+		stopRefreshIfIdle();
 	};
 }
 
@@ -53,19 +50,48 @@ export function subscribeAgentLedger(ledgerId: string, runId: string, deliver: A
  * own run, so a worker's mirror carries its own attributed entries with the
  * ids and conflict stamps the orchestrator assigned.
  */
-export function publishAgentLedgerEntry(ledgerId: string, entry: AgentLedgerEntry): void {
+export function publishAgentLedgerEntry(ledgerId: string, _entry: AgentLedgerEntry): void {
+	refreshLedger(ledgerId);
+}
+
+let refreshTimer: ReturnType<typeof setInterval> | undefined;
+
+function stopRefreshIfIdle(): void {
+	if (subscribers.size === 0 && refreshTimer !== undefined) {
+		clearInterval(refreshTimer);
+		refreshTimer = undefined;
+	}
+}
+
+function startRefresh(): void {
+	if (refreshTimer !== undefined || subscribers.size === 0) return;
+	refreshTimer = setInterval(() => {
+		for (const id of subscribers.keys()) refreshLedger(id);
+	}, 500);
+	refreshTimer.unref();
+}
+
+function refreshLedger(ledgerId: string): void {
 	const set = subscribers.get(ledgerId);
 	if (set === undefined) return;
+	let entries: ReadonlyArray<AgentLedgerEntry>;
+	try {
+		entries = readAgentLedger(ledgerId)?.entries ?? [];
+	} catch {
+		// A transient read failure retries on the next background refresh.
+		return;
+	}
 	for (const subscriber of [...set]) {
-		let reachable = false;
+		const delta = entries.filter((entry) => entry.sequence > subscriber.watermark);
+		if (delta.length === 0) continue;
 		try {
-			reachable = subscriber.deliver([entry]);
+			if (!subscriber.deliver(delta)) set.delete(subscriber);
+			else subscriber.watermark = delta[delta.length - 1]?.sequence ?? subscriber.watermark;
 		} catch {
-			reachable = false;
+			// Broken transports are retired; durable entries remain replayable.
+			set.delete(subscriber);
 		}
-		// An unreachable worker is dropped silently. Staleness is declared by the
-		// mirror's watermark and no receipt depends on a mirror.
-		if (!reachable) set.delete(subscriber);
 	}
 	if (set.size === 0) subscribers.delete(ledgerId);
+	stopRefreshIfIdle();
 }

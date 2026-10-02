@@ -1,3 +1,4 @@
+import { renderAgentLedgerBoard } from "../domains/dispatch/agent-ledger-store.js";
 /**
  * `clio-coder fleet view <runId|fleetRootId> [--follow]`.
  *
@@ -98,6 +99,7 @@ export interface RunViewTranscriptLine {
 }
 
 export interface RunViewModel {
+	agentLedgerBoard?: string;
 	runId: string;
 	agentId: string;
 	model: string;
@@ -269,6 +271,9 @@ export function loadRunViewModel(runId: string, options: LoadRunViewOptions = {}
 		journalPath: runEventJournalPath(runId, options.journalRoot === undefined ? undefined : options.journalRoot),
 		evidence: evidence.text,
 		receiptPath: evidence.receiptPath,
+		...(run.projection?.ledgerId
+			? { agentLedgerBoard: renderAgentLedgerBoard(run.projection.ledgerId) ?? "No peer contributions yet." }
+			: {}),
 		outcome: journal.terminal?.outcome ?? run.outcome ?? null,
 		outcomeDetail: journal.terminal?.detail ?? run.outcomeDetail ?? null,
 		terminal: journal.terminal !== null || run.endedAt !== null,
@@ -339,6 +344,12 @@ function renderRunView(model: RunViewModel, width: number = DEFAULT_WIDTH): stri
 	}
 	lines.push(rule);
 	lines.push(...wrapViewerValue("evidence  ", model.evidence, columns));
+	if (model.agentLedgerBoard) {
+		lines.push("", "Shared agent ledger (untrusted peer data):");
+		for (const line of model.agentLedgerBoard.split("\n")) {
+			lines.push(...wrapTextWithAnsi(sanitizeBounded(line, TASK_MAX_WIDTH), columns));
+		}
+	}
 	if (model.receiptPath !== null) {
 		lines.push(truncatePlain(`receipt   ${model.receiptPath}`, columns));
 	}

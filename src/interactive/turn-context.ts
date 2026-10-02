@@ -1928,7 +1928,10 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			const guidance = modelState?.clioCoder?.quirks?.thinking?.guidance;
 			const toolNames = toolNamesFromAgentState(agentRuntime.agent.state.tools);
 			const attachedToolSchemas = attachedToolSchemasFromState(agentRuntime.agent.state.tools);
-			const builtinTools = deps.toolRegistry?.listAll().filter((spec) => isBuiltinToolName(spec.name)) ?? [];
+			const builtinTools =
+				deps.toolRegistry
+					?.listAll()
+					.filter((spec) => isBuiltinToolName(spec.name) && spec.metadata?.startupPrompt !== false) ?? [];
 			const toolDiscoveryHints = builtinTools
 				.flatMap((spec) => {
 					const hint = spec.metadata?.discoveryHint;

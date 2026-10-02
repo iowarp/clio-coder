@@ -697,7 +697,12 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 		],
 		input.readOnly,
 		(effects) => middlewareToolChoice.apply(effects),
-		input.agentLedger,
+		input.agentLedger === undefined
+			? undefined
+			: {
+					read: () => input.agentLedger?.read() ?? null,
+					post: (body) => input.agentLedger?.post(body, runFlow ?? undefined) ?? { ok: false, reason: "no-ledger" },
+				},
 		observations.recall,
 		input.taskGit !== undefined
 			? createWorkerGitContext({

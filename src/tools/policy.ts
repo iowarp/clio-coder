@@ -127,10 +127,7 @@ const INTERACTIVE_BOUND_TOOLS = new Set<ToolName>([ToolNames.AskUser, ToolNames.
 /** Registered only when a pane host answered detection and the mux is live. */
 const PANES_BOUND_TOOLS = new Set<ToolName>([ToolNames.Panes]);
 /**
- * Registered only when a dispatch bound an agent-ledger port to this registry,
- * which only a worker process does. The session has no peers to coordinate
- * with, so on that surface the tool could only answer "no ledger" and its
- * schema was 444 tokens of every first turn for nothing.
+ * Registered with a worker port or an ownership-scoped session selector.
  */
 const LEDGER_BOUND_TOOLS = new Set<ToolName>([ToolNames.Ledger]);
 /**

@@ -1,3 +1,4 @@
+import type { FlowRestrictionSet } from "../core/flow-restrictions.js";
 /**
  * Worker-side agent-ledger mirror and port.
  *
@@ -13,13 +14,8 @@
  * admitted is what a receipt counts.
  */
 
-import {
-	type AgentLedgerBody,
-	type AgentLedgerEntry,
-	type AgentLedgerPort,
-	parseAgentLedgerBody,
-	type WorkerControlFrame,
-} from "./protocol.js";
+import type { AgentLedgerBody, AgentLedgerEntry, AgentLedgerPort, WorkerControlFrame } from "./protocol.js";
+import { parseAgentLedgerBody } from "./protocol.js";
 
 /** Mirrors the orchestrator's per-run cap so a refusal is synchronous. */
 export const WORKER_AGENT_LEDGER_POST_CAP = 20;
@@ -44,7 +40,8 @@ export function createWorkerAgentLedgerMirror(): WorkerAgentLedgerMirror {
 	return {
 		apply(entries: ReadonlyArray<AgentLedgerEntry>): void {
 			for (const entry of entries) {
-				bySequence.set(entry.sequence, entry);
+				if (bySequence.has(entry.sequence) || bySequence.size >= 200) continue;
+				bySequence.set(entry.sequence, structuredClone(entry));
 				if (entry.sequence > watermark) watermark = entry.sequence;
 			}
 		},
@@ -75,13 +72,19 @@ export function createWorkerAgentLedgerPort(deps: WorkerAgentLedgerPortDeps): Wo
 	const { ledger, emitControlFrame } = deps;
 	let posted = 0;
 	return {
-		post(body: AgentLedgerBody): { ok: true } | { ok: false; reason: WorkerAgentLedgerRefusal } {
+		post(
+			body: AgentLedgerBody,
+			flowRestrictions?: FlowRestrictionSet,
+		): { ok: true } | { ok: false; reason: WorkerAgentLedgerRefusal } {
 			if (ledger === undefined) return { ok: false, reason: "no-ledger" };
 			const parsed = parseAgentLedgerBody(body);
 			if (!parsed.ok) return { ok: false, reason: "invalid-body" };
 			if (posted >= WORKER_AGENT_LEDGER_POST_CAP) return { ok: false, reason: "per-run-cap" };
+			if (flowRestrictions !== undefined && Buffer.byteLength(JSON.stringify(flowRestrictions), "utf8") > 12000) {
+				return { ok: false, reason: "invalid-body" };
+			}
 			posted += 1;
-			emitControlFrame({ kind: "ledger_post", body: parsed.body });
+			emitControlFrame({ kind: "ledger_post", body: parsed.body, ...(flowRestrictions ? { flowRestrictions } : {}) });
 			return { ok: true };
 		},
 		read(): { open: boolean; watermark: number; entries: ReadonlyArray<AgentLedgerEntry> } | null {

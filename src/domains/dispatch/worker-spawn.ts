@@ -1,3 +1,4 @@
+import type { FlowRestrictionSet } from "../../core/flow-restrictions.js";
 /**
  * Orchestrator-side subprocess spawner for the native worker.
  *
@@ -132,7 +133,7 @@ export interface WorkerProcessOptions {
 	 * nothing else; the orchestrator stamps every attribution field from its own
 	 * admission record, so this callback only ever receives a validated body.
 	 */
-	onLedgerPost?: (body: AgentLedgerBody) => void;
+	onLedgerPost?: (body: AgentLedgerBody, flowRestrictions?: FlowRestrictionSet) => void;
 	/**
 	 * One model the worker's request loaded and pinned. The orchestrator owns the
 	 * release of worker loads, so dispatch adopts each report into its own
@@ -457,7 +458,7 @@ function attachWorkerChannel(
 				appendStderr("[worker] dropped a ledger post that arrived before attestation was accepted\n");
 				return;
 			}
-			opts?.onLedgerPost?.(frame.value.body);
+			opts?.onLedgerPost?.(frame.value.body, frame.value.flowRestrictions);
 			return;
 		}
 		if (frame.value.kind === "model_loaded") {

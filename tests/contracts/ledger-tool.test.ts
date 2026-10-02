@@ -68,16 +68,21 @@ describe("ledger tool", () => {
 		strictEqual(claimed.kind, "ok", JSON.stringify(claimed));
 		if (claimed.kind === "ok") {
 			deepStrictEqual(claimed.details, { action: "post", kind: "claim", ledger: true });
-			ok(claimed.output.startsWith("posted a claim\n\n"), claimed.output);
+			ok(claimed.output.startsWith("submitted a claim; admission is confirmed"), claimed.output);
 		}
 		const reviewed = await f.call({ action: "post", kind: "review", target: 3, passed: false, evidence: "reran it" });
 		strictEqual(reviewed.kind, "ok", JSON.stringify(reviewed));
 		const finding = await f.call({ action: "post", kind: "finding", claim: "  cap is 20  ", path: "src/x.ts", line: 4 });
 		strictEqual(finding.kind, "ok", JSON.stringify(finding));
+		strictEqual(
+			(await f.call({ action: "post", kind: "message", to: "main", text: "Ready for review", replyTo: "e3" })).kind,
+			"ok",
+		);
 		deepStrictEqual(f.frames, [
 			{ kind: "ledger_post", body: { kind: "claim", scope: ["src/tools", "tests"], intent: "add tests" } },
 			{ kind: "ledger_post", body: { kind: "review", target: "e3", passed: false, evidence: "reran it" } },
 			{ kind: "ledger_post", body: { kind: "finding", claim: "cap is 20", path: "src/x.ts", line: 4 } },
+			{ kind: "ledger_post", body: { kind: "message", to: "main", text: "Ready for review", replyTo: "e3" } },
 		]);
 	});
 
@@ -86,7 +91,7 @@ describe("ledger tool", () => {
 		const empty = await f.call({ action: "read" });
 		strictEqual(empty.kind, "ok");
 		if (empty.kind === "ok")
-			match(empty.output, /No peer contributions yet\.\n\nboard as of sequence 0 \(local mirror\)/);
+			match(empty.output, /No peer contributions yet\.\n\nboard as of sequence 0 \(open; delivered snapshot\)/);
 		f.port.acceptDelta([
 			entry(1, "scout", { kind: "claim", scope: ["src/parser"], intent: "rewrite the tokenizer" }),
 			entry(2, "reviewer", { kind: "finding", claim: "tokenizer drops tabs", path: "src/parser/lex.ts", line: 12 }),
@@ -99,7 +104,7 @@ describe("ledger tool", () => {
 		deepStrictEqual(board.details, { action: "read", ledger: true });
 		match(board.output, /rewrite the tokenizer/);
 		match(board.output, /tokenizer drops tabs/);
-		match(board.output, /board as of sequence 2 \(local mirror\)/);
+		match(board.output, /board as of sequence 2 \(open; delivered snapshot\)/);
 		const findings = await f.call({ action: "read", kinds: '["finding"]' });
 		ok(findings.kind === "ok" && !findings.output.includes("rewrite the tokenizer"), JSON.stringify(findings));
 		const since = await f.call({ action: "read", since: 1 });
@@ -112,7 +117,7 @@ describe("ledger tool", () => {
 		const f = workerLedger();
 		const cases: Array<[Record<string, unknown>, RegExp]> = [
 			[{ action: "write" }, /action must be one of post, read; got 'write'/],
-			[{ action: "post", kind: "note" }, /kind must be one of claim, finding, review; got 'note'/],
+			[{ action: "post", kind: "note" }, /kind must be one of claim, finding, review, message; got 'note'/],
 			[{ action: "post", kind: "claim", scope: ["src"] }, /a claim requires intent/],
 			[{ action: "post", kind: "claim", intent: "x" }, /a claim requires scope/],
 			[{ action: "post", kind: "finding" }, /a finding requires claim/],

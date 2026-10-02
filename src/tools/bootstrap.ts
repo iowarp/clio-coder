@@ -21,6 +21,7 @@ import { coordinatorDispatchParameters } from "./dispatch-schema.js";
 import { createMcpCapabilitySource, type McpCapabilitySource } from "./gateway/index.js";
 import { registerHarnessExtensionTools } from "./harness-extensions.js";
 import { lazyTool } from "./lazy-tool.js";
+import { createLedgerTool } from "./ledger.js";
 import { monitorToolSurface } from "./monitor-surface.js";
 import { panesToolSurface } from "./panes-surface.js";
 import type { RegistryDeps, ToolRegistry } from "./registry.js";
@@ -89,6 +90,22 @@ export function registerAllTools(registry: ToolRegistry, deps: ToolBootstrapDeps
 		);
 	if (deps.dispatch) {
 		const dispatch = deps.dispatch;
+		if (deps.agentLedger === undefined) {
+			registration.includeLedgerTools = true;
+			const ledger = builtin(
+				lazyTool(createLedgerTool({ resolveLedger: () => null }), async () =>
+					(await import("./ledger-session.js")).createSessionLedgerTool(dispatch, deps.flow),
+				),
+				{ path: "src/tools/ledger.ts", scope: "core" },
+			);
+			// A board matters after dispatch; gateway discovery exposes it without
+			// paying for its schema or map entry on every session's first request.
+			registry.register({
+				...ledger,
+				placement: "gateway",
+				...(ledger.metadata ? { metadata: { ...ledger.metadata, startupPrompt: false } } : {}),
+			});
+		}
 		// Display tail only. In a composed process the dispatch domain writes the
 		// durable journal off its own progress channel, which covers every run
 		// rather than only the ones the model dispatched through this tool, so a

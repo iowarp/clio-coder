@@ -98,12 +98,15 @@ describe("gateway in the session prompt", () => {
 		try {
 			const registry = createRegistry({ safety: createWorkerSafety({ cwd: env.dir }) });
 			registerAllTools(registry, { mcpCapabilities: false, dispatch: bundle.contract, includeLedgerTools: true });
+			strictEqual(registry.get(ToolNames.Ledger)?.placement, "gateway");
+			strictEqual(registry.get(ToolNames.Ledger)?.metadata?.startupPrompt, false);
 			const tools = resolveAgentTools({ registry });
 			const names = tools.map((tool) => tool.name as ToolName).sort();
 			for (const present of [ToolNames.Gateway, ToolNames.Read, ToolNames.Write, ToolNames.Edit, ToolNames.Dispatch]) {
 				ok(names.includes(present), `${present} is attached`);
 			}
 			for (const absent of [
+				ToolNames.Ledger,
 				ToolNames.Artifact,
 				ToolNames.WebFetch,
 				ToolNames.WebRead,

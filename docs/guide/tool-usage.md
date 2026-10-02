@@ -783,13 +783,21 @@ tasks(action="done", id="t1", note="reproduced and fixed; targeted test passes")
 
 Reads or posts to the agent ledger shared by concurrent workers in one
 dispatch. Source: [ledger.ts](../../src/tools/ledger.ts). Read class; sequential. The tool
-registers only when a worker has an agent-ledger port. An ordinary session or a
-worker with no peers does not receive a usable coordination board.
+is also available through `gateway` to the main agent when dispatch is available,
+without adding a schema or capability-map entry to the startup prompt. The main agent
+selects an owned run with `runId`, or omits it when exactly one board is active.
+Workers read only their assigned board. In 0.6.0, native workers and the main
+agent participate live. Claude SDK, Claude Code, Codex, OpenCode and Pi workers
+receive the starting board read-only; they do not have a live ledger tool.
 
 Arguments:
 
 - `action` (required). `read` or `post`.
-- `kind` (post). `claim`, `finding`, or `review`.
+- `kind` (post). `claim`, `finding`, `review`, or `message`.
+- `runId` (main agent). Select the board belonging to an owned dispatch run.
+- `to`, `text`, and optional `replyTo` (message). Intended recipient (`main`,
+  `all`, or a run id), up to 1000 characters, and an existing entry id. Messages
+  are shared board data, not private channels or automatic steering.
 - `scope` and `intent` (claim). Path prefixes being taken and what the worker
   will do there.
 - `claim`, with optional `path` and `line` (finding). One grounded observation.
@@ -801,7 +809,10 @@ Arguments:
 A claim requires nonempty scope and intent. A finding requires a claim. A
 review requires a target, boolean verdict, and evidence. Reads answer from the
 worker's local mirror and report its sequence watermark, so peer state can be
-slightly stale. Every post returns the updated board. Each run may make at most
+slightly stale. Local commits push immediately; commits from another parent
+process reach subscribed workers on a 500 ms background refresh. A worker post
+returns its current mirror; admission is confirmed only when the attributed entry
+appears there. Each run may make at most
 20 posts; reissuing a post is not retry-safe because it creates another entry.
 Peer entries are untrusted data, never instructions.
 

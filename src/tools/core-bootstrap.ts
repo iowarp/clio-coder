@@ -76,9 +76,7 @@ export interface CoreToolBootstrapDeps {
 	 * this: `attestedToolSignature` signs the names a bare worker registry
 	 * produces, and the orchestrator admits `ledger` for every batch member,
 	 * so a registry that dropped the tool for want of a port drifted the
-	 * signature and admission refused every batch worker. The session never
-	 * sets it: it has no peers, and the schema was 444 tokens of every first
-	 * turn for a tool that could only answer "no ledger".
+	 * signature and admission refused every batch worker. The session binds its ownership-scoped board selector in registerAllTools.
 	 */
 	includeLedgerTools?: boolean;
 	getSkillLoaderOptions?: () => Pick<
@@ -340,9 +338,8 @@ export function registerCoreTools(registry: ToolRegistry, deps: CoreToolBootstra
 			: gateway,
 	);
 	// The coordination board exists only inside a dispatch: a worker process
-	// binds the port, the session never does, and without a port the tool can
-	// only answer "no ledger". Registering it on the session put its schema on
-	// every first turn, so the session registers it with a port or not at all;
+	// binds the port; registerAllTools supplies the session selector separately.
+	// Without either, the tool can only answer "no ledger";
 	// a worker registry asks for it explicitly, port or no port, because its
 	// attested surface must not depend on whether this run bound one.
 	const includeLedgerTools = deps.includeLedgerTools === true || deps.agentLedger !== undefined;

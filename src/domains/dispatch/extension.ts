@@ -1605,7 +1605,7 @@ export function buildDynamicPromptMessages(
 	}
 	if (req.ledger !== undefined) {
 		const board = readAgentLedger(req.ledger.id);
-		const entries = board?.entries ?? [];
+		const entries = (board?.entries ?? []).filter((entry) => (entry.flowRestrictions?.restrictions.length ?? 0) === 0);
 		if (board !== null) {
 			const body = [
 				"A shared agent ledger is available for this concurrent dispatch: workers record path ownership, grounded findings, and reviews here.",
@@ -6252,23 +6252,34 @@ export function createDispatchBundle(
 		const agentLedgerId = spec.ledger?.id ?? null;
 		let agentLedgerAttribution: AgentLedgerAttribution | null = null;
 		let unsubscribeAgentLedger: (() => void) | null = null;
-		const heldLedgerPosts: AgentLedgerBody[] = [];
-		const appendLedgerPost = (attribution: AgentLedgerAttribution, body: AgentLedgerBody): void => {
+		const heldLedgerPosts: Array<{ body: AgentLedgerBody; flowRestrictions?: FlowRestrictionSet }> = [];
+		const appendLedgerPost = (
+			attribution: AgentLedgerAttribution,
+			body: AgentLedgerBody,
+			flowRestrictions?: FlowRestrictionSet,
+		): void => {
 			if (agentLedgerId === null) return;
-			void appendAgentLedgerEntry(agentLedgerId, attribution, body)
+			const carried = mergeFlowRestrictions(spec.flowRestrictions, flowRestrictions);
+			trustedFlow = mergeFlowRestrictions(trustedFlow, carried);
+			void appendAgentLedgerEntry(
+				agentLedgerId,
+				{ ...attribution, ...(carried ? { flowRestrictions: carried } : {}) },
+				body,
+			)
 				.then((result) => {
 					if (result.ok) publishAgentLedgerEntry(agentLedgerId, result.entry);
 				})
 				.catch((error) => reportDispatchDiagnostic(`append agent ledger entry for ${attribution.runId}`, error));
 		};
-		const onLedgerPost = (body: AgentLedgerBody): void => {
+		const onLedgerPost = (body: AgentLedgerBody, flowRestrictions?: FlowRestrictionSet): void => {
 			if (agentLedgerId === null) return;
 			const attribution = agentLedgerAttribution;
 			if (attribution === null) {
-				if (heldLedgerPosts.length < MAX_AGENT_LEDGER_POSTS_PER_RUN) heldLedgerPosts.push(body);
+				if (heldLedgerPosts.length < MAX_AGENT_LEDGER_POSTS_PER_RUN)
+					heldLedgerPosts.push({ body, ...(flowRestrictions ? { flowRestrictions } : {}) });
 				return;
 			}
-			appendLedgerPost(attribution, body);
+			appendLedgerPost(attribution, body, flowRestrictions);
 		};
 		// A model this worker loaded is this process's to release at exit, and
 		// stays out of mid-session eviction until then (#379). The report is
@@ -6881,9 +6892,29 @@ export function createDispatchBundle(
 				// The hub replays the whole board on subscription, so this mirror is
 				// complete whatever this run's spawn timing was.
 				unsubscribeAgentLedger = subscribeAgentLedger(agentLedgerId, envelope.id, (entries) =>
-					sendToWorker === undefined ? false : sendToWorker({ type: "ledger_delta", entries }),
+					sendToWorker === undefined
+						? false
+						: sendToWorker({
+								type: "ledger_delta",
+								entries: entries.filter((entry) => {
+									if ((entry.flowRestrictions?.restrictions.length ?? 0) === 0) return true;
+									if (spec.flowPolicy === undefined || lifecycle.runtimeKind !== "http") return false;
+									return (
+										flowTransferRefusal(
+											compileWorkerFlowPolicy(spec.flowPolicy),
+											entry.flowRestrictions ?? null,
+											resolveModelDestination({
+												targetId: lifecycle.target.target.id,
+												runtimeId: lifecycle.target.runtime.id,
+												url: lifecycle.target.target.url,
+												model: lifecycle.target.wireModelId,
+											}),
+										) === null
+									);
+								}),
+							}),
 				);
-				for (const body of heldLedgerPosts.splice(0)) appendLedgerPost(attribution, body);
+				for (const post of heldLedgerPosts.splice(0)) appendLedgerPost(attribution, post.body, post.flowRestrictions);
 			}
 			identity = detectRunIdentity();
 			ledgerRef.update(envelope.id, {
