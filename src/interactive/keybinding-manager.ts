@@ -459,7 +459,22 @@ function scopesOverlap(a: string, b: string): boolean {
 	return true;
 }
 
+/**
+ * A fullscreen viewport key and an editor key that both keep their shipped
+ * binding share it by design: pi-tui's `tui.altScreen.*` defaults shadow the
+ * unmodified editor keys in fullscreen mode (PageUp scrolls the viewport, and
+ * Ctrl+PageUp still pages the editor). That is a scope, not a conflict. A user
+ * who rebinds either side has chosen the overlap, so it is still reported.
+ */
+function isShippedFullscreenShadow(inner: KeybindingsManager, a: string, b: string): boolean {
+	const scopes = [keybindingScope(a), keybindingScope(b)];
+	if (!scopes.includes("fullscreen composer") || !scopes.includes("editable field")) return false;
+	const user = inner.getUserBindings();
+	return user[a] === undefined && user[b] === undefined;
+}
+
 function effectiveConflicts(inner: KeybindingsManager): KeybindingConflict[] {
+	const overlaps = (a: string, b: string): boolean => scopesOverlap(a, b) && !isShippedFullscreenShadow(inner, a, b);
 	const keys = new Map<string, string[]>();
 	for (const id of Object.keys(CLIO_KEYBINDINGS) as Keybinding[]) {
 		for (const key of inner.getKeys(id)) {
@@ -471,12 +486,11 @@ function effectiveConflicts(inner: KeybindingsManager): KeybindingConflict[] {
 	}
 	return [...keys]
 		.filter(
-			([, ids]) =>
-				ids.length > 1 && ids.some((id, index) => ids.slice(index + 1).some((other) => scopesOverlap(id, other))),
+			([, ids]) => ids.length > 1 && ids.some((id, index) => ids.slice(index + 1).some((other) => overlaps(id, other))),
 		)
 		.map(([key, keybindings]) => ({
 			key: key as KeyId,
-			keybindings: keybindings.filter((id) => keybindings.some((other) => other !== id && scopesOverlap(id, other))),
+			keybindings: keybindings.filter((id) => keybindings.some((other) => other !== id && overlaps(id, other))),
 		}));
 }
 
