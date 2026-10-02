@@ -20,6 +20,7 @@ import { evaluateAdmission } from "../../src/domains/safety/admission.js";
 import { mapAutonomy } from "../../src/domains/safety/autonomy.js";
 import { describeCallTarget } from "../../src/domains/safety/call-target.js";
 import type { SafetyContract, SafetyDecision } from "../../src/domains/safety/contract.js";
+import { EMPTY_INFORMATION_FLOW_INPUT } from "../../src/domains/safety/information-flow.js";
 import { createSafetyPolicyEngine, type SafetyPolicyEngine } from "../../src/domains/safety/policy-engine.js";
 import { loadProjectSafetyPolicy } from "../../src/domains/safety/project-policy.js";
 import {
@@ -290,6 +291,7 @@ describe("safety gate boundary", () => {
 				],
 				pathPolicy: {},
 				disableDefaultPathPolicy: false,
+				informationFlow: EMPTY_INFORMATION_FLOW_INPUT,
 			},
 		});
 		const safety: SafetyContract = {
@@ -360,6 +362,7 @@ describe("safety gate boundary", () => {
 					],
 					pathPolicy: {},
 					disableDefaultPathPolicy: false,
+					informationFlow: EMPTY_INFORMATION_FLOW_INPUT,
 				},
 			});
 			const outwardSafety: SafetyContract = {
