@@ -492,12 +492,18 @@ function parseCouncilBallot(output: string | null): CouncilBallot | null {
 function validateCouncilBallot(contract: ResultContract, output: string | null): ResultContractValidation {
 	const parsed = parseJson(output);
 	if (!parsed.ok) return failure(contract, "unmeasured", parsed.reason);
+	const value = parsed.value;
+	const unexpected = unexpectedResultKeyReason("Council ballot", value, ["verdict", "text"]);
+	if (unexpected !== null) return failure(contract, "unmeasured", unexpected);
+	for (const key of ["verdict", "text"] as const) {
+		if (!string(value[key])) return failure(contract, "unmeasured", `Council ballot ${key} must be a non-empty string`);
+	}
 	const ballot = parseCouncilBallot(output);
 	if (ballot === null) {
 		return failure(
 			contract,
 			"unmeasured",
-			`A council ballot must carry only verdict and text, both non-empty strings, with verdict a single line of at most ${COUNCIL_BALLOT_VERDICT_MAX_BYTES} bytes so the tally can match it against the other members`,
+			`Council ballot verdict must be a single line of at most ${COUNCIL_BALLOT_VERDICT_MAX_BYTES} UTF-8 bytes`,
 		);
 	}
 	// Unmeasured, like every other contract whose shape carries no correctness
@@ -703,6 +709,17 @@ function hasOnlyKeys(value: Record<string, unknown>, keys: ReadonlyArray<string>
 	return Object.keys(value).every((key) => allowed.has(key));
 }
 
+function unexpectedResultKeyReason(
+	label: string,
+	value: Record<string, unknown>,
+	keys: ReadonlyArray<string>,
+): string | null {
+	const unexpected = Object.keys(value).find((key) => !keys.includes(key));
+	return unexpected === undefined
+		? null
+		: `${label} has unexpected key ${JSON.stringify(unexpected)}; allowed keys: ${keys.join(", ")}`;
+}
+
 function string(value: unknown): value is string {
 	return typeof value === "string" && value.trim().length > 0;
 }
@@ -792,17 +809,41 @@ function parseSubtasks(value: unknown): ScoutSubtask[] | null {
 	return subtasks;
 }
 
-function isContextHandbookResult(value: Record<string, unknown>): boolean {
-	if (!hasOnlyKeys(value, ["projectName", "identity", "conventions", "invariants", "sections"])) return false;
-	if (!string(value.projectName) || !string(value.identity)) return false;
-	if (!Array.isArray(value.conventions) || value.conventions.some((entry) => !string(entry))) return false;
-	if (!Array.isArray(value.invariants) || value.invariants.some((entry) => !string(entry))) return false;
-	if (!Array.isArray(value.sections)) return false;
-	return value.sections.every((entry) => {
-		if (entry === null || typeof entry !== "object" || Array.isArray(entry)) return false;
+function contextHandbookReason(value: Record<string, unknown>): string | null {
+	const unexpected = unexpectedResultKeyReason("Context handbook result", value, [
+		"projectName",
+		"identity",
+		"conventions",
+		"invariants",
+		"sections",
+	]);
+	if (unexpected !== null) return unexpected;
+	for (const key of ["projectName", "identity"] as const) {
+		if (!string(value[key])) return `Context handbook result ${key} must be a non-empty string`;
+	}
+	for (const key of ["conventions", "invariants"] as const) {
+		const entries = value[key];
+		if (!Array.isArray(entries) || entries.some((entry) => !string(entry))) {
+			return `Context handbook result ${key} must be an array of non-empty strings`;
+		}
+	}
+	if (!Array.isArray(value.sections))
+		return "Context handbook result sections must be an array of {title, body} objects";
+	for (const [index, entry] of value.sections.entries()) {
+		if (entry === null || typeof entry !== "object" || Array.isArray(entry)) {
+			return `Context handbook result sections[${index}] must be an object`;
+		}
 		const section = entry as Record<string, unknown>;
-		return hasOnlyKeys(section, ["title", "body"]) && string(section.title) && string(section.body);
-	});
+		const sectionUnexpected = unexpectedResultKeyReason(`Context handbook result sections[${index}]`, section, [
+			"title",
+			"body",
+		]);
+		if (sectionUnexpected !== null) return sectionUnexpected;
+		for (const key of ["title", "body"] as const) {
+			if (!string(section[key])) return `Context handbook result sections[${index}].${key} must be a non-empty string`;
+		}
+	}
+	return null;
 }
 
 /**
@@ -813,13 +854,8 @@ function isContextHandbookResult(value: Record<string, unknown>): boolean {
 function validateContextHandbook(contract: ResultContract, output: string | null): ResultContractValidation {
 	const parsed = parseJson(output);
 	if (!parsed.ok) return failure(contract, "fail", parsed.reason);
-	if (!isContextHandbookResult(parsed.value)) {
-		return failure(
-			contract,
-			"fail",
-			"context handbook result must carry projectName, identity, conventions[], invariants[], and sections[{title, body}] and nothing else",
-		);
-	}
+	const reason = contextHandbookReason(parsed.value);
+	if (reason !== null) return failure(contract, "fail", reason);
 	return success(contract, "unmeasured", parsed.value);
 }
 
@@ -892,15 +928,18 @@ function validateScout(contract: ResultContract, output: string | null): ResultC
 	// strict failure unchanged when the result carries no usable claim either.
 	const degrade = (reason: string): ResultContractValidation =>
 		degradedScout(contract, value, reason) ?? failure(contract, "fail", reason);
-	if (!hasOnlyKeys(value, ["findings", "needsSplit", "proposedSubtasks"])) {
-		return degrade("Scout result has unknown fields");
-	}
+	const unexpected = unexpectedResultKeyReason("Scout result", value, ["findings", "needsSplit", "proposedSubtasks"]);
+	if (unexpected !== null) return degrade(unexpected);
 	const findings = parseFindings(value.findings);
 	const proposedSubtasks = parseSubtasks(value.proposedSubtasks);
-	if (findings === null || typeof value.needsSplit !== "boolean" || proposedSubtasks === null) {
+	if (findings === null) {
 		return degrade(
-			"Scout result must carry findings as {claim, path, line} objects, needsSplit, and 0..4 typed proposed subtasks",
+			"Scout result findings must be an array of {claim, path, line} objects with non-empty strings and positive integer lines",
 		);
+	}
+	if (typeof value.needsSplit !== "boolean") return degrade("Scout result needsSplit must be a boolean");
+	if (proposedSubtasks === null) {
+		return degrade("Scout result proposedSubtasks must be an array of 0..4 valid typed subtasks");
 	}
 	if (value.needsSplit !== proposedSubtasks.length > 0) {
 		return degrade("Scout needsSplit must agree with proposedSubtasks");
@@ -1172,19 +1211,18 @@ function validateOracle(contract: ResultContract, output: string | null): Result
 	const parsed = parseJson(output);
 	if (!parsed.ok) return failure(contract, "unmeasured", parsed.reason);
 	const value = parsed.value;
-	if (
-		!hasOnlyKeys(value, ["verdict", "challenge", "changesMyMind", "citedDecisions"]) ||
-		!string(value.verdict) ||
-		!string(value.challenge) ||
-		!string(value.changesMyMind) ||
-		!Array.isArray(value.citedDecisions) ||
-		value.citedDecisions.some((entry) => !string(entry))
-	) {
-		return failure(
-			contract,
-			"unmeasured",
-			'Oracle result must carry verdict, challenge, changesMyMind, and a citedDecisions array of strings, for example {"verdict":"consistent with decision routing.target","challenge":"...","changesMyMind":"...","citedDecisions":["routing.target"]}',
-		);
+	const unexpected = unexpectedResultKeyReason("Oracle result", value, [
+		"verdict",
+		"challenge",
+		"changesMyMind",
+		"citedDecisions",
+	]);
+	if (unexpected !== null) return failure(contract, "unmeasured", unexpected);
+	for (const key of ["verdict", "challenge", "changesMyMind"] as const) {
+		if (!string(value[key])) return failure(contract, "unmeasured", `Oracle result ${key} must be a non-empty string`);
+	}
+	if (!Array.isArray(value.citedDecisions) || value.citedDecisions.some((entry) => !string(entry))) {
+		return failure(contract, "unmeasured", "Oracle result citedDecisions must be an array of non-empty strings");
 	}
 	return success(contract, "unmeasured", value);
 }
@@ -1214,20 +1252,25 @@ function validateCodeReport(contract: ResultContract, output: string | null): Re
 	const parsed = parseJson(output);
 	if (!parsed.ok) return failure(contract, "unmeasured", parsed.reason);
 	const value = parsed.value;
-	if (
-		!hasOnlyKeys(value, ["passed", "exitCode", "checks", "artifactPaths", "outputExcerpt"]) ||
-		typeof value.passed !== "boolean" ||
-		typeof value.exitCode !== "number" ||
-		!Number.isSafeInteger(value.exitCode) ||
-		typeof value.outputExcerpt !== "string" ||
-		!Array.isArray(value.artifactPaths) ||
-		value.artifactPaths.some((entry) => !string(entry))
-	) {
-		return failure(
-			contract,
-			"unmeasured",
-			"Code result must carry passed, integer exitCode, checks, artifactPaths, and outputExcerpt",
-		);
+	const unexpected = unexpectedResultKeyReason("Code result", value, [
+		"passed",
+		"exitCode",
+		"checks",
+		"artifactPaths",
+		"outputExcerpt",
+	]);
+	if (unexpected !== null) return failure(contract, "unmeasured", unexpected);
+	if (typeof value.passed !== "boolean") {
+		return failure(contract, "unmeasured", "Code result passed must be a boolean");
+	}
+	if (typeof value.exitCode !== "number" || !Number.isSafeInteger(value.exitCode)) {
+		return failure(contract, "unmeasured", "Code result exitCode must be a safe integer");
+	}
+	if (typeof value.outputExcerpt !== "string") {
+		return failure(contract, "unmeasured", "Code result outputExcerpt must be a string");
+	}
+	if (!Array.isArray(value.artifactPaths) || value.artifactPaths.some((entry) => !string(entry))) {
+		return failure(contract, "unmeasured", "Code result artifactPaths must be an array of non-empty path strings");
 	}
 	const checks = parseChecks(value.checks);
 	if (checks === null) return failure(contract, "unmeasured", "Code result must carry typed checks");
@@ -1592,11 +1635,16 @@ function validateWorldKnowledge(
 		if (factUnknown.length > 0) {
 			return failure(contract, "unmeasured", `World-knowledge field "facts[${index}].${factUnknown[0]}" is not legal`);
 		}
-		if (!string(fact.claim) || !string(fact.evidence) || !Array.isArray(fact.sources)) {
+		for (const key of ["claim", "evidence"] as const) {
+			if (!string(fact[key])) {
+				return failure(contract, "unmeasured", `World-knowledge field "facts[${index}].${key}" must be a non-empty string`);
+			}
+		}
+		if (!Array.isArray(fact.sources)) {
 			return failure(
 				contract,
 				"unmeasured",
-				`World-knowledge field "facts[${index}]" requires non-empty claim/evidence strings and a sources array`,
+				`World-knowledge field "facts[${index}].sources" must be an array of strings`,
 			);
 		}
 		if (fact.sources.some((source) => !string(source))) {
@@ -1688,15 +1736,27 @@ function validateMutation(contract: ResultContract, input: ResultContractValidat
 	const parsed = parseJson(input.output);
 	if (!parsed.ok) return failure(contract, "unmeasured", parsed.reason);
 	const value = parsed.value;
-	if (
-		!hasOnlyKeys(value, ["mutatedPaths", "validations", "observations", "declaredChecks", "commitMessage", "summary"]) ||
-		!Array.isArray(value.mutatedPaths) ||
-		value.mutatedPaths.some((entry) => !string(entry)) ||
-		["observations", "declaredChecks"].some(
-			(key) => value[key] !== undefined && (!Array.isArray(value[key]) || !value[key].every((entry) => string(entry))),
-		)
-	) {
-		return failure(contract, "unmeasured", "Mutation result must carry mutatedPaths and validations");
+	const unexpected = unexpectedResultKeyReason("Mutation result", value, [
+		"mutatedPaths",
+		"validations",
+		"observations",
+		"declaredChecks",
+		"commitMessage",
+		"summary",
+	]);
+	if (unexpected !== null) return failure(contract, "unmeasured", unexpected);
+	if (!Array.isArray(value.mutatedPaths) || value.mutatedPaths.some((entry) => !string(entry))) {
+		return failure(contract, "unmeasured", "Mutation result mutatedPaths must be an array of non-empty path strings");
+	}
+	for (const key of ["observations", "declaredChecks"] as const) {
+		const entries = value[key];
+		if (entries !== undefined && (!Array.isArray(entries) || !entries.every((entry) => string(entry)))) {
+			return failure(
+				contract,
+				"unmeasured",
+				`Mutation result ${key} must be an array of non-empty strings${typeof entries === "string" ? ", not a string" : ""}`,
+			);
+		}
 	}
 	const authorship = validateAuthorship(value, resultSummaryMaxBytes(contract));
 	if (authorship !== null) return failure(contract, "unmeasured", authorship);
@@ -1743,17 +1803,14 @@ function validateProvenance(contract: ResultContract, output: string | null): Re
 	const parsed = parseJson(output);
 	if (!parsed.ok) return failure(contract, "unmeasured", parsed.reason);
 	const value = parsed.value;
-	if (
-		!hasOnlyKeys(value, ["confirmedFacts", "missingEvidence", "nextInspections"]) ||
-		![value.confirmedFacts, value.missingEvidence, value.nextInspections].every(
-			(entry) => Array.isArray(entry) && entry.every((item) => string(item)),
-		)
-	) {
-		return failure(
-			contract,
-			"unmeasured",
-			"Provenance result must carry confirmedFacts, missingEvidence, and nextInspections",
-		);
+	const keys = ["confirmedFacts", "missingEvidence", "nextInspections"] as const;
+	const unexpected = unexpectedResultKeyReason("Provenance result", value, keys);
+	if (unexpected !== null) return failure(contract, "unmeasured", unexpected);
+	for (const key of keys) {
+		const entries = value[key];
+		if (!Array.isArray(entries) || !entries.every((entry) => string(entry))) {
+			return failure(contract, "unmeasured", `Provenance result ${key} must be an array of non-empty strings`);
+		}
 	}
 	return success(contract, "unmeasured", value);
 }
