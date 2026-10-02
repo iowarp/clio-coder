@@ -5,7 +5,7 @@ import { dirname, isAbsolute, join, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { resolveClioDirs } from "../clio/http-shims.js";
 import { findLocalServer, type LocalServerMeta, waitForLocalServer } from "../local-server.js";
-import { controlService, openBrowser } from "../process-policy.js";
+import { controlService, openApp } from "../process-policy.js";
 import {
 	type BackgroundConfig,
 	backgroundPaths,
@@ -16,6 +16,12 @@ import {
 import { desktopEntry, type LaunchPaths } from "./desktop-entry.js";
 import { contents, installLauncher, launcherStatus, uninstallLauncher } from "./install.js";
 import { DEFAULT_GUI_PORT } from "./ports.js";
+import {
+	assertWindowsLauncherRemovable,
+	installWindowsLauncher,
+	uninstallWindowsLauncher,
+	windowsLauncherStatus,
+} from "./windows.js";
 
 const hash = (value: string) => createHash("sha256").update(value).digest("hex");
 type Control = typeof controlService;
@@ -195,6 +201,7 @@ export async function backgroundStatus(
 		pid: Number(service.MainPID) || null,
 		ready: !!found,
 		desktop: (await desktopOwned(state.config, directory)) ? "installed" : "absent",
+		windows: await windowsLauncherStatus(directory),
 	};
 }
 type Installed = Extract<Awaited<ReturnType<typeof owned>>, { status: "installed" }>;
@@ -348,8 +355,10 @@ export async function uninstallBackground(directory: string, control: Control = 
 	if (state.status === "absent") return { status: "absent", directory };
 	await serviceState(state.files, control);
 	const desktop = await desktopOwned(state.config, directory);
+	await assertWindowsLauncherRemovable(directory);
 	await control("disable", state.files.unit, state.files.unitFile);
 	if (desktop) await uninstallLauncher(state.config.desktopPrefix);
+	await uninstallWindowsLauncher(directory);
 	for (const file of [state.files.manifest, state.files.unitFile, state.files.config]) await unlink(file);
 	await control("reload", state.files.unit, state.files.unitFile);
 	await rmdir(directory).catch((error: NodeJS.ErrnoException) => {
@@ -366,6 +375,7 @@ export async function backgroundRemoval(directory: string, packageRoot: string, 
 		throw new Error("Background service belongs to another installation; uninstall stopped before removing Clio state.");
 	await serviceState(state.files, control);
 	await desktopOwned(state.config, directory);
+	await assertWindowsLauncherRemovable(directory);
 	return { path: directory, remove: () => uninstallBackground(directory, control) };
 }
 
@@ -429,12 +439,21 @@ export async function background(args: string[], launch: LaunchPaths) {
 				? process.env.XDG_DATA_HOME
 				: join(homedir(), ".local/share"));
 		const config = await newBackgroundConfig(port, launch, prefix);
-		console.log(JSON.stringify(await installBackground(directory, config), null, 2));
+		const result = await installBackground(directory, config);
+		// Windows entries are a convenience around a service that already works, so their failure is reported, not fatal.
+		const windows = await installWindowsLauncher(directory, { ...config.launch, background: directory }).catch(
+			(error: unknown) => ({ status: "failed" as const, reason: error instanceof Error ? error.message : String(error) }),
+		);
+		console.log(JSON.stringify({ ...result, windows }, null, 2));
 		console.log(
 			"Background sessions use Clio Coder's saved credentials. If a target key exists only in your terminal environment, save it with clio-coder auth login <target> before starting a conversation.",
 		);
 		if (!values.open) {
-			console.log("Open it any time with: clio-coder gui");
+			console.log(
+				windows.status === "installed"
+					? "Open it any time from the Windows Start Menu (Clio Coder) or with: clio-coder gui"
+					: "Open it any time with: clio-coder gui",
+			);
 			return;
 		}
 	}
@@ -464,7 +483,7 @@ export async function background(args: string[], launch: LaunchPaths) {
 		return;
 	}
 	// The link is the way in when no desktop can take it, so a failed opener hands it over instead of failing.
-	await openBrowser(url).catch(() => {
+	await openApp(url).catch(() => {
 		console.log(`[clio-coder:gui] ${url}`);
 		console.error("[clio-coder:gui] Could not open the browser. Open the printed URL manually.");
 	});

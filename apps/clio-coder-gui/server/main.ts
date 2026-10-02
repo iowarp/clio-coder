@@ -13,7 +13,7 @@ import { backgroundEnvironment, readBackgroundConfig } from "./launcher/backgrou
 import { listenPorts } from "./launcher/ports.js";
 import { restrictNetwork } from "./network-policy.js";
 import { serverOptions } from "./options.js";
-import { autoOpenBrowser, openBrowser } from "./process-policy.js";
+import { autoOpenBrowser, openApp, openBrowser } from "./process-policy.js";
 import { CliRunner } from "./services/cli-runner.js";
 import { EventHub } from "./services/event-hub.js";
 import { EvidenceService } from "./services/evidence.js";
@@ -62,7 +62,7 @@ export async function main(args = process.argv.slice(2)) {
 	const values = serverOptions(args);
 	const open = values.open === "always" || (values.open === "auto" && autoOpenBrowser());
 	const openLink = (href: string) =>
-		openBrowser(href).catch(() => {
+		openApp(href).catch(() => {
 			console.error("[clio-coder:gui] Could not open the browser. Open the printed URL manually.");
 		});
 	// A person at a terminal gets guidance; a pipe, a script or a test gets only the link on stdout.

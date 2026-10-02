@@ -166,6 +166,57 @@ export function autoOpenBrowser(
 	return !!(env.DISPLAY || env.WAYLAND_DISPLAY || env.WSL_DISTRO_NAME);
 }
 
+/** Windows PowerShell as WSL interop reaches it; the shortcut and folder scripts below are the only users. */
+export const WINDOWS_POWERSHELL = "/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe";
+/** Browsers that can show the app in its own window, in the order a person would expect them. */
+const WINDOWS_APP_BROWSERS = [
+	"/mnt/c/Program Files/Google/Chrome/Application/chrome.exe",
+	"/mnt/c/Program Files (x86)/Google/Chrome/Application/chrome.exe",
+	"/mnt/c/Program Files (x86)/Microsoft/Edge/Application/msedge.exe",
+	"/mnt/c/Program Files/Microsoft/Edge/Application/msedge.exe",
+];
+
+/** WSL with Windows interop. Linux's own opener would reach a Windows tab, never an app window. */
+export function isWsl(
+	env: NodeJS.ProcessEnv = process.env,
+	platform: NodeJS.Platform = process.platform,
+	exists: (path: string) => boolean = existsSync,
+) {
+	return platform === "linux" && !!env.WSL_DISTRO_NAME && exists(WINDOWS_POWERSHELL);
+}
+
+/**
+ * From WSL the app opens as a standalone Chrome or Edge window on the Windows desktop, which is how an
+ * installed web app presents itself. The URL stays one literal argument; nothing is interpreted by a shell.
+ */
+export function windowsAppCommand(
+	url: string,
+	env: NodeJS.ProcessEnv = process.env,
+	exists: (path: string) => boolean = existsSync,
+) {
+	browserCommand(url, "linux", env);
+	if (!isWsl(env, "linux", exists)) return null;
+	const file = WINDOWS_APP_BROWSERS.find((candidate) => exists(candidate));
+	return file ? { file, argv: [`--app=${url}`] } : null;
+}
+
+/**
+ * Opens the installed app. Under WSL that is a standalone Chrome or Edge window; everywhere else, and when
+ * no such browser is installed, it is the ordinary opener. Only launcher entry points use it, so a foreground
+ * server or a test that asks for a browser still goes through the system opener it was given.
+ */
+export async function openApp(url: string, env: NodeJS.ProcessEnv = process.env) {
+	const app = windowsAppCommand(url, env);
+	if (!app) return openBrowser(url, env);
+	// A first launch keeps this process alive for the browser's whole life, so it is released, not awaited.
+	const child = spawn(app.file, app.argv, { cwd: "/mnt/c/Windows", env, shell: false, detached: true, stdio: "ignore" });
+	await new Promise<void>((resolve, reject) => {
+		child.once("error", reject);
+		child.once("spawn", resolve);
+	});
+	child.unref();
+}
+
 /** The OS opener owns the browser. Reap only our short-lived opener, never the user's browser. */
 export async function openBrowser(url: string, env: NodeJS.ProcessEnv = process.env) {
 	const command = browserCommand(url, process.platform, env);
@@ -251,6 +302,56 @@ export async function controlService(
 			if (code === 0 && !exceeded) resolve(Buffer.concat(output).toString("utf8"));
 			else
 				reject(new Error(`Background service ${action} failed. Check the user service manager and journal for ${unit}.`));
+		});
+	});
+}
+
+/**
+ * Runs one fixed PowerShell script on the Windows side. Values travel as environment variables forwarded
+ * through WSLENV, never inside the script text, so no path or argument is ever parsed as PowerShell.
+ */
+export async function runWindowsPowerShell(script: string, values: Record<string, string> = {}) {
+	for (const name of Object.keys(values))
+		if (!/^CLIO_WIN_[A-Z0-9_]+$/.test(name)) throw new Error("Invalid Windows script variable name.");
+	if (!isWsl()) throw new Error("Windows integration requires WSL with Windows interop.");
+	const env: NodeJS.ProcessEnv = {
+		...process.env,
+		...values,
+		WSLENV: [...(process.env.WSLENV ? [process.env.WSLENV] : []), ...Object.keys(values)].join(":"),
+	};
+	const child = spawn(
+		WINDOWS_POWERSHELL,
+		["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", script],
+		{ cwd: "/mnt/c/Windows", env, shell: false, stdio: ["ignore", "pipe", "pipe"] },
+	);
+	return new Promise<string>((resolve, reject) => {
+		const output: Buffer[] = [];
+		let bytes = 0,
+			stderr = "",
+			exceeded = false;
+		const timer = setTimeout(() => {
+			exceeded = true;
+			child.kill("SIGKILL");
+		}, 30_000);
+		child.stdout.on("data", (chunk: Buffer) => {
+			bytes += chunk.length;
+			if (bytes > 65_536) {
+				exceeded = true;
+				child.kill("SIGKILL");
+			} else output.push(chunk);
+		});
+		child.stderr.on("data", (chunk: Buffer) => {
+			if (stderr.length < 400) stderr += chunk.toString("utf8");
+		});
+		child.once("error", (error) => {
+			clearTimeout(timer);
+			reject(error);
+		});
+		child.once("close", (code) => {
+			clearTimeout(timer);
+			if (code === 0 && !exceeded) resolve(Buffer.concat(output).toString("utf8").replace(/\r/g, ""));
+			else
+				reject(new Error(`Windows PowerShell failed${stderr ? `: ${stderr.trim().split("\n")[0]?.slice(0, 200)}` : "."}`));
 		});
 	});
 }
