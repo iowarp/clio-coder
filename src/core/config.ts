@@ -1262,6 +1262,7 @@ function validateFleetNode(issues: Issues, path: string, value: unknown, seen: S
 		"port",
 		"identityFile",
 		"clioCoderEntry",
+		"clioCoderVersionCommand",
 		"clioEntry",
 		"labels",
 		"maxWorkers",
@@ -1282,13 +1283,13 @@ function validateFleetNode(issues: Issues, path: string, value: unknown, seen: S
 	}
 	seen.add(id);
 	const node: FleetNodeConfig = { id, host, maxWorkers: 2 };
-	for (const key of ["user", "identityFile", "clioCoderEntry"] as const) {
+	for (const key of ["user", "identityFile", "clioCoderEntry", "clioCoderVersionCommand"] as const) {
 		if (!(key in value)) continue;
 		const parsed = expectString(issues, `${path}.${key}`, value[key]);
 		if (parsed !== undefined) node[key] = parsed;
 	}
 	if ("port" in value) {
-		const parsed = expectInteger(issues, `${path}.port`, value.port, { min: 1 });
+		const parsed = expectInteger(issues, `${path}.port`, value.port, { min: 1, max: 65535 });
 		if (parsed !== undefined) node.port = parsed;
 	}
 	if ("labels" in value) {

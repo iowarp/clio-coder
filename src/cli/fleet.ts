@@ -97,6 +97,7 @@ const HELP = `clio-coder fleet <subcommand>
 Repo-owned fleet contracts and the dispatch status surface.
 
 Subcommands:
+  nodes add|list|remove|test     manage SSH worker nodes and project verification
   list                          list .clio-coder/fleets/*.md contracts with validation status
   new <name> --from <builtin>   copy build-review, build-test, or sdlc into this repository
   validate <name> [--json]      run the fleet execution preflight without side effects
@@ -835,6 +836,7 @@ function runAdmissionControl(command: "drain" | "resume", args: ReadonlyArray<st
 
 export async function runFleetCommand(args: ReadonlyArray<string>): Promise<number> {
 	const sub = args[0];
+	if (sub === "nodes") return (await import("./fleet-nodes.js")).runFleetNodes(args.slice(1));
 	if (sub === "view" && (args.includes("--help") || args.includes("-h"))) {
 		return (await import("./fleet-view.js")).runFleetView(args.slice(1));
 	}

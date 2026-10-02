@@ -22,6 +22,9 @@ export interface NodeTargetFact {
 	targetId: string;
 	/** The endpoint answered from this node. */
 	reachable: FactState;
+	/** Successful listing access is distinct from a server answering HTTP. */
+	authentication?: FactState;
+	httpStatus?: number | null;
 	/** The node's runtime can speak this target's API family. */
 	runtimeCompatible: FactState;
 	/** The requested wire model is servable by this endpoint. */

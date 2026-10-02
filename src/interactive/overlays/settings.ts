@@ -2115,16 +2115,27 @@ export function fleetNodeRows(nodes: ReadonlyArray<FleetNodeSnapshot>): Settings
 		const bound =
 			node.capacityBound === null ? null : describeLocalCapacity({ limit: node.maxWorkers, bound: node.capacityBound });
 		const busy = `${node.maxWorkers > 0 ? `${node.activeWorkers}/${node.maxWorkers} busy` : `${node.activeWorkers} busy`}${bound ? ` · ${bound}` : ""}`;
-		return settingItem(`fleet.nodes.${node.id}`, `${node.state} · ${busy}`, {
+		const readiness =
+			node.state === "offline"
+				? "offline"
+				: node.kind === "local"
+					? "ready"
+					: node.verification?.ok
+						? "ready for this project"
+						: node.verification?.reason?.includes("has not passed")
+							? "not checked"
+							: "needs attention";
+		return settingItem(`fleet.nodes.${node.id}`, `${readiness} · ${busy}`, {
 			label: `node ${node.id}`,
 			description: `${node.kind} · ${node.host}${node.stateReason ? ` · ${node.stateReason}` : ""}${node.lastSeenAt ? ` · seen ${clockLocal(node.lastSeenAt)}` : ""}`,
-			affordance: "Add remote machines in the settings file; Check setup tests their connection",
+			affordance:
+				node.verification?.reason ?? "Manage nodes with clio-coder fleet nodes; Check setup tests their connection",
 			readOnly: true,
 			presentationKind: "status",
 			valueSegments: [
 				{
-					text: `${node.state === "online" ? GLYPH.running : "○"} ${node.state}`,
-					tone: node.state === "online" ? "healthy" : "unhealthy",
+					text: `${node.state === "online" && (node.kind === "local" || node.verification?.ok) ? GLYPH.running : "○"} ${readiness}`,
+					tone: node.state === "online" && (node.kind === "local" || node.verification?.ok) ? "healthy" : "unhealthy",
 				},
 				{ text: ` · ${busy}`, tone: "neutral" },
 			],

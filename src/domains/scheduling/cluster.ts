@@ -19,6 +19,7 @@
  */
 
 import type { FleetNodeSettings } from "../../core/defaults.js";
+import { fleetPreflightVerdict } from "../dispatch/fleet-preflight.js";
 import type { LocalCapacity, LocalCapacityBound } from "./local-capacity.js";
 
 export type FleetNodeState = "online" | "offline";
@@ -35,6 +36,7 @@ export interface FleetNodeSnapshot {
 	capacityBound: LocalCapacityBound | null;
 	labels: ReadonlyArray<string>;
 	lastSeenAt: string | null;
+	verification?: { ok: boolean; reason: string | null };
 }
 
 export interface FleetRegistry {
@@ -131,6 +133,7 @@ export function createFleetRegistry(
 			maxWorkers: config.maxWorkers,
 			capacityBound: null,
 			labels: [...(config.labels ?? [])],
+			verification: fleetPreflightVerdict(config, process.cwd()),
 			lastSeenAt: state.lastSeenMs !== null ? new Date(state.lastSeenMs).toISOString() : null,
 		};
 	}

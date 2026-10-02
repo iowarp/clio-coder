@@ -106,6 +106,8 @@ export const SAFE_EXEC_PIPE_DRAIN_BOUND_MS = 1000;
 const GROUP_POLL_INTERVAL_MS = 25;
 
 export interface RunCommandVectorOptions {
+	/** Input travels through a pipe, keeping credentials and payloads out of argv. */
+	input?: string | Uint8Array;
 	cwd?: string;
 	workspaceRoot?: string;
 	timeoutMs?: number;
@@ -512,7 +514,7 @@ export function runCommandVector(
 				cwd,
 				env: attribution.env,
 				detached: process.platform !== "win32",
-				stdio: ["ignore", "pipe", "pipe"],
+				stdio: [options.input === undefined ? "ignore" : "pipe", "pipe", "pipe"],
 			},
 		);
 
@@ -692,6 +694,12 @@ export function runCommandVector(
 			closed = true;
 			tryFinish();
 		});
+		if (options.input !== undefined && child.stdin) {
+			child.stdin.on("error", () => {
+				// Early remote exit closes stdin; the command outcome reports that failure.
+			});
+			child.stdin.end(options.input);
+		}
 	});
 }
 

@@ -461,6 +461,8 @@ export interface FleetNodeSettings {
 	identityFile?: string;
 	/** Remote worker-entry invocation; defaults to `clio-coder worker` on the remote PATH. */
 	clioCoderEntry?: string;
+	/** Explicit version invocation for a custom worker entry; must print the exact Clio version. */
+	clioCoderVersionCommand?: string;
 	/** Advisory routing labels (e.g. gpu, high-memory). */
 	labels?: string[];
 	/** Per-node concurrent worker cap. */
