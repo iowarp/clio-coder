@@ -1,6 +1,6 @@
 import { isTestFilePath } from "../../core/test-paths.js";
 import type { ResultContract } from "../agents/result-contract.js";
-import { mutationReportChecks } from "../agents/result-contract.js";
+import { mutationReportChecks, mutationReportFailures } from "../agents/result-contract.js";
 
 const DECLARED_CHECK_DETAIL_MAX_CHARS = 120;
 
@@ -173,8 +173,11 @@ export function mergeGateVerdict(input: MergeGateInput): MergeGateVerdict | null
 	}
 	if (input.hostStatus === "verified") return null;
 	if (input.quality === "fail") {
+		const failed = mutationReportFailures(input.contract, input.output);
+		const named = failed.slice(0, 3).map(boundedCheck).join("; ");
+		const more = failed.length > 3 ? `; and ${failed.length - 3} more` : "";
 		return {
-			reason: "the worker's own report lists a failing validation",
+			reason: `the worker's own report lists a failing validation${named ? ` (${named}${more})` : ""}`,
 			appliesWhen: "if that failure was already there",
 		};
 	}

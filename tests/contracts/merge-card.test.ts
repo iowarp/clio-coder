@@ -73,6 +73,7 @@ test("the merge card distinguishes a host failure also observed on the base", as
 		{ ask },
 		{
 			...INPUT,
+			workerFailedChecks: ["test"],
 			hostVerification: {
 				status: "rejected",
 				checks: [
@@ -90,7 +91,7 @@ test("the merge card distinguishes a host failure also observed on the base", as
 			},
 		},
 	);
-	match(asked[0]?.question ?? "", /also fails on base base-sha/);
+	match(asked[0]?.question ?? "", /Worker-reported check 'test': the check also fails on base base-sha/);
 	match(asked[0]?.question ?? "", /does not establish that the worker caused/);
 });
 

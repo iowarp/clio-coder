@@ -39,6 +39,7 @@ export function mergeCardCauseNote(cause: MergeCardCause): string {
 
 export interface MergeCardInput {
 	hostVerification?: RunHostVerification;
+	workerFailedChecks?: ReadonlyArray<string>;
 	branch: string;
 	/** The branch Merge would land on, as the source checkout has it checked out now. */
 	destination?: string;
@@ -134,6 +135,12 @@ function mergeCardQuestion(input: MergeCardInput): AskUserQuestion {
 			...(omitted > 0 ? [`- … and ${omitted} more`] : []),
 			"",
 			`The merge was held because ${input.reason}.`,
+			...(input.workerFailedChecks ?? []).slice(0, 3).map((name) => {
+				const compared = input.hostVerification?.checks.find(
+					(check) => check.check === name || check.argv.join(" ") === name,
+				);
+				return `Worker-reported check '${boundedCheck(name)}': ${compared && compared.exitCode !== 0 ? hostCheckBaseNote(compared) : "no matching host failure was compared on the task base; whether the failure predates the worker is unknown"}.`;
+			}),
 			...(input.hostVerification?.checks
 				.filter((check) => check.exitCode !== 0)
 				.map((check) => `Host check '${check.check}': ${hostCheckBaseNote(check)}.`) ?? []),

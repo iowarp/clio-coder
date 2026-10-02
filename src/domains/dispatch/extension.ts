@@ -97,6 +97,7 @@ import type { AgentsContract } from "../agents/contract.js";
 import type { AgentRecipe } from "../agents/recipe.js";
 import {
 	INTERNAL_HELPER_RESULT_KINDS,
+	mutationReportFailures,
 	resultContractAuthorship,
 	validateRecipeResult,
 	validateStructuredHelperResult,
@@ -7626,6 +7627,7 @@ export function createDispatchBundle(
 										destination: mergeDestination(req.taskWorktree.root),
 										changedPaths: worktreeReceipt.changedPaths ?? [],
 										reason: withheldVerdict.reason,
+										workerFailedChecks: mutationReportFailures(mergeGateInput?.contract ?? null, mergeGateInput?.output ?? null),
 										...(hostVerification !== undefined ? { hostVerification } : {}),
 										protectedPaths: previewedProtected,
 									})

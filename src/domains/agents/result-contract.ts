@@ -1447,6 +1447,18 @@ export function mutationReportChecks(contract: ResultContract, output: string | 
 	};
 }
 
+/** Named failures in the worker's mutation report, without inferring unreported checks. */
+export function mutationReportFailures(contract: ResultContract | null, output: string | null): string[] {
+	if (contract?.kind !== "mutation-report") return [];
+	const parsed = parseJson(output);
+	if (!parsed.ok || !Array.isArray(parsed.value.validations)) return [];
+	return parsed.value.validations.flatMap((entry: unknown) => {
+		if (entry === null || typeof entry !== "object") return [];
+		const check = entry as Record<string, unknown>;
+		return check.passed === false && string(check.name) ? [check.name as string] : [];
+	});
+}
+
 function validateDebugger(contract: ResultContract, output: string | null): ResultContractValidation {
 	const parsed = parseJson(output);
 	if (!parsed.ok) return failure(contract, "unmeasured", `Debugger result payload failed: ${parsed.reason}`);
