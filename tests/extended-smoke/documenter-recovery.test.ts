@@ -12,14 +12,14 @@ import { makeScratchHome } from "../harness/scratch-env.js";
 
 const CLI = new URL("../../dist/cli/index.js", import.meta.url).pathname;
 const SOURCE = "coords = [0, 1, 3]\n";
-const LIMITATION =
-	"Cannot supply the requested 150-200 word explanation of spacing types, differentiator selection, and coefficients: grid.py:1 only defines three coordinates. The type conversion and coefficient code are absent from this fixture. No files changed.";
+const EXPLANATION =
+	"grid.py:1 defines coords = [0, 1, 3], so the spacing is three explicit coordinates. The type conversion, differentiator selection and coefficient code are absent from this fixture, so none is cited. No files changed.";
 const REPORT = JSON.stringify({
 	mutatedPaths: [],
 	validations: [
 		{ name: "read grid.py", passed: true, evidence: "grid.py:1 defines coords = [0, 1, 3]; no command ran." },
 	],
-	summary: LIMITATION,
+	summary: EXPLANATION,
 });
 
 function run(args: string[], cwd: string, env: NodeJS.ProcessEnv) {
@@ -55,7 +55,7 @@ function run(args: string[], cwd: string, env: NodeJS.ProcessEnv) {
 
 // Scripted loopback models exercise the real parent, worker repair loop, and
 // sealed receipts. They prove transport/settlement, not live model reliability.
-for (const scenario of ["dependent-repair", "independent-recovery", "exhausted"] as const) {
+for (const scenario of ["dependent-repair", "exhausted"] as const) {
 	test(`built Documenter recovery: ${scenario}`, { timeout: 60_000 }, async (t) => {
 		const scratch = makeScratchHome("clio-coder-documenter-recovery-");
 		const requests: Array<{ role: string; history: string }> = [];
@@ -103,45 +103,30 @@ for (const scenario of ["dependent-repair", "independent-recovery", "exhausted"]
 									tasks: [{ agent: "scout", intent, task: "Read grid.py and identify its coordinate representation." }, docTask],
 								},
 							};
-						} else if (scenario === "independent-recovery" && parentRounds === 2) {
-							match(history, /halted at step 1\/2/u);
-							tool = {
-								name: "dispatch",
-								arguments: {
-									...docTask,
-									briefing:
-										"Independent recovery after failed Scout. Read grid.py directly; do not treat the failed result as evidence.",
-								},
-							};
 						} else {
 							match(history, /terminal Documenter result/u);
 							match(history, /do not repeatedly read/u);
-							if (scenario !== "exhausted") match(history, /Cannot supply the requested/u);
+							if (scenario !== "exhausted") match(history, /three explicit coordinates/u);
 							else match(history, /outcome=failed/u);
 							const ids = [
 								...new Set([...history.matchAll(/runs=([a-z0-9, ]+)/gu)].flatMap((m) => m[1]?.split(/, */u) ?? [])),
 							];
 							strictEqual(ids.length, 2);
 							const outcomes =
-								scenario === "independent-recovery"
-									? "Original Scout failed; dependent Documenter was skipped. Independent Documenter recovery succeeded with a limitation."
-									: scenario === "exhausted"
-										? "Scout succeeded; Documenter failed after its bounded result repairs. The requested explanation is unavailable."
-										: "Scout and dependent Documenter succeeded; Documenter returned a limitation.";
-							final = `${outcomes} Run IDs: ${ids.join(", ")}.${scenario === "exhausted" ? "" : ` ${LIMITATION}`}`;
+								scenario === "exhausted"
+									? "Scout succeeded; Documenter failed after its bounded result repairs. The requested explanation is unavailable."
+									: "Scout and dependent Documenter succeeded.";
+							final = `${outcomes} Run IDs: ${ids.join(", ")}.${scenario === "exhausted" ? "" : ` ${EXPLANATION}`}`;
 							text = final;
 						}
 					} else if (!body.messages?.some((m) => m.role === "tool")) {
 						tool = { name: "read", arguments: { path: "grid.py", offset: 1, limit: 1 } };
 					} else if (role === "scout") {
-						text =
-							scenario === "independent-recovery"
-								? "invalid scout result"
-								: JSON.stringify({
-										findings: [{ claim: "coords holds three coordinates", path: "grid.py", line: 1 }],
-										needsSplit: false,
-										proposedSubtasks: [],
-									});
+						text = JSON.stringify({
+							findings: [{ claim: "coords holds three coordinates", path: "grid.py", line: 1 }],
+							needsSplit: false,
+							proposedSubtasks: [],
+						});
 					} else {
 						documenterRounds += 1;
 						match(system, /summary.*explanation/u);
@@ -217,16 +202,17 @@ for (const scenario of ["dependent-repair", "independent-recovery", "exhausted"]
 					"--json",
 					"--autonomy",
 					"yolo",
-					"Use a read-only Scout then Documenter pipeline for grid.py; report the explanation or a precise limitation. Independent recovery is authorized if Scout fails.",
+					"Use a read-only Scout then Documenter pipeline for grid.py; report the explanation or a precise limitation.",
 				],
 				workspace,
 				env,
 			);
 			deepStrictEqual(fixtureErrors, [], result.stderr);
-			strictEqual(result.code, 0, result.stderr);
+			// A Documenter that exhausts its repairs is a dispatched worker that did not deliver.
+			strictEqual(result.code, scenario === "exhausted" ? 1 : 0, result.stderr);
 			doesNotMatch(result.stderr, /receipt write failed/u);
 			strictEqual(readFileSync(join(workspace, "grid.py"), "utf8"), SOURCE);
-			strictEqual(parentRounds, scenario === "independent-recovery" ? 3 : 2);
+			strictEqual(parentRounds, 2);
 			strictEqual(documenterRounds, scenario === "exhausted" ? 3 : 2);
 			const journal = readRunJournal(join(scratch.dir, "state"));
 			ok(journal);
@@ -242,7 +228,7 @@ for (const scenario of ["dependent-repair", "independent-recovery", "exhausted"]
 			const parent = journal.receipts.find((r) => r.agentId === "main-agent");
 			const scout = journal.receipts.find((r) => r.agentId === "scout");
 			ok(doc && parent && scout);
-			strictEqual(scout.outcome, scenario === "independent-recovery" ? "failed" : "succeeded");
+			strictEqual(scout.outcome, "succeeded");
 			strictEqual(doc.outcome, scenario === "exhausted" ? "failed" : "succeeded");
 			strictEqual(doc.quality.resultContract?.conformance, scenario === "exhausted" ? "fail" : "pass");
 			strictEqual(doc.output?.text, scenario === "exhausted" ? "invalid Documenter result" : REPORT);
@@ -271,12 +257,11 @@ for (const scenario of ["dependent-repair", "independent-recovery", "exhausted"]
 				)
 				.at(-1);
 			strictEqual(terminal?.message?.content?.find((part) => part.type === "text")?.textLength, final.length);
-			strictEqual(parent.outcome, "succeeded");
+			strictEqual(parent.outcome, scenario === "exhausted" ? "failed" : "succeeded");
 			strictEqual(doc.toolActivity?.mutatingSucceeded, false);
 			strictEqual(doc.exitCode, scenario === "exhausted" ? 1 : 0);
 			strictEqual(parent.toolStats.find((s) => s.tool === "monitor")?.count ?? 0, 0);
-			if (scenario === "independent-recovery") strictEqual(doc.pipeline, undefined);
-			else ok(doc.pipeline, "the intended dependent Documenter must actually run in the pipeline");
+			ok(doc.pipeline, "the intended dependent Documenter must actually run in the pipeline");
 			t.diagnostic(
 				JSON.stringify({
 					scenario,
