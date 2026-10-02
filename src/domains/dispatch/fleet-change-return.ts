@@ -72,7 +72,7 @@ export async function prepareFleetChangeReturn(
 }
 
 async function git(root: string, args: string[], env?: Record<string, string>): Promise<string> {
-	const result = await runCommandVector("git", ["-C", root, ...args], {
+	const result = await runCommandVector("git", ["-C", root, "-c", "core.hooksPath=/dev/null", ...args], {
 		timeoutMs: 60_000,
 		maxOutputBytes: 1024 * 1024,
 		...(env ? { env } : {}),

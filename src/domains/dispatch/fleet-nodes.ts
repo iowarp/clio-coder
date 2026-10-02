@@ -84,7 +84,7 @@ export function removeFleetNode(id: string): void {
 }
 
 /** Read stored API keys without refreshing OAuth or writing credential state during diagnostics. */
-export function fleetPreflightTargets(): FleetPreflightTarget[] {
+function fleetPreflightTargets(): FleetPreflightTarget[] {
 	const registry = getRuntimeRegistry();
 	registerBuiltinRuntimes(registry);
 	const auth = openAuthStorage();
