@@ -6,6 +6,7 @@ const HELP = `clio-coder fleet nodes <command>
   add <id> --host <SSH alias or address> [--user <name>] [--port <number>]
       [--identity-file <path>] [--entry <worker command>] [--version-command <command>]
       [--labels <comma-separated labels>] [--max-workers <number>] [--test] [--record]
+  install <id> [--yes]            preview a user-level install of this exact client; --yes executes
   list [--json]                  show recorded readiness for this project and check age
   remove <id>                    remove a node without deleting remote files
   test <id> [--record] [--json]   probe without remote writes; --record updates local eligibility
@@ -110,6 +111,28 @@ export async function runFleetNodes(args: ReadonlyArray<string>): Promise<number
 				return runFleetNodes(["test", node.id, ...(parsed.flags.has("--record") ? ["--record"] : [])]);
 			process.stdout.write(`Next: clio-coder fleet nodes test ${node.id} --record\n`);
 			return 0;
+		}
+		if (sub === "install") {
+			const parsed = parse(args.slice(1), ["--yes"], []);
+			if (parsed.positional.length !== 1) throw new Error("install requires one node id");
+			const { prepareFleetNodeInstall, describeFleetNodeInstall, executeFleetNodeInstall } = await import(
+				"../domains/dispatch/fleet-node-install.js"
+			);
+			const plan = await prepareFleetNodeInstall(parsed.positional[0] as string);
+			try {
+				process.stdout.write(`${describeFleetNodeInstall(plan)}\n`);
+				if (!parsed.flags.has("--yes")) {
+					process.stdout.write(`Run 'clio-coder fleet nodes install ${plan.node.id} --yes' to execute.\n`);
+					return 0;
+				}
+				await executeFleetNodeInstall(plan);
+				process.stdout.write(
+					`Installed and version-verified. Next: clio-coder fleet nodes test ${plan.node.id} --record\n`,
+				);
+				return 0;
+			} finally {
+				plan.cleanup();
+			}
 		}
 		if (sub === "test") {
 			const parsed = parse(args.slice(1), ["--record", "--json"], []);
