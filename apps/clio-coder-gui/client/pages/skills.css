@@ -71,3 +71,9 @@
 	font-family: var(--font-mono);
 	font-size: var(--text-exact);
 }
+
+@media (max-width: 650px) {
+	.skills__inner {
+		padding: var(--space-5) var(--space-4) var(--space-8);
+	}
+}

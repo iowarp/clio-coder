@@ -399,7 +399,9 @@ export function ApprovalBanner({ client, session }: { client: Client; session: S
 						!
 					</span>
 					<span className="approval-strip__eyebrow">{escalated ? "Approval waiting" : "Approval needed"}</span>
-					<strong className="approval-strip__title">{permission.title}</strong>
+					<strong className="approval-strip__title" title={permission.title}>
+						{permission.title}
+					</strong>
 					{timings?.budgetKnown ? (
 						<span className="approval-strip__left">stops in {formatDuration(timings.remainingMs)}</span>
 					) : null}
@@ -416,7 +418,6 @@ export function ApprovalBanner({ client, session }: { client: Client; session: S
 					>
 						Review
 					</button>
-					<ApprovalButtons sessionId={session.id} permission={permission} answer={answer} />
 				</div>
 			</section>
 		);

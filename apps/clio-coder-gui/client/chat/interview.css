@@ -1,5 +1,5 @@
 .interview-dialog {
-	width: min(1040px, calc(100vw - 48px));
+	width: min(880px, calc(100vw - 48px));
 	max-width: calc(100vw - 24px);
 	max-height: calc(100dvh - 48px);
 	padding: 0;
@@ -21,27 +21,27 @@
 	display: flex;
 	align-items: center;
 	justify-content: space-between;
-	gap: 20px;
-	padding: 28px 32px 24px;
+	gap: var(--space-4);
+	padding: var(--space-4) var(--space-5);
 	border-bottom: 1px solid var(--line);
 }
 .interview-dialog__header .eyebrow {
 	color: var(--accent);
-	margin: 0 0 10px;
+	margin: 0 0 var(--space-1);
 	font-size: var(--text-instrument);
 }
 .interview-dialog__header h2 {
 	margin: 0;
-	font: 500 clamp(28px, 3vw, 40px) / 1.1 var(--font-editorial);
+	font: 600 18px / 1.3 var(--font-ui);
 }
 .interview-dialog__header > button {
 	background: transparent;
 	color: var(--ink-muted);
 	border: 0;
 	flex: none;
-	width: 44px;
-	height: 44px;
-	padding: 10px;
+	width: 34px;
+	height: 34px;
+	padding: 8px;
 }
 .interview-dialog__header > button:hover {
 	color: var(--ink);
@@ -49,13 +49,13 @@
 }
 .interview-dialog__layout {
 	display: grid;
-	grid-template-columns: 230px minmax(0, 1fr);
+	grid-template-columns: 190px minmax(0, 1fr);
 	min-height: 0;
 	flex: 1;
 }
 .interview-dialog__steps {
 	display: block;
-	padding: 24px 18px;
+	padding: var(--space-4) var(--space-3);
 	border-right: 1px solid var(--line);
 	background: var(--paper);
 	overflow: auto;
@@ -124,7 +124,7 @@
 	min-height: 0;
 	overflow: auto;
 	overscroll-behavior: contain;
-	padding: 28px 32px 32px;
+	padding: var(--space-5);
 	scrollbar-gutter: stable;
 }
 .interview-dialog__question > .eyebrow,
@@ -134,7 +134,7 @@
 	font-size: var(--text-instrument);
 }
 .interview-dialog__body h3 {
-	font: 500 30px / 1.2 var(--font-editorial);
+	font: 500 20px / 1.35 var(--font-ui);
 	margin: 0 0 20px;
 	color: var(--ink-strong);
 }
@@ -158,9 +158,9 @@
 	gap: 14px;
 	align-items: flex-start;
 	padding: 16px;
-	border: 1px solid var(--line-strong);
-	border-radius: var(--radius-md);
-	background: var(--paper);
+	border: 1px solid var(--line);
+	border-radius: 10px;
+	background: var(--wb-faint);
 	cursor: pointer;
 }
 .interview-dialog__choices label:hover {
@@ -168,7 +168,7 @@
 }
 .interview-dialog__choices label[data-selected="true"] {
 	border-color: var(--accent);
-	background: color-mix(in srgb, var(--accent) 5%, var(--paper));
+	background: var(--accent-soft);
 }
 .interview-dialog__choices input {
 	margin: 4px 0 0;
@@ -281,7 +281,7 @@
 	justify-content: space-between;
 	gap: 16px;
 	flex-wrap: wrap;
-	padding: 20px 32px;
+	padding: var(--space-4) var(--space-5);
 	border-top: 1px solid var(--line);
 	background: var(--paper);
 }
@@ -298,7 +298,7 @@
 	gap: 10px;
 }
 .interview-dialog__footer button {
-	min-height: 44px;
+	min-height: 36px;
 	display: inline-flex;
 	align-items: center;
 	gap: 10px;
@@ -317,7 +317,7 @@
 		padding: 20px;
 	}
 	.interview-dialog__header h2 {
-		font-size: 28px;
+		font-size: 18px;
 	}
 	.interview-dialog__layout {
 		display: flex;
@@ -351,7 +351,7 @@
 		padding: 20px;
 	}
 	.interview-dialog__body h3 {
-		font-size: 26px;
+		font-size: 20px;
 	}
 	.interview-dialog__footer {
 		padding: 16px 20px;
