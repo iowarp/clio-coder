@@ -1,4 +1,4 @@
-import { readSettings } from "../core/config.js";
+import { type ClioSettings, readSettings } from "../core/config.js";
 import {
 	type DoctorFinding,
 	formatDoctorReport,
@@ -16,6 +16,7 @@ import {
 	observeHostCapacityFacts,
 	resolveLocalConcurrency,
 } from "../domains/scheduling/local-capacity.js";
+import { classifyDefaultTarget, describeVerdict } from "./default-target.js";
 import { hpcToolchainFindings } from "./doctor-hpc.js";
 import { namingHistoryFindings } from "./doctor-naming.js";
 import { panesFindings } from "./doctor-panes.js";
@@ -26,9 +27,10 @@ import { toolchainFindings } from "./doctor-toolchain.js";
 import { validationContractFinding } from "./doctor-validation-contract.js";
 import { printError } from "./shared.js";
 
-const HELP = `clio-coder doctor [--fix] [--json] [--deep [--tools-timeout <seconds>]]
+const HELP = `clio-coder doctor [--fix] [--json] [--verbose] [--deep [--tools-timeout <seconds>]]
 
-Diagnose Clio Coder state without creating files. On a home Clio has never
+Diagnose Clio Coder state without creating files. The first row says whether
+chat can run and what to run when it cannot. On a home Clio has never
 written to, doctor says so in one row and exits 0. Use --fix to repair structure:
 missing directories, missing template files, and credential permissions.
 --fix also repairs retired enum values and YAML 1.1 on/off booleans in settings,
@@ -37,6 +39,8 @@ preserving comments and formatting. Plain doctor reports the proposed repairs.
 dispatch for the current project root; plain doctor only reports it.
 Settings are validated directly against the current schema.
 Pass --json to emit a machine-readable report on stdout.
+The text report folds the toolchain, interop, slurm, and naming rows into one
+row per family while none of them needs attention; --verbose prints every row.
 --deep adds a live tool-call probe on every configured target, which can load
 a cold local model and releases it afterwards, and a dry run of the workspace
 validation contract that resolves each validator command and reports whether
@@ -109,6 +113,147 @@ async function deepFindings(
 	return [...toolRows, ...contractRows];
 }
 
+const SETUP_COMMAND = "run `clio-coder configure` to choose one";
+
+/**
+ * Whether chat can run: a target, a model, and a credential where one is
+ * needed. It leads the report because a fresh home read healthy from top to
+ * bottom while `clio-coder run` could not answer; no row named the missing
+ * target. The verdict is the one the bare launch acts on (default-target.ts),
+ * so doctor and startup never disagree about what is missing. A WARN and not
+ * an error: an unconfigured home is not a broken one, and `doctor --fix` on a
+ * fresh home still exits 0.
+ */
+function chatReadinessFinding(untouched: boolean, connectionRows: ReadonlyArray<DoctorFinding>): DoctorFinding {
+	const warn = (detail: string): DoctorFinding => ({ ok: true, level: "warn", name: "chat", detail });
+	// No settings to read, and reading them through the ensuring accessors
+	// would create the home doctor promised to leave alone.
+	if (untouched) return warn(`cannot run yet: no model target is configured; ${SETUP_COMMAND}`);
+	let settings: ClioSettings;
+	try {
+		settings = readSettings();
+	} catch {
+		return warn("cannot run until settings.yaml loads; the settings.yaml row says why");
+	}
+	const verdict = classifyDefaultTarget(settings);
+	if (verdict.kind === "no-target") return warn(`cannot run yet: no model target is configured; ${SETUP_COMMAND}`);
+	if (verdict.kind === "ineligible-runtime") {
+		return warn(`cannot run: ${describeVerdict(verdict)} Run \`clio-coder configure\` to choose a chat target.`);
+	}
+	const targetId = settings.chat.target ?? "";
+	const model = settings.chat.model?.trim();
+	if (!model) {
+		return warn(
+			`cannot run yet: target '${targetId}' has no chat model; run \`clio-coder targets use ${targetId} --model <model>\``,
+		);
+	}
+	const route = `target '${targetId}', model '${model}'`;
+	if (verdict.kind === "missing-credential") {
+		return warn(
+			`${route}; no stored credential under '${verdict.store}'; run \`clio-coder auth login ${verdict.store}\` if the endpoint requires one`,
+		);
+	}
+	const failing = connectionRows.filter(
+		(row) =>
+			(row.name === `connection ${targetId}` || row.name === `model ${targetId}`) && (!row.ok || row.level === "warn"),
+	);
+	if (failing.length > 0) {
+		const checks = failing.map((row) => `\`${row.name}\``).join(" and ");
+		return warn(`${route}; configured, but ${checks} below did not pass`);
+	}
+	const connection = connectionRows.find((row) => row.name === `connection ${targetId}`);
+	const reachable = connection !== undefined && (connection.level === undefined || connection.level === "ok");
+	return {
+		ok: true,
+		name: "chat",
+		detail: reachable ? `${route}; endpoint reachable` : `${route}; reachability is checked on the first request`,
+	};
+}
+
+/**
+ * Row families the text report folds into one row each. A first run printed
+ * 50 rows, most of them compilers, peer agents, and history scans a new user
+ * has no reason to read. A member that needs attention (WARN or error) always
+ * keeps its own row; `--verbose` and `--json` keep every row.
+ */
+interface FoldedFamily {
+	name: string;
+	/** The member's short name, or null when the row is not in this family. */
+	member: (row: DoctorFinding) => string | null;
+	/** How the summary labels OK members and INFO members. */
+	ok: string;
+	info: string;
+	hint?: string;
+}
+
+const prefixed =
+	(prefix: string, except: ReadonlyArray<string> = []) =>
+	(row: DoctorFinding): string | null =>
+		row.name.startsWith(prefix) && !except.includes(row.name) ? row.name.slice(prefix.length) : null;
+
+const FOLDED_FAMILIES: ReadonlyArray<FoldedFamily> = [
+	{
+		name: "interop",
+		member: prefixed("interop ", ["interop skills"]),
+		ok: "on PATH",
+		info: "noted",
+		hint: "`clio-coder configure --interop` reviews them",
+	},
+	{ name: "toolchain", member: prefixed("toolchain "), ok: "found", info: "not on PATH" },
+	{ name: "slurm", member: prefixed("slurm "), ok: "ready", info: "not set up" },
+	{ name: "naming", member: prefixed("naming "), ok: "clean", info: "noted" },
+];
+
+/** The report's rows with each quiet family folded, and how many rows the folds absorbed. */
+function foldDoctorFindings(findings: ReadonlyArray<DoctorFinding>): {
+	findings: DoctorFinding[];
+	folded: number;
+} {
+	const quiet = (row: DoctorFinding) =>
+		row.ok && (row.level === undefined || row.level === "ok" || row.level === "info");
+	const familyOf = new Map<DoctorFinding, FoldedFamily>();
+	const members = new Map<FoldedFamily, Array<{ member: string; info: boolean }>>();
+	for (const row of findings) {
+		if (!quiet(row)) continue;
+		for (const family of FOLDED_FAMILIES) {
+			const member = family.member(row);
+			if (member === null) continue;
+			familyOf.set(row, family);
+			members.set(family, [...(members.get(family) ?? []), { member, info: row.level === "info" }]);
+			break;
+		}
+	}
+	const out: DoctorFinding[] = [];
+	let folded = 0;
+	const placed = new Set<FoldedFamily>();
+	for (const row of findings) {
+		const family = familyOf.get(row);
+		const rows = family === undefined ? [] : (members.get(family) ?? []);
+		// A lone member folds into nothing shorter than itself.
+		if (family === undefined || rows.length < 2) {
+			out.push(row);
+			continue;
+		}
+		if (placed.has(family)) continue;
+		placed.add(family);
+		folded += rows.length;
+		const okNames = rows.filter((entry) => !entry.info).map((entry) => entry.member);
+		const infoNames = rows.filter((entry) => entry.info).map((entry) => entry.member);
+		const parts = [
+			okNames.length > 0 ? `${family.ok}: ${okNames.join(", ")}` : null,
+			infoNames.length > 0 ? `${family.info}: ${infoNames.join(", ")}` : null,
+			family.hint ?? null,
+		].filter((part): part is string => part !== null);
+		out.push({
+			ok: true,
+			...(okNames.length === 0 ? { level: "info" as const } : {}),
+			name: family.name,
+			detail: parts.join("; "),
+		});
+	}
+	return { findings: out, folded };
+}
+
 /**
  * Every doctor check in report order. The CLI prints these; the TUI's
  * `/doctor` renders the same list in-session and passes its own providers
@@ -175,6 +320,7 @@ export async function collectDoctorFindings(options: DoctorCollectOptions = {}):
 	const worktreeChecks = taskWorktreeFindings(workspaceRoot);
 	const deepChecks = options.deep ? await deepFindings(untouched, workspaceRoot, options.deep) : [];
 	return [
+		chatReadinessFinding(untouched, modelChecks),
 		...findings,
 		localCapacity,
 		...storageChecks,
@@ -212,16 +358,18 @@ export function doctorNotice(findings: ReadonlyArray<DoctorFinding>): {
 interface DoctorArgs {
 	fix: boolean;
 	json: boolean;
+	verbose: boolean;
 	deep: boolean;
 	toolsTimeoutMs?: number;
 }
 
 function parseDoctorArgs(args: ReadonlyArray<string>): DoctorArgs {
-	const parsed: DoctorArgs = { fix: false, json: false, deep: false };
+	const parsed: DoctorArgs = { fix: false, json: false, verbose: false, deep: false };
 	for (let i = 0; i < args.length; i += 1) {
 		const arg = args[i];
 		if (arg === "--fix") parsed.fix = true;
 		else if (arg === "--json") parsed.json = true;
+		else if (arg === "--verbose") parsed.verbose = true;
 		else if (arg === "--deep") parsed.deep = true;
 		else if (arg === "--tools-timeout") {
 			const value = args[i + 1];
@@ -257,8 +405,15 @@ export async function runDoctorCommand(args: ReadonlyArray<string> = []): Promis
 	const ok = all.every((f) => f.ok);
 	if (json) {
 		process.stdout.write(`${JSON.stringify({ ok, fix, deep: parsed.deep, findings: all }, null, 2)}\n`);
-	} else {
+	} else if (parsed.verbose) {
 		process.stdout.write(`${formatDoctorReport(all)}\n`);
+	} else {
+		const report = foldDoctorFindings(all);
+		// One write: a reader such as `| head` that closes the pipe after the
+		// first rows would turn a second write into an EPIPE crash.
+		const trailer =
+			report.folded > 0 ? `${report.folded} rows folded; \`clio-coder doctor --verbose\` prints each one\n` : "";
+		process.stdout.write(`${formatDoctorReport(report.findings)}\n${trailer}`);
 	}
 	return ok ? 0 : 1;
 }

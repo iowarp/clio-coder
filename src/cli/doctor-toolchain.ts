@@ -60,9 +60,10 @@ function yaziProfileFinding(enabled: boolean, fix: boolean): DoctorFinding {
  * found compares to the pin.
  *
  * Every one of these tools is optional, so no row is ever an error. A missing
- * tool is a WARN with the command that installs it, because doctor's exit code
- * answers "is this Clio install healthy", and an operator who never wanted
- * panes has a healthy install without them.
+ * tool is a WARN with the command that installs it only while an enabled
+ * integration needs it; otherwise it is INFO. A fresh home used to show a
+ * missing croc, which nothing uses yet, as its one warning, above a missing
+ * chat target that doctor did not mention at all.
  *
  * A PATH copy Clio rejected for being below the registry floor is never
  * reported as an absent one. The row says which binary was found, what version
@@ -88,7 +89,9 @@ export function toolchainFindings(options: ToolchainFindingOptions = {}): Doctor
 			(status.id === "herdr" && !panesEnabled) || (status.id === "yazi" && !filesEnabled)
 				? ("ok" as const)
 				: status.resolution.source === "none"
-					? ("warn" as const)
+					? status.id === "herdr" || status.id === "yazi"
+						? ("warn" as const)
+						: ("info" as const)
 					: ("ok" as const),
 	}));
 	return [...tools, yaziProfileFinding(filesEnabled, options.fix === true)];
