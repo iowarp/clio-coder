@@ -467,7 +467,9 @@ export function createSystemOneHost(deps: SystemOneHostDeps): SystemOneHost {
 		},
 
 		clearVerdict() {
-			if (turn !== null) turn.verdict = null;
+			// A fresh record, so a reading still in flight lands in the one it was
+			// started for and never in what the next continuation reads.
+			if (turn !== null) turn = { id: turn.id, task: turn.task, verdict: null, groupRecipe: null };
 		},
 
 		task: () => turn?.task ?? "",
