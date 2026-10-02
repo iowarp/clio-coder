@@ -243,6 +243,7 @@ async function main(): Promise<number> {
 		...(spec.responseSchema !== undefined ? { responseSchema: spec.responseSchema } : {}),
 		// Preserve the host's stable context-generation policy across the worker process boundary.
 		...(spec.sampling !== undefined ? { sampling: spec.sampling } : {}),
+		...(spec.synthesisAt !== undefined ? { synthesisAt: spec.synthesisAt } : {}),
 		...(spec.resultContract !== undefined ? { resultContract: spec.resultContract } : {}),
 		...(spec.helperResult === true ? { helperResult: true } : {}),
 		...(spec.product !== undefined ? { product: spec.product } : {}),

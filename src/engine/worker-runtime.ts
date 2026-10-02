@@ -159,6 +159,8 @@ export interface WorkerRunInput {
 	responseSchema?: Record<string, unknown>;
 	/** Generated context should not vary with local server sampling defaults. */
 	sampling?: "deterministic";
+	/** Epoch ms when exploration ends; later rounds are the terminal handoff only. */
+	synthesisAt?: number;
 	/** Orchestrator-resolved runtime decision carried on the WorkerSpec. */
 	runtimeResolution?: RuntimeTargetSnapshot;
 	/**
@@ -1120,6 +1122,18 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 	agent.followUpMode = "all";
 	agent.steeringMode = "all";
 	abortWorkerForBound = () => agent.abort();
+	// Qwopus 3.8 explored context init's whole 240 s ceiling one read at a time and was
+	// aborted before submitting. A host deadline ends exploration while the terminal round fits.
+	const synthesisTimer =
+		input.synthesisAt === undefined
+			? undefined
+			: setTimeout(
+					() => {
+						synthesisToolLock = true;
+					},
+					Math.max(0, input.synthesisAt - Date.now()),
+				);
+	synthesisTimer?.unref();
 	const repairHelperResult = (reason: string): void => {
 		if (!input.resultContract || acceptedHelperResult !== null || workerBoundFailure !== null) return;
 		helperTerminalPhase = true;
@@ -1793,6 +1807,7 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 			process.stderr.write(`[worker] agent error: ${msg}\n`);
 			return { messages: agent.state.messages.slice(inheritedCount), exitCode: 1 };
 		} finally {
+			clearTimeout(synthesisTimer);
 			clearActiveEscalation();
 			unsubscribePermission();
 		}

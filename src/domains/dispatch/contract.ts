@@ -42,6 +42,8 @@ export interface ResolvedVerificationCheck {
 export interface DispatchRequest extends JobSpec {
 	/** Generated context needs stable local sampling across identical runs. */
 	sampling?: "deterministic";
+	/** Epoch ms when exploration ends and the worker must take its terminal round. */
+	synthesisAt?: number;
 	/** Inherited host policy, outside the model-authored JobSpec. */
 	turnConstraints?: TurnConstraints;
 	/** Host-captured conversation seed; never accepted from model arguments. */

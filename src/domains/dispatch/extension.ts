@@ -2675,6 +2675,7 @@ function buildDispatchWorkerSpec(input: DispatchWorkerSpecInput, config?: Config
 	if (input.req.responseSchema !== undefined) spec.responseSchema = input.req.responseSchema;
 	// Identical local context runs otherwise inherit changing server sampling defaults.
 	if (input.req.sampling !== undefined) spec.sampling = input.req.sampling;
+	if (input.req.synthesisAt !== undefined) spec.synthesisAt = input.req.synthesisAt;
 	// The worker repairs against exactly the contract the orchestrator will seal.
 	// A gate role that overrides the recipe contract gets no worker-side repair,
 	// for the same reason it gets no recipe validation.

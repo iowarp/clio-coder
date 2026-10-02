@@ -116,6 +116,9 @@ export function resolveBootstrapRoute(settings: Readonly<ClioSettings>): Bootstr
  * standard ceiling on 15 calls and fell back to the heuristic writer. Capping the
  * level instead stopped both models exploring at all, so the ceiling scales.
  */
+/** Share of the bootstrap ceiling reserved for the terminal handoff. */
+const BOOTSTRAP_SYNTHESIS_RESERVE = 0.25;
+
 function bootstrapTimeoutMs(baseMs: number, level: ThinkingLevel): number {
 	if (level === "medium" || level === "high") return baseMs * 2;
 	if (level === "xhigh" || level === "max") return baseMs * 3;
@@ -443,6 +446,9 @@ async function generateBootstrapWithModel(
 	const thinkingLevel = route?.thinkingLevel ?? "off";
 	const timeoutMs = bootstrapTimeoutMs(policy.timeoutMs, thinkingLevel);
 	const assignmentDeadlineAt = Date.now() + timeoutMs;
+	// The last quarter of the ceiling is held for the terminal round; Qwopus 3.8 needed
+	// about 35 s for a whole draft and was aborted mid-exploration without one.
+	const synthesisAt = assignmentDeadlineAt - Math.round(timeoutMs * BOOTSTRAP_SYNTHESIS_RESERVE);
 	const dispatchBootstrap = (nativeSchema: boolean) =>
 		dispatch.dispatch({
 			runIdHint,
@@ -455,6 +461,7 @@ async function generateBootstrapWithModel(
 			// Identical local bootstrap runs should not vary with the server's sampling defaults.
 			sampling: "deterministic",
 			assignmentDeadlineAt,
+			synthesisAt,
 			thinkingLevel,
 			budget: { toolCalls, readReserve: Math.min(3, toolCalls - 1) },
 			noSkills: true,

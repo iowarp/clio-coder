@@ -117,6 +117,8 @@ interface WorkerSpecFields {
 	responseSchema?: Record<string, unknown>;
 	/** Stable sampling for generated context, explicitly requested by the host. */
 	sampling?: "deterministic";
+	/** Epoch ms when the worker stops exploring and takes its terminal round. */
+	synthesisAt?: number;
 	/**
 	 * Terminal contract from the admitted agent recipe. The worker validates its
 	 * own final result against it and spends bounded repair rounds, so the
@@ -920,6 +922,7 @@ export function parseWorkerSpec(value: unknown): WorkerSpec {
 	readOptionalEnum(spec, "thinkingLevel", "WorkerSpec", THINKING_LEVELS);
 	// A misspelled sampling policy must not silently restore the server defaults that varied handbooks.
 	readOptionalEnum(spec, "sampling", "WorkerSpec", ["deterministic"] as const);
+	readOptionalNumber(spec, "synthesisAt", "WorkerSpec");
 	if (spec.modelCapabilities !== undefined)
 		validateCapabilityPatch(spec.modelCapabilities, "WorkerSpec.modelCapabilities");
 	if (spec.responseSchema !== undefined) {
