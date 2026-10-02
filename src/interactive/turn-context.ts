@@ -103,7 +103,7 @@ import {
 } from "../domains/session/prompt-manifest.js";
 import { filterEntriesToActivePath } from "../domains/session/tree/active-path.js";
 import type { AgentMessage, Usage } from "../engine/types.js";
-import { capabilityStarterArgs } from "../tools/gateway/guidance.js";
+import { capabilityArgumentShape, capabilityStarterArgs } from "../tools/gateway/guidance.js";
 import { TOOL_PLANES } from "../tools/policy.js";
 import type { ToolRegistry } from "../tools/registry.js";
 import {
@@ -1897,7 +1897,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			const builtinTools = deps.toolRegistry?.listAll().filter((spec) => isBuiltinToolName(spec.name)) ?? [];
 			const toolDiscoveryHints = builtinTools
 				.flatMap((spec) => {
-					const hint = spec.metadata?.discoveryHint;
+					const hint = [spec.metadata?.discoveryHint, capabilityArgumentShape(spec)].filter(Boolean).join(" ");
 					if (!hint) return [];
 					const starterArgs = capabilityStarterArgs(spec);
 					return [{ tool: spec.name, hint, ...(starterArgs ? { starterArgs } : {}) }];

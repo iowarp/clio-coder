@@ -4,7 +4,7 @@ import type { ToolSpec, ToolUsageExample } from "../registry.js";
 import { toolSpecPlacement } from "../surface.js";
 
 const EXAMPLE_MAX_BYTES = 768;
-const EXAMPLES_PER_TOOL = 3;
+const EXAMPLES_PER_TOOL = 8;
 const examplesBySpec = new WeakMap<ToolSpec, ReadonlyArray<ToolUsageExample>>();
 
 /** Stale examples must disappear rather than teach a call the live schema rejects. */
@@ -36,8 +36,23 @@ export function capabilityStarterArgs(spec: ToolSpec): Readonly<Record<string, u
 	return validatedExamples(spec).find((example) => example.startup)?.args;
 }
 
+/** Bounded schema cues and validated examples for calls made before describe. */
+export function capabilityArgumentShape(spec: ToolSpec): string {
+	const required = (spec.parameters as { required?: string[] }).required ?? [];
+	const requiredCue = required.length > 0 ? `Required args: ${required.join(", ")}.` : "";
+	const parts = [
+		Buffer.byteLength(requiredCue) > 512 ? `${requiredCue.slice(0, 120)}… Describe for all required args.` : requiredCue,
+	];
+	for (const { args } of validatedExamples(spec)) {
+		const part = `args=${JSON.stringify(args)}`;
+		if (Buffer.byteLength([...parts, part].join(" ")) > 2048) break;
+		parts.push(part);
+	}
+	return parts.filter(Boolean).join(" ");
+}
+
 /** Ready-to-adapt gateway arguments; sample paths and values are examples, not observations. */
-export function gatewayExamples(spec: ToolSpec, query = "", limit = EXAMPLES_PER_TOOL) {
+export function gatewayExamples(spec: ToolSpec, query = "", limit = 3) {
 	// Dispatch can be described here, but its attached tool must still be called directly.
 	if (toolSpecPlacement(spec) === "direct") return [];
 	const examples = validatedExamples(spec);

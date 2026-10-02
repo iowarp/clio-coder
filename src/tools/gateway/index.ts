@@ -26,7 +26,7 @@ import {
 import { type GatewayCapabilityKind, gatewayCapabilityKind, toolSpecPlacement } from "../surface.js";
 import { GATEWAY_FIND_SELF_CAP_BYTES } from "./caps.js";
 import { runGatewayChain } from "./chain.js";
-import { gatewayExamples } from "./guidance.js";
+import { capabilityArgumentShape, gatewayExamples } from "./guidance.js";
 import type { McpCapabilitySource, McpServerListing } from "./mcp-capabilities.js";
 
 export { GATEWAY_FIND_SELF_CAP_BYTES } from "./caps.js";
@@ -72,6 +72,7 @@ export interface GatewayCapabilityEntry {
 	actionClass: ActionClass;
 	/** Required field names are a compact cue, not a substitute for the full schema. */
 	requiredArgs?: ReadonlyArray<string>;
+	argumentShape?: string;
 }
 
 /** What each action class is for, as a capability category's stated purpose. */
@@ -411,6 +412,7 @@ export function createGatewayTool(deps: GatewayToolDeps): ToolSpec {
 						description: firstSentence(spec.description),
 						actionClass: spec.baseActionClass,
 						...(requiredArgs.length > 0 ? { requiredArgs } : {}),
+						...(capabilityArgumentShape(spec) ? { argumentShape: capabilityArgumentShape(spec) } : {}),
 					};
 				});
 			// A registered spec is the live one; a cached descriptor of the same

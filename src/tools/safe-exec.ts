@@ -107,6 +107,7 @@ const GIT_OPS = ["status", "diff", "log", "add", "commit"] as const;
 const GIT_FIELDS = [
 	"op",
 	"mode",
+	"action",
 	"path",
 	"paths",
 	"message",
@@ -120,7 +121,13 @@ const GIT_FIELDS = [
 ];
 
 function gitOp(args: Record<string, unknown>): string {
-	return typeof args.op === "string" ? args.op : typeof args.mode === "string" ? args.mode : "";
+	return typeof args.op === "string"
+		? args.op
+		: typeof args.mode === "string"
+			? args.mode
+			: typeof args.action === "string"
+				? args.action
+				: "";
 }
 
 /**
@@ -197,6 +204,7 @@ export const gitTool: ToolSpec = {
 			}),
 		),
 		mode: Type.Optional(StringEnum([...GIT_OPS], { description: "Same as op." })),
+		action: Type.Optional(StringEnum([...GIT_OPS], { description: "Same as op." })),
 		path: Type.Optional(Type.String({ description: "Limit diff/log to one path." })),
 		paths: Type.Optional(Type.Array(Type.String(), { description: "add: literal paths to stage." })),
 		message: Type.Optional(Type.String({ description: "commit: the commit message." })),

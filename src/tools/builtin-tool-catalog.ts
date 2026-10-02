@@ -252,7 +252,13 @@ const TOOL_METADATA: Readonly<Record<string, ToolMetadata>> = {
 		retrySafety: "idempotent",
 		resultSizePolicy: summaryPolicy("Limit the diff/log to one path or fewer commits."),
 		costLatency: "local_fast",
-		examples: [{ goal: "Inspect workspace changes without modifying them", args: { op: "diff" } }],
+		examples: [
+			{ goal: "Inspect workspace status", args: { op: "status" } },
+			{ goal: "Inspect workspace changes", args: { op: "diff" } },
+			{ goal: "Inspect recent commits", args: { op: "log", limit: 20 } },
+			{ goal: "Stage literal paths", args: { op: "add", paths: ["src/index.ts"] } },
+			{ goal: "Commit the staged index", args: { op: "commit", message: "fix: correct retry handling" } },
+		],
 	},
 	[ToolNames.Verify]: {
 		objective: "Run declared verification checks (scripts or frontend artifacts).",
@@ -427,6 +433,17 @@ const TOOL_METADATA: Readonly<Record<string, ToolMetadata>> = {
 		costLatency: "network",
 	},
 	[ToolNames.Decide]: {
+		examples: [
+			{
+				goal: "Record a design choice before implementation",
+				args: {
+					key: "cache-key-shape",
+					value: "Use the full path",
+					alternatives: ["Use the basename"],
+					rationale: "Avoid collisions between directories",
+				},
+			},
+		],
 		objective: "Record a design decision with its rejected alternatives and rationale on the session decision board.",
 		uiLabel: "Decide",
 		// A repeated call with the same key supersedes the earlier record, so
