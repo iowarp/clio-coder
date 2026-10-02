@@ -236,13 +236,15 @@ export const TEST_RUNNER_COMMANDS: ReadonlyArray<{ id: string; re: RegExp }> = [
 		id: "builtin:bun-test-script",
 		re: /^bun\s+run\s+test:[\w=./:-]+(?:\s+--\s+[\w=./:-]+(?:\s+[\w=./:-]+)*)?$/,
 	},
+	// uv can provision dependencies before pytest; --no-sync keeps #377's
+	// unattended allowance from authorizing environment synchronization.
 	{
 		id: "builtin:uv-pytest",
-		re: /^uv\s+run(?:\s+--(?:no-sync|frozen|locked))*\s+pytest(?:\s+[\w=./:-]+)*$/,
+		re: /^uv\s+run(?:\s+--(?:frozen|locked))*\s+--no-sync(?:\s+--(?:no-sync|frozen|locked))*\s+pytest(?:\s+[\w=./:-]+)*$/,
 	},
 	{
 		id: "builtin:uv-python-pytest",
-		re: /^uv\s+run(?:\s+--(?:no-sync|frozen|locked))*\s+python\s+-m\s+pytest(?:\s+[\w=./:-]+)*$/,
+		re: /^uv\s+run(?:\s+--(?:frozen|locked))*\s+--no-sync(?:\s+--(?:no-sync|frozen|locked))*\s+python\s+-m\s+pytest(?:\s+[\w=./:-]+)*$/,
 	},
 	{ id: "builtin:node-test", re: /^node\s+--test(?:\s+[\w=./:-]+)*$/ },
 	{ id: "builtin:pytest", re: /^pytest(?:\s+[\w=./:-]+)*$/ },

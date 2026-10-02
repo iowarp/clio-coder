@@ -29,7 +29,7 @@ const SPELLINGS: Record<ValidationCommandLabel, string> = {
 	"yarn run test:<name>": "yarn run test:unit",
 	"bun run test:<name>": "bun run test:unit",
 	"uv run pytest": "uv run --no-sync pytest -q tests/x.py",
-	"uv run python -m pytest": "uv run --frozen --locked python -m pytest -q tests/x.py",
+	"uv run python -m pytest": "uv run --frozen --no-sync --locked python -m pytest -q tests/x.py",
 	"node --test": "node --test sum.test.mjs",
 	pytest: "pytest -q tests",
 	"python -m pytest": "python3 -m pytest -q test_index_policy.py",
@@ -43,6 +43,13 @@ const SPELLINGS: Record<ValidationCommandLabel, string> = {
 	"meson test": "meson test -C build",
 	"mvn test": "mvn test -Dtest=SolverTest",
 	"gradle test": "./gradlew test",
+};
+
+const SCRIPT_IDENTITIES: Partial<Record<ValidationCommandLabel, string>> = {
+	"npm run test:<name>": "npm run test:unit",
+	"pnpm run test:<name>": "pnpm run test:file",
+	"yarn run test:<name>": "yarn run test:unit",
+	"bun run test:<name>": "bun run test:unit",
 };
 
 /** The validation label each unattended test runner stands for. */
@@ -120,7 +127,11 @@ describe("test runner vocabulary (#377)", () => {
 		);
 		for (const label of VALIDATION_COMMAND_LABELS) {
 			const spelling = SPELLINGS[label];
-			deepStrictEqual(detectValidationCommand(spelling), { kind: "validation", matched: label }, spelling);
+			deepStrictEqual(
+				detectValidationCommand(spelling),
+				{ kind: "validation", matched: SCRIPT_IDENTITIES[label] ?? label },
+				spelling,
+			);
 			const decision = policy.evaluate({ tool: ToolNames.Bash, args: { command: spelling } });
 			strictEqual(decision.kind, "allow", spelling);
 			strictEqual(decision.execRecognition, "recognized", spelling);
@@ -151,13 +162,14 @@ describe("test runner vocabulary (#377)", () => {
 			"pnpm run test -- tests/x.test.ts",
 			"yarn test",
 			"bun run test -- tests/x.test.ts",
-			"uv run pytest -q tests/x.py",
-			"uv run --locked pytest -q tests/x.py",
-			"uv run python -m pytest -q tests/x.py",
+			"uv run --no-sync pytest -q tests/x.py",
+			"uv run --locked --no-sync pytest -q tests/x.py",
+			"uv run --no-sync --frozen python -m pytest -q tests/x.py",
 		]) {
 			strictEqual(disposition(policy, command, "default"), "allow", command);
 			strictEqual(disposition(policy, command, "yolo"), "allow", command);
 		}
+		strictEqual(disposition(policy, "uv run pytest -q", "default"), "ask");
 	});
 
 	it("keeps substitution and unsafe destinations behind the hard safety rails", () => {

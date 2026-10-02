@@ -30,6 +30,18 @@ it("grounds package-manager test aliases in both directions without equating dif
 		});
 		strictEqual(result?.grounded, 0);
 	}
+	const effects = createRunEffectsRecorder(process.cwd());
+	effects.start("test-unit", "bash", { command: "npm run test:unit" });
+	effects.finish("test-unit", false);
+	strictEqual(
+		groundClaimedValidations({
+			contractKind: "verifier-report",
+			output: '{"checks":[{"name":"npm run test:integration","passed":true,"evidence":"exit 0"}]}',
+			executedCommands: effects.snapshot().verificationCommands,
+			executedCheckingCalls: 1,
+		})?.grounded,
+		0,
+	);
 });
 
 it("keeps punctuation and quoted validation claims grounded", () => {

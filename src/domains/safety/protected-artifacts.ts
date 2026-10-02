@@ -1279,10 +1279,10 @@ function pathMatchesArtifact(commandPath: string, artifactKey: string, mode: "ta
 }
 
 /**
- * Every fixed label `validationMatch` returns. The only other label is the
- * `<package manager> run <verification script>` family. The policy engine's
- * `TEST_RUNNER_COMMANDS` must run each of these without an ask in default;
- * `tests/contracts/test-runner-vocabulary.test.ts` fails when the two drift.
+ * Validation vocabulary shared with unattended test runners (#377). Labels
+ * with `<name>` describe script families; `validationMatch` preserves the
+ * actual script name so one script cannot ground a claim about another.
+ * `tests/contracts/test-runner-vocabulary.test.ts` prevents admission drift.
  */
 export const VALIDATION_COMMAND_LABELS = [
 	"npm test",
@@ -1321,7 +1321,6 @@ function validationMatch(
 		if (args[0] === "test") return `${executable} test`;
 		const script = args[0] === "run" && typeof args[1] === "string" ? args[1] : null;
 		if (script === "test") return `${executable} test`;
-		if (script !== null && /^test:[\w=./:-]+$/.test(script)) return `${executable} run test:<name>`;
 		if (script !== null && isVerificationScriptName(script)) return `${executable} run ${script}`;
 	}
 	if (executable === "uv") {
