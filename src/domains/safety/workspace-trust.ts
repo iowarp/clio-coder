@@ -40,7 +40,7 @@ export function gateProjectSafetyPolicy(
 		informationFlow: policy.informationFlow,
 		errors: [
 			...policy.errors,
-			`${policy.path} is ${trustVerdict}; project safety ignored. Review with clio-coder config trust safety.`,
+			`${policy.path} is ${trustVerdict}; project safety grants ignored until approved${policy.informationFlow.sources.length > 0 ? "; information-flow sources still restrict what is read" : ""}. Review with clio-coder config trust safety.`,
 		],
 	};
 }
