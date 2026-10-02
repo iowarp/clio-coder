@@ -195,6 +195,8 @@ export interface Verdict<V> {
 }
 
 export interface RunOptions {
+	/** Per-call failure diagnostics for callers that need to explain a null fallback. */
+	readonly onFailure?: (reason: string) => void;
 	/** Join key for outcome rows: the user turn id, a permission request id, a tool call id. */
 	readonly ref?: string;
 	readonly signal?: AbortSignal;

@@ -373,10 +373,14 @@ export function createConsultTool(deps: ConsultDeps): ToolSpec {
 			turn.calls += 1;
 			const remaining = CONSULT_LIMITS.callsPerTurn - turn.calls;
 			const questions = Object.fromEntries(parsed.map((entry) => [entry.id, entry.question]));
+			let failure: string | undefined;
 			const verdict = await deps.systemOne.run(
 				consultSite(questions),
 				{ state, files: evidence.files },
 				{
+					onFailure: (reason) => {
+						failure = redactSecretsText(reason, createRedactionTally());
+					},
 					...(options?.toolCallId !== undefined && options.toolCallId.length > 0 ? { ref: options.toolCallId } : {}),
 					...(options?.signal !== undefined ? { signal: options.signal } : {}),
 					...(flow !== undefined ? { flow } : {}),
@@ -389,7 +393,10 @@ export function createConsultTool(deps: ConsultDeps): ToolSpec {
 			if (verdict === null) {
 				const output = {
 					answered: false,
-					note: "The decision model gave no usable answer. Proceed on your own judgment.",
+					note: failure
+						? `The decision model could not answer: ${failure}. Proceed on your own judgment.`
+						: "The decision model gave no usable answer. Proceed on your own judgment.",
+					...(failure !== undefined ? { error: failure } : {}),
 					...evidenceNote,
 					remainingCalls: remaining,
 				};

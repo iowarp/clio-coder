@@ -259,6 +259,13 @@ export function createRunner(deps: RunnerDeps): Runner {
 				policy?: DecisionRecord["policy"];
 			} = {},
 		): number => {
+			if (outcome !== "answered") {
+				try {
+					options.onFailure?.(scrub(errorText(detail.error ?? outcome), createRedactionTally(), false));
+				} catch {
+					// Diagnostics cannot change the decision's null fallback.
+				}
+			}
 			const latencyMs = Math.round(performance.now() - started);
 			const responded = plans.filter((plan) => plan.reply !== undefined);
 			// One build names the call only when one engine answered all of it.

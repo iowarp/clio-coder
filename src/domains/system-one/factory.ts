@@ -284,11 +284,19 @@ export function createSystemOne(deps: SystemOneDeps): SystemOneInstance {
 			try {
 				const resolution = resolve(site.id);
 				const routes = routesOf(resolution);
-				if (routes === null) return null;
+				if (routes === null) {
+					options.onFailure?.(resolution.info.problem ?? `System One site '${site.id}' is not bound`);
+					return null;
+				}
 				const timeoutMs = resolution.usable?.timeoutMs;
 				return await runner.run({ routes, ...(timeoutMs !== undefined ? { timeoutMs } : {}) }, site, object, options);
-			} catch {
+			} catch (error) {
 				// Nothing that goes wrong in System One may reach the caller's turn.
+				try {
+					options.onFailure?.(error instanceof Error ? error.message : String(error));
+				} catch {
+					// A caller's diagnostic observer cannot change the fallback.
+				}
 				return null;
 			}
 		},
