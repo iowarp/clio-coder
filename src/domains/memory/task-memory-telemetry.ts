@@ -72,6 +72,7 @@ export interface TaskMemoryTelemetryRecord {
 	decision: TaskMemoryTelemetryDecision;
 	/** What produced the decision. The field that makes a `silent` row actionable. */
 	reason: TaskMemoryPolicyReason;
+	refusalReason?: string;
 	/** Operations the bank accepted from the model. */
 	bankOperations: number;
 	/** Operations the bank refused. Nonzero beside a zero `bankOperations` is a total loss. */
@@ -90,6 +91,7 @@ export interface TaskMemoryTelemetryStep {
 	bankDelta: TaskMemoryBankDelta;
 	decision: TaskMemoryTelemetryDecision;
 	reason: TaskMemoryPolicyReason;
+	refusalReason?: string;
 	bankOperations: number;
 	droppedOperations: number;
 	citedEntries: number;
@@ -145,6 +147,7 @@ export function taskMemoryTelemetryRecord(step: TaskMemoryTelemetryStep, at: Dat
 		bankDelta: step.bankDelta,
 		decision: step.decision,
 		reason: step.reason,
+		...(step.refusalReason === undefined ? {} : { refusalReason: step.refusalReason }),
 		bankOperations: nonNegativeInteger(step.bankOperations),
 		droppedOperations: nonNegativeInteger(step.droppedOperations),
 		citedEntries: nonNegativeInteger(step.citedEntries),
@@ -163,7 +166,8 @@ export function taskMemoryBankDelta(before: TaskMemorySnapshot, after: TaskMemor
 }
 
 export function parseTaskMemoryTelemetryRecord(value: unknown): TaskMemoryTelemetryRecord | null {
-	if (!isRecord(value) || !hasKeys(value, TELEMETRY_KEYS, ROUTE_KEYS)) return null;
+	if (!isRecord(value) || !hasKeys(value, TELEMETRY_KEYS, [...ROUTE_KEYS, "refusalReason"])) return null;
+	if (value.refusalReason !== undefined && typeof value.refusalReason !== "string") return null;
 	const route = parseRoute(value);
 	if (route === null) return null;
 	if (value.version !== TASK_MEMORY_TELEMETRY_VERSION || !validIsoTimestamp(value.at)) return null;
@@ -181,6 +185,7 @@ export function parseTaskMemoryTelemetryRecord(value: unknown): TaskMemoryTeleme
 		bankDelta,
 		decision: value.decision,
 		reason: value.reason,
+		...(value.refusalReason === undefined ? {} : { refusalReason: value.refusalReason as string }),
 		bankOperations: value.bankOperations,
 		droppedOperations: value.droppedOperations,
 		citedEntries: value.citedEntries,
@@ -242,6 +247,7 @@ const REASONS = new Set<TaskMemoryPolicyReason>([
 	"timed_out",
 	"endpoint_busy",
 	"client_error",
+	"information_flow_blocked",
 	"no_client",
 	"no_consumer",
 	"step_in_flight",

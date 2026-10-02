@@ -641,7 +641,11 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 						initialTimeoutMs <= 0
 							? { ...silent("deadline"), decision: "timeout" }
 							: await runClient(client, initialTimeoutMs);
-					if (promptedResult.reason === "client_error" && isCurrent() && remainingMs() > 0) {
+					if (
+						(promptedResult.reason === "client_error" || promptedResult.reason === "information_flow_blocked") &&
+						isCurrent() &&
+						remainingMs() > 0
+					) {
 						let fallback: TaskMemoryModelClient | null = null;
 						let fallbackReady = false;
 						try {
@@ -663,7 +667,11 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 								promptedResult.inputTokens,
 								promptedResult.outputTokens,
 								started,
-								{ bankOperations: promptedResult.bankOperations, droppedOperations: promptedResult.droppedOperations },
+								{
+									bankOperations: promptedResult.bankOperations,
+									droppedOperations: promptedResult.droppedOperations,
+									...(promptedResult.refusalReason === undefined ? {} : { refusalReason: promptedResult.refusalReason }),
+								},
 								attemptRoute,
 							);
 							attemptStarted = process.hrtime.bigint();
@@ -704,7 +712,11 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 			promptedResult.inputTokens,
 			promptedResult.outputTokens,
 			attemptStarted,
-			{ bankOperations: promptedResult.bankOperations, droppedOperations: promptedResult.droppedOperations },
+			{
+				bankOperations: promptedResult.bankOperations,
+				droppedOperations: promptedResult.droppedOperations,
+				...(promptedResult.refusalReason === undefined ? {} : { refusalReason: promptedResult.refusalReason }),
+			},
 			attemptRoute,
 		);
 		return {
@@ -733,7 +745,10 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 		inputTokens: number,
 		outputTokens: number,
 		started: bigint,
-		operations: { bankOperations: number; droppedOperations: number } = { bankOperations: 0, droppedOperations: 0 },
+		operations: { bankOperations: number; droppedOperations: number; refusalReason?: string } = {
+			bankOperations: 0,
+			droppedOperations: 0,
+		},
 		route?: TaskMemoryRoute,
 	): void {
 		const next = deps.bank.snapshot();
@@ -749,6 +764,7 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 				reason,
 				bankOperations: operations.bankOperations,
 				droppedOperations: operations.droppedOperations,
+				...(operations.refusalReason === undefined ? {} : { refusalReason: operations.refusalReason }),
 				citedEntries,
 				inputTokens,
 				outputTokens,

@@ -35,6 +35,9 @@ export interface TaskMemoryTrajectoryStep {
 /** Admission changed while a client prepared; no inference request was sent. */
 export class TaskMemoryEndpointBusyError extends Error {}
 
+/** Restricted context cannot reach the selected background model. */
+export class TaskMemoryInformationFlowBlockedError extends Error {}
+
 export interface TaskMemoryModelRequest {
 	systemPrompt: string;
 	userPrompt: string;
@@ -148,6 +151,8 @@ export type TaskMemoryPolicyReason =
 	| "endpoint_busy"
 	/** The model client threw: unreachable route, auth failure, malformed request. */
 	| "client_error"
+	/** Information-flow admission refused the request before inference. */
+	| "information_flow_blocked"
 	/** No background role is configured, so the llm tier never ran. */
 	| "no_client"
 	/**
@@ -214,6 +219,8 @@ export interface TaskMemoryPolicyInput {
 }
 
 export interface TaskMemoryPolicyResult {
+	/** Admission diagnostic, present only when information flow refused the request. */
+	refusalReason?: string;
 	decision: TaskMemoryPolicyDecision;
 	reason: TaskMemoryPolicyReason;
 	bankOperations: number;
@@ -331,6 +338,7 @@ export async function runTaskMemoryPolicy(
 			inputTokens: parts.inputTokens ?? stepUsage?.input ?? 0,
 			outputTokens: parts.outputTokens ?? stepUsage?.output ?? 0,
 			usage: stepUsage,
+			...(parts.refusalReason === undefined ? {} : { refusalReason: parts.refusalReason }),
 		};
 		try {
 			if (input.isCurrent?.() !== false)
@@ -432,6 +440,8 @@ export async function runTaskMemoryPolicy(
 	} catch (error) {
 		if (error instanceof TaskMemoryEndpointBusyError) return settle("silent", "endpoint_busy");
 		clientError = errorMessage(error);
+		if (error instanceof TaskMemoryInformationFlowBlockedError)
+			return settle("silent", "information_flow_blocked", { refusalReason: clientError });
 		// A transport that aborted at its own deadline spent the whole budget and
 		// produced nothing. Reporting it as silence made a step that held a local
 		// server for its full timeout indistinguishable from a model that read the

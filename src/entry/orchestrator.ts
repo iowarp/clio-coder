@@ -93,7 +93,10 @@ import {
 import { createMemoryPromptReader } from "../domains/memory/prompt-cache.js";
 import { createMemoryRelevance } from "../domains/memory/relevance-source.js";
 import { TaskMemoryBank } from "../domains/memory/task-bank.js";
-import { TaskMemoryEndpointBusyError } from "../domains/memory/task-memory-policy.js";
+import {
+	TaskMemoryEndpointBusyError,
+	TaskMemoryInformationFlowBlockedError,
+} from "../domains/memory/task-memory-policy.js";
 import { createDecisionHintsRegistration } from "../domains/middleware/decision-hints.js";
 import {
 	createDetachedDispatchNudgeRegistration,
@@ -627,7 +630,7 @@ function prepareBackgroundMemoryRoute(
 				}
 				const refusal =
 					admitModelFlow?.({ targetId, runtimeId: refined.runtimeId, wireModelId: refined.wireModelId }) ?? null;
-				if (refusal !== null) throw new Error(refusal);
+				if (refusal !== null) throw new TaskMemoryInformationFlowBlockedError(refusal);
 				return announceMemoryStepEndpoint({ bus, endpointKey, targetId }, async () => {
 					const startedAt = Date.now();
 					let observedUsage: TaskMemoryStepUsage | undefined;
@@ -674,6 +677,8 @@ function prepareBackgroundMemoryRoute(
 		},
 	};
 }
+
+const emitMemoryFlowNotice = declareRuntimeNoticeProducer("background-memory-flow", ["memory-flow-blocked"]);
 
 const emitRouteFallbackNotice = declareRuntimeNoticeProducer("background-memory-route", ["route-fallback"]);
 
@@ -1943,6 +1948,26 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 				);
 			});
 	};
+	const memoryFlowNoticedSessions = new Set<string | null>();
+	const admitMemoryFlow: AdmitBackgroundModelFlow = (destination) => {
+		const refusal = admitModelFlow(destination);
+		const sessionId = session?.current()?.id ?? null;
+		if (refusal !== null && !memoryFlowNoticedSessions.has(sessionId)) {
+			memoryFlowNoticedSessions.add(sessionId);
+			emitMemoryFlowNotice(
+				{
+					kind: "memory-flow-blocked",
+					level: "info",
+					message: `Memory skipped target ${destination.targetId}: ${refusal}`,
+					targetId: destination.targetId,
+					runtimeId: destination.runtimeId,
+					model: destination.wireModelId,
+				},
+				bus,
+			);
+		}
+		return refusal;
+	};
 	const memoryIntervention = createMemoryInterventionRegistration({
 		bank: taskMemoryBank,
 		telemetry: createTaskMemoryTelemetrySink(),
@@ -1961,7 +1986,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 				timeoutMs: memory.timeoutMs,
 			};
 		},
-		...createBackgroundMemoryRouting(providers, () => effectiveSettingsForDispatch?.(), bus, admitModelFlow),
+		...createBackgroundMemoryRouting(providers, () => effectiveSettingsForDispatch?.(), bus, admitMemoryFlow),
 		captureStepUsage: captureBackgroundMemoryUsage,
 		onInjectedEntries: (entries) => proposeInjectedMemoryEntries(entries),
 	});

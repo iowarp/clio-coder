@@ -94,6 +94,7 @@ export const RUNTIME_NOTICE_KINDS = [
 	"stress",
 	"degraded",
 	"route-fallback",
+	"memory-flow-blocked",
 ] as const;
 
 /** Collision, capacity, or stress category for a {@link RuntimeNoticePayload}. */
