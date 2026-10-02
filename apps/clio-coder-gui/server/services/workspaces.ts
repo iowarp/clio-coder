@@ -59,7 +59,16 @@ export class WorkspaceService {
 	async list(): Promise<Workspace[]> {
 		const value = await this.files.read("workspaces");
 		if (!Value.Check(Workspaces, value)) throw new AppProblem("unavailable", "Recent workspace state is invalid.");
-		return value;
+		const available = await Promise.all(
+			value.map(async (row) => {
+				try {
+					return (await realpath(row.path)) === row.path && (await stat(row.path)).isDirectory() ? row : null;
+				} catch {
+					return null;
+				}
+			}),
+		);
+		return available.filter((row): row is Workspace => row !== null);
 	}
 	async get(id: string) {
 		const row = (await this.list()).find((item) => item.id === id);

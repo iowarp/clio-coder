@@ -119,7 +119,7 @@ export function App({ client }: { client: Client }) {
 	const activeWorkspaceId = useMemo(() => {
 		const known = new Set(workspaces.data?.map((workspace) => workspace.id));
 		for (const candidate of [snapshot?.workspaceId, routeWorkspace, remembered])
-			if (candidate && (known.size === 0 || known.has(candidate))) return candidate;
+			if (candidate && known.has(candidate)) return candidate;
 		return [...(workspaces.data ?? [])].sort((a, b) => b.openedAt.localeCompare(a.openedAt))[0]?.id ?? null;
 	}, [snapshot?.workspaceId, routeWorkspace, remembered, workspaces.data]);
 	useEffect(() => {
