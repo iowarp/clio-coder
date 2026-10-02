@@ -37,6 +37,12 @@ export interface TaskWorktree {
 	parent?: string;
 	branch: string;
 	base: string;
+	/**
+	 * Branch the source checkout had checked out at dispatch. A merge lands only
+	 * while that branch is still checked out. Absent when HEAD was detached, and
+	 * on a value built before this was recorded.
+	 */
+	sourceBranch?: string;
 	ownerToken: string;
 }
 
@@ -89,6 +95,9 @@ export interface TaskWorktreeReceipt {
 
 /** Receipt reason for a task worktree whose HEAD no longer names its own task branch (F5). */
 export const WORKTREE_HEAD_MOVED = "worktree_head_moved";
+
+/** Receipt reason for a merge refused because the source checkout is no longer on a branch that holds the task's base. */
+export const WORKTREE_DESTINATION_MOVED = "worktree_destination_moved";
 
 /** Receipt reason for a merge refused because the worktree no longer holds the commit an operator was shown. */
 export const WORKTREE_CHANGED_SINCE_PREVIEW = "worktree_changed_since_preview";
@@ -310,6 +319,7 @@ export function createTaskWorktree(
 	const canonical = realpathSync(root);
 	if (base === undefined && gitHeadIsUnborn(canonical)) throw new Error(WORKTREE_UNBORN_HEAD_MESSAGE);
 	const resolvedBase = base ?? git(canonical, ["rev-parse", "HEAD"]);
+	const sourceBranch = git(canonical, ["branch", "--show-current"]);
 	const claimParent = diskWorktreeParent(canonical);
 	const parent = worktreeParent ?? claimParent;
 	const path = join(parent, runId);
@@ -342,6 +352,7 @@ export function createTaskWorktree(
 				runId,
 				branch,
 				base: resolvedBase,
+				...(sourceBranch.length > 0 ? { sourceBranch } : {}),
 				ownerToken,
 				// What restart recovery needs to tell a crashed run from a live one.
 				state: "active" satisfies TaskWorktreeState,
@@ -355,7 +366,16 @@ export function createTaskWorktree(
 		)}\n`,
 		{ encoding: "utf8", flag: "wx" },
 	);
-	return { root: canonical, runId, path, parent, branch, base: resolvedBase, ownerToken };
+	return {
+		root: canonical,
+		runId,
+		path,
+		parent,
+		branch,
+		base: resolvedBase,
+		...(sourceBranch.length > 0 ? { sourceBranch } : {}),
+		ownerToken,
+	};
 }
 
 const DEPENDENCY_INPUTS = {
@@ -665,6 +685,44 @@ function previewDrift(worktree: TaskWorktree, pinned: string, head: string): str
 	return null;
 }
 
+/** The branch a merge from this task would land on right now: the source checkout's branch, or `detached HEAD`. */
+export function mergeDestination(root: string): string {
+	try {
+		return git(root, ["branch", "--show-current"]) || "detached HEAD";
+	} catch {
+		return "an unreadable HEAD";
+	}
+}
+
+/** Whether `HEAD` of the source checkout has `base` in its history. `unknown` when git could not say. */
+function headContainsBase(root: string, base: string): "yes" | "no" | "unknown" {
+	try {
+		git(root, ["merge-base", "--is-ancestor", base, "HEAD"]);
+		return "yes";
+	} catch (error) {
+		// `--is-ancestor` exits 1 for "not an ancestor"; any other status is git failing.
+		return (error as { status?: unknown }).status === 1 ? "no" : "unknown";
+	}
+}
+
+/** Why the source checkout cannot take this task's merge as it stands, or null when it can. */
+function destinationRefusal(worktree: TaskWorktree, destination: string): string | null {
+	const kept = `Nothing was merged; the task branch ${worktree.branch} is preserved.`;
+	const dispatched = worktree.sourceBranch;
+	if (dispatched !== undefined && destination !== dispatched) {
+		return `${WORKTREE_DESTINATION_MOVED}: task worktree ${worktree.runId} was dispatched from branch ${dispatched}, but the checkout is now on ${destination}. ${kept} Switch back to ${dispatched} and merge ${worktree.branch}.`;
+	}
+	const short = worktree.base.slice(0, 7);
+	switch (headContainsBase(worktree.root, worktree.base)) {
+		case "yes":
+			return null;
+		case "no":
+			return `${WORKTREE_DESTINATION_MOVED}: ${destination} does not contain base ${short} that task branch ${worktree.branch} was cut from${dispatched !== undefined ? ` on ${dispatched}` : ""}, so merging would also land commits the task was never built on. ${kept}`;
+		case "unknown":
+			return `${WORKTREE_DESTINATION_MOVED}: git could not confirm that ${destination} contains base ${short} of task branch ${worktree.branch}. ${kept}`;
+	}
+}
+
 export function applyTaskWorktree(input: {
 	worktree: TaskWorktree;
 	apply: TaskWorktreeApply;
@@ -727,7 +785,12 @@ export function applyTaskWorktree(input: {
 		const detail = `${WORKTREE_HEAD_MOVED}: task branch refs/heads/${worktree.branch} moved from pinned commit ${commit} to ${branchTip ?? "nothing"} before merge; candidate commit ${commit}. Nothing was merged; the worktree and its branch are preserved.`;
 		return { ...headMovedReceipt(worktree, input.apply, detail), commit };
 	}
-	const destinationBranch = git(worktree.root, ["branch", "--show-current"]) || "detached HEAD";
+	const destinationBranch = mergeDestination(worktree.root);
+	// The merge lands on whatever the source checkout has checked out now, and
+	// a card can wait indefinitely while the operator or the main agent keeps
+	// working, so the branch may have changed since dispatch.
+	const stranded = destinationRefusal(worktree, destinationBranch);
+	if (stranded !== null) return { ...receipt, reason: WORKTREE_DESTINATION_MOVED, detail: stranded };
 	const merged = mergeWorktreeBranch(worktree.root, commit, COMMIT_IDENTITY, `Merge branch '${worktree.branch}'`);
 	if (!merged.ok) return { ...receipt, reason: "worktree_merge_conflict" };
 	const landedCommit = git(worktree.root, ["rev-parse", "HEAD"]);

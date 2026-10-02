@@ -41,6 +41,8 @@ export function mergeCardCauseNote(cause: MergeCardCause): string {
 export interface MergeCardInput {
 	hostVerification?: RunHostVerification;
 	branch: string;
+	/** The branch Merge would land on, as the source checkout has it checked out now. */
+	destination?: string;
 	changedPaths: ReadonlyArray<string>;
 	/** The gate's reason clause, as `mergeGateVerdict` words it. */
 	reason: string;
@@ -89,11 +91,16 @@ function mergeCardPresentation(title: string, authorization: string, reversibili
 	};
 }
 
-function choosePresentation(offerMerge: boolean): DecisionPresentation {
+function destinationOf(input: MergeCardInput): string {
+	return input.destination ?? "your current branch";
+}
+
+function choosePresentation(input: MergeCardInput): DecisionPresentation {
+	const offerMerge = offersMerge(input);
 	return mergeCardPresentation(
 		"Merge task branch?",
 		offerMerge
-			? "Merge lands the branch on your current branch through the same guarded path as an ordinary merge. Keep branch merges nothing. Discard asks once more before deleting."
+			? `Merge lands the branch on ${destinationOf(input)} through the same guarded path as an ordinary merge, and is withheld if that checkout has since moved to another branch. Keep branch merges nothing. Discard asks once more before deleting.`
 			: "Keep branch merges nothing. Discard asks once more before deleting. Merge is not offered because the branch changes protected paths.",
 		offerMerge
 			? "Reversible: Merge and Keep branch can be undone or redone with git. Discard deletes the branch and cannot be undone."
@@ -118,7 +125,7 @@ function mergeCardQuestion(input: MergeCardInput): AskUserQuestion {
 	const noun = total === 1 ? "path" : "paths";
 	const protectedPaths = input.protectedPaths ?? [];
 	const options = [
-		...(offersMerge(input) ? [{ label: MERGE, description: "Land it on your current branch now." }] : []),
+		...(offersMerge(input) ? [{ label: MERGE, description: `Land it on ${destinationOf(input)} now.` }] : []),
 		{ label: KEEP, description: `Leave it on ${input.branch}; \`git merge ${input.branch}\` applies it later.` },
 		{ label: DISCARD, description: "Delete the branch and its worktree after one more confirmation." },
 	];
@@ -215,7 +222,7 @@ export async function askMergeCard(deps: MergeCardDeps, input: MergeCardInput): 
 	};
 	try {
 		for (;;) {
-			const picked = await put(mergeCardQuestion(input), choosePresentation(offersMerge(input)));
+			const picked = await put(mergeCardQuestion(input), choosePresentation(input));
 			if (picked === null) return stopped();
 			if (picked.cancelled === true) return keep("escaped");
 			if (offersMerge(input) && chose(picked, MERGE)) return { choice: "merge", cause: "answered" };

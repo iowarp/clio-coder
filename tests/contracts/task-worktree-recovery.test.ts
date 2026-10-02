@@ -169,6 +169,42 @@ describe("task worktree restart recovery", () => {
 		ok(!existsSync(join(root, `${moved.task.runId}.txt`)));
 	});
 
+	it("withholds a merge when the checkout left its dispatch branch or no longer holds the task's base", () => {
+		const commitOn = (cwd: string, file: string): void => {
+			writeFileSync(join(cwd, file), "w\n");
+			git(cwd, "add", "-A");
+			git(cwd, "-c", "user.name=w", "-c", "user.email=w@local", "commit", "-qm", file);
+		};
+		const mainTip = git(root, "rev-parse", "main");
+		git(root, "switch", "-q", "-c", "feature-a");
+		commitOn(root, "unfinished.txt");
+		const switched = createTaskWorktree(root, "run-dest-switched", undefined, "merge");
+		strictEqual(switched.sourceBranch, "feature-a");
+		writeFileSync(join(switched.path, "task.txt"), "t\n");
+		git(root, "switch", "-q", "main");
+		const refusal = applyTaskWorktree({ worktree: switched, apply: "merge" });
+		strictEqual(refusal.reason, "worktree_destination_moved");
+		strictEqual(refusal.applied, false);
+		match(refusal.detail ?? "", /dispatched from branch feature-a, but the checkout is now on main/u);
+		strictEqual(git(root, "rev-parse", "main"), mainTip, "main did not pick up the unmerged feature work");
+		ok(!existsSync(join(root, "unfinished.txt")) && !existsSync(join(root, "task.txt")));
+		ok(branches().includes(switched.branch), "the task branch is kept");
+
+		// Same branch name, but its history no longer holds the base the task was cut from.
+		git(root, "switch", "-q", "feature-a");
+		const rewound = createTaskWorktree(root, "run-dest-rewound", undefined, "merge");
+		writeFileSync(join(rewound.path, "task.txt"), "t\n");
+		git(root, "reset", "-q", "--hard", mainTip);
+		const lost = applyTaskWorktree({ worktree: rewound, apply: "merge" });
+		strictEqual(lost.reason, "worktree_destination_moved");
+		match(
+			lost.detail ?? "",
+			/feature-a does not contain base [0-9a-f]{7} that task branch clio-coder\/task\/run-dest-rewound/u,
+		);
+		strictEqual(git(root, "rev-parse", "HEAD"), mainTip);
+		ok(branches().includes(rewound.branch));
+	});
+
 	it("an operator discard whose branch deletion fails reports the branch kept and releases the claim", () => {
 		const done = createTaskWorktree(root, "run-discard-done", undefined, "merge");
 		writeFileSync(join(done.path, "w.txt"), "w\n");

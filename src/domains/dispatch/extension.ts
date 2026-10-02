@@ -71,6 +71,7 @@ import {
 	discardIdleTaskWorktree,
 	discardTaskWorktree,
 	gitCheckoutRoot,
+	mergeDestination,
 	protectedPathsChangedByWorktreeBranch,
 	settleTaskWorktree,
 	shareTaskWorktreeDependencies,
@@ -7621,6 +7622,7 @@ export function createDispatchBundle(
 							(worktreeReceipt.changedPaths?.length ?? 0) > 0
 								? await askWithheldMerge(activeRun, {
 										branch: req.taskWorktree.branch,
+										destination: mergeDestination(req.taskWorktree.root),
 										changedPaths: worktreeReceipt.changedPaths ?? [],
 										reason: withheldVerdict.reason,
 										...(hostVerification !== undefined ? { hostVerification } : {}),
