@@ -10,9 +10,9 @@
  */
 
 import { createHash, randomUUID } from "node:crypto";
-import type { FollowUpTracker } from "./outcomes.js";
 import type { CategoryGroup, Grouping } from "./hierarchy.js";
 import { groupByCategory } from "./hierarchy.js";
+import type { FollowUpTracker } from "./outcomes.js";
 import type { RelevanceCandidate, RelevanceUse } from "./sites/relevance.js";
 import {
 	RELEVANCE_CLUSTER_SITE,
@@ -130,9 +130,7 @@ export function createRelevanceRanker(input: RelevanceRankerInput): RelevanceRan
 		if (signal?.aborted === true) return null;
 		const grouping = groupsFor(request.candidates);
 		if ("abstain" in grouping) return null;
-		const groups = new Map<string, CategoryGroup<RelevanceCandidate>>(
-			grouping.groups.map((group) => [group.key, group]),
-		);
+		const groups = new Map<string, CategoryGroup<RelevanceCandidate>>(grouping.groups.map((group) => [group.key, group]));
 		const budget = new AbortController();
 		const timer = setTimeout(
 			() => budget.abort(new Error(`relevance hierarchy exceeded ${RELEVANCE_SITE.deadlineMs}ms`)),
@@ -215,8 +213,7 @@ export function createRelevanceRanker(input: RelevanceRankerInput): RelevanceRan
 			// than a ranking of whichever entries happened to come first.
 			const window = limits?.windowTokens ?? null;
 			const flat =
-				request.candidates.length <= RELEVANCE_MAX_CANDIDATES &&
-				(window === null || flatTokens(request, task) <= window);
+				request.candidates.length <= RELEVANCE_MAX_CANDIDATES && (window === null || flatTokens(request, task) <= window);
 			const ranking = flat
 				? await rankFlat(request, task, ref, signal)
 				: await rankHierarchical(request, task, ref, signal);

@@ -1,5 +1,3 @@
-import { flowRestrictionsOfRuns } from "./dispatch-runner.js";
-import { FLOW_RESTRICTIONS_DETAIL } from "./registry.js";
 import { readFileSync } from "node:fs";
 import { projectLedgerAssignments, projectReceiptFindings } from "../domains/dispatch/agent-ledger.js";
 import { renderAgentLedgerBoard } from "../domains/dispatch/agent-ledger-store.js";
@@ -12,8 +10,10 @@ import { isTerminalRunEnvelope } from "../domains/dispatch/types.js";
 import type { CanonicalTrustStatus } from "../domains/evidence/trust-status.js";
 import { adaptRunReceiptTrustStatus, inspectRunReceiptTrustStatus } from "../domains/evidence/trust-status.js";
 import { COST_NOT_MEASURED, costAggregateForAmount, formatCostAggregate } from "../domains/observability/index.js";
+import { flowRestrictionsOfRuns } from "./dispatch-runner.js";
 import type { MonitorToolDeps } from "./monitor.js";
 import type { ToolResult } from "./registry.js";
+import { FLOW_RESTRICTIONS_DETAIL } from "./registry.js";
 import { truncateUtf8 } from "./truncate-utf8.js";
 import {
 	compactHelperResultLines,

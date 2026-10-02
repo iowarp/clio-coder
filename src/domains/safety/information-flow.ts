@@ -142,7 +142,12 @@ export interface InformationFlowPolicyInput {
 	readonly sources: ReadonlyArray<FlowSourceRuleInput>;
 }
 
-export const EMPTY_INFORMATION_FLOW_INPUT: InformationFlowPolicyInput = { groups: {}, targets: {}, mcp: {}, sources: [] };
+export const EMPTY_INFORMATION_FLOW_INPUT: InformationFlowPolicyInput = {
+	groups: {},
+	targets: {},
+	mcp: {},
+	sources: [],
+};
 
 /** Own-property lookup so a name like `constructor` cannot resolve an inherited entry. */
 function own<T>(record: Readonly<Record<string, T>>, key: string): T | undefined {
@@ -279,7 +284,12 @@ export function mergeFlowRestrictions(
 			const key = `${r.ruleId}\0${r.policyHash}\0${r.sourceRef}`;
 			if (seen.has(key)) continue;
 			seen.add(key);
-			restrictions.push({ ruleId: r.ruleId, policyHash: r.policyHash, sourceRef: r.sourceRef, recipients: [...r.recipients] });
+			restrictions.push({
+				ruleId: r.ruleId,
+				policyHash: r.policyHash,
+				sourceRef: r.sourceRef,
+				recipients: [...r.recipients],
+			});
 		}
 		for (const a of set.advisory ?? []) advisory.add(a);
 	}
@@ -337,7 +347,9 @@ function expandRecipients(
 			const binding = own(input.mcp, server);
 			if (binding === undefined) dangling.push(ref);
 			else {
-				const cwd = canonicalizePath(path.resolve(policyRoot, binding.cwd ?? "."), memo) ?? path.resolve(policyRoot, binding.cwd ?? ".");
+				const cwd =
+					canonicalizePath(path.resolve(policyRoot, binding.cwd ?? "."), memo) ??
+					path.resolve(policyRoot, binding.cwd ?? ".");
 				recipients.push(mcpTransportIdentity(server, binding.command, binding.args, cwd, binding.env ?? {}));
 			}
 			continue;
@@ -461,7 +473,10 @@ export interface FlowSourceCall {
  * split per file. Named tools are judged by registry name. Null when no rule
  * matches, which is the baseline for a project without rules.
  */
-export function flowRestrictionsForCall(policy: InformationFlowPolicy, call: FlowSourceCall): FlowRestrictionSet | null {
+export function flowRestrictionsForCall(
+	policy: InformationFlowPolicy,
+	call: FlowSourceCall,
+): FlowRestrictionSet | null {
 	if (policy.rules.length === 0) return null;
 	const restrictions: FlowRestriction[] = [];
 	const pathField = READ_PATH_TOOLS.get(call.tool);
@@ -500,7 +515,9 @@ export function flowRestrictionsForCall(policy: InformationFlowPolicy, call: Flo
 
 function describeDestination(destination: FlowDestination): string {
 	if (destination.kind === "tool") {
-		return destination.endpoint === null ? `tool ${destination.tool}` : `tool ${destination.tool} -> ${destination.endpoint}`;
+		return destination.endpoint === null
+			? `tool ${destination.tool}`
+			: `tool ${destination.tool} -> ${destination.endpoint}`;
 	}
 	return `target ${destination.targetId} (${destination.runtime}, ${destination.endpoint ?? "no endpoint"})`;
 }
@@ -509,7 +526,8 @@ function recipientAdmits(ref: string, destination: FlowDestination): boolean {
 	if (destination.kind === "model") {
 		return ref === pinnedTargetRef(destination.targetId, destination.runtime, destination.endpoint);
 	}
-	if (ref.startsWith("mcp:")) return destination.mcp !== undefined && destination.mcp !== null && ref === destination.mcp;
+	if (ref.startsWith("mcp:"))
+		return destination.mcp !== undefined && destination.mcp !== null && ref === destination.mcp;
 	if (destination.endpoint === null) return false;
 	if (ref.startsWith("endpoint:")) return ref === `endpoint:${destination.endpoint}`;
 	if (ref.startsWith("origin:")) return ref === `origin:${flowEndpointOrigin(destination.endpoint) ?? ""}`;
@@ -548,7 +566,12 @@ export function evaluateInformationFlow(input: InformationFlowInput): Informatio
 	// A policy that cannot vouch refuses every transfer, restricted context or
 	// not: unlabeled restricted content may already be in context.
 	if (input.policy.refusal !== null) {
-		return { kind: "unresolved", reason: `${input.policy.refusal}; transfer to ${where} is refused`, ruleIds: [], evidence: [] };
+		return {
+			kind: "unresolved",
+			reason: `${input.policy.refusal}; transfer to ${where} is refused`,
+			ruleIds: [],
+			evidence: [],
+		};
 	}
 	if (restrictions.length === 0) {
 		return { kind: "permitted", reason: "no restricted source in context", ruleIds: [], evidence: [] };

@@ -20,8 +20,8 @@ import {
 	writeMcpServerCatalog,
 } from "../../domains/gateway/mcp/index.js";
 import type { ClassifierCall } from "../../domains/safety/action-classifier.js";
-import type { ImageContent } from "../../engine/types.js";
 import { mcpTransportIdentity } from "../../domains/safety/information-flow.js";
+import type { ImageContent } from "../../engine/types.js";
 import type { ToolRegistry, ToolResult, ToolSpec } from "../registry.js";
 
 /** An ACP client's declaration lives only for its hosted session. */

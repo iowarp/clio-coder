@@ -69,6 +69,9 @@ import {
 import type { ActionClass, ClassifierCall } from "../domains/safety/action-classifier.js";
 import type { ApprovalAuthority } from "../domains/safety/admission.js";
 import { describeCallTarget } from "../domains/safety/call-target.js";
+import { describeBashCallConsequences } from "../domains/safety/command-consequence.js";
+import type { SafetyDecision } from "../domains/safety/contract.js";
+import { grantEffectDescriptor, grantEffectDigest } from "../domains/safety/grant-effect.js";
 import type { FlowRestrictionSet } from "../domains/safety/information-flow.js";
 import {
 	EMPTY_INFORMATION_FLOW_POLICY,
@@ -76,9 +79,6 @@ import {
 	mergeFlowRestrictions,
 	resolveModelDestination,
 } from "../domains/safety/information-flow.js";
-import { describeBashCallConsequences } from "../domains/safety/command-consequence.js";
-import type { SafetyDecision } from "../domains/safety/contract.js";
-import { grantEffectDescriptor, grantEffectDigest } from "../domains/safety/grant-effect.js";
 import { createProtectedArtifactsRegistration } from "../domains/safety/protected-artifacts-registration.js";
 import { createRunEffectsRecorder, recordToolExecutionEffects } from "../domains/safety/run-effects.js";
 import type { WorkerGitAllowance, WorkerPermitAllowance } from "../domains/safety/worker-permit.js";

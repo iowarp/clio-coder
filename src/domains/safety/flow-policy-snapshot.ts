@@ -60,7 +60,11 @@ function isFlowInput(value: unknown): value is InformationFlowPolicyInput {
 	if (!isRecord(value) || !isRecord(value.groups) || !isRecord(value.targets) || !isRecord(value.mcp)) return false;
 	if (!Array.isArray(value.sources)) return false;
 	if (!Object.values(value.groups).every(isStringArray)) return false;
-	if (!Object.values(value.targets).every((t) => isRecord(t) && typeof t.runtime === "string" && typeof t.endpoint === "string"))
+	if (
+		!Object.values(value.targets).every(
+			(t) => isRecord(t) && typeof t.runtime === "string" && typeof t.endpoint === "string",
+		)
+	)
 		return false;
 	if (
 		!Object.values(value.mcp).every(

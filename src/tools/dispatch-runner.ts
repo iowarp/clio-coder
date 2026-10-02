@@ -1,6 +1,3 @@
-import type { FlowRestrictionSet } from "../domains/safety/information-flow.js";
-import { mergeFlowRestrictions } from "../domains/safety/information-flow.js";
-import { FLOW_RESTRICTIONS_DETAIL } from "./registry.js";
 import { randomBytes } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -67,6 +64,8 @@ import { summarizeTrustStatus } from "../domains/evidence/trust-projection.js";
 import { adaptRunReceiptTrustStatus } from "../domains/evidence/trust-status.js";
 import { aggregateCostAmounts, renderCostAggregate } from "../domains/observability/cost.js";
 import type { AutonomyLevel } from "../domains/safety/autonomy.js";
+import type { FlowRestrictionSet } from "../domains/safety/information-flow.js";
+import { mergeFlowRestrictions } from "../domains/safety/information-flow.js";
 import { activeDecisionRefs } from "../domains/session/decision-board.js";
 import { renderCompeteJudgeTask } from "./compete-judge-task.js";
 import {
@@ -106,6 +105,7 @@ import type {
 } from "./dispatch-types.js";
 import { grantRequestLines } from "./grant-request-text.js";
 import type { ToolInvokeOptions, ToolResult, ToolResultDetails } from "./registry.js";
+import { FLOW_RESTRICTIONS_DETAIL } from "./registry.js";
 import { truncateUtf8 } from "./truncate-utf8.js";
 import {
 	compactHelperResultLines,

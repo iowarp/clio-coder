@@ -3,7 +3,6 @@ import type { ProtectedModelRef, ResidencyRole } from "../core/residency-protect
 import { assertValidResponseSchema, runtimeSpeaksResponseSchemaDialect } from "../core/response-schema.js";
 import { WORKER_SANDBOX_SPEC_VERSION, type WorkerSandboxSpec } from "../core/sandbox/types.js";
 import type { ToolName } from "../core/tool-names.js";
-import type { FlowRestrictionSet } from "../domains/safety/information-flow.js";
 import { snapshotTurnConstraints, type TurnConstraints } from "../core/turn-constraints.js";
 import type { ResultContract } from "../domains/agents/result-contract.js";
 import type { AgentProduct } from "../domains/agents/spec.js";
@@ -19,6 +18,7 @@ import type {
 	TargetDescriptor,
 	ThinkingLevel,
 } from "../domains/providers/index.js";
+import type { FlowRestrictionSet } from "../domains/safety/information-flow.js";
 import type { ProtectedArtifact } from "../domains/safety/protected-artifacts.js";
 import type { WorkerPermit } from "../domains/safety/worker-permit.js";
 import type { ToolProfileName } from "../tools/profiles.js";

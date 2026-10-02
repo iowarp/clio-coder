@@ -57,7 +57,12 @@ function fakeSystemOne(): { asked: Asked[]; systemOne: Pick<SystemOne, "run"> } 
 				const questions = site.questions(object);
 				asked.push({ state: site.state(object), questions, ref: options?.ref });
 				const answers = Object.fromEntries(Object.entries(questions).map(([id, question]) => [id, answer(question)]));
-				const value = site.read(answers, object, { build: "jev-1.13.0", fitted: false, cut: () => undefined, source: () => undefined });
+				const value = site.read(answers, object, {
+					build: "jev-1.13.0",
+					fitted: false,
+					cut: () => undefined,
+					source: () => undefined,
+				});
 				if (value === null) return null;
 				return { value, callId: "call-1", engine: "jev", build: "jev-1.13.0", fitted: false, latencyMs: 212 };
 			},

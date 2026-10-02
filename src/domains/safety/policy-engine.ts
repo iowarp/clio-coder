@@ -30,12 +30,16 @@ import {
 	mergePathPolicyInputs,
 	OPERATOR_PATH_POLICY,
 } from "./default-path-policy.js";
+import type { ApprovedFlowPolicy } from "./flow-policy-snapshot.js";
+import {
+	forgetApprovedFlowPolicy,
+	recallApprovedFlowPolicy,
+	rememberApprovedFlowPolicy,
+} from "./flow-policy-snapshot.js";
 import { normalizedGitCommands } from "./git-command-normalization.js";
 import { classifyBashGit, splitGitChdir } from "./git-policy.js";
 import type { FlowRestrictionSet, InformationFlowPolicy } from "./information-flow.js";
 import { compileInformationFlowPolicy, flowRestrictionsForCall } from "./information-flow.js";
-import type { ApprovedFlowPolicy } from "./flow-policy-snapshot.js";
-import { forgetApprovedFlowPolicy, recallApprovedFlowPolicy, rememberApprovedFlowPolicy } from "./flow-policy-snapshot.js";
 import { inertQuotedMatch } from "./literal-exemption.js";
 import {
 	type CompiledPathPolicy,
@@ -381,7 +385,12 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 	if (flowTrusted && projectPolicy.hash !== null && projectPolicy.path !== null) {
 		flowRefusal =
 			projectPolicy.informationFlow.sources.length > 0
-				? rememberApprovedFlowPolicy(projectPolicyRoot, projectPolicy.path, projectPolicy.hash, projectPolicy.informationFlow)
+				? rememberApprovedFlowPolicy(
+						projectPolicyRoot,
+						projectPolicy.path,
+						projectPolicy.hash,
+						projectPolicy.informationFlow,
+					)
 				: forgetApprovedFlowPolicy(projectPolicyRoot);
 	} else {
 		const recalled = recallApprovedFlowPolicy(projectPolicyRoot);

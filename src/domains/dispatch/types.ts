@@ -1,5 +1,5 @@
-import type { FlowRestrictionSet } from "../safety/information-flow.js";
 import type { WorkerContextProvenance } from "../context/worker/contract.js";
+import type { FlowRestrictionSet } from "../safety/information-flow.js";
 /**
  * Shared run + receipt types for the dispatch domain.
  *

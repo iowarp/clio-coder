@@ -166,9 +166,7 @@ function measuredApplies(build: string, site: string, contract: CallContract | u
 	if (contract === undefined) return true;
 	const bound = Object.hasOwn(FITTED_CONTRACTS, build) ? FITTED_CONTRACTS[build] : undefined;
 	return (
-		bound !== undefined &&
-		bound.renderer === contract.renderer &&
-		bound.sites[site as SiteId] === contract.siteVersion
+		bound !== undefined && bound.renderer === contract.renderer && bound.sites[site as SiteId] === contract.siteVersion
 	);
 }
 

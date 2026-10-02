@@ -286,12 +286,7 @@ export function createSystemOne(deps: SystemOneDeps): SystemOneInstance {
 				const routes = routesOf(resolution);
 				if (routes === null) return null;
 				const timeoutMs = resolution.usable?.timeoutMs;
-				return await runner.run(
-					{ routes, ...(timeoutMs !== undefined ? { timeoutMs } : {}) },
-					site,
-					object,
-					options,
-				);
+				return await runner.run({ routes, ...(timeoutMs !== undefined ? { timeoutMs } : {}) }, site, object, options);
 			} catch {
 				// Nothing that goes wrong in System One may reach the caller's turn.
 				return null;

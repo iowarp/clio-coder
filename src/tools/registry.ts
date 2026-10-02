@@ -23,6 +23,7 @@ import { type AutonomyExposure, type AutonomyLevel, DEFAULT_AUTONOMY_LEVEL } fro
 import { describeCallTarget } from "../domains/safety/call-target.js";
 import type { SafetyContract, SafetyDecision } from "../domains/safety/contract.js";
 import type { DecisionPresentation } from "../domains/safety/decision-presentation.js";
+import { SYSTEM_ONE_GATE_RULE_ID } from "../domains/safety/decision-presentation.js";
 import type { FlowRestrictionSet } from "../domains/safety/information-flow.js";
 import {
 	EMPTY_INFORMATION_FLOW_POLICY,
@@ -31,7 +32,6 @@ import {
 	mergeFlowRestrictions,
 	resolveToolDestination,
 } from "../domains/safety/information-flow.js";
-import { SYSTEM_ONE_GATE_RULE_ID } from "../domains/safety/decision-presentation.js";
 import { hashToolCall } from "../domains/safety/loop-detector.js";
 import { detectValidationCommand } from "../domains/safety/protected-artifacts.js";
 import { screensToolResult } from "../domains/system-one/sites/tool-result.js";
@@ -730,7 +730,9 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 		const refusal = deps.safety.policy?.informationFlow?.().refusal ?? null;
 		if (refusal === null) return null;
 		const isSource =
-			FLOW_SOURCE_TOOLS.has(spec.name) || isMcpToolName(spec.name) || resolveToolDestination(spec.name, call.args) !== null;
+			FLOW_SOURCE_TOOLS.has(spec.name) ||
+			isMcpToolName(spec.name) ||
+			resolveToolDestination(spec.name, call.args) !== null;
 		return isSource ? `${spec.name} refused while the information-flow policy is unavailable: ${refusal}` : null;
 	};
 

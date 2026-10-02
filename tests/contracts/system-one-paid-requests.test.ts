@@ -308,7 +308,12 @@ describe("System One paid requests: a ceiling refusal", () => {
 				cutOverrides: () => ({}),
 			});
 			try {
-				const verdict = await runner.run({ routes: [{ name: "paid", engine, digest: `refusal-${wire}`, tasks: null }] }, site, "task", {});
+				const verdict = await runner.run(
+					{ routes: [{ name: "paid", engine, digest: `refusal-${wire}`, tasks: null }] },
+					site,
+					"task",
+					{},
+				);
 				strictEqual(verdict, null);
 				strictEqual(records.length, 1);
 				strictEqual(records[0]?.outcome, "failed");

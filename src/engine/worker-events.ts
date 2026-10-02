@@ -5,9 +5,9 @@
  * events without disturbing pi-agent-core consumers.
  */
 
-import type { FlowRestrictionSet } from "../domains/safety/information-flow.js";
 import type { StructuredHelperResult } from "../domains/agents/result-contract.js";
 import type { RunOutcomeCode } from "../domains/dispatch/types.js";
+import type { FlowRestrictionSet } from "../domains/safety/information-flow.js";
 import type { ToolFinishEvent, ToolStartEvent } from "../tools/agent-tools.js";
 
 export interface ClioToolStartEvent {

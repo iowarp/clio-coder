@@ -370,7 +370,8 @@ function parseFlowSource(value: unknown, label: string, errors: string[]): FlowS
 	const paths = value.paths === undefined ? [] : parseRelativePathList(value.paths, `${label}.paths`, errors);
 	const tools = value.tools === undefined ? [] : parseToolRefList(value.tools, `${label}.tools`, errors);
 	if (value.recipients === undefined) errors.push(`${label}.recipients is required; use [] to forbid every transfer`);
-	const recipients = value.recipients === undefined ? [] : parseRecipientList(value.recipients, `${label}.recipients`, errors);
+	const recipients =
+		value.recipients === undefined ? [] : parseRecipientList(value.recipients, `${label}.recipients`, errors);
 	if (paths.length === 0 && tools.length === 0) errors.push(`${label} must name at least one path or tool`);
 	if (errors.length > before || id === undefined || recipients === undefined) return undefined;
 	return { id, paths, tools, recipients };
@@ -394,7 +395,10 @@ function parseRelativePathList(value: unknown, label: string, errors: string[]):
 			errors.push(`${entry} must be relative to the policy root`);
 			continue;
 		}
-		const segments = path.normalize(trimmed).split(path.sep).filter((segment) => segment.length > 0);
+		const segments = path
+			.normalize(trimmed)
+			.split(path.sep)
+			.filter((segment) => segment.length > 0);
 		if (segments.some((segment) => segment === "..")) {
 			errors.push(`${entry} must not escape the policy root with '..'`);
 			continue;

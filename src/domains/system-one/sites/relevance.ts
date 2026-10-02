@@ -18,9 +18,9 @@
  * times evidence.
  */
 
-import { yesNo } from "../questions.js";
 import type { CatalogCategory, CategoryGroup } from "../hierarchy.js";
 import { representative } from "../hierarchy.js";
+import { yesNo } from "../questions.js";
 import type { Question, SiteDefinition } from "../types.js";
 import { boundedHead } from "./bounds.js";
 
@@ -183,9 +183,7 @@ export const RELEVANCE_CLUSTER_SITE: SiteDefinition<ClusterObject, ClusterValue>
 		return {
 			need,
 			...(task.length > 0 && task !== need ? { task } : {}),
-			groups: Object.fromEntries(
-				object.groups.map((group) => [group.key, representative(group, MAX_GROUP_LINE_CHARS)]),
-			),
+			groups: Object.fromEntries(object.groups.map((group) => [group.key, representative(group, MAX_GROUP_LINE_CHARS)])),
 		};
 	},
 	questions(object) {

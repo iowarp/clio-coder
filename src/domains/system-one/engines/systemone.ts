@@ -146,7 +146,7 @@ export function createSystemOneEngine(input: SystemOneEngineInput): DecisionEngi
 				...(result.tokensUsed !== undefined ? { usage: result.tokensUsed } : {}),
 				...(Object.keys(abstained).length > 0 ? { abstained } : {}),
 				...(profile.renderer !== "systemone-v1" ? { rendered: sent } : {}),
-				};
+			};
 		},
 	};
 }

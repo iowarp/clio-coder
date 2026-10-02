@@ -165,7 +165,7 @@ import {
 import { expandSubmitText } from "../domains/resources/submit-expansion.js";
 import { DEFAULT_RECENT_ENTRY_LIMIT } from "../domains/safety/finish-contract.js";
 import { createFinishContractRegistration } from "../domains/safety/finish-contract-registration.js";
-import type { AutonomyLevel, SafetyContract } from "../domains/safety/index.js";
+import type { AutonomyLevel, FlowRestrictionSet, SafetyContract } from "../domains/safety/index.js";
 import {
 	EMPTY_INFORMATION_FLOW_POLICY,
 	flowTransferRefusal,
@@ -212,11 +212,8 @@ import { filterEntriesToActivePath } from "../domains/session/tree/active-path.j
 import { reseedSessionUsageFromLedger } from "../domains/session/usage-reseed.js";
 import { latestUserImages } from "../domains/session/vision-images.js";
 import { archiveCommandHost, type ShareContract, ShareDomainModule } from "../domains/share/index.js";
-import type { LlmRequestAdmission, OneShotPort } from "../domains/system-one/index.js";
-import type { FlowRestrictionSet } from "../domains/safety/index.js";
-import type { SystemOneInstance } from "../domains/system-one/index.js";
+import type { LlmRequestAdmission, OneShotPort, SystemOneInstance } from "../domains/system-one/index.js";
 import { createSystemOne } from "../domains/system-one/index.js";
-import { createFlowLedger } from "./flow-ledger.js";
 import { createFollowUpTracker, observePermissionOutcomes } from "../domains/system-one/outcomes.js";
 import { createRelevanceRanker } from "../domains/system-one/rank.js";
 import { anchorSessionRows, createRecorder, SESSION_ROW_CUSTOM_TYPE } from "../domains/system-one/recorder/index.js";
@@ -268,6 +265,7 @@ import { prepareBackgroundModelMetadata } from "./background-model-metadata.js";
 import type { BootOptions } from "./boot-options.js";
 import { readCompactionSystemPrompt } from "./compaction-prompt.js";
 import { createExtensionReloadCoordinator } from "./extension-reload.js";
+import { createFlowLedger } from "./flow-ledger.js";
 import { resolvePanesEnablement } from "./panes-activation.js";
 import { reloadPluginResourcesAndNotify } from "./plugin-reload.js";
 import { createDecisionUsageTally, createSystemOneHost, createSystemOneRequestAdmission } from "./system-one-host.js";

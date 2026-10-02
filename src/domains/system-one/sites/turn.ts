@@ -20,7 +20,7 @@
  */
 
 import { chosen } from "../answers.js";
-import type { CategoryGroup, CatalogCategory } from "../hierarchy.js";
+import type { CatalogCategory, CategoryGroup } from "../hierarchy.js";
 import { groupByCategory, representative } from "../hierarchy.js";
 import { MAX_CHOICE_OPTIONS, pick, yesNo } from "../questions.js";
 import type { Answer, Question, SiteCuts, SiteDefinition } from "../types.js";
@@ -347,15 +347,7 @@ function planHint(shape: TurnShape | null): string {
 function policy(
 	value: Pick<
 		TurnValue,
-		| "direct"
-		| "dispatch"
-		| "intent"
-		| "orientation"
-		| "breadth"
-		| "direction"
-		| "shape"
-		| "recipe"
-		| "recipeGroup"
+		"direct" | "dispatch" | "intent" | "orientation" | "breadth" | "direction" | "shape" | "recipe" | "recipeGroup"
 	>,
 	task: string,
 	cuts: SiteCuts,

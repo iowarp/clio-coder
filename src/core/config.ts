@@ -17,11 +17,11 @@ import { isAbsolute, join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import type { AutonomyLevel } from "../domains/safety/autonomy.js";
 import { AUTONOMY_LEVELS } from "../domains/safety/autonomy.js";
-import type { SiteId } from "../domains/system-one/types.js";
-import { SITE_IDS } from "../domains/system-one/types.js";
 import type { DecisionTask } from "../domains/system-one/contract.js";
 import { SITE_TASKS } from "../domains/system-one/contract.js";
 import { PROFILE_IDS } from "../domains/system-one/profiles.js";
+import type { SiteId } from "../domains/system-one/types.js";
+import { SITE_IDS } from "../domains/system-one/types.js";
 import { TURN_CONTROL_WORKFLOWS } from "../domains/turn-control/settings.js";
 import {
 	ACTIVE_AGENT_AUTOMATION_ROLES,

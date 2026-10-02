@@ -61,7 +61,11 @@ function usable(category: CatalogCategory | undefined): category is CatalogCateg
 	);
 }
 
-function split<T extends Categorized>(items: ReadonlyArray<T>, depth: number, prefix: string): Map<string, CategoryGroup<T>> {
+function split<T extends Categorized>(
+	items: ReadonlyArray<T>,
+	depth: number,
+	prefix: string,
+): Map<string, CategoryGroup<T>> {
 	const groups = new Map<string, { category: CatalogCategory; members: T[] }>();
 	for (const item of items) {
 		const category = item.categories?.[depth] as CatalogCategory;
