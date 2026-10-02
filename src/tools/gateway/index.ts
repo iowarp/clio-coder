@@ -100,42 +100,42 @@ export interface GatewayCapabilityRanking {
 
 /**
  * Ranks capabilities against what find was asked for, or returns null when it
- * has no opinion. Bound only on the session registry, from the `capabilities`
- * decision site; a worker's gateway and an unbound session never rank.
+ * has no finished opinion. It never waits. Bound only on the session registry,
+ * from the `relevance` decision site; a worker's gateway and an unbound
+ * session never rank.
  */
-export type GatewayCapabilityRanker = (
-	request: {
+export interface GatewayCapabilityRanker {
+	(request: {
 		query: string;
 		entries: ReadonlyArray<{
 			name: string;
 			description: string;
 			categories?: ReadonlyArray<{ id: string; label: string; purpose: string }>;
 		}>;
-	},
-	signal?: AbortSignal,
-) => Promise<GatewayCapabilityRanking | null>;
+	}): GatewayCapabilityRanking | null;
+	/** Whether a ranking would be asked for now, so find skips projecting its catalog for nothing. */
+	asks(): boolean;
+}
 
 /**
  * The gateway's ranker over the shared relevance ranker. Only the session has
  * one; a worker's gateway and an unbound session never rank.
  */
 export function capabilityRankerFrom(ranker: RelevanceRanker): GatewayCapabilityRanker {
-	return async (request, signal) => {
-		if (!ranker.bound()) return null;
-		const ranked = await ranker(
-			{
-				use: "capabilities",
-				need: request.query,
-				candidates: request.entries.map((entry) => ({
-					id: entry.name,
-					summary: entry.description,
-					...(entry.categories !== undefined ? { categories: entry.categories } : {}),
-				})),
-			},
-			signal,
-		);
+	const rank = (request: Parameters<GatewayCapabilityRanker>[0]): GatewayCapabilityRanking | null => {
+		if (!ranker.asks()) return null;
+		const ranked = ranker({
+			use: "capabilities",
+			need: request.query,
+			candidates: request.entries.map((entry) => ({
+				id: entry.name,
+				summary: entry.description,
+				...(entry.categories !== undefined ? { categories: entry.categories } : {}),
+			})),
+		});
 		return ranked === null ? null : { scores: ranked.scores, source: ranked.source };
 	};
+	return Object.assign(rank, { asks: () => ranker.asks() });
 }
 
 export interface GatewayToolDeps {
@@ -279,36 +279,32 @@ export function createGatewayTool(deps: GatewayToolDeps): ToolSpec {
 	});
 
 	/**
-	 * Ask the ranker, never letting it cost the find. Every failure is the
-	 * listing the substring filter already produced.
+	 * Take a finished ranking, never letting it cost the find. Every miss or
+	 * failure is the listing the substring filter already produced.
 	 */
-	const rank = async (
-		query: string,
-		entries: ReadonlyArray<GatewayCapabilityEntry>,
-		signal: AbortSignal | undefined,
-	): Promise<GatewayCapabilityRanking | null> => {
+	const rank = (query: string, entries: ReadonlyArray<GatewayCapabilityEntry>): GatewayCapabilityRanking | null => {
 		if (deps.rankCapabilities === undefined || entries.length === 0) return null;
 		try {
+			// Checked before the catalog is projected, so a site that would not be
+			// asked costs the find nothing.
+			if (!deps.rankCapabilities.asks()) return null;
 			// The one category every capability carries with a stated purpose is its
 			// action class. MCP servers declare no purpose, so they are not offered as
 			// finer categories; an `unknown` class has none, and a catalog holding one
 			// is not grouped at all.
-			return await deps.rankCapabilities(
-				{
-					query,
-					entries: entries.map((entry) => {
-						const purpose = ACTION_CLASS_PURPOSE[entry.actionClass];
-						return {
-							name: entry.name,
-							description: entry.description,
-							...(purpose !== undefined
-								? { categories: [{ id: entry.actionClass, label: `${entry.actionClass} capabilities`, purpose }] }
-								: {}),
-						};
-					}),
-				},
-				signal,
-			);
+			return deps.rankCapabilities({
+				query,
+				entries: entries.map((entry) => {
+					const purpose = ACTION_CLASS_PURPOSE[entry.actionClass];
+					return {
+						name: entry.name,
+						description: entry.description,
+						...(purpose !== undefined
+							? { categories: [{ id: entry.actionClass, label: `${entry.actionClass} capabilities`, purpose }] }
+							: {}),
+					};
+				}),
+			});
 		} catch {
 			return null;
 		}
@@ -454,7 +450,7 @@ export function createGatewayTool(deps: GatewayToolDeps): ToolSpec {
 			let related: GatewayCapabilityEntry[] = [];
 			let relatedBy: string | undefined;
 			if (!scoped && query.length === 0 && entries.length > GATEWAY_RANK_MIN_LISTING) {
-				const ranking = await rank("", entries, options?.signal);
+				const ranking = rank("", entries);
 				if (ranking !== null) {
 					entries = rankByPrecomputedScore(entries, (entry) => entry.name, ranking.scores).map((ranked) => ranked.item);
 					rankedBy = ranking.source;
@@ -466,7 +462,7 @@ export function createGatewayTool(deps: GatewayToolDeps): ToolSpec {
 				// An unbound capabilities site answers null at no cost.
 				const hits = new Set(entries.map((entry) => entry.name));
 				const others = catalogEntries.filter((entry) => !hits.has(entry.name));
-				const ranking = await rank(rawQuery, others, options?.signal);
+				const ranking = rank(rawQuery, others);
 				if (ranking !== null) {
 					related = others
 						.filter((entry) => (ranking.scores[entry.name] ?? 0) >= GATEWAY_RELATED_MIN_SCORE)

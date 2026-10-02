@@ -2454,7 +2454,6 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		systemOne,
 		flow: () => flowLedger.current(),
 		task: () => systemOneHost.task(),
-		turnKey: () => systemOneHost.turnId(),
 		tracker: followUps,
 		recording: () => getCurrentSettings().systemOne.record,
 	});

@@ -9,20 +9,21 @@ import type { MemoryPromptReader, MemoryPromptRequest } from "./prompt-cache.js"
  * eligible records than the section admits, and no ranking pinned earlier in
  * the session. Otherwise nothing is asked and the section keeps its base order.
  * The reader owns that judgment because it owns the pin, so the candidates come
- * from it. Every failure returns undefined, which is the order memory had
- * before a ranking existed.
+ * from it. The prompt never waits: a ranking is used only if it already
+ * finished, and every miss or failure returns undefined, which is the order
+ * memory had before a ranking existed.
  */
 export function createMemoryRelevance(input: {
 	reader: Pick<MemoryPromptReader, "rankingCandidates">;
 	rank: RelevanceRanker;
-}): (request: MemoryPromptRequest, signal?: AbortSignal) => Promise<PrecomputedRanking | undefined> {
-	return async (request, signal) => {
+}): (request: MemoryPromptRequest) => PrecomputedRanking | undefined {
+	return (request) => {
 		try {
-			// The cheap check first: an unbound site must not cost a store read.
-			if (!input.rank.bound()) return undefined;
+			// The cheap check first: a site that would not be asked must not cost a store read.
+			if (!input.rank.asks()) return undefined;
 			const candidates = input.reader.rankingCandidates(request);
 			if (candidates === null) return undefined;
-			const ranked = await input.rank({ use: "memory", need: request.taskText, candidates }, signal);
+			const ranked = input.rank({ use: "memory", need: request.taskText, candidates });
 			return ranked === null ? undefined : { scores: ranked.scores, source: ranked.source };
 		} catch {
 			return undefined;

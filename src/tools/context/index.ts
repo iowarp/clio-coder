@@ -483,19 +483,16 @@ async function runRankedSkillsScope(
 ): Promise<ToolResult> {
 	const listing = (typeof args.name === "string" ? args.name.trim() : "").length === 0;
 	let relevance: PrecomputedRanking | undefined;
-	if (listing && deps.rankRelevance?.bound() === true) {
+	if (listing && deps.rankRelevance?.asks() === true) {
 		try {
 			const skills = withPluginDiscoveryPass(() =>
 				modelVisibleSkills(loadSkills({ cwd: cwdFromDeps(deps), ...(deps.getSkillLoaderOptions?.() ?? {}) }).items),
 			);
-			const ranked = await deps.rankRelevance(
-				{
-					use: "skills",
-					need: typeof args.query === "string" ? args.query.trim() : "",
-					candidates: skills.map((skill) => ({ id: skill.name, summary: skill.description })),
-				},
-				options?.signal,
-			);
+			const ranked = deps.rankRelevance({
+				use: "skills",
+				need: typeof args.query === "string" ? args.query.trim() : "",
+				candidates: skills.map((skill) => ({ id: skill.name, summary: skill.description })),
+			});
 			if (ranked !== null) relevance = { scores: ranked.scores, source: ranked.source };
 		} catch {
 			// A ranking that cannot be read is simply no ranking; the listing is the

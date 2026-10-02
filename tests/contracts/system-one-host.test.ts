@@ -151,7 +151,7 @@ describe("contracts/system one host: the turn site", () => {
 		strictEqual(host.hints(), null);
 		strictEqual(host.interpretation(), undefined);
 		strictEqual(host.prewarm(), null);
-		strictEqual(host.turnId(), "turn-2", "the turn is still held for a later ranking to join");
+		strictEqual(host.task(), "look at the repo and tell me what it does", "the turn is still held for a later ranking");
 	});
 });
 

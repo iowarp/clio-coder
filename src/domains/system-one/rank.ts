@@ -3,10 +3,12 @@
  * catalog too long to show in full: the skills listing, the memory section and
  * the gateway's capability find.
  *
- * The ranker asks the `relevance` site once per distinct question in a turn and
- * remembers the answer, so a model that lists skills three times pays once. It
- * only reorders: every failure, an unbound site, an abstention or a slow engine
- * returns null and the caller keeps the order it already had.
+ * Nothing waits for a ranking. The ranker answers from a cache of finished
+ * rankings, keyed by the catalog, the question, the binding and the flow
+ * restrictions; a miss returns null at once and starts one detached call that
+ * fills the cache for the next listing that asks the same thing. It only
+ * reorders: every miss, failure, abstention or slow engine leaves the caller
+ * with the order it already had.
  */
 
 import { createHash, randomUUID } from "node:crypto";
@@ -42,36 +44,47 @@ export interface RelevanceRanking {
 }
 
 export interface RelevanceRanker {
-	(request: RelevanceRankRequest, signal?: AbortSignal): Promise<RelevanceRanking | null>;
-	/** Whether the `relevance` site has a usable binding now, so a caller can skip preparing candidates for nothing. */
-	bound(): boolean;
+	/** The finished ranking for this request, or null; a miss starts the call that fills it. Never waits. */
+	(request: RelevanceRankRequest): RelevanceRanking | null;
+	/**
+	 * Whether a ranking would be asked for now: the site is bound, and its build
+	 * is not a shadowed one with nothing recording. A caller skips preparing
+	 * candidates otherwise.
+	 */
+	asks(): boolean;
 }
 
 export interface RelevanceRankerInput {
-	readonly systemOne: Pick<SystemOne, "run" | "bound" | "shadowed"> & Partial<Pick<SystemOne, "limits">>;
+	readonly systemOne: Pick<SystemOne, "run" | "bound" | "shadowed" | "describe"> & Partial<Pick<SystemOne, "limits">>;
 	/** Whether `systemOne.record` keeps a dataset, the only thing an unfitted ranking produces. */
 	readonly recording: () => boolean;
 	/** The turn's task text, which is the need of an unfiltered listing. */
 	readonly task: () => string;
-	/** Identity of the running turn; null disables the per-turn cache. */
-	readonly turnKey: () => string | null;
 	readonly tracker?: FollowUpTracker | undefined;
 	/** The turn's inherited information-flow restrictions, passed to every ranking call unread. */
 	readonly flow?: () => unknown;
 }
 
-function digest(request: RelevanceRankRequest): string {
+/** Finished rankings kept for reuse; a session asks about a handful of catalogs. */
+const READY_RANKINGS = 32;
+
+function digest(request: RelevanceRankRequest, task: string, binding: unknown, flow: unknown): string {
 	return createHash("sha256")
 		.update(
 			JSON.stringify([
 				request.use,
 				request.need,
+				task,
 				request.candidates.map((c) => [
 					c.id,
 					c.summary,
 					// Label and purpose are question wording; a change must not reuse a cached ranking.
 					(c.categories ?? []).map((category) => [category.id, category.label, category.purpose]),
 				]),
+				// Another engine or model, or a narrower flow, must ask again rather than
+				// reuse what was answered under the old ones.
+				binding ?? null,
+				flow ?? null,
 			]),
 		)
 		.digest("hex");
@@ -91,21 +104,17 @@ function groupsFor(candidates: ReadonlyArray<RelevanceCandidate>): Grouping<Rele
 }
 
 export function createRelevanceRanker(input: RelevanceRankerInput): RelevanceRanker {
-	// Read per call: restrictions grow as the turn reads restricted sources.
-	const flowOption = (): { flow?: unknown } => {
-		const flow = input.flow?.();
-		return flow !== undefined ? { flow } : {};
-	};
+	const flowOption = (flow: unknown): { flow?: unknown } => (flow !== undefined ? { flow } : {});
 	const rankFlat = async (
 		request: RelevanceRankRequest,
 		task: string,
 		ref: string,
-		signal: AbortSignal | undefined,
+		flow: unknown,
 	): Promise<RelevanceRanking | null> => {
 		const verdict = await input.systemOne.run(
 			RELEVANCE_SITE,
 			{ use: request.use, need: request.need, task, candidates: request.candidates },
-			{ ref, ...(signal !== undefined ? { signal } : {}), ...flowOption() },
+			{ ref, ...flowOption(flow) },
 		);
 		return verdict === null ? null : { scores: verdict.value.scores, source: verdict.build, ref };
 	};
@@ -124,10 +133,8 @@ export function createRelevanceRanker(input: RelevanceRankerInput): RelevanceRan
 		request: RelevanceRankRequest,
 		task: string,
 		ref: string,
-		signal: AbortSignal | undefined,
+		flow: unknown,
 	): Promise<RelevanceRanking | null> => {
-		// A listener added below never fires for a signal that was already aborted.
-		if (signal?.aborted === true) return null;
 		const grouping = groupsFor(request.candidates);
 		if ("abstain" in grouping) return null;
 		const groups = new Map<string, CategoryGroup<RelevanceCandidate>>(grouping.groups.map((group) => [group.key, group]));
@@ -136,8 +143,6 @@ export function createRelevanceRanker(input: RelevanceRankerInput): RelevanceRan
 			() => budget.abort(new Error(`relevance hierarchy exceeded ${RELEVANCE_SITE.deadlineMs}ms`)),
 			RELEVANCE_SITE.deadlineMs,
 		);
-		const onAbort = () => budget.abort(signal?.reason);
-		signal?.addEventListener("abort", onAbort, { once: true });
 		try {
 			const clusters = await input.systemOne.run(
 				RELEVANCE_CLUSTER_SITE,
@@ -147,7 +152,7 @@ export function createRelevanceRanker(input: RelevanceRankerInput): RelevanceRan
 					task,
 					groups: grouping.groups,
 				},
-				{ ref, signal: budget.signal, ...flowOption() },
+				{ ref, signal: budget.signal, ...flowOption(flow) },
 			);
 			if (clusters === null) return null;
 			const picked = clusters.value.selected
@@ -162,7 +167,7 @@ export function createRelevanceRanker(input: RelevanceRankerInput): RelevanceRan
 					input.systemOne.run(
 						RELEVANCE_SITE,
 						{ use: request.use, need: request.need, task, candidates: members },
-						{ ref, signal: budget.signal, ...flowOption() },
+						{ ref, signal: budget.signal, ...flowOption(flow) },
 					),
 				),
 			);
@@ -182,29 +187,26 @@ export function createRelevanceRanker(input: RelevanceRankerInput): RelevanceRan
 			};
 		} finally {
 			clearTimeout(timer);
-			signal?.removeEventListener("abort", onAbort);
 		}
 	};
 
-	// One answer per use, replaced when the turn or the question changes.
-	const cache = new Map<RelevanceUse, { turn: string; key: string; ranking: RelevanceRanking | null }>();
-	const rank = async (request: RelevanceRankRequest, signal?: AbortSignal): Promise<RelevanceRanking | null> => {
+	// Finished rankings, a null among them: an engine that had no opinion or ran
+	// out of time is not asked the same question again. Oldest first.
+	const ready = new Map<string, RelevanceRanking | null>();
+	const pending = new Set<string>();
+	const remember = (key: string, ranking: RelevanceRanking | null): void => {
+		ready.delete(key);
+		ready.set(key, ranking);
+		while (ready.size > READY_RANKINGS) {
+			const oldest = ready.keys().next().value;
+			if (oldest === undefined) break;
+			ready.delete(oldest);
+		}
+	};
+
+	const fill = async (key: string, request: RelevanceRankRequest, task: string, flow: unknown): Promise<void> => {
 		try {
-			if (request.candidates.length === 0 || !input.systemOne.bound("relevance")) return null;
-			const turn = input.turnKey();
-			const key = digest(request);
-			const held = cache.get(request.use);
-			if (turn !== null && held !== undefined && held.turn === turn && held.key === key) return held.ranking;
-			// An unfitted build never reorders, so with no dataset to feed the call is
-			// pure spend: a catalog-sized request to a systemone server, or two to five
-			// requests per candidate to an LLM engine. The build is rechecked once its
-			// last answer ages out.
-			if (input.systemOne.shadowed("relevance") && !input.recording()) {
-				input.tracker?.unranked(request.use);
-				return null;
-			}
 			const ref = `rk_${randomUUID()}`;
-			const task = input.task();
 			const limits = input.systemOne.limits?.("relevance", "relevance") ?? null;
 			// Each candidate is its own yes/no, so the flat ask is bounded by the window
 			// and the flat site's candidate cap, never by an option count. Past either,
@@ -214,18 +216,52 @@ export function createRelevanceRanker(input: RelevanceRankerInput): RelevanceRan
 			const window = limits?.windowTokens ?? null;
 			const flat =
 				request.candidates.length <= RELEVANCE_MAX_CANDIDATES && (window === null || flatTokens(request, task) <= window);
-			const ranking = flat
-				? await rankFlat(request, task, ref, signal)
-				: await rankHierarchical(request, task, ref, signal);
-			// A null is cached too: a slow engine must not be asked again by the next
-			// listing in the same turn. A caller's abort is not the engine's answer.
-			if (turn !== null && signal?.aborted !== true) cache.set(request.use, { turn, key, ranking });
-			if (ranking !== null) input.tracker?.ranked(request.use, ref, ranking.scores);
-			else if (signal?.aborted !== true) input.tracker?.unranked(request.use);
-			return ranking;
+			remember(key, flat ? await rankFlat(request, task, ref, flow) : await rankHierarchical(request, task, ref, flow));
+		} catch {
+			// A fill that failed leaves the key unanswered, so the next listing asks again.
+		} finally {
+			pending.delete(key);
+		}
+	};
+
+	// An unfitted build never reorders, so with no dataset to feed a call is pure
+	// spend: a catalog-sized request to a systemone server, or two to five requests
+	// per candidate to an LLM engine. The build is rechecked once its last answer
+	// ages out.
+	const asks = (): boolean => {
+		try {
+			if (!input.systemOne.bound("relevance")) return false;
+			return !input.systemOne.shadowed("relevance") || input.recording();
+		} catch {
+			return false;
+		}
+	};
+
+	const rank = (request: RelevanceRankRequest): RelevanceRanking | null => {
+		try {
+			if (request.candidates.length === 0 || !asks()) {
+				input.tracker?.unranked(request.use);
+				return null;
+			}
+			const task = input.task();
+			const flow = input.flow?.();
+			const binding = input.systemOne.describe().find((info) => info.site === "relevance");
+			const key = digest(request, task, binding, flow);
+			const ranking = ready.get(key);
+			if (ranking !== undefined) {
+				if (ranking !== null) input.tracker?.ranked(request.use, ranking.ref, ranking.scores);
+				else input.tracker?.unranked(request.use);
+				return ranking;
+			}
+			if (!pending.has(key)) {
+				pending.add(key);
+				void fill(key, request, task, flow);
+			}
+			input.tracker?.unranked(request.use);
+			return null;
 		} catch {
 			return null;
 		}
 	};
-	return Object.assign(rank, { bound: () => input.systemOne.bound("relevance") });
+	return Object.assign(rank, { asks });
 }

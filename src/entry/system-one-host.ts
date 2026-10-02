@@ -245,8 +245,6 @@ export interface SystemOneHost {
 	clearVerdict(): void;
 	/** The task text of the last operator turn, for a catalog ranking asked for mid-turn. */
 	task(): string;
-	/** The user turn id of the last operator turn, the join key of a mid-turn ranking. */
-	turnId(): string | null;
 	/** Drop the operator texts kept in memory. The next turn-end reading reads the ledger once. */
 	forgetOperatorTexts(): void;
 	/**
@@ -473,7 +471,6 @@ export function createSystemOneHost(deps: SystemOneHostDeps): SystemOneHost {
 		},
 
 		task: () => turn?.task ?? "",
-		turnId: () => turn?.id ?? null,
 
 		forgetOperatorTexts() {
 			operatorTexts = { session: null, seeded: false, turns: [] };
