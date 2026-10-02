@@ -44,6 +44,19 @@ export function isSameOrDescendant(candidatePath: string, policyPath: string): b
 	return relative === "" || (relative !== ".." && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative));
 }
 
+/**
+ * {@link isSameOrDescendant} for two paths that are already resolved (a
+ * canonicalized target and a compiled entry path). Admission tests one target
+ * against every entry, and a directory walk tests thousands of targets, so the
+ * two `path.resolve` calls and the `path.relative` per pair dominated its cost.
+ */
+function isSameOrDescendantResolved(candidate: string, policyPath: string): boolean {
+	// path.relative compares case-insensitively on Windows; a string prefix does not.
+	if (process.platform === "win32") return isSameOrDescendant(candidate, policyPath);
+	if (candidate === policyPath) return true;
+	return candidate.startsWith(policyPath.endsWith(path.sep) ? policyPath : `${policyPath}${path.sep}`);
+}
+
 function expandTilde(rawPath: string): string {
 	if (rawPath === "~") return homedir();
 	if (rawPath.startsWith("~/")) return path.join(homedir(), rawPath.slice(2));
@@ -124,7 +137,7 @@ function matchesEntry(
 	normalizedRelativeTarget: string,
 	normalizedRawTarget: string,
 ): boolean {
-	if (isSameOrDescendant(resolvedTarget, entry.path)) return true;
+	if (isSameOrDescendantResolved(resolvedTarget, entry.path)) return true;
 	if (entry.pattern === undefined) return false;
 	return (
 		entry.pattern.test(normalizedResolvedTarget) ||
