@@ -1,4 +1,5 @@
-import { type Api, createModels, type KnownProvider, type Model } from "@earendil-works/pi-ai";
+import type { Api, KnownProvider, Model } from "@earendil-works/pi-ai";
+import { createModels } from "@earendil-works/pi-ai/models";
 import { amazonBedrockProvider } from "@earendil-works/pi-ai/providers/amazon-bedrock";
 import { anthropicProvider } from "@earendil-works/pi-ai/providers/anthropic";
 import { deepseekProvider } from "@earendil-works/pi-ai/providers/deepseek";
