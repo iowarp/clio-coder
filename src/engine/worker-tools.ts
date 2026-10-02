@@ -137,8 +137,12 @@ export function createWorkerSafety(options: WorkerSafetyOptions = {}): SafetyCon
 		isSubset,
 		policy: {
 			informationFlow: () => informationFlow,
+			// With no rules there is nothing to label, and resolving the call's cwd
+			// is a filesystem walk every worker edit and write would pay for.
 			flowRestrictionsFor: (rawCall) =>
-				flowRestrictionsForCall(informationFlow, flowSourceCallFor(rawCall, options.cwd ?? process.cwd())),
+				informationFlow.rules.length === 0
+					? null
+					: flowRestrictionsForCall(informationFlow, flowSourceCallFor(rawCall, options.cwd ?? process.cwd())),
 			metadata: (posture) => policyEngine.metadata(posture),
 			writeTargetViolation: (target) => workerReadOnlyTargetViolation(target) ?? policyEngine.writeTargetViolation(target),
 			allowsObservationPath: (path) =>
