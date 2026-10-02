@@ -38,6 +38,9 @@ export interface AppliedEditsResult {
 export interface EditDiffResult {
 	diff: string;
 	firstChangedLine: number | undefined;
+	/** Line counts of the whole change; the diff text itself is capped. */
+	addedLines: number;
+	removedLines: number;
 }
 
 export function normalizeToLF(text: string): string {
@@ -436,6 +439,8 @@ export function generateDiffString(oldContent: string, newContent: string, conte
 	let newLineNum = 1;
 	let lastWasChange = false;
 	let firstChangedLine: number | undefined;
+	let addedLines = 0;
+	let removedLines = 0;
 
 	for (let i = 0; i < parts.length; i += 1) {
 		const part = parts[i];
@@ -448,6 +453,8 @@ export function generateDiffString(oldContent: string, newContent: string, conte
 
 		if (part.added || part.removed) {
 			firstChangedLine ??= newLineNum;
+			if (part.added) addedLines += raw.length;
+			else removedLines += raw.length;
 			for (const line of raw) {
 				if (part.added) {
 					output.push(`+${String(newLineNum).padStart(lineNumWidth, " ")} ${line}`);
@@ -523,5 +530,5 @@ export function generateDiffString(oldContent: string, newContent: string, conte
 	}
 
 	const diff = truncateUtf8(output.join("\n"), MAX_DIFF_BYTES, "\n… diff truncated (details capped)");
-	return { diff, firstChangedLine };
+	return { diff, firstChangedLine, addedLines, removedLines };
 }

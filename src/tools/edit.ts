@@ -148,7 +148,7 @@ function prepareEditArguments(args: Record<string, unknown>): Record<string, unk
 export const editTool: ToolSpec = {
 	name: ToolNames.Edit,
 	description:
-		"Edit one file with exact text replacements. Each oldText must match a unique region of the original file. Matching tries exact text first, then quote/dash/NFKC and trailing-space normalization, then indentation relaxation. Files above 1 MiB require exact matches and skip diffs to bound allocation. Refuses NUL bytes, invalid UTF-8, and mixed or bare-CR line endings. LF replacement text adopts the file’s LF or CRLF endings; the UTF-8 BOM is preserved. Publishes atomically through symlinks with mode bits preserved. External writers are not locked; the last rename wins. Returned file identities describe publication, not a precondition on an earlier model read.",
+		"Change part of one existing file with exact text replacements; use it instead of rewriting the whole file with write. Each oldText must match a unique region of the original file. Matching tries exact text first, then quote/dash/NFKC and trailing-space normalization, then indentation relaxation. Files above 1 MiB require exact matches and skip diffs to bound allocation. Refuses NUL bytes, invalid UTF-8, and mixed or bare-CR line endings. LF replacement text adopts the file’s LF or CRLF endings; the UTF-8 BOM is preserved. Publishes atomically through symlinks with mode bits preserved. External writers are not locked; the last rename wins. Returned file identities describe publication, not a precondition on an earlier model read.",
 	parameters: Type.Object({
 		path: Type.String({ description: "File path (relative or absolute)." }),
 		edits: Type.Array(editEntrySchema, { description: "One or more targeted replacements." }),

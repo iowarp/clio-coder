@@ -1,15 +1,33 @@
 import { open, stat } from "node:fs/promises";
 import { Type } from "typebox";
 import { ToolNames } from "../core/tool-names.js";
-import { generateDiffString } from "./edit-diff.js";
+import { type EditDiffResult, generateDiffString } from "./edit-diff.js";
 import { publishFileAtomically, withFileMutationQueue } from "./file-mutation-queue.js";
 import { resolveMutationTarget } from "./path-utils.js";
 import type { ToolResult, ToolSpec } from "./registry.js";
 
+/** Below this many lines a whole-file rewrite costs about as much as an edit. */
+const PARTIAL_REWRITE_MIN_LINES = 20;
+
+/**
+ * A rewrite that left at least two thirds of an existing file in place was a
+ * partial change sent as the whole file. A local model trimming a notes file
+ * rewrote it with write six times in one run and never called edit, resending
+ * every line each time. The note steers the next change to edit without
+ * refusing this write: a deliberate full rewrite stays legitimate.
+ */
+function partialRewriteNote(previousContent: string, diff: EditDiffResult): string | null {
+	const oldLines = previousContent.split("\n").length - (previousContent.endsWith("\n") ? 1 : 0);
+	if (oldLines < PARTIAL_REWRITE_MIN_LINES) return null;
+	const kept = oldLines - diff.removedLines;
+	if (kept * 3 < (kept + Math.max(diff.removedLines, diff.addedLines)) * 2) return null;
+	return `${kept} of ${oldLines} lines were unchanged. For a partial change to an existing file use edit, which sends only the replaced text; keep write for new files and full rewrites.`;
+}
+
 export const writeTool: ToolSpec = {
 	name: ToolNames.Write,
 	description:
-		"Write a UTF-8 text file, creating parent directories and overwriting existing files. Publishes atomically through symlinks, preserving mode bits. In-process writes are serialized; external writers are not locked and the last rename wins. Use edit for surgical changes.",
+		"Create a UTF-8 text file, or replace an existing file's entire contents, creating parent directories. For a partial change to an existing file use edit, which sends only the replaced text; keep write for new files and full rewrites. Publishes atomically through symlinks, preserving mode bits. In-process writes are serialized; external writers are not locked and the last rename wins.",
 	parameters: Type.Object({
 		path: Type.String({ description: "File path (relative or absolute)." }),
 		content: Type.String({ description: "Full UTF-8 file contents." }),
@@ -25,7 +43,7 @@ export const writeTool: ToolSpec = {
 		const { path: filePath, physical } = resolveMutationTarget(pathArg);
 		try {
 			const bytes = Buffer.byteLength(content, "utf8");
-			const { file, diff, previousEndedWithNewline, skipDiff, unchanged } = await withFileMutationQueue(
+			const { file, diff, previousEndedWithNewline, skipDiff, unchanged, partialRewrite } = await withFileMutationQueue(
 				filePath,
 				async () => {
 					const previous = await stat(filePath).catch((error: NodeJS.ErrnoException) => {
@@ -53,17 +71,23 @@ export const writeTool: ToolSpec = {
 							await handle.close();
 						}
 					}
-					const diff = skipDiff ? undefined : generateDiffString(previousContent, content).diff;
+					const diffResult = skipDiff ? undefined : generateDiffString(previousContent, content);
+					const diff = diffResult?.diff;
 					const file = await publishFileAtomically(filePath, content, {
 						...(options?.writeTargetViolation ? { admitTarget: options.writeTargetViolation } : {}),
 					});
+					// Only a diffed overwrite can prove the bytes did not change.
+					const unchanged = previous !== null && !skipDiff && previousContent === content;
 					return {
 						file,
 						diff,
 						previousEndedWithNewline: previousContent.endsWith("\n"),
 						skipDiff,
-						// Only a diffed overwrite can prove the bytes did not change.
-						unchanged: previous !== null && !skipDiff && previousContent === content,
+						unchanged,
+						partialRewrite:
+							previous !== null && diffResult !== undefined && !unchanged
+								? partialRewriteNote(previousContent, diffResult)
+								: null,
 					};
 				},
 				physical,
@@ -74,6 +98,7 @@ export const writeTool: ToolSpec = {
 			if (previousEndedWithNewline && !content.endsWith("\n")) {
 				output += `\nnote: ${pathArg} no longer ends with a newline; the previous content did`;
 			}
+			if (partialRewrite !== null) output += `\nnote: ${partialRewrite}`;
 			// The transcript ledger sizes a call from details.observation.shownBytes
 			// before it falls back to the length of the returned text. A write's
 			// text is a confirmation sentence, so without this the ledger printed

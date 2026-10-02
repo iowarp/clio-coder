@@ -219,14 +219,14 @@ const TOOL_METADATA: Readonly<Record<string, ToolMetadata>> = {
 	},
 	// MUTATE: write-class, sequential, file-mutation queue.
 	[ToolNames.Write]: {
-		objective: "Write a complete UTF-8 file.",
+		objective: "Create a file, or replace all of an existing file.",
 		uiLabel: "Write",
 		retrySafety: "not_retry_safe",
 		resultSizePolicy: exactMutationPolicy,
 		costLatency: "local_fast",
 	},
 	[ToolNames.Edit]: {
-		objective: "Apply exact text replacements to one file.",
+		objective: "Change part of an existing file by exact text replacement.",
 		uiLabel: "Edit",
 		retrySafety: "not_retry_safe",
 		resultSizePolicy: exactMutationPolicy,
