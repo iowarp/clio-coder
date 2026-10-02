@@ -171,8 +171,22 @@
 	.installer-next .text-link {
 		font-size: 0.8rem;
 	}
-	.hero-copy .installer + .actions {
+	/* The hero offers one command; every other method lives in the install chapter. */
+	.hero-try {
+		max-inline-size: 36rem;
+		margin-block-start: 2.5rem;
+	}
+	.hero-try .eyebrow {
+		margin-block-end: 0.75rem;
+	}
+	.hero-try-links {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.5rem 2rem;
 		margin-block-start: 1.25rem;
+	}
+	.install-steps .installer {
+		margin-block: 0.75rem 1rem;
 	}
 	.hero-portrait {
 		min-inline-size: 0;

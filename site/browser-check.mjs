@@ -131,7 +131,7 @@ try {
 	await page.reload();
 	assert.notEqual(await page.locator("html").getAttribute("data-theme"), initial, "Theme preference persists");
 	await page.locator("#start").scrollIntoViewIfNeeded();
-	await page.locator("#start .code-block .copy").first().click();
+	await page.locator("#start .installer [data-copy]").first().click();
 	assert.equal(
 		await page.evaluate(() => navigator.clipboard.readText()),
 		"curl -fsSL https://coder.iowarp.ai/install.sh | sh",
@@ -151,12 +151,12 @@ try {
 	assert.equal(missing.status(), 404);
 	assert.match(await page.locator("h1").innerText(), /back/);
 	await page.goto(`${values.url}/?__static=1`);
-	const copied = page.locator("#start .code-block .copy").first();
+	const copied = page.locator("#start .installer [data-copy]").first();
 	await copied.click();
 	await copied.click();
 	await expectCopyReset();
 	async function expectCopyReset() {
-		await page.waitForFunction(() => document.querySelector("#start .code-block .copy")?.textContent === "Copy");
+		await page.waitForFunction(() => document.querySelector("#start .installer [data-copy]")?.title === "Copy");
 		assert.equal(await copied.getAttribute("data-copy-state"), null, "Repeated copying restores the normal state");
 	}
 	await page.locator(".faq-items summary").first().click();
