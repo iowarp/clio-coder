@@ -151,6 +151,7 @@ export interface TurnContextDeps {
 					| "signal"
 					| "beforeSummaryCall"
 					| "checkpointForSummary"
+					| "checkpointTokenFigures"
 				>,
 		  ) => Promise<CompactResult | null>)
 		| undefined;
@@ -785,16 +786,20 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 	};
 
 	let pendingUserImages: ReadonlyArray<unknown> = [];
-	const liveContextEstimate = (agentRuntime: AgentRuntime, pendingUserText?: string): LiveContextEstimate => {
+	const liveContextEstimate = (
+		agentRuntime: AgentRuntime,
+		pendingUserText?: string,
+		replayMessages?: ReadonlyArray<AgentMessage>,
+	): LiveContextEstimate => {
 		const contextWindow = agentRuntime.runtimeResolution.contextWindowDetails.effectiveContextWindow;
 		const estimateInput = {
 			systemPrompt: agentRuntime.agent.state.systemPrompt,
-			messages: agentRuntime.agent.state.messages.filter((message) => message.role !== "system"),
+			messages: (replayMessages ?? agentRuntime.agent.state.messages).filter((message) => message.role !== "system"),
 			tools: agentRuntime.agent.state.tools,
 			...(pendingUserText !== undefined ? { pendingUserText, pendingUserImages } : {}),
 		};
 		const breakdown = estimateAgentContextBreakdown(estimateInput);
-		const historyTokens = reconciledHistoryTokens(agentRuntime);
+		const historyTokens = replayMessages === undefined ? reconciledHistoryTokens(agentRuntime) : null;
 		const anchor = reconciledAnchor;
 		// Provider usage already includes the old system prompt and schemas.
 		// Price only positive growth, separately: shrinking one must not hide
@@ -1519,6 +1524,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 					| "signal"
 					| "beforeSummaryCall"
 					| "checkpointForSummary"
+					| "checkpointTokenFigures"
 			  >
 			| undefined = skillContextState !== undefined ? { skillContextState } : undefined;
 		if (pendingUserText !== undefined && state.activeUserTurnId === null && pendingUserIsOperator)
@@ -1554,6 +1560,19 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 							...budget,
 							...handoff,
 							signal: summarySignal,
+							checkpointTokenFigures: (entry) => {
+								const messages = buildModelReplayAgentMessagesFromTurns(
+									[...(deps.readSessionEntries?.() ?? []), { ...entry, timestamp: new Date().toISOString() }],
+									{
+										...(state.lastTurnId ? { activeLeafTurnId: state.lastTurnId } : {}),
+										continuity: continuityContextFromSession(deps.session),
+									},
+								);
+								return {
+									tokensBefore: footerTokensBefore,
+									tokensAfter: liveContextEstimate(agentRuntime, pendingUserText, messages).tokens,
+								};
+							},
 							beforeSummaryCall: async () => {
 								await (handoff?.beforeSummaryCall ?? budget?.beforeSummaryCall)?.();
 								if (!summaryLifecycleStarted) startSummaryLifecycle();

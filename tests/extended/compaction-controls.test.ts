@@ -45,6 +45,10 @@ import {
 } from "../../src/interactive/application-controller.js";
 import { createChatLoop } from "../../src/interactive/chat-loop.js";
 import { buildModelReplayAgentMessagesFromTurns } from "../../src/interactive/model-session-replay.js";
+import {
+	renderCompactionSummaryEntry,
+	renderCompactionSummaryLine,
+} from "../../src/interactive/renderers/compaction-summary.js";
 import { createTurnContext } from "../../src/interactive/turn-context.js";
 import type { TurnMiddleware } from "../../src/interactive/turn-middleware.js";
 import { type AgentRuntime, createTurnState } from "../../src/interactive/turn-state.js";
@@ -1120,6 +1124,7 @@ describe("production compaction controls", () => {
 			const recorded: unknown[][] = [];
 			const bus = createSafeEventBus();
 			const pruned: ContextPrunedPayload[] = [];
+			const notices: string[] = [];
 			bus.on(BusChannels.ContextPruned, (event) => {
 				pruned.push(event as ContextPrunedPayload);
 			});
@@ -1131,8 +1136,8 @@ describe("production compaction controls", () => {
 				getSettings: () => f.settings,
 				providers: f.providers,
 				readSessionEntries: f.entries,
-				autoCompact: async () => {
-					const result = await f.run();
+				autoCompact: async (...args) => {
+					const result = await f.run(...args);
 					if (legacy && result?.usage) {
 						delete result.usage.targetId;
 						delete result.usage.modelId;
@@ -1141,7 +1146,7 @@ describe("production compaction controls", () => {
 				},
 				observability: { recordTokens: (...args: unknown[]) => recorded.push(args) } as unknown as ObservabilityContract,
 				middleware: { fireCompactionHook: () => {} } as unknown as TurnMiddleware,
-				emitNotice: () => {},
+				emitNotice: (text) => notices.push(text),
 			});
 			const runtime = {
 				targetId: "chat-target",
@@ -1193,10 +1198,18 @@ describe("production compaction controls", () => {
 			}
 			const checkpoint = f.entries().find((entry) => entry.kind === "compactionSummary");
 			ok(checkpoint?.kind === "compactionSummary");
-			ok(
-				checkpoint.tokensBefore < event.tokensAfter,
-				"ledger history accounting remains separate from full-runtime estimates",
-			);
+			strictEqual(checkpoint.tokensBefore, event.tokensBefore);
+			strictEqual(checkpoint.tokensAfter, event.tokensAfter);
+			const liveLine = renderCompactionSummaryLine({
+				messagesSummarized: checkpoint.messagesSummarized ?? 0,
+				summaryChars: checkpoint.summary.length,
+				tokensBefore: event.tokensBefore,
+				tokensAfter: event.tokensAfter,
+			});
+			ok(notices.includes(liveLine));
+			const figures = liveLine.match(/compacted (.+? tokens)/u)?.[1];
+			ok(figures);
+			ok(renderCompactionSummaryEntry(checkpoint, 200).join("\n").includes(figures));
 			strictEqual(recorded.length, 1);
 			deepStrictEqual(recorded[0]?.slice(0, 2), legacy ? ["chat-target", "chat"] : ["summary-target", "summary"]);
 			strictEqual(recorded[0]?.[5], legacy ? "known_free" : "unknown");

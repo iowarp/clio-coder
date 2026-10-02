@@ -29,6 +29,7 @@ import {
 	skillContextContentHash,
 	verifiedSkillContextCheckpoint,
 } from "../entries.js";
+import type { CompactionSummaryEntry } from "../entries.js";
 import { serializeConversation } from "./branch-summary.js";
 import { findCutPoint } from "./cut-point.js";
 import { DEFAULT_KEEP_RECENT_TOKENS, DEFAULT_RESERVE_TOKENS } from "./defaults.js";
@@ -152,6 +153,11 @@ export interface CompactionCallObservation {
 export interface CompactInput {
 	/** Admission after exact request-fit, before each provider call. */
 	beforeSummaryCall?: (() => void | Promise<void>) | undefined;
+	/** Price the proposed replay before persisting the operator-visible figures. */
+	checkpointTokenFigures?: (entry: Readonly<Omit<CompactionSummaryEntry, "timestamp">>) => {
+		tokensBefore: number;
+		tokensAfter: number;
+	};
 	checkpointForSummary?:
 		| ((summaryRef: string, tokensBefore: number, tokensAfter: number) => ContinuityCheckpointPayload)
 		| undefined;

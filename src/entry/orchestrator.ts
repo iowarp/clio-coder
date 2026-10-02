@@ -1048,6 +1048,7 @@ async function runCompactionFlow(
 		| "signal"
 		| "beforeSummaryCall"
 		| "checkpointForSummary"
+		| "checkpointTokenFigures"
 	>,
 	summarize?: CompactInput["summarize"],
 	admission?: {
@@ -1229,6 +1230,11 @@ async function runCompactionFlow(
 		// report`, which folded the ledger and so counted every call but this one.
 		...(result.usage !== undefined ? { usage: result.usage } : {}),
 	};
+	if (budget?.checkpointTokenFigures) {
+		const figures = budget.checkpointTokenFigures(entry);
+		entry.tokensBefore = figures.tokensBefore;
+		entry.tokensAfter = figures.tokensAfter;
+	}
 	if (budget?.checkpointForSummary) {
 		entry.continuity = budget.checkpointForSummary(entry.turnId, entry.tokensBefore, entry.tokensAfter ?? 0);
 	}
@@ -1305,6 +1311,7 @@ export function createProductionAutoCompact(
 		| "signal"
 		| "beforeSummaryCall"
 		| "checkpointForSummary"
+		| "checkpointTokenFigures"
 	>,
 ) => Promise<CompactResult | null> {
 	return (instructions, trigger, budget) =>

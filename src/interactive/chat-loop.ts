@@ -787,6 +787,7 @@ export interface CreateChatLoopDeps {
 			| "signal"
 			| "beforeSummaryCall"
 			| "checkpointForSummary"
+			| "checkpointTokenFigures"
 		>,
 	) => Promise<CompactResult | null>;
 	/** Optional observability sink for orchestrator chat token usage. */
