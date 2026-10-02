@@ -58,21 +58,33 @@ export function createFlowLedger(deps: {
 	let carried: FlowRestrictionSet | null = null;
 	let readFailure: string | null = null;
 	const known = new Map<string, FlowRestrictionSet>();
-	/** Sets absorbed in this process whose entry has not yet reached that session's ledger. */
-	const pending = new Map<string, Array<{ set: FlowRestrictionSet; origin: { tool?: string; toolCallId?: string } }>>();
+	/** Unpersisted sets; the null key holds reads awaiting their first session (R5). */
+	const pending = new Map<
+		string | null,
+		Array<{ set: FlowRestrictionSet; origin: { tool?: string; toolCallId?: string } }>
+	>();
 	let writeFailure: string | null = null;
 
 	const sync = (): void => {
 		const meta = deps.session?.current() ?? null;
 		const id = meta?.id ?? null;
 		if (id === loadedFor) return;
+		if (id !== null) {
+			const unassigned = pending.get(null);
+			if (unassigned !== undefined) {
+				pending.set(id, [...(pending.get(id) ?? []), ...unassigned]);
+				pending.delete(null);
+			}
+		}
 		if (id !== loadedFor) {
 			// A different session: its ledger is the only authority for what it
 			// carries. Entries still pending for the old session stay queued under
 			// its id and are written when it is current again.
 			writeFailure = null;
-			carried =
-				id === null ? null : mergeFlowRestrictions(known.get(id), ...(pending.get(id) ?? []).map((item) => item.set));
+			carried = mergeFlowRestrictions(
+				id === null ? null : known.get(id),
+				...(pending.get(id) ?? []).map((item) => item.set),
+			);
 		}
 		loadedFor = id;
 		if (id === null) {
@@ -149,7 +161,7 @@ export function createFlowLedger(deps: {
 			const before = carried?.restrictions.length ?? 0;
 			carried = merged;
 			if (loadedFor !== null && carried !== null) known.set(loadedFor, carried);
-			if (merged !== null && merged.restrictions.length > before && loadedFor !== null) {
+			if (merged !== null && merged.restrictions.length > before) {
 				const queue = pending.get(loadedFor) ?? [];
 				queue.push({ set, origin });
 				pending.set(loadedFor, queue);
