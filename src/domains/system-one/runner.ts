@@ -142,6 +142,7 @@ export function createRunner(deps: RunnerDeps): Runner {
 	// slow answer, and the call goes on to record it whenever it settles, so a
 	// process that exits in between would lose the row without something to wait on.
 	const inflight = new Set<Promise<unknown>>();
+	const knownBuilds = new Map<string, { build: string; at: number }>();
 	const answered = new Map<string, { identity: string; contract: CallContract; at: number }>();
 
 	function sessionAtStart(): string | null | undefined {
@@ -371,8 +372,34 @@ export function createRunner(deps: RunnerDeps): Runner {
 			return null;
 		}
 
+		let overrides: ReturnType<typeof deps.cutOverrides> | undefined;
+		try {
+			overrides = deps.cutOverrides();
+		} catch {
+			// Unreadable overrides grant no operator cut.
+		}
 		for (const plan of live) {
 			const { route } = plan;
+			if (site.requiredCut !== undefined) {
+				const known = knownBuilds.get(route.digest);
+				const build =
+					known !== undefined && performance.now() - known.at <= ANSWERED_BUILD_TTL_MS ? known.build : route.engine.model;
+				const compactVersion = Object.keys(plan.compact).length > 0 ? site.compact?.version : undefined;
+				const identity =
+					build === null ? null : thresholdIdentity(build, route.engine.renderer, site.version, compactVersion);
+				const cut =
+					identity === null
+						? undefined
+						: cutsFor(identity, site.id, overrides, {
+								siteVersion: site.version,
+								renderer: route.engine.renderer,
+							}).cut(site.requiredCut);
+				if (cut === undefined) {
+					plan.outcome = "unsupported";
+					plan.error = `decision ${site.id}/${site.moment ?? "main"} requires a ${site.requiredCut} cut for the engine identity`;
+					continue;
+				}
+			}
 			// Laya keeps the head of an oversized state and CLM the tail, both
 			// silently, so evidence at the far end is simply not read. An LLM engine
 			// truncates or errors at its own window. Asking nothing is the only answer
@@ -506,13 +533,6 @@ export function createRunner(deps: RunnerDeps): Runner {
 			return null;
 		}
 
-		let overrides: ReturnType<typeof deps.cutOverrides> | undefined;
-		try {
-			overrides = deps.cutOverrides();
-		} catch {
-			// Unreadable settings leave the fitted table alone, and the call still
-			// leaves its one record instead of vanishing with the answer in hand.
-		}
 		const answers: Record<string, Answer> = {};
 		for (const plan of replied) {
 			const reply = plan.reply as EngineReply;
@@ -528,7 +548,8 @@ export function createRunner(deps: RunnerDeps): Runner {
 				siteVersion: site.version,
 				renderer: plan.route.engine.renderer,
 			});
-			answered.set(`${plan.route.digest}|${site.id}`, {
+			knownBuilds.set(plan.route.digest, { build: reply.build, at: performance.now() });
+			answered.set(`${plan.route.digest}|${site.id}${site.moment === undefined ? "" : `|${site.moment}`}`, {
 				identity: plan.identity,
 				contract: { siteVersion: site.version, renderer: plan.route.engine.renderer },
 				at: performance.now(),

@@ -153,6 +153,8 @@ export interface SiteDefinition<O, V> {
 	 * opens the gate's.
 	 */
 	readonly moment?: string;
+	/** Skip this optional follow-up unless its engine identity has this cut. */
+	readonly requiredCut?: string;
 	/**
 	 * Short wordings for renderers with a declared per-option bound, keyed by
 	 * question id. They are the site's own text under their own version, which

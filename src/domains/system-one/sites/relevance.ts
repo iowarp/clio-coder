@@ -166,13 +166,14 @@ export interface ClusterValue {
  * category from its stated purpose is not judging an entry, so neither Jev's
  * `relevance.ranked` marker nor any entry-level measurement validates it. A
  * build selects groups only once `relevance.clusters` has a cut for it, and is
- * otherwise asked and recorded in shadow. Each group is an independent yes/no,
+ * otherwise skipped before any request. Each group is an independent yes/no,
  * so "none of these" is every group answered below the cut, which abstains.
  */
 export const RELEVANCE_CLUSTER_SITE: SiteDefinition<ClusterObject, ClusterValue> = {
 	id: "relevance",
 	version: "relevance-cluster-v2",
 	moment: "clusters",
+	requiredCut: "clusters",
 	deadlineMs: 1500,
 	taskOf: () => "clusterSelect",
 	cutTask: () => "clusterSelect",
