@@ -10,7 +10,9 @@ import {
 	type Component,
 	lexMarkdownBlocks,
 	Markdown,
+	Marked,
 	stripTerminalSequences,
+	type Tokens,
 	truncateToWidth,
 	visibleWidth,
 	wrapTextWithAnsi,
@@ -66,12 +68,12 @@ import { type TranscriptDetailPolicy, transcriptDetail } from "./transcript-deta
 import type { ViewArtifact } from "./view/artifacts.js";
 import type { WorkerEntryState } from "./worker-stream.js";
 
-// Fenced code reaches the screen through pi-tui's Markdown component, which
-// exposes the MarkdownTheme.highlightCode hook: it hands over the raw fence
-// text plus its language tag before pi-tui draws the fence borders and indent.
-// Wiring code ink through that hook colors only the ink, so the fence frame,
-// indentation, and width behavior stay pi-tui's and nothing post-processes
-// already-rendered output.
+// A top-level code block is drawn by `codeBlockRows` below. Fenced code nested
+// in a list or quote still reaches the screen through pi-tui's Markdown
+// component, which exposes the MarkdownTheme.highlightCode hook: it hands over
+// the raw fence text plus its language tag before pi-tui draws the fence
+// borders and indent. Wiring code ink through that hook colors only the ink,
+// and nothing post-processes already-rendered output.
 const CHAT_MARKDOWN_THEME = markdownTheme(clioTheme(), (code, lang) => codeInk(lang, code.split("\n")));
 const CHAT_MARKDOWN_OPTIONS = {
 	transform: createMermaidMarkdownTransform(clioTheme()),
@@ -706,7 +708,11 @@ interface MarkdownChunk {
 	raw: string;
 	firstType: string;
 	lastType: string;
-	md: Markdown;
+	/** Renders the chunk; absent for a code block Clio draws itself. */
+	md?: Markdown;
+	code?: CodeBlock;
+	/** Rows of `code` at one width; a finished block is not inked or wrapped again per frame. */
+	codeRows?: { width: number; rows: string[] };
 }
 
 interface MarkdownBlocks {
@@ -758,6 +764,76 @@ function blankBetweenBlocks(previousLast: string, nextFirst: string): boolean {
 	if (previousLast === "space" || nextFirst === "space") return false;
 	if (previousLast === "paragraph") return nextFirst !== "list";
 	return ["heading", "code", "blockquote", "hr", "latexBlock", "table"].includes(previousLast);
+}
+
+/**
+ * A top-level code block. pi-tui's Markdown draws one between literal
+ * ```lang and ``` rows and wraps a long code row back to column 0 after its
+ * indent, so the transcript draws it itself: the language as a quiet label
+ * row, then the ink rows with wrapped rows hung under the same indent.
+ */
+interface CodeBlock {
+	lang: string | undefined;
+	text: string;
+	/** A blank-line token follows the block, which Markdown renders as one blank row. */
+	blankAfter: boolean;
+}
+
+const CODE_INDENT = "  ";
+const codeBlockParser = new Marked();
+
+/**
+ * The code block a chunk holds, or null when Markdown should render it: a
+ * Mermaid fence goes through the Mermaid transform, and anything but a lone
+ * code token is not this function's to draw.
+ */
+function parseCodeChunk(raw: string): CodeBlock | null {
+	let token: Tokens.Code | undefined;
+	let blankAfter = false;
+	for (const next of codeBlockParser.lexer(raw)) {
+		if (next.type === "space") {
+			blankAfter = token !== undefined;
+			continue;
+		}
+		if (next.type !== "code" || token !== undefined) return null;
+		token = next as Tokens.Code;
+	}
+	if (token === undefined) return null;
+	const lang = token.lang?.trim().split(/\s+/u, 1)[0] || undefined;
+	if (lang?.toLowerCase() === "mermaid") return null;
+	let text = token.text;
+	// A streamed partial closing fence is not code yet; pi-tui trims it the same way.
+	const marker = /^(`{3,}|~{3,})/u.exec(token.raw)?.[1];
+	const lastLine = token.raw.split("\n").pop();
+	if (
+		marker !== undefined &&
+		lastLine &&
+		lastLine.length < marker.length &&
+		lastLine === marker.slice(0, 1).repeat(lastLine.length)
+	) {
+		text = text.slice(0, -lastLine.length).replace(/\n$/u, "");
+	}
+	return { lang, text, blankAfter };
+}
+
+function codeBlockRows(block: CodeBlock, width: number): string[] {
+	const rows: string[] = [];
+	if (block.lang !== undefined) rows.push(clioTheme().fg("annotation", block.lang));
+	if (block.text.length > 0) {
+		const inner = Math.max(1, width - CODE_INDENT.length);
+		for (const inked of codeInk(block.lang, block.text.split("\n"))) {
+			for (const part of wrapTextWithAnsi(inked, inner)) rows.push(`${CODE_INDENT}${part}`);
+		}
+	}
+	if (block.blankAfter) rows.push("");
+	return rows.map((row) => clioTheme().base("assistantProse", row.replace(/ +$/, "")));
+}
+
+function chunkRows(chunk: MarkdownChunk, width: number): string[] {
+	if (chunk.md !== undefined) return markdownRows(chunk.md, width);
+	if (chunk.code === undefined) return [];
+	if (chunk.codeRows?.width !== width) chunk.codeRows = { width, rows: codeBlockRows(chunk.code, width) };
+	return chunk.codeRows.rows;
 }
 
 function chatMarkdown(text: string): Markdown {
@@ -831,14 +907,15 @@ function renderTextSegmentLines(seg: TextSegment, width: number): string[] {
 	for (let index = 0; index < finished; index += 1) {
 		const chunk = pending[index];
 		if (chunk === undefined) continue;
-		blocks.chunks.push({ ...chunk, md: chatMarkdown(chunk.raw) });
+		const code = chunk.firstType === "code" ? parseCodeChunk(chunk.raw) : null;
+		blocks.chunks.push(code === null ? { ...chunk, md: chatMarkdown(chunk.raw) } : { ...chunk, code });
 		blocks.covered += chunk.raw;
 	}
 	const lines: string[] = [];
 	let previousLast: string | undefined;
 	for (const chunk of blocks.chunks) {
 		if (previousLast !== undefined && blankBetweenBlocks(previousLast, chunk.firstType)) lines.push("");
-		for (const row of markdownRows(chunk.md, width)) lines.push(row);
+		for (const row of chunkRows(chunk, width)) lines.push(row);
 		previousLast = chunk.lastType;
 	}
 	const open = seg.finalized ? undefined : pending[finished];
@@ -847,6 +924,12 @@ function renderTextSegmentLines(seg: TextSegment, width: number): string[] {
 		return withoutLeadingBlanks(lines);
 	}
 	if (previousLast !== undefined && blankBetweenBlocks(previousLast, open.firstType)) lines.push("");
+	const openCode = open.firstType === "code" ? parseCodeChunk(open.raw) : null;
+	if (openCode !== null) {
+		delete blocks.openFence;
+		for (const row of codeBlockRows(openCode, width)) lines.push(row);
+		return withoutLeadingBlanks(lines);
+	}
 	if (GROWING_BLOCKS.has(open.firstType)) {
 		blocks.openFence ??= chatMarkdown(open.raw);
 		blocks.openFence.setText(open.raw);
