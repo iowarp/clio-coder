@@ -3125,6 +3125,26 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	// in between would deliver them to nobody.
 	let cancelQueuedSpeculativeHold: (() => void) | null = null;
 	let previousSpeculativeStats = dispatch?.speculativeStats?.() ?? { held: 0, adopted: 0, discarded: 0, live: 0 };
+	// The prewarm reads the turn reading where the hints do, as the prompt is
+	// built, so a reading that has not landed by then holds no worker. The hold
+	// is queued before the request goes out, so an immediate dispatch can adopt
+	// it; settlement cancels a queued hold first.
+	middleware.registerHook({
+		id: "observer.decision-prewarm",
+		description: "holds the worker a landed turn reading predicts",
+		hooks: ["turn_start"],
+		evaluate(input) {
+			if (input.metadata?.requestContinuation === true) return [];
+			const prediction = systemOneHost.prewarm();
+			if (prediction === null) return [];
+			cancelQueuedSpeculativeHold?.();
+			cancelQueuedSpeculativeHold = scheduleSpeculativeHold(() => {
+				cancelQueuedSpeculativeHold = null;
+				dispatch?.speculate?.(prediction);
+			});
+			return [];
+		},
+	});
 	const chat = createChatLoop({
 		turnControl,
 		turnOutcomeCollector,
@@ -3162,20 +3182,12 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		// what the section carries: more eligible records than it admits and no
 		// ranking pinned earlier in the session.
 		getMemoryRelevance: createMemoryRelevance({ reader: memoryReader, rank: relevanceRanker }),
-		readTurn: async (input) => {
+		readTurn: (input) => {
 			if ((session?.current()?.id ?? null) !== outcomeSessionId) {
 				seedOutcomeFromSession();
 				seedOrientationFromSession();
 			}
-			await systemOneHost.readTurn(input);
-			// The hold runs before the awaiting turn resumes, so an immediate
-			// dispatch can adopt it. Settlement cancels a queued hold first.
-			const prediction = systemOneHost.prewarm();
-			if (prediction === null) return;
-			cancelQueuedSpeculativeHold = scheduleSpeculativeHold(() => {
-				cancelQueuedSpeculativeHold = null;
-				dispatch?.speculate?.(prediction);
-			});
+			systemOneHost.readTurn(input);
 		},
 		// Held processes a turn did not use die with the turn, cancelled or not.
 		onTurnSettled: () => {

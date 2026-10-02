@@ -838,14 +838,14 @@ export interface CreateChatLoopDeps {
 	 */
 	getMemorySection?: (request: MemoryPromptRequest) => string;
 	/**
-	 * Read this turn's request through the `turn` site, once, before the prompt is
-	 * built. The interactive host always wires it and asks nothing when the site
-	 * is unbound. The host keeps the verdict: the hint registration, the turn
-	 * controller and the prewarm read it from there. It always settles, so an
-	 * outage costs the deadline and never the turn. `userTurnId` is the id the
-	 * ledger will file the user turn under, so the decision record and the
-	 * outcome that follows it share a join key. `previousTask` reads the ledger
-	 * and may throw, so it is called only by a bound site, inside a catch.
+	 * Start reading this turn's request through the `turn` site, once, before the
+	 * prompt is built, and return without waiting for it. The interactive host
+	 * always wires it and asks nothing when the site is unbound. The host keeps a
+	 * reading that lands in time: the hint registration, the turn controller and
+	 * the prewarm read it from there. `userTurnId` is the id the ledger will file
+	 * the user turn under, so the decision record and the outcome that follows it
+	 * share a join key. `previousTask` reads the ledger and may throw, so it is
+	 * called only when a call will be made, inside a catch.
 	 */
 	readTurn?: (input: {
 		userTurnId: string;
@@ -854,8 +854,7 @@ export interface CreateChatLoopDeps {
 		request: string;
 		previous: string;
 		previousTask: () => string;
-		signal: AbortSignal;
-	}) => Promise<void>;
+	}) => void;
 	/** Called once when a submitted turn settles, whether it completed, failed or was cancelled. */
 	onTurnSettled?: () => SpeculativeDispatchCounts | undefined;
 	/**
@@ -2055,16 +2054,16 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 					// Recording an outcome never costs the turn it describes.
 				}
 			}
-			// The one place a turn pays for System One before the prompt is built. The
-			// hint registration and the controller are synchronous, so the answer is
-			// awaited here, inside the site's own deadline, rather than fetched where it
-			// is read. A continuation turn carries a nudge rather than the operator's
-			// request, so a judgment about it would be a judgment about the nudge.
+			// System One's reading of the request starts here and nothing waits for
+			// it: the hint registration, the controller and the prewarm use it only if
+			// it has landed by the time they read. A continuation turn carries a nudge
+			// rather than the operator's request, so a judgment about it would be a
+			// judgment about the nudge.
 			if (operatorTurn && deps.readTurn) {
 				// What the operator asked last turn, as typed. Without it a correction
 				// such as "actually drop X from that list" has nothing to correct, and
 				// it scored unknown at 0.22 on the assistant's reply alone. Read only
-				// when a bound site asks, because it reparses the whole ledger from
+				// when a call will be made, because it reparses the whole ledger from
 				// disk and an operator without System One must not pay for it.
 				const lastTurnId = state.lastTurnId ?? undefined;
 				const previousTask = (): string => {
@@ -2077,34 +2076,18 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 					}
 					return "";
 				};
-				const turnReadAbort = new AbortController();
-				pendingPreTurnRead = turnReadAbort;
 				try {
 					// The last assistant message is evidence for a short follow-up: "ok go
 					// ahead" is an action after a proposal and a pleasantry without one.
-					await deps.readTurn({
+					deps.readTurn({
 						userTurnId: reservedUserTurnId,
 						task: text,
 						request: options.display?.text ?? operatorText,
 						previous,
 						previousTask,
-						signal: turnReadAbort.signal,
 					});
 				} catch {
 					// Every consumer degrades to what it did before the call existed.
-				} finally {
-					if (pendingPreTurnRead === turnReadAbort) pendingPreTurnRead = null;
-				}
-				// Cancellation before prompt admission leaves no user turn or model
-				// request behind, even if an injected reader ignored its signal.
-				if (turnReadAbort.signal.aborted) {
-					await recordCanceledBeforeAdmission({
-						userTurnId: reservedUserTurnId,
-						continuation: !operatorTurn,
-						control: null,
-						submittedAt,
-					});
-					return;
 				}
 			}
 

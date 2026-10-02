@@ -216,12 +216,7 @@ function readFixtureEntries(path: string): SessionEntry[] {
 	return entries;
 }
 
-function fixture(
-	initialMode: WireMode,
-	readTurn?: (input: { signal: AbortSignal }) => Promise<void>,
-	visionSidecar?: VisionSidecar,
-	visionCapable = false,
-) {
+function fixture(initialMode: WireMode, readTurn?: () => void, visionSidecar?: VisionSidecar, visionCapable = false) {
 	const settings = structuredClone(DEFAULT_SETTINGS);
 	settings.chat.prewarm = false;
 	settings.chat.target = target.id;
@@ -326,39 +321,22 @@ function fixture(
 	};
 }
 
-it("cancel aborts an awaited decision brief before the chat request and leaves the next turn usable", {
+it("starts the decision brief once per operator turn and never holds the chat request on it", {
 	timeout: 10_000,
 }, async () => {
-	let startedBrief!: () => void;
-	const started = new Promise<void>((resolve) => {
-		startedBrief = resolve;
-	});
-	let releaseBrief!: () => void;
-	const gate = new Promise<void>((resolve) => {
-		releaseBrief = resolve;
-	});
-	let seenSignal: AbortSignal | undefined;
 	let briefs = 0;
-	const h = fixture("success", async ({ signal }) => {
+	const h = fixture("success", () => {
 		briefs += 1;
-		if (briefs > 1) return;
-		seenSignal = signal;
-		startedBrief();
-		await gate;
 	});
 	try {
-		const pending = h.loop.submit("Cancel while the brief is pending.");
-		await started;
-		h.loop.cancel();
-		releaseBrief();
-		await pending;
-		ok(seenSignal?.aborted, "cancel never reached the decision brief");
-		strictEqual(h.wire().calls(), 0, "the cancelled turn reached the chat model");
+		await h.loop.submit("The brief is started, not awaited.");
+		strictEqual(briefs, 1);
+		strictEqual(h.wire().calls(), 1, "the turn reached the chat model");
 
-		await h.loop.submit("A later turn still works.");
-		strictEqual(h.wire().calls(), 1);
+		await h.loop.submit("A later turn starts its own brief.");
+		strictEqual(briefs, 2);
+		strictEqual(h.wire().calls(), 2);
 	} finally {
-		releaseBrief();
 		await h.close();
 	}
 });

@@ -1,9 +1,10 @@
 /**
  * What the composition root keeps between System One calls.
  *
- * The turn site is asked once, before the prompt is built, and readers that
- * cannot await take what it left: the hint registration, the turn controller,
- * the plan-close registration and the prewarm. The turn-end site is asked once
+ * The turn site is asked once, at submit, and nothing waits for it. Its readers
+ * (the hint registration, the turn controller, the plan-close registration and
+ * the prewarm) take a fitted reading that has already landed when they read,
+ * and otherwise behave as if the site were unbound. The turn-end site is asked once
  * per settled turn; whether the message asks the operator feeds the
  * clarification streak and the turn outcome record that measures how turns
  * end. The relevance site ranks a catalog when a tool is asked for one.
@@ -218,9 +219,8 @@ export interface TurnReadInput {
 	/** What the operator typed, as the ledger shows it: an expansion's typed title rather than its body. */
 	request: string;
 	previous: string;
-	/** The operator's previous request. It reparses the ledger, so it is read only when the site is bound. */
+	/** The operator's previous request. It reparses the ledger, so it is read only when a call will be made. */
 	previousTask: () => string;
-	signal: AbortSignal;
 }
 
 export interface TurnEndReadInput {
@@ -236,11 +236,15 @@ export interface TurnPrewarmPrediction {
 }
 
 export interface SystemOneHost {
-	/** Ask the `turn` site about this request and keep the verdict for its synchronous readers. */
-	readTurn(input: TurnReadInput): Promise<void>;
-	/** This turn's hint lines, or null when no site answered. */
+	/**
+	 * Start asking the `turn` site about this request and return at once. A
+	 * fitted reading is kept for the readers below when it lands; an unfitted one
+	 * is only recorded.
+	 */
+	readTurn(input: TurnReadInput): void;
+	/** This turn's hint lines, or null until a fitted reading has landed. */
 	hints(): DecisionHintLines | null;
-	/** What the turn controller may act on, or undefined when no site answered. */
+	/** What the turn controller may act on, or undefined until a fitted reading has landed. */
 	interpretation(): TurnInterpretation | undefined;
 	/** The worker a confident forecast says the agent is about to dispatch, or null. */
 	prewarm(): TurnPrewarmPrediction | null;
@@ -444,7 +448,7 @@ export function createSystemOneHost(deps: SystemOneHostDeps): SystemOneHost {
 	}
 
 	return {
-		async readTurn(input) {
+		readTurn(input) {
 			const held: NonNullable<typeof turn> = { id: input.userTurnId, task: input.task, verdict: null, groupRecipe: null };
 			turn = held;
 			noteOperatorTurn(input.userTurnId, input.request);
@@ -452,6 +456,11 @@ export function createSystemOneHost(deps: SystemOneHostDeps): SystemOneHost {
 			// turn joins this id.
 			deps.usage.begin(input.userTurnId);
 			if (!systemOne.bound("turn")) return;
+			// A build with no fitted cut can hint and act on nothing, so with recording
+			// off its call is not made, and the recipe list and the ledger reparse that
+			// would only build its state are skipped with it.
+			const shadow = systemOne.shadowed("turn");
+			if (shadow && !recordingOn()) return;
 			let recipes: ReadonlyArray<TurnRecipeOption> | null = null;
 			try {
 				recipes = deps.listRecipes();
@@ -472,32 +481,33 @@ export function createSystemOneHost(deps: SystemOneHostDeps): SystemOneHost {
 				...(recipes !== null ? { recipes } : {}),
 				...(recipeOptionLimit !== undefined ? { recipeOptionLimit } : {}),
 			};
-			// A build with no fitted cut can hint and act on nothing, so the prompt does
-			// not wait up to the site's deadline for an answer that changes no reader.
-			// With recording on the call still runs and is recorded, and the turn proceeds
-			// as if it were null; with it off no call is made.
-			if (systemOne.shadowed("turn")) {
-				if (!recordingOn()) return;
+			if (shadow) {
 				detached(() => systemOne.run(TURN_SITE, object, { ref: input.userTurnId }));
 				return;
 			}
-			const verdict = await systemOne.run(TURN_SITE, object, { ref: input.userTurnId, signal: input.signal });
-			// A newer turn may have started while this one waited.
-			if (turn !== held) return;
-			held.verdict = verdict;
-			// A category was chosen but not its member: one bounded follow-up under
-			// its own deadline picks the recipe to hold, or nothing is held.
-			const value = verdict?.value;
-			if (value !== undefined && value.acts.prewarmPending && typeof value.recipeGroup === "string") {
+			// Nothing waits for the reading. Its readers take it only if it landed
+			// before they read, and only from a fitted build: an unfitted reading's
+			// intent has no cut and once overrode the plan-close regex on its own.
+			// The operator's cancel does not abort it, because the reading is still a
+			// record of the request.
+			detached(async () => {
+				const verdict = await systemOne.run(TURN_SITE, object, { ref: input.userTurnId });
+				if (turn !== held || verdict === null || !verdict.fitted) return;
+				held.verdict = verdict;
+				// A category was chosen but not its member: one bounded follow-up under
+				// its own deadline picks the recipe to hold, chained here so it never
+				// adds a wait of its own.
+				const value = verdict.value;
+				if (!value.acts.prewarmPending || typeof value.recipeGroup !== "string") return;
 				const members = recipesInGroup(object, value.recipeGroup);
 				if (members.length === 0) return;
 				const picked = await systemOne.run(
 					TURN_RECIPE_SITE,
 					{ task: input.task, previous: input.previous, previousTask, recipes: members },
-					{ ref: input.userTurnId, signal: input.signal },
+					{ ref: input.userTurnId },
 				);
 				if (turn === held) held.groupRecipe = picked?.value.recipe ?? null;
-			}
+			});
 		},
 
 		hints: () => turn?.verdict?.value.hints ?? null,

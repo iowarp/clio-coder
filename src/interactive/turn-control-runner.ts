@@ -62,9 +62,9 @@ export interface TurnControlRunnerDeps {
 	getTurnConstraints(): TurnConstraints | undefined;
 	isContinuation(): boolean;
 	/**
-	 * The turn site's reading of this request, or undefined when no site is bound
-	 * or it did not answer. Read after the pre-turn call settled, so it is this
-	 * turn's verdict and never the previous one's.
+	 * The turn site's fitted reading of this request if it has landed, or
+	 * undefined. Nothing waits for it, and the host forgets it at settle, so it
+	 * is this turn's reading and never the previous one's.
 	 */
 	readInterpretation(): TurnInterpretation | undefined;
 	facts: {

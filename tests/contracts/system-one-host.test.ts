@@ -110,15 +110,31 @@ function turnInput(userTurnId: string) {
 		request: "look at the repo and tell me what it does",
 		previous: "",
 		previousTask: () => "",
-		signal: new AbortController().signal,
 	};
 }
 
+/** Let every already-resolved promise run its continuations. */
+const landed = () => new Promise<void>((resolve) => setImmediate(resolve));
+
 describe("contracts/system one host: the turn site", () => {
-	it("joins the call to the reserved user turn id", async () => {
+	it("joins the call to the reserved user turn id", () => {
 		const { calls, systemOne } = fakeSystemOne(() => LOUD_TURN, ["turn"]);
-		await hostOver(systemOne).readTurn(turnInput("reserved-turn-7"));
+		hostOver(systemOne).readTurn(turnInput("reserved-turn-7"));
 		deepStrictEqual(calls, [{ site: "turn", ref: "reserved-turn-7" }]);
+	});
+
+	it("returns before the engine answers and hands readers nothing until the reading lands", async () => {
+		let release: (answers: Readonly<Record<string, Answer>>) => void = () => {};
+		const { systemOne } = fakeSystemOne(() => new Promise((resolve) => (release = resolve)), ["turn"]);
+		const host = hostOver(systemOne);
+
+		host.readTurn(turnInput("turn-1"));
+		await landed();
+		strictEqual(host.hints(), null, "a reader before the reading lands takes nothing");
+		strictEqual(host.interpretation(), undefined);
+		release(LOUD_TURN);
+		await landed();
+		ok(host.interpretation() !== undefined, "a fitted reading that landed is held");
 	});
 
 	it("leaves hints, interpretation and prewarm empty when the verdict is null", async () => {
@@ -126,12 +142,14 @@ describe("contracts/system one host: the turn site", () => {
 		const { systemOne } = fakeSystemOne(() => answers, ["turn"]);
 		const host = hostOver(systemOne);
 
-		await host.readTurn(turnInput("turn-1"));
+		host.readTurn(turnInput("turn-1"));
+		await landed();
 		ok(host.interpretation() !== undefined, "the control verdict is held");
 		ok(host.prewarm() !== null, "the control verdict would prewarm");
 
 		answers = null;
-		await host.readTurn(turnInput("turn-2"));
+		host.readTurn(turnInput("turn-2"));
+		await landed();
 		strictEqual(host.hints(), null);
 		strictEqual(host.interpretation(), undefined);
 		strictEqual(host.prewarm(), null);
@@ -236,11 +254,10 @@ describe("contracts/system one host: a shadowed build", () => {
 	];
 
 	for (const [label, recording, made] of rows) {
-		it(`resolves the turn read at once and makes ${made} call with ${label}`, async () => {
+		it(`makes ${made} turn call with ${label}`, () => {
 			const { calls, systemOne } = fakeSystemOne(NEVER, ["turn"], true);
 			const host = hostOver(systemOne, recording);
-			const settled = await Promise.race([host.readTurn(turnInput("turn-1")).then(() => "read"), flushed()]);
-			strictEqual(settled, "read", "the prompt does not wait on a shadowed engine");
+			host.readTurn(turnInput("turn-1"));
 			strictEqual(calls.length, made);
 			strictEqual(host.hints(), null);
 		});
