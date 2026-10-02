@@ -3,10 +3,8 @@
  * TUI_KEYBINDINGS) with the Clio-specific action ids so `KeybindingsManager`
  * can resolve both against user overrides stored in `settings.yaml`.
  *
- * The `Keybindings` interface in pi-tui is extensible via declaration merging.
- * Adding `clio-coder.*` ids here makes them typed everywhere the manager is
- * used: pass a wrong id to `matches("clio-coder.typo", ...)` and the compiler
- * complains.
+ * The engine's ambient keybinding augmentation makes the Clio action IDs
+ * typed everywhere the manager is used.
  */
 
 import type { KeybindingDefinitions, KeyId } from "../../engine/tui.js";
@@ -44,16 +42,6 @@ export interface ClioAppKeybindings {
 }
 
 export type ClioKeybinding = keyof ClioAppKeybindings;
-
-/**
- * Declaration merge: pi-tui's `Keybindings` interface is open so downstream
- * packages register their action ids. After this block, `KeybindingsManager`
- * returned from `createKeybindingManager` accepts `clio-coder.*` ids with full
- * TypeScript checking.
- */
-declare module "@earendil-works/pi-tui" {
-	interface Keybindings extends ClioAppKeybindings {}
-}
 
 /** Stable application descriptors. Fixed leader suffixes never derive from overrides. */
 interface AppActionDescriptor {
