@@ -1931,7 +1931,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 						// Enter while streaming means "correct it now": the engine
 						// steering queue drains after every tool batch, so the text
 						// lands as a user message before the next model turn.
-						// Ctrl+Q (queueFollowUp) keeps the after-this-run intent.
+						// The end-of-turn mode (ACP, or the navigator's slot toggle) keeps the after-this-run intent.
 						if (isWorkerShareNote(trimmed)) state.turnSharedWorkerNote = true;
 						// The queue carries the submitted bytes, not the trimmed copy the
 						// guard above reads: a steer is a model-facing turn and the

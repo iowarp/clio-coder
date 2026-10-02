@@ -15,7 +15,6 @@ export const CLOSED_ACTION_ORDER = [
 	"clio-coder.autonomy.toggle",
 	"clio-coder.notifications.dismiss",
 	"clio-coder.editor.external",
-	"clio-coder.message.followUp",
 	"clio-coder.message.interrupt",
 	"clio-coder.message.dequeue",
 	"clio-coder.queue.open",

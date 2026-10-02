@@ -70,7 +70,7 @@ export interface EditorSubmitUi {
 
 type EditorSubmitChat = Pick<
 	ChatLoop,
-	"clearQueuedFollowUps" | "interruptRefusal" | "isStreaming" | "queueFollowUp" | "submit" | "whenSettled"
+	"clearQueuedFollowUps" | "interruptRefusal" | "isStreaming" | "submit" | "whenSettled"
 >;
 type EditorSubmitDispatch = Pick<DispatchContract, "snapshot" | "steer">;
 type EditorSubmitSession = Pick<SessionContract, "appendEntry" | "current" | "tree">;
@@ -124,7 +124,6 @@ export interface EditorSubmitController {
 	submitEditorText(text: string): void;
 	/** Admit an immutable boot record without reading or mutating the live draft. */
 	admitCapturedText(text: string, signal?: AbortSignal): Promise<void>;
-	queueFollowUpFromEditor(): void;
 	/**
 	 * Interrupt mode: cancel the active run and deliver the draft now. Idle, it
 	 * is a plain send. The chat loop owns cancel → settle → submit and the two
@@ -484,56 +483,6 @@ export function createEditorSubmitController(deps: EditorSubmitDeps): EditorSubm
 		return true;
 	};
 
-	const queueFollowUpFromEditor = (): void => {
-		const streaming = deps.chat.isStreaming();
-		const snapshot = captureDraft();
-		const text = deps.editor.getTextForSubmit().trim();
-		if (text.length === 0) return;
-		if (streaming && refuseBusyCommand(text, "Ctrl+Q")) return;
-		if (!streaming) {
-			deps.editor.setText("");
-			submitEditorText(text);
-			deps.ui.requestRender();
-			return;
-		}
-		if (pendingDrafts.has(snapshot.key)) return;
-		pendingDrafts.add(snapshot.key);
-		// Expansion can outlive a busy /new (flywheel p7/A2). Its captured
-		// message belongs to that session, even if a new one is now streaming.
-		const sessionId = deps.session?.current()?.id;
-		const restoreDraft = (): void => {
-			if (snapshot.owns()) return;
-			const current = deps.editor.getExpandedText?.() ?? deps.editor.getText();
-			setLiteralText([unguardPastedEditorOperator(text), current].filter((part) => part.length > 0).join("\n\n"));
-			deps.ui.requestRender();
-		};
-		let admitted = false;
-		void (async () => {
-			const submitted = await deps.expandSubmit(unguardPastedEditorOperator(text));
-			if (submitted.images.length > 0) {
-				restoreDraft();
-				deps.io.stderr("[follow-up] image references cannot be queued while a response is streaming\n");
-				return;
-			}
-			deps.beforeSemanticBoundary?.("follow-up-submit");
-			if (deps.session?.current()?.id !== sessionId || !deps.chat.queueFollowUp(submitted.text, submitted.display)) {
-				restoreDraft();
-				deps.io.stderr("[follow-up] no active response to queue against\n");
-				return;
-			}
-			admitted = true;
-			deps.editor.addToHistory(text);
-			if (snapshot.owns()) deps.editor.setText("");
-			deps.ui.requestRender();
-		})()
-			.catch((err) => {
-				if (!admitted) restoreDraft();
-				const msg = err instanceof Error ? err.message : String(err);
-				deps.io.stderr(`[follow-up] ${msg}\n`);
-			})
-			.finally(() => pendingDrafts.delete(snapshot.key));
-	};
-
 	const interruptFromEditor = (explicitText?: string): void => {
 		const streaming = deps.chat.isStreaming();
 		const snapshot = captureDraft();
@@ -605,7 +554,6 @@ export function createEditorSubmitController(deps: EditorSubmitDeps): EditorSubm
 		handleEditorSteerMention,
 		submitEditorText,
 		admitCapturedText,
-		queueFollowUpFromEditor,
 		interruptFromEditor,
 		restoreQueuedFollowUpsToEditor,
 		hasActiveEditorBash: () => activeEditorBash !== null,

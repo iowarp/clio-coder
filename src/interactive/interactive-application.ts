@@ -321,7 +321,6 @@ export interface KeyBindingDeps {
 	/** Note a harness feature the operator used, for demo guidance. */
 	recordFeature?: (feature: string) => void;
 	openExternalEditor: () => void;
-	queueFollowUp: () => void;
 	interruptWithMessage: () => void;
 	restoreQueuedFollowUps: () => void;
 	openQueueNavigator: () => void;
@@ -349,9 +348,6 @@ export function dispatchInteractiveAction(id: ClioKeybinding, deps: KeyBindingDe
 			return true;
 		case "clio-coder.editor.external":
 			deps.openExternalEditor();
-			return true;
-		case "clio-coder.message.followUp":
-			deps.queueFollowUp();
 			return true;
 		case "clio-coder.message.interrupt":
 			deps.interruptWithMessage();

@@ -43,7 +43,6 @@ export interface InteractiveInputKeyActionDeps {
 	toggleAutonomy?: () => void;
 	recordFeature?: (feature: string) => void;
 	openExternalEditor: () => void;
-	queueFollowUp: () => void;
 	interruptWithMessage: () => void;
 	restoreQueuedFollowUps: () => void;
 	openQueueNavigator: () => void;
@@ -126,7 +125,6 @@ export interface InteractiveInputRuntimeDeps {
 	};
 	editorSubmit: {
 		openExternalEditorForInput(): void;
-		queueFollowUpFromEditor(): void;
 		interruptFromEditor(): void;
 		restoreQueuedFollowUpsToEditor(): void;
 	};
@@ -201,7 +199,6 @@ export function createInteractiveInputRuntime(deps: InteractiveInputRuntimeDeps)
 		...(deps.actions.toggleAutonomy ? { toggleAutonomy: deps.actions.toggleAutonomy } : {}),
 		...(deps.actions.recordFeature ? { recordFeature: deps.actions.recordFeature } : {}),
 		openExternalEditor: deps.editorSubmit.openExternalEditorForInput,
-		queueFollowUp: deps.editorSubmit.queueFollowUpFromEditor,
 		interruptWithMessage: deps.editorSubmit.interruptFromEditor,
 		restoreQueuedFollowUps: deps.editorSubmit.restoreQueuedFollowUpsToEditor,
 		openQueueNavigator: deps.actions.openQueueNavigator,

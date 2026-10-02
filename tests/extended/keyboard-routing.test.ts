@@ -170,7 +170,6 @@ function fixture(overrides: Record<string, string | string[]> = {}, scrollFooter
 		editor,
 		editorSubmit: {
 			openExternalEditorForInput: noop,
-			queueFollowUpFromEditor: noop,
 			interruptFromEditor: noop,
 			restoreQueuedFollowUpsToEditor: noop,
 		},

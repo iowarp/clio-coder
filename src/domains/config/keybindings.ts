@@ -36,7 +36,6 @@ export interface ClioAppKeybindings {
 	"clio-coder.model.cycleForward": true;
 	"clio-coder.model.cycleBackward": true;
 	"clio-coder.editor.external": true;
-	"clio-coder.message.followUp": true;
 	"clio-coder.message.interrupt": true;
 	"clio-coder.message.dequeue": true;
 	"clio-coder.queue.open": true;
@@ -130,14 +129,6 @@ export const CLIO_APP_KEYBINDINGS = {
 		repeat: false,
 		leader: "y",
 	},
-	"clio-coder.message.followUp": {
-		defaultKeys: "ctrl+q",
-		description: "Send after the active run",
-		scope: "composer",
-		kind: "send",
-		repeat: false,
-		leader: "f",
-	},
 	"clio-coder.message.dequeue": {
 		defaultKeys: "alt+q",
 		description: "Restore queued messages",
@@ -214,8 +205,10 @@ export const CLIO_APP_KEYBINDINGS = {
 		leader: "s",
 	},
 	"clio-coder.message.interrupt": {
-		defaultKeys: [],
-		description: "Interrupt with draft",
+		// Not alt+enter: in legacy terminal mode it is the same bytes as the
+		// shift+enter newline mapping many operators install.
+		defaultKeys: "alt+s",
+		description: "Send now: interrupt the run with the draft, or flush the queue",
 		scope: "composer",
 		kind: "send",
 		repeat: false,
