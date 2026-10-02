@@ -73,6 +73,7 @@ import {
 	shareTaskWorktreeDependencies,
 	snapshotTaskWorktree,
 	taskWorktreeBaseDiff,
+	taskWorktreeHoldsWork,
 	WORKTREE_CHANGED_SINCE_PREVIEW,
 } from "../../tools/task-worktree.js";
 import { truncateUtf8 } from "../../tools/truncate-utf8.js";
@@ -7490,8 +7491,14 @@ export function createDispatchBundle(
 				// Master's `npm test: exit 1` commit merged onto main (flywheel s5r2).
 				// The tree is still committed to its preserved branch, so a failure the
 				// operator knows was already there costs one merge command.
+				// A worktree that holds nothing has no merge to withhold. Gating it failed a read-only run over a
+				// "no check needed" line in the worker's report and left an empty branch behind; without the gate it
+				// takes the ordinary applied path, which removes the worktree and its branch.
 				const mergeGateInput =
-					req.taskWorktree !== undefined && (req.apply ?? "merge") === "merge" && finalOutcome === "succeeded"
+					req.taskWorktree !== undefined &&
+					(req.apply ?? "merge") === "merge" &&
+					finalOutcome === "succeeded" &&
+					taskWorktreeHoldsWork(req.taskWorktree)
 						? {
 								quality: sealedResultContractFact?.quality,
 								hostStatus: hostVerification?.status,

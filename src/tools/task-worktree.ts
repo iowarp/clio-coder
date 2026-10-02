@@ -953,6 +953,14 @@ function workHeldBy(canonical: string, claim: Pick<TaskClaim, "base" | "branch" 
 	}
 }
 
+/**
+ * Whether a finished run's worktree holds anything to land: a commit beyond its base, or any modified, staged
+ * or untracked file. Fails toward true, so an unreadable tree keeps every gate that would have applied to it.
+ */
+export function taskWorktreeHoldsWork(worktree: TaskWorktree): boolean {
+	return workHeldBy(worktree.root, worktree) !== null;
+}
+
 function preservedView(claim: TaskClaim, state: TaskWorktreeState, reason: string): PreservedTaskWorktree {
 	return {
 		runId: claim.runId,
