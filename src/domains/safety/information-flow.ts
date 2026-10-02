@@ -711,3 +711,10 @@ export function resolveToolDestination(
 	if (isMcpToolName(tool)) return { kind: "tool", tool, endpoint: null, mcp: mcpTransport?.(tool) ?? null };
 	return null;
 }
+
+/** Unmediated delegates cannot enforce the labels carried by their input. */
+export function flowHandoffRefusal(destination: string, restrictions: FlowRestrictionSet | null): string | null {
+	if (restrictions === null || restrictions.restrictions.length === 0) return null;
+	const rules = [...new Set(restrictions.restrictions.map((r) => r.ruleId))].join(", ");
+	return `dispatch: ${destination} cannot carry context restricted by information-flow rule ${rules}; the delegated agent's model requests are not admitted by Clio`;
+}

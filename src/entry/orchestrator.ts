@@ -2502,6 +2502,11 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	bus.on(BusChannels.SessionTurnSwitched, () => systemOneHost.forgetOperatorTexts());
 	const visionSidecar = createVisionSidecar({ getSettings: () => getCurrentSettings(), providers });
 	const toolBootstrap = registerAllTools(toolRegistry, {
+		flow: {
+			carried: () => flowLedger.current(),
+			refusal: () => flowLedger.refusal(),
+			absorb: (set, origin) => flowLedger.absorb(set, origin),
+		},
 		...(resolvedSettings.fleet.profiles.vision?.target
 			? {
 					visionSidecar,

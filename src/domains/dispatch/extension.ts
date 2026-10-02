@@ -1,4 +1,3 @@
-import type { WorkerFlowPolicyInput } from "../safety/information-flow.js";
 import { writeDiagnostic } from "../../core/diagnostics.js";
 import { boundedExternalDiagnostic } from "../../core/external-diagnostic.js";
 import { readPiMonoVersion } from "../../engine/pi-mono-names.js";
@@ -6,6 +5,8 @@ import { parseWorkerContextSeed } from "../../worker/context-seed.js";
 import { WORKER_STDIN_FRAME_MAX_BYTES } from "../../worker/protocol.js";
 import { WORKER_CONTEXT_PREAMBLE } from "../context/worker/select.js";
 import { persistWorkerContextSeed } from "../context/worker/store.js";
+import type { WorkerFlowPolicyInput } from "../safety/information-flow.js";
+import { flowHandoffRefusal } from "../safety/information-flow.js";
 /**
  * Dispatch domain wire-up (post-W5).
  *
@@ -2380,11 +2381,8 @@ function protectedArtifactReceiptSummary(
 
 /** An unmediated handoff of restricted context is refused; nothing on that path judges its sends. */
 function assertFlowHandoffMediated(path: string, restrictions: FlowRestrictionSet | null): void {
-	if (restrictions === null || restrictions.restrictions.length === 0) return;
-	const rules = [...new Set(restrictions.restrictions.map((r) => r.ruleId))].join(", ");
-	throw new Error(
-		`dispatch: ${path} cannot carry context restricted by information-flow rule ${rules}; the delegated agent's model requests are not admitted by Clio`,
-	);
+	const refusal = flowHandoffRefusal(path, restrictions);
+	if (refusal !== null) throw new Error(refusal);
 }
 
 function assertPlannedNodeIdentity(req: DispatchRequest, actual: RunNodeIdentity): void {

@@ -23,7 +23,7 @@ import { registerHarnessExtensionTools } from "./harness-extensions.js";
 import { lazyTool } from "./lazy-tool.js";
 import { monitorToolSurface } from "./monitor-surface.js";
 import { panesToolSurface } from "./panes-surface.js";
-import type { ToolRegistry } from "./registry.js";
+import type { RegistryDeps, ToolRegistry } from "./registry.js";
 import { createSelfCompactTool, type RequestSelfCompact } from "./self-compact.js";
 import { steerToolSurface } from "./steer-surface.js";
 import { coordinatorToolPlacement } from "./surface.js";
@@ -54,6 +54,7 @@ export interface ToolBootstrapDeps extends Omit<CoreToolBootstrapDeps, "mcpCapab
 	 * is what keeps the `panes` tool out of the prompt on a machine with none.
 	 */
 	panes?: PanesOperations;
+	flow?: RegistryDeps["flow"];
 	/**
 	 * Local MCP servers for the gateway. Absent means one is built for the
 	 * session cwd; `false` registers none (a registry that must never launch a
@@ -145,7 +146,9 @@ export function registerAllTools(registry: ToolRegistry, deps: ToolBootstrapDeps
 		const panes = deps.panes;
 		registry.register({
 			...builtin(
-				lazyTool(panesToolSurface, async () => (await import("./panes.js")).createPanesTool({ panes })),
+				lazyTool(panesToolSurface, async () =>
+					(await import("./panes.js")).createPanesTool({ panes, ...(deps.flow !== undefined ? { flow: deps.flow } : {}) }),
+				),
 				{ path: "src/tools/panes.ts", scope: "core" },
 			),
 		});

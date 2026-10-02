@@ -1,7 +1,8 @@
 import type { PanesOperations } from "../domains/mux/operations.js";
 import { PANE_PEER_IDS, PANES_PRESET_IDS, type PanePeerId } from "../domains/mux/operations.js";
+import { flowHandoffRefusal } from "../domains/safety/information-flow.js";
 import { panesToolSurface } from "./panes-surface.js";
-import type { ToolResult, ToolSpec } from "./registry.js";
+import type { RegistryDeps, ToolResult, ToolSpec } from "./registry.js";
 
 /**
  * The `panes` tool: the model's read-class door to the pane layer.
@@ -18,6 +19,7 @@ import type { ToolResult, ToolSpec } from "./registry.js";
 
 export interface PanesToolDeps {
 	panes: PanesOperations;
+	flow?: RegistryDeps["flow"];
 }
 
 function describeInventory(deps: PanesToolDeps): ToolResult {
@@ -102,6 +104,10 @@ export function createPanesTool(deps: PanesToolDeps): ToolSpec {
 					return { kind: "error", message: "panes: brief must be text" };
 				if (args.cwd !== undefined && typeof args.cwd !== "string")
 					return { kind: "error", message: "panes: cwd must be text" };
+				if (typeof args.brief === "string") {
+					const refusal = deps.flow?.refusal() ?? flowHandoffRefusal("panes-handoff", deps.flow?.carried() ?? null);
+					if (refusal !== null) return { kind: "error", message: refusal };
+				}
 				const result = await deps.panes.handoff({
 					peer: peer as PanePeerId,
 					...(typeof args.brief === "string" ? { brief: args.brief } : {}),
