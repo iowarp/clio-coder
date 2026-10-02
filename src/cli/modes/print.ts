@@ -517,14 +517,13 @@ function prefixHeadlessFailure(chat: ChatLoop, message: string): string {
  * The events `--json-events terminal` lets through, alongside the `turn_start`
  * and `turn_end` frames this mode synthesizes itself.
  *
- * The mode's contract is the run receipt and nothing else. It used to admit
- * `message_end`, which is the largest event on the stream and carries the
- * injected system reminders, the operator's prompt, and every thinking block:
- * "Say OK." produced 39.8 KB. `agent_start` and the two `tool_execution_*`
- * events are per-step progress, which is what `--json-events full` is for.
+ * The mode carries terminal accounting and the final answer on synthesized
+ * `turn_end.text`. It omits prompts, thinking, and per-step progress, which
+ * `--json-events full` carries. It never admits whole `message_end` frames:
+ * those include injected reminders and intermediate content.
  *
  * `turn_end` is deliberately absent even though the mode emits one. The
- * synthesized frame carries `startedAt`, `endedAt`, and `exitCode`; the streamed
+ * synthesized frame carries `startedAt`, `endedAt`, `exitCode`, and `text`; the streamed
  * event of the same name carries the turn's assistant message instead. Letting
  * both through would put two different shapes behind one `type` on one stream.
  */
@@ -1007,6 +1006,7 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 				startedAt,
 				endedAt,
 				exitCode,
+				text: result.sawTerminatingToolResult ? result.terminatingToolText : result.text,
 				...(terminal.failureMessage !== null ? { error: terminal.failureMessage } : {}),
 			}),
 		);

@@ -429,6 +429,7 @@ describe("smoke/built CLI core", { concurrency: false }, () => {
 			for (const type of ["session", "turn_start", "agent_end", "turn_end"]) ok(types.includes(type), turn.stdout);
 			const settled = [...events].reverse().find((event) => event.type === "turn_end");
 			strictEqual(settled?.exitCode, 0);
+			strictEqual(settled?.text, "core reply");
 			ok(typeof settled?.endedAt === "string");
 			ok(
 				requests.some((request) => JSON.stringify(request.messages).includes(prompt)),

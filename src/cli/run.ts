@@ -78,7 +78,9 @@ Flags:
   --repeat-penalty <N>      one-run repeat penalty override
   --max-context-tokens <N>  cap this run's context budget without enlarging the server window
   --json                    stream JSONL events for the main-agent path; dispatch streams events and receipt JSON
-  --json-events <mode>      main-agent JSON stream mode: full|terminal; implies --json; refused with --agent
+  --json-events <mode>      full: progress and final answer in turn_end.message.content
+                           terminal: accounting and final answer in turn_end.text
+                           implies --json; refused with --agent
   --steer-channel <path>    read live steering lines from a FIFO or appended regular file
   --session <id>            append this turn to an existing session
   --continue                append this turn to the most recent session for this cwd
