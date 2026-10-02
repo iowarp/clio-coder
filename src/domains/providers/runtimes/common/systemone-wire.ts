@@ -128,10 +128,25 @@ export async function postSystemOne(
 	const questionIds = Object.keys(opts.questions);
 	if (questionIds.length === 0) throw new Error("decide() requires at least one question");
 	const signal = opts.signal ?? ctx.signal;
+	signal?.throwIfAborted();
+	const answers: Record<string, DecisionAnswer> = {};
+	const questions: Record<string, DecisionQuestion> = {};
+	for (const [id, question] of Object.entries(opts.questions)) {
+		const keys = question.type === "choice" ? Object.keys(question.criteria) : [];
+		const only = keys.length === 1 ? keys[0] : undefined;
+		// A singleton has no uncertainty; some backends reject it outright.
+		if (only !== undefined) {
+			answers[id] = { type: "choice", choice: only, probabilities: { [only]: 1 }, confidence: 1 };
+		} else questions[id] = question;
+	}
+	if (Object.keys(questions).length === 0) {
+		// No model answered, so this result must not inherit a model's fitted cuts.
+		return { model: "unknown", answers, tokensUsed: { input: 0, output: 0 } };
+	}
 	const body = {
 		state: opts.state,
 		...(request.model !== undefined ? { model: request.model } : {}),
-		questions: opts.questions,
+		questions,
 	};
 	const http = {
 		url: `${request.baseUrl}/systemone`,
@@ -145,14 +160,13 @@ export async function postSystemOne(
 		? probeJson<SystemOneResponse>({ ...http, signal })
 		: probeJson<SystemOneResponse>(http));
 	if (!response.ok || !response.data) {
-		// A 422 or 529 body names the cause (a rejected question, an overloaded
-		// backend); the status line alone does not.
+		// Refusals, including busy 503s, throw into the runner's existing failed-call
+		// abstention path. Never retry a site decision past its deadline.
 		const cause = response.errorBody === undefined ? "" : `: ${response.errorBody.replace(/\s+/gu, " ").slice(0, 300)}`;
 		throw new Error(`${request.label} decide failed: ${response.error ?? "unknown"}${cause}`);
 	}
-	const answers: Record<string, DecisionAnswer> = {};
 	for (const [id, raw] of Object.entries(response.data.answers ?? {})) {
-		const question = opts.questions[id];
+		const question = questions[id];
 		if (question === undefined) continue;
 		const parsed = parseAnswer(raw, question);
 		if (parsed) answers[id] = parsed;
