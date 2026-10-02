@@ -24,8 +24,8 @@ export const GUIDANCE_REGISTRATION_ID = "observer.guidance";
 
 /** A lesson retires after this many showings across all sessions. */
 export const LESSON_LIFETIME_SHOWS = 2;
-/** Tips per session. */
-export const SESSION_TIP_BUDGET = 4;
+/** Tips per session. A second one inside a working session is noise, so a session gets one. */
+export const SESSION_TIP_BUDGET = 1;
 /** Substantive turns between tips, unless a lesson answers the prompt directly. */
 export const TURNS_BETWEEN_TIPS = 3;
 /** A lesson at or above this score answers the prompt itself and may skip the spacing. */

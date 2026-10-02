@@ -242,9 +242,10 @@ export function createTurnMiddleware(deps: TurnMiddlewareDeps): TurnMiddleware {
 
 	const notifyOperator = (message: string, key: string): void => {
 		if (deps.emitOperatorTip) deps.emitOperatorTip(message, key);
-		// `notify_operator` is the operator-only advisory channel, so it is the tip's
-		// source. The rule's own `[tip]` label is redundant under the callout title.
-		else deps.emitNotice(message.replace(/^\[tip\]\s*/u, ""), "info", "tip");
+		// `notify_operator` is the operator-only advisory channel. A tip is not part
+		// of the work, so it takes the footer's fading slot instead of a callout in
+		// the transcript, and the rule's own `[tip]` label becomes the line's lead.
+		else deps.emitFooterNotice("info", message.replace(/^\[tip\]\s*/u, "tip: "), key);
 	};
 
 	const applyRequestContinuation = (message: string, note?: string): void => {

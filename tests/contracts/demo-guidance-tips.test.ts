@@ -152,19 +152,12 @@ describe("demo guidance tips", () => {
 		ok(harnessQuestionTopics("where is the keybinding for the model picker?").includes("keys"));
 	});
 
-	it("spaces tips across turns, lets a direct answer through sooner, and caps a session", () => {
+	it("shows one tip in a session, then none even for a direct match", () => {
 		const { turn } = guidance();
 		ok(tipOf(turn("btw, what does this regex do?")));
-		// The very next turn never tips, even for a direct match.
-		strictEqual(tipOf(turn("How do I switch the model in clio?")), undefined);
-		// A direct answer may come after one quiet turn; weaker lessons wait longer.
-		ok(tipOf(turn("How do I switch the model in clio?")));
-		strictEqual(tipOf(turn("no, that's wrong, go back")), undefined);
-		strictEqual(tipOf(turn("no, try again")), undefined);
-		let shown = 2;
+		let shown = 1;
 		for (let index = 0; index < 20; index++) {
-			if (tipOf(turn("no, that is not what i asked", { end: { assistantTextChars: 9_000, turnToolCalls: 12 } })))
-				shown += 1;
+			if (tipOf(turn("How do I switch the model in clio?"))) shown += 1;
 		}
 		strictEqual(shown, SESSION_TIP_BUDGET);
 	});
@@ -280,8 +273,9 @@ describe("advisory sources", () => {
 		{ role: "assistant", content: [{ type: "text", text: "done" }], stopReason: "stop", timestamp: 1 },
 	] as unknown as AgentMessage[];
 
-	it("names a tip, a generic reminder and a memory note as advisories, and drops the rule's own [tip] label", async () => {
+	it("names a reminder and a memory note as advisories and puts a tip in the footer, led by tip: instead of [tip]", async () => {
 		const notices: string[] = [];
+		const footer: string[] = [];
 		const { contract } = createMiddlewareBundle({
 			registrations: [
 				{
@@ -301,14 +295,11 @@ describe("advisory sources", () => {
 			middleware: contract,
 			middlewareToolChoice: createMiddlewareToolChoiceControl(),
 			emitNotice: (text, level, source) => notices.push(`${source}/${level}/${text}`),
-			emitFooterNotice: () => {},
+			emitFooterNotice: (level, text, key) => footer.push(`${key}/${level}/${text}`),
 		});
 		await turn.fireTurnEnd(runtime, done);
-		deepStrictEqual(notices, [
-			"tip/info/try /view",
-			"reminder/warning/Finish the open steps.",
-			"memory/info/Memory: [tm-p-1] it failed.",
-		]);
+		deepStrictEqual(notices, ["reminder/warning/Finish the open steps.", "memory/info/Memory: [tm-p-1] it failed."]);
+		deepStrictEqual(footer, ["guidance.view/info/tip: try /view"]);
 		// The model-facing block keeps the prefix and the ref.
 		match(turn.flushPendingReminders(), /Memory: \[tm-p-1\] it failed\./u);
 	});
