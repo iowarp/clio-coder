@@ -73,6 +73,7 @@ import {
 	modelCandidatesForStatus,
 	registerForegroundStream,
 	resolveModelCapabilities,
+	resolveRuntimeTarget,
 	runtimeTargetSnapshot,
 	targetRequiresAuth,
 } from "../domains/providers/index.js";
@@ -100,7 +101,7 @@ import { reduceTurnOutcome } from "../domains/turn-control/index.js";
 import { createEngineAgent } from "../engine/agent.js";
 import { countImageBlocks } from "../engine/image-context.js";
 import { cwdHash } from "../engine/session.js";
-import type { AgentEvent, AgentMessage, ImageContent, Usage } from "../engine/types.js";
+import type { AgentEvent, AgentMessage, EngineModel, ImageContent, Usage } from "../engine/types.js";
 import { resolveSessionTools } from "../tools/agent-tools.js";
 import { finalizeAskUserInterviewForHost } from "../tools/ask-user.js";
 import { isGatewayChain } from "../tools/gateway-display.js";
@@ -137,6 +138,19 @@ import type { ApprovalRequestView } from "./permission-overlay.js";
 import type { runPrewarmRound } from "./prewarm.js";
 import { runOutOfTurnRound, runSideQuestion, type SideQuestionResult, sideQuestionUsage } from "./side-question.js";
 import type { AgentStatusEvent } from "./status/types.js";
+import {
+	parseTriageAnswer,
+	TRIAGE_MAX_TOKENS,
+	TRIAGE_RESPONSE_SCHEMA,
+	TRIAGE_SCHEMA_NAME,
+	TRIAGE_SYSTEM_PROMPT,
+	type TriageEntry,
+	triageKindFor,
+	triageLabelsFor,
+	triageMayInterrupt,
+	triageSnapshotMatches,
+	triageUserText,
+} from "./steering-triage.js";
 import type { LiveContextUsage, LiveSystemPrompt } from "./turn-context.js";
 import { createTurnContext } from "./turn-context.js";
 import { createTurnMiddleware } from "./turn-middleware.js";
@@ -896,6 +910,8 @@ export interface CreateChatLoopDeps {
 		queued: number;
 		previous: string;
 	}) => void;
+	/** The operator request the run is working on, for the steering triage round. Absent, triage sends no task. */
+	currentOperatorTask?: () => string;
 	/** Called once when a submitted turn settles, whether it completed, failed or was cancelled. */
 	onTurnSettled?: () => SpeculativeDispatchCounts | undefined;
 	/**
@@ -1707,9 +1723,28 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		runtime: AgentRuntime,
 		usage: SideQuestionResult["usage"],
 		label: CostEntryLabel,
+	): void =>
+		recordOutOfTurnUsageFor(
+			{
+				targetId: runtime.targetId,
+				wireModelId: runtime.wireModelId,
+				costProvenance: runtime.runtimeResolution.costProvenance,
+			},
+			usage,
+			label,
+		);
+
+	const recordOutOfTurnUsageFor = (
+		runtime: {
+			targetId: string;
+			wireModelId: string;
+			costProvenance: AgentRuntime["runtimeResolution"]["costProvenance"];
+		},
+		usage: SideQuestionResult["usage"],
+		label: CostEntryLabel,
 	): void => {
 		if (!usage) return;
-		const costProvenance = runtime.runtimeResolution.costProvenance;
+		const costProvenance = runtime.costProvenance;
 		deps.observability?.recordTokens(
 			runtime.targetId,
 			runtime.wireModelId,
@@ -1929,6 +1964,197 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 	// array in the same tick, which the scheduler collapses onto one round.
 	prewarm.schedule("session-start");
 
+	// --- steering triage ----------------------------------------------------
+	//
+	// Off by default (chat.steering.triage). Once the queue has settled for a
+	// moment with enough entries, one detached side-model round reads it and
+	// relabels entries: an unrelated task moves to the end of the turn, a
+	// confident stop may interrupt the run when the operator allowed it. The
+	// round never holds the engine; a verdict that lands after the queue changed
+	// is dropped, and the operator's own toggles pin an entry against it.
+	const TRIAGE_DEBOUNCE_MS = 1200;
+	let triageTimer: ReturnType<typeof setTimeout> | null = null;
+	let triageInFlight = false;
+
+	const cancelTriage = (): void => {
+		if (triageTimer !== null) clearTimeout(triageTimer);
+		triageTimer = null;
+	};
+
+	const scheduleTriage = (): void => {
+		const triage = deps.getSettings().chat.steering.triage;
+		if (!triage.enabled || queues.entries().length < triage.minQueued) return;
+		cancelTriage();
+		triageTimer = setTimeout(() => {
+			triageTimer = null;
+			void runTriage();
+		}, TRIAGE_DEBOUNCE_MS);
+		triageTimer.unref?.();
+	};
+
+	type TriageModel = {
+		model: EngineModel;
+		target: AgentRuntime["runtimeResolution"]["target"];
+		targetId: string;
+		runtimeId: string;
+		wireModelId: string;
+		costProvenance: AgentRuntime["runtimeResolution"]["costProvenance"];
+		apiKey: string | undefined;
+	};
+
+	/** The configured triage target, or the session's active runtime when none is named. */
+	const resolveTriageModel = async (signal: AbortSignal): Promise<TriageModel | null> => {
+		const triage = deps.getSettings().chat.steering.triage;
+		const runtime = state.runtime;
+		if (!runtime) return null;
+		if (!triage.target) {
+			const resolution = runtime.runtimeResolution;
+			const apiKey = targetRequiresAuth(resolution.target, resolution.runtime)
+				? (await deps.providers.auth.resolveForTarget(resolution.target, resolution.runtime, { signal })).apiKey
+				: LOCAL_SIDE_QUESTION_API_KEY;
+			return {
+				model: runtime.agent.state.model,
+				target: resolution.target,
+				targetId: runtime.targetId,
+				runtimeId: resolution.runtime.id,
+				wireModelId: runtime.wireModelId,
+				costProvenance: resolution.costProvenance,
+				apiKey,
+			};
+		}
+		const resolved = resolveRuntimeTarget(deps.providers, {
+			targetId: triage.target,
+			wireModelId: triage.model,
+			requestedThinkingLevel: "off",
+			requireTools: false,
+			requireStreaming: false,
+			requireOutputBudget: false,
+		});
+		if (!resolved.ok) return null;
+		const route = resolved.target;
+		const kbHit = deps.providers.knowledgeBase?.lookup(route.wireModelId, route.runtime.id) ?? null;
+		const apiKey = targetRequiresAuth(route.target, route.runtime)
+			? (await deps.providers.auth.resolveForTarget(route.target, route.runtime, { signal })).apiKey
+			: LOCAL_SIDE_QUESTION_API_KEY;
+		return {
+			model: route.runtime.synthesizeModel(route.target, route.wireModelId, kbHit),
+			target: route.target,
+			targetId: route.targetId,
+			runtimeId: route.runtimeId,
+			wireModelId: route.wireModelId,
+			costProvenance: route.costProvenance,
+			apiKey,
+		};
+	};
+
+	const runTriage = async (): Promise<void> => {
+		if (triageInFlight || !state.streaming || !state.runtime) return;
+		const triage = deps.getSettings().chat.steering.triage;
+		const asked: TriageEntry[] = queues.entries().map((entry) => ({ id: entry.id, text: entry.text, kind: entry.kind }));
+		if (asked.length < triage.minQueued) return;
+		triageInFlight = true;
+		const controller = new AbortController();
+		const deadline = setTimeout(() => controller.abort(), triage.timeoutMs);
+		deadline.unref?.();
+		try {
+			const resolved = await resolveTriageModel(controller.signal);
+			if (resolved === null) return;
+			const destination = {
+				targetId: resolved.targetId,
+				runtimeId: resolved.runtimeId,
+				wireModelId: resolved.wireModelId,
+			};
+			// The queued texts carry whatever the operator inlined into them, so the
+			// round is admitted under the session's flow restrictions like any side round.
+			if ((deps.admitRuntimeFlow?.(destination) ?? null) !== null) return;
+			const endpointKey = canonicalEndpointKey(resolved.target);
+			const release = endpointKey === null ? () => {} : registerForegroundStream(endpointKey);
+			let result: SideQuestionResult;
+			try {
+				result = await draftRound({
+					admitFlow: () => deps.admitRuntimeFlow?.(destination) ?? null,
+					model: resolved.model,
+					messages: [],
+					systemPrompt: TRIAGE_SYSTEM_PROMPT,
+					userText: triageUserText({
+						task: deps.currentOperatorTask?.() ?? "",
+						previous: lastAssistantText(state.runtime.agent.state.messages),
+						entries: asked,
+					}),
+					maxTokens: TRIAGE_MAX_TOKENS,
+					responseSchema: { name: TRIAGE_SCHEMA_NAME, schema: TRIAGE_RESPONSE_SCHEMA },
+					runtimeId: resolved.runtimeId,
+					signal: controller.signal,
+					...(resolved.apiKey !== undefined ? { apiKey: resolved.apiKey } : {}),
+				});
+			} finally {
+				release();
+			}
+			recordOutOfTurnUsageFor(resolved, result.usage, "side-question");
+			if (result.aborted) return;
+			const verdicts = parseTriageAnswer(
+				result.text,
+				asked.map((entry) => entry.id),
+			);
+			if (!triageSnapshotMatches(asked, queues.entries())) {
+				for (const verdict of verdicts) {
+					deps.recordOutcome?.({ ref: verdict.id, source: "steer", facts: { event: "triage", stale: true } });
+				}
+				return;
+			}
+			applyTriage(verdicts, triage.autoInterrupt);
+		} catch {
+			// A failed round leaves the queue exactly as the operator left it.
+		} finally {
+			clearTimeout(deadline);
+			triageInFlight = false;
+		}
+	};
+
+	const applyTriage = (
+		verdicts: ReadonlyArray<ReturnType<typeof parseTriageAnswer>[number]>,
+		autoInterrupt: boolean,
+	): void => {
+		for (const verdict of verdicts) {
+			const entry = queues.entries().find((candidate) => candidate.id === verdict.id);
+			if (entry === undefined) continue;
+			deps.recordOutcome?.({
+				ref: entry.id,
+				source: "steer",
+				facts: {
+					event: "triage",
+					relation: verdict.relation,
+					urgency: verdict.urgency,
+					confidence: verdict.confidence,
+					pinned: entry.pinned === true,
+				},
+			});
+			if (
+				autoInterrupt &&
+				state.streaming &&
+				triageMayInterrupt(verdict, entry, Date.now()) &&
+				interruptRefusalReason() === null
+			) {
+				const taken = queues.removeEntry(entry.id, "sent-now");
+				if (taken === null) continue;
+				const preview = taken.text.replace(/\s+/g, " ").slice(0, 60);
+				emitNotice(`[Clio Coder] triage read "${preview}" as a stop; interrupting the run to deliver it now.`, "warning");
+				void submitTracked(taken.text, {
+					steering: "interrupt",
+					...(taken.display ? { display: taken.display } : {}),
+					...(taken.referencedPaths && taken.referencedPaths.length > 0
+						? { workingContextPaths: taken.referencedPaths }
+						: {}),
+				}).catch(() => {
+					// The interrupt path reports its own refusals; nothing else to do here.
+				});
+				// One interrupt per round: the rest of the queue is held for the new run.
+				return;
+			}
+			queues.relabel(entry.id, triageLabelsFor(verdict), triageKindFor(verdict));
+		}
+	};
+
 	const api: ChatLoop = {
 		steer: (text) => queues.steer(text) !== null,
 		queueFollowUp: (text, display) => queues.queueFollowUp(text, display) !== null,
@@ -2025,6 +2251,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 								previous: lastAssistantText(state.runtime.agent.state.messages),
 							});
 						}
+						if (entry !== null) scheduleTriage();
 						return;
 					}
 					emitNotice("[Clio Coder] response already in progress. Press Esc to cancel the active run.");
@@ -2856,6 +3083,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				turnRuntime.cleanupSessionResources(state.runtime.agent.sessionId);
 			}
 			recovery.cancelRetryCountdown();
+			cancelTriage();
 			queues.reset();
 			middleware.clearPendingReminders();
 			middlewareToolChoice.reset();
@@ -2902,6 +3130,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				turnRuntime.cleanupSessionResources(state.runtime.agent.sessionId);
 			}
 			recovery.cancelRetryCountdown();
+			cancelTriage();
 			queues.reset();
 			middlewareToolChoice.reset();
 		},

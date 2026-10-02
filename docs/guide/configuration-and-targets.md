@@ -122,6 +122,12 @@ This is the version-2 durable schema shipped in `DEFAULT_SETTINGS`. Validation i
 | `chat.retry.maxDelayMs` | `60000` | next turn |
 | `chat.retry.streamStallMs` | `180000` | next turn |
 | `chat.retry.firstTokenStallMs` | `600000` | next turn |
+| `chat.steering.triage.enabled` | `false` | next turn |
+| `chat.steering.triage.target` | `null` | next turn |
+| `chat.steering.triage.model` | `null` | next turn |
+| `chat.steering.triage.minQueued` | `2` | next turn |
+| `chat.steering.triage.timeoutMs` | `8000` | next turn |
+| `chat.steering.triage.autoInterrupt` | `true` | next turn |
 
 ### Configure a different model for workers
 

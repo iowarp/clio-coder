@@ -1619,6 +1619,7 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 				"maxOutputTokens",
 				"prewarm",
 				"retry",
+				"steering",
 			]);
 			const routeInput: Record<string, unknown> = {};
 			for (const key of ["target", "model", "thinkingLevel"] as const) {
@@ -1680,6 +1681,52 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 						if (!(key in chat.retry)) continue;
 						const parsed = expectInteger(issues, `chat.retry.${key}`, chat.retry[key], { min: 0 });
 						if (parsed !== undefined) settings.chat.retry[key] = parsed;
+					}
+				}
+			}
+			if ("steering" in chat) {
+				if (!isPlainObject(chat.steering)) issues.add("chat.steering", `expected a map, got ${describe(chat.steering)}`);
+				else {
+					issues.unknownKeys("chat.steering", chat.steering, ["triage"]);
+					if ("triage" in chat.steering) {
+						const triage = chat.steering.triage;
+						if (!isPlainObject(triage)) issues.add("chat.steering.triage", `expected a map, got ${describe(triage)}`);
+						else {
+							const path = "chat.steering.triage";
+							const target = settings.chat.steering.triage;
+							issues.unknownKeys(path, triage, ["enabled", "target", "model", "minQueued", "timeoutMs", "autoInterrupt"]);
+							for (const key of ["enabled", "autoInterrupt"] as const) {
+								if (!(key in triage)) continue;
+								const parsed = expectBoolean(issues, `${path}.${key}`, triage[key]);
+								if (parsed !== undefined) target[key] = parsed;
+							}
+							if ("target" in triage) {
+								if (triage.target === null) target.target = null;
+								else {
+									const parsed = expectString(issues, `${path}.target`, triage.target);
+									if (parsed !== undefined)
+										target.target = settings.targets.some((candidate) => candidate.id === parsed) ? parsed : null;
+								}
+							}
+							if ("model" in triage) {
+								if (triage.model === null) target.model = null;
+								else {
+									const parsed = expectString(issues, `${path}.model`, triage.model);
+									if (parsed !== undefined) target.model = parsed;
+								}
+							}
+							// A model without a target is the session target's own model choice, which the
+							// active runtime already made; it is dropped the way the memory block drops it.
+							if (!target.target) target.model = null;
+							for (const [key, min] of [
+								["minQueued", 1],
+								["timeoutMs", 1],
+							] as const) {
+								if (!(key in triage)) continue;
+								const parsed = expectInteger(issues, `${path}.${key}`, triage[key], { min });
+								if (parsed !== undefined) target[key] = parsed;
+							}
+						}
 					}
 				}
 			}

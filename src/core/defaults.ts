@@ -516,11 +516,33 @@ export interface AdaptiveRoutingSettings {
 /** Compatibility type name for the dispatch planner; its fields are the canonical v2 fields. */
 export type RoutingActivationSettings = AdaptiveRoutingSettings;
 
+/**
+ * Experimental. Triage reads the queued steering messages with a side model
+ * once the queue settles and relabels them: an unrelated task moves to the end
+ * of the turn, a confident stop may interrupt the run. `target` null uses the
+ * session's active target.
+ */
+export interface SteeringTriageSettings {
+	enabled: boolean;
+	target: string | null;
+	model: string | null;
+	/** Queue length that starts a triage round. */
+	minQueued: number;
+	timeoutMs: number;
+	/** Whether a confident `stop` reading may cancel the run to deliver its message now. */
+	autoInterrupt: boolean;
+}
+
+export interface SteeringSettings {
+	triage: SteeringTriageSettings;
+}
+
 export interface ChatSettings extends WorkerTarget {
 	modelPicker: ModelSelectorSettings;
 	maxOutputTokens: number;
 	prewarm: boolean;
 	retry: RetrySettings;
+	steering: SteeringSettings;
 }
 
 export interface MemorySettings {
@@ -599,6 +621,16 @@ export const DEFAULT_SETTINGS = {
 			streamStallMs: 180000,
 			firstTokenStallMs: 600000,
 		} as RetrySettings,
+		steering: {
+			triage: {
+				enabled: false,
+				target: null as string | null,
+				model: null as string | null,
+				minQueued: 2,
+				timeoutMs: 8000,
+				autoInterrupt: true,
+			},
+		} as SteeringSettings,
 	} as ChatSettings,
 	fleet: {
 		default: {
@@ -758,6 +790,17 @@ chat:
     maxDelayMs: 60000
     streamStallMs: 180000
     firstTokenStallMs: 600000
+  # Experimental. Triage reads messages queued during a run with a side model and
+  # relabels them: an unrelated task waits for the end of the turn, a confident
+  # stop may interrupt the run. target null uses the session's active target.
+  steering:
+    triage:
+      enabled: false
+      target: null
+      model: null
+      minQueued: 2
+      timeoutMs: 8000
+      autoInterrupt: true
 
 fleet:
   default:

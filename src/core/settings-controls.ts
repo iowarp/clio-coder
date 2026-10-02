@@ -503,6 +503,30 @@ const EXTRA_HELP: Record<string, [string, string]> = {
 		"Agent profile assignments",
 		"Map native agent names to existing worker profile names. Use Fleet's binding actions or edit this JSON object.",
 	],
+	"chat.steering.triage.enabled": [
+		"Steering triage",
+		"Experimental. Once messages queued during a run settle, a side model reads them: an unrelated task waits for the end of the turn and a confident stop may interrupt the run. Off, every queued message lands where your key put it.",
+	],
+	"chat.steering.triage.target": [
+		"Steering triage connection",
+		"Connection the triage round uses. Empty uses the session's active connection.",
+	],
+	"chat.steering.triage.model": [
+		"Steering triage model",
+		"Model the triage round asks on that connection. Empty uses the connection's default model.",
+	],
+	"chat.steering.triage.minQueued": [
+		"Steering triage queue size",
+		"Queued messages that start a triage round. Fewer are delivered as queued without a round.",
+	],
+	"chat.steering.triage.timeoutMs": [
+		"Steering triage timeout",
+		"Milliseconds a triage round may take before its answer is dropped and the queue stays as you left it.",
+	],
+	"chat.steering.triage.autoInterrupt": [
+		"Steering triage may interrupt",
+		"Let a confident stop reading cancel the run and deliver that message now. Off, it is only marked as urgent in the queue panel.",
+	],
 	"systemOne.record": [
 		"Save decision examples",
 		"Keep local examples of what each decision engine chose and what happened next. Secrets are removed before saving. Files stay on this machine until you export them. Off by default; a short session record is kept either way.",

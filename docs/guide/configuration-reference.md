@@ -45,6 +45,12 @@ Default chat settings control interactive conversation routing, reasoning effort
 | `chat.retry.maxDelayMs` | `60000` |
 | `chat.retry.streamStallMs` | `180000` |
 | `chat.retry.firstTokenStallMs` | `600000` |
+| `chat.steering.triage.enabled` | `false` |
+| `chat.steering.triage.target` | `null` |
+| `chat.steering.triage.model` | `null` |
+| `chat.steering.triage.minQueued` | `2` |
+| `chat.steering.triage.timeoutMs` | `8000` |
+| `chat.steering.triage.autoInterrupt` | `true` |
 | `fleet.default.target` | `null` |
 | `fleet.default.model` | `null` |
 | `fleet.default.thinkingLevel` | `"off"` |

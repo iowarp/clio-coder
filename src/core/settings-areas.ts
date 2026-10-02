@@ -244,7 +244,7 @@ export function settingsPlacementForRow(id: string, path: string): SettingsPlace
 	if (under(path, "fleet.history")) return place("fleet", "Run history");
 	if (under(path, "fleet.permissions")) return place("safety", "Worker approvals");
 	if (under(path, "safety.review")) return place("safety", "Review");
-	if (under(path, "systemOne")) return place("advanced", "Experimental");
+	if (under(path, "systemOne") || under(path, "chat.steering")) return place("advanced", "Experimental");
 	if (under(path, "context.workingSet") || under(path, "context.memory") || under(path, "context.compaction"))
 		return place("advanced", "Context tuning");
 	return place("advanced", "Other");
