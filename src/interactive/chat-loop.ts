@@ -1944,11 +1944,19 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 						// lands as a user message before the next model turn.
 						// The end-of-turn mode (ACP, or the navigator's slot toggle) keeps the after-this-run intent.
 						if (isWorkerShareNote(trimmed)) state.turnSharedWorkerNote = true;
+						// Inlined @file content is part of this text and reaches the model
+						// at the next slot without passing the fresh-prompt path, so its
+						// information-flow sources are labeled now, not when it lands.
+						const referencedPaths = options.workingContextPaths ?? [];
+						if (referencedPaths.length > 0) {
+							deps.labelReferencedPaths?.(referencedPaths);
+							context.addWorkingContextPaths(referencedPaths);
+						}
 						// The queue carries the submitted bytes, not the trimmed copy the
 						// guard above reads: a steer is a model-facing turn and the
 						// payload contract applies to it too (issue #244).
-						if (mode === "end-of-turn") queues.queueFollowUp(text, options.display);
-						else queues.steer(text, options.display, { front });
+						if (mode === "end-of-turn") queues.queueFollowUp(text, options.display, { referencedPaths });
+						else queues.steer(text, options.display, { front, referencedPaths });
 						return;
 					}
 					emitNotice("[Clio Coder] response already in progress. Press Esc to cancel the active run.");

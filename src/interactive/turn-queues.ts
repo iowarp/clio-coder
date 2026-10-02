@@ -45,6 +45,17 @@ export interface QueuedChatMessage {
 	labels?: Readonly<Record<string, string>>;
 	/** True once the operator set the kind by hand; a producer never relabels a pinned entry. */
 	pinned?: boolean;
+	/**
+	 * Paths whose content the expansion inlined into `text`. Their information-flow
+	 * labels are absorbed when the entry is queued, since the text reaches the
+	 * model at the next slot without passing the fresh-prompt path again.
+	 */
+	referencedPaths?: ReadonlyArray<string>;
+}
+
+export interface QueueEnqueueOptions {
+	front?: boolean;
+	referencedPaths?: ReadonlyArray<string>;
 }
 
 export interface QueuedMessagesSnapshot {
@@ -64,14 +75,17 @@ export interface TurnQueuesDeps {
 	emitQueuedUserTurn: (entry: QueuedChatMessage) => void;
 	emitNotice: (text: string) => void;
 	/** Late-bound `ChatLoop.submit`; wired by the loop after API construction. */
-	submit: (text: string, options?: { requestContinuation?: boolean }) => Promise<void>;
+	submit: (
+		text: string,
+		options?: { requestContinuation?: boolean; workingContextPaths?: ReadonlyArray<string> },
+	) => Promise<void>;
 	now?: () => number;
 }
 
 export interface TurnQueues {
 	/** `front` puts the entry at the head of the queue: a send-now the operator chose to wait with. */
-	steer(text: string, display?: QueuedChatMessage["display"], options?: { front?: boolean }): boolean;
-	queueFollowUp(text: string, display?: QueuedChatMessage["display"]): boolean;
+	steer(text: string, display?: QueuedChatMessage["display"], options?: QueueEnqueueOptions): boolean;
+	queueFollowUp(text: string, display?: QueuedChatMessage["display"], options?: QueueEnqueueOptions): boolean;
 	queuedMessages(): QueuedMessagesSnapshot;
 	/** Copies of the entries still in Clio's hands, in delivery order. */
 	entries(): QueuedChatMessage[];
@@ -147,7 +161,7 @@ export function createTurnQueues(deps: TurnQueuesDeps): TurnQueues {
 		text: string,
 		kind: QueuedMessageKind,
 		display?: QueuedChatMessage["display"],
-		options?: { front?: boolean },
+		options?: QueueEnqueueOptions,
 	): boolean => {
 		// The payload crosses to the model exactly as it was submitted; only the
 		// emptiness test reads a trimmed copy. A queued turn that shortened its own
@@ -155,12 +169,14 @@ export function createTurnQueues(deps: TurnQueuesDeps): TurnQueues {
 		// produced it, which is the same defect the persisted echo had (issue #244).
 		if (text.trim().length === 0 || !state.streaming || !state.runtime) return false;
 		sequence += 1;
+		const paths = options?.referencedPaths ?? [];
 		const entry: QueuedChatMessage = {
 			id: `q${sequence}`,
 			text,
 			kind,
 			enqueuedAt: now(),
 			...(display ? { display } : {}),
+			...(paths.length > 0 ? { referencedPaths: [...paths] } : {}),
 		};
 		if (options?.front === true) queue.unshift(entry);
 		else queue.push(entry);
@@ -186,7 +202,7 @@ export function createTurnQueues(deps: TurnQueuesDeps): TurnQueues {
 
 	return {
 		steer: (text, display, options) => enqueue(text, "steer", display, options),
-		queueFollowUp: (text, display) => enqueue(text, "follow-up", display),
+		queueFollowUp: (text, display, options) => enqueue(text, "follow-up", display, options),
 		queuedMessages(): QueuedMessagesSnapshot {
 			return {
 				steer: queue.filter((entry) => entry.kind === "steer").map((entry) => entry.text),
@@ -323,7 +339,11 @@ export function createTurnQueues(deps: TurnQueuesDeps): TurnQueues {
 			// this is the only place the first text can enter the transcript; the
 			// rest arrive through message_end like any handed-over message.
 			deps.emitQueuedUserTurn({ ...first });
-			await deps.submit(first.text);
+			await deps.submit(first.text, {
+				...(first.referencedPaths && first.referencedPaths.length > 0
+					? { workingContextPaths: first.referencedPaths }
+					: {}),
+			});
 			return true;
 		},
 		async resubmitRequestContinuation(): Promise<void> {

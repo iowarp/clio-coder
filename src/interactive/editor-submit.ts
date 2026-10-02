@@ -4,7 +4,7 @@ import type { PendingSkillRequest } from "../core/skill-activation.js";
 import type { DispatchContract } from "../domains/dispatch/contract.js";
 import type { SessionEntryInput } from "../domains/session/contract.js";
 import type { SessionContract, SessionEntry } from "../domains/session/index.js";
-import type { ChatLoop } from "./chat-loop.js";
+import type { ChatLoop, QueuedChatMessage } from "./chat-loop.js";
 import type { ChatPanel } from "./chat-panel.js";
 import { parseEditorBashCommand, unguardPastedEditorOperator } from "./editor-bash.js";
 import {
@@ -503,7 +503,7 @@ export function createEditorSubmitController(deps: EditorSubmitDeps): EditorSubm
 		const streaming = deps.chat.isStreaming();
 		const snapshot = captureDraft();
 		let text = (explicitText ?? deps.editor.getTextForSubmit()).trim();
-		let flushDisplay: EditorSubmitExpansion["display"] | undefined;
+		let flushed: QueuedChatMessage | undefined;
 		if (text.length === 0) {
 			// An empty draft with a queue means "send the queue now": the first
 			// entry becomes the fresh prompt and the rest ride the engine's opening
@@ -518,7 +518,7 @@ export function createEditorSubmitController(deps: EditorSubmitDeps): EditorSubm
 			if (deps.chat.removeQueuedEntry(first.id) === null) return;
 			deps.chat.flushQueueOnNextPrompt();
 			text = first.text;
-			flushDisplay = first.display;
+			flushed = first;
 		}
 		if (streaming && refuseBusyCommand(text, "a send-now")) return;
 		if (!streaming) {
@@ -530,15 +530,21 @@ export function createEditorSubmitController(deps: EditorSubmitDeps): EditorSubm
 		if (pendingDrafts.has(snapshot.key)) return;
 		pendingDrafts.add(snapshot.key);
 		void (async () => {
-			const submitted =
-				flushDisplay !== undefined
-					? { text, images: [], display: flushDisplay }
-					: await deps.expandSubmit(unguardPastedEditorOperator(text));
+			// A flushed entry was expanded when it was queued; its display and the
+			// paths it inlined travel with it instead of being expanded again.
+			const submitted: EditorSubmitExpansion = flushed
+				? {
+						text,
+						images: [],
+						...(flushed.display ? { display: flushed.display } : {}),
+						...(flushed.referencedPaths ? { workingContextPaths: flushed.referencedPaths } : {}),
+					}
+				: await deps.expandSubmit(unguardPastedEditorOperator(text));
 			if (submitted.images.length > 0) {
 				deps.io.stderr("[interrupt] image references cannot be sent while a response is streaming\n");
 				return;
 			}
-			if (flushDisplay === undefined) deps.editor.addToHistory(text);
+			if (!flushed) deps.editor.addToHistory(text);
 			// The queue stays queued: a send-now does not undo what the operator
 			// already asked for. Held through the cancel, it lands at the new run's
 			// first slot (or with its first model call, for a flush).
