@@ -13,6 +13,7 @@ import type { ClioSettings } from "../core/config.js";
 import type { PendingSkillToolPolicy } from "../core/skill-activation.js";
 import type { TurnConstraints } from "../core/turn-constraints.js";
 import type {
+	CostProvenance,
 	ResolvedRuntimeTarget,
 	RuntimeDescriptor,
 	RuntimeTargetSnapshot,
@@ -47,6 +48,7 @@ export interface ChatLoopRunSnapshot {
 	runtimeKind: RuntimeDescriptor["kind"];
 	wireModelId: string;
 	autonomy: ClioSettings["safety"]["autonomy"];
+	costProvenance?: CostProvenance;
 	compiledPromptHash: string | null;
 	staticCompositionHash: string | null;
 	promptSignature: string | null;

@@ -2693,6 +2693,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				runtimeKind: agentRuntime.runtimeResolution.runtimeKind,
 				wireModelId: agentRuntime.wireModelId,
 				autonomy: deps.getSettings().safety.autonomy,
+				costProvenance: agentRuntime.runtimeResolution.costProvenance,
 				compiledPromptHash: promptHash,
 				staticCompositionHash: promptHash,
 				promptSignature: promptHash,

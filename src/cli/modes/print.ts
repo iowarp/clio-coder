@@ -33,6 +33,8 @@ import type {
 	SafetyBlockedAttempt,
 	ToolCallStat,
 } from "../../domains/dispatch/types.js";
+import type { CostAmount } from "../../domains/observability/cost.js";
+import { aggregateCostAmounts } from "../../domains/observability/cost.js";
 import type { ActionClass } from "../../domains/safety/action-classifier.js";
 import { SESSION_COST_CEILING_EXIT_CODE, SESSION_COST_CEILING_REASON } from "../../domains/scheduling/budget.js";
 import { readPiMonoVersion } from "../../engine/pi-mono-names.js";
@@ -156,6 +158,7 @@ interface HeadlessMainAgentReceiptStats {
 	verifyCalls: VerifyCallOutcome[];
 	skillActivations: SkillActivation[];
 	usage: RunUsageSummary | null;
+	costAmounts: CostAmount[];
 	/** The decision axis, counted the way a worker receipt counts it. */
 	decisions: RunReceiptSafetySummary["decisions"];
 	/** Every call whose outcome was blocked, in the worker receipt's shape, up to `BLOCKED_ATTEMPTS_LIMIT`. */
@@ -582,6 +585,15 @@ async function recordHeadlessMainAgentReceipt(input: {
 	const cacheWriteTokenCount = usage?.cacheWrite ?? 0;
 	const reasoningTokenCount = usage?.reasoning ?? 0;
 	const costUsd = usage?.costUsd ?? 0;
+	const cost = aggregateCostAmounts(input.stats.costAmounts);
+	const costProvenance =
+		cost.calls === 0 || cost.hasUnknown
+			? "unknown"
+			: cost.hasEstimated
+				? "estimated"
+				: cost.allKnownFree
+					? "known_free"
+					: "known";
 	const { exitCode, outcome, status } = input.terminal;
 	const outcomeDetail = input.terminal.outcomeDetail ?? input.terminal.failureMessage;
 	const outcomeCode = outcome === "failed" ? snapshot.outcomeCode : undefined;
@@ -653,7 +665,7 @@ async function recordHeadlessMainAgentReceipt(input: {
 			failover: "none",
 		},
 		quality: createRunReceiptQuality({ runtimeEnforceable: false, enforcementPassed: null, typedValidations }),
-		costProvenance: "unknown",
+		costProvenance,
 		startedAt: input.startedAt,
 		endedAt: input.endedAt,
 		exitCode,
@@ -727,6 +739,7 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 		verifyCalls: [],
 		skillActivations: [],
 		usage: null,
+		costAmounts: [],
 		decisions: { allowed: 0, blocked: 0, permissionRequested: 0 },
 		blockedAttempts: [],
 		blockedAttemptsTruncated: 0,
@@ -851,6 +864,10 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 			// runs), so nothing here may key on the last segment alone.
 			const usageSummary = sumRunUsage([event.message]);
 			if (usageSummary.hadUsage) {
+				receiptStats.costAmounts.push({
+					usd: usageSummary.costUsd,
+					provenance: chat.lastRunSnapshot?.()?.costProvenance ?? "unknown",
+				});
 				receiptStats.usage = receiptStats.usage === null ? usageSummary : addRunUsage(receiptStats.usage, usageSummary);
 			}
 		}
