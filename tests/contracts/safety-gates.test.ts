@@ -1206,8 +1206,6 @@ describe("safety gate boundary", () => {
 			"ls --dereference",
 			"ls -L && cat a.txt",
 			"rg x",
-			"rg x src/",
-			"rg -e x .",
 			"rg --files ..",
 			"rg --files -e x",
 			"cat a.txt | rg -f p",
@@ -1279,6 +1277,8 @@ describe("safety gate boundary", () => {
 			'cd pkg && git branch -a && echo "---X---" && git status && cat ../src/a.js',
 			"git log | rg foo",
 			"rg -n TODO src/a.js",
+			"rg x src/",
+			"rg -e x .",
 			"rg --files",
 			"rg --files src",
 			"git -C . status",
@@ -1291,6 +1291,22 @@ describe("safety gate boundary", () => {
 			const decision = policy.evaluate({ tool: ToolNames.Bash, args: { command } });
 			strictEqual(decision.execRecognition, "recognized", command);
 		}
+	});
+
+	it("recognizes an rg directory search only when its walk reaches no zero-access file", () => {
+		writeInspectionFixture();
+		mkdirSync(join(scratch, "certs", "deep"), { recursive: true });
+		writeFileSync(join(scratch, "certs", "deep", "server.pem"), "key\n");
+		const policy = engine();
+		const recognition = (command: string) => policy.evaluate({ tool: ToolNames.Bash, args: { command } }).execRecognition;
+		strictEqual(recognition("rg x src"), "recognized");
+		strictEqual(recognition("rg x certs"), "unrecognized", "a nested *.pem is a zero-access file");
+		strictEqual(recognition("rg x ."), "unrecognized", "the walk from the root reaches certs/deep/server.pem");
+		// The bare kubeconfig entry protects the workspace root's own file.
+		rmSync(join(scratch, "certs"), { recursive: true });
+		strictEqual(recognition("rg x ."), "recognized");
+		writeFileSync(join(scratch, "kubeconfig"), "k\n");
+		strictEqual(recognition("rg x ."), "unrecognized", "the root kubeconfig is zero-access");
 	});
 
 	it("holds git -C to the workspace even where an exempt read root is readable", () => {
