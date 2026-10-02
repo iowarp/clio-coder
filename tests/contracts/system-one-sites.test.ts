@@ -71,7 +71,13 @@ describe("turn policy", () => {
 	it("gives no hint and starts nothing under an unfitted build", () => {
 		const value = turn(loudTurn(), UNFITTED, { ...TASK, recipes: RECIPES });
 		deepStrictEqual(value.hints, { scope: null, plan: null });
-		deepStrictEqual(value.acts, { orientation: false, direction: false, prewarm: false, dispatch: false });
+		deepStrictEqual(value.acts, {
+			orientation: false,
+			direction: false,
+			prewarm: false,
+			dispatch: false,
+			prewarmPending: false,
+		});
 	});
 
 	it("hints scope at the cut and above, not below", () => {
