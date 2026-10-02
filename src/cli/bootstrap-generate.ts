@@ -70,12 +70,11 @@ export interface BootstrapRoute {
 }
 
 /**
- * The bootstrap agent's route, resolved with the same precedence every other
- * internal dispatch uses: an explicit profile binding first, then
- * `workers.default`. A fresh install with a perfectly good `workers.default`
- * must still produce a model-driven CLIO-CODER.md, so an absent binding is an absent
- * opinion rather than a refusal. A dangling binding still throws, because
- * naming a profile that does not resolve is an operator error.
+ * The bootstrap agent's route: an explicit profile binding first, then the main
+ * orchestrator's model, then `fleet.default`. The orchestrator is the model the
+ * operator already chose for this work, so an unbound install writes its handbook
+ * with it instead of a worker default nobody picked for the job. A dangling binding
+ * still throws, because naming a profile that does not resolve is an operator error.
  *
  * A `scout` binding is honored as the second choice. Operators bound Scout
  * back when bootstrap ran through it, and an upgrade must not silently move
@@ -94,19 +93,19 @@ export function resolveBootstrapRoute(settings: Readonly<ClioSettings>): Bootstr
 			...(profile.thinkingLevel ? { thinkingLevel: profile.thinkingLevel } : {}),
 		};
 	}
-	const fallback = settings.fleet.default;
-	if (!fallback?.target) {
-		throw new Error(
-			`bootstrap has no route: fleet.agentProfiles.${CONTEXT_BOOTSTRAP_AGENT_ID} is unbound and ` +
-				`fleet.default has no target; bind a profile with ` +
-				`'clio-coder targets profile bind ${CONTEXT_BOOTSTRAP_AGENT_ID} <profile>' or set fleet.default.target`,
-		);
+	for (const fallback of [settings.chat, settings.fleet.default]) {
+		if (!fallback?.target) continue;
+		return {
+			target: fallback.target,
+			...(fallback.model ? { model: fallback.model } : {}),
+			...(fallback.thinkingLevel ? { thinkingLevel: fallback.thinkingLevel } : {}),
+		};
 	}
-	return {
-		target: fallback.target,
-		...(fallback.model ? { model: fallback.model } : {}),
-		...(fallback.thinkingLevel ? { thinkingLevel: fallback.thinkingLevel } : {}),
-	};
+	throw new Error(
+		`bootstrap has no route: fleet.agentProfiles.${CONTEXT_BOOTSTRAP_AGENT_ID} is unbound, chat has no target and ` +
+			`fleet.default has no target; bind a profile with ` +
+			`'clio-coder targets profile bind ${CONTEXT_BOOTSTRAP_AGENT_ID} <profile>' or set fleet.default.target or chat.target`,
+	);
 }
 
 /**
