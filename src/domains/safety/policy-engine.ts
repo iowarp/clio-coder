@@ -805,6 +805,9 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 		},
 		informationFlow: () => informationFlow,
 		flowRestrictionsFor(rawCall) {
+			// Runs on every tool call. With no rules there is nothing to label, and the
+			// cwd canonicalization below is a filesystem walk the call must not pay for.
+			if (informationFlow.rules.length === 0) return null;
 			const call = normalizeCallPaths(rawCall);
 			return flowRestrictionsForCall(informationFlow, { tool: call.tool, args: call.args, cwd: cwdArg(call.args, cwd) });
 		},
