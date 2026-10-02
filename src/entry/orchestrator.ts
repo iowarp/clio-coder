@@ -1,4 +1,3 @@
-import { workerFlowPolicyInput } from "../domains/safety/information-flow.js";
 import { randomBytes, randomUUID } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -178,6 +177,7 @@ import {
 	resolveRigor,
 	SafetyDomainModule,
 } from "../domains/safety/index.js";
+import { workerFlowPolicyInput } from "../domains/safety/information-flow.js";
 import type { ProtectedArtifactState } from "../domains/safety/protected-artifacts.js";
 import {
 	createProtectedArtifactsRegistration,
@@ -266,7 +266,7 @@ import { prepareBackgroundModelMetadata } from "./background-model-metadata.js";
 import type { BootOptions } from "./boot-options.js";
 import { readCompactionSystemPrompt } from "./compaction-prompt.js";
 import { createExtensionReloadCoordinator } from "./extension-reload.js";
-import { createFlowLedger } from "./flow-ledger.js";
+import { createFlowLedger, FLOW_RESTRICTION_ENTRY_TYPE } from "./flow-ledger.js";
 import { resolvePanesEnablement } from "./panes-activation.js";
 import { reloadPluginResourcesAndNotify } from "./plugin-reload.js";
 import { createDecisionUsageTally, createSystemOneHost, createSystemOneRequestAdmission } from "./system-one-host.js";
@@ -895,6 +895,19 @@ async function resolveCompactionModel(
 function readSessionEntriesForCompact(sessionId: string): SessionEntry[] {
 	const reader = openSession(sessionId);
 	return collectSessionEntries(reader.turns(), sessionPaths(reader.meta()).current);
+}
+
+/** Only flow custom entries need validation here; message payloads never enter this ledger. */
+function readFlowSessionEntries(sessionId: string): ReadonlyArray<unknown> {
+	return openSession(sessionId)
+		.turns()
+		.filter(
+			(entry) =>
+				typeof entry === "object" &&
+				entry !== null &&
+				"customType" in entry &&
+				entry.customType === FLOW_RESTRICTION_ENTRY_TYPE,
+		);
 }
 
 /**
@@ -1658,7 +1671,11 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	const session = result.getContract<SessionContract>("session");
 	// One durable union of restricted sources per session. Every model send,
 	// mediated outbound call and System One request is judged against it.
-	const flowLedger = createFlowLedger({ session: session ?? null, readEntries: readSessionEntriesForCompact });
+	const flowLedger = createFlowLedger({
+		session: session ?? null,
+		readEntries: readFlowSessionEntries,
+		hasSourceRules: () => (safety?.policy?.informationFlow?.().rules.length ?? 0) > 0,
+	});
 	flowRestrictionsForDispatch = () => {
 		// A worker launched while the ledger cannot vouch would carry unlabeled
 		// context; the refusal surfaces at its first model request instead.

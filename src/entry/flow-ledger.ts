@@ -11,15 +11,14 @@
  * history.
  *
  * The ledger never downgrades on failure. A session whose ledger cannot be
- * read, or a restriction that could not be persisted, leaves the ledger
- * `unavailable`: in-memory restrictions still govern, and every outbound
- * admission that asks `refusal()` is told to refuse until a later read or
- * write succeeds. Persistence is retried on every later call.
+ * read while source rules or carried labels require provenance, or a restriction
+ * that could not be persisted, leaves the ledger `unavailable`. Session reads
+ * are retried on a session switch; persistence is retried on every later call.
  */
 
 import type { FlowRestrictionSet } from "../domains/safety/index.js";
 import { isFlowRestrictionSet, mergeFlowRestrictions } from "../domains/safety/index.js";
-import type { SessionContract, SessionEntry } from "../domains/session/index.js";
+import type { SessionContract } from "../domains/session/index.js";
 
 export const FLOW_RESTRICTION_ENTRY_TYPE = "clio_coder_flow_restriction";
 
@@ -37,9 +36,11 @@ export interface FlowLedger {
 }
 
 /** The union of every flow-restriction entry in a session's ledger. */
-function flowRestrictionsFromEntries(entries: ReadonlyArray<SessionEntry>): FlowRestrictionSet | null {
+function flowRestrictionsFromEntries(entries: ReadonlyArray<unknown>): FlowRestrictionSet | null {
 	const sets: FlowRestrictionSet[] = [];
-	for (const entry of entries) {
+	for (const raw of entries) {
+		if (typeof raw !== "object" || raw === null) continue;
+		const entry = raw as { kind?: unknown; customType?: unknown; data?: unknown };
 		if (entry.kind !== "custom" || entry.customType !== FLOW_RESTRICTION_ENTRY_TYPE) continue;
 		const data = (entry.data as { set?: unknown } | undefined)?.set;
 		if (isFlowRestrictionSet(data)) sets.push(data);
@@ -49,11 +50,14 @@ function flowRestrictionsFromEntries(entries: ReadonlyArray<SessionEntry>): Flow
 
 export function createFlowLedger(deps: {
 	session: SessionContract | null;
-	readEntries: (sessionId: string) => ReadonlyArray<SessionEntry>;
+	readEntries: (sessionId: string) => ReadonlyArray<unknown>;
+	/** A configured source policy requires provenance even before a label has been recovered. */
+	hasSourceRules?: () => boolean;
 }): FlowLedger {
 	let loadedFor: string | null = null;
 	let carried: FlowRestrictionSet | null = null;
 	let readFailure: string | null = null;
+	const known = new Map<string, FlowRestrictionSet>();
 	/** Sets absorbed in this process whose entry has not yet reached that session's ledger. */
 	const pending = new Map<string, Array<{ set: FlowRestrictionSet; origin: { tool?: string; toolCallId?: string } }>>();
 	let writeFailure: string | null = null;
@@ -61,13 +65,14 @@ export function createFlowLedger(deps: {
 	const sync = (): void => {
 		const meta = deps.session?.current() ?? null;
 		const id = meta?.id ?? null;
-		if (id === loadedFor && readFailure === null) return;
+		if (id === loadedFor) return;
 		if (id !== loadedFor) {
 			// A different session: its ledger is the only authority for what it
 			// carries. Entries still pending for the old session stay queued under
 			// its id and are written when it is current again.
 			writeFailure = null;
-			carried = null;
+			carried =
+				id === null ? null : mergeFlowRestrictions(known.get(id), ...(pending.get(id) ?? []).map((item) => item.set));
 		}
 		loadedFor = id;
 		if (id === null) {
@@ -80,11 +85,11 @@ export function createFlowLedger(deps: {
 				carried,
 				...(pending.get(id) ?? []).map((item) => item.set),
 			);
+			if (carried !== null) known.set(id, carried);
 			readFailure = null;
 		} catch (error) {
-			// Keep whatever is already known; the ledger stays unavailable until a
-			// later read succeeds, and every outbound admission is refused meanwhile.
-			readFailure = `information-flow provenance for session ${id} could not be read (${error instanceof Error ? error.message : String(error)}); outbound transfer is refused until the session ledger is readable`;
+			// Retry on a session switch, rather than parsing the full file on every admission.
+			readFailure = `information-flow provenance for session ${id} could not be read (${error instanceof Error ? error.message : String(error)}); restore the session ledger and reopen the session before transferring restricted context`;
 		}
 	};
 
@@ -134,13 +139,16 @@ export function createFlowLedger(deps: {
 		refusal() {
 			sync();
 			flush();
-			return readFailure ?? writeFailure;
+			return (
+				((carried?.restrictions.length ?? 0) > 0 || deps.hasSourceRules?.() === true ? readFailure : null) ?? writeFailure
+			);
 		},
 		absorb(set, origin) {
 			sync();
 			const merged = mergeFlowRestrictions(carried, set);
 			const before = carried?.restrictions.length ?? 0;
 			carried = merged;
+			if (loadedFor !== null && carried !== null) known.set(loadedFor, carried);
 			if (merged !== null && merged.restrictions.length > before && loadedFor !== null) {
 				const queue = pending.get(loadedFor) ?? [];
 				queue.push({ set, origin });
