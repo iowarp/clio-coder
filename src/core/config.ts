@@ -493,15 +493,16 @@ function validatePricing(
 	path: string,
 	value: unknown,
 ): ClioSettings["targets"][number]["pricing"] | undefined {
+	if (value === "free") return value;
 	if (!isPlainObject(value)) {
-		issues.add(path, `expected a map, got ${describe(value)}`);
+		issues.add(path, `expected 'free' or a map, got ${describe(value)}`);
 		return undefined;
 	}
 	issues.unknownKeys(path, value, ["input", "output", "cacheRead", "cacheWrite"]);
 	const input = expectNumber(issues, `${path}.input`, value.input, { min: 0 });
 	const output = expectNumber(issues, `${path}.output`, value.output, { min: 0 });
 	if (input === undefined || output === undefined) return undefined;
-	const out: NonNullable<ClioSettings["targets"][number]["pricing"]> = { input, output };
+	const out: Exclude<NonNullable<ClioSettings["targets"][number]["pricing"]>, "free"> = { input, output };
 	if ("cacheRead" in value) {
 		const v = expectNumber(issues, `${path}.cacheRead`, value.cacheRead, { min: 0 });
 		if (v !== undefined) out.cacheRead = v;

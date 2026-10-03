@@ -87,7 +87,7 @@ export function synthLocalModel(input: LocalSynthesisInput): Model<Api> {
 	const caps = mergeCapabilities(defaultCapabilities, hintCapabilities(kb?.entry), null, target.capabilities ?? null);
 	const rawUrl = target.url ?? "";
 	const baseUrl = rawUrl.length > 0 ? input.baseUrlForTarget(rawUrl) : "";
-	const pricing = target.pricing;
+	const pricing = target.pricing === "free" ? undefined : target.pricing;
 	const headers = target.auth?.headers;
 	const quirks = extractLocalModelQuirks(kb?.entry.quirks);
 	const model: Model<Api> & ClioLocalModelMetadata = {

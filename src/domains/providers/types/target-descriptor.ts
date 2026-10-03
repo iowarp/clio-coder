@@ -111,7 +111,7 @@ export interface TargetDescriptor {
 	capabilities?: Partial<CapabilityFlags>;
 	lifecycle?: TargetLifecycle;
 	gateway?: boolean;
-	pricing?: TargetPricing;
+	pricing?: TargetPricing | "free";
 	cache?: TargetCacheSettings;
 	lmstudio?: LmStudioTargetSettings;
 	litellm?: LiteLLMTargetSettings;

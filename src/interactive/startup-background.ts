@@ -23,7 +23,7 @@ interface StartupPreparation {
 async function warmWorkerTarget(input: StartupPreparation, status: TargetStatus, modelId: string): Promise<void> {
 	const { target, runtime } = status;
 	if (!runtime || target.cache?.warm?.startup !== true || target.cache.retention === "none") return;
-	if (target.pricing && Object.values(target.pricing).some((rate) => rate > 0)) return;
+	if (target.pricing && target.pricing !== "free" && Object.values(target.pricing).some((rate) => rate > 0)) return;
 	const identity = JSON.stringify(target);
 	const signal = AbortSignal.any([
 		input.signal,
