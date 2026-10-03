@@ -11,6 +11,7 @@ import { createApp } from "./app.js";
 import { getVersionInfo, resolveClioDirs, resolvePackageRoot } from "./clio/http-shims.js";
 import { backgroundEnvironment, readBackgroundConfig } from "./launcher/background-config.js";
 import { listenPorts } from "./launcher/ports.js";
+import { showPage } from "./local-server.js";
 import { restrictNetwork } from "./network-policy.js";
 import { serverOptions } from "./options.js";
 import { autoOpenBrowser, openApp, openBrowser } from "./process-policy.js";
@@ -64,6 +65,7 @@ export async function main(args = process.argv.slice(2)) {
 	const openLink = (href: string) =>
 		openApp(href).catch(() => {
 			console.error("[clio-coder:gui] Could not open the browser. Open the printed URL manually.");
+			return "failed" as const;
 		});
 	// A person at a terminal gets guidance; a pipe, a script or a test gets only the link on stdout.
 	const hint = (line: string) => {
@@ -99,7 +101,15 @@ export async function main(args = process.argv.slice(2)) {
 				console.error(
 					`[clio-coder:gui] The background app is still running Clio Coder ${reused.running}; this installation is ${version}. Restart it to use this version: clio-coder gui background restart`,
 				);
-			if (open) await openLink(url.href);
+			// A window that was already open is only brought forward, still on its own page. A bare launch
+			// leaves it there; one that named a page asks the app to show it in that window.
+			if (open && (await openLink(url.href)) === "focused" && values.path !== "/") {
+				const token = new URLSearchParams(url.hash.slice(1)).get("token") ?? "";
+				if (!(await showPage(Number(url.port), token, values.path).catch(() => false)))
+					console.error(
+						"[clio-coder:gui] The open window was brought forward but could not be shown that page. Open the printed URL in it.",
+					);
+			}
 			return;
 		}
 		if (reused.kind === "unavailable")

@@ -3,6 +3,7 @@ import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { API_VERSION, APP_VERSION } from "../contracts/meta.js";
 import { openapi } from "../contracts/openapi.js";
+import { isPagePath } from "../contracts/pages.js";
 import { routes } from "../contracts/routes.js";
 import { getVersionInfo, resolvePackageRoot } from "./clio/http-shims.js";
 import { auth } from "./http/auth.js";
@@ -95,6 +96,13 @@ export function createApp(options: {
 	}));
 	register(app, hub, routes.openapi, () => openapi());
 	register(app, hub, routes.events, ({ query }, context) => events(context, hub, query.after));
+	// The launcher focuses the open window and stops, so a launch that named a page sends it here and
+	// every window hears it. The one that has the focus goes there.
+	register(app, hub, routes.launch, ({ body }) => {
+		if (!isPagePath(body.path)) throw new AppProblem("validation", "The launch path is not a page of this app.");
+		hub.publish({ type: "app.launch", payload: { path: body.path } });
+		return {};
+	});
 	register(app, hub, routes.tools, async (_input, context) => {
 		const result = await toolchain.list();
 		if (options.diagnostics) context.header("X-Clio-Worker-Thread", String(result.threadId));

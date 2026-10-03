@@ -63,6 +63,12 @@ export const Event = Type.Union([
 		payload: Type.Object({ ...resource, kind: Type.String(), operation: Type.Optional(Operation) }),
 	}),
 	Type.Object({ ...base, type: Type.Literal("toolchain.changed"), payload: Type.Object({ id: Id }) }),
+	/** A launch found the app window open and asks it to show a page. The window the launcher focused takes it. */
+	Type.Object({
+		...base,
+		type: Type.Literal("app.launch"),
+		payload: Type.Object({ path: Type.String({ maxLength: 512 }) }, { additionalProperties: false }),
+	}),
 ]);
 export type Event = Static<typeof Event>;
 export type DomainEvent = Exclude<Event, { type: "hello" | "resync" }>;

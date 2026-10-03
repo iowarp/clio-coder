@@ -5,13 +5,22 @@ import { routes } from "../../contracts/routes.js";
 import { type SessionDelta, SessionDeltas, type SessionSnapshot } from "../../contracts/sessions.js";
 import { onTokenRejected, tokenRejected } from "./auth-state.js";
 import { type Client, emptyInput } from "./client.js";
+import { clock } from "./clock.js";
 import { FrameEventBuffer } from "./frame-buffer.js";
 import { resetSessionBuffers, SESSION_CACHES, sessionBuffer } from "./sessions.js";
 
 type OperationEntry = { resource: string; revision: number; operation?: Operation };
 export type ConnectionState = "Connecting…" | "Connected" | "Reconnecting…" | "Not connected";
+/** A launch older than this was meant for a moment that has passed, such as one replayed after a reconnect. */
+const LAUNCH_FRESH_MS = 10_000;
 
-export function subscribe(client: Client, queries: QueryClient, connection: (state: ConnectionState) => void) {
+export function subscribe(
+	client: Client,
+	queries: QueryClient,
+	connection: (state: ConnectionState) => void,
+	/** A launch found this app open and named a page for the window it focused. */
+	launch: (path: string) => void = () => {},
+) {
 	let stream: EventSource | null = null;
 	let cursor: string | undefined;
 	let retryTimer: ReturnType<typeof setTimeout> | null = null;
@@ -28,6 +37,7 @@ export function subscribe(client: Client, queries: QueryClient, connection: (sta
 			invalidate = new Set<string>(),
 			operations: OperationEntry[] = [];
 		let resynced = false;
+		let launched: string | null = null;
 		for (const event of events) {
 			if ((epoch && epoch !== event.epoch) || event.type === "resync") {
 				// Everything collected so far is stale, and so is the rest of the batch.
@@ -37,6 +47,7 @@ export function subscribe(client: Client, queries: QueryClient, connection: (sta
 				resumed.clear();
 				invalidate.clear();
 				operations.length = 0;
+				launched = null;
 				epoch = event.epoch;
 				continue;
 			}
@@ -104,6 +115,8 @@ export function subscribe(client: Client, queries: QueryClient, connection: (sta
 				queries.setQueryData(["session-interview", event.payload.resource], event.payload.round);
 			}
 			if (event.type === "toolchain.changed") invalidate.add("tools");
+			if (event.type === "app.launch" && clock.now() - Date.parse(event.at) < LAUNCH_FRESH_MS)
+				launched = event.payload.path;
 		}
 		if (resynced) {
 			queries.removeQueries({ queryKey: ["operation"] });
@@ -123,6 +136,7 @@ export function subscribe(client: Client, queries: QueryClient, connection: (sta
 			else void queries.invalidateQueries({ queryKey: ["operation", entry.resource] });
 		}
 		for (const key of invalidate) void queries.invalidateQueries({ queryKey: [key] });
+		if (launched !== null) launch(launched);
 	});
 
 	const connect = () => {
@@ -145,6 +159,7 @@ export function subscribe(client: Client, queries: QueryClient, connection: (sta
 			"operation.finished",
 			"toolchain.changed",
 			"interview.changed",
+			"app.launch",
 			...Object.keys(SessionDeltas),
 		])
 			source.addEventListener(type, receive as EventListener);

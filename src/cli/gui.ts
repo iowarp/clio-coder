@@ -31,8 +31,10 @@ version; --if-idle leaves it alone when work or a conversation is open. Stop
 stops it until the next login or the next clio-coder gui, and uninstall also
 removes its login, desktop and Windows entries.
 Under WSL, background install also adds a Clio Coder Start Menu shortcut and a
-sign-in entry on Windows. The shortcut wakes WSL, starts the app and opens it
-in a Chrome or Edge app window; the sign-in entry only wakes WSL and starts it.
+sign-in entry on Windows. The shortcut wakes WSL, starts the app and brings
+its window to the front, opening a Chrome or Edge app window only when none
+is open; the sign-in entry only wakes WSL and starts it. clio-coder gui
+focuses the open window the same way, and --path then shows that page in it.
 macOS and native Windows run the private server only; Windows prints the link
 instead of opening it. Your CLI, terminal interface, headless runs, and
 graphical app use the same Clio Coder runtime, configuration and sessions, and

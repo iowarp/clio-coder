@@ -841,6 +841,15 @@ export const routes = {
 		response: SessionSnapshot,
 		summary: "Close the supervised session and its child",
 	}),
+	launch: defineRoute({
+		...post,
+		status: 200,
+		params: Empty,
+		path: "/api/launch",
+		body: Type.Object({ path: Type.String({ maxLength: 512, pattern: "^/" }) }, { additionalProperties: false }),
+		response: Empty,
+		summary: "Ask the app window a launch just focused to show a page",
+	}),
 	viewSession: defineRoute({
 		...post,
 		status: 200,

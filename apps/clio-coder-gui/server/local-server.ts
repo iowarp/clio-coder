@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { request } from "node:http";
 import { setTimeout } from "node:timers/promises";
 import { listenPorts } from "./launcher/ports.js";
@@ -62,6 +63,42 @@ export async function localServerMeta(port: number, token: string) {
 			resolve(null);
 		});
 		req.end();
+	});
+}
+/**
+ * Ask the app to show a page in the window a launch just brought forward. False when the app did not
+ * take the request, which an app still running an older version never does.
+ */
+export async function showPage(port: number, token: string, path: string) {
+	if (!Number.isInteger(port) || port < 1 || port > 65535 || !/^[\w-]{32,256}$/.test(token))
+		throw new Error("Invalid local server identity.");
+	const body = JSON.stringify({ path });
+	return new Promise<boolean>((resolve) => {
+		const req = request(
+			{
+				hostname: "127.0.0.1",
+				port,
+				path: "/api/launch",
+				method: "POST",
+				headers: {
+					Authorization: `Bearer ${token}`,
+					"Content-Type": "application/json",
+					"Content-Length": Buffer.byteLength(body),
+					"Idempotency-Key": randomUUID(),
+				},
+			},
+			(response) => {
+				response.resume();
+				response.on("error", () => resolve(false));
+				response.on("end", () => resolve(response.statusCode === 200));
+			},
+		);
+		req.on("error", () => resolve(false));
+		req.setTimeout(1000, () => {
+			req.destroy();
+			resolve(false);
+		});
+		req.end(body);
 	});
 }
 export async function waitForLocalServer(port: number, token: string): Promise<LocalServerMeta> {

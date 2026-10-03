@@ -20,11 +20,11 @@ import { useSetupStatus } from "./pages/target-onboarding.js";
 import { ASIDE_DOCK_QUERY, toggleAside, useAsideExpanded } from "./shell/aside-state.js";
 import { OpenWorkspaceDialog } from "./shell/OpenWorkspaceDialog.js";
 import { type ShellApi, ShellContext } from "./shell/shell-context.js";
-import { isSettingsPath, sessionIdFromPath, taskRows } from "./shell/shell-model.js";
+import { isHeld, isSettingsPath, sessionIdFromPath, taskRows } from "./shell/shell-model.js";
 import { TaskSidebar } from "./shell/TaskSidebar.js";
 import { rememberedWorkspace, rememberWorkspace, useTaskActions } from "./shell/tasks.js";
 import { useApplyTheme } from "./shell/theme.js";
-import { launchedPath, openAppWindow } from "./shell/windows.js";
+import { launchedPath, openAppWindow, whenFocused } from "./shell/windows.js";
 import type { WizardExit } from "./wizard/Wizard.js";
 import type { WizardMode } from "./wizard/wizard-model.js";
 import "./shell/shell.css";
@@ -89,8 +89,14 @@ export function App({ client }: { client: Client }) {
 		queryFn: () => client.call(routes.meta, emptyInput),
 		enabled: !!client.token,
 	});
+	// The launcher brought one window forward and named a page; only that window goes there.
+	const launched = useRef<(path: string) => void>(() => {});
+	launched.current = (path) =>
+		whenFocused(() => {
+			if (path !== window.location.pathname) void navigate(path);
+		});
 	useEffect(() => {
-		if (client.token) return subscribe(client, queries, setConnection);
+		if (client.token) return subscribe(client, queries, setConnection, (path) => launched.current(path));
 	}, [client, queries]);
 	const setup = useSetupStatus(client, !!client.token && !refused);
 	// A machine with no connection at all opens the wizard, full window. It stays until the wizard
@@ -250,7 +256,7 @@ export function App({ client }: { client: Client }) {
 	const openTask = useCallback(
 		(id: string) => {
 			const sessions = queries.getQueryData<SessionSnapshot[]>(["sessions"]) ?? [];
-			if (sessions.some((session) => session.id === id && session.state !== "closed")) void navigate(`/sessions/${id}`);
+			if (sessions.some((session) => session.id === id && isHeld(session))) void navigate(`/sessions/${id}`);
 			else {
 				const workspace = (workspaces.data ?? []).find((candidate) =>
 					queries.getQueryData<SessionSummary[]>(["session-history", candidate.id])?.some((row) => row.id === id),

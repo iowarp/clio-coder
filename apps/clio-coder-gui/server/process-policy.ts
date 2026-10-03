@@ -267,12 +267,16 @@ export async function focusAppWindow() {
  * server or a test that asks for a browser still goes through the system opener it was given.
  *
  * The app has one window unless the operator asks for another from inside it, so a launch that finds
- * an app window focuses it and stops there.
+ * an app window focuses it and stops there. The answer says which happened, because a focused window
+ * is still on its own page and the caller may have been asked for another.
  */
-export async function openApp(url: string, env: NodeJS.ProcessEnv = process.env) {
+export async function openApp(url: string, env: NodeJS.ProcessEnv = process.env): Promise<"focused" | "opened"> {
 	const app = windowsAppCommand(url, env);
-	if (!app) return openBrowser(url, env);
-	if (await focusAppWindow()) return;
+	if (!app) {
+		await openBrowser(url, env);
+		return "opened";
+	}
+	if (await focusAppWindow()) return "focused";
 	// A first launch keeps this process alive for the browser's whole life, so it is released, not awaited.
 	const child = spawn(app.file, app.argv, { cwd: "/mnt/c/Windows", env, shell: false, detached: true, stdio: "ignore" });
 	await new Promise<void>((resolve, reject) => {
@@ -280,6 +284,7 @@ export async function openApp(url: string, env: NodeJS.ProcessEnv = process.env)
 		child.once("spawn", resolve);
 	});
 	child.unref();
+	return "opened";
 }
 
 /** The OS opener owns the browser. Reap only our short-lived opener, never the user's browser. */
