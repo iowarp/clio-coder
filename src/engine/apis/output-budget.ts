@@ -7,9 +7,12 @@ import { normalizeContext, resolvedRequestContext } from "../context.js";
 
 /**
  * Pi clamps max_tokens to the remaining window on every simple stream, with its
- * own safety margin. The number-based preflight below has no context to hand
- * Pi, so it reads that margin off Pi's clamp rather than copying it, which keeps
- * the reservation equal to what reaches the wire.
+ * own safety margin. Clio's clamp below reads that margin off Pi's clamp rather
+ * than copying it, so a Pi change moves both. Only the margin comes from Pi: the
+ * input is sized by {@link estimateInputTokensFromContext}, because Pi's
+ * estimator anchors on the last assistant usage, which is stale after
+ * observation masking or working-set eviction (the `contextUsageInvalidated`
+ * stamp), and it throws on an assistant message that carries no usage.
  */
 const MARGIN_PROBE_WINDOW = 1_000_000;
 const CONTEXT_BUDGET_SAFETY_TOKENS =
@@ -152,6 +155,7 @@ export function remainingContextMaxTokens(
 	context: Context,
 	options: Pick<StreamOptions, "maxTokens"> | undefined,
 ): number {
+	const inputTokens = estimateInputTokensFromContext(context);
 	const contextWindow = model.contextWindow > 0 ? model.contextWindow : Number.POSITIVE_INFINITY;
 	const modelLimit = model.maxTokens > 0 ? model.maxTokens : Number.POSITIVE_INFINITY;
 	// Precedence for the requested ceiling when the caller gave no explicit
@@ -165,11 +169,7 @@ export function remainingContextMaxTokens(
 			? globalDefaultMaxOutputTokens
 			: (recommendedOutputTokens(model, contextWindow) ?? (model.maxTokens > 0 ? modelLimit : DEFAULT_MAX_OUTPUT_TOKENS));
 	const requested = options?.maxTokens ?? defaultLimit;
-	const resolved = clampMaxTokensToContext(
-		{ contextWindow } as Model<Api>,
-		normalizeContext(context),
-		Math.min(requested, modelLimit),
-	);
+	const resolved = clampOutputToRemainingContext(Math.min(requested, modelLimit), contextWindow, inputTokens);
 	return Number.isFinite(resolved) ? resolved : DEFAULT_MAX_OUTPUT_TOKENS;
 }
 
