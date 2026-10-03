@@ -25,6 +25,7 @@ export function parseCommandArgs(argsString: string): string[] {
 }
 
 const PLACEHOLDER = /\$\{(\d+|ARGUMENTS|@):-([^}]*)\}|\$\{@:(\d+)(?::(\d+))?\}|\$(ARGUMENTS|@|\d+)/g;
+const UNBRACED_PLACEHOLDER = /\$(ARGUMENTS|@|\d+)/g;
 
 /**
  * Substitute `$1`, `$@`, `$ARGUMENTS`, `${N:-default}`, `${@:-default}`, `${ARGUMENTS:-default}`, `${@:N}` and
@@ -35,21 +36,31 @@ const PLACEHOLDER = /\$\{(\d+|ARGUMENTS|@):-([^}]*)\}|\$\{@:(\d+)(?::(\d+))?\}|\
 export function substituteArgs(content: string, args: string[], rawArguments?: string): string {
 	const allArgs = args.join(" ");
 	const exactArgs = rawArguments ?? allArgs;
-	return content.replace(
-		PLACEHOLDER,
-		(_match: string, target?: string, fallback?: string, from?: string, count?: string, simple?: string) => {
-			if (target !== undefined) {
-				const value =
-					target === "ARGUMENTS" ? (args.length > 0 ? exactArgs : "") : target === "@" ? allArgs : args[Number(target) - 1];
-				return value || (fallback ?? "");
-			}
-			if (from !== undefined) {
-				const start = Math.max(Number(from) - 1, 0);
-				return args.slice(start, count === undefined ? undefined : start + Number(count)).join(" ");
-			}
-			if (simple === "ARGUMENTS") return exactArgs;
-			if (simple === "@") return allArgs;
-			return args[Number(simple) - 1] ?? "";
-		},
-	);
+	const unbraced = (_match: string, simple: string): string => {
+		if (simple === "ARGUMENTS") return exactArgs;
+		if (simple === "@") return allArgs;
+		return args[Number(simple) - 1] ?? "";
+	};
+	// Every braced placeholder ends at a "}", so none can match after the last one. Scanning that tail with the
+	// braced pattern would rerun `[^}]*` to the end from every unterminated `${N:-` opener, which is quadratic:
+	// a 1 MB template of openers blocked the turn. The tail only takes the unbraced forms.
+	const end = content.lastIndexOf("}") + 1;
+	const head = content
+		.slice(0, end)
+		.replace(
+			PLACEHOLDER,
+			(match: string, target?: string, fallback?: string, from?: string, count?: string, simple?: string) => {
+				if (target !== undefined) {
+					const value =
+						target === "ARGUMENTS" ? (args.length > 0 ? exactArgs : "") : target === "@" ? allArgs : args[Number(target) - 1];
+					return value || (fallback ?? "");
+				}
+				if (from !== undefined) {
+					const start = Math.max(Number(from) - 1, 0);
+					return args.slice(start, count === undefined ? undefined : start + Number(count)).join(" ");
+				}
+				return unbraced(match, simple ?? "");
+			},
+		);
+	return head + content.slice(end).replace(UNBRACED_PLACEHOLDER, unbraced);
 }
