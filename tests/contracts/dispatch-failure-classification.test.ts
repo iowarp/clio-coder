@@ -10,6 +10,7 @@ import type { RunTerminationEvidence } from "../../src/domains/dispatch/outcome.
 import { blockedWriteAttempts, workerNoWorkDetail } from "../../src/domains/dispatch/tool-stats.js";
 import type { ToolCallStat } from "../../src/domains/dispatch/types.js";
 import type { ActionClass } from "../../src/domains/safety/action-classifier.js";
+import { WORKER_PROVIDER_HTTP_STATUS_MARKER } from "../../src/worker/spec-contract.js";
 
 const evidence: RunTerminationEvidence = {
 	exitCode: 1,
@@ -103,6 +104,18 @@ describe("dispatch failure classification", () => {
 			strictEqual(affectsTargetBreaker(failureClass), false, tail);
 		}
 		strictEqual(classifyTail("ACP peer reported HTTP 500: server error"), "target-transient");
+	});
+
+	it("does not resend a request the provider rejected with a 4xx, except 408 and 429", () => {
+		const tail = (status: number) =>
+			`${WORKER_PROVIDER_HTTP_STATUS_MARKER}${status}\n[worker] agent ended with stopReason=error: invalid request`;
+		for (const status of [400, 404, 422]) {
+			strictEqual(classifyTail(tail(status)), "deterministic-task", String(status));
+			strictEqual(decideRetry(classifyTail(tail(status)), 0, 2).retry, false, String(status));
+		}
+		strictEqual(classifyTail(tail(429)), "target-rate-limit");
+		strictEqual(classifyTail(tail(408)), "worker-runtime");
+		strictEqual(decideRetry(classifyTail(tail(408)), 0, 2).retry, true);
 	});
 
 	it("keeps a provider context overflow off the target breaker and out of retry", () => {

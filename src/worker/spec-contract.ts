@@ -45,6 +45,13 @@ export const WORKER_PROTECTED_ARTIFACT_STATE_VERSION = 1;
  */
 export const WORKER_EXIT_PERMISSION_REQUIRED = 3;
 
+/**
+ * Stderr prefix a native worker writes, followed by the status code, when its
+ * run ends on a provider error after an HTTP error answer. The dispatch retry
+ * policy reads it to stop resending a request the server rejected.
+ */
+export const WORKER_PROVIDER_HTTP_STATUS_MARKER = "[worker] provider answered http ";
+
 export interface SerializedWorkerRuntimeDescriptor {
 	version: typeof WORKER_RUNTIME_DESCRIPTOR_VERSION;
 	id: string;

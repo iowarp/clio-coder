@@ -105,6 +105,7 @@ import {
 	DEFAULT_ESCALATION_FALLBACK,
 	DEFAULT_ESCALATION_TIMEOUT_MS,
 	WORKER_EXIT_PERMISSION_REQUIRED,
+	WORKER_PROVIDER_HTTP_STATUS_MARKER,
 	type WorkerBudget,
 	type WorkerEscalationConfig,
 	type WorkerPromptMessage,
@@ -627,6 +628,10 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 	let synthesisToolLock = false;
 	let lockedSynthesisReprompts = 0;
 	let workerBoundFailure: string | null = null;
+	// Last HTTP status a provider answered. Pi's error messages drop it on some
+	// APIs (openai-codex keeps only the body text), and the dispatch retry policy
+	// needs it to tell a rejected request from a transient failure.
+	let lastProviderHttpStatus: number | null = null;
 	let workerBoundAborted = false;
 	let abortWorkerForBound: (() => void) | null = null;
 	// For synthesis:false, the loop guard records the final admitted call while
@@ -1171,7 +1176,17 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 							: undefined,
 					],
 				);
-				return engineStreamSimple(currentModel, controlled.context, controlled.options);
+				// Pi's SDK adapters report onResponse only for a 2xx answer, so the
+				// status is read at the fetch boundary every adapter routes through.
+				const fetchImpl = controlled.options?.fetch ?? ((url, init) => globalThis.fetch(url, init));
+				return engineStreamSimple(currentModel, controlled.context, {
+					...controlled.options,
+					fetch: async (url, init) => {
+						const response = await fetchImpl(url, init);
+						lastProviderHttpStatus = response.status;
+						return response;
+					},
+				});
 			};
 			const first = request(messages);
 			// The server is the authority on its own limit. An unreported window, a
@@ -1930,14 +1945,20 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 				return { messages: agent.state.messages.slice(inheritedCount), exitCode: WORKER_EXIT_PERMISSION_REQUIRED };
 			}
 			const messages = agent.state.messages.slice(inheritedCount);
-			if (helperSchema !== null && acceptedHelperResult === null) {
-				return { messages, exitCode: 1 };
-			}
+			// The provider error is reported before the helper check: a helper run
+			// that died on a 400 used to exit 1 with empty stderr, which dispatch
+			// read as a worker runtime fault and resent twice.
 			const errorMessage = getTerminalAgentError(messages);
 			if (errorMessage !== null) {
+				if (lastProviderHttpStatus !== null && lastProviderHttpStatus >= 400) {
+					process.stderr.write(`${WORKER_PROVIDER_HTTP_STATUS_MARKER}${lastProviderHttpStatus}\n`);
+				}
 				if (errorMessage.length > 0) {
 					process.stderr.write(`[worker] agent ended with stopReason=error: ${errorMessage}\n`);
 				}
+				return { messages, exitCode: 1 };
+			}
+			if (helperSchema !== null && acceptedHelperResult === null) {
 				return { messages, exitCode: 1 };
 			}
 			return { messages, exitCode: 0 };
