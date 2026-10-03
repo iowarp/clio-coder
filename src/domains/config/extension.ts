@@ -41,6 +41,13 @@ export function createConfigBundle(
 	let reloadFailure: string | null = null;
 	let reloadsHeld = options.holdReloads === true;
 	let reloadPending = false;
+	const sessionTargets = new Map<string, ClioSettings["targets"][number]>();
+	function retainSessionTargets(settings: ClioSettings): ClioSettings {
+		for (const target of sessionTargets.values()) {
+			if (!settings.targets.some((saved) => saved.id === target.id)) settings.targets.push(target);
+		}
+		return settings;
+	}
 	let sourcesFor: { snapshot: ClioSettings; sources: Record<string, SettingsOrigin> } | null = null;
 	const listeners = new Map<ChangeKind, Set<ChangeListener>>([
 		["hotReload", new Set()],
@@ -111,7 +118,7 @@ export function createConfigBundle(
 			return;
 		}
 		publishReloadFailure(null);
-		snapshot = next;
+		snapshot = retainSessionTargets(next);
 		setGitCommitAttributionEnabled(next.integrations.git.commitAttribution);
 		if (!prev) return;
 		const diff = diffSettings(prev, next);
@@ -134,6 +141,11 @@ export function createConfigBundle(
 	};
 
 	const contract: ConfigContract = {
+		reload: onWatcherFire,
+		holdReloads(targets = []) {
+			for (const target of targets) sessionTargets.set(target.id, target);
+			reloadsHeld = true;
+		},
 		get() {
 			if (!snapshot) throw new Error("config domain not started");
 			return snapshot;
@@ -156,7 +168,7 @@ export function createConfigBundle(
 				assertAgentNamespace(next);
 				return next;
 			});
-			snapshot = normalized;
+			snapshot = retainSessionTargets(normalized);
 			setGitCommitAttributionEnabled(normalized.integrations.git.commitAttribution);
 			const diff = diffSettings(previous, normalized);
 			if (diff.hotReload.length > 0) dispatch("hotReload", { diff, settings: normalized });
@@ -171,7 +183,7 @@ export function createConfigBundle(
 				assertAgentNamespace(next);
 				return next;
 			});
-			snapshot = normalized;
+			snapshot = retainSessionTargets(normalized);
 			setGitCommitAttributionEnabled(normalized.integrations.git.commitAttribution);
 			const diff = diffSettings(previous, normalized);
 			if (diff.hotReload.length > 0) dispatch("hotReload", { diff, settings: normalized });

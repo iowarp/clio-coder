@@ -4241,6 +4241,42 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			};
 		},
 		getSettings: getCurrentSettings,
+		onConfigure: async () => {
+			const before = readSettings();
+			const current = getCurrentSettings();
+			config?.holdReloads?.(
+				current.targets.filter(
+					(target) => target.id === current.chat.target && !before.targets.some((saved) => saved.id === target.id),
+				),
+			);
+			let code: number;
+			try {
+				const { runConfigureCommand } = await import("../cli/configure.js");
+				code = await runConfigureCommand([]);
+			} finally {
+				try {
+					const after = readSettings();
+					// Only setup's saved routing delta supersedes this session's route.
+					// Apply it before publishing reload events so they see the new route.
+					const patch = diffRouting(before, after);
+					if (patch) {
+						if (patch.orchestrator && (before.chat.target !== after.chat.target || before.chat.model !== after.chat.model)) {
+							patch.orchestrator.target = after.chat.target;
+							patch.orchestrator.model = after.chat.model;
+						}
+						applyRoutingPatch(sessionRouting, patch);
+					}
+					bumpSessionState();
+					config?.reload?.();
+				} finally {
+					config?.releaseReloads?.();
+				}
+			}
+			if (code !== 0 && code !== 130) throw new Error("Configure could not complete.");
+			if (JSON.stringify(before) === JSON.stringify(readSettings())) return "No changes saved.";
+			const route = getCurrentSettings().chat;
+			return `Setup saved. Active route: ${route.target ?? "(none)"}/${route.model ?? "(no model)"}.`;
+		},
 		getFleetNodes: () => result.getContract<SchedulingContract>("scheduling")?.fleet?.list() ?? [],
 		getRouteBreakers: () => result.getContract<DispatchContract>("dispatch")?.routeBreakers?.() ?? [],
 		onBackgroundDispatch: () => dispatchBackground.backgroundNewest(),
