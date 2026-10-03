@@ -5,7 +5,7 @@ import { routes } from "../../contracts/routes.js";
 import type { Client } from "../api/client.js";
 import { clock, formatDuration } from "../api/clock.js";
 import type { ConnectionState } from "../api/events.js";
-import { sessionBuffer } from "../api/sessions.js";
+import { SESSION_CACHES, sessionBuffer } from "../api/sessions.js";
 import { ApprovalBanner, pendingPermission } from "../chat/Approval.js";
 import { ChatTurnView } from "../chat/ChatTurn.js";
 import { Composer, fillComposer } from "../chat/Composer.js";
@@ -168,13 +168,23 @@ function SessionView({ client, id }: { client: Client; id: string }) {
 			void queries.invalidateQueries({ queryKey: ["session-history", snapshot.workspaceId] });
 		},
 	});
+	const resume = useMutation({
+		mutationFn: (workspaceId: string) =>
+			client.call(routes.loadSession, { params: { id }, query: {}, body: { workspaceId } }),
+		onSuccess: (snapshot) => {
+			for (const key of SESSION_CACHES) queries.removeQueries({ queryKey: [key, id] });
+			queries.setQueryData(["session", id], sessionBuffer(id).snapshot(snapshot) ?? snapshot);
+			void queries.invalidateQueries({ queryKey: ["sessions"] });
+			void queries.invalidateQueries({ queryKey: ["session-history", snapshot.workspaceId] });
+		},
+	});
 	const closeSession = useCallback(() => close.mutate(), [close.mutate]);
 	const renameTask = useRenameTask(client);
 	const [renaming, setRenaming] = useState(false);
 	const scroll = useRef<HTMLDivElement | null>(null);
 	const previousTurns = useRef<readonly ChatTurn[]>([]);
 	const snapshot = session.data;
-	const shown = useShown(client, id, snapshot?.state);
+	useShown(client, id, snapshot?.state);
 	// The tab names the task, so several open tabs can be told apart.
 	const pageTitle = snapshot ? taskTitle(snapshot) : null;
 	useEffect(() => {
@@ -252,7 +262,7 @@ function SessionView({ client, id }: { client: Client; id: string }) {
 			: snapshot.state === "starting"
 				? { tone: "working", label: "Starting" }
 				: snapshot.state === "parked"
-					? { tone: "working", label: "Resuming" }
+					? { tone: "quiet", label: "Paused" }
 					: snapshot.state === "closed"
 						? { tone: "quiet", label: "Closed" }
 						: snapshot.state === "unknown" || snapshot.state === "failed"
@@ -365,17 +375,22 @@ function SessionView({ client, id }: { client: Client; id: string }) {
 								The recorded conversation is still available below.
 							</ConversationBanner>
 						) : null}
-						{shown.failure ? (
+						{snapshot.state === "parked" ? (
 							<ConversationBanner
-								tone="warn"
-								title="This task could not be resumed."
+								tone="quiet"
+								title="Paused. You can read the conversation below."
 								action={
-									<button type="button" onClick={shown.retry}>
-										Try again
+									<button type="button" disabled={resume.isPending} onClick={() => resume.mutate(snapshot.workspaceId)}>
+										{resume.isPending ? "Resuming…" : "Resume session"}
 									</button>
 								}
 							>
-								{shown.failure}
+								Resume when you want to continue. New requests wait for a slot when other work is running.
+							</ConversationBanner>
+						) : null}
+						{resume.error ? (
+							<ConversationBanner tone="warn" title="Could not resume this session.">
+								{resume.error.message}
 							</ConversationBanner>
 						) : null}
 						<ApprovalBanner client={client} session={snapshot} />

@@ -4,15 +4,18 @@ import { useMemo } from "react";
 import { Link } from "react-router";
 import { routes } from "../../contracts/routes.js";
 import type { Client } from "../api/client.js";
+import { emptyInput } from "../api/client.js";
+import type { IconName } from "../design/icons.js";
 import { Icon } from "../design/icons.js";
 import { StatusMark } from "../design/status.js";
 import { countRender } from "../render/render-probe.js";
 import { ClioPulse, PULSE_SIZE } from "../shell/ClioMark.js";
+import { isHeld, STATE_LABELS, taskState, taskTitle } from "../shell/shell-model.js";
 import { boardView, type PlanRow } from "./board-model.js";
 import { branchView } from "./branch-model.js";
 import { changeCounts, summarizeChanges } from "./changes-model.js";
 import { FLEET_STATE_LABELS, FLEET_STATE_TONES, fleetEvidence, foldFleetRuns, isLiveRun } from "./fleet-facts.js";
-import { compactDuration, contextMeter, contextSegments, taskOverview } from "./overview-model.js";
+import { compactCount, compactDuration, contextMeter, contextSegments, taskOverview } from "./overview-model.js";
 import type { PaneSession, PaneView } from "./pane-model.js";
 import { ReceiptLine } from "./ReceiptLine.js";
 import type { RouteFacts } from "./route.js";
@@ -53,12 +56,14 @@ const ROUTE_HEALTH_WORDS: Readonly<Record<RouteFacts["tone"], string>> = {
 function Section({
 	id,
 	title,
+	icon,
 	aside,
 	open,
 	children,
 }: {
 	id: string;
 	title: string;
+	icon: IconName;
 	aside?: ReactNode;
 	open?: () => void;
 	children: ReactNode;
@@ -66,14 +71,24 @@ function Section({
 	return (
 		<section className="pane-card" aria-labelledby={id}>
 			<header>
-				<h2 id={id}>
+				<h2 id={id} className="pane-card__heading">
 					{open ? (
 						<button type="button" className="pane-card__open" onClick={open}>
+							<span className="pane-card__symbol">
+								<Icon name={icon} />
+							</span>
 							<span>{title}</span>
-							<Icon name="chevronRight" />
+							<span className="pane-card__chevron">
+								<Icon name="chevronRight" />
+							</span>
 						</button>
 					) : (
-						title
+						<>
+							<span className="pane-card__symbol">
+								<Icon name={icon} />
+							</span>
+							{title}
+						</>
 					)}
 				</h2>
 				{aside}
@@ -112,6 +127,17 @@ export function SessionOverview({
 	countRender("session-overview");
 	const params = { params: { id: session.id }, query: {}, body: {} };
 	const open = session.state === "open";
+	const sessions = useQuery({ queryKey: ["sessions"], queryFn: () => client.call(routes.sessions, emptyInput) });
+	const workspaces = useQuery({ queryKey: ["workspaces"], queryFn: () => client.call(routes.workspaces, emptyInput) });
+	const workspaceNames = new Map((workspaces.data ?? []).map((item) => [item.id, item.name]));
+	const activity = (sessions.data ?? [])
+		.filter(isHeld)
+		.map((item) => ({ session: item, state: taskState(item) }))
+		.filter(({ state }) => state === "working" || state === "waiting" || state === "starting" || state === "approval");
+	const otherActivity = activity.filter((item) => item.session.id !== session.id);
+	const workingCount = activity.filter((item) => item.state === "working" || item.state === "starting").length;
+	const queuedCount = activity.filter((item) => item.state === "waiting").length;
+	const approvalCount = activity.filter((item) => item.state === "approval").length;
 	const capabilities = useSessionCapabilities(client, session.id, open);
 	const settled = settledTurns(session.turns);
 	// The keys the drill-ins use, so opening one after the column costs no second request.
@@ -149,32 +175,39 @@ export function SessionOverview({
 	const receipts = runs.filter((run) => run.receipt);
 	const last = session.turns.at(-1);
 	const working = open && overview.running;
-	const state = overview.running
-		? "Working"
-		: last?.queued
-			? "Waiting for a slot"
-			: last?.status === "failed"
-				? "Failed"
-				: last?.status === "cancelled"
-					? "Stopped"
-					: last
-						? "Complete"
-						: "Not started";
+	const state =
+		session.state === "parked"
+			? "Paused"
+			: overview.running
+				? "Working"
+				: last?.queued
+					? "Waiting for a slot"
+					: last?.status === "failed"
+						? "Failed"
+						: last?.status === "cancelled"
+							? "Stopped"
+							: last
+								? "Complete"
+								: "Not started";
 	const done = plan?.rows.filter((row) => row.tone === "success").length ?? 0;
 	const openTasks = view?.tasks.filter((task) => task.actions.length > 0).length ?? 0;
 	const decisions = view?.activeDecisions.length ?? 0;
-	const used = spendLine(
-		sessionSpend(
-			session.turns,
-			usage.data,
-			overview.running || !usage.data || usage.isPlaceholderData ? session.telemetry?.usage : undefined,
-		),
+	const spend = sessionSpend(
+		session.turns,
+		usage.data,
+		overview.running || !usage.data || usage.isPlaceholderData ? session.telemetry?.usage : undefined,
 	);
+	const used = spendLine(spend);
 	return (
 		<div className="pane-cards">
-			<section className="pane-card" aria-labelledby="pane-goal">
+			<section className="pane-card pane-card--lead" aria-labelledby="pane-goal">
 				<header>
-					<h2 id="pane-goal">Task</h2>
+					<h2 id="pane-goal" className="pane-card__heading">
+						<span className="pane-card__symbol">
+							<Icon name="compose" />
+						</span>
+						Task
+					</h2>
 					<span className="pane-card__state" data-state={state}>
 						{working ? <ClioPulse size={PULSE_SIZE.inline} /> : null}
 						{state}
@@ -192,10 +225,41 @@ export function SessionOverview({
 					</p>
 				) : null}
 			</section>
+			<Section id="pane-activity" title="App activity" icon="running">
+				{sessions.data ? (
+					<>
+						<p className="pane-card__facts">
+							{workingCount} working · {queuedCount} queued{approvalCount > 0 ? ` · ${approvalCount} need approval` : ""}
+						</p>
+						{otherActivity.length > 0 ? (
+							<ul className="pane-agents">
+								{otherActivity.map((item) => (
+									<li key={item.session.id}>
+										<Icon name={item.state === "approval" ? "shield" : "sessions"} />
+										<Link to={`/sessions/${item.session.id}`}>{taskTitle(item.session)}</Link>
+										<span>
+											{[workspaceNames.get(item.session.workspaceId), STATE_LABELS[item.state]].filter(Boolean).join(" · ")}
+										</span>
+									</li>
+								))}
+							</ul>
+						) : (
+							<p className="pane-empty">
+								{activity.length > 0 ? "This is the only active session." : "No work is running or queued."}
+							</p>
+						)}
+						<p className="pane-card__facts">Across all workspaces in this app.</p>
+					</>
+				) : (
+					<p className="pane-empty">{sessions.error ? "App activity could not be read." : "Reading app activity…"}</p>
+				)}
+			</Section>
 
 			{workspace ? (
-				<Section id="pane-workspace" title="Workspace">
-					<p className="pane-workspace-path pane-mono">{workspace.cwd}</p>
+				<Section id="pane-workspace" title="Workspace" icon="folder">
+					<p className="pane-path" title={workspace.cwd}>
+						<bdi dir="ltr">{workspace.cwd}</bdi>
+					</p>
 					<p className="pane-card__facts">
 						{workspace.isGit
 							? [
@@ -219,6 +283,7 @@ export function SessionOverview({
 				<Section
 					id="pane-model"
 					title="Model"
+					icon="models"
 					{...(onChangeModel ? { open: onChangeModel } : {})}
 					aside={<StatusMark tone={route.tone} label={ROUTE_HEALTH_WORDS[route.tone]} />}
 				>
@@ -233,6 +298,7 @@ export function SessionOverview({
 				<Section
 					id="pane-context"
 					title="Context"
+					icon="layers"
 					open={() => onOpen("context")}
 					aside={meter ? <span className="pane-card__state">{Math.round(meter.percent)}%</span> : null}
 				>
@@ -275,13 +341,32 @@ export function SessionOverview({
 				</Section>
 			) : null}
 
-			<Section id="pane-usage" title="Usage" {...(capabilities.data?.usage ? { open: () => onOpen("usage") } : {})}>
-				<p className="pane-changes-line">{used ?? "Nothing used yet."}</p>
+			<Section
+				id="pane-usage"
+				title="Usage"
+				icon="usage"
+				{...(capabilities.data?.usage ? { open: () => onOpen("usage") } : {})}
+			>
+				{used ? (
+					<dl className="pane-usage-stats">
+						<div>
+							<dt>Tokens</dt>
+							<dd title={`${spend.tokens.toLocaleString("en-US")} tokens`}>{compactCount(spend.tokens)}</dd>
+						</div>
+						<div>
+							<dt>Cost</dt>
+							<dd>{spend.cost ?? "Unpriced"}</dd>
+						</div>
+					</dl>
+				) : (
+					<p className="pane-empty">Nothing used yet.</p>
+				)}
 			</Section>
 
 			<Section
 				id="pane-plan"
 				title="Plan"
+				icon="listChecks"
 				{...(capabilities.data?.board ? { open: () => onOpen("board") } : {})}
 				aside={
 					plan && plan.rows.length > 0 ? (
@@ -307,7 +392,7 @@ export function SessionOverview({
 					<p className="pane-empty">
 						{capabilities.data?.board === undefined && !session.telemetry?.plan
 							? "This session does not report a plan."
-							: "Clio has not published a plan for this task yet."}
+							: "No plan published yet."}
 					</p>
 				)}
 				{openTasks > 0 || decisions > 0 ? (
@@ -324,13 +409,14 @@ export function SessionOverview({
 
 			{session.telemetry?.plan?.truncated ? <p className="pane-hint">The plan shows its first 100 steps.</p> : null}
 			{capabilities.data?.artifacts ? (
-				<Section id="pane-artifacts" title="Artifacts" open={() => onOpen("artifacts")}>
-					<p className="pane-empty">Receipts, tool output, prompts and session records.</p>
+				<Section id="pane-artifacts" title="Artifacts" icon="artifacts" open={() => onOpen("artifacts")}>
+					<p className="pane-empty">Receipts, outputs and session records.</p>
 				</Section>
 			) : null}
 			<Section
 				id="pane-changes"
 				title="Changes"
+				icon="fileDiff"
 				{...(changes.files.length > 0 ? { open: () => onOpen("changes") } : {})}
 				aside={
 					changes.applied > 0 ? (
@@ -357,6 +443,7 @@ export function SessionOverview({
 				<Section
 					id="pane-branches"
 					title="Branches"
+					icon="branch"
 					open={() => onOpen("branches")}
 					aside={
 						branches.branchPoints > 0 ? (
@@ -370,7 +457,7 @@ export function SessionOverview({
 						{branches.branchPoints === 0 ? "One line of conversation." : "Continuing on the current branch."}
 						{branches.forkedFrom ? " Forked from an earlier task." : ""}
 					</p>
-					{tip ? <p className="pane-card__facts">Latest: {tip.label ?? tip.text}</p> : null}
+					{tip ? <p className="pane-card__facts pane-card__preview">Latest: {tip.label ?? tip.text}</p> : null}
 				</Section>
 			) : null}
 
@@ -378,6 +465,7 @@ export function SessionOverview({
 				<Section
 					id="pane-agents"
 					title="Agents"
+					icon="fleet"
 					open={() => onOpen("agents")}
 					aside={
 						runs.length > 0 ? (
@@ -410,6 +498,7 @@ export function SessionOverview({
 				<Section
 					id="pane-evidence"
 					title="Evidence"
+					icon="evidence"
 					aside={
 						<span className="pane-card__state">
 							{receipts.length > 0
@@ -454,8 +543,11 @@ export function SessionOverview({
 			) : null}
 
 			{open ? (
-				<p className="pane-hint">
-					Branches, handoff, side questions and commands: type <kbd>/</kbd> in the composer.
+				<p className="pane-hint pane-hint--commands">
+					<Icon name="bolt" />
+					<span>
+						Commands and side questions <kbd>/</kbd>
+					</span>
 				</p>
 			) : null}
 		</div>

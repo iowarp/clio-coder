@@ -36,7 +36,9 @@ export function HomeAside({ client, workspace }: { client: Client; workspace: Wo
 		<aside className="pane" aria-label="Project overview">
 			<div className="pane__inner">
 				<header className="pane__head">
-					<h2 className="pane__title">Overview</h2>
+					<h2 className="pane__title">
+						<Icon name="overview" /> Overview
+					</h2>
 					<button
 						type="button"
 						className="wb-icon"
@@ -51,7 +53,12 @@ export function HomeAside({ client, workspace }: { client: Client; workspace: Wo
 					<div className="pane-cards">
 						<section className="pane-card" aria-labelledby="aside-project">
 							<header>
-								<h2 id="aside-project">Project</h2>
+								<h2 id="aside-project" className="pane-card__heading">
+									<span className="pane-card__symbol">
+										<Icon name="folder" />
+									</span>
+									Project
+								</h2>
 								{workspace ? (
 									<Link className="pane-link" to={`/workspaces/${workspace.id}/sessions`}>
 										All tasks
@@ -62,7 +69,7 @@ export function HomeAside({ client, workspace }: { client: Client; workspace: Wo
 								<>
 									<p className="pane-goal">{workspace.name}</p>
 									<p className="pane-path" title={workspace.path}>
-										{workspace.path}
+										<bdi dir="ltr">{workspace.path}</bdi>
 									</p>
 								</>
 							) : (
@@ -72,7 +79,12 @@ export function HomeAside({ client, workspace }: { client: Client; workspace: Wo
 
 						<section className="pane-card" aria-labelledby="aside-model">
 							<header>
-								<h2 id="aside-model">Model</h2>
+								<h2 id="aside-model" className="pane-card__heading">
+									<span className="pane-card__symbol">
+										<Icon name="models" />
+									</span>
+									Model
+								</h2>
 								<Link className="pane-link" to="/settings/models">
 									Change
 								</Link>
@@ -95,7 +107,12 @@ export function HomeAside({ client, workspace }: { client: Client; workspace: Wo
 
 						<section className="pane-card" aria-labelledby="aside-running">
 							<header>
-								<h2 id="aside-running">Running now</h2>
+								<h2 id="aside-running" className="pane-card__heading">
+									<span className="pane-card__symbol">
+										<Icon name="running" />
+									</span>
+									Running now
+								</h2>
 								{workers > 0 ? (
 									<span className="pane-card__state">
 										{workers} {workers === 1 ? "worker" : "workers"}

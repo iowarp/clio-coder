@@ -11,12 +11,20 @@
 	"projection": {
 		"source": "site/export-brand.mjs",
 		"designSha256": "3ac20c87fad09db521621c5ac57fe6c5184b120897ede3d347e991ab8624f5d9",
-		"padding": "Square icons center the unchanged mark within an 80% safe area.",
+		"padding": "Square app icons center the mark within a 94% safe area; the header mark is unchanged.",
 		"sha256": {
 			"clio-coder-logo.webp": "0a9ad4f1015c4c0bb17dbe952841c915a39ca0cf5fc9ec06f403d1673357bd23",
-			"favicon.png": "e488b10dcb51127ebf1e734322806d038485ad2f3410e49c8354b9dd846b65cc",
-			"icon-192.png": "1e33d7ac29b43397822d0b5fd9206218bb5a587f3fcc19c88647ef7106345f01",
-			"icon-512.png": "d13a622ac0a49dfe1f1a639b10138dc9b46cb1f4b0580d0973e6a054b10cbcac"
+			"favicon.png": "1d0d4233d5aea0affb11330e3e7243b0310207be13a7d27feede9e64d7ebf68d",
+			"icon-192.png": "bcd22f337b89420082980b9c1ddbb461086ad5c73d314fed39ffbc7af37a6c4c",
+			"icon-512.png": "cbb4bf89f51072438f7ff499fc40e303e2d4f57c7f6adcb72dec1353016bb11c"
+		},
+		"iconTreatment": {
+			"source": "site/assets/brand/clio-mark.png",
+			"safeArea": 0.94,
+			"saturation": 1.16,
+			"brightness": 1.14,
+			"resampling": "Pillow Image.Resampling.LANCZOS",
+			"alpha": "Preserved from the canonical mark before resizing."
 		}
 	}
 }

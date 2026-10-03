@@ -380,7 +380,7 @@ export function App({ client }: { client: Client }) {
 			<aside
 				className="wb-sidebar"
 				id={SIDEBAR_ID}
-				aria-label="Tasks and settings"
+				aria-label="Clio navigation and settings"
 				inert={layered || (phone && !drawer)}
 				onKeyDown={(event) => {
 					if (event.key === "Escape" && drawer) setDrawer(false);
@@ -389,6 +389,8 @@ export function App({ client }: { client: Client }) {
 				{authed ? (
 					<TaskSidebar
 						client={client}
+						version={meta.data?.clio}
+						platform={meta.data?.platform}
 						actions={actions}
 						connection={connection}
 						activeWorkspaceId={activeWorkspaceId}

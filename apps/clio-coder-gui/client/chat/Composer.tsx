@@ -618,7 +618,7 @@ export const Composer = memo(function Composer({
 					aria-describedby={hintId}
 					value={draft.text}
 					rows={1}
-					// A parked task is on its way back, so its draft can be written while it resumes.
+					// A paused task keeps its draft editable without waking its agent.
 					disabled={sessionState !== "open" && sessionState !== "parked"}
 					placeholder={
 						sessionState !== "open" && sessionState !== "parked"

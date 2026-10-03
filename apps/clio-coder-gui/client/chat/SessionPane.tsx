@@ -226,6 +226,7 @@ export const SessionPane = memo(function SessionPane({
 					</button>
 				) : null}
 				<h2 className="pane__title" id={`${headId}-title`} tabIndex={-1}>
+					<Icon name={PANE_VIEWS.find((entry) => entry.id === view)?.icon ?? "sessions"} />
 					{paneViewLabel(view)}
 				</h2>
 				<button

@@ -26,12 +26,12 @@ function SectionLink({
 	);
 }
 
-/** The harness tab shares the task rail's header, footer and width. */
+/** Configuration is reached from the work sidebar's Settings button. */
 export function SettingsSidebar({ onNavigate, onHelp }: { onNavigate: () => void; onHelp: () => void }) {
 	const location = useLocation();
 	const current = settingsSectionFor(location.pathname);
 	return (
-		<nav className="wb-side__sections" aria-label="Harness">
+		<nav className="wb-side__sections" aria-label="Settings">
 			{SETTINGS_GROUPS.map((group) => (
 				<Fragment key={group.id}>
 					<h2 className="wb-side__label">{group.label}</h2>

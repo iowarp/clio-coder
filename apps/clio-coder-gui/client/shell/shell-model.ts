@@ -7,7 +7,7 @@
 import type { SessionSnapshot, SessionSummary } from "../../contracts/sessions.js";
 import { isAwaitingAnswer } from "../chat/permission-state.js";
 
-export type TaskState = "starting" | "working" | "waiting" | "approval" | "failed" | "idle";
+export type TaskState = "starting" | "working" | "waiting" | "approval" | "failed" | "paused" | "idle";
 
 export interface TaskRow {
 	readonly id: string;
@@ -37,6 +37,7 @@ export function taskTitle(
 }
 
 export function taskState(session: Pick<SessionSnapshot, "state" | "turns" | "permissions">): TaskState {
+	if (session.state === "parked") return "paused";
 	if (session.permissions.some(isAwaitingAnswer)) return "approval";
 	if (session.state === "starting") return "starting";
 	const last = session.turns.at(-1);
@@ -74,9 +75,7 @@ export function taskRows(
 	const live = sessions.filter(
 		(session) => session.workspaceId === workspaceId && isHeld(session) && !isUntouched(session),
 	);
-	const liveIds = new Set(
-		sessions.filter((session) => session.workspaceId === workspaceId).map((session) => session.id),
-	);
+	const liveIds = new Set(live.map((session) => session.id));
 	const rows: TaskRow[] = [
 		...live.map((session): TaskRow => {
 			const turn = session.turns.at(-1);
@@ -127,6 +126,7 @@ export const STATE_LABELS: Readonly<Record<TaskState, string>> = {
 	waiting: "Waiting for a slot",
 	approval: "Needs your approval",
 	failed: "Last turn failed",
+	paused: "Paused",
 	idle: "",
 };
 

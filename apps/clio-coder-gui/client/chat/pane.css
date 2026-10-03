@@ -68,6 +68,9 @@
 	padding: 0 var(--space-2) 0 var(--space-3);
 }
 .pane__title {
+	display: flex;
+	align-items: center;
+	gap: var(--space-2);
 	flex: 1;
 	min-width: 0;
 	margin: 0;
@@ -78,6 +81,11 @@
 	overflow: hidden;
 	text-overflow: ellipsis;
 	white-space: nowrap;
+}
+.pane__title > .icon {
+	flex: none;
+	width: var(--icon-md);
+	height: var(--icon-md);
 }
 .pane__title:focus {
 	outline: none;
@@ -100,10 +108,8 @@
 	display: none;
 }
 
-/* ---- the Session column ---------------------------------------------------------
-   The rail's own grammar, mirrored: a muted label, then what belongs under it, with space between
-   groups and no rules or boxes. A group that opens a drill-in turns its whole label row into the
-   way in, the way a rail row is one target from edge to edge. */
+/* Section icons and quiet rules make the observations scan as instruments. A header that opens
+   a detail view remains one target across the row, including its figures. */
 .pane-cards {
 	--pane-bleed: 8px;
 	display: grid;
@@ -111,20 +117,29 @@
 }
 .pane-card {
 	display: grid;
-	gap: 6px;
-	margin-top: var(--space-8);
+	gap: var(--space-2);
+	padding-block: var(--space-4);
+	border-bottom: 1px solid var(--line);
 	min-width: 0;
 }
 .pane-card:first-child {
-	margin-top: var(--space-1);
+	padding-top: var(--space-2);
+}
+.pane-card--lead,
+.pane-card--lead:first-child {
+	margin-block: var(--space-1) var(--space-2);
+	padding: var(--space-3);
+	border: 1px solid var(--line);
+	border-radius: var(--radius-md);
+	background: var(--wb-faint);
 }
 .pane-card > header {
 	position: relative;
 	display: flex;
 	align-items: center;
 	justify-content: space-between;
-	gap: var(--space-3);
-	min-height: 28px;
+	gap: var(--space-2);
+	min-height: 36px;
 	margin-inline: calc(var(--pane-bleed) * -1);
 	padding-inline: var(--pane-bleed);
 	border-radius: 8px;
@@ -145,13 +160,37 @@
 	font-size: var(--text-meta);
 	font-weight: 500;
 	letter-spacing: 0.01em;
+	color: var(--ink);
+}
+.pane-card__heading {
+	display: flex;
+	align-items: center;
+	gap: var(--space-2);
+	min-width: 0;
+}
+.pane-card__symbol {
+	display: inline-grid;
+	place-items: center;
+	flex: none;
+	width: 28px;
+	height: 28px;
+	border-radius: var(--radius-sm);
+	background: var(--wb-hover);
 	color: var(--accent);
+}
+.pane-card__symbol .icon {
+	width: var(--icon-sm);
+	height: var(--icon-sm);
+}
+.pane-card:has(#pane-usage) .pane-card__symbol {
+	background: color-mix(in srgb, var(--secondary) 8%, transparent);
+	color: var(--secondary);
 }
 .pane-card__open {
 	display: inline-flex;
 	align-items: center;
-	gap: 3px;
-	min-height: 0;
+	gap: var(--space-2);
+	min-height: 36px;
 	margin: 0;
 	padding: 0;
 	border: 0;
@@ -183,7 +222,11 @@
 	outline: 2px solid var(--focus);
 	outline-offset: -2px;
 }
-.pane-card__open .icon {
+.pane-card__chevron {
+	display: inline-flex;
+	color: var(--ink-muted);
+}
+.pane-card__chevron .icon {
 	width: var(--icon-sm);
 	height: var(--icon-sm);
 	opacity: 1;
@@ -191,7 +234,7 @@
 		opacity var(--motion-fast) var(--ease-standard),
 		transform var(--motion-fast) var(--ease-standard);
 }
-.pane-card > header:has(.pane-card__open:hover) .icon {
+.pane-card > header:has(.pane-card__open:hover) .pane-card__chevron .icon {
 	opacity: 1;
 	transform: translateX(2px);
 }
@@ -199,6 +242,9 @@
 	display: inline-flex;
 	align-items: center;
 	gap: 6px;
+	flex-wrap: wrap;
+	justify-content: flex-end;
+	text-align: right;
 	font-size: var(--text-exact);
 	color: var(--ink-muted);
 	font-variant-numeric: tabular-nums;
@@ -240,6 +286,41 @@
 	margin: 0;
 	font-size: var(--text-exact);
 	color: var(--ink-muted);
+}
+.pane-card__preview {
+	display: -webkit-box;
+	-webkit-line-clamp: 2;
+	-webkit-box-orient: vertical;
+	overflow: hidden;
+}
+.pane-usage-stats {
+	display: grid;
+	grid-template-columns: repeat(2, minmax(0, 1fr));
+	gap: var(--space-3);
+	margin: 0;
+	padding: var(--space-2) 0 var(--space-1);
+}
+.pane-usage-stats > div {
+	display: grid;
+	gap: var(--space-1);
+	min-width: 0;
+}
+.pane-usage-stats > div + div {
+	padding-left: var(--space-3);
+	border-left: 1px solid var(--line);
+}
+.pane-usage-stats dt {
+	font-size: var(--text-instrument);
+	color: var(--ink-muted);
+}
+.pane-usage-stats dd {
+	margin: 0;
+	font: 500 var(--text-body) / var(--leading-tight) var(--font-mono);
+	font-variant-numeric: tabular-nums;
+	overflow-wrap: anywhere;
+}
+.pane-usage-stats > div + div dd {
+	color: var(--secondary);
 }
 .pane-meter {
 	display: grid;
@@ -368,6 +449,20 @@
 	background: var(--wb-faint);
 	font: var(--text-exact) / 1.5 var(--font-mono);
 	color: var(--ink);
+}
+.pane-hint--commands {
+	display: flex;
+	align-items: baseline;
+	gap: var(--space-2);
+	margin-top: var(--space-4);
+	font-size: var(--text-instrument);
+}
+.pane-hint--commands > .icon {
+	flex: none;
+	align-self: center;
+	width: var(--icon-sm);
+	height: var(--icon-sm);
+	color: var(--accent);
 }
 .pane-evidence {
 	display: grid;
@@ -551,8 +646,8 @@
 	border-color: transparent;
 }
 .change-file__row > .icon {
-	width: 14px;
-	height: 14px;
+	width: var(--icon-sm);
+	height: var(--icon-sm);
 	flex: none;
 	color: var(--ink-muted);
 }
@@ -562,7 +657,7 @@
 	padding: 2px 4px;
 	border: 1px solid var(--line-strong);
 	border-radius: 5px;
-	font: 500 9.5px / 1.3 var(--font-mono);
+	font: 500 var(--text-instrument) / var(--leading-tight) var(--font-mono);
 	letter-spacing: 0.04em;
 	text-align: center;
 	color: var(--ink-muted);
@@ -651,7 +746,7 @@
 }
 .touched__calls {
 	flex: none;
-	font: 11.5px / 1 var(--font-mono);
+	font: var(--text-instrument) / var(--leading-tight) var(--font-mono);
 	color: var(--ink-muted);
 }
 @media (prefers-reduced-motion: reduce) {
@@ -781,7 +876,7 @@
 	letter-spacing: -0.2px;
 }
 .wb-aside .pane-cards {
-	padding: 0 var(--space-2) var(--space-6) 10px;
+	padding: 0 var(--space-3) var(--space-5);
 }
 .wb-aside .pane-drill {
 	padding: var(--space-1) var(--space-2) var(--space-6) 10px;

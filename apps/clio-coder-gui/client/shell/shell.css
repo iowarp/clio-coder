@@ -100,6 +100,24 @@
 	font-size: var(--text-body);
 	letter-spacing: -0.2px;
 }
+.wb-brand__identity {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: baseline;
+	gap: 2px var(--space-2);
+	min-width: 0;
+}
+.wb-brand__identity > span {
+	max-width: 100%;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+.wb-brand__version {
+	color: var(--ink-muted);
+	font: 400 var(--text-instrument) / var(--leading-tight) var(--font-mono);
+	letter-spacing: 0;
+}
 .wb-back {
 	font-weight: 500;
 	font-size: var(--text-meta);
@@ -275,46 +293,11 @@
 	min-height: 0;
 	overflow-y: auto;
 }
-.wb-side__tabs {
-	display: flex;
-	gap: 4px;
-	padding: 3px;
-	margin: 0 0 12px;
-	background: var(--wb-faint);
-	border-radius: 10px;
-}
-.wb-side__tabs [role="tab"] {
-	flex: 1;
-	min-width: 0;
-	min-height: var(--wb-row);
-	padding: 5px 10px;
-	border: 0;
-	border-radius: 8px;
-	background: transparent;
-	color: var(--muted);
-	font-size: var(--text-meta);
-	font-weight: 500;
-}
-.wb-side__tabs [role="tab"]:hover {
-	background: var(--wb-hover);
-}
-.wb-side__tabs [aria-selected="true"] {
-	background: var(--wb-active);
-	color: var(--ink);
-}
 .wb-side__panel {
 	display: flex;
 	flex: 1;
 	flex-direction: column;
 	min-height: 0;
-}
-.wb-side__panel[hidden] {
-	display: none;
-}
-@media (pointer: coarse) {
-	.wb-side__tabs [role="tab"] {
-		min-height: 40px;
-	}
 }
 
 /* ---- tasks ---------------------------------------------------------------- */
@@ -499,56 +482,90 @@
 
 /* ---- footer --------------------------------------------------------------- */
 .wb-side__foot {
+	container-type: inline-size;
 	display: flex;
 	align-items: center;
-	gap: 10px;
+	gap: var(--space-1);
 	padding: var(--space-2) var(--space-1) var(--space-3) var(--space-2);
 	border-top: 1px solid var(--line);
 }
-.wb-side__foot--plain {
-	display: block;
-	padding: var(--space-2) 0 var(--space-3);
+.wb-runtime {
+	display: flex;
+	align-items: center;
+	gap: var(--space-2);
+	flex: 1;
+	min-width: 0;
+	min-height: 40px;
+	padding: var(--space-1);
+	border-radius: var(--radius-sm);
+	color: var(--ink);
+	text-decoration: none;
 }
-.wb-me {
-	display: grid;
-	place-items: center;
+.wb-runtime:hover,
+.wb-runtime:focus-visible {
+	background: var(--wb-hover);
+}
+.wb-runtime > .icon {
 	flex: none;
-	width: 30px;
-	height: 30px;
-	border-radius: 50%;
-	background: var(--wb-active);
+	width: var(--icon-sm);
+	height: var(--icon-sm);
+	color: var(--ink-muted);
 }
-.wb-side__who {
+.wb-runtime:hover > .icon,
+.wb-runtime:focus-visible > .icon {
+	color: var(--accent);
+}
+.wb-runtime__identity {
 	display: grid;
 	flex: 1;
 	min-width: 0;
-	line-height: 1.25;
+	gap: 2px;
+	line-height: var(--leading-tight);
 }
-.wb-side__who strong {
-	font-weight: 600;
-	font-size: var(--text-meta);
+.wb-runtime__identity strong {
+	display: flex;
+	align-items: baseline;
+	gap: var(--space-2);
+	font-weight: 500;
+	font-size: var(--text-exact);
+}
+.wb-runtime__platform {
+	color: var(--ink-muted);
+	font-size: var(--text-instrument);
+	font-weight: 400;
+}
+@container (max-width: 230px) {
+	.wb-runtime > .icon,
+	.wb-runtime__platform {
+		display: none;
+	}
 }
 .wb-status {
 	display: inline-flex;
 	align-items: center;
-	gap: 6px;
-	font-size: var(--text-exact);
+	gap: var(--space-1);
+	min-width: 0;
+	font-size: var(--text-instrument);
 	color: var(--ink-muted);
 }
-.wb-status__dot {
-	width: 6px;
-	height: 6px;
-	border-radius: 50%;
-	background: var(--status-unverified-line);
+.wb-status__glyph {
+	flex: none;
+	width: 12px;
+	text-align: center;
 }
-.wb-status[data-tone="ok"] .wb-status__dot {
-	background: var(--accent);
+.wb-status__label {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
 }
-.wb-status[data-tone="warn"] .wb-status__dot {
-	background: var(--status-warn-line);
+.wb-status[data-tone="success"] {
+	color: var(--status-success-fg);
 }
-.wb-status[data-tone="off"] .wb-status__dot {
-	background: var(--status-fail-line);
+.wb-status[data-tone="warn"] {
+	color: var(--status-warn-fg);
+}
+.wb-status[data-tone="fail"] {
+	color: var(--status-fail-fg);
 }
 
 /* ---- the Clio mark as an activity indicator -------------------------------
