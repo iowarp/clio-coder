@@ -1,6 +1,10 @@
 import { deepStrictEqual, doesNotMatch, match, ok, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
+import { EMPTY_WORKING_SET_VIEW } from "../../src/domains/context/working-set/contract.js";
+import { DEFAULT_WORKING_SET_SETTINGS } from "../../src/domains/context/working-set/defaults.js";
+import { planEviction } from "../../src/domains/context/working-set/engine.js";
 import { foldWorkingSet } from "../../src/domains/context/working-set/fold.js";
+import { structuralV2Policy } from "../../src/domains/context/working-set/policies/index.js";
 import { projectWorkingSet } from "../../src/domains/context/working-set/project.js";
 import {
 	buildRecallFields,
@@ -218,5 +222,54 @@ describe("working-set ledger boundary", () => {
 		strictEqual(recorded[0]?.kind, "contextRecall");
 		strictEqual(recorded[0]?.parentTurnId, "r14");
 		strictEqual((recalled.details?.recall as { state: string }).state, "summarized");
+	});
+});
+
+describe("failed command rerun", () => {
+	/** One bash step that failed as turn-runtime persists it: the registry's error reason rides `blockReason`. */
+	function failedRun(id: string, parent: string): SessionEntry[] {
+		const args = { command: "pnpm test" };
+		return [
+			{
+				kind: "message",
+				turnId: `a-${id}`,
+				parentTurnId: parent,
+				timestamp: TS,
+				role: "assistant",
+				payload: { role: "assistant", content: [{ type: "toolCall", id, name: "bash", arguments: args }] },
+			},
+			{
+				kind: "message",
+				turnId: id,
+				parentTurnId: `a-${id}`,
+				timestamp: TS,
+				role: "tool_result",
+				payload: {
+					toolCallId: id,
+					toolName: "bash",
+					result: { content: [{ type: "text", text: "x".repeat(2000) }] },
+					isError: true,
+					outcome: "error",
+					blockReason: "exit 1",
+				},
+			},
+		];
+	}
+
+	it("lets the pressure path supersede a failed run once the same command reran", () => {
+		const entries = [message("u1", null, "user"), ...failedRun("test1", "u1"), ...failedRun("test2", "test1")];
+		const plan = planEviction(structuralV2Policy, {
+			entries,
+			view: EMPTY_WORKING_SET_VIEW,
+			cwd: "/repo",
+			settings: { ...DEFAULT_WORKING_SET_SETTINGS, protectLastTurns: 1, protectLastSteps: 1 },
+			pressure: { tokens: 90_000, contextWindow: 100_000, threshold: 0.8, target: 0.6 },
+			estimateTokens: (entry) => Math.ceil(JSON.stringify(entry).length / 4),
+		});
+		ok(plan);
+		deepStrictEqual(
+			plan.items.map((item) => [item.ref.entry, item.reason]),
+			[["test1", "superseded_call"]],
+		);
 	});
 });

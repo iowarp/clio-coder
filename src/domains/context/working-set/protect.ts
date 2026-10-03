@@ -15,7 +15,7 @@
 import type { SessionEntry } from "../../session/entries.js";
 import type { PolicyInput } from "./contract.js";
 import type { ChainMember, PathIndex, PathObservation } from "./path-index.js";
-import { hasLegacyCompactionMarker, isRecord, recalledRef, toolResultBodyTokens } from "./payload.js";
+import { hasLegacyCompactionMarker, isRecord, isRefusedVerdict, recalledRef, toolResultBodyTokens } from "./payload.js";
 
 export interface ProtectionContext {
 	entryIndex: number;
@@ -41,7 +41,7 @@ function isBlockedResult(payload: unknown): boolean {
 	// The registry's admission verdict, persisted by turn-persistence. A call
 	// the safety rails refused is a decision the session made, not an
 	// observation it can re-fetch.
-	return payload.outcome === "blocked" || typeof payload.blockReason === "string";
+	return isRefusedVerdict(payload);
 }
 
 function isErrorResult(payload: unknown): boolean {

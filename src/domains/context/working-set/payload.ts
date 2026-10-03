@@ -19,6 +19,18 @@ export function isRecord(value: unknown): value is Record<string, unknown> {
 	return !!value && typeof value === "object" && !Array.isArray(value);
 }
 
+/**
+ * The safety rails refused this call. The registry persists its admission
+ * reason as `blockReason` for an ordinary tool error too, so only `outcome`
+ * decides; the reason alone marks a refusal only in ledgers written before
+ * the outcome was recorded. Reading the reason alone made every failed test
+ * run a permanent refusal that no rerun could supersede.
+ */
+export function isRefusedVerdict(record: Record<string, unknown>): boolean {
+	if (record.outcome !== undefined) return record.outcome === "blocked";
+	return typeof record.blockReason === "string";
+}
+
 export interface ToolResultPayload {
 	/** The payload object itself, or a synthetic wrapper when the payload is a bare value. */
 	obj: Record<string, unknown>;
