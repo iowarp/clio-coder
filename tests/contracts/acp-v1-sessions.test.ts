@@ -634,3 +634,92 @@ test("ACP session listing hides empty failed turns before pagination", async () 
 		await peer.stop();
 	}
 });
+
+test("ACP session/new carries the workspace view and an edit that dirties the tree re-sends it", async () => {
+	const requests = new Map<string, (params: unknown) => unknown>();
+	const updates: Array<Record<string, unknown>> = [];
+	let close: () => void = () => {};
+	let onEvent: (event: unknown) => void = () => {};
+	let dirty = false;
+	let probes = 0;
+	const transport: AcpJsonRpcPeerTransport = {
+		closed: false,
+		request: async () => ({}) as never,
+		notify: (method, params) => {
+			if (method === "session/update") updates.push((params as { update: Record<string, unknown> }).update);
+		},
+		onRequest: (method, handler) => {
+			requests.set(method, handler);
+			return () => requests.delete(method);
+		},
+		onNotification: () => () => {},
+		onClose: (handler) => {
+			close = handler;
+			return () => {};
+		},
+		close: () => close(),
+	};
+	const settle = (id: string, toolName: string) => {
+		onEvent({ type: "tool_execution_start", toolCallId: id, toolName, args: { path: "README.md" } });
+		onEvent({ type: "tool_execution_end", toolCallId: id, toolName, result: "ok", isError: false });
+	};
+	const served = serveClioAcpAgent({
+		transport,
+		cwd: process.cwd(),
+		workspace: async (cwd) => {
+			probes++;
+			return {
+				cwd,
+				isGit: true,
+				branch: "v060",
+				dirty,
+				ahead: 0,
+				behind: null,
+				recentCommits: [{ sha: "abc", subject: "private subject" }],
+				remoteUrl: "https://user:secret-token@github.com/iowarp/clio-coder",
+				projectType: "unknown",
+				capturedAt: new Date().toISOString(),
+			};
+		},
+		chat: {
+			submit: async () => {
+				settle("r1", "read");
+				dirty = true;
+				settle("e1", "edit");
+			},
+			cancel: () => {},
+			onEvent: (handler) => {
+				onEvent = handler;
+				return () => {
+					onEvent = () => {};
+				};
+			},
+			isStreaming: () => false,
+			getSessionId: () => null,
+		},
+	});
+	const call = async (method: string, params: unknown) => await requests.get(method)?.(params);
+	const init = (await call("initialize", { protocolVersion: 1 })) as {
+		agentCapabilities: { _meta: Record<string, unknown> };
+	};
+	deepStrictEqual(init.agentCapabilities._meta["clio-coder/workspace"], { version: 1, update: "session_info_update" });
+	const created = (await call("session/new", { cwd: process.cwd(), mcpServers: [] })) as {
+		sessionId: string;
+		_meta: Record<string, Record<string, unknown>>;
+	};
+	const view = created._meta["clio-coder/workspace"];
+	strictEqual(view?.dirty, false);
+	strictEqual(view?.branch, "v060");
+	strictEqual(view?.remoteUrl, "https://github.com/iowarp/clio-coder");
+	strictEqual(view?.recentCommits, undefined);
+	strictEqual(probes, 1);
+	await call("session/prompt", { sessionId: created.sessionId, prompt: [{ type: "text", text: "edit" }] });
+	strictEqual(probes, 2, "a read settles without a probe; the edit probes once");
+	const infos = updates.filter((update) => update.sessionUpdate === "session_info_update") as Array<{
+		_meta: Record<string, Record<string, unknown>>;
+	}>;
+	strictEqual(infos.length, 1);
+	strictEqual(infos[0]?._meta["clio-coder/workspace"]?.dirty, true);
+	close();
+	await served;
+});

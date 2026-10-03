@@ -130,3 +130,105 @@ test("the ledger method answers for the bound session and is absent without a le
 		await served;
 	}
 });
+
+test("a long turn streams usage_update per model response with the meter rising and totals matching the response", async () => {
+	const handlers = new Map<string, (params: unknown) => unknown>();
+	const updates: Array<Record<string, unknown>> = [];
+	let close: () => void = () => {};
+	let onEvent: (event: unknown) => void = () => {};
+	let used = 1000;
+	const transport: AcpJsonRpcPeerTransport = {
+		closed: false,
+		request: async () => ({}) as never,
+		notify: (method, params) => {
+			if (method === "session/update") updates.push((params as { update: Record<string, unknown> }).update);
+		},
+		onNotification: () => () => {},
+		onRequest: (method, handler) => {
+			handlers.set(method, handler);
+			return () => handlers.delete(method);
+		},
+		onClose: (handler) => {
+			close = handler;
+			return () => {};
+		},
+		close: () => close(),
+	};
+	const response = (text: string) => ({
+		role: "assistant",
+		content: [{ type: "text", text }],
+		stopReason: "stop",
+		usage: { input: 100, output: 20, cacheRead: 50, totalTokens: 170, cost: { total: 0.25 }, costProvenance: "known" },
+	});
+	const served = serveClioAcpAgent({
+		transport,
+		cwd: process.cwd(),
+		autonomy: () => "default",
+		contextLedger: () => ({ ...LEDGER, usedTokens: used }),
+		usage: {
+			session: () => ({
+				cost: { knownUsd: 1, hasEstimated: false, hasUnknown: false, allKnownFree: false, calls: 2 },
+				rows: [],
+			}),
+			quota: async () => [],
+		},
+		chat: {
+			submit: async () => {
+				for (const text of ["one", "two", "three"]) {
+					used += 4000;
+					onEvent({ type: "message_end", message: response(text) });
+					await new Promise((resolve) => setImmediate(resolve));
+				}
+				// A burst in one tick is one frame.
+				used += 4000;
+				onEvent({ type: "message_end", message: response("four") });
+				onEvent({ type: "message_end", message: response("five") });
+			},
+			cancel: () => {},
+			onEvent: (handler) => {
+				onEvent = handler;
+				return () => {
+					onEvent = () => {};
+				};
+			},
+			isStreaming: () => false,
+			getSessionId: () => null,
+		},
+	});
+	const call = async (method: string, params: unknown) => await handlers.get(method)?.(params);
+	await call("initialize", { protocolVersion: 1 });
+	const { sessionId } = (await call("session/new", { cwd: process.cwd(), mcpServers: [] })) as { sessionId: string };
+	assert.equal(updates.filter((update) => update.sessionUpdate === "usage_update").length, 0, "a new session is quiet");
+	const result = (await call("session/prompt", { sessionId, prompt: [{ type: "text", text: "go" }] })) as {
+		_meta: Record<string, unknown>;
+	};
+	const frames = updates.filter((update) => update.sessionUpdate === "usage_update") as Array<{
+		used: number;
+		size: number;
+		cost?: { amount: number; currency: string };
+		_meta: Record<string, Record<string, unknown>>;
+	}>;
+	assert.deepEqual(
+		frames.map((frame) => frame.used),
+		[5000, 9000, 13000, 17000],
+	);
+	assert.ok(frames.every((frame) => frame.size === 131072));
+	assert.equal(frames[0]?._meta["clio-coder/context"]?.compactionThreshold, 0.8);
+	const last = frames.at(-1);
+	const { session, ...turn } = last?._meta["clio-coder/usage"] ?? {};
+	assert.deepEqual(turn, result._meta["clio-coder/usage"]);
+	assert.equal((turn as { output: number }).output, 100);
+	assert.deepEqual(session, {
+		input: 500,
+		output: 100,
+		cacheRead: 250,
+		cacheWrite: 0,
+		reasoning: 0,
+		totalTokens: 850,
+		costUsd: 2.25,
+		costProvenance: "known",
+	});
+	assert.deepEqual(last?.cost, { amount: 2.25, currency: "USD" });
+	close();
+	await served;
+});

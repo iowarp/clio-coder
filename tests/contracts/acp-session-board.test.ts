@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { DecisionLedgerEntry } from "../../src/domains/session/entries.js";
+import type { TaskBoardSnapshot } from "../../src/domains/session/task-board.js";
 import type { UserTask } from "../../src/domains/user-tasks/store.js";
 import { ACP_BOARD_MAX_ITEMS, type AcpBoardSource, projectSessionBoard } from "../../src/engine/acp/board.js";
 import { AcpRequestError } from "../../src/engine/acp/errors.js";
@@ -166,4 +167,117 @@ test("the method is announced and answers only when the host supplies a board", 
 	await assert.rejects(async () => wired.call("_clio-coder/session/board", { sessionId: "not-a-session" }));
 	wired.close();
 	await wired.served;
+});
+
+test("each plan change reaches the client as a standard plan update, in order", async () => {
+	const requests = new Map<string, (params: unknown) => unknown>();
+	const updates: Array<Record<string, unknown>> = [];
+	let close: () => void = () => {};
+	let onEvent: (event: unknown) => void = () => {};
+	let plan: TaskBoardSnapshot | null = null;
+	const transport: AcpJsonRpcPeerTransport = {
+		closed: false,
+		request: async () => ({}) as never,
+		notify: (method, params) => {
+			if (method === "session/update") updates.push((params as { update: Record<string, unknown> }).update);
+		},
+		onRequest: (method, handler) => {
+			requests.set(method, handler);
+			return () => requests.delete(method);
+		},
+		onNotification: () => () => {},
+		onClose: (handler) => {
+			close = handler;
+			return () => {};
+		},
+		close: () => close(),
+	};
+	const tool = (id: string, change: () => void) => {
+		onEvent({ type: "tool_execution_start", toolCallId: id, toolName: "tasks", args: {} });
+		change();
+		onEvent({ type: "tool_execution_end", toolCallId: id, toolName: "tasks", result: "ok", isError: false });
+	};
+	const board = (tasks: TaskBoardSnapshot["tasks"]): TaskBoardSnapshot => ({
+		boardId: "b1",
+		title: "Ship it",
+		tasks,
+		activeRunIds: [],
+	});
+	const served = serveClioAcpAgent({
+		transport,
+		cwd: process.cwd(),
+		plan: () => plan,
+		chat: {
+			submit: async () => {
+				tool("c1", () => {
+					plan = board([
+						{ id: "1", title: "Read", status: "active" },
+						{ id: "2", title: "Write", status: "pending" },
+					]);
+				});
+				// A settled call that leaves the rows alone sends nothing.
+				tool("c2", () => {
+					plan = plan === null ? null : { ...plan, activeRunIds: ["run-1"] };
+				});
+				tool("c3", () => {
+					plan = board([
+						{ id: "1", title: "Read", status: "completed" },
+						{ id: "2", title: "Write", status: "blocked", reason: "needs review" },
+						{ id: "3", title: "Drop me", status: "cancelled", reason: "out of scope" },
+					]);
+				});
+			},
+			cancel: () => {},
+			onEvent: (handler) => {
+				onEvent = handler;
+				return () => {
+					onEvent = () => {};
+				};
+			},
+			isStreaming: () => false,
+			getSessionId: () => null,
+		},
+	});
+	const call = async (method: string, params: unknown) => await requests.get(method)?.(params);
+	await call("initialize", { protocolVersion: 1, clientCapabilities: {} });
+	const { sessionId } = (await call("session/new", { cwd: process.cwd(), mcpServers: [] })) as { sessionId: string };
+	await call("session/prompt", { sessionId, prompt: [{ type: "text", text: "plan" }] });
+	const plans = updates.filter((update) => update.sessionUpdate === "plan") as Array<{
+		entries: Array<{ content: string; status: string; priority: string; _meta: Record<string, unknown> }>;
+		_meta: Record<string, unknown>;
+	}>;
+	assert.deepEqual(
+		plans.map((frame) => frame.entries.map((entry) => [entry.content, entry.status, entry.priority])),
+		[
+			[
+				["Read", "in_progress", "medium"],
+				["Write", "pending", "medium"],
+			],
+			[
+				["Read", "completed", "medium"],
+				["Write", "pending", "medium"],
+			],
+		],
+	);
+	assert.deepEqual(plans[1]?.entries[1]?._meta["clio-coder/plan"], {
+		id: "2",
+		status: "blocked",
+		origin: "agent",
+		reason: "needs review",
+	});
+	assert.deepEqual(plans[1]?._meta["clio-coder/plan"], {
+		version: 1,
+		boardId: "b1",
+		title: "Ship it",
+		cancelled: 1,
+		truncated: false,
+	});
+	// Each plan frame follows the tool call that changed it.
+	const order = updates.map((update) =>
+		update.sessionUpdate === "tool_call_update" ? `end:${update.toolCallId}` : String(update.sessionUpdate),
+	);
+	assert.ok(order.indexOf("end:c1") < order.indexOf("plan"));
+	assert.ok(order.lastIndexOf("plan") > order.indexOf("end:c3"));
+	close();
+	await served;
 });
