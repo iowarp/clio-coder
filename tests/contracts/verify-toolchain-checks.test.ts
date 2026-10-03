@@ -1,5 +1,5 @@
 import { deepStrictEqual, doesNotMatch, match, ok, strictEqual } from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, it } from "node:test";
@@ -69,6 +69,42 @@ describe("verify in repositories without package.json", () => {
 		strictEqual(commandOf(root, "python-unittest"), undefined);
 	});
 
+	it("resolves python3 once on the worker PATH and refuses provisioning before execution", async () => {
+		const root = workspace({ "pyproject.toml": "[tool.pytest.ini_options]\n", "bin/python3": "#!/bin/sh\necho ran\n" });
+		chmodSync(join(root, "bin/python3"), 0o755);
+		const previousPath = process.env.PATH;
+		const previousVenv = process.env.VIRTUAL_ENV;
+		process.chdir(root);
+		try {
+			process.env.PATH = join(root, "bin");
+			delete process.env.VIRTUAL_ENV;
+			const entry = discoverToolchainChecks(root).find((check) => check.id === "python-pytest");
+			deepStrictEqual(entry?.command, ["python3", "-m", "pytest"]);
+			strictEqual(entry?.provenance.interpreter, "python3");
+			deepStrictEqual(discoverToolchainChecks(root)[0], entry);
+			strictEqual((await verifyTool.run({ check: "python-pytest" })).kind, "ok");
+			writeFileSync(join(root, "uv.lock"), "version = 1\n");
+			const listed = await verifyTool.run({});
+			match(textOf(listed), /needs-provisioning.*uv sync/u);
+			const refused = await verifyTool.run({ check: "python-pytest", args: ["-q"] });
+			strictEqual(refused.kind, "error");
+			deepStrictEqual(refused.details?.judgement, {
+				execution: "unavailable",
+				validation: "not-run",
+				scientificValidity: "not established by this check",
+			});
+			match(textOf(refused), /other arguments or cwd cannot help/u);
+			strictEqual(refused.details?.exitCode, undefined, "uv was never spawned");
+			mkdirSync(join(root, ".venv"));
+			deepStrictEqual(commandOf(root, "python-pytest"), ["uv", "run", "--no-sync", "python", "-m", "pytest"]);
+		} finally {
+			if (previousPath === undefined) delete process.env.PATH;
+			else process.env.PATH = previousPath;
+			if (previousVenv === undefined) delete process.env.VIRTUAL_ENV;
+			else process.env.VIRTUAL_ENV = previousVenv;
+		}
+	});
+
 	it("lists Makefile verification targets and the scripts CI runs, and skips setup steps", () => {
 		const root = workspace({
 			Makefile: "install:\n\tpip install .\ntest:\n\t@echo make-test-ran\nlint:\n\t@echo lint\n",
@@ -124,24 +160,15 @@ describe("verify in repositories without package.json", () => {
 });
 
 describe("verify admission under headless autonomy", () => {
-	it("admits a derived check at yolo exactly as bash admits its command", () => {
+	it("refuses an unprovisioned uv check without weakening bare uv admission", () => {
 		const root = workspace({ "pyproject.toml": PYPROJECT, "uv.lock": "version = 1\n", "tests/test_a.py": "" });
 		strictEqual(admission(root, { check: "python-unittest" }, "yolo"), "allow");
-		strictEqual(
-			admission(root, { check: "python-unittest" }, "yolo"),
-			(() => {
-				const decision = createSafetyPolicyEngine({ cwd: root }).evaluate({
-					tool: "bash",
-					args: { command: "uv run python -m unittest discover -s tests" },
-				});
-				return decision.kind === "allow"
-					? mapAutonomy("yolo", decision.actionClass, {
-							executeRecognized: decision.execRecognition !== "unrecognized",
-						})
-					: decision.kind;
-			})(),
-		);
-		strictEqual(admission(root, { check: "python-unittest" }, "default"), "ask");
+		strictEqual(admission(root, { check: "python-unittest" }, "default"), "allow");
+		const decision = createSafetyPolicyEngine({ cwd: root }).evaluate({
+			tool: "bash",
+			args: { command: "uv run python -m pytest" },
+		});
+		strictEqual(decision.execRecognition, "unrecognized", "#377 still requires --no-sync on executable uv pytest");
 	});
 
 	it("runs a package typecheck or lint at yolo and asks at default", () => {

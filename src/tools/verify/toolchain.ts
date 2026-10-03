@@ -1,6 +1,6 @@
-import { existsSync, readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
+import { accessSync, constants, existsSync, readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
 import path from "node:path";
-import { resolveSafeCwd, SAFE_EXEC_DEFAULT_TIMEOUT_MS } from "../../core/safe-exec.js";
+import { buildSafeToolEnv, resolveSafeCwd, SAFE_EXEC_DEFAULT_TIMEOUT_MS } from "../../core/safe-exec.js";
 import { parseTomlDocument, tomlTableAt } from "../../core/toml.js";
 import { isVerificationScriptName } from "../../core/verification-scripts.js";
 
@@ -33,6 +33,13 @@ export interface VerifierProvenance {
 	path: string;
 	detail: string;
 	authority: VerifierProposalAuthority;
+	interpreter?: string;
+}
+
+export interface VerifierAvailability {
+	state: "needs-provisioning" | "unavailable";
+	reason: string;
+	provisionCommand?: string[];
 }
 
 export interface RawProposal {
@@ -43,6 +50,7 @@ export interface RawProposal {
 	timeoutMs: number;
 	tags: string[];
 	provenance: VerifierProvenance;
+	availability?: VerifierAvailability;
 }
 
 export const DECLARED_FILE_CAP_BYTES = 1024 * 1024;
@@ -176,6 +184,31 @@ function pythonLauncher(workspaceRoot: string): string[] {
 	return existsSync(path.join(workspaceRoot, ".venv")) ? ["uv", "run", "--no-sync"] : ["uv", "run"];
 }
 
+/** DF-11: safe-exec preserves this PATH inside the worker sandbox; resolve once, without executing a probe. */
+function pythonInterpreter(workspaceRoot: string, launcher: string[]): string | null {
+	if (launcher.length > 0) return "python";
+	if (existsSync(path.join(workspaceRoot, ".venv"))) {
+		return process.platform === "win32" ? ".venv/Scripts/python.exe" : ".venv/bin/python";
+	}
+	if (process.env.VIRTUAL_ENV) {
+		return path.join(process.env.VIRTUAL_ENV, process.platform === "win32" ? "Scripts/python.exe" : "bin/python");
+	}
+	const env = buildSafeToolEnv();
+	for (const name of ["python", "python3"]) {
+		for (const directory of (env.PATH ?? "/usr/bin:/bin").split(path.delimiter)) {
+			const candidate = path.resolve(workspaceRoot, directory, process.platform === "win32" ? `${name}.exe` : name);
+			try {
+				if (!statSync(candidate).isFile()) continue;
+				accessSync(candidate, constants.X_OK);
+				return name;
+			} catch {
+				// Missing or non-executable candidates do not resolve this interpreter.
+			}
+		}
+	}
+	return null;
+}
+
 const PYTEST_REQUIREMENT_RE = /^\s*pytest(?![\w.-])/u;
 
 /** Whether any dependency list pyproject.toml declares names pytest itself. */
@@ -226,6 +259,24 @@ function unittestStartDirectory(workspaceRoot: string): string | null {
 export function pythonProposals(workspaceRoot: string, diagnostics: string[]): RawProposal[] {
 	const proposals: RawProposal[] = [];
 	const launcher = pythonLauncher(workspaceRoot);
+	const resolvedInterpreter = pythonInterpreter(workspaceRoot, launcher);
+	const interpreter = resolvedInterpreter ?? "python";
+	const availability: VerifierAvailability | undefined =
+		launcher.length === 2
+			? {
+					state: "needs-provisioning",
+					reason: "uv.lock exists but .venv is missing; bare uv run would sync dependencies under a no-install policy",
+					provisionCommand: ["uv", "sync"],
+				}
+			: resolvedInterpreter === null
+				? { state: "unavailable", reason: "neither python nor python3 is executable on the worker PATH" }
+				: undefined;
+	const finish = (): RawProposal[] =>
+		proposals.map((proposal) => ({
+			...proposal,
+			provenance: { ...proposal.provenance, ...(resolvedInterpreter ? { interpreter: resolvedInterpreter } : {}) },
+			...(availability ? { availability } : {}),
+		}));
 	let pytestDependency = false;
 	const pyprojectPath = "pyproject.toml";
 	const pyproject = regularFileText(path.join(workspaceRoot, pyprojectPath), workspaceRoot);
@@ -251,7 +302,7 @@ export function pythonProposals(workspaceRoot: string, diagnostics: string[]): R
 				proposals.push({
 					preferredId: id,
 					description,
-					command: [...launcher, "python", "-m", module],
+					command: [...launcher, interpreter, "-m", module],
 					cwd: ".",
 					timeoutMs: SAFE_EXEC_DEFAULT_TIMEOUT_MS,
 					tags: [...tags],
@@ -307,7 +358,7 @@ export function pythonProposals(workspaceRoot: string, diagnostics: string[]): R
 		proposals.push({
 			preferredId: id,
 			description,
-			command: [...launcher, "python", "-m", module],
+			command: [...launcher, interpreter, "-m", module],
 			cwd: ".",
 			timeoutMs: SAFE_EXEC_DEFAULT_TIMEOUT_MS,
 			tags: ["python", "test"],
@@ -319,7 +370,7 @@ export function pythonProposals(workspaceRoot: string, diagnostics: string[]): R
 			},
 		});
 	}
-	if (proposals.some((proposal) => proposal.preferredId === "python-pytest")) return proposals;
+	if (proposals.some((proposal) => proposal.preferredId === "python-pytest")) return finish();
 	const conftest = ["conftest.py", "tests/conftest.py", "test/conftest.py"].find((relative) =>
 		existsSync(path.join(workspaceRoot, relative)),
 	);
@@ -327,7 +378,7 @@ export function pythonProposals(workspaceRoot: string, diagnostics: string[]): R
 		proposals.push({
 			preferredId: "python-pytest",
 			description: "Run the pytest suite the project depends on",
-			command: [...launcher, "python", "-m", "pytest"],
+			command: [...launcher, interpreter, "-m", "pytest"],
 			cwd: ".",
 			timeoutMs: SAFE_EXEC_DEFAULT_TIMEOUT_MS,
 			tags: ["python", "test"],
@@ -338,14 +389,14 @@ export function pythonProposals(workspaceRoot: string, diagnostics: string[]): R
 				authority: "toolchain-defined",
 			},
 		});
-		return proposals;
+		return finish();
 	}
 	const start = unittestStartDirectory(workspaceRoot);
 	if (start !== null) {
 		proposals.push({
 			preferredId: "python-unittest",
 			description: `Run the standard-library unittest suite under ${start}/`,
-			command: [...launcher, "python", "-m", "unittest", "discover", "-s", start],
+			command: [...launcher, interpreter, "-m", "unittest", "discover", "-s", start],
 			cwd: ".",
 			timeoutMs: SAFE_EXEC_DEFAULT_TIMEOUT_MS,
 			tags: ["python", "test"],
@@ -357,7 +408,7 @@ export function pythonProposals(workspaceRoot: string, diagnostics: string[]): R
 			},
 		});
 	}
-	return proposals;
+	return finish();
 }
 
 export function goProposals(workspaceRoot: string, diagnostics: string[]): RawProposal[] {

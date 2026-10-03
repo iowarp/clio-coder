@@ -13,6 +13,8 @@ import {
 	regularFileText,
 	shellLikeArgv,
 	slug,
+	type VerifierAvailability,
+	type VerifierProvenance,
 } from "./toolchain.js";
 
 /**
@@ -38,6 +40,8 @@ export const TOOLCHAIN_DISCOVERY_SOURCES =
 /** A derived check and the argv prefix model-supplied `args` extend; absent means the check takes none. */
 export interface ToolchainCheck extends DeclaredCheck {
 	argsBase?: string[];
+	provenance: VerifierProvenance;
+	availability?: VerifierAvailability;
 }
 
 const SHELL_TOKEN_RE = /[|&;<>`$(){}*?]/u;
@@ -52,6 +56,8 @@ function fromProposal(proposal: RawProposal, id: string, argsBase: string[] | un
 		tags: [...proposal.tags],
 		source: { kind: "toolchain", path: proposal.provenance.path },
 		kind: "command",
+		provenance: { ...proposal.provenance },
+		...(proposal.availability ? { availability: proposal.availability } : {}),
 		...(argsBase !== undefined ? { argsBase } : {}),
 	};
 }
