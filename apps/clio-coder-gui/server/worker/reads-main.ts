@@ -43,7 +43,7 @@ serveWorker(async (call) => {
 	}
 	if (call.method === "setup.status") {
 		const { readSetupStatus } = await import("../clio/adapters/setup-status.js");
-		return readSetupStatus();
+		return readSetupStatus(call.params.cwd);
 	}
 	if (call.method === "settings.controls") {
 		const { readSettingsControls } = await import("../clio/adapters/settings-controls.js");

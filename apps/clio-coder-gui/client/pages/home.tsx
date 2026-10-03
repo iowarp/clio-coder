@@ -19,7 +19,7 @@ import { TopBar } from "../shell/TopBar.js";
 import { rememberWorkspace } from "../shell/tasks.js";
 import "../chat/composer-box.css";
 import "./home.css";
-import { setupLink, useSetupStatus } from "./target-onboarding.js";
+import { setupLink, setupStatusInput, useSetupStatus } from "./target-onboarding.js";
 
 /** The project the next task lands in, with a way to switch projects or open another folder. */
 function WorkspaceMenu({
@@ -143,7 +143,6 @@ export function Home({ client }: { client: Client }) {
 	const shell = useShell();
 	const navigate = useNavigate();
 	const queries = useQueryClient();
-	const setup = useSetupStatus(client);
 	const fieldId = useId();
 	const field = useRef<HTMLTextAreaElement>(null);
 	const key = useRef<string>(crypto.randomUUID());
@@ -152,12 +151,14 @@ export function Home({ client }: { client: Client }) {
 	const workspaces = useQuery({ queryKey: ["workspaces"], queryFn: () => client.call(routes.workspaces, emptyInput) });
 	const list = workspaces.data ?? [];
 	const workspaceId = chosen && list.some((item) => item.id === chosen) ? chosen : (shell?.activeWorkspaceId ?? null);
+	// The project the task will start in decides readiness: its own settings may name the model.
+	const setup = useSetupStatus(client, true, workspaceId);
 	const ready = setup.data?.state === "ready";
 	const send = useMutation({
 		mutationFn: async ({ workspace, request }: { workspace: string; request: string }) => {
 			const status = await queries.fetchQuery({
-				queryKey: ["setup-status"],
-				queryFn: () => client.call(routes.setupStatus, emptyInput),
+				queryKey: ["setup-status", workspace],
+				queryFn: () => client.call(routes.setupStatus, setupStatusInput(workspace)),
 			});
 			if (status.state !== "ready") throw new Error(status.message || "Connect a model before starting a task.");
 			const sessions = await queries.fetchQuery({

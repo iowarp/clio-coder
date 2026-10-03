@@ -1,4 +1,5 @@
 import { readSettings } from "../../../../../src/core/config.js";
+import { readLayeredSettings } from "../../../../../src/core/settings-layers.js";
 import {
 	openAuthStorage,
 	resolveAuthTarget,
@@ -8,11 +9,15 @@ import { getRuntimeRegistry } from "../../../../../src/domains/providers/registr
 import { registerBuiltinRuntimes } from "../../../../../src/domains/providers/runtimes/builtins.js";
 import type { SetupStatus } from "../../../contracts/setup.js";
 
-/** Saved routing and credential presence only; never probes, refreshes OAuth, or generates. */
-export function readSetupStatus(): SetupStatus {
+/**
+ * Saved routing and credential presence only; never probes, refreshes OAuth, or generates. With a
+ * project directory the answer uses that project's effective settings, the same layers a task started
+ * there runs with; without one it is the user settings alone, which is what first-run setup asks.
+ */
+export function readSetupStatus(cwd?: string): SetupStatus {
 	const registry = getRuntimeRegistry();
 	if (registry.list().length === 0) registerBuiltinRuntimes(registry);
-	const settings = readSettings();
+	const settings = cwd ? readLayeredSettings(cwd).settings : readSettings();
 	const target = settings.targets.find((entry) => entry.id === settings.chat.target);
 	const runtime = target ? registry.get(target.runtime) : undefined;
 	if (!target || !runtime || runtime.kind !== "http")

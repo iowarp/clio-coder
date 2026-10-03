@@ -6,7 +6,7 @@ import type { TargetsService } from "../services/targets-cli.js";
 import { idempotencyKey, register } from "./validate.js";
 
 export function targetsRoutes(app: Hono, hub: EventHub, targets: TargetsService, setup: SetupService) {
-	register(app, hub, routes.setupStatus, () => setup.status());
+	register(app, hub, routes.setupStatus, ({ query }) => setup.status(query.workspace));
 	register(app, hub, routes.setupStart, ({ body }, context) => setup.start(body, idempotencyKey(context)));
 	register(app, hub, routes.setupState, ({ params }) => setup.snapshot(params.id));
 	register(app, hub, routes.setupAnswer, ({ params, body }, context) =>

@@ -124,6 +124,7 @@ export const routes = {
 	setupStatus: defineRoute({
 		...get,
 		path: "/api/setup",
+		query: Type.Object({ workspace: Type.Optional(Id) }, { additionalProperties: false }),
 		response: SetupStatus,
 		summary: "Read saved chat setup without contacting providers.",
 	}),

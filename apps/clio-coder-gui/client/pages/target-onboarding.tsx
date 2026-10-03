@@ -1,14 +1,22 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link, useLocation } from "react-router";
 import { routes } from "../../contracts/routes.js";
-import { type Client, emptyInput } from "../api/client.js";
+import type { Client } from "../api/client.js";
 
-export function useSetupStatus(client: Client, enabled = true) {
+/**
+ * Whether a task can start. Given a workspace, the answer is that project's effective setup, the
+ * layers a task started there runs with; without one it is the user's own settings (first-run setup).
+ */
+export function useSetupStatus(client: Client, enabled = true, workspaceId?: string | null) {
 	return useQuery({
-		queryKey: ["setup-status"],
-		queryFn: () => client.call(routes.setupStatus, emptyInput),
+		queryKey: workspaceId ? ["setup-status", workspaceId] : ["setup-status"],
+		queryFn: () => client.call(routes.setupStatus, setupStatusInput(workspaceId)),
 		enabled,
 	});
+}
+
+export function setupStatusInput(workspaceId?: string | null) {
+	return { params: {}, query: workspaceId ? { workspace: workspaceId } : {}, body: {} };
 }
 
 /** Where the setup wizard is opened from, so it can return there. */

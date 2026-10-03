@@ -5,6 +5,7 @@ import { type SetupAnswer, type SetupStart, SetupState, SetupStatus } from "../.
 import { startConfigureChild, stopClioCommand } from "../process-policy.js";
 import type { WorkerHost } from "../worker/host.js";
 import { AppProblem } from "./problem.js";
+import type { WorkspaceService } from "./workspaces.js";
 
 type Running = {
 	state: SetupState;
@@ -21,12 +22,15 @@ export class SetupService {
 	constructor(
 		private readonly reads: WorkerHost,
 		private readonly env: NodeJS.ProcessEnv = process.env,
+		private readonly workspaces?: WorkspaceService,
 	) {}
 	get busy() {
 		return this.starting || (!!this.running && ["working", "prompt"].includes(this.running.state.status));
 	}
-	async status() {
-		const result = await this.reads.call("setup.status", {});
+	/** Scoped to a workspace, the answer is that project's effective setup; unscoped, the user's. */
+	async status(workspaceId?: string) {
+		const cwd = workspaceId && this.workspaces ? (await this.workspaces.get(workspaceId)).path : undefined;
+		const result = await this.reads.call("setup.status", cwd ? { cwd } : {});
 		if (!Value.Check(SetupStatus, result)) throw new AppProblem("unavailable", "Saved setup could not be read.");
 		return result;
 	}

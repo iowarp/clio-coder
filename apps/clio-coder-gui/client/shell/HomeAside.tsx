@@ -20,7 +20,7 @@ import "../chat/pane.css";
  */
 export function HomeAside({ client, workspace }: { client: Client; workspace: Workspace | null }) {
 	const slot = useShell()?.asideSlot ?? null;
-	const setup = useSetupStatus(client);
+	const setup = useSetupStatus(client, true, workspace?.id ?? null);
 	const sessions = useQuery({ queryKey: ["sessions"], queryFn: () => client.call(routes.sessions, emptyInput) });
 	const workspaces = useQuery({ queryKey: ["workspaces"], queryFn: () => client.call(routes.workspaces, emptyInput) });
 	if (!slot) return null;

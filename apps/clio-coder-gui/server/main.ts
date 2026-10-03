@@ -145,7 +145,7 @@ export async function main(args = process.argv.slice(2)) {
 	const sessions = new SessionService(supervisor, workspaces, reads);
 	const cli = new CliRunner(env);
 	const settingsService = new SettingsService(reads, workspaces, ops);
-	const setup = new SetupService(reads, env);
+	const setup = new SetupService(reads, env, workspaces);
 	const token = persistent?.token ?? values.token ?? randomBytes(32).toString("base64url");
 	let log: Awaited<ReturnType<typeof lifecycleLog>>;
 	try {
