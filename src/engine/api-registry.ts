@@ -25,6 +25,7 @@ import {
 } from "@earendil-works/pi-ai/providers/faux";
 import "@earendil-works/pi-ai/providers/images/register-builtins";
 
+import { withCodexPromptItems } from "./apis/codex-prompt-items.js";
 import { filterAssistantProseStream } from "./assistant-prose-stream.js";
 import { normalizeContext } from "./context.js";
 import { getEngineEnvApiKey } from "./env-api-keys.js";
@@ -135,7 +136,9 @@ export function engineStream(
 ): AssistantMessageEventStream {
 	return filterAssistantProseStream(
 		guardToolArgumentStream(model, context, options, (guarded) =>
-			instrumentProviderCall(model, guarded, (effective) => dispatchEngineStream(model, context, effective)),
+			instrumentProviderCall(model, withCodexPromptItems(model, guarded), (effective) =>
+				dispatchEngineStream(model, context, effective),
+			),
 		),
 		model,
 	);
@@ -148,7 +151,9 @@ export function engineStreamSimple(
 ): AssistantMessageEventStream {
 	return filterAssistantProseStream(
 		guardToolArgumentStream(model, context, options, (guarded) =>
-			instrumentProviderCall(model, guarded, (effective) => dispatchEngineStreamSimple(model, context, effective)),
+			instrumentProviderCall(model, withCodexPromptItems(model, guarded), (effective) =>
+				dispatchEngineStreamSimple(model, context, effective),
+			),
 		),
 		model,
 	);
