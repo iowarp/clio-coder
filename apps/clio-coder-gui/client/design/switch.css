@@ -1,0 +1,67 @@
+/* A two-state control: a 32x18 track with a 14px thumb, and the state in words beside it. Every colour is
+   a token. The global button rules (a 34px bordered control with its own hover ground) are restated
+   here so that neither the size nor the hover repaints the track. */
+.switch-field {
+	display: inline-flex;
+	align-items: center;
+	gap: var(--space-2);
+}
+.switch {
+	position: relative;
+	flex: none;
+	display: inline-block;
+	width: 32px;
+	height: 18px;
+	min-height: 0;
+	padding: 0;
+	border: 0;
+	border-radius: var(--radius-pill);
+	background: var(--wb-active);
+	box-shadow: inset 0 0 0 1px var(--line-strong);
+	cursor: pointer;
+	transition: background-color var(--motion-fast) var(--ease-standard);
+}
+.switch[aria-checked="true"] {
+	background: var(--primary-fill);
+	box-shadow: none;
+}
+.switch:disabled {
+	opacity: 0.5;
+	cursor: not-allowed;
+}
+.switch:hover:not(:disabled),
+.switch:active:not(:disabled) {
+	background: var(--wb-active);
+}
+.switch[aria-checked="true"]:hover:not(:disabled),
+.switch[aria-checked="true"]:active:not(:disabled) {
+	background: var(--primary-fill);
+}
+.switch__thumb {
+	position: absolute;
+	top: 2px;
+	left: 2px;
+	width: 14px;
+	height: 14px;
+	border-radius: 50%;
+	/* --raised would be the natural thumb, but in dark it is within 1.04:1 of the track and the thumb vanishes. */
+	background: var(--ink-muted);
+	transition:
+		transform var(--motion-fast) var(--ease-standard),
+		background-color var(--motion-fast) var(--ease-standard);
+}
+.switch[aria-checked="true"] .switch__thumb {
+	background: var(--on-primary);
+	transform: translateX(14px);
+}
+.switch__state {
+	min-width: 3ch;
+	font-size: var(--text-exact);
+	color: var(--ink-muted);
+}
+@media (prefers-reduced-motion: reduce) {
+	.switch,
+	.switch__thumb {
+		transition: none;
+	}
+}

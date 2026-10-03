@@ -7,6 +7,7 @@ import { STRUCTURED_SETTINGS } from "../../contracts/structured-settings.js";
 import { type Client, emptyInput } from "../api/client.js";
 import { formatTime } from "../api/clock.js";
 import { useOperation } from "../api/queries.js";
+import { Switch } from "../design/Switch.js";
 import { MODEL_TARGET_PATHS } from "./model-options.js";
 import { ModelSelect } from "./model-select.js";
 import { StructuredSettingsEditor } from "./StructuredSettingsEditor.js";
@@ -128,7 +129,8 @@ function ControlRow({
 	showPath?: boolean;
 }) {
 	const fieldId = useId(),
-		helpId = useId();
+		helpId = useId(),
+		labelId = useId();
 	const submitting = useRef(false);
 	const [structuredValid, setStructuredValid] = useState(true);
 	const [editorRevision, setEditorRevision] = useState(0);
@@ -163,7 +165,9 @@ function ControlRow({
 	return (
 		<div className="setting-control" data-access={control.access}>
 			<div className="setting-control__about">
-				<label htmlFor={writable && !structured ? fieldId : undefined}>{control.label}</label>
+				<label id={labelId} htmlFor={writable && !structured ? fieldId : undefined}>
+					{control.label}
+				</label>
 				<p id={helpId}>{control.description}</p>
 				{control.help && <p className="setting-control__help">{control.help}</p>}
 				{control.note && <p className="setting-control__note">{control.note}</p>}
@@ -229,6 +233,16 @@ function ControlRow({
 								value={value}
 								disabled={write.isPending}
 								onChange={edit}
+							/>
+						) : control.kind === "boolean" ? (
+							// The same "true" and "false" the select wrote, through the same draft and save path.
+							<Switch
+								id={fieldId}
+								aria-labelledby={labelId}
+								aria-describedby={helpId}
+								checked={value === "true"}
+								disabled={write.isPending}
+								onChange={(next) => edit(next ? "true" : "false")}
 							/>
 						) : options ? (
 							<select
