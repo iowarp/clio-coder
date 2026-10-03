@@ -1,7 +1,13 @@
 export type { ToolFetcher, ToolInstallOptions, ToolInstallResult } from "./install.js";
 export { installPinnedTool, installTool } from "./install.js";
 export { toolchainRoot, toolVersionDir, vendoredBinaryPath } from "./paths.js";
-export { currentToolPlatform, findPinnedTool, findPinnedToolByBinary, PINNED_TOOLS } from "./registry.js";
+export {
+	currentToolPlatform,
+	findPinnedTool,
+	findPinnedToolByBinary,
+	PINNED_TOOLS,
+	packageManagerInstallHints,
+} from "./registry.js";
 export type { ToolRemoveOptions, ToolRemoveResult } from "./remove.js";
 export { installedToolVersions, pruneSupersededVersions, removeTool, STALE_STAGING_MS } from "./remove.js";
 export {

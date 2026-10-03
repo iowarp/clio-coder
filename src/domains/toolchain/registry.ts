@@ -228,7 +228,81 @@ export const PINNED_TOOLS: ReadonlyArray<PinnedTool> = [
 		},
 		documents: [],
 	},
+	{
+		id: "cliamp",
+		version: "1.63.2",
+		summary: "terminal music player with outside control; the music pane",
+		homepage: "https://cliamp.stream",
+		license: "MIT",
+		binaries: ["cliamp"],
+		primaryBinary: "cliamp",
+		// At the pin. The surfaces Clio drives (`CLIAMP_CONFIG_DIR`, `--playlist`,
+		// and the `next`, `load`, `status --json` IPC commands) were exercised on
+		// 1.63.2 in a herdr pane and on nothing older.
+		minimumVersion: "1.63.2",
+		versionArgs: ["--version"],
+		// Every hash below matched upstream's own checksums.txt for this tag.
+		// The Linux assets link the codecs statically; the macOS ones load
+		// FLAC, Vorbis, Ogg and mpg123 from Homebrew, which `brew install
+		// bjarneo/cliamp/cliamp` brings along and a vendored copy does not.
+		downloads: {
+			"linux-x64": {
+				url: "https://github.com/bjarneo/cliamp/releases/download/v1.63.2/cliamp-linux-amd64",
+				sha256: "b066832c84cb9dffcb126252dedb55a0ebcd13cbac95bbff103b111b88ce17c9",
+				archive: "raw",
+				binaryMembers: { cliamp: "" },
+				documentMembers: [],
+			},
+			"linux-arm64": {
+				url: "https://github.com/bjarneo/cliamp/releases/download/v1.63.2/cliamp-linux-arm64",
+				sha256: "3be4ebe8806d2432b58afedd0fbdcb9522266b0204ab6cddb7f519f6ee33a8aa",
+				archive: "raw",
+				binaryMembers: { cliamp: "" },
+				documentMembers: [],
+			},
+			"darwin-x64": {
+				url: "https://github.com/bjarneo/cliamp/releases/download/v1.63.2/cliamp-darwin-amd64",
+				sha256: "e8595ba960be284cf6ab21a3dd34537a8ddca4fca4fd253f057e02379f608276",
+				archive: "raw",
+				binaryMembers: { cliamp: "" },
+				documentMembers: [],
+			},
+			"darwin-arm64": {
+				url: "https://github.com/bjarneo/cliamp/releases/download/v1.63.2/cliamp-darwin-arm64",
+				sha256: "e9786bcedb5c284a6c15b8d472b846e67e321ab9e95b688ef999de24baec6074",
+				archive: "raw",
+				binaryMembers: { cliamp: "" },
+				documentMembers: [],
+			},
+			"win32-x64": {
+				url: "https://github.com/bjarneo/cliamp/releases/download/v1.63.2/cliamp-windows-amd64.exe",
+				sha256: "bc72bb495fcf21e2d61b434a5fcd7c6c2848f09fd4f78cb4b6952a6d970f43a2",
+				archive: "raw",
+				binaryMembers: { cliamp: "" },
+				documentMembers: [],
+			},
+		},
+		documents: [
+			{
+				name: "LICENSE",
+				url: "https://raw.githubusercontent.com/bjarneo/cliamp/v1.63.2/LICENSE",
+				sha256: "57764ebae827c1c96dc5c1b74e2579ff34d3abcaabb54f5e5498fb2f612330cc",
+			},
+		],
+	},
 ];
+
+/**
+ * Package-manager alternatives to `clio-coder tools install <id>`, per
+ * platform, for tools whose upstream publishes them. Clio prints these and
+ * never runs them: an install is something the operator types.
+ */
+export function packageManagerInstallHints(id: string, platform: NodeJS.Platform = process.platform): string[] {
+	if (id !== "cliamp") return [];
+	const hints = platform === "darwin" ? ["brew install bjarneo/cliamp/cliamp"] : [];
+	hints.push("go install github.com/bjarneo/cliamp@latest");
+	return hints;
+}
 
 /** The registry's platform key for the running process, or null when unmapped. */
 export function currentToolPlatform(): ToolPlatform | null {
