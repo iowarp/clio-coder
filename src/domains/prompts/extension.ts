@@ -664,6 +664,25 @@ function selfDevelopmentSkillFragments(
 	autonomy: string,
 ): RenderedPromptFragment[] {
 	if (!selfRepo || !sessionCanUseSkills(inputs) || inputs.turnConstraints?.mode === "proposal") return [];
+	// On T3 a headless run loaded both skills and the 12 KB CONTRIBUTING.md they
+	// point to before its first edit, about 25 KB resent on every later request
+	// for sprint and handoff guidance a stated bug fix never uses. A headless
+	// run keeps them discoverable in the catalog and works from the code.
+	if (inputs.headless === true) {
+		const body = [
+			"# Self-development skills",
+			"clio-coder-dev and clio-coder-test guide operator-led development of this checkout: sprint packets, handoffs and release discipline. A headless task works from the code, its tests and the project handbook; load one of them only when the change needs a convention those do not show.",
+		].join("\n");
+		return [
+			{
+				id: "context.self-development-skills",
+				relPath: "inline/self-development-skills",
+				body,
+				contentHash: sha256(body),
+				dynamic: true,
+			},
+		];
+	}
 	const activation = isAutonomyLevel(autonomy);
 	const listCall = 'gateway(op="call", capability="context", args={scope:"skills"})';
 	const loadCall = (name: string) => `gateway(op="call", capability="context", args={scope:"skills",name:"${name}"})`;

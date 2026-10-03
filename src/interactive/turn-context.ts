@@ -131,6 +131,8 @@ export interface TurnContextDeps {
 	operatorInterviews?: boolean;
 	/** True for a headless `clio-coder run`, whose approval asks are always denied. */
 	headless?: boolean;
+	/** False when no operator message can arrive mid-run; the prompt then omits steering guidance. */
+	liveSteering?: boolean;
 	state: ChatTurnState;
 	getSettings: () => Readonly<ClioSettings>;
 	providers: ProvidersContract;
@@ -2007,6 +2009,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 				...(guidance ? { thinkingGuidance: guidance } : {}),
 				...(deps.toolRegistry?.get(ToolNames.ConfigureClio) ? { canConfigureClio: true } : {}),
 				...(deps.headless === true ? { headless: true } : {}),
+				...(deps.liveSteering === false ? { liveSteering: false } : {}),
 				...(deps.interactiveGuidance === true || deps.operatorInterviews === true ? { operatorInterviews: true } : {}),
 			};
 			if (deps.getMemorySection) {

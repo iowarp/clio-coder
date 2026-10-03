@@ -744,6 +744,8 @@ export interface CreateChatLoopDeps {
 	 * approval ask, so the session prompt says so instead of promising a pause.
 	 */
 	headless?: boolean;
+	/** False when no operator message can arrive mid-run (a headless run without a steer channel). */
+	liveSteering?: boolean;
 	scheduling?: SchedulingContract;
 	getSettings: () => Readonly<ClioSettings>;
 	/**
@@ -1331,6 +1333,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		interactiveGuidance: deps.interactiveGuidance === true,
 		operatorInterviews: deps.operatorInterviews === true,
 		headless: deps.headless === true,
+		...(deps.liveSteering === false ? { liveSteering: false } : {}),
 		state,
 		getSettings: deps.getSettings,
 		providers: deps.providers,

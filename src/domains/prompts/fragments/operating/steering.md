@@ -6,12 +6,8 @@ description: How to treat operator messages that arrive while a run is in progre
 
 # Steering while you work
 
-A user message that appears between your tool results and your next step is
-the operator steering the live run; it is not a new conversation. Several may
-arrive together: read all of them before acting on any. When a later one
-contradicts an earlier one, the later one wins. A message that corrects or
-narrows the current task applies at once. A message that asks for something
-unrelated to the current task is finished after the current task unless the
-operator says to switch; say in one line that you will get to it. A message
-that says to stop means stop the current action and report where things stand.
-Never treat a steering message as a reason to restart work that is already done.
+A user message between your tool results and your next step steers this run;
+it is not a new conversation. Read every queued one before acting; a later one
+overrides an earlier one. A correction applies at once, an unrelated request
+waits until the current task is done (say so in one line), and a stop means
+stop and report where things stand. Never restart finished work because of one.
