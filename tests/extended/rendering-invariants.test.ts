@@ -706,6 +706,24 @@ describe("streamed answers settle in place", () => {
 		strictEqual(stripTerminalSequences(settledTail), `${stripTerminalSequences(tail)}.`);
 	});
 
+	it("never restyles a row above the open trailing block while the answer streams", () => {
+		const panel = createChatPanel({ now: () => 0 });
+		panel.appendUser("Explain the retry design.");
+		panel.applyEvent({ type: "agent_start" } as never);
+		panel.applyEvent({ type: "message_start", message: { role: "assistant" } } as never);
+		let previous = panel.render(80);
+		for (let at = 0; at < STREAMED_ANSWER.length; at += 4) {
+			panel.applyEvent({ type: "text_delta", contentIndex: 0, delta: STREAMED_ANSWER.slice(at, at + 4) } as never);
+			const frame = panel.render(80);
+			let changed = 0;
+			while (changed < previous.length && changed < frame.length && previous[changed] === frame[changed]) changed += 1;
+			// Stock Markdown renders top-level blocks independently, so only the open block may change.
+			// 16 rows covers the tallest open block here, the 12-line fence with its two fence rows.
+			ok(changed >= frame.length - 16, `delta at ${at} restyled row ${changed} of ${frame.length}`);
+			previous = frame;
+		}
+	});
+
 	it("streams against one settled prefix array and keeps the regular root equal to the frame", () => {
 		const panel = createChatPanel({ now: () => 0 });
 		for (let turn = 0; turn < 3; turn += 1) {
