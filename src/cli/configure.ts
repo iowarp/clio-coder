@@ -20,6 +20,7 @@ import {
 	settingsGroupForPath,
 } from "../core/settings-navigation.js";
 import { resolveClioDirs } from "../core/xdg.js";
+import { ensureClaudeAgentSdk } from "../domains/lifecycle/claude-sdk-install.js";
 import { getVersionInfo } from "../domains/lifecycle/version.js";
 import { openAuthStorage, targetRequiresAuth } from "../domains/providers/auth/index.js";
 import {
@@ -39,7 +40,6 @@ import { closestRuntimeId, getRuntimeRegistry } from "../domains/providers/regis
 import { registerBuiltinRuntimes } from "../domains/providers/runtimes/builtins.js";
 import { greetLmStudio } from "../domains/providers/runtimes/common/lmstudio-http.js";
 import type { ProbeResult, RuntimeDescriptor } from "../domains/providers/types/runtime-descriptor.js";
-import { ensureClaudeAgentSdk } from "../domains/lifecycle/claude-sdk-install.js";
 import type { TargetDescriptor } from "../domains/providers/types/target-descriptor.js";
 import { autonomyFromUserInput } from "../domains/safety/index.js";
 import {

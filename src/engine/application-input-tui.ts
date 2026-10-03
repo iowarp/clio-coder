@@ -64,7 +64,8 @@ function gateFor(
 	return gate;
 }
 
-const SGR_MOUSE = /^\x1b\[<(\d+);\d+;\d+[Mm]$/;
+// An SGR mouse report: ESC [ < button ; column ; row (M press, m release).
+const SGR_MOUSE = new RegExp(`^${String.fromCharCode(27)}\\[<(\\d+);\\d+;\\d+[Mm]$`);
 
 function replacePolicy(gate: Gate, policy: ApplicationInputPolicy): () => void {
 	gate.policy = policy;

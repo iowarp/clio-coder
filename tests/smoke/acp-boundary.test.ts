@@ -406,8 +406,10 @@ describe("smoke/ACP stdio boundary", { concurrency: false }, () => {
 			const error = rejected.error as { code: number; data: { _meta: Record<string, Record<string, unknown>> } };
 			strictEqual(error.code, -32603);
 			strictEqual(error.data._meta["clio-coder/error"]?.code, "prompt_not_admitted");
+			// Session-level frames (commands, usage, workspace) may arrive; a refused prompt streams no turn content.
+			const turnContent = new Set(["agent_message_chunk", "agent_thought_chunk", "tool_call", "tool_call_update"]);
 			strictEqual(
-				emptyClient.updates.some((update) => update.sessionUpdate !== "available_commands_update"),
+				emptyClient.updates.some((update) => turnContent.has(String(update.sessionUpdate))),
 				false,
 			);
 			await emptyClient.close(emptySession);

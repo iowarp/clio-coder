@@ -211,7 +211,9 @@ export function createOverlaySessionLifecycle(deps: OverlaySessionLifecycleDeps)
 		if (ids.includes(target)) return { id: target };
 		const matches = ids.filter((id) => id.startsWith(target));
 		if (matches.length === 1 && matches[0] !== undefined) return { id: matches[0] };
-		return { miss: matches.length === 0 ? `no session matches ${target}` : `${target} matches ${matches.length} sessions` };
+		return {
+			miss: matches.length === 0 ? `no session matches ${target}` : `${target} matches ${matches.length} sessions`,
+		};
 	}
 
 	function openResume(target?: string): void {
@@ -225,9 +227,7 @@ export function createOverlaySessionLifecycle(deps: OverlaySessionLifecycleDeps)
 		if (target !== undefined) {
 			const match = matchSessionId(session, target);
 			if ("id" in match) {
-				void resumeSession(session, match.id, preResumeSessionId).then(() =>
-					probeResumedCwd(session, preResumeSessionId),
-				);
+				void resumeSession(session, match.id, preResumeSessionId).then(() => probeResumedCwd(session, preResumeSessionId));
 				return;
 			}
 			emitCommandNotice(deps.getSlashNotice(), "warn", "resume", match.miss);
