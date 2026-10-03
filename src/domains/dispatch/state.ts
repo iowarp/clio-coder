@@ -21,6 +21,7 @@
 import { randomBytes } from "node:crypto";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { setTimeout as sleep } from "node:timers/promises";
 import { resolveGuardrail } from "../../core/guardrails.js";
 import { withStateFileLock } from "../../core/state-file-lock.js";
 import { clioStateDir, stateRootRemoved } from "../../core/xdg.js";
@@ -371,13 +372,28 @@ export function openLedger(opts?: LedgerOptions): Ledger {
 			// call waits for a sibling process to finish its own critical section.
 			if (stateRootRemoved()) return;
 			const target = runsPath();
-			await withStateFileLock(target, () => {
+			await withStateFileLock(target, async () => {
 				if (stateRootRemoved()) return;
 				const diskRuns = readRuns();
 				const merged = mergeRunsById(diskRuns, runs, dirty);
 				const capped = capRuns(merged, resolveMaxRuns(opts?.maxRuns));
 				runs = capped;
-				atomicWrite(target, JSON.stringify(capped, null, 2));
+				const written = new Map(capped.map((run) => [run.id, run]));
+				const contents = JSON.stringify(capped, null, 2);
+				for (let attempt = 0; ; attempt += 1) {
+					if (stateRootRemoved()) return;
+					try {
+						atomicWrite(target, contents);
+						break;
+					} catch (error) {
+						const code = (error as NodeJS.ErrnoException).code;
+						if (process.platform !== "win32" || attempt >= 20 || !["EPERM", "EACCES", "EBUSY"].includes(code ?? "")) {
+							throw error;
+						}
+						// Let pending close callbacks release Windows rename-blocking handles.
+						await sleep(50);
+					}
+				}
 				// A run that left the ring has no ledger row to view any more, so its
 				// event journal is unreachable state. Retention is bound to the ring
 				// rather than to a second policy so the two can never disagree about
@@ -386,11 +402,12 @@ export function openLedger(opts?: LedgerOptions): Ledger {
 					const kept = new Set(capped.map((run) => run.id));
 					removeRunEventJournals(merged.filter((run) => !kept.has(run.id)).map((run) => run.id));
 				}
-				// Everything this process claimed is now on disk, so the mirror holds
-				// no newer state until the next write. Clearing here is what stops a
-				// long-lived process from re-asserting an old snapshot of its own rows
-				// over a sibling's later update to them.
-				dirty.clear();
+				// Keep updates made while a Windows rename retry yielded; clear only
+				// the rows written so an old snapshot cannot overwrite a sibling later.
+				const current = new Map(runs.map((run) => [run.id, run]));
+				for (const id of dirty) {
+					if (current.get(id) === written.get(id)) dirty.delete(id);
+				}
 			});
 		},
 

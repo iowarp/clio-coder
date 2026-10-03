@@ -1,3 +1,4 @@
+import { isAbsolute } from "node:path";
 import { THINKING_LEVELS } from "../core/defaults.js";
 import type { ProtectedModelRef, ResidencyRole } from "../core/residency-protection.js";
 import { assertValidResponseSchema, runtimeSpeaksResponseSchemaDialect } from "../core/response-schema.js";
@@ -836,7 +837,7 @@ const WORKER_SANDBOX_KEYS = new Set([
 
 function readAbsolutePaths(value: unknown, source: string): void {
 	for (const [index, entry] of readStringArray(value, source).entries()) {
-		if (!entry.startsWith("/") || entry.includes("\0")) {
+		if (!isAbsolute(entry) || entry.includes("\0")) {
 			throw new Error(`${source}[${index}] must be an absolute path`);
 		}
 	}

@@ -471,36 +471,143 @@ function checkCiScripts(): void {
 	if (
 		!isDeepStrictEqual(
 			[...(ci.jobs?.ci?.needs ?? [])].sort(),
-			["checks", "core-tests", "windows-subprocess", "installed-package"].sort(),
+			["checks", "core-tests", "windows-subprocess", "installed-package", "platform"].sort(),
 		)
 	)
 		fail("ci-scripts", "the required Node 22 status must depend on all routine checks");
-	if (release.jobs?.ci?.uses !== "./.github/workflows/ci.yml" || release.jobs?.qualify?.needs !== "ci")
-		fail("ci-scripts", "tag qualification must wait for the reusable CI workflow");
+	const platforms = (ci.jobs?.platform?.strategy?.matrix?.include ?? []).map(
+		(leg: { os?: string; node?: string | number }) => `${leg.os}/${leg.node}`,
+	);
+	const floor = /(\d+\.\d+\.\d+)/.exec(JSON.parse(readRoot("package.json")).engines?.node ?? "")?.[1];
+	for (const leg of ["macos-latest/22", "windows-latest/22", "ubuntu-latest/24", `ubuntu-latest/${floor}`]) {
+		if (!platforms.includes(leg)) fail("ci-scripts", `the platform matrix must build and boot on ${leg}`);
+	}
+	const releaseTriggers = Object.keys(release.on ?? {});
+	if (releaseTriggers.length !== 1 || releaseTriggers[0] !== "workflow_dispatch")
+		fail("ci-scripts", "a release starts from a dispatched commit, never from a pushed tag");
+	const releaseNeeds = (job: string): string[] => [release.jobs?.[job]?.needs ?? []].flat();
+	if (release.jobs?.ci?.uses !== "./.github/workflows/ci.yml" || !releaseNeeds("qualify").includes("ci"))
+		fail("ci-scripts", "release qualification must wait for the reusable CI workflow");
 	if (release.permissions?.contents !== "read" || release.jobs?.release?.permissions?.contents !== "write")
 		fail("ci-scripts", "only the release job may write repository contents");
+	for (const [name, job] of Object.entries(release.jobs ?? {}) as Array<[string, { permissions?: object }]>) {
+		if (name !== "release" && job.permissions !== undefined)
+			fail("ci-scripts", `release job ${name} must not widen the read-only workflow permissions`);
+	}
 	if (
 		!release.jobs?.qualify?.steps?.some((step: { run?: string }) =>
 			step.run?.includes("release-candidate.mjs qualify-after-ci"),
 		)
 	)
-		fail("ci-scripts", "tag qualification must audit and test the exact package");
-	if (release.jobs?.release?.needs !== "qualify")
+		fail("ci-scripts", "release qualification must audit and test the exact package");
+	if (!releaseNeeds("release").includes("qualify"))
 		fail("ci-scripts", "release creation must depend on successful qualification");
-	if (!release.jobs?.release?.steps?.some((step: { run?: string }) => step.run?.includes("sha256sum --check")))
+	const releaseRuns: string[] = (release.jobs?.release?.steps ?? []).map((step: { run?: string }) => step.run ?? "");
+	if (!releaseRuns.some((run) => run.includes("sha256sum --check")))
 		fail("ci-scripts", "release creation must verify the qualified package digest");
-	for (const workflow of [ci, release]) {
+	const publish = releaseRuns.findIndex((run) => run.includes("npm publish candidate.tgz --provenance"));
+	const tag = releaseRuns.findIndex((run) => run.includes("gh release create") && run.includes("--target"));
+	if (publish < 0 || release.jobs?.release?.permissions?.["id-token"] !== "write")
+		fail("ci-scripts", "the release job must publish the qualified tarball to npm with provenance");
+	if (tag !== releaseRuns.length - 1 || tag < publish || !releaseRuns[tag]?.includes("candidate.tgz"))
+		fail("ci-scripts", "the tag and GitHub release are created last, from the published tarball");
+	const candidate = readRoot("scripts/release-candidate.mjs");
+	for (const tier of ["test:full", "test:gui:full"]) {
+		if (!candidate.includes(`"${tier}"`)) fail("ci-scripts", `release qualification must run ${tier}`);
+	}
+	for (const [file, workflow] of [
+		["ci.yml", ci],
+		["release.yml", release],
+		["pages.yml", parseYaml(readRoot(".github/workflows/pages.yml"))],
+	] as const) {
 		for (const job of Object.values(workflow.jobs ?? {}) as Array<{
 			"continue-on-error"?: boolean;
-			steps?: Array<{ "continue-on-error"?: boolean; run?: string }>;
+			steps?: Array<{ "continue-on-error"?: boolean; run?: string; uses?: string }>;
 		}>) {
 			if (job["continue-on-error"]) fail("ci-scripts", "gate jobs must propagate failures");
 			for (const step of job.steps ?? []) {
 				if (step["continue-on-error"] || step.run?.includes("--ignore-scripts"))
 					fail("ci-scripts", "gate steps must not bypass failures or lifecycle hooks");
+				if (step.uses !== undefined && !step.uses.startsWith("./") && !/@[0-9a-f]{40}$/.test(step.uses))
+					fail("ci-scripts", `${file} must pin ${step.uses} to a full commit sha`);
 			}
 		}
 	}
+}
+
+// ---------------------------------------------------------------------------
+// test-tiers: a test file belongs to one named tier, by the directory it sits
+// in, and each tier names the package script whose glob runs it. A test file
+// anywhere else, or a tier whose script lost its glob, is a test no gate
+// reaches: 41 GUI files sat outside a hand-kept list that way.
+// ---------------------------------------------------------------------------
+const GUI_MANIFEST = "apps/clio-coder-gui/package.json";
+const TEST_TIERS: ReadonlyArray<{ tier: string; dir: string; manifest: string; script?: string; runs?: string }> = [
+	{
+		tier: "contracts",
+		dir: "tests/contracts",
+		manifest: "package.json",
+		script: "test",
+		runs: "tests/contracts/*.test.ts",
+	},
+	{ tier: "smoke", dir: "tests/smoke", manifest: "package.json", script: "test:full", runs: "tests/smoke/*.test.ts" },
+	{
+		tier: "extended",
+		dir: "tests/extended",
+		manifest: "package.json",
+		script: "test:full",
+		runs: "tests/extended/*.test.ts",
+	},
+	{
+		tier: "extended-smoke",
+		dir: "tests/extended-smoke",
+		manifest: "package.json",
+		script: "test:full",
+		runs: "tests/extended-smoke/*.test.ts",
+	},
+	{
+		tier: "gui",
+		dir: "apps/clio-coder-gui/tests",
+		manifest: GUI_MANIFEST,
+		script: "test",
+		runs: "tests/*.test.ts tests/*.test.tsx",
+	},
+	// The live tier drives a real agent and a real browser, so it is run by hand:
+	// no glob, and every file is named by a script of its own.
+	{ tier: "gui-real", dir: "apps/clio-coder-gui/tests/real", manifest: GUI_MANIFEST },
+];
+
+function checkTestTiers(): void {
+	const scriptsOf = (manifest: string): Record<string, string> => JSON.parse(readRoot(manifest)).scripts ?? {};
+	for (const tier of TEST_TIERS) {
+		if (tier.script === undefined || tier.runs === undefined) continue;
+		if (!scriptsOf(tier.manifest)[tier.script]?.includes(tier.runs))
+			fail("test-tiers", `${tier.manifest} script ${tier.script} must run the ${tier.tier} tier as ${tier.runs}`);
+	}
+	const visit = (dir: string): void => {
+		for (const entry of readdirSync(join(root, dir), { withFileTypes: true })) {
+			const rel = `${dir}/${entry.name}`;
+			if (entry.isDirectory()) {
+				if (entry.name !== "node_modules") visit(rel);
+				continue;
+			}
+			if (!/\.test\.[cm]?[jt]sx?$/.test(entry.name)) continue;
+			const tier = TEST_TIERS.find((candidate) => candidate.dir === dir);
+			if (tier === undefined) {
+				fail("test-tiers", `${rel} sits in no test tier; move it under one of ${TEST_TIERS.map((t) => t.dir).join(", ")}`);
+			} else if (tier.runs !== undefined) {
+				const suffixes = tier.runs.split(" ").map((glob) => glob.slice(glob.indexOf("*") + 1));
+				if (!suffixes.some((suffix) => entry.name.endsWith(suffix)))
+					fail("test-tiers", `${rel} does not match the ${tier.tier} tier glob ${tier.runs}`);
+			} else if (
+				!Object.values(scriptsOf(tier.manifest)).some((script) => script.includes(rel.slice(dir.lastIndexOf("/tests") + 1)))
+			) {
+				fail("test-tiers", `${rel} is in the hand-run ${tier.tier} tier and no ${tier.manifest} script names it`);
+			}
+		}
+	};
+	visit("tests");
+	visit("apps/clio-coder-gui/tests");
 }
 
 // ---------------------------------------------------------------------------
@@ -1896,6 +2003,7 @@ const checks: ReadonlyArray<[string, () => void | Promise<void>]> = [
 	["export-hygiene", checkExportHygiene],
 	["boundaries", checkBoundaries],
 	["ci-scripts", checkCiScripts],
+	["test-tiers", checkTestTiers],
 	["library-pin", checkLibraryPin],
 	["defaults-yaml", checkDefaultsYaml],
 	["settings-inventory", checkSettingsInventory],

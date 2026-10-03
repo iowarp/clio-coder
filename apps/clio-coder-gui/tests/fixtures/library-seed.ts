@@ -33,8 +33,10 @@ writeFileSync(
 		compatibility: { clio: ">=0.0.0" },
 	}),
 );
-const result = installExtension(source, { cwd, scope: "project" });
+// Project copies stay unloaded until the workspace trusts them, so the loadable fixture is a user copy.
+const result = installExtension(source, { cwd, scope: "user" });
 assert.ok(result.extension, JSON.stringify(result.diagnostics));
+mkdirSync(join(cwd, ".clio-coder"), { recursive: true });
 writeFileSync(
 	join(cwd, "package.json"),
 	JSON.stringify({

@@ -12,6 +12,10 @@ test("evidence REST preserves all 40 artifacts, historical unknown, provenance a
 	const h = await harness();
 	try {
 		await seedEvidence(h.home.path, h.home.env);
+		// The source worker imports the evidence adapter through tsx on its first call, which
+		// under a parallel tier with a cold transform cache outlasts the 10 s read deadline.
+		// Pay that import here on its own budget so every asserted read keeps the shipped deadline.
+		await h.reads.call("evidence.read", { kind: "list", limit: 1 }, { deadlineMs: 60_000 });
 		await writeFile(join(h.home.path, "data/evidence/incomplete-file"), "incomplete artifact");
 		const visited: string[] = [],
 			unknown: string[] = [];

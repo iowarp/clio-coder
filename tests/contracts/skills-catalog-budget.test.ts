@@ -370,8 +370,9 @@ describe("contracts/skills catalog through the context tool", () => {
 	it("keeps text and details on the same page when a ready row and a package row share a name", async () => {
 		// An installed standalone skill produces both rows under one name.
 		// Filtering details by name alone put the package row in `details` on a
-		// page whose text carried only the ready row.
-		installSkillPackage("probe-kit", "A probe skill package.");
+		// page whose text carried only the ready row. The package sits in the
+		// user scope: a project plugin's skill is ready only in a trusted workspace.
+		installUserSkillPackage("probe-kit", "A probe skill package.");
 		const full = await listing();
 		const details = full.details as Record<string, unknown>;
 		const skills = details.skills as Array<{ name: string }>;

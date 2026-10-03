@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { Workspace } from "../contracts/sessions.js";
 import { SettingsControls, SettingWritten } from "../contracts/settings-controls.js";
+import { STRUCTURED_SETTINGS } from "../contracts/structured-settings.js";
 import { harness, json } from "./harness/app.js";
 import { seedSettings } from "./harness/settings-fixture.js";
 
@@ -40,6 +41,12 @@ test("settings controls derive from the engine registry, write only the user lay
 		assert.ok(report.controls.every((control) => control.access === "writable" || control.reason));
 		assert.ok(report.controls.every((control) => report.sections.some((section) => section.id === control.section)));
 		for (const control of report.controls.filter((candidate) => candidate.kind === "json")) {
+			// Only a collection with a guided editor is writable and crosses as content.
+			if (Object.hasOwn(STRUCTURED_SETTINGS, control.path)) {
+				assert.equal(control.access, "writable", control.path);
+				assert.doesNotThrow(() => JSON.parse(control.value), control.path);
+				continue;
+			}
 			assert.equal(control.access, "read-only", control.path);
 			assert.match(control.value, /^\d+ entr(y|ies)$/, "structured content never crosses");
 		}
@@ -67,7 +74,8 @@ test("settings controls derive from the engine registry, write only the user lay
 		const written = await json(await patch({ path: "chat.thinkingLevel", value: "low" }), SettingWritten);
 		assert.deepEqual(written.changed, [{ path: "chat.thinkingLevel", value: "low" }]);
 		assert.equal(written.timing, "nextTurn");
-		assert.match(await readFile(join(h.home.path, "config/settings.yaml"), "utf8"), /thinkingLevel: low/);
+		// The seeded user file is JSON, and the writer keeps the quoting of a key it rewrites in place.
+		assert.match(await readFile(join(h.home.path, "config/settings.yaml"), "utf8"), /"thinkingLevel": "low"/);
 		const reread = await json(await h.request(base), SettingsControls);
 		assert.equal(reread.controls.find((control) => control.path === "chat.thinkingLevel")?.value, "low");
 
@@ -89,7 +97,7 @@ test("settings controls derive from the engine registry, write only the user lay
 
 		assert.equal((await patch({ path: "interface.mode", value: "fullscreen" })).status, 404);
 		assert.equal((await patch({ path: "targets.0.url", value: "http://x" })).status, 422);
-		assert.equal((await patch({ path: "fleet.profiles", value: "{}" })).status, 409);
+		assert.equal((await patch({ path: "integrations.externalAgents.entries", value: "[]" })).status, 409);
 		assert.equal((await patch({ path: "integrations.library.confirmedRemote", value: "x" })).status, 409);
 
 		const unconfirmed = await patch({ path: "fleet.history.maxRuns", value: "10" });

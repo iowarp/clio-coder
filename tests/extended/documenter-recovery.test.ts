@@ -226,11 +226,13 @@ it("preserves explicit Coder and delivers its bounded explanation through the co
 			["coder", "coder"],
 		);
 		const prompt = specs[0]?.systemPrompt ?? "";
-		match(prompt, /Put the requested explanation and source citations in `summary`/u);
-		match(prompt, /summary` allows 16384 UTF-8 bytes by default/u);
-		match(prompt, /applied result contract, also quoted during repair, sets this run's allowance/u);
+		match(prompt, /Put source citations and the requested explanation in `summary`/u);
+		match(
+			prompt,
+			/summary` allows 16384 UTF-8 bytes unless the applied result contract \(quoted again during repair\) says otherwise/u,
+		);
 		match(prompt, /without claiming delivery/u);
-		match(prompt, /commitMessage.*within 1000 bytes/u);
+		match(prompt, /`commitMessage` 1000/u);
 		for (const run of bundle.contract.listRuns()) {
 			ok(run.receiptPath);
 			const receipt = JSON.parse(readFileSync(run.receiptPath, "utf8")) as RunReceipt;

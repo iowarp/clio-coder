@@ -31,6 +31,7 @@ const report = JSON.parse(
 	// every run; errors still reach the terminal.
 	execFileSync("npm", ["pack", "--dry-run", "--json", "--ignore-scripts", "--loglevel=error"], {
 		cwd: root,
+		shell: process.platform === "win32",
 		encoding: "utf8",
 		maxBuffer: 64 * 1024 * 1024,
 		stdio: ["ignore", "pipe", "inherit"],

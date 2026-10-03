@@ -206,7 +206,11 @@ export default function Wizard({
 		if (status === "saved") {
 			if (needsWorkspace === null) return;
 			setIntro("done");
-			notify({ tone: "info", title: "Chat is ready", detail: `${read.chat ?? "Using your saved setup."} Change it in Settings.` });
+			notify({
+				tone: "info",
+				title: "Chat is ready",
+				detail: `${read.chat ?? "Using your saved setup."} Change it in Settings.`,
+			});
 			finish();
 		} else if ((status !== null && status !== "working") || session.error !== null) setIntro("welcome");
 	}, [intro, status, session.error, needsWorkspace, read.chat, finish]);

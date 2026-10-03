@@ -47,9 +47,14 @@ try {
 		// leave an earlier success available for publication.
 		rmSync(receiptPath, { force: true });
 		const commit = source();
-		// The tag workflow has already run the reusable CI workflow against this
-		// commit. It only needs a fresh build for the exact package audit.
-		run("pnpm", ["run", mode === "qualify" ? "ci" : "build"]);
+		// The release workflow has already run the reusable CI workflow against
+		// this commit, so it starts from a fresh build. A local qualification runs
+		// the static gates itself.
+		const steps = mode === "qualify" ? ["typecheck", "lint", "build", "check:gui"] : ["build"];
+		// The full tiers gate a release and nothing else: per-push CI runs the
+		// contract tier, and the extended tiers rotted unseen while no gate ran them.
+		// test:full is a superset of test and test:maintenance.
+		for (const step of [...steps, "test:full", "test:gui:full"]) run("pnpm", ["run", step]);
 		run(process.execPath, ["scripts/check-release.mjs"]);
 		const packed = pack(scratch);
 		run("pnpm", ["run", "test:package"], { env: { ...process.env, CLIO_CODER_RELEASE_TARBALL: packed } });

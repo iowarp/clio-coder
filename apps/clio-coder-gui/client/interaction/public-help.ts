@@ -1,11 +1,13 @@
 /** Intentional projection of site/public-docs.json. Never turn an arbitrary local path into a public URL. */
 export const PUBLIC_HELP = "https://coder.iowarp.ai/docs.html";
 export const PUBLIC_GUIDES = [
+	"hpc-clusters",
 	"configuration-and-targets",
 	"commands-and-modes",
 	"tool-usage",
 	"context-continuity",
 	"panes-and-files",
+	"gui",
 	"fleet-dispatch",
 	"resource-library",
 	"plugins",

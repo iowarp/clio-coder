@@ -79,6 +79,10 @@ test("evidence detail admits only what the listing showed, and a refusal is not 
 	const h = await harness();
 	t.after(h.close);
 	await seedEvidence(h.home.path, h.home.env);
+	// The source worker imports the evidence adapter through tsx on its first call, which
+	// under a parallel tier with a cold transform cache outlasts the 10 s read deadline.
+	// Pay that import here on its own budget so every asserted read keeps the shipped deadline.
+	await h.reads.call("evidence.read", { kind: "list", limit: 1 }, { deadlineMs: 60_000 });
 	const cold = await h.request("/api/evidence/evidence-039");
 	assert.equal(cold.status, 403, "A bookmarked detail opened cold names an id this host never served");
 	assert.equal((await json(cold, Problem)).code, "unauthorized");

@@ -2,6 +2,7 @@ import { execFileSync } from "node:child_process";
 import { cpSync, existsSync, mkdirSync, rmSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { defineConfig } from "tsup";
 import { artifactBytes, buildVerbose, reportBuildStage } from "./scripts/build-output.js";
 import { GRAMMAR_ASSETS, type GrammarAssetSource } from "./src/domains/context/codewiki/grammar-assets.js";
@@ -140,7 +141,7 @@ export default defineConfig({
 			artifactBytes("dist", (file) => file.endsWith(".js")),
 		);
 		const appRequire = createRequire(join(process.cwd(), "apps/clio-coder-gui/package.json"));
-		const { build: buildClient } = await import(appRequire.resolve("vite"));
+		const { build: buildClient } = await import(pathToFileURL(appRequire.resolve("vite")).href);
 		const clientStartedAt = performance.now();
 		await buildClient({
 			configFile: "apps/clio-coder-gui/vite.config.ts",

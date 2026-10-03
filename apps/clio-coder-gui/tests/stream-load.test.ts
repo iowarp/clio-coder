@@ -89,7 +89,8 @@ test("E2/E4: 1400-event turn reconnects over HTTP without lost/reordered text an
 	);
 	assert.deepEqual(buffer.value, h.supervisor.get(session.id));
 	assert.equal(buffer.hasGap, false);
-	assert.equal(h.hub.size, 1403);
+	// Nothing was evicted: the ring still holds what opening the session published and every turn event.
+	assert.equal(h.hub.size, session.revision + 1402);
 	assert.ok(h.hub.byteSize < 8 * 1024 * 1024);
 	// Server and client projections both run in this process. Recompute-from-scratch accounting encoded the whole
 	// timeline on each of the 1,400 deltas on both sides, which is tens of megabytes; incremental accounting is linear.

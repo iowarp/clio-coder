@@ -45,6 +45,8 @@ test("interop lists all registered kinds, runs nothing until asked and then prob
 		'#!/bin/sh\nif [ "$1" = "--version" ]; then echo "codex 1.2.3 private-probe-prose"; else exit 9; fi\n',
 	);
 	await chmod(executable, 0o700);
+	// The Codex ACP recipe launches through npx, and an agent whose launcher is not on PATH is not offered.
+	await writeFile(join(bin, "npx"), "#!/bin/sh\nexit 9\n", { mode: 0o700 });
 	const h = await harness({}, { env: { PATH: bin } });
 	try {
 		const dir = join(h.home.path, ".codex");
@@ -103,6 +105,7 @@ test("a proposed agent is accepted or declined through the terminal review's own
 		const executable = join(bin, "codex");
 		await writeFile(executable, '#!/bin/sh\nif [ "$1" = "--version" ]; then echo "codex 1.2.3"; else exit 9; fi\n');
 		await chmod(executable, 0o700);
+		await writeFile(join(bin, "npx"), "#!/bin/sh\nexit 9\n", { mode: 0o700 });
 		const h = await harness({}, { env: { PATH: bin } });
 		try {
 			const workspace = await h.workspaces.open(h.home.path);

@@ -55,7 +55,7 @@ test("recovery upgrade replaces only owned caches and never caches API or extern
 	assert.equal(stores.has("clio-coder-recovery-v2"), false);
 	assert.equal(stores.has("another-app"), true);
 	assert.deepEqual(
-		[...(stores.get("clio-coder-recovery-v3") ?? [])],
+		[...(stores.get("clio-coder-recovery-v4") ?? [])],
 		["/offline.html", "/offline.css", "/offline.js", "/icon-192.png"],
 	);
 	for (const [url, method] of [

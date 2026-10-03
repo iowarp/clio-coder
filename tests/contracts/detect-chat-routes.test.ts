@@ -32,16 +32,14 @@ test("discovery orders settings, descriptor env keys, Clio logins, then bounded 
 		settings.targets = [{ id: "mine", runtime: "openai", defaultModel: "gpt-6-luna" }];
 	});
 	const signals: AbortSignal[] = [];
-	t.mock.method(globalThis, "fetch", async (input: string | URL | Request, init?: RequestInit) => {
-		const url = new URL(String(input));
+	const routes = await detectChatRoutes(readSettings(), async (input, signal) => {
+		const url = new URL(input);
 		assert.equal(url.hostname, "127.0.0.1");
 		assert.ok(Object.values(DEFAULT_PORTS).includes(Number(url.port)));
-		assert.equal(init?.redirect, "error");
-		if (init?.signal) signals.push(init.signal);
-		if (url.port === "1234") return Response.json({ data: [{ id: "first-served" }, { id: "second-served" }] });
-		return new Promise<Response>(() => {});
+		signals.push(signal);
+		if (url.port === "1234") return { data: [{ id: "first-served" }, { id: "second-served" }] };
+		return new Promise<unknown>(() => {});
 	});
-	const routes = await detectChatRoutes(readSettings());
 	assert.deepEqual(
 		routes.map((route) => route.source),
 		[

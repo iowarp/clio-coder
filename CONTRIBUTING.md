@@ -33,7 +33,7 @@ pnpm run ci
 | `pnpm run test` | Standard test suite (contracts + fast smoke tests). |
 | `pnpm run ci` | Routine gate: types, lint, build, test, maintenance, and GUI checks. |
 | `pnpm run test:full` | Full root test investigation, including extended regressions. |
-| `pnpm run ci:release` | Qualify a candidate and its exact installed tarball. |
+| `pnpm run ci:release` | Qualify a candidate: static gates, the full root and GUI test tiers, the package audit, and its exact installed tarball. |
 | `pnpm run release:readiness` | Read-only package, website/docs provenance, and media readiness check; use `-- --release` only for an immutable candidate. |
 
 Use `pnpm test:file` (which preloads `tests/harness/tmp-root.ts`) and `tests/harness/scratch-env.ts` for state isolation. Never mutate `process.stdout.write` across async test boundaries.
@@ -87,8 +87,19 @@ See [architecture invariants](docs/architecture/architecture.md#boundary-invaria
 - `main` is always the latest stable release and moves only by fast-forward.
 - Development happens on the version branch, currently `v060`. The next patch line follows the same naming (`v061` for 0.6.1). Pull requests target that branch.
 - Tags are immutable. A published tag is never moved or recreated.
-- Release candidates are tagged `vX.Y.Z-rc.N` and published with `npm publish --tag beta`; the publish preflight refuses a pre-release under any other dist-tag. Users opt in with `clio-coder upgrade --channel=beta`.
+- Release candidates are versioned `X.Y.Z-rc.N` and ship under the npm `beta` dist-tag. Users opt in with `clio-coder upgrade --channel=beta`.
 - Patch releases (`0.6.1`, `0.6.2`) ship fixes after `0.6.0`.
+
+A release is one dispatched run of `.github/workflows/release.yml`, and nobody pushes a tag by hand:
+
+1. Commit the release version in `package.json` and `assets/acp-registry/agent.json`, and title the top `CHANGELOG.md` section `## X.Y.Z - YYYY-MM-DD`. Push the version branch.
+2. Optionally rehearse: `pnpm run ci:release` qualifies the commit locally, and a push to a `ci-scratch-*` branch runs the same gates hosted.
+3. Dispatch the workflow on the branch whose head is the release commit: `gh workflow run release.yml --ref v060 -f sha=<full sha>`. The run refuses a sha that is not that head and a version whose tag already exists.
+4. The run executes every CI gate, then qualifies the exact package: the full root and GUI test tiers (`test:full`, `test:gui:full`), the package audit, and the installed-tarball suite.
+5. Only then does the `release` job publish that qualified `candidate.tgz` to npm through trusted publishing with provenance, and create the `vX.Y.Z` tag and the GitHub release from the same file. Its sha256 is printed in the run summary, so the npm tarball and the release asset are the same bytes.
+6. Fast-forward `main` to the released commit.
+
+A failed gate leaves no tag and no published package; fix the branch and dispatch again. `npm publish` from a workstation stays guarded by the `prepublishOnly` preflight, which accepts only a commit that `pnpm run ci:release` qualified within the last 24 hours, and is a fallback, not the release path.
 
 ## README contract
 

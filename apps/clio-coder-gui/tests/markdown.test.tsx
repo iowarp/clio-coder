@@ -179,7 +179,11 @@ test("hostile Markdown never becomes markup, a live unsafe link, or a fetched im
 		html,
 		/<a class="md-link" href="https:\/\/example\.org\/ok" target="_blank" rel="noopener noreferrer" title="Title">ok<\/a>/u,
 	);
-	match(html, /<span class="md-image"[^>]*>\[image: tracker\]<\/span>/u);
+	// A remote image is offered as a link the operator may follow; the page itself never loads it.
+	match(
+		html,
+		/<a class="md-image md-link" href="https:\/\/evil\.example\/x\.png" target="_blank" rel="noopener noreferrer"[^>]*>\[image: tracker\]<\/a>/u,
+	);
 	match(html, /href="https:\/\/example\.org\/auto"/u);
 	match(html, /href="https:\/\/example\.org\/bare"/u);
 });

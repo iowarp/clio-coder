@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import { get } from "node:http";
 import { parse as parseYaml } from "yaml";
 import type { ClioSettings } from "../core/config.js";
 import { settingsPath, updateSettings } from "../core/config.js";
@@ -26,8 +27,38 @@ export interface DetectedChatRoute {
 	model?: string;
 }
 
+/**
+ * One loopback GET, parsed as JSON; a redirect or any other non-2xx reply rejects.
+ * node:http destroys a socket that is still connecting when the signal aborts.
+ * fetch keeps it until undici's 10 s connect timeout, so on a host where a
+ * closed loopback port never answers (WSL2) a cancelled configure sat for
+ * 10 s after its last line before the process could exit.
+ */
+function readLoopbackJson(url: string, signal: AbortSignal): Promise<unknown> {
+	return new Promise((resolve, reject) => {
+		get(url, { signal }, (response) => {
+			const status = response.statusCode ?? 0;
+			if (status < 200 || status > 299) {
+				response.resume();
+				reject(new Error(`status ${status}`));
+				return;
+			}
+			const chunks: Buffer[] = [];
+			response.on("data", (chunk: Buffer) => chunks.push(chunk));
+			response.on("error", reject);
+			response.on("end", () => {
+				try {
+					resolve(JSON.parse(Buffer.concat(chunks).toString("utf8")));
+				} catch (err) {
+					reject(err);
+				}
+			});
+		}).on("error", reject);
+	});
+}
+
 /** Passive discovery only: one deadline, fixed loopback addresses, no redirects or credentials. */
-async function localModels(): Promise<Map<string, string>> {
+async function localModels(readJson: typeof readLoopbackJson): Promise<Map<string, string>> {
 	const models = new Map<string, string>();
 	const controller = new AbortController();
 	let timer: ReturnType<typeof setTimeout> | undefined;
@@ -46,9 +77,10 @@ async function localModels(): Promise<Map<string, string>> {
 			Promise.all(
 				[...urls].map(async (url) => {
 					try {
-						const response = await fetch(url, { signal: controller.signal, redirect: "error" });
-						if (!response.ok) return;
-						const body = (await response.json()) as { data?: { id?: string }[]; models?: { name?: string }[] };
+						const body = (await readJson(url, controller.signal)) as {
+							data?: { id?: string }[];
+							models?: { name?: string }[];
+						};
 						const model = url.endsWith("/api/tags") ? body.models?.[0]?.name : body.data?.[0]?.id;
 						if (!controller.signal.aborted && typeof model === "string" && model.trim()) {
 							models.set(new URL(url).origin, model);
@@ -66,7 +98,10 @@ async function localModels(): Promise<Map<string, string>> {
 	return models;
 }
 
-export async function detectChatRoutes(settings: Readonly<ClioSettings>): Promise<DetectedChatRoute[]> {
+export async function detectChatRoutes(
+	settings: Readonly<ClioSettings>,
+	readJson: typeof readLoopbackJson = readLoopbackJson,
+): Promise<DetectedChatRoute[]> {
 	const registry = getRuntimeRegistry();
 	registerBuiltinRuntimes(registry);
 	const auth = openAuthStorage();
@@ -116,7 +151,7 @@ export async function detectChatRoutes(settings: Readonly<ClioSettings>): Promis
 			...(model ? { model } : {}),
 		});
 	}
-	const served = await localModels();
+	const served = await localModels(readJson);
 	for (const [id] of Object.entries(DEFAULT_PORTS)) {
 		const runtime = runtimes.find((entry) => entry.id === id);
 		const url = defaultUrlFor(id);

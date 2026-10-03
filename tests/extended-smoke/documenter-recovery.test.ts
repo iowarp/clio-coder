@@ -104,10 +104,16 @@ for (const scenario of ["dependent-repair", "exhausted"] as const) {
 								},
 							};
 						} else {
-							match(history, /terminal Documenter result/u);
-							match(history, /do not repeatedly read/u);
-							if (scenario !== "exhausted") match(history, /three explicit coordinates/u);
-							else match(history, /outcome=failed/u);
+							// A conforming result arrives inline in the compact line; the
+							// delivery guidance rides only on the full labels of a run that failed.
+							if (scenario !== "exhausted") {
+								match(history, /documenter · run [a-z0-9]+ · mutation-report/u);
+								match(history, /three explicit coordinates/u);
+							} else {
+								match(history, /terminal Documenter result/u);
+								match(history, /do not repeatedly read/u);
+								match(history, /outcome=failed/u);
+							}
 							const ids = [
 								...new Set([...history.matchAll(/runs=([a-z0-9, ]+)/gu)].flatMap((m) => m[1]?.split(/, */u) ?? [])),
 							];

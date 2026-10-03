@@ -49,7 +49,10 @@ export function libraryLifecycleAdapter(ttlMs = TTL_MS) {
 				plan = planLibraryLifecycle({ ...request, cwd });
 			} catch (error) {
 				const detail = message(error);
-				throw new AppProblem(/not installed|neither an existing/i.test(detail) ? "not_found" : "operation_failed", detail);
+				throw new AppProblem(
+					/not installed|is not a library package/i.test(detail) ? "not_found" : "operation_failed",
+					detail,
+				);
 			}
 			while (held.size >= MAX_PLANS) drop(held.keys().next().value as string);
 			const timer = setTimeout(() => drop(plan.id), ttlMs);

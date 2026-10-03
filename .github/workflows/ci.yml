@@ -12,20 +12,22 @@ permissions:
   contents: read
 
 concurrency:
-  group: ci-${{ github.event.pull_request.number || github.ref }}
+  # github.workflow is the caller's name under workflow_call, so a release run
+  # on the version branch never shares a group with that branch's push run.
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
   checks:
     name: checks (22)
     runs-on: ubuntu-latest
-    timeout-minutes: 4
+    timeout-minutes: 8
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
           persist-credentials: false
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v6
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
         with:
           node-version: 22
           cache: pnpm
@@ -34,6 +36,7 @@ jobs:
       - run: pnpm run lint
       - run: pnpm run check:gui
       - run: pnpm --filter @iowarp/clio-coder-gui build
+      - run: pnpm run build
       - run: pnpm run test:gui
       - run: pnpm run test:maintenance
 
@@ -46,11 +49,11 @@ jobs:
       matrix:
         shard: [1, 2, 3]
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
           persist-credentials: false
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v6
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
         with:
           node-version: 22
           cache: pnpm
@@ -75,11 +78,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 6
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
           persist-credentials: false
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v6
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
         with:
           node-version: 22
           cache: pnpm
@@ -98,11 +101,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 4
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
           persist-credentials: false
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v6
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
         with:
           node-version: 24
           cache: pnpm
@@ -114,20 +117,62 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 4
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
           persist-credentials: false
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v6
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
         with:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm run test:file tests/contracts/antigravity-subprocess.test.ts tests/contracts/bash-exec-settlement.test.ts tests/contracts/windows-process-tree.test.ts
 
+  # Linux on the current Node 22 proves nothing about the other hosts the
+  # installers target, the engines floor, or Node 24. Each leg builds, boots
+  # the built binary and installs the packed tarball.
+  platform:
+    name: platform (${{ matrix.os }}, ${{ matrix.node }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: macos-latest, node: 22 }
+          - { os: windows-latest, node: 22 }
+          - { os: ubuntu-latest, node: 24 }
+          - { os: ubuntu-latest, node: 22.19.0 }
+    defaults:
+      run:
+        shell: bash
+    steps:
+      # Library integrity pins bind the committed bytes, including line endings.
+      - name: Preserve committed resource bytes
+        if: ${{ runner.os == 'Windows' }}
+        run: git config --global core.autocrlf false
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version: ${{ matrix.node }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run build
+      - name: Boot the built binary
+        run: pnpm run test:file tests/smoke/real-binary-boot.test.ts
+      - name: Pack and test the installed package
+        # Known Windows gap: 'loads bundled library packages, agent recipes, and lazy codewiki from an installed package'.
+        if: ${{ runner.os != 'Windows' }}
+        run: |
+          tarball="$(npm pack --pack-destination "$RUNNER_TEMP" --silent)"
+          CLIO_CODER_RELEASE_TARBALL="$RUNNER_TEMP/$tarball" pnpm run test:file tests/smoke/installed-package.test.ts
+
   ci:
     name: ci (22)
-    needs: [checks, core-tests, windows-subprocess, installed-package]
+    needs: [checks, core-tests, windows-subprocess, installed-package, platform]
     if: ${{ always() }}
     runs-on: ubuntu-latest
     timeout-minutes: 1
@@ -138,20 +183,26 @@ jobs:
           test '${{ needs.core-tests.result }}' = success
           test '${{ needs.windows-subprocess.result }}' = success
           test '${{ needs.installed-package.result }}' = success
+          test '${{ needs.platform.result }}' = success
 
   candidate-qualification:
     if: ${{ startsWith(github.ref, 'refs/heads/ci-scratch-') }}
     needs: [ci, runtime-compatibility]
     runs-on: ubuntu-latest
-    timeout-minutes: 4
+    # Qualification runs the full root and GUI test tiers.
+    timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
           persist-credentials: false
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v6
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
         with:
           node-version: 22
           cache: pnpm
+      - name: Install native search tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends ripgrep fd-find
       - run: pnpm install --frozen-lockfile
       - run: node scripts/release-candidate.mjs qualify-after-ci

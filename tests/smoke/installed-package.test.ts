@@ -15,7 +15,7 @@ import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { createServer as createTcpServer } from "node:net";
 import { tmpdir } from "node:os";
-import { join, relative, resolve, sep } from "node:path";
+import { dirname, join, relative, resolve, sep } from "node:path";
 import { describe, it } from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -29,6 +29,7 @@ import { pluginContentDigest } from "../../src/domains/plugins/index.js";
 import { clearPluginSnapshots } from "../../src/domains/plugins/resources.js";
 import { loadPromptTemplates } from "../../src/domains/resources/prompts/loader.js";
 import { loadSkills } from "../../src/domains/resources/skills/loader.js";
+import { PINNED_TOOLS } from "../../src/domains/toolchain/registry.js";
 import { closeServer, readRequestBody } from "../harness/openai-compat-fixture.js";
 
 const ROOT = fileURLToPath(new URL("../..", import.meta.url));
@@ -438,7 +439,11 @@ async function assertInstalledWebApp(packageRoot: string, bin: string, prefix: s
 
 		const tools = await request("/api/toolchain/tools");
 		strictEqual(tools.status, 200);
-		strictEqual(((await tools.json()) as unknown[]).length, 3, "the reads worker lists the three pinned tools");
+		strictEqual(
+			((await tools.json()) as unknown[]).length,
+			PINNED_TOOLS.length,
+			"the reads worker lists every pinned tool",
+		);
 
 		const removal = await request("/api/toolchain/tools/herdr/remove", {});
 		strictEqual(removal.status, 202);
@@ -485,7 +490,12 @@ async function assertInstalledWebApp(packageRoot: string, bin: string, prefix: s
 		strictEqual((await request("/manifest.webmanifest")).status, 404, "installable assets require background mode");
 	} finally {
 		const exit = await server.close();
-		deepStrictEqual(exit, { code: 0, signal: null }, `foreground server stops cleanly on SIGTERM:\n${server.stderr()}`);
+		// Windows terminates the child directly instead of delivering SIGTERM.
+		deepStrictEqual(
+			exit,
+			process.platform === "win32" ? { code: null, signal: "SIGTERM" } : { code: 0, signal: null },
+			`foreground server stops on SIGTERM:\n${server.stderr()}`,
+		);
 	}
 
 	// Removed command stays absent in the installed entry point; bundled reference survives.
@@ -564,12 +574,17 @@ async function assertInstalledWebApp(packageRoot: string, bin: string, prefix: s
 		};
 		strictEqual(manifest.start_url, "/");
 		deepStrictEqual(
-			manifest.icons.map((icon) => icon.src),
+			// Each icon carries a content-hash query so an updated icon replaces the cached one.
+			manifest.icons.map((icon) => icon.src.replace(/\?v=[0-9a-f]+$/u, "")),
 			["/icon-192.png", "/icon-512.png"],
 		);
 	} finally {
 		const exit = await service.close();
-		deepStrictEqual(exit, { code: 0, signal: null }, `service server stops cleanly on SIGTERM:\n${service.stderr()}`);
+		deepStrictEqual(
+			exit,
+			process.platform === "win32" ? { code: null, signal: "SIGTERM" } : { code: 0, signal: null },
+			`service server stops on SIGTERM:\n${service.stderr()}`,
+		);
 	}
 
 	// Ordinary CLI invocations never evaluate the graphical server or its bundled Hono.
@@ -608,8 +623,9 @@ describe("smoke/installed package", { concurrency: false }, () => {
 	// the CLI subprocesses below retain their separate 20-second timeout.
 	// The graphical checks below start two installed servers and run four
 	// coverage-traced CLI invocations, which is why the budget grew from 120s.
+	// Cold Windows installs need more time to extract the package and dependencies.
 	it("loads bundled library packages, agent recipes, and lazy codewiki from an installed package", {
-		timeout: 180_000,
+		timeout: process.platform === "win32" ? 480_000 : 180_000,
 	}, async () => {
 		const work = mkdtempSync(join(tmpdir(), "clio-coder-installed-package-"));
 		const prefix = join(work, "prefix");
@@ -625,6 +641,7 @@ describe("smoke/installed package", { concurrency: false }, () => {
 				: (JSON.parse(
 						execFileSync("npm", ["pack", "--json", "--silent", "--pack-destination", work], {
 							cwd: ROOT,
+							shell: process.platform === "win32",
 							encoding: "utf8",
 							stdio: ["ignore", "pipe", "ignore"],
 						}),
@@ -633,8 +650,10 @@ describe("smoke/installed package", { concurrency: false }, () => {
 			const filename = packed[0]?.filename;
 			ok(filename);
 			execFileSync(
-				"npm",
+				process.platform === "win32" ? process.execPath : "npm",
 				[
+					// A direct npm process releases its handles when the timeout kills it.
+					...(process.platform === "win32" ? [join(dirname(process.execPath), "node_modules/npm/bin/npm-cli.js")] : []),
 					"install",
 					"--prefix",
 					prefix,
@@ -645,7 +664,11 @@ describe("smoke/installed package", { concurrency: false }, () => {
 					"--loglevel=error",
 					process.env.CLIO_CODER_RELEASE_TARBALL ?? join(work, filename),
 				],
-				{ cwd: prefix, stdio: "pipe", timeout: 90_000 },
+				{
+					cwd: prefix,
+					stdio: "pipe",
+					timeout: process.platform === "win32" ? 300_000 : 90_000,
+				},
 			);
 
 			const packageRoot = join(prefix, "node_modules", "@iowarp", "clio-coder");
@@ -653,7 +676,8 @@ describe("smoke/installed package", { concurrency: false }, () => {
 			ok(existsSync(join(prefix, "node_modules", ".bin", "clio-coder")), "npm must link the package bin");
 			const version = await run(bin, ["--version"], foreign, isolatedEnv(home));
 			strictEqual(version.code, 0, version.stderr);
-			match(version.stdout, /^Clio Coder \d+\.\d+\.\d+$/mu);
+			// A development tree packs as `0.6.0-dev (unreleased · <commit>)`; a release packs as the bare version.
+			match(version.stdout, /^Clio Coder \d+\.\d+\.\d+(?:-[\w.]+)?(?: \(unreleased · [0-9a-f]+(?:-dirty)?\))?$/mu);
 
 			// Ordinary npm consumers receive a pi-tui that lacks the editor and search
 			// seams. The built application must carry that implementation itself, and
@@ -729,10 +753,11 @@ describe("smoke/installed package", { concurrency: false }, () => {
 			const codeNavChunk = [...codeNavChunks][0];
 			ok(codeNavChunk);
 			const codeNavChild = `
+				import { sep } from "node:path";
 				import { pathToFileURL } from "node:url";
 				const loaded = await import(pathToFileURL(process.argv[1]).href);
 				const symbol = await loaded.codeNavTool.run({ source: "clio", mode: "symbol", query: "codeNavTool" });
-				const continuation = await loaded.codeNavTool.run({ source: "clio", mode: "path", query: "src/", limit: 1 });
+				const continuation = await loaded.codeNavTool.run({ source: "clio", mode: "path", query: "src" + sep, limit: 1 });
 				process.stdout.write(JSON.stringify({ symbol, continuation }));
 			`;
 			const rawCodeNavResult = execFileSync(
@@ -911,6 +936,17 @@ describe("smoke/installed package", { concurrency: false }, () => {
 				strictEqual(installed.sha256, entry.sha256, `packed bytes must match the full-tree pin for ${entry.name}`);
 			}
 
+			// The second project install changed the plugin state the first one
+			// approved, so the operator reviews and approves it before the bundle loads.
+			const review = (await libraryJson(["config", "trust", "plugins"])) as { contentHash: string };
+			const approved = await run(
+				bin,
+				["config", "trust", "plugins", "--hash", review.contentHash],
+				libraryProject,
+				libraryEnv,
+			);
+			strictEqual(approved.code, 0, approved.stderr);
+
 			// 3. Load the installed skill and bundle alongside built-in recipes.
 			const allAgents = (await libraryJson(["agents", "--all"])) as Array<{ id: string; skills: string[] }>;
 			strictEqual(allAgents.length, 20, "must expose exactly 20 agent recipes total");
@@ -1008,6 +1044,16 @@ describe("smoke/installed package", { concurrency: false }, () => {
 				libraryEnv,
 			);
 			strictEqual(measurementsInstall.code, 0, measurementsInstall.stderr);
+			// Disabling lab-status and installing a second extension changed the
+			// state the first install approved; the operator approves the new one.
+			const extensionReview = (await libraryJson(["config", "trust", "extensions"])) as { contentHash: string };
+			const extensionApproved = await run(
+				bin,
+				["config", "trust", "extensions", "--hash", extensionReview.contentHash],
+				libraryProject,
+				libraryEnv,
+			);
+			strictEqual(extensionApproved.code, 0, extensionApproved.stderr);
 			const workerChunks = emittedFilesContaining(packageRoot, "function createWorkerToolRegistry(");
 			strictEqual(workerChunks.size, 1);
 			const workerChunk = [...workerChunks][0];
@@ -1062,7 +1108,7 @@ describe("smoke/installed package", { concurrency: false }, () => {
 			await assertInstalledReasoningReplay(bin, libraryProject, join(work, "replay-home"));
 			await assertInstalledWebApp(packageRoot, bin, prefix, work);
 		} finally {
-			rmSync(work, { recursive: true, force: true });
+			rmSync(work, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
 		}
 	});
 });

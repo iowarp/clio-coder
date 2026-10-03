@@ -68,7 +68,8 @@ export function fsyncDirectory(dir: string): void {
 }
 
 function fsyncFile(filePath: string): void {
-	const fd = openSync(filePath, "r");
+	// Windows FlushFileBuffers requires a handle opened with write access.
+	const fd = openSync(filePath, process.platform === "win32" ? "r+" : "r");
 	try {
 		fsyncSync(fd);
 	} finally {

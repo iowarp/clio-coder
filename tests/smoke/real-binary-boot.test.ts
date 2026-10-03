@@ -6,8 +6,9 @@ import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
+import { fileURLToPath } from "node:url";
 
-const ROOT = new URL("../..", import.meta.url).pathname;
+const ROOT = fileURLToPath(new URL("../..", import.meta.url));
 const CLI = join(ROOT, "dist", "cli", "index.js");
 const V1_SETTINGS = `version: 1
 autonomy: suggest

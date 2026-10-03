@@ -1,42 +1,78 @@
 name: release
 
+# Dispatched on the branch whose head is the release commit:
+#   gh workflow run release.yml --ref v060 -f sha=<full sha>
+# Nothing public exists until every gate has passed: the tag is created by the
+# last step, so a failed qualification never burns an immutable tag.
 on:
-  push:
-    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: Full commit sha to release; must be the head of the dispatched ref
+        required: true
+        type: string
 
 permissions:
   contents: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  group: release
+  cancel-in-progress: false
 
 jobs:
+  candidate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - name: Require the dispatched head
+        # Every later job checks out github.sha, so the named commit has to be it.
+        env:
+          REQUESTED: ${{ inputs.sha }}
+        run: test "$REQUESTED" = "$GITHUB_SHA"
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+      - name: Require an unused release tag
+        id: version
+        run: |
+          version="$(node -p "require('./package.json').version")"
+          if git ls-remote --exit-code --tags origin "refs/tags/v$version"; then
+            echo "tag v$version already exists; published tags are immutable" >&2
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
   ci:
+    needs: candidate
     uses: ./.github/workflows/ci.yml
 
   qualify:
-    needs: ci
+    needs: [candidate, ci]
     runs-on: ubuntu-latest
-    timeout-minutes: 4
+    timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
           persist-credentials: false
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v6
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
         with:
           node-version: 22
           cache: pnpm
-      - run: pnpm install --frozen-lockfile
-      - name: Verify release version
+      - name: Install native search tools
         run: |
-          pkg="$(node -p "require('./package.json').version")"
-          test "${GITHUB_REF_NAME#v}" = "$pkg"
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends ripgrep fd-find
+      - run: pnpm install --frozen-lockfile
       - name: Qualify exact package
         id: candidate
+        env:
+          # No tag exists yet, so the release-version rules are asked for by name.
+          CLIO_CODER_RELEASE_CONTEXT: publish
         run: node scripts/release-candidate.mjs qualify-after-ci
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: qualified-package
           path: ${{ steps.candidate.outputs.artifact }}*
@@ -44,35 +80,71 @@ jobs:
           retention-days: 1
 
   release:
-    needs: qualify
+    needs: [candidate, qualify]
     runs-on: ubuntu-latest
-    timeout-minutes: 3
+    timeout-minutes: 5
     permissions:
       contents: write
+      # npm trusted publishing exchanges this job's OIDC token for a publish grant.
+      id-token: write
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
           persist-credentials: false
-      - uses: actions/download-artifact@v4
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          # Trusted publishing needs npm 11.5.1 or newer, which Node 24 bundles.
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: qualified-package
           path: ${{ runner.temp }}/qualified-package
-      - name: Create GitHub release from qualified package
+      - name: Verify the qualified package
         env:
-          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.candidate.outputs.version }}
         run: |
-          (cd "$RUNNER_TEMP/qualified-package" && sha256sum --check candidate.tgz.sha256)
-          version="${GITHUB_REF_NAME#v}"
-          awk -v version="$version" '
+          cd "$RUNNER_TEMP/qualified-package"
+          sha256sum --check candidate.tgz.sha256
+          test "$(tar -xzOf candidate.tgz package/package.json | node -p "JSON.parse(require('fs').readFileSync(0, 'utf8')).version")" = "$VERSION"
+          echo "candidate.tgz sha256: $(cut -d' ' -f1 candidate.tgz.sha256)" | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: Release notes
+        env:
+          VERSION: ${{ needs.candidate.outputs.version }}
+        run: |
+          awk -v version="$VERSION" '
             /^## / { if (found) exit; if ($2 == version) { found = 1; next } }
             found { print }
           ' CHANGELOG.md > "$RUNNER_TEMP/release-notes.md"
           test -n "$(tr -d '[:space:]' < "$RUNNER_TEMP/release-notes.md")"
-          # A pre-release tag (vX.Y.Z-rc.N) must not take the Latest badge.
+      - name: Publish the qualified package to npm
+        env:
+          VERSION: ${{ needs.candidate.outputs.version }}
+        run: |
+          node -e 'const [a, b, c] = process.argv[1].split(".").map(Number); if (a < 11 || (a === 11 && (b < 5 || (b === 5 && c < 1)))) { console.error(`npm ${process.argv[1]} cannot use trusted publishing`); process.exit(1); }' "$(npm --version)"
+          cd "$RUNNER_TEMP/qualified-package"
+          name="$(tar -xzOf candidate.tgz package/package.json | node -p "JSON.parse(require('fs').readFileSync(0, 'utf8')).name")"
+          # A rerun after a failed release step finds the same bytes already published and moves on.
+          published="$(npm view "$name@$VERSION" dist.integrity 2>/dev/null || true)"
+          if test -n "$published"; then
+            test "$published" = "sha512-$(openssl dgst -sha512 -binary candidate.tgz | openssl base64 -A)"
+            echo "$name@$VERSION is already published with these bytes"
+            exit 0
+          fi
+          # A pre-release (X.Y.Z-rc.N) ships under beta so it never moves latest.
           channel=()
-          case "$version" in *-*) channel=(--prerelease --latest=false) ;; esac
+          case "$VERSION" in *-*) channel=(--tag beta) ;; esac
+          npm publish candidate.tgz --provenance --access public "${channel[@]}"
+      - name: Create the tag and the GitHub release from the same package
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.candidate.outputs.version }}
+        run: |
+          # A pre-release must not take the Latest badge.
+          channel=()
+          case "$VERSION" in *-*) channel=(--prerelease --latest=false) ;; esac
           # The installers ride along so `releases/latest/download/install.sh` and
           # `install.ps1` are stable URLs until coder.iowarp.ai serves them.
-          gh release create "$GITHUB_REF_NAME" "$RUNNER_TEMP/qualified-package/candidate.tgz" scripts/install.sh scripts/install.ps1 \
-            --title "Clio Coder $version" --notes-file "$RUNNER_TEMP/release-notes.md" --verify-tag \
+          gh release create "v$VERSION" "$RUNNER_TEMP/qualified-package/candidate.tgz" scripts/install.sh scripts/install.ps1 \
+            --target "$GITHUB_SHA" --title "Clio Coder $VERSION" --notes-file "$RUNNER_TEMP/release-notes.md" \
             "${channel[@]}"

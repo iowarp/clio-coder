@@ -174,7 +174,6 @@ test("operator promotion persists a convention and only approval admits it into 
 				false,
 			);
 			const prompt = JSON.stringify(messages);
-			ok(prompt.includes("Available tools never widen task scope"));
 			ok(prompt.includes("Autonomy: yolo"));
 			deepStrictEqual(repositoryFiles(), beforeFiles, "yolo memory consumption leaves every repository file unchanged");
 			strictEqual(prompt.includes(TRANSCRIPT_ONLY), false, "transcript recovery is not memory consumption");

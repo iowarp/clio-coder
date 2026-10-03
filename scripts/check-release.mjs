@@ -54,8 +54,11 @@ const ENTRIES = ["dist/cli/index.js", "dist/worker/entry.js"];
 // read-scope let Clio read her own code, and the grammars stay local for
 // offline and HPC sites. The next lever is redirecting self-reading to the
 // tagged GitHub source so src/** can leave the tarball.
-const MAX_TARBALL_BYTES = 14_000_000;
-const MAX_UNPACKED_BYTES = 60_000_000;
+// Final 0.6.0 qualification raises the ceilings to 16MB packed / 65MB unpacked
+// by operator decision. The current source, client, bundles, code map and
+// grammars measure 14.23MB packed / 61.56MB unpacked with no packaging leaks.
+const MAX_TARBALL_BYTES = 16_000_000;
+const MAX_UNPACKED_BYTES = 65_000_000;
 
 // The installers ship: `clio-coder upgrade` re-runs the installed copy for an
 // install.sh or install.ps1 installation (src/domains/lifecycle/install-method.ts),
