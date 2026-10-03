@@ -438,7 +438,7 @@ export interface SettingControl {
 }
 
 const CHOICES: Record<string, readonly string[]> = {
-	"interface.exitSummary": ["full", "brief", "off"],
+	"interface.exitSummary": ["auto", "brief", "standard", "report", "off"],
 	"safety.autonomy": ["default", "yolo"],
 	"safety.sandbox": ["auto", "required", "off"],
 	"chat.thinkingLevel": THINKING_LEVELS,
@@ -490,7 +490,7 @@ const EXTRA_HELP: Record<string, [string, string]> = {
 	],
 	"interface.exitSummary": [
 		"Session summary on exit",
-		"Full shows this visit's activity and usage; brief shows models, tokens and cost; off shows only how to resume.",
+		"Auto follows output style: compact gives a brief summary, standard gives activity and usage, detailed gives a one-page report. Choose brief, standard or report to override; off shows only how to resume.",
 	],
 	"safety.sandbox": [
 		"Worker command sandbox",

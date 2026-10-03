@@ -29,6 +29,7 @@ import {
 	ACTIVE_ROUTING_ROLES,
 	COUNCIL_MEMBER_LABEL_PATTERN,
 	DEFAULT_SETTINGS,
+	normalizeExitSummaryStyle,
 	normalizeOutputStyle,
 	SETTINGS_FILE_MODE,
 	THEME_NAMED_COLORS,
@@ -2300,8 +2301,12 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 				if (style) settings.interface.outputDetail = style;
 				else issues.add("interface.outputDetail", "expected compact, standard, or detailed");
 			}
+			if ("exitSummary" in ui) {
+				const style = normalizeExitSummaryStyle(ui.exitSummary);
+				if (style) settings.interface.exitSummary = style;
+				else issues.add("interface.exitSummary", "expected auto, brief, standard, report, or off");
+			}
 			for (const [key, allowed] of [
-				["exitSummary", ["full", "brief", "off"]],
 				["smoothStreaming", ["off", "auto", "on"]],
 				["mode", ["regular", "fullscreen"]],
 				["fullscreenScrollbar", ["hidden", "auto", "always"]],

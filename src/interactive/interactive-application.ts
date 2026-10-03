@@ -1599,11 +1599,14 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 		},
 		cancelParkedCalls: (reason) => deps.toolRegistry?.cancelParkedCalls(reason),
 		onCleanExit: () => {
+			const ui = deps.getSettings?.().interface;
 			const lines = renderExitSummary(
 				exitSummary.snapshot(),
-				deps.getSettings?.().interface.exitSummary ?? "full",
+				ui?.exitSummary ?? "auto",
 				process.stdout.columns ?? 80,
 				process.stdout.isTTY === true,
+				ui?.outputDetail ?? "standard",
+				process.stdout.rows ?? 48,
 			);
 			if (lines.length > 0) process.stdout.write(`${lines.join("\n")}\n`);
 		},
