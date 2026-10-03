@@ -78,7 +78,7 @@ export class BoundedListingSelection {
 export const lsTool: ToolSpec = {
 	name: ToolNames.Ls,
 	description:
-		'List directory entries alphabetically, "/" after directories, dotfiles included; symlinks render as name@ -> target.',
+		'List directory entries alphabetically, "/" after directories, dotfiles included; symlinks render as name@ -> target, broken links as name@ (broken), and inaccessible entries are marked and counted.',
 	parameters: Type.Object({
 		path: Type.Optional(Type.String({ description: "Directory to list." })),
 		limit: Type.Optional(Type.Number({ description: `Max entries (default ${DEFAULT_LIMIT}).` })),

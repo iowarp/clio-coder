@@ -277,7 +277,7 @@ function renderFindResult(input: {
 export const findTool: ToolSpec = {
 	name: ToolNames.Find,
 	description:
-		"Find files and directories by glob pattern (*, **, ?, [abc]); returns paths relative to the search directory. Respects .gitignore and skips generated dirs (node_modules, dist, build, ...) unless include_ignored=true. Symlinked directories are never followed. order=mtime returns newest first. A truncated result says how to continue.",
+		"Find files and directories by glob pattern (*, **, ?, [abc]); returns paths relative to the search directory. Respects .gitignore and skips generated dirs (node_modules, dist, build, ...) unless include_ignored=true. Symlinked directories are never followed. Only the fallback counts skipped symlinked directories; native fd leaves that count unmeasured, as indicated by details.symlinkDirectories.counted=false. Without fd the fallback uses GENERATED_DIRS only, with no .gitignore support. order=path (default) returns fd's native order; order=mtime returns newest first from a bounded candidate set. A truncated result says how to continue.",
 	parameters: Type.Object({
 		pattern: Type.String({ description: "Glob, e.g. 'src/**/*.ts'." }),
 		path: Type.Optional(Type.String({ description: "Directory to search." })),

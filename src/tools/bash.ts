@@ -20,8 +20,8 @@ const BASH_DISPLAY_MAX_BYTES = 16 * 1024;
 // What a bounded result leaves in the model's context, which every later
 // request resends. A 16 KB tail kept the least useful end of a search: three
 // rg results held 51 KB of campaign T3's transcript. Head and tail keep the
-// first matches and the closing diagnostics, at the 10 KiB Codex CLI uses.
-const BASH_CONTEXT_MAX_BYTES = 10 * 1024;
+// first matches and the closing diagnostics, at 16 KiB in total.
+const BASH_CONTEXT_MAX_BYTES = 16 * 1024;
 export type BashOutputPolicy = "full" | "bounded" | "summary" | "metadata-only";
 
 const BASH_OUTPUT_POLICIES = new Set<BashOutputPolicy>(["full", "bounded", "summary", "metadata-only"]);
@@ -266,14 +266,14 @@ export const bashTool: ToolSpec = {
 		command: Type.String({ description: "Bash command to execute." }),
 		cwd: Type.Optional(
 			Type.String({
-				description: "Relative subdirectory of the workspace root; omit otherwise.",
+				description: "Relative subdirectory of the workspace root; omit otherwise. Outside the root is blocked.",
 			}),
 		),
 		timeout_ms: Type.Optional(Type.Number({ description: "Timeout in milliseconds." })),
 		output_policy: Type.Optional(
 			Type.Union([Type.Literal("full"), Type.Literal("bounded"), Type.Literal("summary"), Type.Literal("metadata-only")], {
 				description:
-					"What returns to you. Omit for a bounded tail; summary for noisy runs; metadata-only when only the outcome matters; full only for known-small output.",
+					"What returns to you. Omit for a bounded head and tail; summary for noisy runs; metadata-only when only the outcome matters; full only for known-small output.",
 			}),
 		),
 	}),

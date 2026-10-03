@@ -27,6 +27,31 @@ it("preserves pipeline failure in Bash receipts unless the caller explicitly dis
 	}
 });
 
+it("keeps both bash output ends in a 16 KiB model context including multibyte text", async () => {
+	const env = await isolateClioEnv("clio-bash-context-");
+	try {
+		const output = `HEAD matches\n${"€ x ".repeat(6000)}\nTAIL diagnostic`;
+		const result = shapeToolResult(
+			bashTool,
+			{ kind: "ok", output },
+			{ sessionId: "head-tail" },
+			BASH_DEFAULT_RESULT_DISPOSITION,
+		);
+		strictEqual(result.kind, "ok");
+		const context = result.modelContext ?? "";
+		ok(Buffer.byteLength(context) > 10 * 1024, "the old 10 KiB budget must not truncate the retained context");
+		ok(Buffer.byteLength(context) <= 16 * 1024, "the head, tail and metadata share one byte budget");
+		match(context, /HEAD matches/u);
+		match(context, /TAIL diagnostic/u);
+		strictEqual(context.includes("�"), false, "UTF-8 characters remain whole at both cut points");
+		const disposition = result.details?.resultDisposition as { context: { maxBytes: number; excerpt: string } };
+		strictEqual(disposition.context.maxBytes, 16 * 1024);
+		strictEqual(disposition.context.excerpt, "head-tail");
+	} finally {
+		env.restore();
+	}
+});
+
 it("stops a child at the Bash cap and preserves partial output and recovery instructions", async () => {
 	const env = await isolateClioEnv("clio-bash-cap-");
 	try {

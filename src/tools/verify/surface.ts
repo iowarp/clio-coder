@@ -31,7 +31,7 @@ export const verifyToolSurface = {
 				description: `Check id, package script (${VERIFICATION_SCRIPT_FAMILY_HINT}), or "frontend"; omit to list.`,
 			}),
 		),
-		path: Type.Optional(Type.String({ description: "frontend: artifact file." })),
+		path: Type.Optional(Type.String({ description: "frontend: artifact file under the workspace root." })),
 		args: Type.Optional(
 			Type.Array(Type.String(), {
 				description: "Extra arguments: after -- for package scripts, appended for derived runners.",
@@ -39,8 +39,8 @@ export const verifyToolSurface = {
 		),
 		browser: Type.Optional(StringEnum(BROWSER_MODES, { description: "frontend: browser mode." })),
 		cwd: Type.Optional(Type.String({ description: "Package script working directory." })),
-		timeout_ms: Type.Optional(Type.Number()),
-		max_output_bytes: Type.Optional(Type.Number()),
+		timeout_ms: Type.Optional(Type.Number({ description: "Package and frontend checks only: timeout in ms." })),
+		max_output_bytes: Type.Optional(Type.Number({ description: "Output cap in bytes." })),
 	}),
 	baseActionClass: "execute",
 	executionMode: "sequential",
