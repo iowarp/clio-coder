@@ -37,7 +37,7 @@
 .composer__field {
 	width: 100%;
 	resize: none;
-	/* One line at rest. `fitComposerField` grows it with the draft up to the cap below. */
+	/* One line at rest, growing with the draft up to the cap below. */
 	max-height: min(14rem, 28dvh);
 	overflow-y: hidden;
 	border: 0;
@@ -55,6 +55,14 @@
 	.composer__field:focus-visible {
 		outline: none;
 		box-shadow: none;
+	}
+}
+/* Where the browser can size a field to its content, the draft grows the field with no script and no
+   measuring reflow; `fitComposerField` covers browsers that cannot. */
+@supports (field-sizing: content) {
+	.composer__field {
+		field-sizing: content;
+		overflow-y: auto;
 	}
 }
 .composer__field:disabled {
@@ -90,9 +98,13 @@
 	flex: 1;
 	justify-content: flex-end;
 }
+/* `.primary` lays a label and a trailing mark out with space-between and a gap; a round button holding
+   one icon states its own centring, or the arrow sits against the left edge. */
 .composer__submit.primary {
-	display: grid;
-	place-items: center;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	gap: 0;
 	flex: none;
 	width: 34px;
 	min-height: 34px;

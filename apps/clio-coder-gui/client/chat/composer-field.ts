@@ -28,12 +28,35 @@ export function rememberEnterSends(enterSends: boolean): void {
 	}
 }
 
-/** Grow with the draft until CSS applies its cap; after that, keep scrolling inside the field. */
+let nativeSizing: boolean | undefined;
+
+/**
+ * Grow with the draft until CSS applies its cap; after that, keep scrolling inside the field.
+ *
+ * Where the browser sizes a field to its content (`field-sizing`, see composer-box.css) there is
+ * nothing to do. Elsewhere the field has to be measured at its natural height, and a field that
+ * collapses to one line for that instant shrinks the whole dock: the transcript beside it grows,
+ * clamps its scroll offset, and a followed conversation is left a draft's height above its live
+ * edge with following turned off. The box is held at its current height while the field is
+ * measured, so the transcript only ever sees the net change.
+ */
 export function fitComposerField(field: HTMLTextAreaElement | null): void {
 	if (field === null) return;
+	nativeSizing ??= typeof CSS !== "undefined" && CSS.supports("field-sizing", "content");
+	if (nativeSizing) return;
+	const box = field.parentElement;
+	if (box !== null) {
+		box.style.minHeight = `${box.offsetHeight}px`;
+		// Without this the held box would stretch its rows, and the field with them.
+		box.style.alignContent = "start";
+	}
 	field.style.height = "auto";
 	field.style.height = `${field.scrollHeight}px`;
 	field.style.overflowY = field.scrollHeight > field.clientHeight ? "auto" : "hidden";
+	if (box !== null) {
+		box.style.minHeight = "";
+		box.style.alignContent = "";
+	}
 }
 
 export type ComposerKeyAction = "send" | "newline" | "ignore";
