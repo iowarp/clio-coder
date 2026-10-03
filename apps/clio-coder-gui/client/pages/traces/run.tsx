@@ -1,4 +1,4 @@
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router";
 import { routes } from "../../../contracts/routes.js";
@@ -9,9 +9,12 @@ import { PanelEmpty } from "../../design/panel.js";
 import { emptyState } from "../../design/panel-model.js";
 import { StatusMark } from "../../design/status.js";
 import { listDestination } from "../run-inspection-model.js";
+import "./trace-live.css";
 import { CostPanel, EventRow, Facts, Gates, ReceiptPanel, Waterfall } from "./panels.js";
 import "../run-inspection.css";
+import { detailRefetchMs, liveLabel, runIsLive, type TraceLiveState } from "./trace-live-model.js";
 import { histogram, orderedPhases, runTone, runTotals } from "./trace-model.js";
+import { useTraceLive } from "./use-trace-live.js";
 export function TraceRunPage({ client }: { client: Client }) {
 	const { runId = "" } = useParams();
 	return <Run key={runId} client={client} runId={runId} />;
@@ -30,10 +33,9 @@ function Run({ client, runId }: { client: Client; runId: string }) {
 		"source",
 		"status",
 	]);
-	const queries = useQueryClient(),
-		[full, setFull] = useState(false),
-		[live, setLive] = useState("Connecting to trace…"),
-		[now, setNow] = useState(clock.now());
+	const [full, setFull] = useState(false),
+		[now, setNow] = useState(clock.now()),
+		[tail, setTail] = useState<TraceLiveState>("idle");
 	const input = { params: { runId }, query: {}, body: {} };
 	const detail = useQuery({
 		queryKey: ["trace-detail", runId, full],
@@ -47,7 +49,8 @@ function Run({ client, runId }: { client: Client; runId: string }) {
 			]);
 			return { run, phases, gates, processes, receipt };
 		},
-		refetchInterval: (query) => (query.state.data?.run.status === "running" ? 5000 : false),
+		// The live tail carries events; the header and phases only need a slow safety refresh while it holds.
+		refetchInterval: (query) => detailRefetchMs(query.state.data?.run.status, tail),
 	});
 	const events = useQuery({
 		queryKey: ["trace-events", runId],
@@ -63,39 +66,13 @@ function Run({ client, runId }: { client: Client; runId: string }) {
 		},
 		staleTime: Number.POSITIVE_INFINITY,
 	});
-	const ready = !!events.data && !!detail.data;
+	const live = useTraceLive(client, runId, !!events.data && runIsLive(detail.data?.run.status));
+	useEffect(() => setTail(live), [live]);
 	useEffect(() => {
 		if (detail.data?.run.status !== "running") return;
 		const interval = setInterval(() => setNow(clock.now()), 500);
 		return () => clearInterval(interval);
 	}, [detail.data?.run.status]);
-	useEffect(() => {
-		if (!ready) return;
-		const rows = queries.getQueryData<TraceEvent[]>(["trace-events", runId]) ?? [];
-		const source = new EventSource(
-			`/api/traces/runs/${encodeURIComponent(runId)}/live?after=${rows.at(-1)?.rowid ?? 0}&token=${encodeURIComponent(client.token)}`,
-		);
-		source.addEventListener("ready", () => setLive("Live trace"));
-		source.addEventListener("trace.event", (event) => {
-			const row = JSON.parse(event.data) as TraceEvent;
-			queries.setQueryData<TraceEvent[]>(["trace-events", runId], (previous) =>
-				[...new Map([...(previous ?? []), row].map((item) => [item.rowid, item])).values()].sort(
-					(a, b) => a.rowid - b.rowid,
-				),
-			);
-		});
-		source.addEventListener("finished", () => {
-			setLive("Trace complete");
-			source.close();
-			void queries.invalidateQueries({ queryKey: ["trace-detail", runId] });
-		});
-		source.addEventListener("problem", (event) => {
-			setLive(`Trace unavailable: ${String(JSON.parse(event.data).detail)}`);
-			source.close();
-		});
-		source.onerror = () => setLive("Reconnecting to trace…");
-		return () => source.close();
-	}, [client, queries, ready, runId]);
 	if ((detail.error && !detail.data) || (events.error && !events.data))
 		return (
 			<div role="alert">
@@ -120,7 +97,9 @@ function Run({ client, runId }: { client: Client; runId: string }) {
 			<h1>{run.request ?? run.run_id}</h1>
 			<div className="trace-event-head">
 				<StatusMark tone={runTone(run.status)} label={run.status} />
-				<span role="status">{live}</span>
+				<span role="status" className="trace-live" data-state={live}>
+					{liveLabel[live]}
+				</span>
 			</div>
 			<p className="panel-note">Durable run record · receipt integrity is a separate check</p>
 			<ul className="trace-totals">

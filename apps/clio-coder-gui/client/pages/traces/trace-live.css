@@ -1,0 +1,24 @@
+/* The live-tail indicator beside the run status. Quiet by design: a small dot and a word. */
+.trace-live {
+	display: inline-flex;
+	align-items: center;
+	gap: var(--space-1);
+	font-size: var(--text-meta);
+	color: var(--ink-muted);
+}
+.trace-live:empty {
+	display: none;
+}
+.trace-live[data-state="live"]::before {
+	content: "";
+	inline-size: 6px;
+	block-size: 6px;
+	border-radius: var(--radius-pill);
+	background: var(--status-running-line);
+}
+.trace-live[data-state="live"] {
+	color: var(--status-running-fg);
+}
+.trace-live[data-state="unavailable"] {
+	color: var(--status-warn-fg);
+}
