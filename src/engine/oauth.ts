@@ -1,42 +1,46 @@
 /**
- * Engine-boundary wrapper over pi-ai provider auth.
+ * Thin engine-boundary wrapper over pi-ai OAuth flows.
  *
- * Pi owns the OAuth protocol: `Models.getAuth()` refreshes an expiring token
- * under the credential store's lock, re-checks expiry inside it, and derives
- * request auth with `OAuthAuth.toAuth`. Clio owns where credentials live, so
- * the domain's `AuthStorage` implements Pi's `CredentialStore` and this module
- * binds one `Models` to each store. Domains and CLI code import these helpers
- * from src/engine/** rather than value-importing pi-ai directly.
- *
- * Only providers Clio has a runtime or login flow for appear here. Pi's
- * `openai` and `openrouter` providers also advertise OAuth, but a stored
- * `openai` OAuth credential would be read by the API-key `openai` runtime as
- * a bearer for the wrong endpoint, so the list is an allow-list.
+ * pi-ai 0.83 removed the global OAuth provider registry
+ * (`registerOAuthProvider`/`getOAuthProvider`) in favor of per-provider
+ * `ProviderAuth.oauth` flows (`login`/`refresh`/`toAuth`). Clio owns its own
+ * credential persistence (`openAuthStorage()`), so this module keeps a small
+ * Clio-side registry keyed by provider id that adapts those flows to the
+ * engine surface the domains consume. Domains and CLI code must import these
+ * helpers from src/engine/** rather than value-importing pi-ai directly.
  */
 
 import type {
-	CredentialStore,
+	OAuthAuth,
 	OAuthCredentials,
 	OAuthLoginCallbacks,
 	OAuthSelectPrompt,
-	Provider,
 	ProviderAuthInteraction,
 } from "@earendil-works/pi-ai";
-import { openAICompletionsApi } from "@earendil-works/pi-ai/api/openai-completions.lazy";
-import type { MutableModels } from "@earendil-works/pi-ai/models";
-import { createModels, createProvider } from "@earendil-works/pi-ai/models";
 import { anthropicProvider } from "@earendil-works/pi-ai/providers/anthropic";
 import { githubCopilotProvider } from "@earendil-works/pi-ai/providers/github-copilot";
 import { openaiCodexProvider } from "@earendil-works/pi-ai/providers/openai-codex";
-import { alcfOAuth } from "./alcf-oauth.js";
+import { alcfOAuthProvider } from "./alcf-oauth.js";
 
 export type { OAuthCredentials, OAuthLoginCallbacks, OAuthSelectPrompt };
 
-const ALCF_GATEWAY_ORIGIN = "https://inference-api.alcf.anl.gov/resource_server";
+/**
+ * Clio's engine-level OAuth provider surface. Login keeps the legacy callback
+ * shape the CLI and TUI implement; `getApiKey` is async because pi's
+ * `OAuthAuth.toAuth` derivation is async.
+ */
+export interface EngineOAuthProvider {
+	id: string;
+	name: string;
+	usesCallbackServer: boolean;
+	login(callbacks: OAuthLoginCallbacks): Promise<OAuthCredentials>;
+	refreshToken(credentials: OAuthCredentials, signal: AbortSignal): Promise<OAuthCredentials>;
+	getApiKey(credentials: OAuthCredentials): Promise<string>;
+}
 
-/** Adapt Clio's login callbacks, which the CLI and TUI implement, to Pi's AuthInteraction. */
+/** Adapt Clio's legacy login callbacks to pi's AuthInteraction. */
 function interactionFromLoginCallbacks(callbacks: OAuthLoginCallbacks): ProviderAuthInteraction {
-	return {
+	const interaction: ProviderAuthInteraction = {
 		signal: callbacks.signal ?? new AbortController().signal,
 		notify(event) {
 			switch (event.type) {
@@ -84,70 +88,89 @@ function interactionFromLoginCallbacks(callbacks: OAuthLoginCallbacks): Provider
 			}
 		},
 	};
+	return interaction;
 }
 
-let providers: ReadonlyMap<string, Provider> | undefined;
+function fromOAuthAuth(id: string, auth: OAuthAuth | undefined, usesCallbackServer: boolean): EngineOAuthProvider {
+	if (!auth) throw new Error(`provider "${id}" does not expose an OAuth flow`);
+	return {
+		id,
+		name: auth.name,
+		usesCallbackServer,
+		async login(callbacks) {
+			return auth.login(interactionFromLoginCallbacks(callbacks));
+		},
+		async refreshToken(credentials, signal) {
+			return auth.refresh({ ...credentials, type: "oauth" }, signal);
+		},
+		async getApiKey(credentials) {
+			const resolved = await auth.toAuth({ ...credentials, type: "oauth" });
+			if (!resolved.apiKey) {
+				throw new Error(`OAuth provider "${id}" resolved no API key from the stored credential`);
+			}
+			return resolved.apiKey;
+		},
+	};
+}
 
-function oauthProviders(): ReadonlyMap<string, Provider> {
-	providers ??= new Map(
-		[
-			anthropicProvider(),
-			openaiCodexProvider(),
-			githubCopilotProvider(),
-			createProvider({
-				id: "alcf",
-				name: "ALCF Inference",
-				baseUrl: ALCF_GATEWAY_ORIGIN,
-				auth: { oauth: alcfOAuth },
-				models: [],
-				api: openAICompletionsApi(),
-			}),
-		].map((provider): [string, Provider] => [provider.id, provider]),
-	);
+let providers: Map<string, EngineOAuthProvider> | null = null;
+
+function builtinProviders(): EngineOAuthProvider[] {
+	return [
+		fromOAuthAuth("anthropic", anthropicProvider().auth.oauth, true),
+		fromOAuthAuth("openai-codex", openaiCodexProvider().auth.oauth, true),
+		fromOAuthAuth("github-copilot", githubCopilotProvider().auth.oauth, false),
+	];
+}
+
+function registry(): Map<string, EngineOAuthProvider> {
+	if (!providers) {
+		providers = new Map(builtinProviders().map((provider) => [provider.id, provider]));
+	}
 	return providers;
 }
 
-export function hasEngineOAuthProvider(providerId: string): boolean {
-	return oauthProviders().has(providerId);
+export function getEngineOAuthProvider(providerId: string): EngineOAuthProvider | undefined {
+	return registry().get(providerId);
 }
 
-export function listEngineOAuthProviders(): ReadonlyArray<{ id: string; name: string }> {
-	return [...oauthProviders().values()].flatMap((provider) =>
-		provider.auth.oauth ? [{ id: provider.id, name: provider.auth.oauth.name }] : [],
-	);
+export function listEngineOAuthProviders(): EngineOAuthProvider[] {
+	return [...registry().values()];
+}
+
+function registerEngineOAuthProvider(provider: EngineOAuthProvider): void {
+	registry().set(provider.id, provider);
+}
+
+let clioOAuthProvidersRegistered = false;
+
+export function registerClioOAuthProviders(): void {
+	if (clioOAuthProvidersRegistered) return;
+	clioOAuthProvidersRegistered = true;
+	registerEngineOAuthProvider(alcfOAuthProvider);
 }
 
 export async function loginWithEngineOAuthProvider(
 	providerId: string,
 	callbacks: OAuthLoginCallbacks,
 ): Promise<OAuthCredentials> {
-	const oauth = oauthProviders().get(providerId)?.auth.oauth;
-	if (!oauth) throw new Error(`unknown OAuth provider: ${providerId}`);
-	return oauth.login(interactionFromLoginCallbacks(callbacks));
+	const provider = registry().get(providerId);
+	if (!provider) throw new Error(`unknown OAuth provider: ${providerId}`);
+	return provider.login(callbacks);
 }
 
-const modelsByStore = new WeakMap<CredentialStore, MutableModels>();
-
-function modelsFor(store: CredentialStore): MutableModels {
-	let models = modelsByStore.get(store);
-	if (!models) {
-		models = createModels({ credentials: store });
-		for (const provider of oauthProviders().values()) models.setProvider(provider);
-		modelsByStore.set(store, models);
-	}
-	return models;
-}
-
-/**
- * Request auth for a stored OAuth credential. Pi refreshes through `store.modify`
- * when the token expires within five minutes and rejects with a ModelsError when
- * the refresh or the store write fails; the caller decides what that means.
- */
-export async function resolveEngineOAuthApiKey(
-	store: CredentialStore,
+export async function refreshEngineOAuthCredentials(
 	providerId: string,
-	signal?: AbortSignal,
-): Promise<string | undefined> {
-	const resolved = await modelsFor(store).getAuth(providerId, signal ? { signal } : undefined);
-	return resolved?.auth.apiKey;
+	credentials: OAuthCredentials,
+	signal: AbortSignal,
+): Promise<OAuthCredentials> {
+	const provider = registry().get(providerId);
+	if (!provider) throw new Error(`unknown OAuth provider: ${providerId}`);
+	return provider.refreshToken(credentials, signal);
+}
+
+export async function getEngineOAuthApiKey(providerId: string, credentials: OAuthCredentials): Promise<string> {
+	const provider = registry().get(providerId);
+	if (!provider) throw new Error(`unknown OAuth provider: ${providerId}`);
+	return provider.getApiKey(credentials);
 }

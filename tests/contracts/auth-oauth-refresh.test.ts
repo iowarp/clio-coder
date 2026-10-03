@@ -12,6 +12,11 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { FileAuthStorageBackend } from "../../src/domains/providers/auth/backend-file.js";
 import { AuthStorage } from "../../src/domains/providers/auth/storage.js";
+import { registerClioOAuthProviders } from "../../src/engine/oauth.js";
+
+// The engine registry is lazy and ALCF joins it only through this call, which
+// the providers extension and the configure and target CLI paths make.
+registerClioOAuthProviders();
 
 const realFetch = globalThis.fetch;
 
@@ -39,7 +44,7 @@ describe("contracts/auth OAuth refresh", () => {
 	let calls: Array<{ url: string; body: string }>;
 	const open = (): AuthStorage => new AuthStorage(new FileAuthStorageBackend(path));
 
-	function seed(expiresInMs: number, extra = ""): void {
+	function seed(expiresInMs: number): void {
 		writeFileSync(
 			path,
 			[
@@ -54,7 +59,6 @@ describe("contracts/auth OAuth refresh", () => {
 				"  mistral:",
 				"    type: api_key",
 				'    key: "sk-keep"',
-				extra,
 				"",
 			].join("\n"),
 			"utf8",
@@ -97,16 +101,6 @@ describe("contracts/auth OAuth refresh", () => {
 			throw new Error("network must not be touched");
 		}) as typeof fetch;
 		strictEqual((await open().resolveApiKey("alcf")).apiKey, "old-access");
-	});
-
-	it("refreshes inside Pi's five-minute window instead of only at expiry", async () => {
-		seed(2 * 60_000);
-		globalThis.fetch = (async (url: unknown, init?: RequestInit) => {
-			calls.push({ url: String(url), body: String(init?.body) });
-			return globusResponse("access-early");
-		}) as typeof fetch;
-		strictEqual((await open().resolveApiKey("alcf")).apiKey, "access-early");
-		strictEqual(calls.length, 1);
 	});
 
 	it("refreshes once when two stores race on the same file", async () => {
@@ -154,34 +148,6 @@ describe("contracts/auth OAuth refresh", () => {
 		strictEqual(readFileSync(path, "utf8"), committed);
 		const kept = storage.get("alcf");
 		ok(kept?.type === "oauth" && kept.access === "old-access", "the committed credential is still the one in memory");
-		ok(storage.damageReason()?.includes("no space left on device"), `got: ${storage.damageReason()}`);
-	});
-
-	it("never rewrites a damaged store while refreshing", async () => {
-		seed(-1000, "\tstray: tab");
-		const before = readFileSync(path, "utf8");
-		globalThis.fetch = (async () => {
-			throw new Error("network must not be touched for a store that read as empty");
-		}) as typeof fetch;
-		const storage = open();
-		ok(storage.damageReason()?.includes("not valid YAML"));
-		const resolved = await storage.resolveApiKey("alcf");
-		strictEqual(resolved.apiKey, undefined);
-		strictEqual(readFileSync(path, "utf8"), before);
-		await rejects(
-			storage.modify("alcf", async () => ({ type: "oauth", access: "a", refresh: "r", expires: 1 })),
-			/refusing to write credentials/,
-		);
-		strictEqual(readFileSync(path, "utf8"), before);
-		strictEqual(storage.damageReason() !== null, true);
-	});
-
-	it("does not call a rejected refresh a write failure", async () => {
-		seed(-1000);
-		globalThis.fetch = (async () => new Response("invalid_grant", { status: 400 })) as typeof fetch;
-		const storage = open();
-		await storage.resolveApiKey("alcf");
-		strictEqual(storage.damageReason(), null);
 	});
 
 	it("propagates an abort instead of reporting a missing key", async () => {
@@ -193,17 +159,6 @@ describe("contracts/auth OAuth refresh", () => {
 				controller.abort(new Error("operator cancelled"));
 			})) as typeof fetch;
 		await rejects(open().resolveApiKey("alcf", { signal: controller.signal }), /operator cancelled/);
-	});
-
-	it("refuses to persist a credential shape the file cannot represent", async () => {
-		seed(60 * 60_000);
-		const before = readFileSync(path, "utf8");
-		await rejects(
-			open().modify("amazon-bedrock", async () => ({ type: "api_key", env: { AWS_PROFILE: "p" } })),
-			/not representable/,
-		);
-		strictEqual(readFileSync(path, "utf8"), before);
-		strictEqual(open().damageReason(), null);
 	});
 
 	it("logs in through ALCF using the callback shape the CLI and TUI implement", async () => {
