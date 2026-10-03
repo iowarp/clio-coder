@@ -232,6 +232,10 @@ async function runValidatedToolCall(input: RunValidatedToolCallInput): Promise<W
 			input.returnDispositionedErrors === true &&
 			(isDispositionedToolResultError(verdict.result) ||
 				isRefusalToolResultError(verdict.result) ||
+				// DF-10: throwing discards the unavailable judgement from worker events and receipts.
+				(spec.name === ToolNames.Verify &&
+					isRecord(verdict.result.details?.judgement) &&
+					verdict.result.details.judgement.execution === "unavailable") ||
 				(spec.name === ToolNames.Gateway && verdict.result.details?.op === "chain"))
 		) {
 			return projectToolResult(verdict.result);

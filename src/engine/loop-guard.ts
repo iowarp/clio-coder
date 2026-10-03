@@ -38,6 +38,7 @@ import { hashToolCall } from "../domains/safety/loop-detector.js";
 import { isGatewayChain } from "../tools/gateway-display.js";
 import { resolveReadPath } from "../tools/path-utils.js";
 import { effectiveToolCall } from "../tools/surface.js";
+import { resolveVerifyCall } from "../tools/verify/resolve.js";
 import type { AgentMessage } from "./types.js";
 
 export const LOOP_GUARD_REGISTRATION_ID = "guard.loop";
@@ -582,6 +583,7 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 	let reserveDirectiveEmitted = false;
 	const blocksByTurn = new Map<string, number>();
 	const lastBlockedCallByTurn = new Map<string, string>();
+	const unavailableChecks = new Map<string, string>();
 	const callsByTurn = new Map<string, number>();
 	/**
 	 * Per-turn count of parent-workspace mutations, including sealed delegated
@@ -1220,6 +1222,21 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 			}
 			if (input.hook === "after_tool") {
 				const turnKey = input.turnId ?? NO_TURN_BUCKET;
+				const judgement = input.toolResultDetails?.judgement as { execution?: unknown } | undefined;
+				if (
+					options.toolCallCap !== undefined &&
+					input.toolName === ToolNames.Verify &&
+					judgement?.execution === "unavailable"
+				) {
+					for (const id of [input.toolResultDetails?.check, input.toolArgs?.check]) {
+						if (typeof id === "string" && id.trim()) {
+							unavailableChecks.set(
+								`${turnKey}\0${id.trim()}`,
+								typeof input.metadata?.errorMessage === "string" ? input.metadata.errorMessage : "runner unavailable",
+							);
+						}
+					}
+				}
 				const blocked = lastBlockedCallByTurn.get(turnKey);
 				const workspaceMutated = recordWorkspaceMutation(input);
 				recordMonitorCollectProgress(input);
@@ -1281,6 +1298,26 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 			const now = options.now?.() ?? Date.now();
 			const turnKey = input.turnId ?? NO_TURN_BUCKET;
 			const decide = (): ReadonlyArray<MiddlewareEffect> => {
+				// DF-10: startup failures belong to the entry, not to its test arguments or cwd.
+				let check = typeof input.toolArgs?.check === "string" ? input.toolArgs.check.trim() : "";
+				let unavailable = input.toolName === ToolNames.Verify ? unavailableChecks.get(`${turnKey}\0${check}`) : undefined;
+				if (input.toolName === ToolNames.Verify && check && unavailable === undefined && unavailableChecks.size > 0) {
+					const resolution = resolveVerifyCall(process.cwd(), { ...input.toolArgs });
+					if ("check" in resolution) {
+						check = resolution.check.id;
+						unavailable = unavailableChecks.get(`${turnKey}\0${check}`);
+					}
+				}
+				if (unavailable !== undefined && capLockout === null && softLockout === null && !lockoutByTurn.has(turnKey)) {
+					return blockAsLoop(
+						input,
+						turnKey,
+						ToolNames.Verify,
+						2,
+						`verify: unavailable '${check}' was already reported in this run. Rerunning this entry with other arguments or cwd cannot help; report the limitation and stop. Previous error: ${unavailable}`,
+						now,
+					);
+				}
 				// Once a synthesis phase begins, sibling calls from the already-emitted
 				// parallel batch are denied without consuming the lifetime cap or the
 				// per-round non-compliance backstop.

@@ -903,11 +903,15 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 	 * and its own finish cannot carry the child's verdict.
 	 */
 	const observeBoundReason = (reason: string): void => {
-		// Lifetime-cap lockout: record the bound (the run must not seal as an
-		// ordinary success) but do not abort. The loop guard has flipped the
-		// synthesis tool lock, so the next model round runs text-only and the
-		// synthesized answer still reaches message_end and the receipt.
+		// Lifetime-cap lockout ends tool use before the final report. Writers
+		// retain the exhausted outcome; reporting workers can seal their synthesis.
 		if (isWorkerToolCallCapSynthesisReason(reason)) {
+			if (workerBudget.synthesis && deliveryTools.length === 0) {
+				// DF-10: a reporting recipe's cap ends tool use; its sealed synthesis is the product.
+				synthesisToolLock = true;
+				process.stderr.write(`[worker] ${reason}\n`);
+				return;
+			}
 			emit({ type: "clio_coder_run_outcome", payload: { outcomeCode: "worker_tool_call_cap_exhausted" } });
 			if (workerBoundFailure === null) {
 				workerBoundFailure = reason;

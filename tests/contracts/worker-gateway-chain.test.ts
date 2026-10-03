@@ -16,7 +16,7 @@ import { isolateClioEnv } from "../harness/scratch-env.js";
  * v0.5.7 release review). A chain child is a settled capability operation: a
  * read or grep it ran grounds a citation exactly as the direct call would, a
  * pending or failed step grounds nothing, and a child the tool-call cap refused
- * ends the run as cap-exhausted exactly as a refused direct call does.
+ * ends tool use and leaves the final synthesis turn, as a refused direct call does.
  */
 
 const SOURCE = [
@@ -415,7 +415,7 @@ function lastAssistantText(events: WorkerEvent[]): string {
 	);
 }
 
-test("a chain child refused by the tool-call cap ends the run exhausted, like a direct call", {
+test("a read-only worker seals its synthesis after a chain or direct call reaches the cap", {
 	timeout: 20_000,
 }, async () => {
 	const direct = await runWorker(
@@ -441,9 +441,9 @@ test("a chain child refused by the tool-call cap ends the run exhausted, like a 
 		["direct", direct],
 		["chain", chained],
 	] as const) {
-		strictEqual(run.result.exitCode, 1, `${label}: a cap-exhausted run never seals as success`);
+		strictEqual(run.result.exitCode, 0, `${label}: the final synthesis seals normally`);
 		ok(
-			outcomes(run.events).some((payload) => payload.outcomeCode === "worker_tool_call_cap_exhausted"),
+			!outcomes(run.events).some((payload) => payload.outcomeCode === "worker_tool_call_cap_exhausted"),
 			`${label}: ${JSON.stringify(outcomes(run.events))}`,
 		);
 		strictEqual(lastAssistantText(run.events), SYNTHESIS, `${label}: the synthesis round still runs`);
@@ -506,4 +506,45 @@ test("an escalation with no responder applies its fallback at once instead of wa
 	strictEqual(resolved[0]?.source, "policy");
 	strictEqual(resolved[0]?.mode, "deny");
 	ok(/no operator can answer worker escalations/u.test(resolved[0]?.reason ?? ""), resolved[0]?.reason);
+});
+
+test("an unavailable verifier entry cannot rerun with changed arguments and still synthesizes on cap", {
+	timeout: 20_000,
+}, async () => {
+	const report = JSON.stringify({
+		verdict: "fail",
+		checks: [{ name: "python-pytest", passed: false, evidence: "uv.lock exists but .venv is missing; no test ran" }],
+	});
+	const verify = (args: Record<string, unknown>): Call => ({ name: "verify", arguments: JSON.stringify(args) });
+	const run = await runWorker(
+		[
+			[verify({ check: "python-pytest" })],
+			[verify({ check: "python-pytest", args: ["-q"], cwd: "{WORKSPACE}" })],
+			[read({ path: "uv.lock" })],
+			[read({ path: "pyproject.toml" })],
+			{ text: report },
+		],
+		{
+			agentId: "verifier",
+			allowedTools: ["verify", "read"],
+			resultContract: { kind: "verifier-report" },
+			budget: { mode: "advisory", toolCalls: 2, readReserve: 0, synthesis: true, hardCap: 150, ceiling: 2 },
+		},
+		{ "pyproject.toml": "[tool.pytest.ini_options]\n", "uv.lock": "version = 1\n" },
+	);
+	const ends = run.events.filter((event) => event.type === "tool_execution_end") as Array<{
+		toolName: string;
+		result: { content: Array<{ text?: string }>; details: Record<string, unknown> };
+	}>;
+	const attempts = ends.filter((event) => event.toolName === "verify");
+	strictEqual(
+		(attempts[0]?.result.details.judgement as { execution?: string } | undefined)?.execution,
+		"unavailable",
+		JSON.stringify(attempts),
+	);
+	ok(attempts[1]?.result.content.some((block) => block.text?.includes("was already reported in this run")));
+	strictEqual(run.result.exitCode, 0);
+	strictEqual(lastAssistantText(run.events), report);
+	strictEqual(run.requests, 5);
+	ok(!run.bodies.at(-1)?.tools, "the final synthesis request has no work tools");
 });

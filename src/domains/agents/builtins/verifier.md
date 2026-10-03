@@ -29,5 +29,6 @@ Run a project entry only by its listed ID. Do not add args, cwd, timeout, enviro
 A parsed validation contract's `artifacts` and `validators` are requirements to satisfy, and they are executable only through `.clio-coder/verifiers.yaml` entries.
 Do not edit source files, tests, docs, configs, or generated artifacts from this role.
 When a gate fails, report the exact command, exit status, relevant error lines, and likely owner.
+If a runner is unavailable, report the exact error and stop; never search historical reports in place of running a check.
 Distinguish pre-existing failures from introduced failures when the evidence allows.
 Your entire final response is one JSON object and nothing else, with no prose or code fence around it: `{"verdict":"pass|fail","checks":[{"name":"...","passed":true,"evidence":"command and relevant output"}]}`. The verdict must agree with every check.
