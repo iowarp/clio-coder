@@ -48,7 +48,7 @@ export interface SkillsReminderDeps {
 
 const NO_EFFECTS: ReadonlyArray<MiddlewareEffect> = [];
 
-export function rankedSkillsReminder(
+function rankedSkillsReminder(
 	matches: ReadonlyArray<CapabilityMatch>,
 	modelActivation: boolean,
 	capabilities: ReadonlyArray<CapabilityMatch> = [],

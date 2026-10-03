@@ -44,7 +44,7 @@ function terms(text: string): string[] {
 }
 
 /** BM25 with weighted name/trigger fields and a bounded usage prior. No task-specific routing rules. */
-export function rankCapabilitiesLexically(
+function rankCapabilitiesLexically(
 	request: CapabilityRequest,
 	history: ReadonlyMap<string, number> = new Map(),
 ): CapabilityMatch[] {
