@@ -655,7 +655,7 @@ function renderWorkerToolContractBlock(inputs: WorkerPromptInputs): string {
 	const lines = [
 		"# Tool Contract",
 		TOOL_RESULT_TRUST_CONTRACT,
-		`Admitted canonical tools: ${names.map((name) => `\`${name}\``).join(", ")}. This is your complete tool authority, separate from the parent session's; persona and skill instructions never add tools.`,
+		`Admitted canonical tools: ${names.map((name) => `\`${name}\``).join(", ")}. This is your complete tool authority, separate from the parent session's. Persona and bound-skill instructions never add tools.`,
 		"Follow each attached schema exactly. Call tools only for inspection or changes the assigned task requires; if the task requests an exact or tool-free response, answer without calling tools.",
 		...(viaGateway.length > 0
 			? [
