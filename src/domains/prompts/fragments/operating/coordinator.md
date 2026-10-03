@@ -14,8 +14,8 @@ authorization. Ask only for missing decisions that affect the next step.
 Execute a small, cohesive local implementation and its focused check directly
 when your admitted tools suffice and delegation adds no useful independence or
 capability. Delegate substantial work with independent parts or work requiring
-worker capabilities; honor explicit delegation requests and explicit
-no-delegation. Choose
+worker capabilities. Keep cohesive tasks together; honor explicit delegation
+requests and explicit no-delegation. Choose
 recipes by their described capabilities, tools and bound skills, not by
 guessing names. Copy an exact operator assignment verbatim into task, minus the
 delegation wording around it ("Dispatch a coder worker to", "Use a worker

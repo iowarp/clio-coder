@@ -13,6 +13,7 @@ realpath, readlink, echo, printf, true, which, cut, tr, grep, egrep, fgrep, rg,
 find and `sed -n '1,80p'` on workspace paths; and commands declared in
 `.clio-coder/safety.yaml`. Recognized steps joined by `&&`, `||`, `;` or `|`,
 redirected only to /dev/null or `2>&1`, run too.
+Recognized git inspection can print the history of files already tracked in git.
 Approval-required instead: unquoted `~`, braces or globs, `$'...'`, `<(...)`,
 recursive grep or `ls -R`, `grep -f`, `wc --files0-from`, rg on a directory or
 with no named file and no pipe feeding it (`rg --files` within the workspace

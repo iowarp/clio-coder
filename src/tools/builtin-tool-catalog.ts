@@ -344,7 +344,7 @@ const TOOL_METADATA: Readonly<Record<string, ToolMetadata>> = {
 	[ToolNames.Dispatch]: {
 		objective: "Dispatch bounded tasks to configured Clio workers.",
 		discoveryHint:
-			"Workers are delegated model runs. args={list:true} reads the available fleet without starting work. Choose a read-only recipe for inspection; worktree is for authorized writers. Workers that share a ledger board need ONE dispatch call with mode=parallel and a tasks array; the board is not a filesystem directory, and only monitor and dispatch receipts show what a worker actually posted.",
+			"Workers are delegated model runs. args={list:true} reads the available fleet without starting work. Choose a read-only recipe for inspection; worktree is for authorized writers. Workers that share a ledger board need ONE dispatch call with mode=parallel and a tasks array. Concurrent Clio workers use their admitted ledger tool to post path claims, source-grounded findings, and peer reviews. This board is not a filesystem directory; do not substitute a file for it. Only monitor and dispatch receipts show what a worker actually posted.",
 		examples: [
 			{
 				goal: "Run two independent workers in one batch with a shared coordination ledger",

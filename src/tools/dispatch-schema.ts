@@ -134,7 +134,7 @@ const DispatchVerificationSchema = Type.Array(
 	Type.Object(
 		{
 			check: Type.String(),
-			timeout_ms: Type.Optional(Type.Integer({ minimum: 1 })),
+			timeout_ms: Type.Optional(Type.Integer({ minimum: 1, description: "Within the check's declared bounds." })),
 		},
 		{ additionalProperties: false },
 	),
@@ -209,7 +209,7 @@ const WorkerContextSchema = Type.Union(
 		),
 	],
 	{
-		description: `Parent history: isolated (default), fork (full native transcript), splice (selected text, default ${WORKER_CONTEXT_SPLICE_TOKENS} tokens). refs: tool:<id> or message:<index>. Per-task overrides allowed.`,
+		description: `Parent history: isolated (default), fork (native only, full transcript), splice (selected text, default ${WORKER_CONTEXT_SPLICE_TOKENS} tokens). refs: tool:<id> or message:<index>. Per-task overrides allowed.`,
 	},
 );
 export function buildDispatchParameters(composition: DispatchSchemaComposition = FULL_DISPATCH_SCHEMA_COMPOSITION) {

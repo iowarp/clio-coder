@@ -266,14 +266,14 @@ export const bashTool: ToolSpec = {
 		command: Type.String({ description: "Bash command to execute." }),
 		cwd: Type.Optional(
 			Type.String({
-				description: "Relative subdirectory of the workspace root; omit otherwise.",
+				description: "Relative subdirectory of the workspace root; omit otherwise. Outside the root is blocked.",
 			}),
 		),
 		timeout_ms: Type.Optional(Type.Number({ description: "Timeout in milliseconds." })),
 		output_policy: Type.Optional(
 			Type.Union([Type.Literal("full"), Type.Literal("bounded"), Type.Literal("summary"), Type.Literal("metadata-only")], {
 				description:
-					"What returns to you. Omit for a bounded tail; summary for noisy runs; metadata-only when only the outcome matters; full only for known-small output.",
+					"What returns to you. Omit for a bounded head and tail; summary for noisy runs; metadata-only when only the outcome matters; full only for known-small output.",
 			}),
 		),
 	}),

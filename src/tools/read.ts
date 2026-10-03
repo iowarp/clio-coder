@@ -697,7 +697,7 @@ export const readTool: ToolSpec = {
 	name: ToolNames.Read,
 	description: `Read a UTF-8 text file or a PNG, JPEG, GIF, or WebP image when the routed model supports vision; notebooks, PDFs (pages) and zip/tar archives (member) render as text. Output is capped at ${DEFAULT_MAX_LINES} lines or ${
 		DEFAULT_READ_MAX_BYTES / 1024
-	}KB per call; a truncated result says how to continue with offset/limit. line_numbers=true prefixes each line with its 1-based number and " | ", which is not file content.`,
+	}KB per call; a truncated result says how to continue with offset/limit. Files over 32MB report their line total as N+. Binary or non-UTF-8 files are refused with the failing byte offset. line_numbers=true prefixes each line with its 1-based number and " | ", which is not file content.`,
 	parameters: Type.Object({
 		path: Type.String({ description: "File path (relative or absolute)." }),
 		line_numbers: Type.Optional(

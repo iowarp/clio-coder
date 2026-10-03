@@ -48,12 +48,12 @@ export const limitationTool: ToolSpec = {
 	description:
 		"Record what this turn could not verify and why: call it once before your final reply when you changed files but could not run validation. The receipt stands in for validation evidence at the finish gate.",
 	parameters: Type.Object({
-		scope: Type.String({ description: "What could not be verified." }),
+		scope: Type.String({ description: "What could not be verified, in one sentence." }),
 		reason: StringEnum(LIMITATION_REASONS, {
 			description:
 				"no-runner: no runner exists; blocked: a gate or denial stopped the check; out-of-scope: the task excluded it; environment: it cannot run here; other.",
 		}),
-		paths: Type.Optional(Type.Array(Type.String(), { description: "Paths left unverified." })),
+		paths: Type.Optional(Type.Array(Type.String(), { description: "Repository-relative paths left unverified." })),
 	}),
 	baseActionClass: "read",
 	executionMode: "parallel",
