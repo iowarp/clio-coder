@@ -2,6 +2,8 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { basename, join, relative, resolve } from "node:path";
 import { resolvePackageRoot } from "../../core/package-root.js";
 import { guidanceForDocs } from "../../domains/prompts/runtime-guidance.js";
+import type { DocsHeadingState } from "../docs-headings.js";
+import { docsHeading } from "../docs-headings.js";
 
 // Deterministic, dependency-free retrieval over Clio's bundled human docs,
 // serving the `clio_docs` gateway capability. It intentionally avoids
@@ -152,6 +154,7 @@ interface IndexedSection extends RawSection {
 }
 
 interface DocsIndex {
+	root: string;
 	dir: string;
 	files: string[];
 	sections: IndexedSection[];
@@ -249,6 +252,7 @@ function titleFromFile(name: string): string {
  */
 function parseSections(file: string, markdown: string): RawSection[] {
 	const lines = markdown.split(/\r?\n/);
+	if (markdown.endsWith("\n")) lines.pop();
 	const sections: RawSection[] = [];
 	let title = titleFromFile(file);
 	let heading = "(overview)";
@@ -256,7 +260,7 @@ function parseSections(file: string, markdown: string): RawSection[] {
 	let headingLine = 1;
 	let bodyStartLine = 1;
 	let buffer: string[] = [];
-	let inFence = false;
+	const headingState: DocsHeadingState = {};
 	const stack: Array<{ level: number; text: string }> = [];
 	const headingCounts = new Map<string, number>();
 
@@ -288,12 +292,11 @@ function parseSections(file: string, markdown: string): RawSection[] {
 
 	for (let i = 0; i < lines.length; i += 1) {
 		const line = lines[i] ?? "";
-		if (/^\s*(```|~~~)/.test(line)) inFence = !inFence;
-		const headingMatch = inFence ? null : /^(#{1,6})\s+(.+?)\s*#*\s*$/.exec(line);
+		const headingMatch = docsHeading(line, headingState);
 		if (headingMatch) {
 			flush(i);
-			level = (headingMatch[1] ?? "").length;
-			heading = (headingMatch[2] ?? "").trim();
+			level = headingMatch.level;
+			heading = headingMatch.heading;
 			if (level === 1) title = heading;
 			while (stack.length > 0 && (stack[stack.length - 1]?.level ?? 0) >= level) stack.pop();
 			stack.push({ level, text: heading });
@@ -405,6 +408,7 @@ function loadDocsIndex(): { ok: true; index: DocsIndex } | { ok: false; message:
 	if (sections.length === 0) return { ok: false, message: `no markdown sections found under ${docsDir}` };
 	const totalLength = sections.reduce((sum, section) => sum + section.bodyLength, 0);
 	cachedIndex = {
+		root,
 		dir: docsDir,
 		files: indexedFiles,
 		sections,
@@ -581,6 +585,15 @@ function resultPayload(index: DocsIndex, plan: QueryPlan, scored: ReadonlyArray<
 			breadcrumb: entry.section.breadcrumb,
 			anchor: entry.section.anchor,
 			lines: { start: entry.section.startLine, end: entry.section.endLine },
+			read: {
+				tool: "read",
+				args: {
+					path: join(index.root, entry.section.file),
+					offset: entry.section.startLine,
+					limit: entry.section.endLine - entry.section.startLine + 1,
+					line_numbers: true,
+				},
+			},
 			snippetLines: { start: snippet.startLine, end: snippet.endLine },
 			snippet: snippet.text,
 			score: Number(entry.score.toFixed(3)),
@@ -608,7 +621,7 @@ function resultPayload(index: DocsIndex, plan: QueryPlan, scored: ReadonlyArray<
 		results,
 		followUp:
 			results.length > 0
-				? 'Cited files are Clio\'s bundled docs: read them from the installed documentation path named in your prompt, never by searching the workspace for them. For more depth, call gateway(op="call", capability="clio_docs", args={query:"<more specific terms>"}).'
+				? 'Use a relevant hit\'s read.tool and read.args to read exactly its cited section at the bundled absolute path. Do not read the whole guide for a narrow question. Stop once the question is answered; for other sections, call gateway(op="call", capability="clio_docs", args={query:"<more specific terms>"}).'
 				: "Try Clio vocabulary such as target, autonomy, dispatch, evidence, middleware, context, validation, install, or model catalog.",
 	};
 }

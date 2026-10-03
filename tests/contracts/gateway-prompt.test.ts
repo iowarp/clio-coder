@@ -134,10 +134,12 @@ describe("gateway in the session prompt", () => {
 			const lines = compiled.systemPrompt.split("\n");
 			ok(
 				compiled.systemPrompt.includes(
-					'For questions about Clio\'s documented commands, configuration, or behavior, call gateway(op="call", capability="clio_docs", args={query: <the question>}) before answering and before any workspace search, then read the document it names from the installed documentation path above.',
+					'For questions about Clio\'s documented commands, configuration, or behavior, call gateway(op="call", capability="clio_docs", args={query: <the question>}) before answering and before any workspace search.',
 				),
 				"The compiled prompt routes documented Clio behavior through gateway before answering or searching the workspace.",
 			);
+			match(compiled.systemPrompt, /hit's ready-to-use read call/);
+			match(compiled.systemPrompt, /offset, limit, and line_numbers select exactly the cited section/);
 			doesNotMatch(
 				compiled.systemPrompt,
 				/\bcontext\s*\(\s*scope\s*=\s*["']docs["']/,
