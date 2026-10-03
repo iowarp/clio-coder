@@ -11,16 +11,8 @@
 import type { ClioSettings } from "../core/config.js";
 import { installDiagnosticSink } from "../core/diagnostics.js";
 import { getTerminationCoordinator } from "../core/termination.js";
-import {
-	type Component,
-	Container,
-	isKeyRelease,
-	isKeyRepeat,
-	matchesKey,
-	ScrollView,
-	type TUI,
-	VStack,
-} from "../engine/tui.js";
+import type { ApplicationInputTui } from "../engine/tui.js";
+import { type Component, Container, isKeyRelease, isKeyRepeat, matchesKey, ScrollView, VStack } from "../engine/tui.js";
 import { ClioEditor, type EditorChrome } from "./clio-editor.js";
 import { createProcessInteractiveShell } from "./interactive-shell.js";
 import { type ClioKeybindingManager, createKeybindingManager, formatKeyLabel } from "./keybinding-manager.js";
@@ -75,7 +67,7 @@ export interface TerminalLeaseAdoption {
 export interface TerminalLease {
 	readonly shell: ReturnType<typeof createProcessInteractiveShell>;
 	readonly terminal: ReturnType<typeof createProcessInteractiveShell>["terminal"];
-	readonly tui: TUI;
+	readonly tui: ApplicationInputTui;
 	readonly editor: ClioEditor;
 	readonly keybindings: ClioKeybindingManager;
 	readonly pending: Component;
@@ -264,7 +256,7 @@ export function createProcessTerminalLease(options: CreateProcessTerminalLeaseOp
 			tuiMode: settings.interface.mode,
 			...(options.onStage0Commit ? { onFirstFrameCommit: options.onStage0Commit } : {}),
 		});
-	const tui = shell.tui as TUI;
+	const tui = shell.tui;
 	const editor = new ClioEditor(tui, editorChromeProxy);
 	editor.focused = true;
 	const pendingPanel = new BootSubmissionPanel();

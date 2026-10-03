@@ -655,12 +655,17 @@ describe("smoke/installed package", { concurrency: false }, () => {
 			strictEqual(version.code, 0, version.stderr);
 			match(version.stdout, /^Clio Coder \d+\.\d+\.\d+$/mu);
 
-			// Ordinary npm consumers receive unpatched pi-tui dependencies. The built
-			// application must carry the compatibility implementation itself.
+			// Ordinary npm consumers receive a pi-tui that lacks the editor and search
+			// seams. The built application must carry that implementation itself, and
+			// its engine subclass supplies application-first input over stock Pi.
 			const tuiChunks = emittedFilesContaining(packageRoot, "var TuiAltScreen = class");
 			strictEqual(tuiChunks.size, 1, "one bundled patched TUI implementation");
 			const tuiChunk = [...tuiChunks][0];
 			ok(tuiChunk);
+			const instrumentedChunks = emittedFilesContaining(packageRoot, "var InstrumentedTuiAltScreen = class");
+			strictEqual(instrumentedChunks.size, 1, "one bundled application-input TUI implementation");
+			const instrumentedChunk = [...instrumentedChunks][0];
+			ok(instrumentedChunk);
 			const keyboardChild = `
 			 import assert from "node:assert/strict";
 			 import { createRequire } from "node:module";
@@ -670,8 +675,10 @@ describe("smoke/installed package", { concurrency: false }, () => {
 			 const bundled = await import(pathToFileURL(process.argv[1]).href);
 			 const require = createRequire(pathToFileURL(process.argv[1]));
 			 const ordinary = require.resolve("@earendil-works/pi-tui");
+			 const instrumented = await import(pathToFileURL(process.argv[2]).href);
 			 const stock = await import(pathToFileURL(ordinary).href);
 			 assert.equal(stock.TuiAltScreen.prototype.setApplicationInputPolicy, undefined);
+			 assert.equal(typeof instrumented.InstrumentedTuiAltScreen.prototype.setApplicationInputPolicy, "function");
 			 for (const platform of ["darwin", "linux", "win32"]) {
 			  for (const arch of ["arm64", "x64"]) {
 			   const filename = platform + "-platform" + (platform === "linux" ? "-x11" : "") + ".node";
@@ -681,7 +688,8 @@ describe("smoke/installed package", { concurrency: false }, () => {
 			 const noop = () => {};
 			 let ingress = noop;
 			 const terminal = { columns: 80, rows: 24, kittyProtocolActive: false, start: fn => ingress = fn, stop: noop, write: noop, moveBy: noop, hideCursor: noop, showCursor: noop, clearLine: noop, clearFromCursor: noop, clearScreen: noop, setTitle: noop, setProgress: noop };
-			 const tui = new bundled.TuiAltScreen(terminal);
+			 const observer = { beginFrame: () => 1, endFrame: noop, beginPhase: () => 1, endPhase: noop };
+			 const tui = new instrumented.InstrumentedTuiAltScreen(terminal, observer);
 			 const input = new bundled.Input();
 			 const root = new bundled.VStack();
 			 root.addChild(new bundled.ScrollView(new bundled.Text("alpha\\nalpha", 0, 0), { primary: true }), { grow: 1 }); root.addChild(input);
@@ -701,12 +709,16 @@ describe("smoke/installed package", { concurrency: false }, () => {
 			  process.stdout.write("packed-keyboard-ok\\n");
 			 } finally { tui.stop(); }
 			`;
-			const keyboardReceipt = execFileSync(process.execPath, ["--input-type=module", "-e", keyboardChild, tuiChunk], {
-				cwd: foreign,
-				env: isolatedEnv(home),
-				encoding: "utf8",
-				timeout: 20_000,
-			});
+			const keyboardReceipt = execFileSync(
+				process.execPath,
+				["--input-type=module", "-e", keyboardChild, tuiChunk, instrumentedChunk],
+				{
+					cwd: foreign,
+					env: isolatedEnv(home),
+					encoding: "utf8",
+					timeout: 20_000,
+				},
+			);
 			match(keyboardReceipt, /packed-keyboard-ok/u);
 			for (const notice of ["pi-tui-LICENSE", "marked-LICENSE", "get-east-asian-width-LICENSE"]) {
 				ok(existsSync(join(packageRoot, "dist", "assets", "tui-notices", notice)));

@@ -1,9 +1,28 @@
-import type { Api, Context, Model, StreamOptions } from "@earendil-works/pi-ai";
+import type { Api, AssistantMessage, Context, Model, StreamOptions } from "@earendil-works/pi-ai";
+import { clampMaxTokensToContext } from "@earendil-works/pi-ai/api/simple-options";
+import { estimateTextTokens } from "@earendil-works/pi-ai/utils/estimate";
 import { CLIO_MIN_CONTEXT_WINDOW, CLIO_MIN_MAX_OUTPUT_TOKENS } from "../../core/context-floor.js";
 import { ceilChars, estimateAgentMessageTokens, toolSchemaChars } from "../../domains/session/context-accounting.js";
-import { resolvedRequestContext } from "../context.js";
+import { normalizeContext, resolvedRequestContext } from "../context.js";
 
-const CONTEXT_BUDGET_SAFETY_TOKENS = 1024;
+/**
+ * Pi clamps max_tokens to the remaining window on every simple stream, with its
+ * own safety margin. Clio's clamp below reads that margin off Pi's clamp rather
+ * than copying it, so a Pi change moves both. Only the margin comes from Pi: the
+ * input is sized by {@link estimateInputTokensFromContext}, because Pi's
+ * estimator anchors on the last assistant usage, which is stale after
+ * observation masking or working-set eviction (the `contextUsageInvalidated`
+ * stamp), and it throws on an assistant message that carries no usage.
+ */
+const MARGIN_PROBE_WINDOW = 1_000_000;
+const CONTEXT_BUDGET_SAFETY_TOKENS =
+	MARGIN_PROBE_WINDOW -
+	clampMaxTokensToContext(
+		{ contextWindow: MARGIN_PROBE_WINDOW } as Model<Api>,
+		normalizeContext({ messages: [] }),
+		MARGIN_PROBE_WINDOW,
+	);
+
 /**
  * Output budget when nothing more specific applies. It is the product floor,
  * not a conservative guess: a turn that writes a source file or a wiki page
@@ -22,9 +41,8 @@ let globalDefaultMaxOutputTokens = 0;
 
 /**
  * Install the global default output budget. {@link remainingContextMaxTokens}
- * uses it as the requested value when the caller passes no explicit maxTokens
- * and no more-specific tool-turn limit applies. The value is always clamped
- * down to the model's cap and the remaining context window, so a model that
+ * uses it as the requested value when the caller passes no explicit maxTokens.
+ * The value is always clamped down to the model's cap and the remaining context window, so a model that
  * supports less still gets less. Non-positive values disable the default.
  */
 export function setGlobalDefaultMaxOutputTokens(value: number): void {
@@ -135,28 +153,26 @@ export function remainingContextMaxTokens(
 	model: Pick<Model<Api>, "contextWindow" | "maxTokens"> & { clioCoder?: unknown },
 	context: Context,
 	options: Pick<StreamOptions, "maxTokens"> | undefined,
-	limits?: { contextWindow?: number; maxOutputTokens?: number },
 ): number {
 	const inputTokens = estimateInputTokensFromContext(context);
-	const configuredContextWindow = model.contextWindow > 0 ? model.contextWindow : Number.POSITIVE_INFINITY;
-	const loadedContextWindow =
-		limits?.contextWindow !== undefined && limits.contextWindow > 0 ? limits.contextWindow : Number.POSITIVE_INFINITY;
-	const contextWindow = Math.min(configuredContextWindow, loadedContextWindow);
+	const contextWindow = model.contextWindow > 0 ? model.contextWindow : Number.POSITIVE_INFINITY;
 	const modelLimit = model.maxTokens > 0 ? model.maxTokens : Number.POSITIVE_INFINITY;
 	// Precedence for the requested ceiling when the caller gave no explicit
-	// maxTokens: a more-specific tool-turn limit, then the global default, then
-	// the profile's recommendation, then the model's advertised cap. A model that
-	// advertises no cap uses the product floor instead of requesting its entire
-	// remaining context window. Math.min
+	// maxTokens: the global default, then the profile's recommendation, then the
+	// model's advertised cap. A model that advertises no cap uses the product
+	// floor instead of requesting its entire remaining context window. Math.min
 	// below clamps the result down to every known boundary, so frontier providers
 	// with a known cap never receive a larger max_tokens value.
 	const defaultLimit =
-		limits?.maxOutputTokens !== undefined && limits.maxOutputTokens > 0
-			? limits.maxOutputTokens
-			: globalDefaultMaxOutputTokens > 0
-				? globalDefaultMaxOutputTokens
-				: (recommendedOutputTokens(model, contextWindow) ?? (model.maxTokens > 0 ? modelLimit : DEFAULT_MAX_OUTPUT_TOKENS));
+		globalDefaultMaxOutputTokens > 0
+			? globalDefaultMaxOutputTokens
+			: (recommendedOutputTokens(model, contextWindow) ?? (model.maxTokens > 0 ? modelLimit : DEFAULT_MAX_OUTPUT_TOKENS));
 	const requested = options?.maxTokens ?? defaultLimit;
 	const resolved = clampOutputToRemainingContext(Math.min(requested, modelLimit), contextWindow, inputTokens);
 	return Number.isFinite(resolved) ? resolved : DEFAULT_MAX_OUTPUT_TOKENS;
+}
+
+/** Reasoning tokens inferred from visible thinking text, for servers that report none. */
+export function estimateReasoningTokens(content: AssistantMessage["content"]): number {
+	return estimateTextTokens(content.map((block) => (block.type === "thinking" ? block.thinking : "")).join(""));
 }

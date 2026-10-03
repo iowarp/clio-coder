@@ -136,7 +136,24 @@ describe("contracts/metering integrity", () => {
 		strictEqual(remainingContextMaxTokens(model, empty, undefined), 8_192);
 		strictEqual(remainingContextMaxTokens(model, empty, { maxTokens: 4_096 }), 4_096);
 		setGlobalDefaultMaxOutputTokens(32_768);
-		strictEqual(remainingContextMaxTokens(servedWindowModel, loaded, undefined), 10_048);
+		strictEqual(remainingContextMaxTokens(servedWindowModel, loaded, undefined), 6_976);
+		// Masking and eviction stamp the last assistant usage stale. The ceiling sizes input from the
+		// transcript, so that anchor must not shrink it.
+		const masked = {
+			systemPrompt: "",
+			messages: [
+				{
+					role: "assistant",
+					content: [{ type: "text", text: "ok" }],
+					stopReason: "stop",
+					timestamp: 1,
+					usage: { totalTokens: 120_000 },
+					contextUsageInvalidated: true,
+				},
+			],
+			tools: [],
+		} as unknown as Context;
+		strictEqual(remainingContextMaxTokens(servedWindowModel, masked, undefined), 32_768);
 	});
 
 	it("reserves the configured response allowance rather than compacting a fitting first request", () => {
@@ -159,7 +176,7 @@ describe("contracts/metering integrity", () => {
 				contextWindow: model.contextWindow,
 				inputTokens: 11_890,
 			});
-			strictEqual(reserved, 118_158);
+			strictEqual(reserved, 115_086);
 			strictEqual(reserved, remainingContextMaxTokens(model, context, undefined));
 			ok(11_890 + reserved < model.contextWindow);
 			strictEqual(

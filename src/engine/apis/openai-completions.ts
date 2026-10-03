@@ -12,7 +12,6 @@ import {
 	type SimpleStreamOptions,
 	type StreamOptions,
 	type ThinkingBudgets,
-	type ThinkingContent,
 	type Tool,
 	type Usage,
 } from "@earendil-works/pi-ai";
@@ -25,7 +24,6 @@ import {
 } from "../../core/gateway-routing.js";
 import type { ResponseModelIdObservation } from "../../core/response-model-id.js";
 import {
-	type AppliedThinking,
 	type ResolvedModelRuntimeCapabilities,
 	reasoningClassForMechanism,
 	resolveModelRuntimeCapabilitiesForModel,
@@ -50,7 +48,6 @@ import {
 	diffusionFramesEnabled,
 	observeDiffusionFrameChunk,
 	runtimeStreamsDiffusionFrames,
-	withDiffusingRequest,
 } from "./diffusion-frames.js";
 import { ensureLlamaCppResidency, listLlamaCppResidentModels } from "./llamacpp-residency.js";
 import {
@@ -60,7 +57,7 @@ import {
 	listGatewayLmStudioResidentModels,
 	listLmStudioResidentModels,
 } from "./lmstudio.js";
-import { remainingContextMaxTokens } from "./output-budget.js";
+import { estimateReasoningTokens, remainingContextMaxTokens } from "./output-budget.js";
 import { residencyManagedFor } from "./residency.js";
 import { pickSamplingProfile, samplingParamsFromProfile } from "./sampling-overrides.js";
 import type { EngineApiProvider } from "./types.js";
@@ -81,14 +78,6 @@ declare module "@earendil-works/pi-ai" {
 }
 
 const piOpenAICompletions = openAICompletionsApi();
-
-/**
- * Average characters-per-token for the English/code reasoning streams pi-ai
- * surfaces from openai-compatible providers. The exact ratio depends on the
- * upstream tokenizer; 4 matches GPT-2/BPE-style splits and is the same
- * estimator other inference tools use when no authoritative count is exposed.
- */
-const REASONING_CHARS_PER_TOKEN = 4;
 
 export { estimateInputTokensFromContext, remainingContextMaxTokens } from "./output-budget.js";
 
@@ -181,38 +170,32 @@ function backendTimingsSourceForModel(model: Model<Api>): BackendTimingsSource |
 	return null;
 }
 
-function observeResponseMetadataLine(line: string, capture: ResponseModelIdCapture): void {
-	const normalized = line.endsWith("\r") ? line.slice(0, -1) : line;
-	if (!normalized.startsWith("data:")) return;
-	const data = normalized.slice("data:".length).trimStart();
-	if (data.length === 0 || data === "[DONE]") return;
-	try {
-		const payload = JSON.parse(data) as unknown;
-		if (!isPlainRecord(payload)) return;
-		if (capture.diffusionFrames !== null) observeDiffusionFrameChunk(payload, capture.diffusionFrames);
-		if (isContentFilterErrorFrame(payload.error)) capture.contentFilter = true;
-		const usage = isPlainRecord(payload.usage) ? payload.usage : {};
-		const details = isPlainRecord(usage.prompt_tokens_details) ? usage.prompt_tokens_details : {};
-		if (
-			nonnegativeFiniteNumber(details.cached_tokens) !== null ||
-			nonnegativeFiniteNumber(usage.cache_read_input_tokens) !== null
-		) {
-			capture.cacheReadReported = true;
+/**
+ * Read one parsed completion chunk. Pi hands each chunk to
+ * `onProviderStreamEvent` before it normalizes it, so these facts need no
+ * second decode of the transport bytes.
+ */
+function observeProviderChunk(payload: unknown, capture: ResponseModelIdCapture): void {
+	if (!isPlainRecord(payload)) return;
+	if (capture.diffusionFrames !== null) observeDiffusionFrameChunk(payload, capture.diffusionFrames);
+	const usage = isPlainRecord(payload.usage) ? payload.usage : {};
+	const details = isPlainRecord(usage.prompt_tokens_details) ? usage.prompt_tokens_details : {};
+	if (
+		nonnegativeFiniteNumber(details.cached_tokens) !== null ||
+		nonnegativeFiniteNumber(usage.cache_read_input_tokens) !== null
+	) {
+		capture.cacheReadReported = true;
+	}
+	if (!capture.modelIdDone) {
+		const model = payload.model;
+		if (typeof model === "string" && model.trim().length > 0) {
+			capture.reportedModelId = model.trim();
+			capture.modelIdDone = true;
 		}
-		if (!capture.modelIdDone) {
-			const model = payload.model;
-			if (typeof model === "string" && model.trim().length > 0) {
-				capture.reportedModelId = model.trim();
-				capture.modelIdDone = true;
-			}
-		}
-		if (capture.backendTimingsSource !== null) {
-			const timings = backendCompletionTimings(payload.timings, capture.backendTimingsSource);
-			if (timings !== null) capture.backendTimings = timings;
-		}
-	} catch {
-		// A partial or vendor-specific event is pi-ai's parsing concern. This
-		// observer records only complete OpenAI-compatible JSON data lines.
+	}
+	if (capture.backendTimingsSource !== null) {
+		const timings = backendCompletionTimings(payload.timings, capture.backendTimingsSource);
+		if (timings !== null) capture.backendTimings = timings;
 	}
 }
 
@@ -226,23 +209,26 @@ function isContentFilterErrorFrame(error: unknown): boolean {
 	return [error.code, error.type].some((value) => typeof value === "string" && isProviderContentFilter(value));
 }
 
-function observeResponseModelIdBytes(
-	chunk: Uint8Array | undefined,
-	capture: ResponseModelIdCapture,
-	flush = false,
-): void {
+/**
+ * The OpenAI SDK throws on an in-stream error frame before Pi's hook can see
+ * it, and Pi's error text drops the frame's code. This scan is the only
+ * remaining read of the SSE stream; `captureErrorBody` still reads a non-2xx
+ * body from a clone.
+ */
+function observeErrorFrameBytes(chunk: Uint8Array | undefined, capture: ResponseModelIdCapture, flush = false): void {
 	if (!capture.decoder) return;
 	capture.buffer += chunk ? capture.decoder.decode(chunk, { stream: !flush }) : capture.decoder.decode();
-	let newline = capture.buffer.indexOf("\n");
-	while (newline >= 0) {
-		const line = capture.buffer.slice(0, newline);
-		capture.buffer = capture.buffer.slice(newline + 1);
-		observeResponseMetadataLine(line, capture);
-		newline = capture.buffer.indexOf("\n");
-	}
-	if (flush && capture.buffer.length > 0) {
-		observeResponseMetadataLine(capture.buffer, capture);
-		capture.buffer = "";
+	const lines = capture.buffer.split("\n");
+	capture.buffer = flush ? "" : (lines.pop() ?? "");
+	for (const line of lines) {
+		const data = line.startsWith("data:") ? line.slice("data:".length).trimStart() : "";
+		if (!data.includes('"error"')) continue;
+		try {
+			const payload = JSON.parse(data) as unknown;
+			if (isPlainRecord(payload) && isContentFilterErrorFrame(payload.error)) capture.contentFilter = true;
+		} catch {
+			// A partial or vendor-specific event is pi-ai's parsing concern.
+		}
 	}
 	if (flush) capture.decoder = null;
 }
@@ -259,12 +245,12 @@ function captureResponseModelId(response: Response, capture: ResponseModelIdCapt
 		new TransformStream<Uint8Array, Uint8Array>({
 			transform(chunk, controller) {
 				capture.observed = true;
-				observeResponseModelIdBytes(chunk, capture);
+				observeErrorFrameBytes(chunk, capture);
 				controller.enqueue(chunk);
 			},
 			flush() {
 				capture.observed = true;
-				observeResponseModelIdBytes(undefined, capture, true);
+				observeErrorFrameBytes(undefined, capture, true);
 			},
 		}),
 	);
@@ -306,6 +292,10 @@ function withResponseModelIdCapture<TOptions extends StreamOptions>(
 	const capturedOptions = {
 		...options,
 		fetch: async (input, init) => captureResponseModelId(await fetchImpl(input, init), capture, model),
+		onProviderStreamEvent: async (data: unknown, eventModel: Model<Api>) => {
+			observeProviderChunk(data, capture);
+			await options.onProviderStreamEvent?.(data, eventModel);
+		},
 	} as TOptions;
 	const source = sourceFactory(capturedOptions);
 	const annotated = createAssistantMessageEventStream();
@@ -385,32 +375,9 @@ function withLiteLLMRouteFailureAdvice(
 	return advised;
 }
 
-type AnyOnPayload = (payload: unknown, model: Model<Api>) => unknown | undefined | Promise<unknown | undefined>;
 type StreamOptionsWithThinkingBudgets = StreamOptions & { thinkingBudgets?: ThinkingBudgets };
 
-const THINKING_CHAT_TEMPLATE_KWARGS = new Set([
-	"enable_thinking",
-	"preserve_thinking",
-	"reasoning_effort",
-	"thinking_budget",
-]);
-
 type UsageWithReasoningAliases = Usage & { reasoning?: number; reasoningTokens?: number; reasoning_tokens?: number };
-
-function stripThinkingRequestFields(payload: Record<string, unknown>): Record<string, unknown> {
-	const next: Record<string, unknown> = { ...payload };
-	delete next.enable_thinking;
-	delete next.reasoning;
-	delete next.reasoning_effort;
-	delete next.thinking;
-	if (isPlainRecord(next.chat_template_kwargs)) {
-		const chatTemplateKwargs: Record<string, unknown> = { ...next.chat_template_kwargs };
-		for (const key of THINKING_CHAT_TEMPLATE_KWARGS) delete chatTemplateKwargs[key];
-		if (Object.keys(chatTemplateKwargs).length > 0) next.chat_template_kwargs = chatTemplateKwargs;
-		else delete next.chat_template_kwargs;
-	}
-	return next;
-}
 
 function stripsThinking(resolved: ResolvedModelRuntimeCapabilities): boolean {
 	return reasoningClassForMechanism(resolved.thinking.mechanism) === "never";
@@ -481,186 +448,123 @@ function withStrippedPartial<TEvent extends AssistantMessageEvent>(event: TEvent
 	return { ...event, partial: stripThinkingFromMessage(event.partial as AssistantMessage) };
 }
 
-/**
- * Apply thinking-mechanism payload mutations to an openai-compat request body
- * after the catalog sampler is in place. Each mechanism owns the wire fields
- * it touches:
- *   - `effort-levels` writes `reasoning_effort` when the family resolved one;
- *     off also carries `chat_template_kwargs.enable_thinking=false` for strict
- *     templates whose effort vocabulary has no off value.
- *   - `budget-tokens` writes a vendor-specific budget object when the family
- *     declares a `thinkingFormat` of `anthropic-extended`; otherwise the
- *     budget remains informational and surfaces through the prompt only.
- *   - `on-off` writes `chat_template_kwargs.enable_thinking` matching the
- *     existing nemotron-cascade YAML precedent.
- *   - `none` removes thinking controls that lower layers may have added from
- *     stale/live-probed `model.reasoning` state.
- *   - `always-on` does not touch the payload; the backend/model owns it.
- */
-function applyThinkingPayload(
-	payload: Record<string, unknown>,
-	applied: AppliedThinking,
-	resolved: ResolvedModelRuntimeCapabilities,
-	model: Model<Api>,
-): Record<string, unknown> {
-	if (applied.mechanism === "none" || applied.mechanism === "always-on") {
-		const next = applied.mechanism === "none" ? stripThinkingRequestFields(payload) : { ...payload };
-		// Inception P1: Mercury requires its runtime-pinned off value even after discovery resolves no thinking.
-		if (applied.mechanism === "none" && model.samplingParams) {
-			for (const key of ["enable_thinking", "reasoning", "reasoning_effort", "thinking"]) {
-				if (Object.hasOwn(model.samplingParams, key)) next[key] = model.samplingParams[key];
-			}
-		}
-		if (resolved.request.chatTemplateKwargs && !chatTemplateKwargsUnsupported(model)) {
-			const existing = isPlainRecord(next.chat_template_kwargs) ? next.chat_template_kwargs : {};
-			next.chat_template_kwargs = { ...existing, ...resolved.request.chatTemplateKwargs };
-		}
-		return next;
-	}
-	const next: Record<string, unknown> = { ...payload };
-	if (
-		resolved.request.reasoningEffort &&
-		(next.reasoning_effort === undefined || resolved.response.parser === "harmony")
-	) {
-		next.reasoning_effort = resolved.request.reasoningEffort;
-	}
-	// LiteLLM generic openai/<local model> routes otherwise drop this standard
-	// parameter. Allow only the effort this model/runtime actually resolved;
-	// unknown off controls and unrelated caller parameters gain no allowance.
-	if (
-		resolved.runtimeId === "litellm" &&
-		resolved.request.reasoningEffort &&
-		next.reasoning_effort === resolved.request.reasoningEffort
-	) {
-		const allowed = Array.isArray(next.allowed_openai_params) ? next.allowed_openai_params : [];
-		next.allowed_openai_params = [...new Set([...allowed, "reasoning_effort"])];
-	}
-	if (resolved.request.chatTemplateKwargs && !chatTemplateKwargsUnsupported(model)) {
-		const existing = isPlainRecord(next.chat_template_kwargs) ? next.chat_template_kwargs : {};
-		next.chat_template_kwargs = { ...existing, ...resolved.request.chatTemplateKwargs };
-	}
-	if (
-		applied.mechanism === "budget-tokens" &&
-		resolved.request.budgetTokens !== undefined &&
-		next.thinking === undefined &&
-		resolved.request.budgetEnforcement === "enforced" &&
-		resolved.runtimeId !== "vllm"
-	) {
-		// Only vendors whose openai-compat surface advertises a structured
-		// thinking budget (e.g. anthropic-extended on routed providers) get
-		// the field. The `qwen-chat-template` and llama.cpp surfaces do not
-		// accept it; in those cases the budget stays informational and the
-		// model only learns about it through the prompt Runtime block.
-		next.thinking = { type: "enabled", budget_tokens: resolved.request.budgetTokens };
-	}
-	return next;
-}
-
 function isLmStudioModel(model: Model<Api>): boolean {
 	const metadata = runtimeMetadata(model);
 	return model.provider === "lmstudio" && metadata?.runtimeId === "lmstudio";
 }
 
-function applyLmStudioPayload(
-	payload: Record<string, unknown>,
-	model: Model<Api>,
-	resolved: ResolvedModelRuntimeCapabilities,
-): Record<string, unknown> {
-	if (!isLmStudioModel(model)) return payload;
-	const request = runtimeMetadata(model)?.lmstudio?.request;
-	const next: Record<string, unknown> = { ...payload };
-	delete next.chat_template_kwargs;
-	if (request?.ttlSeconds !== undefined) next.ttl = request.ttlSeconds;
-	if (request?.draftModel !== undefined) next.draft_model = request.draftModel;
-	if (resolved.thinking.mechanism === "none" || resolved.thinking.mechanism === "always-on") return next;
-	const resolvedEffort = runtimeMetadata(model)?.lmstudioReasoningOptions
-		? lmStudioReasoningEffort(resolved.thinking.effectiveLevel, runtimeMetadata(model)?.lmstudioReasoningOptions)
-		: (resolved.request.reasoningEffort ?? lmStudioReasoningEffort(resolved.thinking.effectiveLevel));
-	switch (request?.reasoning) {
+/**
+ * The `reasoning_effort` spelling LM Studio reads for this request, or
+ * undefined to send none (binary models take an effort only to switch off).
+ */
+function lmStudioWireEffort(model: Model<Api>, resolved: ResolvedModelRuntimeCapabilities): string | undefined {
+	const metadata = runtimeMetadata(model);
+	const options = metadata?.lmstudioReasoningOptions;
+	const setting = metadata?.lmstudio?.request?.reasoning;
+	switch (setting) {
 		case "off":
-			next.reasoning_effort = lmStudioReasoningEffort("off", runtimeMetadata(model)?.lmstudioReasoningOptions);
-			break;
+			return lmStudioReasoningEffort("off", options);
 		case "on":
-			next.reasoning_effort = lmStudioReasoningEffort("low", runtimeMetadata(model)?.lmstudioReasoningOptions);
-			break;
+			return lmStudioReasoningEffort("low", options);
 		case "low":
 		case "medium":
 		case "high":
-			next.reasoning_effort = lmStudioReasoningEffort(request.reasoning, runtimeMetadata(model)?.lmstudioReasoningOptions);
-			break;
+			return lmStudioReasoningEffort(setting, options);
 		default:
-			next.reasoning_effort = resolvedEffort;
+			return options
+				? lmStudioReasoningEffort(resolved.thinking.effectiveLevel, options)
+				: (resolved.request.reasoningEffort ?? lmStudioReasoningEffort(resolved.thinking.effectiveLevel));
 	}
-	return next;
 }
 
-function applyLlamaCppPromptCachePayload(
-	payload: Record<string, unknown>,
-	model: Model<Api>,
-	retention: StreamOptions["cacheRetention"],
+/**
+ * Body fields the runtime reads for one request on a local runtime target.
+ * Only `synthLocalModel` sets `clioCoder.runtimeId`, and that id is the gate.
+ * Pi merges `StreamOptions.samplingParams` into the request body after its own
+ * fields, so these ride that public pass-through instead of a payload rewrite,
+ * and a caller's samplingParams key replaces the value computed here. Pi's
+ * compat chain cannot carry them: it emits `chat_template_kwargs` or
+ * `reasoning_effort` but never both, gates the chat-template branch on
+ * `model.reasoning` while Clio's family kwargs apply regardless, and has no
+ * field for `allowed_openai_params`, `cache_prompt`, `ttl` or `draft_model`.
+ * `none` and `always-on` leave `reasoning_effort` to the backend or to
+ * model.samplingParams (Mercury's pinned `instant`). A model without a runtime
+ * id keeps Pi's thinking handling. That includes Pi catalog models and
+ * catalog-backed targets, which can carry `clioCoder` cache metadata but never
+ * a runtime id.
+ */
+function runtimeBodyFields(
+	model: Model<"openai-completions">,
+	resolved: ResolvedModelRuntimeCapabilities,
+	options: (StreamOptions & { reasoning?: string; reasoningEffort?: string }) | undefined,
 ): Record<string, unknown> {
 	const metadata = runtimeMetadata(model);
-	if (model.provider !== "llamacpp" || metadata?.runtimeId !== "llamacpp") return payload;
-	if (payload.cache_prompt !== undefined) return payload;
-	return { ...payload, cache_prompt: retention !== "none" };
-}
-
-function shouldApplyLlamaCppPromptCache(model: Model<"openai-completions">): boolean {
-	const metadata = runtimeMetadata(model);
-	return model.provider === "llamacpp" && metadata?.runtimeId === "llamacpp";
-}
-
-/** Compose Clio-only payload deltas over the caller hook after pi applies sampling. */
-function composeThinkingOnPayload(
-	resolved: ResolvedModelRuntimeCapabilities,
-	base: AnyOnPayload | undefined,
-	retention: StreamOptions["cacheRetention"],
-): AnyOnPayload {
-	return async (payload, model) => {
-		if (!isPlainRecord(payload)) {
-			return base ? await base(payload, model) : undefined;
-		}
-		const cached = applyLlamaCppPromptCachePayload(payload, model, retention);
-		const next = applyLmStudioPayload(applyThinkingPayload(cached, resolved.thinking, resolved, model), model, resolved);
-		if (base) {
-			const fromBase = await base(next, model);
-			if (fromBase !== undefined) return fromBase;
-		}
-		return next;
+	const fields: Record<string, unknown> = {};
+	if (metadata?.runtimeId === undefined) return fields;
+	const lmstudio = isLmStudioModel(model);
+	const { mechanism } = resolved.thinking;
+	const controlled = mechanism !== "none" && mechanism !== "always-on";
+	const effort = controlled
+		? lmstudio
+			? lmStudioWireEffort(model, resolved)
+			: resolved.request.reasoningEffort
+		: undefined;
+	if (effort !== undefined) fields.reasoning_effort = effort;
+	// LiteLLM generic openai/<local model> routes otherwise drop this standard
+	// parameter. Allow only the effort this model/runtime actually resolved.
+	if (
+		resolved.runtimeId === "litellm" &&
+		controlled &&
+		effort !== undefined &&
+		effort === resolved.request.reasoningEffort
+	) {
+		fields.allowed_openai_params = ["reasoning_effort"];
+	}
+	const requested = options?.reasoning ?? options?.reasoningEffort;
+	const kwargs = {
+		// samplingParams replaces the whole chat_template_kwargs value, so Pi's
+		// two-key qwen-chat-template spelling is repeated here for the family
+		// kwargs to extend. Re-run the local wire matrix after a Pi bump.
+		...(model.compat?.thinkingFormat === "qwen-chat-template" && model.reasoning
+			? { enable_thinking: requested !== undefined && requested !== "off", preserve_thinking: true }
+			: {}),
+		...(chatTemplateKwargsUnsupported(model) ? {} : resolved.request.chatTemplateKwargs),
 	};
+	// LM Studio ignores chat_template_kwargs; undefined removes Pi's own field.
+	if (lmstudio) fields.chat_template_kwargs = undefined;
+	else if (Object.keys(kwargs).length > 0) fields.chat_template_kwargs = kwargs;
+	if (model.provider === "llamacpp" && metadata.runtimeId === "llamacpp")
+		fields.cache_prompt = options?.cacheRetention !== "none";
+	if (lmstudio) {
+		const request = metadata.lmstudio?.request;
+		if (request?.ttlSeconds !== undefined) fields.ttl = request.ttlSeconds;
+		if (request?.draftModel !== undefined) fields.draft_model = request.draftModel;
+	}
+	return fields;
 }
 
 function withSamplingOverrides<TOptions extends StreamOptions>(
 	model: Model<"openai-completions">,
 	options: TOptions | undefined,
 	resolved: ResolvedModelRuntimeCapabilities,
-): TOptions | undefined {
-	const applied = resolved.thinking;
+	diffusion: boolean,
+): TOptions {
 	const quirks = clioQuirks(model);
-	const profile = pickSamplingProfile(quirks, applied.thinkingActive);
-	const promptCache = shouldApplyLlamaCppPromptCache(model);
-	const lmstudio = isLmStudioModel(model);
+	const profile = pickSamplingProfile(quirks, resolved.thinking.thinkingActive);
 	const vllmThinkingBudgets = resolved.runtimeId === "vllm" ? quirks?.thinking?.budgetByLevel : undefined;
-	const needsPayloadControls = promptCache || lmstudio || applied.mechanism !== "always-on";
-	if (!profile && !vllmThinkingBudgets && !needsPayloadControls) {
-		return options;
-	}
 	const merged: Record<string, unknown> = { ...(options ?? {}) };
 	if (profile?.temperature !== undefined && merged.temperature === undefined) merged.temperature = profile.temperature;
-	if (profile) {
-		merged.samplingParams = {
-			...samplingParamsFromProfile(profile, resolved.runtimeId),
-			...options?.samplingParams,
-		};
-	}
+	merged.samplingParams = {
+		...(diffusion ? { diffusing: true } : {}),
+		...runtimeBodyFields(model, resolved, options),
+		...(profile ? samplingParamsFromProfile(profile, resolved.runtimeId) : {}),
+		...options?.samplingParams,
+	};
 	if (vllmThinkingBudgets) {
 		merged.thinkingBudgets = {
 			...vllmThinkingBudgets,
 			...(options as StreamOptionsWithThinkingBudgets | undefined)?.thinkingBudgets,
 		};
-	}
-	if (needsPayloadControls) {
-		merged.onPayload = composeThinkingOnPayload(resolved, options?.onPayload, options?.cacheRetention);
 	}
 	return merged as TOptions;
 }
@@ -720,11 +624,10 @@ function hasHeader(headers: Readonly<Record<string, unknown>> | undefined, name:
 /**
  * Apply LiteLLM's request-control headers at the final transport boundary.
  *
- * The OpenAI SDK otherwise retries twice below Clio's visible recovery loop and
- * below LiteLLM's own router, multiplying a single failure into several hidden
- * attempts. Gateway requests use zero client retries by default; optional
- * `numRetries` controls the proxy router itself, where any configured attempts
- * remain observable. A physical-routing gateway should leave it at zero.
+ * Pi's adapter already makes zero client attempts unless `maxRetries` is set, so
+ * the only retry control left here is the optional `numRetries` header: it
+ * configures the proxy router itself, where any attempts stay observable. A
+ * physical-routing gateway should leave `numRetries` at zero.
  */
 function withLiteLLMRequestOptions<TOptions extends StreamOptions>(
 	model: Model<"openai-completions">,
@@ -745,14 +648,7 @@ function withLiteLLMRequestOptions<TOptions extends StreamOptions>(
 	setDefault("x-litellm-timeout", request?.timeoutSeconds?.toString());
 	setDefault("x-litellm-stream-timeout", request?.streamTimeoutSeconds?.toString());
 	setDefault("x-litellm-num-retries", request?.numRetries?.toString());
-	return {
-		...options,
-		headers,
-		// Never hide duplicate attempts inside the OpenAI SDK beneath Clio's
-		// operator-visible failure. The gateway may still be configured to retry,
-		// but physical-routing deployments should keep that policy at zero too.
-		maxRetries: options.maxRetries ?? 0,
-	} as TOptions;
+	return { ...options, headers } as TOptions;
 }
 
 function requiredToolArguments(tool: Tool): ReadonlyArray<string> {
@@ -821,22 +717,6 @@ function finalErrorFromPartial(partial: AssistantMessage, message: string): Assi
 		stopReason: "error",
 		errorMessage: message,
 	};
-}
-
-function reasoningCharsFromContent(content: AssistantMessage["content"]): number {
-	let chars = 0;
-	for (const block of content) {
-		if (block.type === "thinking") {
-			chars += (block as ThinkingContent).thinking.length;
-		}
-	}
-	return chars;
-}
-
-function estimateReasoningTokens(content: AssistantMessage["content"]): number {
-	const chars = reasoningCharsFromContent(content);
-	if (chars === 0) return 0;
-	return Math.max(1, Math.round(chars / REASONING_CHARS_PER_TOKEN));
 }
 
 function positiveNumber(value: unknown): boolean {
@@ -1202,16 +1082,7 @@ function streamCompletions<TOptions extends StreamOptions>(
 			} as TOptions)
 		: options;
 	const diffusion = diffusionFramesActive(model);
-	const framedOptions: TOptions = diffusion
-		? ({
-				...(transportOptions ?? {}),
-				onPayload: async (payload: unknown, payloadModel: Model<Api>) => {
-					const base = await transportOptions?.onPayload?.(payload, payloadModel);
-					return withDiffusingRequest(base ?? payload);
-				},
-			} as TOptions)
-		: (transportOptions ?? ({} as TOptions));
-	const requestOptions = withLiteLLMRequestOptions(model, framedOptions);
+	const requestOptions = withLiteLLMRequestOptions(model, transportOptions ?? ({} as TOptions));
 	const source = withResponseModelIdCapture(model, requestOptions, (capturedOptions) =>
 		withLocalResidency(model, options ?? {}, (requestModel) => {
 			return start(
@@ -1220,7 +1091,7 @@ function streamCompletions<TOptions extends StreamOptions>(
 				withRemainingContextBudget(
 					requestModel,
 					effectiveContext,
-					withSamplingOverrides(requestModel, capturedOptions, resolved),
+					withSamplingOverrides(requestModel, capturedOptions, resolved, diffusion),
 				),
 			);
 		}),

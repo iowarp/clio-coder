@@ -162,8 +162,10 @@ valid answer into a provider error. Explicit finish reasons remain authoritative
 Anthropic thinking is assembled by Pi, not by Clio. Pi's `streamSimple` maps the agent's thinking
 level onto `thinking.type: "adaptive"` plus `output_config.effort` (read from the model's
 `thinkingLevelMap` and `compat.forceAdaptiveThinking`) or onto a bounded `budget_tokens` for
-budget-based models. Clio's payload hook (`engine/provider-payload.ts`) does not rewrite those fields; it sets the
-OpenAI Responses `reasoning.summary` verbosity, which the agent loop cannot express as an option.
+budget-based models. Clio's request controls in `src/engine/provider-payload.ts` remove thinking
+and effort only on forced-tool rounds for Claude models that accept forced choice. Models that
+reject forced choice keep thinking and use automatic tool selection. OpenAI Responses, Azure
+Responses and Codex use Pi's stock `reasoning.summary: "auto"`; Clio does not override it.
 [thinking-off-wire.test.ts](../../tests/extended/thinking-off-wire.test.ts) locks the local LM Studio and
 llama.cpp controls used when thinking is off. Anthropic request assembly is
 inherited from the pinned Pi dependency; Clio no longer carries a separate

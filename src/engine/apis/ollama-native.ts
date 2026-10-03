@@ -35,7 +35,7 @@ import { createGemmaChannelFilter, usesGemmaChannelMarkers } from "../gemma-chan
 import { createSentinelStripper } from "../strip-tokenizer-sentinels.js";
 import { createDegradedInferenceStream } from "./degraded-inference.js";
 import { ollamaJson, streamOllamaChat } from "./ollama-http.js";
-import { remainingContextMaxTokens } from "./output-budget.js";
+import { estimateReasoningTokens, remainingContextMaxTokens } from "./output-budget.js";
 import {
 	EXIT_RELEASE_MS,
 	forgetReleasedModel,
@@ -53,7 +53,6 @@ import { type ResidentModelInfo, residentMatchesKeep } from "./resident-models.j
 import { pickSamplingProfile, samplingParamsFromProfile } from "./sampling-overrides.js";
 import type { EngineApiProvider } from "./types.js";
 
-const REASONING_CHARS_PER_TOKEN = 4;
 const ownedModelsByTarget = new Map<string, Set<string>>();
 /** How to reach each target that holds an owned model, for the release on exit. */
 const ownedEndpointsByTarget = new Map<string, { baseUrl: string; headers: Record<string, string> }>();
@@ -247,6 +246,11 @@ function buildRequest(
 	const samplingProfile = pickSamplingProfile(resolved.quirks ?? clioQuirks(model), applied.thinkingActive);
 	if (samplingProfile) applyOllamaSamplingProfile(opts, samplingProfile);
 	if (options?.temperature !== undefined) opts.temperature = options.temperature;
+	// Pi's samplingParams carry the request-level sampler values (the deterministic
+	// seed among them); Ollama takes them as nested options.
+	for (const [key, value] of Object.entries(options?.samplingParams ?? {})) {
+		if (typeof value === "number" && Number.isFinite(value)) Object.assign(opts, { [key]: value });
+	}
 	opts.num_predict = remainingContextMaxTokens(model, context, options);
 	// Sent only when the operator configured it: a `num_ctx` that differs from
 	// the loaded one makes Ollama reload the model, which on a shared server
@@ -471,7 +475,8 @@ function runStream(
 			signal?.throwIfAborted();
 			const pin = await reconcileOllamaResidency(model, headers, signal);
 			signal?.throwIfAborted();
-			// Native Ollama must run the payload hook too, or generated context loses its temperature and seed.
+			// Native Ollama runs the payload hook like Pi's adapters, so the request-local
+			// edits in provider-payload.ts and the provider diagnostics dump see its body.
 			const request = buildRequest(model, context, options, thinkingLevel, pin);
 			const patchedRequest = (await options?.onPayload?.(request, model)) ?? request;
 			const iterator = streamOllamaChat(model.baseUrl, patchedRequest as typeof request, {
@@ -483,7 +488,6 @@ function runStream(
 			let activeIdx = -1;
 			let activeThinking: ThinkingContent | null = null;
 			let activeThinkingIdx = -1;
-			let reasoningChars = 0;
 			let hadToolCall = false;
 			let doneReason: string | undefined;
 			const sentinelStripper = createSentinelStripper();
@@ -546,7 +550,6 @@ function runStream(
 					stream.push({ type: "thinking_start", contentIndex: activeThinkingIdx, partial: output });
 				}
 				activeThinking.thinking += content;
-				reasoningChars += content.length;
 				stream.push({
 					type: "thinking_delta",
 					contentIndex: activeThinkingIdx,
@@ -627,11 +630,9 @@ function runStream(
 					output.usage.input = response.prompt_eval_count ?? 0;
 					output.usage.output = response.eval_count ?? 0;
 					output.usage.totalTokens = output.usage.input + output.usage.output;
-					if (reasoningChars > 0) {
-						(output.usage as Usage & { reasoningTokens?: number }).reasoningTokens = Math.max(
-							1,
-							Math.round(reasoningChars / REASONING_CHARS_PER_TOKEN),
-						);
+					const reasoningTokens = estimateReasoningTokens(output.content);
+					if (reasoningTokens > 0) {
+						(output.usage as Usage & { reasoningTokens?: number }).reasoningTokens = reasoningTokens;
 					}
 					calculateEngineCost(model, output.usage);
 					doneReason = response.done_reason;

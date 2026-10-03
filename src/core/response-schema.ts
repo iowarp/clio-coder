@@ -61,16 +61,31 @@ export type ResponseSchemaDialect = "llamacpp-json-object" | "openai-json-schema
  * Deliberately a name check, for the reason {@link RESPONSE_SCHEMA_RUNTIME_ID}
  * gives: a generic OpenAI-compatible gateway answers HTTP 200 to a spelling it
  * does not implement and returns unconstrained JSON, so a capability flag would
- * turn a known non-enforcement into a silent one. This is the out-of-turn
- * seam's table; the worker seam keeps the narrower
- * {@link runtimeSpeaksResponseSchemaDialect} check, because a worker that
- * cannot enforce a contract must refuse admission rather than degrade.
+ * turn a known non-enforcement into a silent one. This table gives the spelling
+ * for both the out-of-turn seam and the worker seam. Admission to the worker
+ * stays on the narrower {@link runtimeSpeaksResponseSchemaDialect} check,
+ * because a worker that cannot enforce a contract must refuse admission rather
+ * than degrade.
  */
 export function responseSchemaDialectFor(runtimeId: string): ResponseSchemaDialect | null {
 	if (runtimeId === RESPONSE_SCHEMA_RUNTIME_ID) return "llamacpp-json-object";
 	if (runtimeId === OPENAI_SCHEMA_RUNTIME_ID) return "openai-json-schema";
 	if (runtimeId === GATEWAY_SCHEMA_RUNTIME_ID) return "openai-json-schema";
 	return null;
+}
+
+/**
+ * The `response_format` request field that binds a completion to `schema` in
+ * `dialect`. Callers carry it through `StreamOptions.samplingParams`, which the
+ * completions adapter merges into the body after every named field.
+ */
+export function responseFormatFor(
+	dialect: ResponseSchemaDialect,
+	schema: Record<string, unknown>,
+	name: string,
+): Record<string, unknown> {
+	if (dialect === "llamacpp-json-object") return { type: "json_object", schema };
+	return { type: "json_schema", json_schema: { name, strict: true, schema } };
 }
 
 /**

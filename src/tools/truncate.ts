@@ -1,6 +1,7 @@
 import {
 	formatSize,
 	GREP_MAX_LINE_LENGTH,
+	splitLinesForCounting,
 	type TruncationOptions,
 	type TruncationResult,
 	truncateLine,
@@ -8,25 +9,16 @@ import {
 	truncateTail as truncatePiTail,
 } from "../engine/truncate.js";
 
-// Per-observation source cap. Pi defaults to 50 KiB; Clio allows 64 KiB while
-// its default 192 KiB turn pool remains authoritative across calls. Three full
-// results consume that pool, so a fourth finds it filled. The wrappers below
-// retain only that product-level delta while Pi owns UTF-8-safe head/tail
-// truncation, line limits, grep-line clipping, and size formatting.
+// Per-observation source cap. The engine copy defaults to 50 KiB; Clio allows
+// 64 KiB while its default 192 KiB turn pool remains authoritative across
+// calls. Three full results consume that pool, so a fourth finds it filled.
+// The wrappers below retain only that 64 KiB and 2000-line product default;
+// the engine copy owns UTF-8-safe head/tail truncation, line counting,
+// grep-line clipping, and size formatting.
 export const DEFAULT_MAX_LINES = 2000;
 export const DEFAULT_MAX_BYTES = 64 * 1024;
 export type { TruncationResult };
-export { formatSize, GREP_MAX_LINE_LENGTH, truncateLine };
-
-// Count lines without a trailing-newline phantom entry. Pi uses the same
-// counting rule internally but does not export it; Clio's read continuation
-// notices need the total before selecting a slice.
-export function splitLinesForCounting(content: string): string[] {
-	if (content.length === 0) return [];
-	const lines = content.split("\n");
-	if (content.endsWith("\n")) lines.pop();
-	return lines;
-}
+export { formatSize, GREP_MAX_LINE_LENGTH, splitLinesForCounting, truncateLine };
 
 function withClioDefaults(options: TruncationOptions): Required<TruncationOptions> {
 	return {

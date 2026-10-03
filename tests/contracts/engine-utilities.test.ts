@@ -62,11 +62,12 @@ test("summary and bash replay wording remains exact", () => {
 	);
 });
 
-test("prompt arguments retain quoted, positional, slice and raw substitution semantics", () => {
+test("prompt arguments retain quoted, positional, slice and raw substitution semantics and Pi 1.0 defaults", () => {
 	const raw = "  first\t\"two words\"  'three words' ";
 	const args = parseCommandArgs(raw);
 	deepStrictEqual(args, ["first", "two words", "three words"]);
-	deepStrictEqual(parseCommandArgs('"" one\ntwo'), ["one\ntwo"]);
+	deepStrictEqual(parseCommandArgs('"" one\ntwo'), ["one", "two"]);
+	deepStrictEqual(parseCommandArgs('"a\nb" c\nd'), ["a\nb", "c", "d"]);
 	strictEqual(
 		// biome-ignore lint/suspicious/noTemplateCurlyInString: These are prompt placeholders passed to the substitution API.
 		substituteArgs("$1|$2|$4|${@:2:1}|${@:2}|$@|$ARGUMENTS", args),
@@ -74,4 +75,13 @@ test("prompt arguments retain quoted, positional, slice and raw substitution sem
 	);
 	strictEqual(substituteArgs("$1|$ARGUMENTS|$@", args, raw), `first|${raw}|first two words three words`);
 	strictEqual(substituteArgs("$ARGUMENTS", args, 'literal $1 $@ "quoted"'), 'literal $1 $@ "quoted"');
+	// biome-ignore lint/suspicious/noTemplateCurlyInString: These are prompt placeholders passed to the substitution API.
+	strictEqual(substituteArgs("${1:-7}|${@:-all}|${ARGUMENTS:-none}", [], ""), "7|all|none");
+	// Clio's default form inserts the raw payload exactly when parsed arguments exist and falls back when only whitespace was typed.
+	// biome-ignore lint/suspicious/noTemplateCurlyInString: These are prompt placeholders passed to the substitution API.
+	strictEqual(substituteArgs("${ARGUMENTS:-d}", args, raw), raw);
+	// biome-ignore lint/suspicious/noTemplateCurlyInString: These are prompt placeholders passed to the substitution API.
+	strictEqual(substituteArgs("${ARGUMENTS:-d}", parseCommandArgs(" \t "), " \t "), "d");
+	// biome-ignore lint/suspicious/noTemplateCurlyInString: These are prompt placeholders passed to the substitution API.
+	strictEqual(substituteArgs("$1|${@:1:1}", ["$@", "b"]), "$@|$@");
 });

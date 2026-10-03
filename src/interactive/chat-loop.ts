@@ -851,7 +851,7 @@ export interface CreateChatLoopDeps {
 	/**
 	 * Shared next-round provider routing. The registry applies effects emitted
 	 * by before_tool/after_tool; the chat loop applies turn hooks and consumes
-	 * the resulting choice in onPayload.
+	 * the resulting choice when it builds each request.
 	 */
 	middlewareToolChoice?: MiddlewareToolChoiceControl;
 	/**
@@ -1043,7 +1043,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 	const handoffRound = deps.runHandoffRound ?? runHandoffRound;
 	const draftRound = deps.runDraftRound ?? runOutOfTurnRound;
 	const middlewareToolChoice = deps.middlewareToolChoice ?? createMiddlewareToolChoiceControl();
-	const state = createTurnState(deps.getSettings().chat.thinkingLevel ?? "off");
+	const state = createTurnState();
 	const toolStartTimes = new Map<string, number>();
 	let lastHistoricalImageNoticeKey: string | null = null;
 
@@ -2704,7 +2704,6 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			};
 
 			agentRuntime.agent.maxRetryDelayMs = retrySettings().maxDelayMs;
-			state.currentThinkingLevel = agentRuntime.agent.state.thinkingLevel;
 			state.toolProseAbortReason = null;
 			state.toolProseAssessedChars = 0;
 			state.activeInterruptReason = null;

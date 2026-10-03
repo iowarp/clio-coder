@@ -8,7 +8,11 @@
  * reacher, so the request is built and read here through `probeJson`.
  */
 
-import { isResponseSchemaRejection, responseSchemaDialectFor } from "../../../core/response-schema.js";
+import {
+	isResponseSchemaRejection,
+	responseFormatFor,
+	responseSchemaDialectFor,
+} from "../../../core/response-schema.js";
 import { probeJson } from "../../providers/probe/http.js";
 import type { RuntimeDescriptor } from "../../providers/types/runtime-descriptor.js";
 import type { TargetDescriptor } from "../../providers/types/target-descriptor.js";
@@ -288,11 +292,7 @@ export function createHttpChannel(input: HttpChannelInput): Channel {
 			};
 			const schema = voteSchema(labelCount);
 			const bound =
-				dialect === null || schemaRejections.has(rejectionKey)
-					? null
-					: dialect === "llamacpp-json-object"
-						? { type: "json_object", schema }
-						: { type: "json_schema", json_schema: { name: "answer", strict: true, schema } };
+				dialect === null || schemaRejections.has(rejectionKey) ? null : responseFormatFor(dialect, schema, "answer");
 			let data: ChatCompletion;
 			try {
 				data = await post(bound === null ? base : { ...base, response_format: bound });

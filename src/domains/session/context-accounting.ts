@@ -204,7 +204,7 @@ function nestedNumber(root: unknown, path: ReadonlyArray<string>): number | null
 /** Approximate reasoning tokens from visible thinking text; never a provider attestation. */
 export function estimateReasoningTextTokens(text: string): number | null {
 	if (typeof text !== "string" || text.trim().length === 0) return null;
-	return Math.max(1, Math.round(text.length / TOKEN_CHARS));
+	return ceilChars(text.length);
 }
 
 export function extractReasoningTokens(usage: unknown): number | null {

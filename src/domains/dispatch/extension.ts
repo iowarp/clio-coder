@@ -62,6 +62,7 @@ import {
 	type AcpDelegationRunInput,
 	startAcpDelegationRun,
 } from "../../engine/acp/adapter.js";
+import { engineRetryDelayMs } from "../../engine/ai.js";
 import { isClaudeCanonicalTool } from "../../engine/claude/tool-safety.js";
 import { WORKER_RUNTIME_MEDIATES_CLIO_DISPATCH } from "../../engine/worker-runtime-capabilities.js";
 import type { AskUserHandler } from "../../tools/ask-user.js";
@@ -213,7 +214,6 @@ import {
 	settleStoredAssignment,
 	timeoutStoredAssignment,
 } from "./assignment-store.js";
-import { type BackoffState, createBackoff, nextDelay } from "./backoff.js";
 import {
 	getDetachedBatch,
 	listDetachedBatches,
@@ -3768,7 +3768,12 @@ export function createDispatchBundle(
 		settleCanceled: () => void;
 	}
 	const retryQueue = new Map<string, RetryQueueEntry>();
-	const retryBackoff = new Map<string, BackoffState>();
+	/** Delay before the first retry of a member's worker run; each further attempt doubles it. */
+	const RETRY_BACKOFF_BASE_MS = 500;
+	/** Ceiling the doubled retry delay never exceeds. */
+	const RETRY_BACKOFF_CAP_MS = 60_000;
+	/** Retry attempts per member control root; the count sets the delay between the base and the cap above. */
+	const retryBackoff = new Map<string, number>();
 	const retryReasons = new Map<string, string>();
 	const assignmentRootsByAttempt = new Map<string, string>();
 	// Fleet lineage is shared ancestry, not control ownership. Keep each
@@ -4017,9 +4022,9 @@ export function createDispatchBundle(
 					"automatic retry suppressed because incomplete tool telemetry cannot prove the failed attempt left the shared workspace unchanged",
 			};
 		}
-		const backoff = retryBackoff.get(controlRoot) ?? createBackoff();
-		const { state: nextBackoff, delayMs: backoffDelayMs } = nextDelay(backoff);
-		retryBackoff.set(controlRoot, nextBackoff);
+		const backoffAttempt = (retryBackoff.get(controlRoot) ?? 0) + 1;
+		retryBackoff.set(controlRoot, backoffAttempt);
+		const backoffDelayMs = engineRetryDelayMs(RETRY_BACKOFF_BASE_MS, RETRY_BACKOFF_CAP_MS, backoffAttempt);
 		// An in-flight assignment is governed by maxRetries and backoff alone. The
 		// target cooldown it just created protects new work, not this chain.
 		const delayMs = Math.max(backoffDelayMs, decision.retryAfterMs ?? 0);

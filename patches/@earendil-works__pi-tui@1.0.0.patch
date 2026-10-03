@@ -1,5 +1,5 @@
 diff --git a/dist/alt-screen-search.d.ts b/dist/alt-screen-search.d.ts
-index 7bdab98c0..3e9bf40e6 100644
+index 7bdab98c02b263c26ae44bf70b41772d2c4a26b7..3e9bf40e6048a126918842d1552ea8022fd8f2cf 100644
 --- a/dist/alt-screen-search.d.ts
 +++ b/dist/alt-screen-search.d.ts
 @@ -39,6 +39,7 @@ export declare class AltScreenSearchComponent implements Component, Focusable {
@@ -11,7 +11,7 @@ index 7bdab98c0..3e9bf40e6 100644
      invalidate(): void;
      render(width: number): string[];
 diff --git a/dist/alt-screen-search.js b/dist/alt-screen-search.js
-index 29318b322..b11f8b3bb 100644
+index 29318b3224bb8346991569caa0fc6277fda4117b..b11f8b3bb5cd369907c625170c89df71d2cff42e 100644
 --- a/dist/alt-screen-search.js
 +++ b/dist/alt-screen-search.js
 @@ -205,6 +205,10 @@ export class AltScreenSearchComponent {
@@ -26,7 +26,7 @@ index 29318b322..b11f8b3bb 100644
          const previous = this.input.getValue();
          this.input.handleInput(data);
 diff --git a/dist/components/editor.d.ts b/dist/components/editor.d.ts
-index 445c8184e..26569efa2 100644
+index 445c8184eeb734692d9cc036f2a4b195d8769e3e..26569efa2f3d00ddb86e2d3bd1f88fb65dd140fe 100644
 --- a/dist/components/editor.d.ts
 +++ b/dist/components/editor.d.ts
 @@ -98,6 +98,7 @@ export declare class Editor implements Component, Focusable {
@@ -38,7 +38,7 @@ index 445c8184e..26569efa2 100644
      private layoutText;
      getText(): string;
 diff --git a/dist/components/editor.js b/dist/components/editor.js
-index f02bf7f5a..c39760f36 100644
+index f02bf7f5ac3ea8466431ce4ae3171ae4bb37eb86..c39760f36d7623c26823a63276ba6b9e0289eb1d 100644
 --- a/dist/components/editor.js
 +++ b/dist/components/editor.js
 @@ -545,6 +545,18 @@ export class Editor {
@@ -61,7 +61,7 @@ index f02bf7f5a..c39760f36 100644
          const kb = getKeybindings();
          // Handle character jump mode (awaiting next character to jump to)
 diff --git a/dist/components/input.d.ts b/dist/components/input.d.ts
-index 982a3d988..4df94e925 100644
+index 982a3d9888fa79ed008f643beaf9461b068aed9e..4df94e925f63c8d9cfd2a4e40189b0a938d8557f 100644
 --- a/dist/components/input.d.ts
 +++ b/dist/components/input.d.ts
 @@ -26,6 +26,7 @@ export declare class Input implements Component, Focusable {
@@ -73,7 +73,7 @@ index 982a3d988..4df94e925 100644
      handleMouse(event: TuiMouseEvent): TuiMouseEventResult | undefined;
      private insertCharacter;
 diff --git a/dist/components/input.js b/dist/components/input.js
-index 5e7fffa20..73428b2ee 100644
+index 5e7fffa205390c2b2ff906a5386275c9197490fa..73428b2ee1c8b555bd3a8eed2dd88e11b1e851f2 100644
 --- a/dist/components/input.js
 +++ b/dist/components/input.js
 @@ -40,6 +40,26 @@ export class Input {
@@ -103,71 +103,8 @@ index 5e7fffa20..73428b2ee 100644
      handleInput(data) {
          // Handle bracketed paste mode
          // Start of paste: \x1b[200~
-diff --git a/dist/components/markdown.d.ts b/dist/components/markdown.d.ts
-index 7dfee5979..acf81ef09 100644
---- a/dist/components/markdown.d.ts
-+++ b/dist/components/markdown.d.ts
-@@ -50,6 +50,11 @@ export interface MarkdownOptions {
-     /** Render supported LaTeX math expressions as Unicode text (default: true). */
-     renderLatex?: boolean;
- }
-+/** Clio patch: the top-level block tokens `Markdown` renders for `text`, tabs expanded. */
-+export declare function lexMarkdownBlocks(text: string): Array<{
-+    type: string;
-+    raw: string;
-+}>;
- export declare class Markdown implements Component {
-     private text;
-     private paddingX;
-diff --git a/dist/components/markdown.js b/dist/components/markdown.js
-index 28709ba45..d498da33f 100644
---- a/dist/components/markdown.js
-+++ b/dist/components/markdown.js
-@@ -147,6 +147,16 @@ markdownParser.setOptions({
-     tokenizer: new StrictStrikethroughTokenizer(),
- });
- markdownParser.use({ extensions: [...LATEX_MARKDOWN_EXTENSIONS] });
-+/**
-+ * Clio patch: the top-level block tokens `Markdown` renders for `text`, from
-+ * the same lexer, tabs expanded the same way. Each token carries its `type`
-+ * and `raw` source; the raws concatenate to the tab-expanded text. A caller
-+ * that renders a document block by block splits it here so its blocks are
-+ * exactly the ones this renderer would see.
-+ */
-+export function lexMarkdownBlocks(text) {
-+    return markdownParser.lexer(text.replace(/\t/g, "   ")).map((token) => ({ type: token.type, raw: token.raw }));
-+}
- export class Markdown {
-     text;
-     paddingX; // Left/right padding
-diff --git a/dist/index.d.ts b/dist/index.d.ts
-index 9893b73e6..d4ae94291 100644
---- a/dist/index.d.ts
-+++ b/dist/index.d.ts
-@@ -8,7 +8,7 @@ export { HStack } from "./components/h-stack.ts";
- export { Image, type ImageOptions, type ImageTheme } from "./components/image.ts";
- export { Input } from "./components/input.ts";
- export { Loader, type LoaderIndicatorOptions } from "./components/loader.ts";
--export { type DefaultTextStyle, Markdown, type MarkdownOptions, type MarkdownTheme } from "./components/markdown.ts";
-+export { type DefaultTextStyle, lexMarkdownBlocks, Markdown, type MarkdownOptions, type MarkdownTheme } from "./components/markdown.ts";
- export { MouseRegion, type MouseRegionHandler } from "./components/mouse-region.ts";
- export { ScrollView, type ScrollViewOptions, type ScrollViewScrollbar, type ScrollViewScrollToOptions, } from "./components/scroll-view.ts";
- export { type SelectItem, SelectList, type SelectListLayoutOptions, type SelectListTheme, type SelectListTruncatePrimaryContext, } from "./components/select-list.ts";
-diff --git a/dist/index.js b/dist/index.js
-index 25599ecb8..6dc26857c 100644
---- a/dist/index.js
-+++ b/dist/index.js
-@@ -12,7 +12,7 @@ export { HStack } from "./components/h-stack.js";
- export { Image } from "./components/image.js";
- export { Input } from "./components/input.js";
- export { Loader } from "./components/loader.js";
--export { Markdown } from "./components/markdown.js";
-+export { lexMarkdownBlocks, Markdown } from "./components/markdown.js";
- export { MouseRegion } from "./components/mouse-region.js";
- export { ScrollView, } from "./components/scroll-view.js";
- export { SelectList, } from "./components/select-list.js";
 diff --git a/dist/tui-alt-screen.d.ts b/dist/tui-alt-screen.d.ts
-index f9a115092..7df22fde6 100644
+index f9a115092e2014240e414ec70b71d1d07971c4dc..7df22fde65119146cf0f8d95c3f148ad5010c863 100644
 --- a/dist/tui-alt-screen.d.ts
 +++ b/dist/tui-alt-screen.d.ts
 @@ -105,11 +105,13 @@ export declare class TuiAltScreen extends TuiBase implements ViewportTUI {
@@ -189,7 +126,7 @@ index f9a115092..7df22fde6 100644
      private handleSearchMouseEvent;
      private refreshSearch;
 diff --git a/dist/tui-alt-screen.js b/dist/tui-alt-screen.js
-index 2789a1155..ab2a96498 100644
+index 2789a11558000bd5965cbaade52f5c0638c4d6b1..ab2a964986311530a5c56e2709744dcaa550481c 100644
 --- a/dist/tui-alt-screen.js
 +++ b/dist/tui-alt-screen.js
 @@ -309,6 +309,13 @@ export class TuiAltScreen extends TuiBase {
@@ -207,7 +144,7 @@ index 2789a1155..ab2a96498 100644
          if (this.activeSearch) {
              this.closeSearch();
 diff --git a/dist/tui-main-screen.js b/dist/tui-main-screen.js
-index 896bb501f..c30b6bbdb 100644
+index 896bb501fc5d6e7b0bf76faa8d97dcd045e95526..57cfbca2322993438bb96c4c3c69c6ca5e084fe7 100644
 --- a/dist/tui-main-screen.js
 +++ b/dist/tui-main-screen.js
 @@ -3,7 +3,8 @@ import * as os from "node:os";
@@ -310,107 +247,8 @@ index 896bb501f..c30b6bbdb 100644
                  if (extractKittyImageIds(lines[i]).length === 0)
                      continue;
                  const blockEnd = i + this.getKittyImageReservedRows(lines, i) - 1;
-@@ -445,6 +502,11 @@ export class TuiMainScreen extends TuiBase {
-             if (i > firstChanged)
-                 output.append("\r\n");
-             const line = newLines[i];
-+            // Clio patch: a row inside the changed range that did not change is
-+            // already on screen; step over it instead of clearing and rewriting it.
-+            // A streamed token otherwise rewrote every row down to the footer.
-+            if (i < this.previousLines.length && line === this.previousLines[i] && !isImageLine(line))
-+                continue;
-             const isImage = isImageLine(line);
-             const imageReservedRows = isImage ? this.getKittyImageReservedRows(newLines, i, renderEnd) : 1;
-             if (imageReservedRows > 1) {
-diff --git a/dist/tui.d.ts b/dist/tui.d.ts
-index acc522954..4b1fa8ec7 100644
---- a/dist/tui.d.ts
-+++ b/dist/tui.d.ts
-@@ -231,6 +231,8 @@ export interface TUI extends Component {
-     stop(options?: TuiStopOptions): void;
-     renderNow(force?: boolean): void;
-     requestRender(force?: boolean): void;
-+    /** One application policy, before viewport listeners; releases are filtered first. */
-+    setApplicationInputPolicy(policy: TuiInputListener): () => void;
-     addInputListener(listener: TuiInputListener): () => void;
-     removeInputListener(listener: TuiInputListener): void;
-     onTerminalColorSchemeChange(listener: (scheme: TerminalColorScheme) => void): () => void;
-@@ -331,6 +333,8 @@ export declare abstract class TuiBase extends Container implements TUI {
-     private getTopmostVisibleOverlay;
-     invalidate(): void;
-     start(): void;
-+    /** One application policy, before viewport listeners; releases are filtered first. */
-+    setApplicationInputPolicy(policy: TuiInputListener): () => void;
-     addInputListener(listener: TuiInputListener): () => void;
-     removeInputListener(listener: TuiInputListener): void;
-     onTerminalColorSchemeChange(listener: (scheme: TerminalColorScheme) => void): () => void;
-diff --git a/dist/tui.js b/dist/tui.js
-index 9f8123fb0..4b6313324 100644
---- a/dist/tui.js
-+++ b/dist/tui.js
-@@ -127,17 +127,19 @@ export class Container {
-         return undefined;
-     }
-     render(width) {
--        const lines = [];
-+        // Clio patch: one exact-size copy of the children's rows. Growing a
-+        // fresh array one row at a time allocated about five times the frame
-+        // on every render, which on a tall transcript was most of the garbage
-+        // behind scavenge pauses in the middle of a stream.
-+        const parts = [];
-         const mouseChildren = [];
-         for (const child of this.children) {
-             const childLines = child.render(width);
-             mouseChildren.push({ component: child, height: childLines.length });
--            for (const line of childLines) {
--                lines.push(line);
--            }
-+            parts.push(childLines);
-         }
-         this.mouseLayout = { width, children: mouseChildren };
--        return lines;
-+        return parts.length === 1 ? parts[0].slice() : [].concat(...parts);
-     }
- }
- /**
-@@ -175,6 +177,7 @@ export class TuiBase extends Container {
-     terminal;
-     focusedComponent = null;
-     inputListeners = new Set();
-+    applicationInputPolicy;
-     /** Global callback for debug key (Shift+Ctrl+D). Called before input is forwarded to focused component. */
-     onDebug;
-     renderRequested = false;
-@@ -569,6 +572,12 @@ export class TuiBase extends Container {
-         this.queryCellSize();
-         this.requestRender();
-     }
-+    setApplicationInputPolicy(policy) {
-+        this.applicationInputPolicy = policy;
-+        return () => {
-+            if (this.applicationInputPolicy === policy) this.applicationInputPolicy = undefined;
-+        };
-+    }
-     addInputListener(listener) {
-         this.inputListeners.add(listener);
-         return () => {
-@@ -682,6 +691,14 @@ export class TuiBase extends Container {
-         if (this.consumeTerminalColorSchemeReport(data)) {
-             return;
-         }
-+        // Application ownership precedes viewport shortcuts and focused input.
-+        // Bracketed paste is literal data, including event-looking bytes.
-+        const paste = data.includes("\x1b[200~");
-+        if (!paste && isKeyRelease(data)) return;
-+        const policy = this.applicationInputPolicy?.(data);
-+        if (policy?.consume) return;
-+        if (policy?.data !== undefined) data = policy.data;
-+        if (data.length === 0) return;
-         if (this.inputListeners.size > 0) {
-             let current = data;
-             for (const listener of this.inputListeners) {
 diff --git a/dist/utils.js b/dist/utils.js
-index e6b878c52..55903d69b 100644
+index e6b878c5234f1bb456033c429e699e1b62629c28..55903d69b1797025229a8d37487ea1c407dc5334 100644
 --- a/dist/utils.js
 +++ b/dist/utils.js
 @@ -856,7 +856,9 @@ function wrapSingleLine(line, width) {

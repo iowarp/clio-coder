@@ -1,4 +1,4 @@
-// Copied from Pi packages/agent/src/harness/messages.ts at v0.99.1 (MIT license).
+// Derived from pi-coding-agent packages/coding-agent/src/core/messages.ts at v1.0.0 (MIT license).
 export const COMPACTION_SUMMARY_PREFIX = `The conversation history before this point was compacted into the following summary:
 
 <summary>

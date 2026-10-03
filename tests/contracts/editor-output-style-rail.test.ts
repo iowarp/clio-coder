@@ -4,7 +4,7 @@ import type { ClioSettings } from "../../src/core/config.js";
 import type { OutputStyle } from "../../src/core/defaults.js";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import type { ProcessTerminal, Terminal } from "../../src/engine/tui.js";
-import { stripTerminalSequences, TuiMainScreen, VStack } from "../../src/engine/tui.js";
+import { ApplicationInputTuiMainScreen, stripTerminalSequences, VStack } from "../../src/engine/tui.js";
 import type { TerminalLease } from "../../src/interactive/terminal-lease.js";
 import { createProcessTerminalLease } from "../../src/interactive/terminal-lease.js";
 
@@ -34,7 +34,7 @@ afterEach(async () => {
 
 function lease(settings: ClioSettings): TerminalLease {
 	const terminal = new RailTerminal();
-	const tui = new TuiMainScreen(terminal);
+	const tui = new ApplicationInputTuiMainScreen(terminal);
 	const created = createProcessTerminalLease({
 		settings,
 		testing: {

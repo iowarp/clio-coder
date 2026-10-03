@@ -1,118 +1,216 @@
-import { deepStrictEqual, strictEqual, throws } from "node:assert/strict";
+import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { test } from "node:test";
+import type { Model } from "@earendil-works/pi-ai";
+import { Type } from "typebox";
+import { responseFormatFor, responseSchemaDialectFor } from "../../src/core/response-schema.js";
+import ollamaRuntime from "../../src/domains/providers/runtimes/local-native/ollama.js";
+import litellmRuntime from "../../src/domains/providers/runtimes/protocol/litellm.js";
+import { engineStreamSimple } from "../../src/engine/api-registry.js";
+import { ollamaNativeApiProvider } from "../../src/engine/apis/ollama-native.js";
+import { engineModels } from "../../src/engine/models.js";
 import {
-	patchTerminalToolPayload,
-	patchWorkerRequestPayload,
+	applyToolRounds,
+	deterministicSampling,
 	supportsNamedToolChoice,
+	type ToolRound,
 } from "../../src/engine/provider-payload.js";
 import type { EngineModel } from "../../src/engine/types.js";
 
 const name = "clio_submit_result";
-const model = (api: string) => ({ id: "fixture", provider: "fixture", api }) as EngineModel;
-const tools = [
-	{ type: "function", function: { name: "write" } },
-	{ type: "function", function: { name } },
-];
-test("terminal handoff overrides work-tool lock with one required tool", () => {
-	deepStrictEqual(
-		patchWorkerRequestPayload({ tools }, model("openai-completions"), {
-			runtimeId: "litellm",
-			toolSurfaceLocked: true,
-			terminalToolName: name,
-		}),
-		{ tools: [tools[1]], tool_choice: "required", parallel_tool_calls: false },
-	);
+const tool = (toolName: string) => ({
+	name: toolName,
+	description: toolName,
+	parameters: Type.Object({ path: Type.String() }),
 });
-test("Anthropic terminal handoff disables thinking and parallel calls", () => {
-	deepStrictEqual(
-		patchTerminalToolPayload(
-			{ tools: [{ name: "write" }, { name }], thinking: { type: "adaptive" }, output_config: { effort: "high" } },
-			model("anthropic-messages"),
-			name,
-		),
-		{ tools: [{ name }], tool_choice: { type: "tool", name, disable_parallel_tool_use: true } },
+const handoff: ToolRound = { kind: "required", toolName: name, handoff: true };
+const lock: ToolRound = { kind: "tools-removed" };
+
+/** The wire body Pi's own serializer builds for one controlled round; no network is reached. */
+async function wire(
+	model: EngineModel,
+	rounds: readonly (ToolRound | undefined)[],
+	reasoning = true,
+	extra: NonNullable<Parameters<typeof applyToolRounds>[2]> = {},
+) {
+	const usage = { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2 };
+	const context = {
+		systemPrompt: "Terminal protocol.",
+		tools: [tool("write"), tool(name)],
+		messages: [
+			{ role: "user" as const, content: "inspect", timestamp: 1 },
+			{
+				role: "assistant" as const,
+				api: model.api,
+				provider: model.provider,
+				model: model.id,
+				stopReason: "toolUse" as const,
+				timestamp: 2,
+				usage: { ...usage, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
+				content: [{ type: "toolCall" as const, id: "call_1", name: "write", arguments: { path: "a" } }],
+			},
+			{
+				role: "toolResult" as const,
+				toolCallId: "call_1",
+				toolName: "write",
+				content: [{ type: "text" as const, text: "ok" }],
+				isError: false,
+				timestamp: 3,
+			},
+			{ role: "user" as const, content: "continue", timestamp: 4 },
+		],
+	};
+	const controlled = applyToolRounds(
+		model,
+		context,
+		{ apiKey: "fixture", ...(reasoning ? { reasoning: "high" as const } : {}), ...extra },
+		rounds,
 	);
+	let body: Record<string, unknown> = {};
+	await engineStreamSimple(model, controlled.context, {
+		...controlled.options,
+		onPayload: async (payload, current) => {
+			const next = (await controlled.options?.onPayload?.(payload, current)) ?? payload;
+			body = structuredClone(next) as Record<string, unknown>;
+			throw new Error("captured before network I/O");
+		},
+	}).result();
+	return body;
+}
+const catalog = (provider: string, id: string): EngineModel => {
+	const model = engineModels.getModel(provider as never, id) as EngineModel | undefined;
+	ok(model, `${provider}/${id} must exist in the Pi catalog`);
+	return model;
+};
+// Pi 1.0 appends a reserved deferred placeholder to managed-tool Claude requests.
+const names = (tools: unknown) =>
+	(tools as Array<{ name?: string; function?: { name: string }; type?: string }>)
+		.map((entry) => entry.function?.name ?? entry.name)
+		.filter((entry) => entry !== "__pi_deferred_placeholder__");
+
+test("terminal handoff overrides work-tool lock with one required tool", async () => {
+	const model = catalog("openrouter", "google/gemini-2.5-flash:batch");
+	const body = await wire(model, [handoff, lock]);
+	deepStrictEqual(names(body.tools), [name]);
+	strictEqual(body.tool_choice, "required");
+	strictEqual(body.parallel_tool_calls, false);
+});
+test("Anthropic terminal handoff disables thinking and parallel calls", async () => {
+	for (const id of ["claude-opus-4-8", "claude-opus-5"]) {
+		const body = await wire(catalog("anthropic", id), [handoff]);
+		deepStrictEqual(names(body.tools), [name]);
+		deepStrictEqual(body.tool_choice, { type: "tool", name, disable_parallel_tool_use: true });
+		strictEqual(body.thinking, undefined);
+		strictEqual((body.output_config as { effort?: string } | undefined)?.effort, undefined);
+	}
 });
 for (const id of ["claude-sonnet-5-5", "claude-opus-5-5", "claude-fable-5-1", "claude-mythos-5-1"]) {
-	test(`${id} terminal handoff uses auto and preserves Anthropic thinking`, () => {
+	test(`${id} terminal handoff uses auto and preserves Anthropic thinking`, async () => {
+		// Mythos has no catalog row; its forced-choice rule rides the id, so a sibling row stands in for the wire shape.
+		const anthropic = id.startsWith("claude-mythos")
+			? { ...catalog("anthropic", "claude-fable-5-1"), id }
+			: catalog("anthropic", id);
+		const body = await wire(anthropic, [handoff]);
+		deepStrictEqual(names(body.tools), [name]);
+		deepStrictEqual(body.tool_choice, { type: "auto", disable_parallel_tool_use: true });
+		strictEqual((body.thinking as { type: string }).type, "adaptive");
+		deepStrictEqual(body.output_config, { effort: "high" });
+		const sibling = id.startsWith("claude-mythos") ? "anthropic.claude-fable-5-1" : `anthropic.${id}`;
+		const bedrock = await wire({ ...catalog("amazon-bedrock", sibling), id: `anthropic.${id}` }, [handoff]);
+		const config = bedrock.toolConfig as { tools: Array<{ toolSpec: { name: string } }>; toolChoice: unknown };
 		deepStrictEqual(
-			patchTerminalToolPayload(
-				{ tools: [{ name: "write" }, { name }], thinking: { type: "adaptive" }, output_config: { effort: "high" } },
-				{ ...model("anthropic-messages"), id },
-				name,
-			),
-			{
-				tools: [{ name }],
-				thinking: { type: "adaptive" },
-				output_config: { effort: "high" },
-				tool_choice: { type: "auto", disable_parallel_tool_use: true },
-			},
+			config.tools.map((entry) => entry.toolSpec.name),
+			[name],
 		);
-		deepStrictEqual(
-			patchTerminalToolPayload(
-				{ toolConfig: { tools: [{ toolSpec: { name: "write" } }, { toolSpec: { name } }] } },
-				{ ...model("bedrock-converse-stream"), id: `anthropic.${id}` },
-				name,
-			),
-			{ toolConfig: { tools: [{ toolSpec: { name } }], toolChoice: { auto: {} } } },
-		);
+		deepStrictEqual(config.toolChoice, { auto: {} });
 	});
 }
-test("Responses terminal handoff uses native function choice", () => {
-	deepStrictEqual(
-		patchTerminalToolPayload(
-			{
-				tools: [
-					{ type: "function", name: "write" },
-					{ type: "function", name },
-				],
-			},
-			model("openai-responses"),
-			name,
-		),
-		{ tools: [{ type: "function", name }], tool_choice: { type: "function", name }, parallel_tool_calls: false },
-	);
+test("Responses terminal handoff uses native function choice", async () => {
+	const body = await wire(catalog("openai", "gpt-5.6-luna"), [handoff]);
+	deepStrictEqual(names(body.tools), [name]);
+	deepStrictEqual(body.tool_choice, { type: "function", name });
+	strictEqual(body.parallel_tool_calls, false);
 });
-test("Google terminal handoff narrows nested declarations", () => {
+test("Google terminal handoff narrows nested declarations", async () => {
+	const body = await wire(catalog("google", "gemini-3.1-pro-preview"), [handoff]);
+	const config = body.config as {
+		tools: Array<{ functionDeclarations: Array<{ name: string }> }>;
+		toolConfig: { functionCallingConfig: { mode: string } };
+	};
 	deepStrictEqual(
-		patchTerminalToolPayload(
-			{ config: { tools: [{ functionDeclarations: [{ name: "write" }, { name }] }] } },
-			model("google-generative-ai"),
-			name,
-		),
-		{
-			config: {
-				tools: [{ functionDeclarations: [{ name }] }],
-				toolConfig: { functionCallingConfig: { mode: "ANY", allowedFunctionNames: [name] } },
-			},
-		},
+		config.tools.flatMap((entry) => entry.functionDeclarations.map((declaration) => declaration.name)),
+		[name],
 	);
+	// One declared function under ANY is the forced call; Pi has no allowed-names option.
+	strictEqual(config.toolConfig.functionCallingConfig.mode, "ANY");
 });
-test("Bedrock terminal handoff narrows tool specs", () => {
+test("Bedrock terminal handoff narrows tool specs", async () => {
+	const body = await wire(catalog("amazon-bedrock", "anthropic.claude-sonnet-4-5-20250929-v1:0"), [handoff]);
+	const config = body.toolConfig as { tools: Array<{ toolSpec: { name: string } }>; toolChoice: unknown };
 	deepStrictEqual(
-		patchTerminalToolPayload(
-			{ toolConfig: { tools: [{ toolSpec: { name: "write" } }, { toolSpec: { name } }] } },
-			model("bedrock-converse-stream"),
-			name,
-		),
-		{ toolConfig: { tools: [{ toolSpec: { name } }], toolChoice: { tool: { name } } } },
+		config.tools.map((entry) => entry.toolSpec.name),
+		[name],
 	);
+	deepStrictEqual(config.toolChoice, { tool: { name } });
+	// A forced choice and thinking are exclusive on Claude: the round leaves reasoning unset.
+	strictEqual(body.additionalModelRequestFields, undefined);
 });
 test("unknown API does not claim forced-tool support", () => {
 	strictEqual(supportsNamedToolChoice("unknown-api"), false);
-	strictEqual(patchTerminalToolPayload({ tools }, model("unknown-api"), name), undefined);
+	const model = { id: "fixture", provider: "fixture", api: "unknown-api" } as EngineModel;
+	const request = { messages: [], tools: [tool(name)] };
+	const controlled = applyToolRounds(model, request, undefined, [handoff]);
+	strictEqual(controlled.context, request);
+	strictEqual(controlled.options, undefined);
+});
+test("deterministic sampling is limited to compatible self-hosted APIs", async () => {
+	// The worker merges deterministicSampling over its stream options; the body below is what each API then serializes.
+	const sampled = (model: EngineModel, runtimeId: string) =>
+		wire(model, [], false, { ...deterministicSampling(model, runtimeId) });
+	const gateway = (id: string) =>
+		litellmRuntime.synthesizeModel({ id: "gateway", runtime: "litellm", url: "http://gateway.invalid:4000" }, id, null);
+	const local = await sampled(gateway("dynamo/qwen3.8-27b") as EngineModel, "litellm");
+	strictEqual(local.temperature, 0);
+	strictEqual(local.seed, 42);
+	// Anthropic proxies reject non-default sampling even behind a self-hosted gateway.
+	const claude = await sampled(gateway("claude-sonnet-4") as EngineModel, "litellm");
+	strictEqual(claude.temperature, undefined);
+	strictEqual(claude.seed, undefined);
+	// Hosted dialects may reject a seed or a zero temperature, so a runtime outside the self-hosted list sends neither.
+	const hosted = await sampled(catalog("openrouter", "google/gemini-2.5-flash:batch"), "openrouter");
+	strictEqual(hosted.temperature, undefined);
+	strictEqual(hosted.seed, undefined);
+	// Ollama has no Pi serializer; its adapter carries the seed as a nested option.
+	const ollama = ollamaRuntime.synthesizeModel?.(
+		{ id: "o", runtime: "ollama", url: "http://127.0.0.1:9", lifecycle: "user-managed" },
+		"qwen3:30b-a3b-instruct",
+		null,
+	) as Model<"ollama-native">;
+	let request: { options?: { temperature?: number; seed?: number } } = {};
+	await ollamaNativeApiProvider
+		.streamSimple(
+			ollama,
+			{ messages: [{ role: "user", content: "inspect", timestamp: 1 }] },
+			{
+				apiKey: "fixture",
+				...deterministicSampling(ollama, "ollama"),
+				onPayload: (payload) => {
+					request = structuredClone(payload) as typeof request;
+					throw new Error("captured before network I/O");
+				},
+			},
+		)
+		.result();
+	strictEqual(request.options?.temperature, 0);
+	strictEqual(request.options?.seed, 42);
 });
 test("admitted LiteLLM response schema uses gateway dialect while llama retains native dialect", () => {
 	const schema = { type: "object", properties: {} };
-	deepStrictEqual(
-		patchWorkerRequestPayload({}, model("openai-completions"), { runtimeId: "litellm", responseSchema: schema }),
-		{ response_format: { type: "json_schema", json_schema: { name: "clio_result", strict: true, schema } } },
-	);
-	deepStrictEqual(
-		patchWorkerRequestPayload({}, model("openai-completions"), { runtimeId: "llamacpp", responseSchema: schema }),
-		{ response_format: { type: "json_object", schema } },
-	);
-	throws(() =>
-		patchWorkerRequestPayload({}, model("openai-completions"), { runtimeId: "ollama", responseSchema: schema }),
-	);
+	const litellm = responseSchemaDialectFor("litellm");
+	const llamacpp = responseSchemaDialectFor("llamacpp");
+	ok(litellm !== null && llamacpp !== null);
+	deepStrictEqual(responseFormatFor(litellm, schema, "clio_result"), {
+		type: "json_schema",
+		json_schema: { name: "clio_result", strict: true, schema },
+	});
+	deepStrictEqual(responseFormatFor(llamacpp, schema, "clio_result"), { type: "json_object", schema });
 });

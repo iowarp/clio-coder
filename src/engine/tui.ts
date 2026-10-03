@@ -22,6 +22,7 @@ export type {
 	ScrollViewScrollbar,
 	SelectItem,
 	SelectListLayoutOptions,
+	SelectListTheme,
 	SettingItem,
 	SettingsListTheme,
 	SlashCommand,
@@ -84,13 +85,13 @@ export {
 	isKeyRelease,
 	isKeyRepeat,
 	KeybindingsManager,
-	lexMarkdownBlocks,
 	Markdown,
 	Marked,
 	matchesKey,
 	ProcessTerminal,
 	parseKey,
 	ScrollView,
+	SelectList,
 	setKeybindings,
 	stripTerminalSequences,
 	Text,
@@ -104,16 +105,11 @@ export {
 } from "@earendil-works/pi-tui";
 export { decodePrintableKey } from "@earendil-works/pi-tui/dist/keys.js";
 export { extractAnsiCode } from "@earendil-works/pi-tui/dist/utils.js";
+export type { ApplicationInputHost, ApplicationInputPolicy, ApplicationInputTui } from "./application-input-tui.js";
+export { ApplicationInputTuiAltScreen, ApplicationInputTuiMainScreen } from "./application-input-tui.js";
 export {
 	InstrumentedTuiAltScreen,
 	InstrumentedTuiMainScreen,
 	type TuiRenderObserver,
 	type TuiRenderPhase,
 } from "./instrumented-tui.js";
-export type { SelectListTheme } from "./select-list.js";
-/**
- * SelectList ships from the engine as a thin subclass that honors a design
- * cursor exposed through SelectListTheme, so raw pickers no longer inherit
- * pi-tui's hardcoded arrow. See ./select-list.ts.
- */
-export { SelectList } from "./select-list.js";

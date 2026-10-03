@@ -17,6 +17,7 @@
  * not overrun the frame the TUI just handed back.
  */
 
+import { wrapTextWithAnsi } from "../engine/text-wrap.js";
 import { BusChannels } from "./bus-events.js";
 import { getSharedBus } from "./shared-bus.js";
 
@@ -49,42 +50,15 @@ const SIGNAL_EXIT_CODES: Partial<Record<NodeJS.Signals, number>> = {
 };
 
 /**
- * Break `text` into lines no wider than `width` columns, at spaces where
- * possible and mid-word when a single token is wider than the terminal.
- */
-function wrapToWidth(text: string, width: number): string[] {
-	if (!Number.isFinite(width) || width < 1) return [text];
-	const lines: string[] = [];
-	let current = "";
-	for (const word of text.split(/\s+/).filter((w) => w.length > 0)) {
-		let token = word;
-		while (token.length > width) {
-			if (current) {
-				lines.push(current);
-				current = "";
-			}
-			lines.push(token.slice(0, width));
-			token = token.slice(width);
-		}
-		if (!current) current = token;
-		else if (current.length + 1 + token.length <= width) current = `${current} ${token}`;
-		else {
-			lines.push(current);
-			current = token;
-		}
-	}
-	if (current) lines.push(current);
-	return lines.length > 0 ? lines : [""];
-}
-
-/**
  * Emit a shutdown notice on stderr, wrapped to the terminal width when stderr
  * or stdout is a TTY. Off a TTY the text goes out unwrapped, since a log
  * consumer wants one record per line.
  */
 export function writeShutdownNotice(text: string): void {
 	const width = process.stderr.columns ?? process.stdout.columns;
-	const lines = width === undefined ? [text] : wrapToWidth(text, width);
+	// Stock wrapTextWithAnsi at width 0 or below returns one-character shards, so a
+	// non-positive or NaN columns value writes the text unwrapped.
+	const lines = width === undefined || !(width >= 1) ? [text] : wrapTextWithAnsi(text, width);
 	process.stderr.write(`${lines.join("\n")}\n`);
 }
 

@@ -8,7 +8,8 @@
  * write) can belong to that frame.
  */
 
-import { type Terminal, TuiAltScreen, type TuiAltScreenOptions, TuiMainScreen } from "@earendil-works/pi-tui";
+import type { Terminal, TuiAltScreenOptions } from "@earendil-works/pi-tui";
+import { ApplicationInputTuiAltScreen, ApplicationInputTuiMainScreen } from "./application-input-tui.js";
 
 export type TuiRenderPhase = "overlay" | "normalization" | "cursor";
 
@@ -61,7 +62,7 @@ class DeferredRenderAdmission {
 	}
 }
 
-export class InstrumentedTuiMainScreen extends TuiMainScreen {
+export class InstrumentedTuiMainScreen extends ApplicationInputTuiMainScreen {
 	constructor(
 		terminal: Terminal,
 		private readonly renderObserver: TuiRenderObserver,
@@ -125,7 +126,7 @@ export class InstrumentedTuiMainScreen extends TuiMainScreen {
 	private readonly deferredAdmission: DeferredRenderAdmission;
 }
 
-export class InstrumentedTuiAltScreen extends TuiAltScreen {
+export class InstrumentedTuiAltScreen extends ApplicationInputTuiAltScreen {
 	private terminalSelectionUsers = 0;
 	private readonly capturesMouse: boolean;
 

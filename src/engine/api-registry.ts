@@ -28,7 +28,6 @@ import "@earendil-works/pi-ai/providers/images/register-builtins";
 import { filterAssistantProseStream } from "./assistant-prose-stream.js";
 import { normalizeContext } from "./context.js";
 import { getEngineEnvApiKey } from "./env-api-keys.js";
-import { engineModels } from "./models.js";
 import { instrumentProviderCall } from "./provider-diagnostics.js";
 import { guardToolArgumentStream } from "./tool-argument-stream.js";
 
@@ -54,24 +53,8 @@ let compatUniverse: CompatUniverse | undefined;
 let compatUniversePromise: Promise<void> | undefined;
 let builtinsRegistered = false;
 
-function wrappedProvider(provider: EngineRegisteredApiProvider): EngineRegisteredApiProvider {
-	const { api } = provider;
-	return {
-		api,
-		stream(model, context, options) {
-			if (model.api !== api) throw new Error(`Mismatched api: ${model.api} expected ${api}`);
-			return provider.stream(model, context, options);
-		},
-		streamSimple(model, context, options) {
-			if (model.api !== api) throw new Error(`Mismatched api: ${model.api} expected ${api}`);
-			return provider.streamSimple(model, context, options);
-		},
-	};
-}
-
 export function registerEngineApiProvider(provider: EngineRegisteredApiProvider, sourceId?: string): void {
-	const wrapped = wrappedProvider(provider);
-	registry.set(provider.api, { provider: wrapped, ...(sourceId === undefined ? {} : { sourceId }) });
+	registry.set(provider.api, { provider, ...(sourceId === undefined ? {} : { sourceId }) });
 	compatUniverse?.registerApiProvider(provider, sourceId);
 }
 
@@ -119,23 +102,10 @@ function withEnvApiKey<T extends StreamOptions | SimpleStreamOptions>(
 	return { ...options, apiKey } as T;
 }
 
-function builtinProvider(model: Model<Api>) {
-	if (getEngineApiProvider(model.api) !== builtinInstances.get(model.api)) return undefined;
-	const provider = engineModels.getProvider(model.provider);
-	return provider?.getModels().some((candidate) => candidate.api === model.api) ? provider : undefined;
-}
-
 function resolved(api: Api): EngineRegisteredApiProvider {
 	const provider = getEngineApiProvider(api);
 	if (!provider) throw new Error(`No API provider registered for api: ${api}`);
 	return provider;
-}
-
-function hasCloudflareAuth(options?: StreamOptions): boolean {
-	return (
-		(typeof options?.apiKey === "string" && options.apiKey.trim().length > 0) ||
-		typeof options?.headers?.["cf-aig-authorization"] === "string"
-	);
 }
 
 function dispatchEngineStream(
@@ -145,13 +115,6 @@ function dispatchEngineStream(
 ): AssistantMessageEventStream {
 	registerEngineBuiltins();
 	if (compatUniverse) return compatUniverse.stream(model, context, options);
-	const provider = builtinProvider(model);
-	if (provider) {
-		if (model.provider.startsWith("cloudflare-") && !hasCloudflareAuth(options)) {
-			return engineModels.stream(model, context, options);
-		}
-		return provider.stream(model, normalizeContext(context), withEnvApiKey(model, options));
-	}
 	return resolved(model.api).stream(model, normalizeContext(context), withEnvApiKey(model, options));
 }
 
@@ -162,13 +125,6 @@ function dispatchEngineStreamSimple(
 ): AssistantMessageEventStream {
 	registerEngineBuiltins();
 	if (compatUniverse) return compatUniverse.streamSimple(model, context, options);
-	const provider = builtinProvider(model);
-	if (provider) {
-		if (model.provider.startsWith("cloudflare-") && !hasCloudflareAuth(options)) {
-			return engineModels.streamSimple(model, context, options);
-		}
-		return provider.streamSimple(model, normalizeContext(context), withEnvApiKey(model, options));
-	}
 	return resolved(model.api).streamSimple(model, normalizeContext(context), withEnvApiKey(model, options));
 }
 

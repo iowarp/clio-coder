@@ -21,10 +21,6 @@ import { anthropicProvider } from "@earendil-works/pi-ai/providers/anthropic";
 import { githubCopilotProvider } from "@earendil-works/pi-ai/providers/github-copilot";
 import { openaiCodexProvider } from "@earendil-works/pi-ai/providers/openai-codex";
 import { alcfOAuthProvider } from "./alcf-oauth.js";
-import {
-	findEngineEnvKeys as findEngineEnvKeysRaw,
-	getEngineEnvApiKey as getEngineEnvApiKeyRaw,
-} from "./env-api-keys.js";
 
 export type { OAuthCredentials, OAuthLoginCallbacks, OAuthSelectPrompt };
 
@@ -132,22 +128,6 @@ function registry(): Map<string, EngineOAuthProvider> {
 		providers = new Map(builtinProviders().map((provider) => [provider.id, provider]));
 	}
 	return providers;
-}
-
-export function getEngineEnvApiKey(providerId: string): string | undefined {
-	try {
-		return getEngineEnvApiKeyRaw(providerId);
-	} catch {
-		return undefined;
-	}
-}
-
-export function findEngineEnvKeys(providerId: string): string[] | undefined {
-	try {
-		return findEngineEnvKeysRaw(providerId);
-	} catch {
-		return undefined;
-	}
 }
 
 export function getEngineOAuthProvider(providerId: string): EngineOAuthProvider | undefined {

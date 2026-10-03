@@ -29,7 +29,11 @@ import {
 	isWorkerToolCallCapSynthesisReason,
 } from "../core/guardrails.js";
 import { parseJsonObjectPayload } from "../core/json-payload.js";
-import { runtimeSpeaksResponseSchemaDialect } from "../core/response-schema.js";
+import {
+	responseFormatFor,
+	responseSchemaDialectFor,
+	runtimeSpeaksResponseSchemaDialect,
+} from "../core/response-schema.js";
 import { workerSandboxConfinesWrites, workerSandboxReadableRoots } from "../core/sandbox/worker-process.js";
 import { readLayeredSettings } from "../core/settings-layers.js";
 import { agentSkillToolPolicy } from "../core/skill-activation.js";
@@ -123,7 +127,7 @@ import {
 	sanitizeLockedSynthesisMessage,
 	workerLoopBlockBudget,
 } from "./loop-guard.js";
-import { patchWorkerRequestPayload, supportsNamedToolChoice } from "./provider-payload.js";
+import { applyToolRounds, deterministicSampling, supportsNamedToolChoice } from "./provider-payload.js";
 import type { AgentEvent, AgentMessage, EngineModel } from "./types.js";
 import type { ClioWorkerEvent } from "./worker-events.js";
 import { createWorkerSafety, createWorkerToolRegistry, INTERNAL_HELPER_RESULT_TOOL } from "./worker-tools.js";
@@ -439,6 +443,12 @@ export function workerProviderSupportsTools(input: WorkerRunInput): boolean {
 	return input.runtime.defaultCapabilities.tools === true;
 }
 
+function responseSchemaRuntimeRefusal(input: WorkerRunInput): Error {
+	return new Error(
+		`responseSchema requires a native llamacpp runtime with resolved JSON-schema support; received '${input.runtime.id}'`,
+	);
+}
+
 function assertResponseSchemaRuntime(input: WorkerRunInput): void {
 	if (input.responseSchema === undefined) return;
 	if (
@@ -447,9 +457,21 @@ function assertResponseSchemaRuntime(input: WorkerRunInput): void {
 	) {
 		return;
 	}
-	throw new Error(
-		`responseSchema requires a native llamacpp runtime with resolved JSON-schema support; received '${input.runtime.id}'`,
-	);
+	throw responseSchemaRuntimeRefusal(input);
+}
+
+/**
+ * The `response_format` an admitted schema rides on. Admission
+ * ({@link assertResponseSchemaRuntime}) and the dialect table are separate
+ * predicates, so a schema with no dialect here means they drifted. The request
+ * must not go out unconstrained in that case, because the parent would read a
+ * contract it believes was enforced.
+ */
+function workerResponseFormatFor(input: WorkerRunInput): Record<string, unknown> | undefined {
+	if (input.responseSchema === undefined) return undefined;
+	const dialect = responseSchemaDialectFor(input.runtime.id);
+	if (dialect === null) throw responseSchemaRuntimeRefusal(input);
+	return responseFormatFor(dialect, input.responseSchema, "clio_result");
 }
 
 interface ReadCitationRequest {
@@ -591,9 +613,10 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 			? { protectedArtifactState: { artifacts: [...input.protectedArtifactState.artifacts] } }
 			: {}),
 	});
-	// Flipped by the loop guard's lockout callback; read by onPayload below to
-	// force the remaining model rounds text-only by removing the tool surface
-	// (tool_choice none on Anthropic; see patchToolSurfaceLockedPayload).
+	// Flipped by the loop guard's lockout callback; read by streamFn below to
+	// force the remaining model rounds text-only by removing the tool
+	// declarations (Anthropic, Google and Vertex keep them and send tool choice
+	// none instead; see toolsRemovedRound).
 	let synthesisToolLock = false;
 	let lockedSynthesisReprompts = 0;
 	let workerBoundFailure: string | null = null;
@@ -936,6 +959,10 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 	});
 	const helperToolAvailable = helperSchema !== null && workerProviderSupportsTools(input);
 	const helperForcedChoiceAvailable = helperToolAvailable && supportsNamedToolChoice(model.api);
+	// The terminal handoff names its tool in the request, so it keeps the tool
+	// surface that a synthesis lock would otherwise remove.
+	const terminalHandoffActive = (api: string): boolean =>
+		helperToolAvailable && (synthesisToolLock || helperTerminalPhase) && supportsNamedToolChoice(api);
 	if (helperToolAvailable) {
 		tools.push({
 			name: INTERNAL_HELPER_RESULT_TOOL,
@@ -972,6 +999,9 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 
 	const inheritedMessages = seededWorkerMessages(input.contextSeed);
 	const contextGuard = createWorkerContextGuard(observations.archive);
+	// The constraint rides samplingParams, which the completions adapter merges
+	// into the body after every named field.
+	const workerResponseFormat = workerResponseFormatFor(input);
 	const options: EngineAgentOptions = {
 		// The run's restrictions are judged against the target as configured for
 		// this run before each request, the same verdict the parent would reach.
@@ -1091,16 +1121,51 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 				}
 				throw error;
 			}
-			const request = (projected: AgentMessage[]) =>
-				engineStreamSimple(
+			// Stable sampling applies to every context-generation round, terminal
+			// repairs included. It merges over the caller's options so it beats quirk
+			// profiles and run overrides, which the adapters apply underneath.
+			const sampling =
+				input.sampling === "deterministic" ? deterministicSampling(currentModel, input.runtime.id) : undefined;
+			const requestOptions =
+				sampling === undefined && workerResponseFormat === undefined
+					? streamOptions
+					: {
+							...streamOptions,
+							...sampling,
+							samplingParams: {
+								...streamOptions?.samplingParams,
+								...sampling?.samplingParams,
+								...(workerResponseFormat !== undefined ? { response_format: workerResponseFormat } : {}),
+							},
+						};
+			// Routed per attempt: the lock and the middleware choice can flip between
+			// the first call and the overflow retry. The terminal handoff comes first
+			// because it names its tool and keeps the surface a lock would remove. A
+			// locked round has no declarations left, so neither middleware round
+			// applies to it.
+			const request = (projected: AgentMessage[]) => {
+				const middlewareChoice = middlewareToolChoice.current();
+				const controlled = applyToolRounds(
 					currentModel,
 					{
 						...currentContext,
 						...(systemPrompt !== undefined ? { systemPrompt } : {}),
 						messages: projected as typeof currentContext.messages,
 					},
-					streamOptions,
+					requestOptions,
+					[
+						terminalHandoffActive(currentModel.api)
+							? { kind: "required", toolName: INTERNAL_HELPER_RESULT_TOOL, handoff: true }
+							: undefined,
+						synthesisToolLock ? { kind: "tools-removed" } : undefined,
+						middlewareChoice.kind === "none" && !synthesisToolLock ? { kind: "text-only" } : undefined,
+						middlewareChoice.kind === "required" && !synthesisToolLock
+							? { kind: "required", toolName: middlewareChoice.toolName }
+							: undefined,
+					],
 				);
+				return engineStreamSimple(currentModel, controlled.context, controlled.options);
+			};
 			const first = request(messages);
 			// The server is the authority on its own limit. An unreported window, a
 			// window that changed since it was resolved, or a server tokenizer that
@@ -1117,22 +1182,6 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 			thinkingLevel: effectiveThinkingLevel,
 			tools,
 			messages: inheritedMessages,
-		},
-		onPayload: async (payload, currentModel) => {
-			const middlewareChoice = middlewareToolChoice.current();
-			return patchWorkerRequestPayload(payload, currentModel, {
-				runtimeId: input.runtime.id,
-				thinkingLevel: effectiveThinkingLevel,
-				...(input.responseSchema !== undefined ? { responseSchema: input.responseSchema } : {}),
-				// Apply stable sampling to every context-generation round, including terminal repairs.
-				...(input.sampling !== undefined ? { sampling: input.sampling } : {}),
-				toolSurfaceLocked: synthesisToolLock,
-				...(helperToolAvailable && (synthesisToolLock || helperTerminalPhase) && supportsNamedToolChoice(currentModel.api)
-					? { terminalToolName: INTERNAL_HELPER_RESULT_TOOL }
-					: {}),
-				toolChoiceNone: middlewareChoice.kind === "none",
-				...(middlewareChoice.kind === "required" ? { toolChoiceName: middlewareChoice.toolName } : {}),
-			});
 		},
 		getApiKey: async () => input.apiKey,
 	};

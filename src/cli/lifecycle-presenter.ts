@@ -47,7 +47,7 @@ export interface LifecycleReport {
  * listing is read at: the operator wants to know whether a root is megabytes or
  * gigabytes before agreeing to delete it, not its third significant figure.
  *
- * Not `formatSize` from pi-agent-core, which this otherwise matches. That one
+ * Not the engine's `formatSize`, which this otherwise matches. That one
  * stops at megabytes, so a data root holding evidence and vendored tools reads
  * as `4300.8MB` where the question being asked is whether it is gigabytes; and
  * it writes no space before the unit, which is fine inside a tool observation

@@ -4,6 +4,7 @@ import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import type { SessionContract, SessionMeta } from "../../src/domains/session/index.js";
 import type { ProcessTerminal } from "../../src/engine/tui.js";
 import {
+	ApplicationInputTuiAltScreen,
 	type Component,
 	getKeybindings,
 	Input,
@@ -12,7 +13,6 @@ import {
 	stripTerminalSequences,
 	type Terminal,
 	Text,
-	TuiAltScreen,
 	VStack,
 	visibleWidth,
 } from "../../src/engine/tui.js";
@@ -73,7 +73,7 @@ function fixture(overrides: Record<string, string | string[]> = {}, scrollFooter
 	const keys = createKeybindingManager(settings, {});
 	cleanups.push(() => setKeybindings(previousKeys));
 	const terminal = new KeyboardTerminal();
-	const tui = new TuiAltScreen(terminal);
+	const tui = new ApplicationInputTuiAltScreen(terminal);
 	const overlays: { component: Component; handle: ReturnType<typeof tui.showOverlay> }[] = [];
 	const showOverlay = tui.showOverlay.bind(tui);
 	tui.showOverlay = (component, options) => {
@@ -579,7 +579,7 @@ it("preserves literal boot input and queued submissions across the single-editor
 	const previousKeys = getKeybindings();
 	cleanups.push(() => setKeybindings(previousKeys));
 	const terminal = new KeyboardTerminal();
-	const tui = new TuiAltScreen(terminal);
+	const tui = new ApplicationInputTuiAltScreen(terminal);
 	let shutdowns = 0;
 	let policyCalls = 0;
 	const lease = createProcessTerminalLease({

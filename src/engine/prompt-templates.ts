@@ -1,19 +1,17 @@
-// Copied from Pi packages/agent/src/harness/prompt-templates.ts at v0.99.1 (MIT license).
-/** Parse an argument string using simple shell-style single and double quotes. */
+// Derived from pi-coding-agent packages/coding-agent/src/core/prompt-templates.ts at v1.0.0 (MIT license).
+/** Parse bash-style quoted arguments. Unquoted whitespace of any kind, including newlines, separates arguments. */
 export function parseCommandArgs(argsString: string): string[] {
 	const args: string[] = [];
 	let current = "";
 	let inQuote: string | null = null;
 
-	for (let i = 0; i < argsString.length; i++) {
-		// biome-ignore lint/style/noNonNullAssertion: The upstream loop bounds guarantee this character exists.
-		const char = argsString[i]!;
+	for (const char of argsString) {
 		if (inQuote) {
 			if (char === inQuote) inQuote = null;
 			else current += char;
 		} else if (char === '"' || char === "'") {
 			inQuote = char;
-		} else if (char === " " || char === "\t") {
+		} else if (/\s/.test(char)) {
 			if (current) {
 				args.push(current);
 				current = "";
@@ -26,33 +24,43 @@ export function parseCommandArgs(argsString: string): string[] {
 	return args;
 }
 
-/** Substitute prompt template placeholders (`$1`, `$@`, `$ARGUMENTS`, `${@:N}`, `${@:N:L}`) with command arguments. */
-function substituteParsedArgs(content: string, args: string[]): string {
-	let result = content;
-	result = result.replace(/\$(\d+)/g, (_, num: string) => args[parseInt(num, 10) - 1] ?? "");
-	result = result.replace(/\$\{@:(\d+)(?::(\d+))?\}/g, (_, startStr: string, lengthStr?: string) => {
-		let start = parseInt(startStr, 10) - 1;
-		if (start < 0) start = 0;
-		if (lengthStr) return args.slice(start, start + parseInt(lengthStr, 10)).join(" ");
-		return args.slice(start).join(" ");
-	});
-	const allArgs = args.join(" ");
-	result = result.replace(/\$ARGUMENTS/g, allArgs);
-	result = result.replace(/\$@/g, allArgs);
-	return result;
-}
-
-const RAW_ARGUMENTS_PLACEHOLDER = /\$ARGUMENTS/g;
+const PLACEHOLDER = /\$\{(\d+|ARGUMENTS|@):-([^}]*)\}|\$\{@:(\d+)(?::(\d+))?\}|\$(ARGUMENTS|@|\d+)/g;
+const UNBRACED_PLACEHOLDER = /\$(ARGUMENTS|@|\d+)/g;
 
 /**
- * Substitute prompt arguments while optionally retaining the exact raw text
- * for `$ARGUMENTS`. Positional, slice, and `$@` placeholders keep Pi's
- * shell-style parsing semantics.
+ * Substitute `$1`, `$@`, `$ARGUMENTS`, `${N:-default}`, `${@:-default}`, `${ARGUMENTS:-default}`, `${@:N}` and
+ * `${@:N:L}` in one pass over the template, so values that contain placeholder-like text are never expanded again.
+ * `rawArguments` is the exact text after the command. When given, `$ARGUMENTS` inserts it byte for byte
+ * instead of the re-joined parsed arguments.
  */
 export function substituteArgs(content: string, args: string[], rawArguments?: string): string {
-	if (rawArguments === undefined) return substituteParsedArgs(content, args);
-	return content
-		.split(RAW_ARGUMENTS_PLACEHOLDER)
-		.map((segment) => substituteParsedArgs(segment, args))
-		.join(rawArguments);
+	const allArgs = args.join(" ");
+	const exactArgs = rawArguments ?? allArgs;
+	const unbraced = (_match: string, simple: string): string => {
+		if (simple === "ARGUMENTS") return exactArgs;
+		if (simple === "@") return allArgs;
+		return args[Number(simple) - 1] ?? "";
+	};
+	// Every braced placeholder ends at a "}", so none can match after the last one. Scanning that tail with the
+	// braced pattern would rerun `[^}]*` to the end from every unterminated `${N:-` opener, which is quadratic:
+	// a 1 MB template of openers blocked the turn. The tail only takes the unbraced forms.
+	const end = content.lastIndexOf("}") + 1;
+	const head = content
+		.slice(0, end)
+		.replace(
+			PLACEHOLDER,
+			(match: string, target?: string, fallback?: string, from?: string, count?: string, simple?: string) => {
+				if (target !== undefined) {
+					const value =
+						target === "ARGUMENTS" ? (args.length > 0 ? exactArgs : "") : target === "@" ? allArgs : args[Number(target) - 1];
+					return value || (fallback ?? "");
+				}
+				if (from !== undefined) {
+					const start = Math.max(Number(from) - 1, 0);
+					return args.slice(start, count === undefined ? undefined : start + Number(count)).join(" ");
+				}
+				return unbraced(match, simple ?? "");
+			},
+		);
+	return head + content.slice(end).replace(UNBRACED_PLACEHOLDER, unbraced);
 }

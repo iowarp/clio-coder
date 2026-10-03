@@ -378,6 +378,19 @@
 						"piMessagesApi": "7659ce44b8f7bd11dc1c3755218461435a7c61ed94a71fba11de6ba5e800bd4b"
 					}
 				},
+				"./api/simple-options": {
+					"declaration": "dist/api/simple-options.d.ts",
+					"exports": {
+						"adjustMaxTokensForThinking": "f2035f47e457426168dff37f6315a0a0d1481b83a39d8c2c586273ffc3ade0f5",
+						"buildBaseOptions": "2258f4da57919d646b4bad3e435446d9a6a8d22cf9d29e43cbc9f5bbc12f3a4f",
+						"clampMaxTokensToContext": "766dbd93bd66a3447955ddc7368082fba996a039148925f35e151712666624e0",
+						"clampReasoning": "d18319fe2170e83f939cd468a0fd73ab3f4a81971a4055e0040f9d280c066d3a",
+						"clampThinkingBudgetToAnswerRoom": "0d2d82cbe0e3f471bcdc2f16e43ecb38fad2fed22c4d378a1ea362860812dc1a",
+						"DEFAULT_THINKING_BUDGETS": "0ce3f074a6a610f23217ff92cab2034b8c94fc452fd74b8a653ccb8e8822a8e8",
+						"MIN_ANSWER_TOKENS": "65e1305b7ee635b64e8af0f8bf630ecfe0e3f3cb9104e172269ae7846cd737f1",
+						"thinkingBudgetForLevel": "6ade3e3c59fa9c0b24b6d51c8fea579888231c3e7475228a99298dcd00037e9b"
+					}
+				},
 				"./models": {
 					"declaration": "dist/models.d.ts",
 					"exports": {
@@ -495,6 +508,17 @@
 					"exports": {
 						"openrouterProvider": "d19d93559a8287e27c47a4f0e3b63b2311a15f92a02c5baa4a0559de64e105e7"
 					}
+				},
+				"./utils/estimate": {
+					"declaration": "dist/utils/estimate.d.ts",
+					"exports": {
+						"calculateContextTokens": "e5c4725f10052b21828736bd25c8faeb7f9977a1142d5330d5395aedf54824f0",
+						"ContextUsageEstimate": "2bce005e4cdcf722927097ab01a7956375c4f1254deaa708f807ea31e8f92ad0",
+						"estimateContextTokens": "f2c49719a568802d541305935db1aeee1affc64ec0bfc3ab46ac67488e96aa78",
+						"estimateMessageTokens": "0fa9b5c985fe81f58680d973878d3a3aa7083c28213838f98c5159f51cd58a7c",
+						"estimateTextAndImageContentTokens": "a5d149383a8bb3179c41e3a6a8c31eb4f9d336dbece4dc3c0dd204623561fb35",
+						"estimateTextTokens": "8815a24c2e371b1eca4197edcec3d1ae70934820ddfdeb61bcf57e28829c119e"
+					}
 				}
 			}
 		},
@@ -579,7 +603,6 @@
 						"KeybindingsManager": "1715a79cdcbf0c00069fd705c39d2a87836681a9f0151c438cd7b0fb68bb74ce",
 						"KeyEventType": "179c15b2d20f603e05af6db602a659a0f4b71db45f833de037f814e72dc3d17b",
 						"KeyId": "725884d65f4852ccf2e0279b076cbfa2edcf2658619cab0472a5ac2b82e90127",
-						"lexMarkdownBlocks": "22280c4af084d494321f5b79b59261b7eba220f072edd1a744728a9f9d3cd90f",
 						"Loader": "c625acf06d8c41c894af0273eb0cedec2b8b990c7c02baef8e11efe51dfe8b6a",
 						"LoaderIndicatorOptions": "021adcfb5906d3d194a1a2c2d2ab2200bf1f0765a9fa54809e4b4e60b50847d2",
 						"Markdown": "c52aee2f06ce102c3d22a0def0ebbfc2dd9369d490b3373118939bbc0a27a0a0",
@@ -657,7 +680,7 @@
 						"Tokens": "e896e99f30e6349f5cabd324167ac759d3cd3ff6de091d3b6757654ac2b5bea6",
 						"TruncatedText": "b1461f7fca0686d9b490230804ebb8a08594c4177e4bf5ecef851cc63d3972ce",
 						"truncateToWidth": "6f3d41ce186e453a785b02a66f4305a013c8f9bc4e0d58d7f8a29001998352f4",
-						"TUI": "056f105d4ee9090e16cafee6df797160d8fe80fc17beccfb3665e5a728066a8b",
+						"TUI": "3903117a7523c4402c0341285f893f3af5f3e31bcc487d8bf9bdc5c4c291d07e",
 						"TUI_KEYBINDINGS": "c0bea41cbce1560301bc7bf3ad2e658aab0e54c4d7b1189ac0154a8c0282d139",
 						"TuiAltScreen": "7391b6670fb7da54953cc1158dac0a805deccf7af1dd685addf3b462e3e5267e",
 						"TuiAltScreenOptions": "6715783523d00c7ed08bdc77c2420e800440974ce71a78448b4bdaa90a7d6455",
