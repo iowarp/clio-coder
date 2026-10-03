@@ -988,17 +988,14 @@ try {
 			await composerField.press("Enter");
 			await pane.getByRole("button", { name: "Back to Session", exact: true }).waitFor();
 		}
-		// The top bar's live chips open their drill-ins; where the bar has no room for them, the quiet rail
-		// under the composer carries the same two figures.
-		async function chipOrRail(chip: RegExp, rail: RegExp) {
+		// The top bar's live chips open their drill-ins; where a phone's bar has no room for them, the same
+		// views are one slash command away.
+		async function chipOrSlash(chip: RegExp, view: "usage" | "context") {
 			const button = page.locator(".conversation .wb-bar").getByRole("button", { name: chip });
-			if (await button.isVisible()) await button.click();
-			else
-				await page
-					.getByRole("navigation", { name: "This chat's context and usage", exact: true })
-					.getByRole("button", { name: rail })
-					.click();
-			await pane.getByRole("button", { name: "Back to Session", exact: true }).waitFor();
+			if (await button.isVisible()) {
+				await button.click();
+				await pane.getByRole("button", { name: "Back to Session", exact: true }).waitFor();
+			} else await slashPane(view);
 		}
 		await slashPane("tasks");
 		const board = page.locator(".pane:not([hidden]) .board-panel");
@@ -1287,7 +1284,7 @@ try {
 		await closeDialog(extensionsDialog);
 		// Usage: the conversation's spend in the agent's own words, and each provider's windows. The top
 		// bar's spend chip opens it.
-		await chipOrRail(/^Spent .*\. Open usage\.$/, /tokens/);
+		await chipOrSlash(/^Spent .*\. Open usage\.$/, "usage");
 		const usagePanel = pane.locator(".usage-panel");
 		await usagePanel.locator(".usage-panel__route", { hasText: "local · fixture-model" }).waitFor();
 		await usagePanel.getByText("Beside the conversation: 1 side question", { exact: true }).waitFor();
@@ -1328,7 +1325,7 @@ try {
 		await page.getByLabel("Message Clio Coder", { exact: true }).fill("");
 		// The context window: Clio Coder's own accounting, worded and never recomputed. The top bar's
 		// context ring opens it.
-		await chipOrRail(/Open the context window\.$/, /context window used$/);
+		await chipOrSlash(/Open the context window\.$/, "context");
 		const contextPanel = pane.locator(".context-panel");
 		await contextPanel.locator(".context-panel__figure strong", { hasText: "16%" }).waitFor();
 		assert.equal((await contextPanel.locator(".context-panel__of").innerText()).trim(), "20,480 of 131,072 tokens");

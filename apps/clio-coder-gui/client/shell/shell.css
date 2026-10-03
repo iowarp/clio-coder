@@ -865,6 +865,20 @@ button.wb-chip:hover:not(:disabled) {
 	right: auto;
 	left: 0;
 }
+/* On a phone the menu hangs from the bar's own left gutter, so it fits whatever the title's width. */
+@media (max-width: 560px) {
+	.wb-bar {
+		position: relative;
+	}
+	.wb-bar > .wb-menu {
+		position: static;
+	}
+	.wb-bar > .wb-menu > .wb-menu__panel {
+		left: var(--space-2);
+		right: auto;
+		max-width: calc(100vw - 2 * var(--space-2));
+	}
+}
 /* No scale: Menu.tsx measures the panel while it opens to place a floating one. */
 @keyframes wb-menu-open {
 	from {
