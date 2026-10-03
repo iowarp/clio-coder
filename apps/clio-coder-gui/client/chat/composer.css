@@ -401,18 +401,25 @@
 }
 
 /* What is waiting on the engine. A queued message is not lost work and must
-   never read as one, so the row states when it will be read. */
+   never read as one, so the row states when it will be read. It is the first
+   line of the composer, set off by a rule instead of a box of its own. */
 .composer__queue {
 	display: grid;
 	gap: var(--space-2);
-	justify-items: start;
-	padding: var(--space-3);
-	border: 1px solid var(--line);
-	border-radius: var(--radius-md);
-	background: var(--well);
+	padding: 0 0 var(--space-2);
+	margin-bottom: var(--space-1);
+	border-bottom: 1px solid var(--line);
+}
+.composer__queue-head {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: var(--space-3);
+	min-width: 0;
 }
 .composer__queue-summary {
 	margin: 0;
+	min-width: 0;
 	font-size: var(--text-exact);
 	color: var(--ink-muted);
 }
@@ -429,15 +436,29 @@
 }
 .composer__queue-row {
 	display: flex;
-	flex-wrap: wrap;
 	align-items: baseline;
 	gap: var(--space-2);
+	min-width: 0;
 	font-size: var(--text-meta);
 }
 .composer__queue-text {
-	flex: 1 1 24ch;
+	flex: 1 1 auto;
+	min-width: 0;
 	color: var(--ink);
-	overflow-wrap: anywhere;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+/* A queue row's mark is a glyph and a word, not a pill. The toned selector is needed because a tone's
+   tint is declared later and would otherwise win on load order. */
+.composer__queue .status-mark,
+.composer__queue .status-mark[data-tone] {
+	flex: none;
+	padding: 0;
+	border: 0;
+	background: transparent;
+	font-weight: 500;
+	white-space: nowrap;
 }
 
 /* Message actions stay quiet until the turn is pointed at, and are always
@@ -706,6 +727,10 @@
 .composer__attachment-remove .icon {
 	width: var(--icon-sm);
 	height: var(--icon-sm);
+}
+/* The queue's one action reuses the chip control at the summary's size; it follows that control so it wins. */
+.composer__queue-head .composer__attachment-action {
+	font-size: var(--text-exact);
 }
 .composer__paste-note {
 	display: flex;

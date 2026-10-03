@@ -489,6 +489,37 @@ export const Composer = memo(function Composer({
 				<p className="sr-only" role="status">
 					{paletteOpen ? `${matches.length} slash ${matches.length === 1 ? "command" : "commands"}` : ""}
 				</p>
+				{/* Only while the turn runs: the query is disabled once it settles, and a
+			    cached snapshot from a finished turn is a claim about the engine that
+			    nothing observed. */}
+				{running && steering.queue && queued.length > 0 ? (
+					<section className="composer__queue" aria-label="Messages waiting on the engine">
+						<div className="composer__queue-head">
+							<p className="composer__queue-summary" role="status">
+								{queueSummary(queued)}
+							</p>
+							<button
+								className="composer__attachment-action"
+								type="button"
+								disabled={drain.isPending}
+								onClick={() => drain.mutate()}
+								title="Take every waiting message back out of the queue and into this field."
+							>
+								{drain.isPending ? "Taking them back…" : "Take them back"}
+							</button>
+						</div>
+						<ol className="composer__queue-list">
+							{queued.map((message) => (
+								<li key={message.id} className="composer__queue-row">
+									<StatusMark tone="warn" label={message.queue === "steer" ? "Now" : "After this turn"} />
+									<span className="composer__queue-text" title={message.text}>
+										{message.text}
+									</span>
+								</li>
+							))}
+						</ol>
+					</section>
+				) : null}
 				{attachments.length > 0 ? (
 					<ul className="composer__attachments" aria-label="Attachments to send with this request">
 						{attachments.map((item) => (
@@ -923,33 +954,6 @@ export const Composer = memo(function Composer({
 						<StatusMark tone={notice.tone} label={notice.tone === "fail" ? "Failed" : "Refused"} />
 						{notice.message}
 					</p>
-				) : null}
-				{/* Only while the turn runs: the query is disabled once it settles, and a
-			    cached snapshot from a finished turn is a claim about the engine that
-			    nothing observed. */}
-				{running && steering.queue && queued.length > 0 ? (
-					<section className="composer__queue" aria-label="Messages waiting on the engine">
-						<p className="composer__queue-summary" role="status">
-							{queueSummary(queued)}
-						</p>
-						<ol className="composer__queue-list">
-							{queued.map((message) => (
-								<li key={message.id} className="composer__queue-row">
-									<StatusMark tone="warn" label={message.queue === "steer" ? "Now" : "After this turn"} />
-									<span className="composer__queue-text">{message.text}</span>
-								</li>
-							))}
-						</ol>
-						<button
-							className="composer__secondary"
-							type="button"
-							disabled={drain.isPending}
-							onClick={() => drain.mutate()}
-							title="Take every waiting message back out of the queue and into this field."
-						>
-							{drain.isPending ? "Taking them back…" : "Take them back"}
-						</button>
-					</section>
 				) : null}
 			</form>
 			{/* Outside the form: React bubbles a portaled panel's submit through its owner, and the
