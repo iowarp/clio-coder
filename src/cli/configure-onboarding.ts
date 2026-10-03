@@ -84,6 +84,7 @@ import {
 	setWorkerProfilePointer,
 	targetApiKeyRef,
 } from "./configure-target.js";
+import type { DetectedChatRoute } from "./detect-chat-routes.js";
 import type { LifecyclePresenter } from "./lifecycle-presenter.js";
 import { createLifecyclePresenter, shortenPath } from "./lifecycle-presenter.js";
 import { canSelect, promptSelect, promptText } from "./select.js";
@@ -114,6 +115,7 @@ type CredentialSource = "env" | "stored" | "keep" | "skip" | "oauth-connect" | "
 // that depended on the one being changed by assigning undefined to them.
 interface Answers {
 	mode: "first" | "add" | "edit";
+	detectedChatRoute?: DetectedChatRoute | undefined;
 	fixedRuntime?: boolean;
 	existing?: TargetDescriptor | undefined;
 	contextWindow?: number | undefined;
@@ -135,9 +137,10 @@ interface Answers {
 	antigravity?: { targetId: string; model: string } | undefined;
 }
 
-type StepOutcome = "next" | "back" | "quit" | "cancel" | "credential";
+type StepOutcome = "next" | "back" | "quit" | "cancel" | "credential" | "detected";
 
 interface Wizard {
+	detectedRoutes: ReadonlyArray<DetectedChatRoute>;
 	select: ConfigureWizardHost["select"];
 	text: ConfigureWizardHost["text"];
 	host?: ConfigureWizardHost;
@@ -201,6 +204,12 @@ function allEntries(): ProviderSupportEntry[] {
 
 /** The descriptor as it stands mid-wizard, for a probe or a model read. */
 function draftDescriptor(answers: Answers, runtime: RuntimeDescriptor, withModel: boolean): TargetDescriptor {
+	if (answers.detectedChatRoute) {
+		const target = structuredClone(answers.detectedChatRoute.target);
+		if (withModel && answers.model) target.defaultModel = answers.model;
+		else delete target.defaultModel;
+		return target;
+	}
 	const apiKeyRef =
 		answers.credential === "stored"
 			? targetApiKeyRef(answers.targetId ?? runtime.id, readSettings().targets)
@@ -244,18 +253,24 @@ const CATEGORY_STEP: Step = {
 			(choice) => runtimesForCategory(eligible, choice.category).length > 0,
 		);
 		const current = available.findIndex((choice) => choice.category === answers.category);
-		const result = await wizard.select<ConfigureCategory>({
+		const result = await wizard.select<ConfigureCategory | DetectedChatRoute>({
 			heading: [
 				"",
 				chalk.bold("Where does your model come from?"),
 				chalk.dim("Choose the description you recognize; Clio shows the exact providers next."),
 			],
-			choices: available.map((choice) => ({
-				value: choice.category,
-				label: choice.label,
-				hint: choice.summary,
-			})),
-			initialIndex: current >= 0 ? current : 0,
+			choices: [
+				...wizard.detectedRoutes.map((route) => ({
+					value: route,
+					label: `Use ${route.runtime.id} / ${route.model ?? "choose model"} (from ${route.source})`,
+				})),
+				...available.map((choice) => ({
+					value: choice.category,
+					label: choice.label,
+					hint: choice.summary,
+				})),
+			],
+			initialIndex: current >= 0 ? current + wizard.detectedRoutes.length : 0,
 			railPrefix: wizard.rail,
 			backLabel: "cancel",
 			clearOnExit: true,
@@ -264,6 +279,29 @@ const CATEGORY_STEP: Step = {
 		});
 		if (result.kind === "quit") return "quit";
 		if (result.kind === "back") return "back";
+		if (typeof result.value !== "string") {
+			const route = result.value;
+			answers.detectedChatRoute = route;
+			answers.runtime = route.runtime;
+			answers.targetId = route.target.id;
+			answers.url = route.target.url;
+			answers.model = route.model;
+			answers.apiKeyEnv = route.target.auth?.apiKeyEnvVar;
+			answers.credential = answers.apiKeyEnv ? "env" : route.target.auth?.apiKeyRef ? "keep" : undefined;
+			answers.apiKeyLiteral = undefined;
+			answers.thinking = undefined;
+			answers.contextWindow = route.target.capabilities?.contextWindow;
+			answers.probe = route.source.startsWith("http://127.0.0.1:")
+				? { ok: true, models: route.model ? [route.model] : [] }
+				: undefined;
+			answers.inventory = { models: route.model ? [route.model] : [], source: answers.probe ? "probe" : "catalog" };
+			answers.inventoryKey = undefined;
+			wizard.answer("Source", route.source);
+			wizard.answer("Provider", route.runtime.id);
+			return "detected";
+		}
+		if (answers.detectedChatRoute) answers.runtime = undefined;
+		answers.detectedChatRoute = undefined;
 		if (answers.category !== result.value) {
 			answers.runtime = undefined;
 			answers.detected = undefined;
@@ -1069,7 +1107,9 @@ function applyAnswers(
 	if (answers.mode === "edit") {
 		if (JSON.stringify(current) !== JSON.stringify(answers.existing))
 			throw new Error("This target changed during setup; reopen Edit to keep those changes.");
-	} else if (current) throw new Error(`Target '${descriptor.id}' already exists; use Edit a target.`);
+	} else if (current && JSON.stringify(current) !== JSON.stringify(answers.detectedChatRoute?.target)) {
+		throw new Error(`Target '${descriptor.id}' already exists; use Edit a target.`);
+	}
 	assertOrchestratorReplacementEligible(settings, descriptor);
 	applyTarget(settings, descriptor);
 	// The first target is the one everything points at. A second target is a
@@ -1107,6 +1147,7 @@ export async function runOnboardingWizard(
 	const rail = railPrefix(presenter.isPlain());
 	const columns = (streams.out as { columns?: number }).columns ?? 80;
 	const wizard: Wizard = {
+		detectedRoutes: [],
 		select: host?.select.bind(host) ?? promptSelect,
 		text: host?.text.bind(host) ?? promptText,
 		...(host ? { host } : {}),
@@ -1136,6 +1177,14 @@ export async function runOnboardingWizard(
 	presenter.note(`Saved result: ${shortenPath(settingsPath())}`);
 
 	const existing = options.mode === "edit" ? options.target : undefined;
+	if (options.mode === "first" && !options.runtime) {
+		const settings = readSettings();
+		const { classifyDefaultTarget } = await import("./default-target.js");
+		if (classifyDefaultTarget(settings).kind !== "usable") {
+			const { detectChatRoutes } = await import("./detect-chat-routes.js");
+			wizard.detectedRoutes = await detectChatRoutes(settings);
+		}
+	}
 	const answers: Answers = {
 		mode: options.mode,
 		existing,
@@ -1178,12 +1227,22 @@ export async function runOnboardingWizard(
 		marks[cursor] = writer.mark();
 		const outcome = await step.run(wizard, answers);
 		if (outcome === "quit" || outcome === "cancel") return stop(outcome === "quit");
+		if (outcome === "detected" || (answers.detectedChatRoute && step === MODEL_STEP && outcome === "next")) {
+			direction = 1;
+			cursor = STEPS.indexOf(answers.model ? REVIEW_STEP : MODEL_STEP);
+			continue;
+		}
 		if (outcome === "credential") {
 			direction = 1;
 			cursor = STEPS.indexOf(CREDENTIAL_STEP);
 			continue;
 		}
 		if (outcome === "back") {
+			if (answers.detectedChatRoute) {
+				cursor = 0;
+				writer.rewindTo(marks[0] ?? writer.mark());
+				continue;
+			}
 			direction = -1;
 			cursor -= 1;
 			// Rewind past the row the step we are returning to left behind, so it

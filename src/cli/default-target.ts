@@ -1,4 +1,5 @@
-import { type ClioSettings, readSettings } from "../core/config.js";
+import type { ClioSettings } from "../core/config.js";
+import { readSettings } from "../core/config.js";
 import { bootAuthStatus } from "../domains/providers/auth/boot-status.js";
 import { findBuiltinRuntimeBootMetadata } from "../domains/providers/runtimes/boot-manifest.js";
 
@@ -6,20 +7,13 @@ import { findBuiltinRuntimeBootMetadata } from "../domains/providers/runtimes/bo
  * Why the configured chat target cannot be used, in the operator's terms
  * rather than as one boolean.
  *
- * The single boolean this replaced sent every cause to the same place: the
- * full "How will you connect Clio to a model?" wizard. Three of the four
- * causes below are genuinely a target-selection problem and belong there. The
- * fourth is not. A declared, present, orchestrator-eligible target whose
- * credential is merely unresolved is one `clio-coder auth login` away, and for a
- * local runtime that ignores keys it is not broken at all: a live LM Studio
- * target in exactly this state answers turns normally. Restarting runtime
- * selection for it told the operator their working installation was
- * unconfigured, on every launch, and the only way past it was to cancel the
- * wizard and watch the session start anyway.
+ * This stays a cheap credential-presence check. Only an unusable verdict
+ * loads route discovery; a configured user never pays for local probes.
  */
 export type DefaultTargetVerdict =
 	| { kind: "usable" }
 	| { kind: "no-target" }
+	| { kind: "no-model"; targetId: string }
 	| { kind: "ineligible-runtime"; targetId: string; runtime: string }
 	| { kind: "missing-credential"; targetId: string; store: string };
 
@@ -37,6 +31,7 @@ export function classifyDefaultTarget(settings: Readonly<ClioSettings> = readSet
 	if (runtime?.kind !== "http") {
 		return { kind: "ineligible-runtime", targetId, runtime: target.runtime };
 	}
+	if (!settings.chat.model && !target.defaultModel) return { kind: "no-model", targetId };
 	const auth = bootAuthStatus(target, runtime);
 	if (auth.available) return { kind: "usable" };
 	return { kind: "missing-credential", targetId, store: auth.providerId };
@@ -49,6 +44,8 @@ export function describeVerdict(verdict: DefaultTargetVerdict): string {
 			return "No model target is configured.";
 		case "ineligible-runtime":
 			return `Target '${verdict.targetId}' runs on '${verdict.runtime}', which cannot drive the main agent.`;
+		case "no-model":
+			return `Target '${verdict.targetId}' has no chat model configured.`;
 		default:
 			return "No usable default target is configured.";
 	}

@@ -1,6 +1,8 @@
+import { existsSync } from "node:fs";
 import { formatBootTrace } from "../core/boot-trace.js";
 import { initializeClioHome } from "../core/init.js";
 import { readLayeredSettings, readStrictLayeredSettings } from "../core/settings-layers.js";
+import { resolveClioDirs } from "../core/xdg.js";
 import type { BootOptions } from "../entry/boot-options.js";
 import { classifyDefaultTarget, describeVerdict } from "./default-target.js";
 
@@ -43,21 +45,28 @@ export async function runClioCommand(
 	}
 	let startupSettings: import("../core/config.js").ClioSettings | undefined;
 	if (terminalLeaseEligible(options)) {
+		const dirs = resolveClioDirs();
+		const existingHome = [dirs.config, dirs.data, dirs.state].some((dir) => existsSync(dir));
 		initializeClioHome();
 		// The user file remains a strict gate. Project layers retain their
 		// established best-effort diagnostics, but every subsequent boot phase
 		// consumes this same effective snapshot.
 		startupSettings = readStrictLayeredSettings(process.cwd()).settings;
 		const verdict = classifyDefaultTarget(startupSettings);
-		if (verdict.kind === "missing-credential") {
-			// Diagnosis without a detour. The session continues, because whether
-			// the credential is actually required is the endpoint's answer to
-			// give and not something Clio can settle from settings alone.
-			process.stdout.write(
-				`Target '${verdict.targetId}' has no stored credential under '${verdict.store}'.\n` +
-					`Run \`clio-coder auth login ${verdict.store}\` if the endpoint requires one; local runtimes that ignore keys work as is.\n`,
-			);
-		} else if (verdict.kind !== "usable") {
+		let detected = false;
+		if (existingHome && verdict.kind !== "usable") {
+			const { detectChatRoutes, useDetectedChatRoute } = await import("./detect-chat-routes.js");
+			const route = (await detectChatRoutes(startupSettings)).find((candidate) => candidate.model);
+			if (route?.model) {
+				const result = useDetectedChatRoute(startupSettings, { ...route, model: route.model });
+				startupSettings = result.settings;
+				detected = true;
+				process.stdout.write(
+					`Chat: ${route.runtime.id} / ${route.model} from ${route.source}.${result.persisted ? "" : " Session only; saved chat route unchanged."} Change it with /config.\n`,
+				);
+			}
+		}
+		if (!detected && verdict.kind !== "usable") {
 			process.stdout.write(`${describeVerdict(verdict)} Starting \`clio-coder configure\`.\n`);
 			const { runConfigureCommand } = await import("./configure.js");
 			const configured = await runConfigureCommand([]);

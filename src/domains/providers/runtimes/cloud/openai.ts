@@ -28,6 +28,7 @@ const openaiRuntime: RuntimeDescriptor = {
 	apiFamily: "openai-responses",
 	auth: "api-key",
 	credentialsEnvVar: "OPENAI_API_KEY",
+	defaultModel: "gpt-6-luna",
 	defaultCapabilities,
 	synthesizeModel(target: TargetDescriptor, wireModelId: string, kb: KnowledgeBaseHit | null): Model<Api> {
 		return synthesizeCatalogBackedModel({
