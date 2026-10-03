@@ -798,6 +798,10 @@ button.wb-chip:hover:not(:disabled) {
 	.wb-bar .wb-chip:not(.wb-chip--status) {
 		display: none;
 	}
+	/* A phone keeps the controls and drops their words; each still has its accessible name. */
+	.wb-bar .wb-icon--text > span {
+		display: none;
+	}
 }
 
 .wb-icon.wb-icon--text {
