@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { memo, useEffect, useId, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { useNavigate } from "react-router";
 import { routes } from "../../contracts/routes.js";
 import type { Client } from "../api/client.js";
 import { Icon } from "../design/icons.js";
@@ -14,6 +15,7 @@ import { ContextPanel } from "./ContextPanel.js";
 import { changeCounts, NO_CHANGES, summarizeChanges } from "./changes-model.js";
 import { PANE_VIEWS, type PaneView, paneViewLabel, ROOT_VIEW, selectPaneSession } from "./pane-model.js";
 import { usePaneSection } from "./pane-state.js";
+import { openRoutePicker } from "./RoutePicker.js";
 import type { RouteFacts } from "./route.js";
 import { SessionBoardPanel } from "./SessionBoard.js";
 import { SessionOverview } from "./SessionOverview.js";
@@ -52,6 +54,7 @@ export const SessionPane = memo(function SessionPane({
 }) {
 	countRender("session-pane");
 	const headId = useId();
+	const navigate = useNavigate();
 	const requested = usePaneSection();
 	const aside = useRef<HTMLElement>(null);
 	const slot = useShell()?.asideSlot ?? null;
@@ -121,6 +124,14 @@ export const SessionPane = memo(function SessionPane({
 	}, [open, wide, slot, onClose, view, onViewChange]);
 
 	if (!pane) return null;
+	// The picker belongs to the composer. On a narrow screen this pane covers the composer, so it steps
+	// aside first; a task whose composer offers no picker is sent to the saved route instead.
+	const changeModel = () => {
+		if (!wide) onClose();
+		requestAnimationFrame(() => {
+			if (!openRoutePicker(sessionId)) void navigate("/settings/models");
+		});
+	};
 	const drilled = view !== ROOT_VIEW;
 	const mounted = (id: PaneView) => visited.has(id);
 	const body = (id: PaneView) => {
@@ -134,6 +145,7 @@ export const SessionPane = memo(function SessionPane({
 						workspaceRoot={workspaceRoot}
 						nowMs={nowMs}
 						onOpen={onViewChange}
+						onChangeModel={changeModel}
 						{...(route ? { route } : {})}
 					/>
 				);

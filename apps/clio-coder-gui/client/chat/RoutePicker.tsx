@@ -1,7 +1,7 @@
 // The next request’s route, with explicit conversation and saved scopes.
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useId, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import type { AgentCapabilities } from "../../contracts/capabilities.js";
 import { routes } from "../../contracts/routes.js";
 import type { SessionConfig } from "../../contracts/session-config.js";
@@ -20,6 +20,14 @@ import { conversationChanges, routeDraft, savedRoutePatch } from "./route-picker
 
 type Thinking = NonNullable<SafeSettingsPatch["chat.thinkingLevel"]>;
 const THINKING: readonly Thinking[] = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
+
+/** Openers keyed by session, so the Session column's Model section can open this composer's picker. */
+const openers = new Map<string, () => boolean>();
+
+/** Opens the route picker in a session's composer. False when that composer shows no picker. */
+export function openRoutePicker(sessionId: string): boolean {
+	return openers.get(sessionId)?.() ?? false;
+}
 
 /** The chip's face: the reported route with the target's health as its glyph. */
 function RouteFace({ route }: { route: RouteFacts }) {
@@ -57,6 +65,19 @@ export function RoutePicker({
 	const panel = useRef<HTMLDetailsElement>(null);
 	const [open, setOpen] = useState(false);
 	useDetailsDismiss(panel, open);
+	useEffect(() => {
+		const reveal = () => {
+			const details = panel.current;
+			if (!details) return false;
+			details.open = true;
+			details.querySelector("summary")?.focus();
+			return true;
+		};
+		openers.set(sessionId, reveal);
+		return () => {
+			if (openers.get(sessionId) === reveal) openers.delete(sessionId);
+		};
+	}, [sessionId]);
 	const global = capabilities?.settings?.get_safe === true && capabilities.settings.patch_safe === true;
 	if (!global && !route.config?.options.length)
 		return (

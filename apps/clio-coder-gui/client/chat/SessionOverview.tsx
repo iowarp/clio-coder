@@ -93,6 +93,7 @@ export function SessionOverview({
 	workspaceRoot,
 	nowMs,
 	onOpen,
+	onChangeModel,
 	route,
 }: {
 	client: Client;
@@ -101,6 +102,8 @@ export function SessionOverview({
 	workspaceRoot: string | undefined;
 	nowMs: number;
 	onOpen: (view: PaneView) => void;
+	/** Opens the place this task's route is changed: the composer's picker, or the saved route. */
+	onChangeModel?: () => void;
 	/** The route the composer shows, so the column and the chip never disagree. */
 	route?: RouteFacts;
 }) {
@@ -182,6 +185,7 @@ export function SessionOverview({
 				<Section
 					id="pane-model"
 					title="Model"
+					{...(onChangeModel ? { open: onChangeModel } : {})}
 					aside={<StatusMark tone={route.tone} label={ROUTE_HEALTH_WORDS[route.tone]} />}
 				>
 					<p className="pane-changes-line" title={route.title}>
