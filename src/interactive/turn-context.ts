@@ -2098,7 +2098,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 				}
 				lastSystemPromptReused = !changed;
 				const preload = result.projectPreload;
-				if (preload?.mode === "partial" && !deps.headless) {
+				if (preload?.mode === "partial" && !deps.headless && !deps.interactiveGuidance) {
 					// A provisional first compile belongs to the id created after it.
 					if (announcedProjectPreloadSession === "" && sessionId) announcedProjectPreloadSession = sessionId;
 					if (announcedProjectPreloadSession !== sessionId) {

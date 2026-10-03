@@ -479,7 +479,7 @@ function indexedSourceFileCount(codewiki: Codewiki): number {
 /** Measure how the session compiler will preload the on-disk project context. */
 function measureProjectPreload(cwd: string): ProjectPreloadClass {
 	const promptContext = renderPromptContext(cwd);
-	return selectProjectPreload(promptContext, null).classification;
+	return selectProjectPreload(promptContext, null, { cwd }).classification;
 }
 
 function packageScripts(cwd: string): Record<string, string> {

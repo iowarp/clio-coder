@@ -1534,6 +1534,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 	};
 
 	const turnRuntime = createTurnRuntime({
+		interactiveGuidance: deps.interactiveGuidance === true,
 		state,
 		gatewayCapabilityNames: () => deps.toolRegistry?.listGateway().map((spec) => spec.name) ?? [],
 		getSettings: deps.getSettings,

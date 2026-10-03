@@ -257,7 +257,7 @@ export function createPromptsBundle(
 			if (!suppressContextFiles) {
 				const projectContext = sources.projectContext;
 				if (projectContext) {
-					const selected = selectProjectPreload(projectContext, input.sessionInputs.providerSupportsTools ?? null);
+					const selected = selectProjectPreload(projectContext, input.sessionInputs.providerSupportsTools ?? null, { cwd });
 					contextFiles = selected.text;
 					projectPreload = selected.classification;
 					projectHandbookFiles = projectContext.handbookFiles;

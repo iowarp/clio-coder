@@ -1,3 +1,4 @@
+import { relative } from "node:path";
 import { renderProjectContextFragment } from "../context/clio-md.js";
 import type { ProjectPromptContext } from "../context/contract.js";
 import { sha256 } from "./hash.js";
@@ -64,13 +65,14 @@ function coverage(path: string, source: string, included: string): ProjectPreloa
 export function selectProjectPreload(
 	context: ProjectPromptContext,
 	providerSupportsTools: boolean | null = null,
-	options: { maxChars?: number; externalReadTools?: boolean } = {},
+	options: { maxChars?: number; externalReadTools?: boolean; cwd?: string } = {},
 ): { text: string; classification: ProjectPreloadClass } {
 	const maxChars = options.maxChars ?? FULL_PROJECT_CONTEXT_MAX_CHARS;
 	const fits = (text: string): boolean =>
 		text.length <= maxChars && renderedLines(text) <= FULL_PROJECT_CONTEXT_MAX_LINES;
 	const chars = context.text.length;
 	const lines = renderedLines(context.text);
+	let bindingReason: ProjectPreloadReason | null = null;
 	const classify = (
 		text: string,
 		mode: ProjectPreloadMode,
@@ -80,8 +82,16 @@ export function selectProjectPreload(
 		const includedChars = text.length;
 		const includedLines = renderedLines(text);
 		const omittedFiles = sources.filter((source) => source.omissionReason !== null);
+		const reason = mode !== "partial" ? null : (bindingReason ?? (chars > maxChars ? "size" : "lines"));
 		const coverageLabel = omittedFiles
-			.map((source) => `${source.path}: ${source.includedLines} of ${source.availableLines} lines included`)
+			.map((source) => {
+				const path = relative(options.cwd ?? process.cwd(), source.path) || "CLIO-CODER.md";
+				const loaded =
+					reason === "size"
+						? `${source.includedChars.toLocaleString("en-US")} of ${source.availableChars.toLocaleString("en-US")} characters`
+						: `${source.includedLines} of ${source.availableLines} lines`;
+				return `${path}: first ${loaded} loaded; lines ${source.omittedRange?.join("-")} left out`;
+			})
 			.join("; ");
 		return {
 			mode,
@@ -92,14 +102,14 @@ export function selectProjectPreload(
 			sources,
 			omittedSupportFragments,
 			providerSupportsTools,
-			reason: mode !== "partial" ? null : chars > maxChars ? "size" : "lines",
+			reason,
 			nearLimit: mode === "full" && (chars > maxChars * 0.9 || lines > FULL_PROJECT_CONTEXT_MAX_LINES * 0.9),
 			label:
 				mode === "full"
 					? `all ${lines} lines loaded`
 					: mode === "none"
 						? "none found"
-						: `${coverageLabel || "Some project support instructions were left out"}${omittedSupportFragments > 0 ? `; ${omittedSupportFragments} support fragments left out` : ""}. Shorten the project instructions to fit within ${FULL_PROJECT_CONTEXT_MAX_LINES} lines and ${maxChars.toLocaleString("en-US")} characters, including supporting instructions. There is no setting to raise this preload limit.`,
+						: `${coverageLabel || "Project support instructions left out"}${omittedSupportFragments > 0 ? `; ${omittedSupportFragments} support fragments left out` : ""} (${reason === "size" ? `${maxChars.toLocaleString("en-US")}-character` : `${FULL_PROJECT_CONTEXT_MAX_LINES}-line`} preload limit, including supporting instructions). Shorten the project instructions.`,
 		};
 	};
 	if (fits(context.text)) {
@@ -144,6 +154,7 @@ export function selectProjectPreload(
 			const previous = fragments[index] ?? "";
 			fragments[index] = renderProjectContextFragment(source.slice(0, offset), path);
 			if (!fits(assemble(reservedNotice))) {
+				bindingReason ??= assemble(reservedNotice).length > maxChars ? "size" : "lines";
 				fragments[index] = previous;
 				break;
 			}

@@ -6,9 +6,11 @@ import { motionEnabled } from "../core/terminal-preferences.js";
 import type { AgentsContract } from "../domains/agents/contract.js";
 import { isUserVisibleAgent } from "../domains/agents/spec.js";
 import type { ContextState } from "../domains/context/index.js";
+import { renderPromptContext } from "../domains/context/index.js";
 import type { DispatchContract } from "../domains/dispatch/contract.js";
 import type { TaskMemoryOperatorStatus } from "../domains/memory/index.js";
 import type { ObservabilityContract, TokenThroughputSnapshot } from "../domains/observability/index.js";
+import { selectProjectPreload } from "../domains/prompts/preload.js";
 import type { ProvidersContract } from "../domains/providers/index.js";
 import { resolveModelRuntimeCapabilitiesForProviders } from "../domains/providers/index.js";
 import { createQuotaSummaryFeed } from "../domains/quota/summary-feed.js";
@@ -266,6 +268,16 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 		// miss, so the banner refreshes it off the frame rather than calling it
 		// during render; the frame that shows the result is asked for below.
 		...(deps.getContextState ? { getContextState: deps.getContextState } : {}),
+		getProjectPreload: (cwd) => {
+			const current = deps.getSettings?.();
+			const capabilities = resolveModelRuntimeCapabilitiesForProviders(
+				deps.providers,
+				current?.chat?.target,
+				current?.chat?.model,
+			)?.capabilities;
+			const preload = selectProjectPreload(renderPromptContext(cwd), capabilities?.tools ?? null, { cwd }).classification;
+			return preload.mode === "partial" ? preload.label : null;
+		},
 		getSubmitKeyLabel: () => effectiveSubmitKeyLabel(),
 		getKeyLabel: (action) => {
 			const key = keybindings.isDisabled(action) ? undefined : keybindings.getKeys(action)[0];
@@ -489,9 +501,11 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 			)?.thinking;
 			return {
 				label:
-					thinking?.mechanism === "none"
-						? "unavailable"
-						: (thinking?.requestedDisplay ?? current?.chat?.thinkingLevel ?? "off"),
+					thinking && thinking.configuredLevel !== thinking.effectiveLevel
+						? `${thinking.configuredLevel}→${thinking.display}`
+						: thinking?.mechanism === "none"
+							? "unavailable"
+							: (thinking?.requestedDisplay ?? current?.chat?.thinkingLevel ?? "off"),
 				hasLevels: thinking?.mechanism === "effort-levels" || thinking?.mechanism === "budget-tokens",
 				supportedLevels: thinking?.supportedLevels ?? [],
 			};

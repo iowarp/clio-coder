@@ -187,7 +187,7 @@ describe("authored handbook fidelity", { concurrency: false }, () => {
 				strictEqual(compiled.systemPrompt.includes("OMITTED_TAIL_SENTINEL"), false);
 				strictEqual(compiled.projectPreload?.mode, "partial");
 				strictEqual(compiled.systemPrompt.includes(JSON.stringify(path)), true);
-				const selected = selectProjectPreload(renderPromptContext(cwd), providerSupportsTools);
+				const selected = selectProjectPreload(renderPromptContext(cwd), providerSupportsTools, { cwd });
 				deepStrictEqual(compiled.projectPreload, selected.classification);
 				strictEqual(compiled.systemPrompt.includes(selected.text), true);
 				writeFileSync(path, "Changed on disk.\n");

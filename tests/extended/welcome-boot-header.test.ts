@@ -74,6 +74,7 @@ function workspace(over: Record<string, unknown> = {}): unknown {
 }
 
 interface BannerOptions {
+	preload?: string;
 	statuses?: unknown[];
 	target?: string | undefined;
 	model?: string | undefined;
@@ -91,6 +92,7 @@ interface BannerOptions {
 
 function banner(options: BannerOptions = {}) {
 	const deps: WelcomeDashboardDeps = {
+		getProjectPreload: () => options.preload ?? null,
 		providers: { list: () => (options.statuses ?? [status()]) as never },
 		getSettings: () =>
 			({
@@ -803,14 +805,25 @@ test("the composer rail uses a model nickname while the session header retains i
 
 test("the welcome keeps a quiet launchpad and the session header names the full model", () => {
 	const model = "dynamo/qwopus3.5-flash@q4_k_m";
-	const component = banner({ model });
+	const preload =
+		"CLIO-CODER.md: first 23,100 of 27,928 characters loaded; lines 129-180 left out (24,000-character preload limit, including supporting instructions). Shorten the project instructions.";
+	const component = banner({ model, preload });
 	const wide = rows(component, 120);
 	ok(wide.join("\n").includes("████"));
-	for (const label of ["Session started", "Project", "AI usage"]) ok(wide.join("\n").includes(label));
+	for (const label of [
+		"Session started",
+		"Project",
+		"AI usage",
+		"Instructions",
+		"lines 129-180 left out",
+		"24,000-character",
+	])
+		ok(wide.join("\n").includes(label));
 	ok(actionLine(wide).endsWith(`v${readClioVersion()}${isDevVersion(readClioVersion()) ? "·source" : ""}`));
 	component.collapseToSessionHeader();
 	strictEqual(rows(component, 120).length, 1);
 	ok(rows(component, 120)[0]?.includes(model));
+	ok(!rows(component, 120).join("\n").includes("Instructions"));
 });
 
 test("the instant shell uses the finished welcome footprint without hydration copy or false readiness", () => {

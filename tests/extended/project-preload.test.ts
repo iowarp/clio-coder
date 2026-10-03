@@ -53,13 +53,17 @@ describe("bounded authored preload", () => {
 	});
 	it("allocates nearest first, renders ancestors first, and reports exact omissions", () => {
 		const input = context([`ANCESTOR\n\n${"Ancestor paragraph.\n\n".repeat(600)}`, "MIDDLE\n\n", "NEAREST\n\n"]);
-		const selected = selectProjectPreload(input, true);
+		const selected = selectProjectPreload(input, true, { cwd: "/layer/0" });
 		assertBudget(selected);
 		strictEqual(selected.text.includes("NEAREST"), true);
 		strictEqual(selected.text.indexOf("ANCESTOR") < selected.text.indexOf("MIDDLE"), true);
 		strictEqual(selected.text.indexOf("MIDDLE") < selected.text.indexOf("NEAREST"), true);
 		const ancestor = selected.classification.sources?.[0];
 		strictEqual(ancestor?.omissionReason, "budget");
+		strictEqual(selected.classification.label.includes("CLIO-CODER.md: first"), true);
+		strictEqual(selected.classification.label.includes("/layer/"), false);
+		strictEqual(selected.classification.label.includes("220-line preload limit"), true);
+		strictEqual(selected.classification.label.includes(`lines ${ancestor?.omittedRange?.join("-")} left out`), true);
 		deepStrictEqual(ancestor?.omittedRange, [(ancestor?.includedLines ?? 0) + 1, ancestor?.availableLines]);
 		strictEqual(selected.text.includes(`omitted physical lines ${ancestor?.omittedRange?.join("-")} (budget)`), true);
 		strictEqual(selected.text.includes("read({path: ABSOLUTE_PATH, offset: FIRST_OMITTED_LINE, limit: 200})"), true);

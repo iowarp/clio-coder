@@ -91,6 +91,7 @@ export interface WelcomeDashboardDeps {
 	 * paints `checking` until the first reading lands.
 	 */
 	getContextState?: (cwd: string) => ContextState;
+	getProjectPreload?: (cwd: string) => string | null;
 	/** Effective label for the submit binding; null when unbound or disabled. */
 	getSubmitKeyLabel?: () => string | null;
 	/** Effective shortcut labels; null hides an unbound action. */
@@ -123,6 +124,7 @@ export interface WelcomeDashboardStats {
 	routeReason: string | null;
 	/** `checking` in session mode: the collapsed row does not show it, so it is not read. */
 	projectContext: WelcomeProjectContextState;
+	projectPreload?: string | null;
 	/** Null in session mode: the collapsed row prints no key hint. */
 	submitKeyLabel: string | null;
 	autonomy: string;
@@ -468,7 +470,15 @@ export function buildWelcomeDashboardLines(
 	);
 	const theme = clioTheme();
 	const safeWidth = Math.max(1, width);
-	if (mode === "session") return [padAnsi(sessionRow(theme, stats, version, safeWidth), safeWidth)];
+	const coverageRows = (room: number): string[] =>
+		stats.projectPreload
+			? wrapTextWithAnsi(
+					`${theme.fg("fieldName", "Instructions  ")}${theme.fg("body", sanitizeCallTargetText(stats.projectPreload))}`,
+					room,
+				)
+			: [];
+	if (mode === "session")
+		return [padAnsi(sessionRow(theme, stats, version, safeWidth), safeWidth), ...coverageRows(safeWidth)];
 	const panelWidth = safeWidth;
 	const room = Math.max(1, panelWidth - 4);
 	const fit = (text: string): string => truncateToWidth(text, room, GLYPH.ellipsis, false);
@@ -593,7 +603,7 @@ export function buildWelcomeDashboardLines(
 	return frame(
 		theme,
 		title,
-		[...rows, ...taglineRows, innerDivider(theme, room), fit(`${action}${gap}${versionTag}`)],
+		[...rows, ...coverageRows(room), ...taglineRows, innerDivider(theme, room), fit(`${action}${gap}${versionTag}`)],
 		panelWidth,
 	);
 }
@@ -616,6 +626,7 @@ function statsSignature(stats: WelcomeDashboardStats): string {
 		stats.route,
 		stats.routeReason,
 		stats.projectContext,
+		stats.projectPreload,
 		stats.quota,
 	].join("\0");
 }
@@ -623,6 +634,7 @@ function statsSignature(stats: WelcomeDashboardStats): string {
 interface ProjectContextReading {
 	cwd: string;
 	state: WelcomeProjectContextState;
+	preload: string | null;
 	/** When the last *successful* read landed. Never renewed by a failure. */
 	readAt: number;
 	/** When the last attempt finished, successful or not. Paces retries. */
@@ -666,7 +678,7 @@ export class WelcomeDashboard implements WelcomeDashboardComponent {
 
 	render(width: number): string[] {
 		const mode = richWelcomeEnabled(this.deps.getSettings?.().interface?.demo) ? this.mode : "session";
-		const stats = this.stats(mode);
+		const stats = this.stats();
 		// Existing presentation refreshes advance the hints; no extra timer or startup work.
 		const hintPage =
 			mode === "launchpad" && width >= WELCOME_HINT_MIN_WIDTH
@@ -700,6 +712,7 @@ export class WelcomeDashboard implements WelcomeDashboardComponent {
 	resetToLaunchpad(): boolean {
 		if (this.mode === "launchpad") return false;
 		this.mode = "launchpad";
+		this.context = null;
 		this.hintStartedAt = this.now();
 		this.cachedRender = null;
 		return true;
@@ -728,7 +741,7 @@ export class WelcomeDashboard implements WelcomeDashboardComponent {
 		}
 	}
 
-	private stats(mode: WelcomeDashboardMode): WelcomeDashboardStats {
+	private stats(): WelcomeDashboardStats {
 		const settings = this.deps.getSettings?.();
 		const statuses = this.deps.providers.list();
 		const current = findCurrentStatus(statuses, settings);
@@ -741,7 +754,7 @@ export class WelcomeDashboard implements WelcomeDashboardComponent {
 		// no background context read, and no cache invalidation when either
 		// changes while the header cannot show it. `/new` returns to the launchpad
 		// and the check resumes on the next frame.
-		const launchpad = mode === "launchpad";
+		const launchpad = this.mode === "launchpad";
 		return {
 			cwd,
 			workspace,
@@ -750,6 +763,7 @@ export class WelcomeDashboard implements WelcomeDashboardComponent {
 			route,
 			routeReason,
 			projectContext: launchpad ? this.projectContext(cwd) : "checking",
+			projectPreload: launchpad && this.context?.cwd === cwd ? this.context.preload : null,
 			submitKeyLabel: null,
 			autonomy: settings?.safety?.autonomy ?? "default",
 			quota: launchpad ? (this.deps.getQuotaSummary?.() ?? null) : null,
@@ -796,8 +810,10 @@ export class WelcomeDashboard implements WelcomeDashboardComponent {
 				return;
 			}
 			let resolved: WelcomeProjectContextState | null = null;
+			let preload: string | null = null;
 			try {
 				resolved = normalizeProjectContext(read(cwd));
+				preload = this.deps.getProjectPreload?.(cwd) ?? null;
 			} catch {
 				// A read that threw proves nothing about the workspace. Never turn it
 				// into `ok` or `none`.
@@ -816,13 +832,14 @@ export class WelcomeDashboard implements WelcomeDashboardComponent {
 					? {
 							cwd,
 							state: previous?.state ?? "checking",
+							preload: previous?.preload ?? null,
 							// Deliberately not renewed: a failure must not extend the trust
 							// window of the value it failed to confirm.
 							readAt: previous?.readAt ?? 0,
 							attemptedAt: at,
 							failingSince: previous?.failingSince ?? at,
 						}
-					: { cwd, state: resolved, readAt: at, attemptedAt: at, failingSince: null };
+					: { cwd, state: resolved, preload, readAt: at, attemptedAt: at, failingSince: null };
 			this.cachedRender = null;
 			this.deps.onFactsRefreshed?.();
 		});

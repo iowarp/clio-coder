@@ -140,6 +140,7 @@ export type AssistantDeltaEvent =
 	  };
 
 export interface TurnRuntimeDeps {
+	interactiveGuidance?: boolean;
 	state: ChatTurnState;
 	/** Capabilities behind the attached gateway, for the streaming tool-prose cutoff. */
 	gatewayCapabilityNames?: (() => ReadonlyArray<string>) | undefined;
@@ -286,8 +287,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 				key,
 			);
 		}
-		// emitThinkingClampNotice prints the one combined thinking line when the
-		// dial takes effect; the thinking diagnostics are its two halves.
+		// The TUI's thinking indicator owns coercion facts; other surfaces retain their notice.
 		for (const message of runtimeResolutionWarningsBesideThinkingNotice(
 			resolved.diagnostics.filter((entry) => entry.code !== "chat-template-kwargs-undeliverable"),
 			resolved.target.modelRuntime.thinking.notice,
@@ -455,6 +455,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 	const announcedThinkingNotices = new Set<string>();
 	let thinkingNoticeSession: string | undefined;
 	const emitThinkingClampNotice = (resolution: ChatLoopTarget["runtimeResolution"]): void => {
+		if (deps.interactiveGuidance) return;
 		const sessionId = deps.sessionId?.();
 		// The first runtime can precede session creation; bind its notices to that session.
 		if (sessionId !== thinkingNoticeSession) {
