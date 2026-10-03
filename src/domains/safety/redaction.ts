@@ -18,11 +18,20 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 const SECRET_KEY_RE =
 	/(?:api[-_]?key|access[-_]?key|auth(?:orization)?|credential|password|private[-_]?key|secret|token)/iu;
 const ENV_KEY_RE = /^env(?:ironment)?$/iu;
-const SECRET_STRING_RE = /(https?:\/\/[^\s/@]+:)[^\s/@]+@/giu;
+const SECRET_STRING_RE = /(https?:\/\/[^\s/@]+:)([^\s/@]+)@/giu;
 const SECRET_URL_PARAM_RE =
-	/([?&](?:api[-_]?key|access[-_]?token|auth(?:orization)?|credential|password|secret|token)[^=\s]*=)[^&#\s]+/giu;
+	/([?&](?:api[-_]?key|access[-_]?token|auth(?:orization)?|credential|password|secret|token)[^=\s]*=)([^&#\s]+)/giu;
 const SECRET_ASSIGNMENT_RE =
-	/(?<![A-Z0-9_])((?:[A-Z0-9_]*(?:ACCESS|API|AUTH|CREDENTIAL|KEY|PASS(?:WORD)?|PRIVATE|SECRET|TOKEN)[A-Z0-9_]*)=)[^\s;&|]+/giu;
+	/(?<![A-Z0-9_])((?:[A-Z0-9_]*(?:ACCESS|API|AUTH|CREDENTIAL|KEY|PASS(?:WORD)?|PRIVATE|SECRET|TOKEN)[A-Z0-9_]*)=)([^\s;&|]+)/giu;
+// `:_authToken=${NPM_TOKEN}` or `--token "$TOKEN"` names a variable instead of
+// holding a credential. Hiding it leaves the operator unable to see what was
+// written. A bare `$name` counts only in the uppercase environment shape, so a
+// literal secret that happens to start with `$` still redacts.
+const ENV_REFERENCE_RE = /^["']?\$(?:[A-Z_][A-Z0-9_]*|\{[A-Za-z_][A-Za-z0-9_]*\})["']?$/u;
+
+function redactUnlessEnvReference(match: string, prefix: string, secret: string, suffix = ""): string {
+	return ENV_REFERENCE_RE.test(secret) ? match : `${prefix}[redacted]${suffix}`;
+}
 const SECRET_FLAG_NAME_RE = /(?=(api[-_]?key|access[-_]?token|auth(?:orization)?|credential|password|secret|token))/giu;
 
 function secretFlagStart(word: string): number | null {
@@ -58,6 +67,7 @@ function redactSecretFlags(value: string): string {
 		if (secretFlagStart(word[0]) === null) continue;
 		argument.lastIndex = valueStart;
 		if (argument.exec(value) === null) continue;
+		if (ENV_REFERENCE_RE.test(value.slice(valueStart, argument.lastIndex))) continue;
 		out.push(value.slice(copied, valueStart), "[redacted]");
 		copied = argument.lastIndex;
 		words.lastIndex = copied;
@@ -70,9 +80,15 @@ function redactSecretFlags(value: string): string {
 export function redactSecretString(value: string): string {
 	return redactSecretFlags(
 		value
-			.replace(SECRET_STRING_RE, "$1[redacted]@")
-			.replace(SECRET_URL_PARAM_RE, "$1[redacted]")
-			.replace(SECRET_ASSIGNMENT_RE, "$1[redacted]"),
+			.replace(SECRET_STRING_RE, (match, prefix: string, secret: string) =>
+				redactUnlessEnvReference(match, prefix, secret, "@"),
+			)
+			.replace(SECRET_URL_PARAM_RE, (match, prefix: string, secret: string) =>
+				redactUnlessEnvReference(match, prefix, secret),
+			)
+			.replace(SECRET_ASSIGNMENT_RE, (match, prefix: string, secret: string) =>
+				redactUnlessEnvReference(match, prefix, secret),
+			),
 	);
 }
 

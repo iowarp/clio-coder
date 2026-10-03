@@ -573,7 +573,7 @@ export function createOverlayPermissionLifecycle(deps: OverlayPermissionLifecycl
 			// standing "do not retry, pivot or report" instruction, so restating it
 			// here printed the same guidance twice in one payload.
 			const cancellationReason = stopping
-				? "User denied this call and stopped the turn. The turn is over."
+				? "User stopped the turn at this call's approval card. It did not run, and the turn is over."
 				: "User denied this call at the permission prompt. It will not run; no approval is pending.";
 			deps.bus.emit(BusChannels.PermissionResolved, {
 				status: "denied",
@@ -623,8 +623,8 @@ export function createOverlayPermissionLifecycle(deps: OverlayPermissionLifecycl
 			deps.closeOverlay();
 			deps.stopActiveTurn(
 				tool === undefined
-					? "[Clio Coder] turn stopped: you denied the tool call at its approval card."
-					: `[Clio Coder] turn stopped: you denied ${tool} at its approval card.`,
+					? "[Clio Coder] turn stopped at the approval card; the tool call did not run."
+					: `[Clio Coder] turn stopped at the approval card; ${tool} did not run.`,
 			);
 		},
 		onPermissionOverlayClosed,

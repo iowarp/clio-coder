@@ -69,7 +69,7 @@ entries:
       - build a literature survey
     version: 0.5.1
     sourceUrl: skills/research/arxiv-literature
-    sha256: ebda3bed06d5226aee6cabb612a70ca4a2e504dec5f5333b0e7c61322cd20225
+    sha256: 2d367bd030b72c3c2eebdea8b073cc6be1351cd24c5466833322f3dcb819d108
     provides:
       - kind: skill
         name: arxiv-literature

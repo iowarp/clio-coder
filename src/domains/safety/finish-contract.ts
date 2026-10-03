@@ -1,6 +1,6 @@
 import { homedir } from "node:os";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
-import { isNonSourcePath } from "../../core/test-paths.js";
+import { isNonSourcePath, isProsePath } from "../../core/test-paths.js";
 import { ToolNames } from "../../core/tool-names.js";
 import { isProjectVerifierCheckId, isVerificationScriptName } from "../../core/verification-scripts.js";
 import { effectiveToolCall, expandChainMessages } from "../../tools/surface.js";
@@ -67,6 +67,7 @@ export type FinishContractReason =
 	| "no_mutation"
 	| "no_net_mutation"
 	| "deletion_only"
+	| "prose_only"
 	| "validation_evidence"
 	| "explicit_limitation"
 	| "unvalidated_mutation";
@@ -74,7 +75,13 @@ export type FinishContractReason =
 export type FinishContractAssessment =
 	| {
 			kind: "ok";
-			reason: "no_mutation" | "no_net_mutation" | "deletion_only" | "validation_evidence" | "explicit_limitation";
+			reason:
+				| "no_mutation"
+				| "no_net_mutation"
+				| "deletion_only"
+				| "prose_only"
+				| "validation_evidence"
+				| "explicit_limitation";
 			evidence: ReadonlyArray<FinishContractEvidence>;
 			mutatedPaths: ReadonlyArray<string>;
 			quality?: ReadonlyArray<QualityFinding>;
@@ -134,7 +141,8 @@ interface MutationCandidate {
  *   1. no mutating receipt in the window        -> ok/no_mutation
  *   2. validation evidence present              -> ok/validation_evidence, with bounded scope advisory
  *   3. successful `limitation` receipt present  -> ok/explicit_limitation
- *   4. otherwise                                -> engage/unvalidated_mutation
+ *   4. only prose written, or only non-source removed -> ok/prose_only or ok/deletion_only
+ *   5. otherwise                                -> engage/unvalidated_mutation
  *
  * The assistant's prose never enters the decision. A limitation counts only
  * as a `limitation` tool_call paired with a non-error tool_result inside the
@@ -143,7 +151,12 @@ interface MutationCandidate {
  */
 export function assessFinishContract(input: FinishContractInput): FinishContractAssessment {
 	const assessment = assessMutationFinishContract(input);
-	if (assessment.mutatedPaths.length === 0 || assessment.reason === "deletion_only") return assessment;
+	if (
+		assessment.mutatedPaths.length === 0 ||
+		assessment.reason === "deletion_only" ||
+		assessment.reason === "prose_only"
+	)
+		return assessment;
 	const limitations = assessment.evidence.filter((item) => item.kind === "limitation");
 	const passedChecks = [
 		...assessment.evidence.filter((item) => item.kind === "validation_command").map((item) => item.check ?? item.summary),
@@ -270,6 +283,11 @@ function assessMutationFinishContract(input: FinishContractInput): FinishContrac
 
 	if (limitations.length > 0) {
 		return { kind: "ok", reason: "explicit_limitation", evidence: limitations, mutatedPaths };
+	}
+	// A handoff note, a spec or a Mermaid diagram has no check to run, so
+	// writing only prose is not an unverified change.
+	if (mutatedPaths.every((path) => isProsePath(path))) {
+		return { kind: "ok", reason: "prose_only", evidence: [], mutatedPaths };
 	}
 	// Removing tests or docs leaves nothing to check (D2-t2-b). Removing source
 	// can break imports or the build, so it still earns the advisory unless the

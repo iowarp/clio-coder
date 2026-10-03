@@ -66,16 +66,25 @@ Default every request — single paper, search, compare, and survey alike — to
   into paper cards:
 
   ```text
-  https://export.arxiv.org/api/query?search_query=all:QUERY&sortBy=submittedDate&sortOrder=descending&start=0&max_results=10
+  https://export.arxiv.org/api/query?search_query=abs:%22PHRASE%22+AND+abs:TERM+AND+abs:TERM&sortBy=submittedDate&sortOrder=descending&start=0&max_results=10
   ```
+
+  arXiv ORs bare words: `all:learned I/O prediction` becomes
+  `all:learned OR all:I/O OR all:prediction`, and a date sort then returns the
+  newest unrelated papers. Build `search_query` from two to four distinctive
+  terms, each with its own field prefix (`abs:` abstract, `ti:` title,
+  `cat:cs.DC` category), joined with `+AND+`, and quote a multi-word phrase as
+  `%22two+words%22`. If the results are off-topic, drop the least essential
+  term or switch to `sortBy=relevance` before concluding that no papers exist.
 
   For a compare request, run one query per paper ID (`id_list=ID` instead of
   `search_query`) or one broader query covering all of them — whichever stays
   inside the fetch cap in Step 3.
 
-Useful categories for `search_query`: `cs.AI` (AI), `cs.LG` (ML), `cs.CL`
+Useful categories for a `cat:` term: `cs.AI` (AI), `cs.LG` (ML), `cs.CL`
 (NLP/LLMs), `cs.CR` (security), `cs.SE` (software engineering), `cs.MA`
-(multi-agent), `cs.IR` (retrieval/RAG), `cs.CV` (vision), `cs.RO` (robotics).
+(multi-agent), `cs.IR` (retrieval/RAG), `cs.CV` (vision), `cs.RO` (robotics),
+`cs.DC` (distributed, parallel and HPC).
 
 **Only dispatch the `researcher` shadow agent when the user explicitly asks
 for a deep or broad survey** ("survey the field", "don't just skim arXiv, go

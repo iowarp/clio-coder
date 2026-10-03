@@ -30,7 +30,7 @@ const DECISIONS_ENV = "CLIO_CODER_COMMIT_DECISIONS";
 /** Present iff this environment carries Clio's command-scope core.hooksPath pair; holds the count below it. */
 const CONFIG_BASE_COUNT_ENV = "CLIO_CODER_GIT_CONFIG_BASE_COUNT";
 const DEFAULT_HOOKS_EQUIVALENT_ENV = "CLIO_CODER_GIT_DEFAULT_HOOKS_EQUIVALENT";
-const MANAGED_HOOK_VERSION = 3;
+const MANAGED_HOOK_VERSION = 4;
 const DIAGNOSTIC_MAX_CHARS = 300;
 const COUNT = /^(?:0|[1-9][0-9]*)$/u;
 const reportedDiagnostics = new Set<string>();
@@ -265,6 +265,12 @@ has_trailer() {
     { line=$0; gsub(/[ \\t]+/, " ", line); sub(/ $/, "", line); if (tolower(line) == wanted) found=1 }
     END { exit found ? 0 : 1 }' "$message_file"
 }
+
+# git merge -m writes its message without a final newline, and
+# interpret-trailers then glues the first trailer under the subject.
+if [ -s "$message_file" ] && [ -n "$(tail -c 1 "$message_file")" ]; then
+  printf '\\n' >> "$message_file"
+fi
 
 append_trailer() {
   if has_trailer "$1"; then return 0; fi
