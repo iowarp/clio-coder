@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { createStdioTransport } from "../../src/engine/acp/transport.js";
-import { type HeadlessScratch, headlessScratch, runCli } from "../harness/headless-run.js";
+import { type HeadlessScratch, headlessScratch, privateCliCopy, runCli } from "../harness/headless-run.js";
 import {
 	closeServer,
 	type OpenAICompatFixture,
@@ -12,7 +12,8 @@ import {
 	startOpenAICompatFixture,
 } from "../harness/openai-compat-fixture.js";
 
-const CLI = join(new URL("../..", import.meta.url).pathname, "dist", "cli", "index.js");
+// Another session may rebuild dist/ while this suite runs; a private copy keeps its CLI whole.
+const CLI = privateCliCopy();
 
 /**
  * Two sessions on one machine share settings.yaml. A model another session
@@ -36,7 +37,7 @@ describe("resuming a session keeps the route it ran on", { timeout: 180_000 }, (
 
 	async function turn(args: ReadonlyArray<string>): Promise<string> {
 		const before = chat.requests.length;
-		const result = await runCli(["run", ...args], { env: scratch.env, cwd: scratch.root, timeoutMs: 60_000 });
+		const result = await runCli(["run", ...args], { env: scratch.env, cwd: scratch.root, timeoutMs: 60_000, cli: CLI });
 		strictEqual(result.code, 0, `run failed\nstdout=${result.stdout}\nstderr=${result.stderr}`);
 		const request = chat.requests[before];
 		ok(request, "the turn sent no chat request");
@@ -44,7 +45,7 @@ describe("resuming a session keeps the route it ran on", { timeout: 180_000 }, (
 	}
 
 	before(async () => {
-		scratch = headlessScratch("clio-resume-route-");
+		scratch = headlessScratch("clio-resume-route-", CLI);
 		chat = await startOpenAICompatFixture("Noted.", {
 			models: [
 				{ id: "mock-model", object: "model" },
