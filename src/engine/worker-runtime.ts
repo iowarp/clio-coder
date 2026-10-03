@@ -441,6 +441,12 @@ export function workerProviderSupportsTools(input: WorkerRunInput): boolean {
 	return input.runtime.defaultCapabilities.tools === true;
 }
 
+function responseSchemaRuntimeRefusal(input: WorkerRunInput): Error {
+	return new Error(
+		`responseSchema requires a native llamacpp runtime with resolved JSON-schema support; received '${input.runtime.id}'`,
+	);
+}
+
 function assertResponseSchemaRuntime(input: WorkerRunInput): void {
 	if (input.responseSchema === undefined) return;
 	if (
@@ -449,9 +455,21 @@ function assertResponseSchemaRuntime(input: WorkerRunInput): void {
 	) {
 		return;
 	}
-	throw new Error(
-		`responseSchema requires a native llamacpp runtime with resolved JSON-schema support; received '${input.runtime.id}'`,
-	);
+	throw responseSchemaRuntimeRefusal(input);
+}
+
+/**
+ * The `response_format` an admitted schema rides on. Admission
+ * ({@link assertResponseSchemaRuntime}) and the dialect table are separate
+ * predicates, so a schema with no dialect here means they drifted. The request
+ * must not go out unconstrained in that case, because the parent would read a
+ * contract it believes was enforced.
+ */
+function workerResponseFormatFor(input: WorkerRunInput): Record<string, unknown> | undefined {
+	if (input.responseSchema === undefined) return undefined;
+	const dialect = responseSchemaDialectFor(input.runtime.id);
+	if (dialect === null) throw responseSchemaRuntimeRefusal(input);
+	return responseFormatFor(dialect, input.responseSchema, "clio_result");
 }
 
 interface ReadCitationRequest {
@@ -971,14 +989,9 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 
 	const inheritedMessages = seededWorkerMessages(input.contextSeed);
 	const contextGuard = createWorkerContextGuard(observations.archive);
-	// assertResponseSchemaRuntime refused any runtime without a dialect, so a
-	// schema here always has one. The constraint rides samplingParams, which the
-	// completions adapter merges into the body after every named field.
-	const responseDialect = responseSchemaDialectFor(input.runtime.id);
-	const workerResponseFormat =
-		input.responseSchema !== undefined && responseDialect !== null
-			? responseFormatFor(responseDialect, input.responseSchema, "clio_result")
-			: undefined;
+	// The constraint rides samplingParams, which the completions adapter merges
+	// into the body after every named field.
+	const workerResponseFormat = workerResponseFormatFor(input);
 	const options: EngineAgentOptions = {
 		// The run's restrictions are judged against the target as configured for
 		// this run before each request, the same verdict the parent would reach.
