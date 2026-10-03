@@ -22,9 +22,12 @@ Implement this change and leave the suite green.
 
 {{task}}
 
-The suite is run by code, not by you. Do not try to discover, invent, or run the
-test command yourself; a deterministic step runs the repository's registered
-`test` command after you finish and reports its exit code and output verbatim.
+The suite is run by code: after you finish, a deterministic check step runs the
+repository's registered `test` command, shown below with its exact arguments,
+and reports its exit code and output verbatim. Do not invent another test
+command. For a reported defect, put your reproduction test where that command
+runs it (extend a test file it names, when it names files), so the check stays
+red until every clause of the report is fixed.
 
 If the suite comes back red you receive its output and the previous attempt's report as input data. Repair
 exactly what it reported. Do not restate the failure, do not weaken or delete a

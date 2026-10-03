@@ -115,11 +115,38 @@ function declaredLoops(steps: ReadonlyArray<FleetContractStep>): Map<string, Exe
 	return loops;
 }
 
+/**
+ * The exact argument vector each loop's code check runs, for the agents whose
+ * work it checks. A registered suite that already passes on the untouched tree
+ * never fails the check, so the repair loop never triggers (campaign T3); an
+ * agent that knows the vector can put its reproduction test where it runs.
+ */
+function loopCheckCommandNote(
+	contract: FleetContract,
+	commands: FleetCommandRegistry | null | undefined,
+	vars: Readonly<Record<string, string>>,
+): string {
+	if (!commands) return "";
+	const lines: string[] = [];
+	for (const step of contract.steps) {
+		if (step.kind !== "loop" || step.check.kind !== "code") continue;
+		const command = commands.commands.get(step.check.command);
+		if (command === undefined) continue;
+		const argv = [...command.argv, ...resolveFleetCommandArgs(step.check.args ?? [], vars)];
+		lines.push(
+			`Check step \`${step.id}\` runs the registered \`${command.id}\` command as ${JSON.stringify(argv)} in \`${command.cwd}\`.`,
+		);
+	}
+	return lines.join("\n");
+}
+
 export function compileFleetExecutionPlan(input: CompileFleetPlanInput): ExecutionPlan {
-	const { contract, task, resolveAgent } = input;
+	const { contract, resolveAgent } = input;
 	if (input.commands !== undefined) validateFleetCommands(contract, input.commands, input.vars ?? {});
 	else if (fleetCodeSteps(contract).some((step) => (step.args?.length ?? 0) > 0))
 		throw new Error("fleet code args: admission requires the operator command registry");
+	const checkNote = loopCheckCommandNote(contract, input.commands, input.vars ?? {});
+	const task = checkNote.length > 0 ? `${input.task}\n\n${checkNote}` : input.task;
 	const loops = declaredLoops(contract.steps);
 	const steps: ExecutionPlanStepInput[] = [];
 
@@ -285,7 +312,7 @@ export function compileFleetExecutionPlan(input: CompileFleetPlanInput): Executi
 
 	return compileExecutionPlan({
 		topology: "fleet",
-		rootTask: task,
+		rootTask: input.task,
 		maxWorkers: contract.maxWorkers,
 		...(contract.writers === 1 ? { writers: 1 as const } : {}),
 		onFailure: contract.onFailure,

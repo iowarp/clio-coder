@@ -146,6 +146,11 @@ Verify task output.
 		plan.steps.filter((step) => step.kind === "code").map((step) => step.args),
 		[["task-03"], ["task-03"]],
 	);
+	// The repair agent is told the exact vector the check runs, so a reproduction
+	// test it writes can land where that check runs it.
+	const vector = JSON.stringify([process.execPath, "-e", "process.stdout.write('approved')", "--", "task-03"]);
+	const repair = plan.steps.find((step) => step.kind === "agent");
+	strictEqual(repair?.task.includes(`Check step \`check\` runs the registered \`verify\` command as ${vector}`), true);
 });
 
 it("keeps legacy commands fixed and rejects eval flags before admission and direct execution", async () => {
