@@ -761,6 +761,39 @@
 	.tutorial-card .text-link {
 		margin-block-start: 1rem;
 	}
+	.experimental-list {
+		grid-template-columns: minmax(0, 1fr);
+		gap: 0;
+	}
+	.experimental-list .tutorial-card {
+		display: grid;
+		grid-template-columns: minmax(8rem, 0.6fr) minmax(0, 2fr);
+		column-gap: 3rem;
+		padding-block: 2rem;
+		border-block-start: 1px solid var(--line);
+	}
+	.experimental-list .tutorial-card > * {
+		grid-column: 2;
+		max-inline-size: 65ch;
+	}
+	.experimental-list .tutorial-card > .eyebrow {
+		grid-column: 1;
+		grid-row: 1 / span 4;
+		margin: 0;
+	}
+	.experimental-list .tutorial-card > .caption {
+		margin-block-start: 1rem;
+		font-size: 0.8rem;
+	}
+	@media (max-width: 600px) {
+		.experimental-list .tutorial-card {
+			display: block;
+		}
+		.experimental-list .tutorial-card > .eyebrow {
+			margin-block-end: 1rem;
+		}
+	}
+
 	.tutorial-article {
 		max-inline-size: 760px;
 		padding-block: 3rem 5rem;
@@ -1055,6 +1088,12 @@
 		.faq,
 		.project-section {
 			gap: 3rem;
+		}
+	}
+	@media (max-width: 1000px) {
+		.source-link,
+		.mast-actions > .btn {
+			display: none;
 		}
 	}
 	@media (max-width: 850px) {

@@ -36,6 +36,8 @@ Check the destination, dependencies, scope, and package pin. The `--json` form c
 clio-coder library install skill:tdd --project
 ```
 
+The first project install in a workspace is yours, so Clio approves the project's packages for that workspace. After that, a changed project package set, including one that arrives with a clone or a pull, is listed but not loaded until you review it with `clio-coder config trust plugins` and approve the digest it prints.
+
 ### Load it for one concrete task
 
 ```text
@@ -89,10 +91,11 @@ After changes made by another process, `/library reload` refreshes recipes and `
 
 ## Know when you need an extension
 
-Library plugins provide portable recipes. Executable harness extensions add runtime tools, hooks, or interface behavior through `clio-coder extensions`, and adding tool schemas requires a new session; reloading recipes does not change them.
+Library plugins provide portable recipes. Executable harness extensions add runtime tools, hooks, or interface behavior through `clio-coder extensions`, and adding tool schemas requires a new session; reloading recipes does not change them. Project extensions follow the same trust rule through `clio-coder config trust extensions`, and Clio names any it ignored when a session starts.
 
 ::: limits
 - Choose the least extensive mechanism that supplies the task.
+- Workspace trust decides whether project packages load. It does not review them for you.
 - Review executable code before using it, and account for its commands and network access under your own machine's permissions.
 - A bigger Library helps only when it serves a better-defined task.
 :::

@@ -4,112 +4,118 @@
   "corpusPolicy": "site/public-docs.json",
   "source": {
     "version": "0.6.0",
-    "ref": "6c148db046d4515e4de6ec1ed4fbdc405f8179db",
-    "commit": "6c148db046d4515e4de6ec1ed4fbdc405f8179db",
+    "ref": "9e8d3739dcb54a00e95ca07ad22ae8844e82083d",
+    "commit": "9e8d3739dcb54a00e95ca07ad22ae8844e82083d",
     "mode": "repository"
   },
   "files": [
     {
       "path": "README.md",
       "source": "README.md",
-      "sha256": "15886253f3921cffd5dd9f008cec89ec9b4c415ab959c3a4b40ec93454e1d71b",
-      "sourceSha256": "0a31e44a5f17a7f7825c5cf9c97bf8211d61e717bc6a3ac007928fd6afaeaf6b"
+      "sha256": "63b04006e3b8bea04c061402ea400d199bdd3e87ae20821bc12e355d3a96fa28",
+      "sourceSha256": "07c2bc175bd86be6255012ca14d9c959079321f1500fff01bd82f9224d42601b"
     },
     {
       "path": "guide/hpc-clusters.md",
       "source": "docs/guide/hpc-clusters.md",
-      "sha256": "674b7aea126899c2c5a2ba7e3b01c80904b4aed0a3b13e2167279eee9fce4005",
-      "sourceSha256": "2eea7684c1ac6e678a3d60e2c174ad60aad2c8c9254c25dcc823613b1e98ab9a"
+      "sha256": "196c68605a7b2cac5d86bce76c49905f8e7cada0b5ab29c2ee8f8f816b56bfb4",
+      "sourceSha256": "fe289432c3b00d632b6ab7e26f00bf1005d2b413b723028ede117dbff017e421"
     },
     {
       "path": "guide/configuration-and-targets.md",
       "source": "docs/guide/configuration-and-targets.md",
       "sha256": "f15392fa33b6139fb0a2873f4c3643695efbc23622e26ad1cd7af631e19c500a",
-      "sourceSha256": "db79164d9c60d48a35279e315aae83f72896cf5991c55510620feacf6bd6eaf5"
+      "sourceSha256": "b862c38ff9cebbd3e13cb1c1f39b0713598be0623a7c35b64eea34c14030ec15"
     },
     {
       "path": "guide/commands-and-modes.md",
       "source": "docs/guide/commands-and-modes.md",
-      "sha256": "72b366da0b1ef64cccad984ee8c71c0cd0252279bf44b778d9447a54a4bfa1f3",
-      "sourceSha256": "a2561d4cb14d7e2fb3004c964e6f3ed80286f18d5651cff7a6409244abb31729"
+      "sha256": "d496327dd19cf4108789613b332a69a6486e9cea9feadca6f19b46e8cd681d98",
+      "sourceSha256": "8e24e6d7f2563731a90778769e75b3147b775ba46623c8a872a1624423196a36"
     },
     {
       "path": "guide/tool-usage.md",
       "source": "docs/guide/tool-usage.md",
-      "sha256": "99ad93503b743f42be61f66bad28cb5ac9346d4230b3c88e663f2b85acebe626",
-      "sourceSha256": "c54e6230c70fdf57f76d8065f8213eed9616aca43085f04fd2eea06040893b05"
+      "sha256": "6ca3dc2131fefd33412583aea58c140bd89649d9d0f30d64d97f797bf82e0df0",
+      "sourceSha256": "78d15b3d87c007e1a83f3d2e09f6687d9bd587c8967ea0b12a969e561dc2f8e3"
     },
     {
       "path": "guide/context-continuity.md",
       "source": "docs/guide/context-continuity.md",
-      "sha256": "dc1995b48ecf86aebf8da44c3c4276a87b6b21e2a4ccd25b3963e5d69cfce7e6",
-      "sourceSha256": "0432ba55dafb91b86024a2ca6103a58020a7231df7620ee7aeba4afb5b91d3da"
+      "sha256": "fa5cc910f0f20b0e1bb76f6367e2f136a50f60b36b6a6d4007b967d385546e0e",
+      "sourceSha256": "2b78ee7dbdd137b17314828a03ef431b245e68302baaa6dc76c4ae8fd5c797be"
     },
     {
       "path": "guide/panes-and-files.md",
       "source": "docs/guide/panes-and-files.md",
-      "sha256": "0508c9828d5fcaff2038c96399b31b094a463e1834358a08aa33e0934ac78fc7",
-      "sourceSha256": "2aa44acad608eaacb9c5cf3bacda01928614dc584d871d3f118852ec9134d0fe"
+      "sha256": "b482e20ded747b4ee9a3245859245d095c3a6e3485743b9db469c57e06ba3295",
+      "sourceSha256": "9569ce6ac1cc2e55d42555ad643afafb4afd7b9d2eb5cb2b3f6e2d9fa8d15805"
+    },
+    {
+      "path": "guide/gui.md",
+      "source": "docs/guide/gui.md",
+      "sha256": "91f67d529ffb0680b5c0f3b6e677bbc0f2e9e87ea46717c4a62198d8f3db75fe",
+      "sourceSha256": "63d3e9fe361d437ccdb9821bdf1f4b70bda9bed24de415cbee26a735e377af19"
     },
     {
       "path": "guide/fleet-dispatch.md",
       "source": "docs/guide/fleet-dispatch.md",
-      "sha256": "6d541302b2d187d0a41d4f6a848563139bdc14f7b3ae5e117ee1c24cb65f63f8",
-      "sourceSha256": "47566764f0641771a92f4c33ea0915f1589d8af1bb222f14503e6d3380464fd7"
+      "sha256": "1e2455ea834cdffd6163ee0e34ed52b41406764ef261efcf56dc1989f7805fa1",
+      "sourceSha256": "19efa970ba5033a212e33119fc8c38eba5e58c4a3a02587bd5c4df3cd4f36f35"
     },
     {
       "path": "guide/resource-library.md",
       "source": "docs/guide/resource-library.md",
-      "sha256": "19f3899fc90926b82df707ef160829713e39108d751c4eb35ba63f3274ad0637",
-      "sourceSha256": "aad3852013eceef3a302558840d8310e562f5d84e758acd91ec7cf08dbb64cbf"
+      "sha256": "78581ef0e5315bfa804ac0444e4f01d390da0758d0547a807c107e41dfd4ed36",
+      "sourceSha256": "06fb635c54c8f6b85803e4c909009e76d72069c6ddf26bb29d60742a0eb2521d"
     },
     {
       "path": "guide/plugins.md",
       "source": "docs/guide/plugins.md",
-      "sha256": "1628898d3ba57b7f8fd7cac8d16de1b54880db757d7fd42837a532f3b382fe11",
-      "sourceSha256": "d8e05bf6243bdd23ddaae39170c2cbc70eed26ef6a99c389e377c772a4a72dab"
+      "sha256": "cb87e930cd765962e3b29785b7594d2509d5428c7c0b3e0beffb2c8d0b3f3352",
+      "sourceSha256": "de16d2acefe1b16385cb1de27ae25aa5136372899f49fe2a05880ebf10e819ca"
     },
     {
       "path": "guide/interop.md",
       "source": "docs/guide/interop.md",
       "sha256": "e677c46a2659a43cc6f5b977a4b008b4ad68e5445648992dac5855d8ffde3c91",
-      "sourceSha256": "99023baf0c2c356712f5e911c58b185675f9557caddec1cee3c9c6fc0223c2ff"
+      "sourceSha256": "3ce8af65bafcfc041a3df356067c7f0349ca092398579e765a92a582d1572a0f"
     },
     {
       "path": "guide/slurm.md",
       "source": "docs/guide/slurm.md",
       "sha256": "9b596c0f343f5fbaf435fe22715c95a7b81c410da84bb90482424f70526a5bee",
-      "sourceSha256": "c4fb865b179745af82b1435eaae1a07bea082e1aa175c9fa5ebe673c1cdbc117"
+      "sourceSha256": "456981ebbbc19863f17d84bf5928b2f4790bde8cfcb0017157650f558413034f"
     },
     {
       "path": "guide/doctor.md",
       "source": "docs/guide/doctor.md",
       "sha256": "e434612376f9b6294ad85d48008344368ec10d3e2b327a0c653a50308df06f39",
-      "sourceSha256": "1f276f4dfc67d874c61eb83f29ca2c057a8ee2e9507db6149a9264328d19274b"
+      "sourceSha256": "07e927ce44207458902e8ee3eb07f6eaeed980a4133909bdd808bb5a9c899c1f"
     },
     {
       "path": "guide/troubleshooting.md",
       "source": "docs/guide/troubleshooting.md",
-      "sha256": "0210f62555c4debbe3514be9ccfab91ff98059fb5ee7cc9a5171372d78b1c618",
-      "sourceSha256": "d5f29156e8f8236e17113b499ec92ae9d98a16ed2c2ae07d42e6f11444cb2047"
+      "sha256": "9a387e37432c9b17c3dffa4fce8bf370051f58f59bc885f75ec56031ddebded4",
+      "sourceSha256": "16ac3c071d5ae8343861f5653e23a6a0f64273480f50ba89c2fd43ae49c4ff7b"
     },
     {
       "path": "guide/quality-policy.md",
       "source": "docs/guide/quality-policy.md",
       "sha256": "a90819026ddbd42ede96598604f9d8ad2cb004e324224ee9ee19e356faac26fd",
-      "sourceSha256": "7576b99b1e9b8bb92034ee184da3f44b1161c33539eaf73957b1bb534da84fca"
+      "sourceSha256": "a69c259ae2675cacf4928526ab59eb2ef7224c9dc0956c4475f5072b464a8dd0"
     },
     {
       "path": "guide/configuration-reference.md",
       "source": "docs/guide/configuration-reference.md",
       "sha256": "f7db394b1302d6da2ae708784b0a75a5ec408edef44eabf3082e199c3c95342d",
-      "sourceSha256": "97fbcf4920b332ff615936a6709231d5de7ff57437ca6992ff3a63b5896d7151"
+      "sourceSha256": "873e0d498990820a725a59c7c369760b8db4ae077deb750e4f042e06678a87ba"
     },
     {
       "path": "guide/environment-variables.md",
       "source": "docs/guide/environment-variables.md",
       "sha256": "0bfc9e2d097677a79bd7584734cb8649a426c0a328888695dc19caed5e3bbed5",
-      "sourceSha256": "8edf21ac4e519f760981c3a6bbb345bf6501b89531b6a1f16d88f8e6e7789441"
+      "sourceSha256": "7b2a6e44be0f744363e3f2404962adcf548961993f0165e697ef11e592a18772"
     }
   ]
 }

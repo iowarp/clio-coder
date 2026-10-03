@@ -18,7 +18,7 @@ link_ref = product.get('linkRef') or docs_source['ref']
 source_tree = f"{repository}/tree/{link_ref}"
 doc_sources = {item["path"]: item["source"] for item in manifest["files"]}
 errors = []
-for private in ('content/docs', 'content/doc-summaries', 'content/tutorials', 'content/drafts', 'review', 'vendor', 'cards'):
+for private in ('content/docs', 'content/doc-summaries', 'content/tutorials', 'content/experimental', 'content/drafts', 'review', 'vendor', 'cards'):
     if (root / private).exists():
         errors.append(f'Private source directory entered the public output: {private}')
 for private in ('assets/brand/provenance.json', 'assets/logo.webp', 'assets/banner.webp'):
@@ -34,6 +34,10 @@ class Page(HTMLParser):
         self.ids = set()
         self.refs = []
         self.canonical = None
+        self.lang = None
+        self.alternates = {}
+        self.webmanifest = None
+        self.robots = None
         self.description = None
         self.social = {}
         self.doc_path = None
@@ -55,6 +59,14 @@ class Page(HTMLParser):
             if a['id'] in self.ids:
                 errors.append(f'{self.path}: duplicate id {a["id"]}')
             self.ids.add(a['id'])
+        if tag == 'html':
+            self.lang = a.get('lang')
+        if tag == 'link' and a.get('rel') == 'alternate':
+            self.alternates[a.get('hreflang')] = a.get('href')
+        if tag == 'link' and a.get('rel') == 'manifest':
+            self.webmanifest = a.get('href')
+        if tag == 'meta' and a.get('name') == 'robots':
+            self.robots = a.get('content')
         if tag == 'link' and a.get('rel') == 'canonical':
             self.canonical = a.get('href')
         elif tag in ('a', 'link') and 'href' in a:
@@ -114,7 +126,15 @@ urls = [e.text for e in ET.parse(root / 'sitemap.xml').findall('.//{*}loc')]
 if len(urls) != len(set(urls)):
     errors.append('Sitemap contains duplicate URLs')
 pages = {}
-for url in urls:
+for collection in ('tutorials', 'experimental'):
+    for item in json.loads((site / f'content/{collection}.json').read_text()):
+        if f"{origin}/{collection}/{item['slug']}.html" not in urls:
+            errors.append(f"{collection}/{item['slug']}: registered article is missing from sitemap")
+if origin + '/experimental.html' not in urls:
+    errors.append('Experimental listing is missing from sitemap')
+if origin + '/404.html' in urls:
+    errors.append('404 must not be listed in sitemap')
+for url in [*urls, origin + '/404.html']:
     path = urlsplit(url).path
     file = root / ('index.html' if path == '/' else path.lstrip('/'))
     if not file.is_file():
@@ -129,6 +149,12 @@ for url in urls:
     pages[path] = page
     if page.canonical != url:
         errors.append(f'{path}: canonical {page.canonical} differs from sitemap {url}')
+    if page.lang != 'en' or page.alternates != {'en': url, 'x-default': url}:
+        errors.append(f'{path}: missing or inconsistent language metadata')
+    if page.webmanifest != '/site.webmanifest':
+        errors.append(f'{path}: missing web manifest')
+    if path == '/404.html' and page.robots != 'noindex':
+        errors.append('404 must be noindex')
     if not page.title or not page.description:
         errors.append(f'{path}: missing title or description')
     for key, value in [('og:title', page.title), ('twitter:title', page.title), ('og:description', page.description), ('twitter:description', page.description)]:
@@ -148,16 +174,19 @@ for url in urls:
         entity = next(node for node in graph if node.get('@id') == f'{url}#page')
         if entity.get('url') != url or entity.get('name') != page.title or entity.get('description') != page.description:
             errors.append(f'{path}: structured page metadata differs from the HTML')
-        if path != '/':
+        if path not in ('/', '/404.html'):
             crumbs = next(node for node in graph if node.get('@type') == 'BreadcrumbList')['itemListElement']
             if [item['position'] for item in crumbs] != list(range(1, len(crumbs) + 1)) or crumbs[-1]['item'] != url:
                 errors.append(f'{path}: structured breadcrumbs are not a valid path to this page')
-        if path.startswith('/tutorials/') and (entity.get('@type') != 'TechArticle' or not entity.get('headline') or not entity.get('author')):
+        if path.startswith(('/tutorials/', '/experimental/')) and (entity.get('@type') != 'Article' or not entity.get('headline') or not entity.get('author')):
             errors.append(f'{path}: tutorial article metadata is incomplete')
         if path == '/':
             software = next(node for node in graph if node.get('@type') == 'SoftwareSourceCode')
             if software.get('version') != product['version']:
                 errors.append('Software source metadata differs from the site version')
+            application = next(node for node in graph if node.get('@type') == 'SoftwareApplication')
+            if application.get('softwareVersion') != product['publishedVersion']:
+                errors.append('Software application metadata differs from the published version')
     except (ValueError, TypeError, KeyError, StopIteration):
         errors.append(f'{path}: missing or invalid structured data')
     if path.startswith('/docs') and ('data-doc=' not in source or 'Opening the page' in source):
@@ -179,8 +208,16 @@ for path, page in pages.items():
             errors.append(f'{path}: missing internal target {ref}')
         elif url.fragment and target in pages and unquote(url.fragment) not in pages[target].ids:
             errors.append(f'{path}: missing anchor {ref}')
+webmanifest = json.loads((root / 'site.webmanifest').read_text())
+for icon in webmanifest.get('icons', []):
+    if not (root / icon['src'].lstrip('/')).is_file():
+        errors.append(f"Missing manifest icon: {icon['src']}")
+if {icon['sizes'] for icon in webmanifest.get('icons', [])} != {'192x192', '512x512'}:
+    errors.append('Manifest must provide 192px and 512px icons')
+if f'Sitemap: {origin}/sitemap.xml' not in (root / 'robots.txt').read_text():
+    errors.append('robots.txt must reference the canonical sitemap')
 repository_root = site.parent
-for installer in ('install.sh', 'install.ps1'):
+for installer in ('install.sh', 'install.ps1', 'install.cmd'):
     published = root / installer
     if not published.is_file() or published.read_bytes() != (repository_root / 'scripts' / installer).read_bytes():
         errors.append(f'{installer} is missing or differs from scripts/{installer}')
@@ -188,7 +225,7 @@ if (root / 'CNAME').read_text().strip() != urlsplit(origin).hostname:
     errors.append('CNAME does not name the site origin')
 if not (root / '.nojekyll').is_file():
     errors.append('.nojekyll is missing')
-for installer in ('install.sh', 'install.ps1'):
+for installer in ('install.sh', 'install.ps1', 'install.cmd'):
     if f'/{installer}' in (root / 'sitemap.xml').read_text():
         errors.append(f'{installer} must not be listed in the sitemap')
 if errors:

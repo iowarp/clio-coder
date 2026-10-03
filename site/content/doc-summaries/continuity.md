@@ -2,7 +2,7 @@
 
 In the terminal, use `/resume` to choose a previous session. On the desktop, open a saved conversation from **Overview** or **Sessions**. Saved history lets you continue with the context of earlier work.
 
-Use `/tree` to inspect terminal conversation branches and `/fork` to branch from an assistant turn. On the desktop, open **Session panel → Tools → Branches**. Branches let you explore another direction while preserving the earlier conversation.
+Use `/tree` to inspect terminal conversation branches and `/fork` to branch from an assistant turn. On the desktop, open **Branches** in the Session column. Branches let you explore another direction while preserving the earlier conversation.
 
 ## Keep long work focused
 

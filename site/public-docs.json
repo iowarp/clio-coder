@@ -56,6 +56,14 @@
 		"summary": "panes.md"
 	},
 	{
+		"path": "guide/gui.md",
+		"source": "docs/guide/gui.md",
+		"title": "The desktop app",
+		"group": "Everyday use",
+		"excerpt": "Open the desktop alpha, keep tasks in one window, and read the Session column.",
+		"summary": "gui.md"
+	},
+	{
 		"path": "guide/fleet-dispatch.md",
 		"source": "docs/guide/fleet-dispatch.md",
 		"title": "Workers and fleets",

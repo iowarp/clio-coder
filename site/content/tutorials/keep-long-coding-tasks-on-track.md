@@ -22,7 +22,7 @@ The codemap locates structural information without reading every file into the c
 
 ## Inspect before the context fills
 
-In the terminal, `/context` shows usage, output reservation, remaining headroom, and any pending handoff. On the desktop alpha, open **Session panel**, then **Context** under **Session**. Branches and handoffs are under **Tools**.
+In the terminal, `/context` shows usage, output reservation, remaining headroom, and any pending handoff. On the desktop alpha, the Session column has **Context** and **Branches** cards, and typing `/` in the composer offers `/context`, `/tree`, `/fork`, and `/handoff`.
 
 ::: capture tui-context tui-tree
 The terminal's context window, and a forked conversation in /tree.
@@ -48,7 +48,7 @@ Read the continuation. Compaction reduces history; it does not prove that the mo
 /handoff Fix the empty-input parser bug: keep the failing case in tests/parser.test.ts, the chosen approach of validating before tokenizing, and rerun the parser tests before finishing.
 :::
 
-Handoffs are bound to the active branch and its decisions. A fork can recall earlier notes without inheriting permission to resume its parent's pending transition. Use `/tree` and `/fork` deliberately, and confirm which branch you are continuing.
+Handoffs are bound to the active branch and its decisions. A fork can recall earlier notes without inheriting permission to resume its parent's pending transition. Use `/tree` and `/fork` deliberately, and confirm which branch you are continuing. To return to a session after quitting, type the `/resume <id>` line from the exit summary; a prefix works when it matches one session.
 
 ## Recover an interrupted transition explicitly
 

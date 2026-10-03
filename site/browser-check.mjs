@@ -35,6 +35,10 @@ const primary = [
 	"/",
 	"/docs.html",
 	"/learn.html",
+	"/experimental.html",
+	...JSON.parse(await readFile(join(site, "content/experimental.json"), "utf8")).map(
+		(item) => `/experimental/${item.slug}.html`,
+	),
 	"/tutorials/first-session.html",
 	"/tutorials/desktop-and-terminal.html",
 	"/tutorials/temperature-calibration.html",
@@ -236,7 +240,8 @@ try {
 	await motionPage.waitForFunction(() => document.querySelector("#project").dataset.reveal === "visible");
 	await motionPage.emulateMedia({ reducedMotion: "reduce" });
 	await motionPage.waitForFunction(() => !document.querySelector('[data-reveal="pending"]'));
-	assert.equal(await motionPage.locator(".hero-stage").evaluate((el) => getComputedStyle(el).animationName), "none");
+	assert.equal(await motionPage.locator("body").getAttribute("data-companion-enabled"), null);
+	assert.equal(await motionPage.locator("video").evaluateAll((videos) => videos.every((video) => video.paused)), true);
 	await motionPage.setViewportSize({ width: 768, height: 1024 });
 	assert.equal(
 		await motionPage.evaluate(() => document.documentElement.scrollWidth > innerWidth + 1),

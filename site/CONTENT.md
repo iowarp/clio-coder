@@ -19,9 +19,21 @@ from an independently executed demonstration. State the version scope when
 commands or formats may change. Do not invent screenshots, benchmarks, costs,
 adoption numbers, or testimonials.
 
-Use existing Overview, Docs, and Tutorials navigation. The install section and
-first-session tutorial are useful next actions. More articles are justified by
-more answered user questions, not keyword permutations.
+Use existing Overview, Docs, Tutorials, and Experimental navigation. The install
+section and first-session tutorial are useful next actions. More articles are
+justified by more answered user questions, not keyword permutations.
+
+## Experimental articles
+
+Experimental is for capabilities a reader has to opt into: features that are
+off by default, need extra software, or may change between releases. Articles
+live in `content/experimental/` and are registered in
+`content/experimental.json`, which has the same shape as
+`content/tutorials.json`. They may be shorter than tutorials. Each one opens
+with a note that marks the feature experimental and states the version scope,
+says what turns it on, and names its limits. A capability moves to Tutorials or
+the overview only when it stops needing that note. An entry has a cover only
+when a real capture of that feature exists.
 
 ## First guide batch
 

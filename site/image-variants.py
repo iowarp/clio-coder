@@ -54,14 +54,14 @@ def generate():
             variants.append({"path": target, "width": width, "height": height, "sha256": digest(SITE / target)})
         result[source] = {"width": image.width, "height": image.height, "sha256": digest(SITE / source), "variants": variants}
     mark = Image.open(SITE / "assets/brand/clio-mark.png").convert("RGBA")
-    for size in [32, 180]:
+    for size in [32, 180, 192, 512]:
         canvas = Image.new("RGBA", (size, size))
         fitted = mark.copy()
         fitted.thumbnail((round(size*.9), round(size*.9)), Image.Resampling.LANCZOS)
         canvas.alpha_composite(fitted, ((size-fitted.width)//2, (size-fitted.height)//2))
         canvas.save(SITE / f"assets/responsive/clio-icon-{size}.png", optimize=True)
     MANIFEST.write_text(json.dumps(result, indent=2)+"\n")
-    print(f"Generated {sum(len(item['variants']) for item in result.values())} responsive captures and marks, plus two square icons.")
+    print(f"Generated {sum(len(item['variants']) for item in result.values())} responsive captures and marks, plus four square icons.")
 
 
 def check():
@@ -73,7 +73,7 @@ def check():
             path = SITE / variant["path"]
             if digest(path) != variant["sha256"] or Image.open(path).size != (variant["width"], variant["height"]):
                 raise ValueError(f"image derivative drift: {path}")
-    for size in [32, 180]:
+    for size in [32, 180, 192, 512]:
         if Image.open(SITE / f"assets/responsive/clio-icon-{size}.png").size != (size, size):
             raise ValueError("square application icon dimensions differ")
     print("Responsive source hashes, derivatives, and icon dimensions checked.")

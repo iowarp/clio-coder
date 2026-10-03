@@ -96,7 +96,22 @@
     "summary": "panes.md",
     "headings": [
       "Add a file browser or companion shell",
-      "Use the files pane"
+      "Use the files pane",
+      "Docks hide instead of closing"
+    ]
+  },
+  {
+    "path": "guide/gui.md",
+    "source": "docs/guide/gui.md",
+    "title": "The desktop app",
+    "group": "Everyday use",
+    "excerpt": "Open the desktop alpha, keep tasks in one window, and read the Session column.",
+    "summary": "gui.md",
+    "headings": [
+      "Open the desktop app",
+      "One window, many tasks",
+      "Read the Session column",
+      "Approvals"
     ]
   },
   {

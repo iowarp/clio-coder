@@ -255,12 +255,12 @@
 			"width": 2880,
 			"height": 1920,
 			"label": "Task",
-			"alt": "Clio Coder desktop after a finished task: the conversation lists the approved bash call, Clio's reasoning and three file reads, then the reference temperatures from the test file; the Progress pane on the right shows the task, one turn, and the context meter.",
-			"caption": "A finished task on the desktop: the tool calls that ran, the answer, and the Progress pane beside it.",
-			"interface": "Desktop",
+			"alt": "Clio Coder desktop after a completed calibration task: seven passing tests and the reference temperatures in the conversation, with task status, workspace, model, context and usage in the Session column.",
+			"caption": "A completed desktop task: test results, reference temperatures, and the Session column alongside the conversation.",
+			"interface": "Desktop (alpha)",
 			"version": "0.6.0-dev",
-			"capturedAt": "2026-10-01",
-			"source": "clio-coder 0.6.0-dev (commit f5f234d on feat/gui-native-clio, with feat/gui-workbench merged) built with pnpm run build from the checkout and started with clio-coder gui --foreground in an isolated profile (user researcher) under bubblewrap. Desktop app in Chrome at 1440x960, device pixel ratio 2, dark theme, reduced motion. Chat: Nemotron 3.5 Lightning through a LiteLLM gateway. Request typed in a new task in ~/projects/calibration-lab: Run the test check through verify and tell me what the reference temperatures in the test file are. The one bash approval was allowed once. The full window at the end of the turn, scrolled to the answer."
+			"capturedAt": "2026-10-03",
+			"source": "Current main-checkout dist/ (v060 source HEAD a7505259128dcd00cd7d63f958aa67c6a89c70dd), private clio-coder gui --foreground --no-open server on an OS-assigned free port, isolated CLIO_CODER config/data/state/cache under the site-design scratch directory. Chrome at 1440x960, device scale 2, dark theme and reduced motion. Live tasks used only target litellm, model dynamo/qwopus3.8-27b-flash@q5_k_m, one task at a time. Requested npm test and the reference temperatures in calibration.test.mjs. All seven existing tests passed; captured the completed response."
 		},
 		"gui-home": {
 			"image": "assets/guides/gui-home.webp",
@@ -268,12 +268,12 @@
 			"width": 2880,
 			"height": 1920,
 			"label": "New task",
-			"alt": "Clio Coder on the desktop at start: the task rail with the calibration-lab workspace and no tasks yet, the Clio mark, the question What are we working on, the composer with the workspace chip, and three starter prompts.",
-			"caption": "The desktop at start: the composer, the open workspace, and three ways to begin.",
-			"interface": "Desktop",
+			"alt": "Clio Coder desktop new-task view with the calibration-lab workspace, recent tasks, a message composer, three starter prompts, and the Overview column.",
+			"caption": "Start another task in the open workspace, with recent tasks kept in the left rail.",
+			"interface": "Desktop (alpha)",
 			"version": "0.6.0-dev",
-			"capturedAt": "2026-10-01",
-			"source": "clio-coder 0.6.0-dev (commit f5f234d on feat/gui-native-clio, with feat/gui-workbench merged) built with pnpm run build from the checkout and started with clio-coder gui --foreground in an isolated profile (user researcher) under bubblewrap. Desktop app in Chrome at 1440x960, device pixel ratio 2, dark theme, reduced motion. Chat: Nemotron 3.5 Lightning through a LiteLLM gateway. Fresh launch with ~/projects/calibration-lab opened as the workspace and no tasks yet."
+			"capturedAt": "2026-10-03",
+			"source": "Current main-checkout dist/ (v060 source HEAD a7505259128dcd00cd7d63f958aa67c6a89c70dd), private clio-coder gui --foreground --no-open server on an OS-assigned free port, isolated CLIO_CODER config/data/state/cache under the site-design scratch directory. Chrome at 1440x960, device scale 2, dark theme and reduced motion. Live tasks used only target litellm, model dynamo/qwopus3.8-27b-flash@q5_k_m, one task at a time. Opened the new-task view after real calibration tasks in the isolated calibration-lab workspace."
 		},
 		"gui-approval": {
 			"image": "assets/guides/gui-approval.webp",
@@ -281,12 +281,12 @@
 			"width": 2880,
 			"height": 1920,
 			"label": "Approval",
-			"alt": "Clio Coder on the desktop waiting for an approval: a pinned strip reads Approval needed, bash, stops in 9m 57s, with Review, Reject, Reject and stop the turn, and Allow once; the card below shows the find command, its authorization, consequence and reversibility, and the top bar reads Needs your approval.",
-			"caption": "A bash call waits for you: the command, what approval authorizes, and what it can affect, before anything runs.",
-			"interface": "Desktop",
+			"alt": "Clio Coder desktop waiting for approval to run npm run check: the command, authorization, consequences, Reject and Allow once controls, with task activity and context in the Session column.",
+			"caption": "Review a project check before allowing its command to run.",
+			"interface": "Desktop (alpha)",
 			"version": "0.6.0-dev",
-			"capturedAt": "2026-10-01",
-			"source": "clio-coder 0.6.0-dev (commit f5f234d on feat/gui-native-clio, with feat/gui-workbench merged) built with pnpm run build from the checkout and started with clio-coder gui --foreground in an isolated profile (user researcher) under bubblewrap. Desktop app in Chrome at 1440x960, device pixel ratio 2, dark theme, reduced motion. Chat: Nemotron 3.5 Lightning through a LiteLLM gateway. Same request as the task capture, in a new task; the window while the first bash call was parked. The call was then rejected and the turn stopped."
+			"capturedAt": "2026-10-03",
+			"source": "Current main-checkout dist/ (v060 source HEAD a7505259128dcd00cd7d63f958aa67c6a89c70dd), private clio-coder gui --foreground --no-open server on an OS-assigned free port, isolated CLIO_CODER config/data/state/cache under the site-design scratch directory. Chrome at 1440x960, device scale 2, dark theme and reduced motion. Live tasks used only target litellm, model dynamo/qwopus3.8-27b-flash@q5_k_m, one task at a time. Added a check script that runs the existing calibration tests to the scratch package. Requested npm run check. Captured the actual pending bash approval, then allowed it once; all seven tests passed."
 		},
 		"gui-setup": {
 			"image": "assets/guides/gui-setup.webp",
@@ -294,12 +294,12 @@
 			"width": 2880,
 			"height": 1920,
 			"label": "Setup",
-			"alt": "The desktop setup wizard's welcome: five steps across the top, Provider, Connect, Model, Test, Workspace; the Clio mark in a black scene with the caption A coding agent that works in your folders and asks before it changes anything; and the three promises, pick a provider, connect and choose a model, open a folder, above Get started.",
-			"caption": "Guided setup in the desktop: a first run opens on the welcome and walks the five steps the terminal's configure asks.",
-			"interface": "Desktop",
+			"alt": "Clio Coder desktop setup welcome, with Provider, Connect, Model, Test and Workspace steps, the Clio mark, and Get started.",
+			"caption": "A fresh desktop profile opens guided setup before a connection is saved.",
+			"interface": "Desktop (alpha)",
 			"version": "0.6.0-dev",
-			"capturedAt": "2026-10-01",
-			"source": "clio-coder 0.6.0-dev (commit f5f234d on feat/gui-native-clio, with feat/gui-workbench merged) built with pnpm run build from the checkout and started with clio-coder gui --foreground in an isolated profile (user researcher) under bubblewrap. Desktop app in Chrome at 1440x960, device pixel ratio 2, dark theme, reduced motion. Chat: Nemotron 3.5 Lightning through a LiteLLM gateway. Launched from a profile with no model connection saved, so the app opened on the setup wizard's welcome. Nothing was entered."
+			"capturedAt": "2026-10-03",
+			"source": "Current main-checkout dist/ (v060 source HEAD a7505259128dcd00cd7d63f958aa67c6a89c70dd), private clio-coder gui --foreground --no-open server on an OS-assigned free port, isolated CLIO_CODER config/data/state/cache under the site-design scratch directory. Chrome at 1440x960, device scale 2, dark theme and reduced motion. Live tasks used only target litellm, model dynamo/qwopus3.8-27b-flash@q5_k_m, one task at a time. Opened a separate private GUI server with an empty isolated profile; captured the setup welcome without entering credentials."
 		}
 	}
 }

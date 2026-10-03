@@ -1,5 +1,24 @@
 [
 	{
+		"id": "rings",
+		"description": "Mechanical rings unfold around the copper center, turn, and settle into the Clio mark.",
+		"original": "assets/CLIO_icon_rotating_mechanical_rings_20261001123940.mp4",
+		"sourceSha256": "5008d8d98f9e67e0a147df91afcc569dfa854d400b15fa28e07992b1245b1760",
+		"video": "assets/animations/rings.mp4",
+		"lightVideo": "assets/animations/rings-light.mp4",
+		"poster": "assets/animations/rings.webp",
+		"processing": {
+			"crop": "560:420:360:150",
+			"size": "720x540",
+			"fps": 24,
+			"codec": "h264",
+			"crf": 23,
+			"audio": false,
+			"matte": "Source RGB retained; alpha ramps from 0 at max RGB 24 to 1 at 56; composite on black or raisedPaper.",
+			"posterFrame": 48
+		}
+	},
+	{
 		"id": "read",
 		"prompt": "C3",
 		"description": "Code-like dashes gather at the opening, followed by a quiet ring highlight.",

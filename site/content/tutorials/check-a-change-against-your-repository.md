@@ -78,7 +78,7 @@ Required checks run through `verify` without argument or working-directory overr
 
 ## Read the result where you work
 
-On the desktop alpha, open **Artifacts**, then **Results**, beside the conversation; **Files** shows paths and changes recorded by tools. In the terminal, `/view` opens artifacts and receipts.
+On the desktop alpha, the Session column's **Artifacts** card lists receipts, outputs, and session records, **Changes** lists the files a turn changed, and **Evidence** appears once a run has a receipt. In the terminal, `/view` opens artifacts and receipts.
 
 ::: capture tui-view-result
 :::

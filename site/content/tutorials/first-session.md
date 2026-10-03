@@ -2,7 +2,7 @@ Clio Coder works in the repository you open. For your first session, give it a s
 
 ## 1. Install Clio
 
-The installer brings its own Node.js and needs no root. Linux and macOS are the primary supported platforms. Windows is best effort, and WSL is the recommended route.
+The installer brings its own Node.js and needs no root. Linux, macOS, and WSL are the primary platforms. Native Windows is best effort and needs 0.6.0 or newer. On Linux, the installer offers to add the desktop app when it finishes.
 
 ```sh
 curl -fsSL https://coder.iowarp.ai/install.sh | sh
@@ -20,6 +20,8 @@ clio-coder configure
 Choose **Guided setup**, then select an app on this computer, a model server, an AI subscription, or a provider account. Clio helps you choose a model and review the connection before saving. Choose a model that supports tool calling.
 
 **Connect by endpoint** is the shortcut when you already know the URL. LM Studio commonly serves at `http://localhost:1234`; Ollama commonly serves at `http://localhost:11434`. The [connection guide](/docs/guide/configuration-and-targets.html) covers setup and credentials.
+
+If you have used Clio before, you can skip this step: starting `clio-coder` looks for a saved connection, a provider key in your environment, a stored sign-in, or a local model server, and opens chat with the first one that has a model.
 
 If a connection fails, run:
 
@@ -41,7 +43,7 @@ Or open the desktop alpha in your browser:
 clio-coder gui --open
 ```
 
-In the desktop, select your project and start a conversation. If you have not configured a model, **Guided setup** is also available in the browser; terminal configuration is optional. For this tutorial, either interface gives you a place to enter the first request.
+In the desktop, open a workspace folder and start a task. If you have not configured a model, **Guided setup** is also available in the browser; terminal configuration is optional. For this tutorial, either interface gives you a place to enter the first request.
 
 ## 4. Ask a focused question
 
@@ -61,6 +63,8 @@ Use your project's real test name. Read the command and its output before decidi
 
 ## Keep going
 
-In the terminal, `/help` lists commands, `/model` selects a model, and `/settings` opens configuration. Use `/resume` to return to an earlier conversation.
+In the terminal, `/help` lists commands, `/model` selects a model, `/settings` opens configuration, and `/config` runs guided setup again without leaving the session.
+
+When you quit, Clio prints a summary of the session and a `/resume <id>` line. Start `clio-coder` again and type that line to return to the conversation, or use `/resume` alone to pick from a list.
 
 The [commands guide](/docs/guide/commands-and-modes.html) covers shortcuts and session controls. The [tools guide](/docs/guide/tool-usage.html) explains the repository tools and their permissions.

@@ -44,7 +44,7 @@
 	let measureNeeded = true;
 	let geometry;
 	const clamp = (value, min = 0, max = 1) => Math.min(max, Math.max(min, value));
-	const ease = (value) => value * value * (3 - 2 * value);
+	const ease = (value) => value * value * value * (value * (value * 6 - 15) + 10);
 	const mix = (from, to, progress) => from + (to - from) * progress;
 	const canMove = () => ready && !paused && !reduced.matches && !document.hidden;
 	const eligible = (scene) =>
@@ -175,6 +175,7 @@
 				lane: position(element.querySelector(".chapter-visual")),
 				slot: position(element.querySelector(".scene-slot")),
 				padding: parseFloat(getComputedStyle(element).paddingTop),
+				body: position(element.querySelector(".chapter-body")),
 				scene: scenes.find((scene) => scene.chapter === element) ?? null,
 			})),
 		};
@@ -188,7 +189,7 @@
 	}
 	function desktopJourney(y) {
 		const { hero, chapters: stops, height } = geometry;
-		const viewportY = height * 0.45;
+		const viewportY = Math.max(geometry.header + 120, height * 0.45);
 		const documentY = Math.max(y + viewportY, hero.top + hero.height / 2);
 		const first = stops[0];
 		const last = stops.at(-1);
@@ -203,13 +204,15 @@
 		const stop = stops[index];
 		const base = Math.min(320, stop.lane.width - 32);
 		const introduction = ease(
-			clamp((documentY - hero.top - hero.height / 2) / (first.lane.top - hero.top - hero.height / 2)),
+			clamp(
+				(documentY - hero.top - hero.height / 2) / (first.slot.top + first.slot.height / 2 - hero.top - hero.height / 2),
+			),
 		);
 		if (introduction < 1) {
 			paint(
 				mix(hero.x, first.lane.x, introduction),
 				documentY - y,
-				mix(hero.width * 1.18, base, introduction),
+				mix(hero.width, base, introduction),
 				documentY < first.top ? heroScene : first.scene,
 			);
 			return;
@@ -217,17 +220,22 @@
 		let x = stop.lane.x;
 		let width = base;
 		let drift = Math.sin(clamp((documentY - stop.top) / stop.height) * Math.PI) * 24;
-		const boundary = stops.slice(1).find((item) => Math.abs(documentY - item.top) < item.padding * 1.4);
+		const boundary = stops.slice(1).find((item, i) => {
+			const previous = stops[i];
+			return documentY >= previous.body.bottom && documentY <= item.body.top;
+		});
 		if (boundary) {
 			const previous = stops[stops.indexOf(boundary) - 1];
-			const offset = documentY - boundary.top;
-			const bridge = boundary.padding * 0.4;
-			const progress = ease(clamp((offset + bridge) / (bridge * 2)));
-			x = mix(previous.lane.x, boundary.lane.x, progress);
-			const proximity = ease(clamp(Math.abs(offset) / (boundary.padding * 1.4)));
-			width = mix(Math.min(base, boundary.padding * 1.3), base, proximity);
+			const gap = boundary.body.top - previous.body.bottom;
+			const progress = clamp((documentY - previous.body.bottom) / gap);
+			// Stay in each margin while shrinking, then cross only the empty inter-chapter band.
+			const crossing = ease(clamp((progress - 0.25) / 0.5));
+			x = mix(previous.lane.x, boundary.lane.x, crossing);
+			const proximity = ease(clamp(Math.abs(progress - 0.5) * 2));
+			width = mix(Math.min(base, gap * 0.6), base, proximity);
 			drift *= proximity;
 		}
+
 		paint(x, documentY - y + drift, width, stop.scene);
 	}
 	function mobileJourney(y) {
@@ -251,7 +259,11 @@
 			return;
 		}
 		const { slot } = band;
-		const size = Math.min(232, width * 0.58, slot.width, slot.height / 0.75);
+		if (band.scene === heroScene) {
+			paint(slot.x, slot.top + slot.height / 2 - y, slot.width, heroScene);
+			return;
+		}
+		const size = Math.min(264, width * 0.68, slot.width, slot.height / 0.75);
 		let progress = ease(clamp(((y + height - slot.top) / (height + slot.height) - 0.2) / 0.6));
 		if (band.reverse) progress = 1 - progress;
 		const fraction = (Math.min(slot.bottom - y, height) - Math.max(slot.top - y, header)) / slot.height;

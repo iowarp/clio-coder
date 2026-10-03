@@ -1,6 +1,6 @@
 ## Install
 
-You need a model with tool calling. Linux and macOS are the primary platforms; on Windows, use WSL. The latest release is **0.5.9**, and every command below installs it. Choose the tab for your system.
+You need a model with tool calling. Linux, macOS and WSL are the primary platforms; native Windows is best effort. Every command below installs the latest release. Choose the tab for your system.
 
 ::: tabs Install method
 ### macOS, Linux and WSL
@@ -11,7 +11,9 @@ curl -fsSL https://coder.iowarp.ai/install.sh | sh
 
 The installer brings its own Node.js 24 and needs no root, including on x64 HPC login nodes with glibc 2.17 or newer. It checks the Node download against its published SHA-256 checksums, and their OpenPGP signature when `gpg` is installed. It installs under `~/.local/share/clio-coder-install` on Linux or `~/Library/Application Support/clio-coder/install` on macOS, and writes the launcher `~/.local/bin/clio-coder`.
 
-Pass options after `sh -s --`. For example, `--modify-path` adds the launcher directory to your shell profile, and `--omit-optional` skips the optional Claude Agent SDK, about 224 MB:
+On Linux, an install run from a terminal ends by offering the desktop app, which starts at login and appears in your app menu. The optional Claude Agent SDK, about 224 MB, is skipped; Clio offers to fetch it the first time you need it.
+
+Pass options after `sh -s --`. For example, `--modify-path` adds the launcher directory to your shell profile, `--gui` sets up the desktop app without asking, and `--include-claude-sdk` installs the SDK now:
 
 ```sh
 curl -fsSL https://coder.iowarp.ai/install.sh | sh -s -- --modify-path
@@ -21,7 +23,7 @@ On a cluster, read [Install on a cluster](/docs/guide/hpc-clusters.html).
 
 ### PowerShell
 
-**Needs Clio Coder 0.6.0, which is not released yet.** With 0.5.9, this command installs the package and then stops at its post-install check. Until 0.6.0, install WSL, open its Linux terminal, and use the macOS, Linux and WSL command.
+Native Windows is best effort and needs Clio Coder 0.6.0 or newer; a complete native install has not been verified end to end. The install needs no administrator rights. WSL with the macOS, Linux and WSL command is the better-tested route.
 
 ```powershell
 irm https://coder.iowarp.ai/install.ps1 | iex
@@ -31,7 +33,7 @@ PowerShell shows `PS C:\>` at the prompt. If `curl ... | sh` reports that `sh` i
 
 ### CMD
 
-**Needs Clio Coder 0.6.0, which is not released yet.** With 0.5.9, this command installs the package and then stops at its post-install check. Until 0.6.0, use WSL.
+The same best-effort install, started from CMD.
 
 ```bat
 powershell -NoProfile -Command "irm https://coder.iowarp.ai/install.ps1 | iex"
@@ -82,7 +84,9 @@ clio-coder
 
 On first launch, **Guided setup** helps you connect a local app, a model server, an AI subscription, or a provider account. Choose a model, review the connection, and save. Clio Coder has no account of its own; your provider may require credentials and charge for inference.
 
-Prefer the desktop alpha? It opens locally in your browser and shares the terminal's saved connections and settings:
+A new installation starts guided setup by itself, so `clio-coder configure` is optional. If you have used Clio Coder before and your saved chat route is missing, it looks for a route it can use, such as a provider key in your environment or a local model server, and opens chat with it. `/config` runs setup again from inside a session.
+
+Prefer the desktop alpha? It is served from your own machine, opens in your browser, and shares the terminal's saved connections and settings. See [the desktop app](/docs/guide/gui.html):
 
 ```sh
 clio-coder gui --open
@@ -92,17 +96,17 @@ The browser has its own **Guided setup**; configuring in the terminal first is o
 
 ## Update, roll back and remove
 
-Clio Coder 0.5.9 does not update itself. Its interactive sessions show a quiet footer hint when a newer release exists. Update with the tool that installed it:
+Interactive sessions show a quiet footer hint when a newer release exists, and `/upgrade` reviews and applies it from inside the terminal. From the shell, update with the tool that installed it:
 
 | Installed with | Update | Remove the program |
 | --- | --- | --- |
-| Installer | Run the install command again. 0.5.9's `clio-coder upgrade` does not recognize the installer's layout. | `clio-coder uninstall`, then delete `~/.local/bin/clio-coder` and the install root above. |
+| Installer | `clio-coder upgrade`. The new version installs beside the current one and must start before the launcher switches to it. | `clio-coder uninstall --remove-binary` |
 | npm | `clio-coder upgrade` | `npm uninstall -g @iowarp/clio-coder` |
 | bun | `bun add -g @iowarp/clio-coder@latest`, then `clio-coder upgrade --post-install` | `bun remove -g @iowarp/clio-coder` |
 
-The installer keeps the previous version. `curl -fsSL https://coder.iowarp.ai/install.sh | sh -s -- --rollback` points the launcher back at it.
+The installer keeps the previous version. `clio-coder upgrade --rollback` makes it current again. An install made with an exact `--version` stays pinned to that version until you run the installer with `--version latest`.
 
-`clio-coder uninstall` removes your settings, credentials, sessions and caches, so it previews what it will delete and asks first. Add `--keep-config` to keep settings and credentials, or `--dry-run` to only look. Removing the program with npm or bun keeps those files. Project `.clio-coder/` directories are never removed.
+`clio-coder uninstall` removes your settings, credentials, sessions and caches, and the desktop app's background service, so it previews what it will delete and asks first. Add `--keep-config` to keep settings and credentials, or `--dry-run` to only look. Removing the program with npm or bun keeps those files. Project `.clio-coder/` directories are never removed.
 
 If coder.iowarp.ai is unreachable, the latest GitHub release carries the same script from 0.6.0 on, at `https://github.com/iowarp/clio-coder/releases/latest/download/install.sh`.
 

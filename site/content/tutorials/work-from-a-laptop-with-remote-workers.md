@@ -6,7 +6,7 @@ This guide describes the v0.6.0 fleet. Remote workers use your existing SSH acce
 
 ::: needs
 - Noninteractive SSH access to a machine you may use for work.
-- Node.js 22.19 or newer and npm on its noninteractive SSH PATH.
+- Clio Coder on the node at exactly your client's version. To let Clio install it, the node needs Node.js 22.19 or newer and npm on its noninteractive SSH PATH.
 - The project at the same absolute path on the client and node, using shared storage or matching clean Git checkouts.
 - A model route the worker can reach from the node.
 :::
@@ -33,7 +33,7 @@ The implicit `local` node already exists. Adding a node keeps unpinned work loca
 
 Use an existing SSH alias to select the user, port and identity. You can also pass `--user`, `--port` and `--identity-file` explicitly. `--labels cpu,build` adds operator declarations. Start with one slot until you know the node's workload and resource limits.
 
-In the terminal, open `/fleet` or **Settings → Fleet** and choose **Add SSH node**. The guided flow asks for a name and host, then offers a test or installation preview. Open a node row to see evidence and timestamps, test it, preview an install or remove its saved entry.
+In the terminal, open `/settings fleet` and choose **Add SSH node**. The guided flow asks for a name and host, then offers to test and record readiness or to preview an installation. Open a node row to see evidence and timestamps, test it, preview an install or remove its saved entry. A test started here always records its result.
 
 ::: capture tui-settings-fleet
 :::
@@ -49,7 +49,7 @@ clio-coder fleet nodes add travel-node --host travel-node.example-tailnet.ts.net
 
 Discovery is opt-in. It reads `tailscale status --json` when the CLI is installed and signed in, lists MagicDNS names and IP addresses, and leaves the selection to you. The TUI's **Discover with Tailscale** lets you pick an endpoint and name the node. A discovered peer has no proven SSH access, runtime or project readiness. You can add an SSH host directly without Tailscale.
 
-The endpoint can matter substantially. A 4 MiB SSH transfer from this project's development client to mini measured about **173 MiB/s over LAN and 1.4 MiB/s over Tailscale**. SSH setup and existing connection multiplexing affect those numbers; measure your own route. Clio uses the host you configure and does not automatically switch between addresses.
+The endpoint can matter substantially. In one measurement on this project's development network, a 4 MiB SSH transfer ran at about **173 MiB/s over LAN and 1.4 MiB/s over Tailscale**. SSH setup and existing connection multiplexing affect those numbers; measure your own route. Clio uses the host you configure and does not automatically switch between addresses.
 
 ## Install the exact client build
 
@@ -65,9 +65,9 @@ Review the package size, digest and destination. Then execute it:
 clio-coder fleet nodes install build-node --yes
 ```
 
-Clio packs the build the client actually runs, transfers it over SSH, checks its SHA-256 digest, and installs it under the node's `~/.local/share/clio-coder/workers/<digest>/`. She uses the existing Node and npm, verifies the version and updates the saved worker entry. The installer does not require sudo or modify services or shell profiles. Optional SDK dependencies are omitted.
+Clio packs the build the client actually runs, transfers it over SSH, checks its SHA-256 digest, and installs it under the node's `~/.local/share/clio-coder/workers/<digest>/`. The install uses the node's existing Node.js and npm, verifies the version and updates the saved worker entry. The installer does not require sudo or modify services or shell profiles. Optional SDK dependencies are omitted.
 
-You can also manage Clio yourself. The default invocation is `clio-coder worker`. A custom `--entry` needs an explicit `--version-command` that reports its Clio version; it cannot skip version verification.
+You can also manage Clio yourself, for example with the standard installer on a cluster login node, whose private Node.js is not on `PATH`. The default invocation is `clio-coder worker`. A custom `--entry` needs an explicit `--version-command` that reports its Clio version; it cannot skip version verification.
 
 ## Prepare and verify the project
 
@@ -120,7 +120,7 @@ Use a read-only Scout to inspect the README and explain this project's test comm
 Before dispatching, ask me once where to run it, offering local and suitable verified fleet nodes.
 ```
 
-When a verified node suits substantial work and no preference or pin exists, Clio asks once for the session. The choice remembers the exact node id for later unpinned work. The question does not replace the existing dispatch-plan approval. If you explicitly request `build-node`, she can pin it directly.
+When a verified node suits substantial work and no preference or pin exists, Clio asks once for the session. The choice remembers the exact node id for later unpinned work. The question does not replace the existing dispatch-plan approval. If you explicitly request `build-node`, Clio can pin it directly.
 
 A **Standing worker node preference** in Fleet settings persists across sessions. Placement priority is an explicit task node, a profile pin, the session choice, the standing preference, then local. Headless runs never ask; configure a preference or explicit pin before running them.
 
@@ -128,17 +128,17 @@ Remote workers retain default worker authority even when the coordinator uses yo
 
 ## Return edits from an independent checkout
 
-An editing dispatch to an independent node checkout must use `worktree: true`. Ask Clio to use an isolated task worktree, name the files she may change and declare the host checks you want before application.
+An editing dispatch to an independent node checkout must use `worktree: true`. Ask Clio to use an isolated task worktree, name the files the worker may change and declare the host checks you want before application.
 
-Clio creates a matching branch and worktree on the node at the approved baseline. After the worker exits, she commits its edits there, fetches the branch through the existing SSH connection and checks the returned baseline and permitted paths.
+Clio creates a matching branch and worktree on the node at the approved baseline. After the worker exits, Clio commits its edits there, fetches the branch through the existing SSH connection and checks the returned baseline and permitted paths.
 
-She imports it into the owned local task worktree before the existing host verification and guarded apply flow. `apply: "preserve"` keeps the result without merging it.
+The commit is imported into the owned local task worktree before the existing host verification and guarded apply flow. `apply: "preserve"` keeps the result without merging it.
 
 Transfer, verification and application failures preserve the node branch for recovery. The receipt names the node, branch, worktree and returned commit when available. Inspect preserved work before merging or deleting it. A successful guarded merge permits remote cleanup. The node's original checkout stays at its old baseline, so update it deliberately before the next dispatch that needs the new commit.
 
 ## Follow the result
 
-Open **Workers** with Alt+W to see queued, active, failed and completed work with its actual node. Review the worker result, receipt and project changes. The CLI's `clio-coder fleet status` and `clio-coder fleet view <runId>` expose durable results from another terminal.
+Open **Workers** with Alt+W to see queued, active, failed and completed work with its actual node. Inside Herdr with panes on, the same key opens a [live dashboard](/experimental/panes-and-docks.html) beside the conversation. Review the worker result, receipt and project changes. The CLI's `clio-coder fleet status` and `clio-coder fleet view <runId>` expose durable results from another terminal.
 
 SSH nodes and delegated peers are separate execution paths. A delegated peer is not an SSH machine whose resources or project access Clio has verified.
 

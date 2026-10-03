@@ -12,7 +12,7 @@ A useful sequence is **inspect → change → verify → review**. Inspect the a
 
 ## Understand permission requests
 
-**default** is the supervised mode for workspace edits and approved execution. **yolo** allows work without ordinary confirmation prompts; hard blocks and damage-control questions still apply. Set autonomy in **Permissions & Limits**.
+**default** is the supervised mode. Reads, workspace edits, and commands Clio recognizes, such as read-only inspection and the project's test runners, run without a prompt. Unrecognized shell commands and outward actions such as a push wait for your approval. **yolo** allows work without ordinary confirmation prompts; hard blocks and damage-control questions still apply. Set autonomy in **Permissions & Limits**.
 
 Read each requested command and its working directory before approving it. In the terminal, a shell approval card also shows an **Effect** line that says in plain words what the command would do. It is a reading aid; admission does not depend on it.
 
@@ -24,6 +24,6 @@ Ask Clio to discover available checks, then run the relevant one with `verify`. 
 
 > Discover this project's verification checks. Run the test check through verify and report the exit status, failures, and anything you could not check.
 
-On the desktop, open **Artifacts → Results** beside the conversation to inspect tool output. **Files** shows paths and changes recorded by tools. In the terminal, use `/view` to browse artifacts and receipts.
+On the desktop, the Session column's **Artifacts** card lists tool output, receipts, and session records, and **Changes** lists the files a turn changed. In the terminal, use `/view` to browse artifacts and receipts.
 
 For checks that must accompany specific changes, add a [project quality policy](/docs/guide/quality-policy.html). For a worked example, follow [the temperature-calibration tutorial](/tutorials/temperature-calibration.html).

@@ -32,6 +32,19 @@ const tutorials = JSON.parse(await read("content/tutorials.json"));
 if (values.review)
 	for (const item of JSON.parse(await read("content/drafts/review-catalog.json")).articles)
 		tutorials.push({ ...item, draft: true });
+const experimental = JSON.parse(await read("content/experimental.json"));
+const collections = [
+	{ id: "tutorials", label: "Tutorials", listing: "/learn.html", items: tutorials },
+	{ id: "experimental", label: "Experimental", listing: "/experimental.html", items: experimental },
+];
+const articles = collections.flatMap((collection) =>
+	collection.items.map((item) => ({
+		...item,
+		collection,
+		url: `/${collection.id}/${item.slug}.html`,
+		folder: item.draft ? "content/drafts" : `content/${collection.id}`,
+	})),
+);
 for (const [id, item] of Object.entries(captures)) {
 	for (const key of ["image", "original", "alt", "caption", "label", "interface", "version", "capturedAt", "source"])
 		if (!item[key]) throw new Error(`Capture ${id} is missing ${key}.`);
@@ -40,7 +53,7 @@ for (const [id, item] of Object.entries(captures)) {
 	await readFile(join(root, item.image));
 	await readFile(join(root, item.original));
 }
-for (const item of tutorials) {
+for (const item of articles) {
 	if (item.cover && !captures[item.cover]) throw new Error(`Tutorial ${item.slug} names an unknown cover capture.`);
 	if (item.cover)
 		Object.assign(item, {
@@ -78,7 +91,10 @@ if (manifest.files.length !== catalog.length)
 // documentation commit is not published yet; the manifest keeps the real pin.
 const ref = (product.linkRef ?? source.ref).split("/").map(encodeURIComponent).join("/");
 const repository = product.repository.replace(/\/$/, "");
-const sourceMap = new Map(index.map((item) => [item.source, docUrl(item.path)]));
+const sourceMap = new Map([
+	...index.map((item) => [item.source, docUrl(item.path)]),
+	...articles.map((item) => [`site/${item.folder}/${item.source}`, item.url]),
+]);
 const slug = (text) =>
 	text
 		.replace(/<[^>]+>/g, "")
@@ -88,8 +104,11 @@ const slug = (text) =>
 		.replace(/[^\p{L}\p{N}\s_-]/gu, "")
 		.replace(/\s/g, "-");
 const anchors = new Map();
-for (const item of index) {
-	const tokens = marked.lexer(await read(`content/docs/${item.path}`));
+for (const item of [
+	...index.map((item) => ({ source: item.source, file: `content/docs/${item.path}` })),
+	...articles.map((item) => ({ source: `site/${item.folder}/${item.source}`, file: `${item.folder}/${item.source}` })),
+]) {
+	const tokens = marked.lexer(await read(item.file));
 	anchors.set(
 		item.source,
 		new Set(tokens.filter((token) => token.type === "heading").map((token) => slug(marked.parseInline(token.text)))),
@@ -107,14 +126,15 @@ function responsiveImages(html, path) {
 		if (!item) return tag;
 		const clio = source === "assets/brand/clio-mark.webp";
 		const parent = source === "assets/brand/iowarp-mark.webp";
-		const article = path.startsWith("/tutorials/") || path.startsWith("/docs");
+		const guide = articles.some((item) => item.url === path);
+		const article = guide || path.startsWith("/docs");
 		const sizes = clio
 			? tag.includes('class="scene-mark"')
 				? "160px"
 				: "36px"
 			: parent
 				? "(max-width: 600px) 130px, 220px"
-				: path.startsWith("/tutorials/")
+				: guide
 					? "(max-width: 600px) calc(100vw - 40px), (max-width: 1100px) calc(100vw - 64px), 1000px"
 					: article
 						? "(max-width: 600px) calc(100vw - 40px), (max-width: 850px) calc(100vw - 64px), 760px"
@@ -137,6 +157,7 @@ const contentSecurityPolicy =
 	"default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src 'self'; frame-src https://www.youtube-nocookie.com; object-src 'none'; base-uri 'self'; form-action 'none'";
 function head(path, title, description, type = "WebPage") {
 	const url = `${product.origin}${path}`;
+	const article = articles.find((item) => item.url === path);
 	const graph = {
 		"@context": "https://schema.org",
 		"@graph": [
@@ -153,22 +174,26 @@ function head(path, title, description, type = "WebPage") {
 		],
 	};
 	const page = graph["@graph"][1];
-	if (type === "TechArticle") {
-		page.headline = title.replace(/ — Clio Coder(?: tutorials)?$/, "");
+	if (type === "Article" || type === "TechArticle") {
+		page.headline = title.replace(/ — Clio Coder(?: tutorials| experimental| docs)?$/, "");
 		page.mainEntityOfPage = url;
-		page.author = { "@type": "Organization", name: "The Clio team", url: `${product.origin}/#project` };
-		page.image = `${product.origin}${tutorials.find((item) => path === `/tutorials/${item.slug}.html`)?.image ?? "/assets/social-card.png"}`;
+		page.author = {
+			"@type": article?.author === "The Clio team" || !article ? "Organization" : "Person",
+			name: article?.author ?? "The Clio team",
+			url: `${product.origin}/#project`,
+		};
+		page.image = `${product.origin}${article?.image ?? "/assets/social-card.png"}`;
 	}
 	if (path !== "/" && path !== "/404.html") {
 		const parent = path.startsWith("/docs/")
 			? { name: "Docs", path: "/docs.html" }
-			: path.startsWith("/tutorials/")
-				? { name: "Tutorials", path: "/learn.html" }
+			: article
+				? { name: article.collection.label, path: article.collection.listing }
 				: null;
 		const crumbs = [
 			{ name: "Clio Coder", path: "/" },
 			...(parent ? [parent] : []),
-			{ name: title.replace(/ — Clio Coder(?: tutorials)?$/, ""), path },
+			{ name: title.replace(/ — Clio Coder(?: tutorials| experimental| docs)?$/, ""), path },
 		];
 		graph["@graph"].push({
 			"@type": "BreadcrumbList",
@@ -182,7 +207,7 @@ function head(path, title, description, type = "WebPage") {
 		});
 		page.breadcrumb = { "@id": `${url}#breadcrumbs` };
 	}
-	if (path === "/")
+	if (path === "/") {
 		graph["@graph"].push({
 			"@type": "SoftwareSourceCode",
 			name: "Clio Coder",
@@ -192,19 +217,36 @@ function head(path, title, description, type = "WebPage") {
 			license: `${repository}/blob/main/LICENSE`,
 			author: { "@type": "Person", name: "Anthony Kougkas" },
 		});
+		graph["@graph"].push({
+			"@type": "SoftwareApplication",
+			"@id": `${url}#application`,
+			name: product.name,
+			url,
+			description,
+			applicationCategory: "DeveloperApplication",
+			operatingSystem: "Linux, macOS, Windows",
+			softwareVersion: product.publishedVersion,
+			downloadUrl: "https://www.npmjs.com/package/@iowarp/clio-coder",
+			license: `${repository}/blob/main/LICENSE`,
+			image: `${product.origin}/assets/social-card.png`,
+		});
+	}
+
 	return `<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <meta http-equiv="Content-Security-Policy" content="${contentSecurityPolicy}"><meta name="referrer" content="strict-origin-when-cross-origin">
 <title>${escapeHtml(title)}</title><meta name="description" content="${escapeHtml(description)}"><meta name="color-scheme" content="dark light"><meta name="clio-default-theme" content="${escapeHtml(brand.defaultTheme)}"><meta name="theme-color" content="${escapeHtml(brand.palette[brand.themes[brand.defaultTheme === "light" ? "light" : "dark"].paper])}">
-<link rel="canonical" href="${url}"><link rel="icon" href="/assets/responsive/clio-icon-32.png" type="image/png" sizes="32x32"><link rel="apple-touch-icon" href="/assets/responsive/clio-icon-180.png" sizes="180x180">
+<link rel="canonical" href="${url}"><link rel="alternate" hreflang="en" href="${url}"><link rel="alternate" hreflang="x-default" href="${url}"><link rel="manifest" href="/site.webmanifest"><link rel="icon" href="/assets/responsive/clio-icon-32.png" type="image/png" sizes="32x32"><link rel="apple-touch-icon" href="/assets/responsive/clio-icon-180.png" sizes="180x180">
 <link rel="preload" href="/assets/fonts/plex-sans.woff2" as="font" type="font/woff2" crossorigin><link rel="preload" href="/assets/fonts/news-normal-500.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="/css/brand.css"><link rel="stylesheet" href="/css/site.css"><script src="/js/theme.js"></script>
-<meta property="og:site_name" content="Clio Coder"><meta property="og:type" content="${type === "TechArticle" ? "article" : "website"}"><meta property="og:url" content="${url}"><meta property="og:title" content="${escapeHtml(title)}"><meta property="og:description" content="${escapeHtml(description)}"><meta property="og:image" content="${product.origin}/assets/social-card.png"><meta property="og:image:width" content="1200"><meta property="og:image:height" content="630"><meta property="og:image:alt" content="Clio Coder. An open-source coding agent for scientific software.">
+<meta property="og:locale" content="en_US"><meta property="og:site_name" content="Clio Coder"><meta property="og:type" content="${type === "Article" || type === "TechArticle" ? "article" : "website"}"><meta property="og:url" content="${url}"><meta property="og:title" content="${escapeHtml(title)}"><meta property="og:description" content="${escapeHtml(description)}"><meta property="og:image" content="${product.origin}/assets/social-card.png"><meta property="og:image:width" content="1200"><meta property="og:image:height" content="630"><meta property="og:image:alt" content="Clio Coder. An open-source coding agent for scientific software.">
 <meta name="twitter:card" content="summary_large_image"><meta name="twitter:title" content="${escapeHtml(title)}"><meta name="twitter:description" content="${escapeHtml(description)}"><meta name="twitter:image" content="${product.origin}/assets/social-card.png"><meta name="twitter:image:alt" content="Clio Coder. An open-source coding agent for scientific software.">
 <meta name="robots" content="${path === "/404.html" ? "noindex" : "index,follow,max-image-preview:large"}"><script type="application/ld+json">${JSON.stringify(graph).replace(/</g, "\\u003c")}</script>`;
 }
 function shell(html, path, title, description, type) {
-	const active = path.startsWith("/docs/") ? "/docs.html" : path.startsWith("/tutorials/") ? "/learn.html" : path;
-	const header = mast.replace(/href="(\/|\/docs.html|\/learn.html)"/g, (all, href) =>
+	const active = path.startsWith("/docs/")
+		? "/docs.html"
+		: (articles.find((item) => item.url === path)?.collection.listing ?? path);
+	const header = mast.replace(/href="(\/|\/docs.html|\/learn.html|\/experimental.html)"/g, (all, href) =>
 		href === active ? `${all} aria-current="page"` : all,
 	);
 	let number = 0;
@@ -213,6 +255,7 @@ function shell(html, path, title, description, type) {
 		.replace("<!-- site-header -->", header)
 		.replace("<!-- site-footer -->", footer)
 		.replaceAll("<!-- version -->", escapeHtml(product.version))
+		.replaceAll("<!-- published-version -->", escapeHtml(product.publishedVersion))
 		.replace("<!-- version-source -->", `${repository}/tree/${ref}`)
 		.replaceAll("<!-- source-blob -->", `${repository}/blob/${ref}`)
 		.replace(
@@ -433,6 +476,8 @@ for (const path of [
 	...Object.values(imageVariants).flatMap((item) => item.variants.map((v) => v.path)),
 	"assets/responsive/clio-icon-32.png",
 	"assets/responsive/clio-icon-180.png",
+	"assets/responsive/clio-icon-192.png",
+	"assets/responsive/clio-icon-512.png",
 ])
 	await cp(join(root, path), join(out, path));
 for (const name of [
@@ -539,15 +584,20 @@ const search = index.map(
 await writeFile(join(out, "content/index.json"), `${JSON.stringify(search, null, 2)}\n`);
 
 const tutorialTemplate = await read("tutorial.html");
-for (const item of tutorials) {
-	const folder = item.draft ? "content/drafts" : "content/tutorials";
+for (const item of articles) {
+	const folder = item.folder;
 	const markdown = await read(`${folder}/${item.source}`);
 	const content = renderMarkdown(markdown, `site/${folder}/${item.source}`, true);
 	const headings = [...content.matchAll(/<h2 id="([^"]+)">([\s\S]*?)<\/h2>/g)];
 	const toc = headings.map(([, id, text]) => `<a href="#${id}">${text.replace(/<[^>]+>/g, "")}</a>`).join("\n");
 	const facts = [
 		["Written for", `v${item.versionScope ?? product.version}`],
-		["Works in", (item.interfaces ?? ["Terminal", "Desktop alpha"]).join(" · ")],
+		[
+			"Works in",
+			(item.interfaces ?? (item.collection.id === "experimental" ? ["Terminal"] : ["Terminal", "Desktop alpha"])).join(
+				" · ",
+			),
+		],
 		["Basis", item.basis ?? "Documented workflow"],
 	]
 		.map(([label, value]) => `<div><dt class="eyebrow">${label}</dt><dd>${escapeHtml(value)}</dd></div>`)
@@ -556,8 +606,12 @@ for (const item of tutorials) {
 		? captureFigure(item.cover)
 				.replace('class="guide-capture"', 'class="guide-capture guide-cover"')
 				.replace(' loading="lazy"', ' fetchpriority="high"')
-		: `<img class="cover" src="${escapeHtml(item.image)}" width="${item.width}" height="${item.height}" alt="${escapeHtml(item.alt)}" />`;
-	let html = tutorialTemplate;
+		: item.image
+			? `<img class="cover" src="${escapeHtml(item.image)}" width="${item.width}" height="${item.height}" alt="${escapeHtml(item.alt)}" />`
+			: "";
+	let html = tutorialTemplate
+		.replace("<!-- collection-url -->", item.collection.listing)
+		.replace("<!-- collection-label -->", item.collection.label.toLowerCase());
 	const slots = {
 		"tutorial-description": escapeHtml(item.description),
 		"tutorial-facts": facts,
@@ -566,7 +620,9 @@ for (const item of tutorials) {
 		"tutorial-toc-mobile": toc ? `<details class="doc-toc-mobile"><summary>On this page</summary>${toc}</details>` : "",
 		"tutorial-status": item.draft
 			? `<p class="guide-review"><span class="status-dot"></span>Draft for review · not in the published catalog</p>`
-			: "",
+			: item.status
+				? `<p class="guide-review">${escapeHtml(item.status)}</p>`
+				: "",
 		"tutorial-title": escapeHtml(item.title),
 		"tutorial-category": escapeHtml(item.category),
 		"tutorial-time": escapeHtml(item.time),
@@ -582,25 +638,30 @@ for (const item of tutorials) {
 	};
 	for (const [name, value] of Object.entries(slots)) html = html.replaceAll(`<!-- ${name} -->`, value);
 	await writePage(
-		`/tutorials/${item.slug}.html`,
+		item.url,
 		html,
-		`${item.title} — Clio Coder tutorials`,
+		`${item.title} — Clio Coder ${item.collection.label.toLowerCase()}`,
 		item.description,
-		"TechArticle",
+		"Article",
 	);
 }
-const cards = tutorials
-	.map(
-		(item) =>
-			`<a class="tutorial-card" href="/tutorials/${item.slug}.html"><img src="${escapeHtml(item.image)}" width="${item.width}" height="${item.height}" alt="${escapeHtml(item.alt)}" loading="lazy" decoding="async"><p class="eyebrow">${escapeHtml(item.category)} / ${escapeHtml(item.time)}</p><h2>${escapeHtml(item.title)}</h2><p>${escapeHtml(item.description)}</p><span class="text-link">Read the tutorial <span aria-hidden="true">↗</span></span></a>`,
-	)
-	.join("\n");
-await writePage(
-	"/learn.html",
-	(await read("learn.html")).replace("<!-- tutorial-cards -->", cards),
-	"Tutorials — Clio Coder",
-	"Practical Clio Coder tutorials and product tours. Start a first session and explore the desktop and terminal interfaces.",
-);
+for (const collection of collections) {
+	const cards = articles
+		.filter((item) => item.collection === collection)
+		.map(
+			(item) =>
+				`<a class="tutorial-card" href="${item.url}">${item.image ? `<img src="${escapeHtml(item.image)}" width="${item.width}" height="${item.height}" alt="${escapeHtml(item.alt)}" loading="lazy" decoding="async">` : ""}<p class="eyebrow">${escapeHtml(item.category)} / ${escapeHtml(item.time)}</p><h2>${escapeHtml(item.title)}</h2><p>${escapeHtml(item.description)}</p>${item.status ? `<p class="caption"><span class="chapter">${escapeHtml(item.status)}</span></p>` : ""}<span class="text-link">Read ${collection.id === "tutorials" ? "the tutorial" : "the article"} <span aria-hidden="true">↗</span></span></a>`,
+		)
+		.join("\n");
+	await writePage(
+		collection.listing,
+		(await read(collection.listing.slice(1))).replace("<!-- tutorial-cards -->", cards),
+		`${collection.label} — Clio Coder`,
+		collection.id === "tutorials"
+			? "Practical Clio Coder tutorials and product tours. Start a first session and explore the desktop and terminal interfaces."
+			: "Explore experimental Clio Coder workflows, their setup, and their current limits before trying them in your project.",
+	);
+}
 
 for (const [path, target] of Object.entries(redirects)) {
 	const file = join(out, path.slice(1));
@@ -615,11 +676,14 @@ await writeFile(
 	`<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${urls.map((path) => `  <url><loc>${product.origin}${escapeHtml(path)}</loc></url>`).join("\n")}\n</urlset>\n`,
 );
 await cp(join(root, "robots.txt"), join(out, "robots.txt"));
-console.log(`Built ${urls.length} public pages (${index.length} guides, ${tutorials.length} tutorials).`);
+console.log(
+	`Built ${urls.length} public pages (${index.length} guides, ${tutorials.length} tutorials, ${experimental.length} experimental articles).`,
+);
 
 // Installers are copied, never rewritten: the site must serve the exact bytes
 // of this commit's scripts, and check.py compares them.
-for (const name of ["install.sh", "install.ps1"]) await cp(join(root, "..", "scripts", name), join(out, name));
+for (const name of ["install.sh", "install.ps1", "install.cmd"])
+	await cp(join(root, "..", "scripts", name), join(out, name));
 await writeFile(join(out, "CNAME"), `${new URL(product.origin).hostname}\n`);
 await writeFile(join(out, ".nojekyll"), "");
 await writeFile(
@@ -640,4 +704,29 @@ await writeFile(
 	values.revision
 		? `add_header X-Clio-Site-Revision "${values.revision}" always;\n`
 		: "# Local preview has no deployed revision.\n",
+);
+
+await writeFile(
+	join(out, "site.webmanifest"),
+	`${JSON.stringify(
+		{
+			id: "/",
+			name: product.name,
+			short_name: product.name,
+			lang: "en",
+			start_url: "/",
+			scope: "/",
+			display: "browser",
+			background_color: brand.palette[brand.themes[brand.defaultTheme === "light" ? "light" : "dark"].paper],
+			theme_color: brand.palette[brand.themes[brand.defaultTheme === "light" ? "light" : "dark"].paper],
+			icons: [192, 512].map((size) => ({
+				src: `/assets/responsive/clio-icon-${size}.png`,
+				sizes: `${size}x${size}`,
+				type: "image/png",
+				purpose: "any",
+			})),
+		},
+		null,
+		2,
+	)}\n`,
 );

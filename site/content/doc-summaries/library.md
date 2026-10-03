@@ -21,7 +21,7 @@ Then activate it in the terminal:
 
 The install review shows the destination, dependencies, and verified package pin. In the Library, the selected row offers install, update, enable/disable, and remove actions when applicable. Management actions name the owning package and selected scope.
 
-Project packages take precedence over matching user packages. A disabled project copy also suppresses the user copy, so a project can explicitly keep a resource unavailable.
+Project packages take precedence over matching user packages. A disabled project copy also suppresses the user copy, so a project can explicitly keep a resource unavailable. A project package set you have not approved for the workspace is listed but not loaded, and does not override your user copy; see [plugins](/docs/guide/plugins.html).
 
 ## Refresh a running session
 

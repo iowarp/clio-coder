@@ -35,7 +35,7 @@ The three commands answer different needs. Pick by whether you want a recorded r
 | `/peer <peer> <brief>` | A Herdr pane opens for you to work in (start Clio inside Herdr with `--with-panes`) | No managed receipt |
 :::
 
-Do not infer that a pane completed a task because it opened. Do not infer that a managed receipt contains every internal reasoning step or mediates every operation inside a peer-owned loop.
+Panes are [experimental and off by default](/experimental/panes-and-docks.html). Do not infer that a pane completed a task because it opened. Do not infer that a managed receipt contains every internal reasoning step or mediates every operation inside a peer-owned loop.
 
 ## Give one bounded assignment
 

@@ -46,7 +46,7 @@ node --test examples/temperature-calibration/calibration.test.mjs
 
 ## Inspect the recorded result
 
-In the terminal, open `/view` and select the `checked test` row. The preview shows the check, its working directory, the exit status, and the output, so you can compare the answer with what ran. On the desktop alpha, **Artifacts** then **Results** shows the same record.
+In the terminal, open `/view` and select the `checked test` row. The preview shows the check, its working directory, the exit status, and the output, so you can compare the answer with what ran. On the desktop alpha, **Artifacts** in the Session column lists the same record.
 
 ::: capture tui-view-result
 :::

@@ -14,6 +14,8 @@ clio-coder library install plugin:materio
 
 The catalog ships with Clio, but its content is not installed automatically. Add `--project` to keep a package in the current workspace; otherwise installation uses user scope.
 
+Project packages load only in a workspace you have approved. Your own first project install approves it. After that, a change to the project's package set, including one that arrives with a clone or a pull, stays listed but unloaded until you review it with `clio-coder config trust plugins` and run the approval command it prints.
+
 A local bundle uses the same review flow:
 
 ```sh
@@ -35,6 +37,6 @@ In the terminal, open **Library → Plugins** to browse members and review lifec
 
 ## Choose the right kind of extension
 
-Library plugins supply portable recipes. Executable harness extensions provide runtime tools, hooks, and interface behavior and use `clio-coder extensions` instead. Adding tool schemas requires a new session; recipe reload does not change those schemas.
+Library plugins supply portable recipes. Executable harness extensions provide runtime tools, hooks, and interface behavior and use `clio-coder extensions` instead. Project extensions follow the same approval through `clio-coder config trust extensions`. Adding tool schemas requires a new session; recipe reload does not change those schemas.
 
 See [skills and resources](/docs/guide/resource-library.html) for everyday Library controls. The full plugin guide covers private catalogs and package authoring.

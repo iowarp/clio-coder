@@ -5,7 +5,7 @@ This guide describes v0.6.0. A working connection does not establish a model's c
 :::
 
 ::: needs
-- Linux or macOS. The installer supplies Node.js.
+- Linux, macOS, or WSL. The installer supplies Node.js.
 - A repository you know, so you can judge the first answer.
 - One model route you are allowed to use for this code: an app on your computer, a model server, an AI subscription, or a provider account.
 :::
@@ -44,7 +44,7 @@ cd /path/to/your/project
 clio-coder configure
 ```
 
-Choose **Guided setup**. The desktop alpha offers the same wizard after `clio-coder gui --open`.
+Choose **Guided setup**. The desktop alpha offers the same wizard after `clio-coder gui --open`, and `/config` runs it inside a terminal session and applies the result to that session.
 
 ### Pick the route and the model
 
@@ -74,7 +74,7 @@ Read the tool activity and compare the answer with the project. If it fails, che
 
 ## Separate conversation from worker models
 
-The model answering you need not handle every delegated task. In the desktop and in `clio-coder configure --settings`, Settings separates **Chat** from **Fleet**: select a connection and model for conversation, then use worker defaults or profiles for delegated work. The terminal `/settings` lists the conversation model under **Models & Inference** and worker defaults under **Fleet**.
+The model answering you need not handle every delegated task. The terminal `/settings` lists the conversation model under **Models & Inference** and worker defaults under **Fleet**; `clio-coder configure --settings` opens the same menu from the shell. On the desktop, Settings has a **Models** page and a **Fleet routes** tab. Select a connection and model for conversation, then use worker defaults or profiles for delegated work.
 
 ::: capture tui-settings-models tui-settings-fleet
 Terminal settings keep the conversation model and the worker defaults apart.
@@ -86,7 +86,7 @@ A worker running on your machine against a remote model server is still a local 
 
 ## Choose capabilities deliberately
 
-Clio supports more than one kind of model interaction. Its Inception Mercury runtime serves Mercury diffusion language models as chat models with tool calling. Optional, experimental System One engines answer typed questions at fixed harness decision sites. Neither replaces a chat model or is required to get started.
+Clio supports more than one kind of model interaction. Its Inception runtime serves [Mercury diffusion language models](/experimental/diffusion-models.html) as chat models with tool calling. Optional, experimental [System One engines](/experimental/system-one-decisions.html) answer typed questions at fixed decision sites. Neither replaces a chat model or is required to get started.
 
 Vision support depends on the model and the route. A model advertised as multimodal is not enough if the bridge does not carry images: the managed Codex, Pi, OpenCode, Claude Code, and Antigravity CLI bridges are text-only. Check what the route accepts before attaching a screenshot.
 

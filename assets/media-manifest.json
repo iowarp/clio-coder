@@ -546,8 +546,8 @@
 			"id": "social-link-dark",
 			"template": "site/cards/link.html",
 			"output": "site/assets/social-card.png",
-			"sourceSha256": "7f848b7e01ebe7b99ccd26eb636cb787a78a8913e0e1b4c742b13470a42f23be",
-			"sha256": "9444c30a8d3ea3343616989d3795cefbab0c8d0bd8e45c63f1b06d702769b8ce",
+			"sourceSha256": "271b0501e4c18cd2cc29ec8ece3c63fe54fdceb425a42ee580fdc83dd6baca60",
+			"sha256": "58464e5d23c72c6c45e99a913ea037afd5e951deae2301cf9ca4f56ffe085e4e",
 			"sources": [
 				"site/cards/link.html",
 				"site/css/cards.css",
@@ -572,8 +572,8 @@
 			"id": "social-link-light",
 			"template": "site/cards/link-light.html",
 			"output": "site/assets/social-card-light.png",
-			"sourceSha256": "1f3004b5e5c385b412e082eccdd32eb2435be48b290532ebf2c3992e035a107a",
-			"sha256": "eb9be3297c2ecb4b82c313e1cdb2f09d79e0a50688b7fcd4509f86bd33977277",
+			"sourceSha256": "ca81d66b15a3b2f4d22b4cdb0dba943aadbf87fea739b9f0d473f6bf7b4090c4",
+			"sha256": "a34f3f43329f07701f9399566ea966d29b4cb8c3f69c141564a7a1af7b7d544f",
 			"sources": [
 				"site/cards/link-light.html",
 				"site/css/cards.css",
@@ -598,8 +598,8 @@
 			"id": "social-square-dark",
 			"template": "site/cards/square.html",
 			"output": "site/assets/social-square.png",
-			"sourceSha256": "a2895e67b87c3387803c7bcfc15855895c32a6c28f0a23a55d35921a989f083c",
-			"sha256": "cd7378e8427c6f6dfb66f110c9a5934f4814fd83b09dff33bddf7066031f1f8e",
+			"sourceSha256": "bbcb8e9ab5dce8da8d6f2bd327a43afea35705eedb3ab34a92b46d60261e0da0",
+			"sha256": "ebfb2896c75dd5499a268606d56e26a6aa0bfb3b57cc01bc8176f565778d58b5",
 			"sources": [
 				"site/cards/square.html",
 				"site/css/cards.css",
@@ -624,8 +624,8 @@
 			"id": "social-square-light",
 			"template": "site/cards/square-light.html",
 			"output": "site/assets/social-square-light.png",
-			"sourceSha256": "0b0b70a59d84d1864b24ca5a30c0223b283084d096b746c8541d16cf0dbda21a",
-			"sha256": "626115cba346eb9da188790d2f4b7de42bcf0024a442ff89a543387d72dc0d13",
+			"sourceSha256": "994bb271f0909e9cd052870daec3b797588e0655517fffa572f0d81b6c63e6ef",
+			"sha256": "59b71b93e91aaee55e91284858b19826973ec5ee9bd860f096c5dad9b9b262e3",
 			"sources": [
 				"site/cards/square-light.html",
 				"site/css/cards.css",

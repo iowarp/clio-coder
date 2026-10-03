@@ -477,100 +477,100 @@
   "assets/gui-task.webp": {
     "width": 2880,
     "height": 1920,
-    "sha256": "95239d3c4254430fd8ce9703f6e60f4cc48efec33e0a2a497b77c594463a5761",
+    "sha256": "101e2f9718da5ec483e32d763064bc7b6a8fcd015da63a1cd5699807b24937c8",
     "variants": [
       {
         "path": "assets/responsive/gui-task-640.webp",
         "width": 640,
         "height": 427,
-        "sha256": "b16197b23234402306dfb4853a90a05ffc01266ecd0e30606b0301f4c876daf1"
+        "sha256": "bfae249e339ed399b6593cddde19047231c8e0956081125c31b074e5bf1075a1"
       },
       {
         "path": "assets/responsive/gui-task-960.webp",
         "width": 960,
         "height": 640,
-        "sha256": "7e143862e337124085e69df46664ea9ce8c6321a812f5a26f4d121d1fcb96857"
+        "sha256": "ff64e9b67d2821b2c3d1d4e480a56b5a537054f3742e2188ff0d71912acbfd04"
       },
       {
         "path": "assets/responsive/gui-task-1280.webp",
         "width": 1280,
         "height": 853,
-        "sha256": "e8d4ccd7f42c230117e8a2ba75aeb26146325af70307fcb48e7a0a2b4556a422"
+        "sha256": "690f28ad36246cae12160d70cbaf396babce77332781f6f9fc1bc8af402d849c"
       }
     ]
   },
   "assets/guides/gui-home.webp": {
     "width": 2880,
     "height": 1920,
-    "sha256": "d43e287b979f0a4899239ecc67836b56e9b550d628999512dac38e7f9153ed59",
+    "sha256": "87d8171e682827da9b80aa0e27de4d607a28f36189837f22c49ae73330a0a9b4",
     "variants": [
       {
         "path": "assets/responsive/gui-home-640.webp",
         "width": 640,
         "height": 427,
-        "sha256": "0d7f3d5d8468273efbb4a3d2874470e3cd504bd30c0b884ac347c347e3299b31"
+        "sha256": "87d30cc8e97c1c8d67cf6c37b2ce6d8bfaf312b4e73517ab07e30879d997ce39"
       },
       {
         "path": "assets/responsive/gui-home-1024.webp",
         "width": 1024,
         "height": 683,
-        "sha256": "debbe44d855de9019da4afc15d94ef31b37ea416d00eec8c7e373351a3ac05f6"
+        "sha256": "4bfffa1eb308d8a473f79d6f1c225d08567da4be9534ab364bf1cbe3846808ca"
       },
       {
         "path": "assets/responsive/gui-home-1600.webp",
         "width": 1600,
         "height": 1067,
-        "sha256": "eb78d0341faf11e0a637f2074cb115fab3c196b3d5fd31b37058c2968a8fc315"
+        "sha256": "a15ee25d10f7aab1e13874b7dea5323a817edb8140e7c017ea61387ce1fca1bc"
       }
     ]
   },
   "assets/guides/gui-approval.webp": {
     "width": 2880,
     "height": 1920,
-    "sha256": "7ead7e64ce85cccd4b72ebf7afc477863cd944aef212deea545761ca4f442233",
+    "sha256": "187046eb5ef5217cbf9d65425366562ade28e18060223ee4bb18194670a0c6a0",
     "variants": [
       {
         "path": "assets/responsive/gui-approval-640.webp",
         "width": 640,
         "height": 427,
-        "sha256": "76c94eda616101c4d405bc0b420aba6125bb54cae082f63a55573cbae1b050b8"
+        "sha256": "89da67b480b9c06d74b337cc26a49df9927ad488552d162f5f629b8bf1f61b8f"
       },
       {
         "path": "assets/responsive/gui-approval-1024.webp",
         "width": 1024,
         "height": 683,
-        "sha256": "e5a101fd904683b1b87c4058b75480176ab8bf43247bc3c65483a4dcec3be3a3"
+        "sha256": "8a4ae6e7bbf8419b79b1af87fca95df2389df596b13f68093ac4e2a5660de58f"
       },
       {
         "path": "assets/responsive/gui-approval-1600.webp",
         "width": 1600,
         "height": 1067,
-        "sha256": "9458085e089a94f64cad78e42eac5f8419e7a55d2ea579480e80747ba23edf4e"
+        "sha256": "70653e69ea2cd3e1710925ea3fa36f9c8a478275a8c0c5d60b81b79fa8a2ad30"
       }
     ]
   },
   "assets/guides/gui-setup.webp": {
     "width": 2880,
     "height": 1920,
-    "sha256": "206eba4bbf0df9062272fc8b278a3874a22ce85d9512ffdc8c7498c3e5d6f163",
+    "sha256": "6ee69dfbdb53cd4acd7f3facc4b7707c4187db811bae8368a4a0ac0bcd146a23",
     "variants": [
       {
         "path": "assets/responsive/gui-setup-640.webp",
         "width": 640,
         "height": 427,
-        "sha256": "1fdd6cc246752f6b91b0210dc06f1108909af359e5873f7996a65f8af3b2f7bd"
+        "sha256": "85082868fb3fed076ac65f18abb101fb43680aaed0dd04b4cad9906ff9e6eb1a"
       },
       {
         "path": "assets/responsive/gui-setup-1024.webp",
         "width": 1024,
         "height": 683,
-        "sha256": "5f7a4ec52232d26093c1d8f1404670cf0f4a2442133cec0593f635cd8fbbd0fe"
+        "sha256": "df63b067be09008151436b09658813c8c2e7ef8df809fc65ed1767517fcbd70f"
       },
       {
         "path": "assets/responsive/gui-setup-1600.webp",
         "width": 1600,
         "height": 1067,
-        "sha256": "ca38b7252acb336dc335b8f089aaac51d81885d62a15b04d81cc55add2cda0d7"
+        "sha256": "712f79ac8eda23b6ada62efef366887c077983c50efa9312a183c02f6f265cd8"
       }
     ]
   },

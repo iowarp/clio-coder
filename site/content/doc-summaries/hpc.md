@@ -14,7 +14,7 @@ It needs `curl` or `wget`, `tar` with `xz` or `gzip`, and a SHA-256 tool. The ru
 
 The installer picks a Node build for the host. Official builds cover Linux with glibc 2.28 or newer, macOS, and Alpine on x64. An unofficial build covers x64 hosts with glibc 2.17 to 2.27, the RHEL and CentOS 7 class. Linux arm64 with an older glibc has no build; use conda-forge Node and npm instead.
 
-Export `https_proxy` before running the installer behind a proxy. A version takes about 460 MB, or 190 MB with `--omit-optional`, and Node adds about 210 MB. On a small home quota, move the install root:
+Export `https_proxy` before running the installer behind a proxy. A version takes about 190 MB, or 460 MB with `--include-claude-sdk`, and Node adds about 210 MB. On a small home quota, move the install root:
 
 ```sh
 curl -fsSL https://coder.iowarp.ai/install.sh | sh -s -- --install-dir /project/$USER/clio-coder

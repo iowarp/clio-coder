@@ -29,6 +29,6 @@ If a files or companion pane is unavailable, check that Clio is running inside a
 
 ## Work stopped or a check failed
 
-Read the recorded command and output in **Artifacts → Results** or terminal `/view`. A failed test can point to a useful next task; ask Clio to explain the failure before changing the test's acceptance criteria.
+Read the recorded command and output in the desktop's **Artifacts** card or terminal `/view`. A failed test can point to a useful next task; ask Clio to explain the failure before changing the test's acceptance criteria.
 
 For an interrupted context handoff, inspect `/context` and follow [save and resume work](/docs/guide/context-continuity.html). Include the installed version and relevant doctor findings when reporting a persistent issue; keep credentials and private project content out of public reports.
