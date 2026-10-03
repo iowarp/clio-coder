@@ -262,7 +262,8 @@ const CATEGORY_STEP: Step = {
 			choices: [
 				...wizard.detectedRoutes.map((route) => ({
 					value: route,
-					label: `Use ${route.runtime.id} / ${route.model ?? "choose model"} (from ${route.source})`,
+					label: `Use ${route.runtime.id} / ${route.model ?? "choose model"}`,
+					hint: `from ${route.source}`,
 				})),
 				...available.map((choice) => ({
 					value: choice.category,
