@@ -720,11 +720,10 @@ function hasHeader(headers: Readonly<Record<string, unknown>> | undefined, name:
 /**
  * Apply LiteLLM's request-control headers at the final transport boundary.
  *
- * The OpenAI SDK otherwise retries twice below Clio's visible recovery loop and
- * below LiteLLM's own router, multiplying a single failure into several hidden
- * attempts. Gateway requests use zero client retries by default; optional
- * `numRetries` controls the proxy router itself, where any configured attempts
- * remain observable. A physical-routing gateway should leave it at zero.
+ * Pi's adapter already makes zero client attempts unless `maxRetries` is set, so
+ * only the optional `numRetries` header remains: it controls the proxy router
+ * itself, where any configured attempts stay observable. A physical-routing
+ * gateway should leave it at zero.
  */
 function withLiteLLMRequestOptions<TOptions extends StreamOptions>(
 	model: Model<"openai-completions">,
@@ -745,14 +744,7 @@ function withLiteLLMRequestOptions<TOptions extends StreamOptions>(
 	setDefault("x-litellm-timeout", request?.timeoutSeconds?.toString());
 	setDefault("x-litellm-stream-timeout", request?.streamTimeoutSeconds?.toString());
 	setDefault("x-litellm-num-retries", request?.numRetries?.toString());
-	return {
-		...options,
-		headers,
-		// Never hide duplicate attempts inside the OpenAI SDK beneath Clio's
-		// operator-visible failure. The gateway may still be configured to retry,
-		// but physical-routing deployments should keep that policy at zero too.
-		maxRetries: options.maxRetries ?? 0,
-	} as TOptions;
+	return { ...options, headers } as TOptions;
 }
 
 function requiredToolArguments(tool: Tool): ReadonlyArray<string> {
