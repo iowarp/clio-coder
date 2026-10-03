@@ -14,7 +14,7 @@ import { compileExecutionPlan } from "../../src/domains/dispatch/execution-plan.
 import { executeFleetRun } from "../../src/domains/dispatch/fleet-run.js";
 import { verifyReceiptIntegrity } from "../../src/domains/dispatch/receipt-integrity.js";
 import { getDispatchReservation } from "../../src/domains/dispatch/reservation-store.js";
-import type { SpawnedWorker, SpawnedWorkerResult } from "../../src/domains/dispatch/worker-spawn.js";
+import type { SpawnedWorker, SpawnedWorkerResult, WorkerSpec } from "../../src/domains/dispatch/worker-spawn.js";
 import type { SchedulingContract } from "../../src/domains/scheduling/contract.js";
 import { makeDispatchBundle } from "../harness/dispatch.js";
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
@@ -104,7 +104,7 @@ describe("dispatch member controls", () => {
 	afterEach(() => scratch.restore());
 	async function fixture(
 		maxRetries = 0,
-		onSpawn?: (worker: ReturnType<typeof controlledWorker>, count: number) => void,
+		onSpawn?: (worker: ReturnType<typeof controlledWorker>, count: number, spec: WorkerSpec) => void,
 	) {
 		const settings = structuredClone(DEFAULT_SETTINGS);
 		settings.fleet.retry.maxRetries = maxRetries;
@@ -112,10 +112,10 @@ describe("dispatch member controls", () => {
 		const spawned = deferred<void>();
 		const ctx = dispatchStubContext({ settings });
 		const bundle = makeDispatchBundle(ctx, {
-			spawnWorker: () => {
+			spawnWorker: (spec) => {
 				const worker = controlledWorker();
 				workers.push(worker);
-				onSpawn?.(worker, workers.length);
+				onSpawn?.(worker, workers.length, spec);
 				if (workers.length === 3) spawned.resolve();
 				return worker.worker;
 			},
@@ -638,17 +638,26 @@ describe("dispatch member controls", () => {
 		timeout: 10_000,
 	}, async () => {
 		const started = Array.from({ length: 6 }, () => deferred<void>());
-		const f = await fixture(0, (worker, count) => {
+		const proposalResults = new Map<string, SpawnedWorkerResult & { output: string }>([
+			["verifier", { exitCode: 0, signal: null, output: "proposal-1" }],
+			["architect", { exitCode: 0, signal: null, output: "proposal-2" }],
+			["tester", { exitCode: 1, signal: null, output: "" }],
+		]);
+		const finish: Array<() => void> = [];
+		const f = await fixture(0, (worker, count, spec) => {
+			const result = proposalResults.get(spec.agentId);
+			ok(result);
 			worker.worker.events = (async function* () {
 				const outcome = await worker.worker.promise;
 				if (outcome.exitCode === 0)
 					yield {
 						type: "message_end",
-						message: { role: "assistant", stopReason: "stop", content: `proposal-${count}` },
+						message: { role: "assistant", stopReason: "stop", content: result.output },
 					};
 			})();
+			finish[count - 1] = () => worker.finish(result);
 			started[count - 1]?.resolve();
-			if (count === 4) worker.finish({ exitCode: 1, signal: null });
+			if (spec.resultContract?.kind === "delegation-plan") worker.finish({ exitCode: 1, signal: null });
 		});
 		const scheduling = f.ctx.getContract<SchedulingContract>("scheduling");
 		ok(scheduling);
@@ -705,11 +714,11 @@ describe("dispatch member controls", () => {
 			strictEqual(capacityLeaseUsage().global, 2, "each active proposal owns a capacity lease");
 			ok(ownerId);
 			strictEqual(getDispatchReservation(ownerId)?.members.length, 4, "proposals and planner share the reservation");
-			f.workers[1]?.finish();
+			finish[1]?.();
 			await started[2]?.promise;
 			strictEqual(f.workers.length, 3, "the freed slot starts the third proposal while the first still runs");
-			f.workers[2]?.finish({ exitCode: 1, signal: null });
-			f.workers[0]?.finish();
+			finish[2]?.();
+			finish[0]?.();
 			const outcome = await pending;
 			strictEqual(
 				briefing,
