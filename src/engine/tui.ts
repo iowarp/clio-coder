@@ -22,6 +22,7 @@ export type {
 	ScrollViewScrollbar,
 	SelectItem,
 	SelectListLayoutOptions,
+	SelectListTheme,
 	SettingItem,
 	SettingsListTheme,
 	SlashCommand,
@@ -91,6 +92,7 @@ export {
 	ProcessTerminal,
 	parseKey,
 	ScrollView,
+	SelectList,
 	setKeybindings,
 	stripTerminalSequences,
 	Text,
@@ -110,10 +112,3 @@ export {
 	type TuiRenderObserver,
 	type TuiRenderPhase,
 } from "./instrumented-tui.js";
-export type { SelectListTheme } from "./select-list.js";
-/**
- * SelectList ships from the engine as a thin subclass that honors a design
- * cursor exposed through SelectListTheme, so raw pickers no longer inherit
- * pi-tui's hardcoded arrow. See ./select-list.ts.
- */
-export { SelectList } from "./select-list.js";

@@ -621,7 +621,7 @@ export class ClioEditor extends Editor {
 		const listRoom = room - panelRows;
 		const selected = Math.max(
 			0,
-			items.findIndex((line) => stripTerminalSequences(line).trimStart().startsWith(`${GLYPH.cursor} `)),
+			items.findIndex((line) => stripTerminalSequences(line).trimStart().startsWith("→ ")),
 		);
 		const [start, end] = centeredWindow(
 			items.length,

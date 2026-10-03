@@ -26,10 +26,8 @@ export function markdownTheme(theme: ClioTheme, highlightCode?: MarkdownTheme["h
 
 export function selectListTheme(theme: ClioTheme): SelectListTheme {
 	return {
-		// Autocomplete and standalone selectors share the same focus marker.
-		cursor: GLYPH.cursor,
 		selectedPrefix: () => theme.fg("selectedOption", `${GLYPH.cursor} `),
-		selectedText: (text) => theme.style("selectedOption", text.replace(/^→ /u, `${GLYPH.cursor} `), { bold: true }),
+		selectedText: (text) => theme.style("selectedOption", text, { bold: true }),
 		description: (text) => theme.fg("menuDescription", text),
 		scrollInfo: (text) => theme.fg("positionCount", text),
 		noMatch: (text) => theme.fg("emptyState", text),
