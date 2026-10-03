@@ -174,11 +174,11 @@ for (const width of widths) {
 		const original = structuredClone(entry);
 		let rows = renderWorkerEntryLines(entry, width, { detail: transcriptDetail("detailed"), terminalRows: 14 });
 		bounded(rows, width);
-		// Detailed reserves route and budget rows before current work and the last call.
-		assert.match(plain(rows), /\n {2}│ ⚙ current-研究/u);
-		assert.match(plain(rows), /target blade-gateway/u);
-		assert.match(plain(rows), /state tool · tools/u);
-		assert.match(plain(rows), /last: newest/u);
+		// Slice T 1b keeps current work inline and omits unknown telemetry.
+		assert.equal(rows.length, 2);
+		assert.equal(rows[0], renderWorkerEntryLines(entry, width, { detail: transcriptDetail("compact") })[0]);
+		assert.match(plain(rows), /\n {2}│ blade-gateway .*⚙ current-研究/u);
+		assert.doesNotMatch(plain(rows), /state |tools |tokens|last:|newest|\?/u);
 		assert.deepEqual(entry, original);
 		entry.receipt = { outcome: "succeeded", durationMs: 1000 };
 		entry.pending = false;

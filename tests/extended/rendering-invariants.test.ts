@@ -1295,7 +1295,9 @@ it("renders aligned helper rows with Standard activity and keeps their identity 
 	const detailed = stripTerminalSequences(
 		renderWorkerEntryLines(replayed, 100, { detail: transcriptDetail("detailed") }).join("\n"),
 	);
-	match(detailed, /full findings/);
+	strictEqual(detailed.split("\n").length, 2);
+	match(detailed, /\n {2}│ blade · model/u);
+	doesNotMatch(detailed, /full findings/u);
 
 	replayed.receipt = { outcome: "failed", failureMessage: "Invalid helper result" };
 	const failed = stripTerminalSequences(renderWorkerEntryLines(replayed, 100, {}).join("\n"));
@@ -1858,7 +1860,7 @@ describe("transcript block grammar", () => {
 		strictEqual(stripTerminalSequences(row ?? ""), `${GLYPH.userBar} /skill test-hygiene make the test deterministic`);
 	});
 
-	it("shows what a running worker is doing in Standard and its history only in Detailed", () => {
+	it("shows a running worker's latest action on one Detailed telemetry row", () => {
 		const entry = {
 			assignmentId: "a",
 			runId: "run-2",
@@ -1886,17 +1888,26 @@ describe("transcript block grammar", () => {
 			renderWorkerEntryLines(entry, 80, { detail: transcriptDetail(style) })
 				.map(stripTerminalSequences)
 				.join("\n");
-		// Compact keeps the aligned header; Standard adds activity and Detailed adds route and spend.
+		// Slice T 1b keeps Detailed to the aligned header and one dim detail row.
 		for (const style of ["compact", "standard", "detailed"] as const) {
 			match(render(style), /^◇ scout ● +—/u);
 		}
 		strictEqual(render("compact").split("\n").length, 1);
 		match(render("standard"), /\n {2}│ ⚙ searching retry\(/u);
-		match(render("detailed"), /target blade · model m/u);
-		match(render("detailed"), /\n {2}│ ⚙ grep · searching retry\(/u);
+		strictEqual(render("detailed").split("\n").length, 2);
+		match(render("detailed"), /\n {2}│ blade · m · ⚙ searching retry\(/u);
 		doesNotMatch(render("standard"), /last: read/u);
-		match(render("detailed"), /last: read a\.ts/u);
+		doesNotMatch(render("detailed"), /state |last:|\?|read a\.ts/u);
 		doesNotMatch(render("compact"), /last:/u);
+		ok(entry.progress);
+		entry.toolCallLimit = 150;
+		entry.progress = { ...entry.progress, toolCalls: 12, processedTokens: 1200 };
+		match(render("detailed"), /blade · m · ▰▱▱ tools 12\/150 · 1\.2k tokens · ⚙ searching retry\(/u);
+		const unknownRoute = { ...entry, runtime: { kind: "acp" as const } };
+		delete unknownRoute.toolCallLimit;
+		const partial = renderWorkerEntryLines(unknownRoute, 80, { detail: transcriptDetail("detailed") });
+		match(stripTerminalSequences(partial[1] ?? ""), /^ {2}│ tools 12 · 1\.2k tokens · ⚙ searching retry\(/u);
+		doesNotMatch(partial.map(stripTerminalSequences).join("\n"), /unknown|\?|\/150/u);
 	});
 
 	it("lists a settled card's calls oldest first in the past tense, and a running card's last call alone", () => {
@@ -1941,10 +1952,11 @@ describe("transcript block grammar", () => {
 			`  │ ${GLYPH.phaseTool} read docs/retry.md`,
 			`  │ ${GLYPH.phaseTool} limitation`,
 		]);
-		deepStrictEqual(trail(true), [
-			`  │ ${GLYPH.phaseTool} bash · running npm test`,
-			`  │ ${GLYPH.phaseTool} last: limitation`,
-		]);
+		deepStrictEqual(trail(true), []);
+		match(
+			stripTerminalSequences(renderWorkerEntryLines(entry(true), 80, { detail: transcriptDetail("detailed") }).join("\n")),
+			/\n {2}│ blade · m · ⚙ running npm test/u,
+		);
 	});
 
 	it("states a run of one repeated call once, counted, and marks a call object the safety layer cut", () => {
@@ -2635,6 +2647,13 @@ describe("agent invocations", () => {
 				);
 				for (const sibling of siblings) panel.applyWorkerState(sibling);
 				const initial = panel.render(width);
+				if (style === "detailed") {
+					for (const sibling of siblings) {
+						const rows = renderWorkerEntryLines(sibling, width, { detail: transcriptDetail(style), nowMs: clock });
+						strictEqual(rows.length, 2);
+						doesNotMatch(rows.map(stripTerminalSequences).join("\n"), /\?|state |tools |tokens/u);
+					}
+				}
 				const initialHeaders = initial.map(stripTerminalSequences).filter((row) => row.startsWith("↳"));
 				strictEqual(initialHeaders.length, 4);
 				strictEqual(new Set(initialHeaders.map((row) => visibleWidth(row.slice(0, row.indexOf("●"))))).size, 1);
@@ -2663,7 +2682,7 @@ describe("agent invocations", () => {
 					strictEqual(new Set(timerColumns).size, 1, "clock columns survive timer format changes");
 					if (style === "detailed" && width >= 80) {
 						match(frame.map(stripTerminalSequences).join("\n"), /4 workers · 4 running · 0 done/u);
-						match(frame.map(stripTerminalSequences).join("\n"), /tools ▰▱▱▱▱ 1\/150/u);
+						match(frame.map(stripTerminalSequences).join("\n"), /▰▱▱ tools 1\/150/u);
 					}
 				}
 				const first = siblings[0];
@@ -2671,6 +2690,10 @@ describe("agent invocations", () => {
 				first.pending = false;
 				first.receipt = { outcome: "succeeded", durationMs: 7000, toolCalls: 1 };
 				panel.applyWorkerState(first);
+				if (style === "detailed") {
+					const rows = renderWorkerEntryLines(first, width, { detail: transcriptDetail(style), siblings });
+					strictEqual(rows.length, 2);
+				}
 				if (style === "detailed" && width >= 80) match(plainRender(panel, width), /4 workers · 3 running · 1 done/u);
 			}
 		}

@@ -490,37 +490,47 @@ function dispatchHeader(siblings: ReadonlyArray<WorkerEntryState>, width: number
 	);
 }
 
-/** Live cards keep one row per fact, even before telemetry arrives. */
-function liveCardFacts(entry: WorkerEntryState, width: number): string[] {
+/** Slice T 1b: one detail row keeps known telemetry and the latest action together. */
+function liveCardDetail(entry: WorkerEntryState, width: number): string {
 	const room = Math.max(0, width - RAIL_WIDTH);
-	const row = (text: string): string =>
-		truncateToWidth(
-			`${theme.fg("gutter", RAIL)}${meta(truncateToWidth(text, room, GLYPH.ellipsis, false))}`,
-			width,
-			GLYPH.ellipsis,
-			false,
-		);
-	const target = sanitizeCallTargetText(redactSecretString(entry.runtime.targetId ?? entry.runtime.kind));
-	const model = sanitizeCallTargetText(redactSecretString(entry.runtime.wireModelId ?? "unknown"));
-	const targetUnit = `target ${target}`;
-	const modelWidth = room - visibleWidth(targetUnit) - SEPARATOR.length - 6;
-	const route =
-		modelWidth > 0
-			? `${targetUnit}${SEPARATOR}model ${truncateToWidth(model, modelWidth, GLYPH.ellipsis, false)}`
-			: targetUnit;
+	const clean = (text: string): string => sanitizeCallTargetText(redactSecretString(text));
+	const target = entry.runtime.targetId === undefined ? "" : clean(entry.runtime.targetId);
+	const model = entry.runtime.wireModelId === undefined ? "" : clean(entry.runtime.wireModelId);
 	const calls = entry.receipt?.toolCalls ?? entry.progress?.toolCalls;
 	const limit = entry.toolCallLimit;
 	const filled =
-		calls === undefined || limit === undefined || limit <= 0 ? 0 : Math.min(5, Math.ceil((calls / limit) * 5));
-	const meter = `${GLYPH.contextFull.repeat(filled)}${GLYPH.contextFree.repeat(5 - filled)} ${calls ?? "?"}/${limit ?? "?"}`;
+		calls === undefined || limit === undefined || limit <= 0 ? 0 : Math.min(3, Math.ceil((calls / limit) * 3));
+	const tools =
+		calls === undefined
+			? ""
+			: limit === undefined || limit <= 0
+				? `tools ${calls}`
+				: `${GLYPH.contextFull.repeat(filled)}${GLYPH.contextFree.repeat(3 - filled)} tools ${calls}/${limit}`;
 	const tokens = entry.receipt?.tokenCount ?? entry.progress?.processedTokens;
-	const state = isPending(entry) ? (entry.progress?.phase ?? "starting") : (entry.receipt?.outcome ?? "unknown");
-	return [
-		row(route),
-		row(
-			`state ${state}${SEPARATOR}tools ${meter}${SEPARATOR}${tokens === undefined ? "?" : formatFooterTokens(tokens)} tokens`,
-		),
-	];
+	const current = isPending(entry) ? describedAction(entry) : null;
+	const last = (entry.progress?.recentActions ?? entry.recentActions)?.[0];
+	const activity =
+		current !== null
+			? clean(current)
+			: last !== undefined
+				? clean(finishedAction(last))
+				: isPending(entry)
+					? workerPhaseActivity(entry.progress?.phase)[1]
+					: "";
+	const facts = [
+		target,
+		tools,
+		tokens === undefined ? "" : `${formatFooterTokens(tokens)} tokens`,
+		activity && `${GLYPH.phaseTool} ${activity}`,
+	].filter(Boolean);
+	const modelRoom = room - visibleWidth(facts.join(SEPARATOR)) - (facts.length > 0 ? SEPARATOR.length : 0);
+	if (model && modelRoom > 0) facts.splice(target ? 1 : 0, 0, truncateToWidth(model, modelRoom, GLYPH.ellipsis, false));
+	return truncateToWidth(
+		`${theme.fg("gutter", RAIL)}${theme.style("toolMetadata", truncateToWidth(facts.join(SEPARATOR), room, GLYPH.ellipsis, false), { dim: true })}`,
+		width,
+		GLYPH.ellipsis,
+		false,
+	);
 }
 
 /**
@@ -528,31 +538,21 @@ function liveCardFacts(entry: WorkerEntryState, width: number): string[] {
  * how long it has run, and what it has spent. No spinner; the panel's clock
  * moves the elapsed.
  */
-function progressLine(
-	entry: WorkerEntryState,
-	width: number,
-	nowMs: number,
-	includeTimer = true,
-	showToolName = false,
-): string {
+function progressLine(entry: WorkerEntryState, width: number, nowMs: number, includeTimer = true): string {
 	const action = describedAction(entry);
 	const [glyph, idle] = workerPhaseActivity(entry.progress?.phase);
 	const answer = entry.helper
 		? ""
 		: safeWorkerAnswerText(stripDeadToolCallMarkup(entry.text)).replace(/\s+/gu, " ").trim();
-	const toolName =
-		showToolName && entry.progress?.currentAction ? `${entry.progress.currentAction.tool}${SEPARATOR}` : "";
 	const doing =
-		action === null
-			? `${glyph} ${idle}${answer.length > 0 ? `: ${answer}` : ""}`
-			: `${GLYPH.phaseTool} ${toolName}${action}`;
+		action === null ? `${glyph} ${idle}${answer.length > 0 ? `: ${answer}` : ""}` : `${GLYPH.phaseTool} ${action}`;
 	const elapsedMs = elapsedMsOf(entry, nowMs);
 	const tokens = entry.progress?.processedTokens;
 	const calls = entry.progress?.toolCalls;
 	const facts = [
 		...(!includeTimer || elapsedMs === undefined ? [] : [formatCompactMs(elapsedMs)]),
-		...(showToolName || tokens === undefined ? [] : [`${formatFooterTokens(tokens)} tokens`]),
-		...(showToolName || calls === undefined ? [] : [`${calls} call${calls === 1 ? "" : "s"}`]),
+		...(tokens === undefined ? [] : [`${formatFooterTokens(tokens)} tokens`]),
+		...(calls === undefined ? [] : [`${calls} call${calls === 1 ? "" : "s"}`]),
 	];
 	// The elapsed time is the line's live signal, so a narrow row cuts the
 	// action's text and then drops the spend, never the clock.
@@ -633,19 +633,25 @@ export function renderWorkerEntryLines(
 			? [dispatchHeader(options.siblings ?? [], safeWidth)]
 			: [];
 	const nowMs = options.nowMs ?? Date.now();
-	if (!inspect && isPending(entry)) {
-		const last = entry.progress?.recentActions[0];
-		const lastLine =
-			last === undefined
-				? meta(`${RAIL}${GLYPH.phaseTool} last: —`)
-				: `${theme.fg("gutter", RAIL)}${GLYPH.phaseTool} last: ${finishedAction(last)}`;
+	if (
+		!inspect &&
+		detail.style === "detailed" &&
+		(isPending(entry) || entry.helper || options.siblings !== undefined) &&
+		!workerNeedsInput(entry)
+	) {
 		return [
 			...council,
 			...group,
 			alignedHeader(entry, safeWidth, nowMs, options.siblings),
-			...(detail.style === "detailed" ? liveCardFacts(entry, safeWidth) : []),
-			...(detail.style === "compact" ? [] : [progressLine(entry, safeWidth, nowMs, false, detail.style === "detailed")]),
-			...(detail.style === "detailed" ? [truncateToWidth(lastLine, safeWidth, GLYPH.ellipsis, false)] : []),
+			liveCardDetail(entry, safeWidth),
+		].map(redactSecretString);
+	}
+	if (!inspect && isPending(entry)) {
+		return [
+			...council,
+			...group,
+			alignedHeader(entry, safeWidth, nowMs, options.siblings),
+			...(detail.style === "compact" ? [] : [progressLine(entry, safeWidth, nowMs, false)]),
 		].map(redactSecretString);
 	}
 	const integrity = entry.receipt?.trust;
@@ -713,7 +719,6 @@ export function renderWorkerEntryLines(
 		...(inspect || options.siblings === undefined
 			? [actionLine(entry, safeWidth)]
 			: [alignedHeader(entry, safeWidth, nowMs, options.siblings)]),
-		...(!inspect && options.siblings !== undefined && detail.style === "detailed" ? liveCardFacts(entry, safeWidth) : []),
 		...(pending ? [progressLine(entry, safeWidth, options.nowMs ?? Date.now())] : []),
 		...(metrics.length ? railLines(joinFacts(metrics), "toolMetadata", safeWidth) : []),
 		...(entry.helper && entry.task && (inspect || options.siblings === undefined)
