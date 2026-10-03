@@ -181,19 +181,8 @@ export function cleanupEngineSessionResources(sessionId?: string): void {
 	piCleanupSessionResources(sessionId);
 }
 
-export function isEngineContextOverflow(errorMessage: string, contextWindow?: number): boolean {
-	const message: AssistantMessage = {
-		role: "assistant",
-		content: [],
-		api: "clio",
-		provider: "clio",
-		model: "unknown",
-		usage: emptyUsage(),
-		stopReason: "error",
-		errorMessage,
-		timestamp: Date.now(),
-	};
-	return piIsContextOverflow(message, contextWindow);
+export function isEngineContextOverflow(errorMessage: string): boolean {
+	return piIsContextOverflow(errorOnlyMessage(errorMessage));
 }
 
 /**
@@ -216,7 +205,12 @@ export function providerContentFilterMessage(providerText: string): string {
 
 /** Classify one provider error through pi-ai without leaking its message shape across the engine boundary. */
 export function isEngineRetryableAssistantError(errorMessage: string): boolean {
-	const message: AssistantMessage = {
+	return piIsRetryableAssistantError(errorOnlyMessage(errorMessage));
+}
+
+/** A thrown error or a worker stderr tail is only text, so classify it as a bare error turn. */
+function errorOnlyMessage(errorMessage: string): AssistantMessage {
+	return {
 		role: "assistant",
 		content: [],
 		api: "clio",
@@ -227,7 +221,6 @@ export function isEngineRetryableAssistantError(errorMessage: string): boolean {
 		errorMessage,
 		timestamp: Date.now(),
 	};
-	return piIsRetryableAssistantError(message);
 }
 
 export function validateEngineToolArguments(

@@ -2,8 +2,8 @@ import {
 	type AssistantMessageEvent,
 	type AssistantMessageEventStream,
 	createAssistantMessageEventStream,
+	isContextOverflow,
 } from "@earendil-works/pi-ai";
-import { isEngineContextOverflow } from "./ai.js";
 
 /**
  * Give a request that the server rejected as too large one more attempt. Only
@@ -29,7 +29,7 @@ export function retryStreamOnceOnOverflow(
 					held.push(event);
 					continue;
 				}
-				if (event.type === "error" && isEngineContextOverflow(event.error.errorMessage ?? "")) {
+				if (event.type === "error" && isContextOverflow(event.error)) {
 					const retry = safeRecover(recover);
 					if (retry) {
 						for await (const next of retry) output.push(next);
