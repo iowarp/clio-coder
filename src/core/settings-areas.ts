@@ -170,6 +170,7 @@ export function settingsPlacementForRow(id: string, path: string): SettingsPlace
 		case "interface.terminalProgress":
 			return place("chat", "Alerts");
 		case "interface.mode":
+		case "interface.exitSummary":
 		case "interface.fullscreenScrollbar":
 			return place("interface", "Transcript");
 		case "interface.demo":

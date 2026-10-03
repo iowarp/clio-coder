@@ -180,6 +180,8 @@ export interface InteractivePresentation {
 	recordChatEvent(event: ChatLoopEvent): void;
 	recordToolStart(toolCallId: string, toolName: string): void;
 	recordToolEnd(result: PresentationToolEnd): void;
+	/** The same accumulated tool counts shown by the footer. */
+	toolCounts(): ReadonlyMap<string, number>;
 	setLastTurnSummary(summary: TurnSummary | null): void;
 	/** Drop every piece of presentation state that belonged to the old session. */
 	resetForNewSession(): void;
@@ -781,6 +783,7 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 			if (isError) footerToolErrors += 1;
 			if (truncated) footerToolTruncatedResults += 1;
 		},
+		toolCounts: () => footerToolCounts,
 		setLastTurnSummary: (summary) => {
 			lastTurnSummary = summary;
 		},

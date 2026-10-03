@@ -457,7 +457,7 @@ function workerOutcomeUsage(
 	};
 }
 
-export type ChatLoopEvent =
+export type ChatLoopEvent = (
 	| AgentEvent
 	| AssistantDeltaEvent
 	| RetryStatusEvent
@@ -466,7 +466,8 @@ export type ChatLoopEvent =
 	| ChatNoticeEvent
 	| AgentStatusEvent
 	| ToolApprovalStateEvent
-	| { type: "speculative_dispatch"; counts: SpeculativeDispatchCounts };
+	| { type: "speculative_dispatch"; counts: SpeculativeDispatchCounts }
+) & { modelTimeMs?: number };
 
 export interface ChatSubmitOptions {
 	/** Explicit host-owned task scope; never parsed from the prompt text. */

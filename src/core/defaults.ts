@@ -325,8 +325,10 @@ export function nextOutputStyle(style: OutputStyle): OutputStyle {
 export type TuiMode = "regular" | "fullscreen";
 export type FullscreenScrollbar = "hidden" | "auto" | "always";
 export type SmoothStreaming = "off" | "auto" | "on";
+export type ExitSummaryStyle = "full" | "brief" | "off";
 
 export interface InterfaceSettings {
+	exitSummary: ExitSummaryStyle;
 	/** Full welcome presentation, interactive guidance, and contextual footer tips. */
 	demo: boolean;
 	terminalProgress: boolean;
@@ -711,6 +713,7 @@ export const DEFAULT_SETTINGS = {
 		sandboxNetwork: false,
 	} as SafetySettings,
 	interface: {
+		exitSummary: "full",
 		demo: true,
 		terminalProgress: false,
 		outputDetail: "standard",
@@ -891,6 +894,8 @@ safety:
   sandboxNetwork: false
 
 interface:
+  # Account of this visit on clean interactive exit: full | brief | off.
+  exitSummary: full
   # Capability guidance during project work; disable for a quiet experience.
   demo: true
   outputDetail: standard

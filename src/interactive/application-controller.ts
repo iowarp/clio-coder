@@ -134,6 +134,8 @@ export interface ApplicationControllerDeps {
 	stopUi: () => void;
 	cancelParkedCalls: (reason: string) => void;
 	onShutdown: () => Promise<void>;
+	/** Print the final account only after a successful terminal teardown. */
+	onCleanExit?: () => void;
 	/**
 	 * Report a teardown step that failed. Deliberately not the UI notice channel:
 	 * interactive teardown disposes that before the application's own shutdown
@@ -281,6 +283,7 @@ export function createApplicationController(deps: ApplicationControllerDeps): Ap
 			// also has to precede onShutdown, which exits the process.
 			failed = failures.length > 0;
 			reportFailures();
+			if (!failed) deps.onCleanExit?.();
 			await deps.onShutdown();
 		} catch (error) {
 			failed = true;

@@ -2279,6 +2279,7 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 		else {
 			const ui = raw.interface;
 			issues.unknownKeys("interface", ui, [
+				"exitSummary",
 				"demo",
 				"outputDetail",
 				"smoothStreaming",
@@ -2300,6 +2301,7 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 				else issues.add("interface.outputDetail", "expected compact, standard, or detailed");
 			}
 			for (const [key, allowed] of [
+				["exitSummary", ["full", "brief", "off"]],
 				["smoothStreaming", ["off", "auto", "on"]],
 				["mode", ["regular", "fullscreen"]],
 				["fullscreenScrollbar", ["hidden", "auto", "always"]],

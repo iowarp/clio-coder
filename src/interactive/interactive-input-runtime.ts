@@ -152,6 +152,7 @@ export interface InteractiveInputRuntimeDeps {
 	beforeStopUi?: () => Promise<void>;
 	cancelParkedCalls: (reason: string) => void;
 	onShutdown: () => Promise<void>;
+	onCleanExit?: () => void;
 	reportShutdownFailure?: (step: string, error: unknown) => void;
 	/** Defaults to the process termination coordinator's drain phase. */
 	registerTerminalTeardown?: (teardown: () => void | Promise<void>) => void;
@@ -536,6 +537,7 @@ export function createInteractiveInputRuntime(deps: InteractiveInputRuntimeDeps)
 		...(deps.beforeStopUi ? { beforeStopUi: deps.beforeStopUi } : {}),
 		cancelParkedCalls: deps.cancelParkedCalls,
 		onShutdown: deps.onShutdown,
+		...(deps.onCleanExit ? { onCleanExit: deps.onCleanExit } : {}),
 		registerTerminalTeardown:
 			deps.registerTerminalTeardown ?? ((teardown) => getTerminationCoordinator().onDrain(teardown)),
 		// stderr for the same reason src/core/termination.ts uses it for a failed
