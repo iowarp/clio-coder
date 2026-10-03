@@ -1,6 +1,6 @@
 import { join } from "node:path";
-import { safeResourceWrite } from "../../../core/safe-resource-write.js";
 import { runCommandVector } from "../../../core/safe-exec.js";
+import { safeResourceWrite } from "../../../core/safe-resource-write.js";
 import { resolveClioDirs } from "../../../core/xdg.js";
 import type { MusicStation } from "./stations.js";
 import { renderCliampTheme } from "./theme.js";

@@ -476,6 +476,18 @@ const OPTIONAL_STRINGS = new Set([
 	"context.compaction.systemPrompt",
 ]);
 const EXTRA_HELP: Record<string, [string, string]> = {
+	"integrations.music.enabled": [
+		"Music pane",
+		"Allow /music to open cliamp in a docked pane and play focus radio. Needs Herdr panes and cliamp; off by default.",
+	],
+	"integrations.music.station": [
+		"Music station",
+		"What /music on plays: a stream URL or a station name looked up in Radio Browser.",
+	],
+	"integrations.music.agentControl": [
+		"Clio controls music",
+		"Give Clio a music tool to start, stop or skip the station herself. When it is off the tool is not registered and costs no prompt bytes.",
+	],
 	"interface.exitSummary": [
 		"Session summary on exit",
 		"Full shows this visit's activity and usage; brief shows models, tokens and cost; off shows only how to resume.",

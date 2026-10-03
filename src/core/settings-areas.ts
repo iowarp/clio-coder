@@ -234,6 +234,8 @@ export function settingsPlacementForRow(id: string, path: string): SettingsPlace
 	if (under(path, "chat.retry")) return place("advanced", "Retry timing");
 	if (under(path, "interface.panes.files")) return place("workspace", "Files pane");
 	if (under(path, "interface.panes")) return place("interface", "Panes");
+	// The music player lives in a pane dock, so its switches sit with the other panes.
+	if (under(path, "integrations.music")) return place("interface", "Panes");
 	if (under(path, "integrations.git")) return place("workspace", "Git");
 	if (under(path, "integrations.projectResources")) return place("integrations", "Project resources");
 	if (under(path, "integrations.library")) return place("integrations", "Resource library");

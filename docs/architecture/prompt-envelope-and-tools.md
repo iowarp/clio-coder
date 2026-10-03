@@ -156,7 +156,7 @@ Project context, memory, bounded dispatch briefing, pipeline input, the assigned
 
 ## Eight planes, thirty-four builtin tools
 
-The canonical builtin catalog contains 34 tools organized in eight planes. A
+The canonical builtin catalog contains 35 tools organized in eight planes. A
 particular session or worker receives the subset whose dependencies and policy
 allow it to register. The policy table records each tool's plane, action class, size posture, and concurrency rule; tools within a plane can differ.
 [policy.ts](../../src/tools/policy.ts) asserts these invariants at bootstrap, so drift between
@@ -184,6 +184,7 @@ it on a registry the test builds.
 | ORCHESTRATE | `tasks` | read | sequential |
 | ORCHESTRATE | `ledger` | read | sequential |
 | ORCHESTRATE | `panes` | read | sequential |
+| ORCHESTRATE | `music` | read | sequential |
 | ORCHESTRATE | `limitation`, `consult` | read | parallel |
 | ORCHESTRATE | `decide` | read | sequential |
 | ORCHESTRATE | `self_compact` | read | sequential |
@@ -201,6 +202,7 @@ Several tools sit in a plane for containment rather than class:
 | `tasks` | Read class, sequential | It orchestrates the agent's own work rather than workers. Sequential so two board mutations in one batch cannot interleave. |
 | `ledger` | Read class | A post reaches a one-way control lane and a read answers from a local mirror, so it touches no workspace. Reviewers and judges have a read-only dispatch restriction, where a write class would block the peer review the board exists for. |
 | `panes` | Read class, sequential | It controls only Clio-owned terminal panes through the live mux. Sequential so two operations cannot race the same pane registry. |
+| `music` | Read class, sequential | It drives only Clio's own cliamp player in Clio's own dock and touches no workspace. Sequential so opening and closing never race the dock slot. |
 | `evidence` | OBSERVE plane, sequential | It only reads canonical evidence, trust status, gate decisions, and findings, but `run` mode may materialize a bundle under Clio's data directory. |
 | `limitation` | ORCHESTRATE plane, read class, parallel | It appends one typed receipt to the session ledger and touches nothing else. The call is pure. |
 | `decide` | ORCHESTRATE plane, read class, sequential | It appends one decision-board entry and touches nothing else. Sequential so two decisions in one batch cannot race the supersede lookup. |
@@ -217,8 +219,9 @@ when a session contract is bound, `dispatch`/`monitor`/`steer` register only
 with a dispatch contract, `ask_user` registers only when an interactive handler
 exists, `ledger` registers only when a worker bound its dispatch's agent-ledger
 port (the session never does, and without a port the tool could only answer
-"no ledger"), and `panes` registers only when a pane host answered detection and
-the mux is live. Dispatch tool profiles narrow the surface for workers:
+"no ledger"), `panes` registers only when a pane host answered detection and
+the mux is live, and `music` registers only when `integrations.music.enabled` and
+`agentControl` are on, cliamp resolves and the mux is live. Dispatch tool profiles narrow the surface for workers:
 `minimal-local` is `read`, `grep`, `find`, `ls`, `git`, `context`, `code_nav`,
 and `ledger`; `science-local` adds `verify`; `council-read-only` is `read`, `grep`, `find`, `ls`, `code_nav` and `context`; `full-agent` keeps everything that
 the runtime registered and the recipe allows.
