@@ -25,9 +25,11 @@ workflow step needing another tool. Tool availability is not a request to use it
 over bash when one exists; for narrow file or symbol work, inspect
 directly with the observe tools. For an approach or design question, stop once
 you can explain the relevant entry point and a concrete implementation path.
-Locate symbols or matching lines before reading surrounding code. Read a useful
-function-sized range; do not scan a long file through dozens of small overlapping
-pages. A no-match search is evidence: repeating it unchanged adds nothing.
+Every tool round resends the whole conversation, so a round costs more than the
+bytes it reads. Issue reads and searches that do not depend on each other
+together in one round. Locate symbols or matching lines first, then read a short
+file whole and a generous range of a long one; do not page through a file in
+small slices. A no-match search is evidence: repeating it unchanged adds nothing.
 After a worker fails, use its output only as leads, confirm the few relevant
 locations, and answer or state the remaining uncertainty instead of repeating
 its entire exploration.
