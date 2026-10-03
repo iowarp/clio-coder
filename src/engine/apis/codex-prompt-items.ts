@@ -20,7 +20,7 @@ function isRecord(value: unknown): value is Payload {
  * (continuation rejected, a changed prompt or tool surface, SSE fallback)
  * still carries both items, so the server sees the same prompt either way.
  */
-export function moveCodexPromptIntoInput(payload: Payload): Payload {
+function moveCodexPromptIntoInput(payload: Payload): Payload {
 	const input = payload.input;
 	if (!Array.isArray(input)) return payload;
 	const instructions = typeof payload.instructions === "string" ? payload.instructions : "";
