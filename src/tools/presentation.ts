@@ -600,8 +600,9 @@ export const TOOL_ROWS: Readonly<Record<string, ToolRowSpec>> = {
 	[ToolNames.Git]: {
 		class: "execute",
 		verbs: CLASS_VERBS.execute,
-		object: (args, context) => plain(joinDefined("git", text(args, "op"), pathArg(args, "path", context, null))),
-		consumes: ["op", "path"],
+		object: (args, context) =>
+			plain(joinDefined("git", text(args, "op"), text(args, "rev"), pathArg(args, "path", context, null))),
+		consumes: ["op", "rev", "path"],
 	},
 	[ToolNames.Panes]: {
 		class: "execute",

@@ -146,13 +146,48 @@ describe("git tool", () => {
 		match(await refusal({ op: "status", cwd: scratch.dir }), /^git: cwd escapes workspace root: /);
 		strictEqual(
 			await refusal({ op: "push" }),
-			'git: expected args.op to be status, diff, log, add, or commit; got "push". Example: gateway({op:"call",capability:"git",args:{op:"log",limit:20}})',
+			'git: expected args.op to be status, diff, log, show, add, or commit; got "push". Example: gateway({op:"call",capability:"git",args:{"op":"log","rev":"main","limit":5,"stat":true}})',
 		);
 		strictEqual(
 			await refusal({ command: "log -20" }),
-			'git: expected args.op to be status, diff, log, add, or commit; got ""; unrecognized field "command". Example: gateway({op:"call",capability:"git",args:{op:"log",limit:20}})',
+			'git: expected args.op to be status, diff, log, show, add, or commit; got ""; unrecognized field "command". Example: gateway({op:"call",capability:"git",args:{"op":"log","rev":"main","limit":5,"stat":true}})',
 		);
 		match(await refusal({ op: "log", max_output_bytes: 8 }), /^git: output exceeded 8 bytes/);
+	});
+
+	it("inspects a named revision with show, log rev, and a diff range, and refuses an option-shaped revision", async () => {
+		const show = await call({ op: "show", rev: "HEAD~1" });
+		deepStrictEqual(show.details?.argv, [
+			"git",
+			"show",
+			"--no-ext-diff",
+			"--no-textconv",
+			"--stat",
+			"--patch",
+			"--diff-merges=first-parent",
+			"--end-of-options",
+			"HEAD~1",
+		]);
+		match(show.output, /^ {4}first$/m);
+		match(show.output, /^\+one$/m);
+		strictEqual((await call({ op: "show", rev: "HEAD~1", stat: true })).output.includes("diff --git"), false);
+		strictEqual((await call({ op: "log", rev: "HEAD~1" })).output.trim().replace(/^[0-9a-f]+ /, ""), "first");
+		strictEqual((await call({ op: "diff", rev: "HEAD~1..HEAD", name_only: true })).output.trim(), "docs/b.md");
+		match(
+			await refusal({ op: "show", rev: "--output=leak.txt" }),
+			/^git: rev "--output=leak\.txt" starts with -; nothing ran/,
+		);
+		match(await refusal({ op: "log", rev: "HEAD~1..-x" }), /starts with -; nothing ran/);
+		match(await refusal({ op: "show", rev: "HEAD~1..HEAD" }), /is a range; show takes one revision/);
+	});
+
+	it("refuses a field the op does not take instead of running a different command", async () => {
+		// DF-9: a nested args array was dropped and the default 20-commit log ran, green.
+		match(
+			await refusal({ op: "log", args: ["-1", "--format=fuller", "HEAD"] }),
+			/^git: op log does not take field "args"; nothing ran\. log takes rev, limit, stat, path, .*use op show with rev\. Example: /,
+		);
+		match(await refusal({ op: "status", limit: 3 }), /^git: op status does not take field "limit"; nothing ran\./);
 	});
 });
 

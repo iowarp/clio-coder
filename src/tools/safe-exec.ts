@@ -19,6 +19,7 @@ import {
 	typedGitInspectEnv,
 	typedGitMutationArgv,
 } from "./git-exec.js";
+import { checkGitFields, GIT_OPS, gitInspectArgv, isGitInspectOp } from "./git-inspect.js";
 import type { ToolInvokeOptions, ToolResult, ToolResultDetails, ToolSpec } from "./registry.js";
 import { COMMIT_IDENTITY } from "./task-worktree.js";
 import { truncateUtf8 } from "./truncate-utf8.js";
@@ -103,31 +104,9 @@ export async function runVectorTool(
 	}
 }
 
-const GIT_OPS = ["status", "diff", "log", "add", "commit"] as const;
-const GIT_FIELDS = [
-	"op",
-	"mode",
-	"action",
-	"path",
-	"paths",
-	"message",
-	"cached",
-	"stat",
-	"name_only",
-	"limit",
-	"cwd",
-	"timeout_ms",
-	"max_output_bytes",
-];
-
 function gitOp(args: Record<string, unknown>): string {
-	return typeof args.op === "string"
-		? args.op
-		: typeof args.mode === "string"
-			? args.mode
-			: typeof args.action === "string"
-				? args.action
-				: "";
+	const check = checkGitFields(args);
+	return check.ok ? check.op : "";
 }
 
 /**
@@ -193,24 +172,32 @@ async function runTypedGitMutation(
 export const gitTool: ToolSpec = {
 	name: ToolNames.Git,
 	description:
-		'Git through fixed argv, never a shell. args.op status, diff, or log inspects (for 20 commits use args={op:"log",limit:20}). args.op add stages args.paths (literal paths); args.op commit commits the index with args.message. add and commit need approval unless a worker owns an attested task worktree under git worktree. Free-form command strings are not accepted.',
+		'Git through fixed argv, never a shell. args.op status, diff, log, or show inspects; args.rev names a revision or an a..b range (one commit: args={op:"show",rev:"HEAD~1"}; 20 commits: args={op:"log",limit:20}). args.op add stages args.paths (literal paths); args.op commit commits the index with args.message. add and commit need approval unless a worker owns an attested task worktree under git worktree. A field the op does not take is refused, and free-form command strings are not accepted.',
 	parameters: Type.Object({
 		// `mode` is what code_nav, evidence and monitor call their selector, and a
 		// model reaching for it here spent three calls on "last 3 commits".
 		op: Type.Optional(
 			StringEnum([...GIT_OPS], {
 				description:
-					"status, diff, or log to inspect; add (with paths) or commit (with message) to stage and commit. For 20 commits use op=log and limit=20.",
+					"status, diff, log, or show to inspect; add (with paths) or commit (with message) to stage and commit. For 20 commits use op=log and limit=20.",
 			}),
 		),
 		mode: Type.Optional(StringEnum([...GIT_OPS], { description: "Same as op." })),
 		action: Type.Optional(StringEnum([...GIT_OPS], { description: "Same as op." })),
-		path: Type.Optional(Type.String({ description: "Limit diff/log to one path." })),
+		rev: Type.Optional(
+			Type.String({
+				description:
+					"show: one revision (default HEAD); log: that revision or an a..b range; diff: one revision against the worktree, or a..b between two.",
+			}),
+		),
+		path: Type.Optional(Type.String({ description: "Limit status/diff/log/show to one path." })),
 		paths: Type.Optional(Type.Array(Type.String(), { description: "add: literal paths to stage." })),
 		message: Type.Optional(Type.String({ description: "commit: the commit message." })),
 		cached: Type.Optional(Type.Boolean({ description: "diff: staged changes (--cached)." })),
-		stat: Type.Optional(Type.Boolean({ description: "diff: summary only; log: changed files per commit (--stat)." })),
-		name_only: Type.Optional(Type.Boolean({ description: "diff: file names only." })),
+		stat: Type.Optional(
+			Type.Boolean({ description: "diff/show: summary only; log: changed files per commit (--stat)." }),
+		),
+		name_only: Type.Optional(Type.Boolean({ description: "diff/show: file names only." })),
 		limit: Type.Optional(Type.Number({ description: "log: commits to show (default 20, max 200)." })),
 		cwd: Type.Optional(Type.String({ description: "Working directory." })),
 		timeout_ms: Type.Optional(Type.Number({ description: "Timeout in ms (default 120000)." })),
@@ -235,39 +222,16 @@ export const gitTool: ToolSpec = {
 		};
 	},
 	async run(args, options) {
-		const op = gitOp(args);
-		const pathArg = typeof args.path === "string" && args.path.length > 0 ? args.path : null;
-		// Inspection never runs an external diff, a text conversion filter, or a pager.
-		const inspect = { ...(options?.signal !== undefined ? { signal: options.signal } : {}), env: typedGitInspectEnv() };
-		if (op === "status") {
-			return runVectorTool("git", "git", ["status", "--short", "--branch"], args, inspect);
+		const check = checkGitFields(args);
+		if (!check.ok) return { kind: "error", message: check.error };
+		if (isGitInspectOp(check.op)) {
+			// Inspection never runs an external diff, a text conversion filter, or a pager.
+			const inspect = { ...(options?.signal !== undefined ? { signal: options.signal } : {}), env: typedGitInspectEnv() };
+			return runVectorTool("git", "git", gitInspectArgv(check.op, args), args, inspect);
 		}
-		if (op === "diff") {
-			const vector = ["diff", "--no-ext-diff", "--no-textconv"];
-			if (args.cached === true) vector.push("--cached");
-			if (args.stat === true) vector.push("--stat");
-			if (args.name_only === true) vector.push("--name-only");
-			if (pathArg) vector.push("--", pathArg);
-			return runVectorTool("git", "git", vector, args, inspect);
-		}
-		if (op === "log") {
-			const limit = typeof args.limit === "number" && args.limit > 0 ? Math.min(200, Math.floor(args.limit)) : 20;
-			const vector = ["log", "--no-ext-diff", "--no-textconv", "--oneline", "-n", String(limit)];
-			// A merge has no stat by default, and the newest commits of a branch are
-			// often merges; the first-parent diff is what the merge brought in.
-			if (args.stat === true) vector.push("--stat", "--diff-merges=first-parent");
-			if (pathArg) vector.push("--", pathArg);
-			return runVectorTool("git", "git", vector, args, inspect);
-		}
-		const built = typedGitMutationArgv(op, args);
-		if (built !== null) {
-			if (!built.ok) return { kind: "error", message: built.error };
-			return runTypedGitMutation(built.argv, built.op, args, options);
-		}
-		const unexpected = Object.keys(args).find((key) => !GIT_FIELDS.includes(key));
-		return {
-			kind: "error",
-			message: `git: expected args.op to be status, diff, log, add, or commit; got ${JSON.stringify(op)}${unexpected ? `; unrecognized field ${JSON.stringify(unexpected)}` : ""}. Example: gateway({op:"call",capability:"git",args:{op:"log",limit:20}})`,
-		};
+		const built = typedGitMutationArgv(check.op, args);
+		if (built === null) return { kind: "error", message: `git: op ${check.op} has no argv; nothing ran` };
+		if (!built.ok) return { kind: "error", message: built.error };
+		return runTypedGitMutation(built.argv, built.op, args, options);
 	},
 };
