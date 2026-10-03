@@ -50,7 +50,6 @@ import {
 	diffusionFramesEnabled,
 	observeDiffusionFrameChunk,
 	runtimeStreamsDiffusionFrames,
-	withDiffusingRequest,
 } from "./diffusion-frames.js";
 import { ensureLlamaCppResidency, listLlamaCppResidentModels } from "./llamacpp-residency.js";
 import {
@@ -518,8 +517,6 @@ function applyLmStudioPayload(
 	const request = runtimeMetadata(model)?.lmstudio?.request;
 	const next: Record<string, unknown> = { ...payload };
 	delete next.chat_template_kwargs;
-	if (request?.ttlSeconds !== undefined) next.ttl = request.ttlSeconds;
-	if (request?.draftModel !== undefined) next.draft_model = request.draftModel;
 	if (resolved.thinking.mechanism === "none" || resolved.thinking.mechanism === "always-on") return next;
 	const resolvedEffort = runtimeMetadata(model)?.lmstudioReasoningOptions
 		? lmStudioReasoningEffort(resolved.thinking.effectiveLevel, runtimeMetadata(model)?.lmstudioReasoningOptions)
@@ -542,34 +539,36 @@ function applyLmStudioPayload(
 	return next;
 }
 
-function applyLlamaCppPromptCachePayload(
-	payload: Record<string, unknown>,
-	model: Model<Api>,
+/**
+ * Body fields only a Clio-synthesized local runtime reads. Pi merges
+ * `StreamOptions.samplingParams` into the request body after its own fields, so
+ * a caller's samplingParams key still wins over these.
+ */
+function runtimeBodyFields(
+	model: Model<"openai-completions">,
 	retention: StreamOptions["cacheRetention"],
 ): Record<string, unknown> {
 	const metadata = runtimeMetadata(model);
-	if (model.provider !== "llamacpp" || metadata?.runtimeId !== "llamacpp") return payload;
-	if (payload.cache_prompt !== undefined) return payload;
-	return { ...payload, cache_prompt: retention !== "none" };
-}
-
-function shouldApplyLlamaCppPromptCache(model: Model<"openai-completions">): boolean {
-	const metadata = runtimeMetadata(model);
-	return model.provider === "llamacpp" && metadata?.runtimeId === "llamacpp";
+	const fields: Record<string, unknown> = {};
+	if (model.provider === "llamacpp" && metadata?.runtimeId === "llamacpp") fields.cache_prompt = retention !== "none";
+	if (isLmStudioModel(model)) {
+		const request = metadata?.lmstudio?.request;
+		if (request?.ttlSeconds !== undefined) fields.ttl = request.ttlSeconds;
+		if (request?.draftModel !== undefined) fields.draft_model = request.draftModel;
+	}
+	return fields;
 }
 
 /** Compose Clio-only payload deltas over the caller hook after pi applies sampling. */
 function composeThinkingOnPayload(
 	resolved: ResolvedModelRuntimeCapabilities,
 	base: AnyOnPayload | undefined,
-	retention: StreamOptions["cacheRetention"],
 ): AnyOnPayload {
 	return async (payload, model) => {
 		if (!isPlainRecord(payload)) {
 			return base ? await base(payload, model) : undefined;
 		}
-		const cached = applyLlamaCppPromptCachePayload(payload, model, retention);
-		const next = applyLmStudioPayload(applyThinkingPayload(cached, resolved.thinking, resolved, model), model, resolved);
+		const next = applyLmStudioPayload(applyThinkingPayload(payload, resolved.thinking, resolved, model), model, resolved);
 		if (base) {
 			const fromBase = await base(next, model);
 			if (fromBase !== undefined) return fromBase;
@@ -582,24 +581,31 @@ function withSamplingOverrides<TOptions extends StreamOptions>(
 	model: Model<"openai-completions">,
 	options: TOptions | undefined,
 	resolved: ResolvedModelRuntimeCapabilities,
+	diffusion: boolean,
 ): TOptions | undefined {
 	const applied = resolved.thinking;
 	const quirks = clioQuirks(model);
 	const profile = pickSamplingProfile(quirks, applied.thinkingActive);
-	const promptCache = shouldApplyLlamaCppPromptCache(model);
+	const bodyFields: Record<string, unknown> = {
+		...(diffusion ? { diffusing: true } : {}),
+		...runtimeBodyFields(model, options?.cacheRetention),
+	};
 	const lmstudio = isLmStudioModel(model);
 	const vllmThinkingBudgets = resolved.runtimeId === "vllm" ? quirks?.thinking?.budgetByLevel : undefined;
 	// Pi catalog models carry no runtime metadata and keep Pi's own thinking handling.
 	const synthesized = runtimeMetadata(model)?.runtimeId !== undefined;
-	const needsPayloadControls = promptCache || lmstudio || (synthesized && applied.mechanism !== "always-on");
-	if (!profile && !vllmThinkingBudgets && !needsPayloadControls) {
+	const needsPayloadControls =
+		lmstudio || bodyFields.cache_prompt !== undefined || (synthesized && applied.mechanism !== "always-on");
+	const hasBodyFields = Object.keys(bodyFields).length > 0;
+	if (!profile && !vllmThinkingBudgets && !needsPayloadControls && !hasBodyFields) {
 		return options;
 	}
 	const merged: Record<string, unknown> = { ...(options ?? {}) };
 	if (profile?.temperature !== undefined && merged.temperature === undefined) merged.temperature = profile.temperature;
-	if (profile) {
+	if (profile || hasBodyFields) {
 		merged.samplingParams = {
-			...samplingParamsFromProfile(profile, resolved.runtimeId),
+			...bodyFields,
+			...(profile ? samplingParamsFromProfile(profile, resolved.runtimeId) : {}),
 			...options?.samplingParams,
 		};
 	}
@@ -610,7 +616,7 @@ function withSamplingOverrides<TOptions extends StreamOptions>(
 		};
 	}
 	if (needsPayloadControls) {
-		merged.onPayload = composeThinkingOnPayload(resolved, options?.onPayload, options?.cacheRetention);
+		merged.onPayload = composeThinkingOnPayload(resolved, options?.onPayload);
 	}
 	return merged as TOptions;
 }
@@ -1144,16 +1150,7 @@ function streamCompletions<TOptions extends StreamOptions>(
 			} as TOptions)
 		: options;
 	const diffusion = diffusionFramesActive(model);
-	const framedOptions: TOptions = diffusion
-		? ({
-				...(transportOptions ?? {}),
-				onPayload: async (payload: unknown, payloadModel: Model<Api>) => {
-					const base = await transportOptions?.onPayload?.(payload, payloadModel);
-					return withDiffusingRequest(base ?? payload);
-				},
-			} as TOptions)
-		: (transportOptions ?? ({} as TOptions));
-	const requestOptions = withLiteLLMRequestOptions(model, framedOptions);
+	const requestOptions = withLiteLLMRequestOptions(model, transportOptions ?? ({} as TOptions));
 	const source = withResponseModelIdCapture(model, requestOptions, (capturedOptions) =>
 		withLocalResidency(model, options ?? {}, (requestModel) => {
 			return start(
@@ -1162,7 +1159,7 @@ function streamCompletions<TOptions extends StreamOptions>(
 				withRemainingContextBudget(
 					requestModel,
 					effectiveContext,
-					withSamplingOverrides(requestModel, capturedOptions, resolved),
+					withSamplingOverrides(requestModel, capturedOptions, resolved, diffusion),
 				),
 			);
 		}),

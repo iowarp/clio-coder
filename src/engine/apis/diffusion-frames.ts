@@ -106,11 +106,6 @@ export function applyDiffusionFrame(event: AssistantMessageEvent, queue: QueuedF
 	return { ...event, delta: "", [FRAME_KEY]: frame } as AssistantMessageEvent;
 }
 
-/** Add `diffusing: true` to an OpenAI-compatible request body. */
-export function withDiffusingRequest(payload: unknown): unknown {
-	return isRecord(payload) ? { ...payload, diffusing: true } : payload;
-}
-
 /**
  * Length of the prefix two consecutive frames agree on. Mercury resolves a
  * block before it starts the next, so the agreed prefix is the settled text
