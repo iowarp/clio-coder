@@ -44,6 +44,19 @@ const SESSION_STARTED_AT = new Intl.DateTimeFormat("en-US", {
 	timeZoneName: "short",
 }).format(new Date(performance.timeOrigin));
 
+export const WELCOME_TAGLINES = [
+	"Ask Clio how to use or extend her.",
+	"The pursuit of excellence does not need justification. Your code does!",
+	"Understanding comes before change.",
+	"Created by researchers who love to code.",
+	"Good work leaves evidence.",
+	"Your models. Your code. Your judgment.",
+	"Honest limits are part of a useful result.",
+] as const;
+
+// Stage 0 and hydration share one choice; redraws and /new keep the launch's line.
+const SESSION_TAGLINE = WELCOME_TAGLINES[Math.floor(Math.random() * WELCOME_TAGLINES.length)] ?? WELCOME_TAGLINES[0];
+
 /**
  * What the route can honestly be said to be.
  *
@@ -447,6 +460,7 @@ export function buildWelcomeDashboardLines(
 	mode: WelcomeDashboardMode,
 	hintPage = 0,
 	getKeyLabel?: WelcomeDashboardDeps["getKeyLabel"],
+	tagline = SESSION_TAGLINE,
 ): string[] {
 	const version = versionLabel.replace(/ \(unreleased(?: · ([^)]+))?\)$/u, (_match, commit: string | undefined) =>
 		commit ? `·${commit}` : "",
@@ -570,17 +584,17 @@ export function buildWelcomeDashboardLines(
 	const versionTag = titleBrand ? "" : theme.fg("brandCopper", `v${version}`);
 	const leftRoom = Math.max(0, room - visibleWidth(versionTag) - (titleBrand ? 0 : 1));
 	const action = actionRow(theme, stats, leftRoom);
-	const helpRoom = leftRoom - visibleWidth(action) - 3;
-	const help =
-		helpRoom >= 18
-			? ` ${theme.fg("divider", GLYPH.rail)} ${theme.fg("body", truncateToWidth("Ask Clio how to use or extend her.", helpRoom, GLYPH.ellipsis, false))}`
-			: "";
-	const left = `${action}${help}`;
-	const gap = titleBrand ? "" : " ".repeat(Math.max(1, room - visibleWidth(left) - visibleWidth(versionTag)));
+	const taglineRows = room >= 36 ? wrapTextWithAnsi(theme.fg("body", tagline), room) : [];
+	const gap = titleBrand ? "" : " ".repeat(Math.max(1, room - visibleWidth(action) - visibleWidth(versionTag)));
 	const title = titleBrand
 		? `${brandMark(theme)} ${theme.style("wordmark", "Clio Coder", { bold: true })} ${theme.fg("brandCopper", `v${version}`)}`
 		: "";
-	return frame(theme, title, [...rows, innerDivider(theme, room), fit(`${left}${gap}${versionTag}`)], panelWidth);
+	return frame(
+		theme,
+		title,
+		[...rows, ...taglineRows, innerDivider(theme, room), fit(`${action}${gap}${versionTag}`)],
+		panelWidth,
+	);
 }
 
 /**

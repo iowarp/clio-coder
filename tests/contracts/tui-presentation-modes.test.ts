@@ -188,7 +188,9 @@ test("welcome height and usage placement stay fixed from Stage 0 through quota h
 	try {
 		for (const width of [8, 20, 40, 60, 76, 80, 100, 160, 200, 240]) {
 			const initial = boot.render(width);
-			strictEqual(initial.length, width >= 57 && width < 76 ? 21 : 17);
+			const baseRows = width >= 57 && width < 76 ? 21 : 17;
+			const taglineRows = width < 40 ? 0 : width < 76 ? 2 : 1;
+			ok(initial.length >= baseRows && initial.length <= baseRows + taglineRows);
 			const usageRow = initial.map(stripTerminalSequences).findIndex((line) => line.includes("AI usage"));
 			for (const reading of [
 				null,
@@ -238,7 +240,7 @@ test("welcome centers the artwork and gives contextual project guidance without 
 	};
 	for (const width of [80, 120, 180, 240]) {
 		const rows = buildWelcomeDashboardLines(stats, "0.5.7", width, "launchpad").map(stripTerminalSequences);
-		strictEqual(rows.length, 17);
+		strictEqual(rows.length, 18);
 		const artRows = rows.flatMap((line, index) => (line.includes("██") ? [index] : []));
 		strictEqual(artRows[0], 2);
 		strictEqual(artRows.at(-1), 12);

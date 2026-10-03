@@ -22,6 +22,7 @@ import {
 	createWelcomeDashboard,
 	WELCOME_PROJECT_CONTEXT_RETRY_MS,
 	WELCOME_PROJECT_CONTEXT_TTL_MS,
+	WELCOME_TAGLINES,
 	type WelcomeDashboardDeps,
 } from "../../src/interactive/welcome-dashboard.js";
 
@@ -220,7 +221,7 @@ test("a malformed CLIO-CODER.md points at the read-only view, never at a regener
 test("missing project context is guidance that keeps the invitation to work", () => {
 	const lines = rows(banner({ clioMd: "none" }), 80);
 	ok(actionLine(lines).includes("/context init to index this repo"), actionLine(lines));
-	ok(lines.join("\n").includes("Ask Clio how to use"));
+	ok(WELCOME_TAGLINES.some((tagline) => lines.join("\n").includes(tagline)));
 });
 
 test("stale project context offers refresh", () => {
@@ -350,7 +351,10 @@ test("the launchpad keeps a bounded footprint and the session header one row", (
 	for (const [label, options] of GEOMETRY_CASES) {
 		for (const width of WIDTHS) {
 			const launchpad = banner(options);
-			strictEqual(rows(launchpad, width).length, width >= 57 && width < 76 ? 21 : 17, `${label}@${width} launchpad rows`);
+			const baseRows = width >= 57 && width < 76 ? 21 : 17;
+			const taglineRows = width < 40 ? 0 : width < 76 ? 2 : 1;
+			const height = rows(launchpad, width).length;
+			ok(height >= baseRows && height <= baseRows + taglineRows, `${label}@${width} launchpad rows: ${height}`);
 			const session = banner(options);
 			session.collapseToSessionHeader();
 			strictEqual(rows(session, width).length, 1, `${label}@${width} session rows`);
@@ -630,7 +634,7 @@ function headerRows(built: ReturnType<typeof presentation>["presentation"], widt
 
 test("the presentation opens on the launchpad and collapses on first submit", async () => {
 	const { presentation: built } = presentation();
-	strictEqual(headerRows(built).length, 17);
+	strictEqual(headerRows(built).length, 18);
 
 	// Drive the collapse through the real submit controller, the way a typed
 	// prompt reaches it, rather than by calling the banner directly.
@@ -675,7 +679,7 @@ test("a new session restores the launchpad", () => {
 	built.collapseWelcomeDashboard();
 	strictEqual(headerRows(built).length, 1);
 	built.resetForNewSession();
-	strictEqual(headerRows(built).length, 17);
+	strictEqual(headerRows(built).length, 18);
 });
 
 test("a boot-time resume opens collapsed, with no fresh-start onboarding", () => {
@@ -707,7 +711,7 @@ test("disposing the presentation disposes the header", () => {
 	const { presentation: built } = presentation();
 	built.dispose();
 	// A disposed banner schedules nothing further; rendering must still be safe.
-	strictEqual(headerRows(built).length, 17);
+	strictEqual(headerRows(built).length, 18);
 });
 
 for (const width of [40, 44, 60, 92, 120]) {
@@ -818,7 +822,9 @@ test("the instant shell uses the finished welcome footprint without hydration co
 	const boot = createBootWelcome(settings, "Ctrl+S");
 	for (const width of WIDTHS) {
 		const lines = boot.render(width).map(stripTerminalSequences);
-		strictEqual(lines.length, width >= 57 && width < 76 ? 21 : 17);
+		const baseRows = width >= 57 && width < 76 ? 21 : 17;
+		const taglineRows = width < 40 ? 0 : width < 76 ? 2 : 1;
+		ok(lines.length >= baseRows && lines.length <= baseRows + taglineRows);
 		for (const line of lines) ok(visibleWidth(line) <= width);
 		ok(!lines.join("\n").includes("Starting Clio"));
 		ok(!lines.join("\n").includes("✓"));
@@ -861,11 +867,11 @@ test("account usage hydrates without moving the welcome frame or passing through
 	});
 	component.render(120);
 	let lines = component.render(120).map(stripAnsi);
-	strictEqual(lines.length, 17);
+	strictEqual(lines.length, 18);
 	ok(lines.join("\n").includes("No usage data"));
 	quota = "Claude 5h 23% used";
 	lines = component.render(120).map(stripAnsi);
-	strictEqual(lines.length, 17);
+	strictEqual(lines.length, 18);
 	ok(lines.join("\n").includes("Accounts") && lines.join("\n").includes("Claude 5h 23%"));
 	quota = `Claude ${ESC}]0;PWNED${BEL}5h 23% used`;
 	const raw = component.render(120).join("\n");
