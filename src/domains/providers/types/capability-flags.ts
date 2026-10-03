@@ -28,7 +28,7 @@ export interface CapabilityFlags {
 	reasoning: boolean;
 	thinkingFormat?: ThinkingFormat;
 	/** Probe-declared upstream control dialect only; never changes gateway routing or residency. */
-	thinkingControlRuntime?: "lmstudio" | "llamacpp";
+	thinkingControlRuntime?: "lmstudio" | "llamacpp" | "flm";
 	/**
 	 * Levels the server itself enumerates for this model (LM Studio `allowed_options`
 	 * mapped onto Clio's vocabulary). A live report only: no profile or catalog sets it,

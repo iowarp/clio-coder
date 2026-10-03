@@ -11,8 +11,8 @@ const kb = new FileKnowledgeBase(fileURLToPath(new URL("../../src/domains/provid
 
 describe("capability precedence", () => {
 	it("a deployment that reports no image input is not vision-capable, whatever the family says", () => {
-		// mini serves Qwopus3.6-35B without an mmproj; the gateway says so, the family entry says vision.
-		const hit = kb.lookup("mini/qwopus3.6-35b-moe-q4km");
+		// A text-only deployment overrides the multimodal checkpoint claim.
+		const hit = kb.lookup("local/gemma-4-26b-a4b-it-q4_k_m");
 		strictEqual(hit?.entry.capabilities.vision, true);
 		const probe = capabilitiesFromLiteLLMModelInfo({
 			mode: "chat",

@@ -59,7 +59,7 @@ describe("thinking off reaches the wire", () => {
 		} as const;
 		const llama = resolveModelRuntimeCapabilities({
 			runtimeId: "llamacpp",
-			modelId: "nemo3.5-30b-moe",
+			modelId: "nvidia-nemotron-3.5-lightning-30b-a3b",
 			capabilities: { ...EMPTY_CAPABILITIES, chat: true, tools: true },
 			quirks: staticQuirks as never,
 		});
@@ -264,37 +264,15 @@ describe("thinking off reaches the wire", () => {
 
 	it("resolves kwargs from local coding target knowledge base entries", () => {
 		const kb = new FileKnowledgeBase(join(process.cwd(), "src/domains/providers/models"));
-		const nemotronLightning = kb.lookup("nemo3.5-30b-moe");
-		const museGlimmer = kb.lookup("muse-30b-dense");
-		const nemotronOmni = kb.lookup("nemotron3-30b-moe-omni");
+		const nemotronLightning = kb.lookup("nvidia-nemotron-3.5-lightning-30b-a3b");
 
 		strictEqual(nemotronLightning?.entry.family, "nemotron-3.5-lightning-30b-a3b");
 		const lightningResolved = resolveModelRuntimeCapabilities({
 			runtimeId: "llamacpp",
-			modelId: "nemo3.5-30b-moe",
+			modelId: "nvidia-nemotron-3.5-lightning-30b-a3b",
 			capabilities: { ...EMPTY_CAPABILITIES, chat: true },
 			kbHit: nemotronLightning,
 		});
 		strictEqual(lightningResolved.request.chatTemplateKwargs?.force_nonempty_content, true);
-
-		strictEqual(museGlimmer?.entry.family, "muse-glimmer-30b");
-		const museResolved = resolveModelRuntimeCapabilities({
-			runtimeId: "llamacpp",
-			modelId: "muse-30b-dense",
-			capabilities: { ...EMPTY_CAPABILITIES, chat: true, reasoning: true },
-			kbHit: museGlimmer,
-			configuredThinkingLevel: "high",
-		});
-		strictEqual(museResolved.request.chatTemplateKwargs?.reasoning_strength, "high");
-
-		strictEqual(nemotronOmni?.entry.family, "nemotron-3-nano-omni-30b-a3b-reasoning");
-		const omniResolved = resolveModelRuntimeCapabilities({
-			runtimeId: "llamacpp",
-			modelId: "nemotron3-30b-moe-omni",
-			capabilities: { ...EMPTY_CAPABILITIES, chat: true, reasoning: true },
-			kbHit: nemotronOmni,
-		});
-		strictEqual(omniResolved.request.chatTemplateKwargs?.reasoning_budget, 16384);
-		strictEqual(typeof omniResolved.request.chatTemplateKwargs?.reasoning_budget, "number");
 	});
 });

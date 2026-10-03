@@ -544,7 +544,7 @@ function validateCapabilityPatch(value: unknown, source: string): void {
 		readOptionalNumber(caps, key, source);
 	}
 	if (caps.thinkingControlRuntime !== undefined) {
-		readEnum(caps.thinkingControlRuntime, `${source}.thinkingControlRuntime`, ["lmstudio", "llamacpp"]);
+		readEnum(caps.thinkingControlRuntime, `${source}.thinkingControlRuntime`, ["lmstudio", "llamacpp", "flm"]);
 	}
 	if (caps.reasoningLevels !== undefined) {
 		if (!Array.isArray(caps.reasoningLevels)) throw new Error(`${source}.reasoningLevels must be an array`);

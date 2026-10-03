@@ -85,14 +85,14 @@ describe("probed image input survives model-hint refinement", () => {
 
 	it("a probed vision route stays vision-capable after the probe-less model is folded in", () => {
 		// The knowledge-base family for this route declares no vision, so the synthesized model is text-only.
-		const { before, after, model } = resolveThroughHints("dynamo/qwopus3.8-27b-flash@q5_k_m", true);
+		const { before, after, model } = resolveThroughHints("local/gpt-oss-20b-q4_k_m", true);
 		deepStrictEqual((model as { input: string[] }).input, ["text"]);
 		strictEqual(before.capabilityDecisions.vision, true);
 		strictEqual(after.capabilityDecisions.vision, true);
 	});
 
 	it("a probe that reports no image input is not overturned by a family that can see", () => {
-		const { after } = resolveThroughHints("mini/qwopus3.6-35b-moe-q4km", false);
+		const { after } = resolveThroughHints("local/gemma-4-26b-a4b-it-q4_k_m", false);
 		strictEqual(after.capabilityDecisions.vision, false);
 	});
 });

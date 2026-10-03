@@ -24,21 +24,20 @@ import {
 	setGlobalDefaultMaxOutputTokens,
 } from "../../src/engine/apis/output-budget.js";
 
-it("the packaged profiles cover curated local aliases and compare without changing their current fields", () => {
+it("the packaged profiles and compatibility catalog agree on upstream local models", () => {
 	const root = mkdtempSync(join(tmpdir(), "clio-model-profiles-"));
 	try {
 		const profiles = loadModelProfiles({ userPath: join(root, "absent.yaml") });
 		const legacy = new FileKnowledgeBase(
 			join(resolvePackageRoot(), "src", "domains", "providers", "models", "local-models"),
 		);
-		// Every legacy family has its profile; the extras are the vision route added in step 4 and the two
-		// Qwen3.8 finetunes whose templates only the profile knows how to drive.
+		// Both packaged catalogs describe the same supported upstream checkpoints.
 		deepStrictEqual(
 			profiles
 				.entries()
 				.map((entry) => entry.id)
 				.filter((id) => !legacy.entries().some((entry) => entry.family === id)),
-			["thinkingcap-qwen3.8-27b", "qwopus3.8v2-27b-dense", "minicpm-v4.6"],
+			[],
 		);
 		for (const entry of legacy.entries()) {
 			for (const alias of entry.matchPatterns) {
@@ -57,22 +56,22 @@ it("the packaged profiles cover curated local aliases and compare without changi
 		}
 		const settings = structuredClone(DEFAULT_SETTINGS);
 		settings.targets = [
-			{ id: "blade", runtime: "litellm", defaultModel: "dynamo/qwopus3.8-27b-flash@q5_k_m" },
+			{ id: "blade", runtime: "litellm", defaultModel: "local/qwen3.8-27b-q6_k" },
 			{ id: "cloud", runtime: "openai-codex", defaultModel: "gpt-6-sol" },
 			{ id: "unset", runtime: "llamacpp" },
 		];
 		settings.chat.target = "blade";
 		settings.chat.model = "dynamo/nvidia-nemotron-3.5-lightning-30b-a3b";
 		settings.fleet.default.target = "blade";
-		settings.fleet.default.model = "mini/ornith1.5-35b-moe-q4km";
+		settings.fleet.default.model = "local/gemma-4-26b-a4b-it-q4_k_m";
 		settings.fleet.profiles.worker = { target: "cloud", model: "gpt-6-luna", thinkingLevel: "low" };
 		const comparison = compareConfiguredModelProfiles(settings, profiles, legacy);
 		deepStrictEqual(
 			comparison.map((row) => [row.targetId, row.profileId, row.differentFields]),
 			[
-				["blade", "qwopus3.8-27b-dense", []],
+				["blade", "qwen3.8-27b", []],
 				["blade", "nemotron-3.5-lightning-30b-a3b", []],
-				["blade", "ornith-1.5", []],
+				["blade", "gemma4-26b-a4b", []],
 				["cloud", null, []],
 				["cloud", null, []],
 				["unset", null, []],
@@ -197,7 +196,7 @@ it("resolves a model from its profile only where the server is silent, and never
 	strictEqual(window.modelMaximum.value, 1_048_576);
 	strictEqual(window.modelMaximum.kind, "model-maximum");
 	strictEqual(window.servingLimit.value, null);
-	// The old catalog's 65,536 was borrowed from another Nemotron; the profile declares no output cap.
+	// The model card publishes a context maximum, not an independent output cap.
 	strictEqual(silent.target.maxOutputTokensField.value, null);
 	strictEqual(silent.target.capabilities.tools, true);
 	strictEqual(silent.target.modelRuntime.thinking.mechanism, "on-off");
@@ -247,13 +246,13 @@ it("sends the resolved effort a template accepts, never a rounded-down one", () 
 	strictEqual(lmStudioReasoningEffort("low", ["off", "on"]), undefined);
 });
 
-it("drives the ThinkingCap and Qwopus V2 Qwen3.8 templates with the three efforts they accept", () => {
+it("drives the upstream Qwen3.8 template with the three efforts it accepts", () => {
 	const kb = createProfileKnowledgeBase(
 		new FileKnowledgeBase(join(resolvePackageRoot(), "src", "domains", "providers", "models", "local-models")),
 	);
 	for (const [model, profile] of [
-		["mini/thinkingcap3.8-27b-dense-q4km", "thinkingcap-qwen3.8-27b"],
-		["mini/qwopus3.8v2-27b-dense-q6k", "qwopus3.8v2-27b-dense"],
+		["local/qwen3.8-27b-q4_k_m", "qwen3.8-27b"],
+		["local/qwen3.8-27b-q6_k", "qwen3.8-27b"],
 	] as const) {
 		strictEqual(kb.lookup(model, "litellm")?.entry.family, profile, model);
 		const thinking = extractLocalModelQuirks(kb.lookup(model, "litellm")?.entry.quirks)?.thinking;

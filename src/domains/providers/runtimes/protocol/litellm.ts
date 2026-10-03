@@ -111,8 +111,10 @@ function boolean(value: unknown): boolean | undefined {
 export function capabilitiesFromLiteLLMModelInfo(info: Record<string, unknown>): Partial<CapabilityFlags> {
 	const caps: Partial<CapabilityFlags> = {};
 	// This is a deployment declaration, never inferred from a URL, port or alias.
-	if (info.runtime === "lm-studio") caps.thinkingControlRuntime = "lmstudio";
-	else if (info.runtime === "llama.cpp") caps.thinkingControlRuntime = "llamacpp";
+	const controlRuntime = info.thinking_control_runtime ?? info.runtime;
+	if (controlRuntime === "lmstudio" || controlRuntime === "lm-studio") caps.thinkingControlRuntime = "lmstudio";
+	else if (controlRuntime === "llamacpp" || controlRuntime === "llama.cpp") caps.thinkingControlRuntime = "llamacpp";
+	else if (controlRuntime === "flm") caps.thinkingControlRuntime = "flm";
 	// max_tokens may be catalog training metadata. The gateway's route-specific
 	// max_input_tokens is the serving limit Clio can admit a request against.
 	const contextWindow = positiveInteger(info.max_input_tokens);

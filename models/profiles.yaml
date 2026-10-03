@@ -1,16 +1,14 @@
-# Packaged local model facts and recommendations. Server observations remain authoritative.
-# Catalog context maxima are unverified claims, never loaded limits.
-# Recommended output tokens are not a server or model output cap.
+# Packaged upstream local model facts and recommendations.
+# Model context maxima are catalog claims, never loaded serving limits.
+# Tool parsing, structured output and sampling extensions depend on the runtime.
 version: 1
 models:
   - id: openai-gpt-oss
     match:
       exactIds:
-        - openai/gpt-oss
+        - openai/gpt-oss-20b
       familyPrefixes:
-        - gpt-oss
         - gpt-oss-20b
-        - gpt-oss-120b
     claims:
       modelMaxContext: 131072
       capabilities:
@@ -19,7 +17,6 @@ models:
         toolCallFormat: openai
         reasoning: true
         thinkingFormat: harmony
-        structuredOutputs: json-schema
         vision: false
         audio: false
         embeddings: false
@@ -32,684 +29,30 @@ models:
           low: low
           medium: medium
           high: high
-        guidance: |
-          GPT-OSS uses OpenAI Harmony formatting and supports low, medium, and
-          high reasoning effort. Clio coerces off/minimal to low, captures
-          non-final Harmony channels as ThinkingContent, and strips Harmony
-          control tokens from visible output. The analysis channel reaches Clio
-          as reasoning_content on llama.cpp and as reasoning on LM Studio; both
-          are captured the same way.
+        guidance: Harmony accepts low, medium and high reasoning effort. There is no upstream thinking-off mode; off
+          and minimal resolve to low. Tool calls use Harmony assistant messages addressed to functions, with
+          analysis and final channels.
     recommendations:
-      sampling:
-        thinking:
-          temperature: 1
-          topP: 1
-        instruct:
-          temperature: 1
-          topP: 1
       runtimePreference:
-        llamaCpp: Use the OpenAI-compatible chat-completions surface with chat_template_kwargs.reasoning_effort set to
-          low, medium, or high. The analysis channel arrives as reasoning_content.
-        lmstudio: Reasoning effort travels as the top-level reasoning_effort field. The analysis channel arrives as
-          the OpenAI-compatible `reasoning` field, on the streamed delta and on the final message, with
-          reasoning_content absent (measured 2026-09-02 on dynamo, gpt-oss-20b and gpt-oss-120b); Clio reads
-          both spellings into thinking content.
-        openaiCompat: Preferred for Harmony reasoning-effort control when the local gateway exposes chat_template_kwargs.
-      outputTokens: 32768
+        llamaCpp: Use the checkpoint chat template with --jinja and the OpenAI-compatible chat-completions endpoint.
+          Send template controls through chat_template_kwargs. Choose the loaded context for available memory;
+          the model maximum does not size the server.
     provenance:
-      source: legacy-curated-catalog
-  - id: agenticqwen-30b-a3b-i1
-    match:
-      familyPrefixes:
-        - agenticqwen-30b-a3b-i1
-        - agenticqwen-30b-a3b-i1-q4_k_m
-        - agenticqwen
-    claims:
-      modelMaxContext: 262144
-      capabilities:
-        chat: true
-        tools: true
-        toolCallFormat: qwen
-        reasoning: true
-        thinkingFormat: qwen-chat-template
-        structuredOutputs: json-schema
-        vision: false
-        audio: false
-        embeddings: false
-        rerank: false
-        fim: false
-    behavior:
-      thinking:
-        mechanism: budget-tokens
-        budgetByLevel:
-          low: 1024
-          medium: 4096
-          high: 16384
-        guidance: |
-          AgenticQwen is the tuned local default for Clio source work on
-          a local llama.cpp server. Thinking emits through the qwen chat template;
-          keep high reasoning for main-agent work and preserve visible thinking
-          blocks in receipts.
-    recommendations:
-      sampling:
-        thinking:
-          temperature: 0.5
-          topP: 0.9
-          topK: 20
-        instruct:
-          temperature: 0.5
-          topP: 0.9
-          topK: 20
-      gpuTiers:
-        32gb: Default 32 GB local llama.cpp orchestrator profile; benchmarked with roughly 1 GiB VRAM headroom on a 32
-          GiB class card.
-      runtimePreference:
-        llamaCpp: OpenAI-compatible chat completions with --jinja. Recommended local profile uses ctx=262144,
-          parallel=4, batch=2048, ubatch=512, and q8 KV cache.
-        openaiCompat: Use only when a gateway fronts the same llama.cpp chat-completions surface.
-      llamaCpp:
-        ctxSize: 262144
-        cacheTypeK: q8_0
-        cacheTypeV: q8_0
-        parallel: 4
-        parallelSlots: Start the server with --parallel 4. Clio discovers total_slots 4 from /props and admits four
-          concurrent requests on this endpoint, one of which the orchestrator's own turn holds while it
-          streams. Add --kv-unified, or the 262144-token context is divided four ways.
-        batchSize: 2048
-        ubatchSize: 512
-      serving: Use the llama.cpp settings listed above for a 262144-token local profile.
-      outputTokens: 65536
-    provenance:
-      source: legacy-curated-catalog
-      measuredUnder:
-        hardware: 32 GiB class GPU; the exact card was not recorded
-        runtime: llamacpp
-        build: unknown
-        llamaCpp: ctx 262144, --parallel 4, --batch-size 2048, --ubatch-size 512, KV q8_0/q8_0 (the block below); no
-          argv was recorded
-        date: unknown
-        source: unknown
-        note: |
-          Only the VRAM-headroom figure in the 32gb tier reads as measured. It
-          entered the catalog with the initial local-model set and no commit,
-          report, or server argv records where it was taken, so everything but
-          the recommended serving profile is unknown.
-  - id: nemotron-3-nano-omni-30b-a3b-reasoning
-    match:
-      familyPrefixes:
-        - nvidia-nemotron-3-nano-omni-30b-a3b-reasoning
-        - nemotron-3-nano-omni-30b-a3b-reasoning-ud-q4_k_m
-        - nemotron-3-nano-omni-30b-a3b-reasoning
-        - nemotron-3-nano-omni
-        - nemotron-nano-omni
-        - nemotron3-30b-moe-omni
-        - nemotron3-30b-omni
-    claims:
-      modelMaxContext: 1048576
-      capabilities:
-        chat: true
-        tools: true
-        toolCallFormat: qwen
-        reasoning: true
-        thinkingFormat: qwen-chat-template
-        structuredOutputs: json-schema
-        vision: true
-        audio: true
-        embeddings: false
-        rerank: false
-        fim: false
-    behavior:
-      thinking:
-        mechanism: on-off
-        chatTemplateKwargs:
-          static:
-            reasoning_budget: 16384
-          lmstudio: unsupported
-        guidance: |
-          Reasoning is template-driven and the switch is
-          chat_template_kwargs.enable_thinking; intermediate levels coerce to on.
-          The checkpoint reasons when nothing is sent, so off has to be carried on
-          the wire rather than omitted. reasoning_effort is inert on llama.cpp;
-          LM Studio reads the same on-off switch from that field instead.
-    recommendations:
-      sampling:
-        thinking:
-          temperature: 0.6
-          topP: 0.95
-          topK: 20
-        instruct:
-          temperature: 0.2
-          topK: 1
-      gpuTiers:
-        24gb: Use a 4-bit quant with reduced load context for evaluation. Prefer the 32GB tier for sustained Clio
-          writes.
-        32gb: Primary strong local model for multimodal main-agent work. Keep openai-compat available for tool-call
-          fallback.
-      runtimePreference:
-        lmstudio: Use LM Studio per-model load settings unless this target carries explicit lmstudio.load overrides.
-        openaiCompat: Use for a generic gateway that fronts the same OpenAI-compatible chat surface.
-        llamaCpp: OpenAI-compatible chat completions with --jinja.
-      llamaCpp:
-        ctxSize: 819200
-        cacheTypeK: q8_0
-        cacheTypeV: q8_0
-        flashAttn: true
-        nGpuLayers: 99
-        parallel: 4
-        parallelSlots: Start the server with --parallel 4, and add --kv-unified unless each of the four slots is meant
-          to get 204800 tokens rather than the whole 819200. Clio admits four concurrent requests on this
-          endpoint once /props reports total_slots 4.
-      serving: Use qwen3_coder tool parsing when served through OpenAI-compatible HTTP. LM Studio uses the same
-        OpenAI-compatible tool surface.
-      outputTokens: 131072
-    provenance:
-      source: legacy-curated-catalog
-      measuredUnder:
-        hardware: mini fleet node, AMD Radeon AI PRO R9700 32 GB, Vulkan backend, 4 request slots
-        runtime: llamacpp
-        build: worker llama-server from ~/src/llama.cpp-b10687/build-vulkan/bin, behind a router
-          reporting build_info b1-c841aee (the string the ornith-1.5 entry below records for this same host on
-          this date)
-        model: Nemotron-3-Nano-Omni-30B-A3B-Reasoning UD-Q4_K_M with Nemotron-Omni-mmproj-F16 (arch nemotron_h_moe)
-        llamaCpp: --ctx-size 1032192 --parallel 4 --kv-unified --cache-type-k f16 --cache-type-v f16 --batch-size
-          16384 --ubatch-size 2048 --flash-attn true --n-gpu-layers 99 --jinja --reasoning on --temperature
-          0.6 --top-k 40 --top-p 0.95 --repeat-penalty 1.05
-        date: 2026-09-02
-        source: "issue #263 thinking sweep: one non-streaming POST /v1/chat/completions per variant on a one-line
-          arithmetic prompt, max_tokens 4096"
-        note: |
-          The on-off classification is measured, and it replaces a budget-tokens
-          dial that never reached this runtime. With no thinking field the model
-          spent 54 completion tokens with 140 characters of reasoning_content;
-          with chat_template_kwargs.enable_thinking false it answered in 4 tokens
-          with none; with it true it spent 42 tokens and 119 characters.
-          reasoning_effort moved nothing: none, low, and high produced 43, 48, and
-          39 tokens and a reasoning trace every time. The budget-tokens mechanism
-          this entry used to declare is downgraded to informational for
-          openai-completions on llama.cpp with a qwen chat template
-          (acceptsBudgetTokensField in model-runtime-capabilities.ts), so no
-          budget ever reached the server and the model reasoned at every level.
-          The router agrees with the measurement, advertising reasoning:on_off
-          with default_reasoning:on.
-
-          The measuring server is not the recommended profile below: it ran
-          ctx-size 1032192 with f16 KV against the 819200 and q8_0 recommended
-          here, and loaded only the vision mmproj, so the audio capability stays
-          the card's claim rather than this run's.
-  - id: nemotron-3.5-lightning-30b-a3b
-    match:
-      familyPrefixes:
-        - nvidia-nemotron-3.5-lightning-30b-a3b
-        - nemotron-3.5-lightning-30b-a3b
-        - nemotron-3.5-lightning-30b
-        - nemo3.5-30b-moe
-    claims:
-      modelMaxContext: 1048576
-      capabilities:
-        chat: true
-        tools: true
-        toolCallFormat: qwen
-        reasoning: true
-        thinkingFormat: qwen-chat-template
-        structuredOutputs: json-schema
-        vision: false
-        audio: false
-        embeddings: false
-        rerank: false
-        fim: false
-    behavior:
-      thinking:
-        mechanism: on-off
-        chatTemplateKwargs:
-          static:
-            force_nonempty_content: true
-          lmstudio: unsupported
-        guidance: |
-          Nemotron 3.5 Lightning's chat template exposes thinking as on or off
-          through enable_thinking; intermediate levels coerce to on. It reasons by
-          default, so off has to be carried on the wire. On LM Studio the same
-          switch is read from reasoning_effort instead, which Clio sends for
-          on-off models on that runtime.
-    recommendations:
-      sampling:
-        thinking:
-          temperature: 1
-          topP: 0.95
-          topK: 40
-          repeatPenalty: 1.05
-        instruct:
-          temperature: 1
-          topP: 0.95
-          topK: 40
-          repeatPenalty: 1.05
-      gpuTiers:
-        32gb: Text-only agent target on a 32 GB card. Q4_K_M weights plus f16 KV reach the full 1048576-token window
-          at parallel 1 on the measured server.
-      runtimePreference:
-        llamaCpp: OpenAI-compatible chat completions with --jinja and --reasoning on. The router profile pins
-          chat_template_kwargs.enable_thinking true, so a request that wants silence must send false rather
-          than omitting the field.
-        openaiCompat: Use when a gateway fronts the same llama.cpp chat-completions surface with qwen tool parsing.
-        lmstudio: LM Studio reads the on-off switch from reasoning_effort, not from chat_template_kwargs; see the
-          2026-08-11 note above.
-      llamaCpp:
-        ctxSize: 1048576
-        cacheTypeK: f16
-        cacheTypeV: f16
-        flashAttn: true
-        nGpuLayers: 99
-        parallel: 1
-        parallelSlots: Start the server with --parallel 1 so one agent gets the whole 1048576-token context, and add
-          --kv-unified if --parallel is raised or the context is divided across slots. Clio discovers
-          total_slots 1 and admits one request at a time on this endpoint, so a dispatch raised while the
-          orchestrator streams is refused rather than queued.
-        batchSize: 16384
-        ubatchSize: 2048
-        chatTemplateKwargs:
-          enable_thinking: true
-      serving: NVIDIA-Nemotron-3.5-Lightning-30B-A3B, MoE hybrid of Mamba-2, MoE and attention layers with 3B active
-        parameters. The card recommends nemotron_v3 reasoning parsing and qwen3_coder tool parsing; the mini
-        router serves the Q4_K_M gguf with XML tool calls through llama.cpp's qwen3_coder parser. Native
-        context is 1M.
-      outputTokens: 65536
-    provenance:
-      source: legacy-curated-catalog
-      measuredUnder:
-        hardware: mini fleet node, AMD Radeon AI PRO R9700 32 GB, Vulkan backend, 1 request slot
-        runtime: llamacpp
-        build: worker llama-server from ~/src/llama.cpp-b10687/build-vulkan/bin, behind a router
-          reporting build_info b1-c841aee
-        model: NVIDIA-Nemotron-3.5-Lightning-30B-A3B Q4_K_M (arch nemotron_h_moe)
-        llamaCpp: '--ctx-size 1048576 --parallel 1 --kv-unified --cache-type-k f16 --cache-type-v f16 --batch-size
-          16384 --ubatch-size 2048 --flash-attn true --fit off --n-gpu-layers 99 --jinja --reasoning on
-          --chat-template-kwargs {"enable_thinking": true} --temperature 1.0 --top-k 40 --top-p 0.95
-          --repeat-penalty 1.05'
-        date: 2026-09-02
-        source: "issue #263 thinking sweep: one non-streaming POST /v1/chat/completions per variant on a one-line
-          arithmetic prompt, max_tokens 4096"
-        note: |
-          The mechanism is measured on this runtime and the card agrees with it.
-          With no thinking field the model spent 97 completion tokens with 300
-          characters of reasoning_content; with
-          chat_template_kwargs.enable_thinking false it answered in 3 tokens with
-          none; with it true it spent 120 tokens and 353 characters.
-          reasoning_effort is inert: none, low, and high produced 127, 114, and
-          117 tokens with a reasoning trace every time. The NVIDIA card states the
-          same control, "Reasoning Mode: Configurable on/off via chat template
-          (enable_thinking=True/False)", and the router advertises reasoning:on_off
-          with default_reasoning:on.
-
-          The same divergence is already recorded in code for this checkpoint:
-          model-runtime-capabilities.ts notes a 2026-08-11 fleet measurement on
-          nvidia-nemotron-3.5-lightning-30b-a3b where LM Studio suppressed
-          reasoning for reasoning_effort "none" and ignored enable_thinking false
-          while llama.cpp did the reverse. That id is a matchPattern here.
-
-          Sampler provenance: temperature 1.0 and top_p 0.95 are the card's
-          "Recommended Sampling"; top_k 40 and repeat_penalty 1.05 are the router
-          preset's launch arguments and have no card value. The card publishes no
-          separate thinking and instruct profiles, so both carry the same numbers.
-          maxTokens follows nemotron-cascade-2, the other 1M-context Nemotron in
-          this catalog; the card caps output only by the context window.
-  - id: qwen3.6-35b-a3b
-    match:
-      familyPrefixes:
-        - qwen3.6-35b-a3b
-        - qwen3_6-35b-a3b
-        - qwen3-6-35b-a3b
-        - qwen3.6-35b
-        - qwen3.6-35b-a3b-ud
-        - qwen3.6-35b-a3b-ud-q4_k_xl
-    claims:
-      modelMaxContext: 262144
-      capabilities:
-        chat: true
-        tools: true
-        toolCallFormat: qwen
-        reasoning: true
-        thinkingFormat: qwen-chat-template
-        structuredOutputs: json-schema
-        vision: true
-        audio: false
-        embeddings: false
-        rerank: false
-        fim: false
-    behavior:
-      thinking:
-        mechanism: budget-tokens
-        budgetByLevel:
-          low: 1024
-          medium: 4096
-          high: 16384
-        guidance: |
-          Qwen chat template emits thinking blocks. The card recommends at least
-          128K context for thinking quality. Preserve thinking blocks across
-          coding-task turns so iterative reasoning chains do not restart cold.
-    recommendations:
-      sampling:
-        thinking:
-          temperature: 0.6
-          topP: 0.95
-          topK: 20
-        instruct:
-          temperature: 0.7
-          topP: 0.8
-          topK: 20
-          minP: 0
-      gpuTiers:
-        32gb: Main-agent candidate on 32GB targets when Nemotron Omni is unavailable or tool behavior is better for
-          text-only work.
-      runtimePreference:
-        lmstudio: Usable for text and vision through LM Studio's OpenAI-compatible chat surface.
-        openaiCompat: Preferred local gateway path for tool-call stress tests.
-        llamaCpp: OpenAI-compatible chat completions with --jinja. Local llama.cpp profile emits reasoning_content
-          without a separate --reasoning flag.
-      llamaCpp:
-        ctxSize: 262144
-        cacheTypeK: q8_0
-        cacheTypeV: q8_0
-        flashAttn: true
-        nGpuLayers: 99
-      serving: Official card recommends at least 128K context for thinking quality. Use 262K when memory allows.
-      outputTokens: 81920
-    provenance:
-      source: legacy-curated-catalog
-  - id: ornith-1.0-35b
-    match:
-      exactIds:
-        - deepreinforce-ai/ornith-1.0-35b-gguf
-      familyPrefixes:
-        - ornith-1.0-35b
-        - ornith-1.0-35b-q4_k_m
-        - ornith-1.0-35b-gguf
-        - ornith
-    claims:
-      modelMaxContext: 262144
-      capabilities:
-        chat: true
-        tools: true
-        toolCallFormat: qwen
-        reasoning: true
-        thinkingFormat: qwen-chat-template
-        structuredOutputs: json-schema
-        vision: false
-        audio: false
-        embeddings: false
-        rerank: false
-        fim: false
-    behavior:
-      thinking:
-        mechanism: always-on
-        guidance: |
-          Ornith emits a Qwen-style <think> block by default. The local llama.cpp
-          router is configured with --reasoning on, so the OpenAI-compatible
-          response separates this trace into reasoning_content while content
-          contains the final answer.
-    recommendations:
-      sampling:
-        thinking:
-          temperature: 0.6
-          topP: 0.95
-          topK: 20
-        instruct:
-          temperature: 0.6
-          topP: 0.95
-          topK: 20
-          repeatPenalty: 1.05
-      gpuTiers:
-        32gb: 32 GB local profile with Q4_K_M, ctx=262144, q8 KV, flash attention, and parallel=1.
-      runtimePreference:
-        llamaCpp: OpenAI-compatible chat completions with --jinja and --reasoning on. Recommended local profile uses
-          ctx=262144, parallel=1, batch=2048, ubatch=512, flash attention, and q8 KV cache.
-        openaiCompat: Preferred when a gateway fronts the same llama.cpp chat-completions surface with qwen
-          reasoning/tool parsing.
-      llamaCpp:
-        ctxSize: 262144
-        cacheTypeK: q8_0
-        cacheTypeV: q8_0
-        flashAttn: true
-        nGpuLayers: 99
-        parallel: 1
-        parallelSlots: Start the server with --parallel 1 so one agent gets the whole 262144-token context. Clio
-          discovers total_slots 1 and admits one request at a time on this endpoint, so a dispatch raised
-          while the orchestrator is streaming is refused with the endpoint denial rather than queued; point
-          workers at a second server, or raise --parallel and re-probe.
-        batchSize: 2048
-        ubatchSize: 512
-      serving: Ornith-1.0-35B is an agentic coding model; the card recommends 262K context, qwen3 reasoning parsing,
-        qwen3_coder/qwen3_xml tool parsing, and sampler temperature=0.6, top_p=0.95, top_k=20.
-      outputTokens: 65536
-    provenance:
-      source: legacy-curated-catalog
-      measuredUnder:
-        hardware: unknown
-        runtime: lmstudio
-        build: unknown; the host was a Windows LM Studio machine whose bundled build string was not recorded on this
-          date
-        llamaCpp: unknown; the measurement went through LM Studio's OpenAI-compatible port, which does not expose the
-          underlying server argv
-        date: 2026-08-08
-        source: "commit b3db3b82 (fix(providers): thinking off reaches the wire for models that reason by default)"
-        note: |
-          The always-on classification is the measured part. That session found
-          Ornith reasoning by default with no thinking field set, in the same
-          family of behavior as qwopus3.6-35b-a3b-coder. The recommended
-          llama.cpp serving profile below is the model card's, not that
-          measurement's, and no argv from the measuring host survives.
-  - id: ornith-1.5
-    match:
-      familyPrefixes:
-        - ornith-1.5-35b-a3b
-        - ornith1.5-35b-moe
-        - ornith-1.5-35b
-        - ornith1.5-35b
-        - ornith-1.5
-        - ornith1.5
-    claims:
-      modelMaxContext: 262144
-      capabilities:
-        chat: true
-        tools: true
-        toolCallFormat: qwen
-        reasoning: true
-        thinkingFormat: qwen-chat-template
-        structuredOutputs: json-schema
-        vision: false
-        audio: false
-        embeddings: false
-        rerank: false
-        fim: false
-    behavior:
-      thinking:
-        mechanism: on-off
-        guidance: |
-          Ornith 1.5's Qwen3.5 chat template exposes thinking as on or off
-          through enable_thinking; intermediate levels coerce to on. LM Studio
-          2026-09-03 exposed a split vocabulary on this exact Q4_K_M: native
-          discovery advertised {off,on}, while its OpenAI-compatible request
-          validator rejected literal `on` and accepted only effort-level values.
-          `low` ran only after a warning and fallback to on, so Clio now omits an
-          active override for this default-on model and sends `reasoning_effort:
-          none` only when disabling it.
-    recommendations:
-      sampling:
-        thinking:
-          temperature: 0.6
-          topP: 0.95
-          topK: 20
-        instruct:
-          temperature: 0.6
-          topP: 0.95
-          topK: 20
-          repeatPenalty: 1.05
-      serving: "Ornith-1.5-35B-A3B follows the 1.0 card: 262K context, qwen3 reasoning parsing, qwen3_coder tool
-        parsing, sampler temperature=0.6, top_p=0.95, top_k=20."
-      outputTokens: 65536
-    provenance:
-      source: legacy-curated-catalog
-      measuredUnder:
-        hardware: mini fleet node, AMD GPU on the Vulkan backend, 4 request slots
-        runtime: llamacpp
-        build: b1-c841aee
-        model: Ornith-1.5-35B-A3B Q4_K_M (arch qwen35moe)
-        llamaCpp: --ctx-size 786432 --parallel 4 --no-kv-unified --cache-type-k q8_0 --cache-type-v q8_0 --batch-size
-          16384 --ubatch-size 2048 --jinja --reasoning on
-        date: 2026-09-02
-        source: "prompt-infrastructure round 2 (v0.4.2 development): live probe of the on-off switch, and a debugger
-          dispatch receipt"
-        note: |
-          The 1.5 release is a Qwen3.5-MoE derivative and its chat template
-          honors enable_thinking, which the 1.0 measurement above did not find.
-          Measured on this date: with chat_template_kwargs.enable_thinking false
-          the model answered a one-line arithmetic prompt in 4 completion tokens
-          with no reasoning_content; with it true the same prompt spent 79
-          tokens, 158 characters of them reasoning. Under the inherited
-          always-on classification a debugger worker dispatched with thinking
-          off spent 1,061 of its 1,518 output tokens on a reasoning trace, and
-          the router itself advertises the model as reasoning:on_off. The
-          generic `ornith` pattern still routes 1.0 checkpoints to the entry
-          above; these longer patterns win for 1.5 ids.
-  - id: qwen3.6-27b
-    match:
-      familyPrefixes:
-        - qwen3.6-27b
-        - qwen3_6-27b
-        - qwen3-6-27b
-    claims:
-      modelMaxContext: 262144
-      capabilities:
-        chat: true
-        tools: true
-        toolCallFormat: qwen
-        reasoning: true
-        thinkingFormat: qwen-chat-template
-        structuredOutputs: json-schema
-        vision: true
-        audio: false
-        embeddings: false
-        rerank: false
-        fim: false
-    behavior:
-      thinking:
-        mechanism: budget-tokens
-        budgetByLevel:
-          low: 1024
-          medium: 4096
-          high: 16384
-        guidance: |
-          Qwen chat template drives thinking via standard <think> blocks.
-          Coding sampler is the precise variant. Preserve thinking blocks across
-          turns when the workflow is iterative; the budget caps runaway chains.
-    recommendations:
-      sampling:
-        thinking:
-          temperature: 0.6
-          topP: 0.95
-          topK: 20
-          minP: 0
-          presencePenalty: 0
-          repetitionPenalty: 1
-        instruct:
-          temperature: 0.7
-          topP: 0.8
-          topK: 20
-          minP: 0
-          presencePenalty: 1.5
-          repetitionPenalty: 1
-      gpuTiers:
-        32gb: Fits at f16 KV with parallel=1 and ctx=262144 (Q4_K_XL weights ~19.5 GB plus ~32 GB KV).
-      runtimePreference:
-        lmstudio: Primary LM Studio path through OpenAI-compatible chat and native REST model management.
-        openaiCompat: Verified parity for tool calls; reasoning_content surfaces and
-          completion_tokens_details.reasoning_tokens is reported.
-      serving: Official Qwen card recommends max output 32768 tokens for standard queries (81920 only for math/code
-        competitions). Coding sampler is the precise variant; preserve thinking blocks across turns for
-        iterative workflows.
-      outputTokens: 81920
-    provenance:
-      source: legacy-curated-catalog
-      measuredUnder:
-        hardware: unknown
-        runtime: lmstudio and its OpenAI-compatible port
-        build: unknown
-        llamaCpp: unknown; this family carries no llamaCpp block and the parity check ran over LM Studio's HTTP surface
-        date: unknown
-        source: unknown
-        note: |
-          The measured claim is the openaiCompat parity line: tool calls, a
-          reasoning_content field, and completion_tokens_details.reasoning_tokens
-          were all observed on the wire. It entered the catalog with the initial
-          local-model set, so the host, the LM Studio version, and the loaded
-          quantization are all unrecorded. The sampler and the 32gb VRAM
-          arithmetic come from the official Qwen card rather than a run.
-  - id: qwopus3.8-27b-dense
-    match:
-      exactIds:
-        - mini/qwopus3.8-27b-dense
-      familyPrefixes:
-        - qwopus3.8-27b-dense
-        - qwopus3.8-27b
-    claims:
-      capabilities:
-        reasoning: true
-    behavior:
-      thinking:
-        mechanism: effort-levels
-        effortByLevel:
-          low: low
-          medium: medium
-          xhigh: xhigh
-        guidance: |
-          The measured mini/qwopus3.8-27b-dense-q6 route accepts low, medium,
-          and xhigh, and rejects high. Clio maps high and max to xhigh and
-          explicitly forwards that supported effort through LiteLLM. Omitting
-          active effort can expose an incompatible deployment default.
-    recommendations:
-      sampling:
-        thinking:
-          temperature: 1
-          topP: 0.95
-          topK: 20
-          minP: 0
-          presencePenalty: 0
-          repetitionPenalty: 1
-        instruct:
-          temperature: 0.7
-          topP: 0.8
-          topK: 20
-          minP: 0
-          presencePenalty: 1.5
-          repetitionPenalty: 1
-    provenance:
-      source: legacy-curated-catalog
-      measuredUnder:
-        runtime: LiteLLM route mini/qwopus3.8-27b-dense-q6; model_info.runtime llama.cpp
-        date: 2026-09-16
-        source: Operator report and current-source request to blade-gateway, reproduced during v0.4.9 closeout
-        note: |
-          The exact route rejected an omitted effort with Jinja's diagnostic
-          Unexpected reasoning effort high. Supported types are xhigh
-          (default), medium, and low. Clio's captured request carried only
-          enable_thinking true. The upstream behavior is consistent with an
-          incompatible deployment default; its precise cause was not inspected.
-          These effort levels come from that server diagnostic, not from
-          Qwen or Qwopus name similarity. Other capabilities remain supplied
-          by the route probe; no hardware or context size is inherited.
-          The sampler is Qwen3.8's, per mode, because Jackrong's
-          Qwopus3.8-27B-Flash card states none and its generation_config.json
-          repeats Qwen's thinking defaults (temperature 1.0, top_p 0.95,
-          top_k 20). A server preset is only the fallback for a request that
-          carries no sampler, so thinking-on requests no longer inherit the
-          non-thinking preset every mini and dynamo Qwopus3.8 server starts with.
-          Since 2026-09-24 mini's default route is mini/qwopus3.8-27b-dense-q4km.
-          It serves Qwopus3.8-27B-Flash-MTP Q4_K_M with an F16 mmproj, four
-          slots sharing one 131072-token pool with f16 KV, thinking off by
-          default and reasoning-effort high (dotfiles d9400d7). The -q6 route
-          was renamed mini/qwopus3.8-27b-dense-q6k the same day. The effort
-          levels below were measured on the -q6 route only and have not been
-          re-measured on the default route.
+      source: upstream-model-card
+      url: https://huggingface.co/openai/gpt-oss-20b
+      retrieved: 2026-10-03
+      config: https://huggingface.co/openai/gpt-oss-20b/blob/main/config.json
+      generationConfig: https://huggingface.co/openai/gpt-oss-20b/blob/main/generation_config.json
+      chatTemplate: https://huggingface.co/openai/gpt-oss-20b/blob/main/chat_template.jinja
+      notes: Context comes from config.json max_position_embeddings. The card and generation config publish no
+        recommended temperature or top_p; retain runtime sampling defaults instead of inventing a sampler.
+      runtimeSources:
+        - https://github.com/ggml-org/llama.cpp/blob/master/tools/server/README.md
+        - https://docs.litellm.ai/docs/providers/openai_compatible
   - id: qwen3.8-27b
     match:
+      exactIds:
+        - Qwen/Qwen3.8-27B
       familyPrefixes:
         - qwen3.8-27b
         - qwen3_8-27b
@@ -722,7 +65,6 @@ models:
         toolCallFormat: qwen
         reasoning: true
         thinkingFormat: qwen-chat-template
-        structuredOutputs: json-schema
         vision: true
         audio: false
         embeddings: false
@@ -735,766 +77,59 @@ models:
           low: low
           medium: medium
           xhigh: xhigh
-        guidance: |
-          Official Qwen3.8-27B chat template (chat_template.jinja) validates
-          reasoning_effort against exactly {xhigh, medium, low} and raises a
-          fatal jinja exception (hard 500, not a graceful fallback) on anything
-          else, including minimal/high/max. The 27B card gives no /think or
-          /no_think soft switch for this model; unlike Qwen3, that idiom has no
-          effect here. The template defaults to xhigh with thinking enabled.
-          The picker offers off/low/medium/xhigh; released high and max choices
-          normalize to xhigh rather than reaching the strict template unchanged.
-          Template-level off uses chat_template_kwargs.enable_thinking:false.
-          preserve_thinking should stay
-          on for an agentic harness (the template's own recommendation for
-          agent scenarios; improves KV cache reuse). llama.cpp's own
-          reasoning_effort:"none" also disables reasoning at the server layer
-          and is a separate mechanism from the template's enable_thinking flag;
-          the none sentinel is consumed before strict template effort validation.
-          LM Studio's HTTP port also accepts none. A 2026-09-05 same-route
-          LiteLLM probe showed none and the template flag alone still reasoned
-          because the generic OpenAI route filtered the effort parameter. Adding
-          allowed_openai_params:["reasoning_effort"] produced zero reasoning
-          twice; an allowed low control still reasoned. Clio forwards only an
-          effort resolved from the model/runtime contract, and never infers the
-          upstream control runtime from a host name, port, or model alias.
-
-          Thinking off is verified for this family, and no floor is imposed on
-          it. The official card and template were rechecked at revision
-          1d4bf0f2ff6012fd82039f2fa52739d0dd7c60c0:
-          https://huggingface.co/Qwen/Qwen3.8-27B/blob/1d4bf0f2ff6012fd82039f2fa52739d0dd7c60c0/chat_template.jinja
-          JetBrains report that Qwen3.8 without reasoning gets stuck in a
-          loop repeating the same tool call indefinitely under Junie. Clio's
-          shipped default is chat.thinkingLevel: off, an explicit Clio preference
-          rather than the vendor's template default. On llama.cpp it
-          sends chat_template_kwargs.enable_thinking:false and on LM Studio's
-          OpenAI-compatible port sends reasoning_effort:"none". Clio 0.3.8 ran
-          that configuration on both runtimes (llama.cpp build b226-2115b73d8 on
-          ROCm, LM Studio 2.29.0) through the v0.3.9 local-inference campaign on
-          2026-08-29 and 2026-08-30: an interactive build-and-resume session, a
-          three-worker fleet step, and a ten-task eval suite totalling 116 model
-          calls, none of which repeated a tool call into a loop. The catalog
-          therefore imposes no thinking floor for this family. A provisional 2026-09-03 LM Studio A/B on the heavily quantized
-          `qwen3.8-27b-gsq-rco` alias corroborated the switch: four thinking-off
-          scenarios reported zero reasoning tokens and no repeated-tool loop,
-          versus visible reasoning at the active level. The host had LM Link
-          enabled, so this records behavior only—not hardware throughput or a
-          controlled quality claim. If a future build or quantization regresses into the loop
-          JetBrains describe, the guards that catch it are Clio's own, not a
-          catalog setting: the tool-prose-loop detector
-          (src/interactive/tool-prose-loop.ts), which is armed on the
-          local-native tier, and the stalled-turn middleware
-          (src/domains/middleware/stalled-turn.ts).
-    recommendations:
-      sampling:
-        thinking:
-          temperature: 1
-          topP: 0.95
-          topK: 20
-          minP: 0
-          presencePenalty: 0
-          repetitionPenalty: 1
-        instruct:
-          temperature: 0.7
-          topP: 0.8
-          topK: 20
-          minP: 0
-          presencePenalty: 1.5
-          repetitionPenalty: 1
-      gpuTiers:
-        24gb-rocm: "24 GB ROCm class: IQ4_NL uses about 17.3 GB and UD-Q4_K_XL uses about 19.5 GB. Serve ctx=131072
-          with q8_0/q8_0 KV, parallel=2, and draft-mtp speculative decoding."
-        32gb-cuda: "32 GB CUDA class: Q6_K uses about 23.8 GB. Serve ctx=131072 with parallel=4 because the full
-          262144-token context is VRAM-bound."
-        128gb-unified-vulkan: "128 GB unified-memory Vulkan class: IQ4_NL uses about 17.3 GB and fits ctx=262144 with
-          parallel=4. Vulkan backends show much slower prefill than ROCm/CUDA on this family; prefer ROCm
-          where available."
-      runtimePreference:
-        llamaCpp: Primary verified path. OpenAI-compatible chat completions with --jinja, --reasoning on,
-          --reasoning-effort medium as server defaults; reasoning_content and tool_calls both confirmed to
-          parse correctly. A request can override to off with chat_template_kwargs.enable_thinking:false, or
-          to a different active level with reasoning_effort in {low, medium, xhigh} (never minimal/high/max on
-          the wire; the stock template raises a fatal jinja exception on those and Clio's landed capability
-          resolver already clamps to this set).
-        lmstudioOpenaiCompat: "Clio sends reasoning_effort over LM Studio's OpenAI-compatible HTTP port and omits
-          chat_template_kwargs because LM Studio does not use that field for this model. The upstream template
-          defaults to thinking on/xhigh; an LM Studio deployment may configure another default.
-          reasoning_effort:'none' explicitly disables it. Through LiteLLM, this control also requires
-          allowed_openai_params:['reasoning_effort']; Clio selects the LM Studio spelling only when every
-          deployment of that alias explicitly declares model_info.runtime: lm-studio."
-        lmstudioNative: Clio's LM Studio runtime uses the OpenAI-compatible HTTP chat adapter with native REST model
-          discovery and residency management.
-      llamaCpp:
-        ctxSize: 131072
-        cacheTypeK: q8_0
-        cacheTypeV: q8_0
-        flashAttn: true
-        nGpuLayers: 99
-        parallel: 2
-        parallelSlots: Start the server with --parallel 2 to serve the orchestrator and one worker at once. Clio then
-          discovers total_slots from /props and admits two concurrent requests against this endpoint; a server
-          started with --parallel 1 discovers one slot, and a dispatch during the orchestrator's own turn is
-          refused rather than queued.
-        batchSize: 1024
-        ubatchSize: 256
-        mmproj: true
-        reasoning: on
-        reasoningEffort: medium
-        specType: draft-mtp
-        specDraftNMax: 1
-      serving: "Qwen3.8-27B (unsloth/Qwen3.8-27B-GGUF), hybrid qwen3_5 architecture: 3 linear-attention (Gated
-        DeltaNet) layers per 1 full-attention layer, so only 16 of 64 layers hold a conventional KV cache.
-        Native ctx 262144, extensible to 1M via YaRN (out of scope for the hardware classes above; leave rope
-        at default). Tool calls use an XML <tool_call><function=...> form in the stock template; llama.cpp's
-        qwen3_coder parser converts this to standard tool_calls JSON, verified live on ROCm, CUDA, and Vulkan
-        backends. Only messages[0] may be a system message and only system/user/assistant/tool roles are
-        accepted; a second system message or a developer role raises a template error. The recurrent layers
-        set the prefix-cache economics: llama.cpp cannot roll gated-deltanet state back to an arbitrary token,
-        so a divergence anywhere inside a cached prefix re-prefills from the last context checkpoint rather
-        than from the changed byte. Checkpoints are written at the end of each processed prompt and only when
-        at least --checkpoint-min-step tokens separate them, so the server's checkpoint count and
-        --checkpoint-min-step are a quality variable on this family and not a tuning detail: measured on the
-        configuration recorded in measuredUnder, one changed line inside an earlier turn of a four-turn
-        conversation cost cache_n 9 and 17.9 s at the build defaults (32 checkpoints, min step 8192) and
-        cache_n 7570 and 10.9 s at 64 checkpoints and min step 1024. A single prefill writes one checkpoint at
-        its end, so a 16.7K-token prompt re-sent with one changed line re-prefills from zero (18.4 s) under
-        both settings, while changing only the final user message re-prefills the last ubatch (prompt_n 517,
-        1.4 s). Serving this family with --parallel greater than 1 divides --ctx-size across slots unless
-        --kv-unified is set."
-      outputTokens: 131072
-    provenance:
-      source: legacy-curated-catalog
-      measuredUnder:
-        hardware: AMD Radeon AI PRO R9700, gfx1201, 32 GB, ROCm 7.2.0
-        runtime: llamacpp
-        build: b226-2115b73d8
-        model: Qwen3.8-27B IQ4_NL, mmproj F16
-        llamaCpp: --ctx-size 262144 --parallel 1 --kv-unified --cache-type-k q8_0 --cache-type-v q8_0 --flash-attn
-          true --batch-size 2048 --ubatch-size 512 --spec-type draft-mtp --spec-draft-n-max 4
-          --n-gpu-layers-draft 99 --swa-checkpoints 64 --checkpoint-min-step 1024 --jinja --reasoning on
-          --reasoning-effort high --temperature 1.0 --top-k 20 --top-p 0.95 --min-p 0.0 --presence-penalty 0.0
-          --repeat-penalty 1.0
-        date: 2026-08-29
-        source: docs/release-notes/v0.3.9-local-economics.md
-        alsoMeasuredOn: LM Studio 2.29.0 (OpenAI-compatible HTTP port), host build string
-          llama.cpp-win-x86_64-nvidia-cuda12-avx2
-        note: |
-          The server above is deliberately not the 24gb-rocm tier below: it runs
-          ctx=262144 and parallel=1 where that tier recommends ctx=131072 and
-          parallel=2. The reasoning_effort vocabulary and the enable_thinking
-          control were established earlier, on 2026-08-18, from a llama.cpp host
-          and an LM Studio host whose build strings were not recorded; treat those
-          two findings as unknown-build.
-  - id: gemma-4-31b-it-nvfp4-turbo
-    match:
-      familyPrefixes:
-        - gemma-4-31b-it-nvfp4-turbo
-        - gemma-4-31b-it-nvfp4
-        - gemma-4-31b-it-turbo
-        - gemma-4-31b-it
-        - gemma-4-31b
-    claims:
-      modelMaxContext: 122880
-      capabilities:
-        chat: true
-        tools: true
-        toolCallFormat: openai
-        reasoning: true
-        thinkingFormat: qwen-chat-template
-        structuredOutputs: json-schema
-        vision: true
-        audio: false
-        embeddings: false
-        rerank: false
-        fim: false
-    behavior:
-      thinking:
-        mechanism: on-off
-        guidance: |
-          Gemma 4 chat template exposes thinking only as on or off; intermediate
-          levels coerce to on. NVFP4 quantization can corrupt JSON tool-call
-          output under aggressive sampling, so the instruct profile pins
-          temperature at 0.7. Clio classifies inline channel markers on LM Studio's
-          OpenAI-compatible stream when the server leaves them in content.
-    recommendations:
-      sampling:
-        thinking:
-          temperature: 1
-          topP: 0.95
-          topK: 64
-          minP: 0
-          presencePenalty: 0
-          repetitionPenalty: 1
-        instruct:
-          temperature: 0.7
-          topP: 0.95
-          topK: 64
-          minP: 0
-      chatTemplate: gemma-channel
-      leakageNote: |
-        LM Studio's gemma4 chat template emits chain-of-thought as plain text
-        bracketed by literal '<|channel>thought\n' and '<channel|>' markers
-        rather than structured reasoning fragments. Clio splits those regions into
-        thinking content on the OpenAI-compatible stream, including LM Studio,
-        and removes the channel markers from the visible answer.
-      gpuTiers:
-        48gb: Fits at f16 KV when parallel=1 and ctx=122880; drop to q8_0 KV at parallel=4.
-        80gb: Comfortable at f16 KV with parallel=1 and ctx=122880.
-      runtimePreference:
-        lmstudio: Pin parallel=1 in the LM Studio per-model preset to give a single agent the full 122880 context.
-        openaiCompat: LM Studio chat uses this surface; Clio separates inline thought regions and removes their
-          channel markers.
-      serving: LilaRest publishes no per-model sampler; values inherit the gemma family default per the official
-        Google Gemma 4 31B card. KV cache budget at f16, ctx=122880 is roughly 57 GB on top of ~21 GB of NVFP4
-        weights.
-      outputTokens: 32768
-    provenance:
-      source: legacy-curated-catalog
-      measuredUnder:
-        hardware: unknown
-        runtime: lmstudio and its OpenAI-compatible port
-        build: unknown
-        llamaCpp: unknown; this family carries no llamaCpp block, and the channel-marker leakage was observed through
-          LM Studio's stream
-        date: unknown
-        source: unknown
-        note: |
-          Two claims here are observations rather than card values: the
-          channel-marker leakage in leakageNote, and the instruct temperature
-          pinned at 0.7 because NVFP4 quantization corrupts tool-call JSON under
-          the card's 1.0. Neither records the host, the LM Studio version, or the
-          exact NVFP4 build it was seen on. The KV-budget arithmetic in the
-          gpuTiers and the serving note is derived from the official Google
-          Gemma 4 31B card.
-  - id: gemma-4-31b-it-qat-mtp
-    match:
-      familyPrefixes:
-        - gemma-4-31b-it-qat-ud-q4_k_xl-mtp-262k
-        - gemma-4-31b-it-qat-ud-q4_k_xl-mtp
-        - gemma-4-31b-it-qat-ud
-        - gemma-4-31b-it-qat
-        - gemma4-31b-dense
-    claims:
-      modelMaxContext: 262144
-      capabilities:
-        chat: true
-        tools: true
-        toolCallFormat: openai
-        reasoning: true
-        thinkingFormat: qwen-chat-template
-        structuredOutputs: json-schema
-        vision: true
-        audio: false
-        embeddings: false
-        rerank: false
-        fim: false
-    behavior:
-      thinking:
-        mechanism: on-off
-        guidance: |
-          Gemma 4 31B IT QAT exposes thinking only as on or off via the gemma-4
-          enable_thinking template; intermediate levels coerce to on. A local
-          llama.cpp profile serves it with --reasoning off (default_reasoning off),
-          so the chain-of-thought is not requested; if the template emits one it
-          surfaces via reasoning_content and is accounted as reasoning tokens. The
-          QAT weights hold tool-call JSON together better than the NVFP4 turbo
-          build, but the instruct profile still pins a conservative temperature.
-    recommendations:
-      sampling:
-        thinking:
-          temperature: 1
-          topP: 0.95
-          topK: 64
-          minP: 0
-          presencePenalty: 0
-          repetitionPenalty: 1
-        instruct:
-          temperature: 0.7
-          topP: 0.95
-          topK: 64
-          minP: 0
-          repeatPenalty: 1.05
-      chatTemplate: gemma-channel
-      gpuTiers:
-        32gb: 32 GB Vulkan llama.cpp profile with UD-Q4_K_XL weights, ctx=262144, q8 KV, flash attention, parallel=1,
-          F16 gemma4v mmproj (vision), and MTP draft (spec-type draft-mtp, n_max 4) both active.
-      runtimePreference:
-        llamaCpp: OpenAI-compatible chat completions with --jinja and --reasoning off. Recommended local profile
-          serves at ctx=262144, q8 KV, flash attention, parallel=1, batch=1024, ubatch=256, with F16 mmproj
-          vision and draft-mtp speculative decoding; sampler temperature 0.8, top_p 0.95, top_k 64,
-          repeat_penalty 1.05.
-        openaiCompat: Fallback when a gateway fronts the same llama.cpp chat-completions surface; Clio separates
-          inline thought regions with the shared channel-marker filter.
-      llamaCpp:
-        ctxSize: 262144
-        cacheTypeK: q8_0
-        cacheTypeV: q8_0
-        flashAttn: true
-        nGpuLayers: 99
-        parallel: 1
-        parallelSlots: Start the server with --parallel 1 so one agent gets the whole 262144-token context. Clio
-          discovers total_slots 1 and admits one request at a time on this endpoint, so a dispatch raised
-          during the orchestrator's turn is refused rather than queued.
-        batchSize: 1024
-        ubatchSize: 256
-        mmproj: true
-      serving: Gemma 4 31B IT QAT, UD-Q4_K_XL, served as a local llama.cpp router model (vulkan) with MTP
-        speculative decoding (spec-type draft-mtp, n_max 4, draft mtp-gemma-4-31B-it) and F16 gemma4v mmproj
-        vision both active at 262k. Reasoning off by default; gemma-4 thinking is on/off. Sampler temperature
-        0.8, top_p 0.95, top_k 64, repeat_penalty 1.05.
-      outputTokens: 32768
-    provenance:
-      source: legacy-curated-catalog
-      measuredUnder:
-        hardware: mini fleet node, AMD Radeon AI PRO R9700 32 GB, ROCm backend, 1 request slot
-        runtime: llamacpp
-        build: worker llama-server from ~/src/llama.cpp-b10687/build-rocm/bin, behind a router reporting
-          build_info b1-c841aee
-        model: Gemma-4-31B-it-qat UD-Q4_K_XL with mtp-gemma-4-31B-it draft and mmproj-F16 (arch gemma4)
-        llamaCpp: --ctx-size 139264 --parallel 1 --kv-unified --cache-type-k f16 --cache-type-v f16 --batch-size 1024
-          --ubatch-size 256 --flash-attn true --fit off --n-gpu-layers 99 --spec-type draft-mtp
-          --spec-draft-n-max 4 --n-gpu-layers-draft 99 --jinja --reasoning off --temperature 0.8 --top-k 64
-          --top-p 0.95 --repeat-penalty 1.05
-        date: 2026-09-02
-        source: "issue #263 thinking sweep: one non-streaming POST /v1/chat/completions per variant on a one-line
-          arithmetic prompt, max_tokens 4096"
-        note: |
-          The on-off mechanism this entry already claimed is now measured on
-          llama.cpp rather than inherited from the gemma-4 template. With no
-          thinking field, and with chat_template_kwargs.enable_thinking false, the
-          model answered in 3 completion tokens with no reasoning_content; with it
-          true the same prompt spent 68 tokens, 128 characters of them reasoning.
-          reasoning_effort is inert: none, low, and high all stayed at 3 tokens
-          with no trace, so this family is on-off and not effort-levels on this
-          runtime. The router serves it with --reasoning off, which is why the
-          no-field baseline is silent.
-
-          The measuring server is not the 32gb profile recommended below. It ran
-          ROCm at ctx-size 139264 with f16 KV, batch 1024 and ubatch 256, where the
-          block below recommends Vulkan at 262144 with q8_0 KV. The serving note
-          and gpuTiers keep the 262k recommendation; treat the argv above as the
-          configuration the token counts came from.
-  - id: gemopus-4-31b-it
-    match:
-      familyPrefixes:
-        - gemopus-4-31b-it
-        - gemopus-4-31b
-        - gemopus-4
-    claims:
-      modelMaxContext: 122880
-      capabilities:
-        chat: true
-        tools: true
-        toolCallFormat: openai
-        reasoning: true
-        thinkingFormat: qwen-chat-template
-        structuredOutputs: json-schema
-        vision: false
-        audio: false
-        embeddings: false
-        rerank: false
-        fim: false
-    behavior:
-      thinking:
-        mechanism: always-on
-        guidance: |
-          Distilled traces emit unconditionally. The thinking level setting is
-          ignored at the API surface; chain-of-thought arrives whether or not
-          Clio asks for it. The shared channel-marker filter splits inline thought
-          regions into thinking content on the OpenAI-compatible LM Studio path
-          and removes the markers from the visible answer.
-    recommendations:
-      sampling:
-        thinking:
-          temperature: 1
-          topP: 0.95
-          topK: 64
-          minP: 0
-          presencePenalty: 0
-          repetitionPenalty: 1
-        instruct:
-          temperature: 0.7
-          topP: 0.95
-          topK: 64
-          minP: 0
-      chatTemplate: gemma-channel
-      thinkingControl: |
-        Jackrong's distilled gemma-4 31B uses the same channel-marker template.
-        Thinking mode is gated by the literal '<|think|>' token in the system
-        prompt; Clio does not currently inject it, so the model emits an empty
-        thought region followed by the answer.
-      gpuTiers:
-        48gb: Fits at f16 KV with parallel=1; q8_0 KV recommended at parallel=4.
-        80gb: Comfortable at f16 KV with parallel=1 and ctx=122880.
-      runtimePreference:
-        lmstudio: LM Studio may stream inline channel markers; Clio separates the thought region and removes the
-          markers from the answer.
-        openaiCompat: Fallback; reasoning_content is absent from the openai-compat reasoning probe for this family.
-      serving: Distilled from Claude 4.6 Opus reasoning traces onto Google Gemma 4 31B; sampler matches the gemopus
-        card values.
-      outputTokens: 32768
-    provenance:
-      source: legacy-curated-catalog
-      measuredUnder:
-        hardware: unknown
-        runtime: lmstudio and its OpenAI-compatible port
-        build: unknown
-        llamaCpp: unknown; this family carries no llamaCpp block
-        date: unknown
-        source: unknown
-        note: |
-          The measured claims are the empty thought region the model emits when
-          the '<|think|>' token is absent from the system prompt, and the absence
-          of reasoning_content from the openai-compat reasoning probe. Both
-          entered the catalog with the initial local-model set, with no host, LM
-          Studio version, or quantization recorded.
-  - id: qwopus3.6-27b-v1-preview
-    match:
-      familyPrefixes:
-        - qwopus3.6-27b-v1-preview
-        - qwopus3.6-27b
-    claims:
-      modelMaxContext: 262144
-      capabilities:
-        chat: true
-        tools: true
-        toolCallFormat: qwen
-        reasoning: true
-        thinkingFormat: qwen-chat-template
-        structuredOutputs: json-schema
-        vision: false
-        audio: false
-        embeddings: false
-        rerank: false
-        fim: false
-    behavior:
-      thinking:
-        mechanism: budget-tokens
-        budgetByLevel:
-          low: 1024
-          medium: 4096
-          high: 16384
-        guidance: |
-          Distilled Opus reasoning traces over Qwen3.6 27B; thinking emits via
-          standard <think> tags. Coding-task sampler is the precise variant.
-          Preserve thinking blocks across turns for iterative workflows.
-    recommendations:
-      sampling:
-        thinking:
-          temperature: 0.6
-          topP: 0.95
-          topK: 20
-          minP: 0
-          presencePenalty: 0
-          repetitionPenalty: 1
-        instruct:
-          temperature: 0.7
-          topP: 0.8
-          topK: 20
-          minP: 0
-          presencePenalty: 1.5
-          repetitionPenalty: 1
-      gpuTiers:
-        32gb: Fits at f16 KV with parallel=1 and ctx=262144 thanks to the Q4_K_M weights (~16.5 GB).
-      runtimePreference:
-        lmstudio: Primary LM Studio path; thinking is read from the OpenAI-compatible reasoning stream.
-        openaiCompat: Verified for tool-call extraction parity; reasoning_content surfaces.
-      serving: "Distilled from Claude 4.6 Opus reasoning traces onto Qwen3.6 27B. Coding-task sampler is the precise
-        variant: temperature 0.6, top_p 0.95, top_k 20."
-      outputTokens: 32768
-    provenance:
-      source: legacy-curated-catalog
-      measuredUnder:
-        hardware: unknown
-        runtime: lmstudio and its OpenAI-compatible port
-        build: unknown
-        llamaCpp: unknown; this family carries no llamaCpp block
-        date: unknown
-        source: unknown
-        note: |
-          The measured claim is the openaiCompat tool-call extraction parity and
-          the reasoning_content field surfacing. It entered the catalog with the
-          initial local-model set and records no host, LM Studio version, or
-          quantization. The sampler comes from the model card.
-  - id: qwopus3.6-35b-a3b-coder
-    match:
-      familyPrefixes:
-        - qwopus3.6-35b-a3b-coder-mtp-q4_k_m-262k
-        - qwopus3.6-35b-a3b-coder-mtp
-        - qwopus3.6-35b-a3b-coder
-        - qwopus3.6-35b-a3b
-        - qwopus3.6-35b-moe
-    claims:
-      modelMaxContext: 262144
-      capabilities:
-        chat: true
-        tools: true
-        toolCallFormat: qwen
-        reasoning: true
-        thinkingFormat: qwen-chat-template
-        structuredOutputs: json-schema
-        vision: true
-        audio: false
-        embeddings: false
-        rerank: false
-        fim: false
-    behavior:
-      thinking:
-        mechanism: on-off
-        guidance: |
-          One switch, two spellings: chat_template_kwargs.enable_thinking on
-          llama.cpp, reasoning_effort ("none" off, "low" on) on LM Studio, each
-          inert on the other host. Intermediate levels coerce to on, and off has
-          to be carried on the wire because the checkpoint reasons unless told
-          not to, whatever its card says about thinking-off execution.
-    recommendations:
-      sampling:
-        thinking:
-          temperature: 0.6
-          topP: 0.95
-          topK: 20
-          minP: 0
-          presencePenalty: 0
-          repetitionPenalty: 1
-        instruct:
-          temperature: 0.7
-          topP: 0.8
-          topK: 20
-          minP: 0
-          presencePenalty: 1.5
-          repetitionPenalty: 1
-      gpuTiers:
-        32gb: "Default 32 GB local profile: Q4_K_M, ctx=262144, q8 KV, flash attention, parallel=1, with F32 mmproj
-          (vision) and draft-mtp speculative decoding both active. Leaves several GiB free at 262k on a 32 GiB
-          class card."
-      runtimePreference:
-        llamaCpp: OpenAI-compatible chat completions with --jinja. Recommended local profile serves text-only with
-          reasoning off and enable_thinking false. Clio sends Qwen3.6's per-mode sampler on every request.
-        openaiCompat: Use when a gateway fronts the same llama.cpp chat-completions surface with qwen tool parsing.
-      llamaCpp:
-        ctxSize: 262144
-        cacheTypeK: q8_0
-        cacheTypeV: q8_0
-        flashAttn: true
-        nGpuLayers: 99
-        parallel: 1
-        parallelSlots: Start the server with --parallel 1 so one agent gets the whole 262144-token context. Clio
-          discovers total_slots 1 and admits one request at a time on this endpoint. This family is often the
-          workers.default model on a router that also serves the orchestrator, and a one-slot router refuses
-          the worker batch rather than queueing it; a second server or an explicit maxConcurrentRequests on
-          the target is the remedy.
-        batchSize: 2048
-        ubatchSize: 512
-        mmproj: true
         chatTemplateKwargs:
-          enable_thinking: false
-      serving: Jackrong Qwopus3.6 35B-A3B Coder MTP, Q4_K_M. Thinking-off coder/agent tuned for tool-use loops.
-        Served as a local router default with MTP speculative decoding (spec-type draft-mtp, n_max 2) and F32
-        mmproj vision both active at 262k.
-      outputTokens: 32768
-    provenance:
-      source: legacy-curated-catalog
-      measuredUnder:
-        hardware: mini fleet node, AMD Radeon AI PRO R9700 32 GB, Vulkan backend, 4 request slots, for the 2026-09-02
-          run; unknown for both earlier dates
-        runtime: llamacpp for the 2026-09-02 on-off measurement; lmstudio and its OpenAI-compatible port for the
-          2026-08-08 reasoning findings; an unrecorded llama.cpp host for the presence-penalty finding
-        build: worker llama-server from ~/src/llama.cpp-b10687/build-vulkan/bin behind a router reporting
-          build_info b1-c841aee, for the 2026-09-02 run. Unknown for both earlier dates; the Windows LM Studio
-          measurement host's bundled build string was first recorded on 2026-08-29 as
-          llama.cpp-win-x86_64-nvidia-cuda12-avx2, which is three weeks after the reasoning measurement and
-          cannot be backdated to it
-        model: Qwopus3.6-35B-A3B-Coder-MTP Q4_K_M (arch qwen35moe)
-        llamaCpp: "2026-09-02 only: --ctx-size 786432 --parallel 4 --no-kv-unified --cache-type-k q8_0 --cache-type-v
-          q8_0 --batch-size 16384 --ubatch-size 2048 --flash-attn true --fit off --n-gpu-layers 99 --jinja
-          --reasoning off --chat-template-kwargs {\"enable_thinking\": false} --temperature 0.6 --top-k 20
-          --top-p 0.95 --min-p 0.0 --presence-penalty 0.0 --repeat-last-n 256 --repeat-penalty 1.0. Unknown
-          for both earlier dates; the reasoning measurement went through LM Studio's HTTP port, which does not
-          expose the underlying server argv, and no argv survives for the dispatch that produced the
-          presence-penalty value"
-        date: 2026-09-02 (llama.cpp on-off switch), 2026-08-08 (reasoning_effort and enable_thinking on LM Studio),
-          2026-07-06 (presence penalty)
-        source: "issue #263 thinking sweep for the llama.cpp date; commits b3db3b82 and f7d76bf4 for the two earlier
-          ones"
-        note: |
-          Measured 2026-09-02 on llama.cpp: with no thinking field, and with
-          chat_template_kwargs.enable_thinking false, the model answered a
-          one-line arithmetic prompt in 3 completion tokens with no
-          reasoning_content; with enable_thinking true the same prompt spent 130
-          tokens, 338 characters of them reasoning. reasoning_effort none, low and
-          high all left it at 3 tokens with no trace. The silent baseline is the
-          router's doing rather than the checkpoint's: the preset launches this
-          model with --reasoning off and chat_template_kwargs enable_thinking
-          false, which is the opposite default from the LM Studio host below.
-
-          Three numbers from the earlier dates are also measurements. On
-          2026-08-08 on that LM Studio host this model spent 98 of 103 completion
-          tokens reasoning on "what is 17+25" with no thinking field set;
-          chat_template_kwargs enable_thinking was inert, re-checked with unique
-          prompts to rule out prompt-cache hits; and reasoning_effort "none" took
-          the same prompt to 0. The same session recorded a wiki planning dispatch
-          over a 1007-file repository going from 89,501 reasoning tokens, 47 tool
-          calls and exit 1 at 459 s to 0 reasoning tokens, 8 tool calls and exit 0
-          at 218 s. On 2026-07-06 a live dispatch measured presence_penalty 1.5:
-          without it a coder worker repeated one code_nav call into the loop-guard
-          abort on 3 of 3 runs, and with it the same task passed 3 of 3. Neither
-          commit records the hardware or the server configuration, so both stay
-          unknown.
-
-          The 2026-09-02 server also differs from the profile recommended below.
-          It ran ctx-size 786432 with --parallel 4 and --no-kv-unified, giving each
-          slot 196608 tokens, and served text-only with no mmproj and no MTP draft
-          where the block below recommends 262144 at parallel 1 with both active.
-          The vision capability stays the checkpoint's; that run simply did not
-          load the projector. That has a consequence for any projector-less
-          deployment, because the model Clio builds takes vision from this entry
-          and from a target-level override only: synthLocalModel merges the
-          runtime defaults, this entry and target.capabilities and passes no probe
-          layer, then sets input to ["text","image"] whenever vision is true. Once
-          this id resolves here rather than to the 27B preview it did before issue
-          #263, mini's text-only preset would be offered image input it rejects,
-          so a target serving this checkpoint without --mmproj needs
-          capabilities.vision false on the target entry.
-
-          Why on-off replaced the four-level effort map, and what it costs. The
-          map gave LM Studio a low/medium/high granularity nothing had measured,
-          and gave llama.cpp an active level that put reasoning_effort on the wire
-          and nothing else, which this template does not read. on-off is what both
-          measurements support. The cost is that resolveRequestCapability adds the
-          reasoning_effort spelling for an on-off family only when runtimeId is
-          literally `lmstudio` (REASONING_EFFORT_ONLY_RUNTIMES), while an
-          effort-levels family emitted it on every runtime. An LM Studio server
-          reached through a generic openai-compat, litellm or vllm target
-          therefore now receives only the template flag, which that host ignores,
-          and the model reasons at every level. Point such a target at the
-          `lmstudio` runtime, which is what the 2026-08-08 finding above was taken
-          on and what carries the spelling that reaches it.
-  - id: qwopus3.6-27b-coder
-    match:
-      familyPrefixes:
-        - qwopus3.6-27b-coder-mtp-q5_k_m-262k
-        - qwopus3.6-27b-coder-mtp
-        - qwopus3.6-27b-coder
-    claims:
-      modelMaxContext: 262144
-      capabilities:
-        chat: true
-        tools: true
-        toolCallFormat: qwen
-        reasoning: false
-        thinkingFormat: qwen-chat-template
-        structuredOutputs: json-schema
-        vision: false
-        audio: false
-        embeddings: false
-        rerank: false
-        fim: false
-    behavior:
-      thinking:
-        mechanism: none
-        guidance: |
-          Qwopus3.6 27B Coder-MTP is the dense thinking-off coder variant; the
-          dial clamps to off at every level.
+          byLevel:
+            key: reasoning_effort
+            values:
+              low: low
+              medium: medium
+              xhigh: xhigh
+            lmstudio: unsupported
+        guidance: The upstream template defaults to thinking on and accepts exactly low, medium and xhigh. High and
+          max resolve to xhigh; off uses enable_thinking:false. preserve_thinking defaults to true. Tools use
+          <tool_call><function=...><parameter=...> XML and <tool_response> replies.
     recommendations:
       sampling:
         thinking:
-          temperature: 0.6
+          temperature: 1
           topP: 0.95
           topK: 20
           minP: 0
           presencePenalty: 0
-          repetitionPenalty: 1
+          repeatPenalty: 1
         instruct:
           temperature: 0.7
           topP: 0.8
           topK: 20
           minP: 0
           presencePenalty: 1.5
-          repetitionPenalty: 1
+          repeatPenalty: 1
+      outputTokens: 131072
       runtimePreference:
-        llamaCpp: A local llama.cpp router serves it with --jinja and enable_thinking false. Clio sends Qwen3.6's
-          per-mode sampler on every request.
-        lmstudio: Dense 27B Coder-MTP; configure MTP in LM Studio's per-model load settings.
-      serving: Jackrong Qwopus3.6 27B Coder MTP, Q5_K_M. Thinking-off dense coder for tool-use loops.
-      outputTokens: 32768
+        llamaCpp: Use the checkpoint chat template with --jinja and the OpenAI-compatible chat-completions endpoint.
+          Send template controls through chat_template_kwargs. Choose the loaded context for available memory;
+          the model maximum does not size the server.
     provenance:
-      source: legacy-curated-catalog
-      measuredUnder:
-        hardware: unknown
-        runtime: unknown
-        build: unknown
-        llamaCpp: unknown
-        date: unknown
-        source: commit b3db3b82, which states the exclusion directly
-        note: |
-          Nothing in this entry was measured on this model. The reasoning:false
-          pin and the presence penalty are both carried over from the 35B-A3B
-          Coder-MTP design; the commit that reclassified the 35B on live evidence
-          says in as many words that the 27B and 9B Coder variants keep their
-          "never" pin because nothing has measured them. Read the reasoning class
-          as an untested inheritance until someone runs this model.
-  - id: qwopus3.5-9b-coder
-    match:
-      familyPrefixes:
-        - qwopus3.5-9b-coder-q8_0-262k
-        - qwopus3.5-9b-coder
-    claims:
-      modelMaxContext: 262144
-      capabilities:
-        chat: true
-        tools: true
-        toolCallFormat: qwen
-        reasoning: false
-        thinkingFormat: qwen-chat-template
-        structuredOutputs: json-schema
-        vision: false
-        audio: false
-        embeddings: false
-        rerank: false
-        fim: false
-    behavior:
-      thinking:
-        mechanism: none
-        guidance: |
-          Qwopus3.5 9B Coder is the small thinking-off coder; the dial clamps
-          to off at every level.
-    recommendations:
-      sampling:
-        instruct:
-          temperature: 0.2
-          topP: 0.9
-          topK: 20
-          repeatPenalty: 1.05
-      runtimePreference:
-        llamaCpp: A local llama.cpp router serves it with --jinja and enable_thinking false; coder sampler temperature
-          0.2, top_p 0.9, top_k 20.
-      serving: Jackrong Qwopus3.5 9B Coder, Q8_0. Thinking-off small coder for fast tool loops.
-      outputTokens: 32768
-    provenance:
-      source: legacy-curated-catalog
-      measuredUnder:
-        hardware: unknown
-        runtime: unknown
-        build: unknown
-        llamaCpp: unknown
-        date: unknown
-        source: commit b3db3b82, which states the exclusion directly
-        note: |
-          Nothing in this entry was measured on this model. The reasoning:false
-          pin is carried over from the Coder-MTP design; the commit that
-          reclassified the 35B-A3B on live evidence says in as many words that
-          the 27B and 9B Coder variants keep their "never" pin because nothing
-          has measured them.
+      source: upstream-model-card
+      url: https://huggingface.co/Qwen/Qwen3.8-27B
+      retrieved: 2026-10-03
+      config: https://huggingface.co/Qwen/Qwen3.8-27B/blob/main/config.json
+      generationConfig: https://huggingface.co/Qwen/Qwen3.8-27B/blob/main/generation_config.json
+      chatTemplate: https://huggingface.co/Qwen/Qwen3.8-27B/blob/main/chat_template.jinja
+      notes: Sampling follows the card thinking and instruct profiles. Native context is 262144; the advertised
+        1000000 requires RoPE scaling. outputTokens is a suggested shared completion budget using the card
+        final-response allowance, clamped to the loaded window and server cap; it is not a model output
+        maximum.
+      runtimeSources:
+        - https://github.com/ggml-org/llama.cpp/blob/master/tools/server/README.md
+        - https://docs.litellm.ai/docs/providers/openai_compatible
   - id: gemma4-26b-a4b
     match:
+      exactIds:
+        - google/gemma-4-26B-A4B-it
       familyPrefixes:
-        - gemma-4-26b-a4b
-        - gemma4-26b-a4b
         - gemma-4-26b-a4b-it
         - gemma4-26b-a4b-it
-        - gemma-4-26b-a4b-it-q4
-        - gemma-4-26b-a4b-it-q4_k_m
-        - gemma4-26b-moe
     claims:
       modelMaxContext: 262144
       capabilities:
@@ -1502,8 +137,6 @@ models:
         tools: true
         toolCallFormat: openai
         reasoning: true
-        thinkingFormat: qwen-chat-template
-        structuredOutputs: json-schema
         vision: true
         audio: false
         embeddings: false
@@ -1512,84 +145,44 @@ models:
     behavior:
       thinking:
         mechanism: on-off
-        guidance: |
-          Gemma 4 chat template exposes thinking only as on or off via
-          enable_thinking. Intermediate levels coerce to on. The MoE A4B variant
-          keeps the same template behavior as the dense gemma-4 family.
+        guidance: The instruction-tuned upstream template defaults enable_thinking to false. Set it true to emit
+          <|channel>thought blocks; intermediate effort levels resolve to on. Native tool calls use
+          <|tool_call>call:name{...}<tool_call|>, converted by the runtime to OpenAI tool_calls.
     recommendations:
       sampling:
         thinking:
-          temperature: 0.3
-          topP: 0.9
-          topK: 20
-        instruct:
-          temperature: 0.7
+          temperature: 1
           topP: 0.95
           topK: 64
-          minP: 0
-      gpuTiers:
-        32gb: Main-agent candidate for 32 GB and larger local systems when Gemma behavior is preferred.
+        instruct:
+          temperature: 1
+          topP: 0.95
+          topK: 64
       runtimePreference:
-        lmstudio: Use for already-loaded LM Studio sessions and multimodal checks.
-        openaiCompat: LM Studio chat uses this OpenAI-compatible surface.
-        llamaCpp: OpenAI-compatible chat completions with --jinja, --reasoning on, and the matching mmproj.
-      llamaCpp:
-        ctxSize: 262144
-        cacheTypeK: q8_0
-        cacheTypeV: q8_0
-        flashAttn: true
-        nGpuLayers: 99
-        mmproj: true
-      thinkingControl: Gemma 4 exposes thinking through chat template enable_thinking support.
-      outputTokens: 65536
+        llamaCpp: Use the checkpoint chat template with --jinja and the OpenAI-compatible chat-completions endpoint.
+          Send template controls through chat_template_kwargs. Choose the loaded context for available memory;
+          the model maximum does not size the server. Image input also requires the matching multimodal
+          projector (--mmproj).
     provenance:
-      source: legacy-curated-catalog
-      measuredUnder:
-        hardware: mini fleet node, AMD Radeon AI PRO R9700 32 GB, Vulkan backend, 1 request slot
-        runtime: llamacpp
-        build: worker llama-server from ~/src/llama.cpp-b10687/build-vulkan/bin, behind a router
-          reporting build_info b1-c841aee
-        model: Gemma-4-26B-A4B-it-qat UD-Q4_K_XL with mmproj-F16, no draft model (arch gemma4)
-        llamaCpp: --ctx-size 262144 --parallel 1 --kv-unified --cache-type-k f16 --cache-type-v f16 --batch-size 16384
-          --ubatch-size 2048 --flash-attn true --n-gpu-layers 99 --jinja --reasoning off --temperature 0.8
-          --top-k 64 --top-p 0.95 --repeat-penalty 1.05
-        date: 2026-09-02
-        source: "issue #263 thinking sweep: one non-streaming POST /v1/chat/completions per variant on a one-line
-          arithmetic prompt, max_tokens 4096"
-        note: |
-          The on-off mechanism this entry already claimed is now measured on
-          llama.cpp rather than inherited from the gemma-4 template. With no
-          thinking field, and with chat_template_kwargs.enable_thinking false, the
-          model answered in 3 completion tokens with no reasoning_content; with it
-          true the same prompt spent 99 tokens, 227 characters of them reasoning.
-          reasoning_effort is inert: none, low, and high all stayed at 3 tokens
-          with no trace, so this family is on-off and not effort-levels on this
-          runtime. The router serves it with --reasoning off, which is why the
-          no-field baseline is silent.
-
-          Three serving facts differ from the recommended profile below. The
-          measuring server ran f16 KV where the block below recommends q8_0, and
-          it ran at batch 16384 and ubatch 2048. It also ran without speculative
-          decoding: the preset's --tags string advertises
-          spec:mtp,spec_draft_n:4,draft:mtp-gemma-4-26B-A4B-it, but the argv
-          carries no --model-draft, --spec-type or --spec-draft-n-max, so the
-          token counts above come from a plain decode. The 31B qat sibling above
-          does pass those flags, which is where the tags were copied from.
-
-          Separately, the round-5 cache sweep on this same date measured the
-          Gemma 4 tokenizer rendering Clio's full-capability first prompt at 7,353
-          tokens against roughly 8.4k for the Qwen tokenizer on the identical
-          prompt, so this family buys about a thousand tokens of headroom per turn
-          over the Qwen-tokenized families.
-  - id: nemotron-cascade-2-30b-a3b
+      source: upstream-model-card
+      url: https://huggingface.co/google/gemma-4-26B-A4B-it
+      retrieved: 2026-10-03
+      config: https://huggingface.co/google/gemma-4-26B-A4B-it/blob/main/config.json
+      generationConfig: https://huggingface.co/google/gemma-4-26B-A4B-it/blob/main/generation_config.json
+      chatTemplate: https://huggingface.co/google/gemma-4-26B-A4B-it/blob/main/chat_template.jinja
+      notes: Use the instruction-tuned checkpoint, not the pretrained variant. Sampling follows
+        generation_config.json and the card Best Practices, which publish one sampler for both modes. The 26B
+        A4B model supports images and text, not audio.
+      runtimeSources:
+        - https://github.com/ggml-org/llama.cpp/blob/master/tools/server/README.md
+        - https://docs.litellm.ai/docs/providers/openai_compatible
+  - id: nemotron-3.5-lightning-30b-a3b
     match:
+      exactIds:
+        - nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-BF16
       familyPrefixes:
-        - nemotron-cascade-2
-        - nemotron-cascade-2-30b-a3b
-        - nemotron-cascade-2-30b-a3b-i1
-        - nemotron-cascade-2-30b-a3b-i1-q4_k_m
-        - nemotron-cascade2
-        - nemotron-cascade-2-30b
+        - nvidia-nemotron-3.5-lightning-30b-a3b
+        - nemotron-3.5-lightning-30b-a3b
     claims:
       modelMaxContext: 1048576
       capabilities:
@@ -1598,7 +191,6 @@ models:
         toolCallFormat: qwen
         reasoning: true
         thinkingFormat: qwen-chat-template
-        structuredOutputs: json-schema
         vision: false
         audio: false
         embeddings: false
@@ -1607,458 +199,47 @@ models:
     behavior:
       thinking:
         mechanism: on-off
-        guidance: |
-          Nemotron Cascade 2 chat template exposes thinking through
-          chat_template_kwargs.enable_thinking. Intermediate levels coerce to on.
-          The recommended llama.cpp profile disables thinking in the template kwargs by
-          default; flip via the runtime override when reasoning is needed.
-    recommendations:
-      sampling:
-        instruct:
-          temperature: 0.3
-          topP: 0.9
-          topK: 20
-      gpuTiers:
-        32gb: Preferred local worker model when a text-only worker is enough.
-      runtimePreference:
-        lmstudio: Use when LM Studio's OpenAI-compatible tool extraction is verified for the loaded template.
-        openaiCompat: Use for a generic gateway that fronts the same OpenAI-compatible chat surface.
-        anthropicCompat: Do not select for the current llama.cpp target profile; /v1/messages returned 404 while
-          /v1/models and OpenAI-compatible chat worked.
-        llamaCpp: OpenAI-compatible chat completions with --jinja. Recommended local profile disables thinking in
-          chat_template_kwargs.
-      llamaCpp:
-        ctxSize: 1048576
-        cacheTypeK: q8_0
-        cacheTypeV: q8_0
-        flashAttn: true
-        nGpuLayers: 99
-        parallel: 4
-        parallelSlots: Start the server with --parallel 4, and add --kv-unified unless each of the four slots is meant
-          to get 262144 tokens rather than the whole 1048576. Clio admits four concurrent requests on this
-          endpoint once /props reports total_slots 4.
+        guidance: The upstream template defaults enable_thinking to true and supports true/false per request.
+          Intermediate effort levels resolve to on. There is no documented numeric reasoning budget. Tool use
+          follows the Qwen coder XML template and requires the runtime tool parser. The card recommends
+          force_nonempty_content:true for coding agents; it requires a runtime that forwards template kwargs.
         chatTemplateKwargs:
-          enable_thinking: false
-      serving: NVIDIA card recommends vLLM with nemotron_v3 reasoning and qwen3_coder tool parsing.
-      outputTokens: 65536
-    provenance:
-      source: legacy-curated-catalog
-      measuredUnder:
-        hardware: unknown
-        runtime: llamacpp; the anthropicCompat probe ran against a llama.cpp target's /v1/messages and /v1/models
-        build: unknown
-        llamaCpp: unknown; the recommended profile below was not recorded as the profile the probe ran under
-        date: unknown
-        source: unknown
-        note: |
-          The measured claim is the anthropicCompat line: /v1/messages returned
-          404 on the llama.cpp target profile in use while /v1/models and the
-          OpenAI-compatible chat surface both worked. That is a fact about one
-          server's mounted routes, so it is exactly the kind of finding a
-          different build or launch configuration can invalidate, and no build or
-          argv was recorded with it. Everything else in this entry comes from the
-          NVIDIA card.
-  - id: qwen3.5-35b-a3b-claude-4.6-opus-reasoning-distilled
-    match:
-      familyPrefixes:
-        - qwen3.5-35b-a3b-claude-4.6-opus-reasoning-distilled
-        - qwen3.5-35b-a3b-claude-4.6-opus-reasoning-distilled-i1
-        - qwen3.5-35b-a3b-claude-4.6-opus-reasoning-distilled-i1-q4_k_m
-        - qwen35-distilled
-        - qwen35-distilled-i1
-        - qwen35-distilled-i1-q4_k_m
-    claims:
-      modelMaxContext: 262144
-      capabilities:
-        chat: true
-        tools: true
-        toolCallFormat: qwen
-        reasoning: true
-        thinkingFormat: qwen-chat-template
-        structuredOutputs: json-schema
-        vision: false
-        audio: false
-        embeddings: false
-        rerank: false
-        fim: false
-    behavior:
-      thinking:
-        mechanism: budget-tokens
-        budgetByLevel:
-          low: 1024
-          medium: 4096
-          high: 16384
-        guidance: |
-          Distilled Opus reasoning over Qwen3.5 35B A3B; thinking emits via the
-          qwen chat template. Preserve thinking blocks across coding-task turns;
-          the budget caps runaway chains while keeping iterative reasoning
-          coherent.
-    recommendations:
-      sampling:
-        thinking:
-          temperature: 0.6
-          topP: 0.95
-          topK: 20
-        instruct:
-          temperature: 0.2
-          topP: 0.9
-          topK: 20
-      gpuTiers:
-        32gb: Distilled Opus-style reasoning at Qwen3.5 35B A3B scale. Use as a strong local main agent when GPU room
-          is available.
-      runtimePreference:
-        lmstudio: Verified usable on LM Studio when loaded with the Qwen-style preset.
-        openaiCompat: LM Studio chat uses this OpenAI-compatible surface.
-        llamaCpp: OpenAI-compatible chat completions with --jinja. Match qwen3 reasoning parser flags upstream.
-      serving: Distilled from Claude 4.6 Opus reasoning traces; expect stronger thinking-then-answer behavior than
-        vanilla Qwen3.5 35B A3B.
-      outputTokens: 32768
-    provenance:
-      source: legacy-curated-catalog
-      measuredUnder:
-        hardware: unknown
-        runtime: lmstudio
-        build: unknown
-        llamaCpp: unknown; this family carries no llamaCpp block
-        date: unknown
-        source: unknown
-        note: |
-          The only measured claim is the lmstudio line, that the model loads and
-          runs usably under the Qwen-style preset. It entered the catalog with
-          the initial local-model set and records no host, LM Studio version, or
-          quantization. The sampler and the thinking budgets follow the Qwen3.5
-          family defaults rather than a run on this distillation.
-  - id: qwopus3.5-9b-v3
-    match:
-      familyPrefixes:
-        - qwopus3.5-9b-v3
-        - qwopus-9b
-        - qwopus 9b
-    claims:
-      modelMaxContext: 262144
-      capabilities:
-        chat: true
-        tools: true
-        toolCallFormat: qwen
-        reasoning: true
-        thinkingFormat: qwen-chat-template
-        structuredOutputs: json-schema
-        vision: false
-        audio: false
-        embeddings: false
-        rerank: false
-        fim: false
-    behavior:
-      thinking:
-        mechanism: always-on
-        guidance: |
-          Qwopus 9B distilled from Opus reasoning; the chain-of-thought comes out
-          of the chat template unconditionally and the dial cannot stop it, so
-          Clio shows the level as forced. Output cap is tighter than the
-          32GB-class MoE families because this is the 16GB emulation target;
-          budget for a reasoning preamble ahead of every answer.
-    recommendations:
-      sampling:
-        instruct:
-          temperature: 0.2
-          topP: 0.9
-          topK: 20
-        thinking:
-          temperature: 0.6
-          topP: 0.95
-          topK: 20
-      gpuTiers:
-        16gb: Use this as the local 16GB emulation target. It keeps the output cap below the 32GB-class MoE defaults.
-      runtimePreference:
-        lmstudio: Primary local laptop path. Verified through LM Studio /api/v1/models with 262144 loaded context,
-          flash attention, GPU KV offload, and trained_for_tool_use.
-        openaiCompat: LM Studio chat uses this surface for reasoning and tool calls.
-        anthropicCompat: LM Studio's Anthropic Messages surface streams simple text with the server root URL as
-          baseUrl; keep as a protocol fallback until tool and reasoning behavior are proven.
-      serving: LM Studio reports trained_for_tool_use for the local qwopus3.5-9b-v3 target. Configure residency
-        through LM Studio or explicit lmstudio.load settings.
-      outputTokens: 32768
-    provenance:
-      source: legacy-curated-catalog
-      measuredUnder:
-        hardware: unknown; the host was a Windows LM Studio machine
-        runtime: lmstudio, SDK 1.5.0 and its OpenAI-compatible port
-        build: unknown; LM Studio's bundled llama.cpp build string was not recorded on this date
-        llamaCpp: unknown; the measurement went through LM Studio, which does not expose the underlying server argv
-        date: 2026-08-11
-        source: "commit fbaa0492 (fix: make thinking off reach the model on LM Studio routes)"
-        note: |
-          The always-on classification is measured, and it is measured against
-          every control that could have disproved it. Baseline 56 reasoning
-          tokens; reasoning_effort none 120; reasoning_effort minimal 243;
-          chat_template_kwargs.enable_thinking false 45; both together 44. No
-          spelling silences it, and the budget-tokens mechanism the entry
-          previously claimed never reached the wire on either LM Studio or
-          llama.cpp. The gpuTiers 16gb line is a role assignment rather than a
-          VRAM measurement.
-  - id: muse-glimmer-30b
-    match:
-      exactIds:
-        - unsloth/muse-glimmer-30b-gguf
-      familyPrefixes:
-        - muse-glimmer-30b-gguf
-        - muse-glimmer-30b
-        - muse-30b-dense
-    claims:
-      modelMaxContext: 131072
-      capabilities:
-        chat: true
-        tools: true
-        toolCallFormat: openai
-        reasoning: true
-        thinkingFormat: qwen-chat-template
-        structuredOutputs: json-schema
-        vision: true
-        audio: false
-        embeddings: false
-        rerank: false
-        fim: false
-    behavior:
-      thinking:
-        mechanism: always-on
-        chatTemplateKwargs:
-          byLevel:
-            key: reasoning_strength
-            values:
-              low: low
-              medium: medium
-              high: high
-              xhigh: xhigh
-            lmstudio: unsupported
+          static:
+            force_nonempty_content: true
           lmstudio: unsupported
-        guidance: |
-          Muse Glimmer reasons on every turn and its strength scale has no off
-          level, so Clio shows the dial as forced and budgets for a reasoning
-          preamble ahead of every answer. The thinking level still sets how much
-          it thinks: on llama.cpp Clio sends reasoning_strength (low, medium,
-          high, xhigh) as a chat-template kwarg per request. LM Studio drops that
-          kwarg, so there the strength stays at the server's own default.
     recommendations:
       sampling:
         thinking:
           temperature: 1
           topP: 0.95
-          topK: 64
         instruct:
           temperature: 1
           topP: 0.95
-          topK: 64
-      gpuTiers:
-        32gb: "Agent-role target on a 32 GB card: UD-Q4_K_XL weights, q8_0 KV at ctx=131072, parallel=1, with the Q8_0
-          perception encoder and the DFlash drafter both resident."
       runtimePreference:
-        llamaCpp: OpenAI-compatible chat completions with --jinja. Clio drives the reasoning budget per request
-          through chat_template_kwargs.reasoning_strength, mapped from the thinking level by
-          thinking.chatTemplateKwargs.byLevel; a --chat-template-kwargs launch value is only the server
-          default for requests that send none.
-        openaiCompat: Use when a gateway fronts the same llama.cpp chat-completions surface. Expect a reasoning trace
-          on every response whatever the configured thinking level says.
-      llamaCpp:
-        ctxSize: 131072
-        cacheTypeK: q8_0
-        cacheTypeV: q8_0
-        flashAttn: true
-        nGpuLayers: 99
-        parallel: 1
-        parallelSlots: Start the server with --parallel 1 so one agent gets the whole 131072-token context. Clio
-          discovers total_slots 1 and admits one request at a time on this endpoint, so a dispatch raised
-          while the orchestrator streams is refused rather than queued.
-        batchSize: 2048
-        ubatchSize: 512
-        mmproj: true
-        specType: draft-dflash
-        specDraftNMax: 16
-      serving: Meta Superintelligence Lab Muse-Glimmer-30B, a dense 29.6B causal transformer with a ~1.8B ViT-G/14
-        perception encoder, interleaved local and global attention with a 2048 sliding window, and a DFlash
-        block-diffusion drafter that proposes 16 tokens per forward pass. Card context length is 131072. Input
-        is text plus image; the mini router additionally tags video, which the card does not claim, so the
-        catalog follows the card.
-      outputTokens: 32768
+        llamaCpp: Use the checkpoint chat template with --jinja and the OpenAI-compatible chat-completions endpoint.
+          Send template controls through chat_template_kwargs. Choose the loaded context for available memory;
+          the model maximum does not size the server.
     provenance:
-      source: legacy-curated-catalog
-      measuredUnder:
-        hardware: mini fleet node, AMD Radeon AI PRO R9700 32 GB, ROCm backend, 1 request slot
-        runtime: llamacpp
-        build: worker llama-server from ~/src/llama.cpp-b10687/build-rocm/bin, behind a router reporting
-          build_info b1-c841aee
-        model: Muse-Glimmer-30B UD-Q4_K_XL with dflash-kquant draft and mmproj-Muse-Glimmer-30B-Q8_0 (arch
-          muse-glimmer)
-        llamaCpp: '--ctx-size 131072 --parallel 1 --kv-unified --cache-type-k q8_0 --cache-type-v q8_0 --batch-size
-          2048 --ubatch-size 512 --flash-attn true --fit off --n-gpu-layers 99 --spec-type draft-dflash
-          --spec-draft-n-max 16 --n-gpu-layers-draft 99 --jinja --chat-template-kwargs {"reasoning_strength":
-          "xhigh"} --temperature 1.0 --top-k 64 --top-p 0.95'
-        date: 2026-09-02
-        source: "issue #263 thinking sweep: one non-streaming POST /v1/chat/completions per variant on a one-line
-          arithmetic prompt, max_tokens 4096"
-        note: |
-          always-on is the measured classification, and it is measured against
-          both controls Clio can send. With no thinking field the model spent 99
-          completion tokens with 358 characters of reasoning_content;
-          chat_template_kwargs.enable_thinking false still produced 91 tokens with
-          332 characters, and true produced 90 with 312; reasoning_effort none,
-          low, and high produced 81, 83, and 61 tokens, every one of them with a
-          trace. Nothing Clio can put on the wire silences it.
-
-          The reason is the model's own design rather than a template bug. The
-          card's dial is reasoning strength with levels low, medium, high, and
-          xhigh, set through the system prompt as "Reasoning strength: <value>",
-          and the router passes it as chat_template_kwargs.reasoning_strength
-          pinned to xhigh. There is no off level on that scale, so the family
-          stays always-on: encoding it as on-off would put an enable_thinking
-          flag on the wire that this template does not read while the TUI showed
-          a working off/on dial, which is the failure qwopus3.5-9b-v3 above was
-          reclassified to stop. The strength dial itself is driven per request:
-          thinking.chatTemplateKwargs.byLevel below maps Clio's thinking level to
-          chat_template_kwargs.reasoning_strength on llama.cpp, and LM Studio,
-          which drops chat_template_kwargs, reports that kwarg as undeliverable
-          instead of sending it. No per-level output has been measured yet, so
-          the always-on classification above stands until one is.
-
-          Sampler provenance: temperature 1.0, top_p 0.95 and top_k 64 are the
-          card's Best Practices values and the router preset uses the same three.
-          The preset sets no repeat penalty and the card recommends none, so this
-          entry declares none. contextWindow is the card's 131072, which the
-          router matches at ctx-size 131072. maxTokens has no card value and
-          follows the other 131072-context families here.
-  - id: thinkingcap-qwen3.6-27b
-    match:
-      familyPrefixes:
-        - thinkingcap-qwen3.6-27b
-        - thinkingcap-27b-dense-q4
-        - thinkingcap-27b-dense
-        - thinkingcap-27b
-    claims:
-      modelMaxContext: 131072
-      capabilities:
-        chat: true
-        tools: true
-        toolCallFormat: qwen
-        reasoning: true
-        thinkingFormat: qwen-chat-template
-        structuredOutputs: json-schema
-        vision: false
-        audio: false
-        embeddings: false
-        rerank: false
-        fim: false
-    behavior:
-      thinking:
-        mechanism: on-off
-        guidance: |
-          ThinkingCap keeps the Qwen3.6 chat template's enable_thinking switch;
-          intermediate levels coerce to on. The router serves it with thinking on
-          by default, so off has to be carried on the wire rather than omitted,
-          and reasoning_effort is inert on llama.cpp. The finetune's point is a
-          shorter chain rather than no chain, so an active level is cheap.
-    recommendations:
-      sampling:
-        thinking:
-          temperature: 0.6
-          topP: 0.95
-          topK: 20
-          minP: 0
-          repeatPenalty: 1
-        instruct:
-          temperature: 0.6
-          topP: 0.95
-          topK: 20
-          minP: 0
-          repeatPenalty: 1
-      gpuTiers:
-        32gb: "Reasoning-role target on a 32 GB card: Q4_K_M weights (about 17 GB) with f16 KV at ctx=131072,
-          parallel=1, and the baked-in MTP draft head active."
-      runtimePreference:
-        llamaCpp: "OpenAI-compatible chat completions with --jinja and --reasoning on. The MTP head ships inside the
-          gguf, so --spec-type draft-mtp needs no second model. Never decode greedy: temperature 0 makes this
-          finetune loop without closing its think block."
-        openaiCompat: Use when a gateway fronts the same llama.cpp chat-completions surface with qwen reasoning and
-          tool parsing.
-      llamaCpp:
-        ctxSize: 131072
-        cacheTypeK: f16
-        cacheTypeV: f16
-        flashAttn: true
-        nGpuLayers: 99
-        parallel: 1
-        parallelSlots: Start the server with --parallel 1 so one agent gets the whole 131072-token context. Clio
-          discovers total_slots 1 and admits one request at a time on this endpoint, so a dispatch raised
-          while the orchestrator streams is refused rather than queued.
-        batchSize: 2048
-        ubatchSize: 512
-        specType: draft-mtp
-        specDraftNMax: 4
-        chatTemplateKwargs:
-          enable_thinking: true
-      serving: BottleCapAI ThinkingCap-Qwen3.6-27B, a brevity finetune of Qwen3.6-27B that holds accuracy at roughly
-        40 to 46 percent fewer thinking tokens (the quantizer measured a 15-prompt reasoning set at mean 675
-        tokens against 1401 for base Qwen3.6-27B). Served on mini as the Q4_K_M gguf with the MTP draft head
-        embedded in the file, so speculative decoding needs no second model.
-      outputTokens: 32768
-    provenance:
-      source: legacy-curated-catalog
-      measuredUnder:
-        hardware: mini fleet node, AMD Radeon AI PRO R9700 32 GB, ROCm backend, 1 request slot
-        runtime: llamacpp
-        build: worker llama-server from ~/src/llama.cpp-b10687/build-rocm/bin, behind a router reporting
-          build_info b1-c841aee
-        model: ThinkingCap-27B Q4_K_M with the MTP draft head baked into the gguf (arch qwen36)
-        llamaCpp: '--ctx-size 131072 --parallel 1 --kv-unified --cache-type-k f16 --cache-type-v f16 --batch-size 2048
-          --ubatch-size 512 --flash-attn true --fit off --n-gpu-layers 99 --spec-type draft-mtp
-          --spec-draft-n-max 4 --n-gpu-layers-draft 99 --jinja --reasoning on --chat-template-kwargs
-          {"enable_thinking": true} --temperature 1.0 --top-k 20 --top-p 0.95 --min-p 0.0 --repeat-penalty
-          1.0'
-        date: 2026-09-02
-        source: "issue #263 thinking sweep: one non-streaming POST /v1/chat/completions per variant on a one-line
-          arithmetic prompt, max_tokens 4096"
-        note: |
-          The router tag is wrong for this model and the measurement wins. It is
-          the only reasoning model on this router tagged reasoning:on rather than
-          reasoning:on_off, and it carries no default_reasoning tag at all, which
-          reads as always-on. It is not. On the q4 that this family is keyed to,
-          the no-field baseline spent 125 completion tokens with 354 characters of
-          reasoning_content, chat_template_kwargs.enable_thinking false answered
-          in 3 tokens with none, and true spent 130 tokens with 388 characters.
-          reasoning_effort is inert: none, low, and high produced 115, 140, and
-          131 tokens with a trace every time. The default-on behavior comes from
-          the preset rather than the checkpoint, because the
-          [thinkingcap-27b-dense-q4] block launches the server with reasoning = on
-          and chat-template-kwargs {"enable_thinking": true}.
-
-          Issue #263 names thinkingcap-27b-dense-q6, which no longer exists. That
-          quant was measured on this same date (baseline 99 tokens with 246
-          characters of reasoning, enable_thinking false 3 tokens with none, true
-          98 tokens with 291 characters, the same on-off shape as the q4) and then
-          deleted from mini: the weights are gone and the preset block is removed
-          from the router, which now serves the q4 as the only ThinkingCap id.
-          This family therefore names no q6 quant. The short `thinkingcap-27b`
-          pattern still covers that spelling if the operator ever restores it.
-
-          One serving observation was taken on the q6 before it was removed and
-          has not been repeated on the q4: in the round-5 cache sweep this model
-          re-prefilled 661 tokens on a `--continue` turn where the other eight
-          router models kept their prefix. Read it as a lead rather than a fact
-          about the q4.
-
-          Sampler provenance: temperature 0.6, top_p 0.95 and top_k 20 are the
-          quantizer's stated intended sampling for this finetune, which also warns
-          that greedy decoding makes it loop without closing the think block. The
-          router preset instead runs temperature 1.0 with the same top_p and
-          top_k, plus min_p 0.0 and repeat_penalty 1.0. The catalog follows the
-          card, as it does for every other family here, and records the preset
-          divergence above.
-  - id: thinkingcap-qwen3.8-27b
+      source: upstream-model-card
+      url: https://huggingface.co/nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-BF16
+      retrieved: 2026-10-03
+      config: https://huggingface.co/nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-BF16/blob/main/config.json
+      generationConfig: https://huggingface.co/nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-BF16/blob/main/generation_config.json
+      chatTemplate: https://huggingface.co/nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-BF16/blob/main/chat_template.jinja
+      notes: The card documents up to 1048576 context with explicit long-context serving recipes; config.json
+        defaults to 262144. Neither is the loaded server window. Temperature and top_p follow both the card
+        and generation_config.json; no top_k, penalties or numeric thinking budget are prescribed.
+      runtimeSources:
+        - https://github.com/ggml-org/llama.cpp/blob/master/tools/server/README.md
+        - https://docs.litellm.ai/docs/providers/openai_compatible
+  - id: qwen3.5-4b
     match:
       exactIds:
-        - mini/thinkingcap3.8-27b-dense
+        - Qwen/Qwen3.5-4B
       familyPrefixes:
-        - thinkingcap-qwen3.8-27b
-        - thinkingcap3.8-27b-dense
-        - thinkingcap3.8-27b
+        - qwen3.5-4b
+        - qwen3_5-4b
+        - qwen3-5-4b
     claims:
       modelMaxContext: 262144
       capabilities:
@@ -2067,115 +248,6 @@ models:
         toolCallFormat: qwen
         reasoning: true
         thinkingFormat: qwen-chat-template
-        structuredOutputs: json-schema
-    behavior:
-      thinking:
-        mechanism: effort-levels
-        effortByLevel:
-          low: low
-          medium: medium
-          xhigh: xhigh
-        guidance: |
-          The ThinkingCap-Qwen3.8-27B chat template accepts reasoning_effort only as low,
-          medium, or xhigh (xhigh (default)) and raises a fatal jinja exception, which
-          the server returns as HTTP 500, on anything else. Clio maps high and
-          max to xhigh, the nearest supported level at or above the request,
-          as it does for the Qwen3.8 base. Template-level off uses
-          chat_template_kwargs.enable_thinking:false.
-    recommendations:
-      sampling:
-        thinking:
-          temperature: 1
-          topP: 0.95
-          topK: 20
-          minP: 0
-          presencePenalty: 0
-          repetitionPenalty: 1
-        instruct:
-          temperature: 0.7
-          topP: 0.8
-          topK: 20
-          minP: 0
-          presencePenalty: 1.5
-          repetitionPenalty: 1
-    provenance:
-      source: GGUF chat template and operator router tags on the mini llama.cpp preset
-      note: |
-        The effort vocabulary was read from the chat template stored in the
-        Q4_K_M gguf metadata on mini, which tests reasoning_effort not in
-        ('xhigh', 'medium', 'low') and names xhigh (default) as the default.
-        Clio sent high on this route and got HTTP 500 before this profile existed.
-        The sampler is the Qwen3.8 base's, per mode, matching the preset's
-        instruct values. The preset tags say vision:off and reasoning:on_off, so
-        vision stays with the route probe. No hardware or context size is
-        inherited; the model maximum is the preset's model_ctx:256k tag.
-  - id: qwopus3.8v2-27b-dense
-    match:
-      exactIds:
-        - mini/qwopus3.8v2-27b-dense
-      familyPrefixes:
-        - qwopus3.8-27b-flash-v2
-        - qwopus3.8v2-27b-dense
-        - qwopus3.8v2-27b
-    claims:
-      modelMaxContext: 262144
-      capabilities:
-        chat: true
-        tools: true
-        toolCallFormat: qwen
-        reasoning: true
-        thinkingFormat: qwen-chat-template
-        structuredOutputs: json-schema
-    behavior:
-      thinking:
-        mechanism: effort-levels
-        effortByLevel:
-          low: low
-          medium: medium
-          xhigh: xhigh
-        guidance: |
-          The Qwopus3.8-27B-Flash-V2 chat template accepts reasoning_effort only as low,
-          medium, or xhigh (medium (default)) and raises a fatal jinja exception, which
-          the server returns as HTTP 500, on anything else. Clio maps high and
-          max to xhigh, the nearest supported level at or above the request,
-          as it does for the Qwen3.8 base. Template-level off uses
-          chat_template_kwargs.enable_thinking:false.
-    recommendations:
-      sampling:
-        thinking:
-          temperature: 1
-          topP: 0.95
-          topK: 20
-          minP: 0
-          presencePenalty: 0
-          repetitionPenalty: 1
-        instruct:
-          temperature: 0.7
-          topP: 0.8
-          topK: 20
-          minP: 0
-          presencePenalty: 1.5
-          repetitionPenalty: 1
-    provenance:
-      source: GGUF chat template and operator router tags on the mini llama.cpp preset
-      note: |
-        The effort vocabulary was read from the chat template stored in the
-        Q4_K_M gguf metadata on mini, which tests reasoning_effort not in
-        ('xhigh', 'medium', 'low') and names medium (default) as the default.
-        The V2 template defaults to medium; the V1 template defaults to xhigh.
-        The sampler is the Qwen3.8 base's, per mode, matching the preset's
-        instruct values. The preset tags say vision:off and reasoning:on_off, so
-        vision stays with the route probe. No hardware or context size is
-        inherited; the model maximum is the preset's model_ctx:256k tag.
-  - id: minicpm-v4.6
-    match:
-      familyPrefixes:
-        - minicpm-v4.6
-    claims:
-      modelMaxContext: 262144
-      capabilities:
-        chat: true
-        reasoning: false
         vision: true
         audio: false
         embeddings: false
@@ -2183,15 +255,45 @@ models:
         fim: false
     behavior:
       thinking:
-        mechanism: none
-        guidance: |
-          MiniCPM-V 4.6 is a 1B vision-language model without a reasoning mode.
-          Any thinking level is ignored.
+        mechanism: on-off
+        guidance: The upstream template defaults to thinking on. Disable it with
+          chat_template_kwargs.enable_thinking:false; intermediate effort levels resolve to on. Tools use
+          <tool_call><function=...><parameter=...> XML and <tool_response> replies. FLM uses top-level
+          reasoning_effort:none for off and low for on; higher efforts do not select a finer depth.
+    recommendations:
+      sampling:
+        thinking:
+          temperature: 0.6
+          topP: 0.95
+          topK: 20
+          minP: 0
+          presencePenalty: 0
+          repeatPenalty: 1
+        instruct:
+          temperature: 0.7
+          topP: 0.8
+          topK: 20
+          minP: 0
+          presencePenalty: 1.5
+          repeatPenalty: 1
+      runtimePreference:
+        llamaCpp: Use the checkpoint chat template with --jinja and the OpenAI-compatible chat-completions endpoint.
+          Send template controls through chat_template_kwargs. Choose the loaded context for available memory;
+          the model maximum does not size the server.
+        flm: FastFlowLM v1.0.5 reads top-level reasoning_effort none/low as an off/on toggle for Qwen3.5. It does not
+          read chat_template_kwargs. A gateway must explicitly declare thinking_control_runtime:flm so Clio
+          sends the supported control.
     provenance:
-      source: operator router tags on the mini llama.cpp preset
-      note: |
-        model_ctx:256k, vision:on, audio:off, reasoning:off and modality
-        text+image+video come from the preset's own tags, read from the router's
-        model list. The preset serves it at ctx-size 32768, which is a deployment
-        fact the server reports and not part of this profile. Tool calling is not
-        claimed because the preset says nothing about it.
+      source: upstream-model-card
+      url: https://huggingface.co/Qwen/Qwen3.5-4B
+      retrieved: 2026-10-03
+      config: https://huggingface.co/Qwen/Qwen3.5-4B/blob/main/config.json
+      generationConfig: Not published; raw/main/generation_config.json returned HTTP 404 on retrieval.
+      chatTemplate: https://huggingface.co/Qwen/Qwen3.5-4B/blob/main/chat_template.jinja
+      notes: Thinking sampling uses the card precise-coding profile; instruct sampling uses its general non-thinking
+        profile. Native context is 262144; the longer advertised window requires RoPE scaling. The card
+        includes vLLM and SGLang tool-serving recipes.
+      runtimeSources:
+        - https://github.com/ggml-org/llama.cpp/blob/master/tools/server/README.md
+        - https://docs.litellm.ai/docs/providers/openai_compatible
+        - https://github.com/FastFlowLM/FastFlowLM/blob/v1.0.5/src/include/AutoModel/modeling_qwen3_5vl.hpp

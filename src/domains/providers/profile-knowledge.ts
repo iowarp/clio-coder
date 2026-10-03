@@ -4,8 +4,8 @@ import type { KnowledgeBase, KnowledgeBaseEntry, KnowledgeBaseHit } from "./type
 /**
  * Refactor step 4: `models/profiles.yaml` answers what the model is (windows, output cap,
  * capability flags, thinking mechanism and levels) through the `KnowledgeBase` shape every
- * resolver already consumes. The legacy catalog stays behind it only for the fields not
- * switched yet (sampling recommendations, family for parser selection), so it never
+ * resolver already consumes. Profiles also supply sampling recommendations, including user
+ * overrides. The legacy catalog supplies a fallback sampler and family for parser selection, so it never
  * decides a switched field: its capability flags, window and output numbers, and thinking
  * block are dropped even for a model no profile matches. Step 5 deletes the legacy side.
  */
@@ -78,8 +78,8 @@ function entryFromProfile(profile: ModelProfile, old: KnowledgeBaseEntry | null)
 		capabilities.reasoning = thinking.mechanism !== "none";
 	}
 	const quirks: Record<string, unknown> = {};
-	// Sampling stays with the legacy catalog until step 4b moves it.
-	const sampling = old?.quirks?.sampling;
+	// User profiles must keep their sampler when the packaged legacy family is retired.
+	const sampling = profile.recommendations?.sampling ?? old?.quirks?.sampling;
 	if (sampling !== undefined) quirks.sampling = sampling;
 	if (thinking !== undefined) quirks.thinking = thinking;
 	const outputTokens = profile.recommendations?.outputTokens;

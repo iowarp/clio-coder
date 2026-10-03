@@ -21,46 +21,18 @@ function quirksOf(id: string): LocalModelQuirks | undefined {
 	return (model as { clioCoder?: { quirks?: LocalModelQuirks } }).clioCoder?.quirks;
 }
 
-// Jackrong's cards for the served Qwopus builds state no sampler of their own, so each
-// Qwopus family samples like the Qwen family it was tuned from, in both thinking modes.
-describe("Qwopus samples like its Qwen base", () => {
-	const qwen38 = quirksOf("dynamo/qwen3.8-27b");
-	const qwen36 = quirksOf("qwen3.6-27b");
+describe("upstream Qwen sampling recommendations", () => {
+	const qwen38 = quirksOf("local/qwen3.8-27b");
+	const qwen35 = quirksOf("Qwen/Qwen3.5-4B");
 	it("the Qwen reference families carry both samplers", () => {
-		for (const quirks of [qwen38, qwen36]) {
+		for (const quirks of [qwen38, qwen35]) {
 			ok(quirks?.sampling?.thinking);
 			ok(quirks?.sampling?.instruct);
 		}
 	});
-	for (const route of [
-		"dynamo/qwopus3.8-27b-flash@q4_k_m",
-		"dynamo/qwopus3.8-27b-flash@q5_k_m",
-		"mini/qwopus3.8-27b-dense-q4km",
-		"mini/qwopus3.8-27b-dense-q6k",
-		"zbook-lemonade/Qwopus3.8-27B-Flash-MTP-Q4_K_M",
-	]) {
-		it(`${route} uses the Qwen3.8 thinking and non-thinking samplers`, () => {
-			strictEqual(kb.lookup(route)?.entry.family, "qwopus3.8-27b-dense");
-			const quirks = quirksOf(route);
-			deepStrictEqual(pickSamplingProfile(quirks, true), pickSamplingProfile(qwen38, true));
-			deepStrictEqual(pickSamplingProfile(quirks, false), pickSamplingProfile(qwen38, false));
-		});
-	}
-
-	for (const route of [
-		"dynamo/qwopus3.6-27b-coder-mtp",
-		"dynamo/qwopus3.6-35b-a3b-coder-mtp",
-		"mini/qwopus3.6-35b-moe-q4km",
-	]) {
-		it(`${route} uses the Qwen3.6 thinking and non-thinking samplers`, () => {
-			const quirks = quirksOf(route);
-			deepStrictEqual(pickSamplingProfile(quirks, true), pickSamplingProfile(qwen36, true));
-			deepStrictEqual(pickSamplingProfile(quirks, false), pickSamplingProfile(qwen36, false));
-		});
-	}
 
 	it("thinking on and off send different samplers on the wire", () => {
-		const quirks = quirksOf("dynamo/qwopus3.8-27b-flash@q4_k_m");
+		const quirks = quirksOf("local/qwen3.8-27b-q4_k_m");
 		const thinking = pickSamplingProfile(quirks, true);
 		const instruct = pickSamplingProfile(quirks, false);
 		ok(thinking && instruct);
@@ -83,8 +55,8 @@ describe("Qwopus samples like its Qwen base", () => {
 	});
 
 	it("the request body carries every sampler field, repeat_penalty included, in both modes", async () => {
-		// The catalog spells it repetitionPenalty; the wire must still say repeat_penalty.
-		const modelId = "dynamo/qwopus3.8-27b-flash@q4_k_m";
+		// Catalog repeatPenalty reaches the runtime as repeat_penalty.
+		const modelId = "local/qwen3.8-27b-q4_k_m";
 		const fixture = await startGatewayThinkingFixture("lm-studio", modelId);
 		try {
 			const target = { id: "blade", runtime: "litellm", url: fixture.url, defaultModel: modelId };

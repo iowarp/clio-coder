@@ -140,10 +140,10 @@ describe("contracts/engine reads model.clioCoder", () => {
 		strictEqual(request.reasoning_effort, "medium");
 	});
 
-	it("an always-on family still sends its level-keyed chat template kwarg on vLLM", async () => {
-		const id = "muse-glimmer-30b";
+	it("a family sends its recommended chat template kwarg on vLLM", async () => {
+		const id = "nvidia-nemotron-3.5-lightning-30b-a3b";
 		const hit = new FileKnowledgeBase(join(process.cwd(), "src/domains/providers/models")).lookup(id);
-		ok(hit, "the Muse Glimmer family must exist in the catalog");
+		ok(hit, "the Nemotron Lightning family must exist in the catalog");
 		const server = await fixture(id);
 		const request = await lastRequest(
 			server,
@@ -151,7 +151,7 @@ describe("contracts/engine reads model.clioCoder", () => {
 			"high",
 		);
 		// Pi's chat-template branch never carries a family key, so the overlay has to.
-		strictEqual((request.chat_template_kwargs as Record<string, unknown>)?.reasoning_strength, "high");
+		strictEqual((request.chat_template_kwargs as Record<string, unknown>)?.force_nonempty_content, true);
 		strictEqual(request.reasoning_effort, undefined);
 	});
 

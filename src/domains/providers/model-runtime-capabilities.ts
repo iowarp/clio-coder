@@ -575,7 +575,7 @@ function resolveThinkingCapability(
  * a family's own kwargs (#267) for the same reason, so those are reported as
  * undeliverable rather than merged into the request (#268).
  */
-const REASONING_EFFORT_ONLY_RUNTIMES: ReadonlySet<string> = new Set(["lmstudio"]);
+const REASONING_EFFORT_ONLY_RUNTIMES: ReadonlySet<string> = new Set(["lmstudio", "flm"]);
 
 /** `none` is the observed LM Studio HTTP off value; on-off models have no finer dial than `low`. */
 function onOffReasoningEffort(thinkingActive: boolean): string {

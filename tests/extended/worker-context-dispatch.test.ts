@@ -28,7 +28,7 @@ for (const mode of ["isolated", "fork", "splice"] as const) {
 			{ role: "user", content: "PARENT_CONSTRAINT_42", timestamp: 1 },
 		];
 		let captures = 0;
-		const fixture = await startGatewayThinkingFixture("lm-studio", "zbook/ornith-1.5-35b-a3b", async () => {
+		const fixture = await startGatewayThinkingFixture("lm-studio", "local/gemma-4-26b-a4b-it", async () => {
 			parent.push({ role: "user", content: "LATER_PARENT_TURN", timestamp: 2 });
 		});
 		const settings = structuredClone(DEFAULT_SETTINGS);

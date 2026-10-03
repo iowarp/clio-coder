@@ -24,7 +24,7 @@ import { isolateClioEnv } from "../harness/scratch-env.js";
 
 async function setup(runtime = "lm-studio", beforeMetadata?: () => Promise<void>, responseText = "323") {
 	const env = await isolateClioEnv("clio-coder-background-thinking-");
-	const fixture = await startGatewayThinkingFixture(runtime, "zbook/ornith-1.5-35b-a3b", beforeMetadata, responseText);
+	const fixture = await startGatewayThinkingFixture(runtime, "local/gemma-4-26b-a4b-it", beforeMetadata, responseText);
 	const settings = structuredClone(DEFAULT_SETTINGS);
 	settings.targets = [
 		{ id: "memory", runtime: "litellm", url: fixture.url, defaultModel: fixture.modelId },

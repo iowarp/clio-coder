@@ -20,7 +20,9 @@ const kb = new FileKnowledgeBase(fileURLToPath(new URL("../../src/domains/provid
 
 test("gateway control runtime requires unanimous explicit deployment metadata", () => {
 	const lm = capabilitiesFromLiteLLMModelInfo({ runtime: "lm-studio" });
-	const llama = capabilitiesFromLiteLLMModelInfo({ runtime: "llama.cpp" });
+	const llama = capabilitiesFromLiteLLMModelInfo({ runtime: "lemonade", thinking_control_runtime: "llamacpp" });
+	const flm = capabilitiesFromLiteLLMModelInfo({ runtime: "lemonade", thinking_control_runtime: "flm" });
+	strictEqual(flm.thinkingControlRuntime, "flm");
 	strictEqual(lm.thinkingControlRuntime, "lmstudio");
 	strictEqual(llama.thinkingControlRuntime, "llamacpp");
 	strictEqual(aggregateLiteLLMCapabilities([lm, lm]).thinkingControlRuntime, "lmstudio");
@@ -57,50 +59,53 @@ test("Qwen3.8 offers vendor levels and preserves the released high alias without
 });
 
 test("actual gateway probe to engine stream disables reasoning while retaining gateway ownership", async () => {
-	const fixture = await startGatewayThinkingFixture();
-	try {
-		const target = { id: "gateway", runtime: "litellm", url: fixture.url, defaultModel: fixture.modelId };
-		const probe = await litellm.probe?.(target, { credentialsPresent: new Set(), httpTimeoutMs: 1000 });
-		ok(probe?.ok);
-		// JSON round-trip reproduces the capability projection carried to workers.
-		const caps = JSON.parse(JSON.stringify(probe.modelCapabilities?.[fixture.modelId]));
-		const model = applyModelCapabilityPatch(
-			litellm.synthesizeModel(target, fixture.modelId, kb.lookup(fixture.modelId)),
-			caps,
-		) as Model<"openai-completions">;
-		for (const level of ["off", "low", "off"] as const) {
-			const stream = openAICompletionsApiProvider.streamSimple(
-				model,
-				{ messages: [{ role: "user", content: "17 times 19", timestamp: 0 }] },
-				{ apiKey: "fixture", ...(level === "off" ? {} : { reasoning: level }) },
+	for (const runtime of ["lm-studio", "flm"] as const) {
+		const modelId = runtime === "flm" ? "Qwen/Qwen3.5-4B" : "Qwen/Qwen3.8-27B";
+		const fixture = await startGatewayThinkingFixture(runtime, modelId);
+		try {
+			const target = { id: "gateway", runtime: "litellm", url: fixture.url, defaultModel: fixture.modelId };
+			const probe = await litellm.probe?.(target, { credentialsPresent: new Set(), httpTimeoutMs: 1000 });
+			ok(probe?.ok);
+			// JSON round-trip reproduces the capability projection carried to workers.
+			const caps = JSON.parse(JSON.stringify(probe.modelCapabilities?.[fixture.modelId]));
+			const model = applyModelCapabilityPatch(
+				litellm.synthesizeModel(target, fixture.modelId, kb.lookup(fixture.modelId)),
+				caps,
+			) as Model<"openai-completions">;
+			for (const level of ["off", "low", "off"] as const) {
+				const stream = openAICompletionsApiProvider.streamSimple(
+					model,
+					{ messages: [{ role: "user", content: "17 times 19", timestamp: 0 }] },
+					{ apiKey: "fixture", ...(level === "off" ? {} : { reasoning: level }) },
+				);
+				const result = await stream.result();
+				strictEqual(result.stopReason, "stop");
+				strictEqual(
+					result.content.some((part) => part.type === "thinking"),
+					level !== "off",
+				);
+				const request = fixture.requests.at(-1);
+				strictEqual(request?.reasoning_effort, level === "off" ? "none" : "low");
+				deepStrictEqual(request?.allowed_openai_params, ["reasoning_effort"]);
+				strictEqual(model.provider, "litellm");
+				strictEqual(
+					(model as unknown as { clioCoder: { runtimeId: string; gateway: boolean } }).clioCoder.runtimeId,
+					"litellm",
+				);
+				strictEqual((model as unknown as { clioCoder: { gateway: boolean } }).clioCoder.gateway, true);
+			}
+			ok(
+				fixture.paths.every((path) =>
+					["/health/liveliness", "/v1/models", "/v1/model/info", "/v1/chat/completions"].includes(path),
+				),
+				fixture.paths.join(","),
 			);
-			const result = await stream.result();
-			strictEqual(result.stopReason, "stop");
-			strictEqual(
-				result.content.some((part) => part.type === "thinking"),
-				level !== "off",
-			);
-			const request = fixture.requests.at(-1);
-			strictEqual(request?.reasoning_effort, level === "off" ? "none" : "low");
-			deepStrictEqual(request?.allowed_openai_params, ["reasoning_effort"]);
-			strictEqual(model.provider, "litellm");
-			strictEqual(
-				(model as unknown as { clioCoder: { runtimeId: string; gateway: boolean } }).clioCoder.runtimeId,
-				"litellm",
-			);
-			strictEqual((model as unknown as { clioCoder: { gateway: boolean } }).clioCoder.gateway, true);
+			// A later unresolved declaration must remove a prior route-specific hint.
+			applyModelCapabilityPatch(model, { reasoning: true });
+			strictEqual(resolveModelRuntimeCapabilitiesForModel(model, "off").request.reasoningEffort, undefined);
+		} finally {
+			await fixture.close();
 		}
-		ok(
-			fixture.paths.every((path) =>
-				["/health/liveliness", "/v1/models", "/v1/model/info", "/v1/chat/completions"].includes(path),
-			),
-			fixture.paths.join(","),
-		);
-		// A later unresolved declaration must remove a prior route-specific hint.
-		applyModelCapabilityPatch(model, { reasoning: true });
-		strictEqual(resolveModelRuntimeCapabilitiesForModel(model, "off").request.reasoningEffort, undefined);
-	} finally {
-		await fixture.close();
 	}
 });
 
@@ -123,9 +128,9 @@ test("unknown gateway routes do not invent an effort-only protocol or suppress o
 	}
 });
 
-test("reported Qwopus route sends only its evidenced effort vocabulary through LiteLLM", async () => {
-	strictEqual(kb.lookup("mini/qwopus3.8-9b"), null);
-	for (const modelId of ["mini/qwopus3.8-27b-dense-q4km", "mini/qwopus3.8-27b-dense-q6k"]) {
+test("reported Qwen3.8 route sends only its upstream effort vocabulary through LiteLLM", async () => {
+	strictEqual(kb.lookup("local/qwen3.8-9b"), null);
+	for (const modelId of ["local/qwen3.8-27b-q4_k_m", "local/qwen3.8-27b-q6_k"]) {
 		const fixture = await startGatewayThinkingFixture("llama.cpp", modelId);
 		try {
 			const target = { id: "blade-gateway", runtime: "litellm", url: fixture.url, defaultModel: modelId };
@@ -133,7 +138,7 @@ test("reported Qwopus route sends only its evidenced effort vocabulary through L
 			ok(probe?.ok);
 			const hit = kb.lookup(modelId);
 			ok(hit);
-			strictEqual(hit.entry.family, "qwopus3.8-27b-dense");
+			strictEqual(hit.entry.family, "qwen3.8-27b");
 			const model = applyModelCapabilityPatch(
 				litellm.synthesizeModel(target, modelId, hit),
 				probe.modelCapabilities?.[modelId],

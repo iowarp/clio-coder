@@ -129,8 +129,8 @@ describe("contracts/gemma-4 channel filtering", () => {
 const catalog = new FileKnowledgeBase(fileURLToPath(new URL("../../src/domains/providers/models/", import.meta.url)));
 
 for (const [id, family] of [
-	["LilaRest/gemma-4-31B-it-NVFP4-turbo", "gemma-4-31b-it-nvfp4-turbo"],
-	["Jackrong/Gemopus-4-31B-it-GGUF", "gemopus-4-31b-it"],
+	["google/gemma-4-26B-A4B-it", "gemma4-26b-a4b"],
+	["local/gemma-4-26b-a4b-it-q4_k_m", "gemma4-26b-a4b"],
 ] as const) {
 	for (const runtime of ["lmstudio", "openai-compat"] as const) {
 		it(`filters ${family} through ${runtime} using the shipped catalog`, async () => {
