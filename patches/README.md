@@ -8,15 +8,12 @@ unpatched.** Every existing hunk was rebased against the published, unmodified
 1.0.0 package without changing its behavior. Stock 1.0.0 still lacks the editor,
 search and application-first keyboard seams below. Its ANSI search highlighting,
 weak render caches, and slash completion fixes are inherited alongside the patch.
-The performance measurements below come from the earlier SDK; they have not
-been rerun on 1.0.0.
 
 | Added API | Required behavior | Why stock 1.0.0 is insufficient |
 | --- | --- | --- |
 | `TuiBase.setApplicationInputPolicy` | Clio's single keyboard owner runs before viewport shortcuts and focused widgets. Key releases are ignored; bracketed-paste contents remain literal data. The returned disposer removes only its own policy. | Public `addInputListener` appends to a listener set. The alternate-screen viewport installs its listener during construction, so later application listeners cannot consume conflicting keys first. There is no public prepend/priority option. |
 | `Editor.applyEdit` and `Input.applyEdit` | Invoke undo and deletion directly after Clio resolves a semantic keyboard action, without passing through submission or a second keybinding lookup. Input clear retains undo and kill-ring behavior. | The underlying edit operations are private and `handleInput` interprets bytes against configurable bindings. `setText` / `setValue` alone do not express the same undo, cursor and kill-ring semantics. |
 | Search focus, query undo, prompt navigation, and search navigation methods | Clio can route Escape, undo, history, and navigation to the current owner, including the native search overlay, and keep overlay focus/rendering correct. | Search focus and these navigation methods are private; the public viewport scroll methods cannot query or manipulate search ownership or its undo history. |
-| `TuiMainScreen.applyLineResets` memo | A regular-screen frame reuses the reset output of every row whose raw string is unchanged, rewriting the memo in place, and records which rows are image rows. The Kitty image scans (`collectKittyImageIds`, `expandChangedRangeForKittyImages`) visit only those rows. | Stock 1.0.0 normalizes, rebuilds and scans all three image passes over every transcript row on every frame. With 22,800 rows that was 8–16 ms per keystroke, 37% of bench CPU in the image scans alone. |
 | `wrapTextWithAnsi` whitespace tokens | A space token that carries the closing codes of the styled word before it is treated as whitespace, and its codes apply before the next row opens. | A styled word that exactly filled a row stranded the following space at the start of the next row. |
 | `lexMarkdownBlocks` | The top-level block tokens `Markdown` renders, from the same lexer and LaTeX extension, tabs expanded. | The block lexer is module-private; the transcript renders streamed answers block by block and must split them exactly where the renderer does. |
 
