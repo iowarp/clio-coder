@@ -179,38 +179,32 @@ function backendTimingsSourceForModel(model: Model<Api>): BackendTimingsSource |
 	return null;
 }
 
-function observeResponseMetadataLine(line: string, capture: ResponseModelIdCapture): void {
-	const normalized = line.endsWith("\r") ? line.slice(0, -1) : line;
-	if (!normalized.startsWith("data:")) return;
-	const data = normalized.slice("data:".length).trimStart();
-	if (data.length === 0 || data === "[DONE]") return;
-	try {
-		const payload = JSON.parse(data) as unknown;
-		if (!isPlainRecord(payload)) return;
-		if (capture.diffusionFrames !== null) observeDiffusionFrameChunk(payload, capture.diffusionFrames);
-		if (isContentFilterErrorFrame(payload.error)) capture.contentFilter = true;
-		const usage = isPlainRecord(payload.usage) ? payload.usage : {};
-		const details = isPlainRecord(usage.prompt_tokens_details) ? usage.prompt_tokens_details : {};
-		if (
-			nonnegativeFiniteNumber(details.cached_tokens) !== null ||
-			nonnegativeFiniteNumber(usage.cache_read_input_tokens) !== null
-		) {
-			capture.cacheReadReported = true;
+/**
+ * Read one parsed completion chunk. Pi hands each chunk to
+ * `onProviderStreamEvent` before it normalizes it, so these facts need no
+ * second decode of the transport bytes.
+ */
+function observeProviderChunk(payload: unknown, capture: ResponseModelIdCapture): void {
+	if (!isPlainRecord(payload)) return;
+	if (capture.diffusionFrames !== null) observeDiffusionFrameChunk(payload, capture.diffusionFrames);
+	const usage = isPlainRecord(payload.usage) ? payload.usage : {};
+	const details = isPlainRecord(usage.prompt_tokens_details) ? usage.prompt_tokens_details : {};
+	if (
+		nonnegativeFiniteNumber(details.cached_tokens) !== null ||
+		nonnegativeFiniteNumber(usage.cache_read_input_tokens) !== null
+	) {
+		capture.cacheReadReported = true;
+	}
+	if (!capture.modelIdDone) {
+		const model = payload.model;
+		if (typeof model === "string" && model.trim().length > 0) {
+			capture.reportedModelId = model.trim();
+			capture.modelIdDone = true;
 		}
-		if (!capture.modelIdDone) {
-			const model = payload.model;
-			if (typeof model === "string" && model.trim().length > 0) {
-				capture.reportedModelId = model.trim();
-				capture.modelIdDone = true;
-			}
-		}
-		if (capture.backendTimingsSource !== null) {
-			const timings = backendCompletionTimings(payload.timings, capture.backendTimingsSource);
-			if (timings !== null) capture.backendTimings = timings;
-		}
-	} catch {
-		// A partial or vendor-specific event is pi-ai's parsing concern. This
-		// observer records only complete OpenAI-compatible JSON data lines.
+	}
+	if (capture.backendTimingsSource !== null) {
+		const timings = backendCompletionTimings(payload.timings, capture.backendTimingsSource);
+		if (timings !== null) capture.backendTimings = timings;
 	}
 }
 
@@ -224,23 +218,25 @@ function isContentFilterErrorFrame(error: unknown): boolean {
 	return [error.code, error.type].some((value) => typeof value === "string" && isProviderContentFilter(value));
 }
 
-function observeResponseModelIdBytes(
-	chunk: Uint8Array | undefined,
-	capture: ResponseModelIdCapture,
-	flush = false,
-): void {
+/**
+ * The OpenAI SDK throws on an in-stream error frame before Pi's hook can see
+ * it, and Pi's error text drops the frame's code. This scan is the only
+ * remaining read of the transport bytes.
+ */
+function observeErrorFrameBytes(chunk: Uint8Array | undefined, capture: ResponseModelIdCapture, flush = false): void {
 	if (!capture.decoder) return;
 	capture.buffer += chunk ? capture.decoder.decode(chunk, { stream: !flush }) : capture.decoder.decode();
-	let newline = capture.buffer.indexOf("\n");
-	while (newline >= 0) {
-		const line = capture.buffer.slice(0, newline);
-		capture.buffer = capture.buffer.slice(newline + 1);
-		observeResponseMetadataLine(line, capture);
-		newline = capture.buffer.indexOf("\n");
-	}
-	if (flush && capture.buffer.length > 0) {
-		observeResponseMetadataLine(capture.buffer, capture);
-		capture.buffer = "";
+	const lines = capture.buffer.split("\n");
+	capture.buffer = flush ? "" : (lines.pop() ?? "");
+	for (const line of lines) {
+		const data = line.startsWith("data:") ? line.slice("data:".length).trimStart() : "";
+		if (!data.includes('"error"')) continue;
+		try {
+			const payload = JSON.parse(data) as unknown;
+			if (isPlainRecord(payload) && isContentFilterErrorFrame(payload.error)) capture.contentFilter = true;
+		} catch {
+			// A partial or vendor-specific event is pi-ai's parsing concern.
+		}
 	}
 	if (flush) capture.decoder = null;
 }
@@ -257,12 +253,12 @@ function captureResponseModelId(response: Response, capture: ResponseModelIdCapt
 		new TransformStream<Uint8Array, Uint8Array>({
 			transform(chunk, controller) {
 				capture.observed = true;
-				observeResponseModelIdBytes(chunk, capture);
+				observeErrorFrameBytes(chunk, capture);
 				controller.enqueue(chunk);
 			},
 			flush() {
 				capture.observed = true;
-				observeResponseModelIdBytes(undefined, capture, true);
+				observeErrorFrameBytes(undefined, capture, true);
 			},
 		}),
 	);
@@ -304,6 +300,10 @@ function withResponseModelIdCapture<TOptions extends StreamOptions>(
 	const capturedOptions = {
 		...options,
 		fetch: async (input, init) => captureResponseModelId(await fetchImpl(input, init), capture, model),
+		onProviderStreamEvent: async (data: unknown, eventModel: Model<Api>) => {
+			observeProviderChunk(data, capture);
+			await options.onProviderStreamEvent?.(data, eventModel);
+		},
 	} as TOptions;
 	const source = sourceFactory(capturedOptions);
 	const annotated = createAssistantMessageEventStream();
