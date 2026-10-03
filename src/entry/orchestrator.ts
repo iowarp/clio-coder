@@ -1710,6 +1710,17 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		readEntries: readFlowSessionEntries,
 		hasSourceRules: () => (safety?.policy?.informationFlow?.().rules.length ?? 0) > 0,
 	});
+	// An operator shell line's output joins the context the next request sends,
+	// so a source it names is labeled first, the way a bash tool call is. The
+	// terminal's `!` and ACP's `_clio-coder/session/shell` share this one gate.
+	const labelOperatorCommand = (command: string, cwd: string): string | null => {
+		const unavailable = safety?.policy?.informationFlow?.().refusal ?? null;
+		if (unavailable !== null) return unavailable;
+		const labels = safety?.policy?.flowRestrictionsFor?.({ tool: ToolNames.Bash, args: { command, cwd } }) ?? null;
+		if (labels === null) return null;
+		flowLedger.absorb(labels, { tool: "operator-bash" });
+		return flowLedger.refusal();
+	};
 	flowRestrictionsForDispatch = () => {
 		// A worker launched while the ledger cannot vouch would carry unlabeled
 		// context; the refusal surfaces at its first model request instead.
@@ -3963,6 +3974,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 						}
 					: {}),
 				toolRegistry,
+				labelOperatorCommand,
 				hostToolEvents: acpHostToolEvents,
 				...(session
 					? {
@@ -4255,16 +4267,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		toolRegistry,
 		...(session ? { session } : {}),
 		...(session ? { readSessionEntries: readCurrentSessionEntries } : {}),
-		// An operator `!` command's output joins the context the next request
-		// sends, so a source it names is labeled first, the way a bash tool call is.
-		labelOperatorCommand: (command, cwd) => {
-			const unavailable = safety?.policy?.informationFlow?.().refusal ?? null;
-			if (unavailable !== null) return unavailable;
-			const labels = safety?.policy?.flowRestrictionsFor?.({ tool: ToolNames.Bash, args: { command, cwd } }) ?? null;
-			if (labels === null) return null;
-			flowLedger.absorb(labels, { tool: "operator-bash" });
-			return flowLedger.refusal();
-		},
+		labelOperatorCommand,
 		getTaskBoard: () => taskBoard.cachedSnapshot(),
 		getDecisionBoard: () => decisionBoard.snapshot(),
 		supersedeDecision: (interviewId, key, correction) => decisionBoard.supersede(interviewId, key, correction),

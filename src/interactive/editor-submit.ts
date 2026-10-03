@@ -1,9 +1,10 @@
-import { type BashCommandResult, combineBashOutput, runBashCommand } from "../core/bash-exec.js";
+import type { runBashCommand } from "../core/bash-exec.js";
+import { combineBashOutput } from "../core/bash-exec.js";
 import { type ExternalEditResult, editTextExternally, resolveExternalEditor } from "../core/external-editor.js";
 import type { PendingSkillRequest } from "../core/skill-activation.js";
 import type { DispatchContract } from "../domains/dispatch/contract.js";
-import type { SessionEntryInput } from "../domains/session/contract.js";
 import type { SessionContract, SessionEntry } from "../domains/session/index.js";
+import { runOperatorShellLine } from "../domains/session/operator-shell.js";
 import type { ChatLoop, QueuedChatMessage } from "./chat-loop.js";
 import type { ChatPanel } from "./chat-panel.js";
 import { parseEditorBashCommand, unguardPastedEditorOperator } from "./editor-bash.js";
@@ -16,7 +17,6 @@ import {
 import { type BashTranscriptExecution, renderBashTranscriptExecution } from "./renderers/tool-execution.js";
 import { parseSlashCommand, type RunIo, type SlashCommand, type SlashCommandDispatchResult } from "./slash-commands.js";
 
-const EDITOR_BASH_TIMEOUT_MS = 300_000;
 /** Existing bash TERM-to-KILL grace (5s), plus settlement and session append. */
 export const EDITOR_BASH_SHUTDOWN_MS = 6000;
 
@@ -213,26 +213,25 @@ export function createEditorSubmitController(deps: EditorSubmitDeps): EditorSubm
 		let settlement!: Promise<void>;
 		settlement = (async () => {
 			try {
-				const cwd = deps.getCwd?.() ?? process.cwd();
-				const result = await (deps.runBash ?? runBashCommand)(parsed.command, {
-					cwd,
-					timeoutMs: EDITOR_BASH_TIMEOUT_MS,
+				const {
+					result,
+					entry: input,
+					unlabeled,
+				} = await runOperatorShellLine({
+					command: parsed.command,
+					cwd: deps.getCwd?.() ?? process.cwd(),
+					excludeFromContext: parsed.excludeFromContext,
+					parentTurnId,
 					signal: abort.signal,
 					onUpdate: (progress) => {
 						execution.output = combineBashOutput(progress);
 						execution.totalBytes = progress.outputBytes;
 						deps.ui.requestRender();
 					},
+					...(deps.labelOperatorCommand ? { label: deps.labelOperatorCommand } : {}),
+					...(deps.runBash ? { runBash: deps.runBash } : {}),
 				});
-				const unlabeled = parsed.excludeFromContext ? null : (deps.labelOperatorCommand?.(parsed.command, cwd) ?? null);
 				if (unlabeled !== null) deps.io.stderr(`[bash] output kept out of context: ${unlabeled}\n`);
-				const input = bashExecutionEntryInput({
-					command: parsed.command,
-					result,
-					parentTurnId,
-					excludeFromContext: parsed.excludeFromContext || unlabeled !== null,
-					timeoutMs: EDITOR_BASH_TIMEOUT_MS,
-				});
 				const entry = deps.session?.current()
 					? deps.session.appendEntry(input)
 					: ({
@@ -624,36 +623,5 @@ export function createEditorSubmitController(deps: EditorSubmitDeps): EditorSubm
 			activeEditorBash.abort();
 			return true;
 		},
-	};
-}
-
-function appendStatusNotes(output: string, result: BashCommandResult, timeoutMs: number): string {
-	const notes: string[] = [];
-	if (result.aborted) notes.push("command aborted");
-	if (result.timedOut) notes.push(`command timed out after ${timeoutMs}ms`);
-	if (result.outputCapped) notes.push("command output exceeded the inline output limit");
-	if (result.error && output.trim().length === 0) notes.push(result.error.message);
-	if (notes.length === 0) return output;
-	const suffix = notes.map((note) => `[${note}]`).join("\n");
-	return output.length > 0 ? `${output.replace(/\s+$/g, "")}\n${suffix}` : suffix;
-}
-
-function bashExecutionEntryInput(args: {
-	command: string;
-	result: BashCommandResult;
-	parentTurnId: string | null;
-	excludeFromContext: boolean;
-	timeoutMs: number;
-}): Extract<SessionEntryInput, { kind: "bashExecution" }> {
-	const output = appendStatusNotes(combineBashOutput(args.result), args.result, args.timeoutMs);
-	return {
-		kind: "bashExecution",
-		parentTurnId: args.parentTurnId,
-		command: args.command,
-		output,
-		exitCode: args.result.exitCode,
-		cancelled: args.result.aborted,
-		truncated: args.result.outputCapped,
-		excludeFromContext: args.excludeFromContext,
 	};
 }

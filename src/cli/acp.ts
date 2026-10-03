@@ -143,6 +143,8 @@ export async function runAcpCommand(
 				images: true,
 				interviews: true,
 				workerPermissions: true,
+				shell: true,
+				queueEdit: true,
 			});
 			const serving = serveDeferredAcp({
 				transport,

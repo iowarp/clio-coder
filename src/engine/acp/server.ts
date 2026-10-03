@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { realpathSync } from "node:fs";
 import { isAbsolute, resolve as resolvePath } from "node:path";
+import { type BashCommandProgress, combineBashOutput } from "../../core/bash-exec.js";
 import {
 	type AccountabilityEvidenceReadyPayload,
 	BusChannels,
@@ -43,6 +44,7 @@ import {
 import type { ContextLedger } from "../../domains/session/context-ledger.js";
 import type { SessionContract, SessionMeta } from "../../domains/session/contract.js";
 import type { MessageEntry, SessionEntry } from "../../domains/session/entries.js";
+import { OPERATOR_SHELL_TIMEOUT_MS, runOperatorShellLine } from "../../domains/session/operator-shell.js";
 import type { TaskBoardSnapshot } from "../../domains/session/task-board.js";
 import { filterEntriesToActivePath } from "../../domains/session/tree/active-path.js";
 import type { WorkspaceSnapshot } from "../../domains/session/workspace/index.js";
@@ -250,9 +252,31 @@ export interface AcpServerChat {
 	queuedMessages?(): { steer: ReadonlyArray<string>; followUp: ReadonlyArray<string> };
 	/** Drain both queues and hand back the texts so a client can restore them. */
 	clearQueuedFollowUps?(): string[];
+	/** The queued entries still in Clio's hands, in delivery order. */
+	queueEntries?(): ReadonlyArray<AcpQueuedEntry>;
+	/** Takes one entry out of the queue; null when it already left. `reason` is recorded, never acted on. */
+	removeQueuedEntry?(id: string, reason?: "removed" | "to-editor" | "sent-now"): AcpQueuedEntry | null;
+	/** Moves one entry up (-1) or down (+1) in delivery order; false when it cannot move. */
+	moveQueuedEntry?(id: string, delta: -1 | 1): boolean;
+	/** The operator's own choice of slot, which pins the entry against steering producers. */
+	setQueuedEntryKind?(id: string, kind: AcpQueuedEntryKind): boolean;
 	/** Why an interrupt would be refused right now, or null when it would cancel the run. */
 	interruptRefusal?(): string | null;
 	dispose?(): void;
+}
+
+export type AcpQueuedEntryKind = "steer" | "follow-up";
+
+/** One message waiting in the chat loop's steering queue, as the loop holds it. */
+export interface AcpQueuedEntry {
+	id: string;
+	kind: AcpQueuedEntryKind;
+	text: string;
+	/** Epoch milliseconds the message was queued. */
+	enqueuedAt: number;
+	pinned?: boolean;
+	display?: { text: string; note?: string };
+	referencedPaths?: ReadonlyArray<string>;
 }
 
 /**
@@ -391,6 +415,14 @@ export interface ClioAcpServerOptions {
 	) => Promise<AcpPromptExpansion>;
 	toolRegistry?: ToolRegistry;
 	/**
+	 * The terminal's `!` line gate: labels the information-flow sources an
+	 * operator shell line names and returns why they could not be labeled, which
+	 * keeps that line's output out of context. Absent means
+	 * `_clio-coder/session/shell` is not announced and refuses, as it does when
+	 * the session readers it records and replays through are not wired.
+	 */
+	labelOperatorCommand?: (command: string, cwd: string) => string | null;
+	/**
 	 * Tool calls the host makes on the operator's behalf inside a prompt turn,
 	 * such as the dispatch a `/council` command starts. They arrive as the same
 	 * engine-shaped `tool_execution_*` events the chat emits and are announced
@@ -514,6 +546,14 @@ interface ActivePrompt {
 	toolCallSequence: number;
 	/** Opt-in state and per-call counters for the non-terminal progress stream. */
 	toolProgress: AcpToolProgressState;
+	/**
+	 * The run a queue send-now started by interrupting this one. The request
+	 * that opened the turn waits for it, so its events stream on the same
+	 * subscription and its stop reason is the one this prompt returns.
+	 */
+	continuation: Promise<void> | null;
+	/** False once the request stopped waiting on runs; a send-now then has nothing to ride. */
+	acceptsContinuation: boolean;
 }
 
 /**
@@ -1063,6 +1103,8 @@ function createActivePromptState(toolProgress?: { enabled: boolean; now: () => n
 			now: toolProgress?.now ?? Date.now,
 			calls: new Map<string, { frames: number; lastSentAt: number; lastText: string }>(),
 		},
+		continuation: null,
+		acceptsContinuation: true,
 	};
 }
 
@@ -1660,6 +1702,22 @@ function branchesWired(options: ClioAcpServerOptions): boolean {
 		options.readSessionEntries !== undefined &&
 		options.buildReplayMessages !== undefined &&
 		options.chat.resetForSession !== undefined
+	);
+}
+
+/** A shell line is recorded in the session and replayed into context through the same readers. */
+function shellWired(options: ClioAcpServerOptions): boolean {
+	return options.labelOperatorCommand !== undefined && branchesWired(options);
+}
+
+/** The per-entry operations the terminal's queue navigator performs, plus the send-now resubmit. */
+function queueEditWired(options: ClioAcpServerOptions): boolean {
+	const chat = options.chat;
+	return (
+		chat.queueEntries !== undefined &&
+		chat.removeQueuedEntry !== undefined &&
+		chat.moveQueuedEntry !== undefined &&
+		chat.setQueuedEntryKind !== undefined
 	);
 }
 
@@ -2737,6 +2795,73 @@ function boundedQueueTexts(texts: ReadonlyArray<string>): string[] {
 	return texts.slice(0, ACP_MAX_QUEUED_MESSAGES).map((text) => boundString(text, ACP_MAX_STEER_TEXT_BYTES));
 }
 
+const ACP_QUEUE_META_KEY = "clio-coder/queue";
+const ACP_QUEUE_EDIT_METHOD = "_clio-coder/session/queue_edit";
+const ACP_QUEUE_CHANGED_NOTIFICATION = "_clio-coder/session/queue_changed";
+/** The queue navigator's per-entry keys: x, e, Shift+Up/Down, t and Enter. */
+const ACP_QUEUE_EDIT_OPS = ["remove", "restore", "move", "set_kind", "send_now"] as const;
+type AcpQueueEditOp = (typeof ACP_QUEUE_EDIT_OPS)[number];
+/** Entry ids are minted by the chat loop (`steer_<8 hex>_<n>`); anything wider is not one. */
+const ACP_MAX_QUEUE_ENTRY_ID_BYTES = 128;
+
+interface AcpQueueEntryProjection {
+	id: string;
+	kind: AcpQueuedEntryKind;
+	text: string;
+	enqueuedAt: number;
+	pinned: boolean;
+}
+
+/** The queue in delivery order, each entry as the client addresses it. */
+function projectQueueEntries(entries: ReadonlyArray<AcpQueuedEntry>): AcpQueueEntryProjection[] {
+	return entries.slice(0, ACP_MAX_QUEUED_MESSAGES).map((entry) => ({
+		id: entry.id,
+		kind: entry.kind,
+		text: boundString(entry.text, ACP_MAX_STEER_TEXT_BYTES),
+		enqueuedAt: entry.enqueuedAt,
+		pinned: entry.pinned === true,
+	}));
+}
+
+const ACP_SHELL_META_KEY = "clio-coder/shell";
+const ACP_SESSION_SHELL_METHOD = "_clio-coder/session/shell";
+/** One editor line's worth of command; the terminal admits no newline in it either. */
+const ACP_MAX_SHELL_COMMAND_BYTES = 16 * 1024;
+/** A shell line's output on the wire is its tail; the whole output is in the session entry. */
+const ACP_MAX_SHELL_OUTPUT_BYTES = ACP_MAX_CHUNK_BYTES;
+const ACP_SHELL_TRUNCATION_PREFIX = "[truncated]…";
+
+/**
+ * A shell line is the terminal's `!` operator: one line, run as typed. A
+ * newline would make it a script, which the terminal editor never admits, and
+ * the other C0 controls are refused rather than stripped so the command that
+ * runs is the command the client shows.
+ */
+function requireShellCommand(value: unknown): string {
+	if (typeof value !== "string" || value.trim().length === 0) {
+		throw new AcpRequestError(-32602, "command is required", { code: "invalid_params" });
+	}
+	if (
+		utf8Bytes(value) > ACP_MAX_SHELL_COMMAND_BYTES ||
+		/[\n\r]/u.test(value) ||
+		hasControlCharacters(value.replace(/\t/g, " "))
+	) {
+		throw new AcpRequestError(-32602, "command is invalid", { code: "invalid_params" });
+	}
+	return value.trim();
+}
+
+/** The last {@link ACP_MAX_SHELL_OUTPUT_BYTES} of a shell line's output, marked at the front when cut. */
+function shellOutputTail(output: string): string {
+	if (utf8Bytes(output) <= ACP_MAX_SHELL_OUTPUT_BYTES) return output;
+	const budget = ACP_MAX_SHELL_OUTPUT_BYTES - utf8Bytes(ACP_SHELL_TRUNCATION_PREFIX);
+	const bytes = Buffer.from(output, "utf8");
+	let start = bytes.length - budget;
+	// Step forward off UTF-8 continuation bytes so no code point is split.
+	while (start < bytes.length && ((bytes[start] ?? 0) & 0xc0) === 0x80) start += 1;
+	return `${ACP_SHELL_TRUNCATION_PREFIX}${bytes.subarray(start).toString("utf8")}`;
+}
+
 /**
  * Refusal codes for `_clio-coder/dispatch/steer`. `DispatchContract.steer` reports
  * every refusal as an operator-facing Error, so the wire gets the classification
@@ -2794,6 +2919,10 @@ export interface AcpHandshakeFeatures {
 	interviews?: boolean;
 	/** Whether the host can forward worker permission asks over `session/request_permission`; absent reads as false. */
 	workerPermissions?: boolean;
+	/** Whether `_clio-coder/session/shell` runs operator shell lines; absent reads as false. */
+	shell?: boolean;
+	/** Whether `_clio-coder/session/queue_edit` acts on one queued entry; absent reads as false. */
+	queueEdit?: boolean;
 }
 
 /** ACP stdio declarations are client authority for one session, never saved settings. */
@@ -2853,6 +2982,8 @@ export interface AcpHandshake {
 	readonly interviewsEnabled: boolean;
 	/** The client advertised `clio-coder/workerPermissions`: a person answers forwarded worker asks. */
 	readonly workerPermissionsEnabled: boolean;
+	/** The client advertised `clio-coder/queue` and is sent `_clio-coder/session/queue_changed`. */
+	readonly queueEventsEnabled: boolean;
 	readonly workspaceInstanceId: string;
 	initialize(params: unknown): AcpInitializeResponse;
 	authenticate(params: unknown): never;
@@ -2866,6 +2997,7 @@ export function createAcpHandshake(features: AcpHandshakeFeatures): AcpHandshake
 	let toolProgressEnabled = false;
 	let interviewsEnabled = false;
 	let workerPermissionsEnabled = false;
+	let queueEventsEnabled = false;
 	const enabledEventKinds = new Set<AcpForwardableEventKind>();
 	const workspaceInstanceId = randomUUID();
 	const requireInitialized = (): void => {
@@ -2896,6 +3028,9 @@ export function createAcpHandshake(features: AcpHandshakeFeatures): AcpHandshake
 		},
 		get workerPermissionsEnabled() {
 			return workerPermissionsEnabled;
+		},
+		get queueEventsEnabled() {
+			return queueEventsEnabled;
 		},
 		workspaceInstanceId,
 		initialize(params) {
@@ -2952,6 +3087,11 @@ export function createAcpHandshake(features: AcpHandshakeFeatures): AcpHandshake
 				workerPermissionsRequest !== null &&
 				workerPermissionsRequest.version === 1 &&
 				workerPermissionsRequest.withdraw === ACP_PERMISSION_WITHDRAW_METHOD;
+			// A queue snapshot on every enqueue, hand-over and edit is only worth
+			// sending to a client that replaces its list with it instead of polling.
+			const queueRequest =
+				clientMeta !== null && isRecord(clientMeta[ACP_QUEUE_META_KEY]) ? clientMeta[ACP_QUEUE_META_KEY] : null;
+			queueEventsEnabled = features.queueEdit === true && queueRequest !== null && queueRequest.version === 1;
 			const canLoadSession = features.loadSession;
 			initialized = true;
 			return {
@@ -3135,6 +3275,28 @@ export function createAcpHandshake(features: AcpHandshakeFeatures): AcpHandshake
 									},
 								}
 							: {}),
+						...(features.shell
+							? {
+									[ACP_SHELL_META_KEY]: {
+										version: 1,
+										run: ACP_SESSION_SHELL_METHOD,
+										timeoutMs: OPERATOR_SHELL_TIMEOUT_MS,
+									},
+								}
+							: {}),
+						// The `queue` read gains `entries` alongside its two text lists. The
+						// change notification carries the same list and is sent only to a
+						// client that advertised this key, like the tool-progress stream.
+						...(features.queueEdit
+							? {
+									[ACP_QUEUE_META_KEY]: {
+										version: 1,
+										edit: ACP_QUEUE_EDIT_METHOD,
+										ops: ACP_QUEUE_EDIT_OPS,
+										notification: ACP_QUEUE_CHANGED_NOTIFICATION,
+									},
+								}
+							: {}),
 					},
 				},
 				authMethods:
@@ -3210,6 +3372,8 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 			images: options.expandPrompt !== undefined,
 			interviews: options.interviews !== undefined,
 			workerPermissions: options.workerPermissions !== undefined,
+			shell: shellWired(options),
+			queueEdit: queueEditWired(options),
 		});
 	const workspaceInstanceId = handshake.workspaceInstanceId;
 	const now = options.now ?? Date.now;
@@ -3238,6 +3402,8 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 	/** Counts prompts, so a draft drawn while a request started is known to be stale. */
 	let promptSerial = 0;
 	let promptSettled: Promise<void> | null = null;
+	/** The one operator shell line this process runs at a time, as the terminal runs one. */
+	let activeShell: { sessionId: string; abort: AbortController; settled: Promise<void> } | null = null;
 	const closedSessionIds = new Set<string>();
 	const closingSessions = new Map<string, Promise<Record<string, never>>>();
 	// The launch cwd is the process's one workspace identity: settings, project
@@ -3636,6 +3802,24 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 		unsubscribeEvents.length = 0;
 		dispatchProgress.clear();
 	};
+	// The chat loop reports every enqueue, hand-over, edit and drain, mid-turn
+	// or not. A client that opted in replaces its queue rows with each list
+	// instead of polling `queue` while a turn runs.
+	const unsubscribeQueueEvents = queueEditWired(options)
+		? options.chat.onEvent((raw) => {
+				if (eventRecord(raw).type !== "queue_update") return;
+				const sessionId = activeSessionId ?? boundSessionId;
+				if (!handshake.initialized || !handshake.queueEventsEnabled || sessionId === null) return;
+				try {
+					options.transport.notify(ACP_QUEUE_CHANGED_NOTIFICATION, {
+						sessionId,
+						entries: projectQueueEntries(options.chat.queueEntries?.() ?? []),
+					});
+				} catch {
+					options.diagnostics?.("failed to send a queue change notification");
+				}
+			})
+		: () => {};
 
 	/**
 	 * Records a delegated agent against the tool call that spawned it and
@@ -5017,6 +5201,11 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 				reason: "steer-instead",
 			});
 		}
+		if (activeShell !== null && options.commands.injectsUserTurn(request.command)) {
+			throw new AcpRequestError(-32602, "this command submits a user turn and a shell line is running", {
+				code: "shell_active",
+			});
+		}
 		// A prompt-turn command asks for approvals that bind to a call on the
 		// wire, and outside a prompt there is no turn to put that call in. It is
 		// refused here with the path that works, rather than admitted and denied.
@@ -5102,6 +5291,8 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 	});
 
 	const cancelSession = (session: AcpServerSession, reason: string): void => {
+		// A shell line never runs beside a prompt, so this stops whichever of the two is running.
+		if (activeShell?.sessionId === session.id) activeShell.abort.abort();
 		if (activeSessionId === session.id || activeSessionId === null) permission.cancelPending(reason);
 		if ((activeSessionId ?? boundSessionId) === session.id) options.interviews?.cancel();
 		if (!session.activePrompt) return;
@@ -5184,7 +5375,11 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 			throw new AcpRequestError(-32601, "method not found", { code: "method_not_found" });
 		}
 		const queued = options.chat.queuedMessages();
-		return { steer: boundedQueueTexts(queued.steer), followUp: boundedQueueTexts(queued.followUp) };
+		return {
+			steer: boundedQueueTexts(queued.steer),
+			followUp: boundedQueueTexts(queued.followUp),
+			...(options.chat.queueEntries !== undefined ? { entries: projectQueueEntries(options.chat.queueEntries()) } : {}),
+		};
 	});
 
 	options.transport.onRequest("_clio-coder/session/queue_clear", (params) => {
@@ -5197,6 +5392,245 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 		// Both queues drain together, exactly as Alt+Q does in the terminal: the
 		// returned texts are what the client now owns and must re-send to deliver.
 		return { restored: boundedQueueTexts(options.chat.clearQueuedFollowUps()) };
+	});
+
+	/** The chat loop's per-entry queue operations, bound, or a refusal when this build has none. */
+	const queueControl = () => {
+		const chat = options.chat;
+		if (
+			chat.queueEntries === undefined ||
+			chat.removeQueuedEntry === undefined ||
+			chat.moveQueuedEntry === undefined ||
+			chat.setQueuedEntryKind === undefined
+		) {
+			throw new AcpRequestError(-32601, "method not found", { code: "method_not_found" });
+		}
+		return {
+			entries: chat.queueEntries.bind(chat),
+			remove: chat.removeQueuedEntry.bind(chat),
+			move: chat.moveQueuedEntry.bind(chat),
+			setKind: chat.setQueuedEntryKind.bind(chat),
+		};
+	};
+
+	options.transport.onRequest(ACP_QUEUE_EDIT_METHOD, (params) => {
+		requireInitialized();
+		const request = assertParamKeys(params, new Set(["sessionId", "id", "op", "delta", "kind"]));
+		const session = getSession(request);
+		const queue = queueControl();
+		const id = requireBoundedClientString(request.id, "id", ACP_MAX_QUEUE_ENTRY_ID_BYTES);
+		if (typeof request.op !== "string" || !(ACP_QUEUE_EDIT_OPS as ReadonlyArray<string>).includes(request.op)) {
+			throw new AcpRequestError(-32602, `op must be one of ${ACP_QUEUE_EDIT_OPS.join(", ")}`, {
+				code: "invalid_params",
+			});
+		}
+		const op = request.op as AcpQueueEditOp;
+		// Each operand belongs to one op. Accepting it on another would promise
+		// an effect that op never has.
+		if (
+			(request.delta !== undefined) !== (op === "move") ||
+			(op === "move" && request.delta !== -1 && request.delta !== 1)
+		) {
+			throw new AcpRequestError(-32602, "move takes delta -1 or 1, and no other op takes delta", {
+				code: "invalid_params",
+			});
+		}
+		if (
+			(request.kind !== undefined) !== (op === "set_kind") ||
+			(op === "set_kind" && request.kind !== "steer" && request.kind !== "follow-up")
+		) {
+			throw new AcpRequestError(-32602, "set_kind takes kind steer or follow-up, and no other op takes kind", {
+				code: "invalid_params",
+			});
+		}
+		// Every answer carries the queue as it now stands, so a client redraws
+		// from the reply and never from its own guess at what the op did.
+		const answer = (fields: Record<string, unknown>) => ({ ...fields, entries: projectQueueEntries(queue.entries()) });
+		const stale = () => answer({ applied: false, reason: "stale-entry" });
+		if (!queue.entries().some((entry) => entry.id === id)) return stale();
+		switch (op) {
+			case "remove":
+				return queue.remove(id, "removed") === null ? stale() : answer({ applied: true });
+			case "restore": {
+				// The terminal's `e`: the entry leaves the queue and its text is the client's draft again.
+				const taken = queue.remove(id, "to-editor");
+				return taken === null
+					? stale()
+					: answer({ applied: true, text: boundString(taken.text, ACP_MAX_STEER_TEXT_BYTES) });
+			}
+			case "move":
+				return queue.move(id, request.delta as -1 | 1)
+					? answer({ applied: true })
+					: answer({ applied: false, reason: "at-edge" });
+			case "set_kind":
+				return queue.setKind(id, request.kind as AcpQueuedEntryKind) ? answer({ applied: true }) : stale();
+			case "send_now": {
+				const active = session.activePrompt;
+				if (active === null) return answer({ applied: false, reason: "no-active-prompt" });
+				if (active.cancelled || !active.acceptsContinuation) return answer({ applied: false, reason: "prompt-ending" });
+				if (!options.chat.isStreaming()) return answer({ applied: false, reason: "not-streaming" });
+				const refusal = options.chat.interruptRefusal?.() ?? null;
+				const taken = queue.remove(id, "sent-now");
+				if (taken === null) return stale();
+				// The navigator's Enter: the entry leaves the queue and is resubmitted
+				// as an interrupt. The chat loop cancels the run, holds the rest of the
+				// queue for the fresh prompt and starts it. When it refuses the
+				// interrupt (an attached dispatch, a parked permission ask) it puts the
+				// text at the head of the steering queue instead, with a notice.
+				const run = options.chat.submit(taken.text, {
+					steering: "interrupt",
+					...(taken.display !== undefined ? { display: taken.display } : {}),
+					...(taken.referencedPaths !== undefined && taken.referencedPaths.length > 0
+						? { workingContextPaths: [...taken.referencedPaths] }
+						: {}),
+				});
+				// Observed here so a rejection that lands before the prompt handler
+				// reaches its continuation is not reported as unhandled; the handler
+				// still awaits `run` and records the failure on the turn.
+				run.catch(() => {});
+				const previous = active.continuation;
+				active.continuation = previous === null ? run : Promise.all([previous, run]).then(() => {});
+				return answer({
+					applied: true,
+					delivery: refusal === null ? "interrupt" : "next-slot",
+					text: boundString(taken.text, ACP_MAX_STEER_TEXT_BYTES),
+					...(refusal !== null ? { refusal } : {}),
+				});
+			}
+		}
+	});
+
+	options.transport.onRequest(ACP_SESSION_SHELL_METHOD, async (params) => {
+		requireInitialized();
+		const request = assertParamKeys(params, new Set(["sessionId", "command", "excludeFromContext"]));
+		const session = getSession(request);
+		const label = options.labelOperatorCommand;
+		const durable = options.session;
+		const resetForSession = options.chat.resetForSession;
+		if (label === undefined || durable === undefined || resetForSession === undefined || !branchesWired(options)) {
+			throw new AcpRequestError(-32601, "method not found", { code: "method_not_found" });
+		}
+		const command = requireShellCommand(request.command);
+		if (request.excludeFromContext !== undefined && typeof request.excludeFromContext !== "boolean") {
+			throw new AcpRequestError(-32602, "excludeFromContext must be a boolean", { code: "invalid_params" });
+		}
+		const excludeFromContext = request.excludeFromContext === true;
+		if (closingSessions.has(session.id)) {
+			throw new AcpRequestError(-32002, "unknown ACP session", { code: "session_unknown" });
+		}
+		// The terminal's two admission guards. A turn's context would change
+		// underneath it when the line's entry lands, and one line runs at a time.
+		if (session.activePrompt !== null || options.chat.isStreaming()) {
+			throw new AcpRequestError(-32602, "a turn is running; cancel it before running a shell line", {
+				code: "prompt_active",
+			});
+		}
+		if (activeShell !== null) {
+			throw new AcpRequestError(-32602, "a shell line is already running; cancel it first", { code: "shell_active" });
+		}
+		if (durable.current()?.id !== session.id) durable.resume(session.id);
+		const abort = new AbortController();
+		let settle: () => void = () => {};
+		const settled = new Promise<void>((resolveSettled) => {
+			settle = resolveSettled;
+		});
+		activeShell = { sessionId: session.id, abort, settled };
+		// The line is the operator's, not the agent's: its frames carry this key
+		// instead of agent attribution, and the same call shape a `bash` row has.
+		const meta = { [ACP_SHELL_META_KEY]: { version: 1, excludeFromContext } };
+		const toolCallId = `shell_${randomUUID()}`;
+		const title = boundString(command, ACP_MAX_TOOL_TITLE_BYTES);
+		const notify = (update: Record<string, unknown>): void => {
+			try {
+				options.transport.notify("session/update", { sessionId: session.id, update, _meta: meta });
+			} catch {
+				options.diagnostics?.("failed to send a shell line update");
+			}
+		};
+		// The tool-progress opt-in and its bounds, applied to the line's cumulative output tail.
+		let frames = 0;
+		let lastSentAt = Number.NEGATIVE_INFINITY;
+		let lastText = "";
+		const onUpdate = (progress: BashCommandProgress): void => {
+			const text = shellOutputTail(combineBashOutput(progress));
+			const sentAt = now();
+			if (
+				text.length === 0 ||
+				text === lastText ||
+				frames >= ACP_MAX_TOOL_PROGRESS_FRAMES_PER_CALL ||
+				sentAt - lastSentAt < ACP_MIN_TOOL_PROGRESS_INTERVAL_MS
+			) {
+				return;
+			}
+			frames += 1;
+			lastSentAt = sentAt;
+			lastText = text;
+			notify({ sessionUpdate: "tool_call_update", toolCallId, status: "in_progress", content: toolCallContent(text) });
+		};
+		try {
+			const parentTurnId = durable.tree().leafId ?? null;
+			notify({
+				sessionUpdate: "tool_call",
+				toolCallId,
+				name: "shell",
+				title,
+				kind: "execute" satisfies AcpToolKind,
+				status: "in_progress" satisfies AcpToolCallStatus,
+				rawInput: { command, excludeFromContext },
+			});
+			let entry: SessionEntry;
+			let run: Awaited<ReturnType<typeof runOperatorShellLine>>;
+			try {
+				run = await runOperatorShellLine({
+					command,
+					cwd: session.cwd,
+					excludeFromContext,
+					parentTurnId,
+					signal: abort.signal,
+					label,
+					...(handshake.toolProgressEnabled ? { onUpdate } : {}),
+				});
+				if (run.unlabeled !== null) options.diagnostics?.(`shell output kept out of context: ${run.unlabeled}`);
+				entry = durable.appendEntry(run.entry);
+				// As in the terminal: the entry stays anchored where the line started,
+				// and the context is rebuilt from the leaf the session has now.
+				const leafTurnId = durable.tree().leafId ?? parentTurnId;
+				resetForSession.call(
+					options.chat,
+					leafTurnId,
+					prepareRestore(session.id, leafTurnId, "leaf", false).replayMessages,
+				);
+			} catch (err) {
+				options.diagnostics?.(`shell line failed: ${acpErrorMessage(err instanceof Error ? err.message : String(err))}`);
+				notify({ sessionUpdate: "tool_call_update", toolCallId, title, kind: "execute", status: "failed" });
+				throw new AcpRequestError(-32603, "the shell line could not be run or recorded", { code: "shell_failed" });
+			}
+			const output = shellOutputTail(entry.kind === "bashExecution" ? entry.output : run.entry.output);
+			const { result } = run;
+			const settledResult = {
+				exitCode: result.exitCode,
+				cancelled: result.aborted,
+				timedOut: result.timedOut,
+				truncated: run.entry.truncated,
+				excludedFromContext: run.entry.excludeFromContext === true,
+				...(run.unlabeled !== null ? { unlabeled: true } : {}),
+			};
+			notify({
+				sessionUpdate: "tool_call_update",
+				toolCallId,
+				title,
+				kind: "execute",
+				status: (result.exitCode === 0 && !result.aborted && !result.timedOut
+					? "completed"
+					: "failed") satisfies AcpToolCallStatus,
+				...(output.length > 0 ? { content: toolCallContent(output) } : {}),
+				rawOutput: settledResult,
+			});
+			return { turnId: entry.turnId, ...settledResult, output, outputBytes: result.outputBytes };
+		} finally {
+			if (activeShell?.abort === abort) activeShell = null;
+			settle();
+		}
 	});
 
 	options.transport.onRequest("_clio-coder/session/interrupt", (params) => {
@@ -5287,6 +5721,8 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 			if (session.activePrompt) {
 				if (promptSettled) await promptSettled;
 			}
+			// The aborted line still appends its entry; the ledger must outlive that write.
+			if (activeShell?.sessionId === session.id) await activeShell.settled;
 			if (options.session?.current()?.id === session.id) await options.session.close();
 			await options.mcpCapabilities?.detachClientServers();
 			sessions.delete(session.id);
@@ -5309,6 +5745,13 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 		const session = getSession(params);
 		if (session.activePrompt || options.chat.isStreaming()) {
 			throw new AcpRequestError(-32602, "this session already has an active prompt", { code: "prompt_active" });
+		}
+		// The line rebuilds the chat's context when it settles, which aborts a
+		// run in flight, so a turn waits for it exactly as it waits for a turn.
+		if (activeShell !== null) {
+			throw new AcpRequestError(-32602, "a shell line is running; wait for it or cancel it first", {
+				code: "shell_active",
+			});
 		}
 		const text = promptText(params);
 		const resources = promptResources(params);
@@ -5426,11 +5869,20 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 					...(expansion.display ? { display: expansion.display } : {}),
 				});
 			}
+			// A queue send-now interrupted the run this request started and
+			// resubmitted the entry. This request carries that run to its end, so
+			// it is never a turn with no request to report its stop reason on.
+			while (active.continuation !== null) {
+				const next = active.continuation;
+				active.continuation = null;
+				await next;
+			}
 		} catch (err) {
 			if (err instanceof AcpRequestError) throw err;
 			active.errored = true;
 			active.errorMessage = err instanceof Error ? err.message : String(err);
 		} finally {
+			active.acceptsContinuation = false;
 			unsubscribe();
 			// The last meter and plan frames precede the response they total.
 			await telemetry.turnSettled();
@@ -5508,12 +5960,16 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 			permission.unregister();
 			unsubscribeEventStream();
 			permission.cancelPending("ACP transport closed");
+			unsubscribeQueueEvents();
 			for (const session of sessions.values()) cancelSession(session, "ACP transport closed");
-			const inFlight = promptSettled;
-			if (inFlight === null) {
+			const settling = [promptSettled, activeShell?.settled ?? null].filter(
+				(pending): pending is Promise<void> => pending !== null,
+			);
+			if (settling.length === 0) {
 				resolve(0);
 				return;
 			}
+			const inFlight = Promise.all(settling);
 			// The prompt handler owns the chat loop's settlement; resolving the
 			// serve promise before it returns lets the orchestrator stop domains
 			// under a live writer. The bound keeps a wedged turn from holding the
