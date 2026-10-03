@@ -30,7 +30,7 @@ import { effectiveToolCall, expandChainMessages } from "../../../tools/surface.j
 import type { MessageEntry, SessionEntry } from "../../session/entries.js";
 import type { WorkingSetRef } from "./contract.js";
 import { isTurnStart } from "./horizon.js";
-import { isRecord, toolResultText } from "./payload.js";
+import { isRecord, isRefusedVerdict, toolResultText } from "./payload.js";
 
 /**
  * The observing verb. Clio's `git` and `verify` are command runners with an
@@ -396,7 +396,7 @@ function resultDetails(obj: Record<string, unknown> | null): Record<string, unkn
  */
 function chainStepBlocked(obj: Record<string, unknown> | null): boolean {
 	const admission = resultDetails(obj)?.chainAdmission;
-	return isRecord(admission) && (admission.outcome === "blocked" || typeof admission.blockReason === "string");
+	return isRecord(admission) && isRefusedVerdict(admission);
 }
 
 function chainMember(child: MessageEntry, observation: PathObservation | null): ChainMember {
@@ -425,7 +425,7 @@ function toolResultObservation(
 	if (op === undefined) return null;
 	const args = call !== undefined && isRecord(call.args) ? call.args : null;
 	const isError = obj?.isError === true || obj?.error === true;
-	const isBlocked = obj?.outcome === "blocked" || typeof obj?.blockReason === "string" || chainStepBlocked(obj);
+	const isBlocked = (obj !== null && isRefusedVerdict(obj)) || chainStepBlocked(obj);
 	const path = observedPath(op, args, context.cwd);
 	const surfaced = shouldParseSurfaced(op, args, isError)
 		? surfacedPaths(op, args, toolResultText(obj?.result ?? entry.payload), path, context.cwd)
