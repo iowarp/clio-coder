@@ -96,9 +96,7 @@ export function coordinatorDispatchParameters() {
 			}),
 		),
 		worktree: Type.Optional(Type.Literal(true)),
-		detach: Type.Optional(
-			Type.Boolean({ description: "Return ids; collect with monitor before synthesis." }),
-		),
+		detach: Type.Optional(Type.Boolean({ description: "Return ids; collect with monitor before synthesis." })),
 	});
 }
 
