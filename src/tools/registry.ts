@@ -138,6 +138,12 @@ export interface ToolMetadata {
 	presentation?: ToolPresentationPolicy;
 }
 
+export interface ToolConfirmation {
+	ruleId: string;
+	detail: string;
+	hints: ReadonlyArray<string>;
+}
+
 export interface ToolSpec {
 	name: ToolName;
 	description: string;
@@ -163,6 +169,11 @@ export interface ToolSpec {
 	baseActionClass: ActionClass;
 	/** A safety-net confirmation required at every autonomy level. */
 	confirmationRuleId?: string;
+	/**
+	 * The same rail decided per call, for a tool whose arguments decide whether
+	 * the operator must confirm. Wins over `confirmationRuleId` when it returns one.
+	 */
+	confirmationFor?(args: Record<string, unknown>): ToolConfirmation | undefined;
 	/** Harness-owned projection of executable effects for the safety engine. Never package-supplied code. */
 	safetyCall?(args: Record<string, unknown>): ClassifierCall | undefined;
 	/**
@@ -940,6 +951,7 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 				? (spec.describeDispatchPlan?.(call.args ?? {}) ?? describeDispatchPlan(call.args))
 				: null;
 		const planScale = dispatchPlan?.planScale === true;
+		const confirmation = spec.confirmationFor?.(call.args ?? {});
 		// The shared evaluator decides; this adapter only parks, audits and runs.
 		// The SDK bridge and the ACP mediator call the same function.
 		const admission = evaluateAdmission({
@@ -956,7 +968,14 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 				...(options?.allowedTools !== undefined ? { allowedTools: options.allowedTools } : {}),
 				...(options?.pendingSkillPolicy !== undefined ? { pendingSkillPolicy: options.pendingSkillPolicy } : {}),
 			},
-			...(spec.confirmationRuleId !== undefined ? { confirmationRuleId: spec.confirmationRuleId } : {}),
+			...(confirmation !== undefined
+				? {
+						confirmationRuleId: confirmation.ruleId,
+						confirmationText: { detail: confirmation.detail, hints: confirmation.hints },
+					}
+				: spec.confirmationRuleId !== undefined
+					? { confirmationRuleId: spec.confirmationRuleId }
+					: {}),
 			...(grant !== undefined
 				? { authorization: { actionClass: grant.actionClass, issuer: grant.issuer ?? "operator" } }
 				: {}),

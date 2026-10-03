@@ -74,6 +74,7 @@ import {
 	readScopeSpellings,
 } from "./read-scope.js";
 import { formatRejection, type RejectionMessage } from "./rejection-feedback.js";
+import { ROUTING_PIN_HINT } from "./routing-settings.js";
 import { getCachedDefaultRulePacks, type PackId, type RulePacks } from "./rule-pack-loader.js";
 import { clioCredentialStorePaths } from "./secret-paths.js";
 import { activeClioSkillRoots, mutationCandidates, skillMutationReason } from "./skill-authority.js";
@@ -715,6 +716,24 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 					reasonCode: "outside-file-replacement",
 					reasons: [
 						`Existing file '${outsideReplacement}' lies outside the workspace; replacing its contents requires operator approval`,
+					],
+					policySource: "builtin-classifier" as const,
+				};
+				return posture === "confirmed" ? allowDecision(base, input) : askDecision(base, input);
+			}
+			// Project settings carry persistent fleet routing. A model edit is file
+			// level, so it cannot be told apart from a routing change: every mutation
+			// asks at every autonomy level, and a headless denial repeats reasons[0].
+			const projectSettings = [
+				path.join(cwd, ".clio-coder", "settings.yaml"),
+				path.join(cwd, ".clio-coder", "settings.local.yaml"),
+			];
+			if (skillMutationReason(projectSettings, candidates, walkMemo) !== null) {
+				const input = {
+					ruleId: "project-settings-confirm",
+					reasonCode: "project-settings-confirm",
+					reasons: [
+						`Project settings under .clio-coder/ hold persistent fleet routing and are operator-owned; changing them requires operator approval. ${ROUTING_PIN_HINT}`,
 					],
 					policySource: "builtin-classifier" as const,
 				};

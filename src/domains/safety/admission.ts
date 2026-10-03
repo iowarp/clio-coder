@@ -90,6 +90,8 @@ export interface AdmissionInput {
 	constraints?: AdmissionConstraints;
 	/** A tool-level confirmation rail required at every autonomy level. */
 	confirmationRuleId?: string;
+	/** What the confirmation rail tells the operator and a denied model; absent keeps the Slurm wording. */
+	confirmationText?: { detail: string; hints: ReadonlyArray<string> };
 	authorization?: AdmissionAuthorization;
 	/** Adapter translation of each net decision (a registered tool's base action class). */
 	normalize?: (decision: SafetyDecision) => SafetyDecision;
@@ -322,8 +324,10 @@ export function evaluateAdmission(input: AdmissionInput): AdmissionDisposition {
 			confirmationRuleId: input.confirmationRuleId,
 			rejection: {
 				short: `${call.tool} needs operator confirmation`,
-				detail: `${call.tool} changes a Slurm allocation and requires approval before it reaches the scheduler.`,
-				hints: ["Approving resumes only this call."],
+				detail:
+					input.confirmationText?.detail ??
+					`${call.tool} changes a Slurm allocation and requires approval before it reaches the scheduler.`,
+				hints: ["Approving resumes only this call.", ...(input.confirmationText?.hints ?? [])],
 			},
 			...(decision.policy !== undefined ? { policy: decision.policy } : {}),
 		};

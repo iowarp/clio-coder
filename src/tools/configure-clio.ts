@@ -7,9 +7,10 @@ import { ToolNames } from "../core/tool-names.js";
 import { settingsChangeKind } from "../domains/config/classify.js";
 import type { AutonomyLevel } from "../domains/safety/autonomy.js";
 import { sanitizeCallTargetText } from "../domains/safety/call-target.js";
+import { isFleetRoutingPath, ROUTING_PIN_HINT } from "../domains/safety/routing-settings.js";
 import { StringEnum } from "../engine/ai.js";
 import type { AskUserHandler } from "./ask-user.js";
-import type { ToolSpec } from "./registry.js";
+import type { ToolConfirmation, ToolSpec } from "./registry.js";
 
 interface ConfigureClioDeps {
 	askUser: AskUserHandler;
@@ -34,13 +35,16 @@ const ELIGIBLE_PATH =
  * preview directly; both modes retain expiry and stale-value checks.
  * One pending proposal per session keeps both the UI and stale-value check
  * unambiguous. It deliberately never accepts credentials or arbitrary paths.
+ * Persistent fleet routing is the exception to yolo: its apply parks on the
+ * registry's confirmation rail at every autonomy level, so the operator
+ * approves the exact preview there and this tool does not ask a second time.
  */
 export function createConfigureClioTool(deps: ConfigureClioDeps): ToolSpec {
 	let pending: Proposal | null = null;
 	return {
 		name: ToolNames.ConfigureClio,
 		description:
-			"Preview a saved global Clio routing or fleet setting, then apply the exact proposal. Default asks the operator to approve; yolo applies directly. Use action=preview with a settings path and text value; action=apply with proposalId. For agent model bindings, preview/apply fleet.profiles first, then fleet.agentProfiles; each value is a complete JSON map preserving existing entries, not a nested path. The save result names when the setting takes effect; session-owned routing requires exiting and starting a new Clio session. Project saves use the operator's /settings UI. Autonomy is changed only by the operator through /settings, clio-coder configure, or --autonomy.",
+			"Preview a saved global Clio routing or fleet setting, then apply the exact proposal. Default asks the operator to approve; yolo applies directly, except fleet routing (fleet.default, fleet.profiles, fleet.agentProfiles), which always asks the operator. For a one-off run, pin dispatch's target and model instead of saving routing. Use action=preview with a settings path and text value; action=apply with proposalId. For agent model bindings, preview/apply fleet.profiles first, then fleet.agentProfiles; each value is a complete JSON map preserving existing entries, not a nested path. The save result names when the setting takes effect; session-owned routing requires exiting and starting a new Clio session. Project saves use the operator's /settings UI. Autonomy is changed only by the operator through /settings, clio-coder configure, or --autonomy.",
 		placement: "gateway",
 		parameters: Type.Object({
 			action: StringEnum(["preview", "apply"]),
@@ -50,6 +54,15 @@ export function createConfigureClioTool(deps: ConfigureClioDeps): ToolSpec {
 		}),
 		baseActionClass: "write",
 		executionMode: "sequential",
+		confirmationFor(args): ToolConfirmation | undefined {
+			if (args.action !== "apply" || !pending || args.proposalId !== pending.id) return undefined;
+			if (!isFleetRoutingPath(pending.path)) return undefined;
+			return {
+				ruleId: "fleet-routing-settings",
+				detail: `configure_clio saves persistent fleet routing, which needs operator approval at every autonomy level.\n${pending.preview}`,
+				hints: [ROUTING_PIN_HINT],
+			};
+		},
 		async run(args) {
 			const path = typeof args.path === "string" ? args.path.trim() : undefined;
 			const inputValue = typeof args.value === "string" ? args.value.trim() : undefined;
@@ -101,9 +114,10 @@ export function createConfigureClioTool(deps: ConfigureClioDeps): ToolSpec {
 						preview: boundedSettingPreview(affected),
 						expiresAt: Date.now() + 10 * 60_000,
 					};
+					const routing = isFleetRoutingPath(path);
 					return {
 						kind: "ok",
-						output: `Proposed saved settings change:\n${pending.preview}\n\nCall configure_clio(action="apply", proposalId="${pending.id}") to ${autonomy === "yolo" ? "save it" : "request operator approval"}. This proposal expires in 10 minutes.`,
+						output: `Proposed saved settings change:\n${pending.preview}\n\nCall configure_clio(action="apply", proposalId="${pending.id}") to ${autonomy === "yolo" && !routing ? "save it" : "request operator approval"}. This proposal expires in 10 minutes.${routing ? ` ${ROUTING_PIN_HINT}` : ""}`,
 					};
 				} catch (error) {
 					return { kind: "error", message: error instanceof Error ? error.message : String(error) };
@@ -120,7 +134,7 @@ export function createConfigureClioTool(deps: ConfigureClioDeps): ToolSpec {
 				if (JSON.stringify(getAtPath(readSettings(), proposal.path)) !== proposal.before) {
 					return { kind: "error", message: "saved setting changed since preview; preview it again" };
 				}
-				if (autonomy !== "yolo") {
+				if (autonomy !== "yolo" && !isFleetRoutingPath(proposal.path)) {
 					const answer = await deps.askUser([
 						{
 							question: `Apply this saved Clio setting?\n${proposal.preview}`,

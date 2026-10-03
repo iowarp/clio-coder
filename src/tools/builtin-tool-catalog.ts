@@ -506,7 +506,7 @@ const TOOL_METADATA: Readonly<Record<string, ToolMetadata>> = {
 		resultSizePolicy: { kind: "exact", maxBytes: 8_192 },
 		costLatency: "local_slow",
 		promptHint:
-			"When asked to change Clio settings in default or yolo mode, call configure_clio through gateway. Preview first, then apply the returned proposal id; default asks the operator, yolo saves directly, and stale proposals are refused.",
+			"When asked to change Clio settings in default or yolo mode, call configure_clio through gateway. Preview first, then apply the returned proposal id; default asks the operator, yolo saves directly except fleet routing, which always asks, and stale proposals are refused.",
 	},
 	// ARTIFACT: terminal writers.
 	[ToolNames.Artifact]: {
