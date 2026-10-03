@@ -59,8 +59,10 @@ compare ratios, not absolute milliseconds.
   237 to 1,769, and frame time is unchanged within noise.
 
 The regular screen is Clio's default mode (`src/core/defaults.ts`), so dropping
-the memo would put a 9.5x keystroke and 5.3x streamed-token slowdown on the
-default path for very long transcripts, which is why those five hunks stay.
+the memo would put a 6 to 10 ms frame on the default path for very long
+transcripts against 0.6 to 1.1 ms with it (9.5x to 16.8x for keystrokes across
+the probes, which ran under different host load), which is why those five hunks
+stay.
 Pi's own coding agent defaults to fullscreen, where the alternate screen
 virtualizes the transcript, and its large-transcript benchmarks cover only that
 mode. The two removed hunks cost at most 1.5x frame time or extra bytes written
@@ -96,7 +98,7 @@ hunks. The memo stays until Pi ships the change upstream (draft 0003).
   upstream behavior fixes.
 - **Move the render memo into an engine subclass:** rejected. The Kitty
   image-row scans are private methods, so a subclass cannot replace them. In an earlier probe a
-  stock regular-screen frame cost 9.8 to 10.4 ms at 22.9k rows, a protected
+  stock regular-screen frame cost 9.8 to 10.4 ms at 22.9k rows in the same interleaved probe, a protected
   `applyLineResets` override alone cost 4.8 to 5.1 ms, and the full memo cost
   0.6 to 1.1 ms. Making fullscreen the default as Pi's coding agent does would
   avoid the cost but is a product decision, not a dependency patch.
