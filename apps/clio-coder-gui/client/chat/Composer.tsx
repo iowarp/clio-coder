@@ -37,6 +37,7 @@ import {
 	type ImageAttachment,
 } from "./attachments-model.js";
 import { fitComposerField, initialEnterSends, rememberEnterSends } from "./composer-field.js";
+import { type HistoryBrowse, readHistory, rememberPrompt, stepHistory } from "./composer-history.js";
 import {
 	capabilityRefusal,
 	composerKeyAction,
@@ -53,12 +54,23 @@ import {
 	submitIntent,
 	submitLabel,
 } from "./composer-model.js";
+import { foldFleetRuns, isLiveRun, steerOutcome } from "./fleet-facts.js";
+import { SuggestionPalette, type SuggestionRow, suggestionOptionId } from "./MentionPalette.js";
+import {
+	applyMention,
+	mentionQuery,
+	parseSteerMention,
+	type RunningRun,
+	resolveSteerTarget,
+	steerCandidates,
+} from "./mention-model.js";
 import { usePaneActions } from "./pane-context.js";
 import { LARGE_PASTE_CHARACTERS, planPaste } from "./paste-model.js";
 import { RoutePicker } from "./RoutePicker.js";
 import type { RouteFacts } from "./route.js";
 import { SlashActionDialog, SlashPalette, slashOptionId } from "./SlashPalette.js";
 import {
+	argumentSuggestions,
 	completedDraft,
 	exactEntry,
 	filterSlashEntries,
@@ -100,6 +112,8 @@ export function fillComposer(sessionId: string, text: string): void {
 export interface ComposerProps {
 	readonly client: Client;
 	readonly sessionId: string;
+	/** The workspace an `@` reference is completed against. */
+	readonly workspaceId: string;
 	readonly sessionState: SessionSnapshot["state"];
 	readonly initialFocus: boolean;
 	/** The id of the turn running right now, or null when none is. */
@@ -111,6 +125,7 @@ export interface ComposerProps {
 export const Composer = memo(function Composer({
 	client,
 	sessionId,
+	workspaceId,
 	sessionState,
 	initialFocus,
 	runningTurnId,
@@ -208,6 +223,68 @@ export const Composer = memo(function Composer({
 	const paletteOpen = matches.length > 0 && dismissed !== draft.text && dialog === null;
 	const active = Math.min(activeIndex, Math.max(0, matches.length - 1));
 	const line = slashDraft ? parseSlashLine(draft.text, commandCatalog.data) : null;
+
+	// The `@` list. The caret is state only so the reference under it can be read during render; it
+	// changes with typing and caret moves, never with transcript frames.
+	const [caret, setCaret] = useState(0);
+	const [mentionIndex, setMentionIndex] = useState(0);
+	const [mentionDismissed, setMentionDismissed] = useState<string | null>(null);
+	const mention =
+		sessionState === "open" && !paletteOpen && draft.text.includes("@") ? mentionQuery(draft.text, caret) : null;
+	const mentionKey = mention === null ? null : `${mention.start}:${mention.path}`;
+	const files = useQuery({
+		queryKey: ["workspace-files", workspaceId, mention?.path ?? ""],
+		queryFn: () =>
+			client.call(routes.workspaceFiles, { params: { id: workspaceId }, query: { input: mention?.path ?? "" }, body: {} }),
+		enabled: mention !== null && workspaceId !== "",
+		staleTime: 4_000,
+		retry: false,
+		// The previous list stays up while the next keystroke's answer is on its way.
+		placeholderData: (previous) => previous,
+	});
+	const fileMatches = mention === null ? [] : (files.data?.matches ?? []);
+	// Read from the cache when the list is built, never subscribed to: the composer must not render
+	// with the transcript.
+	const liveRuns = (): readonly RunningRun[] =>
+		foldFleetRuns(queries.getQueryData<SessionSnapshot>(["session", sessionId])?.fleet ?? []).filter(isLiveRun);
+	// A message that opens with `@name` can steer a running agent, so those lead the list there.
+	const agents =
+		mention !== null && mention.start === 0 && running && steering.dispatch && !mention.path.includes("/")
+			? liveRuns().filter((run) => run.agentId.toLowerCase().startsWith(mention.path.toLowerCase()))
+			: [];
+	const argMatches =
+		!paletteOpen && slashDraft && mention === null ? argumentSuggestions(draft.text, commandCatalog.data) : [];
+	const suggestions: readonly SuggestionRow[] =
+		mention !== null
+			? [
+					...agents.map((run) => ({
+						id: `agent:${run.runId}`,
+						label: run.agentId,
+						summary: `running agent · ${run.runId.slice(0, 8)}`,
+						icon: "bolt" as const,
+					})),
+					...fileMatches.map((match) => ({
+						id: `file:${match.path}`,
+						label: `${match.name}${match.directory ? "/" : ""}`,
+						summary: match.path.slice(0, match.path.length - match.name.length - (match.directory ? 1 : 0)),
+						icon: match.directory ? ("folder" as const) : ("artifacts" as const),
+						path: true,
+					})),
+				]
+			: argMatches.map((row) => ({ id: `arg:${row.value}`, label: row.value, summary: row.summary }));
+	const suggestionKey = mention !== null ? mentionKey : argMatches.length > 0 ? draft.text : null;
+	const mentionOpen = suggestions.length > 0 && mentionDismissed !== suggestionKey && dialog === null;
+	const mentionActive = Math.min(mentionIndex, Math.max(0, suggestions.length - 1));
+	const [steerNote, setSteerNote] = useState<{ tone: "success" | "warn" | "fail"; message: string } | null>(null);
+	// A second Esc within this window stops the turn; the first only says so.
+	const [stopArmed, setStopArmed] = useState(false);
+	useEffect(() => {
+		if (!stopArmed) return;
+		const timer = setTimeout(() => setStopArmed(false), 2_000);
+		return () => clearTimeout(timer);
+	}, [stopArmed]);
+	// What ↑ and ↓ recalled, so the next press continues from it instead of moving the caret.
+	const browse = useRef<(HistoryBrowse & { readonly text: string }) | null>(null);
 	const slash = slashDraft && line === null && !paletteOpen ? slashNotice(draft.text, commandCatalog.data) : null;
 
 	const queue = useQuery({
@@ -301,13 +378,58 @@ export const Composer = memo(function Composer({
 		setSlashError(null);
 		command.mutate({ request: plan.request, key: crypto.randomUUID(), description: plan.description, sent });
 	};
-	const placeCaretAtEnd = () =>
+	const placeCaret = (at: number | null) =>
 		requestAnimationFrame(() => {
 			const element = field.current;
 			if (!element) return;
 			element.focus();
-			element.setSelectionRange(element.value.length, element.value.length);
+			const position = at ?? element.value.length;
+			element.setSelectionRange(position, position);
+			setCaret(position);
 		});
+	const placeCaretAtEnd = () => placeCaret(null);
+	const pickSuggestion = (index: number) => {
+		setMentionIndex(0);
+		if (mention === null) {
+			const row = argMatches[index];
+			if (!row) return;
+			store.write(row.draft);
+			placeCaretAtEnd();
+			return;
+		}
+		const agent = agents[index];
+		const file = fileMatches[index - agents.length];
+		if (!agent && !file) return;
+		const edit = agent
+			? { text: `@${agent.agentId} ${draft.text.slice(caret).trimStart()}`, caret: agent.agentId.length + 2 }
+			: file
+				? applyMention(draft.text, caret, mention, file.path, file.directory)
+				: null;
+		if (edit === null) return;
+		store.write(edit.text);
+		placeCaret(edit.caret);
+	};
+	const guide = useMutation({
+		mutationFn: ({ run, message }: { run: RunningRun; message: string; sent: string }) =>
+			client.call(routes.steerDispatchRun, {
+				params: { id: sessionId },
+				query: {},
+				body: { runId: run.runId, action: "guide", message },
+			}),
+		onSuccess: (result, submitted) => {
+			const outcome = steerOutcome("guide", result);
+			setSteerNote({
+				tone: outcome.tone === "success" ? "success" : "warn",
+				message: `${submitted.run.agentId}: ${outcome.message}`,
+			});
+			if (result.accepted && store.snapshot().text === submitted.sent) store.clear();
+		},
+		onError: (error) =>
+			setSteerNote({
+				tone: capabilityRefusal(error) === null ? "fail" : "warn",
+				message: capabilityRefusal(error) ?? (error instanceof Error ? error.message : String(error)),
+			}),
+	});
 	const pick = (entry: SlashEntry) => {
 		setActiveIndex(0);
 		setSlashError(null);
@@ -410,6 +532,27 @@ export const Composer = memo(function Composer({
 	const submit = () => {
 		if (sending.current) return;
 		const current = store.snapshot();
+		// `@agent text` guides a running worker instead of the main turn. With no worker running the
+		// line is an ordinary message, and its `@word` an ordinary file reference.
+		const steerTo = steering.dispatch ? parseSteerMention(current.text) : null;
+		const runs = steerTo === null ? [] : liveRuns();
+		if (steerTo !== null && runs.length > 0) {
+			const target = resolveSteerTarget(steerTo.target, runs);
+			if (target.kind === "match") {
+				if (guide.isPending) return;
+				setSteerNote(null);
+				rememberPrompt(current.text);
+				guide.mutate({ run: target.run, message: steerTo.text, sent: current.text });
+			} else
+				setSteerNote({
+					tone: "warn",
+					message:
+						target.kind === "ambiguous"
+							? `@${steerTo.target} names more than one running agent. Use a run id: ${steerCandidates(target.candidates)}.`
+							: `No running agent is named @${steerTo.target}. Running: ${steerCandidates(runs)}. To reference a file of that name, write @"${steerTo.target}".`,
+				});
+			return;
+		}
 		// A line naming a session action or a catalog command runs it instead of becoming a prompt.
 		// Anything else that starts with a slash, a prompt template say, still goes to the agent.
 		if (sessionState === "open" && current.text.trimStart().startsWith("/")) {
@@ -424,6 +567,7 @@ export const Composer = memo(function Composer({
 				return;
 			}
 			if (parsed?.kind === "command") {
+				rememberPrompt(current.text);
 				runCommand(parsed.plan, current.text);
 				return;
 			}
@@ -431,6 +575,8 @@ export const Composer = memo(function Composer({
 		const next = submitIntent(current, situation);
 		if (next.kind !== "blocked" && attachmentRefusal(attached.current, running) === null) {
 			sending.current = true;
+			browse.current = null;
+			rememberPrompt(current.text);
 			store.markSubmitted(current);
 			send.mutate({ intent: next, draft: current, attachments: attached.current });
 		}
@@ -470,6 +616,33 @@ export const Composer = memo(function Composer({
 				</label>
 				{paletteOpen ? (
 					<SlashPalette listId={listId} entries={matches} activeIndex={active} onActivate={setActiveIndex} onPick={pick} />
+				) : mentionOpen ? (
+					<SuggestionPalette
+						listId={listId}
+						label={mention !== null ? "Files in this workspace" : "Command arguments"}
+						rows={suggestions}
+						activeIndex={mentionActive}
+						onActivate={setMentionIndex}
+						onPick={pickSuggestion}
+						keys={
+							mention !== null ? (
+								<>
+									<kbd>Enter</kbd> or <kbd>Tab</kbd>{" "}
+									{mentionActive < agents.length
+										? "steer"
+										: fileMatches[mentionActive - agents.length]?.directory
+											? "open"
+											: "add"}{" "}
+									· <kbd>Esc</kbd> close{files.data?.truncated ? " · keep typing to narrow" : ""}
+								</>
+							) : (
+								<>
+									<kbd>Tab</kbd> pick · <kbd>Enter</kbd> {line?.kind === "command" ? "runs the line" : "pick"} · <kbd>Esc</kbd>{" "}
+									close
+								</>
+							)
+						}
+					/>
 				) : line !== null && dialog === null ? (
 					<div className="slash-palette slash-palette--line" role="status">
 						<p className="slash-palette__line">
@@ -487,7 +660,11 @@ export const Composer = memo(function Composer({
 					</div>
 				) : null}
 				<p className="sr-only" role="status">
-					{paletteOpen ? `${matches.length} slash ${matches.length === 1 ? "command" : "commands"}` : ""}
+					{paletteOpen
+						? `${matches.length} slash ${matches.length === 1 ? "command" : "commands"}`
+						: mentionOpen
+							? `${suggestions.length} ${suggestions.length === 1 ? "suggestion" : "suggestions"}`
+							: ""}
 				</p>
 				{/* Only while the turn runs: the query is disabled once it settles, and a
 			    cached snapshot from a finished turn is a claim about the engine that
@@ -608,13 +785,15 @@ export const Composer = memo(function Composer({
 					className="composer__field"
 					role="combobox"
 					aria-autocomplete="list"
-					aria-expanded={paletteOpen}
+					aria-expanded={paletteOpen || mentionOpen}
 					{...(paletteOpen
 						? {
 								"aria-controls": listId,
 								"aria-activedescendant": matches[active] ? slashOptionId(listId, matches[active]) : undefined,
 							}
-						: {})}
+						: mentionOpen
+							? { "aria-controls": listId, "aria-activedescendant": suggestionOptionId(listId, mentionActive) }
+							: {})}
 					aria-describedby={hintId}
 					value={draft.text}
 					rows={1}
@@ -631,11 +810,18 @@ export const Composer = memo(function Composer({
 					}
 					onChange={(event) => {
 						store.write(event.target.value);
+						setCaret(event.target.selectionStart);
+						setMentionIndex(0);
+						setMentionDismissed(null);
+						setSteerNote(null);
+						setStopArmed(false);
+						browse.current = null;
 						setActiveIndex(0);
 						setSlashError(null);
 						if (!event.target.value.startsWith("/")) setDismissed(null);
 						if (!send.isPending) send.reset();
 					}}
+					onSelect={(event) => setCaret(event.currentTarget.selectionStart)}
 					onPaste={(event) => {
 						const images = [...event.clipboardData.files].filter((file) => file.type.startsWith("image/"));
 						if (canAttachImages && images.length > 0) {
@@ -704,6 +890,54 @@ export const Composer = memo(function Composer({
 								return;
 							}
 						}
+						const plain = !event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey;
+						if (mentionOpen && !event.nativeEvent.isComposing) {
+							const count = suggestions.length;
+							if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+								event.preventDefault();
+								setMentionIndex((mentionActive + (event.key === "ArrowDown" ? 1 : -1) + count) % count);
+								return;
+							}
+							// On a command line that can already run, Enter runs it and Tab takes the suggestion.
+							const enterPicks = mention !== null || line?.kind !== "command";
+							if ((event.key === "Tab" || (event.key === "Enter" && enterPicks)) && plain) {
+								event.preventDefault();
+								pickSuggestion(mentionActive);
+								return;
+							}
+							if (event.key === "Escape") {
+								event.preventDefault();
+								event.stopPropagation();
+								setMentionDismissed(suggestionKey);
+								return;
+							}
+						}
+						// Esc with nothing open stops the turn, as it does in the terminal, on the second press.
+						if (event.key === "Escape" && plain && running && !layerOwned && !optionsOpen) {
+							event.preventDefault();
+							if (stopArmed && !stop.isPending) stop.mutate();
+							setStopArmed(!stopArmed);
+							return;
+						}
+						if ((event.key === "ArrowUp" || event.key === "ArrowDown") && plain && !event.nativeEvent.isComposing) {
+							const element = event.currentTarget;
+							const browsing = browse.current !== null && browse.current.text === draft.text ? browse.current : null;
+							// ↑ recalls from the very start of the field, where there is no line above to move to.
+							const offered =
+								event.key === "ArrowUp"
+									? browsing !== null || (element.selectionStart === 0 && element.selectionEnd === 0)
+									: browsing !== null;
+							const step = offered
+								? stepHistory(readHistory(), browsing, event.key === "ArrowUp" ? "older" : "newer", draft.text)
+								: null;
+							if (step !== null) {
+								event.preventDefault();
+								store.write(step.text);
+								browse.current = step.browse === null ? null : { ...step.browse, text: step.text };
+								placeCaretAtEnd();
+								return;
+							}
+						}
 						const action = composerKeyAction(
 							{
 								key: event.key,
@@ -728,6 +962,20 @@ export const Composer = memo(function Composer({
 						</button>
 					</p>
 				)}
+				{stopArmed && running ? (
+					<p className="composer__notice" role="status">
+						Press <kbd>Esc</kbd> again to stop this turn.
+					</p>
+				) : null}
+				{steerNote ? (
+					<p className="composer__notice" role={steerNote.tone === "fail" ? "alert" : "status"}>
+						<StatusMark
+							tone={steerNote.tone}
+							label={steerNote.tone === "success" ? "Sent to agent" : steerNote.tone === "fail" ? "Failed" : "Not sent"}
+						/>
+						{steerNote.message}
+					</p>
+				) : null}
 				{attachProblem ? (
 					<p className="composer__notice" role="alert">
 						<StatusMark tone="fail" label="Not attached" />
@@ -735,7 +983,8 @@ export const Composer = memo(function Composer({
 					</p>
 				) : null}
 				<p className="composer__hint sr-only" id={hintId}>
-					{enterSends ? "Shift+Enter adds a line" : "Enter adds a line · Ctrl/⌘+Enter sends"} · @path adds a project file
+					{enterSends ? "Shift+Enter adds a line" : "Enter adds a line · Ctrl/⌘+Enter sends"} · @ adds a file or folder · ↑
+					recalls earlier messages
 					{attachments.length > 0 ? ` · ${attachmentSummary(attachments)}` : ""}
 				</p>
 				<div className="composer__actions">
@@ -826,7 +1075,8 @@ export const Composer = memo(function Composer({
 									Enter sends
 								</label>
 								<p className="composer__options-note">
-									{enterSends ? "Shift+Enter adds a line." : "Enter adds a line. Ctrl/⌘+Enter sends."} @path adds a project file.
+									{enterSends ? "Shift+Enter adds a line." : "Enter adds a line. Ctrl/⌘+Enter sends."} @ adds a file or folder. ↑
+									recalls earlier messages.
 								</p>
 							</div>
 						</details>

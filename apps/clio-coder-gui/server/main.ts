@@ -112,6 +112,11 @@ export async function main(args = process.argv.slice(2)) {
 			}
 			return;
 		}
+		// The flag's promise is that no second server starts. With no background app there is nothing to reuse.
+		if (values.reuse === "required")
+			throw new Error(
+				"--reuse-background found no background app for this installation. Install one with clio-coder gui background install, or run clio-coder gui without the flag.",
+			);
 		if (reused.kind === "unavailable")
 			console.error(`[clio-coder:gui] ${reused.reason} Starting a private server for this terminal instead.`);
 		backgroundAbsent = reused.kind === "absent";

@@ -6,7 +6,9 @@ import type { Workspace } from "../../contracts/sessions.js";
 import { type Client, emptyInput } from "../api/client.js";
 import { sessionBuffer } from "../api/sessions.js";
 import { composerKeyAction, fitComposerField, initialEnterSends } from "../chat/composer-field.js";
+import { rememberPrompt } from "../chat/composer-history.js";
 import { STARTER_PROMPTS } from "../chat/starter-prompts.js";
+import { useFieldAssist } from "../chat/use-field-assist.js";
 import { Icon } from "../design/icons.js";
 import { useDetailsDismiss } from "../interaction/use-details-dismiss.js";
 import { ClioPulse, PULSE_SIZE } from "../shell/ClioMark.js";
@@ -181,13 +183,16 @@ export function Home({ client }: { client: Client }) {
 	});
 	const canSend = (ready || setup.isPending) && workspaceId !== null && text.trim() !== "" && !send.isPending;
 	const submit = () => {
-		if (canSend && workspaceId) send.mutate({ workspace: workspaceId, request: text.trim() });
+		if (!canSend || !workspaceId) return;
+		rememberPrompt(text);
+		send.mutate({ workspace: workspaceId, request: text.trim() });
 	};
 	useEffect(() => {
 		if (window.matchMedia("(pointer: fine)").matches) field.current?.focus();
 	}, []);
 	// biome-ignore lint/correctness/useExhaustiveDependencies: the text is the resize trigger; the DOM read happens in the callback.
 	useLayoutEffect(() => fitComposerField(field.current), [text]);
+	const assist = useFieldAssist({ client, workspaceId, text, setText, field });
 	const needsSetup = setup.isSuccess && !ready;
 	const needsWorkspace = workspaces.isSuccess && list.length === 0;
 	const onboarding = needsSetup || needsWorkspace;
@@ -249,6 +254,7 @@ export function Home({ client }: { client: Client }) {
 								<label className="sr-only" htmlFor={fieldId}>
 									Message Clio Coder
 								</label>
+								{assist.palette}
 								<textarea
 									id={fieldId}
 									ref={field}
@@ -256,8 +262,13 @@ export function Home({ client }: { client: Client }) {
 									rows={1}
 									value={text}
 									placeholder="Describe a task or ask a question"
-									onChange={(event) => setText(event.target.value)}
+									{...assist.fieldProps}
+									onChange={(event) => {
+										setText(event.target.value);
+										assist.changed(event.target);
+									}}
 									onKeyDown={(event) => {
+										if (assist.keyDown(event)) return;
 										if (event.key !== "Enter") return;
 										// The same Enter policy and stored preference as the conversation composer.
 										const action = composerKeyAction(

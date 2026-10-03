@@ -22716,6 +22716,161 @@
 				}
 			}
 		},
+		"/api/workspaces/{id}/files": {
+			"get": {
+				"operationId": "workspaceFiles",
+				"summary": "Complete a typed @path against the files of one workspace",
+				"security": [
+					{
+						"bearer": []
+					}
+				],
+				"parameters": [
+					{
+						"name": "id",
+						"in": "path",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+						}
+					},
+					{
+						"name": "input",
+						"in": "query",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"maxLength": 4096
+						}
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "Success",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"required": ["matches", "truncated"],
+									"properties": {
+										"matches": {
+											"type": "array",
+											"items": {
+												"type": "object",
+												"required": ["name", "path", "directory"],
+												"properties": {
+													"name": {
+														"type": "string",
+														"maxLength": 512
+													},
+													"path": {
+														"type": "string",
+														"maxLength": 4096
+													},
+													"directory": {
+														"type": "boolean"
+													}
+												},
+												"additionalProperties": false
+											},
+											"maxItems": 50
+										},
+										"truncated": {
+											"type": "boolean"
+										}
+									},
+									"additionalProperties": false
+								}
+							}
+						},
+						"headers": {
+							"X-Clio-Epoch": {
+								"schema": {
+									"type": "string"
+								},
+								"description": "Server epoch"
+							},
+							"X-Clio-Seq": {
+								"schema": {
+									"type": "integer"
+								},
+								"description": "Sequence before assembling the snapshot"
+							}
+						}
+					},
+					"default": {
+						"description": "Problem",
+						"content": {
+							"application/problem+json": {
+								"schema": {
+									"type": "object",
+									"required": ["type", "title", "status", "detail", "code", "instance"],
+									"properties": {
+										"type": {
+											"type": "string"
+										},
+										"title": {
+											"type": "string"
+										},
+										"status": {
+											"type": "integer"
+										},
+										"detail": {
+											"type": "string"
+										},
+										"code": {
+											"anyOf": [
+												{
+													"type": "string",
+													"const": "validation"
+												},
+												{
+													"type": "string",
+													"const": "unauthorized"
+												},
+												{
+													"type": "string",
+													"const": "not_found"
+												},
+												{
+													"type": "string",
+													"const": "conflict"
+												},
+												{
+													"type": "string",
+													"const": "unsupported"
+												},
+												{
+													"type": "string",
+													"const": "unavailable"
+												},
+												{
+													"type": "string",
+													"const": "upstream_acp"
+												},
+												{
+													"type": "string",
+													"const": "operation_failed"
+												},
+												{
+													"type": "string",
+													"const": "internal"
+												}
+											]
+										},
+										"instance": {
+											"type": "string"
+										}
+									},
+									"additionalProperties": false
+								}
+							}
+						}
+					}
+				}
+			}
+		},
 		"/api/workspaces/{id}/sessions": {
 			"get": {
 				"operationId": "sessionHistory",

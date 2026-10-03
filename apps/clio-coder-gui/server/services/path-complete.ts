@@ -2,8 +2,8 @@ import type { Dirent } from "node:fs";
 import { readFileSync } from "node:fs";
 import { readdir, stat } from "node:fs/promises";
 import { homedir } from "node:os";
-import { posix, win32 } from "node:path";
-import type { PathCompletion } from "../../contracts/sessions.js";
+import { join as joinPath, posix, win32 } from "node:path";
+import type { FileCompletion, PathCompletion } from "../../contracts/sessions.js";
 
 /**
  * Where the server runs decides which typed paths mean something. A WSL host also understands the
@@ -234,5 +234,60 @@ export async function completePath(
 		matches,
 		commonPrefix: commonPrefix.length >= input.length ? commonPrefix : input,
 		truncated: names.length > shown.length,
+	};
+}
+
+/** Folders that hold generated or vendored trees; listed only once their name is being typed. */
+const HEAVY_DIRECTORIES = new Set(["node_modules", ".git"]);
+
+/**
+ * Completes the path after an `@` in the composer against one workspace. The input is relative to
+ * the root and never leaves it: an absolute path, a `~` or a `..` segment matches nothing, because
+ * the agent resolves `@path` from the workspace and a listing of anything else would be a claim
+ * about files the reference cannot name. A name that starts with the typed text sorts before one
+ * that only contains it, and folders sort first so a deep file is reached by walking.
+ */
+export async function completeWorkspaceFile(
+	root: string,
+	input: string,
+	io: Pick<PathCompleteIo, "readdir"> = realIo,
+): Promise<FileCompletion> {
+	const none: FileCompletion = { matches: [], truncated: false };
+	const cut = input.lastIndexOf("/");
+	const parent = cut < 0 ? "" : input.slice(0, cut + 1);
+	const partial = (cut < 0 ? input : input.slice(cut + 1)).toLowerCase();
+	const segments = parent.split("/").filter(Boolean);
+	if (input.startsWith("/") || input.startsWith("~") || segments.some((segment) => segment === ".." || segment === "."))
+		return none;
+	let entries: Dirent[];
+	try {
+		entries = await io.readdir(joinPath(root, ...segments));
+	} catch {
+		// A folder that is not there yet is an ordinary state while typing.
+		return none;
+	}
+	const rank = (name: string) => (name.toLowerCase().startsWith(partial) ? 0 : 1);
+	const rows = entries
+		.filter((entry) => {
+			const name = entry.name.toLowerCase();
+			if (!name.includes(partial)) return false;
+			if (HEAVY_DIRECTORIES.has(entry.name)) return partial !== "" && name.startsWith(partial);
+			return partial.startsWith(".") || !entry.name.startsWith(".");
+		})
+		.map((entry) => ({ name: entry.name, directory: entry.isDirectory() }))
+		.sort(
+			(a, b) =>
+				rank(a.name) - rank(b.name) ||
+				Number(b.directory) - Number(a.directory) ||
+				a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: "base" }),
+		);
+	const prefix = segments.length === 0 ? "" : `${segments.join("/")}/`;
+	return {
+		matches: rows.slice(0, PATH_MATCH_LIMIT).map((row) => ({
+			name: row.name,
+			path: `${prefix}${row.name}${row.directory ? "/" : ""}`,
+			directory: row.directory,
+		})),
+		truncated: rows.length > PATH_MATCH_LIMIT,
 	};
 }

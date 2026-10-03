@@ -331,3 +331,9 @@ ol.onboard > li:not([data-done="true"]) ~ li:not([data-done="true"]) .primary:no
 	border-radius: var(--radius-sm);
 	text-decoration: none;
 }
+
+/* The `@` list hangs under the new-task box: above it sits the question, which should stay readable. */
+.newtask__composer .slash-palette {
+	top: calc(100% + var(--space-2));
+	bottom: auto;
+}

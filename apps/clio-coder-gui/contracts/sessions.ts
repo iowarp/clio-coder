@@ -37,6 +37,26 @@ export const PathCompletion = Type.Object(
 	{ additionalProperties: false },
 );
 export type PathCompletion = Static<typeof PathCompletion>;
+/** Files and folders under one workspace that match a typed `@path`, as paths relative to its root. */
+export const FileCompletion = Type.Object(
+	{
+		matches: Type.Array(
+			Type.Object(
+				{
+					name: Type.String({ maxLength: 512 }),
+					/** Relative to the workspace root with `/` separators; a folder ends in `/`. */
+					path: Type.String({ maxLength: 4096 }),
+					directory: Type.Boolean(),
+				},
+				{ additionalProperties: false },
+			),
+			{ maxItems: 50 },
+		),
+		truncated: Type.Boolean(),
+	},
+	{ additionalProperties: false },
+);
+export type FileCompletion = Static<typeof FileCompletion>;
 export const WorkspacePick = Type.Union([
 	Type.Object(
 		{ status: Type.Literal("picked"), path: Type.String({ maxLength: 4096 }) },

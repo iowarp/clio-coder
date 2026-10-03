@@ -141,6 +141,8 @@ export class Supervisor {
 	private readonly waking = new Map<string, Promise<void>>();
 	/** Parked session ids, oldest first. */
 	private parked: string[] = [];
+	/** The autonomy each parked task was at, so "Run without asking" comes back with the task. */
+	private readonly parkedAutonomy = new Map<string, "default" | "yolo">();
 	/** The highest revision any session here has published. A reloaded session starts above it. */
 	private floor = 0;
 	private readonly opening = new Set<Promise<SessionSnapshot>>();
@@ -287,6 +289,41 @@ export class Supervisor {
 			this.opening.delete(pending);
 		}
 	}
+	/**
+	 * A resumed child reads autonomy, thinking and its other session controls from settings. The task
+	 * was parked with the operator's own choices, kept in its snapshot, so they are set again before
+	 * any window is told the task is open. A choice the new child no longer offers is left at its
+	 * setting, and a refusal leaves the task open on the settings' values rather than failing the resume.
+	 */
+	private async restoreChoices(entry: Entry, id: string) {
+		const level = this.parkedAutonomy.get(id);
+		this.parkedAutonomy.delete(id);
+		try {
+			if (level !== undefined && (await entry.client.autonomy(id)).level !== level) await entry.client.autonomy(id, level);
+			for (const kept of this.snapshots.get(id)?.config?.options ?? []) {
+				const offered = entry.client.config?.options.find((option) => option.id === kept.id);
+				if (
+					!offered ||
+					offered.currentValue === kept.currentValue ||
+					!offered.options.some((row) => row.value === kept.currentValue)
+				)
+					continue;
+				const result = record(
+					await entry.client.request("session/set_config_option", {
+						sessionId: id,
+						configId: kept.id,
+						value: kept.currentValue,
+					}),
+				);
+				const options = projectConfigOptions(result.configOptions);
+				if (options !== undefined) entry.client.config = { ...entry.client.config, options };
+			}
+		} catch (error) {
+			console.error(
+				`[clio-coder:gui] session ${id} resumed on its settings: ${error instanceof Error ? error.message : String(error)}`,
+			);
+		}
+	}
 	/** Start a parked session's child again. Its transcript is the kept snapshot, so clients see only the state change. */
 	private wake(id: string) {
 		let job = this.waking.get(id);
@@ -423,6 +460,7 @@ export class Supervisor {
 			const boundId = await entry.client.open(workspace.path, existingId, !resume);
 			delete entry.resuming;
 			if (entry.replay !== null && entry.turnId) this.finish(entry, "end_turn", null, null, null);
+			if (resume) await this.restoreChoices(entry, boundId);
 			if (boundId !== id) {
 				if (this.entries.has(boundId))
 					throw new AppProblem("upstream_acp", "ACP returned an already-bound session identity.");
@@ -1367,7 +1405,11 @@ export class Supervisor {
 			const snapshot = this.snapshots.get(entry.id);
 			// A task nobody typed into has nothing to come back to, so it closes like any other.
 			const parks = entry.parking && !!snapshot && snapshot.turns.length + snapshot.timeline.length > 0;
-			if (parks) this.parked.push(entry.id);
+			if (parks) {
+				this.parked.push(entry.id);
+				const level = await entry.client.autonomy(entry.id).catch(() => null);
+				if (level?.source === "session") this.parkedAutonomy.set(entry.id, level.level);
+			}
 			this.state(entry.id, parks ? "parked" : "closed");
 			if (entry.parking && !parks) this.snapshots.delete(entry.id);
 		} else this.state(entry.id, "unknown");
@@ -1383,6 +1425,7 @@ export class Supervisor {
 		for (const id of this.parked.splice(0, Math.max(0, this.parked.length - PARKED_KEPT))) {
 			this.state(id, "closed");
 			this.snapshots.delete(id);
+			this.parkedAutonomy.delete(id);
 		}
 		const closed = [...this.snapshots.values()].filter(
 			(snapshot) => snapshot.state === "closed" && !this.entries.has(snapshot.id),

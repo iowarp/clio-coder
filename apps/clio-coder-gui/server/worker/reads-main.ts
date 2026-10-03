@@ -57,6 +57,10 @@ serveWorker(async (call) => {
 	}
 	if (call.method === "sessions.list") return sessionHistory(call.params.cwd);
 	if (call.method === "sessions.workspaces") return sessionWorkspaces();
+	if (call.method === "workspace.files") {
+		const { completeWorkspaceFiles } = await import("../clio/adapters/workspace-files.js");
+		return completeWorkspaceFiles(call.params.cwd, call.params.input);
+	}
 	if (call.method === "traces.read") return traces.read(call.params);
 	if (call.method !== "tools.list") throw new AppProblem("unsupported", "Method is not available in the reads worker.");
 	if (settings.fixture && settings.readDelayMs)

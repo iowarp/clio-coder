@@ -352,3 +352,74 @@ export function parseSlashLine(text: string, catalog: CommandCatalog | undefined
 	const planned = planCommand(command, fields as CommandFields);
 	return planned.plan ? { kind: "command", command, plan: planned.plan, hint } : invalid(planned.error);
 }
+
+export interface ArgumentSuggestion {
+	/** The word that completes the token under the caret. */
+	readonly value: string;
+	readonly summary: string;
+	/** The whole line once this word is taken, ready for the next one. */
+	readonly draft: string;
+}
+
+/**
+ * What can come next on a `/name …` line, from the catalog grammar alone: a subcommand, an option,
+ * or one of the values an option or argument is limited to. Free text has no suggestions, and a
+ * word already typed in full is not offered back.
+ */
+export function argumentSuggestions(text: string, catalog: CommandCatalog | undefined): readonly ArgumentSuggestion[] {
+	if (text.includes("\n")) return [];
+	const match = /^\/([A-Za-z][A-Za-z0-9:-]*)\s+([\s\S]*)$/u.exec(text);
+	if (!match) return [];
+	const command = catalog?.commands.find((entry) => entry.name === match[1]);
+	if (!command) return [];
+	const rest = match[2] ?? "";
+	const words = tokens(rest);
+	const typing = rest !== "" && !/\s$/u.test(rest);
+	const partial = typing ? (words.at(-1)?.value ?? "") : "";
+	const settled = typing ? words.slice(0, -1) : words;
+	const head = text.slice(0, text.length - partial.length);
+	const offer = (value: string, summary: string): ArgumentSuggestion => ({ value, summary, draft: `${head}${value} ` });
+	const narrowed = (rows: readonly ArgumentSuggestion[]) =>
+		rows.filter((row) => row.value !== partial && row.value.toLowerCase().startsWith(partial.toLowerCase()));
+
+	const subcommands = command.args.subcommands;
+	const first = settled[0]?.value;
+	const subcommand = first !== undefined && subcommands && Object.hasOwn(subcommands, first) ? first : null;
+	if (subcommand === null && settled.length === 0 && subcommands && !partial.startsWith("-")) {
+		const verbs = narrowed(
+			Object.keys(subcommands).map((name) => offer(name, command.subcommandSummaries?.[name] ?? command.summary)),
+		);
+		if (verbs.length > 0 || command.requiresSubcommand) return verbs;
+	}
+	const args: LeafArgs | undefined = subcommand !== null ? subcommands?.[subcommand] : command.args;
+	const flags = args?.flags ?? [];
+	const used = new Set<string>();
+	let position = 0;
+	let awaiting: (typeof flags)[number] | null = null;
+	for (const word of settled.slice(subcommand !== null ? 1 : 0)) {
+		if (awaiting !== null) {
+			awaiting = null;
+			continue;
+		}
+		const flag = word.value.startsWith("--") ? flags.find((entry) => entry.name === word.value) : undefined;
+		if (flag) {
+			used.add(flag.name);
+			if (flag.takesValue) awaiting = flag;
+			continue;
+		}
+		position += 1;
+	}
+	if (awaiting !== null)
+		return narrowed((awaiting.values ?? []).map((value) => offer(value, `${awaiting?.name} value`)));
+	const positional = args?.positionals?.[position];
+	const values = partial.startsWith("-")
+		? []
+		: (positional?.values ?? []).map((value) => offer(value, positional?.name ?? ""));
+	const options = flags
+		.filter((flag) => flag.repeatable || !used.has(flag.name))
+		.map((flag) =>
+			offer(flag.name, flag.takesValue ? `takes ${flag.values?.join(" | ") ?? flag.valueName ?? "a value"}` : "option"),
+		);
+	// Options are offered once a dash is typed, or when nothing else can come next.
+	return narrowed(partial.startsWith("-") || values.length === 0 ? [...values, ...options] : values);
+}

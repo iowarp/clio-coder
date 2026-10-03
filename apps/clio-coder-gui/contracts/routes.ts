@@ -52,7 +52,14 @@ import { Accepted, Operation } from "./operations.js";
 import { PermissionDecision } from "./permissions.js";
 import { UsageReport } from "./reports.js";
 import { SessionConfig, SetConfigOption } from "./session-config.js";
-import { PathCompletion, SessionSnapshot, SessionSummary, Workspace, WorkspacePick } from "./sessions.js";
+import {
+	FileCompletion,
+	PathCompletion,
+	SessionSnapshot,
+	SessionSummary,
+	Workspace,
+	WorkspacePick,
+} from "./sessions.js";
 import { ConfigGraph, SettingsReport } from "./settings.js";
 import { SettingsControls, SettingWrite, SettingWritten } from "./settings-controls.js";
 import { Autonomy, AutonomyLevel, SafeSettings, SafeSettingsPatch } from "./settings-safe.js";
@@ -780,6 +787,14 @@ export const routes = {
 		path: "/api/workspaces/:id",
 		response: Workspace,
 		summary: "Canonical workspace",
+	}),
+	workspaceFiles: defineRoute({
+		...get,
+		params: operationParams,
+		path: "/api/workspaces/:id/files",
+		query: Type.Object({ input: Type.String({ maxLength: 4096 }) }, { additionalProperties: false }),
+		response: FileCompletion,
+		summary: "Complete a typed @path against the files of one workspace",
 	}),
 	sessionHistory: defineRoute({
 		...get,

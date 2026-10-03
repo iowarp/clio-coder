@@ -442,6 +442,7 @@ function SessionView({ client, id }: { client: Client; id: string }) {
 						<Composer
 							client={client}
 							sessionId={snapshot.id}
+							workspaceId={snapshot.workspaceId}
 							sessionState={snapshot.state}
 							initialFocus={snapshot.timeline.length === 0}
 							runningTurnId={turn?.status === "running" ? turn.id : null}

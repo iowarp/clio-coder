@@ -186,3 +186,29 @@
 		outline-offset: -2px;
 	}
 }
+
+/* A suggestion row: the word or name leads with its icon and what it is trails. A path summary is
+   shortened from the front so the nearest folders stay readable. */
+.suggestion-option .slash-palette__name {
+	display: inline-flex;
+	align-items: center;
+	gap: var(--space-2);
+	min-width: 0;
+	flex: 0 1 auto;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+.suggestion-option .slash-palette__name .icon {
+	flex: none;
+	width: var(--icon-sm);
+	height: var(--icon-sm);
+	color: var(--ink-muted);
+}
+.suggestion-option .slash-palette__summary {
+	flex: 0 10 auto;
+}
+.suggestion-option--path .slash-palette__summary {
+	direction: rtl;
+	font-family: var(--font-mono);
+	font-size: var(--text-exact);
+}

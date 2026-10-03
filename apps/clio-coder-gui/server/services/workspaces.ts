@@ -3,11 +3,11 @@ import { realpath, stat } from "node:fs/promises";
 import { basename, isAbsolute } from "node:path";
 import { Type } from "typebox";
 import { Value } from "typebox/value";
-import { type PathCompletion, Workspace, type WorkspacePick } from "../../contracts/sessions.js";
+import { FileCompletion, type PathCompletion, Workspace, type WorkspacePick } from "../../contracts/sessions.js";
 import { runFolderPicker } from "../process-policy.js";
 import type { AppFiles } from "../state/files.js";
 import type { WorkerHost } from "../worker/host.js";
-import { completePath, detectPathHost, type PathHost, toServerPath } from "./path-complete.js";
+import { completePath, completeWorkspaceFile, detectPathHost, type PathHost, toServerPath } from "./path-complete.js";
 import { AppProblem } from "./problem.js";
 
 const Workspaces = Type.Array(Workspace);
@@ -34,6 +34,22 @@ export class WorkspaceService {
 	}
 	complete(input: string, hidden = false): Promise<PathCompletion> {
 		return completePath(input, hidden, this.pathHost());
+	}
+	/**
+	 * Matches for an `@` reference in the composer. The reads worker searches the whole tree; a
+	 * workspace it cannot enumerate still completes one folder at a time.
+	 */
+	async completeFile(id: string, input: string): Promise<FileCompletion> {
+		const root = (await this.get(id)).path;
+		if (this.ledger) {
+			try {
+				const found = await this.ledger.call("workspace.files", { cwd: root, input });
+				if (Value.Check(FileCompletion, found)) return found;
+			} catch {
+				// Answered below from the folder itself.
+			}
+		}
+		return completeWorkspaceFile(root, input);
 	}
 	/** One native folder dialog at a time: a second would stack behind the first on the person's desktop. */
 	async pick(signal?: AbortSignal): Promise<WorkspacePick> {

@@ -44,6 +44,7 @@ const adapters = new Set([
 	"src/core/package-root.ts",
 	"src/domains/toolchain/index.ts",
 	"src/core/xdg.ts",
+	"src/core/workspace-files.ts",
 	"src/domains/observability/trace-store.ts",
 	"src/domains/observability/evidence-index.ts",
 	"src/domains/session/history.ts",
