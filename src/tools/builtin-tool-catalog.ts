@@ -245,7 +245,7 @@ const TOOL_METADATA: Readonly<Record<string, ToolMetadata>> = {
 		costLatency: "local_slow",
 	},
 	[ToolNames.Git]: {
-		objective: "Read-only git inspection: status, diff, or log.",
+		objective: "Read-only git inspection: status, diff, log, or show.",
 		uiLabel: "Git",
 		retrySafety: "idempotent",
 		resultSizePolicy: summaryPolicy("Limit the diff/log to one path or fewer commits."),
@@ -254,6 +254,7 @@ const TOOL_METADATA: Readonly<Record<string, ToolMetadata>> = {
 			{ goal: "Inspect workspace status", args: { op: "status" } },
 			{ goal: "Inspect workspace changes", args: { op: "diff" } },
 			{ goal: "Inspect recent commits", args: { op: "log", limit: 20 } },
+			{ goal: "Inspect one commit's stat and patch", args: { op: "show", rev: "HEAD~1" } },
 			{ goal: "Stage literal paths", args: { op: "add", paths: ["src/index.ts"] } },
 			{ goal: "Commit the staged index", args: { op: "commit", message: "fix: correct retry handling" } },
 		],
