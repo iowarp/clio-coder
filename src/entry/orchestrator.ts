@@ -1457,12 +1457,23 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	termination.installSignalHandlers();
 
 	ensureClioState();
+	// The leased TUI turns boot diagnostics into transcript notices. Without a
+	// lease (instant shell off) stderr would print before the first frame, so
+	// the interactive boot holds trust notices for the transcript instead (C-4).
+	const holdTrustNotices =
+		options.terminalLease === undefined &&
+		!options.headless &&
+		options.acp === undefined &&
+		process.env.CLIO_CODER_INTERACTIVE === "1";
+	const heldTrustNotices: string[] = [];
 	for (const surface of ["safety", "settings"] as const) {
 		const snapshot = captureProjectSurface(process.cwd(), surface);
 		if (snapshot.verdict === "trusted") continue;
 		for (const file of snapshot.files) {
 			if (file.text !== null || file.error !== undefined) {
-				bootStderr(`[clio-coder:trust] ${projectSurfaceTrustNotice(snapshot, file.path)}\n`);
+				const notice = `[clio-coder:trust] ${projectSurfaceTrustNotice(snapshot, file.path)}`;
+				if (holdTrustNotices) heldTrustNotices.push(notice);
+				else bootStderr(`${notice}\n`);
 			}
 		}
 	}
@@ -1739,7 +1750,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	const mux = result.getContract<MuxContract>("mux");
 	const contextDomain = result.getContract<ContextContract>("context");
 	const interop = result.getContract<InteropContract>("interop");
-	const initialNotices = interactive ? [...(contextDomain?.startupHints() ?? [])] : [];
+	const initialNotices = interactive ? [...heldTrustNotices, ...(contextDomain?.startupHints() ?? [])] : [];
 	// Once per version, interactive only: headless and ACP have no operator at
 	// the keyboard to tell, and the record is left unclaimed for the boot that does.
 	const upgrade = interactive ? takeUpgradeNotice() : null;
