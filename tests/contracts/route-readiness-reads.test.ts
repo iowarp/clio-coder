@@ -8,7 +8,11 @@ import { after, describe, it } from "node:test";
 import { gateDecisionsDirectory } from "../../src/domains/dispatch/gate-decisions.js";
 import { withReceiptIntegrity } from "../../src/domains/dispatch/receipt-integrity.js";
 import type { RouteCandidate } from "../../src/domains/dispatch/route-decision.js";
-import { createRouteHistoryStore, ROUTE_HISTORY_VERSION } from "../../src/domains/dispatch/route-history.js";
+import {
+	createRouteHistoryStore,
+	ROUTE_HISTORY_VERSION,
+	routeSettledLabel,
+} from "../../src/domains/dispatch/route-history.js";
 import { createRouteObserver } from "../../src/domains/dispatch/route-observer.js";
 import type { RunEnvelope, RunReceipt } from "../../src/domains/dispatch/types.js";
 import { fixtureEnvelope, fixtureReceiptDraft } from "../harness/receipt.js";
@@ -147,6 +151,52 @@ describe("contracts/route readiness reads", () => {
 		observer.readinessWindow();
 		const after = statSync(historyPath);
 		deepStrictEqual([after.ino, after.mtimeMs], [reconciled.ino, reconciled.mtimeMs], "no rewrite without new evidence");
+	});
+
+	it("every settled route carries its receipt's outcome label, backfilled on older records", () => {
+		const stateDir = mkdtempSync(join(tmpdir(), "clio-coder-readiness-settled-"));
+		const ok = sealed("run-ok", true);
+		const capped = fixtureEnvelope("run-cap");
+		const cappedDraft = fixtureReceiptDraft(capped);
+		cappedDraft.outcome = "failed";
+		cappedDraft.outcomeCode = "worker_tool_call_cap_exhausted";
+		const failed = { envelope: capped, receipt: withReceiptIntegrity(cappedDraft, capped) };
+		ledger(stateDir, [ok, failed]);
+		const store = createRouteHistoryStore({ stateDir });
+		for (const [run, reliability] of [
+			[ok, "success"],
+			[failed, "failure"],
+		] as const) {
+			store.upsert({
+				version: ROUTE_HISTORY_VERSION,
+				receiptDigest: run.receipt.integrity.digest,
+				assignmentId: run.envelope.id,
+				route: ROUTE,
+				executionRole: "builder",
+				qualityLabel: "unmeasured",
+				reliability,
+				firstPass: true,
+				completedCostUsd: null,
+				completedPhaseTiming: null,
+				cacheRead: false,
+				sourceDigests: [run.receipt.integrity.digest],
+				settledAt: "2026-06-25T12:00:05.000Z",
+			});
+		}
+		createRouteObserver({ stateDir, logDir: join(stateDir, "route-decisions") }).readinessWindow();
+		deepStrictEqual(
+			createRouteHistoryStore({ stateDir })
+				.all()
+				.map((record) => record.settled)
+				.sort(),
+			["success", "worker_tool_call_cap_exhausted"],
+		);
+		strictEqual(
+			routeSettledLabel({ outcome: "failed", outcomeDetail: "permission_required; refused" }),
+			"permission_required",
+		);
+		strictEqual(routeSettledLabel({ outcome: "timed_out" }), "timed_out");
+		strictEqual(routeSettledLabel({ outcome: "failed", outcomeDetail: "exit code 1" }), "failure");
 	});
 
 	it("a receipt rewritten in place is verified again, never trusted from the cache", () => {

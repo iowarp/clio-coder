@@ -37,7 +37,7 @@ import {
 	routeCandidateKey,
 	routeConstraintValidity,
 } from "./route-decision.js";
-import { createRouteHistoryStore, type RouteHistoryStore } from "./route-history.js";
+import { createRouteHistoryStore, type RouteHistoryStore, routeSettledLabel } from "./route-history.js";
 import { type RouteObservation, routeObservationFromHistory } from "./route-policy.js";
 import { type RouteQualityReduction, receiptSourceAuthenticated, reduceRouteQuality } from "./route-quality.js";
 import type { RunEnvelope, RunReceipt } from "./types.js";
@@ -332,6 +332,8 @@ export function createRouteObserver(options: CreateRouteObserverOptions): RouteO
 			const completed = record.reliability === "success" && quality.label !== "fail";
 			const next = {
 				...record,
+				// Records settled before the label existed take it from their receipt.
+				settled: record.settled ?? routeSettledLabel(subject.receipt),
 				qualityLabel: quality.label,
 				completedCostUsd: completed ? record.completedCostUsd : null,
 				completedPhaseTiming: completed ? record.completedPhaseTiming : null,
@@ -449,6 +451,10 @@ export function createRouteObserver(options: CreateRouteObserverOptions): RouteO
 							? "success"
 							: "failure";
 				const completed = realized.outcome === "succeeded" && outcome.quality.label !== "fail";
+				// 141 of 142 operator route records carried no outcome label because
+				// quality waits on independent evidence; the receipt's own verdict is
+				// always available.
+				const settled = routeSettledLabel(outcome.receipt);
 				const sample: RouteObservation = {
 					qualityLabel: outcome.quality.label,
 					reliability,
@@ -467,6 +473,7 @@ export function createRouteObserver(options: CreateRouteObserverOptions): RouteO
 					executionRole: realized.route.executionRole,
 					qualityLabel: outcome.quality.label,
 					reliability,
+					settled,
 					firstPass: realized.firstPass,
 					completedCostUsd: sample.completedCostUsd,
 					completedPhaseTiming:
@@ -498,6 +505,7 @@ export function createRouteObserver(options: CreateRouteObserverOptions): RouteO
 					validity: evaluation.validity,
 					calibration: evaluation.calibration,
 					outcome: evaluation.outcome,
+					settled,
 				});
 			} catch {
 				// Observation must never disturb dispatch.
