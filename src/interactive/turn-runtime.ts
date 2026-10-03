@@ -36,7 +36,7 @@ import { cleanupEngineSessionResources } from "../engine/ai.js";
 import { engineStreamSimple } from "../engine/api-registry.js";
 import { setGlobalDefaultMaxOutputTokens } from "../engine/apis/index.js";
 import { lockedSynthesisSystemPrompt, sanitizeLockedSynthesisMessage } from "../engine/loop-guard.js";
-import { applyToolRounds, patchToolChoiceNamedPayload } from "../engine/provider-payload.js";
+import { applyToolRounds } from "../engine/provider-payload.js";
 import type { AgentEvent, AgentMessage, EngineModel, Usage } from "../engine/types.js";
 import type { resolveAgentTools, ToolFinishEvent, ToolTelemetry } from "../tools/agent-tools.js";
 import { effectiveToolCall } from "../tools/surface.js";
@@ -580,8 +580,13 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 		let unsettledSpendUsd = 0;
 		const handle = deps.createAgent({
 			transcriptStreamFn: (currentModel, currentContext, options) => {
+				const middlewareChoice = middlewareToolChoice.current();
+				// A locked round has no named tool to require; it is text-only.
 				const controlled = applyToolRounds(currentModel, currentContext, options, [
-					state.synthesisToolLock || middlewareToolChoice.current().kind === "none" ? { kind: "text-only" } : undefined,
+					state.synthesisToolLock || middlewareChoice.kind === "none" ? { kind: "text-only" } : undefined,
+					middlewareChoice.kind === "required" && !state.synthesisToolLock
+						? { kind: "required", toolName: middlewareChoice.toolName }
+						: undefined,
 				]);
 				if (!state.synthesisToolLock) return engineStreamSimple(currentModel, controlled.context, controlled.options);
 				const request = resolvedRequestContext(controlled.context);
@@ -676,15 +681,6 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 				setGlobalDefaultMaxOutputTokens(deps.getSettings().chat.maxOutputTokens);
 				apiCallStartedAt = performance.now();
 				apiCallFirstDeltaAt = null;
-			},
-			onPayload: async (payload, currentModel) => {
-				// A locked round is already text-only through transcriptStreamFn, and a
-				// named choice here would reopen its tool surface.
-				if (state.synthesisToolLock) return undefined;
-				const middlewareChoice = middlewareToolChoice.current();
-				return middlewareChoice.kind === "required"
-					? patchToolChoiceNamedPayload(payload, currentModel, middlewareChoice.toolName)
-					: undefined;
 			},
 			getApiKey: async () => {
 				if (!targetRequiresAuth(target.target, target.runtime)) {

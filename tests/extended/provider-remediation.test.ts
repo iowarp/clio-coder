@@ -2,9 +2,10 @@ import assert from "node:assert/strict";
 import { existsSync, readFileSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
+import { Type } from "typebox";
 import { isRetryableErrorMessage } from "../../src/domains/session/retry.js";
 import { engineStream, engineStreamSimple } from "../../src/engine/api-registry.js";
-import { patchToolChoiceNamedPayload } from "../../src/engine/provider-payload.js";
+import { applyToolRounds, type ToolRound } from "../../src/engine/provider-payload.js";
 import type { EngineModel } from "../../src/engine/types.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
 
@@ -21,31 +22,59 @@ const model: EngineModel = {
 	maxTokens: 1000,
 };
 
-test("Anthropic named-tool rounds retain the entire tool prefix and resume thinking later", () => {
-	const tools = [
-		{ name: "read", input_schema: { type: "object" } },
-		{ name: "bash", input_schema: { type: "object" } },
-	];
-	const payload = {
-		tools,
-		thinking: { type: "adaptive" },
-		output_config: { effort: "high", format: { type: "json_schema" } },
+test("Anthropic named-tool rounds retain the entire tool prefix and resume thinking later", async () => {
+	const tools = ["read", "bash"].map((name) => ({ name, description: name, parameters: Type.Object({}) }));
+	// Managed-effort Claude: Pi sends adaptive thinking and effort whatever `reasoning` says.
+	const managed = {
+		...model,
+		id: "claude-opus-5",
+		compat: { supportsMidConvoEffort: true, forceAdaptiveThinking: true },
+	} as EngineModel;
+	const request = { messages: [{ role: "user" as const, content: "go", timestamp: 0 }], tools };
+	type Body = {
+		tools: Array<{ name: string }>;
+		tool_choice?: unknown;
+		thinking?: { type: string };
+		output_config?: { effort?: string };
 	};
-	const before = JSON.stringify(payload);
-	const patched = patchToolChoiceNamedPayload(payload, model, "read") as Record<string, unknown>;
-	assert.equal(patched.tools, tools);
-	assert.equal(JSON.stringify(patched.tools), JSON.stringify(tools));
-	assert.deepEqual(patched.tool_choice, { type: "tool", name: "read" });
-	assert.equal(patched.thinking, undefined);
-	assert.deepEqual(patched.output_config, { format: { type: "json_schema" } });
-	assert.equal(JSON.stringify(payload), before);
-	assert.equal(patchToolChoiceNamedPayload(payload, model, "missing"), undefined);
-	const local = patchToolChoiceNamedPayload(payload, { ...model, api: "openai-completions" }, "read") as Record<
-		string,
-		unknown
-	>;
-	assert.deepEqual(local.tools, [tools[0]]);
-	assert.equal(local.tool_choice, "required");
+	const wire = async (target: EngineModel, rounds: readonly ToolRound[]): Promise<Body> => {
+		const controlled = applyToolRounds(target, request, { apiKey: "fixture", reasoning: "high" }, rounds);
+		let body: Body | undefined;
+		await engineStreamSimple(target, controlled.context, {
+			...controlled.options,
+			onPayload: async (payload, current) => {
+				body = structuredClone((await controlled.options?.onPayload?.(payload, current)) ?? payload) as Body;
+				throw new Error("captured before network I/O");
+			},
+		}).result();
+		assert.ok(body, "the serializer must build a body before the stream fails");
+		return body;
+	};
+	const forced = await wire(managed, [{ kind: "required", toolName: "read" }]);
+	// Pi 1.0 appends a reserved deferred placeholder to managed-tool Claude requests.
+	assert.deepEqual(
+		forced.tools.map((entry) => entry.name).filter((entry) => !entry.startsWith("__pi_")),
+		["read", "bash"],
+	);
+	assert.deepEqual(forced.tool_choice, { type: "tool", name: "read" });
+	assert.equal(forced.thinking, undefined);
+	assert.equal(forced.output_config?.effort, undefined);
+	// The next round without a forced choice resumes the configured thinking.
+	const resumed = await wire(managed, []);
+	assert.equal(resumed.thinking?.type, "adaptive");
+	assert.equal(resumed.output_config?.effort, "high");
+	assert.equal(resumed.tool_choice, undefined);
+	const missing = applyToolRounds(managed, request, undefined, [{ kind: "required", toolName: "missing" }]);
+	assert.equal(missing.context, request);
+	assert.equal(missing.options, undefined);
+	const local = applyToolRounds({ ...model, api: "openai-completions" } as EngineModel, request, undefined, [
+		{ kind: "required", toolName: "read" },
+	]);
+	assert.deepEqual(
+		local.context.tools?.map((entry) => entry.name),
+		["read"],
+	);
+	assert.equal(local.options?.toolChoice, "required");
 });
 
 function anthropicResponse(): Response {

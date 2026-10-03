@@ -851,7 +851,7 @@ export interface CreateChatLoopDeps {
 	/**
 	 * Shared next-round provider routing. The registry applies effects emitted
 	 * by before_tool/after_tool; the chat loop applies turn hooks and consumes
-	 * the resulting choice in onPayload.
+	 * the resulting choice when it builds each request.
 	 */
 	middlewareToolChoice?: MiddlewareToolChoiceControl;
 	/**

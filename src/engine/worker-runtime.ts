@@ -124,7 +124,7 @@ import {
 import {
 	applyToolRounds,
 	deterministicSampling,
-	patchWorkerRequestPayload,
+	patchLlamaCppResponseSchemaPayload,
 	supportsNamedToolChoice,
 } from "./provider-payload.js";
 import type { AgentEvent, AgentMessage, EngineModel } from "./types.js";
@@ -1089,9 +1089,12 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 							samplingParams: { ...streamOptions?.samplingParams, ...sampling.samplingParams },
 						};
 			// Routed per attempt: the lock and the middleware choice can flip between
-			// the first call and the overflow retry. A locked round loses its tool
-			// declarations, so the middleware text-only round yields to it.
+			// the first call and the overflow retry. The terminal handoff comes first
+			// because it names its tool and keeps the surface a lock would remove. A
+			// locked round has no declarations left, so neither middleware round
+			// applies to it.
 			const request = (projected: AgentMessage[]) => {
+				const middlewareChoice = middlewareToolChoice.current();
 				const controlled = applyToolRounds(
 					currentModel,
 					{
@@ -1101,8 +1104,14 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 					},
 					requestOptions,
 					[
-						synthesisToolLock && !terminalHandoffActive(currentModel.api) ? { kind: "tools-removed" } : undefined,
-						middlewareToolChoice.current().kind === "none" && !synthesisToolLock ? { kind: "text-only" } : undefined,
+						terminalHandoffActive(currentModel.api)
+							? { kind: "required", toolName: INTERNAL_HELPER_RESULT_TOOL, handoff: true }
+							: undefined,
+						synthesisToolLock ? { kind: "tools-removed" } : undefined,
+						middlewareChoice.kind === "none" && !synthesisToolLock ? { kind: "text-only" } : undefined,
+						middlewareChoice.kind === "required" && !synthesisToolLock
+							? { kind: "required", toolName: middlewareChoice.toolName }
+							: undefined,
 					],
 				);
 				return engineStreamSimple(currentModel, controlled.context, controlled.options);
@@ -1124,19 +1133,14 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 			tools,
 			messages: inheritedMessages,
 		},
-		onPayload: async (payload, currentModel) => {
-			const middlewareChoice = middlewareToolChoice.current();
-			return patchWorkerRequestPayload(payload, currentModel, {
-				runtimeId: input.runtime.id,
-				...(input.responseSchema !== undefined ? { responseSchema: input.responseSchema } : {}),
-				...(terminalHandoffActive(currentModel.api) ? { terminalToolName: INTERNAL_HELPER_RESULT_TOOL } : {}),
-				// A locked round has no declarations left to name, and Anthropic keeps
-				// its tools under tool_choice none, which a named choice would override.
-				...(middlewareChoice.kind === "required" && !synthesisToolLock
-					? { toolChoiceName: middlewareChoice.toolName }
-					: {}),
-			});
-		},
+		// The response-schema constraint is the one request mutation still applied
+		// to the body; tool routing lives in the rounds above.
+		...(input.responseSchema !== undefined
+			? {
+					onPayload: async (payload: unknown) =>
+						patchLlamaCppResponseSchemaPayload(payload, input.runtime.id, input.responseSchema),
+				}
+			: {}),
 		getApiKey: async () => input.apiKey,
 	};
 	if (input.sessionId) options.sessionId = input.sessionId;

@@ -1,4 +1,16 @@
-import type { Context, SimpleStreamOptions } from "@earendil-works/pi-ai";
+import type {
+	AnthropicOptions,
+	AzureOpenAIResponsesOptions,
+	BedrockOptions,
+	Context,
+	GoogleOptions,
+	GoogleVertexOptions,
+	MistralOptions,
+	OpenAICodexResponsesOptions,
+	OpenAICompletionsOptions,
+	OpenAIResponsesOptions,
+	SimpleStreamOptions,
+} from "@earendil-works/pi-ai";
 import {
 	GATEWAY_SCHEMA_RUNTIME_ID,
 	RESPONSE_SCHEMA_RUNTIME_ID,
@@ -8,27 +20,38 @@ import {
 import { resolvedRequestContext } from "./context.js";
 import type { EngineModel } from "./types.js";
 
+type Choice<T extends { toolChoice?: unknown }> = NonNullable<T["toolChoice"]>;
+
+/**
+ * Each API's own spelling of "call this tool", typed by that adapter's option
+ * so a Pi release that renames a spelling fails the typecheck. Pi's
+ * `streamSimple` copies `options.toolChoice` into the provider options
+ * unchanged on all of these adapters. Generic OpenAI-compatible servers (LM
+ * Studio, llama.cpp) answer HTTP 400 to the object form ("Invalid tool_choice
+ * type: 'object'. Supported string values: none, auto, required"), so
+ * completions use "required" over a one-tool surface, which is equivalent.
+ */
+const NAMED_CHOICE = {
+	"anthropic-messages": (name: string, rejected: boolean): Choice<AnthropicOptions> =>
+		rejected ? "auto" : { type: "tool", name },
+	"bedrock-converse-stream": (name: string, rejected: boolean): Choice<BedrockOptions> =>
+		rejected ? "auto" : { type: "tool", name },
+	"google-generative-ai": (): Choice<GoogleOptions> => "any",
+	"google-vertex": (): Choice<GoogleVertexOptions> => "any",
+	"mistral-conversations": (name: string): Choice<MistralOptions> => ({ type: "function", function: { name } }),
+	"openai-responses": (name: string): Choice<OpenAIResponsesOptions> => ({ type: "function", name }),
+	"azure-openai-responses": (name: string): Choice<AzureOpenAIResponsesOptions> => ({ type: "function", name }),
+	"openai-codex-responses": (): Choice<OpenAICodexResponsesOptions> => "required",
+	"openai-completions": (): Choice<OpenAICompletionsOptions> => "required",
+} as const;
+
 function isOpenAIResponsesApi(api: string): boolean {
 	return api === "openai-codex-responses" || api === "openai-responses" || api === "azure-openai-responses";
 }
 
-function isAnthropicMessagesApi(api: string): boolean {
-	return api === "anthropic-messages";
-}
-
-/** APIs whose named-tool request dialect is implemented below. */
-export function supportsNamedToolChoice(api: string): boolean {
-	return (
-		isAnthropicMessagesApi(api) ||
-		isOpenAIResponsesApi(api) ||
-		[
-			"openai-completions",
-			"google-generative-ai",
-			"google-vertex",
-			"bedrock-converse-stream",
-			"mistral-conversations",
-		].includes(api)
-	);
+/** APIs whose named-tool request is expressible as a Pi tool choice. */
+export function supportsNamedToolChoice(api: string): api is keyof typeof NAMED_CHOICE {
+	return Object.hasOwn(NAMED_CHOICE, api);
 }
 
 /**
@@ -60,59 +83,16 @@ function rejectsForcedToolChoice(model: Pick<EngineModel, "id">): boolean {
 	return major > removedAt[0] || (major === removedAt[0] && minor >= removedAt[1]);
 }
 
-/** A terminal protocol round exposes one handoff tool, never the work surface. */
-export function patchTerminalToolPayload(payload: unknown, model: EngineModel, toolName: string): unknown | undefined {
-	if (!supportsNamedToolChoice(model.api)) return undefined;
-	const patched = patchToolChoiceNamedPayload(payload, model, toolName);
-	if (!isRecord(patched)) return undefined;
-	// Named Anthropic choices normally preserve the schema cache. A terminal
-	// handoff deliberately removes the work surface as well as requiring its name.
-	if (isAnthropicMessagesApi(model.api)) {
-		const tools = namedToolDefinitions(patched.tools, toolName);
-		if (tools === null) return undefined;
-		// The handoff tool is the only one attached, so auto with one call at most
-		// is the forced round on models that reject a named choice.
-		const toolChoice = rejectsForcedToolChoice(model)
-			? { type: "auto", disable_parallel_tool_use: true }
-			: { type: "tool", name: toolName, disable_parallel_tool_use: true };
-		return { ...patched, tools, tool_choice: toolChoice };
-	}
-	if (model.api === "openai-completions" || isOpenAIResponsesApi(model.api)) {
-		return { ...patched, parallel_tool_calls: false };
-	}
-	return patched;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-	return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function namedToolDefinitions(tools: unknown, toolName: string): unknown[] | null {
-	if (!Array.isArray(tools)) return null;
-	const narrowed: unknown[] = [];
-	for (const tool of tools) {
-		if (!isRecord(tool)) continue;
-		const directName = typeof tool.name === "string" ? tool.name : undefined;
-		const functionName =
-			isRecord(tool.function) && typeof tool.function.name === "string" ? tool.function.name : undefined;
-		const toolSpecName =
-			isRecord(tool.toolSpec) && typeof tool.toolSpec.name === "string" ? tool.toolSpec.name : undefined;
-		if (directName === toolName || functionName === toolName || toolSpecName === toolName) {
-			narrowed.push(tool);
-			continue;
-		}
-		if (Array.isArray(tool.functionDeclarations)) {
-			const declarations = tool.functionDeclarations.filter(
-				(declaration) => isRecord(declaration) && declaration.name === toolName,
-			);
-			if (declarations.length > 0) narrowed.push({ ...tool, functionDeclarations: declarations });
-		}
-	}
-	return narrowed.length > 0 ? narrowed : null;
-}
-
-/** One model round's tool routing, derived from the host's lock and middleware state. */
-export type ToolRound = { kind: "text-only" } | { kind: "tools-removed" };
+/**
+ * One model round's tool routing, derived from the host's lock, middleware and
+ * terminal-handoff state. `required` names one declared tool; `handoff` marks
+ * the host-owned terminal result tool, whose round drops the work surface and
+ * allows at most one call.
+ */
+export type ToolRound =
+	| { kind: "text-only" }
+	| { kind: "tools-removed" }
+	| { kind: "required"; toolName: string; handoff?: boolean };
 
 export interface ControlledRequest {
 	context: Context;
@@ -120,6 +100,10 @@ export interface ControlledRequest {
 }
 
 type Payload = Record<string, unknown>;
+
+function isRecord(value: unknown): value is Payload {
+	return typeof value === "object" && value !== null && !Array.isArray(value);
+}
 
 /** Run the caller's hook first, then one request-local edit, so the host's own patches still apply underneath. */
 function withPayloadEdit(
@@ -134,6 +118,36 @@ function withPayloadEdit(
 			return isRecord(base) ? edit(base) : base;
 		},
 	};
+}
+
+/**
+ * A forced choice is exclusive with thinking on Anthropic. Leaving `reasoning`
+ * unset turns thinking off on most models, but Pi sends adaptive thinking and
+ * `output_config.effort` on managed-effort ones whatever `reasoning` says, so
+ * the forced round strips both from the body.
+ */
+function withoutThinking(payload: Payload): Payload {
+	const next = { ...payload };
+	delete next.thinking;
+	if (isRecord(next.output_config) && "effort" in next.output_config) {
+		const { effort: _effort, ...rest } = next.output_config;
+		if (Object.keys(rest).length > 0) next.output_config = rest;
+		else delete next.output_config;
+	}
+	return next;
+}
+
+/**
+ * Pi has no parallel-call option on any adapter, so the single-handoff
+ * guarantee is a body edit: Anthropic's `disable_parallel_tool_use` and the
+ * `parallel_tool_calls: false` of completions and the Responses APIs.
+ */
+function singleCall(api: string, payload: Payload): Payload {
+	if (api === "anthropic-messages" && isRecord(payload.tool_choice)) {
+		return { ...payload, tool_choice: { ...payload.tool_choice, disable_parallel_tool_use: true } };
+	}
+	if (api === "openai-completions" || isOpenAIResponsesApi(api)) return { ...payload, parallel_tool_calls: false };
+	return payload;
 }
 
 /**
@@ -228,6 +242,49 @@ function toolsRemovedRound(
 	return { context: { ...resolved, tools: [] }, options: withPayloadEdit(options, withoutToolSurface) };
 }
 
+/**
+ * Require one declared tool for this round through the API's own tool-choice
+ * option. The request narrows to that tool, so a spelling that cannot name a
+ * tool ("any", "required") still picks exactly it. Returns undefined when the
+ * API has no spelling for it or the tool is not declared.
+ *
+ * Claude models that accept a forced choice cannot think beside it, so the
+ * round drops `reasoning`; the next round without one resumes the configured
+ * level. They keep the full tool array on a work round so the cacheable schema
+ * prefix stays intact; only a terminal handoff drops the work surface. Models
+ * that reject a forced choice stay on "auto" over the narrowed surface and
+ * keep their thinking.
+ */
+function requiredRound(
+	model: EngineModel,
+	context: Context,
+	options: SimpleStreamOptions | undefined,
+	round: Extract<ToolRound, { kind: "required" }>,
+): ControlledRequest | undefined {
+	const api = model.api;
+	const name = round.toolName;
+	if (name.trim().length === 0 || !supportsNamedToolChoice(api)) return undefined;
+	const resolved = resolvedRequestContext(context);
+	const tools = resolved.tools ?? [];
+	if (!tools.some((tool) => tool.name === name)) return undefined;
+	const rejected = rejectsForcedToolChoice(model);
+	// Pi types SimpleStreamOptions.toolChoice as "auto" | "none" yet forwards it
+	// verbatim into each adapter's own option, which NAMED_CHOICE is typed against.
+	const toolChoice = NAMED_CHOICE[api](name, rejected) as NonNullable<SimpleStreamOptions["toolChoice"]>;
+	let next: SimpleStreamOptions = { ...options, toolChoice };
+	let narrowed: Context = { ...resolved, tools: tools.filter((tool) => tool.name === name) };
+	if (!rejected && (api === "anthropic-messages" || (api === "bedrock-converse-stream" && /claude/iu.test(model.id)))) {
+		const { reasoning: _reasoning, ...withoutReasoning } = next;
+		next = withoutReasoning;
+		if (api === "anthropic-messages") {
+			next = withPayloadEdit(next, withoutThinking);
+			if (round.handoff !== true) narrowed = context;
+		}
+	}
+	if (round.handoff === true) next = withPayloadEdit(next, (payload) => singleCall(api, payload));
+	return { context: narrowed, options: next };
+}
+
 function applyToolRound(
 	model: EngineModel,
 	context: Context,
@@ -239,6 +296,8 @@ function applyToolRound(
 			return textOnlyRound(model, context, options);
 		case "tools-removed":
 			return toolsRemovedRound(model, context, options);
+		case "required":
+			return requiredRound(model, context, options, round);
 	}
 }
 
@@ -256,81 +315,8 @@ export function applyToolRounds(
 	return { context, options };
 }
 
-/** Require one exposed tool for the next provider round while preserving the full schema surface. */
-export function patchToolChoiceNamedPayload(
-	payload: unknown,
-	model: EngineModel,
-	toolName: string,
-): unknown | undefined {
-	if (!isRecord(payload) || toolName.trim().length === 0) return undefined;
-	if (isAnthropicMessagesApi(model.api)) {
-		const tools = namedToolDefinitions(payload.tools, toolName);
-		if (tools === null) return undefined;
-		// These models reject any forced choice and cannot turn thinking off.
-		// Narrowing the surface to the required tool under auto keeps the
-		// requirement and leaves the configured thinking in place.
-		if (rejectsForcedToolChoice(model)) return { ...payload, tools, tool_choice: { type: "auto" } };
-		// Anthropic rejects a named tool choice while extended/adaptive thinking
-		// is active. Required-tool rounds are routing rounds, so disable thinking
-		// for this request only and remove the adaptive effort knob that belongs
-		// to it; the next automatic round resumes the configured thinking level.
-		const patched = { ...payload };
-		delete patched.thinking;
-		if (isRecord(patched.output_config) && "effort" in patched.output_config) {
-			const outputConfig = { ...patched.output_config };
-			delete outputConfig.effort;
-			if (Object.keys(outputConfig).length > 0) patched.output_config = outputConfig;
-			else delete patched.output_config;
-		}
-		// Keep the cacheable schema prefix intact. The request-level choice
-		// already identifies the required tool; narrowing changes it twice.
-		return { ...patched, tool_choice: { type: "tool", name: toolName } };
-	}
-	if (model.api === "google-generative-ai" || model.api === "google-vertex") {
-		if (!isRecord(payload.config) || payload.config.tools === undefined || payload.config.tools === null)
-			return undefined;
-		const tools = namedToolDefinitions(payload.config.tools, toolName);
-		if (tools === null) return undefined;
-		const toolConfig = isRecord(payload.config.toolConfig) ? payload.config.toolConfig : {};
-		return {
-			...payload,
-			config: {
-				...payload.config,
-				tools,
-				toolConfig: {
-					...toolConfig,
-					functionCallingConfig: { mode: "ANY", allowedFunctionNames: [toolName] },
-				},
-			},
-		};
-	}
-	if (model.api === "bedrock-converse-stream") {
-		if (!isRecord(payload.toolConfig) || payload.toolConfig.tools === undefined || payload.toolConfig.tools === null) {
-			return undefined;
-		}
-		const tools = namedToolDefinitions(payload.toolConfig.tools, toolName);
-		if (tools === null) return undefined;
-		const toolChoice = rejectsForcedToolChoice(model) ? { auto: {} } : { tool: { name: toolName } };
-		return { ...payload, toolConfig: { ...payload.toolConfig, tools, toolChoice } };
-	}
-	const tools = namedToolDefinitions(payload.tools, toolName);
-	if (tools === null) return undefined;
-	if (isOpenAIResponsesApi(model.api)) {
-		return { ...payload, tools, tool_choice: { type: "function", name: toolName } };
-	}
-	if (model.api === "mistral-conversations") {
-		return { ...payload, tools, toolChoice: { type: "function", function: { name: toolName } } };
-	}
-	// Generic OpenAI-compatible servers reject the object form outright: both LM
-	// Studio and llama.cpp answer HTTP 400 with "Invalid tool_choice type:
-	// 'object'. Supported string values: none, auto, required". The tool surface
-	// is already narrowed to the single named definition above, so "required" is
-	// equivalent here and is the only spelling every server accepts.
-	return { ...payload, tools, tool_choice: "required" };
-}
-
 /** Attach the admitted runtime's JSON-schema constraint without changing its tool surface. */
-function patchLlamaCppResponseSchemaPayload(
+export function patchLlamaCppResponseSchemaPayload(
 	payload: unknown,
 	runtimeId: string,
 	responseSchema: Record<string, unknown> | undefined,
@@ -374,14 +360,6 @@ export function patchResponseSchemaPayloadForDialect(
 	};
 }
 
-export interface WorkerPayloadPatchOptions {
-	runtimeId: string;
-	responseSchema?: Record<string, unknown>;
-	toolChoiceName?: string;
-	/** Host-owned terminal handoff; takes precedence over the work-tool lock. */
-	terminalToolName?: string;
-}
-
 // Identical local handbook runs shared few rules when servers sampled at their defaults.
 const CONTEXT_GENERATION_SEED = 42;
 const DETERMINISTIC_SAMPLING_RUNTIMES = new Set([
@@ -415,34 +393,4 @@ export function deterministicSampling(
 		(model.api === "ollama-native" && runtimeId === "ollama") ||
 		(model.api === "openai-completions" && DETERMINISTIC_SAMPLING_RUNTIMES.has(runtimeId));
 	return accepted ? { temperature: 0, samplingParams: { temperature: 0, seed: CONTEXT_GENERATION_SEED } } : undefined;
-}
-
-/** Compose all worker-owned request mutations over one payload in a stable order. */
-export function patchWorkerRequestPayload(
-	payload: unknown,
-	model: EngineModel,
-	options: WorkerPayloadPatchOptions,
-): unknown | undefined {
-	let patched = payload;
-	let changed = false;
-
-	const schemaPatched = patchLlamaCppResponseSchemaPayload(patched, options.runtimeId, options.responseSchema);
-	if (schemaPatched !== undefined) {
-		patched = schemaPatched;
-		changed = true;
-	}
-
-	if (options.terminalToolName !== undefined) {
-		const terminal = patchTerminalToolPayload(patched, model, options.terminalToolName);
-		if (terminal !== undefined) return terminal;
-	}
-	if (options.toolChoiceName !== undefined) {
-		const toolChoicePatched = patchToolChoiceNamedPayload(patched, model, options.toolChoiceName);
-		if (toolChoicePatched !== undefined) {
-			patched = toolChoicePatched;
-			changed = true;
-		}
-	}
-
-	return changed ? patched : undefined;
 }

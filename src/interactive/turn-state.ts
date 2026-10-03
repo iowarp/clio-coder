@@ -117,7 +117,7 @@ export interface ChatTurnState {
 	/**
 	 * Loop-guard synthesis lockout: once the guard locks a turn, the remaining
 	 * model rounds are forced text-only at the request level (tool_choice none
-	 * in onPayload). Cleared when the next user turn starts.
+	 * from the text-only round in transcriptStreamFn). Cleared when the next user turn starts.
 	 */
 	synthesisToolLock: boolean;
 	/** Reason a streaming tool-prose cutoff (or hard-block reminder) aborted the run. */
