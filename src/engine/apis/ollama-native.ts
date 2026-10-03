@@ -35,7 +35,7 @@ import { createGemmaChannelFilter, usesGemmaChannelMarkers } from "../gemma-chan
 import { createSentinelStripper } from "../strip-tokenizer-sentinels.js";
 import { createDegradedInferenceStream } from "./degraded-inference.js";
 import { ollamaJson, streamOllamaChat } from "./ollama-http.js";
-import { remainingContextMaxTokens } from "./output-budget.js";
+import { estimateReasoningTokens, remainingContextMaxTokens } from "./output-budget.js";
 import {
 	EXIT_RELEASE_MS,
 	forgetReleasedModel,
@@ -53,7 +53,6 @@ import { type ResidentModelInfo, residentMatchesKeep } from "./resident-models.j
 import { pickSamplingProfile, samplingParamsFromProfile } from "./sampling-overrides.js";
 import type { EngineApiProvider } from "./types.js";
 
-const REASONING_CHARS_PER_TOKEN = 4;
 const ownedModelsByTarget = new Map<string, Set<string>>();
 /** How to reach each target that holds an owned model, for the release on exit. */
 const ownedEndpointsByTarget = new Map<string, { baseUrl: string; headers: Record<string, string> }>();
@@ -488,7 +487,6 @@ function runStream(
 			let activeIdx = -1;
 			let activeThinking: ThinkingContent | null = null;
 			let activeThinkingIdx = -1;
-			let reasoningChars = 0;
 			let hadToolCall = false;
 			let doneReason: string | undefined;
 			const sentinelStripper = createSentinelStripper();
@@ -551,7 +549,6 @@ function runStream(
 					stream.push({ type: "thinking_start", contentIndex: activeThinkingIdx, partial: output });
 				}
 				activeThinking.thinking += content;
-				reasoningChars += content.length;
 				stream.push({
 					type: "thinking_delta",
 					contentIndex: activeThinkingIdx,
@@ -632,11 +629,9 @@ function runStream(
 					output.usage.input = response.prompt_eval_count ?? 0;
 					output.usage.output = response.eval_count ?? 0;
 					output.usage.totalTokens = output.usage.input + output.usage.output;
-					if (reasoningChars > 0) {
-						(output.usage as Usage & { reasoningTokens?: number }).reasoningTokens = Math.max(
-							1,
-							Math.round(reasoningChars / REASONING_CHARS_PER_TOKEN),
-						);
+					const reasoningTokens = estimateReasoningTokens(output.content);
+					if (reasoningTokens > 0) {
+						(output.usage as Usage & { reasoningTokens?: number }).reasoningTokens = reasoningTokens;
 					}
 					calculateEngineCost(model, output.usage);
 					doneReason = response.done_reason;

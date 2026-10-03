@@ -12,7 +12,6 @@ import {
 	type SimpleStreamOptions,
 	type StreamOptions,
 	type ThinkingBudgets,
-	type ThinkingContent,
 	type Tool,
 	type Usage,
 } from "@earendil-works/pi-ai";
@@ -58,7 +57,7 @@ import {
 	listGatewayLmStudioResidentModels,
 	listLmStudioResidentModels,
 } from "./lmstudio.js";
-import { remainingContextMaxTokens } from "./output-budget.js";
+import { estimateReasoningTokens, remainingContextMaxTokens } from "./output-budget.js";
 import { residencyManagedFor } from "./residency.js";
 import { pickSamplingProfile, samplingParamsFromProfile } from "./sampling-overrides.js";
 import type { EngineApiProvider } from "./types.js";
@@ -79,14 +78,6 @@ declare module "@earendil-works/pi-ai" {
 }
 
 const piOpenAICompletions = openAICompletionsApi();
-
-/**
- * Average characters-per-token for the English/code reasoning streams pi-ai
- * surfaces from openai-compatible providers. The exact ratio depends on the
- * upstream tokenizer; 4 matches GPT-2/BPE-style splits and is the same
- * estimator other inference tools use when no authoritative count is exposed.
- */
-const REASONING_CHARS_PER_TOKEN = 4;
 
 export { estimateInputTokensFromContext, remainingContextMaxTokens } from "./output-budget.js";
 
@@ -722,22 +713,6 @@ function finalErrorFromPartial(partial: AssistantMessage, message: string): Assi
 		stopReason: "error",
 		errorMessage: message,
 	};
-}
-
-function reasoningCharsFromContent(content: AssistantMessage["content"]): number {
-	let chars = 0;
-	for (const block of content) {
-		if (block.type === "thinking") {
-			chars += (block as ThinkingContent).thinking.length;
-		}
-	}
-	return chars;
-}
-
-function estimateReasoningTokens(content: AssistantMessage["content"]): number {
-	const chars = reasoningCharsFromContent(content);
-	if (chars === 0) return 0;
-	return Math.max(1, Math.round(chars / REASONING_CHARS_PER_TOKEN));
 }
 
 function positiveNumber(value: unknown): boolean {

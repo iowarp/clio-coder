@@ -1,5 +1,6 @@
-import type { Api, Context, Model, StreamOptions } from "@earendil-works/pi-ai";
+import type { Api, AssistantMessage, Context, Model, StreamOptions } from "@earendil-works/pi-ai";
 import { clampMaxTokensToContext } from "@earendil-works/pi-ai/api/simple-options";
+import { estimateTextTokens } from "@earendil-works/pi-ai/utils/estimate";
 import { CLIO_MIN_CONTEXT_WINDOW, CLIO_MIN_MAX_OUTPUT_TOKENS } from "../../core/context-floor.js";
 import { ceilChars, estimateAgentMessageTokens, toolSchemaChars } from "../../domains/session/context-accounting.js";
 import { normalizeContext, resolvedRequestContext } from "../context.js";
@@ -170,4 +171,9 @@ export function remainingContextMaxTokens(
 		Math.min(requested, modelLimit),
 	);
 	return Number.isFinite(resolved) ? resolved : DEFAULT_MAX_OUTPUT_TOKENS;
+}
+
+/** Reasoning tokens inferred from visible thinking text, for servers that report none. */
+export function estimateReasoningTokens(content: AssistantMessage["content"]): number {
+	return estimateTextTokens(content.map((block) => (block.type === "thinking" ? block.thinking : "")).join(""));
 }

@@ -508,6 +508,17 @@
 					"exports": {
 						"openrouterProvider": "d19d93559a8287e27c47a4f0e3b63b2311a15f92a02c5baa4a0559de64e105e7"
 					}
+				},
+				"./utils/estimate": {
+					"declaration": "dist/utils/estimate.d.ts",
+					"exports": {
+						"calculateContextTokens": "e5c4725f10052b21828736bd25c8faeb7f9977a1142d5330d5395aedf54824f0",
+						"ContextUsageEstimate": "2bce005e4cdcf722927097ab01a7956375c4f1254deaa708f807ea31e8f92ad0",
+						"estimateContextTokens": "f2c49719a568802d541305935db1aeee1affc64ec0bfc3ab46ac67488e96aa78",
+						"estimateMessageTokens": "0fa9b5c985fe81f58680d973878d3a3aa7083c28213838f98c5159f51cd58a7c",
+						"estimateTextAndImageContentTokens": "a5d149383a8bb3179c41e3a6a8c31eb4f9d336dbece4dc3c0dd204623561fb35",
+						"estimateTextTokens": "8815a24c2e371b1eca4197edcec3d1ae70934820ddfdeb61bcf57e28829c119e"
+					}
 				}
 			}
 		},
