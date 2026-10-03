@@ -11,7 +11,7 @@ import type { Tokens } from "marked";
 import type { ReactNode, RefObject } from "react";
 import * as React from "react";
 
-const { createContext, memo, useContext, useEffect, useMemo, useRef, useState } = React;
+const { createContext, memo, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore } = React;
 
 import { type HighlightToken, highlightCode } from "./highlight.js";
 import {
@@ -23,7 +23,7 @@ import {
 	mermaidSourceProblem,
 	safeHref,
 } from "./markdown-model.js";
-import { type MermaidResult, renderMermaid } from "./mermaid.js";
+import { type MermaidResult, mermaidThemeKey, renderMermaid, subscribeMermaidTheme } from "./mermaid.js";
 
 const ENTITY_PATTERN =
 	/&(#x[0-9a-f]+|#[0-9]+|amp|lt|gt|quot|apos|nbsp|copy|reg|hellip|mdash|ndash|rarr|larr|times);/giu;
@@ -267,6 +267,8 @@ export const MermaidBlock = memo(function MermaidBlock({ source, settled }: Merm
 	const [showSource, setShowSource] = useState(false);
 	const problem = mermaidSourceProblem(source);
 	const wantsRender = settled && !streaming && near && problem === null;
+	// Mermaid bakes its colours into the drawing, so a theme change draws it again from the new tokens.
+	const themeKey = useSyncExternalStore(subscribeMermaidTheme, mermaidThemeKey, () => "");
 	useEffect(() => {
 		if (!wantsRender) return;
 		let cancelled = false;
@@ -276,7 +278,7 @@ export const MermaidBlock = memo(function MermaidBlock({ source, settled }: Merm
 		return () => {
 			cancelled = true;
 		};
-	}, [wantsRender, source]);
+	}, [wantsRender, source, themeKey]);
 	const state =
 		!settled || streaming
 			? "pending"

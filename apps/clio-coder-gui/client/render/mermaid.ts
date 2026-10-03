@@ -23,44 +23,125 @@ interface SanitizerLike {
 }
 
 /**
- * Mermaid computes shades from these, so they are hex rather than CSS variables. They restate the
- * `--code-*` tokens in tokens.css: node fills on the code surface, the brand's signal cyan for the
- * rules a reader follows, warm grey for secondary rules, and the code ink for every label.
+ * Mermaid computes shades from its theme variables, so they must be concrete colours rather than CSS
+ * variables. They are read from the token layer each time the theme changes: node fills on the code
+ * surface, the brand accent for the rules a reader follows, the code gutter for secondary rules, and the
+ * code ink for every label. A token that cannot be read is left out, so Mermaid keeps its own default
+ * for it instead of this file carrying a colour of its own.
  */
-const THEME_VARIABLES = {
-	background: "transparent",
-	fontFamily: '"IBM Plex Sans", "Segoe UI", system-ui, sans-serif',
-	fontSize: "13px",
-	primaryColor: "#1c1915",
-	primaryTextColor: "#f3ecdf",
-	primaryBorderColor: "#00c2cb",
-	secondaryColor: "#12100d",
-	secondaryTextColor: "#f3ecdf",
-	secondaryBorderColor: "#6f6558",
-	tertiaryColor: "#12100d",
-	tertiaryTextColor: "#f3ecdf",
-	tertiaryBorderColor: "#6f6558",
-	lineColor: "#b0a594",
-	textColor: "#f3ecdf",
-	mainBkg: "#1c1915",
-	nodeBorder: "#00c2cb",
-	clusterBkg: "#12100d",
-	clusterBorder: "#6f6558",
-	titleColor: "#f3ecdf",
-	edgeLabelBackground: "#12100d",
-	actorBkg: "#1c1915",
-	actorBorder: "#00c2cb",
-	actorTextColor: "#f3ecdf",
-	signalColor: "#f3ecdf",
-	signalTextColor: "#f3ecdf",
-	labelBoxBkgColor: "#1c1915",
-	labelTextColor: "#f3ecdf",
-	noteBkgColor: "#12100d",
-	noteTextColor: "#f3ecdf",
-	noteBorderColor: "#6f6558",
-	errorBkgColor: "#2c0e0b",
-	errorTextColor: "#f26d63",
+const ROLE_TOKENS = {
+	paper: "--code-paper",
+	surface: "--code-surface",
+	ink: "--code-ink",
+	muted: "--code-ink-muted",
+	edge: "--code-gutter",
+	signal: "--accent",
+	failFill: "--status-fail-tint",
+	failInk: "--status-fail-fg",
 } as const;
+
+type Role = keyof typeof ROLE_TOKENS;
+type Palette = Readonly<Partial<Record<Role, string>>>;
+
+const FONT_FAMILY = '"IBM Plex Sans", "Segoe UI", system-ui, sans-serif';
+const DARK_QUERY = "(prefers-color-scheme: dark)";
+
+function readPalette(): Palette {
+	if (typeof document === "undefined") return {};
+	const style = getComputedStyle(document.documentElement);
+	const palette: Partial<Record<Role, string>> = {};
+	for (const [role, token] of Object.entries(ROLE_TOKENS) as [Role, string][]) {
+		const value = style.getPropertyValue(token).trim();
+		if (value !== "") palette[role] = value;
+	}
+	return palette;
+}
+
+function themeVariables(palette: Palette): Record<string, string> {
+	const { paper, surface, ink, muted, edge, signal, failFill, failInk } = palette;
+	const roles: Record<string, string | undefined> = {
+		primaryColor: surface,
+		primaryTextColor: ink,
+		primaryBorderColor: signal,
+		secondaryColor: paper,
+		secondaryTextColor: ink,
+		secondaryBorderColor: edge,
+		tertiaryColor: paper,
+		tertiaryTextColor: ink,
+		tertiaryBorderColor: edge,
+		lineColor: muted,
+		textColor: ink,
+		mainBkg: surface,
+		nodeBorder: signal,
+		clusterBkg: paper,
+		clusterBorder: edge,
+		titleColor: ink,
+		edgeLabelBackground: paper,
+		actorBkg: surface,
+		actorBorder: signal,
+		actorTextColor: ink,
+		signalColor: ink,
+		signalTextColor: ink,
+		labelBoxBkgColor: surface,
+		labelTextColor: ink,
+		noteBkgColor: paper,
+		noteTextColor: ink,
+		noteBorderColor: edge,
+		errorBkgColor: failFill,
+		errorTextColor: failInk,
+	};
+	const variables: Record<string, string> = { background: "transparent", fontFamily: FONT_FAMILY, fontSize: "13px" };
+	for (const [name, value] of Object.entries(roles)) if (value !== undefined) variables[name] = value;
+	return variables;
+}
+
+function mermaidConfig(palette: Palette): Record<string, unknown> {
+	return {
+		startOnLoad: false,
+		securityLevel: "strict",
+		htmlLabels: false,
+		flowchart: { htmlLabels: false, useMaxWidth: true },
+		sequence: { useMaxWidth: true },
+		gantt: { useMaxWidth: true },
+		theme: "base",
+		themeVariables: themeVariables(palette),
+		fontFamily: FONT_FAMILY,
+		maxTextSize: 16_384,
+		maxEdges: 400,
+		suppressErrorRendering: true,
+		deterministicIds: true,
+		logLevel: "fatal",
+	};
+}
+
+/** Names the theme the page is painting, so a drawn diagram can tell that its colours are stale. */
+export function mermaidThemeKey(): string {
+	if (typeof document === "undefined") return "";
+	let dark = false;
+	try {
+		dark = window.matchMedia(DARK_QUERY).matches;
+	} catch {
+		// No media query support: the system preference reads as light, as it does in shell/theme.ts.
+	}
+	return `${document.documentElement.dataset.theme ?? "system"}|${dark ? "dark" : "light"}`;
+}
+
+/** Calls `listener` when the root's `data-theme` or the system colour preference changes. */
+export function subscribeMermaidTheme(listener: () => void): () => void {
+	const observer = new MutationObserver(listener);
+	observer.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+	let query: MediaQueryList | undefined;
+	try {
+		query = window.matchMedia(DARK_QUERY);
+		query.addEventListener("change", listener);
+	} catch {
+		// No media query support: only an explicit choice can change the theme.
+	}
+	return () => {
+		observer.disconnect();
+		query?.removeEventListener("change", listener);
+	};
+}
 
 /**
  * Mermaid's embedded stylesheet stays: it is scoped to the diagram id and the
@@ -75,27 +156,12 @@ const SANITIZE_CONFIG = {
 
 let loading: Promise<{ mermaid: MermaidLike; sanitizer: SanitizerLike }> | null = null;
 let counter = 0;
+let configuredFor = "";
 
 function load(): Promise<{ mermaid: MermaidLike; sanitizer: SanitizerLike }> {
 	if (loading === null) {
 		loading = Promise.all([import("mermaid"), import("dompurify")]).then(([mermaidModule, purifyModule]) => {
 			const mermaid = mermaidModule.default as unknown as MermaidLike;
-			mermaid.initialize({
-				startOnLoad: false,
-				securityLevel: "strict",
-				htmlLabels: false,
-				flowchart: { htmlLabels: false, useMaxWidth: true },
-				sequence: { useMaxWidth: true },
-				gantt: { useMaxWidth: true },
-				theme: "base",
-				themeVariables: THEME_VARIABLES,
-				fontFamily: THEME_VARIABLES.fontFamily,
-				maxTextSize: 16_384,
-				maxEdges: 400,
-				suppressErrorRendering: true,
-				deterministicIds: true,
-				logLevel: "fatal",
-			});
 			const sanitizer = purifyModule.default as unknown as SanitizerLike;
 			return { mermaid, sanitizer };
 		});
@@ -104,6 +170,15 @@ function load(): Promise<{ mermaid: MermaidLike; sanitizer: SanitizerLike }> {
 		});
 	}
 	return loading;
+}
+
+/** Mermaid bakes its colours into each drawing, so the config is rebuilt whenever the tokens differ. */
+function configure(mermaid: MermaidLike): void {
+	const palette = readPalette();
+	const key = JSON.stringify(palette);
+	if (key === configuredFor) return;
+	mermaid.initialize(mermaidConfig(palette));
+	configuredFor = key;
 }
 
 function describeError(error: unknown): string {
@@ -135,6 +210,7 @@ async function renderNow(source: string): Promise<MermaidResult> {
 		return { ok: false, error: `The diagram renderer could not load: ${describeError(error)}` };
 	}
 	try {
+		configure(runtime.mermaid);
 		await runtime.mermaid.parse(source);
 		counter += 1;
 		const { svg } = await runtime.mermaid.render(`clio-coder-diagram-${counter}`, source);

@@ -125,23 +125,26 @@
 	/* About 90 characters of reading text: long enough for tables and code, short enough to read. */
 	--conversation-max: 820px;
 
-	/* ---- code surface: a contained dark instrument in BOTH themes ------- */
-	--code-paper: #12100d;
-	--code-surface: #1c1915;
-	--code-ink: #f3ecdf;
-	--code-ink-muted: #b0a594;
-	--code-line: #36302a;
-	--code-gutter: #6f6558;
-	/* Syntax inside the code well: the brand signal for keywords, warm neutrals for structure. */
-	--syntax-comment: #9a8f80;
-	--syntax-punctuation: #cfc5b6;
-	--syntax-keyword: #5fd4db;
-	--syntax-string: #f2c07e;
-	--syntax-number: #d8c2ed;
-	--syntax-function: #9cc9ee;
-	--syntax-property: #8fd1a7;
-	--syntax-deleted: #f58e85;
-	--syntax-inserted: #8fd1a7;
+	/* ---- code surface: a contained well that follows the theme. Light is a sunken warm paper, the
+	   page's own --well edged by --line, with ink and hues drawn from the brand families. The dark
+	   set lives in both dark blocks below. Every pair is measured in scripts/check-contrast.mjs. ---- */
+	--code-paper: #efe9de;
+	--code-surface: #e8e1d3;
+	--code-ink: #1a1612;
+	--code-ink-muted: #524a42;
+	--code-line: #d4cbbd;
+	--code-gutter: #7d7466;
+	/* Syntax inside the code well: the brand teal for keywords, copper for strings, the reasoning purple
+	   for numbers, the success green for names and additions, the fail red for removals. */
+	--syntax-comment: #675e50;
+	--syntax-punctuation: #5c5347;
+	--syntax-keyword: #0a666c;
+	--syntax-string: #9a4812;
+	--syntax-number: #674677;
+	--syntax-function: #1f5a96;
+	--syntax-property: #14573a;
+	--syntax-deleted: #8c3a32;
+	--syntax-inserted: #14573a;
 
 	/* ---- the setup wizard's scene: the supplied films are authored on pure black, so the frame that
 	   holds them is black in both themes, like the site's scenes. Its caption sits outside, on paper. */
@@ -164,9 +167,24 @@
 	   the chrome and which is the stage is swapped here, after brand.css, so every sheet follows. */
 	--paper: #0d0d0c;
 	--surface: #000000;
-	/* On a black stage the warm code paper read as a brown tint over the whole conversation, so in
-	   dark a code or diagram well is the stage's own black, held by its line. Light keeps the well. */
+	/* The dark well is a contained instrument. On a black stage the warm code paper read as a brown
+	   tint over the whole conversation, so a code or diagram well is the stage's own black, held by
+	   its line. Light keeps its sunken paper (see :root). */
 	--code-paper: #000000;
+	--code-surface: #1c1915;
+	--code-ink: #f3ecdf;
+	--code-ink-muted: #b0a594;
+	--code-line: #36302a;
+	--code-gutter: #6f6558;
+	--syntax-comment: #9a8f80;
+	--syntax-punctuation: #cfc5b6;
+	--syntax-keyword: #5fd4db;
+	--syntax-string: #f2c07e;
+	--syntax-number: #d8c2ed;
+	--syntax-function: #9cc9ee;
+	--syntax-property: #8fd1a7;
+	--syntax-deleted: #f58e85;
+	--syntax-inserted: #8fd1a7;
 	--scrim: rgb(0 0 0 / 72%);
 	--glint: var(--ink);
 	--well: #151412;
@@ -219,6 +237,20 @@
 		--paper: #0d0d0c;
 		--surface: #000000;
 		--code-paper: #000000;
+		--code-surface: #1c1915;
+		--code-ink: #f3ecdf;
+		--code-ink-muted: #b0a594;
+		--code-line: #36302a;
+		--code-gutter: #6f6558;
+		--syntax-comment: #9a8f80;
+		--syntax-punctuation: #cfc5b6;
+		--syntax-keyword: #5fd4db;
+		--syntax-string: #f2c07e;
+		--syntax-number: #d8c2ed;
+		--syntax-function: #9cc9ee;
+		--syntax-property: #8fd1a7;
+		--syntax-deleted: #f58e85;
+		--syntax-inserted: #8fd1a7;
 		--scrim: rgb(0 0 0 / 72%);
 		--glint: var(--ink);
 		--well: #151412;

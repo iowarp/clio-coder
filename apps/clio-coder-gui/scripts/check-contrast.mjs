@@ -79,6 +79,10 @@ const CHECKS = [
 	["--code-ink-muted", "--code-paper", TEXT],
 	["--code-ink-muted", "--code-surface", TEXT],
 	["--code-gutter", "--code-paper", NON_TEXT],
+	["--code-gutter", "--code-surface", NON_TEXT],
+	// Mermaid draws node borders in the accent on the well, so the outline must read on both grounds.
+	["--accent", "--code-paper", NON_TEXT],
+	["--accent", "--code-surface", NON_TEXT],
 	...["comment", "punctuation", "keyword", "string", "number", "function", "property", "deleted", "inserted"].flatMap(
 		(kind) => [
 			[`--syntax-${kind}`, "--code-paper", TEXT],

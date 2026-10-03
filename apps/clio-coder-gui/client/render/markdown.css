@@ -122,8 +122,9 @@
 	overflow-wrap: normal;
 	word-break: normal;
 }
-/* Code and diagrams are contained dark wells in both themes. Their chrome is one quiet line inside
-   the well, the language and the actions, so the code itself is the heaviest thing in the block. */
+/* Code and diagrams are contained wells that follow the theme: sunken paper in light, the stage's black
+   in dark. Their chrome is one quiet line inside the well, the language and the actions, so the code
+   itself is the heaviest thing in the block. */
 .code-block,
 .diagram {
 	min-width: 0;
