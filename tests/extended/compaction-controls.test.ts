@@ -666,6 +666,81 @@ describe("production compaction controls", () => {
 		ok(context.liveContextEstimate(runtime).tokens < 32768);
 	});
 
+	it("pauses automatic compaction after three consecutive summary failures until one succeeds", async () => {
+		const saved = JSON.parse(
+			readFileSync(new URL("../fixtures/context-pressure-pipeline.json", import.meta.url), "utf8"),
+		) as {
+			entries: SessionEntry[];
+			systemPrompt: string;
+			tools: AgentRuntime["agent"]["state"]["tools"];
+		};
+		const f = fixture();
+		const state = createTurnState("off");
+		state.activeUserTurnId = saved.entries[0]?.turnId ?? null;
+		const runtime = {
+			targetId: "chat-target",
+			runtimeId: "fixture",
+			wireModelId: "chat",
+			runtimeResolution: {
+				costProvenance: "known_free",
+				capabilityDecisions: { maxTokens: 8192 },
+				contextWindowDetails: {
+					desiredContextWindow: 32768,
+					effectiveContextWindow: 32768,
+					contextWindowSource: "configured",
+				},
+			},
+			agent: {
+				state: {
+					systemPrompt: saved.systemPrompt,
+					tools: saved.tools,
+					messages: [],
+					thinkingLevel: "off",
+					model: { ...faux.getModel("chat"), contextWindow: 32768, maxTokens: 8192 },
+				},
+			},
+		} as unknown as AgentRuntime;
+		state.runtime = runtime;
+		let attempts = 0;
+		let failing = true;
+		const notices: string[] = [];
+		const context = createTurnContext({
+			state,
+			session: f.session,
+			getSettings: () => f.settings,
+			providers: f.providers,
+			readSessionEntries: f.entries,
+			autoCompact: (...args) => {
+				attempts++;
+				if (failing) return Promise.reject(new Error("summary route unavailable"));
+				return f.run(...args);
+			},
+			middleware: { fireCompactionHook: () => {} } as unknown as TurnMiddleware,
+			emitNotice: (text) => notices.push(text),
+		});
+		// Seventeen entries leave an older span outside the default keep-recent
+		// window, so the forced call below has something to summarize.
+		const entries = saved.entries.slice(0, 17);
+		f.state.writer.replaceEntries(entries);
+		f.pinLeaf(entries.at(-1)?.turnId ?? null);
+		state.lastTurnId = entries.at(-1)?.turnId ?? null;
+		context.refreshAgentMessagesFromSession(runtime);
+		f.settings.context.compaction.threshold = 0.01;
+		const paused = "automatic compaction paused after 3 consecutive failures; run /compact to retry";
+		for (let i = 1; i <= 3; i++) {
+			await rejects(context.runAutoCompact(runtime, false), /summary route unavailable/);
+			strictEqual(attempts, i);
+		}
+		strictEqual(notices.filter((notice) => notice === paused).length, 1);
+		strictEqual(await context.runAutoCompact(runtime, false), false);
+		strictEqual(attempts, 3, "a paused automatic attempt never reaches the summarizer");
+		failing = false;
+		strictEqual(await context.runAutoCompact(runtime, true), true, "/compact still runs while paused");
+		strictEqual(attempts, 4);
+		await context.runAutoCompact(runtime, false);
+		strictEqual(attempts, 5, "a successful compaction lifts the pause");
+	});
+
 	it("routes a configured dedicated summary model through the production callback", async () => {
 		const f = fixture();
 		f.settings.context.compaction.model = "summary-target/summary";
