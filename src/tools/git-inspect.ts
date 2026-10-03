@@ -50,7 +50,7 @@ function revPartError(part: string): string | null {
 }
 
 /** Why `rev` is refused, or null. A range is `a..b` or `a...b`; show takes one revision. */
-export function gitRevError(rev: unknown, op: GitOp): string | null {
+function gitRevError(rev: unknown, op: GitOp): string | null {
 	if (typeof rev !== "string" || rev.length === 0) return "must be a non-empty string";
 	if (rev.length > REV_MAX_CHARS) return `exceeds ${REV_MAX_CHARS} characters`;
 	if (rev.startsWith("-")) return "starts with -";

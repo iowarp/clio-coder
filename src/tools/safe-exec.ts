@@ -10,7 +10,6 @@ import {
 import { ToolNames } from "../core/tool-names.js";
 import { gitArgvCommand } from "../domains/safety/git-policy.js";
 import { StringEnum } from "../engine/ai.js";
-import { checkGitFields, GIT_OPS, gitInspectArgv, isGitInspectOp } from "./git-inspect.js";
 import {
 	gitConfigBool,
 	gitConfigValue,
@@ -20,6 +19,7 @@ import {
 	typedGitInspectEnv,
 	typedGitMutationArgv,
 } from "./git-exec.js";
+import { checkGitFields, GIT_OPS, gitInspectArgv, isGitInspectOp } from "./git-inspect.js";
 import type { ToolInvokeOptions, ToolResult, ToolResultDetails, ToolSpec } from "./registry.js";
 import { COMMIT_IDENTITY } from "./task-worktree.js";
 import { truncateUtf8 } from "./truncate-utf8.js";
