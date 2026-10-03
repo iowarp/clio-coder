@@ -106,9 +106,10 @@ export function createPromptsBundle(
 		try {
 			snapshot.recipes = (agentsDomain()?.listSpecs() ?? [])
 				.filter((spec) => isUserVisibleAgent(spec) || spec.audience === "shadow")
+				// The marker rides on the purpose so the name stays a valid dispatch id.
 				.map((spec) => ({
-					name: spec.audience === "shadow" ? `${spec.id} (shadow)` : spec.id,
-					purpose: spec.description,
+					name: spec.id,
+					purpose: spec.audience === "shadow" ? `(shadow) ${spec.description}` : spec.description,
 				}));
 		} catch {
 			// dispatch({list:true}) remains the authoritative roster.
