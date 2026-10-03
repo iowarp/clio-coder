@@ -1,0 +1,201 @@
+/* The composer's slash palette: a list anchored above the field, read like the command palette
+   (`client/interaction/interaction.css`) and sized like the composer's options panel. Colours are
+   tokens only; the active row is marked by a rule and a tint, never by colour alone. */
+
+.slash-palette {
+	position: absolute;
+	left: 0;
+	right: 0;
+	bottom: calc(100% + var(--space-2));
+	z-index: 6;
+	display: grid;
+	gap: var(--space-1);
+	padding: var(--space-2);
+	border: 1px solid var(--line);
+	border-radius: var(--radius-lg);
+	background: var(--overlay);
+	box-shadow: var(--shadow-panel);
+}
+.slash-palette__list {
+	max-height: min(22rem, 46dvh);
+	overflow: auto;
+	overscroll-behavior: contain;
+}
+.slash-palette__group {
+	padding: var(--space-2) var(--space-2) var(--space-1);
+	color: var(--ink-muted);
+	font-family: var(--font-mono);
+	font-size: var(--text-exact);
+	letter-spacing: 0.06em;
+	text-transform: uppercase;
+}
+.slash-palette__group:first-child {
+	padding-top: var(--space-1);
+}
+.slash-palette__option {
+	display: flex;
+	align-items: baseline;
+	justify-content: space-between;
+	gap: var(--space-4);
+	padding: var(--space-2);
+	border-radius: var(--radius-sm);
+	cursor: default;
+}
+.slash-palette__option[data-active="true"] {
+	background: var(--accent-soft);
+	box-shadow: inset 2px 0 0 var(--accent);
+}
+.slash-palette__name {
+	flex: 0 0 auto;
+	font-family: var(--font-mono);
+	font-size: var(--text-meta);
+	color: var(--ink);
+	white-space: nowrap;
+}
+.slash-palette__hint {
+	color: var(--ink-muted);
+}
+.slash-palette__summary {
+	flex: 0 1 auto;
+	min-width: 0;
+	text-align: end;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	color: var(--ink-muted);
+	font-size: var(--text-meta);
+}
+.slash-palette__keys {
+	margin: 0;
+	padding: var(--space-1) var(--space-2) 0;
+	border-top: 1px solid var(--line);
+	color: var(--ink-subtle);
+	font-size: var(--text-exact);
+}
+.slash-palette__keys kbd {
+	font-family: var(--font-mono);
+	font-size: var(--text-exact);
+	color: var(--ink-muted);
+}
+.slash-palette__keys code {
+	font-family: var(--font-mono);
+	color: var(--ink);
+}
+
+/* A typed `/name args` line: the grammar it is held to and what Enter will send. */
+.slash-palette--line {
+	padding: var(--space-2) var(--space-3);
+}
+.slash-palette__line {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: baseline;
+	gap: var(--space-1) var(--space-3);
+	margin: 0;
+	font-size: var(--text-meta);
+	color: var(--ink-muted);
+}
+.slash-palette__line code {
+	font-family: var(--font-mono);
+	color: var(--ink);
+	overflow-wrap: anywhere;
+}
+.slash-palette--line .slash-palette__keys {
+	padding-inline: 0;
+	margin-top: var(--space-1);
+}
+.slash-palette__error {
+	margin: var(--space-1) 0 0;
+	padding-top: var(--space-1);
+	border-top: 1px solid var(--line);
+	color: var(--status-fail-fg);
+	font-size: var(--text-meta);
+}
+
+/* What a command answered, under the field until dismissed. */
+.slash-result {
+	display: grid;
+	gap: var(--space-1);
+	min-width: 0;
+	padding: var(--space-2) var(--space-3);
+	border: 1px solid var(--line);
+	border-radius: var(--radius-md);
+	background: var(--well);
+	font-size: var(--text-meta);
+}
+.slash-result__head {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: baseline;
+	gap: var(--space-2);
+	margin: 0;
+}
+.slash-result__head code {
+	font-family: var(--font-mono);
+	font-size: var(--text-exact);
+}
+.slash-result__head .composer__secondary {
+	min-height: 32px;
+	margin-inline-start: auto;
+	font-size: var(--text-exact);
+}
+.slash-result pre,
+.slash-result p {
+	margin: 0;
+}
+.slash-result pre {
+	max-height: 12rem;
+	overflow: auto;
+	font-family: var(--font-mono);
+	font-size: var(--text-exact);
+	white-space: pre-wrap;
+	overflow-wrap: anywhere;
+}
+
+/* A session action in its dialog. The panels it hosts render frameless; one that still renders as a
+   disclosure (FleetRunPanel) is opened by the host, and its frame and summary fold away here so the
+   dialog's own heading is the only one. */
+.slash-dialog:focus {
+	outline: none;
+}
+.slash-dialog > details {
+	margin: 0;
+	padding: 0;
+	border: 0;
+	background: transparent;
+	box-shadow: none;
+}
+.slash-dialog > details > summary {
+	display: none;
+}
+.slash-dialog > :first-child > :first-child {
+	margin-top: 0;
+}
+
+/* The extension rows carry no id column, so the status keeps its own width instead of the title's. */
+.extensions-panel--bare .session-board__rows > li {
+	grid-template-columns: minmax(0, 1fr) auto;
+}
+
+@media (max-width: 650px) {
+	.slash-palette__option {
+		flex-direction: column;
+		gap: 0;
+	}
+	.slash-palette__name {
+		white-space: normal;
+		overflow-wrap: anywhere;
+	}
+	.slash-palette__summary {
+		text-align: start;
+		white-space: normal;
+	}
+}
+
+@media (forced-colors: active) {
+	.slash-palette__option[data-active="true"] {
+		forced-color-adjust: none;
+		outline: 2px solid Highlight;
+		outline-offset: -2px;
+	}
+}

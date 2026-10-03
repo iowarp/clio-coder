@@ -34,6 +34,7 @@ export const HandoffPanel = memo(function HandoffPanel({
 	sessionOpen: boolean;
 	capabilities: AgentCapabilities | undefined;
 	running: boolean;
+	/** Render without the disclosure frame, for a host that supplies its own heading. */
 }) {
 	const fieldId = useId();
 	const navigate = useNavigate();
@@ -105,9 +106,8 @@ export const HandoffPanel = memo(function HandoffPanel({
 		},
 	});
 	const shown = refusal ? handoffRefusal(refusal) : null;
-	return (
-		<details className="command-panel session-board handoff-panel" open>
-			<summary>Hand off to a new conversation</summary>
+	const body = (
+		<>
 			{!sessionOpen ? <p>This session is not open. Load it to hand it off.</p> : null}
 			{sessionOpen && !supported ? <p>This Clio Coder session cannot hand itself off.</p> : null}
 			{sessionOpen && supported && !held ? (
@@ -126,6 +126,7 @@ export const HandoffPanel = memo(function HandoffPanel({
 					<label htmlFor={fieldId}>What should the next conversation accomplish?</label>
 					<input
 						id={fieldId}
+						data-autofocus
 						value={goal}
 						maxLength={2000}
 						onChange={(event) => setGoal(event.target.value.replace(/[\r\n]+/g, " "))}
@@ -155,6 +156,7 @@ export const HandoffPanel = memo(function HandoffPanel({
 					<label htmlFor={`${fieldId}-document`}>Handoff document</label>
 					<textarea
 						id={`${fieldId}-document`}
+						data-autofocus
 						value={held.edited}
 						rows={14}
 						spellCheck={false}
@@ -181,6 +183,7 @@ export const HandoffPanel = memo(function HandoffPanel({
 				</p>
 			) : null}
 			{prepare.error || commit.error ? <p role="alert">{(prepare.error ?? commit.error)?.message}</p> : null}
-		</details>
+		</>
 	);
+	return <div className="session-board handoff-panel handoff-panel--bare">{body}</div>;
 });

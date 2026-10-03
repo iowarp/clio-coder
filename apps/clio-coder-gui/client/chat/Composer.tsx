@@ -13,9 +13,10 @@
  */
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { memo, useEffect, useId, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
+import { memo, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { routes } from "../../contracts/routes.js";
 import type { SessionSnapshot } from "../../contracts/sessions.js";
+import type { CommandRequest } from "../../contracts/steering.js";
 import type { Client } from "../api/client.js";
 import { Icon } from "../design/icons.js";
 import { StatusMark } from "../design/status.js";
@@ -51,9 +52,21 @@ import {
 	submitIntent,
 	submitLabel,
 } from "./composer-model.js";
+import { usePaneActions } from "./pane-context.js";
 import { LARGE_PASTE_CHARACTERS, planPaste } from "./paste-model.js";
 import { RoutePicker } from "./RoutePicker.js";
 import type { RouteFacts } from "./route.js";
+import { SlashActionDialog, SlashPalette, slashOptionId } from "./SlashPalette.js";
+import {
+	completedDraft,
+	exactEntry,
+	filterSlashEntries,
+	parseSlashLine,
+	type SlashAction,
+	type SlashEntry,
+	slashEntries,
+	slashQuery,
+} from "./slash-model.js";
 import "./composer.css";
 
 /** Focus handlers keyed by session, so a retry elsewhere in the turn can fill and focus this field. */
@@ -197,7 +210,29 @@ export const Composer = memo(function Composer({
 		staleTime: 30_000,
 		retry: false,
 	});
-	const slash = slashDraft ? slashNotice(draft.text, commandCatalog.data) : null;
+	// The slash palette. The textarea stays the combobox and owns every key; the list only renders.
+	const pane = usePaneActions();
+	const listId = useId();
+	const [activeIndex, setActiveIndex] = useState(0);
+	// Escape closes the palette for the text it was pressed on; typing reopens it.
+	const [dismissed, setDismissed] = useState<string | null>(null);
+	const [dialog, setDialog] = useState<SlashAction | null>(null);
+	const [slashError, setSlashError] = useState<string | null>(null);
+	// The branch tree is keyed on settled turns, the way the pane passes it.
+	const [settledTurns, setSettledTurns] = useState(0);
+	useEffect(() => {
+		if (runningTurnId === null) setSettledTurns((count) => count + 1);
+	}, [runningTurnId]);
+	const entries = useMemo(
+		() => slashEntries({ capabilities: capabilities.data, catalog: commandCatalog.data, paneAvailable: pane !== null }),
+		[capabilities.data, commandCatalog.data, pane],
+	);
+	const query = sessionState === "open" ? slashQuery(draft.text) : null;
+	const matches = useMemo(() => (query === null ? [] : filterSlashEntries(entries, query)), [entries, query]);
+	const paletteOpen = matches.length > 0 && dismissed !== draft.text && dialog === null;
+	const active = Math.min(activeIndex, Math.max(0, matches.length - 1));
+	const line = slashDraft ? parseSlashLine(draft.text, commandCatalog.data) : null;
+	const slash = slashDraft && line === null && !paletteOpen ? slashNotice(draft.text, commandCatalog.data) : null;
 
 	const queue = useQuery({
 		queryKey: ["session-queue", sessionId],
@@ -274,6 +309,49 @@ export const Composer = memo(function Composer({
 			client.call(routes.cancelTurn, { params: { id: sessionId, turnId: runningTurnId ?? "" }, query: {}, body: {} }),
 		onSuccess: () => void queries.invalidateQueries({ queryKey: ["session", sessionId] }),
 	});
+	const command = useMutation({
+		mutationFn: ({ request, key }: { request: CommandRequest; key: string; description: string; sent: string | null }) =>
+			client.call(routes.invokeSessionCommand, { ...params, body: request }, key),
+		onSuccess: (_result, submitted) => {
+			// A typed line is cleared once it ran, and only if it was not edited in the meantime.
+			if (submitted.sent !== null && store.snapshot().text === submitted.sent) store.clear();
+			void queries.invalidateQueries({ queryKey: ["session", sessionId] });
+			if (submitted.request.command === "tasks")
+				void queries.invalidateQueries({ queryKey: ["session-board", sessionId] });
+		},
+	});
+	const runCommand = (plan: { request: CommandRequest; description: string }, sent: string | null) => {
+		if (command.isPending) return;
+		setSlashError(null);
+		command.mutate({ request: plan.request, key: crypto.randomUUID(), description: plan.description, sent });
+	};
+	const placeCaretAtEnd = () =>
+		requestAnimationFrame(() => {
+			const element = field.current;
+			if (!element) return;
+			element.focus();
+			element.setSelectionRange(element.value.length, element.value.length);
+		});
+	const pick = (entry: SlashEntry) => {
+		setActiveIndex(0);
+		setSlashError(null);
+		if (entry.kind === "command") {
+			const parsed = entry.needsArgs ? null : parseSlashLine(`/${entry.name}`, commandCatalog.data);
+			if (parsed?.kind === "command") {
+				store.clear();
+				runCommand(parsed.plan, null);
+				return;
+			}
+			// Required arguments: complete the name and let the operator type them; Enter then runs it.
+			store.write(completedDraft(entry));
+			placeCaretAtEnd();
+			return;
+		}
+		store.clear();
+		if (entry.kind === "pane") pane?.show(entry.view);
+		else setDialog(entry.action);
+	};
+
 	const drain = useMutation({
 		mutationFn: () => client.call(routes.clearSessionQueue, { ...params, body: {} }),
 		onSuccess: (result) => {
@@ -340,6 +418,24 @@ export const Composer = memo(function Composer({
 	const submit = () => {
 		if (sending.current) return;
 		const current = store.snapshot();
+		// A line naming a session action or a catalog command runs it instead of becoming a prompt.
+		// Anything else that starts with a slash, a prompt template say, still goes to the agent.
+		if (sessionState === "open" && current.text.trimStart().startsWith("/")) {
+			const exact = exactEntry(entries, current.text);
+			if (exact) {
+				pick(exact);
+				return;
+			}
+			const parsed = parseSlashLine(current.text, commandCatalog.data);
+			if (parsed?.kind === "invalid") {
+				setSlashError(parsed.error);
+				return;
+			}
+			if (parsed?.kind === "command") {
+				runCommand(parsed.plan, current.text);
+				return;
+			}
+		}
 		const next = submitIntent(current, situation);
 		if (next.kind !== "blocked" && attachmentRefusal(attached.current, running) === null) {
 			sending.current = true;
@@ -360,403 +456,514 @@ export const Composer = memo(function Composer({
 		noticeForRefusal(interrupt.data);
 
 	return (
-		<form
-			className="composer"
-			onSubmit={(event) => {
-				event.preventDefault();
-				submit();
-			}}
-			onDragOver={(event) => {
-				if (canAttach && event.dataTransfer.types.includes("Files")) event.preventDefault();
-			}}
-			onDrop={(event) => {
-				if (!canAttach || event.dataTransfer.files.length === 0) return;
-				event.preventDefault();
-				void attach([...event.dataTransfer.files]);
-			}}
-		>
-			<label className="composer__label sr-only" htmlFor={fieldId}>
-				Message Clio Coder
-			</label>
-			<textarea
-				id={fieldId}
-				ref={field}
-				className="composer__field"
-				aria-describedby={hintId}
-				value={draft.text}
-				rows={1}
-				disabled={sessionState !== "open"}
-				placeholder={
-					sessionState !== "open"
-						? "This conversation is not open"
-						: running
-							? steering.steer || steering.queue
-								? "Add direction for Clio Coder while it works"
-								: "Draft your next message while Clio Coder works"
-							: "Describe a task or ask a question"
-				}
-				onChange={(event) => {
-					store.write(event.target.value);
-					if (!send.isPending) send.reset();
-				}}
-				onPaste={(event) => {
-					const images = [...event.clipboardData.files].filter((file) => file.type.startsWith("image/"));
-					if (canAttachImages && images.length > 0) {
-						event.preventDefault();
-						void attach(images);
-						return;
-					}
-					const paste = event.clipboardData.getData("text/plain");
-					if (paste.length < LARGE_PASTE_CHARACTERS && paste.length + store.snapshot().text.length <= 32000) return;
-					event.preventDefault();
-					const field = event.currentTarget;
-					let index = 1;
-					while (attached.current.some((item) => item.name === `pasted-text-${index}.txt`)) index++;
-					const plan = planPaste(
-						paste,
-						store.snapshot().text,
-						field.selectionStart,
-						field.selectionEnd,
-						canAttachFiles,
-						`pasted-text-${index}.txt`,
-					);
-					setPasteNotice(null);
-					if (plan.kind === "review") {
-						setPasteReview(plan);
-						return;
-					}
-					if (plan.kind === "file") {
-						const file: FileAttachment = { ...plan.file, id: crypto.randomUUID() };
-						const admission = admitAttachment(attached.current, file);
-						if (!admission.ok) {
-							setPasteReview({ text: paste, reason: admission.reason, bytes: file.bytes });
-							return;
-						}
-						attached.current = [...attached.current, file];
-						setAttachments(attached.current);
-						setPasteNotice({
-							id: file.id,
-							text: `Full paste attached as ${file.name} · ${Math.max(1, Math.round(file.bytes / 1024))} KiB`,
-						});
-					}
-					setPasteReview(null);
-					store.write(plan.text);
-					if (!send.isPending) send.reset();
-					requestAnimationFrame(() => field.setSelectionRange(plan.caret, plan.caret));
-				}}
-				onKeyDown={(event) => {
-					const action = composerKeyAction(
-						{
-							key: event.key,
-							altKey: event.altKey,
-							ctrlKey: event.ctrlKey,
-							metaKey: event.metaKey,
-							shiftKey: event.shiftKey,
-						},
-						{ layerOwned, composing: event.nativeEvent.isComposing, plainEnterSends: enterSends },
-					);
-					if (action !== "send") return;
+		<>
+			<form
+				className="composer"
+				onSubmit={(event) => {
 					event.preventDefault();
 					submit();
 				}}
-			/>
-			{pasteNotice && attachments.some((item) => item.id === pasteNotice.id) ? (
-				<p className="composer__paste-note" role="status">
-					<Icon name="paperclip" />
-					{pasteNotice.text}
-				</p>
-			) : null}
-			{pasteReview ? (
-				<div className="composer__paste-review" role="status">
-					<strong>Paste kept for review · {Math.max(1, Math.round(pasteReview.bytes / 1024))} KiB</strong>
-					<p>{pasteReview.reason}</p>
-					<details>
-						<summary>Preview pasted text</summary>
-						<pre>
-							{pasteReview.text.slice(0, 4000)}
-							{pasteReview.text.length > 4000 ? "\n… Preview shortened. The download contains the full paste." : ""}
-						</pre>
-					</details>
-					<div>
-						<button
-							type="button"
-							onClick={() => {
-								const url = URL.createObjectURL(new Blob([pasteReview.text], { type: "text/plain;charset=utf-8" }));
-								const link = document.createElement("a");
-								link.href = url;
-								link.download = "clio-coder-gui-pasted-text.txt";
-								link.click();
-								setTimeout(() => URL.revokeObjectURL(url), 1000);
-							}}
-						>
-							Save full paste
-						</button>
-						<button type="button" onClick={() => setPasteReview(null)}>
-							Dismiss paste
-						</button>
+				onDragOver={(event) => {
+					if (canAttach && event.dataTransfer.types.includes("Files")) event.preventDefault();
+				}}
+				onDrop={(event) => {
+					if (!canAttach || event.dataTransfer.files.length === 0) return;
+					event.preventDefault();
+					void attach([...event.dataTransfer.files]);
+				}}
+			>
+				<label className="composer__label sr-only" htmlFor={fieldId}>
+					Message Clio Coder
+				</label>
+				{paletteOpen ? (
+					<SlashPalette listId={listId} entries={matches} activeIndex={active} onActivate={setActiveIndex} onPick={pick} />
+				) : line !== null && dialog === null ? (
+					<div className="slash-palette slash-palette--line" role="status">
+						<p className="slash-palette__line">
+							<code>{line.hint}</code>
+							<span>{line.command.summary}</span>
+						</p>
+						{slashError ? (
+							<p className="slash-palette__error">{slashError}</p>
+						) : (
+							<p className="slash-palette__keys">
+								<kbd>{enterSends ? "Enter" : "Ctrl/⌘+Enter"}</kbd> runs{" "}
+								{line.kind === "command" ? <code>{line.plan.description}</code> : "it once the arguments are complete"}
+							</p>
+						)}
 					</div>
-				</div>
-			) : null}
-			{store.uncertainSubmission() && (
-				<p className="composer__notice" role="status">
-					<StatusMark tone="warn" label="Review draft" />A send may have finished before this page reloaded. Check the
-					conversation above before sending this draft again.
-					<button type="button" className="composer__secondary" onClick={() => store.clear()}>
-						Discard draft
-					</button>
+				) : null}
+				<p className="sr-only" role="status">
+					{paletteOpen ? `${matches.length} slash ${matches.length === 1 ? "command" : "commands"}` : ""}
 				</p>
-			)}
-			{attachments.length > 0 ? (
-				<ul className="composer__attachments" aria-label="Attachments to send with this request">
-					{attachments.map((item) => (
-						<li key={item.id}>
-							{item.kind === "image" ? (
-								<img src={`data:${item.mimeType};base64,${item.data}`} alt="" width={48} height={48} />
-							) : (
-								<span className="composer__attachment-file" aria-hidden="true">
-									{fileBadge(item.name)}
-								</span>
-							)}
-							<span className="composer__attachment-name">
-								{item.name}
-								<small>
-									{item.kind === "image"
-										? `${item.width}×${item.height}`
-										: `text, ${Math.max(1, Math.round(item.bytes / 1024))} KiB`}
-								</small>
-							</span>
-							<span className="composer__attachment-actions">
-								<button type="button" className="composer__secondary" onClick={() => saveAttachment(item)}>
-									Save<span className="sr-only"> {item.name}</span>
-								</button>
-								<button type="button" className="composer__secondary" onClick={() => detach(item.id)}>
-									Remove<span className="sr-only"> {item.name}</span>
-								</button>
-							</span>
-						</li>
-					))}
-				</ul>
-			) : null}
-			{attachments.length > 0 && !attachmentsStored ? (
-				<p className="composer__paste-note" role="status">
-					Browser draft storage is unavailable. These attachments are kept in memory; save them before reloading this tab.
-				</p>
-			) : null}
-			{attachProblem ? (
-				<p className="composer__notice" role="alert">
-					<StatusMark tone="fail" label="Not attached" />
-					{attachProblem}
-				</p>
-			) : null}
-			<p className="composer__hint sr-only" id={hintId}>
-				{enterSends ? "Shift+Enter adds a line" : "Enter adds a line · Ctrl/⌘+Enter sends"} · @path adds a project file
-				{attachments.length > 0 ? ` · ${attachmentSummary(attachments)}` : ""}
-			</p>
-			{running && modes.length > 1 ? (
-				<fieldset className="composer__delivery">
-					<legend className="sr-only">Message delivery</legend>
-					<span>Deliver</span>
-					{modes.map((offer) => (
-						<button
-							key={offer.mode}
-							type="button"
-							aria-pressed={draft.mode === offer.mode}
-							title={offer.lands}
-							disabled={send.isPending}
-							onClick={() => {
-								store.chooseMode(offer.mode);
-								if (!send.isPending) send.reset();
-							}}
-						>
-							{offer.label}
-						</button>
-					))}
-				</fieldset>
-			) : null}
-			<div className="composer__actions">
-				<div className="composer__tools">
-					{canAttach ? (
-						<>
-							<input
-								ref={picker}
-								id={pickerId}
-								hidden
-								type="file"
-								{...(canAttachFiles ? {} : { accept: "image/png,image/jpeg,image/gif,image/webp" })}
-								multiple
-								onChange={(event) => {
-									const files = [...(event.target.files ?? [])];
-									event.target.value = "";
-									void attach(files);
-								}}
-							/>
+				<textarea
+					id={fieldId}
+					ref={field}
+					className="composer__field"
+					role="combobox"
+					aria-autocomplete="list"
+					aria-expanded={paletteOpen}
+					{...(paletteOpen
+						? {
+								"aria-controls": listId,
+								"aria-activedescendant": matches[active] ? slashOptionId(listId, matches[active]) : undefined,
+							}
+						: {})}
+					aria-describedby={hintId}
+					value={draft.text}
+					rows={1}
+					disabled={sessionState !== "open"}
+					placeholder={
+						sessionState !== "open"
+							? "This conversation is not open"
+							: running
+								? steering.steer || steering.queue
+									? "Add direction for Clio Coder while it works"
+									: "Draft your next message while Clio Coder works"
+								: "Describe a task or ask a question"
+					}
+					onChange={(event) => {
+						store.write(event.target.value);
+						setActiveIndex(0);
+						setSlashError(null);
+						if (!event.target.value.startsWith("/")) setDismissed(null);
+						if (!send.isPending) send.reset();
+					}}
+					onPaste={(event) => {
+						const images = [...event.clipboardData.files].filter((file) => file.type.startsWith("image/"));
+						if (canAttachImages && images.length > 0) {
+							event.preventDefault();
+							void attach(images);
+							return;
+						}
+						const paste = event.clipboardData.getData("text/plain");
+						if (paste.length < LARGE_PASTE_CHARACTERS && paste.length + store.snapshot().text.length <= 32000) return;
+						event.preventDefault();
+						const field = event.currentTarget;
+						let index = 1;
+						while (attached.current.some((item) => item.name === `pasted-text-${index}.txt`)) index++;
+						const plan = planPaste(
+							paste,
+							store.snapshot().text,
+							field.selectionStart,
+							field.selectionEnd,
+							canAttachFiles,
+							`pasted-text-${index}.txt`,
+						);
+						setPasteNotice(null);
+						if (plan.kind === "review") {
+							setPasteReview(plan);
+							return;
+						}
+						if (plan.kind === "file") {
+							const file: FileAttachment = { ...plan.file, id: crypto.randomUUID() };
+							const admission = admitAttachment(attached.current, file);
+							if (!admission.ok) {
+								setPasteReview({ text: paste, reason: admission.reason, bytes: file.bytes });
+								return;
+							}
+							attached.current = [...attached.current, file];
+							setAttachments(attached.current);
+							setPasteNotice({
+								id: file.id,
+								text: `Full paste attached as ${file.name} · ${Math.max(1, Math.round(file.bytes / 1024))} KiB`,
+							});
+						}
+						setPasteReview(null);
+						store.write(plan.text);
+						if (!send.isPending) send.reset();
+						requestAnimationFrame(() => field.setSelectionRange(plan.caret, plan.caret));
+					}}
+					onKeyDown={(event) => {
+						if (paletteOpen && !event.nativeEvent.isComposing) {
+							const plain = !event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey;
+							const count = matches.length;
+							if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+								event.preventDefault();
+								setActiveIndex((active + (event.key === "ArrowDown" ? 1 : -1) + count) % count);
+								return;
+							}
+							if ((event.key === "Enter" || event.key === "Tab") && plain) {
+								event.preventDefault();
+								const entry = matches[active];
+								if (entry) pick(entry);
+								return;
+							}
+							if (event.key === "Escape") {
+								// The palette is the innermost layer here; nothing behind it should also close.
+								event.preventDefault();
+								event.stopPropagation();
+								setDismissed(draft.text);
+								return;
+							}
+						}
+						const action = composerKeyAction(
+							{
+								key: event.key,
+								altKey: event.altKey,
+								ctrlKey: event.ctrlKey,
+								metaKey: event.metaKey,
+								shiftKey: event.shiftKey,
+							},
+							{ layerOwned, composing: event.nativeEvent.isComposing, plainEnterSends: enterSends },
+						);
+						if (action !== "send") return;
+						event.preventDefault();
+						submit();
+					}}
+				/>
+				{pasteNotice && attachments.some((item) => item.id === pasteNotice.id) ? (
+					<p className="composer__paste-note" role="status">
+						<Icon name="paperclip" />
+						{pasteNotice.text}
+					</p>
+				) : null}
+				{pasteReview ? (
+					<div className="composer__paste-review" role="status">
+						<strong>Paste kept for review · {Math.max(1, Math.round(pasteReview.bytes / 1024))} KiB</strong>
+						<p>{pasteReview.reason}</p>
+						<details>
+							<summary>Preview pasted text</summary>
+							<pre>
+								{pasteReview.text.slice(0, 4000)}
+								{pasteReview.text.length > 4000 ? "\n… Preview shortened. The download contains the full paste." : ""}
+							</pre>
+						</details>
+						<div>
 							<button
 								type="button"
-								className="composer__icon-button composer__attach"
-								onClick={() => picker.current?.click()}
-								aria-label={attachLabel}
-								title={`${attachLabel} to this request. You can also ${canAttachImages ? "paste or " : ""}drop them here.`}
+								onClick={() => {
+									const url = URL.createObjectURL(new Blob([pasteReview.text], { type: "text/plain;charset=utf-8" }));
+									const link = document.createElement("a");
+									link.href = url;
+									link.download = "clio-coder-gui-pasted-text.txt";
+									link.click();
+									setTimeout(() => URL.revokeObjectURL(url), 1000);
+								}}
 							>
-								<Icon name="plus" />
+								Save full paste
 							</button>
-						</>
-					) : null}
-					<AutonomyPill client={client} sessionId={sessionId} capabilities={capabilities.data} locked={running} />
-					<details
-						className="composer__options"
-						ref={options}
-						onToggle={(event) => setOptionsOpen(event.currentTarget.open)}
-						onKeyDown={(event) => {
-							if (event.key !== "Escape") return;
-							event.preventDefault();
-							closeOptions();
-						}}
-					>
-						<summary aria-label="Message options" title="Keyboard and message delivery options">
-							<Icon name="keyboard" />
-							{running && modes.length > 1 ? (
-								<span className="composer__delivery-label">
-									{modes.find((offer) => offer.mode === draft.mode)?.label ?? modes[0]?.label}
-								</span>
-							) : null}
-						</summary>
-						<div className="composer__options-panel">
-							<p className="composer__options-title">Message options</p>
-							<label className="composer__enter-mode">
-								<input type="checkbox" checked={enterSends} onChange={(event) => setEnterSends(event.target.checked)} />
-								Enter sends
-							</label>
-							<p>{enterSends ? "Shift+Enter adds a new line." : "Enter adds a line. Ctrl/⌘+Enter sends."}</p>
-							<p>Use @path to add a project file to your message.</p>
-							{running && modes.length > 1 ? (
-								<fieldset className="composer__modes">
-									<legend>Deliver this</legend>
-									{modes.map((offer) => (
-										<label key={offer.mode} className="composer__mode" title={offer.lands}>
-											<input
-												type="radio"
-												name={`${fieldId}-mode`}
-												checked={draft.mode === offer.mode}
-												onChange={() => {
-													store.chooseMode(offer.mode);
-													if (!send.isPending) send.reset();
-												}}
-											/>
-											{offer.label}
-										</label>
-									))}
-									<span className="composer__mode-lands">
-										{modes.find((offer) => offer.mode === draft.mode)?.lands ?? modes[0]?.lands}
-									</span>
-								</fieldset>
-							) : null}
-							{running && steering.interrupt ? (
-								<button
-									className="composer__secondary"
-									type="button"
-									disabled={interrupt.isPending}
-									onClick={() => interrupt.mutate()}
-									title="Ask Clio Coder to put down what it is doing and take new direction. The turn stays open."
-								>
-									{interrupt.isPending ? "Interrupting…" : "Interrupt"}
-								</button>
-							) : null}
+							<button type="button" onClick={() => setPasteReview(null)}>
+								Dismiss paste
+							</button>
 						</div>
-					</details>
-				</div>
-				<div className="composer__route-actions">
-					<RoutePicker
-						client={client}
-						sessionId={sessionId}
-						route={route}
-						running={running}
-						capabilities={capabilities.data}
-					/>
-					{running ? (
-						<button
-							className="composer__icon-button composer__stop composer__stop--live"
-							type="button"
-							disabled={stop.isPending}
-							onClick={() => stop.mutate()}
-							aria-label={stop.isPending ? "Stopping…" : "Stop turn"}
-							title="End this turn now. Nothing further is run."
-						>
-							{sessionState === "open" ? <ClioPulse size={PULSE_SIZE.row} /> : <Icon name="stop" />}
-							<span aria-hidden="true">{stop.isPending ? "Stopping" : "Stop"}</span>
+					</div>
+				) : null}
+				{store.uncertainSubmission() && (
+					<p className="composer__notice" role="status">
+						<StatusMark tone="warn" label="Review draft" />A send may have finished before this page reloaded. Check the
+						conversation above before sending this draft again.
+						<button type="button" className="composer__secondary" onClick={() => store.clear()}>
+							Discard draft
 						</button>
-					) : null}
-					{!running || draft.text.trim() !== "" ? (
-						<button
-							className="composer__submit primary"
-							type="submit"
-							disabled={intent.kind === "blocked" || attachBlock !== null}
-							aria-label={send.isPending ? "Sending…" : submitLabel(intent, situation, draft.mode)}
-							title={intent.kind === "blocked" ? intent.reason : (attachBlock ?? submitLabel(intent, situation, draft.mode))}
-						>
-							{send.isPending ? <ClioPulse size={PULSE_SIZE.row} /> : <Icon name="arrowUp" />}
-						</button>
-					) : null}
-				</div>
-			</div>
-			{attachBlock !== null && intent.kind !== "blocked" ? (
-				<p className="composer__blocked" role="status">
-					{attachBlock}
-				</p>
-			) : null}
-			{intent.kind === "blocked" && draft.text.trim() !== "" ? (
-				<p className="composer__blocked" role="status">
-					{intent.reason}
-					{running && steeringUnavailable === "failed" ? (
-						<button
-							type="button"
-							className="composer__secondary"
-							disabled={capabilities.isFetching}
-							onClick={() => void capabilities.refetch()}
-						>
-							Retry control check
-						</button>
-					) : null}
-				</p>
-			) : null}
-			{slash && !send.isPending ? (
-				<p className="composer__notice" role="status">
-					<StatusMark tone={slash.tone} label="Not a command" />
-					{slash.message}
-				</p>
-			) : null}
-			{notice ? (
-				<p className="composer__notice" role={notice.tone === "fail" ? "alert" : "status"}>
-					<StatusMark tone={notice.tone} label={notice.tone === "fail" ? "Failed" : "Refused"} />
-					{notice.message}
-				</p>
-			) : null}
-			{/* Only while the turn runs: the query is disabled once it settles, and a
-			    cached snapshot from a finished turn is a claim about the engine that
-			    nothing observed. */}
-			{running && steering.queue && queued.length > 0 ? (
-				<section className="composer__queue" aria-label="Messages waiting on the engine">
-					<p className="composer__queue-summary" role="status">
-						{queueSummary(queued)}
 					</p>
-					<ol className="composer__queue-list">
-						{queued.map((message) => (
-							<li key={message.id} className="composer__queue-row">
-								<StatusMark tone="warn" label={message.queue === "steer" ? "Now" : "After this turn"} />
-								<span className="composer__queue-text">{message.text}</span>
+				)}
+				{attachments.length > 0 ? (
+					<ul className="composer__attachments" aria-label="Attachments to send with this request">
+						{attachments.map((item) => (
+							<li key={item.id}>
+								{item.kind === "image" ? (
+									<img src={`data:${item.mimeType};base64,${item.data}`} alt="" width={48} height={48} />
+								) : (
+									<span className="composer__attachment-file" aria-hidden="true">
+										{fileBadge(item.name)}
+									</span>
+								)}
+								<span className="composer__attachment-name">
+									{item.name}
+									<small>
+										{item.kind === "image"
+											? `${item.width}×${item.height}`
+											: `text, ${Math.max(1, Math.round(item.bytes / 1024))} KiB`}
+									</small>
+								</span>
+								<span className="composer__attachment-actions">
+									<button type="button" className="composer__secondary" onClick={() => saveAttachment(item)}>
+										Save<span className="sr-only"> {item.name}</span>
+									</button>
+									<button type="button" className="composer__secondary" onClick={() => detach(item.id)}>
+										Remove<span className="sr-only"> {item.name}</span>
+									</button>
+								</span>
 							</li>
 						))}
-					</ol>
-					<button
-						className="composer__secondary"
-						type="button"
-						disabled={drain.isPending}
-						onClick={() => drain.mutate()}
-						title="Take every waiting message back out of the queue and into this field."
-					>
-						{drain.isPending ? "Taking them back…" : "Take them back"}
-					</button>
-				</section>
+					</ul>
+				) : null}
+				{attachments.length > 0 && !attachmentsStored ? (
+					<p className="composer__paste-note" role="status">
+						Browser draft storage is unavailable. These attachments are kept in memory; save them before reloading this tab.
+					</p>
+				) : null}
+				{attachProblem ? (
+					<p className="composer__notice" role="alert">
+						<StatusMark tone="fail" label="Not attached" />
+						{attachProblem}
+					</p>
+				) : null}
+				<p className="composer__hint sr-only" id={hintId}>
+					{enterSends ? "Shift+Enter adds a line" : "Enter adds a line · Ctrl/⌘+Enter sends"} · @path adds a project file
+					{attachments.length > 0 ? ` · ${attachmentSummary(attachments)}` : ""}
+				</p>
+				{running && modes.length > 1 ? (
+					<fieldset className="composer__delivery">
+						<legend className="sr-only">Message delivery</legend>
+						<span>Deliver</span>
+						{modes.map((offer) => (
+							<button
+								key={offer.mode}
+								type="button"
+								aria-pressed={draft.mode === offer.mode}
+								title={offer.lands}
+								disabled={send.isPending}
+								onClick={() => {
+									store.chooseMode(offer.mode);
+									if (!send.isPending) send.reset();
+								}}
+							>
+								{offer.label}
+							</button>
+						))}
+					</fieldset>
+				) : null}
+				<div className="composer__actions">
+					<div className="composer__tools">
+						{canAttach ? (
+							<>
+								<input
+									ref={picker}
+									id={pickerId}
+									hidden
+									type="file"
+									{...(canAttachFiles ? {} : { accept: "image/png,image/jpeg,image/gif,image/webp" })}
+									multiple
+									onChange={(event) => {
+										const files = [...(event.target.files ?? [])];
+										event.target.value = "";
+										void attach(files);
+									}}
+								/>
+								<button
+									type="button"
+									className="composer__icon-button composer__attach"
+									onClick={() => picker.current?.click()}
+									aria-label={attachLabel}
+									title={`${attachLabel} to this request. You can also ${canAttachImages ? "paste or " : ""}drop them here.`}
+								>
+									<Icon name="plus" />
+								</button>
+							</>
+						) : null}
+						<AutonomyPill client={client} sessionId={sessionId} capabilities={capabilities.data} locked={running} />
+						<details
+							className="composer__options"
+							ref={options}
+							onToggle={(event) => setOptionsOpen(event.currentTarget.open)}
+							onKeyDown={(event) => {
+								if (event.key !== "Escape") return;
+								event.preventDefault();
+								closeOptions();
+							}}
+						>
+							<summary aria-label="Message options" title="Keyboard and message delivery options">
+								<Icon name="keyboard" />
+								{running && modes.length > 1 ? (
+									<span className="composer__delivery-label">
+										{modes.find((offer) => offer.mode === draft.mode)?.label ?? modes[0]?.label}
+									</span>
+								) : null}
+							</summary>
+							<div className="composer__options-panel">
+								<p className="composer__options-title">Message options</p>
+								<label className="composer__enter-mode">
+									<input type="checkbox" checked={enterSends} onChange={(event) => setEnterSends(event.target.checked)} />
+									Enter sends
+								</label>
+								<p>{enterSends ? "Shift+Enter adds a new line." : "Enter adds a line. Ctrl/⌘+Enter sends."}</p>
+								<p>Use @path to add a project file to your message.</p>
+								{running && modes.length > 1 ? (
+									<fieldset className="composer__modes">
+										<legend>Deliver this</legend>
+										{modes.map((offer) => (
+											<label key={offer.mode} className="composer__mode" title={offer.lands}>
+												<input
+													type="radio"
+													name={`${fieldId}-mode`}
+													checked={draft.mode === offer.mode}
+													onChange={() => {
+														store.chooseMode(offer.mode);
+														if (!send.isPending) send.reset();
+													}}
+												/>
+												{offer.label}
+											</label>
+										))}
+										<span className="composer__mode-lands">
+											{modes.find((offer) => offer.mode === draft.mode)?.lands ?? modes[0]?.lands}
+										</span>
+									</fieldset>
+								) : null}
+								{running && steering.interrupt ? (
+									<button
+										className="composer__secondary"
+										type="button"
+										disabled={interrupt.isPending}
+										onClick={() => interrupt.mutate()}
+										title="Ask Clio Coder to put down what it is doing and take new direction. The turn stays open."
+									>
+										{interrupt.isPending ? "Interrupting…" : "Interrupt"}
+									</button>
+								) : null}
+							</div>
+						</details>
+					</div>
+					<div className="composer__route-actions">
+						<RoutePicker
+							client={client}
+							sessionId={sessionId}
+							route={route}
+							running={running}
+							capabilities={capabilities.data}
+						/>
+						{running ? (
+							<button
+								className="composer__icon-button composer__stop composer__stop--live"
+								type="button"
+								disabled={stop.isPending}
+								onClick={() => stop.mutate()}
+								aria-label={stop.isPending ? "Stopping…" : "Stop turn"}
+								title="End this turn now. Nothing further is run."
+							>
+								{sessionState === "open" ? <ClioPulse size={PULSE_SIZE.row} /> : <Icon name="stop" />}
+								<span aria-hidden="true">{stop.isPending ? "Stopping" : "Stop"}</span>
+							</button>
+						) : null}
+						{!running || draft.text.trim() !== "" ? (
+							<button
+								className="composer__submit primary"
+								type="submit"
+								disabled={intent.kind === "blocked" || attachBlock !== null}
+								aria-label={send.isPending ? "Sending…" : submitLabel(intent, situation, draft.mode)}
+								title={intent.kind === "blocked" ? intent.reason : (attachBlock ?? submitLabel(intent, situation, draft.mode))}
+							>
+								{send.isPending ? <ClioPulse size={PULSE_SIZE.row} /> : <Icon name="arrowUp" />}
+							</button>
+						) : null}
+					</div>
+				</div>
+				{attachBlock !== null && intent.kind !== "blocked" ? (
+					<p className="composer__blocked" role="status">
+						{attachBlock}
+					</p>
+				) : null}
+				{intent.kind === "blocked" && draft.text.trim() !== "" ? (
+					<p className="composer__blocked" role="status">
+						{intent.reason}
+						{running && steeringUnavailable === "failed" ? (
+							<button
+								type="button"
+								className="composer__secondary"
+								disabled={capabilities.isFetching}
+								onClick={() => void capabilities.refetch()}
+							>
+								Retry control check
+							</button>
+						) : null}
+					</p>
+				) : null}
+				{slash && !send.isPending ? (
+					<p className="composer__notice" role="status">
+						<StatusMark tone={slash.tone} label="Not a command" />
+						{slash.message}
+					</p>
+				) : null}
+				{command.isPending ? (
+					<p className="composer__notice" role="status">
+						<ClioPulse size={PULSE_SIZE.row} />
+						Running <code>{command.variables?.description}</code>…
+					</p>
+				) : null}
+				{command.error ? (
+					<p className="composer__notice" role="alert">
+						<StatusMark tone="fail" label="Command failed" />
+						{command.error.message}
+					</p>
+				) : null}
+				{command.data ? (
+					<div className="slash-result" role="status">
+						<p className="slash-result__head">
+							<StatusMark
+								tone={
+									command.data.level === "error"
+										? "fail"
+										: command.data.level === "warn"
+											? "warn"
+											: command.data.level === "success"
+												? "success"
+												: "neutral"
+								}
+								label={`Command ${command.data.level}`}
+							/>
+							<code>{command.variables?.description}</code>
+							<button type="button" className="composer__secondary" onClick={() => command.reset()}>
+								Dismiss
+							</button>
+						</p>
+						{command.data.lines.length ? (
+							// biome-ignore lint/a11y/noNoninteractiveTabindex: the bounded result can scroll with keyboard arrows.
+							<pre tabIndex={0}>{command.data.lines.join("\n")}</pre>
+						) : (
+							<p>Clio Coder returned no lines. Check the conversation for any ongoing work.</p>
+						)}
+					</div>
+				) : null}
+				{notice ? (
+					<p className="composer__notice" role={notice.tone === "fail" ? "alert" : "status"}>
+						<StatusMark tone={notice.tone} label={notice.tone === "fail" ? "Failed" : "Refused"} />
+						{notice.message}
+					</p>
+				) : null}
+				{/* Only while the turn runs: the query is disabled once it settles, and a
+			    cached snapshot from a finished turn is a claim about the engine that
+			    nothing observed. */}
+				{running && steering.queue && queued.length > 0 ? (
+					<section className="composer__queue" aria-label="Messages waiting on the engine">
+						<p className="composer__queue-summary" role="status">
+							{queueSummary(queued)}
+						</p>
+						<ol className="composer__queue-list">
+							{queued.map((message) => (
+								<li key={message.id} className="composer__queue-row">
+									<StatusMark tone="warn" label={message.queue === "steer" ? "Now" : "After this turn"} />
+									<span className="composer__queue-text">{message.text}</span>
+								</li>
+							))}
+						</ol>
+						<button
+							className="composer__secondary"
+							type="button"
+							disabled={drain.isPending}
+							onClick={() => drain.mutate()}
+							title="Take every waiting message back out of the queue and into this field."
+						>
+							{drain.isPending ? "Taking them back…" : "Take them back"}
+						</button>
+					</section>
+				) : null}
+			</form>
+			{/* Outside the form: React bubbles a portaled panel's submit through its owner, and the
+		    composer's own submit must never hear it. */}
+			{dialog !== null ? (
+				<SlashActionDialog
+					action={dialog}
+					client={client}
+					sessionId={sessionId}
+					sessionOpen={sessionState === "open"}
+					capabilities={capabilities.data}
+					running={running}
+					settledTurns={settledTurns}
+					onClose={() => setDialog(null)}
+				/>
 			) : null}
-		</form>
+		</>
 	);
 });

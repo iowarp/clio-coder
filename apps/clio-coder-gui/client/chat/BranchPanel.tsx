@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { memo, useId, useRef, useState } from "react";
+import { memo, useId, useRef } from "react";
 import { useNavigate } from "react-router";
 import type { AgentCapabilities } from "../../contracts/capabilities.js";
 import { routes } from "../../contracts/routes.js";
@@ -31,9 +31,9 @@ export const BranchPanel = memo(function BranchPanel({
 	/** Changes when a turn settles, which is when the tree can have grown. */
 	settledTurns: number;
 	running: boolean;
+	/** Render without the disclosure frame, for a host that supplies its own heading. */
 }) {
-	const [expanded, setExpanded] = useState(true);
-	const panel = useRef<HTMLDetailsElement>(null);
+	const panel = useRef<HTMLDivElement>(null);
 	const headingId = useId();
 	const navigate = useNavigate();
 	const queries = useQueryClient();
@@ -42,7 +42,7 @@ export const BranchPanel = memo(function BranchPanel({
 	const tree = useQuery({
 		queryKey: ["session-tree", sessionId, settledTurns],
 		queryFn: () => client.call(routes.sessionTree, { ...params, body: {} }),
-		enabled: expanded && sessionOpen && supported,
+		enabled: sessionOpen && supported,
 		retry: false,
 	});
 	const change = useMutation({
@@ -80,26 +80,23 @@ export const BranchPanel = memo(function BranchPanel({
 			}
 			notify({ tone: "success", title: `Continuing from “${excerpt(outcome.row.text)}”`, detail: SWITCHED_NOTE });
 			await queries.invalidateQueries({ queryKey: ["session-tree", sessionId] });
-			requestAnimationFrame(() => panel.current?.querySelector<HTMLElement>("summary")?.focus());
+			// The pressed row is now the tip and disabled, so focus moves to a stable landmark.
+			requestAnimationFrame(() => panel.current?.querySelector<HTMLElement>("h3")?.focus());
 		},
 	});
 	const view = tree.data ? branchView(tree.data) : null;
 	const busy = change.isPending || running;
-	return (
-		<details
-			open={expanded}
-			ref={panel}
-			className="command-panel session-board branch-panel"
-			onToggle={(event) => setExpanded(event.currentTarget.open)}
-		>
-			<summary>Branches</summary>
+	const body = (
+		<>
 			{!sessionOpen ? <p>This session is not open. Load it to read its branches.</p> : null}
 			{sessionOpen && !supported ? <p>This Clio Coder session does not report its branches.</p> : null}
-			{tree.isPending && expanded && sessionOpen && supported ? <p>Reading the branches…</p> : null}
+			{tree.isPending && sessionOpen && supported ? <p>Reading the branches…</p> : null}
 			{tree.error ? <p role="alert">{tree.error.message}</p> : null}
 			{view ? (
 				<section aria-labelledby={headingId}>
-					<h3 id={headingId}>{view.branchPoints === 0 ? "One line of turns" : `${view.branchPoints + 1} branches`}</h3>
+					<h3 id={headingId} tabIndex={-1}>
+						{view.branchPoints === 0 ? "One line of turns" : `${view.branchPoints + 1} branches`}
+					</h3>
 					<p className="session-board__note">
 						Continue moves where the next request lands and keeps the other branches. Fork starts a new conversation from a
 						turn. Files in the project are never rewound.
@@ -143,6 +140,7 @@ export const BranchPanel = memo(function BranchPanel({
 										<button
 											type="button"
 											disabled={busy}
+											data-fork
 											onClick={() => change.mutate({ action: "fork", row })}
 											aria-label={`Fork a new conversation from this ${row.word.toLowerCase()}: ${excerpt(row.text)}`}
 										>
@@ -166,6 +164,11 @@ export const BranchPanel = memo(function BranchPanel({
 					{change.error ? <p role="alert">{change.error.message}</p> : null}
 				</section>
 			) : null}
-		</details>
+		</>
+	);
+	return (
+		<div ref={panel} className="session-board branch-panel branch-panel--bare">
+			{body}
+		</div>
 	);
 });

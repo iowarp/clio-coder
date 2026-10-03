@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { memo, useState } from "react";
+import { memo } from "react";
 import type { AgentCapabilities } from "../../contracts/capabilities.js";
 import { routes } from "../../contracts/routes.js";
 import type { Client } from "../api/client.js";
@@ -23,15 +23,15 @@ export const ExtensionsPanel = memo(function ExtensionsPanel({
 	sessionOpen: boolean;
 	capabilities: AgentCapabilities | undefined;
 	running: boolean;
+	/** Render without the disclosure frame, for a host that supplies its own heading. */
 }) {
-	const [expanded, setExpanded] = useState(true);
 	const queries = useQueryClient();
 	const params = { params: { id: sessionId }, query: {}, body: {} };
 	const supported = !!capabilities?.extensions;
 	const list = useQuery({
 		queryKey: ["session-extensions", sessionId],
 		queryFn: () => client.call(routes.sessionExtensions, params),
-		enabled: expanded && sessionOpen && supported,
+		enabled: sessionOpen && supported,
 		retry: false,
 	});
 	const reload = useMutation({
@@ -39,16 +39,11 @@ export const ExtensionsPanel = memo(function ExtensionsPanel({
 		onSettled: () => queries.invalidateQueries({ queryKey: ["session-extensions", sessionId] }),
 	});
 	const outcome = reload.data ? reloadOutcome(reload.data) : null;
-	return (
-		<details
-			open={expanded}
-			className="command-panel session-board extensions-panel"
-			onToggle={(event) => setExpanded(event.currentTarget.open)}
-		>
-			<summary>Extensions</summary>
+	const body = (
+		<>
 			{!sessionOpen ? <p>This session is not open. Load it to read its extensions.</p> : null}
 			{sessionOpen && !supported ? <p>This Clio Coder session does not report its extensions.</p> : null}
-			{list.isPending && expanded && sessionOpen && supported ? <p>Reading the extensions…</p> : null}
+			{list.isPending && sessionOpen && supported ? <p>Reading the extensions…</p> : null}
 			{list.error ? <p role="alert">{list.error.message}</p> : null}
 			{list.data ? (
 				<>
@@ -91,6 +86,7 @@ export const ExtensionsPanel = memo(function ExtensionsPanel({
 					{reload.error ? <p role="alert">{reload.error.message}</p> : null}
 				</>
 			) : null}
-		</details>
+		</>
 	);
+	return <div className="session-board extensions-panel extensions-panel--bare">{body}</div>;
 });
