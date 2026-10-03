@@ -219,6 +219,7 @@ import { writeTranscriptExport } from "../domains/session/transcript-export.js";
 import { filterEntriesToActivePath } from "../domains/session/tree/active-path.js";
 import { reseedSessionUsageFromLedger } from "../domains/session/usage-reseed.js";
 import { latestUserImages } from "../domains/session/vision-images.js";
+import { probeWorkspaceAsync } from "../domains/session/workspace/index.js";
 import { archiveCommandHost, type ShareContract, ShareDomainModule } from "../domains/share/index.js";
 import type { LlmRequestAdmission, OneShotPort, SystemOneInstance } from "../domains/system-one/index.js";
 import { createSystemOne } from "../domains/system-one/index.js";
@@ -3943,6 +3944,10 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 						}
 					: {}),
 				contextLedger: () => chat.contextLedger(),
+				// The plan rows the standard `plan` update carries, and the Git facts
+				// the terminal footer shows, pushed instead of polled.
+				plan: () => taskBoard.snapshot(),
+				workspace: (cwd) => probeWorkspaceAsync(cwd),
 				...(extensions
 					? {
 							extensions: {

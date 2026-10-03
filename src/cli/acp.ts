@@ -138,6 +138,7 @@ export async function runAcpCommand(
 				libraryReload: true,
 				aside: true,
 				usage: true,
+				workspace: true,
 				images: true,
 				interviews: true,
 				workerPermissions: true,
