@@ -39,8 +39,7 @@
 .approval-card > *,
 .approval-card__actions > *,
 .approval-preview > *,
-.tool-card > *,
-.fleet-strip > * {
+.tool-card > * {
 	min-width: 0;
 }
 /* A chip row, a headline and a fact are prose, not code: they wrap rather than scroll. */

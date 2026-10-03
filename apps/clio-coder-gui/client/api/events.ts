@@ -48,6 +48,8 @@ export function subscribe(client: Client, queries: QueryClient, connection: (sta
 				if (
 					delta.type === "session.changed" ||
 					delta.type === "session.labelled" ||
+					delta.type === "session.configured" ||
+					delta.type === "session.reset" ||
 					delta.type === "turn.started" ||
 					delta.type === "turn.finished" ||
 					delta.type === "permission.requested" ||
@@ -56,9 +58,17 @@ export function subscribe(client: Client, queries: QueryClient, connection: (sta
 				) {
 					invalidate.add("sessions");
 				}
-				if (delta.type === "session.changed" || delta.type === "session.labelled" || delta.type === "turn.finished") {
+				if (
+					delta.type === "session.changed" ||
+					delta.type === "session.labelled" ||
+					delta.type === "session.reset" ||
+					delta.type === "turn.finished"
+				) {
 					invalidate.add("session-history");
 				}
+				// A sealed evidence bundle changes what the evidence and receipt reads return.
+				if (delta.type === "evidence.ready")
+					for (const key of ["evidence", "evidence-detail", "fleet-receipt"]) invalidate.add(key);
 			}
 			if (event.type === "hello") {
 				if (disconnected) {
@@ -79,14 +89,7 @@ export function subscribe(client: Client, queries: QueryClient, connection: (sta
 				if (event.payload.kind.startsWith("evidence."))
 					for (const key of ["evidence", "evidence-detail", "fleet-receipt"]) invalidate.add(key);
 				if (event.payload.kind.startsWith("targets."))
-					for (const key of [
-						"targets",
-						"routing",
-						"workspace-settings",
-						"config-graph",
-						"target-runtimes",
-						"settings-controls",
-					])
+					for (const key of ["targets", "routing", "workspace-settings", "config-graph", "settings-controls"])
 						invalidate.add(key);
 			}
 			if (event.type === "operation.progress") operations.push({ ...event.payload });

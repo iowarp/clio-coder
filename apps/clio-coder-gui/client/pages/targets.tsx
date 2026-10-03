@@ -50,7 +50,7 @@ export function TargetsPage({ client, view }: { client: Client; view: "targets" 
 		const result = operation.data?.status === "succeeded" ? operation.data.result : null;
 		if (!result || !("targets" in result) || !operationScope) return;
 		queries.setQueryData(["targets", operationScope.workspaceId], result.targets);
-		for (const key of ["routing", "workspace-settings", "config-graph", "target-runtimes", "settings-controls"])
+		for (const key of ["routing", "workspace-settings", "config-graph", "settings-controls"])
 			void queries.invalidateQueries({ queryKey: [key] });
 	}, [operation.data, operationScope, queries]);
 	const busy =

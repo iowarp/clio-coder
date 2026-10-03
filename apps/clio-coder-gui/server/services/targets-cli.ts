@@ -1,13 +1,6 @@
 import { Value } from "typebox/value";
 import { SettingsOrigin } from "../../contracts/settings.js";
-import {
-	CliTargets,
-	Routing,
-	type TargetAdd,
-	type TargetOperationResult,
-	TargetRuntimes,
-} from "../../contracts/targets-cli.js";
-import type { WorkerHost } from "../worker/host.js";
+import { CliTargets, Routing, type TargetOperationResult } from "../../contracts/targets-cli.js";
 import type { CliRunner } from "./cli-runner.js";
 import { fingerprint, type OperationRegistry } from "./operations.js";
 import { AppProblem } from "./problem.js";
@@ -81,7 +74,6 @@ export class TargetsService {
 		private readonly workspaces: WorkspaceService,
 		private readonly settings: SettingsService,
 		private readonly operations: OperationRegistry,
-		private readonly reads?: WorkerHost,
 	) {}
 	async list(workspaceId: string) {
 		const workspace = await this.workspaces.get(workspaceId);
@@ -117,45 +109,6 @@ export class TargetsService {
 					message: action === "probe" ? "Target probe completed." : "User target settings updated.",
 					targets,
 					...(settings ? { settings } : {}),
-				};
-			},
-		});
-	}
-	async runtimes(): Promise<TargetRuntimes> {
-		if (!this.reads) throw new AppProblem("unsupported", "This server was started without a runtime reader.");
-		const result = await this.reads.call("targets.runtimes", {});
-		if (!Value.Check(TargetRuntimes, result))
-			throw new AppProblem("unavailable", "Runtime inventory returned an invalid projection.");
-		return result;
-	}
-	async add(workspaceId: string, input: TargetAdd, key: string) {
-		const workspace = await this.workspaces.get(workspaceId);
-		return this.operations.create({
-			kind: "targets.add",
-			scope: workspaceId,
-			key,
-			fingerprint: fingerprint({ workspaceId, action: "add", input }),
-			run: async (progress, signal): Promise<TargetOperationResult> => {
-				progress("Clio is checking the endpoint and saving the connection to your user settings.");
-				const result = (await this.runner.run({ kind: "targets.add", ...input }, workspace.path, signal)) as {
-					notes?: string;
-				};
-				let targets: CliTargets;
-				try {
-					targets = await this.list(workspaceId);
-				} catch {
-					throw new AppProblem(
-						"operation_failed",
-						"The connection was saved, but its follow-up read failed. Refresh before retrying.",
-					);
-				}
-				return {
-					kind: "targets",
-					id: input.id,
-					exitCode: 0,
-					message: result.notes ? `Connection saved. ${result.notes}` : "Connection saved.",
-					targets,
-					...(input.useForChat ? { settings: await this.settings.settings(workspaceId) } : {}),
 				};
 			},
 		});

@@ -42,12 +42,8 @@ serveWorker(async (call) => {
 		return inspectSettings(call.params.cwd);
 	}
 	if (call.method === "setup.status") {
-		const { readSetupStatus } = await import("../clio/adapters/target-runtimes.js");
+		const { readSetupStatus } = await import("../clio/adapters/setup-status.js");
 		return readSetupStatus();
-	}
-	if (call.method === "targets.runtimes") {
-		const { readTargetRuntimes } = await import("../clio/adapters/target-runtimes.js");
-		return readTargetRuntimes();
 	}
 	if (call.method === "settings.controls") {
 		const { readSettingsControls } = await import("../clio/adapters/settings-controls.js");

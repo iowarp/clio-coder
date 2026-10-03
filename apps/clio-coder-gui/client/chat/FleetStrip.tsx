@@ -1,34 +1,23 @@
-// The fleet strip: one row per dispatched run, inside the conversation. It replaces a list that
-// printed one row per event with a JSON payload underneath, which meant five rows for one run and
-// no way to see what any of them was doing.
-//
-// The Running-only filter is off by default and says how many rows it hid, because a settled row
-// must never disappear unannounced. The taxonomy and the fold live in ./fleet-facts.ts.
+// Fleet run rows: one row per dispatched run, never one per event. The live rows sit at the
+// transcript's edge and the pane's Agents view lists every run. The taxonomy and the fold live in
+// ./fleet-facts.ts.
 
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { memo, useEffect, useId, useMemo, useRef, useState } from "react";
 import type { FleetItem } from "../../contracts/fleet-events.js";
 import { routes } from "../../contracts/routes.js";
-import type { SessionSnapshot } from "../../contracts/sessions.js";
 import { STEER_TEXT_MAX_BYTES } from "../../contracts/steering.js";
 import type { Client } from "../api/client.js";
-import { formatTime } from "../api/clock.js";
 import { StatusMark } from "../design/status.js";
 import { ClioPulse, PULSE_SIZE } from "../shell/ClioMark.js";
 import { capabilityRefusal, steeringAffordances } from "./composer-model.js";
 import {
-	FLEET_EMPTY,
-	FLEET_EMPTY_FILTERED,
 	FLEET_GLYPHS,
 	FLEET_STATE_TONES,
-	FLEET_SUMMARY_GLYPH,
 	type FleetRun,
-	fleetFilterStatus,
-	fleetNotices,
 	fleetRunDetail,
 	fleetRunNote,
 	fleetRunTitle,
-	fleetSummaryLabel,
 	foldFleetRuns,
 	guidanceReady,
 	isLiveRun,
@@ -207,67 +196,6 @@ export function FleetRunRows({
 				);
 			})}
 		</ul>
-	);
-}
-
-export function FleetStrip({ client, session }: { client: Client; session: SessionSnapshot }) {
-	// Off by default, and it says how many rows it hid.
-	const [runningOnly, setRunningOnly] = useState(false);
-	// Same key as the composer, so this is one request per session. A build that announced no
-	// dispatch steering gets no controls at all rather than buttons that answer 409.
-	const capabilities = useQuery({
-		queryKey: ["session-capabilities", session.id],
-		queryFn: () => client.call(routes.sessionCapabilities, { params: { id: session.id }, query: {}, body: {} }),
-		staleTime: Number.POSITIVE_INFINITY,
-		retry: false,
-		enabled: session.state === "open",
-	});
-	const steering =
-		session.state === "open" && steeringAffordances(capabilities.data).dispatch
-			? { client, sessionId: session.id }
-			: undefined;
-	const runs = foldFleetRuns(session.fleet);
-	const notices = fleetNotices(session.fleet);
-	if (runs.length === 0 && notices.length === 0) return null;
-	const shown = runningOnly ? runs.filter(isLiveRun) : runs;
-	const live = runs.filter(isLiveRun).length;
-	return (
-		<details className="fleet-strip fleet-strip--runs" open={live > 0}>
-			<summary>
-				<span aria-hidden="true">{FLEET_SUMMARY_GLYPH}</span> {fleetSummaryLabel(runs)}
-				<span className="fleet-strip__count">{runs.length}</span>
-			</summary>
-			{runs.length > 0 ? (
-				<>
-					<div className="fleet-strip__filter">
-						<button type="button" aria-pressed={runningOnly} onClick={() => setRunningOnly(!runningOnly)}>
-							Running only
-						</button>
-						<p role="status">{fleetFilterStatus(shown.length, runs.length)}</p>
-					</div>
-					{shown.length === 0 ? (
-						<p>{FLEET_EMPTY_FILTERED}</p>
-					) : (
-						<FleetRunRows runs={shown} steering={steering} sessionOpen={session.state === "open"} />
-					)}
-				</>
-			) : (
-				<p>{FLEET_EMPTY}</p>
-			)}
-			{notices.length > 0 ? (
-				<ul className="fleet-runs fleet-runs--notices">
-					{notices.map((notice) => (
-						<li className="fleet-run" key={notice.id}>
-							<span className="fleet-run__agent">{notice.presentation.label}</span>
-							<span className="fleet-run__task">{notice.presentation.summary}</span>
-							<span className="fleet-run__state">
-								<StatusMark tone={notice.presentation.tone} label={formatTime(notice.at)} />
-							</span>
-						</li>
-					))}
-				</ul>
-			) : null}
-		</details>
 	);
 }
 

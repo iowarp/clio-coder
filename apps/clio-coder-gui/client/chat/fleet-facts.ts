@@ -209,17 +209,6 @@ export const fleetRunNote = (run: FleetRun): string | null => (run.node === null
 export const fleetSummaryLabel = (runs: readonly FleetRun[]): string =>
 	`Fleet · ${runs.filter(isLiveRun).length} running of ${runs.length}`;
 
-export const FLEET_SUMMARY_GLYPH = "⛭";
-
-/** The filter's own `role="status"` line. A filter that hides rows has to say how many it hid. */
-export function fleetFilterStatus(shown: number, total: number): string {
-	const noun = total === 1 ? "run" : "runs";
-	return shown === total ? `All ${total} reported ${noun} shown` : `${shown} of ${total} reported ${noun} shown`;
-}
-
-export const FLEET_EMPTY_FILTERED = "No run is running right now. Every reported run has settled.";
-export const FLEET_EMPTY = "Clio Coder reports no dispatched runs in this conversation.";
-
 // ---- the closed fact taxonomy ----------------------------------------------------------------
 
 export interface FleetFactPresentation {

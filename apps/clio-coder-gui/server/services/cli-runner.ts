@@ -2,7 +2,6 @@ import { type CliCommand, commandPlan } from "../cli-commands.js";
 import { runClioCommand, stopClioCommand } from "../process-policy.js";
 import { AppProblem } from "./problem.js";
 
-const ANSI = new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*m`, "g");
 export class CliCancelled extends Error {}
 export class CliRunner {
 	private jobs = new Map<AbortController, Promise<unknown>>();
@@ -25,7 +24,7 @@ export class CliRunner {
 		const controller = new AbortController();
 		const abort = () => controller.abort();
 		signal?.addEventListener("abort", abort, { once: true });
-		const job = this.execute(command, cwd, plan.output, controller.signal, plan.explain === true).finally(() => {
+		const job = this.execute(command, cwd, plan.output, controller.signal).finally(() => {
 			signal?.removeEventListener("abort", abort);
 			this.jobs.delete(controller);
 		});
@@ -37,7 +36,6 @@ export class CliRunner {
 		cwd: string,
 		output: "json" | "jsonl" | "exit",
 		signal: AbortSignal,
-		explain = false,
 	): Promise<unknown> {
 		const { child, birthToken } = await runClioCommand(command, cwd, this.env);
 		return new Promise((resolve, reject) => {
@@ -45,17 +43,6 @@ export class CliRunner {
 			let stdoutBytes = 0,
 				stderrBytes = 0;
 			const chunks: Buffer[] = [];
-			// Only commands the table marks `explain` surface stderr, and only its first 2 KiB: those
-			// commands take no secret, and their refusal text is the whole point of the operation.
-			let said = "";
-			const explanation = () =>
-				said
-					.replace(ANSI, "")
-					.split(/\r?\n/)
-					.map((line) => line.replace(/^(error|warning):\s*/, "").trim())
-					.filter(Boolean)
-					.join(" ")
-					.slice(0, 600);
 			let kill: NodeJS.Timeout | undefined;
 			const stop = (error: Error) => {
 				failure ??= error;
@@ -79,7 +66,6 @@ export class CliRunner {
 			});
 			child.stderr.on("data", (chunk: Buffer) => {
 				stderrBytes += chunk.length;
-				if (explain && said.length < 2048) said += chunk.toString("utf8").slice(0, 2048 - said.length);
 				if (stderrBytes > 256 * 1024) stop(new AppProblem("operation_failed", "CLI stderr exceeded 256 KiB."));
 			});
 			child.on("error", () => {
@@ -97,14 +83,13 @@ export class CliRunner {
 					reject(
 						new AppProblem(
 							"operation_failed",
-							(explain && explanation()) ||
-								`CLI command exited with ${code === null ? `signal ${termination ?? "unknown"}` : `exit code ${code}`}.`,
+							`CLI command exited with ${code === null ? `signal ${termination ?? "unknown"}` : `exit code ${code}`}.`,
 						),
 					);
 					return;
 				}
 				if (output === "exit") {
-					resolve({ exitCode: 0, ...(explain && explanation() ? { notes: explanation() } : {}) });
+					resolve({ exitCode: 0 });
 					return;
 				}
 				try {

@@ -79,7 +79,7 @@ export async function harness(
 		library: new LibraryService(reads, cli, workspaces, ops),
 		reports: new ReportsService(cli, workspaces),
 		evidence: new EvidenceService(reads, cli, workspaces, operations),
-		targets: new TargetsService(cli, workspaces, settingsService, operations, reads),
+		targets: new TargetsService(cli, workspaces, settingsService, operations),
 		sessions,
 		idle: () =>
 			!(operations.activeCount || cli.activeCount || setup.busy || supervisor.busy || supervisor.hasOpenSessions),

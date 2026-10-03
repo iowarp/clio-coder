@@ -1183,8 +1183,7 @@ nav a:hover {
 	margin-block: var(--space-4);
 }
 .session-controls,
-.permission-card,
-.fleet-strip {
+.permission-card {
 	padding: var(--space-5);
 	border: 1px solid var(--line-strong);
 	border-radius: var(--radius-md);
@@ -1208,10 +1207,6 @@ nav a:hover {
 }
 .permission-card p {
 	font-size: 14px;
-}
-.fleet-strip > summary {
-	font-size: 14px;
-	color: var(--ink);
 }
 .session-settings {
 	display: grid;
@@ -1257,13 +1252,6 @@ nav a:hover {
 	gap: var(--space-4);
 	align-items: center;
 	overflow-wrap: anywhere;
-}
-.fleet-strip ol {
-	padding-left: var(--space-5);
-}
-.fleet-strip li > span {
-	margin-left: var(--space-3);
-	font-size: var(--text-exact);
 }
 .fleet-receipt {
 	white-space: pre-wrap;

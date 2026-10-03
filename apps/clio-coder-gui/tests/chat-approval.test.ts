@@ -27,7 +27,6 @@ import {
 	FLEET_RUN_CAP,
 	FLEET_STATE_LABELS,
 	type FleetItemLike,
-	fleetFilterStatus,
 	fleetNotices,
 	fleetRunDetail,
 	fleetRunTitle,
@@ -400,12 +399,6 @@ test("the cap drops the oldest settled run first and never a live one", () => {
 test("a run fact with no runId is skipped rather than folded into a nameless row", () => {
 	assert.deepEqual(foldFleetRuns([fact("fleet.started", { agentId: "a" })]), []);
 	assert.deepEqual(foldFleetRuns([{ id: "x", at: "now", sourceSequence: 1, fact: { type: "fleet.started" } }]), []);
-});
-
-test("the running-only filter says how many rows it hid", () => {
-	assert.equal(fleetFilterStatus(1, 3), "1 of 3 reported runs shown");
-	assert.equal(fleetFilterStatus(1, 1), "All 1 reported run shown");
-	assert.equal(fleetFilterStatus(3, 3), "All 3 reported runs shown");
 });
 
 test("every fact type has a label, a tone and a sentence, and an unknown one degrades readably", () => {

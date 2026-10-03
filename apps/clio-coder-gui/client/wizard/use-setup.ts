@@ -17,7 +17,6 @@ const AFTER_SAVE = [
 	"config-graph",
 	"targets",
 	"routing",
-	"target-runtimes",
 ] as const;
 
 const ENDED: ReadonlySet<SetupState["status"]> = new Set(["saved", "cancelled", "failed"]);
