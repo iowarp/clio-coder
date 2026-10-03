@@ -1,5 +1,6 @@
 import { deepStrictEqual, notStrictEqual, ok, rejects, strictEqual, throws } from "node:assert/strict";
 import { test } from "node:test";
+import { formatDispatchHumanOutput } from "../../src/cli/run-output.js";
 import type { InternalHelperResultKind } from "../../src/domains/agents/result-contract.js";
 import {
 	INTERNAL_HELPER_RESULT_KINDS,
@@ -333,6 +334,52 @@ test("mutation workers gain typed handoff eligibility while artifact helpers ret
 			await rejects(bundle.contract.dispatch(request), /ordinary worker reached/);
 		}
 		strictEqual(starts, 2);
+	} finally {
+		await bundle.extension.stop?.();
+		env.restore();
+	}
+});
+
+test("headless human output exposes a sealed coder limitation between narration and receipt", async (t) => {
+	const env = await isolateClioEnv("clio-sealed-limits-");
+	const limitation = "Full diff inspection was not possible; only the current state was verified.";
+	const answer = "No concrete regressions found.";
+	const bundle = makeDispatchBundle(dispatchStubContext(), {
+		spawnWorker: () => ({
+			pid: null,
+			heartbeatAt: { current: Date.now(), monotonic: performance.now() },
+			promise: Promise.resolve({ exitCode: 0, signal: null }),
+			abort() {},
+			events: (async function* () {
+				yield { type: "message_end", message: { role: "assistant", content: [{ type: "text", text: answer }] } };
+				yield {
+					type: "clio_coder_helper_result",
+					payload: {
+						version: 1,
+						kind: "mutation-report",
+						data: { mutatedPaths: [], validations: [], declaredChecks: [limitation] },
+					},
+				};
+			})(),
+		}),
+	});
+	try {
+		await bundle.extension.start();
+		const run = await bundle.contract.dispatch({
+			agentId: "coder",
+			task: "Review the actual diff",
+			executionRole: "builder",
+			requestOrigin: "user",
+			readOnly: true,
+			cwd: env.dir,
+		});
+		const receipt = await run.finalPromise;
+		strictEqual(receipt.exitCode, 0);
+		deepStrictEqual(receipt.output?.structured?.data.declaredChecks, [limitation]);
+		const human = formatDispatchHumanOutput(answer, receipt);
+		ok(human.startsWith(`${answer}\n\nNot verified:\n- ${limitation}\nreceipt:`), human);
+		ok(human.includes("exit=0 verification=unverified not_verified=1"), human);
+		t.diagnostic(human.trim());
 	} finally {
 		await bundle.extension.stop?.();
 		env.restore();

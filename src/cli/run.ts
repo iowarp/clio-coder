@@ -39,17 +39,14 @@ import { SchedulingDomainModule } from "../domains/scheduling/index.js";
 import { SessionDomainModule } from "../domains/session/index.js";
 import type { ImageContent } from "../engine/types.js";
 import type { HeadlessRunDeadline } from "../entry/boot-options.js";
-import {
-	assistantTextFromEvent,
-	receiptGatewayRoutingLabel,
-	receiptResponseModelIdObservationLabel,
-} from "../tools/dispatch-event-text.js";
+import { assistantTextFromEvent } from "../tools/dispatch-event-text.js";
 import { isToolProfileName } from "../tools/profiles.js";
 import { parseRunCliArgs, type RunCliArgs } from "./args.js";
 import { runClioCommand } from "./clio.js";
 import { buildInitialMessage, readPipedStdin, shouldReadPipedStdin } from "./initial-message.js";
 import { projectDispatchJsonEvent } from "./modes/json-stream.js";
 import { flushRawStdout, restoreStdout, takeOverStdout } from "./output-guard.js";
+import { formatDispatchHumanOutput } from "./run-output.js";
 import { setupSteerChannel } from "./steer-channel.js";
 
 const USAGE =
@@ -670,7 +667,7 @@ async function runDispatch(
 		process.on("SIGINT", onSignal);
 		process.on("SIGTERM", onSignal);
 
-		// Human output is the worker's final answer plus the receipt line. Native
+		// Human output is the worker's final answer, sealed limits, and receipt. Native
 		// workers carry the answer in the last assistant message_end event;
 		// acp-delegation runs stream it as text_delta increments instead, so the
 		// accumulated deltas serve as the fallback. Raw event names are noise for
@@ -707,8 +704,7 @@ async function runDispatch(
 			process.stdout.write(`\n${JSON.stringify(receipt, null, 2)}\n`);
 		} else {
 			const answer = lastAssistantText.length > 0 ? lastAssistantText : accumulatedText.trim();
-			if (answer.length > 0) process.stdout.write(`${answer}\n`);
-			process.stdout.write(`${formatReceipt(receipt)}\n`);
+			process.stdout.write(formatDispatchHumanOutput(answer, receipt));
 		}
 
 		process.off("SIGINT", onSignal);
@@ -751,15 +747,6 @@ function shadowStandInCommand(parsed: RunCliArgs): string {
 	if (parsed.thinking !== undefined) parts.push("--thinking", parsed.thinking);
 	parts.push('"<task>"');
 	return parts.join(" ");
-}
-
-function formatReceipt(r: RunReceipt): string {
-	const reasoning =
-		typeof r.reasoningTokenCount === "number" && r.reasoningTokenCount > 0 ? ` reasoning=${r.reasoningTokenCount}` : "";
-	const failure = r.failureMessage ? ` error=${r.failureMessage}` : "";
-	const responseModelIdObservation = receiptResponseModelIdObservationLabel(r);
-	const gatewayRouting = receiptGatewayRoutingLabel(r);
-	return `receipt: ${r.runId} agent=${r.agentId} exit=${r.exitCode} target=${r.targetId} requested_model_id=${r.wireModelId}${responseModelIdObservation ? ` ${responseModelIdObservation}` : ""}${gatewayRouting ? ` ${gatewayRouting}` : ""} tokens=${r.tokenCount}${reasoning}${failure} start=${r.startedAt} end=${r.endedAt}`;
 }
 
 function mapExitCode(r: RunReceipt): number {
