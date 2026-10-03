@@ -1,4 +1,3 @@
-import type { Api, KnownProvider, Model } from "@earendil-works/pi-ai";
 import { createModels } from "@earendil-works/pi-ai/models";
 import { amazonBedrockProvider } from "@earendil-works/pi-ai/providers/amazon-bedrock";
 import { anthropicProvider } from "@earendil-works/pi-ai/providers/anthropic";
@@ -29,15 +28,3 @@ const CONFIGURED_PROVIDER_FACTORIES = [
 
 export const engineModels = createModels();
 for (const factory of CONFIGURED_PROVIDER_FACTORIES) engineModels.setProvider(factory());
-
-export function engineModelProviders(): KnownProvider[] {
-	return engineModels.getProviders().map((provider) => provider.id as KnownProvider);
-}
-
-export function engineModelsFor(provider: KnownProvider): Model<Api>[] {
-	return [...engineModels.getModels(provider)];
-}
-
-export function getEngineModel(provider: KnownProvider, modelId: string): Model<Api> | undefined {
-	return engineModels.getModel(provider, modelId);
-}

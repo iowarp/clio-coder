@@ -4,9 +4,8 @@
  * gone; runtime descriptors under `src/domains/providers/runtimes/` own
  * model synthesis via `RuntimeDescriptor.synthesizeModel()`.
  *
- * pi-ai's provider registry is process-global. Calling
- * `registerBuiltInApiProviders()` multiple times is safe; we still gate on a
- * module-local flag to keep startup hot paths predictable.
+ * Built-in API providers are registered once by `registerEngineBuiltins()`,
+ * which is idempotent, so `ensurePiAiRegistered` is that function.
  */
 
 import {
@@ -36,7 +35,7 @@ import {
 	registerEngineBuiltins,
 	registerEngineFauxProvider,
 } from "./api-registry.js";
-import { engineModelProviders, engineModelsFor, getEngineModel } from "./models.js";
+import { engineModels } from "./models.js";
 import type { EngineModel } from "./types.js";
 
 export { StringEnum };
@@ -143,27 +142,19 @@ export async function completeEngineText(input: EngineTextCompletionInput): Prom
 }
 
 export interface EngineAi {
-	listProviders(): KnownProvider[];
 	listModels<TProvider extends KnownProvider>(provider: TProvider): EngineModel[];
 	getModel<TProvider extends KnownProvider>(provider: TProvider, modelId: string): EngineModel | undefined;
 }
 
-let registered = false;
-
-export function ensurePiAiRegistered(): void {
-	if (registered) return;
-	registerEngineBuiltins();
-	registered = true;
-}
+export const ensurePiAiRegistered = registerEngineBuiltins;
 
 export function createEngineAi(): EngineAi {
 	ensurePiAiRegistered();
 	return {
-		listProviders: () => engineModelProviders(),
-		listModels: (provider) => engineModelsFor(provider) as EngineModel[],
+		listModels: (provider) => [...engineModels.getModels(provider)] as EngineModel[],
 		getModel: (provider, modelId) => {
 			try {
-				return getEngineModel(provider, modelId) as EngineModel | undefined;
+				return engineModels.getModel(provider, modelId) as EngineModel | undefined;
 			} catch {
 				return undefined;
 			}
