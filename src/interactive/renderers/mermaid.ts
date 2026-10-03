@@ -4,6 +4,11 @@ import type { ClioTheme } from "../theme/index.js";
 
 const markdownParser = new Marked();
 
+// Only a diagram that would bury the transcript falls back on height. The old
+// limit of about two rows per source line rejected every top-to-bottom chain
+// past four or five nodes, since each node draws about five rows.
+const MAX_DIAGRAM_ROWS = 120;
+
 function isMermaid(token: Tokens.Generic): token is Tokens.Code {
 	return token.type === "code" && token.lang?.trim().split(/\s+/, 1)[0]?.toLowerCase() === "mermaid";
 }
@@ -49,9 +54,19 @@ export function createMermaidMarkdownTransform(theme: ClioTheme): (markdown: str
 					const stacked = token.text.replace(/^(\s*(?:flowchart|graph)\s+)LR\b/, "$1TD");
 					if (stacked !== token.text) art = render(stacked);
 				}
-				// Long routed edges can consume a screen even when the diagram fits horizontally.
-				const maxRows = Math.min(40, Math.max(24, token.text.split("\n").length * 2));
-				if (!art || art.width > availableWidth || art.styled.length > maxRows) return token.raw;
+				const fallback = !art
+					? "could not be drawn"
+					: art.width > availableWidth
+						? `is ${art.width} columns wide and the terminal fits ${availableWidth}`
+						: art.styled.length > MAX_DIAGRAM_ROWS
+							? `is ${art.styled.length} rows tall, over the ${MAX_DIAGRAM_ROWS}-row limit`
+							: null;
+				if (!art || fallback !== null) {
+					// Say why only once the fence is closed, so a diagram still streaming in
+					// does not flash a note on every frame.
+					if (!/\n[ \t]*(?:`{3,}|~{3,})[ \t]*\n*$/.test(token.raw)) return token.raw;
+					return `${token.raw.replace(/\n*$/, "")}\n\n${theme.fg("metadata", `Mermaid diagram shown as source: it ${fallback}.`)}\n\n`;
+				}
 				const lines = art.styled.map((row) => row.map((span) => styleSpan(span, theme)).join(""));
 				return `${lines.map(codeSpan).join("  \n")}\n`;
 			})
