@@ -188,7 +188,7 @@ export interface InteractiveSlashRuntimeDeps {
 	openConfigure?: () => void;
 	openSettings: (area?: SettingsAreaId, group?: string) => void;
 	openFleetRuns?: () => void;
-	openResume: () => void;
+	openResume: (target?: string) => void;
 	startNewSession: () => void;
 	openTree: () => void;
 	openMessagePicker: () => void;
