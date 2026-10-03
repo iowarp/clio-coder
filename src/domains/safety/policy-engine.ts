@@ -499,7 +499,9 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 			const hit = scans.length > 0 ? matchSourcedRule(scans, sourcedRules) : null;
 			const classification = effectiveClassification(rawClassification, hit?.match);
 
-			const base = baseDecision(call, classification, callCwd, posture, command);
+			// Verify carries no command argument; the resolved argv is what runs, and
+			// a refusal or audit row names it.
+			const base = baseDecision(call, classification, callCwd, posture, command ?? verifyCommand);
 
 			// Worker write-root containment (Slice C). A write-class tool whose
 			// target escapes every permitted root is a final block, ranked ahead of

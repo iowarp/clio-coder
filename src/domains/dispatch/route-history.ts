@@ -6,8 +6,23 @@ import { atomicWrite } from "../../engine/session.js";
 import { type ExecutionRole, isExecutionRole } from "./execution-role.js";
 import { type RouteCandidate, routeCapabilityKey, routeDriftGuard, routeDriftInvalidates } from "./route-decision.js";
 import type { RouteQualityLabel } from "./route-quality.js";
+import type { RunReceipt } from "./types.js";
 
 export type RouteReliabilityOutcome = "success" | "failure" | "neutral";
+
+/**
+ * The run's settled outcome as its receipt states it: `success`, or the most
+ * specific failure class the receipt carries (an outcome code such as
+ * `worker_tool_call_cap_exhausted`, `permission_required`, a non-generic
+ * outcome such as `timed_out`), else `failure`. Quality labels stay reserved
+ * for independent evidence; this label is what every settled route carries.
+ */
+export function routeSettledLabel(receipt: Pick<RunReceipt, "outcome" | "outcomeCode" | "outcomeDetail">): string {
+	if (receipt.outcome === "succeeded") return "success";
+	if (receipt.outcomeCode !== undefined && receipt.outcomeCode !== null) return receipt.outcomeCode;
+	if (/^permission_required(?:;|$)/u.test(receipt.outcomeDetail ?? "")) return "permission_required";
+	return receipt.outcome === "failed" ? "failure" : receipt.outcome;
+}
 
 /** One reconstructable, terminal observation for a concrete route identity. */
 /**
@@ -35,6 +50,8 @@ export interface RouteHistoryRecord {
 	executionRole: ExecutionRole;
 	qualityLabel: RouteQualityLabel;
 	reliability: RouteReliabilityOutcome;
+	/** `routeSettledLabel` of the settling receipt; absent only on records written before it existed. */
+	settled?: string;
 	/** Assignment-level observation; retries are never independent first-pass work. */
 	firstPass: boolean;
 	/** Only completed, non-quality-failed work may contribute timing or cost. */
@@ -88,6 +105,9 @@ function validateRecord(value: unknown): RouteHistoryRecord {
 	if (value.reliability !== "success" && value.reliability !== "failure" && value.reliability !== "neutral") {
 		throw new Error("route history reliability invalid");
 	}
+	if (value.settled !== undefined && (typeof value.settled !== "string" || !/^[a-z][a-z_-]*$/u.test(value.settled))) {
+		throw new Error("route history settled label invalid");
+	}
 	if (typeof value.firstPass !== "boolean") throw new Error("route history first-pass state invalid");
 	if (
 		value.completedCostUsd !== null &&
@@ -113,6 +133,7 @@ function validateRecord(value: unknown): RouteHistoryRecord {
 		executionRole: value.executionRole,
 		qualityLabel: value.qualityLabel,
 		reliability: value.reliability,
+		...(typeof value.settled === "string" ? { settled: value.settled } : {}),
 		firstPass: value.firstPass,
 		completedCostUsd: value.completedCostUsd,
 		completedPhaseTiming: value.completedPhaseTiming === null ? null : { ...value.completedPhaseTiming },

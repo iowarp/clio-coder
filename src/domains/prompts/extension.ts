@@ -669,10 +669,10 @@ function selfDevelopmentSkillFragments(
 	const loadCall = (name: string) => `gateway(op="call", capability="context", args={scope:"skills",name:"${name}"})`;
 	const body = [
 		"# Self-development skills",
-		"For a task that changes Clio's source, harness, prompts, or library, use clio-coder-dev before editing and clio-coder-test when choosing validation. Skip this workflow for unrelated or self-contained questions.",
+		"For a task that changes Clio's source, harness, prompts, or library, clio-coder-dev guides the editing step and clio-coder-test the validation step. Skip both for unrelated or self-contained questions.",
 		`These two skills are discoverable from this checkout's library/skills/meta when no installed package owns their names. Check ${listCall} for current readiness; disabled, damaged, or hidden skills stay unavailable.`,
 		activation
-			? `Load each relevant ready skill with ${loadCall("clio-coder-dev")} or ${loadCall("clio-coder-test")} as needed, without waiting for a separate skill request. Reuse already loaded guidance; do not load every reference or the whole catalog.`
+			? `Load each one when its step arrives, without waiting for a separate skill request: ${loadCall("clio-coder-dev")} once you have read the code and are about to make the first edit, ${loadCall("clio-coder-test")} once the change is made and you are choosing how to validate it. Never load both up front or for a step the task does not reach; a loaded skill is resent on every later request. Reuse already loaded guidance; do not load every reference or the whole catalog.`
 			: "Only the operator activates skills at this autonomy level. Suggest /skill clio-coder-dev or /skill clio-coder-test when relevant, then continue permitted work without waiting or bypassing the activation gate.",
 		"Read CONTRIBUTING.md and the assigned sprint packet from the detected repository root. A plan or skill does not launch an unapproved implementation sprint or authorize publication.",
 	].join("\n");

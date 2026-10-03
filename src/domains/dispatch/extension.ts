@@ -2999,7 +2999,7 @@ function resolveSelectedDispatchTarget(
 		modelCapabilities,
 		toolsCapabilityExplicit: explicitToolCapability(providers, target, wireModelId, status),
 		runtimeResolution: resolved.target,
-		effectivePricing: resolveEffectivePricing(target, runtime.id, wireModelId),
+		effectivePricing: resolveEffectivePricing(target, runtime, wireModelId),
 	};
 	if (routeWarning) resolvedTarget.routeWarning = routeWarning;
 	const resolutionWarnings = runtimeResolutionWarnings(resolved.diagnostics);

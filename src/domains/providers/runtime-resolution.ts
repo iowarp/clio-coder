@@ -561,7 +561,7 @@ export function resolveRuntimeTarget(
 		auth: runtime.auth,
 		authRequired: targetRequiresAuth(target, runtime),
 		wireModelId,
-		costProvenance: resolveCostProvenance(target, runtime.id, wireModelId),
+		costProvenance: resolveCostProvenance(target, runtime, wireModelId),
 		requestedThinkingLevel,
 		effectiveThinkingLevel: modelRuntime.thinking.effectiveLevel,
 		capabilities,

@@ -6,7 +6,7 @@
  */
 import { ok, strictEqual } from "node:assert/strict";
 import { execFileSync, spawn } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
+import { copyFileSync, cpSync, mkdtempSync, rmSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { verifyReceiptIntegrity } from "../../src/domains/dispatch/receipt-integrity.js";
@@ -15,6 +15,30 @@ import { readRunJournal } from "./run-journal.js";
 
 const ROOT = new URL("../..", import.meta.url).pathname;
 const CLI = join(ROOT, "dist", "cli", "index.js");
+
+let privateCli: string | null = null;
+
+/**
+ * A private copy of the built CLI, for a test that must survive another session
+ * rebuilding `dist/` mid-run. Only the bundle is copied; the package files it
+ * reads at runtime are linked, so the copy resolves as its own package root.
+ * It lives under the run's temp root, which the harness removes at exit.
+ */
+export function privateCliCopy(): string {
+	if (privateCli !== null) return privateCli;
+	const root = mkdtempSync(join(tmpdir(), "clio-private-cli-"));
+	const dist = join(ROOT, "dist");
+	cpSync(dist, join(root, "dist"), {
+		recursive: true,
+		filter: (source) => !source.endsWith(".map") && !/metafile[^/]*\.json$/u.test(source) && source !== join(dist, "gui"),
+	});
+	copyFileSync(join(ROOT, "package.json"), join(root, "package.json"));
+	for (const entry of ["node_modules", "src", "library", "models", "docs", "damage-control-rules.yaml"]) {
+		symlinkSync(join(ROOT, entry), join(root, entry));
+	}
+	privateCli = join(root, "dist", "cli", "index.js");
+	return privateCli;
+}
 
 export interface HeadlessScratch {
 	root: string;
@@ -25,7 +49,7 @@ export interface HeadlessScratch {
 }
 
 /** A throwaway home initialized by `doctor --fix`, ready for a seeded target. */
-export function headlessScratch(prefix: string): HeadlessScratch {
+export function headlessScratch(prefix: string, cli = CLI): HeadlessScratch {
 	const root = mkdtempSync(join(tmpdir(), prefix));
 	const env: NodeJS.ProcessEnv = {
 		...process.env,
@@ -39,7 +63,7 @@ export function headlessScratch(prefix: string): HeadlessScratch {
 		CLIO_CODER_REQUIRE_HOME_PREFIX: "1",
 		CLIO_CODER_TEST_OPENAI_KEY: "fixture-key",
 	};
-	execFileSync(process.execPath, [CLI, "doctor", "--fix"], { cwd: root, env, stdio: "pipe" });
+	execFileSync(process.execPath, [cli, "doctor", "--fix"], { cwd: root, env, stdio: "pipe" });
 	return {
 		root,
 		configDir: join(root, "config"),
@@ -62,10 +86,10 @@ export interface CliResult {
 /** Spawn the built CLI with stdin closed; SIGKILL and reject after `timeoutMs`. */
 export function runCli(
 	args: ReadonlyArray<string>,
-	options: { env: NodeJS.ProcessEnv; cwd: string; timeoutMs?: number },
+	options: { env: NodeJS.ProcessEnv; cwd: string; timeoutMs?: number; cli?: string },
 ): Promise<CliResult> {
 	const startedAt = Date.now();
-	const child = spawn(process.execPath, [CLI, ...args], {
+	const child = spawn(process.execPath, [options.cli ?? CLI, ...args], {
 		cwd: options.cwd,
 		env: options.env,
 		stdio: ["pipe", "pipe", "pipe"],

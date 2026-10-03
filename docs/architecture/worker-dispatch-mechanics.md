@@ -127,7 +127,7 @@ stateDiagram-v2
     TimeoutFallback --> ApplyFallback : Apply fallback posture (deny | fail)
 ```
 
-1. **Deny:** Immediately returns a structured denial to the model, allowing the run to continue without making the call.
+1. **Deny:** Immediately returns a structured denial to the model, allowing the run to continue without making the call. The third refused execute call in one run ends it with exit code `3`, and the reason names every refused command.
 2. **Fail:** Terminate the run immediately, exiting the worker subprocess with exit code `3` (`WORKER_EXIT_PERMISSION_REQUIRED`).
 3. **Escalate (Parking Loop):**
    - The worker parks the tool execution thread.
@@ -248,7 +248,7 @@ Structured helper results ([result-contract.ts](../../src/domains/agents/result-
 The child process exits with specific status codes to signal run outcomes to the orchestrator:
 * **`0`**: The worker process completed without a runtime error; dispatch still requires a nonempty receipt-sealed final answer before classifying the run as successful.
 * **`2`**: Worker runtime initialization failed (e.g., target runtime not registered, or `WorkerSpec` invalid/mismatched).
-* **`3` (`WORKER_EXIT_PERMISSION_REQUIRED`)**: The run aborted because a tool required permission and `onPermission` was set to `fail` (or timed out to a `fail` fallback).
+* **`3` (`WORKER_EXIT_PERMISSION_REQUIRED`)**: The run aborted because a tool required permission and `onPermission` was set to `fail` (or timed out to a `fail` fallback), or because the deny posture refused three execute calls in one run.
 * **Other (e.g., `1` or uncaught exceptions)**: Represents an unhandled crash or internal error within the runner.
 
 ## Antigravity conversation identity

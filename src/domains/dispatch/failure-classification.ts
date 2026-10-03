@@ -1,6 +1,6 @@
 import { isResponseSchemaRejection } from "../../core/response-schema.js";
 import { isEngineContextOverflow, isProviderContentFilter } from "../../engine/ai.js";
-import { WORKER_EXIT_PERMISSION_REQUIRED } from "../../worker/spec-contract.js";
+import { WORKER_EXIT_PERMISSION_REQUIRED, WORKER_PROVIDER_HTTP_STATUS_MARKER } from "../../worker/spec-contract.js";
 import { isDeterministicOutcomeCode } from "./backoff.js";
 import type { RunTerminationEvidence } from "./outcome.js";
 import type { RunOutcome, RunOutcomeCode } from "./types.js";
@@ -43,6 +43,16 @@ const TRANSIENT_TARGET_TEXT =
 	/timeout|timed out|temporar|unavailable|\b50[0234]\b|internal server error|econnrefused|econnreset|fetch failed|connection error/;
 
 const WORKERSPEC_REJECTION = /\[worker\] fatal: workerspec/;
+
+/** HTTP status the worker reported for the provider answer that ended its run. */
+function workerProviderHttpStatus(result: SpawnedWorkerResult | null): number | null {
+	const tail = result?.stderrTail;
+	if (typeof tail !== "string") return null;
+	const at = tail.lastIndexOf(WORKER_PROVIDER_HTTP_STATUS_MARKER);
+	if (at < 0) return null;
+	const match = /^\d{3}\b/u.exec(tail.slice(at + WORKER_PROVIDER_HTTP_STATUS_MARKER.length));
+	return match === null ? null : Number(match[0]);
+}
 
 function resultText(result: SpawnedWorkerResult | null, providerError?: string | null): string {
 	return [result?.stderrTail, providerError]
@@ -132,6 +142,14 @@ export function classifyFailure(
 	// engine's detector carries pi-ai's per-provider patterns, including the
 	// llama.cpp and Ollama "exceeds the available context size" wording.
 	if (diagnostic !== "" && isEngineContextOverflow(diagnostic)) return "deterministic-task";
+	// The server rejected the request itself. Resending the identical bytes earns
+	// the identical answer: a coder worker sent one 400 three times in 0.6 s while
+	// the main agent sent it once. 408 and 429 stay retryable, and 401/403 keep
+	// their target failover below.
+	const httpStatus = workerProviderHttpStatus(result);
+	if (httpStatus !== null && httpStatus >= 400 && httpStatus < 500 && ![401, 403, 408, 429].includes(httpStatus)) {
+		return "deterministic-task";
+	}
 	if (/\b(?:401|403)\b|unauthorized|forbidden|invalid api key|authentication/.test(diagnostic)) return "target-auth";
 	if (/\b429\b|rate[ -]?limit|too many requests/.test(diagnostic)) return "target-rate-limit";
 	if (/\bvram\b|\bgpu\b|\bcuda\b|\boom\b|out of memory/.test(diagnostic)) return "node-resource";

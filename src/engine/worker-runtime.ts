@@ -105,6 +105,7 @@ import {
 	DEFAULT_ESCALATION_FALLBACK,
 	DEFAULT_ESCALATION_TIMEOUT_MS,
 	WORKER_EXIT_PERMISSION_REQUIRED,
+	WORKER_PROVIDER_HTTP_STATUS_MARKER,
 	type WorkerBudget,
 	type WorkerEscalationConfig,
 	type WorkerPromptMessage,
@@ -130,6 +131,13 @@ import {
 import { applyToolRounds, deterministicSampling, supportsNamedToolChoice } from "./provider-payload.js";
 import type { AgentEvent, AgentMessage, EngineModel } from "./types.js";
 import type { ClioWorkerEvent } from "./worker-events.js";
+import type { WorkerRefusal } from "./worker-refusals.js";
+import {
+	describeWorkerRefusal,
+	formatWorkerRefusal,
+	WORKER_REFUSAL_LIMIT,
+	workerRefusalLimitReason,
+} from "./worker-refusals.js";
 import { createWorkerSafety, createWorkerToolRegistry, INTERNAL_HELPER_RESULT_TOOL } from "./worker-tools.js";
 
 /** Room left for the frame envelope under the 16 KiB control-lane bound, counted in the UTF-8 bytes the host limit counts. */
@@ -620,6 +628,10 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 	let synthesisToolLock = false;
 	let lockedSynthesisReprompts = 0;
 	let workerBoundFailure: string | null = null;
+	// Last HTTP status a provider answered. Pi's error messages drop it on some
+	// APIs (openai-codex keeps only the body text), and the dispatch retry policy
+	// needs it to tell a rejected request from a transient failure.
+	let lastProviderHttpStatus: number | null = null;
 	let workerBoundAborted = false;
 	let abortWorkerForBound: (() => void) | null = null;
 	// For synthesis:false, the loop guard records the final admitted call while
@@ -1164,7 +1176,17 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 							: undefined,
 					],
 				);
-				return engineStreamSimple(currentModel, controlled.context, controlled.options);
+				// Pi's SDK adapters report onResponse only for a 2xx answer, so the
+				// status is read at the fetch boundary every adapter routes through.
+				const fetchImpl = controlled.options?.fetch ?? ((url, init) => globalThis.fetch(url, init));
+				return engineStreamSimple(currentModel, controlled.context, {
+					...controlled.options,
+					fetch: async (url, init) => {
+						const response = await fetchImpl(url, init);
+						lastProviderHttpStatus = response.status;
+						return response;
+					},
+				});
 			};
 			const first = request(messages);
 			// The server is the authority on its own limit. An unreported window, a
@@ -1520,15 +1542,23 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 	const operatorUnattended = input.escalation?.operatorResponder === "none";
 	const mainRoutedPermit = input.permitAllowance?.asks === "main" && input.permitAllowance.approvalAuthority === "main";
 	let permissionFailure = false;
+	const executeRefusals: WorkerRefusal[] = [];
 
 	// Exact, byte-stable denial reasons for the deny/fail postures. Escalate
 	// timeouts and operator denials use their own wording below.
-	const denyReason = (tool: string, actionClass: string): string =>
-		unattendedEscalation
+	// A refused command leads the sentence so it survives the model-facing
+	// 300-character line cap (rejection-feedback.ts).
+	const denyReason = (tool: string, actionClass: string, refused?: WorkerRefusal): string => {
+		const head =
+			refused === undefined
+				? "permission denied by policy: "
+				: `permission denied by policy: ${formatWorkerRefusal(refused)}; `;
+		return unattendedEscalation
 			? mainRoutedPermit
-				? `permission denied by policy: no operator or granting main agent can answer worker asks for this dispatch (fleet.permissions.mode=main, fallback=deny); ${tool} requires ${actionClass} confirmation`
-				: `permission denied by policy: no operator can answer worker escalations for this dispatch (fleet.permissions.mode=escalate, fallback=deny); ${tool} requires ${actionClass} confirmation`
-			: `permission denied by policy: dispatched workers run non-interactively (fleet.permissions.mode=deny); ${tool} requires ${actionClass} confirmation`;
+				? `${head}no operator or granting main agent can answer worker asks for this dispatch (fleet.permissions.mode=main, fallback=deny); ${tool} requires ${actionClass} confirmation`
+				: `${head}no operator can answer worker escalations for this dispatch (fleet.permissions.mode=escalate, fallback=deny); ${tool} requires ${actionClass} confirmation`
+			: `${head}dispatched workers run non-interactively (fleet.permissions.mode=deny); ${tool} requires ${actionClass} confirmation`;
+	};
 	const failReason = (tool: string, actionClass: string): string =>
 		unattendedEscalation
 			? `permission required for ${tool} (${actionClass}); no operator can answer worker escalations for this dispatch and fallback=fail ends this run`
@@ -1865,12 +1895,23 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 		]
 			.slice(0, 3)
 			.join(" ");
-		const reason =
+		// A refused command reaches the model as a tool result and the turn goes
+		// on, so it can take another route (P1 mode B ended at its first refused
+		// verify). Changing the command still cannot create an absent execute
+		// approval route, so the third refusal ends the run as permission_required.
+		const refusal = onPermission !== "fail" && actionClass === "execute" ? describeWorkerRefusal(call, decision) : null;
+		if (refusal !== null) executeRefusals.push(refusal);
+		// The refusal names the command and its rule: "outside the no-prompt set"
+		// alone left the model and the receipt guessing which call was refused.
+		const deniedHead = denyReason(call.tool, actionClass, refusal ?? undefined);
+		const deniedReason =
 			onPermission === "fail"
 				? failReason(call.tool, actionClass)
 				: policyDetail.length > 0
-					? `${denyReason(call.tool, actionClass)}. ${policyDetail}`
-					: denyReason(call.tool, actionClass);
+					? `${deniedHead}. ${policyDetail}`
+					: deniedHead;
+		const refusalLimitReached = executeRefusals.length >= WORKER_REFUSAL_LIMIT;
+		const reason = refusalLimitReached ? workerRefusalLimitReason(executeRefusals) : deniedReason;
 		emit({
 			type: "clio_coder_permission_resolved",
 			payload: {
@@ -1882,8 +1923,7 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 				reason,
 			},
 		} as ClioWorkerEvent);
-		// CLB-5: changing the command cannot create an absent execute approval route.
-		if (onPermission === "fail" || actionClass === "execute") {
+		if (onPermission === "fail" || refusalLimitReached) {
 			permissionFailure = true;
 			registry.cancelParkedCalls(reason);
 			process.stderr.write(`[worker] ${reason}\n`);
@@ -1905,14 +1945,20 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 				return { messages: agent.state.messages.slice(inheritedCount), exitCode: WORKER_EXIT_PERMISSION_REQUIRED };
 			}
 			const messages = agent.state.messages.slice(inheritedCount);
-			if (helperSchema !== null && acceptedHelperResult === null) {
-				return { messages, exitCode: 1 };
-			}
+			// The provider error is reported before the helper check: a helper run
+			// that died on a 400 used to exit 1 with empty stderr, which dispatch
+			// read as a worker runtime fault and resent twice.
 			const errorMessage = getTerminalAgentError(messages);
 			if (errorMessage !== null) {
+				if (lastProviderHttpStatus !== null && lastProviderHttpStatus >= 400) {
+					process.stderr.write(`${WORKER_PROVIDER_HTTP_STATUS_MARKER}${lastProviderHttpStatus}\n`);
+				}
 				if (errorMessage.length > 0) {
 					process.stderr.write(`[worker] agent ended with stopReason=error: ${errorMessage}\n`);
 				}
+				return { messages, exitCode: 1 };
+			}
+			if (helperSchema !== null && acceptedHelperResult === null) {
 				return { messages, exitCode: 1 };
 			}
 			return { messages, exitCode: 0 };

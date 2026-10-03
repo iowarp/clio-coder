@@ -68,6 +68,42 @@ describe("headless approval wording in the session prompt", () => {
 	}
 });
 
+describe("interactive-only guidance in the session prompt", () => {
+	let env: IsolatedClioEnv;
+	beforeEach(async () => {
+		env = await isolateClioEnv("clio-coder-headless-guidance-");
+	});
+	afterEach(() => env.restore());
+
+	it("leaves docs, settings and operator-control guidance out of a headless session", () => {
+		const prompt = (headless: boolean) =>
+			compile(loadFragments(), {
+				identity: "identity.clio",
+				operatingContract: "operating.contract",
+				safety: "safety.default",
+				sessionInputs: {
+					coordinatorCapabilities: ["clio_docs"],
+					provider: "local",
+					model: "stable-model",
+					providerSupportsTools: true,
+					toolNames: [ToolNames.Bash, ToolNames.Read, ToolNames.Gateway, ToolNames.Context],
+					headless,
+				},
+			}).systemPrompt;
+		const headings = ["# Clio documentation routing", "# Clio settings routing", "# User control and understanding"];
+		deepStrictEqual(
+			headings.map((heading) => prompt(false).includes(heading)),
+			[true, true, true],
+		);
+		deepStrictEqual(
+			headings.map((heading) => prompt(true).includes(heading)),
+			[false, false, false],
+		);
+		ok(!prompt(true).includes("# Answering questions about Clio"), "no inline support guidance replaces the routing");
+		strictEqual(prompt(true), prompt(true), "the headless prompt is byte-stable");
+	});
+});
+
 describe("headless flag threading into the compiled session inputs", () => {
 	function compiled(systemPrompt: string): CompiledSessionPrompt {
 		return { systemPrompt, systemPromptHash: systemPrompt, tokenEstimate: 1, sections: [], fragmentManifest: [] };
