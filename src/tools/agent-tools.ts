@@ -526,13 +526,17 @@ export function resolveSessionTools(
 	const input: ResolveAgentToolsInput = { registry: toolRegistry };
 	const constraints = invokeOptions?.().turnConstraints;
 	if (constraints) input.turnConstraints = constraints;
-	input.invokeOptions = () => ({
-		...invokeOptions?.(),
-		supportsImages: acceptsImageInput({
-			runtimeId: runtime.runtimeResolution.runtime.id,
-			vision: runtime.runtimeResolution.capabilityDecisions.vision,
-		}),
-	});
+	input.invokeOptions = () => {
+		const contextWindow = runtime.runtimeResolution.contextWindowDetails?.effectiveContextWindow;
+		return {
+			...invokeOptions?.(),
+			supportsImages: acceptsImageInput({
+				runtimeId: runtime.runtimeResolution.runtime.id,
+				vision: runtime.runtimeResolution.capabilityDecisions.vision,
+			}),
+			...(contextWindow !== undefined ? { contextWindow } : {}),
+		};
+	};
 	if (telemetry) input.telemetry = telemetry;
 	return resolveAgentTools(input).filter(
 		(tool) => tool.name !== ToolNames.SelfCompact || !runtime.runtimeResolution.runtime.externalAgentLoop,

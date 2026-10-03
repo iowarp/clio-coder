@@ -241,7 +241,7 @@ export const SETTINGS_HELP_BY_ID: Partial<Record<string, string>> = {
 		"When history fills, the oldest run and its event log are removed. Whole number of at least 1.",
 	"guardrails.readMaxBytes": "Enter a number of bytes. Clio reads at least 1 KB even if you choose a smaller value.",
 	"guardrails.observationTurnBudgetBytes":
-		"Shared by every tool in the turn. Enter a whole number of bytes, at least 1.",
+		"Shared by every tool in the turn. At the default, the pool grows with the model's context window above 128K tokens, up to 1 MB. Any other value applies exactly. Enter a whole number of bytes, at least 1.",
 	"guardrails.internalDispatchTimeoutMs":
 		"Ends an internal worker run that never finishes, including the wiki writer and first project Scout. Enter at least 1 millisecond.",
 	"retry.streamStallMs":

@@ -373,6 +373,8 @@ export interface ToolInvokeOptions {
 	hostRun?: import("../domains/dispatch/contract.js").DispatchPreparationOptions["hostRun"];
 	/** Trusted resolved model capability; never read from tool arguments. */
 	supportsImages?: boolean;
+	/** Trusted effective context window in tokens; sizes the per-turn observation pool. */
+	contextWindow?: number;
 	signal?: AbortSignal;
 	runId?: string;
 	sessionId?: string;

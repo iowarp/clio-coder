@@ -1,4 +1,4 @@
-import { resolveGuardrail } from "../core/guardrails.js";
+import { GUARDRAIL_DEFAULTS, resolveGuardrail } from "../core/guardrails.js";
 import { createSafetyPolicyEngine } from "../domains/safety/policy-engine.js";
 import type { ImageContent } from "../engine/types.js";
 import type { ToolInvokeOptions, ToolResult } from "./registry.js";
@@ -131,8 +131,22 @@ function boundContinuation(next: string | undefined): string | undefined {
 	return `${Array.from(next).slice(0, MAX_CONTINUATION_CHARS).join("")}…`;
 }
 
-function observationTurnBudgetLimit(): number {
-	return Math.max(MIN_BUDGET_SLICE_BYTES, resolveGuardrail("observationTurnBudgetBytes"));
+// The default pool follows the active window at 1.5 bytes per window token,
+// about 37% of the window at four bytes a token. 128K is the smallest window
+// real work assumes, so the pool never drops below the 192 KB that window gets,
+// and it stops at 1 MB. A configured value other than the default is the
+// operator's own choice and applies exactly.
+const OBSERVATION_POOL_BYTES_PER_WINDOW_TOKEN = 1.5;
+const OBSERVATION_POOL_CEILING_BYTES = 1024 * 1024;
+
+function observationTurnBudgetLimit(options?: ToolInvokeOptions): number {
+	const configured = Math.max(MIN_BUDGET_SLICE_BYTES, resolveGuardrail("observationTurnBudgetBytes"));
+	const window = options?.contextWindow;
+	if (configured !== GUARDRAIL_DEFAULTS.observationTurnBudgetBytes || window === undefined || !(window > 0)) {
+		return configured;
+	}
+	const scaled = Math.floor(window * OBSERVATION_POOL_BYTES_PER_WINDOW_TOKEN);
+	return Math.min(OBSERVATION_POOL_CEILING_BYTES, Math.max(configured, scaled));
 }
 
 function budgetKey(options: ToolInvokeOptions | undefined): string | null {
@@ -166,7 +180,7 @@ export function reserveObservation(selfCapBytes: number, options?: ToolInvokeOpt
 	if (key === null) {
 		return {
 			key,
-			limitBytes: observationTurnBudgetLimit(),
+			limitBytes: observationTurnBudgetLimit(options),
 			usedBeforeBytes: 0,
 			selfCapBytes,
 			callCapBytes: selfCapBytes,
@@ -176,7 +190,7 @@ export function reserveObservation(selfCapBytes: number, options?: ToolInvokeOpt
 			settled: false,
 		};
 	}
-	const limitBytes = observationTurnBudgetLimit();
+	const limitBytes = observationTurnBudgetLimit(options);
 	const state = turnBudgets.get(key) ?? { usedBytes: 0, lastSeenAt: Date.now(), exhaustedStreak: 0 };
 	state.lastSeenAt = Date.now();
 	turnBudgets.set(key, state);
