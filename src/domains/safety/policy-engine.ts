@@ -264,6 +264,36 @@ export const TEST_RUNNER_COMMANDS: ReadonlyArray<{ id: string; re: RegExp }> = [
 	{ id: "builtin:gradle-test", re: /^(?:gradle|(?:\.\/)?gradlew)\s+test(?:\s+[\w=./:-]+)*$/ },
 ];
 
+/** Test runners that resolve imports through PYTHONPATH. */
+const PYTHON_TEST_RUNNER_IDS: ReadonlySet<string> = new Set([
+	"builtin:uv-pytest",
+	"builtin:uv-python-pytest",
+	"builtin:pytest",
+	"builtin:python-pytest",
+	"builtin:python-unittest",
+]);
+
+/**
+ * A src-layout Python project is tested as `PYTHONPATH=src python3 -m pytest`.
+ * The bare runner was recognized, but the prefixed form fell to
+ * bash-unrecognized, so a non-interactive worker was refused the exact check
+ * its task named and finished with a test that contradicted its own fix
+ * (DF-16). The prefix is read only when every entry is a relative path with no
+ * `..`, which keeps the import roots inside the call's workspace cwd: the
+ * runner already executes that repository's code, so the prefix adds no reach.
+ */
+function pythonRunnerBehindWorkspacePythonPath(command: string): { id: string; re: RegExp } | undefined {
+	const match = /^PYTHONPATH=([\w./:-]+)[ \t]+(\S.*)$/.exec(command);
+	if (match === null) return undefined;
+	const entries = (match[1] ?? "").split(":");
+	const inWorkspace = entries.every(
+		(entry) => entry.length > 0 && !entry.startsWith("/") && !entry.split("/").includes(".."),
+	);
+	if (!inWorkspace) return undefined;
+	const runner = match[2] ?? "";
+	return TEST_RUNNER_COMMANDS.find((entry) => PYTHON_TEST_RUNNER_IDS.has(entry.id) && entry.re.test(runner));
+}
+
 /**
  * Repository scripts that are not test runners. They still count as validation
  * evidence (`npm run <verification script>`). Their net verdict passes after
@@ -1161,7 +1191,9 @@ function evaluateBashPolicy(
 			execRecognition: "unrecognized",
 		};
 	}
-	const testRunner = TEST_RUNNER_COMMANDS.find((entry) => entry.re.test(recognitionCommand));
+	const testRunner =
+		TEST_RUNNER_COMMANDS.find((entry) => entry.re.test(recognitionCommand)) ??
+		pythonRunnerBehindWorkspacePythonPath(recognitionCommand);
 	if (testRunner !== undefined) {
 		return {
 			kind: "allow",

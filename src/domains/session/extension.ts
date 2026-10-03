@@ -22,7 +22,7 @@ import { forkFromState } from "./tree/fork.js";
 import { appendEntryToSessionFile, readTreeBundle, removeSessionDirectory, tombstoneSession } from "./tree/manager.js";
 import { buildTreeSnapshot, computeLeafId, type TreeInputNode, type TreeSnapshot } from "./tree/navigator.js";
 import { buildTurnPreview } from "./tree/preview.js";
-import { probeWorkspace } from "./workspace/index.js";
+import { probeWorkspace, WORKSPACE_PROBE_REUSE_MS } from "./workspace/index.js";
 
 /**
  * Session domain wire-up. Owns a single current SessionManagerState and
@@ -172,7 +172,7 @@ export function createSessionBundle(context: DomainContext): DomainBundle<Sessio
 				void prior.writer.close();
 			}
 			const next = startSession(startInput);
-			next.meta.workspace = probeWorkspace(cwd);
+			next.meta.workspace = probeWorkspace(cwd, { reuseWithinMs: WORKSPACE_PROBE_REUSE_MS });
 			persistSessionMeta(next);
 			state = next;
 			currentTurnId = null;

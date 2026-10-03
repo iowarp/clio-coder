@@ -782,6 +782,11 @@ export interface RunReceiptReproducibility {
 
 export interface RunReceiptUpstreamResponse {
 	requestedModelId: string | null;
+	/**
+	 * What the provider said about its own response model. `not-observed` means
+	 * Clio captured no report for the call; it never means the requested model
+	 * served it, and the route on `routeDecision` is configuration, not this.
+	 */
 	responseModelIdObservation: ResponseModelIdObservation;
 	differingResponseModelId: string | null;
 	providerResponseId: string | null;

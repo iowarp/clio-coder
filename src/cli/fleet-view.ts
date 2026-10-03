@@ -36,8 +36,10 @@ import { renderAgentLedgerBoard } from "../domains/dispatch/agent-ledger-store.j
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { readSettings } from "../core/config.js";
+import { responseModelIdObservationFromRecord } from "../core/response-model-id.js";
 import { clioStateDir, resetXdgCache } from "../core/xdg.js";
 import type { ExecutionStepResult } from "../domains/dispatch/execution-scheduler.js";
+import { routeSettledLabel } from "../domains/dispatch/route-history.js";
 import {
 	type RunEventJournalLine,
 	readRunEventJournal,
@@ -53,11 +55,18 @@ import { truncateToWidth, visibleWidth, wrapTextWithAnsi } from "../engine/tui-p
 import { fleetInspectionScope } from "./fleet-project-scope.js";
 
 const HELP = `clio-coder fleet view <runId|fleetRootId> [--follow] [--all]
+clio-coder fleet view <runId> --json [--all]
 clio-coder fleet view --watch <selection-file> [--all]
 
 Follow one dispatched run from its durable state: the run ledger entry, the
 run event journal, and the sealed receipt once it exists.
 
+Once the receipt authenticates, the snapshot also names the model the run
+requested next to the model the provider reported on each call ("not
+observed" when Clio did not capture one), the cost with its pricing
+provenance, and the label the route settled with.
+
+  --json      print the snapshot and the authenticated receipt as JSON
   --follow    keep tailing until the run's terminal line, then stay open (q exits)
   --watch     follow whichever run id the selection file names, retargeting
               live as the file changes (q exits). This is the process the
@@ -118,6 +127,8 @@ export interface RunViewModel {
 	/** Authenticated receipt status line, or the reason there is not one. */
 	evidence: string;
 	receiptPath: string | null;
+	/** Present only when the receipt authenticated against its ledger row. */
+	receipt?: RunReceipt;
 	outcome: string | null;
 	outcomeDetail: string | null;
 	/** True once the journal carries its terminal line or the ledger row ended. */
@@ -146,7 +157,7 @@ function receiptPathFor(run: RunEnvelope): string {
  * trust vocabulary. Nothing from an unauthenticated receipt reaches the line
  * beyond the reason it could not be trusted.
  */
-function evidenceLine(run: RunEnvelope): { text: string; receiptPath: string | null } {
+function evidenceLine(run: RunEnvelope): { text: string; receiptPath: string | null; receipt?: RunReceipt } {
 	if (run.receiptPath === null && run.endedAt === null) {
 		return { text: "receipt pending; the run has not finalized", receiptPath: null };
 	}
@@ -167,7 +178,42 @@ function evidenceLine(run: RunEnvelope): { text: string; receiptPath: string | n
 			receiptPath: path,
 		};
 	}
-	return { text: formatTrustSummaryLine(inspection.status), receiptPath: path };
+	return { text: formatTrustSummaryLine(inspection.status), receiptPath: path, receipt };
+}
+
+/**
+ * The requested model next to what the provider reported, call by call. The
+ * route a run was dispatched on is configuration; only `upstreamResponses`
+ * records what a provider said about its own response, and a call whose
+ * report Clio did not capture reads "not observed", never the requested id.
+ */
+function modelObservationText(receipt: RunReceipt): string {
+	const requested = `requested ${sanitizeBounded(receipt.wireModelId ?? "not recorded", 128)}`;
+	const responses = receipt.upstreamResponses ?? [];
+	if (responses.length === 0) return `${requested} · no provider response recorded`;
+	const counts = new Map<string, number>();
+	for (const response of responses) {
+		const observation = responseModelIdObservationFromRecord(
+			response as unknown as Record<string, unknown>,
+			"legacy-difference-only",
+		);
+		const label =
+			observation.state === "reported"
+				? `reported ${observation.reportedModelId}`
+				: observation.state === "not-reported"
+					? "no model id in the response"
+					: observation.state === "not-observed"
+						? "not observed"
+						: `legacy record, differing id ${observation.differingModelId ?? "unknown"}`;
+		counts.set(label, (counts.get(label) ?? 0) + 1);
+	}
+	const observed = [...counts].map(([label, count]) => `${sanitizeBounded(label, 128)} (${count}/${responses.length})`);
+	return `${requested} · provider ${observed.join(", ")}`;
+}
+
+function costText(receipt: RunReceipt): string {
+	const cost = typeof receipt.costUsd === "number" && Number.isFinite(receipt.costUsd) ? receipt.costUsd : null;
+	return `${cost === null ? "not recorded" : `$${cost.toFixed(4)}`} · ${receipt.costProvenance ?? "provenance not recorded"}`;
 }
 
 function transcriptLine(line: RunEventJournalLine): RunViewTranscriptLine | null {
@@ -271,6 +317,7 @@ export function loadRunViewModel(runId: string, options: LoadRunViewOptions = {}
 		journalPath: runEventJournalPath(runId, options.journalRoot === undefined ? undefined : options.journalRoot),
 		evidence: evidence.text,
 		receiptPath: evidence.receiptPath,
+		...(evidence.receipt === undefined ? {} : { receipt: evidence.receipt }),
 		...(run.projection?.ledgerId
 			? { agentLedgerBoard: renderAgentLedgerBoard(run.projection.ledgerId) ?? "No peer contributions yet." }
 			: {}),
@@ -349,6 +396,11 @@ function renderRunView(model: RunViewModel, width: number = DEFAULT_WIDTH): stri
 		for (const line of model.agentLedgerBoard.split("\n")) {
 			lines.push(...wrapTextWithAnsi(sanitizeBounded(line, TASK_MAX_WIDTH), columns));
 		}
+	}
+	if (model.receipt !== undefined) {
+		lines.push(...wrapViewerValue("model     ", modelObservationText(model.receipt), columns));
+		lines.push(truncatePlain(`cost      ${costText(model.receipt)}`, columns));
+		lines.push(truncatePlain(`settled   ${sanitizeBounded(routeSettledLabel(model.receipt), 64)}`, columns));
 	}
 	if (model.receiptPath !== null) {
 		lines.push(truncatePlain(`receipt   ${model.receiptPath}`, columns));
@@ -603,16 +655,21 @@ interface ParsedViewArgs {
 	};
 	follow: boolean;
 	all: boolean;
+	json: boolean;
 	help: boolean;
 }
 
 function parseViewArgs(args: ReadonlyArray<string>): ParsedViewArgs | string {
-	const parsed: ParsedViewArgs = { follow: false, all: false, help: false };
+	const parsed: ParsedViewArgs = { follow: false, all: false, json: false, help: false };
 	for (let i = 0; i < args.length; i += 1) {
 		const arg = args[i];
 		if (arg === undefined) continue;
 		if (arg === "--follow" || arg === "-f") {
 			parsed.follow = true;
+			continue;
+		}
+		if (arg === "--json") {
+			parsed.json = true;
 			continue;
 		}
 		if (arg === "--all") {
@@ -657,6 +714,9 @@ function parseViewArgs(args: ReadonlyArray<string>): ParsedViewArgs | string {
 	}
 	if (parsed.watchPath !== undefined && parsed.follow) {
 		return "--watch already follows; drop --follow";
+	}
+	if (parsed.json && (parsed.follow || parsed.watchPath !== undefined)) {
+		return "--json prints one snapshot; drop --follow and --watch";
 	}
 	return parsed;
 }
@@ -738,6 +798,7 @@ export async function runFleetView(args: ReadonlyArray<string>): Promise<number>
 		}
 		const fleetModel = loadFleetRunViewModel(root.rootId, { scope });
 		if (fleetModel === null) return fail(`unknown fleet run '${root.rootId}'`);
+		if (parsed.json) return fail("--json takes a run id; view the fleet root without it to list its step run ids");
 		if (parsed.follow) {
 			process.stderr.write("clio-coder fleet view: --follow applies to a run id, not a fleet root; printing the index\n");
 		}
@@ -753,6 +814,10 @@ export async function runFleetView(args: ReadonlyArray<string>): Promise<number>
 	const runId = resolved.runId;
 	const snapshot = loadRunViewModel(runId, { scope });
 	if (snapshot === null) return fail(`unknown run '${runId}'`);
+	if (parsed.json) {
+		process.stdout.write(`${JSON.stringify(snapshot, null, 2)}\n`);
+		return 0;
+	}
 
 	// A non-TTY stdout has no alternate screen and no keypresses, so --follow
 	// there would spin without ever being readable or quittable. Print the

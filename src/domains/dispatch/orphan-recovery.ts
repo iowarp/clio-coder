@@ -13,7 +13,7 @@
  * destroy evidence.
  */
 
-import { existsSync, readdirSync, readFileSync, renameSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, renameSync, statSync } from "node:fs";
 import { hostname } from "node:os";
 import { join } from "node:path";
 import { clioStateDir } from "../../core/xdg.js";
@@ -37,6 +37,12 @@ export interface OrphanRecoverySummary {
  * order; the integrity digest picks the right one.
  */
 const STATUS_CANDIDATES: ReadonlyArray<RunStatus> = ["completed", "failed", "interrupted", "dead", "stale"];
+
+/**
+ * Slack for a receipt's mtime against the run's own start: on a shared
+ * filesystem the server stamps mtime with its clock, not the writer's.
+ */
+const RECEIPT_MTIME_SKEW_MS = 60 * 60 * 1000;
 
 function receiptsDir(): string {
 	return join(clioStateDir(), "receipts");
@@ -251,6 +257,7 @@ export function recoverOrphanReceipts(ledger: Ledger): OrphanRecoverySummary {
 	// horizon so a wiped runs.json can be rebuilt from receipts.
 	const rows = ledger.list();
 	const oldestRetained = rows.length > 0 ? (rows[rows.length - 1]?.startedAt ?? null) : null;
+	const oldestRetainedMs = oldestRetained === null ? Number.NaN : Date.parse(oldestRetained);
 	let files: string[];
 	try {
 		files = readdirSync(dir).filter((name) => name.endsWith(".json"));
@@ -259,6 +266,19 @@ export function recoverOrphanReceipts(ledger: Ledger): OrphanRecoverySummary {
 	}
 	for (const name of files) {
 		const path = join(dir, name);
+		// Both checks run before the receipt is read. Receipts are never pruned,
+		// and parsing every one on every boot cost ~40 ms at 246 receipts (15 MB)
+		// and grew with history. A receipt is written as `<runId>.json`, so a run
+		// the ledger holds is known by name; and it is written after its run
+		// started, so an mtime well before the horizon means a start before it.
+		if (ledger.get(name.slice(0, -".json".length)) !== null) continue;
+		if (Number.isFinite(oldestRetainedMs)) {
+			try {
+				if (statSync(path).mtimeMs < oldestRetainedMs - RECEIPT_MTIME_SKEW_MS) continue;
+			} catch {
+				// Unstattable here means unreadable below, which quarantines or skips it.
+			}
+		}
 		let receipt: RunReceipt;
 		try {
 			receipt = JSON.parse(readFileSync(path, "utf8")) as RunReceipt;

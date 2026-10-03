@@ -371,7 +371,10 @@ export interface RouteDecisionV1 {
 	/**
 	 * The route the caller actually ran. Equal to `selected` at fixed and active
 	 * mode; in shadow mode it is the production route the decision did not
-	 * touch, and the pair is what route regret is computed from.
+	 * touch, and the pair is what route regret is computed from. It is the
+	 * configured identity Clio dispatched on, not an observation: the model a
+	 * provider reported for each call is the receipt's
+	 * `upstreamResponses[].responseModelIdObservation` (DF-14).
 	 */
 	executedRoute: RouteCandidate;
 }

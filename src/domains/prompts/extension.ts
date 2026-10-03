@@ -27,7 +27,7 @@ import { parseRigorOverride, rigorResolution } from "../safety/rigor.js";
 import type { SchedulingContract } from "../scheduling/contract.js";
 import type { SessionContract } from "../session/contract.js";
 import { latestPriorSession } from "../session/history.js";
-import { probeWorkspaceAsync, type WorkspaceSnapshot } from "../session/workspace/index.js";
+import { probeWorkspaceAsync, WORKSPACE_PROBE_REUSE_MS, type WorkspaceSnapshot } from "../session/workspace/index.js";
 import {
 	compile,
 	compileWorker,
@@ -162,7 +162,7 @@ export function createPromptsBundle(
 		}
 		let workspace: WorkspaceSnapshot | null = null;
 		try {
-			workspace = await probeWorkspaceAsync(cwd);
+			workspace = await probeWorkspaceAsync(cwd, { reuseWithinMs: WORKSPACE_PROBE_REUSE_MS });
 		} catch {
 			// Git facts are orientation, not authority; a failed probe renders none.
 		}

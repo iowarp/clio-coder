@@ -22,7 +22,7 @@ import type {
 import { normalizeClioCoderEventType } from "../../core/naming-events.js";
 import { processAlive, processBirthToken } from "../../core/process-identity.js";
 import { chainStepToolCallId, displayToolCall, gatewayChainSteps, VIA_GATEWAY } from "../../tools/gateway-display.js";
-import { createRedactionTally, redactSecretsText } from "../evidence/redact.js";
+import { createRedactionTally, redactSecretsText, secretRedactingReplacer } from "../evidence/redact.js";
 import { normalizeCostProvenance } from "../providers/types/cost-provenance.js";
 
 export const TRACE_SCHEMA_VERSION = 1;
@@ -1754,10 +1754,10 @@ function boundedSnippet(value: unknown): string | null {
 }
 
 function boundedJson(value: unknown): string {
-	const serialized = JSON.stringify(value, (_key, current: unknown) =>
-		typeof current === "bigint" ? current.toString() : current,
+	const redact = secretRedactingReplacer(createRedactionTally());
+	const json = JSON.stringify(value, (key, current: unknown) =>
+		redact(key, typeof current === "bigint" ? current.toString() : current),
 	);
-	const json = serialized === undefined ? undefined : redactSecretsText(serialized, createRedactionTally());
 	if (json === undefined) return "null";
 	if (Buffer.byteLength(json) <= TRACE_PAYLOAD_LIMIT_BYTES) return json;
 	return JSON.stringify({

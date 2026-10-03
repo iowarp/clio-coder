@@ -43,9 +43,17 @@ const SECRET_PATTERNS: ReadonlyArray<SecretPattern> = [
 		kind: "assignment",
 		// KEY=value / key: value / "api_key": "value" shapes where the key name
 		// is secret-flavored and the value is long enough to be a credential.
-		re: /\b((?:[A-Za-z0-9_-]*(?:api[_-]?key|apikey|secret|token|passwd|password|credential)[A-Za-z0-9_-]*)\s*["']?\s*[:=]\s*["']?)([^\s"'`;,&|<>]{8,})/gi,
+		// A value that opens a call with no argument, a literal or a line break
+		// is code, not a credential: source constants such as
+		// `BASE_TOKENS = frozenset({` were redacted on every read (DF-12). A
+		// password like `Summer2024(!)` still reads as a value.
+		re: /\b((?:[A-Za-z0-9_-]*(?:api[_-]?key|apikey|secret|token|passwd|password|credential)[A-Za-z0-9_-]*)\s*["']?\s*[:=]\s*["']?)(?![A-Za-z_][\w.]*\((?:[\s"'{[)]|$))([^\s"'`;,&|<>]{8,})/gi,
 	},
 ];
+
+/** The assignment pattern's key and value halves, for a key that arrives as a JSON property name. */
+const SECRET_PROPERTY_NAME = /(?:api[_-]?key|apikey|secret|token|passwd|password|credential)[A-Za-z0-9_-]*$/i;
+const CREDENTIAL_PREFIX = /^[^\s"'`;,&|<>]{8,}/;
 
 /** Replace every secret-shaped value in `text`, tallying replacements. */
 export function redactSecretsText(text: string, tally: RedactionTally): string {
@@ -78,4 +86,24 @@ export function redactSecretsDeep<T>(value: T, tally: RedactionTally): T {
 		return out as unknown as T;
 	}
 	return value;
+}
+
+/**
+ * A `JSON.stringify` replacer that redacts string leaves before they are
+ * escaped. Redacting the serialized text instead let the assignment value
+ * swallow the backslash of an escaped quote, which left an unescaped quote in
+ * the durable trace and an undecodable payload (DF-12). Leaf by leaf the
+ * assignment pattern never sees a property name, so a secret-flavored name
+ * redacts its credential-shaped value the way `"api_key": "value"` text would.
+ */
+export function secretRedactingReplacer(tally: RedactionTally): (key: string, value: unknown) => unknown {
+	return (key, value) => {
+		if (typeof value !== "string") return value;
+		const redacted = redactSecretsText(value, tally);
+		if (!SECRET_PROPERTY_NAME.test(key) || redacted.startsWith("[redacted:")) return redacted;
+		return redacted.replace(CREDENTIAL_PREFIX, () => {
+			tally.count += 1;
+			return "[redacted:assignment]";
+		});
+	};
 }

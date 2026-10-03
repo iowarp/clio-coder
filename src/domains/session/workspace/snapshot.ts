@@ -63,8 +63,39 @@ function snapshotFrom(cwd: string, git: GitProbeResult): WorkspaceSnapshot {
 	};
 }
 
-export function probeWorkspace(cwd: string): WorkspaceSnapshot {
-	return snapshotFrom(cwd, probeGit(cwd));
+/**
+ * How long a landed probe answers a caller that opts into reuse. A first
+ * prompt used to probe the same tree three times inside a second: the welcome
+ * dashboard at hydration, the session prompt's source capture, then session
+ * bind's synchronous probe, which blocked the loop for about 80 ms (seven `git`
+ * spawns and a file walk) right before the first request. Five seconds is the
+ * footer's Git refresh period, so a reused snapshot is never older than the
+ * branch and dirty state the footer is already showing.
+ */
+export const WORKSPACE_PROBE_REUSE_MS = 5_000;
+
+export interface WorkspaceProbeOptions {
+	/** Accept a snapshot of the same cwd that landed this recently, or join one in flight. */
+	reuseWithinMs?: number;
+}
+
+const landedProbes = new Map<string, { snapshot: WorkspaceSnapshot; at: number }>();
+const inFlightProbes = new Map<string, Promise<WorkspaceSnapshot>>();
+
+function remember(cwd: string, snapshot: WorkspaceSnapshot): WorkspaceSnapshot {
+	landedProbes.set(cwd, { snapshot, at: performance.now() });
+	return snapshot;
+}
+
+function recentProbe(cwd: string, options: WorkspaceProbeOptions): WorkspaceSnapshot | null {
+	if (options.reuseWithinMs === undefined) return null;
+	const landed = landedProbes.get(cwd);
+	return landed && performance.now() - landed.at <= options.reuseWithinMs ? landed.snapshot : null;
+}
+
+/** Without `reuseWithinMs` this always probes; the context tool's refresh depends on that. */
+export function probeWorkspace(cwd: string, options: WorkspaceProbeOptions = {}): WorkspaceSnapshot {
+	return recentProbe(cwd, options) ?? remember(cwd, snapshotFrom(cwd, probeGit(cwd)));
 }
 
 /**
@@ -72,6 +103,19 @@ export function probeWorkspace(cwd: string): WorkspaceSnapshot {
  * interactive layer uses this to paint an empty workspace chip and fill it in
  * when the probe lands rather than holding the frame for ~280 ms.
  */
-export async function probeWorkspaceAsync(cwd: string): Promise<WorkspaceSnapshot> {
-	return snapshotFrom(cwd, await probeGitAsync(cwd));
+export async function probeWorkspaceAsync(
+	cwd: string,
+	options: WorkspaceProbeOptions = {},
+): Promise<WorkspaceSnapshot> {
+	const recent = recentProbe(cwd, options);
+	if (recent) return recent;
+	const pending = options.reuseWithinMs === undefined ? undefined : inFlightProbes.get(cwd);
+	if (pending) return pending;
+	const probe = probeGitAsync(cwd).then((git) => remember(cwd, snapshotFrom(cwd, git)));
+	inFlightProbes.set(cwd, probe);
+	try {
+		return await probe;
+	} finally {
+		if (inFlightProbes.get(cwd) === probe) inFlightProbes.delete(cwd);
+	}
 }

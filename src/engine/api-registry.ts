@@ -26,6 +26,7 @@ import {
 import "@earendil-works/pi-ai/providers/images/register-builtins";
 
 import { withCodexPromptItems } from "./apis/codex-prompt-items.js";
+import { observeResponsesModelId } from "./apis/responses-model-id.js";
 import { filterAssistantProseStream } from "./assistant-prose-stream.js";
 import { normalizeContext } from "./context.js";
 import { getEngineEnvApiKey } from "./env-api-keys.js";
@@ -137,7 +138,7 @@ export function engineStream(
 	return filterAssistantProseStream(
 		guardToolArgumentStream(model, context, options, (guarded) =>
 			instrumentProviderCall(model, withCodexPromptItems(model, guarded), (effective) =>
-				dispatchEngineStream(model, context, effective),
+				observeResponsesModelId(model, effective, (observed) => dispatchEngineStream(model, context, observed)),
 			),
 		),
 		model,
@@ -152,7 +153,7 @@ export function engineStreamSimple(
 	return filterAssistantProseStream(
 		guardToolArgumentStream(model, context, options, (guarded) =>
 			instrumentProviderCall(model, withCodexPromptItems(model, guarded), (effective) =>
-				dispatchEngineStreamSimple(model, context, effective),
+				observeResponsesModelId(model, effective, (observed) => dispatchEngineStreamSimple(model, context, observed)),
 			),
 		),
 		model,
