@@ -75,6 +75,7 @@ function mergeCardPresentation(title: string, authorization: string, reversibili
 		tier: "workspace",
 		tierLabel: "Task merge",
 		title,
+		kind: "task merge",
 		semanticToken: "action",
 		authorizationCopy: authorization,
 		consequenceCopy: "The answer decides what happens to this task's branch and worktree.",

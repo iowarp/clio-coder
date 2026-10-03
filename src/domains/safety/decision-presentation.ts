@@ -75,6 +75,8 @@ export interface DecisionPresentation {
 	tier: DecisionTier;
 	tierLabel: string;
 	title: string;
+	/** What is being decided, as a short noun phrase for a title that already names who asks. */
+	kind: string;
 	semanticToken: DecisionSemanticToken;
 	authorizationCopy: string;
 	consequenceCopy: string;
@@ -172,15 +174,26 @@ function tierIdentity(
 ): {
 	tierLabel: string;
 	title: string;
+	kind: string;
 	semanticToken: DecisionSemanticToken;
 } {
 	switch (tier) {
 		case "conversation":
-			return { tierLabel: "Conversational answer", title: "Answer a question", semanticToken: "accent" };
+			return { tierLabel: "Conversational answer", title: "Answer a question", kind: "question", semanticToken: "accent" };
 		case "workspace":
-			return { tierLabel: "Workspace authority", title: "Approve workspace action", semanticToken: "action" };
+			return {
+				tierLabel: "Workspace authority",
+				title: "Approve workspace action",
+				kind: "workspace action",
+				semanticToken: "action",
+			};
 		case "outward":
-			return { tierLabel: "Outward consequence", title: "Confirm outward consequence", semanticToken: "warning" };
+			return {
+				tierLabel: "Outward consequence",
+				title: "Confirm outward consequence",
+				kind: "outward consequence",
+				semanticToken: "warning",
+			};
 		case "safety-net":
 			// The gate is System One's judgment of one command, not a standing
 			// rail, so the card is titled for who asked.
@@ -188,13 +201,29 @@ function tierIdentity(
 				? {
 						tierLabel: "System One confirmation (experimental)",
 						title: "System One confirmation (experimental)",
+						kind: "System One gate",
 						semanticToken: "warning",
 					}
-				: { tierLabel: "Safety-net confirmation", title: "Safety-net confirmation", semanticToken: "warning" };
+				: {
+						tierLabel: "Safety-net confirmation",
+						title: "Safety-net confirmation",
+						kind: "safety-net rail",
+						semanticToken: "warning",
+					};
 		case "system":
-			return { tierLabel: "System change", title: "Approve system change", semanticToken: "warning" };
+			return {
+				tierLabel: "System change",
+				title: "Approve system change",
+				kind: "system change",
+				semanticToken: "warning",
+			};
 		case "worker":
-			return { tierLabel: "Worker escalation", title: "Worker needs approval", semanticToken: "action" };
+			return {
+				tierLabel: "Worker escalation",
+				title: "Worker needs approval",
+				kind: "worker call",
+				semanticToken: "action",
+			};
 	}
 }
 

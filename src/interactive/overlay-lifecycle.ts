@@ -18,8 +18,8 @@ import type { PermissionOverlayBodyHandle } from "./permission-overlay.js";
 import {
 	createPermissionOverlayBody,
 	permissionOverlayHint,
-	permissionOverlayTitle,
 	permissionOverlayTone,
+	permissionRailTitle,
 } from "./permission-overlay.js";
 
 export * from "./overlay-key-routing.js";
@@ -323,14 +323,24 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 			const body = createPermissionOverlayBody(view, inspect, invocation, advisory);
 			permissionBody = body;
 			const handle = showOverlayFrame(tui, body, {
-				// The card docks above the composer's own rows: a steer typed while
-				// the call is parked is what the CONFIRM rail is for.
+				// The card takes the editor's rails and keeps the draft editable under
+				// it: a steer typed while the call is parked is what the CONFIRM rail
+				// is for.
 				keepComposer: true,
+				approval: true,
 				// Not derived from the title: that one is classified per decision
 				// axis and is one of five strings for the same modal.
 				markerId: "permission-confirm",
 				awaitingInput: true,
-				title: permissionOverlayTitle(view),
+				// Read per frame: a call that parks behind this one moves the count.
+				title: (context) =>
+					permissionRailTitle(view, {
+						actor: context?.actor ?? "",
+						room: context?.room ?? Number.POSITIVE_INFINITY,
+						...(view.origin.kind === "main" && deps.app.toolRegistry
+							? { queueDepth: deps.app.toolRegistry.parkedCount() }
+							: {}),
+					}),
 				tone: permissionOverlayTone(view),
 				// Read per frame: the footer names what Enter does right now, and
 				// that depends on whether the composer holds a draft and on whether

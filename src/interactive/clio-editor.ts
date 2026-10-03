@@ -400,6 +400,7 @@ export class ClioEditor extends Editor {
 			yolo: this.chrome.getAutonomy?.() === "yolo",
 			animate: false,
 			now: this.railAnimationTime,
+			...(mode === "CONFIRM" ? { tone: "attentionRail" as const } : {}),
 		};
 	}
 
@@ -414,7 +415,7 @@ export class ClioEditor extends Editor {
 		let lead = "";
 		let activity = "";
 		if (mode === "CONFIRM") {
-			lead = theme.fg("composerRail", attentionCue(this.railAnimationTime, this.chrome.getMotionEnabled?.() ?? true));
+			lead = theme.fg("attentionRail", attentionCue(this.railAnimationTime, this.chrome.getMotionEnabled?.() ?? true));
 			activity = theme.style("decisionCue", "needs approval", { bold: true });
 		} else if (mode === "PREPARING" || mode === "COMPACTING") {
 			lead = theme.fg("harnessAction", spinner);
@@ -443,21 +444,34 @@ export class ClioEditor extends Editor {
 	}
 
 	/** The top rail holds harness activity or the active menu's title. */
-	private topRail(width: number, theme: ClioTheme, rail: EditorRailState, label: string, suffix = ""): string {
-		const left = rail.yolo ? `${theme.fg("composerRail", "━")} ${theme.style("yoloLabel", "YOLO", { bold: true })}` : "";
-		const room = Math.max(0, this.railLabelRoom(width) - (left ? visibleWidth(left) + 1 : 0));
-		const labelRoom = Math.max(0, room - visibleWidth(suffix) - (label && suffix ? 3 : 0));
-		const right = [truncateToWidth(label, labelRoom, GLYPH.ellipsis, false), suffix]
+	private topRail(
+		width: number,
+		theme: ClioTheme,
+		rail: EditorRailState,
+		label: string,
+		suffix = "",
+		labelRoom = this.railLabelRoom(width),
+	): string {
+		const left = rail.yolo
+			? `${theme.fg(rail.tone ?? "composerRail", "━")} ${theme.style("yoloLabel", "YOLO", { bold: true })}`
+			: "";
+		const room = Math.max(0, labelRoom - (left ? visibleWidth(left) + 1 : 0));
+		const fitted = Math.max(0, room - visibleWidth(suffix) - (label && suffix ? 3 : 0));
+		const right = [truncateToWidth(label, fitted, GLYPH.ellipsis, false), suffix]
 			.filter(Boolean)
 			.join(theme.fg("border", " · "));
 		return renderEditorRail(theme, width, { left, leftRaw: true, right, rightRaw: true }, rail);
 	}
 
-	/** Thinking and context stay together; permission and menu keys have priority. */
-	private bottomRail(width: number, theme: ClioTheme, rail: EditorRailState, right = ""): string {
-		const room = this.railLabelRoom(width);
+	/**
+	 * Thinking and context stay together; permission and menu keys have priority.
+	 * An approval passes its own `room` and the rail then carries its keys alone.
+	 */
+	private bottomRail(width: number, theme: ClioTheme, rail: EditorRailState, right = "", keysOnlyRoom?: number): string {
+		const room = keysOnlyRoom ?? this.railLabelRoom(width);
 		const fittedRight = truncateToWidth(right, room, GLYPH.ellipsis, false);
-		const groupRoom = Math.max(0, room - visibleWidth(fittedRight) - (fittedRight ? 3 : 0));
+		const groupRoom =
+			keysOnlyRoom !== undefined ? 0 : Math.max(0, room - visibleWidth(fittedRight) - (fittedRight ? 3 : 0));
 		const thinking =
 			groupRoom > 0
 				? truncateToWidth(
@@ -489,6 +503,11 @@ export class ClioEditor extends Editor {
 		return Math.max(1, width - Math.min(16, Math.floor(width / 3)) - 3);
 	}
 
+	/** An approval's title and keys take the rail to a three-column stretch: at 60 columns the shared room cut the queue count. */
+	private approvalLabelRoom(width: number): number {
+		return Math.max(1, width - 6);
+	}
+
 	protected override renderBottomBorder(width: number, hiddenLineCount: number): string {
 		this.renderedBottomHidden = hiddenLineCount;
 		const theme = clioTheme();
@@ -513,74 +532,80 @@ export class ClioEditor extends Editor {
 		return this.renderedBottomRail;
 	}
 
-	/** Commands share the composer rails; permission cards retain the editable draft beneath their body. */
-	private renderDock(
+	/** A docked command or menu: its title and keys on the composer's rails, its body between them. */
+	private renderDock(entry: DockEntry, width: number, theme: ClioTheme, rail: EditorRailState): string[] {
+		const gutter = ClioEditor.DOCK_GUTTER;
+		const contentWidth = Math.max(1, width - gutter * 2);
+		const adaptive = entry.adaptive === true;
+		const bodyRows = adaptive ? dockGrowthRows(this.dockHost) : dockBodyRows(this.dockHost);
+		let body = entry.frame.renderDockBody(contentWidth, Math.max(1, bodyRows));
+		if (adaptive) {
+			// The frame pads to the ceiling; keep only the rows the content used, down to the compact floor.
+			let used = body.length;
+			while (used > 1 && stripTerminalSequences(body[used - 1] ?? "").trim() === "") used -= 1;
+			body = body.slice(0, dockAdaptiveRows(this.dockHost, used));
+		}
+		const pad = " ".repeat(gutter);
+		const titleText = theme.style(entry.frame.dockTone() ?? "sectionHeading", entry.frame.dockTitle(), { bold: true });
+		const title = entry.frame.dockAwaitingInput?.()
+			? `${theme.fg(rail.tone ?? "composerRail", attentionCue(this.railAnimationTime, this.chrome.getMotionEnabled?.() ?? true))} ${titleText}`
+			: titleText;
+		const hint = entry.frame.dockHint(this.railLabelRoom(width) + 4);
+		return [
+			this.topRail(width, theme, rail, title),
+			...body.map((row) => padAnsi(`${pad}${row}${pad}`, width)),
+			this.bottomRail(width, theme, rail, hint?.trim().length ? hint : ""),
+		];
+	}
+
+	/**
+	 * A permission card inside the editor's own rails. It used to be a second,
+	 * boxed frame above a composer that repeated its keys; now the rails take the
+	 * attention tone, the top one names the decision and the bottom one carries
+	 * the card's keys once. The operator's draft, when there is one, stays
+	 * editable under the card because Enter is inert while it exists (#186).
+	 */
+	private renderApproval(
 		entry: DockEntry,
 		width: number,
 		theme: ClioTheme,
-		rail: EditorRailState,
-		composerRows = 0,
-	): string[] {
+		draft: { rows: string[]; hiddenAbove: number; hiddenBelow: number },
+	): { card: string[]; composer: string[] } {
 		const gutter = ClioEditor.DOCK_GUTTER;
 		const contentWidth = Math.max(1, width - gutter * 2);
-		const adaptive = entry.adaptive === true && !entry.keepComposer;
-		const bodyRows =
-			(adaptive ? dockGrowthRows(this.dockHost) : dockBodyRows(this.dockHost)) -
-			(entry.keepComposer ? Math.max(0, composerRows - 1) : 0);
-		let rendered = entry.frame.renderDockBody(contentWidth, Math.max(1, bodyRows));
-		if (adaptive) {
-			// The frame pads to the ceiling; keep only the rows the content used, down to the compact floor.
-			let used = rendered.length;
-			while (used > 1 && stripTerminalSequences(rendered[used - 1] ?? "").trim() === "") used -= 1;
-			rendered = rendered.slice(0, dockAdaptiveRows(this.dockHost, used));
-		}
-		// The dock pads every body to its full budget so a docked menu keeps its
-		// footprint. A card that keeps the composer has the composer's own rows under
-		// it, so the padding only leaves blank rows between the card and the rail
-		// that carries its keys.
-		let bodyEnd = rendered.length;
-		if (entry.keepComposer)
-			while (bodyEnd > 1 && stripTerminalSequences(rendered[bodyEnd - 1] ?? "").trim() === "") bodyEnd -= 1;
-		const body = rendered.slice(0, bodyEnd);
 		const pad = " ".repeat(gutter);
-		const tone = entry.frame.dockTone();
-		const titleText = theme.style(
-			entry.keepComposer ? (tone ?? "decisionCue") : (tone ?? "sectionHeading"),
-			entry.frame.dockTitle(),
-			{
-				bold: true,
-			},
-		);
-		const title =
-			!entry.keepComposer && entry.frame.dockAwaitingInput?.()
-				? `${theme.fg("composerRail", attentionCue(this.railAnimationTime, this.chrome.getMotionEnabled?.() ?? true))} ${titleText}`
-				: titleText;
-		const labelRoom = this.railLabelRoom(width);
-		const top = entry.keepComposer
-			? padAnsi(
-					`${theme.fg("attentionRail", "┌")}${rule(theme, Math.max(0, width - 2), {
-						left: ` ${title}`,
-						leftRaw: true,
-						fillToken: "attentionRail",
-					})}${theme.fg("attentionRail", "┐")}`,
-					width,
-				)
-			: this.topRail(width, theme, rail, title);
-		const lines = [
-			top,
-			...body.map((row) =>
-				padAnsi(
-					entry.keepComposer
-						? `${theme.fg("attentionRail", "│")} ${row} ${theme.fg("attentionRail", "│")}`
-						: `${pad}${row}${pad}`,
-					width,
-				),
-			),
-		];
-		if (entry.keepComposer) return lines;
-		const hint = entry.frame.dockHint(labelRoom + 4);
-		lines.push(this.bottomRail(width, theme, rail, hint?.trim().length ? hint : ""));
-		return lines;
+		const rail: EditorRailState = { ...this.railState("CONFIRM"), tone: "attentionRail" };
+		const room = this.approvalLabelRoom(width);
+		const route = this.chrome.getModelLabel();
+		const cue = attentionCue(this.railAnimationTime, this.chrome.getMotionEnabled?.() ?? true);
+		const up = draft.hiddenAbove > 0 ? theme.fg("positionCount", `${GLYPH.up}${draft.hiddenAbove}`) : "";
+		const titleRoom = Math.max(1, room - visibleWidth(cue) - 1 - (up ? visibleWidth(up) + 3 : 0) - (rail.yolo ? 7 : 0));
+		const title = entry.frame.dockTitle({
+			room: titleRoom,
+			actor: modelNickname(typeof route === "string" ? route.split("·").at(-1) : route.modelId),
+		});
+		const label = `${theme.fg("attentionRail", cue)} ${theme.style(entry.frame.dockTone() ?? "decisionCue", title, { bold: true })}`;
+		// The draft's rows and its divider come out of the card's budget, so the whole surface keeps the dock's height.
+		const draftRows = draft.rows.length > 0 ? draft.rows.length + 1 : 0;
+		const rendered = entry.frame.renderDockBody(contentWidth, Math.max(1, dockBodyRows(this.dockHost) - draftRows));
+		// The frame pads every body to its budget; a card owes no blank rows above its keys.
+		let bodyEnd = rendered.length;
+		while (bodyEnd > 1 && stripTerminalSequences(rendered[bodyEnd - 1] ?? "").trim() === "") bodyEnd -= 1;
+		const down = draft.hiddenBelow > 0 ? theme.fg("positionCount", `${GLYPH.down}${draft.hiddenBelow}`) : "";
+		const hint = entry.frame.dockHint(room - (down ? visibleWidth(down) + 3 : 0) + 4);
+		const keys = [down, hint?.trim().length ? theme.fg("decisionKey", hint) : ""]
+			.filter(Boolean)
+			.join(theme.fg("border", " · "));
+		return {
+			card: [
+				this.topRail(width, theme, rail, label, up, room),
+				...rendered.slice(0, bodyEnd).map((row) => padAnsi(`${pad}${row}${pad}`, width)),
+				...(draft.rows.length > 0
+					? [padAnsi(`${pad}${rule(theme, contentWidth, { left: "Your draft", leftToken: "annotation" })}`, width)]
+					: []),
+			],
+			composer: [...draft.rows, this.bottomRail(width, theme, rail, keys, room)],
+		};
 	}
 
 	private renderAutocompleteDock(lines: string[], width: number, theme: ClioTheme): string[] {
@@ -684,6 +709,7 @@ export class ClioEditor extends Editor {
 		width: number,
 		bodyEnd = lines.length - 1,
 		baseRole: "inputText" | "menuOption" = "inputText",
+		bodyStart = 1,
 	): string[] {
 		const theme = clioTheme();
 		const key = `${theme.context.mode}:${baseRole}:${width}`;
@@ -694,7 +720,7 @@ export class ClioEditor extends Editor {
 			this.surfacePainters.set(key, paint);
 		}
 		const paintRails = projectsYolo(theme.context);
-		return lines.map((line, index) => (paintRails || (index > 0 && index < bodyEnd) ? paint(line) : line));
+		return lines.map((line, index) => (paintRails || (index >= bodyStart && index < bodyEnd) ? paint(line) : line));
 	}
 
 	override render(width: number): string[] {
@@ -721,6 +747,7 @@ export class ClioEditor extends Editor {
 				yolo: this.chrome.getAutonomy?.() === "yolo",
 				animate: false,
 				now: this.railAnimationTime,
+				...(docked.approval ? { tone: "attentionRail" as const } : {}),
 			};
 			const lines = this.renderDock(docked, safeWidth, theme, rail);
 			this.autocompleteRowMap = lines.map(() => -1);
@@ -742,22 +769,21 @@ export class ClioEditor extends Editor {
 				input.findIndex((line) => line.includes(REVERSE_VIDEO)),
 			);
 			const [start, end] = centeredWindow(input.length, cursor, Math.max(1, dockBodyRows(this.dockHost) - 3));
-			const composer = [
-				this.renderTopBorder(safeWidth, this.renderedTopHidden + start),
-				...input.slice(start, end),
-				this.renderBottomBorder(safeWidth, this.renderedBottomHidden + input.length - end),
-			];
-			const body = this.renderDock(docked, safeWidth, theme, this.railState(mode), composer.length);
+			// An empty composer has nothing to show under the card; its draft returns with the normal rails.
+			const { card, composer } = this.renderApproval(docked, safeWidth, theme, {
+				rows: text.length > 0 ? input.slice(start, end) : [],
+				hiddenAbove: text.length > 0 ? this.renderedTopHidden + start : 0,
+				hiddenBelow: text.length > 0 ? this.renderedBottomHidden + input.length - end : 0,
+			});
 			this.autocompleteSourceStart = Number.POSITIVE_INFINITY;
 			this.autocompleteRowMap = [
-				...body.map(() => -1),
-				0,
-				...input.slice(start, end).map((_, index) => start + index + 1),
+				...card.map(() => -1),
+				...composer.slice(0, -1).map((_, index) => start + index + 1),
 				border,
 			];
 			return [
-				...this.paintComposerBody(body, safeWidth, body.length, "menuOption"),
-				...this.paintComposerBody(composer, safeWidth),
+				...this.paintComposerBody(card, safeWidth, card.length, "menuOption"),
+				...this.paintComposerBody(composer, safeWidth, composer.length - 1, "inputText", 0),
 			];
 		}
 		if (super.isShowingAutocomplete()) this.autocompleteDockOpen = true;

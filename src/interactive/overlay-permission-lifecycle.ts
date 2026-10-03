@@ -288,7 +288,7 @@ function workerEscalationEntry(payload: PermissionRequestedPayload, autonomy: st
 	};
 }
 
-function workerApprovalRequestView(entry: WorkerEscalationEntry): ApprovalRequestView {
+function workerApprovalRequestView(entry: WorkerEscalationEntry, queueDepth: number): ApprovalRequestView {
 	return {
 		requestId: entry.requestId,
 		tool: entry.tool,
@@ -299,6 +299,7 @@ function workerApprovalRequestView(entry: WorkerEscalationEntry): ApprovalReques
 		...(entry.target !== undefined && entry.target.length > 0 ? { target: entry.target } : {}),
 		...(entry.consequence !== undefined ? { consequence: entry.consequence } : {}),
 		...(entry.grant !== undefined ? { workerGrant: entry.grant } : {}),
+		...(queueDepth > 1 ? { queueDepth } : {}),
 	};
 }
 
@@ -376,7 +377,9 @@ export function createOverlayPermissionLifecycle(deps: OverlayPermissionLifecycl
 			target: entry.target ?? "",
 			requestId: entry.requestId,
 		});
-		if (!deps.openPermissionOverlay(workerApprovalRequestView(entry), undefined, undefined, advisory)) return false;
+		// The entry is still at the head of the queue here, so the queue's length counts it.
+		const view = workerApprovalRequestView(entry, workerQueue.length);
+		if (!deps.openPermissionOverlay(view, undefined, undefined, advisory)) return false;
 		pendingWorker = entry;
 		pendingPermission = null;
 		confirmed = false;

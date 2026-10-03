@@ -10,7 +10,7 @@ import {
 	truncateToWidth,
 	visibleWidth,
 } from "../engine/tui.js";
-import { dockBodyRows, dockMount, dockRaise, dockUnmount, dockViewportRows } from "./dock.js";
+import { type DockTitleContext, dockBodyRows, dockMount, dockRaise, dockUnmount, dockViewportRows } from "./dock.js";
 import { keyboardOwner } from "./keyboard-owner.js";
 import { enterModal, type ModalMarkerSink } from "./modal-marker.js";
 import {
@@ -416,7 +416,7 @@ export class ClioOverlayFrame implements Component {
 
 	constructor(
 		private readonly child: Component,
-		private readonly title: string | (() => string),
+		private readonly title: string | ((context?: DockTitleContext) => string),
 		/**
 		 * A function hint is given the box's inner width so an overlay whose keys
 		 * matter can shorten its own labels rather than let `elideHint` drop the
@@ -531,8 +531,8 @@ export class ClioOverlayFrame implements Component {
 		return lines;
 	}
 
-	dockTitle(): string {
-		return typeof this.title === "function" ? this.title() : this.title;
+	dockTitle(context?: DockTitleContext): string {
+		return typeof this.title === "function" ? this.title(context) : this.title;
 	}
 
 	/**
@@ -597,7 +597,7 @@ export function showClioOverlayFrame(
 	tui: TUI,
 	child: Component,
 	options: OverlayOptions & {
-		title: string | (() => string);
+		title: string | ((context?: DockTitleContext) => string);
 		footerHint?: string | ((innerWidth: number) => string | undefined);
 		/** Border and title token; omitted leaves the informational frame. */
 		tone?: OverlayTone;
@@ -612,18 +612,30 @@ export function showClioOverlayFrame(
 		markerId: string;
 		/** Formerly covered the viewport; the dock ignores it. */
 		fullscreen?: boolean;
-		/** Keep the composer's own text beneath the body (the permission card). */
+		/** Keep the composer's draft editable beneath the body (the permission card). */
 		keepComposer?: boolean;
+		/** An approval: the editor's rails take the attention tone while it is open. */
+		approval?: boolean;
 		/** Size the dock to the body between the compact floor and half the terminal (option-heavy lists). */
 		adaptiveHeight?: boolean;
 		/** Only unanswered decisions receive the small attention cue. */
 		awaitingInput?: boolean | (() => boolean);
 	},
 ): OverlayHandle {
-	const { title, footerHint, tone, visible, markerId, keepComposer, adaptiveHeight, awaitingInput, ...overlayOptions } =
-		options;
+	const {
+		title,
+		footerHint,
+		tone,
+		visible,
+		markerId,
+		keepComposer,
+		adaptiveHeight,
+		awaitingInput,
+		approval,
+		...overlayOptions
+	} = options;
 	const frame = new ClioOverlayFrame(child, title, footerHint, 0, "left", tone, false, awaitingInput);
-	const entry = dockMount(tui, frame, keepComposer === true, adaptiveHeight === true);
+	const entry = dockMount(tui, frame, keepComposer === true, adaptiveHeight === true, approval === true);
 	// The engine keeps this overlay for focus and input routing only. It paints
 	// nothing: the composer draws the frame inline, in normal flow, so the
 	// transcript keeps its rows and its mouse selection.

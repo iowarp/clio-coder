@@ -200,6 +200,9 @@ export function openFleetRunApprovalOverlay(tui: TUI, options: OpenFleetRunAppro
 		width: fleetRunApprovalOverlayWidth(options.columns),
 		markerId: "fleet-run-approval",
 		title: FLEET_RUN_APPROVAL_OVERLAY_TITLE,
+		// A plan that can dispatch is a decision, so the rails carry the approval
+		// tone. A failed preflight has nothing to approve and stays informational.
+		...(acceptable ? { approval: true, awaitingInput: true, tone: "decisionCue" as const } : {}),
 		footerHint: buildResponsiveHint(
 			[...(acceptable ? [{ key: "Enter", verb: "dispatch" }] : []), { key: "↑↓", verb: "scroll" }],
 			{ key: "Esc", verb: "cancel" },

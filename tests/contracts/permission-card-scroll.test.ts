@@ -23,7 +23,7 @@ const NET_VIEW: ApprovalRequestView = {
 };
 
 const COLUMNS = 60;
-const ROW_BUDGET = 17;
+const ROW_BUDGET = 12;
 const CONTENT = Math.min(PERMISSION_OVERLAY_WIDTH, COLUMNS) - 4;
 
 function plain(lines: ReadonlyArray<string>): string[] {
@@ -65,7 +65,7 @@ test("a card that fits does not scroll and folding the terms resets the window",
 	const body = createPermissionOverlayBody(NET_VIEW);
 	body.setBodyRows(ROW_BUDGET - 2);
 	body.render(CONTENT);
-	strictEqual(body.isCardScrollable(), false, "the folded card fits in 15 rows");
+	strictEqual(body.isCardScrollable(), false, "the folded card fits in 10 rows");
 	strictEqual(body.scrollCard(1), false, "an arrow on a card that fits is not consumed");
 
 	body.toggleTerms();

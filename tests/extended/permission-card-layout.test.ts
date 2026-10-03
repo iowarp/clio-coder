@@ -76,8 +76,7 @@ for (const columns of [80, 120, 160]) {
 		ok(lines.length <= 10, `${lines.length} rows: the folded card stays short`);
 		ok(!joined.includes("Hard-blocked actions remain blocked"), "standing terms are folded");
 		ok(!joined.includes("Consequence:"), "standing terms are folded");
-		match(joined, /Allow runs this one write call/u);
-		match(joined, /Press alt\+t for the full terms/u);
+		match(joined, /Allow runs this one write call\. Deny skips it\. Stop ends the turn\./u);
 		match(joined, /Requested by: main agent through autonomy level \(default\)/u);
 
 		body.toggleTerms();
@@ -96,10 +95,7 @@ test("worker terms disclose approval and denial reuse within the same run", () =
 		origin: { kind: "worker", agentId: "coder", runId: "run-1" },
 	});
 	const folded = plain(body.render(76)).join(" ").replace(/\s+/g, " ");
-	match(
-		folded,
-		/Allow or Deny applies to this call and identical calls under the same permission conditions for this worker run/u,
-	);
+	match(folded, /Allow or Deny holds for identical calls in this worker run/u);
 	doesNotMatch(folded, /this one .*call/u);
 	body.toggleTerms();
 	const terms = plain(body.render(76)).join(" ").replace(/\s+/g, " ");

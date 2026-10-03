@@ -13,10 +13,16 @@ import type { TUI } from "../engine/tui.js";
  * its scrollback, and stays selectable.
  */
 
+/** What the composer knows and a title may use: the columns the rail has and who is asking. */
+export interface DockTitleContext {
+	room: number;
+	actor: string;
+}
+
 export interface DockFrame {
 	/** Body rows fitted to `bodyRows`, each exactly `contentWidth` wide. */
 	renderDockBody(contentWidth: number, bodyRows: number): string[];
-	dockTitle(): string;
+	dockTitle(context?: DockTitleContext): string;
 	dockHint(width: number): string | undefined;
 	dockTone(): import("./theme/index.js").ClioToken | undefined;
 	/** A decision needs the operator's answer, rather than an ordinary open menu. */
@@ -29,9 +35,9 @@ export interface DockEntry {
 	hidden: boolean;
 	order: number;
 	/**
-	 * Draw the composer's own text beneath the body. The permission card keeps
-	 * the composer because a steer typed while a call is parked is what the
-	 * CONFIRM rail exists for.
+	 * Keep the composer's draft editable inside the same rails, beneath the body.
+	 * The permission card does, because a steer typed while a call is parked is
+	 * what the CONFIRM rail exists for.
 	 */
 	keepComposer: boolean;
 	/**
@@ -40,6 +46,8 @@ export interface DockEntry {
 	 * other menu changes height.
 	 */
 	adaptive?: boolean;
+	/** An approval owns the editor: the rails take the attention tone until it resolves. */
+	approval?: boolean;
 }
 
 /** Every open menu shares this body height while the terminal has room. */
@@ -62,13 +70,20 @@ function entriesFor(tui: object): DockEntry[] {
 	return entries;
 }
 
-export function dockMount(tui: object, frame: DockFrame, keepComposer: boolean, adaptive = false): DockEntry {
+export function dockMount(
+	tui: object,
+	frame: DockFrame,
+	keepComposer: boolean,
+	adaptive = false,
+	approval = false,
+): DockEntry {
 	const entry: DockEntry = {
 		frame,
 		hidden: false,
 		order: ++orderCounter,
 		keepComposer,
 		...(adaptive ? { adaptive } : {}),
+		...(approval ? { approval } : {}),
 	};
 	entriesFor(tui).push(entry);
 	return entry;

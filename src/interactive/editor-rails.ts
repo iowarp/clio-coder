@@ -5,6 +5,8 @@ export interface EditorRailState {
 	yolo: boolean;
 	animate: boolean;
 	now: number;
+	/** The rail's own ink while a decision owns the editor; the composer rail otherwise. */
+	tone?: ClioToken;
 }
 
 /** Presentation only. Reuses the existing render ticker; never owns input or timers. */
@@ -15,7 +17,7 @@ export function renderEditorRail(
 	state: EditorRailState,
 ): string {
 	const attention = state.phase === "attention";
-	const base: ClioToken = "composerRail";
+	const base: ClioToken = state.tone ?? "composerRail";
 	const paint = (columns: number, token: ClioToken): string => theme.style(token, "━".repeat(columns), { bold: true });
 	if (!attention || !state.animate) {
 		return rule(theme, width, {

@@ -239,14 +239,7 @@ class PermissionOverlayBody implements PermissionOverlayBodyHandle {
 		}
 		if (this.preview === null) {
 			const { facts, rest } = permissionCardSections(this.view, width, this.terms, this.readAdvisory());
-			const tail =
-				this.invocation && !this.inspect
-					? wrapTextWithAnsi(
-							clioTheme().fg("annotation", `${MUTATION_PREVIEW_KEY} · inspect the complete invocation before deciding`),
-							width,
-						)
-					: [];
-			return this.windowCard(facts, rest, tail, width);
+			return this.windowCard(facts, rest, width);
 		}
 		const rendered = permissionInspectionLines(this.view, this.preview, width, this.scroll);
 		this.lastLineCount = rendered.wrappedLineCount;
@@ -260,9 +253,9 @@ class PermissionOverlayBody implements PermissionOverlayBodyHandle {
 	 * (BT-005). With no known budget, or no room for a window, the card renders
 	 * whole and the frame's cut still marks what is missing.
 	 */
-	private windowCard(facts: string[], rest: string[], tail: string[], width: number): string[] {
-		const whole = [...facts, ...rest, ...tail];
-		const room = this.bodyRows - facts.length - tail.length - 1;
+	private windowCard(facts: string[], rest: string[], width: number): string[] {
+		const whole = [...facts, ...rest];
+		const room = this.bodyRows - facts.length - 1;
 		if (this.bodyRows <= 0 || whole.length <= this.bodyRows || room < 1) {
 			this.cardMaxScroll = 0;
 			this.cardScroll = 0;
@@ -276,7 +269,7 @@ class PermissionOverlayBody implements PermissionOverlayBodyHandle {
 			"annotation",
 			`${this.cardScroll + 1}–${end} of ${rest.length} rows · ↑↓ scroll${back}`,
 		);
-		return [...facts, ...rest.slice(this.cardScroll, end), fitRow(position, width), ...tail];
+		return [...facts, ...rest.slice(this.cardScroll, end), fitRow(position, width)];
 	}
 
 	/**
@@ -351,8 +344,22 @@ function permissionDecisionPresentation(view: ApprovalRequestView): DecisionPres
 	);
 }
 
-export function permissionOverlayTitle(view: ApprovalRequestView): string {
-	return permissionDecisionPresentation(view).title;
+/**
+ * The rail title for one decision: who needs approval, what kind, and its place
+ * in the queue. The kind goes first when the rail is narrow, then the model's
+ * name, so the count and the words "needs approval" survive at 60 columns.
+ */
+export function permissionRailTitle(
+	view: ApprovalRequestView,
+	context: { actor: string; room: number; queueDepth?: number },
+): string {
+	const presentation = permissionDecisionPresentation(view);
+	const who =
+		view.origin.kind === "worker" ? `Worker ${view.origin.agentId}` : context.actor.length > 0 ? context.actor : "Clio";
+	const depth = context.queueDepth ?? view.queueDepth ?? 0;
+	const count = depth > 1 ? ` · 1 of ${depth}` : "";
+	const candidates = [`${who} needs approval · ${presentation.kind}${count}`, `${who} needs approval${count}`];
+	return candidates.find((candidate) => visibleWidth(candidate) <= context.room) ?? `Needs approval${count}`;
 }
 
 export function permissionOverlayTone(_view: ApprovalRequestView): ClioToken {
@@ -436,16 +443,17 @@ function permissionInspectionLines(
 }
 
 /**
- * The one-row statement of what the three keys do, in the presentation's own
- * words, so the folded card still says what allow, deny, and stop mean.
+ * The one-row statement of what the three keys do, so the folded card still
+ * says what allow, deny, and stop mean. The full terms are behind the terms
+ * key, which the rail names.
  */
 function termsSummary(presentation: DecisionPresentation, actionClass: string): string {
 	const stop = presentation.requiredActions.find((action) => action.id === "stop");
 	const stopWords = stop?.consequence.includes("main-agent turn") ? "ends the main-agent turn" : "ends the turn";
 	if (presentation.tier === "worker") {
-		return `Allow or Deny applies to this call and identical calls under the same permission conditions for this worker run. The autonomy level stays unchanged. Stop ${stopWords}. Press ${PERMISSION_TERMS_KEY} for the full terms.`;
+		return `Allow or Deny holds for identical calls in this worker run. Stop ${stopWords}.`;
 	}
-	return `Allow runs this one ${actionClass} call and leaves the autonomy level alone. Deny skips it. Stop ${stopWords}. Press ${PERMISSION_TERMS_KEY} for the full terms.`;
+	return `Allow runs this one ${actionClass} call. Deny skips it. Stop ${stopWords}.`;
 }
 
 /**
@@ -502,18 +510,17 @@ function permissionCardSections(
 		// that no part of the harness acted on. The sentence says so itself; the
 		// styling keeps it from reading as a verdict at a glance.
 		...(advisory.length > 0 ? wrapSentence(clioTheme().fg("annotation", advisory), content) : []),
-		...(view.queueDepth !== undefined && view.queueDepth > 1 ? [`1 of ${view.queueDepth} parked`] : []),
 	];
-	const rest = [
-		...(view.artifact !== undefined
+	// The queue count rides the rail title, and the terms follow the facts without a spacer row.
+	const rest =
+		view.artifact !== undefined
 			? [
 					"",
 					"Resolved dispatch plan:",
 					...view.artifact.text.split(/\r?\n/u).flatMap((line) => wrapArtifactLine(line, content)),
+					"",
 				]
-			: []),
-		"",
-	];
+			: [];
 	if (!terms) {
 		rest.push(...wrapSentence(termsSummary(presentation, view.actionClass), content));
 		return { facts, rest };
