@@ -38,7 +38,7 @@ export { DATA_TOOL_NAME, dataToolSurface, prepareDataArguments } from "./data-su
 
 /**
  * The `data` capability: structured-data inspection, selection, and
- * validation over CSV/TSV, JSON, and JSON Lines through the streaming readers
+ * validation over CSV/TSV, JSON, JSON Lines, and SQLite through the streaming readers
  * in src/tools/data. This module owns only the tool contract: argument
  * normalization, path resolution against the workspace, the observation
  * envelope for large results, and the mapping of a typed refusal to a tool
@@ -145,6 +145,7 @@ export function createDataTool(deps: DataToolDeps = {}): ToolSpec {
 						...(format !== undefined ? { format } : {}),
 						...(delimiter !== undefined ? { delimiter } : {}),
 						...(header !== undefined ? { header } : {}),
+						...(typeof args.table === "string" ? { table: args.table } : {}),
 						...(typeof args.sample_rows === "number" ? { sampleRows: args.sample_rows } : {}),
 						...(args.max_rows === null || typeof args.max_rows === "number" ? { maxRows: args.max_rows } : {}),
 						signal,
@@ -159,6 +160,8 @@ export function createDataTool(deps: DataToolDeps = {}): ToolSpec {
 						...(typeof args.limit === "number" ? { limit: args.limit } : {}),
 						...(Array.isArray(args.columns) ? { columns: args.columns as Array<string | number> } : {}),
 						...(typeof args.pointer === "string" ? { pointer: args.pointer } : {}),
+						...(typeof args.sql === "string" ? { sql: args.sql } : {}),
+						...(typeof args.table === "string" ? { table: args.table } : {}),
 						signal,
 					};
 					result = await selectData(target, selectOptions);

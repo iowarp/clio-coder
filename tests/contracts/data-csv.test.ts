@@ -539,7 +539,7 @@ describe("contracts/data-csv", () => {
 			const unsupported = await inspectData(file("notes.txt", "just prose here\nno delimiter\n"));
 			ok(isDataRefusal(unsupported));
 			strictEqual(unsupported.reason, "unsupported-format");
-			deepStrictEqual(unsupported.supported, ["csv", "tsv", "json", "jsonl"]);
+			deepStrictEqual(unsupported.supported, ["csv", "tsv", "json", "jsonl", "sqlite"]);
 			match(unsupported.message, /run_script/u);
 			const explicitBad = await inspectData(join(dir, "notes.txt"), { format: "parquet" });
 			ok(isDataRefusal(explicitBad));

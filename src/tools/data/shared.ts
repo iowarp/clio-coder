@@ -2,7 +2,7 @@ import { createReadStream, statSync } from "node:fs";
 
 /**
  * Shared substrate for the structured-data readers (csv.ts, json.ts,
- * jsonl.ts): the fatal UTF-8 chunk decoder, the text stream with its byte
+ * jsonl.ts, sqlite.ts): the fatal UTF-8 chunk decoder, the text stream with its byte
  * accounting, the typed refusals every reader returns instead of a guess, and
  * the cell classification the CSV and JSONL inspectors both use.
  *
@@ -11,7 +11,7 @@ import { createReadStream, statSync } from "node:fs";
  * scan can never pass for the complete dataset.
  */
 
-export const DATA_FORMATS = ["csv", "tsv", "json", "jsonl"] as const;
+export const DATA_FORMATS = ["csv", "tsv", "json", "jsonl", "sqlite"] as const;
 export type DataFormat = (typeof DATA_FORMATS)[number];
 
 export function isDataFormat(value: unknown): value is DataFormat {
@@ -62,7 +62,10 @@ export type DataRefusalReason =
 	| "invalid-argument"
 	| "pointer-not-found"
 	| "selection-too-large"
-	| "unknown-column";
+	| "unknown-column"
+	| "unknown-table"
+	| "statement-not-allowed"
+	| "timed-out";
 
 /**
  * A typed refusal. The readers return one of these instead of interpreting

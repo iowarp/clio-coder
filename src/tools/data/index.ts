@@ -34,10 +34,12 @@ import {
 	refusalFromError,
 	statDataFile,
 } from "./shared.js";
+import type { SqliteInspectResult, SqliteSelectResult } from "./sqlite.js";
 
 /**
  * Public entry points for structured-data inspection, selection, and
- * validation over CSV/TSV, JSON, and JSON Lines files. Every function streams,
+ * validation over CSV/TSV, JSON, and JSON Lines files, plus read-only
+ * inspection and selection over SQLite databases. Every function streams,
  * returns a JSON-serializable result whose `view` says whether it is exact or
  * sampled, and refuses with a typed reason instead of guessing at bytes it
  * cannot read as the declared format.
@@ -83,6 +85,7 @@ export type {
 	PrecisionKind,
 } from "./shared.js";
 export { DATA_FORMATS, isDataFormat, isDataRefusal, SENTINEL_TOKENS } from "./shared.js";
+export type { SqliteColumn, SqliteInspectResult, SqliteObject, SqliteSelectResult } from "./sqlite.js";
 
 const EXTENSION_FORMATS: Readonly<Record<string, DataFormat>> = {
 	".csv": "csv",
@@ -91,7 +94,14 @@ const EXTENSION_FORMATS: Readonly<Record<string, DataFormat>> = {
 	".json": "json",
 	".jsonl": "jsonl",
 	".ndjson": "jsonl",
+	".sqlite": "sqlite",
+	".sqlite3": "sqlite",
+	".db": "sqlite",
+	".db3": "sqlite",
 };
+
+// The SQLite header string, kept here so detection never loads the reader.
+const SQLITE_MAGIC = "SQLite format 3\0";
 
 const SNIFF_BYTES = 4096;
 
@@ -121,6 +131,7 @@ export async function detectDataFormat(path: string, explicit?: string | null): 
 	} catch {
 		return null;
 	}
+	if (text.startsWith(SQLITE_MAGIC)) return "sqlite";
 	if (text.startsWith("﻿")) text = text.slice(1);
 	const trimmed = text.trimStart();
 	if (trimmed.length === 0) return null;
@@ -156,14 +167,16 @@ export interface InspectDataOptions {
 	delimiter?: string;
 	/** CSV/TSV header handling: "auto" (default), true, or false. */
 	header?: CsvHeaderOption;
-	/** Rows (CSV, JSONL) or top-level elements/members (JSON) kept as the sample; default 10, max 1000. */
+	/** SQLite: the table to count and sample. */
+	table?: string;
+	/** Rows (CSV, JSONL, SQLite table) or top-level elements/members (JSON) kept as the sample; default 10, max 1000. */
 	sampleRows?: number;
 	/** Rows scanned before the view becomes sampled; default 100000, null for unbounded. */
 	maxRows?: number | null;
 	signal?: AbortSignal | undefined;
 }
 
-export type InspectDataResult = CsvInspectResult | JsonInspectResult | JsonlInspectResult;
+export type InspectDataResult = CsvInspectResult | JsonInspectResult | JsonlInspectResult | SqliteInspectResult;
 
 export async function inspectData(
 	path: string,
@@ -192,6 +205,11 @@ export async function inspectData(
 				return await inspectJson(path, shared);
 			case "jsonl":
 				return await inspectJsonl(path, shared);
+			case "sqlite":
+				return await (await import("./sqlite.js")).inspectSqlite(path, stat.size, {
+					...shared,
+					...(options.table !== undefined ? { table: options.table } : {}),
+				});
 		}
 	} catch (error) {
 		return refusalFromError(error, path, options.signal);
@@ -210,10 +228,14 @@ export interface SelectDataOptions {
 	columns?: ReadonlyArray<string | number>;
 	/** JSON: RFC 6901 pointer to the value to return; "" is the whole document. */
 	pointer?: string;
+	/** SQLite: one read-only SELECT, WITH, VALUES or EXPLAIN statement. */
+	sql?: string;
+	/** SQLite: a table to select from instead of sql. */
+	table?: string;
 	signal?: AbortSignal | undefined;
 }
 
-export type SelectDataResult = CsvSelectResult | JsonSelectResult | JsonlSelectResult;
+export type SelectDataResult = CsvSelectResult | JsonSelectResult | JsonlSelectResult | SqliteSelectResult;
 
 export async function selectData(
 	path: string,
@@ -258,6 +280,18 @@ export async function selectData(
 					);
 				}
 				return await selectJsonl(path, window);
+			case "sqlite":
+				if (options.pointer !== undefined) {
+					return refusal("invalid-argument", "pointer applies to a JSON document; SQLite selects with sql or table", {
+						path,
+					});
+				}
+				return await (await import("./sqlite.js")).selectSqlite(path, stat.size, {
+					...window,
+					...(options.sql !== undefined ? { sql: options.sql } : {}),
+					...(options.table !== undefined ? { table: options.table } : {}),
+					...(options.columns !== undefined ? { columns: options.columns } : {}),
+				});
 		}
 	} catch (error) {
 		return refusalFromError(error, path, options.signal);
@@ -301,6 +335,8 @@ export async function validateData(
 				return await validateJson(path, shared);
 			case "jsonl":
 				return await validateJsonl(path, shared);
+			case "sqlite":
+				return refusal("invalid-argument", "validate covers text formats; inspect a SQLite database instead", { path });
 		}
 	} catch (error) {
 		return refusalFromError(error, path, options.signal);
