@@ -205,6 +205,17 @@ export function applySessionDelta(current: SessionSnapshot, event: SessionDelta)
 				});
 			break;
 		}
+		case "turn.admitted": {
+			const { turnId, startedAt } = event.payload;
+			return {
+				...state,
+				turns: state.turns.map((turn) => {
+					if (turn.id !== turnId) return turn;
+					const { queued: _queued, ...admitted } = turn;
+					return { ...admitted, startedAt };
+				}),
+			};
+		}
 		case "turn.text":
 		case "turn.thought":
 		case "turn.user": {
@@ -259,9 +270,11 @@ export function applySessionDelta(current: SessionSnapshot, event: SessionDelta)
 			const status = stopReason === "cancelled" ? "cancelled" : problem ? "failed" : "succeeded";
 			state = {
 				...state,
-				turns: state.turns.map((turn) =>
-					turn.id === turnId ? { ...turn, status, stopReason, usage, problem, finishedAt } : turn,
-				),
+				turns: state.turns.map((turn) => {
+					if (turn.id !== turnId) return turn;
+					const { queued: _queued, ...settled } = turn;
+					return { ...settled, status, stopReason, usage, problem, finishedAt };
+				}),
 				timeline: state.timeline.map((item) =>
 					item.turnId === turnId && (item.status === "in_progress" || item.status === "pending")
 						? { ...item, status: status === "succeeded" ? "completed" : status }

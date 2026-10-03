@@ -24,6 +24,7 @@ import { isSettingsPath, sessionIdFromPath, taskRows } from "./shell/shell-model
 import { TaskSidebar } from "./shell/TaskSidebar.js";
 import { rememberedWorkspace, rememberWorkspace, useTaskActions } from "./shell/tasks.js";
 import { useApplyTheme } from "./shell/theme.js";
+import { launchedPath, openAppWindow } from "./shell/windows.js";
 import type { WizardExit } from "./wizard/Wizard.js";
 import type { WizardMode } from "./wizard/wizard-model.js";
 import "./shell/shell.css";
@@ -192,8 +193,23 @@ export function App({ client }: { client: Client }) {
 	}, [activeWorkspaceId, actions.newTask]);
 	const openWorkspace = useCallback(() => setWorkspaceOpen(true), []);
 	const openHelp = useCallback(() => setHelpOpen(true), []);
+	const openWindow = useCallback(
+		() => openAppWindow(sessionId ? `/sessions/${sessionId}` : "/", client.token),
+		[sessionId, client.token],
+	);
+	// Launching the installed app again focuses this window (`launch_handler` in the manifest) and
+	// hands the launch here, so a launch that named a page still arrives at it.
+	useEffect(() => {
+		const queue = (window as { launchQueue?: { setConsumer(consumer: (launch: { targetURL?: string }) => void): void } })
+			.launchQueue;
+		queue?.setConsumer((launch) => {
+			const path = launchedPath(launch.targetURL, window.location.origin, window.location.pathname);
+			if (path !== null) void navigate(path);
+		});
+	}, [navigate]);
 
 	useShortcut("palette", () => setPaletteOpen(true));
+	useShortcut("newWindow", openWindow);
 	useShortcut("help", openHelp);
 	useShortcut("sidebar", revealSidebar);
 	useShortcut("newTask", startTask);
@@ -262,6 +278,7 @@ export function App({ client }: { client: Client }) {
 					newTask: startTask,
 					openWorkspace,
 					openTask,
+					openWindow,
 					cancelTurn: (turnId) => {
 						if (sessionId === null) return;
 						void client
@@ -295,6 +312,7 @@ export function App({ client }: { client: Client }) {
 			openHelp,
 			paletteTasks,
 			openTask,
+			openWindow,
 		],
 	);
 	const shell = useMemo<ShellApi>(

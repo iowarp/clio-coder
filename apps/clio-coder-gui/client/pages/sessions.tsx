@@ -22,6 +22,7 @@ import { PaneToggles, SessionPane } from "../chat/SessionPane.js";
 import { ConversationBanner, TaskSkeleton, TaskUnavailable } from "../chat/SessionStates.js";
 import { TelemetryChips } from "../chat/TelemetryChips.js";
 import { type ChatTurn, groupTurns, turnStatuses } from "../chat/turns.js";
+import { useShown } from "../chat/use-shown.js";
 import { Icon } from "../design/icons.js";
 import { StatusMark } from "../design/status.js";
 import { setPageTitle } from "../interaction/announcer.js";
@@ -34,6 +35,7 @@ import { Menu, MenuItem } from "../shell/Menu.js";
 import { taskTitle } from "../shell/shell-model.js";
 import { TopBar } from "../shell/TopBar.js";
 import { useRenameTask } from "../shell/tasks.js";
+import { openAppWindow } from "../shell/windows.js";
 import "../chat/chat-turn.css";
 import "../chat/conversation.css";
 /** The old projects page. Choosing and opening projects now lives in the rail and the Open workspace dialog. */
@@ -172,6 +174,7 @@ function SessionView({ client, id }: { client: Client; id: string }) {
 	const scroll = useRef<HTMLDivElement | null>(null);
 	const previousTurns = useRef<readonly ChatTurn[]>([]);
 	const snapshot = session.data;
+	const shown = useShown(client, id, snapshot?.state);
 	// The tab names the task, so several open tabs can be told apart.
 	const pageTitle = snapshot ? taskTitle(snapshot) : null;
 	useEffect(() => {
@@ -238,21 +241,25 @@ function SessionView({ client, id }: { client: Client; id: string }) {
 	const chip: { tone: "working" | "approval" | "failed" | "quiet"; label: string } | null = pending
 		? { tone: "approval", label: "Needs your approval" }
 		: running && snapshot.state === "open"
-			? {
-					tone: "working",
-					label: [liveWorkers > 0 ? `Waiting on ${workerCount(liveWorkers)}` : "Working", elapsed ?? null]
-						.filter(Boolean)
-						.join(" · "),
-				}
+			? turn?.queued
+				? { tone: "quiet", label: "Waiting for a slot" }
+				: {
+						tone: "working",
+						label: [liveWorkers > 0 ? `Waiting on ${workerCount(liveWorkers)}` : "Working", elapsed ?? null]
+							.filter(Boolean)
+							.join(" · "),
+					}
 			: snapshot.state === "starting"
 				? { tone: "working", label: "Starting" }
-				: snapshot.state === "closed"
-					? { tone: "quiet", label: "Closed" }
-					: snapshot.state === "unknown" || snapshot.state === "failed"
-						? { tone: "failed", label: "Unavailable" }
-						: turn?.status === "failed"
-							? { tone: "failed", label: "Last turn failed" }
-							: null;
+				: snapshot.state === "parked"
+					? { tone: "working", label: "Resuming" }
+					: snapshot.state === "closed"
+						? { tone: "quiet", label: "Closed" }
+						: snapshot.state === "unknown" || snapshot.state === "failed"
+							? { tone: "failed", label: "Unavailable" }
+							: turn?.status === "failed"
+								? { tone: "failed", label: "Last turn failed" }
+								: null;
 	return (
 		<PaneContext.Provider value={paneActions}>
 			<section className="conversation" data-pane={paneOpen ? "open" : "closed"}>
@@ -274,6 +281,9 @@ function SessionView({ client, id }: { client: Client; id: string }) {
 						<Menu label="Task actions">
 							<MenuItem icon="pencil" onClick={() => setRenaming(true)}>
 								Rename task
+							</MenuItem>
+							<MenuItem icon="external" onClick={() => openAppWindow(`/sessions/${snapshot.id}`, client.token)}>
+								Open in new window
 							</MenuItem>
 							<MenuItem icon="sliders" onClick={() => void navigate(`/settings/advanced?workspace=${snapshot.workspaceId}`)}>
 								Project settings
@@ -353,6 +363,19 @@ function SessionView({ client, id }: { client: Client; id: string }) {
 								action={<Link to={`/workspaces/${snapshot.workspaceId}/sessions`}>Reopen from the task list</Link>}
 							>
 								The recorded conversation is still available below.
+							</ConversationBanner>
+						) : null}
+						{shown.failure ? (
+							<ConversationBanner
+								tone="warn"
+								title="This task could not be resumed."
+								action={
+									<button type="button" onClick={shown.retry}>
+										Try again
+									</button>
+								}
+							>
+								{shown.failure}
 							</ConversationBanner>
 						) : null}
 						<ApprovalBanner client={client} session={snapshot} />

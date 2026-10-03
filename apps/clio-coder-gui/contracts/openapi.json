@@ -19258,6 +19258,10 @@
 												},
 												{
 													"type": "string",
+													"const": "parked"
+												},
+												{
+													"type": "string",
 													"const": "unknown"
 												},
 												{
@@ -19638,6 +19642,10 @@
 														"type": "integer",
 														"minimum": 1,
 														"maximum": 4
+													},
+													"queued": {
+														"type": "boolean",
+														"const": true
 													}
 												},
 												"additionalProperties": false
@@ -22967,6 +22975,10 @@
 												},
 												{
 													"type": "string",
+													"const": "parked"
+												},
+												{
+													"type": "string",
 													"const": "unknown"
 												},
 												{
@@ -23347,6 +23359,10 @@
 														"type": "integer",
 														"minimum": 1,
 														"maximum": 4
+													},
+													"queued": {
+														"type": "boolean",
+														"const": true
 													}
 												},
 												"additionalProperties": false
@@ -25416,6 +25432,10 @@
 												},
 												{
 													"type": "string",
+													"const": "parked"
+												},
+												{
+													"type": "string",
 													"const": "unknown"
 												},
 												{
@@ -25796,6 +25816,10 @@
 														"type": "integer",
 														"minimum": 1,
 														"maximum": 4
+													},
+													"queued": {
+														"type": "boolean",
+														"const": true
 													}
 												},
 												"additionalProperties": false
@@ -27829,6 +27853,10 @@
 													},
 													{
 														"type": "string",
+														"const": "parked"
+													},
+													{
+														"type": "string",
 														"const": "unknown"
 													},
 													{
@@ -28209,6 +28237,10 @@
 															"type": "integer",
 															"minimum": 1,
 															"maximum": 4
+														},
+														"queued": {
+															"type": "boolean",
+															"const": true
 														}
 													},
 													"additionalProperties": false
@@ -30489,6 +30521,10 @@
 												},
 												{
 													"type": "string",
+													"const": "parked"
+												},
+												{
+													"type": "string",
 													"const": "unknown"
 												},
 												{
@@ -30869,6 +30905,10 @@
 														"type": "integer",
 														"minimum": 1,
 														"maximum": 4
+													},
+													"queued": {
+														"type": "boolean",
+														"const": true
 													}
 												},
 												"additionalProperties": false
@@ -32757,6 +32797,147 @@
 											"maxItems": 32
 										}
 									},
+									"additionalProperties": false
+								}
+							}
+						},
+						"headers": {
+							"X-Clio-Epoch": {
+								"schema": {
+									"type": "string"
+								},
+								"description": "Server epoch"
+							},
+							"X-Clio-Seq": {
+								"schema": {
+									"type": "integer"
+								},
+								"description": "Sequence before assembling the snapshot"
+							}
+						}
+					},
+					"default": {
+						"description": "Problem",
+						"content": {
+							"application/problem+json": {
+								"schema": {
+									"type": "object",
+									"required": ["type", "title", "status", "detail", "code", "instance"],
+									"properties": {
+										"type": {
+											"type": "string"
+										},
+										"title": {
+											"type": "string"
+										},
+										"status": {
+											"type": "integer"
+										},
+										"detail": {
+											"type": "string"
+										},
+										"code": {
+											"anyOf": [
+												{
+													"type": "string",
+													"const": "validation"
+												},
+												{
+													"type": "string",
+													"const": "unauthorized"
+												},
+												{
+													"type": "string",
+													"const": "not_found"
+												},
+												{
+													"type": "string",
+													"const": "conflict"
+												},
+												{
+													"type": "string",
+													"const": "unsupported"
+												},
+												{
+													"type": "string",
+													"const": "unavailable"
+												},
+												{
+													"type": "string",
+													"const": "upstream_acp"
+												},
+												{
+													"type": "string",
+													"const": "operation_failed"
+												},
+												{
+													"type": "string",
+													"const": "internal"
+												}
+											]
+										},
+										"instance": {
+											"type": "string"
+										}
+									},
+									"additionalProperties": false
+								}
+							}
+						}
+					}
+				}
+			}
+		},
+		"/api/sessions/{id}/view": {
+			"post": {
+				"operationId": "viewSession",
+				"summary": "Report that a window shows the session, which keeps its child and resumes a parked one",
+				"security": [
+					{
+						"bearer": []
+					}
+				],
+				"parameters": [
+					{
+						"name": "id",
+						"in": "path",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+						}
+					},
+					{
+						"name": "Idempotency-Key",
+						"in": "header",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"minLength": 1,
+							"maxLength": 128
+						}
+					}
+				],
+				"requestBody": {
+					"required": true,
+					"content": {
+						"application/json": {
+							"schema": {
+								"type": "object",
+								"properties": {},
+								"additionalProperties": false
+							}
+						}
+					}
+				},
+				"responses": {
+					"200": {
+						"description": "Success",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {},
 									"additionalProperties": false
 								}
 							}
@@ -39052,9 +39233,60 @@
 												"type": "integer",
 												"minimum": 1,
 												"maximum": 4
+											},
+											"queued": {
+												"type": "boolean",
+												"const": true
 											}
 										},
 										"additionalProperties": false
+									}
+								},
+								"additionalProperties": false
+							}
+						}
+					},
+					{
+						"type": "object",
+						"required": ["v", "epoch", "seq", "at", "type", "payload"],
+						"properties": {
+							"v": {
+								"type": "number",
+								"const": 1
+							},
+							"epoch": {
+								"type": "string",
+								"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+							},
+							"seq": {
+								"type": "integer",
+								"minimum": 0
+							},
+							"at": {
+								"type": "string"
+							},
+							"type": {
+								"type": "string",
+								"const": "turn.admitted"
+							},
+							"payload": {
+								"type": "object",
+								"required": ["resource", "revision", "turnId", "startedAt"],
+								"properties": {
+									"resource": {
+										"type": "string",
+										"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+									},
+									"revision": {
+										"type": "integer",
+										"minimum": 1
+									},
+									"turnId": {
+										"type": "string",
+										"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+									},
+									"startedAt": {
+										"type": "string"
 									}
 								},
 								"additionalProperties": false
@@ -47463,6 +47695,10 @@
 											{
 												"type": "string",
 												"const": "open"
+											},
+											{
+												"type": "string",
+												"const": "parked"
 											},
 											{
 												"type": "string",

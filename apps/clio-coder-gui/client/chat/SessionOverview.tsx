@@ -151,13 +151,15 @@ export function SessionOverview({
 	const working = open && overview.running;
 	const state = overview.running
 		? "Working"
-		: last?.status === "failed"
-			? "Failed"
-			: last?.status === "cancelled"
-				? "Stopped"
-				: last
-					? "Complete"
-					: "Not started";
+		: last?.queued
+			? "Waiting for a slot"
+			: last?.status === "failed"
+				? "Failed"
+				: last?.status === "cancelled"
+					? "Stopped"
+					: last
+						? "Complete"
+						: "Not started";
 	const done = plan?.rows.filter((row) => row.tone === "success").length ?? 0;
 	const openTasks = view?.tasks.filter((task) => task.actions.length > 0).length ?? 0;
 	const decisions = view?.activeDecisions.length ?? 0;

@@ -141,6 +141,14 @@ export const KEYBINDINGS = {
 		action: "Start a new task in the current project",
 		where: "Anywhere except inside a dialog",
 	},
+	newWindow: {
+		id: "newWindow",
+		key: "n",
+		modifiers: ["primary", "shift"],
+		scope: "global",
+		action: "Open the current task in a second window",
+		where: "In the installed app, except inside a dialog. A browser tab keeps this chord for itself",
+	},
 	openWorkspace: {
 		id: "openWorkspace",
 		key: "o",

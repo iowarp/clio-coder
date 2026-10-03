@@ -152,13 +152,21 @@ export const Turn = Type.Object(
 		images: Type.Optional(Type.Integer({ minimum: 1, maximum: 4 })),
 		/** How many text files this app sent with the request; a replayed turn does not know. */
 		files: Type.Optional(Type.Integer({ minimum: 1, maximum: 4 })),
+		/** The request is recorded and waiting for a turn slot; nothing has reached the model yet. */
+		queued: Type.Optional(Type.Literal(true)),
 	},
 	closed,
 );
 export type Turn = Static<typeof Turn>;
+/**
+ * `parked` is an open task whose agent process was stopped while nothing was
+ * running and no window showed it. The snapshot is kept and the process comes
+ * back when a window shows the task again.
+ */
 export const SessionState = Type.Union([
 	Type.Literal("starting"),
 	Type.Literal("open"),
+	Type.Literal("parked"),
 	Type.Literal("unknown"),
 	Type.Literal("closed"),
 	Type.Literal("failed"),
@@ -196,6 +204,8 @@ const healthPayload = Type.Object({ ...base, item: HealthItem }, closed);
 export const SessionDeltas = {
 	"session.telemetry": Type.Object({ ...base, telemetry: SessionTelemetry }, closed),
 	"turn.started": Type.Object({ ...base, turn: Turn }, closed),
+	/** A queued turn got its slot and its request went to the agent. */
+	"turn.admitted": Type.Object({ ...base, turnId: Id, startedAt: string }, closed),
 	"turn.text": textPayload,
 	"turn.thought": textPayload,
 	"turn.user": textPayload,

@@ -10,6 +10,7 @@ import type { StatusTone } from "../design/status.js";
 import type { ChatTurn } from "./turns.js";
 
 export type LiveState =
+	| "queued"
 	| "starting"
 	| "thinking"
 	| "writing"
@@ -31,6 +32,7 @@ export interface LiveStatus {
  * their entries remain as the plain-text form of the same state.
  */
 export const LIVE_GLYPHS: Readonly<Record<LiveState, string>> = {
+	queued: "◌",
 	starting: "◌",
 	thinking: "◔",
 	writing: "◑",
@@ -56,6 +58,7 @@ export const isWorking = (state: LiveState): boolean => WORKING_STATES.has(state
  * survives a greyscale screenshot.
  */
 export const LIVE_TONES: Readonly<Record<LiveState, StatusTone>> = {
+	queued: "neutral",
 	starting: "unverified",
 	thinking: "running",
 	writing: "running",
@@ -93,6 +96,8 @@ export function liveStatus(
 	}
 	if (turn.origin === "replay") return { state: "done", label: "Earlier record", detail: null };
 	if (stopping) return { state: "stopping", label: "Stopping", detail: null };
+	// The server runs a bounded number of turns at once; this one is recorded and has not started.
+	if (row?.queued) return { state: "queued", label: "Waiting for a slot", detail: null };
 	if (pending !== null && pending.turnId === turn.turnId)
 		return { state: "waiting", label: "Waiting for your approval", detail: pending.title };
 	// A dispatched worker can run for minutes while the orchestrator's own timeline stays silent.

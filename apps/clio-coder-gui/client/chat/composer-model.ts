@@ -338,6 +338,7 @@ export interface ComposerSituation {
 
 const CLOSED_SESSION_REASON: Readonly<Record<string, string>> = {
 	starting: "This session is still starting. It will take a prompt once the agent answers.",
+	parked: "Clio Coder is resuming this task. Send again in a moment.",
 	unknown: "This session is not reachable right now, so nothing can be sent into it.",
 	closed: "This session is closed. Open a new one to keep working.",
 	failed: "This session failed. Open a new one to keep working.",

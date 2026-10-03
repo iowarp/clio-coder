@@ -618,9 +618,10 @@ export const Composer = memo(function Composer({
 					aria-describedby={hintId}
 					value={draft.text}
 					rows={1}
-					disabled={sessionState !== "open"}
+					// A parked task is on its way back, so its draft can be written while it resumes.
+					disabled={sessionState !== "open" && sessionState !== "parked"}
 					placeholder={
-						sessionState !== "open"
+						sessionState !== "open" && sessionState !== "parked"
 							? "This conversation is not open"
 							: running
 								? steering.steer || steering.queue

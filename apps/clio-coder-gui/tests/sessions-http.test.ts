@@ -141,16 +141,15 @@ test("permission rejection never executes and remote session admission codes rem
 	}
 });
 
-test("concurrent admission allows four ACP children and refuses the fifth without starting it", {
+test("open sessions are not limited: a fifth and a sixth ACP child start beside the first four", {
 	timeout: 15000,
 }, async (t) => {
 	const h = await harness();
 	t.after(h.close);
 	const workspace = await h.workspaces.open(h.home.path);
-	const replies = await Promise.all(Array.from({ length: 5 }, () => h.post(`/api/workspaces/${workspace.id}/sessions`)));
-	assert.equal(replies.filter((response) => response.status === 200).length, 4);
-	assert.equal(replies.filter((response) => response.status === 409).length, 1);
-	assert.equal((await h.supervisor.children.rows()).length, 4);
+	const replies = await Promise.all(Array.from({ length: 6 }, () => h.post(`/api/workspaces/${workspace.id}/sessions`)));
+	assert.equal(replies.filter((response) => response.status === 200).length, 6);
+	assert.equal((await h.supervisor.children.rows()).length, 6);
 	await h.supervisor.shutdown();
 	assert.deepEqual(await h.files.read("children"), []);
 });

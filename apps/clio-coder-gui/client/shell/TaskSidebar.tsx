@@ -380,8 +380,15 @@ function TaskItem({
 		<>
 			<span className="wb-task__glyph">{glyph}</span>
 			<span className="wb-task__title">{actions.resuming === row.id ? "Opening…" : row.title}</span>
-			{label ? <span className="sr-only">{label}</span> : null}
-			{age ? <span className="wb-task__age">{age}</span> : null}
+			{/* A queued turn says so in place of the age: nothing else on the row would show it is not running. */}
+			{row.state === "waiting" ? (
+				<span className="wb-task__age">{label}</span>
+			) : (
+				<>
+					{label ? <span className="sr-only">{label}</span> : null}
+					{age ? <span className="wb-task__age">{age}</span> : null}
+				</>
+			)}
 		</>
 	);
 	const title = `${row.title}${label ? ` · ${label}` : ""}`;
@@ -448,6 +455,9 @@ function TaskItem({
 					<Menu label={`Actions for ${row.title}`} float>
 						<MenuItem icon="pencil" disabled={busy} onClick={() => setEditing(true)}>
 							Rename
+						</MenuItem>
+						<MenuItem icon="external" disabled={busy} onClick={() => actions.openWindow(row.id, row.workspaceId, row.open)}>
+							Open in new window
 						</MenuItem>
 						{row.open ? (
 							<MenuItem icon="close" disabled={busy || working} onClick={() => actions.close(row.id)}>

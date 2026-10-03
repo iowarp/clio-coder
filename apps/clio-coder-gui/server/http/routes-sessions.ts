@@ -181,4 +181,6 @@ export function sessionRoutes(
 	register(app, hub, routes.closeSession, ({ params }, context) =>
 		commands.run(`session.close:${params.id}`, idempotencyKey(context), {}, () => supervisor.close(params.id)),
 	);
+	// A sighting is repeated on purpose and changes nothing durable, so it keeps no command record.
+	register(app, hub, routes.viewSession, ({ params }) => supervisor.view(params.id));
 }

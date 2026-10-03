@@ -7,7 +7,7 @@
 import type { SessionSnapshot, SessionSummary } from "../../contracts/sessions.js";
 import { isAwaitingAnswer } from "../chat/permission-state.js";
 
-export type TaskState = "starting" | "working" | "approval" | "failed" | "idle";
+export type TaskState = "starting" | "working" | "waiting" | "approval" | "failed" | "idle";
 
 export interface TaskRow {
 	readonly id: string;
@@ -39,10 +39,15 @@ export function taskTitle(
 export function taskState(session: Pick<SessionSnapshot, "state" | "turns" | "permissions">): TaskState {
 	if (session.permissions.some(isAwaitingAnswer)) return "approval";
 	if (session.state === "starting") return "starting";
-	const last = session.turns.at(-1)?.status;
-	if (last === "running") return "working";
-	if (last === "failed") return "failed";
+	const last = session.turns.at(-1);
+	if (last?.status === "running") return last.queued ? "waiting" : "working";
+	if (last?.status === "failed") return "failed";
 	return "idle";
+}
+
+/** A task this server holds: its agent process is running, starting, or parked until a window shows it again. */
+export function isHeld(session: Pick<SessionSnapshot, "state">): boolean {
+	return session.state === "open" || session.state === "starting" || session.state === "parked";
 }
 
 /** True for an open session nobody has typed into. "New task" reuses it instead of spawning another child. */
@@ -67,10 +72,7 @@ export function taskRows(
 ): TaskRow[] {
 	const saved = new Map(history.map((row) => [row.id, row]));
 	const live = sessions.filter(
-		(session) =>
-			session.workspaceId === workspaceId &&
-			(session.state === "open" || session.state === "starting") &&
-			!isUntouched(session),
+		(session) => session.workspaceId === workspaceId && isHeld(session) && !isUntouched(session),
 	);
 	const liveIds = new Set(
 		sessions.filter((session) => session.workspaceId === workspaceId).map((session) => session.id),
@@ -122,6 +124,7 @@ export function shortAge(iso: string | undefined, nowMs: number): string {
 export const STATE_LABELS: Readonly<Record<TaskState, string>> = {
 	starting: "Starting",
 	working: "Working",
+	waiting: "Waiting for a slot",
 	approval: "Needs your approval",
 	failed: "Last turn failed",
 	idle: "",

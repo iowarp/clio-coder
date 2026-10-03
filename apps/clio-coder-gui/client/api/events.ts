@@ -6,7 +6,7 @@ import { type SessionDelta, SessionDeltas, type SessionSnapshot } from "../../co
 import { onTokenRejected, tokenRejected } from "./auth-state.js";
 import { type Client, emptyInput } from "./client.js";
 import { FrameEventBuffer } from "./frame-buffer.js";
-import { resetSessionBuffers, sessionBuffer } from "./sessions.js";
+import { resetSessionBuffers, SESSION_CACHES, sessionBuffer } from "./sessions.js";
 
 type OperationEntry = { resource: string; revision: number; operation?: Operation };
 export type ConnectionState = "Connecting…" | "Connected" | "Reconnecting…" | "Not connected";
@@ -24,6 +24,7 @@ export function subscribe(client: Client, queries: QueryClient, connection: (sta
 	const buffer = new FrameEventBuffer((events) => {
 		const snapshots = new Map<string, SessionSnapshot>(),
 			gaps = new Set<string>(),
+			resumed = new Set<string>(),
 			invalidate = new Set<string>(),
 			operations: OperationEntry[] = [];
 		let resynced = false;
@@ -33,6 +34,7 @@ export function subscribe(client: Client, queries: QueryClient, connection: (sta
 				resynced = true;
 				snapshots.clear();
 				gaps.clear();
+				resumed.clear();
 				invalidate.clear();
 				operations.length = 0;
 				epoch = event.epoch;
@@ -42,8 +44,11 @@ export function subscribe(client: Client, queries: QueryClient, connection: (sta
 			if (Object.hasOwn(SessionDeltas, event.type)) {
 				const delta = event as SessionDelta,
 					held = sessionBuffer(delta.payload.resource),
+					parked = held.value?.state === "parked",
 					state = held.event(delta);
 				if (state) snapshots.set(state.id, state);
+				// A resumed task answers from a new agent process, so what the old one reported is stale.
+				if (parked && state?.state === "open") resumed.add(state.id);
 				if (held.hasGap) gaps.add(delta.payload.resource);
 				if (
 					delta.type === "session.changed" ||
@@ -51,6 +56,7 @@ export function subscribe(client: Client, queries: QueryClient, connection: (sta
 					delta.type === "session.configured" ||
 					delta.type === "session.reset" ||
 					delta.type === "turn.started" ||
+					delta.type === "turn.admitted" ||
 					delta.type === "turn.finished" ||
 					delta.type === "permission.requested" ||
 					delta.type === "permission.resolved" ||
@@ -108,6 +114,7 @@ export function subscribe(client: Client, queries: QueryClient, connection: (sta
 		}
 		for (const [id, state] of snapshots) queries.setQueryData<SessionSnapshot>(["session", id], state);
 		for (const id of gaps) void queries.invalidateQueries({ queryKey: ["session", id] });
+		for (const id of resumed) for (const key of SESSION_CACHES) void queries.invalidateQueries({ queryKey: [key, id] });
 		for (const entry of operations) {
 			if (entry.operation)
 				queries.setQueryData<Operation>(["operation", entry.resource], (current) =>

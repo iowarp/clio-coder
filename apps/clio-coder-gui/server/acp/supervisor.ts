@@ -109,6 +109,14 @@ type Entry = {
 	rebase?: { mode: "move"; moved: boolean } | { mode: "switch"; reset: boolean };
 	/** A handoff document is being drawn up; a request now would make it describe a moving session. */
 	drafting?: boolean;
+	/** The turn is recorded and waits for a slot: `admit` sends it to the agent, `drop` gives it up. */
+	queued?: { admit(): void; drop(): void };
+	/** When a request, a turn or a window last touched this child, on the monotonic clock. */
+	activeAt: number;
+	/** A resume loads a transcript the kept snapshot already holds, so its replay is not projected again. */
+	resuming?: boolean;
+	/** Retired for idleness: the snapshot stays and reads `parked` once the child is gone. */
+	parking?: boolean;
 };
 /** A branch change reads and replays a whole session, which a long one makes slow. */
 const BRANCH_TIMEOUT_MS = 60_000;
@@ -116,6 +124,10 @@ const BRANCH_TIMEOUT_MS = 60_000;
 const ASIDE_TIMEOUT_MS = 15 * 60_000;
 /** Longest a command reply may take; see invokeCommand. */
 const COMMAND_TIMEOUT_MS = 10 * 60_000;
+/** How long a task with no turn and no window showing it keeps its agent process. */
+const PARK_AFTER_MS = 5 * 60_000;
+/** Parked snapshots kept in memory. An older one is closed and forgotten, and reloads from its ledger like any saved task. */
+const PARKED_KEPT = 32;
 
 export class Supervisor {
 	readonly children: ChildrenFile;
@@ -123,6 +135,14 @@ export class Supervisor {
 	private readonly entries = new Map<string, Entry>();
 	private readonly reapers = new Set<Promise<void>>();
 	private starting = 0;
+	/** Entries whose turn waits for a slot, oldest first. */
+	private readonly waiting: Entry[] = [];
+	/** Resumes in flight, so two windows showing one parked task start one child. */
+	private readonly waking = new Map<string, Promise<void>>();
+	/** Parked session ids, oldest first. */
+	private parked: string[] = [];
+	/** The highest revision any session here has published. A reloaded session starts above it. */
+	private floor = 0;
 	private readonly opening = new Set<Promise<SessionSnapshot>>();
 	private readonly controls = new Set<Promise<void>>();
 	private readonly loading = new Set<string>();
@@ -134,16 +154,45 @@ export class Supervisor {
 		files: AppFiles,
 		private readonly hub: EventHub,
 		private readonly env: NodeJS.ProcessEnv = process.env,
-		readonly capacity = 4,
+		/** Turns that may run at once across every session. Open sessions are not limited. */
+		readonly turnCapacity = 4,
 		private readonly permissionTimers?: PermissionTimers,
 		private readonly recover?: (cwd: string, sessionId: string) => Promise<unknown>,
+		private readonly parkAfterMs = PARK_AFTER_MS,
 	) {
 		this.children = new ChildrenFile(files);
 		this.monitor = setInterval(() => {
-			for (const entry of this.entries.values())
-				if (!entry.closing && entry.client.transport.closed) this.retireDetached(entry);
+			const now = performance.now();
+			for (const entry of this.entries.values()) {
+				if (entry.closing) continue;
+				if (entry.client.transport.closed) this.retireDetached(entry);
+				else if (now - entry.activeAt >= this.parkAfterMs && this.resting(entry)) {
+					entry.parking = true;
+					this.retireDetached(entry);
+				}
+			}
 		}, 200);
 		this.monitor.unref();
+	}
+	/** Nothing runs in the child, nothing waits on it, and its ledger can be loaded again. */
+	private resting(entry: Entry) {
+		return (
+			entry.bound &&
+			entry.turnId === null &&
+			!entry.rebase &&
+			!entry.drafting &&
+			entry.client.pending === 0 &&
+			entry.client.capabilities.loadSession &&
+			!this.configuring.has(entry.id) &&
+			this.snapshots.get(entry.id)?.state === "open"
+		);
+	}
+	/** Turns whose request is with an agent now. A replayed turn and a queued one hold no slot. */
+	private get runningTurns() {
+		let count = 0;
+		for (const entry of this.entries.values())
+			if (entry.turnId !== null && entry.replay === null && !entry.queued) count++;
+		return count;
 	}
 	/** The live projection, never handed outside this class: callers that only read a field must not pay for a clone. */
 	private snapshot(id: string) {
@@ -175,6 +224,7 @@ export class Supervisor {
 	private publish(event: SessionDelta) {
 		const current = this.snapshots.get(event.payload.resource);
 		if (!current) return;
+		if (event.payload.revision > this.floor) this.floor = event.payload.revision;
 		this.snapshots.set(current.id, applySessionDelta(current, event));
 		this.hub.publish(event);
 	}
@@ -223,7 +273,13 @@ export class Supervisor {
 		}
 	}
 	async open(workspaceId: string, existingId?: string) {
-		const pending = this.openSession(workspaceId, existingId);
+		if (existingId && this.snapshots.get(existingId)?.state === "parked") {
+			await this.wake(existingId);
+			return this.get(existingId);
+		}
+		return this.track(this.openSession(workspaceId, existingId));
+	}
+	private async track(pending: Promise<SessionSnapshot>) {
 		this.opening.add(pending);
 		try {
 			return await pending;
@@ -231,12 +287,32 @@ export class Supervisor {
 			this.opening.delete(pending);
 		}
 	}
-	private async openSession(workspaceId: string, existingId?: string) {
+	/** Start a parked session's child again. Its transcript is the kept snapshot, so clients see only the state change. */
+	private wake(id: string) {
+		let job = this.waking.get(id);
+		if (!job) {
+			job = this.track(this.openSession(this.snapshot(id).workspaceId, id, true))
+				.then(() => undefined)
+				.finally(() => this.waking.delete(id));
+			this.waking.set(id, job);
+		}
+		return job;
+	}
+	/**
+	 * A window shows this session. That keeps its child from being parked, and brings a parked one back
+	 * before answering, so the caller can treat the session as open.
+	 */
+	async view(id: string) {
+		const entry = this.entries.get(id);
+		if (entry?.parking) await entry.retired?.catch(() => undefined);
+		else if (entry) entry.activeAt = performance.now();
+		if (this.snapshot(id).state === "parked") await this.wake(id);
+		return {};
+	}
+	private async openSession(workspaceId: string, existingId?: string, resume = false) {
 		if (this.stopping) throw new AppProblem("unavailable", "The server is shutting down.");
 		if (existingId && (this.entries.has(existingId) || this.loading.has(existingId)))
 			throw new AppProblem("conflict", "Session is already open in this server.");
-		if (this.entries.size + this.starting >= this.capacity)
-			throw new AppProblem("conflict", `At most ${this.capacity} sessions can be open at once.`);
 		this.starting++;
 		if (existingId) this.loading.add(existingId);
 		let entry: Entry | undefined;
@@ -264,8 +340,16 @@ export class Supervisor {
 				closing: false,
 				bound: false,
 				eventSequence: 0,
+				activeAt: performance.now(),
+				...(resume ? { resuming: true } : {}),
 			};
-			this.snapshots.set(id, emptySession(id, workspaceId));
+			// A session loaded again starts above every revision this server has published, so a window
+			// still holding its earlier snapshot takes the new one instead of ignoring it as older.
+			if (!resume)
+				this.snapshots.set(
+					id,
+					existingId ? { ...emptySession(id, workspaceId), revision: this.floor + 1 } : emptySession(id, workspaceId),
+				);
 			this.entries.set(id, entry);
 			this.starting--;
 			const owned = entry;
@@ -309,6 +393,10 @@ export class Supervisor {
 				}
 			});
 			transport.onNotification("_clio-coder/event", (params) => {
+				// A resume repeats facts the kept snapshot already holds. A new session can report a fact, such
+				// as a target that is down, before its response binds the server's id; that frame names an id
+				// this entry does not have yet, and failing on it used to end the child before the task opened.
+				if (owned.resuming || (!owned.bound && record(params).sessionId !== owned.id)) return;
 				try {
 					const projected = fleetEvent(params, owned.id, owned.eventSequence);
 					// The sequence advances even for a dropped kind, so a later frame
@@ -332,7 +420,8 @@ export class Supervisor {
 				}
 			});
 			await entry.client.initialize();
-			const boundId = await entry.client.open(workspace.path, existingId);
+			const boundId = await entry.client.open(workspace.path, existingId, !resume);
+			delete entry.resuming;
 			if (entry.replay !== null && entry.turnId) this.finish(entry, "end_turn", null, null, null);
 			if (boundId !== id) {
 				if (this.entries.has(boundId))
@@ -358,6 +447,7 @@ export class Supervisor {
 				await this.retire(entry);
 				throw new AppProblem("unavailable", "Server shut down while opening the session.");
 			}
+			entry.activeAt = performance.now();
 			this.state(boundId, "open");
 			return this.get(boundId);
 		} catch (error) {
@@ -386,16 +476,45 @@ export class Supervisor {
 				"Attachments exceed what one request can carry. Remove one or attach smaller ones.",
 			);
 		entry.replay = null;
-		const turnId = this.begin(entry, text, "live", randomUUID(), images.length, files.length);
-		entry.prompt = entry.client
-			.prompt(id, text, images, files)
-			.then((result) => {
-				if (entry.turnId === turnId) this.finish(entry, result.stopReason, result.usage, null, new Date().toISOString());
-			})
-			.catch((error) => {
-				if (entry.turnId === turnId) this.failTurn(entry, acpProblem(error));
+		entry.activeAt = performance.now();
+		// Past the limit the turn is recorded at once, so the request shows in the task, and sent when a slot frees.
+		const queued = this.runningTurns >= this.turnCapacity;
+		const turnId = this.begin(entry, text, "live", randomUUID(), images.length, files.length, queued);
+		const run = () =>
+			entry.client
+				.prompt(id, text, images, files)
+				.then((result) => {
+					if (entry.turnId === turnId) this.finish(entry, result.stopReason, result.usage, null, new Date().toISOString());
+				})
+				.catch((error) => {
+					if (entry.turnId === turnId) this.failTurn(entry, acpProblem(error));
+				});
+		if (queued)
+			entry.prompt = new Promise<void>((resolve) => {
+				entry.queued = { admit: () => resolve(run()), drop: () => resolve() };
+				this.waiting.push(entry);
 			});
+		else entry.prompt = run();
 		return { turnId };
+	}
+	/** Send queued turns to their agents, oldest first, while slots are free. */
+	private admit() {
+		while (this.waiting.length > 0 && this.runningTurns < this.turnCapacity) {
+			const entry = this.waiting.shift();
+			const queued = entry?.queued;
+			if (!entry || !queued || entry.turnId === null) continue;
+			delete entry.queued;
+			this.publish({
+				type: "turn.admitted",
+				payload: {
+					resource: entry.id,
+					revision: this.revision(entry.id),
+					turnId: entry.turnId,
+					startedAt: new Date().toISOString(),
+				},
+			});
+			queued.admit();
+		}
 	}
 	private begin(
 		entry: Entry,
@@ -404,19 +523,21 @@ export class Supervisor {
 		id: string = randomUUID(),
 		images = 0,
 		files = 0,
+		queued = false,
 	) {
 		const turn: Turn = {
 			id,
 			prompt,
 			origin,
 			status: "running",
-			startedAt: origin === "live" ? new Date().toISOString() : null,
+			startedAt: origin === "live" && !queued ? new Date().toISOString() : null,
 			finishedAt: null,
 			stopReason: null,
 			usage: null,
 			problem: null,
 			...(images > 0 ? { images } : {}),
 			...(files > 0 ? { files } : {}),
+			...(queued ? { queued: true as const } : {}),
 		};
 		entry.turnId = id;
 		this.publish({ type: "turn.started", payload: { resource: entry.id, revision: this.revision(entry.id), turn } });
@@ -445,6 +566,16 @@ export class Supervisor {
 			},
 		});
 		entry.turnId = null;
+		entry.activeAt = performance.now();
+		const queued = entry.queued;
+		if (queued) {
+			delete entry.queued;
+			const index = this.waiting.indexOf(entry);
+			if (index >= 0) this.waiting.splice(index, 1);
+			queued.drop();
+		}
+		// Whatever ended this turn freed its slot.
+		this.admit();
 	}
 	private failTurn(entry: Entry, problem: AppProblem) {
 		this.finish(entry, "failed", null, problem.problem, new Date().toISOString());
@@ -487,7 +618,7 @@ export class Supervisor {
 				payload: { resource: entry.id, revision: this.revision(entry.id), config },
 			});
 		}
-		if (metadataUpdate) return;
+		if (metadataUpdate || entry.resuming) return;
 		const replay = record(meta["clio-coder/replay"]).turn;
 		if (typeof replay === "number" && Number.isInteger(replay) && replay > 0 && replay !== entry.replay) {
 			if (entry.turnId) this.finish(entry, "end_turn", null, null, null);
@@ -606,6 +737,7 @@ export class Supervisor {
 		const entry = this.entries.get(id);
 		if (!entry || entry.closing || this.snapshot(id).state !== "open")
 			throw new AppProblem("conflict", "Session is not open in this server.");
+		entry.activeAt = performance.now();
 		return entry;
 	}
 	interview(id: string) {
@@ -631,7 +763,9 @@ export class Supervisor {
 			if (this.snapshot(id).turns.some((turn) => turn.id === turnId && turn.status !== "running")) return {};
 			throw new AppProblem("conflict", "Turn is not active in this session.");
 		}
-		await this.cancelEntry(entry);
+		// A queued turn never reached the agent, so there is nothing to cancel there.
+		if (entry.queued) this.finish(entry, "cancelled", null, null, new Date().toISOString());
+		else await this.cancelEntry(entry);
 		return {};
 	}
 	private async cancelEntry(entry: Entry) {
@@ -721,6 +855,8 @@ export class Supervisor {
 		const entry = this.active(id);
 		if (!entry.client.capabilities.steering)
 			throw new AppProblem("conflict", "This Clio build does not expose mid-turn steering.");
+		if (entry.queued)
+			throw new AppProblem("conflict", "This turn is waiting for a slot. It can take a message once it starts.");
 		return entry;
 	}
 	steer(id: string, body: Static<typeof SteerRequest>) {
@@ -1158,8 +1294,7 @@ export class Supervisor {
 	}
 	/** A closed ledger needs an initialized, unbound ACP peer; loading it would make deletion inadmissible. */
 	private async control(workspaceId: string, id: string, method: string, params: unknown) {
-		if (this.stopping || this.entries.size + this.starting >= this.capacity)
-			throw new AppProblem("conflict", "No ACP control capacity is available.");
+		if (this.stopping) throw new AppProblem("unavailable", "The server is shutting down.");
 		if (this.loading.has(id)) throw new AppProblem("conflict", "A session command is already in progress.");
 		this.starting++;
 		this.loading.add(id);
@@ -1186,7 +1321,14 @@ export class Supervisor {
 	}
 	async close(id: string) {
 		const entry = this.entries.get(id);
-		if (entry) await this.retire(entry);
+		if (entry) {
+			// An explicit close wins over a parking already under way.
+			entry.parking = false;
+			await this.retire(entry);
+		} else if (this.snapshots.get(id)?.state === "parked") {
+			this.state(id, "closed");
+			this.prune();
+		}
 		return this.get(id);
 	}
 	private retire(entry: Entry) {
@@ -1201,7 +1343,7 @@ export class Supervisor {
 	private async retireEntry(entry: Entry) {
 		entry.closing = true;
 		try {
-			if (entry.turnId && !entry.client.transport.closed) {
+			if (entry.turnId && !entry.queued && !entry.client.transport.closed) {
 				await entry.client.request("session/cancel", { sessionId: entry.id }, 2000);
 				entry.permissions?.cancel();
 				entry.interviews?.cancel();
@@ -1222,9 +1364,26 @@ export class Supervisor {
 		if (!(await childRunning(entry.row.pid))) {
 			await this.recoverLedger(entry.row.workspaceId, entry.id);
 			await this.children.remove(entry.row);
-			this.state(entry.id, "closed");
+			const snapshot = this.snapshots.get(entry.id);
+			// A task nobody typed into has nothing to come back to, so it closes like any other.
+			const parks = entry.parking && !!snapshot && snapshot.turns.length + snapshot.timeline.length > 0;
+			if (parks) this.parked.push(entry.id);
+			this.state(entry.id, parks ? "parked" : "closed");
+			if (entry.parking && !parks) this.snapshots.delete(entry.id);
 		} else this.state(entry.id, "unknown");
 		this.entries.delete(entry.id);
+		this.prune();
+	}
+	/**
+	 * Bound what stays in memory. The oldest parked tasks are closed and forgotten here, which leaves each
+	 * one as its saved row in the task list, and old closed ones are forgotten.
+	 */
+	private prune() {
+		this.parked = this.parked.filter((id) => this.snapshots.get(id)?.state === "parked");
+		for (const id of this.parked.splice(0, Math.max(0, this.parked.length - PARKED_KEPT))) {
+			this.state(id, "closed");
+			this.snapshots.delete(id);
+		}
 		const closed = [...this.snapshots.values()].filter(
 			(snapshot) => snapshot.state === "closed" && !this.entries.has(snapshot.id),
 		);

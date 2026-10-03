@@ -4,6 +4,7 @@ import { access, readFile, realpath, stat } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { delimiter, isAbsolute, join, resolve, win32 } from "node:path";
 import { Worker } from "node:worker_threads";
+import { APP_TITLE } from "../contracts/meta.js";
 import { type CliCommand, commandPlan } from "./cli-commands.js";
 import { createStdioTransport, processAlive, processBirthToken, resolvePackageRoot } from "./clio/http-shims.js";
 import { AppProblem } from "./services/problem.js";
@@ -200,14 +201,78 @@ export function windowsAppCommand(
 	return file ? { file, argv: [`--app=${url}`] } : null;
 }
 
+// Finds an open app window on the Windows desktop and brings it forward. Chrome and Edge top-level
+// windows share one window class, and a browser tab's title ends with the browser's own name, so a
+// title that ends with the app's name is an app window: one this launcher opened, or the app installed
+// from the browser. Windows are visited front to back, so the one last used is taken.
+//
+// SetForegroundWindow and WScript.Shell's AppActivate only flash the taskbar button when the caller is
+// not the foreground process, which a launcher never is. SwitchToThisWindow is the Alt+Tab switch: it
+// takes the foreground and restores a minimized window. Asked for the window already in front it
+// switches away instead, so that window is left alone. The switch lands a moment after the call and is
+// lost if this process has exited by then, so the script waits for it, at most half a second. The C#
+// holds no single quote, because it travels inside a PowerShell single-quoted string, and stays within
+// what Windows PowerShell compiles.
+const FOCUS_WINDOW_SOURCE = [
+	"using System; using System.Diagnostics; using System.Runtime.InteropServices; using System.Text; using System.Threading;",
+	"public static class ClioDesktop {",
+	"delegate bool Visit(IntPtr window, IntPtr state);",
+	'[DllImport("user32.dll")] static extern bool EnumWindows(Visit visit, IntPtr state);',
+	'[DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr window);',
+	'[DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int GetClassName(IntPtr window, StringBuilder text, int count);',
+	'[DllImport("user32.dll")] static extern int GetWindowTextLength(IntPtr window);',
+	'[DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int GetWindowText(IntPtr window, StringBuilder text, int count);',
+	'[DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr window, out uint process);',
+	'[DllImport("user32.dll")] static extern IntPtr GetForegroundWindow();',
+	'[DllImport("user32.dll")] static extern void SwitchToThisWindow(IntPtr window, bool altTab);',
+	"public static bool Focus(string suffix) {",
+	"IntPtr found = IntPtr.Zero;",
+	"EnumWindows((window, state) => {",
+	"if (!IsWindowVisible(window)) return true;",
+	"StringBuilder kind = new StringBuilder(64);",
+	'if (GetClassName(window, kind, kind.Capacity) == 0 || kind.ToString() != "Chrome_WidgetWin_1") return true;',
+	"StringBuilder title = new StringBuilder(GetWindowTextLength(window) + 1);",
+	"GetWindowText(window, title, title.Capacity);",
+	"if (!title.ToString().EndsWith(suffix, StringComparison.Ordinal)) return true;",
+	"uint process; GetWindowThreadProcessId(window, out process);",
+	'try { string owner = Process.GetProcessById((int)process).ProcessName; if (owner != "chrome" && owner != "msedge") return true; }',
+	"catch (Exception) { return true; }",
+	"found = window; return false; }, IntPtr.Zero);",
+	"if (found == IntPtr.Zero) return false;",
+	"if (GetForegroundWindow() != found) SwitchToThisWindow(found, true);",
+	"for (int wait = 0; wait < 25 && GetForegroundWindow() != found; wait++) Thread.Sleep(20);",
+	"return true; } }",
+].join(" ");
+const FOCUS_WINDOW_SCRIPT = [
+	"$ErrorActionPreference = 'Stop'",
+	`Add-Type -TypeDefinition '${FOCUS_WINDOW_SOURCE}'`,
+	"if ([ClioDesktop]::Focus($env:CLIO_WIN_TITLE)) { [Console]::Out.Write('focused') } else { [Console]::Out.Write('none') }",
+].join("; ");
+
+/**
+ * Brings an open app window to the front on the Windows desktop and says whether there was one. A
+ * script that fails or times out counts as no window, so the launch falls back to opening one.
+ */
+export async function focusAppWindow() {
+	try {
+		return (await runWindowsPowerShell(FOCUS_WINDOW_SCRIPT, { CLIO_WIN_TITLE: APP_TITLE }, 5_000)) === "focused";
+	} catch {
+		return false;
+	}
+}
+
 /**
  * Opens the installed app. Under WSL that is a standalone Chrome or Edge window; everywhere else, and when
  * no such browser is installed, it is the ordinary opener. Only launcher entry points use it, so a foreground
  * server or a test that asks for a browser still goes through the system opener it was given.
+ *
+ * The app has one window unless the operator asks for another from inside it, so a launch that finds
+ * an app window focuses it and stops there.
  */
 export async function openApp(url: string, env: NodeJS.ProcessEnv = process.env) {
 	const app = windowsAppCommand(url, env);
 	if (!app) return openBrowser(url, env);
+	if (await focusAppWindow()) return;
 	// A first launch keeps this process alive for the browser's whole life, so it is released, not awaited.
 	const child = spawn(app.file, app.argv, { cwd: "/mnt/c/Windows", env, shell: false, detached: true, stdio: "ignore" });
 	await new Promise<void>((resolve, reject) => {
@@ -310,7 +375,7 @@ export async function controlService(
  * Runs one fixed PowerShell script on the Windows side. Values travel as environment variables forwarded
  * through WSLENV, never inside the script text, so no path or argument is ever parsed as PowerShell.
  */
-export async function runWindowsPowerShell(script: string, values: Record<string, string> = {}) {
+export async function runWindowsPowerShell(script: string, values: Record<string, string> = {}, timeoutMs = 30_000) {
 	for (const name of Object.keys(values))
 		if (!/^CLIO_WIN_[A-Z0-9_]+$/.test(name)) throw new Error("Invalid Windows script variable name.");
 	if (!isWsl()) throw new Error("Windows integration requires WSL with Windows interop.");
@@ -332,7 +397,7 @@ export async function runWindowsPowerShell(script: string, values: Record<string
 		const timer = setTimeout(() => {
 			exceeded = true;
 			child.kill("SIGKILL");
-		}, 30_000);
+		}, timeoutMs);
 		child.stdout.on("data", (chunk: Buffer) => {
 			bytes += chunk.length;
 			if (bytes > 65_536) {

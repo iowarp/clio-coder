@@ -3,6 +3,7 @@
 // because the events transport that raises most of these is not a component.
 
 import { useSyncExternalStore } from "react";
+import { APP_TITLE } from "../../contracts/meta.js";
 
 export type Urgency = "assertive" | "polite";
 
@@ -79,6 +80,6 @@ export function resetAnnouncer(): void {
  * the route label and the approval marker compose here instead.
  */
 export function composeTitle(sectionLabel: string | undefined, approvalPending: boolean): string {
-	const base = sectionLabel ? `${sectionLabel} · Clio Coder` : "Clio Coder";
+	const base = sectionLabel ? `${sectionLabel} · ${APP_TITLE}` : APP_TITLE;
 	return approvalPending ? `● Approval needed — ${base}` : base;
 }

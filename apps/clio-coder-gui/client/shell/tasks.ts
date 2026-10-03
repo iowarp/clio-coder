@@ -8,22 +8,12 @@ import { useLocation, useNavigate } from "react-router";
 import { routes } from "../../contracts/routes.js";
 import { ApiProblem, type Client, emptyInput } from "../api/client.js";
 import { clock } from "../api/clock.js";
-import { sessionBuffer } from "../api/sessions.js";
+import { SESSION_CACHES, sessionBuffer } from "../api/sessions.js";
 import { type ProjectLaunch, useProjectLaunch } from "../pages/project-open.js";
-import { withRoom } from "./capacity.js";
 import { isUntouched, sessionIdFromPath } from "./shell-model.js";
+import { openAppWindow } from "./windows.js";
 
 const WORKSPACE_KEY = "clio-coder-gui-workspace";
-
-/** Per-session caches that a freshly loaded ledger can invalidate (it may bind a new ACP child). */
-const SESSION_CACHES = [
-	"session-capabilities",
-	"session-commands",
-	"session-queue",
-	"session-settings",
-	"session-targets",
-	"session-autonomy",
-] as const;
 
 export function rememberedWorkspace(): string | null {
 	try {
@@ -46,6 +36,8 @@ export interface TaskActions {
 	/** Start a task in a project, or return to its untouched draft instead of spawning a second child. */
 	newTask(workspaceId: string): void;
 	resume(sessionId: string, workspaceId: string): void;
+	/** Show a task in a second window. A saved one is loaded here first, so the new window finds it open. */
+	openWindow(sessionId: string, workspaceId: string, held: boolean): void;
 	readonly resuming: string | null;
 	close(sessionId: string): void;
 	readonly closing: string | null;
@@ -58,14 +50,13 @@ export function useTaskActions(client: Client, afterNavigate?: () => void): Task
 	const launch = useProjectLaunch(client);
 	const sessions = useQuery({ queryKey: ["sessions"], queryFn: () => client.call(routes.sessions, emptyInput) });
 	const resume = useMutation({
-		mutationFn: ({ sessionId, workspaceId }: { sessionId: string; workspaceId: string }) =>
-			withRoom(client, queries, () =>
-				client.call(routes.loadSession, { params: { id: sessionId }, query: {}, body: { workspaceId } }),
-			),
-		onSuccess: (session) => {
+		mutationFn: ({ sessionId, workspaceId }: { sessionId: string; workspaceId: string; window?: boolean }) =>
+			client.call(routes.loadSession, { params: { id: sessionId }, query: {}, body: { workspaceId } }),
+		onSuccess: (session, request) => {
 			for (const key of SESSION_CACHES) queries.removeQueries({ queryKey: [key, session.id] });
 			queries.setQueryData(["session", session.id], sessionBuffer(session.id).snapshot(session) ?? session);
 			void queries.invalidateQueries({ queryKey: ["sessions"] });
+			if (request.window) return openAppWindow(`/sessions/${session.id}`, client.token);
 			afterNavigate?.();
 			void navigate(`/sessions/${session.id}`);
 		},
@@ -93,6 +84,10 @@ export function useTaskActions(client: Client, afterNavigate?: () => void): Task
 		launch,
 		newTask,
 		resume: (sessionId, workspaceId) => resume.mutate({ sessionId, workspaceId }),
+		openWindow: (sessionId, workspaceId, held) => {
+			if (held) openAppWindow(`/sessions/${sessionId}`, client.token);
+			else resume.mutate({ sessionId, workspaceId, window: true });
+		},
 		resuming: resume.isPending ? (resume.variables?.sessionId ?? null) : null,
 		close: (sessionId) => close.mutate(sessionId),
 		closing: close.isPending ? (close.variables ?? null) : null,

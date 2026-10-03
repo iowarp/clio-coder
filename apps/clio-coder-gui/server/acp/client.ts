@@ -145,13 +145,20 @@ export class AcpClient {
 	config: SessionConfig | undefined;
 	private readonly modes = new Map<string, { level: "default" | "yolo"; source: "settings" | "session" }>();
 	constructor(readonly transport: AcpJsonRpcTransport) {}
+	/** Requests awaiting the agent's answer. A child with one in flight is not idle. */
+	pending = 0;
 	async request<T>(method: string, params: unknown, timeoutMs = 15000): Promise<T> {
+		this.pending++;
 		try {
 			return await this.transport.request<T>(method, params, timeoutMs);
 		} catch (error) {
 			throw acpProblem(error);
+		} finally {
+			this.pending--;
 		}
 	}
+	/** The agent restores a session without replaying it, which a resume uses when the transcript is already held. */
+	private resumable = false;
 	/** What the agent announced at initialize. Empty until {@link initialize} returns. */
 	capabilities: AgentCapabilities = EMPTY_CAPABILITIES;
 	async initialize() {
@@ -178,10 +185,12 @@ export class AcpClient {
 		if (!Value.Check(Initialize, result))
 			throw new AppProblem("upstream_acp", "Clio ACP returned an invalid initialize response.");
 		this.capabilities = readCapabilities(result);
+		this.resumable = stableCapability(record(record(record(result).agentCapabilities).sessionCapabilities).resume);
 	}
 	telemetry: SessionTelemetry = {};
-	async open(cwd: string, sessionId?: string) {
-		const result = await this.request<unknown>(sessionId ? "session/load" : "session/new", {
+	async open(cwd: string, sessionId?: string, replay = true) {
+		const load = replay || !this.resumable ? "session/load" : "session/resume";
+		const result = await this.request<unknown>(sessionId ? load : "session/new", {
 			cwd,
 			mcpServers: [],
 			...(sessionId ? { sessionId } : {}),

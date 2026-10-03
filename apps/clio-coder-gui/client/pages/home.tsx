@@ -11,7 +11,6 @@ import { Icon } from "../design/icons.js";
 import { useDetailsDismiss } from "../interaction/use-details-dismiss.js";
 import { ClioPulse, PULSE_SIZE } from "../shell/ClioMark.js";
 import { ClioStage } from "../shell/ClioStage.js";
-import { withRoom } from "../shell/capacity.js";
 import { HomeAside } from "../shell/HomeAside.js";
 import { useShell } from "../shell/shell-context.js";
 import { isUntouched } from "../shell/shell-model.js";
@@ -167,11 +166,7 @@ export function Home({ client }: { client: Client }) {
 				staleTime: 0,
 			});
 			const draft = sessions.find((session) => session.workspaceId === workspace && isUntouched(session));
-			const session =
-				draft ??
-				(await withRoom(client, queries, () =>
-					client.call(routes.newSession, { params: { id: workspace }, query: {}, body: {} }),
-				));
+			const session = draft ?? (await client.call(routes.newSession, { params: { id: workspace }, query: {}, body: {} }));
 			await client.call(routes.turn, { params: { id: session.id }, query: {}, body: { text: request } }, key.current);
 			return session;
 		},

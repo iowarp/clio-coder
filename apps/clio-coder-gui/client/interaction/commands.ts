@@ -101,6 +101,8 @@ export interface CommandHandlers {
 	newTask?(): void;
 	openWorkspace?(): void;
 	openTask?(id: string): void;
+	/** Show the task on screen in a second window. */
+	openWindow?(): void;
 }
 
 export const NO_SITUATION: CommandSituation = {
@@ -148,6 +150,16 @@ export function appCommands(situation: CommandSituation, handlers: CommandHandle
 				available: task.id !== sessionId,
 				run: () => openTask(task.id),
 			});
+	if (sessionId !== null && handlers.openWindow)
+		commands.push({
+			id: "session.window",
+			title: "Open this task in a new window",
+			group: "Session",
+			keywords: ["second", "another", "split", "side"],
+			binding: "newWindow",
+			available: true,
+			run: handlers.openWindow,
+		});
 	if (sessionId !== null) {
 		commands.push({
 			id: "session.cancel",

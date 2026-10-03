@@ -10,7 +10,7 @@ import { StatusMark } from "../design/status.js";
 import { useSetupStatus } from "../pages/target-onboarding.js";
 import { setAsideExpanded } from "./aside-state.js";
 import { useShell } from "./shell-context.js";
-import { isUntouched, STATE_LABELS, taskState, taskTitle } from "./shell-model.js";
+import { isHeld, isUntouched, STATE_LABELS, taskState, taskTitle } from "./shell-model.js";
 import "../chat/pane.css";
 
 /**
@@ -24,14 +24,12 @@ export function HomeAside({ client, workspace }: { client: Client; workspace: Wo
 	const workspaces = useQuery({ queryKey: ["workspaces"], queryFn: () => client.call(routes.workspaces, emptyInput) });
 	if (!slot) return null;
 	const names = new Map((workspaces.data ?? []).map((item) => [item.id, item.name]));
-	const live = (sessions.data ?? []).filter(
-		(session) => (session.state === "open" || session.state === "starting") && !isUntouched(session),
-	);
+	const live = (sessions.data ?? []).filter((session) => isHeld(session) && !isUntouched(session));
 	// "Running now" means work in motion or work waiting on the operator. An open task that sits idle
 	// is in the rail; listing it here made the heading untrue and left its row without a mark.
 	const active = live
 		.map((session) => ({ session, state: taskState(session) }))
-		.filter(({ state }) => state === "working" || state === "starting" || state === "approval");
+		.filter(({ state }) => state === "working" || state === "waiting" || state === "starting" || state === "approval");
 	const workers = live.reduce((sum, session) => sum + foldFleetRuns(session.fleet).filter(isLiveRun).length, 0);
 	const status = setup.data;
 	return createPortal(
@@ -119,7 +117,9 @@ export function HomeAside({ client, workspace }: { client: Client; workspace: Wo
 											{/* The heading and the mark say it is running, so the row names where; a task
 											    that waits on the operator says so instead. */}
 											<span>
-												{state === "approval" ? STATE_LABELS.approval : (names.get(session.workspaceId) ?? STATE_LABELS[state])}
+												{state === "approval" || state === "waiting"
+													? STATE_LABELS[state]
+													: (names.get(session.workspaceId) ?? STATE_LABELS[state])}
 											</span>
 										</li>
 									))}

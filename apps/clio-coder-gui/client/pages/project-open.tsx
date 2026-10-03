@@ -7,7 +7,6 @@ import { useNavigate } from "react-router";
 import { routes } from "../../contracts/routes.js";
 import { type Client, emptyInput } from "../api/client.js";
 import { sessionBuffer } from "../api/sessions.js";
-import { withRoom } from "../shell/capacity.js";
 
 export interface ProjectLaunch {
 	/** Open a folder as a project, then start a conversation there or show its saved ones. */
@@ -27,9 +26,7 @@ export function useProjectLaunch(client: Client): ProjectLaunch {
 	const inFlight = useRef(false);
 	const start = useMutation({
 		mutationFn: (workspaceId: string) =>
-			withRoom(client, queries, () =>
-				client.call(routes.newSession, { params: { id: workspaceId }, query: {}, body: {} }),
-			),
+			client.call(routes.newSession, { params: { id: workspaceId }, query: {}, body: {} }),
 		onSuccess: (session) => {
 			sessionBuffer(session.id).snapshot(session);
 			queries.setQueryData(["session", session.id], session);

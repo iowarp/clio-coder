@@ -841,6 +841,14 @@ export const routes = {
 		response: SessionSnapshot,
 		summary: "Close the supervised session and its child",
 	}),
+	viewSession: defineRoute({
+		...post,
+		status: 200,
+		params: operationParams,
+		path: "/api/sessions/:id/view",
+		response: Empty,
+		summary: "Report that a window shows the session, which keeps its child and resumes a parked one",
+	}),
 	traceStatus: defineRoute({
 		...get,
 		path: "/api/traces/status",

@@ -15,6 +15,7 @@ export const Event = Type.Union([
 		payload: Type.Object({ resource: Id, round: Type.Union([InterviewRound, Type.Null()]) }),
 	}),
 	Type.Object({ ...base, type: Type.Literal("turn.started"), payload: SessionDeltas["turn.started"] }),
+	Type.Object({ ...base, type: Type.Literal("turn.admitted"), payload: SessionDeltas["turn.admitted"] }),
 	Type.Object({ ...base, type: Type.Literal("turn.text"), payload: SessionDeltas["turn.text"] }),
 	Type.Object({ ...base, type: Type.Literal("turn.thought"), payload: SessionDeltas["turn.thought"] }),
 	Type.Object({ ...base, type: Type.Literal("turn.user"), payload: SessionDeltas["turn.user"] }),
