@@ -15,6 +15,9 @@ type Ready = Extract<FleetPreview, { status: "ready" }>;
  * The terminal's `/fleet run <name>`. Preview compiles the contract and dispatches nothing; Run
  * starts the plan only if it still hashes to the one shown, so a contract edited in between is
  * shown again instead of run. Its runs join the agent tree above this panel.
+ *
+ * The Agents drill keeps it as a collapsed section under the tree; the slash palette's dialog has its
+ * own heading, so there it renders as plain content with the contract name ready for typing.
  */
 export const FleetRunPanel = memo(function FleetRunPanel({
 	client,
@@ -22,12 +25,14 @@ export const FleetRunPanel = memo(function FleetRunPanel({
 	sessionOpen,
 	capabilities,
 	running,
+	variant = "section",
 }: {
 	client: Client;
 	sessionId: string;
 	sessionOpen: boolean;
 	capabilities: AgentCapabilities | undefined;
 	running: boolean;
+	variant?: "section" | "dialog";
 }) {
 	const fieldId = useId();
 	const [name, setName] = useState("");
@@ -79,12 +84,8 @@ export const FleetRunPanel = memo(function FleetRunPanel({
 	const supported = !!capabilities?.fleet;
 	const ready = shown?.preview.status === "ready" ? shown.preview : null;
 	const view = ready ? fleetPlanView(ready) : null;
-	return (
-		<details className="agents-section fleet-run-panel">
-			<summary>
-				<h3 className="agents-eyebrow">Run a fleet contract</h3>
-				<Icon name="chevronDown" />
-			</summary>
+	const content = (
+		<>
 			{!sessionOpen ? <p className="agents-note">This session is not open. Load it to run a fleet contract.</p> : null}
 			{sessionOpen && !supported ? (
 				<p className="agents-note">This Clio Coder session cannot preview fleet contracts.</p>
@@ -107,6 +108,7 @@ export const FleetRunPanel = memo(function FleetRunPanel({
 					<label htmlFor={`${fieldId}-name`}>Contract name</label>
 					<input
 						id={`${fieldId}-name`}
+						data-autofocus
 						value={name}
 						maxLength={128}
 						onChange={(event) => {
@@ -210,6 +212,16 @@ export const FleetRunPanel = memo(function FleetRunPanel({
 					{(preview.error ?? run.error)?.message}
 				</p>
 			) : null}
+		</>
+	);
+	if (variant === "dialog") return <div className="fleet-run-panel--dialog">{content}</div>;
+	return (
+		<details className="agents-section fleet-run-panel">
+			<summary>
+				<h3 className="agents-eyebrow">Run a fleet contract</h3>
+				<Icon name="chevronDown" />
+			</summary>
+			{content}
 		</details>
 	);
 });

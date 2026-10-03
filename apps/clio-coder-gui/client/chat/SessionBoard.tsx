@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { memo, useId, useRef, useState } from "react";
+import { memo, useEffect, useId, useRef, useState } from "react";
 import type { AgentCapabilities } from "../../contracts/capabilities.js";
 import { routes } from "../../contracts/routes.js";
 import type { Client } from "../api/client.js";
@@ -12,6 +12,7 @@ import {
 	type OperatorTaskAction,
 	supersedeOutcome,
 } from "./board-model.js";
+import type { PaneSection } from "./pane-context.js";
 import "./session-board.css";
 
 /**
@@ -26,6 +27,8 @@ export const SessionBoardPanel = memo(function SessionBoardPanel({
 	capabilities,
 	settledTurns,
 	running,
+	section = null,
+	onSectionShown,
 }: {
 	client: Client;
 	sessionId: string;
@@ -34,6 +37,9 @@ export const SessionBoardPanel = memo(function SessionBoardPanel({
 	/** Changes when a turn settles, which is when the plan and the decisions can have changed. */
 	settledTurns: number;
 	running: boolean;
+	/** A section the pane was opened at, `/decisions`: scrolled to and focused once it has rendered. */
+	section?: PaneSection | null;
+	onSectionShown?: () => void;
 }) {
 	const [title, setTitle] = useState("");
 	const titleId = useId();
@@ -113,6 +119,20 @@ export const SessionBoardPanel = memo(function SessionBoardPanel({
 		onError: (error) => setMemoryNote({ tone: "error", text: error.message }),
 	});
 	const view = board.data ? boardView(board.data) : null;
+	const loaded = !!board.data;
+	useEffect(() => {
+		if (section === null || !loaded) return;
+		// After the pane's own effects, which focus its title on a change of view and open the modal
+		// slide-over; either would otherwise take focus back from the section.
+		const frame = requestAnimationFrame(() => {
+			const heading = panel.current?.querySelector<HTMLElement>(`[data-board-section="${section}"]`);
+			if (!heading) return;
+			heading.focus({ preventScroll: true });
+			heading.scrollIntoView({ block: "start" });
+			onSectionShown?.();
+		});
+		return () => cancelAnimationFrame(frame);
+	}, [section, loaded, onSectionShown]);
 	const act = (id: string, action: OperatorTaskAction) => change.mutate([action, id]);
 	return (
 		<div ref={panel} className="pane-drill drill board-panel">
@@ -228,7 +248,7 @@ export const SessionBoardPanel = memo(function SessionBoardPanel({
 						)}
 					</section>
 					<section className="drill__section" aria-labelledby={`${titleId}-decisions`}>
-						<h3 id={`${titleId}-decisions`} tabIndex={-1}>
+						<h3 id={`${titleId}-decisions`} data-board-section="decisions" tabIndex={-1}>
 							Decisions
 						</h3>
 						{decisionsEmptyLine(view) ? <p className="pane-empty">{decisionsEmptyLine(view)}</p> : null}

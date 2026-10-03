@@ -562,3 +562,9 @@ code.agents-mono {
 .worker-graph .fleet-steer__outcome {
 	font-size: 12.5px;
 }
+
+/* The fleet form as the slash palette's dialog content: the dialog carries the heading and frame. */
+.fleet-run-panel--dialog {
+	display: grid;
+	gap: var(--space-3);
+}

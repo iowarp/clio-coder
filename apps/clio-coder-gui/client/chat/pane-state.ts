@@ -1,6 +1,7 @@
 // Whether the pane is open and which view it shows, with dismissal kept for the current tab.
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { type PaneSection, type PaneTarget, paneTargetParts } from "./pane-context.js";
 import { migratedPaneView, type PaneView, ROOT_VIEW } from "./pane-model.js";
 
 const VIEW_KEY = "clio-coder-gui-pane-view";
@@ -35,11 +36,39 @@ function rememberOpen(open: boolean): void {
 	}
 }
 
+// The section the last show asked for, until the drill that holds it has shown it. The page that
+// owns the pane hands it only the view, so the request is kept here beside it; one session page is
+// mounted at a time, and any other navigation of the pane drops it.
+let requestedSection: PaneSection | null = null;
+const sectionListeners = new Set<() => void>();
+
+function requestSection(section: PaneSection | null): void {
+	if (requestedSection === section) return;
+	requestedSection = section;
+	for (const listener of sectionListeners) listener();
+}
+
+function subscribeSection(listener: () => void): () => void {
+	sectionListeners.add(listener);
+	return () => sectionListeners.delete(listener);
+}
+
+const settleSection = () => requestSection(null);
+
+/** The section a show asked the pane to open at, and how its drill says it has been shown. */
+export function usePaneSection(): { section: PaneSection | null; settle: () => void } {
+	const section = useSyncExternalStore(subscribeSection, () => requestedSection);
+	return { section, settle: settleSection };
+}
+
 export interface PaneState {
 	readonly open: boolean;
 	readonly view: PaneView;
-	/** Open the pane on a view. `trigger` is the id of the control to return focus to on close. */
-	show(view: PaneView, trigger: string): void;
+	/**
+	 * Open the pane on a view, or at a section of one. `trigger` is the id of the control to return
+	 * focus to on close.
+	 */
+	show(target: PaneTarget, trigger: string): void;
 	/** Open the pane, or close it when it is already showing this view. */
 	toggle(view: PaneView, trigger: string): void;
 	close(): void;
@@ -56,7 +85,7 @@ export function usePaneState(fallbackTrigger: string): PaneState {
 		query.addEventListener("change", change);
 		return () => query.removeEventListener("change", change);
 	}, []);
-	const setView = useCallback((next: PaneView) => {
+	const storeView = useCallback((next: PaneView) => {
 		setViewState(next);
 		try {
 			localStorage.setItem(VIEW_KEY, next);
@@ -64,7 +93,15 @@ export function usePaneState(fallbackTrigger: string): PaneState {
 			// The preference holds in this tab.
 		}
 	}, []);
+	const setView = useCallback(
+		(next: PaneView) => {
+			requestSection(null);
+			storeView(next);
+		},
+		[storeView],
+	);
 	const close = useCallback(() => {
+		requestSection(null);
 		const dismissed = document.activeElement;
 		setOpen(false);
 		rememberOpen(false);
@@ -75,13 +112,15 @@ export function usePaneState(fallbackTrigger: string): PaneState {
 		});
 	}, [fallbackTrigger]);
 	const show = useCallback(
-		(next: PaneView, trigger: string) => {
+		(target: PaneTarget, trigger: string) => {
+			const { view: next, section } = paneTargetParts(target);
 			opener.current = trigger;
-			setView(next);
+			requestSection(section);
+			storeView(next);
 			setOpen(true);
 			rememberOpen(true);
 		},
-		[setView],
+		[storeView],
 	);
 	const toggle = useCallback(
 		(next: PaneView, trigger: string) => {

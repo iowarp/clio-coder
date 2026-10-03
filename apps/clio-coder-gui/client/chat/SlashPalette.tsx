@@ -4,7 +4,7 @@
  * list here only renders and answers the mouse.
  */
 
-import { type RefObject, useEffect, useLayoutEffect, useMemo, useRef } from "react";
+import { type RefObject, useEffect, useMemo, useRef } from "react";
 import type { AgentCapabilities } from "../../contracts/capabilities.js";
 import type { Client } from "../api/client.js";
 import { Dialog } from "../interaction/Dialog.js";
@@ -97,8 +97,7 @@ const DIALOG_COPY: Readonly<Record<SlashAction, { title: string; eyebrow: string
 };
 
 /**
- * One session action in a modal over the conversation. The panel is the same component the pane's
- * Session tools drill renders, in its frameless form. The focus trap returns focus to the composer
+ * One session action in a modal over the conversation, each panel in its dialog form. The focus trap returns focus to the composer
  * that opened it.
  */
 export function SlashActionDialog({
@@ -140,14 +139,6 @@ export function SlashActionDialog({
 		}),
 		[action],
 	);
-	// FleetRunPanel is not ours to restructure and renders as a closed `<details>`; it is opened once
-	// here so the dialog does not land on a second disclosure. Before paint and before the focus trap
-	// runs, which could not focus a control inside a closed disclosure.
-	useLayoutEffect(() => {
-		if (action !== "fleet-run") return;
-		const details = body.current?.querySelector("details");
-		if (details && !details.open) details.open = true;
-	}, [action]);
 	const facts = { client, sessionId, sessionOpen, capabilities, running } as const;
 	const copy = DIALOG_COPY[action];
 	return (
@@ -162,13 +153,7 @@ export function SlashActionDialog({
 				) : action === "extensions" ? (
 					<ExtensionsPanel {...facts} />
 				) : (
-					<FleetRunPanel
-						client={client}
-						sessionId={sessionId}
-						sessionOpen={sessionOpen}
-						capabilities={capabilities}
-						running={running}
-					/>
+					<FleetRunPanel {...facts} variant="dialog" />
 				)}
 			</div>
 		</Dialog>

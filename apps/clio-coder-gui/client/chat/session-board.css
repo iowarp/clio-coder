@@ -28,6 +28,10 @@
 	padding-block: var(--space-2);
 	border-bottom: 1px solid var(--line);
 }
+/* Rows with no id column, such as the extensions list, so the status keeps its own width. */
+.session-board__rows--untagged > li {
+	grid-template-columns: minmax(0, 1fr) auto;
+}
 .session-board__id {
 	font-family: var(--font-mono);
 	font-size: var(--text-exact);

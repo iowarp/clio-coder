@@ -23,7 +23,6 @@ export const ExtensionsPanel = memo(function ExtensionsPanel({
 	sessionOpen: boolean;
 	capabilities: AgentCapabilities | undefined;
 	running: boolean;
-	/** Render without the disclosure frame, for a host that supplies its own heading. */
 }) {
 	const queries = useQueryClient();
 	const params = { params: { id: sessionId }, query: {}, body: {} };
@@ -50,7 +49,7 @@ export const ExtensionsPanel = memo(function ExtensionsPanel({
 					{list.data.extensions.length === 0 ? (
 						<p className="session-board__empty">No extension is installed for this project.</p>
 					) : (
-						<ul className="session-board__rows">
+						<ul className="session-board__rows session-board__rows--untagged">
 							{extensionRows(list.data).map((row) => (
 								<li key={row.key}>
 									<span className="session-board__title">
@@ -88,5 +87,5 @@ export const ExtensionsPanel = memo(function ExtensionsPanel({
 			) : null}
 		</>
 	);
-	return <div className="session-board extensions-panel extensions-panel--bare">{body}</div>;
+	return <div className="session-board extensions-panel">{body}</div>;
 });

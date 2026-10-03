@@ -14,11 +14,12 @@ import type { AgentCapabilities } from "../../contracts/capabilities.js";
 import type { CommandCatalog, CommandDescriptor } from "../../contracts/steering.js";
 import { prefixScore } from "../interaction/prefix-score.js";
 import { type CommandFields, type CommandPlan, planCommand } from "./command-model.js";
+import type { PaneSection } from "./pane-context.js";
 
 /** Session actions hosted in a dialog over the conversation. */
 export type SlashAction = "tree" | "fork" | "handoff" | "btw" | "draft" | "extensions" | "fleet-run";
-/** Pane views a slash name opens beside the conversation. */
-export type SlashPaneView = "context" | "usage" | "board";
+/** Pane views a slash name opens beside the conversation, `/decisions` at the board's Decisions. */
+export type SlashPaneView = "context" | "usage" | "board" | { readonly view: "board"; readonly section: PaneSection };
 
 interface EntryBase {
 	readonly id: string;
@@ -189,8 +190,8 @@ const PANES: readonly PaneSpec[] = [
 	{
 		id: "decisions",
 		name: "decisions",
-		view: "board",
-		summary: "Open tasks and decisions beside the conversation",
+		view: { view: "board", section: "decisions" },
+		summary: "Open the session's decisions beside the conversation",
 		supported: (capabilities) => !!capabilities.board,
 	},
 ];

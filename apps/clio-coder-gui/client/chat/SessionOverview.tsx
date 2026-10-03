@@ -269,19 +269,25 @@ export function SessionOverview({
 				)}
 			</Section>
 
-			{runs.length > 0 ? (
+			{/* A session that can run fleets keeps the section with no runs, because its drill holds the
+			    form that starts one. */}
+			{runs.length > 0 || capabilities.data?.fleet ? (
 				<Section
 					id="pane-agents"
 					title="Agents"
 					open={() => onOpen("agents")}
 					aside={
-						<span className="pane-card__state">
-							{live.length > 0 ? `${live.length} live · ` : ""}
-							{runs.length} {runs.length === 1 ? "run" : "runs"}
-						</span>
+						runs.length > 0 ? (
+							<span className="pane-card__state">
+								{live.length > 0 ? `${live.length} live · ` : ""}
+								{runs.length} {runs.length === 1 ? "run" : "runs"}
+							</span>
+						) : null
 					}
 				>
-					{live.length > 0 ? (
+					{runs.length === 0 ? (
+						<p className="pane-empty">No agents dispatched yet.</p>
+					) : live.length > 0 ? (
 						<ul className="pane-agents">
 							{live.slice(0, 4).map((run) => (
 								<li key={run.runId}>

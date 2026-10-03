@@ -152,29 +152,13 @@
 	overflow-wrap: anywhere;
 }
 
-/* A session action in its dialog. The panels it hosts render frameless; one that still renders as a
-   disclosure (FleetRunPanel) is opened by the host, and its frame and summary fold away here so the
-   dialog's own heading is the only one. */
+/* A session action in its dialog. The dialog's own heading is the only one, so a panel's first
+   block sits flush under it. */
 .slash-dialog:focus {
 	outline: none;
 }
-.slash-dialog > details {
-	margin: 0;
-	padding: 0;
-	border: 0;
-	background: transparent;
-	box-shadow: none;
-}
-.slash-dialog > details > summary {
-	display: none;
-}
 .slash-dialog > :first-child > :first-child {
 	margin-top: 0;
-}
-
-/* The extension rows carry no id column, so the status keeps its own width instead of the title's. */
-.extensions-panel--bare .session-board__rows > li {
-	grid-template-columns: minmax(0, 1fr) auto;
 }
 
 @media (max-width: 650px) {

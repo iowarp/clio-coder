@@ -15,8 +15,7 @@ import { LiveWorkers, workerCount } from "../chat/FleetStrip.js";
 import { foldFleetRuns, isLiveRun } from "../chat/fleet-facts.js";
 import { type HealthRow, type HealthSummary, summarizeHealth } from "../chat/health.js";
 import { Interview } from "../chat/Interview.js";
-import { PaneContext } from "../chat/pane-context.js";
-import type { PaneView } from "../chat/pane-model.js";
+import { PaneContext, type PaneTarget } from "../chat/pane-context.js";
 import { usePaneState } from "../chat/pane-state.js";
 import { routeFacts } from "../chat/route.js";
 import { PaneToggles, SessionPane } from "../chat/SessionPane.js";
@@ -124,7 +123,10 @@ function SessionView({ client, id }: { client: Client; id: string }) {
 	const navigate = useNavigate();
 	const ids = { changes: useId(), pane: useId() };
 	const pane = usePaneState(ids.pane);
-	const paneActions = useMemo(() => ({ show: (view: PaneView) => pane.show(view, ids.pane) }), [pane.show, ids.pane]);
+	const paneActions = useMemo(
+		() => ({ show: (target: PaneTarget) => pane.show(target, ids.pane) }),
+		[pane.show, ids.pane],
+	);
 	useShortcut("sessionPanel", () => (pane.open ? pane.close() : pane.show(pane.view, ids.pane)));
 	useShortcut("focusComposer", () => document.querySelector<HTMLTextAreaElement>(".composer__field")?.focus());
 	useShortcut("agents", () => pane.show("agents", ids.pane));

@@ -11,6 +11,7 @@ import { ChangesView } from "./ChangesView.js";
 import { ContextPanel } from "./ContextPanel.js";
 import { changeCounts, NO_CHANGES, summarizeChanges } from "./changes-model.js";
 import { PANE_VIEWS, type PaneView, paneViewLabel, ROOT_VIEW, selectPaneSession } from "./pane-model.js";
+import { usePaneSection } from "./pane-state.js";
 import { SessionBoardPanel } from "./SessionBoard.js";
 import { SessionOverview } from "./SessionOverview.js";
 import { selectSessionPanel } from "./session-panel-model.js";
@@ -45,6 +46,7 @@ export const SessionPane = memo(function SessionPane({
 }) {
 	countRender("session-pane");
 	const headId = useId();
+	const requested = usePaneSection();
 	const aside = useRef<HTMLElement>(null);
 	const dialog = useRef<HTMLDialogElement>(null);
 	const [wide, setWide] = useState(() => typeof window === "undefined" || matchMedia("(min-width: 1100px)").matches);
@@ -144,7 +146,14 @@ export const SessionPane = memo(function SessionPane({
 				};
 				if (id === "context") return <ContextPanel {...facts} />;
 				if (id === "usage") return <UsagePanel {...facts} />;
-				return <SessionBoardPanel {...facts} running={pane.turns.at(-1)?.status === "running"} />;
+				return (
+					<SessionBoardPanel
+						{...facts}
+						running={pane.turns.at(-1)?.status === "running"}
+						section={view === "board" ? requested.section : null}
+						onSectionShown={requested.settle}
+					/>
+				);
 			}
 		}
 	};
