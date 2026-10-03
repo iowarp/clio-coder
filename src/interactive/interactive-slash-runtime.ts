@@ -638,8 +638,14 @@ export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps)
 				// transcript detail policy (every body open, full receipts) with no
 				// operator overrides, and rendered at a stable width. HTML converts
 				// the resulting ANSI presentation to inline styles; Markdown keeps the
-				// prior plain-text fenced transcript.
-				const exportPanel = createChatPanel({ unboundedToolBodies: true, getOutputStyle: () => "detailed" });
+				// prior plain-text fenced transcript. Code blocks drop Pi's fence
+				// rows, which the live transcript keeps, so they neither show as
+				// border characters in HTML nor widen the Markdown outer fence.
+				const exportPanel = createChatPanel({
+					unboundedToolBodies: true,
+					bareCodeFences: true,
+					getOutputStyle: () => "detailed",
+				});
 				// Scoped to the leaf the session is on, the same way /resume replays
 				// (issue #107): with a /tree pin persisted and not yet extended, the
 				// file still holds the abandoned branch after the pin, and an unscoped

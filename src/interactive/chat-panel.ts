@@ -80,6 +80,16 @@ import type { WorkerEntryState } from "./worker-stream.js";
 const CHAT_MARKDOWN_THEME = markdownTheme(clioTheme(), (code, lang) =>
 	codeInk(lang?.trim().split(/\s+/u, 1)[0], code.split("\n")),
 );
+// /export writes plain text inside its own fence, so Pi's top-level fence rows
+// are noise there and widen that outer fence. Pi gives no switch for them, so
+// the export panel's theme tags every fence row it draws with a Unicode
+// noncharacter, which valid text never carries, and `exportFenceRow` resolves
+// the tags row by row.
+const EXPORT_FENCE_MARK = "\uFDD0";
+const EXPORT_MARKDOWN_THEME = {
+	...CHAT_MARKDOWN_THEME,
+	codeBlockBorder: (text: string) => `${EXPORT_FENCE_MARK}${CHAT_MARKDOWN_THEME.codeBlockBorder(text)}`,
+};
 const mermaidTransform = createMermaidMarkdownTransform(clioTheme());
 const CHAT_MARKDOWN_OPTIONS = {
 	transform: (text: string, width: number) => {
@@ -439,6 +449,13 @@ export interface ChatPanelOptions {
 	 */
 	unboundedToolBodies?: boolean;
 	/**
+	 * Draw a top-level fenced code block as its language word over its code rows,
+	 * without the literal fence rows Pi's Markdown adds, which the live transcript
+	 * keeps. `/export` sets it so the written file carries no fence rows of its own
+	 * to close its outer fence early or show as border characters in HTML.
+	 */
+	bareCodeFences?: boolean;
+	/**
 	 * Run `step` when the process is otherwise idle, again after each call that
 	 * returns true. The panel uses it to render settled entries in the two
 	 * output styles it is not showing, a few milliseconds at a time, so the
@@ -728,8 +745,34 @@ function fitMarkdownTables(text: string, width: number): string {
 		.join("");
 }
 
-function chatMarkdown(text: string): Markdown {
-	return new Markdown(text, 0, 0, CHAT_MARKDOWN_THEME, undefined, CHAT_MARKDOWN_OPTIONS);
+function chatMarkdown(text: string, bareFences: boolean): Markdown {
+	return new Markdown(
+		text,
+		0,
+		0,
+		bareFences ? EXPORT_MARKDOWN_THEME : CHAT_MARKDOWN_THEME,
+		undefined,
+		CHAT_MARKDOWN_OPTIONS,
+	);
+}
+
+/**
+ * One row of an export panel's Markdown, with its fence tags resolved. A fence
+ * at the top level starts its row with the tag: the opening row becomes the
+ * language word as a quiet label and every other fence row is dropped, which is
+ * how the export drew a code block before Pi's fence rows reached the transcript.
+ * A fence nested in a list or quote carries that block's indent ahead of the
+ * tag and keeps Pi's literal row, as it always did.
+ */
+function exportFenceRow(row: string): string | null {
+	const tagAt = row.indexOf(EXPORT_FENCE_MARK);
+	if (tagAt < 0) return row;
+	if (tagAt > 0) return row.replace(EXPORT_FENCE_MARK, "");
+	const lang = stripTerminalSequences(row)
+		.slice(EXPORT_FENCE_MARK.length + 3)
+		.trim()
+		.split(/\s+/u, 1)[0];
+	return lang ? clioTheme().fg("annotation", lang) : null;
 }
 
 /**
@@ -739,10 +782,12 @@ function chatMarkdown(text: string): Markdown {
  * frame than the same row trimmed first. The regex keeps a trailing no-break
  * space, which Mermaid rows use.
  */
-function markdownRows(md: Markdown, width: number): string[] {
+function markdownRows(md: Markdown, width: number, bareFences: boolean): string[] {
 	const rows: string[] = [];
 	for (const padded of md.render(width)) {
-		const line = padded.replace(/ +$/u, "");
+		const trimmed = padded.replace(/ +$/u, "");
+		const line = bareFences ? exportFenceRow(trimmed) : trimmed;
+		if (line === null) continue;
 		const parts = visibleWidth(line) > width ? wrapTextWithAnsi(line, width) : [line];
 		for (const part of parts) {
 			const fitted = visibleWidth(part) > width ? truncateToWidth(part, width, "") : part;
@@ -760,18 +805,18 @@ function markdownRows(md: Markdown, width: number): string[] {
  * the answer finalizes. setText always invalidates that cache, so it runs only
  * when the projected text changed.
  */
-function renderTextSegmentLines(seg: TextSegment, width: number): string[] {
+function renderTextSegmentLines(seg: TextSegment, width: number, bareFences: boolean): string[] {
 	if (!seg.finalized && seg.diffusion) {
 		return renderDiffusionFrameLines(seg, seg.diffusion.settled, width);
 	}
 	seg.prose ??= new AssistantProseProjection();
 	const prose = seg.prose.project(seg.text, seg.finalized);
-	if (seg.markdown === undefined) seg.markdown = { view: chatMarkdown(prose), source: prose };
+	if (seg.markdown === undefined) seg.markdown = { view: chatMarkdown(prose, bareFences), source: prose };
 	else if (seg.markdown.source !== prose) {
 		seg.markdown.view.setText(prose);
 		seg.markdown.source = prose;
 	}
-	return withoutLeadingBlanks(markdownRows(seg.markdown.view, width));
+	return withoutLeadingBlanks(markdownRows(seg.markdown.view, width, bareFences));
 }
 
 /**
@@ -1188,6 +1233,7 @@ function renderEntryLines(
 	width: number,
 	nowMs: number,
 	unboundedToolBodies: boolean,
+	bareFences: boolean,
 	detail: TranscriptDetailPolicy,
 	terminalRows: number,
 	previous?: TranscriptEntry,
@@ -1303,7 +1349,7 @@ function renderEntryLines(
 		if (split) {
 			flushReasoning("words");
 			blocks.push({ kind: "tool", lines: renderSkillSuggestionRow(split.suggestion, width), body: false });
-			const answerLines = renderTextSegmentLines(split.answer, proseWidth);
+			const answerLines = renderTextSegmentLines(split.answer, proseWidth, bareFences);
 			if (answerLines.length > 0) blocks.push({ kind: "prose", lines: hangProseLines(answerLines, CLIO_PREFIX) });
 			continue;
 		}
@@ -1319,7 +1365,7 @@ function renderEntryLines(
 		}
 		let rendered =
 			seg.kind === "text"
-				? renderTextSegmentLines(seg, proseWidth)
+				? renderTextSegmentLines(seg, proseWidth, bareFences)
 				: renderErrorSegmentLines(seg, proseWidth, unboundedToolBodies);
 		if (seg.kind === "error" && !unboundedToolBodies) {
 			rendered = previewRows(rendered, previewBudget(detail.errorRows, terminalRows), proseWidth);
@@ -1377,7 +1423,7 @@ const WARM_ANSWER = [
 export function warmTranscriptRender(width: number): void {
 	const safeWidth = Math.max(20, Math.floor(width));
 	renderUserLines("Warm the transcript.", safeWidth, "committed");
-	renderTextSegmentLines({ kind: "text", text: WARM_ANSWER, finalized: true }, safeWidth - PROSE_GUTTER_WIDTH);
+	renderTextSegmentLines({ kind: "text", text: WARM_ANSWER, finalized: true }, safeWidth - PROSE_GUTTER_WIDTH, false);
 	const calls: ToolExecutionFinished[] = [
 		{
 			toolCallId: "warm-read",
@@ -1476,6 +1522,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 	 */
 	let frozen: { lines: string[]; through: number; key: string } | null = null;
 	const unboundedToolBodies = options.unboundedToolBodies === true;
+	const bareFences = options.bareCodeFences === true;
 	/**
 	 * Settled entries are rendered ahead, in idle time, in the styles Alt+O
 	 * cycles to, into the same per-entry cache a revisit reads. A first visit to
@@ -1915,7 +1962,16 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 				for (const line of cached) out.push(line);
 			} else {
 				entriesRendered += 1;
-				const renderedEntry = renderEntryLines(entry, width, nowMs, unboundedToolBodies, detail, terminalRows, previous);
+				const renderedEntry = renderEntryLines(
+					entry,
+					width,
+					nowMs,
+					unboundedToolBodies,
+					bareFences,
+					detail,
+					terminalRows,
+					previous,
+				);
 				for (const line of renderedEntry) out.push(line);
 				if (cacheable) {
 					const byKey = renders ?? new Map<string, string[]>();
@@ -1990,6 +2046,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 					job.width,
 					now(),
 					unboundedToolBodies,
+					bareFences,
 					transcriptDetail(style),
 					job.terminalRows,
 					transcript[index - 1],
