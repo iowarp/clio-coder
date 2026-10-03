@@ -1,10 +1,19 @@
 import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { test } from "node:test";
+import type { Model } from "@earendil-works/pi-ai";
 import { Type } from "typebox";
 import { responseFormatFor, responseSchemaDialectFor } from "../../src/core/response-schema.js";
+import ollamaRuntime from "../../src/domains/providers/runtimes/local-native/ollama.js";
+import litellmRuntime from "../../src/domains/providers/runtimes/protocol/litellm.js";
 import { engineStreamSimple } from "../../src/engine/api-registry.js";
+import { ollamaNativeApiProvider } from "../../src/engine/apis/ollama-native.js";
 import { engineModels } from "../../src/engine/models.js";
-import { applyToolRounds, supportsNamedToolChoice, type ToolRound } from "../../src/engine/provider-payload.js";
+import {
+	applyToolRounds,
+	deterministicSampling,
+	supportsNamedToolChoice,
+	type ToolRound,
+} from "../../src/engine/provider-payload.js";
 import type { EngineModel } from "../../src/engine/types.js";
 
 const name = "clio_submit_result";
@@ -17,7 +26,12 @@ const handoff: ToolRound = { kind: "required", toolName: name, handoff: true };
 const lock: ToolRound = { kind: "tools-removed" };
 
 /** The wire body Pi's own serializer builds for one controlled round; no network is reached. */
-async function wire(model: EngineModel, rounds: readonly (ToolRound | undefined)[], reasoning = true) {
+async function wire(
+	model: EngineModel,
+	rounds: readonly (ToolRound | undefined)[],
+	reasoning = true,
+	extra: NonNullable<Parameters<typeof applyToolRounds>[2]> = {},
+) {
 	const usage = { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2 };
 	const context = {
 		systemPrompt: "Terminal protocol.",
@@ -48,7 +62,7 @@ async function wire(model: EngineModel, rounds: readonly (ToolRound | undefined)
 	const controlled = applyToolRounds(
 		model,
 		context,
-		{ apiKey: "fixture", ...(reasoning ? { reasoning: "high" as const } : {}) },
+		{ apiKey: "fixture", ...(reasoning ? { reasoning: "high" as const } : {}), ...extra },
 		rounds,
 	);
 	let body: Record<string, unknown> = {};
@@ -147,6 +161,47 @@ test("unknown API does not claim forced-tool support", () => {
 	const controlled = applyToolRounds(model, request, undefined, [handoff]);
 	strictEqual(controlled.context, request);
 	strictEqual(controlled.options, undefined);
+});
+test("deterministic sampling is limited to compatible self-hosted APIs", async () => {
+	// The worker merges deterministicSampling over its stream options; the body below is what each API then serializes.
+	const sampled = (model: EngineModel, runtimeId: string) =>
+		wire(model, [], false, { ...deterministicSampling(model, runtimeId) });
+	const gateway = (id: string) =>
+		litellmRuntime.synthesizeModel({ id: "gateway", runtime: "litellm", url: "http://gateway.invalid:4000" }, id, null);
+	const local = await sampled(gateway("dynamo/qwen3.8-27b") as EngineModel, "litellm");
+	strictEqual(local.temperature, 0);
+	strictEqual(local.seed, 42);
+	// Anthropic proxies reject non-default sampling even behind a self-hosted gateway.
+	const claude = await sampled(gateway("claude-sonnet-4") as EngineModel, "litellm");
+	strictEqual(claude.temperature, undefined);
+	strictEqual(claude.seed, undefined);
+	// Hosted dialects may reject a seed or a zero temperature, so a runtime outside the self-hosted list sends neither.
+	const hosted = await sampled(catalog("openrouter", "google/gemini-2.5-flash:batch"), "openrouter");
+	strictEqual(hosted.temperature, undefined);
+	strictEqual(hosted.seed, undefined);
+	// Ollama has no Pi serializer; its adapter carries the seed as a nested option.
+	const ollama = ollamaRuntime.synthesizeModel?.(
+		{ id: "o", runtime: "ollama", url: "http://127.0.0.1:9", lifecycle: "user-managed" },
+		"qwen3:30b-a3b-instruct",
+		null,
+	) as Model<"ollama-native">;
+	let request: { options?: { temperature?: number; seed?: number } } = {};
+	await ollamaNativeApiProvider
+		.streamSimple(
+			ollama,
+			{ messages: [{ role: "user", content: "inspect", timestamp: 1 }] },
+			{
+				apiKey: "fixture",
+				...deterministicSampling(ollama, "ollama"),
+				onPayload: (payload) => {
+					request = structuredClone(payload) as typeof request;
+					throw new Error("captured before network I/O");
+				},
+			},
+		)
+		.result();
+	strictEqual(request.options?.temperature, 0);
+	strictEqual(request.options?.seed, 42);
 });
 test("admitted LiteLLM response schema uses gateway dialect while llama retains native dialect", () => {
 	const schema = { type: "object", properties: {} };

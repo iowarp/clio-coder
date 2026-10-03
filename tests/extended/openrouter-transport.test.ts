@@ -166,6 +166,8 @@ describe("OpenRouter catalog transport", () => {
 			} else {
 				strictEqual(payload.system, undefined);
 				strictEqual(payload.thinking, undefined);
+				// Hosted catalog models carry no runtime metadata, so Clio's chat-template overlay never reaches them.
+				strictEqual(payload.chat_template_kwargs, undefined);
 				strictEqual(result.api, "openai-completions");
 			}
 		});

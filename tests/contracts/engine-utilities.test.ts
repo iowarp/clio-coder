@@ -77,6 +77,11 @@ test("prompt arguments retain quoted, positional, slice and raw substitution sem
 	strictEqual(substituteArgs("$ARGUMENTS", args, 'literal $1 $@ "quoted"'), 'literal $1 $@ "quoted"');
 	// biome-ignore lint/suspicious/noTemplateCurlyInString: These are prompt placeholders passed to the substitution API.
 	strictEqual(substituteArgs("${1:-7}|${@:-all}|${ARGUMENTS:-none}", [], ""), "7|all|none");
+	// Clio's default form inserts the raw payload exactly when parsed arguments exist and falls back when only whitespace was typed.
+	// biome-ignore lint/suspicious/noTemplateCurlyInString: These are prompt placeholders passed to the substitution API.
+	strictEqual(substituteArgs("${ARGUMENTS:-d}", args, raw), raw);
+	// biome-ignore lint/suspicious/noTemplateCurlyInString: These are prompt placeholders passed to the substitution API.
+	strictEqual(substituteArgs("${ARGUMENTS:-d}", parseCommandArgs(" \t "), " \t "), "d");
 	// biome-ignore lint/suspicious/noTemplateCurlyInString: These are prompt placeholders passed to the substitution API.
 	strictEqual(substituteArgs("$1|${@:1:1}", ["$@", "b"]), "$@|$@");
 });

@@ -421,6 +421,62 @@ describe("provider transport boundary", () => {
 		deepStrictEqual(done.message.content, [{ type: "text", text: "wire-ok" }]);
 	});
 
+	it("reports the response model id, cache-read count and llama.cpp timings only when the stream carried them", async () => {
+		const done = async (chunks: ReadonlyArray<Record<string, unknown>>) => {
+			const model = synthesizeOpenAICompatModel({
+				target: { id: "local", runtime: "llamacpp", url: "http://llama.invalid:8080", lifecycle: "user-managed" },
+				wireModelId: "wire-model",
+				kb: null,
+				defaultCapabilities: { ...EMPTY_CAPABILITIES, chat: true },
+				provider: "llamacpp",
+			}) as Model<"openai-completions">;
+			const context = { messages: [{ role: "user", content: "hello", timestamp: 0 }] } as unknown as Context;
+			const body = [...chunks.map((chunk) => `data: ${JSON.stringify(chunk)}`), "data: [DONE]", ""].join("\n\n");
+			const result = await openAICompletionsApiProvider
+				.streamSimple(model, context, {
+					apiKey: "test-key",
+					fetch: async () => new Response(body, { status: 200, headers: { "content-type": "text/event-stream" } }),
+				})
+				.result();
+			strictEqual(result.stopReason, "stop", result.errorMessage);
+			return result;
+		};
+		const reported = await done([
+			{ model: "served-model", choices: [{ index: 0, delta: { content: "ok" } }] },
+			{
+				model: "served-model",
+				choices: [{ index: 0, delta: {}, finish_reason: "stop" }],
+				usage: {
+					prompt_tokens: 100,
+					completion_tokens: 5,
+					total_tokens: 105,
+					prompt_tokens_details: { cached_tokens: 80 },
+				},
+				timings: { prompt_n: 20, prompt_ms: 40, predicted_n: 5, predicted_ms: 100, cache_n: 80 },
+			},
+		]);
+		deepStrictEqual(reported.responseModelIdObservation, { state: "reported", reportedModelId: "served-model" });
+		strictEqual(reported.usage.cacheReadReported, true);
+		deepStrictEqual(reported.backendTimings, {
+			promptTokens: 100,
+			cachedTokens: 80,
+			predictedTokens: 5,
+			promptMs: 40,
+			predictedMs: 100,
+			source: "llamacpp-timings",
+		});
+		const silent = await done([
+			{ choices: [{ index: 0, delta: { content: "ok" } }] },
+			{
+				choices: [{ index: 0, delta: {}, finish_reason: "stop" }],
+				usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+			},
+		]);
+		deepStrictEqual(silent.responseModelIdObservation, { state: "not-reported" });
+		strictEqual(silent.usage.cacheReadReported, false);
+		strictEqual(silent.backendTimings, undefined);
+	});
+
 	it("applies LiteLLM request controls and records its physical route", async () => {
 		const model = litellmRuntime.synthesizeModel(
 			{

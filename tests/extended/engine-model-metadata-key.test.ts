@@ -1,7 +1,10 @@
-import { strictEqual } from "node:assert/strict";
+import { ok, strictEqual } from "node:assert/strict";
+import { join } from "node:path";
 import { afterEach, describe, it } from "node:test";
 import type { Model } from "@earendil-works/pi-ai";
 
+import { FileKnowledgeBase } from "../../src/domains/providers/types/knowledge-base.js";
+import { extractLocalModelQuirks } from "../../src/domains/providers/types/local-model-quirks.js";
 import { openAICompletionsApiProvider } from "../../src/engine/apis/openai-completions.js";
 import { closeServer, type OpenAICompatFixture, startOpenAICompatFixture } from "../harness/openai-compat-fixture.js";
 
@@ -30,7 +33,7 @@ async function fixture(id: string): Promise<OpenAICompatFixture> {
 function model(
 	server: OpenAICompatFixture,
 	id: string,
-	provider: "lmstudio" | "llamacpp",
+	provider: "lmstudio" | "llamacpp" | "vllm",
 	clioCoder: Record<string, unknown>,
 ): Model<"openai-completions"> {
 	return {
@@ -118,6 +121,38 @@ describe("contracts/engine reads model.clioCoder", () => {
 		);
 		strictEqual(request.temperature, 0.55);
 		strictEqual(request.top_p, 0.8);
+	});
+
+	it("LM Studio sends the target's ttl and draft_model and lets its reasoning override beat the thinking level", async () => {
+		const id = "nvidia-nemotron-3.5-lightning-30b-a3b";
+		const server = await fixture(id);
+		// No thinking level is requested, which alone would send reasoning_effort none.
+		const request = await lastRequest(
+			server,
+			model(server, id, "lmstudio", {
+				family: "nemotron-3.5-lightning-30b-a3b",
+				chatTemplateKwargsUnsupported: true,
+				lmstudio: { request: { ttlSeconds: 900, draftModel: "qwen-draft", reasoning: "medium" } },
+			}),
+		);
+		strictEqual(request.ttl, 900);
+		strictEqual(request.draft_model, "qwen-draft");
+		strictEqual(request.reasoning_effort, "medium");
+	});
+
+	it("an always-on family still sends its level-keyed chat template kwarg on vLLM", async () => {
+		const id = "muse-glimmer-30b";
+		const hit = new FileKnowledgeBase(join(process.cwd(), "src/domains/providers/models")).lookup(id);
+		ok(hit, "the Muse Glimmer family must exist in the catalog");
+		const server = await fixture(id);
+		const request = await lastRequest(
+			server,
+			model(server, id, "vllm", { family: hit.entry.family, quirks: extractLocalModelQuirks(hit.entry.quirks) }),
+			"high",
+		);
+		// Pi's chat-template branch never carries a family key, so the overlay has to.
+		strictEqual((request.chat_template_kwargs as Record<string, unknown>)?.reasoning_strength, "high");
+		strictEqual(request.reasoning_effort, undefined);
 	});
 
 	it("llama.cpp keeps the template flag and asks for the prompt cache", async () => {
