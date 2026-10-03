@@ -1469,8 +1469,23 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 			}
 		},
 		registerInputListener: (listener) => {
-			if (lease) lease.registerApplicationInput(listener);
-			else tui.setApplicationInputPolicy(listener);
+			const handleInput: typeof listener = (data) => {
+				const overlayState = overlayLifecycle.getState();
+				try {
+					return listener(data);
+				} catch (error) {
+					if (overlayState === "closed") throw error;
+					overlayLifecycle.closeOverlay();
+					notify(
+						"error",
+						`Overlay closed after an input error: ${error instanceof Error ? error.message : String(error)}`,
+						"overlay:input-error",
+					);
+					return { consume: true };
+				}
+			};
+			if (lease) lease.registerApplicationInput(handleInput);
+			else tui.setApplicationInputPolicy(handleInput);
 		},
 		...(lease
 			? {

@@ -1067,27 +1067,40 @@ export const SETTINGS_SECTION_ROWS = Object.fromEntries(
 	]),
 ) as unknown as Record<SettingsSectionId, readonly EditableSettingId[]>;
 
+interface SettingItemOptions {
+	values?: readonly string[];
+	submenu?: SettingSubmenuBuilder;
+	affordance?: string;
+	readOnly?: boolean;
+	presentationKind?: SettingsPresentationKind;
+	valueSegments?: readonly SettingsValueSegment[];
+	label?: string;
+	description?: string;
+	help?: string;
+	editValue?: string;
+}
+
+function hasSettingMetadata(id: EditableSettingId): id is keyof typeof SETTINGS_LABELS_BY_ID {
+	return Object.hasOwn(SETTINGS_LABELS_BY_ID, id);
+}
+
 function settingItem(
-	id: EditableSettingId,
+	id: keyof typeof SETTINGS_LABELS_BY_ID,
 	currentValue: string,
-	options: {
-		values?: readonly string[];
-		submenu?: SettingSubmenuBuilder;
-		affordance?: string;
-		readOnly?: boolean;
-		presentationKind?: SettingsPresentationKind;
-		valueSegments?: readonly SettingsValueSegment[];
-		label?: string;
-		description?: string;
-		help?: string;
-		editValue?: string;
-	},
-): SettingsCenterItem {
+	options: SettingItemOptions,
+): SettingsCenterItem;
+function settingItem(
+	id: EntrySettingId,
+	currentValue: string,
+	options: SettingItemOptions & Pick<SettingsCenterItem, "label" | "description">,
+): SettingsCenterItem;
+function settingItem(id: EditableSettingId, currentValue: string, options: SettingItemOptions): SettingsCenterItem {
+	const catalogId = hasSettingMetadata(id) ? id : null;
 	const item: SettingsCenterItem = {
 		id,
-		label: options.label ?? SETTINGS_LABELS_BY_ID[id as keyof typeof SETTINGS_LABELS_BY_ID],
+		label: options.label ?? (catalogId === null ? id : SETTINGS_LABELS_BY_ID[catalogId]),
 		currentValue,
-		description: options.description ?? SETTINGS_DESCRIPTIONS_BY_ID[id as keyof typeof SETTINGS_LABELS_BY_ID],
+		description: options.description ?? (catalogId === null ? "" : SETTINGS_DESCRIPTIONS_BY_ID[catalogId]),
 		section: sectionForSetting(id),
 		configPath: settingsV2PathForRow(id),
 		affordance:
@@ -1497,6 +1510,7 @@ export function buildSettingItems(
 			? [
 					settingItem("fleet.nodes.add", "Add SSH node", {
 						label: "Add SSH node",
+						description: "Add a remote worker node with guided SSH setup and project verification.",
 						presentationKind: "action",
 						submenu: fleetNodeSettingsSubmenu("add", {
 							text: textInputSubmenu,
@@ -1508,6 +1522,7 @@ export function buildSettingItems(
 					}),
 					settingItem("fleet.nodes.discover", "Discover with Tailscale", {
 						label: "Discover with Tailscale",
+						description: "Find Tailscale peers and review them before adding remote worker nodes.",
 						presentationKind: "action",
 						submenu: fleetNodeSettingsSubmenu("discover", {
 							text: textInputSubmenu,
@@ -3682,9 +3697,9 @@ export class SettingsCenter implements Component {
 		const query = this.effectiveFilterQuery().toLowerCase();
 		if (query.length === 0) return true;
 		return (
-			item.label.toLowerCase().includes(query) ||
-			item.configPath.toLowerCase().includes(query) ||
-			item.description.toLowerCase().includes(query) ||
+			(item.label ?? "").toLowerCase().includes(query) ||
+			(item.configPath ?? "").toLowerCase().includes(query) ||
+			(item.description ?? "").toLowerCase().includes(query) ||
 			context.toLowerCase().includes(query)
 		);
 	}
