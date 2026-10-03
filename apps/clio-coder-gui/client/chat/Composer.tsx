@@ -556,6 +556,52 @@ export const Composer = memo(function Composer({
 						))}
 					</ul>
 				) : null}
+				{pasteNotice && attachments.some((item) => item.id === pasteNotice.id) ? (
+					<p className="composer__paste-note" role="status">
+						<Icon name="paperclip" />
+						{pasteNotice.text}
+					</p>
+				) : null}
+				{attachments.length > 0 && !attachmentsStored ? (
+					<p className="composer__paste-note" role="status">
+						Browser draft storage is unavailable. These attachments are kept in memory; save them before reloading this tab.
+					</p>
+				) : null}
+				{pasteReview ? (
+					<div className="composer__paste-review" role="status">
+						<div className="composer__paste-head">
+							<StatusMark tone="warn" label="Paste kept for review" />
+							<span className="composer__paste-size">· {Math.max(1, Math.round(pasteReview.bytes / 1024))} KiB</span>
+							<span className="composer__paste-actions">
+								<button
+									type="button"
+									className="composer__attachment-action"
+									onClick={() => {
+										const url = URL.createObjectURL(new Blob([pasteReview.text], { type: "text/plain;charset=utf-8" }));
+										const link = document.createElement("a");
+										link.href = url;
+										link.download = "clio-coder-gui-pasted-text.txt";
+										link.click();
+										setTimeout(() => URL.revokeObjectURL(url), 1000);
+									}}
+								>
+									Save full paste
+								</button>
+								<button type="button" className="composer__attachment-action" onClick={() => setPasteReview(null)}>
+									Dismiss paste
+								</button>
+							</span>
+						</div>
+						<p>{pasteReview.reason}</p>
+						<details>
+							<summary>Preview pasted text</summary>
+							<pre>
+								{pasteReview.text.slice(0, 4000)}
+								{pasteReview.text.length > 4000 ? "\n… Preview shortened. The download contains the full paste." : ""}
+							</pre>
+						</details>
+					</div>
+				) : null}
 				<textarea
 					id={fieldId}
 					ref={field}
@@ -672,43 +718,6 @@ export const Composer = memo(function Composer({
 						submit();
 					}}
 				/>
-				{pasteNotice && attachments.some((item) => item.id === pasteNotice.id) ? (
-					<p className="composer__paste-note" role="status">
-						<Icon name="paperclip" />
-						{pasteNotice.text}
-					</p>
-				) : null}
-				{pasteReview ? (
-					<div className="composer__paste-review" role="status">
-						<strong>Paste kept for review · {Math.max(1, Math.round(pasteReview.bytes / 1024))} KiB</strong>
-						<p>{pasteReview.reason}</p>
-						<details>
-							<summary>Preview pasted text</summary>
-							<pre>
-								{pasteReview.text.slice(0, 4000)}
-								{pasteReview.text.length > 4000 ? "\n… Preview shortened. The download contains the full paste." : ""}
-							</pre>
-						</details>
-						<div>
-							<button
-								type="button"
-								onClick={() => {
-									const url = URL.createObjectURL(new Blob([pasteReview.text], { type: "text/plain;charset=utf-8" }));
-									const link = document.createElement("a");
-									link.href = url;
-									link.download = "clio-coder-gui-pasted-text.txt";
-									link.click();
-									setTimeout(() => URL.revokeObjectURL(url), 1000);
-								}}
-							>
-								Save full paste
-							</button>
-							<button type="button" onClick={() => setPasteReview(null)}>
-								Dismiss paste
-							</button>
-						</div>
-					</div>
-				) : null}
 				{store.uncertainSubmission() && (
 					<p className="composer__notice" role="status">
 						<StatusMark tone="warn" label="Review draft" />A send may have finished before this page reloaded. Check the
@@ -718,11 +727,6 @@ export const Composer = memo(function Composer({
 						</button>
 					</p>
 				)}
-				{attachments.length > 0 && !attachmentsStored ? (
-					<p className="composer__paste-note" role="status">
-						Browser draft storage is unavailable. These attachments are kept in memory; save them before reloading this tab.
-					</p>
-				) : null}
 				{attachProblem ? (
 					<p className="composer__notice" role="alert">
 						<StatusMark tone="fail" label="Not attached" />
