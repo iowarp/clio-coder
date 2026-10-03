@@ -20,6 +20,7 @@ import {
 import type { ResourcesContract } from "../domains/resources/index.js";
 import { installSkill } from "../domains/resources/skills/marketplace.js";
 import type { SessionContract, SessionEntry } from "../domains/session/index.js";
+import { verifyReceiptFileReport } from "../domains/session/view-artifacts.js";
 import { archiveCommandHost, type ShareContract } from "../domains/share/index.js";
 import type { UserTaskAcceptance } from "../domains/user-tasks/acceptance.js";
 import type { UserTasksStore } from "../domains/user-tasks/store.js";
@@ -50,7 +51,6 @@ import {
 	type SlashCommandDispatchResult,
 	type TaskMemorySeedCommandResult,
 } from "./slash-commands.js";
-import { verifyReceiptFileReport } from "./view/artifacts.js";
 import type { WorkerEntryState } from "./worker-stream.js";
 
 const EXPORT_RENDER_WIDTH = 100;

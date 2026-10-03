@@ -1,3 +1,4 @@
+import { formatFooterTokens } from "../core/display-units.js";
 import type { TokenThroughputSnapshot, UsageBreakdown } from "../domains/observability/index.js";
 import { sanitizeCallTargetText } from "../domains/safety/call-target.js";
 import type { Text } from "../engine/tui.js";
@@ -17,25 +18,7 @@ export const ACTIVE_DISPATCH_STATUSES: ReadonlySet<DispatchBoardStatus> = new Se
 ]);
 export const FAILED_DISPATCH_STATUSES: ReadonlySet<DispatchBoardStatus> = new Set(["failed", "aborted", "dead"]);
 
-/**
- * Render a token count with a single-letter magnitude suffix so the footer
- * stays short on long-running sessions. Values under 1,000 render as the
- * raw integer; 1,000-999,999 render with a `k` suffix and one decimal when
- * that digit is non-zero; 1,000,000+ uses `M`.
- */
-export function formatFooterTokens(n: number): string {
-	if (!Number.isFinite(n) || n <= 0) return "0";
-	const value = Math.round(n);
-	if (value < 1000) return value.toString();
-	if (value < 1_000_000) {
-		const scaled = value / 1000;
-		const fixed = scaled.toFixed(1);
-		return fixed.endsWith(".0") ? `${fixed.slice(0, -2)}k` : `${fixed}k`;
-	}
-	const scaled = value / 1_000_000;
-	const fixed = scaled.toFixed(1);
-	return fixed.endsWith(".0") ? `${fixed.slice(0, -2)}M` : `${fixed}M`;
-}
+export { formatFooterTokens };
 
 /**
  * Build the token-counter footer segment. Returns `null` when no usage has

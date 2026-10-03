@@ -48,6 +48,18 @@ import { toolResultPresentationText } from "../../tools/result-disposition.js";
 import { effectiveToolCall } from "../../tools/surface.js";
 import type { AgentMessage, ImageContent } from "../types.js";
 import {
+	ACP_ARTIFACT_CATEGORIES,
+	ACP_ARTIFACTS_LIST_METHOD,
+	ACP_ARTIFACTS_META_KEY,
+	ACP_ARTIFACTS_PER_CATEGORY,
+	ACP_ARTIFACTS_READ_METHOD,
+	type AcpArtifactsSource,
+	listAcpArtifacts,
+	parseArtifactCategories,
+	parseArtifactReadRequest,
+	readAcpArtifact,
+} from "./artifacts.js";
+import {
 	ACP_ASIDE_ASK_METHOD,
 	ACP_ASIDE_CANCEL_METHOD,
 	ACP_ASIDE_DRAFT_COUNTS,
@@ -354,6 +366,12 @@ export interface ClioAcpServerOptions {
 	 * means the capability is not announced and no workspace view is sent.
 	 */
 	workspace?: (cwd: string) => Promise<WorkspaceSnapshot>;
+	/**
+	 * The `/view` overlay's provider inputs for the bound session, read for
+	 * `_clio-coder/artifacts/*`. Absent means both methods are not announced
+	 * and refuse.
+	 */
+	artifacts?: AcpArtifactsSource;
 	/**
 	 * Expands operator syntax in a prompt as the terminal does before it submits:
 	 * `@path` file and image references, prompt templates and `/skill` requests,
@@ -2743,6 +2761,8 @@ export interface AcpHandshakeFeatures {
 	fleet?: boolean;
 	/** Whether `_clio-coder/context/ledger` answers; absent reads as false. */
 	contextLedger?: boolean;
+	/** Whether `_clio-coder/artifacts/list` and `/read` answer; absent reads as false. */
+	artifacts?: boolean;
 	/** Whether the extension list and reload methods answer; absent reads as false. */
 	extensions?: boolean;
 	/** Whether `_clio-coder/library/reload` answers; absent reads as false. */
@@ -3067,6 +3087,17 @@ export function createAcpHandshake(features: AcpHandshakeFeatures): AcpHandshake
 								}
 							: {}),
 						...(features.contextLedger ? { [ACP_CONTEXT_META_KEY]: { version: 1, ledger: ACP_CONTEXT_LEDGER_METHOD } } : {}),
+						...(features.artifacts
+							? {
+									[ACP_ARTIFACTS_META_KEY]: {
+										version: 1,
+										list: ACP_ARTIFACTS_LIST_METHOD,
+										read: ACP_ARTIFACTS_READ_METHOD,
+										categories: ACP_ARTIFACT_CATEGORIES,
+										perCategory: ACP_ARTIFACTS_PER_CATEGORY,
+									},
+								}
+							: {}),
 						...(features.fleet
 							? {
 									[ACP_FLEET_META_KEY]: {
@@ -3152,6 +3183,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 			handoff: handoffWired(options),
 			fleet: options.fleet !== undefined,
 			contextLedger: options.contextLedger !== undefined,
+			artifacts: options.artifacts !== undefined,
 			extensions: options.extensions !== undefined,
 			libraryReload: options.libraryReload !== undefined,
 			aside: options.aside !== undefined,
@@ -4471,6 +4503,47 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 		} catch (error) {
 			options.diagnostics?.(`context ledger failed: ${acpErrorMessage(error)}`);
 			throw new AcpRequestError(-32603, "context ledger could not be read", { code: "internal_error" });
+		}
+	});
+
+	// The terminal's /view artifacts, from the overlay's own providers.
+	const artifactDeps = (request: Record<string, unknown>) => {
+		requireInitialized();
+		if (options.artifacts === undefined) {
+			throw new AcpRequestError(-32601, "method not found", { code: "method_not_found" });
+		}
+		const session = getSession(request);
+		const deps = options.artifacts.deps(session.id);
+		if (deps === null) {
+			throw new AcpRequestError(-32002, "session is not the bound session", { code: "session_not_bound" });
+		}
+		return deps;
+	};
+	const artifactFailure = (what: string, error: unknown): never => {
+		if (error instanceof AcpRequestError) throw error;
+		options.diagnostics?.(`artifact ${what} failed: ${acpErrorMessage(error)}`);
+		throw new AcpRequestError(-32603, `artifacts could not be ${what === "list" ? "listed" : "read"}`, {
+			code: "internal_error",
+		});
+	};
+	options.transport.onRequest(ACP_ARTIFACTS_LIST_METHOD, async (params) => {
+		const request = assertParamKeys(params, new Set(["sessionId", "categories"]));
+		const deps = artifactDeps(request);
+		const categories = parseArtifactCategories(request.categories);
+		try {
+			return await listAcpArtifacts(deps, categories);
+		} catch (error) {
+			return artifactFailure("list", error);
+		}
+	});
+	options.transport.onRequest(ACP_ARTIFACTS_READ_METHOD, async (params) => {
+		const request = assertParamKeys(params, new Set(["sessionId", "id", "offset", "limit", "details"]));
+		const deps = artifactDeps(request);
+		const read = parseArtifactReadRequest(request);
+		try {
+			return await readAcpArtifact(deps, read);
+		} catch (error) {
+			return artifactFailure("read", error);
 		}
 	});
 

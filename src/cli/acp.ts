@@ -134,6 +134,7 @@ export async function runAcpCommand(
 				handoff: true,
 				fleet: true,
 				contextLedger: true,
+				artifacts: true,
 				extensions: true,
 				libraryReload: true,
 				aside: true,
