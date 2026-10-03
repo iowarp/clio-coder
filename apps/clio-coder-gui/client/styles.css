@@ -16,7 +16,7 @@
 	--scroll-thumb-hover: color-mix(in srgb, var(--ink-muted) 85%, transparent);
 	scrollbar-gutter: stable;
 }
-/* Code and diagrams are dark in both themes, so their thumb follows the code ink. */
+/* Code and diagrams sit in their own well in each theme, so their thumb follows the code ink. */
 pre,
 .code-block,
 .md-diagram {
@@ -121,6 +121,13 @@ textarea {
 	color: var(--ink);
 	background: var(--wb-faint);
 	font-size: var(--text-meta);
+}
+/* A select's own ground is a translucent tint, and Chrome paints its open list on white beneath that
+   tint: in dark the list was light ink on a white sheet. The options name the opaque raised ground. */
+option,
+optgroup {
+	color: var(--ink);
+	background: var(--raised);
 }
 details {
 	font-size: var(--text-exact);
