@@ -145,7 +145,7 @@ Offload: when the byte cap cut content that was already collected, the complete 
 
 JSON-format results (including code_nav, context workspace, clio_docs, data, and gateway find) never get an appended notice. An oversize JSON payload is replaced whole by the parseable stub `{"error":"result exceeded <cap>","offloadPath":"...","next":"..."}` so the model never receives JSON cut mid-document. Empty results are also valid JSON with empty arrays and `next` populated.
 
-Turn budget: all envelope-backed tools draw from one shared pool of 192KB per turn (`safety.limits.observationBytesPerTurn`, keyed on `sessionId:turnId`). When the remaining pool shrinks a call below its self cap, a note is appended naming the bytes already used. When the pool is exhausted, the call short-circuits with `[observation budget exhausted for this turn before <tool> ...]` instead of paying for a search whose output cannot be returned. Use narrower arguments or continue in a follow-up turn.
+Turn budget: all envelope-backed tools draw from one shared pool per turn (`safety.limits.observationBytesPerTurn`, keyed on `sessionId:turnId`). At the default of 192KB the pool grows with the model's context window, at 1.5 bytes per window token, so windows up to 128K tokens get 192KB and larger windows get more, up to 1MB. Any other configured value applies exactly. When the remaining pool shrinks a call below its self cap, a note is appended naming the bytes already used. When the pool is exhausted, the call short-circuits with `[observation budget exhausted for this turn before <tool> ...]` instead of paying for a search whose output cannot be returned. Use narrower arguments or continue in a follow-up turn.
 
 ## Search scope: read, ls, grep, and find outside the workspace
 
