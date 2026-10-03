@@ -20,7 +20,9 @@ names. Copy an exact operator assignment verbatim into task, minus the delegatio
 wording around it ("Dispatch a coder worker to", "Use a worker for"): task is the
 work itself. Keep your evidence in briefing. Declare intent paths. intent.verification is an array of
 {check:"<declared id>"} entries using only ids discovered through verify(); never
-invent a label such as "test suite" or send a single object. Without the OS sandbox,
+invent a label such as "test suite" or send a single object. When the operator names
+a target or model for a dispatch, pin it with dispatch's target and model fields;
+never edit routing settings for a one-off request. Without the OS sandbox,
 workers confined by write_roots cannot run bash/verify and declared checks run on
 the host.
 

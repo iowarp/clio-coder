@@ -61,8 +61,10 @@ export function coordinatorDispatchParameters() {
 	});
 	return Type.Object({
 		node: Type.Optional(Type.String()),
-		list: Type.Optional(Type.Boolean({ description: "Discover available worker recipes and their tools." })),
-		agent: Type.Optional(Type.String({ description: "Recipe id from list; choose a specialist for the task." })),
+		target: Type.Optional(Type.String()),
+		model: Type.Optional(Type.String()),
+		list: Type.Optional(Type.Boolean({ description: "List worker recipes and their tools." })),
+		agent: Type.Optional(Type.String({ description: "Recipe id from list." })),
 		task: Type.Optional(
 			Type.String({
 				description:
@@ -95,7 +97,7 @@ export function coordinatorDispatchParameters() {
 		),
 		worktree: Type.Optional(Type.Literal(true)),
 		detach: Type.Optional(
-			Type.Boolean({ description: "Return ids; discover monitor to collect before final synthesis." }),
+			Type.Boolean({ description: "Return ids; collect with monitor before synthesis." }),
 		),
 	});
 }

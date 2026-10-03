@@ -151,7 +151,7 @@ describe("compact coordinator dispatch contract", () => {
 		};
 		const attached = resolveAgentTools({ registry });
 		deepStrictEqual(described.parameters, attached.find((tool) => tool.name === "dispatch")?.parameters);
-		for (const field of ["model", "candidates", "members", "context", "routing"]) {
+		for (const field of ["candidates", "members", "context", "routing"]) {
 			ok(!(field in compact.properties));
 			ok(!(field in described.parameters.properties));
 		}
