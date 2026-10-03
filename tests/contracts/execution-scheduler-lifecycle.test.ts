@@ -520,4 +520,26 @@ describe("execution scheduler lifecycle", () => {
 		deepStrictEqual(log, ["verify", "mutate", "verify", "dependent"]);
 		deepStrictEqual(outcome.revalidated, ["verify"]);
 	});
+
+	it("opens a ledger only for agent steps that can run together", async () => {
+		const ledgers = async (maxWorkers: number, steps: ExecutionPlanAgentStep[]) => {
+			const seen: Array<string | undefined> = [];
+			const f = fixture();
+			f.adapter.run = async (s, _handoffs, _reservation, ledger) => {
+				seen.push(ledger?.id);
+				return { assignmentId: s.id, result: Promise.resolve(result(s.id)) };
+			};
+			await executePlan(
+				compileExecutionPlan({ topology: "parallel", rootTask: "ledger", maxWorkers, onFailure: "stop", steps }),
+				f.adapter,
+			);
+			return seen;
+		};
+		const ordered = await ledgers(2, [step("a"), step("b", ["a"])]);
+		deepStrictEqual(ordered, [undefined, undefined]);
+		const serial = await ledgers(1, [step("a"), step("b")]);
+		deepStrictEqual(serial, [undefined, undefined]);
+		const parallel = await ledgers(2, [step("a"), step("b")]);
+		ok(parallel.every((id) => id !== undefined && id === parallel[0]));
+	});
 });

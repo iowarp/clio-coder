@@ -192,6 +192,17 @@ function isExecutionPlanWriter(step: ExecutionPlanStep): boolean {
 	return isWorkspaceMutator(step);
 }
 
+/** Whether two agent steps can be in flight together: workers allow it and neither depends on the other. */
+function hasConcurrentAgentSteps(plan: ExecutionPlan, agentSteps: ReadonlyArray<ExecutionPlanAgentStep>): boolean {
+	if (plan.maxWorkers < 2) return false;
+	const ancestors = new Map(agentSteps.map((step) => [step.id, executionPlanAncestors(plan, step.id)]));
+	return agentSteps.some((a, index) =>
+		agentSteps
+			.slice(index + 1)
+			.some((b) => !(ancestors.get(a.id)?.has(b.id) ?? false) && !(ancestors.get(b.id)?.has(a.id) ?? false)),
+	);
+}
+
 export async function executePlan(
 	initialPlan: ExecutionPlan,
 	adapter: ExecutionSchedulerAdapter,
@@ -229,8 +240,12 @@ export async function executePlan(
 	// are outside admission entirely: they reserve nothing and spawn no worker.
 	// Loop attempts are admitted up front too, because the bound is the ceiling
 	// an operator approved and a repair must never be admitted mid-run.
-	// A plan with a single agent step has no peers, so it gets no board.
-	const ledgerId = agentSteps.length >= 2 ? `ledger-plan-${plan.hash.slice(0, 12)}-${Date.now().toString(36)}` : null;
+	// A board serves agent steps that can run at the same time. A build and its
+	// loop repairs are ordered, so on build-test the board only made every
+	// worker spend a round posting a claim nobody would read.
+	const ledgerId = hasConcurrentAgentSteps(plan, agentSteps)
+		? `ledger-plan-${plan.hash.slice(0, 12)}-${Date.now().toString(36)}`
+		: null;
 	const ledger = ledgerId === null ? undefined : { id: ledgerId, sequence: 0 };
 	const admissions = agentSteps.map((step) => adapter.preflight(step));
 	const reservation = adapter.reserve(plan, admissions);
