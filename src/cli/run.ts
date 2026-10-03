@@ -531,6 +531,7 @@ async function runDispatch(
 			// event registry, so the domain is the only thing that can write the
 			// run's durable transcript.
 			journalRunEvents: true,
+			workerSteering: parsed.steerChannel !== undefined,
 		}),
 	]);
 	const config = loaded.getContract<ConfigContract>("config");

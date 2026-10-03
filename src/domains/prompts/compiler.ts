@@ -105,6 +105,8 @@ export interface CompileInputs {
 
 /** Stable inputs for one mediated fleet worker's canonical system prompt. */
 export interface WorkerPromptInputs {
+	/** False when nothing can steer this worker; its prompt then omits steering guidance. */
+	liveSteering?: boolean;
 	/** The same inherited constraints enforced by worker admission. */
 	turnConstraints?: TurnConstraints;
 	/** Dispatch-owned restriction on this worker run. */
@@ -1044,7 +1046,7 @@ export function compileWorker(table: FragmentTable, inputs: WorkerPromptInputs):
 	const operatingContract = lookupFragment(table, "operating.contract", "operating contract");
 	const workerContract = lookupFragment(table, "operating.worker", "worker contract");
 	// A worker is steered through @<agent>; the same guidance on several messages at one slot applies.
-	const steering = table.byId.get("operating.steering");
+	const steering = inputs.liveSteering === false ? undefined : table.byId.get("operating.steering");
 	const safety = lookupFragment(table, "safety.default", "safety");
 
 	const parts: string[] = [];

@@ -1612,6 +1612,8 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 				// Only an operator surface answers worker escalations (F9): the TUI
 				// overlay, or an ACP client that advertised it forwards them to a person.
 				workerPermissionResponder: !options.headless && (!options.acp || acpWorkerPermissions),
+				// A headless steer channel reaches the main session only.
+				workerSteering: !options.headless,
 				// The merge card rides the same attended gate, and asks through
 				// whichever ask_user handler the TUI or the ACP client has by then.
 				...(!options.headless && (!options.acp || acpInterviews)

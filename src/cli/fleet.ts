@@ -380,7 +380,7 @@ async function runFleet(args: ReadonlyArray<string>): Promise<number> {
 		// A fleet step is dispatched by executeFleetRun, which drains the handle
 		// itself and never builds a dispatch event registry, so the domain is the
 		// only thing that can write each step's durable transcript.
-		createDispatchDomainModule({ journalRunEvents: true }),
+		createDispatchDomainModule({ journalRunEvents: true, workerSteering: false }),
 		SessionDomainModule,
 	]);
 	const dispatch = loaded.getContract<DispatchContract>("dispatch");

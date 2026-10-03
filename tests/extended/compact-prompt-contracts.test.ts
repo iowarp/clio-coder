@@ -69,6 +69,7 @@ function workerPrompt(input: {
 	hasBoundSkills: boolean;
 	onPermission?: "deny" | "fail" | "escalate";
 	personaBody?: string;
+	liveSteering?: false;
 }): CompiledSessionPrompt {
 	const toolNames = input.hasContext
 		? [ToolNames.Read, ToolNames.Context, ToolNames.CodeNav]
@@ -78,6 +79,7 @@ function workerPrompt(input: {
 	return compileWorker(table, {
 		...(input.turnConstraints ? { turnConstraints: input.turnConstraints } : {}),
 		...(input.readOnly ? { readOnly: true } : {}),
+		...(input.liveSteering === false ? { liveSteering: false } : {}),
 		providerSupportsTools,
 		toolNames,
 		toolPromptHints: toolPromptHintsForNames(toolNames, role),
@@ -226,6 +228,12 @@ describe("compact prompt contracts", () => {
 			match(compiled.systemPrompt, /"mutatedPaths":\[\],"validations"/u);
 			match(compiled.systemPrompt, /Permit: git inspect, asks fail\./u);
 		}
+		// A worker nothing can steer (headless, fleet CLI) carries no steering section.
+		deepStrictEqual(
+			workerPrompt({ providerSupportsTools: true, hasContext: true, hasBoundSkills: false, liveSteering: false })
+				.sections.map((section) => section.id),
+			["identity", "operating-contract", "tool-contract", "safety", "persona"],
+		);
 
 		match(
 			workerPrompt({

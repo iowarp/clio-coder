@@ -555,6 +555,12 @@ export interface DispatchBundleOptions {
 	 */
 	workerPermissionResponder?: boolean;
 	/**
+	 * False when nothing can steer a dispatched worker: a headless session, the
+	 * fleet CLI, or `run --agent` without a steer channel. The worker prompt then
+	 * leaves out the steering guidance it could never use. Absent means steerable.
+	 */
+	workerSteering?: boolean;
+	/**
 	 * The attached operator's ask surface: the interactive TUI, or an ACP client
 	 * that advertised interviews. A merge-mode task worktree the gate would
 	 * withhold is put to the operator as a merge card when `available()` is true.
@@ -4951,6 +4957,7 @@ export function createDispatchBundle(
 			onPermission: workerPermissionMode,
 			permit,
 			...(req.taskWorktree !== undefined ? { taskWorktree: true } : {}),
+			...(options?.workerSteering === false ? { liveSteering: false } : {}),
 			persona: {
 				id: `persona.${recipe.id}`,
 				relPath: recipe.filepath,
