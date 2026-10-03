@@ -254,8 +254,23 @@ export function createEditorSubmitController(deps: EditorSubmitDeps): EditorSubm
 				// may have landed while the command ran, so restore the leaf the
 				// session has now, not the one captured then. Restoring the stale
 				// one wedged every later submit on a parent that was no longer
-				// the leaf.
-				deps.sessionTranscript.refreshChatContextFromSession(deps.session?.tree().leafId ?? parentTurnId);
+				// the leaf. The refresh resets the chat loop, which aborts a live
+				// turn, so a turn that started during the line finishes first.
+				const refresh = () =>
+					deps.sessionTranscript.refreshChatContextFromSession(deps.session?.tree().leafId ?? parentTurnId);
+				if (!deps.chat.isStreaming()) refresh();
+				else
+					void (async () => {
+						// A macrotask between checks: a stream not owned by a submit
+						// would otherwise spin on an already settled promise.
+						while (deps.chat.isStreaming()) {
+							await deps.chat.whenSettled();
+							await new Promise((resolve) => setTimeout(resolve, 50));
+						}
+						if (!shuttingDown) refresh();
+					})().catch((err) => {
+						deps.io.stderr(`[bash] context refresh failed: ${err instanceof Error ? err.message : String(err)}\n`);
+					});
 			} catch (err) {
 				const msg = err instanceof Error ? err.message : String(err);
 				execution.running = false;

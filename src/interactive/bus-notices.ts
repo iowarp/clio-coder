@@ -45,13 +45,13 @@ export function budgetAlertNotice(payload: unknown): BusNotice | null {
 	if (payload.level === "over") {
 		return {
 			level: "error",
-			text: `[budget] Session priced spend ${spend} exceeded. Paid requests are paused; raise budget.sessionCeilingUsd to resume.`,
+			text: `[budget] Session priced spend ${spend} exceeded. Paid requests are paused; raise safety.limits.sessionCostUsd to resume.`,
 			source: "budget",
 		};
 	}
 	return {
 		level: "warn",
-		text: `[budget] Session priced spend ${spend} reached. Paid requests are paused; raise budget.sessionCeilingUsd to resume.`,
+		text: `[budget] Session priced spend ${spend} reached. Paid requests are paused; raise safety.limits.sessionCostUsd to resume.`,
 		source: "budget",
 	};
 }

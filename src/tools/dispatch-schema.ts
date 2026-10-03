@@ -212,6 +212,39 @@ const WorkerContextSchema = Type.Union(
 		description: `Parent history: isolated (default), fork (native only, full transcript), splice (selected text, default ${WORKER_CONTEXT_SPLICE_TOKENS} tokens). refs: tool:<id> or message:<index>. Per-task overrides allowed.`,
 	},
 );
+
+/**
+ * `judge` serves both compete and council synthesis, and their defaults
+ * differ: compete falls back to the verifier (`gateDeciderAgentId`), a council
+ * judge to the call's own agent (`dispatch-admission.ts`).
+ */
+function judgeSchema(composition: DispatchSchemaComposition) {
+	const both = composition.compete && composition.council;
+	return Type.Object(
+		{
+			agent: Type.Optional(
+				Type.String({
+					description: both
+						? "Judge recipe id (default: verifier for compete, the call's agent for council)."
+						: composition.compete
+							? "Judge recipe id (default: verifier)."
+							: "Judge recipe id (default: the call's agent).",
+				}),
+			),
+			model: Type.Optional(Type.String()),
+			target: Type.Optional(Type.String()),
+			node: Type.Optional(Type.String({ description: "Fleet node pin for the judge." })),
+		},
+		{
+			description: both
+				? "Read-only judge that ranks compete candidates or synthesizes a council with synthesis judge."
+				: composition.compete
+					? "Read-only judge that ranks compete candidates."
+					: "Read-only judge for council synthesis judge.",
+		},
+	);
+}
+
 export function buildDispatchParameters(composition: DispatchSchemaComposition = FULL_DISPATCH_SCHEMA_COMPOSITION) {
 	const modes = [
 		"parallel",
@@ -330,20 +363,10 @@ export function buildDispatchParameters(composition: DispatchSchemaComposition =
 				},
 			),
 		),
+		...(composition.compete || composition.council ? { judge: Type.Optional(judgeSchema(composition)) } : {}),
 		...(composition.compete
 			? {
 					candidates: Type.Optional(Type.Number({ description: "Compete candidates, 2 to 4 (default 2)." })),
-					judge: Type.Optional(
-						Type.Object(
-							{
-								agent: Type.Optional(Type.String({ description: "Judge recipe id (default: verifier)." })),
-								model: Type.Optional(Type.String()),
-								target: Type.Optional(Type.String()),
-								node: Type.Optional(Type.String({ description: "Fleet node pin for the judge." })),
-							},
-							{ description: "Read-only judge that ranks compete candidates." },
-						),
-					),
 					apply_winner: Type.Optional(
 						Type.Object(
 							{

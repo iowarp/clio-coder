@@ -709,6 +709,15 @@ export function createAskUserTool(deps: AskUserToolDeps = {}): ToolSpec {
 			const policy = standalone ? createStandalonePolicy(options) : (turnPolicy ?? createStandalonePolicy(options));
 			if (standalone && turnPolicy?.planOnly !== undefined) policy.planOnly = turnPolicy.planOnly;
 			hydratePolicy(policy, options);
+			// A cold complete records no decision and its "act on the answers"
+			// reply reads as approval; models used it to announce results (FW-2).
+			if (call.action === "complete" && policy.rounds.length === 0) {
+				return {
+					kind: "error",
+					message:
+						"ask_user: action=complete closes an interview that asked questions, and none was asked. Give the answer or result as plain text.",
+				};
+			}
 			if (policy.status === "complete") return okInterviewResult(policy, "already_complete");
 
 			if (call.action === "complete") {

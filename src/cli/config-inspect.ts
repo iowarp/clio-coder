@@ -224,6 +224,9 @@ function inspectHooks(cwd: string, graph: CustomizationGraph): void {
 		for (const issue of loaded.issues) {
 			graph.issues.push(`hook ${issue.source.sourcePath}#${issue.index}: ${issue.issues.join("; ")}`);
 		}
+		// Every loaded hook already passed its trust gate: project hooks need an
+		// approved hooks surface, and extension hooks come only from loadable
+		// packages, which a trust-blocked project copy never is (snapshot.ts).
 		for (const hook of loaded.hooks) {
 			graph.entries.push({
 				category: "hook",
@@ -231,7 +234,7 @@ function inspectHooks(cwd: string, graph: CustomizationGraph): void {
 				scope: hook.source.origin,
 				sourcePath: hook.source.sourcePath,
 				hash: hook.hash,
-				trust: hook.source.origin === "extension" ? "untrusted" : "trusted",
+				trust: "trusted",
 				precedence: "winner",
 				reloadClass: "reload",
 				detail: { on: hook.on, kind: hook.spec.kind, enabled: hook.enabled, ...(hook.tools ? { tools: hook.tools } : {}) },
@@ -244,7 +247,7 @@ function inspectHooks(cwd: string, graph: CustomizationGraph): void {
 				scope: loser.source.origin,
 				sourcePath: loser.source.sourcePath,
 				hash: loser.hash,
-				trust: loser.source.origin === "extension" ? "untrusted" : "trusted",
+				trust: "trusted",
 				precedence: "loser",
 				reloadClass: "reload",
 				detail: { on: loser.on, kind: loser.spec.kind },
@@ -300,7 +303,9 @@ function inspectExtensions(cwd: string, graph: CustomizationGraph): void {
 				scope: ext.scope,
 				sourcePath: ext.rootPath,
 				hash: shortHash(`${ext.id}@${ext.version}`),
-				trust: "untrusted",
+				// User installs carry the operator's consent; a project copy is
+				// trust-blocked until `config trust extensions` approves its state.
+				trust: ext.trustBlocked ? "untrusted" : "trusted",
 				precedence: ext.effective ? "winner" : "loser",
 				reloadClass: "reload",
 				detail: {

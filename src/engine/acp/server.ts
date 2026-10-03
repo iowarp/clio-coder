@@ -43,7 +43,7 @@ import {
 } from "../../domains/safety/decision-presentation.js";
 import type { ContextLedger } from "../../domains/session/context-ledger.js";
 import type { SessionContract, SessionMeta } from "../../domains/session/contract.js";
-import type { MessageEntry, SessionEntry } from "../../domains/session/entries.js";
+import type { BashExecutionEntry, MessageEntry, SessionEntry } from "../../domains/session/entries.js";
 import { OPERATOR_SHELL_TIMEOUT_MS, runOperatorShellLine } from "../../domains/session/operator-shell.js";
 import type { TaskBoardSnapshot } from "../../domains/session/task-board.js";
 import { filterEntriesToActivePath } from "../../domains/session/tree/active-path.js";
@@ -1867,6 +1867,47 @@ function closeUnrecordedReplayCalls(active: ActivePrompt, frames: AcpReplayFrame
 	active.openToolCalls.clear();
 }
 
+/** The live shell line's call and settled update, rebuilt from what its entry recorded. */
+function replayShellLine(entry: BashExecutionEntry): AcpReplayFrame[] {
+	const excludeFromContext = entry.excludeFromContext === true;
+	const meta = { [ACP_SHELL_META_KEY]: { version: 1, excludeFromContext } };
+	const toolCallId = `shell_${entry.turnId}`;
+	const command = safeStoredString(entry.command, ACP_MAX_SHELL_COMMAND_BYTES);
+	const title = boundString(command, ACP_MAX_TOOL_TITLE_BYTES);
+	const output = shellOutputTail(entry.output);
+	return [
+		{
+			update: {
+				sessionUpdate: "tool_call",
+				toolCallId,
+				name: "shell",
+				title,
+				kind: "execute" satisfies AcpToolKind,
+				status: "in_progress" satisfies AcpToolCallStatus,
+				rawInput: { command, excludeFromContext },
+			},
+			meta,
+		},
+		{
+			update: {
+				sessionUpdate: "tool_call_update",
+				toolCallId,
+				title,
+				kind: "execute",
+				status: (entry.exitCode === 0 && !entry.cancelled ? "completed" : "failed") satisfies AcpToolCallStatus,
+				...(output.length > 0 ? { content: toolCallContent(output) } : {}),
+				rawOutput: {
+					exitCode: entry.exitCode,
+					cancelled: entry.cancelled,
+					truncated: entry.truncated,
+					excludedFromContext: excludeFromContext,
+				},
+			},
+			meta,
+		},
+	];
+}
+
 /**
  * Build client-visible replay from original active-branch transcript entries.
  * Provider-only synthetic context never enters this projection.
@@ -1901,6 +1942,18 @@ function prepareAcpReplay(
 					meta: { "clio-coder/notice": { level: "info" } },
 				});
 			}
+			continue;
+		}
+		if (entry.kind === "bashExecution") {
+			// An operator shell line (terminal `!` or `_clio-coder/session/shell`)
+			// runs only between turns, so the turn before it has ended.
+			if (current === null) {
+				current = { frames: [] };
+				turns.push(current);
+			} else {
+				closeUnrecordedReplayCalls(ids, current.frames);
+			}
+			current.frames.push(...replayShellLine(entry));
 			continue;
 		}
 		if (entry.kind !== "message") continue;
