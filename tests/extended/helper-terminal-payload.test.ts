@@ -17,7 +17,6 @@ test("terminal handoff overrides work-tool lock with one required tool", () => {
 	deepStrictEqual(
 		patchWorkerRequestPayload({ tools }, model("openai-completions"), {
 			runtimeId: "litellm",
-			toolSurfaceLocked: true,
 			terminalToolName: name,
 		}),
 		{ tools: [tools[1]], tool_choice: "required", parallel_tool_calls: false },

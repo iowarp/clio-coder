@@ -593,9 +593,9 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 			? { protectedArtifactState: { artifacts: [...input.protectedArtifactState.artifacts] } }
 			: {}),
 	});
-	// Flipped by the loop guard's lockout callback; read by onPayload below to
-	// force the remaining model rounds text-only by removing the tool surface
-	// (tool_choice none on Anthropic; see patchToolSurfaceLockedPayload).
+	// Flipped by the loop guard's lockout callback; read by streamFn below to
+	// force the remaining model rounds text-only by removing the tool
+	// declarations (tool_choice none on Anthropic; see toolsRemovedRound).
 	let synthesisToolLock = false;
 	let lockedSynthesisReprompts = 0;
 	let workerBoundFailure: string | null = null;
@@ -932,6 +932,10 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 	});
 	const helperToolAvailable = helperSchema !== null && workerProviderSupportsTools(input);
 	const helperForcedChoiceAvailable = helperToolAvailable && supportsNamedToolChoice(model.api);
+	// The terminal handoff names its tool in the request, so it keeps the tool
+	// surface that a synthesis lock would otherwise remove.
+	const terminalHandoffActive = (api: string): boolean =>
+		helperToolAvailable && (synthesisToolLock || helperTerminalPhase) && supportsNamedToolChoice(api);
 	if (helperToolAvailable) {
 		tools.push({
 			name: INTERNAL_HELPER_RESULT_TOOL,
@@ -1085,8 +1089,8 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 							samplingParams: { ...streamOptions?.samplingParams, ...sampling.samplingParams },
 						};
 			// Routed per attempt: the lock and the middleware choice can flip between
-			// the first call and the overflow retry. A locked round already loses its
-			// tool surface in onPayload, so the middleware text-only round yields to it.
+			// the first call and the overflow retry. A locked round loses its tool
+			// declarations, so the middleware text-only round yields to it.
 			const request = (projected: AgentMessage[]) => {
 				const controlled = applyToolRounds(
 					currentModel,
@@ -1096,7 +1100,10 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 						messages: projected as typeof currentContext.messages,
 					},
 					requestOptions,
-					[middlewareToolChoice.current().kind === "none" && !synthesisToolLock ? { kind: "text-only" } : undefined],
+					[
+						synthesisToolLock && !terminalHandoffActive(currentModel.api) ? { kind: "tools-removed" } : undefined,
+						middlewareToolChoice.current().kind === "none" && !synthesisToolLock ? { kind: "text-only" } : undefined,
+					],
 				);
 				return engineStreamSimple(currentModel, controlled.context, controlled.options);
 			};
@@ -1122,11 +1129,12 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 			return patchWorkerRequestPayload(payload, currentModel, {
 				runtimeId: input.runtime.id,
 				...(input.responseSchema !== undefined ? { responseSchema: input.responseSchema } : {}),
-				toolSurfaceLocked: synthesisToolLock,
-				...(helperToolAvailable && (synthesisToolLock || helperTerminalPhase) && supportsNamedToolChoice(currentModel.api)
-					? { terminalToolName: INTERNAL_HELPER_RESULT_TOOL }
+				...(terminalHandoffActive(currentModel.api) ? { terminalToolName: INTERNAL_HELPER_RESULT_TOOL } : {}),
+				// A locked round has no declarations left to name, and Anthropic keeps
+				// its tools under tool_choice none, which a named choice would override.
+				...(middlewareChoice.kind === "required" && !synthesisToolLock
+					? { toolChoiceName: middlewareChoice.toolName }
 					: {}),
-				...(middlewareChoice.kind === "required" ? { toolChoiceName: middlewareChoice.toolName } : {}),
 			});
 		},
 		getApiKey: async () => input.apiKey,

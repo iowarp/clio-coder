@@ -13,7 +13,7 @@ import {
 	lockedSynthesisSystemPrompt,
 	sanitizeLockedSynthesisMessage,
 } from "../../src/engine/loop-guard.js";
-import { applyToolRounds, patchWorkerRequestPayload } from "../../src/engine/provider-payload.js";
+import { applyToolRounds, type ToolRound } from "../../src/engine/provider-payload.js";
 import type { AgentMessage, EngineModel } from "../../src/engine/types.js";
 import { createWorkerSafety } from "../../src/engine/worker-tools.js";
 
@@ -28,30 +28,66 @@ const model = {
 	contextWindow: 32768,
 	maxTokens: 4096,
 } as unknown as EngineModel;
-const anthropicModel = { id: "m", provider: "anthropic", api: "anthropic-messages" } as unknown as EngineModel;
-const payload = () => ({
-	model: "m",
-	messages: [{ role: "user", content: "hi" }],
-	tools: [{ type: "function", function: { name: "read", parameters: { type: "object" } } }],
-});
+const anthropicModel = {
+	...model,
+	provider: "anthropic",
+	api: "anthropic-messages",
+	baseUrl: "https://provider.invalid",
+} as unknown as EngineModel;
+const usage = {
+	input: 0,
+	output: 0,
+	cacheRead: 0,
+	cacheWrite: 0,
+	totalTokens: 0,
+	cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+};
+const userTurn = { role: "user" as const, content: "hi", timestamp: 1 };
+const readHistory: Parameters<typeof applyToolRounds>[1]["messages"] = [
+	userTurn,
+	{
+		role: "assistant",
+		content: [{ type: "toolCall", id: "call_1", name: "read", arguments: { path: "a.ts" } }],
+		api: "openai-completions",
+		provider: "llamacpp",
+		model: "m",
+		usage,
+		stopReason: "toolUse",
+		timestamp: 2,
+	},
+	{
+		role: "toolResult",
+		toolCallId: "call_1",
+		toolName: "read",
+		content: [{ type: "text", text: "export {};" }],
+		isError: false,
+		timestamp: 3,
+	},
+];
 
-/** The wire body Pi's serializer builds for a text-only round; the hook stops before any network I/O. */
-async function textOnlyWire(target: EngineModel): Promise<Record<string, unknown>> {
+/** The wire body Pi's serializer builds for a controlled round; the hook stops before any network I/O. */
+async function roundWire(
+	target: EngineModel,
+	rounds: readonly ToolRound[],
+	messages: Parameters<typeof applyToolRounds>[1]["messages"] = [userTurn],
+): Promise<Record<string, unknown>> {
 	const controlled = applyToolRounds(
 		target,
 		{
 			systemPrompt: "lock",
 			tools: [{ name: "read", description: "read", parameters: Type.Object({ path: Type.String() }) }],
-			messages: [{ role: "user", content: "hi", timestamp: 1 }],
+			messages,
 		},
 		{ apiKey: "fixture" },
-		[{ kind: "text-only" }],
+		rounds,
 	);
 	let body: Record<string, unknown> = {};
 	await engineStreamSimple(target, controlled.context, {
 		...controlled.options,
-		onPayload: async (payload) => {
-			body = structuredClone(payload) as Record<string, unknown>;
+		onPayload: async (payload, current) => {
+			// Run the round's own payload edit, as the provider adapter does before sending.
+			const edited = (await controlled.options?.onPayload?.(payload, current)) ?? payload;
+			body = structuredClone(edited) as Record<string, unknown>;
 			throw new Error("captured before network I/O");
 		},
 	}).result();
@@ -124,20 +160,22 @@ describe("worker synthesis lock", () => {
 		strictEqual(guard.extendWorkerToolCallPhase({ toolCalls: 3, readReserve: 0 }), false);
 	});
 
-	it("strips the tool surface on a locked round and keeps it under Anthropic's tool_choice", () => {
-		const stripped = patchWorkerRequestPayload(payload(), model, {
-			runtimeId: "llamacpp",
-			toolSurfaceLocked: true,
-		}) as Record<string, unknown>;
+	it("strips the tool surface on a locked round and keeps it under Anthropic's tool_choice", async () => {
+		const stripped = await roundWire(model, [{ kind: "tools-removed" }]);
 		strictEqual("tools" in stripped, false);
 		strictEqual("tool_choice" in stripped, false);
+		// Pi adds `tools: []` beside tool history on completions; the lock still
+		// sends no tools key there.
+		const withHistory = await roundWire(model, [{ kind: "tools-removed" }], readHistory);
+		strictEqual("tools" in withHistory, false);
+		strictEqual("tool_choice" in withHistory, false);
 		// Anthropic rejects a history carrying tool_use blocks unless tools are
 		// defined, so the lock stays on the tool_choice knob there.
-		const anthropic = patchWorkerRequestPayload(payload(), anthropicModel, {
-			runtimeId: "anthropic",
-			toolSurfaceLocked: true,
-		}) as Record<string, unknown>;
-		deepStrictEqual(anthropic.tools, payload().tools);
+		const anthropic = await roundWire(anthropicModel, [{ kind: "tools-removed" }]);
+		deepStrictEqual(
+			(anthropic.tools as Array<{ name: string }>).map((entry) => entry.name),
+			["read"],
+		);
 		deepStrictEqual(anthropic.tool_choice, { type: "none" });
 	});
 
@@ -148,7 +186,7 @@ describe("worker synthesis lock", () => {
 		// HTTP 400 on the object form ("Invalid tool_choice type: 'object'"), and
 		// "auto" would leave the turn calling tools past the lockout with nothing
 		// failing loudly.
-		const locked = await textOnlyWire(model);
+		const locked = await roundWire(model, [{ kind: "text-only" }]);
 		strictEqual((locked.tools as unknown[]).length, 1);
 		strictEqual(locked.tool_choice, "none");
 	});

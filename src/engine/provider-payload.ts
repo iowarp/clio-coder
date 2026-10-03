@@ -112,11 +112,43 @@ function namedToolDefinitions(tools: unknown, toolName: string): unknown[] | nul
 }
 
 /** One model round's tool routing, derived from the host's lock and middleware state. */
-export type ToolRound = { kind: "text-only" };
+export type ToolRound = { kind: "text-only" } | { kind: "tools-removed" };
 
 export interface ControlledRequest {
 	context: Context;
 	options: SimpleStreamOptions | undefined;
+}
+
+type Payload = Record<string, unknown>;
+
+/** Run the caller's hook first, then one request-local edit, so the host's own patches still apply underneath. */
+function withPayloadEdit(
+	options: SimpleStreamOptions | undefined,
+	edit: (payload: Payload) => Payload,
+): SimpleStreamOptions {
+	const previous = options?.onPayload;
+	return {
+		...options,
+		onPayload: async (payload, model) => {
+			const base = (await previous?.(payload, model)) ?? payload;
+			return isRecord(base) ? edit(base) : base;
+		},
+	};
+}
+
+/**
+ * A locked round has no tool declarations, so the body carries neither `tools`
+ * nor `tool_choice`. Pi adds `tools: []` beside tool history on completions and
+ * Codex always sends `tool_choice: "auto"`; both would change the body a
+ * llama.cpp or LM Studio server sees from the one #78 was fixed with.
+ */
+function withoutToolSurface(payload: Payload): Payload {
+	const next = { ...payload };
+	if (!Array.isArray(next.tools) || next.tools.length === 0) {
+		delete next.tools;
+		delete next.tool_choice;
+	}
+	return next;
 }
 
 function hasToolHistory(messages: Context["messages"]): boolean {
@@ -125,6 +157,25 @@ function hasToolHistory(messages: Context["messages"]): boolean {
 			message.role === "toolResult" ||
 			(message.role === "assistant" && message.content.some((block) => block.type === "toolCall")),
 	);
+}
+
+/**
+ * The resolved context when the request carries a tool surface a lock can act
+ * on, otherwise undefined (nothing to lock).
+ */
+function lockableContext(model: EngineModel, context: Context): Context | undefined {
+	const resolved = resolvedRequestContext(context);
+	// Pi adds `tools: []` beside tool history on completions, a surface Clio has
+	// always locked; every other API serializes a tool surface only when tools
+	// are declared.
+	const hasSurface =
+		(resolved.tools?.length ?? 0) > 0 || (model.api === "openai-completions" && hasToolHistory(resolved.messages));
+	if (!hasSurface) return undefined;
+	// Pi answers "none" on Converse by dropping toolConfig, which Bedrock rejects
+	// beside toolUse and toolResult history. The lock stays off there, as it
+	// always was, instead of failing every locked round with a ValidationException.
+	if (model.api === "bedrock-converse-stream") return undefined;
+	return resolved;
 }
 
 /**
@@ -143,18 +194,38 @@ function textOnlyRound(
 	context: Context,
 	options: SimpleStreamOptions | undefined,
 ): ControlledRequest | undefined {
-	const resolved = resolvedRequestContext(context);
-	// Pi adds `tools: []` beside tool history on completions, a surface Clio has
-	// always locked; every other API serializes a tool surface only when tools
-	// are declared.
-	const hasSurface =
-		(resolved.tools?.length ?? 0) > 0 || (model.api === "openai-completions" && hasToolHistory(resolved.messages));
-	if (!hasSurface) return undefined;
-	// Pi answers "none" on Converse by dropping toolConfig, which Bedrock rejects
-	// beside toolUse and toolResult history. The lock stays off there, as it
-	// always was, instead of failing every locked round with a ValidationException.
-	if (model.api === "bedrock-converse-stream") return undefined;
+	if (lockableContext(model, context) === undefined) return undefined;
 	return { context, options: { ...options, toolChoice: "none" } };
+}
+
+/**
+ * Force a text-only round the hard way: remove the tool declarations from the
+ * request. Used for a worker's synthesis-locked rounds (the loop-guard lockout
+ * and the terminal result-contract repair). {@link textOnlyRound} is not enough
+ * there: llama.cpp honors tool_choice "none" by disabling its tool-call parser
+ * while the chat template still renders every tool schema, so a local model
+ * that decides to call a tool anyway hands its markup back as content, the loop
+ * guard strips it, and the worker ends with no result at all (a coder run that
+ * had written and tested its file returned zero output this way, #78). With no
+ * tools in the prompt the template renders no tool block and the model has
+ * nothing to call. The prompt prefix changes for these one or two rounds; that
+ * is the price of a usable answer.
+ *
+ * Anthropic keeps the tool_choice knob instead: its API rejects a history that
+ * carries tool_use blocks unless tools are defined, and it honors none
+ * properly. Google and Vertex take Pi's function-calling mode NONE.
+ */
+function toolsRemovedRound(
+	model: EngineModel,
+	context: Context,
+	options: SimpleStreamOptions | undefined,
+): ControlledRequest | undefined {
+	const resolved = lockableContext(model, context);
+	if (resolved === undefined) return undefined;
+	if (model.api === "anthropic-messages" || model.api === "google-generative-ai" || model.api === "google-vertex") {
+		return { context, options: { ...options, toolChoice: "none" } };
+	}
+	return { context: { ...resolved, tools: [] }, options: withPayloadEdit(options, withoutToolSurface) };
 }
 
 function applyToolRound(
@@ -166,6 +237,8 @@ function applyToolRound(
 	switch (round.kind) {
 		case "text-only":
 			return textOnlyRound(model, context, options);
+		case "tools-removed":
+			return toolsRemovedRound(model, context, options);
 	}
 }
 
@@ -181,45 +254,6 @@ export function applyToolRounds(
 		if (controlled !== undefined) return controlled;
 	}
 	return { context, options };
-}
-
-/**
- * Anthropic's leg of the worker synthesis lock, which keeps the tool_choice knob
- * instead of removing declarations. Plain text-only rounds go through
- * {@link applyToolRounds}.
- */
-function patchToolChoiceNonePayload(payload: unknown, model: EngineModel): unknown | undefined {
-	if (!isRecord(payload)) return undefined;
-	if (!("tools" in payload) || payload.tools === undefined || payload.tools === null) return undefined;
-	if (isAnthropicMessagesApi(model.api)) return { ...payload, tool_choice: { type: "none" } };
-	return { ...payload, tool_choice: "none" };
-}
-
-/**
- * Force a text-only round the hard way: remove the tool surface from the
- * request. Used for a worker's synthesis-locked rounds (the loop-guard lockout
- * and the terminal result-contract repair). {@link patchToolChoiceNonePayload}
- * is not enough there: llama.cpp honors tool_choice "none" by disabling its
- * tool-call parser while the chat template still renders every tool schema,
- * so a local model that decides to call a tool anyway hands its markup back
- * as content, the loop guard strips it, and the worker ends with no result
- * at all (a coder run that had written and tested its file returned zero
- * output this way, #78). With no tools in the prompt the template renders no
- * tool block and the model has nothing to call. The prompt prefix changes for
- * these one or two rounds; that is the price of a usable answer.
- *
- * Anthropic keeps the tool_choice knob instead: its API rejects a history
- * that carries tool_use blocks unless tools are defined, and it honors
- * tool_choice none properly.
- */
-function patchToolSurfaceLockedPayload(payload: unknown, model: EngineModel): unknown | undefined {
-	if (!isRecord(payload)) return undefined;
-	if (!("tools" in payload) || payload.tools === undefined || payload.tools === null) return undefined;
-	if (isAnthropicMessagesApi(model.api)) return patchToolChoiceNonePayload(payload, model);
-	const stripped = { ...payload };
-	delete stripped.tools;
-	delete stripped.tool_choice;
-	return stripped;
 }
 
 /** Require one exposed tool for the next provider round while preserving the full schema surface. */
@@ -344,8 +378,6 @@ export interface WorkerPayloadPatchOptions {
 	runtimeId: string;
 	responseSchema?: Record<string, unknown>;
 	toolChoiceName?: string;
-	/** Synthesis-locked round: remove the tool surface, see {@link patchToolSurfaceLockedPayload}. */
-	toolSurfaceLocked?: boolean;
 	/** Host-owned terminal handoff; takes precedence over the work-tool lock. */
 	terminalToolName?: string;
 }
@@ -404,13 +436,7 @@ export function patchWorkerRequestPayload(
 		const terminal = patchTerminalToolPayload(patched, model, options.terminalToolName);
 		if (terminal !== undefined) return terminal;
 	}
-	if (options.toolSurfaceLocked === true) {
-		const lockedPatched = patchToolSurfaceLockedPayload(patched, model);
-		if (lockedPatched !== undefined) {
-			patched = lockedPatched;
-			changed = true;
-		}
-	} else if (options.toolChoiceName !== undefined) {
+	if (options.toolChoiceName !== undefined) {
 		const toolChoicePatched = patchToolChoiceNamedPayload(patched, model, options.toolChoiceName);
 		if (toolChoicePatched !== undefined) {
 			patched = toolChoicePatched;
