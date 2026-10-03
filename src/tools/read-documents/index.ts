@@ -1,6 +1,7 @@
 import type { FileHandle } from "node:fs/promises";
 import { splitLinesForCounting, truncateHead, truncateTail } from "../truncate.js";
 import { truncateUtf8 } from "../truncate-utf8.js";
+import { renderTar, renderZip } from "./archive.js";
 import { renderNotebook } from "./notebook.js";
 import { renderPdf } from "./pdf.js";
 import type { DocumentRequest, Rendered } from "./shared.js";
@@ -8,14 +9,15 @@ import type { DocumentRequest, Rendered } from "./shared.js";
 export type { DocumentRequest } from "./shared.js";
 
 /**
- * Document renderers for `read`: Jupyter notebooks and PDF text through
- * poppler. Loaded on first use so the read chunk never carries
+ * Document renderers for `read`: Jupyter notebooks, PDF text through poppler,
+ * and zip or tar archives. Loaded on first use so the read chunk never carries
  * them. Each renderer turns its file into bounded text, and `windowDocument`
  * applies read's offset, limit, tail, and line_numbers to that text, so a
- * notebook or a PDF pages exactly like a source file.
+ * notebook or a PDF pages exactly like a source file. Nothing is extracted to
+ * disk: archive members are inflated in memory up to RENDER_CAP_BYTES.
  */
 
-export type DocumentKind = "notebook" | "pdf";
+export type DocumentKind = "notebook" | "pdf" | "zip" | "tar" | "gzip";
 
 export interface DocumentView {
 	output: string;
@@ -93,10 +95,18 @@ export async function renderDocument(
 	request: DocumentRequest,
 ): Promise<Rendered> {
 	if (request.pages !== undefined && kind !== "pdf") return { error: "pages applies to a PDF" };
+	if (request.member !== undefined && kind !== "zip" && kind !== "tar" && kind !== "gzip") {
+		return { error: "member applies to a zip or tar archive" };
+	}
 	switch (kind) {
 		case "notebook":
 			return await renderNotebook(handle, size);
 		case "pdf":
 			return await renderPdf(filePath, request);
+		case "zip":
+			return await renderZip(filePath, handle, size, request);
+		case "tar":
+		case "gzip":
+			return await renderTar(filePath, kind === "gzip", request);
 	}
 }

@@ -5,6 +5,7 @@ export interface DocumentRequest {
 	limit: number | null;
 	tail: number | null;
 	pages?: string;
+	member?: string;
 	signal: AbortSignal | undefined;
 }
 
