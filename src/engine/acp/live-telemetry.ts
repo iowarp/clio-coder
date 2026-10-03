@@ -91,7 +91,7 @@ function redactRemote(url: string | null): string | null {
 	return bounded(url.replace(/^([a-z][a-z0-9+.-]*:\/\/)[^/@]*@/iu, "$1"));
 }
 
-export function projectWorkspace(snapshot: WorkspaceSnapshot): AcpWorkspaceView {
+function projectWorkspace(snapshot: WorkspaceSnapshot): AcpWorkspaceView {
 	return {
 		version: 1,
 		cwd: bounded(snapshot.cwd),
@@ -120,7 +120,7 @@ const PLAN_STATUS = {
  * replaces the whole list on every update, so it is left out and counted.
  * The board has no priority, so every entry says medium.
  */
-export function projectAcpPlan(plan: TaskBoardSnapshot | null) {
+function projectAcpPlan(plan: TaskBoardSnapshot | null) {
 	const tasks = plan?.tasks ?? [];
 	const kept = tasks.filter((task) => task.status !== "cancelled");
 	return {
