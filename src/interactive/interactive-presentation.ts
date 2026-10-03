@@ -260,6 +260,7 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 			requestRender();
 		},
 	});
+	const announcedPreloadCwds = new Set<string>();
 	const banner = factories.createBanner({
 		providers: deps.providers,
 		...(deps.agents ? { getAgentCount: () => deps.agents?.listSpecs().filter(isUserVisibleAgent).length ?? 0 } : {}),
@@ -276,7 +277,21 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 				current?.chat?.model,
 			)?.capabilities;
 			const preload = selectProjectPreload(renderPromptContext(cwd), capabilities?.tools ?? null, { cwd }).classification;
-			return preload.mode === "partial" ? preload.label : null;
+			// Coverage is a session fact, not something to put in the operator's face: one short footer
+			// notice per workspace that expires, with /context holding the detail. The welcome shows nothing.
+			if (preload.mode === "partial" && !announcedPreloadCwds.has(cwd)) {
+				announcedPreloadCwds.add(cwd);
+				const file = /^([^:]+):/u.exec(preload.label)?.[1] ?? "project instructions";
+				queueMicrotask(() =>
+					notifications.add({
+						level: "info",
+						text: `${file} is only partly loaded · /context for details`,
+						key: "project-preload",
+						ttlMs: 8_000,
+					}),
+				);
+			}
+			return null;
 		},
 		getSubmitKeyLabel: () => effectiveSubmitKeyLabel(),
 		getKeyLabel: (action) => {
