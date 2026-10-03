@@ -30,7 +30,7 @@ export const ACP_TRUST_CAPABILITY = {
 } as const;
 
 /** Every present project file on an unapproved surface; empty when nothing was ignored. */
-export function ignoredProjectSurfaces(cwd: string): AcpIgnoredProjectSurface[] {
+function ignoredProjectSurfaces(cwd: string): AcpIgnoredProjectSurface[] {
 	const ignored: AcpIgnoredProjectSurface[] = [];
 	for (const surface of TRUST_SURFACES) {
 		let snapshot: ReturnType<typeof captureProjectSurface>;

@@ -240,6 +240,7 @@ On macOS, `sandbox-exec` provides a seatbelt backend when its probe succeeds. Th
 | `interface.mode` | `regular` | restart |
 | `interface.fullscreenScrollbar` | `auto` | restart |
 | `interface.smoothStreaming` | `auto` | immediately |
+| `interface.exitSummary` | `full` | immediately, at the next exit |
 | `interface.desktopNotifications` | `false` | next turn |
 | `interface.panes.enabled` | `off` | restart |
 | `interface.panes.notifications` | `failures` | immediately |
@@ -268,6 +269,9 @@ On macOS, `sandbox-exec` provides a seatbelt backend when its probe succeeds. Th
 | `integrations.library.confirmedRemote` | `null` | next turn |
 | `integrations.library.sync` | `false` | next turn |
 | `integrations.git.commitAttribution` | `true` | immediately for subsequent commits |
+| `integrations.music.enabled` | `false` | immediately, at the next `/music` |
+| `integrations.music.station` | `http://radio.cliamp.stream/lofi/stream` | immediately, at the next `/music` |
+| `integrations.music.agentControl` | `false` | restart |
 
 The retired v1-only paths `identity`, `background.thinkingLevel`, `theme`, and `compaction.excludeLastTurns` have no v2 replacement. Fresh v2 files naming them receive targeted removal diagnostics. The v1 migrator drops them with the reason recorded in its migration report; they are tombstones, not executable aliases.
 
