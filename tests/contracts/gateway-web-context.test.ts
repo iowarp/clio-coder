@@ -1,12 +1,18 @@
 import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
+import { resolvePackageRoot } from "../../src/core/package-root.js";
 import { ToolNames } from "../../src/core/tool-names.js";
 import { classify } from "../../src/domains/safety/action-classifier.js";
 import { createWorkerSafety } from "../../src/engine/worker-tools.js";
 import { listDocsCorpus, searchDocs } from "../../src/tools/context/docs-engine.js";
 import { createContextTool, runDocsScope } from "../../src/tools/context/index.js";
+import type { DocsHeadingState } from "../../src/tools/docs-headings.js";
+import { docsHeading } from "../../src/tools/docs-headings.js";
 import { createClioDocsTool, createClioLibraryTool } from "../../src/tools/gateway/clio-context-tools.js";
 import { reserveObservation } from "../../src/tools/observation.js";
+import { DEFAULT_DOCS_HEAD_LINES, readTool } from "../../src/tools/read.js";
 import { createRegistry } from "../../src/tools/registry.js";
 import { webFetchTool, webReadTool } from "../../src/tools/web-fetch.js";
 import { type IsolatedClioEnv, isolateClioEnv } from "../harness/scratch-env.js";
@@ -118,6 +124,83 @@ describe("clio_docs and clio_library", () => {
 		if (!defaultsQuery.ok) return;
 		const defaultsResults = (defaultsQuery.payload as { results: Array<{ file: string }> }).results;
 		strictEqual(defaultsResults[0]?.file, "docs/guide/configuration-reference.md");
+	});
+
+	it("makes every ranked hit directly readable at its exact bundled section range", async () => {
+		const result = await createClioDocsTool().run({ query: "headless run command dispatch target model flags" });
+		ok(result.kind === "ok", JSON.stringify(result));
+		const payload = JSON.parse(result.output) as {
+			results: Array<{
+				file: string;
+				lines: { start: number; end: number };
+				read: { tool: string; args: { path: string; offset: number; limit: number; line_numbers: boolean } };
+			}>;
+		};
+		ok(payload.results.length > 0);
+		for (const hit of payload.results) {
+			strictEqual(hit.read.tool, ToolNames.Read);
+			deepStrictEqual(hit.read.args, {
+				path: join(resolvePackageRoot(), hit.file),
+				offset: hit.lines.start,
+				limit: hit.lines.end - hit.lines.start + 1,
+				line_numbers: true,
+			});
+			const source = readFileSync(hit.read.args.path, "utf8").split("\n");
+			if (source[source.length - 1] === "") source.pop();
+			ok(hit.lines.end <= source.length, "range ends on a physical file line");
+			const read = await readTool.run(hit.read.args);
+			ok(read.kind === "ok", JSON.stringify(read));
+			const body = source
+				.slice(hit.lines.start - 1, hit.lines.end)
+				.map((line, index) => `${hit.lines.start + index} | ${line}`)
+				.join("\n");
+			ok(read.output.startsWith(body), read.output);
+			ok(!read.output.includes("Section index (inclusive line ranges)"));
+		}
+	});
+
+	it("bounds implicit bundled-doc reads, preserving explicit windows and full reads", async () => {
+		const path = join(resolvePackageRoot(), "docs", "guide", "fleet-dispatch.md");
+		const head = await readTool.run({ path });
+		ok(head.kind === "ok", JSON.stringify(head));
+		const observation = head.details?.observation as { shownCount: number; truncated: boolean; next?: string };
+		strictEqual(observation.shownCount, DEFAULT_DOCS_HEAD_LINES);
+		strictEqual(observation.truncated, true);
+		strictEqual(observation.next, undefined);
+		ok(head.output.includes("Section index (inclusive line ranges):"));
+		ok(head.output.includes("offset=1 without limit"));
+		const headings = [...head.output.matchAll(/^(\d+)-(\d+) \|\s*(.+)$/gm)];
+		ok(headings.length > 1);
+		const source = readFileSync(path, "utf8").split("\n");
+		if (source[source.length - 1] === "") source.pop();
+		for (const match of headings) {
+			const start = Number(match[1]);
+			const end = Number(match[2]);
+			ok(end >= start);
+			ok(source[start - 1]?.includes(match[3] ?? ""), "index heading matches its physical line");
+		}
+		strictEqual(Number(headings.at(-1)?.[2]), source.length);
+		for (const args of [{ offset: 1 }, { limit: 3 }, { tail: 3 }]) {
+			const explicit = await readTool.run({ path, ...args });
+			ok(explicit.kind === "ok", JSON.stringify(explicit));
+			ok(!explicit.output.includes("Section index (inclusive line ranges):"));
+			const count = (explicit.details?.observation as { shownCount: number }).shownCount;
+			if ("offset" in args) ok(count > DEFAULT_DOCS_HEAD_LINES);
+			else strictEqual(count, 3);
+		}
+		const ordinary = await readTool.run({ path: join(resolvePackageRoot(), "src", "tools", "dispatch-schema.ts") });
+		ok(ordinary.kind === "ok", JSON.stringify(ordinary));
+		ok(!ordinary.output.includes("Section index (inclusive line ranges):"));
+		ok((ordinary.details?.observation as { shownCount: number }).shownCount > DEFAULT_DOCS_HEAD_LINES);
+	});
+
+	it("keeps headings inside fenced examples out of retrieval and read indexes", () => {
+		const state: DocsHeadingState = {};
+		for (const line of ["````markdown", "# Example", "```", "## Still an example", "~~~~", "# Also an example"]) {
+			strictEqual(docsHeading(line, state), null);
+		}
+		strictEqual(docsHeading("````", state), null);
+		deepStrictEqual(docsHeading("## Real section", state), { level: 2, heading: "Real section" });
 	});
 
 	it("returns portable Markdown heading anchors, including duplicates and Unicode", () => {

@@ -1,14 +1,18 @@
 import { isUtf8 } from "node:buffer";
 import { createHash } from "node:crypto";
-import { type FileHandle, open, stat } from "node:fs/promises";
-import { extname } from "node:path";
+import { type FileHandle, open, realpath, stat } from "node:fs/promises";
+import { extname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { createInterface } from "node:readline";
 import { Type } from "typebox";
 import { detectSupportedImageMimeType, prepareBoundedImage } from "../core/file-references.js";
 import { GUARDRAIL_DEFAULTS, resolveGuardrail } from "../core/guardrails.js";
+import { resolvePackageRoot } from "../core/package-root.js";
 import { ToolNames } from "../core/tool-names.js";
 import type { ReadRecallPort } from "../domains/context/working-set/reread.js";
 import { acceptsImageInput } from "../domains/providers/image-input.js";
 import { ceilChars } from "../domains/session/context-accounting.js";
+import type { DocsHeadingState } from "./docs-headings.js";
+import { docsHeading } from "./docs-headings.js";
 import {
 	commitObservationReservation,
 	finalizeObservation,
@@ -38,6 +42,69 @@ import { truncateUtf8 } from "./truncate-utf8.js";
 // value lives at safety.limits.readBytesPerCall.
 export const DEFAULT_READ_MAX_BYTES = GUARDRAIL_DEFAULTS.readMaxBytes;
 const MIN_READ_CAP_BYTES = 1024;
+export const DEFAULT_DOCS_HEAD_LINES = 80;
+
+async function isBundledDoc(filePath: string): Promise<boolean> {
+	if (extname(filePath).toLowerCase() !== ".md") return false;
+	const packageRoot = process.env.CLIO_CODER_PACKAGE_ROOT?.trim();
+	const docsRoot = packageRoot ? join(resolve(packageRoot), "docs") : join(resolvePackageRoot(), "docs");
+	const physicalRoot = await realpath(docsRoot).catch(() => null);
+	if (physicalRoot === null) return false;
+	const path = relative(physicalRoot, await realpath(filePath));
+	return path.length > 0 && path !== ".." && !path.startsWith(`..${sep}`) && !isAbsolute(path);
+}
+
+/** Index only headings, streaming from the same descriptor as the head window (DF-2). */
+async function bundledDocIndex(
+	handle: FileHandle,
+	file: ReadFileIdentity,
+	cap: number,
+	signal: AbortSignal | undefined,
+): Promise<string> {
+	const hint =
+		"[Clio docs: showing a head window. Select a section below with offset=start and limit=end-start+1; use line_numbers=true for citations. For an explicit full read, use offset=1 without limit (per-call caps still apply).]";
+	if (file.bytes > READ_LINE_COUNT_BUDGET_BYTES) {
+		return `${hint}\n[Section index omitted above 32MB; use clio_docs with a specific query.]`;
+	}
+	const stream = handle.createReadStream({ start: 0, autoClose: false, ...(signal ? { signal } : {}) });
+	const lines = createInterface({ input: stream, crlfDelay: Infinity });
+	const state: DocsHeadingState = {};
+	const sections: string[] = [];
+	let lineNumber = 0;
+	let start = 1;
+	let heading = "(overview)";
+	let level = 0;
+	let hasContent = false;
+	const flush = (end: number): void => {
+		if (end >= start && (hasContent || level > 0)) {
+			sections.push(`${start}-${end} | ${"  ".repeat(Math.max(0, level - 1))}${heading}`);
+		}
+	};
+	try {
+		for await (const line of lines) {
+			if (signal?.aborted) throw new ReadCancelled(stream.bytesRead);
+			lineNumber++;
+			const found = docsHeading(line, state);
+			if (found) {
+				flush(lineNumber - 1);
+				start = lineNumber;
+				heading = found.heading;
+				level = found.level;
+				hasContent = false;
+			} else if (line.trim().length > 0) {
+				hasContent = true;
+			}
+		}
+		flush(lineNumber);
+	} finally {
+		lines.close();
+	}
+	return truncateUtf8(
+		`${hint}\nSection index (inclusive line ranges):\n${sections.join("\n")}`,
+		Math.min(8 * 1024, Math.floor(cap / 2)),
+		"\n[Index truncated; use clio_docs with a specific query.]",
+	);
+}
 
 /**
  * Scan granularity. The newline scans (forward to `offset`, backward for
@@ -697,7 +764,7 @@ export const readTool: ToolSpec = {
 	name: ToolNames.Read,
 	description: `Read a UTF-8 text file or a PNG, JPEG, GIF, or WebP image when the routed model supports vision; notebooks, PDFs (pages) and zip/tar archives (member) render as text. Output is capped at ${DEFAULT_MAX_LINES} lines or ${
 		DEFAULT_READ_MAX_BYTES / 1024
-	}KB per call; a truncated result says how to continue with offset/limit. Files over 32MB report their line total as N+. Binary or non-UTF-8 files are refused with the failing byte offset. line_numbers=true prefixes each line with its 1-based number and " | ", which is not file content.`,
+	}KB per call; a truncated result says how to continue with offset/limit. Clio's own docs/*.md default to an ${DEFAULT_DOCS_HEAD_LINES}-line head plus section index when offset, limit and tail are omitted; use clio_docs hit read.args for a section, or offset=1 without limit for an explicit full read within the caps. Files over 32MB report their line total as N+. Binary or non-UTF-8 files are refused with the failing byte offset. line_numbers=true prefixes each line with its 1-based number and " | ", which is not file content.`,
 	parameters: Type.Object({
 		path: Type.String({ description: "File path (relative or absolute)." }),
 		line_numbers: Type.Optional(
@@ -717,6 +784,7 @@ export const readTool: ToolSpec = {
 		const pathArg = typeof args.path === "string" ? args.path : null;
 		if (!pathArg) return { kind: "error", message: "read: missing path argument" };
 		const filePath = resolveReadPath(pathArg);
+		const defaultDocsWindow = args.offset === undefined && args.limit === undefined && args.tail === undefined;
 		const pages = typeof args.pages === "string" && args.pages.trim().length > 0 ? args.pages : undefined;
 		const member = typeof args.member === "string" && args.member.length > 0 ? args.member : undefined;
 		const request: ReadRequest = {
@@ -788,14 +856,24 @@ export const readTool: ToolSpec = {
 			if (nul >= 0) return refuseBinary(pathArg, nul, file);
 			const lastByte =
 				file.bytes <= first.length ? first[file.bytes - 1] : (await readExact(handle, file.bytes - 1, 1))[0];
+			const docsIndex =
+				defaultDocsWindow && (await isBundledDoc(filePath))
+					? await bundledDocIndex(handle, file, reservation.callCapBytes, request.signal)
+					: null;
+			if (docsIndex !== null) request.limit = DEFAULT_DOCS_HEAD_LINES;
 			const plan: ReadPlan = {
 				file,
-				cap: reservation.callCapBytes,
+				cap: reservation.callCapBytes - (docsIndex === null ? 0 : Buffer.byteLength(docsIndex) + 2),
 				counted: file.bytes <= READ_LINE_COUNT_BUDGET_BYTES,
 				endsWithNewline: file.bytes > 0 && lastByte === 0x0a,
 			};
 			const view = request.tail === null ? await readHead(handle, request, plan) : await readTail(handle, request, plan);
 			if ("kind" in view) return view;
+			if (docsIndex !== null) {
+				view.output += `\n\n${docsIndex}`;
+				// DF-2: an offset-only continuation would bypass the docs default; select a section instead.
+				delete view.next;
+			}
 			const after = await handle.stat();
 			const change: ReadFileIdentity | null =
 				after.size !== file.bytes || after.mtimeMs !== file.mtimeMs ? { bytes: after.size, mtimeMs: after.mtimeMs } : null;
