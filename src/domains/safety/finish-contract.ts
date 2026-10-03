@@ -414,7 +414,7 @@ function limitationToolCall(entry: unknown): ToolCallEvidenceCandidate | null {
  * turn. Grounded in the same mutation notion the action classifier records, so
  * the audit ledger and this gate stay consistent about what counts as a change.
  */
-function mutatingReceipts(recent: ReadonlyArray<unknown>): { paths: string[]; written: Set<string> } {
+export function mutatingReceipts(recent: ReadonlyArray<unknown>): { paths: string[]; written: Set<string> } {
 	const mutationCalls = new Map<string, MutationCandidate>();
 	const paths: string[] = [];
 	const seen = new Set<string>();

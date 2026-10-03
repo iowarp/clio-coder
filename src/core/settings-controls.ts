@@ -438,6 +438,7 @@ export interface SettingControl {
 }
 
 const CHOICES: Record<string, readonly string[]> = {
+	"interface.exitSummary": ["full", "brief", "off"],
 	"safety.autonomy": ["default", "yolo"],
 	"safety.sandbox": ["auto", "required", "off"],
 	"chat.thinkingLevel": THINKING_LEVELS,
@@ -475,6 +476,10 @@ const OPTIONAL_STRINGS = new Set([
 	"context.compaction.systemPrompt",
 ]);
 const EXTRA_HELP: Record<string, [string, string]> = {
+	"interface.exitSummary": [
+		"Session summary on exit",
+		"Full shows this visit's activity and usage; brief shows models, tokens and cost; off shows only how to resume.",
+	],
 	"safety.sandbox": [
 		"Worker command sandbox",
 		"Run dispatched workers' shell and verification commands in an OS sandbox that can write only the run's writable roots and a private /tmp. auto uses it when available, required refuses those commands without it, off never sandboxes. Your own chat commands are not sandboxed.",

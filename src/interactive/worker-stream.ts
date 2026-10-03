@@ -86,6 +86,8 @@ export interface WorkerReceiptSummary extends RunReceiptSummary {
 /** A receipt's projection: the summary plus the answer it sealed. */
 export interface WorkerReceiptFacts extends WorkerReceiptSummary {
 	text?: string;
+	toolCounts?: ReadonlyArray<{ tool: string; count: number }>;
+	changedPaths?: ReadonlyArray<string>;
 }
 
 /** Reads `receipts/<runId>.json` and projects it; null when it is absent or unreadable. */

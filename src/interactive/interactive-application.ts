@@ -42,6 +42,8 @@ import { appendNotice, OPERATOR_COMMAND_ENTRY } from "./command-output.js";
 import { dispatchCouncilThroughRegistry } from "./council-dispatch.js";
 import { createDispatchSteering } from "./dispatch-steering.js";
 import { createEditorSubmitController, EDITOR_BASH_SHUTDOWN_MS } from "./editor-submit.js";
+import { renderExitSummary } from "./exit-summary.js";
+import { createExitSummaryCollector } from "./exit-summary-collector.js";
 import { createInteractiveDesktopNotifications } from "./footer/notifications.js";
 import { createInteractiveEventProjection } from "./interactive-event-projection.js";
 import { createInteractiveInputRuntime } from "./interactive-input-runtime.js";
@@ -70,6 +72,7 @@ import { recordStartupDiagnostic } from "./startup-diagnostics.js";
 import { processAutoPacingAllowed } from "./stream-pacing-policy.js";
 import type { BootInteractivity, TerminalLease } from "./terminal-lease.js";
 import type { createWatchPaneController } from "./watch-pane.js";
+import { readWorkerReceiptFacts } from "./worker-receipts.js";
 import { WORKER_SETTLED_ENTRY } from "./worker-replay.js";
 import { createWorkspaceFacts } from "./workspace-facts.js";
 import type { createYaziBridge, YaziBridge } from "./yazi-bridge.js";
@@ -289,30 +292,6 @@ export interface InteractiveDeps {
 export type InteractiveSubmitExpansion = SubmitExpansion;
 export const expandInteractiveSubmitAsync = expandSubmitText;
 
-/**
- * The line printed after a clean exit, pointing at the in-app `/resume` because
- * the CLI refuses `--resume` (#191). A session without a model turn gets none:
- * the picker hides it, so the hint would name something nobody can find.
- */
-function resumeHintLine(
-	session: SessionContract | undefined,
-	readEntries: (() => ReadonlyArray<SessionEntry>) | undefined,
-): string | null {
-	const id = session?.current()?.id;
-	if (!id || !readEntries) return null;
-	let entries: ReadonlyArray<SessionEntry>;
-	try {
-		entries = readEntries();
-	} catch {
-		// The process is exiting; a transcript that cannot be read only costs the hint.
-		return null;
-	}
-	const hasTurn = entries.some(
-		(entry) => entry.kind === "message" && (entry.role === "assistant" || entry.role === "tool_call"),
-	);
-	return hasTurn ? `To resume: clio-coder, then /resume ${id}` : null;
-}
-
 function availableInteractiveThinkingLevels(deps: InteractiveDeps): ReadonlyArray<ThinkingLevel> {
 	const settings = deps.getSettings?.();
 	return settings ? resolveAvailableThinkingLevels(deps.providers, settings) : ["off"];
@@ -510,6 +489,20 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 		refreshStatus: () => refreshPresentationFooter(),
 	});
 	const { readStructuredEntries, recordSubmittedTurn } = sessionTranscript;
+	const exitSummary = createExitSummaryCollector({
+		bus: deps.bus,
+		observability: deps.observability,
+		dispatch: deps.dispatch,
+		...(deps.session ? { session: deps.session } : {}),
+		getTurns: sessionTranscript.liveSessionTurns,
+		getToolCounts: () => presentation.toolCounts(),
+		getModel: () => {
+			const settings = deps.getSettings?.();
+			return settings?.chat.target && settings.chat.model
+				? { target: settings.chat.target, model: settings.chat.model }
+				: null;
+		},
+	});
 	/**
 	 * Ctrl+G armed the leader and is waiting for the next key. Owned here because
 	 * the footer reads it and the input runtime that flips it is built later.
@@ -719,6 +712,7 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 		...(deps.getSettings ? { getSettings: deps.getSettings } : {}),
 		getTerminalColumns: () => terminal.columns,
 		onChatEventIngress: (event) => {
+			exitSummary.observeChat(event);
 			recordChatEventIngress(event);
 			presentation.recordChatEvent(event);
 		},
@@ -940,6 +934,7 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 	});
 
 	const editorSubmit = createEditorSubmitController({
+		onLocalEntry: exitSummary.observeLocalEntry,
 		recordFeature,
 		onLocalBashRunning: presentation.setLocalBashRunning,
 		returnToLiveEdge: liveEdge,
@@ -1170,6 +1165,7 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 		deps.onNewSession();
 		deps.observability.resetSession();
 		presentation.resetForNewSession();
+		exitSummary.reset();
 		resetTranscript();
 		deps.chat.resetForSession(null);
 		if (unsent.length > 0) {
@@ -1280,6 +1276,11 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 	};
 	const interactiveSubscriptions = createInteractiveSubscriptions({
 		bus: deps.bus,
+		readWorkerReceipt: (runId) => {
+			const receipt = readWorkerReceiptFacts(runId, deps.stateDir);
+			exitSummary.observeReceipt(runId, receipt);
+			return receipt;
+		},
 		refreshFooter: () => footer.refresh(),
 		renderTaskIsland: interactiveTickers.renderTaskIsland,
 		renderContextIsland: interactiveTickers.renderContextIsland,
@@ -1474,6 +1475,7 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 				watchPane?.dispose();
 				muxBridge?.dispose();
 				interactiveSubscriptions.dispose();
+				exitSummary.dispose();
 			},
 		},
 		beforeStopUi: (() => {
@@ -1489,14 +1491,21 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 			else shell.stop();
 		},
 		cancelParkedCalls: (reason) => deps.toolRegistry?.cancelParkedCalls(reason),
+		onCleanExit: () => {
+			const lines = renderExitSummary(
+				exitSummary.snapshot(),
+				deps.getSettings?.().interface.exitSummary ?? "full",
+				process.stdout.columns ?? 80,
+				process.stdout.isTTY === true,
+			);
+			if (lines.length > 0) process.stdout.write(`${lines.join("\n")}\n`);
+		},
 		onShutdown: async () => {
 			// The terminal is already stopped here and the domains have not, so this
 			// is the one moment a plain line about the pane host can both be read
 			// and still see the registry that shutdown is about to forget.
 			const leftBehind = mux && mux.mode !== "none" && mux.available() ? describePanesLeftBehind(mux) : null;
 			if (leftBehind !== null) process.stderr.write(`${leftBehind}\n`);
-			const resumeHint = resumeHintLine(deps.session, deps.readSessionEntries);
-			if (resumeHint !== null) process.stdout.write(`${resumeHint}\n`);
 			try {
 				if (dumpInputWedgeOnTerminate) process.off("SIGTERM", dumpInputWedgeOnTerminate);
 				await operatorExtensions?.dispose();
