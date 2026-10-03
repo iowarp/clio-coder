@@ -1,5 +1,5 @@
+import { renderProjectContextFragment } from "../context/clio-md.js";
 import type { ProjectPromptContext } from "../context/contract.js";
-import { renderProjectContextFragment } from "../context/index.js";
 import { sha256 } from "./hash.js";
 import { safePrefixOffsets, sourceLineCount } from "./preload-prefix.js";
 
