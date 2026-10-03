@@ -25,7 +25,6 @@ import {
 } from "../../core/gateway-routing.js";
 import type { ResponseModelIdObservation } from "../../core/response-model-id.js";
 import {
-	type AppliedThinking,
 	type ResolvedModelRuntimeCapabilities,
 	reasoningClassForMechanism,
 	resolveModelRuntimeCapabilitiesForModel,
@@ -384,7 +383,6 @@ function withLiteLLMRouteFailureAdvice(
 	return advised;
 }
 
-type AnyOnPayload = (payload: unknown, model: Model<Api>) => unknown | undefined | Promise<unknown | undefined>;
 type StreamOptionsWithThinkingBudgets = StreamOptions & { thinkingBudgets?: ThinkingBudgets };
 
 type UsageWithReasoningAliases = Usage & { reasoning?: number; reasoningTokens?: number; reasoning_tokens?: number };
@@ -458,123 +456,96 @@ function withStrippedPartial<TEvent extends AssistantMessageEvent>(event: TEvent
 	return { ...event, partial: stripThinkingFromMessage(event.partial as AssistantMessage) };
 }
 
-/**
- * Apply Clio's thinking overlay to an openai-compat request body after Pi's
- * builder and the catalog sampler have run. Pi gates every thinking field on
- * model.reasoning, which is also what resolves the `none` mechanism, so there
- * is nothing to strip for `none`. `none` and `always-on` leave
- * `reasoning_effort` alone: the backend owns it, or model.samplingParams does
- * (Mercury's pinned `instant`, which Pi applies last). Every other mechanism
- * writes `reasoning_effort` when the family resolved one. Family
- * `chat_template_kwargs` such as `enable_thinking` merge for every mechanism.
- * A budget-tokens family's budget reaches the wire only through Pi's
- * thinkingTokenBudgetField on vLLM and is otherwise informational in the prompt.
- */
-function applyThinkingPayload(
-	payload: Record<string, unknown>,
-	applied: AppliedThinking,
-	resolved: ResolvedModelRuntimeCapabilities,
-	model: Model<Api>,
-): Record<string, unknown> {
-	const next: Record<string, unknown> = { ...payload };
-	if (applied.mechanism !== "none" && applied.mechanism !== "always-on") {
-		if (
-			resolved.request.reasoningEffort &&
-			(next.reasoning_effort === undefined || resolved.response.parser === "harmony")
-		) {
-			next.reasoning_effort = resolved.request.reasoningEffort;
-		}
-		// LiteLLM generic openai/<local model> routes otherwise drop this standard
-		// parameter. Allow only the effort this model/runtime actually resolved;
-		// unknown off controls and unrelated caller parameters gain no allowance.
-		if (
-			resolved.runtimeId === "litellm" &&
-			resolved.request.reasoningEffort &&
-			next.reasoning_effort === resolved.request.reasoningEffort
-		) {
-			const allowed = Array.isArray(next.allowed_openai_params) ? next.allowed_openai_params : [];
-			next.allowed_openai_params = [...new Set([...allowed, "reasoning_effort"])];
-		}
-	}
-	if (resolved.request.chatTemplateKwargs && !chatTemplateKwargsUnsupported(model)) {
-		const existing = isPlainRecord(next.chat_template_kwargs) ? next.chat_template_kwargs : {};
-		next.chat_template_kwargs = { ...existing, ...resolved.request.chatTemplateKwargs };
-	}
-	return next;
-}
-
 function isLmStudioModel(model: Model<Api>): boolean {
 	const metadata = runtimeMetadata(model);
 	return model.provider === "lmstudio" && metadata?.runtimeId === "lmstudio";
 }
 
-function applyLmStudioPayload(
-	payload: Record<string, unknown>,
-	model: Model<Api>,
-	resolved: ResolvedModelRuntimeCapabilities,
-): Record<string, unknown> {
-	if (!isLmStudioModel(model)) return payload;
-	const request = runtimeMetadata(model)?.lmstudio?.request;
-	const next: Record<string, unknown> = { ...payload };
-	delete next.chat_template_kwargs;
-	if (resolved.thinking.mechanism === "none" || resolved.thinking.mechanism === "always-on") return next;
-	const resolvedEffort = runtimeMetadata(model)?.lmstudioReasoningOptions
-		? lmStudioReasoningEffort(resolved.thinking.effectiveLevel, runtimeMetadata(model)?.lmstudioReasoningOptions)
-		: (resolved.request.reasoningEffort ?? lmStudioReasoningEffort(resolved.thinking.effectiveLevel));
-	switch (request?.reasoning) {
+/**
+ * The `reasoning_effort` spelling LM Studio reads for this request, or
+ * undefined to send none (binary models take an effort only to switch off).
+ */
+function lmStudioWireEffort(model: Model<Api>, resolved: ResolvedModelRuntimeCapabilities): string | undefined {
+	const metadata = runtimeMetadata(model);
+	const options = metadata?.lmstudioReasoningOptions;
+	const setting = metadata?.lmstudio?.request?.reasoning;
+	switch (setting) {
 		case "off":
-			next.reasoning_effort = lmStudioReasoningEffort("off", runtimeMetadata(model)?.lmstudioReasoningOptions);
-			break;
+			return lmStudioReasoningEffort("off", options);
 		case "on":
-			next.reasoning_effort = lmStudioReasoningEffort("low", runtimeMetadata(model)?.lmstudioReasoningOptions);
-			break;
+			return lmStudioReasoningEffort("low", options);
 		case "low":
 		case "medium":
 		case "high":
-			next.reasoning_effort = lmStudioReasoningEffort(request.reasoning, runtimeMetadata(model)?.lmstudioReasoningOptions);
-			break;
+			return lmStudioReasoningEffort(setting, options);
 		default:
-			next.reasoning_effort = resolvedEffort;
+			return options
+				? lmStudioReasoningEffort(resolved.thinking.effectiveLevel, options)
+				: (resolved.request.reasoningEffort ?? lmStudioReasoningEffort(resolved.thinking.effectiveLevel));
 	}
-	return next;
 }
 
 /**
- * Body fields only a Clio-synthesized local runtime reads. Pi merges
- * `StreamOptions.samplingParams` into the request body after its own fields, so
- * a caller's samplingParams key still wins over these.
+ * Body fields the runtime reads for one request on a Clio-synthesized target.
+ * Pi merges `StreamOptions.samplingParams` into the request body after its own
+ * fields, so these ride that public pass-through instead of a payload rewrite,
+ * and a caller's samplingParams key replaces the value computed here. Pi's
+ * compat chain cannot carry them: it emits `chat_template_kwargs` or
+ * `reasoning_effort` but never both, gates the chat-template branch on
+ * `model.reasoning` while Clio's family kwargs apply regardless, and has no
+ * field for `allowed_openai_params`, `cache_prompt`, `ttl` or `draft_model`.
+ * `none` and `always-on` leave `reasoning_effort` to the backend or to
+ * model.samplingParams (Mercury's pinned `instant`). Pi catalog models carry no
+ * runtime metadata and keep Pi's thinking handling.
  */
 function runtimeBodyFields(
 	model: Model<"openai-completions">,
-	retention: StreamOptions["cacheRetention"],
+	resolved: ResolvedModelRuntimeCapabilities,
+	options: (StreamOptions & { reasoning?: string; reasoningEffort?: string }) | undefined,
 ): Record<string, unknown> {
 	const metadata = runtimeMetadata(model);
 	const fields: Record<string, unknown> = {};
-	if (model.provider === "llamacpp" && metadata?.runtimeId === "llamacpp") fields.cache_prompt = retention !== "none";
-	if (isLmStudioModel(model)) {
-		const request = metadata?.lmstudio?.request;
+	if (metadata?.runtimeId === undefined) return fields;
+	const lmstudio = isLmStudioModel(model);
+	const { mechanism } = resolved.thinking;
+	const controlled = mechanism !== "none" && mechanism !== "always-on";
+	const effort = controlled
+		? lmstudio
+			? lmStudioWireEffort(model, resolved)
+			: resolved.request.reasoningEffort
+		: undefined;
+	if (effort !== undefined) fields.reasoning_effort = effort;
+	// LiteLLM generic openai/<local model> routes otherwise drop this standard
+	// parameter. Allow only the effort this model/runtime actually resolved.
+	if (
+		resolved.runtimeId === "litellm" &&
+		controlled &&
+		effort !== undefined &&
+		effort === resolved.request.reasoningEffort
+	) {
+		fields.allowed_openai_params = ["reasoning_effort"];
+	}
+	const requested = options?.reasoning ?? options?.reasoningEffort;
+	const kwargs = {
+		// samplingParams replaces the whole chat_template_kwargs value, so Pi's
+		// two-key qwen-chat-template spelling is repeated here for the family
+		// kwargs to extend. Re-run the local wire matrix after a Pi bump.
+		...(model.compat?.thinkingFormat === "qwen-chat-template" && model.reasoning
+			? { enable_thinking: requested !== undefined && requested !== "off", preserve_thinking: true }
+			: {}),
+		...(chatTemplateKwargsUnsupported(model) ? {} : resolved.request.chatTemplateKwargs),
+	};
+	// LM Studio ignores chat_template_kwargs; undefined removes Pi's own field.
+	if (lmstudio) fields.chat_template_kwargs = undefined;
+	else if (Object.keys(kwargs).length > 0) fields.chat_template_kwargs = kwargs;
+	if (model.provider === "llamacpp" && metadata.runtimeId === "llamacpp")
+		fields.cache_prompt = options?.cacheRetention !== "none";
+	if (lmstudio) {
+		const request = metadata.lmstudio?.request;
 		if (request?.ttlSeconds !== undefined) fields.ttl = request.ttlSeconds;
 		if (request?.draftModel !== undefined) fields.draft_model = request.draftModel;
 	}
 	return fields;
-}
-
-/** Compose Clio-only payload deltas over the caller hook after pi applies sampling. */
-function composeThinkingOnPayload(
-	resolved: ResolvedModelRuntimeCapabilities,
-	base: AnyOnPayload | undefined,
-): AnyOnPayload {
-	return async (payload, model) => {
-		if (!isPlainRecord(payload)) {
-			return base ? await base(payload, model) : undefined;
-		}
-		const next = applyLmStudioPayload(applyThinkingPayload(payload, resolved.thinking, resolved, model), model, resolved);
-		if (base) {
-			const fromBase = await base(next, model);
-			if (fromBase !== undefined) return fromBase;
-		}
-		return next;
-	};
 }
 
 function withSamplingOverrides<TOptions extends StreamOptions>(
@@ -582,41 +553,23 @@ function withSamplingOverrides<TOptions extends StreamOptions>(
 	options: TOptions | undefined,
 	resolved: ResolvedModelRuntimeCapabilities,
 	diffusion: boolean,
-): TOptions | undefined {
-	const applied = resolved.thinking;
+): TOptions {
 	const quirks = clioQuirks(model);
-	const profile = pickSamplingProfile(quirks, applied.thinkingActive);
-	const bodyFields: Record<string, unknown> = {
-		...(diffusion ? { diffusing: true } : {}),
-		...runtimeBodyFields(model, options?.cacheRetention),
-	};
-	const lmstudio = isLmStudioModel(model);
+	const profile = pickSamplingProfile(quirks, resolved.thinking.thinkingActive);
 	const vllmThinkingBudgets = resolved.runtimeId === "vllm" ? quirks?.thinking?.budgetByLevel : undefined;
-	// Pi catalog models carry no runtime metadata and keep Pi's own thinking handling.
-	const synthesized = runtimeMetadata(model)?.runtimeId !== undefined;
-	const needsPayloadControls =
-		lmstudio || bodyFields.cache_prompt !== undefined || (synthesized && applied.mechanism !== "always-on");
-	const hasBodyFields = Object.keys(bodyFields).length > 0;
-	if (!profile && !vllmThinkingBudgets && !needsPayloadControls && !hasBodyFields) {
-		return options;
-	}
 	const merged: Record<string, unknown> = { ...(options ?? {}) };
 	if (profile?.temperature !== undefined && merged.temperature === undefined) merged.temperature = profile.temperature;
-	if (profile || hasBodyFields) {
-		merged.samplingParams = {
-			...bodyFields,
-			...(profile ? samplingParamsFromProfile(profile, resolved.runtimeId) : {}),
-			...options?.samplingParams,
-		};
-	}
+	merged.samplingParams = {
+		...(diffusion ? { diffusing: true } : {}),
+		...runtimeBodyFields(model, resolved, options),
+		...(profile ? samplingParamsFromProfile(profile, resolved.runtimeId) : {}),
+		...options?.samplingParams,
+	};
 	if (vllmThinkingBudgets) {
 		merged.thinkingBudgets = {
 			...vllmThinkingBudgets,
 			...(options as StreamOptionsWithThinkingBudgets | undefined)?.thinkingBudgets,
 		};
-	}
-	if (needsPayloadControls) {
-		merged.onPayload = composeThinkingOnPayload(resolved, options?.onPayload);
 	}
 	return merged as TOptions;
 }
