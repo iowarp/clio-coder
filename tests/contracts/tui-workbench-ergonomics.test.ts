@@ -174,8 +174,10 @@ for (const width of widths) {
 		const original = structuredClone(entry);
 		let rows = renderWorkerEntryLines(entry, width, { detail: transcriptDetail("detailed"), terminalRows: 14 });
 		bounded(rows, width);
-		// The live progress line comes first under the header; finished calls follow.
-		assert.match(plain(rows), /^[^\n]*\n {2}│ ⚙ current-研究/u);
+		// Detailed reserves route and budget rows before current work and the last call.
+		assert.match(plain(rows), /\n {2}│ ⚙ current-研究/u);
+		assert.match(plain(rows), /target blade-gateway/u);
+		assert.match(plain(rows), /state tool · tools/u);
 		assert.match(plain(rows), /last: newest/u);
 		assert.deepEqual(entry, original);
 		entry.receipt = { outcome: "succeeded", durationMs: 1000 };
