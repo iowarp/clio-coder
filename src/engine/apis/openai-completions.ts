@@ -388,29 +388,7 @@ function withLiteLLMRouteFailureAdvice(
 type AnyOnPayload = (payload: unknown, model: Model<Api>) => unknown | undefined | Promise<unknown | undefined>;
 type StreamOptionsWithThinkingBudgets = StreamOptions & { thinkingBudgets?: ThinkingBudgets };
 
-const THINKING_CHAT_TEMPLATE_KWARGS = new Set([
-	"enable_thinking",
-	"preserve_thinking",
-	"reasoning_effort",
-	"thinking_budget",
-]);
-
 type UsageWithReasoningAliases = Usage & { reasoning?: number; reasoningTokens?: number; reasoning_tokens?: number };
-
-function stripThinkingRequestFields(payload: Record<string, unknown>): Record<string, unknown> {
-	const next: Record<string, unknown> = { ...payload };
-	delete next.enable_thinking;
-	delete next.reasoning;
-	delete next.reasoning_effort;
-	delete next.thinking;
-	if (isPlainRecord(next.chat_template_kwargs)) {
-		const chatTemplateKwargs: Record<string, unknown> = { ...next.chat_template_kwargs };
-		for (const key of THINKING_CHAT_TEMPLATE_KWARGS) delete chatTemplateKwargs[key];
-		if (Object.keys(chatTemplateKwargs).length > 0) next.chat_template_kwargs = chatTemplateKwargs;
-		else delete next.chat_template_kwargs;
-	}
-	return next;
-}
 
 function stripsThinking(resolved: ResolvedModelRuntimeCapabilities): boolean {
 	return reasoningClassForMechanism(resolved.thinking.mechanism) === "never";
@@ -482,20 +460,16 @@ function withStrippedPartial<TEvent extends AssistantMessageEvent>(event: TEvent
 }
 
 /**
- * Apply thinking-mechanism payload mutations to an openai-compat request body
- * after the catalog sampler is in place. Each mechanism owns the wire fields
- * it touches:
- *   - `effort-levels` writes `reasoning_effort` when the family resolved one;
- *     off also carries `chat_template_kwargs.enable_thinking=false` for strict
- *     templates whose effort vocabulary has no off value.
- *   - `budget-tokens` writes a vendor-specific budget object when the family
- *     declares a `thinkingFormat` of `anthropic-extended`; otherwise the
- *     budget remains informational and surfaces through the prompt only.
- *   - `on-off` writes `chat_template_kwargs.enable_thinking` matching the
- *     existing nemotron-cascade YAML precedent.
- *   - `none` removes thinking controls that lower layers may have added from
- *     stale/live-probed `model.reasoning` state.
- *   - `always-on` does not touch the payload; the backend/model owns it.
+ * Apply Clio's thinking overlay to an openai-compat request body after Pi's
+ * builder and the catalog sampler have run. Pi gates every thinking field on
+ * model.reasoning, which is also what resolves the `none` mechanism, so there
+ * is nothing to strip for `none`. `none` and `always-on` leave
+ * `reasoning_effort` alone: the backend owns it, or model.samplingParams does
+ * (Mercury's pinned `instant`, which Pi applies last). Every other mechanism
+ * writes `reasoning_effort` when the family resolved one. Family
+ * `chat_template_kwargs` such as `enable_thinking` merge for every mechanism.
+ * A budget-tokens family's budget reaches the wire only through Pi's
+ * thinkingTokenBudgetField on vLLM and is otherwise informational in the prompt.
  */
 function applyThinkingPayload(
 	payload: Record<string, unknown>,
@@ -503,55 +477,29 @@ function applyThinkingPayload(
 	resolved: ResolvedModelRuntimeCapabilities,
 	model: Model<Api>,
 ): Record<string, unknown> {
-	if (applied.mechanism === "none" || applied.mechanism === "always-on") {
-		const next = applied.mechanism === "none" ? stripThinkingRequestFields(payload) : { ...payload };
-		// Inception P1: Mercury requires its runtime-pinned off value even after discovery resolves no thinking.
-		if (applied.mechanism === "none" && model.samplingParams) {
-			for (const key of ["enable_thinking", "reasoning", "reasoning_effort", "thinking"]) {
-				if (Object.hasOwn(model.samplingParams, key)) next[key] = model.samplingParams[key];
-			}
-		}
-		if (resolved.request.chatTemplateKwargs && !chatTemplateKwargsUnsupported(model)) {
-			const existing = isPlainRecord(next.chat_template_kwargs) ? next.chat_template_kwargs : {};
-			next.chat_template_kwargs = { ...existing, ...resolved.request.chatTemplateKwargs };
-		}
-		return next;
-	}
 	const next: Record<string, unknown> = { ...payload };
-	if (
-		resolved.request.reasoningEffort &&
-		(next.reasoning_effort === undefined || resolved.response.parser === "harmony")
-	) {
-		next.reasoning_effort = resolved.request.reasoningEffort;
-	}
-	// LiteLLM generic openai/<local model> routes otherwise drop this standard
-	// parameter. Allow only the effort this model/runtime actually resolved;
-	// unknown off controls and unrelated caller parameters gain no allowance.
-	if (
-		resolved.runtimeId === "litellm" &&
-		resolved.request.reasoningEffort &&
-		next.reasoning_effort === resolved.request.reasoningEffort
-	) {
-		const allowed = Array.isArray(next.allowed_openai_params) ? next.allowed_openai_params : [];
-		next.allowed_openai_params = [...new Set([...allowed, "reasoning_effort"])];
+	if (applied.mechanism !== "none" && applied.mechanism !== "always-on") {
+		if (
+			resolved.request.reasoningEffort &&
+			(next.reasoning_effort === undefined || resolved.response.parser === "harmony")
+		) {
+			next.reasoning_effort = resolved.request.reasoningEffort;
+		}
+		// LiteLLM generic openai/<local model> routes otherwise drop this standard
+		// parameter. Allow only the effort this model/runtime actually resolved;
+		// unknown off controls and unrelated caller parameters gain no allowance.
+		if (
+			resolved.runtimeId === "litellm" &&
+			resolved.request.reasoningEffort &&
+			next.reasoning_effort === resolved.request.reasoningEffort
+		) {
+			const allowed = Array.isArray(next.allowed_openai_params) ? next.allowed_openai_params : [];
+			next.allowed_openai_params = [...new Set([...allowed, "reasoning_effort"])];
+		}
 	}
 	if (resolved.request.chatTemplateKwargs && !chatTemplateKwargsUnsupported(model)) {
 		const existing = isPlainRecord(next.chat_template_kwargs) ? next.chat_template_kwargs : {};
 		next.chat_template_kwargs = { ...existing, ...resolved.request.chatTemplateKwargs };
-	}
-	if (
-		applied.mechanism === "budget-tokens" &&
-		resolved.request.budgetTokens !== undefined &&
-		next.thinking === undefined &&
-		resolved.request.budgetEnforcement === "enforced" &&
-		resolved.runtimeId !== "vllm"
-	) {
-		// Only vendors whose openai-compat surface advertises a structured
-		// thinking budget (e.g. anthropic-extended on routed providers) get
-		// the field. The `qwen-chat-template` and llama.cpp surfaces do not
-		// accept it; in those cases the budget stays informational and the
-		// model only learns about it through the prompt Runtime block.
-		next.thinking = { type: "enabled", budget_tokens: resolved.request.budgetTokens };
 	}
 	return next;
 }
