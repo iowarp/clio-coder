@@ -793,30 +793,17 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 				return posture === "confirmed" || posture === "yolo" ? allowDecision(base, input) : askDecision(base, input);
 			}
 
-			const packageCommand =
-				call.tool === ToolNames.Verify &&
-				verifyArgv === null &&
-				typeof call.args?.check === "string" &&
-				call.args.check !== "frontend"
-					? `npm run ${call.args.check}`
-					: null;
-			if (
-				(call.tool === ToolNames.Bash || verifyArgv !== null || packageCommand !== null) &&
-				classification.actionClass === "execute"
-			) {
-				const bash = evaluateBashPolicy(
-					verifyArgv ?? packageCommand ?? command ?? "",
-					callCwd,
-					cwd,
-					posture,
-					projectPolicy,
-					{
-						exemptRoots: readExemptRoots,
-						memo: walkMemo,
-						readable: (target) => evaluatePathPolicy(zeroAccessPolicy, "read", target, callCwd, walkMemo).kind === "allow",
-						walkBudget: { remaining: RG_WALK_BUDGET },
-					},
-				);
+			// A verify call that resolves to no argv lists the checks or names the
+			// ids it accepts and runs nothing. Scanning it as `npm run <check>` made
+			// an unknown id a permission ask, which a non-interactive worker turns
+			// into a terminal denial instead of reading the id list it would get.
+			if ((call.tool === ToolNames.Bash || verifyArgv !== null) && classification.actionClass === "execute") {
+				const bash = evaluateBashPolicy(verifyArgv ?? command ?? "", callCwd, cwd, posture, projectPolicy, {
+					exemptRoots: readExemptRoots,
+					memo: walkMemo,
+					readable: (target) => evaluatePathPolicy(zeroAccessPolicy, "read", target, callCwd, walkMemo).kind === "allow",
+					walkBudget: { remaining: RG_WALK_BUDGET },
+				});
 				// A typed verifier still runs through the same command safety scan.
 				// Unrecognized checks are left to the autonomy mapping: default asks,
 				// while yolo admits them headlessly.

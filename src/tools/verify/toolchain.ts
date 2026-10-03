@@ -166,10 +166,14 @@ export function cmakeProposals(workspaceRoot: string, diagnostics: string[]): Ra
  * How the project launches Python. A uv project keeps its dependencies in a
  * project environment that a bare `python` on PATH does not see, so every
  * runner goes through `uv run`; agents in uv repositories otherwise ran the
- * suite against the wrong interpreter or gave up on it.
+ * suite against the wrong interpreter or gave up on it. Once the environment
+ * exists the runner adds `--no-sync`: a bare `uv run` may provision
+ * dependencies first, so #377 admits uv-launched pytest only with that flag,
+ * and without it every non-interactive worker was denied its own test check.
  */
 function pythonLauncher(workspaceRoot: string): string[] {
-	return existsSync(path.join(workspaceRoot, "uv.lock")) ? ["uv", "run"] : [];
+	if (!existsSync(path.join(workspaceRoot, "uv.lock"))) return [];
+	return existsSync(path.join(workspaceRoot, ".venv")) ? ["uv", "run", "--no-sync"] : ["uv", "run"];
 }
 
 const PYTEST_REQUIREMENT_RE = /^\s*pytest(?![\w.-])/u;

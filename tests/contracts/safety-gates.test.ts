@@ -291,6 +291,10 @@ describe("safety gate boundary", () => {
 	});
 
 	it("admits typed package verification in yolo after the command safety scan", () => {
+		writeFileSync(
+			join(scratch, "package.json"),
+			JSON.stringify({ scripts: { typecheck: "tsc --noEmit", lint: "biome check .", build: "tsup" } }),
+		);
 		const policy = engine();
 		for (const check of ["typecheck", "lint", "build"]) {
 			const args = { check };

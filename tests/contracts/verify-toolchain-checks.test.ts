@@ -158,7 +158,21 @@ describe("verify admission under headless autonomy", () => {
 		const root = workspace({ "pyproject.toml": PYPROJECT, "tests/test_a.py": "" });
 		strictEqual(admission(root, { check: "" }, "yolo"), "allow");
 		strictEqual(admission(root, {}, "default"), "allow");
+		strictEqual(admission(root, { check: "" }, "default"), "allow");
 		strictEqual(admission(root, { check: "pytest tests/test_a.py" }, "yolo"), "allow");
+		// A worker at default once had this denied and ended before seeing the id list.
+		strictEqual(admission(root, { check: "tests", args: ["-q"] }, "default"), "allow");
+	});
+
+	it("runs a synced uv project's pytest without an ask", () => {
+		const root = workspace({
+			"pyproject.toml": `${PYPROJECT}\n[dependency-groups]\ndev = ["pytest>=8"]\n`,
+			"uv.lock": "version = 1\n",
+			".venv/pyvenv.cfg": "",
+			"tests/test_a.py": "",
+		});
+		deepStrictEqual(commandOf(root, "python-pytest"), ["uv", "run", "--no-sync", "python", "-m", "pytest"]);
+		strictEqual(admission(root, { check: "python-pytest", args: ["tests/test_a.py", "-q"] }, "default"), "allow");
 	});
 
 	it("scans model-supplied arguments with the resolved command", () => {
