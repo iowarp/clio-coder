@@ -160,7 +160,7 @@ const TOOL_METADATA: Readonly<Record<string, ToolMetadata>> = {
 			worker:
 				'This worker has no operator skill-activation channel; do not load or suggest skills. Recall needed [evicted ...] content with context(scope="recall", ref=...).',
 			boundWorker:
-				'Load only the harness-activated recipe-bound skills named in the persona, and only when they match the assigned task. This worker cannot install or suggest marketplace skills. Recall needed [evicted ...] content with context(scope="recall", ref=...).',
+				'Load only the bound skills the persona names; this worker cannot install or suggest others. Recall needed [evicted ...] content with context(scope="recall", ref=...).',
 		},
 	},
 	[ToolNames.CredentialPresent]: {
@@ -243,8 +243,6 @@ const TOOL_METADATA: Readonly<Record<string, ToolMetadata>> = {
 		},
 		resultDisposition: BASH_DEFAULT_RESULT_DISPOSITION,
 		costLatency: "local_slow",
-		promptHint:
-			"bash output_policy: omit for a bounded tail; summary for noisy commands; metadata-only when only the outcome matters; full only when the output is known to fit.",
 	},
 	[ToolNames.Git]: {
 		objective: "Read-only git inspection: status, diff, or log.",
@@ -263,7 +261,7 @@ const TOOL_METADATA: Readonly<Record<string, ToolMetadata>> = {
 	[ToolNames.Verify]: {
 		objective: "Run declared verification checks (scripts or frontend artifacts).",
 		discoveryHint:
-			"args={} discovers declared checks without running them. Then describe the tool and run the relevant authorized check. Report actual pass, fail, or unrun status; do not invent a script or treat a plan to verify as evidence.",
+			'verify({}) lists declared checks without running them; verify({check:"<id>"}) runs one. Report actual pass, fail, or unrun status; do not invent a script or treat a plan to verify as evidence.',
 		examples: [{ goal: "Discover available verification checks without running them", args: {}, startup: true }],
 		uiLabel: "Verify",
 		retrySafety: "retry_safe",
@@ -346,7 +344,7 @@ const TOOL_METADATA: Readonly<Record<string, ToolMetadata>> = {
 	[ToolNames.Dispatch]: {
 		objective: "Dispatch bounded tasks to configured Clio workers.",
 		discoveryHint:
-			"Workers are delegated model runs. args={list:true} reads the available fleet without starting work. Choose a read-only recipe for inspection; worktree is for authorized writers. For workers sharing a board, use ONE dispatch call with mode=parallel and a tasks array; separate dispatch calls do not share a ledger. Concurrent Clio workers use their admitted ledger tool to post path claims, source-grounded findings, and peer reviews. This board is not a filesystem directory; do not substitute a file for it. The coordinator inspects actual entries through monitor and dispatch receipts. A worker report alone does not prove it posted a ledger entry.",
+			"Workers are delegated model runs. args={list:true} reads the available fleet without starting work. Choose a read-only recipe for inspection; worktree is for authorized writers. Workers that share a ledger board need ONE dispatch call with mode=parallel and a tasks array; the board is not a filesystem directory, and only monitor and dispatch receipts show what a worker actually posted.",
 		examples: [
 			{
 				goal: "Run two independent workers in one batch with a shared coordination ledger",

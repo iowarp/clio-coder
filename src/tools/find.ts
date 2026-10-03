@@ -277,15 +277,13 @@ function renderFindResult(input: {
 export const findTool: ToolSpec = {
 	name: ToolNames.Find,
 	description:
-		"Find files and directories by glob pattern (supports *, **, ?, [abc]); returns paths relative to the search directory. Respects .gitignore and skips generated dirs (node_modules, dist, build, ...) unless include_ignored=true. Symlinked directories are never followed. Only the fallback counts skipped symlinked directories; native fd leaves that count unmeasured, as indicated by details.symlinkDirectories.counted=false. Without fd the fallback uses GENERATED_DIRS only, with no .gitignore support. order=path (default) returns fd's native order; order=mtime returns newest first from a bounded candidate set. Truncated results say how to continue and where the full list was saved.",
+		"Find files and directories by glob pattern (*, **, ?, [abc]); returns paths relative to the search directory. Respects .gitignore and skips generated dirs (node_modules, dist, build, ...) unless include_ignored=true. Symlinked directories are never followed. order=mtime returns newest first. A truncated result says how to continue.",
 	parameters: Type.Object({
-		pattern: Type.String({ description: "Glob pattern, e.g. 'src/**/*.ts'." }),
-		path: Type.Optional(Type.String({ description: "Directory to search in." })),
-		order: Type.Optional(
-			StringEnum(["path", "mtime"], { description: "Result order: path (default) or mtime descending." }),
-		),
-		limit: Type.Optional(Type.Number({ description: `Max results (default ${DEFAULT_LIMIT}).` })),
-		include_ignored: Type.Optional(Type.Boolean({ description: "Search gitignored and generated paths too." })),
+		pattern: Type.String({ description: "Glob, e.g. 'src/**/*.ts'." }),
+		path: Type.Optional(Type.String({ description: "Directory to search." })),
+		order: Type.Optional(StringEnum(["path", "mtime"])),
+		limit: Type.Optional(Type.Number({ description: "Max results." })),
+		include_ignored: Type.Optional(Type.Boolean({ description: "Also search gitignored and generated paths." })),
 	}),
 	baseActionClass: "read",
 	executionMode: "parallel",

@@ -133,15 +133,15 @@ const DispatchBudgetSchema = Type.Object(
 const DispatchVerificationSchema = Type.Array(
 	Type.Object(
 		{
-			check: Type.String({ description: "Declared check id, never a shell command." }),
-			timeout_ms: Type.Optional(Type.Integer({ minimum: 1, description: "Within the check's declared bounds." })),
+			check: Type.String(),
+			timeout_ms: Type.Optional(Type.Integer({ minimum: 1 })),
 		},
 		{ additionalProperties: false },
 	),
 	{
 		maxItems: 8,
 		description:
-			'Array of {check:"<declared id>"} entries from verify() discovery; never invent ids such as "test suite" or pass an object or shell command.',
+			'Array of {check:"<declared id>"} entries from verify(); never invent ids such as "test suite" or pass a shell command.',
 	},
 );
 

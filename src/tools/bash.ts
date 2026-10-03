@@ -257,20 +257,19 @@ function observeToolsNudge(command: string, sessionId: string | undefined): stri
 export const bashTool: ToolSpec = {
 	name: ToolNames.Bash,
 	description:
-		"Execute a bash command in a fresh child at the workspace root (or explicit cwd); shell state does not persist across calls. Combined stdout and stderr have a 16 MiB hard cap that stops the child; use run_script to stream unbounded output to .clio-coder/runs/<runId>/. The default timeout is 300s; use panes for long-lived processes or an explicit timeout_ms, and use output_policy for bounded diagnostic tail (default), summary, metadata-only, or budget-limited full output. Network reachability follows the host environment and OS isolation; disabling web_fetch does not isolate bash networking.",
+		"Execute a bash command in a fresh child at the workspace root (or explicit cwd); shell state does not persist across calls. Combined output has a 16 MiB hard cap that stops the child; run_script streams unbounded output. The default timeout is 300s.",
 	parameters: Type.Object({
 		command: Type.String({ description: "Bash command to execute." }),
 		cwd: Type.Optional(
 			Type.String({
-				description:
-					"Omit unless the command must run in a subdirectory of the workspace root, given as a relative path; outside the root is blocked.",
+				description: "Relative subdirectory of the workspace root; omit otherwise.",
 			}),
 		),
 		timeout_ms: Type.Optional(Type.Number({ description: "Timeout in milliseconds." })),
 		output_policy: Type.Optional(
 			Type.Union([Type.Literal("full"), Type.Literal("bounded"), Type.Literal("summary"), Type.Literal("metadata-only")], {
 				description:
-					"Model-context disposition. Omit for bounded tail output. Use summary for noisy runs, metadata-only when only status and retrieval matter, and full only for known-small output.",
+					"What returns to you. Omit for a bounded tail; summary for noisy runs; metadata-only when only the outcome matters; full only for known-small output.",
 			}),
 		),
 	}),

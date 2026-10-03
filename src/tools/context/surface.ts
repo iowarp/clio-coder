@@ -12,29 +12,16 @@ import type { ToolSurface } from "../lazy-tool.js";
 export const contextToolSurface = {
 	name: ToolNames.Context,
 	description:
-		"Environment context: scope=settings explains effective settings, autonomy, limits and UI commands without credentials; workspace returns the git/project snapshot; budget inspects the native session's live request budget (read-only); skills lists ready and installable skills, or loads one by name; recall returns an evicted/summarized result by ref or path, or lists them by query with limit/offset. Clio docs and recipes: gateway capabilities clio_docs and clio_library. Repository code/wiki: code_nav (mode=wiki).",
+		"Environment context. scope=workspace: git/project snapshot; settings: effective settings, autonomy and limits without credentials; budget: the live request budget; skills: list ready skills or load one by name; recall: an evicted result by ref or path, or a list by query.",
 	parameters: Type.Object({
 		scope: StringEnum(["workspace", "settings", "skills", "recall", "budget"], { description: "Context source." }),
-		// These three carry three scopes each. The attached-schema byte budget in
-		// tests/contracts/gateway-prompt.test.ts had 18 bytes of headroom, so
-		// naming scope=skills here is paid for by compressing the wording rather
-		// than by widening a budget that exists to keep the prompt small.
-		query: Type.Optional(
-			Type.String({
-				description:
-					"scope=settings: path/section/terms; scope=recall (no ref): path/tool/ref terms; scope=skills: narrow the list.",
-			}),
-		),
-		name: Type.Optional(Type.String({ description: "scope=skills: skill name to load; omit to list." })),
-		limit: Type.Optional(
-			Type.Number({ description: "scope=settings/recall: page size (max 12); scope=skills: rows (max 200)." }),
-		),
-		ref: Type.Optional(Type.String({ description: "scope=recall: result ref; omit to discover." })),
-		path: Type.Optional(Type.String({ description: "scope=recall: newest evicted read of a file." })),
-		offset: Type.Optional(
-			Type.Number({ description: "scope=settings, recall, or skills: 0-based offset; follow nextOffset." }),
-		),
-		include_tree: Type.Optional(Type.Boolean({ description: "scope=skills: list files under the skill base_dir." })),
+		query: Type.Optional(Type.String({ description: "settings, recall or skills: search terms." })),
+		name: Type.Optional(Type.String({ description: "skills: the skill to load." })),
+		limit: Type.Optional(Type.Number({ description: "Page size." })),
+		ref: Type.Optional(Type.String({ description: "recall: result ref." })),
+		path: Type.Optional(Type.String({ description: "recall: newest evicted read of this file." })),
+		offset: Type.Optional(Type.Number({ description: "Follow nextOffset." })),
+		include_tree: Type.Optional(Type.Boolean({ description: "skills: list the skill's files." })),
 	}),
 	baseActionClass: "read",
 	executionMode: "parallel",
