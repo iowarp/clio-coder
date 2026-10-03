@@ -19,6 +19,7 @@ export interface ConfigDiff {
 }
 
 const HOT_RELOAD_FIELDS = new Set<string>([
+	"interface.exitSummary",
 	"interface.keybindings",
 	"safety.autonomy",
 	"chat.modelPicker",

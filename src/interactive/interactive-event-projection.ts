@@ -170,19 +170,11 @@ export function createInteractiveEventProjection(deps: InteractiveEventProjectio
 				deps.resetAskUserCancellation();
 			}
 			if (event.type === "tool_execution_start") {
-				if (event.toolName.toLowerCase() === "dispatch") {
-					deps.applyChatEvent(event);
-					return;
-				}
 				// Footer tallies count the capability that ran, as a direct call of
 				// it counted in v056, not the gateway wrapper the coordinator used.
 				deps.recordToolStart(displayToolCall(event.toolName, event.args).toolName, event.toolCallId);
 				deps.refreshFooter();
 			} else if (event.type === "tool_execution_end") {
-				if (event.toolName.toLowerCase() === "dispatch") {
-					deps.applyChatEvent(event);
-					return;
-				}
 				if (askUserInterviewClosedByToolResult(event)) {
 					deps.closeAskUserSession();
 					deps.resetAskUserCancellation();

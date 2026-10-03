@@ -101,6 +101,17 @@ function workerReceiptFacts(receipt: Record<string, unknown>): WorkerReceiptFact
 	const checkoutPaths = Array.isArray(checkoutChanges?.changedPaths)
 		? checkoutChanges.changedPaths.filter((path): path is string => typeof path === "string")
 		: undefined;
+	const toolCounts = Array.isArray(receipt.toolStats)
+		? receipt.toolStats.flatMap((stat) =>
+				isRecord(stat) &&
+				typeof stat.tool === "string" &&
+				typeof stat.count === "number" &&
+				Number.isFinite(stat.count) &&
+				stat.count >= 0
+					? [{ tool: stat.tool, count: stat.count }]
+					: [],
+			)
+		: undefined;
 	const reproducibility = isRecord(receipt.reproducibility) ? receipt.reproducibility : null;
 	const placement = external
 		? worktree && optionalString(worktree.path) && optionalString(worktree.branch)
@@ -120,6 +131,8 @@ function workerReceiptFacts(receipt: Record<string, unknown>): WorkerReceiptFact
 		: undefined;
 	return {
 		outcome,
+		...(toolCounts !== undefined ? { toolCounts } : {}),
+		...((changedPaths ?? checkoutPaths) !== undefined ? { changedPaths: changedPaths ?? checkoutPaths ?? [] } : {}),
 		...(outcomeCode !== undefined ? { outcomeCode } : {}),
 		...(failureMessage !== undefined ? { failureMessage } : {}),
 		...(mergeDetail !== undefined ? { mergeDetail } : {}),

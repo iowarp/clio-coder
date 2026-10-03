@@ -94,6 +94,7 @@ export interface EditorSubmitSessionTranscript {
 }
 
 export interface EditorSubmitDeps {
+	onLocalEntry?: (entry: SessionEntry) => void;
 	onLocalBashRunning?: (running: boolean) => void;
 	/** Note a harness feature the operator used, for demo guidance; see recordOperatorFeature. */
 	recordFeature?: (feature: string) => void;
@@ -240,6 +241,7 @@ export function createEditorSubmitController(deps: EditorSubmitDeps): EditorSubm
 							timestamp: deps.nowIso?.() ?? new Date().toISOString(),
 						} as SessionEntry);
 				if (entry.kind === "bashExecution") {
+					deps.onLocalEntry?.(entry);
 					execution.output = entry.output;
 					execution.running = false;
 					execution.exitCode = entry.exitCode;

@@ -1025,6 +1025,12 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 					publicEvent = { ...enrichedEvent, messages: reported } as typeof enrichedEvent;
 				}
 			}
+			if (publicEvent?.type === "message_end" && publicEvent.message.role === "assistant" && apiCallStartedAt !== null) {
+				publicEvent = {
+					...publicEvent,
+					modelTimeMs: Math.round(Math.max(0, eventClock - apiCallStartedAt)),
+				} as typeof publicEvent;
+			}
 			if (publicEvent) generationTiming.record(publicEvent, eventClock);
 			if (publicEvent?.type === "agent_start") {
 				persistence.deferTraceClose(true);
