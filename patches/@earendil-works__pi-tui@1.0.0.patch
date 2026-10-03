@@ -333,35 +333,10 @@ index acc5229544279c526bbfaa65de703dfcc30e0a21..4b1fa8ec77dd0c03fc4e0e153ec6425f
      removeInputListener(listener: TuiInputListener): void;
      onTerminalColorSchemeChange(listener: (scheme: TerminalColorScheme) => void): () => void;
 diff --git a/dist/tui.js b/dist/tui.js
-index 9f8123fb0931b983d042bca493de5a8093f9482f..4b6313324e70e98fcb56a5d8a5db49a1d6961ac5 100644
+index 9f8123fb0931b983d042bca493de5a8093f9482f..551faf44c2c150ecaaeb48ff91b65f127acbd2ce 100644
 --- a/dist/tui.js
 +++ b/dist/tui.js
-@@ -127,17 +127,19 @@ export class Container {
-         return undefined;
-     }
-     render(width) {
--        const lines = [];
-+        // Clio patch: one exact-size copy of the children's rows. Growing a
-+        // fresh array one row at a time allocated about five times the frame
-+        // on every render, which on a tall transcript was most of the garbage
-+        // behind scavenge pauses in the middle of a stream.
-+        const parts = [];
-         const mouseChildren = [];
-         for (const child of this.children) {
-             const childLines = child.render(width);
-             mouseChildren.push({ component: child, height: childLines.length });
--            for (const line of childLines) {
--                lines.push(line);
--            }
-+            parts.push(childLines);
-         }
-         this.mouseLayout = { width, children: mouseChildren };
--        return lines;
-+        return parts.length === 1 ? parts[0].slice() : [].concat(...parts);
-     }
- }
- /**
-@@ -175,6 +177,7 @@ export class TuiBase extends Container {
+@@ -175,6 +175,7 @@ export class TuiBase extends Container {
      terminal;
      focusedComponent = null;
      inputListeners = new Set();
@@ -369,7 +344,7 @@ index 9f8123fb0931b983d042bca493de5a8093f9482f..4b6313324e70e98fcb56a5d8a5db49a1
      /** Global callback for debug key (Shift+Ctrl+D). Called before input is forwarded to focused component. */
      onDebug;
      renderRequested = false;
-@@ -569,6 +572,12 @@ export class TuiBase extends Container {
+@@ -569,6 +570,12 @@ export class TuiBase extends Container {
          this.queryCellSize();
          this.requestRender();
      }
@@ -382,7 +357,7 @@ index 9f8123fb0931b983d042bca493de5a8093f9482f..4b6313324e70e98fcb56a5d8a5db49a1
      addInputListener(listener) {
          this.inputListeners.add(listener);
          return () => {
-@@ -682,6 +691,14 @@ export class TuiBase extends Container {
+@@ -682,6 +689,14 @@ export class TuiBase extends Container {
          if (this.consumeTerminalColorSchemeReport(data)) {
              return;
          }
