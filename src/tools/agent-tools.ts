@@ -38,7 +38,7 @@ import {
 	isRefusalToolResultError,
 	toolResultContextText,
 } from "./result-disposition.js";
-import { toolSpecPlacement, withGatewayForCapabilities } from "./surface.js";
+import { surfaceSpecPlacement, withGatewayForCapabilities } from "./surface.js";
 
 /**
  * Lightweight per-call observability hook. Default no-op so unused
@@ -423,9 +423,11 @@ function toAgentTool(
  */
 export function resolveAgentTools(input: ResolveAgentToolsInput): AgentTool[] {
 	const specs: ToolSpec[] = [];
-	for (const name of effectiveToolNames(input)) {
+	const names = effectiveToolNames(input);
+	const surface = new Set<string>(names);
+	for (const name of names) {
 		const spec = input.registry.get(name);
-		if (spec && toolSpecPlacement(spec) === "direct") specs.push(spec);
+		if (spec && surfaceSpecPlacement(spec, surface) === "direct") specs.push(spec);
 	}
 	specs.sort((a, b) => a.name.localeCompare(b.name));
 	// Bind the same immutable ceiling to execution as to schema selection.

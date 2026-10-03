@@ -1,7 +1,7 @@
 import { discoveryScore } from "../../core/harness-discovery.js";
 import { validateEngineToolArguments } from "../../engine/ai.js";
 import type { ToolSpec, ToolUsageExample } from "../registry.js";
-import { toolSpecPlacement } from "../surface.js";
+import { surfaceSpecPlacement } from "../surface.js";
 
 const EXAMPLE_MAX_BYTES = 768;
 const EXAMPLES_PER_TOOL = 8;
@@ -52,9 +52,9 @@ export function capabilityArgumentShape(spec: ToolSpec, exampleLimit = EXAMPLES_
 }
 
 /** Ready-to-adapt gateway arguments; sample paths and values are examples, not observations. */
-export function gatewayExamples(spec: ToolSpec, query = "", limit = 3) {
+export function gatewayExamples(spec: ToolSpec, query = "", limit = 3, surface: ReadonlySet<string> | null = null) {
 	// Dispatch can be described here, but its attached tool must still be called directly.
-	if (toolSpecPlacement(spec) === "direct") return [];
+	if (surfaceSpecPlacement(spec, surface) === "direct") return [];
 	const examples = validatedExamples(spec);
 	const ranked = query
 		? examples

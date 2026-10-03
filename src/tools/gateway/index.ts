@@ -23,7 +23,7 @@ import {
 	type ToolResult,
 	type ToolSpec,
 } from "../registry.js";
-import { type GatewayCapabilityKind, gatewayCapabilityKind, toolSpecPlacement } from "../surface.js";
+import { type GatewayCapabilityKind, gatewayCapabilityKind, surfaceSpecPlacement } from "../surface.js";
 import { GATEWAY_FIND_SELF_CAP_BYTES } from "./caps.js";
 import { runGatewayChain } from "./chain.js";
 import { capabilityArgumentShape, gatewayExamples } from "./guidance.js";
@@ -154,11 +154,11 @@ export const gatewayToolSurface = {
 	name: ToolNames.Gateway,
 	description: DESCRIPTION,
 	parameters: Type.Object({
-		op: StringEnum(GATEWAY_OPS, { description: `${GATEWAY_OPS.join(", ")}. Select gateway operations with op.` }),
-		capability: Type.Optional(Type.String({ description: "describe and call: the capability name from find." })),
-		query: Type.Optional(Type.String({ description: "find: task terms, capability name, or desired next step." })),
-		limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 300, description: "find: page size (default 12)." })),
-		offset: Type.Optional(Type.Integer({ minimum: 0, description: "find: follow nextOffset." })),
+		op: StringEnum(GATEWAY_OPS, { description: "Gateway operation." }),
+		capability: Type.Optional(Type.String({ description: "describe and call: the capability name." })),
+		query: Type.Optional(Type.String({ description: "find: task terms or the next step." })),
+		limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 300, description: "find: page size." })),
+		offset: Type.Optional(Type.Integer({ minimum: 0, description: "find: nextOffset." })),
 		// The find payload names the exact refresh call for a server whose catalog
 		// is missing, so the remedy is taught where it is needed rather than
 		// carried in every turn's attached schema.
@@ -166,14 +166,13 @@ export const gatewayToolSurface = {
 		refresh: Type.Optional(Type.Boolean({ description: "find: list that server live." })),
 		args: Type.Optional(
 			Type.Record(Type.String(), Type.Unknown(), {
-				description: "call: the capability's arguments, matching its describe schema.",
+				description: "call: the capability's arguments.",
 			}),
 		),
 		steps: Type.Optional(
 			Type.Array(Type.Unknown(), {
 				maxItems: 16,
-				description:
-					'chain: {id,capability,args,after?:[ids]}; steps execute registered tools. Use op="describe", capability="gateway" separately for bindings.',
+				description: 'chain: {id,capability,args,after?:[ids]}; describe capability="gateway" for bindings.',
 			}),
 		),
 	}),
@@ -265,7 +264,7 @@ export function createGatewayTool(deps: GatewayToolDeps): ToolSpec {
 				message: `gateway: unknown capability "${name}"; run gateway(op="find") to list the capabilities this session offers`,
 			};
 		}
-		if (!allowDirect && toolSpecPlacement(spec) === "direct") {
+		if (!allowDirect && surfaceSpecPlacement(spec, allowedSet(options)) === "direct") {
 			return {
 				spec: null,
 				message: `gateway: ${directCallGuidance(name)}`,
@@ -391,7 +390,8 @@ export function createGatewayTool(deps: GatewayToolDeps): ToolSpec {
 					}));
 			}
 			const registryEntries: GatewayCapabilityEntry[] = registry
-				.listGateway()
+				.listAll()
+				.filter((spec) => surfaceSpecPlacement(spec, allowed) === "gateway")
 				// Scoping asks the source who owns a name rather than testing the
 				// `mcp_<id>__` prefix. Server ids may contain `__`, so with
 				// declarations `a` and `a__b` the prefix test hands `a__b`'s
@@ -480,7 +480,7 @@ export function createGatewayTool(deps: GatewayToolDeps): ToolSpec {
 				query.length > 0
 					? shown.slice(0, 1).flatMap((entry) => {
 							const spec = registry.get(entry.name as ToolName);
-							return spec ? gatewayExamples(spec, rawQuery, 1) : [];
+							return spec ? gatewayExamples(spec, rawQuery, 1, allowed) : [];
 						})
 					: [];
 			const payload = {
@@ -604,13 +604,13 @@ export function createGatewayTool(deps: GatewayToolDeps): ToolSpec {
 				message: `gateway: unknown capability "${name}"; run gateway(op="find") to list the capabilities this session offers`,
 			};
 		}
-		if (toolSpecPlacement(spec) === "direct" && name !== ToolNames.Dispatch && name !== ToolNames.Gateway) {
+		const direct = surfaceSpecPlacement(spec, allowed) === "direct";
+		if (direct && name !== ToolNames.Dispatch && name !== ToolNames.Gateway) {
 			return {
 				kind: "error",
 				message: `gateway: ${directCallGuidance(name)}`,
 			};
 		}
-		const direct = toolSpecPlacement(spec) === "direct";
 		const kind = gatewayCapabilityKind(spec.name);
 		const authority = direct
 			? [directCallGuidance(spec.name), autonomyNote(spec.baseActionClass)]
@@ -630,7 +630,7 @@ export function createGatewayTool(deps: GatewayToolDeps): ToolSpec {
 		}
 		const mcpNote = kind === "mcp" ? deps.mcp?.authorityNote(spec.name) : null;
 		if (mcpNote) authority.push(mcpNote);
-		const examples = gatewayExamples(spec);
+		const examples = gatewayExamples(spec, "", 3, allowed);
 		const payload = {
 			name: spec.name,
 			kind,
@@ -709,7 +709,7 @@ export function createGatewayTool(deps: GatewayToolDeps): ToolSpec {
 				{ type: "toolCall", id: options?.toolCallId ?? "", name: spec.name, arguments: rawArgs },
 			) as Record<string, unknown>;
 		} catch (error) {
-			const examples = gatewayExamples(spec, "", 1);
+			const examples = gatewayExamples(spec, "", 1, allowedSet(options));
 			return {
 				kind: "error",
 				message:

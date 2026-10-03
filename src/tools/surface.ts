@@ -102,8 +102,32 @@ export function toolSpecPlacement(spec: { name: string; placement?: ToolPlacemen
 	return spec.placement ?? toolPlacement(spec.name);
 }
 
-function isGatewayPlacedToolName(name: string): boolean {
-	return toolPlacement(name) === "gateway";
+/**
+ * Directory listing and path search that bash already runs as recognized
+ * commands: `ls` and `find` on workspace paths need no approval. A surface
+ * that attaches bash reaches these two through the gateway instead of carrying
+ * their schemas on every request (1.2 KB of a coder's), and a surface without
+ * bash keeps them attached.
+ */
+const SHELL_COVERED_TOOLS: ReadonlySet<string> = new Set([ToolNames.Find, ToolNames.Ls]);
+
+/**
+ * Placement of a tool by name on one admitted surface. `null` is an unscoped
+ * surface, which gets the name rule. Every consumer that decides direct versus
+ * gateway for a run (schema attachment, the attested signature, the worker
+ * prompt, gateway admission and find) asks this one function, so they agree.
+ */
+export function surfaceToolPlacement(name: string, surface: ReadonlySet<string> | null): ToolPlacement {
+	if (surface !== null && SHELL_COVERED_TOOLS.has(name) && surface.has(ToolNames.Bash)) return "gateway";
+	return toolPlacement(name);
+}
+
+/** A registered spec on one surface: its explicit declaration wins, then the surface rule. */
+export function surfaceSpecPlacement(
+	spec: { name: string; placement?: ToolPlacement },
+	surface: ReadonlySet<string> | null,
+): ToolPlacement {
+	return spec.placement ?? surfaceToolPlacement(spec.name, surface);
 }
 
 export type GatewayCapabilityKind = "builtin" | "extension" | "mcp";
@@ -125,7 +149,8 @@ export function gatewayCapabilityKind(name: string): GatewayCapabilityKind {
 export function withGatewayForCapabilities(names: ReadonlyArray<ToolName>): ToolName[] {
 	const out = [...new Set(names)];
 	if (out.includes(ToolNames.Gateway)) return out;
-	if (!out.some((name) => isGatewayPlacedToolName(name))) return out;
+	const surface = new Set<string>(out);
+	if (!out.some((name) => surfaceToolPlacement(name, surface) === "gateway")) return out;
 	out.push(ToolNames.Gateway);
 	return out;
 }
@@ -137,13 +162,14 @@ export function withGatewayForCapabilities(names: ReadonlyArray<ToolName>): Tool
  * lists "direct tools" from an admitted capability list.
  */
 export function directSurfaceNames(names: ReadonlyArray<string>): string[] {
+	const surface = new Set(names);
 	const seen = new Set<string>();
 	const out: string[] = [];
 	let reachesGateway = false;
 	for (const name of names) {
 		if (seen.has(name)) continue;
 		seen.add(name);
-		if (isGatewayPlacedToolName(name)) {
+		if (surfaceToolPlacement(name, surface) === "gateway") {
 			reachesGateway = true;
 			continue;
 		}
