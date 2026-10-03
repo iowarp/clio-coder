@@ -1,6 +1,6 @@
 import { deepStrictEqual, strictEqual } from "node:assert/strict";
 import { test } from "node:test";
-import type { Api, Model } from "@earendil-works/pi-ai";
+import type { Api, Model, StreamOptions } from "@earendil-works/pi-ai";
 import { withCodexPromptItems } from "../../src/engine/apis/codex-prompt-items.js";
 
 const codex = { api: "openai-codex-responses", id: "gpt-6-luna" } as Model<Api>;
@@ -12,7 +12,7 @@ function body(extra: Record<string, unknown> = {}): Record<string, unknown> {
 }
 
 async function finish(model: Model<Api>, payload: Record<string, unknown>, transport?: "sse" | "auto") {
-	const options = withCodexPromptItems(model, transport ? { transport } : {});
+	const options = withCodexPromptItems<StreamOptions>(model, transport ? { transport } : {});
 	return (await options?.onPayload?.(payload, model)) ?? payload;
 }
 
