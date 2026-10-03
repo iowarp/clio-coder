@@ -78,7 +78,8 @@ export interface OverlaySessionLifecycleDeps {
 }
 
 export interface OverlaySessionLifecycle {
-	openResume(): void;
+	/** Resume `target` (an id or unique id prefix) directly, or open the picker. */
+	openResume(target?: string): void;
 	openTree(): void;
 	openMessagePicker(): void;
 	/** `/handoff <goal>`: extract, review, and seed a successor session. */
@@ -130,7 +131,90 @@ export function createOverlaySessionLifecycle(deps: OverlaySessionLifecycleDeps)
 	const openMessagePicker = deps.openMessagePickerOverlay ?? openMessagePickerOverlay;
 	const openCwdFallback = deps.openCwdFallbackOverlay ?? openCwdFallbackOverlay;
 
-	function openResume(): void {
+	/**
+	 * One switch path for the picker and `/resume <id>`, so a direct resume
+	 * gets the same #93 identity check and #107 active-path replay.
+	 */
+	async function resumeSession(session: SessionContract, sessionId: string, preResumeSessionId: string | null) {
+		const settlement = settleChatBeforeSessionSwitch(deps.chat);
+		if (settlement) await settlement;
+		deps.onResumeSession?.(sessionId);
+		// onResumeSession (wired to session.resume) catches and stderr-logs
+		// its own failure rather than throwing here, so this is the only
+		// signal available: a successful switch always leaves session.current()
+		// pointing at the requested id. Without this check, a failed switch
+		// still replayed the target's transcript and moved the chat leaf to
+		// it while session.current() stayed on the session the operator
+		// started on (issue #93), so the next message was appended with a
+		// parent turn from a session that was never actually opened.
+		if (session.current()?.id !== sessionId) {
+			emitCommandNotice(
+				deps.getSlashNotice(),
+				"error",
+				"resume",
+				`could not switch to that session; staying on ${preResumeSessionId ?? "no session"}`,
+			);
+			deps.refreshFooter();
+			deps.requestRender();
+			return;
+		}
+		try {
+			const turns = deps.readStructuredEntries(sessionId);
+			// The leaf is read before the transcript is rebuilt because it is
+			// what the rebuild has to follow. resolveLeafOnOpen prefers a
+			// persisted `/tree` pin over the newest turn, so a session resumed
+			// on a pin extends from the pinned turn while the file still holds
+			// the abandoned branch after it. Replaying the file unfiltered
+			// rendered those abandoned turns as ordinary history above the
+			// prompt, disagreeing with the branch the next message parents onto
+			// and with the tip `/tree` marks (issue #107). The `/tree` switch
+			// path below has always scoped its replay to the selected turn;
+			// this is the same active-path filter, rooted at the leaf resume
+			// actually landed on.
+			const leafTurnId = session.tree(sessionId).leafId;
+			// activeLeafTurnId, not uptoTurnId: this is a live branch about to
+			// be extended, so sidecars anchored to a path turn but written
+			// after it (a compaction summary covering the leaf, above all)
+			// still belong on screen. uptoTurnId is the historical-truncation
+			// variant `/tree` uses.
+			const replayOptions = withContinuityReplay(turns, leafTurnId ? { activeLeafTurnId: leafTurnId } : {}, session);
+			deps.resetTranscript();
+			rehydrateChatPanelFromTurns(deps.chatPanel, turns, replayOptions);
+			const replayMessages = buildModelReplayAgentMessagesFromTurns(turns, replayOptions);
+			deps.chat.resetForSession(leafTurnId, replayMessages);
+			rescopeToBranch(session, turns, leafTurnId);
+		} catch (error) {
+			deps.stderr(`[/resume] transcript replay failed: ${error instanceof Error ? error.message : String(error)}\n`);
+		}
+		if (sessionId !== preResumeSessionId) {
+			deps.announceTaskMemorySeedOffer();
+		}
+		deps.refreshFooter();
+		deps.requestRender();
+	}
+
+	function probeResumedCwd(session: SessionContract, preResumeSessionId: string | null): void {
+		const current = session.current();
+		if (!current || current.id === preResumeSessionId) return;
+		const probe = resolveSessionCwd(current);
+		if (probe.ok) return;
+		openCwdFallbackState({
+			sessionCwd: typeof current.cwd === "string" ? current.cwd : "",
+			reason: probe.reason,
+			preResumeSessionId,
+		});
+	}
+
+	/** An exact id wins; otherwise the prefix has to name exactly one session. */
+	function matchSessionId(session: SessionContract, target: string): { id: string } | { miss: string } {
+		const ids = session.history().map((meta) => meta.id);
+		if (ids.includes(target)) return { id: target };
+		const matches = ids.filter((id) => id.startsWith(target));
+		if (matches.length === 1 && matches[0] !== undefined) return { id: matches[0] };
+		return { miss: matches.length === 0 ? `no session matches ${target}` : `${target} matches ${matches.length} sessions` };
+	}
+
+	function openResume(target?: string): void {
 		if (deps.transitions.state !== "closed") return;
 		if (!deps.session) {
 			emitCommandNotice(deps.getSlashNotice(), "error", "resume", "session contract unavailable");
@@ -138,79 +222,24 @@ export function createOverlaySessionLifecycle(deps: OverlaySessionLifecycleDeps)
 		}
 		const session = deps.session;
 		const preResumeSessionId = session.current()?.id ?? null;
+		if (target !== undefined) {
+			const match = matchSessionId(session, target);
+			if ("id" in match) {
+				void resumeSession(session, match.id, preResumeSessionId).then(() =>
+					probeResumedCwd(session, preResumeSessionId),
+				);
+				return;
+			}
+			emitCommandNotice(deps.getSlashNotice(), "warn", "resume", match.miss);
+		}
 		deps.transitions.state = "resume";
 		deps.transitions.handle = openResumeOverlay(deps.tui, {
 			session,
-			onResume: async (sessionId) => {
-				const settlement = settleChatBeforeSessionSwitch(deps.chat);
-				if (settlement) await settlement;
-				deps.onResumeSession?.(sessionId);
-				// onResumeSession (wired to session.resume) catches and stderr-logs
-				// its own failure rather than throwing here, so this is the only
-				// signal available: a successful switch always leaves session.current()
-				// pointing at the requested id. Without this check, a failed switch
-				// still replayed the target's transcript and moved the chat leaf to
-				// it while session.current() stayed on the session the operator
-				// started on (issue #93), so the next message was appended with a
-				// parent turn from a session that was never actually opened.
-				if (session.current()?.id !== sessionId) {
-					emitCommandNotice(
-						deps.getSlashNotice(),
-						"error",
-						"resume",
-						`could not switch to that session; staying on ${preResumeSessionId ?? "no session"}`,
-					);
-					deps.refreshFooter();
-					deps.requestRender();
-					return;
-				}
-				try {
-					const turns = deps.readStructuredEntries(sessionId);
-					// The leaf is read before the transcript is rebuilt because it is
-					// what the rebuild has to follow. resolveLeafOnOpen prefers a
-					// persisted `/tree` pin over the newest turn, so a session resumed
-					// on a pin extends from the pinned turn while the file still holds
-					// the abandoned branch after it. Replaying the file unfiltered
-					// rendered those abandoned turns as ordinary history above the
-					// prompt, disagreeing with the branch the next message parents onto
-					// and with the tip `/tree` marks (issue #107). The `/tree` switch
-					// path below has always scoped its replay to the selected turn;
-					// this is the same active-path filter, rooted at the leaf resume
-					// actually landed on.
-					const leafTurnId = session.tree(sessionId).leafId;
-					// activeLeafTurnId, not uptoTurnId: this is a live branch about to
-					// be extended, so sidecars anchored to a path turn but written
-					// after it (a compaction summary covering the leaf, above all)
-					// still belong on screen. uptoTurnId is the historical-truncation
-					// variant `/tree` uses.
-					const replayOptions = withContinuityReplay(turns, leafTurnId ? { activeLeafTurnId: leafTurnId } : {}, session);
-					deps.resetTranscript();
-					rehydrateChatPanelFromTurns(deps.chatPanel, turns, replayOptions);
-					const replayMessages = buildModelReplayAgentMessagesFromTurns(turns, replayOptions);
-					deps.chat.resetForSession(leafTurnId, replayMessages);
-					rescopeToBranch(session, turns, leafTurnId);
-				} catch (error) {
-					deps.stderr(`[/resume] transcript replay failed: ${error instanceof Error ? error.message : String(error)}\n`);
-				}
-				if (sessionId !== preResumeSessionId) {
-					deps.announceTaskMemorySeedOffer();
-				}
-				deps.refreshFooter();
-				deps.requestRender();
-			},
+			...(target !== undefined ? { initialQuery: target } : {}),
+			onResume: (sessionId) => resumeSession(session, sessionId, preResumeSessionId),
 			onClose: () => {
 				deps.transitions.close();
-				queueMicrotask(() => {
-					const current = session.current();
-					if (!current || current.id === preResumeSessionId) return;
-					const probe = resolveSessionCwd(current);
-					if (probe.ok) return;
-					openCwdFallbackState({
-						sessionCwd: typeof current.cwd === "string" ? current.cwd : "",
-						reason: probe.reason,
-						preResumeSessionId,
-					});
-				});
+				queueMicrotask(() => probeResumedCwd(session, preResumeSessionId));
 			},
 		});
 		deps.requestRender();

@@ -123,6 +123,8 @@ export interface OpenSessionOverlayDeps {
 	session: SessionContract;
 	onResume: (sessionId: string) => void;
 	onClose: () => void;
+	/** Prefills the search box, so `/resume <id>` that missed opens already filtered. */
+	initialQuery?: string;
 }
 
 /**
@@ -155,7 +157,7 @@ function createSessionOverlayBox(
 	sessions: ReadonlyArray<SessionMeta>,
 	onSelect: (sessionId: string) => void,
 	onClose: () => void,
-	options: { escapeGraceMs?: number } = {},
+	options: { escapeGraceMs?: number; initialQuery?: string } = {},
 ): FocusBox & { dispose(): void } {
 	const input = new Input();
 	const noMatchView = new Text("");
@@ -176,9 +178,14 @@ function createSessionOverlayBox(
 	box.dispose = (): void => {
 		clearPendingEscape();
 	};
-	input.setValue("");
+	input.setValue(options.initialQuery ?? "");
 	input.onSubmit = () => commitSelection();
-	rebuildChildren();
+	if (options.initialQuery) {
+		lastQuery = options.initialQuery;
+		applyFilter();
+	} else {
+		rebuildChildren();
+	}
 	return box;
 
 	function buildList(sessions: ReadonlyArray<SessionMeta>): SelectList {
@@ -313,6 +320,7 @@ export function openSessionOverlay(tui: TUI, deps: OpenSessionOverlayDeps): Over
 		sessions,
 		(sessionId) => deps.onResume(sessionId),
 		() => deps.onClose(),
+		deps.initialQuery !== undefined ? { initialQuery: deps.initialQuery } : {},
 	);
 	const handle = showClioOverlayFrame(tui, box, {
 		anchor: "center",

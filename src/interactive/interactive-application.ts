@@ -289,6 +289,30 @@ export interface InteractiveDeps {
 export type InteractiveSubmitExpansion = SubmitExpansion;
 export const expandInteractiveSubmitAsync = expandSubmitText;
 
+/**
+ * The line printed after a clean exit, pointing at the in-app `/resume` because
+ * the CLI refuses `--resume` (#191). A session without a model turn gets none:
+ * the picker hides it, so the hint would name something nobody can find.
+ */
+function resumeHintLine(
+	session: SessionContract | undefined,
+	readEntries: (() => ReadonlyArray<SessionEntry>) | undefined,
+): string | null {
+	const id = session?.current()?.id;
+	if (!id || !readEntries) return null;
+	let entries: ReadonlyArray<SessionEntry>;
+	try {
+		entries = readEntries();
+	} catch {
+		// The process is exiting; a transcript that cannot be read only costs the hint.
+		return null;
+	}
+	const hasTurn = entries.some(
+		(entry) => entry.kind === "message" && (entry.role === "assistant" || entry.role === "tool_call"),
+	);
+	return hasTurn ? `To resume: clio-coder, then /resume ${id}` : null;
+}
+
 function availableInteractiveThinkingLevels(deps: InteractiveDeps): ReadonlyArray<ThinkingLevel> {
 	const settings = deps.getSettings?.();
 	return settings ? resolveAvailableThinkingLevels(deps.providers, settings) : ["off"];
@@ -901,7 +925,7 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 				return openSettingsOverlayState("models", "scope");
 			openSettingsOverlayState(area);
 		},
-		openResume: () => openResumeOverlayState(),
+		openResume: (target) => openResumeOverlayState(target),
 		startNewSession: () => startNewSession(),
 		openTree: () => openTreeOverlayState(),
 		openMessagePicker: () => openMessagePickerOverlayState(),
@@ -1471,6 +1495,8 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 			// and still see the registry that shutdown is about to forget.
 			const leftBehind = mux && mux.mode !== "none" && mux.available() ? describePanesLeftBehind(mux) : null;
 			if (leftBehind !== null) process.stderr.write(`${leftBehind}\n`);
+			const resumeHint = resumeHintLine(deps.session, deps.readSessionEntries);
+			if (resumeHint !== null) process.stdout.write(`${resumeHint}\n`);
 			try {
 				if (dumpInputWedgeOnTerminate) process.off("SIGTERM", dumpInputWedgeOnTerminate);
 				await operatorExtensions?.dispose();

@@ -213,7 +213,8 @@ type SlashCommandVariant =
 	| { kind: "model" }
 	| { kind: "model-set"; pattern: string }
 	| { kind: "settings"; area?: SettingsAreaId; group?: string }
-	| { kind: "resume" }
+	/** `target` is a session id or a unique id prefix; absent opens the picker. */
+	| { kind: "resume"; target?: string }
 	| { kind: "new" }
 	| { kind: "tree" }
 	| { kind: "fork" }
@@ -874,7 +875,8 @@ export interface SlashCommandContext {
 	openConfigure?: () => void;
 	openSettings: (area?: SettingsAreaId, group?: string) => void;
 	openFleetRuns?: () => void;
-	openResume: () => void;
+	/** Resume `target` (an id or unique id prefix) directly, or open the picker. */
+	openResume: (target?: string) => void;
 	startNewSession: () => void;
 	openTree: () => void;
 	openMessagePicker: () => void;
@@ -2554,13 +2556,17 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	},
 	{
 		name: "resume",
-		description: "Resume a past session",
+		description: "Resume a past session; an id or unique id prefix skips the picker",
 		group: "Session",
 		kinds: ["resume"],
-		args: {},
-		fromArgs: fromArgsOrUsage("resume", { kind: "resume" }),
-		handle(_command, ctx) {
-			ctx.openResume();
+		args: { positionals: [{ name: "id", required: false }] },
+		fromArgs(parsed) {
+			if (parsed.error) return { kind: "usage-error", command: "resume", reason: parsed.error };
+			const target = parsed.positionals[0];
+			return target ? { kind: "resume", target } : { kind: "resume" };
+		},
+		handle(command, ctx) {
+			if (command.kind === "resume") ctx.openResume(command.target);
 		},
 	},
 	{

@@ -178,7 +178,7 @@ export interface OverlayLifecycleController {
 	openModelScopeState(ref: PendingModelScope): void;
 	openConfigureState(): void;
 	openSettingsOverlayState(section?: SettingsSectionId, rowId?: SettingsCenterRowId): void;
-	openResumeOverlayState(): void;
+	openResumeOverlayState(target?: string): void;
 	openTreeOverlayState(): void;
 	openMessagePickerOverlayState(): void;
 	openHelpOverlayState(query?: string): void;
