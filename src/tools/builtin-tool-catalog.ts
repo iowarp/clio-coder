@@ -160,7 +160,7 @@ const TOOL_METADATA: Readonly<Record<string, ToolMetadata>> = {
 			worker:
 				'This worker has no operator skill-activation channel; do not load or suggest skills. Recall needed [evicted ...] content with context(scope="recall", ref=...).',
 			boundWorker:
-				'Load only the bound skills the persona names; this worker cannot install or suggest others. Recall needed [evicted ...] content with context(scope="recall", ref=...).',
+				'Load only the harness-activated recipe-bound skills named in the persona, and only when they match the assigned task. This worker cannot install or suggest marketplace skills. Recall needed [evicted ...] content with context(scope="recall", ref=...).',
 		},
 	},
 	[ToolNames.CredentialPresent]: {
