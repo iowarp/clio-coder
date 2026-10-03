@@ -1,10 +1,13 @@
 import { deepStrictEqual, match, ok, strictEqual } from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { ToolNames } from "../../src/core/tool-names.js";
+import { parseFrontmatter } from "../../src/domains/agents/frontmatter.js";
 import {
 	type CompiledSessionPrompt,
 	compile,
+	compileWorker,
 	HEADLESS_SESSION_APPROVAL_SEMANTICS,
 	SESSION_APPROVAL_SEMANTICS,
 	type SessionPromptInputs,
@@ -101,6 +104,51 @@ describe("interactive-only guidance in the session prompt", () => {
 		);
 		ok(!prompt(true).includes("# Answering questions about Clio"), "no inline support guidance replaces the routing");
 		strictEqual(prompt(true), prompt(true), "the headless prompt is byte-stable");
+	});
+
+	it("keeps clause evidence and conditional reproduction tests in unattended prompts only", () => {
+		const table = loadFragments();
+		const main = (headless: boolean) =>
+			compile(table, {
+				identity: "identity.clio",
+				operatingContract: "operating.contract",
+				safety: "safety.default",
+				sessionInputs: { coordinatorCapabilities: [], headless },
+			}).systemPrompt.replace(/\s+/gu, " ");
+		const coderPath = new URL("../../src/domains/agents/builtins/coder.md", import.meta.url);
+		const { body } = parseFrontmatter(readFileSync(coderPath, "utf8"), coderPath.pathname);
+		const worker = compileWorker(table, {
+			providerSupportsTools: false,
+			toolNames: [],
+			toolPromptHints: [],
+			hasCanonicalContext: false,
+			hasBoundSkills: false,
+			onPermission: "deny",
+			persona: { id: "persona.coder", relPath: coderPath.pathname, body, contentHash: "coder", dynamic: false },
+		}).systemPrompt.replace(/\s+/gu, " ");
+		for (const prompt of [main(true), worker]) {
+			match(prompt, /Restate the task as its separate clauses|restating the assigned task as its separate clauses/u);
+			match(prompt, /performance and robustness clauses/u);
+			match(prompt, /first check whether existing tests cover each clause/u);
+			match(prompt, /only when no existing test covers the clause and the task and project instructions allow tests/u);
+			match(prompt, /Follow the neighboring tests.*fail on the untouched code/u);
+			match(prompt, /map each clause to evidence in your diff or a check you ran/u);
+			match(prompt, /a clause without evidence is unfinished/iu);
+			match(prompt, /not done/u);
+		}
+		const attended = main(false);
+		strictEqual(attended.includes("reproduction test"), false);
+		strictEqual(attended.includes("map each clause"), false);
+		for (const prompt of [attended, main(true), worker]) {
+			match(prompt, /Name the blocking guard and its stated way to proceed/u);
+			match(prompt, /Preserve mathematical notation, units, scientific Unicode/u);
+			match(prompt, /Before committing, verify the actual implementation against active decisions/u);
+			match(prompt, /operator choices require operator revision/u);
+			match(prompt, /For an approach or design question, stop once/u);
+			match(prompt, /unless the operator says to switch/u);
+			match(prompt, /declared dependencies were never installed/u);
+			match(prompt, /missing module imported only there/u);
+		}
 	});
 });
 
