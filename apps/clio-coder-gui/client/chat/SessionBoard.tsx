@@ -56,23 +56,29 @@ export const SessionBoardPanel = memo(function SessionBoardPanel({
 		// so rows (and the focus a row holds) do not vanish between the two reads.
 		placeholderData: (previous) => previous,
 	});
+	// The mutation is still pending inside onSuccess, so every row button is disabled there; a focus
+	// call from that callback (or a frame after it) can land before the enabled rows commit and is lost.
+	const handed = useRef<string | null>(null);
 	const change = useMutation({
 		mutationFn: (argv: string[]) =>
 			client.call(routes.invokeSessionCommand, { ...params, body: { command: "tasks", argv } }, crypto.randomUUID()),
 		onSuccess: async (result, argv) => {
 			if (result.level !== "error") setTitle("");
 			await queries.invalidateQueries({ queryKey: ["session-board", sessionId] });
-			if (argv[0] === "hand")
-				requestAnimationFrame(() => {
-					const active = document.activeElement;
-					if (active !== document.body && active?.getAttribute("data-task-id") !== argv[1]) return;
-					const next = Array.from(panel.current?.querySelectorAll<HTMLButtonElement>("button[data-task-id]") ?? []).find(
-						(button) => button.dataset.taskId === argv[1],
-					);
-					(next ?? panel.current?.querySelector<HTMLElement>("h3"))?.focus();
-				});
+			if (argv[0] === "hand") handed.current = argv[1] ?? null;
 		},
 	});
+	useEffect(() => {
+		const id = handed.current;
+		if (id === null || change.isPending) return;
+		handed.current = null;
+		const active = document.activeElement;
+		if (active !== document.body && active?.getAttribute("data-task-id") !== id) return;
+		const next = Array.from(panel.current?.querySelectorAll<HTMLButtonElement>("button[data-task-id]") ?? []).find(
+			(button) => button.dataset.taskId === id && !button.disabled,
+		);
+		(next ?? panel.current?.querySelector<HTMLElement>("h3"))?.focus();
+	}, [change.isPending]);
 	const [confirming, setConfirming] = useState<string | null>(null);
 	const [correcting, setCorrecting] = useState<string | null>(null);
 	const [correction, setCorrection] = useState("");
