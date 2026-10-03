@@ -16,7 +16,6 @@ import {
 	fleetNotices,
 	fleetRunDetail,
 	isLiveRun,
-	isWorkingRun,
 } from "./fleet-facts.js";
 import {
 	dispatchRecordPath,
@@ -77,7 +76,6 @@ function RunNode({
 	parentAgent,
 	expanded,
 	onToggle,
-	sessionOpen,
 	steering,
 }: {
 	node: WorkerNode;
@@ -87,7 +85,6 @@ function RunNode({
 	parentAgent: string | null;
 	expanded: boolean;
 	onToggle: () => void;
-	sessionOpen: boolean;
 	steering: RunSteering | undefined;
 }) {
 	const { run, missingParent } = node;
@@ -118,11 +115,8 @@ function RunNode({
 				>
 					<span className="agents-node__head">
 						<span className="agents-node__agent">{run.agentId}</span>
-						<StatusMark
-							live={sessionOpen && isWorkingRun(run)}
-							tone={FLEET_STATE_TONES[run.state]}
-							label={FLEET_STATE_LABELS[run.state]}
-						/>
+						{/* A glyph and a word per run; the tree's root row carries the one moving mark. */}
+						<StatusMark tone={FLEET_STATE_TONES[run.state]} label={FLEET_STATE_LABELS[run.state]} />
 					</span>
 					<span className="agents-node__line">
 						<span className="agents-node__task">{run.taskPreview ?? "No task preview was reported."}</span>
@@ -255,7 +249,6 @@ export const WorkerGraph = memo(function WorkerGraph({
 								parentAgent={node.parentRunId === null ? null : (agents.get(node.parentRunId) ?? null)}
 								expanded={selected === node.run.runId}
 								onToggle={() => setSelected(selected === node.run.runId ? null : node.run.runId)}
-								sessionOpen={open}
 								steering={steering}
 							/>
 						))}

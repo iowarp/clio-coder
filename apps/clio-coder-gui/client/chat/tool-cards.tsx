@@ -27,7 +27,6 @@ import { memo, useState } from "react";
 import type { TimelineItem } from "../../contracts/sessions.js";
 import { StatusMark } from "../design/status.js";
 import { CopyButton } from "../render/Markdown.js";
-import { ClioPulse, PULSE_SIZE } from "../shell/ClioMark.js";
 import { statusGlyph } from "./activity.js";
 import { ELAPSED_TITLE } from "./chat-turn.js";
 import { DiffView } from "./Diff.js";
@@ -248,20 +247,9 @@ export interface ToolCardProps {
 	readonly agent?: string | null;
 	/** Browser-measured running time, already formatted, or null when not worth showing. */
 	readonly elapsed?: string | null;
-	/**
-	 * This call belongs to a turn that is live in an open session. Only then does a running call draw
-	 * the Clio spinner; a call that a recorded session reports as in progress keeps its glyph.
-	 */
-	readonly live?: boolean;
 }
 
-export const ToolCard = memo(function ToolCard({
-	item,
-	options,
-	agent = null,
-	elapsed = null,
-	live = false,
-}: ToolCardProps) {
+export const ToolCard = memo(function ToolCard({ item, options, agent = null, elapsed = null }: ToolCardProps) {
 	const card = presentTool(item, options ?? {});
 	const [open, setOpen] = useState(() => toolOpensAtMount(card));
 	return (
@@ -274,15 +262,7 @@ export const ToolCard = memo(function ToolCard({
 		>
 			<summary className="tool-card__head">
 				<span className="tool-card__glyph" aria-hidden="true">
-					{live && item.status === "in_progress" && !card.settled ? (
-						<ClioPulse size={PULSE_SIZE.inline} />
-					) : card.ended ? (
-						"–"
-					) : card.failed ? (
-						"✕"
-					) : (
-						statusGlyph(item.status)
-					)}
+					{card.ended ? "–" : card.failed ? "✕" : statusGlyph(item.status)}
 				</span>
 				<span className="tool-card__verb" title={`Clio Coder tool: ${card.name}`}>
 					{card.verb}

@@ -24,7 +24,6 @@ import { formatDuration, formatTime } from "../api/clock.js";
 import { StatusMark } from "../design/status.js";
 import { MarkdownContent } from "../render/Markdown.js";
 import { countRender } from "../render/render-probe.js";
-import { ClioPulse, PULSE_SIZE } from "../shell/ClioMark.js";
 import { ActivityGroup } from "./ActivityGroup.js";
 import { isAwaitingAnswer } from "./approval-model.js";
 import {
@@ -229,8 +228,7 @@ export const ChatTurnView = memo(function ChatTurnView({
 					) : null}
 					{turn.segments.length === 0 && live ? (
 						<p className="chat-response__placeholder">
-							{working ? <ClioPulse size={PULSE_SIZE.row} /> : <span aria-hidden="true">{LIVE_GLYPHS[status.state]}</span>}{" "}
-							{livePlaceholder(status)}
+							<span aria-hidden="true">{LIVE_GLYPHS[status.state]}</span> {livePlaceholder(status)}
 						</p>
 					) : null}
 					{turn.segments.map((segment, index) => {
@@ -258,7 +256,6 @@ export const ChatTurnView = memo(function ChatTurnView({
 										session={session}
 										workspaceRoot={workspaceRoot}
 										nowMs={nowMs}
-										working={working}
 									/>
 								);
 						}

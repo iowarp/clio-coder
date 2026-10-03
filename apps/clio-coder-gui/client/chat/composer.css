@@ -360,7 +360,8 @@
 	background: var(--ink-muted);
 	color: var(--paper);
 }
-/* A turn is running: the stop control carries the Clio spinner and the word, not a bare square. */
+/* A turn is running: Stop is the square and the word. The working mark turns once, on the turn's own
+   status line, so the control that ends the turn does not also look like the thing that is busy. */
 .composer__stop.composer__stop--live {
 	display: inline-flex;
 	gap: var(--space-2);
@@ -381,9 +382,6 @@
 .composer__stop .icon {
 	width: var(--icon-lg);
 	height: var(--icon-lg);
-}
-.composer__stop--live .clio-pulse + .icon {
-	display: none;
 }
 .composer__secondary:disabled,
 .composer__icon-button:disabled {
@@ -598,14 +596,8 @@
 		padding: 0;
 		justify-content: center;
 	}
-	.composer[data-steering] .composer__stop--live > span,
-	.composer[data-steering] .composer__stop--live .clio-pulse {
+	.composer[data-steering] .composer__stop--live > span {
 		display: none;
-	}
-	.composer[data-steering] .composer__stop--live .clio-pulse + .icon {
-		display: block;
-		width: var(--icon-md);
-		height: var(--icon-md);
 	}
 }
 @container composer (max-width: 300px) {

@@ -9,7 +9,6 @@ import { routes } from "../../contracts/routes.js";
 import { STEER_TEXT_MAX_BYTES } from "../../contracts/steering.js";
 import type { Client } from "../api/client.js";
 import { StatusMark } from "../design/status.js";
-import { ClioPulse, PULSE_SIZE } from "../shell/ClioMark.js";
 import { capabilityRefusal, steeringAffordances } from "./composer-model.js";
 import {
 	FLEET_GLYPHS,
@@ -21,7 +20,6 @@ import {
 	foldFleetRuns,
 	guidanceReady,
 	isLiveRun,
-	isWorkingRun,
 	type SteerOutcome,
 	steerOutcome,
 } from "./fleet-facts.js";
@@ -162,25 +160,15 @@ export function RunSteer({ run, steering }: { run: FleetRun; steering: RunSteeri
 	);
 }
 
-function FleetRunRows({
-	runs,
-	steering,
-	sessionOpen = false,
-}: {
-	runs: readonly FleetRun[];
-	steering?: RunSteering | undefined;
-	/** A worker spins only while its session is open. In a recorded session "running" is a record. */
-	sessionOpen?: boolean;
-}) {
+function FleetRunRows({ runs, steering }: { runs: readonly FleetRun[]; steering?: RunSteering | undefined }) {
 	return (
 		<ul className="fleet-runs">
 			{runs.map((run) => {
 				const note = fleetRunNote(run);
-				const working = sessionOpen && isWorkingRun(run);
 				return (
 					<li className="fleet-run" key={run.runId}>
 						<span className="fleet-run__glyph" aria-hidden="true">
-							{working ? <ClioPulse size={PULSE_SIZE.inline} /> : FLEET_GLYPHS[run.state]}
+							{FLEET_GLYPHS[run.state]}
 						</span>
 						<span className="fleet-run__agent">{run.agentId}</span>
 						<span className="fleet-run__task">
@@ -230,7 +218,7 @@ export const LiveWorkers = memo(function LiveWorkers({
 	const steering = sessionOpen && steeringAffordances(capabilities.data).dispatch ? { client, sessionId } : undefined;
 	return (
 		<section className="live-workers" aria-label={liveWorkersLabel(live.length)}>
-			<FleetRunRows runs={live} steering={steering} sessionOpen={sessionOpen} />
+			<FleetRunRows runs={live} steering={steering} />
 		</section>
 	);
 });

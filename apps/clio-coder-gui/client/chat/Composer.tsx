@@ -830,7 +830,6 @@ export const Composer = memo(function Composer({
 								aria-label={stop.isPending ? "Stopping…" : "Stop turn"}
 								title="End this turn now. Nothing further is run."
 							>
-								{sessionState === "open" ? <ClioPulse size={PULSE_SIZE.row} /> : null}
 								<Icon name="stop" />
 								<span aria-hidden="true">{stop.isPending ? "Stopping" : "Stop"}</span>
 							</button>
