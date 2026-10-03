@@ -159,6 +159,14 @@
 }
 
 :root[data-theme="dark"] {
+	/* The app's dark theme seats the work on pure black and the two sidebars on the graphite, the
+	   reverse of the site's page and sheet. The two colours are the brand's own; only which one is
+	   the chrome and which is the stage is swapped here, after brand.css, so every sheet follows. */
+	--paper: #0d0d0c;
+	--surface: #000000;
+	/* On a black stage the warm code paper read as a brown tint over the whole conversation, so in
+	   dark a code or diagram well is the stage's own black, held by its line. Light keeps the well. */
+	--code-paper: #000000;
 	--scrim: rgb(0 0 0 / 72%);
 	--glint: var(--ink);
 	--well: #151412;
@@ -208,6 +216,9 @@
    :not([data-theme="light"]) guard keeps an explicit light choice winning. */
 @media (prefers-color-scheme: dark) {
 	:root:not([data-theme="light"]) {
+		--paper: #0d0d0c;
+		--surface: #000000;
+		--code-paper: #000000;
 		--scrim: rgb(0 0 0 / 72%);
 		--glint: var(--ink);
 		--well: #151412;
