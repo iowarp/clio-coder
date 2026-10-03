@@ -132,6 +132,7 @@ export const BranchPanel = memo(function BranchPanel({
 										<button
 											type="button"
 											disabled={busy || row.tip}
+											{...(row.tip ? { "data-tip": "" } : {})}
 											onClick={() => change.mutate({ action: "continue", row })}
 											aria-label={`Continue from this ${row.word.toLowerCase()}: ${excerpt(row.text)}`}
 										>

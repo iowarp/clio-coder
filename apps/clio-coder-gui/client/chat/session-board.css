@@ -71,6 +71,30 @@
 .branch-panel__row--active > .session-board__id {
 	padding-inline-start: var(--space-2);
 }
+/* In the Session column a branch is a line of a list, not a form. The kind word is a label, so it
+   speaks in the interface face, and the two actions are the sidebars' quiet controls: no frame, a
+   fill when pointed at. The dialog the slash palette opens keeps the framed buttons, because there
+   choosing a turn is the whole task. */
+.pane-drill .branch-panel__row > .session-board__id {
+	font-family: var(--font-ui);
+}
+.pane-drill .branch-panel__row .session-board__actions {
+	gap: var(--space-1);
+	margin-inline-start: calc(-1 * var(--space-2));
+}
+.pane-drill .branch-panel__row .session-board__actions button {
+	min-height: 28px;
+	padding: 0 var(--space-2);
+	border-color: transparent;
+	color: var(--ink-muted);
+}
+.pane-drill .branch-panel__row .session-board__actions button:hover:not(:disabled) {
+	color: var(--ink);
+}
+/* The tip is where the next request already lands; its line says so, and a dead Continue adds nothing. */
+.pane-drill .branch-panel__row .session-board__actions button[data-tip] {
+	display: none;
+}
 
 /* Handoff: a goal, then the document a person reviews. The document is prose, so it reads in the
    interface face; starting the new conversation is the consequential action and carries amber. */
