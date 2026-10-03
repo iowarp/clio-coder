@@ -19,6 +19,12 @@ import {
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { stripAuthoredTrailers } from "../core/commit-message.js";
 import { safeResourceWrite } from "../core/safe-resource-write.js";
+import {
+	LEGACY_TASK_WORKTREE_KIND,
+	SAFE_TASK_RUN_ID,
+	TASK_WORKTREE_KIND,
+	TASK_WORKTREE_OWNER_SUFFIX,
+} from "../core/task-worktree-claim.js";
 import { currentProcessLease, ownerIsAlive, type ProcessLease, validProcessLease } from "./process-lease.js";
 import { diskWorktreeParent } from "./worktree-root.js";
 
@@ -107,10 +113,8 @@ export const WORKTREE_DESTINATION_MOVED = "worktree_destination_moved";
 /** Receipt reason for a merge refused because the worktree no longer holds the commit an operator was shown. */
 export const WORKTREE_CHANGED_SINCE_PREVIEW = "worktree_changed_since_preview";
 
-const SAFE_RUN_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/u;
-const OWNER_FILE_SUFFIX = ".task-owner.json";
-const TASK_WORKTREE_KIND = "clio-coder-task-worktree";
-const LEGACY_TASK_WORKTREE_KIND = "clio-task-worktree";
+const SAFE_RUN_ID = SAFE_TASK_RUN_ID;
+const OWNER_FILE_SUFFIX = TASK_WORKTREE_OWNER_SUFFIX;
 /** Identity of commits the host makes on a task branch, and of worker commits when the repository names none. */
 export const COMMIT_IDENTITY = "clio-coder-task";
 

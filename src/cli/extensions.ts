@@ -1,4 +1,5 @@
 import { resolve } from "node:path";
+import { approveFirstProjectInstall, projectPackagesHaveNoState } from "../core/workspace-trust.js";
 import {
 	disableExtension,
 	discoverExtensionPackages,
@@ -188,12 +189,19 @@ export function runExtensionsCommand(argv: ReadonlyArray<string>): number | Prom
 				process.stderr.write("usage: clio-coder extensions install <path> [--user|--project] [--force]\n");
 				return 2;
 			}
+			const firstProjectInstall = parsed.scope === "project" && projectPackagesHaveNoState(process.cwd(), "extensions");
 			const result = installExtension(resolve(root), { ...scopeOptions, force: parsed.force });
+			const approved =
+				firstProjectInstall && result.extension !== undefined && approveFirstProjectInstall(process.cwd(), "extensions");
 			if (parsed.json) process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
 			else {
 				printDiagnostics(result.diagnostics);
 				if (result.extension) {
 					printOk(`installed ${result.extension.id} (${result.extension.scope})`);
+					if (approved)
+						process.stdout.write(
+							"This is the workspace's first project extension install, so project extensions are approved for it. Later installs, disables and removes need clio-coder config trust extensions.\n",
+						);
 					if (result.extension.runtime)
 						process.stderr.write(
 							"Operator runtime code starts on the next interactive startup/reload or explicit extensions run. Install only code you trust; it runs with your user account authority.\n",

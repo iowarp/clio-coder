@@ -19,6 +19,7 @@ import { createHash } from "node:crypto";
 import { lstatSync, mkdirSync, readFileSync, statfsSync } from "node:fs";
 import { userInfo } from "node:os";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
+import { taskWorktreeClaimParent } from "../core/task-worktree-claim.js";
 
 export type WorktreeRootSetting = "auto" | "tmpfs" | "disk" | (string & {});
 
@@ -118,7 +119,7 @@ export interface ResolvedWorktreeRoot {
 }
 
 export function diskWorktreeParent(projectRoot: string): string {
-	return join(projectRoot, ".clio-coder", "worktrees");
+	return taskWorktreeClaimParent(projectRoot);
 }
 
 /** Worktrees of different checkouts never share a directory under a shared root. */

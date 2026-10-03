@@ -10,6 +10,7 @@ import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { safeResourceWrite } from "./safe-resource-write.js";
 import { withStateFileLockSync } from "./state-file-lock.js";
+import { taskWorktreeOrigin } from "./task-worktree-claim.js";
 import { clioStateDir, clioStatePath, stateRootRemoved } from "./xdg.js";
 
 export type WorkspaceTrustVerdict = "trusted" | "untrusted" | "changed";
@@ -156,8 +157,29 @@ export function safetySurfaceTrustHash(canonicalSourcePath: string, contentHash:
 	return sha256(JSON.stringify([[resolve(canonicalSourcePath), contentHash]]));
 }
 
+/**
+ * A task worktree Clio created inherits its origin's approval of the package
+ * surfaces while its install state is byte-identical to the origin's approved
+ * state. Identical state pins identical content digests, so the worktree runs
+ * nothing the operator did not already approve.
+ */
+function inheritsOriginTrust(snapshot: ProjectSurfaceSnapshot): boolean {
+	if (snapshot.surface !== "extensions" && snapshot.surface !== "plugins") return false;
+	const hash = snapshot.files[0]?.hash;
+	if (hash === undefined || hash === null) return false;
+	const origin = taskWorktreeOrigin(snapshot.workspaceRoot);
+	if (origin === null) return false;
+	const approved = captureOwnProjectSurface(origin, snapshot.surface);
+	return approved.verdict === "trusted" && approved.files[0]?.hash === hash;
+}
+
 /** Capture once, hash once, and let loaders parse exactly the admitted bytes. */
 export function captureProjectSurface(workspaceRoot: string, surface: ProjectTrustSurface): ProjectSurfaceSnapshot {
+	const own = captureOwnProjectSurface(workspaceRoot, surface);
+	return own.verdict !== "trusted" && inheritsOriginTrust(own) ? { ...own, verdict: "trusted" } : own;
+}
+
+function captureOwnProjectSurface(workspaceRoot: string, surface: ProjectTrustSurface): ProjectSurfaceSnapshot {
 	let root = resolve(workspaceRoot);
 	try {
 		root = realpathSync(root);
@@ -196,6 +218,32 @@ export function projectPackagesTrusted(workspaceRoot: string, surface: "extensio
 		return captureProjectSurface(workspaceRoot, surface).verdict === "trusted";
 	} catch {
 		// Authority that cannot be read is never consent.
+		return false;
+	}
+}
+
+/** Whether the project has no install state yet for this package surface. */
+export function projectPackagesHaveNoState(workspaceRoot: string, surface: "extensions" | "plugins"): boolean {
+	return !existsSync(join(resolve(workspaceRoot), ".clio-coder", surface, "state.json"));
+}
+
+/**
+ * The operator's own first install into a project creates that surface's first
+ * install state, so the state is theirs to approve. Call it only from an
+ * operator install and only when {@link projectPackagesHaveNoState} held
+ * before it ran. Archive imports and imports from other tools never call it,
+ * and any later install, enable, disable or remove needs `config trust`.
+ * Returns whether the new state was approved.
+ */
+export function approveFirstProjectInstall(workspaceRoot: string, surface: "extensions" | "plugins"): boolean {
+	try {
+		const snapshot = captureOwnProjectSurface(workspaceRoot, surface);
+		if (snapshot.contentHash === null || !snapshot.files.some((file) => file.text !== null)) return false;
+		recordProjectSurfaceTrust(snapshot.workspaceRoot, surface, snapshot.contentHash);
+		return true;
+	} catch {
+		// The install already succeeded; without the record the package stays
+		// unloaded and the trust notice names the command that approves it.
 		return false;
 	}
 }

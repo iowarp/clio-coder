@@ -8,6 +8,7 @@
 import { randomBytes } from "node:crypto";
 import { existsSync } from "node:fs";
 import path from "node:path";
+import { approveFirstProjectInstall, projectPackagesHaveNoState } from "../../core/workspace-trust.js";
 import type { LibraryImportApplyResult, LibraryImportPlan } from "../interop/import.js";
 import {
 	disablePlugin,
@@ -715,6 +716,9 @@ export function applyLibraryLifecycle(
 				outcomes.push(step.refusal ? failed(step, "refused", step.refusal) : { ...unattempted(step) });
 			return summarize(plan, false, outcomes, { status: "not-applicable", reason: "plan refused; nothing committed" });
 		}
+		const firstProjectInstall =
+			plan.steps.some((step) => step.operation === "install" && step.identity.scope === "project") &&
+			projectPackagesHaveNoState(plan.cwd, "plugins");
 		let aborted = false;
 		for (const step of plan.steps) {
 			if (aborted) {
@@ -726,6 +730,16 @@ export function applyLibraryLifecycle(
 			// A durable commit with a verification problem still stops the batch;
 			// later steps must not build on a copy whose state cannot be proven.
 			if (outcome.status !== "committed" || outcome.error) aborted = true;
+		}
+		// The operator's own first project install creates the project's plugin
+		// state, which is theirs to approve (workspace trust).
+		if (
+			firstProjectInstall &&
+			outcomes.some(
+				(item) => item.status === "committed" && item.operation === "install" && item.identity.scope === "project",
+			)
+		) {
+			approveFirstProjectInstall(plan.cwd, "plugins");
 		}
 	} finally {
 		releaseLibraryLifecycle(plan);
