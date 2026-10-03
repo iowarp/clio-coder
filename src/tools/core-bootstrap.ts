@@ -1,5 +1,6 @@
 import type { ContextRecalledPayload } from "../core/bus-events.js";
 import type { ClioSettings } from "../core/config.js";
+import type { RouteProvenance } from "../core/route-provenance.js";
 import { ToolNames } from "../core/tool-names.js";
 import type { BudgetProvider } from "../domains/context/budget/inspection.js";
 import type { WorkerRecall } from "../domains/context/worker/recall.js";
@@ -52,6 +53,8 @@ export interface CoreToolBootstrapDeps {
 	/** Native session accounting only. Worker registries do not inherit it. */
 	getContextBudget?: BudgetProvider;
 	getSettings?: () => Readonly<ClioSettings>;
+	/** Live source of each active and saved route; absent where no saved layers exist. */
+	getRouteProvenance?: () => RouteProvenance;
 	workerRecall?: WorkerRecall;
 	session?: SessionContract;
 	/** Full ledger of the current session; context(scope=recall) folds it. Absent in worker registries. */
@@ -200,6 +203,7 @@ export function registerCoreTools(registry: ToolRegistry, deps: CoreToolBootstra
 	const skillToolDeps = {
 		...(deps.getContextBudget ? { getContextBudget: deps.getContextBudget } : {}),
 		...(deps.getSettings ? { getSettings: deps.getSettings } : {}),
+		...(deps.getRouteProvenance ? { getRouteProvenance: deps.getRouteProvenance } : {}),
 		...(deps.workerRecall ? { workerRecall: deps.workerRecall } : {}),
 		getCwd: () => deps.session?.current()?.cwd ?? process.cwd(),
 		...(deps.getSkillLoaderOptions ? { getSkillLoaderOptions: deps.getSkillLoaderOptions } : {}),

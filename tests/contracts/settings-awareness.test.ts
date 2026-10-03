@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
+import { formatRouteSources, resolveRouteProvenance } from "../../src/core/route-provenance.js";
 import { settingsAwareness } from "../../src/core/settings-awareness.js";
 import { createContextTool } from "../../src/tools/context/index.js";
 
@@ -87,4 +88,53 @@ test("broad fleet questions expose live routing in one lookup without disclosing
 	assert.equal(settingsAwareness(settings, "unmatched-query").routing.fleetDefault.model, "changed-live");
 	settings.fleet.default.model = null;
 	assert.equal(settingsAwareness(settings).routing.fleetDefault.model, null);
+});
+
+test("route provenance separates session overrides, saved routes and the fleet default (DF-7)", () => {
+	const saved = structuredClone(DEFAULT_SETTINGS);
+	saved.chat.target = "anthropic-max";
+	saved.chat.model = "claude-sonnet-5-5";
+	saved.context.memory.target = "litellm";
+	saved.context.memory.model = "gemma";
+	saved.fleet.default.target = "openai-codex";
+	saved.fleet.default.model = "gpt-6.1-sol";
+	const effective = structuredClone(saved);
+	effective.chat.target = "litellm";
+	effective.chat.model = "dynamo";
+	effective.context.memory.model = "dynamo";
+	effective.context.compaction.model = "litellm/dynamo";
+	const userPaths = new Set([
+		"chat.target",
+		"chat.model",
+		"context.memory.target",
+		"context.memory.model",
+		"fleet.default.target",
+		"fleet.default.model",
+	]);
+	const provenance = resolveRouteProvenance(effective, saved, (path) => (userPaths.has(path) ? "user" : "built-in"));
+	assert.deepEqual(provenance.active, { chat: "session", memory: "session", compaction: "session", fleet: "user" });
+	assert.equal(
+		formatRouteSources(provenance.active),
+		"Routes: chat session, memory session, compaction session, fleet user.",
+	);
+	const routing = settingsAwareness(effective, "", 0, 1, provenance).routing;
+	assert.deepEqual(routing.chat, {
+		target: "litellm",
+		model: "dynamo",
+		thinkingLevel: saved.chat.thinkingLevel,
+		source: "session",
+		saved: {
+			target: "anthropic-max",
+			model: "claude-sonnet-5-5",
+			thinkingLevel: saved.chat.thinkingLevel,
+			source: "user",
+		},
+	});
+	assert.deepEqual(routing.compaction, {
+		model: "litellm/dynamo",
+		source: "session",
+		saved: { model: null, source: "chat" },
+	});
+	assert.equal((routing.fleetDefault as { source?: string }).source, "user");
+	assert.equal("saved" in routing.fleetDefault, false);
 });

@@ -4,7 +4,9 @@ import { writeDiagnostic } from "../../core/diagnostics.js";
 import type { DomainBundle, DomainContext, DomainExtension } from "../../core/domain-loader.js";
 import { setGitCommitAttributionEnabled } from "../../core/git-commit-attribution.js";
 import {
+	readLayeredSettings,
 	readStrictLayeredSettings,
+	type SettingsOrigin,
 	updateLayeredSettings,
 	updateProjectLocalSettings,
 } from "../../core/settings-layers.js";
@@ -39,6 +41,7 @@ export function createConfigBundle(
 	let reloadFailure: string | null = null;
 	let reloadsHeld = options.holdReloads === true;
 	let reloadPending = false;
+	let sourcesFor: { snapshot: ClioSettings; sources: Record<string, SettingsOrigin> } | null = null;
 	const listeners = new Map<ChangeKind, Set<ChangeListener>>([
 		["hotReload", new Set()],
 		["nextTurn", new Set()],
@@ -134,6 +137,13 @@ export function createConfigBundle(
 		get() {
 			if (!snapshot) throw new Error("config domain not started");
 			return snapshot;
+		},
+		sources() {
+			if (!snapshot) throw new Error("config domain not started");
+			// Every reload and save swaps the snapshot, so its identity keys the attribution.
+			if (sourcesFor?.snapshot !== snapshot)
+				sourcesFor = { snapshot, sources: readLayeredSettings(process.cwd()).sources };
+			return sourcesFor.sources;
 		},
 		update(mutate) {
 			if (!snapshot) throw new Error("config domain not started");

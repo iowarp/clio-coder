@@ -7,6 +7,7 @@ description: Questions about Clio's own settings go to context(scope="settings")
 # Clio settings routing
 
 For a question about her own settings, targets, profiles or limits, call context(scope="settings") for the live values and the UI that changes them; never answer from defaults or documentation alone, and never change permission rules to get past a denial.
+Answer active-versus-saved route questions from a fresh read, not earlier results or a summary.
 {SETTINGS_CHANGE_POLICY}
 
 Before requesting consent for a setup, inspect current routes and explain any

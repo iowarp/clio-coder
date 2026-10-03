@@ -1,4 +1,5 @@
 import type { ClioSettings } from "./config.js";
+import { type RouteName, type RouteProvenance, routeFields } from "./route-provenance.js";
 import { getAtPath } from "./session-routing.js";
 import { settingsAreaForPath } from "./settings-areas.js";
 import { SETTING_CONTROLS } from "./settings-controls.js";
@@ -38,7 +39,13 @@ const SAFE_STRING_VALUES = new Set([
 ]);
 
 /** An allowlisted projection: never serialize targets, auth, URLs, external-agent commands, or arbitrary JSON. */
-export function settingsAwareness(settings: Readonly<ClioSettings>, query = "", offset = 0, limit = 12) {
+export function settingsAwareness(
+	settings: Readonly<ClioSettings>,
+	query = "",
+	offset = 0,
+	limit = 12,
+	provenance?: RouteProvenance,
+) {
 	const area = resolveSettingsSection(query);
 	const terms = query.toLowerCase().split(/\s+/).filter(Boolean);
 
@@ -58,6 +65,16 @@ export function settingsAwareness(settings: Readonly<ClioSettings>, query = "", 
 		thinkingLevel: value.thinkingLevel,
 		...(value.node ? { node: value.node } : {}),
 	});
+	// Active value, its source, and the saved route a session override hides (DF-7).
+	const sourced = (route: RouteName, value: Record<string, unknown>) => {
+		if (!provenance) return value;
+		const saved = provenance.savedRoutes[route];
+		return {
+			...value,
+			source: provenance.active[route],
+			...(saved ? { saved: { ...saved, source: provenance.saved[route] } } : {}),
+		};
+	};
 
 	const rows = controls.slice(offset, offset + limit).map((control) => {
 		const disclose =
@@ -80,8 +97,10 @@ export function settingsAwareness(settings: Readonly<ClioSettings>, query = "", 
 	return {
 		scope: "effective settings for the running session; includes its overrides",
 		routing: {
-			chat: route(settings.chat),
-			fleetDefault: route(settings.fleet.default),
+			chat: sourced("chat", route(settings.chat)),
+			memory: sourced("memory", routeFields("memory", settings)),
+			compaction: sourced("compaction", routeFields("compaction", settings)),
+			fleetDefault: sourced("fleet", route(settings.fleet.default)),
 			profiles: Object.fromEntries(Object.entries(settings.fleet.profiles).map(([name, value]) => [name, route(value)])),
 			agentProfiles: { ...settings.fleet.agentProfiles },
 			targets: settings.targets.map((target) => ({
@@ -90,7 +109,10 @@ export function settingsAwareness(settings: Readonly<ClioSettings>, query = "", 
 				defaultModel: target.defaultModel ?? null,
 			})),
 			note:
-				"These are configured routes, not backend health or a guarantee of a particular dispatch. Shadow helpers use fleet routing; do not substitute the chat model for the fleet default. Agent/profile bindings, explicit requests, recipe requirements and admission can affect a run. Null means not explicitly configured, not inheritance from chat.",
+				"These are configured routes, not backend health or a guarantee of a particular dispatch. Shadow helpers use fleet routing; do not substitute the chat model for the fleet default. Agent/profile bindings, explicit requests, recipe requirements and admission can affect a run. Null means not explicitly configured, not inheritance from chat; a null compaction model uses the chat route, and a null memory target means rules-only memory." +
+				(provenance
+					? " source says where each active route comes from: session = applied for this session only and not saved; user = saved user settings; project = this workspace's .clio-coder settings; built-in = default; chat = follows the chat route. saved is the saved route a session override hides; when absent, the active route is the saved one. fleetDefault is the worker route, never the saved chat route."
+					: ""),
 		},
 		posture: describeSettingsPosture(settings),
 		limits: {
