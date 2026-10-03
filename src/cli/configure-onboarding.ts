@@ -36,6 +36,7 @@ import type { ThinkingLevel } from "../core/defaults.js";
 import { THINKING_LEVELS } from "../core/defaults.js";
 import { initializeClioHome } from "../core/init.js";
 import { resolveOnPath } from "../domains/interop/detect.js";
+import { ensureClaudeAgentSdk } from "../domains/lifecycle/claude-sdk-install.js";
 import { authStoragePath, openAuthStorage, targetRequiresAuth } from "../domains/providers/auth/index.js";
 import type { ProviderSupportEntry } from "../domains/providers/index.js";
 import {
@@ -369,6 +370,37 @@ const RUNTIME_STEP: Step = {
 		answers.targetId ??= deriveTargetId(runtime.id, readSettings().targets);
 		wizard.answer("Provider", `${runtime.displayName}  ${chalk.dim(`(${runtime.id})`)}`);
 		return "next";
+	},
+};
+
+const SDK_STEP: Step = {
+	id: "claude-sdk",
+	applies: (answers) => answers.runtime?.id === "claude-sdk",
+	run: async (wizard) => {
+		try {
+			await ensureClaudeAgentSdk({
+				confirm: async (question) => {
+					const result = await wizard.select<boolean>({
+						heading: ["", question],
+						choices: [
+							{ value: true, label: "Install now" },
+							{ value: false, label: "Not now" },
+						],
+						initialIndex: 1,
+						railPrefix: wizard.rail,
+						backLabel: "back",
+						clearOnExit: true,
+						input: wizard.input,
+						output: wizard.output,
+					});
+					return result.kind === "selected" && result.value;
+				},
+			});
+			return "next";
+		} catch (error) {
+			wizard.presenter.fail(error instanceof Error ? error.message : String(error));
+			return "cancel";
+		}
 	},
 };
 
@@ -1086,6 +1118,7 @@ const REVIEW_STEP: Step = {
 const STEPS: ReadonlyArray<Step> = [
 	CATEGORY_STEP,
 	RUNTIME_STEP,
+	SDK_STEP,
 	CREDENTIAL_STEP,
 	CREDENTIAL_VALUE_STEP,
 	URL_STEP,

@@ -41,7 +41,7 @@ NODE_KEYRING_URL="https://github.com/nodejs/release-keys/raw/HEAD/gpg-only-activ
 LAUNCHER_MARK="# clio-coder-installer launcher"
 MANIFEST_KIND="clio-coder-installer"
 # Unpacked Node is about 210 MB and one package prefix about 460 MB, half of it
-# the optional Claude Agent SDK binary (--omit-optional skips it). Refuse early
+# the optional Claude Agent SDK binary (--include-claude-sdk opts in). Refuse early
 # rather than die half way through on a quota.
 MIN_FREE_KB=750000
 
@@ -70,7 +70,9 @@ Options:
                         $CLIO_CODER_HOME/install when CLIO_CODER_HOME is set.
   --bin-dir <dir>       Where the clio-coder launcher goes. Default ~/.local/bin.
                         Env: CLIO_CODER_BIN_DIR
-  --omit-optional       Skip the optional Claude Agent SDK dependency.
+  --include-claude-sdk  Include the optional Claude Agent SDK (about 224 MB).
+                        Default: skip it; Clio offers to fetch it on first use.
+  --omit-optional       Accepted for compatibility; skipping is already default.
   --no-modify-path      Keep shell startup files unchanged (default).
   --modify-path         Append a PATH line for the bin dir to your shell's
                         startup file. Without it, the installer only prints one.
@@ -536,7 +538,6 @@ path_line() {
 
 report_path() {
 	if path_contains_dir "$bin_dir"; then
-		ok "$bin_dir is on PATH"
 		return 0
 	fi
 	rc="$(shell_rc_file)"
@@ -564,33 +565,7 @@ warn_about_shadowing_clio() {
 }
 
 print_next_steps() {
-	if version_ge "${installed_version%%-*}" "0.6.0"; then
-		upgrade_advice="clio-coder upgrade"
-		rollback_advice="clio-coder upgrade --rollback (binary only; background updates are disabled)"
-		remove_advice="clio-coder uninstall --remove-binary"
-	else
-		upgrade_advice="rerun install.sh with the same --install-dir and --bin-dir"
-		rollback_advice="rerun install.sh --rollback with the same --install-dir and --bin-dir"
-		remove_advice="this legacy package cannot remove managed binaries; after all sessions exit, remove only $install_root/runtime, $install_root/versions, $install_root/install.json and $launcher"
-	fi
-	cat <<NEXT
-
-Installed: $launcher
-Runtime:   Node v$node_version ($node_build), $runtime_dir
-Package:   $final_prefix
-
-Verify this exact install, then configure a model target:
-  "$launcher" --version
-  "$launcher" doctor
-  "$launcher" configure
-
-Terminal (interactive TUI):
-  "$launcher"
-
-Upgrade: $upgrade_advice
-Rollback: $rollback_advice
-Remove: $remove_advice
-NEXT
+	printf 'Run: clio-coder\n'
 }
 
 default_install_root() {
@@ -655,7 +630,7 @@ main() {
 	node_wanted="${CLIO_CODER_NODE_VERSION:-$NODE_DEFAULT_MAJOR}"
 	install_root_arg=""
 	bin_dir_arg="${CLIO_CODER_BIN_DIR:-$HOME/.local/bin}"
-	omit_optional=0
+	omit_optional=1
 	modify_path="${CLIO_CODER_MODIFY_PATH:-0}"
 	auto_update="${CLIO_CODER_AUTO_UPDATE:-preserve}"
 	lock_owned=0
@@ -688,7 +663,8 @@ main() {
 			--node-tarball=*) CLIO_CODER_NODE_TARBALL="${1#--node-tarball=}" ;;
 			--install-dir=*) install_root_arg="${1#--install-dir=}" ;;
 			--bin-dir=*) bin_dir_arg="${1#--bin-dir=}" ;;
-			--omit-optional) omit_optional=1 ;;
+			--include-claude-sdk) omit_optional=0 ;;
+			--omit-optional) : ;;
 			--modify-path) modify_path=1 ;;
 			--no-modify-path) modify_path=0 ;;
 			--no-auto-update) auto_update=0 ;;
@@ -759,7 +735,7 @@ main() {
 	else
 		spec="$PACKAGE@$version"
 	fi
-	npm_extra=""
+	npm_extra="--include=optional"
 	if [ "$omit_optional" = 1 ]; then npm_extra="--omit=optional"; fi
 
 	log "platform:     $os-$arch${libc:+ ($libc${glibc:+ $glibc})}"

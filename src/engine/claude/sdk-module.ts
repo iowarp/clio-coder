@@ -2,8 +2,8 @@
  * Lazy loader for the optional `@anthropic-ai/claude-agent-sdk` package.
  *
  * The SDK's platform package ships a 224MB proprietary binary, so it lives in
- * `optionalDependencies` and a default install skips it under
- * `npm install --omit=optional`. Nothing may import it at module scope: boot,
+ * `optionalDependencies` and the installer skips it by default.
+ * Nothing may import it at module scope: boot,
  * `doctor`, and every non-Claude runtime have to work on an install that never
  * fetched it. The one value the runtime needs (`query`) is reached through the
  * dynamic import below, at the moment a `claude-sdk` run actually starts, and a
@@ -11,40 +11,18 @@
  * command instead of an ESM resolution stack.
  */
 import type { query } from "@anthropic-ai/claude-agent-sdk";
+import { ClaudeAgentSdkUnavailableError } from "../../domains/lifecycle/claude-sdk-install.js";
 
-/** The optional package this module resolves. */
-export const CLAUDE_AGENT_SDK_PACKAGE = "@anthropic-ai/claude-agent-sdk";
-
-/**
- * Version the checkout pins in `optionalDependencies`. A contract test keeps
- * the two in step so the install command quoted in the diagnostic never drifts
- * from the version the runtime was built against.
- */
-export const CLAUDE_AGENT_SDK_VERSION = "0.3.186";
-
-/** Exact command an operator can paste to make the Claude SDK runtime usable. */
-export const CLAUDE_AGENT_SDK_INSTALL_COMMAND = `npm install ${CLAUDE_AGENT_SDK_PACKAGE}@${CLAUDE_AGENT_SDK_VERSION}`;
+export {
+	CLAUDE_AGENT_SDK_INSTALL_COMMAND,
+	CLAUDE_AGENT_SDK_PACKAGE,
+	CLAUDE_AGENT_SDK_VERSION,
+	ClaudeAgentSdkUnavailableError,
+} from "../../domains/lifecycle/claude-sdk-install.js";
 
 /** The slice of the SDK surface the worker runtime calls. */
 export interface ClaudeAgentSdkModule {
 	query: typeof query;
-}
-
-/** Thrown when a `claude-sdk` run starts on an install that omitted the optional package. */
-export class ClaudeAgentSdkUnavailableError extends Error {
-	readonly code = "CLAUDE_AGENT_SDK_UNAVAILABLE";
-	readonly packageName = CLAUDE_AGENT_SDK_PACKAGE;
-	readonly installCommand = CLAUDE_AGENT_SDK_INSTALL_COMMAND;
-
-	constructor(cause?: unknown) {
-		super(
-			`The claude-sdk runtime needs the optional package ${CLAUDE_AGENT_SDK_PACKAGE}, which is not installed. ` +
-				`Install it with \`${CLAUDE_AGENT_SDK_INSTALL_COMMAND}\` (or reinstall clio-coder without \`--omit=optional\`), ` +
-				`then select the target again. Every other runtime works without it.`,
-			cause === undefined ? undefined : { cause },
-		);
-		this.name = "ClaudeAgentSdkUnavailableError";
-	}
 }
 
 /** Resolution failures that mean "the package is not on disk" rather than "the package is broken". */

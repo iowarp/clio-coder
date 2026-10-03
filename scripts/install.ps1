@@ -29,6 +29,7 @@ param(
 	[string]$InstallDir = $env:CLIO_CODER_INSTALL_DIR,
 	[string]$BinDir = $env:CLIO_CODER_BIN_DIR,
 	[switch]$OmitOptional,
+	[switch]$IncludeClaudeSdk,
 	[switch]$AddToPath,
 	[switch]$NoModifyPath,
 	[switch]$NoAutoUpdate,
@@ -220,7 +221,7 @@ function Install-ClioCoder {
 		New-Item -ItemType Directory -Force -Path (Join-Path $staging "lib") | Out-Null
 		$npmCli = Join-Path $runtimeDir "node_modules\npm\bin\npm-cli.js"
 		$npmArgs = @($npmCli, "install", "--prefix", (Join-Path $staging "lib"), "--no-save", "--loglevel=error")
-		if ($Options.OmitOptional) { $npmArgs += "--omit=optional" }
+		if (-not $Options.IncludeClaudeSdk) { $npmArgs += "--omit=optional" } else { $npmArgs += "--include=optional" }
 		$npmArgs += $installSpec
 		Say "installing $installSpec with the npm bundled in Node v$nodeVersion"
 		$savedPath = $env:Path
@@ -261,7 +262,7 @@ function Install-ClioCoder {
 		$rawPath = if ($envKey) { [string]$envKey.GetValue("Path", "", [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames) } else { "" }
 		$onPath = @([Environment]::ExpandEnvironmentVariables($rawPath) -split ";" | ForEach-Object { $_.TrimEnd("\") }) -contains $binDir.TrimEnd("\")
 		if ($onPath) {
-			Ok "$binDir is on your user PATH"
+			# No PATH hint is needed for an existing entry.
 		} elseif ($modifyPath) {
 			if (-not $envKey) { $envKey = [Microsoft.Win32.Registry]::CurrentUser.CreateSubKey("Environment") }
 			$kind = if ($envKey.GetValueNames() -contains "Path") { $envKey.GetValueKind("Path") } else { [Microsoft.Win32.RegistryValueKind]::ExpandString }
@@ -276,17 +277,7 @@ function Install-ClioCoder {
 			Warn "$binDir is not on your PATH. Rerun with -AddToPath (or set CLIO_CODER_MODIFY_PATH=1), or add it yourself."
 		}
 		if ($envKey) { $envKey.Dispose() }
-		Write-Host ""
-		Write-Host "Installed: $launcher"
-		Write-Host "Runtime:   Node v$nodeVersion ($build), $runtimeDir"
-		Write-Host "Package:   $final"
-		Write-Host ""
-		Write-Host "Verify, then configure a model target:"
-		Write-Host "  & `"$launcher`" --version"
-		Write-Host "  & `"$launcher`" doctor"
-		Write-Host "  & `"$launcher`" configure"
-		Write-Host ""
-		Write-Host "Native Windows is best effort; WSL is the recommended way to run Clio Coder on Windows."
+		Write-Host "Run: clio-coder"
 	} finally {
 		Remove-Item -LiteralPath $lock -Recurse -Force -ErrorAction SilentlyContinue
 		if ($work) { Remove-Item -LiteralPath $work -Recurse -Force -ErrorAction SilentlyContinue }
@@ -296,7 +287,7 @@ function Install-ClioCoder {
 
 Install-ClioCoder -Options ([pscustomobject]@{
 	Version = $Version; Channel = $Channel; Package = $Package; NodeVersion = $NodeVersion; NodeZip = $NodeZip
-	InstallDir = $InstallDir; BinDir = $BinDir; OmitOptional = [bool]$OmitOptional; AddToPath = [bool]$AddToPath
+	InstallDir = $InstallDir; BinDir = $BinDir; IncludeClaudeSdk = [bool]$IncludeClaudeSdk; AddToPath = [bool]$AddToPath
 	NoModifyPath = [bool]$NoModifyPath; NoAutoUpdate = [bool]$NoAutoUpdate; AutoUpdate = [bool]$AutoUpdate; Rollback = [bool]$Rollback
 	NoPostInstall = [bool]$NoPostInstall; RefreshRuntime = [bool]$RefreshRuntime; Force = [bool]$Force; DryRun = [bool]$DryRun
 })

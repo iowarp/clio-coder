@@ -53,7 +53,6 @@ nodes with an old glibc or no usable `module load nodejs`:
 ```bash
 curl -fsSL https://coder.iowarp.ai/install.sh | sh
 cd /path/to/your/project
-clio-coder configure
 clio-coder
 ```
 
@@ -133,9 +132,9 @@ bun add -g @iowarp/clio-coder
 # Run without a global install
 npx --yes @iowarp/clio-coder@latest
 
-# Install without the optional Claude Agent SDK worker dependency (about 224 MB).
-# npm 11 ignores --omit=optional on global installs; the installer honors it:
-curl -fsSL https://coder.iowarp.ai/install.sh | sh -s -- --omit-optional
+# The installer skips the Claude Agent SDK (about 224 MB) by default.
+# To include it at install time instead of fetching it on first use:
+curl -fsSL https://coder.iowarp.ai/install.sh | sh -s -- --include-claude-sdk
 ```
 
 From source, build the release tag:
