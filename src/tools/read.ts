@@ -1,6 +1,7 @@
 import { isUtf8 } from "node:buffer";
 import { createHash } from "node:crypto";
 import { type FileHandle, open, stat } from "node:fs/promises";
+import { extname } from "node:path";
 import { Type } from "typebox";
 import { detectSupportedImageMimeType, prepareBoundedImage } from "../core/file-references.js";
 import { GUARDRAIL_DEFAULTS, resolveGuardrail } from "../core/guardrails.js";
@@ -624,6 +625,44 @@ async function readImage(
 	});
 }
 
+type DocumentKind = "notebook";
+
+/** Documents read renders to text before windowing: by extension for notebooks, by magic bytes otherwise. */
+function documentKind(filePath: string, _first: Buffer): DocumentKind | null {
+	if (extname(filePath).toLowerCase() === ".ipynb") return "notebook";
+	return null;
+}
+
+async function readDocument(
+	kind: DocumentKind,
+	filePath: string,
+	handle: FileHandle,
+	file: ReadFileIdentity,
+	request: ReadRequest,
+	reservation: ObservationReservation,
+	options: ToolInvokeOptions | undefined,
+): Promise<ToolResult> {
+	const { renderDocument, windowDocument } = await import("./read-documents/index.js");
+	const rendered = await renderDocument(kind, filePath, handle, file.bytes, request);
+	if ("error" in rendered)
+		return { kind: "error", message: `read: ${request.pathArg}: ${rendered.error}`, details: { file } };
+	const view = windowDocument(rendered.text, request, reservation.callCapBytes);
+	if ("error" in view) return { kind: "error", message: `read: ${request.pathArg}: ${view.error}`, details: { file } };
+	return finalizeObservation({
+		tool: ToolNames.Read,
+		unit: "lines",
+		output: view.output,
+		shownCount: view.shownCount,
+		totalCount: view.totalCount,
+		totalBytes: view.totalBytes,
+		truncated: view.truncated,
+		...(view.next !== undefined ? { next: view.next } : {}),
+		details: { file, document: kind },
+		reservation,
+		...(options ? { options } : {}),
+	});
+}
+
 const LOCATOR_TOOLS = [ToolNames.CodeNav, ToolNames.Find, ToolNames.Ls] as const;
 
 /**
@@ -645,7 +684,7 @@ function locateAdvice(options: ToolInvokeOptions | undefined): string {
 
 export const readTool: ToolSpec = {
 	name: ToolNames.Read,
-	description: `Read a UTF-8 text file or a PNG, JPEG, GIF, or WebP image when the routed model supports vision. Output is capped at ${DEFAULT_MAX_LINES} lines or ${
+	description: `Read a UTF-8 text file or a PNG, JPEG, GIF, or WebP image when the routed model supports vision. Jupyter notebooks render as cells with text outputs (images omitted); offset, limit, tail, and line_numbers then apply to that text. Output is capped at ${DEFAULT_MAX_LINES} lines or ${
 		DEFAULT_READ_MAX_BYTES / 1024
 	}KB per call; truncated results say how to continue with offset/limit. Files of any size are read through one bounded window, so offset and tail stay cheap; files over 32MB report their line total as N+. Binary or non-UTF-8 files are refused with the failing byte offset. Pass tail=N to read the last N lines (jump to EOF) instead of paging from the top. Set line_numbers=true for citations: each source line is prefixed with its physical 1-based line number and " | "; these labels are not file content.`,
 	parameters: Type.Object({
@@ -716,6 +755,10 @@ export const readTool: ToolSpec = {
 			const first = await readExact(handle, 0, Math.min(file.bytes, READ_SCAN_CHUNK_BYTES));
 			if (detectSupportedImageMimeType(first) !== null)
 				return await readImage(handle, pathArg, file, reservation, options);
+			const kind = documentKind(filePath, first);
+			if (kind !== null) {
+				return await readDocument(kind, filePath, handle, file, request, reservation, options);
+			}
 			const nul = first.indexOf(0);
 			if (nul >= 0) return refuseBinary(pathArg, nul, file);
 			const lastByte =
