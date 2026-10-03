@@ -695,9 +695,9 @@ function locateAdvice(options: ToolInvokeOptions | undefined): string {
 
 export const readTool: ToolSpec = {
 	name: ToolNames.Read,
-	description: `Read a UTF-8 text file or a PNG, JPEG, GIF, or WebP image when the routed model supports vision. Jupyter notebooks render as cells with text outputs (images omitted), PDFs as text by page (pages="3-7"; first 50 pages by default), and zip, tar, or tar.gz archives as a member listing, or one text member with member=<name>; offset, limit, tail, and line_numbers then apply to that text. Output is capped at ${DEFAULT_MAX_LINES} lines or ${
+	description: `Read a UTF-8 text file or a PNG, JPEG, GIF, or WebP image when the routed model supports vision. Notebooks, PDFs (pages), and zip/tar archives (member) render as text. Output is capped at ${DEFAULT_MAX_LINES} lines or ${
 		DEFAULT_READ_MAX_BYTES / 1024
-	}KB per call; truncated results say how to continue with offset/limit. Files of any size are read through one bounded window, so offset and tail stay cheap; files over 32MB report their line total as N+. Binary or non-UTF-8 files are refused with the failing byte offset. Pass tail=N to read the last N lines (jump to EOF) instead of paging from the top. Set line_numbers=true for citations: each source line is prefixed with its physical 1-based line number and " | "; these labels are not file content.`,
+	}KB per call; truncated results say how to continue with offset/limit. Files over 32MB report their line total as N+. Binary or non-UTF-8 files are refused with the failing byte offset. Set line_numbers=true for citations: each source line is prefixed with its physical 1-based line number and " | "; these labels are not file content.`,
 	parameters: Type.Object({
 		path: Type.String({ description: "File path (relative or absolute)." }),
 		line_numbers: Type.Optional(
@@ -710,10 +710,8 @@ export const readTool: ToolSpec = {
 		tail: Type.Optional(
 			Type.Number({ description: "Read the last N lines of the file (jump to EOF). Overrides offset/limit." }),
 		),
-		pages: Type.Optional(Type.String({ description: 'PDF only: page range such as "3", "3-7" or "3-".' })),
-		member: Type.Optional(
-			Type.String({ description: "zip or tar archive only: the text member to read instead of the listing." }),
-		),
+		pages: Type.Optional(Type.String({ description: 'PDF page range, e.g. "3-7".' })),
+		member: Type.Optional(Type.String({ description: "Archive member to read." })),
 	}),
 	baseActionClass: "read",
 	executionMode: "parallel",
