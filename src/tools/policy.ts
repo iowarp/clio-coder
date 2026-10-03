@@ -75,6 +75,9 @@ export const TOOL_PLANES: Readonly<Record<BuiltinToolName, PlaneExpectation>> = 
 	// panes. It mutates no workspace, so it stays read class; sequential because
 	// two pane operations in one batch would race the same pane registry.
 	[ToolNames.Panes]: { plane: "orchestrate", actionClass: "read", executionMode: "sequential" },
+	// music drives Clio's own player in Clio's own dock and touches no
+	// workspace. Sequential so open and close never race the dock slot.
+	[ToolNames.Music]: { plane: "orchestrate", actionClass: "read", executionMode: "sequential" },
 	// limitation records a typed receipt in the session ledger and nothing
 	// else: no filesystem, no shell. Read class so it never trips a safety
 	// gate; parallel because the call is pure and idempotent.
@@ -126,6 +129,8 @@ const DISPATCH_BOUND_TOOLS = new Set<ToolName>([ToolNames.Dispatch, ToolNames.Mo
 const INTERACTIVE_BOUND_TOOLS = new Set<ToolName>([ToolNames.AskUser, ToolNames.ConfigureClio]);
 /** Registered only when a pane host answered detection and the mux is live. */
 const PANES_BOUND_TOOLS = new Set<ToolName>([ToolNames.Panes]);
+/** Registered only when the operator opted the model into the music pane. */
+const MUSIC_BOUND_TOOLS = new Set<ToolName>([ToolNames.Music]);
 /**
  * Registered with a worker port or an ownership-scoped session selector.
  */
@@ -215,6 +220,7 @@ export function validateBuiltinToolPolicy(
 		if (!includeNetworkTools && NETWORK_BOUND_TOOLS.has(tool)) required.delete(tool);
 		if (DECISION_BOUND_TOOLS.has(tool)) required.delete(tool);
 		if (VISION_BOUND_TOOLS.has(tool)) required.delete(tool);
+		if (MUSIC_BOUND_TOOLS.has(tool)) required.delete(tool);
 	}
 	for (const tool of required) {
 		if (!registered.has(tool)) errors.push(`builtin tool ${tool} is not registered`);

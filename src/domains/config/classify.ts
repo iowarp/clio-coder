@@ -28,6 +28,9 @@ const HOT_RELOAD_FIELDS = new Set<string>([
 	"interface.smoothStreaming",
 	"interface.panes.notifications",
 	"integrations.git.commitAttribution",
+	// `/music` reads both on every invocation.
+	"integrations.music.enabled",
+	"integrations.music.station",
 	// The bridge reads these on every explicit open; no mux re-detection is
 	// needed because the host capability rung remains `panes.enabled`.
 	"interface.panes.files",
@@ -80,6 +83,8 @@ const RESTART_REQUIRED_FIELDS = new Set<string>([
 	"interface.fullscreenScrollbar",
 	"interface.panes.enabled",
 	"integrations.runtimePlugins",
+	// The `music` tool is registered once at startup, like consult.
+	"integrations.music.agentControl",
 ]);
 
 function matchesPrefix(path: string, fields: Set<string>): boolean {

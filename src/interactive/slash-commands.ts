@@ -27,6 +27,8 @@ import type { ExtensionOutput } from "../domains/extensions/public-api.js";
 import type { InteropAgentId, InteropProposal, InteropReport } from "../domains/interop/index.js";
 import { isInteropHeadlessRuntime } from "../domains/interop/peer-modes.js";
 import type { DoctorFinding } from "../domains/lifecycle/doctor.js";
+import type { MusicOperations, MusicResult } from "../domains/mux/music-operations.js";
+import { describeMusicResult } from "../domains/mux/music-operations.js";
 import type { PanePeerId, PanesOperations, PanesPresetId, PanesStatus } from "../domains/mux/operations.js";
 import { PANE_PEER_IDS, PANES_PRESET_IDS, PANES_PRESETS, resolvePanesPresetId } from "../domains/mux/operations.js";
 import type { ProvidersContract, ResolvedModelRef } from "../domains/providers/index.js";
@@ -208,6 +210,10 @@ type SlashCommandVariant =
 	/** `/files`: toggle the files pane; `pick` borrows it for one selection; `close` closes it. */
 	| { kind: "files"; action: "toggle" | "open" | "close" | "pick" }
 	| { kind: "files-usage"; reason: string }
+	/** `/music`: toggle the music pane, or on, off, next, status, station <name or url>. */
+	| { kind: "music"; action: "toggle" | "on" | "off" | "next" | "status" }
+	| { kind: "music-station"; station: string }
+	| { kind: "music-usage"; reason: string }
 	| { kind: "thinking-set"; level: string }
 	| { kind: "thinking-picker" }
 	| { kind: "model" }
@@ -845,6 +851,8 @@ export interface SlashCommandContext {
 	 * absent only when the host did not compose pane operations at all.
 	 */
 	panes?: PanesOperations;
+	/** The music pane. Absent when the session started without panes. */
+	music?: MusicOperations;
 	/** Serialize a local async command so the next admitted slash command observes its committed state. */
 	runLocalOperation?: (operation: () => Promise<void>) => void;
 	/**
@@ -2422,6 +2430,64 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 				} else {
 					ctx.notice("warn", result.reason);
 				}
+			});
+		},
+	},
+	{
+		name: "music",
+		description: "Toggle the focus-radio music pane (cliamp in a herdr dock)",
+		group: "Inspect",
+		kinds: ["music", "music-station", "music-usage"],
+		args: {
+			positionals: [
+				{ name: "action", required: false },
+				{ name: "station", required: false, rest: true },
+			],
+		},
+		subcommandDescriptions: {
+			on: "Open the music pane and play",
+			off: "Stop the music and close the pane",
+			next: "Skip to the next station",
+			status: "Say what is playing",
+			station: "Play a stream URL or a station by name",
+		},
+		fromArgs(parsed) {
+			if (parsed.error) return { kind: "music-usage", reason: parsed.error };
+			const action = parsed.positionals[0];
+			if (action === undefined) return { kind: "music", action: "toggle" };
+			if (action === "station") {
+				const station = parsed.rest?.trim() ?? "";
+				return station.length > 0
+					? { kind: "music-station", station }
+					: { kind: "music-usage", reason: "name a station or paste a stream URL" };
+			}
+			if (action === "on" || action === "off" || action === "next" || action === "status" || action === "toggle") {
+				return { kind: "music", action };
+			}
+			return { kind: "music-usage", reason: `Unexpected argument: ${action}` };
+		},
+		handle(command, ctx) {
+			if (command.kind === "music-usage") {
+				ctx.notice("info", `${command.reason}\nusage: /music [on|off|next|status|station <name or url>]`);
+				return;
+			}
+			const music = ctx.music;
+			if (!music) {
+				ctx.notice(
+					"info",
+					"music needs the pane layer and this session started without panes: set integrations.music.enabled: true in settings.yaml, install cliamp with `clio-coder tools install cliamp`, then restart inside herdr with `clio-coder --with-panes`",
+				);
+				return;
+			}
+			const runLocal = ctx.runLocalOperation ?? ((operation: () => Promise<void>) => void operation());
+			runLocal(async () => {
+				let result: MusicResult;
+				if (command.kind === "music-station") result = await music.station(command.station);
+				else if (command.kind !== "music") return;
+				else if (command.action === "toggle") result = await music.toggle();
+				else result = await music[command.action]();
+				const level = result.status === "playing" ? "success" : result.status === "stopped" ? "info" : "warn";
+				ctx.notice(level, describeMusicResult(result));
 			});
 		},
 	},

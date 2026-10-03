@@ -385,6 +385,18 @@ export interface GitIntegrationSettings {
 	commitAttribution: boolean;
 }
 
+/** The music pane: cliamp in a herdr dock. Off until the operator turns it on. */
+export interface MusicIntegrationSettings {
+	enabled: boolean;
+	/** Station that `/music on` starts: a stream URL or a station name. */
+	station: string;
+	/** Registers the `music` tool at startup so the model can drive the pane. */
+	agentControl: boolean;
+}
+
+/** The focus station `/music on` plays when settings name none. */
+export const DEFAULT_MUSIC_STATION = "http://radio.cliamp.stream/lofi/stream";
+
 export type DelegationToolGovernance = "clio-coder-policy" | "agent-managed" | "deny-all";
 
 /**
@@ -599,6 +611,7 @@ export interface IntegrationsSettings {
 		sync: boolean;
 	};
 	git: GitIntegrationSettings;
+	music: MusicIntegrationSettings;
 }
 
 export const DEFAULT_SETTINGS = {
@@ -755,6 +768,7 @@ export const DEFAULT_SETTINGS = {
 			sync: false,
 		},
 		git: { commitAttribution: true },
+		music: { enabled: false, station: DEFAULT_MUSIC_STATION, agentControl: false },
 	} as IntegrationsSettings,
 };
 
@@ -936,6 +950,10 @@ integrations:
     sync: false
   git:
     commitAttribution: true
+  music:
+    enabled: false
+    station: http://radio.cliamp.stream/lofi/stream
+    agentControl: false
 `;
 
 /**

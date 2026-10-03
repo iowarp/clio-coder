@@ -26,6 +26,7 @@ export interface ClioAppKeybindings {
 	"clio-coder.session.tree": true;
 	"clio-coder.dispatchBoard.toggle": true;
 	"clio-coder.files.toggle": true;
+	"clio-coder.music.toggle": true;
 	"clio-coder.tasks.open": true;
 	"clio-coder.decisions.open": true;
 	"clio-coder.dispatch.background": true;
@@ -100,6 +101,14 @@ export const CLIO_APP_KEYBINDINGS = {
 		kind: "toggle",
 		repeat: false,
 		leader: "e",
+	},
+	"clio-coder.music.toggle": {
+		defaultKeys: [],
+		description: "Music pane (/music)",
+		scope: "composer",
+		kind: "toggle",
+		repeat: false,
+		leader: "a",
 	},
 	"clio-coder.thinking.cycle": {
 		defaultKeys: "shift+tab",

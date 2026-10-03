@@ -9,6 +9,7 @@ import { runOperatorRecall } from "../domains/context/working-set/operator-recal
 import type { DispatchContract } from "../domains/dispatch/contract.js";
 import { agentRoleFactsResolver } from "../domains/dispatch/execution-role.js";
 import type { ExtensionsContract } from "../domains/extensions/index.js";
+import type { MusicOperations } from "../domains/mux/music-operations.js";
 import type { PanesOperations } from "../domains/mux/operations.js";
 import {
 	type ProvidersContract,
@@ -179,6 +180,8 @@ export interface InteractiveSlashRuntimeDeps {
 	openView: (filter?: string) => void;
 	/** Pane-layer operations behind `/panes`. Absent when the mux resolved to `none`. */
 	panes?: PanesOperations;
+	/** The music pane behind `/music`. Absent when the session started without panes. */
+	music?: MusicOperations;
 	openModel: () => void;
 	/**
 	 * Ask where a resolved `/model <pattern>` swap lands before anything applies.
@@ -522,6 +525,7 @@ export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps)
 		},
 		openView: deps.openView,
 		...(deps.panes ? { panes: deps.panes } : {}),
+		...(deps.music ? { music: deps.music } : {}),
 		setThinkingLevel: (level) => {
 			const settings = deps.getSettings?.();
 			if (!settings || !deps.onSetThinkingLevel) return { status: "unavailable" };

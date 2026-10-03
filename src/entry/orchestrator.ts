@@ -2289,6 +2289,17 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 					getCwd: () => process.cwd(),
 				})
 			: null;
+	// The music pane rides the same pane host. It exists on every panes boot so
+	// `/music` can name what is missing; the model's `music` tool is gated
+	// separately at registration below.
+	const music =
+		withPanes && mux
+			? withPanes.createMusicSession({
+					mux,
+					getSettings: () => getCurrentSettings().integrations.music,
+					getCwd: () => process.cwd(),
+				})
+			: null;
 
 	// The effective view has to exist before anything below composes against it.
 	// `systemOne.bound("consult")` reads it while the tool registry is assembled,
@@ -2653,6 +2664,12 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		// absent from the prompt on a machine with none rather than present and
 		// always refusing.
 		...(panes && mux?.mode !== "none" ? { panes } : {}),
+		// The operator opts the model in with integrations.music.agentControl, and
+		// the tool exists only when music could actually play at startup, so a
+		// session without it carries no tool schema and no prompt bytes for it.
+		...(music && getCurrentSettings().integrations.music.agentControl && music.unavailableReason() === null
+			? { music }
+			: {}),
 		getCostCeilingUsd: () => result.getContract<SchedulingContract>("scheduling")?.ceilingUsd() ?? 0,
 		...(config ? { getWorkerRosters: () => config.get().fleet.rosters } : {}),
 		...(config ? { getDispatchSchemaComposition: () => dispatchSchemaCompositionFor(config.get().fleet) } : {}),
@@ -4219,6 +4236,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		...(share ? { share } : {}),
 		...(mux ? { mux } : {}),
 		...(panes ? { panes } : {}),
+		...(music ? { music } : {}),
 		...(panes ? { attachYaziBridge: (bridge) => panes.attachYazi(bridge) } : {}),
 		// The interactive surface never imports the panes glue itself; the
 		// factories arrive only on an active boot, through the same dynamic

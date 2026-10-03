@@ -78,6 +78,7 @@ export const TOOL_PLACEMENT: Readonly<Record<BuiltinToolName, ToolPlacement>> = 
 	[ToolNames.Tasks]: "direct",
 	[ToolNames.Ledger]: "direct",
 	[ToolNames.Panes]: "direct",
+	[ToolNames.Music]: "direct",
 	[ToolNames.Limitation]: "direct",
 	[ToolNames.Decide]: "direct",
 	[ToolNames.Consult]: "gateway",

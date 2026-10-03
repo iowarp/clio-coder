@@ -75,6 +75,7 @@ export const TOOL_PRESENTATION: Readonly<Record<string, ToolPresentationPolicy>>
 	[ToolNames.Tasks]: FOLDED,
 	[ToolNames.Ledger]: FOLDED,
 	[ToolNames.Panes]: FOLDED,
+	[ToolNames.Music]: FOLDED,
 	[ToolNames.Limitation]: FOLDED,
 	[ToolNames.Decide]: FOLDED,
 	[ToolNames.Consult]: FOLDED,
@@ -603,6 +604,12 @@ export const TOOL_ROWS: Readonly<Record<string, ToolRowSpec>> = {
 		object: (args, context) =>
 			plain(joinDefined("git", text(args, "op"), text(args, "rev"), pathArg(args, "path", context, null))),
 		consumes: ["op", "rev", "path"],
+	},
+	[ToolNames.Music]: {
+		class: "execute",
+		verbs: ["playing", "played"],
+		object: (args) => plain(joinDefined("music", text(args, "action"))),
+		consumes: ["action"],
 	},
 	[ToolNames.Panes]: {
 		class: "execute",

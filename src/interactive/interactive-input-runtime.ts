@@ -30,6 +30,7 @@ export interface InteractiveInputKeyActionDeps {
 	toggleStatus: () => void;
 	toggleDispatchBoard: () => void;
 	toggleFilesPane: () => void;
+	toggleMusic?: () => void;
 	openTasks: () => void;
 	openDecisions: () => void;
 	backgroundDispatch: () => void;
@@ -75,6 +76,8 @@ export interface InteractiveInputRuntimeDeps {
 		backgroundActiveDispatch(): void;
 		/** Toggle the files pane; the application decides what "inactive" says. */
 		toggleFilesPane(): void;
+		/** Toggle the music pane; the application decides what "inactive" says. */
+		toggleMusic?(): void;
 		/** Open the steering queue navigator overlay. */
 		openQueueNavigator(): void;
 	};
@@ -184,6 +187,7 @@ export function createInteractiveInputRuntime(deps: InteractiveInputRuntimeDeps)
 		openDecisions: deps.overlay.openDecisionsOverlayState,
 		backgroundDispatch: deps.actions.backgroundActiveDispatch,
 		toggleFilesPane: deps.actions.toggleFilesPane,
+		...(deps.actions.toggleMusic ? { toggleMusic: deps.actions.toggleMusic } : {}),
 		openModelSelector: deps.overlay.openModelOverlayState,
 		openLibrary: deps.overlay.openSkillsHubState,
 		openTree: deps.overlay.openTreeOverlayState,

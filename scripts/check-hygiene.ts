@@ -29,6 +29,7 @@ import { DEFAULT_SETTINGS, DEFAULT_SETTINGS_YAML } from "../src/core/defaults.js
 import { resolvePackageRoot } from "../src/core/package-root.js";
 import { ALL_TOOL_NAMES, type BuiltinToolName, ToolNames } from "../src/core/tool-names.js";
 import type { DispatchContract } from "../src/domains/dispatch/contract.js";
+import type { MusicOperations } from "../src/domains/mux/music-operations.js";
 import type { PanesOperations } from "../src/domains/mux/operations.js";
 import { loadFragments } from "../src/domains/prompts/fragment-loader.js";
 import { listDocsCorpus, slugify } from "../src/tools/context/docs-engine.js";
@@ -1739,6 +1740,7 @@ const TOOL_CONTRACT_TESTS: Readonly<Record<BuiltinToolName, readonly string[]>> 
 	[ToolNames.Tasks]: ["tests/contracts/task-proposal-scope.test.ts"],
 	[ToolNames.Ledger]: ["tests/contracts/ledger-tool.test.ts"],
 	[ToolNames.Panes]: ["tests/contracts/panes-tool.test.ts"],
+	[ToolNames.Music]: ["tests/contracts/music-tool.test.ts"],
 	[ToolNames.Limitation]: ["tests/contracts/finish-contract-limitation.test.ts"],
 	[ToolNames.Decide]: ["tests/contracts/decide-tool.test.ts"],
 	[ToolNames.Consult]: ["tests/contracts/consult-tool.test.ts"],
@@ -1785,6 +1787,7 @@ async function registeredToolSources(): Promise<Map<string, string>> {
 			mcpCapabilities: false,
 			dispatch: {} as DispatchContract,
 			panes: {} as PanesOperations,
+			music: {} as MusicOperations,
 			askUser: async () => ({ answers: [] }),
 			requestSelfCompact: async () => "",
 			includeLedgerTools: true,
