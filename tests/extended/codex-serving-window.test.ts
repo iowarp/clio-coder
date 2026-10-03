@@ -17,12 +17,12 @@ const token = `h.${Buffer.from(JSON.stringify({ "https://api.openai.com/auth": {
 
 async function codexBackend(respond: () => { status: number; body: unknown }): Promise<{
 	url: string;
-	requests: Array<{ url: string; headers: IncomingHttpHeaders }>;
+	requests: Array<{ method: string; url: string; headers: IncomingHttpHeaders }>;
 	close: () => Promise<void>;
 }> {
-	const requests: Array<{ url: string; headers: IncomingHttpHeaders }> = [];
+	const requests: Array<{ method: string; url: string; headers: IncomingHttpHeaders }> = [];
 	const server = createServer((request, response) => {
-		requests.push({ url: request.url ?? "", headers: request.headers });
+		requests.push({ method: request.method ?? "", url: request.url ?? "", headers: request.headers });
 		const { status, body } = respond();
 		response.writeHead(status, { "content-type": "application/json" });
 		response.end(JSON.stringify(body));
@@ -72,6 +72,11 @@ it("adopts the Codex backend's context_window as the serving window and max_cont
 	try {
 		const { status, resolved } = await probeCodexRoute(backend);
 		strictEqual(backend.requests[0]?.url, `/codex/models?client_version=${CODEX_BACKEND_CLIENT_VERSION}`);
+		// The one request a headless run sends before its first model call is this
+		// bodiless GET, the same models read the Codex CLI makes; a proxy must pass it.
+		strictEqual(backend.requests[0]?.method, "GET");
+		strictEqual(backend.requests[0]?.headers["content-length"], undefined);
+		strictEqual(backend.requests[0]?.headers["transfer-encoding"], undefined);
 		strictEqual(backend.requests[0]?.headers["chatgpt-account-id"], "acct-fixture");
 		strictEqual(backend.requests[0]?.headers.authorization, `Bearer ${token}`);
 		strictEqual(status?.available, true);
