@@ -802,12 +802,17 @@ export function compile(table: FragmentTable, inputs: CompileInputs): CompiledSe
 	};
 
 	let harnessAwareness = "";
+	// Answering docs and settings questions and operator-control guidance serve
+	// an attended session. A headless run carried about 7 KB of it on every
+	// request. The flag is fixed for a session, so its prefix stays byte-stable.
+	const attended = session.headless !== true;
 	const selfAwareness = identity.id === "identity.clio" ? table.byId.get("identity.self-awareness") : undefined;
 	// The routing directive teaches a gateway call, so it renders only when
 	// gateway is on the surface and the provider supports tool calls. The paths
 	// and the code-outranks-docs rule name no tool and stay unconditional.
 	const docsRouting =
 		selfAwareness &&
+		attended &&
 		session.providerSupportsTools !== false &&
 		toolSurfaceHasTool(session.toolNames, "gateway") &&
 		session.coordinatorCapabilities.includes("clio_docs") &&
@@ -817,7 +822,7 @@ export function compile(table: FragmentTable, inputs: CompileInputs): CompiledSe
 	// Defer procedures only when this session can retrieve them. Restricted or
 	// tool-less sessions keep the same guidance without an impossible tool route.
 	const inlineGuidance =
-		identity.id === "identity.clio" && !docsRouting
+		identity.id === "identity.clio" && attended && !docsRouting
 			? ["operating.memory-guidance", "operating.support-guidance"].map((id) => lookupFragment(table, id, "guidance"))
 			: [];
 	if (selfAwareness) {
@@ -831,7 +836,8 @@ export function compile(table: FragmentTable, inputs: CompileInputs): CompiledSe
 			.replace("{CLIO_CODEWIKI_PATH}", join(packageRoot, "dist", "assets", "codemap.json"))
 			.replace("{CLIO_SETTINGS_PATH}", join(clioDirs.config, "settings.yaml"))
 			.replace("{CLIO_STATE_PATH}", clioDirs.state);
-		const settingsRouting = sessionHasContext(session) ? table.byId.get("identity.settings-routing") : undefined;
+		const settingsRouting =
+			attended && sessionHasContext(session) ? table.byId.get("identity.settings-routing") : undefined;
 		harnessAwareness = [
 			rendered.trim(),
 			...(docsRouting
@@ -869,7 +875,7 @@ export function compile(table: FragmentTable, inputs: CompileInputs): CompiledSe
 			? 'Load a matching ready skill through gateway(op="call", capability="context", args={scope:"skills",name:"<name>"}); honor its workflow and tool restrictions. Load the next skill only when its step is reached.'
 			: "Suggest matching skills as /skill <name> (in order when several compose), then continue without them; only the operator activates skills.";
 
-	const userControl = table.byId.get("operating.user-control");
+	const userControl = attended ? table.byId.get("operating.user-control") : undefined;
 	// Steering guidance rides the operating contract: the queue delivers several
 	// operator messages at one slot, and the model needs to know how they rank.
 	const steering = table.byId.get("operating.steering");
