@@ -1,10 +1,11 @@
 import { SKILL_SUGGESTION_ANCHOR } from "../../core/skill-activation.js";
 import { type TurnConstraints, turnAllowsTool } from "../../core/turn-constraints.js";
+import type { CapabilityMatch } from "./capability-gate.js";
 import type { MiddlewareHookRegistration } from "./runtime.js";
 import { isSkillSuggestionWait, SKILL_SUGGESTION_WAIT_CONTINUATION_MESSAGE } from "./stalled-turn.js";
 import { type MiddlewareEffect, metadataNumber } from "./types.js";
 
-/** Once per fresh session, offer ready workflows without making discovery a task prerequisite. */
+/** Task-ranked workflow advice; count-only hosts retain their once-per-session fallback. */
 
 export const SKILLS_REMINDER_REGISTRATION_ID = "observer.skills-reminder";
 
@@ -14,7 +15,7 @@ export function skillsReminderMessage(installed: number, installable = 0, modelA
 	if (installed <= 0) return "";
 	const counts = `${installed} ready Clio skill${installed === 1 ? "" : "s"}`;
 	const discovery =
-		'If a workflow would help the requested work, inspect context(scope="skills"). Skip discovery for self-contained answers and respect tool and task restrictions. ';
+		"If a workflow would help the requested work, choose from the installed catalog. Skip discovery for self-contained answers and respect tool and task restrictions. ";
 	const activation = modelActivation
 		? 'For a matching ready skill, load it with context(scope="skills", name="<name>") and continue the task in the same turn.'
 		: `For a match, suggest \`${SKILL_SUGGESTION_ANCHOR}\` and continue the task in the same turn without it; only the operator loads a skill.`;
@@ -22,6 +23,12 @@ export function skillsReminderMessage(installed: number, installable = 0, modelA
 }
 
 export interface SkillsReminderDeps {
+	/** Pre-turn advice from the shared gate; absence preserves the legacy host protocol. */
+	rankSkills?(task: string): ReadonlyArray<CapabilityMatch>;
+	/** Only admitted gateway-placed capabilities; direct tools already carry their schemas. */
+	rankCapabilities?(task: string): ReadonlyArray<CapabilityMatch>;
+	/** Coordinator registries may override context's default direct placement. */
+	contextPlacement?(): "direct" | "gateway";
 	/** Same host-owned scope used by tool admission and prompt composition. */
 	getTurnConstraints?(): TurnConstraints | undefined;
 	/** Count of installed skills the model may see and suggest. */
@@ -40,6 +47,40 @@ export interface SkillsReminderDeps {
 }
 
 const NO_EFFECTS: ReadonlyArray<MiddlewareEffect> = [];
+
+export function rankedSkillsReminder(
+	matches: ReadonlyArray<CapabilityMatch>,
+	modelActivation: boolean,
+	capabilities: ReadonlyArray<CapabilityMatch> = [],
+	contextPlacement: "direct" | "gateway" = "direct",
+): string {
+	const lines = matches
+		.slice(0, 5)
+		.map((match) => `- ${match.id}: ${match.description.replace(/\s+/gu, " ").slice(0, 150)}`);
+	const load =
+		contextPlacement === "gateway"
+			? 'gateway(op="call", capability="context", args={scope:"skills",name:"<name>"})'
+			: 'context(scope="skills", name="<name>")';
+	const skills =
+		matches.length === 0
+			? []
+			: [
+					"[Skills] Likely workflows for this task. Choose only one that helps the current step; skip all if none fits. Respect tool and task restrictions.",
+					...lines,
+					modelActivation
+						? `Load the chosen name with ${load} and continue the task.`
+						: `Suggest \`${SKILL_SUGGESTION_ANCHOR}\` with the chosen name, then continue without waiting; only the operator loads a skill.`,
+				];
+	const names = capabilities.slice(0, 3).map((match) => match.id);
+	return [
+		...skills,
+		...(names.length > 0
+			? [
+					`[Capabilities] Likely useful: ${names.join(", ")}. Use gateway(op="call", capability="<name>", args={...}) when needed; admission still applies.`,
+				]
+			: []),
+	].join("\n");
+}
 
 // Bare greetings/acknowledgements that carry no task. A turn is treated as a
 // greeting only when EVERY token is one of these, so any real word ("fix",
@@ -143,19 +184,23 @@ export function createSkillsReminderRegistration(deps: SkillsReminderDeps): Midd
 	// mid-session": this flag carries that knowledge across the greeting turns.
 	let observedFreshStart = false;
 	let observedAnyTurn = false;
+	let task = "";
+	let rankedIds = "";
+	let refinements = 0;
 
 	return {
 		id: SKILLS_REMINDER_REGISTRATION_ID,
 		description:
-			"once per session, on the first substantive turn, teaches the skill-suggestion reply protocol; keeps a turn going that stopped on the suggestion",
-		hooks: ["turn_start", "turn_end"],
+			"suggests task-relevant workflows within the skill activation policy; continues a turn that stopped on a suggestion",
+		hooks: ["turn_start", "before_tool", "turn_end"],
 		evaluate(input): ReadonlyArray<MiddlewareEffect> {
 			const constraints = deps.getTurnConstraints?.();
 			const suppressed =
 				constraints?.mode === "answer" ||
 				constraints?.mode === "proposal" ||
 				constraints?.skills === "disabled" ||
-				!turnAllowsTool(constraints, "context");
+				!turnAllowsTool(constraints, "context") ||
+				(deps.contextPlacement?.() === "gateway" && !turnAllowsTool(constraints, "gateway"));
 			// The registration that teaches "suggest, then continue" owns the
 			// consequence when a model suggests and stops. The generic stalled-turn
 			// rule cannot see this case: the listing call counts as a tool call.
@@ -175,6 +220,43 @@ export function createSkillsReminderRegistration(deps: SkillsReminderDeps): Midd
 					return NO_EFFECTS;
 				}
 			}
+			if (deps.rankSkills || deps.rankCapabilities) {
+				if (input.hook === "turn_start") {
+					task = input.text ?? "";
+					rankedIds = "";
+					refinements = 0;
+					if ((metadataNumber(input, "pendingSkillRequests") ?? 0) > 0) task = "";
+				}
+				if (
+					constraints?.mode === "answer" ||
+					constraints?.mode === "proposal" ||
+					!isSubstantiveUserTurn(task) ||
+					refinements >= 2
+				)
+					return NO_EFFECTS;
+				const matches = suppressed ? [] : (deps.rankSkills?.(task) ?? []);
+				const capabilities = turnAllowsTool(constraints, "gateway")
+					? (deps.rankCapabilities?.(task) ?? []).filter((match) => turnAllowsTool(constraints, match.id)).slice(0, 3)
+					: [];
+				const ids = JSON.stringify([matches.map((match) => match.id), capabilities.map((match) => match.id)]);
+				if ((matches.length === 0 && capabilities.length === 0) || ids === rankedIds) return NO_EFFECTS;
+				rankedIds = ids;
+				refinements++;
+				return [
+					{
+						kind: "inject_reminder",
+						severity: "info",
+						audience: "model",
+						message: rankedSkillsReminder(
+							matches,
+							deps.modelMayActivateSkills?.() ?? false,
+							capabilities,
+							deps.contextPlacement?.() ?? "direct",
+						),
+					},
+				];
+			}
+			if (input.hook !== "turn_start") return NO_EFFECTS;
 			const sessionId = input.sessionId ?? null;
 			if (lastSeenSessionId === undefined) {
 				lastSeenSessionId = sessionId;

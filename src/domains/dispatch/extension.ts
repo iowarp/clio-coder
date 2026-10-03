@@ -6,6 +6,7 @@ import { WORKER_STDIN_FRAME_MAX_BYTES } from "../../worker/protocol.js";
 import { WORKER_CONTEXT_PREAMBLE } from "../context/worker/select.js";
 import { persistWorkerContextSeed } from "../context/worker/store.js";
 import { ensureClaudeAgentSdk } from "../lifecycle/claude-sdk-install.js";
+import type { CapabilityGate } from "../middleware/capability-gate.js";
 import type { WorkerFlowPolicyInput } from "../safety/information-flow.js";
 import {
 	compileWorkerFlowPolicy,
@@ -520,6 +521,7 @@ export interface DispatchNodePlacement {
 }
 
 export interface DispatchBundleOptions {
+	getCapabilityGate?: () => CapabilityGate;
 	spawnWorker?: (spec: WorkerSpec, opts?: WorkerSpawnOptions) => SpawnedWorker;
 	/**
 	 * Start a worker held for its spec, for speculative dispatch. Defaults to the
@@ -8503,6 +8505,7 @@ export function createDispatchBundle(
 		const specs = agents.listSpecs();
 		const auto = req.agentSelection?.mode === "auto";
 		const agentCandidates = agentRouteCandidates({
+			...(options?.getCapabilityGate ? { gate: options.getCapabilityGate() } : {}),
 			specs,
 			request: req,
 			mode,

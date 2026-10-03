@@ -80,7 +80,7 @@ for (const level of AUTONOMY_LEVELS) {
 		const reminder = skillsReminderMessage(1, 1, enabled);
 		assert.match(reminder, /Skip discovery for self-contained answers/);
 		assert.match(reminder, /respect tool and task restrictions/);
-		assert.match(reminder, /If a workflow would help.*context\(scope="skills"\)/);
+		assert.match(reminder, /If a workflow would help.*choose from the installed catalog/);
 		assert.doesNotMatch(reminder, /Start this task by/);
 		assert.match(reminder, /continue.*same turn/);
 		assert.equal(reminder.includes('load it with context(scope="skills", name="<name>")'), enabled);

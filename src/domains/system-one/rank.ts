@@ -58,6 +58,8 @@ export interface RelevanceRankerInput {
 	readonly systemOne: Pick<SystemOne, "run" | "bound" | "shadowed" | "describe"> & Partial<Pick<SystemOne, "limits">>;
 	/** Whether `systemOne.record` keeps a dataset, the only thing an unfitted ranking produces. */
 	readonly recording: () => boolean;
+	/** Shared pre-turn callers serialize optional inference without delaying their local answer. */
+	readonly maxPending?: number;
 	/** The turn's task text, which is the need of an unfiltered listing. */
 	readonly task: () => string;
 	readonly tracker?: FollowUpTracker | undefined;
@@ -253,7 +255,7 @@ export function createRelevanceRanker(input: RelevanceRankerInput): RelevanceRan
 				else input.tracker?.unranked(request.use);
 				return ranking;
 			}
-			if (!pending.has(key)) {
+			if (!pending.has(key) && pending.size < (input.maxPending ?? Number.POSITIVE_INFINITY)) {
 				pending.add(key);
 				void fill(key, request, task, flow);
 			}

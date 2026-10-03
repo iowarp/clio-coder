@@ -517,9 +517,8 @@ export async function invokeRegisteredTool(
 
 /**
  * The orchestrator's session tool surface: the full resolved surface when the
- * resolved runtime mediates tool calls, nothing otherwise. Deterministic and
- * identical on every submit so the serialized tool schemas stay byte-stable
- * for provider prefix caching. Per-tool gating (pending-skill policy, safety)
+ * resolved runtime mediates tool calls, nothing otherwise. Tool schemas remain
+ * stable across task changes so provider prefix caching and prewarm agree. Per-tool gating (pending-skill policy, safety)
  * happens at invoke time, inside the same admission path workers use.
  */
 export function resolveSessionTools(

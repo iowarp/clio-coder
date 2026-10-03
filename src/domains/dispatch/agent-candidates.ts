@@ -10,6 +10,8 @@ import {
 	type AgentSpec,
 	agentSpecFingerprint,
 } from "../agents/spec.js";
+import type { CapabilityGate } from "../middleware/capability-gate.js";
+import { createCapabilityGate } from "../middleware/capability-gate.js";
 import type { DispatchRequest } from "./contract.js";
 import { deriveExecutionRole, type ExecutionRole } from "./execution-role.js";
 import type { RouteCandidate } from "./route-decision.js";
@@ -141,6 +143,7 @@ export interface AgentRouteDimension {
 
 /** Pure projection from one trusted request into the agent dimension of the joint route universe. */
 export function agentRouteCandidates(input: {
+	gate?: CapabilityGate;
 	specs: ReadonlyArray<AgentSpec>;
 	request: DispatchRequest;
 	mode: "shadow" | "active";
@@ -200,9 +203,28 @@ export function agentRouteCandidates(input: {
 		...evaluation,
 		executionRole: recovery ? ("recovery" as const) : evaluation.executionRole,
 	}));
+	const ranked = (input.gate ?? createCapabilityGate()).rank({
+		kind: "agents",
+		task: request.task,
+		candidates: specs
+			.filter((spec) => evaluations.some((entry) => entry.agentId === spec.id && entry.rejections.length === 0))
+			.map((spec) => ({ id: spec.id, description: spec.description, triggers: spec.tags })),
+	});
+	const order = new Map(ranked.map((candidate, index) => [candidate.id, index]));
+	for (const candidate of evaluations) {
+		const index = order.get(candidate.agentId);
+		if (index === undefined || candidate.rejections.length > 0) continue;
+		candidate.coldPrior = {
+			...candidate.coldPrior,
+			qualityMean: Math.min(1, candidate.coldPrior.qualityMean + 0.05 / (index + 1)),
+		};
+		candidate.priorReasons = [...candidate.priorReasons, "capability-relevance"];
+	}
+	// FW-1: prioritize population without removing the baseline or any admitted fallback.
+	const population = [...evaluations].sort((a, b) => (order.get(a.agentId) ?? 100) - (order.get(b.agentId) ?? 100));
 	return {
 		evaluations,
-		dimensions: evaluations
+		dimensions: population
 			.filter((evaluation) => evaluation.rejections.length === 0)
 			.map((evaluation) => ({
 				agentId: evaluation.agentId,

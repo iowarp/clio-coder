@@ -46,6 +46,7 @@ import { StartupTimer } from "../core/startup-timer.js";
 import { getTerminationCoordinator, resolveShutdownHookBudgetMs } from "../core/termination.js";
 import { yieldToEventLoop } from "../core/timers.js";
 import { ToolNames } from "../core/tool-names.js";
+import { turnAllowsTool } from "../core/turn-constraints.js";
 import { captureProjectSurface, projectSurfaceTrustNotice } from "../core/workspace-trust.js";
 import { clioDataDir, clioStateDir } from "../core/xdg.js";
 import { renderAgentCatalogSectionsFromSpecs } from "../domains/agents/catalog.js";
@@ -98,6 +99,7 @@ import {
 	TaskMemoryEndpointBusyError,
 	TaskMemoryInformationFlowBlockedError,
 } from "../domains/memory/task-memory-policy.js";
+import { createCapabilityGate } from "../domains/middleware/capability-gate.js";
 import { createDecisionHintsRegistration } from "../domains/middleware/decision-hints.js";
 import {
 	createDetachedDispatchNudgeRegistration,
@@ -221,6 +223,7 @@ import { reseedSessionUsageFromLedger } from "../domains/session/usage-reseed.js
 import { latestUserImages } from "../domains/session/vision-images.js";
 import { probeWorkspaceAsync } from "../domains/session/workspace/index.js";
 import { archiveCommandHost, type ShareContract, ShareDomainModule } from "../domains/share/index.js";
+import { capabilitySettings } from "../domains/system-one/capability-settings.js";
 import type { LlmRequestAdmission, OneShotPort, SystemOneInstance } from "../domains/system-one/index.js";
 import { createSystemOne } from "../domains/system-one/index.js";
 import { createFollowUpTracker, observePermissionOutcomes } from "../domains/system-one/outcomes.js";
@@ -269,6 +272,8 @@ import {
 	continuityContextFromSession,
 } from "../interactive/model-session-replay.js";
 import { createTurnOutcomeCollector } from "../interactive/turn-outcome-collector.js";
+import { effectiveToolNames } from "../tools/agent-tools.js";
+import { surfaceSpecPlacement } from "../tools/surface.js";
 import { resizeImage } from "../utils/image-resize.js";
 import { prepareBackgroundModelMetadata } from "./background-model-metadata.js";
 import type { BootOptions } from "./boot-options.js";
@@ -1423,6 +1428,7 @@ function advanceScopedTarget(
 }
 
 export async function bootOrchestrator(options: BootOptions = {}): Promise<BootResult> {
+	let capabilityGate = createCapabilityGate();
 	const bootStdout = (text: string): void => {
 		if (options.terminalLease) options.terminalLease.writeDiagnostic("stdout", text);
 		else process.stdout.write(text);
@@ -1622,6 +1628,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			// settings view once it exists (assigned below, after the config
 			// contract loads); until then it falls back to the shared snapshot.
 			createDispatchDomainModule({
+				getCapabilityGate: () => capabilityGate,
 				budgetWaitForRaise: !options.headless && !options.acp,
 				// Only an operator surface answers worker escalations (F9): the TUI
 				// overlay, or an ACP client that advertised it forwards them to a person.
@@ -2090,14 +2097,18 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		"default";
 	const resolveEffectiveAutonomy = (): AutonomyLevel => activeAcpSessionAutonomy ?? resolveBaselineAutonomy();
 	const skillDiscoveryEnabled = options.noSkills !== true && options.headless?.noSkills !== true;
-	let readySkillSnapshot: { key: string; count: number } | undefined;
+	let readySkillSnapshot: { key: string; count: number; skills: ReturnType<typeof modelVisibleSkills> } | undefined;
 	const getReadySkillCount = (): number => {
 		if (!resources) return 0;
 		const cwd = process.cwd();
 		// Skill loading reads and hashes the filesystem. Reuse the count across
 		// warm/real requests and reminders until the same source epoch that
 		// invalidates prompt composition changes (/library reload, config, etc.).
-		if (!prompts) return modelVisibleSkills(resources.skills(cwd).items).length;
+		if (!prompts) {
+			const skills = modelVisibleSkills(resources.skills(cwd).items);
+			readySkillSnapshot = { key: cwd, count: skills.length, skills };
+			return skills.length;
+		}
 		const key = JSON.stringify([
 			cwd,
 			prompts.inputEpoch(),
@@ -2106,22 +2117,53 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			options.skillPaths ?? options.headless?.skillPaths ?? [],
 		]);
 		if (readySkillSnapshot?.key === key) return readySkillSnapshot.count;
-		const count = modelVisibleSkills(resources.skills(cwd).items).length;
-		readySkillSnapshot = { key, count };
+		const skills = modelVisibleSkills(resources.skills(cwd).items);
+		const count = skills.length;
+		readySkillSnapshot = { key, count, skills };
 		return count;
 	};
-	// First-turn skills reminder: user-message-visible text is the one channel
-	// the battery-tested local models act on. Which protocol it teaches follows
-	// the effective session autonomy level, resolved one line up: default and
-	// yolo can load trusted installed skills. Read-only workers cannot activate them.
-	// A headless run gets its skills rule from the system prompt alone: the
-	// reminder's discovery invitation cost campaign T3 three opening rounds and
-	// about 19 KB of skill text resent on every later request.
-	if (resources && skillDiscoveryEnabled && !options.headless) {
+	// FW-1: task-ranked advice is cheap enough for attended and headless turns;
+	// it names loadable workflows directly and preserves the activation policy.
+	if (resources && skillDiscoveryEnabled) {
 		middleware.registerHook(
 			createSkillsReminderRegistration({
 				getTurnConstraints: () => chat.currentTurnConstraints?.(),
+				contextPlacement: () => {
+					const spec = toolRegistry.get(ToolNames.Context);
+					return spec ? surfaceSpecPlacement(spec, null) : "direct";
+				},
 				countModelVisibleSkills: getReadySkillCount,
+				rankCapabilities: (task) => {
+					const constraints = chat.currentTurnConstraints?.();
+					if (!turnAllowsTool(constraints, "gateway")) return [];
+					const surface = new Set(
+						effectiveToolNames({ registry: toolRegistry, ...(constraints ? { turnConstraints: constraints } : {}) }),
+					);
+					return capabilityGate.rank({
+						kind: "capabilities",
+						task,
+						limit: 3,
+						candidates: toolRegistry
+							.listGateway()
+							.filter((spec) => surface.has(spec.name) && surfaceSpecPlacement(spec, surface) === "gateway")
+							.map((spec) => ({ id: spec.name, description: spec.description })),
+					});
+				},
+				rankSkills: (task) => {
+					getReadySkillCount();
+					return capabilityGate.rank({
+						kind: "skills",
+						task,
+						workspace: process.cwd(),
+						candidates: (readySkillSnapshot?.skills ?? []).map((skill) => ({
+							id: skill.name,
+							description: skill.description,
+							triggers: Array.isArray(skill.metadata.triggers)
+								? skill.metadata.triggers.filter((value): value is string => typeof value === "string")
+								: [],
+						})),
+					});
+				},
 				// Same lookup context(scope="skills") lists under its Marketplace
 				// heading, minus what is already installed, so the count the
 				// reminder quotes is the count the listing will show.
@@ -2443,7 +2485,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		stateDir: clioStateDir(),
 	});
 	const systemOneCore = createSystemOne({
-		settings: () => getCurrentSettings(),
+		settings: () => capabilitySettings(getCurrentSettings()),
 		// Every engine request is judged against the restrictions it inherited
 		// before a byte leaves, typed and LLM engines alike. The runner treats a
 		// throw as abstention, so this only ever returns.
@@ -2542,12 +2584,39 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		},
 	});
 	const relevanceRanker = createRelevanceRanker({
+		maxPending: 1,
 		systemOne,
 		flow: () => flowLedger.current(),
 		task: () => systemOneHost.task(),
 		tracker: followUps,
 		recording: () => getCurrentSettings().systemOne.record,
 	});
+	capabilityGate = createCapabilityGate({
+		relevance: relevanceRanker,
+		relevanceCandidateLimit: () =>
+			systemOne.describe().find((binding) => binding.site === "relevance")?.kind === "llm" ? 12 : 64,
+		allowRelevance: () => {
+			const binding = systemOne.describe().find((entry) => entry.site === "relevance");
+			const settings = getCurrentSettings();
+			return binding?.kind !== "llm" || binding.target !== settings.chat.target || binding.model !== settings.chat.model;
+		},
+	});
+	const catalogRanker = Object.assign(
+		(request: Parameters<typeof relevanceRanker>[0]) => {
+			if (request.use === "memory") return relevanceRanker(request);
+			const ranked = capabilityGate.rank({
+				kind: request.use,
+				task: request.need || systemOneHost.task(),
+				candidates: request.candidates.map((candidate) => ({ id: candidate.id, description: candidate.summary })),
+				limit: 10,
+			});
+			return ranked.length
+				? { scores: Object.fromEntries(ranked.map((hit) => [hit.id, hit.score])), source: "capability gate", ref: "" }
+				: null;
+		},
+		{ asks: () => true },
+	);
+
 	/**
 	 * Write what System One recorded since the last flush as ledger entries. A row goes under the
 	 * turn its ref names when the tree holds that turn and under the current leaf otherwise, so a
@@ -2608,13 +2677,16 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 					},
 				}
 			: {}),
-		// The skills listing and the gateway's find rank through the `relevance`
-		// site mid-turn, inside the site's own deadline because the model is waiting
-		// on the listing. One ranker serves both, so a turn that lists skills twice
-		// pays once, and a later use of a ranked entry joins the ranking's call.
-		rankRelevance: relevanceRanker,
-		onSkillLoaded: (name) => followUps.used("skills", name),
-		onCapabilityCalled: (name) => followUps.used("capabilities", name),
+		// Discovery shares the pre-turn gate; optional calibrated rankings arrive from its nonblocking cache.
+		rankRelevance: catalogRanker,
+		onSkillLoaded: (name) => {
+			followUps.used("skills", name);
+			capabilityGate.used("skills", name);
+		},
+		onCapabilityCalled: (name) => {
+			followUps.used("capabilities", name);
+			capabilityGate.used("capabilities", name);
+		},
 		// consult exists only when its site is bound at startup, so an operator who
 		// never bound it keeps the registry, tool signature and prompt they had. A
 		// binding removed mid-session answers "no usable answer". bound() reads the
