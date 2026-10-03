@@ -29,8 +29,8 @@ import {
 	receiptWireFacts,
 } from "../../domains/dispatch/receipt-facts.js";
 import type { ProvidersContract } from "../../domains/providers/contract.js";
-import { resolveRuntimeTarget } from "../../domains/providers/runtime-resolution.js";
 import { isOrchestratorEligibleRuntime } from "../../domains/providers/eligibility.js";
+import { resolveRuntimeTarget } from "../../domains/providers/runtime-resolution.js";
 import { type CostProvenance, resolveCostProvenance } from "../../domains/providers/types/cost-provenance.js";
 import { type AutonomyLevel, DEFAULT_AUTONOMY_LEVEL, isAutonomyLevel } from "../../domains/safety/autonomy.js";
 import { describeMainCallConsequences } from "../../domains/safety/call-consequence.js";
