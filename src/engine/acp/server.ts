@@ -105,6 +105,7 @@ import {
 	projectSessionTree,
 } from "./session-tree.js";
 import type { AcpJsonRpcPeerTransport } from "./transport.js";
+import { ACP_TRUST_CAPABILITY, ACP_TRUST_META_KEY, trustResultMeta } from "./trust-notice.js";
 import type {
 	AcpContentBlock,
 	AcpInitializeResponse,
@@ -2971,6 +2972,7 @@ export function createAcpHandshake(features: AcpHandshakeFeatures): AcpHandshake
 							list: features.providers,
 							probe: features.providers,
 						},
+						[ACP_TRUST_META_KEY]: ACP_TRUST_CAPABILITY,
 						...(features.commandsCapability !== undefined
 							? {
 									[ACP_COMMANDS_META_KEY]: Object.fromEntries(
@@ -3879,7 +3881,11 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 		return {
 			sessionId: id,
 			...sessionConfig(session),
-			_meta: { [ACP_SESSION_META_KEY]: sessionResultMeta(session, false), ...(await workspaceResultMeta()) },
+			_meta: {
+				[ACP_SESSION_META_KEY]: sessionResultMeta(session, false),
+				...(await workspaceResultMeta()),
+				...trustResultMeta(session.cwd),
+			},
 		};
 	});
 
@@ -3996,6 +4002,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 					replay !== undefined ? { turns: replay.turns, truncated: replay.truncated } : undefined,
 				),
 				...(await workspaceResultMeta()),
+				...trustResultMeta(session.cwd),
 			},
 		};
 	};
