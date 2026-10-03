@@ -4,1219 +4,269 @@ Notable changes to Clio Coder, following [Keep a Changelog](https://keepachangel
 
 ## Unreleased
 
-## 0.5.9 - 2026-09-29
+Clio Coder 0.6.0 is the largest release so far. The browser app is rebuilt as a desktop app with a setup wizard, a task rail and a Session column. A new installer brings its own Node.js to Linux, macOS and Windows. Approvals say what a command would do, and dispatched workers run under permits and an OS sandbox. Queued messages are held in Clio, where you can reorder, edit or send them now. Editors get live usage, plan and workspace telemetry over ACP. Experimental additions are SSH worker nodes, docks for workers, files and music, and steering triage. The Pi SDK moves to 1.0.0.
 
-Clio Coder 0.5.9 introduces experimental System One decisions. Typed decision calls, served by a hosted engine, a self-hosted `systemone` server or a configured chat model, can guide turn scope, dispatch and approval advisories, and an unfitted build runs in shadow. Model knowledge now comes from the serving server first, with packaged model profiles supplying the rest and labeled estimates where no window is reported. The Pi SDK moves to 0.99.1, bringing GPT-6.1 Sol through the `openai-codex` subscription and Sonnet 5.5 through `anthropic-max`. Settings files from earlier releases that stopped loading on a retired value such as `safety.autonomy: auto-edit` are previewed by `clio-coder doctor` and repaired by `clio-coder doctor --fix`.
+### Upgrade notes
+
+- Settings from 0.5.9 load unchanged and no key is retired. New keys are `safety.sandbox`, `safety.sandboxNetwork`, `interface.exitSummary`, `integrations.music.*`, `chat.steering.triage.*` and `fleet.defaultNode`, and `fleet.permissions.mode` accepts `main`. `settings.yaml` is now written owner-only, and `clio-coder doctor` warns about a wider mode that `doctor --fix` tightens.
+- Project extensions and plugins load only after the workspace is approved with `clio-coder config trust extensions` or `plugins`. An unapproved project copy stays listed but unloaded and no longer shadows your own copy. Your first project install approves its own surface; later installs, enables and removes ask again.
+- A dispatched worker's own commands (`bash`, `run_script`, verification) run under an OS sandbox when `safety.sandbox` is `auto` (the default) and a backend exists, which is bubblewrap on Linux and Seatbelt on macOS. Writes land only in the worker's roots, `.git` and `.clio-coder` stay read-only, and network is off unless the run holds `web_fetch` or `safety.sandboxNetwork` is true. `required` refuses commands without a backend and `off` disables it. Main-agent commands are not sandboxed. A worker confined to narrow write roots loses `bash` and `verify` when no sandbox is active.
+- External agents that run their own tool loop (the Claude Code, Codex, OpenCode, Pi and Antigravity runtimes, and ACP peers with `toolGovernance: agent-managed`) are refused write-capable work unless the target or entry sets `trustedUnmediated: true`. Read-only runs are unaffected.
+- Under the default `fleet.permissions.mode: deny`, a worker's refused command returns to the model, and the third refusal ends the run as `permission_required` naming every refused command. The denial names the tool, the command (clipped, secrets redacted) and the rule. The Claude SDK runtime still ends at its first refusal. A worker change that removes existing test cases or deletes a test file is withheld from the merge (`merge_withheld`), and a current-tree run fails with `worker_removed_tests`, unless the task asked for the removal.
+- `Ctrl+Q` no longer queues for the end of the turn and `clio-coder.message.followUp` is retired. A keybindings file that names it reports the replacement. Enter queues for the next slot, `Alt+K` opens the queue navigator, `Alt+S` sends now, and `Alt+A` toggles the music dock. `Alt+E` and `Alt+W` now hide and show docks, and a second tap within 400 ms closes them.
+- A clean interactive exit prints a session summary. `interface.exitSummary` is `auto` by default and follows `interface.outputDetail`; `brief`, `standard`, `report` and `off` override it.
+- `safety.limits.sessionCostUsd: 0` means no session ceiling in every path, including dispatch plans, fleet previews and `clio-coder configure`.
+- The installer no longer fetches the Claude Agent SDK. Pass `--include-claude-sdk`, or accept the one-time prompt on first use, which installs it into Clio's own package root or prints the package-manager command.
+- On sessions that attach `bash`, `find` and `ls` sit behind the gateway, and bash output keeps 16 KiB in model context, split between its head and tail.
+- Prompt templates follow Pi 1.0 argument semantics (`$1`, `$@`, `${@:N}`, `${N:-default}`), and bare `$ARGUMENTS` inserts the text after the command unchanged.
+- The packaged local model catalog now holds five profiles verified against their Hugging Face model cards: gpt-oss, Qwen3.8-27B, Gemma 4 26B-A4B, Nemotron 3.5 Lightning 30B-A3B and Qwen3.5-4B. Earlier profiles for finetunes are no longer packaged; keep any you rely on in `~/.config/clio-coder/model-profiles.yaml`, which merges over the packaged entries by id.
+
+### Desktop app
+
+- The app is organized as a rail of tasks per project and one Session column holding the chat's model and health, context and spend, branches, sealed evidence, artifacts and workers. A first run goes through a setup wizard. A machine that has used Clio, with a provider key in the environment, a stored login or a local server on a default port, lands in chat with a notice naming the route.
+- Any number of tasks stay open. A task idle for 5 minutes is parked and resumes when shown again, and at most 4 turns run at once, with later turns shown as "Waiting for a slot". Closed tasks stay in the rail as saved tasks.
+- One app window: launching focuses the open window, in an installed Chrome or Edge app and through the Start Menu shortcut under WSL, and "Open in new window" or `Ctrl/Cmd+Shift+N` opens another on purpose. `clio-coder gui background install` keeps the app on port 4343, or 7373 while another program holds it.
+- In the composer, `@` completes workspace files, `↑` recalls earlier messages, `/commands` complete from their grammar, and `@agent text` steers a running worker. A message that starts with `!` runs as a shell line between turns, and `!!` keeps its output out of Clio's context. Each queued message has Send now, move, Now or After, Edit and Remove.
+- Worker blocks, the Agents view and Evidence show each run's receipt outcome, contract conformance, trust verdict and validation, and an Artifacts page lists a session's `/view` artifacts. Ignored untrusted project surfaces appear in a notice above the transcript with the trust command to run. `Esc` twice in the composer stops the running turn.
+- Tool output keeps the colours a command printed, tables keep their header and offer "Copy table", diffs mark the changed part of a line, and a wide Mermaid diagram offers "Full size". Images embedded in a reply as data are drawn; images at a web address are never loaded.
+- Settings is rebuilt as a few pages, Library has its own page, and "Sign out" under Settings, Models removes the credential Clio stored for a connection. A settled turn closes with one line: Done, Failed or Stopped, then duration, tool calls and tokens.
+- Limits: on native Linux the desktop launcher still opens a browser tab per launch, because focusing an existing window needs the installed Chrome or Edge app, and the limit of 4 running turns has no setting.
+
+### Install, upgrade and first run
+
+- `install.sh` installs a private Node.js 24 and the package under a versioned prefix with no root and no system Node. Downloads are checked against Node.js's published checksums and, when `gpgv` or `gpg` is present, its release signature. Older x64 Linux gets a glibc 2.17 build, Alpine a musl build, and `--modify-path` is the only way it edits a shell startup file. `install.ps1` and `install.cmd` do the same on Windows, where support remains best effort and a complete native install of 0.6.0 has not yet been verified end to end.
+- `install.sh` offers the desktop app at the end (`--gui` or `--no-gui`). `clio-coder` checks the Node version before loading and honours `CLIO_CODER_NODE` for hosts whose default `node` is too old.
+- `clio-coder upgrade --rollback` restores the previous version. A pinned install shows its pin, and `/upgrade` follows the recorded channel, leaves a pin alone and tells a source checkout to update through Git. Pre-release builds name their commit and say they are unreleased, and they hear about newer beta and latest releases.
+- A new home starts directly at "Welcome to Clio Coder" and the first question. A home with no usable chat route tries configured targets, environment keys, Clio's stored logins and local servers on default ports, and saves a route only when none exists. `/config` runs configure inside the TUI and applies saved routing live. Peer agents enlist through current ACP recipes, including `@agentclientprotocol/claude-agent-acp` for Claude and `copilot --acp`.
+- `clio-coder reset` and `uninstall` also remove the desktop app, and `uninstall` reports `.zshrc` and fish config lines that mention clio-coder. After a native upgrade, `clio-coder gui` and `gui background restart` accept the desktop app the previous version installed.
+- `clio-coder doctor` leads with whether chat can run. `clio-coder library register|pin|drift` print text unless `--json`, and `clio-coder tools list|status` say when a pin bump superseded a vendored tool.
+
+### Approvals, trust and worker safety
+
+- A permission approval renders inside the editor's own rails. The top rail names the decision and its kind, the card lists tool, target, effect, requester and worker authority, and `Alt+T` opens the full terms and `Alt+V` the full invocation. Bash approvals state what the command would do. A draft you were typing stays editable under the card.
+- Every worker attempt runs under an immutable permit that fixes its asks, tools and Git allowance. `clio-coder run --delegate-tools` sets what dispatched workers may hold, separately from the main agent's `--allow-tools`.
+- `fleet.permissions.mode: main` is a new opt-in. The main agent grants ordinary worker asks on native local workers at `yolo` and forwards them to you at any other autonomy level. Asks that need operator authority always reach you, and an ask no one can answer is denied.
+- Workers in a task worktree commit on their task branch through a typed `git` capability (`status`, `diff`, `log`, `show`, `add`, `commit`) that refuses fields an operation does not take. Clio asks an attached operator before withholding a task worktree merge. A task worktree Clio created inherits package trust while its package state is unchanged. Model-run `clio-coder library import`, `push` and `remote` ask for confirmation like other library mutations, and `--dry-run` never asks.
+- Information flow (advanced and opt-in) keeps named content with the models you chose. Source rules in `.clio-coder/safety.yaml` under `informationFlow` name paths or tools and their allowed recipients, and `clio-coder config trust safety` approves them. Refusals hold at `yolo`, restrictions travel through workers, resume and compaction, and a project with no rules behaves as before. The policy format may change.
+
+### Terminal
+
+- Messages sent during a run are held in Clio and handed over at the next steering slot. The queue navigator (`Alt+K`) reorders, edits, removes, switches an entry to end-of-turn and sends it now, and `Alt+S` interrupts the run with your draft. `/resume <id>` resumes a session directly, and a clean exit prints the resume line. CLI `--resume` and `--continue` stay refused (#191).
+- The exit summary shows identity, model, tokens, cost provenance, wall time and resume instructions in brief form, and adds turns, files changed, tools, worker outcomes and compactions in standard and report form.
+- An edit's diff shows once its arguments close, before the call runs. `/compact <instructions>` binds the summarizer and keeps the instructions verbatim. The wheel scrolls the transcript while an overlay is open and never moves list choices.
+- Each substantive turn ranks installed skills, gateway capabilities and agents, and the reminder names up to five likely skills and three capabilities without changing the tool set between turns. `clio-coder fleet view <runId>` shows the requested model beside the provider-reported one, with cost provenance, and `--json` prints the snapshot with its authenticated receipt.
+
+### Fleet and tools
+
+- `clio-coder fleet nodes add|list|remove|test|discover|install` manages SSH worker nodes (experimental). `install <id> --yes` installs the exact client build you run, `discover` lists Tailscale peers, and a node needs a passing recorded `test --record` before dispatch. `fleet.defaultNode` sets a standing preference, and edits from a separate checkout return through isolated task branches. `clio-coder fleet cancel <runId>` cancels a run from any terminal.
+- `read` lists zip and tar archives and reads one text member, extracts PDF text by page (needs poppler's `pdftotext` and `pdfinfo`), and renders Jupyter notebooks. The `data` tool reads SQLite databases read-only.
+- The per-turn observation pool scales with the active context window. Automatic compaction pauses after three consecutive failures, while `/compact` and overflow recovery still run. A fleet loop's check step also runs the test files its workspace changed, and a failure feeds the repair loop.
+- Headless runs and the coder agent map each task clause to evidence before finishing. Unattended runs and workers install only dependencies that were never installed and report failures confined to files they did not touch. When Clio needs one-off routing for a dispatch, she pins the dispatch's `target` and `model` fields instead of editing routing settings.
+- Headless `clio-coder run --agent` prints a "Not verified:" block from the sealed result. Codex, OpenAI Responses and Azure Responses calls record the model the provider reports.
+
+### Editors and ACP
+
+- ACP pushes `usage_update` (at most one per model response), `plan` after board changes and `_meta["clio-coder/workspace"]`, so clients stop polling. It serves `/view` artifacts through `_clio-coder/artifacts/list` and `read`, sealed receipt facts on terminal fleet frames and replay, and ignored untrusted project surfaces in `_meta["clio-coder/trust"]`.
+- `_clio-coder/session/shell` runs an operator shell line with the terminal's `!` and `!!` semantics, and `_clio-coder/session/queue_edit` removes, restores, moves, retypes and sends queued entries, with `_clio-coder/session/queue_changed` notifications for clients that opt in. Worker permission asks, `ask_user` and harness cards reach an attended ACP client, and bash asks carry the command's consequence line. `session/load` replay does not yet show shell lines.
+
+### Experimental
+
+- Docks need Herdr and are off by default. `Alt+W` opens a live workers dashboard (`clio-coder fleet view --watch`), `Alt+E` the Yazi files pane (`interface.panes.files.enabled`), and `Alt+A` the music pane. A hidden dock keeps running, and a second tap within 400 ms closes it. `/panes` and `/files` report and control docks.
+- `/music` and the opt-in `music` tool drive cliamp 1.63.2 as focus radio. They need `integrations.music.enabled: true`, `integrations.music.agentControl` for the tool, and `clio-coder tools install cliamp` or a package-manager install.
+- System One gains per-model capability profiles (`systemOne.engines.<name>.profile`), per-task routing under a site binding, a `steer` site and category hierarchies for recipes and catalogs. Its sites, keys and cuts may change between releases.
+- `chat.steering.triage` (off by default) lets a side model read queued messages once the queue settles and relabel them. An unrelated task waits for the end of the turn, and a confident stop may interrupt the run. `fleet.speculativeDispatch` stays experimental.
+
+### Fixed
+
+- A turn that only writes Markdown, reStructuredText, AsciiDoc or Mermaid source finishes as prose-only instead of "change not verified". Stopping at an approval card says the turn stopped and the tool did not run.
+- Redaction no longer treats code such as `token = getToken()` or a pure `$NAME` reference in an assignment as a credential, while literal secrets still redact, and durable trace payloads stay valid JSON after redaction.
+- Python verification resolves `python` or `python3` once, refuses a uv project without `.venv`, and recognizes `PYTHONPATH=<relative paths>` test forms. A check that cannot start is reported as unavailable and not retried.
+- Typed Git refuses fields an operation does not take, and the loop guard keys repeated Git calls on the arguments that run.
+- A new desktop task opens when its model target is down instead of failing with "Clio ACP process is unavailable".
+
+## 0.5.9 - 2026-09-29
 
 A `v0.5.8` tag was published on 2026-09-29 and withdrawn before the package reached npm. Its changes ship in 0.5.9.
 
-### Turn control and workspace guidance
-
-- Clio records a typed outcome for each operator turn.
-- The turn controller starts explicit repository tours with read-only orientation and offers grounded next steps for undecided requests.
-- Finished detached worker batches are collected before the main model continues.
-- Session startup supplies bounded workspace facts and installed capability catalogs.
-- Gateway discovery uses a generated capability map to find tools beyond those attached to the main session.
-- Coordinator guidance checks available tools before asking the operator through `ask_user`.
-- Prior-session answers draw on recorded history, and disputed CI claims are checked against available run evidence.
-- Read-only workers can inspect bounded Git history and name refused citations.
-- The agent board shows scheduler-known assignments and receipt findings.
-
-### System One decisions and records (experimental)
-
-- `systemOne.engines` and `systemOne.sites` bind typed decision calls to a hosted decision engine, self-hosted `systemone` servers, or configured chat models.
-- An unfitted System One build runs in shadow until cuts are configured for that build; unbound and failed sites leave the normal workflow in place.
-- Fitted decision sites can guide turn scope, orientation, dispatch, approval advisories, external-result warnings, and finished-turn questions.
-- The `relevance`, `consult`, and `drafts` sites rank catalogs, answer typed consultations, and judge `/draft` candidates respectively.
-- Each System One call writes a compact session-ledger record.
-- Requests from an `llm` System One engine pass the same paid-request admission as other calls, count toward session cost ceilings and token totals, and appear as System One calls in `/usage` and `clio-coder usage report`. A refused request fails that decision, and the site behaves as if System One were absent.
-- Optional `systemOne.record` saves redacted decision and outcome rows with retention limits, available through `clio-coder systemone status` and `export`.
-- Fleet settings and `clio-coder doctor` show decision-site bindings and their health.
-- Oversized decision state and repeatedly timed-out endpoints fall back without holding the main turn indefinitely.
-- **Settings migration:** Non-empty `fleet.decisionProfiles` and `turnControl.interpretation` are retired in favor of `systemOne.engines` and `systemOne.sites`. An empty `fleet.decisionProfiles: {}` written by earlier releases is accepted.
-
-### Model knowledge and context recovery
-
-- The Pi SDK moves to 0.99.1. GPT-6.1 Sol is available through the `openai-codex` subscription and Sonnet 5.5 through `anthropic-max`, and `/draft` runs both without a sampling temperature.
-- The packaged `models/profiles.yaml` supplies model facts and recommendations, with an optional `<config>/model-profiles.yaml` override.
-- Live server capability reports take precedence over profile claims; a user override can lower but not raise a reported capability.
-- A profile's recommended output budget fills an unset budget.
-- ThinkingCap-Qwen3.8-27B and Qwopus3.8-27B-Flash-V2 profiles map requested reasoning levels onto the `low`, `medium` and `xhigh` levels their chat templates accept.
-- Inference-server serving windows carry provenance; a YAML or Pi value is labeled as a model maximum, while cloud routes without a window endpoint use a labeled Pi catalog estimate.
-- The openai-codex route reads its serving window from the Codex backend.
-- An unknown serving window displays as unknown and disables threshold compaction.
-- A server overflow can trigger one compact-and-retry, even when the window or output limit is unknown.
-- Workers make one recovery attempt after a server context overflow by evicting reversible observations when possible. Their initial fork remains intact.
-- An explicit per-model LM Studio context setting takes precedence over the co-resident context clamp, with a reload for drift that restores the previous instance if replacement fails.
-
-### Terminal, tools, and execution
-
-- `/draft` marks candidates containing tool-call markup as failed so they cannot be taken as an answer.
-- Gateway `describe` returns the attached direct tool schema, giving callers the actual available arguments.
-- `/upgrade` supports an approved in-session npm upgrade, with installed-package checks and restart guidance.
-- A narrow terminal welcome uses a compact one-band wordmark.
-- Model nicknames shorten by rule, and advisory notices render as titled callouts.
-- Git, read, and ledger errors name a useful correction.
-- Git pushes are classified as outward actions, and MCP Slurm tools are classified individually.
-- Session cost ceilings are enforced before paid requests.
-- Permission decisions gain audit rows in the session ledger, and memory steps record the serving route used.
-
-### Configuration and lifecycle
-
-- Settings that take `on` and `off` levels accept the YAML 1.1 booleans an unquoted `on`, `off`, `true` or `false` parses to. `clio-coder doctor` warns about them, and `doctor --fix` rewrites them while preserving comments.
-- Reset, uninstall, upgrade, and migration paths refuse unsafe root layouts and untrusted migration history.
-
-### Fixed
-
-- Startup no longer prints a `[providers:profiles:compare]` line for every configured route without a model profile. The comparison was a migration aid and now runs only when `CLIO_CODER_PROFILE_COMPARE=1` is set.
-- An operator dispatch whose typed intent replaces prose path inference no longer adds a callout or a footer diagnostic to the transcript. Harness-owned dispatches keep the `typed scope replacement` diagnostic, and receipts keep the record.
-- A settings file from before 0.5.6 that still uses a retired value such as `safety.autonomy: auto-edit` no longer leaves Clio unusable. Plain `clio-coder doctor` previews the rewrite, and `doctor --fix` replaces each retired enum value with the one the validation error names while preserving comments and formatting.
-- A failed gateway or helper tool call is reported as failed. A failed gateway chain could previously appear successful.
-- `clio-coder doctor --deep` reports the tool probe as not applicable for decision-engine targets instead of warning that the probe failed.
-- `clio-coder doctor` builds its configure model list from the current catalog when a runtime has no live model list, so a stale default no longer shapes it.
-- `clio-coder reset` on an absent installation leaves it absent instead of recreating the configuration and state roots.
-- An orientation scout is not reused in a workspace outside Git or with uncommitted changes, where an unchanged fingerprint cannot prove the files are unchanged.
-- A `fleet.speculativeDispatch` change applies on the next turn instead of requiring a restart.
-- `clio-coder systemone export --out` refuses a destination reached through a symbolic link.
-- External Pi workers keep Pi's built-in llama.cpp provider on Pi 0.99 and later, where `--no-extensions` also disables built-in providers.
-- File-lock acquisition and System One readout-mode rechecks use monotonic deadlines, so a wall-clock change cannot stretch or cut them short.
+- Experimental System One decisions: typed decision calls served by a hosted engine, a self-hosted `systemone` server or a configured chat model, bound through `systemOne.engines` and `systemOne.sites`. An unfitted build runs in shadow, and a non-empty `fleet.decisionProfiles` or `turnControl.interpretation` is retired in favor of them.
+- Model knowledge comes from the serving server first, then the packaged `models/profiles.yaml`, with labeled estimates where no window is reported. The Pi SDK moves to 0.99.1, adding GPT-6.1 Sol through `openai-codex` and Sonnet 5.5 through `anthropic-max`.
+- `clio-coder doctor` previews and `doctor --fix` repairs settings files that stopped loading on a retired value such as `safety.autonomy: auto-edit`. Session cost ceilings apply before paid requests, and `/upgrade` upgrades npm installs in session.
 
 ## 0.5.7 - 2026-09-27
 
-### Coordinator discovery and composition
-
-- Main sessions attach `read`, `write`, `edit`, `gateway`, and `dispatch` when wired. Secondary builtin, extension, and MCP capabilities remain discoverable through the gateway; workers retain their recipe tool surfaces. Ordinary dispatch uses a compact schema, with advanced composition described on demand and canonical validation retained.
-- Gateway discovery ranks task vocabulary and returns deterministic pages of 12 by default. The model-facing recipe catalog also accepts task vocabulary without loading workflow bodies or installing packages.
-- `gateway(op="chain")` composes bounded dependency steps and structured result references. Eligible independent reads run in parallel; failures, cancellation, interviews, skill activation, and terminal results stop scheduling. Completed child receipts remain available to completion assessment, artifacts, handoffs, and path indexing after a later failure.
-- Gateway and chain receipts retain capability identity, per-check verification, partial writes and denied operations. Historical skill instructions and continuation hooks remain available when secondary schemas are hidden.
-- Optional `fleet.decisionProfiles.harnessRouting` binds an advisory intent and capability shortlist to the existing pre-turn decision batch. Unbound sessions do no additional catalog preparation or inference. Routing never grants authority or removes capabilities from discovery.
-- Coordinator prompts guide intent understanding, bounded delegation, verification, user steering, and explanations of project state. Educational walkthroughs, reports, and knowledge checks are offered when useful and created when requested.
-- Repository tours, architecture maps, and open-ended exploration go to the read-only Scout recipe before the coordinator surveys directories itself, with independent areas sent as one parallel batch. An undecided user receives two or three next steps grounded in bounded read-only workspace observations.
-- Runtime guidance compiles reachable capability hints and schema-validated examples without enlarging the attached tool surface. Display, traces, ACP, and the browser application name the capability each gateway call ran; worker grounding, tool-call bounds, and the loop guard count each settled chain step once, as a direct call would.
-
-### Verification and execution evidence
-
-- Repository quality policies in `.clio-coder/quality.yaml` select required checks by changed path. A valid policy selects high rigor unless overridden.
-- Verification records source, check-declaration, and policy fingerprints. Completion assessment requires fresh evidence for the covered inputs and reports outstanding requirements in interactive and worker runs.
-- Receipts distinguish executed checks, denied checks, result quality, and completion findings. Denied verification calls preserve their admission outcome without acquiring a validation result.
-- Validation grounding recognizes equivalent npm, pnpm, and Yarn test-script invocations.
-- Scout citation repair names the rejected `path:line` and the file's current physical line range. Empty root `find` and `grep` results name the internal directories they exclude and state that a miss does not prove a file is absent.
-- Architect plan workers keep the artifact tool their contracted `PLAN.md` requires when a bound skill narrows the tool surface.
-
-### Project and session context
-
-- The structural index is now a **codemap**, stored at `.clio-coder/codemap.json`. Existing schema-v5 indexes and legacy `codewiki.json` artifacts remain readable.
-- Bounded project orientation includes declared purpose, commands, entry candidates, areas, counts, workspace scope, observation time, and input identities. `code_nav` project mode retrieves current Git and durable operator-task status.
-- Foreground prompt assembly uses bounded state and root inputs. Incremental reconciliation shares dependency work, and dispatched workers receive orientation independently of handbook availability.
-- CMake orientation handles comments, quoted examples, and literal preset names. Project status handles grouped Git rename/copy records and remains available during codemap rebuild failures.
-- `structural-v2` becomes the default working-set policy, protecting recent assistant steps and repeated recalls. The `default`, `data-analysis`, and `web-design` profiles tailor retained context to the task.
-- Context pressure is checked before each model request, including tool continuations. A rearm band controls repeated automatic eviction and summary; `/context` displays the active profile and rearm percentage.
-- Recall supports visible eviction-marker paths and historical references. Rereads preserve recall lineage, and recall-recording failures preserve successful file reads.
-- Reviewed handoffs are bound to the active session, conversation branch, and decisions. Changes invalidate a draft before it creates the successor session.
-- **Session compatibility:** format 6 records eviction reasons, reread triggers, and optional content hashes. Supported older ledgers are upgraded when opened; format-5 readers cannot reopen format-6 sessions. Upgrade clients sharing sessions together.
-
-### Browser application and ACP
-
-- First-time browser users can connect a model through the shared configure wizard before opening a project, including masked key entry, supported browser sign-in, model inventories, passive checks, and review before Save. Existing configured users go directly to project selection.
-- GUI Settings follows configure and the TUI's eight sections, control groups, and order. Connections replaces the old flat form; model defaults use **Use connection default**, and proactive memory offers **Rules only**. Terminal launch behavior stays the same.
-
-- The browser application adopts the canonical cyan Clio mark, warm dark/light palette, and locally bundled IBM Plex and Newsreader fonts across navigation, installation icons, and offline recovery.
-- Conversations use a compact input with attachment, message-options, model, thinking, and send/stop controls. Sessions switches the sidebar to conversations grouped by project, with expandable history and a return to application navigation.
-- Sidebar controls for Settings, Library, Traces, Fleet, Evidence, Toolchain, and System keep the active conversation in view. Explicit viewer links open larger inspection pages. A collapsible right inspector presents recorded file activity, tool results, and linked evidence beside a compact conversation dashboard.
-- Traces, Fleet, Evidence, Library, Toolchain, Settings, and System gain focused inspection, URL-backed discovery, reviewed operations, and clearer storage/error states. Recorded session traces open correctly, and unpriced model usage remains unavailable rather than displaying zero spend.
-
-- The alpha browser application exposes session boards, operator tasks, plans, decisions, memory proposals, context inspection and recovery, conversation branches, and reviewed handoffs through ACP host capabilities.
-- Fleet previews show waves, routes, write boundaries, gates, command arguments, and budget. Execution checks the approved recipes, resolved routes, and registered invocation bindings; bounded previews mark omitted details.
-- Requests accept supported images, workspace `@path` references, and bounded UTF-8 text attachments. Model and thinking controls distinguish conversation settings from saved project defaults.
-- Side questions and labelled alternative drafts run beside the main conversation. Draft comparison can use a configured decision model.
-- Session usage, provider quota, extension eligibility and reload, and library updates are available to open browser sessions. ACP hosts also bind sharing, archive operations, advisor and council workflows, and transcript export.
-- Bare `clio-coder gui` reuses the installation's owned background application or starts a private foreground server. Installed Linux background applications refresh launch paths after an upgrade while idle.
-- Streaming Markdown keeps rendered nodes mounted as a response grows, matches deferred highlighting and Mermaid output to its current source, and updates artifacts independently of response text. **Jump to latest** returns immediately, reading history keeps its position, and viewport changes no longer stop stream following.
-- `clio-coder gui --open` on Windows passes the loopback URL to the registered browser through the system `rundll32` handler rather than `cmd.exe`. ACP builds its command catalog once per server instead of on every prompt.
-
-### Terminal interface
-
-- A semantic presentation system gives the composer, menus, transcript, tool and worker activity, welcome screen, footer, and dashboard one ivory, cyan, and action-orange hierarchy with a distinct YOLO projection. Session and worker prompts prohibit decorative emoji, and displayed answers, worker summaries, side questions, and reasoning follow the authored-prose policy while code, quoted evidence, and scientific notation stay intact.
-- The composer rail shows context occupancy and YOLO state, and the thinking effort indicator carries a brain glyph and accent. The compact footer shows the workspace path, Git branch and dirty marker, counters, notices, and active harness facts; thinking, verbosity, and autonomy changes are confirmed briefly in its value slot, and every footer row stays reachable on short terminals.
-- `Ctrl+G` then `y` toggles the current session between default and YOLO autonomy. The action has no direct key by default.
-- The footer dashboard samples local machine metrics only while its Status page is open.
-- Live fleet activity appears above the composer, and tasks use grouped cards with empty states.
-- `/settings targets` supports adding and editing targets inside the docked configuration wizard; `/config` opens settings.
-- With an empty composer, `?` opens quick help, left arrow opens fleets, and down arrow opens tasks.
-- `/usage` opens an Activity workspace heatmap alongside Accounts, Session, Models, and Workers views. Price coverage and Git observation state are displayed from available accounting and status data.
-
-### Safety, providers, and diagnostics
-
-- Git normalization handles quoted words, global options, combined flags, accepted long-option prefixes, and line continuations before policy matching. Forced checkout, whole-worktree operations, and force-prefixed push refspecs retain their applicable permission or block rules.
-- Dry-run clean, leased pushes, and named-file restores use their respective Git rules. Proven inert quoted command text is excluded from destructive shell matching.
-- Inception Mercury retains its required instant reasoning setting in chat and tool probes.
-- Doctor distinguishes unavailable probes from failed health checks, repairs managed Yazi profiles, and checks Slurm controller configuration.
-- Relocated Clio homes isolate sibling-CLI credential discovery unless the corresponding product home is explicitly configured. Local-runtime accounting appears when a local target is configured.
-- Stored provider credentials become visible to the running session only after their storage write commits.
-- ACP aside failures return host diagnostics summaries while provider response bodies remain in the diagnostic stream.
-
-### Documentation and distribution
-
-- The safety model documents unattended analysis at `yolo`, temporary Python scripts, and the remaining damage-control and worker approval limits.
-- Removed `clio-coder docs`, its documentation server, and the browser application’s native Docs reader. Help opens the public documentation and identifies the installed Markdown reference; offline `clio_docs` retrieval and bundled resources remain available.
-- Product documentation describes the current architecture, configuration, context, verification, and delegation interfaces. Generated development wiki pages retain independent **v0.1** versioning.
-- Website documentation is linked to its release source. README and website include v0.5.7 terminal and browser captures in dark and light themes from a real temperature-calibration session, whose runnable source is in `examples/temperature-calibration`. Reusable media have checked hashes, dimensions, and delivery copies.
-- The installed package contains authored product documentation and its corpus metadata; generated development wiki pages remain in the repository and GitHub Wiki.
+- Main sessions attach `read`, `write`, `edit`, `gateway` and `dispatch`, and other capabilities are found through the gateway, where `gateway(op="chain")` composes bounded dependent steps. Repository tours go to the read-only Scout recipe.
+- Repository quality policies in `.clio-coder/quality.yaml` select required checks by changed path, and receipts distinguish executed checks from denied ones. The structural index becomes the codemap in `.clio-coder/codemap.json`, and session format 6 cannot be reopened by format-5 readers.
+- The browser app gains first-run model setup and redesigned conversation and inspection pages, and `/usage` gains an Activity heatmap. `clio-coder docs` and its documentation server are removed.
 
 ## 0.5.6 - 2026-09-25
 
-### Autonomy
-
-- **Breaking:** `safety.autonomy` accepts only `default` and `yolo`. The retired values `auto-edit`, `full-auto`, `suggest` and `read-only` are refused with no migration, and Clio will not start while your user `settings.yaml` holds one. Edit the file by hand: `auto-edit`, `suggest` and `read-only` become `default`, and `full-auto` becomes `yolo`. `clio-coder paths` shows where the file is. `--autonomy` accepts the same two names.
-- **Breaking:** Project settings can no longer set autonomy. A `safety.autonomy` in `.clio-coder/settings.yaml` or `.clio-coder/settings.local.yaml` is ignored with a diagnostic, whether or not the file is trusted. Set it in your user `settings.yaml`, `/settings`, `clio-coder configure`, `--autonomy`, or an ACP client's session mode.
-- `configure_clio` refuses to preview or apply `safety.autonomy` at either level, so only the operator changes autonomy.
-- Autonomy now governs only the main agent. Workers and peers always run at `default` (see Dispatch and peers).
-- The session prompt, the `/settings` help and the safety model guide describe the two levels as the code enforces them. `default` runs workspace edits and recognized commands, and asks before project build, lint, typecheck and CI scripts, other commands, outward actions, access outside the workspace and plan-scale dispatch. `yolo` runs all of those without asking, while hard blocks, damage-control confirmations and protected paths still apply.
-- A headless `clio-coder run` now tells the model that no operator is attached and that approval-required calls are denied, instead of saying they pause for a confirmation that never comes.
-
-### Safety
-
-- Damage-control rules now match each command a shell string would run, including `&&`, `||` and `;` chains, `sh -c` scripts, `$(...)` and backtick substitutions, and substitutions inside double quotes. Before, `git restore . && echo ok` ran at yolo with no confirmation, and a second bash argument could hide `git restore .` from every rule. Commands like these may now ask or hit a hard block where they used to run.
-- The `git restore` and `git checkout --` discard-all confirmations also match the `./` and `:/` spellings of the whole worktree and allow options before the pathspec.
-- When an approval releases a parked call, the tool result starts with one line naming who released it: the operator, a forwarded worker escalation, an ACP client, or a remembered answer. The model no longer sees an approved call as one that never asked.
-
-### Dispatch and peers
-
-- **Breaking:** Every dispatched worker and external peer runs at `default`, whatever the session level. A yolo session no longer passes yolo to its workers, and their asks resolve through `fleet.permissions.mode`.
-- **Breaking:** `CLIO_CODER_ALLOW_EXTERNAL_FULL_ACCESS` is removed and ignored, so a peer can no longer run in its own full-access mode through Clio. `toolGovernance: agent-managed` on a peer entry remains the one explicit opt-in to peer-owned tools, and admission refuses it for a read-only run.
-- **Breaking:** `clio-coder run --agent --autonomy` is a usage error (exit 2). Use `--read-only` to restrict a dispatch.
-- **Breaking:** The worker spec is now version 5, so a remote fleet node running an older build refuses dispatches until it is upgraded.
-- Read-only is a dispatch restriction instead of an autonomy level. Recipes with `capabilityClass: read-only`, reviewer, judge and council roles, `/oracle`, the watchdog verifier and fleet `scope: readonly` set it. A read-only run may read inside the workspace and nothing else, and it cannot load a skill.
-- Added `--read-only` to `/run`, `/delegate` and `clio-coder run --agent` to restrict one dispatch. Peers enforce it with their own read-only modes: Codex `--sandbox read-only`, Claude Code `plan` with read tools, Antigravity `plan --sandbox`, and Pi read tools. OpenCode refuses a read-only headless run before launch.
-
-### ACP
-
-- **Breaking:** Clio's custom methods and her event notification moved under the `_clio-coder/` prefix that ACP reserves for extensions, for example `_clio-coder/session/label` and `_clio-coder/event`. The `clio-coder/*` names are gone with no alias, so third-party clients must switch.
-- **Breaking:** The custom session list, delete and autonomy methods are gone. Use `session/list`, `session/delete`, and `session/set_mode` or `session/set_config_option`.
-- **Breaking:** Error codes follow the ACP v1 schema. `-32000` now means only authentication required; invalid params use `-32602`, a missing resource `-32002`, and an unclassified failure `-32603`. A client that treated `-32000` as a generic failure must read the specific codes.
-- `initialize` answers protocol version 1 and advertises only what Clio serves. A client that advertises `auth.terminal` gets a terminal method that runs `clio-coder acp auth login` and opens Quick Connect in a separate process; other clients get none. `authenticate` and `logout` are served.
-- Every request and notification accepts `_meta`, and `session/prompt` accepts `resource_link` blocks, which the model sees as a `Resource: <name> (<uri>)` line.
-- Added `session/list` with a cwd filter and cursor paging, `session/delete`, and `session/resume`, which restores a closed session without resending its messages.
-- `session/load` streams the complete active-branch history, without the former 64-turn and 4 MiB cut, so loading a long session sends much more to the client.
-- `session/close` cancels an active prompt, waits for it to settle, and then closes, instead of refusing.
-- Sessions offer the modes `default` and `yolo` through `session/set_mode` and `current_mode_update`, and config options for autonomy, model and thinking level through `session/set_config_option` and `config_option_update`. A change during a prompt is refused, and model and thinking changes apply to the session without saving a default.
-- The server sends `available_commands_update` for the commands that work over ACP, `session_info_update` when the session label changes, and each tool's `name` when it starts. Per-turn usage, now with cost provenance, stays in `_meta["clio-coder/usage"]`; Clio sends no `usage_update` or `plan` update.
-- When no workspace is bound yet, the first `session/new`, `session/load` or `session/resume` binds the server to the `cwd` it names, so a client no longer has to launch Clio in the project directory. `clio-coder acp --cwd <dir>` still binds at launch.
-- A later session that names a different `cwd` is refused with `-32602` naming the bound workspace.
-- Stdio MCP servers a client passes in `session/new`, `session/load` or `session/resume` run for that session only and are never written to settings. Every call goes through the gateway's safety policy and autonomy like any other MCP capability, and closing the session stops the servers.
-- **Breaking:** As a client of ACP peers, Clio selects a named model only through the peer's `model` config option and `session/set_config_option`. A peer that offers models only through the unstable `models` field can no longer take a named model, and that delegation fails before the prompt.
-- When an ACP peer offers a `thought_level` select config option, Clio sets a requested thinking level through `session/set_config_option` and refuses the delegation if the peer reports a different level. Peers without that option still use `model[effort]` variants.
-- Clio never answers a peer's permission request with `allow_always`, which would turn one approval into a standing grant inside the peer. When a peer offers no `allow_once` for a call Clio approves, Clio rejects the call and the receipt's delegation tool log says why.
-- Clio advertises no client capabilities to ACP peers, because she serves no file-system or terminal methods to them.
-
-### Receipts and evidence
-
-- **Breaking:** A receipt records one `autonomy` field, the level the run ran under; workers always record `default`. The `autonomyEnforcement` block and the autonomy trust axis are gone, so evidence and the GUI show five trust checks instead of six. Read `autonomy` where you read `autonomyEnforcement`. Receipts sealed by earlier builds still verify.
-- **Breaking:** New gate decisions and receipts write `yolo-policy`, `yolo-applied`, `yolo-applied-winner` and `yolo-gate-policy` where earlier builds wrote the `full-auto-*` ids. Records sealed earlier still read and verify unchanged.
-- **Breaking:** New receipts no longer carry fields nothing read: `attestation`, `identity.hpc` (the Slurm, PBS or LSF allocation), `reproducibility.git`, `fleetGate`, `ledgerContribution`, `pathScope`, `staticShellHash` and the decision and first-token phase marks. Sealing a receipt no longer spawns git. Older receipts still verify.
-- New evidence bundles no longer write `trace.raw.jsonl`, `trace.cleaned.jsonl`, `audit-linked.jsonl` or `protected-artifacts.json`; their counts stay in the overview. Bundles from earlier builds still read.
-- Worker receipts record `effectiveFailover`, the failover mode the retry path actually used, beside the requested `routingIntent.failover`. Main-agent and print-mode receipts omit it, and earlier receipts verify unchanged.
-- A worker whose validation tool ran and failed now seals verification basis `validation-tool` with state `unverified` instead of `no-validation-tool`. Observed validation also outranks `acp-external-unobserved`.
-- ACP delegation receipts keep each peer call's ACP tool kind, so starts and finishes pair, successful edits count as mutations, and peer-owned completions no longer claim a safety approval. A call without a kind reads as `other`, and a title such as `npm test` no longer counts as verification.
-- A worker that runs `verify` more than once is judged by the latest run of each check. A check it fixed and re-ran seals as passed and verified, and a later failure of a check that had passed seals as failed. A check is the call's `check`, `path`, `cwd`, `browser` and `args` together, and a blocked call changes nothing.
-- Worker and ACP delegation receipts of a read-only run carry `safety.readOnly: true`, including runs whose worker never tried to write. Receipts of runs that could write are unchanged.
-
-### Terminal interface
-
-- The palette is derived from the Clio Coder logo and iowarp.ai: mint and cyan for identity, input and selection, orange for Clio acting, steel blue for information, slate for frames and secondary text, and green, amber and coral for success, warnings and errors. The launchpad wordmark is two-tone like the logo, and titles and the tagline are cyan.
-- Interactive startup asks the terminal for its background (OSC 11, then `COLORFGBG`) and draws the palette for a dark or light terminal, with every text token at 4:1 or better on common themes of each kind. An unknown background keeps a mid-luminance palette of about 3:1 on both. `CLIO_CODER_THEME=dark|light|neutral` overrides detection, and startup waits one terminal round trip, at most 200 ms.
-- Status colors mark only status. Context meter categories, shell flags, cancellations and the active dashboard tab no longer use amber, red or orange, and `yolo` is coral everywhere.
-- The Yazi files pane profile reverses one token for its mode, tab and count badges instead of pairing two, and the herdr theme block is rendered for the detected background with readable selection rows.
-- Pickers, inspectors, the permission card, ask-user and the leader menu open docked in the composer's slot instead of floating over the transcript, which keeps its rows, scrollback and mouse selection. The dock body has a fixed budget of 16 rows, fewer on short terminals, and in fullscreen mode the transcript shrinks by that height while a surface is open.
-- A permission card taller than its rows scrolls its terms or dispatch plan with the arrow and page keys and shows a position row.
-- A call the operator approved keeps an `allowed by you` line naming the rail on its live transcript row, and compact style no longer folds it into its neighbors. A resumed or replayed session does not show the line.
-- The Fleet runs island names a running run's phase in the words its inline card uses, and its live input count includes cache reads, so its totals match the card.
-- Self-drawn list rows share one selection style, view, settings and the session tree show the editor's live filter row, the footer stacks Context and Status below 84 columns, and help rows drop flags before the description at narrow widths.
-- `/tasks` scrolls inside the dock. The selection stays in view, PgUp and PgDn page, Tab and Shift+Tab jump between sections, and a position row shows where the window sits, so operator tasks stay reachable below a long agent board.
-- Alt+O now changes the composer's thinking rail along with the transcript: `T` in compact, `think` in standard, and the level spelled out in detailed.
-- An operator cancel closes its turn with `⊘` in the transcript, as the footer does, instead of the warning `⚠`. A loop-guard stop keeps `⚠`.
-- A settled worker card whose final answer outgrew the live preview shows its summary instead of the raw result JSON.
-
-### Fixes
-
-- **Breaking:** A startup flag before a subcommand other than `run` or `acp` (for example `clio-coder -nc doctor`) is refused with exit 2 instead of silently ignored. `--with-panes` and `--no-panes` are refused before any subcommand.
-- **Breaking:** `clio-coder fleet run` refuses unknown flags and no longer takes an option's value as the contract name.
-- **Breaking:** `clio-coder share export --dry-run` lists the entries and writes nothing, and each share command refuses a flag it does not read, so `export --force`, `import --both` and `inspect --force` exit 2.
-- `clio-coder upgrade --restart` relaunches plain `clio-coder` instead of the refused `--continue`, and every resume hint names `/resume`.
-- `clio-coder run --agent` forwards the seven sampling flags (`--temperature`, `--top-p`, `--top-k`, `--min-p`, `--presence-penalty`, `--frequency-penalty`, `--repeat-penalty`) to the worker and refuses `--json-events`.
-- `--with-panes` with `interface.panes.enabled: embedded` now looks for a herdr host, as `auto` does, instead of opening no panes.
-- `clio-coder doctor --deep` evaluates each validator at the session's autonomy level, as tool admission does. A `$(...)` validator asks at `default` and runs at `yolo`, and a damage-control confirmation asks at both levels.
-- A failed evidence build now shows as an error on the dispatch board and in the footer.
-- The trace mirror records every worker's tool calls with their durations, including claude-sdk workers, which had no `tool_call` rows.
-- Tool statistics, safety decisions and finish-contract entries a worker produces now survive backpressure on the worker stream.
-- A worker that fails to spawn names the spawn error in its receipt.
-- A run adopted after a restart keeps its council membership and cost provenance.
-- A failed or aborted prewarm no longer reads as a free success in usage records.
-- A replayed tool row without a recorded duration no longer shows a made-up one.
-- The GUI receipt provenance panel shows the Clio Coder version again, and the GUI keeps a running tool's partial output when an update carries no content.
-
-### Removed
-
-- **Breaking:** The read-time aliases for the old `clio` names are gone, with no migration. A user `settings.yaml` with `lifecycle: clio-managed` or `toolGovernance: clio-policy` refuses to load; use `clio-coder-managed` and `clio-coder-policy`. A target with `runtime: lmstudio-native` or `ollama-native` resolves to an unknown runtime; use `lmstudio` or `ollama`, and re-enter credentials stored under the old id. A `clio.<action>` keybinding is ignored in favor of the default; use `clio-coder.<action>`. Installed `clio-dev` and `clio-test` skills load under their old names, and installing `clio-dev` finds nothing; the skills are now `clio-coder-dev` and `clio-coder-test`.
-- **Breaking:** `doctor --fix` no longer rewrites legacy names in settings, skills, tool markers or the yazi profile, and `upgrade` registers two migrations instead of five. A yazi process left from a 0.4 session no longer delivers picks, and fleet preflight no longer accepts the pre-rename `clio-preflight/1` reply.
-- **Breaking:** Three settings keys nothing read are retired: `integrations.externalAgents.entries[].permissionTimeoutMs`, `integrations.externalAgents.entries[].labels` and `fleet.decisionProfiles.routing`. A user settings file naming one refuses to load with a "retired without replacement" issue; earlier builds wrote `permissionTimeoutMs` on every peer accepted through interop consent, so remove it by hand. In a project layer the key is dropped with a diagnostic.
-- **Breaking:** A user hook whose event cannot apply its effect is refused at load instead of recording an effect that was dropped. Every user hook on `on_compaction` is refused.
-- **Breaking:** A plugin manifest that declares `resources.themes` is refused. No loader ever read it.
-- **Breaking:** `clio-coder configure --remove` and `--rename` are gone. Use `clio-coder targets remove` and `clio-coder targets rename`.
-- New `trace.sqlite` databases have no `envelopes` table or itemized cost columns, which nothing filled, and the GUI drops the always-empty envelopes panel. A `trace sql` query naming them fails on a new database, and a 0.5.5 build cannot prune a database this build created. Existing databases keep both.
-- `clio-coder usage report` rows no longer record `sessionId`, `timing`, `promptCache` or cost provenance, which the report never read.
-- The `safety.allowed` and `extensions.reloaded` bus channels, which had no subscriber, and the GUI's desktop approval notifications, which could never be turned on.
-
-### Documentation
-
-- The README is rebuilt around nine fixed sections with a product screenshot, and a `readme-shape` hygiene check keeps that structure.
-- The safety model guide is rewritten to the two-level model and to what the code enforces, including the real damage-control hard blocks and confirmation rules.
-- The environment variable reference lists the ambient variables Clio reads, and its hygiene check now also fails when a documented variable is no longer read. `clio-coder config trust safety|hooks|settings` is documented.
-- The 0.5.5 sprint retrospective no longer ships in the package documentation.
+- **Breaking:** `safety.autonomy` accepts only `default` and `yolo`, and a user `settings.yaml` holding `auto-edit`, `full-auto`, `suggest` or `read-only` refuses to load. Project settings can no longer set autonomy, and workers and peers always run at `default`.
+- **Breaking:** ACP custom methods moved under `_clio-coder/`, error codes follow ACP v1, and the custom session list, delete and autonomy methods are gone in favor of `session/list`, `session/delete` and `session/set_mode`.
+- **Breaking:** The read-time aliases for old `clio` names are removed, along with `CLIO_CODER_ALLOW_EXTERNAL_FULL_ACCESS` and the unread keys `integrations.externalAgents.entries[].permissionTimeoutMs`, `integrations.externalAgents.entries[].labels` and `fleet.decisionProfiles.routing`.
 
 ## 0.5.5 - 2026-09-24
 
-### External coding agents
-
-- Added managed Codex, OpenCode, and Pi CLI runtimes to Clio dispatch. Claude Code and Antigravity CLI retain their existing managed runners; all five now use the shared subprocess connector registry. Configured headless targets use the normal run board, events, cancellation, and sealed receipts.
-- `/interop` and `interop inspect` now show the modes available for each installed peer and the setup needed to use them. Added `/peer [--cwd <workspace>] <peer> [brief]` to open any of the five CLIs in an owned Herdr pane. A pane is an interactive handoff without a managed receipt.
-- Claude Code retains its pinned ACP bridge; Codex retains its pinned bridge and OpenCode uses its native ACP mode. The outbound ACP client now resolves explicitly named environment references and records task worktree edits. ACP receipts state that peer-owned tools may write without sending a permission request. Antigravity CLI and Pi have no built-in ACP recipe.
-- Added `/run --worktree` for a preserved task branch. Managed receipts record the branch and changed paths, or the Git-visible delta observed in the current checkout. OpenCode headless forwards only credential variables referenced by its local provider configuration and refuses authority levels its CLI cannot enforce.
-
-### Image input and vision
-
-- Image admission now uses the resolved route's live capability decision. An explicit deployment probe reporting no image input takes precedence over family defaults, while a target override remains authoritative. Later model hints preserve the probed result, and the optional vision sidecar probes its target before its first headless use.
-- A text-only route refuses new image turns before saving the turn or contacting the provider, with the selected route and available vision choices in the interactive notice and `IMAGE_INPUT_UNSUPPORTED` in headless runs. Managed Codex, Pi, and OpenCode CLI peers remain text-only because their bridges do not carry image blocks, even with a vision override.
-- When a text-only route follows an image-bearing session, Clio sends omission notes in place of historical image blocks and warns once; the saved session keeps the original images. The dashboard, model selector, and `/model` notices show the resolved image-input state.
-- An optional `fleet.profiles.vision` target can inspect attached images before a text-only chat turn or answer a `vision` tool question about a recent attachment or image file. The main model receives a bounded, attributed text observation; image bytes stay with the sidecar. Image input documentation now lists supported formats and fixed resize and size bounds.
-
-### Local models and routing
-
-- LM Studio targets can set context, parallelism, flash attention, and speculative draft load options globally or per model. A LiteLLM route with one declared LM Studio deployment can use the same profile while requests continue through its alias; Clio does not forward the gateway key upstream. A resident instance with reported settings that differ from the profile is reloaded, which can interrupt another client's use of that instance.
-- Clio records its LM Studio loads across processes and releases its earlier models before a profiled load on the same server. Live streams hold leases so another Clio process does not unload their model mid-request. Switching between models can now incur reload time.
-- Qwopus routes send their Qwen-family sampler settings for thinking on and off instead of relying on server presets. Mini's quant-suffixed gateway routes are reflected in the catalog and tests, and model labels are wide enough to distinguish them in the TUI.
-- An unknown dispatch node that matches a fleet profile now explains that node pins take `local` or a `fleet.nodes` id and points to profile selection.
-
-### Project handbooks
-
-- A project handbook written to the 200-line guideline now preloads in full. The session cap rose from 8000 to 24000 UTF-16 units, so the 220-line cap binds first, and `context init` now sees all of an existing handbook it is asked to preserve.
-- Handbook discovery stops at the repository root, the nearest directory holding a `.git` directory or file. A `CLIO-CODER.md` in a folder above several repositories no longer instructs each of them. Handbooks nested inside a repository still layer.
-- Fleet workers receive the handbook rules that apply to them instead of the first 1500 characters. Each H2 section compiles into rule units whose audience comes from the section title and whose scope comes from the paths it cites. A worker gets the hard invariants, the rules scoped to its dispatch paths and its role's rules within 6000 UTF-16 units, plus a line naming the sections it did not get. A `<!-- clio: audience=... paths=... -->` comment after a heading overrides both.
-- A worker dispatched into a task worktree now receives the source checkout's handbook when the worktree has none, the usual case for a repository that keeps `CLIO-CODER.md` out of git.
-- `clio-coder context init` now writes the rules an agent would get wrong after reading the code: hard invariants, conventions that differ from defaults, change recipes, and verification. The model receives an inventory of what the repository enforces, built without a model: the commands CI runs, the package scripts they reach, and each custom check with its coded failure messages and their remedies. It is asked for one rule per check an ordinary change can fail and for one rule on where a regression test must live so CI runs it. Clio writes the verification section itself from CI and the declared test runners.
-- `context init` now uses the handbook the bootstrap worker submits through its result tool. Before, frontier models' output was dropped and the 11-line heuristic handbook was written. Citations are grounded against every visible repository path and file, so rules citing `CONTRIBUTING.md`, a CI job name or a glob are no longer deleted as invented. An overlong rule now ends at its last whole sentence instead of mid-word.
-- When `context init` finds no route, its error now names the current `fleet.agentProfiles` and `fleet.default` keys.
-
-### Verification and permissions
-
-- `verify` now runs a repository's own checks outside Node. It derives Python runners (pytest or unittest, through `uv run` when `uv.lock` exists), Cargo, Go and CMake test presets, Makefile and justfile verification targets, and repository scripts that CI runs directly, such as `scripts/gate.sh`. A check it cannot resolve runs nothing, and the error names what was searched and points at `bash`. A resolved `verify` call is admitted exactly as `bash` admits the same command.
-- At full-auto (`--autonomy yolo`), `npm run build|lint|typecheck|ci`, a test runner behind a pipe or redirect, and an `&&` chain holding a repository script now run without asking. They still ask at suggest and auto-edit. Headless runs, which deny every ask, had been refused their repository's own gate.
-- Exact `git diff --check` commands run at capable. Typed `verify` scans the resolved command, model-supplied arguments, and execution directory before admission; shell substitution and protected paths retain their safety rails.
-
-### Harness reliability
-
-- Task views distinguish a completion claim from verified checks and name the next host validation action. Sealed delegated edits and batch collect progress now advance the loop guard without admitting unchanged retries.
-- Native read-only scouts enter final synthesis after 36 observed tool calls. Dispatch summaries expose sealed batch call counts and cost with provenance for opaque external runs.
-- Evidence pages through visible session bundles and explains trust axes and event attribution. Memory reminders suppress stale paths and resolved failures; skill load warnings show drift hashes and receipt provenance.
-
-### Build
-
-- Building from source now works on case-insensitive filesystems such as the macOS default. Four GUI logic modules were renamed so no module stem differs from its component's only by case, and a hygiene check rejects case-only path collisions (#397).
-- Biome's exclusions are anchored at the repository root, so a checkout inside `.clio-coder/worktrees` or `.claude/worktrees` can lint its own files while the parent checkout skips nested worktrees.
+- Managed Codex, OpenCode and Pi CLI runtimes join Claude Code and Antigravity in dispatch. `/peer` opens any of them in an owned Herdr pane, and `/run --worktree` keeps a task branch.
+- Image admission follows the resolved route's live capability, and an optional `fleet.profiles.vision` sidecar describes images for text-only routes.
+- `verify` runs Python, Cargo, Go, CMake, Makefile and justfile checks, and fleet workers receive the project handbook rules that apply to them. Source builds work on case-insensitive filesystems (#397).
 
 ## 0.5.4 - 2026-09-23
 
-### Installation and upgrades
-
-- Added a quiet, dismissible update hint that waits for an idle terminal. Checks start after the first full frame, cache registry results for a day, and detect when the running installation has been replaced. `CLIO_CODER_UPDATE_CHECK=0` disables the monitor.
-- Added `clio-coder upgrade --restart` to upgrade an npm installation, complete migrations, and resume the project's last session after success.
-- Preserve an npm installation's actual prefix and invoke the exact installed binary for post-install checks. Other package managers receive matching instructions; older dist-tags do not downgrade newer installations.
-- Source installation now applies migrations before repair. Bootstrap installation reports incomplete post-install checks as a failure with the correct retry command.
-- Reset and uninstall stop owned documentation servers before removing state. State reset also removes owned background services and preserves state if ownership or shutdown cannot be verified.
-
-### Session and project isolation
-
-- Dispatch runs, receipts, and batches now carry their owning Clio session. A sibling session in the same project can inspect a run, while collect, steer, nudge, and gate recovery act only on runs owned by the current session (#392).
-- Resuming a session restores its own model and thinking level without changing global settings. Model changes in the picker and keyboard cycle stay in the current session until explicitly saved (#393).
-- `/model` and `/settings` can save edits for the current project in `.clio-coder/settings.local.yaml`. Existing project settings must be trusted; an explicit save approves only the exact bytes Clio wrote (#394).
-- `fleet status`, `inspect`, `decisions`, and `view` now show the current project by default. `--all` enables machine-wide inspection, including run and fleet root IDs from other projects (#395).
-- The footer's first-pass success and accountability figures now count only runs owned by the current session (#396).
-
-### Demo guidance and self-knowledge
-
-- Demo guidance shows at most one `[tip]` row after a turn, chosen by the harness from what the turn did, such as a question about Clio's settings, a `btw` side question, or a correction that `/tree` could rewind. The model never sees tips and no model call is made. Tips are spaced out, capped at four per session, and retire once you use the feature. A local `harness-profile.json` tracks what you already know. Turning off Demo guidance in `/settings` (`interface.demo`) or passing `--no-demo` stops tips, footer key hints, and the profile.
-- Clio reads her shipped docs and source without an approval prompt, always knows where her live settings are, and can preview a settings change with `configure_clio` at capable autonomy. At capable she cannot propose raising autonomy.
-
-### Startup and input readiness
-
-- The instant shell answers the keyboard while the full interface loads. Boot yields between its phases, so keystrokes echo, Enter queues a submission that runs once in order after loading, and Ctrl+C, SIGTERM and resize work before the full interface appears. `CLIO_CODER_INSTANT_SHELL=0` restores the old single-step boot.
-- Operator extensions start just after the first full frame instead of before it, about 60 to 80 ms sooner to a usable screen with many plugins installed.
-- Installed plugins are verified at most once per operation. Plain-text submits no longer verify them at all, slash completion and the `/help` and `/extensions` views read the plugin state committed at load, and `context`, library inventory and a session's first turn verify each plugin once. Running a template or an extension command still verifies it first.
-
-### Transcript presentation
-
-- **Two-cell gutter grammar**: Unified gutter across all output styles (`✓ Done`, `✗ Failed`, `⊘ Cancelled`, `▸` observation, `⚙` worker, `§` skills, `ℹ`/`⚠`/`✗`/`↻` notices) with hanging indents for wrapped rows.
-- **Worker cards**: Display live action and spend across all styles (`⚙ running <cmd> · <time> · <tokens> · <calls>`), stack under dispatch calls (`◆ delegated to <role> ✓`), group council rounds under `◇ council · round N`, and show failover retry attempts.
-- **Skill actions & status**: Dedicated `§` rows for skill activations, refusals with explicit error reasons (`manual-only`, `not-ready`, etc.), and armed surfaces in the footer until `/skill off`.
-- **Receipts**: Consolidated Detailed turn receipts into a single fact per field (`✓ Done · 14s · 3 calls · in 100.1k · out 381 · reasoning 98 · cold: <reason>`), persisting consistently across `/resume` and `/export`.
-- **Compact folding**: Group consecutive file reads, searches, and listings into class folds (`▸ explored 3 files, 2 searches ✓`), with cleaner folding across reasoning model spans.
-- **Cleaned action rows**: Removed duplicate command echoes, repetitive error codes, and unnecessary workspace `cd` prefixes; state scalar arguments directly on the action row.
-- **Inspectable `/view`**: Responsive layout switching above/below 84 columns, human-readable tool titles instead of raw IDs, redacted titles and search text, and post-paint layout optimization.
-- **Direct transcript inspection**: Bare `/view` selects the first displayed transcript detail, and clearing its filter retains the selected item. The preview shows the selected row's full available content with terminal controls neutralized; worker inspection and `/export` retain raw answers and validation facts.
-- **Worker outcomes**: Detailed trails distinguish successful, failed, and blocked calls in live and resumed sessions, compress repeated calls, and name earlier calls omitted by the four-action trail. Detailed receipts show speculative worker holds adopted or left unused after the session journal records them.
-- **Terminal responsiveness**: Accurate footer rendering across terminal resizes, auto-scroll to live edge after prompts or commands, and proper diff row wrapping.
-- **Narrow-screen polish**: Keep a quantized model suffix whole in the footer, reserve Fleet orange for a running glyph, exit fullscreen without printing its docked frame, name workspace-local `/export` files relatively, and omit a repeated run id from monitor previews.
-
-### Transcript speed
-
-- **Eliminated full transcript re-scans**: Replaced flex stack with delegating lease host to prevent call stack overflow on long sessions; step over unchanged rows in rewritten ranges.
-- **Zero-copy rendering**: Eliminated transcript-sized array allocations per streamed frame; retain row buffers across frames and leverage zero-copy container rendering in pi-tui.
-- **Immediate first-token display**: Render full first deltas on the leading edge of quiet windows instead of pacing individual graphemes.
-- **Pre-warmed renderers**: Warm Markdown, LaTeX, and syntax renderers post-initialization to eliminate first-answer latency spikes.
-- **Synchronized animation clocks**: Combined footer spinner and composer rail pulse on a unified 120ms animation clock; idle-render alternative output styles for instant Alt+O switching.
-- **Cached replay blocks**: Cache notices, command output, and finished `!` commands in transcript render cache.
-
-Fresh built-binary PTY measurements against `5a8289ce` used five interleaved runs per side at 120×40, Node 24.20.0 on WSL2, with compile cache disabled. The long fixture held 40,000 settled source lines across four turns under a 1,000,000-token mock context, avoiding benchmark-triggered compaction on both sides. Times are milliseconds; pairs are p50/p99 except first token and startup, which are medians. Earlier step-2 measurements used a different long fixture and are not directly comparable.
-
-| Measure | Short before | Short after | 40k lines before | 40k lines after |
-| --- | ---: | ---: | ---: | ---: |
-| Idle key to stdout | 1.09 / 3.12 | 1.11 / 3.07 | 4.70 / 12.00 | 2.63 / 3.14 |
-| Streaming key to stdout | 0.70 / 6.36 | 0.69 / 1.42 | 5.27 / 14.22 | 2.17 / 2.89 |
-| First token to stdout | 33.11 | 8.57 | 34.02 | 6.96 |
-| Stream frame | 0.52 / 2.45 | 0.53 / 1.21 | 5.23 / 14.55 | 2.04 / 9.94 |
-| Stdout bytes per token | 149.58 | 140.12 | 143.70 | 138.21 |
-| Stage 0 / Stage 1 startup | 112.6 / 745.6 | 113.3 / 743.5 | 118.6 / 778.8 | 122.6 / 767.5 |
-
-Every run committed all 400 streamed deltas with zero full redraws. In three interleaved short runs with an empty composer, stdout bytes per token fell from 141.37 to 130.94.
-
-### Streaming Markdown
-
-- **Block-by-block streaming**: Render completed top-level Markdown blocks as the next block begins; style open code fences, lists, and quotes while growing.
-- **Layout caching**: Retain transcript rendering across the last three layouts for instantaneous style toggling.
-- **Clean spacing**: Automatically drop blank opening rows in replies.
-
-### Diffusion frames
-
-- **Interactive diffusion streaming**: Stream Inception Mercury answers frame-by-frame in TUI, rewriting live frames instead of concatenating delta SSE chunks.
-- **Scoped interactive rendering**: Restrict diffusion frame replacement to interactive surfaces; headless `run`, ACP, JSONL, and workers retain standard delta streaming.
-- **Tool-call stability**: Preserve single preamble frame segments during tool-call argument deltas and accurately track time-to-first-token.
-- **Progress semantics**: The footer enters Writing on the first frame. No numeric denoising gauge is shown because the API reports progress as 0 until its final frame reports 1.
-
-### Drafts judged by a decision model
-
-- **`/draft [N] <request>`**: Added command to generate N parallel candidate drafts and select the best response using a decision model.
-- **`drafts` decision site**: Added dedicated decision site for evaluating and ranking candidate draft answers.
-
-### System One decision sites
-
-- **Decision sites**: Added `turnScope`, `dispatchForecast`, `capabilities`, `consult`, and `drafts` decision sites; retired legacy `routing` site.
-- **Unified `askSite` interface**: Added single resolution entry point with certainty floors, structured criteria scaling, and provider-agnostic distributions across Jev and Laya models.
-- **Speculative dispatch**: Added experimental pre-turn worker prewarming behind `fleet.speculativeDispatch`.
-- **Dispatch accounting**: Persist speculative hold, adoption, and discard counts for live Detailed receipts and `/resume`. Admit requests to check whether tests pass to verifier, and classify inspection of test files as read work for scout.
-- **Batched pre-turn briefs**: Combined pre-turn memory and skill relevance queries into a single batched request with a 1.5s timeout.
-- **Calibration tooling**: Added `scripts/decision-probe.ts` with `--cases` to score and calibrate site prompts and certainty thresholds against labeled fixtures.
-- **Local execution**: Documented running Laya locally through `typesafe-jev` on CPU and ROCm/Radeon iGPU.
-
-### Pi 0.87.1
-
-- Upgraded to Pi 0.87.1.
-- Limited worker terminal handoffs to three requests upon repair exhaustion.
-
-### Fixes
-
-- Registered `inception` and `typesafe-jev` in the runtime boot manifest.
-- Demoted dated release handoffs in documentation search.
-- Corrected skill listing ordering when decision models abstain.
-- Refused `targets use --model` selections targeting unconfigured roles.
-- Normalized worker error classification and grounded citations to grep matches.
-- Bound pre-turn memory and skill query latency.
-- Mark a call target only when its source description is actually truncated at 120 characters; ACP, audit, and TUI use the same mark. Charge the context estimate only for custom handoff seeds replayed to the model, rather than display-only session records. Strip inert `<tool_call>` markup from a pending worker answer tail while preserving the settled raw answer for inspection.
-- `verifiers validate` fails when discovery would block the catalog, and names the colliding check id and both of its sources. Ported from ikourkouta-svg's fix (#382).
-- Model lists come from the provider when it answers. A cached list or catalog shown as a fallback says why in `configure`, `targets use`, `models` and the model picker. Gemini lists the models its API key can generate with (#390, #386).
-- ALCF targets ask for a gateway URL, with the Sophia endpoint as the example, instead of offering `http://127.0.0.1:8080` (#388).
-- On macOS, the safety classifier and the startup workspace check treat `/private/etc`, `/private/var` and `/private/tmp` as the system paths they are, and the root test suites pass there (#391).
-
-### Tool contract coverage
-
-- Enforced executable contract test references for all built-in tools.
-- Added contract tests for `steer`, `monitor`, `ledger`, `panes`, `ask_user`, `code_nav`, and `data`.
-- Promoted 7 deterministic tests to `tests/contracts/` (`evidence`, `decide`, `limitation`, `tasks`, `verify`, `web_read`, `web_fetch`).
-- Synchronized built-in tool inventory count to 31.
-
-### Removed
-
-- Removed evaluation engine (`src/domains/eval`) and all `clio-coder eval` subcommands (`validate`, `run`, `report`, `compare`, `gate`, `baseline`, `inventory`, `skill`).
-- Removed `evals/` test suites, baselines, and behavioral benchmarks.
-- Removed `clio-coder evidence build --eval` and eval evidence sources.
-- Removed GUI Evals view, `/api/evals` endpoints, and evaluation scenario files (`evals.md`) from library skills.
+- `clio-coder upgrade --restart` upgrades and resumes the last session, and a quiet update hint can be disabled with `CLIO_CODER_UPDATE_CHECK=0`. Dispatch runs and receipts carry their owning session, and `fleet` commands default to the current project (`--all` for machine-wide) (#392 to #396).
+- A unified transcript grammar covers worker cards, compact folding and `/view`, and the instant shell answers the keyboard while the interface loads.
+- Adds `/draft`, experimental `fleet.speculativeDispatch` and more System One decision sites. The `eval` command suite is removed.
 
 ## 0.5.3 - 2026-09-22
 
-### Diffusion model support
-
-- **Inception runtime**: Added `inception` cloud runtime for Inception Mercury diffusion models (`mercury-2.5`, `mercury-2`, `mercury-edit-2`), authenticated via `INCEPTION_API_KEY`.
-- **Chat and FIM endpoints**: Wired chat completions at `/v1/chat/completions` and fill-in-the-middle at `/v1/fim/completions` via `infill()`.
-- **Reasoning configuration**: Disabled reasoning with `reasoning_effort: instant` to prevent hidden token exhaustion.
-- **Provider compatibility**: Added `compat` and `samplingParams` passthrough for catalog-backed models; dynamically probe context and output limits from `/models`.
-
-### System One decision models
-
-- **TypeSafe runtime**: Added `typesafe-jev` cloud runtime (`jev-latest`, `jev-preview`), authenticated via `TYPESAFE_API_KEY`, for closed-distribution micro-decisions (`chat: false`).
-- **`decide()` primitive**: Added `decide()` verb covering `noul` (truth probability), `choice` (categorical distribution), and `score` (position on a criteria ladder).
-- **Confidence handling**: Separated confidence from probability; derived `noul` certainty based on deviation from coin-flip; abstentions return `null` below confidence floor.
-- **Harness binding**: Bound decision sites via `fleet.decisionProfiles` (`routing`, `skills`, `memory`, `toolRisk`) with fallback to heuristics when unbound.
-- **Decision integration**: Ranked skill discovery by relevance; scored command blast radius advisively in approval prompts; batched synchronous memory scoring during turn boundaries.
-
-### Harness eval baselines
-
-- **Committed baselines**: Recorded per-task baselines via `eval baseline record|check` and inline checks in `eval run`, pinning deterministic harness properties while excluding environmental noise.
-- **Tool bench suites**: Added `bash` tool bench suite (230 scenarios) with per-scenario autonomy (`auto-edit` vs `full-auto`). Added 5 offline machinery suites covering admission, prompts, and context budgets.
-- **Suite renaming**: Renamed `tracked-metrics-baseline.yaml` to `tracked-metrics-suite.yaml`.
-
-### Cached MCP discovery
-
-- **Cached metadata queries**: Answered `gateway(op="find")` and `describe` from persistent tool metadata cache (`metadata-cache.ts`) instead of launching MCP server processes on discovery.
-- **Catalog persistence**: Persisted bounded tool catalogs per declared server, tracking provenance and missing catalogs; added `server` and `refresh` parameters to `find`.
-- **Live execution**: Kept live server connection and real-time schema validation for `call`.
+- Inception Mercury diffusion models run through the `inception` runtime (`INCEPTION_API_KEY`) and stream frame by frame in the terminal.
+- A `typesafe-jev` runtime and the `decide()` primitive let System One decision sites bind through `fleet.decisionProfiles`.
+- `gateway(op="find")` and `describe` answer from a persistent MCP tool metadata cache instead of launching servers.
 
 ## 0.5.2 - 2026-09-21
 
-### Context continuity and memory
-
-- **Self-compaction**: Added `self_compact({note_to_self})` for assistant-authored notes, whole-batch exclusivity, and summary/eviction checkpoints.
-- **Context recovery**: Added `/context recover <handoffId> <reduce|deliver>` for explicit branch-bound recovery; session format v5 persists continuity records across forks and replays.
-- **Budget enforcement**: Strictly enforced input and reserved output budgets across tool continuations; inspectable via `context(scope="budget")` and `/context`.
-- **Memory stability**: Froze approved durable-memory selection for prepared turns using content hashes; restored private task memory only after successful reductions.
-
-### Skills and harness correctness
-
-- **Skill discovery**: Added bounded query and paging for skill discovery with drift detection.
-- **Test stability**: Corrected handoff guidance fixtures, removed checkout-name test dependencies, and stabilized retained-memory measurements.
-
-### Library
-
-- **Remote catalog packaging**: Added `wtfp@0.7.3` as pinned remote catalog package with manifest and tree-digest validation.
-
-### Self-development skills
-
-- **Developer skills**: Redesigned `clio-coder-dev` and `clio-coder-test` around source ownership, isolated builds, and focused validation; auto-discovered inside checkout.
+- `self_compact`, `/context recover` and strict input and reserved-output budgets across tool continuations, with session format 5.
+- Skill discovery pages and detects drift, and the `clio-coder-dev` and `clio-coder-test` skills are redesigned.
 
 ## 0.5.1 - 2026-09-21
 
-### subscription quota and unified usage
-
-- **Subscription quota normalization**: Added proactive quota readers for Claude Code, `anthropic-max`, Codex CLI, and Antigravity, normalizing reported windows into consumed percentage models cached for ~5 minutes.
-- **`/usage` overlay**: Replaced `/cost` with `/usage` featuring Accounts, Session, Models, and Workers views (switched via keys 1–4, Tab, and arrows); retained `clio-coder usage report` for cross-session reporting.
-- **Unified telemetry**: Displayed cached subscription headroom across welcome launchpad, dashboard, worker cards, and fleet islands with explicit `used` vs `left` direction labels.
-- **Compact footer**: Standardized two-line footer layout: Line 1 for active work, model identity, headroom, thinking, and context; Line 2 for cwd, git branch/status, and rotating hints.
-- **Worker quota**: Displayed worker quota as shared account headroom for local credentials and matching model groups.
+- `/usage` replaces `/cost` with Accounts, Session, Models and Workers views and subscription quota readers for Claude Code, `anthropic-max`, Codex CLI and Antigravity.
 
 ## 0.5.0 - 2026-09-20
 
-### public launch and documentation
-
-- **Public launch**: Initial public release with full CLI, interactive TUI, documentation server, and browser application.
-- **Documentation**: Shipped comprehensive guides under `docs/` and accessible in-session via `clio_docs`.
-- **Safe data stores**: All state, cache, logs, and configuration strictly scoped to user and project data directories; added `clio-coder uninstall` with verification.
-
-### engine, prompts, and long sessions
-
-- **Context management**: Automatic multi-tier compaction, eviction, and working-set retention for long interactive sessions.
-- **Prompt compilation**: Modular prompt templates with scoped layering, cache-key hashing, and token budgeting.
-- **Session persistence**: Append-only session format (v4) with replay, branching, and export support.
-
-### command admission and context controls
-
-- **Command admission**: Pre-execution security and safety admission pipeline for tools and shell commands.
-- **Context controls**: Added `/context` inspection, manual compaction triggers, and live budget tracking.
-
-### graphical application
-
-- **Browser GUI**: Bundled local web interface (`apps/clio-coder-gui`) with session explorer, settings manager, and documentation reader.
-- **Lifecycle & auth**: Origin-verified local server with secure token-based authentication and process lifecycle management.
-
-### library
-
-- **Package management**: Packaged and validated skills, prompts, fleets, and plugins under `library/`.
-- **Installation scopes**: Supported project-local and global package registration and installation via `clio-coder library`.
-
-### configuration and terminal
-
-- **Settings reorganization**: Structured settings around Connections, Chat, Fleet, Context & Memory, and Safety.
-- **Terminal UI**: State-aware composer rails, live local-machine telemetry (CPU, RAM, RSS, network), and diagnostics routing.
-- **Interactive doctor**: Added in-session `/doctor` diagnostic reports with error and warning prioritization.
-
-### agent behavior
-
-- **Shadow helpers**: Inline agent-to-agent delegation cards with compact footer status and lifecycle accounting.
-- **Loop lockout**: Detected repetitive identical tool calls and infinite loops with bounded recovery prompts.
-- **Result handoffs**: Native shadow helpers submit results via structured terminal handoff contracts.
-
-### run
-
-- **Headless mode**: `clio-coder run` with `--timeout <seconds>`, `--cwd <dir>`, and structured JSON output for non-interactive scripting.
-- **Sealed receipts**: Headless execution receipts record safety decisions, blocked attempts, and outcome summaries.
-
-### safety
-
-- **Symlink resolution**: Rigorous recursive symlink traversal and `..` canonicalization in safety admission.
-- **Bash admission**: Real-time evaluation of bash write targets, variable expansions, and chained directory navigation.
-- **Autonomy levels**: Unconfirmed test command execution at `auto-edit` (`npm test`, `pytest`); strict out-of-tree read/write gating.
-
-### grep
-
-- **Binary & encoding resilience**: Clean handling and reporting for non-UTF8 lines in grep results.
-
-### eval
-
-- **Tool bench suites**: Added evaluation harnesses for `grep`, `find`, and core tool behavior.
-- **Failure classification**: Structured scoring of run tasks with granular failure classifications.
-
-### providers
-
-- **Local & gateway providers**: Hardened streaming and residency tracking for Ollama, llama.cpp, LM Studio, and LiteLLM.
-- **Live probing**: Added `targets --probe` with `--tools` and `--reasoning` flags for real-time capability verification.
-- **Slot & memory management**: Dynamic slot discovery, context window extraction, and automatic model release on exit.
-
-### fleet
-
-- **Dynamic concurrency**: `fleet.concurrency` defaults to `auto`, sizing worker limits from available CPUs and cgroups.
-- **Circuit breaker & failover**: Half-open circuit breaker on target routes with automatic failover to alternative providers.
-- **Isolated task worktrees**: Git worktree isolation for concurrent workers with lease recovery after process crashes.
-- **Slurm integration**: Optional cluster dispatch via clio-kit Slurm MCP server.
-
-### doctor
-
-- **Environment diagnostics**: Added comprehensive system checks for compilers, MPI, Slurm, and runtime dependencies.
-- **Deep probing**: Added `doctor --deep` for live model inference and tool-calling validation.
+- Public launch with the CLI, interactive TUI, headless `clio-coder run` with sealed receipts, and a bundled browser application.
+- Safety admission for tools and shell commands, automatic compaction with working-set retention, session format v4, and `doctor --deep`.
+- Fleet dispatch with automatic concurrency, a circuit breaker with failover, isolated task worktrees and optional Slurm dispatch, plus `clio-coder library` packages.
 
 ## 0.4.9 - 2026-09-17
 
-### read
-- Bounded file reads with offset-based paging and large-file truncation warnings.
-
-### write and edit
-- Atomic file writes with automatic parent directory creation and lint-aware inline replacement.
-
-### bash
-- Sandboxed shell execution with execution timeout, output capture, and safety admission checks.
-
-### grep, find, and ls
-- Native search commands with `.gitignore` awareness, regex filtering, and bounded result counts.
-
-### run_script
-- Direct execution for project scripts in isolated temporary environments.
-
-### verify
-- Executable verification contracts linking test commands and file validation assertions.
-
-### gateway and MCP
-- Model Context Protocol (MCP) server lifecycle management, stdio transport, and dynamic tool catalog discovery.
-
-### model compatibility
-- Standardized sampling parameters and prompt formatting across OpenAI, Anthropic, and local inference targets.
-
-### context, web, and artifacts
-- Web page extraction, artifact lifecycle management, and scoped context window tracking.
-
-### data
-- Structured data query and inspection utilities for workspace analysis.
-
-### terminal workbench
-- Interactive pane docking, split-window browsing, and live status inspection.
-
-### maintenance reliability
-- Hardened subprocess lifecycle handling, signals cleanup on SIGINT/SIGTERM, and memory leak prevention.
+- Hardened `read`, `write`, `edit`, `bash`, `grep`, `find`, `ls`, `run_script`, `verify`, `data` and MCP gateway tools with bounds, atomic writes and sandboxed shell execution.
+- Web extraction, artifacts, terminal pane docking and subprocess cleanup on SIGINT and SIGTERM.
 
 ## 0.4.8 - 2026-09-12
 
-### Added
-- Explicit background service setup for Linux with a systemd user session and installable PWA with stable local origin.
-- Exact-package qualification script (`scripts/release-candidate.mjs qualify`).
-- Shared runtime trace reader integration in web application.
-
-### Changed
-- Separated fast routine CI, exact-package qualification, and explicit full development investigations.
-- Generated web documentation directly from canonical Markdown with unified search and navigation.
-- Unified web surface build with CLI, sharing server chunks and assets.
-- Retired standalone trace viewer in favor of unified web app.
-
-### Fixed
-- Applied effective output limits, thinking settings, tool read limits, and history retention at declared boundaries.
-- Loaded provider runtime packages from canonical settings and bound cached probe state to target identity.
-- Preserved SDK pricing tiers and per-call costs through native worker accounting.
-- Applied user-hook path protections before tool execution.
-- Stopped owned web background services and desktop entries during uninstall.
+- A Linux systemd background service and installable web app for the browser app, with one web build that retires the standalone trace viewer.
+- An exact-package qualification script, and output limits, thinking settings and history retention applied at their declared boundaries.
 
 ## 0.4.7 - 2026-09-10
 
-### Added
-- Operator extension runtimes with declared namespaced slash commands and bounded session/turn observation.
-- Added `context(scope="library")` projection for shared recipe inventory inspection.
-- Unified installable plugins, skills, agents, prompts, and fleets into canonical `library/` packages with manifest validation.
-- Auto-discovery of user/project resources from major coding agents.
-- Prompt template frontmatter `display-only: true` support and composer slash autocompletion.
-- Shipped `materio` materials research plugin with literature search and advisory review.
-- Harness extensions for contained Node.js and Python command tools with JSON contracts.
-
-### Changed
-- Replaced welcome panel with compact three-row header showing configured route and status.
-- Contextual keyboard map (Ctrl+G menu, Ctrl+Q follow-up, Alt+Q recovery).
-- Package management centralized in `clio-coder library` and `/library`; deprecated separate plugin/skill commands.
-- Responsive `ask_user` interview UI positioned above composer with preserved answer history.
-- Standalone harness extension manifest schema (`id`, `name`, `version`, `description`, `capabilities`).
-
-### Fixed
-- Extended hosted Ubuntu release gate timeout to 15 minutes.
-- Preserved trusted project output-token settings in native workers.
-- Protected installed plugin and harness extension directories as operator-owned resources.
-- Gated `/skill off` prior to skill expansion on interactive chat admission.
-
-### Removed
-- Removed extension-owned prompt, skill, agent, and fleet directories outside `library/`.
-- Removed legacy `2026-09-01-extension-install-digests` lifecycle migration.
+- Installable plugins, skills, agents, prompts and fleets unify into `library/` packages managed by `clio-coder library` and `/library`.
+- Operator extension runtimes with namespaced slash commands, harness extensions for contained Node.js and Python tools, and a compact three-row welcome header.
 
 ## 0.4.6 - 2026-09-08
 
-### Added
-- Quick Connect launcher option with immediate setup alongside Settings and Diagnostics.
-
-### Changed
-- Three distinct output styles: Compact, Standard (default), and Detailed, toggled via Alt+O.
-- Bounded terminal wrapping for reasoning spans, shell output, diffs, and worker previews.
-- Footer exclusively owns live activity state, concurrent tool status, and background counts.
-- Defaulted to single worker, disabled prompt prewarm, and automatic TTY streaming.
-
-### Fixed
-- Preserved JSON measurement fields in numerical verification without prototype pollution.
-- Fixed `configure` readline scoping and menu arrow-key selection exits.
-- Canonicalized autonomy levels across settings menu and schema validation.
-- Added `configure --edit` and All Settings menu for in-place settings file editing.
-- Prevented configuration inspection and dry runs from unintentionally initializing user state.
+- Compact, Standard and Detailed output styles toggled with Alt+O, and a Quick Connect launcher option.
+- Defaults to a single worker with prompt prewarm off and automatic TTY streaming.
 
 ## 0.4.5 - 2026-09-07
 
-### Added
-- Directory-scoped `CLIO-CODER.override.md` configuration override support.
-- Worker task timeout controls and bounded cancellation timeouts.
-- Dynamic tool result truncation with configurable byte ceilings.
-- Model knowledge base entries for Claude 3.5 Sonnet and GPT-4o.
-- Memory and compaction diagnostics via `/context inspect` and `/context prune`.
-
-### Changed
-- Compacted default main and worker system prompts.
-- Unified receipt status reporting across headless CLI and interactive TUI.
-- Strict parameter schema validation for built-in tool calls.
-- Simplified keyboard navigation and modal dismissal shortcuts.
-
-### Fixed
-- Fixed command argument escaping and variable expansion in safety admission.
-- Handled recursive symlink loops and cross-device directory moves gracefully.
-- Prevented unhandled stream abort exceptions during provider failover.
-- Sanitized ANSI escape sequence filtering across wrapped terminal views.
-- Restored accurate task board status tracking across resumed sessions.
+- `CLIO-CODER.override.md`, worker task timeouts, dynamic tool-result truncation, and `/context inspect` and `/context prune`.
 
 ## 0.4.4 - 2026-09-05
 
-### Added
-- Model Context Protocol (MCP) protocol v3 support with bidirectional tool routing.
-- Command-line trace inspection utilities via `clio-coder trace`.
-- Target probe timeout flags (`--probe-timeout`) and failure diagnostics.
-- Custom MCP server environment variable inheritance and working directory configuration.
-- Bounded scratch space offload for oversized tool execution outputs.
-
-### Changed
-- Migrated settings path to `~/.config/clio-coder/settings.yaml`.
-- Unified session storage format with backward compatibility for v3 sessions.
-- Enhanced parallel worker dispatch scheduling and concurrency limits.
-
-### Fixed
-- Resolved MCP stdio transport hanging on abrupt SIGINT/SIGTERM termination.
-- Fixed worker lease acquisition timeouts under high concurrency.
-- Corrected terminal resize reflow bugs causing duplicate prompt renders.
-- Fixed token count misattributions during multi-turn compaction cycles.
-
-### Removed
-- Removed deprecated legacy command-line flags and alias parameters.
+- MCP protocol v3 with bidirectional tool routing, `clio-coder trace`, and settings moved to `~/.config/clio-coder/settings.yaml`.
 
 ## 0.4.3 - 2026-09-05
 
-### Added
-- Remote marketplace skills (`skills/remote.yaml`) fetching external repository packages.
-- `archify` architecture planning skill pinned to `tt-a1i/archify` v2.16.0.
-- `clio-coder context map [--out <path>] [--json]` generating architecture seeds from codewiki indices.
-- Read-only `world-knowledge` shadow agent for open-world research and web synthesis.
-- Reusable `branch-closeout` Git workflow skill (`skills/git/branch-closeout/`).
-
-### Changed
-- Unified skill pin validation into single lint pass.
-- Enabled `context.compaction.model` and `context.compaction.systemPrompt` configuration overrides.
-- Isolated Antigravity external delegation within bounded subprocess boundary.
-- Hardened complete Git skill suite (`file-ticket`, `fix-issue`, `ship`, `worktree-create`).
-
-### Fixed
-- Cold target metadata discovery for LiteLLM before worker admission.
-- Compaction usage accounting in out-of-turn ledger for failed/empty compactions.
-- Preserved thinking controls through LiteLLM parameter filtering.
-- Reset transient task memory on explicit session and branch switches.
+- Remote marketplace skills, `clio-coder context map`, a read-only `world-knowledge` agent and `context.compaction.model` overrides.
 
 ## 0.4.2 - 2026-09-02
 
-### Added
-- **Accountability in ACP**: Observability extension publishes `accountability.evidenceReady` events with run evidence bundles.
-- **Trace step inspection**: Added `clio-coder trace code-steps <rootId> [--json]` for reading deterministic code-step records.
-- **Real-home smoke test**: Added `npm run smoke:real-home` testing binaries against real operator configuration.
-- **Files pane**: Added `/files` pane docked below the session with dedicated keyboard navigation.
-- **Immutable extension snapshots**: Extensions projected into generation-numbered immutable snapshots per session.
-- **Configuration reference**: Added complete switch and knob inventory in `docs/configuration-reference.md`.
-- **Audience documentation structure**: Restructured documentation into `docs/guide/`, `docs/architecture/`, and `docs/process/`.
-
-### Changed
-- **Tool result ceiling**: Added configurable `context.toolResultMaxBytes` (default 65,536 bytes).
-- **Dynamic output limits**: Chat completions default to model advertised maximums rather than fixed 32k ceilings.
-- **Pi SDK 0.84.4**: Updated Pi engine libraries (`pi-ai`, `pi-agent-core`, `pi-tui`) from 0.84.0 to 0.84.4.
-- **Default thinking**: Set `chat.thinkingLevel` default to `low`; mapped thinking off to `reasoning_effort: "none"`.
-- **Loop detection**: Retained last 48 attempts in loop detector rather than time-based windows.
-- **System prompt diet**: Compacted main and worker system prompts, eliminating redundant routing and retrieval prose.
-- **Dispatch schema**: Serialized `intent` and `budget` schemas once under `$defs`.
-
-### Fixed
-- Fixed skill `clio:` frontmatter deprecation warnings.
-- Restored `model.clioCoder` runtime metadata reading after naming migration.
-- Fixed thinking off reaching LM Studio as `reasoning_effort: "none"`.
-- Fixed boot refusal when `safety.limits.readBytesPerCall` exceeded 50 KiB.
-- Fixed `runs.json` dispatch run ledger path and added `source` column to trace `runs` table.
-- Fixed headless `run --autonomy <level>` flag application.
-- Restored parallel tool batch result order during session replay.
-- Handled `intent.verification: [{ check: "none" }]` without failing dispatches.
-
-### Removed
-- Removed unused environment variables `CLIO_CODER_RESUME_SESSION_ID` and `CLIO_CODER_BOOTSTRAP_GENERATE_CHILD`.
-- Removed `CLIO_CODER_SYNTHESIS_LOCK`.
+- A `/files` pane, `context.toolResultMaxBytes` (65,536 bytes by default), `chat.thinkingLevel` defaulting to `low`, and Pi SDK 0.84.4.
+- Documentation restructured into `docs/guide/` and `docs/architecture/`.
 
 ## 0.4.1 - 2026-09-01
 
-### Changed
-- Version-2 `settings.yaml` organized around `chat`, `fleet`, `targets`, `context`, and `safety`.
-- Panes, docks, and Yazi file integration marked experimental and opt-in.
-- Slash command registry organized into Work, Inspect, Configure, and Session categories.
-
-### Added
-- Grammar-aware slash autocomplete in interactive composer.
-- Workspace-aware `@` file picker in editor with metadata and line counts.
-- Bounded public/private execution boundary for `!command` operators.
-- Marketplace self-promotion matching requests to uninstalled catalog skills.
-
-### Fixed
-- Fixed version-2 settings diagnostics and missing-journal error messaging.
-- Cached marketplace offer middleware inventory per session.
-- Model picker Enter key confirms and applies selection cleanly.
-- `clio-coder doctor` runs read-only by default (requires `--fix` to mutate).
-- TUI text properly wraps to terminal width without truncating remedies.
-
-### Test-suite diet
-- Automated test suite streamlined from 557 files (184k lines) to 35 files (19k lines).
-
-### CI modernization
-- Consolidated CI into single Node 22 job executing package qualification.
-
-### Eval consolidation
-- Unified evaluation engine under `src/domains/eval/`.
-
-### Clio Coder naming migration
-- Consolidated machine-facing identifiers and paths under the unified `clio-coder` namespace.
+- Version-2 `settings.yaml` organized around `chat`, `fleet`, `targets`, `context` and `safety`, with machine-facing names consolidated under `clio-coder`.
+- Panes, docks and Yazi integration marked experimental, and `clio-coder doctor` runs read-only unless `--fix` is given.
 
 ## 0.4.0 - 2026-08-31
 
-### Added
-- **ACP setup discovery**: ACP clients discover terminal setup flow via `clio-login`.
-- **Vendored tools registry**: Added `clio-coder tools list|status|install|remove <id>` for pinned external binaries.
-- **Herdr pane integration**: Integrated `/panes show|open|focus|close` when running inside Herdr.
-- **Pane file picker**: Added terminal file picker pane returning selected paths to composer.
-- **Run event journal**: Dispatched runs record append-only NDJSON journals at `<stateDir>/runs/<runId>/events.ndjson`.
-- **LiteLLM runtime**: First-class LiteLLM provider runtime supporting managed gateways.
-- **Fleet board & agent attribution**: Live fleet board in ACP attributing frames and tool calls to originating agents.
-- **Slot discovery persistence**: Discovered parallel slot counts persisted across process lifetimes.
-- **Workbench read surfaces**: Added four read surfaces over durable harness state in Workbench.
-
-### Changed
-- Moved `@anthropic-ai/claude-agent-sdk` to `optionalDependencies`.
-- Graduated pane layer to first-class integration with fallback when unsupported.
-- Enforced boundary rules preventing unauthorized external network reach.
-
-### Fixed
-- Output budgeting for thinking models in proactive memory.
-- Saturated endpoint dispatch queueing under stable run identities.
-- Error reporting for debugger, verifier, and research result-contract repairs.
-- Clean TUI exit for fleet watch panes and restored input focus.
-- Corrected unpriced model work display from `$0.0000` to unmetered indicator.
-- Sanitized slash command validation in `clio-coder run`.
+- `clio-coder tools list|status|install|remove`, Herdr pane integration, a first-class LiteLLM runtime and run event journals.
+- `@anthropic-ai/claude-agent-sdk` moves to `optionalDependencies`.
 
 ## 0.3.9 - 2026-08-30
-
-### Added
-- Additive execution envelope binding prompt fragment IDs, versions, and composition hashes to results.
-- Bounded SQLite trace mirror with retention policies and `clio-coder trace prune` (#226).
-- Always-on input pipeline crash logging written on `SIGTERM` (#224).
-- Behavioral evaluation comparison reporting correctness, safety, and efficiency metrics.
-- Typed dispatch validation projections (`routeValidationProjection`).
-- Added `clio-coder config validate` command.
-
-### Fixed
-- Prevented dispatch retries from dropping original execution constraints.
-- Restored terminal raw mode reliably across interrupted prompts and error exits.
-- Corrected context window calculation for local models with custom context offsets.
-- Fixed prompt cache invalidation races during rapid sequential tool executions.
-- Compacted trace storage automatically upon reaching size thresholds.
-- Accurately recorded token usage for aborted or timed-out tool calls.
+Execution envelopes binding prompt fragment ids to results, a bounded SQLite trace mirror with `clio-coder trace prune` (#226), and `clio-coder config validate`.
 
 ## 0.3.8 - 2026-08-29
-
-### Added
-- Added `clio-coder evidence` command suite for inspecting, validating, and exporting evidence bundles.
-- Deterministic SHA-256 evidence bundle hashing for reproducible verification records.
-
-### Changed
-- Unified evidence schema (v3) with strict provenance metadata and validation timestamps.
-- Normalized timestamp formats across session, trace, and run ledgers to ISO 8601 UTC.
-
-### Fixed
-- Resolved race conditions in concurrent dispatches modifying shared ledger entries.
-- Fixed subagent cancellation cascading to ensure child processes terminate cleanly.
-- Eliminated memory retention in long-running TUI sessions caused by uncleared terminal buffers.
-- Corrected prompt cache key generation to prevent spurious cache misses across turns.
+`clio-coder evidence` inspects, validates and exports evidence bundles with deterministic SHA-256 hashes.
 
 ## 0.3.7 - 2026-08-24
-
-### Added
-- **Typed dispatch intent and verification** (#155): Added `intent` (`read_roots`, `write_roots`, `relevant_paths`, `expected_outputs`, `verification: [{check, timeout_ms?}]`) with host-run verification via code-step runner and receipt sealing (integrity v16).
-- **Side questions (`/btw <question>`)** (#41): Evaluates read-only questions against compiled history without modifying session JSONL, ledger, or worker briefs.
-- **Desktop notifications** (#204): Opt-in notifications via `terminal.notify: true` using OSC 777 / OSC 9 on turn completion, batch settlement, or parked approvals.
-- **Single-writer leases & task worktrees** (#207): `writers: 1` concurrency constraint with process-level checkout writer leases and `worktree: true` task isolation (`clio/task/<runId>`) with automatic verification and merge policies (receipt integrity v17).
-
-### Changed
-- Resolved verification checks from package scripts and `.clio-coder/verifiers.yaml` at admission.
-- Enforced POSIX-normalized repository-relative paths across all dispatch intents.
+Typed dispatch intent with host-run verification (#155), `/btw` side questions (#41), opt-in desktop notifications (#204), and single-writer leases with task worktrees (#207).
 
 ## 0.3.6 - 2026-08-23
-
-### Added
-- Interactive task board overlay (`/tasks`) for tracking active, queued, and completed subagent tasks.
-- Multi-stage prompt caching with prefix stabilization to maximize local and cloud KV-cache reuse.
-- Live token cost and usage estimation per turn based on configured target pricing models.
-
-### Changed
-- Modernized TUI layout with adaptive pane splitting on wide terminals.
-- Streamlined permission approval prompts with granular risk explanations.
-
-### Fixed
-- Fixed session recovery failures when resuming across differing terminal geometries.
-- Hardened subprocess signal propagation to prevent orphaned worker processes.
-- Fixed provider SSE parsing edge cases during stream reconnection.
+A `/tasks` board overlay, multi-stage prompt caching with prefix stabilization, and per-turn cost estimates from target pricing.
 
 ## 0.3.4 - 2026-08-22
-
-### Added
-- Session format v4 adding `contextEviction` and `contextRecall` records.
-- Working set settings under `context.workingSet` (`enabled`, `policy: structural-v1`, `targetOccupancy`).
-- Compaction reporting `working_set` stage on `ContextPruned`, exposing `on_compaction` middleware hooks.
-- Deterministic code-point ordering for evidence rows and verifier catalogs.
-
-### Changed
-- Unified trust fact derivation across receipts, evidence bundles, and monitor outputs.
-- Calibrated tool-result summaries with disjoint head and tail slicing and offload paths.
-
-### Removed
-- Removed Claude Code transcript loader for `context replay`.
-- Removed legacy evidence trust status promotion rules.
-
-### Security
-- Gated project-catalog `verify(check=<id>)` behind policy engine validation.
-
-### Fixed
-- Prevented auto-compaction from destroying valid tool observation bodies.
-- Fixed verifier catalog writer reporting incorrect status prior to file commits.
+Session format v4 with context eviction and recall records, `context.workingSet` settings, and policy-gated `verify(check=<id>)`.
 
 ## 0.3.3 - 2026-08-21
-
-### Changed
-- Unified transcript detail under `/output minimal|default|verbose` with per-block folding controls.
-- Folded Bash execution bodies by default while retaining concise command, outcome, timing, and size headers.
-- Rendered reasoning as stream-ordered thinking segments.
-
-### Fixed
-- Preserved reasoning order and token provenance across live, interrupted, and replayed turns.
-- Preserved complete replay bodies for HTML export and aggregated multi-call receipts.
-- Contained failure excerpts and mutation diffs within narrow terminal frames (down to 40 columns).
-- Replaced internal tool-call signatures with human-readable action summaries.
+Transcript detail unified under `/output` with per-block folding, folded Bash bodies and stream-ordered thinking segments.
 
 ## 0.3.2 - 2026-08-20
-
-### Added
-- Evidence-aware Git commit attribution (configurable via Advanced settings).
-- Fullscreen terminal mode, native Mermaid and LaTeX rendering, and smooth-streaming controls.
-- HTML transcript export with retained Markdown export option.
-- Directory-scoped `CLIO-CODER.override.md` instructions and project-rule propagation to workers.
-- Compile-cache support for interactive, run, ACP, and worker boot paths.
-- Updated Pi SDK libraries to 0.84.0 with declaration-surface checks.
-
-### Changed
-- Consolidated slash command spelling and argument handling; retired aliases fail closed.
-- Replaced LM Studio SDK with HTTP adapter (`lmstudio` canonical, `lmstudio-native` alias).
-- Strengthened ACP v1 contracts for sessions, workspaces, permissions, and error reporting.
-
-### Fixed
-- Preserved prompt submission order during instant-shell boot and restored fullscreen rendering.
-- Prevented concurrent dispatch processes from overwriting run-ledger entries (#118).
-- Fixed LM Studio duplicate model loading (#113) and llama.cpp residency errors (#127, #134).
-- Restored documented headless JSON/event output and CLI exit code behavior (#122, #123).
-
-### Security
-- Hardened worker and session safety policies, OAuth cancellation, and ACP permission mediation.
-- Added publish-time version-coherence verification (#124).
+Fullscreen mode with native Mermaid and LaTeX, HTML transcript export, Git commit attribution, Pi SDK 0.84.0 and hardened worker and ACP safety policy.
 
 ## 0.3.1 - 2026-08-16
-
-### Added
-- Live worker transcript blocks, receipts, sharing, and durable replay for `/run` and `/delegate`.
-- Interoperability discovery and opt-in configuration for compatible external coding agents.
-- Agent-ledger surface for coordinated worker findings and transactional Settings Center.
-- Stream-stall retries and authoritative timezone-aware timing.
-
-### Changed
-- Redesigned TUI around adaptive launch, composer, transcript, and narrow-terminal layouts.
-- Unified user-facing runtime identifiers to `clio-coder`.
-
-### Fixed
-- Restored prompt-template invocation in TUI and implemented ACP `--cwd` and `--permission-timeout`.
-- Prevented unsafe llama.cpp model parameter overrides.
-- Fixed cancelled-turn replay accounting and credentials corruption safeguards.
-
-### Security
-- Scoped escalation decisions without widening separate requests.
-- Added outward-exposure confirmation prompts and protected foreign-agent file paths.
+Live worker transcript blocks, receipts and replay for `/run` and `/delegate`, interoperability discovery for external coding agents, and a redesigned TUI.
 
 ## 0.3.0 - 2026-08-14
-
-### Added
-- Initial npm-published `clio-coder` command and package namespace.
-- Agent ledgers, intentional compete stances, durable capacity leases, and deterministic execution plans.
-- Soak and invariant evaluation suites with receipt-derived accounting.
-
-### Changed
-- Streamlined `clio-coder --help` to focus on primary human commands (`--help --all` for full list).
-- Unknown slash commands fail closed with helpful correction hints.
-
-### Fixed
-- Preserved active session branches across compaction and replay cycles.
-- Prevented automatic retries following state-mutating tool executions.
-- Fixed JSON transcript duplication and evaluation threshold enforcement.
-
-### Security
-- Replaced shell interpolation with argument-safe process execution when opening URLs.
-- Enforced immutable, receipt-backed dispatch plans and worker write-boundary restrictions.
+First npm-published `clio-coder` command, with agent ledgers, durable capacity leases and receipt-backed dispatch plans.
 
 ## 0.2.9 - 2026-08-05
-
-### Added
-- Deterministic fleet code steps, bounded check/repair loops, shipped SDLC fleets, and a durable trace store with read-only trace commands and viewer.
-- Per-step write-boundary verification, typed worker result contracts, strict worker attestation, and process-safe capacity/routing leases.
-- One compiled worker harness with explicit tool/budget profiles, model-facing dispatch/collect provenance, and transactional editing attempts.
-
-### Changed
-- Added first-class singular dispatch while retaining batch dispatch, and unified synchronous and detached run monitoring.
-- Updated Pi engine dependencies to 0.80.6 and advanced receipt, route, plan, and policy formats to their strict current versions.
-- Broadened model-authored repository exploration while retaining bounded Scout guidance and Fleet Runs visibility.
-
-### Fixed
-- Made successful native and ACP delegation require receipt-sealed final output, and made protected-artifact recovery durable across restart and worktrees.
-- Improved compaction, context provenance, routing, external-agent cancellation, and generated-wiki grounding.
-
-### Security
-- Enforced immutable approved dispatch plans, strict external-agent policy checks, bounded worker protocol frames, and fail-closed handling of older or partial durable formats.
+Deterministic fleet code steps with bounded check and repair loops, shipped SDLC fleets, a durable trace store and typed worker result contracts.
 
 ## 0.2.8 - 2026-07-07
-
-### Added
-- A consolidated seven-plane tool surface, task tracking, richer dispatch monitoring/steering, codewiki v4, exports, and improved interactive command hubs.
-- Multi-model local residency management and native shadow-agent fleet routing.
-
-### Changed
-- Improved local-model prompting, TUI pressure handling, accounting, worker IPC, deadlines, model catalog metadata, and documentation.
-
-### Fixed
-- Corrected approval, symlink, loop-guard, worker-profile, reasoning, session-branch, and timeout edge cases.
-
-### Removed
-- Legacy tools including `glob`, `workspace_context`, `docs_search`, `run_task`, `validate_frontend`, `write_plan`, `write_review`, `create_skill`, and `dispatch_batch`; use the consolidated tool surface.
+A consolidated seven-plane tool surface, task tracking, codewiki v4 and multi-model local residency, with legacy tools such as `glob` and `dispatch_batch` removed.
 
 ## 0.2.7 - 2026-07-02
-
-### Added
-- Reviewed marketplace skills, executable skill evaluations, enforced skill tool surfaces, and registry integrity pins.
-- Credential damage control, usage reports, headless receipts, dispatch evidence bundles, and high-rigor validation support.
-
-### Changed
-- Reduced package size and refreshed release and documentation workflows.
-
-### Fixed
-- Improved dispatch, lifecycle, skill, and loop-guard reliability.
-
-### Security
-- Added zero-access credential storage and secret redaction in evidence bundles.
+Reviewed marketplace skills, credential damage control, usage reports, headless receipts and secret redaction in evidence bundles.
 
 ## 0.2.6 - 2026-06-24
-
-### Added
-- VRAM-aware local-model residency, layered settings, path-scoped rules, operator profiles, hooks, configuration inspection, docs search/viewing, and SciCode benchmark support.
-
-### Fixed
-- Prevented dispatched Ollama work from leaving models resident and overflowing VRAM.
+VRAM-aware local-model residency, layered settings, path-scoped rules, operator profiles, hooks and configuration inspection.
 
 ## 0.2.5 - 2026-06-23
-
-### Added
-- The `alcf` runtime for Argonne ALCF Sophia/Metis targets, including Globus OAuth, discovery, metadata, and gateway documentation.
-
-### Fixed
-- Enforced strict OpenAI-compatible reasoning payloads for ALCF targets.
+The `alcf` runtime for Argonne ALCF Sophia and Metis targets with Globus OAuth.
 
 ## 0.2.4 - 2026-06-23
-
-### Added
-- Fleet management with agent/profile bindings, fault-tolerant dispatch, and a `/fleet` overlay.
-
-### Changed
-- Refreshed Pi, Claude, Anthropic, Biome, TypeBox, Undici, UUID, and TSX dependencies.
-
-### Fixed
-- Isolated dispatch tests and made receipt digests deterministic across hosts.
+Fleet management with agent and profile bindings, fault-tolerant dispatch and a `/fleet` overlay.
 
 ## 0.2.3 - 2026-06-17
-
-### Added
-- Declarative slash commands and full-screen hubs; enforced autonomy and safety notices; additional subscription/delegation runtimes; codewiki indexing, middleware, live steering, and richer receipts.
-
-### Changed
-- Reworked on-disk roots, settings ownership, lifecycle commands, model-target vocabulary, and observability.
-
-### Removed
-- Retired legacy slash commands; their workflows moved to `/skill`, `/targets`, `/help`, `/view`, and related hubs.
+Declarative slash commands and hubs, enforced autonomy notices, codewiki indexing, live steering and richer receipts, with legacy slash commands retired.
 
 ## 0.2.2 - 2026-06-11
-
-### Added
-- Context engine, compaction, bounded tool results, prompt-cache telemetry, ACP support, a curated skills marketplace, and local install/uninstall scripts.
-- A richer `CLIO.md` project rulebook and source-tree awareness.
-
-### Changed
-- Replaced built-in CLI-subprocess runtimes with direct HTTP/native/Pi targets and ACP delegation.
-
-### Fixed
-- Improved prompt-prefix stability, ledger appends, permission overlays, and release verification.
+Context engine with compaction and bounded tool results, ACP support, a curated skills marketplace and local install and uninstall scripts.
 
 ## 0.2.1 - 2026-06-05
-
-### Added
-- Live token-throughput telemetry, prompt-envelope hashes, and `clio run --json` prompt diagnostics.
-
-### Changed
-- Reduced context pressure through narrower tool exposure and bounded output; improved the footer for smaller terminals.
-
-### Fixed
-- Corrected headless run arguments, unknown-agent handling, dashboard layout, and prompt-diagnostic visibility.
+Live token-throughput telemetry, prompt-envelope hashes and `clio run --json` prompt diagnostics.
 
 ## 0.2.0 - 2026-06-03
-
-### Added
-- First community alpha for source-checkout users, with JIT skills, stronger compaction, project-instruction adoption, runtime resolution, diagnostics, durable sessions, and expanded documentation.
-
-### Fixed
-- Hardened path policy, headless runs, prompt-cache boundaries, overlays, session replay, and TUI startup.
+First community alpha for source-checkout users, with JIT skills, stronger compaction, durable sessions and diagnostics.
 
 ## 0.1.9 - 2026-05-17
-
-### Added
-- First-class fleet `dispatch`, frontend artifact validation, typed finish evidence, and local-model capability improvements.
-
-### Fixed
-- Corrected reasoning replay, Harmony parsing, Codex file-tool aliases, lifecycle metadata repair, and model-capability duplication.
+First-class fleet `dispatch`, frontend artifact validation, typed finish evidence and local-model capability improvements.
 
 ## 0.1.8 - 2026-05-11
-
-### Added
-- Extensions, share archives, associated CLI/TUI workflows, a redesigned welcome dashboard, configure validation, and a Claude Code SDK safety bridge.
-
-### Fixed
-- Corrected Gemini CLI token accounting and expanded extension, sharing, configuration, and supervised-SDK coverage.
+Extensions, share archives, a redesigned welcome dashboard and a Claude Code SDK safety bridge.
 
 ## 0.1.7 - 2026-05-11
-
-### Added
-- A shared safety-policy engine, strict project command policies, typed execution tools, and receipt safety summaries.
-
-### Changed
-- Default Bash now denies ordinary execution unless allowed by curated commands or project policy.
-
-### Fixed
-- Hardened dispatch scope, external-runtime permissions, audit rows, and worker safety parity.
+A shared safety-policy engine, strict project command policies and typed execution tools; default Bash denies ordinary execution unless allowed.
 
 ## 0.1.6 - 2026-05-04
-
-### Added
-- `clio --print` / `clio -p` for one non-interactive turn, with stdin/argv composition and stdout safeguards.
-
-### Changed
-- Reserved future JSON/RPC modes behind explicit errors.
+`clio --print` and `clio -p` run one non-interactive turn.
 
 ## 0.1.5 - 2026-05-03
-
-### Added
-- Public alpha for source-install developers and research-software teams: interactive TUI, target-first configuration, coding agents, sessions, project context, receipts, audits, evidence, evaluations, memory, and safety modes.
-- `clio init`, CLIO.md parsing, codewiki indexing, improved cost/model UI, and documented alpha operating limits.
+Public alpha for source-install developers and research-software teams, with `clio init`, `CLIO.md` parsing and codewiki indexing.
 
 ## 0.1.4 - 2026-04-30
-
-### Added
-- Evolution tooling for inventories, change manifests, evidence, evaluations, memory, middleware, protected artifacts, finish checks, workspace orientation, specialist recipes, and scientific validation.
-
-### Changed
-- Unified llama.cpp handling and improved TUI, compaction, context accounting, and protected-artifact behavior.
+Evolution tooling for inventories, evidence, evaluations, memory, middleware and protected artifacts.
 
 ## 0.1.3 - 2026-04-27
-
-### Added
-- Live tool output, Bash echo, thinking expansion, and a Git-branch footer slot.
-
-### Changed
-- Made `CLIO.md` the canonical project instruction file and improved LM Studio/Ollama detection.
-
-### Fixed
-- Corrected Debian/Ubuntu slash autocomplete, doctor/targets JSON envelopes, and partial tool-output rendering.
+Live tool output, Bash echo, thinking expansion and a Git-branch footer slot, with `CLIO.md` as the canonical project file.
 
 ## 0.1.2 - 2026-04-25
-
-### Added
-- Visible retries for transient provider and stream failures.
-
-### Changed
-- Improved interactive tool, Bash, dashboard, hotkey, resume, prompt, receipt, compaction, audit, and abort behavior.
-
-### Fixed
-- Corrected retry duplication, cancellation races, oversized Bash output, active-run session operations, provider hot-swaps, and local OpenAI-compatible reasoning/tool schemas.
+Visible retries for transient provider and stream failures, and many interactive fixes.
 
 ## 0.1.1 - 2026-04-24
-
-### Added
-- Deterministic loading of project context files from the working directory upward.
-
-### Fixed
-- Corrected rich session replay, subprocess dispatch, out-of-tree SDK rehydration, receipt verification, dispatch heartbeats, and boundary-check documentation.
+Deterministic loading of project context files from the working directory upward.
 
 ## 0.1.0-exp - 2026-04-24
-
-### Added
-- Initial experimental public release with interactive TUI, lifecycle CLI, target-first configuration, runtime support, built-in agents, dispatch workers, receipts, audit logs, safety modes, and XDG-aware state.
-
-### Security
-- Windows support was best effort; remote fan-out and MCP surfaces were scaffolded but not admitted by dispatch.
+Initial experimental public release with the interactive TUI, lifecycle CLI, target-first configuration, dispatch workers, receipts and safety modes. Windows support was best effort.
