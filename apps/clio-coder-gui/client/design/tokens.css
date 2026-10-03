@@ -25,6 +25,11 @@
 	/* The edge of a raised surface. A control keeps --line-strong for its 3:1 boundary; a floating panel
 	   is bounded by its shadow and ground as well, so its line sits between the two rules. */
 	--line-float: color-mix(in srgb, var(--line-strong) 40%, var(--line));
+	--accent-line: color-mix(in srgb, var(--accent) 38%, var(--line));
+	--accent-glow: color-mix(in srgb, var(--accent) 12%, transparent);
+	--stage-edge: var(--accent-line);
+	--shadow-stage: var(--shadow-raised);
+	--shadow-composer: var(--shadow-raised);
 
 	/* ---- status ramp: neutral / running / success / warn / fail /
 	   unverified. Each tone is fg (text), tint (surface), line (boundary). */
@@ -76,14 +81,14 @@
 	--space-16: 64px;
 
 	/* ---- type scale ----------------------------------------------------- */
-	--text-instrument: 10px;
-	--text-exact: 12px;
-	--text-meta: 13px;
-	--text-body: 15px;
-	--text-reading: 16px;
-	--text-h3: 18px;
-	--text-h2: 23px;
-	--text-h1: 30px;
+	--text-instrument: 14px;
+	--text-exact: 16px;
+	--text-meta: 18px;
+	--text-body: 20px;
+	--text-reading: 24px;
+	--text-h3: 26px;
+	--text-h2: 32px;
+	--text-h1: 40px;
 	--text-display: clamp(32px, 3.4vw, 52px);
 	--leading-tight: 1.25;
 	--leading-body: 1.55;
@@ -113,9 +118,9 @@
 
 	/* ---- icons: one stroke weight at every drawn size, and the sizes they are drawn at ---------- */
 	--icon-stroke: 1.4px;
-	--icon-sm: 14px;
-	--icon-md: 16px;
-	--icon-lg: 18px;
+	--icon-sm: 16px;
+	--icon-md: 20px;
+	--icon-lg: 24px;
 
 	/* ---- shell metrics --------------------------------------------------- */
 	--masthead-height: 58px;
@@ -123,7 +128,7 @@
 	--rail-collapsed-width: 68px;
 	--reading-measure: 72ch;
 	/* About 90 characters of reading text: long enough for tables and code, short enough to read. */
-	--conversation-max: 820px;
+	--conversation-max: 1120px;
 
 	/* ---- code surface: a contained well that follows the theme. Light is a sunken warm paper, the
 	   page's own --well edged by --line, with ink and hues drawn from the brand families. The dark
@@ -162,24 +167,39 @@
 }
 
 :root[data-theme="dark"] {
-	/* The app's dark theme seats the work on pure black and the two sidebars on the graphite, the
-	   reverse of the site's page and sheet. The two colours are the brand's own; only which one is
-	   the chrome and which is the stage is swapped here, after brand.css, so every sheet follows. */
-	--paper: #0d0d0c;
+	/* Near-black chrome has only a trace of warmth; the conversation remains OLED black. */
+	--paper: #0b0a09;
 	--surface: #000000;
+	--surface-sunken: #10100f;
+	--overlay: #141311;
+	--ink: #f2f3f2;
+	--ink-strong: #fafbf9;
+	--ink-muted: #b7b8b6;
+	--ink-subtle: #979b98;
+	--line: #242622;
+	--line-strong: #676c69;
+	--accent: #19e1eb;
+	--accent-strong: #19e1eb;
+	--accent-soft: #073035;
+	--focus: #19e1eb;
+	--primary-fill: #19e1eb;
+	--selection: #07373a;
+	--secondary: #ffad63;
+	--stage-edge: #233032;
+	--accent-line: color-mix(in srgb, var(--accent) 24%, var(--line));
 	/* The dark well is a contained instrument. On a black stage the warm code paper read as a brown
 	   tint over the whole conversation, so a code or diagram well is the stage's own black, held by
 	   its line. Light keeps its sunken paper (see :root). */
 	--code-paper: #000000;
-	--code-surface: #1c1915;
-	--code-ink: #f3ecdf;
-	--code-ink-muted: #b0a594;
-	--code-line: #36302a;
-	--code-gutter: #6f6558;
-	--syntax-comment: #9a8f80;
-	--syntax-punctuation: #cfc5b6;
+	--code-surface: #151615;
+	--code-ink: #eef0ed;
+	--code-ink-muted: #b7b8b6;
+	--code-line: #2b2e2b;
+	--code-gutter: #979b98;
+	--syntax-comment: #9a9f9b;
+	--syntax-punctuation: #c6ccc7;
 	--syntax-keyword: #5fd4db;
-	--syntax-string: #f2c07e;
+	--syntax-string: #edba83;
 	--syntax-number: #d8c2ed;
 	--syntax-function: #9cc9ee;
 	--syntax-property: #8fd1a7;
@@ -187,10 +207,10 @@
 	--syntax-inserted: #8fd1a7;
 	--scrim: rgb(0 0 0 / 72%);
 	--glint: var(--ink);
-	--well: #151412;
-	--raised: #171614;
+	--well: #10100f;
+	--raised: #141311;
 
-	--status-neutral-fg: #a89e8f;
+	--status-neutral-fg: #b7b8b6;
 	--status-neutral-tint: #151412;
 	--status-neutral-line: #7a7064;
 
@@ -198,7 +218,7 @@
 	--status-running-tint: #052629;
 	--status-running-line: #2a9ea4;
 
-	--status-success-fg: #58b380;
+	--status-success-fg: #7bdfa8;
 	--status-success-tint: #0a2517;
 	--status-success-line: #3a8f5f;
 
@@ -214,14 +234,16 @@
 	--status-unverified-tint: #151412;
 	--status-unverified-line: #7a7064;
 
-	--reason-fg: #c6a9dd;
-	--reason-tint: #1c1424;
-	--reason-line: #8566a0;
+	--reason-fg: #c3cbc8;
+	--reason-tint: #121615;
+	--reason-line: #587d76;
 
-	--action-fg: #f09a3e;
-	--action-tint: #2a1705;
-	--action-line: #a8631c;
+	--action-fg: #ffad63;
+	--action-tint: #1c160e;
+	--action-line: #c9823c;
 
+	--shadow-stage: inset 0 1px 0 rgb(255 255 255 / 4%), 0 12px 32px rgb(0 0 0 / 60%);
+	--shadow-composer: inset 0 1px 0 rgb(255 255 255 / 3%), 0 2px 4px rgb(0 0 0 / 45%), 0 12px 28px rgb(0 0 0 / 35%);
 	--shadow-raised: 0 1px 2px rgb(0 0 0 / 28%);
 	--shadow-panel: 0 16px 40px rgb(0 0 0 / 38%);
 	--shadow-float: 0 28px 72px rgb(0 0 0 / 48%);
@@ -234,18 +256,35 @@
    :not([data-theme="light"]) guard keeps an explicit light choice winning. */
 @media (prefers-color-scheme: dark) {
 	:root:not([data-theme="light"]) {
-		--paper: #0d0d0c;
+		--paper: #0b0a09;
 		--surface: #000000;
+		--surface-sunken: #10100f;
+		--overlay: #141311;
+		--ink: #f2f3f2;
+		--ink-strong: #fafbf9;
+		--ink-muted: #b7b8b6;
+		--ink-subtle: #979b98;
+		--line: #242622;
+		--line-strong: #676c69;
+		--accent: #19e1eb;
+		--accent-strong: #19e1eb;
+		--accent-soft: #073035;
+		--focus: #19e1eb;
+		--primary-fill: #19e1eb;
+		--selection: #07373a;
+		--secondary: #ffad63;
+		--stage-edge: #233032;
+		--accent-line: color-mix(in srgb, var(--accent) 24%, var(--line));
 		--code-paper: #000000;
-		--code-surface: #1c1915;
-		--code-ink: #f3ecdf;
-		--code-ink-muted: #b0a594;
-		--code-line: #36302a;
-		--code-gutter: #6f6558;
-		--syntax-comment: #9a8f80;
-		--syntax-punctuation: #cfc5b6;
+		--code-surface: #151615;
+		--code-ink: #eef0ed;
+		--code-ink-muted: #b7b8b6;
+		--code-line: #2b2e2b;
+		--code-gutter: #979b98;
+		--syntax-comment: #9a9f9b;
+		--syntax-punctuation: #c6ccc7;
 		--syntax-keyword: #5fd4db;
-		--syntax-string: #f2c07e;
+		--syntax-string: #edba83;
 		--syntax-number: #d8c2ed;
 		--syntax-function: #9cc9ee;
 		--syntax-property: #8fd1a7;
@@ -253,10 +292,10 @@
 		--syntax-inserted: #8fd1a7;
 		--scrim: rgb(0 0 0 / 72%);
 		--glint: var(--ink);
-		--well: #151412;
-		--raised: #171614;
+		--well: #10100f;
+		--raised: #141311;
 
-		--status-neutral-fg: #a89e8f;
+		--status-neutral-fg: #b7b8b6;
 		--status-neutral-tint: #151412;
 		--status-neutral-line: #7a7064;
 
@@ -264,7 +303,7 @@
 		--status-running-tint: #052629;
 		--status-running-line: #2a9ea4;
 
-		--status-success-fg: #58b380;
+		--status-success-fg: #7bdfa8;
 		--status-success-tint: #0a2517;
 		--status-success-line: #3a8f5f;
 
@@ -280,19 +319,34 @@
 		--status-unverified-tint: #151412;
 		--status-unverified-line: #7a7064;
 
-		--reason-fg: #c6a9dd;
-		--reason-tint: #1c1424;
-		--reason-line: #8566a0;
+		--reason-fg: #c3cbc8;
+		--reason-tint: #121615;
+		--reason-line: #587d76;
 
-		--action-fg: #f09a3e;
-		--action-tint: #2a1705;
-		--action-line: #a8631c;
+		--action-fg: #ffad63;
+		--action-tint: #1c160e;
+		--action-line: #c9823c;
 
+		--shadow-stage: inset 0 1px 0 rgb(255 255 255 / 4%), 0 12px 32px rgb(0 0 0 / 60%);
+		--shadow-composer: inset 0 1px 0 rgb(255 255 255 / 3%), 0 2px 4px rgb(0 0 0 / 45%), 0 12px 28px rgb(0 0 0 / 35%);
 		--shadow-raised: 0 1px 2px rgb(0 0 0 / 28%);
 		--shadow-panel: 0 16px 40px rgb(0 0 0 / 38%);
 		--shadow-float: 0 28px 72px rgb(0 0 0 / 48%);
 
 		color-scheme: dark;
+	}
+}
+
+@media (max-width: 760px) {
+	:root {
+		--text-instrument: 13px;
+		--text-exact: 14px;
+		--text-meta: 16px;
+		--text-body: 18px;
+		--text-reading: 20px;
+		--text-h3: 24px;
+		--text-h2: 28px;
+		--text-h1: 34px;
 	}
 }
 

@@ -8,6 +8,7 @@ import { Icon } from "../design/icons.js";
 import { KEYBINDINGS, matchesKeybinding } from "../interaction/keybindings.js";
 import { useShortcutLayer } from "../interaction/use-shortcut.js";
 import { countRender } from "../render/render-probe.js";
+import { ASIDE_DOCK_QUERY } from "../shell/aside-state.js";
 import { useShell } from "../shell/shell-context.js";
 import { ArtifactsPanel } from "./ArtifactsPanel.js";
 import { BranchPanel } from "./BranchPanel.js";
@@ -26,7 +27,7 @@ import { WorkerGraph } from "./WorkerGraph.js";
 import "./pane.css";
 
 /**
- * The pane beside the conversation. At 1100px and wider it docks and can be resized; narrower, the
+ * The pane beside the conversation. At 1440px and wider it docks and can be resized; narrower, the
  * same content opens as a modal slide-over so the conversation keeps its reading width.
  */
 export const SessionPane = memo(function SessionPane({
@@ -60,13 +61,13 @@ export const SessionPane = memo(function SessionPane({
 	const aside = useRef<HTMLElement>(null);
 	const slot = useShell()?.asideSlot ?? null;
 	const dialog = useRef<HTMLDialogElement>(null);
-	const [wide, setWide] = useState(() => typeof window === "undefined" || matchMedia("(min-width: 1100px)").matches);
+	const [wide, setWide] = useState(() => typeof window === "undefined" || matchMedia(ASIDE_DOCK_QUERY).matches);
 	const [visited, setVisited] = useState<ReadonlySet<PaneView>>(() => new Set([view]));
 	useEffect(() => {
 		if (open) setVisited((previous) => (previous.has(view) ? previous : new Set([...previous, view])));
 	}, [open, view]);
 	useEffect(() => {
-		const query = matchMedia("(min-width: 1100px)");
+		const query = matchMedia(ASIDE_DOCK_QUERY);
 		const change = () => setWide(query.matches);
 		query.addEventListener("change", change);
 		change();

@@ -44,4 +44,4 @@ export function useAsideExpanded(): boolean {
 }
 
 /** The width at which the right sidebar docks beside the work; narrower, it opens over it. */
-export const ASIDE_DOCK_QUERY = "(min-width: 1100px)";
+export const ASIDE_DOCK_QUERY = "(min-width: 1440px)";

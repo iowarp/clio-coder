@@ -18,7 +18,7 @@ export const LEFT_SIDEBAR: SplitterSpec = {
 	cssVar: "--wb-side",
 	min: 216,
 	max: 420,
-	initial: 268,
+	initial: 320,
 	maxShare: 0.34,
 };
 
@@ -27,7 +27,7 @@ export const RIGHT_SIDEBAR: SplitterSpec = {
 	cssVar: "--wb-aside",
 	min: 280,
 	max: 560,
-	initial: 340,
+	initial: 400,
 	maxShare: 0.4,
 };
 

@@ -172,7 +172,7 @@ h1 em {
 }
 /* Matches the site's eyebrow: small mono capitals at regular weight. */
 .eyebrow {
-	font-size: 11px;
+	font-size: var(--text-instrument);
 	letter-spacing: 0.1em;
 	text-transform: uppercase;
 	color: var(--ink-muted);
@@ -181,7 +181,7 @@ h1 em {
 }
 /* .trace-panel p outranks .eyebrow by one element, which set panel eyebrows at body size. */
 .trace-panel .eyebrow {
-	font-size: 11px;
+	font-size: var(--text-instrument);
 	line-height: 1.6;
 }
 .intro {
@@ -265,7 +265,7 @@ nav {
 	border-radius: var(--radius-sm);
 	background: var(--ink);
 	color: var(--paper);
-	font-size: 12px;
+	font-size: var(--text-exact);
 	font-weight: 500;
 	white-space: nowrap;
 	pointer-events: none;
@@ -276,7 +276,7 @@ nav a {
 	gap: var(--space-3);
 	text-decoration: none;
 	padding: 11px 14px;
-	font-size: 14px;
+	font-size: var(--text-meta);
 	border-radius: var(--radius-sm);
 	color: var(--ink-muted);
 	transition:
@@ -427,7 +427,7 @@ nav a:hover {
 	box-shadow: var(--shadow-float);
 }
 .app-dialog > p {
-	font-size: 14px;
+	font-size: var(--text-meta);
 	line-height: 1.65;
 }
 .app-version {
@@ -464,7 +464,7 @@ nav a:hover {
 	gap: var(--space-3);
 }
 .problem-toast p {
-	font-size: 14px;
+	font-size: var(--text-meta);
 	line-height: 1.5;
 }
 .problem-toast small {
@@ -710,7 +710,7 @@ nav a:hover {
 }
 .pwa-controls {
 	max-width: 38rem;
-	font: 14px / 1.6 var(--font-ui);
+	font: var(--text-meta) / 1.6 var(--font-ui);
 	letter-spacing: normal;
 	color: var(--ink);
 }
@@ -769,7 +769,7 @@ nav a:hover {
 	min-width: 0;
 }
 .trace-run-card h2 {
-	font-size: 17px;
+	font-size: var(--text-body);
 	font-weight: 600;
 	letter-spacing: -0.2px;
 	margin-top: var(--space-2);
@@ -847,7 +847,7 @@ nav a:hover {
 	padding-bottom: var(--space-5);
 }
 .trace-panel h2 {
-	font-size: 18px;
+	font-size: var(--text-h3);
 	margin-bottom: var(--space-3);
 }
 /* A panel's title that leads somewhere is still a title; it underlines only when pointed at. */
@@ -863,7 +863,7 @@ nav a:hover {
 	font-size: var(--text-reading);
 }
 .trace-panel p {
-	font-size: 14px;
+	font-size: var(--text-meta);
 	line-height: 1.65;
 }
 .trace-panel .page-heading {
@@ -1188,12 +1188,12 @@ nav a:hover {
 	font-size: var(--text-h2);
 }
 .permission-card p {
-	font-size: 14px;
+	font-size: var(--text-meta);
 }
 .session-settings {
 	display: grid;
 	gap: var(--space-4);
-	font-size: 14px;
+	font-size: var(--text-meta);
 	color: var(--ink);
 }
 .session-settings__route,
@@ -1336,7 +1336,7 @@ nav a:hover {
 }
 .reconnect__problem {
 	color: var(--status-fail-fg);
-	font-size: 14px;
+	font-size: var(--text-meta);
 }
 
 /* Dense inspection pages share a compact title; expressive type remains on the overview. */
@@ -1346,7 +1346,7 @@ nav a:hover {
 main :is(.panel-heading, .page-heading) h1,
 .wb-main[data-mode="settings"] h1 {
 	font-family: var(--font-ui);
-	font-size: 28px;
+	font-size: var(--text-h1);
 	font-weight: 650;
 	letter-spacing: -0.6px;
 	line-height: 1.2;
@@ -1354,7 +1354,7 @@ main :is(.panel-heading, .page-heading) h1,
 }
 /* Low specificity on purpose: a card or panel that sizes its own heading keeps that size. */
 :where(.wb-main[data-mode="settings"]) h2 {
-	font-size: 20px;
+	font-size: var(--text-h3);
 	font-weight: 650;
 	letter-spacing: -0.3px;
 	line-height: 1.3;

@@ -6,7 +6,7 @@
 	min-width: 0;
 	min-height: 0;
 	border-left: 1px solid var(--line);
-	background: var(--surface);
+	background: var(--paper);
 }
 .pane[hidden] {
 	display: none;
@@ -16,7 +16,7 @@
 	display: contents;
 }
 .pane__dialog {
-	width: min(440px, 100vw);
+	width: min(520px, 100vw);
 	height: 100dvh;
 	max-width: 100vw;
 	max-height: 100dvh;
@@ -24,14 +24,14 @@
 	padding: 0;
 	border: 0;
 	border-left: 1px solid var(--line-strong);
-	background: var(--surface);
+	background: var(--raised);
 	color: var(--ink);
 	box-shadow: var(--shadow-float);
 }
 .pane__dialog::backdrop {
 	background: var(--scrim);
 }
-@media (min-width: 1100px) {
+@media (min-width: 1440px) {
 	.pane__dialog {
 		position: static;
 		width: 100%;
@@ -41,6 +41,7 @@
 		margin: 0;
 		border: 0;
 		box-shadow: none;
+		background: var(--paper);
 	}
 }
 .pane__inner {
@@ -63,14 +64,15 @@
 	align-items: center;
 	gap: var(--space-1);
 	flex: none;
-	min-height: 48px;
+	min-height: 60px;
 	padding: 0 var(--space-2) 0 var(--space-3);
 }
 .pane__title {
 	flex: 1;
 	min-width: 0;
 	margin: 0;
-	font-size: 13px;
+	font-size: var(--text-body);
+	color: var(--accent);
 	font-weight: 600;
 	letter-spacing: -0.1px;
 	overflow: hidden;
@@ -110,7 +112,7 @@
 .pane-card {
 	display: grid;
 	gap: 6px;
-	margin-top: var(--space-5);
+	margin-top: var(--space-8);
 	min-width: 0;
 }
 .pane-card:first-child {
@@ -126,10 +128,13 @@
 	margin-inline: calc(var(--pane-bleed) * -1);
 	padding-inline: var(--pane-bleed);
 	border-radius: 8px;
-	transition: background var(--motion-fast) var(--ease-standard);
+	transition:
+		background var(--motion-fast) var(--ease-standard),
+		box-shadow var(--motion-fast) var(--ease-standard);
 }
 .pane-card > header:has(.pane-card__open:hover) {
 	background: var(--wb-hover);
+	box-shadow: inset 2px 0 0 var(--accent);
 }
 .pane-card > header:has(.pane-card__open:active) {
 	background: var(--wb-active);
@@ -137,10 +142,10 @@
 /* Section names read like the rail's own labels, so both sidebars speak one language. */
 .pane-card h2 {
 	margin: 0;
-	font-size: 12px;
+	font-size: var(--text-meta);
 	font-weight: 500;
 	letter-spacing: 0.01em;
-	color: var(--ink-muted);
+	color: var(--accent);
 }
 .pane-card__open {
 	display: inline-flex;
@@ -179,9 +184,9 @@
 	outline-offset: -2px;
 }
 .pane-card__open .icon {
-	width: 12px;
-	height: 12px;
-	opacity: 0.6;
+	width: var(--icon-sm);
+	height: var(--icon-sm);
+	opacity: 1;
 	transition:
 		opacity var(--motion-fast) var(--ease-standard),
 		transform var(--motion-fast) var(--ease-standard);
@@ -194,7 +199,7 @@
 	display: inline-flex;
 	align-items: center;
 	gap: 6px;
-	font-size: 12px;
+	font-size: var(--text-exact);
 	color: var(--ink-muted);
 	font-variant-numeric: tabular-nums;
 }
@@ -207,7 +212,7 @@
 	padding: 0;
 	border: 0;
 	background: transparent;
-	font-size: 12px;
+	font-size: var(--text-exact);
 	font-weight: 500;
 }
 .pane-card__state[data-state="Working"] {
@@ -233,7 +238,7 @@
 }
 .pane-card__facts {
 	margin: 0;
-	font-size: 12px;
+	font-size: var(--text-exact);
 	color: var(--ink-muted);
 }
 .pane-meter {
@@ -244,7 +249,7 @@
    accent so the largest part reads strongest in either theme. */
 .pane-stack {
 	display: flex;
-	height: 6px;
+	height: 8px;
 	border-radius: var(--radius-pill);
 	background: var(--wb-active);
 	overflow: hidden;
@@ -283,7 +288,7 @@
 	margin: 0;
 	padding: 0;
 	list-style: none;
-	font-size: 11.5px;
+	font-size: var(--text-exact);
 	color: var(--ink-muted);
 }
 .pane-legend li {
@@ -299,7 +304,7 @@
 	background: var(--part);
 }
 .pane-legend span {
-	font: 11px / 1 var(--font-mono);
+	font: var(--text-exact) / 1 var(--font-mono);
 	font-variant-numeric: tabular-nums;
 	color: var(--ink);
 }
@@ -342,7 +347,7 @@
 	border-radius: inherit;
 }
 .pane-agents strong {
-	font: 500 12px / 1.4 var(--font-mono);
+	font: 500 var(--text-exact) / 1.4 var(--font-mono);
 }
 .pane-agents span {
 	overflow: hidden;
@@ -352,7 +357,7 @@
 }
 .pane-hint {
 	margin: var(--space-6) 0 0;
-	font-size: 12px;
+	font-size: var(--text-exact);
 	line-height: 1.6;
 	color: var(--ink-muted);
 }
@@ -361,7 +366,7 @@
 	border: 1px solid var(--line-float);
 	border-radius: 4px;
 	background: var(--wb-faint);
-	font: 11px / 1.5 var(--font-mono);
+	font: var(--text-exact) / 1.5 var(--font-mono);
 	color: var(--ink);
 }
 .pane-evidence {
@@ -379,12 +384,12 @@
 	font-size: var(--text-meta);
 }
 .pane-evidence strong {
-	font: 500 12px / 1.4 var(--font-mono);
+	font: 500 var(--text-exact) / 1.4 var(--font-mono);
 }
 .pane-evidence__links {
 	display: inline-flex;
 	gap: var(--space-2);
-	font-size: 12px;
+	font-size: var(--text-exact);
 }
 .pane-evidence__links a {
 	color: var(--accent);
@@ -415,7 +420,7 @@
 	border-radius: 6px;
 	background: transparent;
 	color: var(--accent);
-	font-size: 12px;
+	font-size: var(--text-exact);
 	font-weight: 500;
 	text-decoration: none;
 }
@@ -448,7 +453,7 @@
 }
 .pane-steps small {
 	color: var(--ink-muted);
-	font-size: 12px;
+	font-size: var(--text-exact);
 }
 /* A finished step steps back by tone alone; a struck line through every done row made the plan read
    as a list of deletions. */
@@ -496,7 +501,7 @@
 }
 
 .diffstat {
-	font: 12px / 1 var(--font-mono);
+	font: var(--text-exact) / 1 var(--font-mono);
 	white-space: nowrap;
 	font-variant-numeric: tabular-nums;
 }
@@ -579,7 +584,7 @@
 	overflow: hidden;
 	text-overflow: ellipsis;
 	white-space: nowrap;
-	font-size: 11.5px;
+	font-size: var(--text-exact);
 	color: var(--ink-muted);
 	direction: rtl;
 	text-align: left;
@@ -589,7 +594,7 @@
 	padding: 1px 7px;
 	border: 1px solid var(--status-warn-line);
 	border-radius: var(--radius-pill);
-	font-size: 11px;
+	font-size: var(--text-exact);
 	color: var(--status-warn-fg);
 }
 .change-file__diffs {
@@ -717,7 +722,7 @@
 .turn-changes > header button {
 	min-height: 0;
 	padding: 4px 10px;
-	font-size: 12.5px;
+	font-size: var(--text-exact);
 	color: var(--ink-muted);
 }
 .turn-changes ul {
@@ -749,11 +754,11 @@
 }
 .turn-changes__name small {
 	color: var(--ink-muted);
-	font-size: 11.5px;
+	font-size: var(--text-exact);
 }
 .turn-changes .turn-changes__more {
 	color: var(--ink-muted);
-	font-size: 12px;
+	font-size: var(--text-exact);
 }
 
 /* ---- docked in the shell's chrome --------------------------------------------------- */
@@ -766,12 +771,12 @@
 	padding: var(--space-2) var(--space-2) 0 var(--space-1);
 }
 .wb-aside .pane__head {
-	min-height: 40px;
+	min-height: 52px;
 	margin-bottom: var(--space-2);
 	padding: 0 var(--space-1) 0 var(--space-2);
 }
 .wb-aside .pane__title {
-	font-size: 15px;
+	font-size: var(--text-body);
 	font-weight: 650;
 	letter-spacing: -0.2px;
 }
@@ -788,11 +793,11 @@
 	white-space: nowrap;
 	direction: rtl;
 	text-align: left;
-	font: 11.5px / 1.4 var(--font-mono);
+	font: var(--text-exact) / 1.4 var(--font-mono);
 	color: var(--ink-muted);
 }
 .pane-mono {
-	font: 12px / 1.4 var(--font-mono);
+	font: var(--text-exact) / 1.4 var(--font-mono);
 }
 .pane-agents a {
 	min-width: 0;

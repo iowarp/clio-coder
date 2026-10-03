@@ -83,7 +83,7 @@
 	overflow-wrap: anywhere;
 }
 .chat-turn.is-replay {
-	opacity: 0.92;
+	opacity: 1;
 }
 
 /* The operator's words on one quiet ground, right-aligned. Agent prose and tool activity remain on the
@@ -146,6 +146,7 @@
 	padding: var(--space-3) var(--space-4);
 	border-radius: var(--radius-lg);
 	background: var(--well);
+	box-shadow: inset 2px 0 0 var(--accent);
 	color: var(--ink-strong);
 	white-space: pre-wrap;
 	overflow-wrap: anywhere;
@@ -195,20 +196,20 @@
 	font-family: var(--font-ui);
 	font-weight: 650;
 	letter-spacing: -0.01em;
-	color: var(--ink-strong);
+	color: var(--accent-strong);
 	margin: 1.4em 0 0.4em;
 }
 .chat-response .markdown > .md-heading:first-child {
 	margin-top: 0;
 }
 .chat-response .markdown .md-heading--1 {
-	font-size: 22px;
+	font-size: var(--text-h2);
 }
 .chat-response .markdown .md-heading--2 {
-	font-size: 19px;
+	font-size: var(--text-h3);
 }
 .chat-response .markdown .md-heading--3 {
-	font-size: 17px;
+	font-size: var(--text-reading);
 }
 .chat-response .markdown :is(.md-heading--4, .md-heading--5, .md-heading--6) {
 	font-size: var(--text-reading);
@@ -227,7 +228,7 @@
 	font-weight: 600;
 }
 
-/* Reported reasoning is provenance, not prose, and stays behind a disclosure: one quiet violet line
+/* Reported reasoning stays behind a disclosure: one quiet line
    with its first sentence, the full text on the reasoning tint once opened. */
 .reasoning {
 	min-width: 0;

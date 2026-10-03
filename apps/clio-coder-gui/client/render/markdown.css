@@ -2,8 +2,8 @@
 .markdown {
 	min-width: 0;
 	color: var(--ink);
-	font-size: 16px;
-	line-height: 1.7;
+	font-size: var(--text-reading);
+	line-height: var(--leading-reading);
 	overflow-wrap: anywhere;
 	white-space: normal;
 }
@@ -23,18 +23,18 @@
 	margin: 1.2em 0 0.45em;
 }
 .markdown .md-heading--1 {
-	font-size: 30px;
+	font-size: var(--text-h1);
 }
 .markdown .md-heading--2 {
-	font-size: 25px;
+	font-size: var(--text-h2);
 }
 .markdown .md-heading--3 {
-	font-size: 21px;
+	font-size: var(--text-h3);
 }
 .markdown .md-heading--4,
 .markdown .md-heading--5,
 .markdown .md-heading--6 {
-	font-size: 18px;
+	font-size: var(--text-h3);
 }
 .markdown .md-list {
 	margin: 0.6em 0;
@@ -66,6 +66,11 @@
 .markdown .md-link {
 	color: var(--accent);
 	text-underline-offset: 3px;
+	text-decoration-color: var(--accent-line);
+	transition: text-decoration-color var(--motion-fast) var(--ease-standard);
+}
+.markdown .md-link:hover {
+	text-decoration-color: var(--accent);
 }
 .markdown .md-link--blocked {
 	border-bottom: 1px dotted var(--muted);
@@ -74,7 +79,7 @@
 .markdown .md-image,
 .markdown .md-html {
 	color: var(--muted);
-	font: 12px / 1.7 var(--font-mono);
+	font: var(--text-exact) / 1.7 var(--font-mono);
 }
 .markdown p.md-html {
 	white-space: pre-wrap;
@@ -84,8 +89,8 @@
 	padding: 2px 5px;
 	border-radius: 3px;
 	background: var(--inset);
-	color: var(--ink);
-	font: 0.84em var(--font-mono);
+	color: var(--code-ink);
+	font: 0.9em var(--font-mono);
 }
 .markdown pre code {
 	display: inline;
@@ -104,7 +109,7 @@
 .markdown table {
 	min-width: 100%;
 	border-collapse: collapse;
-	font-size: 14px;
+	font-size: var(--text-meta);
 }
 .markdown td,
 .markdown th {
@@ -145,6 +150,7 @@
 }
 .code-block__lang {
 	margin-right: auto;
+	color: var(--syntax-keyword);
 }
 .code-block__lines {
 	margin-right: var(--space-2);
@@ -178,7 +184,7 @@
 	overflow: auto;
 	color: var(--code-ink);
 	white-space: pre;
-	font: 12px / 1.7 var(--font-mono);
+	font: var(--text-exact) / 1.7 var(--font-mono);
 	tab-size: 4;
 }
 .code-block__cursor {
@@ -255,7 +261,7 @@
 }
 .diagram__status {
 	padding: 0 var(--space-4) var(--space-3);
-	font: 12px / 1.6 var(--font-mono);
+	font: var(--text-exact) / 1.6 var(--font-mono);
 	color: var(--code-ink-muted);
 	white-space: pre-wrap;
 }

@@ -2,20 +2,20 @@
    Colour comes from client/design/tokens.css only. Overlays are derived with color-mix so the
    rail follows the theme (warm paper in light, black in dark) without a raw value. */
 
-/* Overlay tints derived from the ink, so a hover reads on paper, card and code alike. They live on the
+/* Accent tints keep interaction consistent across paper, card and code. They live on the
    root because dialogs are portaled to the body, outside .wb. */
 :root {
-	--wb-hover: color-mix(in srgb, var(--ink) 6%, transparent);
-	--wb-active: color-mix(in srgb, var(--ink) 11%, transparent);
+	--wb-hover: color-mix(in srgb, var(--accent) 8%, transparent);
+	--wb-active: color-mix(in srgb, var(--accent) 14%, transparent);
 	--wb-faint: color-mix(in srgb, var(--ink) 4%, transparent);
 }
 
 .wb {
-	--wb-side: 268px;
-	--wb-aside: 340px;
+	--wb-side: 320px;
+	--wb-aside: 400px;
 	--wb-gap: 8px;
 	--wb-radius: 14px;
-	--wb-row: 32px;
+	--wb-row: 40px;
 	display: grid;
 	grid-template-columns: var(--wb-side) minmax(0, 1fr) 0;
 	height: 100dvh;
@@ -84,7 +84,7 @@
 	align-items: center;
 	justify-content: space-between;
 	gap: var(--space-2);
-	min-height: 40px;
+	min-height: 52px;
 	padding: 0 var(--space-1) 0 var(--space-2);
 	margin-bottom: var(--space-2);
 }
@@ -97,7 +97,7 @@
 	color: var(--ink);
 	text-decoration: none;
 	font-weight: 650;
-	font-size: 15px;
+	font-size: var(--text-body);
 	letter-spacing: -0.2px;
 }
 .wb-back {
@@ -134,8 +134,8 @@
 	display: inline-grid;
 	place-items: center;
 	flex: none;
-	width: 30px;
-	height: 30px;
+	width: 36px;
+	height: 36px;
 	padding: 0;
 	color: var(--ink-muted);
 }
@@ -181,6 +181,12 @@
 .wb-action:disabled {
 	opacity: 0.45;
 }
+.wb-icon:hover:not(:disabled) .icon,
+.wb-action:hover:not(:disabled) .icon,
+.wb-icon:focus-visible .icon,
+.wb-action:focus-visible .icon {
+	color: var(--accent);
+}
 
 .wb-side__actions {
 	display: grid;
@@ -191,7 +197,7 @@
 	display: flex;
 	align-items: center;
 	gap: 10px;
-	height: 34px;
+	height: 42px;
 	padding: 0 10px;
 	width: 100%;
 	text-align: left;
@@ -213,12 +219,13 @@
 }
 .wb-action kbd {
 	font: inherit;
-	font-size: 11.5px;
+	font-size: var(--text-exact);
 	color: var(--ink-muted);
 	letter-spacing: 0.02em;
 }
 .wb-action[data-active="true"] {
-	background: var(--wb-active);
+	background: var(--accent-soft);
+	box-shadow: inset 2px 0 0 var(--accent);
 }
 .wb-action[data-active="true"] .icon {
 	color: var(--accent);
@@ -234,10 +241,10 @@
 .wb-side__heading h2,
 .wb-side__label {
 	margin: 0;
-	font-size: 12px;
+	font-size: var(--text-exact);
 	font-weight: 500;
 	letter-spacing: 0.01em;
-	color: var(--ink-muted);
+	color: var(--accent);
 }
 .wb-side__label {
 	padding: var(--space-4) 10px var(--space-1);
@@ -279,13 +286,13 @@
 .wb-side__tabs [role="tab"] {
 	flex: 1;
 	min-width: 0;
-	min-height: 32px;
+	min-height: var(--wb-row);
 	padding: 5px 10px;
 	border: 0;
 	border-radius: 8px;
 	background: transparent;
 	color: var(--muted);
-	font-size: 13px;
+	font-size: var(--text-meta);
 	font-weight: 500;
 }
 .wb-side__tabs [role="tab"]:hover {
@@ -345,9 +352,12 @@
 .wb-project[data-current="true"] .wb-project__toggle {
 	color: var(--ink);
 }
+.wb-project[data-current="true"] .wb-project__toggle .icon {
+	color: var(--secondary);
+}
 .wb-project__toggle .icon {
-	width: 16px;
-	height: 16px;
+	width: var(--icon-md);
+	height: var(--icon-md);
 	flex: none;
 }
 .wb-project__toggle span {
@@ -401,7 +411,8 @@
 	color: var(--ink);
 }
 .wb-task[data-selected="true"] .wb-task__main {
-	background: var(--wb-active);
+	background: var(--accent-soft);
+	box-shadow: inset 2px 0 0 var(--accent);
 }
 .wb-task__glyph {
 	display: inline-grid;
@@ -419,7 +430,7 @@
 }
 .wb-task__age {
 	flex: none;
-	font-size: 12px;
+	font-size: var(--text-exact);
 	color: var(--ink-muted);
 	font-variant-numeric: tabular-nums;
 }
@@ -465,7 +476,7 @@
 	height: 28px;
 	padding: 0 10px 0 34px;
 	text-align: left;
-	font-size: 12px;
+	font-size: var(--text-exact);
 	color: var(--ink-muted);
 }
 .wb-link {
@@ -478,7 +489,7 @@
 .wb-note {
 	margin: 0;
 	padding: 6px 10px 6px 34px;
-	font-size: 12px;
+	font-size: var(--text-exact);
 	color: var(--ink-muted);
 	list-style: none;
 }
@@ -521,7 +532,7 @@
 	display: inline-flex;
 	align-items: center;
 	gap: 6px;
-	font-size: 11.5px;
+	font-size: var(--text-exact);
 	color: var(--ink-muted);
 }
 .wb-status__dot {
@@ -603,9 +614,10 @@
 	min-width: 0;
 	min-height: 0;
 	margin: var(--wb-gap) var(--wb-gap) var(--wb-gap) 0;
-	border: 1px solid var(--line);
+	border: 1px solid var(--stage-edge);
 	border-radius: var(--wb-radius);
 	background: var(--surface);
+	box-shadow: var(--shadow-stage);
 	overflow: hidden;
 }
 .wb[data-sidebar="collapsed"] .wb-stage {
@@ -652,7 +664,7 @@
 	align-items: center;
 	gap: var(--space-2);
 	flex: none;
-	min-height: 40px;
+	min-height: 52px;
 	padding: 0 var(--space-3);
 }
 .wb-bar__lead {
@@ -671,7 +683,7 @@
 	text-overflow: ellipsis;
 	white-space: nowrap;
 	font-family: var(--font-ui);
-	font-size: 14px;
+	font-size: var(--text-body);
 	font-weight: 600;
 	letter-spacing: -0.1px;
 	line-height: 1.3;
@@ -696,8 +708,8 @@
 }
 .wb-bar .wb-icon[aria-pressed="true"],
 .wb-bar .wb-icon[aria-expanded="true"] {
-	background: var(--wb-active);
-	color: var(--ink);
+	background: var(--accent-soft);
+	color: var(--accent);
 }
 .wb-chip {
 	display: inline-flex;
@@ -711,15 +723,15 @@
 	border-radius: var(--radius-pill);
 	background: var(--wb-faint);
 	color: var(--ink-muted);
-	font-size: 12.5px;
+	font-size: var(--text-exact);
 	text-decoration: none;
 	white-space: nowrap;
 	overflow: hidden;
 	text-overflow: ellipsis;
 }
 .wb-chip .icon {
-	width: 14px;
-	height: 14px;
+	width: var(--icon-sm);
+	height: var(--icon-sm);
 }
 /* The chip clips, so its words carry the ellipsis; without this a long path was cut mid-letter. */
 .wb-chip > span {
@@ -739,14 +751,17 @@ button.wb-chip:hover:not(:disabled) {
 .wb-chip--meter,
 .wb-chip--figure {
 	flex: none;
-	font: 500 12px / 1 var(--font-mono);
+	font: 500 var(--text-exact) / 1 var(--font-mono);
 	font-variant-numeric: tabular-nums;
 	color: var(--ink);
 	cursor: pointer;
 }
+.wb-chip--meter {
+	color: var(--accent);
+}
 .wb-ring {
-	width: 14px;
-	height: 14px;
+	width: 18px;
+	height: 18px;
 	transform: rotate(-90deg);
 }
 .wb-ring circle {
@@ -754,7 +769,7 @@ button.wb-chip:hover:not(:disabled) {
 	stroke-width: 2.5;
 }
 .wb-ring__track {
-	stroke: var(--wb-active);
+	stroke: var(--line);
 }
 .wb-ring__fill {
 	stroke: var(--accent);
@@ -763,6 +778,9 @@ button.wb-chip:hover:not(:disabled) {
 }
 .wb-chip--meter[data-tone="warn"] .wb-ring__fill {
 	stroke: var(--status-warn-line);
+}
+.wb-chip--meter[data-tone="warn"] {
+	color: var(--status-warn-fg);
 }
 .wb-chip--meter[data-tone="full"] .wb-ring__fill {
 	stroke: var(--status-fail-line);
@@ -797,6 +815,18 @@ button.wb-chip:hover:not(:disabled) {
 	border-color: transparent;
 	background: var(--wb-hover);
 	color: var(--ink);
+}
+.wb-bar :is(.wb-chip--meter, .wb-chip--figure):hover:not(:disabled) {
+	box-shadow: inset 0 -1px 0 var(--accent-line);
+}
+.wb-bar .wb-chip--figure:hover:not(:disabled) {
+	color: var(--accent);
+}
+.wb-bar .wb-chip--meter[data-tone="warn"]:hover:not(:disabled) {
+	color: var(--status-warn-fg);
+}
+.wb-bar .wb-chip--meter[data-tone="full"]:hover:not(:disabled) {
+	color: var(--status-fail-fg);
 }
 .wb-bar a.wb-chip:active,
 .wb-bar button.wb-chip:active:not(:disabled) {
@@ -943,7 +973,7 @@ button.wb-chip:hover:not(:disabled) {
 	align-items: center;
 	gap: 10px;
 	width: 100%;
-	min-height: 32px;
+	min-height: 40px;
 	padding: 0 10px;
 	border: 0;
 	border-radius: var(--radius-sm);
@@ -1054,7 +1084,7 @@ button.wb-chip:hover:not(:disabled) {
 .wb-bar__title .wb-rename {
 	height: 28px;
 	width: min(32ch, 100%);
-	font-size: 14px;
+	font-size: var(--text-meta);
 	font-weight: 600;
 }
 .wb-bar__rename {
@@ -1105,7 +1135,7 @@ button.wb-chip:hover:not(:disabled) {
 	min-height: 0;
 	height: 24px;
 	padding: 0 9px;
-	font-size: 12px;
+	font-size: var(--text-exact);
 }
 .wb-task__confirm .wb-task__delete {
 	border-color: var(--status-fail-line);

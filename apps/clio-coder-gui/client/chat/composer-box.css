@@ -15,11 +15,11 @@
 	display: grid;
 	gap: var(--space-1);
 	margin-top: 0;
-	padding: var(--space-3) var(--space-3) var(--space-2) var(--space-4);
+	padding: var(--space-4) var(--space-4) var(--space-3) var(--space-5);
 	background: var(--raised);
-	border: 1px solid var(--line-float);
+	border: 1px solid var(--accent-line);
 	border-radius: 18px;
-	box-shadow: var(--shadow-raised);
+	box-shadow: var(--shadow-composer);
 	transition:
 		border-color var(--motion-fast) var(--ease-standard),
 		box-shadow var(--motion-fast) var(--ease-standard);
@@ -27,8 +27,8 @@
 .composer:focus-within {
 	border-color: var(--accent);
 	box-shadow:
-		var(--shadow-raised),
-		0 0 0 3px color-mix(in srgb, var(--accent) 16%, transparent);
+		var(--shadow-composer),
+		0 0 0 1px var(--accent-glow);
 }
 .composer__label {
 	font-size: var(--text-meta);
@@ -72,6 +72,8 @@
 /* A placeholder is a hint, never content: it stays on its one line and gives way to an ellipsis, so
    a narrow composer does not rest two lines tall on words nobody typed. */
 .composer__field::placeholder {
+	color: var(--ink-muted);
+	opacity: 1;
 	overflow: hidden;
 	white-space: nowrap;
 	text-overflow: ellipsis;
@@ -106,9 +108,9 @@
 	justify-content: center;
 	gap: 0;
 	flex: none;
-	width: 34px;
-	min-height: 34px;
-	height: 34px;
+	width: 44px;
+	min-height: 44px;
+	height: 44px;
 	padding: 0;
 	border: 0;
 	border-radius: 50%;
@@ -123,6 +125,7 @@
 .composer__submit.primary:hover:not(:disabled) {
 	background: color-mix(in srgb, var(--primary-fill) 86%, var(--ink));
 	color: var(--on-primary);
+	box-shadow: 0 0 0 3px var(--accent-soft);
 }
 /* Nothing to send: an empty ring, so the filled teal means exactly one thing. */
 .composer__submit.primary:disabled {
