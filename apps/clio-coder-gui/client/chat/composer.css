@@ -612,6 +612,21 @@
 	}
 }
 
+/* Below this the tools, the route and the send button cannot share one row with words, so the
+   working-freedom pill keeps its icon and its name moves out of sight but stays announced. */
+@media (max-width: 380px) {
+	.autonomy > summary > span {
+		position: absolute;
+		width: 1px;
+		height: 1px;
+		overflow: hidden;
+		clip-path: inset(50%);
+		white-space: nowrap;
+	}
+	.composer__submit {
+		flex: none;
+	}
+}
 @media (max-width: 420px) {
 	.composer__delivery-label,
 	.route-chip__glyph {

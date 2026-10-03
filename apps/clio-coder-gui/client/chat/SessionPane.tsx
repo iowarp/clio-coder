@@ -212,7 +212,9 @@ export const SessionPane = memo(function SessionPane({
 					}}
 					onCancel={(event) => {
 						event.preventDefault();
-						onClose();
+						// The slide-over steps back from a drill-in first, as the docked pane does.
+						if (view !== ROOT_VIEW) onViewChange(ROOT_VIEW);
+						else onClose();
 					}}
 				>
 					{content}

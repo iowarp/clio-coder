@@ -134,6 +134,35 @@ export function App({ client }: { client: Client }) {
 	}, [mode, location.pathname, location.search]);
 
 	const closeDrawer = useCallback(() => setDrawer(false), []);
+	// The phone drawer is modal: the page behind it goes inert, so focus has to move into it on open
+	// or Escape has nowhere to land, and it returns to the control that opened it on close.
+	const drawerOpener = useRef<HTMLElement | null>(null);
+	useEffect(() => {
+		if (!phone) return;
+		if (drawer) {
+			const active = document.activeElement;
+			drawerOpener.current = active instanceof HTMLElement && active !== document.body ? active : null;
+			requestAnimationFrame(() =>
+				document
+					.getElementById(SIDEBAR_ID)
+					?.querySelector<HTMLElement>("a[href], button:not([disabled]), [tabindex]:not([tabindex='-1'])")
+					?.focus(),
+			);
+			const dismiss = (event: KeyboardEvent) => {
+				if (event.key === "Escape") setDrawer(false);
+			};
+			document.addEventListener("keydown", dismiss);
+			return () => document.removeEventListener("keydown", dismiss);
+		}
+		const opener = drawerOpener.current;
+		drawerOpener.current = null;
+		// A navigation from the drawer hands focus to the new page; only a plain dismissal returns it.
+		requestAnimationFrame(() => {
+			const active = document.activeElement;
+			const stranded = active === null || active === document.body || !!active.closest(`#${SIDEBAR_ID}`);
+			if (stranded && opener?.isConnected) opener.focus();
+		});
+	}, [drawer, phone]);
 	const actions = useTaskActions(client, closeDrawer);
 	const previousPath = useRef(location.pathname);
 	useEffect(() => {
