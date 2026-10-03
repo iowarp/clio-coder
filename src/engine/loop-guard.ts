@@ -36,6 +36,7 @@ import type { MiddlewareEffect, MiddlewareHookInput } from "../domains/middlewar
 import type { SafetyContract } from "../domains/safety/contract.js";
 import { hashToolCall } from "../domains/safety/loop-detector.js";
 import { isGatewayChain } from "../tools/gateway-display.js";
+import { gitCallIdentity } from "../tools/git-inspect.js";
 import { resolveReadPath } from "../tools/path-utils.js";
 import { effectiveToolCall } from "../tools/surface.js";
 import type { AgentMessage } from "./types.js";
@@ -125,6 +126,16 @@ const COLLECT_BLOCKED_EPOCH_MS = 5_000;
 export const RESULT_STAGNATION_THRESHOLD = 3;
 const CROSS_ARGUMENT_RESULT_MIN_BYTES = 64;
 
+/**
+ * Repeat identity of a call. A git call keys on the argv it will run, so two
+ * spellings of one inspection (an op alias, limit 20 or none) cannot dodge the
+ * detector as ignored log fields once did (DF-4, DF-9).
+ */
+function callIdentity(tool: string, args: Record<string, unknown> | undefined): string {
+	const git = tool === ToolNames.Git && args !== undefined ? gitCallIdentity(args) : null;
+	return hashToolCall(tool, git ?? args ?? {});
+}
+
 function stagnationFingerprint(tool: string, args: Record<string, unknown> | undefined): string {
 	const reduced: Record<string, unknown> = {};
 	for (const [key, value] of Object.entries(args ?? {})) {
@@ -149,22 +160,39 @@ function crossArgumentResultMessage(tool: string, distinctArguments: number): st
 }
 
 /**
- * Base block reason: names the loop and asks for a strategy change (block #1).
- * When the same call already returned a successful result earlier this run, the
- * reason says so and points the model at that result — for a weak local model
- * "you already have this answer" is the strongest available anchor, stronger
- * than a generic "change strategy".
+ * The concrete next move for a blocked repeat. "Change strategy" alone left a
+ * 27B reviewer repeating one git call after its block, and a read-only scout
+ * re-reading the same file a third time (DF-4); a small model follows a named
+ * call more reliably than an abstract instruction.
+ */
+function loopNextMove(tool: string): string {
+	if (tool === ToolNames.Git) {
+		return (
+			'For one commit use args={op:"show",rev:"<commit>"}; for a range use op log or diff with rev:"<a>..<b>". ' +
+			"If the result above already answers the question, answer from it."
+		);
+	}
+	if (tool === ToolNames.Read) {
+		return "Read a different part with offset, grep for the symbol you need, or answer from what you already read.";
+	}
+	return "Change the arguments, use a different tool, or answer from the results you already have.";
+}
+
+/**
+ * Base block reason: names the loop and the next move (block #1). When the
+ * same call already returned a successful result earlier this run, the reason
+ * says so and points the model at that result: for a weak local model "you
+ * already have this answer" is the strongest available anchor.
  */
 function loopBlockBaseReason(tool: string, repeatCount: number, priorSuccesses: number): string {
 	const evidence =
 		priorSuccesses > 0
-			? `This exact call already succeeded ${priorSuccesses} ${priorSuccesses === 1 ? "time" : "times"} this run; ` +
-				`its result is already in the conversation above — re-read that result before calling tools again. `
+			? `This exact call already succeeded ${priorSuccesses} ${priorSuccesses === 1 ? "time" : "times"} this run, ` +
+				"and its result is already in the conversation above; calling it again returns the same text. "
 			: "";
 	return (
 		`loop detected: ${tool} was called ${repeatCount} times with identical arguments among this turn's recent ` +
-		`tool calls. Repeating the exact call is blocked. ${evidence}Change strategy: vary the arguments, use a ` +
-		`different tool, or explain what new information you expect before retrying.`
+		`tool calls. Repeating the exact call is blocked. ${evidence}Next: ${loopNextMove(tool)}`
 	);
 }
 
@@ -749,7 +777,7 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 		if (!resultCarriesEvidence(input.toolResultDetails)) return;
 		const tool = input.toolName;
 		if (typeof tool !== "string" || tool.length === 0) return;
-		bumpBoundedCounter(succeededFingerprints, hashToolCall(tool, input.toolArgs ?? {}), SUCCEEDED_FINGERPRINT_LIMIT);
+		bumpBoundedCounter(succeededFingerprints, callIdentity(tool, input.toolArgs), SUCCEEDED_FINGERPRINT_LIMIT);
 	};
 
 	// after_tool touchpoint: extend or reset the per-turn stagnation streak. A
@@ -978,7 +1006,7 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 		baseReason: string,
 		now: number,
 	): ReadonlyArray<MiddlewareEffect> => {
-		lastBlockedCallByTurn.set(turnKey, hashToolCall(tool, input.toolArgs ?? {}));
+		lastBlockedCallByTurn.set(turnKey, callIdentity(tool, input.toolArgs));
 		const blocksThisTurn = bumpTurnBlocks(turnKey);
 		const reachedBudget = blocksThisTurn >= budget;
 		// Budget reached with the synthesis lockout wired: enter the lockout
@@ -1191,21 +1219,22 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 			// the repeat fingerprint is re-derived the same way so the repeat
 			// detector and the success memory share one identity (#F8).
 			const unwrapped = effectiveToolCall(hookInput.toolName ?? "", hookInput.toolArgs);
-			const input: MiddlewareHookInput = unwrapped.viaGateway
-				? {
-						...hookInput,
-						toolName: unwrapped.toolName,
-						toolArgs: unwrapped.args ?? {},
-						...(typeof hookInput.metadata?.callFingerprint === "string"
-							? {
-									metadata: {
-										...hookInput.metadata,
-										callFingerprint: hashToolCall(unwrapped.toolName, unwrapped.args ?? {}),
-									},
-								}
-							: {}),
-					}
-				: hookInput;
+			const input: MiddlewareHookInput =
+				unwrapped.viaGateway || unwrapped.toolName === ToolNames.Git
+					? {
+							...hookInput,
+							toolName: unwrapped.toolName,
+							toolArgs: unwrapped.args ?? {},
+							...(typeof hookInput.metadata?.callFingerprint === "string"
+								? {
+										metadata: {
+											...hookInput.metadata,
+											callFingerprint: callIdentity(unwrapped.toolName, unwrapped.args),
+										},
+									}
+								: {}),
+						}
+					: hookInput;
 			if (input.hook === "after_tool" && isGatewayChain(hookInput.toolName ?? "", hookInput.toolArgs)) {
 				// A chain's completion is aggregate bookkeeping. Each step already ran
 				// its own after_tool as the capability it is, so the steps own the
@@ -1229,7 +1258,7 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 					input.toolResultDetails?.unchanged !== true &&
 					input.toolName !== undefined &&
 					input.toolName !== ToolNames.Read &&
-					hashToolCall(input.toolName, input.toolArgs ?? {}) !== blocked
+					callIdentity(input.toolName, input.toolArgs) !== blocked
 				) {
 					// A different productive call is evidence of recovery; give the
 					// model another chance before a turn-wide synthesis lockout.
