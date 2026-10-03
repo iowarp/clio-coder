@@ -108,6 +108,7 @@ export function summarizeToolActivity(
 ): ToolActivitySummary {
 	const summary: ToolActivitySummary = { calls: 0, succeeded: 0, failed: 0, blocked: 0, mutatingSucceeded: false };
 	for (const stat of stats.values()) {
+		if (stat.tool === "clio_submit_result") continue;
 		summary.calls += stat.count;
 		summary.succeeded += stat.ok;
 		summary.failed += stat.errors;

@@ -1,13 +1,15 @@
 import { deepStrictEqual, notStrictEqual, ok, rejects, strictEqual, throws } from "node:assert/strict";
 import { test } from "node:test";
+import type { InternalHelperResultKind } from "../../src/domains/agents/result-contract.js";
 import {
 	INTERNAL_HELPER_RESULT_KINDS,
-	type InternalHelperResultKind,
 	internalHelperResultSchema,
+	resultContractOutputBytes,
 	validateStructuredHelperResult,
 } from "../../src/domains/agents/result-contract.js";
 import { createWorkerOutputCapture } from "../../src/domains/dispatch/event-pump.js";
 import { verifyReceiptIntegrity, withReceiptIntegrity } from "../../src/domains/dispatch/receipt-integrity.js";
+import { summarizeToolActivity, workerNoWorkDetail } from "../../src/domains/dispatch/tool-stats.js";
 import { approvedIdentityForSpec } from "../../src/domains/dispatch/worker-protocol.js";
 import { attestedToolSignature } from "../../src/engine/worker-tools.js";
 import { parseWorkerSpec } from "../../src/worker/spec-contract.js";
@@ -23,6 +25,7 @@ const evidence = {
 	observedReadRanges: new Map([["/repo/source.ts", [[1, 1] as const]]]),
 };
 const samples: Record<InternalHelperResultKind, Record<string, unknown>> = {
+	"mutation-report": { mutatedPaths: [], validations: [] },
 	"scout-report": {
 		findings: [{ claim: "Exports answer", path: "source.ts", line: 1 }],
 		needsSplit: false,
@@ -68,6 +71,53 @@ test("internal helper schemas and typed validation retain contract-specific evid
 		validateStructuredHelperResult({ ...evidence, contract: { kind: "mutation-report" }, data: {} }).structured,
 		null,
 	);
+});
+
+test("typed mutation reports retain semantic grounding and their authorship and capture bounds", () => {
+	const contract = { kind: "mutation-report" as const, maxSummaryBytes: 32_768 };
+	const input = {
+		...evidence,
+		contract,
+		filesystem: { ...evidence.filesystem, pathExists: () => false },
+		observedRunEffects: {
+			mutatedPaths: new Set<string>(),
+			failedMutationPaths: new Set<string>(),
+			validationCommands: new Set<string>(),
+		},
+	};
+	const unsupported = validateStructuredHelperResult({
+		...input,
+		data: { mutatedPaths: ["missing.ts"], validations: [] },
+	});
+	strictEqual(unsupported.structured, null);
+	ok(unsupported.validation.reason?.includes("this run never wrote"));
+	const data = { ...samples[contract.kind], summary: "x".repeat(32_768), commitMessage: "x".repeat(1000) };
+	const accepted = validateStructuredHelperResult({ ...input, data });
+	deepStrictEqual(accepted.structured?.data, data);
+	strictEqual(resultContractOutputBytes(contract), 71_632);
+	strictEqual(resultContractOutputBytes({ kind: "mutation-report" }), 38_864);
+	for (const invalid of [
+		{ ...data, summary: "x".repeat(32_769) },
+		{ ...data, commitMessage: "x".repeat(1001) },
+		{ ...data, summary: "bad\u0000text" },
+		{ ...data, observations: "an observation" },
+	]) {
+		strictEqual(validateStructuredHelperResult({ ...input, data: invalid }).structured, null);
+	}
+	const capture = createWorkerOutputCapture({
+		helperResult: { contract, validate: (value) => validateStructuredHelperResult({ ...input, data: value }).structured },
+	});
+	capture.observe({ type: "clio_coder_helper_result", payload: accepted.structured });
+	deepStrictEqual(capture.snapshot()?.structured?.data, data);
+	const activity = summarizeToolActivity(
+		new Map([
+			["clio_submit_result", { tool: "clio_submit_result", count: 1, ok: 1, errors: 0, blocked: 0, totalDurationMs: 0 }],
+		]),
+		() => "write",
+	);
+	strictEqual(activity.calls, 0);
+	strictEqual(activity.mutatingSucceeded, false);
+	ok(workerNoWorkDetail({ activity, limitationRecorded: false, mutatedPathCount: 0 }));
 });
 
 test("typed Scout submission cannot ground unread lines or smuggle continuation through degraded claims", () => {
@@ -254,14 +304,15 @@ test("dispatch selects helper mode from trusted audience and seals its validated
 	}
 });
 
-test("base agents and artifact helpers retain ordinary specs even when a caller asks for helper mode", async () => {
+test("mutation workers gain typed handoff eligibility while artifact helpers retain ordinary specs", async () => {
 	const env = await isolateClioEnv("clio-helper-eligibility-");
 	let starts = 0;
 	const bundle = makeDispatchBundle(dispatchStubContext(), {
 		spawnWorker(spec) {
 			starts++;
-			strictEqual(spec.helperResult, undefined);
-			strictEqual(parseWorkerSpec(JSON.parse(JSON.stringify(spec))).helperResult, undefined);
+			const helperResult = spec.agentId === "coder" ? true : undefined;
+			strictEqual(spec.helperResult, helperResult);
+			strictEqual(parseWorkerSpec(JSON.parse(JSON.stringify(spec))).helperResult, helperResult);
 			throw new Error("ordinary worker reached");
 		},
 	});

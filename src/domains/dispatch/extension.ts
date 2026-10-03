@@ -939,6 +939,7 @@ const OUTCOME_CODE_SPECIFICITY: ReadonlyArray<RunOutcomeCode> = [
 	"loop_guard_tools_disabled_exhausted",
 	"worker_tool_call_cap_exhausted",
 	"vram_capacity_fit_failure",
+	"worker_no_work",
 ];
 
 const WORKER_FINAL_OUTPUT_MISSING_DETAIL = "worker exited successfully without a receipt-sealed final assistant output";
@@ -1977,6 +1978,7 @@ function resolveDispatchPermitOnce(
 		(spec.audience === "shadow" || spec.audience === "internal") &&
 		contract !== undefined &&
 		contract !== null &&
+		contract.kind !== "mutation-report" &&
 		(INTERNAL_HELPER_RESULT_KINDS as readonly string[]).includes(contract.kind);
 	return resolveWorkerPermit({
 		agentId: spec.id,
@@ -2694,7 +2696,9 @@ function buildDispatchWorkerSpec(input: DispatchWorkerSpecInput, config?: Config
 	const workerResultContract = dispatchResultContract(input.req, input.recipe);
 	if (workerResultContract) spec.resultContract = workerResultContract;
 	if (
-		(input.recipe?.audience === "shadow" || input.recipe?.audience === "internal") &&
+		(workerResultContract?.kind === "mutation-report" ||
+			input.recipe?.audience === "shadow" ||
+			input.recipe?.audience === "internal") &&
 		input.target.runtime.kind === "http" &&
 		targetToolCapability(input.target) === true &&
 		workerResultContract &&
@@ -6550,7 +6554,9 @@ export function createDispatchBundle(
 			maxBytes: workerOutputCaptureBytes(helperContract),
 			...(spec.helperResult === true &&
 			acceptsOutcomeCodeEvents &&
-			(lifecycle.agentAudience === "shadow" || lifecycle.agentAudience === "internal") &&
+			(helperContract?.kind === "mutation-report" ||
+				lifecycle.agentAudience === "shadow" ||
+				lifecycle.agentAudience === "internal") &&
 			helperContract &&
 			(INTERNAL_HELPER_RESULT_KINDS as readonly string[]).includes(helperContract.kind)
 				? {

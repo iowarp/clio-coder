@@ -28,6 +28,7 @@ import { normalizeClioCoderEventRecord } from "../core/naming-events.js";
 
 /** Internal JSON handoffs; artifact and mutation contracts keep their existing delivery paths. */
 export const INTERNAL_HELPER_RESULT_KINDS = [
+	"mutation-report",
 	"scout-report",
 	"research-report",
 	"world-knowledge-report",

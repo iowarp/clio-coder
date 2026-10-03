@@ -3,7 +3,8 @@ import path from "node:path";
 import { stripAuthoredTrailers } from "../../core/commit-message.js";
 import { parseJsonObjectPayload } from "../../core/json-payload.js";
 import { INTERNAL_HELPER_RESULT_KINDS } from "../../worker/protocol.js";
-import { AGENT_AUTOMATION_AUTHORITIES, type AgentAutomationAuthority } from "./spec.js";
+import type { AgentAutomationAuthority } from "./spec.js";
+import { AGENT_AUTOMATION_AUTHORITIES } from "./spec.js";
 
 export type ResultContract =
 	| { kind: "architect-plan"; path: string }
@@ -116,6 +117,18 @@ export function internalHelperResultSchema(contract: ResultContract): Record<str
 	});
 	const strings = list(text);
 	switch (contract.kind) {
+		case "mutation-report":
+			return {
+				...object({
+					mutatedPaths: strings,
+					validations: list(object({ name: text, passed: { type: "boolean" }, evidence: text })),
+					observations: strings,
+					declaredChecks: strings,
+					summary: { type: ["string", "null"] },
+					commitMessage: { type: ["string", "null"] },
+				}),
+				required: ["mutatedPaths", "validations"],
+			};
 		case "scout-report":
 			return object({
 				findings: list({
@@ -189,8 +202,9 @@ export function validateStructuredHelperResult(
 	} catch {
 		return reject("helper result must contain only JSON values");
 	}
-	if (Buffer.byteLength(output, "utf8") > STRUCTURED_HELPER_RESULT_MAX_BYTES) {
-		return reject(`helper result exceeds ${STRUCTURED_HELPER_RESULT_MAX_BYTES} UTF-8 bytes; shorten the result`);
+	const maxBytes = resultContractOutputBytes(input.contract) ?? STRUCTURED_HELPER_RESULT_MAX_BYTES;
+	if (Buffer.byteLength(output, "utf8") > maxBytes) {
+		return reject(`helper result exceeds ${maxBytes} UTF-8 bytes; shorten the result`);
 	}
 	const validation = validateResultContract({ ...input, output });
 	if (validation.conformance !== "pass") return { validation, structured: null };
@@ -205,8 +219,8 @@ export function validateStructuredHelperResult(
 		};
 	}
 	// Salvage adds canonical fields; its serialized result must fit too.
-	if (Buffer.byteLength(JSON.stringify(data), "utf8") > STRUCTURED_HELPER_RESULT_MAX_BYTES)
-		return reject(`helper result exceeds ${STRUCTURED_HELPER_RESULT_MAX_BYTES} UTF-8 bytes; shorten the result`);
+	if (Buffer.byteLength(JSON.stringify(data), "utf8") > maxBytes)
+		return reject(`helper result exceeds ${maxBytes} UTF-8 bytes; shorten the result`);
 	return { validation, structured: { version: 1, kind: input.contract.kind as InternalHelperResultKind, data } };
 }
 
@@ -1376,7 +1390,7 @@ export function withResultSummaryAllowance(contract: ResultContract, maxSummaryB
  */
 export function resultContractOutputBytes(contract: ResultContract | null | undefined): number | null {
 	if (contract === null || contract === undefined) return null;
-	if ((INTERNAL_HELPER_RESULT_KINDS as readonly string[]).includes(contract.kind))
+	if (contract.kind !== "mutation-report" && (INTERNAL_HELPER_RESULT_KINDS as readonly string[]).includes(contract.kind))
 		return STRUCTURED_HELPER_RESULT_MAX_BYTES;
 	if (contract.kind !== "mutation-report") return null;
 	return (

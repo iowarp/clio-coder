@@ -1,5 +1,5 @@
 import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { join } from "node:path";
@@ -19,12 +19,78 @@ const data = { findings: [{ claim: "No grounded evidence is available." }], need
 const submit = (args: unknown = data) => ({ name: "clio_submit_result", arguments: JSON.stringify(args) });
 const longData = { ...data, findings: [{ claim: "Substantive finding. ".repeat(600) }] };
 const write = { name: "write", arguments: JSON.stringify({ path: "forbidden.txt", content: "must not execute" }) };
+const mutationData = { mutatedPaths: ["changed.txt"], validations: [], observations: ["Updated the assigned file."] };
+const mutationWrite = { name: "write", arguments: JSON.stringify({ path: "changed.txt", content: "changed" }) };
 const scenarios: Array<{
 	name: string;
 	rounds: Array<Array<ReturnType<typeof submit>> | string>;
 	code: number;
-	expectedData?: typeof data;
+	expectedData?: Record<string, unknown>;
+	mutation?: boolean;
+	toolsSupported?: boolean;
+	terminalRound?: number;
+	synthesisDuringWrite?: boolean;
+	noWorkRecovery?: boolean;
 }> = [
+	{
+		name: "coder prose repairs through a typed mutation handoff",
+		mutation: true,
+		rounds: [[mutationWrite], "Updated the file.", [submit(mutationData)]],
+		code: 0,
+		expectedData: mutationData,
+		terminalRound: 2,
+	},
+	{
+		name: "coder typed handoff rejects an unsupported path claim",
+		mutation: true,
+		rounds: [
+			[mutationWrite],
+			"Updated the file.",
+			[submit({ ...mutationData, mutatedPaths: ["missing.ts"] })],
+			[submit(mutationData)],
+		],
+		code: 0,
+		expectedData: mutationData,
+		terminalRound: 2,
+	},
+	{
+		name: "coder without tool support accepts ordinary JSON",
+		mutation: true,
+		toolsSupported: false,
+		rounds: [JSON.stringify({ mutatedPaths: [], validations: [], summary: null, commitMessage: null })],
+		code: 0,
+		expectedData: { mutatedPaths: [], validations: [], summary: null, commitMessage: null },
+	},
+	{
+		name: "coder ordinary JSON seals without a submission round",
+		mutation: true,
+		rounds: [[mutationWrite], JSON.stringify(mutationData)],
+		code: 0,
+		expectedData: mutationData,
+		terminalRound: 2,
+	},
+	{
+		name: "entering synthesis during a write retains both terminal repairs",
+		mutation: true,
+		synthesisDuringWrite: true,
+		rounds: [
+			[mutationWrite],
+			[submit({ mutatedPaths: [], validations: "invalid" })],
+			[submit({ mutatedPaths: [], validations: "invalid" })],
+			[submit(mutationData)],
+		],
+		code: 0,
+		expectedData: mutationData,
+		terminalRound: 1,
+	},
+	{
+		name: "repeated malformed no-work replies retain worker_no_work",
+		mutation: true,
+		noWorkRecovery: true,
+		rounds: ["Done.", "Done."],
+		code: 1,
+		terminalRound: 2,
+	},
 	{
 		name: "accepts a report larger than the old 8 KiB capture limit",
 		rounds: [[submit(longData)]],
@@ -56,10 +122,13 @@ const scenarios: Array<{
 	},
 ];
 for (const scenario of scenarios) {
-	test(`internal helper: ${scenario.name}`, { timeout: 15000 }, async () => {
+	test(`internal helper: ${scenario.name}`, { timeout: 15000 }, async (context) => {
 		const env = await isolateClioEnv("clio-helper-terminal-");
+		const previousCwd = process.cwd();
+		process.chdir(env.dir);
 		const requests: Array<{
-			tools: Array<{ function: { name: string } }>;
+			tools?: Array<{ function: { name: string; parameters?: unknown } }>;
+			messages: Array<{ role: string; content: unknown }>;
 			tool_choice?: unknown;
 			parallel_tool_calls?: unknown;
 		}> = [];
@@ -72,14 +141,15 @@ for (const scenario of scenarios) {
 			const round = scenario.rounds[requests.length - 1] ?? [submit({ findings: [] })];
 			res.setHeader("content-type", "text/event-stream");
 			res.end(
-				`data: ${JSON.stringify({ model: "fixture", choices: [{ index: 0, delta: typeof round === "string" ? { content: round } : { role: "assistant", tool_calls: round.map((call, index) => ({ index, id: `call_${requests.length}_${index}`, type: "function", function: call })) }, finish_reason: typeof round === "string" ? "stop" : "tool_calls" }] })}\n\ndata: [DONE]\n\n`,
+				`data: ${JSON.stringify({ model: "fixture", choices: [{ index: 0, delta: typeof round === "string" ? { content: round } : { role: "assistant", tool_calls: round.map((call, index) => ({ index, id: `call_${requests.length}_${index}`, type: "function", function: call === mutationWrite ? { ...call, arguments: JSON.stringify({ path: join(env.dir, "changed.txt"), content: "changed" }) } : call })) }, finish_reason: typeof round === "string" ? "stop" : "tool_calls" }] })}\n\ndata: [DONE]\n\n`,
 			);
 		});
 		try {
 			await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+			if (scenario.synthesisDuringWrite) context.mock.timers.enable({ apis: ["setTimeout"] });
 			worker = startWorkerRun(
 				{
-					agentId: "scout",
+					agentId: scenario.mutation ? "coder" : "scout",
 					systemPrompt: "Inspect and return a Scout report.",
 					task: "Summarize available evidence.",
 					target: { id: "fixture", runtime: "litellm", url: `http://127.0.0.1:${(server.address() as AddressInfo).port}` },
@@ -87,44 +157,79 @@ for (const scenario of scenarios) {
 					wireModelId: "fixture",
 					apiKey: "fixture",
 					thinkingLevel: "off",
-					modelCapabilities: { contextWindow: 131072, maxTokens: 8192, tools: true },
-					allowedTools: ["write"],
+					modelCapabilities: { contextWindow: 131072, maxTokens: 8192, tools: scenario.toolsSupported !== false },
+					allowedTools: scenario.toolsSupported === false ? [] : ["write"],
+					writeRoots: [env.dir],
+					...(scenario.synthesisDuringWrite ? { synthesisAt: Date.now() + 60_000 } : {}),
 					budget: { mode: "advisory", toolCalls: 18, readReserve: 0, synthesis: true, hardCap: 150 },
 					product: "orientation",
 					noSkills: true,
 					cwd: env.dir,
 					helperResult: true,
-					resultContract: { kind: "scout-report" },
+					resultContract: { kind: scenario.mutation ? "mutation-report" : "scout-report" },
 				},
 				(event) => {
 					events.push(event);
+					if (scenario.synthesisDuringWrite && event.type === "clio_coder_tool_start" && event.payload.tool === "write")
+						context.mock.timers.tick(60_000);
 					if (event.type === "clio_coder_helper_result") worker?.steer?.("Attempt another write after acceptance.");
 				},
 			);
 			const result = await worker.promise;
 			strictEqual(result.exitCode, scenario.code, JSON.stringify(result));
 			strictEqual(requests.length, scenario.rounds.length);
+			if (scenario.synthesisDuringWrite)
+				strictEqual(JSON.stringify(requests[1]?.messages).includes("clio-result-contract-repair"), false);
+			if (scenario.noWorkRecovery)
+				deepStrictEqual(
+					events.filter((event) => event.type === "clio_coder_run_outcome").map((event) => event.payload),
+					[{ outcomeCode: "worker_no_work", detail: "worker executed no tools, so it did none of its assignment" }],
+				);
 			ok(
 				typeof sessionIds[0] === "string" && sessionIds[0].length > 0 && sessionIds.every((id) => id === sessionIds[0]),
 				"provider options must carry one stable session ID across the worker's calls and repair rounds",
 			);
 			ok(requests[0]);
-			ok(
-				requests[0].tools.some((tool) => tool.function.name === "write"),
-				"fixture must expose a real work tool before terminal lock",
-			);
-			strictEqual(
-				toolSignatureOf(requests[0].tools.map((tool) => tool.function.name)),
-				attestedToolSignature({
-					allowedTools: ["write"],
-					toolsSupported: true,
-					helperResult: true,
-					agentId: "scout",
-					task: "Summarize available evidence.",
-				}),
-			);
+			if (scenario.toolsSupported !== false)
+				ok(
+					requests[0].tools?.some((tool) => tool.function.name === "write"),
+					"fixture must expose a real work tool before terminal lock",
+				);
+			if (!scenario.mutation) {
+				strictEqual(
+					toolSignatureOf((requests[0].tools ?? []).map((tool) => tool.function.name)),
+					attestedToolSignature({
+						allowedTools: ["write"],
+						toolsSupported: true,
+						helperResult: true,
+						agentId: "scout",
+						task: "Summarize available evidence.",
+					}),
+				);
+			} else {
+				for (const request of requests.slice(0, scenario.terminalRound ?? requests.length)) {
+					ok(!JSON.stringify(request.tools ?? []).includes("clio_submit_result"));
+					ok(
+						!JSON.stringify(request.messages.filter((message) => message.role === "system")).includes(
+							"Internal helper protocol",
+						),
+					);
+				}
+				if (scenario.toolsSupported !== false && scenario.code === 0)
+					strictEqual(readFileSync(join(env.dir, "changed.txt"), "utf8"), "changed");
+				if (scenario.name.includes("unsupported path")) {
+					const rejected = events.filter(
+						(event) => event.type === "tool_execution_end" && event.toolName === "clio_submit_result" && event.isError,
+					);
+					strictEqual(rejected.length, 1);
+					ok(JSON.stringify(rejected[0]).includes("this run never wrote"));
+				}
+			}
 			strictEqual(existsSync(join(env.dir, "forbidden.txt")), false);
-			if (scenario.rounds.some((round) => Array.isArray(round) && round.some((call) => call.name === "write"))) {
+			if (
+				!scenario.mutation &&
+				scenario.rounds.some((round) => Array.isArray(round) && round.some((call) => call.name === "write"))
+			) {
 				const deniedWrite = events.find((event) => event.type === "tool_execution_end" && event.toolName === "write");
 				ok(deniedWrite?.type === "tool_execution_end");
 				strictEqual(deniedWrite.isError, true);
@@ -133,15 +238,20 @@ for (const scenario of scenarios) {
 			const accepted = events.filter((event) => event.type === "clio_coder_helper_result");
 			strictEqual(accepted.length, scenario.code === 0 ? 1 : 0);
 			if (accepted[0]) {
-				deepStrictEqual(accepted[0].payload, { version: 1, kind: "scout-report", data: scenario.expectedData ?? data });
+				deepStrictEqual(accepted[0].payload, {
+					version: 1,
+					kind: scenario.mutation ? "mutation-report" : "scout-report",
+					data: scenario.expectedData ?? data,
+				});
 				strictEqual(projectWorkerEventForStdout(accepted[0]), accepted[0]);
 				strictEqual(isReceiptBearingFrame(accepted[0]), true);
 			}
-			for (const request of requests.slice(1)) {
+			for (const request of requests.slice(scenario.terminalRound ?? (scenario.mutation ? requests.length : 1))) {
 				deepStrictEqual(
-					request.tools.map((tool) => tool.function.name),
+					(request.tools ?? []).map((tool) => tool.function.name),
 					["clio_submit_result"],
 				);
+				if (scenario.mutation) ok((request.tools ?? [])[0]?.function.parameters);
 				strictEqual(request.tool_choice, "required");
 				strictEqual(request.parallel_tool_calls, false);
 			}
@@ -157,7 +267,9 @@ for (const scenario of scenarios) {
 		} finally {
 			worker?.abort();
 			await worker?.promise;
+			if (scenario.synthesisDuringWrite) context.mock.timers.reset();
 			await closeServer(server);
+			process.chdir(previousCwd);
 			env.restore();
 		}
 	});
