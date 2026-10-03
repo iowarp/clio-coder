@@ -9,6 +9,7 @@ import type { DispatchContract } from "../domains/dispatch/contract.js";
 import type { AgentRoleFactsResolver } from "../domains/dispatch/execution-role.js";
 import { FLEET_PLACEMENT_HEADER, rememberSessionFleetNode } from "../domains/dispatch/fleet-placement-preference.js";
 import { DEFAULT_KILL_GRACE_MS, DEFAULT_TEARDOWN_BOUND_MS } from "../domains/gateway/mcp/index.js";
+import type { MusicOperations } from "../domains/mux/music-operations.js";
 import type { PanesOperations } from "../domains/mux/operations.js";
 import type { AutonomyLevel } from "../domains/safety/autonomy.js";
 import type { DecisionLedgerEntry } from "../domains/session/entries.js";
@@ -24,6 +25,7 @@ import { registerHarnessExtensionTools } from "./harness-extensions.js";
 import { lazyTool } from "./lazy-tool.js";
 import { createLedgerTool } from "./ledger.js";
 import { monitorToolSurface } from "./monitor-surface.js";
+import { musicToolSurface } from "./music-surface.js";
 import { panesToolSurface } from "./panes-surface.js";
 import type { RegistryDeps, ToolRegistry } from "./registry.js";
 import { createSelfCompactTool, type RequestSelfCompact } from "./self-compact.js";
@@ -56,6 +58,11 @@ export interface ToolBootstrapDeps extends Omit<CoreToolBootstrapDeps, "mcpCapab
 	 * is what keeps the `panes` tool out of the prompt on a machine with none.
 	 */
 	panes?: PanesOperations;
+	/**
+	 * The music pane. Present only when the operator set
+	 * integrations.music.agentControl and music could play at startup.
+	 */
+	music?: MusicOperations;
 	flow?: RegistryDeps["flow"];
 	/**
 	 * Local MCP servers for the gateway. Absent means one is built for the
@@ -192,6 +199,15 @@ export function registerAllTools(registry: ToolRegistry, deps: ToolBootstrapDeps
 					(await import("./panes.js")).createPanesTool({ panes, ...(deps.flow !== undefined ? { flow: deps.flow } : {}) }),
 				),
 				{ path: "src/tools/panes.ts", scope: "core" },
+			),
+		});
+	}
+	if (deps.music) {
+		const music = deps.music;
+		registry.register({
+			...builtin(
+				lazyTool(musicToolSurface, async () => (await import("./music.js")).createMusicTool({ music })),
+				{ path: "src/tools/music.ts", scope: "core" },
 			),
 		});
 	}

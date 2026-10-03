@@ -26,6 +26,7 @@ export const GLOBAL_ACTION_ORDER = [
 	"clio-coder.session.tree",
 	"clio-coder.dispatchBoard.toggle",
 	"clio-coder.files.toggle",
+	"clio-coder.music.toggle",
 	"clio-coder.tasks.open",
 	"clio-coder.decisions.open",
 	"clio-coder.dispatch.background",

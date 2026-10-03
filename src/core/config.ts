@@ -2386,6 +2386,7 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 				"runtimePlugins",
 				"library",
 				"git",
+				"music",
 			]);
 			if ("projectResources" in integrations) {
 				if (!isPlainObject(integrations.projectResources))
@@ -2433,6 +2434,24 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 					if ("commitAttribution" in integrations.git) {
 						const parsed = expectBoolean(issues, "integrations.git.commitAttribution", integrations.git.commitAttribution);
 						if (parsed !== undefined) settings.integrations.git.commitAttribution = parsed;
+					}
+				}
+			}
+			if ("music" in integrations) {
+				if (!isPlainObject(integrations.music))
+					issues.add("integrations.music", `expected a map, got ${describe(integrations.music)}`);
+				else {
+					const music = integrations.music;
+					issues.unknownKeys("integrations.music", music, ["enabled", "station", "agentControl"]);
+					for (const key of ["enabled", "agentControl"] as const) {
+						if (!(key in music)) continue;
+						const parsed = expectBoolean(issues, `integrations.music.${key}`, music[key]);
+						if (parsed !== undefined) settings.integrations.music[key] = parsed;
+					}
+					if ("station" in music) {
+						if (typeof music.station !== "string" || music.station.trim().length === 0)
+							issues.add("integrations.music.station", `expected a non-empty string, got ${describe(music.station)}`);
+						else settings.integrations.music.station = music.station.trim();
 					}
 				}
 			}

@@ -407,6 +407,20 @@ const TOOL_METADATA: Readonly<Record<string, ToolMetadata>> = {
 		promptHint:
 			'When the operator asks to see a dispatched agent ("show me the tester"), call panes(action="show", target=<agent id>).',
 	},
+	[ToolNames.Music]: {
+		// Empty on purpose: a non-empty objective lands in the prompt's capability
+		// map, and the tool description is meant to be the only music text the
+		// model reads.
+		objective: "",
+		uiLabel: "Music",
+		retrySafety: "not_retry_safe",
+		resultSizePolicy: {
+			kind: "exact",
+			maxBytes: 2_048,
+			followUpHint: 'Call music with action="status" to see what is playing.',
+		},
+		costLatency: "local_fast",
+	},
 	[ToolNames.Limitation]: {
 		objective: "Record what the turn could not verify and why as a ledger receipt.",
 		uiLabel: "Limitation",

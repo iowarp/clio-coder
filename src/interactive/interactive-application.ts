@@ -17,6 +17,8 @@ import type { InteropContract } from "../domains/interop/index.js";
 import type { TaskMemoryOperatorStatus } from "../domains/memory/index.js";
 import { openDetachedBatchViews } from "../domains/middleware/index.js";
 import type { MuxContract } from "../domains/mux/index.js";
+import type { MusicOperations } from "../domains/mux/music-operations.js";
+import { describeMusicResult } from "../domains/mux/music-operations.js";
 import type { PanesOperations, PanesWatchController } from "../domains/mux/operations.js";
 import type { ObservabilityContract } from "../domains/observability/index.js";
 import { appendOutOfTurnUsageRow } from "../domains/observability/out-of-turn-usage.js";
@@ -149,6 +151,8 @@ export interface InteractiveDeps {
 	 * composition root so the tool registry and this surface drive one instance.
 	 */
 	panes?: PanesOperations;
+	/** The music pane behind `/music` and its leader key. Absent without panes. */
+	music?: MusicOperations;
 	/**
 	 * Factory seam for the dispatch-to-pane bridge, so a contract test can drive
 	 * it without a TUI. Production leaves it unset and gets `createMuxBridge`.
@@ -333,6 +337,8 @@ export interface KeyBindingDeps {
 	toggleDispatchBoard: () => void;
 	/** `/files` as a key: open the files pane when closed, close it when open. */
 	toggleFilesPane: () => void;
+	/** `/music` as a key: open and play when closed, stop and close when open. */
+	toggleMusic?: () => void;
 	openTasks: () => void;
 	openDecisions: () => void;
 	backgroundDispatch: () => void;
@@ -398,6 +404,10 @@ export function dispatchInteractiveAction(id: ClioKeybinding, deps: KeyBindingDe
 			return true;
 		case "clio-coder.files.toggle":
 			deps.toggleFilesPane();
+			return true;
+		case "clio-coder.music.toggle":
+			if (!deps.toggleMusic) return false;
+			deps.toggleMusic();
 			return true;
 		case "clio-coder.tasks.open":
 			deps.openTasks();
@@ -915,6 +925,7 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 		...(deps.seedTaskMemory ? { seedTaskMemory: deps.seedTaskMemory } : {}),
 		openView: (filter) => openViewOverlayState(filter),
 		...(deps.panes ? { panes: deps.panes } : {}),
+		...(deps.music ? { music: deps.music } : {}),
 		openModel: () => openModelOverlayState(),
 		openModelScope: (ref) => openModelScopeState(ref),
 		openConfigure: () => overlayLifecycle.openConfigureState(),
@@ -1405,6 +1416,21 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 					} else if (result.status === "closed") notify("info", "files pane closed", "files:close");
 					else if (result.status === "missing-binary") notify("warning", result.detail, "files:missing");
 					else notify("warning", result.reason, "files:refused");
+				});
+			},
+			toggleMusic: () => {
+				const music = deps.music;
+				if (!music) {
+					notify(
+						"info",
+						"music needs the pane layer: restart inside herdr with `clio-coder --with-panes`, then use /music",
+						"music:info",
+					);
+					return;
+				}
+				void music.toggle().then((result) => {
+					const level = result.status === "playing" ? "success" : result.status === "stopped" ? "info" : "warning";
+					notify(level, describeMusicResult(result), "music:toggle");
 				});
 			},
 		},

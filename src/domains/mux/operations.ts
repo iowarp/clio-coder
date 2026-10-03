@@ -97,7 +97,7 @@ export interface PanesEffectiveSettings {
 
 /** One managed dock's live geometry, flattened for `/panes` status. */
 export interface PanesDockStatus {
-	slot: "workers" | "files";
+	slot: "workers" | "files" | "music";
 	paneId: string;
 	/** Share of the axis the dock currently targets, 0..0.5. */
 	targetShare: number;

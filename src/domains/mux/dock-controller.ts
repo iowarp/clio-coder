@@ -3,8 +3,8 @@
  *
  * A dock is a pane in a fixed position relative to Clio's anchor pane with a
  * target share of the anchor's axis, a minimum size in cells, and a managed
- * lifecycle. Two slots exist: `workers` to the right of the anchor and
- * `files` below it. Ad-hoc utility panes are not docks and are never touched
+ * lifecycle. Three slots exist: `workers` to the right of the anchor, and
+ * `files` and `music` below it. Ad-hoc utility panes are not docks and are never touched
  * here.
  *
  * The controller owns geometry only. Ownership stays in the pane registry,
@@ -27,8 +27,8 @@
 import type { MuxClient } from "./socket-client.js";
 import type { MuxLayoutNode, MuxLog, MuxPaneRef, MuxRect, MuxTabGeometry } from "./types.js";
 
-/** The two managed dock positions. */
-export type DockSlot = "workers" | "files";
+/** The managed dock positions. */
+export type DockSlot = "workers" | "files" | "music";
 
 export interface DockSpec {
 	slot: DockSlot;
@@ -47,6 +47,10 @@ export interface DockSpec {
 export const DOCK_SPECS: Readonly<Record<DockSlot, DockSpec>> = {
 	workers: { slot: "workers", direction: "right", defaultShare: 0.34, minCells: 48 },
 	files: { slot: "files", direction: "down", defaultShare: 0.3, minCells: 12 },
+	// cliamp draws its spectrum only from 16 inner rows up (40x10 drops it), and
+	// herdr's border takes two more. The tiny default share means the floor
+	// always wins, so the pane is exactly as tall as the bars need.
+	music: { slot: "music", direction: "down", defaultShare: 0.05, minCells: 18 },
 };
 
 /** A dock may never take more than half the axis, whatever the share asks. */
