@@ -97,7 +97,7 @@
 		gap: 1rem;
 		padding: 0.4rem 0.4rem 0.4rem 1rem;
 		border: 1px solid var(--code-border);
-		border-radius: var(--radius);
+		border-radius: var(--radius-sm);
 		background: var(--code);
 		color: var(--code-ink);
 	}
@@ -129,7 +129,7 @@
 		padding: 0;
 		border: 1px solid var(--code);
 		background: transparent;
-		border-radius: var(--radius);
+		border-radius: var(--radius-sm);
 		color: var(--code-muted);
 		transition:
 			color var(--motion-fast) var(--motion-ease),

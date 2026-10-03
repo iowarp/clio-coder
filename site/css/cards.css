@@ -75,7 +75,7 @@ footer {
 }
 aside {
 	border: 1px solid var(--line-control);
-	border-radius: 10px;
+	border-radius: var(--radius);
 	background: var(--paper-raised);
 	padding: 30px;
 	display: flex;

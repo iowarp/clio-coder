@@ -34,7 +34,7 @@ ${theme(initial)}
   --header: 5rem;
   --space-1: .25rem; --space-2: .5rem; --space-3: .75rem; --space-4: 1rem;
   --space-5: 1.5rem; --space-6: 2rem; --space-7: 3rem; --space-8: 4rem; --space-9: 6rem;
-  --radius: .35rem;
+  --radius-sm: 2px; --radius: 4px;
 ${Object.entries(motion)
 	.map(([key, value]) => `  --motion-${key}: ${value};`)
 	.join("\n")}

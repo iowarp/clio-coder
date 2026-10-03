@@ -260,7 +260,7 @@
 		block-size: 2.75rem;
 		background: transparent;
 		border: 1px solid var(--line-control);
-		border-radius: var(--radius);
+		border-radius: var(--radius-sm);
 		font-size: 1.3rem;
 		line-height: 1;
 	}
@@ -276,7 +276,7 @@
 		list-style: none;
 		border: 1px solid var(--line-control);
 		padding: 0.5rem 0.75rem;
-		border-radius: var(--radius);
+		border-radius: var(--radius-sm);
 		font-size: 0.85rem;
 	}
 	.nav-more summary::-webkit-details-marker {
@@ -340,7 +340,7 @@
 		background: var(--accent);
 		color: var(--on-accent);
 		border: 1px solid var(--accent);
-		border-radius: var(--radius);
+		border-radius: var(--radius-sm);
 		font-size: 0.9rem;
 		font-weight: 500;
 		text-decoration: none;
@@ -431,7 +431,7 @@
 	.hero-stage {
 		padding: 0.9rem 0.9rem 0;
 		border: 1px solid var(--line-control);
-		border-radius: 0.65rem;
+		border-radius: var(--radius);
 		background: var(--paper-raised);
 	}
 	.stage-label,
@@ -453,7 +453,7 @@
 	.hero-capture {
 		inline-size: 100%;
 		border: 1px solid var(--line);
-		border-radius: 0.25rem;
+		border-radius: var(--radius-sm);
 	}
 	.stage-caption {
 		padding-block: 0.85rem;
@@ -552,7 +552,7 @@
 		border: 1px solid var(--line-control);
 		padding: 0.2rem 0.45rem;
 		color: var(--muted);
-		border-radius: 0.2rem;
+		border-radius: var(--radius-sm);
 		font: 0.65rem var(--font-mono);
 		white-space: nowrap;
 	}
@@ -570,14 +570,14 @@
 		color: var(--code-ink);
 		padding: 0.6rem 1rem;
 		border: 1px solid var(--code-border);
-		border-radius: var(--radius);
+		border-radius: var(--radius-sm);
 		margin-block-start: 1rem;
 	}
 	.copy {
 		background: transparent;
 		border: 1px solid var(--code-border);
 		color: var(--code-muted);
-		border-radius: 0.2rem;
+		border-radius: var(--radius-sm);
 		padding: 0.45rem 0.6rem;
 		font: 0.65rem var(--font-mono);
 		min-block-size: 2rem;
@@ -861,7 +861,7 @@
 		inline-size: 100%;
 		min-block-size: 2.75rem;
 		border: 1px solid var(--line-control);
-		border-radius: var(--radius);
+		border-radius: var(--radius-sm);
 		padding: 0.6rem 0.7rem;
 		color: var(--ink);
 		background: var(--paper-raised);
@@ -972,7 +972,7 @@
 		color: var(--ink);
 		padding: 0.15rem 0.3rem;
 		border: 1px solid var(--line);
-		border-radius: 0.15rem;
+		border-radius: var(--radius-sm);
 	}
 	.doc pre {
 		max-inline-size: 100%;
@@ -1516,7 +1516,7 @@
 	}
 	.hero-stage .capture-link {
 		overflow: clip;
-		border-radius: 0.25rem;
+		border-radius: var(--radius-sm);
 	}
 	.hero-capture,
 	.interface-item img {
@@ -1728,7 +1728,7 @@
 		min-inline-size: 2.75rem;
 		min-block-size: 2.75rem;
 		border: 1px solid var(--line-control);
-		border-radius: var(--radius);
+		border-radius: var(--radius-sm);
 		padding: 0.4rem 0.75rem;
 		color: var(--ink);
 		background: var(--paper);
