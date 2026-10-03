@@ -786,6 +786,11 @@ export interface TurnOutcomeView {
 	readonly usage: Usage | null;
 	readonly usageTitle: string | null;
 	readonly finishedAt: string | null;
+	readonly breakdown: readonly {
+		group: "Model" | "Usage" | "Speed" | "Cache" | "Cost" | "Tools";
+		label: string;
+		value: string;
+	}[];
 }
 
 /** Two numbers visible. */
@@ -824,6 +829,53 @@ export function turnOutcome(turn: Turn, toolCount: number): TurnOutcomeView {
 		turn.startedAt && turn.finishedAt ? Date.parse(turn.finishedAt) - Date.parse(turn.startedAt) : Number.NaN;
 	// Under a second is not a duration worth a place in the line.
 	if (Number.isFinite(elapsed) && elapsed >= 1000) facts.push(compactDuration(elapsed));
+	const breakdown: { group: "Model" | "Usage" | "Speed" | "Cache" | "Cost" | "Tools"; label: string; value: string }[] =
+		[];
+	if (turn.details?.model) breakdown.push({ group: "Model", label: "Model", value: turn.details.model });
+	const usage = turn.usage;
+	if (usage) {
+		for (const [key, label] of [
+			["input", "Input"],
+			["output", "Output"],
+			["reasoning", "Reasoning"],
+		] as const)
+			if (usage[key] > 0) breakdown.push({ group: "Usage", label, value: usage[key].toLocaleString("en-US") });
+		const inputTotal = usage.input + usage.cacheRead + usage.cacheWrite;
+		if (usage.cacheRead > 0 && inputTotal > 0)
+			breakdown.push({
+				group: "Cache",
+				label: "Hit share",
+				value: `${Math.round((100 * usage.cacheRead) / inputTotal)}%`,
+			});
+		if (usage.cacheWrite > 0)
+			breakdown.push({ group: "Cache", label: "Written", value: usage.cacheWrite.toLocaleString("en-US") });
+		if (usage.costUsd !== undefined && Number.isFinite(usage.costUsd))
+			breakdown.push({
+				group: "Cost",
+				label: "Reported",
+				value: usage.costUsd === 0 ? "$0" : `$${usage.costUsd.toFixed(4)}`,
+			});
+	}
+	if (turn.details?.outputTokensPerSecond && turn.details.outputTokensPerSecond > 0)
+		breakdown.push({
+			group: "Speed",
+			label: "Output",
+			value: `${turn.details.outputTokensPerSecond.toFixed(1)} tokens/s`,
+		});
+	if (turn.details?.ttftMs && turn.details.ttftMs > 0)
+		breakdown.push({
+			group: "Speed",
+			label: "First token",
+			value:
+				turn.details.ttftMs < 1000
+					? `${Math.round(turn.details.ttftMs)} ms`
+					: `${(turn.details.ttftMs / 1000).toFixed(2)}s`,
+		});
+	if (toolCount > 0) breakdown.push({ group: "Tools", label: "Calls", value: String(toolCount) });
+	if (usage?.costUsd !== undefined && Number.isFinite(usage.costUsd))
+		facts.push(usage.costUsd === 0 ? "$0" : `$${usage.costUsd.toFixed(4)}`);
+	if (turn.details?.outputTokensPerSecond && turn.details.outputTokensPerSecond > 0)
+		facts.push(`${turn.details.outputTokensPerSecond.toFixed(1)} tokens/s`);
 	if (toolCount > 0) facts.push(`${toolCount} tool ${toolCount === 1 ? "call" : "calls"}`);
 	return {
 		tone: shape.tone,
@@ -832,9 +884,30 @@ export function turnOutcome(turn: Turn, toolCount: number): TurnOutcomeView {
 		detail: turn.status === "succeeded" ? null : (turn.problem?.detail ?? null),
 		stopReason: turn.status === "failed" ? turn.stopReason : null,
 		facts,
-		usageLabel: turn.usage === null ? null : `${compactCount(turn.usage.input + turn.usage.output)} tokens`,
+		usageLabel: usage
+			? [
+					usage.input + usage.cacheRead + usage.cacheWrite > 0
+						? `${compactCount(usage.input + usage.cacheRead + usage.cacheWrite)} in`
+						: null,
+					usage.output > 0 ? `${compactCount(usage.output)} out` : null,
+				]
+					.filter(Boolean)
+					.join(" / ") || null
+			: null,
 		usage: turn.usage,
 		usageTitle: turn.usage === null ? null : usageTitle(turn.usage),
 		finishedAt: turn.finishedAt,
+		breakdown,
 	};
+}
+
+/** Named groups keep the disclosure readable without printing empty categories. */
+export function outcomeDetailGroups(outcome: TurnOutcomeView) {
+	const groups = new Map<string, { label: string; value: string }[]>();
+	for (const field of outcome.breakdown) {
+		const bucket = groups.get(field.group) ?? [];
+		bucket.push({ label: field.label, value: field.value });
+		groups.set(field.group, bucket);
+	}
+	return [...groups].map(([label, fields]) => ({ label, fields }));
 }

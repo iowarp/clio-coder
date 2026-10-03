@@ -9,12 +9,12 @@ import { SESSION_CACHES, sessionBuffer } from "../api/sessions.js";
 import { ApprovalBanner, pendingPermission } from "../chat/Approval.js";
 import { ChatTurnView } from "../chat/ChatTurn.js";
 import { Composer, fillComposer } from "../chat/Composer.js";
-import { CONTEXT_WARNING_LABEL, placeHealthRows, STARTER_PROMPTS, TRUNCATION_NOTE } from "../chat/chat-turn.js";
+import { STARTER_PROMPTS, TRUNCATION_NOTE } from "../chat/chat-turn.js";
 import { LiveWorkers, workerCount } from "../chat/FleetStrip.js";
 import { foldFleetRuns, isLiveRun } from "../chat/fleet-facts.js";
-import { type HealthRow, type HealthSummary, summarizeHealth } from "../chat/health.js";
+import type { HealthRow } from "../chat/health.js";
+import { summarizeHealth } from "../chat/health.js";
 import { Interview } from "../chat/Interview.js";
-import { ProjectTrustNotice } from "../chat/ProjectTrustNotice.js";
 import { PaneContext, type PaneTarget } from "../chat/pane-context.js";
 import { usePaneState } from "../chat/pane-state.js";
 import { routeFacts } from "../chat/route.js";
@@ -24,7 +24,6 @@ import { TelemetryChips } from "../chat/TelemetryChips.js";
 import { type ChatTurn, groupTurns, turnStatuses } from "../chat/turns.js";
 import { useShown } from "../chat/use-shown.js";
 import { Icon } from "../design/icons.js";
-import { StatusMark } from "../design/status.js";
 import { setPageTitle } from "../interaction/announcer.js";
 import { useShortcut } from "../interaction/use-shortcut.js";
 import { JumpToLatest } from "../render/FollowLatest.js";
@@ -83,39 +82,6 @@ function EmptyTranscript({ sessionId }: { sessionId: string }) {
 					</li>
 				))}
 			</ul>
-		</div>
-	);
-}
-
-/**
- * Session health that needs a reader. A healthy target is one glyph in the route chip; anything else,
- * and every fact kind this build does not recognise, is written out here in full.
- */
-function SessionHealth({ summary }: { summary: HealthSummary }) {
-	const concerns = summary.providers.filter((row) => row.tone !== "success");
-	if (!summary.contextWarning && concerns.length === 0 && summary.unknown.length === 0) return null;
-	return (
-		<div className="conversation__health">
-			{summary.contextWarning ? (
-				<p className="context-banner" role="status">
-					<strong>{CONTEXT_WARNING_LABEL}</strong> {summary.contextWarning.detail ?? summary.contextWarning.label}
-				</p>
-			) : null}
-			{concerns.length > 0 || summary.unknown.length > 0 ? (
-				<div className="session-health">
-					{concerns.map((row) => (
-						<StatusMark
-							key={row.id}
-							tone={row.tone}
-							label={row.label}
-							{...(row.detail === null ? {} : { detail: row.detail })}
-						/>
-					))}
-					{summary.unknown.map((row) => (
-						<StatusMark key={row.id} tone={row.tone} label={row.label} />
-					))}
-				</div>
-			) : null}
 		</div>
 	);
 }
@@ -204,12 +170,7 @@ function SessionView({ client, id }: { client: Client; id: string }) {
 	const fleet = snapshot?.fleet;
 	const liveWorkers = useMemo(() => (fleet === undefined ? 0 : foldFleetRuns(fleet).filter(isLiveRun).length), [fleet]);
 	const health = useMemo(() => summarizeHealth(snapshot?.health ?? []), [snapshot?.health]);
-	const notices = useMemo(() => {
-		const rows = [health.compaction, health.toolBudget, ...health.scopeNotices].filter(
-			(row): row is HealthRow => row !== null,
-		);
-		return placeHealthRows(rows, snapshot?.turns ?? []);
-	}, [health, snapshot?.turns]);
+
 	const running = snapshot?.turns.at(-1)?.status === "running";
 	const now = useSecond(running || (snapshot?.permissions.some((item) => item.status === "pending") ?? false));
 	// A deep link starts without a cached snapshot. Attach the observer only once
@@ -340,10 +301,6 @@ function SessionView({ client, id }: { client: Client; id: string }) {
 							/>
 						</div>
 					</TopBar>
-					<div className="conversation__notices">
-						<SessionHealth summary={health} />
-						<ProjectTrustNotice trust={snapshot.telemetry?.trust} />
-					</div>
 					<div className="conversation__approval">
 						{connection === "Reconnecting…" || connection === "Not connected" || session.error ? (
 							<ConversationBanner
@@ -398,15 +355,7 @@ function SessionView({ client, id }: { client: Client; id: string }) {
 					<div className="chat-transcript" ref={scroll}>
 						<div className="chat-transcript__content">
 							{snapshot.timelineTruncated ? <p className="trace-warning">{TRUNCATION_NOTE}</p> : null}
-							{notices.leading.length > 0 ? (
-								<ul className="turn-health">
-									{notices.leading.map((row) => (
-										<li key={row.id}>
-											<StatusMark tone={row.tone} label={row.label} {...(row.detail === null ? {} : { detail: row.detail })} />
-										</li>
-									))}
-								</ul>
-							) : null}
+
 							{turns.map((item) => (
 								<ChatTurnView
 									key={item.turnId}
@@ -418,7 +367,7 @@ function SessionView({ client, id }: { client: Client; id: string }) {
 									pendingPermissionId={pending?.id ?? null}
 									nowMs={item.settled ? 0 : now}
 									stopping={false}
-									notices={notices.after.get(item.turnId) ?? NO_ROWS}
+									notices={NO_ROWS}
 									workspaceRoot={workspaceRoot}
 									liveWorkers={item.settled ? 0 : liveWorkers}
 								/>

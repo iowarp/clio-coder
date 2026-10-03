@@ -449,26 +449,25 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 	/**
 	 * One visible line when the requested thinking dial cannot apply as-is
 	 * (reasoning-class-never model, always-on model, on/off coercion). Emitted
-	 * where the dial takes effect, once per target+model+request change; the
+	 * where the dial takes effect, once per session, model and requested level; the
 	 * same facts stay inspectable in receipts via runtimeResolution.thinking.
 	 */
-	let lastThinkingNoticeKey: string | null = null;
+	const announcedThinkingNotices = new Set<string>();
+	let thinkingNoticeSession: string | undefined;
 	const emitThinkingClampNotice = (resolution: ChatLoopTarget["runtimeResolution"]): void => {
+		const sessionId = deps.sessionId?.();
+		// The first runtime can precede session creation; bind its notices to that session.
+		if (sessionId !== thinkingNoticeSession) {
+			if (thinkingNoticeSession !== undefined) announcedThinkingNotices.clear();
+			thinkingNoticeSession = sessionId;
+		}
 		const thinking = resolution.modelRuntime.thinking;
 		const notice = thinking.notice.trim();
 		if (thinking.noticeKind === "applied" || notice.length === 0) return;
-		const key = [
-			resolution.targetId,
-			resolution.wireModelId,
-			resolution.requestedThinkingLevel,
-			resolution.effectiveThinkingLevel,
-			notice,
-		].join("|");
-		if (key === lastThinkingNoticeKey) return;
-		lastThinkingNoticeKey = key;
-		deps.emitNotice(
-			`[Clio Coder] thinking ${resolution.requestedThinkingLevel} -> ${thinking.display}: ${notice} (${resolution.wireModelId})`,
-		);
+		const key = `${resolution.wireModelId}|${resolution.requestedThinkingLevel}`;
+		if (announcedThinkingNotices.has(key)) return;
+		announcedThinkingNotices.add(key);
+		deps.emitNotice(notice);
 	};
 
 	// A target id/model names the selection, not its current URL, auth, pricing
@@ -1029,6 +1028,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 				publicEvent = {
 					...publicEvent,
 					modelTimeMs: Math.round(Math.max(0, eventClock - apiCallStartedAt)),
+					ttftMs: apiCallFirstDeltaAt === null ? null : Math.round(Math.max(0, apiCallFirstDeltaAt - apiCallStartedAt)),
 				} as typeof publicEvent;
 			}
 			if (publicEvent) generationTiming.record(publicEvent, eventClock);

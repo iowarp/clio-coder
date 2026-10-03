@@ -280,7 +280,7 @@ export function applyThinkingMechanism(
 			};
 			if (requestedActive && level !== "low") {
 				result.noticeKind = "ignored-on-off";
-				result.notice = "model has on/off thinking; level coerced to on";
+				result.notice = `This model only turns thinking on or off, so Thinking ${level} runs as on.`;
 			}
 			return result;
 		}
@@ -530,11 +530,11 @@ function resolveThinkingCapability(
 			);
 		}
 	} else if (mechanism === "on-off" && configuredLevel !== effectiveLevel) {
-		applied = appendNotice(
-			applied,
-			`model has on/off thinking; ${configuredLevel} was coerced to ${thinkingLevelDisplayWord(mechanism, effectiveLevel)}`,
-			"ignored-on-off",
-		);
+		applied = {
+			...applied,
+			notice: `This model only turns thinking on or off, so Thinking ${configuredLevel} runs as ${thinkingLevelDisplayWord(mechanism, effectiveLevel)}.`,
+			noticeKind: "ignored-on-off",
+		};
 	} else if (mechanism === "always-on" && configuredLevel !== effectiveLevel) {
 		applied = appendNotice(applied, `${configuredLevel} was ignored because thinking is always on`, "always-on");
 	} else if (mechanism === "none" && configuredLevel !== effectiveLevel) {

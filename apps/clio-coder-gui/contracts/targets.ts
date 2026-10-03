@@ -9,6 +9,9 @@ export const SessionTargets = Type.Object(
 					id: Type.String({ maxLength: 128 }),
 					runtime: Type.String({ maxLength: 64 }),
 					models: Type.Array(Type.String({ maxLength: 256 }), { maxItems: 64 }),
+					thinkingLevels: Type.Optional(
+						Type.Record(Type.String({ maxLength: 256 }), Type.Array(Type.String({ maxLength: 16 }), { maxItems: 7 })),
+					),
 					isOrchestrator: Type.Boolean(),
 				},
 				closed,

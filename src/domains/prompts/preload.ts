@@ -79,8 +79,10 @@ export function selectProjectPreload(
 	): ProjectPreloadClass => {
 		const includedChars = text.length;
 		const includedLines = renderedLines(text);
-		const incomplete = sources.filter((source) => source.omissionReason !== null).length;
-		const coverageLabel = mode === "full" ? "included in full" : mode === "none" ? "none found" : "partly included";
+		const omittedFiles = sources.filter((source) => source.omissionReason !== null);
+		const coverageLabel = omittedFiles
+			.map((source) => `${source.path}: ${source.includedLines} of ${source.availableLines} lines included`)
+			.join("; ");
 		return {
 			mode,
 			chars,
@@ -97,7 +99,7 @@ export function selectProjectPreload(
 					? `all ${lines} lines loaded`
 					: mode === "none"
 						? "none found"
-						: `${coverageLabel} (${includedChars}/${chars} text units (UTF-16), ${includedLines}/${lines} lines; ${sources.length - incomplete} of ${sources.length} handbook files fully included${providerSupportsTools === null ? "; model tool support not checked" : ""})`,
+						: `${coverageLabel || "Some project support instructions were left out"}${omittedSupportFragments > 0 ? `; ${omittedSupportFragments} support fragments left out` : ""}. Shorten the project instructions to fit within ${FULL_PROJECT_CONTEXT_MAX_LINES} lines and ${maxChars.toLocaleString("en-US")} characters, including supporting instructions. There is no setting to raise this preload limit.`,
 		};
 	};
 	if (fits(context.text)) {

@@ -46,9 +46,11 @@ export interface PaneSession {
 	readonly turns: SessionSnapshot["turns"];
 	readonly fleet: SessionSnapshot["fleet"];
 	readonly telemetry: SessionSnapshot["telemetry"];
+	readonly health: SessionSnapshot["health"];
 	readonly timelineTruncated: boolean;
 	/** Tool calls in the order they were made. */
 	readonly tools: readonly TimelineItem[];
+	readonly notices: readonly TimelineItem[];
 }
 
 /**
@@ -65,7 +67,9 @@ export function selectPaneSession(session: SessionSnapshot): PaneSession {
 		turns: session.turns,
 		fleet: session.fleet,
 		telemetry: session.telemetry,
+		health: session.health,
 		timelineTruncated: session.timelineTruncated,
 		tools: session.timeline.filter(readsPane),
+		notices: session.timeline.filter((item) => item.kind === "notice"),
 	};
 }

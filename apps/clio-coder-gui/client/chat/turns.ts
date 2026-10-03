@@ -10,6 +10,7 @@
 // streams.
 
 import type { TimelineItem, Turn } from "../../contracts/sessions.js";
+import { isConversationItem } from "./session-facts-model.js";
 
 export type ChatSegment =
 	| Readonly<{ kind: "response"; item: TimelineItem }>
@@ -62,6 +63,7 @@ function buildTurn(turnId: string, items: readonly TimelineItem[], status: Turn[
 		pending = [];
 	};
 	for (const item of items) {
+		if (!isConversationItem(item)) continue;
 		switch (item.kind) {
 			case "user":
 				request = item;
@@ -71,12 +73,6 @@ function buildTurn(turnId: string, items: readonly TimelineItem[], status: Turn[
 				segments.push({ kind: "response", item });
 				break;
 			case "notice":
-				if (item.toolKind !== "transcript") {
-					pending.push(item);
-					break;
-				}
-				flush();
-				segments.push({ kind: "notice", item });
 				break;
 			case "thought":
 			case "tool":

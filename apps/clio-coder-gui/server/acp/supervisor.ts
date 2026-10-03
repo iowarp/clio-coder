@@ -74,7 +74,7 @@ import { fleetEvent } from "./fleet-events.js";
 import { Interviews } from "./interviews.js";
 import { Permissions, type PermissionTimers } from "./permissions.js";
 import { projectConfigOptions } from "./session-config.js";
-import { sessionUpdateTelemetry } from "./telemetry.js";
+import { sessionResultTelemetry, sessionUpdateTelemetry } from "./telemetry.js";
 
 /**
  * The text of an ACP tool-call content array, or undefined when the frame
@@ -185,6 +185,8 @@ export class Supervisor {
 	private resting(entry: Entry) {
 		return (
 			entry.bound &&
+			!entry.parking &&
+			!entry.closing &&
 			entry.turnId === null &&
 			!entry.rebase &&
 			!entry.drafting &&
@@ -347,7 +349,19 @@ export class Supervisor {
 	async view(id: string) {
 		const entry = this.entries.get(id);
 		if (entry?.parking) await entry.retired?.catch(() => undefined);
-		else if (entry) entry.activeAt = performance.now();
+		else if (entry) {
+			entry.activeAt = performance.now();
+			if (entry.bound && this.resting(entry) && entry.client.capabilities.trustRefresh) {
+				const telemetry = sessionResultTelemetry(
+					await entry.client.request(entry.client.capabilities.trustRefresh, { sessionId: id }),
+				);
+				if (JSON.stringify(telemetry.trust) !== JSON.stringify(this.snapshot(id).telemetry?.trust) && this.resting(entry)) {
+					entry.parking = true;
+					this.retireDetached(entry);
+					await entry.retired;
+				}
+			}
+		}
 		if (this.snapshot(id).state === "parked") await this.wake(id);
 		return {};
 	}
@@ -532,7 +546,8 @@ export class Supervisor {
 			entry.client
 				.prompt(id, text, images, files)
 				.then((result) => {
-					if (entry.turnId === turnId) this.finish(entry, result.stopReason, result.usage, null, new Date().toISOString());
+					if (entry.turnId === turnId)
+						this.finish(entry, result.stopReason, result.usage, null, new Date().toISOString(), result.details);
 				})
 				.catch((error) => {
 					if (entry.turnId === turnId) this.failTurn(entry, acpProblem(error));
@@ -597,6 +612,7 @@ export class Supervisor {
 		usage: Turn["usage"],
 		problem: Turn["problem"],
 		finishedAt: string | null,
+		details?: Turn["details"],
 	) {
 		if (!entry.turnId) return;
 		entry.permissions?.cancel();
@@ -611,6 +627,7 @@ export class Supervisor {
 				usage,
 				problem,
 				finishedAt,
+				...(details ? { details } : {}),
 			},
 		});
 		entry.turnId = null;
@@ -693,23 +710,13 @@ export class Supervisor {
 			if (content.type !== "text" || typeof content.text !== "string")
 				throw new AppProblem("upstream_acp", "ACP message is not a text chunk.");
 			if (kind === "agent_message_chunk" && meta["clio-coder/notice"] !== undefined) {
-				this.publish({
-					type: "turn.tool",
-					payload: {
-						resource: entry.id,
-						revision: common.revision,
-						item: {
-							id: randomUUID(),
-							turnId: entry.turnId,
-							sequence: 0,
-							kind: "notice",
-							toolKind: "transcript",
-							text: boundedText(content.text, 16384),
-							status: "completed",
-							origin,
-						},
-					},
-				});
+				const text = boundedText(content.text, 16384).trim();
+				const notices = this.snapshot(entry.id).telemetry?.notices ?? [];
+				if (text && !notices.includes(text))
+					this.publish({
+						type: "session.telemetry",
+						payload: { resource: entry.id, revision: common.revision, telemetry: { notices: [...notices, text].slice(-32) } },
+					});
 				return;
 			}
 			this.publish({

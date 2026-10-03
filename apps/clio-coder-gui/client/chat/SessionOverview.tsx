@@ -15,8 +15,11 @@ import { boardView, type PlanRow } from "./board-model.js";
 import { branchView } from "./branch-model.js";
 import { changeCounts, summarizeChanges } from "./changes-model.js";
 import { FLEET_STATE_LABELS, FLEET_STATE_TONES, fleetEvidence, foldFleetRuns, isLiveRun } from "./fleet-facts.js";
+import { summarizeHealth } from "./health.js";
 import { compactCount, compactDuration, contextMeter, contextSegments, taskOverview } from "./overview-model.js";
 import type { PaneSession, PaneView } from "./pane-model.js";
+import { ProjectTrustNotice } from "./ProjectTrustNotice.js";
+import { modelSessionFacts, sessionFacts } from "./session-facts-model.js";
 import { ReceiptLine } from "./ReceiptLine.js";
 import type { RouteFacts } from "./route.js";
 import {
@@ -165,6 +168,8 @@ export function SessionOverview({
 	const view = board.data ? boardView(board.data) : null;
 	const plan = session.telemetry?.plan ? livePlanView(session.telemetry.plan) : (view?.plan ?? null);
 	const workspace = session.telemetry?.workspace;
+	const facts = sessionFacts(session.notices, session.telemetry?.notices);
+	const health = summarizeHealth(session.health);
 	const meter = ledger.data ? contextMeter(ledger.data) : null;
 	const segments = ledger.data ? contextSegments(ledger.data) : [];
 	const overview = useMemo(() => taskOverview(session.turns, nowMs), [session.turns, nowMs]);
@@ -291,10 +296,15 @@ export function SessionOverview({
 						<span className="pane-mono">{route.text}</span>
 					</p>
 					{route.thinking ? <p className="pane-card__facts">Thinking {route.thinking}</p> : null}
+					{modelSessionFacts(route.config, facts.model).map((text) => (
+						<p key={text} className="pane-card__facts">
+							{text}
+						</p>
+					))}
 				</Section>
 			) : null}
 
-			{meter || capabilities.data?.context ? (
+			{meter || capabilities.data?.context || facts.context.length > 0 ? (
 				<Section
 					id="pane-context"
 					title="Context"
@@ -338,6 +348,35 @@ export function SessionOverview({
 					) : (
 						<p className="pane-empty">{ledger.isPending ? "Reading the context window…" : "Not reported yet."}</p>
 					)}
+					{facts.context.map((text) => (
+						<p key={text} className="pane-card__facts">
+							{text}
+						</p>
+					))}
+				</Section>
+			) : null}
+
+			{session.telemetry?.trust?.ignored.length ? (
+				<Section id="pane-trust" title="Project trust" icon="shield">
+					<ProjectTrustNotice trust={session.telemetry.trust} />
+				</Section>
+			) : null}
+			{health.rows.length > 0 ? (
+				<Section id="pane-health" title="Health" icon="shield">
+					{health.rows.map((row) => (
+						<p key={row.id} className="pane-card__facts">
+							<StatusMark tone={row.tone} label={row.label} {...(row.detail ? { detail: row.detail } : {})} />
+						</p>
+					))}
+				</Section>
+			) : null}
+			{facts.other.length > 0 ? (
+				<Section id="pane-notes" title="Session notes" icon="sessions">
+					{facts.other.map((text) => (
+						<p key={text} className="pane-card__facts">
+							{text}
+						</p>
+					))}
 				</Section>
 			) : null}
 

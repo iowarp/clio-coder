@@ -77,13 +77,13 @@ test("groupTurns interleaves prose, reasoning and runs of activity", () => {
 	assert.equal(turn.settled, true);
 	assert.deepEqual(
 		turn.segments.map((segment) => (segment.kind === "activity" ? ["activity", segment.items.length] : segment.kind)),
-		["response", ["activity", 2], "response", ["activity", 3]],
+		["response", ["activity", 2], "response", ["activity", 2]],
 	);
 	const work = turn.segments[3];
 	assert.ok(work?.kind === "activity");
 	assert.deepEqual(
 		work.items.map((entry) => entry.id),
-		["f", "g", "h"],
+		["f", "g"],
 		"reasoning between calls stays with the calls, in wire order",
 	);
 	const activity = turn.segments[1];
@@ -798,7 +798,7 @@ test("a refused call and a stopped run end without breaking, so groups count the
 	assert.equal(summarizeActivity([refused, tool("c", "failed")]).label, "1 tool failed");
 });
 
-test("transcript notices stay visible between activity and the response", () => {
+test("engine notices stay out of the conversation segments", () => {
 	const turns = groupTurns(
 		[
 			item({ id: "u", turnId: "t", kind: "user", text: "Continue" }),
@@ -816,6 +816,6 @@ test("transcript notices stay visible between activity and the response", () => 
 	);
 	assert.deepEqual(
 		only(turns).segments.map((segment) => segment.kind),
-		["activity", "notice", "response"],
+		["activity", "response"],
 	);
 });

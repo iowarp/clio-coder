@@ -29,6 +29,7 @@ import {
 	receiptWireFacts,
 } from "../../domains/dispatch/receipt-facts.js";
 import type { ProvidersContract } from "../../domains/providers/contract.js";
+import { resolveRuntimeTarget } from "../../domains/providers/runtime-resolution.js";
 import { isOrchestratorEligibleRuntime } from "../../domains/providers/eligibility.js";
 import { type CostProvenance, resolveCostProvenance } from "../../domains/providers/types/cost-provenance.js";
 import { type AutonomyLevel, DEFAULT_AUTONOMY_LEVEL, isAutonomyLevel } from "../../domains/safety/autonomy.js";
@@ -513,6 +514,10 @@ interface ActivePrompt {
 	stopReason: string;
 	usage: AcpServerUsage;
 	usageMessages: WeakSet<object>;
+	model?: string;
+	generationMs?: number;
+	timedOutputTokens?: number;
+	ttftMs?: number;
 	/**
 	 * Engine tool-call id -> every wire id it has been given this turn, oldest
 	 * first. An engine that reuses one id for two calls gets a second wire id
@@ -1636,6 +1641,26 @@ function handleChatEvent(
 	}
 	if (event.type === "message_end") {
 		const message = event.message;
+		if (isRecord(message) && message.role === "assistant") {
+			const model = safeStoredIdentifier(message.model, ACP_MAX_MODEL_ID_BYTES);
+			if (model) active.model = model;
+			const apiMs = event.modelTimeMs;
+			const ttftMs = event.ttftMs;
+			const output = isRecord(message.usage) ? message.usage.output : undefined;
+			if (typeof ttftMs === "number" && Number.isFinite(ttftMs) && ttftMs >= 0) {
+				if (active.ttftMs === undefined) active.ttftMs = ttftMs;
+				if (
+					typeof apiMs === "number" &&
+					Number.isFinite(apiMs) &&
+					apiMs > ttftMs &&
+					typeof output === "number" &&
+					output > 0
+				) {
+					active.generationMs = (active.generationMs ?? 0) + apiMs - ttftMs;
+					active.timedOutputTokens = (active.timedOutputTokens ?? 0) + output;
+				}
+			}
+		}
 		active.sawTurnEnd = true;
 		mergeMessageUsage(active.usage, message, active.usageMessages);
 		applyStopReason(active, message);
@@ -2093,6 +2118,7 @@ interface AcpSafeTargetProjection {
 	id: string;
 	runtime: string;
 	models: string[];
+	thinkingLevels?: Record<string, readonly AcpThinkingLevel[]>;
 	isOrchestrator: boolean;
 }
 
@@ -4018,6 +4044,16 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 			},
 		],
 	});
+	const sessionThinking = (session: AcpServerSession, model = session.model) => {
+		if (!options.providers || !session.target || !model) return null;
+		const resolved = resolveRuntimeTarget(options.providers, {
+			targetId: session.target,
+			wireModelId: model,
+			requestedThinkingLevel: session.thinkingLevel,
+			use: "orchestrator",
+		});
+		return resolved.ok ? resolved.target.modelRuntime.thinking : null;
+	};
 	const configOptions = (session: AcpServerSession) => {
 		const optionsList: Array<Record<string, unknown>> = [
 			{
@@ -4043,16 +4079,24 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 				category: "model",
 				type: "select",
 				currentValue: session.model,
-				options: models.map((model) => ({ value: model, name: model })),
+				options: models.map((model) => {
+					const thinking = sessionThinking(session, model);
+					return { value: model, name: model, ...(thinking ? { thinkingLevels: thinking.supportedLevels } : {}) };
+				}),
 			});
 		}
+		const thinking = sessionThinking(session);
 		optionsList.push({
 			id: "thinkingLevel",
 			name: "Thinking level",
 			category: "thought_level",
 			type: "select",
-			currentValue: session.thinkingLevel,
-			options: [...ACP_THINKING_LEVELS].map((level) => ({ value: level, name: level })),
+			currentValue: thinking?.effectiveLevel ?? session.thinkingLevel,
+			...(thinking?.notice ? { notice: thinking.notice } : {}),
+			options: (thinking?.supportedLevels ?? []).map((level) => ({
+				value: level,
+				name: thinking?.mechanism === "on-off" && level !== "off" ? "on" : level,
+			})),
 		});
 		return optionsList;
 	};
@@ -5086,6 +5130,13 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 		return {};
 	});
 
+	options.transport.onRequest("_clio-coder/session/trust", (params) => {
+		requireInitialized();
+		requireAuthenticated();
+		const session = getSession(assertParamKeys(params, new Set(["sessionId"])));
+		return { _meta: trustResultMeta(session.cwd) };
+	});
+
 	options.transport.onRequest("session/set_config_option", (params) => {
 		requireInitialized();
 		requireAuthenticated();
@@ -5296,13 +5347,24 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 			budgetBytes += targetSeparatorBytes + boundedBytes;
 			for (const model of projected.models) {
 				const candidateModels = [...bounded.models, model];
-				const candidate = { ...bounded, models: candidateModels };
+				const resolved = resolveRuntimeTarget(options.providers, {
+					targetId: projected.id,
+					wireModelId: model,
+					requestedThinkingLevel: "off",
+					use: "orchestrator",
+				});
+				const thinkingLevels = {
+					...bounded.thinkingLevels,
+					...(resolved.ok ? { [model]: resolved.target.modelRuntime.thinking.supportedLevels } : {}),
+				};
+				const candidate = { ...bounded, models: candidateModels, thinkingLevels };
 				const candidateBytes = utf8Bytes(JSON.stringify(candidate));
 				if (budgetBytes + candidateBytes - boundedBytes > ACP_MAX_TARGET_LIST_RESULT_BYTES) {
 					budgetExhausted = true;
 					break;
 				}
 				bounded.models.push(model);
+				bounded.thinkingLevels = thinkingLevels;
 				budgetBytes += candidateBytes - boundedBytes;
 				boundedBytes = candidateBytes;
 			}
@@ -5330,6 +5392,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 		try {
 			const status = await options.providers.probeTarget(targetId, { reasoning: false });
 			if (status === null) return { targetId, healthy: false, latencyMs: null, reason: "probe-failed" };
+			for (const session of sessions.values()) if (session.target === targetId) notifyConfigOptions(session);
 			const reason = safeProbeReason(options.providers, status);
 			const latencyMs =
 				typeof status.health.latencyMs === "number" &&
@@ -6039,7 +6102,19 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 
 /** PromptResponse is `{ stopReason, _meta? }`; usage is not an ACP v1 field. */
 function promptResponse(stopReason: string, active: ActivePrompt): AcpPromptResponse {
-	return { stopReason, _meta: { [ACP_USAGE_META_KEY]: turnUsageMeta(active.usage) } };
+	return {
+		stopReason,
+		_meta: {
+			[ACP_USAGE_META_KEY]: turnUsageMeta(active.usage),
+			"clio-coder/turn": {
+				...(active.model ? { model: active.model } : {}),
+				...(active.ttftMs !== undefined ? { ttftMs: active.ttftMs } : {}),
+				...(active.generationMs && active.timedOutputTokens
+					? { outputTokensPerSecond: active.timedOutputTokens / (active.generationMs / 1000) }
+					: {}),
+			},
+		},
+	};
 }
 
 export type AcpPromptContent = AcpContentBlock[];

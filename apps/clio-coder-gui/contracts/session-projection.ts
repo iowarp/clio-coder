@@ -273,7 +273,15 @@ export function applySessionDelta(current: SessionSnapshot, event: SessionDelta)
 				turns: state.turns.map((turn) => {
 					if (turn.id !== turnId) return turn;
 					const { queued: _queued, ...settled } = turn;
-					return { ...settled, status, stopReason, usage, problem, finishedAt };
+					return {
+						...settled,
+						status,
+						stopReason,
+						usage,
+						problem,
+						finishedAt,
+						...(event.payload.details ? { details: event.payload.details } : {}),
+					};
 				}),
 				timeline: state.timeline.map((item) =>
 					item.turnId === turnId && (item.status === "in_progress" || item.status === "pending")

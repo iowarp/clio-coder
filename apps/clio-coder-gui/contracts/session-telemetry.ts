@@ -94,6 +94,7 @@ export const SessionTelemetry = Type.Object(
 		plan: Type.Optional(SessionPlan),
 		workspace: Type.Optional(SessionWorkspace),
 		trust: Type.Optional(ProjectTrust),
+		notices: Type.Optional(Type.Array(Type.String({ maxLength: 16384 }), { maxItems: 32 })),
 	},
 	closed,
 );

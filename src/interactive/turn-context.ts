@@ -470,7 +470,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 	let sessionPrompt: CompiledSessionPrompt | null = null;
 	let liveSystemPrompt: LiveSystemPrompt | null = null;
 	let sessionPromptKey: string | null = null;
-	let announcedProjectPreload: string | null = null;
+	let announcedProjectPreloadSession: string | null = null;
 	// The hash this process compiled *for the session that is current now*, and
 	// the manifest's `previousHash` whenever it is set. It is not read off
 	// `sessionPrompt`: an in-process `/resume` leaves that compile in place so
@@ -2097,20 +2097,16 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 					};
 				}
 				lastSystemPromptReused = !changed;
-				// /context init prints this line, so a session says it too: once per
-				// session, and again if the handbook later stops fitting (p8/B4).
-				// Headless runs keep stderr to their session line.
 				const preload = result.projectPreload;
-				if (preload && preload.mode !== "none" && !deps.headless) {
-					const announced = `${sessionId}:${preload.label}`;
-					// The first turn compiles before the session file exists, so its id is
-					// empty; the same label under the id it then receives is the same session.
-					const provisional = announcedProjectPreload === `:${preload.label}`;
-					if (announcedProjectPreload !== announced) {
-						announcedProjectPreload = announced;
-						if (!provisional) deps.emitNotice(`project instructions: ${preload.label}`);
+				if (preload?.mode === "partial" && !deps.headless) {
+					// A provisional first compile belongs to the id created after it.
+					if (announcedProjectPreloadSession === "" && sessionId) announcedProjectPreloadSession = sessionId;
+					if (announcedProjectPreloadSession !== sessionId) {
+						announcedProjectPreloadSession = sessionId;
+						deps.emitNotice(`Project instructions: ${preload.label}`);
 					}
 				}
+
 				liveSystemPrompt = {
 					compiled: result,
 					compiledAt,

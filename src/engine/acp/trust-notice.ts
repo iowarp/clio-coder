@@ -26,6 +26,7 @@ export const ACP_TRUST_CAPABILITY = {
 	version: 1,
 	meta: ACP_TRUST_META_KEY,
 	surfaces: TRUST_SURFACES,
+	refresh: "_clio-coder/session/trust",
 	results: ["session/new", "session/load", "session/resume"],
 } as const;
 

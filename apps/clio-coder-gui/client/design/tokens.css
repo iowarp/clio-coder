@@ -12,16 +12,22 @@
 	--font-editorial: "Newsreader", Georgia, "Times New Roman", serif;
 	--font-mono: "IBM Plex Mono", "Cascadia Code", ui-monospace, monospace;
 
-	/* Canonical surfaces, ink, interaction roles and focus live in brand.css. */
+	/* Light uses pale apricot chrome, cream reading paper and a cyan prompt wash. */
+	--paper: #f6ede7;
+	--surface: #faf4ed;
+	--surface-sunken: #eee4da;
+	--overlay: #faf4ed;
+	--accent-soft: #e4f1f1;
+	--selection: #dceeed;
 	--scrim: rgb(26 22 18 / 52%);
 	/* The pale highlight that passes over a ring, as in the site's closing film. */
 	--glint: var(--surface);
 	/* A sunken fill for wells, chips and inputs. The brand's paper-sunk is its line colour in light,
 	   which reads as mud when used as a fill; dark keeps the brand's graphite. */
-	--well: #efe9de;
+	--well: #e8f1ef;
 	/* The ground of anything that sits above the page: the composer, menus, popovers and dialogs. Light
 	   lifts with a paler sheet and a shadow; dark has no shadow to cast on black, so it lifts by tone. */
-	--raised: #fffdfa;
+	--raised: #fcf7f1;
 	/* The edge of a raised surface. A control keeps --line-strong for its 3:1 boundary; a floating panel
 	   is bounded by its shadow and ground as well, so its line sits between the two rules. */
 	--line-float: color-mix(in srgb, var(--line-strong) 40%, var(--line));

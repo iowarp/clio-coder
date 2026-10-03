@@ -25,7 +25,7 @@ import { INTERVIEW_CANCEL_METHOD, INTERVIEW_REQUEST_METHOD, InterviewCapability 
 import { PERMISSION_WITHDRAW_METHOD } from "../../contracts/permissions.js";
 import type { SessionConfig } from "../../contracts/session-config.js";
 import type { SessionTelemetry } from "../../contracts/session-telemetry.js";
-import { ACP_EVENT_KINDS, Usage } from "../../contracts/sessions.js";
+import { ACP_EVENT_KINDS, TurnDetails, Usage } from "../../contracts/sessions.js";
 import { UsageCapability } from "../../contracts/usage.js";
 import { type AcpJsonRpcTransport, AcpProtocolError, AcpTimeoutError } from "../clio/http-shims.js";
 import { AppProblem } from "../services/problem.js";
@@ -55,6 +55,9 @@ function readCapabilities(result: unknown): AgentCapabilities {
 	const extensionSession = record(meta["clio-coder/session"]);
 	return {
 		loadSession: capabilities.loadSession === true,
+		...(record(meta["clio-coder/trust"]).refresh === "_clio-coder/session/trust"
+			? { trustRefresh: "_clio-coder/session/trust" as const }
+			: {}),
 		mediatedTools: meta["clio-coder/tools"] === "mediated",
 		...(record(capabilities.promptCapabilities).image === true ? { images: true } : {}),
 		...(record(capabilities.promptCapabilities).embeddedContext === true ? { embeddedContext: true } : {}),
@@ -106,7 +109,7 @@ const PromptResult = Type.Object({
 		Type.Literal("max_turn_requests"),
 		Type.Literal("refusal"),
 	]),
-	_meta: Type.Object({ "clio-coder/usage": Usage }),
+	_meta: Type.Object({ "clio-coder/usage": Usage, "clio-coder/turn": Type.Optional(TurnDetails) }),
 });
 export function record(value: unknown): Record<string, unknown> {
 	return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
@@ -287,7 +290,11 @@ export class AcpClient {
 		const projected = Value.Clean(PromptResult, result);
 		if (!Value.Check(PromptResult, projected))
 			throw new AppProblem("upstream_acp", "Clio ACP returned invalid turn usage or stop reason.");
-		return { stopReason: projected.stopReason, usage: projected._meta["clio-coder/usage"] };
+		return {
+			stopReason: projected.stopReason,
+			usage: projected._meta["clio-coder/usage"],
+			...(projected._meta["clio-coder/turn"] ? { details: projected._meta["clio-coder/turn"] } : {}),
+		};
 	}
 	async close(sessionId: string) {
 		try {

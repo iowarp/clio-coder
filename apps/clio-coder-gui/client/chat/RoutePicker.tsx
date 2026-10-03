@@ -5,7 +5,6 @@ import { useEffect, useId, useRef, useState } from "react";
 import type { AgentCapabilities } from "../../contracts/capabilities.js";
 import { routes } from "../../contracts/routes.js";
 import type { SessionConfig } from "../../contracts/session-config.js";
-import type { SafeSettingsPatch } from "../../contracts/settings-safe.js";
 import type { Client } from "../api/client.js";
 import { formatTime } from "../api/clock.js";
 import { Icon } from "../design/icons.js";
@@ -16,10 +15,13 @@ import { ACP_TARGET_MODEL_LIMIT, catalogMayBeCut, modelAfterTargetChange } from 
 import { ModelSelect } from "../pages/model-select.js";
 import type { RouteFacts } from "./route.js";
 import type { RouteDraft, RouteScope } from "./route-picker-model.js";
-import { conversationChanges, routeDraft, savedRoutePatch } from "./route-picker-model.js";
-
-type Thinking = NonNullable<SafeSettingsPatch["chat.thinkingLevel"]>;
-const THINKING: readonly Thinking[] = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
+import {
+	conversationChanges,
+	draftWithSupportedThinking,
+	modelThinkingLevels,
+	routeDraft,
+	savedRoutePatch,
+} from "./route-picker-model.js";
 
 /** Openers keyed by session, so the Session column's Model section can open this composer's picker. */
 const openers = new Map<string, () => boolean>();
@@ -155,7 +157,14 @@ function RouteForm({
 	});
 	const [edited, setEdited] = useState<RouteDraft | null>(null);
 	const reported = routeDraft(settings.data, config, scope);
-	const draft = edited ?? reported;
+	const requested = edited ?? reported;
+	const thinkingLevels = modelThinkingLevels(
+		config,
+		requested?.model ?? "",
+		targets.data?.targets.find((row) => row.id === requested?.target)?.thinkingLevels,
+		scope === "conversation",
+	);
+	const draft = draftWithSupportedThinking(requested, thinkingLevels);
 	const chosenTarget = draft?.target ?? "";
 	// The chosen target is asked for its catalog at most every five minutes, so the list is what the
 	// endpoint offers rather than what the configuration last recorded.
@@ -306,13 +315,10 @@ function RouteForm({
 				<select
 					id={thinkingId}
 					value={draft.thinking}
-					disabled={locked || (scope === "conversation" && !config?.options.some((row) => row.id === "thinkingLevel"))}
+					disabled={locked || thinkingLevels.length === 0}
 					onChange={(event) => edit({ thinking: event.target.value })}
 				>
-					{(scope === "conversation"
-						? (config?.options.find((row) => row.id === "thinkingLevel")?.options.map((row) => row.value) ?? [])
-						: THINKING
-					).map((level) => (
+					{thinkingLevels.map((level) => (
 						<option key={level}>{level}</option>
 					))}
 				</select>

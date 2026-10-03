@@ -12,12 +12,16 @@
  * so a Branch button would be a control with nothing behind it.
  */
 
-import type { Usage } from "../../contracts/sessions.js";
 import { formatTime } from "../api/clock.js";
 import { StatusMark } from "../design/status.js";
 import { CopyButton } from "../render/Markdown.js";
 import { fillComposer } from "./Composer.js";
-import { type MessageActionContext, messageActionOffers, type TurnOutcomeView } from "./composer-model.js";
+import {
+	type MessageActionContext,
+	messageActionOffers,
+	outcomeDetailGroups,
+	type TurnOutcomeView,
+} from "./composer-model.js";
 import "./composer.css";
 
 export interface MessageActionsProps extends MessageActionContext {
@@ -58,34 +62,6 @@ export function MessageActions({ sessionId, row, requestText, responseText, stat
 	);
 }
 
-type UsageCounter = "input" | "output" | "cacheRead" | "cacheWrite" | "reasoning";
-
-const USAGE_ROWS: readonly { key: UsageCounter; label: string }[] = [
-	{ key: "input", label: "Input" },
-	{ key: "output", label: "Output" },
-	{ key: "cacheRead", label: "Cache read" },
-	{ key: "cacheWrite", label: "Cache write" },
-	{ key: "reasoning", label: "Reasoning" },
-];
-
-function UsageBreakdown({ summary, title, usage }: { summary: string; title: string | null; usage: Usage }) {
-	return (
-		<details className="turn-usage">
-			<summary className="turn-outcome__fact" title={title ?? undefined}>
-				{summary}
-			</summary>
-			<dl className="turn-usage__details">
-				{USAGE_ROWS.map((row) => (
-					<div key={row.key}>
-						<dt>{row.label}</dt>
-						<dd>{usage[row.key].toLocaleString("en-US")}</dd>
-					</div>
-				))}
-			</dl>
-		</details>
-	);
-}
-
 /**
  * The outcome footer, one quiet line of facts from the `Turn` row: how it ended, how long it
  * took, the calls it made, what it spent and when. The token total opens the complete reported
@@ -99,23 +75,45 @@ export function TurnOutcome({
 	formatClock: (at: string) => string;
 }) {
 	return (
-		<footer className="turn-outcome" data-tone={outcome.tone}>
-			<StatusMark tone={outcome.tone} label={outcome.label} />
-			{outcome.detail ? <span className="turn-outcome__detail">{outcome.detail}</span> : null}
+		<details className="turn-outcome" data-tone={outcome.tone}>
+			<summary className="turn-outcome__line">
+				<StatusMark tone={outcome.tone} label={outcome.label} />
+				{outcome.facts.slice(0, 1).map((fact) => (
+					<span className="turn-outcome__fact" key={fact}>
+						{fact}
+					</span>
+				))}
+				{outcome.usageLabel ? <span className="turn-outcome__fact">{outcome.usageLabel}</span> : null}
+				{outcome.facts.slice(1).map((fact) => (
+					<span className="turn-outcome__fact" key={fact}>
+						{fact}
+					</span>
+				))}
+				{outcome.finishedAt ? (
+					<time dateTime={outcome.finishedAt} title={formatTime(outcome.finishedAt)}>
+						{formatClock(outcome.finishedAt)}
+					</time>
+				) : null}
+			</summary>
+			{outcome.detail ? <p className="turn-outcome__detail">{outcome.detail}</p> : null}
 			{outcome.stopReason ? <code className="turn-outcome__code">{outcome.stopReason}</code> : null}
-			{outcome.facts.map((fact) => (
-				<span className="turn-outcome__fact" key={fact}>
-					{fact}
-				</span>
-			))}
-			{outcome.usage !== null && outcome.usageLabel !== null ? (
-				<UsageBreakdown summary={outcome.usageLabel} title={outcome.usageTitle} usage={outcome.usage} />
+			{outcome.breakdown.length > 0 ? (
+				<div className="turn-details" aria-label="Turn details">
+					{outcomeDetailGroups(outcome).map((group) => (
+						<section key={group.label} className="turn-details__group">
+							<h3>{group.label}</h3>
+							<dl>
+								{group.fields.map((field) => (
+									<div key={field.label}>
+										<dt>{field.label}</dt>
+										<dd>{field.value}</dd>
+									</div>
+								))}
+							</dl>
+						</section>
+					))}
+				</div>
 			) : null}
-			{outcome.finishedAt ? (
-				<time dateTime={outcome.finishedAt} title={formatTime(outcome.finishedAt)}>
-					{formatClock(outcome.finishedAt)}
-				</time>
-			) : null}
-		</footer>
+		</details>
 	);
 }

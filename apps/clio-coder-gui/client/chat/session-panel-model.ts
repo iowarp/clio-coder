@@ -6,7 +6,7 @@ export function selectSessionPanel(session: SessionSnapshot): SessionSnapshot {
 		...session,
 		// The transcript revision changes on every text delta; this view reads only session facts.
 		revision: 0,
-		timeline: [],
+		timeline: session.timeline.filter((item) => item.kind === "notice"),
 		permissions: [],
 		health: [],
 		turns: session.turns.map((turn) => ({ ...turn, prompt: "" })),

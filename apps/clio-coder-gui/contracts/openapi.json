@@ -10965,6 +10965,10 @@
 										"loadSession": {
 											"type": "boolean"
 										},
+										"trustRefresh": {
+											"type": "string",
+											"const": "_clio-coder/session/trust"
+										},
 										"session": {
 											"type": "object",
 											"required": ["close", "list", "label", "delete", "autonomy"],
@@ -19096,6 +19100,10 @@
 														"maxLength": 256,
 														"pattern": "^[^\\u0000-\\u001f\\u007f]+$"
 													},
+													"notice": {
+														"type": "string",
+														"maxLength": 4096
+													},
 													"options": {
 														"type": "array",
 														"items": {
@@ -19113,6 +19121,16 @@
 																	"minLength": 1,
 																	"maxLength": 256,
 																	"pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+																},
+																"thinkingLevels": {
+																	"type": "array",
+																	"items": {
+																		"type": "string",
+																		"minLength": 1,
+																		"maxLength": 256,
+																		"pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+																	},
+																	"maxItems": 7
 																}
 															},
 															"additionalProperties": false
@@ -19266,6 +19284,19 @@
 															"maxLength": 256
 														},
 														"maxItems": 64
+													},
+													"thinkingLevels": {
+														"type": "object",
+														"patternProperties": {
+															"^.*$": {
+																"type": "array",
+																"items": {
+																	"type": "string",
+																	"maxLength": 16
+																},
+																"maxItems": 7
+															}
+														}
 													},
 													"isOrchestrator": {
 														"type": "boolean"
@@ -20225,6 +20256,24 @@
 															}
 														]
 													},
+													"details": {
+														"type": "object",
+														"properties": {
+															"model": {
+																"type": "string",
+																"maxLength": 256
+															},
+															"outputTokensPerSecond": {
+																"type": "number",
+																"minimum": 0
+															},
+															"ttftMs": {
+																"type": "number",
+																"minimum": 0
+															}
+														},
+														"additionalProperties": false
+													},
 													"problem": {
 														"anyOf": [
 															{
@@ -20365,6 +20414,10 @@
 																"maxLength": 256,
 																"pattern": "^[^\\u0000-\\u001f\\u007f]+$"
 															},
+															"notice": {
+																"type": "string",
+																"maxLength": 4096
+															},
 															"options": {
 																"type": "array",
 																"items": {
@@ -20382,6 +20435,16 @@
 																			"minLength": 1,
 																			"maxLength": 256,
 																			"pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+																		},
+																		"thinkingLevels": {
+																			"type": "array",
+																			"items": {
+																				"type": "string",
+																				"minLength": 1,
+																				"maxLength": 256,
+																				"pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+																			},
+																			"maxItems": 7
 																		}
 																	},
 																	"additionalProperties": false
@@ -20994,6 +21057,14 @@
 														}
 													},
 													"additionalProperties": false
+												},
+												"notices": {
+													"type": "array",
+													"items": {
+														"type": "string",
+														"maxLength": 16384
+													},
+													"maxItems": 32
 												}
 											},
 											"additionalProperties": false
@@ -24097,6 +24168,24 @@
 															}
 														]
 													},
+													"details": {
+														"type": "object",
+														"properties": {
+															"model": {
+																"type": "string",
+																"maxLength": 256
+															},
+															"outputTokensPerSecond": {
+																"type": "number",
+																"minimum": 0
+															},
+															"ttftMs": {
+																"type": "number",
+																"minimum": 0
+															}
+														},
+														"additionalProperties": false
+													},
 													"problem": {
 														"anyOf": [
 															{
@@ -24237,6 +24326,10 @@
 																"maxLength": 256,
 																"pattern": "^[^\\u0000-\\u001f\\u007f]+$"
 															},
+															"notice": {
+																"type": "string",
+																"maxLength": 4096
+															},
 															"options": {
 																"type": "array",
 																"items": {
@@ -24254,6 +24347,16 @@
 																			"minLength": 1,
 																			"maxLength": 256,
 																			"pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+																		},
+																		"thinkingLevels": {
+																			"type": "array",
+																			"items": {
+																				"type": "string",
+																				"minLength": 1,
+																				"maxLength": 256,
+																				"pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+																			},
+																			"maxItems": 7
 																		}
 																	},
 																	"additionalProperties": false
@@ -24866,6 +24969,14 @@
 														}
 													},
 													"additionalProperties": false
+												},
+												"notices": {
+													"type": "array",
+													"items": {
+														"type": "string",
+														"maxLength": 16384
+													},
+													"maxItems": 32
 												}
 											},
 											"additionalProperties": false
@@ -26554,6 +26665,24 @@
 															}
 														]
 													},
+													"details": {
+														"type": "object",
+														"properties": {
+															"model": {
+																"type": "string",
+																"maxLength": 256
+															},
+															"outputTokensPerSecond": {
+																"type": "number",
+																"minimum": 0
+															},
+															"ttftMs": {
+																"type": "number",
+																"minimum": 0
+															}
+														},
+														"additionalProperties": false
+													},
 													"problem": {
 														"anyOf": [
 															{
@@ -26694,6 +26823,10 @@
 																"maxLength": 256,
 																"pattern": "^[^\\u0000-\\u001f\\u007f]+$"
 															},
+															"notice": {
+																"type": "string",
+																"maxLength": 4096
+															},
 															"options": {
 																"type": "array",
 																"items": {
@@ -26711,6 +26844,16 @@
 																			"minLength": 1,
 																			"maxLength": 256,
 																			"pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+																		},
+																		"thinkingLevels": {
+																			"type": "array",
+																			"items": {
+																				"type": "string",
+																				"minLength": 1,
+																				"maxLength": 256,
+																				"pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+																			},
+																			"maxItems": 7
 																		}
 																	},
 																	"additionalProperties": false
@@ -27323,6 +27466,14 @@
 														}
 													},
 													"additionalProperties": false
+												},
+												"notices": {
+													"type": "array",
+													"items": {
+														"type": "string",
+														"maxLength": 16384
+													},
+													"maxItems": 32
 												}
 											},
 											"additionalProperties": false
@@ -28975,6 +29126,24 @@
 																}
 															]
 														},
+														"details": {
+															"type": "object",
+															"properties": {
+																"model": {
+																	"type": "string",
+																	"maxLength": 256
+																},
+																"outputTokensPerSecond": {
+																	"type": "number",
+																	"minimum": 0
+																},
+																"ttftMs": {
+																	"type": "number",
+																	"minimum": 0
+																}
+															},
+															"additionalProperties": false
+														},
 														"problem": {
 															"anyOf": [
 																{
@@ -29115,6 +29284,10 @@
 																	"maxLength": 256,
 																	"pattern": "^[^\\u0000-\\u001f\\u007f]+$"
 																},
+																"notice": {
+																	"type": "string",
+																	"maxLength": 4096
+																},
 																"options": {
 																	"type": "array",
 																	"items": {
@@ -29132,6 +29305,16 @@
 																				"minLength": 1,
 																				"maxLength": 256,
 																				"pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+																			},
+																			"thinkingLevels": {
+																				"type": "array",
+																				"items": {
+																					"type": "string",
+																					"minLength": 1,
+																					"maxLength": 256,
+																					"pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+																				},
+																				"maxItems": 7
 																			}
 																		},
 																		"additionalProperties": false
@@ -29744,6 +29927,14 @@
 															}
 														},
 														"additionalProperties": false
+													},
+													"notices": {
+														"type": "array",
+														"items": {
+															"type": "string",
+															"maxLength": 16384
+														},
+														"maxItems": 32
 													}
 												},
 												"additionalProperties": false
@@ -31643,6 +31834,24 @@
 															}
 														]
 													},
+													"details": {
+														"type": "object",
+														"properties": {
+															"model": {
+																"type": "string",
+																"maxLength": 256
+															},
+															"outputTokensPerSecond": {
+																"type": "number",
+																"minimum": 0
+															},
+															"ttftMs": {
+																"type": "number",
+																"minimum": 0
+															}
+														},
+														"additionalProperties": false
+													},
 													"problem": {
 														"anyOf": [
 															{
@@ -31783,6 +31992,10 @@
 																"maxLength": 256,
 																"pattern": "^[^\\u0000-\\u001f\\u007f]+$"
 															},
+															"notice": {
+																"type": "string",
+																"maxLength": 4096
+															},
 															"options": {
 																"type": "array",
 																"items": {
@@ -31800,6 +32013,16 @@
 																			"minLength": 1,
 																			"maxLength": 256,
 																			"pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+																		},
+																		"thinkingLevels": {
+																			"type": "array",
+																			"items": {
+																				"type": "string",
+																				"minLength": 1,
+																				"maxLength": 256,
+																				"pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+																			},
+																			"maxItems": 7
 																		}
 																	},
 																	"additionalProperties": false
@@ -32412,6 +32635,14 @@
 														}
 													},
 													"additionalProperties": false
+												},
+												"notices": {
+													"type": "array",
+													"items": {
+														"type": "string",
+														"maxLength": 16384
+													},
+													"maxItems": 32
 												}
 											},
 											"additionalProperties": false
@@ -39847,6 +40078,14 @@
 													}
 												},
 												"additionalProperties": false
+											},
+											"notices": {
+												"type": "array",
+												"items": {
+													"type": "string",
+													"maxLength": 16384
+												},
+												"maxItems": 32
 											}
 										},
 										"additionalProperties": false
@@ -40182,6 +40421,24 @@
 														"type": "null"
 													}
 												]
+											},
+											"details": {
+												"type": "object",
+												"properties": {
+													"model": {
+														"type": "string",
+														"maxLength": 256
+													},
+													"outputTokensPerSecond": {
+														"type": "number",
+														"minimum": 0
+													},
+													"ttftMs": {
+														"type": "number",
+														"minimum": 0
+													}
+												},
+												"additionalProperties": false
 											},
 											"problem": {
 												"anyOf": [
@@ -40924,6 +41181,24 @@
 												"type": "null"
 											}
 										]
+									},
+									"details": {
+										"type": "object",
+										"properties": {
+											"model": {
+												"type": "string",
+												"maxLength": 256
+											},
+											"outputTokensPerSecond": {
+												"type": "number",
+												"minimum": 0
+											},
+											"ttftMs": {
+												"type": "number",
+												"minimum": 0
+											}
+										},
+										"additionalProperties": false
 									},
 									"problem": {
 										"anyOf": [
@@ -42618,6 +42893,10 @@
 															"maxLength": 256,
 															"pattern": "^[^\\u0000-\\u001f\\u007f]+$"
 														},
+														"notice": {
+															"type": "string",
+															"maxLength": 4096
+														},
 														"options": {
 															"type": "array",
 															"items": {
@@ -42635,6 +42914,16 @@
 																		"minLength": 1,
 																		"maxLength": 256,
 																		"pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+																	},
+																	"thinkingLevels": {
+																		"type": "array",
+																		"items": {
+																			"type": "string",
+																			"minLength": 1,
+																			"maxLength": 256,
+																			"pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+																		},
+																		"maxItems": 7
 																	}
 																},
 																"additionalProperties": false

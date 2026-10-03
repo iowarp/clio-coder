@@ -122,19 +122,6 @@ function LiveChip({ status, working }: { status: LiveStatus; working: boolean })
 	);
 }
 
-function HealthNotices({ rows }: { rows: readonly HealthRow[] }) {
-	if (rows.length === 0) return null;
-	return (
-		<ul className="turn-health">
-			{rows.map((row) => (
-				<li key={row.id}>
-					<StatusMark tone={row.tone} label={row.label} {...(row.detail === null ? {} : { detail: row.detail })} />
-				</li>
-			))}
-		</ul>
-	);
-}
-
 export const ChatTurnView = memo(function ChatTurnView({
 	turn,
 	row,
@@ -143,7 +130,6 @@ export const ChatTurnView = memo(function ChatTurnView({
 	pending,
 	nowMs,
 	stopping,
-	notices,
 	workspaceRoot,
 	liveWorkers,
 }: ChatTurnProps) {
@@ -243,11 +229,7 @@ export const ChatTurnView = memo(function ChatTurnView({
 									</div>
 								);
 							case "notice":
-								return (
-									<p key={segment.item.id} className="chat-response__placeholder">
-										{segment.item.text}
-									</p>
-								);
+								return null;
 							case "reasoning":
 								return <ReasoningDisclosure key={segment.item.id} item={segment.item} />;
 							default:
@@ -280,7 +262,6 @@ export const ChatTurnView = memo(function ChatTurnView({
 					/>
 				</div>
 			</div>
-			<HealthNotices rows={notices} />
 		</article>
 	);
 }, sameChatTurn);

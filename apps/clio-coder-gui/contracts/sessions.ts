@@ -152,6 +152,14 @@ export const TimelineItem = Type.Object(
 	closed,
 );
 export type TimelineItem = Static<typeof TimelineItem>;
+export const TurnDetails = Type.Object(
+	{
+		model: Type.Optional(Type.String({ maxLength: 256 })),
+		outputTokensPerSecond: Type.Optional(Type.Number({ minimum: 0 })),
+		ttftMs: Type.Optional(Type.Number({ minimum: 0 })),
+	},
+	closed,
+);
 export const Turn = Type.Object(
 	{
 		id: Id,
@@ -167,6 +175,7 @@ export const Turn = Type.Object(
 		finishedAt: nullableString,
 		stopReason: nullableString,
 		usage: Type.Union([Usage, Type.Null()]),
+		details: Type.Optional(TurnDetails),
 		problem: Type.Union([Problem, Type.Null()]),
 		/** How many images this app sent with the request; a replayed turn does not know. */
 		images: Type.Optional(Type.Integer({ minimum: 1, maximum: 4 })),
@@ -236,6 +245,7 @@ export const SessionDeltas = {
 			turnId: Id,
 			stopReason: string,
 			usage: Type.Union([Usage, Type.Null()]),
+			details: Type.Optional(TurnDetails),
 			problem: Type.Union([Problem, Type.Null()]),
 			finishedAt: nullableString,
 		},

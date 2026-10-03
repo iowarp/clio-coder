@@ -7,8 +7,8 @@ export function ProjectTrustNotice({ trust }: { trust: SessionTelemetry["trust"]
 		<details className="project-trust">
 			<summary>Project files were ignored</summary>
 			<p>
-				Clio has not trusted these project files. Review them, then run the named command in this workspace and reopen the
-				task.
+				Clio has not trusted these project files. Run the named command to inspect them, then approve the reviewed hash in
+				this workspace. Clio reloads an idle task when approval changes.
 			</p>
 			<ul>
 				{trust.ignored.map((surface) => (

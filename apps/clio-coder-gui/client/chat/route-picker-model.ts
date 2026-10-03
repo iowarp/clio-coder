@@ -38,3 +38,24 @@ export function savedRoutePatch(draft: RouteDraft, reported: RouteDraft): SafeSe
 		patch["chat.thinkingLevel"] = draft.thinking as NonNullable<SafeSettingsPatch["chat.thinkingLevel"]>;
 	return patch;
 }
+
+/** Capabilities come from the engine's resolution of this exact target and model. */
+export function modelThinkingLevels(
+	config: SessionConfig | undefined,
+	model: string,
+	catalog: Readonly<Record<string, readonly string[]>> | undefined,
+	conversation: boolean,
+): readonly string[] {
+	const declared = conversation
+		? config?.options.find((row) => row.id === "model")?.options.find((row) => row.value === model)?.thinkingLevels
+		: catalog?.[model];
+	if (declared) return declared;
+	if (conversation && config?.options.find((row) => row.id === "model")?.currentValue === model)
+		return config.options.find((row) => row.id === "thinkingLevel")?.options.map((row) => row.value) ?? [];
+	return [];
+}
+
+export function draftWithSupportedThinking(draft: RouteDraft | null, levels: readonly string[]): RouteDraft | null {
+	if (!draft || levels.length === 0 || levels.includes(draft.thinking)) return draft;
+	return { ...draft, thinking: draft.thinking === "off" ? (levels[0] ?? "off") : (levels.at(-1) ?? "off") };
+}

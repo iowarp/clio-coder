@@ -105,6 +105,7 @@ export const SessionCapability = Type.Object(
 export const AgentCapabilities = Type.Object(
 	{
 		loadSession: Type.Boolean(),
+		trustRefresh: Type.Optional(Type.Literal("_clio-coder/session/trust")),
 		session: Type.Optional(SessionCapability),
 		settings: Type.Optional(Type.Object({ get_safe: Type.Boolean(), patch_safe: Type.Boolean() }, closed)),
 		targets: Type.Optional(Type.Object({ list: Type.Boolean(), probe: Type.Boolean() }, closed)),

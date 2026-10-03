@@ -21,6 +21,7 @@ import { openRoutePicker } from "./RoutePicker.js";
 import type { RouteFacts } from "./route.js";
 import { SessionBoardPanel } from "./SessionBoard.js";
 import { SessionOverview } from "./SessionOverview.js";
+import { needsTrustReview } from "./session-facts-model.js";
 import { selectSessionPanel } from "./session-panel-model.js";
 import { UsagePanel } from "./UsagePanel.js";
 import { WorkerGraph } from "./WorkerGraph.js";
@@ -314,6 +315,7 @@ export const PaneToggles = memo(function PaneToggles({
 	);
 	const stat = changeCounts(changes);
 	const docked = useShell()?.asideSlot != null;
+	const trustAttention = needsTrustReview(pane?.telemetry?.trust);
 	return (
 		<>
 			<button
@@ -339,11 +341,16 @@ export const PaneToggles = memo(function PaneToggles({
 					type="button"
 					className="wb-icon"
 					aria-pressed={open}
-					aria-label={open ? "Hide task sidebar" : "Show task sidebar"}
+					aria-label={`${open ? "Hide" : "Show"} task sidebar${trustAttention ? ", project files need review" : ""}`}
 					title="Task sidebar (Ctrl/⌘ Shift \\)"
 					onClick={() => onToggle(view, ids.pane)}
 				>
 					<Icon name="panelRight" />
+					{trustAttention ? (
+						<span className="pane-attention" aria-hidden="true">
+							•
+						</span>
+					) : null}
 				</button>
 			)}
 		</>

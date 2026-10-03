@@ -7,7 +7,14 @@ export const ConfigOption = Type.Object(
 	{
 		id: ConfigId,
 		currentValue: identifier,
-		options: Type.Array(Type.Object({ value: identifier, name: identifier }, closed), { maxItems: 64 }),
+		notice: Type.Optional(Type.String({ maxLength: 4096 })),
+		options: Type.Array(
+			Type.Object(
+				{ value: identifier, name: identifier, thinkingLevels: Type.Optional(Type.Array(identifier, { maxItems: 7 })) },
+				closed,
+			),
+			{ maxItems: 64 },
+		),
 	},
 	closed,
 );
