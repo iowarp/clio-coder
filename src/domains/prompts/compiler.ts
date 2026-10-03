@@ -203,6 +203,19 @@ export interface CompiledSessionPrompt {
 }
 
 /**
+ * The chat's last compiled main prompt, held in memory for `/view
+ * system-prompt` and its ACP read (`_clio-coder/artifacts/read`).
+ */
+export interface LiveSystemPrompt {
+	compiled: CompiledSessionPrompt;
+	compiledAt: string;
+	modelId: string;
+	targetId: string;
+	sessionId: string | null;
+	turnId: string | null;
+}
+
+/**
  * Worker-side mirror of the parent's `SPOT_CHECK_GUIDANCE`. The parent sentence
  * demonstrably works: in the E19 drive it is what caught a verifier reporting a
  * quality pass on a typecheck script that does not exist. The same failure

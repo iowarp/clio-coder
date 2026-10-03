@@ -6,6 +6,7 @@ import { rawDurationMs } from "../core/timers.js";
 import { ToolNames } from "../core/tool-names.js";
 import { sanitizeCallTargetText, sanitizeMultilineDisplayText } from "../domains/safety/call-target.js";
 import { redactSecretString } from "../domains/safety/redaction.js";
+import type { ViewArtifact } from "../domains/session/view-artifacts.js";
 import { settledPrefixLength } from "../engine/apis/diffusion-frames.js";
 import {
 	type Component,
@@ -68,7 +69,6 @@ import {
 	SGR_RESET,
 } from "./theme/index.js";
 import { type TranscriptDetailPolicy, transcriptDetail } from "./transcript-detail.js";
-import type { ViewArtifact } from "./view/artifacts.js";
 import type { WorkerEntryState } from "./worker-stream.js";
 
 // Every fenced code block, top level or nested in a list or quote, reaches the

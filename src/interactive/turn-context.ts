@@ -53,7 +53,7 @@ import { resolveWorkingSetPolicy } from "../domains/context/working-set/policies
 import { selectVisibleEntries } from "../domains/context/working-set/visible.js";
 import type { MemoryPromptRequest } from "../domains/memory/prompt-cache.js";
 import type { ObservabilityContract } from "../domains/observability/contract.js";
-import type { CompiledSessionPrompt, SessionPromptInputs } from "../domains/prompts/compiler.js";
+import type { CompiledSessionPrompt, LiveSystemPrompt, SessionPromptInputs } from "../domains/prompts/compiler.js";
 import type { PromptsContract } from "../domains/prompts/contract.js";
 import {
 	type ContextWindowDetails,
@@ -235,14 +235,7 @@ export type ExpectedColdReason =
 export type LiveContextUsage = ContextUsageSnapshot &
 	Pick<LiveBudgetView, "revision" | "inputSource" | "historical" | "breakdownSource">;
 
-export interface LiveSystemPrompt {
-	compiled: CompiledSessionPrompt;
-	compiledAt: string;
-	modelId: string;
-	targetId: string;
-	sessionId: string | null;
-	turnId: string | null;
-}
+export type { LiveSystemPrompt };
 
 export interface TurnContext {
 	liveSystemPrompt(): LiveSystemPrompt | null;

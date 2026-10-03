@@ -19,6 +19,8 @@ import type { SessionMeta } from "../domains/session/index.js";
 import { foldSessionArtifacts } from "../domains/session/session-artifacts.js";
 import { foldSessionTaskHistory } from "../domains/session/task-board.js";
 import { filterEntriesToActivePath } from "../domains/session/tree/active-path.js";
+import type { ArtifactProviderDeps } from "../domains/session/view-artifacts.js";
+import { createDefaultArtifactProviders } from "../domains/session/view-artifacts.js";
 import type { GitChanges } from "../domains/session/workspace/git-probe.js";
 import { probeGitChangesAsync } from "../domains/session/workspace/git-probe.js";
 import type { OutcomeRecord } from "../domains/system-one/index.js";
@@ -46,9 +48,8 @@ import { openQueueNavigatorOverlay } from "./overlays/queue-navigator.js";
 import { openSideQuestionOverlay } from "./overlays/side-question.js";
 import type { ContextClearCommandOptions } from "./slash-commands.js";
 import { openTasksOverlay } from "./tasks-overlay.js";
+import { abbreviateModelId } from "./theme/labels.js";
 import { openUsageOverlay } from "./usage-overlay.js";
-import type { ArtifactProviderDeps } from "./view/artifacts.js";
-import { createDefaultArtifactProviders } from "./view/artifacts.js";
 import { openViewOverlay } from "./view/view-overlay.js";
 
 export interface OverlayGeneralOpenersDeps {
@@ -372,6 +373,7 @@ export function createOverlayGeneralOpeners(deps: OverlayGeneralOpenersDeps): Ov
 				readSessionEntries: deps.readSessionEntries,
 				readTranscript: deps.readTranscript,
 				readSystemPrompt: deps.readSystemPrompt,
+				formatModelId: abbreviateModelId,
 			}),
 			...(initialFilter ? { initialFilter } : {}),
 			notice: deps.notify,

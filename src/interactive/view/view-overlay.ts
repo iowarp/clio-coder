@@ -1,5 +1,14 @@
-import { sanitizeCallTargetText } from "../../domains/safety/call-target.js";
-import { redactSecretString } from "../../domains/safety/redaction.js";
+import type {
+	ArtifactProvider,
+	ViewArtifact,
+	ViewArtifactCategory,
+	ViewArtifactFormat,
+} from "../../domains/session/view-artifacts.js";
+import {
+	listViewArtifacts,
+	VIEW_ARTIFACT_CATEGORIES,
+	viewArtifactDisplayText,
+} from "../../domains/session/view-artifacts.js";
 import type { Component, OverlayHandle, TUI } from "../../engine/tui.js";
 import { Input, Markdown, matchesKey, truncateToWidth, visibleWidth, wrapTextWithAnsi } from "../../engine/tui.js";
 import { dockBodyRows } from "../dock.js";
@@ -7,8 +16,6 @@ import { clockLocal } from "../format-time.js";
 import { localKey } from "../keyboard-owner.js";
 import { buildHint, fitRows, selectionMark, showClioOverlayFrame } from "../overlay-frame.js";
 import { clioTheme, GLYPH, markdownTheme, padAnsi } from "../theme/index.js";
-import type { ArtifactProvider, ViewArtifact, ViewArtifactCategory, ViewArtifactFormat } from "./artifacts.js";
-import { listViewArtifacts, VIEW_ARTIFACT_CATEGORIES } from "./artifacts.js";
 
 export const VIEW_OVERLAY_WIDTH = "100%";
 export const VIEW_OVERLAY_MAX_HEIGHT = "100%";
@@ -337,7 +344,7 @@ function buildArtifactHeaderLines(
 	// The list may cut a title, especially in a split pane. Give the selected
 	// act its own readable heading before the full body, while bounding a very
 	// long command so it cannot consume the entire preview.
-	const title = redactSecretString(sanitizeCallTargetText(artifact.title));
+	const title = viewArtifactDisplayText(artifact.title);
 	const wrappedTitle = wrapTextWithAnsi(
 		theme.fg("menuOption", truncateToWidth(title, Math.max(1, width * 3), GLYPH.ellipsis, true)),
 		Math.max(1, width),
@@ -606,7 +613,7 @@ export class ViewOverlayView implements Component {
 				...(artifact.runId ? [`Run: ${artifact.runId}`] : []),
 				...(artifact.correlationId ? [`Correlation: ${artifact.correlationId}`] : []),
 				...(artifact.description ? [`Details: ${artifact.description}`] : []),
-			].flatMap((line) => wrapTextWithAnsi(redactSecretString(sanitizeCallTargetText(line)), Math.max(1, width)));
+			].flatMap((line) => wrapTextWithAnsi(viewArtifactDisplayText(line), Math.max(1, width)));
 			const content = this.content?.details;
 			if (content) {
 				if (content.renderWidth !== width) this.queueContentRender(content, width);
@@ -696,7 +703,7 @@ export class ViewOverlayView implements Component {
 			if (!row.item) continue;
 			const selected = row.itemIndex === this.selectedIndex;
 			const cursor = `${selectionMark(selected)} `;
-			const safeTitle = redactSecretString(sanitizeCallTargetText(row.item.title));
+			const safeTitle = viewArtifactDisplayText(row.item.title);
 			const title = theme.fg("menuOption", safeTitle, selected ? "selected" : "normal");
 			const metaParts = [formatRelativeTime(row.item.timestamp), formatArtifactSize(row.item.sizeBytes)].filter(Boolean);
 			const meta = metaParts.length > 0 ? theme.fg("annotation", metaParts.join(" ")) : "";

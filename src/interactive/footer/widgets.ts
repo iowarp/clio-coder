@@ -1,3 +1,4 @@
+import { formatUsd } from "../../core/display-units.js";
 import { ToolNames } from "../../core/tool-names.js";
 import type { LiveBudgetView } from "../../domains/context/budget/live-view.js";
 import type { CostAggregate, TokenThroughputSnapshot, UsageBreakdown } from "../../domains/observability/index.js";
@@ -181,11 +182,7 @@ export function formatToolTally(snapshot: ToolTallySnapshot | null | undefined, 
 	return `${prefix}${active}${truncated} · ${formatFooterTokens(snapshot.errors)}${GLYPH.error}`;
 }
 
-export function formatUsd(value: number): string {
-	if (!Number.isFinite(value) || value <= 0) return "$0.00";
-	if (value < 0.01) return `$${value.toFixed(4)}`;
-	return `$${value.toFixed(2)}`;
-}
+export { formatUsd };
 
 function contextComposition(context: ContextEngineFacts): {
 	system: number;

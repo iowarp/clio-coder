@@ -18,7 +18,7 @@ import { join } from "node:path";
 import { clioStateDir } from "../core/xdg.js";
 import type { RunEnvelope, RunReceipt } from "../domains/dispatch/types.js";
 import { inspectRunReceiptTrustStatus } from "../domains/evidence/trust-status.js";
-import { receiptFilePath } from "./view/artifacts.js";
+import { receiptFilePath } from "../domains/session/view-artifacts.js";
 import type { WorkerPresentedResultContract, WorkerReceiptFacts, WorkerResultContract } from "./worker-stream.js";
 
 function isRecord(value: unknown): value is Record<string, unknown> {

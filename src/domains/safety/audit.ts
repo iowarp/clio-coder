@@ -212,7 +212,7 @@ const MAX_STRING_LEN = 200;
 //
 // A formatter resolves its zone at construction and never re-reads it, so it is
 // rebuilt when process.env.TZ no longer matches the zone it was built for. This
-// is the same idiom as src/interactive/format-time.ts; it costs one string
+// is the same idiom as src/core/format-time.ts; it costs one string
 // comparison per row and keeps a mid-process TZ change from writing rows into
 // the previous zone's file.
 const DATE_OPTIONS: Intl.DateTimeFormatOptions = { year: "numeric", month: "2-digit", day: "2-digit" };
@@ -223,7 +223,7 @@ function localDateString(d: Date): string {
 	if (process.env.TZ !== dateFormatterZone) {
 		dateFormatterZone = process.env.TZ;
 		// The zone is passed explicitly, not left for Intl to pick up from
-		// process.env.TZ implicitly: see src/interactive/format-time.ts's
+		// process.env.TZ implicitly: see src/core/format-time.ts's
 		// syncZone() for the traced repro (issue #84) of a rebuilt formatter
 		// resolving to the wrong zone while process.env.TZ read correctly at
 		// both construction and format time. Same idiom, same fix.
