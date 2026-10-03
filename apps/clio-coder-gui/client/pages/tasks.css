@@ -43,10 +43,10 @@
 	overflow: hidden;
 }
 .taskpage__row {
+	position: relative;
 	display: flex;
 	align-items: center;
 	gap: var(--space-3);
-	padding-right: var(--space-3);
 }
 .taskpage__row + .taskpage__row {
 	border-top: 1px solid var(--line);
@@ -100,6 +100,8 @@
 }
 .taskpage__age {
 	flex: none;
+	min-width: 4ch;
+	text-align: right;
 	font-size: 12px;
 	color: var(--ink-muted);
 	font-variant-numeric: tabular-nums;
@@ -110,9 +112,6 @@
 	text-align: center;
 	color: var(--ink-muted);
 	font-size: var(--text-meta);
-}
-.taskpage__row .delete-session {
-	flex: none;
 }
 @media (max-width: 760px) {
 	.taskpage {
@@ -127,6 +126,19 @@
 	align-items: center;
 	justify-content: flex-end;
 	gap: var(--space-2);
+}
+/* The delete control takes no room until it asks its question: it sits over the row's age the way
+   the rail's row menu does, so every age in the list ends on one edge. */
+.taskpage__row .delete-session {
+	flex: none;
+	padding-right: var(--space-3);
+}
+.taskpage__row .delete-session:not(:has(.delete-session__ask)) {
+	position: absolute;
+	right: 0;
+}
+.taskpage__row:has(.delete-session__start):is(:hover, :focus-within) .taskpage__age {
+	visibility: hidden;
 }
 .taskpage__row .delete-session__start {
 	min-height: 0;

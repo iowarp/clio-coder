@@ -593,12 +593,14 @@
 }
 
 /* ---- top bar used by task screens ------------------------------------------ */
+/* The bar is as tall as the two sidebars' headers and starts one card edge lower, so the brand, the
+   task's name and the sidebar's title sit on one line across the window. */
 .wb-bar {
 	display: flex;
 	align-items: center;
 	gap: var(--space-2);
 	flex: none;
-	min-height: 48px;
+	min-height: 40px;
 	padding: 0 var(--space-3);
 }
 .wb-bar__lead {
@@ -630,6 +632,16 @@
 	align-items: center;
 	gap: 2px;
 }
+/* A filled action in the bar is cut to the bar's control height. */
+.wb-bar > .primary {
+	min-height: 30px;
+	padding: 0 12px;
+	gap: var(--space-2);
+}
+.wb-bar > .primary .icon {
+	width: var(--icon-md);
+	height: var(--icon-md);
+}
 .wb-bar .wb-icon[aria-pressed="true"],
 .wb-bar .wb-icon[aria-expanded="true"] {
 	background: var(--wb-active);
@@ -656,6 +668,12 @@
 .wb-chip .icon {
 	width: 14px;
 	height: 14px;
+}
+/* The chip clips, so its words carry the ellipsis; without this a long path was cut mid-letter. */
+.wb-chip > span {
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
 }
 a.wb-chip:hover,
 button.wb-chip:hover:not(:disabled) {
@@ -707,6 +725,46 @@ button.wb-chip:hover:not(:disabled) {
 	border-color: var(--action-line);
 }
 
+/* In the bar a chip is a reading on an instrument strip, not a tag: no frame and no fill, the same
+   quiet control as the icon buttons beside it, filling only when pointed at. One chip keeps its
+   frame, the approval that is waiting on the operator, so it is the only boxed thing in the bar. */
+.wb-bar .wb-chip {
+	height: 30px;
+	/* The status chip is a paragraph; its default margin made the bar taller than its controls. */
+	margin: 0;
+	padding: 0 8px;
+	border-color: transparent;
+	border-radius: 8px;
+	background: transparent;
+	transition:
+		background var(--motion-fast) var(--ease-standard),
+		color var(--motion-fast) var(--ease-standard);
+}
+.wb-bar a.wb-chip:hover,
+.wb-bar button.wb-chip:hover:not(:disabled) {
+	border-color: transparent;
+	background: var(--wb-hover);
+	color: var(--ink);
+}
+.wb-bar a.wb-chip:active,
+.wb-bar button.wb-chip:active:not(:disabled) {
+	background: var(--wb-active);
+}
+.wb-bar .wb-chip--status {
+	padding-inline: var(--space-1);
+}
+.wb-bar .wb-chip--status[data-tone="approval"] {
+	height: 26px;
+	padding-inline: 10px;
+	border-color: var(--action-line);
+	border-radius: var(--radius-pill);
+	background: var(--action-tint);
+}
+/* The two figures sit as one reading: the ring and its share, then the spend. */
+.wb-bar .wb-chip--meter + .wb-chip--figure {
+	margin-inline-start: -4px;
+}
+
 /* ---- phones: the rail becomes a drawer ------------------------------------- */
 .wb-scrim {
 	display: none;
@@ -756,6 +814,10 @@ button.wb-chip:hover:not(:disabled) {
 	}
 	.wb-bar__lead {
 		display: flex;
+	}
+	/* No sidebars to line up with on a phone, and a finger needs the taller strip. */
+	.wb-bar {
+		min-height: 48px;
 	}
 	.wb-main[data-mode="settings"] {
 		padding: var(--space-8) var(--space-4) var(--space-12);

@@ -99,28 +99,40 @@
 }
 
 /* ---- the Session column ---------------------------------------------------------
-   Open sections on fine rules with small mono labels, the site's field-guide layout, rather than
-   a stack of boxed cards inside a panel. A section that opens a drill-in names itself as the way in. */
+   The rail's own grammar, mirrored: a muted label, then what belongs under it, with space between
+   groups and no rules or boxes. A group that opens a drill-in turns its whole label row into the
+   way in, the way a rail row is one target from edge to edge. */
 .pane-cards {
+	--pane-bleed: 8px;
 	display: grid;
 	padding: 0 var(--space-5) var(--space-6);
 }
 .pane-card {
 	display: grid;
-	gap: var(--space-2);
-	padding: var(--space-4) 0 var(--space-5);
-	border-top: 1px solid var(--line);
+	gap: 6px;
+	margin-top: var(--space-5);
+	min-width: 0;
 }
 .pane-card:first-child {
-	border-top: 0;
-	padding-top: var(--space-2);
+	margin-top: var(--space-1);
 }
 .pane-card > header {
+	position: relative;
 	display: flex;
 	align-items: center;
 	justify-content: space-between;
 	gap: var(--space-3);
-	min-height: 22px;
+	min-height: 28px;
+	margin-inline: calc(var(--pane-bleed) * -1);
+	padding-inline: var(--pane-bleed);
+	border-radius: 8px;
+	transition: background var(--motion-fast) var(--ease-standard);
+}
+.pane-card > header:has(.pane-card__open:hover) {
+	background: var(--wb-hover);
+}
+.pane-card > header:has(.pane-card__open:active) {
+	background: var(--wb-active);
 }
 /* Section names read like the rail's own labels, so both sidebars speak one language. */
 .pane-card h2 {
@@ -133,37 +145,50 @@
 .pane-card__open {
 	display: inline-flex;
 	align-items: center;
-	gap: 2px;
+	gap: 3px;
 	min-height: 0;
-	margin: -2px 0 -2px -6px;
-	padding: 2px 4px 2px 6px;
+	margin: 0;
+	padding: 0;
 	border: 0;
-	border-radius: 6px;
+	border-radius: 8px;
 	background: transparent;
 	color: inherit;
 	font: inherit;
 	letter-spacing: inherit;
-	text-transform: inherit;
+}
+/* The press target is the whole label row, figures included; the ring is drawn on that row too. */
+.pane-card__open::after {
+	content: "";
+	position: absolute;
+	inset: 0;
+	border-radius: inherit;
+}
+.pane-card__open:hover:not(:disabled),
+.pane-card__open:active:not(:disabled) {
+	background: transparent;
+}
+.pane-card > header:has(.pane-card__open:hover) h2 {
+	color: var(--ink);
+}
+.pane-card__open:focus-visible {
+	outline: none;
+	box-shadow: none;
+}
+.pane-card__open:focus-visible::after {
+	outline: 2px solid var(--focus);
+	outline-offset: -2px;
 }
 .pane-card__open .icon {
 	width: 12px;
 	height: 12px;
-	opacity: 0;
-	transform: translateX(-3px);
+	opacity: 0.6;
 	transition:
 		opacity var(--motion-fast) var(--ease-standard),
 		transform var(--motion-fast) var(--ease-standard);
 }
-.pane-card__open:hover,
-.pane-card__open:focus-visible {
-	background: var(--wb-hover);
-	color: var(--ink);
-	border-color: transparent;
-}
-.pane-card__open:hover .icon,
-.pane-card__open:focus-visible .icon {
+.pane-card > header:has(.pane-card__open:hover) .icon {
 	opacity: 1;
-	transform: none;
+	transform: translateX(2px);
 }
 .pane-card__state {
 	display: inline-flex;
@@ -172,6 +197,15 @@
 	font-size: 12px;
 	color: var(--ink-muted);
 	font-variant-numeric: tabular-nums;
+}
+/* In either sidebar a state is a glyph and a word, like the rail's own connection line, never a pill. */
+.pane .status-mark {
+	gap: 5px;
+	padding: 0;
+	border: 0;
+	background: transparent;
+	font-size: 12px;
+	font-weight: 500;
 }
 .pane-card__state[data-state="Working"] {
 	color: var(--accent);
@@ -184,7 +218,7 @@
 }
 .pane-goal {
 	margin: 0;
-	font-size: var(--text-reading);
+	font-size: var(--text-body);
 	font-weight: 600;
 	letter-spacing: -0.1px;
 	line-height: 1.4;
@@ -268,17 +302,33 @@
 }
 .pane-agents {
 	display: grid;
-	gap: var(--space-2);
-	margin: 0;
+	margin: 0 calc(var(--pane-bleed) * -1);
 	padding: 0;
 	list-style: none;
 }
+/* A rail row's metrics, so a running task reads the same on either side of the page. */
 .pane-agents li {
+	position: relative;
 	display: grid;
 	grid-template-columns: auto minmax(0, 1fr) auto;
-	align-items: baseline;
+	align-items: center;
 	gap: var(--space-2);
+	min-height: 30px;
+	padding-inline: var(--pane-bleed);
+	border-radius: 8px;
 	font-size: var(--text-meta);
+}
+.pane-agents li > span:empty {
+	width: 14px;
+}
+.pane-agents li:has(a:hover) {
+	background: var(--wb-hover);
+}
+.pane-agents a::after {
+	content: "";
+	position: absolute;
+	inset: 0;
+	border-radius: inherit;
 }
 .pane-agents strong {
 	font: 500 12px / 1.4 var(--font-mono);
@@ -290,15 +340,16 @@
 	color: var(--ink-muted);
 }
 .pane-hint {
-	margin: var(--space-4) 0 0;
+	margin: var(--space-6) 0 0;
 	font-size: 12px;
-	line-height: 1.5;
+	line-height: 1.6;
 	color: var(--ink-muted);
 }
 .pane-hint kbd {
-	padding: 0 5px;
-	border: 1px solid var(--line-strong);
+	padding: 1px 5px;
+	border: 1px solid var(--line-float);
 	border-radius: 4px;
+	background: var(--wb-faint);
 	font: 11px / 1.5 var(--font-mono);
 	color: var(--ink);
 }
@@ -330,6 +381,7 @@
 }
 .pane-evidence__links a:hover {
 	text-decoration: underline;
+	text-underline-offset: 3px;
 }
 .pane-empty,
 .pane-note {
@@ -341,15 +393,20 @@
 .pane-note {
 	padding: 0 var(--space-3) var(--space-2);
 }
+/* A quiet action at the end of a label row. It is a button or a link; either way it is not underlined
+   prose, it is a control that fills on hover like every other one in the chrome. */
 .pane-link {
+	position: relative;
 	min-height: 0;
-	padding: 2px 6px;
-	margin-right: -6px;
+	padding: 3px 7px;
+	margin-right: -7px;
 	border: 0;
 	border-radius: 6px;
 	background: transparent;
 	color: var(--accent);
-	font-size: 12.5px;
+	font-size: 12px;
+	font-weight: 500;
+	text-decoration: none;
 }
 .pane-link:hover:not(:disabled) {
 	background: var(--accent-soft);
@@ -361,15 +418,15 @@
 }
 .pane-steps {
 	display: grid;
-	gap: var(--space-3);
-	margin: 0;
+	gap: 10px;
+	margin: 2px 0 0;
 	padding: 0;
 	list-style: none;
 }
 .pane-steps li {
 	display: flex;
 	align-items: flex-start;
-	gap: var(--space-3);
+	gap: 10px;
 	font-size: var(--text-meta);
 	line-height: 1.45;
 }
@@ -382,10 +439,10 @@
 	color: var(--ink-muted);
 	font-size: 12px;
 }
+/* A finished step steps back by tone alone; a struck line through every done row made the plan read
+   as a list of deletions. */
 .pane-steps li[data-tone="success"] > span:last-child {
 	color: var(--ink-muted);
-	text-decoration: line-through;
-	text-decoration-color: color-mix(in srgb, var(--ink-muted) 60%, transparent);
 }
 .pane-step__glyph {
 	flex: none;
@@ -394,18 +451,18 @@
 	width: 16px;
 	height: 16px;
 	margin-top: 1px;
-	border: 1.5px solid var(--line-strong);
+	border: 1.5px solid var(--line-float);
 	border-radius: 50%;
 	color: var(--accent);
 }
 .pane-step__glyph.is-done {
-	border-color: var(--accent);
+	border-color: color-mix(in srgb, var(--accent) 45%, transparent);
 	background: var(--accent-soft);
 }
 .pane-step__glyph .icon {
 	width: 10px;
 	height: 10px;
-	stroke-width: 2.4;
+	stroke-width: 2px;
 	animation: pane-step-tick var(--motion-entry) var(--ease-standard) both;
 }
 /* The tick mounts when a step completes, so it lands once; a finished plan never re-animates. */
@@ -530,7 +587,6 @@
 .touched {
 	margin: 0 var(--space-2) var(--space-5);
 	padding-top: var(--space-2);
-	border-top: 1px solid var(--line);
 }
 .touched > summary {
 	display: flex;
@@ -554,7 +610,7 @@
 .touched > summary .icon {
 	width: 14px;
 	height: 14px;
-	transition: transform 0.12s ease;
+	transition: transform var(--motion-fast) var(--ease-standard);
 }
 .touched[open] > summary .icon {
 	transform: rotate(90deg);
@@ -706,6 +762,9 @@
 .wb-aside .pane-cards {
 	padding: 0 var(--space-2) var(--space-6) 10px;
 }
+.wb-aside .pane-drill {
+	padding: var(--space-1) var(--space-2) var(--space-6) 10px;
+}
 .pane-path {
 	margin: 0;
 	overflow: hidden;
@@ -726,7 +785,4 @@
 	white-space: nowrap;
 	color: var(--ink);
 	text-decoration: none;
-}
-.pane-agents a:hover {
-	text-decoration: underline;
 }

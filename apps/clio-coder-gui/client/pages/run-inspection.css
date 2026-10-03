@@ -2,9 +2,6 @@
 	min-width: 0;
 	overflow-wrap: anywhere;
 }
-.run-inspection h1 {
-	font-size: var(--text-h1);
-}
 .inspection-heading,
 .inspection-jumps {
 	display: flex;
@@ -24,8 +21,9 @@
 }
 .run-inspection .trace-filters {
 	padding: var(--space-4);
-	background: var(--surface);
+	background: var(--wb-faint);
 	border: 1px solid var(--line);
+	border-radius: var(--radius-lg);
 	margin: var(--space-5) 0;
 }
 .evidence-actions label,

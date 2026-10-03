@@ -529,8 +529,9 @@ nav a:hover {
 .operation {
 	background: var(--well);
 	border-left: 3px solid var(--accent);
-	padding: 22px;
-	margin-top: 28px;
+	border-radius: 0 var(--radius-md) var(--radius-md) 0;
+	padding: var(--space-4) var(--space-5);
+	margin-top: var(--space-6);
 }
 .operation-heading {
 	display: flex;
@@ -730,28 +731,47 @@ nav a:hover {
 	flex: 1;
 	min-width: 180px;
 }
+/* A run in a list is a row, not a card: it answers the pointer across its whole width and its name
+   is set at the size of a row title, so a screen holds more than three of them. */
 .trace-run-card {
+	position: relative;
 	display: flex;
 	justify-content: space-between;
 	gap: var(--space-6);
-	padding: 25px 0;
-	border-top: 1px solid var(--line);
+	margin-inline: calc(var(--space-3) * -1);
+	padding: var(--space-4) var(--space-3);
+	border-radius: var(--radius-md);
 	text-decoration: none;
+	transition: background var(--motion-fast) var(--ease-standard);
+}
+/* The rule between rows is drawn apart from the row, because a border would bend round its corners. */
+.trace-run-card::before {
+	content: "";
+	position: absolute;
+	inset: 0 var(--space-3) auto;
+	height: 1px;
+	background: var(--line);
+}
+.trace-run-card:hover {
+	background: var(--wb-faint);
 }
 .trace-run-card:hover h2 {
-	text-decoration: underline;
-	text-underline-offset: 5px;
+	color: var(--accent);
 }
 .trace-run-card > div {
 	min-width: 0;
 }
 .trace-run-card h2 {
-	font-size: 21px;
-	margin-top: var(--space-3);
+	font-size: 17px;
+	font-weight: 600;
+	letter-spacing: -0.2px;
+	margin-top: var(--space-2);
 	overflow-wrap: anywhere;
 }
 .trace-run-card p {
-	margin: 10px 0;
+	margin: 4px 0 6px;
+	font-size: var(--text-meta);
+	color: var(--ink-muted);
 }
 .trace-run-card small,
 .trace-note {
@@ -770,10 +790,11 @@ nav a:hover {
 .trace-badge {
 	display: inline-block;
 	font-size: var(--text-exact);
+	font-weight: 500;
 	line-height: 1.5;
-	padding: 4px 9px;
+	padding: 1px 9px;
 	border: 1px solid var(--status-neutral-line);
-	border-radius: var(--radius-sm);
+	border-radius: var(--radius-pill);
 	background: var(--status-neutral-tint);
 	color: var(--status-neutral-fg);
 }
@@ -792,17 +813,44 @@ nav a:hover {
 	border-color: var(--status-fail-line);
 	color: var(--status-fail-fg);
 }
+/* The page's card. It sits on the page ground on a fine line; the control-weight line is kept for
+   controls, so a page of panels no longer reads as a page of form fields. */
 .trace-panel {
-	margin-top: var(--space-6);
-	border: 1px solid var(--line-strong);
-	padding: var(--space-6);
-	border-radius: var(--radius-md);
-	background: var(--surface);
+	margin-top: var(--space-5);
+	border: 1px solid var(--line);
+	padding: var(--space-5) var(--space-6);
+	border-radius: var(--radius-lg);
+	background: var(--wb-faint);
 	min-width: 0;
 }
+/* A panel that is only a disclosure is one row until it is opened. */
+.wb-main details.trace-panel {
+	margin-top: var(--space-3);
+	padding-block: 0;
+	font-size: var(--text-meta);
+}
+.wb-main details.trace-panel > summary {
+	min-height: 0;
+	margin: 0;
+	padding-block: 14px;
+	font-weight: 500;
+	color: var(--ink);
+}
+.wb-main details.trace-panel[open] {
+	padding-bottom: var(--space-5);
+}
 .trace-panel h2 {
-	font-size: 21px;
-	margin-bottom: var(--space-4);
+	font-size: 18px;
+	margin-bottom: var(--space-3);
+}
+/* A panel's title that leads somewhere is still a title; it underlines only when pointed at. */
+.trace-panel :is(h2, h3) a {
+	text-decoration: none;
+}
+.trace-panel :is(h2, h3) a:hover {
+	text-decoration: underline;
+	text-underline-offset: 4px;
+	text-decoration-thickness: 1px;
 }
 .trace-panel h3 {
 	font-size: var(--text-reading);
@@ -815,13 +863,18 @@ nav a:hover {
 	gap: var(--space-3);
 	flex-wrap: wrap;
 }
+/* Buttons in a panel or a filter bar are the app's ordinary buttons; they once had their own taller
+   shape and accent ink, which made every panel look like a different product. */
 .trace-panel button,
 .trace-filters button {
 	border: 1px solid var(--line-strong);
-	padding: 11px var(--space-4);
-	background: var(--surface);
-	border-radius: var(--radius-sm);
-	color: var(--accent);
+	border-radius: 8px;
+	background: transparent;
+	color: var(--ink);
+}
+.trace-panel button:hover:not(:disabled),
+.trace-filters button:hover:not(:disabled) {
+	background: var(--wb-hover);
 }
 /* The panel's quiet button rule outranks .primary by one element; restate the fill so a panel's
    one important action still reads as primary. */
@@ -960,7 +1013,6 @@ nav a:hover {
 	background: var(--action-line);
 }
 .trace-run-detail h1 {
-	font-size: var(--text-display);
 	overflow-wrap: anywhere;
 }
 /* The run's four totals, and how many events and processes there were of each kind. */
@@ -1284,12 +1336,24 @@ nav a:hover {
 }
 
 /* Dense inspection pages share a compact title; expressive type remains on the overview. */
-main :is(.panel-heading, .page-heading) h1 {
+/* One page voice. Every settings and inspection page opens the same way: a title in the interface
+   face at one size, whatever wrapper the page puts it in. The editorial serif is kept for the two
+   places that greet the operator: the home question and an empty conversation. */
+main :is(.panel-heading, .page-heading) h1,
+.wb-main[data-mode="settings"] h1 {
 	font-family: var(--font-ui);
-	font-size: clamp(28px, 3vw, 38px);
-	font-weight: 600;
-	letter-spacing: -0.8px;
+	font-size: 28px;
+	font-weight: 650;
+	letter-spacing: -0.6px;
 	line-height: 1.2;
+	margin: var(--space-1) 0 var(--space-4);
+}
+/* Low specificity on purpose: a card or panel that sizes its own heading keeps that size. */
+:where(.wb-main[data-mode="settings"]) h2 {
+	font-size: 20px;
+	font-weight: 650;
+	letter-spacing: -0.3px;
+	line-height: 1.3;
 }
 main > .panel-heading {
 	margin-bottom: var(--space-6);

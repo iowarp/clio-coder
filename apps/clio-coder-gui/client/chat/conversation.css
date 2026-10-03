@@ -34,20 +34,13 @@
 	margin: 0;
 }
 
-/* The status the bar shows beside the title: only when there is something to say. */
+/* The status the bar shows beside the title: only when there is something to say. Its frame, and
+   the approval tone's, are drawn with the other bar chips in client/shell/shell.css. */
 .wb-chip--status {
 	/* The word that carries the state never shrinks; the title gives way instead. */
 	flex: none;
 	max-width: none;
-	border-color: transparent;
-	background: transparent;
-	padding-inline: var(--space-1);
 	gap: var(--space-2);
-}
-.wb-chip--status[data-tone="approval"] {
-	border-color: var(--status-warn-line);
-	background: var(--status-warn-tint);
-	padding-inline: 10px;
 }
 .wb-chip--status[data-tone="failed"] {
 	color: var(--status-fail-fg);
