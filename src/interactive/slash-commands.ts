@@ -131,6 +131,7 @@ type SlashCommandVariant =
 	| { kind: "mcp"; argv: string[] }
 	| { kind: "doctor"; deep: boolean }
 	| { kind: "upgrade" }
+	| { kind: "config" }
 	| { kind: "quit" }
 	| { kind: "help"; query?: string }
 	| { kind: "init"; options: InitCommandOptions }
@@ -870,6 +871,7 @@ export interface SlashCommandContext {
 	 * changed; the dialog reports the outcome itself.
 	 */
 	applyModelRef: (ref: ResolvedModelRef) => "applied" | "pending";
+	openConfigure?: () => void;
 	openSettings: (area?: SettingsAreaId, group?: string) => void;
 	openFleetRuns?: () => void;
 	openResume: () => void;
@@ -2503,6 +2505,25 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 		},
 	},
 	{
+		name: "config",
+		description: "Run setup and apply saved changes to this session",
+		group: "Configure",
+		kinds: ["config"],
+		args: {},
+		fromArgs: fromArgsOrUsage("config", { kind: "config" }),
+		handle(_command, ctx) {
+			if (ctx.isTurnInFlight?.()) {
+				ctx.notice("warn", "A turn is running. Press Esc first, then run /config.");
+				return;
+			}
+			if (!ctx.openConfigure) {
+				ctx.notice("warn", "/config needs an interactive terminal.");
+				return;
+			}
+			ctx.openConfigure();
+		},
+	},
+	{
 		name: "settings",
 		description: "Open interactive settings",
 		group: "Configure",
@@ -2617,7 +2638,6 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	},
 ];
 
-const settingsCommand = CANONICAL_SLASH_COMMANDS.find((entry) => entry.name === "settings");
 const contextCommand = CANONICAL_SLASH_COMMANDS.find((entry) => entry.name === "context");
 export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	...CANONICAL_SLASH_COMMANDS,
@@ -2636,9 +2656,6 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 							: { kind: "compact", instructions: parsed.rest },
 				},
 			]
-		: []),
-	...(settingsCommand
-		? [{ ...settingsCommand, name: "config", kinds: [], description: "Open settings (alias for /settings)" }]
 		: []),
 ];
 

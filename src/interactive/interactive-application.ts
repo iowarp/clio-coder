@@ -203,6 +203,8 @@ export interface InteractiveDeps {
 	 * first-available entry.
 	 */
 	getSettings?: () => Readonly<ClioSettings>;
+	/** Run setup while the terminal is suspended; return the session result. */
+	onConfigure?: () => Promise<string>;
 	/** Live fleet node snapshots for the /fleet nodes view and node-pin editor. */
 	getFleetNodes?: () => ReadonlyArray<FleetNodeSnapshot>;
 	/** Live dispatch breaker state per route for the Settings → Targets rows. */
@@ -891,6 +893,7 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 		...(deps.panes ? { panes: deps.panes } : {}),
 		openModel: () => openModelOverlayState(),
 		openModelScope: (ref) => openModelScopeState(ref),
+		openConfigure: () => overlayLifecycle.openConfigureState(),
 		openSettings: (area, group) => {
 			if (!area) return openSettingsOverlayState();
 			// The quick-switch list lives under Models & Inference; `/settings chat model-picker` predates that area.
@@ -1056,6 +1059,15 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 			try {
 				tui.stop();
 				return run();
+			} finally {
+				tui.start();
+				tui.requestRender(true);
+			}
+		},
+		suspendTerminalAsync: async (run) => {
+			try {
+				tui.stop();
+				return await run();
 			} finally {
 				tui.start();
 				tui.requestRender(true);

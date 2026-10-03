@@ -50,6 +50,7 @@ export type OverlayLifecycleApplicationDeps = Pick<
 	| "recordOutcome"
 	| "interop"
 	| "observability"
+	| "onConfigure"
 	| "onContextClear"
 	| "onForkSession"
 	| "onNewSession"
@@ -101,6 +102,8 @@ export interface OverlayLifecycleRuntimeDeps {
 	 * own `$EDITOR` opener does.
 	 */
 	suspendTerminal: <T>(run: () => T) => T;
+	/** Keep the same terminal owner suspended until setup releases stdin. */
+	suspendTerminalAsync?: <T>(run: () => Promise<T>) => Promise<T>;
 	io: import("./slash-commands.js").RunIo;
 	readStructuredEntries: (sessionId: string) => import("../domains/session/index.js").SessionEntry[];
 	announceTaskMemorySeedOffer: () => void;
@@ -173,6 +176,7 @@ export interface OverlayLifecycleController {
 	openModelOverlayState(): void;
 	/** `/model <pattern>` and the picker both land here: choose session or global before anything applies. */
 	openModelScopeState(ref: PendingModelScope): void;
+	openConfigureState(): void;
 	openSettingsOverlayState(section?: SettingsSectionId, rowId?: SettingsCenterRowId): void;
 	openResumeOverlayState(): void;
 	openTreeOverlayState(): void;
@@ -580,6 +584,20 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 		startHandoffState,
 		openModelOverlayState: overlayModelSelectors.openModelOverlayState,
 		openModelScopeState: overlayModelSelectors.openModelScopeState,
+		openConfigureState: () => {
+			if (!deps.app.onConfigure || !deps.suspendTerminalAsync) {
+				notify("warning", "/config needs an interactive terminal.");
+				return;
+			}
+			void deps.suspendTerminalAsync(deps.app.onConfigure).then(
+				(message) => {
+					appendNotice("info", message, busNoticeSink);
+					footer.refresh();
+					tui.requestRender();
+				},
+				(error: unknown) => notify("error", `Setup failed: ${error instanceof Error ? error.message : String(error)}`),
+			);
+		},
 		openSettingsOverlayState: overlayModelSelectors.openSettingsOverlayState,
 		openResumeOverlayState,
 		openTreeOverlayState,

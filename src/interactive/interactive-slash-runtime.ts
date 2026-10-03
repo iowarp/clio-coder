@@ -185,6 +185,7 @@ export interface InteractiveSlashRuntimeDeps {
 	 * Absent on a host with no overlay layer, where the swap stays session-scoped.
 	 */
 	openModelScope?: (ref: PendingModelScope) => void;
+	openConfigure?: () => void;
 	openSettings: (area?: SettingsAreaId, group?: string) => void;
 	openFleetRuns?: () => void;
 	openResume: () => void;
@@ -596,6 +597,7 @@ export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps)
 			deps.requestRender();
 			return "applied";
 		},
+		...(deps.openConfigure ? { openConfigure: deps.openConfigure } : {}),
 		openSettings: deps.openSettings,
 		openResume: deps.openResume,
 		startNewSession: deps.startNewSession,

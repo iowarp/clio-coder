@@ -15,9 +15,11 @@ import { parseSlashCommand } from "../../src/interactive/slash-commands.js";
 import { TargetWizardSurface } from "../../src/interactive/target-wizard.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
 
-test("/config opens the same settings areas as /settings (#385)", () => {
+test("/config runs setup while /settings retains its areas", () => {
+	deepStrictEqual(parseSlashCommand("/config"), { kind: "config" });
+	strictEqual(parseSlashCommand("/config targets").kind, "usage-error");
 	for (const area of ["", "targets", "chat", "interface"]) {
-		deepStrictEqual(parseSlashCommand(`/config ${area}`.trim()), parseSlashCommand(`/settings ${area}`.trim()));
+		strictEqual(parseSlashCommand(`/settings ${area}`.trim()).kind, "settings");
 	}
 });
 
