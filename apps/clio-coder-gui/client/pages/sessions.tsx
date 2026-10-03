@@ -293,11 +293,11 @@ function SessionView({ client, id }: { client: Client; id: string }) {
 							<span>{workspaceName}</span>
 						</Link>
 						{chip ? (
-							<p className="wb-chip wb-chip--status" data-tone={chip.tone} role="status">
+							<span className="wb-chip wb-chip--status" data-tone={chip.tone} role="status">
 								{chip.tone === "working" ? <ClioPulse size={PULSE_SIZE.inline} /> : null}
 								<span>{chip.label}</span>
 								{snapshot.recoveredOrphan ? <span>· recovered after a server interruption</span> : null}
-							</p>
+							</span>
 						) : null}
 						<span className="wb-bar__spacer" />
 						<TelemetryChips

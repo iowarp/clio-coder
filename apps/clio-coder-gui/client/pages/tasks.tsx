@@ -6,6 +6,7 @@ import { type Client, emptyInput } from "../api/client.js";
 import { formatTime } from "../api/clock.js";
 import { Icon } from "../design/icons.js";
 import { ClioPulse, PULSE_SIZE } from "../shell/ClioMark.js";
+import { HomeAside } from "../shell/HomeAside.js";
 import { STATE_LABELS, shortAge, type TaskRow, taskRows } from "../shell/shell-model.js";
 import { TopBar } from "../shell/TopBar.js";
 import { useMinuteClock, useTaskActions } from "../shell/tasks.js";
@@ -54,6 +55,8 @@ export function Sessions({ client }: { client: Client }) {
 	const name = workspace.data?.name ?? "Tasks";
 	return (
 		<>
+			{/* The project overview fills the right sidebar here too, so the shell never shows an empty column. */}
+			<HomeAside client={client} workspace={workspace.data ?? null} />
 			<TopBar title={name}>
 				{workspace.data ? (
 					<span className="wb-chip" title={workspace.data.path}>
