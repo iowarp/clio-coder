@@ -101,7 +101,7 @@ All symbols are defined in the `GLYPH` object in [src/interactive/theme/glyphs.t
 | `✦` | `agent` | `accent` | Agent voice | First row of agent prose; `error` on a failed turn. |
 | `▌` | `userBar` | `accent` | Operator input | Gutter of every prompt row. |
 | `›` | `user` | `action` | Quoted operator text | Steering queue, command echoes. |
-| `❯` | `cursor` | `accent` | Focus | Selected row in lists, menus and overlays. |
+| `❯` | `cursor` | `accent` | Focus | Selected row in lists, menus and overlays; Pi SelectList renders it through the public `selectedText` theme hook. |
 | `▸` | `toolHeader` | `tool` | Observe or search | Reads, listings, searches. |
 | `§` | `classKnowledge` | `tool` | Knowledge or skill | Context, docs, library, evidence, skills. |
 | `±` | `classMutate` | `tool` | Mutate | Writes, patches, edits. |
@@ -145,7 +145,7 @@ Every framed block is built by `frame()` and `innerDivider()` in [rules.ts](../.
 Full-screen or docked panels for interactive workflows (`/settings`, `/view`, `/tasks`, `/usage`).
 - Header: Centered or left-aligned title with category tabs.
 - Navigation: `↑`/`↓` for items, `Tab` for sections, `Enter` to select, `Esc` to close.
-- **Selection**: A focused row carries `❯` in `accent` and its label in bold `accent`; nothing else on the row changes color. Every self-drawn list takes both from `selectionMark` and `selectionLabel` in [overlay-frame.ts](../../src/interactive/overlay-frame.ts).
+- **Selection**: A focused row carries `❯`. Self-drawn lists use `selectionMark` and `selectionLabel` in [overlay-frame.ts](../../src/interactive/overlay-frame.ts) for an `accent` marker and bold `accent` label. Pi SelectList uses the public `selectedText` hook to replace its leading arrow with `❯` and style the selected row in bold `selectedOption`, including its description. No subclass or dependency patch is used.
 
 ### 3.3 Status Pills
 Compact inline lifecycle indicators:

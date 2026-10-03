@@ -26,6 +26,11 @@ The semantic operations call Pi's existing editing and search implementation;
 they do not replace it. Consumers are the terminal lease, input router, editor
 and overlays under `src/interactive/`, through `src/engine/tui.ts`.
 
+Clio also retains its own locked YAML credential storage and OAuth refresh lifecycle
+for 0.6.0. Provider login and refresh flows delegate to Pi through Clio's OAuth
+registry; `CredentialStore` and `Models.getAuth` adoption was reverted. This
+auth boundary is Clio application code and adds no dependency patch.
+
 ## What was removed
 
 The patch carried 26 hunks before the Pi 1.0 adoption series and carries

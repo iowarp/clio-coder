@@ -65,6 +65,11 @@ Their MIT notices are distributed in dist/assets/tui-notices/. The pinned
 pi-tui runtime package remains installed for its Darwin and Windows native
 helpers; Clio does not modify consumer dependencies during installation.
 
+Clio retains its own credential storage, OAuth provider registry and locked
+refresh lifecycle. Anthropic, OpenAI Codex and GitHub Copilot OAuth flows
+delegate to Pi; the ALCF OAuth integration remains Clio-owned. Pi's
+CredentialStore and Models.getAuth are not used for stored OAuth in 0.6.0.
+
 Copied Pi utility code
 ----------------------
 The truncation, prompt-argument and message-replay utility blocks in
