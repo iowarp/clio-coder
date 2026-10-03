@@ -136,7 +136,7 @@ describe("contracts/metering integrity", () => {
 		strictEqual(remainingContextMaxTokens(model, empty, undefined), 8_192);
 		strictEqual(remainingContextMaxTokens(model, empty, { maxTokens: 4_096 }), 4_096);
 		setGlobalDefaultMaxOutputTokens(32_768);
-		strictEqual(remainingContextMaxTokens(servedWindowModel, loaded, undefined), 10_048);
+		strictEqual(remainingContextMaxTokens(servedWindowModel, loaded, undefined), 6_976);
 	});
 
 	it("reserves the configured response allowance rather than compacting a fitting first request", () => {
@@ -159,7 +159,7 @@ describe("contracts/metering integrity", () => {
 				contextWindow: model.contextWindow,
 				inputTokens: 11_890,
 			});
-			strictEqual(reserved, 118_158);
+			strictEqual(reserved, 115_086);
 			strictEqual(reserved, remainingContextMaxTokens(model, context, undefined));
 			ok(11_890 + reserved < model.contextWindow);
 			strictEqual(

@@ -378,6 +378,19 @@
 						"piMessagesApi": "7659ce44b8f7bd11dc1c3755218461435a7c61ed94a71fba11de6ba5e800bd4b"
 					}
 				},
+				"./api/simple-options": {
+					"declaration": "dist/api/simple-options.d.ts",
+					"exports": {
+						"adjustMaxTokensForThinking": "f2035f47e457426168dff37f6315a0a0d1481b83a39d8c2c586273ffc3ade0f5",
+						"buildBaseOptions": "2258f4da57919d646b4bad3e435446d9a6a8d22cf9d29e43cbc9f5bbc12f3a4f",
+						"clampMaxTokensToContext": "766dbd93bd66a3447955ddc7368082fba996a039148925f35e151712666624e0",
+						"clampReasoning": "d18319fe2170e83f939cd468a0fd73ab3f4a81971a4055e0040f9d280c066d3a",
+						"clampThinkingBudgetToAnswerRoom": "0d2d82cbe0e3f471bcdc2f16e43ecb38fad2fed22c4d378a1ea362860812dc1a",
+						"DEFAULT_THINKING_BUDGETS": "0ce3f074a6a610f23217ff92cab2034b8c94fc452fd74b8a653ccb8e8822a8e8",
+						"MIN_ANSWER_TOKENS": "65e1305b7ee635b64e8af0f8bf630ecfe0e3f3cb9104e172269ae7846cd737f1",
+						"thinkingBudgetForLevel": "6ade3e3c59fa9c0b24b6d51c8fea579888231c3e7475228a99298dcd00037e9b"
+					}
+				},
 				"./models": {
 					"declaration": "dist/models.d.ts",
 					"exports": {

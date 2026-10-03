@@ -1,9 +1,24 @@
 import type { Api, Context, Model, StreamOptions } from "@earendil-works/pi-ai";
+import { clampMaxTokensToContext } from "@earendil-works/pi-ai/api/simple-options";
 import { CLIO_MIN_CONTEXT_WINDOW, CLIO_MIN_MAX_OUTPUT_TOKENS } from "../../core/context-floor.js";
 import { ceilChars, estimateAgentMessageTokens, toolSchemaChars } from "../../domains/session/context-accounting.js";
-import { resolvedRequestContext } from "../context.js";
+import { normalizeContext, resolvedRequestContext } from "../context.js";
 
-const CONTEXT_BUDGET_SAFETY_TOKENS = 1024;
+/**
+ * Pi clamps max_tokens to the remaining window on every simple stream, with its
+ * own safety margin. The number-based preflight below has no context to hand
+ * Pi, so it reads that margin off Pi's clamp rather than copying it, which keeps
+ * the reservation equal to what reaches the wire.
+ */
+const MARGIN_PROBE_WINDOW = 1_000_000;
+const CONTEXT_BUDGET_SAFETY_TOKENS =
+	MARGIN_PROBE_WINDOW -
+	clampMaxTokensToContext(
+		{ contextWindow: MARGIN_PROBE_WINDOW } as Model<Api>,
+		normalizeContext({ messages: [] }),
+		MARGIN_PROBE_WINDOW,
+	);
+
 /**
  * Output budget when nothing more specific applies. It is the product floor,
  * not a conservative guess: a turn that writes a source file or a wiki page
@@ -136,7 +151,6 @@ export function remainingContextMaxTokens(
 	context: Context,
 	options: Pick<StreamOptions, "maxTokens"> | undefined,
 ): number {
-	const inputTokens = estimateInputTokensFromContext(context);
 	const contextWindow = model.contextWindow > 0 ? model.contextWindow : Number.POSITIVE_INFINITY;
 	const modelLimit = model.maxTokens > 0 ? model.maxTokens : Number.POSITIVE_INFINITY;
 	// Precedence for the requested ceiling when the caller gave no explicit
@@ -150,6 +164,10 @@ export function remainingContextMaxTokens(
 			? globalDefaultMaxOutputTokens
 			: (recommendedOutputTokens(model, contextWindow) ?? (model.maxTokens > 0 ? modelLimit : DEFAULT_MAX_OUTPUT_TOKENS));
 	const requested = options?.maxTokens ?? defaultLimit;
-	const resolved = clampOutputToRemainingContext(Math.min(requested, modelLimit), contextWindow, inputTokens);
+	const resolved = clampMaxTokensToContext(
+		{ contextWindow } as Model<Api>,
+		normalizeContext(context),
+		Math.min(requested, modelLimit),
+	);
 	return Number.isFinite(resolved) ? resolved : DEFAULT_MAX_OUTPUT_TOKENS;
 }
