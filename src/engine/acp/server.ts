@@ -37,7 +37,9 @@ import {
 import type { ContextLedger } from "../../domains/session/context-ledger.js";
 import type { SessionContract, SessionMeta } from "../../domains/session/contract.js";
 import type { MessageEntry, SessionEntry } from "../../domains/session/entries.js";
+import type { TaskBoardSnapshot } from "../../domains/session/task-board.js";
 import { filterEntriesToActivePath } from "../../domains/session/tree/active-path.js";
+import type { WorkspaceSnapshot } from "../../domains/session/workspace/index.js";
 import { type AskUserHandler, askUserExposure } from "../../tools/ask-user.js";
 import type { McpCapabilitySource, McpClientServerSpec } from "../../tools/gateway/mcp-capabilities.js";
 import { gatewayChainPlan } from "../../tools/gateway-display.js";
@@ -81,6 +83,8 @@ import {
 	bounded as boundedFleetText,
 	projectFleetPreview,
 } from "./fleet-run.js";
+import type { AcpLiveTelemetry } from "./live-telemetry.js";
+import { ACP_WORKSPACE_META_KEY, createAcpLiveTelemetry, turnUsageMeta } from "./live-telemetry.js";
 import {
 	ACP_SESSION_FORK_METHOD,
 	ACP_SESSION_SWITCH_TURN_METHOD,
@@ -338,6 +342,18 @@ export interface ClioAcpServerOptions {
 	 * Absent means the method is not announced and refuses.
 	 */
 	contextLedger?: () => ContextLedger;
+	/**
+	 * The session's task-board plan, re-read after every settled tool call so a
+	 * change reaches the client as the standard `plan` update. Absent means no
+	 * `plan` update is sent; `_clio-coder/session/board` still carries the plan.
+	 */
+	plan?: () => TaskBoardSnapshot | null;
+	/**
+	 * Probes the workspace's Git facts for `_meta["clio-coder/workspace"]` on the
+	 * session responses and on `session_info_update` when they change. Absent
+	 * means the capability is not announced and no workspace view is sent.
+	 */
+	workspace?: (cwd: string) => Promise<WorkspaceSnapshot>;
 	/**
 	 * Expands operator syntax in a prompt as the terminal does before it submits:
 	 * `@path` file and image references, prompt templates and `/skill` requests,
@@ -1391,6 +1407,24 @@ function sendToolProgress(
 		},
 		toolCallUpdateMeta(active.toolCallSnapshots.get(toolCallId)),
 	);
+}
+
+const EMPTY_SESSION_USAGE: ReturnType<AcpUsageSource["session"]> = {
+	cost: { knownUsd: 0, hasEstimated: false, hasUnknown: false, allKnownFree: false, calls: 0 },
+	rows: [],
+};
+
+/** Kinds that only look; any other settled call may have moved the branch or the worktree. */
+const READ_ONLY_TOOL_KINDS: ReadonlySet<AcpToolKind> = new Set<AcpToolKind>(["read", "search", "fetch"]);
+
+function observeTelemetry(telemetry: AcpLiveTelemetry, rawEvent: AcpServerEvent, active: ActivePrompt): void {
+	if (active.permissionExpired || active.toolCallLimitReached) return;
+	const event = eventRecord(rawEvent);
+	if (event.type === "message_end" && isRecord(event.message) && event.message.role === "assistant") {
+		telemetry.modelResponded();
+	} else if (event.type === "tool_execution_end") {
+		telemetry.toolSettled(!READ_ONLY_TOOL_KINDS.has(toolKind(eventString(event, "toolName"))));
+	}
 }
 
 function handleChatEvent(
@@ -2717,6 +2751,8 @@ export interface AcpHandshakeFeatures {
 	aside?: boolean;
 	/** Whether `_clio-coder/usage/read` answers; absent reads as false. */
 	usage?: boolean;
+	/** Whether session responses and `session_info_update` carry the workspace view; absent reads as false. */
+	workspace?: boolean;
 	/** Whether prompts are expanded, which is what admits image blocks; absent reads as false. */
 	images?: boolean;
 	/** Whether the host can ask `ask_user` rounds over `_clio-coder/interview/request`; absent reads as false. */
@@ -3007,6 +3043,7 @@ export function createAcpHandshake(features: AcpHandshakeFeatures): AcpHandshake
 							: {}),
 						...(features.libraryReload ? { [ACP_LIBRARY_META_KEY]: { version: 1, reload: ACP_LIBRARY_RELOAD_METHOD } } : {}),
 						...(features.usage ? { [ACP_ACCOUNTING_META_KEY]: { version: 1, read: ACP_USAGE_READ_METHOD } } : {}),
+						...(features.workspace ? { [ACP_WORKSPACE_META_KEY]: { version: 1, update: "session_info_update" } } : {}),
 						...(features.aside
 							? {
 									[ACP_ASIDE_META_KEY]: {
@@ -3119,6 +3156,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 			libraryReload: options.libraryReload !== undefined,
 			aside: options.aside !== undefined,
 			usage: options.usage !== undefined,
+			workspace: options.workspace !== undefined,
 			images: options.expandPrompt !== undefined,
 			interviews: options.interviews !== undefined,
 			workerPermissions: options.workerPermissions !== undefined,
@@ -3158,6 +3196,20 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 	// trailing slash, or a `/.` suffix is recognised rather than refused.
 	const canonicalCwd = realpathSync(options.cwd ?? process.cwd());
 	const permissionTimeoutMs = options.permissionTimeoutMs ?? DEFAULT_DELEGATION_PERMISSION_TIMEOUT_MS;
+	const telemetry: AcpLiveTelemetry = createAcpLiveTelemetry({
+		notify: (sessionId, update) => options.transport.notify("session/update", { sessionId, update }),
+		sessionId: () => boundSessionId,
+		cwd: canonicalCwd,
+		...(options.contextLedger !== undefined ? { contextLedger: options.contextLedger } : {}),
+		...(options.usage !== undefined ? { sessionUsage: () => options.usage?.session() ?? EMPTY_SESSION_USAGE } : {}),
+		...(options.plan !== undefined ? { plan: options.plan } : {}),
+		...(options.workspace !== undefined ? { workspace: options.workspace } : {}),
+		...(options.diagnostics !== undefined ? { diagnostics: options.diagnostics } : {}),
+	});
+	const workspaceResultMeta = async (): Promise<Record<string, unknown>> => {
+		const view = await telemetry.workspace();
+		return view === null ? {} : { [ACP_WORKSPACE_META_KEY]: view };
+	};
 	if (
 		!Number.isSafeInteger(permissionTimeoutMs) ||
 		permissionTimeoutMs < 1 ||
@@ -3791,10 +3843,11 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 		sessions.set(id, session);
 		boundSessionId = id;
 		announceCommands(id);
+		telemetry.bind(false);
 		return {
 			sessionId: id,
 			...sessionConfig(session),
-			_meta: { [ACP_SESSION_META_KEY]: sessionResultMeta(session, false) },
+			_meta: { [ACP_SESSION_META_KEY]: sessionResultMeta(session, false), ...(await workspaceResultMeta()) },
 		};
 	});
 
@@ -3833,6 +3886,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 		if (replay !== undefined) {
 			for (const replayParams of replay.params) options.transport.notify("session/update", replayParams);
 		}
+		telemetry.bind(replay !== undefined);
 	};
 
 	const restoreSession = async (params: unknown, replayToClient: boolean) => {
@@ -3909,6 +3963,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 					true,
 					replay !== undefined ? { turns: replay.turns, truncated: replay.truncated } : undefined,
 				),
+				...(await workspaceResultMeta()),
 			},
 		};
 	};
@@ -5135,12 +5190,15 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 			settle = resolveSettled;
 		});
 		options.onActiveSessionAutonomyChange?.(session.autonomy);
-		const onTurnEvent = (event: AcpServerEvent) =>
+		telemetry.turnStarted(active.usage);
+		const onTurnEvent = (event: AcpServerEvent) => {
 			handleChatEvent(event, options.transport, session.id, active, canonicalCwd, options.diagnostics, () => {
 				permission.cancelPending("tool call limit exceeded");
 				options.toolRegistry?.cancelParkedCalls("tool call limit exceeded");
 				options.chat.cancel();
 			});
+			observeTelemetry(telemetry, event, active);
+		};
 		const unsubscribeChat = options.chat.onEvent(onTurnEvent);
 		const unsubscribeHost = options.hostToolEvents?.onEvent(onTurnEvent);
 		const unsubscribe = () => {
@@ -5212,6 +5270,8 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 			active.errorMessage = err instanceof Error ? err.message : String(err);
 		} finally {
 			unsubscribe();
+			// The last meter and plan frames precede the response they total.
+			await telemetry.turnSettled();
 			if (session.activePrompt === active) session.activePrompt = null;
 			if (activePromptState === active) activePromptState = null;
 			if (activeSessionId === session.id) {
@@ -5281,6 +5341,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 	options.onReady?.();
 	return await new Promise<number>((resolve) => {
 		options.transport.onClose(() => {
+			telemetry.dispose();
 			detachInterviews?.();
 			permission.unregister();
 			unsubscribeEventStream();
@@ -5307,21 +5368,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 
 /** PromptResponse is `{ stopReason, _meta? }`; usage is not an ACP v1 field. */
 function promptResponse(stopReason: string, active: ActivePrompt): AcpPromptResponse {
-	return {
-		stopReason,
-		_meta: {
-			[ACP_USAGE_META_KEY]: {
-				input: active.usage.input,
-				output: active.usage.output,
-				cacheRead: active.usage.cacheRead,
-				cacheWrite: active.usage.cacheWrite,
-				reasoning: active.usage.reasoning,
-				totalTokens: active.usage.totalTokens,
-				costUsd: active.usage.costUsd,
-				costProvenance: active.usage.costProvenance,
-			},
-		},
-	};
+	return { stopReason, _meta: { [ACP_USAGE_META_KEY]: turnUsageMeta(active.usage) } };
 }
 
 export type AcpPromptContent = AcpContentBlock[];
