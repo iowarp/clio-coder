@@ -1011,9 +1011,12 @@ function pathPolicyTargets(
 		}
 		case ToolNames.Data: {
 			// data streams one named file; a zero-access path is refused here,
-			// before the reader opens it, exactly as a read of the same path.
+			// before the reader opens it, under every spelling a read of the
+			// same path is checked against.
 			const target = pathArg(args);
-			return target === null ? [] : [{ operation: "read", path: target }];
+			return target === null
+				? []
+				: readScopeSpellings(target, callCwd).map((spelling) => ({ operation: "read" as const, path: spelling }));
 		}
 		case ToolNames.Write:
 		case ToolNames.Edit: {

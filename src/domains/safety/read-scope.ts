@@ -10,9 +10,16 @@ import { isSameOrDescendant } from "./path-policy.js";
 
 /**
  * The read-class tools that take a path from the model. Each opens whatever
- * the path resolves to, so each is held to the workspace the same way.
+ * the path resolves to, so each is held to the workspace the same way. data
+ * opens its file as directly as read does, so it meets the same escape gate.
  */
-const READ_SCOPE_TOOLS: ReadonlySet<string> = new Set([ToolNames.Read, ToolNames.Ls, ToolNames.Grep, ToolNames.Find]);
+const READ_SCOPE_TOOLS: ReadonlySet<string> = new Set([
+	ToolNames.Read,
+	ToolNames.Ls,
+	ToolNames.Grep,
+	ToolNames.Find,
+	ToolNames.Data,
+]);
 
 export function isReadScopeTool(tool: string): boolean {
 	return READ_SCOPE_TOOLS.has(tool);
