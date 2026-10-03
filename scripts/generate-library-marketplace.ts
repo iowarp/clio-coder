@@ -5,7 +5,7 @@
  *
  * Run through `pnpm run library:pin`; verified by `pnpm run library:check`,
  * which `lint` runs, so a stale marketplace fails the gate.
- * `scripts/verify-portable-hosts.sh` reproduces the host behavior this file
+ * Local host interoperability checks reproduce the host behavior this file
  * relies on, against real host CLIs in throwaway homes.
  *
  * Behavior measured against Claude Code 2.1.267 rather than assumed:

@@ -10,7 +10,6 @@ sources:
   - "scripts/release-candidate.mjs"
   - "scripts/pi-surface-diff.ts"
   - "scripts/decision-probe.ts"
-  - "scripts/bench-boot.ts"
   - "scripts/configuration-reference.ts"
   - "scripts/release-version-policy.mjs"
   - "scripts/release-manifest.json"
@@ -66,7 +65,6 @@ run):
 - `library:pin` / `library:check` run `scripts/pin-library.ts`, with `--check`.
 - `pi:surface-diff` runs `scripts/pi-surface-diff.ts`; `pi:surface-snapshot`
   runs the same file with `--write`.
-- `bench:boot` runs `scripts/bench-boot.ts`.
 - `ci:release` runs `node scripts/release-candidate.mjs qualify`;
   `release:preflight` (also the `prepublishOnly` hook) runs
   `scripts/release-candidate.mjs preflight`.
@@ -224,7 +222,7 @@ handbook.
 
 Two scripts are explicitly operator-run and are never part of CI:
 
-`scripts/bench-boot.ts` measures boot interactivity. It launches
+The maintainer’s local boot benchmark measures boot interactivity. It launches
 `dist/cli/index.js` in a real pseudo-terminal (via `node-pty`) against an
 isolated home and a local stub HTTP target, starts typing the moment the
 Stage 0 editor paints, and times each keystroke's echo. It reports Stage 0
@@ -314,8 +312,8 @@ library tests do not gate routine pull requests.
   assert this. Adding a `scripts/` path to the `package.json` `files` allowlist
   or to `release-manifest.json` will fail these gates.
 - **No model calls in the lint gate.** `check-hygiene.ts` must stay free of
-  model requests and real user installations; `bench-boot.ts` and
-  `decision-probe.ts` are the operator-run benches that do call real
+  model requests and real user installations; the local boot benchmark and
+  `decision-probe.ts` are operator-run tools that exercise real
   runtimes, and they are invoked only by hand, never by CI.
 - **Generated catalogs are committed.** `library/registry.yaml`,
   `library/skills/registry.yaml`, `library/skills/skill-marketplace.json`, and

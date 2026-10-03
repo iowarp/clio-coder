@@ -54,3 +54,20 @@ AGENTS.md
 
 # Throwaway scratch: probe scripts, fixtures, copied repositories.
 /tmp/
+
+# Maintainer benchmarks, live probes and their private inputs/coverage.
+/scripts/bench-boot.ts
+/scripts/bench-harness-context.ts
+/scripts/bench-welcome.ts
+/scripts/harness-probe.ts
+/scripts/smoke-real-home.sh
+/scripts/verify-portable-hosts.sh
+/tests/contracts/harness-probe.test.ts
+/tests/extended/real-home-smoke-isolation.test.ts
+/assets/recordings/gui-calibration-master.webm
+/tests/fixtures/harness-probes/capability.json
+/tests/fixtures/harness-probes/focused.json
+/tests/fixtures/harness-probes/independent-areas.json
+/tests/fixtures/harness-probes/orientation.json
+/tests/fixtures/harness-probes/session-facts.json
+/tests/fixtures/harness-probes/undecided.json

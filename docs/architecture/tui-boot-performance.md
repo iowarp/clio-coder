@@ -43,15 +43,9 @@ The native worker entry (`src/worker/entry.ts`) and the rest of `src/worker/` im
 
 ## Reproduce
 
-```bash
-pnpm run build
-pnpm run bench:boot -- --runs 7 --json /tmp/clio-boot-fullscreen.json
-pnpm run bench:boot -- --runs 3 --mode regular --json /tmp/clio-boot-regular.json
-pnpm run bench:boot -- --runs 3 --no-compile-cache --json /tmp/clio-boot-uncached.json
-node --import tsx scripts/bench-welcome.ts
-```
+Build the CLI with `pnpm run build`. The measurement harnesses are maintainer-local and are not included in a source checkout.
 
-[bench-boot.ts](../../scripts/bench-boot.ts) launches the built CLI (`dist/cli/index.js`) in a pseudo-terminal of 180 columns by 30 rows against an isolated home and a local HTTP stub that serves one model. It runs the `full`, `normal` and `portable` profiles, which differ only in `interface.demo` and `NO_COLOR`. Each profile's home gets one unreported priming boot, kept as `cold` in the JSON. Because setup runs `upgrade` and caches outside the isolated home may be warm, that boot is not a cold operating-system boot. The measured runs interleave the profiles and rotate which goes first.
+The maintainer’s local boot benchmark launches the built CLI (`dist/cli/index.js`) in a pseudo-terminal of 180 columns by 30 rows against an isolated home and a local HTTP stub that serves one model. It runs the `full`, `normal` and `portable` profiles, which differ only in `interface.demo` and `NO_COLOR`. Each profile's home gets one unreported priming boot, kept as `cold` in the JSON. Because setup runs `upgrade` and caches outside the isolated home may be warm, that boot is not a cold operating-system boot. The measured runs interleave the profiles and rotate which goes first.
 
 The harness types one marker character every `--interval` milliseconds (default 20) as soon as the Stage 0 editor paints, caps the typing at `--keys` characters (default 160), and keeps typing until the hydrated footer has been visible for `--settle` milliseconds (default 500). The hydrated footer is recognized by the parenthesized context percentage it alone prints. Per run it reports:
 
@@ -77,6 +71,6 @@ The summary prints per-profile medians. A run is invalid when hydration, the pha
 | `--cpu-profile-dir <dir>` | Record Node CPU profiles. Profiling changes timing, so keep those runs separate from unprofiled ones. |
 | `--json <file>` | Write every run, including the priming boots. |
 
-`scripts/bench-welcome.ts` is a separate loop, not a startup measurement. It renders the full and normal Stage 0 headers, cached and fresh, and paints the wordmark in truecolor, indexed and monochrome terminals, and prints milliseconds per iteration (`--iterations`, default 2000, after 100 warm-up calls), rows and encoded bytes.
+The maintainer’s local welcome benchmark is a separate loop, not a startup measurement. It renders the full and normal Stage 0 headers, cached and fresh, and paints the wordmark in truecolor, indexed and monochrome terminals, and prints milliseconds per iteration (`--iterations`, default 2000, after 100 warm-up calls), rows and encoded bytes.
 
 Timings are observations, not thresholds. Hardware load, filesystem caches, terminal implementations, fonts, plugin inventories, real model routes and SSH latency change them, and a pseudo-terminal does not prove glyph rendering on any particular terminal. The deterministic guard on discovery cost is the file-system call count in `tests/contracts/plugin-discovery-fs-scaling.test.ts`, and the deterministic guard on Stage 0 size is the import budget above.
