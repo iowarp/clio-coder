@@ -64,11 +64,11 @@ const FORCED_TOOL_CHOICE_REMOVED_AT: Readonly<Record<string, readonly [number, n
 /**
  * Whether the model rejects a forced tool choice. Matches first-party ids
  * (`claude-sonnet-5-5`), dated snapshots and platform-prefixed ids
- * (`anthropic.claude-opus-5-5`). The minor version is one or two digits so a
+ * (`anthropic.claude-opus-5-5`, `anthropic/claude-opus-5.5`). The minor version is one or two digits so a
  * date suffix on a whole-number release is never read as a minor version.
  */
 function rejectsForcedToolChoice(model: Pick<EngineModel, "id">): boolean {
-	const match = /claude-(sonnet|opus|fable|mythos)-(\d+)(?:-(\d{1,2}))?(?!\d)/u.exec(model.id);
+	const match = /claude-(sonnet|opus|fable|mythos)-(\d+)(?:[.-](\d{1,2}))?(?!\d)/u.exec(model.id);
 	if (!match) return false;
 	const removedAt = FORCED_TOOL_CHOICE_REMOVED_AT[match[1] ?? ""];
 	if (!removedAt) return false;
