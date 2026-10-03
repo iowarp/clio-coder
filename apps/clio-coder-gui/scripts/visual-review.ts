@@ -24,7 +24,6 @@ import { traceFixture } from "../tests/harness/trace-fixture.js";
 
 const SHOTS = [
 	"home",
-	"workspaces",
 	"history",
 	"delete",
 	"empty",
@@ -42,7 +41,7 @@ const SHOTS = [
 	"approval",
 	"fleet",
 	"steer",
-	"tools",
+	"pane",
 ];
 const { values } = parseArgs({
 	options: {
@@ -145,21 +144,14 @@ if (values.serve) {
 				page.locator(".chat-transcript").evaluate((element, where) => {
 					element.scrollTop = where === "top" ? 0 : element.scrollHeight;
 				}, edge);
+			// The app opens on a blank task: the home composer is the first thing that renders.
+			const homeField = page.getByPlaceholder("Describe a task or ask a question");
 			await page.goto(`${origin}/#token=test-token`);
-			await page.getByRole("heading", { level: 1 }).waitFor();
-			if (want("home")) {
-				await page.goto(`${origin}/`);
-				await page.getByLabel("Project folder", { exact: true }).waitFor();
-				await shot("home", true);
-			}
-			if (want("workspaces")) {
-				await page.goto(`${origin}/sessions`);
-				await page.getByRole("heading", { name: "Recent projects" }).waitFor();
-				await shot("workspaces", true);
-			}
+			await homeField.waitFor();
+			if (want("home") || want("empty")) await shot(want("home") ? "home" : "empty");
 			if (want("history") || want("delete")) {
 				await page.goto(`${origin}/workspaces/${workspace.id}/sessions`);
-				await page.getByText("Survey the sensor calibration notes").waitFor();
+				await page.locator("main").getByText("Survey the sensor calibration notes").waitFor();
 				if (want("history")) await shot("history", true);
 				if (want("delete")) {
 					await page.getByRole("button", { name: "Delete Survey the sensor calibration notes", exact: true }).click();
@@ -213,22 +205,30 @@ if (values.serve) {
 					await shot(`${name}-${values.state}`, true);
 				}
 			if (values.state === "error") await page.unroute("**/api/**");
-			if (["empty", "picker", "conv", "approval", "fleet", "steer", "tools"].some(want)) {
-				await page.goto(`${origin}/workspaces/${workspace.id}/sessions`);
-				await page.getByRole("button", { name: "New conversation", exact: true }).click();
+			if (["picker", "conv", "approval", "fleet", "steer", "pane"].some(want)) {
+				// A task starts from the home composer and lands on its conversation.
+				await page.goto(`${origin}/`);
+				await homeField.fill("Summarize the fixture workspace.");
+				await homeField.press("Enter");
+				await page.waitForURL(/\/sessions\/[^/]+$/);
 				const field = page.getByLabel("Message Clio Coder", { exact: true });
 				await field.waitFor();
-				if (want("empty")) await shot("empty");
+				// The route picker locks while a turn runs, so the opening turn settles first.
+				await page.getByRole("button", { name: "Stop turn", exact: true }).waitFor({ state: "detached" });
 				// The route picker needs the route facts, so it is photographed only with --route.
 				if (want("picker") && values.route) {
 					const picker = page.locator(".route-picker");
 					await picker.locator("summary").click();
+					// A conversation keeps its connection, so the choice is made for every project.
+					await picker.getByLabel("Apply to", { exact: true }).selectOption("every-project");
 					await picker.getByLabel("Connection", { exact: true }).selectOption("field-station");
 					await picker.getByText(/^field-station answered at /).waitFor();
 					await shot("picker");
 					await page.keyboard.press("Escape");
 				}
 				const send = async (text: string) => {
+					// A message sent while a turn runs is queued as direction, not started as a turn.
+					await page.getByRole("button", { name: "Stop turn", exact: true }).waitFor({ state: "detached" });
 					await field.fill(text);
 					await page.locator(".composer__submit").click();
 				};
@@ -274,11 +274,11 @@ if (values.serve) {
 					await page.getByRole("button", { name: "Guide scout", exact: true }).waitFor({ state: "detached" });
 					if (want("fleet")) await shot("fleet-settled");
 				}
-				if (want("tools")) {
-					await page.locator(".conversation__tools > summary").click();
-					await page.locator(".conversation__tools-body").waitFor();
-					await shot("tools");
-					await page.keyboard.press("Escape");
+				if (want("pane")) {
+					if ((await page.locator(".pane:not([hidden])").count()) === 0)
+						await page.getByRole("button", { name: "Show task pane", exact: true }).click();
+					await page.locator(".pane:not([hidden]) .pane__body").waitFor();
+					await shot("pane");
 				}
 			}
 			await context.close();

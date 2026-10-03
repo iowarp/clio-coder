@@ -43,5 +43,20 @@ export async function seedHistory(home: string, project: string, now = Date.now(
 				...("preview" in row ? { firstMessagePreview: row.preview } : {}),
 			}),
 		);
+		// The ledger lists only sessions whose transcript holds a model turn, so each one gets an exchange.
+		const prompt = "preview" in row ? row.preview : row.name;
+		const entries = [
+			{ type: "session", version: 6, id, timestamp: at, cwd: project },
+			{ kind: "message", turnId: `${id}-0`, parentTurnId: null, timestamp: at, role: "user", payload: { text: prompt } },
+			{
+				kind: "message",
+				turnId: `${id}-1`,
+				parentTurnId: `${id}-0`,
+				timestamp: at,
+				role: "assistant",
+				payload: { text: "Done." },
+			},
+		];
+		await writeFile(join(directory, "current.jsonl"), `${entries.map((entry) => JSON.stringify(entry)).join("\n")}\n`);
 	}
 }
