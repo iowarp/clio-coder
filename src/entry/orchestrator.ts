@@ -167,6 +167,7 @@ import {
 	type ResourcesContract,
 } from "../domains/resources/index.js";
 import { expandSubmitText } from "../domains/resources/submit-expansion.js";
+import { createCitationGroundingRegistration } from "../domains/safety/citation-grounding.js";
 import { DEFAULT_RECENT_ENTRY_LIMIT } from "../domains/safety/finish-contract.js";
 import { createFinishContractRegistration } from "../domains/safety/finish-contract-registration.js";
 import type { AutonomyLevel, FlowRestrictionSet, SafetyContract } from "../domains/safety/index.js";
@@ -3124,6 +3125,10 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			}),
 		);
 	}
+
+	// DF-1: a final answer that cites line numbers no tool printed gets one
+	// continuation to re-read with line_numbers. Every surface, headless included.
+	middleware.registerHook(createCitationGroundingRegistration());
 
 	if (!options.headless && !options.acp) {
 		middleware.registerHook(
