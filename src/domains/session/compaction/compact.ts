@@ -549,16 +549,24 @@ function buildPreviousContextPrefix(previousContextText: string): string {
 	return trimmed.length > 0 ? `<previous-context>\n${trimmed}\n</previous-context>\n\n` : "";
 }
 
-function buildUserText(conversationText: string, instructions?: string, previousContextText = ""): string {
+/**
+ * Manual `/compact <text>` instructions. A trailing "Additional focus" line
+ * after the split-turn template's "summarize ONLY" scope was ignored by a live
+ * summarizer that dropped the session routes the operator asked it to keep
+ * (DF-7), so they now outrank the template and name facts outside the transcript.
+ */
+function buildOperatorInstructions(instructions?: string): string {
 	const focus = instructions?.trim();
-	const suffix = focus ? `\n\nAdditional focus: ${focus}` : "";
-	return `${buildPreviousContextPrefix(previousContextText)}<conversation>\n${conversationText}\n</conversation>\n\n${COMPACTION_USER_PROMPT_TEMPLATE}${suffix}`;
+	if (!focus) return "";
+	return `\n\n<operator-instructions>\n${focus}\n</operator-instructions>\nThe operator wrote these instructions for this checkpoint. They override the default scope above: keep every fact, value and decision they name in the checkpoint, even when the conversation does not show it.`;
+}
+
+function buildUserText(conversationText: string, instructions?: string, previousContextText = ""): string {
+	return `${buildPreviousContextPrefix(previousContextText)}<conversation>\n${conversationText}\n</conversation>\n\n${COMPACTION_USER_PROMPT_TEMPLATE}${buildOperatorInstructions(instructions)}`;
 }
 
 function buildTurnPrefixUserText(conversationText: string, instructions?: string, previousContextText = ""): string {
-	const focus = instructions?.trim();
-	const suffix = focus ? `\n\nAdditional focus: ${focus}` : "";
-	return `${buildPreviousContextPrefix(previousContextText)}<conversation>\n${conversationText}\n</conversation>\n\n${COMPACTION_TURN_PREFIX_PROMPT_TEMPLATE}${suffix}`;
+	return `${buildPreviousContextPrefix(previousContextText)}<conversation>\n${conversationText}\n</conversation>\n\n${COMPACTION_TURN_PREFIX_PROMPT_TEMPLATE}${buildOperatorInstructions(instructions)}`;
 }
 
 /**
@@ -621,7 +629,7 @@ function operatorMessageText(entry: SessionEntry): string | null {
 	return parts.length > 0 ? parts.join("\n") : null;
 }
 
-function extractOperatorNotes(entries: ReadonlyArray<SessionEntry>): string[] {
+function extractOperatorNotes(entries: ReadonlyArray<SessionEntry>, latest?: string): string[] {
 	const notes = new Set<string>();
 	const add = (note: string): void => {
 		const trimmed = note.trim();
@@ -647,6 +655,7 @@ function extractOperatorNotes(entries: ReadonlyArray<SessionEntry>): string[] {
 			add(trimmed);
 		}
 	}
+	if (latest !== undefined) add(latest);
 	return [...notes].slice(-OPERATOR_NOTE_MAX_COUNT);
 }
 
@@ -1125,10 +1134,16 @@ export async function compact(input: CompactInput): Promise<CompactResult> {
 		if (text !== null) userContext = { turnId: activeUser.turnId, text };
 	}
 
-	const operatorNotes = extractOperatorNotes([
-		...priorCompactionContextEntries(entries, prevCompactionIndex),
-		...entries.slice(boundaryStart, cut.firstKeptEntryIndex),
-	]);
+	// The instructions also ride verbatim as an operator note, so they survive
+	// a summarizer that ignores them and carry into later checkpoints (DF-7).
+	const compactInstructions = input.instructions?.trim();
+	const operatorNotes = extractOperatorNotes(
+		[
+			...priorCompactionContextEntries(entries, prevCompactionIndex),
+			...entries.slice(boundaryStart, cut.firstKeptEntryIndex),
+		],
+		compactInstructions ? `/compact: ${compactInstructions}` : undefined,
+	);
 	const summary = `${summaryParts
 		.join("\n\n---\n\n")
 		// The model sees the prior block inside <previous-context> and may echo it;

@@ -775,7 +775,10 @@ describe("production compaction controls", () => {
 		writeFileSync(join(scratch.dir, "summary.md"), "custom summary rules");
 		await f.run("retain exact paths");
 		strictEqual(f.calls[0]?.systemPrompt, "custom summary rules");
-		match(f.calls[0]?.user ?? "", /Additional focus: retain exact paths/);
+		match(
+			f.calls[0]?.user ?? "",
+			/<operator-instructions>(?:\n|\\n)retain exact paths(?:\n|\\n)<\/operator-instructions>/,
+		);
 		const count = f.calls.length;
 		writeFileSync(join(scratch.dir, "summary.md"), "changed summary rules");
 		f.addHistory("new-history");
@@ -784,7 +787,10 @@ describe("production compaction controls", () => {
 		match(f.calls[count]?.user ?? "", /fixture checkpoint/);
 		match(f.calls[count]?.user ?? "", /history-5/);
 		match(f.calls[count]?.user ?? "", /new-history-0/);
-		match(f.calls[count]?.user ?? "", /Additional focus: retain task state/);
+		match(
+			f.calls[count]?.user ?? "",
+			/<operator-instructions>(?:\n|\\n)retain task state(?:\n|\\n)<\/operator-instructions>/,
+		);
 		doesNotMatch(f.calls[count]?.user ?? "", /\[User\]: history-0 /);
 		strictEqual(f.entries().filter((entry) => entry.kind === "compactionSummary").length, 2);
 	});
@@ -1427,7 +1433,7 @@ describe("production compaction controls", () => {
 		for (const call of f.calls) {
 			strictEqual(call.model, "summary");
 			strictEqual(call.systemPrompt, "split summary instructions");
-			match(call.user, /Additional focus: focus stays in user message/);
+			match(call.user, /<operator-instructions>(?:\n|\\n)focus stays in user message(?:\n|\\n)<\/operator-instructions>/);
 		}
 		const usage = ledgerUsageCalls(f.entries());
 		strictEqual(usage[0]?.apiCalls, 2);
