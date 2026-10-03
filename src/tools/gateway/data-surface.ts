@@ -17,7 +17,7 @@ export const DATA_OPS = ["inspect", "select", "validate"] as const;
 export type DataOp = (typeof DATA_OPS)[number];
 
 const DESCRIPTION =
-	"Inspect, select, or validate a structured data file without loading it whole: CSV/TSV (delimiter and header detection, per-column types, sentinels such as NA counted, never converted), JSON (document shape, RFC 6901 pointer selection), and JSON Lines (record windows). op=inspect reports schema, dimensions, and a sample; op=select returns a bounded window of rows, records, or the value at a pointer; op=validate checks the whole file against its format. Every result carries view {exact, sampled, converted} and honest counts (rowCount null means the scan stopped early), and large integers or long floats are reported, never rounded. Refuses invalid UTF-8, binary, and unsupported formats (HDF5, NetCDF, Parquet: use run_script with a library) with an actionable reason.";
+	"Inspect, select, or validate a structured data file without loading it whole: CSV/TSV (delimiter and header detection, per-column types, sentinels such as NA counted, never converted), JSON (document shape, RFC 6901 pointer selection), JSON Lines (record windows), and SQLite read-only (op=inspect lists tables, views and columns, and with table adds a row count and sample; op=select takes one SELECT, WITH, VALUES or EXPLAIN statement in sql, or a table with optional columns). op=inspect reports schema, dimensions, and a sample; op=select returns a bounded window of rows, records, or the value at a pointer; op=validate checks the whole file against its format. Every result carries view {exact, sampled, converted} and honest counts (rowCount null means the scan stopped early), and large integers or long floats are reported, never rounded. Refuses invalid UTF-8, binary, and unsupported formats (Parquet, HDF5, NetCDF: use run_script with pyarrow, h5py or netCDF4) with an actionable reason.";
 
 function numberArg(value: unknown): number | undefined {
 	if (typeof value === "number" && Number.isFinite(value)) return value;
@@ -102,7 +102,7 @@ export const dataToolSurface = {
 		path: Type.String({ description: "Data file, relative to the workspace root or absolute." }),
 		format: Type.Optional(
 			StringEnum(DATA_FORMATS, {
-				description: "Format when the extension or content does not say: csv, tsv, json, jsonl.",
+				description: "Format when the extension or content does not say: csv, tsv, json, jsonl, sqlite.",
 			}),
 		),
 		delimiter: Type.Optional(Type.String({ description: "CSV/TSV: one delimiter character (or \\t)." })),
@@ -124,11 +124,20 @@ export const dataToolSurface = {
 		limit: Type.Optional(Type.Number({ description: "select: rows returned (default 50, max 1000)." })),
 		columns: Type.Optional(
 			Type.Array(Type.Union([Type.String(), Type.Number()]), {
-				description: "select, CSV/TSV: header names or 0-based indices to project.",
+				description: "select, CSV/TSV: header names or 0-based indices to project; SQLite with table: column names.",
 			}),
 		),
 		pointer: Type.Optional(
 			Type.String({ description: 'select, JSON: RFC 6901 pointer to the value to return; "" is the whole document.' }),
+		),
+		sql: Type.Optional(
+			Type.String({
+				description:
+					"select, SQLite: one read-only SELECT, WITH, VALUES or EXPLAIN statement; offset and limit window its rows.",
+			}),
+		),
+		table: Type.Optional(
+			Type.String({ description: "SQLite: inspect counts and samples this table; select reads it instead of sql." }),
 		),
 	}),
 	baseActionClass: "read",

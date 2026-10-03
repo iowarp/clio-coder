@@ -82,7 +82,7 @@ export const readTestSeams: {
 } = {};
 
 const NON_TEXT_HINT =
-	"For CSV, TSV, JSON, or JSONL use the data capability through the gateway; for binary or other encodings use run_script with a suitable library. Do not edit it as text.";
+	"For CSV, TSV, JSON, JSONL, or SQLite use the data capability through the gateway; for binary or other encodings use run_script with a suitable library. Do not edit it as text.";
 
 /** Identity of the file as it was read, from fstat on the open descriptor. */
 export interface ReadFileIdentity {
