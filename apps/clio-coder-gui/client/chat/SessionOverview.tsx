@@ -17,11 +17,11 @@ import { changeCounts, summarizeChanges } from "./changes-model.js";
 import { FLEET_STATE_LABELS, FLEET_STATE_TONES, fleetEvidence, foldFleetRuns, isLiveRun } from "./fleet-facts.js";
 import { summarizeHealth } from "./health.js";
 import { compactCount, compactDuration, contextMeter, contextSegments, taskOverview } from "./overview-model.js";
-import type { PaneSession, PaneView } from "./pane-model.js";
 import { ProjectTrustNotice } from "./ProjectTrustNotice.js";
-import { modelSessionFacts, sessionFacts } from "./session-facts-model.js";
+import type { PaneSession, PaneView } from "./pane-model.js";
 import { ReceiptLine } from "./ReceiptLine.js";
 import type { RouteFacts } from "./route.js";
+import { modelSessionFacts, sessionFacts } from "./session-facts-model.js";
 import {
 	sessionSpend,
 	settledTurns,

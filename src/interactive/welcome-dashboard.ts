@@ -678,7 +678,7 @@ export class WelcomeDashboard implements WelcomeDashboardComponent {
 
 	render(width: number): string[] {
 		const mode = richWelcomeEnabled(this.deps.getSettings?.().interface?.demo) ? this.mode : "session";
-		const stats = this.stats();
+		const stats = this.stats(mode);
 		// Existing presentation refreshes advance the hints; no extra timer or startup work.
 		const hintPage =
 			mode === "launchpad" && width >= WELCOME_HINT_MIN_WIDTH
@@ -741,7 +741,7 @@ export class WelcomeDashboard implements WelcomeDashboardComponent {
 		}
 	}
 
-	private stats(): WelcomeDashboardStats {
+	private stats(mode: WelcomeDashboardMode): WelcomeDashboardStats {
 		const settings = this.deps.getSettings?.();
 		const statuses = this.deps.providers.list();
 		const current = findCurrentStatus(statuses, settings);
@@ -754,7 +754,7 @@ export class WelcomeDashboard implements WelcomeDashboardComponent {
 		// no background context read, and no cache invalidation when either
 		// changes while the header cannot show it. `/new` returns to the launchpad
 		// and the check resumes on the next frame.
-		const launchpad = this.mode === "launchpad";
+		const launchpad = mode === "launchpad";
 		return {
 			cwd,
 			workspace,

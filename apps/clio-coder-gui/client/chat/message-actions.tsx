@@ -98,7 +98,7 @@ export function TurnOutcome({
 			{outcome.detail ? <p className="turn-outcome__detail">{outcome.detail}</p> : null}
 			{outcome.stopReason ? <code className="turn-outcome__code">{outcome.stopReason}</code> : null}
 			{outcome.breakdown.length > 0 ? (
-				<div className="turn-details" aria-label="Turn details">
+				<div className="turn-details">
 					{outcomeDetailGroups(outcome).map((group) => (
 						<section key={group.label} className="turn-details__group">
 							<h3>{group.label}</h3>
