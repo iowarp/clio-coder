@@ -2087,7 +2087,10 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	// the battery-tested local models act on. Which protocol it teaches follows
 	// the effective session autonomy level, resolved one line up: default and
 	// yolo can load trusted installed skills. Read-only workers cannot activate them.
-	if (resources && skillDiscoveryEnabled) {
+	// A headless run gets its skills rule from the system prompt alone: the
+	// reminder's discovery invitation cost campaign T3 three opening rounds and
+	// about 19 KB of skill text resent on every later request.
+	if (resources && skillDiscoveryEnabled && !options.headless) {
 		middleware.registerHook(
 			createSkillsReminderRegistration({
 				getTurnConstraints: () => chat.currentTurnConstraints?.(),
