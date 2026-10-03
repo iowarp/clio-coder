@@ -230,8 +230,12 @@ describe("compact prompt contracts", () => {
 		}
 		// A worker nothing can steer (headless, fleet CLI) carries no steering section.
 		deepStrictEqual(
-			workerPrompt({ providerSupportsTools: true, hasContext: true, hasBoundSkills: false, liveSteering: false })
-				.sections.map((section) => section.id),
+			workerPrompt({
+				providerSupportsTools: true,
+				hasContext: true,
+				hasBoundSkills: false,
+				liveSteering: false,
+			}).sections.map((section) => section.id),
 			["identity", "operating-contract", "tool-contract", "safety", "persona"],
 		);
 

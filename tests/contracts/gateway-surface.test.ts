@@ -121,10 +121,7 @@ describe("gateway surface placement", () => {
 		const registry = createWorkerToolRegistry();
 		const attached = resolveAgentTools({ registry }).map((tool) => tool.name);
 		const shellCovered: string[] = [ToolNames.Find, ToolNames.Ls];
-		deepStrictEqual(
-			attached,
-			[...registry.listRegistered()].filter((name) => !shellCovered.includes(name)).sort(),
-		);
+		deepStrictEqual(attached, [...registry.listRegistered()].filter((name) => !shellCovered.includes(name)).sort());
 		for (const name of GATEWAY_BUILTINS) ok(!attached.includes(name), `${name} has no attached schema`);
 	});
 

@@ -117,7 +117,7 @@ const SHELL_COVERED_TOOLS: ReadonlySet<string> = new Set([ToolNames.Find, ToolNa
  * gateway for a run (schema attachment, the attested signature, the worker
  * prompt, gateway admission and find) asks this one function, so they agree.
  */
-export function surfaceToolPlacement(name: string, surface: ReadonlySet<string> | null): ToolPlacement {
+function surfaceToolPlacement(name: string, surface: ReadonlySet<string> | null): ToolPlacement {
 	if (surface !== null && SHELL_COVERED_TOOLS.has(name) && surface.has(ToolNames.Bash)) return "gateway";
 	return toolPlacement(name);
 }
