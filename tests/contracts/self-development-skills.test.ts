@@ -198,6 +198,7 @@ it("repo guidance tracks actual skill capability, autonomy and turn restrictions
 	const automatic = await prompt(inputs);
 	match(automatic.systemPrompt, /# Self-development skills/);
 	match(automatic.systemPrompt, /without waiting for a separate skill request/);
+	match(automatic.systemPrompt, /Never load both up front or for a step the task does not reach/);
 	strictEqual(automatic.systemPrompt.includes("## Establish the actual assignment"), false);
 	for (const disabled of [
 		{ ...inputs, skillDiscoveryEnabled: false },
