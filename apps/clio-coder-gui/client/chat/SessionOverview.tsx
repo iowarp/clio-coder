@@ -9,10 +9,12 @@ import { StatusMark } from "../design/status.js";
 import { countRender } from "../render/render-probe.js";
 import { ClioPulse, PULSE_SIZE } from "../shell/ClioMark.js";
 import { boardView, type PlanRow } from "./board-model.js";
+import { branchView } from "./branch-model.js";
 import { changeCounts, summarizeChanges } from "./changes-model.js";
 import { FLEET_STATE_LABELS, FLEET_STATE_TONES, fleetEvidence, foldFleetRuns, isLiveRun } from "./fleet-facts.js";
 import { compactDuration, contextMeter, contextSegments, taskOverview } from "./overview-model.js";
 import type { PaneSession, PaneView } from "./pane-model.js";
+import type { RouteFacts } from "./route.js";
 import {
 	sessionSpend,
 	settledTurns,
@@ -34,6 +36,16 @@ function PlanGlyph({ tone }: { tone: PlanRow["tone"] }) {
 	if (tone === "fail" || tone === "warn") return <span className="pane-step__glyph is-blocked" aria-hidden="true" />;
 	return <span className="pane-step__glyph" aria-hidden="true" />;
 }
+
+/** The target's reported health as one word beside the route. */
+const ROUTE_HEALTH_WORDS: Readonly<Record<RouteFacts["tone"], string>> = {
+	success: "Healthy",
+	unverified: "Not checked",
+	warn: "Degraded",
+	fail: "Unavailable",
+	running: "Checking",
+	neutral: "Reported",
+};
 
 /** A section of the Session column. A section with more to show names itself as the way in. */
 function Section({
@@ -81,6 +93,7 @@ export function SessionOverview({
 	workspaceRoot,
 	nowMs,
 	onOpen,
+	route,
 }: {
 	client: Client;
 	session: PaneSession;
@@ -88,6 +101,8 @@ export function SessionOverview({
 	workspaceRoot: string | undefined;
 	nowMs: number;
 	onOpen: (view: PaneView) => void;
+	/** The route the composer shows, so the column and the chip never disagree. */
+	route?: RouteFacts;
 }) {
 	countRender("session-overview");
 	const params = { params: { id: session.id }, query: {}, body: {} };
@@ -104,6 +119,16 @@ export function SessionOverview({
 		// so rows (and the focus a row holds) do not vanish between the two reads.
 		placeholderData: (previous) => previous,
 	});
+	// The branches drill reads the same key, so its summary here costs no second request.
+	const tree = useQuery({
+		queryKey: ["session-tree", session.id, settled],
+		queryFn: () => client.call(routes.sessionTree, params),
+		enabled: open && !!capabilities.data?.branches,
+		retry: false,
+		placeholderData: (previous) => previous,
+	});
+	const branches = tree.data ? branchView(tree.data) : null;
+	const tip = branches?.rows.filter((row) => row.tip && row.active).at(-1) ?? null;
 	const ledger = useContextLedger(client, session.id, settled, open && !!capabilities.data?.context);
 	const usage = useSessionUsage(client, session.id, settled, open && !!capabilities.data?.usage);
 	const view = board.data ? boardView(board.data) : null;
@@ -152,6 +177,19 @@ export function SessionOverview({
 					</p>
 				) : null}
 			</section>
+
+			{route ? (
+				<Section
+					id="pane-model"
+					title="Model"
+					aside={<StatusMark tone={route.tone} label={ROUTE_HEALTH_WORDS[route.tone]} />}
+				>
+					<p className="pane-changes-line" title={route.title}>
+						<span className="pane-mono">{route.text}</span>
+					</p>
+					{route.thinking ? <p className="pane-card__facts">Thinking {route.thinking}</p> : null}
+				</Section>
+			) : null}
 
 			{meter || capabilities.data?.context ? (
 				<Section
@@ -271,6 +309,27 @@ export function SessionOverview({
 
 			{/* A session that can run fleets keeps the section with no runs, because its drill holds the
 			    form that starts one. */}
+			{branches ? (
+				<Section
+					id="pane-branches"
+					title="Branches"
+					open={() => onOpen("branches")}
+					aside={
+						branches.branchPoints > 0 ? (
+							<span className="pane-card__state">
+								{branches.branchPoints} {branches.branchPoints === 1 ? "fork point" : "fork points"}
+							</span>
+						) : null
+					}
+				>
+					<p className="pane-changes-line">
+						{branches.branchPoints === 0 ? "One line of conversation." : "Continuing on the current branch."}
+						{branches.forkedFrom ? " Forked from an earlier task." : ""}
+					</p>
+					{tip ? <p className="pane-card__facts">Latest: {tip.label ?? tip.text}</p> : null}
+				</Section>
+			) : null}
+
 			{runs.length > 0 || capabilities.data?.fleet ? (
 				<Section
 					id="pane-agents"

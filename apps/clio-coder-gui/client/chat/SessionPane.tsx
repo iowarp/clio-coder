@@ -8,11 +8,13 @@ import { KEYBINDINGS, matchesKeybinding } from "../interaction/keybindings.js";
 import { useShortcutLayer } from "../interaction/use-shortcut.js";
 import { countRender } from "../render/render-probe.js";
 import { useShell } from "../shell/shell-context.js";
+import { BranchPanel } from "./BranchPanel.js";
 import { ChangesView } from "./ChangesView.js";
 import { ContextPanel } from "./ContextPanel.js";
 import { changeCounts, NO_CHANGES, summarizeChanges } from "./changes-model.js";
 import { PANE_VIEWS, type PaneView, paneViewLabel, ROOT_VIEW, selectPaneSession } from "./pane-model.js";
 import { usePaneSection } from "./pane-state.js";
+import type { RouteFacts } from "./route.js";
 import { SessionBoardPanel } from "./SessionBoard.js";
 import { SessionOverview } from "./SessionOverview.js";
 import { selectSessionPanel } from "./session-panel-model.js";
@@ -34,6 +36,7 @@ export const SessionPane = memo(function SessionPane({
 	nowMs,
 	view,
 	onViewChange,
+	route,
 }: {
 	open: boolean;
 	onClose: () => void;
@@ -44,6 +47,8 @@ export const SessionPane = memo(function SessionPane({
 	nowMs: number;
 	view: PaneView;
 	onViewChange: (view: PaneView) => void;
+	/** The next turn's route as the composer shows it, so both read the same facts. */
+	route?: RouteFacts;
 }) {
 	countRender("session-pane");
 	const headId = useId();
@@ -129,7 +134,21 @@ export const SessionPane = memo(function SessionPane({
 						workspaceRoot={workspaceRoot}
 						nowMs={nowMs}
 						onOpen={onViewChange}
+						{...(route ? { route } : {})}
 					/>
+				);
+			case "branches":
+				return (
+					<div className="pane-drill">
+						<BranchPanel
+							client={client}
+							sessionId={pane.id}
+							sessionOpen={pane.state === "open"}
+							capabilities={capabilities.data}
+							settledTurns={pane.turns.filter((turn) => turn.status !== "running").length}
+							running={pane.turns.at(-1)?.status === "running"}
+						/>
+					</div>
 				);
 			case "changes":
 				return <ChangesView session={pane} workspaceRoot={workspaceRoot} />;

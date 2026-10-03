@@ -11,6 +11,7 @@ export const PANE_VIEWS = [
 	{ id: "usage", label: "Usage and quota", icon: "usage" },
 	{ id: "board", label: "Tasks and decisions", icon: "listChecks" },
 	{ id: "changes", label: "Changes", icon: "fileDiff" },
+	{ id: "branches", label: "Branches", icon: "branch" },
 	{ id: "agents", label: "Agents", icon: "fleet" },
 ] as const;
 

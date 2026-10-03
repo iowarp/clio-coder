@@ -425,6 +425,7 @@ function SessionView({ client, id }: { client: Client; id: string }) {
 					nowMs={now}
 					view={pane.view}
 					onViewChange={pane.setView}
+					route={route}
 				/>
 			</section>
 		</PaneContext.Provider>
