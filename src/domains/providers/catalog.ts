@@ -5,6 +5,7 @@ import { acceptsImageInput } from "./image-input.js";
 import type { CapabilityFlags, ThinkingLevel } from "./types/capability-flags.js";
 import type { CostProvenance } from "./types/cost-provenance.js";
 import type { KnowledgeBaseHit } from "./types/knowledge-base.js";
+import type { RuntimeDescriptor } from "./types/runtime-descriptor.js";
 import type { TargetDescriptor } from "./types/target-descriptor.js";
 
 const engineAi = createEngineAi();
@@ -43,10 +44,15 @@ export interface EffectivePricing {
 	provenance: CostProvenance;
 }
 
+/** The runtime facts pricing reads: its id for the catalog, its tier for locality. */
+export type PricingRuntime = Pick<RuntimeDescriptor, "id" | "tier">;
+
+const FREE_RATES = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } as const;
+
 /** Resolve rates and provenance together so callers cannot price from a different source. */
 export function resolveEffectivePricing(
 	target: TargetDescriptor,
-	runtimeId: string,
+	runtime: PricingRuntime,
 	wireModelId: string,
 ): EffectivePricing {
 	if (target.pricing) {
@@ -61,7 +67,12 @@ export function resolveEffectivePricing(
 			provenance: Object.values(rates).every((rate) => rate === 0) ? "known_free" : "known",
 		};
 	}
-	const catalogModel = getCatalogModelForRuntime(runtimeId, wireModelId);
+	// A runtime that is local by kind (LM Studio, llama.cpp, Ollama, vLLM, SGLang,
+	// Lemonade) bills nothing: 109 of 142 campaign receipts read "unknown" only
+	// because those targets declare no price. Proxies such as LiteLLM are protocol
+	// tier and can front paid cloud models, so they stay unknown until priced.
+	if (runtime.tier === "local-native") return { rates: { ...FREE_RATES }, provenance: "known_free" };
+	const catalogModel = getCatalogModelForRuntime(runtime.id, wireModelId);
 	if (!catalogModel) return { rates: null, provenance: "unknown" };
 	return {
 		rates: {
@@ -77,10 +88,10 @@ export function resolveEffectivePricing(
 /** Resolve pricing truth from the same fallback chain used for model synthesis. */
 export function resolveCostProvenance(
 	target: TargetDescriptor,
-	runtimeId: string,
+	runtime: PricingRuntime,
 	wireModelId: string,
 ): CostProvenance {
-	return resolveEffectivePricing(target, runtimeId, wireModelId).provenance;
+	return resolveEffectivePricing(target, runtime, wireModelId).provenance;
 }
 
 export function getCatalogModelForRuntime(runtimeId: string, wireModelId: string): Model<Api> | undefined {

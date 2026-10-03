@@ -6,9 +6,10 @@
  * and resolveCostProvenance are now the one shared definition each side
  * imports, so the two surfaces cannot silently disagree on the same run.
  */
-import { strictEqual } from "node:assert/strict";
+import { deepStrictEqual, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
 import { resolveDispatchFailureStatus } from "../../src/core/dispatch-outcome.js";
+import { resolveEffectivePricing } from "../../src/domains/providers/catalog.js";
 import { resolveCostProvenance } from "../../src/domains/providers/types/cost-provenance.js";
 
 describe("resolveDispatchFailureStatus", () => {
@@ -43,5 +44,20 @@ describe("resolveCostProvenance", () => {
 		strictEqual(resolveCostProvenance(undefined, "known"), "known");
 		strictEqual(resolveCostProvenance(null, "known"), "known");
 		strictEqual(resolveCostProvenance(42, "known"), "known");
+	});
+});
+
+describe("resolveEffectivePricing", () => {
+	it("prices an unpriced local-native runtime as free and leaves an unpriced proxy unknown", () => {
+		const target = (runtime: string) => ({ id: "t", runtime, defaultModel: "qwen" });
+		const local = resolveEffectivePricing(target("lmstudio"), { id: "lmstudio", tier: "local-native" }, "qwen");
+		strictEqual(local.provenance, "known_free");
+		deepStrictEqual(local.rates, { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 });
+		strictEqual(
+			resolveEffectivePricing(target("litellm"), { id: "litellm", tier: "protocol" }, "qwen").provenance,
+			"unknown",
+		);
+		const priced = { ...target("litellm"), pricing: { input: 1, output: 2 } };
+		strictEqual(resolveEffectivePricing(priced, { id: "litellm", tier: "protocol" }, "qwen").provenance, "known");
 	});
 });

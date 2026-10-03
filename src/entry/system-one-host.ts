@@ -47,7 +47,7 @@ const EARLIER_REQUESTS = 3;
 const COUNTED_TURNS = 8;
 
 export function createSystemOneRequestAdmission(deps: {
-	providers: Pick<ProvidersContract, "getTarget">;
+	providers: Pick<ProvidersContract, "getTarget"> & Partial<Pick<ProvidersContract, "getRuntime">>;
 	scheduling?: SchedulingContract;
 	observability?: ObservabilityContract;
 	getCeilingUsd: () => number;
@@ -60,7 +60,11 @@ export function createSystemOneRequestAdmission(deps: {
 		const repoIdentity = deps.repoIdentity();
 		const target = deps.providers.getTarget(targetId);
 		if (target === null) throw new LlmAdmissionRefused(`target '${targetId}' is no longer configured`);
-		const pricing = resolveEffectivePricing(target, target.runtime, model);
+		const pricing = resolveEffectivePricing(
+			target,
+			deps.providers.getRuntime?.(target.runtime) ?? { id: target.runtime },
+			model,
+		);
 		try {
 			signal.throwIfAborted();
 			if (pricing.provenance === "known" || pricing.provenance === "estimated") {
