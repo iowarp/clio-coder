@@ -772,8 +772,9 @@
 }
 
 /* ---- working freedom: the pill beside the attach button ---------------------------- */
+/* Not a positioned box: its panel hangs from the composer, like the + menu and the route picker
+   beside it. Anchored to the chip, a panel sized to the screen ran 27px off a 390px phone. */
 .autonomy {
-	position: relative;
 	margin: 0;
 	font-size: var(--text-meta);
 	color: var(--ink-muted);
@@ -826,7 +827,7 @@
 	z-index: 6;
 	display: grid;
 	gap: var(--space-1);
-	width: min(22rem, calc(100vw - 32px));
+	width: min(22rem, 100%);
 	min-width: 0;
 	margin: 0;
 	padding: var(--space-2);
