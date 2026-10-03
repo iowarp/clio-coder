@@ -848,6 +848,9 @@ export function compile(table: FragmentTable, inputs: CompileInputs): CompiledSe
 	const attendedSelfAwareness =
 		selfAwareness && attended ? table.byId.get("identity.self-awareness-attended") : undefined;
 	const attendedContract = attended ? table.byId.get("operating.contract-attended") : undefined;
+	// Every harness in the 2026-10 campaign lost T3 by finishing with a
+	// performance clause unaddressed; a headless run has no operator to catch it.
+	const headlessContract = attended ? undefined : table.byId.get("operating.contract-headless");
 	const skillInstalls = attended ? table.byId.get("operating.skill-installs") : undefined;
 	// The routing directive teaches a gateway call, so it renders only when
 	// gateway is on the surface and the provider supports tool calls. The paths
@@ -922,7 +925,13 @@ export function compile(table: FragmentTable, inputs: CompileInputs): CompiledSe
 	// Steering guidance rides the operating contract: the queue delivers several
 	// operator messages at one slot, and the model needs to know how they rank.
 	const steering = session.liveSteering === false ? undefined : table.byId.get("operating.steering");
-	const mainOperatingContract = [operatingContract.body, attendedContract?.body, userControl?.body, steering?.body]
+	const mainOperatingContract = [
+		operatingContract.body,
+		attendedContract?.body,
+		headlessContract?.body,
+		userControl?.body,
+		steering?.body,
+	]
 		.filter(Boolean)
 		.join("\n\n");
 	const identityBody = [identity.body, attendedIdentity?.body, ...inlineGuidance.map((fragment) => fragment.body)]
@@ -969,6 +978,7 @@ export function compile(table: FragmentTable, inputs: CompileInputs): CompiledSe
 		...(docsRouting ? [docsRouting] : []),
 		operatingContract,
 		...(attendedContract ? [attendedContract] : []),
+		...(headlessContract ? [headlessContract] : []),
 		...(userControl ? [userControl] : []),
 		...(steering ? [steering] : []),
 		...(delegation ? [delegation] : []),
