@@ -135,27 +135,20 @@ export function remainingContextMaxTokens(
 	model: Pick<Model<Api>, "contextWindow" | "maxTokens"> & { clioCoder?: unknown },
 	context: Context,
 	options: Pick<StreamOptions, "maxTokens"> | undefined,
-	limits?: { contextWindow?: number; maxOutputTokens?: number },
 ): number {
 	const inputTokens = estimateInputTokensFromContext(context);
-	const configuredContextWindow = model.contextWindow > 0 ? model.contextWindow : Number.POSITIVE_INFINITY;
-	const loadedContextWindow =
-		limits?.contextWindow !== undefined && limits.contextWindow > 0 ? limits.contextWindow : Number.POSITIVE_INFINITY;
-	const contextWindow = Math.min(configuredContextWindow, loadedContextWindow);
+	const contextWindow = model.contextWindow > 0 ? model.contextWindow : Number.POSITIVE_INFINITY;
 	const modelLimit = model.maxTokens > 0 ? model.maxTokens : Number.POSITIVE_INFINITY;
 	// Precedence for the requested ceiling when the caller gave no explicit
-	// maxTokens: a more-specific tool-turn limit, then the global default, then
-	// the profile's recommendation, then the model's advertised cap. A model that
-	// advertises no cap uses the product floor instead of requesting its entire
-	// remaining context window. Math.min
+	// maxTokens: the global default, then the profile's recommendation, then the
+	// model's advertised cap. A model that advertises no cap uses the product
+	// floor instead of requesting its entire remaining context window. Math.min
 	// below clamps the result down to every known boundary, so frontier providers
 	// with a known cap never receive a larger max_tokens value.
 	const defaultLimit =
-		limits?.maxOutputTokens !== undefined && limits.maxOutputTokens > 0
-			? limits.maxOutputTokens
-			: globalDefaultMaxOutputTokens > 0
-				? globalDefaultMaxOutputTokens
-				: (recommendedOutputTokens(model, contextWindow) ?? (model.maxTokens > 0 ? modelLimit : DEFAULT_MAX_OUTPUT_TOKENS));
+		globalDefaultMaxOutputTokens > 0
+			? globalDefaultMaxOutputTokens
+			: (recommendedOutputTokens(model, contextWindow) ?? (model.maxTokens > 0 ? modelLimit : DEFAULT_MAX_OUTPUT_TOKENS));
 	const requested = options?.maxTokens ?? defaultLimit;
 	const resolved = clampOutputToRemainingContext(Math.min(requested, modelLimit), contextWindow, inputTokens);
 	return Number.isFinite(resolved) ? resolved : DEFAULT_MAX_OUTPUT_TOKENS;

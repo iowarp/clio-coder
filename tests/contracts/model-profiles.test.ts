@@ -166,7 +166,6 @@ it("a profile's recommended output tokens fill an unset budget and yield to expl
 	try {
 		strictEqual(remainingContextMaxTokens(model, context, undefined), recommended, "fills an unset budget");
 		strictEqual(remainingContextMaxTokens(model, context, { maxTokens: 111 }), 111, "a request value wins");
-		strictEqual(remainingContextMaxTokens(model, context, undefined, { maxOutputTokens: 222 }), 222, "a turn limit wins");
 		setGlobalDefaultMaxOutputTokens(333);
 		strictEqual(remainingContextMaxTokens(model, context, undefined), 333, "chat.maxOutputTokens wins");
 		setGlobalDefaultMaxOutputTokens(0);
