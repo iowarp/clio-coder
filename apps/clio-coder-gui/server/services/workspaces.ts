@@ -5,9 +5,11 @@ import { homedir } from "node:os";
 import { basename, dirname, isAbsolute, join } from "node:path";
 import { Type } from "typebox";
 import { Value } from "typebox/value";
-import { Workspace, type WorkspaceFolders } from "../../contracts/sessions.js";
+import { type PathCompletion, Workspace, type WorkspaceFolders, type WorkspacePick } from "../../contracts/sessions.js";
+import { runFolderPicker } from "../process-policy.js";
 import type { AppFiles } from "../state/files.js";
 import type { WorkerHost } from "../worker/host.js";
+import { completePath, detectPathHost, type PathHost, toServerPath } from "./path-complete.js";
 import { AppProblem } from "./problem.js";
 
 const Workspaces = Type.Array(Workspace);
@@ -22,10 +24,42 @@ const workspaceId = (path: string) => createHash("sha256").update(path).digest("
  * ran in, so both feed the list and a project started in the terminal is already here.
  */
 export class WorkspaceService {
+	private picking = false;
+	private host: PathHost | null = null;
 	constructor(
 		private readonly files: AppFiles,
 		private readonly ledger?: WorkerHost,
 	) {}
+	private pathHost() {
+		this.host ??= detectPathHost();
+		return this.host;
+	}
+	complete(input: string, hidden = false): Promise<PathCompletion> {
+		return completePath(input, hidden, this.pathHost());
+	}
+	/** One native folder dialog at a time: a second would stack behind the first on the person's desktop. */
+	async pick(signal?: AbortSignal): Promise<WorkspacePick> {
+		if (this.picking) throw new AppProblem("conflict", "A folder dialog is already open.");
+		this.picking = true;
+		try {
+			const result = await runFolderPicker(signal);
+			if (result.status !== "picked") return result;
+			const host = this.pathHost();
+			// A Windows dialog under WSL answers in Windows spelling; map it onto this distro's mounts.
+			const candidate = result.windows && host.platform !== "win32" ? toServerPath(result.raw, host) : result.raw;
+			if (!candidate || !isAbsolute(candidate))
+				return { status: "unavailable", reason: `The chosen folder ${result.raw} is not reachable from this server.` };
+			try {
+				const path = await realpath(candidate);
+				if ((await stat(path)).isDirectory()) return { status: "picked", path };
+			} catch {
+				// Reported below as an unreachable choice; the dialog itself succeeded.
+			}
+			return { status: "unavailable", reason: `The chosen folder ${result.raw} is not reachable from this server.` };
+		} finally {
+			this.picking = false;
+		}
+	}
 	async browse(requested?: string, hidden = false): Promise<WorkspaceFolders> {
 		const start = requested ?? process.cwd();
 		if (!isAbsolute(start)) throw new AppProblem("validation", "Choose an absolute directory path.");

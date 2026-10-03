@@ -31,6 +31,42 @@ export const WorkspaceFolders = Type.Object(
 	{ additionalProperties: false },
 );
 export type WorkspaceFolders = Static<typeof WorkspaceFolders>;
+/** Completion of a typed workspace path. `display` keeps the user's spelling; `path` is what the server opens. */
+export const PathCompletion = Type.Object(
+	{
+		input: Type.String({ maxLength: 4096 }),
+		resolvedParent: Type.Union([Type.String({ maxLength: 4096 }), Type.Null()]),
+		matches: Type.Array(
+			Type.Object(
+				{
+					name: Type.String({ maxLength: 512 }),
+					path: Type.String({ maxLength: 4096 }),
+					display: Type.String({ maxLength: 4608 }),
+				},
+				{ additionalProperties: false },
+			),
+			{ maxItems: 50 },
+		),
+		commonPrefix: Type.String({ maxLength: 4608 }),
+		isDirectory: Type.Boolean(),
+		separator: Type.Union([Type.Literal("/"), Type.Literal("\\")]),
+		truncated: Type.Boolean(),
+	},
+	{ additionalProperties: false },
+);
+export type PathCompletion = Static<typeof PathCompletion>;
+export const WorkspacePick = Type.Union([
+	Type.Object(
+		{ status: Type.Literal("picked"), path: Type.String({ maxLength: 4096 }) },
+		{ additionalProperties: false },
+	),
+	Type.Object({ status: Type.Literal("cancelled") }, { additionalProperties: false }),
+	Type.Object(
+		{ status: Type.Literal("unavailable"), reason: Type.String({ maxLength: 1024 }) },
+		{ additionalProperties: false },
+	),
+]);
+export type WorkspacePick = Static<typeof WorkspacePick>;
 export const SessionSummary = Type.Object(
 	{
 		id: Id,

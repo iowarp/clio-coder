@@ -1,7 +1,7 @@
 import { type ChildProcess, spawn } from "node:child_process";
 import { constants, existsSync } from "node:fs";
 import { access, readFile, realpath, stat } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { delimiter, isAbsolute, join, resolve, win32 } from "node:path";
 import { Worker } from "node:worker_threads";
 import { type CliCommand, commandPlan } from "./cli-commands.js";
@@ -352,6 +352,167 @@ export async function runWindowsPowerShell(script: string, values: Record<string
 			if (code === 0 && !exceeded) resolve(Buffer.concat(output).toString("utf8").replace(/\r/g, ""));
 			else
 				reject(new Error(`Windows PowerShell failed${stderr ? `: ${stderr.trim().split("\n")[0]?.slice(0, 200)}` : "."}`));
+		});
+	});
+}
+
+/** What a folder dialog run produced. `raw` is the dialog's own spelling, Windows paths included. */
+export type FolderPickerResult =
+	| { status: "picked"; raw: string; windows: boolean }
+	| { status: "cancelled" }
+	| { status: "unavailable"; reason: string };
+export type FolderPickerPlan =
+	| { file: string; argv: string[]; cwd?: string; windows: boolean; cancelCodes: number[] }
+	| { unavailable: string };
+
+// The dialog is owned by a hidden topmost form so it opens in front of the browser rather than behind it.
+// Exit 3 is this script's cancel; output is UTF-8 so non-ASCII folder names survive the pipe.
+const FOLDER_DIALOG_SCRIPT = [
+	"$ErrorActionPreference = 'Stop'",
+	"[Console]::OutputEncoding = [System.Text.Encoding]::UTF8",
+	"Add-Type -AssemblyName System.Windows.Forms",
+	"$owner = New-Object System.Windows.Forms.Form",
+	"$owner.TopMost = $true",
+	"$owner.ShowInTaskbar = $false",
+	"$dialog = New-Object System.Windows.Forms.FolderBrowserDialog",
+	"$dialog.Description = 'Open workspace'",
+	"$dialog.ShowNewFolderButton = $true",
+	"$result = $dialog.ShowDialog($owner)",
+	"$owner.Dispose()",
+	"if ($result -eq [System.Windows.Forms.DialogResult]::OK -and $dialog.SelectedPath) { [Console]::Out.Write($dialog.SelectedPath); exit 0 }",
+	"exit 3",
+].join("; ");
+const powershellArgs = ["-NoProfile", "-NonInteractive", "-STA", "-ExecutionPolicy", "Bypass", "-Command"];
+
+function onPath(name: string, env: NodeJS.ProcessEnv, exists: (path: string) => boolean) {
+	for (const directory of (env.PATH ?? "").split(delimiter).filter((entry) => isAbsolute(entry))) {
+		const file = join(directory, name);
+		if (exists(file)) return file;
+	}
+	return null;
+}
+
+/**
+ * The fixed native folder dialog for this host. Only the home directory reaches argv, as one literal
+ * argument; the PowerShell script is a constant. WSL prefers the Windows dialog over a WSLg one, because
+ * that is the desktop the person is looking at.
+ */
+export function folderPickerCommand(
+	platform: NodeJS.Platform = process.platform,
+	env: NodeJS.ProcessEnv = process.env,
+	home = homedir(),
+	exists: (path: string) => boolean = existsSync,
+): FolderPickerPlan {
+	if (platform === "win32") {
+		const root = env.SystemRoot ?? env.SYSTEMROOT ?? "C:\\Windows";
+		if (!win32.isAbsolute(root)) return { unavailable: "SystemRoot is not an absolute Windows path." };
+		return {
+			file: win32.join(root, "System32", "WindowsPowerShell", "v1.0", "powershell.exe"),
+			argv: [...powershellArgs, FOLDER_DIALOG_SCRIPT],
+			windows: true,
+			cancelCodes: [3],
+		};
+	}
+	if (platform === "darwin")
+		return {
+			file: "/usr/bin/osascript",
+			argv: ["-e", 'POSIX path of (choose folder with prompt "Open workspace")'],
+			windows: false,
+			// osascript exits 1 with "User canceled. (-128)"; it is told apart from failure by stderr.
+			cancelCodes: [],
+		};
+	if (platform !== "linux") return { unavailable: "No native folder dialog is supported on this platform." };
+	if (isWsl(env, platform, exists))
+		return {
+			file: WINDOWS_POWERSHELL,
+			argv: [...powershellArgs, FOLDER_DIALOG_SCRIPT],
+			cwd: "/mnt/c/Windows",
+			windows: true,
+			cancelCodes: [3],
+		};
+	if (!env.DISPLAY && !env.WAYLAND_DISPLAY)
+		return { unavailable: "No desktop display is available to show a folder dialog. Type the path instead." };
+	const zenity = onPath("zenity", env, exists);
+	if (zenity)
+		return {
+			file: zenity,
+			argv: ["--file-selection", "--directory", "--title=Open workspace", `--filename=${home.replace(/\/?$/, "/")}`],
+			windows: false,
+			cancelCodes: [1, 5],
+		};
+	const kdialog = onPath("kdialog", env, exists);
+	if (kdialog)
+		return {
+			file: kdialog,
+			argv: ["--title", "Open workspace", "--getexistingdirectory", home],
+			windows: false,
+			cancelCodes: [1],
+		};
+	return { unavailable: "Install zenity or kdialog to browse folders, or type the path instead." };
+}
+
+/** Runs the native folder dialog once. The dialog is killed on abort or after `timeoutMs`. */
+export async function runFolderPicker(
+	signal?: AbortSignal,
+	timeoutMs = 300_000,
+	plan: FolderPickerPlan = folderPickerCommand(),
+	env: NodeJS.ProcessEnv = process.env,
+): Promise<FolderPickerResult> {
+	if ("unavailable" in plan) return { status: "unavailable", reason: plan.unavailable };
+	if (signal?.aborted) return { status: "cancelled" };
+	const child = spawn(plan.file, plan.argv, {
+		...(plan.cwd !== undefined ? { cwd: plan.cwd } : {}),
+		env,
+		shell: false,
+		stdio: ["ignore", "pipe", "pipe"],
+	});
+	return new Promise<FolderPickerResult>((resolve) => {
+		const output: Buffer[] = [];
+		let bytes = 0,
+			stderr = "",
+			ended: "timeout" | "abort" | "overflow" | null = null;
+		const stop = (reason: NonNullable<typeof ended>) => {
+			ended ??= reason;
+			child.kill("SIGKILL");
+		};
+		const timer = setTimeout(() => stop("timeout"), timeoutMs);
+		const onAbort = () => stop("abort");
+		signal?.addEventListener("abort", onAbort, { once: true });
+		const finish = (result: FolderPickerResult) => {
+			clearTimeout(timer);
+			signal?.removeEventListener("abort", onAbort);
+			resolve(result);
+		};
+		child.stdout.on("data", (chunk: Buffer) => {
+			bytes += chunk.length;
+			if (bytes > 65_536) stop("overflow");
+			else output.push(chunk);
+		});
+		child.stderr.on("data", (chunk: Buffer) => {
+			if (stderr.length < 400) stderr += chunk.toString("utf8");
+		});
+		child.once("error", (error) =>
+			finish({
+				status: "unavailable",
+				reason: `The folder dialog could not start: ${error instanceof Error ? error.message : String(error)}`,
+			}),
+		);
+		child.once("close", (code) => {
+			if (ended === "abort") return finish({ status: "cancelled" });
+			if (ended === "timeout") return finish({ status: "unavailable", reason: "The folder dialog timed out." });
+			if (ended === "overflow")
+				return finish({ status: "unavailable", reason: "The folder dialog returned an oversized answer." });
+			const raw = Buffer.concat(output)
+				.toString("utf8")
+				.replace(/\r?\n$/, "")
+				.replace(/\r/g, "");
+			if (code === 0 && raw) return finish({ status: "picked", raw, windows: plan.windows });
+			if ((code !== null && plan.cancelCodes.includes(code)) || /User canceled|\(-128\)/.test(stderr))
+				return finish({ status: "cancelled" });
+			finish({
+				status: "unavailable",
+				reason: `The folder dialog failed${stderr ? `: ${stderr.trim().split("\n")[0]?.slice(0, 200)}` : "."}`,
+			});
 		});
 	});
 }

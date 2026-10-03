@@ -51,7 +51,14 @@ import { Accepted, Operation } from "./operations.js";
 import { PermissionDecision } from "./permissions.js";
 import { UsageReport } from "./reports.js";
 import { SessionConfig, SetConfigOption } from "./session-config.js";
-import { SessionSnapshot, SessionSummary, Workspace, WorkspaceFolders } from "./sessions.js";
+import {
+	PathCompletion,
+	SessionSnapshot,
+	SessionSummary,
+	Workspace,
+	WorkspaceFolders,
+	WorkspacePick,
+} from "./sessions.js";
 import { ConfigGraph, SettingsReport } from "./settings.js";
 import { SettingsControls, SettingWrite, SettingWritten } from "./settings-controls.js";
 import { Autonomy, AutonomyLevel, SafeSettings, SafeSettingsPatch } from "./settings-safe.js";
@@ -738,6 +745,27 @@ export const routes = {
 		),
 		response: WorkspaceFolders,
 		summary: "Browse local directories to choose a workspace",
+	}),
+	workspacePathComplete: defineRoute({
+		...get,
+		path: "/api/workspaces/complete",
+		query: Type.Object(
+			{
+				input: Type.String({ maxLength: 4096 }),
+				hidden: Type.Optional(Type.Boolean()),
+			},
+			{ additionalProperties: false },
+		),
+		response: PathCompletion,
+		summary: "Complete a typed directory path on this machine",
+	}),
+	workspacePick: defineRoute({
+		...post,
+		status: 200,
+		params: Empty,
+		path: "/api/workspaces/pick",
+		response: WorkspacePick,
+		summary: "Ask the operating system's folder dialog for a workspace directory",
 	}),
 	openWorkspace: defineRoute({
 		...post,

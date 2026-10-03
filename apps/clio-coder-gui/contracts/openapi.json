@@ -21169,6 +21169,367 @@
 				}
 			}
 		},
+		"/api/workspaces/complete": {
+			"get": {
+				"operationId": "workspacePathComplete",
+				"summary": "Complete a typed directory path on this machine",
+				"security": [
+					{
+						"bearer": []
+					}
+				],
+				"parameters": [
+					{
+						"name": "input",
+						"in": "query",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"maxLength": 4096
+						}
+					},
+					{
+						"name": "hidden",
+						"in": "query",
+						"required": false,
+						"schema": {
+							"type": "boolean"
+						}
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "Success",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"required": ["input", "resolvedParent", "matches", "commonPrefix", "isDirectory", "separator", "truncated"],
+									"properties": {
+										"input": {
+											"type": "string",
+											"maxLength": 4096
+										},
+										"resolvedParent": {
+											"anyOf": [
+												{
+													"type": "string",
+													"maxLength": 4096
+												},
+												{
+													"type": "null"
+												}
+											]
+										},
+										"matches": {
+											"type": "array",
+											"items": {
+												"type": "object",
+												"required": ["name", "path", "display"],
+												"properties": {
+													"name": {
+														"type": "string",
+														"maxLength": 512
+													},
+													"path": {
+														"type": "string",
+														"maxLength": 4096
+													},
+													"display": {
+														"type": "string",
+														"maxLength": 4608
+													}
+												},
+												"additionalProperties": false
+											},
+											"maxItems": 50
+										},
+										"commonPrefix": {
+											"type": "string",
+											"maxLength": 4608
+										},
+										"isDirectory": {
+											"type": "boolean"
+										},
+										"separator": {
+											"anyOf": [
+												{
+													"type": "string",
+													"const": "/"
+												},
+												{
+													"type": "string",
+													"const": "\\"
+												}
+											]
+										},
+										"truncated": {
+											"type": "boolean"
+										}
+									},
+									"additionalProperties": false
+								}
+							}
+						},
+						"headers": {
+							"X-Clio-Epoch": {
+								"schema": {
+									"type": "string"
+								},
+								"description": "Server epoch"
+							},
+							"X-Clio-Seq": {
+								"schema": {
+									"type": "integer"
+								},
+								"description": "Sequence before assembling the snapshot"
+							}
+						}
+					},
+					"default": {
+						"description": "Problem",
+						"content": {
+							"application/problem+json": {
+								"schema": {
+									"type": "object",
+									"required": ["type", "title", "status", "detail", "code", "instance"],
+									"properties": {
+										"type": {
+											"type": "string"
+										},
+										"title": {
+											"type": "string"
+										},
+										"status": {
+											"type": "integer"
+										},
+										"detail": {
+											"type": "string"
+										},
+										"code": {
+											"anyOf": [
+												{
+													"type": "string",
+													"const": "validation"
+												},
+												{
+													"type": "string",
+													"const": "unauthorized"
+												},
+												{
+													"type": "string",
+													"const": "not_found"
+												},
+												{
+													"type": "string",
+													"const": "conflict"
+												},
+												{
+													"type": "string",
+													"const": "unsupported"
+												},
+												{
+													"type": "string",
+													"const": "unavailable"
+												},
+												{
+													"type": "string",
+													"const": "upstream_acp"
+												},
+												{
+													"type": "string",
+													"const": "operation_failed"
+												},
+												{
+													"type": "string",
+													"const": "internal"
+												}
+											]
+										},
+										"instance": {
+											"type": "string"
+										}
+									},
+									"additionalProperties": false
+								}
+							}
+						}
+					}
+				}
+			}
+		},
+		"/api/workspaces/pick": {
+			"post": {
+				"operationId": "workspacePick",
+				"summary": "Ask the operating system's folder dialog for a workspace directory",
+				"security": [
+					{
+						"bearer": []
+					}
+				],
+				"parameters": [
+					{
+						"name": "Idempotency-Key",
+						"in": "header",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"minLength": 1,
+							"maxLength": 128
+						}
+					}
+				],
+				"requestBody": {
+					"required": true,
+					"content": {
+						"application/json": {
+							"schema": {
+								"type": "object",
+								"properties": {},
+								"additionalProperties": false
+							}
+						}
+					}
+				},
+				"responses": {
+					"200": {
+						"description": "Success",
+						"content": {
+							"application/json": {
+								"schema": {
+									"anyOf": [
+										{
+											"type": "object",
+											"required": ["status", "path"],
+											"properties": {
+												"status": {
+													"type": "string",
+													"const": "picked"
+												},
+												"path": {
+													"type": "string",
+													"maxLength": 4096
+												}
+											},
+											"additionalProperties": false
+										},
+										{
+											"type": "object",
+											"required": ["status"],
+											"properties": {
+												"status": {
+													"type": "string",
+													"const": "cancelled"
+												}
+											},
+											"additionalProperties": false
+										},
+										{
+											"type": "object",
+											"required": ["status", "reason"],
+											"properties": {
+												"status": {
+													"type": "string",
+													"const": "unavailable"
+												},
+												"reason": {
+													"type": "string",
+													"maxLength": 1024
+												}
+											},
+											"additionalProperties": false
+										}
+									]
+								}
+							}
+						},
+						"headers": {
+							"X-Clio-Epoch": {
+								"schema": {
+									"type": "string"
+								},
+								"description": "Server epoch"
+							},
+							"X-Clio-Seq": {
+								"schema": {
+									"type": "integer"
+								},
+								"description": "Sequence before assembling the snapshot"
+							}
+						}
+					},
+					"default": {
+						"description": "Problem",
+						"content": {
+							"application/problem+json": {
+								"schema": {
+									"type": "object",
+									"required": ["type", "title", "status", "detail", "code", "instance"],
+									"properties": {
+										"type": {
+											"type": "string"
+										},
+										"title": {
+											"type": "string"
+										},
+										"status": {
+											"type": "integer"
+										},
+										"detail": {
+											"type": "string"
+										},
+										"code": {
+											"anyOf": [
+												{
+													"type": "string",
+													"const": "validation"
+												},
+												{
+													"type": "string",
+													"const": "unauthorized"
+												},
+												{
+													"type": "string",
+													"const": "not_found"
+												},
+												{
+													"type": "string",
+													"const": "conflict"
+												},
+												{
+													"type": "string",
+													"const": "unsupported"
+												},
+												{
+													"type": "string",
+													"const": "unavailable"
+												},
+												{
+													"type": "string",
+													"const": "upstream_acp"
+												},
+												{
+													"type": "string",
+													"const": "operation_failed"
+												},
+												{
+													"type": "string",
+													"const": "internal"
+												}
+											]
+										},
+										"instance": {
+											"type": "string"
+										}
+									},
+									"additionalProperties": false
+								}
+							}
+						}
+					}
+				}
+			}
+		},
 		"/api/workspaces/{id}": {
 			"get": {
 				"operationId": "workspace",
