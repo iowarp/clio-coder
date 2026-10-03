@@ -31,7 +31,7 @@ Related pages: [tool-usage.md](../guide/tool-usage.md) for the `dispatch` tool a
 }
 ```
 
-The three scope fields, `read_roots`, `write_roots`, and `relevant_paths`, use
+An intent object may carry only `version`, `read_roots`, `write_roots`, `relevant_paths`, `expected_outputs`, and `verification`; any other field is refused as `intent_malformed`. The three scope fields, `read_roots`, `write_roots`, and `relevant_paths`, use
 the repository-relative POSIX boundary grammar in [path-boundary.ts](../../src/core/path-boundary.ts).
 A trailing `/` means the subtree; no trailing `/` means that exact file.
 Absolute paths, `..` segments, interior `.` segments, backslashes, and globs
@@ -42,9 +42,9 @@ an empty normalized path, but it normalizes interior `.` and repeated `/`
 segments and does not interpret or reject glob characters. Each list is
 normalized, deduplicated, and sorted by
 code point, holds at most 32 entries, and each entry is at most 512 UTF-8 bytes.
-`verification` holds at most 8 entries and every
+`verification` holds at most 8 entries, each carrying only `check` and an optional `timeout_ms`, and every
 `check` is a declared id resolved from package scripts or
-`.clio-coder/verifiers.yaml`, never a shell command. The one exception is
+`.clio-coder/verifiers.yaml`, never a shell command. A `timeout_ms` is raised to at least 1000 ms and clamped to the declared check's own timeout; when omitted the check's own timeout applies. The one exception is
 `{ "check": "none" }`, which models write to mean "no verification"; it
 normalizes to an empty list instead of costing a refused round unless the
 workspace actually declares a verifier whose id is `none`.
@@ -64,7 +64,7 @@ Each rule resolves to exactly one of three decisions.
 | Decision | Meaning | Where it surfaces |
 | :--- | :--- | :--- |
 | **accept** | The request is unambiguous. | Nothing is reported. |
-| **warn** | The request is compatible, but the classifier identified a weaker declaration or a scope-replacement tradeoff. The dispatch runs with the authority it would have had anyway. | Current admission publishes the typed-scope replacement warning. Legacy provenance still appears in the approval artifact; the absent-intent and missing-verification classifier findings are not emitted as standalone warnings. |
+| **warn** | The request is compatible, but the classifier identified a weaker declaration or a scope-replacement tradeoff. The dispatch runs with the authority it would have had anyway. | Current admission publishes the typed-scope replacement warning as a dispatch diagnostic for internal and harness origin requests, except the context generators. Legacy provenance still appears in the approval artifact; the absent-intent and missing-verification classifier findings are not emitted as standalone warnings. |
 | **refuse** | The request states two incompatible things about authority, or states one this build cannot interpret. | Terminal admission error carrying the reason code. The dispatch never runs. |
 
 The invariant that separates `warn` from `refuse`: **a warning is never the
@@ -168,7 +168,7 @@ inference path, whose malformed-path errors remain terminal.
 | :--- | :--- | :--- | :--- | :--- |
 | **`dispatch` tool, singular `task`** | [dispatch-arguments.ts](../../src/tools/dispatch-arguments.ts) | Declared, top-level `intent` | Legacy inference from `writeRoots` + task/briefing tokens | All codes |
 | **`dispatch` tool, batch `tasks[]`** | `src/tools/dispatch-arguments.ts` | Declared per task, shallow-merged over the top-level default | Same as singular, per task | All codes, plus `intent_scope_widening` against the top-level ceiling |
-| **`dispatch` modes parallel / sequential / pipeline / detached** | [dispatch-admission.ts](../../src/tools/dispatch-admission.ts) | Inherited unchanged from the task that declared it | Legacy inference | All codes |
+| **`dispatch` modes parallel / sequential / pipeline, with or without `detach`** | [dispatch-admission.ts](../../src/tools/dispatch-admission.ts) | Inherited unchanged from the task that declared it | Legacy inference | All codes |
 | **`dispatch` mode compete, candidates** | `src/tools/dispatch-admission.ts` | Inherited unchanged from the single base task | Legacy inference | All codes. `verification` is refused for the mode (`verification_unsupported_for_mode`) |
 | **`dispatch` mode compete, judge** | `src/tools/dispatch-admission.ts` | None. The judge is a fresh read-only request | Legacy inference over the judge's own task | Legacy inference errors only |
 | **`dispatch` mode council, members** | `src/tools/dispatch-admission.ts` | Inherited, narrowed to read-only: declared write roots arrive as read roots | Legacy inference | All codes. `verification` is refused for the mode (`council_verification_unsupported`) |
@@ -183,7 +183,6 @@ inference path, whose malformed-path errors remain terminal.
 | **Fleet code step** | [code-step.ts](../../src/domains/dispatch/code-step.ts) | Not applicable. Runs a declared command, not a worker | Not applicable | Not applicable |
 | **ACP delegation target** | [extension.ts](../../src/domains/dispatch/extension.ts) | Accepted and carried into the plan, but the external agent runs its own tool surface | Legacy inference | All codes, plus a hard refusal of any resolved `writeRoots` on this transport |
 | **Custom agent recipe** | `src/domains/agents/` | Not a producer. A recipe narrows the tool surface and capability class; it never declares dispatch scope | Not applicable | Not applicable |
-| **Extension-authored `DispatchRequest`** | Any `DispatchContract` consumer | Declared, if the extension builds one through `declaredScopeIntent()` or the normalizer | Legacy inference | All codes |
 | **`clio-coder run --agent`** | [run.ts](../../src/cli/run.ts) | **None** | Legacy inference | Legacy inference errors only |
 | **`clio-coder context wiki`** | [wiki-generate.ts](../../src/cli/wiki-generate.ts) | Declared through `declaredScopeIntent()`: read the repository root, write only the wiki staging directory. It also sets the matching legacy `writeRoots` | Not applicable | All codes |
 | **`clio-coder context init`** | [bootstrap-generate.ts](../../src/cli/bootstrap-generate.ts) | Declared through `declaredScopeIntent()`: read the repository root, no write roots | Not applicable | All codes |
@@ -204,7 +203,7 @@ only malformed or absolute prose-path inference can refuse it.
 | **Run Receipt** | `20` | `intent` inside the integrity digest, plus optional legacy `pathScope` | **Refused, never migrated.** A receipt below v20 is reported as retired: intact, but never read as evidence. |
 | **`ResolvedDispatchPlanArtifact`** | `3` | `intent` and `resolvedVerification` per task | **Refused, never migrated.** `resolvedDispatchPlanFromArgs` returns `null` for any version but 3, and a task whose `intent` fails `isDispatchIntent` invalidates the whole artifact. The call falls back to unresolved admission rather than executing a half-understood plan. |
 | **Dispatch plan approval text and hash** | Rendered, hashed | `intent_sha256` for a declared task; the full inferred scope table for a legacy task | Not persisted across versions. The hash binds the exact rendering an operator approved. |
-| **Worker Spec** | `5` | **No.** Carries the *resolved* `writeRoots`, not the declaration | Fail-closed preflight rejection. Deliberate: a worker receives an enforced boundary, never a statement of intent it could reinterpret. |
+| **Worker Spec** | `8` | **No.** Carries the *resolved* `writeRoots`, not the declaration | Fail-closed preflight rejection. Deliberate: a worker receives an enforced boundary, never a statement of intent it could reinterpret. |
 | **Execution Plan** | `4` | **No.** Carries per-step `writes` | Preflight rejects unsupported plan versions. Intent is built from `writes` at request construction, so the plan hash is unchanged by this. |
 | **Fleet Contract** | `1..5` | **No.** v4+ carries per-step `writes:` | Reader refuses contracts whose version features it does not support. A pre-v4 contract declares nothing and stays on inference. |
 | **Fleet Run Record** | `1` | **No** | Resume refuses a changed plan hash. Adding intent to steps does not change the hash, so existing records stay resumable. |
@@ -351,10 +350,12 @@ the step, which is why it is not restated as `write_roots`: that would mint a
 second grant, enforced at the per-tool worker seam, which refuses outright on
 the subprocess and ACP runtimes a fleet may legitimately route a step to.
 
-### 6.5 Extension-authored request
+### 6.5 In-process callers
 
-An extension holding repository-relative paths builds intent through the domain
-rather than assembling the normalized object by hand:
+Harness extensions have no dispatch API, so they cannot build a request. Code
+inside the runtime that holds repository-relative paths builds intent through
+the domain rather than assembling the normalized object by hand. The fleet
+runner, `context wiki` and `context init` do:
 
 ```ts
 import { declaredScopeIntent } from "../domains/dispatch/index.js";
@@ -365,7 +366,7 @@ await dispatch.dispatch({ agentId: "coder", executionRole: "builder", task, inte
 ```
 
 `declaredScopeIntent` runs the same normalization, caps, and provenance
-construction the dispatch tool uses, so an extension cannot mint an intent shape
+construction the dispatch tool uses, so a caller cannot mint an intent shape
 the tool could not. It deliberately does not accept `verification`: a declared
 check id means nothing until it is resolved against the workspace catalog, and
 that resolution belongs to the admission controller that owns the catalog.

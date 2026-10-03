@@ -3,7 +3,12 @@
 	"product": {
 		"label": "Authored product, operator, and current architecture documentation",
 		"roots": ["README.md", "architecture/", "guide/"],
-		"excludes": ["html/**", "wiki/**"]
+		"supporting": ["../README.md", "../CHANGELOG.md", "../CLIO-CODER.md"],
+		"excludes": ["html/**", "wiki/**"],
+		"enforcedBy": {
+			"html/**": "src/tools/context/docs-engine.ts skips docs/html when it indexes",
+			"wiki/**": "package.json files omits docs/wiki from the npm package"
+		}
 	},
 	"developmentWiki": {
 		"label": "Generated development Wiki reference",

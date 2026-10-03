@@ -1,10 +1,10 @@
-# Extensions, Resources, and Share Archives
+# Prompts, skills, and share archives
 
-Clio Coder has two package kinds. A plugin is a domain bundle: prompts, skills, agent recipes, fleet contracts, scripts, and reference files, installed with `clio-coder library install <path>`. A harness extension is executable runtime capability: command tools and hook declarations, installed with `clio-coder extensions install <path>`. Only plugins contribute resources; see [plugins.md](plugins.md) and [harness-extensions.md](harness-extensions.md) for each contract.
+Clio Coder has two package systems. A plugin is a domain bundle of prompts, skills, agent recipes, fleet contracts, scripts, and reference files, installed with `clio-coder library install <path>`. A harness extension is executable runtime capability (command tools, operator commands, and hook declarations), installed with `clio-coder extensions install <path>`. Only plugins contribute resources. See [plugins.md](plugins.md) for the concept map and [harness-extensions.md](harness-extensions.md) for the extension contract.
 
-Share archives are portable JSON files for moving project and user Clio resources between machines or collaborators.
+This page covers how prompt templates and skills are discovered, ranked, trusted, and invoked, and how share archives move user and project resources between machines.
 
-Source of truth: `src/domains/extensions/**`, `src/domains/plugins/**`, `src/domains/resources/**`, `src/domains/share/**`, [extensions.ts](../../src/cli/extensions.ts), and [share.ts](../../src/cli/share.ts).
+Source of truth: `src/domains/resources/`, `src/domains/plugins/`, `src/domains/interop/registry.ts`, `src/domains/share/`, [share.ts](../../src/cli/share.ts), and [skills.ts](../../src/cli/skills.ts).
 
 ---
 
@@ -26,30 +26,37 @@ The skill precedence, lowest to highest, is:
 
 | Precedence | Scope | Source | Root |
 | --- | --- | --- | --- |
+| 9 | project | clio (self-development) | `library/skills/meta/clio-coder-dev` and `clio-coder-test`, only inside Clio's own repository and only when no installed package owns the name |
 | 10 | package | plugin | enabled plugin resource roots |
 | 20 | user | agents / claude / codex / copilot / opencode | `~/.agents/skills`, `~/.claude/skills`, `~/.codex/skills`, `~/.copilot/skills`, `~/.config/opencode/skills` |
 | 30 | user | clio | `<configDir>/skills` |
 | 40 | project | agents / claude / codex / copilot / opencode | `.agents/skills`, `.claude/skills`, `.codex/skills`, `.github/skills`, `.opencode/skills` (untrusted by default) |
 | 50 | project | clio | `.clio-coder/skills` |
-| 60 | cli | path | reserved for call-site injected resources |
+| 60 | cli | path | `--skill <path>` explicit paths |
 
-Clio-native roots intentionally outrank shared compatibility roots at the same scope, so `.clio-coder/skills` overrides a project `.codex/skills` skill of the same name, and `<configDir>/skills` overrides `~/.agents/skills`. If multiple compatibility roots contain the same name at the same precedence, the tie breaks by the registry's agent order rather than by path spelling, so a skill symlinked into two foreign roots resolves to the same winner on every machine. If two roots resolve to the same canonical `SKILL.md` through a symlink, Clio keeps the higher-precedence entry and records a diagnostic naming the path that is in use.
+Inside Clio's own repository, attended sessions are told to load `clio-coder-dev` before the first edit and `clio-coder-test` when choosing validation ([extension.ts](../../src/domains/prompts/extension.ts)). Headless runs are told to take conventions from the code and neighboring tests and not to load either, and both skills stay discoverable.
 
-### Native skills, foreign compatibility roots, and collision resolution
+Clio-native roots intentionally outrank shared compatibility roots at the same scope, so `.clio-coder/skills` overrides a project `.codex/skills` skill of the same name, and `<configDir>/skills` overrides `~/.agents/skills`. Project roots may not leave the workspace and user roots may not leave the home directory through a symlink; an escaping skill is skipped with a warning.
 
-When inspecting skills discovered across native and foreign compatibility roots, candidate resolution follows strict, source-grounded precedence and trust rules implemented in [loader.ts](../../src/domains/resources/skills/loader.ts):
+### Skill collision resolution
 
-1. **Trust-first collision resolution**: `compareSkillCandidates` compares **trusted status first** (`Number(a.trusted) - Number(b.trusted)`), then precedence level, then registry agent order (`interopSourceRank`), and finally file path. This ordering governs both canonical-file deduplication (`dedupeCanonicalSkillPaths`) and same-name collision resolution (`resolveSkillCollisions`). Crucially, trust-first ordering prevents an untrusted project compatibility copy (such as an unvetted `.claude/skills/my-skill` or `.agents/skills/my-skill`) from winning a collision against an admitted native library skill and then disappearing at model visibility time. The trusted native skill wins and remains active.
-2. **Canonical file deduplication**: If multiple scanned roots resolve to the exact same canonical `SKILL.md` path on disk (via symlinks), `dedupeCanonicalSkillPaths` sorts candidates with `compareSkillCandidates` and retains only the winning candidate, logging a diagnostic for the shadowed path.
-3. **Model visibility**: Only admitted skills passing `modelVisibleSkills` (`skill.trusted && !skill.disableModelInvocation`) are visible in `context(scope="skills")` or eligible for model invocation. Setting `disable-model-invocation: true` in skill YAML frontmatter keeps the skill in the catalog for manual operator slash command usage while withholding it from model context.
-4. **Foreign package trust vs unmanaged roots**: Skills and prompts discovered in other agents' user or project folders are inactive until explicitly imported into Clio. Imported foreign packages retain `trust: "foreign"` at either scope and additionally require `integrations.projectResources.trustProjectImports` (legacy control id `skills.trustProjectCompatRoots`). Enabling trust never imports or activates loose compatibility files.
-5. **Project-package shadowing**: Shadowing and disabling of entire packages operates through the managed package lifecycle (`state.json`), where a project-scoped package installation can shadow and disable an underlying user-scoped package of the same ID, rather than through an arbitrary filesystem switch on unmanaged files.
+Candidate resolution for skills is implemented in [loader.ts](../../src/domains/resources/skills/loader.ts). `compareSkillCandidates` orders competing candidates for one name and for one canonical file, and the last one wins:
+
+1. **Trust first.** A trusted candidate beats an untrusted one. An untrusted project compatibility copy (an unvetted `.claude/skills/my-skill` or `.agents/skills/my-skill`) therefore cannot win a collision against an admitted native skill and then disappear at model visibility time.
+2. **Ownership.** A skill from a plugin, a Clio root, or an explicit path outranks a loose compatibility discovery, so an imported copy that still awaits trust owns its name over a loose file.
+3. **Precedence tier**, from the table above.
+4. **Registry agent order** for compatibility roots in the same tier: the earlier agent in the interop registry (claude, codex, opencode, copilot, agents) wins, so a skill symlinked into two foreign roots resolves to the same winner on every machine.
+5. **File path**, as the final tie-break.
+
+If two roots resolve to the same canonical `SKILL.md` through a symlink, Clio keeps the winner by the same order and records a diagnostic naming the path that is in use. Prompt collisions use the same trust and precedence rules, but ties inside one tier break by file path, not registry order.
+
+A project-scoped package installation shadows a user-scoped package of the same ID through the managed package lifecycle (`plugins/state.json`), not through a filesystem switch on unmanaged files. A disabled project package still suppresses the user copy. That holds only while the operator has approved the workspace's `.clio-coder/plugins/state.json`; an unapproved project package does not load and does not suppress the user copy (see [Library packages](resource-library.md)).
 
 ---
 
 ## Prompt templates
 
-Prompt templates are Markdown files under a prompt root. Filename is the command name. Every loaded template, including a plugin's namespaced `/<plugin>:<name>` prompts, is offered in the composer's slash autocomplete after the built-in commands, with its `description` and `argument-hint`; an unavailable template is listed disabled with its reason.
+Prompt templates are Markdown files under a prompt root. The command name is the path beneath the root without `.md`, with directory separators written as colons, so `prompts/bugfix.md` is `/bugfix` and a plugin's `prompts/lab-research/start.md` is `/lab-research:start`. Every loaded template is offered in the composer's slash autocomplete after the built-in commands, with its `description` and `argument-hint`; an unavailable template is listed disabled with its reason. A template whose name equals a built-in slash command is ignored with a collision diagnostic. Symbolic links inside a prompt root are ignored.
 
 Example `.clio-coder/prompts/bugfix.md`:
 
@@ -74,7 +81,9 @@ Use in the TUI:
 /bugfix src/parser.ts empty input crashes
 ```
 
-Templates without frontmatter are accepted; Clio derives a fallback description from the first non-empty line. Invalid frontmatter degrades to a warning for prompt templates rather than failing the whole load.
+Arguments follow Pi 1.0 semantics: bash-style quoting splits the text after the command into positional arguments, and the placeholders `$1`, `$@`, `$ARGUMENTS`, `${N:-default}`, `${@:N}`, and `${@:N:L}` expand in one pass. Bare `$ARGUMENTS` inserts the raw payload byte for byte. The placeholder contract is in [prompt-envelope-and-tools.md](../architecture/prompt-envelope-and-tools.md).
+
+Frontmatter fields are `description`, `argument-hint` (or `argumentHint`), and `display-only` (or `displayOnly`). Templates without frontmatter are accepted; Clio derives a fallback description from the first non-empty line. Invalid frontmatter degrades to a warning rather than failing the whole load. A template whose package reference cannot resolve, or whose file cannot be read, still loads with an empty body and a reason, so invoking it reports the reason instead of "not a command".
 
 ### Display-only templates
 
@@ -94,7 +103,7 @@ Display the following:
 ```
 ```
 
-Submitting `/pkg:help` renders the template locally as an operator card in the transcript, headed by the command name and its source package. Nothing is sent to the model, nothing is recorded in the model-facing session context, and no tokens are spent. The card shows the first fenced code block when the body has one, otherwise the whole body, wrapped to the terminal width with no truncation and scrollable like any other transcript output. Arguments after the command name are ignored. The composer's autocomplete lists such a template with a `reference` marker, and `/prompts` marks it the same way. Headless `clio-coder run /pkg:help` prints the same text to stdout and exits 0 without booting a provider or a session.
+Submitting `/pkg:help` renders the template locally as an operator card in the transcript, headed by the command name and its source package. Nothing is sent to the model, nothing is recorded in the model-facing session context, and no tokens are spent. The card shows the first fenced code block when the body has one, otherwise the whole body, wrapped to the terminal width with no truncation and scrollable like any other transcript output. Arguments after the command name are ignored. The composer's autocomplete lists such a template with a `reference` marker. Headless `clio-coder run /pkg:help` prints the same text to stdout and exits 0 without booting a provider or a session.
 
 ### Foreign prompt roots
 
@@ -104,7 +113,7 @@ Claude, Codex, and OpenCode prompt folders are discovered at user and project sc
 
 ## Skills
 
-Skills follow the Agent Skills `SKILL.md` format. A skill is a directory containing `SKILL.md`, or a single Markdown file under a skill root. YAML frontmatter is required and must include a `description`. A missing description is the only hard rejection; every other validation issue degrades to a warning and the skill still loads.
+Skills follow the Agent Skills `SKILL.md` format. A skill is a directory containing `SKILL.md`, or a single Markdown file under a skill root. YAML frontmatter is required and must include a `description`. Frontmatter validation issues degrade to warnings and the skill still loads. A skill file is skipped only when the description is missing, the file is unreadable, larger than 1 MiB, not valid UTF-8 text, or has frontmatter that cannot be parsed, or when a package reference in the body cannot resolve.
 
 Example `.clio-coder/skills/hdf5-review/SKILL.md`:
 
@@ -114,8 +123,8 @@ name: hdf5-review
 description: Review HDF5/NetCDF validation logic and output assumptions.
 license: MIT
 allowed-tools:
-  - Read
-  - Grep
+  - read
+  - grep
 ---
 
 When asked to review scientific array output:
@@ -132,45 +141,38 @@ Use in the TUI:
 /skill hdf5-review review the output validation path
 ```
 
-Bare `/skill` returns a usage error that points to `/skills`, which opens the Library overlay's skill tab with discovered project skills, user skills, and marketplace entries. `/skill <name> [args]` submits `args` with a pending skill request; the model must call `context` (scope="skills") for that skill before following the workflow. The same pending-request path runs in headless mode, so `clio-coder run "/skill hdf5-review inspect the writer"` matches the interactive behavior.
+Bare `/skill` returns a usage error that points to `/skills`, which opens the Library on its Skills tab. `/skill <name> [args]` submits `args` with a pending skill request; the model must call `context` (scope="skills") for that skill before following the workflow. `/skill off` clears the session's skill tool surface (see [skills-marketplace.md](skills-marketplace.md)). The same pending-request path runs in headless mode, so `clio-coder run "/skill hdf5-review inspect the writer"` matches the interactive behavior.
 
 Every activation records a session ledger entry with the skill name, file path, hash, source, trigger (`slash-command` or `tool`), and turn id when one is available. The same ledger is mirrored into session metadata, prompt diagnostics, and run receipts. Compaction keeps the newest active skill turn in the retained suffix so a loaded skill is not silently summarized away.
 
 ### Naming and validation
 
-The canonical invocation name is the frontmatter `name` when present, otherwise the directory or file subject. When `name` differs from the path subject Clio records a warning and keeps the frontmatter name, which lets shared cross-agent skill folders load without renaming. Names should use lowercase letters, numbers, and single hyphens; format violations warn but do not block loading.
+The canonical invocation name is the frontmatter `name` when present, otherwise the directory or file subject. When `name` differs from the path subject Clio records a warning and keeps the frontmatter name, which lets shared cross-agent skill folders load without renaming. Names should be at most 64 characters of lowercase letters, numbers, and single hyphens that neither start nor end the name. A description should be at most 1024 characters. Format violations warn but do not block loading. A `SKILL.md` over 50 KiB loads with a warning, but activation delivers at most 50 KiB.
 
 Recognized frontmatter fields:
 
 - `name`, `description`: core identity.
 - `disable-model-invocation: true`: hides the skill from the model-visible catalog while keeping it loadable by `/skill <name>`.
-- `allowed-tools`, `disallowed-tools`: parsed as tool policy fields for the loaded skill workflow.
-- `license`, `version`, `compatibility`, and other non-core keys: captured as skill metadata and surfaced when the skill loads through `context`.
-- `source-url`, `registry-id`, `installed-at`, `updated-at`, `audit`: captured as install provenance when present.
+- `allowed-tools`, `disallowed-tools`: a comma-separated string or a YAML list. Tool names are matched case-insensitively against Clio's tools. A name Clio does not have is a warning, and an `allowed-tools` list naming no Clio tool narrows nothing. Loading narrows the tool surface and never grants a tool the host would refuse. Spell the names in Clio's lowercase form (`read`, `grep`): Claude Code reads `allowed-tools` as a pre-approval grant, so a capitalized `Bash` in a skill that another host loads would auto-approve that tool there. Curated library skills are checked for the lowercase spelling.
+- `requires: [skill:<name>]`: typed dependency. A name that resolves to no loaded skill is a warning.
+- `license`, `version`, `compatibility`, and other non-core keys: captured as skill metadata and surfaced when the skill loads through `context`. A nested `clio-coder:` block lands in `metadata.clioCoder`.
+- `source-url`, `registry-id`, `registry-url`, `installed-at`, `updated-at`, `installed-hash`, `audit` (`pass`, `warn`, `fail`, `unknown`), `installed-by`: captured as install provenance when present, nested under `clio-coder:` or flat.
 
 ### Trust and compatibility roots
 
-Shared and other-agent user/project roots are discovery-only. Explicitly import the desired resources into Clio; then review and enable `integrations.projectResources.trustProjectImports` to use imported foreign packages. This setting applies to imported packages at either scope, despite its historical name. It never activates loose `.claude`, `.agents`, `.codex`, or other compatibility roots. Clio-native roots and trusted marketplace packages remain usable.
+Shared and other-agent user and project roots are discovery-only. Explicitly import the desired resources into Clio, then review and enable `integrations.projectResources.trustProjectImports` (legacy control id `skills.trustProjectCompatRoots`) to use imported foreign packages. The setting applies to imported packages at either scope, despite its historical name. It never imports or activates loose `.claude`, `.agents`, `.codex`, or other compatibility roots. Clio-native roots and trusted library packages remain usable. Imported foreign packages record `trust: "foreign"` at either scope; a project resource adopted into user scope keeps foreign trust. Workspace trust is a separate gate: a package installed at project scope, foreign or not, loads only while the operator has approved the project's plugin state with `clio-coder config trust plugins`, and an import or adoption never approves it.
 
-`context(scope="skills")` lists model-visible skills when called with no `name`, or loads a pending skill body by `name`. It returns structured metadata (`name`, `description`, `path`, `base_dir`, `hash`, `source`, `scope`, `disable_model_invocation`, parsed tool policy fields, diagnostics, and frontmatter metadata) plus the body. Pass `include_tree: true` to list sibling files under the skill base directory, capped internally at 50 entries. The skills scope never executes bundled scripts and only resolves skills the model is allowed to see.
+Model visibility is `trusted && !disable-model-invocation`. Only visible skills appear in `context(scope="skills")` or are eligible for model invocation. `disable-model-invocation: true` keeps a skill in the catalog for manual `/skill` use while withholding it from the model. A named load of an untrusted, not-imported, or manual-only skill reports that specific restriction instead of calling the skill unknown.
 
-Creation under protected roots is operator authority: the ordinary model `write` and `edit` tools cannot write protected active skill roots (`.clio-coder/skills/<name>/` or the user `<configDir>/skills/`). Model-authored skills must be created outside protected roots (for example in a staging workspace or package directory) and then installed by the operator with `clio-coder library install <path> [--user|--project]`, or copied directly into an active root by the operator. The loader validates frontmatter on demand (`clio-coder library validate <package-path|SKILL.md>` reports diagnostics), and the `skill-craft` shipped skill documents the frontmatter contract and craft rules.
+`context(scope="skills")` with no `name` lists the catalog, with optional `query`, `limit`, and `offset`. With a `name` it loads that skill's body, returning structured metadata (`name`, `description`, `path`, `base_dir`, `hash`, `source`, `scope`, `disable_model_invocation`, parsed tool policy fields, diagnostics, and frontmatter metadata) plus the body. Pass `include_tree: true` to list sibling files under the skill base directory, capped at 50 entries. The skills scope never executes bundled scripts and only resolves skills the model is allowed to see. Listing sections and readiness rules are in [skills-marketplace.md](skills-marketplace.md).
 
-### Library and skill commands
+Creation under protected roots is operator authority: the ordinary model `write` and `edit` tools cannot write active skill roots (`.clio-coder/skills/<name>/` or the user `<configDir>/skills/`). Model-authored skills must be created outside protected roots and then installed by the operator with `clio-coder library install <path> [--user|--project]`, or copied directly into an active root by the operator. `clio-coder library validate <package-path|SKILL.md>` reports diagnostics, and the `skill-craft` shipped skill documents the frontmatter contract and craft rules.
 
-```bash
-clio-coder library list [--kind skill] [--user|--project] [--json]
-clio-coder library search [query] [--kind skill] [--json]
-clio-coder library inspect <path|kind:name|name> [--user|--project] [--json]
-clio-coder library validate <package-path|SKILL.md> [--json]
-clio-coder library install <path|kind:name|name> [--user|--project] [--force] [--with-requirements] [--dry-run] [--json]
-clio-coder library import <path|github-tree-url> [--user|--project] [--format claude|codex] [--dry-run] [--json] [--yes]
-clio-coder library update <kind:name|name> [--user|--project] [--force] [--dry-run] [--json]
-clio-coder library sync
-clio-coder library skills [--all] [--json]
-```
+### Skill commands and flags
 
-Headless runs also accept `--no-skills` to disable discovery and repeatable `--skill <path>` to load one explicit `SKILL.md` file or skill directory for that run. Explicit `--skill` paths are honored even when `--no-skills` is set.
+The `library` verbs that install, validate, and list skills are in [resource-library.md](resource-library.md). `clio-coder library skills [--all] [--json]` lists runtime skills including unmanaged files.
+
+The interactive session and `clio-coder run` accept `--no-skills` to disable discovery and repeatable `--skill <path>` to load one explicit `SKILL.md` file or skill directory at precedence 60. Explicit `--skill` paths are honored even when `--no-skills` is set. A `--skill` path that loads no skill fails a headless run before any model call.
 
 ### Agent Skills compatibility
 
@@ -180,131 +182,17 @@ Clio is local-first. Skills run from disk and no chat turn depends on network ac
 npx skills add <skill> -a codex   # installs into ~/.codex/skills
 ```
 
-Clio does not call Skills.sh during startup or prompt assembly, and does not emit its own telemetry. If you run `npx skills`, its telemetry follows that CLI and can be disabled with `DISABLE_TELEMETRY=1`. Skills.sh remote search and audit are unavailable. Clio supports library package discovery and installation via `clio-coder library install <path|kind:name|name> [--user|--project]`: bare names and `kind:name` references resolve through the library catalog, and local paths require a valid package containing a root `plugin.json`. Raw or unindexed GitHub URLs cannot be installed directly; remote package installation requires a catalog entry with version and full-tree SHA-256 pin.
+Clio does not call Skills.sh during startup or prompt assembly, and does not emit her own telemetry. If you run `npx skills`, its telemetry follows that CLI and can be disabled with `DISABLE_TELEMETRY=1`. Skills.sh remote search and audit are unavailable. Clio's own package discovery and installation go through the library: bare names and `kind:name` references resolve through the library index, and local paths require a valid package containing a root `plugin.json`. Raw or unindexed GitHub URLs cannot be installed directly; remote package installation requires an index entry with version and full-tree SHA-256 pin.
 
 ### Prompt envelope and safety
 
-Skill bodies never enter the prompt uninvited. The model discovers skills only through `context(scope="skills")`: a call with no `name` returns a one-line listing (name, scope, description) of model-visible skills, and a body loads only when the pending-skill policy authorizes that name for the turn, which requires an explicit operator invocation such as `/skill <name>`. Skills are prompt resources, not execution grants: any script a skill references still runs through normal Clio tools and safety gates, and a loaded skill's `allowed-tools` declaration narrows the tool surface at admission (reason code `skill_surface`) without ever granting anything the host would refuse.
-
----
-
-## Extension package manifest
-
-An extension root contains `clio-coder-extension.yaml`, `clio-coder-extension.yml`, or `clio-coder-extension.json`.
-
-```yaml
-id: lab-tools
-name: Lab Tools
-version: 1.0.0
-description: Executable capabilities for this lab
-compatibility:
-  clio: ">=0.4.7"
-capabilities:
-  tools:
-    - name: summarize
-      description: Return the count and sum of supplied measurements.
-      runtime: node
-      entrypoint: tools/summarize.cjs
-      inputSchema:
-        type: object
-        properties:
-          values: { type: array, items: { type: number } }
-        required: [values]
-        additionalProperties: false
-```
-
-Required fields are `id`, `version`, and `description`. `name` defaults to `id` when absent. `capabilities` is optional, so a package whose only contribution is a root `hooks.yaml` is valid. The command-tool contract lives in [harness-extensions.md](harness-extensions.md).
-
-A manifest that declares `resources`, `prompts`, `skills`, `agents`, or `fleets` is invalid. Those are plugin content, and the diagnostic says so: install the bundle with `clio-coder library install <path>` instead.
-
-IDs must be lowercase and may include numbers, dots, underscores, and hyphens; they must start/end alphanumeric.
-
-`compatibility.clio` is optional. When present, it must be a valid SemVer range such as `>=0.3.8`, `^0.3.8`, or `0.3.x`. Installation refuses a package whose range excludes the running Clio version and names the extension, its declared range, and that running version. Clio repeats the check whenever it loads installed extensions, so a package that becomes incompatible after a Clio version change stays visible in `extensions list` with its diagnostic but contributes no command tools or hooks. An incompatible project package does not hide a compatible user package with the same ID. A manifest without `compatibility.clio` keeps the existing unrestricted behavior.
-
-### Callers that dispatch
-
-A caller that builds a `DispatchRequest` against the `DispatchContract` is a
-dispatch producer and is bound by the typed-intent compatibility rules like any
-other. Build the declaration with `declaredScopeIntent()` from the dispatch
-domain rather than assembling the normalized object by hand: it runs the same
-path grammar, caps, deduplication, and provenance construction the dispatch tool
-uses, so a caller cannot mint an intent shape the tool could not.
-
-```ts
-import { declaredScopeIntent } from "../domains/dispatch/index.js";
-
-const built = declaredScopeIntent({ readRoots: ["src/"], writeRoots: ["src/generated/"] });
-if (!built.ok) throw new Error(`${built.reason}: ${built.message}`);
-await dispatch.dispatch({ agentId: "coder", executionRole: "builder", task, intent: built.intent });
-```
-
-A caller that declares nothing keeps working: scope falls back to inference over
-its task and briefing text, and the request is refused only when it states a
-contradiction, such as an inferred `writeRoots` disagreeing with a declared
-`write_roots`. Declaring is what stops an applicable project rule from being
-missed because the task text happened not to spell a path. See
-[dispatch-typed-intent.md](../architecture/dispatch-typed-intent.md).
-
----
-
-## Extension CLI
-
-```bash
-clio-coder extensions list [--all] [--json] [--user|--project]
-clio-coder extensions discover <path> [--json]
-clio-coder extensions run <id> <command> [--json] -- [arguments]
-clio-coder extensions install <path> [--user|--project] [--force] [--json]
-clio-coder extensions enable <id> [--user|--project] [--json]
-clio-coder extensions disable <id> [--user|--project] [--json]
-clio-coder extensions remove <id> [--user|--project] [--json]
-```
-
-Install locations:
-
-| Scope | Root |
-| --- | --- |
-| user | `<configDir>/extensions/<id>` |
-| project | `.clio-coder/extensions/<id>` |
-
-Project extensions shadow user extensions with the same ID. Use `--all` to list shadowed/disabled entries.
-
-Installed packages are admitted only when their current tree matches the SHA-256 digest in `extensions/state.json`. An install record without a digest, a drifted tree, and a corrupt state file all fail closed: the package stays visible and inactive, and its diagnostic says to reinstall with `--force`. Listing extensions, booting Clio, inspection, and plain doctor runs never rewrite install state.
-
-### Generations and reload
-
-A running session does not read installed packages on every load. While domains start, the extensions domain publishes nothing: readers use an ephemeral generation-0 projection. The composition root then asks the extensions domain to build an immutable candidate for the session's working directory and builds the matching user-hook registration table from it. After validating that both candidates are still current, the composition root publishes the snapshot and hooks with two adjacent reference assignments. That paired boot snapshot is generation 1. It contains package identity and provenance, the command-tool declarations of each loadable package, and the parsed `hooks.yaml` declarations captured from the exact bytes the install digest covered. Every consumer in the process then reads the committed generation, so consecutive loads within one turn agree on the package set.
-
-`/extensions reload` is the only in-session way to publish a later generation. It rebuilds the snapshot from disk, re-verifies every installed tree against `state.json`, builds the user-hook registrations for the candidate, validates both candidates, and then performs the same two adjacent assignment-only publications. No callback, event, log, or refusal sits between them; conflict diagnostics and the plugin resource reload run only after both references are live. Hook evaluation and every later reader therefore see the previous hooks or the new ones, never an intermediate pairing. The command reports the new generation, which packages were added, removed, or modified, and how many hooks were registered, dropped, or rejected. A tree that no longer verifies is listed as inactive and contributes nothing until it is reinstalled. A build failure or stale candidate publishes neither side and reports why.
-
-Reloading an unchanged tree still publishes a new generation with the same content digest; content identity is the digest, not the generation number. Installs, enables, disables, and removes performed by `clio-coder extensions` in another process are invisible to a running session until the operator reloads or restarts. There is no filesystem watcher, so a CLI mutation never becomes an implicit mid-turn hook change. Command-tool schemas are frozen when a session registry is created, so a reload never changes a live model's tool surface; restart the session for that. Plugin resources have their own generation and their own `/library reload`.
-
-If extension state is corrupt, loading remains fail-closed. A normal reinstall refuses it; `extensions install <valid-source> --force` backs up the corrupt state and parks the previous package bytes before installing and recording the verified replacement. `extensions remove <id>` can also remove an unverifiable package from the load path while preserving both its bytes and any corrupt state in the paths printed by the command. These recovery backups are deliberately not treated as installed packages.
-
-### Skill pack distribution
-
-Reusable skill packs belong in the Library. Clio-Coder currently bundles its canonical recipes under this repository's `library/`; no separate `iowarp/clio-kit` marketplace is required. A shareable skill pack carries a root `plugin.json` plus a `skills/` directory, and users install it with `clio-coder library install <path> --project` or without the flag for user scope. Harness tools, hooks, commands, and UI belong in the separate extension system.
-
-Recommended layout:
-
-```text
-lab-skills/
-  plugin.json
-  skills/
-    hpc-review/
-      SKILL.md
-      references/
-      scripts/
-    release-check/
-      SKILL.md
-```
-
-This keeps the runtime local-first and small. Clio Coder discovers enabled plugin skill roots, records provenance as `source: plugin`, and still requires normal tool safety gates for any script a skill asks the agent to run.
+Skill bodies never enter the prompt uninvited. The model discovers skills only through `context(scope="skills")`, and a body loads only when the pending-skill policy authorizes that name for the turn, which requires an explicit operator invocation such as `/skill <name>` or, where the autonomy level allows it, a model activation of a trusted installed skill. Skills are prompt resources, not execution grants: any script a skill references still runs through normal Clio tools and safety gates, and a loaded skill's `allowed-tools` declaration narrows the tool surface at admission (reason code `skill_surface`) without ever granting anything the host would refuse.
 
 ---
 
 ## Share archives
 
-Share archives are single JSON files:
+Share archives are single JSON files for moving loose project and user Clio resources between machines or collaborators. They carry the files under the prompt, skill, agent, fleet, and extension roots, project context files, and a settings fragment. Packages installed through `clio-coder library` live under `plugins/` and are not exported; distribute those through their source directory or a library index.
 
 ```json
 {
@@ -312,7 +200,7 @@ Share archives are single JSON files:
   "formatVersion": 1,
   "manifest": {
     "format": "clio-coder.share.v1",
-    "clioCoderVersion": "0.4.2",
+    "clioCoderVersion": "0.6.0",
     "createdAt": "...",
     "files": []
   },
@@ -320,10 +208,7 @@ Share archives are single JSON files:
 }
 ```
 
-Every file entry is base64 encoded and SHA-256 checked on import.
-Readers continue to accept the released legacy identities `clio-share-archive`,
-`clio.share.v1`, and `clioVersion`, then normalize them to the canonical shape.
-New exports use only the `clio-coder` names above.
+Every file entry carries its type, scope, archive path, relative path, size, and base64 data, and its SHA-256 is checked on import. Readers continue to accept the released legacy identities `clio-share-archive`, `clio.share.v1`, and `clioVersion`, then normalize them to the canonical shape. New exports use only the `clio-coder` names above. Import warns when the archive's major or minor version differs from the running Clio.
 
 ### Export
 
@@ -336,29 +221,24 @@ Options:
 
 | Flag | Meaning |
 | --- | --- |
+| `--out <path>` | Required archive path. |
 | `--project` | Export project resources only. Default scope. |
 | `--user` | Export user resources only. |
 | `--both` | Export both user and project resources. |
-| `--context` | Include project context files (`CLIO-CODER.md`, `AGENTS.md`, `CODEX.md`, `GEMINI.md`, `CLAUDE.md`). |
+| `--context` | Include project context files (`CLIO-CODER.md`, `AGENTS.md`, `CODEX.md`, `GEMINI.md`, `CLAUDE.md`). Project scope only. |
 | `--prompts` | Include prompt templates. |
 | `--skills` | Include skills. |
 | `--settings` | Include non-secret settings fragment. |
-| `--extensions` | Include harness extension bundle files, excluding extension `state.json`. |
+| `--extensions` | Include harness extension bundle files, excluding `state.json` files and hidden backup directories. |
 | `--agents` | Include agent recipe files. |
 | `--fleets` | Include fleet contract files. |
 | `--all` | Include every supported resource class. |
 | `--dry-run` | List the entries the archive would hold and write nothing. |
 | `--json` | Print the archive, or with `--dry-run` its manifest, as JSON. |
 
-If no include flags are supplied, export includes all supported classes for the selected scope.
-Each share command refuses, with exit 2, a flag it does not use: `export` takes no
-`--force`, `import` takes neither `--both`, `--out` nor include flags, and `inspect` takes
-only `--json`.
+If no include flags are supplied, export includes all supported classes for the selected scope. Naming any include flag makes every class opt-in. Each share command refuses, with exit 2, a flag it does not use: `export` takes no `--force`, `import` takes neither `--both`, `--out` nor include flags, and `inspect` takes only `--json`.
 
-Settings fragments are version 2 documents containing only
-`chat.modelPicker.cycleSet`, `chat.retry`, `fleet.concurrency`,
-`context.compaction`, `safety.autonomy`, `safety.limits.sessionCostUsd`, and the
-`interface` settings block. Targets and credentials are not included.
+Settings fragments are version 2 documents containing only `chat.modelPicker.cycleSet`, `chat.retry`, `fleet.concurrency`, `context.compaction`, `safety.autonomy`, `safety.limits.sessionCostUsd`, and the `interface` settings block. Targets and credentials are not included.
 
 ### Import and inspect
 
@@ -368,18 +248,20 @@ clio-coder share import project.clio-coder-share.json --dry-run
 clio-coder share import project.clio-coder-share.json --force
 ```
 
-`share import` also accepts `--user` or `--project` to force every file into one destination scope; otherwise each entry keeps its archived scope. Dry-run imports produce a plan and report conflicts without writing. Without `--force`, conflicting destination files block writes. With `--force`, conflicting files are overwritten and supported settings-fragment keys are merged into the current settings file.
+`share import` also accepts `--user` or `--project` to force prompt, skill, and extension entries into one destination scope; otherwise each entry keeps its archived scope. Agent, fleet, and settings entries always import into the user config directory, and project context files into the working directory. Dry-run imports produce a plan and report conflicts without writing. Without `--force`, conflicting destination files block writes. With `--force`, conflicting files are overwritten, keeping a backup, and supported settings-fragment keys are merged into the current settings file. Every target path must stay inside its import root, including through symbolic links, or the whole import is refused before any write.
 
-Extension entries are grouped into complete packages, staged, strictly validated, and passed through the canonical extension installer. A successful import therefore records the installed content digest before the package can contribute resources. A destination tree is skipped only when it already matches a verified install record; an unrecorded, drifted, or corrupt destination requires `--force`, which uses the same backup-preserving recovery contract as `extensions install --force`. Invalid archived packages fail preflight before destination writes.
+Extension entries are grouped into complete packages, staged, strictly validated, and passed through the canonical extension installer. A successful import therefore records the installed content digest before the package can contribute resources. A destination tree is skipped only when it already matches a verified install record; an unrecorded, drifted, or corrupt destination requires `--force`, which uses the same backup-preserving recovery contract as `extensions install --force`. Invalid archived packages fail preflight before destination writes. An import never approves workspace trust. When it writes `.clio-coder/extensions/state.json` at project scope, including the workspace's first such file, the project's extensions stay blocked until `clio-coder config trust extensions` approves the new bytes. Only `clio-coder extensions install <path> --project` approves a workspace's first project extension install (see [Harness extensions](harness-extensions.md)).
 
-Archives accept `agent` and `fleet` file entry types alongside prompts and skills. Agent entries import into the user agent root and must pass the recipe parser and policy checks. Fleet entries import into the user fleet root and must pass `parseFleetContract` before any write. Dry-run plans report both types by kind.
+Archives accept `agent` and `fleet` file entry types alongside prompts and skills. Agent entries must pass the recipe parser and policy checks. Fleet entries must pass `parseFleetContract` before any write. Dry-run plans report both types by kind. Share commands exit 0 on success, 1 when the plan carries an error or conflict diagnostic, and 2 for a usage error.
 
-Aliases:
+### Aliases and session commands
 
 ```bash
 clio-coder export --out project.clio-coder-share.json
 clio-coder import project.clio-coder-share.json --dry-run
 ```
+
+In a session, `/archive export <path>` writes a project-scope archive with every resource class, and `/archive import <path> [--dry-run] [--force]` imports one. `/share` shares a worker result with the main agent and is unrelated to archives. `/share export` and `/share import` are retired and refuse with a pointer to `/archive`.
 
 ---
 

@@ -80,7 +80,7 @@ export interface BoardPaint {
 	dim(text: string): string;
 }
 
-export function createBoardPaint(enabled: boolean = !colorDisabled()): BoardPaint {
+function createBoardPaint(enabled: boolean = !colorDisabled()): BoardPaint {
 	const background = terminalBackground();
 	const truecolor = detectTruecolor();
 	const codes = new Map<SemanticRole, string>();
@@ -119,7 +119,7 @@ function cut(text: string, width: number): string {
 // Formatting
 // ---------------------------------------------------------------------------
 
-export function formatClock(ms: number): string {
+function formatClock(ms: number): string {
 	const seconds = Math.max(0, Math.floor(ms / 1000));
 	if (seconds < 60) return `${seconds}s`;
 	const minutes = Math.floor(seconds / 60);
@@ -216,7 +216,7 @@ function meter(calls: number, cap: number | undefined): string {
  * The facts row, shed in a fixed order as the dock narrows: the model is cut,
  * then cost, route and tokens leave; the tool budget stays longest.
  */
-export function factsText(card: WorkerCard, width: number): string {
+function factsText(card: WorkerCard, width: number): string {
 	const target = clean(card.target);
 	const model = clean(card.model);
 	const tools = meter(card.toolCalls, card.toolCap);
@@ -296,7 +296,7 @@ function activityText(paint: BoardPaint, card: WorkerCard): string {
 }
 
 /** One card: the aligned header, the facts, and the live or verdict row. */
-export function renderCard(
+function renderCard(
 	paint: BoardPaint,
 	card: WorkerCard,
 	width: number,
@@ -359,7 +359,7 @@ const EMPTY_BOARD = [
 ];
 
 /** The whole board screen, exactly `height` rows (fewer only when the terminal is tiny). */
-export function renderBoard(
+function renderBoard(
 	paint: BoardPaint,
 	board: BoardModel,
 	view: BoardView,
@@ -591,7 +591,7 @@ function takeoverHeader(paint: BoardPaint, model: TakeoverModel, width: number, 
 }
 
 /** The takeover screen: pinned header, the stream window, the hint row. */
-export function renderTakeover(
+function renderTakeover(
 	paint: BoardPaint,
 	model: TakeoverModel | null,
 	view: TakeoverView,

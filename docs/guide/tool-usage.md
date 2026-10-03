@@ -1,6 +1,6 @@
 # Tool Usage Reference
 
-Operational reference for agents and readers using the web app. Sections summarize each tool's arguments, boundaries, outputs, and core workflow; schemas and implementation live in `src/tools/` and linked source files. Retrieve a section through `gateway(op="call", capability="clio_docs", args={query: ...})`.
+Operational reference for agents and operators. Sections summarize each tool's arguments, boundaries, outputs, and core workflow; schemas and implementation live in `src/tools/` and linked source files. Retrieve a section through `gateway(op="call", capability="clio_docs", args={query: ...})`.
 
 ### The tool surface at a glance
 
@@ -9,16 +9,17 @@ Operational reference for agents and readers using the web app. Sections summari
 | Read and search the workspace | [`read`](#read-page-through-a-file-with-offset-limit-and-tail), [`grep`](#grep-search-file-contents-with-ripgrep), [`find`](#find-locate-files-and-directories-by-glob-pattern), [`ls`](#ls-list-one-directory), [`code_nav`](#codenav-navigate-the-codemap) |
 | Change the workspace | [`edit`](#edit-exact-text-replacements-in-one-file), [`write`](#write-create-or-overwrite-a-whole-file), [`bash`](#bash-run-a-shell-command), [`run_script`](#runscript-stream-a-scientific-processing-step-to-disk) |
 | Prove something works | [`verify`](#verify-run-declared-verification-checks), [`evidence`](#evidence-inspect-canonical-evidence-and-trust-status), [`limitation`](#limitation-record-what-a-turn-could-not-verify) |
-| Delegate and supervise work | [`dispatch`](#dispatch-run-bounded-tasks-on-fleet-agents), [`monitor`](#monitor-inspect-dispatched-runs), [`steer`](#steer-guide-or-cancel-a-running-worker), [`ledger`](#ledger-coordinate-peer-workers-through-typed-entries) |
+| Delegate and supervise work | [`dispatch`](#dispatch-run-bounded-tasks-on-fleet-agents), [`monitor`](#monitor-inspect-dispatched-runs), [`steer`](#steer-guide-cancel-or-approve-a-running-worker), [`ledger`](#ledger-coordinate-peer-workers-through-typed-entries) |
 | Track and record decisions | [`tasks`](#tasks-the-session-task-board), [`decide`](#decide-record-a-design-decision), [`artifact`](#artifact-plans-reviews-and-reports) |
-| Look things up | [`gateway`](#gateway-discover-and-call-secondary-capabilities), [`clio_docs`](#cliodocs-retrieve-bundled-documentation-through-the-gateway), [`clio_library`](#cliolibrary-inspect-the-recipe-catalog-through-the-gateway), [`context`](#context-workspace-skill-activation-and-recall), [`git`](#git-read-only-inspection-of-git-repository-state), [`data`](#data-inspect-structured-files-through-the-gateway) |
+| Look things up | [`gateway`](#gateway-discover-and-call-secondary-capabilities), [`clio_docs`](#cliodocs-retrieve-bundled-documentation-through-the-gateway), [`clio_library`](#cliolibrary-inspect-the-recipe-catalog-through-the-gateway), [`context`](#context-workspace-skill-activation-and-recall), [`git`](#git-typed-inspection-staging-and-commits), [`data`](#data-inspect-structured-files-through-the-gateway) |
 | Reach outside the machine | [`web_read` and `web_fetch`](#webread-and-webfetch-read-web-pages-or-make-full-http-requests), [`credential_present`](#credentialpresent-check-environment-or-file-for-a-credential-key) |
 | Talk to the operator | [`ask_user`](#askuser-host-owned-operator-interviews), [`panes`](#panes-manage-clio-owned-terminal-panes) |
-| Configure and manage the session | [`configure_clio`](#configureclio-change-routing-and-fleet-settings-with-an-approved-preview), [`self_compact`](#selfcompact-save-a-handoff-note-and-compact-context), [`vision`](#vision-ask-the-configured-vision-model-about-an-image), [`consult`](#consult-ask-system-one-a-bounded-question) |
+| Configure and manage the session | [`configure_clio`](#configureclio-change-routing-and-fleet-settings-with-an-approved-preview), [`self_compact`](#selfcompact-save-a-handoff-note-and-compact-context), [`vision`](#vision-ask-the-configured-vision-model-about-an-image), [`consult`](#consult-ask-system-one-a-bounded-question), [`music`](#music-control-the-focus-radio-pane) |
 
 Cross-cutting behavior that applies to every tool is in
-[Observation envelope](#observation-envelope-truncation-notices-offload-next-hints-and-the-turn-budget)
-and [Search scope](#search-scope-read-ls-grep-and-find-outside-the-workspace).
+[Observation envelope](#observation-envelope-truncation-notices-offload-next-hints-and-the-turn-budget),
+[Search scope](#search-scope-read-ls-grep-and-find-outside-the-workspace) and
+[Placement, plane and policy per tool](#placement-plane-and-policy-per-tool).
 
 Tool registration and argument normalization are owned by [agent-tools.ts](../../src/tools/agent-tools.ts) and each tool's `ToolSpec`.
 
@@ -47,7 +48,7 @@ One gateway provides `find`, `describe`, `call`, and `chain`. Source: [index.ts]
 | `refresh` | Find only; explicitly connect and refresh the named server. |
 | `steps` | Chain: 1–16 operations with unique `id`, `capability`, `args`, and optional `after:[ids]`. |
 
-`find` returns bounded pages within 32 KiB, including required argument names and bounded validated argument examples for registered capabilities. Startup capability guidance also includes a bounded argument cue and example. `describe` returns schema, usage, and
+`find` returns bounded pages within 32 KiB, including required argument names and bounded validated argument examples for registered capabilities. When the System One `relevance` site has a ranking ready, an unfiltered listing of more than 40 entries is ordered by it and a queried find adds up to five related capabilities beside its own hits; hits keep their order and nothing is removed (see [System One](system-one.md)). Startup capability guidance also includes a bounded argument cue and example. `describe` returns schema, usage, and
 authority notes; `call` validates against the live schema and runs under the
 capability's own authority. Direct tools are called directly, or included as
 steps in a chain. Describing `gateway` returns composition syntax; describing
@@ -56,9 +57,22 @@ steps in a chain. Describing `gateway` returns composition syntax; describing
 | Placement | Tools |
 | --- | --- |
 | Direct in main sessions | read, bash, edit, write, verify, ask_user, gateway; dispatch when wired |
-| Gateway in main sessions | Other wired builtins, including grep, find, ls, code_nav, context, tasks, monitor, workflow, and supervision capabilities |
-| Direct in workers | Execution and observation tools admitted by the recipe; see its discovered tools rather than assuming the main surface |
+| Gateway in main sessions | Every other wired builtin, including grep, find, ls, code_nav, context, run_script, tasks, monitor, steer, ledger, panes, music, limitation, decide and self_compact |
+| Direct in workers | The builtins that `TOOL_PLACEMENT` marks direct and the recipe admits. `find` and `ls` move behind the gateway when the worker's surface admits `bash`. See its discovered tools rather than assuming the main surface |
 | Gateway when trusted/installed | `extension_<id>__<name>`, `mcp_<id>__<tool>` |
+
+`find` and `ls` sit behind the gateway on any surface that admits `bash`, because bash already runs both as recognized commands on workspace paths (`SHELL_COVERED_TOOLS` in [surface.ts](../../src/tools/surface.ts)). A surface without `bash` keeps them attached, and an explicit placement on a registered spec wins over that rule.
+
+Capabilities that the gateway directory implements itself, and the other gateway-placed builtins:
+
+| Capability | Arguments | Reference |
+| --- | --- | --- |
+| `clio_docs` | `query` (omit to list the corpus), `limit` | [clio_docs](#cliodocs-retrieve-bundled-documentation-through-the-gateway) |
+| `clio_library` | `query`, `kind`, `ref`, `limit`, `offset` | [clio_library](#cliolibrary-inspect-the-recipe-catalog-through-the-gateway) |
+| `data` | `op` is `inspect`, `select` or `validate`, plus the format and window arguments | [data](#data-inspect-structured-files-through-the-gateway) |
+| `artifact`, `web_read`, `web_fetch`, `git`, `evidence`, `credential_present`, `consult`, `vision`, `configure_clio` | Each tool's own schema | The tool's own section |
+| `extension_<id>__<name>` | The extension command's schema | [Harness extensions](harness-extensions.md) |
+| `mcp_<id>__<tool>` | The MCP server tool's schema | The MCP paragraphs below |
 
 Gateway adds no authority: inner safety, skills, approvals, action class,
 cancellation, shaping, and evidence still apply. An ordinary gateway call counts
@@ -124,6 +138,50 @@ gateway(op="call", capability="data", args={op: "inspect", path: "results.csv"})
 gateway(op="find", server="analysis", refresh=true)
 ```
 
+## Placement, plane and policy per tool
+
+Every name in `ToolNames` ([tool-names.ts](../../src/core/tool-names.ts)) has one row. The placement columns come from `TOOL_PLACEMENT` and `COORDINATOR_DIRECT_TOOLS` in [surface.ts](../../src/tools/surface.ts), and the last three from `TOOL_PLANES` in [policy.ts](../../src/tools/policy.ts). The first placement column applies to workers and any registry that does not apply the coordinator surface. The main-session column applies to the interactive, ACP, GUI and headless main registry. A tool registers only when its dependencies are wired; the conditions are in [Prompt Envelope and Tools](../architecture/prompt-envelope-and-tools.md).
+
+| Tool | Table placement | Main session | Plane | Action class | Mode |
+| --- | --- | --- | --- | --- | --- |
+| `read` | direct | direct | observe | read | parallel |
+| `evidence` | gateway | gateway | observe | read | sequential |
+| `grep` | direct | gateway | observe | read | parallel |
+| `find` | direct, or gateway with `bash` | gateway | observe | read | parallel |
+| `ls` | direct, or gateway with `bash` | gateway | observe | read | parallel |
+| `code_nav` | direct | gateway | observe | read | parallel |
+| `self_compact` | direct | gateway | orchestrate | read | sequential |
+| `context` | direct | gateway | observe | read | parallel |
+| `credential_present` | gateway | gateway | observe | read | parallel |
+| `clio_docs` | gateway | gateway | observe | read | parallel |
+| `clio_library` | gateway | gateway | observe | read | parallel |
+| `data` | gateway | gateway | observe | read | parallel |
+| `write` | direct | direct | mutate | write | sequential |
+| `edit` | direct | direct | mutate | write | sequential |
+| `bash` | direct | direct | execute | execute | sequential |
+| `git` | gateway | gateway | execute | read; `add` and `commit` are judged as bash | sequential |
+| `verify` | direct | direct | execute | execute | sequential |
+| `run_script` | direct | gateway | execute | execute | sequential |
+| `dispatch` | direct | direct | orchestrate | dispatch | sequential |
+| `monitor` | direct | gateway | orchestrate | read | parallel |
+| `steer` | direct | gateway | orchestrate | dispatch | sequential |
+| `tasks` | direct | gateway | orchestrate | read | sequential |
+| `ledger` | direct | gateway | orchestrate | read | sequential |
+| `panes` | direct | gateway | orchestrate | read | sequential |
+| `music` | direct | gateway | orchestrate | read | sequential |
+| `limitation` | direct | gateway | orchestrate | read | parallel |
+| `decide` | direct | gateway | orchestrate | read | sequential |
+| `consult` | gateway | gateway | orchestrate | read | parallel |
+| `vision` | gateway | gateway | observe | read | parallel |
+| `web_read` | gateway | gateway | retrieve | read | parallel |
+| `web_fetch` | gateway | gateway | retrieve | read; outward for a non-GET method or a body | parallel |
+| `ask_user` | direct | direct | interact | read | sequential |
+| `configure_clio` | gateway | gateway | interact | write | sequential |
+| `artifact` | gateway | gateway | artifact | write | sequential |
+| `gateway` | direct | direct | gateway | read; the inner call keeps its class | sequential |
+
+There are 35 tools in eight planes. The action class is the tool's base class; admission still judges the effect of a particular call, so `bash`, `run_script`, `verify` and `git` mutations are classified by the command they would run. See [the safety model](../architecture/safety-model.md) for autonomy, and [Prompt Envelope and Tools](../architecture/prompt-envelope-and-tools.md) for why a tool sits in its plane.
+
 ## Observation envelope: truncation notices, offload, next hints, and the turn budget
 
 The envelope-backed OBSERVE tools (`read`, `grep`, `find`, `ls`, `code_nav`,
@@ -136,7 +194,7 @@ Per-call byte caps: read 50KB (`safety.limits.readBytesPerCall`), grep 16KB for 
 Truncated text results append exactly one notice line:
 
 ```text
-[<tool>: <shown>/<total> <unit> shown (<shownSize> of <totalSize>) | full: <offloadPath> | next: <exact-call>]
+[<tool>: <shown>/<total> <unit> shown (<shownSize> of <totalSize>) | full: <offloadPath> (overflow copy, read-only; not the workspace) | next: <exact-call>]
 ```
 
 Segments that do not apply are omitted. `<total>` renders as `N+` when the search stopped early at its item limit, so the true total was never counted. `next:` is an exact argument fragment (for example `limit=200` or `offset=451`); re-issue the same call with that argument changed to continue.
@@ -145,11 +203,11 @@ Offload: when the byte cap cut content that was already collected, the complete 
 
 JSON-format results (including code_nav, context workspace, clio_docs, data, and gateway find) never get an appended notice. An oversize JSON payload is replaced whole by the parseable stub `{"error":"result exceeded <cap>","offloadPath":"...","next":"..."}` so the model never receives JSON cut mid-document. Empty results are also valid JSON with empty arrays and `next` populated.
 
-Turn budget: all envelope-backed tools draw from one shared pool per turn (`safety.limits.observationBytesPerTurn`, keyed on `sessionId:turnId`). At the default of 192KB the pool grows with the model's context window, at 1.5 bytes per window token, so windows up to 128K tokens get 192KB and larger windows get more, up to 1MB. Any other configured value applies exactly. When the remaining pool shrinks a call below its self cap, a note is appended naming the bytes already used. When the pool is exhausted, the call short-circuits with `[observation budget exhausted for this turn before <tool> ...]` instead of paying for a search whose output cannot be returned. Use narrower arguments or continue in a follow-up turn.
+Turn budget: all envelope-backed tools draw from one shared pool per turn (`safety.limits.observationBytesPerTurn`, keyed on `sessionId:turnId`). At the default of 192KB the pool grows with the model's context window, at 1.5 bytes per window token, so windows up to 128K tokens get 192KB and larger windows get more, up to 1MB. Any other configured value applies exactly. When the remaining pool shrinks a call below its self cap, a note is appended naming the bytes already used. When the pool is exhausted, the call short-circuits with `[observation budget exhausted for this turn before <tool> ...]` instead of paying for a search whose output cannot be returned. Use narrower arguments or continue in a follow-up turn. A fourth consecutive exhausted call in one turn fails as an error instead of returning another notice.
 
 ## Search scope: read, ls, grep, and find outside the workspace
 
-`read`, `ls`, `grep`, and `find` run without asking on any path inside the session workspace. A path that resolves outside it, by an absolute path, a `..`, or a link at any component, asks for one-shot approval in `default` and runs in `yolo`. Headless runs deny the ask, so give a headless run `--autonomy yolo` or a `--cwd` that contains what it must read. Zero-access paths (`.env`, `~/.ssh/`, the credential store) are refused in both modes. Read-only dispatched runs deny outside reads and all non-read calls without asking. Workers run at `default`. Installed skill, plugin, and extension trees, the `full:` offload files a truncation notice names, and dispatch receipts stay readable without an ask. A search that starts inside the workspace never follows a linked directory out of it. See [the safety model](../architecture/safety-model.md#autonomy).
+`read`, `ls`, `grep`, and `find` run without asking on any path inside the session workspace. A path that resolves outside it, by an absolute path, a `..`, or a link at any component, asks for one-shot approval in `default` and runs in `yolo`. Headless runs deny the ask, so give a headless run `--autonomy yolo` or a `--cwd` that contains what it must read. Zero-access paths (`.env`, `~/.ssh/`, the credential store) are refused in both modes. Read-only dispatched runs deny outside reads and all non-read calls without asking. Workers run at `default`. Installed skill, plugin, and extension trees, the `full:` offload files a truncation notice names, and dispatch receipts stay readable without an ask. A search that starts inside the workspace never follows a linked directory out of it. See [the safety model](../architecture/safety-model.md).
 
 ## read: page through a file with offset, limit, and tail
 
@@ -170,6 +228,8 @@ Each call stops at 2000 lines or the 50 KiB read cap; the turn budget may lower 
 Truncation provides the first unshown line as `next: offset=...`; read uses the file itself for continuation, never offloads. Oversized single lines return a UTF-8 prefix and hint to narrow grep/edit. Tail continuation widens when total is unknown; numbered tail is refused if absolute line numbers cannot be established. `details.file` includes bytes/mtime and `details.fileChange` reports observed identity changes; neither locks against writers.
 
 Documents render to text first, and `offset`, `limit`, `tail` and `line_numbers` then page that text like a source file. A notebook shows each cell's source and its stream, result and error outputs; image and other binary outputs become a one-line placeholder naming the MIME type. A PDF runs poppler's `pdfinfo` and `pdftotext` with a 60 s timeout and renders each page under a page marker; without poppler on `PATH` the call refuses and names `run_script` with pypdf. An archive lists its members with size and time, and `member` inflates one UTF-8 text member in memory, up to 4 MiB; nothing is extracted to disk, and encrypted or binary members are refused.
+
+A bundled `docs/*.md` file read with no `offset`, `limit` or `tail` returns an 80-line head plus an index of its sections with start and end lines, and no `next` continuation. Read one section with `offset` and `limit`, or pass `offset=1` without `limit` for an explicit full read within the per-call caps. `clio_docs` hits carry the ready `read` arguments.
 
 Use grep to locate a region, then read that span. Use tail for logs.
 
@@ -208,7 +268,7 @@ Writes complete UTF-8 content, creating parent directories and replacing an exis
 | `path` | Required target path. |
 | `content` | Required complete file content. |
 
-Returns bytes written. If prior content ended in newline and new content does not, the result notes the dropped newline. Publication, symlink, mode, mutation-queue, and external-writer semantics match [edit](#edit-exact-text-replacements-in-one-file). The previous file is read only up to 1 MiB plus one byte; a diff is included only if both versions are at most 1 MiB, otherwise the skip is reported. Result includes before/after file identity.
+Returns bytes written. If prior content ended in newline and new content does not, the result notes the dropped newline. When an existing file of at least 20 lines keeps at least two thirds of its lines, the result adds a note that names the unchanged count and steers the next partial change to `edit`; the write itself is never refused, because a deliberate full rewrite stays legitimate. Publication, symlink, mode, mutation-queue, and external-writer semantics match [edit](#edit-exact-text-replacements-in-one-file). The previous file is read only up to 1 MiB plus one byte; a diff is included only if both versions are at most 1 MiB, otherwise the skip is reported. Result includes before/after file identity.
 
 Use write for a new or fully regenerated file; use edit for a surgical change.
 
@@ -229,22 +289,22 @@ Runs a fresh `/bin/bash` per call and returns stdout/stderr. Login environment i
 
 Filesystem targets resolving outside the workspace escalate to `system_modify` and require one-shot approval in `default`; `yolo` admits them unless a damage-control rule asks or blocks. Inside-workspace writes remain `execute`. Detection covers redirects, path operands to `tee`/`mkdir`/`touch`, `cp`/`mv`/`ln`, in-place `sed`, outside `cd`/`pushd`, runtime-expanded targets, and link-preserving/creating copies. Wrappers such as `nice`, `timeout`, `xargs`, or `find -exec` do not bypass it. Here-doc bodies are inspected for `cd`; child shells do not inherit `CDPATH`.
 
-| Policy | Model context |
-| --- | --- |
-| `bounded` | Tail-biased excerpt under the 16 KiB result budget. |
-| `summary` | Deterministic head/tail/error excerpt, repository-secret-redacted with hash/algorithm provenance. |
-| `metadata-only` | Outcome/termination facts; output stays out of model context. |
-| `full` | Complete output only when it fits; otherwise typed downgrade to bounded with retrieval path. |
+| Policy | What the model receives | Limits |
+| --- | --- | --- |
+| `bounded` (default) | A result header (outcome facts, captured and shown bytes, truncation, retrieval path) followed by the output. When the output does not fit, the head and the tail are kept around an `[… omitted …]` marker. | 16 KiB for the whole projection, header included. The bytes left after the header and marker are split evenly between head and tail, and each cut moves to a whitespace boundary when one lies within 16 bytes. |
+| `summary` | A deterministic diagnostic excerpt: the first 4 non-empty lines, error-like lines from the middle (`error`, `exception`, `fail`, `fatal`, `panic`, `abort`, `assert`, `killed`, `signal`, `timeout`, `not ok`, `ERR!`), and the last 6 lines, with each line cut at 768 bytes. Repository-secret-redacted, with the source SHA-256, line count and algorithm as provenance. | 16 KiB. A short output that fits whole is returned without section labels. Under pressure the head, error and tail sections share the budget 25%, 45% and 30%, or 40% and 60% when no error-like line exists. |
+| `metadata-only` | The result header and outcome facts. Stdout and stderr stay out of model context. | 16 KiB cap on the header. |
+| `full` | The complete output and a metadata trailer. | 16 KiB. When the output does not fit, the result downgrades to `bounded` with a tail excerpt, records a `full` to `bounded` downgrade with reason `hard-budget`, and names the retrieval path. |
 
-Operator display is independently folded and tail-biased. If display/context omits captured bytes, terminal output is retained in a per-session scratch artifact; live updates follow the selected policy but create no artifacts. Results record requested/applied context modes, captured/display/context bytes, truncation/downgrade, retrieval path, and exit/signal/timeout/abort/cap facts. Scratch retrieval may contain raw output; summary is the redacted projection. More than 16 MiB combined stdout/stderr stops with error; use `run_script` for larger output.
+Operator display is independently folded and tail-biased at 16 KiB. If display or context omits captured bytes, terminal output is retained in a per-session scratch artifact; live updates follow the selected policy but create no artifacts. Results record requested/applied context modes, captured/display/context bytes, truncation/downgrade, retrieval path, and exit/signal/timeout/abort/cap facts. Scratch retrieval may contain raw output; summary is the redacted projection. More than 16 MiB combined stdout/stderr stops with error; use `run_script` for larger output.
 
-Commands writing outside the workspace ask in `default` and run in `yolo` unless damage control intervenes; zero-access paths remain denied. Repository test runners are allowed without confirmation in both modes: `npm test`, `npm run test`, `node --test`, `pytest`, `python -m pytest`, `python -m unittest` (python/python3/python3.N), `cargo test`, `go test`, `ctest`, `make test`, `make check`, `ninja test`, `meson test`, `mvn test`, `gradle test`, `./gradlew test`. Arguments must be bare words to qualify as recognized. A few inspection commands also run without asking: `pwd`, `ls`, `git status`, `git diff` (with `--cached`, `--stat` or `--name-only`), `git log --oneline`, and `git diff --check`. An `&&` chain is admitted in `default` only if each command qualifies. Repository build, lint, typecheck and CI scripts (`npm run lint`, `npm run build`, `npm run typecheck`, `npm run ci`) are unrecognized by default: they ask in `default`, where a headless run denies them, and run in `yolo`. A project safety policy entry can recognize one. Its `requireConfirmation` setting asks in `default` and is skipped in `yolo`. Damage-control asks and blocks remain authoritative.
+Commands writing outside the workspace ask in `default` and run in `yolo` unless damage control intervenes; zero-access paths remain denied. Repository test runners are allowed without confirmation in both modes: `npm test`, `npm run test` and `npm run test:<name>` (also `pnpm`, `yarn` and `bun`), `node --test`, `pytest`, `python -m pytest`, `python -m unittest` (python/python3/python3.N), `uv run --no-sync pytest` and `uv run --no-sync python -m pytest`, `cargo test`, `go test`, `ctest`, `make test`, `make check`, `ninja test`, `meson test`, `mvn test`, `gradle test`, `./gradlew test`. Arguments must be bare words to qualify as recognized. The Python runners also accept a leading `PYTHONPATH=<relative paths>`, such as `PYTHONPATH=src python3 -m pytest`; an absolute or `..` entry leaves the command unrecognized ([Recognized commands](../architecture/safety-model.md#recognized-commands)). Read-only inspection on workspace paths also runs without asking (`cat`, `head`, `tail`, `wc`, `ls`, `grep`, `rg`, `find`, `sed -n`, `git status`, `git diff`, `git log`, `git show` and similar), joined by `&&`, `||`, `;` or `|` and redirected only to `/dev/null` or `2>&1`. The statement the model receives is the `safety.default` fragment. An `&&` chain is admitted in `default` only if each command qualifies. Repository build, lint, typecheck and CI scripts (`npm run lint`, `npm run build`, `npm run typecheck`, `npm run ci`) are unrecognized by default: they ask in `default`, where a headless run denies them, and run in `yolo`. A project safety policy entry can recognize one. Its `requireConfirmation` setting asks in `default` and is skipped in `yolo`. Damage-control asks and blocks remain authoritative.
 
-A `git push` other than `--dry-run` is an outward action: it asks in `default` and runs in `yolo` unless a damage-control rule blocks it. A delete is judged by where it lands: inside the workspace it is an ordinary command, while the workspace root, a path outside the workspace, the workspace `.git`, or a path only named at run time is blocked at both levels, with `/tmp` and the system temp directory exempt. See the [safety model](../architecture/safety-model.md#delete-targets).
+A `git push` other than `--dry-run` is an outward action: it asks in `default` and runs in `yolo` unless a damage-control rule blocks it. A delete is judged by where it lands: inside the workspace it is an ordinary command, while the workspace root, a path outside the workspace, the workspace `.git`, or a path only named at run time is blocked at both levels, with `/tmp` and the system temp directory exempt. See the [safety model](../architecture/safety-model.md).
 
 Shell commands inside `$(...)` or backticks are scanned for damage-control rules, including substitutions inside double quotes. An escaped delimiter in the outer shell word or a single-quoted substitution remains literal text. Escaped backticks inside a backtick script can delimit a nested substitution. A matching damage-control rule still asks in `yolo`.
 
-Prefer dedicated read/search tools for envelope continuation and ignore rules, and `verify` for declared checks.
+Prefer dedicated read/search tools for envelope continuation and ignore rules, and `verify` for declared checks. The first successful bash call per session whose command starts with `cat`, `head`, `tail`, `ls`, `grep`, `rg` or `find` appends one note pointing at the structured observe tools.
 
 ```text
 bash(command="npm run build", timeout_ms=600000, output_policy="summary")
@@ -269,7 +329,7 @@ Logs stream to `.clio-coder/runs/<runId>/stdout.log` and `stderr.log`; disk use 
 
 Outcomes: `succeeded`, `failed`, `timed-out`, `aborted`, `spawn-failed`, `cleanup-incomplete`, `pipe-drain-incomplete`. Failure returns retained logs and observed partial outputs. `exitCode` is effective status; `leaderExit` records the process code/signal. Cleanup/drain failure changes a leader zero to effective 1. Cancellation after leader exit can retain exit 0 with `aborted=true`; inspect outcome and flags. Neither zero exit nor output existence proves scientific validity; verify separately.
 
-On POSIX, the original process group receives TERM, 3s grace, then KILL; cleanup waits at most 1s for disappearance and pipe drain is independently capped at 1s. Escaped processes are not contained and outputs may still change. Windows cleans the direct child only. Retention keeps 100 newest completed records and removes manifest-less orphans after 24h. See [run record placement](../architecture/artifact-placement.md#script-run-records-and-retention).
+On POSIX, the original process group receives TERM, 3s grace, then KILL; cleanup waits at most 1s for disappearance and pipe drain is independently capped at 1s. Escaped processes are not contained and outputs may still change. Windows cleans the direct child only. Retention keeps 100 newest completed records and removes manifest-less orphans after 24h. See [artifact placement](../architecture/artifact-placement.md) for run records and retention.
 
 ```text
 run_script(interpreter="python3", script="scripts/analyze.py", args=["inputs.csv"], outputs=["out/stats.json"])
@@ -406,14 +466,14 @@ Runs one task or a batch on configured fleet agents. Source: [`src/tools/dispatc
 | `task` / `tasks` | Supply exactly one. `task` is one assignment; `tasks` is an array of strings or task objects. A task object may set `context`, `briefing`, `agent`, `target`, `model`, `node`, `intent`, `gate`, `budget`, `worktree`, or `result_summary_max_bytes`; each overrides the batch default. |
 | `mode` | `parallel` (default), `sequential`, `pipeline` (each task receives prior output), `compete` (candidates run in scratch worktrees for a judge), or `council` (members answer the same task). A singular ordinary task uses the sequential path. |
 | `roster` / `members` | Council only; provide exactly one. `roster` names a configured `fleet.rosters` entry; `members` supplies 2–5 `{label,target,model?,thinking?}` entries. |
-| `synthesis`, `rounds`, `judge` | Council synthesis is `none` (default), `judge`, or `vote`; rounds are 1–3 (default 1). `judge` may set `agent`, `model`, `target`, and `node`; it is also used by `compete`. |
+| `synthesis`, `rounds`, `judge` | Council synthesis is `none` (default), `judge`, or `vote`; rounds are 1–3 (default 1). `judge` may set `agent`, `model`, `target`, and `node`; it is also used by `compete`, where the judge agent defaults to `verifier`. A council's synthesis judge runs the call's own agent unless `judge.agent` names another recipe. |
 | `candidates`, `apply_winner` | Compete only; candidates 2–4 (default 2). `judge` is a read-only ranker; `apply_winner` merges `{branch,cwd?}` from a preserved winner after approval. |
 | `writers`, `worktree`, `apply` | `writers:1` serializes writers while reads run concurrently. `worktree:true` isolates a singular writer; `apply` is `merge` (default) or `preserve` and requires a worktree. |
 | `detach` | Parallel fan-out only; returns durable `batch_id` and `assignmentIds` while workers continue. Use `monitor`/`steer`, then `collect` before final synthesis. |
-| `review` | One task only; optional bool or `{reviewer?,max_cycles?,node?,model?,target?}`; read-only pass/fail/revise review, cycles default 2 (max 4). |
+| `review` | One task only; optional bool or `{reviewer?,max_cycles?,node?,model?,target?}`; read-only pass/fail/revise review by `review.reviewer`, which defaults to `verifier` and never to the builder's agent, cycles default 2 (max 4). |
 | `agent`, `persona`, `tool_profile`, `thinking_level` | Batch defaults. Agent defaults to `coder` (`researcher` for council); `auto` selects by task shape. Persona max 8000 chars; profiles are `minimal-local`, `science-local`, `full-agent`; thinking is `off|minimal|low|medium|high|xhigh|max`. |
 | `context` | Parent history: `isolated` (default), `fork` (full native transcript), or `splice` (selected text). Fork/splice `max_tokens` 256–262144; splice takes 1–64 `paths` or `refs`, each 1–4096 chars (`tool:<id>` or `message:<index>`). Per-task override supported. |
-| `target`, `model`, `node`, `cwd` | Top-level route and working-directory defaults. |
+| `target`, `model`, `node`, `cwd` | Top-level route and working-directory defaults. `target` and `model` pin the route for this call, and a task object may override them. This is how a one-off request for a named target or model runs: the coordinator pins it here and never edits routing settings. |
 | `routing` | Hard bounds: positive `maxCostUsd`, positive `deadlineMs`, `requiredCapabilities`. Configured adaptive routing adds `posture` (`manual`, `quality`, `balanced`, `latency`, `economy`), `minimumQuality` (0–1), `locality` (`local-only`, `prefer-local`, `any`), and `failover` (`none`, `approved`). Exact pins require manual posture and do not fail over; model-authored candidate lists are rejected. |
 | `timeout_ms` | Abort the whole dispatch after this duration; remaining sequential tasks are skipped. |
 | `briefing` | Optional parent context, not a task or worker instruction; trimmed, max 12,000 UTF-8 bytes, and recorded as byte/hash provenance. A task-level briefing overrides the batch value. |
@@ -424,6 +484,14 @@ Runs one task or a batch on configured fleet agents. Source: [`src/tools/dispatc
 `tasks` accepts a JSON-string array, single object, or bare string. The result is batch-shaped even for one task: `details` carries `assignmentIds`, counts, and `runs[]`; each run distinguishes `assignmentId` from terminal `runId`, and includes verification and receipt-integrity status. There is no `runIds` alias. Any nonzero terminal attempt makes the call fail with the same summary.
 
 Receipt integrity, worker evidence, orchestrator verification, parent briefing, and rendered project context are separate facts. A zero exit alone is not a deliverable: native and ACP workers need nonempty final output. Treat worker prose as advisory until you inspect its receipt or verify the stated result. For detached batches, `wait` observes; `collect` closes the batch and resolves each assignment to its terminal attempt. See [Fleet dispatch](fleet-dispatch.md) for receipt and verification workflows.
+
+### Compact schema in the main session
+
+The main session attaches a compact schema (`coordinatorDispatchParameters` in [dispatch-schema.ts](../../src/tools/dispatch-schema.ts)) instead of the canonical one, so the permanent surface stays small. Its fields are `node`, `target`, `model`, `list`, `agent`, `task`, `tasks` (strings, or objects with `node`, `agent`, `task`, `briefing`, `intent`), `intent` (`read_roots`, `write_roots`, `expected_outputs`, `verification`), `briefing`, `mode`, `worktree` (only `true`) and `detach`. `mode` is a plain string there so the compete and council modes that `describe` teaches are not refused by the compact schema. `gateway(op="describe", capability="dispatch")` returns the canonical schema, and canonical validation checks every call whichever schema the model saw.
+
+The canonical schema is composed once per session from the fleet. The council block (`roster`, `members`, `synthesis`, `rounds`) is advertised only when `fleet.rosters` names at least one roster. The compete block (`candidates`, `judge`, `apply_winner`) is always advertised. The adaptive routing fields (`routing.posture`, `minimumQuality`, `locality`, `failover`) are advertised only when `fleet.adaptiveRouting` configures roles, postures or agent roles. Admission reads every field regardless, so a call that sends a field the schema did not advertise is still honored.
+
+A one-off target or model belongs on the call. Persistent fleet routing is operator-owned: a `configure_clio` apply that changes `fleet.default`, `fleet.profiles` or `fleet.agentProfiles` asks the operator at every autonomy level. See [configure_clio](#configureclio-change-routing-and-fleet-settings-with-an-approved-preview).
 
 ```text
 dispatch(list=true)
@@ -456,13 +524,26 @@ When a repository declares its checks outside `package.json`, `verify` derives t
 | ID | Derived from | Runs |
 | --- | --- | --- |
 | `python-pytest` | `[tool.pytest.ini_options]`, `pytest.ini`, `setup.cfg [tool:pytest]`, a `conftest.py`, or pytest in a dependency list | `python -m pytest` |
-| `python-unittest` | `tests/` or `test/` holding `test*.py` modules when pytest is not configured | `python -m unittest discover -s tests` |
+| `python-unittest` | `tests/` or `test/` holding `test*.py` or `*_test.py` modules when pytest is not configured | `python -m unittest discover -s tests` |
 | `python-tox`, `python-nox`, `python-<entry>` | tox/nox configuration, verification-family `[project.scripts]` entries | the runner or entry point |
 | `cargo-test`, `go-test`, `cmake-test-<preset>` | `Cargo.toml`, `go.mod`, `CMakePresets.json` test presets | `cargo test`, `go test ./...`, `ctest --preset <name>` |
 | `make-<target>`, `just-<recipe>` | Makefile and justfile targets named `test`, `lint`, `check`, `typecheck`, `format`, `build` or `ci` (with suffixes) | `make <target>`, `just <recipe>` |
 | `ci-<script>` | a CI step that runs a repository script directly, such as `run: scripts/gate.sh` or `run: sh scripts/gate.sh` | the step's argv |
 
-A `uv.lock` at the root prefixes every Python runner with `uv run`, because a bare `python` does not see the uv project environment. A package script or catalog entry with the same ID wins, and identical argv is listed once. The listing prints each derived argv. When nothing is declared or derivable, the error names every source it read and directs the agent to run the documented command through `bash`. A check string that names no declared or derived check runs nothing.
+Python entries resolve their interpreter once per derivation, so every Python check in a listing uses the same one. A `uv.lock` at the root prefixes each runner with `uv run --no-sync` when a `.venv` exists, because a bare `python` does not see the uv project environment and a bare `uv run` may provision dependencies. A uv project without `.venv` is refused as needing provisioning: the entry is listed as `needs-provisioning` and names `uv sync` as the operator's command, and `verify` runs nothing for it. Without `uv.lock` the interpreter is `.venv/bin/python` when that exists, then `$VIRTUAL_ENV/bin/python`, then the first executable `python` or `python3` on the worker `PATH`. When none resolves, the entries are `unavailable`. A package script or catalog entry with the same ID wins, and identical argv is listed once. The listing prints each derived argv. When nothing is declared or derivable, the error names every source it read and directs the agent to run the documented command through `bash`. A check string that names no declared or derived check runs nothing.
+
+A check that cannot start is reported as `unavailable`, with `judgement.execution` set to `unavailable` and `validation` to `not-run`. That covers a runner `verify` refuses up front (`needs-provisioning`, no interpreter) and a startup failure such as a missing executable, a sandbox refusal or a missing `pytest`, `tox` or `nox` module. The result tells the agent that rerunning the entry with other arguments or a different cwd cannot help. In a worker run the loop guard enforces that: a second `verify` call for the same check in the run is blocked, and the worker reports the limitation instead of retrying.
+
+### Changed test files
+
+A fleet loop's `check` step without an explicit gate runs, after the registered command, the test files that its workspace-scoped ancestor steps changed, each through the project's own runner. A failure fails the check and feeds the repair loop. See [Fleet dispatch](fleet-dispatch.md) for the loop. `resolveTestFileChecks` in [test-files.ts](../../src/tools/verify/test-files.ts) picks the runner without guessing an installed one.
+
+- A path counts as a test file when it matches `test*.py`, `test_*.<ext>`, `*.test.<ext>`, `*_test.<ext>`, `*.spec.<ext>` or `*_spec.<ext>`, is a JavaScript or TypeScript file under `__tests__/`, or is a Rust file under `tests/`.
+- The runner root is the nearest ancestor directory holding `package.json`, `pyproject.toml`, `go.mod` or `Cargo.toml`, stopping at the workspace root.
+- Declared checks are tried first. A package script or catalog `command` check whose argv is `node --test`, `tsx --test`, `jest` or `vitest` runs JavaScript and TypeScript test files (`jest` gets `--runTestsByPath`, and `vitest` gets `--run` unless the argv already has `run`). One whose argv names `pytest` or `unittest` runs Python test files. A package script that wraps `unittest` is not used for a single file.
+- Otherwise the derived checks apply: `python-pytest` or `python-unittest` for Python, `go-test` for `_test.go` files (run on the file's package directory), and `cargo-test` for Rust files.
+- Any other runner yields the note `Changed test <path>: no recognizable project runner; retained the declared check only for this file.` and only the registered command runs.
+- Identical runner and argv pairs run once. Each changed-test run is bounded by the time left in the registered command's timeout, and a nonzero exit fails the check.
 
 ### Project verifier catalog
 
@@ -514,7 +595,7 @@ Version 1 remains readable and means `kind: command`; version 2 adds `numeric-co
 | `tags` | Up to 16 unique tags matching `[a-z0-9][a-z0-9._-]*`, at most 32 bytes each. |
 | File | At most 262144 bytes and 128 checks. |
 
-Catalog and package IDs share one namespace; a collision or invalid catalog prevents listing and execution. Checks run declared argv without model-supplied args, cwd, timeout, or environment overrides, through safe-exec's environment allowlist and 600000-byte output cap. Judged output and reference/baseline files are capped at 32 MiB. Nonzero exit, timeout, abort, or output cap prevents judgement. Results include exact argv/cwd/exit/duration and `aborted`/`timedOut`/`outputCapped` flags; judged checks also report numeric deviations or measured time, budget, and ratio. `judgement.execution` is `succeeded`, `failed`, `timed-out`, `aborted`, or `output-capped`; validation is `passed`, `failed`, `exit-code`, or `not-run`. `scientificValidity` is always `not established by this check`.
+Catalog and package IDs share one namespace; a collision or invalid catalog prevents listing and execution. Checks run declared argv without model-supplied args, cwd, timeout, or environment overrides, through safe-exec's environment allowlist and 600000-byte output cap. Judged output and reference/baseline files are capped at 32 MiB. Nonzero exit, timeout, abort, or output cap prevents judgement. Results include exact argv/cwd/exit/duration and `aborted`/`timedOut`/`outputCapped` flags; judged checks also report numeric deviations or measured time, budget, and ratio. `judgement.execution` is `succeeded`, `failed`, `unavailable`, `timed-out`, `aborted`, or `output-capped`; validation is `passed`, `failed`, `exit-code`, or `not-run`. `scientificValidity` is always `not established by this check`.
 
 Numeric reports identify the reference and extracted payload by SHA-256 and byte count. Non-finite report values serialize as `"NaN"`, `"Infinity"`, or `"-Infinity"`. Version 2 performance baselines record wall time, check, timestamp, and host (`hostname`, `platform`, `arch`, `cpuModel`, `cpuCount`, `totalMemoryBytes`, `nodeVersion`); version 1 still loads. Host differences are reported but do not change the verdict.
 
@@ -552,34 +633,48 @@ verify(check="rust-workspace")
 verify(check="frontend", path="site/index.html", browser="off")
 ```
 
-## git: read-only inspection of git repository state
+## git: typed inspection, staging and commits
 
-Executes read-only inspection commands against the local git repository. Source: [safe-exec.ts](../../src/tools/safe-exec.ts). Read class; parallel.
+Runs git through a fixed argv, never a shell, and accepts no free-form command string. Sources: [safe-exec.ts](../../src/tools/safe-exec.ts), [git-inspect.ts](../../src/tools/git-inspect.ts), [git-exec.ts](../../src/tools/git-exec.ts). Gateway capability. Read class and sequential: the inspection ops are reads, and `add` and `commit` are judged as the equivalent bash commands.
 
-Arguments:
+| Argument | Contract |
+| --- | --- |
+| `op` | One of `status`, `diff`, `log`, `show`, `add`, `commit`. `mode` and `action` are aliases; when more than one is given they must name the same op. |
+| `path` | `status`, `diff`, `log` and `show`: limit to one file or directory. |
+| `rev` | `show`: one revision, default `HEAD`. `log`: a revision or an `a..b` or `a...b` range. `diff`: one revision against the worktree, or a range. At most 200 characters, built from ref-name characters, `~`, `^` and `@{n}`; a leading `-`, whitespace, `:` and globs are refused. `show` refuses a range. |
+| `cached` | `diff`: staged changes. |
+| `stat` | `diff` and `show`: summary only. `log`: changed files per commit, with the first-parent diff for merges. |
+| `name_only` | `diff` and `show`: file names only. |
+| `limit` | `log`: commits to show, default 20, maximum 200. |
+| `paths` | `add`: a non-empty array of literal paths to stage. |
+| `message` | `commit`: the message, non-empty, without NUL, at most 16,384 characters. |
+| `cwd`, `timeout_ms`, `max_output_bytes` | Every op. Defaults 120000 ms and 600000 bytes. |
 
-- `op` (required). The inspection operation to run: `status`, `diff`, or `log`.
-- `path` (optional). Limit diff/log to a specific file or directory path.
-- `cached` (optional boolean). For `op="diff"`: staged changes (`--cached`).
-- `stat` (optional boolean). For `op="diff"`: summary only (`--stat`).
-- `name_only` (optional boolean). For `op="diff"`: file names only.
-- `mode`, `action` (optional). Aliases for `op`; selection prefers `op`, then `mode`, then `action`.
-- `stat` (optional boolean). Also applies to `op="log"`, where it adds changed files per commit.
-- `limit` (optional number). For `op="log"`: commits to show (default 20, max 200).
-- `cwd` (optional). Working directory.
-- `timeout_ms` (optional). Default 120000.
-- `max_output_bytes` (optional). Default 600000.
+A field an op does not take is refused before anything runs. The error names the fields the op accepts and an example call, so a call such as `log` with a nested `args` array cannot silently run the default log. A named revision follows `--end-of-options`, so it can never be read as an option.
 
-Commands map directly to git subprocess execution:
-- `op="status"` runs `git status --short --branch`.
-- `op="diff"` runs `git diff` with optional `--cached`, `--stat`, or `--name-only` flags.
-- `op="log"` runs `git log --oneline -n <limit>` listing recent commit shas and subjects.
+The argv each op runs:
+
+- `status`: `git status --short --branch`, then `-- <path>`.
+- `diff`: `git diff --no-ext-diff --no-textconv`, then `--cached`, `--stat`, `--name-only` as given, then `--end-of-options <rev>` and `-- <path>`.
+- `log`: `git log --no-ext-diff --no-textconv --oneline -n <limit>`, then `--stat --diff-merges=first-parent` with `stat`, then `--end-of-options <rev>` and `-- <path>`.
+- `show`: `git show --no-ext-diff --no-textconv`, then `--stat` or `--name-only` as given (`--stat --patch` when neither is), then `--diff-merges=first-parent` and `--end-of-options <rev or HEAD>`.
+- `add`: `git add -- <paths>` with literal pathspecs.
+- `commit`: `git commit -m <message>`.
+
+Every op runs with no system git config, no terminal prompt, no editor, no pager and no fsmonitor. The inspection ops also skip external diff and text-conversion helpers and optional index writes. A mutation runs repository hooks from the hooks directory resolved at call time and pinned for that command. A commit leaves signing off unless the operator's own configuration requires signed commits, and a missing author identity falls back to a Clio commit identity.
+
+`add` and `commit` use the Git classifier's task-mutation class. Whether they ask is decided by admission, not by this tool: a worker whose permit grants `git: worktree` and that owns an attested task worktree runs them without asking, and every other caller is subject to the ordinary approval flow. See [the safety model](../architecture/safety-model.md) and [Fleet dispatch](fleet-dispatch.md).
+
+The loop guard identifies a git call by the argv it will run and the cwd, so two spellings of one inspection, such as an op alias or `limit: 20` against no limit, count as the same repeat. A refused call and a mutation keep their raw arguments as identity. After a block the guard names the recovery: `args={op:"show",rev:"<commit>"}` for one commit, or `log` or `diff` with `rev:"<a>..<b>"` for a range.
 
 ```text
 gateway(op="call", capability="git", args={op: "status"})
 gateway(op="call", capability="git", args={op: "diff", stat: true})
-gateway(op="call", capability="git", args={op: "diff", path: "src/tools/safe-exec.ts"})
-gateway(op="call", capability="git", args={op: "log", limit: 10})
+gateway(op="call", capability="git", args={op: "diff", rev: "HEAD~1..HEAD", path: "src/tools/git-inspect.ts"})
+gateway(op="call", capability="git", args={op: "log", rev: "main", limit: 5, stat: true})
+gateway(op="call", capability="git", args={op: "show", rev: "HEAD~1"})
+gateway(op="call", capability="git", args={op: "add", paths: ["src/index.ts"]})
+gateway(op="call", capability="git", args={op: "commit", message: "fix: correct retry handling"})
 ```
 
 ## context: workspace, skill activation, and recall
@@ -596,7 +691,7 @@ ceilings, and names the exact configure and `/settings` destinations. `query`
 filters by section alias, settings path, or terms; `limit` is 1–12 (default 12),
 and `offset` follows `nextOffset`. Credentials, endpoint URLs, arbitrary strings,
 and structured command configuration are omitted. Configured ceilings are not
-remaining budgets. The tool never writes settings; it guides the operator to
+remaining budgets, and `safety.limits.sessionCostUsd: 0` is reported as no session ceiling. The tool never writes settings; it guides the operator to
 changes. A worker without an authoritative snapshot receives an unavailable
 error rather than guessed defaults.
 
@@ -609,9 +704,11 @@ context(scope="recall", path="src/solver.ts")
 
 ## clio_docs: retrieve bundled documentation through the gateway
 
-Offline retrieval over bundled Markdown. Sources: [clio-context-tools.ts](../../src/tools/gateway/clio-context-tools.ts), [docs-engine.ts](../../src/tools/context/docs-engine.ts). Arguments: `query` (omit to list corpus), `limit` (default 5, max 12).
+Offline retrieval over bundled Markdown. Sources: [clio-context-tools.ts](../../src/tools/gateway/clio-context-tools.ts), [docs-engine.ts](../../src/tools/context/docs-engine.ts). Gateway capability, read class, parallel. Arguments: `query` (omit to list the corpus) and `limit` (default 5, maximum 12).
 
-Indexes recursively bundled `docs/`, `README.md`, `CHANGELOG.md`, and `CLIO-CODER.md` as heading sections with vocabulary expansion and ranked body matches. Results include corpus, terms, and ranked records with `file`, `heading`, `breadcrumb`, `anchor`, `lines`, `snippet`, `score`, `coverage`, `matchedTerms`, and `signals`, plus an omitted count. Follow the cited file and lines for full text. An omitted query lists files and section counts. Empty results remain JSON with a follow-up hint; output caps at 16 KiB and uses a parseable offload stub if oversize. The old `docs_search` file filter is gone.
+The corpus is every Markdown file under `docs/` except `docs/html/`, plus `README.md`, `CHANGELOG.md` and `CLIO-CODER.md` from the package root when present. It is indexed as heading sections with vocabulary expansion and ranked body matches. A search returns `version`, `query`, `guidance`, `corpus` (document and section counts, the file list, the exclusion), `terms` (query, expanded and phrase terms), `resultCount`, `results`, `omitted` and a `followUp` instruction. Each result has `rank`, `file`, `heading`, `breadcrumb`, `anchor`, `lines` (section start and end), a `read` object with the tool name and ready arguments for exactly that section, `snippetLines`, `snippet`, `score`, `coverage`, `matchedTerms` and `signals`. Follow a relevant hit's `read` arguments instead of reading a whole guide. `guidance` carries the shipped support procedure, plus the memory procedure when the query matches memory vocabulary.
+
+An omitted query lists files and section counts. An empty result remains JSON with a follow-up hint and a `next` continuation. Output caps at 16 KiB and uses a parseable offload stub if oversize. There is no per-file filter; narrow with more specific query terms.
 
 ```text
 gateway(op="call", capability="clio_docs", args={query: "dispatch receipts evidence", limit: 8})
@@ -660,7 +757,7 @@ Modes:
 - `outline`: returns declarations in one indexed file, sorted by line.
 - `deps`: returns one indexed file's internal and external imports.
 - `dependents`: returns indexed files that import the target file.
-- `wiki`: returns Markdown wiki pages plus absent/fresh/stale/unknown wiki state and checkpoint/layout warnings.
+- `wiki`: returns Markdown wiki pages plus absent/fresh/stale/unknown wiki state and checkpoint/layout warnings. With a `query`, it resolves a page id or title (exact match first, then substring) to one page's id, title, summary and readable path under `.clio-coder/wiki/`; an ambiguous or unmatched query errors and lists the pages. Wiki generation is operator-only (`clio-coder context wiki --update`).
 - `project`: returns orientation, current Git observations and durable operator-task evidence. If source indexing fails, orientation is unavailable and the codemap reason is returned alongside any readable Git/task observations.
 
 For `outline`, `deps`, and `dependents` the query must resolve to exactly one indexed file: an exact path or a substring matching one path. An ambiguous substring errors with the match count. Output is always parseable JSON (empty results carry empty arrays, an `omitted` count, and `next`); an omitted remainder suggests `next: limit=<2x>`. 16KB cap with the JSON stub on overflow.
@@ -690,7 +787,7 @@ Arguments:
 - `body` (optional). Request body string.
 - `timeout_ms` (optional). Request timeout in milliseconds (default 30000).
 - `max_bytes` (optional). Max bytes returned (default 600000, capped at 5MB).
-- `format` (optional). Content parsing format: `auto` (default, converts HTML to Markdown), `markdown`, or `raw`.
+- `format` (optional). Content parsing format: `auto` (default, converts HTML to Markdown), `markdown`, or `raw`. Any other value errors.
 
 Specialized behaviors:
 - **ArXiv Papers**: If the URL points to an arXiv paper or abstract page (such as `arxiv.org/abs/...` or `alphaxiv.org/...`), it automatically retrieves paper metadata, abstract, and any AlphaXiv markdown overview.
@@ -698,6 +795,9 @@ Specialized behaviors:
 - **Git Repo Tree Summary**: If the URL points to a GitHub or GitLab directory tree (such as `github.com/.../tree/...`), it fetches repository contents, summarizes the directory tree, and preloads the first few markdown files (e.g. README/SKILL/INSTALL).
 - **HTML Cleaning**: For regular websites, boilerplate content (scripts, styles, svg, iframe, forms) is stripped, and the main article/content area is extracted and parsed into Markdown.
 - **Binary formats**: Non-text, binary, or unsupported content types are rejected.
+- **Errors**: A response outside 2xx is an error that carries a bounded preview of the body under an untrusted-content banner.
+
+The arXiv and repository-tree summaries apply only to a bodiless `GET` with no custom headers and a `format` other than `raw`. A redirect is followed hop by hop, and every hop, helper URLs included, is judged against the session's information-flow restrictions (see [information flow](information-flow.md)). A URL that resolves to a private or non-public address is refused unless the operator started the process with `CLIO_CODER_WEB_FETCH_ALLOW_PRIVATE_NETWORK=1`; the model cannot set that. Both tools are omitted from the registry when `CLIO_CODER_DISABLE_RETRIEVE_TOOLS=1`, which removes the tools and is not a network sandbox for `bash`.
 
 ```text
 gateway(op="call", capability="web_fetch", args={url: "https://arxiv.org/abs/2303.17564"})
@@ -720,7 +820,7 @@ Read-only view of known synchronous and detached runs from the dispatch ledger, 
 | `run_id` | Optional dispatch run ID. |
 | `mode` | `list`, `status`, `peek`, `receipt`, `wait`, `collect`, or `tools`; defaults to status with run_id, list otherwise. |
 | `batch_id`, `run_ids` | `collect`: provide a detached batch ID or nonempty run list; one `run_ids` entry also serves as `run_id` for single-run modes. |
-| `timeout_ms` | `wait` only; default 60000 ms, maximum 600000 ms. Ignored by nonblocking `collect`. |
+| `timeout_ms` | `wait` default 60000 ms, `collect` default 30000 ms, maximum 600000 ms for both. Ignored by other modes. |
 
 | Mode | Result |
 | --- | --- |
@@ -729,12 +829,12 @@ Read-only view of known synchronous and detached runs from the dispatch ledger, 
 | `peek` | Recent process-local event tail (100 events/run, 64 runs, 8 KiB; oldest trimmed). Other-process/prior-process runs have no tail. |
 | `receipt` | Receipt JSON, capped at 14 KiB with path to full receipt. |
 | `wait` | Bounded wait for one run; timeout observes only and never cancels. |
-| `collect` | Non-blocking barrier snapshot for a detached `batch_id` or explicit `run_ids` this session dispatched; returns full results when terminal. |
+| `collect` | Barrier over a detached `batch_id` or explicit `run_ids` this session dispatched. It polls once a second while any run is in flight and returns full results once every run is terminal. At the timeout it returns a pending snapshot with `timedOut: true` and leaves the runs running. |
 | `tools` | Executed tool names/outcomes from event buffer plus integrity-verified receipt totals; command arguments are not recorded. |
 
-The ledger and batch store are machine-wide, so single-run modes refuse runs another project dispatched, and `collect` and steer refuse runs another session dispatched.
+`wait` and `collect` stop early, with `permissionPending: true` and the pending requests listed, when a worker in scope is waiting for the main agent's permission decision; answer with [steer](#steer-guide-cancel-or-approve-a-running-worker) `approve` or `deny`. The ledger and batch store are machine-wide, so single-run modes refuse runs another project dispatched, and `collect` and steer refuse runs another session dispatched.
 
-Use monitor to observe detached workers; pair with steer when a native worker needs correction.
+Use monitor to observe detached workers; pair with steer when a native worker needs correction. Collect before final synthesis.
 
 ```text
 monitor(mode="list")
@@ -742,25 +842,29 @@ monitor(run_id="run-01H...", mode="peek")
 monitor(run_id="run-01H...", mode="receipt")
 ```
 
-## steer: guide or cancel a running worker
+## steer: guide, cancel, or approve a running worker
 
 Controls a running dispatched worker whose id is already available. Parent-model mid-run control requires detached dispatch because dispatch and steer are sequential; the interactive operator/TUI can steer an active synchronous HTTP or SDK worker through the dispatch contract. Source: [steer.ts](../../src/tools/steer.ts). Dispatch class; sequential.
 
 Arguments:
 
 - `run_id` (required). A run id from dispatch output or `monitor(mode="list")`.
-- `action` (required). `guide` or `cancel`.
+- `action` (required). `guide`, `cancel`, `approve` or `deny`.
 - `message` (required for `guide`). The steering text.
+- `request_id` (required for `approve` and `deny`). The worker permission request id from the dispatch or monitor output.
 
 `action="guide"` injects the message through the dispatch contract's stdin steer channel; an HTTP or SDK worker sees it as a user message at its next turn boundary. The worker acknowledges only after its runtime accepts the guidance. Single-shot subprocess runtimes (Claude CLI and Antigravity) and ACP delegation do not expose live input and return the contract's structured unsupported-steering error.
 
 `action="cancel"` aborts a non-terminal run; the run finalizes with `outcome=canceled` and its receipt records the cancellation. A run that already finished (completed, failed, interrupted, stale, or dead) errors with its state, since there is nothing to cancel. `run_id` may also be a detached assignment id: cancelling a running assignment aborts its current attempt and starts no further attempt. A run or assignment that another Clio process is running is refused with that process's pid, so steer or cancel it from that session.
+
+`action="approve"` and `action="deny"` answer one worker permission request that was raised to the main agent. The request id is looked up in the dispatch domain's grant broker, never trusted from the arguments, and the request must belong to this session and the named run. A deny always settles the request, and the worker continues without that call. An approve is admitted as the main agent's own call. At `yolo`, it is granted when the worker's effect is inside the worker's permit, inside the operator's delegation ceiling for the turn, and admitted at `yolo`; the worker still re-admits the call under its unchanged permit. Below `yolo`, an attended session forwards the approval to the operator, who decides with the main agent's request as provenance, and a headless run denies it at once. A request marked operator authority is never main-grantable. One approval runs that one call once; an identical later call asks again.
 
 Prefer guide over cancel-and-redispatch when the worker is on track but needs a scope correction; the worker keeps its context.
 
 ```text
 steer(run_id="run-01H...", action="guide", message="Skip the docs sweep; limit the fix to tests/contracts and report the diff.")
 steer(run_id="run-01H...", action="cancel")
+steer(run_id="run-01H...", action="approve", request_id="req-...")
 ```
 
 ## tasks: the session task board
@@ -778,7 +882,7 @@ Tracks the agent's own work plan. Source: [tasks.ts](../../src/tools/tasks.ts); 
 
 Plan replaces the prior board and assigns pending IDs `t1..tN`. Start activates one task and returns any other active task to pending. Done records the agent's completion claim on the session ledger; its note does not certify validation. Verification receipts record observed checks separately. Block requires a reason and suppresses the open-task nudge; drop cancels without reusing the ID. Pick links an operator inbox task; a self-authored plan is not operator authorization. Every action returns the whole board.
 
-Mutations persist full-snapshot `taskLedger` entries, replayable after resume/fork and available to the footer and `/tasks` overlay. At turn end, pending/active tasks trigger one nudge; record the resulting terminal state. Live fleet runs link to the board through `activeRunIds`; this process-live link clears after resume/fork. Claude TODO calls map to the same board.
+The tool coerces weak-model shapes before validation: a numeric id becomes `tN` (`uN` for `pick`), a JSON-string `tasks` array is parsed, and `{title}` objects collapse to their titles. Mutations persist full-snapshot `taskLedger` entries, replayable after resume/fork and available to the footer and `/tasks` overlay. At turn end, pending/active tasks trigger one nudge; record the resulting terminal state. Live fleet runs link to the board through `activeRunIds`; this process-live link clears after resume/fork. Claude TODO calls map to the same board.
 
 ```text
 tasks(action="plan", title="Fix scheduler test", tasks=["reproduce", "fix and verify"])
@@ -793,13 +897,12 @@ dispatch. Source: [ledger.ts](../../src/tools/ledger.ts). Read class; sequential
 is also available through `gateway` to the main agent when dispatch is available,
 without adding a schema or capability-map entry to the startup prompt. The main agent
 selects an owned run with `runId`, or omits it when exactly one board is active.
-Workers read only their assigned board. In 0.6.0, native workers and the main
-agent participate live. Claude SDK, Claude Code, Codex, OpenCode and Pi workers
-receive the starting board read-only; they do not have a live ledger tool.
-When an SDK or CLI run settles, the host posts one bounded final-report preview
-with its outcome and a `fleet view <runId>` reference to the full receipt.
-This uses the same board capacity; a repeated settlement does not duplicate it.
-There is no loopback MCP bridge in 0.6.0.
+Workers read only their assigned board. Native workers and the main
+agent participate live. Workers on non-HTTP runtimes (Claude SDK, CLI peers and
+ACP) have no live ledger tool. When such a run settles, the host posts one
+bounded final-report preview of at most 1000 bytes with its outcome and a
+`fleet view <runId>` reference to the full receipt. It uses the same board
+capacity, and a repeated settlement does not duplicate it.
 
 Arguments:
 
@@ -846,15 +949,15 @@ Arguments:
 - `action` (required). `show`, `open`, `handoff`, `close`, or `list`.
 - `target` (show or close). For `show`, an agent id or run-id prefix. For
   `close`, a Clio-owned pane id, label, agent id, or `all`.
-- `preset` (open). One of `files`, `logs`, or `shell`. Opening a preset whose pane is already open focuses that pane instead of splitting again.
+- `preset` (open). One of `files`, `logs`, or `shell`. Opening a preset whose pane is already open focuses that pane instead of splitting again. Opening `files` while the files pane is hidden shows it and focuses it.
 - `peer` (handoff, required). One of `claude-code`, `codex`, `opencode`, `antigravity`, or `pi`.
 - `brief` (handoff). Task brief, at most 8192 bytes.
 - `cwd` (handoff). Selected workspace path.
 
-`show` focuses a live dispatched run in the watch pane. `open` accepts only the
+`show` takes the workers dock over for a live dispatched run without moving the keyboard. `open` accepts only the
 fixed preset enum. Arbitrary argv is operator-only through `/panes open` and is
-rejected by the model tool. `handoff` opens the named coding CLI interactively in a Clio-owned pane. It produces no managed run and no receipt. `close` can remove only panes Clio owns. `list`
-reports mux health, notification policy, and the current inventory.
+rejected by the model tool. `handoff` opens the named coding CLI interactively in a Clio-owned pane. It produces no managed run and no receipt. `close` can remove only panes Clio owns, and it ends a dock's process whether the dock is visible or hidden. `list`
+reports mux health, notification policy, the state of the files, workers and music docks, and the current inventory. Each dock reads `visible`, `hidden` (parked and still running) or `closed`, and the music dock adds what it is playing (`playing <title>` or `paused`). The model reads dock state there rather than from settings files, and `list` reports it whether or not `integrations.music.agentControl` is on. The tool has no action that hides a dock.
 
 ```text
 panes(action="list")
@@ -893,7 +996,7 @@ Arguments:
 - `reason` (required). `no-runner`, `blocked`, `out-of-scope`, `environment`, or `other`.
 - `paths` (optional). Repository-relative paths left unverified.
 
-Call it once, before the final reply, when files changed and validation could not run. The finish contract accepts a successful `limitation` receipt inside the same window as the mutation scan in place of validation evidence. A rejected call (empty scope, unknown reason) leaves no receipt and does not count, and the assistant's prose never does. See [the finish gate](../architecture/safety-model.md#evidence-and-the-finish-contract).
+A `reason` written as prose is filed under the closest category (`blocked` when it mentions a block, denial, permission, policy, safety or approval, otherwise `other`) and its text joins `scope`, so the call still lands. Call it once, before the final reply, when files changed and validation could not run. The finish contract accepts a successful `limitation` receipt inside the same window as the mutation scan in place of validation evidence. A rejected call (empty scope, unknown reason) leaves no receipt and does not count, and the assistant's prose never does. See [the safety model](../architecture/safety-model.md) for the finish gate.
 
 ```text
 limitation(scope="CUDA kernels changed but no GPU is available here", reason="environment", paths=["src/kernels/solve.cu"])
@@ -935,7 +1038,7 @@ Arguments:
 - `max_rounds` (optional number). Round limit for this interview (default 6, max 24).
 - `exposure` (optional). `local` (default) or `outward`. `outward` marks a gate whose answer publishes or sends something outside the workspace (filing an issue or PR, posting a comment, pushing, releasing). In `default`, an outward gate parks for the operator; `yolo` answers it. See [safety-model.md](../architecture/safety-model.md).
 
-The tool manages a stateful operator interview. The UI presents choices (with an implicit "Other" option for custom text input). Once completed, the final decisions are persisted as standard configurations in the session ledger, allowing the agent to proceed with operators' inputs or defaults.
+After `action="complete"` closes an interview, a later `mode="single_question"` ask in the same turn opens a standalone question instead of returning `already_complete`. A repeated identical round is ignored, and the round limit closes the interview. The tool manages a stateful operator interview. The UI presents choices (with an implicit "Other" option for custom text input). Once completed, the final decisions are persisted as standard configurations in the session ledger, allowing the agent to proceed with operators' inputs or defaults.
 
 What the operator sees is one box above the composer, sized to the round: the question header, the question with bold spans and hanging numbered lists, then every option with its whole description. A round of several questions names them all in a strip at the top. A question longer than the box scrolls with PgUp/PgDn while its options stay on screen. Enter records the focused option; `t` records it and opens a multi-line answer field (Shift+Enter for a newline, Esc back to the options); an option whose label says the operator will type, such as "Provided details" or "Other", opens the field on Enter. Space toggles a multi-select option, Left/Right move between the questions of a round, `a` opens the answers recorded so far, and `?` shows the decision's tier, effect, and reversibility. Each answered round is recorded in the transcript as the question headers and the answers.
 
@@ -978,7 +1081,7 @@ gateway(op="call", capability="artifact", args={kind: "review", content: "# Revi
 | `value` | `preview`: the new value as text. |
 | `proposalId` | `apply`: the id the preview returned. |
 
-`preview` returns the changed values and a `proposalId`. Each changed leaf is one `path: old → new` line, an object value is compared key by key, and the preview shows at most 20 lines of 160 characters with `… N more changed values` after them. The Apply card and the transcript row name the setting and leave out the value text the model composed. One proposal is pending per session, it expires after 10 minutes, and `apply` fails when the saved value changed since the preview. At `default`, `apply` asks the operator to approve the exact preview. At `yolo`, `apply` saves it directly. The tool refuses `safety.autonomy`, credentials and arbitrary paths, because only the operator changes autonomy, through `/settings`, `clio-coder configure` or `--autonomy`.
+`configure_clio` is available only at `default` and `yolo`, and a value is at most 8192 bytes. `preview` returns the changed values and a `proposalId`. Each changed leaf is one `path: old → new` line, an object value is compared key by key, and the preview shows at most 20 lines of 160 characters with `… N more changed values` after them. The Apply card and the transcript row name the setting and leave out the value text the model composed. One proposal is pending per session, it expires after 10 minutes, and `apply` fails when the saved value changed since the preview. At `default`, `apply` asks the operator to approve the exact preview. At `yolo`, `apply` saves it directly, with one exception: persistent fleet routing (`fleet.default`, `fleet.profiles`, `fleet.agentProfiles`) parks on the registry's confirmation rail at every autonomy level, so the operator approves the exact preview even at `yolo`. A one-off run belongs on dispatch's `target` and `model` fields instead. For agent model bindings, preview and apply `fleet.profiles` first, then `fleet.agentProfiles`, each as a complete JSON map. The tool refuses `safety.autonomy`, credentials and arbitrary paths, because only the operator changes autonomy, through `/settings`, `clio-coder configure` or `--autonomy`. Project-scope saves use the operator's `/settings` UI.
 
 A saved `apply` reports when the change takes effect, by the setting's effect timing. Routing paths keep the session's current routing, so exit and start a new Clio session to use them. A live setting is picked up automatically once the settings watcher reads the save. A next-turn setting applies to the next request or dispatch, and running workers keep their settings. A restart-required setting needs a new session. There is no `/reload` command.
 
@@ -986,6 +1089,12 @@ A saved `apply` reports when the change takes effect, by the setting's effect ti
 gateway(op="call", capability="configure_clio", args={action: "preview", path: "chat.thinkingLevel", value: "high"})
 gateway(op="call", capability="configure_clio", args={action: "apply", proposalId: "<id from preview>"})
 ```
+
+## music: control the focus-radio pane
+
+`music(action)` drives the focus-radio player in Clio's own dock pane. Source: [music.ts](../../src/tools/music.ts), [music-surface.ts](../../src/tools/music-surface.ts). Read class; sequential. `action` is required and is one of `on` (play, opening or revealing the pane first), `pause` (silence the stream and keep the pane), `off` (stop and close it), `next` (skip to the next station) or `status` (report what is playing or paused). Showing and hiding the pane stay with the operator. The result is one line, and a refusal or failure comes back as an error naming the reason.
+
+The tool registers only when `integrations.music.agentControl` is on, cliamp resolves and the pane mux is live, which also requires `integrations.music.enabled`. A session where it could only refuse carries no schema for it. No prompt fragment says when to play music; that is the operator's call in project instructions. The operator's own door is the `/music` command. Setup, stations and the player are in [Music](music.md).
 
 ## self_compact: save a handoff note and compact context
 

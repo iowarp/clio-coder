@@ -1,6 +1,6 @@
 # Proactive task memory
 
-The [evidence and memory contract](../architecture/evidence-and-memory.md) explains durable memory records and their provenance.
+The [evidence and memory contract](../architecture/evidence-and-memory.md) explains durable memory records, their review flow and their provenance.
 
 After a durable context reduction, restoration uses a commit-scoped offer: stale content jobs and buffered reminders lose authority, known usage remains attributed, and restoration is consumed only after an admitted installation. See [Context continuity and recovery](context-continuity.md) for the lifecycle and its limits.
 
@@ -21,7 +21,10 @@ writes, model resolution, reminders, handoff offers, and handoff seeding.
 | You want to… | Use |
 | --- | --- |
 | Inspect the bank and recent memory steps | `/memory` |
-| Select a background model or change memory controls | `/settings` → **Context & Memory** |
+| Propose a bank entry for durable review | `/memory`, then `p` (repository scope) or `g` (global scope) on a selected knowledge or procedural row; over ACP, `_clio-coder/memory/propose` (see [ACP](../architecture/acp.md)) |
+| Import the newest handoff's task memory | `/memory seed` |
+| List, approve, reject or prune durable records | `clio-coder memory`, see [Memory CLI](../architecture/evidence-and-memory.md#memory-cli) |
+| Select a background model or change memory controls | `/settings` → **Context & Memory** → **Proactive memory** |
 | Review recorded cost | `/usage` or `clio-coder usage report` |
 | Look up the default values and routing example | [Operator setup](#operator-setup) |
 | Understand what survives a handoff | [Handoff continuity](#handoff-continuity) |
@@ -44,7 +47,9 @@ flowchart LR
 
 The task bank is in `src/domains/memory/` and belongs to one live session. It is
 separate from both durable approved lessons and the regenerable repository
-context engine.
+context engine. The registration is `observer.memory-intervention` in
+`src/domains/middleware/memory-intervention.ts`; it hooks `before_tool`,
+`after_tool`, `turn_start`, `turn_end` and `on_compaction`.
 
 - **Private status** is the memory policy's short progress model. Inspect it
   with `/memory`. It stays out of ordinary reminders, the memory model's bank
@@ -55,13 +60,37 @@ context engine.
 - **Procedural memory** contains attempts and outcomes such as failed commands,
   ruled-out hypotheses, diagnoses, and fixes that worked.
 
-Knowledge and procedural entries have stable short IDs. A visible reminder is
-one `Memory:` advisory block and records the cited entry IDs' injection counts.
+Knowledge and procedural entries have stable short IDs (`tm-k-<n>` and
+`tm-p-<n>`, with the counter in base 36; status is `tm-s-<n>`). A visible
+reminder is one `Memory:` advisory block and records the cited entry IDs'
+injection counts.
+
+The bank lives in process memory only. Each entry holds at most 1,200 characters
+of whitespace-normalized text. The knowledge class keeps at most 20 entries and
+the procedural class at most 30; saving past a cap evicts the entry touched
+longest ago. The bank is never written to disk except as a redacted handoff
+snapshot or a reviewed promotion (`src/domains/memory/task-bank.ts`).
 
 The existing middleware path delivers that block at the first boundary that can
 carry it, which is either a native tool-batch boundary inside the running turn or
 the next accepted prompt, and persists its attribution in the session ledger.
 There is no hidden `transformContext` injection.
+
+## What reaches the model and when
+
+Memory reaches the action agent through four channels. Each one is advisory text
+or a labeled prompt section, never a tool or a permission.
+
+| Channel | When | Content | Source |
+| --- | --- | --- | --- |
+| Tool-result annotation | The second identical failure in the bounded trajectory, at most once per operation per turn | One cited `Memory:` line appended to the failing tool's own result | `annotateRepeatedFailure` in `src/domains/middleware/memory-intervention.ts` |
+| Deferred or turn-end reminder | At a native tool-batch boundary while the turn runs, at turn end for the rules tier, or on the next accepted prompt for a finished background step | A `Memory:` block inside `<system-reminder>`, recorded in the session ledger | `src/interactive/turn-middleware.ts` |
+| Post-compaction restoration | After a durable continuity or summary commit is installed | Status (when no handoff note or summary already carries current state), knowledge and procedural entries, labeled unverified | `src/domains/memory/restoration.ts`, `src/interactive/turn-context.ts` |
+| Approved durable memory | Every prepared operator turn, as part of the compiled system prompt | A `# Memory` section of at most 5 approved records within 400 estimated tokens | `src/domains/memory/prompt-section.ts`, selection rules in the [evidence and memory contract](../architecture/evidence-and-memory.md#prompt-injection-rules) |
+
+A background model never writes to the system prompt. The unreviewed bank can
+reach the durable section only through a reviewed proposal that an operator
+approves.
 
 ## Paper mapping and Clio constraints
 
@@ -113,35 +142,46 @@ For a valid list, two recoverable cases are handled per operation:
 - A `save_knowledge` or `save_procedural` ID that names no entry of that class
   creates a new entry; a `delete` of an unknown ID is dropped.
 - An unrecognized `op` is dropped while recognized operations remain eligible.
-  A list with no recognized operations records `malformed`.
+  A list with no recognized operations records `malformed` with reason
+  `all_operations_invalid`.
 
 Phase 1 writes remain valid when Phase 2 is gated or yields to a deterministic
 reminder; an over-budget reminder is recorded as `gated` and suppressed rather
 than discarding the writes that came with it. A timeout, provider failure,
-malformed response, or telemetry failure is silent and never blocks a tool.
+malformed response, or telemetry failure never blocks a tool and produces no
+reminder.
 
 </details>
 
-### Intervention defaults and cadence
-- `context.memory.enabled` (default `true`): Enables observation, task bank writes, and reminder injection.
-- `context.memory.cadenceToolCalls` (default `10`): Minimum completed-tool interval between background interventions.
-- `context.memory.trajectorySteps` (default `8`): Completed tool-trajectory window analyzed during background evaluation.
-- `context.memory.maxOutputTokens` (default `2000`): Bounds the rendered memory-bank context and the ordinary policy-model completion. An always-on-thinking model receives additional reasoning headroom, at least `4,000` tokens when its model cap permits, so it can still reach the strict envelope.
-- `context.memory.timeoutMs` (default `60000`): Wall-clock limit for one background memory-policy step, including its one permitted chat fallback attempt. The step is detached, so this deadline never delays a turn, but it does hold a request slot on a real inference endpoint that your own turns and dispatched workers queue against. Raise it only after inspecting the timeout and hit-rate evidence for the selected route.
+## Settings
+
+All keys live under `context.memory` in `settings.yaml` (`src/core/defaults.ts`, validated in `src/core/config.ts`). A change applies at the next turn.
+
+| Key | Default | Minimum | Effect |
+| --- | --- | --- | --- |
+| `context.memory.enabled` | `true` | | Enables observation, task bank writes, and reminder injection. `false` is the kill switch for the whole plane. |
+| `context.memory.target` | `null` | | Target for the optional background model tier. A value that names no configured target resets to `null`. |
+| `context.memory.model` | `null` | | Wire model on that target. Cleared when `target` is unset; defaults to the target's `defaultModel` when `target` is set and `model` is not. |
+| `context.memory.cadenceToolCalls` | `10` | `2` | Minimum completed-tool interval between background interventions. |
+| `context.memory.trajectorySteps` | `8` | `1` | Completed tool-trajectory window analyzed during background evaluation. |
+| `context.memory.maxOutputTokens` | `2000` | `1` | Bounds the rendered memory-bank context, the ordinary policy-model completion, and the reminder (4 characters per token). An always-on-thinking model receives twice this value and at least `4000` tokens, within the model's own output cap, so it can still reach the strict envelope. |
+| `context.memory.timeoutMs` | `60000` | `1` | Wall-clock limit for one background memory-policy step, including its one permitted chat fallback attempt. The step is detached, so this deadline never delays a turn, but it does hold a request slot on a real inference endpoint that your own turns and dispatched workers queue against. Raise it only after inspecting the timeout and hit-rate evidence for the selected route. |
+
+There is no thinking-level key. Clio always requests thinking off for the memory route.
 
 ## Trigger semantics
 
 Memory does not call a model after every tool. Signals accumulate and coalesce at
-a turn-end boundary; at most one prompted step is started for that boundary, and
-it runs detached from it.
+a turn-end or native tool-batch boundary; at most one prompted step is started for
+that boundary, and it runs detached from it.
 
 | Trigger | Behavior |
 | --- | --- |
-| Interval | After `context.memory.cadenceToolCalls` completed tools since the last prompted step; default 10. This is the nondeterministic/citation-gated path. |
-| Tool-error streak | Two consecutive error outcomes. A successful tool resets the streak. Memory stays silent for a turn whose operator message asks for a repeat (`again`, `twice`, `retry`, `re-run`, `once more` and similar), because the repeat is the task, so that turn gets neither this trigger nor the repeated-failure annotation. |
+| Interval | After `context.memory.cadenceToolCalls` completed tools since the last prompted step; default 10. This is the nondeterministic, citation-gated path. |
+| Tool-error streak | Two consecutive error outcomes. A successful tool resets the streak. Memory stays silent for a turn whose operator message asks for a repeat, because the repeat is the task. A clause that opens with a run, execute, invoke, try, re-run, re-try or repeat request and carries `again`, `twice`, `once more`, `a second time` or a similar phrase counts, as does `re-run`, `retry` or `repeat` itself. A negation such as `not`, `never`, `avoid`, `stop`, `without` or `don't` cancels it. That turn gets neither this trigger nor the repeated-failure annotation. |
 | Loop signal | Reuses the orchestrator loop guard's verdict; it does not infer a second competing loop detector. |
-| Repeated failure | The rules tier records failed operation fingerprints and annotates the failing tool result once the same failure appears twice in the bounded trajectory. |
-| Post-compaction | The first turn start after compaction restores status and knowledge once, without a model call, because compaction is precisely where execution facts leave the active window. |
+| Repeated failure | The rules tier records failed operation fingerprints and annotates the failing tool result once the same failure appears twice in the bounded trajectory. A successful `write`, `system_modify`, `git_destructive` or `dispatch` call between the two failures resets the count, because rerunning a check after an edit is verification and not a repeat. |
+| Post-compaction | After a durable context reduction, restoration offers status, knowledge and procedural entries once, without a model call, because compaction is precisely where execution facts leave the active window. See [Post-compaction restoration](#post-compaction-restoration). |
 
 ### Two delivery channels
 
@@ -155,7 +195,8 @@ repeated failure uses exactly one of them:
   `annotate_tool_result` effect the loop guard already uses. The advisory uses
   the canonical result-disposition digest when one is available. Older hook
   producers fall back to the first tool-error line that names a problem. Every
-  digest is redacted and byte-capped before it reaches the task bank. The model
+  digest is redacted and byte-capped (240 bytes, `TOOL_RESULT_DIGEST_MAX_BYTES` in
+  `src/tools/result-disposition.ts`) before it reaches the task bank. The model
   reads the advisory on its very next round. This is spent once per operation
   fingerprint per turn and re-earned in a later turn, because the same command
   failing again after an operator turn is news again.
@@ -177,7 +218,7 @@ step resolves, its reminder joins the deferred-reminder buffer and drains at the
 next boundary that can carry it: a native tool-batch boundary if the session is
 still executing tools, otherwise the next accepted prompt.
 
-Two consequences follow:
+Three consequences follow:
 
 - At most one background step is alive per session. A boundary that arrives while
   a step is still running is dropped rather than queued, so a model slower than
@@ -188,20 +229,20 @@ Two consequences follow:
 - A reminder can arrive one turn later than the trajectory that earned it. The
   rules tier is unaffected and stays synchronous, so deterministic protection
   keeps its original timing.
+- After two consecutive model steps record `timeout`, the session stops spending
+  its endpoint on the model tier. Later boundaries record `silent` with reason
+  `llm_timeout_backoff` and the rules tier keeps working. No model step runs
+  while the backoff holds, so only a bank reset clears the counter: `/new`,
+  `/resume`, a turn switch and the other session changes
+  (`MEMORY_INTERVENTION_TIMEOUT_BACKOFF_THRESHOLD`).
 
-`/memory` shows whether a step is in flight, and the footer's memory row shows
-`working` while one is running.
+A headless `clio-coder run` submits no further turn, so a detached step could only
+finish after the process exited. When triggers are pending there, the boundary
+records `silent` with reason `no_consumer` and starts no model call. The rules
+tier is unaffected.
 
-A prompted reminder over a trajectory that contains a failed tool call needs evidence
-of a repeat: one operation fingerprint seen at least twice with an error among them, not
-counting a `read` of a guessed path that does not exist. Without that, and without
-restoring an unchanged bank fact, the step is recorded as `gated` with reason
-`no_repeated_failure` and stays invisible.
-
-The error-streak, loop, repeated-failure, and post-compaction paths are
-deterministic. A prompted reminder from one of those paths may be uncited. An
-interval-only prompted reminder must cite at least one current knowledge or
-procedural ID or it is recorded as `gated` and remains invisible.
+`/memory` shows `step running` in its header while a step is in flight, and the
+expanded footer dashboard's Memory bank row shows `updating`.
 
 ### Outcome semantics
 
@@ -216,6 +257,42 @@ previous boundary, so it is not a new memory boundary and does not replace the
 prior outcome. `last` therefore remains `injected` across such continuations until
 a later tool-bearing or explicitly triggered step produces a new outcome, such as
 a healthy tool leading to `silent`.
+
+## Output validation
+
+A small background model can derail mid-completion, and its text reaches both the
+operator's `/memory` history and the action agent's next turn. Everything a step
+produces is checked before it goes anywhere, and a failing item is dropped whole
+instead of repaired (`src/domains/memory/task-memory-output.ts`,
+`src/domains/memory/task-memory-policy.ts`).
+
+A reminder is gated with reason `invalid_reminder` when it holds a chat-template
+control token, an envelope tag, more than three non-empty lines, more than 500
+characters, JSON-shaped text, first-person reasoning about the task or the answer
+format, a script that appears nowhere in the task, bank or trajectory, or a
+repeated sentence. A reminder with no closing tag was cut off and is rejected the
+same way. The phase-one bank writes of that step still apply.
+
+A stored operation is dropped, and counted as a dropped operation, when its
+content holds a chat-template control token, deliberation about the answer
+format, or a script foreign to the session. Stored content may quote JSON or the
+memory grammar, because a session working on the memory tier legitimately does.
+
+A well-formed reminder is still gated, and stays invisible, in these cases:
+
+| Reason | Condition |
+| --- | --- |
+| `uncited` | A reminder started by the interval alone cites no current knowledge or procedural ID. Steps started by an error streak or a loop signal may be uncited. |
+| `duplicate_reminder` | The text repeats the reminder already on screen. Recorded as `silent`. |
+| `suppressed` | The rules tier already spoke for this boundary. Recorded as `silent`; phase one still applied. |
+| `over_budget` | The reminder exceeds `context.memory.maxOutputTokens` once prefixed with `Memory:`. It is dropped rather than truncated, because truncation could strip the citation that earns it a voice. |
+| `resolved_failure` | A cited procedural entry records a call that has since succeeded in the observed trajectory. |
+| `invalid_path` | The reminder names a workspace file that does not exist, holds more than 16 path references, or names a path over 320 characters. A path outside the workspace is not checked. |
+| `no_repeated_failure` | The trajectory holds a failed tool call but no operation fingerprint seen at least twice with an error among them, and the reminder restores no unchanged bank fact. A `read` of a guessed path that does not exist does not count. |
+
+The error-streak and loop paths are deterministic. The interval path is the only
+one that must cite. The repeated-failure annotation and the post-compaction
+restoration belong to the rules tier and need no model.
 
 ## Cost and defaults
 
@@ -246,12 +323,20 @@ the endpoint has no request capacity left.
 If the dedicated route is
 known unavailable (missing target/runtime, down target, absent model in a known
 catalog, or a model reported unloaded/loading), Clio selects the active chat
-route for that step. A runtime client error on the dedicated route permits one
-chat attempt within the original remaining deadline. It does not retry after a
+route for that step. A runtime client error on the dedicated route, or an
+information-flow refusal of the dedicated destination, permits one chat attempt
+within the original remaining deadline. It does not retry after a
 timeout, cancellation, session/branch switch, malformed envelope, or a model's
 explicit silence. The fallback never falls back again. Both routes unavailable
 produce a visible `client_error` outcome. An unset memory role remains rules-only;
 chat fallback does not enable model-based memory by default.
+
+An information-flow refusal means restricted context cannot reach the selected
+background model. The step records `information_flow_blocked`, the telemetry row
+carries the admission diagnostic as `refusalReason`, and the session shows one
+`Memory skipped target <id>: <reason>` notice per session. The chat fallback is
+admitted against the same policy, so a restricted session can end with no model
+step at all. See [Information flow](information-flow.md).
 
 A runtime notice names the selected chat fallback and its reason. Routing stays
 session-local and does not edit saved settings. Each attempted call records its
@@ -286,8 +371,8 @@ actually evicted the chat prefix.
 ## Choosing a background model
 
 Memory reads a trajectory and writes a bounded envelope. A small model can reduce
-latency and resource use. Clio requests thinking off for the memory route; memory
-settings version 2 has no configurable thinking-level key.
+latency and resource use. Clio requests thinking off for the memory route and
+exposes no key to change that.
 
 The off request depends on runtime and model metadata: llama.cpp reads
 `chat_template_kwargs.enable_thinking`, and LM Studio reads `reasoning_effort`,
@@ -331,10 +416,12 @@ reaches the transcript. It carries counts and outcomes only, never bank or
 trajectory text.
 
 `/settings` exposes controls for every key above, with shorter operator-facing
-row labels. The saved background-memory target is the Memory target row in
-Settings → Context & Memory, independent of the chat target and the fleet default. A
-running session owns its routing snapshot; the saved selection becomes the
-default for new sessions.
+row labels. The saved background-memory target is the Memory connection row in
+Settings → Context & Memory, independent of the chat target and the fleet default.
+The memory target and model belong to the session's live routing: a change made in
+the running session applies at once and is saved for new sessions, while an external
+edit to `settings.yaml` changes the default for new sessions only. Each step
+resolves its route from those effective settings when it starts.
 
 An example gateway topology keeps the three backend routes distinct:
 
@@ -397,18 +484,21 @@ operation while leaving deterministic protection active.
 
 ## Where what the tier writes ends up
 
-A bank entry lives and dies with its session. When a reminder actually reaches
-the operator, the entries it cited are also proposed into the durable store at
+A bank entry lives and dies with its session. When a model-tier reminder actually
+reaches the operator, the entries it cited are also proposed into the durable store at
 `<dataDir>/memory/records.json`, unapproved, scoped to the repository the session
-is working in, with provenance naming the session and the source entry. That is
-the one automatic writer of that file; everything else about it is unchanged.
+is working in, with provenance naming the session and the source entry. The record
+cites `session:<sessionId>` as its evidence reference and starts at confidence
+`0.6`. That is the one automatic writer of that file; everything else about it is
+unchanged (`src/domains/memory/task-bank-promotion.ts`).
 
 `/memory` and `clio-coder memory list` show the proposal, and
 `clio-coder memory approve <id>` is still a separate operator action, so nothing
 the background plane produced reaches a system prompt without review. A step with
 no session, or one running outside a canonical repository, proposes nothing:
 global scope broadens applicability to every future session and is not a claim a
-background step may make on the operator's behalf.
+background step may make on the operator's behalf. An unapproved proposal that is
+never reviewed becomes eligible for `memory prune --stale` after 30 days.
 
 Rules-tier reminders are not proposed. Their entries are this middleware's own
 one-line records of a repeated tool failure, and filing each one as a durable
@@ -421,28 +511,59 @@ A trajectory step keeps two fields with different purposes. The operation
 fingerprint identifies repeated calls using the tool name and arguments. The
 result digest contains diagnostic text from the canonical result-disposition
 projection with source provenance. Secret redaction and a 240-byte cap apply
-before it reaches the task bank or background request.
+before it reaches the task bank or background request. The prompt carries the
+task text clipped to 2,000 characters and a trajectory rendered as valid JSON
+within 4,000 characters, dropping the oldest whole steps first.
 
 A metadata-only disposition contributes outcome facts without a captured body.
 Results without a canonical disposition use a redacted deterministic fallback.
 The model's bounded operation envelope can update task status, save knowledge,
 or save procedural entries; validation controls which writes are admitted.
-Post-compaction restoration includes task status as well as selected knowledge
-and procedural entries.
+
+## Post-compaction restoration
+
+When a continuity commit or compaction summary becomes durable, the memory
+registration records the commit and prepares one restoration offer. The offer is
+a user-role `<system-reminder>` message that opens with `Memory: remembered
+execution context (unverified; current instructions take precedence).` followed
+by one line per distinct content, each quoting the entry text and naming its IDs.
+Entries with equal whitespace-normalized content share one line. Status leads and
+is labeled `historical status`, but it is omitted when the accepted handoff note
+or compaction summary already carries current state. Knowledge and procedural
+entries follow in recency order, and entries that do not fit the budget are
+omitted. The budget is the smaller of the room left in the context window and
+`context.memory.maxOutputTokens`. The offer is consumed only after the host
+installs the exact message into the admitted context; a cancelled or stale offer
+is discarded and the pending restoration stays.
+
+A surface that never binds a commit scope falls back to a rules reminder at the
+next turn start, headed `Memory: execution state restored after compaction:`,
+which restores status and knowledge only.
 
 ## Handoff continuity
 
 The bank normally dies with the session. When `context-handoff` is explicitly
-requested, Clio supplies the skill a redacted `clio-task-memory` fenced snapshot
-containing knowledge and procedural entries only. Ordinary turns receive no
-snapshot. The handoff artifact remains under ignored `.clio-coder/handoffs/`; private
-status and secret-shaped values do not cross the export boundary.
+requested, Clio supplies the skill a redacted `clio-coder-task-memory` fenced
+snapshot (`version: 2`) containing knowledge and procedural entries only, plus
+the source session, its evidence reference, the runtime ID and redaction facts.
+Ordinary turns receive no snapshot. The skill writes the handoff to
+`.clio-coder/handoffs/handoff-YYYY-MM-DD[-slug].md`, an ignored project path;
+private status and secret-shaped values do not cross the export boundary. The
+parser also accepts the older `clio-task-memory` fence language and `version: 1`
+snapshots in handoff files written by earlier builds. Version 1 snapshots seed
+a bank but cannot be promoted, because they carry no source provenance.
+`clio-coder context reset` removes `.clio-coder/handoffs/`.
 
-After `/resume`, Clio checks only the newest handoff and offers `/memory seed` if
-it contains a valid snapshot. Seeding is explicit and deduplicated. It resets
-injection attribution for the new session, and the master kill switch disables
-both the offer and writes. `/new`, `/fork`, `/resume`, and ACP session changes
-clear the prior heap bank before the new session can observe it.
+When a session is resumed with `/resume` and its id differs from the previous one,
+or when Clio boots into a resumed session, she checks only the newest
+`handoff-*.md` by modification time (at most 1,000,000 bytes) and offers
+`/memory seed` if it contains a valid snapshot. Seeding is explicit and
+deduplicated by class and normalized content. It resets injection attribution for
+the new entries, and the master kill switch disables both the offer and the
+writes. Navigation that parks, resumes or switches turns in the session clears the
+prior bank before the new session can observe it. `clio-coder memory promote
+--from-handoff` turns selected snapshot entries into reviewed proposals; see the
+[Memory CLI](../architecture/evidence-and-memory.md#memory-cli).
 
 ## Telemetry
 
@@ -458,14 +579,25 @@ keeps one previous generation as `steps.jsonl.1`.
 <details>
 <summary>Every field in a steps.jsonl record and what each outcome means</summary>
 
-Every exact-schema record has:
+Every exact-schema record (`version: 2`) has:
 
-- timestamp and schema version;
-- one to three coalesced trigger reasons;
-- `rules` or `llm` tier;
-- per-class added, updated, and deleted entry counts;
-- `silent`, `injected`, `gated`, `timeout`, `malformed`, or `dropped` decision;
-- count of cited entries, input/output/total memory-model tokens, and latency.
+- `at` timestamp and `version`;
+- `triggerReasons`: one to three of `interval`, `tool_error_streak`, `loop_signal`, `repeated_failure`, `turn_end`, `post_compaction`, `manual`;
+- `tier`: `rules` or `llm`;
+- `bankDelta`: per-class (`status`, `knowledge`, `procedural`) added, updated, and deleted entry counts;
+- `decision`: `silent`, `injected`, `gated`, `timeout`, `malformed`, or `dropped`;
+- `reason`, which explains the decision, and an optional `refusalReason` on `information_flow_blocked`;
+- `bankOperations` accepted, `droppedOperations` refused, and `citedEntries`;
+- `tokenCost` with input, output and total memory-model tokens, and `latencyMs`;
+- `targetId` and `modelId` for the route that served the step, absent on rules-tier rows.
+
+The reasons are `intervened`, `model_silent`, `duplicate_reminder`, `suppressed`,
+`uncited`, `invalid_path`, `resolved_failure`, `over_budget`, `invalid_reminder`,
+`unparseable`, `all_operations_invalid`, `deadline`, `timed_out`, `endpoint_busy`,
+`client_error`, `information_flow_blocked`, `no_client`, `no_consumer`,
+`step_in_flight`, `llm_timeout_backoff`, `no_repeated_failure`, `bank_empty` and
+`scope_changed`. The parser rejects rows from schema version 1 and rows with any
+other key set.
 
 The same steps are also billed. See "Cost and defaults" for the
 `/usage` row, the durable out-of-turn usage row, and the lifetime figures `/memory`
@@ -495,8 +627,16 @@ triggered memory steps produce rows.
 
 </details>
 
+When debugging a model route, set `CLIO_CODER_MEMORY_TRACE` to a file path. Each
+step then appends one content-bearing JSON row there (the reminder, plus the
+prompt and the raw response each clipped to 8,000 characters), and the file is
+truncated when the session opens it. The trace is never written unless the variable is set; see
+[Environment variables](environment-variables.md).
+
 ## Session scope
 
 Proactive memory intervention runs in the main session. Dispatched workers use
 their own loop detectors and tool-call limits; they do not register this memory
-policy or receive the parent's memory bank implicitly.
+policy or receive the parent's memory bank implicitly. A headless
+`clio-coder run --agent` run loads approved durable memory into the worker's
+prompt as described in the [evidence and memory contract](../architecture/evidence-and-memory.md#prompt-injection-rules).

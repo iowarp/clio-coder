@@ -13,7 +13,7 @@ are, the deep checks, the in-session `/doctor`, and how to read the rows.
 | --- | --- |
 | `clio-coder doctor` | Every standard check. Read-only; quiet row families are folded in text output. |
 | `clio-coder doctor --verbose` | Print every finding separately in text output. JSON always retains every finding. |
-| `clio-coder doctor --fix` | Also repairs missing directories, template files, and credential permissions, rewrites retired enum values and YAML 1.1 `on`/`off` booleans in `settings.yaml` while preserving comments and formatting, and records fleet preflight results. |
+| `clio-coder doctor --fix` | Also repairs missing directories, template files, and credential permissions, tightens `settings.yaml` to `0600`, rewrites retired enum values and YAML 1.1 `on`/`off` booleans in `settings.yaml` while preserving comments and formatting, records fleet preflight results, removes stale task worktree claims, and regenerates a managed Yazi profile that is not current. It does not apply migrations or remove retired settings keys; `clio-coder upgrade` does. |
 | `clio-coder doctor --json` | The same findings as JSON on stdout: `{ ok, fix, deep, findings: [{ ok, name, level, detail }] }`. |
 | `clio-coder doctor --deep` | The standard checks plus the live tool probe on every configured target and a dry run of the validation contract. |
 | `clio-coder doctor --deep --tools-timeout <seconds>` | Bounds each tool probe's generation. The default is 120 seconds, enough for a cold load of a large local model. |
@@ -21,7 +21,15 @@ are, the deep checks, the in-session `/doctor`, and how to read the rows.
 | `/doctor deep` | The deep checks against the session's targets and autonomy. |
 
 `--deep` composes with `--json` and `--fix`. `--tools-timeout` without
-`--deep` is a usage error (exit 2).
+`--deep`, a value that is not a positive number of seconds, and an unknown flag
+are usage errors: the message and the help text go to stderr and doctor exits 2.
+`--help` prints the help text on stdout and exits 0.
+
+In text output the `interop`, `toolchain`, `slurm` and `naming` row families fold
+into one row each while every member is `OK` or `INFO` and the family has at
+least two members. A member that is `WARN` or an error keeps its own row. When
+anything folded, the report ends with
+``N rows folded; `clio-coder doctor --verbose` prints each one``.
 
 ## Reading a row
 
@@ -65,9 +73,56 @@ also states that Clio did not inspect GPU/VRAM or model fit.
 
 A `chat` row leads the report with the configured route, whether chat can run, and the recovery command when setup is incomplete. The core install checks follow: `Clio Coder version`, `install method`, `node version`, `platform`, `engine runtime`, `directory layout`, `config dir`, `data dir`, `state dir`, `cache dir`, `settings.yaml`, `credentials`, `state metadata`, `lifecycle migrations`, and the session store and state storage rows. A missing directory, an invalid `settings.yaml`, a `credentials.yaml` whose mode is not `600`, or stale state metadata is an error, and `clio-coder doctor --fix` repairs the directories, template files, credential mode and state metadata.
 
+The core rows read as follows.
+
+| Row | Level and meaning |
+| --- | --- |
+| `repair` | `!!` `--fix could not finish: <reason>` when the repair itself threw. The rows below say which root is still wrong. |
+| `install method` | The detected kind and package root. For an installer install it also names the prefix, the managed Node and its path. `WARN` when the launcher points at a different prefix than this process runs, when this process runs a different Node than the managed one (for example under `CLIO_CODER_NODE`), and for an unknown layout. |
+| `settings.yaml` | `OK` with the path when the file validates against the current schema. Otherwise `!!` with the exact key paths and the remedy. Validation is read-only. |
+| `settings.yaml mode` | `WARN` when the file is wider than owner read and write. `--fix` tightens it to `0600` and the row then reads `tightened <old> -> 600`. Not checked on Windows. |
+| `settings.yaml booleans` | `WARN` when YAML 1.1 `on`/`off` values read as strings. `--fix` rewrites exactly those values. |
+| `settings.yaml retired values` | `WARN` naming each retired enum value `--fix` would rewrite and the value it becomes. |
+| `settings.yaml repair`, `settings.yaml repair skipped` | What `--fix` rewrote, and `WARN` for values it could not rewrite safely because of aliases, anchors or tags. |
+| `credentials` | `!!` when `credentials.yaml` is missing, unreadable, or not `0600` on POSIX. On Windows only its content is checked. |
+| `state metadata` | `!!` when the state `install.json` is missing, unreadable, or records an older version than the running one. A development build leaves the recorded version alone. |
+| `lifecycle migrations` | See the migration paragraph above. |
+| `session store` | `OK` with the number of readable session ledgers. `!!` when ledgers hold lines that cannot be read or a directory cannot be listed. |
+| `cache telemetry` | The latest session's prompt-cache verdict counts (`hot`, `partial`, `cold`, `small`, `unknown`) and the most common expected cold reason. `WARN` when that session recorded no prompt-cache telemetry. |
+| `state storage` | Total size of the state root and its largest top-level contributor. `!!` only when the root cannot be measured. |
+| `target <id>` | `WARN` when an OpenAI-compatible or Anthropic-compatible target answers like a native LM Studio or Ollama server, with the `clio-coder targets convert` command. `!!` when the target names an unknown runtime. |
+| `cache <id>` | `WARN` prompt-cache advisories from a target's passive check. |
+
 On a home Clio has never written to, plain `doctor` prints a `chat` warning explaining that no model target is configured and an `installation` warning row (`not set up yet`) and exits 0. It creates nothing. `doctor --fix` creates the directories without choosing a model.
 
-Other rows appear when they apply: `validation contract` (valid, absent, Markdown-only or invalid; an invalid contract is an error and a valid one raises the rigor default to high), `interop <agent>` rows for detected external agents, `fleet node <id>` rows from the SSH preflight, `panes ...` rows, `external tool <id>` rows, and `naming ...` rows that count legacy `clio` history, git refs and worktree markers.
+Other rows appear when they apply: `validation contract` (valid, absent, Markdown-only or invalid; an invalid contract is an error and a valid one raises the rigor default to high), `interop <agent>` rows for detected external agents, `fleet node <id>` rows from the SSH preflight, `panes ...` rows, `external tool <id>` rows, and the `naming immutable history`, `naming git refs` and `naming worktree markers` rows. The naming rows count released `clio` identifiers retained in sessions, receipts, traces and evidence, `clio/task/*` and `clio/compete/*` git refs, and legacy worktree markers. They warn while any remain, are read-only even under `--fix`, and repair nothing.
+
+## External tool rows
+
+Doctor reports one `external tool <id>` row for each pinned external program:
+`herdr` (the pane host), `yazi` (the files pane), `croc` (relay file transfer
+between machines) and `cliamp` (the terminal music player behind `/music`). The detail says
+where the tool resolves, with a `PATH` copy winning when it meets the pin's minimum version:
+
+| Detail | Meaning |
+| --- | --- |
+| `PATH <path> (<version>, pin <pin>)` | A copy on `PATH` met the minimum and is used. |
+| `vendored <path> (<pin>)` | The copy `clio-coder tools install <id>` downloaded is used. When a `PATH` copy was rejected the detail names it, its version and the floor it missed. |
+| ``vendored <versions> is superseded by the <pin> pin (update with `clio-coder tools install <id>`)`` | A Clio upgrade moved the pin and only older vendored versions remain on disk, so nothing resolves. A rejected `PATH` copy is named in the same detail. |
+| `PATH copy <path> is <version>, below the <floor> floor, and nothing is vendored (install with ...)` | A `PATH` copy is too old and there is no vendored copy. |
+| ``not found (install with `clio-coder tools install <id>`)`` | Nothing resolves. |
+| `not installed and no pinned asset for this platform (<platform>)` | The pin has no download for this machine. |
+| `experimental integration disabled by settings` | `herdr` while panes are off, or `yazi` while the files pane or panes are off. |
+
+An external tool row is never an error. A missing `herdr` or `yazi`, which includes
+one whose only vendored copy is superseded, is a `WARN` while its integration is
+enabled, and the row is `OK` with the disabled detail while it is off; a missing
+`croc` or `cliamp` is `INFO`. The `files pane profile` row reports the managed Yazi profile
+(`OK` when current, `INFO` when not yet generated, `WARN` when stale or when
+generation failed). `doctor --fix` regenerates a profile that is not current when
+both `yazi` and `ya` resolve, and Yazi validates the staged profile first. See [Panes and the Files Pane](panes-and-files.md)
+for the rows `panes mode`, `panes socket`, `panes protocol`, `panes binary`,
+`panes layout`, `naming panes` and `panes journal dir`, none of which is an error.
 
 ## HPC toolchain rows
 
@@ -82,7 +137,7 @@ seconds from a scratch directory, and all of them run at once.
 
 - An absent tool is `INFO`. Most workspaces need none of these.
 - An absent tool is `WARN` when the workspace
-  [validation contract](tool-usage.md#verify-run-declared-verification-checks) names it in a
+  [validation contract](quality-policy.md) names it in a
   validator command, or when the contract declares `runtime.kind: slurm` and
   `sbatch` is missing.
 - An installed tool whose `--version` exits nonzero is `WARN`. An
@@ -103,7 +158,7 @@ run's worktree that restart recovery kept because it holds work, and it is a
 warning, as is a claim whose owner is gone or that predates recovery. Each row
 gives the branch, the age, the `git log <base>..<branch>` command to inspect
 it, and the commands to drop it. A claim whose branch and worktree are both gone is reported as stale; `doctor --fix` removes that stale claim after rechecking both. Doctor never removes a surviving branch or worktree. See
-[worktree per task](fleet-dispatch.md#worktree-per-task).
+[Fleet dispatch](fleet-dispatch.md).
 
 ## Slurm MCP rows
 

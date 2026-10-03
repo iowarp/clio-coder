@@ -2,10 +2,10 @@
 
 The working set is the part of the session ledger the model actually receives on the next request. When context pressure crosses `context.compaction.threshold`, Clio narrows that view before it considers summarizing anything: selected tool-result bodies and closed-turn thinking blocks stop being replayed, and a one-line marker takes each body's place. Nothing is deleted. The ledger keeps every byte the tools produced, the transcript keeps showing them, and the model can ask for any evicted body back by ref.
 
-Source of truth is `src/domains/context/working-set/` (`contract.ts`, `fold.ts`, `project.ts`, `marker.ts`, `protect.ts`, `engine.ts`, `recall.ts`, `policies/`), the ledger records in [entries.ts](../../src/domains/session/entries.ts), and the compaction stage in [turn-context.ts](../../src/interactive/turn-context.ts) (`runAutoCompact`).
+Source of truth is `src/domains/context/working-set/` (`contract.ts`, `fold.ts`, `project.ts`, `marker.ts`, `protect.ts`, `payload.ts`, `path-index.ts`, `engine.ts`, `recall.ts`, `policies/`), the ledger records in [entries.ts](../../src/domains/session/entries.ts), and the compaction stage in [turn-context.ts](../../src/interactive/turn-context.ts) (`runAutoCompact`).
 
 > [!WARNING]
-> This is an experimental community alpha surface. The default policy is `structural-v2`; `structural-v1` remains available as the previous composition, and `age-horizon` preserves the old age-based selection except for the current low-yield token floor and stays available.
+> This is an experimental community alpha surface. The default policy is `structural-v2`. `structural-v1` is the same composition without `offloaded_body` and the recalled-twice pin. `age-horizon` is the age-based selection with the low-yield token floor.
 
 ## Vocabulary
 
@@ -21,7 +21,7 @@ Source of truth is `src/domains/context/working-set/` (`contract.ts`, `fold.ts`,
 
 ## Eviction is a projection, not a rewrite
 
-The stage this layer replaces rewrote history. `maskStaleObservations` walked the entries, replaced observation bodies with a masked-out string, and called `session.replaceEntries`. That destroyed the only copy: after a mask, `/resume`, `/tree`, `/fork`, and the HTML export all showed the placeholder, and the content was gone for the operator as well as the model.
+Eviction never rewrites the ledger. The legacy destructive stage, `maskStaleObservations`, is reachable only with `CLIO_CODER_LEGACY_MASK=1` (see [Environment variables](../guide/environment-variables.md)). It walks the entries, replaces observation bodies with a masked-out string, and calls `session.replaceEntries`. That destroys the only copy: after a mask, `/resume`, `/tree`, `/fork`, and the HTML export all show the placeholder, and the content is gone for the operator as well as the model.
 
 The working-set layer separates the two audiences. What leaves is recorded as a `contextEviction` entry, appended like any other. `refreshAgentMessagesFromSession` folds those entries into a `WorkingSetView` and applies `projectWorkingSet` before `buildReplayAgentMessagesFromTurns` runs, so only the messages bound for the provider carry markers. Every reader that shows the session to a human reads the raw ledger and sees the full bodies.
 
@@ -39,12 +39,12 @@ Two entry kinds carry the layer, both defined in [entries.ts](../../src/domains/
 
 | Kind | Fields | Meaning |
 | --- | --- | --- |
-| `contextEviction` | `policyId`, `trigger` (`pressure` or `operator`), `evicted[]`, `tokensBefore`, `tokensAfter`, `pressureBefore`, `snapshotIdBefore` | One applied event. Each `evicted[]` item is `{ ref, reason, tokensFreed, marker, alias?, by?, contentHash? }`. |
+| `contextEviction` | `policyId`, `trigger` (`pressure` or `operator`), `evicted[]`, `tokensBefore`, `tokensAfter`, `pressureBefore`, `snapshotIdBefore` | One applied event. Each `evicted[]` item is `{ ref, reason, tokensFreed, marker, alias?, by?, contentHash? }`. The live checkpoint writes `trigger: "pressure"`. The `operator` trigger and the `operator` reason are valid values that no shipped command writes. |
 | `contextRecall` | `ref`, `trigger` (`tool`, `operator`, or `reread`), `tokensReadmitted`, `toolCallId?` | One readmission of one ref. It is a churn record, not an un-eviction. |
 
-`reason` is one of `superseded_read`, `stale_after_mutation`, `listing_consumed`, `failure_resolved`, `superseded_call`, `search_narrowed`, `diff_applied`, `offloaded_body`, `dispatch_receipt_settled`, `thinking_turn_closed`, `age_horizon`, `operator`. A `ref` is the `turnId` of the ledger entry that holds the unit: for a `tool_result` message the unit is the result body, and for an `assistant` message it is every thinking block the message carries. Per-block eviction is deliberately not modelled.
+`reason` is one of `superseded_read`, `stale_after_mutation`, `listing_consumed`, `failure_resolved`, `superseded_call`, `search_narrowed`, `diff_applied`, `offloaded_body`, `dispatch_receipt_settled`, `thinking_turn_closed`, `age_horizon`, `operator`. A `ref` is the `turnId` of the ledger entry that holds the unit: for a `tool_result` message the unit is the result body, and for an `assistant` message it is every thinking block the message carries. Per-block eviction is deliberately not modelled. Each evicted tool result also receives a session-local `alias` (`r1`, `r2`, …), allocated in order and never reused across branches. Markers and recall accept the alias or the `turnId`. Thinking units get no alias, marker or hash.
 
-Session format is version 6 (`CURRENT_SESSION_FORMAT_VERSION = 6` in [session.ts](../../src/engine/session.ts)). Version 5 introduced short recall aliases; version 6 adds the new eviction reasons, the `reread` trigger and optional SHA-256 `contentHash`. Older supported ledgers, including formats 4 and 5, remain readable and are restamped on opening. A reader supporting only format 5 refuses a ledger written by this build; the change is one-way. Legacy eviction items without a hash remain valid but cannot match automatic rereads.
+Session format is version 6 (`CURRENT_SESSION_FORMAT_VERSION = 6` in [session.ts](../../src/engine/session.ts)). Format 4 introduced `contextEviction` and `contextRecall`, format 5 added the continuity kinds, and format 6 added the reasons `search_narrowed`, `diff_applied`, `offloaded_body` and `dispatch_receipt_settled`, the `reread` trigger and the optional SHA-256 `contentHash`. Formats 3 to 5 remain readable and are restamped on opening. A reader that supports only an earlier format refuses a ledger written by this build, so the change is one-way. Legacy eviction items without a hash remain valid but cannot match automatic rereads.
 
 ## Pressure checkpoints and rearm band
 
@@ -54,22 +54,28 @@ After an eviction, automatic reduction waits until projected working-set tokens 
 
 The rearm band and policy headroom arithmetic use projected visible-ledger tokens in both live execution and replay. The live threshold and request-fit checks still include the full prompt, tool schemas and output reserve. Replay models overflow at a configurable fraction of the budget (0.95 by default); its summary and cache costs are estimates, not provider measurements.
 
+Three triggers reach the eviction stage. Threshold pressure checkpoints run it, then fall through to a summary when eviction frees too little. Overflow recovery, the forced fit reduction and `self_compact` reduction run it when the window is known, with the threshold and target lowered to what the request needs, and the summary follows when the request still does not fit. With an unknown window they summarize directly. `/context compact` and `/compact` skip it and summarize directly. `context.compaction.auto: false` and the automatic failure pause (see [Context continuity](../guide/context-continuity.md#automatic-compaction-and-its-failure-pause)) stop the threshold path, eviction included, and leave the forced paths running.
+
+### Why eviction waits for pressure
+
+Eviction does not run after every model round. An eager per-round variant reduced message bytes by 4.3% and raised reprocessed cached bytes by 59%: each event freed 0.1K to 4.7K tokens and invalidated 10K to 34K tokens of cached history. The pressure threshold, the `target` stop and the rearm band all encode the same rule, that an event must free enough to pay for the cold prefix it causes. A per-round or per-step eviction trigger is not part of this layer.
+
 ## The marker contract
 
 A marker is one line, its fields are in fixed order, and it carries no timestamp and no counter. That is not cosmetic. The marker is persisted inside the `contextEviction` entry and replayed on every subsequent request, so a marker whose bytes drifted between renders would cold-start the provider prefix cache on a turn that evicted nothing new. It would also make two replays of the same recorded ledger disagree.
 
-Field order is `ref`, `reason`, `by`, `tool`, `path`, `size`, `offload`, `recall`, then the body tail. Undefined fields are omitted rather than rendered empty. `path` is the one file the result was about: `details.paths` when the tool recorded exactly one (`edit`, `write`, `artifact`), otherwise the `path` argument of the call as the model wrote it, which is how a `read` marker names its file. Real output from `renderMarker` in [marker.ts](../../src/domains/context/working-set/marker.ts):
+Field order is `ref`, `reason`, `by`, `tool`, `path`, `size`, `offload`, `recall`, then the body tail. Undefined fields are omitted rather than rendered empty. `ref` is the recall alias (`r12`) when the eviction item has one, and the entry `turnId` for items recorded without an alias. `by` is always a `turnId`. `path` is the one file the result was about: `details.paths` when the tool recorded exactly one (`edit`, `write`, `artifact`), otherwise the `path` argument of the call as the model wrote it, which is how a `read` marker names its file. Output shape from `renderMarker` in [marker.ts](../../src/domains/context/working-set/marker.ts):
 
 ```text
-[evicted ref=0198f3c2-7a10-7c31-9d44-2b0c5f1e88a3 reason=stale_after_mutation by=0198f3c2-9b02-7f55-8e10-6d21ac9e4471 tool=read path=src/domains/context/working-set/engine.ts size=41 lines/3.8KB recall=context(scope="recall", ref="0198f3c2-7a10-7c31-9d44-2b0c5f1e88a3") preview="export function planEviction(policy: WorkingSetPolicy, input: PolicyInput): EvictionPlan | null { export function planEv"]
+[evicted ref=r12 reason=stale_after_mutation by=0198f3c2-9b02-7f55-8e10-6d21ac9e4471 tool=read path=src/domains/context/working-set/engine.ts size=41 lines/3.8KB recall=context(scope="recall", ref="r12") preview="export function planEviction(policy: WorkingSetPolicy, input: PolicyInput): EvictionPlan | null { export function planEv"]
 ```
 
 ```text
-[evicted ref=0198f3c2-1d44-7a90-b201-77c0e1a2f5de reason=failure_resolved by=0198f3c3-0002-7ab1-9c33-14ff90bb2c07 tool=bash size=4 lines/152B recall=context(scope="recall", ref="0198f3c2-1d44-7a90-b201-77c0e1a2f5de") first_line="src/interactive/turn-context.ts(466,15): error TS2345: Argument of type 'PolicyInput' is not assignable to parameter of "]
+[evicted ref=r7 reason=failure_resolved by=0198f3c3-0002-7ab1-9c33-14ff90bb2c07 tool=bash size=4 lines/152B recall=context(scope="recall", ref="r7") first_line="src/interactive/turn-context.ts(466,15): error TS2345: Argument of type 'PolicyInput' is not assignable to parameter of "]
 ```
 
 ```text
-[evicted ref=0198f3c4-55aa-7be2-8f01-9a3d6c2b1e77 reason=listing_consumed tool=grep size=1 lines/234.4KB offload=/home/dev/.local/state/clio-coder/offload/0198f3c4-grep.txt recall=context(scope="recall", ref="0198f3c4-55aa-7be2-8f01-9a3d6c2b1e77")]
+[evicted ref=r15 reason=listing_consumed tool=grep size=1 lines/234.4KB offload=/home/dev/.local/state/clio-coder/offload/0198f3c4-grep.txt recall=context(scope="recall", ref="r15")]
 ```
 
 Three rules govern the tail. Most reasons render `preview`: the first 120 characters of the body, whitespace collapsed and double quotes escaped, so the preview cannot break the quoted field or spill onto a second line. A `failure_resolved` or `dispatch_receipt_settled` eviction renders `first_line` instead, because the line that says what failed is worth the marker's tokens where a preview of a stack trace is not. An offloaded body renders neither, because the `offload=` pointer already promises the full artifact at a stable path and a preview would spend tokens repeating it.
@@ -88,10 +94,19 @@ A policy answers one question: which units should leave. It never writes, never 
 2. Anything inside the recent window, which starts at `protectionCutoffIndex(entries, settings)`. The later cutoff of the last `protectLastTurns` turns and last `protectLastSteps` assistant steps wins. A turn starts at a user message, a `bashExecution`, or a `branchSummary`. At least the newest assistant step stays protected, including provider-required thinking.
 3. A result whose estimated body is below `minEvictableTokens`. This protects low-yield bodies from churn; the engine independently rejects a marker that would free no tokens.
 4. A body the legacy destructive stage already replaced, which has nothing left to evict.
-5. A call the safety rails blocked. A refused call is a decision the session made, not an observation it can re-fetch.
+5. A call the safety rails refused: a result whose persisted `outcome` is `blocked`. A refused call is a decision the session made, not an observation it can re-fetch. A failed command is not a refusal, see [Failed command versus refused call](#failed-command-versus-refused-call).
 6. A write or edit the turn in flight is still standing on.
-7. A failure nothing later resolved, and any unindexed failure, because without an observation there is no way to ask whether it was resolved.
+7. A failure that no later call resolved and no later call re-ran with identical arguments, and any unindexed failure, because without an observation there is no way to ask whether it was resolved.
 8. A gateway chain aggregate with any member that items 5 to 7 would keep as a standalone result of its capability: a refused step, a write or edit the turn in flight stands on, or an unresolved or unindexed failure. A failed step with no member, such as a step whose `$from` binding failed and never ran, is an unindexed failure and keeps the aggregate. The floor, pins and recent window apply to the aggregate, which is the unit a marker replaces. Eviction addresses whole persisted results, so an aggregate otherwise leaves as one unit, and only after every settled member has earned a rung reason. A member with no path observation earns one only from a whole-entry rung such as `age_horizon`. The aggregate carries its weakest member's reason, the latest rung in the policy's order, and its marker and recall address the whole aggregate body.
+
+### Failed command versus refused call
+
+The registry persists an admission verdict on every tool result, and `isRefusedVerdict` in [payload.ts](../../src/domains/context/working-set/payload.ts) reads it for both `protect.ts` and the path index. A result is refused only when its `outcome` is `"blocked"`. When `outcome` is absent, as in ledgers written before the outcome was recorded, a string `blockReason` marks the refusal. The registry also stores its admission reason as `blockReason` on an ordinary tool error, so the reason alone is not a refusal: a failed test run has `isError: true` and `outcome: "error"` and is not blocked. A gateway chain step carries the same verdict in `details.chainAdmission`.
+
+The two cases evict differently:
+
+- **Refused call.** Protected. It is never a later success and never a later run, so it cannot resolve or supersede an earlier failure.
+- **Failed command.** Protected only while nothing answers it. A later call with byte-identical arguments evicts it as `superseded_call` even when the rerun fails again, and a later success evicts it as `failure_resolved`. A failed test, build or lint loop therefore keeps only its newest output once the older runs leave the protected window.
 
 ### `age-horizon`
 
@@ -127,6 +142,8 @@ Rungs 1 through 7 do not test pressure themselves; the live scheduler gates the 
 Three additional rungs are available in replay outside the default composition: `search_narrowed` accepts searches whose paths were read or edited; `diff_applied` accepts mutation echoes superseded by a covering read or later mutation; `dispatch_receipt_settled` accepts receipts acknowledged by later continuity records.
 
 The path index records tool identity, canonical paths, ranges, outcomes, and ledger position. Call arguments establish identical-call supersession. Content hashes serve reread matching rather than candidate ranking.
+
+`code_nav` results enter the index as read-class, rerunnable observations. The modes whose `query` is a file (`path`, `outline`, `deps`, `dependents`) key on that path, so a later edit of the file evicts them as `stale_after_mutation`. The modes keyed on a symbol or page name (`symbol`, `entries`, `wiki`, `project`) and every `source=clio` call carry no path. An identical later `code_nav` call evicts the earlier one as `superseded_call` in every mode.
 
 ### Protection profiles
 
@@ -199,7 +216,7 @@ context:
 | `context.workingSet.rearmFraction` | `0.1` | number ≥ 0 and < 1 | Required projected growth as a fraction of the window before another automatic reduction. |
 | `context.workingSet.minEvictableTokens` | `200` | integer ≥ 0 | Results below this body estimate are never evicted. The default protects low-yield bodies; marker break-even is enforced separately. |
 
-The retired `compaction.excludeLastTurns` key is not accepted by settings v2. The temporary legacy mask uses a compiled six-turn fallback; working-set protection uses `context.workingSet.protectLastTurns`. Settings validation is strict, so an unknown key under this block fails startup with its exact path.
+Changes to any `context.*` key apply on the next turn (`src/domains/config/classify.ts`). The retired `compaction.excludeLastTurns` key is not accepted by settings v2. The temporary legacy mask uses a compiled six-turn fallback; working-set protection uses `context.workingSet.protectLastTurns`. Settings validation is strict, so an unknown key under this block fails startup with its exact path.
 
 `CLIO_CODER_LEGACY_MASK=1` enables the legacy stale-observation stage for compatibility. That stage rewrites the ledger rather than projecting a working set.
 
@@ -208,17 +225,15 @@ The retired `compaction.excludeLastTurns` key is not accepted by settings v2. Th
 - **`/context` overlay.** A working-set section under the category legend: the configured policy with its state (`policy structural-v2 · rearm 10% · no events yet` until the first event, `disabled` when `context.workingSet.enabled` is off, and `(last event by <policy>)` when the setting changed after an event), the non-default profile (for example `profile web-design`), rearm percentage, evicted item count, evicted tokens, event count, recall count, and churn. Evicted tokens render as one line after the legend rather than as a meter category, because they are outside the window rather than a slice of it.
 - **Transcript.** An evicted tool row keeps its full body and gains a dim `evicted · <reason>` tag. The transcript shows the ledger, never the projection, so `/resume`, `/tree`, `/fork`, and the HTML export are unaffected by eviction.
 - **`/context recall <ref>`.** Prints the ref, its evicted or summarized state, the token count, and any offload pointer, followed by the persisted body. Transcript only.
-- **Prompt cache line.** Every applied event stamps `working_set_evict` on the next assistant entry's `promptCache.expectedColdReasons`. When the last settled run came back cold for that reason, the overlay adds `last cold turn: working-set eviction (expected)` and drops the shell-reused-but-backend-cold warning, because the cold turn is explained rather than surprising.
-- **Notice.** One line per applied event: `[context engine] working set: N items evicted by <policy>; ~X -> ~Y tokens, recall by ref with context(scope="recall")`. The numbers are the plan's, priced over the visible ledger slice, and they are the same numbers the `contextEviction` entry, the `[Compaction] Reclaimed context` toast, and the overlay's `last compaction` line carry. The footer meter is a separate live estimate over the agent message list and can differ from them by the tool schemas and replay text it includes.
+- **Prompt cache line.** Every applied event stamps `working_set_evict` on the next assistant entry's `promptCache.expectedColdReasons`. When the last settled run came back cold for that reason, the overlay adds `last cache-affecting events: working-set eviction (reuse measured separately)` and drops the shell-reused-but-backend-cold warning, because the cold turn is explained rather than surprising.
+- **Notice.** One line per applied event: `[context engine] working set: N items evicted by <policy>; ~X -> ~Y tokens, recall by ref with context(scope="recall")`. The numbers are the plan's, priced over the visible ledger slice, and they are the same numbers the `contextEviction` entry and the overlay's `last compaction: reclaimed X -> Y tokens (working_set)` line carry. The footer meter is a separate live estimate over the agent message list and can differ from them by the tool schemas and replay text it includes.
+- **Declined eviction.** When a summary follows because nothing was evictable, one line says why before the summary runs: `[context engine] working set: nothing evictable …; llm_summary runs instead`, naming the protected window or `context.workingSet.enabled false`.
 
-Dispatched workers replay their own ledgers without the working-set stage.
-Automatic reduction uses the pressure threshold and rearm band. Recall markers
-contain tool identity, size, and a first-line preview; a reread restores current
-content when requested.
+Dispatched workers do not fold this layer's ledger entries and have no profile binding. Each worker keeps its own in-memory pressure guard (`src/domains/context/worker/pressure.ts`), described in [Worker context](worker-context.md).
 
 ## See also
 
-- `clio-coder context replay --sessions <path>...` replays Clio ledgers, and `--synthetic <ids>` replays the seeded procedural corpora, through the same fold, projection, and policy code with `none`, `random`, and `oracle` controls; `clio-coder context working-set --session <id|path>` prints one session's fold and path index. Both are described under [Working-set replay](../guide/commands-and-modes.md#working-set-replay). Reports include per-reason items and tokens, events and checkpoints per trace, modeled cache-miss cost, and overflow reductions. With `--profile data-analysis` or `--profile web-design`, a profile section lists effective settings and pairs every policy/budget row with a default-profile run over the same loaded corpus. JSON schema `clio-coder-context-replay-v3` contains the same profile fields and baseline results. Copy a changing session corpus before comparing runs.
+- `clio-coder context replay --sessions <path>...` replays Clio ledgers, and `--synthetic <ids>` replays the seeded procedural corpora, through the same fold, projection, and policy code with `none`, `random`, and `oracle` controls; `clio-coder context working-set --session <id|path>` prints one session's fold and path index. Both are described in [Commands and modes](../guide/commands-and-modes.md). Reports include per-reason items and tokens, events and checkpoints per trace, modeled cache-miss cost, and overflow reductions. With `--profile data-analysis` or `--profile web-design`, a profile section lists effective settings and pairs every policy/budget row with a default-profile run over the same loaded corpus. JSON schema `clio-coder-context-replay-v3` contains the same profile fields and baseline results. Copy a changing session corpus before comparing runs.
 - [context-engine.md](context-engine.md) for context window resolution, token accounting, and how this stage sits ahead of summary compaction.
 - [session-lifecycle.md](session-lifecycle.md) for the ledger format, active-path lineage, and branching.
 - [glossary.md](../guide/glossary.md) for the one-line definitions of these terms.

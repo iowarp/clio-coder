@@ -7,9 +7,11 @@ Use this guide to connect a provider and choose where chat and workers run. Exac
 | Task | Entry point |
 | --- | --- |
 | Connect a model | [First-run flow](#first-run-flow), or `clio-coder configure --quick` when you already know the endpoint |
-| Edit saved settings | `clio-coder configure --settings` or TUI `/settings` (alias `/config`) |
+| Understand how an existing home picks a chat route | [Chat route detection](#chat-route-detection) |
+| Edit saved settings | `clio-coder configure --settings` or TUI `/settings`; TUI `/config` reruns setup |
 | Inspect or probe targets | `clio-coder targets` |
 | Check a model list | `clio-coder models --target <id>` |
+| Make a target report cost | [Pricing and cost provenance](#pricing-and-cost-provenance) |
 | Find exact keys, flags, and project file owners | [Configuration reference](configuration-reference.md) |
 | Troubleshoot startup and provider errors | [Troubleshooting checklist](#troubleshooting-checklist) |
 
@@ -21,7 +23,7 @@ User settings are stored at `<configDir>/settings.yaml`. Project layers are `.cl
 
 ## First-run flow
 
-For terminal setup, run `clio-coder configure` or start `clio-coder` without a chat target. For browser setup, run `clio-coder gui --open` and use **Guided setup** on the home page; a prior configure run is optional. Both presentations run the same connection wizard. Choose **Guided setup** and then the source you recognize: an app on this computer, a model server, an AI subscription, or a provider account/API. Clio chooses a unique internal connection id, fills known local addresses, and lists the relevant providers. An installed coding agent is a separate worker-only choice when adding another connection.
+For terminal setup, run `clio-coder configure` or start `clio-coder` in a new home. An existing home whose chat route is missing or unusable first tries [chat route detection](#chat-route-detection) and starts configure only when nothing is detected. For browser setup, run `clio-coder gui --open` and use **Guided setup** on the home page; a prior configure run is optional. Both presentations run the same connection wizard. Choose **Guided setup** and then the source you recognize: an app on this computer, a model server, an AI subscription, or a provider account/API. Clio chooses a unique internal connection id, fills known local addresses, and lists the relevant providers. An installed coding agent is a separate worker-only choice when adding another connection.
 
 1. Choose the provider or app. Provide a key or complete browser sign-in only when required.
 2. Confirm the server address when that provider has one. Clio performs a passive reachability and model-catalog probe when the runtime supports it; this sends no generation request.
@@ -29,9 +31,32 @@ For terminal setup, run `clio-coder configure` or start `clio-coder` without a c
 4. Review the evidence. The screen distinguishes reachable, live model discovery, catalog/cache fallback, and facts not checked. The compact summary keeps Save, Back, and Cancel visible on a short terminal. **Connection and machine details** shows usable CPUs, available memory, and automatic local-worker sizing. Clio states that GPU/VRAM, model fit, answer quality, and tool use were not tested.
 5. Save. The first connection becomes the chat and fleet model; shipped defaults handle the remaining settings.
 
+When a home has no usable chat route, the first screen of the terminal wizard lists the routes Clio detected before the source categories. Each reads `Use <runtime> / <model>` with the evidence it came from. Choosing one skips the provider, address and credential steps and goes to review, or to the model step when the detection carried no model. The detection rules are in [Chat route detection](#chat-route-detection).
+
 `clio-coder configure --quick` retains the URL-first shortcut. It identifies compatible local runtimes where possible, requires live model discovery, and is intended for users who already know the endpoint.
 
 For saved defaults use `clio-coder configure --settings`. Each area shows its complete setting catalog in one grouped menu; uncommon controls are not hidden behind a second page. Chat, fleet, and proactive-memory routes select a connection and then offer its discovered/catalog models instead of asking for a handwritten model id. **Use connection default** keeps inheritance, so later changes to that connection’s default also apply to the route. Proactive memory offers **Rules only** to avoid a background model call. Jump to a section with `clio-coder configure --section targets|chat|fleet|context|safety|interface|integrations|advanced`. Runtime IDs available in the installed build come from `clio-coder configure --list`.
+
+## Chat route detection
+
+A bare `clio-coder` start in an interactive terminal checks the saved chat route before the TUI boots. Headless `run`, ACP and non-TTY starts never detect or configure, unless `CLIO_CODER_INTERACTIVE=1` forces interactive mode. The check is `classifyDefaultTarget` in [`src/cli/default-target.ts`](../../src/cli/default-target.ts), a credential-presence check that does no network work. Its verdict is `usable`, `no-target`, `no-model`, `ineligible-runtime` (the target's runtime is not an HTTP runtime) or `missing-credential`. A user whose route is `usable` pays nothing for what follows.
+
+| Home state | Verdict | What the start does |
+| --- | --- | --- |
+| New: none of the config, data or state directories existed | not usable | Skips detection and runs `clio-coder configure`, whose wizard lists detected routes first. |
+| Existing | `usable` | Boots with the saved route. |
+| Existing | any other verdict | Runs detection. The first detected route that carries a model is used and the start continues without configure. With none, configure runs as for a new home. |
+
+[`detectChatRoutes`](../../src/cli/detect-chat-routes.ts) considers only HTTP runtimes that offer chat and can drive the main agent. It collects routes in this order, and the startup path takes the first one that has a model:
+
+1. Usable configured targets. A target counts when its runtime is eligible and, if it needs a credential, one is present. Its model is its `defaultModel`, else the runtime's curated model.
+2. Runtime-declared environment keys. A runtime with `credentialsEnvVar` (for example `OPENAI_API_KEY`) and a nonempty variable yields a route whose target reads that variable with `auth.apiKeyEnvVar`, so no key is stored. Gateway runtimes that need an operator-supplied URL, such as `alcf`, are skipped.
+3. Clio's own stored logins. A `credentials.yaml` entry for an eligible runtime counts when its type matches the runtime's auth: an OAuth login for an OAuth runtime, an API key for an API-key runtime. The target references the stored credential with `auth.oauthProfile` or `auth.apiKeyRef`.
+4. Local servers on the default loopback ports. Clio asks `http://127.0.0.1:<port>/v1/models`, or `/api/tags` for Ollama, under one shared 400 ms deadline. It follows no redirects, sends no credentials, and takes the first model the server lists. The ports are `llamacpp` 8080, `lmstudio` 1234, `ollama` 11434, `vllm` 8000, `sglang` 30000, `litellm` 4000, and 8000 for `lemonade`, `openai-compat` and `anthropic-compat`.
+
+The curated model of a route found through steps 1 to 3 is the runtime's `defaultModel`, which is `gpt-6-luna` for `openai` and `openai-codex`, or the first id of a model list the runtime owns, such as `mercury-2.5` for `inception`. A runtime whose models come only from the Pi catalog, such as `anthropic`, has no curated model because catalog order is alphabetical and recommends nothing. Its route is listed in the wizard as `Use <runtime> / choose model` and skipped by the startup pick.
+
+[`useDetectedChatRoute`](../../src/cli/detect-chat-routes.ts) applies the pick and prints `Chat: <runtime> / <model> from <source>. Change it with /config.` It writes the target and the chat route to the user `settings.yaml` only when no chat route exists: `chat.target` is empty in memory and absent from the saved file. A saved `chat.target` is the user's choice even when it cannot be used now, because its credential is missing, it has no model, its runtime cannot drive the main agent, or it names a target that is no longer configured. In those cases the detected route applies to this session alone, the saved route stays as written, and the notice adds `Session only; saved chat route unchanged.` A configured route is never overwritten.
 
 ## Advanced settings
 
@@ -52,19 +77,19 @@ Settings YAML paths shown in the inventory below are canonical. Use [Configurati
 
 ## Strict validation and lifecycle repair
 
-Settings use one strict version-2 schema. Unknown keys and invalid values stop startup with a path-specific diagnostic. Objects merge by key; arrays and scalars replace the lower layer. Project layers are read only after the workspace's project settings are trusted; until then Clio ignores them and prints a notice, and `clio-coder config trust settings` shows the captured files and how to approve exactly those bytes. Credential-bearing keys (`auth`, `apiKey`, `token`, `secret`, `password`) and `safety.autonomy` in project layers are dropped with a diagnostic.
+Settings use one strict version-2 schema. Unknown keys and invalid values stop startup with a path-specific diagnostic. Objects merge by key; arrays and scalars replace the lower layer. Project layers are read only after the workspace's project settings are trusted; until then Clio ignores them and prints a notice, and `clio-coder config trust settings` shows the captured files and how to approve exactly those bytes. Workspace trust gates four more project surfaces the same way (`safety`, `hooks`, `extensions` and `plugins`); project extensions and library packages load only after `clio-coder config trust extensions` or `plugins` approves their install state, as described in [Commands and modes](commands-and-modes.md). Credential-bearing keys (`auth`, `apiKey`, `token`, `secret`, `password`) in project layers are dropped with a diagnostic. A project `safety.autonomy` is kept only when it is no looser than the user's level, so it can tighten `yolo` to `default` and never the reverse; a looser value is dropped with a diagnostic.
 
 `clio-coder upgrade` runs the registered version-1 migration and preserves the original as `settings.yaml.v1.bak`. `clio-coder doctor --fix` repairs selected installation state. It also rewrites a retired enum value, such as `safety.autonomy: auto-edit`, to the replacement the validation error names, and YAML 1.1 `on`/`off` booleans, preserving comments and formatting. Plain `doctor` lists those repairs without writing them. `doctor --fix` does not run migrations or remove retired keys. See [settings validation and migration](../../src/core/config.ts).
 
 ## Live routing vs saved defaults
 
-Saved `chat.*`, `fleet.default.*`, and `context.memory.*` values seed routing at session start. The active interactive session owns its current route. `/model`, `/thinking`, and `/settings` can change that route; choose apply-this-session, save for this project, or save globally where offered. Project saves write `.clio-coder/settings.local.yaml` and require existing project settings to be trusted; Clio approves the exact bytes it writes. A write from another process updates saved defaults but does not redirect a running session. Clio saves a setting by editing the YAML document in place, so a save changes only the keys that changed. Comments, blank lines, quoting (a quoted `'on'` stays quoted), flow style and list indentation elsewhere in the file are kept.
+Saved `chat.target`, `chat.model`, `chat.thinkingLevel`, `chat.modelPicker.cycleSet`, `fleet.default.target`, `.model` and `.thinkingLevel`, and `context.memory.target` and `.model` seed routing at session start. The active interactive session owns its current route. `/model`, `/thinking`, and `/settings` can change that route; choose apply-this-session, save for this project, or save globally where offered. Project saves write `.clio-coder/settings.local.yaml` and require existing project settings to be trusted; Clio approves the exact bytes it writes. A write from another process updates saved defaults but does not redirect a running session. Clio saves a setting by editing the YAML document in place, so a save changes only the keys that changed. Comments, blank lines, quoting (a quoted `'on'` stays quoted), flow style and list indentation elsewhere in the file are kept.
 
 Other settings apply at the boundary shown in the inventory. The routing classifier is in [`src/core/settings-layers.ts`](../../src/core/settings-layers.ts) and [`src/core/settings-controls.ts`](../../src/core/settings-controls.ts).
 
 ## Settings Center
 
-Open `/settings` in the TUI, `clio-coder configure --settings`, or Settings in the GUI. The TUI starts with **Recent & Pinned**, **Connections**, **Models & Inference**, **Chat**, **Agents & Delegation**, **Fleet**, **Context & Memory**, **Workspace & Files**, **Permissions & Limits**, **Appearance**, **Integrations**, and **Advanced**, in that order. Configure and GUI use the eight sections listed above. A connection is the provider/app/server entry stored as a `target`; the CLI's `targets` commands and the YAML keys keep that technical name.
+Open `/settings` in the TUI, `clio-coder configure --settings`, or Settings in the GUI. The TUI command `/config` is separate: it runs the configure flow inside the TUI and applies the saved routing to the running session, while `/settings` stays the settings center (see [commands and modes](commands-and-modes.md)). The TUI starts with **Recent & Pinned**, **Connections**, **Models & Inference**, **Chat**, **Agents & Delegation**, **Fleet**, **Context & Memory**, **Workspace & Files**, **Permissions & Limits**, **Appearance**, **Integrations**, and **Advanced**, in that order. Configure and GUI use the eight sections listed above. A connection is the provider/app/server entry stored as a `target`; the CLI's `targets` commands and the YAML keys keep that technical name.
 
 Use **Connections → Add a target** to reopen Guided setup inside the TUI. It runs the same setup flow as configure, including model inventories, passive checks, and review before Save. **Chat** selects the connection and model that answer you. **Fleet → Default model** selects the connection, model, and thinking level for delegated work; profiles and agent routes stay in Fleet. **Permissions & Limits** opens with **Autonomy**, ahead of worker approvals, external-agent tool permissions and spending/tool limits, in both configure and `/settings`.
 
@@ -74,25 +99,13 @@ In the TUI, use arrows to move, Enter to open, and `/` to filter by name or cano
 
 Configure edits saved global defaults. It does not offer the TUI's session/project scope menu or redirect an already-running chat session. In **Advanced**, the TUI's **Check setup** and **Edit all settings** rows show the terminal commands for diagnostics and the validated file editor.
 
-In the GUI, **Connections → Guided setup** runs the same connection wizard before
-or after opening a project. A configured home page goes straight to project
-selection; an incomplete saved chat route offers repair. Setup does not send a
-generation request. Live, catalog, and cached model evidence retain the wizard's
-labels and limitations. Keys are entered in a masked field or supplied through
-an existing credential or environment variable; supported subscriptions offer an
-explicit browser sign-in link. Setup replies are not stored as conversations or
-operation history. OAuth credentials are saved when sign-in succeeds, while
-connection settings wait for **Save target**. Adding or editing another connection
-preserves explicit chat, fleet, and memory routes. Saved settings in the GUI apply
-to new conversations; active conversation model controls have their own scope.
-See [the graphical application guide](commands-and-modes.md#graphical-application)
-for launch, cancellation, credential storage, and project override behavior.
+In the GUI, **Connections → Guided setup** runs the same connection wizard before or after opening a project, with the same labels for live, catalog and cached model evidence. Setup sends no generation request. OAuth credentials are saved when sign-in succeeds, while connection settings wait for **Save target**, and adding or editing a connection preserves explicit chat, fleet and memory routes. Launch, cancellation, credential storage and project override behavior are described in the [graphical application guide](gui.md).
 
 ## Settings inventory
 
 This is the version-2 durable schema shipped in `DEFAULT_SETTINGS`. Validation is strict: a path absent from this inventory is rejected, including a retired version-1 path. `clio-coder upgrade` performs the one-time v1-to-v2 rename before configuration-domain load and keeps the original as the sibling `settings.yaml.v1.bak` backup.
 
-"When it applies" follows the configuration classifier. **Immediately** means a running process observes the value without rebuilding runtime state. **Next turn** and **next dispatch** mean current work finishes on the old value. **Next session** identifies routing defaults copied into session-owned state at launch. **Restart** means process or pane-host setup must be rebuilt.
+"When it applies" follows [`settingsChangeKind`](../../src/domains/config/classify.ts), whose three buckets the [configuration reference](configuration-reference.md#effect-timing) names hot reload, next turn and restart required. **Immediately** is hot reload: a running process observes the value without rebuilding runtime state. **Next turn** and **next dispatch** are the next-turn bucket, and current work finishes on the old value. **Next session** marks routing defaults copied into session-owned state at launch, which a later save does not push into a running session. **Restart** means process or pane-host setup must be rebuilt.
 
 ### Structural and target catalog
 
@@ -152,6 +165,7 @@ explains worker route selection.
 | `fleet.agentProfiles` | `{}` | next dispatch |
 | `fleet.speculativeDispatch` | `false` | next turn |
 | `fleet.defaultNode` | `null` | next dispatch |
+| `fleet.default.node` | unset | next dispatch |
 | `fleet.nodes` | `[]` | next dispatch |
 | `fleet.adaptiveRouting.roles` | `[]` | next dispatch |
 | `fleet.adaptiveRouting.postures` | `[]` | next dispatch |
@@ -187,8 +201,8 @@ explains worker route selection.
 | `context.compaction.model` | unset | next turn |
 | `context.compaction.systemPrompt` | unset | next turn |
 | `context.memory.enabled` | `true` | next turn |
-| `context.memory.target` | `null` | next turn |
-| `context.memory.model` | `null` | next turn |
+| `context.memory.target` | `null` | next session |
+| `context.memory.model` | `null` | next session |
 | `context.memory.cadenceToolCalls` | `10` | next turn |
 | `context.memory.trajectorySteps` | `8` | next turn |
 | `context.memory.maxOutputTokens` | `2000` | next turn |
@@ -200,7 +214,7 @@ Configure `context.memory.target` and `context.memory.model` to opt into model-b
 
 ### System One
 
-System One is experimental and off by default; its keys and sites may change between releases, and nothing waits on a decision engine's answer. `systemOne.engines` maps a name you choose to `{ kind, target, model?, mode?, profile? }`, where `kind` is `systemone` or `llm`, `target` is a `targets[].id`, `mode` applies only to `llm` and `profile` (the served model's capability profile, such as `julia-1`) only to `systemone`. `systemOne.sites` binds a site (`turn`, `toolCall`, `toolResult`, `turnEnd`, `relevance`, `consult`, `drafts`) to an engine name, or to `{ engine, timeoutMs?, tasks? }`, where `tasks` routes one of the site's decision tasks to another declared engine. A site with no entry is off. `systemOne.cuts` holds per-build overrides keyed by answering build, then `<site>.<key>`, with values from 0.01 to 0.99. The [System One guide](system-one.md) explains each key and which tier of engine suits which site, and `systemOne.sites.consult` needs a restart because the `consult` tool is registered at startup. `fleet.speculativeDispatch` is experimental too: it holds the worker a fitted `turn` reading predicts.
+System One is experimental and off by default; its keys and sites may change between releases, and nothing waits on a decision engine's answer. `systemOne.engines` maps a name you choose to `{ kind, target, model?, mode?, profile? }`, where `kind` is `systemone` or `llm`, `target` is a `targets[].id`, `mode` applies only to `llm` and `profile` (the served model's capability profile, such as `julia-1`) only to `systemone`. `systemOne.sites` binds a site (`turn`, `toolCall`, `toolResult`, `turnEnd`, `relevance`, `consult`, `drafts`, `steer`) to an engine name, or to `{ engine, timeoutMs?, tasks? }`, where `tasks` routes one of the site's decision tasks to another declared engine. A site with no entry is off. `systemOne.cuts` holds per-build overrides keyed by answering build, then `<site>.<key>`, with values from 0.01 to 0.99. The [System One guide](system-one.md) explains each key and which tier of engine suits which site, and `systemOne.sites.consult` needs a restart because the `consult` tool is registered at startup. `fleet.speculativeDispatch` is experimental too: it holds the worker a fitted `turn` reading predicts.
 
 | Key | Default | When it applies |
 | --- | --- | --- |
@@ -213,11 +227,11 @@ System One is experimental and off by default; its keys and sites may change bet
 
 ### Safety
 
-The safety-limit leaves have no one-process `CLIO_CODER_*` overrides in the current schema. Resolution follows the normal settings stack, from session or project layers where supported through user `settings.yaml`, then the compiled default. `safety.autonomy` is an operator choice: only the user layer and operator session controls can set it.
+The safety-limit leaves have no one-process `CLIO_CODER_*` overrides in the current schema. Resolution follows the normal settings stack, from session or project layers where supported through user `settings.yaml`, then the compiled default. `safety.autonomy` is an operator choice: the user layer and operator session controls set it, and a project layer can only tighten it.
 
 | Key | Default | When it applies |
 | --- | --- | --- |
-| `safety.autonomy` | `default` | immediately; user layer or operator session control only |
+| `safety.autonomy` | `default` | immediately; user layer or operator session control, and a project layer can only tighten it |
 | `safety.limits.sessionCostUsd` | `5` | next turn |
 | `safety.limits.chatToolCallsPerTurn` | `60` | next turn |
 | `safety.limits.readBytesPerCall` | `51200` | next turn |
@@ -273,15 +287,13 @@ On macOS, `sandbox-exec` provides a seatbelt backend when its probe succeeds. Th
 | `integrations.music.station` | `http://radio.cliamp.stream/lofi/stream` | immediately, at the next `/music` |
 | `integrations.music.agentControl` | `false` | restart |
 
-The retired v1-only paths `identity`, `background.thinkingLevel`, `theme`, and `compaction.excludeLastTurns` have no v2 replacement. Fresh v2 files naming them receive targeted removal diagnostics. The v1 migrator drops them with the reason recorded in its migration report; they are tombstones, not executable aliases.
-
-Four version-2 paths are retired the same way. `integrations.externalAgents.entries[].permissionTimeoutMs` did nothing, because a delegated agent's permission ask is decided at once and never waits for the operator; `integrations.externalAgents.defaults.permissionTimeoutMs` still bounds Clio's own ACP server. `integrations.externalAgents.entries[].labels` was never read or displayed. `fleet.decisionProfiles` and `turnControl.interpretation` belonged to the decision layer that System One replaced: bind an engine under `systemOne.engines` and `systemOne.sites` instead, as the [System One guide](system-one.md#migration-from-057) describes. An empty `fleet.decisionProfiles: {}`, which `init` wrote from 0.5.3 through 0.5.7, is accepted silently, and any other use of these two paths is refused. A user `settings.yaml` naming a retired path is refused with a targeted removal message, and a project or local layer drops the leaf with the same diagnostic. The v1 migrator drops the two per-agent keys from moved `delegation.agents` entries and records why.
+Renamed version-1 paths and retired keys, including the version-2 keys `fleet.decisionProfiles`, `turnControl.interpretation` and the per-agent `permissionTimeoutMs` and `labels`, are listed in the [version 1 to version 2 key map](configuration-reference.md#version-1-to-version-2-key-map) and [retired keys and values](configuration-reference.md#retired-keys-and-values). A user `settings.yaml` that names one is refused with a targeted removal message, and a project or local layer drops the leaf with the same diagnostic. The decision-layer replacement is described in the [System One guide](system-one.md).
 
 ---
 
 ## Configure targets
 
-In the TUI, open `/settings connections` (or `/settings targets`, `/config targets`), choose **Add a target**, or open a connection and choose **Edit URL, runtime and default model**. The configure wizard runs in the composer dock, with the same probing, model validation and review-before-save behavior. Enter advances, Esc goes back, and Ctrl+C cancels target setup. **Save target** writes global target settings and keeps explicit chat, fleet and memory route defaults. Browser sign-in stores credentials immediately; other target settings wait for Save.
+In the TUI, open `/settings connections` (or `/settings targets`), choose **Add a target**, or open a connection and choose **Edit URL, runtime and default model**. The configure wizard runs in the composer dock, with the same probing, model validation and review-before-save behavior. Enter advances, Esc goes back, and Ctrl+C cancels target setup. **Save target** writes global target settings and keeps explicit chat, fleet and memory route defaults. Browser sign-in stores credentials immediately; other target settings wait for Save.
 
 Use guided `clio-coder configure` for source-led setup, `clio-coder configure --quick` for the URL-first shortcut, `clio-coder configure --section targets` for the target console, or `clio-coder targets add` for the target wizard. The non-interactive flag surface is documented by `clio-coder configure --help` and implemented in [`src/cli/configure.ts`](../../src/cli/configure.ts).
 
@@ -409,9 +421,60 @@ Clio reads both files at startup and rereads them whenever the `/model` overlay 
 
 ## Target fields
 
-A `targets[]` entry accepts `id` and `runtime` (both required), `url`, `auth`, `defaultModel`, `wireModels`, `capabilities`, `lifecycle`, `gateway`, `pricing`, `cache`, `lmstudio`, `litellm`, `ollama`, `maxConcurrentRequests` and `trustedUnmediated`. Any other key is rejected. When `defaultModel` is omitted, the first `wireModels` entry is used.
+A `targets[]` entry accepts `id` and `runtime` (both required), `url`, `auth`, `defaultModel`, `wireModels`, `capabilities`, `lifecycle`, `gateway`, `pricing`, `cache`, `lmstudio`, `litellm`, `ollama`, `maxConcurrentRequests` and `trustedUnmediated`. Any other key is rejected. Target ids are unique. When `defaultModel` is omitted, the first `wireModels` entry is used.
 
-`auth` takes `apiKeyEnvVar` (environment variable read per request), `apiKeyRef`, `oauthProfile` and `headers`. `pricing` takes `input` and `output` (both required) plus `cacheRead` and `cacheWrite`. `cache.retention` is `none`, `short` or `long`. `maxConcurrentRequests` is an explicit request-slot limit for the endpoint and overrides live discovery. `lifecycle` is `user-managed` or `clio-coder-managed`; `user-managed` keeps Clio from loading or unloading models on that server. `trustedUnmediated: true` lets a runtime that runs its own tool loop (claude-code, codex-cli, pi-cli, opencode-cli, antigravity) take write-capable dispatch work under its own authority; without it such work is refused, and the opt-in is recorded on the run receipt. Only user settings may set it; a project layer's value is ignored.
+`auth` takes `apiKeyEnvVar` (environment variable read per request), `apiKeyRef`, `oauthProfile` and `headers`. `capabilities` takes the booleans `chat`, `tools`, `reasoning`, `vision`, `audio`, `embeddings`, `rerank` and `fim`, the enums `toolCallFormat`, `thinkingFormat` and `structuredOutputs`, and the integers `contextWindow` and `maxTokens`. `gateway: true` marks the endpoint as a gateway. `pricing` is `free` or a rate map; see [pricing and cost provenance](#pricing-and-cost-provenance). `cache.retention` is `none`, `short` or `long`; `cache.deployment` binds the read-only control URL of a `llamacpp`, `vllm` or `lmstudio` deployment (`backend`, `controlUrl`, `model`, `build`, and an optional `gatewayDeploymentId`) so Clio can observe its cache state; `cache.warm` bounds startup prewarm with `startup`, `maxInputTokens`, `maxDurationMs` and `cooldownMs`, and startup prewarm does nothing while `cache.retention` is `none`. `maxConcurrentRequests` is an explicit request-slot limit for the endpoint and overrides live discovery. `lifecycle` is `user-managed` or `clio-coder-managed`; `user-managed` keeps Clio from loading or unloading models on that server. `trustedUnmediated: true` lets a runtime that runs its own tool loop (`claude-code`, `codex-cli`, `pi-cli`, `opencode-cli`, `antigravity-code`) take write-capable dispatch work under its own authority; without it such work is refused, and the opt-in is recorded on the run receipt. Only user settings may set it; a project layer's value is ignored.
+
+## Pricing and cost provenance
+
+Pricing is declared per target in `targets[].pricing` ([`src/core/config.ts`](../../src/core/config.ts)). There is no per-model price: every model served through one target shares that target's rates. The value is the word `free` or a rate map in USD per million tokens:
+
+    targets:
+      - id: gateway
+        runtime: litellm
+        url: http://gateway.example:4000
+        pricing:
+          input: 3
+          output: 15
+          cacheRead: 0.3
+          cacheWrite: 3.75
+      - id: lab-gpu
+        runtime: openai-compat
+        url: http://lab.example:8000/v1
+        pricing: free
+
+`input` and `output` are required nonnegative numbers. `cacheRead` and `cacheWrite` are optional and read as 0 when omitted. Any other key is rejected. `configure` has no pricing flag, so set it in `settings.yaml` directly or through `clio-coder configure --edit`.
+
+[`resolveEffectivePricing`](../../src/domains/providers/catalog.ts) turns a target, its runtime and the wire model id into rates plus a provenance label. It takes the first rule that matches:
+
+| Order | Rule | Rates | Provenance |
+| --- | --- | --- | --- |
+| 1 | The target declares a rate map | The declared rates | `known`, or `known_free` when every declared rate is 0 |
+| 2 | The target declares `pricing: free` | 0 | `known_free` |
+| 3 | The runtime tier is `local-native` (`lmstudio`, `ollama`, `llamacpp` and its variants, `vllm`, `sglang`, `lemonade`) | 0 | `known_free` |
+| 4 | The Pi catalog has a row for the runtime and wire model | The catalog rates | `estimated` |
+| 5 | None of the above | None | `unknown` |
+
+Only runtimes that map to a Pi catalog provider can reach rule 4: `anthropic`, `anthropic-max`, `claude-code`, `claude-sdk`, `bedrock`, `deepseek`, `google`, `groq`, `mistral`, `openai`, `openai-codex` and `openrouter`. The catalog is static data in the pinned Pi dependency and not a live price feed. Runtimes outside that map and outside rule 3, such as `alcf`, `inception` and the subprocess delegation runtimes, stay `unknown` until a target prices them. Protocol-tier runtimes (`litellm`, `openai-compat`, `anthropic-compat`, `systemone`) are never assumed free, because a proxy can front a paid cloud model. A LiteLLM target therefore reports `unknown` cost until it declares `pricing`, even when the model behind it is local. Workers price from the same target rates; a cost the provider call itself reports is kept as reported.
+
+Cost appears in these places, and every one reads the provenance. How each surface records it and how a receipt seals it is described in [observability](../architecture/observability.md).
+
+- Sealed run receipts carry `costUsd` and `costProvenance`.
+- The footer shows the session total, and the footer dashboard page labels it `Tracked cost` and lists the session ceiling beside it as `Clio ceiling`, which reads `none` when `safety.limits.sessionCostUsd` is `0`.
+- `/usage` shows a `cost` row for the session and for each model.
+- The dispatch board, `clio-coder fleet` output and the `monitor` tool show a cost per run.
+- The exit summary prints `Total cost`, and under `full` a `Cost` line per model. It words the label itself: `(known)`, `(free)`, an estimate, `(unknown pricing in total)` or `unknown`.
+
+| Provenance | What the footer, `/usage` and run tables show |
+| --- | --- |
+| `known` | A dollar amount such as `$1.23`. |
+| `known_free` | `$0.00 local` when every priced call was free. |
+| `estimated` | `~$1.23 est`. |
+| `unknown` | Tokens are still counted, but the call adds nothing to the dollar total. A session with some priced calls shows `$1.23 +?`. A session with none shows no cost field in the footer and `/usage`, and `not measured` in the fixed-width tables. |
+
+Provenance also decides what the cost ceiling sees. `safety.limits.sessionCostUsd` gates chat requests only on routes whose provenance is `known` or `estimated`, and gates dispatched routes that have a nonzero rate. `known_free` and `unknown` routes are not counted, so work on an unpriced LiteLLM target spends outside the ceiling until the target declares `pricing`. A dispatch routing intent that sets `maxCostUsd` prices a route with no rates at a fixed admission estimate of 1 USD.
+
+`safety.limits.sessionCostUsd` accepts any finite number of at least 0, fractions included. `0` means no session ceiling. The session gate admits every paid request, and an interactive session never waits on a raise. A dispatch plan and a Scout continuation carry a ceiling of 0 that enforces nothing, and a fleet preview skips its remaining-budget check. A negative value fails settings validation with `safety.limits.sessionCostUsd: expected a number >= 0, got <value>`. `clio-coder configure` shows a ceiling of 0 as `none` and a positive one as `$<amount> USD` on its `Session cost limit` row, and its prompt accepts 0 to remove the ceiling. A positive ceiling still refuses a paid request once priced spend reaches it, and `clio-coder run` then exits 4 with `budget_ceiling` ([exit codes](exit-codes-and-output.md)).
 
 ## Local model settings
 
@@ -454,11 +517,22 @@ Model-family quirks belong to the local model catalog, not the target descriptor
 
 ## Model listing and refresh
 
-Use `clio-coder models --target <id>` to inspect configured, discovered, and catalog models. `--json` is available for scripts; `--offline` avoids live refresh; `--target` is the only other flag. The model-list command is implemented in [`src/cli/models.ts`](../../src/cli/models.ts).
+Use `clio-coder models [search] [--target <id>] [--json] [--offline]` to inspect configured, discovered, and catalog models. The optional positional filters rows by a search term, `--json` is available for scripts, `--offline` skips live probing and uses cached, configured and catalog hints, and `--target` limits the listing to one target. Live probing is the default. A target whose provider lists models live is asked; when it cannot be asked, the list is the cached list or the provider catalog with a note saying why. The model-list command is implemented in [`src/cli/models.ts`](../../src/cli/models.ts), and the discovery contract is in the [model catalog](../architecture/model-catalog.md).
 
-## Built-in runtime categories
+## Built-in runtimes
 
-Runtime IDs and support groups vary by installed build. Use `clio-coder configure --list` for user-facing runtimes and `clio-coder configure --list --all` to include aliases and hidden registrations. Chat targets must resolve to an orchestrator-eligible runtime; worker-only SDK and subprocess runtimes are selected through fleet routes. See [runtime eligibility](../../src/domains/providers/runtime-resolution.ts).
+`clio-coder configure --list` prints the user-facing runtime ids and `clio-coder configure --list --all` adds the hidden registrations. A runtime descriptor fixes its kind (`http`, `sdk` or `subprocess`), tier, API family and auth method; the registry is [`builtins.ts`](../../src/domains/providers/runtimes/builtins.ts). Only `http` runtimes can drive the main agent, so a chat target must resolve to one. The `sdk` and `subprocess` runtimes are worker-only and are selected through fleet routes or `/run`. The tier also decides pricing, as [pricing and cost provenance](#pricing-and-cost-provenance) describes.
+
+| Tier | Runtime ids | API family and auth |
+| --- | --- | --- |
+| `cloud` | `openai`, `openai-codex`, `anthropic`, `anthropic-max`, `google`, `mistral`, `groq`, `deepseek`, `openrouter`, `bedrock`, `inception`, `alcf` | `openai` uses `openai-responses`, `openai-codex` uses `openai-codex-responses`, `anthropic` and `anthropic-max` use `anthropic-messages`, `google` uses `google-generative-ai`, `mistral` uses `mistral-conversations`, `bedrock` uses `bedrock-converse-stream`, and `groq`, `deepseek`, `openrouter`, `inception` and `alcf` use `openai-completions`. Auth is an API key from the runtime's variable (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GOOGLE_API_KEY`, `MISTRAL_API_KEY`, `GROQ_API_KEY`, `DEEPSEEK_API_KEY`, `OPENROUTER_API_KEY`, `INCEPTION_API_KEY`), OAuth for `openai-codex`, `anthropic-max` and `alcf`, or the AWS SDK credential chain for `bedrock`. |
+| `local-native` | `lmstudio`, `ollama`, `llamacpp`, `vllm`, `sglang`, `lemonade` | `ollama` speaks its native API and needs no key. The others use `openai-completions` with an optional key. They probe the server, report loaded models and serving windows, and price as free. |
+| `protocol` | `openai-compat`, `anthropic-compat`, `litellm` | Generic endpoints that carry no local-server assumptions, over `openai-completions` or `anthropic-messages`. `litellm` is a gateway runtime with per-route capability discovery. They never price as free. |
+| `subscription` | `claude-code`, `claude-sdk`, `codex-cli`, `opencode-cli`, `pi-cli`, `antigravity-code` | Worker-only. `claude-code` runs the installed `claude` CLI and `claude-sdk` the Claude Agent SDK, both on the CLI's own login. `codex-cli`, `opencode-cli`, `pi-cli` and `antigravity-code` run the installed command headlessly under its own login. `claude-code` and those four run their own tool loop, so write-capable dispatch work on them needs the target's `trustedUnmediated`. |
+
+Hidden registrations stay resolvable by id: `llamacpp-anthropic`, `llamacpp-completion`, `llamacpp-embed` and `llamacpp-rerank` are the other surfaces of one llama.cpp server, `lemonade-anthropic` is Lemonade's Anthropic surface, `systemone` is the System One decision server, and `typesafe-jev` is its hosted engine. `alcf` is documented in the [ALCF provider contract](../architecture/alcf-provider.md). A custom runtime joins the registry as the [provider adapter cookbook](../architecture/provider-adapter-cookbook.md) describes. The Claude Agent SDK is an optional dependency that the installer skips; see the [installation guide](installation-and-lifecycle.md) for how `claude-sdk` obtains it on first use.
+
+`inception` declares no reasoning support and pins `reasoning_effort: "instant"` on every chat request, because Mercury's reasoning is not observable over its API and any higher effort returns an empty completion. Thinking controls supplied by callers are still removed for it.
 
 ## Auth
 
@@ -471,9 +545,15 @@ Runtime IDs and support groups vary by installed build. Use `clio-coder configur
 
 `auth login` also accepts `--api-key <value>`. Prefer `clio-coder configure --api-key-env <VAR>` (the target's `auth.apiKeyEnvVar`): Clio reads the variable when making a request and stores no key. Stored API keys and OAuth credentials live in `credentials.yaml` in the config directory with mode `0600`, but are plaintext and are not encrypted. The auth CLI and storage are in [`src/cli/auth.ts`](../../src/cli/auth.ts) and [`src/domains/providers/auth/`](../../src/domains/providers/auth/index.ts).
 
+For one request, Clio resolves a credential in this order: the per-process API key override that `--api-key` installs for the active target; a stored credential for the target's provider id (an API key, or an OAuth login); then the environment, where the target's `auth.apiKeyEnvVar` or else the runtime's own variable is read first and the provider's known variables follow. The provider id is the target's `auth.oauthProfile` or `auth.apiKeyRef`, else the runtime's OAuth provider id, else the runtime id. A stored OAuth login is used as is while it is unexpired. Once its `expires` time passes, Clio refreshes it under the credential file lock and writes the new tokens back before using them. A refresh that fails falls back to a re-read of the store and uses the stored token only if it is still valid.
+
+Login depends on the runtime's auth method. An `api-key` runtime prompts for the key, or takes `--api-key`, and stores it in `credentials.yaml` with a plaintext warning. An `oauth` runtime prints its sign-in URL and waits for the browser callback; if the callback has not arrived after 10 seconds, a prompt appears for the verification code or redirect URL. The `alcf` Globus flow has no callback server and always ends with a pasted code. The `aws-sdk`, `claude-cli` and `none` methods do not support `auth login`: `bedrock` uses the AWS SDK's own credentials, `claude-code` and `claude-sdk` use the installed Claude CLI's login, `ollama` needs no credential, and the delegation CLIs keep their own login. `auth status` reports each of them.
+
+OAuth credential storage and refresh stay Clio's own. [`src/engine/oauth.ts`](../../src/engine/oauth.ts) adapts the login flows that Pi provides for `anthropic` (Claude Pro/Max), `openai-codex` (ChatGPT Plus/Pro) and `github-copilot` (no built-in runtime selects that one), and adds the Globus flow for `alcf` in [`src/engine/alcf-oauth.ts`](../../src/engine/alcf-oauth.ts). [`src/domains/providers/auth/storage.ts`](../../src/domains/providers/auth/storage.ts) owns persistence, the file lock, and the refresh. Pi's own credential store and refresh path are not used.
+
 ## Subscription-based Targets and Runtimes
 
-OAuth providers, supported worker runtimes, and external-agent delegation have different runtime roles. Check the installed registry with `clio-coder configure --list` and use [Interop](interop.md) for detected coding-agent peers. Runtime descriptors in [`src/domains/providers/runtimes/`](../../src/domains/providers/runtimes/builtins.ts) define their auth method and whether they serve chat or dispatch.
+OAuth providers, supported worker runtimes, and external-agent delegation have different runtime roles. `openai-codex` and `anthropic-max` are HTTP chat runtimes behind a subscription login. `claude-code`, `claude-sdk` and the `*-cli` runtimes are worker-only and use the installed tool's own login. `auth status` shows which credential source answers for each. Use [Interop](interop.md) for detected coding-agent peers. Runtime descriptors in [`src/domains/providers/runtimes/`](../../src/domains/providers/runtimes/builtins.ts) define their auth method and whether they serve chat or dispatch.
 
 ## Troubleshooting checklist
 
@@ -484,4 +564,4 @@ OAuth providers, supported worker runtimes, and external-agent delegation have d
 
 For a report, include the Clio and Node versions, target id/runtime, model id, probe result, and a redacted receipt or transcript. Do not include API keys or credential files.
 
-Inception Mercury requests retain the runtime-required `reasoning_effort: "instant"` for both tool probes and chat, including after discovery classifies the model as nonreasoning. Thinking controls supplied by callers are still removed for nonreasoning models.
+How a dispatched worker's provider error is classified, and whether it retries on another target, is described in [worker dispatch mechanics](../architecture/worker-dispatch-mechanics.md).

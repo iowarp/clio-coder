@@ -37,11 +37,14 @@ newer glibc than its compute nodes run.
 
 Everything lands in your home directory: the runtime and package versions under
 `~/.local/share/clio-coder-install` (or `--install-dir`), and the launcher in
-`~/.local/bin`. A version takes about 460 MB, or 190 MB with `--omit-optional`,
-which skips the Claude Agent SDK binary; Node adds about 210 MB. On a small home
-quota, put the install root on a project filesystem with
-`--install-dir /project/$USER/clio-coder` and keep the launcher in `~/.local/bin`.
-Compute nodes that mount the same home directory run the same launcher.
+`~/.local/bin`. A version takes about 460 MB with the Claude Agent SDK, roughly
+half of it the SDK binary; the installer skips the SDK unless `--include-claude-sdk`
+is passed, and Node adds about 210 MB. The installer refuses to start with under
+about 732 MB free at the install root. On a small home quota, put the install root
+on a project filesystem with `--install-dir /project/$USER/clio-coder` and keep the
+launcher in `~/.local/bin`. Compute nodes that mount the same home directory run
+the same launcher. `--dry-run` prints the plan without downloading anything. The
+full flag list is in [Installer options](installation-and-lifecycle.md).
 
 Shell startup files are edited only when you pass `--modify-path`; otherwise
 the installer prints the `export PATH=...` line to add yourself.
@@ -102,6 +105,11 @@ serves a modified file is refused rather than installed.
 | `--refresh-runtime` | Download Node again even when the wanted one is present |
 | `--rollback` | Point the launcher back at the previous installed version |
 
+An exact version such as `--version 0.6.0` pins the install: `clio-coder upgrade`
+and background updates leave it there, and `--version latest` (or `beta`, `dev`)
+releases the pin. `--rollback` moves a pin to the version it restores. The
+[installation guide](installation-and-lifecycle.md) has the details.
+
 `clio-coder upgrade` installs the next version beside the current one and keeps
 the managed Node unless you pass `--refresh-runtime`.
 `clio-coder uninstall --remove-binary` removes the launcher, the runtime and
@@ -117,7 +125,15 @@ export CLIO_CODER_NODE=/path/to/node22/bin/node
 clio-coder --version
 ```
 
-The package's `clio-coder` command checks the running Node before loading
-anything else. On an older Node it reruns itself under `CLIO_CODER_NODE` when
-that is set, and otherwise prints the installer command and these options,
-naming the glibc limit when the host's glibc is older than 2.28.
+The package's `clio-coder` command checks the Node before loading anything else.
+When `CLIO_CODER_NODE` is set and names a different binary, it reruns itself
+under that Node. Otherwise, on an older Node, it prints the installer command and
+these options, naming the glibc limit when the host's glibc is older than 2.28.
+
+## Checking the login node
+
+`clio-coder doctor` reports a `toolchain <name>` row for the compilers, MPI
+launchers, build systems, `python3` and `sbatch` it finds on `PATH`, so a login
+node can be inspected before a workspace validation contract names any of them
+([Doctor](doctor.md)). Slurm access through the clio-kit MCP server is covered in
+[Slurm](slurm.md).

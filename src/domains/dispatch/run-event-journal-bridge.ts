@@ -168,7 +168,7 @@ function messageTokens(event: Record<string, unknown>): number | undefined {
  * does not keep it. `streamed` says prose deltas already carried this
  * message's text, so its `message_end` keeps only the token count.
  */
-export function runFeedEntryFromEvent(event: unknown, streamed: boolean, at: string): RunEventJournalEntry | null {
+function runFeedEntryFromEvent(event: unknown, streamed: boolean, at: string): RunEventJournalEntry | null {
 	if (!isRecord(event)) return null;
 	const normalized = normalizeClioCoderEventRecord(event);
 	const type = typeof normalized.type === "string" ? normalized.type : "unknown";

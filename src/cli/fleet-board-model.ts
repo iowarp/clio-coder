@@ -63,7 +63,7 @@ export interface WatchRequest {
 	sinceMs: number | null;
 }
 
-export function parseWatchRequest(raw: string): WatchRequest {
+function parseWatchRequest(raw: string): WatchRequest {
 	const lines = raw.split("\n");
 	const first = lines[0]?.trim() ?? "";
 	const fields = new Map<string, string>();
@@ -414,7 +414,7 @@ export interface RunFoldCache {
 	retain(runIds: ReadonlySet<string>): void;
 }
 
-export function createRunFoldCache(journalRoot?: string): RunFoldCache {
+function createRunFoldCache(journalRoot?: string): RunFoldCache {
 	const cursors = new Map<string, FoldCursor>();
 	return {
 		fold(runId: string): RunFold {
@@ -593,7 +593,7 @@ function supersededIds(runs: ReadonlyArray<RunEnvelope>): Set<string> {
 	return superseded;
 }
 
-export function buildCard(source: BoardSource, run: RunEnvelope, nowMs: number): WorkerCard {
+function buildCard(source: BoardSource, run: RunEnvelope, nowMs: number): WorkerCard {
 	const fold = source.folds.fold(run.id);
 	const state = cardState(run);
 	let receipt: ReceiptView | null = null;
@@ -693,7 +693,7 @@ export interface TakeoverModel {
 	fleet: FleetContext | null;
 }
 
-export function loadFleetContext(rootId: string): FleetContext | null {
+function loadFleetContext(rootId: string): FleetContext | null {
 	try {
 		const record = readFleetRun(rootId);
 		if (record === null) return null;

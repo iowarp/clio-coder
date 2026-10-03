@@ -37,7 +37,7 @@ informationFlow:
 
 Configure a target named `local` with that runtime and endpoint, review and approve this policy, then restart Clio. A permitted read of `secrets/notes.txt` labels the session with `secrets-local`. Subsequent model requests may reach the pinned `local` target; switching to a cloud target refuses the next request before it sends. Locality is not inferred from the address: the operator's pin supplies the approval. If several rules label the session, every rule must allow the destination.
 
-The [configuration reference](configuration-reference.md#project-files) lists the project files and their schema sources.
+The [configuration reference](configuration-reference.md) lists the project files and their schema sources.
 
 ## Review, approve and revoke
 
@@ -48,7 +48,7 @@ clio-coder config trust safety
 clio-coder config trust safety --hash <reviewed-sha256>
 ```
 
-The first command is read-only: it shows captured files and their digest, followed by the exact approval command. Review those bytes before running that command. Approval is per canonical workspace and pins the exact policy bytes. Restart to load safety changes; see [project trust](commands-and-modes.md#project-trust).
+The first command is read-only: it shows captured files and their digest, followed by the exact approval command. Review those bytes before running that command. Approval is per canonical workspace and pins the exact policy bytes. Restart to load safety changes; see [project trust in the safety model](../architecture/safety-model.md#project-trust).
 
 An unapproved edit can only forbid more. The last approved snapshot retains its source rules, including ones removed by the edit; newly introduced unapproved rules label content with no recipients. They cannot authorize sending. If content was read under an unapproved rule, approving those **exact bytes** later and restarting opens those earlier reads to that rule's approved recipients. Any other policy change cannot widen destinations for content already read. Start a new session to work without those old restrictions; resume and compaction preserve them.
 
@@ -60,11 +60,15 @@ Path-taking read-class tools such as `read`, `ls`, `grep`, `find` and `data` lab
 
 Shell observation is conservative: `git add .`, `find .` and `cat *.md` can label context when a source lies below the command's working directory, even if the output contains no source bytes. Clio does not provide full shell coverage. Reads hidden in scripts, variables, command substitution, relative paths after `cd`, and searches with no path operand such as `rg x` are not reliably observed.
 
-Labels are session provenance, not per-token tracking. They travel through summaries, compaction, resume, branches and worker results; removing a visible message does not clear them. A worker's labels enter the parent before derived output. A label absorbed before a session exists is retained, and outbound transfer is refused until it can be persisted.
+Labels are session provenance, not per-token tracking. They travel through summaries, compaction, resume, branches and worker results; removing a visible message does not clear them. The session keeps one durable union of restrictions as `clio_coder_flow_restriction` custom entries in its ledger, so the model cannot erase it. A worker's labels enter the parent before derived output. A label absorbed before a session exists is retained, and outbound transfer is refused until it can be persisted.
+
+## What is checked before bytes leave
+
+Every send that carries session context is judged against the labels the session holds: main-turn model requests, compaction summaries, memory steps, `/btw`, `/draft`, `/handoff`, context-bearing pre-warm requests and System One engine requests, plus mediated outbound tools (`web_fetch`, `web_read` and MCP tools). A request with an empty context, such as the wake request, is not a send. A policy that cannot vouch for its provenance refuses every transfer, even before anything restricted is carried. The destination of a model request is the configured target as it is now, so changing the URL behind a target id is judged on the new URL.
 
 ## Workers and other agents
 
-Native HTTP workers admit each model request, so they can read a source on an allowed target and refuse a later request to a disallowed one. Claude Code, Codex and other CLI or SDK runtimes cannot admit their own model requests through Clio. She refuses their launch whenever any source rule, approved or unapproved, does not allow their pinned target, even before the parent has read a source. Ordinary tool mediation in an SDK does not supply this model-request boundary.
+Native HTTP workers carry the approved source rules and the restrictions their inherited context holds, and admit each model request, so they can read a source on an allowed target and refuse a later request to a disallowed one. Claude Code, Codex and other CLI or SDK runtimes cannot admit their own model requests through Clio. She refuses their launch whenever any source rule, approved or unapproved, does not allow their pinned target, even before the parent has read a source. Ordinary tool mediation in an SDK does not supply this model-request boundary.
 
 ACP agents and pane peers have no pinned model destination that Clio can approve for this purpose, so source rules refuse those delegations or content handoffs. A worker that hits this boundary ends with `information_flow_blocked`; dispatch never retries or fails over that outcome. See [exit codes and output](exit-codes-and-output.md).
 

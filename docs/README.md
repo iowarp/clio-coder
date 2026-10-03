@@ -11,15 +11,19 @@ and implementation boundaries.
 ```text
 docs/
 ├── README.md        Documentation map
+├── corpus.json      Declared documentation roots and exclusions
 ├── guide/           Configuration and operator workflows
 ├── architecture/    Runtime architecture and contracts
 └── wiki/            Generated development reference, v0.1
 ```
 
-The installed application reads the authored Markdown directly; the website
-serves a release-linked snapshot. The [GitHub Wiki](https://github.com/iowarp/clio-coder/wiki)
-is a developing source reference with independent v0.1 versioning. Use the
-architecture guides and current source for implementation decisions.
+Clio reads the authored Markdown in this directory directly from her installed
+package. The website serves a generated snapshot of the guides listed in
+`site/public-docs.json` (a source-checkout file), so a guide that is not listed
+there is bundled with Clio and absent from the website. The
+[GitHub Wiki](https://github.com/iowarp/clio-coder/wiki) is a developing source
+reference with independent v0.1 versioning. Use the architecture guides and
+current source for implementation decisions.
 
 ## Start here
 
@@ -30,23 +34,29 @@ architecture guides and current source for implementation decisions.
 | Learn the interactive session and CLI | [Commands and Modes](guide/commands-and-modes.md) |
 | Understand what Clio may read, change, or execute | [Safety Model](architecture/safety-model.md) |
 | Diagnose a problem by its exact message | [Troubleshooting](guide/troubleshooting.md) |
-| Check an install, its targets, and the HPC toolchain | [Doctor](guide/doctor.md) |
-| Bind a fast decision model (System One) to hints, gates, ranking and consult | [System One](guide/system-one.md) |
+| Run the read-only install check: core install, targets, HPC toolchain, task worktrees, Slurm MCP and System One rows, and the deep checks | [Doctor](guide/doctor.md) |
+| Place a decision engine at System One sites (turn hints, the tool-call gate, relevance ranking, consult, drafts), then calibrate it and run it in shadow mode | [System One](guide/system-one.md) |
 | Submit, poll, and cancel Slurm jobs through the clio-kit MCP server | [Slurm](guide/slurm.md) |
 
-A minimal first run needs Node.js 22.19 or newer and a model to talk to: a
-local app such as Ollama or LM Studio, a lab gateway, an AI subscription, or a
-cloud API. Guided setup starts from those recognizable choices, fills in Clio's
-internal connection name, checks the endpoint when possible, and offers the
-models it can discover. The endpoint shortcut is available for operators who
-already know a server URL.
+A minimal first run needs a model to talk to: a local app such as Ollama or LM
+Studio, a lab gateway, an AI subscription, or a cloud API. Guided setup starts
+from those recognizable choices, fills in Clio's internal connection name,
+checks the endpoint when possible, and offers the models it can discover. The
+endpoint shortcut is available for operators who already know a server URL.
+
+The installer brings its own Node.js and needs no root. Installing from npm
+needs Node.js 22.19 or newer.
 
 ```bash
-npm install -g @iowarp/clio-coder
+curl -fsSL https://coder.iowarp.ai/install.sh | sh
 clio-coder configure
 cd /path/to/your/project
 clio-coder
 ```
+
+`npm install -g @iowarp/clio-coder` replaces the first command when you manage
+Node.js yourself. [Graphical Application](guide/gui.md) covers the browser
+interface, which has its own guided setup.
 
 Use `clio-coder --help` for the installed command surface and `/help` inside an
 interactive session. `clio-coder doctor` is a read-only installation check;
@@ -56,24 +66,26 @@ interactive session. `clio-coder doctor` is a read-only installation check;
 
 | Topic | Guide |
 | --- | --- |
-| Targets, providers, auth, settings v2, routing, and fleet profiles | [Configuration and Targets](guide/configuration-and-targets.md) |
-| Default settings keys, layering, and source pointers for CLI, environment, and project schemas | [Configuration Reference](guide/configuration-reference.md) |
+| Connecting a model: targets, providers, auth, the settings center and inventory, live routing versus saved defaults, model profiles, and local runtime settings | [Configuration and Targets](guide/configuration-and-targets.md) |
+| Settings keys with defaults, the version 1 to 2 key map, retired keys, project files, local stdio MCP trust, and CLI flag and tool argument contracts | [Configuration Reference](guide/configuration-reference.md) |
 | Runtime discovery, model capabilities, local overlays, and field notes | [Model Catalog](architecture/model-catalog.md) |
 | Argonne ALCF Sophia and Metis targets over Globus OAuth | [ALCF Provider](architecture/alcf-provider.md) |
-| Project handbooks, context windows, accounting, compaction, and indexing | [Context Engine](architecture/context-engine.md) |
+| Context windows, token accounting, single-threshold compaction, prefix caching, project handbooks, and the codemap | [Context Engine](architecture/context-engine.md) |
 | Codemap, bounded orientation, current project evidence, and artifact compatibility | [Project Context](architecture/project-context.md) |
 | Choose compaction and recover interrupted handoffs | [Context Continuity](guide/context-continuity.md) |
 | Non-destructive working-set eviction, markers, and recall | [Context Working Set](architecture/context-working-set.md) |
 | Session ledgers, branches, checkpoints, resume, and recovery | [Session Lifecycle](architecture/session-lifecycle.md) |
 | Proactive task memory, interventions, and handoffs | [Proactive Memory](guide/proactive-memory.md) |
-| Skills discovery, marketplace safety, installation, and publishing | [Skills Marketplace](guide/skills-marketplace.md) |
-| Agents, prompts, extensions, and portable share archives | [Extensions and Sharing](guide/extensions-and-sharing.md) |
-| Private resource catalogs and synchronization | [Resource Library](guide/resource-library.md) |
-| Portable domain bundles, library pins, and lifecycle | [Plugins](guide/plugins.md) |
+| Skills as library packages: operator ownership of installed skills, library keys, matching and authoring, and publishing | [Skills Marketplace](guide/skills-marketplace.md) |
+| Resource roots and precedence, prompt templates, skill loading, and share archives | [Prompts, Skills, and Share Archives](guide/extensions-and-sharing.md) |
+| The `library` command family for packages of every kind: browse, install, update, pin and drift, scope and workspace state, index format, registering and publishing, and the shared inventory | [Resource Library](guide/resource-library.md) |
+| Package kinds, how plugins differ from harness extensions, and where each library contract lives | [Plugins](guide/plugins.md) |
 | Package manifests and component references | [Authoring Plugins](guide/authoring-plugins.md) |
 | Executable harness capabilities | [Harness Extensions](guide/harness-extensions.md) |
 | TUI layout, responsive behavior, colors, and interaction rules | [TUI Design](architecture/tui-design.md) |
 | Terminal panes beside a session and the files pane: install, keys, settings, doctor, troubleshooting | [Panes and the Files Pane](guide/panes-and-files.md) |
+| Focus radio in a Herdr dock: `/music`, cliamp install, the `integrations.music.*` settings, and the opt-in `music` tool | [Music Pane](guide/music.md) |
+| The browser interface: starting it, the background app, the installer option, shell layout, approvals, and what the local server exposes | [Graphical Application](guide/gui.md) |
 
 ## Safety, evidence, and reproducibility
 
@@ -83,7 +95,7 @@ interactive session. `clio-coder doctor` is a read-only installation check;
 | Source labels, approved destinations, worker admission, and refusal recovery | [Information Flow](guide/information-flow.md) |
 | System One decision sites, record-only safety observations, calibration, shadow mode, and the opt-in dataset | [System One](guide/system-one.md) |
 | Required checks by changed path, fresh verification snapshots, and completion findings | [Project Quality Policies](guide/quality-policy.md) |
-| Receipts, run inspection, costs, and observability routing | [Observability](architecture/observability.md) |
+| The `/view` artifact viewer, trace retention, the evidence spine, cross-session usage facts, the accountability panel, and receipt integrity | [Observability](architecture/observability.md) |
 | Durable evidence bundles, findings, and reviewed memory | [Evidence and Memory](architecture/evidence-and-memory.md) |
 | SQLite trace mirror, schemas, cursors, and rebuildability | [Trace Store](architecture/trace-store.md) |
 | Where generated files live and who should read them | [Artifact Placement](architecture/artifact-placement.md) |
@@ -99,16 +111,17 @@ reference data, and review define the acceptance criteria for a change.
 | Built-in worker recipes, discovery, frontmatter, and admission | [Built-in Agents](guide/built-in-agents.md) |
 | Local and multi-node fleet execution, placement, gates, and receipts | [Fleet Dispatch](guide/fleet-dispatch.md) |
 | Capacity leases, heartbeats, locks, and node drain control | [Capacity and Scheduling](architecture/capacity-and-scheduling.md) |
-| Worker process protocol, watchdogs, steering, and exit mapping | [Worker Dispatch Mechanics](architecture/worker-dispatch-mechanics.md) |
+| Worker process protocol, watchdogs, exit mapping, the refusal limit and denial format, failure classification and retries, and route history labels | [Worker Dispatch Mechanics](architecture/worker-dispatch-mechanics.md) |
 | Worker context inheritance, fork, and splice modes | [Worker Context](architecture/worker-context.md) |
 | Typed dispatch intent and compatibility boundaries | [Dispatch Typed Intent](architecture/dispatch-typed-intent.md) |
-| Why dispatch remains one domain and where its seams actually are | [Dispatch Architecture Rationale](architecture/dispatch-architecture-rationale.md) |
+| The contracts the dispatch domain shares: plan compilation, reservation, attempt identity, admission, write attribution, receipt authority, and import direction | [Dispatch Domain Boundaries](architecture/dispatch-architecture-rationale.md) |
 
 ## Automation and integration
 
 | Topic | Guide |
 | --- | --- |
-| Agent Client Protocol server, stdio transport, and permission mediation | [ACP](architecture/acp.md) |
+| Agent Client Protocol in both directions: the stdio server, capability negotiation, extension methods, permission mediation, and outbound delegation to peers | [ACP](architecture/acp.md) |
+| Which fragments each prompt tier carries, how they are selected, substitutions, and the dynamic sections | [Prompt Compilation](architecture/prompt-compilation.md) |
 | Prompt-envelope reuse, provider tool delivery, and bounded results | [Prompt Envelope and Tools](architecture/prompt-envelope-and-tools.md) |
 | Built-in tool contracts, operating boundaries, and core workflows | [Tool Usage](guide/tool-usage.md) |
 | Implementing a runtime or inference-server adapter | [Provider Adapter Cookbook](architecture/provider-adapter-cookbook.md) |
@@ -123,12 +136,10 @@ reference data, and review define the acceptance criteria for a change.
 | Topic | Guide |
 | --- | --- |
 | Source layout, compile-time boundaries, domain loading, and runtime flow | [Architecture](architecture/architecture.md) |
-| Package kinds, catalog resolution, integrity, and trust | [Library Architecture](architecture/library.md) |
+| Package identity, envelope, integrity, install state, dependency rule, trust by origin, and the shared inventory | [Library Architecture](architecture/library.md) |
 | Pi framework boundary and Clio-owned policy | [Pi Boundary](architecture/pi-boundary.md) |
 | Clock, duration, timestamp, and ordering conventions | [Time Conventions](architecture/time-conventions.md) |
-| Package qualification, release tags, website documentation, and Wiki updates | [Release Readiness](guide/release-readiness.md) |
-| Export the generated `docs/wiki/` pages to the GitHub Wiki repository | [Publishing the Wiki](guide/publishing-wiki.md) |
-| Startup presentation modes and their measured cost | [TUI Boot Performance](architecture/tui-boot-performance.md) |
+| Boot sequence, startup presentation modes, and how to benchmark boot on a machine | [TUI Boot Performance](architecture/tui-boot-performance.md) |
 | Core terms mapped to source concepts | [Glossary](guide/glossary.md) |
 
 ## Developer quick start
@@ -159,33 +170,52 @@ audit.
 ## Where Clio finds these docs when it is running in someone else's project
 
 Clio's documentation ships with Clio, not with your workspace. Everything below
-resolves from the installed package root (`resolvePackageRoot()`,
-[package-root.ts](../src/core/package-root.ts)), never from the directory you launched in.
+resolves from the installed package root, never from the directory you launched
+in. The root is `CLIO_CODER_PACKAGE_ROOT` when that variable is set, and
+otherwise the nearest directory holding a `package.json` above the running code
+(`resolvePackageRoot()`, [package-root.ts](../src/core/package-root.ts)).
 
-**What is indexed.** The product corpus named by `docs/corpus.json`: this map,
-`docs/guide/**/*.md`, and `docs/architecture/**/*.md`. Root `README.md`,
-`CHANGELOG.md`, and `CLIO-CODER.md` are supporting package documents when each
-exists. A root `CLIO-CODER.md` is indexed only when present, such as in a source
-checkout. Generated `docs/wiki/**` pages and retired `docs/html/**` pages are
-excluded and reported as exclusions. The index is deterministic and needs no
-network or embedding service
-([docs-engine.ts](../src/tools/context/docs-engine.ts)).
+**What is indexed.** `clio_docs` ([docs-engine.ts](../src/tools/context/docs-engine.ts))
+walks `<package root>/docs` for every `.md` file in name order and skips only
+`docs/html`. It then adds the package root's `README.md`, `CHANGELOG.md` and
+`CLIO-CODER.md`, each only when it exists. In an installed package that is this
+map, `docs/guide/**`, `docs/architecture/**`, `README.md` and `CHANGELOG.md`,
+because `package.json` ships `docs/**/*.md` and leaves out `docs/wiki/**`.
+`CLIO-CODER.md` is a source-checkout handbook and is not shipped. A source
+checkout therefore also indexes the generated `docs/wiki/**` pages: the engine
+has no wiki exclusion, and `scripts/check-hygiene.ts` requires every Markdown
+file under `docs/` except `docs/html` to appear in the listing. A search returns
+sections, one per heading, ranked by BM25 over headings and bodies with Clio
+vocabulary aliases and phrase boosts. The index is deterministic and needs no
+network or embedding service.
 
-**Searching and then reading.** `gateway(op="call", capability="clio_docs", args={query: "…"})` returns
-section headings with citations such as `docs/architecture/safety-model.md`.
-Citations are **package-relative**, and this is the step that matters when the
-workspace is someone else's repository: reading `docs/architecture/safety-model.md`
-as a plain relative path reads *that project's* `docs/`, if it has one. Clio's
-own system prompt names the installed documentation directory as
-`{CLIO_DOCS_PATH}`, substituted as `join(packageRoot, "docs")`
-([compiler.ts](../src/domains/prompts/compiler.ts)). Resolve the citation against the **package
-root**, which is that directory's parent. So when the prompt names `/pkg/docs`:
+**What `docs/corpus.json` does.** It declares the product corpus: roots relative
+to `docs/` (this map, `architecture/`, `guide/`), the package-root files that
+also count, and the trees left out (`html/**` by retrieval, `wiki/**` by
+packaging). It ships in the package and the installed-package smoke test checks
+that it exists. No retrieval, build or website code reads it. Adding or removing
+a page changes the corpus through the Markdown file alone, and editing
+`corpus.json` does not change what `clio_docs` returns.
+
+**Searching and then reading.** `gateway(op="call", capability="clio_docs", args={query: "…"})`
+returns up to five sections by default (`limit` up to twelve). Each hit carries a
+package-relative `file` such as `docs/architecture/safety-model.md`, its heading
+and line range, and `read.args`: the absolute `path`, `offset`, `limit` and
+`line_numbers` that read exactly that section. Pass `read.args` to `read` as
+given. This is the step that matters when the workspace is someone else's
+repository: reading `docs/architecture/safety-model.md` as a plain relative path
+reads *that project's* `docs/`, if it has one. Clio's own system prompt names the
+installed documentation directory as `{CLIO_DOCS_PATH}`, substituted as
+`join(packageRoot, "docs")` ([compiler.ts](../src/domains/prompts/compiler.ts)).
+To resolve a `file` by hand, resolve it against the **package root**, which is
+that directory's parent. So when the prompt names `/pkg/docs`:
 
 - `docs/guide/foo.md` → `/pkg/docs/guide/foo.md`
 - `CHANGELOG.md` → `/pkg/CHANGELOG.md`, not `/pkg/docs/CHANGELOG.md`
 
 Do not duplicate the `docs/` segment, and do not resolve a citation against the
-workspace. Omitting `query` lists the corpus instead of searching it.
+workspace. Omitting `query` lists the corpus (file list, document and section
+counts) instead of searching it.
 
 **The public documentation.** Read the user guides at
 <https://coder.iowarp.ai/docs.html>. The browser application's Help entry links to
@@ -196,13 +226,15 @@ There is no documentation command or separate documentation server.
 ## Reading the bundled reference
 
 The package ships the canonical Markdown and `docs/corpus.json`, independent of
-your current project. The offline `clio_docs` capability indexes that corpus for
-agents without a model connection or network request for retrieval.
+your current project. The offline `clio_docs` capability indexes that Markdown
+for agents without a model connection or network request for retrieval.
 
 Edit the authoritative Markdown once to update the installed reference. The
-static product website has a generated public guide snapshot because it deploys
-independently from npm; its manifest records the source revision. The generated
-development Wiki has separate generation and publication ownership.
+static product website has a generated snapshot of the guides listed in
+`site/public-docs.json`, built by `site/sync-docs.py`, because it deploys
+independently from npm; its manifest records the source revision, commit and
+file hashes. The generated development Wiki has separate generation and
+publication ownership.
 
 ## Writing documentation
 
@@ -216,3 +248,6 @@ Use the [contributor guidance](../CONTRIBUTING.md) when updating these pages. In
   product README or an evergreen task guide.
 - Link to the detailed contract instead of duplicating a large schema in
   several places.
+- Link every new page from this map. `clio_docs` indexes any Markdown file under
+  `docs/` without registration, and `scripts/check-hygiene.ts` checks relative
+  links, heading anchors, cited source paths and the corpus listing.

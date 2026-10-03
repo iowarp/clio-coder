@@ -1,6 +1,6 @@
 # Clio Coder Glossary
 
-This document defines the 56 core architectural concepts and terminology used throughout Clio Coder, mapped to their authoritative TypeScript type definitions in `src/`.
+This document defines the core architectural concepts and terminology used throughout Clio Coder, mapped to their authoritative TypeScript type definitions in `src/`.
 
 ---
 
@@ -47,11 +47,11 @@ This document defines the 56 core architectural concepts and terminology used th
 - **Owning Type**: `AgentRecipe` in [recipe-schema.ts](../../src/domains/agents/recipe-schema.ts).
 
 ### 11. Worker
-- **Definition**: An isolated execution subprocess (or remote SSH worker) running a dedicated tool dispatch runtime and communicating over structured NDJSON socket channels.
+- **Definition**: An isolated execution subprocess (or remote SSH worker) running a dedicated tool dispatch runtime and communicating over two lanes of newline-delimited JSON: a bulk lane on stdout for model and tool events, and a control lane on marked stderr lines for the announce, heartbeats and cancellation acknowledgements.
 - **Owning Type**: `WorkerSpec` in [spec-contract.ts](../../src/worker/spec-contract.ts).
 
 ### 12. Target
-- **Definition**: A configured provider endpoint definition mapping a named identifier to an LLM provider runtime, base URL, authentication method, and default model.
+- **Definition**: A configured provider endpoint definition mapping a named identifier to a runtime, base URL, authentication method, default model and optional pricing. The settings UI and the GUI call it a connection; the CLI commands (`targets`) and the YAML key (`targets`) keep the technical name.
 - **Owning Type**: `TargetDescriptor` in [target-descriptor.ts](../../src/domains/providers/types/target-descriptor.ts).
 
 ### 13. Node
@@ -63,7 +63,7 @@ This document defines the 56 core architectural concepts and terminology used th
 - **Owning Type**: `RouteCandidate` in [route-decision.ts](../../src/domains/dispatch/route-decision.ts).
 
 ### 15. Posture (Autonomy Level)
-- **Definition**: The active operator permission mode governing tool mutation authority (`default`, `yolo`). Workers run at `default`; a read-only dispatch restricts their tools.
+- **Definition**: The operator-set dial, `default` or `yolo`, that decides which action classes ask for approval and which run at once. Hard blocks and damage-control rules apply at both levels. A dispatched worker resolves its own approval asks through `fleet.permissions.mode`, and a read-only dispatch restricts its tools. Routing postures (`quality`, `balanced`, `latency`, `economy`) under `fleet.adaptiveRouting.postures` are a different axis that ranks candidate routes.
 - **Owning Type**: `AutonomyLevel` in [autonomy.ts](../../src/domains/safety/autonomy.ts).
 
 ### 16. Capability Class
@@ -71,7 +71,7 @@ This document defines the 56 core architectural concepts and terminology used th
 - **Owning Type**: `AgentCapabilityClass` in [spec.ts](../../src/domains/agents/spec.ts).
 
 ### 17. Topology
-- **Definition**: The multi-agent structural orchestration pattern governing workflow execution. Three unions spell it for three jobs. A compiled plan supports `parallel`, `sequential`, `pipeline`, `review`, `compete`, `council`, and `fleet`. A capacity reservation supports `parallel`, `detached`, `sequential`, `pipeline`, `review`, `compete`, and `council`. The dispatch-plan tool surface supports all eight values from those two sets. The operator-facing argument is spelled `mode`; `singular` (the one-task call shape) and `auto` are values of that argument, not topologies.
+- **Definition**: The multi-agent structural orchestration pattern governing workflow execution. Three unions spell it for three jobs. A compiled plan supports `parallel`, `sequential`, `pipeline`, `review`, `compete`, `council`, and `fleet`. A capacity reservation supports `parallel`, `detached`, `sequential`, `pipeline`, `review`, `compete`, and `council`. The dispatch-plan tool surface supports all eight values from those two sets. The dispatch tool's `mode` argument selects among `parallel`, `sequential`, `pipeline`, `compete` and `council`, and a one-task call omits it.
 - **Owning Types**: `ExecutionPlanTopology` in [execution-plan.ts](../../src/domains/dispatch/execution-plan.ts), `ReservationTopology` in [reservation-store.ts](../../src/domains/dispatch/reservation-store.ts), `DispatchPlanTopology` in [dispatch-plan.ts](../../src/tools/dispatch-plan.ts).
 
 ### 18. Worker Block
@@ -79,8 +79,8 @@ This document defines the 56 core architectural concepts and terminology used th
 - **Owning Type**: `WorkerEntryState` in [worker-stream.ts](../../src/interactive/worker-stream.ts).
 
 ### 19. Origin Glyphs (`◇`/`◆`)
-- **Definition**: Transcript and fleet board indicators that identify who requested a run. The glyph `◇` marks operator-typed runs, `◆` marks model-requested dispatches, and a dim dot marks internal Clio runs. Transcript worker entries admit only user and agent origins; internal runs can appear on dispatch surfaces but never become transcript worker entries.
-- **Owning Types**: `WorkerRunOrigin` in [entries.ts](../../src/domains/session/entries.ts) for transcript entries; `DispatchRequestOrigin` in [types.ts](../../src/domains/dispatch/types.ts) for user, agent, and internal dispatches.
+- **Definition**: Transcript and fleet board indicators that identify who requested a run. The glyph `◇` marks operator-typed runs, `◆` marks model-requested dispatches, and a dim dot marks internal Clio runs and harness-started runs. Transcript worker entries admit only user and agent origins; internal and harness runs can appear on dispatch surfaces but never become transcript worker entries.
+- **Owning Types**: `WorkerRunOrigin` in [entries.ts](../../src/domains/session/entries.ts) for transcript entries; `DispatchRequestOrigin` in [types.ts](../../src/domains/dispatch/types.ts) for user, agent, internal, and harness dispatches.
 
 ### 20. Share Note
 - **Definition**: A bounded operator note formatted as `[worker result] <agent> · run <id> · <outcome> · shared by the operator` that delivers a finished worker answer into the main agent context over the user-turn path.
@@ -143,7 +143,7 @@ This document defines the 56 core architectural concepts and terminology used th
 - **Owning Type**: `TaskLedgerEntry` in [entries.ts](../../src/domains/session/entries.ts).
 
 ### 35. Context Ledger
-- **Definition**: The accounting of how the model's context window is spent and the input to compaction decisions. Current buckets are `system`, `tools`, `agents`, `skills`, `memory`, `project`, `messages`, `pending`, `reserve`, `free`, and `streaming`.
+- **Definition**: The accounting of how the model's context window is spent and the input to compaction decisions. Current buckets are `system`, `tools`, `toolResults`, `agents`, `skills`, `memory`, `project`, `messages`, `pending`, `reserve`, `free`, and `streaming`.
 - **Owning Type**: `ContextLedgerCategory` in [context-ledger.ts](../../src/domains/session/context-ledger.ts).
 
 ### 36. Dispatch Board
@@ -187,11 +187,11 @@ This document defines the 56 core architectural concepts and terminology used th
 - **Owning Type**: `renderMarker` in [marker.ts](../../src/domains/context/working-set/marker.ts).
 
 ### 46. Canonical Trust Status
-- **Definition**: The five-axis record of what is known about one run: artifact integrity, validation grounding, independent review, context provenance, and completion evidence. It is an algebra, not a score: no axis promotes another, every non-absent state names its source and authority, and `absent`, `unknown`, and `not_applicable` are states in their own right. See [docs/architecture/evidence-and-memory.md](../architecture/evidence-and-memory.md#canonical-trust-status) for the full state table.
+- **Definition**: The five-axis record of what is known about one run: artifact integrity, validation grounding, independent review, context provenance, and completion evidence. It is an algebra, not a score: no axis promotes another, every non-absent state names its source and authority, and `absent`, `unknown`, and `not_applicable` are states in their own right. See [docs/architecture/evidence-and-memory.md](../architecture/evidence-and-memory.md) for the full state table.
 - **Owning Type**: `CanonicalTrustStatus` in [trust-status.ts](../../src/domains/evidence/trust-status.ts).
 
 ### 47. Trust Projection
-- **Definition**: The one rendering of the canonical trust status every operator surface prints. The compact human line answers who claims the result, what was observed, what was independently checked, and what is still unknown, in five fixed clauses (`sealed; grounded by host-verification; not independently reviewed; context recorded; completion evidenced`). The machine projection is the same answer as a bounded, versioned record with references to the detailed artifacts. Dispatch and monitor output, `evidence inspect`, `findings.md`, the Alt+W board, the receipt view, and the ACP wire all print from it.
+- **Definition**: The one rendering of the canonical trust status every operator surface prints. The compact human line answers who claims the result, what was observed, what was independently checked, and what is still unknown, in five fixed clauses (`sealed; grounded by host-verification; not independently reviewed; context recorded; completion evidenced`). The machine projection is the same answer as a bounded, versioned record with references to the detailed artifacts. Dispatch and monitor output, `evidence inspect`, `findings.md`, the Fleet Runs board, the receipt view, and the ACP wire all print from it.
 - **Owning Type**: `formatTrustSummary` and `TrustSummaryProjection` in [trust-projection.ts](../../src/domains/evidence/trust-projection.ts).
 
 ### 48. Trust Verdict
@@ -211,7 +211,7 @@ This document defines the 56 core architectural concepts and terminology used th
 - **Owning Type**: `SystemOne` in [types.ts](../../src/domains/system-one/types.ts); built by `createSystemOne` in [factory.ts](../../src/domains/system-one/factory.ts).
 
 ### 52. Decision Site
-- **Definition**: A place where System One is asked, named by the object it judges: `turn` (the operator's request), `toolCall` (a proposed call, at the `card` and `gate` moments), `toolResult`, `turnEnd`, `relevance`, `consult` and `drafts`. A site owns its state, its questions, its policy and its default deadline. Bound to an engine by `systemOne.sites`; a site with no binding is off.
+- **Definition**: A place where System One is asked, named by the object it judges: `turn` (the operator's request), `toolCall` (a proposed call, at the `card` and `gate` moments), `toolResult`, `turnEnd`, `relevance`, `consult`, `drafts` and `steer` (queued steering messages). A site owns its state, its questions, its policy and its default deadline. Bound to an engine by `systemOne.sites`; a site with no binding is off.
 - **Owning Type**: `SiteDefinition` and `SiteId` in [types.ts](../../src/domains/system-one/types.ts).
 
 ### 53. Build
@@ -227,5 +227,45 @@ This document defines the 56 core architectural concepts and terminology used th
 - **Owning Type**: `SystemOne.shadowed` and `SiteCuts.fitted` in [types.ts](../../src/domains/system-one/types.ts).
 
 ### 56. Laya
-- **Definition**: The diffusion-model System One engine that serves the same `POST /v1/systemone` wire as the hosted engine, through `laya-serve` and the `systemone` runtime. Not yet fitted: a Laya build runs in shadow until cuts are fitted on that exact build with `scripts/decision-probe.ts`. See [System One Architecture](../architecture/system-one.md#validating-a-laya-build).
+- **Definition**: The diffusion-model System One engine that serves the same `POST /v1/systemone` wire as the hosted engine, through `laya-serve` and the `systemone` runtime. Not yet fitted: a Laya build runs in shadow until cuts are fitted on that exact build with `scripts/decision-probe.ts`. See [System One Architecture](../architecture/system-one.md).
 - **Owning Type**: `createSystemOneEngine` in [systemone.ts](../../src/domains/system-one/engines/systemone.ts).
+
+### 57. Runtime
+- **Definition**: A registered adapter for one kind of inference backend. It fixes the runtime id a target names, the kind (`http`, `sdk` or `subprocess`), the tier, the API family, the auth method, the default capabilities, and how to probe the backend and synthesize a model. Only `http` runtimes can drive the main agent; `sdk` and `subprocess` runtimes are worker-only. Built-in runtimes are in `BUILTIN_RUNTIMES`, and plugins add more. See [Configuration and targets](configuration-and-targets.md) and the [provider adapter cookbook](../architecture/provider-adapter-cookbook.md).
+- **Owning Type**: `RuntimeDescriptor` in [runtime-descriptor.ts](../../src/domains/providers/types/runtime-descriptor.ts).
+
+### 58. Runtime Tier
+- **Definition**: The deployment class of a runtime: `cloud`, `local-native`, `protocol` or `subscription`. The tier changes behavior beyond grouping. A `local-native` runtime prices as free and is probed for loaded models and serving windows, while a `protocol` runtime (a generic endpoint or a gateway such as LiteLLM) never prices as free because it can front a paid model.
+- **Owning Type**: `RuntimeTier` in [runtime-descriptor.ts](../../src/domains/providers/types/runtime-descriptor.ts).
+
+### 59. Prompt Tier
+- **Definition**: Which compilation path builds a prompt. Main-agent prompts compile in two tiers from one compiler: attended (interactive TUI, GUI, ACP), which carries the operator-facing guidance fragments, and headless (`clio-coder run`), which carries a headless contract and states that approval asks are denied. Workers compile through a separate worker path as the third tier. See [prompt compilation](../architecture/prompt-compilation.md).
+- **Owning Type**: `compile` and `compileWorker` in [compiler.ts](../../src/domains/prompts/compiler.ts).
+
+### 60. Model Profile
+- **Definition**: A per-model record of what a model is: capability flags, a declared context and output maximum, the thinking mechanism and level mapping, and a recommended output budget. Packaged profiles live in `models/profiles.yaml` and the operator's `<configDir>/model-profiles.yaml` layers over them. A profile describes the model and never a deployment, so a live server report outranks it for the serving window, output cap, tools, vision and reasoning. See [Configuration and targets](configuration-and-targets.md) and the [model catalog](../architecture/model-catalog.md).
+- **Owning Type**: `ModelProfile` in [model-profiles.ts](../../src/domains/providers/model-profiles.ts).
+
+### 61. Cost Provenance
+- **Definition**: The label that says where a cost figure came from: `known` (declared target rates), `known_free` (declared free, all-zero rates, or a `local-native` runtime), `estimated` (a Pi catalog rate) or `unknown` (no rate source). Absent provenance reads as `unknown`, never as free. Pricing is declared per target, and the label travels with the cost on receipts and in the footer, `/usage` and run tables. See [pricing and cost provenance](configuration-and-targets.md#pricing-and-cost-provenance).
+- **Owning Type**: `CostProvenance` in [cost-provenance.ts](../../src/domains/providers/types/cost-provenance.ts); resolved by `resolveEffectivePricing` in [catalog.ts](../../src/domains/providers/catalog.ts).
+
+### 62. Chat Route
+- **Definition**: The target, model and thinking level that answer the operator, saved as `chat.target`, `chat.model` and `chat.thinkingLevel`. A session owns its live copy. When an existing home's chat route is missing or unusable, startup detects a replacement from configured targets, environment keys, stored logins and loopback servers and saves it only when no chat route exists. See [chat route detection](configuration-and-targets.md#chat-route-detection).
+- **Owning Type**: `DetectedChatRoute` in [detect-chat-routes.ts](../../src/cli/detect-chat-routes.ts); the verdict is `DefaultTargetVerdict` in [default-target.ts](../../src/cli/default-target.ts).
+
+### 63. Route Provenance
+- **Definition**: Where each active model route comes from: the `chat`, `memory`, `compaction` and `fleet` routes each report `session`, `project`, `user`, `built-in`, or `chat` when the route is unset and follows the chat route. It is recomputed from live state on every read, so a compaction summary that dropped a session-only route cannot decide what Clio says about it.
+- **Owning Type**: `RouteProvenance` in [route-provenance.ts](../../src/core/route-provenance.ts).
+
+### 64. Settled
+- **Definition**: The outcome label every route history record carries, from `routeSettledLabel`: `success`, else the receipt's most specific outcome code, else `permission_required`, else `failure` or the receipt outcome. The route observer backfills older records. Adaptive routing reads quality labels and reliability and does not read `settled`.
+- **Owning Type**: `routeSettledLabel` in [route-history.ts](../../src/domains/dispatch/route-history.ts); backfilled by [route-observer.ts](../../src/domains/dispatch/route-observer.ts).
+
+### 65. Operator Notes
+- **Definition**: The `<operator-notes>` block of a compaction summary, a bounded list of things the operator asked Clio to keep. Each compaction collects the notes already in earlier summaries, sentences in the operator's own messages that open with `remember`, `keep in mind` or `don't forget`, and the instructions given to `/compact`. Instructions to `/compact` also bind the summarizer through an `<operator-instructions>` block and are kept verbatim in the notes. A note is clipped to 400 characters, the block keeps the latest 30, and notes are XML-escaped inside it.
+- **Owning Type**: `extractOperatorNotes` and `formatOperatorNotes` in [compact.ts](../../src/domains/session/compaction/compact.ts).
+
+### 66. Receipt Facts
+- **Definition**: The compact terminal facts of a finished run, read back from its sealed receipt: outcome and outcome code, exit code, token and tool counts, duration, changed paths, placement, result contract and the authenticated trust status. One module produces them for the TUI worker block (live and replayed) and for ACP terminal fleet frames, so every surface draws the same numbers from the same bytes. A missing or corrupt receipt reads as `receipt unavailable` and never fails a render.
+- **Owning Type**: `RunReceiptSummary` and `RunReceiptFacts` in [receipt-facts.ts](../../src/domains/dispatch/receipt-facts.ts).

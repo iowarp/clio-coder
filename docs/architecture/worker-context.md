@@ -27,7 +27,7 @@ With project-context tier `bounded`, workers also receive up to 2,400 characters
 | `fork` | Existing history seeded into Pi | Rejected; use splice | Entire captured model-visible history, without silent trimming |
 | `splice` | Bounded historical evidence packet | Same packet through existing prompt delivery | Exact selected text, with source labels; no summarizer or extra model call |
 
-Fork accepts optional `max_tokens`. Splice also accepts `paths` and `refs`. The token limit is an estimate for the inherited portion, not the complete worker request. The final request must also fit the worker's system prompt, tool schemas, task, dynamic inputs, and output reserve. The allowed explicit token range is 256-262144; the default splice limit is 8000. A seed has a 512 KiB serialized cap, and the complete native WorkerSpec must fit the existing 1 MiB stdin frame. Larger contexts fail explicitly.
+Fork accepts optional `max_tokens`. Splice also accepts `paths` and `refs`. The token limit is an estimate for the inherited portion, not the complete worker request. The final request must also fit the worker's system prompt, tool schemas, task, dynamic inputs, and output reserve. The allowed explicit token range is 256-262144; the default splice limit is 8000. A seed has a 512 KiB serialized cap (`WORKER_CONTEXT_MAX_BYTES`), of which 8 KiB is held back as headroom when a selection is built, and the complete native WorkerSpec must fit the existing 1 MiB stdin frame. Larger contexts fail explicitly. `paths` and `refs` each hold 1 to 64 entries of at most 4096 characters with no control characters, and duplicates are removed.
 
 Splice refs address the captured messages: `tool:<call-id>` for a tool result, or `message:<zero-based-index>` for a user or assistant message. Unknown refs fail. Ref indexes are snapshot-relative, not session turn IDs. Path selection is the practical default: explicit paths override the intent's read roots, relevant paths, and write roots. Matching uses lexical paths in tool arguments relative to the parent's workspace; it does not read files, follow symlinks, or perform semantic relevance search. Without paths, recent tool observations are candidates.
 
@@ -47,11 +47,11 @@ The parent session writer is never forked or closed. Human `/tree`, `/fork`, and
 
 ## Context pressure and recovery
 
-Every native worker checks context headroom before each provider request. The estimate includes actual system and tool surfaces and reserves output capacity. It honors the configured compaction threshold and automatic working-set eviction setting. Parent usage is never a sizing anchor for a child; after the worker's first completion, its own provider usage calibrates subsequent estimates.
+Every native worker checks context headroom before each provider request. The estimate includes actual system and tool surfaces and reserves output capacity. The ceiling is the smaller of the window times `context.compaction.threshold` and the window minus the output reserve. Automatic eviction runs only when both `context.compaction.auto` and `context.workingSet.enabled` are true; otherwise a request over the ceiling ends the run with `worker_context_exhausted`. An unreported serving window admits the request, and a real overflow then fails with the server's own error. Parent usage is never a sizing anchor for a child; after the worker's first completion, its own provider usage calibrates subsequent estimates.
 
-The first request is never automatically reduced: an oversized fork must be explicitly replaced by a smaller splice. During later requests, the guard preserves the two most recent assistant rounds and all user context, tool errors, mutations, and unknown tools. It may remove older private reasoning when visible assistant content remains, and replace large older successful observations from known read tools with stable markers. The original Pi history is not rewritten.
+The first request is never automatically reduced: an oversized fork must be explicitly replaced by a smaller splice. During later requests, the guard preserves the two most recent assistant rounds and all user context, tool errors, mutations, and unknown tools. It may remove older private reasoning when visible assistant content remains, and replace older successful observations of at least 1000 characters from the known read tools (`read`, `grep`, `find`, `ls`, `code_nav`, `web_read`, `web_fetch`, including the same calls made through the gateway) with stable markers. If the latest round alone still does not fit, because a worker read several large files in parallel, the guard also evicts that round's read results, largest first, and the marker tells the model to read a narrower range. When the server rejects a request as too large, the worker earns one retry whose request is projected down to 70 percent of the failed estimate; if eviction cannot reach that target, the run fails with the server's error. The original Pi history is not rewritten.
 
-Evicted observations are durably stored before replacement under `$XDG_STATE_HOME/clio-coder/context-observations/<digest>.json` (or Clio's configured state root). A marker provides an exact file location and a `worker:<digest>` recall ref. Native `context(scope="recall")` discovers only this run's evicted observations. Passing a ref retrieves the exact persisted result through the existing bounded observation envelope. The run-local allowlist rejects another worker's refs, arbitrary paths, and parent-session refs; stored bytes are digest-checked on recall. Recall does not count as rereading or validating the current source. Workers without an admitted context tool can use the marker's file through their admitted read tool.
+Evicted observations are durably stored before replacement under `<stateDir>/context-observations/<digest>.json` (`<stateDir>` is Clio's state directory, `$XDG_STATE_HOME/clio-coder` on Linux), with mode 0600. A marker provides an exact file location and a `worker:<digest>` recall ref. Native `context(scope="recall")` discovers only this run's evicted observations. Passing a ref retrieves the exact persisted result through the existing bounded observation envelope. The run-local allowlist rejects another worker's refs, arbitrary paths, and parent-session refs; stored bytes are digest-checked on recall. Recall does not count as rereading or validating the current source. Workers without an admitted context tool can use the marker's file through their admitted read tool.
 
 If protected context still cannot fit, the worker ends with `worker_context_exhausted`. Dispatch classifies that as deterministic and does not retry it unchanged. Backend token counts can differ from structural estimates; the guard is conservative headroom management, not a promise that every provider tokenizer or oversized individual tool response will fit.
 
@@ -59,9 +59,9 @@ If protected context still cannot fit, the worker ends with `worker_context_exha
 
 Non-isolated requests record context mode, parent session/leaf/workspace, snapshot digest, selected-content digest, estimated tokens, bytes, selected refs, omitted messages, the excluded unfinished tail, and excluded interrupted responses. The resolved plan displays the selection's digest and size; the run envelope and receipt carry the provenance under `workerContext`. Receipt integrity binds it, and context provenance remains separate from independent validation evidence.
 
-The host persists the selected seed at `$XDG_STATE_HOME/clio-coder/context-seeds/<contentHash>.json`, using mode 0600 and durable writes. These are exact historical artifacts with the same sensitivity as session history; there is no automatic garbage collection. Native seeds are self-contained over the wire, including for remote workers. Their metadata and contents are validated before model use and are covered by the existing whole-spec attestation.
+The host persists the selected seed at `<stateDir>/context-seeds/<contentHash>.json`, using mode 0600 and durable writes. These are exact historical artifacts with the same sensitivity as session history; there is no automatic garbage collection. Native seeds are self-contained over the wire, including for remote workers. Their metadata and contents are validated before model use and are covered by the existing whole-spec attestation.
 
-WorkerSpec version **5** is required. Rebuild/update remote workers together with the orchestrator; an older worker must reject the new specification rather than silently ignore inherited history. ACP and other runtime adapters receive bounded splice text but do not implement native history forking or Clio's native pressure/recall loop.
+The worker accepts only its own `WORKER_SPEC_VERSION` (currently **8**), so an older or newer worker exits `2` with a spec rejection instead of silently ignoring inherited history. Rebuild or update remote workers together with the orchestrator. ACP and other runtime adapters receive bounded splice text but do not implement native history forking or Clio's native pressure/recall loop.
 
 No extra LLM request is needed for capture or selection. Optional splice budgeting uses additive size estimates and one final serialization, rather than serializing the growing packet for every candidate. Stable projections help repeated requests retain an unchanged prefix. Cache reuse depends on the worker system prompt, tool surface, model, and provider cache policy.
 
@@ -71,16 +71,20 @@ A worker is a separate process. It does not inherit the parent session's live
 settings; it reads layered settings from disk for its own working directory
 (`startWorkerRun`, [worker-runtime.ts](../../src/engine/worker-runtime.ts)). An unsaved `/settings` or
 `/model` override in the parent session therefore does not reach it. Those
-resolved settings also govern the worker's observation caps and working-set
-eviction, not just its output cap. External vendor runtimes, such as Claude CLI
+resolved settings also govern the worker's observation caps, guardrails, and working-set
+eviction, not just its output cap. The dispatcher copies only the operator's configured
+model ids and a settings fingerprint onto the spec, so the worker protects the same resident
+models and the orchestrator can refuse a peer admitted under other settings. External vendor runtimes, such as Claude CLI
 or Antigravity delegation, return before this native path and are not governed by
 the native request adapter at all.
 
 Precedence for `chat.maxOutputTokens`, highest first: `.clio-coder/settings.local.yaml`,
 `.clio-coder/settings.yaml`, the user `settings.yaml`, then the compiled default.
 **The compiled default is `0`** ([defaults.ts](../../src/core/defaults.ts)), which is not a token
-count. `0` means "use the resolved model's advertised output limit", falling back
-to the product floor when the model does not advertise one.
+count. `0` means no configured budget. The requested output then comes from the model
+profile's recommended output tokens, bounded to half of the served window, then from the
+resolved model's advertised output limit, and finally from the product floor of 32768 tokens
+when the model advertises neither.
 
 Both project layers are gated on workspace trust ([workspace-trust.ts](../../src/core/workspace-trust.ts)).
 An untrusted project, a project whose configuration changed after trust was
@@ -92,8 +96,8 @@ Whatever the resolved number is, it is a request, not a promise. `remainingConte
 ([output-budget.ts](../../src/engine/apis/output-budget.ts)) clamps it to the model's advertised output
 limit and to the remaining context window, and each provider then maps the budget
 onto its own wire contract. On the OpenAI-compatible LiteLLM path,
-`reasoning_effort` is forwarded under `allowed_openai_params` when thinking
-effort is enabled ([openai-completions.ts](../../src/engine/apis/openai-completions.ts)); that is a LiteLLM
+`reasoning_effort` is forwarded under `allowed_openai_params` when the model and runtime
+resolve a controlled thinking effort ([openai-completions.ts](../../src/engine/apis/openai-completions.ts)); that is a LiteLLM
 compatibility allowance and not a universal provider contract. A per-response cap
 also caps one response, not a task: it does not bound total task tokens or
 guarantee the task finishes.
