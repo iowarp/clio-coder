@@ -264,6 +264,7 @@ test("fleet preview compiles the contract, announces its hash, and dispatches no
 			version: 1,
 			preview: "_clio-coder/fleet/preview",
 			run: "_clio-coder/fleet/run",
+			receiptFacts: true,
 		});
 		const preview = (await agent.call("_clio-coder/fleet/preview", {
 			sessionId: agent.sessionId,

@@ -21,6 +21,12 @@ import { readDispatchScopeNotice } from "../../core/dispatch-scope-notice.js";
 import type { SafeEventBus } from "../../core/event-bus.js";
 import { MAX_TIMER_DELAY_MS } from "../../core/timers.js";
 import { ToolNames } from "../../core/tool-names.js";
+import type { RunReceiptFacts } from "../../domains/dispatch/receipt-facts.js";
+import {
+	readRunReceiptFacts,
+	readRunReceiptFactsForReplay,
+	receiptWireFacts,
+} from "../../domains/dispatch/receipt-facts.js";
 import type { ProvidersContract } from "../../domains/providers/contract.js";
 import { isOrchestratorEligibleRuntime } from "../../domains/providers/eligibility.js";
 import { type CostProvenance, resolveCostProvenance } from "../../domains/providers/types/cost-provenance.js";
@@ -1627,6 +1633,7 @@ const ACP_MAX_TARGET_ID_BYTES = 128;
 const ACP_MAX_MODEL_ID_BYTES = 256;
 const ACP_MAX_LABEL_BYTES = 256;
 const ACP_REPLAY_META_KEY = "clio-coder/replay";
+const ACP_RECEIPT_META_KEY = "clio-coder/receipt";
 const ACP_BRANCHES_META_KEY = "clio-coder/branches";
 const ACP_DECISION_SUPERSEDE_METHOD = "_clio-coder/decisions/supersede";
 const ACP_MEMORY_PROPOSE_METHOD = "_clio-coder/memory/propose";
@@ -1755,6 +1762,8 @@ interface AcpReplayTurn {
 
 interface PreparedAcpReplay {
 	params: Array<AcpSessionUpdateParams & { _meta: Record<string, unknown> }>;
+	/** Dispatched runs on the replayed branch, in ledger order, for their terminal frames. */
+	runs: Array<{ runId: string; agentId: string }>;
 	turns: number;
 	truncated: boolean;
 }
@@ -1812,7 +1821,12 @@ function prepareAcpReplay(
 	const turns: AcpReplayTurn[] = [];
 	const ids = createActivePromptState();
 	let current: AcpReplayTurn | null = null;
+	const runs: Array<{ runId: string; agentId: string }> = [];
 	for (const entry of branch) {
+		if (entry.kind === "workerRun") {
+			runs.push({ runId: entry.runId, agentId: entry.agentId });
+			continue;
+		}
 		if (entry.kind === "compactionSummary") {
 			if (current === null) {
 				current = { frames: [] };
@@ -1899,7 +1913,7 @@ function prepareAcpReplay(
 			_meta: { [ACP_REPLAY_META_KEY]: { turn: index + 1 }, ...frame.meta },
 		})),
 	);
-	return { params, turns: turns.length, truncated: false };
+	return { params, runs, turns: turns.length, truncated: false };
 }
 
 function sessionResultMeta(
@@ -3104,6 +3118,8 @@ export function createAcpHandshake(features: AcpHandshakeFeatures): AcpHandshake
 										version: 1,
 										preview: ACP_FLEET_PREVIEW_METHOD,
 										run: ACP_FLEET_RUN_METHOD,
+										// Terminal dispatch frames carry `_meta["clio-coder/receipt"]` (#ACP-02).
+										receiptFacts: true,
 									},
 								}
 							: {}),
@@ -3307,6 +3323,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 		turnId: string | null,
 		terminal: boolean,
 		payload: Record<string, unknown>,
+		meta?: Record<string, unknown>,
 	): void => {
 		const sessionId = activeSessionId ?? boundSessionId;
 		if (!handshake.initialized || !handshake.enabledEventKinds.has(kind) || sessionId === null) return;
@@ -3321,6 +3338,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 				kind,
 				terminal,
 				payload,
+				...(meta !== undefined ? { _meta: meta } : {}),
 			});
 		} catch {
 			options.diagnostics?.("failed to send an opted-in ACP event");
@@ -3369,6 +3387,25 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 
 	const safeCount = (value: unknown): number | null =>
 		typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : null;
+
+	/**
+	 * The sealed receipt's facts for a terminal dispatch frame, projected by the
+	 * same readers the TUI footer uses. The domain seals the receipt before it
+	 * publishes the terminal event, so a live read finds it; a missing or
+	 * unreadable one reports `unavailable: true` rather than failing the frame.
+	 */
+	const readReceipt = (runId: string, replay: boolean): RunReceiptFacts | null => {
+		try {
+			return replay ? readRunReceiptFactsForReplay(runId) : readRunReceiptFacts(runId);
+		} catch {
+			// The readers already swallow I/O and parse errors; anything else still
+			// must not take down the frame, and null reads as unavailable.
+			return null;
+		}
+	};
+	const receiptMeta = (runId: string, facts: RunReceiptFacts | null): Record<string, unknown> => ({
+		[ACP_RECEIPT_META_KEY]: receiptWireFacts(runId, facts),
+	});
 
 	const unsubscribeEvents: Array<() => void> = [];
 	if (options.bus !== undefined) {
@@ -3458,15 +3495,21 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 				const identity = dispatchIdentity(payload);
 				if (identity === null) return;
 				dispatchProgress.delete(identity.runId);
-				forwardEvent("dispatch.completed", null, true, {
-					runId: identity.runId,
-					agentId: identity.agentId,
-					outcome: safeStoredIdentifier(payload.outcome, 64),
-					outcomeCode: safeStoredIdentifier(payload.outcomeCode, 64),
-					outcomeDetail: safeStoredString(payload.outcomeDetail, 2048) || null,
-					durationMs: safeCount(payload.durationMs),
-					tokenCount: safeCount(payload.tokenCount),
-				});
+				forwardEvent(
+					"dispatch.completed",
+					null,
+					true,
+					{
+						runId: identity.runId,
+						agentId: identity.agentId,
+						outcome: safeStoredIdentifier(payload.outcome, 64),
+						outcomeCode: safeStoredIdentifier(payload.outcomeCode, 64),
+						outcomeDetail: safeStoredString(payload.outcomeDetail, 2048) || null,
+						durationMs: safeCount(payload.durationMs),
+						tokenCount: safeCount(payload.tokenCount),
+					},
+					receiptMeta(identity.runId, readReceipt(identity.runId, false)),
+				);
 			}),
 		);
 		unsubscribeEvents.push(
@@ -3474,15 +3517,21 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 				const identity = dispatchIdentity(payload);
 				if (identity === null) return;
 				dispatchProgress.delete(identity.runId);
-				forwardEvent("dispatch.failed", null, true, {
-					runId: identity.runId,
-					agentId: identity.agentId,
-					outcome: safeStoredIdentifier(payload.outcome, 64),
-					reason: safeStoredIdentifier(payload.reason, 64),
-					outcomeCode: safeStoredIdentifier(payload.outcomeCode, 64),
-					outcomeDetail: safeStoredString(payload.outcomeDetail, 2048) || null,
-					durationMs: safeCount(payload.durationMs),
-				});
+				forwardEvent(
+					"dispatch.failed",
+					null,
+					true,
+					{
+						runId: identity.runId,
+						agentId: identity.agentId,
+						outcome: safeStoredIdentifier(payload.outcome, 64),
+						reason: safeStoredIdentifier(payload.reason, 64),
+						outcomeCode: safeStoredIdentifier(payload.outcomeCode, 64),
+						outcomeDetail: safeStoredString(payload.outcomeDetail, 2048) || null,
+						durationMs: safeCount(payload.durationMs),
+					},
+					receiptMeta(identity.runId, readReceipt(identity.runId, false)),
+				);
 			}),
 		);
 		unsubscribeEvents.push(
@@ -3910,6 +3959,38 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 			replay: replayToClient ? prepareAcpReplay(entries, leafTurnId, id) : undefined,
 		};
 	};
+	/**
+	 * A reopened session's historical runs, replayed as the terminal dispatch
+	 * frames a live client would have received, with the same receipt facts the
+	 * TUI's replayed footers read (#ACP-02). A run the ledger still shows open
+	 * in another process has no terminal frame yet, so it is skipped.
+	 */
+	const replayDispatchTerminals = (runs: ReadonlyArray<{ runId: string; agentId: string }>): void => {
+		const seen = new Set<string>();
+		for (const run of runs) {
+			if (seen.has(run.runId)) continue;
+			seen.add(run.runId);
+			const identity = dispatchIdentity(run);
+			if (identity === null) continue;
+			const facts = readReceipt(identity.runId, true);
+			if (facts?.stillRunning === true) continue;
+			const outcome = facts === null ? null : safeStoredIdentifier(facts.outcome, 64);
+			const common = {
+				runId: identity.runId,
+				agentId: identity.agentId,
+				outcome,
+				outcomeCode: safeStoredIdentifier(facts?.outcomeCode, 64),
+				outcomeDetail: safeStoredString(facts?.failureMessage ?? facts?.abandonedDetail, 2048) || null,
+				durationMs: safeCount(facts?.durationMs),
+			};
+			const replayMeta = { ...receiptMeta(identity.runId, facts), [ACP_REPLAY_META_KEY]: { run: true } };
+			if (outcome === "succeeded") {
+				forwardEvent("dispatch.completed", null, true, { ...common, tokenCount: safeCount(facts?.tokenCount) }, replayMeta);
+			} else {
+				forwardEvent("dispatch.failed", null, true, { ...common, reason: outcome }, replayMeta);
+			}
+		}
+	};
 	/** Bind `session` as the one this process hosts, then replay its branch to the client. */
 	const bindRestored = (session: AcpServerSession, replay: PreparedAcpReplay | undefined): void => {
 		sessions.set(session.id, session);
@@ -3917,6 +3998,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 		announceCommands(session.id);
 		if (replay !== undefined) {
 			for (const replayParams of replay.params) options.transport.notify("session/update", replayParams);
+			replayDispatchTerminals(replay.runs);
 		}
 		telemetry.bind(replay !== undefined);
 	};
