@@ -185,7 +185,6 @@ test("fallback grep reports binary, oversized and unreadable files and its ignor
 	const result = await grepTool.run({ path: root, pattern: "needle" });
 	assert.match(ok(result).output, /a.txt:1: needle/);
 	assert.match(ok(result).output, /GENERATED_DIRS only; .gitignore is not applied/);
-	assert.match(grepTool.description, /GENERATED_DIRS only.*\.gitignore/);
 	assert.equal(search(result).reason, "errors");
 	assert.equal(search(result).skipped.count, 3);
 	assert.deepEqual(

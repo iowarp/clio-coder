@@ -120,8 +120,26 @@ describe("gateway surface placement", () => {
 	it("attaches only direct schemas to the agent and keeps every capability name on the effective list", () => {
 		const registry = createWorkerToolRegistry();
 		const attached = resolveAgentTools({ registry }).map((tool) => tool.name);
-		deepStrictEqual(attached, [...registry.listRegistered()].sort());
+		const shellCovered: string[] = [ToolNames.Find, ToolNames.Ls];
+		deepStrictEqual(
+			attached,
+			[...registry.listRegistered()].filter((name) => !shellCovered.includes(name)).sort(),
+		);
 		for (const name of GATEWAY_BUILTINS) ok(!attached.includes(name), `${name} has no attached schema`);
+	});
+
+	it("moves find and ls behind the gateway only when bash is on the surface", () => {
+		const registry = createWorkerToolRegistry();
+		const withShell = resolveAgentTools({
+			registry,
+			allowedTools: [ToolNames.Bash, ToolNames.Find, ToolNames.Ls, ToolNames.Read, ToolNames.Gateway],
+		}).map((tool) => tool.name);
+		deepStrictEqual(withShell, [ToolNames.Bash, ToolNames.Gateway, ToolNames.Read]);
+		const withoutShell = resolveAgentTools({
+			registry,
+			allowedTools: [ToolNames.Find, ToolNames.Ls, ToolNames.Read, ToolNames.Gateway],
+		}).map((tool) => tool.name);
+		deepStrictEqual(withoutShell, [ToolNames.Find, ToolNames.Gateway, ToolNames.Ls, ToolNames.Read]);
 	});
 
 	it("find lists capabilities with kind and class, describe hands over the wire schema, and direct tools are refused", async () => {

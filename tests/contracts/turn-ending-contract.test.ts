@@ -53,7 +53,9 @@ describe("turn-ending contract in the session prompt", () => {
 			ok(!prompt.includes("## Ending a turn"), prompt);
 			ok(!prompt.includes('ask_user "'), prompt);
 			ok(prompt.includes(identityHalf), prompt);
-			ok(prompt.includes("stops\nthere, without a question"), prompt);
+			ok(prompt.includes("with no closing offer, courtesy question or menu of next steps"), prompt);
+			// The greeting rule needs an operator to greet; headless runs leave it out.
+			strictEqual(prompt.includes("stops\nthere, without a question"), inputs.headless !== true);
 		}
 	});
 });
