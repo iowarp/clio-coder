@@ -20,6 +20,7 @@ import { usePaneState } from "../chat/pane-state.js";
 import { routeFacts } from "../chat/route.js";
 import { PaneToggles, SessionPane } from "../chat/SessionPane.js";
 import { ConversationBanner, TaskSkeleton, TaskUnavailable } from "../chat/SessionStates.js";
+import { TelemetryChips } from "../chat/TelemetryChips.js";
 import { type ChatTurn, groupTurns, turnStatuses } from "../chat/turns.js";
 import { Icon } from "../design/icons.js";
 import { StatusMark } from "../design/status.js";
@@ -282,6 +283,13 @@ function SessionView({ client, id }: { client: Client; id: string }) {
 							</p>
 						) : null}
 						<span className="wb-bar__spacer" />
+						<TelemetryChips
+							client={client}
+							sessionId={snapshot.id}
+							state={snapshot.state}
+							turns={snapshot.turns}
+							onOpen={pane.show}
+						/>
 						<div className="wb-bar__end">
 							<PaneToggles
 								client={client}

@@ -1,9 +1,10 @@
 import { useQuery } from "@tanstack/react-query";
-import { memo, useState } from "react";
+import { memo, useId } from "react";
 import type { AgentCapabilities } from "../../contracts/capabilities.js";
 import { routes } from "../../contracts/routes.js";
 import type { Client } from "../api/client.js";
 import { contextView } from "./context-model.js";
+import { contextMeter, contextSegments } from "./overview-model.js";
 import "./session-board.css";
 
 /**
@@ -23,62 +24,113 @@ export const ContextPanel = memo(function ContextPanel({
 	capabilities: AgentCapabilities | undefined;
 	settledTurns: number;
 }) {
-	const [expanded, setExpanded] = useState(true);
 	const supported = !!capabilities?.context;
+	const id = useId();
 	const ledger = useQuery({
 		queryKey: ["session-context", sessionId, settledTurns],
 		queryFn: () => client.call(routes.sessionContext, { params: { id: sessionId }, query: {}, body: {} }),
-		enabled: expanded && sessionOpen && supported,
+		enabled: sessionOpen && supported,
 		retry: false,
 	});
 	const view = ledger.data ? contextView(ledger.data) : null;
+	const meter = ledger.data ? contextMeter(ledger.data) : null;
+	const segments = ledger.data ? contextSegments(ledger.data) : [];
 	return (
-		<details
-			open={expanded}
-			className="command-panel session-board context-panel"
-			onToggle={(event) => setExpanded(event.currentTarget.open)}
-		>
-			<summary>Context window</summary>
-			{!sessionOpen ? <p>This session is not open. Load it to read its context window.</p> : null}
-			{sessionOpen && !supported ? <p>This Clio Coder session does not report its context window.</p> : null}
-			{ledger.isPending && expanded && sessionOpen && supported ? <p>Reading the context window…</p> : null}
-			{ledger.error ? <p role="alert">{ledger.error.message}</p> : null}
+		<div className="pane-drill drill context-panel">
+			{!sessionOpen ? <p className="pane-empty">This session is not open. Load it to read its context window.</p> : null}
+			{sessionOpen && !supported ? (
+				<p className="pane-empty">This Clio Coder session does not report its context window.</p>
+			) : null}
+			{ledger.isPending && sessionOpen && supported ? <p className="pane-empty">Reading the context window…</p> : null}
+			{ledger.error ? (
+				<p role="alert" className="pane-empty">
+					{ledger.error.message}
+				</p>
+			) : null}
 			{view ? (
 				<>
-					<p className="session-board__note">
-						{view.route}. {view.window}
-					</p>
-					<p className="context-panel__total">{view.accounting}</p>
-					<table className="context-panel__rows">
-						<caption className="session-board__note">What fills the window</caption>
-						<thead>
-							<tr>
-								<th scope="col">Part</th>
-								<th scope="col">Tokens</th>
-								<th scope="col">Share</th>
-							</tr>
-						</thead>
-						<tbody>
-							{view.rows.map((row) => (
-								<tr key={row.key}>
-									<th scope="row">{row.label}</th>
-									<td>{row.tokens}</td>
-									<td>{row.share || "not reported"}</td>
+					<section className="drill__section context-panel__lead" aria-label="Context window in use">
+						<p className="context-panel__figure">
+							<strong>{view.figure.percent ?? view.figure.used}</strong>
+							<span className="context-panel__of">
+								{view.figure.percent === null ? "" : `${view.figure.used} `}
+								{view.figure.window === null ? "tokens in use" : `of ${view.figure.window} tokens`}
+							</span>
+						</p>
+						<p className="drill__note">
+							{view.figure.basis}.{view.figure.window === null ? ` ${view.window}` : ""}
+						</p>
+						{meter ? (
+							<div className="pane-meter context-panel__meter" data-tone={meter.tone}>
+								{/* biome-ignore lint/a11y/useSemanticElements: a native meter cannot hold the segments that show what fills the window. */}
+								<div
+									className="pane-stack"
+									role="meter"
+									aria-label="Context window"
+									aria-valuemin={0}
+									aria-valuemax={100}
+									aria-valuenow={Math.round(meter.percent)}
+									aria-valuetext={meter.text}
+								>
+									{segments.map((segment, index) => (
+										<span
+											key={segment.key}
+											className="pane-stack__part"
+											data-index={index}
+											style={{ width: `${segment.percent}%` }}
+											title={`${segment.label} ${segment.percent.toFixed(1)}%`}
+										/>
+									))}
+								</div>
+								{segments.length > 0 ? (
+									<ul className="pane-legend" aria-label="What fills the window">
+										{segments.map((segment, index) => (
+											<li key={segment.key} data-index={index}>
+												{segment.label} <span>{segment.percent < 1 ? "<1" : Math.round(segment.percent)}%</span>
+											</li>
+										))}
+									</ul>
+								) : null}
+							</div>
+						) : null}
+					</section>
+					<section className="drill__section" aria-labelledby={`${id}-parts`}>
+						<h3 id={`${id}-parts`}>What fills the window</h3>
+						<table className="drill__table" aria-labelledby={`${id}-parts`}>
+							<thead>
+								<tr>
+									<th scope="col">Part</th>
+									<th scope="col">Tokens</th>
+									<th scope="col">Share</th>
 								</tr>
+							</thead>
+							<tbody>
+								{view.rows.map((row) => (
+									<tr key={row.key}>
+										<th scope="row">{row.label}</th>
+										<td>{row.tokens}</td>
+										<td>{row.share || <span className="drill__absent">not reported</span>}</td>
+									</tr>
+								))}
+							</tbody>
+						</table>
+					</section>
+					<section className="drill__section" aria-labelledby={`${id}-window`}>
+						<h3 id={`${id}-window`}>Window</h3>
+						<dl className="drill__facts">
+							{view.facts.map((fact) => (
+								<div key={fact.label}>
+									<dt>{fact.label}</dt>
+									<dd>
+										{fact.value !== null ? <span className="drill__num">{fact.value}</span> : null}
+										{fact.note !== null ? <span>{fact.note}</span> : null}
+									</dd>
+								</div>
 							))}
-						</tbody>
-					</table>
-					<p className="session-board__note">
-						{view.reserve} {view.free}
-					</p>
-					<p className="session-board__note">
-						{view.compaction}
-						{view.lastCompaction ? ` ${view.lastCompaction}` : ""}
-					</p>
-					{view.cache ? <p className="session-board__note">{view.cache}</p> : null}
-					{view.handbook ? <p className="session-board__note">{view.handbook}</p> : null}
+						</dl>
+					</section>
 				</>
 			) : null}
-		</details>
+		</div>
 	);
 });

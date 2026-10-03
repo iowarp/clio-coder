@@ -1,0 +1,564 @@
+/* The task pane's Agents drill: a stat line, the run tree under the main conversation, engine
+   notices, and the fleet contract form. It speaks the Session column's language (client/chat/pane.css):
+   mono uppercase eyebrows, fine rules, no boxed cards. Colour comes from client/design/tokens.css. */
+
+.worker-graph {
+	--agents-indent: 16px;
+	/* A collapsed row is two 18px lines in 7px of padding; the tick meets the first line's centre. */
+	--agents-row: 52px;
+	--agents-tick: 16px;
+	display: grid;
+	gap: var(--space-4);
+	min-width: 0;
+}
+
+.agents-eyebrow {
+	margin: 0;
+	font: 500 11px / 1.5 var(--font-mono);
+	letter-spacing: var(--tracking-instrument);
+	text-transform: uppercase;
+	color: var(--ink-muted);
+}
+.agents-mono {
+	font-family: var(--font-mono);
+	font-size: var(--text-exact);
+	font-variant-numeric: tabular-nums;
+	color: var(--ink);
+}
+code.agents-mono {
+	display: inline;
+	padding: 0;
+}
+.agents-note {
+	margin: 0;
+	font-size: 12.5px;
+	line-height: 1.5;
+	color: var(--ink-muted);
+}
+.agents-alert {
+	margin: 0;
+	padding-inline-start: var(--space-2);
+	border-inline-start: 2px solid var(--status-fail-line);
+	font-size: 12.5px;
+	line-height: 1.5;
+	color: var(--ink);
+}
+.agents-alert strong {
+	color: var(--status-fail-fg);
+}
+.agents-alert ul {
+	margin: var(--space-1) 0 0;
+	padding-inline-start: var(--space-4);
+}
+
+/* A borderless control that only shows its ground on hover, for the record link and the copy press. */
+.agents-quiet {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	flex-shrink: 0;
+	min-width: 26px;
+	min-height: 26px;
+	padding: 0 4px;
+	border: 0;
+	border-radius: var(--radius-sm);
+	background: transparent;
+	color: var(--ink-subtle);
+	font-size: 11.5px;
+	text-decoration: none;
+	transition:
+		color var(--motion-fast) var(--ease-standard),
+		background var(--motion-fast) var(--ease-standard);
+}
+.agents-quiet .icon {
+	width: 13px;
+	height: 13px;
+}
+.agents-quiet:hover,
+.agents-quiet:focus-visible {
+	background: var(--wb-hover);
+	color: var(--ink);
+}
+
+/* ---- the stat line ------------------------------------------------------------------ */
+.agents-stats {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	justify-content: space-between;
+	gap: var(--space-2) var(--space-4);
+	padding-bottom: var(--space-3);
+	border-bottom: 1px solid var(--line);
+}
+.agents-stats dl {
+	display: flex;
+	gap: var(--space-5);
+	margin: 0;
+}
+.agents-stats dl > div {
+	display: inline-flex;
+	flex-direction: row-reverse;
+	align-items: baseline;
+	gap: 6px;
+}
+.agents-stats dd {
+	margin: 0;
+	font: 500 18px / 1 var(--font-mono);
+	font-variant-numeric: tabular-nums;
+	color: var(--ink-subtle);
+}
+.agents-stats dt {
+	font: 500 11px / 1 var(--font-mono);
+	letter-spacing: var(--tracking-instrument);
+	text-transform: uppercase;
+	color: var(--ink-muted);
+}
+.agents-stats [data-tone="running"] dd {
+	color: var(--accent);
+}
+.agents-stats [data-tone="success"] dd {
+	color: var(--ink);
+}
+.agents-stats [data-tone="fail"] dd {
+	color: var(--status-fail-fg);
+}
+.agents-filter {
+	min-height: 26px;
+	padding: 0 10px;
+	border: 1px solid var(--line);
+	border-radius: var(--radius-pill);
+	color: var(--ink-muted);
+	font-size: 12px;
+}
+.agents-filter:hover:not(:disabled) {
+	color: var(--ink);
+	border-color: var(--line-strong);
+}
+.agents-filter[aria-pressed="true"] {
+	border-color: var(--accent);
+	background: var(--accent-soft);
+	color: var(--accent);
+}
+.agents-filter[aria-pressed="true"]:hover:not(:disabled) {
+	background: var(--accent-soft);
+	color: var(--accent);
+	border-color: var(--accent);
+}
+
+/* ---- the run tree ------------------------------------------------------------------
+   Each row draws its own guides: a line per shallower level still heading to a later sibling, its
+   own level (through or ending at its tick), the tick, and the start of its children's line. Rows
+   stack without gaps, so the segments read as continuous lines. */
+.worker-graph .status-mark {
+	padding: 0;
+	border: 0;
+	background: transparent;
+	font-size: 11.5px;
+	font-weight: 500;
+}
+.agents-tree {
+	min-width: 0;
+}
+.agents-root {
+	position: relative;
+	display: flex;
+	align-items: center;
+	gap: var(--space-2);
+	min-height: calc(var(--agents-tick) * 2);
+	padding-inline-start: var(--agents-indent);
+}
+.agents-root__dot {
+	position: absolute;
+	left: 1px;
+	top: calc(50% - 4.5px);
+	width: 9px;
+	height: 9px;
+	border: 1.5px solid var(--ink-muted);
+	border-radius: 50%;
+	box-sizing: border-box;
+}
+.agents-root[data-opens]::after {
+	content: "";
+	position: absolute;
+	left: 5px;
+	top: calc(50% + 6px);
+	bottom: 0;
+	width: 1px;
+	background: var(--line-strong);
+	opacity: 0.55;
+}
+.agents-root__name {
+	font-size: var(--text-meta);
+	font-weight: 600;
+	padding-inline-start: 8px;
+}
+.agents-root__role {
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	font-size: 12.5px;
+	color: var(--ink-muted);
+}
+.agents-root .status-mark {
+	margin-left: auto;
+	padding-inline-end: 8px;
+}
+.agents-tree ol {
+	margin: 0;
+	padding: 0;
+	list-style: none;
+}
+.agents-node {
+	position: relative;
+	min-width: 0;
+	padding-inline-start: calc((var(--depth) + 1) * var(--agents-indent));
+}
+.agents-guides {
+	position: absolute;
+	inset: 0;
+	pointer-events: none;
+}
+.agents-guides > span {
+	position: absolute;
+	left: calc(var(--level) * var(--agents-indent) + 5px);
+	width: 1px;
+	background: var(--line-strong);
+	opacity: 0.55;
+}
+.agents-guides [data-line="through"] {
+	top: 0;
+	bottom: 0;
+}
+.agents-guides [data-line="end"] {
+	top: 0;
+	height: calc(var(--agents-tick) + 1px);
+}
+.agents-guides [data-line="tick"] {
+	top: var(--agents-tick);
+	width: calc(var(--agents-indent) - 5px);
+	height: 1px;
+}
+/* A child's line starts under its parent's row, beside the parent's opened detail if any. */
+.agents-guides [data-line="start"] {
+	top: var(--agents-row);
+	bottom: 0;
+}
+.agents-node__row {
+	display: flex;
+	align-items: flex-start;
+	gap: 2px;
+	min-width: 0;
+}
+.agents-node__toggle {
+	display: grid;
+	flex: 1;
+	gap: 2px;
+	min-width: 0;
+	min-height: 0;
+	padding: 7px 8px;
+	border: 0;
+	border-radius: var(--radius-sm);
+	background: transparent;
+	color: var(--ink);
+	text-align: left;
+}
+.agents-node__toggle:hover:not(:disabled) {
+	background: var(--wb-hover);
+}
+.agents-node[data-open] .agents-node__toggle {
+	background: var(--wb-faint);
+}
+.agents-node__head,
+.agents-node__line {
+	display: flex;
+	align-items: baseline;
+	gap: var(--space-2);
+	min-width: 0;
+}
+.agents-node__agent {
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	font: 500 12.5px / 18px var(--font-mono);
+}
+.agents-node__head .status-mark {
+	margin-left: auto;
+	line-height: 18px;
+}
+.agents-node__task {
+	flex: 1;
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	font-size: 12.5px;
+	line-height: 18px;
+	color: var(--ink-muted);
+}
+.agents-node__facts {
+	flex-shrink: 0;
+	max-width: 50%;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	font: 11px / 18px var(--font-mono);
+	font-variant-numeric: tabular-nums;
+	color: var(--ink-subtle);
+}
+.agents-node__record {
+	margin-top: 4px;
+}
+.agents-node__detail {
+	display: grid;
+	gap: var(--space-3);
+	padding: var(--space-2) 8px var(--space-4) 20px;
+}
+.agents-node__detail dl {
+	display: grid;
+	grid-template-columns: auto minmax(0, 1fr);
+	gap: 5px var(--space-3);
+	margin: 0;
+}
+.agents-node__detail dl > div {
+	display: contents;
+}
+.agents-node__detail dt {
+	font: 500 10.5px / 20px var(--font-mono);
+	letter-spacing: var(--tracking-instrument);
+	text-transform: uppercase;
+	color: var(--ink-subtle);
+}
+.agents-node__detail dd {
+	min-width: 0;
+	margin: 0;
+	font-size: 12.5px;
+	line-height: 20px;
+	overflow-wrap: anywhere;
+}
+.agents-runid {
+	display: inline-flex;
+	align-items: center;
+	gap: 2px;
+	max-width: 100%;
+}
+.agents-runid code {
+	display: inline;
+	min-width: 0;
+	padding: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	font-size: 11.5px;
+	font-variant-numeric: tabular-nums;
+	user-select: all;
+}
+.agents-runid .agents-quiet {
+	min-width: 22px;
+	min-height: 22px;
+}
+
+.agents-empty {
+	padding-inline-start: var(--agents-indent);
+}
+
+/* ---- the sections after the tree --------------------------------------------------- */
+.agents-section {
+	display: grid;
+	gap: var(--space-3);
+	margin: 0;
+	padding-top: var(--space-4);
+	border-top: 1px solid var(--line);
+	font-size: var(--text-meta);
+	color: var(--ink);
+}
+.agents-notices ol {
+	display: grid;
+	gap: var(--space-2);
+	margin: 0;
+	padding: 0;
+	list-style: none;
+}
+.agents-notices li {
+	display: grid;
+	grid-template-columns: 14px minmax(0, 1fr) auto;
+	align-items: baseline;
+	gap: var(--space-2);
+	font-size: 12.5px;
+	line-height: 1.45;
+}
+.agents-notices__mark {
+	font-family: var(--font-mono);
+	color: var(--status-neutral-fg);
+}
+.agents-notices [data-tone="running"] .agents-notices__mark {
+	color: var(--status-running-fg);
+}
+.agents-notices [data-tone="success"] .agents-notices__mark {
+	color: var(--status-success-fg);
+}
+.agents-notices [data-tone="warn"] .agents-notices__mark {
+	color: var(--status-warn-fg);
+}
+.agents-notices [data-tone="fail"] .agents-notices__mark {
+	color: var(--status-fail-fg);
+}
+.agents-notices [data-tone="unverified"] .agents-notices__mark {
+	color: var(--status-unverified-fg);
+}
+.agents-notices__text {
+	color: var(--ink-muted);
+}
+.agents-notices__text strong {
+	font-weight: 600;
+	color: var(--ink);
+}
+.agents-notices time {
+	font: 11px / 1.45 var(--font-mono);
+	font-variant-numeric: tabular-nums;
+	color: var(--ink-subtle);
+}
+
+/* The fleet contract form folds shut under its eyebrow; open, it is a calm inline form. */
+.fleet-run-panel > summary {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: var(--space-2);
+	list-style: none;
+	margin: -4px -6px;
+	padding: 4px 6px;
+	border-radius: var(--radius-sm);
+}
+.fleet-run-panel > summary::-webkit-details-marker {
+	display: none;
+}
+.fleet-run-panel > summary:hover {
+	background: var(--wb-hover);
+}
+.fleet-run-panel > summary:hover .agents-eyebrow {
+	color: var(--ink);
+}
+.fleet-run-panel > summary .icon {
+	width: 14px;
+	height: 14px;
+	color: var(--ink-subtle);
+	transform: rotate(-90deg);
+	transition: transform var(--motion-fast) var(--ease-standard);
+}
+.fleet-run-panel[open] > summary .icon {
+	transform: none;
+}
+/* Spacing by margin: a details element's open content does not take the grid gap everywhere. */
+.fleet-run-panel {
+	display: block;
+}
+.fleet-run-panel > :not(summary) {
+	margin-top: var(--space-3);
+}
+.agents-form {
+	display: grid;
+	gap: 6px;
+}
+.agents-form label {
+	margin-top: var(--space-2);
+	font-size: 12px;
+	color: var(--ink-muted);
+}
+.agents-form input,
+.agents-form textarea {
+	font-size: 12.5px;
+}
+.agents-form input {
+	font-family: var(--font-mono);
+}
+.agents-form textarea {
+	font-family: var(--font-mono);
+	resize: vertical;
+	min-height: 52px;
+}
+.agents-form [role="alert"] {
+	font-size: 12px;
+	color: var(--status-fail-fg);
+}
+.agents-form__submit {
+	justify-self: start;
+	margin-top: var(--space-2);
+	min-height: 30px;
+	padding: 0 var(--space-3);
+	font-size: 12.5px;
+}
+.agents-plan {
+	display: grid;
+	gap: var(--space-3);
+	padding-top: var(--space-3);
+	border-top: 1px solid var(--line);
+}
+.agents-plan h4 {
+	margin: 0;
+	font-size: var(--text-meta);
+	font-weight: 600;
+}
+.agents-plan__wave {
+	display: grid;
+	gap: var(--space-1);
+}
+.agents-plan__wave ol {
+	display: grid;
+	margin: 0;
+	padding: 0;
+	list-style: none;
+}
+.agents-plan__wave li {
+	display: grid;
+	grid-template-columns: minmax(3.5rem, auto) minmax(0, 1fr);
+	align-items: baseline;
+	gap: var(--space-3);
+	padding-block: 6px;
+	border-top: 1px solid var(--line);
+	font-size: 12.5px;
+}
+.agents-plan__wave li:first-child {
+	border-top: 0;
+}
+.agents-plan__wave li > span:last-child {
+	display: grid;
+	gap: 1px;
+	min-width: 0;
+	overflow-wrap: anywhere;
+}
+.agents-plan__wave small {
+	font-size: 12px;
+	color: var(--ink-muted);
+}
+.agents-plan__actions {
+	display: flex;
+	flex-wrap: wrap;
+	gap: var(--space-2);
+}
+.agents-plan__actions button {
+	min-height: 30px;
+	padding: 0 var(--space-3);
+	font-size: 12.5px;
+}
+.agents-plan__start:not(:disabled) {
+	border-color: var(--action-line);
+	background: var(--action-tint);
+	color: var(--action-fg);
+}
+
+/* Guide and Stop inside an opened row; the controls and their outcome are styled in approval.css. */
+.worker-graph .fleet-steer button {
+	min-height: 28px;
+	padding: 0 var(--space-3);
+	font-size: 12.5px;
+}
+.worker-graph .fleet-steer__form label {
+	font-size: 12px;
+	color: var(--ink-muted);
+}
+.worker-graph .fleet-steer__actions > span,
+.worker-graph .fleet-steer__outcome {
+	font-size: 12.5px;
+}

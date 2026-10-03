@@ -85,3 +85,32 @@ export function contextMeter(
 	const label = `${compactCount(ledger.usedTokens)} of ${compactCount(ledger.contextWindow)} tokens${ledger.measured ? "" : ", estimated"}`;
 	return { percent, tone, label, text: `Context window ${Math.round(percent)}% used, ${label}` };
 }
+
+export interface ContextSegment {
+	readonly key: string;
+	readonly label: string;
+	/** Share of the whole window, 0 to 100. */
+	readonly percent: number;
+}
+
+/**
+ * What fills the window, as shares of the whole window for a stacked bar. The largest parts keep their
+ * own segment and the rest fold into one, so the bar stays readable at the pane's width.
+ */
+export function contextSegments(
+	ledger: Pick<ContextLedger, "contextWindow" | "groups">,
+	keep = 4,
+): readonly ContextSegment[] {
+	if (ledger.contextWindow <= 0) return [];
+	const parts = ledger.groups
+		.filter((group) => group.tokens > 0)
+		.map((group) => ({
+			key: group.category,
+			label: group.label,
+			percent: (group.tokens / ledger.contextWindow) * 100,
+		}))
+		.sort((a, b) => b.percent - a.percent);
+	if (parts.length <= keep) return parts;
+	const rest = parts.slice(keep - 1).reduce((sum, part) => sum + part.percent, 0);
+	return [...parts.slice(0, keep - 1), { key: "other", label: "Other", percent: rest }];
+}

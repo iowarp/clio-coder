@@ -36,12 +36,88 @@ export interface ContextView {
 	lastCompaction: string | null;
 	cache: string | null;
 	handbook: string | null;
+	/** The lead figure: the share when the window is known, and the counts it is a share of. */
+	figure: { percent: string | null; used: string; window: string | null; basis: string };
+	/** The window's settings and recent history as short label and value pairs, for a facts list. */
+	facts: ContextFact[];
+}
+
+export interface ContextFact {
+	label: string;
+	/** An exact value, drawn in tabular figures; null when the fact is words only. */
+	value: string | null;
+	/** The words beside or instead of the value. */
+	note: string | null;
+}
+
+const count = (value: number) => Math.round(value).toLocaleString("en-US");
+
+function contextFacts(ledger: ContextLedger): ContextFact[] {
+	const known = ledger.contextWindow > 0;
+	const slots = ledger.contextWindowSlots;
+	const route = [ledger.provider, ledger.model].filter(Boolean).join(" · ");
+	const cache = ledger.promptCache;
+	const facts: ContextFact[] = [
+		{ label: "Model", value: null, note: route || "Route not reported" },
+		known
+			? {
+					label: "Window",
+					value: count(ledger.contextWindow),
+					note: [
+						SOURCE_WORDS[ledger.contextWindowSource ?? "unknown"] ?? ledger.contextWindowSource,
+						slots ? `one of ${slots.slots} slots sharing ${count(slots.totalTokens)}` : null,
+					]
+						.filter(Boolean)
+						.join(", "),
+				}
+			: { label: "Window", value: null, note: "Size not reported" },
+		known
+			? { label: "Free", value: count(ledger.freeTokens), note: null }
+			: { label: "Free", value: null, note: "Not reported" },
+		{ label: "Reserve", value: count(ledger.reserveTokens), note: "held for compaction" },
+		{
+			label: "Compaction",
+			value:
+				ledger.compactionAuto && ledger.compactionThreshold !== null
+					? `${Math.round(ledger.compactionThreshold * 100)}%`
+					: null,
+			note: ledger.compactionAuto ? "automatic" : "Automatic compaction is off",
+		},
+	];
+	if (ledger.lastCompaction !== null)
+		facts.push({
+			label: "Last compacted",
+			value: `${count(ledger.lastCompaction.tokensBefore)} → ${count(ledger.lastCompaction.tokensAfter)}`,
+			note: ledger.lastCompaction.trigger,
+		});
+	if (cache !== null)
+		facts.push({
+			label: "Prompt cache",
+			value: cache.cacheReadTokens === null ? null : count(cache.cacheReadTokens),
+			note: [
+				cache.cacheReadTokens === null ? "provider reported no cache reads" : "read from the provider cache",
+				cache.shellReused ? "session shell reused" : "session shell rebuilt",
+				cache.backendVerdict === null ? null : VERDICT_WORDS[cache.backendVerdict],
+			]
+				.filter(Boolean)
+				.join("; "),
+		});
+	if (ledger.projectHandbookFiles !== null && ledger.projectHandbookFiles.length > 0)
+		facts.push({ label: "Handbook", value: null, note: ledger.projectHandbookFiles.join(", ") });
+	return facts;
 }
 
 export function contextView(ledger: ContextLedger): ContextView {
 	const known = ledger.contextWindow > 0;
 	const slots = ledger.contextWindowSlots;
 	return {
+		figure: {
+			percent: known && ledger.percent !== null ? `${ledger.percent.toFixed(ledger.percent < 10 ? 1 : 0)}%` : null,
+			used: count(ledger.usedTokens),
+			window: known ? count(ledger.contextWindow) : null,
+			basis: ledger.measured ? "Measured by the provider" : "Estimated until the provider reports usage",
+		},
+		facts: contextFacts(ledger),
 		route: [ledger.provider, ledger.model].filter(Boolean).join(" · ") || "Route not reported",
 		window: known
 			? `${tokens(ledger.contextWindow)}${slots ? `, one of ${slots.slots} slots sharing ${tokens(slots.totalTokens)}` : ""}, ${

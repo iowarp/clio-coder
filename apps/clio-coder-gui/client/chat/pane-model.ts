@@ -1,28 +1,37 @@
 import type { SessionSnapshot, TimelineItem } from "../../contracts/sessions.js";
 
 /**
- * The right-hand pane. Two views carry the everyday questions: how is it going and what changed. The
- * rest is Clio's depth, reachable from the pane's menu and never in the way. The pane has no command
- * view: what Clio ran is in the transcript, and nothing typed in the browser reaches a process.
+ * The right-hand pane is one Session column: everything about the open chat as calm sections, read
+ * top to bottom. A section with more to say opens a drill-in with a way back. There are no tabs; the
+ * transcript and the composer are where things are done, the pane is where they are reported.
  */
 export const PANE_VIEWS = [
-	{ id: "progress", label: "Progress", icon: "listChecks", primary: true },
-	{ id: "changes", label: "Changes", icon: "fileDiff", primary: true },
-	{ id: "agents", label: "Agents", icon: "fleet", primary: false },
-	{ id: "session", label: "Details", icon: "sliders", primary: false },
-	{ id: "tools", label: "Tools", icon: "toolchain", primary: false },
+	{ id: "session", label: "Session", icon: "sessions" },
+	{ id: "context", label: "Context window", icon: "layers" },
+	{ id: "usage", label: "Usage and quota", icon: "usage" },
+	{ id: "board", label: "Tasks and decisions", icon: "listChecks" },
+	{ id: "changes", label: "Changes", icon: "fileDiff" },
+	{ id: "agents", label: "Agents", icon: "fleet" },
 ] as const;
 
 export type PaneView = (typeof PANE_VIEWS)[number]["id"];
+
+export const ROOT_VIEW: PaneView = "session";
 
 export function isPaneView(value: unknown): value is PaneView {
 	return PANE_VIEWS.some((view) => view.id === value);
 }
 
-/** Earlier builds stored "artifacts" and "files" (now part of Changes) and "terminal" (removed). */
+export function paneViewLabel(view: PaneView): string {
+	return PANE_VIEWS.find((entry) => entry.id === view)?.label ?? "Session";
+}
+
+/** Views earlier builds stored: Progress and Details are the Session column now, Files is Changes. */
 export function migratedPaneView(value: unknown): PaneView {
+	// Session tools moved to the composer's slash palette.
+	if (value === "progress" || value === "details" || value === "tools") return "session";
 	if (value === "artifacts" || value === "files") return "changes";
-	return isPaneView(value) ? value : "progress";
+	return isPaneView(value) ? value : ROOT_VIEW;
 }
 
 /**

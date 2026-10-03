@@ -111,3 +111,8 @@ export function quotaCards(
 		}),
 	};
 }
+
+/** A quota window's fill tone, on the same steps as the context meter so a nearly spent window reads alike. */
+export function quotaTone(share: number): "ok" | "warn" | "full" {
+	return share >= 85 ? "full" : share >= 65 ? "warn" : "ok";
+}

@@ -1,6 +1,6 @@
-/* The session board sits in Session tools beside the command panel and wears its frame
-   (`.command-panel`): rows divide by hairline, ids read as exact values, and every state is a glyph
-   and a word. */
+/* Rows, notes and actions shared by the session-action panels the slash palette opens (branches,
+   handoff, extensions, fleet runs, asides): rows divide by hairline, ids read as exact values, and
+   every state is a glyph and a word. */
 .session-board section {
 	margin-block: var(--space-4);
 }
@@ -38,8 +38,7 @@
 	overflow-wrap: anywhere;
 	font-size: var(--text-meta);
 }
-.session-board__title small,
-.session-board__decisions small {
+.session-board__title small {
 	display: block;
 	color: var(--ink-muted);
 	font-size: var(--text-exact);
@@ -49,50 +48,10 @@
 	display: flex;
 	gap: var(--space-2);
 }
-.session-board__actions button,
-.session-board__add button {
+.session-board__actions button {
 	min-height: 32px;
 	padding: 0 var(--space-3);
 	font-size: var(--text-exact);
-}
-.session-board__add {
-	display: flex;
-	flex-wrap: wrap;
-	align-items: center;
-	gap: var(--space-2);
-	margin-top: var(--space-3);
-}
-.session-board__add label {
-	font-size: var(--text-meta);
-}
-.session-board__add input {
-	flex: 1 1 12rem;
-	min-width: 0;
-}
-.session-board__decisions {
-	margin: 0;
-	display: grid;
-	gap: var(--space-2);
-}
-.session-board__decisions > div {
-	display: grid;
-	grid-template-columns: minmax(7rem, 12rem) minmax(0, 1fr);
-	gap: var(--space-3);
-	font-size: var(--text-meta);
-}
-.session-board__decisions dt {
-	color: var(--ink-muted);
-	overflow-wrap: anywhere;
-}
-.session-board__decisions dd {
-	margin: 0;
-	overflow-wrap: anywhere;
-}
-@media (max-width: 650px) {
-	.session-board__decisions > div {
-		grid-template-columns: minmax(0, 1fr);
-		gap: var(--space-1);
-	}
 }
 
 /* Branches indent one step per branch level, as /tree does, not per message. The current branch is
@@ -160,61 +119,6 @@
 	font-size: var(--text-exact);
 	font-variant-numeric: tabular-nums;
 	color: var(--ink);
-}
-.fleet-run-panel .handoff-panel__refusal ul {
-	margin: var(--space-2) 0 0;
-	padding-inline-start: var(--space-5);
-}
-
-/* The context window: one sentence of accounting, then the parts that fill it as a small table
-   whose numbers are exact values. */
-.context-panel__total {
-	margin: var(--space-2) 0;
-	font-size: var(--text-meta);
-}
-.context-panel__rows {
-	width: 100%;
-	border-collapse: collapse;
-	font-size: var(--text-meta);
-}
-.context-panel__rows caption {
-	text-align: start;
-	padding-block-end: var(--space-1);
-}
-.context-panel__rows th,
-.context-panel__rows td {
-	padding: var(--space-1) var(--space-2);
-	border-bottom: 1px solid var(--line);
-	text-align: start;
-	font-weight: normal;
-}
-.context-panel__rows thead th {
-	color: var(--ink-muted);
-	font-size: var(--text-exact);
-}
-.context-panel__rows thead th:not(:first-child) {
-	text-align: end;
-}
-.context-panel__rows td {
-	font-family: var(--font-mono);
-	font-size: var(--text-exact);
-	font-variant-numeric: tabular-nums;
-	text-align: end;
-}
-
-/* The supersede question sits in the row it asks about: a legend and two buttons, no frame of its own. */
-.session-board__confirm {
-	flex-wrap: wrap;
-	align-items: center;
-	margin: var(--space-2) 0 0;
-	padding: 0;
-	border: 0;
-}
-.session-board__confirm legend {
-	padding: 0;
-	margin-block-end: var(--space-1);
-	font-size: var(--text-meta);
-	color: var(--ink-muted);
 }
 
 /* Beside the conversation: a side question and a set of drafts, each answered in place. The answers
@@ -300,4 +204,378 @@
 	font-family: var(--font-mono);
 	font-size: var(--text-exact);
 	font-variant-numeric: tabular-nums;
+}
+
+/* ---- drill bodies: Context, Usage, and Tasks and decisions --------------------------
+   The Session column's language carried into its drill-ins: open sections on fine rules under mono
+   eyebrows, exact numbers in tabular figures, quiet secondary text, and controls that only fill on
+   hover. The pane header already names the drill, so a body opens straight on its first section. */
+.drill {
+	display: grid;
+	align-content: start;
+}
+.drill__section {
+	display: grid;
+	gap: var(--space-3);
+	min-width: 0;
+	padding: var(--space-4) 0 var(--space-5);
+	border-top: 1px solid var(--line);
+}
+.drill__section:first-child,
+.drill > .pane-empty + .drill__section {
+	border-top: 0;
+	padding-top: var(--space-2);
+}
+.drill h3 {
+	margin: 0;
+	font: 500 11px / 1.5 var(--font-mono);
+	letter-spacing: var(--tracking-instrument);
+	text-transform: uppercase;
+	color: var(--ink-muted);
+}
+/* Focus lands on a heading only when the row that held it moved; the heading is a landmark, not a control. */
+.drill h3:focus:not(:focus-visible) {
+	outline: none;
+}
+.drill > .pane-empty {
+	padding-block: var(--space-2);
+}
+.drill__note {
+	margin: 0;
+	font-size: 12px;
+	line-height: 1.5;
+	color: var(--ink-muted);
+}
+.drill__note--error {
+	color: var(--status-fail-fg);
+}
+.drill__num {
+	font-family: var(--font-mono);
+	font-variant-numeric: tabular-nums;
+}
+.drill__absent {
+	font-family: var(--font-ui);
+	font-style: italic;
+	color: var(--ink-muted);
+}
+
+.drill__rows {
+	display: grid;
+	margin: 0;
+	padding: 0;
+	list-style: none;
+}
+.drill__rows > li {
+	display: grid;
+	grid-template-columns: auto minmax(0, 1fr) auto;
+	align-items: baseline;
+	gap: var(--space-1) var(--space-3);
+	padding-block: 10px;
+}
+.drill__rows > li + li {
+	border-top: 1px solid var(--line);
+}
+.drill__rows > li:first-child {
+	padding-top: 0;
+}
+.drill__id {
+	min-width: 2.5ch;
+	font: 11px / 1.6 var(--font-mono);
+	font-variant-numeric: tabular-nums;
+	color: var(--ink-muted);
+}
+.drill__main {
+	display: grid;
+	gap: 2px;
+	min-width: 0;
+	font-size: var(--text-meta);
+	line-height: 1.45;
+	overflow-wrap: anywhere;
+}
+.drill__main small {
+	font-size: 12px;
+	line-height: 1.45;
+	color: var(--ink-muted);
+}
+.drill__rows .status-mark {
+	padding: 1px 7px;
+	font-size: 11.5px;
+	font-weight: 500;
+}
+
+.drill__actions {
+	grid-column: 2 / -1;
+	display: flex;
+	flex-wrap: wrap;
+	gap: 2px;
+	/* The button's own padding, so its label lines up with the text above it. */
+	margin-inline-start: -8px;
+}
+.drill__btn {
+	min-height: 26px;
+	padding: 3px 8px;
+	border: 1px solid transparent;
+	border-radius: var(--radius-sm);
+	background: transparent;
+	color: var(--ink-muted);
+	font-size: 12px;
+	line-height: 1.3;
+}
+.drill__btn:hover:not(:disabled) {
+	background: var(--wb-hover);
+	border-color: transparent;
+	color: var(--ink);
+}
+.drill__btn--accent {
+	color: var(--accent);
+}
+.drill__btn--accent:hover:not(:disabled) {
+	background: var(--accent-soft);
+	color: var(--accent);
+}
+.drill__btn--line {
+	border-color: var(--line-strong);
+	color: var(--ink);
+}
+.drill__btn--line:hover:not(:disabled) {
+	border-color: var(--line-strong);
+}
+.drill__btn:disabled {
+	opacity: 0.45;
+}
+
+.drill__form {
+	display: flex;
+	align-items: center;
+	gap: var(--space-2);
+}
+.drill__form input {
+	flex: 1 1 auto;
+	min-height: 32px;
+	padding: 5px 10px;
+	border-color: var(--line);
+	border-radius: 8px;
+	font-size: var(--text-meta);
+}
+.drill__form input:hover {
+	border-color: var(--line-strong);
+}
+.drill__form .drill__btn {
+	min-height: 32px;
+	padding-inline: 12px;
+}
+.drill__form--stacked {
+	display: grid;
+	gap: var(--space-2);
+	margin-top: var(--space-2);
+}
+.drill__form--stacked label {
+	font-size: 12px;
+	color: var(--ink-muted);
+}
+.drill__form--stacked .drill__actions {
+	margin-inline-start: 0;
+}
+
+.drill__facts {
+	display: grid;
+	gap: var(--space-2);
+	margin: 0;
+}
+.drill__facts > div {
+	display: grid;
+	grid-template-columns: 6.5rem minmax(0, 1fr);
+	align-items: baseline;
+	gap: var(--space-3);
+	font-size: var(--text-meta);
+	line-height: 1.45;
+}
+.drill__facts dt {
+	font-size: 12px;
+	color: var(--ink-muted);
+}
+.drill__facts dd {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: baseline;
+	gap: 0 var(--space-2);
+	min-width: 0;
+	margin: 0;
+	overflow-wrap: anywhere;
+}
+.drill__facts dd .drill__num {
+	font-size: 12.5px;
+	color: var(--ink);
+}
+.drill__facts dd .drill__num + span {
+	font-size: 12px;
+	color: var(--ink-muted);
+}
+
+.drill__table {
+	width: 100%;
+	border-collapse: collapse;
+	font-size: var(--text-meta);
+}
+.drill__table th,
+.drill__table td {
+	padding: 7px 0;
+	border-top: 1px solid var(--line);
+	text-align: start;
+	font-weight: normal;
+}
+.drill__table th + th,
+.drill__table td {
+	padding-inline-start: var(--space-3);
+}
+.drill__table thead th {
+	padding-top: 0;
+	border-top: 0;
+	font: 11px / 1.5 var(--font-mono);
+	color: var(--ink-muted);
+}
+.drill__table thead th:not(:first-child),
+.drill__table td {
+	text-align: end;
+}
+.drill__table td {
+	font-family: var(--font-mono);
+	font-size: 12px;
+	font-variant-numeric: tabular-nums;
+	white-space: nowrap;
+}
+.drill__table td:last-child {
+	width: 4.5rem;
+	color: var(--ink-muted);
+}
+
+/* Context: the share leads in large figures, then the stacked bar the Session column shows, so the
+   drill reads as the same instrument opened up. */
+.context-panel__lead {
+	gap: var(--space-2);
+}
+.context-panel__figure {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: baseline;
+	gap: var(--space-1) var(--space-3);
+	margin: 0;
+}
+.context-panel__figure strong {
+	font: 500 32px / 1.1 var(--font-mono);
+	font-variant-numeric: tabular-nums;
+	letter-spacing: -0.02em;
+	color: var(--ink);
+}
+.context-panel__of {
+	font: 12.5px / 1.4 var(--font-mono);
+	font-variant-numeric: tabular-nums;
+	color: var(--ink-muted);
+}
+.context-panel__meter {
+	gap: var(--space-2);
+	margin-top: var(--space-2);
+}
+.context-panel__meter .pane-stack {
+	height: 8px;
+}
+
+/* Tasks and decisions: a decision names its key in a quiet line above the value, so a long value
+   keeps the column's full width at the pane's size. */
+.board-panel__plan-title {
+	margin: 0;
+	font-size: var(--text-meta);
+	font-weight: 500;
+	overflow-wrap: anywhere;
+}
+.board-panel__decisions {
+	display: grid;
+	margin: 0;
+}
+.board-panel__decisions > div {
+	display: grid;
+	gap: 2px;
+	padding-block: 10px;
+}
+.board-panel__decisions > div + div {
+	border-top: 1px solid var(--line);
+}
+.board-panel__decisions > div:first-child {
+	padding-top: 0;
+}
+.board-panel__decisions dt {
+	font: 11px / 1.6 var(--font-mono);
+	color: var(--ink-muted);
+	overflow-wrap: anywhere;
+}
+.board-panel__decisions dd {
+	display: grid;
+	gap: 2px;
+	min-width: 0;
+	margin: 0;
+	font-size: var(--text-meta);
+	line-height: 1.45;
+	overflow-wrap: anywhere;
+}
+.board-panel__decisions dd > small {
+	font-size: 12px;
+	color: var(--ink-muted);
+}
+.board-panel__decisions .drill__actions {
+	margin-top: 2px;
+}
+.board-panel__decisions s {
+	color: var(--ink-muted);
+}
+.board-panel__confirm {
+	display: grid;
+	gap: var(--space-1);
+	min-width: 0;
+	margin: var(--space-2) 0 0;
+	padding: var(--space-2) var(--space-3);
+	border: 0;
+	border-radius: 8px;
+	background: var(--wb-faint);
+}
+.board-panel__confirm legend {
+	float: left;
+	width: 100%;
+	padding: 0;
+	font-size: 12px;
+	color: var(--ink-muted);
+}
+.board-panel__confirm .drill__actions {
+	gap: var(--space-1);
+	margin-inline-start: 0;
+}
+.board-panel__earlier > summary {
+	display: inline-flex;
+	align-items: center;
+	min-height: 26px;
+	margin-inline-start: -8px;
+	padding: 2px 8px;
+	border-radius: var(--radius-sm);
+	font-size: 12px;
+	color: var(--ink-muted);
+	cursor: pointer;
+}
+.board-panel__earlier > summary:hover {
+	background: var(--wb-hover);
+	color: var(--ink);
+}
+.board-panel__earlier[open] > summary {
+	margin-bottom: var(--space-2);
+}
+/* A memory entry's kind words vary in width, so the kind sits above the entry rather than in a column. */
+.drill__rows > li.board-panel__entry {
+	grid-template-columns: minmax(0, 1fr);
+	gap: 2px;
+}
+.board-panel__entry .drill__id {
+	letter-spacing: var(--tracking-instrument);
+	text-transform: uppercase;
+}
+.board-panel__entry .drill__actions {
+	grid-column: 1;
+	margin-top: 2px;
 }

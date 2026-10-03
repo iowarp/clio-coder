@@ -35,17 +35,16 @@ export const SessionBoardPanel = memo(function SessionBoardPanel({
 	settledTurns: number;
 	running: boolean;
 }) {
-	const [expanded, setExpanded] = useState(true);
 	const [title, setTitle] = useState("");
 	const titleId = useId();
-	const panel = useRef<HTMLDetailsElement>(null);
+	const panel = useRef<HTMLDivElement>(null);
 	const queries = useQueryClient();
 	const params = { params: { id: sessionId }, query: {}, body: {} };
 	const supported = !!capabilities?.board;
 	const board = useQuery({
 		queryKey: ["session-board", sessionId, settledTurns],
 		queryFn: () => client.call(routes.sessionBoard, params),
-		enabled: expanded && sessionOpen && supported,
+		enabled: sessionOpen && supported,
 		retry: false,
 	});
 	const change = useMutation({
@@ -61,7 +60,7 @@ export const SessionBoardPanel = memo(function SessionBoardPanel({
 					const next = Array.from(panel.current?.querySelectorAll<HTMLButtonElement>("button[data-task-id]") ?? []).find(
 						(button) => button.dataset.taskId === argv[1],
 					);
-					if (panel.current?.open) (next ?? panel.current.querySelector("summary"))?.focus();
+					(next ?? panel.current?.querySelector<HTMLElement>("h3"))?.focus();
 				});
 		},
 	});
@@ -116,199 +115,232 @@ export const SessionBoardPanel = memo(function SessionBoardPanel({
 	const view = board.data ? boardView(board.data) : null;
 	const act = (id: string, action: OperatorTaskAction) => change.mutate([action, id]);
 	return (
-		<details
-			open={expanded}
-			ref={panel}
-			className="command-panel session-board"
-			onToggle={(event) => setExpanded(event.currentTarget.open)}
-		>
-			<summary>Tasks and decisions</summary>
-			{!sessionOpen ? <p>This session is not open. Load it to read its tasks and decisions.</p> : null}
-			{sessionOpen && !supported ? <p>This Clio Coder session does not report tasks and decisions.</p> : null}
-			{board.isPending && expanded && sessionOpen && supported ? <p>Reading the board…</p> : null}
-			{board.error ? <p role="alert">{board.error.message}</p> : null}
+		<div ref={panel} className="pane-drill drill board-panel">
+			{!sessionOpen ? (
+				<p className="pane-empty">This session is not open. Load it to read its tasks and decisions.</p>
+			) : null}
+			{sessionOpen && !supported ? (
+				<p className="pane-empty">This Clio Coder session does not report tasks and decisions.</p>
+			) : null}
+			{board.isPending && sessionOpen && supported ? <p className="pane-empty">Reading the board…</p> : null}
+			{board.error ? (
+				<p role="alert" className="pane-empty">
+					{board.error.message}
+				</p>
+			) : null}
 			{view ? (
 				<>
-					<section aria-labelledby={`${titleId}-tasks`}>
-						<h3 id={`${titleId}-tasks`}>Your tasks</h3>
-						{view.tasks.length === 0 ? <p className="session-board__empty">You have not added a task.</p> : null}
-						<ul className="session-board__rows">
-							{view.tasks.map((task) => (
-								<li key={task.id}>
-									<span className="session-board__id">{task.id}</span>
-									<span className="session-board__title">
-										{task.title}
-										{task.acceptance ? <small>{task.acceptance}</small> : null}
-									</span>
-									<StatusMark tone={task.tone} label={task.word} />
-									{task.actions.length > 0 ? (
-										<span className="session-board__actions">
-											{task.actions.map((action) => (
-												<button
-													type="button"
-													key={action}
-													data-task-id={task.id}
-													disabled={
-														change.isPending || (action === "hand" && (running || capabilities?.commands?.promptTurns !== true))
-													}
-													onClick={() => act(task.id, action)}
-													aria-label={`${action === "hand" ? "Hand to Clio Coder" : action === "done" ? "Mark done" : "Drop"}: ${task.title}`}
-												>
-													{action === "hand" ? "Hand" : action === "done" ? "Done" : "Drop"}
-												</button>
-											))}
+					<section className="drill__section" aria-labelledby={`${titleId}-tasks`}>
+						<h3 id={`${titleId}-tasks`} tabIndex={-1}>
+							Your tasks
+						</h3>
+						{view.tasks.length === 0 ? <p className="pane-empty">You have not added a task.</p> : null}
+						{view.tasks.length > 0 ? (
+							<ul className="drill__rows">
+								{view.tasks.map((task) => (
+									<li key={task.id}>
+										<span className="drill__id">{task.id}</span>
+										<span className="drill__main">
+											<span>{task.title}</span>
+											{task.acceptance ? <small>{task.acceptance}</small> : null}
 										</span>
-									) : null}
-								</li>
-							))}
-						</ul>
+										<StatusMark tone={task.tone} label={task.word} />
+										{task.actions.length > 0 ? (
+											<span className="drill__actions">
+												{task.actions.map((action) => (
+													<button
+														type="button"
+														key={action}
+														className={action === "hand" ? "drill__btn drill__btn--accent" : "drill__btn"}
+														data-task-id={task.id}
+														disabled={
+															change.isPending || (action === "hand" && (running || capabilities?.commands?.promptTurns !== true))
+														}
+														onClick={() => act(task.id, action)}
+														aria-label={`${action === "hand" ? "Hand to Clio Coder" : action === "done" ? "Mark done" : "Drop"}: ${task.title}`}
+													>
+														{action === "hand" ? "Hand" : action === "done" ? "Done" : "Drop"}
+													</button>
+												))}
+											</span>
+										) : null}
+									</li>
+								))}
+							</ul>
+						) : null}
 						<form
-							className="session-board__add"
+							className="drill__form"
 							onSubmit={(event) => {
 								event.preventDefault();
 								const text = title.trim();
 								if (text) change.mutate(["add", text]);
 							}}
 						>
-							<label htmlFor={`${titleId}-add`}>Add a task</label>
+							<label htmlFor={`${titleId}-add`} className="sr-only">
+								Add a task
+							</label>
 							<input
 								id={`${titleId}-add`}
 								value={title}
 								maxLength={1024}
 								onChange={(event) => setTitle(event.target.value)}
-								placeholder="What should be done"
+								placeholder="Add a task"
 							/>
-							<button type="submit" disabled={change.isPending || !title.trim()}>
+							<button type="submit" className="drill__btn drill__btn--line" disabled={change.isPending || !title.trim()}>
 								Add
 							</button>
 						</form>
 						{view.tasks.some((task) => task.actions.includes("hand")) && capabilities?.commands?.promptTurns !== true ? (
-							<p className="session-board__note">Handing a task needs a Clio Coder build that records command turns.</p>
+							<p className="drill__note">Handing a task needs a Clio Coder build that records command turns.</p>
 						) : null}
-						{change.error ? <p role="alert">{change.error.message}</p> : null}
-						{change.data && change.data.level === "error" ? <p role="alert">{change.data.lines.join(" ")}</p> : null}
+						{change.error ? (
+							<p role="alert" className="drill__note drill__note--error">
+								{change.error.message}
+							</p>
+						) : null}
+						{change.data && change.data.level === "error" ? (
+							<p role="alert" className="drill__note drill__note--error">
+								{change.data.lines.join(" ")}
+							</p>
+						) : null}
 					</section>
-					<section aria-labelledby={`${titleId}-plan`}>
+					<section className="drill__section" aria-labelledby={`${titleId}-plan`}>
 						<h3 id={`${titleId}-plan`}>Clio Coder's plan</h3>
 						{view.plan === null ? (
-							<p className="session-board__empty">Clio Coder has not made a plan in this session.</p>
+							<p className="pane-empty">Clio Coder has not made a plan in this session.</p>
 						) : (
 							<>
-								<p className="session-board__note">
-									{view.plan.title}. As Clio Coder reports it; a completed step is its claim, not a check.
-								</p>
-								<ol className="session-board__rows">
+								<p className="board-panel__plan-title">{view.plan.title}</p>
+								<ol className="drill__rows">
 									{view.plan.rows.map((row) => (
 										<li key={row.id}>
-											<span className="session-board__id">{row.id}</span>
-											<span className="session-board__title">
-												{row.title}
+											<span className="drill__id">{row.id}</span>
+											<span className="drill__main">
+												<span>{row.title}</span>
 												{row.reason ? <small>{row.reason}</small> : null}
 											</span>
 											<StatusMark tone={row.tone} label={row.word} />
 										</li>
 									))}
 								</ol>
+								<p className="drill__note">As Clio Coder reports it; a completed step is its claim, not a check.</p>
 							</>
 						)}
 					</section>
-					<section aria-labelledby={`${titleId}-decisions`}>
+					<section className="drill__section" aria-labelledby={`${titleId}-decisions`}>
 						<h3 id={`${titleId}-decisions`} tabIndex={-1}>
 							Decisions
 						</h3>
-						{decisionsEmptyLine(view) ? <p className="session-board__empty">{decisionsEmptyLine(view)}</p> : null}
-						<dl className="session-board__decisions">
-							{view.activeDecisions.map((row) => (
-								<div key={row.ref}>
-									<dt>{row.name}</dt>
-									<dd>
-										{row.value}
-										<small>
-											{row.who}
-											{row.note ? ` · ${row.note}` : ""}
-										</small>
-										{canSupersede && row.target !== null ? (
-											confirming === row.ref ? (
-												<fieldset className="session-board__actions session-board__confirm">
-													<legend>Supersede {row.name}? It stays in the record, marked superseded.</legend>
-
-													<button type="button" disabled={supersede.isPending || running} onClick={() => supersede.mutate({ row })}>
-														Supersede
-													</button>
-													<button
-														type="button"
-														// Keep is the safe answer, so the question puts focus on it.
-														ref={(button) => button?.focus()}
-														onClick={() => setConfirming(null)}
-													>
-														Keep
-													</button>
-												</fieldset>
-											) : correcting === row.ref ? (
-												<form
-													className="session-board__add"
-													onSubmit={(event) => {
-														event.preventDefault();
-														const text = correction.trim();
-														if (text) supersede.mutate({ row, text });
-													}}
-												>
-													<label htmlFor={`${titleId}-correct-${row.ref}`}>New direction</label>
-													<input
-														id={`${titleId}-correct-${row.ref}`}
-														value={correction}
-														maxLength={2000}
-														// biome-ignore lint/a11y/noAutofocus: the operator just asked to write the correction.
-														autoFocus
-														onChange={(event) => setCorrection(event.target.value.replace(/[\r\n]+/g, " "))}
-													/>
-													<button type="submit" disabled={supersede.isPending || running || !correction.trim()}>
-														Supersede and tell Clio Coder
-													</button>
-													<button type="button" onClick={() => setCorrecting(null)}>
-														Cancel
-													</button>
-												</form>
-											) : (
-												<span className="session-board__actions">
-													<button
-														type="button"
-														disabled={supersede.isPending || running}
-														onClick={() => {
-															setDecisionNote(null);
-															setCorrecting(null);
-															setConfirming(row.ref);
+						{decisionsEmptyLine(view) ? <p className="pane-empty">{decisionsEmptyLine(view)}</p> : null}
+						{view.activeDecisions.length > 0 ? (
+							<dl className="board-panel__decisions">
+								{view.activeDecisions.map((row) => (
+									<div key={row.ref}>
+										<dt>{row.name}</dt>
+										<dd>
+											<span>{row.value}</span>
+											<small>
+												{row.who}
+												{row.note ? ` · ${row.note}` : ""}
+											</small>
+											{canSupersede && row.target !== null ? (
+												confirming === row.ref ? (
+													<fieldset className="board-panel__confirm">
+														<legend>Supersede {row.name}? It stays in the record, marked superseded.</legend>
+														<span className="drill__actions">
+															<button
+																type="button"
+																className="drill__btn drill__btn--line"
+																disabled={supersede.isPending || running}
+																onClick={() => supersede.mutate({ row })}
+															>
+																Supersede
+															</button>
+															<button
+																type="button"
+																className="drill__btn"
+																// Keep is the safe answer, so the question puts focus on it.
+																ref={(button) => button?.focus()}
+																onClick={() => setConfirming(null)}
+															>
+																Keep
+															</button>
+														</span>
+													</fieldset>
+												) : correcting === row.ref ? (
+													<form
+														className="drill__form drill__form--stacked"
+														onSubmit={(event) => {
+															event.preventDefault();
+															const text = correction.trim();
+															if (text) supersede.mutate({ row, text });
 														}}
-														aria-label={`Supersede: ${row.name}`}
 													>
-														Supersede
-													</button>
-													<button
-														type="button"
-														disabled={supersede.isPending || running}
-														onClick={() => {
-															setDecisionNote(null);
-															setConfirming(null);
-															setCorrection("");
-															setCorrecting(row.ref);
-														}}
-														aria-label={`Correct: ${row.name}`}
-													>
-														Correct
-													</button>
-												</span>
-											)
-										) : null}
-									</dd>
-								</div>
-							))}
-						</dl>
+														<label htmlFor={`${titleId}-correct-${row.ref}`}>New direction</label>
+														<input
+															id={`${titleId}-correct-${row.ref}`}
+															value={correction}
+															maxLength={2000}
+															// biome-ignore lint/a11y/noAutofocus: the operator just asked to write the correction.
+															autoFocus
+															onChange={(event) => setCorrection(event.target.value.replace(/[\r\n]+/g, " "))}
+														/>
+														<span className="drill__actions">
+															<button
+																type="submit"
+																className="drill__btn drill__btn--line"
+																disabled={supersede.isPending || running || !correction.trim()}
+															>
+																Supersede and tell Clio Coder
+															</button>
+															<button type="button" className="drill__btn" onClick={() => setCorrecting(null)}>
+																Cancel
+															</button>
+														</span>
+													</form>
+												) : (
+													<span className="drill__actions">
+														<button
+															type="button"
+															className="drill__btn"
+															disabled={supersede.isPending || running}
+															onClick={() => {
+																setDecisionNote(null);
+																setCorrecting(null);
+																setConfirming(row.ref);
+															}}
+															aria-label={`Supersede: ${row.name}`}
+														>
+															Supersede
+														</button>
+														<button
+															type="button"
+															className="drill__btn"
+															disabled={supersede.isPending || running}
+															onClick={() => {
+																setDecisionNote(null);
+																setConfirming(null);
+																setCorrection("");
+																setCorrecting(row.ref);
+															}}
+															aria-label={`Correct: ${row.name}`}
+														>
+															Correct
+														</button>
+													</span>
+												)
+											) : null}
+										</dd>
+									</div>
+								))}
+							</dl>
+						) : null}
 						{view.earlierDecisions.length > 0 ? (
-							<details>
+							<details className="board-panel__earlier">
 								<summary>
 									{view.earlierDecisions.length} earlier {view.earlierDecisions.length === 1 ? "decision" : "decisions"}
 								</summary>
-								<dl className="session-board__decisions">
+								<dl className="board-panel__decisions">
 									{view.earlierDecisions.map((row) => (
 										<div key={row.ref}>
 											<dt>{row.name}</dt>
@@ -324,59 +356,69 @@ export const SessionBoardPanel = memo(function SessionBoardPanel({
 								</dl>
 							</details>
 						) : null}
-					</section>
-					{decisionNote ? (
-						<p role={decisionNote.tone === "error" ? "alert" : "status"} className="session-board__note">
-							{decisionNote.text}
-						</p>
-					) : null}
-					<p className="session-board__note">{view.memory}</p>
-					{view.bank.length > 0 ? (
-						<section aria-labelledby={`${titleId}-bank`}>
-							<h3 id={`${titleId}-bank`}>What Clio Coder learned this session</h3>
-							<p className="session-board__note">
-								Proposing makes a candidate for durable memory. Nothing is remembered until you approve it.
+						{decisionNote ? (
+							<p
+								role={decisionNote.tone === "error" ? "alert" : "status"}
+								className={decisionNote.tone === "error" ? "drill__note drill__note--error" : "drill__note"}
+							>
+								{decisionNote.text}
 							</p>
-							<ul className="session-board__rows">
-								{view.bank.map((entry) => (
-									<li key={entry.id}>
-										<span className="session-board__id">{entry.word}</span>
-										<span className="session-board__title">{entry.content}</span>
-										{canPropose ? (
-											<span className="session-board__actions">
-												<button
-													type="button"
-													disabled={propose.isPending}
-													onClick={() => propose.mutate({ entryId: entry.id, scope: "repo" })}
-													aria-label={`Propose for this repository: ${entry.content}`}
-												>
-													Propose for this repository
-												</button>
-												<button
-													type="button"
-													disabled={propose.isPending}
-													onClick={() => propose.mutate({ entryId: entry.id, scope: "global" })}
-													aria-label={`Propose for every project: ${entry.content}`}
-												>
-													{pendingGlobal === entry.id ? "Propose everywhere" : "Propose for every project"}
-												</button>
-											</span>
-										) : null}
-									</li>
-								))}
-							</ul>
-							{memoryNote ? (
-								<p role={memoryNote.tone === "error" ? "alert" : "status"} className="session-board__note">
-									{memoryNote.text}
+						) : null}
+					</section>
+					<section className="drill__section" aria-labelledby={`${titleId}-bank`}>
+						<h3 id={`${titleId}-bank`}>{view.bank.length > 0 ? "What Clio Coder learned this session" : "Memory"}</h3>
+						<p className="drill__note">{view.memory}</p>
+						{view.bank.length > 0 ? (
+							<>
+								<p className="drill__note">
+									Proposing makes a candidate for durable memory. Nothing is remembered until you approve it.
 								</p>
-							) : null}
-						</section>
-					) : null}
+								<ul className="drill__rows">
+									{view.bank.map((entry) => (
+										<li key={entry.id} className="board-panel__entry">
+											<span className="drill__id">{entry.word}</span>
+											<span className="drill__main">{entry.content}</span>
+											{canPropose ? (
+												<span className="drill__actions">
+													<button
+														type="button"
+														className="drill__btn"
+														disabled={propose.isPending}
+														onClick={() => propose.mutate({ entryId: entry.id, scope: "repo" })}
+														aria-label={`Propose for this repository: ${entry.content}`}
+													>
+														Propose for this repository
+													</button>
+													<button
+														type="button"
+														className="drill__btn"
+														disabled={propose.isPending}
+														onClick={() => propose.mutate({ entryId: entry.id, scope: "global" })}
+														aria-label={`Propose for every project: ${entry.content}`}
+													>
+														{pendingGlobal === entry.id ? "Propose everywhere" : "Propose for every project"}
+													</button>
+												</span>
+											) : null}
+										</li>
+									))}
+								</ul>
+								{memoryNote ? (
+									<p
+										role={memoryNote.tone === "error" ? "alert" : "status"}
+										className={memoryNote.tone === "error" ? "drill__note drill__note--error" : "drill__note"}
+									>
+										{memoryNote.text}
+									</p>
+								) : null}
+							</>
+						) : null}
+					</section>
 					{view.truncated ? (
-						<p className="session-board__note">Only the first 100 of a list are shown; the terminal shows the rest.</p>
+						<p className="drill__note">Only the first 100 of a list are shown; the terminal shows the rest.</p>
 					) : null}
 				</>
 			) : null}
-		</details>
+		</div>
 	);
 });

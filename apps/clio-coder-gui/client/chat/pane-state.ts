@@ -1,7 +1,7 @@
 // Whether the pane is open and which view it shows, with dismissal kept for the current tab.
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { migratedPaneView, type PaneView } from "./pane-model.js";
+import { migratedPaneView, type PaneView, ROOT_VIEW } from "./pane-model.js";
 
 const VIEW_KEY = "clio-coder-gui-pane-view";
 const OPEN_KEY = "clio-coder-gui-pane";
@@ -13,7 +13,7 @@ function initialView(): PaneView {
 	try {
 		return migratedPaneView(localStorage.getItem(VIEW_KEY) ?? localStorage.getItem(OLD_VIEW_KEY));
 	} catch {
-		return "progress";
+		return ROOT_VIEW;
 	}
 }
 

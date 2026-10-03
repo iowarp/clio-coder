@@ -4,16 +4,17 @@ import type { AgentCapabilities } from "../../contracts/capabilities.js";
 import type { FleetPreview } from "../../contracts/fleet-run.js";
 import { routes } from "../../contracts/routes.js";
 import type { Client } from "../api/client.js";
+import { Icon } from "../design/icons.js";
 import { notify } from "../design/notifications.js";
 import { fleetPlanView, parseFleetVars } from "./fleet-run-model.js";
-import "./session-board.css";
+import "./agents.css";
 
 type Ready = Extract<FleetPreview, { status: "ready" }>;
 
 /**
  * The terminal's `/fleet run <name>`. Preview compiles the contract and dispatches nothing; Run
  * starts the plan only if it still hashes to the one shown, so a contract edited in between is
- * shown again instead of run. Progress arrives in the fleet history beside this panel.
+ * shown again instead of run. Its runs join the agent tree above this panel.
  */
 export const FleetRunPanel = memo(function FleetRunPanel({
 	client,
@@ -57,7 +58,7 @@ export const FleetRunPanel = memo(function FleetRunPanel({
 				notify({
 					tone: "success",
 					title: `Fleet ${result.name} started`,
-					detail: `${result.stepCount} steps under ${result.fleetRootId}. Their runs appear in the fleet history below.`,
+					detail: `${result.stepCount} steps under ${result.fleetRootId}. Their runs appear under Agents in the task pane.`,
 				});
 				return;
 			}
@@ -79,13 +80,18 @@ export const FleetRunPanel = memo(function FleetRunPanel({
 	const ready = shown?.preview.status === "ready" ? shown.preview : null;
 	const view = ready ? fleetPlanView(ready) : null;
 	return (
-		<details className="command-panel session-board fleet-run-panel">
-			<summary>Run a fleet contract</summary>
-			{!sessionOpen ? <p>This session is not open. Load it to run a fleet contract.</p> : null}
-			{sessionOpen && !supported ? <p>This Clio Coder session cannot preview fleet contracts.</p> : null}
+		<details className="agents-section fleet-run-panel">
+			<summary>
+				<h3 className="agents-eyebrow">Run a fleet contract</h3>
+				<Icon name="chevronDown" />
+			</summary>
+			{!sessionOpen ? <p className="agents-note">This session is not open. Load it to run a fleet contract.</p> : null}
+			{sessionOpen && !supported ? (
+				<p className="agents-note">This Clio Coder session cannot preview fleet contracts.</p>
+			) : null}
 			{sessionOpen && supported ? (
 				<form
-					className="handoff-panel__goal"
+					className="agents-form"
 					onSubmit={(event) => {
 						event.preventDefault();
 						if ("error" in parsed) return;
@@ -94,9 +100,9 @@ export const FleetRunPanel = memo(function FleetRunPanel({
 						preview.mutate({ name: name.trim(), vars: parsed.vars });
 					}}
 				>
-					<p className="session-board__note">
-						A fleet contract is a named plan in this project's <span className="session-board__hash">.clio-coder/fleets</span>
-						. Previewing compiles it and starts nothing.
+					<p className="agents-note">
+						A named plan in this project's <code className="agents-mono">.clio-coder/fleets</code>. Previewing compiles it and
+						starts nothing.
 					</p>
 					<label htmlFor={`${fieldId}-name`}>Contract name</label>
 					<input
@@ -120,23 +126,27 @@ export const FleetRunPanel = memo(function FleetRunPanel({
 						}}
 					/>
 					{"error" in parsed ? <small role="alert">{parsed.error}</small> : null}
-					<button type="submit" disabled={preview.isPending || !name.trim() || "error" in parsed}>
+					<button
+						type="submit"
+						className="agents-form__submit"
+						disabled={preview.isPending || !name.trim() || "error" in parsed}
+					>
 						{preview.isPending ? "Compiling…" : "Preview the plan"}
 					</button>
 				</form>
 			) : null}
 			{failure ? (
-				<p role="alert" className="handoff-panel__refusal handoff-panel__refusal--error">
+				<p role="alert" className="agents-alert">
 					{failure}
 				</p>
 			) : null}
 			{note ? (
-				<p role="status" className="session-board__note">
+				<p role="status" className="agents-note">
 					{note}
 				</p>
 			) : null}
 			{shown?.preview.status === "refused" ? (
-				<div role="alert" className="handoff-panel__refusal handoff-panel__refusal--error">
+				<div role="alert" className="agents-alert">
 					<strong>Fleet {shown.preview.name} cannot run.</strong>
 					<ul>
 						{shown.preview.diagnostics.map((line) => (
@@ -146,18 +156,18 @@ export const FleetRunPanel = memo(function FleetRunPanel({
 				</div>
 			) : null}
 			{ready && view ? (
-				<section aria-labelledby={`${fieldId}-plan`}>
-					<h3 id={`${fieldId}-plan`}>
+				<section className="agents-plan" aria-labelledby={`${fieldId}-plan`}>
+					<h4 id={`${fieldId}-plan`}>
 						Fleet {ready.name}: {view.heading}
-					</h3>
+					</h4>
 					{view.waves.map((wave) => (
-						<div key={wave.label}>
-							<p className="session-board__note">{wave.label}</p>
-							<ol className="session-board__rows fleet-run-panel__rows">
+						<div className="agents-plan__wave" key={wave.label}>
+							<p className="agents-eyebrow">{wave.label}</p>
+							<ol>
 								{wave.rows.map((row) => (
 									<li key={row.key}>
-										<span className="session-board__id">{row.step}</span>
-										<span className="session-board__title">
+										<span className="agents-mono">{row.step}</span>
+										<span>
 											{row.who}
 											<small>{[row.where, ...row.notes].filter(Boolean).join(" · ")}</small>
 										</span>
@@ -167,22 +177,22 @@ export const FleetRunPanel = memo(function FleetRunPanel({
 						</div>
 					))}
 					{view.truncated ? (
-						<p className="session-board__note">
+						<p className="agents-note">
 							This preview omits steps or details. Review the full plan in the terminal before starting.
 						</p>
 					) : null}
-					<p className="session-board__note">{view.budget}</p>
-					<p className="session-board__note">
+					<p className="agents-note">{view.budget}</p>
+					<p className="agents-note">
 						Starting it runs plan{" "}
-						<span className="session-board__hash" title={view.hash.full}>
+						<span className="agents-mono" title={view.hash.full}>
 							{view.hash.short}
 						</span>{" "}
 						exactly; a changed contract is shown again instead.
 					</p>
-					<span className="session-board__actions">
+					<span className="agents-plan__actions">
 						<button
 							type="button"
-							className="handoff-panel__start"
+							className="agents-plan__start"
 							disabled={run.isPending || running}
 							onClick={() => shown && run.mutate({ preview: ready, vars: shown.vars })}
 						>
@@ -192,10 +202,14 @@ export const FleetRunPanel = memo(function FleetRunPanel({
 							Discard
 						</button>
 					</span>
-					{running ? <p className="session-board__note">Wait for the current turn to finish before starting it.</p> : null}
+					{running ? <p className="agents-note">Wait for the current turn to finish before starting it.</p> : null}
 				</section>
 			) : null}
-			{preview.error || run.error ? <p role="alert">{(preview.error ?? run.error)?.message}</p> : null}
+			{preview.error || run.error ? (
+				<p role="alert" className="agents-alert">
+					{(preview.error ?? run.error)?.message}
+				</p>
+			) : null}
 		</details>
 	);
 });

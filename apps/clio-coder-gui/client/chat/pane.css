@@ -65,56 +65,22 @@
 	min-height: 48px;
 	padding: 0 var(--space-2) 0 var(--space-3);
 }
-.pane__tabs {
-	display: flex;
+.pane__title {
 	flex: 1;
 	min-width: 0;
-	gap: 2px;
-	overflow-x: auto;
-	scrollbar-width: none;
-}
-.pane__tabs::-webkit-scrollbar {
-	display: none;
-}
-.pane__tabs > button {
-	display: inline-flex;
-	align-items: center;
-	gap: 6px;
-	flex: none;
-	height: 30px;
-	min-height: 0;
-	padding: 0 8px;
-	border: 0;
-	border-radius: 8px;
-	background: transparent;
-	color: var(--ink-muted);
-	font-size: 12.5px;
-	font-weight: 500;
+	margin: 0;
+	font-size: 13px;
+	font-weight: 600;
+	letter-spacing: -0.1px;
+	overflow: hidden;
+	text-overflow: ellipsis;
 	white-space: nowrap;
 }
-.pane__tabs > button:hover {
-	background: var(--wb-hover);
-	color: var(--ink);
-	border-color: transparent;
+.pane__title:focus {
+	outline: none;
 }
-.pane__tabs > button[aria-selected="true"] {
-	background: var(--wb-active);
-	color: var(--ink);
-}
-.pane__count {
-	min-width: 18px;
-	padding: 0 5px;
-	border-radius: var(--radius-pill);
-	background: var(--wb-active);
-	color: var(--ink-muted);
-	font-size: 11px;
-	line-height: 18px;
-	text-align: center;
-	font-variant-numeric: tabular-nums;
-}
-.pane__tabs > button[aria-selected="true"] .pane__count {
-	background: var(--accent-soft);
-	color: var(--accent);
+.pane__head[data-drilled="true"] {
+	padding-left: var(--space-1);
 }
 .pane__body {
 	flex: 1;
@@ -131,9 +97,9 @@
 	display: none;
 }
 
-/* ---- Progress ------------------------------------------------------------------
+/* ---- the Session column ---------------------------------------------------------
    Open sections on fine rules with small mono labels, the site's field-guide layout, rather than
-   a stack of boxed cards inside a panel. */
+   a stack of boxed cards inside a panel. A section that opens a drill-in names itself as the way in. */
 .pane-cards {
 	display: grid;
 	padding: 0 var(--space-5) var(--space-6);
@@ -161,6 +127,41 @@
 	letter-spacing: var(--tracking-instrument);
 	text-transform: uppercase;
 	color: var(--ink-muted);
+}
+.pane-card__open {
+	display: inline-flex;
+	align-items: center;
+	gap: 2px;
+	min-height: 0;
+	margin: -2px 0 -2px -6px;
+	padding: 2px 4px 2px 6px;
+	border: 0;
+	border-radius: 6px;
+	background: transparent;
+	color: inherit;
+	font: inherit;
+	letter-spacing: inherit;
+	text-transform: inherit;
+}
+.pane-card__open .icon {
+	width: 12px;
+	height: 12px;
+	opacity: 0;
+	transform: translateX(-3px);
+	transition:
+		opacity var(--motion-fast) var(--ease-standard),
+		transform var(--motion-fast) var(--ease-standard);
+}
+.pane-card__open:hover,
+.pane-card__open:focus-visible {
+	background: var(--wb-hover);
+	color: var(--ink);
+	border-color: transparent;
+}
+.pane-card__open:hover .icon,
+.pane-card__open:focus-visible .icon {
+	opacity: 1;
+	transform: none;
 }
 .pane-card__state {
 	display: inline-flex;
@@ -200,41 +201,104 @@
 	display: grid;
 	gap: var(--space-1);
 }
-.pane-meter__bar {
-	appearance: none;
-	width: 100%;
-	height: 4px;
-	border: 0;
+/* What fills the context window, as shares of the whole window. Segment colours step down from the
+   accent so the largest part reads strongest in either theme. */
+.pane-stack {
+	display: flex;
+	height: 6px;
 	border-radius: var(--radius-pill);
 	background: var(--wb-active);
 	overflow: hidden;
 }
-.pane-meter__bar::-webkit-meter-bar {
-	height: 4px;
-	border: 0;
-	border-radius: var(--radius-pill);
-	background: var(--wb-active);
+.pane-stack__part {
+	height: 100%;
+	min-width: 2px;
+	background: var(--part);
+	transition: width var(--motion-base) var(--ease-standard);
 }
-.pane-meter__bar::-webkit-meter-optimum-value {
-	border-radius: var(--radius-pill);
-	background: var(--accent);
+.pane-stack__part + .pane-stack__part {
+	box-shadow: inset 1px 0 0 var(--surface);
 }
-.pane-meter__bar::-webkit-meter-suboptimum-value {
-	border-radius: var(--radius-pill);
-	background: var(--status-warn-line);
+.pane-meter[data-tone="warn"] {
+	--tone: var(--status-warn-line);
 }
-.pane-meter__bar::-webkit-meter-even-less-good-value {
-	border-radius: var(--radius-pill);
-	background: var(--status-fail-line);
+.pane-meter[data-tone="full"] {
+	--tone: var(--status-fail-line);
 }
-.pane-meter__bar:-moz-meter-optimum::-moz-meter-bar {
-	background: var(--accent);
+.pane-meter [data-index="0"] {
+	--part: var(--tone, var(--accent));
 }
-.pane-meter__bar:-moz-meter-sub-optimum::-moz-meter-bar {
-	background: var(--status-warn-line);
+.pane-meter [data-index="1"] {
+	--part: color-mix(in srgb, var(--tone, var(--accent)) 66%, var(--surface));
 }
-.pane-meter__bar:-moz-meter-sub-sub-optimum::-moz-meter-bar {
-	background: var(--status-fail-line);
+.pane-meter [data-index="2"] {
+	--part: color-mix(in srgb, var(--tone, var(--accent)) 42%, var(--surface));
+}
+.pane-meter [data-index="3"] {
+	--part: color-mix(in srgb, var(--tone, var(--accent)) 24%, var(--surface));
+}
+.pane-legend {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 2px var(--space-3);
+	margin: 0;
+	padding: 0;
+	list-style: none;
+	font-size: 11.5px;
+	color: var(--ink-muted);
+}
+.pane-legend li {
+	display: inline-flex;
+	align-items: center;
+	gap: 5px;
+}
+.pane-legend li::before {
+	content: "";
+	width: 7px;
+	height: 7px;
+	border-radius: 2px;
+	background: var(--part);
+}
+.pane-legend span {
+	font: 11px / 1 var(--font-mono);
+	font-variant-numeric: tabular-nums;
+	color: var(--ink);
+}
+.pane-agents {
+	display: grid;
+	gap: var(--space-2);
+	margin: 0;
+	padding: 0;
+	list-style: none;
+}
+.pane-agents li {
+	display: grid;
+	grid-template-columns: auto minmax(0, 1fr) auto;
+	align-items: baseline;
+	gap: var(--space-2);
+	font-size: var(--text-meta);
+}
+.pane-agents strong {
+	font: 500 12px / 1.4 var(--font-mono);
+}
+.pane-agents span {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	color: var(--ink-muted);
+}
+.pane-hint {
+	margin: var(--space-4) 0 0;
+	font-size: 12px;
+	line-height: 1.5;
+	color: var(--ink-muted);
+}
+.pane-hint kbd {
+	padding: 0 5px;
+	border: 1px solid var(--line-strong);
+	border-radius: 4px;
+	font: 11px / 1.5 var(--font-mono);
+	color: var(--ink);
 }
 .pane-empty,
 .pane-note {
@@ -515,9 +579,9 @@
 	max-width: 26ch;
 }
 
-/* The legacy views keep their own layout; give them the pane's gutters. */
-.pane__panel > .session-panel {
-	padding-inline: var(--space-2);
+/* A drill-in body: the column's gutters and rhythm. */
+.pane-drill {
+	padding: var(--space-2) var(--space-5) var(--space-6);
 }
 
 /* ---- the card that closes a turn which changed files ------------------------------ */

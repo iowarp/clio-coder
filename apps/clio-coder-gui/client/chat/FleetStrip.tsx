@@ -1,6 +1,6 @@
 // Fleet run rows: one row per dispatched run, never one per event. The live rows sit at the
-// transcript's edge and the pane's Agents view lists every run. The taxonomy and the fold live in
-// ./fleet-facts.ts.
+// transcript's edge; the pane's Agents view (./WorkerGraph.tsx) lists every run and borrows the
+// steering control from here. The taxonomy and the fold live in ./fleet-facts.ts.
 
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { memo, useEffect, useId, useMemo, useRef, useState } from "react";
@@ -37,7 +37,7 @@ export interface RunSteering {
  * in-flight work and there is no undo. `accepted` only means the engine queued the request, so
  * the outcome sentence never claims the worker has read or obeyed it.
  */
-function RunSteer({ run, steering }: { run: FleetRun; steering: RunSteering }) {
+export function RunSteer({ run, steering }: { run: FleetRun; steering: RunSteering }) {
 	const [mode, setMode] = useState<"idle" | "guide" | "confirm-stop">("idle");
 	const [text, setText] = useState("");
 	const [outcome, setOutcome] = useState<SteerOutcome | null>(null);
@@ -162,8 +162,7 @@ function RunSteer({ run, steering }: { run: FleetRun; steering: RunSteering }) {
 	);
 }
 
-/** The run rows alone, so a dispatch tool card can render its own matching runs inline. */
-export function FleetRunRows({
+function FleetRunRows({
 	runs,
 	steering,
 	sessionOpen = false,
@@ -203,7 +202,7 @@ export function FleetRunRows({
  * The workers running right now, at the transcript's live edge after the last turn, so a run that an
  * earlier turn dispatched still shows where the operator is reading. Each row can be guided or
  * stopped. A run leaves the strip once it settles; the delegation row in its turn records how it
- * ended, and Session tools keep the full fleet history.
+ * ended, and the task pane's Agents view keeps the full fleet history.
  *
  * `fleet` keeps its identity across narrative deltas, so streamed text never re-renders this.
  */

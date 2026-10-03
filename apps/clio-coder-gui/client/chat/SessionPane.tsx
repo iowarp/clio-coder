@@ -7,13 +7,14 @@ import { Splitter, TASK_PANE } from "../design/Splitter.js";
 import { KEYBINDINGS, matchesKeybinding } from "../interaction/keybindings.js";
 import { useShortcutLayer } from "../interaction/use-shortcut.js";
 import { countRender } from "../render/render-probe.js";
-import { Menu, MenuItem } from "../shell/Menu.js";
 import { ChangesView } from "./ChangesView.js";
+import { ContextPanel } from "./ContextPanel.js";
 import { changeCounts, NO_CHANGES, summarizeChanges } from "./changes-model.js";
-import { ProgressView } from "./ProgressView.js";
-import { PANE_VIEWS, type PaneView, selectPaneSession } from "./pane-model.js";
-import { SessionPanel } from "./SessionPanel.js";
+import { PANE_VIEWS, type PaneView, paneViewLabel, ROOT_VIEW, selectPaneSession } from "./pane-model.js";
+import { SessionBoardPanel } from "./SessionBoard.js";
+import { SessionOverview } from "./SessionOverview.js";
 import { selectSessionPanel } from "./session-panel-model.js";
+import { UsagePanel } from "./UsagePanel.js";
 import { WorkerGraph } from "./WorkerGraph.js";
 import "./pane.css";
 
@@ -43,7 +44,7 @@ export const SessionPane = memo(function SessionPane({
 	onViewChange: (view: PaneView) => void;
 }) {
 	countRender("session-pane");
-	const tabId = useId();
+	const headId = useId();
 	const aside = useRef<HTMLElement>(null);
 	const dialog = useRef<HTMLDialogElement>(null);
 	const [wide, setWide] = useState(() => typeof window === "undefined" || matchMedia("(min-width: 1100px)").matches);
@@ -59,6 +60,14 @@ export const SessionPane = memo(function SessionPane({
 		return () => query.removeEventListener("change", change);
 	}, []);
 	useShortcutLayer("dialog", open && !wide);
+	// A drill-in hides the button that opened it, so focus moves to the view's title and Escape keeps
+	// reaching the pane. The first render leaves focus alone; only a change of view moves it.
+	const shownView = useRef(view);
+	useEffect(() => {
+		if (shownView.current === view) return;
+		shownView.current = view;
+		if (open) document.getElementById(`${headId}-title`)?.focus();
+	}, [open, view, headId]);
 
 	const pane = useQuery({
 		queryKey: ["session", sessionId],
@@ -66,17 +75,19 @@ export const SessionPane = memo(function SessionPane({
 		enabled: false,
 		select: selectPaneSession,
 	}).data;
+	const capabilities = useQuery({
+		queryKey: ["session-capabilities", sessionId],
+		queryFn: () => client.call(routes.sessionCapabilities, { params: { id: sessionId }, query: {}, body: {} }),
+		enabled: pane?.state === "open",
+		staleTime: Number.POSITIVE_INFINITY,
+		retry: false,
+	});
 	const legacy = useQuery({
 		queryKey: ["session", sessionId],
 		queryFn: () => client.call(routes.session, { params: { id: sessionId }, query: {}, body: {} }),
 		enabled: false,
 		select: selectSessionPanel,
 	}).data;
-	const changeCount = useMemo(
-		() => (pane ? summarizeChanges(pane.tools, workspaceRoot).files.length : 0),
-		[pane, workspaceRoot],
-	);
-
 	// Only the slide-over is modal. The docked pane renders its dialog already open, because
 	// `show()` would move focus into it on every page load.
 	useEffect(() => {
@@ -91,100 +102,78 @@ export const SessionPane = memo(function SessionPane({
 		const dismissKey = (event: KeyboardEvent) => {
 			if (matchesKeybinding(KEYBINDINGS.escape, event)) {
 				event.stopPropagation();
-				onClose();
+				// A drill-in steps back to the Session column first; only the column closes the pane.
+				if (view !== ROOT_VIEW) onViewChange(ROOT_VIEW);
+				else onClose();
 			}
 		};
 		node.addEventListener("keydown", dismissKey);
 		return () => node.removeEventListener("keydown", dismissKey);
-	}, [open, wide, onClose]);
+	}, [open, wide, onClose, view, onViewChange]);
 
 	if (!pane) return null;
-	const primary = PANE_VIEWS.filter((entry) => entry.primary);
-	const extra = PANE_VIEWS.filter((entry) => !entry.primary);
-	const activeExtra = extra.find((entry) => entry.id === view);
-	const tabs = activeExtra ? [...primary, activeExtra] : primary;
-	const badge = (id: PaneView): number => (id === "changes" ? changeCount : 0);
+	const drilled = view !== ROOT_VIEW;
 	const mounted = (id: PaneView) => visited.has(id);
-	const tab = (id: PaneView) => `${tabId}-${id}`;
+	const body = (id: PaneView) => {
+		switch (id) {
+			case "session":
+				return (
+					<SessionOverview
+						client={client}
+						session={pane}
+						title={title}
+						workspaceRoot={workspaceRoot}
+						nowMs={nowMs}
+						onOpen={onViewChange}
+					/>
+				);
+			case "changes":
+				return <ChangesView session={pane} workspaceRoot={workspaceRoot} />;
+			case "agents":
+				return legacy ? <WorkerGraph client={client} session={legacy} /> : null;
+			case "context":
+			case "usage":
+			case "board": {
+				if (!legacy) return null;
+				const facts = {
+					client,
+					sessionId: pane.id,
+					sessionOpen: pane.state === "open",
+					capabilities: capabilities.data,
+					settledTurns: pane.turns.filter((turn) => turn.status !== "running").length,
+				};
+				if (id === "context") return <ContextPanel {...facts} />;
+				if (id === "usage") return <UsagePanel {...facts} />;
+				return <SessionBoardPanel {...facts} running={pane.turns.at(-1)?.status === "running"} />;
+			}
+		}
+	};
 	const content = (
 		<div className="pane__inner">
-			<header className="pane__head">
-				<div className="pane__tabs" role="tablist" aria-label="Task views">
-					{tabs.map((entry, index) => (
-						<button
-							key={entry.id}
-							id={tab(entry.id)}
-							type="button"
-							role="tab"
-							aria-selected={entry.id === view}
-							aria-controls={`${tab(entry.id)}-panel`}
-							tabIndex={entry.id === view ? 0 : -1}
-							onClick={() => onViewChange(entry.id)}
-							onKeyDown={(event) => {
-								let next: number;
-								if (matchesKeybinding(KEYBINDINGS.tabNext, event)) next = (index + 1) % tabs.length;
-								else if (matchesKeybinding(KEYBINDINGS.tabPrevious, event)) next = (index + tabs.length - 1) % tabs.length;
-								else if (matchesKeybinding(KEYBINDINGS.tabFirst, event)) next = 0;
-								else if (matchesKeybinding(KEYBINDINGS.tabLast, event)) next = tabs.length - 1;
-								else return;
-								event.preventDefault();
-								const target = tabs[next];
-								if (!target) return;
-								onViewChange(target.id);
-								document.getElementById(tab(target.id))?.focus();
-							}}
-						>
-							<span>{entry.label}</span>
-							{badge(entry.id) > 0 ? <span className="pane__count">{badge(entry.id)}</span> : null}
-						</button>
-					))}
-				</div>
-				<Menu label="More views" icon="more">
-					{extra.map((entry) => (
-						<MenuItem key={entry.id} icon={entry.icon} onClick={() => onViewChange(entry.id)}>
-							{entry.label}
-						</MenuItem>
-					))}
-				</Menu>
+			<header className="pane__head" data-drilled={drilled}>
+				{drilled ? (
+					<button
+						type="button"
+						className="wb-icon"
+						onClick={() => onViewChange(ROOT_VIEW)}
+						aria-label="Back to Session"
+						title="Back to Session (Esc)"
+					>
+						<Icon name="arrowLeft" />
+					</button>
+				) : null}
+				<h2 className="pane__title" id={`${headId}-title`} tabIndex={-1}>
+					{paneViewLabel(view)}
+				</h2>
 				<button type="button" className="wb-icon" onClick={onClose} aria-label="Close pane" title="Close pane">
 					<Icon name="close" />
 				</button>
 			</header>
 			<div className="pane__body">
-				{(
-					[
-						[
-							"progress",
-							<ProgressView
-								key="p"
-								client={client}
-								session={pane}
-								title={title}
-								workspaceRoot={workspaceRoot}
-								nowMs={nowMs}
-								onOpen={onViewChange}
-							/>,
-						],
-						["changes", <ChangesView key="c" session={pane} workspaceRoot={workspaceRoot} />],
-						["agents", legacy ? <WorkerGraph key="a" client={client} session={legacy} /> : null],
-						["session", legacy ? <SessionPanel key="s" client={client} session={legacy} tools={false} /> : null],
-						["tools", legacy ? <SessionPanel key="x" client={client} session={legacy} tools /> : null],
-					] as const
-				).map(([id, body]) => (
-					<div
-						key={id}
-						id={`${tab(id)}-panel`}
-						role="tabpanel"
-						aria-labelledby={tab(id)}
-						className="pane__panel"
-						hidden={view !== id}
-					>
-						{/* The legacy views open on h3s, so the pane names them at h2 for the outline. */}
-						{id === "session" || id === "tools" ? (
-							<h2 className="sr-only">{PANE_VIEWS.find((entry) => entry.id === id)?.label}</h2>
-						) : null}
-						{mounted(id) ? body : null}
-					</div>
+				{PANE_VIEWS.map(({ id }) => (
+					<section key={id} className="pane__panel" hidden={view !== id} aria-labelledby={`${headId}-title`}>
+						{mounted(id) ? body(id) : null}
+					</section>
 				))}
 			</div>
 		</div>
