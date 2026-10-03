@@ -158,7 +158,7 @@ export function buildProviderSupportEntry(runtime: RuntimeDescriptor): ProviderS
 	// a runtime that is not in the global registry used to report no models at all.
 	const modelHints = knownModelsFor(runtime.id, runtime);
 	const modelSource = runtimeModelListSource(runtime);
-	const defaultModel = modelSource === "catalog" ? undefined : modelHints[0];
+	const defaultModel = runtime.defaultModel ?? (modelSource === "catalog" ? undefined : modelHints[0]);
 	return {
 		runtimeId: runtime.id,
 		label: runtime.displayName,

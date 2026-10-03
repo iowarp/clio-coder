@@ -189,6 +189,7 @@ const openaiCodexRuntime: RuntimeDescriptor = {
 	tier: "cloud",
 	apiFamily: "openai-codex-responses",
 	auth: "oauth",
+	defaultModel: "gpt-6-luna",
 	defaultCapabilities,
 	probeServingWindows: createCodexServingWindowReader(),
 	synthesizeModel(target: TargetDescriptor, wireModelId: string, kb: KnowledgeBaseHit | null): Model<Api> {

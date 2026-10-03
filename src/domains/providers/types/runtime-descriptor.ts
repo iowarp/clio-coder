@@ -206,6 +206,8 @@ export interface RuntimeDescriptor {
 		detail?: string;
 	};
 	knownModels?: string[];
+	/** Curated chat choice from knownModels or the pinned provider catalog. */
+	defaultModel?: string;
 	binaryName?: string;
 	defaultBinaryPath?: string;
 	headlessCommand?: string;

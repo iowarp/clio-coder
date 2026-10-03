@@ -38,7 +38,7 @@ import type { TargetDescriptor } from "../domains/providers/types/target-descrip
 import type { ConfigureCategory } from "./configure-layout.js";
 import { type LiveModelInventory, validateModelChoice } from "./validate-model.js";
 
-const DEFAULT_PORTS: Record<string, number> = {
+export const DEFAULT_PORTS: Readonly<Record<string, number>> = {
 	llamacpp: 8080,
 	"llamacpp-anthropic": 8080,
 	"llamacpp-completion": 8080,
