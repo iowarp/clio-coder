@@ -130,6 +130,8 @@ import {
 import { applyToolRounds, deterministicSampling, supportsNamedToolChoice } from "./provider-payload.js";
 import type { AgentEvent, AgentMessage, EngineModel } from "./types.js";
 import type { ClioWorkerEvent } from "./worker-events.js";
+import type { WorkerRefusal } from "./worker-refusals.js";
+import { describeWorkerRefusal, WORKER_REFUSAL_LIMIT, workerRefusalLimitReason } from "./worker-refusals.js";
 import { createWorkerSafety, createWorkerToolRegistry, INTERNAL_HELPER_RESULT_TOOL } from "./worker-tools.js";
 
 /** Room left for the frame envelope under the 16 KiB control-lane bound, counted in the UTF-8 bytes the host limit counts. */
@@ -1520,6 +1522,7 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 	const operatorUnattended = input.escalation?.operatorResponder === "none";
 	const mainRoutedPermit = input.permitAllowance?.asks === "main" && input.permitAllowance.approvalAuthority === "main";
 	let permissionFailure = false;
+	const executeRefusals: WorkerRefusal[] = [];
 
 	// Exact, byte-stable denial reasons for the deny/fail postures. Escalate
 	// timeouts and operator denials use their own wording below.
@@ -1865,12 +1868,21 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 		]
 			.slice(0, 3)
 			.join(" ");
-		const reason =
+		const deniedReason =
 			onPermission === "fail"
 				? failReason(call.tool, actionClass)
 				: policyDetail.length > 0
 					? `${denyReason(call.tool, actionClass)}. ${policyDetail}`
 					: denyReason(call.tool, actionClass);
+		// A refused command reaches the model as a tool result and the turn goes
+		// on, so it can take another route (P1 mode B ended at its first refused
+		// verify). Changing the command still cannot create an absent execute
+		// approval route, so the third refusal ends the run as permission_required.
+		if (onPermission !== "fail" && actionClass === "execute") {
+			executeRefusals.push(describeWorkerRefusal(call, decision));
+		}
+		const refusalLimitReached = executeRefusals.length >= WORKER_REFUSAL_LIMIT;
+		const reason = refusalLimitReached ? workerRefusalLimitReason(executeRefusals) : deniedReason;
 		emit({
 			type: "clio_coder_permission_resolved",
 			payload: {
@@ -1882,8 +1894,7 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 				reason,
 			},
 		} as ClioWorkerEvent);
-		// CLB-5: changing the command cannot create an absent execute approval route.
-		if (onPermission === "fail" || actionClass === "execute") {
+		if (onPermission === "fail" || refusalLimitReached) {
 			permissionFailure = true;
 			registry.cancelParkedCalls(reason);
 			process.stderr.write(`[worker] ${reason}\n`);

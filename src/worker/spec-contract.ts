@@ -39,7 +39,8 @@ export const WORKER_PROTECTED_ARTIFACT_STATE_VERSION = 1;
 
 /**
  * Exit code a native worker uses to report that the run ended because a tool
- * call required interactive permission under fleet.permissions.mode="fail".
+ * call required interactive permission under fleet.permissions.mode="fail", or
+ * because the deny posture refused WORKER_REFUSAL_LIMIT execute calls in one run.
  * The orchestrator's outcome resolver maps it to failed/permission_required.
  */
 export const WORKER_EXIT_PERMISSION_REQUIRED = 3;
