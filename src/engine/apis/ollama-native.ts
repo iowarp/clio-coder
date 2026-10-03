@@ -247,6 +247,11 @@ function buildRequest(
 	const samplingProfile = pickSamplingProfile(resolved.quirks ?? clioQuirks(model), applied.thinkingActive);
 	if (samplingProfile) applyOllamaSamplingProfile(opts, samplingProfile);
 	if (options?.temperature !== undefined) opts.temperature = options.temperature;
+	// Pi's samplingParams carry the request-level sampler values (the deterministic
+	// seed among them); Ollama takes them as nested options.
+	for (const [key, value] of Object.entries(options?.samplingParams ?? {})) {
+		if (typeof value === "number" && Number.isFinite(value)) Object.assign(opts, { [key]: value });
+	}
 	opts.num_predict = remainingContextMaxTokens(model, context, options);
 	// Sent only when the operator configured it: a `num_ctx` that differs from
 	// the loaded one makes Ollama reload the model, which on a shared server
@@ -471,7 +476,7 @@ function runStream(
 			signal?.throwIfAborted();
 			const pin = await reconcileOllamaResidency(model, headers, signal);
 			signal?.throwIfAborted();
-			// Native Ollama must run the payload hook too, or generated context loses its temperature and seed.
+			// Native Ollama runs the payload hook too, so worker request patches reach its body.
 			const request = buildRequest(model, context, options, thinkingLevel, pin);
 			const patchedRequest = (await options?.onPayload?.(request, model)) ?? request;
 			const iterator = streamOllamaChat(model.baseUrl, patchedRequest as typeof request, {

@@ -121,7 +121,12 @@ import {
 	sanitizeLockedSynthesisMessage,
 	workerLoopBlockBudget,
 } from "./loop-guard.js";
-import { applyToolRounds, patchWorkerRequestPayload, supportsNamedToolChoice } from "./provider-payload.js";
+import {
+	applyToolRounds,
+	deterministicSampling,
+	patchWorkerRequestPayload,
+	supportsNamedToolChoice,
+} from "./provider-payload.js";
 import type { AgentEvent, AgentMessage, EngineModel } from "./types.js";
 import type { ClioWorkerEvent } from "./worker-events.js";
 import { createWorkerSafety, createWorkerToolRegistry, INTERNAL_HELPER_RESULT_TOOL } from "./worker-tools.js";
@@ -1066,6 +1071,19 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 				}
 				throw error;
 			}
+			// Stable sampling applies to every context-generation round, terminal
+			// repairs included. It merges over the caller's options so it beats quirk
+			// profiles and run overrides, which the adapters apply underneath.
+			const sampling =
+				input.sampling === "deterministic" ? deterministicSampling(currentModel, input.runtime.id) : undefined;
+			const requestOptions =
+				sampling === undefined
+					? streamOptions
+					: {
+							...streamOptions,
+							...sampling,
+							samplingParams: { ...streamOptions?.samplingParams, ...sampling.samplingParams },
+						};
 			// Routed per attempt: the lock and the middleware choice can flip between
 			// the first call and the overflow retry. A locked round already loses its
 			// tool surface in onPayload, so the middleware text-only round yields to it.
@@ -1077,7 +1095,7 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 						...(systemPrompt !== undefined ? { systemPrompt } : {}),
 						messages: projected as typeof currentContext.messages,
 					},
-					streamOptions,
+					requestOptions,
 					[middlewareToolChoice.current().kind === "none" && !synthesisToolLock ? { kind: "text-only" } : undefined],
 				);
 				return engineStreamSimple(currentModel, controlled.context, controlled.options);
@@ -1104,8 +1122,6 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 			return patchWorkerRequestPayload(payload, currentModel, {
 				runtimeId: input.runtime.id,
 				...(input.responseSchema !== undefined ? { responseSchema: input.responseSchema } : {}),
-				// Apply stable sampling to every context-generation round, including terminal repairs.
-				...(input.sampling !== undefined ? { sampling: input.sampling } : {}),
 				toolSurfaceLocked: synthesisToolLock,
 				...(helperToolAvailable && (synthesisToolLock || helperTerminalPhase) && supportsNamedToolChoice(currentModel.api)
 					? { terminalToolName: INTERNAL_HELPER_RESULT_TOOL }
