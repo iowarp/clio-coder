@@ -93,24 +93,10 @@ describe("contracts/auth OAuth refresh", () => {
 
 	it("does not call the network for a credential with more than five minutes left", async () => {
 		seed(60 * 60_000);
-		globalThis.fetch = (async (url: unknown, init?: RequestInit) => {
-			calls.push({ url: String(url), body: String(init?.body) });
+		globalThis.fetch = (async () => {
 			throw new Error("network must not be touched");
 		}) as typeof fetch;
 		strictEqual((await open().resolveApiKey("alcf")).apiKey, "old-access");
-		strictEqual(calls.length, 0);
-	});
-
-	it("keeps a token that has not expired when the early refresh fails", async () => {
-		seed(2 * 60_000);
-		const before = readFileSync(path, "utf8");
-		globalThis.fetch = (async (url: unknown, init?: RequestInit) => {
-			calls.push({ url: String(url), body: String(init?.body) });
-			return new Response("temporarily unavailable", { status: 503 });
-		}) as typeof fetch;
-		strictEqual((await open().resolveApiKey("alcf")).apiKey, "old-access");
-		ok(calls.length >= 1, "the refresh was attempted");
-		strictEqual(readFileSync(path, "utf8"), before);
 	});
 
 	it("refreshes inside Pi's five-minute window instead of only at expiry", async () => {

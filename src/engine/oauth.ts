@@ -141,26 +141,13 @@ function modelsFor(store: CredentialStore): MutableModels {
 /**
  * Request auth for a stored OAuth credential. Pi refreshes through `store.modify`
  * when the token expires within five minutes and rejects with a ModelsError when
- * the refresh or the store write fails. A token that has not expired yet still
- * authenticates, so a failed early refresh falls back to it instead of dropping a
- * key the caller could have used until true expiry. An expired token, a missing
- * credential and an abort propagate to the caller.
+ * the refresh or the store write fails; the caller decides what that means.
  */
 export async function resolveEngineOAuthApiKey(
 	store: CredentialStore,
 	providerId: string,
 	signal?: AbortSignal,
 ): Promise<string | undefined> {
-	try {
-		const resolved = await modelsFor(store).getAuth(providerId, signal ? { signal } : undefined);
-		return resolved?.auth.apiKey;
-	} catch (error) {
-		if (signal?.aborted) throw error;
-		const oauth = oauthProviders().get(providerId)?.auth.oauth;
-		const credential = await store.read(providerId);
-		if (oauth && credential?.type === "oauth" && Date.now() < credential.expires) {
-			return (await oauth.toAuth(credential)).apiKey;
-		}
-		throw error;
-	}
+	const resolved = await modelsFor(store).getAuth(providerId, signal ? { signal } : undefined);
+	return resolved?.auth.apiKey;
 }
