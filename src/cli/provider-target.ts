@@ -11,7 +11,6 @@ import {
 } from "../domains/providers/index.js";
 import { getRuntimeRegistry } from "../domains/providers/registry.js";
 import { registerBuiltinRuntimes } from "../domains/providers/runtimes/builtins.js";
-import { registerClioOAuthProviders } from "../engine/oauth.js";
 import { columnWidths, formatColumnRow } from "./shared.js";
 
 /**
@@ -36,7 +35,6 @@ export interface ConnectableProviderRow {
 }
 
 function ensureSetupRuntimeRegistry(): void {
-	registerClioOAuthProviders();
 	const registry = getRuntimeRegistry();
 	if (registry.list().length === 0) registerBuiltinRuntimes(registry);
 }

@@ -7,8 +7,7 @@
  * callback.
  */
 
-import type { OAuthCredentials, OAuthLoginCallbacks } from "@earendil-works/pi-ai";
-import type { EngineOAuthProvider } from "./oauth.js";
+import type { OAuthAuth, OAuthCredential, ProviderAuthInteraction } from "@earendil-works/pi-ai";
 
 export const AUTH_CLIENT_ID = "58fdd3bc-e1c3-4ce5-80ea-8d6b87cfb944";
 export const GATEWAY_CLIENT_ID = "681c10cc-f684-4540-bcd7-0b4df3bc26ef";
@@ -103,7 +102,7 @@ function selectGatewayGrant(payload: GlobusTokenResponse): GlobusTokenGrant {
 	);
 }
 
-function grantToCredentials(grant: GlobusTokenGrant, previousRefresh?: string): OAuthCredentials {
+function grantToCredentials(grant: GlobusTokenGrant, previousRefresh?: string): OAuthCredential {
 	const access = grant.access_token;
 	if (typeof access !== "string" || access.length === 0) {
 		throw new Error("Globus token response is missing an access token for the ALCF gateway.");
@@ -115,6 +114,7 @@ function grantToCredentials(grant: GlobusTokenGrant, previousRefresh?: string): 
 	}
 	const expiresInSeconds = typeof grant.expires_in === "number" && grant.expires_in > 0 ? grant.expires_in : 0;
 	return {
+		type: "oauth",
 		access,
 		refresh,
 		expires: Date.now() + expiresInSeconds * 1000 - EXPIRY_SKEW_MS,
@@ -146,7 +146,7 @@ async function postForm(body: Record<string, string>, signal?: AbortSignal): Pro
 	return parsed as GlobusTokenResponse;
 }
 
-async function exchangeCode(code: string, verifier: string, signal?: AbortSignal): Promise<OAuthCredentials> {
+async function exchangeCode(code: string, verifier: string, signal?: AbortSignal): Promise<OAuthCredential> {
 	const payload = await postForm(
 		{
 			grant_type: "authorization_code",
@@ -160,7 +160,7 @@ async function exchangeCode(code: string, verifier: string, signal?: AbortSignal
 	return grantToCredentials(selectGatewayGrant(payload));
 }
 
-async function refreshGatewayToken(refreshToken: string, signal: AbortSignal): Promise<OAuthCredentials> {
+async function refreshGatewayToken(refreshToken: string, signal: AbortSignal): Promise<OAuthCredential> {
 	const payload = await postForm(
 		{
 			grant_type: "refresh_token",
@@ -172,34 +172,31 @@ async function refreshGatewayToken(refreshToken: string, signal: AbortSignal): P
 	return grantToCredentials(selectGatewayGrant(payload), refreshToken);
 }
 
-async function loginAlcf(callbacks: OAuthLoginCallbacks): Promise<OAuthCredentials> {
+async function loginAlcf(interaction: ProviderAuthInteraction): Promise<OAuthCredential> {
 	const { verifier, challenge } = await generatePkce();
 	const url = buildAuthorizeUrl({ challenge, state: randomState() });
-	callbacks.onAuth({
+	interaction.notify({
+		type: "auth_url",
 		url,
 		instructions:
 			"Log in with your ALCF / anl.gov identity. Globus will show an authorization code; copy it and paste it here.",
 	});
-	const pasted = callbacks.onManualCodeInput
-		? await callbacks.onManualCodeInput()
-		: await callbacks.onPrompt({ message: "Paste the authorization code from Globus", placeholder: "code" });
+	const pasted = await interaction.prompt({
+		type: "manual_code",
+		message: "Paste the authorization code from Globus",
+		placeholder: "code",
+	});
 	const code = parseAuthorizationInput(pasted);
 	if (!code) throw new Error("No authorization code was provided.");
-	callbacks.onProgress?.("Exchanging authorization code for an ALCF access token...");
-	return exchangeCode(code, verifier, callbacks.signal);
+	interaction.notify({ type: "progress", message: "Exchanging authorization code for an ALCF access token..." });
+	return exchangeCode(code, verifier, interaction.signal);
 }
 
-export const alcfOAuthProvider: EngineOAuthProvider = {
-	id: "alcf",
+export const alcfOAuth: OAuthAuth = {
 	name: "ALCF Inference (Globus)",
-	usesCallbackServer: false,
-	login(callbacks) {
-		return loginAlcf(callbacks);
-	},
-	refreshToken(credentials, signal) {
-		return refreshGatewayToken(credentials.refresh, signal);
-	},
-	async getApiKey(credentials) {
-		return credentials.access;
+	login: loginAlcf,
+	refresh: (credential, signal) => refreshGatewayToken(credential.refresh, signal),
+	async toAuth(credential) {
+		return { apiKey: credential.access };
 	},
 };

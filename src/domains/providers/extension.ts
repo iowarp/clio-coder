@@ -5,7 +5,6 @@ import type { DomainBundle, DomainContext, DomainExtension } from "../../core/do
 import { ensurePiAiRegistered } from "../../engine/ai.js";
 import { registerClioApiProviders, setGlobalDefaultMaxOutputTokens } from "../../engine/apis/index.js";
 import { releaseModelsLoadedDuring, releaseScopeFor } from "../../engine/apis/residency.js";
-import { registerClioOAuthProviders } from "../../engine/oauth.js";
 import type { ConfigContract } from "../config/contract.js";
 
 import { authNotRequiredStatus, openAuthStorage, resolveAuthTarget, targetRequiresAuth } from "./auth/index.js";
@@ -808,7 +807,6 @@ export function createProvidersBundle(
 			stopped = false;
 			ensurePiAiRegistered();
 			registerClioApiProviders();
-			registerClioOAuthProviders();
 			registerBuiltinRuntimes(registry);
 			const settings = readConfig();
 			setGlobalDefaultMaxOutputTokens(settings.chat.maxOutputTokens);

@@ -1,17 +1,16 @@
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import type { OAuthLoginCallbacks } from "../../../engine/oauth.js";
-import type { AuthOperationOptions } from "../../../engine/types.js";
+import {
+	hasEngineOAuthProvider,
+	listEngineOAuthProviders,
+	loginWithEngineOAuthProvider,
+	resolveEngineOAuthApiKey,
+} from "../../../engine/oauth.js";
+import type { AuthOperationOptions, Credential, CredentialInfo, CredentialStore } from "../../../engine/types.js";
 import type { RuntimeAuth, RuntimeDescriptor } from "../types/runtime-descriptor.js";
 import type { TargetDescriptor } from "../types/target-descriptor.js";
 
 import { normalizeStoredApiKeyRef, resolveEnvironmentApiKey, resolveStoredApiKey } from "./api-key.js";
-import {
-	getOAuthApiKey,
-	getOAuthProvider,
-	listOAuthProviders,
-	loginWithOAuthProvider,
-	refreshOAuthCredentials,
-} from "./oauth.js";
 
 export interface ApiKeyCredential {
 	type: "api_key";
@@ -150,6 +149,12 @@ function toOAuthCredential(raw: unknown): OAuthCredential | null {
 		};
 	}
 	return null;
+}
+
+/** A Pi credential as this file can hold it, or null when the shape has no representation here. */
+function toStoredCredential(credential: Credential): AuthCredential | null {
+	const stamped = { ...credential, updatedAt: nowIso() };
+	return toApiKeyCredential(stamped) ?? toOAuthCredential(stamped);
 }
 
 /**
@@ -295,7 +300,7 @@ export function authNotRequiredStatus(providerId: string): AuthStatus {
 	};
 }
 
-export class AuthStorage {
+export class AuthStorage implements CredentialStore {
 	private data: AuthStorageData = {};
 	private damage: string | null = null;
 	private runtimeOverrides = new Map<string, string>();
@@ -490,48 +495,94 @@ export class AuthStorage {
 		return this.status(target.providerId, args);
 	}
 
-	private async refreshOAuthCredentialWithLock(
+	/** Pi's CredentialStore.read: the committed snapshot, with a stored key's dynamic value resolved. */
+	async read(providerId: string, options?: AuthOperationOptions): Promise<Credential | undefined> {
+		options?.signal?.throwIfAborted();
+		const stored = this.data[providerId];
+		if (stored?.type !== "api_key") return stored;
+		const key = resolveStoredApiKey(stored.key, providerId);
+		return key === undefined ? { type: "api_key" } : { ...stored, key };
+	}
+
+	/** Pi's CredentialStore.list: metadata only, never resolves a stored key. */
+	async list(options?: AuthOperationOptions): Promise<readonly CredentialInfo[]> {
+		options?.signal?.throwIfAborted();
+		return this.listStored().map(({ providerId, type }) => ({ providerId, type }));
+	}
+
+	/**
+	 * Pi's CredentialStore.modify: the one serialized read-modify-write, under the
+	 * same cross-process lock and damage refusal as every other write. `fn` runs
+	 * inside the lock, so Pi's OAuth refresh (network call, rotated token) is
+	 * persisted before the lock is released. Unlike set()/remove(), a failed
+	 * write rejects: Pi's caller owns the consequence of an unpersisted refresh.
+	 */
+	async modify(
 		providerId: string,
-		signal: AbortSignal,
-	): Promise<{ apiKey: string; credential: OAuthCredential } | null> {
+		fn: (current: Credential | undefined) => Promise<Credential | undefined>,
+		options?: AuthOperationOptions,
+	): Promise<Credential | undefined> {
 		let latestData: AuthStorageData | undefined;
-		const result = await this.backend.withLockAsync(
-			async (current) => {
+		// Set for any failure that is not the backend's own: a failed callback or a refused shape.
+		let callbackFailed = false;
+		const result = await this.backend
+			.withLockAsync(async (current) => {
 				const read = readStorageData(current);
 				if (read.damage !== null) {
 					this.damage = read.damage;
 					throw new AuthStorageDamagedError(read.damage, this.backend.describe?.());
 				}
-				const currentData = read.data;
-				latestData = currentData;
-				const stored = currentData[providerId];
-				if (stored?.type !== "oauth") {
-					return { result: null };
+				latestData = read.data;
+				const existing = read.data[providerId];
+				let next: Credential | undefined;
+				try {
+					next = await fn(existing);
+				} catch (error) {
+					callbackFailed = true;
+					throw error;
 				}
-				if (Date.now() < stored.expires) {
-					return { result: { apiKey: await getOAuthApiKey(providerId, stored), credential: stored } };
+				if (next === undefined) return { result: existing };
+				const credential = toStoredCredential(next);
+				if (!credential) {
+					// A key-less api_key credential (Pi's Bedrock profile) would be written as an
+					// entry this reader flags as damage, locking out every later write.
+					callbackFailed = true;
+					throw new Error(`credential for provider=${providerId} is not representable in credentials.yaml`);
 				}
-				const refreshed = await refreshOAuthCredentials(providerId, stored, signal);
-				const next: OAuthCredential = {
-					type: "oauth",
-					...refreshed,
-					updatedAt: nowIso(),
-				};
-				const merged: AuthStorageData = { ...currentData, [providerId]: next };
+				const merged: AuthStorageData = { ...read.data, [providerId]: credential };
 				latestData = merged;
-				return {
-					result: { apiKey: await getOAuthApiKey(providerId, next), credential: next },
-					next: serializeStorageData(merged),
-				};
-			},
-			{ signal },
-		);
-		// Adopt the view only after the backend has committed it. Pi 0.84's
-		// CredentialStore.modify pattern prevents a cancellation between refresh
-		// and persistence from making memory advertise a token disk never received.
+				return { result: credential, next: serializeStorageData(merged) };
+			}, options)
+			.catch((error: unknown) => {
+				// A lock or write failure, as opposed to a refusal or a failed callback, is what
+				// damageReason() reports for the sync writers; keep the channel uniform.
+				if (!callbackFailed && !(error instanceof AuthStorageDamagedError) && !options?.signal?.aborted) {
+					this.damage = `it could not be written: ${error instanceof Error ? error.message : String(error)}`;
+				}
+				throw error;
+			});
+		// Adopt the view only after the backend has committed it.
 		if (latestData) this.data = latestData;
 		this.damage = null;
 		return result;
+	}
+
+	/** Pi's CredentialStore.delete. remove() is the sync variant that records instead of rejecting. */
+	async delete(providerId: string, options?: AuthOperationOptions): Promise<void> {
+		let latestData: AuthStorageData | undefined;
+		await this.backend.withLockAsync(async (current) => {
+			const read = readStorageData(current);
+			if (read.damage !== null) {
+				this.damage = read.damage;
+				throw new AuthStorageDamagedError(read.damage, this.backend.describe?.());
+			}
+			const merged = { ...read.data };
+			delete merged[providerId];
+			latestData = merged;
+			return { result: undefined, next: serializeStorageData(merged) };
+		}, options);
+		if (latestData) this.data = latestData;
+		this.damage = null;
 	}
 
 	async resolveApiKey(
@@ -566,65 +617,23 @@ export class AuthStorage {
 		}
 
 		if (stored?.type === "oauth") {
-			const provider = getOAuthProvider(providerId);
-			if (!provider) {
-				return {
-					providerId,
-					available: true,
-					credentialType: "oauth",
-					source: "stored-oauth",
-					detail: providerId,
-				};
-			}
-			if (Date.now() < stored.expires) {
-				return {
-					providerId,
-					available: true,
-					credentialType: "oauth",
-					source: "stored-oauth",
-					detail: providerId,
-					apiKey: await getOAuthApiKey(providerId, stored),
-				};
-			}
-			try {
-				const refreshed = await this.refreshOAuthCredentialWithLock(
-					providerId,
-					opts?.signal ?? new AbortController().signal,
-				);
-				if (refreshed) {
-					return {
-						providerId,
-						available: true,
-						credentialType: "oauth",
-						source: "stored-oauth",
-						detail: providerId,
-						apiKey: refreshed.apiKey,
-					};
-				}
-			} catch (error) {
-				if (opts?.signal?.aborted) throw opts.signal.reason ?? error;
-				// A refusal already recorded its reason on this.damage; a refresh that
-				// failed for any other reason is answered by re-reading the store below.
-				this.reload();
-				const updated = this.data[providerId];
-				if (updated?.type === "oauth" && Date.now() < updated.expires) {
-					return {
-						providerId,
-						available: true,
-						credentialType: "oauth",
-						source: "stored-oauth",
-						detail: providerId,
-						apiKey: await getOAuthApiKey(providerId, updated),
-					};
-				}
-			}
-			return {
+			const resolution: AuthResolution = {
 				providerId,
 				available: true,
 				credentialType: "oauth",
 				source: "stored-oauth",
 				detail: providerId,
 			};
+			if (!hasEngineOAuthProvider(providerId)) return resolution;
+			try {
+				const apiKey = await resolveEngineOAuthApiKey(this, providerId, opts?.signal);
+				return apiKey === undefined ? resolution : { ...resolution, apiKey };
+			} catch (error) {
+				if (opts?.signal?.aborted) throw opts.signal.reason ?? error;
+				// A refused or failed refresh leaves the stored credential for a retry; a
+				// refusal already recorded its reason on this.damage.
+				return resolution;
+			}
 		}
 
 		const env = resolveEnvironmentApiKey(providerId, opts?.explicitEnvVar);
@@ -680,7 +689,7 @@ export class AuthStorage {
 	}
 
 	async login(providerId: string, callbacks: OAuthLoginCallbacks): Promise<void> {
-		const credentials = await loginWithOAuthProvider(providerId, callbacks);
+		const credentials = await loginWithEngineOAuthProvider(providerId, callbacks);
 		this.set(providerId, { type: "oauth", ...credentials, updatedAt: nowIso() });
 	}
 
@@ -689,8 +698,6 @@ export class AuthStorage {
 	}
 
 	getOAuthProviders(): ReadonlyArray<{ id: string; name: string }> {
-		return listOAuthProviders()
-			.map((provider) => ({ id: provider.id, name: provider.name }))
-			.sort((a, b) => a.id.localeCompare(b.id));
+		return [...listEngineOAuthProviders()].sort((a, b) => a.id.localeCompare(b.id));
 	}
 }

@@ -46,7 +46,6 @@ import {
 	observeHostCapacityFacts,
 	resolveLocalConcurrency,
 } from "../domains/scheduling/local-capacity.js";
-import { registerClioOAuthProviders } from "../engine/oauth.js";
 import { ask, askYesNo } from "./ask.js";
 import { editSettingControl, orderedSectionControls } from "./configure-controls.js";
 import { editSettings } from "./configure-editor.js";
@@ -325,7 +324,6 @@ function parseSetupArgs(argv: ReadonlyArray<string>): ParsedArgs {
 }
 
 function ensureRegistryPopulated(): void {
-	registerClioOAuthProviders();
 	const registry = getRuntimeRegistry();
 	if (registry.list().length === 0) registerBuiltinRuntimes(registry);
 }
