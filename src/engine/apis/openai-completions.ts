@@ -589,7 +589,9 @@ function withSamplingOverrides<TOptions extends StreamOptions>(
 	const promptCache = shouldApplyLlamaCppPromptCache(model);
 	const lmstudio = isLmStudioModel(model);
 	const vllmThinkingBudgets = resolved.runtimeId === "vllm" ? quirks?.thinking?.budgetByLevel : undefined;
-	const needsPayloadControls = promptCache || lmstudio || applied.mechanism !== "always-on";
+	// Pi catalog models carry no runtime metadata and keep Pi's own thinking handling.
+	const synthesized = runtimeMetadata(model)?.runtimeId !== undefined;
+	const needsPayloadControls = promptCache || lmstudio || (synthesized && applied.mechanism !== "always-on");
 	if (!profile && !vllmThinkingBudgets && !needsPayloadControls) {
 		return options;
 	}
