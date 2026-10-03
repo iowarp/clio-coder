@@ -91,7 +91,7 @@ test("decisions split into active and earlier, with who decided and why", () => 
 test("memory reads as a sentence and a missing report says so", () => {
 	assert.equal(memoryLine(board.memory), "Task memory is on, model tier, 1 entry, updating now.");
 	assert.equal(memoryLine({ enabled: false, tier: "rules", entries: 0, stepInFlight: false }), "Task memory is off.");
-	assert.equal(memoryLine(null), "Task memory is not reported by this session.");
+	assert.equal(memoryLine(null), "Clio does not report task memory here.");
 });
 
 test("board writes are worded as what happened, and a proposal always names its review step", async () => {
@@ -115,7 +115,7 @@ test("with only superseded decisions the board says none is active, not that non
 	const { decisionsEmptyLine } = await import("../client/chat/board-model.js");
 	assert.equal(
 		decisionsEmptyLine({ activeDecisions: [], earlierDecisions: [] }),
-		"No decision has been recorded in this session.",
+		"No decision has been recorded in this task.",
 	);
 	assert.equal(
 		decisionsEmptyLine({ activeDecisions: [], earlierDecisions: [{} as never] }),

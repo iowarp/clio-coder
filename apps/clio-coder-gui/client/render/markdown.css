@@ -81,6 +81,13 @@
 	color: var(--muted);
 	font: var(--text-exact) / 1.7 var(--font-mono);
 }
+.markdown .md-picture {
+	display: block;
+	max-width: 100%;
+	max-height: 520px;
+	margin-block: var(--space-2);
+	border: 1px solid var(--line);
+}
 .markdown p.md-html {
 	white-space: pre-wrap;
 }
@@ -186,6 +193,10 @@
 	white-space: pre;
 	font: var(--text-exact) / 1.7 var(--font-mono);
 	tab-size: 4;
+}
+.code-block[data-wrap] pre {
+	white-space: pre-wrap;
+	overflow-wrap: anywhere;
 }
 .code-block__cursor {
 	display: inline-block;

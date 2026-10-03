@@ -13,6 +13,7 @@
  */
 
 import type { Usage } from "../../contracts/sessions.js";
+import { formatTime } from "../api/clock.js";
 import { StatusMark } from "../design/status.js";
 import { CopyButton } from "../render/Markdown.js";
 import { fillComposer } from "./Composer.js";
@@ -86,9 +87,9 @@ function UsageBreakdown({ summary, title, usage }: { summary: string; title: str
 }
 
 /**
- * The outcome footer. Every value is a reported fact from the `Turn` row: the
- * tool count this turn made and what it spent. Two usage numbers stay visible;
- * the complete reported accounting is available from their native disclosure.
+ * The outcome footer, one quiet line of facts from the `Turn` row: how it ended, how long it
+ * took, the calls it made, what it spent and when. The token total opens the complete reported
+ * accounting; the clock's title carries the full date.
  */
 export function TurnOutcome({
 	outcome,
@@ -102,16 +103,19 @@ export function TurnOutcome({
 			<StatusMark tone={outcome.tone} label={outcome.label} />
 			{outcome.detail ? <span className="turn-outcome__detail">{outcome.detail}</span> : null}
 			{outcome.stopReason ? <code className="turn-outcome__code">{outcome.stopReason}</code> : null}
-			{outcome.facts.map((fact) =>
-				fact.startsWith("tokens") && outcome.usage !== null ? (
-					<UsageBreakdown key={fact} summary={fact} title={outcome.usageTitle} usage={outcome.usage} />
-				) : (
-					<span className="turn-outcome__fact" key={fact}>
-						{fact}
-					</span>
-				),
-			)}
-			{outcome.finishedAt ? <time dateTime={outcome.finishedAt}>{formatClock(outcome.finishedAt)}</time> : null}
+			{outcome.facts.map((fact) => (
+				<span className="turn-outcome__fact" key={fact}>
+					{fact}
+				</span>
+			))}
+			{outcome.usage !== null && outcome.usageLabel !== null ? (
+				<UsageBreakdown summary={outcome.usageLabel} title={outcome.usageTitle} usage={outcome.usage} />
+			) : null}
+			{outcome.finishedAt ? (
+				<time dateTime={outcome.finishedAt} title={formatTime(outcome.finishedAt)}>
+					{formatClock(outcome.finishedAt)}
+				</time>
+			) : null}
 		</footer>
 	);
 }

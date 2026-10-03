@@ -31,10 +31,8 @@ export const ContextPanel = memo(function ContextPanel({
 	const segments = ledger.data ? contextSegments(ledger.data) : [];
 	return (
 		<div className="pane-drill drill context-panel">
-			{!sessionOpen ? <p className="pane-empty">This session is not open. Load it to read its context window.</p> : null}
-			{sessionOpen && !supported ? (
-				<p className="pane-empty">This Clio Coder session does not report its context window.</p>
-			) : null}
+			{!sessionOpen ? <p className="pane-empty">This task is not open. Open it to read its context window.</p> : null}
+			{sessionOpen && !supported ? <p className="pane-empty">Clio does not report context window for this task.</p> : null}
 			{ledger.isPending && sessionOpen && supported ? <p className="pane-empty">Reading the context window…</p> : null}
 			{ledger.error ? (
 				<p role="alert" className="pane-empty">

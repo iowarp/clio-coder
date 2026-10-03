@@ -58,7 +58,14 @@ export function TaskSidebar({
 	const theme = useTheme();
 	countRender("task-sidebar");
 	const location = useLocation();
-	const settings = location.pathname === "/settings" || location.pathname.startsWith("/settings/");
+	// The settings rail lists Library, Fleet and the other inspection pages, so it stays up on them.
+	// Library and System are also linked from the work rail; reached from there, they keep that rail.
+	const inSettings = useRef(false);
+	const segment = location.pathname.split("/")[1] ?? "";
+	const settings =
+		segment === "settings" ||
+		(isSettingsPath(location.pathname) && (inSettings.current || (segment !== "library" && segment !== "system")));
+	inSettings.current = settings;
 	const backTo = useRef("/");
 	useEffect(() => {
 		if (!isSettingsPath(location.pathname)) backTo.current = `${location.pathname}${location.search}`;

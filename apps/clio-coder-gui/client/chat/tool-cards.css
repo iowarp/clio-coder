@@ -461,3 +461,37 @@
 .tool-card .tool-card__step[data-status="failed"] .tool-card__glyph {
 	color: var(--status-fail-fg);
 }
+
+/* Colour a command printed, drawn in the code well's own inks so it follows the theme. The sixteen
+   terminal colours fold to these eight; white stays the well's ink and black its muted ink. */
+.tool-card__pre .ansi-red {
+	color: var(--syntax-deleted);
+}
+.tool-card__pre .ansi-green {
+	color: var(--syntax-inserted);
+}
+.tool-card__pre .ansi-yellow {
+	color: var(--syntax-string);
+}
+.tool-card__pre .ansi-blue {
+	color: var(--syntax-function);
+}
+.tool-card__pre .ansi-magenta {
+	color: var(--syntax-number);
+}
+.tool-card__pre .ansi-cyan {
+	color: var(--syntax-keyword);
+}
+.tool-card__pre .ansi-black,
+.tool-card__pre .ansi-dim {
+	color: var(--code-ink-muted);
+}
+.tool-card__pre .ansi-bold {
+	font-weight: 650;
+}
+.tool-card__pre .ansi-italic {
+	font-style: italic;
+}
+.tool-card__pre .ansi-underline {
+	text-decoration: underline;
+}

@@ -35,12 +35,18 @@ export function TargetsPage({ client, view }: { client: Client; view: "targets" 
 		}: {
 			workspaceId: string;
 			targetId: string;
-			action: "probe" | "use" | "remove";
+			action: "probe" | "use" | "remove" | "signout";
 		}) =>
-			client.call(action === "probe" ? routes.targetsProbe : action === "use" ? routes.targetsUse : routes.targetsRemove, {
-				...emptyInput,
-				params: { id: workspaceId, targetId },
-			}),
+			client.call(
+				action === "probe"
+					? routes.targetsProbe
+					: action === "use"
+						? routes.targetsUse
+						: action === "signout"
+							? routes.targetsSignOut
+							: routes.targetsRemove,
+				{ ...emptyInput, params: { id: workspaceId, targetId } },
+			),
 		onSuccess: (value, variables) => setOperationScope({ id: value.operationId, workspaceId: variables.workspaceId }),
 	});
 	const cancel = useMutation({
@@ -83,7 +89,10 @@ export function TargetsPage({ client, view }: { client: Client; view: "targets" 
 						<section className="trace-panel" aria-label="Connection operation">
 							{/* aria-live, not role="status": a role on the h2 would replace its heading role. */}
 							<h2 aria-live="polite">
-								{operation.data.kind.replace("targets.", "Connection ")} · {operation.data.status}
+								{operation.data.kind === "targets.signout"
+									? "Sign out"
+									: operation.data.kind.replace("targets.", "Connection ")}{" "}
+								· {operation.data.status}
 							</h2>
 							{operation.data.progress.length > 0 && (
 								<ul>
@@ -154,6 +163,21 @@ export function TargetsPage({ client, view }: { client: Client; view: "targets" 
 										onClick={() => mutate.mutate({ workspaceId: id, targetId: target.id, action: "use" })}
 									>
 										Use for chat &amp; fleet
+									</button>
+									<button
+										type="button"
+										disabled={busy}
+										title="Remove the API key or login Clio stored for this connection. The connection itself stays."
+										onClick={() => {
+											if (
+												window.confirm(
+													`Sign out of ${target.id}? Clio removes the credential she stored for this connection. The connection stays configured.`,
+												)
+											)
+												mutate.mutate({ workspaceId: id, targetId: target.id, action: "signout" });
+										}}
+									>
+										Sign out
 									</button>
 									<button
 										type="button"

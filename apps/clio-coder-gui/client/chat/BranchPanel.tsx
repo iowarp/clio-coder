@@ -88,8 +88,8 @@ export const BranchPanel = memo(function BranchPanel({
 	const busy = change.isPending || running;
 	const body = (
 		<>
-			{!sessionOpen ? <p>This session is not open. Load it to read its branches.</p> : null}
-			{sessionOpen && !supported ? <p>This Clio Coder session does not report its branches.</p> : null}
+			{!sessionOpen ? <p>This task is not open. Open it to read its branches.</p> : null}
+			{sessionOpen && !supported ? <p>Clio does not report branches for this task.</p> : null}
 			{tree.isPending && sessionOpen && supported ? <p>Reading the branches…</p> : null}
 			{tree.error ? <p role="alert">{tree.error.message}</p> : null}
 			{view ? (

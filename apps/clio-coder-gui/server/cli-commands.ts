@@ -14,6 +14,7 @@ export const CliCommand = Type.Union([
 	Type.Object({ kind: Type.Literal("targets.probe"), id: Id }, closed),
 	Type.Object({ kind: Type.Literal("targets.use"), id: Id }, closed),
 	Type.Object({ kind: Type.Literal("targets.remove"), id: Id }, closed),
+	Type.Object({ kind: Type.Literal("targets.signout"), id: Id }, closed),
 	Type.Object({ kind: Type.Literal("routing.models") }, closed),
 	Type.Object({ kind: Type.Literal("routing.profiles") }, closed),
 	Type.Object({ kind: Type.Literal("routing.bindings") }, closed),
@@ -43,6 +44,8 @@ export function commandPlan(input: unknown, cwd?: string): { argv: string[]; out
 			return { argv: ["targets", "use", input.id], output: "exit" };
 		case "targets.remove":
 			return { argv: ["targets", "remove", input.id], output: "exit" };
+		case "targets.signout":
+			return { argv: ["auth", "logout", input.id], output: "exit" };
 		case "routing.models":
 			return { argv: ["models", "--json", "--offline"], output: "json" };
 		case "routing.profiles":

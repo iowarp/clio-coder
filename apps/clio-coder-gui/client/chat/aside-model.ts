@@ -14,7 +14,7 @@ export function asideBlock(
 	running: boolean,
 ): string | null {
 	if (!capability) return "This Clio Coder build cannot answer beside the conversation.";
-	if (!sessionOpen) return "This session is not open. Load it to ask beside it.";
+	if (!sessionOpen) return "This task is not open. Open it to ask beside it.";
 	if (running) return "Ask once the turn settles. A side question reads the conversation as it stands, not mid-turn.";
 	return null;
 }

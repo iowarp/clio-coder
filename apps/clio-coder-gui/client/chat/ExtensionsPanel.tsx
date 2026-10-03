@@ -40,8 +40,8 @@ export const ExtensionsPanel = memo(function ExtensionsPanel({
 	const outcome = reload.data ? reloadOutcome(reload.data) : null;
 	const body = (
 		<>
-			{!sessionOpen ? <p>This session is not open. Load it to read its extensions.</p> : null}
-			{sessionOpen && !supported ? <p>This Clio Coder session does not report its extensions.</p> : null}
+			{!sessionOpen ? <p>This task is not open. Open it to read its extensions.</p> : null}
+			{sessionOpen && !supported ? <p>Clio does not report extensions for this task.</p> : null}
 			{list.isPending && sessionOpen && supported ? <p>Reading the extensions…</p> : null}
 			{list.error ? <p role="alert">{list.error.message}</p> : null}
 			{list.data ? (

@@ -30,6 +30,15 @@ export function formatTime(value: string | null | undefined) {
 	const instant = value ? new Date(value) : new Date(Number.NaN);
 	return Number.isFinite(instant.valueOf()) ? `${date.format(instant)} ${time.format(instant)}` : "not recorded";
 }
+const minute = new Intl.DateTimeFormat("en-GB", { hourCycle: "h23", hour: "2-digit", minute: "2-digit" });
+/** The clock alone for an instant today, and the day with it for any other; seconds are for the title. */
+export function formatClock(value: string | null | undefined, now: Date = new Date()) {
+	const instant = value ? new Date(value) : new Date(Number.NaN);
+	if (!Number.isFinite(instant.valueOf())) return "not recorded";
+	return date.format(instant) === date.format(now)
+		? minute.format(instant)
+		: `${date.format(instant)} ${minute.format(instant)}`;
+}
 /**
  * A window boundary is a day, not an instant; the clock digits in it are noise. A value that is
  * already a day is returned as it was sent: `new Date("2026-08-21")` is UTC midnight, and rendering

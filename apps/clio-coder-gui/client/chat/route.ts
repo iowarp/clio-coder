@@ -53,7 +53,7 @@ export function routeFacts(
 		return {
 			tone,
 			text: provider ? provider.key : "Model not reported",
-			title: `Clio Coder has not reported this session's model. ${healthText}`,
+			title: `Clio Coder has not reported this task's model. ${healthText}`,
 			spoken: `Model not reported. ${healthText}`,
 		};
 	}

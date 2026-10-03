@@ -54,8 +54,8 @@ export const UsagePanel = memo(function UsagePanel({
 	const quota = usage.data ? quotaCards(usage.data) : null;
 	return (
 		<div className="pane-drill drill usage-panel">
-			{!sessionOpen ? <p className="pane-empty">This session is not open. Load it to read its usage.</p> : null}
-			{sessionOpen && !supported ? <p className="pane-empty">This Clio Coder session does not report its usage.</p> : null}
+			{!sessionOpen ? <p className="pane-empty">This task is not open. Open it to read its usage.</p> : null}
+			{sessionOpen && !supported ? <p className="pane-empty">Clio does not report usage for this task.</p> : null}
 			{usage.isPending && sessionOpen && supported ? <p className="pane-empty">Reading usage…</p> : null}
 			{usage.error ? (
 				<p role="alert" className="pane-empty">

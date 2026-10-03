@@ -145,7 +145,7 @@ const ACTIONS: readonly ActionSpec[] = [
 		action: "extensions",
 		name: "extensions",
 		title: "Extensions",
-		summary: "What this session loaded, and reload",
+		summary: "What this task loaded, and reload",
 		supported: (capabilities) => !!capabilities.extensions,
 	},
 	{
@@ -191,7 +191,7 @@ const PANES: readonly PaneSpec[] = [
 		id: "decisions",
 		name: "decisions",
 		view: { view: "board", section: "decisions" },
-		summary: "Open the session's decisions beside the conversation",
+		summary: "Open this task's decisions beside the conversation",
 		supported: (capabilities) => !!capabilities.board,
 	},
 ];

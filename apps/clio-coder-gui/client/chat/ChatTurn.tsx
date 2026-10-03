@@ -20,7 +20,7 @@ import { memo } from "react";
 import type { Permission } from "../../contracts/permissions.js";
 import type { SessionSnapshot, Turn } from "../../contracts/sessions.js";
 import type { Client } from "../api/client.js";
-import { formatDuration, formatTime } from "../api/clock.js";
+import { formatClock, formatDuration, formatTime } from "../api/clock.js";
 import { StatusMark } from "../design/status.js";
 import { MarkdownContent } from "../render/Markdown.js";
 import { countRender } from "../render/render-probe.js";
@@ -196,8 +196,8 @@ export const ChatTurnView = memo(function ChatTurnView({
 					{startedAt === null ? (
 						<span className="chat-request__time">{formatTime(null)}</span>
 					) : (
-						<time className="chat-request__time" dateTime={startedAt}>
-							{formatTime(startedAt)}
+						<time className="chat-request__time" dateTime={startedAt} title={formatTime(startedAt)}>
+							{formatClock(startedAt)}
 						</time>
 					)}
 					<MessageActions
@@ -269,7 +269,7 @@ export const ChatTurnView = memo(function ChatTurnView({
 				{/* One quiet line closes the turn: its outcome, then what can be done with the response. */}
 				<div className="chat-response__footer">
 					{row !== undefined && row.status !== "running" ? (
-						<TurnOutcome outcome={turnOutcome(row, toolCount(turn))} formatClock={formatTime} />
+						<TurnOutcome outcome={turnOutcome(row, toolCount(turn))} formatClock={formatClock} />
 					) : null}
 					<MessageActions
 						sessionId={session.id}

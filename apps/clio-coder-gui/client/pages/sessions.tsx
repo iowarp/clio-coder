@@ -306,7 +306,7 @@ function SessionView({ client, id }: { client: Client; id: string }) {
 							</MenuItem>
 						</Menu>
 						<Link
-							className="wb-chip"
+							className="wb-chip wb-chip--place"
 							to={`/workspaces/${snapshot.workspaceId}/sessions`}
 							title={workspaceRoot ? `All tasks in ${workspaceRoot}` : "All tasks in this project"}
 						>
@@ -381,7 +381,7 @@ function SessionView({ client, id }: { client: Client; id: string }) {
 								title="Paused. You can read the conversation below."
 								action={
 									<button type="button" disabled={resume.isPending} onClick={() => resume.mutate(snapshot.workspaceId)}>
-										{resume.isPending ? "Resuming…" : "Resume session"}
+										{resume.isPending ? "Resuming…" : "Resume task"}
 									</button>
 								}
 							>
@@ -389,7 +389,7 @@ function SessionView({ client, id }: { client: Client; id: string }) {
 							</ConversationBanner>
 						) : null}
 						{resume.error ? (
-							<ConversationBanner tone="warn" title="Could not resume this session.">
+							<ConversationBanner tone="warn" title="Could not resume this task.">
 								{resume.error.message}
 							</ConversationBanner>
 						) : null}

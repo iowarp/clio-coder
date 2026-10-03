@@ -79,7 +79,7 @@ export class TargetsService {
 		const workspace = await this.workspaces.get(workspaceId);
 		return projectTargets(await this.runner.run({ kind: "targets.list" }, workspace.path));
 	}
-	async mutate(workspaceId: string, id: string, action: "probe" | "use" | "remove", key: string) {
+	async mutate(workspaceId: string, id: string, action: "probe" | "use" | "remove" | "signout", key: string) {
 		const workspace = await this.workspaces.get(workspaceId);
 		return this.operations.create({
 			kind: `targets.${action}`,
@@ -88,8 +88,25 @@ export class TargetsService {
 			fingerprint: fingerprint({ workspaceId, id, action }),
 			cancellable: action === "probe",
 			run: async (progress, signal): Promise<TargetOperationResult> => {
-				progress(action === "probe" ? "Clio is probing configured targets." : "Clio is updating user target settings.");
-				const result = await this.runner.run({ kind: `targets.${action}`, id }, workspace.path, signal);
+				progress(
+					action === "probe"
+						? "Clio is probing configured targets."
+						: action === "signout"
+							? "Clio is removing the stored credential."
+							: "Clio is updating user target settings.",
+				);
+				let result: unknown;
+				try {
+					result = await this.runner.run({ kind: `targets.${action}`, id }, workspace.path, signal);
+				} catch (error) {
+					// The runner keeps no stderr, so the two reasons `auth logout` exits non-zero are named here.
+					if (action === "signout" && error instanceof AppProblem && /exit code 1\b/.test(error.message))
+						throw new AppProblem(
+							"operation_failed",
+							`Nothing was removed for ${id}. Either Clio has no stored credential for it, or its key comes from an environment variable, which is cleared where it is set.`,
+						);
+					throw error;
+				}
 				let targets: CliTargets;
 				let settings: Awaited<ReturnType<SettingsService["settings"]>> | undefined;
 				try {
@@ -106,7 +123,12 @@ export class TargetsService {
 					kind: "targets",
 					id,
 					exitCode: 0,
-					message: action === "probe" ? "Target probe completed." : "User target settings updated.",
+					message:
+						action === "probe"
+							? "Target probe completed."
+							: action === "signout"
+								? `Signed out of ${id}. Its stored credential is removed; the connection stays configured and needs a new sign-in before it is used.`
+								: "User target settings updated.",
 					targets,
 					...(settings ? { settings } : {}),
 				};

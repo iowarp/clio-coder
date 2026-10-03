@@ -85,7 +85,6 @@
 .chat-turn.is-replay {
 	opacity: 1;
 }
-
 /* The operator's words on one quiet ground, right-aligned. Agent prose and tool activity remain on the
    page ground, so the two voices are told apart by place and ground rather than by labels. */
 .chat-request {
@@ -578,4 +577,21 @@
 	display: inline-flex;
 	align-items: center;
 	justify-content: center;
+}
+
+/* What a live turn adds arrives with a short rise, so the eye finds the new line without hunting.
+   Only a live turn animates: a settled conversation opens still, and a turn that settles drops the
+   animation without replaying it. Opacity and translate only. */
+@keyframes turn-enter {
+	from {
+		opacity: 0;
+		transform: translateY(4px);
+	}
+}
+@media (prefers-reduced-motion: no-preference) {
+	.chat-turn.is-live > .chat-request,
+	.chat-turn.is-live .chat-response__body > *,
+	.chat-turn.is-live .activity__rows > * {
+		animation: turn-enter var(--motion-base) var(--ease-standard) both;
+	}
 }

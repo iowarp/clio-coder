@@ -21,6 +21,9 @@ export function targetsRoutes(app: Hono, hub: EventHub, targets: TargetsService,
 	register(app, hub, routes.targetsUse, async ({ params }, context) => ({
 		operationId: await targets.mutate(params.id, params.targetId, "use", idempotencyKey(context)),
 	}));
+	register(app, hub, routes.targetsSignOut, async ({ params }, context) => ({
+		operationId: await targets.mutate(params.id, params.targetId, "signout", idempotencyKey(context)),
+	}));
 	register(app, hub, routes.targetsRemove, async ({ params }, context) => ({
 		operationId: await targets.mutate(params.id, params.targetId, "remove", idempotencyKey(context)),
 	}));

@@ -190,8 +190,8 @@ export function SettingsPage({ client, view }: { client: Client; view: "settings
 				) : map ? (
 					<>
 						<p>
-							A snapshot of the layers Clio Coder says it loaded for this workspace, where they came from, and when a change to
-							each one takes effect.
+							A snapshot of the layers Clio Coder says she loaded for this workspace, where they came from, and when a change
+							to each one takes effect.
 						</p>
 						{settings.error && <p role="alert">{settings.error.message}</p>}
 						<div className="panel-figures">
@@ -249,7 +249,7 @@ export function SettingsPage({ client, view }: { client: Client; view: "settings
 							<li>
 								<span className="influence-path__index">03</span>
 								<h3>Behavior</h3>
-								<p>When Clio Coder says each surface can change what it does.</p>
+								<p>When Clio Coder says each surface can change what she does.</p>
 								<ul>
 									{map.timing.map((row) => (
 										<li key={row.label}>

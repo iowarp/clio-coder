@@ -110,7 +110,7 @@ export function ContextSettings({ client }: { client: Client }) {
 			client={client}
 			scope="context"
 			title="Context and memory"
-			lede="How Clio keeps a long conversation useful, and what it remembers between sessions."
+			lede="How Clio keeps a long conversation useful, and what she remembers between sessions."
 		/>
 	);
 }

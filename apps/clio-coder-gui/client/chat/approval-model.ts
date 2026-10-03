@@ -22,7 +22,7 @@ import type {
 	PermissionDecision,
 	PermissionDecisionFacts,
 } from "../../contracts/permissions.js";
-import { formatDuration, formatTime } from "../api/clock.js";
+import { formatClock, formatDuration } from "../api/clock.js";
 import type { StatusTone } from "../design/status.js";
 
 /** The server's declared escalation window, used only when `escalateAt` does not parse. */
@@ -32,8 +32,8 @@ export const BUDGET_SECONDS = 600;
 
 /** The safety posture, verbatim. It is the product's whole promise in one line. */
 export const SAFETY_POSTURE = "Nothing runs until you answer. The GUI never answers for you.";
-/** The `ONE USE` is load-bearing: there is deliberately no allow-always on the wire. */
-export const CARD_EYEBROW = "APPROVAL NEEDED · ONE USE";
+/** The "one use" is load-bearing: there is deliberately no allow-always on the wire. */
+export const CARD_EYEBROW = "Approval needed · one use";
 export const KEYBOARD_HINT = "Alt+A allows once · Alt+R rejects";
 
 export const bannerEyebrow = (escalated: boolean): string =>
@@ -104,7 +104,7 @@ export function deriveApprovalTimings(
 /** The countdown is phrased as a consequence rather than as a timer, because that is the decision. */
 export function countdownSentence(timings: ApprovalTimings, expiresAt: string): string {
 	return timings.budgetKnown
-		? `If unanswered, this turn stops in ${formatDuration(timings.remainingMs)} (at ${formatTime(expiresAt)}).`
+		? `If unanswered, this turn stops in ${formatDuration(timings.remainingMs)} (at ${formatClock(expiresAt)}).`
 		: "If unanswered, this turn stops when Clio Coder's approval budget runs out.";
 }
 
@@ -465,8 +465,13 @@ export function planPreview(plan: DispatchPlanFacts): PlanPreview {
 		rows,
 		more: Math.max(0, plan.taskCount - rows.length),
 		hash: { short: plan.hash.slice(0, 12), full: plan.hash },
+		// A ceiling of 0 means none is set, everywhere in Clio; it is never a limit of nothing.
 		ceiling:
-			plan.costCeilingUsd === undefined ? null : `Scheduling stops at a cost of $${plan.costCeilingUsd.toFixed(2)}.`,
+			plan.costCeilingUsd === undefined
+				? null
+				: plan.costCeilingUsd > 0
+					? `Scheduling stops at a cost of $${plan.costCeilingUsd.toFixed(2)}.`
+					: "No cost ceiling is set, so scheduling does not stop on cost.",
 	};
 }
 

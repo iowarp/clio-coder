@@ -371,14 +371,21 @@ test("usage shows two numbers and carries five in the tooltip", () => {
 test("a completed turn footer carries its reported tool count and spend, and nothing else", () => {
 	const view = turnOutcome(turn(), 3);
 	assert.equal(view.tone, "success");
-	assert.equal(view.label, "Turn complete");
-	assert.deepEqual(view.facts, ["3 tool calls", "tokens 12,345 in · 678 out"]);
+	assert.equal(view.label, "Done");
+	assert.deepEqual(view.facts, ["12s", "3 tool calls"]);
+	assert.equal(view.usageLabel, "13K tokens");
 	assert.equal(view.usage, usage, "the full reported accounting stays reachable from the compact outcome");
 	assert.equal(view.detail, null);
 	assert.equal(view.stopReason, null, "a stop reason on a successful turn is noise");
-	assert.deepEqual(turnOutcome(turn(), 1).facts[0], "1 tool call");
+	assert.deepEqual(turnOutcome(turn(), 1).facts[1], "1 tool call");
 	const withoutUsage = turnOutcome(turn({ usage: null }), 0);
-	assert.deepEqual(withoutUsage.facts, []);
+	assert.deepEqual(withoutUsage.facts, ["12s"]);
+	assert.equal(withoutUsage.usageLabel, null);
+	assert.deepEqual(
+		turnOutcome(turn({ startedAt: null, usage: null }), 0).facts,
+		[],
+		"a replayed turn has no recorded start",
+	);
 	assert.equal(withoutUsage.usage, null);
 });
 
@@ -403,7 +410,7 @@ test("a failed turn shows its problem detail and its stop reason; a stopped one 
 	assert.equal(failed.stopReason, "refusal");
 	const stopped = turnOutcome(turn({ status: "cancelled", problem: null }), 0);
 	assert.equal(stopped.tone, "neutral");
-	assert.equal(stopped.label, "Turn stopped");
+	assert.equal(stopped.label, "Stopped");
 	assert.equal(stopped.stopReason, null);
 	assert.equal(turnOutcome(turn({ status: "running", usage: null, finishedAt: null }), 0).tone, "running");
 });

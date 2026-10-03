@@ -128,9 +128,7 @@
 /* A boundary carries a copper rule and a copper label, as boundaries do in the site's guides. */
 .approval-card__eyebrow {
 	margin: 0;
-	font: 500 11px / 1.5 var(--font-mono);
-	letter-spacing: var(--tracking-instrument);
-	text-transform: uppercase;
+	font: 500 12px / 1.5 var(--font-ui);
 	color: var(--action-fg);
 }
 .approval-card__title {
@@ -159,7 +157,9 @@
 	display: grid;
 	gap: var(--space-1);
 	margin: 0;
-	padding-left: var(--space-5);
+	padding-left: 0;
+	list-style: none;
+	color: var(--ink-muted);
 	font-size: var(--text-meta);
 	line-height: var(--leading-body);
 }
@@ -217,9 +217,7 @@
 }
 .approval-preview__label {
 	margin: 0;
-	font-size: var(--text-instrument);
-	letter-spacing: var(--tracking-instrument);
-	text-transform: uppercase;
+	font: 500 12px / 1.5 var(--font-ui);
 	color: var(--ink-muted);
 }
 .approval-preview__note {
@@ -328,10 +326,10 @@
 	letter-spacing: var(--tracking-instrument);
 	color: var(--code-gutter);
 	user-select: none;
-	content: "− REMOVED";
+	content: "− Removed";
 }
 .approval-proposed__side[data-side="add"]::before {
-	content: "+ ADDED";
+	content: "+ Added";
 }
 
 @media (max-width: 640px) {

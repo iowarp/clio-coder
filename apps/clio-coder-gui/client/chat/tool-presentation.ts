@@ -14,6 +14,7 @@
 
 import type { TimelineItem } from "../../contracts/sessions.js";
 import type { StatusTone } from "../design/status.js";
+import { hasStyle, stripAnsi } from "../render/ansi.js";
 import { type DiffPanel, diffPanel, NOT_APPROVED_NOTE } from "./diff-model.js";
 import { type ChainStepStatus, readGateway } from "./gateway-model.js";
 
@@ -77,7 +78,10 @@ export interface MatchGroup {
  */
 export interface OutputPane {
 	readonly source: "partial" | "final" | "none";
+	/** The output with terminal sequences removed: what is read, searched and copied. */
 	readonly text: string;
+	/** The output as printed, kept only when it carries colour worth drawing. */
+	readonly styled: string | null;
 	readonly running: boolean;
 	/** The producer cut the text short, so it is a tail or a head, not the whole. */
 	readonly truncated: boolean;
@@ -206,6 +210,8 @@ export interface ToolWire {
 	readonly result: Record<string, unknown> | undefined;
 	readonly details: Record<string, unknown> | undefined;
 	readonly resultText: string | null;
+	/** The result as printed, kept only when it carries colour worth drawing. */
+	readonly styledText: string | null;
 	readonly isError: boolean;
 	readonly rawTruncated: boolean;
 }
@@ -282,6 +288,7 @@ export function readWire(item: Pick<TimelineItem, "rawInput" | "rawOutput">): To
 			result: undefined,
 			details: undefined,
 			resultText: null,
+			styledText: null,
 			isError: false,
 			rawTruncated: inputTruncated,
 		};
@@ -290,7 +297,8 @@ export function readWire(item: Pick<TimelineItem, "rawInput" | "rawOutput">): To
 			input,
 			result: undefined,
 			details: undefined,
-			resultText: output.snippet,
+			resultText: stripAnsi(output.snippet),
+			styledText: hasStyle(output.snippet) ? output.snippet : null,
 			isError: false,
 			rawTruncated: true,
 		};
@@ -299,12 +307,14 @@ export function readWire(item: Pick<TimelineItem, "rawInput" | "rawOutput">): To
 	const operator = operatorText(details);
 	const modelText =
 		str(result?.output) ?? str(result?.message) ?? contentText(output.content) ?? contentText(result?.content) ?? null;
-	const resultText = operator ?? (modelText === null ? null : stripResultEnvelope(modelText));
+	const printed = operator ?? (modelText === null ? null : stripResultEnvelope(modelText));
 	return {
 		input,
 		result,
 		details,
-		resultText,
+		// Every reader of the result (digests, matches, file bodies) takes it without escape sequences.
+		resultText: printed === null ? null : stripAnsi(printed),
+		styledText: printed !== null && hasStyle(printed) ? printed : null,
 		isError: output.isError === true || result?.kind === "error",
 		rawTruncated: inputTruncated,
 	};
@@ -363,7 +373,8 @@ export function outputPane(item: Pick<TimelineItem, "status" | "partialOutput">,
 		if (partial !== undefined && partial.length > 0)
 			return {
 				source: "partial",
-				text: partial,
+				text: stripAnsi(partial),
+				styled: hasStyle(partial) ? partial : null,
 				running: true,
 				truncated: partial.length >= PARTIAL_OUTPUT_LIMIT,
 				placeholder: null,
@@ -371,6 +382,7 @@ export function outputPane(item: Pick<TimelineItem, "status" | "partialOutput">,
 		return {
 			source: "none",
 			text: "",
+			styled: null,
 			running: true,
 			truncated: false,
 			placeholder: "Running. No output yet.",
@@ -378,10 +390,11 @@ export function outputPane(item: Pick<TimelineItem, "status" | "partialOutput">,
 	}
 	const text = wire.resultText;
 	if (text === null || text.length === 0)
-		return { source: "none", text: "", running: false, truncated: false, placeholder: "No output." };
+		return { source: "none", text: "", styled: null, running: false, truncated: false, placeholder: "No output." };
 	return {
 		source: "final",
 		text,
+		styled: wire.styledText,
 		running: false,
 		truncated:
 			record(wire.details?.observation)?.truncated === true ||

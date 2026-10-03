@@ -366,6 +366,13 @@ export const routes = {
 		response: Accepted,
 		summary: "Remove a configured target through the CLI",
 	}),
+	targetsSignOut: defineRoute({
+		...post,
+		path: "/api/workspaces/:id/targets/:targetId/signout",
+		params: Type.Object({ id: Id, targetId: Id }, { additionalProperties: false }),
+		response: Accepted,
+		summary: "Remove the stored credential for a target through the CLI",
+	}),
 	workspaceSettings: defineRoute({
 		...get,
 		path: "/api/workspaces/:id/settings",

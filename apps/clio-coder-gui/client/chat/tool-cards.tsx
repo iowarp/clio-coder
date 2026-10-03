@@ -23,9 +23,10 @@
  *    assistive technology.
  */
 
-import { memo, useState } from "react";
+import { memo, useMemo, useState } from "react";
 import type { TimelineItem } from "../../contracts/sessions.js";
 import { StatusMark } from "../design/status.js";
+import { type AnsiSpan, parseAnsi } from "../render/ansi.js";
 import { CopyButton } from "../render/Markdown.js";
 import { statusGlyph } from "./activity.js";
 import { ELAPSED_TITLE } from "./chat-turn.js";
@@ -87,7 +88,19 @@ function Locations({ locations, headline }: { locations: readonly ToolLocation[]
  * DOM node exists from the first frame, which is what keeps the
  * partialOutput-to-result handover from reflowing the row.
  */
+function spanClass(span: AnsiSpan): string | undefined {
+	const names = [
+		span.color === null ? null : `ansi-${span.color}`,
+		span.bold ? "ansi-bold" : null,
+		span.dim ? "ansi-dim" : null,
+		span.italic ? "ansi-italic" : null,
+		span.underline ? "ansi-underline" : null,
+	].filter(Boolean);
+	return names.length > 0 ? names.join(" ") : undefined;
+}
+
 function OutputBlock({ pane }: { pane: OutputPane }) {
+	const spans = useMemo(() => (pane.styled === null ? null : parseAnsi(pane.styled)), [pane.styled]);
 	return (
 		<div className="tool-card__output" data-source={pane.source} data-running={pane.running ? "yes" : "no"}>
 			<div className="tool-card__output-head">
@@ -99,7 +112,21 @@ function OutputBlock({ pane }: { pane: OutputPane }) {
 			</div>
 			{/* biome-ignore lint/a11y/noNoninteractiveTabindex: A long output scrolls inside its own bounded well, so the keyboard must be able to focus it to scroll. */}
 			<pre className="tool-card__pre" tabIndex={0}>
-				{pane.source === "none" ? (pane.placeholder ?? "") : pane.text}
+				{pane.source === "none"
+					? (pane.placeholder ?? "")
+					: spans === null
+						? pane.text
+						: spans.map((span, index) => {
+								const name = spanClass(span);
+								return name === undefined ? (
+									span.text
+								) : (
+									// biome-ignore lint/suspicious/noArrayIndexKey: spans are positional and rebuilt as a whole per output.
+									<span className={name} key={index}>
+										{span.text}
+									</span>
+								);
+							})}
 			</pre>
 		</div>
 	);

@@ -511,11 +511,15 @@
 	display: flex;
 	flex-wrap: wrap;
 	align-items: baseline;
-	gap: var(--space-1) var(--space-3);
+	gap: var(--space-1) var(--space-2);
 	min-width: 0;
 	font-size: var(--text-exact);
 	color: var(--ink-muted);
 	font-variant-numeric: tabular-nums;
+}
+/* A stopped turn's neutral glyph is a dot, which reads as one more separator in this line. */
+.turn-outcome .status-mark[data-tone="neutral"] .status-mark__glyph {
+	display: none;
 }
 .turn-outcome .status-mark {
 	font-size: var(--text-exact);
@@ -541,6 +545,31 @@
 .turn-usage > summary {
 	cursor: pointer;
 	color: var(--ink-muted);
+	list-style: none;
+	/* The global touch rule gives every summary a 44px band; this one is a word in a line. */
+	min-height: 0;
+	text-decoration: underline dotted transparent;
+	text-underline-offset: 3px;
+	transition:
+		color var(--motion-fast) var(--ease-standard),
+		text-decoration-color var(--motion-fast) var(--ease-standard);
+}
+.turn-usage > summary::-webkit-details-marker {
+	display: none;
+}
+.turn-usage > summary:hover,
+.turn-usage[open] > summary {
+	color: var(--ink);
+	text-decoration-color: currentColor;
+}
+/* The facts read as one line: a middle dot between neighbours, never before the first. */
+.turn-outcome > :is(.turn-outcome__fact, .turn-usage, time)::before {
+	content: "·";
+	margin-right: var(--space-2);
+	color: var(--ink-subtle);
+}
+.turn-usage > summary {
+	display: inline;
 }
 .turn-usage[open] {
 	flex: 1 0 100%;

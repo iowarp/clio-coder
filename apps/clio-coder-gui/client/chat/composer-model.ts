@@ -21,6 +21,7 @@ import {
 	STEER_TEXT_MAX_BYTES,
 	type SteerMode,
 } from "../../contracts/steering.js";
+import { compactCount, compactDuration } from "./overview-model.js";
 
 /** `routes.turn` bounds its text at this many characters, so the composer refuses past it locally. */
 export const PROMPT_TEXT_MAX_CHARACTERS = 32000;
@@ -337,11 +338,11 @@ export interface ComposerSituation {
 }
 
 const CLOSED_SESSION_REASON: Readonly<Record<string, string>> = {
-	starting: "This session is still starting. It will take a prompt once the agent answers.",
-	parked: "This session is paused. Resume it before sending a request.",
-	unknown: "This session is not reachable right now, so nothing can be sent into it.",
-	closed: "This session is closed. Open a new one to keep working.",
-	failed: "This session failed. Open a new one to keep working.",
+	starting: "This task is still starting. It takes a message once Clio answers.",
+	parked: "This task is paused. Resume it before sending.",
+	unknown: "This task is not reachable right now, so nothing can be sent to it.",
+	closed: "This task is closed. Start a new one to keep working.",
+	failed: "This task failed. Start a new one to keep working.",
 };
 
 function blocked(reason: string): SubmitIntent {
@@ -370,7 +371,7 @@ function tooLong(text: string, characters: number, bytes: number): string | null
 export function submitIntent(draft: Draft, situation: ComposerSituation): SubmitIntent {
 	if (situation.sending) return blocked("The previous send is still on the wire.");
 	if (situation.sessionState !== "open")
-		return blocked(CLOSED_SESSION_REASON[situation.sessionState] ?? "This session cannot take a message.");
+		return blocked(CLOSED_SESSION_REASON[situation.sessionState] ?? "This task cannot take a message.");
 	const text = draft.text.trim();
 	if (text === "") return blocked("Write a message first.");
 	if (situation.turnRunning) {
@@ -430,7 +431,7 @@ export function slashNotice(text: string, catalog: CommandCatalog | undefined): 
 	if (catalog.prompts.includes(token)) return null;
 	return {
 		tone: "warn",
-		message: `/${token} is not a command or prompt template in this session, so sending it will be refused. Start the line with \\/ to send it as text.`,
+		message: `/${token} is not a command or prompt template in this task, so sending it will be refused. Start the line with \\/ to send it as text.`,
 	};
 }
 
@@ -620,6 +621,8 @@ export interface TurnOutcomeView {
 	readonly detail: string | null;
 	readonly stopReason: string | null;
 	readonly facts: readonly string[];
+	/** Input and output together, in the short form the line has room for. Null when nothing was reported. */
+	readonly usageLabel: string | null;
 	/** Reported accounting, retained for the keyboard-reachable breakdown beside the outcome. */
 	readonly usage: Usage | null;
 	readonly usageTitle: string | null;
@@ -643,22 +646,26 @@ export function usageTitle(usage: Usage): string {
 }
 
 const OUTCOME: Readonly<Record<Turn["status"], { tone: OutcomeTone; glyph: string; label: string }>> = {
-	running: { tone: "running", glyph: "▸", label: "Turn running" },
-	succeeded: { tone: "success", glyph: "✓", label: "Turn complete" },
-	failed: { tone: "fail", glyph: "✕", label: "Turn failed" },
+	running: { tone: "running", glyph: "▸", label: "Running" },
+	succeeded: { tone: "success", glyph: "✓", label: "Done" },
+	failed: { tone: "fail", glyph: "✕", label: "Failed" },
 	// Stopping is not failing, and it is not waiting either: a stopped turn is a neutral report.
-	cancelled: { tone: "neutral", glyph: "–", label: "Turn stopped" },
+	cancelled: { tone: "neutral", glyph: "–", label: "Stopped" },
 };
 
 /**
- * The footer carries per-turn facts: how many tool calls this turn made and what
- * it spent. Both are reported values; nothing here is derived or estimated.
+ * The footer carries per-turn facts: how long the turn took, how many tool calls it made and what
+ * it spent. The time is the difference of the two recorded instants, so a replayed turn with no
+ * recorded start has none; the counts are reported values.
  */
 export function turnOutcome(turn: Turn, toolCount: number): TurnOutcomeView {
 	const shape = OUTCOME[turn.status];
 	const facts: string[] = [];
+	const elapsed =
+		turn.startedAt && turn.finishedAt ? Date.parse(turn.finishedAt) - Date.parse(turn.startedAt) : Number.NaN;
+	// Under a second is not a duration worth a place in the line.
+	if (Number.isFinite(elapsed) && elapsed >= 1000) facts.push(compactDuration(elapsed));
 	if (toolCount > 0) facts.push(`${toolCount} tool ${toolCount === 1 ? "call" : "calls"}`);
-	if (turn.usage !== null) facts.push(`tokens ${usageSummary(turn.usage)}`);
 	return {
 		tone: shape.tone,
 		glyph: shape.glyph,
@@ -666,6 +673,7 @@ export function turnOutcome(turn: Turn, toolCount: number): TurnOutcomeView {
 		detail: turn.status === "succeeded" ? null : (turn.problem?.detail ?? null),
 		stopReason: turn.status === "failed" ? turn.stopReason : null,
 		facts,
+		usageLabel: turn.usage === null ? null : `${compactCount(turn.usage.input + turn.usage.output)} tokens`,
 		usage: turn.usage,
 		usageTitle: turn.usage === null ? null : usageTitle(turn.usage),
 		finishedAt: turn.finishedAt,

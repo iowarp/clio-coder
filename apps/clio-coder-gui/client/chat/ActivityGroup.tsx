@@ -27,6 +27,7 @@ import {
 	toolStatusLabel,
 	workerLabel,
 } from "./activity.js";
+import { isAwaitingAnswer } from "./approval-model.js";
 import { observeStart } from "./chat-turn.js";
 import { ReasoningDisclosure } from "./Reasoning.js";
 import { WorkerReceipt } from "./ReceiptLine.js";
@@ -93,6 +94,10 @@ export function ActivityGroup({ items, settled, client, session, workspaceRoot, 
 	const summary = summarizeActivity(items);
 	const open = activityOpen(userOpen, settled, summary);
 	const running = runningItem(items);
+	// While a request is waiting, its card is the statement; the engine's "pending" notice beside it
+	// says the same thing twice. Once answered, the notice is the record.
+	const waiting = session.permissions.some(isAwaitingAnswer);
+	const rows = waiting ? items.filter((item) => item.kind !== "notice" || item.toolKind === "safety") : items;
 	const detail =
 		summary.waiting > 0 ? null : running !== null ? describeTool(running, workspaceRoot) : activityDigest(items);
 	return (
@@ -113,7 +118,7 @@ export function ActivityGroup({ items, settled, client, session, workspaceRoot, 
 			</summary>
 			{open ? (
 				<ul className="activity__rows">
-					{items.map((item) => (
+					{rows.map((item) => (
 						<ActivityRow
 							key={item.id}
 							item={item}

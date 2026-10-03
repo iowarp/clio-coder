@@ -693,7 +693,8 @@
 }
 .wb-bar__title {
 	margin: 0;
-	flex: 0 1 auto;
+	/* Shrinks eight times as readily as the project chip beside it, down to the minimum below. */
+	flex: 0 8 auto;
 	/* The task's name is the last thing a narrow bar gives up: chips shrink and drop first. */
 	min-width: min(14ch, 40%);
 	overflow: hidden;
@@ -858,6 +859,26 @@ button.wb-chip:hover:not(:disabled) {
 	border-color: var(--action-line);
 	border-radius: var(--radius-pill);
 	background: var(--action-tint);
+}
+/* What a tight bar gives up, in order: the title down to its minimum, then the token count (the
+   Session column has it), and only then the project's name. Status and the meters never clip. */
+.wb-bar {
+	container: bar / inline-size;
+}
+.wb-bar .wb-chip--place {
+	flex: 0 1 auto;
+	min-width: min(12ch, 30%);
+}
+.wb-bar :is(.wb-chip--status, .wb-chip--meter, .wb-chip--figure) {
+	flex: none;
+}
+@container bar (max-width: 760px) {
+	.wb-bar .wb-chip__tokens {
+		display: none;
+	}
+	.wb-bar__title {
+		min-width: min(10ch, 30%);
+	}
 }
 /* The two figures sit as one reading: the ring and its share, then the spend. */
 .wb-bar .wb-chip--meter + .wb-chip--figure {

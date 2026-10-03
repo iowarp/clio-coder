@@ -28,7 +28,7 @@ export function planPaste(
 			kind: "review",
 			text: paste,
 			bytes: bytes.length,
-			reason: "This session cannot accept text attachments. The paste would exceed the 32,000-character prompt limit.",
+			reason: "This task cannot accept text attachments. The paste would exceed the 32,000-character prompt limit.",
 		};
 	if (bytes.length > TURN_FILE_MAX_BYTES)
 		return {

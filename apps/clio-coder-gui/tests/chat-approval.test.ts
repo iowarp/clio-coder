@@ -158,7 +158,7 @@ test("the third answer is drawn only when the agent announced it, and the affirm
 		three.map((action) => action.keybinding),
 		["reject", null, "allowOnce"],
 	);
-	assert.equal(CARD_EYEBROW, "APPROVAL NEEDED · ONE USE");
+	assert.equal(CARD_EYEBROW, "Approval needed · one use");
 });
 
 test("resolution wording keeps the difference between told no and not told no", () => {

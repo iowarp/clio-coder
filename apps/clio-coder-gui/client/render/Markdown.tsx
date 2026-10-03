@@ -61,6 +61,10 @@ export function decodeEntities(text: string): string {
 	});
 }
 
+/** Raster images only: an SVG can carry script, and the app draws nothing it would have to sanitize. */
+const INLINE_IMAGE = /^data:image\/(?:png|jpeg|gif|webp);base64,[A-Za-z0-9+/]+=*$/u;
+const INLINE_IMAGE_MAX_CHARS = 4 * 1024 * 1024;
+
 const viewportObservers = new Map<string, { observer: IntersectionObserver; targets: Map<Element, Set<() => void>> }>();
 
 function observeNearViewport(element: Element, rootMargin: string, notify: () => void): () => void {
@@ -193,6 +197,19 @@ function HighlightedCode({ tokens }: { tokens: readonly HighlightToken[] }) {
  * that fits says nothing about its length; a longer one names it, because its end is out of sight.
  */
 const CODE_VISIBLE_LINES = 24;
+/** A line past this many characters runs off a reading column, so the block offers to wrap. */
+const CODE_WRAP_OFFER_CHARS = 88;
+
+function hasLongLine(code: string): boolean {
+	let start = 0;
+	while (start <= code.length) {
+		const end = code.indexOf("\n", start);
+		if ((end < 0 ? code.length : end) - start > CODE_WRAP_OFFER_CHARS) return true;
+		if (end < 0) return false;
+		start = end + 1;
+	}
+	return false;
+}
 
 interface CodeBlockProps {
 	readonly code: string;
@@ -224,15 +241,30 @@ export const CodeBlock = memo(function CodeBlock({ code, info, settled }: CodeBl
 	}, [wantsHighlight, code, grammar]);
 	const tokens = highlight?.code === code && highlight.grammar === grammar ? highlight.tokens : null;
 	const lineCount = code.length === 0 ? 0 : code.split("\n").length;
+	const [wrap, setWrap] = useState(false);
+	// Offered once the block has settled, so the control does not appear and vanish while it streams.
+	const wrappable = useMemo(() => settled && hasLongLine(code), [settled, code]);
 	return (
 		<div
 			className={`code-block${settled ? " is-settled" : " is-streaming"}`}
 			ref={container}
 			data-language={grammar ?? undefined}
+			data-wrap={wrap && wrappable ? "" : undefined}
 		>
 			<div className="code-block__head">
 				<span className="code-block__lang">{language.label ?? "text"}</span>
 				{lineCount > CODE_VISIBLE_LINES ? <span className="code-block__lines">{lineCount} lines</span> : null}
+				{wrappable ? (
+					<button
+						type="button"
+						className="code-block__copy"
+						aria-pressed={wrap}
+						title="Wrap long lines inside the block instead of scrolling sideways"
+						onClick={() => setWrap((current) => !current)}
+					>
+						Wrap
+					</button>
+				) : null}
 				<CopyButton text={code} />
 			</div>
 			<CodeViewport>
@@ -399,10 +431,26 @@ function InlineToken({ token }: { token: MarkdownToken }): ReactNode {
 		}
 		case "image": {
 			const image = token as Tokens.Image;
-			return (
-				<span className="md-image" title="Images are not fetched by the Clio Coder GUI">
-					[image{image.text.length > 0 ? `: ${image.text}` : ""}]
+			// A picture carried in the text itself is drawn: nothing is fetched to show it. One that
+			// lives elsewhere is never loaded by the app; it becomes a link the operator may follow.
+			if (INLINE_IMAGE.test(image.href) && image.href.length <= INLINE_IMAGE_MAX_CHARS)
+				return <img className="md-picture" src={image.href} alt={image.text} loading="lazy" decoding="async" />;
+			const label = `image${image.text.length > 0 ? `: ${image.text}` : ""}`;
+			const href = safeHref(image.href);
+			return href === null ? (
+				<span className="md-image" title="This image is not loaded: unsupported address">
+					[{label}]
 				</span>
+			) : (
+				<a
+					className="md-image md-link"
+					href={href}
+					target="_blank"
+					rel="noopener noreferrer"
+					title="Clio Coder does not load images from other places. Open this one in the browser."
+				>
+					[{label}]
+				</a>
 			);
 		}
 		case "checkbox":

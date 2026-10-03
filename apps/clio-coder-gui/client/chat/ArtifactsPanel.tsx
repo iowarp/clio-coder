@@ -52,9 +52,9 @@ export function ArtifactsPanel({
 	return (
 		<div className="pane-drill artifacts">
 			{!open ? (
-				<p className="pane-empty">Open this session to read its artifacts.</p>
+				<p className="pane-empty">Open this task to read its artifacts.</p>
 			) : !supported ? (
-				<p className="pane-empty">This session does not expose artifacts.</p>
+				<p className="pane-empty">Clio does not report artifacts for this task.</p>
 			) : selected ? (
 				<>
 					<button
