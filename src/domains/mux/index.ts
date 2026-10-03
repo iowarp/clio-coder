@@ -69,10 +69,12 @@ export { clioCliEntryPath, type ViewerCommandOptions, watchViewerCommand } from 
 export {
 	createYaziEventStream,
 	parseYaziEventLine,
+	YAZI_DOCK_EVENT,
 	YAZI_PICK_EVENT,
 	YAZI_STREAM_MAX_BYTES,
 	YAZI_STREAM_POLL_MS,
 	type YaziCdEvent,
+	type YaziDockEvent,
 	type YaziEvent,
 	type YaziEventStream,
 	type YaziEventStreamOptions,

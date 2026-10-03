@@ -9,7 +9,7 @@ function record(paneId: string, label: string, purpose: MuxPaneRecord["purpose"]
 }
 
 function dock(paneId: string, slot: DockState["slot"]): DockState {
-	return { slot, paneId, tabId: "t1", targetShare: 0.3, lastAppliedShare: 0.3 };
+	return { slot, paneId, tabId: "t1", targetShare: 0.3, lastAppliedShare: 0.3, hidden: false };
 }
 
 describe("contracts/panes /quit names the utility panes it leaves open (#272)", () => {

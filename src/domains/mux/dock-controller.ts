@@ -12,6 +12,11 @@
  * here that talks to the socket may throw a `MuxError`, and the contract is
  * the layer that turns that into a null/false answer.
  *
+ * A dock can be hidden: `pane.move` carries the running pane into one parking
+ * tab per Clio session and back, so the tool inside it (Yazi's directory,
+ * cliamp's playback) survives. Hidden docks keep their slot, their remembered
+ * share and their ownership; only `close` ends the process.
+ *
  * Three rules run through the reconciliation logic:
  *
  *   1. A user action is a decision. A resize observed via `layout.updated`
@@ -24,8 +29,16 @@
  *      only ever run on explicit request.
  */
 
-import type { MuxClient } from "./socket-client.js";
-import type { MuxLayoutNode, MuxLog, MuxPaneRef, MuxRect, MuxTabGeometry } from "./types.js";
+import type { MuxClient, MuxPaneMoveRequest, MuxPaneMoveResult } from "./socket-client.js";
+import {
+	MuxError,
+	type MuxLayoutNode,
+	type MuxLog,
+	type MuxPane,
+	type MuxPaneRef,
+	type MuxRect,
+	type MuxTabGeometry,
+} from "./types.js";
 
 /** The managed dock positions. */
 export type DockSlot = "workers" | "files" | "music";
@@ -45,13 +58,19 @@ export interface DockSpec {
  * the layout feel like weather.
  */
 export const DOCK_SPECS: Readonly<Record<DockSlot, DockSpec>> = {
-	workers: { slot: "workers", direction: "right", defaultShare: 0.34, minCells: 48 },
+	// The workers dashboard reads at 40 columns (src/cli/fleet-board.ts sheds the
+	// task, then the model, never the state or clock), which is half of an
+	// 80-column terminal.
+	workers: { slot: "workers", direction: "right", defaultShare: 0.34, minCells: 40 },
 	files: { slot: "files", direction: "down", defaultShare: 0.3, minCells: 12 },
 	// cliamp draws its spectrum only from 16 inner rows up (40x10 drops it), and
 	// herdr's border takes two more. The tiny default share means the floor
 	// always wins, so the pane is exactly as tall as the bars need.
 	music: { slot: "music", direction: "down", defaultShare: 0.05, minCells: 18 },
 };
+
+/** Label of the tab hidden docks wait in, so the operator can tell whose panes they are. */
+export const PARKING_TAB_LABEL = "clio parked";
 
 /** A dock may never take more than half the axis, whatever the share asks. */
 export const DOCK_MAX_SHARE = 0.5;
@@ -66,6 +85,8 @@ export interface DockState {
 	targetShare: number;
 	/** What Clio last set, so its own correction is not adopted as a user drag. */
 	lastAppliedShare: number;
+	/** True while the pane waits in the parking tab: still running, out of the layout. */
+	hidden: boolean;
 }
 
 /** Wire ratio for a split where the dock is the `second` child: the anchor keeps the rest. */
@@ -189,6 +210,12 @@ export interface DockControllerOptions {
 	client: MuxClient;
 	anchorPaneId: string;
 	log?: MuxLog;
+	/**
+	 * Leaves zoom on the anchor's tab. herdr refuses to move a pane into or out
+	 * of a zoomed tab, and `pane.zoom off` focuses the pane it addresses, so it
+	 * runs only after a move was refused for that reason, never ahead of one.
+	 */
+	leaveZoom?: () => Promise<void>;
 }
 
 export interface DockController {
@@ -206,11 +233,24 @@ export interface DockController {
 			share?: number;
 			cwd?: string;
 			env?: Readonly<Record<string, string>>;
+			/** Start the pane in the parking tab instead of beside the anchor, so boot never reshapes the layout. */
+			hidden?: boolean;
 			onRefused?: (reason: string) => void;
 		},
 	): Promise<MuxPaneRef | null>;
+	/**
+	 * Move a visible dock into the parking tab. The process keeps running. True
+	 * when the dock is hidden afterwards (including when it already was); false
+	 * when there is no such dock or the host declined.
+	 */
+	hide(slot: DockSlot): Promise<boolean>;
+	/**
+	 * Move a hidden dock back beside the anchor at its remembered share, without
+	 * focusing it. Null when no such dock exists or the anchor is too small.
+	 */
+	show(slot: DockSlot, options?: { onRefused?: (reason: string) => void }): Promise<MuxPaneRef | null>;
 	/** Record an adopted pane (crash recovery) as this slot's dock. */
-	adopt(slot: DockSlot, ref: MuxPaneRef): void;
+	adopt(slot: DockSlot, ref: MuxPaneRef, options?: { hidden?: boolean }): void;
 	/** Feed a `layout.updated` push; user resizes become the new target. */
 	noteLayoutUpdated(geometry: MuxTabGeometry): void;
 	/** Feed a pane departure; a closed dock is a decision, not a fault. */
@@ -253,6 +293,129 @@ export function createDockController(options: DockControllerOptions): DockContro
 		return true;
 	};
 
+	/**
+	 * Everything that can create the parking tab runs in turn. Two docks born or
+	 * hidden at once would each find no parking tab and make their own, and the
+	 * operator would see one "clio parked" tab per dock.
+	 */
+	let parkingQueue: Promise<unknown> = Promise.resolve();
+	const withParkingTab = <T>(task: () => Promise<T>): Promise<T> => {
+		const run = parkingQueue.then(task, task);
+		parkingQueue = run.then(
+			() => undefined,
+			() => undefined,
+		);
+		return run;
+	};
+
+	/** One `pane.move`, retried once after leaving zoom when herdr refuses a zoomed tab. */
+	const move = async (request: MuxPaneMoveRequest): Promise<MuxPaneMoveResult> => {
+		const first = await client.paneMove(request);
+		if (first.changed || first.reason !== "zoomed_tab" || !options.leaveZoom) return first;
+		await options.leaveZoom();
+		return client.paneMove(request);
+	};
+
+	/** Any hidden dock marks the parking tab; the tab itself disappears when its last pane leaves. */
+	const parkingState = (): DockState | null => {
+		for (const state of bySlot.values()) {
+			if (state.hidden) return state;
+		}
+		return null;
+	};
+
+	/**
+	 * A fresh dock born hidden: its pane is created in the parking tab, so the
+	 * anchor is never split and Clio's own pane never resizes at boot.
+	 */
+	const openParked = (
+		slot: DockSlot,
+		spec: DockSpec,
+		workspaceId: string,
+		openOptions: { share?: number; cwd?: string; env?: Readonly<Record<string, string>> },
+	): Promise<MuxPaneRef | null> =>
+		withParkingTab(async () => {
+			const spawn = {
+				...(openOptions.cwd !== undefined ? { cwd: openOptions.cwd } : {}),
+				...(openOptions.env ? { env: openOptions.env } : {}),
+			};
+			const createParkingTab = async (): Promise<MuxPane> =>
+				(await client.tabCreate({ workspaceId, label: PARKING_TAB_LABEL, focus: false, ...spawn })).rootPane;
+			const parking = parkingState();
+			let pane: MuxPane;
+			if (parking) {
+				try {
+					pane = await client.paneSplit({ direction: "down", targetPaneId: parking.paneId, focus: false, ...spawn });
+				} catch (error) {
+					if (!(error instanceof MuxError && error.kind === "not_found")) throw error;
+					pane = await createParkingTab();
+				}
+			} else {
+				pane = await createParkingTab();
+			}
+			const share = clampDockShare(openOptions.share ?? spec.defaultShare);
+			bySlot.set(slot, {
+				slot,
+				paneId: pane.paneId,
+				tabId: pane.tabId,
+				targetShare: share,
+				lastAppliedShare: share,
+				hidden: true,
+			});
+			return { paneId: pane.paneId, tabId: pane.tabId, workspaceId: pane.workspaceId };
+		});
+
+	/**
+	 * Ratio-at-split lands on the anchor's old rect; prior splits or a resize
+	 * since the read can leave the dock under its floor. One converge pass fixes
+	 * it; failure to converge is not failure to place.
+	 */
+	const converge = async (state: DockState, spec: DockSpec): Promise<void> => {
+		try {
+			const after = await client.paneLayout(anchorPaneId);
+			const dockRect = after.panes.find((entry) => entry.paneId === state.paneId)?.rect;
+			if (dockRect && axisCells(dockRect, spec) < spec.minCells) {
+				const anchorAfter = after.panes.find((entry) => entry.paneId === anchorPaneId)?.rect;
+				const total = anchorAfter ? axisCells(anchorAfter, spec) + axisCells(dockRect, spec) : 0;
+				if (total > 0) await applyShare(state, Math.min(DOCK_MAX_SHARE, spec.minCells / total));
+			}
+		} catch (error) {
+			log("debug", `mux ${state.slot} dock converge skipped: ${error instanceof Error ? error.message : String(error)}`);
+		}
+	};
+
+	const hideNow = async (slot: DockSlot): Promise<boolean> => {
+		const state = bySlot.get(slot);
+		if (!state) return false;
+		if (state.hidden) return true;
+		const parking = parkingState();
+		let moved: MuxPaneMoveResult | null = null;
+		if (parking) {
+			try {
+				moved = await move({
+					paneId: state.paneId,
+					destination: { type: "tab", tabId: parking.tabId, split: "down" },
+				});
+			} catch (error) {
+				// The parking tab is gone (the operator closed it, taking its panes
+				// with it); fall through to a fresh one.
+				if (!(error instanceof MuxError && error.kind === "not_found")) throw error;
+			}
+		}
+		moved ??= await move({
+			paneId: state.paneId,
+			destination: { type: "new_tab", label: PARKING_TAB_LABEL },
+		});
+		if (!moved.changed) {
+			log("debug", `mux ${slot} dock was not hidden: ${moved.reason ?? "the pane host declined the move"}`);
+			return false;
+		}
+		state.paneId = moved.pane.paneId;
+		state.tabId = moved.pane.tabId;
+		state.hidden = true;
+		return true;
+	};
+
 	return {
 		states(): ReadonlyArray<DockState> {
 			return [...bySlot.values()].map((state) => ({ ...state }));
@@ -270,6 +433,7 @@ export function createDockController(options: DockControllerOptions): DockContro
 			}
 			const spec = DOCK_SPECS[slot];
 			const geometry = await client.paneLayout(anchorPaneId);
+			if (openOptions.hidden) return openParked(slot, spec, geometry.workspaceId, openOptions);
 			const anchorRect = geometry.panes.find((pane) => pane.paneId === anchorPaneId)?.rect;
 			if (!anchorRect) {
 				openOptions.onRefused?.(`no anchor geometry for ${anchorPaneId}; check the pane host layout before trying again`);
@@ -296,26 +460,59 @@ export function createDockController(options: DockControllerOptions): DockContro
 				tabId: pane.tabId,
 				targetShare: plan.share,
 				lastAppliedShare: plan.share,
+				hidden: false,
 			};
 			bySlot.set(slot, state);
-			// Ratio-at-split lands on the anchor's old rect; prior splits or a
-			// resize since the read can leave the dock under its floor. One
-			// converge pass fixes it; failure to converge is not failure to open.
-			try {
-				const after = await client.paneLayout(anchorPaneId);
-				const dockRect = after.panes.find((entry) => entry.paneId === pane.paneId)?.rect;
-				if (dockRect && axisCells(dockRect, spec) < spec.minCells) {
-					const anchorAfter = after.panes.find((entry) => entry.paneId === anchorPaneId)?.rect;
-					const total = anchorAfter ? axisCells(anchorAfter, spec) + axisCells(dockRect, spec) : 0;
-					if (total > 0) await applyShare(state, Math.min(DOCK_MAX_SHARE, spec.minCells / total));
-				}
-			} catch (error) {
-				log("debug", `mux ${slot} dock converge skipped: ${error instanceof Error ? error.message : String(error)}`);
-			}
+			await converge(state, spec);
 			return { paneId: pane.paneId, tabId: pane.tabId, workspaceId: pane.workspaceId };
 		},
 
-		adopt(slot: DockSlot, ref: MuxPaneRef): void {
+		hide(slot): Promise<boolean> {
+			return withParkingTab(() => hideNow(slot));
+		},
+
+		async show(slot, showOptions = {}): Promise<MuxPaneRef | null> {
+			const state = bySlot.get(slot);
+			if (!state) return null;
+			if (!state.hidden) return { paneId: state.paneId, tabId: state.tabId, workspaceId: "" };
+			const spec = DOCK_SPECS[slot];
+			const geometry = await client.paneLayout(anchorPaneId);
+			const anchorRect = geometry.panes.find((pane) => pane.paneId === anchorPaneId)?.rect;
+			if (!anchorRect) {
+				showOptions.onRefused?.(`no anchor geometry for ${anchorPaneId}; check the pane host layout before trying again`);
+				return null;
+			}
+			// The remembered share, not the default: a drag made before the dock was
+			// hidden is the operator's decision and survives the round trip.
+			const plan = planDockOpen(anchorRect, spec, state.targetShare);
+			if ("refused" in plan) {
+				showOptions.onRefused?.(`${plan.refused}; enlarge the anchor pane before trying again`);
+				log("info", `mux ${slot} dock stays hidden: ${plan.refused}`);
+				return null;
+			}
+			const moved = await move({
+				paneId: state.paneId,
+				destination: {
+					type: "tab",
+					tabId: geometry.tabId,
+					split: plan.direction,
+					targetPaneId: anchorPaneId,
+					ratio: plan.ratio,
+				},
+			});
+			if (!moved.changed && moved.reason !== "same_tab") {
+				showOptions.onRefused?.(`the pane host did not move the ${slot} dock: ${moved.reason ?? "no reason given"}`);
+				return null;
+			}
+			state.paneId = moved.pane.paneId;
+			state.tabId = moved.pane.tabId;
+			state.hidden = false;
+			state.lastAppliedShare = plan.share;
+			await converge(state, spec);
+			return { paneId: moved.pane.paneId, tabId: moved.pane.tabId, workspaceId: moved.pane.workspaceId };
+		},
+
+		adopt(slot: DockSlot, ref: MuxPaneRef, adoptOptions = {}): void {
 			const spec = DOCK_SPECS[slot];
 			bySlot.set(slot, {
 				slot,
@@ -325,6 +522,7 @@ export function createDockController(options: DockControllerOptions): DockContro
 				// layout observation; until then the default is the best guess.
 				targetShare: spec.defaultShare,
 				lastAppliedShare: spec.defaultShare,
+				hidden: adoptOptions.hidden === true,
 			});
 		},
 
@@ -353,6 +551,9 @@ export function createDockController(options: DockControllerOptions): DockContro
 			for (const state of bySlot.values()) {
 				if (state.paneId !== previousPaneId) continue;
 				state.paneId = paneId;
+				// A hidden dock that lands anywhere but its parking tab was put back by
+				// the operator; our own show/hide already wrote the tab it moved to.
+				if (state.hidden && tabId !== state.tabId) state.hidden = false;
 				state.tabId = tabId;
 			}
 		},

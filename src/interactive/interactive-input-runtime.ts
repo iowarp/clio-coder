@@ -78,6 +78,8 @@ export interface InteractiveInputRuntimeDeps {
 		toggleFilesPane(): void;
 		/** Toggle the music pane; the application decides what "inactive" says. */
 		toggleMusic?(): void;
+		/** The workers key: the workers dock with a pane host, the Fleet Runs board without one. */
+		toggleWorkersDock?(): void;
 		/** Open the steering queue navigator overlay. */
 		openQueueNavigator(): void;
 	};
@@ -182,7 +184,7 @@ export function createInteractiveInputRuntime(deps: InteractiveInputRuntimeDeps)
 		},
 		requestShutdown: () => void controller.shutdown(),
 		toggleStatus: deps.overlay.toggleFooterDashboardState,
-		toggleDispatchBoard: deps.overlay.toggleDispatchBoardOverlay,
+		toggleDispatchBoard: deps.actions.toggleWorkersDock ?? deps.overlay.toggleDispatchBoardOverlay,
 		openTasks: deps.overlay.openTasksOverlayState,
 		openDecisions: deps.overlay.openDecisionsOverlayState,
 		backgroundDispatch: deps.actions.backgroundActiveDispatch,

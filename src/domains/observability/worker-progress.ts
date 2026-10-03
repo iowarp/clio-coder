@@ -149,7 +149,7 @@ function nonEmptyString(value: unknown): string | undefined {
  * mapper emits a top-level `text_delta` carrying `text`. Both spellings are
  * read here so ACP peers need no separate UI path.
  */
-function workerTextDelta(event: unknown): string {
+export function workerTextDelta(event: unknown): string {
 	if (!isRecord(event)) return "";
 	if (event.type === "message_update") {
 		const assistantEvent = isRecord(event.assistantMessageEvent) ? event.assistantMessageEvent : null;
@@ -162,7 +162,7 @@ function workerTextDelta(event: unknown): string {
 }
 
 /** Whether this event opens or continues a reasoning block. Its content is never read. */
-function isThinkingEvent(event: Record<string, unknown>): boolean {
+export function isThinkingEvent(event: Record<string, unknown>): boolean {
 	if (event.type === "thinking_delta") return true;
 	if (event.type !== "message_update") return false;
 	const assistantEvent = isRecord(event.assistantMessageEvent) ? event.assistantMessageEvent : null;

@@ -405,7 +405,8 @@ const WELCOME_HINTS: ReadonlyArray<{
 			["/help", "Find a command by name"],
 		],
 		keys: [
-			["clio-coder.files.toggle", "Browse files"],
+			["clio-coder.files.toggle", "Show or hide files"],
+			["clio-coder.music.toggle", "Show or hide music"],
 			["clio-coder.status.toggle", "Cycle dashboard pages"],
 			["clio-coder.session.tree", "Explore the session tree"],
 		],
@@ -418,7 +419,7 @@ const WELCOME_HINTS: ReadonlyArray<{
 			["/help", "Look up a shortcut"],
 		],
 		keys: [
-			["clio-coder.dispatchBoard.toggle", "Open the worker board"],
+			["clio-coder.dispatchBoard.toggle", "Show the workers dashboard"],
 			["clio-coder.tasks.open", "Open tasks"],
 			["clio-coder.thinking.cycle", "Cycle thinking effort"],
 		],

@@ -180,7 +180,7 @@ for (const missing of [false, true]) {
 	it(`reports local ${missing ? "missing anchor" : "minimum size"} refusal before any split`, async () => {
 		const f = fixture();
 		if (missing) f.setAnchor(false);
-		else f.setWidth(80);
+		else f.setWidth(72);
 		const controller = f.watch();
 		const result = await controller.watch("run");
 		strictEqual(result.status, "unavailable");
@@ -190,7 +190,7 @@ for (const missing of [false, true]) {
 			result.reason,
 			missing
 				? /no anchor geometry for self; check the pane host layout/
-				: /needs 48 cells and at most half of 80 is available; enlarge the anchor pane/,
+				: /needs 40 cells and at most half of 72 is available; enlarge the anchor pane/,
 		);
 		doesNotMatch(result.reason, /capacity|code=/);
 		deepStrictEqual(f.calls, []);

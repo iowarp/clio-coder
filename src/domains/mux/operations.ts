@@ -101,6 +101,19 @@ export interface PanesDockStatus {
 	paneId: string;
 	/** Share of the axis the dock currently targets, 0..0.5. */
 	targetShare: number;
+	/** True while the dock waits in the parking tab: running, but out of the layout. */
+	hidden: boolean;
+}
+
+/**
+ * One dock in words, for the model and `/panes`: whether it is in the layout,
+ * parked, or not running, and what it is doing. `detail` is the live fact that
+ * settings files cannot give, such as what the music pane is playing.
+ */
+export interface PanesDockReport {
+	slot: "workers" | "files" | "music";
+	state: "visible" | "hidden" | "closed";
+	detail?: string;
 }
 
 /** File-pane return-path state flattened for `/panes` and the model tool. */
@@ -138,6 +151,13 @@ export type PanesWatchResult =
 	| { status: "watching"; runId: string; paneId: string; opened: boolean }
 	| { status: "unavailable"; reason: string };
 
+/** What the workers key's single tap settles to: a new dock, a parked one shown, or a visible one hidden. */
+export type PanesWorkersResult =
+	| { status: "opened" }
+	| { status: "shown" }
+	| { status: "hidden" }
+	| { status: "unavailable"; reason: string };
+
 /**
  * Interactive-only watch-pane controller, attached after the TUI exists. A
  * structural interface here for the same reason {@link PanesYaziController}
@@ -149,17 +169,36 @@ export interface PanesWatchController {
 	 * composition under `interface.panes.layout`. False when the host refused.
 	 */
 	ensureOpen(): Promise<boolean>;
-	/** Point the watch pane at a run, opening or adopting the pane first if needed. */
+	/**
+	 * Take the dock over for one run, opening, adopting or showing it first if
+	 * needed. It never moves the keyboard: the caller may be the model.
+	 */
 	watch(runId: string): Promise<PanesWatchResult>;
 	/** Retarget only; false when no watch pane is open or the write failed. */
 	follow(runId: string): boolean;
+	/**
+	 * The workers key's single tap: open the dock on the board or show a parked
+	 * one, and move the keyboard into it; park a visible one.
+	 */
+	toggle(): Promise<PanesWorkersResult>;
+	/** Park the dock with the dashboard still running; true when it is parked afterwards. */
+	hide(): Promise<boolean>;
+	/** End the dashboard for real, parked or not; false when nothing was open. */
+	close(): Promise<boolean>;
+	visibility(): "visible" | "hidden" | "closed";
+	/** True while the watch pane is running, visible or parked. */
 	isOpen(): boolean;
+	/**
+	 * A key meant for Clio was pressed inside the dashboard: `hide` is its `q`,
+	 * `key` is Alt+W. Returns the unsubscribe.
+	 */
+	onDockKey(handler: (key: "hide" | "key") => void): () => void;
 	dispose(): void;
 }
 
 export type PanesOpenResult =
 	/** `existing` is true when the preset already had a live pane and it was focused instead of split again. */
-	| { status: "opened"; label: string; paneId: string | null; existing?: boolean; cwd?: string }
+	| { status: "opened"; label: string; paneId: string | null; existing?: boolean; revealed?: boolean; cwd?: string }
 	| { status: "missing-binary"; preset: string; binary: string; installHint: string; detail: string }
 	| { status: "refused"; reason: string }
 	| { status: "unavailable"; reason: string };
@@ -184,22 +223,28 @@ export type PanesCloseResult =
 export interface PanesYaziController {
 	open(options?: {
 		once?: boolean;
+		/** Start parked in the hidden tab, with no layout change and no focus move. */
+		hidden?: boolean;
 	}): Promise<
-		| { status: "opened"; mode: "companion" | "chooser"; paneId: string | null; existing: boolean }
+		| { status: "opened"; mode: "companion" | "chooser"; paneId: string | null; existing: boolean; revealed?: boolean }
 		| { status: "missing-binary"; binary: "yazi" | "ya"; detail: string }
 		| { status: "profile-error"; reason: string }
 		| { status: "unavailable"; reason: string }
 	>;
-	/** Close the files pane if it is open; false when nothing was open. */
+	/** Park the files pane out of sight with Yazi still running where it was. */
+	hide(): Promise<{ status: "hidden" } | { status: "unavailable"; reason: string }>;
+	/** End the files pane for real, parked or not; false when nothing was open. */
 	close(): Promise<boolean>;
-	/** True while a files pane the host still reports is open. */
+	/** True while a files pane the host still reports is running, visible or parked. */
 	isOpen(): boolean;
+	visibility(): "visible" | "hidden" | "closed";
 	status(): Readonly<PanesYaziStatus>;
 }
 
 /** What `/files` and the files keybinding settle to. */
 export type PanesFilesResult =
-	| { status: "opened"; paneId: string | null; existing: boolean }
+	| { status: "opened"; paneId: string | null; existing: boolean; revealed?: boolean }
+	| { status: "hidden" }
 	| { status: "closed" }
 	| { status: "missing-binary"; binary: string; installHint: string; detail: string }
 	| { status: "refused"; reason: string }
@@ -224,12 +269,15 @@ export interface PanesOperations {
 	zoom(target: string): Promise<PanesZoomResult>;
 	close(target: string): Promise<PanesCloseResult>;
 	/**
-	 * The files pane as one operator verb. `toggle` opens it when closed and
-	 * closes it when open, which is what a keybinding needs; `open` and
-	 * `close` are the explicit halves; `pick` borrows the pane for one
-	 * selection and closes it afterwards.
+	 * The files pane as one operator verb. `toggle` is the keybinding's single
+	 * tap: it opens or reveals the pane and moves the keyboard in, or parks it
+	 * when it is in the layout. `open`, `hide` and `close` are the explicit
+	 * halves (`close` ends the process, `hide` does not); `pick` borrows the
+	 * pane for one selection.
 	 */
-	files(action: "toggle" | "open" | "close" | "pick"): Promise<PanesFilesResult>;
+	files(action: "toggle" | "open" | "hide" | "close" | "pick"): Promise<PanesFilesResult>;
+	/** Live state of every dock, including what the music pane is playing. */
+	docks(): Promise<ReadonlyArray<PanesDockReport>>;
 	/** Bind the composer-facing Yazi bridge without rebuilding this shared object. */
 	attachYazi(controller: PanesYaziController): () => void;
 	/** Bind the workers-view watch controller; `show` routes runs through it. */

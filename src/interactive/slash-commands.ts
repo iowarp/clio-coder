@@ -28,7 +28,7 @@ import type { InteropAgentId, InteropProposal, InteropReport } from "../domains/
 import { isInteropHeadlessRuntime } from "../domains/interop/peer-modes.js";
 import type { DoctorFinding } from "../domains/lifecycle/doctor.js";
 import type { MusicOperations, MusicResult } from "../domains/mux/music-operations.js";
-import { describeMusicResult } from "../domains/mux/music-operations.js";
+import { describeMusicResult, musicResultTone } from "../domains/mux/music-operations.js";
 import type { PanePeerId, PanesOperations, PanesPresetId, PanesStatus } from "../domains/mux/operations.js";
 import { PANE_PEER_IDS, PANES_PRESET_IDS, PANES_PRESETS, resolvePanesPresetId } from "../domains/mux/operations.js";
 import type { ProvidersContract, ResolvedModelRef } from "../domains/providers/index.js";
@@ -207,11 +207,11 @@ type SlashCommandVariant =
 	| { kind: "panes-zoom"; target: string }
 	| { kind: "panes-close"; target: string }
 	| { kind: "panes-usage"; reason?: string }
-	/** `/files`: toggle the files pane; `pick` borrows it for one selection; `close` closes it. */
-	| { kind: "files"; action: "toggle" | "open" | "close" | "pick" }
+	/** `/files`: toggle the files pane; `hide` parks it with Yazi running; `close` ends it; `pick` borrows it for one selection. */
+	| { kind: "files"; action: "toggle" | "open" | "hide" | "close" | "pick" }
 	| { kind: "files-usage"; reason: string }
-	/** `/music`: toggle the music pane, or on, off, next, status, station <name or url>. */
-	| { kind: "music"; action: "toggle" | "on" | "off" | "next" | "status" }
+	/** `/music`: reveal or hide the music pane, or on, off, pause, next, status, station <name or url>. */
+	| { kind: "music"; action: "toggle" | "on" | "off" | "pause" | "next" | "status" }
 	| { kind: "music-station"; station: string }
 	| { kind: "music-usage"; reason: string }
 	| { kind: "thinking-set"; level: string }
@@ -1008,7 +1008,9 @@ function formatPanesStatus(status: PanesStatus): ReadonlyArray<string> {
 	if (status.docks.length > 0) {
 		lines.push(
 			`  docks: ${status.docks
-				.map((dock) => `${dock.slot}=${dock.paneId} @${(dock.targetShare * 100).toFixed(0)}%`)
+				.map(
+					(dock) => `${dock.slot}=${dock.paneId} @${(dock.targetShare * 100).toFixed(0)}%${dock.hidden ? " hidden" : ""}`,
+				)
 				.join(", ")}`,
 		);
 	}
@@ -2332,7 +2334,7 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 				runLocal(async () => {
 					const result = await panes.show(command.target);
 					if (result.status === "watching") {
-						ctx.notice("success", `watching ${result.agentId} (${result.runId})${result.opened ? " in a new pane" : ""}`);
+						ctx.notice("success", `the workers dock is following ${result.agentId} (${result.runId})`);
 					} else if (result.status === "not-found") {
 						const known = result.candidates.length > 0 ? `; live runs: ${result.candidates.join(", ")}` : "";
 						ctx.notice("warn", `no live run matches ${result.target}${known}`);
@@ -2402,27 +2404,28 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	},
 	{
 		name: "files",
-		description: "Toggle the files pane; picks land in the composer as @ mentions",
+		description: "Show or hide the files pane; picks land in the composer as @ mentions",
 		group: "Inspect",
 		kinds: ["files", "files-usage"],
 		args: { positionals: [{ name: "action", required: false }] },
 		subcommandDescriptions: {
-			open: "Open the files pane, or focus it when it is already open",
-			close: "Close the files pane",
+			open: "Open or reveal the files pane and move the keyboard into it",
+			hide: "Hide the files pane; Yazi keeps running and keeps its directory",
+			close: "Close the files pane and end Yazi",
 			pick: "Borrow the files pane for one selection, then close it",
 		},
 		fromArgs(parsed) {
 			if (parsed.error) return { kind: "files-usage", reason: parsed.error };
 			const action = parsed.positionals[0];
 			if (action === undefined) return { kind: "files", action: "toggle" };
-			if (action === "open" || action === "close" || action === "pick" || action === "toggle") {
+			if (action === "open" || action === "hide" || action === "close" || action === "pick" || action === "toggle") {
 				return { kind: "files", action };
 			}
 			return { kind: "files-usage", reason: `Unexpected argument: ${action}` };
 		},
 		handle(command, ctx) {
 			if (command.kind === "files-usage") {
-				ctx.notice("info", `${command.reason}\nusage: /files [open|close|pick]`);
+				ctx.notice("info", `${command.reason}\nusage: /files [open|hide|close|pick]`);
 				return;
 			}
 			if (command.kind !== "files") return;
@@ -2442,9 +2445,15 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 					if (result.paneId !== null) {
 						ctx.notice(
 							"success",
-							result.existing ? `files pane focused (${result.paneId})` : `files pane opened (${result.paneId})`,
+							result.revealed
+								? `files pane shown (${result.paneId})`
+								: result.existing
+									? `files pane focused (${result.paneId})`
+									: `files pane opened (${result.paneId})`,
 						);
 					}
+				} else if (result.status === "hidden") {
+					ctx.notice("info", "files pane hidden; /files shows it again and keeps its directory");
 				} else if (result.status === "closed") {
 					ctx.notice("info", "files pane closed");
 				} else if (result.status === "missing-binary") {
@@ -2458,7 +2467,7 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	},
 	{
 		name: "music",
-		description: "Toggle the focus-radio music pane (cliamp in a herdr dock)",
+		description: "Show or hide the focus-radio music pane (cliamp in a herdr dock)",
 		group: "Inspect",
 		kinds: ["music", "music-station", "music-usage"],
 		args: {
@@ -2468,8 +2477,9 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 			],
 		},
 		subcommandDescriptions: {
-			on: "Open the music pane and play",
+			on: "Play, opening or revealing the music pane first",
 			off: "Stop the music and close the pane",
+			pause: "Silence the music and keep the pane",
 			next: "Skip to the next station",
 			status: "Say what is playing",
 			station: "Play a stream URL or a station by name",
@@ -2484,14 +2494,21 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 					? { kind: "music-station", station }
 					: { kind: "music-usage", reason: "name a station or paste a stream URL" };
 			}
-			if (action === "on" || action === "off" || action === "next" || action === "status" || action === "toggle") {
+			if (
+				action === "on" ||
+				action === "off" ||
+				action === "pause" ||
+				action === "next" ||
+				action === "status" ||
+				action === "toggle"
+			) {
 				return { kind: "music", action };
 			}
 			return { kind: "music-usage", reason: `Unexpected argument: ${action}` };
 		},
 		handle(command, ctx) {
 			if (command.kind === "music-usage") {
-				ctx.notice("info", `${command.reason}\nusage: /music [on|off|next|status|station <name or url>]`);
+				ctx.notice("info", `${command.reason}\nusage: /music [on|off|pause|next|status|station <name or url>]`);
 				return;
 			}
 			const music = ctx.music;
@@ -2509,8 +2526,8 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 				else if (command.kind !== "music") return;
 				else if (command.action === "toggle") result = await music.toggle();
 				else result = await music[command.action]();
-				const level = result.status === "playing" ? "success" : result.status === "stopped" ? "info" : "warn";
-				ctx.notice(level, describeMusicResult(result));
+				const tone = musicResultTone(result);
+				ctx.notice(tone === "problem" ? "warn" : tone, describeMusicResult(result));
 			});
 		},
 	},

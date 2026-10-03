@@ -28,6 +28,7 @@ export type MuxGatedMethod =
 	| "pane.rename"
 	| "pane.focus"
 	| "pane.zoom"
+	| "pane.move"
 	| "layout.export"
 	| "layout.set_split_ratio"
 	| "worktree.list"
@@ -40,6 +41,9 @@ export const MUX_METHOD_MIN_PROTOCOL: Readonly<Record<MuxGatedMethod, number>> =
 	"pane.rename": 17,
 	"pane.focus": 17,
 	"pane.zoom": 17,
+	// Introduced in protocol 14 (herdr 0.7.x changelog); the dock tier that calls
+	// it floors at 17 anyway, so this entry names the method rather than raising a floor.
+	"pane.move": 14,
 	"layout.export": 17,
 	"layout.set_split_ratio": 17,
 	"worktree.list": 10,

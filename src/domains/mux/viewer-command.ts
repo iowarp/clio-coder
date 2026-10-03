@@ -30,9 +30,11 @@ export interface ViewerCommandOptions {
 	execPath?: string;
 	/** Exact parent-process layout; pinned on argv so a new pane cannot re-resolve it. */
 	dirs?: Readonly<ClioDirs>;
+	/** The file the dashboard reports `q` and Alt+W to; absent, `q` quits it. */
+	tapPath?: string;
 }
 
-/** The argv the watch pane executes: one viewer process following a selection file. */
+/** The argv the workers dock executes: the dashboard, following a selection file. */
 export function watchViewerCommand(selectionPath: string, options: ViewerCommandOptions = {}): ReadonlyArray<string> {
 	const layout =
 		options.dirs === undefined
@@ -55,5 +57,6 @@ export function watchViewerCommand(selectionPath: string, options: ViewerCommand
 		...layout,
 		"--watch",
 		selectionPath,
+		...(options.tapPath === undefined ? [] : ["--dock-taps", options.tapPath]),
 	];
 }

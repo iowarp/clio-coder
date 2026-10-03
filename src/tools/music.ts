@@ -20,6 +20,7 @@ export function createMusicTool(deps: { music: MusicOperations }): ToolSpec {
 			const run: Record<MusicToolAction, () => Promise<MusicResult>> = {
 				on: () => deps.music.on(),
 				off: () => deps.music.off(),
+				pause: () => deps.music.pause(),
 				next: () => deps.music.next(),
 				status: () => deps.music.status(),
 			};

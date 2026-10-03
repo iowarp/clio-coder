@@ -1,9 +1,11 @@
-import { closeSync, openSync, readSync, statSync } from "node:fs";
+import { closeSync, type FSWatcher, openSync, readSync, statSync, watch } from "node:fs";
 import { StringDecoder } from "node:string_decoder";
 
 export const YAZI_STREAM_POLL_MS = 250;
 export const YAZI_STREAM_MAX_BYTES = 1024 * 1024;
 export const YAZI_PICK_EVENT = "clio-coder-pick";
+/** Alt+E inside Yazi: the same tap Clio's own files key makes, sent from the pane that has the keyboard. */
+export const YAZI_DOCK_EVENT = "clio-coder-dock";
 
 export interface YaziCdEvent {
 	kind: "cd";
@@ -20,7 +22,14 @@ export interface YaziPickEvent {
 	values: ReadonlyArray<string>;
 }
 
-export type YaziEvent = YaziCdEvent | YaziPickEvent;
+export interface YaziDockEvent {
+	kind: typeof YAZI_DOCK_EVENT;
+	receiver: string;
+	sender: string;
+	values: ReadonlyArray<string>;
+}
+
+export type YaziEvent = YaziCdEvent | YaziPickEvent | YaziDockEvent;
 export type YaziEventStreamStopReason = "stopped" | "pane-gone" | "file-missing" | "size-cap";
 
 export interface YaziEventStreamStats {
@@ -62,7 +71,7 @@ export function parseYaziEventLine(line: string): YaziEvent | null {
 	const third = second < 0 ? -1 : line.indexOf(",", second + 1);
 	if (first <= 0 || second <= first + 1 || third <= second + 1) return null;
 	const kind = line.slice(0, first);
-	if (kind !== "cd" && kind !== YAZI_PICK_EVENT) return null;
+	if (kind !== "cd" && kind !== YAZI_PICK_EVENT && kind !== YAZI_DOCK_EVENT) return null;
 	const receiver = line.slice(first + 1, second);
 	const sender = line.slice(second + 1, third);
 	try {
@@ -74,7 +83,7 @@ export function parseYaziEventLine(line: string): YaziEvent | null {
 			return { kind, receiver, sender, tab: String(tab), cwd: body.url };
 		}
 		if (!Array.isArray(body) || !body.every((value) => typeof value === "string")) return null;
-		return { kind: YAZI_PICK_EVENT, receiver, sender, values: body };
+		return { kind, receiver, sender, values: body };
 	} catch {
 		return null;
 	}
@@ -91,6 +100,7 @@ export function createYaziEventStream(options: YaziEventStreamOptions): YaziEven
 	let stopped = false;
 	let polling = false;
 	let interval: NodeJS.Timeout | null = null;
+	let watcher: FSWatcher | null = null;
 	let settleDone: (reason: YaziEventStreamStopReason) => void = () => {};
 	const done = new Promise<YaziEventStreamStopReason>((resolve) => {
 		settleDone = resolve;
@@ -109,6 +119,8 @@ export function createYaziEventStream(options: YaziEventStreamOptions): YaziEven
 		state.stopReason = reason;
 		if (interval) clearInterval(interval);
 		interval = null;
+		watcher?.close();
+		watcher = null;
 		log(reason === "size-cap" ? "warning" : "debug", `yazi event stream stopped (${reason}): ${options.path}`);
 		settleDone(reason);
 	};
@@ -153,7 +165,7 @@ export function createYaziEventStream(options: YaziEventStreamOptions): YaziEven
 				const line = raw.endsWith("\r") ? raw.slice(0, -1) : raw;
 				if (line.length === 0) continue;
 				const kind = line.slice(0, line.indexOf(","));
-				if (kind !== "cd" && kind !== YAZI_PICK_EVENT) continue;
+				if (kind !== "cd" && kind !== YAZI_PICK_EVENT && kind !== YAZI_DOCK_EVENT) continue;
 				const event = parseYaziEventLine(line);
 				if (!event) {
 					state.malformedLines += 1;
@@ -175,6 +187,14 @@ export function createYaziEventStream(options: YaziEventStreamOptions): YaziEven
 	if (options.autoStart !== false) {
 		interval = setInterval(() => void poll(), options.pollMs ?? YAZI_STREAM_POLL_MS);
 		interval.unref();
+		// A key pressed inside Yazi should reach Clio as it happens, not on the next
+		// poll tick. The interval stays as the backstop where change events do not fire.
+		try {
+			watcher = watch(options.path, { persistent: false }, () => void poll());
+			watcher.on("error", () => undefined);
+		} catch {
+			// No change events on this filesystem; the poll tick still delivers every line.
+		}
 		void poll();
 	}
 	return { poll, stop, stats: () => ({ ...state }), done };

@@ -160,7 +160,7 @@ export function formatTrustSummary(status: CanonicalTrustStatus): string {
 }
 
 /** Human wording names the failed axis while preserving the canonical verdict for machine consumers. */
-function trustVerdictWord(status: CanonicalTrustStatus): string {
+export function trustVerdictWord(status: CanonicalTrustStatus): string {
 	const verdict = trustVerdict(status);
 	if (verdict !== "compromised") return verdict;
 	if (status.artifactIntegrity.state === "failed") return trustStateWord("artifactIntegrity", "failed");

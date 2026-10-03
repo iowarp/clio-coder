@@ -4,7 +4,7 @@ import { mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { isAbsolute, join, relative, resolve } from "node:path";
 import { clioCacheDir } from "../core/xdg.js";
 import type { MuxContract } from "../domains/mux/index.js";
-import type { YaziEvent } from "../domains/mux/yazi/event-stream.js";
+import { YAZI_DOCK_EVENT, type YaziEvent } from "../domains/mux/yazi/event-stream.js";
 import { ensureYaziProfile, yaziProfileDir } from "../domains/mux/yazi/profile.js";
 import {
 	createYaziSession,
@@ -47,15 +47,24 @@ export interface YaziBridgeStatus {
 }
 
 export type YaziBridgeOpenResult =
-	| { status: "opened"; mode: YaziSessionMode; paneId: string | null; existing: boolean }
+	| { status: "opened"; mode: YaziSessionMode; paneId: string | null; existing: boolean; revealed?: boolean }
 	| Exclude<YaziSessionOpenResult, { status: "opened" }>;
 
+export type YaziBridgeHideResult = { status: "hidden" } | { status: "unavailable"; reason: string };
+
 export interface YaziBridge {
-	open(options?: { once?: boolean }): Promise<YaziBridgeOpenResult>;
-	/** Close the files pane and hand focus back to the composer; false when nothing was open. */
+	/**
+	 * Open the files pane, or bring a parked one back, and move the keyboard into
+	 * it. `hidden` starts it parked instead and touches neither layout nor focus.
+	 */
+	open(options?: { once?: boolean; hidden?: boolean }): Promise<YaziBridgeOpenResult>;
+	/** Park the files pane out of sight with Yazi still running in its directory. */
+	hide(): Promise<YaziBridgeHideResult>;
+	/** Close the files pane for real, parked or not, and hand focus back to the composer; false when nothing was open. */
 	close(): Promise<boolean>;
-	/** True while the pane host still reports the files pane. */
+	/** True while the pane host still reports the files pane, visible or parked. */
 	isOpen(): boolean;
+	visibility(): "visible" | "hidden" | "closed";
 	status(): Readonly<YaziBridgeStatus>;
 	dispose(): void;
 }
@@ -76,6 +85,11 @@ export interface YaziBridgeDeps {
 	statPath?: (path: string) => "file" | "directory" | "other";
 	livenessMs?: number;
 	pickToken?: () => string;
+	/**
+	 * The files key was pressed inside Yazi, where Clio's own key handler cannot
+	 * hear it. Runs only for a tap carrying this session's token.
+	 */
+	onDockKey?: () => void;
 }
 
 export type YaziTerminalChooserResult =
@@ -296,6 +310,18 @@ export function createYaziBridge(deps: YaziBridgeDeps): YaziBridge {
 	let generation = 0;
 	let livenessTimer: NodeJS.Timeout | null = null;
 	let sawLine = false;
+	/** Clio's cwd when Yazi last learned it, so a plain reveal never drags Yazi back to it. */
+	let syncedCwd: string | null = null;
+	let tail: Promise<unknown> = Promise.resolve();
+	/** Opens, hides and closes touch one pane; running them in order keeps a fast key pair from racing. */
+	const serial = <T>(task: () => Promise<T>): Promise<T> => {
+		const run = tail.then(task, task);
+		tail = run.then(
+			() => undefined,
+			() => undefined,
+		);
+		return run;
+	};
 
 	const clearLiveness = (): void => {
 		if (livenessTimer) clearTimeout(livenessTimer);
@@ -341,6 +367,7 @@ export function createYaziBridge(deps: YaziBridgeDeps): YaziBridge {
 		mode: YaziSessionMode,
 		profileMode: YaziProfileMode,
 		dockShare?: number,
+		hidden = false,
 	): Promise<YaziBridgeOpenResult> => {
 		const mux = deps.mux;
 		if (!mux?.available()) return { status: "unavailable", reason: "the pane layer is not available" };
@@ -349,12 +376,14 @@ export function createYaziBridge(deps: YaziBridgeDeps): YaziBridge {
 		const token = (deps.pickToken ?? randomUUID)();
 		sawLine = false;
 		paneCwd = deps.getCwd();
+		syncedCwd = paneCwd;
 		const result = await openSession({
 			mux,
 			mode,
 			profileMode,
 			cwd: deps.getCwd(),
 			...(dockShare === undefined ? {} : { dockShare }),
+			...(hidden ? { hidden: true } : {}),
 			pickToken: token,
 			onEvent: (event: YaziEvent) => {
 				if (disposed || ownGeneration !== generation) return;
@@ -365,6 +394,10 @@ export function createYaziBridge(deps: YaziBridgeDeps): YaziBridge {
 				}
 				if (event.values[0] !== token) {
 					droppedLines += 1;
+					return;
+				}
+				if (event.kind === YAZI_DOCK_EVENT) {
+					deps.onDockKey?.();
 					return;
 				}
 				insert(event.values.slice(1), paneCwd ?? deps.getCwd());
@@ -390,13 +423,19 @@ export function createYaziBridge(deps: YaziBridgeDeps): YaziBridge {
 		active = result.session;
 		// An explicit open is a request to go and pick something, so the keyboard
 		// follows the pane. The dock tier itself never steals focus; this is the
-		// one caller entitled to ask.
-		await mux.focusPane(result.session.pane.paneId);
+		// one caller entitled to ask. A pane started parked is not being looked at.
+		if (!hidden) await mux.focusPane(result.session.pane.paneId);
 		if (mode === "companion") {
 			livenessTimer = setTimeout(() => {
 				if (disposed || ownGeneration !== generation || sawLine || active === null) return;
 				const stale = active;
 				active = null;
+				if (stale.visibility() === "hidden") {
+					// Nobody asked for this pane yet, so its failure stays quiet; the key
+					// that wants it finds nothing open and reports what went wrong.
+					void stale.close();
+					return;
+				}
 				deps.notice("warning", "the files pane did not report back in time; reopening it in pick mode");
 				void stale.close().finally(() => {
 					if (!disposed && ownGeneration === generation) void start("chooser", profileMode, dockShare);
@@ -435,52 +474,82 @@ export function createYaziBridge(deps: YaziBridgeDeps): YaziBridge {
 		return true;
 	};
 
-	return {
-		async open(options = {}): Promise<YaziBridgeOpenResult> {
-			if (disposed) return { status: "unavailable", reason: "the files pane bridge is closed" };
-			const settings = deps.getSettings?.() ?? { mode: "companion", profile: "managed", followCwd: true };
-			const existing = liveSession();
-			if (existing) {
-				if (settings.followCwd) {
-					const cwd = deps.getCwd();
-					if (await existing.pushCwd(cwd)) paneCwd = cwd;
-				}
-				// Re-opening an open pane means "take me there": leave any zoom that
-				// hides it and put the keyboard in it.
-				await deps.mux?.unzoomSelf();
-				await deps.mux?.focusPane(existing.pane.paneId);
+	const openNow = async (options: { once?: boolean; hidden?: boolean } = {}): Promise<YaziBridgeOpenResult> => {
+		if (disposed) return { status: "unavailable", reason: "the files pane bridge is closed" };
+		const settings = deps.getSettings?.() ?? { mode: "companion", profile: "managed", followCwd: true };
+		const existing = liveSession();
+		if (existing) {
+			if (options.hidden) {
 				return { status: "opened", mode: existing.mode, paneId: existing.pane.paneId, existing: true };
 			}
-			const mode = options.once || settings.profile === "user" ? "chooser" : settings.mode;
-			if (!deps.mux?.available()) {
-				const result = await (
-					deps.runTerminalChooser ??
-					((choiceOptions) =>
-						runYaziTerminalChooser({
-							...choiceOptions,
-							stopUi: deps.stopUi ?? (() => {}),
-							startUi: deps.startUi ?? (() => {}),
-							requestRender: deps.requestRender,
-						}))
-				)({ cwd: deps.getCwd(), profileMode: settings.profile });
-				if (result.status === "chosen") {
-					paneCwd = result.choice.cwd;
-					insert(result.choice.paths, result.choice.cwd);
-				}
-				if (result.status === "chosen" || result.status === "cancelled") {
-					return { status: "opened", mode: "chooser", paneId: null, existing: false };
-				}
-				return result;
+			const revealed = existing.visibility() === "hidden";
+			if (revealed) {
+				const reason = await existing.show();
+				if (reason !== null) return { status: "unavailable", reason };
 			}
-			await deps.mux.unzoomSelf();
-			return await start(mode, settings.profile, settings.ratio);
-		},
+			const cwd = deps.getCwd();
+			// Follow Clio's directory only when it moved: a reveal keeps Yazi where
+			// the operator left it.
+			if (settings.followCwd && cwd !== syncedCwd && (await existing.pushCwd(cwd))) {
+				paneCwd = cwd;
+				syncedCwd = cwd;
+			}
+			// Re-opening an open pane means "take me there": leave any zoom that
+			// hides it (a reveal already did) and put the keyboard in it.
+			if (!revealed) await deps.mux?.unzoomSelf();
+			await deps.mux?.focusPane(existing.pane.paneId);
+			return {
+				status: "opened",
+				mode: existing.mode,
+				paneId: existing.pane.paneId,
+				existing: true,
+				...(revealed ? { revealed: true } : {}),
+			};
+		}
+		const mode = options.once || settings.profile === "user" ? "chooser" : settings.mode;
+		if (!deps.mux?.available()) {
+			const result = await (
+				deps.runTerminalChooser ??
+				((choiceOptions) =>
+					runYaziTerminalChooser({
+						...choiceOptions,
+						stopUi: deps.stopUi ?? (() => {}),
+						startUi: deps.startUi ?? (() => {}),
+						requestRender: deps.requestRender,
+					}))
+			)({ cwd: deps.getCwd(), profileMode: settings.profile });
+			if (result.status === "chosen") {
+				paneCwd = result.choice.cwd;
+				insert(result.choice.paths, result.choice.cwd);
+			}
+			if (result.status === "chosen" || result.status === "cancelled") {
+				return { status: "opened", mode: "chooser", paneId: null, existing: false };
+			}
+			return result;
+		}
+		if (!options.hidden) await deps.mux.unzoomSelf();
+		return await start(mode, settings.profile, settings.ratio, options.hidden === true);
+	};
+
+	const hideNow = async (): Promise<YaziBridgeHideResult> => {
+		const session = liveSession();
+		if (session === null) return { status: "unavailable", reason: "the files pane is not open" };
+		const reason = await session.hide();
+		return reason === null ? { status: "hidden" } : { status: "unavailable", reason };
+	};
+
+	return {
+		open: (options) => serial(() => openNow(options)),
+		hide: () => serial(hideNow),
 		close(): Promise<boolean> {
 			if (disposed) return Promise.resolve(false);
-			return closeActive();
+			return serial(closeActive);
 		},
 		isOpen(): boolean {
 			return liveSession() !== null;
+		},
+		visibility(): "visible" | "hidden" | "closed" {
+			return liveSession()?.visibility() ?? "closed";
 		},
 		status(): Readonly<YaziBridgeStatus> {
 			const snapshot = active?.snapshot();

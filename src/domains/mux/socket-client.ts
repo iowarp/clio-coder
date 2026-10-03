@@ -41,6 +41,7 @@ import {
 	type MuxLog,
 	type MuxNotificationSound,
 	type MuxPane,
+	type MuxPaneRef,
 	type MuxRect,
 	type MuxReportableAgentState,
 	MuxRequestTimeout,
@@ -90,6 +91,37 @@ export interface MuxSplitRequest {
 	env?: Readonly<Record<string, string>>;
 	focus?: boolean;
 	ratio?: number;
+}
+
+/** Where `pane.move` puts a pane. The pane keeps running; only its place in the layout changes. */
+export type MuxPaneMoveDestination =
+	| { type: "new_tab"; label?: string; workspaceId?: string }
+	| { type: "tab"; tabId: string; split: "right" | "down"; targetPaneId?: string; ratio?: number };
+
+export interface MuxPaneMoveRequest {
+	paneId: string;
+	destination: MuxPaneMoveDestination;
+	focus?: boolean;
+}
+
+export interface MuxPaneMoveResult {
+	/** False when herdr declined the move (`reason` says why: same tab, zoomed tab). */
+	changed: boolean;
+	reason: string | null;
+	previousPaneId: string;
+	/** The pane after the move. The id survives a same-workspace move; the tab id does not. */
+	pane: MuxPaneRef;
+	createdTabId: string | null;
+	/** The source tab herdr closed because the move emptied it. */
+	closedTabId: string | null;
+}
+
+export interface MuxTabCreateRequest {
+	workspaceId?: string;
+	cwd?: string;
+	env?: Readonly<Record<string, string>>;
+	label?: string;
+	focus?: boolean;
 }
 
 export interface MuxReportAgentRequest {
@@ -196,6 +228,13 @@ export interface MuxClient {
 	/** Set the pane's operator-facing label. Available on herdr protocol 17. */
 	paneRename(paneId: string, label: string): Promise<void>;
 	paneClose(paneId: string): Promise<void>;
+	/**
+	 * Move a running pane to another place in the layout without restarting its
+	 * process. Available from herdr protocol 14. Never focuses unless asked.
+	 */
+	paneMove(request: MuxPaneMoveRequest): Promise<MuxPaneMoveResult>;
+	/** Create a tab holding one fresh shell pane. The tab does not take focus unless asked. */
+	tabCreate(request: MuxTabCreateRequest): Promise<{ tab: MuxTab; rootPane: MuxPane }>;
 	/**
 	 * Cell-precise geometry of the tab holding `paneId` (the server's focused
 	 * pane when omitted): outer area, pane rects, and live split ratios.
@@ -838,6 +877,48 @@ export function createMuxClient(options: MuxClientOptions): MuxClient {
 		},
 		async paneClose(paneId: string): Promise<void> {
 			await call("pane.close", { pane_id: paneId });
+		},
+		async paneMove(request: MuxPaneMoveRequest): Promise<MuxPaneMoveResult> {
+			const destination = request.destination;
+			const result = await callObject("pane.move", {
+				pane_id: request.paneId,
+				destination:
+					destination.type === "new_tab"
+						? params({ type: "new_tab", label: destination.label, workspace_id: destination.workspaceId })
+						: params({
+								type: "tab",
+								tab_id: destination.tabId,
+								split: destination.split,
+								target_pane_id: destination.targetPaneId,
+								ratio: destination.ratio,
+							}),
+				focus: request.focus ?? false,
+			});
+			const moved = asRecord(result.move_result);
+			if (!moved) throw new MuxError("protocol", "mux pane.move returned no move_result", { method: "pane.move" });
+			const pane = readPane(moved.pane);
+			const createdTab = asRecord(moved.created_tab);
+			return {
+				changed: moved.changed === true,
+				reason: optionalString(moved, "reason"),
+				previousPaneId: requireString(moved, "previous_pane_id", "pane.move"),
+				pane: { paneId: pane.paneId, tabId: pane.tabId, workspaceId: pane.workspaceId },
+				createdTabId: createdTab ? optionalString(createdTab, "tab_id") : null,
+				closedTabId: optionalString(moved, "closed_tab_id"),
+			};
+		},
+		async tabCreate(request: MuxTabCreateRequest): Promise<{ tab: MuxTab; rootPane: MuxPane }> {
+			const result = await callObject(
+				"tab.create",
+				params({
+					workspace_id: request.workspaceId,
+					cwd: request.cwd,
+					env: request.env,
+					label: request.label,
+					focus: request.focus ?? false,
+				}),
+			);
+			return { tab: readTab(result.tab), rootPane: readPane(result.root_pane) };
 		},
 		async paneLayout(paneId?: string): Promise<MuxTabGeometry> {
 			const result = await callObject("pane.layout", params({ pane_id: paneId }));

@@ -26,13 +26,16 @@
  * are never dropped, so a capped journal still answers what the run was and how
  * it ended.
  *
- * Writes are buffered and flushed with one `appendFileSync` per batch rather
- * than queued onto an async chain. A queue would need a timer to drain, and a
- * timer on the dispatch event path either keeps a finished process alive or has
- * to be unref'd and then races finalization; batching keeps the syscall count
- * proportional to bytes written and leaves no handle behind. Every
- * non-droppable line flushes immediately, so the durable file is never behind
- * on the facts a viewer needs.
+ * Writes are synchronous, one `appendFileSync` per line, rather than queued
+ * onto an async chain. A queue would need a timer to drain, and a timer on the
+ * dispatch event path either keeps a finished process alive or has to be
+ * unref'd and then races finalization. Lines used to be batched until 8 KiB
+ * were pending, which kept a running call's start line, and everything after
+ * it, out of the file until the run had said a great deal more: the workers
+ * dashboard then showed a run's history only once it was over. Lines now
+ * arrive already coalesced (prose in 250 ms windows, no deltas or heartbeats,
+ * see run-event-journal-bridge.ts), so writing each one as it comes costs a
+ * few small appends per second per live run and leaves the file current.
  *
  * A sink failure (ENOSPC, EPERM, a removed state root) degrades the whole
  * journal to off after one notice. Nothing here ever throws into a dispatch.
@@ -49,17 +52,39 @@ export const RUN_EVENT_JOURNAL_DIR = "runs";
 export const RUN_EVENT_JOURNAL_FILE = "events.ndjson";
 /** Per-run size cap; crossing it drops display-only lines behind one marker. */
 export const RUN_EVENT_JOURNAL_CAP_BYTES = 2 * 1024 * 1024;
-/** Pending bytes that trigger a flush of droppable lines. */
-export const RUN_EVENT_JOURNAL_FLUSH_BYTES = 8 * 1024;
+/** Pending bytes that trigger a flush of droppable lines; every line, by default. */
+export const RUN_EVENT_JOURNAL_FLUSH_BYTES = 1;
 interface JournalLineBase {
 	seq: number;
 	at: string;
 }
 
+/**
+ * Structured facts an `event` line may carry beside its display `detail`, so a
+ * viewer can build a live worker card without the event itself. Every field is
+ * already bounded and redacted where it was produced: a tool name, the call
+ * descriptor's verb (its object rides in `detail`), a finish outcome and
+ * duration, and the token counts one model call reported. Arguments, results
+ * and reasoning never appear here.
+ */
+export interface RunEventJournalFacts {
+	tool?: string;
+	/** Pairs a tool start with its finish when the producer carried an id. */
+	callId?: string;
+	/** Present-tense descriptor verb (`reading`); the object is the line's detail. */
+	verb?: string;
+	outcome?: "ok" | "error" | "blocked";
+	durationMs?: number;
+	/** Why a call was blocked or failed, or why an approval resolved the way it did. */
+	reason?: string;
+	/** Tokens one model call processed (input, cache reads, output, cache writes). */
+	tokens?: number;
+}
+
 /** Everything on a journal line except the `seq`/`at` envelope the writer adds. */
 export type RunEventJournalBody =
 	| { kind: "open"; runId: string; agentId: string }
-	| { kind: "event"; type: string; detail?: string }
+	| ({ kind: "event"; type: string; detail?: string } & RunEventJournalFacts)
 	| { kind: "journal_truncated"; reason: string; droppedFromSeq: number }
 	| {
 			kind: "receipt";
@@ -73,8 +98,8 @@ export type RunEventJournalBody =
 
 export type RunEventJournalLine = JournalLineBase & RunEventJournalBody;
 
-/** One display-tail entry, structurally the registry's `RunTailEntry`. */
-export interface RunEventJournalEntry {
+/** One display-tail entry, structurally the registry's `RunTailEntry`, plus optional facts. */
+export interface RunEventJournalEntry extends RunEventJournalFacts {
 	at: string;
 	type: string;
 	detail?: string;
@@ -356,13 +381,8 @@ function createRunEventJournal(options: CreateRunEventJournalOptions = {}): RunE
 		append(runId, entry): void {
 			const state = stateFor(runId);
 			if (state === null) return;
-			write(
-				state,
-				entry.detail === undefined
-					? { kind: "event", type: entry.type }
-					: { kind: "event", type: entry.type, detail: entry.detail },
-				true,
-			);
+			const { at: _at, ...body } = entry;
+			write(state, { kind: "event", ...body }, true);
 		},
 		receipt(runId, receipt): void {
 			const state = stateFor(runId);
@@ -408,7 +428,7 @@ function countJournalSeq(path: string): number {
 		let highest = 0;
 		for (const line of raw.split("\n")) {
 			if (line.length === 0) continue;
-			const parsed = parseJournalLine(line);
+			const parsed = parseRunEventJournalLine(line);
 			if (parsed !== null && parsed.seq > highest) highest = parsed.seq;
 		}
 		return highest;
@@ -463,7 +483,23 @@ export interface RunEventJournalRead {
 	agentId: string | null;
 }
 
-function parseJournalLine(raw: string): RunEventJournalLine | null {
+function journalFacts(record: Record<string, unknown>): RunEventJournalFacts {
+	const text = (value: unknown): value is string => typeof value === "string" && value.length > 0;
+	const count = (value: unknown): value is number => typeof value === "number" && Number.isFinite(value) && value >= 0;
+	const outcome = record.outcome;
+	return {
+		...(text(record.tool) ? { tool: record.tool } : {}),
+		...(text(record.callId) ? { callId: record.callId } : {}),
+		...(text(record.verb) ? { verb: record.verb } : {}),
+		...(outcome === "ok" || outcome === "error" || outcome === "blocked" ? { outcome } : {}),
+		...(count(record.durationMs) ? { durationMs: record.durationMs } : {}),
+		...(text(record.reason) ? { reason: record.reason } : {}),
+		...(count(record.tokens) ? { tokens: record.tokens } : {}),
+	};
+}
+
+/** One journal line, read defensively: null for anything malformed or of an unknown kind. */
+export function parseRunEventJournalLine(raw: string): RunEventJournalLine | null {
 	let parsed: unknown;
 	try {
 		parsed = JSON.parse(raw);
@@ -486,6 +522,7 @@ function parseJournalLine(raw: string): RunEventJournalLine | null {
 				kind: "event",
 				type: normalizeClioCoderEventType(record.type),
 				...(detail === undefined ? {} : { detail }),
+				...journalFacts(record),
 			};
 		}
 		case "journal_truncated":
@@ -568,7 +605,7 @@ export function readRunEventJournal(runId: string, options: ReadRunEventJournalO
 	let agentId: string | null = null;
 	for (const candidate of raw.split("\n")) {
 		if (candidate.length === 0) continue;
-		const parsed = parseJournalLine(candidate);
+		const parsed = parseRunEventJournalLine(candidate);
 		// A trailing partial line is the writer mid-flush, not corruption.
 		if (parsed === null) continue;
 		if (parsed.kind === "journal_truncated") truncated = true;

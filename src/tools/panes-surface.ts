@@ -15,7 +15,7 @@ import type { ToolSurface } from "./lazy-tool.js";
 export const panesToolSurface = {
 	name: ToolNames.Panes,
 	description:
-		"Manage Clio-owned panes: show a run, open a utility preset, handoff to a fixed coding CLI, close, or list. A handoff is interactive and has no managed receipt.",
+		"Manage Clio-owned panes: show a run, open a utility preset, handoff to a fixed coding CLI, close, or list. list reports the live state of the files, workers and music docks (visible, hidden or closed; a hidden dock is still running) and what the music pane is playing, so read it there rather than from settings files. A handoff is interactive and has no managed receipt.",
 	parameters: Type.Object({
 		action: StringEnum(["show", "open", "handoff", "close", "list"], { description: "Pane action." }),
 		target: Type.Optional(

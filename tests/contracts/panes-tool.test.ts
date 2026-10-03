@@ -58,6 +58,7 @@ function fakeMux(available = true) {
 			return false;
 		},
 		docks: () => [],
+		dockVisibility: () => "closed",
 	};
 	return { mux: mux as unknown as MuxContract, calls };
 }
@@ -111,7 +112,7 @@ describe("panes tool", () => {
 		const f = fixture();
 		match(
 			output(await f.call({ action: "list" })),
-			/^panes mode=guest available; notifications=\S+\n- no Clio-owned panes$/,
+			/^panes mode=guest available; notifications=\S+\ndocks: files closed[^\n]*; workers closed; music closed[^\n]*\n- no Clio-owned panes$/,
 		);
 		strictEqual(output(await f.call({ action: "open", preset: "shell" })), "opened the shell pane (p1).");
 		strictEqual(
@@ -182,11 +183,16 @@ describe("panes tool", () => {
 				return { status: "watching", runId, paneId: "watch", opened: true };
 			},
 			follow: () => true,
+			toggle: async () => ({ status: "shown" }),
+			hide: async () => true,
+			close: async () => true,
+			visibility: () => "visible",
 			isOpen: () => true,
+			onDockKey: () => () => undefined,
 			dispose: () => {},
 		});
 		const shown = await f.call({ action: "show", target: "tester" });
-		strictEqual(output(shown), "the watch pane is now rendering tester (run run-abc123).");
+		strictEqual(output(shown), "the workers dock is now following tester (run run-abc123).");
 		strictEqual(output(await f.call({ action: "show", target: "run-abc" })), output(shown));
 		strictEqual(
 			errorMessage(await f.call({ action: "show", target: "reviewer" })),

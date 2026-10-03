@@ -56,7 +56,7 @@ import { fleetInspectionScope } from "./fleet-project-scope.js";
 
 const HELP = `clio-coder fleet view <runId|fleetRootId> [--follow] [--all]
 clio-coder fleet view <runId> --json [--all]
-clio-coder fleet view --watch <selection-file> [--all]
+clio-coder fleet view --watch <selection-file> [--dock-taps <file>] [--all]
 
 Follow one dispatched run from its durable state: the run ledger entry, the
 run event journal, and the sealed receipt once it exists.
@@ -66,12 +66,15 @@ requested next to the model the provider reported on each call ("not
 observed" when Clio did not capture one), the cost with its pricing
 provenance, and the label the route settled with.
 
-  --json      print the snapshot and the authenticated receipt as JSON
-  --follow    keep tailing until the run's terminal line, then stay open (q exits)
-  --watch     follow whichever run id the selection file names, retargeting
-              live as the file changes (q exits). This is the process the
-              interactive workers view (Alt+W) runs inside its watch pane.
-  --all       allow inspection across every project (default: this project)
+  --json       print the snapshot and the authenticated receipt as JSON
+  --follow     keep tailing until the run's terminal line, then stay open (q exits)
+  --watch      the workers dashboard: a board of this session's workers, and a
+               live takeover of one (Enter, Esc back). The selection file asks
+               for a takeover and scopes the board to a session. This is the
+               process the workers dock (Alt+W) runs.
+  --dock-taps  where the dashboard reports q (hide the dock) and Alt+W to Clio;
+               without it q quits
+  --all        allow inspection across every project (default: this project)
 
 Without --follow the current snapshot is printed and the command exits.
 The transcript comes from <state>/runs/<runId>/events.ndjson, which the
@@ -216,16 +219,48 @@ function costText(receipt: RunReceipt): string {
 	return `${cost === null ? "not recorded" : `$${cost.toFixed(4)}`} · ${receipt.costProvenance ?? "provenance not recorded"}`;
 }
 
+/**
+ * A feed line in words. The structured facts the workers dashboard reads say
+ * the same thing here in one line: a call as its tool and descriptor with its
+ * outcome, coalesced prose as the assistant's, a model call as its tokens.
+ */
+function eventTranscriptLine(line: Extract<RunEventJournalLine, { kind: "event" }>): RunViewTranscriptLine {
+	const detail = line.detail === undefined ? undefined : sanitizeBounded(line.detail, DETAIL_MAX_WIDTH);
+	const tool = line.tool === undefined ? "" : sanitizeBounded(line.tool, 64);
+	const call = [line.verb === undefined ? "" : sanitizeBounded(line.verb, 32), detail ?? ""].filter(Boolean).join(" ");
+	switch (line.type) {
+		case "text":
+			return { at: line.at, label: "assistant", detail };
+		case "thinking":
+			return { at: line.at, label: "thinking", detail: undefined };
+		case "clio_coder_tool_start":
+			if (tool.length > 0) return { at: line.at, label: `${tool} started`, detail: call || undefined };
+			break;
+		case "clio_coder_tool_finish": {
+			if (tool.length === 0) break;
+			const took = line.durationMs === undefined ? "" : ` in ${line.durationMs}ms`;
+			const reason = line.reason === undefined ? "" : `: ${sanitizeBounded(line.reason, DETAIL_MAX_WIDTH)}`;
+			return {
+				at: line.at,
+				label: `${tool} ${line.outcome ?? "finished"}${took}`,
+				detail: `${call}${reason}` || undefined,
+			};
+		}
+		case "message_end":
+			if (line.tokens !== undefined) {
+				return { at: line.at, label: `model call (${line.tokens} tokens)`, detail };
+			}
+			break;
+	}
+	return { at: line.at, label: sanitizeBounded(line.type, 64), detail };
+}
+
 function transcriptLine(line: RunEventJournalLine): RunViewTranscriptLine | null {
 	switch (line.kind) {
 		case "open":
 			return { at: line.at, label: `run opened (${sanitizeBounded(line.agentId, 64)})`, detail: undefined };
 		case "event":
-			return {
-				at: line.at,
-				label: sanitizeBounded(line.type, 64),
-				detail: line.detail === undefined ? undefined : sanitizeBounded(line.detail, DETAIL_MAX_WIDTH),
-			};
+			return eventTranscriptLine(line);
 		case "journal_truncated":
 			return { at: line.at, label: "journal truncated", detail: sanitizeBounded(line.reason, 64) };
 		case "receipt":
@@ -435,8 +470,8 @@ function renderWatchView(
 		return [
 			"no worker selected.",
 			"",
-			"In clio-coder, open the workers view (Alt+W), pick a run, press Enter.",
-			"Arrow keys there retarget this pane live.",
+			"In clio-coder, Alt+W opens the workers dock: a board of this session's",
+			"workers, where Enter takes the dock over for one of them.",
 		];
 	}
 	if (model === null) {
@@ -647,6 +682,7 @@ function fail(message: string): number {
 interface ParsedViewArgs {
 	runId?: string;
 	watchPath?: string;
+	tapPath?: string;
 	dirs?: {
 		config?: string;
 		data?: string;
@@ -683,6 +719,13 @@ function parseViewArgs(args: ReadonlyArray<string>): ParsedViewArgs | string {
 			i += 1;
 			continue;
 		}
+		if (arg === "--dock-taps") {
+			const value = args[i + 1];
+			if (value === undefined || value.startsWith("-")) return "--dock-taps requires a file path";
+			parsed.tapPath = value;
+			i += 1;
+			continue;
+		}
 		const dirRole =
 			arg === "--config-dir"
 				? "config"
@@ -714,6 +757,9 @@ function parseViewArgs(args: ReadonlyArray<string>): ParsedViewArgs | string {
 	}
 	if (parsed.watchPath !== undefined && parsed.follow) {
 		return "--watch already follows; drop --follow";
+	}
+	if (parsed.tapPath !== undefined && parsed.watchPath === undefined) {
+		return "--dock-taps belongs to --watch";
 	}
 	if (parsed.json && (parsed.follow || parsed.watchPath !== undefined)) {
 		return "--json prints one snapshot; drop --follow and --watch";
@@ -780,7 +826,8 @@ export async function runFleetView(args: ReadonlyArray<string>): Promise<number>
 			process.stdout.write(`${renderWatchView(selected, model, terminalWidth()).join("\n")}\n`);
 			return 0;
 		}
-		return watchSelection(parsed.watchPath, scope);
+		const { runWorkersDashboard } = await import("./fleet-board.js");
+		return runWorkersDashboard({ selectionPath: parsed.watchPath, tapPath: parsed.tapPath ?? null, scope });
 	}
 	if (parsed.runId === undefined) {
 		process.stderr.write(HELP);
@@ -830,58 +877,6 @@ export async function runFleetView(args: ReadonlyArray<string>): Promise<number>
 		return 0;
 	}
 	return followRun(runId, scope);
-}
-
-/**
- * Alternate-screen watch loop: the workers-view pane process. Every poll it
- * re-reads the selection file and renders whichever run it names, so arrow-key
- * navigation in the TUI retargets this process through one small file write
- * and no socket traffic. It never stops on a terminal run; the selection is
- * the operator's cursor, and the cursor outlives any one run.
- */
-async function watchSelection(selectionPath: string, scope: ReturnType<typeof fleetInspectionScope>): Promise<number> {
-	const { ProcessTerminal, TuiAltScreen } = await import("../engine/tui-primitives.js");
-	const terminal = new ProcessTerminal();
-	const tui = new TuiAltScreen(terminal);
-	let selected = readWatchSelection(selectionPath);
-	let model = selected === null ? null : loadRunViewModel(selected, { scope });
-
-	const view = {
-		render(width: number): string[] {
-			const lines = renderWatchView(selected, model, width);
-			lines.push("");
-			lines.push("watching the workers-view selection… q to quit");
-			return lines;
-		},
-		invalidate(): void {},
-	};
-	tui.addChild(view);
-
-	return await new Promise<number>((resolve) => {
-		let settled = false;
-		const timer = setInterval(() => {
-			selected = readWatchSelection(selectionPath);
-			model = selected === null ? null : loadRunViewModel(selected, { scope });
-			tui.requestRender();
-		}, POLL_MS);
-		const finish = (): void => {
-			if (settled) return;
-			settled = true;
-			clearInterval(timer);
-			removeInput();
-			tui.stop();
-			resolve(0);
-		};
-		const removeInput = tui.addInputListener((data: string) => {
-			if (data === "q" || data === QUIT_CTRL_C || data === QUIT_ESCAPE) {
-				finish();
-				return { consume: true };
-			}
-			return undefined;
-		});
-		tui.start();
-		tui.requestRender();
-	});
 }
 
 /**

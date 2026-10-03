@@ -9,6 +9,7 @@ import type { MuxContract } from "../contract.js";
 import type { MuxPaneRef } from "../types.js";
 import {
 	createYaziEventStream,
+	YAZI_DOCK_EVENT,
 	YAZI_PICK_EVENT,
 	YAZI_STREAM_POLL_MS,
 	type YaziEvent,
@@ -47,6 +48,12 @@ export interface YaziSession {
 	readonly profile: Readonly<YaziProfile> | null;
 	snapshot(): Readonly<YaziSessionSnapshot>;
 	pushCwd(cwd: string): Promise<boolean>;
+	/** Where the pane is: in the layout, parked in the hidden tab, or gone. */
+	visibility(): "visible" | "hidden" | "closed";
+	/** Park the pane out of sight; Yazi keeps running in its directory. Null on success, else why not. */
+	hide(): Promise<string | null>;
+	/** Put a parked pane back in its slot without focusing it. Null on success, else why not. */
+	show(): Promise<string | null>;
 	close(): Promise<void>;
 }
 
@@ -66,6 +73,8 @@ export interface YaziSessionOptions {
 	 * `interface.panes.files.ratio`; absent it, the dock spec's default governs.
 	 */
 	dockShare?: number;
+	/** Start parked in the hidden tab so the layout never changes until the pane is shown. */
+	hidden?: boolean;
 	onEvent: (event: YaziEvent) => void;
 	onChooser: (result: YaziChooserResult) => void;
 	onStopped?: (reason: string) => void;
@@ -179,7 +188,13 @@ export async function createYaziSession(options: YaziSessionOptions): Promise<Ya
 	let stdoutPath: string | undefined;
 	if (options.mode === "companion") {
 		writeFileSync(streamPath, "");
-		argv = [binaries.yaziPath, "--local-events", `cd,${YAZI_PICK_EVENT}`, "--remote-events", YAZI_PICK_EVENT];
+		argv = [
+			binaries.yaziPath,
+			"--local-events",
+			`cd,${YAZI_PICK_EVENT},${YAZI_DOCK_EVENT}`,
+			"--remote-events",
+			`${YAZI_PICK_EVENT},${YAZI_DOCK_EVENT}`,
+		];
 		stdoutPath = streamPath;
 	} else {
 		writeFileSync(chooserPath, "");
@@ -203,7 +218,11 @@ export async function createYaziSession(options: YaziSessionOptions): Promise<Ya
 		// The files dock: split down from the anchor at the configured share.
 		// Degrades to a plain split inside the contract when the layout tier is
 		// absent.
-		dock: { slot: "files", ...(options.dockShare === undefined ? {} : { share: options.dockShare }) },
+		dock: {
+			slot: "files",
+			...(options.dockShare === undefined ? {} : { share: options.dockShare }),
+			...(options.hidden ? { hidden: true } : {}),
+		},
 		...(Object.keys(env).length > 0 ? { env } : {}),
 		...(stdoutPath ? { stdoutPath } : {}),
 	});
@@ -281,6 +300,25 @@ export async function createYaziSession(options: YaziSessionOptions): Promise<Ya
 				...(managedProfile ? { YAZI_CONFIG_HOME: managedProfile.dir } : {}),
 			});
 			return pushed;
+		},
+		visibility: () => options.mux.dockVisibility("files"),
+		async hide(): Promise<string | null> {
+			let reason: string | null = null;
+			const hidden = await options.mux.hideDock("files", {
+				onFailure: (failure) => {
+					reason = failure.message;
+				},
+			});
+			return hidden ? null : `the files pane did not hide: ${reason ?? "the pane host refused"}`;
+		},
+		async show(): Promise<string | null> {
+			let reason: string | null = null;
+			const ref = await options.mux.showDock("files", {
+				onFailure: (failure) => {
+					reason = failure.message;
+				},
+			});
+			return ref === null ? `the files pane stayed hidden: ${reason ?? "the pane host refused"}` : null;
 		},
 		async close(): Promise<void> {
 			stream?.stop();

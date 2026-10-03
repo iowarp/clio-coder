@@ -21,7 +21,13 @@
 
 import type { DomainContract } from "../../core/domain-loader.js";
 import type { MuxDetection } from "./detect.js";
-import { createDockController, type DockController, type DockSlot, type DockState } from "./dock-controller.js";
+import {
+	createDockController,
+	type DockController,
+	type DockSlot,
+	type DockState,
+	PARKING_TAB_LABEL,
+} from "./dock-controller.js";
 import { createPaneRegistry, type MuxPaneRegistry, paneRecord } from "./pane-registry.js";
 import { muxSupportsMethod } from "./protocol.js";
 import type {
@@ -86,8 +92,10 @@ export interface MuxOpenUtilityPaneRequest {
 	 * anchor with the slot's direction and sized to `share` of the axis
 	 * (clamped, cell-floored). Requires the layout tier (protocol 17); below
 	 * the floor the request degrades to a plain split and `direction` applies.
+	 * `hidden` creates the pane in the session's parking tab instead, so the
+	 * layout does not change until `showDock`.
 	 */
-	dock?: { slot: DockSlot; share?: number };
+	dock?: { slot: DockSlot; share?: number; hidden?: boolean };
 }
 
 export interface MuxNotifyRequest {
@@ -141,6 +149,30 @@ export interface MuxContract extends DomainContract {
 	unzoomSelf(): Promise<boolean>;
 	/** Live dock geometry states, for `/panes` status. */
 	docks(): ReadonlyArray<DockState>;
+	/** Whether a slot's dock is in the layout, parked in the hidden tab, or not running. */
+	dockVisibility(slot: DockSlot): "visible" | "hidden" | "closed";
+	/**
+	 * Park a visible dock in the session's parking tab. Its process keeps
+	 * running and `showDock` brings it back where it was. True when the dock is
+	 * hidden afterwards; failure reasons go to `onFailure`.
+	 */
+	hideDock(slot: DockSlot, options?: { onFailure?: (failure: MuxPaneOpenFailure) => void }): Promise<boolean>;
+	/**
+	 * Return a hidden dock to its slot at its remembered share. Leaves zoom only
+	 * when herdr refuses the move for it, and never focuses the dock (`focusPane`
+	 * is the explicit half). Null when the slot has no dock or the anchor is too small.
+	 */
+	showDock(slot: DockSlot, options?: { onFailure?: (failure: MuxPaneOpenFailure) => void }): Promise<MuxPaneRef | null>;
+	/** End a dock's process for real, visible or hidden. False when the slot is empty. */
+	closeDock(slot: DockSlot): Promise<boolean>;
+	/**
+	 * Close parked docks a dead Clio process left behind in this workspace. A
+	 * crash skips `shutdown`, and a parked pane is out of sight, so a hidden
+	 * cliamp could otherwise keep playing with nothing on screen. Panes a live
+	 * process owns, and docks in the layout where the operator can see them, are
+	 * never touched. Returns how many were closed.
+	 */
+	reapParkedOrphans(): Promise<number>;
 	notify(request: MuxNotifyRequest): Promise<void>;
 	/** Optional compete storage route. Protocol-gated with a native Git fallback at the caller. */
 	worktreeCreate(request: MuxWorktreeCreateRequest): Promise<MuxWorktreeCreatedResult | null>;
@@ -188,6 +220,16 @@ function token(value: string | undefined | null): string | null {
 	return value.length > TOKEN_VALUE_MAX ? value.slice(0, TOKEN_VALUE_MAX) : value;
 }
 
+/** `kill(pid, 0)` probes without signalling; EPERM means the process exists under another user. */
+function processIsAlive(pid: number): boolean {
+	try {
+		process.kill(pid, 0);
+		return true;
+	} catch (error) {
+		return (error as NodeJS.ErrnoException).code === "EPERM";
+	}
+}
+
 function hasOwnedPaneToken(tokens: Readonly<Record<string, string>>): boolean {
 	return tokens[OWNER_TOKEN_KEY] === OWNER_TOKEN_VALUE || tokens[LEGACY_OWNER_TOKEN_KEY] === LEGACY_OWNER_TOKEN_VALUE;
 }
@@ -205,7 +247,18 @@ export function createMuxRuntime(options: MuxRuntimeOptions): MuxRuntime {
 	 */
 	const docks: DockController | null =
 		client !== null && anchorPaneId !== null && muxSupportsMethod(detection.server, "layout.export")
-			? createDockController({ client, anchorPaneId, log })
+			? createDockController({
+					client,
+					anchorPaneId,
+					log,
+					...(muxSupportsMethod(detection.server, "pane.zoom")
+						? {
+								leaveZoom: async () => {
+									await client.paneZoom(anchorPaneId, "off");
+								},
+							}
+						: {}),
+				})
 			: null;
 
 	let healthy = client !== null;
@@ -269,6 +322,30 @@ export function createMuxRuntime(options: MuxRuntimeOptions): MuxRuntime {
 		});
 	};
 
+	const failureFrom = (error: unknown): MuxPaneOpenFailure =>
+		error instanceof MuxError
+			? { source: "mux", kind: error.kind, wireCode: error.wireCode, method: error.method, message: error.message }
+			: { source: "local", message: error instanceof Error ? error.message : String(error) };
+
+	const reporter =
+		(onFailure: ((failure: MuxPaneOpenFailure) => void) | undefined) =>
+		(failure: MuxPaneOpenFailure): void => {
+			try {
+				onFailure?.(failure);
+			} catch {
+				// Diagnostics must not break the best-effort contract.
+			}
+		};
+
+	/**
+	 * Carries a registry record to the pane's post-move identity. Idempotent: the
+	 * `pane.moved` push and the move's own response both land here, in either order.
+	 */
+	const followMove = (previousPaneId: string, ref: MuxPaneRef): void => {
+		const held = registry.forget(previousPaneId) ?? registry.byPaneId(ref.paneId);
+		if (held) registry.record({ ...held, ref: { ...ref, workspaceId: ref.workspaceId || held.ref.workspaceId } });
+	};
+
 	const onEvent = (event: MuxEvent): void => {
 		if (event.kind === "layout.updated") {
 			docks?.noteLayoutUpdated(event.geometry);
@@ -310,13 +387,7 @@ export function createMuxRuntime(options: MuxRuntimeOptions): MuxRuntime {
 		},
 
 		async openUtilityPane(request: MuxOpenUtilityPaneRequest): Promise<MuxPaneRef | null> {
-			const report = (failure: MuxPaneOpenFailure): void => {
-				try {
-					request.onFailure?.(failure);
-				} catch {
-					// Diagnostics must not break the best-effort contract.
-				}
-			};
+			const report = reporter(request.onFailure);
 			// Idempotence for docks: a slot that already has a pane answers with it.
 			const dockSlot = request.dock?.slot;
 			if (dockSlot && docks) {
@@ -332,6 +403,7 @@ export function createMuxRuntime(options: MuxRuntimeOptions): MuxRuntime {
 						const placed = await docks.open(request.dock.slot, {
 							onRefused: (message) => report({ source: "local", message }),
 							...(request.dock.share === undefined ? {} : { share: request.dock.share }),
+							...(request.dock.hidden ? { hidden: true } : {}),
 							cwd: request.cwd,
 							...(request.env ? { env: request.env } : {}),
 						});
@@ -362,7 +434,16 @@ export function createMuxRuntime(options: MuxRuntimeOptions): MuxRuntime {
 						}
 					}
 					// The `role` token is what adoptPane finds again after a restart.
-					await tagOwner(live, ref.paneId, { role: token(purpose) }, titleSupported ? title : undefined);
+					await tagOwner(
+						live,
+						ref.paneId,
+						{
+							role: token(purpose),
+							// The pid lets a later session tell a parked orphan from a live session's dock.
+							...(request.dock ? { dock: token(request.dock.slot), pid: token(String(process.pid)) } : {}),
+						},
+						titleSupported ? title : undefined,
+					);
 					if (request.argv.length > 0) {
 						// herdr has no argv parameter on pane.split, so the command goes in
 						// through the pane's shell. `exec` replaces the shell so the pane
@@ -373,19 +454,7 @@ export function createMuxRuntime(options: MuxRuntimeOptions): MuxRuntime {
 					return ref;
 				},
 				null,
-				(error) => {
-					if (error instanceof MuxError) {
-						report({
-							source: "mux",
-							kind: error.kind,
-							wireCode: error.wireCode,
-							method: error.method,
-							message: error.message,
-						});
-					} else {
-						report({ source: "local", message: error instanceof Error ? error.message : String(error) });
-					}
-				},
+				(error) => report(failureFrom(error)),
 			);
 		},
 
@@ -430,7 +499,11 @@ export function createMuxRuntime(options: MuxRuntimeOptions): MuxRuntime {
 						);
 						// Crash recovery for a dock: the surviving pane takes the slot back so
 						// geometry management resumes instead of a second dock opening.
-						if (request.dock && docks) docks.adopt(request.dock, ref);
+						if (request.dock && docks) {
+							// A survivor outside Clio's own tab was parked by the session that died.
+							const parked = detection.self.tabId !== null && ref.tabId !== detection.self.tabId;
+							docks.adopt(request.dock, ref, { hidden: parked });
+						}
 						log("info", `mux adopted a ${request.purpose} pane left open by a previous session`);
 						return ref;
 					}
@@ -495,6 +568,81 @@ export function createMuxRuntime(options: MuxRuntimeOptions): MuxRuntime {
 
 		docks(): ReadonlyArray<DockState> {
 			return docks?.states() ?? [];
+		},
+
+		dockVisibility(slot: DockSlot): "visible" | "hidden" | "closed" {
+			const state = docks?.stateFor(slot);
+			if (!state) return "closed";
+			return state.hidden ? "hidden" : "visible";
+		},
+
+		async hideDock(slot: DockSlot, hideOptions = {}): Promise<boolean> {
+			const before = docks?.stateFor(slot);
+			if (!docks || !before) return false;
+			if (before.hidden) return true;
+			if (!muxSupportsMethod(detection.server, "pane.move")) return false;
+			const report = reporter(hideOptions.onFailure);
+			return await attempt(
+				"hideDock",
+				async () => {
+					const hidden = await docks.hide(slot);
+					const after = docks.stateFor(slot);
+					if (after) followMove(before.paneId, { paneId: after.paneId, tabId: after.tabId, workspaceId: "" });
+					if (!hidden) report({ source: "local", message: `the pane host did not move the ${slot} dock out of the layout` });
+					return hidden;
+				},
+				false,
+				(error) => report(failureFrom(error)),
+			);
+		},
+
+		async showDock(slot: DockSlot, showOptions = {}): Promise<MuxPaneRef | null> {
+			const before = docks?.stateFor(slot);
+			if (!docks || !before) return null;
+			if (!before.hidden) return { paneId: before.paneId, tabId: before.tabId, workspaceId: "" };
+			if (!muxSupportsMethod(detection.server, "pane.move")) return null;
+			const report = reporter(showOptions.onFailure);
+			return await attempt(
+				"showDock",
+				async () => {
+					const ref = await docks.show(slot, { onRefused: (message) => report({ source: "local", message }) });
+					if (ref !== null) followMove(before.paneId, ref);
+					return ref;
+				},
+				null,
+				(error) => report(failureFrom(error)),
+			);
+		},
+
+		async closeDock(slot: DockSlot): Promise<boolean> {
+			const state = docks?.stateFor(slot);
+			if (!state) return false;
+			return await contract.closePane(state.paneId);
+		},
+
+		async reapParkedOrphans(): Promise<number> {
+			return await attempt(
+				"reapParkedOrphans",
+				async (live) => {
+					const snapshot = await live.snapshot();
+					const parkedTabs = new Set(
+						snapshot.tabs
+							.filter((tab) => tab.label === PARKING_TAB_LABEL && tab.workspaceId === detection.self.workspaceId)
+							.map((tab) => tab.tabId),
+					);
+					let reaped = 0;
+					for (const pane of snapshot.panes) {
+						if (!parkedTabs.has(pane.tabId) || !hasOwnedPaneToken(pane.tokens) || registry.owns(pane.paneId)) continue;
+						const owner = Number(pane.tokens.pid);
+						if (!pane.tokens.dock || !Number.isInteger(owner) || owner <= 0 || processIsAlive(owner)) continue;
+						await live.paneClose(pane.paneId).catch(() => undefined);
+						reaped += 1;
+					}
+					if (reaped > 0) log("info", `mux closed ${reaped} parked dock(s) left behind by a Clio process that exited`);
+					return reaped;
+				},
+				0,
+			);
 		},
 
 		async notify(request: MuxNotifyRequest): Promise<void> {

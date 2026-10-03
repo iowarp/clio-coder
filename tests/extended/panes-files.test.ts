@@ -242,28 +242,36 @@ describe("contracts/panes files surface", () => {
 			getCwd: () => "/w",
 		});
 		const log: string[] = [];
-		let open = false;
+		let where: "closed" | "visible" | "hidden" = "closed";
 		const controller: PanesYaziController = {
 			async open(options) {
 				log.push(options?.once ? "open:once" : "open");
-				open = true;
+				where = "visible";
 				return { status: "opened", mode: "companion", paneId: "p9", existing: false };
+			},
+			async hide() {
+				log.push("hide");
+				where = "hidden";
+				return { status: "hidden" };
 			},
 			async close() {
 				log.push("close");
-				const was = open;
-				open = false;
+				const was = where !== "closed";
+				where = "closed";
 				return was;
 			},
-			isOpen: () => open,
+			isOpen: () => where !== "closed",
+			visibility: () => where,
 			status: () => ({ mode: "closed", paneId: null, paneCwd: null, lastLineAt: null, droppedLines: 0 }),
 		};
 		panes.attachYazi(controller);
 		deepStrictEqual(await panes.files("toggle"), { status: "opened", paneId: "p9", existing: false });
-		deepStrictEqual(await panes.files("toggle"), { status: "closed" });
+		// A visible pane is parked by the next tap, not ended; the tap after that brings it back.
+		deepStrictEqual(await panes.files("toggle"), { status: "hidden" });
+		deepStrictEqual(await panes.files("toggle"), { status: "opened", paneId: "p9", existing: false });
 		deepStrictEqual(await panes.files("pick"), { status: "opened", paneId: "p9", existing: false });
 		deepStrictEqual(await panes.files("close"), { status: "closed" });
-		deepStrictEqual(log, ["open", "close", "open:once", "close"]);
+		deepStrictEqual(log, ["open", "hide", "open", "open:once", "close"]);
 		// The preset door and the alias reach the same controller.
 		deepStrictEqual(await panes.open({ preset: "yazi" }), {
 			status: "opened",
@@ -299,10 +307,14 @@ describe("contracts/panes files surface", () => {
 					detail: "not found (install with `clio-coder tools install yazi`)",
 				};
 			},
+			async hide() {
+				return { status: "unavailable", reason: "the files pane is not open" };
+			},
 			async close() {
 				return false;
 			},
 			isOpen: () => false,
+			visibility: () => "closed",
 			status: () => ({ mode: "closed", paneId: null, paneCwd: null, lastLineAt: null, droppedLines: 0 }),
 		});
 		const missing = await enabled.files("open");
@@ -354,6 +366,9 @@ describe("contracts/files pane bridge", () => {
 							chooserPath: null,
 						}),
 						pushCwd: async () => false,
+						visibility: () => "visible",
+						hide: async () => null,
+						show: async () => null,
 						close: async () => {
 							await host.mux.closePane(pane.paneId);
 						},
@@ -435,6 +450,9 @@ describe("contracts/files pane bridge", () => {
 							chooserPath: null,
 						}),
 						pushCwd: async () => false,
+						visibility: () => "visible",
+						hide: async () => null,
+						show: async () => null,
 						close: async () => undefined,
 					},
 				};

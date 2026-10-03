@@ -16,9 +16,10 @@ import { OperatorExtensionRuntime } from "../domains/extensions/operator-runtime
 import type { InteropContract } from "../domains/interop/index.js";
 import type { TaskMemoryOperatorStatus } from "../domains/memory/index.js";
 import { openDetachedBatchViews } from "../domains/middleware/index.js";
+import { createDockKeyGate } from "../domains/mux/dock-keys.js";
 import type { MuxContract } from "../domains/mux/index.js";
-import type { MusicOperations } from "../domains/mux/music-operations.js";
-import { describeMusicResult } from "../domains/mux/music-operations.js";
+import type { MusicOperations, MusicResult } from "../domains/mux/music-operations.js";
+import { describeMusicResult, musicResultTone } from "../domains/mux/music-operations.js";
 import type { PanesOperations, PanesWatchController } from "../domains/mux/operations.js";
 import type { ObservabilityContract } from "../domains/observability/index.js";
 import { appendOutOfTurnUsageRow } from "../domains/observability/out-of-turn-usage.js";
@@ -660,6 +661,75 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 			? { onCycleScopedModelBackward: withSettingFeedback(deps.onCycleScopedModelBackward) }
 			: {}),
 	};
+	// The dock keys. A first tap shows or hides at once and a second inside the
+	// window ends the process. A tap can also arrive from inside the dock (Alt+E in
+	// Yazi, Alt+A in cliamp), where Clio's own key handler is not the one that hears
+	// it; those hide the pane and hand the keyboard back to Clio.
+	const dockKeys = createDockKeyGate();
+	type DockKeyOrigin = "composer" | "dock";
+	const pressFilesKey = (origin: DockKeyOrigin): void => {
+		const panes = deps.panes;
+		if (!panes) {
+			notify(
+				"info",
+				"the files pane is inactive: this session started without panes. Restart with `clio-coder --with-panes`, or set interface.panes.enabled=auto",
+				"files:info",
+			);
+			return;
+		}
+		void dockKeys.press("files", {
+			single: async () => {
+				const result = await panes.files("toggle");
+				if (result.status === "opened") {
+					if (result.paneId !== null) {
+						notify(
+							"success",
+							result.revealed ? "files pane shown" : result.existing ? "files pane focused" : "files pane opened",
+							"files:open",
+						);
+					}
+				} else if (result.status === "hidden") {
+					if (origin === "dock") await deps.mux?.focusSelf();
+					notify("info", "files pane hidden, still running; the key shows it again, twice quickly closes it", "files:hide");
+				} else if (result.status === "closed") notify("info", "files pane closed", "files:close");
+				else if (result.status === "missing-binary") notify("warning", result.detail, "files:missing");
+				else notify("warning", result.reason, "files:refused");
+			},
+			double: async () => {
+				await panes.files("close");
+				if (origin === "dock") await deps.mux?.focusSelf();
+				notify("info", "files pane closed", "files:close");
+			},
+		});
+	};
+	const pressMusicKey = (origin: DockKeyOrigin): void => {
+		const music = deps.music;
+		if (!music) {
+			notify(
+				"info",
+				"music needs the pane layer: restart inside herdr with `clio-coder --with-panes`, then use /music",
+				"music:info",
+			);
+			return;
+		}
+		const report = (result: MusicResult): void => {
+			const tone = musicResultTone(result);
+			notify(tone === "problem" ? "warning" : tone, describeMusicResult(result), "music:toggle");
+		};
+		void dockKeys.press("music", {
+			single: async () => {
+				const result = await music.toggle();
+				if (origin === "dock" && result.status === "hidden") await deps.mux?.focusSelf();
+				report(result);
+			},
+			double: async () => {
+				const result = await music.off();
+				if (origin === "dock") await deps.mux?.focusSelf();
+				report(result);
+			},
+		});
+	};
+	const detachMusicDockKey = deps.music?.onDockKey(() => pressMusicKey("dock"));
 	// The factory arrives only from an active `--with-panes` boot (or a test); a
 	// plain session has no deps.panes and no factory, and loads no yazi code.
 	const yaziBridge =
@@ -682,6 +752,7 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 						tui.start();
 						tui.requestRender(true);
 					},
+					onDockKey: () => pressFilesKey("dock"),
 				})
 			: null;
 	const detachYaziBridge = yaziBridge ? deps.attachYaziBridge?.(yaziBridge) : undefined;
@@ -1228,20 +1299,59 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 					notice: (level, text) => appendNotice(level, text, busNoticeSink),
 				})
 			: null;
-	// The workers-view watch pane: opened on Enter over a live run, retargeted
-	// by arrow keys through its selection file. `/panes show` and the panes
-	// tool drive the same controller through the shared operations object.
+	// The workers dock: the workers dashboard beside Clio, opened and hidden by
+	// the workers key, taken over for one run by Enter in the Fleet Runs board,
+	// `/panes show` and the panes tool through the shared operations object.
 	const watchPane =
 		mux && mux.mode !== "none" && deps.createWatchPane
 			? deps.createWatchPane({
 					mux,
 					getCwd: () => process.cwd(),
 					getWorkersRatio: () => deps.getSettings?.().interface.panes.workers.ratio ?? 0.34,
+					getSessionId: () => deps.session?.current()?.id ?? deps.getSessionId?.() ?? null,
 				})
 			: null;
 	const detachWatchPane = watchPane ? deps.attachWatchPane?.(watchPane) : undefined;
+	// The workers key. With a pane host it drives the workers dock the way the
+	// files and music keys drive theirs, and Alt+W or q pressed inside the
+	// dashboard arrive through its tap file. Without one it opens the Fleet Runs
+	// board, which `/fleet` and the left arrow on an empty composer also reach.
+	const pressWorkersKey = (origin: DockKeyOrigin): void => {
+		const workers = watchPane;
+		if (!workers || !mux?.available()) {
+			if (origin === "composer") toggleDispatchBoardOverlay();
+			return;
+		}
+		void dockKeys.press("workers", {
+			single: async () => {
+				const result = await workers.toggle();
+				if (result.status === "hidden") {
+					if (origin === "dock") await mux.focusSelf();
+					notify(
+						"info",
+						"workers dock hidden, still running; the key shows it again, twice quickly closes it",
+						"workers:hide",
+					);
+				} else if (result.status === "unavailable") notify("warning", result.reason, "workers:refused");
+			},
+			double: async () => {
+				await workers.close();
+				await mux.focusSelf();
+				notify("info", "workers dock closed", "workers:close");
+			},
+		});
+	};
+	const detachWorkersDockKey = watchPane?.onDockKey((key) => {
+		if (key === "key") {
+			pressWorkersKey("dock");
+			return;
+		}
+		// q in the dashboard: park it and hand the keyboard back, without arming
+		// a double tap on the workers key.
+		void watchPane.hide().then(() => mux?.focusSelf());
+	});
 	// Boot composition per `interface.panes.layout`: `workers` opens the workers
-	// dock parked on "no selection"; `cockpit` adds the files dock. Fire and
+	// dock on its board; `cockpit` adds the files dock. Fire and
 	// forget, and only against a live pane host: a boot must never fall through
 	// to the in-terminal chooser or block the first paint on socket traffic.
 	{
@@ -1400,40 +1510,9 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 				if (settingActions.onCycleScopedModelBackward?.() === false) announceEmptyScopedSet();
 			},
 			backgroundActiveDispatch,
-			toggleFilesPane: () => {
-				const panes = deps.panes;
-				if (!panes) {
-					notify(
-						"info",
-						"the files pane is inactive: this session started without panes. Restart with `clio-coder --with-panes`, or set interface.panes.enabled=auto",
-						"files:info",
-					);
-					return;
-				}
-				void panes.files("toggle").then((result) => {
-					if (result.status === "opened") {
-						if (result.paneId !== null)
-							notify("success", `files pane ${result.existing ? "focused" : "opened"}`, "files:open");
-					} else if (result.status === "closed") notify("info", "files pane closed", "files:close");
-					else if (result.status === "missing-binary") notify("warning", result.detail, "files:missing");
-					else notify("warning", result.reason, "files:refused");
-				});
-			},
-			toggleMusic: () => {
-				const music = deps.music;
-				if (!music) {
-					notify(
-						"info",
-						"music needs the pane layer: restart inside herdr with `clio-coder --with-panes`, then use /music",
-						"music:info",
-					);
-					return;
-				}
-				void music.toggle().then((result) => {
-					const level = result.status === "playing" ? "success" : result.status === "stopped" ? "info" : "warning";
-					notify(level, describeMusicResult(result), "music:toggle");
-				});
-			},
+			toggleFilesPane: () => pressFilesKey("composer"),
+			toggleMusic: () => pressMusicKey("composer"),
+			toggleWorkersDock: () => pressWorkersKey("composer"),
 		},
 		overlay: overlayLifecycle,
 		refreshFooter: () => footer.refresh(),
@@ -1495,8 +1574,10 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 				clearTimeout(operatorTimer);
 				for (const unsubscribe of operatorSubscriptions) unsubscribe();
 				void operatorExtensions?.dispose();
+				detachMusicDockKey?.();
 				detachYaziBridge?.();
 				yaziBridge?.dispose();
+				detachWorkersDockKey?.();
 				detachWatchPane?.();
 				watchPane?.dispose();
 				muxBridge?.dispose();
@@ -1707,6 +1788,26 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 				if (!startupAbort.signal.aborted) void operatorExtensions.reload("startup");
 			});
 		if (frame === null) return;
+		// Docks are prepared hidden only now that the first frame is out: pane
+		// host traffic and a Yazi or cliamp boot never sit in front of the paint.
+		// A failure stays silent; the key that wants the dock finds it absent and
+		// reports the reason itself.
+		setImmediate(() => {
+			if (startupAbort.signal.aborted) return;
+			const settings = deps.getSettings?.();
+			void (async () => {
+				// Parked orphans first: a crashed session's hidden cliamp must not
+				// keep playing beside the pane this session is about to prepare.
+				await mux?.reapParkedOrphans().catch(() => 0);
+				if (startupAbort.signal.aborted) return;
+				if (yaziBridge && mux?.available() && settings?.interface.panes.files.enabled) {
+					void yaziBridge.open({ hidden: true }).catch(() => undefined);
+				}
+				if (deps.music && settings?.integrations.music.enabled) {
+					void deps.music.prepare().catch(() => undefined);
+				}
+			})();
+		});
 		if (process.env.CLIO_CODER_UPDATE_CHECK !== "0" && !process.env.NO_UPDATE_NOTIFIER && !process.env.CI) {
 			// No import, disk probe, subprocess or registry request belongs on the boot path.
 			const runningVersion = readClioVersion();

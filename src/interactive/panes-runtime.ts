@@ -26,10 +26,12 @@ import {
 	runEventJournalRoot,
 } from "../domains/dispatch/run-event-journal.js";
 import type { MuxContract, MuxPaneRecord } from "../domains/mux/index.js";
+import type { MusicState } from "../domains/mux/music-operations.js";
 import {
 	PANE_PEER_IDS,
 	PANES_PRESETS,
 	type PanesCloseResult,
+	type PanesDockReport,
 	type PanesFilesResult,
 	type PanesInventoryEntry,
 	type PanesOpenResult,
@@ -59,6 +61,8 @@ export interface PanesRuntimeDeps {
 	journalRoot?: () => string;
 	/** Newest run whose journal exists, for the `logs` preset. */
 	newestJournalRunId?: () => string | null;
+	/** The music pane's live facts. Absent where music cannot run; never gated by agentControl. */
+	musicState?: () => Promise<MusicState>;
 }
 
 /**
@@ -206,7 +210,9 @@ export function createPanesRuntime(deps: PanesRuntimeDeps): PanesOperations {
 	 * keybinding, and the model tool. The settings gate and the missing-engine
 	 * message live here so every door says the same thing.
 	 */
-	const openFiles = async (once: boolean): Promise<Exclude<PanesFilesResult, { status: "closed" }>> => {
+	const openFiles = async (
+		once: boolean,
+	): Promise<Exclude<PanesFilesResult, { status: "closed" } | { status: "hidden" }>> => {
 		const preset = PANES_PRESETS[0];
 		if (!deps.getSettings().interface.panes.files.enabled) {
 			return { status: "refused", reason: "the files pane is disabled by interface.panes.files.enabled" };
@@ -218,7 +224,12 @@ export function createPanesRuntime(deps: PanesRuntimeDeps): PanesOperations {
 		try {
 			const result = await yaziController.open(once ? { once: true } : undefined);
 			if (result.status === "opened") {
-				return { status: "opened", paneId: result.paneId, existing: result.existing };
+				return {
+					status: "opened",
+					paneId: result.paneId,
+					existing: result.existing,
+					...(result.revealed ? { revealed: true } : {}),
+				};
 			}
 			if (result.status === "missing-binary") {
 				return {
@@ -246,11 +257,31 @@ export function createPanesRuntime(deps: PanesRuntimeDeps): PanesOperations {
 				await yaziController?.close();
 				return { status: "closed" };
 			}
-			if (action === "toggle" && yaziController?.isOpen()) {
-				await yaziController.close();
-				return { status: "closed" };
+			if (action === "hide" || (action === "toggle" && yaziController?.visibility() === "visible")) {
+				const hidden = await yaziController?.hide();
+				if (hidden === undefined) return { status: "unavailable", reason: "the files pane is not open" };
+				return hidden.status === "hidden" ? { status: "hidden" } : { status: "unavailable", reason: hidden.reason };
 			}
 			return openFiles(action === "pick");
+		},
+
+		async docks(): Promise<ReadonlyArray<PanesDockReport>> {
+			const settings = deps.getSettings();
+			const reports: PanesDockReport[] = [];
+			for (const slot of ["files", "workers", "music"] as const) {
+				const state = deps.mux.dockVisibility(slot);
+				let detail: string | undefined;
+				if (slot === "music") {
+					const music = state === "closed" ? null : await deps.musicState?.();
+					if (music?.playback === "playing") detail = music.title ? `playing ${music.title}` : "playing";
+					else if (music?.playback === "paused") detail = "paused";
+					else if (!settings.integrations.music.enabled) detail = "integrations.music.enabled is false";
+				} else if (slot === "files" && state === "closed" && !settings.interface.panes.files.enabled) {
+					detail = "interface.panes.files.enabled is false";
+				}
+				reports.push({ slot, state, ...(detail === undefined ? {} : { detail }) });
+			}
+			return reports;
 		},
 
 		status(): PanesStatus {
@@ -275,6 +306,7 @@ export function createPanesRuntime(deps: PanesRuntimeDeps): PanesOperations {
 					slot: dock.slot,
 					paneId: dock.paneId,
 					targetShare: dock.targetShare,
+					hidden: dock.hidden,
 				})),
 				panes: [...inventory(deps.mux.list()), ...pendingOpens.values()],
 			};
@@ -297,7 +329,13 @@ export function createPanesRuntime(deps: PanesRuntimeDeps): PanesOperations {
 				if (preset.id === "files") {
 					const result = await openFiles(request.once === true);
 					if (result.status === "opened") {
-						return { status: "opened", label: preset.id, paneId: result.paneId, existing: result.existing };
+						return {
+							status: "opened",
+							label: preset.id,
+							paneId: result.paneId,
+							existing: result.existing,
+							...(result.revealed ? { revealed: true } : {}),
+						};
 					}
 					if (result.status === "missing-binary") {
 						return { ...result, preset: preset.id };

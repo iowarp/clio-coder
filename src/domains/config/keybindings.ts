@@ -88,7 +88,7 @@ export const CLIO_APP_KEYBINDINGS = {
 	},
 	"clio-coder.dispatchBoard.toggle": {
 		defaultKeys: "alt+w",
-		description: "Workers",
+		description: "Workers dock: show or hide (twice quickly closes)",
 		scope: "composer",
 		kind: "toggle",
 		repeat: false,
@@ -96,15 +96,15 @@ export const CLIO_APP_KEYBINDINGS = {
 	},
 	"clio-coder.files.toggle": {
 		defaultKeys: "alt+e",
-		description: "Files (from Clio focus)",
+		description: "Files pane: show or hide (twice quickly closes)",
 		scope: "composer",
 		kind: "toggle",
 		repeat: false,
 		leader: "e",
 	},
 	"clio-coder.music.toggle": {
-		defaultKeys: [],
-		description: "Music pane (/music)",
+		defaultKeys: "alt+a",
+		description: "Music pane: show or hide (twice quickly closes)",
 		scope: "composer",
 		kind: "toggle",
 		repeat: false,

@@ -2274,21 +2274,6 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	// Operator-initiated backgrounding is a TUI affordance: the registry is the
 	// one object the dispatch tool and the keypress both hold.
 	const dispatchBackground = createDispatchBackgroundRegistry();
-	// One `PanesOperations` instance drives both the `panes` tool and the
-	// `/panes` slash command, so the model and the operator cannot be told
-	// different things about the same pane. It also owns the no-mux Yazi chooser,
-	// while model tool registration below remains gated on a live pane host.
-	const panes =
-		withPanes && mux
-			? withPanes.createPanesRuntime({
-					mux,
-					getSettings: () => getCurrentSettings(),
-					getDispatchSnapshot: () => dispatch.snapshot(),
-					agentRefusal: () =>
-						flowUnmediatedAgentRefusal(safety?.policy?.informationFlow?.() ?? EMPTY_INFORMATION_FLOW_POLICY, null),
-					getCwd: () => process.cwd(),
-				})
-			: null;
 	// The music pane rides the same pane host. It exists on every panes boot so
 	// `/music` can name what is missing; the model's `music` tool is gated
 	// separately at registration below.
@@ -2298,6 +2283,24 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 					mux,
 					getSettings: () => getCurrentSettings().integrations.music,
 					getCwd: () => process.cwd(),
+				})
+			: null;
+	// One `PanesOperations` instance drives both the `panes` tool and the
+	// `/panes` slash command, so the model and the operator cannot be told
+	// different things about the same pane. It also owns the no-mux Yazi chooser,
+	// while model tool registration below remains gated on a live pane host. The
+	// music facts it reports come from the session whether or not the model may
+	// control the player: what is playing is knowledge, control stays gated.
+	const panes =
+		withPanes && mux
+			? withPanes.createPanesRuntime({
+					mux,
+					getSettings: () => getCurrentSettings(),
+					getDispatchSnapshot: () => dispatch.snapshot(),
+					agentRefusal: () =>
+						flowUnmediatedAgentRefusal(safety?.policy?.informationFlow?.() ?? EMPTY_INFORMATION_FLOW_POLICY, null),
+					getCwd: () => process.cwd(),
+					...(music ? { musicState: () => music.state() } : {}),
 				})
 			: null;
 

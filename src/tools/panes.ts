@@ -22,14 +22,22 @@ export interface PanesToolDeps {
 	flow?: RegistryDeps["flow"];
 }
 
-function describeInventory(deps: PanesToolDeps): ToolResult {
+async function describeInventory(deps: PanesToolDeps): Promise<ToolResult> {
 	const status = deps.panes.status();
+	const docks = status.available ? await deps.panes.docks() : [];
 	const header = `panes mode=${status.mode} ${status.available ? "available" : "unavailable"}; notifications=${status.settings.notifications}`;
+	// The docks line is the live state settings files cannot give: hidden docks
+	// are still running, and the music pane says what it is playing.
+	const dockLine = docks.map((dock) => `${dock.slot} ${dock.state}${dock.detail ? ` (${dock.detail})` : ""}`).join("; ");
 	const rows = status.panes.map((pane) => `- ${pane.paneId} ${pane.purpose} ${pane.label}`);
 	return {
 		kind: "ok",
-		output: [header, ...(rows.length > 0 ? rows : ["- no Clio-owned panes"])].join("\n"),
-		details: { action: "list", mode: status.mode, available: status.available, panes: status.panes },
+		output: [
+			header,
+			...(dockLine.length > 0 ? [`docks: ${dockLine}`] : []),
+			...(rows.length > 0 ? rows : ["- no Clio-owned panes"]),
+		].join("\n"),
+		details: { action: "list", mode: status.mode, available: status.available, docks, panes: status.panes },
 	};
 }
 
@@ -49,14 +57,14 @@ export function createPanesTool(deps: PanesToolDeps): ToolSpec {
 				};
 			}
 			const target = typeof args.target === "string" ? args.target.trim() : "";
-			if (action === "list") return describeInventory(deps);
+			if (action === "list") return await describeInventory(deps);
 			if (action === "show") {
 				if (target.length === 0) return { kind: "error", message: "panes: action=show requires target" };
 				const result = await deps.panes.show(target);
 				if (result.status === "watching") {
 					return {
 						kind: "ok",
-						output: `the watch pane is now rendering ${result.agentId} (run ${result.runId}).`,
+						output: `the workers dock is now following ${result.agentId} (run ${result.runId}).`,
 						details: { action: "show", runId: result.runId, agentId: result.agentId },
 					};
 				}
@@ -81,9 +89,11 @@ export function createPanesTool(deps: PanesToolDeps): ToolSpec {
 						output:
 							result.paneId === null
 								? `completed the ${result.label} pick.`
-								: result.existing
-									? `the ${result.label} pane was already open and is now focused (${result.paneId}).`
-									: `opened the ${result.label} pane (${result.paneId}).`,
+								: result.revealed
+									? `the ${result.label} pane was hidden and is now shown and focused (${result.paneId}).`
+									: result.existing
+										? `the ${result.label} pane was already open and is now focused (${result.paneId}).`
+										: `opened the ${result.label} pane (${result.paneId}).`,
 						details: { action: "open", preset, paneId: result.paneId },
 					};
 				}

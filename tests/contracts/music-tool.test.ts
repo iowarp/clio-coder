@@ -19,12 +19,17 @@ function fakeMusic(calls: string[]): MusicOperations {
 	return {
 		unavailableReason: () => null,
 		isOpen: () => false,
+		visibility: () => "closed",
 		toggle: record("toggle", { status: "stopped" }),
 		on: record("on", { status: "playing", title: "REYFM Lofi", opened: true }),
 		off: record("off", { status: "stopped" }),
+		pause: record("pause", { status: "paused", title: "REYFM Lofi" }),
 		next: record("next", { status: "playing", title: "Lofi 24/7", opened: false }),
 		station: record("station", { status: "stopped" }),
 		status: record("status", { status: "unavailable", reason: "music is unavailable: cliamp not found" }),
+		prepare: async () => undefined,
+		onDockKey: () => () => undefined,
+		state: async () => ({ dock: "closed", playback: null, title: null }),
 	};
 }
 
@@ -51,11 +56,12 @@ describe("music tool", () => {
 			details: { action: "on", status: "playing", title: "REYFM Lofi", opened: true },
 		});
 		strictEqual((await call("next")).kind, "ok");
+		strictEqual((await call("pause")).kind, "ok");
 		strictEqual((await call("off")).kind, "ok");
 		deepStrictEqual(await call("status"), {
 			kind: "error",
 			message: "music: music is unavailable: cliamp not found",
 		});
-		deepStrictEqual(calls, ["on", "next", "off", "status"]);
+		deepStrictEqual(calls, ["on", "next", "pause", "off", "status"]);
 	});
 });

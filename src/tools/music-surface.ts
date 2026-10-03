@@ -12,7 +12,7 @@ import type { ToolSurface } from "./lazy-tool.js";
 export const musicToolSurface = {
 	name: ToolNames.Music,
 	description:
-		"Control the focus-radio music pane beside this session: on opens it and plays, off stops and closes it, next skips to the next station, status reports what is playing.",
+		"Control the focus-radio music pane beside this session: on plays (opening or revealing the pane first), pause silences it and keeps the pane, off stops and closes it, next skips to the next station, status reports what is playing or paused.",
 	parameters: Type.Object({
 		action: StringEnum([...MUSIC_TOOL_ACTIONS], { description: "Music action." }),
 	}),
