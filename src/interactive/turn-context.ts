@@ -122,6 +122,8 @@ import { renderCompactionSummaryLine, renderEvictionSkipLine } from "./renderers
 import type { TurnMiddleware } from "./turn-middleware.js";
 import type { AgentRuntime, ChatTurnState } from "./turn-state.js";
 
+const AUTO_COMPACT_FAILURE_LIMIT = 3;
+
 export interface TurnContextDeps {
 	memoryCommitBridge?: MemoryInterventionRegistration | undefined;
 	interactiveGuidance?: boolean;
@@ -502,6 +504,13 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 	// context. Same-turn tool growth or same-length content replacement must
 	// get a fresh cut; ordinary below-threshold checks never fingerprint it.
 	let emptyAutoCompactContextKey: string | null = null;
+	// A summarizer that fails deterministically (a summary request too large for
+	// the window, a broken route) would otherwise be called again after every
+	// tool batch, because each batch changes the attempt key. Count consecutive
+	// automatic failures and pause the automatic path at the limit until a
+	// compaction succeeds or the session changes. /compact and overflow recovery
+	// are forced and still run.
+	let autoCompactFailures = 0;
 
 	// The live budget view and the identity that decides when an advisory
 	// re-arms. `branchAnchorTurnId` moves only on real branch navigation, so two
@@ -1218,6 +1227,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		const cfg = settings.context.compaction;
 		const autoEnabled = cfg?.auto !== false;
 		if (!force && !autoEnabled) return false;
+		if (!force && autoCompactFailures >= AUTO_COMPACT_FAILURE_LIMIT) return false;
 		const compactionThreshold = cfg?.threshold ?? DEFAULT_COMPACTION_THRESHOLD;
 		const pressureEstimate = force && !requiredFit ? null : liveContextEstimate(agentRuntime, pendingUserText);
 		if (
@@ -1611,6 +1621,10 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			emitCompactionActivity("failed", compactionFailureMessage(error));
 			deps.bus?.emit(BusChannels.CompactionEnd, { trigger, at: Date.now() });
 			summarySignal?.throwIfAborted();
+			if (!force && ++autoCompactFailures === AUTO_COMPACT_FAILURE_LIMIT)
+				deps.emitNotice(
+					`automatic compaction paused after ${AUTO_COMPACT_FAILURE_LIMIT} consecutive failures; run /compact to retry`,
+				);
 			throw error;
 		}
 		if (result?.noGain) {
@@ -1684,6 +1698,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			at: Date.now(),
 		} satisfies ContextPrunedPayload);
 		emitCompactionActivity("completed", "context compaction complete");
+		autoCompactFailures = 0;
 
 		deps.emitNotice(
 			renderCompactionSummaryLine({
@@ -2395,6 +2410,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			sessionWorkingContextPaths.clear();
 			pendingPromptLogEntry = null;
 			emptyAutoCompactContextKey = null;
+			autoCompactFailures = 0;
 			noUsefulCutBasisKey = null;
 			reconciledAnchor = null;
 			// Real branch navigation. The epoch separates two visits to the same
