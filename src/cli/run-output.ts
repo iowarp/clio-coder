@@ -88,8 +88,56 @@ function limitationLine(item: string): string {
 	return chars.length > 400 ? `${chars.slice(0, 399).join("")}…` : plain;
 }
 
+/**
+ * The sealed result's own prose, for a native worker that delivered its answer
+ * only through the result contract and wrote no assistant text (DF-6: a read-only
+ * coder's explanation reached stdout as a bare receipt line).
+ */
+function sealedResultAnswer(receipt: RunReceipt): string {
+	const output = receipt.output;
+	if (output?.state !== "final") return "";
+	const structured = output.structured;
+	if (structured === undefined) return output.text.trim();
+	const data = structured.data;
+	const claims = (value: unknown): string[] =>
+		records(value).flatMap((finding) => {
+			if (typeof finding.claim !== "string") return [];
+			const at =
+				typeof finding.path === "string" && typeof finding.line === "number"
+					? ` (${finding.path}:${finding.line})`
+					: typeof finding.evidence === "string"
+						? ` (${finding.evidence})`
+						: "";
+			return [`- ${finding.claim}${at}`];
+		});
+	const bullets = (value: unknown): string[] => strings(value).map((item) => `- ${item}`);
+	let lines: string[];
+	switch (structured.kind) {
+		case "mutation-report":
+			lines = [...strings([data.summary]), ...bullets(data.observations)];
+			break;
+		case "scout-report":
+		case "research-report":
+			lines = claims(data.findings);
+			break;
+		case "world-knowledge-report":
+			lines = [...strings(data.synthesis), ...claims(data.facts)];
+			break;
+		case "provenance-report":
+			lines = bullets(data.confirmedFacts);
+			break;
+		case "oracle-report":
+			lines = strings([data.verdict, data.challenge]);
+			break;
+		default:
+			lines = [];
+	}
+	return lines.length > 0 ? lines.join("\n") : output.text.trim();
+}
+
 /** The human answer, sealed evidence limits, and execution receipt in that order. */
-export function formatDispatchHumanOutput(answer: string, receipt: RunReceipt): string {
+export function formatDispatchHumanOutput(streamedAnswer: string, receipt: RunReceipt): string {
+	const answer = streamedAnswer.length > 0 ? streamedAnswer : sealedResultAnswer(receipt);
 	const limitations = sealedResultLimitations(receipt);
 	const block =
 		limitations.length > 0
