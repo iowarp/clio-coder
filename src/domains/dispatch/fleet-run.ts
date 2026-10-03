@@ -19,7 +19,7 @@ import { attributeCommitMessage } from "../../core/commit-attribution.js";
 import { clioStateDir } from "../../core/xdg.js";
 import type { FleetCommandRegistry } from "../agents/fleet-commands.js";
 import type { FleetContract } from "../agents/fleet-contract.js";
-import { resultContractAuthorship } from "../agents/result-contract.js";
+import { mutationReportPaths, resultContractAuthorship } from "../agents/result-contract.js";
 import type { AgentSpec } from "../agents/spec.js";
 import { aggregateCostAmounts, type CostAggregate, renderCostAmount } from "../observability/cost.js";
 import type { CostProvenance } from "../providers/index.js";
@@ -720,7 +720,29 @@ export async function executeFleetRun(input: ExecuteFleetRunInput): Promise<Flee
 					independentReviewFresh = false;
 				}
 				const originalMessage = isCommit ? commitMessageFor(step, priorResults) : null;
+				const mutatedPaths = new Set<string>();
+				if (step.loop?.role === "check" && step.gate === undefined) {
+					const ancestors = executionPlanAncestors(livePlan, step.id);
+					for (const source of livePlan.steps) {
+						if (source.kind !== "agent" || source.scope !== "workspace" || !ancestors.has(source.id)) continue;
+						const result = priorResults.get(source.id);
+						if (result?.integrityValid !== true) continue;
+						const receipt = receiptsByStep.get(source.id);
+						const paths =
+							source.expectedResultContract === "mutation-report"
+								? mutationReportPaths({ kind: "mutation-report" }, result.output)
+								: [];
+						for (const filename of [
+							...paths,
+							...(receipt?.worktree?.changedPaths ?? []),
+							...(receipt?.checkoutChanges?.changedPaths ?? []),
+						]) {
+							mutatedPaths.add(filename);
+						}
+					}
+				}
 				const outcome = await runCodeStep({
+					...(mutatedPaths.size > 0 ? { mutatedPaths: [...mutatedPaths] } : {}),
 					...(step.args ? { args: step.args } : {}),
 					stepId: step.id,
 					command,

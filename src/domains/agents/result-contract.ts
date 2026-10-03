@@ -1482,6 +1482,13 @@ export interface MutationReportChecks {
 	validationPassed: boolean;
 }
 
+export function mutationReportPaths(contract: ResultContract, output: string | null): string[] {
+	if (contract.kind !== "mutation-report") return [];
+	const parsed = parseJson(output);
+	if (!parsed.ok || !Array.isArray(parsed.value.mutatedPaths)) return [];
+	return parsed.value.mutatedPaths.filter((entry): entry is string => string(entry));
+}
+
 /**
  * Read `declaredChecks` and whether any validation passed from a mutation
  * report. Anything unreadable or of another kind reads as no claim, so the

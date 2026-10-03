@@ -1,5 +1,5 @@
 import { match, ok, strictEqual } from "node:assert/strict";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, it } from "node:test";
@@ -58,4 +58,40 @@ it("bounds stdout with the existing command capture cap", async () => {
 	strictEqual(Buffer.byteLength(result.stdout, "utf8"), CODE_STEP_CAPTURE_MAX_BYTES);
 	strictEqual(result.record.outputBytes, producedBytes);
 	strictEqual(result.record.outputTruncated, true);
+});
+
+it("fails the check when a newly reported test fails outside the declared suite", async () => {
+	const root = mkdtempSync(join(tmpdir(), "clio-coder-changed-test-"));
+	roots.push(root);
+	writeFileSync(join(root, "package.json"), JSON.stringify({ scripts: { test: "node --test visible.test.cjs" } }));
+	writeFileSync(join(root, "visible.test.cjs"), "require('node:test')('visible', () => {});\n");
+	writeFileSync(
+		join(root, "repro.test.cjs"),
+		"require('node:test')('reproduction', () => { throw Error('still broken'); });\n",
+	);
+	const input = {
+		stepId: "check",
+		command: {
+			id: "test",
+			argv: [process.execPath, "--test", "visible.test.cjs"],
+			cwd: "",
+			timeoutMs: 30_000,
+			env: [],
+			description: "Declared suite",
+		},
+		workspaceRoot: root,
+	};
+	strictEqual((await runCodeStep(input)).report.passed, true);
+	const failed = await runCodeStep({ ...input, mutatedPaths: ["repro.test.cjs"] });
+	strictEqual(failed.report.passed, false);
+	strictEqual(failed.report.exitCode, 1);
+	strictEqual(failed.report.checks[0]?.passed, true);
+	strictEqual(failed.report.checks[1]?.passed, false);
+	match(failed.report.outputExcerpt, /still broken/u);
+	writeFileSync(join(root, "repro.test.cjs"), "require('node:test')('reproduction', () => {});\n");
+	strictEqual((await runCodeStep({ ...input, mutatedPaths: ["repro.test.cjs"] })).report.passed, true);
+	writeFileSync(join(root, "repro.test.unknown"), "no runner\n");
+	const fallback = await runCodeStep({ ...input, mutatedPaths: ["repro.test.unknown"] });
+	strictEqual(fallback.report.passed, true);
+	match(fallback.report.outputExcerpt, /no recognizable project runner.*declared check only/u);
 });

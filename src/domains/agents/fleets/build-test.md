@@ -24,10 +24,13 @@ Implement this change and leave the suite green.
 
 The suite is run by code: after you finish, a deterministic check step runs the
 repository's registered `test` command, shown below with its exact arguments,
-and reports its exit code and output verbatim. Do not invent another test
-command. For a reported defect, put your reproduction test where that command
-runs it (extend a test file it names, when it names files), so the check stays
-red until every clause of the report is fixed.
+and reports its exit code and output verbatim. The check also runs test files
+you create or change and name in your mutation report through the project's
+recognized test runner. If no runner is recognizable, the check records that
+limitation and runs the registered command. Do not invent another test command.
+For a reported defect, put your reproduction test beside the project's tests
+and report its path, so it gates the result even when the registered command
+names only existing test files.
 
 If the suite comes back red you receive its output and the previous attempt's report as input data. Repair
 exactly what it reported. Do not restate the failure, do not weaken or delete a
