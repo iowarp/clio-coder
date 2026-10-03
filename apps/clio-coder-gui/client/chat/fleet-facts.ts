@@ -310,6 +310,41 @@ export function fleetNotices(items: readonly FleetItemLike[]): readonly FleetNot
 		.map((item) => ({ id: item.id, at: item.at, presentation: presentFleetFact(item.fact) }));
 }
 
+export interface FleetEvidence {
+	readonly id: string;
+	readonly at: string;
+	readonly evidenceId: string;
+	readonly runId: string;
+	readonly firstPassSuccess: boolean;
+	readonly findingCount: number | null;
+}
+
+/**
+ * The evidence bundles sealed for this conversation's runs, newest first. Each names its bundle and
+ * its run, so the chat can open the evidence page and the dispatch record without a lookup.
+ */
+export function fleetEvidence(items: readonly FleetItemLike[]): readonly FleetEvidence[] {
+	return items
+		.flatMap((item): FleetEvidence[] => {
+			if (item.fact.type !== "evidence.ready") return [];
+			const payload = record(item.fact.payload);
+			const evidenceId = text(payload.evidenceId);
+			const runId = text(payload.runId);
+			if (evidenceId === null || runId === null) return [];
+			return [
+				{
+					id: item.id,
+					at: item.at,
+					evidenceId,
+					runId,
+					firstPassSuccess: flag(payload.firstPassSuccess),
+					findingCount: integer(payload.findingCount),
+				},
+			];
+		})
+		.sort((left, right) => right.at.localeCompare(left.at));
+}
+
 /* --------------------------------------------------------------- steering */
 
 /**

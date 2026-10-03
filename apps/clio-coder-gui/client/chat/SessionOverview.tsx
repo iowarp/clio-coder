@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import { useMemo } from "react";
+import { Link } from "react-router";
 import { routes } from "../../contracts/routes.js";
 import type { Client } from "../api/client.js";
 import { Icon } from "../design/icons.js";
@@ -9,7 +10,14 @@ import { countRender } from "../render/render-probe.js";
 import { ClioPulse, PULSE_SIZE } from "../shell/ClioMark.js";
 import { boardView, type PlanRow } from "./board-model.js";
 import { changeCounts, summarizeChanges } from "./changes-model.js";
-import { FLEET_STATE_LABELS, FLEET_STATE_TONES, foldFleetRuns, isLiveRun, isWorkingRun } from "./fleet-facts.js";
+import {
+	FLEET_STATE_LABELS,
+	FLEET_STATE_TONES,
+	fleetEvidence,
+	foldFleetRuns,
+	isLiveRun,
+	isWorkingRun,
+} from "./fleet-facts.js";
 import { compactDuration, contextMeter, contextSegments, taskOverview } from "./overview-model.js";
 import type { PaneSession, PaneView } from "./pane-model.js";
 import {
@@ -114,6 +122,7 @@ export function SessionOverview({
 	const overview = useMemo(() => taskOverview(session.turns, nowMs), [session.turns, nowMs]);
 	const changes = useMemo(() => summarizeChanges(session.tools, workspaceRoot), [session.tools, workspaceRoot]);
 	const runs = useMemo(() => foldFleetRuns(session.fleet), [session.fleet]);
+	const evidence = useMemo(() => fleetEvidence(session.fleet), [session.fleet]);
 	const live = runs.filter(isLiveRun);
 	const last = session.turns.at(-1);
 	const working = open && overview.running;
@@ -304,6 +313,34 @@ export function SessionOverview({
 					) : (
 						<p className="pane-empty">Every worker has settled.</p>
 					)}
+				</Section>
+			) : null}
+
+			{evidence.length > 0 ? (
+				<Section id="pane-evidence" title="Evidence" aside={<span className="pane-card__state">{evidence.length}</span>}>
+					<ul className="pane-evidence">
+						{evidence.slice(0, 6).map((row) => {
+							const agent = runs.find((run) => run.runId === row.runId)?.agentId ?? "run";
+							return (
+								<li key={row.id}>
+									<StatusMark
+										tone={row.firstPassSuccess ? "success" : "warn"}
+										label={row.firstPassSuccess ? "First pass" : "Retried"}
+									/>
+									<span>
+										<strong>{agent}</strong>{" "}
+										{row.findingCount === null
+											? "findings not reported"
+											: `${row.findingCount} ${row.findingCount === 1 ? "finding" : "findings"}`}
+									</span>
+									<span className="pane-evidence__links">
+										<Link to={`/evidence/${encodeURIComponent(row.evidenceId)}`}>Evidence</Link>
+										<Link to={`/fleet/dispatches/${encodeURIComponent(row.runId)}`}>Run</Link>
+									</span>
+								</li>
+							);
+						})}
+					</ul>
 				</Section>
 			) : null}
 

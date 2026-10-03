@@ -12,6 +12,7 @@ import { RunSteer, type RunSteering } from "./FleetStrip.js";
 import {
 	FLEET_STATE_LABELS,
 	FLEET_STATE_TONES,
+	fleetEvidence,
 	fleetNotices,
 	fleetRunDetail,
 	isLiveRun,
@@ -195,6 +196,7 @@ export const WorkerGraph = memo(function WorkerGraph({
 }) {
 	const graph = useMemo(() => workerGraph(session.fleet), [session.fleet]);
 	const notices = useMemo(() => fleetNotices(session.fleet), [session.fleet]);
+	const evidence = useMemo(() => new Map(fleetEvidence(session.fleet).map((row) => [row.id, row])), [session.fleet]);
 	const [selected, setSelected] = useState<string | null>(null);
 	const [liveOnly, setLiveOnly] = useState(false);
 	const noticesId = useId();
@@ -280,6 +282,14 @@ export const WorkerGraph = memo(function WorkerGraph({
 									</span>
 									<span className="agents-notices__text">
 										<strong>{notice.presentation.label}</strong> {notice.presentation.summary}
+										{evidence.has(notice.id) ? (
+											<Link
+												className="agents-notices__link"
+												to={`/evidence/${encodeURIComponent(evidence.get(notice.id)?.evidenceId ?? "")}`}
+											>
+												Open evidence
+											</Link>
+										) : null}
 									</span>
 									<time dateTime={notice.at} title={stamp.full}>
 										{stamp.short}

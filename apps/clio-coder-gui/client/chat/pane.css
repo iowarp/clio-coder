@@ -300,6 +300,35 @@
 	font: 11px / 1.5 var(--font-mono);
 	color: var(--ink);
 }
+.pane-evidence {
+	display: grid;
+	gap: var(--space-2);
+	margin: 0;
+	padding: 0;
+	list-style: none;
+}
+.pane-evidence li {
+	display: grid;
+	grid-template-columns: auto minmax(0, 1fr) auto;
+	align-items: baseline;
+	gap: var(--space-2);
+	font-size: var(--text-meta);
+}
+.pane-evidence strong {
+	font: 500 12px / 1.4 var(--font-mono);
+}
+.pane-evidence__links {
+	display: inline-flex;
+	gap: var(--space-2);
+	font-size: 12px;
+}
+.pane-evidence__links a {
+	color: var(--accent);
+	text-decoration: none;
+}
+.pane-evidence__links a:hover {
+	text-decoration: underline;
+}
 .pane-empty,
 .pane-note {
 	margin: 0;

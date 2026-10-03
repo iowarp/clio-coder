@@ -568,3 +568,13 @@ code.agents-mono {
 	display: grid;
 	gap: var(--space-3);
 }
+
+.agents-notices__link {
+	margin-left: var(--space-2);
+	color: var(--accent);
+	font-size: 12px;
+	text-decoration: none;
+}
+.agents-notices__link:hover {
+	text-decoration: underline;
+}
