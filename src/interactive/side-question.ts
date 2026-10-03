@@ -16,11 +16,11 @@
 import {
 	isResponseSchemaRejection,
 	type ResponseSchemaDialect,
+	responseFormatFor,
 	responseSchemaDialectFor,
 } from "../core/response-schema.js";
 import { stream } from "../engine/ai.js";
 import { readDiffusionFrame } from "../engine/apis/diffusion-frames.js";
-import { patchResponseSchemaPayloadForDialect } from "../engine/provider-payload.js";
 import type { AgentMessage, EngineModel, Usage } from "../engine/types.js";
 
 /**
@@ -206,8 +206,7 @@ async function runRound(input: OutOfTurnRoundInput, binding: SchemaBinding | nul
 	if (input.signal !== undefined) options.signal = input.signal;
 	if (input.temperature !== undefined) options.temperature = input.temperature;
 	if (binding !== null) {
-		options.onPayload = (payload: unknown): unknown | undefined =>
-			patchResponseSchemaPayloadForDialect(payload, binding.dialect, binding.schema, binding.name);
+		options.samplingParams = { response_format: responseFormatFor(binding.dialect, binding.schema, binding.name) };
 	}
 
 	const context = {

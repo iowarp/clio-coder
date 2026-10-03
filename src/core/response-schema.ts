@@ -74,6 +74,20 @@ export function responseSchemaDialectFor(runtimeId: string): ResponseSchemaDiale
 }
 
 /**
+ * The `response_format` request field that binds a completion to `schema` in
+ * `dialect`. Callers carry it through `StreamOptions.samplingParams`, which the
+ * completions adapter merges into the body after every named field.
+ */
+export function responseFormatFor(
+	dialect: ResponseSchemaDialect,
+	schema: Record<string, unknown>,
+	name: string,
+): Record<string, unknown> {
+	if (dialect === "llamacpp-json-object") return { type: "json_object", schema };
+	return { type: "json_schema", json_schema: { name, strict: true, schema } };
+}
+
+/**
  * Whether this runtime speaks the dialect above. Transport shape, not capability.
  *
  * LiteLLM joins llama.cpp here because a gateway in front of llama.cpp is the

@@ -27,7 +27,11 @@ import {
 	isWorkerToolCallCapExceededReason,
 	isWorkerToolCallCapSynthesisReason,
 } from "../core/guardrails.js";
-import { runtimeSpeaksResponseSchemaDialect } from "../core/response-schema.js";
+import {
+	responseFormatFor,
+	responseSchemaDialectFor,
+	runtimeSpeaksResponseSchemaDialect,
+} from "../core/response-schema.js";
 import { workerSandboxConfinesWrites, workerSandboxReadableRoots } from "../core/sandbox/worker-process.js";
 import { readLayeredSettings } from "../core/settings-layers.js";
 import { agentSkillToolPolicy } from "../core/skill-activation.js";
@@ -121,12 +125,7 @@ import {
 	sanitizeLockedSynthesisMessage,
 	workerLoopBlockBudget,
 } from "./loop-guard.js";
-import {
-	applyToolRounds,
-	deterministicSampling,
-	patchLlamaCppResponseSchemaPayload,
-	supportsNamedToolChoice,
-} from "./provider-payload.js";
+import { applyToolRounds, deterministicSampling, supportsNamedToolChoice } from "./provider-payload.js";
 import type { AgentEvent, AgentMessage, EngineModel } from "./types.js";
 import type { ClioWorkerEvent } from "./worker-events.js";
 import { createWorkerSafety, createWorkerToolRegistry, INTERNAL_HELPER_RESULT_TOOL } from "./worker-tools.js";
@@ -972,6 +971,14 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 
 	const inheritedMessages = seededWorkerMessages(input.contextSeed);
 	const contextGuard = createWorkerContextGuard(observations.archive);
+	// assertResponseSchemaRuntime refused any runtime without a dialect, so a
+	// schema here always has one. The constraint rides samplingParams, which the
+	// completions adapter merges into the body after every named field.
+	const responseDialect = responseSchemaDialectFor(input.runtime.id);
+	const workerResponseFormat =
+		input.responseSchema !== undefined && responseDialect !== null
+			? responseFormatFor(responseDialect, input.responseSchema, "clio_result")
+			: undefined;
 	const options: EngineAgentOptions = {
 		// The run's restrictions are judged against the target as configured for
 		// this run before each request, the same verdict the parent would reach.
@@ -1081,12 +1088,16 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 			const sampling =
 				input.sampling === "deterministic" ? deterministicSampling(currentModel, input.runtime.id) : undefined;
 			const requestOptions =
-				sampling === undefined
+				sampling === undefined && workerResponseFormat === undefined
 					? streamOptions
 					: {
 							...streamOptions,
 							...sampling,
-							samplingParams: { ...streamOptions?.samplingParams, ...sampling.samplingParams },
+							samplingParams: {
+								...streamOptions?.samplingParams,
+								...sampling?.samplingParams,
+								...(workerResponseFormat !== undefined ? { response_format: workerResponseFormat } : {}),
+							},
 						};
 			// Routed per attempt: the lock and the middleware choice can flip between
 			// the first call and the overflow retry. The terminal handoff comes first
@@ -1133,14 +1144,6 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 			tools,
 			messages: inheritedMessages,
 		},
-		// The response-schema constraint is the one request mutation still applied
-		// to the body; tool routing lives in the rounds above.
-		...(input.responseSchema !== undefined
-			? {
-					onPayload: async (payload: unknown) =>
-						patchLlamaCppResponseSchemaPayload(payload, input.runtime.id, input.responseSchema),
-				}
-			: {}),
 		getApiKey: async () => input.apiKey,
 	};
 	if (input.sessionId) options.sessionId = input.sessionId;

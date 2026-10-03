@@ -11,12 +11,6 @@ import type {
 	OpenAIResponsesOptions,
 	SimpleStreamOptions,
 } from "@earendil-works/pi-ai";
-import {
-	GATEWAY_SCHEMA_RUNTIME_ID,
-	RESPONSE_SCHEMA_RUNTIME_ID,
-	type ResponseSchemaDialect,
-	responseSchemaDialectFor,
-} from "../core/response-schema.js";
 import { resolvedRequestContext } from "./context.js";
 import type { EngineModel } from "./types.js";
 
@@ -313,51 +307,6 @@ export function applyToolRounds(
 		if (controlled !== undefined) return controlled;
 	}
 	return { context, options };
-}
-
-/** Attach the admitted runtime's JSON-schema constraint without changing its tool surface. */
-export function patchLlamaCppResponseSchemaPayload(
-	payload: unknown,
-	runtimeId: string,
-	responseSchema: Record<string, unknown> | undefined,
-): unknown | undefined {
-	if (responseSchema === undefined) return undefined;
-	if (runtimeId !== RESPONSE_SCHEMA_RUNTIME_ID && runtimeId !== GATEWAY_SCHEMA_RUNTIME_ID) {
-		throw new Error(`responseSchema requires the native llamacpp or litellm runtime; received '${runtimeId}'`);
-	}
-	if (!isRecord(payload)) throw new Error("cannot apply responseSchema to a non-object provider payload");
-	const dialect = responseSchemaDialectFor(runtimeId);
-	return dialect === null
-		? undefined
-		: patchResponseSchemaPayloadForDialect(payload, dialect, responseSchema, "clio_result");
-}
-
-/**
- * Apply a JSON-schema response constraint in the dialect the runtime takes.
- *
- * Unlike the worker patcher above, this one is for a seam that treats native
- * enforcement as an optimization: the caller looks the dialect up first and
- * simply does not call this when there is none, so an unconstrained request
- * still goes out and the prompt-level instruction carries it (issue #223).
- * Returns undefined when the payload is not an object, which leaves it alone.
- */
-export function patchResponseSchemaPayloadForDialect(
-	payload: unknown,
-	dialect: ResponseSchemaDialect,
-	responseSchema: Record<string, unknown>,
-	schemaName: string,
-): unknown | undefined {
-	if (!isRecord(payload)) return undefined;
-	if (dialect === "llamacpp-json-object") {
-		return { ...payload, response_format: { type: "json_object", schema: responseSchema } };
-	}
-	return {
-		...payload,
-		response_format: {
-			type: "json_schema",
-			json_schema: { name: schemaName, strict: true, schema: responseSchema },
-		},
-	};
 }
 
 // Identical local handbook runs shared few rules when servers sampled at their defaults.

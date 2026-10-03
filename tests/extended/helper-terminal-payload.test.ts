@@ -1,14 +1,10 @@
-import { deepStrictEqual, ok, strictEqual, throws } from "node:assert/strict";
+import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { test } from "node:test";
 import { Type } from "typebox";
+import { responseFormatFor, responseSchemaDialectFor } from "../../src/core/response-schema.js";
 import { engineStreamSimple } from "../../src/engine/api-registry.js";
 import { engineModels } from "../../src/engine/models.js";
-import {
-	applyToolRounds,
-	patchLlamaCppResponseSchemaPayload,
-	supportsNamedToolChoice,
-	type ToolRound,
-} from "../../src/engine/provider-payload.js";
+import { applyToolRounds, supportsNamedToolChoice, type ToolRound } from "../../src/engine/provider-payload.js";
 import type { EngineModel } from "../../src/engine/types.js";
 
 const name = "clio_submit_result";
@@ -154,11 +150,12 @@ test("unknown API does not claim forced-tool support", () => {
 });
 test("admitted LiteLLM response schema uses gateway dialect while llama retains native dialect", () => {
 	const schema = { type: "object", properties: {} };
-	deepStrictEqual(patchLlamaCppResponseSchemaPayload({}, "litellm", schema), {
-		response_format: { type: "json_schema", json_schema: { name: "clio_result", strict: true, schema } },
+	const litellm = responseSchemaDialectFor("litellm");
+	const llamacpp = responseSchemaDialectFor("llamacpp");
+	ok(litellm !== null && llamacpp !== null);
+	deepStrictEqual(responseFormatFor(litellm, schema, "clio_result"), {
+		type: "json_schema",
+		json_schema: { name: "clio_result", strict: true, schema },
 	});
-	deepStrictEqual(patchLlamaCppResponseSchemaPayload({}, "llamacpp", schema), {
-		response_format: { type: "json_object", schema },
-	});
-	throws(() => patchLlamaCppResponseSchemaPayload({}, "ollama", schema));
+	deepStrictEqual(responseFormatFor(llamacpp, schema, "clio_result"), { type: "json_object", schema });
 });
