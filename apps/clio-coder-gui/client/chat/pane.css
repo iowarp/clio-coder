@@ -198,8 +198,11 @@
 	color: var(--ink-muted);
 	font-variant-numeric: tabular-nums;
 }
-/* In either sidebar a state is a glyph and a word, like the rail's own connection line, never a pill. */
-.pane .status-mark {
+/* In either sidebar a state is a glyph and a word, like the rail's own connection line, never a pill.
+   The toned selector is here because a tone's own tint has the same weight as `.pane .status-mark`
+   and won on load order, which left a padless tinted chip behind the word. */
+.pane .status-mark,
+.pane .status-mark[data-tone] {
 	gap: 5px;
 	padding: 0;
 	border: 0;
@@ -318,8 +321,16 @@
 	border-radius: 8px;
 	font-size: var(--text-meta);
 }
-.pane-agents li > span:empty {
+/* A static mark: the rail's row for the same task carries the moving one. */
+.pane-agents .pane-agents__glyph {
 	width: 14px;
+	color: var(--accent);
+	font-family: var(--font-mono);
+	text-align: center;
+}
+/* The approval dot sits in the same 14px cell as the mark, so every title starts on one edge. */
+.pane-agents li > .wb-dot {
+	margin-inline: 3.5px;
 }
 .pane-agents li:has(a:hover) {
 	background: var(--wb-hover);

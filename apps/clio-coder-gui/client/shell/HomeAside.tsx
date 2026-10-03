@@ -9,7 +9,6 @@ import { Icon } from "../design/icons.js";
 import { StatusMark } from "../design/status.js";
 import { useSetupStatus } from "../pages/target-onboarding.js";
 import { setAsideExpanded } from "./aside-state.js";
-import { ClioPulse, PULSE_SIZE } from "./ClioMark.js";
 import { useShell } from "./shell-context.js";
 import { isUntouched, STATE_LABELS, taskState, taskTitle } from "./shell-model.js";
 import "../chat/pane.css";
@@ -28,6 +27,11 @@ export function HomeAside({ client, workspace }: { client: Client; workspace: Wo
 	const live = (sessions.data ?? []).filter(
 		(session) => (session.state === "open" || session.state === "starting") && !isUntouched(session),
 	);
+	// "Running now" means work in motion or work waiting on the operator. An open task that sits idle
+	// is in the rail; listing it here made the heading untrue and left its row without a mark.
+	const active = live
+		.map((session) => ({ session, state: taskState(session) }))
+		.filter(({ state }) => state === "working" || state === "starting" || state === "approval");
 	const workers = live.reduce((sum, session) => sum + foldFleetRuns(session.fleet).filter(isLiveRun).length, 0);
 	const status = setup.data;
 	return createPortal(
@@ -100,22 +104,25 @@ export function HomeAside({ client, workspace }: { client: Client; workspace: Wo
 									</span>
 								) : null}
 							</header>
-							{live.length > 0 ? (
+							{active.length > 0 ? (
 								<ul className="pane-agents">
-									{live.slice(0, 8).map((session) => {
-										const state = taskState(session);
-										return (
-											<li key={session.id}>
-												{state === "working" || state === "starting" ? (
-													<ClioPulse size={PULSE_SIZE.inline} />
-												) : (
-													<span aria-hidden="true" />
-												)}
-												<Link to={`/sessions/${session.id}`}>{taskTitle(session)}</Link>
-												<span>{STATE_LABELS[state] || (names.get(session.workspaceId) ?? "")}</span>
-											</li>
-										);
-									})}
+									{active.slice(0, 8).map(({ session, state }) => (
+										<li key={session.id}>
+											{state === "approval" ? (
+												<span className="wb-dot wb-dot--approval" aria-hidden="true" />
+											) : (
+												<span className="pane-agents__glyph" aria-hidden="true">
+													▸
+												</span>
+											)}
+											<Link to={`/sessions/${session.id}`}>{taskTitle(session)}</Link>
+											{/* The heading and the mark say it is running, so the row names where; a task
+											    that waits on the operator says so instead. */}
+											<span>
+												{state === "approval" ? STATE_LABELS.approval : (names.get(session.workspaceId) ?? STATE_LABELS[state])}
+											</span>
+										</li>
+									))}
 								</ul>
 							) : (
 								<p className="pane-empty">No task is running.</p>
