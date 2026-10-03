@@ -11,7 +11,7 @@ import { ClioLogo, ClioPulse, PULSE_SIZE } from "./ClioMark.js";
 import { chordHint } from "./chords.js";
 import { InlineRename } from "./InlineRename.js";
 import { Menu, MenuItem } from "./Menu.js";
-import { STATE_LABELS, sessionIdFromPath, shortAge, type TaskRow, taskRows } from "./shell-model.js";
+import { STATE_LABELS, sessionIdFromPath, shortAge, type TaskRow, taskRows, taskState } from "./shell-model.js";
 import { type TaskActions, useDeleteTask, useMinuteClock, useRenameTask } from "./tasks.js";
 import { setThemeChoice, themeSwitchLabel, useTheme } from "./theme.js";
 
@@ -44,6 +44,11 @@ export function TaskSidebar({
 	const [shown, setShown] = useState(PROJECTS_SHOWN);
 	const workspaces = useQuery({ queryKey: ["workspaces"], queryFn: () => client.call(routes.workspaces, emptyInput) });
 	const sessions = useQuery({ queryKey: ["sessions"], queryFn: () => client.call(routes.sessions, emptyInput) });
+	// The brand mark works while any task does, so Clio's state reads from anywhere in the app.
+	const working = (sessions.data ?? []).some((session) => {
+		const state = taskState(session);
+		return state === "working" || state === "starting";
+	});
 	const activeTask = sessionIdFromPath(location.pathname);
 	const ordered = useMemo(
 		() =>
@@ -63,7 +68,7 @@ export function TaskSidebar({
 		<div className="wb-side">
 			<div className="wb-side__top">
 				<Link className="wb-brand" to="/" onClick={onNavigate} aria-label="Clio Coder home">
-					<ClioLogo size={22} />
+					<ClioLogo size={22} working={working} />
 					<span>Clio Coder</span>
 				</Link>
 				<button
