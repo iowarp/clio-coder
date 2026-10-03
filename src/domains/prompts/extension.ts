@@ -671,7 +671,7 @@ function selfDevelopmentSkillFragments(
 	if (inputs.headless === true) {
 		const body = [
 			"# Self-development skills",
-			"clio-coder-dev and clio-coder-test guide operator-led development of this checkout: sprint packets, handoffs and release discipline. A headless task works from the code and its tests; load one of them only when the change needs a convention they do not show.",
+			"clio-coder-dev and clio-coder-test guide operator-led development of this checkout: sprint packets, handoffs and release discipline. A headless task takes its conventions, test conventions included, from the code and its neighboring tests, and does not load these skills.",
 		].join("\n");
 		return [
 			{

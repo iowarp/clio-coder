@@ -38,5 +38,7 @@ Asked what is broken or failing, run the project's declared test check when it
 is admitted and name the failing tests. A check that fails because declared
 dependencies are not installed (missing node_modules, "Cannot find module" for
 a manifest package, an absent virtualenv) is setup, not a verdict: say so, run
-the project's install command (it goes through normal approval), and rerun.
-Report file changes you could not validate.
+the project's install command (it goes through normal approval), and rerun. A
+failure confined to files your change does not touch predates it: report it
+instead of repairing it or installing for it. Report file changes you could not
+validate.
