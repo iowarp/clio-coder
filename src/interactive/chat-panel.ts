@@ -188,7 +188,7 @@ type TextSegment = {
 	 * A protocol suggestion line and the answer prose beneath it, when the model
 	 * opened its reply with both in one segment (which is what the skills prompt
 	 * asks for). The answer half is a segment of its own so it keeps its own
-	 * Markdown and wrap caches; it is cached here rather than rebuilt per frame.
+	 * Markdown component; it is cached here rather than rebuilt per frame.
 	 */
 	suggestionSplit?: { suggestion: string; answer: TextSegment };
 };

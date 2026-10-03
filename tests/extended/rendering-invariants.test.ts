@@ -718,8 +718,10 @@ describe("streamed answers settle in place", () => {
 			let changed = 0;
 			while (changed < previous.length && changed < frame.length && previous[changed] === frame[changed]) changed += 1;
 			// Stock Markdown renders top-level blocks independently, so only the open block may change.
-			// 16 rows covers the tallest open block here, the 12-line fence with its two fence rows.
-			ok(changed >= frame.length - 16, `delta at ${at} restyled row ${changed} of ${frame.length}`);
+			// Measured at width 80 on STREAMED_ANSWER, the deepest restyle reaches 3 rows from the end
+			// (the open fence). The bound is 4 so a whole-answer restyle, which touches rows far above
+			// the open block, fails instead of hiding inside a window sized for the tallest block.
+			ok(changed >= frame.length - 4, `delta at ${at} restyled row ${changed} of ${frame.length}`);
 			previous = frame;
 		}
 	});
