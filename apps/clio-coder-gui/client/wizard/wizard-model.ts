@@ -37,7 +37,12 @@ export function stagesFor(_mode: WizardMode, needsWorkspace: boolean): readonly 
 	return stages;
 }
 
-/** The film played behind a step. Each is a bounded clip from the site's animation set. */
+/**
+ * The film played behind a step, one per stage so the scene changes where the work does: Clio reads when
+ * she starts, one dash is set while a provider is chosen, helpers go out and return while the connection
+ * is reached, one model is chosen, the sweep inspects what was verified, and the mark settles when saved.
+ * Each is a bounded clip from the site's animation set.
+ */
 export type SceneId = "read" | "focus" | "helpers" | "inspect" | "finale";
 
 export type CategoryKey = "local-app" | "local-server" | "subscription" | "cloud-api" | "external-worker";
@@ -134,6 +139,7 @@ export type StepView =
 			prompt: SelectPrompt;
 			reason: string | null;
 			retry: Choice | null;
+			key: Choice | null;
 			change: Choice | null;
 			manual: Choice | null;
 	  })
@@ -160,6 +166,8 @@ export type StepView =
 
 export type WizardView =
 	| { kind: "welcome" }
+	/** The child is starting and has not said yet whether a returning user's route needs no setup at all. */
+	| { kind: "starting" }
 	| StepView
 	| (Base & { kind: "working"; label: string; signIn: SignIn | null })
 	| (Base & { kind: "saved"; summary: readonly string[]; warnings: readonly string[]; verified: boolean })
@@ -281,7 +289,7 @@ export function stepFor(prompt: Prompt): StepView {
 			return {
 				kind: "signin",
 				stage: "connect",
-				scene: "focus",
+				scene: "helpers",
 				prompt,
 				provider: title.slice("Sign in to ".length),
 				status,
@@ -294,7 +302,7 @@ export function stepFor(prompt: Prompt): StepView {
 			return {
 				kind: "credential-source",
 				stage: "connect",
-				scene: "focus",
+				scene: "helpers",
 				prompt,
 				status:
 					rest(prompt)
@@ -332,7 +340,7 @@ export function stepFor(prompt: Prompt): StepView {
 			return {
 				kind: "model",
 				stage: "model",
-				scene: "inspect",
+				scene: "focus",
 				prompt,
 				note: rest(prompt)[0] ?? null,
 				searchable: prompt.searchable,
@@ -345,10 +353,11 @@ export function stepFor(prompt: Prompt): StepView {
 			return {
 				kind: "model-missing",
 				stage: "model",
-				scene: "inspect",
+				scene: "focus",
 				prompt,
 				reason: rest(prompt)[0] ?? null,
 				retry: byLabel(prompt, /^Check again$/u),
+				key: byLabel(prompt, /^This server needs an API key$/u),
 				change: byLabel(prompt, /^Change the connection$/u),
 				manual: byLabel(prompt, /^Enter an unverified model ID$/u),
 			};
@@ -378,18 +387,18 @@ export function stepFor(prompt: Prompt): StepView {
 				next: byLabel(prompt, /^(Next|Return to review)$/u),
 				previous: byLabel(prompt, /^(Previous|Return to review)$/u),
 			};
-		return { kind: "generic", stage: "connect", scene: "focus", prompt };
+		return { kind: "generic", stage: "connect", scene: "helpers", prompt };
 	}
 	if (title === "Which environment variable?")
-		return { kind: "credential-env", stage: "connect", scene: "focus", prompt };
-	if (title === "Paste the API key") return { kind: "credential-key", stage: "connect", scene: "focus", prompt };
+		return { kind: "credential-env", stage: "connect", scene: "helpers", prompt };
+	if (title === "Paste the API key") return { kind: "credential-key", stage: "connect", scene: "helpers", prompt };
 	if (/verification code/iu.test(title)) return { kind: "oauth-code", stage: "connect", scene: "helpers", prompt };
 	if (title === "Unverified model id")
-		return { kind: "model-manual", stage: "model", scene: "inspect", prompt, warning: rest(prompt)[0] ?? null };
+		return { kind: "model-manual", stage: "model", scene: "focus", prompt, warning: rest(prompt)[0] ?? null };
 	// The server address is the one text prompt whose hint names how to write a URL.
 	if (/^(host:port is enough|paste the whole URL)/u.test(prompt.hint))
-		return { kind: "server", stage: "connect", scene: "focus", prompt, title, guidance: rest(prompt) };
-	return { kind: "generic", stage: "connect", scene: "focus", prompt };
+		return { kind: "server", stage: "connect", scene: "helpers", prompt, title, guidance: rest(prompt) };
+	return { kind: "generic", stage: "connect", scene: "helpers", prompt };
 }
 
 // ---- messages ------------------------------------------------------------------------------------
@@ -409,6 +418,8 @@ export interface Recap {
 }
 
 export interface ReadMessages {
+	/** The route the CLI took for a returning user without asking: `Chat: openai / gpt-6-luna from OPENAI_API_KEY.` */
+	readonly chat: string | null;
 	readonly signIn: SignIn | null;
 	readonly probe: ProbeReading | null;
 	readonly recap: readonly Recap[];
@@ -420,6 +431,7 @@ export interface ReadMessages {
 
 const RECAP_LABELS = /^(Source|Provider|URL|Credential|Model|Thinking|Context|Colleague|Detected)\s{2,}(.*\S)\s*$/u;
 const SIGN_IN_URL = /^\s*Open:\s*(https?:\/\/\S+)\s*$/u;
+const CHAT_ROUTE = /^Chat: \S+ \/ .+ from .+\.$/u;
 
 /** A sign-in link is only offered when it is a plain http(s) URL without credentials in it. */
 export function safeUrl(text: string): string | null {
@@ -433,6 +445,7 @@ export function safeUrl(text: string): string | null {
 }
 
 export function readMessages(messages: readonly string[]): ReadMessages {
+	let chat: string | null = null;
 	let url: string | null = null;
 	let code: string | null = null;
 	let probe: ProbeReading | null = null;
@@ -443,6 +456,10 @@ export function readMessages(messages: readonly string[]): ReadMessages {
 	for (const raw of new Set(messages)) {
 		const line = raw.trim();
 		if (line === "" || INTRO.test(line)) continue;
+		if (CHAT_ROUTE.test(line)) {
+			chat = line;
+			continue;
+		}
 		const link = SIGN_IN_URL.exec(line);
 		if (link) {
 			url = safeUrl(link[1] ?? "") ?? url;
@@ -471,7 +488,7 @@ export function readMessages(messages: readonly string[]): ReadMessages {
 			warnings.push(line);
 		else other.push(line);
 	}
-	return { signIn: url || code ? { url, code } : null, probe, recap, saved, warnings, other };
+	return { chat, signIn: url || code ? { url, code } : null, probe, recap, saved, warnings, other };
 }
 
 const SUMMARY_LABELS: Readonly<Record<string, string>> = {

@@ -156,3 +156,22 @@ export function useDetectedChatRoute(
 	apply(session);
 	return { settings: session, persisted };
 }
+
+export interface AdoptedChatRoute {
+	route: DetectedChatRoute & { model: string };
+	settings: ClioSettings;
+	persisted: boolean;
+}
+
+/** One sentence for the route a returning user landed on, the same words on every surface. */
+export function describeAdoptedRoute({ route, persisted }: Pick<AdoptedChatRoute, "route" | "persisted">): string {
+	return `Chat: ${route.runtime.id} / ${route.model} from ${route.source}.${persisted ? "" : " Session only; saved chat route unchanged."}`;
+}
+
+/** A returning user's first detected route with a model, taken as their chat route. Null when nothing is found. */
+export async function adoptDetectedChatRoute(settings: Readonly<ClioSettings>): Promise<AdoptedChatRoute | null> {
+	const found = (await detectChatRoutes(settings)).find((candidate) => candidate.model);
+	if (!found?.model) return null;
+	const route = { ...found, model: found.model };
+	return { route, ...useDetectedChatRoute(settings, route) };
+}

@@ -1,10 +1,8 @@
-import { existsSync } from "node:fs";
 import { formatBootTrace } from "../core/boot-trace.js";
 import { initializeClioHome } from "../core/init.js";
 import { readLayeredSettings, readStrictLayeredSettings } from "../core/settings-layers.js";
-import { resolveClioDirs } from "../core/xdg.js";
 import type { BootOptions } from "../entry/boot-options.js";
-import { classifyDefaultTarget, describeVerdict } from "./default-target.js";
+import { classifyDefaultTarget, describeVerdict, homeIsReturning } from "./default-target.js";
 
 /** Headless and ACP keep their established non-TUI transports even when an
  * embedding process leaves the interactive marker in the environment. */
@@ -45,8 +43,7 @@ export async function runClioCommand(
 	}
 	let startupSettings: import("../core/config.js").ClioSettings | undefined;
 	if (terminalLeaseEligible(options)) {
-		const dirs = resolveClioDirs();
-		const existingHome = [dirs.config, dirs.data, dirs.state].some((dir) => existsSync(dir));
+		const existingHome = homeIsReturning();
 		initializeClioHome();
 		// The user file remains a strict gate. Project layers retain their
 		// established best-effort diagnostics, but every subsequent boot phase
@@ -55,21 +52,18 @@ export async function runClioCommand(
 		const verdict = classifyDefaultTarget(startupSettings);
 		let detected = false;
 		if (existingHome && verdict.kind !== "usable") {
-			const { detectChatRoutes, useDetectedChatRoute } = await import("./detect-chat-routes.js");
-			const route = (await detectChatRoutes(startupSettings)).find((candidate) => candidate.model);
-			if (route?.model) {
-				const result = useDetectedChatRoute(startupSettings, { ...route, model: route.model });
-				startupSettings = result.settings;
+			const { adoptDetectedChatRoute, describeAdoptedRoute } = await import("./detect-chat-routes.js");
+			const adopted = await adoptDetectedChatRoute(startupSettings);
+			if (adopted) {
+				startupSettings = adopted.settings;
 				detected = true;
-				process.stdout.write(
-					`Chat: ${route.runtime.id} / ${route.model} from ${route.source}.${result.persisted ? "" : " Session only; saved chat route unchanged."} Change it with /config.\n`,
-				);
+				process.stdout.write(`${describeAdoptedRoute(adopted)} Change it with /config.\n`);
 			}
 		}
 		if (!detected && verdict.kind !== "usable") {
 			process.stdout.write(`${describeVerdict(verdict)} Starting \`clio-coder configure\`.\n`);
 			const { runConfigureCommand } = await import("./configure.js");
-			const configured = await runConfigureCommand([]);
+			const configured = await runConfigureCommand([], process.stdin, process.stdout, true);
 			if (configured !== 0) return configured;
 			startupSettings = readStrictLayeredSettings(process.cwd()).settings;
 			const configuredVerdict = classifyDefaultTarget(startupSettings);

@@ -513,7 +513,7 @@ function mapToolCall(toolCall: AcpToolCallUpdate | undefined, cwd: string): Mapp
 	if (rawTool && Object.values(ToolNames).includes(rawTool as (typeof ToolNames)[keyof typeof ToolNames])) {
 		return { tool: rawTool, args: rawInput, evaluations: [{ tool: rawTool, args: rawInput }], known: true, displayTool };
 	}
-	// Fallback: some ACP agents (notably @zed-industries/claude-code-acp) send a
+	// Fallback: some ACP agents (notably claude-agent-acp) send a
 	// permission request carrying only rawInput + title, omitting both `kind` and
 	// the tool name. Infer the clio tool from the rawInput shape so the dangerous
 	// classes (shell, writes, edits) are still classified and gated instead of

@@ -120,6 +120,7 @@ export function SavedStep({
 					))}
 				</ul>
 			) : null}
+			<p className="wizard-hint">For external agent delegation, run clio-coder configure --interop.</p>
 			{view.warnings.map((warning) => (
 				<p className="wizard-problem" data-tone="warn" key={warning}>
 					{warning}

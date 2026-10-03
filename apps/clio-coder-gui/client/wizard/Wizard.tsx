@@ -9,6 +9,7 @@ import { routes } from "../../contracts/routes.js";
 import type { Client } from "../api/client.js";
 import { emptyInput } from "../api/client.js";
 import { Icon } from "../design/icons.js";
+import { notify } from "../design/notifications.js";
 import { announce, setPageTitle } from "../interaction/announcer.js";
 import { EndStep, SavedStep, WorkingStep, WorkspaceStep } from "./phases.js";
 import { Stage } from "./Stage.js";
@@ -82,6 +83,7 @@ function Stepper({ stages, current, done }: { stages: readonly StageId[]; curren
 
 function titleOf(view: WizardView): string {
 	if (view.kind === "welcome") return "Welcome to Clio Coder";
+	if (view.kind === "starting") return "Starting setup";
 	if (view.kind === "working") return view.label;
 	if (view.kind === "saved") return "Connection saved";
 	if (view.kind === "failed") return "Setup stopped";
@@ -104,15 +106,19 @@ export default function Wizard({
 	const workspaces = useQuery({ queryKey: ["workspaces"], queryFn: () => client.call(routes.workspaces, emptyInput) });
 	const [needsWorkspace, setNeedsWorkspace] = useState<boolean | null>(null);
 	const [phase, setPhase] = useState<"setup" | "workspace">("setup");
+	// A first run starts the child behind its welcome screen. A returning user's route is found before they see
+	// anything, and a new user's first question is already waiting when they click Get started.
+	const [intro, setIntro] = useState<"booting" | "welcome" | "done">(mode === "first" ? "booting" : "done");
 	const [workingShown, setWorkingShown] = useState(false);
 	const lastStep = useRef<StepView | null>(null);
 	const started = useRef(false);
 
 	// A first run with no folder ends in the workspace step; a machine that already has one does not.
 	useEffect(() => {
-		if (needsWorkspace === null && workspaces.isSuccess)
-			setNeedsWorkspace(mode === "first" && workspaces.data.length === 0);
-	}, [needsWorkspace, workspaces.isSuccess, workspaces.data, mode]);
+		if (needsWorkspace !== null) return;
+		if (workspaces.isSuccess) setNeedsWorkspace(mode === "first" && workspaces.data.length === 0);
+		else if (workspaces.isError) setNeedsWorkspace(false);
+	}, [needsWorkspace, workspaces.isSuccess, workspaces.isError, workspaces.data, mode]);
 
 	const raw = useMemo(() => viewFor(session.state, lastStep.current), [session.state]);
 	useEffect(() => {
@@ -127,16 +133,22 @@ export default function Wizard({
 		return () => clearTimeout(timer);
 	}, [raw.kind]);
 	const holding = raw.kind === "working" && !workingShown && lastStep.current !== null;
-	const view: WizardView = holding && lastStep.current ? lastStep.current : raw;
+	const view: WizardView =
+		intro === "booting"
+			? { kind: "starting" }
+			: intro === "welcome" && raw.kind !== "failed"
+				? { kind: "welcome" }
+				: holding && lastStep.current
+					? lastStep.current
+					: raw;
 	const busy = session.busy || raw.kind === "working";
 
-	// Repair and add start at once. A first run opens on the welcome screen.
 	useEffect(() => {
-		if (mode !== "first" && !started.current && session.state === null) {
+		if (!started.current && session.state === null) {
 			started.current = true;
 			session.start(targetId);
 		}
-	}, [mode, targetId, session.state, session.start]);
+	}, [targetId, session.state, session.start]);
 	// Repairing keeps the provider the connection already has, so its first question answers itself once.
 	const kept = useRef(false);
 	useEffect(() => {
@@ -149,8 +161,10 @@ export default function Wizard({
 	// A cancelled run ends the wizard where it was opened, or returns a first run to its welcome.
 	useEffect(() => {
 		if (raw.kind !== "cancelled") return;
-		if (mode === "first") session.reset();
-		else onExit("back");
+		if (mode === "first") {
+			session.reset();
+			setIntro("welcome");
+		} else onExit("back");
 	}, [raw.kind, mode, session.reset, onExit]);
 
 	const prompt = "prompt" in view ? view.prompt : null;
@@ -180,16 +194,38 @@ export default function Wizard({
 	}, [spoken]);
 
 	const read = useMemo(() => readMessages(session.state?.messages ?? []), [session.state?.messages]);
+	const finish = useCallback(() => {
+		if (needsWorkspace === true) setPhase("workspace");
+		else onExit("home");
+	}, [needsWorkspace, onExit]);
+	// The child's first word decides the welcome. A saved route means this machine was already set up, as the
+	// terminal start finds it, and there is nothing to ask. Anything else means a question is waiting.
+	const status = session.state?.status ?? null;
+	useEffect(() => {
+		if (intro !== "booting") return;
+		if (status === "saved") {
+			if (needsWorkspace === null) return;
+			setIntro("done");
+			notify({ tone: "info", title: "Chat is ready", detail: `${read.chat ?? "Using your saved setup."} Change it in Settings.` });
+			finish();
+		} else if ((status !== null && status !== "working") || session.error !== null) setIntro("welcome");
+	}, [intro, status, session.error, needsWorkspace, read.chat, finish]);
 	const stages = stagesFor(mode, needsWorkspace === true);
 	const current: StageId | null =
 		phase === "workspace" ? "workspace" : "stage" in view ? view.stage : view.kind === "welcome" ? null : null;
 	const saved = raw.kind === "saved";
 	const scene = phase === "workspace" ? "read" : "scene" in view ? view.scene : "read";
 	const stageKey: StageId | "welcome" | "saved" =
-		phase === "workspace" ? "workspace" : view.kind === "welcome" ? "welcome" : saved ? "saved" : (current ?? "provider");
-	// While the card shows what is being waited on, the card carries the spinner. The stage carries it only
-	// before the first step exists.
-	const workingLabel = session.busy && session.state === null ? "Starting setup" : null;
+		phase === "workspace"
+			? "workspace"
+			: view.kind === "welcome" || view.kind === "starting"
+				? "welcome"
+				: saved
+					? "saved"
+					: (current ?? "provider");
+	// While the card shows what is being waited on, the card carries the spinner. The stage carries it before
+	// the first step exists and while the first run has no card yet.
+	const workingLabel = view.kind === "starting" || (session.busy && session.state === null) ? "Starting setup" : null;
 
 	const send = session.answer;
 	const problem = session.state?.problem ?? session.error;
@@ -204,22 +240,23 @@ export default function Wizard({
 			view.kind === "credential-env" ||
 			view.kind === "review");
 
-	const finish = () => {
-		if (needsWorkspace === true) setPhase("workspace");
-		else onExit("home");
-	};
-
 	let content: React.ReactNode;
 	if (phase === "workspace") content = <WorkspaceStep client={client} onOpened={() => onExit("home")} />;
 	else
 		switch (view.kind) {
+			case "starting":
+				content = null;
+				break;
 			case "welcome":
 				content = (
 					<WelcomeStep
 						mode={mode}
 						busy={session.busy}
 						error={session.error}
-						onStart={() => session.start(targetId)}
+						onStart={() => {
+							if (session.state === null) session.start(targetId);
+							setIntro("done");
+						}}
 						onLater={mode === "first" ? null : () => onExit("back")}
 					/>
 				);

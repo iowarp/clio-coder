@@ -3,6 +3,8 @@ import { stripVTControlCharacters } from "node:util";
 import { readSettings } from "../core/config.js";
 import { getRuntimeRegistry } from "../domains/providers/registry.js";
 import { type ConfigureWizardHost, runHostedTargetWizard } from "./configure-host.js";
+import { classifyDefaultTarget, homeIsReturning } from "./default-target.js";
+import { adoptDetectedChatRoute, describeAdoptedRoute } from "./detect-chat-routes.js";
 import type { SelectOptions, SelectResult, TextPromptOptions, TextResult } from "./select.js";
 
 /** Private line transport. Choice values and credentials never appear in a prompt snapshot. */
@@ -146,6 +148,8 @@ export async function runBrowserConfigure(
 			}
 			if (!started && answer.kind === "start") {
 				started = true;
+				// Read before any step can write the settings file, the moment the terminal's start reads it.
+				const returning = homeIsReturning();
 				const settings = readSettings();
 				const target =
 					typeof answer.targetId === "string" ? settings.targets.find((entry) => entry.id === answer.targetId) : undefined;
@@ -156,10 +160,23 @@ export async function runBrowserConfigure(
 				}
 				const chat = settings.targets.find((entry) => entry.id === settings.chat.target);
 				const hasChat = chat && getRuntimeRegistry().get(chat.runtime)?.kind === "http";
-				result = runHostedTargetWizard(
-					host,
-					target ? { mode: "edit", target: structuredClone(target) } : { mode: hasChat ? "add" : "first" },
-				);
+				// The terminal start gives a returning user the route it finds and lands in chat; so does the app. Only
+				// a saved route counts, because a session-only fallback has nowhere to live in the app.
+				const adopting =
+					!target && !hasChat && returning && classifyDefaultTarget(settings).kind !== "usable"
+						? adoptDetectedChatRoute(settings).catch(() => null)
+						: Promise.resolve(null);
+				result = adopting.then((adopted) => {
+					if (adopted?.persisted) {
+						saved = true;
+						send({ kind: "message", text: describeAdoptedRoute(adopted) });
+						return 0;
+					}
+					return runHostedTargetWizard(
+						host,
+						target ? { mode: "edit", target: structuredClone(target) } : { mode: hasChat ? "add" : "first" },
+					);
+				});
 				void result.then(
 					(code) => {
 						send({

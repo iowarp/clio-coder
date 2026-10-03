@@ -2084,6 +2084,7 @@ async function runInteractive(
 	preselectedRuntime: RuntimeDescriptor | null,
 	defaults: ParsedArgs,
 	streams: ConfigureStreams,
+	startsChat = false,
 ): Promise<number> {
 	if (defaults.quick) {
 		if (!canRunOnboarding(streams)) {
@@ -2122,6 +2123,10 @@ async function runInteractive(
 		await runSection(rl, streams, spec, "quit");
 		return 0;
 	}
+	// A first run that the bare `clio-coder` start sent here has one thing to do. The launcher would put
+	// a second welcome above the wizard's own and offer three entries that lead nowhere with no target.
+	if (canRunOnboarding(streams) && startsChat && readSettings().targets.length === 0)
+		return runOnboardingWizard(streams, { mode: "first", startsChat });
 	if (canRunOnboarding(streams)) return runConfigLauncher(rl, streams);
 
 	if (readSettings().targets.length === 0) {
@@ -2139,6 +2144,8 @@ export async function runConfigureCommand(
 	argv: ReadonlyArray<string>,
 	inStream: NodeJS.ReadableStream = input,
 	outStream: NodeJS.WritableStream = output,
+	/** The bare `clio-coder` start called this and starts the chat session when it returns 0. */
+	startsChat = false,
 ): Promise<number> {
 	// The GUI owns presentation; this fixed child transport keeps provider I/O in the CLI.
 	if (argv.length === 1 && argv[0] === "--gui-host") {
@@ -2247,7 +2254,7 @@ export async function runConfigureCommand(
 
 	const rl = new ConfigurePrompts(inStream, outStream);
 	try {
-		return await runInteractive(rl, runtime, args, { in: inStream, out: outStream });
+		return await runInteractive(rl, runtime, args, { in: inStream, out: outStream }, startsChat);
 	} catch (err) {
 		if (err instanceof ConfigureNavigation) {
 			if (readSettings().targets.length > 0) return 0;

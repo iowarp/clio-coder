@@ -22,6 +22,7 @@ export {
 	delegationEntryForKind,
 	INHERITED_PROJECT_CONTEXT,
 	interopProposals,
+	interopUnofferedReasons,
 	renderProposalEntry,
 } from "./consent.js";
 export type { InteropContract } from "./contract.js";

@@ -2,6 +2,7 @@ import { stringify as stringifyYaml } from "yaml";
 import { type ClioSettings, readSettings, updateSettings } from "../../core/config.js";
 import type { DelegationAgentConfig } from "../../core/defaults.js";
 import { withStateFileLockSync } from "../../core/state-file-lock.js";
+import { resolveOnPath } from "./detect.js";
 import { interopAgentKind } from "./registry.js";
 import { interopStatePath, readInteropReport, writeInteropReport } from "./state.js";
 import type {
@@ -38,6 +39,26 @@ export function delegationEntryForKind(
 	};
 }
 
+/** An `npx` recipe cannot launch without `npx`; `unknown` presence still offers it. */
+function npxMissingFor(kind: InteropAgentKind): boolean {
+	return kind.acp?.command === "npx" && resolveOnPath(["npx"]).presence === "absent";
+}
+
+/** Why a detected agent's recipe is not offered, one line each, when `npx` is not on PATH. */
+export function interopUnofferedReasons(report: InteropReport, settings: ClioSettings): ReadonlyArray<string> {
+	const configured = new Set(settings.integrations.externalAgents.entries.map((agent) => agent.id));
+	const reasons: string[] = [];
+	for (const record of report.agents) {
+		const kind = interopAgentKind(record.kind);
+		if (kind === undefined || record.presence !== "present" || configured.has(kind.id) || !npxMissingFor(kind)) continue;
+		if (record.decision !== undefined && record.decidedFingerprint === record.fingerprint) continue;
+		reasons.push(
+			`${kind.label} is installed but not offered: its ACP adapter launches through npx, which is not on PATH.`,
+		);
+	}
+	return reasons;
+}
+
 /**
  * Agents the operator has not decided on yet. A standing decision suppresses
  * re-proposal only while the facts it was made against still hold, so a
@@ -52,12 +73,15 @@ export function interopProposals(report: InteropReport, settings: ClioSettings):
 		if (record.presence !== "present") continue;
 		if (configured.has(kind.id)) continue;
 		if (record.decision !== undefined && record.decidedFingerprint === record.fingerprint) continue;
+		if (npxMissingFor(kind)) continue;
 		proposals.push({
 			kind: kind.id,
 			label: kind.label,
 			fingerprint: record.fingerprint,
 			entry: delegationEntryForKind(kind, settings.integrations.externalAgents.defaults),
 			needsNetworkInstall: record.adapter !== "present",
+			...(record.binary !== undefined ? { binary: record.binary } : {}),
+			...(record.version !== undefined ? { version: record.version } : {}),
 		});
 	}
 	return proposals;

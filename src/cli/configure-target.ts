@@ -674,7 +674,7 @@ export function inventoryGap(
 	return `${target.url ?? runtime.id} answered no model list${why}; type the id the server serves`;
 }
 
-const LOCAL_APP_RUNTIME_IDS: ReadonlySet<string> = new Set(["ollama", "lmstudio", "lemonade"]);
+export const LOCAL_APP_RUNTIME_IDS: ReadonlySet<string> = new Set(["ollama", "lmstudio", "lemonade"]);
 
 // Generic protocol-compatible runtimes. They are classified local-http (they
 // carry a probe and no cloud catalog entry), but a hosted endpoint such as

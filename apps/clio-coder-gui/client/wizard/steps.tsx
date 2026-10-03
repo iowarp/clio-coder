@@ -115,10 +115,13 @@ export function WelcomeStep({
 			}
 			lede={
 				mode === "first" ? (
-					<p>
-						Connect the model you already use, open a folder, and start. It takes a minute, and nothing is saved until you say
-						so.
-					</p>
+					<>
+						<p>Choose what you already use. Clio checks the endpoint and model list when the provider allows it.</p>
+						<p>
+							Back returns to the previous step. Your choices are saved only at the review, except a browser sign-in you
+							complete.
+						</p>
+					</>
 				) : (
 					<p>Clio checks what you choose before it saves anything, and a sign-in you finish stays stored.</p>
 				)
@@ -655,6 +658,11 @@ export function ModelMissingStep({ view, busy, send }: StepProps<Of<"model-missi
 							onClick={() => run(view.retry)}
 						>
 							Check again
+						</button>
+					) : null}
+					{view.key ? (
+						<button type="button" className="wizard-quiet" disabled={busy} onClick={() => run(view.key)}>
+							This server needs an API key
 						</button>
 					) : null}
 					{view.change ? (

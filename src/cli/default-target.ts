@@ -1,5 +1,8 @@
+import { existsSync } from "node:fs";
+import { join } from "node:path";
 import type { ClioSettings } from "../core/config.js";
 import { readSettings } from "../core/config.js";
+import { resolveClioDirs } from "../core/xdg.js";
 import { bootAuthStatus } from "../domains/providers/auth/boot-status.js";
 import { findBuiltinRuntimeBootMetadata } from "../domains/providers/runtimes/boot-manifest.js";
 
@@ -16,6 +19,18 @@ export type DefaultTargetVerdict =
 	| { kind: "no-model"; targetId: string }
 	| { kind: "ineligible-runtime"; targetId: string; runtime: string }
 	| { kind: "missing-credential"; targetId: string; store: string };
+
+/**
+ * Whether this home has written a settings file before the current launch.
+ *
+ * Directory existence cannot say so: `clioConfigDir()` and its siblings create
+ * the directory they are asked about, and the graphical app's server asks on
+ * boot, so opening the app once would make the terminal treat a first run as a
+ * returning one. Call this before `initializeClioHome()`, which writes the file.
+ */
+export function homeIsReturning(): boolean {
+	return existsSync(join(resolveClioDirs().config, "settings.yaml"));
+}
 
 export function classifyDefaultTarget(settings: Readonly<ClioSettings> = readSettings()): DefaultTargetVerdict {
 	const targetId = settings.chat.target;

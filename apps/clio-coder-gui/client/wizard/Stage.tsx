@@ -1,37 +1,71 @@
 import { useEffect, useRef, useState } from "react";
 import { ClioPulse, PULSE_SIZE } from "../shell/ClioMark.js";
+import { useTheme } from "../shell/theme.js";
 import type { SceneId } from "./wizard-model.js";
 
-// The films are the site's own bounded clips, copied byte for byte from site/assets/animations. They
-// resolve to hashed files in this lazy chunk, so none of it is in the main bundle.
-const SCENES: Readonly<Record<SceneId, { video: string; poster: string; width: number; height: number }>> = {
+// The films are the site's own bounded clips, copied byte for byte from site/assets/animations: the dark
+// ones on a black matte, the light ones on the site's raised-paper matte, and one transparent poster per
+// scene for the light theme. They resolve to hashed files in this lazy chunk, so none of it is in the
+// main bundle.
+type Film = { video: string; poster: string };
+const SCENES: Readonly<Record<SceneId, { dark: Film; light: Film; width: number; height: number }>> = {
 	read: {
-		video: new URL("./media/read.mp4", import.meta.url).href,
-		poster: new URL("./media/read.webp", import.meta.url).href,
+		dark: {
+			video: new URL("./media/read.mp4", import.meta.url).href,
+			poster: new URL("./media/read.webp", import.meta.url).href,
+		},
+		light: {
+			video: new URL("./media/read-light.mp4", import.meta.url).href,
+			poster: new URL("./media/read-light.webp", import.meta.url).href,
+		},
 		width: 720,
 		height: 540,
 	},
 	focus: {
-		video: new URL("./media/focus.mp4", import.meta.url).href,
-		poster: new URL("./media/focus.webp", import.meta.url).href,
+		dark: {
+			video: new URL("./media/focus.mp4", import.meta.url).href,
+			poster: new URL("./media/focus.webp", import.meta.url).href,
+		},
+		light: {
+			video: new URL("./media/focus-light.mp4", import.meta.url).href,
+			poster: new URL("./media/focus-light.webp", import.meta.url).href,
+		},
 		width: 720,
 		height: 540,
 	},
 	helpers: {
-		video: new URL("./media/helpers.mp4", import.meta.url).href,
-		poster: new URL("./media/helpers.webp", import.meta.url).href,
+		dark: {
+			video: new URL("./media/helpers.mp4", import.meta.url).href,
+			poster: new URL("./media/helpers.webp", import.meta.url).href,
+		},
+		light: {
+			video: new URL("./media/helpers-light.mp4", import.meta.url).href,
+			poster: new URL("./media/helpers-light.webp", import.meta.url).href,
+		},
 		width: 720,
 		height: 540,
 	},
 	inspect: {
-		video: new URL("./media/inspect.mp4", import.meta.url).href,
-		poster: new URL("./media/inspect.webp", import.meta.url).href,
+		dark: {
+			video: new URL("./media/inspect.mp4", import.meta.url).href,
+			poster: new URL("./media/inspect.webp", import.meta.url).href,
+		},
+		light: {
+			video: new URL("./media/inspect-light.mp4", import.meta.url).href,
+			poster: new URL("./media/inspect-light.webp", import.meta.url).href,
+		},
 		width: 720,
 		height: 540,
 	},
 	finale: {
-		video: new URL("./media/finale.mp4", import.meta.url).href,
-		poster: new URL("./media/finale.webp", import.meta.url).href,
+		dark: {
+			video: new URL("./media/finale.mp4", import.meta.url).href,
+			poster: new URL("./media/finale.webp", import.meta.url).href,
+		},
+		light: {
+			video: new URL("./media/finale-light.mp4", import.meta.url).href,
+			poster: new URL("./media/finale-light.webp", import.meta.url).href,
+		},
 		width: 960,
 		height: 540,
 	},
@@ -72,9 +106,10 @@ export function Stage({
 	working: string | null;
 }) {
 	const motion = useMotionAllowed();
+	const { resolved: theme } = useTheme();
 	const video = useRef<HTMLVideoElement>(null);
 	const [playing, setPlaying] = useState(false);
-	const source = SCENES[scene];
+	const { width, height, [theme]: source } = SCENES[scene];
 	// biome-ignore lint/correctness/useExhaustiveDependencies: the scene id selects the clip; its URL is read from the table.
 	useEffect(() => {
 		const node = video.current;
@@ -101,16 +136,16 @@ export function Stage({
 			node.removeAttribute("src");
 			node.load();
 		};
-	}, [scene, motion]);
+	}, [scene, theme, motion]);
 	return (
-		<div className="wizard-stage" data-scene={scene}>
+		<div className="wizard-stage" data-scene={scene} data-theme={theme}>
 			<div className="wizard-stage__frame" data-playing={playing && motion ? "yes" : undefined}>
 				<img
-					key={scene}
+					key={`${scene}-${theme}`}
 					className="wizard-stage__poster"
 					src={source.poster}
-					width={source.width}
-					height={source.height}
+					width={width}
+					height={height}
 					alt=""
 					decoding="async"
 				/>
@@ -118,8 +153,8 @@ export function Stage({
 				<video
 					ref={video}
 					className="wizard-stage__film"
-					width={source.width}
-					height={source.height}
+					width={width}
+					height={height}
 					muted
 					playsInline
 					preload="none"

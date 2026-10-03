@@ -180,6 +180,14 @@ export async function detectInteropAgents(
 	// declined agent is proposed again on the next run.
 	const priorByKind = new Map((previous ?? readInteropReport()?.agents ?? []).map((record) => [record.kind, record]));
 	const agents: InteropAgentRecord[] = [];
+	// Each probe is a short child process; run together they cost one probe's time instead of the sum.
+	const versions = new Map<string, Promise<string | undefined>>();
+	if (input.probeVersion === true) {
+		for (const kind of INTEROP_AGENT_KINDS) {
+			const binary = resolveOnPath(kind.binaryNames).binary;
+			if (binary !== undefined) versions.set(kind.id, probeVersion(binary));
+		}
+	}
 
 	for (const kind of INTEROP_AGENT_KINDS) {
 		const resolved = resolveOnPath(kind.binaryNames);
@@ -202,7 +210,7 @@ export async function detectInteropAgents(
 		if (resolved.binary !== undefined) {
 			const version =
 				input.probeVersion === true
-					? await probeVersion(resolved.binary)
+					? await versions.get(kind.id)
 					: // A run that did not probe keeps the last version seen for the same
 						// binary, so the fingerprint does not flip between probing callers.
 						prior?.binary === resolved.binary

@@ -95,6 +95,9 @@ export interface InteropProposal {
 	entry: DelegationAgentConfig;
 	/** True when the pinned adapter is not locally verified and npx may fetch it on first use. */
 	needsNetworkInstall: boolean;
+	/** Resolved executable and its probed version, for the row the operator decides on. */
+	binary?: string;
+	version?: string;
 }
 
 export interface InteropDecisionResult {

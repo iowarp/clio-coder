@@ -69,6 +69,7 @@ import {
 	gatewayUrlGuidance,
 	inventoryGap,
 	inventoryNote,
+	LOCAL_APP_RUNTIME_IDS,
 	modelChoiceRefusal,
 	modelSupportsThinking,
 	normalizeUrl,
@@ -127,6 +128,8 @@ interface Answers {
 	/** Native runtime the URL turned out to be serving, when it is not the chosen one. */
 	detected?: { runtimeId: string; displayName: string } | undefined;
 	credential?: CredentialSource | undefined;
+	/** A local server answered 401 or 403, so the credential question it skipped is now asked. */
+	keyRequested?: boolean | undefined;
 	apiKeyEnv?: string | undefined;
 	apiKeyLiteral?: string | undefined;
 	inventory?: WireModelInventory | undefined;
@@ -150,6 +153,8 @@ interface Wizard {
 	rail: string;
 	input: NodeJS.ReadStream;
 	output: NodeJS.WriteStream;
+	/** The caller starts the chat session as soon as this returns, so the wizard does not tell the user how to. */
+	startsChat: boolean;
 	/** Row on the rail, at the wizard's shared label column. */
 	answer: (label: string, value: string) => void;
 }
@@ -357,6 +362,7 @@ const RUNTIME_STEP: Step = {
 			answers.url = undefined;
 			answers.detected = undefined;
 			answers.credential = undefined;
+			answers.keyRequested = undefined;
 			answers.apiKeyEnv = undefined;
 			answers.apiKeyLiteral = undefined;
 			answers.model = undefined;
@@ -441,6 +447,7 @@ const URL_STEP: Step = {
 		wizard.answer("URL", url);
 		const authenticated = await reportReachability(wizard, answers, runtime, url);
 		if (!authenticated && runtime.auth === "api-key") {
+			answers.keyRequested = true;
 			answers.inventoryKey = undefined;
 			if (answers.credential === "skip") answers.credential = undefined;
 			return "credential";
@@ -475,7 +482,7 @@ async function reportReachability(
 			wizard.presenter.step(
 				`${runtime.id === "alcf" ? "ALCF catalog reachable; inference URL not checked" : "reachable"}, ${readings.length > 0 ? readings.join(", ") : "no model list offered"}`,
 			);
-		} else if (probe.authFailed) {
+		} else if (probe.authFailed || REFUSED_CREDENTIAL.test(probe.error ?? "")) {
 			wizard.presenter.warn("Authentication failed. Choose a credential for this server before selecting a model.");
 			return false;
 		} else {
@@ -565,9 +572,29 @@ async function connectOAuth(wizard: Wizard, runtime: RuntimeDescriptor): Promise
 	}
 }
 
+/** Only some runtimes flag a refused credential; the rest report the bare status of the shared HTTP probe. */
+const REFUSED_CREDENTIAL = /\bHTTP (?:401|403)\b/u;
+
+/**
+ * An app on this computer (LM Studio, Lemonade) takes no key unless its owner turned one on, and asking
+ * before the address reads as a question about something the user never set up. The address step routes
+ * back to the credential step when the app refuses the request, and the missing-list screen offers it, so
+ * the question waits for either. A server or gateway stays asked first: those are often shared and keyed.
+ */
+function keyWaitsForRefusal(answers: Answers, runtime: RuntimeDescriptor): boolean {
+	return (
+		answers.mode !== "edit" &&
+		runtime.auth === "api-key" &&
+		LOCAL_APP_RUNTIME_IDS.has(runtime.id) &&
+		answers.keyRequested !== true
+	);
+}
+
 const CREDENTIAL_STEP: Step = {
 	id: "credential",
-	applies: (answers) => answers.runtime?.auth === "api-key" || answers.runtime?.auth === "oauth",
+	applies: (answers) =>
+		(answers.runtime?.auth === "api-key" && !keyWaitsForRefusal(answers, answers.runtime)) ||
+		answers.runtime?.auth === "oauth",
 	run: async (wizard, answers) => {
 		const runtime = answers.runtime;
 		if (!runtime) return "back";
@@ -730,11 +757,22 @@ const MODEL_STEP: Step = {
 		// 38 ids is `gpt-4` because g sorts early.
 		const preferred = answers.model ?? preferredModelFor(inventory, support);
 
+		if (
+			inventory.models.length === 0 &&
+			keyWaitsForRefusal(answers, runtime) &&
+			REFUSED_CREDENTIAL.test(inventory.probeError ?? "")
+		) {
+			// A keyed llama.cpp or vLLM answers its health check and refuses only the model list.
+			answers.keyRequested = true;
+			answers.inventoryKey = undefined;
+			wizard.presenter.warn("Authentication failed. Choose a credential for this server before selecting a model.");
+			return "credential";
+		}
 		if (inventory.models.length === 0) {
 			const gap = inventoryGap(runtime, { url: answers.url }, inventory.probeError);
 			wizard.presenter.warn(gap);
 			const canDetect = runtimeListsModelsLive(runtime);
-			const result = await wizard.select<"retry" | "back" | "manual">({
+			const result = await wizard.select<"retry" | "back" | "manual" | "key">({
 				heading: [
 					"",
 					chalk.bold("Clio could not read a model list"),
@@ -747,6 +785,17 @@ const MODEL_STEP: Step = {
 				choices: [
 					...(canDetect
 						? [{ value: "retry" as const, label: "Check again", hint: "probe the endpoint and read its model list" }]
+						: []),
+					// A keyed server answers its health check and refuses only the list, which no probe can tell from an
+					// empty one, so the key question the setup skipped stays one choice away.
+					...(keyWaitsForRefusal(answers, runtime)
+						? [
+								{
+									value: "key" as const,
+									label: "This server needs an API key",
+									hint: "choose a credential, then read the model list again",
+								},
+							]
 						: []),
 					{ value: "back", label: "Change the connection", hint: "go back without saving" },
 					{
@@ -764,6 +813,11 @@ const MODEL_STEP: Step = {
 			});
 			if (result.kind === "quit") return "quit";
 			if (result.kind === "back" || result.value === "back") return "back";
+			if (result.value === "key") {
+				answers.keyRequested = true;
+				answers.inventoryKey = undefined;
+				return "credential";
+			}
 			if (result.value === "retry") {
 				answers.inventoryKey = undefined;
 				wizard.presenter.step("checking the endpoint and model list again");
@@ -1169,7 +1223,9 @@ function applyAnswers(
 
 export async function runOnboardingWizard(
 	streams: OnboardingStreams,
-	options: { mode: "first" | "add"; runtime?: RuntimeDescriptor } | { mode: "edit"; target: TargetDescriptor } = {
+	options:
+		| { mode: "first" | "add"; runtime?: RuntimeDescriptor; startsChat?: boolean }
+		| { mode: "edit"; target: TargetDescriptor } = {
 		mode: "first",
 	},
 	host?: ConfigureWizardHost,
@@ -1190,6 +1246,7 @@ export async function runOnboardingWizard(
 		rail,
 		input: streams.in as NodeJS.ReadStream,
 		output: streams.out as NodeJS.WriteStream,
+		startsChat: options.mode !== "edit" && options.startsChat === true,
 		answer: (label, value) => {
 			presenter.fields([[label.padEnd(LABEL_WIDTH), truncate(value, Math.max(12, columns - LABEL_WIDTH - 6))]]);
 		},
@@ -1291,11 +1348,17 @@ export async function runOnboardingWizard(
 	}
 
 	if (host?.cancelled()) return stop(true);
-	const code = finish(wizard, answers);
-	if (code === 0 && answers.mode === "first") {
-		await reviewInteropAgents({ rl: null, streams, presenter, rail, quiet: true });
-	}
-	return code;
+	// A hosted run has no terminal to ask on, and the review's non-terminal branch writes to this process's
+	// stdout, which is the host's line transport. The review runs before "Done" so the rail closes on the last thing asked.
+	const peerReview =
+		answers.mode === "first" && !host
+			? async (): Promise<void> => {
+					const review = await reviewInteropAgents({ rl: null, streams, presenter, rail, quiet: true });
+					// The review leaves the rows to a caller that owns a rail, so an accepted peer would otherwise get no answer.
+					for (const id of review.wired) presenter.completedStep(`delegation agent ${id} added; use /delegate ${id} <task>`);
+				}
+			: undefined;
+	return finish(wizard, answers, peerReview);
 }
 
 function cancel(
@@ -1313,7 +1376,7 @@ function cancel(
 	return answers.mode === "first" || options.quit === true ? 130 : 0;
 }
 
-function finish(wizard: Wizard, answers: Answers): number {
+async function finish(wizard: Wizard, answers: Answers, peerReview?: () => Promise<void>): Promise<number> {
 	const runtime = answers.runtime;
 	const targetId = answers.targetId;
 	if (!runtime || targetId === undefined)
@@ -1388,9 +1451,10 @@ function finish(wizard: Wizard, answers: Answers): number {
 	}
 
 	if (!wizard.host) {
-		presenter.commandAdvice("Start Clio:", "clio-coder");
+		if (!wizard.startsChat) presenter.commandAdvice("Start Clio:", "clio-coder");
 		presenter.commandAdvice("Change any of this later:", "clio-coder configure");
 	}
+	await peerReview?.();
 	presenter.done("Done");
 	return 0;
 }
