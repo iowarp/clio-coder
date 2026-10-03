@@ -41,8 +41,12 @@ import type {
 	DispatchStartedPayload,
 	RunAbortedPayload,
 } from "../core/bus-events.js";
+import type {
+	RunPresentedResultContract,
+	RunReceiptSummary,
+	RunResultContract,
+} from "../domains/dispatch/receipt-facts.js";
 import type { RunKind } from "../domains/dispatch/types.js";
-import type { CanonicalTrustStatus } from "../domains/evidence/trust-status.js";
 import {
 	createWorkerProgressFold,
 	type WorkerAction,
@@ -64,53 +68,19 @@ export interface WorkerAttempt {
 	outcome?: string;
 }
 
-export type WorkerResultContract = "pass" | "fail" | "not-reached" | "unmeasured";
-
-/** Result kinds whose parsed envelopes have a dedicated transcript presentation. */
-export type WorkerPresentedResultContract =
-	| "debugger-report"
-	| "verifier-report"
-	| "research-report"
-	| "world-knowledge-report"
-	| "scout-report";
+export type WorkerResultContract = RunResultContract;
+export type WorkerPresentedResultContract = RunPresentedResultContract;
 
 /**
  * Terminal facts a worker block reports. Sealed by the receipt when it can be
- * read, carried by the terminal event otherwise. Every unit is optional and
- * rendered only when known: an ACP peer reports no tokens of its own, and a
- * block that says it spent zero would be claiming something no receipt sealed.
+ * read, carried by the terminal event otherwise. The receipt-derived fields
+ * come from the dispatch domain; the two below are this transcript's own.
  */
-export interface WorkerReceiptSummary {
-	/**
-	 * The canonical trust status of the persisted receipt, authenticated
-	 * against the persisted ledger row it was sealed from. Present only when
-	 * both could be read back, so a surface that shows it shows an
-	 * authenticated verdict and never the sealing process's own claim.
-	 */
-	trust?: CanonicalTrustStatus;
-	outcome: string;
-	outcomeCode?: string;
-	exitCode?: number;
-	failureMessage?: string;
-	mergeDetail?: string;
-	tokenCount?: number;
-	durationMs?: number;
-	toolCalls?: number;
-	/** Integrity-checked external workspace facts for a shared result. */
-	placement?:
-		| { mode: "current"; cwd: string; changedPaths?: string[] }
-		| { mode: "worktree"; cwd: string; branch: string; changedPaths?: string[] };
-	contract?: WorkerResultContract;
-	/** Parsed from the receipt's result-contract source id; absent on legacy and untyped receipts. */
-	contractKind?: WorkerPresentedResultContract;
+export interface WorkerReceiptSummary extends RunReceiptSummary {
 	/** From an abort marker rather than a sealed terminal event; a later DispatchCompleted/DispatchFailed replaces it. */
 	provisional?: boolean;
 	/** The run is over, but no receipt could be read for it, and the ledger row could not explain why either. */
 	receiptUnavailable?: boolean;
-	/** Replay only: the ledger row for this run has no `endedAt` yet, so the run is still going in another process. */
-	stillRunning?: boolean;
-	/** Replay only: no receipt exists because the ledger closed this row early (`closeAbandonedRows`); the row's own explanation, verbatim. */
-	abandonedDetail?: string;
 }
 
 /** A receipt's projection: the summary plus the answer it sealed. */
