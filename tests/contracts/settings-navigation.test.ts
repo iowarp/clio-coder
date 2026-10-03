@@ -21,6 +21,17 @@ function fixture() {
 	return buildSettingItems(settings);
 }
 
+test("fleet setup actions provide filter metadata without catalog entries", () => {
+	const items = buildSettingItems(structuredClone(DEFAULT_SETTINGS), { onFleetSettingsChanged: () => {} });
+	for (const id of ["fleet.nodes.add", "fleet.nodes.discover"] as const) {
+		const row = items.find((item) => item.id === id);
+		ok(row);
+		strictEqual(row.configPath, id);
+		ok(row.label.length > 0);
+		ok(row.description.length > 0);
+	}
+});
+
 test("every existing settings control has exactly one home and canonical persisted paths determine it", () => {
 	const items = fixture();
 	const controls = items.filter((item) => item.presentationKind !== "group-header");
