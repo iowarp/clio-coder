@@ -47,6 +47,7 @@ import {
 	type CompiledPathPolicy,
 	compilePathPolicy,
 	evaluatePathPolicy,
+	isSameOrDescendant,
 	type PathPolicyDecision,
 	type PathPolicyOperation,
 } from "./path-policy.js";
@@ -77,6 +78,7 @@ import { formatRejection, type RejectionMessage } from "./rejection-feedback.js"
 import { ROUTING_PIN_HINT } from "./routing-settings.js";
 import { getCachedDefaultRulePacks, type PackId, type RulePacks } from "./rule-pack-loader.js";
 import { clioCredentialStorePaths } from "./secret-paths.js";
+import type { MutationCandidate } from "./skill-authority.js";
 import { activeClioSkillRoots, mutationCandidates, skillMutationReason } from "./skill-authority.js";
 
 import { gateProjectSafetyPolicy, workspaceTrustDirectory } from "./workspace-trust.js";
@@ -724,11 +726,7 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 			// Project settings carry persistent fleet routing. A model edit is file
 			// level, so it cannot be told apart from a routing change: every mutation
 			// asks at every autonomy level, and a headless denial repeats reasons[0].
-			const projectSettings = [
-				path.join(cwd, ".clio-coder", "settings.yaml"),
-				path.join(cwd, ".clio-coder", "settings.local.yaml"),
-			];
-			if (skillMutationReason(projectSettings, candidates, walkMemo) !== null) {
+			if (mutatesProjectSettings(cwd, candidates)) {
 				const input = {
 					ruleId: "project-settings-confirm",
 					reasonCode: "project-settings-confirm",
@@ -1290,6 +1288,24 @@ function evaluateBashPolicy(
 		policySource: "builtin-command-allowlist",
 		execRecognition: "unrecognized",
 	};
+}
+
+/**
+ * The roots stay lexical: `cwd` is already canonical and the settings loader
+ * refuses a symlinked `.clio-coder`, so resolving them would only add the two
+ * realpath calls the admission fs budget forbids. A candidate's resolved path
+ * still catches an alias that lands on either file.
+ */
+function mutatesProjectSettings(cwd: string, candidates: ReadonlyArray<MutationCandidate>): boolean {
+	const roots = [path.join(cwd, ".clio-coder", "settings.yaml"), path.join(cwd, ".clio-coder", "settings.local.yaml")];
+	return candidates.some((candidate) =>
+		roots.some((root) =>
+			[candidate.lexical, candidate.resolved].some(
+				(location) =>
+					isSameOrDescendant(location, root) || (candidate.operation === "delete" && isSameOrDescendant(root, location)),
+			),
+		),
+	);
 }
 
 function baseDecision(
