@@ -1367,8 +1367,9 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 					networkAllowed: true,
 					filesystem: nodeResultContractFilesystem(),
 				}).conformance === "fail";
-			if (zeroToolRepairQueued && toolExecutionsStarted === 0) {
+			if (helperSchema !== null && zeroToolRepairQueued && toolExecutionsStarted === 0) {
 				// An unsealed helper would otherwise hide the parent's no-work classification behind a generic failed exit.
+				// Without a helper the worker exits clean and the parent seals worker_no_work from the empty tool activity.
 				workerBoundFailure = "worker executed no tools, so it did none of its assignment";
 				emit({
 					type: "clio_coder_run_outcome",
