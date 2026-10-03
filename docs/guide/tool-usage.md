@@ -153,7 +153,7 @@ Turn budget: all envelope-backed tools draw from one shared pool per turn (`safe
 
 ## read: page through a file with offset, limit, and tail
 
-Reads one UTF-8 text file. Source: [read.ts](../../src/tools/read.ts).
+Reads one UTF-8 text file, an image, or a document rendered as text: a Jupyter notebook, a PDF, or a zip, tar or tar.gz archive. Sources: [read.ts](../../src/tools/read.ts), `src/tools/read-documents/`.
 
 | Argument | Contract |
 | --- | --- |
@@ -162,10 +162,14 @@ Reads one UTF-8 text file. Source: [read.ts](../../src/tools/read.ts).
 | `limit` | Maximum lines. |
 | `tail` | Last N lines; overrides offset/limit. |
 | `line_numbers` | Prefix source line numbers; default false. |
+| `pages` | PDF only: a page range such as `3-7`; default the first 50 pages. |
+| `member` | Archive only: the member to read; without it, read lists the members. |
 
 Each call stops at 2000 lines or the 50 KiB read cap; the turn budget may lower it. Files are read in bounded windows; exact line counts stop after 32 MiB, then total is unknown (`N+`). Images are limited to 20 MB and need the routed model's resolved vision capability. An explicit text-only deployment probe blocks image forwarding even when the model family normally accepts images. Managed Codex, Pi, OpenCode, Claude Code, and Antigravity CLI bridges take text work orders, so they do not accept direct image blocks even if the underlying model supports vision. NUL and invalid UTF-8 in inspected bytes error with zero-based byte offsets. A bounded read says nothing about unread regions.
 
 Truncation provides the first unshown line as `next: offset=...`; read uses the file itself for continuation, never offloads. Oversized single lines return a UTF-8 prefix and hint to narrow grep/edit. Tail continuation widens when total is unknown; numbered tail is refused if absolute line numbers cannot be established. `details.file` includes bytes/mtime and `details.fileChange` reports observed identity changes; neither locks against writers.
+
+Documents render to text first, and `offset`, `limit`, `tail` and `line_numbers` then page that text like a source file. A notebook shows each cell's source and its stream, result and error outputs; image and other binary outputs become a one-line placeholder naming the MIME type. A PDF runs poppler's `pdfinfo` and `pdftotext` with a 60 s timeout and renders each page under a page marker; without poppler on `PATH` the call refuses and names `run_script` with pypdf. An archive lists its members with size and time, and `member` inflates one UTF-8 text member in memory, up to 4 MiB; nothing is extracted to disk, and encrypted or binary members are refused.
 
 Use grep to locate a region, then read that span. Use tail for logs.
 
@@ -274,28 +278,31 @@ verify(check="compare-stats")
 
 ## data: inspect structured files through the gateway
 
-Read-only `inspect`, `select`, and `validate` for CSV, TSV, JSON, and JSONL. Sources: [data-tool.ts](../../src/tools/gateway/data-tool.ts), `src/tools/data/`. No file is rewritten and no parser is installed.
+Read-only `inspect`, `select`, and `validate` for CSV, TSV, JSON, and JSONL, plus `inspect` and `select` for SQLite databases. Sources: [data-tool.ts](../../src/tools/gateway/data-tool.ts), `src/tools/data/`. No file is rewritten and no parser is installed.
 
 | Argument | Contract |
 | --- | --- |
 | `op`, `path` | Required operation and file path. |
-| `format` | Optional explicit `csv`, `tsv`, `json`, or `jsonl`. |
+| `format` | Optional explicit `csv`, `tsv`, `json`, `jsonl`, or `sqlite`. |
 | `delimiter`, `header` | CSV/TSV overrides; delimiter is one character, header defaults to `auto`. Detection considers comma, tab, semicolon, pipe. |
 | `sample_rows` | Inspection preview; default 10, max 1000. |
 | `max_rows` | Inspect/validate scan bound; default 100000, `null` means scan to EOF. |
 | `offset`, `limit` | Select window; zero-based offset (default 0), result limit (default 50, max 1000). |
 | `columns` | CSV/TSV projection by header or zero-based index. |
 | `pointer` | JSON RFC 6901 pointer; empty string selects the document. |
+| `sql` | SQLite select: one read-only `SELECT`, `WITH`, `VALUES` or `EXPLAIN` statement, windowed by `offset` and `limit`. |
+| `table` | SQLite: inspect counts and samples this table; select reads it instead of `sql`, with `columns` as a projection. |
 
 `path` is workspace-relative or absolute and uses normal path policy. Inspect returns schema/dimensions and a bounded sample; select returns rows, records, or a JSON value. Validate covers only scanned rows unless `max_rows=null`; `rowCount:null` means scan stopped early. Results include `view={exact,sampled,converted}`: `sampled` means scan stopped before EOF; `exact=false,sampled=false` means a selected value was cut to budget. `$summary`/`$truncated` mark cuts. Samples may be cut while whole-file counts remain exact. `converted` is always false.
 
 CSV cells stay strings. Empty cells and missing sentinels are counted separately, never coerced to zero/null. Numeric precision issues are surfaced (`unsafe-integer`, `excess-digits`, `inexact`, `overflow`, `underflow`, `oversized-literal`); unrepresentable JSON numbers use `$literal` plus precision metadata. No units are inferred; extrema affected by precision loss are approximate. Format/schema validity establishes neither physical meaning nor transformation correctness.
 
-Readers stream with bounded captures: CSV fields 1,048,576 chars, records 16,777,216; JSONL lines 1,048,576; JSON nesting 1024. Binary/NUL, invalid UTF-8, malformed syntax, unsupported formats, missing pointers, and unknown columns error. Duplicate-key and precision tracking are bounded and report omissions. Gateway observations cap data at 32 KiB and use the shared turn budget. HDF5, NetCDF, and Parquet need `run_script` plus an operator-provided library. After a transform, validate output schema, precision, missing values, and scientific invariants separately.
+Readers stream with bounded captures: CSV fields 1,048,576 chars, records 16,777,216; JSONL lines 1,048,576; JSON nesting 1024. Binary/NUL, invalid UTF-8, malformed syntax, unsupported formats, missing pointers, and unknown columns error. Duplicate-key and precision tracking are bounded and report omissions. Gateway observations cap data at 32 KiB and use the shared turn budget. SQLite runs in a child process that opens the database read-only, sets `query_only`, and accepts one statement with a 30 s timeout; a database whose read-only open fails is reopened with `immutable=1`, and the result says changes still in its WAL are not visible. HDF5, NetCDF, and Parquet need `run_script` plus an operator-provided library. After a transform, validate output schema, precision, missing values, and scientific invariants separately.
 
 ```text
 gateway(op="call", capability="data", args={op: "inspect", path: "results.csv", max_rows: null})
 gateway(op="call", capability="data", args={op: "select", path: "results.json", pointer: "/runs/0"})
+gateway(op="call", capability="data", args={op: "select", path: "runs.db", sql: "SELECT node, sum(bytes) FROM runs GROUP BY node"})
 ```
 
 ## grep: search file contents with ripgrep
