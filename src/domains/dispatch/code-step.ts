@@ -45,6 +45,8 @@ export const CODE_STEP_EMPTY_DIFF_MESSAGE = "nothing to commit: the workspace ha
 export const CODE_STEP_TRUNCATION_MARKER = "\n[... output truncated, see artifact ...]\n";
 
 export interface CodeStepRunInput {
+	/** Run-local mutation paths supplied only for a fleet loop's code check. */
+	mutatedPaths?: ReadonlyArray<string>;
 	/** Already resolved literal arguments; never interpolated a second time. */
 	args?: ReadonlyArray<string>;
 	stepId: string;
@@ -89,6 +91,8 @@ export interface CodeStepRecord {
 	stepId: string;
 	commandId: string;
 	argv: ReadonlyArray<string>;
+	/** Individual command outcomes when a check also ran changed test files. */
+	commandRuns?: ReadonlyArray<{ argv: ReadonlyArray<string>; cwd: string; exitCode: number; durationMs: number }>;
 	cwd: string;
 	envNames: ReadonlyArray<string>;
 	timeoutMs: number;
@@ -332,7 +336,7 @@ export async function runCodeStep(input: CodeStepRunInput): Promise<CodeStepOutc
 	const clock = process.hrtime.bigint();
 	const startedAt = new Date(startedAtMs).toISOString();
 	const emptyWorkspace = input.requireWorkspaceChanges === true && !workspaceHasChanges(cwd);
-	const spawned = emptyWorkspace
+	let spawned = emptyWorkspace
 		? {
 				exitCode: CODE_STEP_EMPTY_DIFF_EXIT_CODE,
 				signal: null,
@@ -343,19 +347,71 @@ export async function runCodeStep(input: CodeStepRunInput): Promise<CodeStepOutc
 				spawnError: null,
 			}
 		: await spawnCommand(input, cwd, argv);
+	const primaryDurationMs = Number((process.hrtime.bigint() - clock) / 1_000_000n);
+	const primaryEvidence = emptyWorkspace
+		? CODE_STEP_EMPTY_DIFF_MESSAGE
+		: spawned.timedOut
+			? `timed out after ${command.timeoutMs}ms (exit ${spawned.exitCode})`
+			: `exit ${spawned.exitCode} in ${primaryDurationMs}ms`;
+	const checks = [
+		{
+			name: command.id,
+			passed: spawned.exitCode === 0,
+			evidence: `\`${argv.join(" ")}\` ${primaryEvidence}`,
+		},
+	];
+	const commandRuns = [{ argv: [...argv], cwd, exitCode: spawned.exitCode, durationMs: primaryDurationMs }];
+	const testFiles = input.mutatedPaths?.length
+		? (await import("../../tools/verify/test-files.js")).resolveTestFileChecks(input.workspaceRoot, input.mutatedPaths)
+		: { checks: [], notes: [] };
+	for (const test of testFiles.checks) {
+		if (input.signal?.aborted || spawned.timedOut) break;
+		const testCommand: FleetCommand = {
+			id: `changed tests (${test.check.id})`,
+			argv: test.argv,
+			cwd: test.check.cwd,
+			timeoutMs: Math.max(
+				1,
+				Math.min(command.timeoutMs - Number((process.hrtime.bigint() - clock) / 1_000_000n), test.check.timeoutMs),
+			),
+			env: command.env,
+			description: test.check.description,
+		};
+		const testCwd = resolveCwd(testCommand, input.workspaceRoot);
+		const testClock = process.hrtime.bigint();
+		const result = await spawnCommand({ ...input, command: testCommand }, testCwd, test.argv);
+		const testDurationMs = Number((process.hrtime.bigint() - testClock) / 1_000_000n);
+		checks.push({
+			name: testCommand.id,
+			passed: result.exitCode === 0,
+			evidence: `\`${test.argv.join(" ")}\` exit ${result.exitCode} in ${testDurationMs}ms`,
+		});
+		commandRuns.push({ argv: [...test.argv], cwd: testCwd, exitCode: result.exitCode, durationMs: testDurationMs });
+		const captured = Buffer.concat([
+			spawned.captured,
+			Buffer.from(`\n$ ${test.argv.join(" ")}\ncwd: ${testCwd}\nexit: ${result.exitCode}\n`),
+			result.captured,
+			Buffer.from(result.spawnError === null ? "" : `\n${result.spawnError}\n`),
+		]);
+		spawned = {
+			...spawned,
+			exitCode: spawned.exitCode === 0 ? result.exitCode : spawned.exitCode,
+			signal: spawned.signal ?? result.signal,
+			timedOut: spawned.timedOut || result.timedOut,
+			captured: captured.subarray(-Math.min(captured.length, input.maxOutputBytes ?? CODE_STEP_CAPTURE_MAX_BYTES)),
+			outputBytes: spawned.outputBytes + result.outputBytes,
+		};
+	}
 	const durationMs = Number((process.hrtime.bigint() - clock) / 1_000_000n);
 	const endedAt = new Date(startedAtMs + durationMs).toISOString();
 	const capturedText =
-		spawned.captured.toString("utf8") + (spawned.spawnError === null ? "" : `\n${spawned.spawnError}\n`);
+		spawned.captured.toString("utf8") +
+		(spawned.spawnError === null ? "" : `\n${spawned.spawnError}\n`) +
+		(testFiles.notes.length === 0 ? "" : `\n${testFiles.notes.join("\n")}\n`);
 	const printed = Buffer.from(capturedText, "utf8");
 	const excerpt = tailUtf8(printed, CODE_STEP_EXCERPT_MAX_BYTES, CODE_STEP_TRUNCATION_MARKER);
 	const rendered = argv.join(" ");
 	const passed = spawned.exitCode === 0;
-	const evidence = emptyWorkspace
-		? CODE_STEP_EMPTY_DIFF_MESSAGE
-		: spawned.timedOut
-			? `timed out after ${command.timeoutMs}ms (exit ${spawned.exitCode})`
-			: `exit ${spawned.exitCode} in ${durationMs}ms`;
 
 	const artifactPaths: string[] = [];
 	if (input.artifactDir !== undefined) {
@@ -380,7 +436,7 @@ export async function runCodeStep(input: CodeStepRunInput): Promise<CodeStepOutc
 	const report: CodeReportResult = {
 		passed,
 		exitCode: spawned.exitCode,
-		checks: [{ name: command.id, passed, evidence: `\`${rendered}\` ${evidence}` }],
+		checks,
 		artifactPaths,
 		outputExcerpt: excerpt.text,
 	};
@@ -390,6 +446,7 @@ export async function runCodeStep(input: CodeStepRunInput): Promise<CodeStepOutc
 		stepId: input.stepId,
 		commandId: command.id,
 		argv: [...argv],
+		...(commandRuns.length > 1 ? { commandRuns } : {}),
 		cwd,
 		envNames: [...FLEET_COMMAND_BASE_ENV, ...command.env],
 		timeoutMs: command.timeoutMs,

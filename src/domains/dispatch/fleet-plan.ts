@@ -116,10 +116,8 @@ function declaredLoops(steps: ReadonlyArray<FleetContractStep>): Map<string, Exe
 }
 
 /**
- * The exact argument vector each loop's code check runs, for the agents whose
- * work it checks. A registered suite that already passes on the untouched tree
- * never fails the check, so the repair loop never triggers (campaign T3); an
- * agent that knows the vector can put its reproduction test where it runs.
+ * The exact registered argument vector each loop's code check runs, alongside
+ * the changed-test checks resolved from the implementer's mutation paths.
  */
 function loopCheckCommandNote(
 	contract: FleetContract,
