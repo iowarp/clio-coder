@@ -1,5 +1,5 @@
 {
-	"description": "An open-source terminal coding agent for scientific software: your models, bounded workers, and inspectable evidence.",
+	"description": "An open-source coding agent for scientific software, in your terminal, in headless runs, over ACP and in the browser: your models, bounded workers, and inspectable evidence.",
 	"homepage": "https://github.com/iowarp/clio-coder#readme",
 	"topics": [
 		"ai",

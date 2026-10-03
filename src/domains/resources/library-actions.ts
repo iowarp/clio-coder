@@ -278,7 +278,7 @@ function installStep(
 	staged.expect = { copies: expected };
 	const refusal =
 		existing && operation === "install" && !staged.force
-			? `${identity.ref} is already installed in ${scope} scope; use update or force`
+			? `${identity.ref} is already installed in ${scope} scope; update it instead, or reinstall it with \`clio-coder library install ${identity.ref} --force\``
 			: undefined;
 	return {
 		operation,

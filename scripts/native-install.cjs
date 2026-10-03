@@ -53,7 +53,17 @@ function entry(prefix) {
 	return path.join(prefix, "lib", "node_modules", "@iowarp", "clio-coder", "dist", "cli", "index.js");
 }
 
-function check(node, prefix, postInstall) {
+function packageVersion(prefix) {
+	try {
+		const file = path.join(prefix, "lib", "node_modules", "@iowarp", "clio-coder", "package.json");
+		return String(JSON.parse(fs.readFileSync(file, "utf8")).version || "");
+	} catch {
+		// A prefix without readable metadata is still named by its path in messages.
+		return "";
+	}
+}
+
+function check(node, prefix, postInstall, echo = true) {
 	for (const args of [[entry(prefix), "--version"], ...(postInstall ? [[entry(prefix), "doctor", "--json"]] : [])]) {
 		const result = spawnSync(node, args, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], maxBuffer: 1024 * 1024 });
 		if (
@@ -64,7 +74,14 @@ function check(node, prefix, postInstall) {
 				`Candidate check failed (${result.status}): ${result.error?.message ?? ""}\n${result.stdout ?? ""}${result.stderr ?? ""}`,
 			);
 		if (args[1] === "doctor") {
-			const report = JSON.parse(result.stdout);
+			let report;
+			try {
+				report = JSON.parse(result.stdout);
+			} catch {
+				throw new Error(
+					`Candidate doctor did not return its JSON report:\n${(result.stdout || result.stderr || "").trim().slice(0, 2000)}`,
+				);
+			}
 			const integrity = new Set([
 				"engine runtime",
 				"directory layout",
@@ -80,7 +97,7 @@ function check(node, prefix, postInstall) {
 				return !finding.ok && integrity.has(finding.name) && !missing;
 			});
 			if (failures.length) throw new Error(failures.map((finding) => `${finding.name}: ${finding.detail}`).join("\n"));
-		} else process.stdout.write(result.stdout);
+		} else if (echo) process.stdout.write(result.stdout);
 		process.stderr.write(result.stderr);
 	}
 }
@@ -131,7 +148,12 @@ async function main() {
 		if (!old?.previous || !inside(path.join(root, "versions"), old.previous))
 			throw new Error("No owned previous install available");
 		const node = old.previousNode || old.node;
-		check(node, old.previous, false);
+		check(node, old.previous, false, false);
+		const restored = packageVersion(old.previous) || old.previous;
+		const replaced = packageVersion(old.current) || old.current;
+		// A pin follows the operator to the version they rolled back to. Left on the
+		// replaced version, the next upgrade or installer run reinstalled exactly it.
+		const pin = old.versionPin ? packageVersion(old.previous) || old.versionPin : "";
 		atomic(
 			path.join(root, "install.json"),
 			`${JSON.stringify(
@@ -145,13 +167,17 @@ async function main() {
 					previousNode: old.node,
 					previousNodeVersion: old.nodeVersion,
 					previousNodeBuild: old.nodeBuild,
+					versionPin: pin,
 					autoUpdate: false,
 				},
 				null,
 				2,
 			)}\n`,
 		);
-		process.stdout.write("[install] rollback complete; background updates disabled until explicitly enabled\n");
+		process.stdout.write(
+			`[install] rolled back to ${restored}; ${replaced} stays installed and another rollback returns to it\n` +
+				`[install] background updates disabled until explicitly enabled${pin ? `; pinned ${pin}` : ""}\n`,
+		);
 		return;
 	}
 	if (action !== "activate") throw new Error(`Unknown installer action ${action}`);

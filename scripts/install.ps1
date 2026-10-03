@@ -104,11 +104,18 @@ function Install-ClioCoder {
 		Fail "refusing to overwrite $launcher, which this installer did not write; move it aside, choose another -BinDir, or pass -Force"
 	}
 	if ($Options.DryRun) {
+		if ($Options.Rollback) {
+			Say "would point $launcher back at the previous version recorded in $installRoot\install.json"
+			Ok "dry run complete; nothing was changed"
+			return
+		}
 		Say "would install Node $($Options.NodeVersion) ($build) and run its npm: npm install --prefix $installRoot\versions\<version>\lib $installSpec"
 		Ok "dry run complete; nothing was downloaded or changed"
 		return
 	}
 
+	$manifestFile = Join-Path $installRoot "install.json"
+	if ($Options.Rollback -and -not (Test-Path -LiteralPath $manifestFile)) { Fail "no installer manifest at $manifestFile; nothing to roll back" }
 	New-Item -ItemType Directory -Force -Path $installRoot | Out-Null
 	$lock = Join-Path $installRoot ".install-lock"
 	try { New-Item -ItemType Directory -Path $lock -ErrorAction Stop | Out-Null }
@@ -117,13 +124,12 @@ function Install-ClioCoder {
 	$work = $null
 	try {
 	if ($Options.Rollback) {
-		$old = Get-Content -LiteralPath (Join-Path $installRoot "install.json") -Raw | ConvertFrom-Json
+		$old = Get-Content -LiteralPath $manifestFile -Raw | ConvertFrom-Json
 		$helper = Join-Path $old.current "lib\node_modules\@iowarp\clio-coder\scripts\native-install.cjs"
 		& $old.node $helper rollback $installRoot
 		if ($LASTEXITCODE -ne 0) { Fail "rollback failed; active install preserved" }
 		return
 	}
-	$manifestFile = Join-Path $installRoot "install.json"
 	if (-not $Options.Version -and -not $Options.Package -and (Test-Path -LiteralPath $manifestFile)) {
 		$policy = Get-Content -LiteralPath $manifestFile -Raw | ConvertFrom-Json
 		if ($policy.versionPin) { $Options.Version = [string]$policy.versionPin; $installSpec = "$PackageName@$($policy.versionPin)" }
@@ -179,10 +185,12 @@ function Install-ClioCoder {
 			}
 			$signed = $false
 			$gpgv = Get-Command gpgv -ErrorAction SilentlyContinue
+			$unsignedReason = if (-not $gpgv) { "no gpgv on PATH" } elseif (-not (Test-Path -LiteralPath "$sums.asc")) { "no SHASUMS256.txt.asc signature" } else { "" }
 			if ($gpgv -and (Test-Path -LiteralPath "$sums.asc")) {
 				$keyring = if ($env:CLIO_CODER_NODE_KEYRING) { $env:CLIO_CODER_NODE_KEYRING } else { Join-Path $work "pubring.kbx" }
-				if (-not $env:CLIO_CODER_NODE_KEYRING) { try { Get-File $KeyringUrl $keyring } catch { $keyring = $null } }
+				if (-not $env:CLIO_CODER_NODE_KEYRING) { try { Get-File $KeyringUrl $keyring } catch { $keyring = $null; $unsignedReason = "the Node.js release keys could not be fetched" } }
 				if ($keyring) {
+					$unsignedReason = "gpgv could not check the signature"
 					$status = & $gpgv.Source --status-fd 1 --keyring $keyring --output "$sums.verified" "$sums.asc" 2>$null
 					if ($status -match "BADSIG") { Fail "the OpenPGP signature on SHASUMS256.txt is BAD; refusing to install" }
 					if ($status -match "VALIDSIG") { $sums = "$sums.verified"; $signed = $true; Ok "SHASUMS256.txt signature verified against the Node.js release keys" }
@@ -190,7 +198,7 @@ function Install-ClioCoder {
 			}
 			if (-not $signed) {
 				if ($env:CLIO_CODER_REQUIRE_SIGNATURE -eq "1") { Fail "CLIO_CODER_REQUIRE_SIGNATURE=1, but no verified signature covers SHASUMS256.txt" }
-				Say "no gpgv on PATH; verifying the checksum from SHASUMS256.txt over HTTPS"
+				Say "$unsignedReason; verifying the checksum from SHASUMS256.txt over HTTPS"
 			}
 			$expected = (Get-Content -LiteralPath $sums | Where-Object { $_ -match "^([0-9a-f]{64})\s+$([regex]::Escape($zipName))$" } | Select-Object -First 1) -replace "\s.*$", ""
 			if (-not $expected) { Fail "$zipName is not listed in SHASUMS256.txt; refusing to install it" }
@@ -249,7 +257,7 @@ function Install-ClioCoder {
 		if ($LASTEXITCODE -ne 0) { Fail "candidate checks failed; previous install remains active" }
 		if (-not $Options.NoPostInstall) {
 			& $node $entry upgrade --post-install
-			if ($LASTEXITCODE -ne 0) { Fail "package installed, but local migrations/initialization need attention. Run clio-coder upgrade --post-install; previous binary remains available with upgrade --rollback." }
+			if ($LASTEXITCODE -ne 0) { Fail "package installed, but local migrations/initialization need attention. Run clio-coder upgrade --post-install; the previous version remains available with: clio-coder upgrade --rollback" }
 		}
 		$reported = & $node $entry --version
 		if ($LASTEXITCODE -ne 0) { Fail "active CLI failed version check" }
@@ -287,9 +295,20 @@ function Install-ClioCoder {
 	}
 }
 
-Install-ClioCoder -Options ([pscustomobject]@{
-	Version = $Version; Channel = $Channel; Package = $Package; NodeVersion = $NodeVersion; NodeZip = $NodeZip
-	InstallDir = $InstallDir; BinDir = $BinDir; IncludeClaudeSdk = [bool]$IncludeClaudeSdk; AddToPath = [bool]$AddToPath
-	NoModifyPath = [bool]$NoModifyPath; NoAutoUpdate = [bool]$NoAutoUpdate; AutoUpdate = [bool]$AutoUpdate; Rollback = [bool]$Rollback
-	NoPostInstall = [bool]$NoPostInstall; RefreshRuntime = [bool]$RefreshRuntime; Force = [bool]$Force; DryRun = [bool]$DryRun
-})
+# Set only when PowerShell runs this file with -File; `irm | iex` and a script block leave it empty.
+$InvokedAsFile = [bool]$MyInvocation.MyCommand.Path
+try {
+	Install-ClioCoder -Options ([pscustomobject]@{
+		Version = $Version; Channel = $Channel; Package = $Package; NodeVersion = $NodeVersion; NodeZip = $NodeZip
+		InstallDir = $InstallDir; BinDir = $BinDir; IncludeClaudeSdk = [bool]$IncludeClaudeSdk; AddToPath = [bool]$AddToPath
+		NoModifyPath = [bool]$NoModifyPath; NoAutoUpdate = [bool]$NoAutoUpdate; AutoUpdate = [bool]$AutoUpdate; Rollback = [bool]$Rollback
+		NoPostInstall = [bool]$NoPostInstall; RefreshRuntime = [bool]$RefreshRuntime; Force = [bool]$Force; DryRun = [bool]$DryRun
+	})
+} catch {
+	# An installer refusal is one line with its fix, as on Linux; anything else keeps its position for a bug report.
+	$message = $_.Exception.Message
+	if (-not $message.StartsWith("[install] error:")) { $message = "[install] error: $message`n$($_.InvocationInfo.PositionMessage)" }
+	[Console]::Error.WriteLine($message)
+	# A file run reports failure through its exit code; under `irm | iex`, exit would close the caller's shell.
+	if ($InvokedAsFile) { exit 1 }
+}

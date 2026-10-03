@@ -74,19 +74,23 @@ export function createInteractiveUpgradeFlow(deps: InteractiveUpgradeFlowDeps): 
 						plan.installation.kind === "pnpm" || plan.installation.kind === "bun"
 							? "\nThen run: clio-coder upgrade --post-install"
 							: "";
-					deps.notify(
-						"warning",
-						`This ${plan.installation.kind} installation must be updated by its owning package manager. Run:\n${plan.command}${postInstall}`,
-						"lifecycle:upgrade-manual",
-					);
-					deps.record?.(
-						"warn",
-						`This ${plan.installation.kind} installation must be updated by its owning package manager. Run:`,
-					);
+					const lead =
+						plan.installation.kind === "source"
+							? "This source checkout updates through git, not the package registry. Run:"
+							: `This ${plan.installation.kind} installation must be updated by its owning package manager. Run:`;
+					deps.notify("warning", `${lead}\n${plan.command}${postInstall}`, "lifecycle:upgrade-manual");
+					deps.record?.("warn", lead);
 					// One transcript row per line: a row holds a single line, and the source
 					// install's command is three, so one row joins `cd` and `git` into one.
 					for (const line of plan.command.split("\n")) deps.record?.("info", line);
 					if (postInstall) deps.record?.("info", "clio-coder upgrade --post-install");
+					return;
+				}
+				if (plan.status === "pinned") {
+					const pinned = `This install is pinned to ${plan.pin}, so /upgrade leaves it there. To follow its channel again, run:`;
+					deps.notify("info", `${pinned}\n${plan.command}`, "lifecycle:upgrade-pinned");
+					deps.record?.("info", pinned);
+					deps.record?.("info", plan.command);
 					return;
 				}
 				if (plan.status === "unavailable") {
@@ -111,12 +115,17 @@ export function createInteractiveUpgradeFlow(deps: InteractiveUpgradeFlowDeps): 
 					return;
 				}
 
+				// An installer install gets a new version prefix beside the current one; npm replaces its package in place.
+				const replacement =
+					plan.installation.kind === "installer" && plan.installation.installer
+						? `This installs it beside the current version under ${plan.installation.installer.root} and switches the launcher; the current version stays for rollback. `
+						: `This replaces only the npm package in ${plan.installation.prefix}. `;
 				const approval = await deps.openAskUser([
 					{
 						header: "Upgrade",
 						question:
 							`Upgrade Clio Coder ${plan.current} → ${plan.available}? ` +
-							`This replaces only the npm package in ${plan.installation.prefix}. ` +
+							replacement +
 							"Settings, credentials, memory, evidence, and session history stay in their current directories. " +
 							"After replacement Clio runs pending lifecycle checks, then asks you to restart.",
 						options: [

@@ -29,10 +29,12 @@ need_cmd() {
 	command -v "$1" >/dev/null 2>&1 || fail "required command not found: $1"
 }
 
+# The "~/" pattern is quoted so bash does not tilde-expand it, which turned
+# CLIO_CODER_BIN_DIR="~/bin" into "$HOME/~/bin".
 expand_tilde() {
 	case "$1" in
 		"~") printf '%s\n' "$HOME" ;;
-		"~/"*) printf '%s/%s\n' "$HOME" "${1#~/}" ;;
+		"~/"*) printf '%s/%s\n' "$HOME" "${1#"~/"}" ;;
 		*) printf '%s\n' "$1" ;;
 	esac
 }
@@ -139,18 +141,18 @@ NODE
 
 # The verification line names the launcher this run installed, by path. A bare
 # `clio-coder` resolves through PATH and can answer for an older install earlier on it,
-# which verifies that one instead of this one.
+# which verifies that one instead of this one. The last two lines match
+# scripts/install.sh: a returning user lands in chat on a detected route, and a
+# new home starts configure by itself.
 print_next_steps() {
 	cat <<NEXT
 
 Verify the install you just made:
   $link_path --version
+If this shell still finds an old clio-coder, run \`hash -r\` (Bash) or \`rehash\` (Zsh).
 
-Next: configure a model target, then start Clio:
-  clio-coder configure
-  clio-coder
-
-If this shell still tries an old clio-coder path, run \`hash -r\` (Bash) or \`rehash\` (Zsh), then try again.
+Run: clio-coder
+Desktop app: clio-coder gui
 NEXT
 }
 

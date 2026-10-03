@@ -597,7 +597,7 @@ describe("plugin library lifecycle", () => {
 		// With old source removed from disk and default catalog still pointing to it, update fails
 		throws(
 			() => planLibraryUpdate("migrated-pkg"),
-			/unsupported plugin source|neither an existing local directory nor a catalog entry|unavailable/i,
+			/unsupported plugin source|is not a library package or a local package directory|unavailable/i,
 		);
 
 		// 2. Configured catalog override repoints package to relocated canonical source
@@ -650,7 +650,7 @@ describe("plugin library lifecycle", () => {
 
 		throws(
 			() => planLibraryUpdate("direct-pkg"),
-			/neither an existing local directory nor a catalog entry|unavailable|no update source/i,
+			/is not a library package or a local package directory|unavailable|no update source/i,
 		);
 	});
 });

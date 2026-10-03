@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { initializeClioHome } from "../core/init.js";
 import { runCommandVector } from "../core/safe-exec.js";
@@ -10,6 +10,7 @@ import {
 	inspectInstallation,
 	installationCommand,
 	installerPackageRoot,
+	installerUnpinCommand,
 	npmInstallArgs,
 	readInstallerRecord,
 } from "../domains/lifecycle/install-method.js";
@@ -168,6 +169,18 @@ async function runChild(
 			reject(new Error(`${label} exited with code ${code ?? -1}${tail.trim() ? `:\n${tail.trim()}` : ""}`));
 		});
 	});
+}
+
+/** The package version installed in an installer prefix, or null when its metadata cannot be read. */
+function installedVersionAt(prefix: string): string | null {
+	try {
+		const pkg = JSON.parse(readFileSync(join(installerPackageRoot(prefix), "package.json"), "utf8")) as {
+			version?: unknown;
+		};
+		return typeof pkg.version === "string" ? pkg.version : null;
+	} catch {
+		return null;
+	}
 }
 
 /** The Node that runs `installation`: its managed runtime for install.sh, else this process's. */
@@ -359,6 +372,11 @@ export async function runUpgradeCommand(
 		return 2;
 	}
 	const stateDir = dirs.state;
+	// A first install has no home yet. Creating it before the migration pass records it as
+	// installed with every registered migration satisfied; migrating nothing first made a
+	// fresh home report applied migrations and a repair.
+	if (opts.postInstall && !opts.dryRun && ![dirs.config, dirs.data, stateDir].some((dir) => existsSync(dir)))
+		initializeClioHome();
 	const installation = deps.inspectInstallation();
 	// An installer upgrade moves the entry to a new prefix; the relaunch and the
 	// background restart must use the new one.
@@ -371,14 +389,26 @@ export async function runUpgradeCommand(
 	if (opts.rollback) {
 		const record = installation.installer;
 		if (method !== "installer" || !record) {
-			presenter.fail("Rollback requires a native installer installation");
+			presenter.fail("Rollback works only for native installer installs, made by install.sh or install.ps1");
+			if (method === "npm" || method === "pnpm" || method === "bun")
+				presenter.commandAdvice(
+					"Install the version you want with the original package manager:",
+					installationCommand(installation, "upgrade", "<version>"),
+				);
 			presenter.finish();
 			return 2;
 		}
+		if (!record.previous) {
+			presenter.fail("No previous version is installed, so there is nothing to roll back to");
+			presenter.finish();
+			return 1;
+		}
+		const previousVersion = installedVersionAt(record.previous) ?? record.previous;
 		if (opts.dryRun) {
-			presenter.note(`Would restore ${record.previous ?? "no previous version"}`);
+			presenter.note(`Would switch the launcher from ${before} to ${previousVersion} and turn background updates off.`);
+			presenter.warn("Dry run: no changes made");
 			presenter.done("Done");
-			return record.previous ? 0 : 1;
+			return 0;
 		}
 		const windows = process.platform === "win32";
 		const args = windows
@@ -409,11 +439,16 @@ export async function runUpgradeCommand(
 			timeoutMs: 60_000,
 		});
 		if (result.exitCode !== 0) {
-			presenter.fail("Rollback failed", result.stderr || result.stdout);
+			presenter.fail("Rollback failed; the active version is unchanged", (result.stderr || result.stdout).trim());
 			presenter.finish();
 			return 1;
 		}
-		presenter.note(result.stdout.trim());
+		// The installer's own lines, without its tag, are the record of what changed.
+		for (const line of result.stdout.split(/\r?\n/)) {
+			const text = line.replace(/^\[install\]\s*/, "").trim();
+			if (text) presenter.completedStep(`${text.charAt(0).toUpperCase()}${text.slice(1)}`);
+		}
+		presenter.note(`Sessions already running keep ${before}; ${RESUME_HINT} to continue one on ${previousVersion}.`);
 		presenter.done("Done");
 		return 0;
 	}
@@ -477,10 +512,13 @@ export async function runUpgradeCommand(
 		return opts.dryRun ? 0 : 1;
 	}
 
+	// An exact --version or --package install is pinned: upgrade holds it at the pin
+	// and says how to release it, instead of reporting the pin as a registry answer.
+	const pin = opts.postInstall ? null : installation.installer?.versionPin || null;
 	const lookup: RegistryLookup = opts.postInstall
 		? { asked: false, reason: "post-install checks" }
-		: installation.installer?.versionPin
-			? { asked: true, version: installation.installer.versionPin }
+		: pin
+			? { asked: true, version: pin }
 			: await deps.lookUpAvailableVersion(opts.channel, method);
 	const availableVersion = lookup.asked ? lookup.version : null;
 
@@ -490,10 +528,12 @@ export async function runUpgradeCommand(
 	// A source checkout is not upgraded from the registry, so the registry is
 	// never asked. Reporting that as "registry check failed" told the operator a
 	// lookup had gone wrong when none was owed.
-	if (availableVersion !== null) presenter.step(`Available version: ${availableVersion}`);
+	if (pin !== null) presenter.step(`Pinned version: ${pin}`);
+	else if (availableVersion !== null) presenter.step(`Available version: ${availableVersion}`);
 	else if (!lookup.asked) presenter.step(`Available version: not checked (${lookup.reason})`);
 	else presenter.step("Available version: unknown (the registry could not be reached)");
-	if ((method === "npm" || method === "installer") && !opts.postInstall) presenter.step(`Channel: ${opts.channel}`);
+	if ((method === "npm" || method === "installer") && !opts.postInstall && pin === null)
+		presenter.step(`Channel: ${opts.channel}`);
 	if (installation.installer) {
 		const record = installation.installer;
 		presenter.step(
@@ -501,6 +541,11 @@ export async function runUpgradeCommand(
 		);
 	}
 	presenter.step(`State dir: ${shortenPath(stateDir)}`);
+	const unpin = pin === null ? null : installerUnpinCommand(installation, opts.channel);
+	if (unpin !== null) {
+		presenter.note(`This install is pinned to ${pin}, so upgrade and background updates leave it there.`);
+		presenter.commandAdvice(`To follow the ${opts.channel} channel again, with background updates, run:`, unpin);
+	}
 
 	const migrations = listMigrations();
 	const migrationIds = migrations.map((m) => m.id);

@@ -307,9 +307,19 @@ function otherClioOnPath(pathClio: string | null, localLink: string): string | n
  * trade, so these rows are listed as kept rather than as removals.
  */
 function detectShellRcEdits(): string[] {
-	const candidates = [join(homedir(), ".bashrc"), join(homedir(), ".zshrc"), join(homedir(), ".profile")];
+	const home = homedir();
+	const zdotdir = process.env.ZDOTDIR?.trim();
+	const xdgConfig = process.env.XDG_CONFIG_HOME?.trim();
+	// The same files scripts/install.sh --modify-path appends to, ZDOTDIR and fish included.
+	const candidates = [
+		join(home, ".bashrc"),
+		join(home, ".zshrc"),
+		...(zdotdir && isAbsolute(zdotdir) ? [join(zdotdir, ".zshrc")] : []),
+		join(home, ".profile"),
+		join(xdgConfig && isAbsolute(xdgConfig) ? xdgConfig : join(home, ".config"), "fish", "config.fish"),
+	];
 	const results: string[] = [];
-	for (const file of candidates) {
+	for (const file of new Set(candidates)) {
 		try {
 			const content = readFileSync(file, "utf8");
 			if (content.includes("clio-coder") || content.includes("CLIO_CODER")) results.push(file);

@@ -204,6 +204,22 @@ function lifecycleJson(
 	return { ...base, ...(plugin ? { plugin } : {}), diagnostics: last?.diagnostics ?? [] };
 }
 
+/** One drift line per package; a changed copy also names both digests. */
+function printDrift(
+	where: string,
+	result: { status: "clean" | "changed" | "missing" | "unpinned"; expected?: string; observed?: string },
+): void {
+	const detail =
+		result.status === "clean"
+			? "matches its pinned content"
+			: result.status === "changed"
+				? `differs from its pin (pinned ${result.expected}, on disk ${result.observed}); update it or reinstall with --force`
+				: result.status === "missing"
+					? "has no files on disk; reinstall it"
+					: "has no verified pin; reinstall it from the library to record one";
+	process.stdout.write(`${where} ${detail}\n`);
+}
+
 export async function runLibraryCommand(
 	args: ReadonlyArray<string>,
 	discoveryOptions: { catalog?: string } = {},
@@ -214,7 +230,7 @@ export async function runLibraryCommand(
 	try {
 		parsed = parse(args);
 	} catch (error) {
-		printError(String(error));
+		printError(error instanceof Error ? error.message : String(error));
 		return 2;
 	}
 	if (parsed.help || !parsed.command) {
@@ -334,14 +350,20 @@ export async function runLibraryCommand(
 				scope: item.scope,
 				...libraryEntryDrift({ kind: item.kind ?? "plugin", name: item.id }, { ...options, scope: item.scope }),
 			}));
-			emit({ results });
+			if (parsed.json) emit({ results });
+			else if (results.length === 0) process.stdout.write("no installed packages\n");
+			else for (const item of results) printDrift(`${item.kind}:${item.id} (${item.scope})`, item);
 			return results.some((item) => item.status !== "clean") ? 1 : 0;
 		}
 		if (!ref || parsed.positional.length !== 1)
 			throw new Error(`library ${parsed.command} requires one path or package reference`);
 		if (parsed.command === "register") {
 			const entry = registerLibraryPackage(ref, { ...options, force: parsed.force });
-			emit({ ok: true, entry });
+			if (parsed.json) emit({ ok: true, entry });
+			else
+				printOk(
+					`registered ${libraryEntryRef(entry)}${entry.version ? ` ${entry.version}` : ""} from ${entry.sourceUrl}; install it with \`clio-coder library install ${libraryEntryRef(entry)}\``,
+				);
 			return 0;
 		}
 		if (parsed.command === "validate") {
@@ -451,25 +473,37 @@ export async function runLibraryCommand(
 						process.stdout.write(
 							`${parsed.dryRun ? "planned" : "unattempted"} ${operation} ${where}${step?.refusal ? `: ${step.refusal}` : ""}\n`,
 						);
-					else
-						printError(`${operation} ${where} failed: ${outcome.error?.message ?? "unknown"}; ${outcome.error?.next ?? ""}`);
+					else {
+						// A refusal already names its fix; the generic next step is the TUI review's wording.
+						const next = outcome.error?.code === "refused" ? "" : (outcome.error?.next ?? "");
+						printError(`${operation} ${where} failed: ${outcome.error?.message ?? "unknown"}${next ? `; ${next}` : ""}`);
+					}
 				}
-				if (apply.committed)
+				if (apply.committed) {
+					const refresh = apply.refresh;
 					process.stderr.write(
-						`refresh: ${apply.refresh.status}${"reason" in apply.refresh ? ` (${apply.refresh.reason})` : ""}\n`,
+						refresh.status === "not-applicable"
+							? "A running session picks this up after /library reload.\n"
+							: refresh.status === "failed"
+								? `session refresh failed: ${refresh.error}\n`
+								: `session resources refreshed (generation ${refresh.generation})\n`,
 					);
+				}
 			}
 			return ok ? 0 : 1;
 		}
 		const entry = resolveInstalledLibraryEntry(ref, options);
 		const scoped = { ...options, scope: entry.scope };
 		if (parsed.command === "pin") {
-			emit({ id: entry.name, ...pinLibraryEntry(entry, scoped) });
+			const pin = pinLibraryEntry(entry, scoped);
+			if (parsed.json) emit({ id: entry.name, ...pin });
+			else printOk(`pinned ${libraryEntryRef(entry)} (${entry.scope}) at sha256 ${pin.sha256}`);
 			return 0;
 		}
 		if (parsed.command === "drift") {
 			const result = libraryEntryDrift(entry, scoped);
-			emit(result);
+			if (parsed.json) emit(result);
+			else printDrift(`${libraryEntryRef(entry)} (${entry.scope})`, result);
 			return result.status === "clean" ? 0 : 1;
 		}
 		throw new Error(`unknown library command: ${parsed.command}`);

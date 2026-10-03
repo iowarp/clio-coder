@@ -185,6 +185,7 @@ export function registerLibraryPackage(
 	options: LibraryScopeOptions & { force?: boolean } = {},
 ): LibraryEntry {
 	const local = pluginLocalPath(source, options.cwd);
+	if (!existsSync(local)) throw new Error(`no package directory at ${local}`);
 	const candidate = readPluginManifest(local);
 	if (!candidate.valid || !candidate.manifest || !candidate.contentDigest)
 		throw new Error(candidate.diagnostics.map((item) => item.message).join("; "));
@@ -453,7 +454,9 @@ export function resolveLibraryPackage(
 	if (entry) return entry;
 	if (parsePluginGithubSource(source))
 		throw new Error("remote plugin installation requires a catalog entry with version and full-tree sha256 pin");
-	throw new Error(`plugin source is neither an existing local directory nor a catalog entry: ${source}`);
+	throw new Error(
+		`${source} is not a library package or a local package directory; find the name with \`clio-coder library search\``,
+	);
 }
 
 export function planLibraryUpdate(

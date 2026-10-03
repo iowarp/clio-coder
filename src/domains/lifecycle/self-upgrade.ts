@@ -1,7 +1,13 @@
 import { spawn } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { type Installation, installationCommand, installerPackageRoot, readInstallerRecord } from "./install-method.js";
+import {
+	type Installation,
+	installationCommand,
+	installerPackageRoot,
+	installerUnpinCommand,
+	readInstallerRecord,
+} from "./install-method.js";
 import { compareReleaseVersions, fetchReleaseVersion, parseReleaseVersion } from "./release-version.js";
 
 const MAX_UPGRADE_REPORT_BYTES = 1024 * 1024;
@@ -11,10 +17,21 @@ export type SelfUpgradePlan =
 	| { status: "available"; current: string; available: string; installation: Installation }
 	| { status: "current"; current: string; available: string; installation: Installation }
 	| { status: "unavailable"; current: string; installation: Installation }
-	| { status: "manual"; current: string; installation: Installation; command: string };
+	| { status: "manual"; current: string; installation: Installation; command: string }
+	| { status: "pinned"; current: string; pin: string; installation: Installation; command: string };
 
 function selfUpgradable(installation: Installation): boolean {
 	return (installation.kind === "npm" || installation.kind === "installer") && installation.prefix !== null;
+}
+
+/**
+ * The channel an in-session upgrade follows: the one an installer install
+ * recorded, as `clio-coder upgrade` does, else latest. Asking for latest on a
+ * beta install moved it off its channel.
+ */
+function upgradeChannel(installation: Installation): "latest" | "beta" | "dev" {
+	const channel = installation.installer?.channel;
+	return channel === "beta" || channel === "dev" ? channel : "latest";
 }
 
 /** Where the package lives after the upgrade: the same root for npm, the manifest's new prefix for install.sh. */
@@ -49,8 +66,18 @@ export async function planSelfUpgrade(options: PlanSelfUpgradeOptions): Promise<
 			command: installationCommand(installation, "upgrade"),
 		};
 	}
+	const pin = installation.installer?.versionPin;
+	if (pin) {
+		return {
+			status: "pinned",
+			current: runningVersion,
+			pin,
+			installation,
+			command: installerUnpinCommand(installation, upgradeChannel(installation)) ?? "",
+		};
+	}
 	signal?.throwIfAborted();
-	const availableResult = await (options.fetchVersion ?? fetchReleaseVersion)("latest", signal);
+	const availableResult = await (options.fetchVersion ?? fetchReleaseVersion)(upgradeChannel(installation), signal);
 	signal?.throwIfAborted();
 	if (typeof availableResult !== "string" || !parseReleaseVersion(availableResult))
 		return { status: "unavailable", current: runningVersion, installation };
@@ -104,11 +131,15 @@ export async function runApprovedSelfUpgrade(
 	signal?.throwIfAborted();
 	const spawnProcess = options.spawnProcess ?? spawn;
 	const output = await new Promise<{ stdout: string; stderr: string }>((resolve, reject) => {
-		const child = spawnProcess(process.execPath, [plan.installation.entry, "upgrade", "--json", "--channel=latest"], {
-			cwd: options.cwd ?? process.cwd(),
-			stdio: ["ignore", "pipe", "pipe"],
-			windowsHide: true,
-		});
+		const child = spawnProcess(
+			process.execPath,
+			[plan.installation.entry, "upgrade", "--json", `--channel=${upgradeChannel(plan.installation)}`],
+			{
+				cwd: options.cwd ?? process.cwd(),
+				stdio: ["ignore", "pipe", "pipe"],
+				windowsHide: true,
+			},
+		);
 		let stdout = Buffer.alloc(0);
 		let stderr = Buffer.alloc(0);
 		let settled = false;

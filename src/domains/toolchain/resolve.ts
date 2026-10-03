@@ -2,6 +2,7 @@ import { statSync } from "node:fs";
 import { delimiter, join } from "node:path";
 import { toolVersionDir, vendoredBinaryPath } from "./paths.js";
 import { currentToolPlatform, findPinnedTool, findPinnedToolByBinary, PINNED_TOOLS } from "./registry.js";
+import { installedToolVersions } from "./remove.js";
 import type { PinnedTool, ToolPathCandidate, ToolResolution, ToolStatus } from "./types.js";
 import { probeBinaryVersion, satisfiesMinimum } from "./version.js";
 
@@ -163,6 +164,13 @@ export function describeResolution(status: ToolStatus): string {
 		// rejection is the whole story and naming a command would be a dead end.
 		const rejected = rejection === null ? "" : `; ${rejection}`;
 		return `not installed and no pinned asset for this platform (${platform})${rejected}`;
+	}
+	// A Clio upgrade that moves a pin leaves the old vendored copy behind. That is
+	// an update to run, not a tool that was never installed.
+	const superseded = installedToolVersions(status.id).filter((version) => version !== status.version);
+	if (superseded.length > 0) {
+		const rejected = rejection === null ? "" : `; ${rejection}`;
+		return `vendored ${superseded.join(", ")} is superseded by the ${status.version} pin${rejected} (update with \`${installRemedy(status.id)}\`)`;
 	}
 	if (rejection !== null) {
 		return `${rejection}, and nothing is vendored (install with \`${installRemedy(status.id)}\`)`;

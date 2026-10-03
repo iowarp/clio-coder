@@ -181,6 +181,20 @@ export function npmInstallArgs(installation: Installation, channel: string): str
 	return ["install", "-g", "--prefix", installation.prefix, `${PACKAGE_NAME}@${channel}`];
 }
 
+/**
+ * The installer run that releases a version pin. A pinned install keeps its
+ * version through `clio-coder upgrade` and installer reruns; only an explicit
+ * channel spec (`--version latest`) clears the pin, and `--auto-update` turns
+ * background updates back on.
+ */
+export function installerUnpinCommand(installation: Installation, channel = "latest"): string | null {
+	const record = installation.installer;
+	if (installation.kind !== "installer" || record === undefined) return null;
+	if (process.platform === "win32")
+		return `powershell -NoProfile -ExecutionPolicy Bypass -File "${join(installation.root, "scripts", "install.ps1")}" -Version ${channel} -AutoUpdate -InstallDir "${record.root}" -BinDir "${dirname(record.launcher)}"`;
+	return `sh ${shellQuote(join(installation.root, "scripts", "install.sh"))} --version ${channel} --auto-update --install-dir ${shellQuote(record.root)} --bin-dir ${shellQuote(dirname(record.launcher))}`;
+}
+
 export function installationCommand(
 	installation: Installation,
 	action: "upgrade" | "uninstall",

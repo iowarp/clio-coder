@@ -3,6 +3,7 @@ import { test } from "node:test";
 import { setTimeout } from "node:timers/promises";
 import { Problem } from "../contracts/common.js";
 import { WorkerHost } from "../server/worker/host.js";
+import { PINNED_TOOLS } from "./fixtures/toolchain.js";
 import { harness, json } from "./harness/app.js";
 import { scratchHome } from "./harness/scratch-home.js";
 
@@ -29,7 +30,7 @@ test("expired synchronous read is discarded, keeps capacity until completion, an
 	assert.equal(worker.pendingCount, 1);
 	await setTimeout(130);
 	assert.equal(worker.pendingCount, 0);
-	assert.equal((await worker.call("tools.list", {})).rows.length, 3);
+	assert.equal((await worker.call("tools.list", {})).rows.length, PINNED_TOOLS.length);
 });
 
 test("worker exit fails pending reads and the next call restarts the worker", async (t) => {
@@ -40,7 +41,7 @@ test("worker exit fails pending reads and the next call restarts the worker", as
 	t.after(() => worker.close());
 	await assert.rejects(worker.call("tools.list", {}), /worker exited/);
 	settings.crashRead = false;
-	assert.equal((await worker.call("tools.list", {})).rows.length, 3);
+	assert.equal((await worker.call("tools.list", {})).rows.length, PINNED_TOOLS.length);
 });
 
 test("warm read lanes overlap, so one slow adapter no longer holds the next read", async (t) => {
@@ -67,7 +68,7 @@ test("a queued read spends its deadline on its own work, not on the call ahead o
 	// still holds the lane for. Under enqueue-time accounting it returned 503 with
 	// most of its budget spent waiting rather than working.
 	const queued = worker.call("tools.list", {}, { deadlineMs: 400 });
-	assert.equal((await queued).rows.length, 3);
+	assert.equal((await queued).rows.length, PINNED_TOOLS.length);
 	await blocker;
 });
 

@@ -1,7 +1,7 @@
 import { realpath } from "node:fs/promises";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { controlService } from "../process-policy.js";
-import { backgroundRemoval } from "./background.js";
+import { backgroundRemoval, sameInstallation } from "./background.js";
 import { contents, launcherStatus, uninstallLauncher } from "./install.js";
 
 export interface WebUninstallOptions {
@@ -32,7 +32,10 @@ export async function prepareGuiUninstall(
 		const manifest = JSON.parse((await contents(desktop.manifest)) ?? "null");
 		const root = await realpath(options.packageRoot);
 		const candidates = [join(root, "dist/gui/server.js"), join(root, "apps/clio-coder-gui/server/main.ts")];
-		if (!candidates.includes(manifest.launch.entry))
+		const entry: string = manifest.launch.entry;
+		// A launcher a previous native version wrote names that version's dist/gui/server.js.
+		const entryRoot = entry.endsWith(join("dist", "gui", "server.js")) ? dirname(dirname(dirname(entry))) : null;
+		if (!candidates.includes(entry) && !(entryRoot !== null && (await sameInstallation(entryRoot, root))))
 			throw new Error("Desktop launcher belongs to another installation; uninstall stopped before removing Clio state.");
 		if (manifest.launch.background) directories.add(manifest.launch.background);
 	}

@@ -3,13 +3,12 @@
 	"id": "clio-coder",
 	"name": "Clio Coder",
 	"version": "0.6.0-dev",
-	"description": "The terminal coding agent for people who maintain the code that science runs on, with user-chosen models and inspectable evidence.",
+	"description": "An open-source coding agent for scientific software: your models, bounded workers, and inspectable evidence.",
 	"repository": "https://github.com/iowarp/clio-coder",
-	"website": "https://iowarp.ai",
+	"website": "https://coder.iowarp.ai",
 	"license": "Apache-2.0",
+	"license_url": "https://github.com/iowarp/clio-coder/blob/main/LICENSE",
 	"authors": ["Anthony Kougkas <a.kougkas@gmail.com>"],
-	"command": "clio-coder",
-	"args": ["acp"],
 	"distribution": {
 		"npx": {
 			"package": "@iowarp/clio-coder",

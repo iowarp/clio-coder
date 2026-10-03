@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
-import { lstat, mkdir, mkdtemp, realpath, rename, rm, rmdir, unlink, writeFile } from "node:fs/promises";
+import { lstat, mkdir, mkdtemp, readFile, realpath, rename, rm, rmdir, unlink, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
-import { dirname, isAbsolute, join, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join, resolve, sep } from "node:path";
 import { parseArgs } from "node:util";
 import { resolveClioDirs } from "../clio/http-shims.js";
 import { findLocalServer, type LocalServerMeta, waitForLocalServer } from "../local-server.js";
@@ -44,11 +44,41 @@ const serverReport = (meta: unknown) => ({
 });
 const sameLaunch = (left: BackgroundConfig["launch"], right: BackgroundConfig["launch"]) =>
 	left.node === right.node && left.loader === right.loader && left.entry === right.entry && left.icon === right.icon;
-async function sameInstallation(left: string, right: string) {
-	return Promise.all([realpath(left), realpath(right)]).then(
-		([installed, current]) => installed === current,
-		() => false,
-	);
+const NATIVE_PACKAGE_SUFFIX = join("lib", "node_modules", "@iowarp", "clio-coder");
+/**
+ * The install root of a package that scripts/install.sh or install.ps1 put at
+ * `<root>/versions/<version>/lib/node_modules/@iowarp/clio-coder`, or null. The root's
+ * install.json is the installer's ownership record and names its current prefix.
+ */
+async function nativeInstallRoot(packageRoot: string): Promise<string | null> {
+	if (!packageRoot.endsWith(sep + NATIVE_PACKAGE_SUFFIX)) return null;
+	const versions = dirname(packageRoot.slice(0, -(NATIVE_PACKAGE_SUFFIX.length + 1)));
+	if (basename(versions) !== "versions") return null;
+	const root = dirname(versions);
+	try {
+		const record = JSON.parse(await readFile(join(root, "install.json"), "utf8"));
+		const owned =
+			record?.kind === "clio-coder-installer" &&
+			(record.schema === 1 || record.schema === 2) &&
+			typeof record.current === "string" &&
+			record.current.startsWith(versions + sep);
+		return owned ? root : null;
+	} catch {
+		// No readable installer record: not a native install, so only an identical root matches.
+		return null;
+	}
+}
+/**
+ * One installation is the same package root, or two versions of one native install: every
+ * native upgrade lands in a new versions/<version> prefix, and comparing those roots made
+ * restart, reuse, reset and uninstall refuse the app the previous version had installed.
+ */
+export async function sameInstallation(left: string, right: string) {
+	const [installed, current] = await Promise.all([realpath(left).catch(() => null), realpath(right).catch(() => null)]);
+	if (installed === null || current === null) return false;
+	if (installed === current) return true;
+	const root = await nativeInstallRoot(installed);
+	return root !== null && root === (await nativeInstallRoot(current));
 }
 async function publishOwned(directory: string, config: BackgroundConfig, files: Files, replace: boolean) {
 	const configText = `${JSON.stringify(config, null, 2)}\n`,
@@ -174,9 +204,10 @@ export async function installBackground(
 		await control("reload", files.unit, files.unitFile);
 	}
 	await control("enable", files.unit, files.unitFile);
-	await ready(config.port, config.token);
+	// The app falls back to its second port while another program holds the first; report where it listens.
+	const port = serverReport(await ready(config.port, config.token)).port ?? config.port;
 	await installLauncher(config.desktopPrefix, { ...config.launch, background: directory });
-	return { status: "installed", unit: files.unit, origin: `http://127.0.0.1:${config.port}`, directory };
+	return { status: "installed", unit: files.unit, origin: `http://127.0.0.1:${port}`, directory };
 }
 export async function backgroundStatus(
 	directory: string,
@@ -287,11 +318,7 @@ export async function preferBackground(
 		};
 	}
 	if (state.status === "absent") return { kind: "absent" };
-	const same = await Promise.all([realpath(state.config.packageRoot), realpath(packageRoot)]).then(
-		([theirs, ours]) => theirs === ours,
-		() => false,
-	);
-	if (!same)
+	if (!(await sameInstallation(state.config.packageRoot, packageRoot)))
 		return {
 			kind: "unavailable",
 			reason: "The background app belongs to another Clio Coder installation, so this one will not take it over.",
@@ -338,7 +365,7 @@ export async function tryStartBackground(
 ) {
 	const state = await owned(directory);
 	if (state.status === "absent") return undefined;
-	if ((await realpath(state.config.packageRoot)) !== (await realpath(packageRoot)))
+	if (!(await sameInstallation(state.config.packageRoot, packageRoot)))
 		throw new Error(
 			"Background setup belongs to another installation. Use that installation or run gui without --reuse-background.",
 		);
@@ -371,8 +398,9 @@ export async function uninstallBackground(directory: string, control: Control = 
 export async function backgroundRemoval(directory: string, packageRoot: string, control: Control = controlService) {
 	const state = await owned(directory);
 	if (state.status === "absent") return null;
-	if ((await realpath(state.config.packageRoot)) !== (await realpath(packageRoot)))
-		throw new Error("Background service belongs to another installation; uninstall stopped before removing Clio state.");
+	// Reset and uninstall both call this before they delete anything, so the refusal names neither.
+	if (!(await sameInstallation(state.config.packageRoot, packageRoot)))
+		throw new Error("Background service belongs to another installation; Clio state was left unchanged.");
 	await serviceState(state.files, control);
 	await desktopOwned(state.config, directory);
 	await assertWindowsLauncherRemovable(directory);

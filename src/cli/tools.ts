@@ -226,7 +226,6 @@ async function installOne(id: string | undefined, force: boolean, json: boolean)
 	}
 	printOk(result.message);
 	for (const path of result.documents) process.stdout.write(`  license  ${path}\n`);
-	for (const version of result.pruned) process.stdout.write(`  pruned   ${id} ${version}\n`);
 	return 0;
 }
 

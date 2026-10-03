@@ -365,6 +365,7 @@ export async function runResetCommand(argv: ReadonlyArray<string>): Promise<numb
 		try {
 			await stopLegacyDocsBeforeRemoval();
 			await web?.remove();
+			for (const item of web?.items ?? []) presenter.completedStep(`Removed ${item.label}`);
 		} catch (error) {
 			presenter.fail(
 				error instanceof Error ? error.message : "Could not stop background services; Clio state was preserved.",

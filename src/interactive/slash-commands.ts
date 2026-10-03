@@ -1176,9 +1176,13 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 		description: "Browse recipes, or review a package install, removal or reload",
 		group: "Inspect",
 		kinds: ["resources"],
+		// The same verbs as `clio-coder library`; each opens the review that command would apply.
 		subcommandDescriptions: {
 			inspect: "Open the Library on one package or recipe",
 			install: "Review installing one package, then apply it",
+			update: "Review updating one installed package, then apply it",
+			enable: "Review enabling one installed package, then apply it",
+			disable: "Review disabling one installed package, then apply it",
 			remove: "Review removing one package, then apply it",
 			import: "Review a plugin source from a path or URL",
 			reload: "Refresh installed recipe resources in this session",
@@ -1190,6 +1194,18 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 					flags: [{ name: "--user" }, { name: "--project" }],
 				},
 				install: {
+					positionals: [{ name: "ref", required: true }],
+					flags: [{ name: "--user" }, { name: "--project" }],
+				},
+				update: {
+					positionals: [{ name: "ref", required: true }],
+					flags: [{ name: "--user" }, { name: "--project" }],
+				},
+				enable: {
+					positionals: [{ name: "ref", required: true }],
+					flags: [{ name: "--user" }, { name: "--project" }],
+				},
+				disable: {
 					positionals: [{ name: "ref", required: true }],
 					flags: [{ name: "--user" }, { name: "--project" }],
 				},
@@ -1225,7 +1241,14 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 					};
 				return { kind: "resources", tab: "plugin", importSource: source, ...(scope ? { scope } : {}) };
 			}
-			if (subcommand === "inspect" || subcommand === "install" || subcommand === "remove") {
+			if (
+				subcommand === "inspect" ||
+				subcommand === "install" ||
+				subcommand === "update" ||
+				subcommand === "enable" ||
+				subcommand === "disable" ||
+				subcommand === "remove"
+			) {
 				const ref = parsed.positionals[0];
 				if (!ref)
 					return {
@@ -1247,7 +1270,7 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 					kind: "usage-error",
 					command: "library",
 					reason:
-						"Use /library to browse, /library inspect|install|remove <ref>, /library import <path-or-url>, or /library reload; /skills, /agents and /prompts open the same browser on their category",
+						"Use /library to browse, /library inspect|install|update|enable|disable|remove <ref>, /library import <path-or-url>, or /library reload; /skills, /agents and /prompts open the same browser on their category",
 				};
 			return { kind: "resources", tab: "plugin" };
 		},
@@ -1259,7 +1282,7 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 				else {
 					try {
 						const snapshot = ctx.reloadPlugins();
-						ctx.notice("success", `library: generation ${snapshot.generation} committed`);
+						ctx.notice("success", `library: reloaded installed recipes (generation ${snapshot.generation})`);
 					} catch (error) {
 						ctx.notice("error", `library: reload failed: ${error instanceof Error ? error.message : String(error)}`);
 					}

@@ -579,20 +579,32 @@ print_next_steps() {
 # with a systemd user session, so other platforms keep the `clio-coder gui` hint only.
 offer_gui() {
 	[ "$install_gui" != 0 ] || return 0
-	[ "$(uname -s 2>/dev/null)" = Linux ] || return 0
-	if "$node_bin" "$entry" gui background status </dev/null 2>/dev/null | grep -q '"status": "installed"'; then
+	if [ "$(uname -s 2>/dev/null)" != Linux ]; then
+		# Asked for by name, it gets an answer; the default stays quiet where there is nothing to offer.
+		if [ "$install_gui" = 1 ]; then warn "the desktop app runs as a login service on Linux only; start it here with: clio-coder gui"; fi
 		return 0
 	fi
 	if [ "$install_gui" = ask ]; then
 		# curl | sh leaves stdin on the pipe; the question goes to the terminal or is not asked.
 		[ -t 1 ] && { : </dev/tty; } 2>/dev/null || return 0
+	fi
+	if "$node_bin" "$entry" gui background status </dev/null 2>/dev/null | grep -q '"status": "installed"'; then
+		return 0
+	fi
+	if [ "$install_gui" = ask ]; then
 		printf '[install] Add the Clio Coder desktop app? It starts at login and appears in your app menu. [Y/n] '
 		answer=""
 		read -r answer </dev/tty || answer=n
 		case "$answer" in "" | [Yy]*) ;; *) return 0 ;; esac
 	fi
-	if "$node_bin" "$entry" gui background install </dev/null; then
-		ok "desktop app installed; search for Clio Coder in your app menu, or run: clio-coder gui"
+	# The command's report is JSON for scripts; the installer states the outcome in its own words.
+	if "$node_bin" "$entry" gui background install </dev/null >"$work/gui.out"; then
+		if sed -n '/"windows"/,/}/p' "$work/gui.out" | grep -q '"status": "installed"'; then
+			ok "desktop app installed; open Clio Coder from the Windows Start Menu or your app menu, or run: clio-coder gui"
+		else
+			ok "desktop app installed; it starts at login and is in your app menu as Clio Coder, or run: clio-coder gui"
+		fi
+		log "the desktop app uses Clio Coder's saved credentials; save a key that lives only in your shell with: clio-coder auth login <target>"
 	else
 		warn "the desktop app was not set up (it needs a systemd user session). Retry later with: clio-coder gui background install"
 	fi
@@ -719,6 +731,10 @@ main() {
 	case "$channel" in
 		latest | beta | dev) ;;
 		*) fail "--channel must be latest, beta or dev, got '$channel'" ;;
+	esac
+	case "$install_gui" in
+		0 | 1 | ask) ;;
+		*) fail "CLIO_CODER_INSTALL_GUI must be 1 or 0, got '$install_gui'" ;;
 	esac
 	if [ -n "$version_spec" ]; then
 		version="$(validate_version "$version_spec")"

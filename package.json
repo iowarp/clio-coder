@@ -1,7 +1,7 @@
 {
 	"name": "@iowarp/clio-coder",
 	"version": "0.6.0-dev",
-	"description": "An open-source terminal coding agent for scientific software: your models, bounded workers, and inspectable evidence.",
+	"description": "An open-source coding agent for scientific software, in your terminal, in headless runs, over ACP and in the browser: your models, bounded workers, and inspectable evidence.",
 	"keywords": [
 		"ai",
 		"agentic-ai",
@@ -17,6 +17,9 @@
 		"model-targets",
 		"multi-agent",
 		"coding-agents",
+		"agent-client-protocol",
+		"acp",
+		"mcp",
 		"software-engineering",
 		"research-software",
 		"scientific-computing",

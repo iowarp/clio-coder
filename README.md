@@ -24,25 +24,23 @@ Your models. Your machines. Work you can inspect.
   <a href="docs/README.md">Documentation</a>
 </p>
 
-Clio Coder connects a model to repository tools, project context, verification,
-and worker delegation. Use her to understand a codebase, investigate a failing
-check, implement a change, or coordinate a workflow across local and SSH workers.
-The runtime records tool activity, changes, checks, and run receipts for review.
+Clio Coder is a coding agent for people who maintain scientific and research
+software. She connects the model you choose to repository tools, project
+context, verification, and worker delegation, so you can understand a codebase,
+investigate a failing check, implement a change, or coordinate work across local
+and SSH workers. Every run leaves tool activity, changes, checks, and run
+receipts you can review.
 
-Developed for simulation kernels, numerical libraries, data pipelines, and
-mixed-language builds, Clio also supports general software development. Chat and
+Clio is built for simulation kernels, numerical libraries, data pipelines, and
+mixed-language builds, and works for general software development too. Chat and
 workers can use different models on your workstation, an institutional gateway,
-or a cloud service. Clio is open-source, pre-1.0 software with active development.
+or a cloud service.
 
-**Experimental software.** Clio Coder is pre-1.0. Settings, commands and interfaces may change between
-minor releases, so read the [changelog](CHANGELOG.md) before upgrading. For
-global npm, pnpm and bun installs, the interactive terminal UI checks the npm
-registry at most once a day and shows a notice when a newer release is out; a
-pre-release install also checks the `beta` channel. Run `clio-coder upgrade`, or
-`/upgrade` in the terminal UI, to update a global npm install; for pnpm and bun
-the same commands print the package-manager command to run. Report problems in
-[GitHub issues](https://github.com/iowarp/clio-coder/issues). Contributions are
-welcome; start with the [contributor guide](CONTRIBUTING.md).
+**Experimental software.** Clio Coder is open-source, pre-1.0 software in active
+development. Settings, commands and interfaces may change between minor
+releases, so read the [changelog](CHANGELOG.md) before upgrading. Report
+problems in [GitHub issues](https://github.com/iowarp/clio-coder/issues);
+contributions start with the [contributor guide](CONTRIBUTING.md).
 
 ## Get started
 
@@ -58,10 +56,14 @@ clio-coder
 
 If coder.iowarp.ai is unreachable, use the copy attached to each GitHub release:
 `curl -fsSL https://github.com/iowarp/clio-coder/releases/latest/download/install.sh | sh`
-(`install.ps1` sits next to it). It verifies the Node download against SHASUMS256.txt and the Node.js release keys,
-installs under `~/.local/share/clio-coder-install`, and writes the launcher to
-`~/.local/bin/clio-coder`. See [HPC clusters](docs/guide/hpc-clusters.md) for old
-glibc, proxies and airgapped sites.
+(`install.ps1` sits next to it). The installer verifies the Node download against
+SHASUMS256.txt and the Node.js release keys, installs under
+`~/.local/share/clio-coder-install` (`~/Library/Application Support/clio-coder/install`
+on macOS), and writes the launcher to `~/.local/bin/clio-coder`. On a Linux
+terminal it also offers the desktop app, which starts at login and appears in
+your app menu; `--gui` or `--no-gui` answers up front. See
+[HPC clusters](docs/guide/hpc-clusters.md) for old glibc, proxies and airgapped
+sites.
 
 With your own **Node.js 22.19 or newer**, npm works too:
 
@@ -69,18 +71,8 @@ With your own **Node.js 22.19 or newer**, npm works too:
 npm install -g @iowarp/clio-coder
 ```
 
-Installer installs of 0.6.0 and later update in the background. An idle
-interactive session checks the install's channel at most once a day, installs a
-newer release beside the current one, and switches the launcher to it; the
-running session keeps its version until you restart and `/resume`. Opt out with
-`--no-auto-update` or `CLIO_CODER_AUTO_UPDATE=0`; an exact `--version` pins the
-install and turns background updates off. `clio-coder upgrade` updates on demand,
-and `clio-coder upgrade --rollback` returns to the previous version and turns
-background updates off. npm, pnpm and Bun installs keep updating through their
-package manager.
-
-Native Windows needs Clio Coder 0.6.0 and is best effort; WSL is the recommended
-route. In PowerShell, run `irm https://coder.iowarp.ai/install.ps1 | iex`. In CMD, run
+Native Windows support is best effort. In PowerShell, run
+`irm https://coder.iowarp.ai/install.ps1 | iex`; in CMD, run
 `curl.exe -fsSL https://coder.iowarp.ai/install.cmd -o install.cmd && install.cmd && del install.cmd`.
 Both install under `%LOCALAPPDATA%\clio-coder\install` with the launcher
 `%USERPROFILE%\.local\bin\clio-coder.cmd`, need no administrator rights, and add
@@ -88,36 +80,47 @@ the launcher directory to your user `PATH` only with `-AddToPath`. A complete
 native Windows install of 0.6.0 has not yet been verified end to end, and the
 terminal session itself is not routinely tested there.
 
-1. Choose **Guided setup**, then pick the description you recognize: an app on
-   this computer, a model server, an AI subscription, or a provider account.
-   Clio fills in the internal connection name, probes the endpoint when the
-   provider allows it, and lets you select from the model list instead of typing
-   an id. **Connect by endpoint** remains a shortcut when you already know a URL.
-2. Start Clio in your project and give a concrete request:
+**First run.**
+
+1. Run `clio-coder` in your project. On a new machine it starts setup: choose
+   **Guided setup**, then either a route Clio already detected (a local model
+   server, a saved login, or an API key in your environment) or the description
+   you recognize: an app on this computer, a model server, an AI subscription,
+   a provider account, or an installed coding agent. Clio probes the endpoint
+   when the provider allows it and lets you pick from its model list.
+   **Connect by endpoint** is the shortcut when you already know a URL. A home
+   that is already set up opens chat on its saved route, or on a route Clio
+   detects when the saved one is missing.
+2. Give a concrete request:
 
    > Explain how this repository builds and runs its tests. Identify the main
    > entry points and suggest one verification task. Do not change files yet.
 
-3. Use `/help` for commands, `/model` for model selection, and `/settings` for
-   configuration. `/settings` keeps configure's section names and order, from
-   **Connections** through **Advanced**. Reopen **Connections → Add a target**
-   for Guided setup, **Chat** to change the answering model, or **Fleet** for
-   worker defaults. See the [settings walkthrough](docs/guide/configuration-and-targets.md#settings-center)
+3. Use `/help` for commands, `/model` for model selection, `/config` to rerun
+   setup, and `/settings` for every saved default. See the
+   [settings walkthrough](docs/guide/configuration-and-targets.md#settings-center)
    for model inheritance and session, project, and global saves.
-   `clio-coder doctor` checks installation and connections.
+   `clio-coder doctor` checks the installation and connections.
 
-Prefer a browser workspace? After installing the same package, run:
+**Update and remove.** Installer installs update in the background: an idle interactive session checks
+the install's channel at most once a day, installs a newer release beside the
+current one, and switches the launcher to it; a running session keeps its
+version until you restart and `/resume`. Opt out with `--no-auto-update` or
+`CLIO_CODER_AUTO_UPDATE=0`. An exact `--version` pins the install;
+`clio-coder upgrade` then holds it there and prints the command that follows the
+channel again. `clio-coder upgrade`, or `/upgrade` in the terminal, updates on
+demand, and `clio-coder upgrade --rollback` returns to the previous version and
+turns background updates off.
 
-```bash
-clio-coder gui --open
-```
+For global npm, pnpm and Bun installs, the terminal checks the npm registry at
+most once a day and shows a notice when a newer release is out.
+`clio-coder upgrade` updates an npm install; for pnpm and Bun it prints the
+package-manager command to run.
 
-If you have already configured Clio, open a project and start a conversation.
-Otherwise, **Guided setup** in the browser connects your app, server, subscription,
-or provider account, selects a model, and reviews the connection before saving.
-You can enter a key or follow the browser sign-in instructions there; running
-`clio-coder configure` first is optional. The terminal and GUI share your saved
-connections and settings. Bare `clio-coder` still opens the terminal workspace.
+`clio-coder reset` clears session state and keeps the launcher;
+`clio-coder uninstall` removes settings, credentials, data, state and caches,
+with `--keep-config` to keep settings and credentials and `--remove-binary` to
+also remove the launcher, the private Node and every installed version.
 
 <details>
 <summary><strong>Package managers and source installation</strong></summary>
@@ -157,17 +160,33 @@ upgrade, launcher, background service, and uninstall options.
 
 ## Interfaces
 
-The terminal brings conversation, tool calls, permissions, fleet activity, and
-context accounting into one workspace. The browser application provides project
-and conversation views, session controls, fleet previews, traces, evidence, and
-configuration through the same runtime. The browser interface is in alpha.
+One runtime serves three surfaces, and they share your saved connections,
+settings, and sessions.
 
-During a conversation, the left sidebar switches between project sessions,
-recorded runs, and configuration tools while your chat stays open. The collapsible
-Artifacts panel holds recorded file activity, results, and linked evidence.
-Open a dedicated trace or evidence viewer when you need more inspection space.
-Scroll up to read earlier messages; **Jump to latest** returns immediately to the
-newest output and resumes following the stream.
+**Terminal.** Bare `clio-coder` opens the terminal workspace: conversation, tool
+calls, permissions, fleet activity, and context accounting in one screen.
+
+**Headless and ACP.** `clio-coder run` executes one task without a terminal UI,
+for scripts and CI, and `clio-coder acp` serves editors and other hosts over the
+Agent Client Protocol:
+
+```bash
+clio-coder run "Summarize this repository's entry points."
+clio-coder run --json --timeout 300 "Run the existing parser tests and report the results."
+clio-coder acp
+```
+
+Headless text mode writes the answer to stdout and diagnostics to stderr;
+`--json` emits JSONL, and calls that would ask for permission are denied.
+
+**Browser.** `clio-coder gui` opens the browser workspace: projects,
+conversations, session controls, fleet previews, traces, evidence, and
+configuration. It reuses this installation's desktop app when one is
+installed, and otherwise starts a private server for this terminal. If Clio is
+not configured yet, **Guided setup** in the browser connects a model and reviews
+the connection before saving. On Linux, `clio-coder gui background install`
+adds the desktop app later. The browser interface is in alpha; see the
+[GUI guide](docs/guide/commands-and-modes.md#graphical-application).
 
 <p align="center">
   <a href="https://raw.githubusercontent.com/iowarp/clio-coder/main/assets/screenshots/tui-boot.png"><img src="https://raw.githubusercontent.com/iowarp/clio-coder/main/assets/screenshots/tui-boot.webp" alt="Clio Coder terminal boot with the model, workspace, fleet, composer, and guidance footer" width="1000" /></a>
@@ -182,6 +201,13 @@ newest output and resumes following the stream.
 
 <details>
 <summary><strong>Browser conversation view</strong></summary>
+
+During a conversation, the left sidebar switches between project sessions,
+recorded runs, and configuration tools while your chat stays open. The collapsible
+Artifacts panel holds recorded file activity, results, and linked evidence.
+Open a dedicated trace or evidence viewer when you need more inspection space.
+Scroll up to read earlier messages; **Jump to latest** returns immediately to the
+newest output and resumes following the stream.
 
 <p align="center">
   <a href="https://raw.githubusercontent.com/iowarp/clio-coder/main/assets/screenshots/gui-conversation.png"><picture>
@@ -198,20 +224,6 @@ newest output and resumes following the stream.
 
 [Watch a real calibration verification (33 seconds, MP4)](https://raw.githubusercontent.com/iowarp/clio-coder/main/assets/recordings/gui-calibration.mp4)
 · [GIF preview](https://raw.githubusercontent.com/iowarp/clio-coder/main/assets/recordings/gui-calibration-preview.gif)
-
-```bash
-clio-coder gui --open
-```
-
-On Linux, an optional background application serves the GUI:
-
-```bash
-clio-coder gui background install --open
-```
-
-Bare `clio-coder gui` reuses this installation's owned background application
-when present, or starts a private foreground server. See the
-[GUI guide](docs/guide/commands-and-modes.md#graphical-application).
 
 </details>
 
@@ -267,17 +279,12 @@ ends the turn.
 # Prepare project guidance and the codemap
 clio-coder context init
 
-# Headless execution; timeout is in seconds
-clio-coder run "Summarize this repository's entry points."
-clio-coder run --json --timeout 300 "Run the existing parser tests and report the results."
-
-# Agent Client Protocol server for editors and other hosts
-clio-coder acp
+# Manage skills, agents, prompts, fleets and plugins; /library does the same in the terminal
+clio-coder library search review
+clio-coder library install skill:ast-grep
 ```
 
-Headless text mode writes the answer to stdout and diagnostics to stderr;
-`--json` emits JSONL. Calls requiring interactive permission are denied in
-headless mode. A focused worker can run inside a terminal session:
+A focused worker can run inside a terminal session:
 
 ```text
 /run verifier Review the current diff and run the relevant existing checks. Do not edit files.
