@@ -47,7 +47,7 @@ export type DeclaredCheckReport = NumericCompareReport | PerfBudgetReport;
  */
 export const JUDGED_CHECK_MAX_OUTPUT_BYTES = 32 * 1024 * 1024;
 
-export type CheckExecutionOutcome = "succeeded" | "failed" | "timed-out" | "aborted" | "output-capped";
+export type CheckExecutionOutcome = "succeeded" | "failed" | "unavailable" | "timed-out" | "aborted" | "output-capped";
 
 /**
  * A verifier result answers three separate questions, and a reader must not
@@ -126,7 +126,12 @@ export function listChecks(cwdArg: string | undefined): ToolResult {
 			lines.push("Derived from the repository's toolchain and CI files (argv shown is what runs):");
 			for (const check of derived) {
 				const args = check.argsBase === undefined ? " (takes no args)" : "";
-				lines.push(`- ${check.id} [${check.tags.join(", ")}]: ${check.command.join(" ")}${args}  (${check.source.path})`);
+				const availability = check.availability
+					? ` [${check.availability.state}: ${check.availability.reason}${check.availability.provisionCommand ? `; operator: ${check.availability.provisionCommand.join(" ")}` : ""}]`
+					: "";
+				lines.push(
+					`- ${check.id} [${check.tags.join(", ")}]: ${check.command.join(" ")}${args}  (${check.source.path})${availability}`,
+				);
 			}
 		}
 	}
@@ -139,7 +144,13 @@ export function listChecks(cwdArg: string | undefined): ToolResult {
 		output: lines.join("\n"),
 		details: {
 			sources: clonedSources(discovery.sources),
-			derived: derived.map((check) => ({ id: check.id, command: [...check.command], path: check.source.path })),
+			derived: derived.map((check) => ({
+				id: check.id,
+				command: [...check.command],
+				path: check.source.path,
+				provenance: { ...check.provenance },
+				...(check.availability ? { availability: check.availability } : {}),
+			})),
 		},
 	};
 }
@@ -155,6 +166,7 @@ export async function runToolchainCheck(
 	args: Record<string, unknown>,
 	options?: { signal?: AbortSignal },
 ): Promise<ToolResult> {
+	if (check.availability) return unavailableCheck(check);
 	const [file, ...vector] = argv;
 	if (file === undefined) return { kind: "error", message: `verify: derived check '${check.id}' has empty argv` };
 	const cwd = resolveProjectVerifierExecutionCwd(check.cwd, process.cwd());
@@ -192,7 +204,8 @@ function withCommandJudgement(result: ToolResult): ToolResult {
 }
 
 function withDeclaredEvidence(result: ToolResult, check: DeclaredCheck): ToolResult {
-	const judged = check.kind === "command" ? withCommandJudgement(result) : result;
+	const classified = classifyUnavailable(result, check.id, check.command);
+	const judged = check.kind === "command" ? withCommandJudgement(classified) : classified;
 	return {
 		...judged,
 		details: {
@@ -207,6 +220,59 @@ function withDeclaredEvidence(result: ToolResult, check: DeclaredCheck): ToolRes
 			declaredTimeoutMs: check.timeoutMs,
 			tags: [...check.tags],
 		},
+	};
+}
+
+const UNAVAILABLE_RETRY_DIRECTIVE =
+	"Rerunning this entry with other arguments or cwd cannot help; report the limitation and stop.";
+
+/** DF-10: no check may silently provision its runner before verification. */
+export function unavailableCheck(check: ToolchainCheck): ToolResult {
+	const availability = check.availability;
+	const operator = availability?.provisionCommand
+		? `; operator provisioning command: ${availability.provisionCommand.join(" ")}`
+		: "";
+	return withDeclaredEvidence(
+		{
+			kind: "error",
+			message: `verify: unavailable '${check.id}': ${availability?.reason ?? "runner is unavailable"}${operator}. ${UNAVAILABLE_RETRY_DIRECTIVE}`,
+			details: {
+				availability,
+				judgement: judgement("unavailable", "not-run"),
+			},
+		},
+		check,
+	);
+}
+
+/** Startup diagnostics only: a test assertion mentioning permissions is still a failed test. */
+function classifyUnavailable(result: ToolResult, check: string, command: ReadonlyArray<string>): ToolResult {
+	if (
+		result.kind !== "error" ||
+		(result.details?.judgement && (result.details.judgement as CheckJudgement).execution === "unavailable")
+	)
+		return result;
+	const message = result.message;
+	const diagnostic = message
+		.replace(
+			/^verify: (?:(?:numeric-compare|perf-budget) command )?exited with code [^:]+(?: before judgement)?:\s*/u,
+			"",
+		)
+		.replace(/^verify:\s*/u, "");
+	const startup =
+		/^(?:spawn .+ (?:ENOENT|EACCES|EROFS)\b|bwrap:|sandbox:|sandbox-exec:|(?:sh|bash): .+(?:not found|Permission denied)|\S+: No module named (?:pytest|tox|nox)\b)/u.test(
+			diagnostic,
+		) ||
+		(command[0] === "uv" &&
+			/^error:[\s\S]*(?:Read-only file system|Permission denied|os error (?:13|30)|No virtual environment found|No interpreter found)/u.test(
+				diagnostic,
+			)) ||
+		/^error:.*(?:\.venv|uv\/|toolchain).*\b(?:EROFS|EACCES)\b/u.test(diagnostic);
+	if (!startup || result.details?.timedOut || result.details?.aborted || result.details?.outputCapped) return result;
+	return {
+		...result,
+		message: `verify: unavailable '${check}': ${message.replace(/^verify: /u, "")}. ${UNAVAILABLE_RETRY_DIRECTIVE}`,
+		details: { ...result.details, check, judgement: judgement("unavailable", "not-run") },
 	};
 }
 
@@ -540,7 +606,12 @@ export async function runScriptCheck(
 		: [];
 	const vector = ["run", check];
 	if (extraArgs.length > 0) vector.push("--", ...extraArgs);
-	return withCommandJudgement(await runVectorTool("verify", "npm", vector, { ...args, cwd }, options));
+	return withCommandJudgement(
+		classifyUnavailable(await runVectorTool("verify", "npm", vector, { ...args, cwd }, options), check, [
+			"npm",
+			...vector,
+		]),
+	);
 }
 
 export {

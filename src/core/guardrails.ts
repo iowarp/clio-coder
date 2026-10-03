@@ -129,8 +129,8 @@ export function isWorkerToolCallCapExceededReason(reason: string): boolean {
 export function workerToolCallCapSynthesisReason(cap: number): string {
 	return (
 		`workerToolCallCap reached (${cap}); tool calls are now disabled for the rest of this run. ` +
-		"Everything you retrieved is already in the conversation above. Answer the operator now, in plain prose, " +
-		"from what you have gathered. Do not write tool-call markup such as <tool_call> blocks; tool calls are " +
+		"Everything you retrieved is already in the conversation above. Return your required final report " +
+		"from what you have gathered, in the declared result format. Do not write tool-call markup such as <tool_call> blocks; tool calls are " +
 		"disabled and will not run."
 	);
 }

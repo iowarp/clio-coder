@@ -2,7 +2,7 @@ import type { ToolResult, ToolSpec } from "../registry.js";
 import { runFrontendCheck } from "./frontend.js";
 import { captureQualitySnapshot, loadQualityPolicy, type QualitySnapshot } from "./quality-policy.js";
 import { resolveVerifyCall } from "./resolve.js";
-import { listChecks, runProjectCheck, runScriptCheck, runToolchainCheck } from "./scripts.js";
+import { listChecks, runProjectCheck, runScriptCheck, runToolchainCheck, unavailableCheck } from "./scripts.js";
 import { prepareVerifyArguments, verifyToolSurface } from "./surface.js";
 
 /**
@@ -93,6 +93,8 @@ async function runResolvedVerify(
 		}
 		case "toolchain":
 			return runToolchainCheck(resolution.check, resolution.argv, args, options);
+		case "unavailable":
+			return unavailableCheck(resolution.check);
 		case "unresolved":
 			return { kind: "error", message: `verify: ${resolution.message}` };
 	}

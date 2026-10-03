@@ -23,6 +23,7 @@ export type VerifyResolution =
 	| { kind: "catalog"; check: DeclaredCheck }
 	| { kind: "package"; check: DeclaredCheck; packageRoot: string }
 	| { kind: "toolchain"; check: ToolchainCheck; argv: string[] }
+	| { kind: "unavailable"; check: ToolchainCheck }
 	| { kind: "unresolved"; message: string };
 
 const FAMILY_WORDS = new Set(["test", "lint", "check", "typecheck", "format", "build", "ci"]);
@@ -111,6 +112,7 @@ function resolveWithDiscovery(
 	const owners = FAMILY_WORDS.has(check) ? derived.filter((candidate) => candidate.tags.includes(check)) : [];
 	const chosen = exact ?? (owners.length === 1 ? owners[0] : undefined);
 	if (chosen !== undefined) {
+		if (chosen.availability) return { kind: "unavailable", check: chosen };
 		const argv = toolchainArgv(chosen, extraArgs(args));
 		if (argv instanceof Error) return { kind: "unresolved", message: argv.message };
 		return { kind: "toolchain", check: chosen, argv };
