@@ -53,7 +53,7 @@ export interface CitationEvidence {
 	mutated: Set<string>;
 }
 
-export function emptyCitationEvidence(): CitationEvidence {
+function emptyCitationEvidence(): CitationEvidence {
 	return { numbered: new Map(), readUnnumbered: new Set(), mutated: new Set() };
 }
 
@@ -72,7 +72,7 @@ function finiteCount(value: unknown): number | null {
  * structured details: `observation.shownCount`/`totalCount` for read, and
  * `observedLines` (absolute path to line list) for grep.
  */
-export function recordCitationEvidence(
+function recordCitationEvidence(
 	evidence: CitationEvidence,
 	toolName: string,
 	args: Readonly<Record<string, unknown>> | undefined,
@@ -145,7 +145,7 @@ function lineNumber(raw: string | undefined): number | null {
  * last path named before it that `isFile` accepts, so a prose token such as
  * `Node.js` between a file and its range does not take the binding.
  */
-export function extractLineCitations(text: string, isFile: (written: string) => boolean = () => true): LineCitation[] {
+function extractLineCitations(text: string, isFile: (written: string) => boolean = () => true): LineCitation[] {
 	const citations: LineCitation[] = [];
 	let lastPath: string | null = null;
 	for (const match of withoutFencedCode(text).matchAll(CITATION_SCAN)) {
@@ -179,7 +179,7 @@ function candidateFiles(evidence: CitationEvidence, written: string, cwd: string
  * Citations into a file the session read without line numbers whose start or
  * end line no tool printed. A citation the evidence cannot judge is kept out.
  */
-export function unbackedCitations(
+function unbackedCitations(
 	evidence: CitationEvidence,
 	citations: ReadonlyArray<LineCitation>,
 	cwd: string,
@@ -212,7 +212,7 @@ function formatCitation(citation: LineCitation): string {
 		: `${citation.path}:${citation.start}-${citation.end}`;
 }
 
-export function buildCitationGroundingMessage(unbacked: ReadonlyArray<LineCitation>): string {
+function buildCitationGroundingMessage(unbacked: ReadonlyArray<LineCitation>): string {
 	const named = unbacked.slice(0, NAMED_CITATION_LIMIT).map(formatCitation).join(", ");
 	const rest = unbacked.length - NAMED_CITATION_LIMIT;
 	return (
