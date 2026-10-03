@@ -44,7 +44,11 @@ const gates = new WeakMap<object, Gate>();
  * order, so the gate runs first exactly when this is called before the first
  * other `addInputListener`.
  */
-function gateFor(tui: object, register: (listener: TuiInputListener) => () => void): Gate {
+function gateFor(
+	tui: object,
+	register: (listener: TuiInputListener) => () => void,
+	preempt?: (data: string) => boolean,
+): Gate {
 	const existing = gates.get(tui);
 	if (existing) return existing;
 	const gate: Gate = { policy: undefined };
@@ -54,10 +58,13 @@ function gateFor(tui: object, register: (listener: TuiInputListener) => () => vo
 		// contains release-looking bytes stays literal data. Everything else is the
 		// policy's own TuiInputListenerResult: Pi's listener loop owns consume and
 		// data rewriting.
-		return isKeyRelease(data) ? { consume: true } : gate.policy?.(data);
+		if (isKeyRelease(data) || preempt?.(data)) return { consume: true };
+		return gate.policy?.(data);
 	});
 	return gate;
 }
+
+const SGR_MOUSE = /^\x1b\[<(\d+);\d+;\d+[Mm]$/;
 
 function replacePolicy(gate: Gate, policy: ApplicationInputPolicy): () => void {
 	gate.policy = policy;
@@ -68,15 +75,36 @@ function replacePolicy(gate: Gate, policy: ApplicationInputPolicy): () => void {
 
 export class ApplicationInputTuiAltScreen extends TuiAltScreen implements ApplicationInputHost {
 	override addInputListener(listener: TuiInputListener): () => void {
-		gateFor(this, (gateListener) => super.addInputListener(gateListener));
+		gateFor(
+			this,
+			(gateListener) => super.addInputListener(gateListener),
+			(data) => this.scrollTranscriptPastOverlay(data),
+		);
 		return super.addInputListener(listener);
 	}
 
 	setApplicationInputPolicy(policy: ApplicationInputPolicy): () => void {
 		return replacePolicy(
-			gateFor(this, (gateListener) => super.addInputListener(gateListener)),
+			gateFor(
+				this,
+				(gateListener) => super.addInputListener(gateListener),
+				(data) => this.scrollTranscriptPastOverlay(data),
+			),
 			policy,
 		);
+	}
+
+	/**
+	 * Pi offers a wheel event to the overlay under the pointer first, and its
+	 * SelectList and SettingsList turn the wheel into selection moves. Clio is
+	 * keyboard first: while an overlay is up the wheel scrolls the transcript
+	 * at Pi's step (one line, five with Alt), and choices move only on keys.
+	 */
+	private scrollTranscriptPastOverlay(data: string): boolean {
+		const button = Number(SGR_MOUSE.exec(data)?.[1] ?? Number.NaN);
+		if ((button & 64) === 0 || (button & 3) > 1 || !this.hasOverlay()) return false;
+		this.scrollBy(((button & 3) === 0 ? -1 : 1) * ((button & 8) !== 0 ? 5 : 1));
+		return true;
 	}
 }
 

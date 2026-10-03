@@ -131,10 +131,14 @@ export class InstrumentedTuiAltScreen extends ApplicationInputTuiAltScreen {
 	private readonly capturesMouse: boolean;
 
 	/** pi-tui selects transcript text, but capturing overlays consume its mouse path.
-	 * Let the terminal select the stable interview screen until it closes. */
+	 * Let the terminal select the stable interview screen until it closes.
+	 * Untracked on the alternate screen, alternate-scroll mode (DECSET 1007) sends
+	 * the wheel as arrow keys that would move the interview's choice, and those
+	 * arrive identical to real arrows, so the lease turns it off too. */
 	useTerminalSelection(): () => void {
 		if (!this.capturesMouse) return () => {};
-		if (this.terminalSelectionUsers++ === 0) this.terminal.write("\x1b[?1006l\x1b[?1003l\x1b[?1002l\x1b[?1000l");
+		if (this.terminalSelectionUsers++ === 0)
+			this.terminal.write("\x1b[?1007l\x1b[?1006l\x1b[?1003l\x1b[?1002l\x1b[?1000l");
 		let released = false;
 		return () => {
 			if (released) return;
@@ -148,7 +152,9 @@ export class InstrumentedTuiAltScreen extends ApplicationInputTuiAltScreen {
 				process.env.STY !== undefined ||
 				term.startsWith("tmux") ||
 				term.startsWith("screen");
-			this.terminal.write(`\x1b[?1000h\x1b[?1002h${multiplexed ? "" : "\x1b[?1003h"}\x1b[?1006h`);
+			// 1007 comes back on because it is the common terminal default and tracking
+			// supersedes it until Clio leaves the alternate screen.
+			this.terminal.write(`\x1b[?1000h\x1b[?1002h${multiplexed ? "" : "\x1b[?1003h"}\x1b[?1006h\x1b[?1007h`);
 		};
 	}
 	private currentFrame: unknown | undefined;
