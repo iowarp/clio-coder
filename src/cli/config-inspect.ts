@@ -17,21 +17,18 @@ import type { ClioSettings } from "../core/config.js";
 import { resolvePackageRoot } from "../core/package-root.js";
 import { readLayeredSettings, type SettingsOrigin, settingsSourceFor } from "../core/settings-layers.js";
 import { clioDataDir, clioStateDir } from "../core/xdg.js";
-import {
-	loadOperatorProfile,
-	loadProjectClioMd,
-	loadProjectRules,
-	renderOperatorProfile,
-	renderPromptContext,
-} from "../domains/context/index.js";
-import { extensionSnapshotFor, listInstalledExtensions } from "../domains/extensions/index.js";
-import { loadMemoryRecordsSync, memoryStorePath } from "../domains/memory/index.js";
-import {
-	HOOK_RECEIPT_LOG_CAPACITY,
-	loadUserHooks,
-	readHookSources,
-	readPersistedHookReceipts,
-} from "../domains/middleware/index.js";
+// C-3: domain barrels also load execution and indexing code. Keep inspection
+// on the readers so source clients do not wait for that unrelated module graph.
+import { loadProjectClioMd } from "../domains/context/clio-md.js";
+import { loadOperatorProfile, renderOperatorProfile } from "../domains/context/operator-profile.js";
+import { loadProjectRules } from "../domains/context/project-rules.js";
+import { renderPromptContext } from "../domains/context/prompt-context.js";
+import { extensionSnapshotFor } from "../domains/extensions/snapshot-access.js";
+import { listInstalledExtensions } from "../domains/extensions/state.js";
+import { loadMemoryRecordsSync, memoryStorePath } from "../domains/memory/store.js";
+import { HOOK_RECEIPT_LOG_CAPACITY, readPersistedHookReceipts } from "../domains/middleware/hook-receipts.js";
+import { loadUserHooks } from "../domains/middleware/hooks.js";
+import { readHookSources } from "../domains/middleware/hooks-io.js";
 import { selectProjectPreload } from "../domains/prompts/preload.js";
 import { defaultScopedResourceRoots } from "../domains/resources/common-loader.js";
 import { createSafetyPolicyEngine } from "../domains/safety/policy-engine.js";
