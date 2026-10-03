@@ -27,7 +27,7 @@ export function markdownTheme(theme: ClioTheme, highlightCode?: MarkdownTheme["h
 export function selectListTheme(theme: ClioTheme): SelectListTheme {
 	return {
 		selectedPrefix: () => theme.fg("selectedOption", `${GLYPH.cursor} `),
-		selectedText: (text) => theme.style("selectedOption", text, { bold: true }),
+		selectedText: (text) => theme.style("selectedOption", text.replace(/^→ /u, `${GLYPH.cursor} `), { bold: true }),
 		description: (text) => theme.fg("menuDescription", text),
 		scrollInfo: (text) => theme.fg("positionCount", text),
 		noMatch: (text) => theme.fg("emptyState", text),
