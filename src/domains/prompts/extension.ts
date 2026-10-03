@@ -6,7 +6,7 @@ import { writeDiagnostic } from "../../core/diagnostics.js";
 import type { DomainBundle, DomainContext, DomainExtension } from "../../core/domain-loader.js";
 import type { AgentsContract } from "../agents/contract.js";
 import { listFleetContracts } from "../agents/fleet-contract.js";
-import { isUserVisibleAgent } from "../agents/spec.js";
+import { isUserVisibleAgent, SHADOW_AGENT_OPERATOR_STAND_IN } from "../agents/spec.js";
 import type { ConfigContract } from "../config/contract.js";
 import {
 	type ContextContract,
@@ -106,7 +106,11 @@ export function createPromptsBundle(
 		try {
 			snapshot.recipes = (agentsDomain()?.listSpecs() ?? [])
 				.filter((spec) => isUserVisibleAgent(spec) || spec.audience === "shadow")
-				.map((spec) => ({ name: spec.id, purpose: spec.description }));
+				// The marker rides on the purpose so the name stays a valid dispatch id.
+				.map((spec) => ({
+					name: spec.id,
+					purpose: spec.audience === "shadow" ? `(shadow) ${spec.description}` : spec.description,
+				}));
 		} catch {
 			// dispatch({list:true}) remains the authoritative roster.
 		}
@@ -612,7 +616,7 @@ function catalogFragments(catalogs: CatalogSnapshot, inputs: SessionPromptInputs
 	}
 	if (catalogs.recipes.length > 0 && names.has("dispatch")) {
 		sections.push(
-			'Agents (dispatch one with agent="<name>"; dispatch({list:true}) shows tools and budgets):',
+			`Agents (dispatch one with agent="<name>"; dispatch({list:true}) shows tools and budgets; shadow ones run only through dispatch, so operator /run or \`run --agent\` commands use ${SHADOW_AGENT_OPERATOR_STAND_IN} --read-only):`,
 			...catalogLines(catalogs.recipes),
 		);
 	}
