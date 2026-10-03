@@ -19,7 +19,6 @@ import { useLayersActive, useShortcut } from "./interaction/use-shortcut.js";
 import { useSetupStatus } from "./pages/target-onboarding.js";
 import { ASIDE_DOCK_QUERY, toggleAside, useAsideExpanded } from "./shell/aside-state.js";
 import { OpenWorkspaceDialog } from "./shell/OpenWorkspaceDialog.js";
-import { SettingsSidebar } from "./shell/SettingsSidebar.js";
 import { type ShellApi, ShellContext } from "./shell/shell-context.js";
 import { isSettingsPath, sessionIdFromPath, taskRows } from "./shell/shell-model.js";
 import { TaskSidebar } from "./shell/TaskSidebar.js";
@@ -142,12 +141,6 @@ export function App({ client }: { client: Client }) {
 	useEffect(() => {
 		if (snapshot?.workspaceId) rememberWorkspace(snapshot.workspaceId);
 	}, [snapshot?.workspaceId]);
-
-	// Settings has one way back: the last place the operator was working.
-	const [backTo, setBackTo] = useState("/");
-	useEffect(() => {
-		if (mode === "work") setBackTo(`${location.pathname}${location.search}`);
-	}, [mode, location.pathname, location.search]);
 
 	const closeDrawer = useCallback(() => setDrawer(false), []);
 	// The phone drawer is modal: the page behind it goes inert, so focus has to move into it on open
@@ -376,20 +369,17 @@ export function App({ client }: { client: Client }) {
 				}}
 			>
 				{authed ? (
-					mode === "settings" ? (
-						<SettingsSidebar backTo={backTo} onNavigate={closeDrawer} onToggle={revealSidebar} onHelp={openHelp} />
-					) : (
-						<TaskSidebar
-							client={client}
-							actions={actions}
-							connection={connection}
-							activeWorkspaceId={activeWorkspaceId}
-							onOpenWorkspace={openWorkspace}
-							onSearch={() => setPaletteOpen(true)}
-							onToggle={revealSidebar}
-							onNavigate={closeDrawer}
-						/>
-					)
+					<TaskSidebar
+						client={client}
+						actions={actions}
+						connection={connection}
+						activeWorkspaceId={activeWorkspaceId}
+						onOpenWorkspace={openWorkspace}
+						onSearch={() => setPaletteOpen(true)}
+						onToggle={revealSidebar}
+						onNavigate={closeDrawer}
+						onHelp={openHelp}
+					/>
 				) : null}
 				{authed && !phone && !collapsed ? (
 					<Splitter spec={LEFT_SIDEBAR} edge="end" label="Resize sidebar" host=".wb" onCollapse={toggleSidebar} />

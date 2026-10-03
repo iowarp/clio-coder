@@ -1,4 +1,5 @@
 import { type Static, type TSchema, Type } from "typebox";
+import { ArtifactList, ArtifactPage, ArtifactRead } from "./artifacts.js";
 import { AsideAnswer, AsideAskRequest, AsideCancelled, AsideDraftRequest, AsideDrafts } from "./aside.js";
 import { TURN_FILE_MAX, TURN_IMAGE_MAX, TurnFile, TurnImage } from "./attachments.js";
 import {
@@ -539,6 +540,22 @@ export const routes = {
 		params: operationParams,
 		response: ExtensionReload,
 		summary: "Reload this conversation's extensions and hooks together",
+	}),
+	sessionArtifacts: defineRoute({
+		...get,
+		path: "/api/sessions/:id/artifacts",
+		params: operationParams,
+		response: ArtifactList,
+		summary: "List this session’s artifacts",
+	}),
+	sessionArtifact: defineRoute({
+		...post,
+		status: 200,
+		path: "/api/sessions/:id/artifacts/read",
+		params: operationParams,
+		body: ArtifactRead,
+		response: ArtifactPage,
+		summary: "Read a page of a session artifact, respecting protection rules",
 	}),
 	sessionUsage: defineRoute({
 		...get,

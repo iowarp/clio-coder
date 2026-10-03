@@ -9,6 +9,7 @@ import { KEYBINDINGS, matchesKeybinding } from "../interaction/keybindings.js";
 import { useShortcutLayer } from "../interaction/use-shortcut.js";
 import { countRender } from "../render/render-probe.js";
 import { useShell } from "../shell/shell-context.js";
+import { ArtifactsPanel } from "./ArtifactsPanel.js";
 import { BranchPanel } from "./BranchPanel.js";
 import { ChangesView } from "./ChangesView.js";
 import { ContextPanel } from "./ContextPanel.js";
@@ -162,6 +163,17 @@ export const SessionPane = memo(function SessionPane({
 						/>
 					</div>
 				);
+			case "artifacts":
+				return (
+					<ArtifactsPanel
+						key={pane.id}
+						client={client}
+						sessionId={pane.id}
+						open={pane.state === "open" && view === "artifacts"}
+						capabilities={capabilities.data}
+						settled={pane.turns.filter((turn) => turn.status !== "running").length}
+					/>
+				);
 			case "changes":
 				return <ChangesView session={pane} workspaceRoot={workspaceRoot} />;
 			case "agents":
@@ -178,7 +190,15 @@ export const SessionPane = memo(function SessionPane({
 					settledTurns: pane.turns.filter((turn) => turn.status !== "running").length,
 				};
 				if (id === "context") return <ContextPanel {...facts} />;
-				if (id === "usage") return <UsagePanel {...facts} />;
+				if (id === "usage")
+					return (
+						<UsagePanel
+							{...facts}
+							{...(pane.turns.at(-1)?.status === "running" && pane.telemetry?.usage
+								? { liveUsage: pane.telemetry.usage }
+								: {})}
+						/>
+					);
 				return (
 					<SessionBoardPanel
 						{...facts}

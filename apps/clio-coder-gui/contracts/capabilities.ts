@@ -1,4 +1,5 @@
 import { type Static, Type } from "typebox";
+import { ArtifactsCapability } from "./artifacts.js";
 import { AsideCapability } from "./aside.js";
 import { BoardCapability } from "./board.js";
 import { BranchesCapability } from "./branches.js";
@@ -104,6 +105,7 @@ export const AgentCapabilities = Type.Object(
 		fleet: Type.Optional(FleetCapability),
 		/** The context window accounting, read for the Context view. */
 		context: Type.Optional(ContextCapability),
+		artifacts: Type.Optional(ArtifactsCapability),
 		/** The session's extensions and their reload. */
 		extensions: Type.Optional(ExtensionsCapability),
 		/** A side question and parallel drafts, answered beside the conversation. */

@@ -155,6 +155,8 @@ export function applySessionDelta(current: SessionSnapshot, event: SessionDelta)
 		state = { ...state, timeline, timelineTruncated: truncated || text.endsWith(MARKER) };
 	};
 	switch (event.type) {
+		case "session.telemetry":
+			return { ...state, telemetry: { ...state.telemetry, ...event.payload.telemetry } };
 		case "session.labelled":
 			return { ...state, label: event.payload.label };
 		case "fleet.loopBlocked":
@@ -175,9 +177,20 @@ export function applySessionDelta(current: SessionSnapshot, event: SessionDelta)
 			return { ...state, state: event.payload.state, recoveredOrphan: event.payload.recoveredOrphan };
 		case "session.configured":
 			return { ...state, config: event.payload.config };
-		case "session.reset":
+		case "session.reset": {
+			const { usage: _usage, plan: _plan, ...telemetry } = state.telemetry ?? {};
 			// Turns, their items and their approvals belong to the branch that was left.
-			return { ...state, timeline: [], timelineTruncated: false, turns: [], permissions: [] };
+			return {
+				...state,
+				timeline: [],
+				timelineTruncated: false,
+				turns: [],
+				permissions: [],
+				fleet: [],
+				health: [],
+				telemetry,
+			};
+		}
 		case "turn.started": {
 			const turn = event.payload.turn;
 			state = { ...state, turns: [...state.turns, turn].slice(-128) };

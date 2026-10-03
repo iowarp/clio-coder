@@ -42,6 +42,7 @@ export interface FleetRun {
 	readonly durationMs: number | null;
 	readonly tokenCount: number | null;
 	readonly updatedAt: string;
+	readonly receipt?: FleetItem["receipt"];
 }
 
 /**
@@ -177,7 +178,8 @@ export function foldFleetRuns(items: readonly FleetItemLike[]): readonly FleetRu
 		const payload = record(item.fact.payload),
 			runId = text(payload.runId);
 		if (runId === null) continue;
-		runs.set(runId, apply(runs.get(runId) ?? blank(runId, item.at), item.fact.type, payload, item.at));
+		const run = apply(runs.get(runId) ?? blank(runId, item.at), item.fact.type, payload, item.at);
+		runs.set(runId, item.receipt ? { ...run, receipt: item.receipt } : run);
 	}
 	if (runs.size <= FLEET_RUN_CAP) return [...runs.values()];
 	const over = runs.size - FLEET_RUN_CAP;

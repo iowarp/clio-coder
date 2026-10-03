@@ -14,6 +14,7 @@ import { changeCounts, summarizeChanges } from "./changes-model.js";
 import { FLEET_STATE_LABELS, FLEET_STATE_TONES, fleetEvidence, foldFleetRuns, isLiveRun } from "./fleet-facts.js";
 import { compactDuration, contextMeter, contextSegments, taskOverview } from "./overview-model.js";
 import type { PaneSession, PaneView } from "./pane-model.js";
+import { ReceiptLine } from "./ReceiptLine.js";
 import type { RouteFacts } from "./route.js";
 import {
 	sessionSpend,
@@ -23,6 +24,7 @@ import {
 	useSessionCapabilities,
 	useSessionUsage,
 } from "./session-telemetry.js";
+import { livePlanView } from "./telemetry-model.js";
 
 function PlanGlyph({ tone }: { tone: PlanRow["tone"] }) {
 	if (tone === "success")
@@ -135,7 +137,8 @@ export function SessionOverview({
 	const ledger = useContextLedger(client, session.id, settled, open && !!capabilities.data?.context);
 	const usage = useSessionUsage(client, session.id, settled, open && !!capabilities.data?.usage);
 	const view = board.data ? boardView(board.data) : null;
-	const plan = view?.plan ?? null;
+	const plan = session.telemetry?.plan ? livePlanView(session.telemetry.plan) : (view?.plan ?? null);
+	const workspace = session.telemetry?.workspace;
 	const meter = ledger.data ? contextMeter(ledger.data) : null;
 	const segments = ledger.data ? contextSegments(ledger.data) : [];
 	const overview = useMemo(() => taskOverview(session.turns, nowMs), [session.turns, nowMs]);
@@ -143,6 +146,7 @@ export function SessionOverview({
 	const runs = useMemo(() => foldFleetRuns(session.fleet), [session.fleet]);
 	const evidence = useMemo(() => fleetEvidence(session.fleet), [session.fleet]);
 	const live = runs.filter(isLiveRun);
+	const receipts = runs.filter((run) => run.receipt);
 	const last = session.turns.at(-1);
 	const working = open && overview.running;
 	const state = overview.running
@@ -157,7 +161,13 @@ export function SessionOverview({
 	const done = plan?.rows.filter((row) => row.tone === "success").length ?? 0;
 	const openTasks = view?.tasks.filter((task) => task.actions.length > 0).length ?? 0;
 	const decisions = view?.activeDecisions.length ?? 0;
-	const used = spendLine(sessionSpend(session.turns, usage.data));
+	const used = spendLine(
+		sessionSpend(
+			session.turns,
+			usage.data,
+			overview.running || !usage.data || usage.isPlaceholderData ? session.telemetry?.usage : undefined,
+		),
+	);
 	return (
 		<div className="pane-cards">
 			<section className="pane-card" aria-labelledby="pane-goal">
@@ -180,6 +190,28 @@ export function SessionOverview({
 					</p>
 				) : null}
 			</section>
+
+			{workspace ? (
+				<Section id="pane-workspace" title="Workspace">
+					<p className="pane-workspace-path pane-mono">{workspace.cwd}</p>
+					<p className="pane-card__facts">
+						{workspace.isGit
+							? [
+									workspace.branch ?? "Detached HEAD",
+									workspace.dirty === null
+										? "Working tree not reported"
+										: workspace.dirty
+											? "Uncommitted changes"
+											: "Clean working tree",
+									workspace.ahead ? `${workspace.ahead} ahead` : null,
+									workspace.behind ? `${workspace.behind} behind` : null,
+								]
+									.filter(Boolean)
+									.join(" · ")
+							: "No Git repository"}
+					</p>
+				</Section>
+			) : null}
 
 			{route ? (
 				<Section
@@ -271,7 +303,7 @@ export function SessionOverview({
 					</ol>
 				) : (
 					<p className="pane-empty">
-						{capabilities.data?.board === undefined
+						{capabilities.data?.board === undefined && !session.telemetry?.plan
 							? "This session does not report a plan."
 							: "Clio has not published a plan for this task yet."}
 					</p>
@@ -288,6 +320,12 @@ export function SessionOverview({
 				) : null}
 			</Section>
 
+			{session.telemetry?.plan?.truncated ? <p className="pane-hint">The plan shows its first 100 steps.</p> : null}
+			{capabilities.data?.artifacts ? (
+				<Section id="pane-artifacts" title="Artifacts" open={() => onOpen("artifacts")}>
+					<p className="pane-empty">Receipts, tool output, prompts and session records.</p>
+				</Section>
+			) : null}
 			<Section
 				id="pane-changes"
 				title="Changes"
@@ -366,8 +404,27 @@ export function SessionOverview({
 				</Section>
 			) : null}
 
-			{evidence.length > 0 ? (
-				<Section id="pane-evidence" title="Evidence" aside={<span className="pane-card__state">{evidence.length}</span>}>
+			{evidence.length > 0 || receipts.length > 0 ? (
+				<Section
+					id="pane-evidence"
+					title="Evidence"
+					aside={
+						<span className="pane-card__state">
+							{receipts.length > 0
+								? `${receipts.length} ${receipts.length === 1 ? "receipt" : "receipts"}`
+								: `${evidence.length} ${evidence.length === 1 ? "bundle" : "bundles"}`}
+						</span>
+					}
+				>
+					{receipts
+						.slice(-6)
+						.reverse()
+						.map((run) => (
+							<div key={run.runId}>
+								<strong className="pane-card__facts">{run.agentId}</strong>
+								{run.receipt ? <ReceiptLine receipt={run.receipt} /> : null}
+							</div>
+						))}
 					<ul className="pane-evidence">
 						{evidence.slice(0, 6).map((row) => {
 							const agent = runs.find((run) => run.runId === row.runId)?.agentId ?? "run";

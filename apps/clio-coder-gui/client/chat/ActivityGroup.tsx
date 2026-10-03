@@ -29,6 +29,7 @@ import {
 } from "./activity.js";
 import { observeStart } from "./chat-turn.js";
 import { ReasoningDisclosure } from "./Reasoning.js";
+import { WorkerReceipt } from "./ReceiptLine.js";
 import { ToolCard } from "./tool-cards.js";
 import { describeTool } from "./tool-presentation.js";
 import "./chat-turn.css";
@@ -72,6 +73,7 @@ function ActivityRow({ item, client, session, workspaceRoot, nowMs }: ActivityRo
 					<span className="sr-only">{toolStatusLabel(item.status)}</span>
 				</p>
 			)}
+			<WorkerReceipt client={client} sessionId={session.id} item={item} />
 			<AnchoredApproval client={client} session={session} item={item} />
 		</li>
 	);

@@ -1,10 +1,9 @@
-import { useQuery } from "@tanstack/react-query";
 import { memo, useId } from "react";
 import type { AgentCapabilities } from "../../contracts/capabilities.js";
-import { routes } from "../../contracts/routes.js";
 import type { Client } from "../api/client.js";
 import { contextView } from "./context-model.js";
 import { contextMeter, contextSegments } from "./overview-model.js";
+import { useContextLedger } from "./session-telemetry.js";
 import "./session-board.css";
 
 /**
@@ -26,15 +25,7 @@ export const ContextPanel = memo(function ContextPanel({
 }) {
 	const supported = !!capabilities?.context;
 	const id = useId();
-	const ledger = useQuery({
-		queryKey: ["session-context", sessionId, settledTurns],
-		queryFn: () => client.call(routes.sessionContext, { params: { id: sessionId }, query: {}, body: {} }),
-		enabled: sessionOpen && supported,
-		retry: false,
-		// The next settled turn changes the key; the last answer stays on screen until the new one lands,
-		// so rows (and the focus a row holds) do not vanish between the two reads.
-		placeholderData: (previous) => previous,
-	});
+	const ledger = useContextLedger(client, sessionId, settledTurns, sessionOpen && supported);
 	const view = ledger.data ? contextView(ledger.data) : null;
 	const meter = ledger.data ? contextMeter(ledger.data) : null;
 	const segments = ledger.data ? contextSegments(ledger.data) : [];

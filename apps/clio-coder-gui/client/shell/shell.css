@@ -268,6 +268,47 @@
 	min-height: 0;
 	overflow-y: auto;
 }
+.wb-side__tabs {
+	display: flex;
+	gap: 4px;
+	padding: 3px;
+	margin: 0 0 12px;
+	background: var(--wb-faint);
+	border-radius: 10px;
+}
+.wb-side__tabs [role="tab"] {
+	flex: 1;
+	min-width: 0;
+	min-height: 32px;
+	padding: 5px 10px;
+	border: 0;
+	border-radius: 8px;
+	background: transparent;
+	color: var(--muted);
+	font-size: 13px;
+	font-weight: 500;
+}
+.wb-side__tabs [role="tab"]:hover {
+	background: var(--wb-hover);
+}
+.wb-side__tabs [aria-selected="true"] {
+	background: var(--wb-active);
+	color: var(--ink);
+}
+.wb-side__panel {
+	display: flex;
+	flex: 1;
+	flex-direction: column;
+	min-height: 0;
+}
+.wb-side__panel[hidden] {
+	display: none;
+}
+@media (pointer: coarse) {
+	.wb-side__tabs [role="tab"] {
+		min-height: 40px;
+	}
+}
 
 /* ---- tasks ---------------------------------------------------------------- */
 .wb-side__tasks {

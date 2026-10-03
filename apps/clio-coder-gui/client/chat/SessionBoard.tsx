@@ -13,6 +13,8 @@ import {
 	supersedeOutcome,
 } from "./board-model.js";
 import type { PaneSection } from "./pane-context.js";
+import { useSessionTelemetry } from "./session-telemetry.js";
+import { livePlanView } from "./telemetry-model.js";
 import "./session-board.css";
 
 /**
@@ -127,7 +129,9 @@ export const SessionBoardPanel = memo(function SessionBoardPanel({
 		},
 		onError: (error) => setMemoryNote({ tone: "error", text: error.message }),
 	});
-	const view = board.data ? boardView(board.data) : null;
+	const reportedPlan = useSessionTelemetry(client, sessionId)?.plan;
+	const boardState = board.data ? boardView(board.data) : null;
+	const view = boardState && reportedPlan ? { ...boardState, plan: livePlanView(reportedPlan) } : boardState;
 	const loaded = !!board.data;
 	useEffect(() => {
 		if (section === null || !loaded) return;

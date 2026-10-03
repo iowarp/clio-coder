@@ -8,8 +8,10 @@ import {
 	HealthFact,
 	type HealthItem,
 } from "../../contracts/fleet-events.js";
+import { ReceiptFacts } from "../../contracts/receipt-facts.js";
 import { AppProblem } from "../services/problem.js";
 import { record } from "./client.js";
+import { projectTelemetryValue } from "./telemetry.js";
 
 const HEALTH = new Set<string>(HEALTH_EVENT_TYPES);
 
@@ -48,8 +50,16 @@ export function fleetEvent(value: unknown, sessionId: string, previousSequence: 
 	const fact = Value.Clean(schema, { type, payload: event.payload });
 	if (!Value.Check(schema, fact) || Buffer.byteLength(JSON.stringify(fact)) > 8192)
 		throw new AppProblem("upstream_acp", "ACP event exceeds its public projection contract.");
-	const item = { id: randomUUID(), at: new Date().toISOString(), sourceSequence: sequence, fact } as
-		| FleetItem
-		| HealthItem;
+	const rawReceipt = record(event._meta)["clio-coder/receipt"];
+	const receipt = rawReceipt === undefined ? undefined : projectTelemetryValue(ReceiptFacts, rawReceipt);
+	if (receipt && receipt.receiptId !== record(event.payload).runId)
+		throw new AppProblem("upstream_acp", "Receipt identifies a different run.");
+	const item = {
+		id: randomUUID(),
+		at: new Date().toISOString(),
+		sourceSequence: sequence,
+		fact,
+		...(receipt ? { receipt } : {}),
+	} as FleetItem | HealthItem;
 	return { type, item, sequence };
 }

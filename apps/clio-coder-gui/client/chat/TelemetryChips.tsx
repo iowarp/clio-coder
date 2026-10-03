@@ -1,13 +1,14 @@
 import { memo } from "react";
 import type { SessionSnapshot } from "../../contracts/sessions.js";
 import type { Client } from "../api/client.js";
-import { contextMeter } from "./overview-model.js";
+import { compactCount, contextMeter } from "./overview-model.js";
 import type { PaneView } from "./pane-model.js";
 import {
 	sessionSpend,
 	settledTurns,
 	useContextLedger,
 	useSessionCapabilities,
+	useSessionTelemetry,
 	useSessionUsage,
 } from "./session-telemetry.js";
 
@@ -35,8 +36,22 @@ export const TelemetryChips = memo(function TelemetryChips({
 	const settled = settledTurns(turns);
 	const ledger = useContextLedger(client, sessionId, settled, open && !!capabilities.data?.context);
 	const usage = useSessionUsage(client, sessionId, settled, open && !!capabilities.data?.usage);
-	const meter = ledger.data ? contextMeter(ledger.data) : null;
-	const spend = sessionSpend(turns, usage.data);
+	const telemetry = useSessionTelemetry(client, sessionId);
+	const meter = ledger.data
+		? contextMeter(ledger.data)
+		: telemetry?.usage
+			? contextMeter({
+					usedTokens: telemetry.usage.used,
+					contextWindow: telemetry.usage.size,
+					percent: null,
+					measured: true,
+				})
+			: null;
+	const spend = sessionSpend(
+		turns,
+		usage.data,
+		turns.at(-1)?.status === "running" || !usage.data || usage.isPlaceholderData ? telemetry?.usage : undefined,
+	);
 	const contextId = `${sessionId}-chip-context`;
 	const spendId = `${sessionId}-chip-spend`;
 	return (
@@ -69,11 +84,12 @@ export const TelemetryChips = memo(function TelemetryChips({
 					id={spendId}
 					type="button"
 					className="wb-chip wb-chip--figure"
-					aria-label={`Spent ${spend.cost ?? `${spend.tokens} tokens`}. Open usage.`}
+					aria-label={`${spend.tokens.toLocaleString("en-US")} tokens${spend.cost ? ` · ${spend.cost}` : ""}. Open usage.`}
 					title={spend.source === "clio" ? "Clio's accounting for this chat" : "Summed from this chat's turns"}
 					onClick={() => onOpen("usage", spendId)}
 				>
-					<span>{spend.cost ?? `${spend.tokens.toLocaleString("en-US")} tok`}</span>
+					<span className="wb-chip__tokens">{compactCount(spend.tokens)} tok</span>
+					{spend.cost ? <span>{spend.cost}</span> : null}
 				</button>
 			) : null}
 		</>

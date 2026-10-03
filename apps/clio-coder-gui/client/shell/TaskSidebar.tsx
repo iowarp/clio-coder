@@ -11,7 +11,16 @@ import { ClioLogo, ClioPulse, PULSE_SIZE } from "./ClioMark.js";
 import { chordHint } from "./chords.js";
 import { InlineRename } from "./InlineRename.js";
 import { Menu, MenuItem } from "./Menu.js";
-import { STATE_LABELS, sessionIdFromPath, shortAge, type TaskRow, taskRows, taskState } from "./shell-model.js";
+import { SettingsSidebar } from "./SettingsSidebar.js";
+import {
+	isSettingsPath,
+	STATE_LABELS,
+	sessionIdFromPath,
+	shortAge,
+	type TaskRow,
+	taskRows,
+	taskState,
+} from "./shell-model.js";
 import { type TaskActions, useDeleteTask, useMinuteClock, useRenameTask } from "./tasks.js";
 import { setThemeChoice, themeSwitchLabel, useTheme } from "./theme.js";
 
@@ -25,6 +34,7 @@ export function TaskSidebar({
 	onOpenWorkspace,
 	onSearch,
 	onToggle,
+	onHelp,
 	onNavigate,
 }: {
 	client: Client;
@@ -34,12 +44,18 @@ export function TaskSidebar({
 	onOpenWorkspace: () => void;
 	onSearch: () => void;
 	onToggle: () => void;
+	onHelp: () => void;
 	/** Called after any navigation so a mobile drawer can close itself. */
 	onNavigate: () => void;
 }) {
 	const theme = useTheme();
 	countRender("task-sidebar");
 	const location = useLocation();
+	const [tab, setTab] = useState<"tasks" | "harness">(() => (isSettingsPath(location.pathname) ? "harness" : "tasks"));
+	useEffect(() => {
+		setTab(isSettingsPath(location.pathname) ? "harness" : "tasks");
+	}, [location.pathname]);
+	const railId = useId();
 	const now = useMinuteClock();
 	const [shown, setShown] = useState(PROJECTS_SHOWN);
 	const workspaces = useQuery({ queryKey: ["workspaces"], queryFn: () => client.call(routes.workspaces, emptyInput) });
@@ -82,76 +98,120 @@ export function TaskSidebar({
 				</button>
 			</div>
 
-			<nav className="wb-side__actions" aria-label="Start">
-				<button
-					type="button"
-					className="wb-action wb-action--primary"
-					disabled={!activeWorkspaceId || actions.launch.busy}
-					onClick={() => activeWorkspaceId && actions.newTask(activeWorkspaceId)}
-					title={activeWorkspaceId ? "Start a new task in the current project" : "Open a project first"}
-				>
-					{actions.launch.busy ? <ClioPulse size={PULSE_SIZE.row} /> : <Icon name="compose" />}
-					<span>{actions.launch.busy ? "Starting…" : "New task"}</span>
-					<kbd>{chordHint("newTask")}</kbd>
-				</button>
-				<button type="button" className="wb-action" onClick={onOpenWorkspace}>
-					<Icon name="folderOpen" />
-					<span>Open workspace</span>
-					<kbd>{chordHint("openWorkspace")}</kbd>
-				</button>
-				<NavLink to="/skills" className="wb-action" onClick={onNavigate}>
-					<Icon name="skills" />
-					<span>Skills</span>
-				</NavLink>
-			</nav>
-
-			<div className="wb-side__heading">
-				<h2>Tasks</h2>
-				<button
-					type="button"
-					className="wb-icon wb-icon--small"
-					aria-label="Search tasks and commands"
-					title={`Search tasks and commands (${chordHint("palette")})`}
-					onClick={onSearch}
-				>
-					<Icon name="search" />
-				</button>
-			</div>
-
-			{/* biome-ignore lint/a11y/noNoninteractiveTabindex: keyboard users scroll the task list independently. */}
-			<section className="wb-side__tasks" tabIndex={0} aria-label="Tasks by project">
-				{workspaces.isPending ? <p className="wb-note">Loading projects…</p> : null}
-				{workspaces.error ? (
-					<p className="wb-note" role="alert">
-						Projects unavailable.{" "}
-						<button type="button" className="wb-link" onClick={() => void workspaces.refetch()}>
-							Retry
-						</button>
-					</p>
-				) : null}
-				{!workspaces.isPending && !workspaces.error && ordered.length === 0 ? (
-					<p className="wb-note">Open a workspace to start your first task.</p>
-				) : null}
-				{ordered.slice(0, shown).map((workspace) => (
-					<ProjectGroup
-						key={workspace.id}
-						client={client}
-						workspace={workspace}
-						sessions={sessions.data ?? []}
-						current={workspace.id === activeWorkspaceId}
-						activeTask={activeTask}
-						actions={actions}
-						now={now}
-						onNavigate={onNavigate}
-					/>
-				))}
-				{ordered.length > shown ? (
-					<button type="button" className="wb-more" onClick={() => setShown((count) => count + PROJECTS_SHOWN)}>
-						Show {ordered.length - shown} more projects
+			<div
+				className="wb-side__tabs"
+				role="tablist"
+				aria-label="Sidebar"
+				onKeyDown={(event) => {
+					if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+					event.preventDefault();
+					const next =
+						event.key === "Home" ? "tasks" : event.key === "End" ? "harness" : tab === "tasks" ? "harness" : "tasks";
+					setTab(next);
+					document.getElementById(`${railId}-${next}-tab`)?.focus();
+				}}
+			>
+				{(["tasks", "harness"] as const).map((value) => (
+					<button
+						type="button"
+						role="tab"
+						key={value}
+						id={`${railId}-${value}-tab`}
+						aria-controls={`${railId}-${value}`}
+						aria-selected={tab === value}
+						tabIndex={tab === value ? 0 : -1}
+						onClick={() => setTab(value)}
+					>
+						{value === "tasks" ? "Tasks" : "Harness"}
 					</button>
-				) : null}
-			</section>
+				))}
+			</div>
+			<div
+				className="wb-side__panel"
+				role="tabpanel"
+				id={`${railId}-tasks`}
+				aria-labelledby={`${railId}-tasks-tab`}
+				hidden={tab !== "tasks"}
+			>
+				<nav className="wb-side__actions" aria-label="Start">
+					<button
+						type="button"
+						className="wb-action wb-action--primary"
+						disabled={!activeWorkspaceId || actions.launch.busy}
+						onClick={() => activeWorkspaceId && actions.newTask(activeWorkspaceId)}
+						title={activeWorkspaceId ? "Start a new task in the current project" : "Open a project first"}
+					>
+						{actions.launch.busy ? <ClioPulse size={PULSE_SIZE.row} /> : <Icon name="compose" />}
+						<span>{actions.launch.busy ? "Starting…" : "New task"}</span>
+						<kbd>{chordHint("newTask")}</kbd>
+					</button>
+					<button type="button" className="wb-action" onClick={onOpenWorkspace}>
+						<Icon name="folderOpen" />
+						<span>Open workspace</span>
+						<kbd>{chordHint("openWorkspace")}</kbd>
+					</button>
+					<NavLink to="/skills" className="wb-action" onClick={onNavigate}>
+						<Icon name="skills" />
+						<span>Skills</span>
+					</NavLink>
+				</nav>
 
+				<div className="wb-side__heading">
+					<h2>Tasks</h2>
+					<button
+						type="button"
+						className="wb-icon wb-icon--small"
+						aria-label="Search tasks and commands"
+						title={`Search tasks and commands (${chordHint("palette")})`}
+						onClick={onSearch}
+					>
+						<Icon name="search" />
+					</button>
+				</div>
+
+				{/* biome-ignore lint/a11y/noNoninteractiveTabindex: keyboard users scroll the task list independently. */}
+				<section className="wb-side__tasks" tabIndex={0} aria-label="Tasks by project">
+					{workspaces.isPending ? <p className="wb-note">Loading projects…</p> : null}
+					{workspaces.error ? (
+						<p className="wb-note" role="alert">
+							Projects unavailable.{" "}
+							<button type="button" className="wb-link" onClick={() => void workspaces.refetch()}>
+								Retry
+							</button>
+						</p>
+					) : null}
+					{!workspaces.isPending && !workspaces.error && ordered.length === 0 ? (
+						<p className="wb-note">Open a workspace to start your first task.</p>
+					) : null}
+					{ordered.slice(0, shown).map((workspace) => (
+						<ProjectGroup
+							key={workspace.id}
+							client={client}
+							workspace={workspace}
+							sessions={sessions.data ?? []}
+							current={workspace.id === activeWorkspaceId}
+							activeTask={activeTask}
+							actions={actions}
+							now={now}
+							onNavigate={onNavigate}
+						/>
+					))}
+					{ordered.length > shown ? (
+						<button type="button" className="wb-more" onClick={() => setShown((count) => count + PROJECTS_SHOWN)}>
+							Show {ordered.length - shown} more projects
+						</button>
+					) : null}
+				</section>
+			</div>
+			<div
+				className="wb-side__panel"
+				role="tabpanel"
+				id={`${railId}-harness`}
+				aria-labelledby={`${railId}-harness-tab`}
+				hidden={tab !== "harness"}
+			>
+				<SettingsSidebar onNavigate={onNavigate} onHelp={onHelp} />
+			</div>
 			<div className="wb-side__foot">
 				<span className="wb-me" aria-hidden="true">
 					<ClioLogo size={18} />
@@ -172,7 +232,16 @@ export function TaskSidebar({
 				>
 					<Icon name={theme.resolved === "dark" ? "sun" : "moon"} />
 				</button>
-				<NavLink to="/settings/general" className="wb-icon" aria-label="Settings" title="Settings" onClick={onNavigate}>
+				<NavLink
+					to="/settings/general"
+					className="wb-icon"
+					aria-label="Settings"
+					title="Settings"
+					onClick={() => {
+						setTab("harness");
+						onNavigate();
+					}}
+				>
 					<Icon name="gear" />
 				</NavLink>
 			</div>

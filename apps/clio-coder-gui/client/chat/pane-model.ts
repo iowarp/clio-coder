@@ -10,6 +10,7 @@ export const PANE_VIEWS = [
 	{ id: "context", label: "Context window", icon: "layers" },
 	{ id: "usage", label: "Usage and quota", icon: "usage" },
 	{ id: "board", label: "Tasks and decisions", icon: "listChecks" },
+	{ id: "artifacts", label: "Artifacts", icon: "artifacts" },
 	{ id: "changes", label: "Changes", icon: "fileDiff" },
 	{ id: "branches", label: "Branches", icon: "branch" },
 	{ id: "agents", label: "Agents", icon: "fleet" },
@@ -31,7 +32,7 @@ export function paneViewLabel(view: PaneView): string {
 export function migratedPaneView(value: unknown): PaneView {
 	// Session tools moved to the composer's slash palette.
 	if (value === "progress" || value === "details" || value === "tools") return "session";
-	if (value === "artifacts" || value === "files") return "changes";
+	if (value === "files") return "changes";
 	return isPaneView(value) ? value : ROOT_VIEW;
 }
 
@@ -44,6 +45,7 @@ export interface PaneSession {
 	readonly state: SessionSnapshot["state"];
 	readonly turns: SessionSnapshot["turns"];
 	readonly fleet: SessionSnapshot["fleet"];
+	readonly telemetry: SessionSnapshot["telemetry"];
 	readonly timelineTruncated: boolean;
 	/** Tool calls in the order they were made. */
 	readonly tools: readonly TimelineItem[];
@@ -62,6 +64,7 @@ export function selectPaneSession(session: SessionSnapshot): PaneSession {
 		state: session.state,
 		turns: session.turns,
 		fleet: session.fleet,
+		telemetry: session.telemetry,
 		timelineTruncated: session.timelineTruncated,
 		tools: session.timeline.filter(readsPane),
 	};

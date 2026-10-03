@@ -1,10 +1,9 @@
-// The open chat's live numbers, read once and shared: the context ledger and Clio's own usage
-// accounting. The pane, the top bar and the composer all read these hooks, and they share query keys
-// with the drill-ins, so every surface shows the same figure from one request per settled turn.
+// Pushed context and totals share the session snapshot; settled accounting still supplies model and quota details.
 
 import { useQuery } from "@tanstack/react-query";
 import type { ContextLedger } from "../../contracts/context-ledger.js";
 import { routes } from "../../contracts/routes.js";
+import type { LiveUsage } from "../../contracts/session-telemetry.js";
 import type { SessionSnapshot } from "../../contracts/sessions.js";
 import type { SessionUsage } from "../../contracts/usage.js";
 import type { Client } from "../api/client.js";
@@ -25,8 +24,18 @@ export function useSessionCapabilities(client: Client, sessionId: string, open: 
 	});
 }
 
-export function useContextLedger(client: Client, sessionId: string, settled: number, enabled: boolean) {
+export function useSessionTelemetry(client: Client, sessionId: string) {
 	return useQuery({
+		queryKey: ["session", sessionId],
+		queryFn: () => client.call(routes.session, { params: { id: sessionId }, query: {}, body: {} }),
+		enabled: false,
+		select: (snapshot) => snapshot.telemetry ?? null,
+	}).data;
+}
+
+export function useContextLedger(client: Client, sessionId: string, settled: number, enabled: boolean) {
+	const live = useSessionTelemetry(client, sessionId)?.usage?.context;
+	const query = useQuery({
 		queryKey: ["session-context", sessionId, settled],
 		queryFn: () => client.call(routes.sessionContext, { params: { id: sessionId }, query: {}, body: {} }),
 		enabled,
@@ -34,6 +43,7 @@ export function useContextLedger(client: Client, sessionId: string, settled: num
 		// The previous turn's figure stays on screen while the next one is read, so nothing blinks.
 		placeholderData: (previous: ContextLedger | undefined) => previous,
 	});
+	return { ...query, data: live ?? query.data, isPending: !live && query.isPending, error: live ? null : query.error };
 }
 
 export function useSessionUsage(client: Client, sessionId: string, settled: number, enabled: boolean) {
@@ -64,7 +74,17 @@ function dollars(value: number): string {
  * because it also counts what ran beside the conversation; the per-turn sums are the fallback for a
  * session that does not.
  */
-export function sessionSpend(turns: Turns, usage: SessionUsage | undefined): Spend {
+export function sessionSpend(turns: Turns, usage: SessionUsage | undefined, live?: LiveUsage): Spend {
+	if (live?.session) {
+		const totals = live.session;
+		const cost =
+			totals.costProvenance === "unknown"
+				? totals.costUsd > 0
+					? `${dollars(totals.costUsd)}+`
+					: null
+				: `${totals.costProvenance === "estimated" ? "~" : ""}${dollars(totals.costUsd)}`;
+		return { tokens: totals.totalTokens, cost, source: "clio" };
+	}
 	if (usage) {
 		const cost = usage.session.cost;
 		const priced =

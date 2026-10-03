@@ -14,6 +14,7 @@ import { LiveWorkers, workerCount } from "../chat/FleetStrip.js";
 import { foldFleetRuns, isLiveRun } from "../chat/fleet-facts.js";
 import { type HealthRow, type HealthSummary, summarizeHealth } from "../chat/health.js";
 import { Interview } from "../chat/Interview.js";
+import { ProjectTrustNotice } from "../chat/ProjectTrustNotice.js";
 import { PaneContext, type PaneTarget } from "../chat/pane-context.js";
 import { usePaneState } from "../chat/pane-state.js";
 import { routeFacts } from "../chat/route.js";
@@ -321,6 +322,7 @@ function SessionView({ client, id }: { client: Client; id: string }) {
 					</TopBar>
 					<div className="conversation__notices">
 						<SessionHealth summary={health} />
+						<ProjectTrustNotice trust={snapshot.telemetry?.trust} />
 					</div>
 					<div className="conversation__approval">
 						{connection === "Reconnecting…" || connection === "Not connected" || session.error ? (

@@ -1,5 +1,6 @@
 import { type Static, type TSchema, Type } from "typebox";
 import { Value } from "typebox/value";
+import { ArtifactsCapability } from "../../contracts/artifacts.js";
 import { AsideCapability } from "../../contracts/aside.js";
 import type { TurnFile, TurnImage } from "../../contracts/attachments.js";
 import { BoardCapability } from "../../contracts/board.js";
@@ -21,11 +22,13 @@ import { HandoffCapability } from "../../contracts/handoff.js";
 import { INTERVIEW_CANCEL_METHOD, INTERVIEW_REQUEST_METHOD, InterviewCapability } from "../../contracts/interviews.js";
 import { PERMISSION_WITHDRAW_METHOD } from "../../contracts/permissions.js";
 import type { SessionConfig } from "../../contracts/session-config.js";
+import type { SessionTelemetry } from "../../contracts/session-telemetry.js";
 import { ACP_EVENT_KINDS, Usage } from "../../contracts/sessions.js";
 import { UsageCapability } from "../../contracts/usage.js";
 import { type AcpJsonRpcTransport, AcpProtocolError, AcpTimeoutError } from "../clio/http-shims.js";
 import { AppProblem } from "../services/problem.js";
 import { projectConfigOptions } from "./session-config.js";
+import { sessionResultTelemetry } from "./telemetry.js";
 
 const Initialize = Type.Object({ protocolVersion: Type.Literal(1) });
 /**
@@ -76,6 +79,7 @@ function readCapabilities(result: unknown): AgentCapabilities {
 		...maybe("handoff", optional(HandoffCapability, meta["clio-coder/handoff"])),
 		...maybe("fleet", optional(FleetCapability, meta["clio-coder/fleet"])),
 		...maybe("context", optional(ContextCapability, meta["clio-coder/context"])),
+		...maybe("artifacts", optional(ArtifactsCapability, meta["clio-coder/artifacts"])),
 		...maybe("extensions", optional(ExtensionsCapability, meta["clio-coder/extensions"])),
 		...maybe("aside", optional(AsideCapability, meta["clio-coder/aside"])),
 		...maybe("interviews", optional(InterviewCapability, meta["clio-coder/interviews"])),
@@ -175,12 +179,14 @@ export class AcpClient {
 			throw new AppProblem("upstream_acp", "Clio ACP returned an invalid initialize response.");
 		this.capabilities = readCapabilities(result);
 	}
+	telemetry: SessionTelemetry = {};
 	async open(cwd: string, sessionId?: string) {
 		const result = await this.request<unknown>(sessionId ? "session/load" : "session/new", {
 			cwd,
 			mcpServers: [],
 			...(sessionId ? { sessionId } : {}),
 		});
+		this.telemetry = sessionResultTelemetry(result);
 		const mode = record(record(result).modes).currentModeId;
 		const options = projectConfigOptions(record(result).configOptions);
 		const target = record(record(record(result)._meta)["clio-coder/session"]).target;
@@ -206,6 +212,7 @@ export class AcpClient {
 	adopt(previousId: string, nextId: string, result: unknown) {
 		const previous = this.modes.get(previousId);
 		this.modes.delete(previousId);
+		this.telemetry = sessionResultTelemetry(result);
 		const mode = record(record(result).modes).currentModeId;
 		if (mode === "default" || mode === "yolo")
 			this.modes.set(nextId, { level: mode, source: previous?.source ?? "settings" });

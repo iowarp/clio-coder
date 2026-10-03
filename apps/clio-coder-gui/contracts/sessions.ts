@@ -3,6 +3,7 @@ import { Id, Problem } from "./common.js";
 import { FleetItem, HealthItem } from "./fleet-events.js";
 import { Permission } from "./permissions.js";
 import { SessionConfig } from "./session-config.js";
+import { SessionTelemetry } from "./session-telemetry.js";
 
 const closed = { additionalProperties: false };
 const string = Type.String();
@@ -174,6 +175,7 @@ export const SessionSnapshot = Type.Object(
 		recoveredOrphan: Type.Boolean(),
 		label: nullableString,
 		config: Type.Optional(SessionConfig),
+		telemetry: Type.Optional(SessionTelemetry),
 		permissions: Type.Array(Permission, { maxItems: 32 }),
 		fleet: Type.Array(FleetItem, { maxItems: 128 }),
 		// Session health, bounded far tighter than the fleet feed: a context
@@ -192,6 +194,7 @@ const permissionPayload = Type.Object({ ...base, permission: Permission }, close
 const fleetPayload = Type.Object({ ...base, item: FleetItem }, closed);
 const healthPayload = Type.Object({ ...base, item: HealthItem }, closed);
 export const SessionDeltas = {
+	"session.telemetry": Type.Object({ ...base, telemetry: SessionTelemetry }, closed),
 	"turn.started": Type.Object({ ...base, turn: Turn }, closed),
 	"turn.text": textPayload,
 	"turn.thought": textPayload,

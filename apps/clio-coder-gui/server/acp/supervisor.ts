@@ -1,6 +1,8 @@
 import { randomUUID } from "node:crypto";
 import type { Static, TSchema } from "typebox";
 import { Value } from "typebox/value";
+import type { ArtifactRead } from "../../contracts/artifacts.js";
+import { ArtifactList, ArtifactPage } from "../../contracts/artifacts.js";
 import { AsideAnswer, AsideCancelled, AsideDrafts } from "../../contracts/aside.js";
 import {
 	attachmentWeight,
@@ -67,6 +69,7 @@ import { fleetEvent } from "./fleet-events.js";
 import { Interviews } from "./interviews.js";
 import { Permissions, type PermissionTimers } from "./permissions.js";
 import { projectConfigOptions } from "./session-config.js";
+import { sessionUpdateTelemetry } from "./telemetry.js";
 
 /**
  * The text of an ACP tool-call content array, or undefined when the frame
@@ -342,6 +345,10 @@ export class Supervisor {
 			}
 			await this.children.bind(row, boundId);
 			entry.bound = true;
+			this.publish({
+				type: "session.telemetry",
+				payload: { resource: boundId, revision: this.revision(boundId), telemetry: entry.client.telemetry },
+			});
 			if (entry.client.config)
 				this.publish({
 					type: "session.configured",
@@ -447,6 +454,8 @@ export class Supervisor {
 			update = record(params.update),
 			meta = record(params._meta);
 		const metadataUpdate =
+			update.sessionUpdate === "usage_update" ||
+			update.sessionUpdate === "plan" ||
 			update.sessionUpdate === "current_mode_update" ||
 			update.sessionUpdate === "config_option_update" ||
 			update.sessionUpdate === "session_info_update" ||
@@ -457,6 +466,13 @@ export class Supervisor {
 			this.moveTo(entry, params.sessionId);
 		if (params.sessionId !== entry.id)
 			throw new AppProblem("upstream_acp", "ACP update has a different session identity.");
+		if (entry.rebase?.mode === "switch" && !entry.rebase.reset) this.resetTimeline(entry);
+		const telemetry = sessionUpdateTelemetry(update);
+		if (telemetry)
+			this.publish({
+				type: "session.telemetry",
+				payload: { resource: entry.id, revision: this.revision(entry.id), telemetry },
+			});
 		if (update.sessionUpdate === "config_option_update") {
 			const options = projectConfigOptions(update.configOptions);
 			if (options === undefined) throw new AppProblem("upstream_acp", "Clio Coder omitted session configuration.");
@@ -472,7 +488,6 @@ export class Supervisor {
 			});
 		}
 		if (metadataUpdate) return;
-		if (entry.rebase?.mode === "switch" && !entry.rebase.reset) this.resetTimeline(entry);
 		const replay = record(meta["clio-coder/replay"]).turn;
 		if (typeof replay === "number" && Number.isInteger(replay) && replay > 0 && replay !== entry.replay) {
 			if (entry.turnId) this.finish(entry, "end_turn", null, null, null);
@@ -797,6 +812,10 @@ export class Supervisor {
 		this.snapshots.set(nextId, {
 			...emptySession(nextId, previous.workspaceId),
 			...(previous.config ? { config: previous.config } : {}),
+			telemetry: {
+				...(previous.telemetry?.workspace ? { workspace: previous.telemetry.workspace } : {}),
+				...(previous.telemetry?.trust ? { trust: previous.telemetry.trust } : {}),
+			},
 		});
 		this.state(nextId, "open");
 		this.state(parentId, "closed");
@@ -826,6 +845,10 @@ export class Supervisor {
 			throw new AppProblem("upstream_acp", "ACP returned a different session identity.");
 		const nextId = entry.id;
 		entry.client.adopt(parentId, nextId, result);
+		this.publish({
+			type: "session.telemetry",
+			payload: { resource: nextId, revision: this.revision(nextId), telemetry: entry.client.telemetry },
+		});
 		if (entry.replay !== null && entry.turnId) this.finish(entry, "end_turn", null, null, null);
 		await this.children.bind(entry.row, nextId);
 		const options = projectConfigOptions(result.configOptions);
@@ -852,6 +875,18 @@ export class Supervisor {
 		} finally {
 			delete entry.rebase;
 		}
+	}
+	artifacts(id: string) {
+		const entry = this.active(id);
+		if (!entry.client.capabilities.artifacts)
+			throw new AppProblem("conflict", "This Clio build does not expose session artifacts.");
+		return this.projected(id, "_clio-coder/artifacts/list", { sessionId: id }, ArtifactList, BRANCH_TIMEOUT_MS);
+	}
+	artifact(id: string, body: Static<typeof ArtifactRead>) {
+		const entry = this.active(id);
+		if (!entry.client.capabilities.artifacts)
+			throw new AppProblem("conflict", "This Clio build does not expose session artifacts.");
+		return this.projected(id, "_clio-coder/artifacts/read", { sessionId: id, ...body }, ArtifactPage, BRANCH_TIMEOUT_MS);
 	}
 	usage(id: string) {
 		const entry = this.active(id);

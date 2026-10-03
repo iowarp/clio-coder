@@ -2,9 +2,11 @@ import { useQuery } from "@tanstack/react-query";
 import { memo, useId } from "react";
 import type { AgentCapabilities } from "../../contracts/capabilities.js";
 import { routes } from "../../contracts/routes.js";
+import type { LiveUsage } from "../../contracts/session-telemetry.js";
 import type { Client } from "../api/client.js";
 import { formatTime } from "../api/clock.js";
 import { StatusMark } from "../design/status.js";
+import { sessionSpend } from "./session-telemetry.js";
 import { quotaCards, quotaTone, usageRows, usageTotals } from "./session-usage-model.js";
 import "./session-board.css";
 import "./usage-panel.css";
@@ -20,12 +22,14 @@ export const UsagePanel = memo(function UsagePanel({
 	sessionOpen,
 	capabilities,
 	settledTurns,
+	liveUsage,
 }: {
 	client: Client;
 	sessionId: string;
 	sessionOpen: boolean;
 	capabilities: AgentCapabilities | undefined;
 	settledTurns: number;
+	liveUsage?: LiveUsage;
 }) {
 	const supported = !!capabilities?.usage;
 	const id = useId();
@@ -38,6 +42,15 @@ export const UsagePanel = memo(function UsagePanel({
 		// so rows (and the focus a row holds) do not vanish between the two reads.
 		placeholderData: (previous) => previous,
 	});
+	const live = liveUsage?.session ? sessionSpend([], undefined, liveUsage) : null;
+	const totals = live
+		? [
+				{ label: "Cost", value: live.cost ?? "Unpriced" },
+				{ label: "Tokens", value: live.tokens.toLocaleString("en-US") },
+			]
+		: usage.data
+			? usageTotals(usage.data)
+			: [];
 	const quota = usage.data ? quotaCards(usage.data) : null;
 	return (
 		<div className="pane-drill drill usage-panel">
@@ -53,14 +66,18 @@ export const UsagePanel = memo(function UsagePanel({
 				<>
 					<section className="drill__section" aria-label="This conversation's spend">
 						<dl className="usage-panel__stats">
-							{usageTotals(usage.data).map((figure) => (
+							{totals.map((figure) => (
 								<div key={figure.label}>
 									<dt>{figure.label}</dt>
 									<dd>{figure.value}</dd>
 								</div>
 							))}
 						</dl>
-						<p className="drill__note">Clio Coder's own accounting for this conversation.</p>
+						<p className="drill__note">
+							{live
+								? "Live totals. Model details below update when the turn finishes."
+								: "Clio Coder’s own accounting for this conversation."}
+						</p>
 					</section>
 					{usage.data.session.rows.length > 0 ? (
 						<section className="drill__section" aria-labelledby={`${id}-models`}>
