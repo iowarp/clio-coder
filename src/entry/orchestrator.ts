@@ -3948,6 +3948,25 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 				// the terminal footer shows, pushed instead of polled.
 				plan: () => taskBoard.snapshot(),
 				workspace: (cwd) => probeWorkspaceAsync(cwd),
+				// /view's providers, bound to the session this host is running.
+				...(session
+					? {
+							artifacts: {
+								deps: (sessionId: string) => {
+									const meta = session.current();
+									if (!meta || meta.id !== sessionId) return null;
+									return {
+										stateDir: clioStateDir(),
+										dataDir: clioDataDir(),
+										...(dispatch ? { dispatch } : {}),
+										sessionMeta: meta,
+										readSessionEntries: readCurrentSessionEntries,
+										readSystemPrompt: () => chat.liveSystemPrompt(),
+									};
+								},
+							},
+						}
+					: {}),
 				...(extensions
 					? {
 							extensions: {
