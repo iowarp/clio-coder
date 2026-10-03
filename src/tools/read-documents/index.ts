@@ -2,18 +2,20 @@ import type { FileHandle } from "node:fs/promises";
 import { splitLinesForCounting, truncateHead, truncateTail } from "../truncate.js";
 import { truncateUtf8 } from "../truncate-utf8.js";
 import { renderNotebook } from "./notebook.js";
+import { renderPdf } from "./pdf.js";
 import type { DocumentRequest, Rendered } from "./shared.js";
 
 export type { DocumentRequest } from "./shared.js";
 
 /**
- * Document renderers for `read`: Jupyter notebooks. Loaded on first use so the read chunk never carries
+ * Document renderers for `read`: Jupyter notebooks and PDF text through
+ * poppler. Loaded on first use so the read chunk never carries
  * them. Each renderer turns its file into bounded text, and `windowDocument`
  * applies read's offset, limit, tail, and line_numbers to that text, so a
- * notebook pages exactly like a source file.
+ * notebook or a PDF pages exactly like a source file.
  */
 
-export type DocumentKind = "notebook";
+export type DocumentKind = "notebook" | "pdf";
 
 export interface DocumentView {
 	output: string;
@@ -85,13 +87,16 @@ export function windowDocument(text: string, request: DocumentRequest, cap: numb
 
 export async function renderDocument(
 	kind: DocumentKind,
-	_filePath: string,
+	filePath: string,
 	handle: FileHandle,
 	size: number,
-	_request: DocumentRequest,
+	request: DocumentRequest,
 ): Promise<Rendered> {
+	if (request.pages !== undefined && kind !== "pdf") return { error: "pages applies to a PDF" };
 	switch (kind) {
 		case "notebook":
 			return await renderNotebook(handle, size);
+		case "pdf":
+			return await renderPdf(filePath, request);
 	}
 }

@@ -625,11 +625,12 @@ async function readImage(
 	});
 }
 
-type DocumentKind = "notebook";
+type DocumentKind = "notebook" | "pdf";
 
 /** Documents read renders to text before windowing: by extension for notebooks, by magic bytes otherwise. */
-function documentKind(filePath: string, _first: Buffer): DocumentKind | null {
+function documentKind(filePath: string, first: Buffer): DocumentKind | null {
 	if (extname(filePath).toLowerCase() === ".ipynb") return "notebook";
+	if (first.toString("latin1", 0, 5) === "%PDF-") return "pdf";
 	return null;
 }
 
@@ -638,7 +639,7 @@ async function readDocument(
 	filePath: string,
 	handle: FileHandle,
 	file: ReadFileIdentity,
-	request: ReadRequest,
+	request: ReadRequest & { pages?: string },
 	reservation: ObservationReservation,
 	options: ToolInvokeOptions | undefined,
 ): Promise<ToolResult> {
@@ -684,7 +685,7 @@ function locateAdvice(options: ToolInvokeOptions | undefined): string {
 
 export const readTool: ToolSpec = {
 	name: ToolNames.Read,
-	description: `Read a UTF-8 text file or a PNG, JPEG, GIF, or WebP image when the routed model supports vision. Jupyter notebooks render as cells with text outputs (images omitted); offset, limit, tail, and line_numbers then apply to that text. Output is capped at ${DEFAULT_MAX_LINES} lines or ${
+	description: `Read a UTF-8 text file or a PNG, JPEG, GIF, or WebP image when the routed model supports vision. Jupyter notebooks render as cells with text outputs (images omitted) and PDFs as text by page (pages="3-7"; first 50 pages by default); offset, limit, tail, and line_numbers then apply to that text. Output is capped at ${DEFAULT_MAX_LINES} lines or ${
 		DEFAULT_READ_MAX_BYTES / 1024
 	}KB per call; truncated results say how to continue with offset/limit. Files of any size are read through one bounded window, so offset and tail stay cheap; files over 32MB report their line total as N+. Binary or non-UTF-8 files are refused with the failing byte offset. Pass tail=N to read the last N lines (jump to EOF) instead of paging from the top. Set line_numbers=true for citations: each source line is prefixed with its physical 1-based line number and " | "; these labels are not file content.`,
 	parameters: Type.Object({
@@ -699,6 +700,7 @@ export const readTool: ToolSpec = {
 		tail: Type.Optional(
 			Type.Number({ description: "Read the last N lines of the file (jump to EOF). Overrides offset/limit." }),
 		),
+		pages: Type.Optional(Type.String({ description: 'PDF only: page range such as "3", "3-7" or "3-".' })),
 	}),
 	baseActionClass: "read",
 	executionMode: "parallel",
@@ -706,6 +708,7 @@ export const readTool: ToolSpec = {
 		const pathArg = typeof args.path === "string" ? args.path : null;
 		if (!pathArg) return { kind: "error", message: "read: missing path argument" };
 		const filePath = resolveReadPath(pathArg);
+		const pages = typeof args.pages === "string" && args.pages.trim().length > 0 ? args.pages : undefined;
 		const request: ReadRequest = {
 			pathArg,
 			numbered: args.line_numbers === true,
@@ -757,7 +760,14 @@ export const readTool: ToolSpec = {
 				return await readImage(handle, pathArg, file, reservation, options);
 			const kind = documentKind(filePath, first);
 			if (kind !== null) {
-				return await readDocument(kind, filePath, handle, file, request, reservation, options);
+				const documentRequest = {
+					...request,
+					...(pages !== undefined ? { pages } : {}),
+				};
+				return await readDocument(kind, filePath, handle, file, documentRequest, reservation, options);
+			}
+			if (pages !== undefined) {
+				return { kind: "error", message: `read: pages applies to a PDF; ${pathArg} is not one`, details: { file } };
 			}
 			const nul = first.indexOf(0);
 			if (nul >= 0) return refuseBinary(pathArg, nul, file);
