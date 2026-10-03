@@ -9,7 +9,6 @@ import { sessionBuffer } from "../api/sessions.js";
 import { ApprovalBanner, pendingPermission } from "../chat/Approval.js";
 import { ChatTurnView } from "../chat/ChatTurn.js";
 import { Composer, fillComposer } from "../chat/Composer.js";
-import { ComposerRail } from "../chat/ComposerRail.js";
 import { CONTEXT_WARNING_LABEL, placeHealthRows, STARTER_PROMPTS, TRUNCATION_NOTE } from "../chat/chat-turn.js";
 import { LiveWorkers, workerCount } from "../chat/FleetStrip.js";
 import { foldFleetRuns, isLiveRun } from "../chat/fleet-facts.js";
@@ -270,6 +269,21 @@ function SessionView({ client, id }: { client: Client; id: string }) {
 							},
 						}}
 					>
+						{/* The task's own actions sit with its name, not with the view controls at the far end. */}
+						<Menu label="Task actions">
+							<MenuItem icon="pencil" onClick={() => setRenaming(true)}>
+								Rename task
+							</MenuItem>
+							<MenuItem icon="sliders" onClick={() => void navigate(`/settings/advanced?workspace=${snapshot.workspaceId}`)}>
+								Project settings
+							</MenuItem>
+							<MenuItem icon="folder" onClick={() => void navigate(`/workspaces/${snapshot.workspaceId}/sessions`)}>
+								All tasks in {workspaceName}
+							</MenuItem>
+							<MenuItem icon="close" tone="danger" disabled={!canClose || close.isPending} onClick={closeSession}>
+								Close task
+							</MenuItem>
+						</Menu>
 						<Link
 							className="wb-chip"
 							to={`/workspaces/${snapshot.workspaceId}/sessions`}
@@ -303,20 +317,6 @@ function SessionView({ client, id }: { client: Client; id: string }) {
 								ids={ids}
 								onToggle={pane.toggle}
 							/>
-							<Menu label="Task actions">
-								<MenuItem icon="pencil" onClick={() => setRenaming(true)}>
-									Rename task
-								</MenuItem>
-								<MenuItem icon="sliders" onClick={() => void navigate(`/settings/advanced?workspace=${snapshot.workspaceId}`)}>
-									Project settings
-								</MenuItem>
-								<MenuItem icon="folder" onClick={() => void navigate(`/workspaces/${snapshot.workspaceId}/sessions`)}>
-									All tasks in {workspaceName}
-								</MenuItem>
-								<MenuItem icon="close" tone="danger" disabled={!canClose || close.isPending} onClick={closeSession}>
-									Close task
-								</MenuItem>
-							</Menu>
 						</div>
 					</TopBar>
 					<div className="conversation__notices">
@@ -407,7 +407,6 @@ function SessionView({ client, id }: { client: Client; id: string }) {
 							runningTurnId={turn?.status === "running" ? turn.id : null}
 							route={route}
 						/>
-						<ComposerRail client={client} sessionId={snapshot.id} state={snapshot.state} turns={snapshot.turns} />
 					</div>
 					<Interview
 						client={client}

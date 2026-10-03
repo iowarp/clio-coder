@@ -11,6 +11,7 @@ import { useDetailsDismiss } from "../interaction/use-details-dismiss.js";
 import { ClioPulse, PULSE_SIZE } from "../shell/ClioMark.js";
 import { ClioStage } from "../shell/ClioStage.js";
 import { withRoom } from "../shell/capacity.js";
+import { HomeAside } from "../shell/HomeAside.js";
 import { useShell } from "../shell/shell-context.js";
 import { isUntouched } from "../shell/shell-model.js";
 import { TopBar } from "../shell/TopBar.js";
@@ -206,6 +207,7 @@ export function Home({ client }: { client: Client }) {
 			: (setup.data?.message ?? null);
 	return (
 		<>
+			<HomeAside client={client} workspace={list.find((item) => item.id === workspaceId) ?? null} />
 			<TopBar />
 			<div className="newtask">
 				<div className="newtask__inner">

@@ -76,3 +76,8 @@ export function useApplyTheme(): void {
 		document.querySelector('meta[name="theme-color"]')?.setAttribute("content", THEME_COLORS[resolved]);
 	}, [chosen, resolved]);
 }
+
+/** The one-click switch beside Settings: flip whatever the screen shows now to the other theme. */
+export function themeSwitchLabel(resolved: Theme): string {
+	return resolved === "dark" ? "Switch to light theme" : "Switch to dark theme";
+}

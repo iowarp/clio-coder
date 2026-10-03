@@ -13,6 +13,7 @@ import { InlineRename } from "./InlineRename.js";
 import { Menu, MenuItem } from "./Menu.js";
 import { STATE_LABELS, sessionIdFromPath, shortAge, type TaskRow, taskRows } from "./shell-model.js";
 import { type TaskActions, useDeleteTask, useMinuteClock, useRenameTask } from "./tasks.js";
+import { setThemeChoice, themeSwitchLabel, useTheme } from "./theme.js";
 
 const TASKS_PER_PROJECT = 6;
 const PROJECTS_SHOWN = 10;
@@ -36,6 +37,7 @@ export function TaskSidebar({
 	/** Called after any navigation so a mobile drawer can close itself. */
 	onNavigate: () => void;
 }) {
+	const theme = useTheme();
 	countRender("task-sidebar");
 	const location = useLocation();
 	const now = useMinuteClock();
@@ -156,6 +158,15 @@ export function TaskSidebar({
 						{status.label}
 					</span>
 				</span>
+				<button
+					type="button"
+					className="wb-icon"
+					aria-label={themeSwitchLabel(theme.resolved)}
+					title={themeSwitchLabel(theme.resolved)}
+					onClick={() => setThemeChoice(theme.resolved === "dark" ? "light" : "dark")}
+				>
+					<Icon name={theme.resolved === "dark" ? "sun" : "moon"} />
+				</button>
 				<NavLink to="/settings/general" className="wb-icon" aria-label="Settings" title="Settings" onClick={onNavigate}>
 					<Icon name="gear" />
 				</NavLink>

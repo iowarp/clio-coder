@@ -1,4 +1,5 @@
-/* The pane beside the conversation: Progress, Changes, and Clio's deeper views. */
+/* The right sidebar: the Session column and its drill-ins. Docked, it sits in the shell's chrome as
+   the left rail's mirror; narrower, the same content opens as a slide-over. */
 
 .pane {
 	position: relative;
@@ -121,11 +122,12 @@
 	gap: var(--space-3);
 	min-height: 22px;
 }
+/* Section names read like the rail's own labels, so both sidebars speak one language. */
 .pane-card h2 {
 	margin: 0;
-	font: 500 11px / 1.5 var(--font-mono);
-	letter-spacing: var(--tracking-instrument);
-	text-transform: uppercase;
+	font-size: 12px;
+	font-weight: 500;
+	letter-spacing: 0.01em;
 	color: var(--ink-muted);
 }
 .pane-card__open {
@@ -680,4 +682,51 @@
 .turn-changes .turn-changes__more {
 	color: var(--ink-muted);
 	font-size: 12px;
+}
+
+/* ---- docked in the shell's chrome --------------------------------------------------- */
+.wb-aside .pane {
+	height: 100%;
+	border: 0;
+	background: transparent;
+}
+.wb-aside .pane__inner {
+	padding: var(--space-2) var(--space-2) 0 var(--space-1);
+}
+.wb-aside .pane__head {
+	min-height: 40px;
+	margin-bottom: var(--space-2);
+	padding: 0 var(--space-1) 0 var(--space-2);
+}
+.wb-aside .pane__title {
+	font-size: 15px;
+	font-weight: 650;
+	letter-spacing: -0.2px;
+}
+.wb-aside .pane-cards {
+	padding: 0 var(--space-2) var(--space-6) 10px;
+}
+.pane-path {
+	margin: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	direction: rtl;
+	text-align: left;
+	font: 11.5px / 1.4 var(--font-mono);
+	color: var(--ink-muted);
+}
+.pane-mono {
+	font: 12px / 1.4 var(--font-mono);
+}
+.pane-agents a {
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	color: var(--ink);
+	text-decoration: none;
+}
+.pane-agents a:hover {
+	text-decoration: underline;
 }

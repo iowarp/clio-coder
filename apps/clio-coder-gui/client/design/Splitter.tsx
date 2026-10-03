@@ -22,13 +22,13 @@ export const LEFT_SIDEBAR: SplitterSpec = {
 	maxShare: 0.34,
 };
 
-export const TASK_PANE: SplitterSpec = {
-	storageKey: "clio-coder-gui-pane-width",
-	cssVar: "--pane-w",
-	min: 320,
-	max: 720,
-	initial: 400,
-	maxShare: 0.55,
+export const RIGHT_SIDEBAR: SplitterSpec = {
+	storageKey: "clio-coder-gui-aside-width",
+	cssVar: "--wb-aside",
+	min: 280,
+	max: 560,
+	initial: 340,
+	maxShare: 0.4,
 };
 
 const KEY_STEP = 16;

@@ -11,6 +11,11 @@ export interface ShellApi {
 	openHelp(): void;
 	readonly activeWorkspaceId: string | null;
 	readonly starting: boolean;
+	/**
+	 * The right sidebar's body, in the shell's chrome beside the work. A page portals what it knows
+	 * about into it; null on narrow screens and in Settings, where there is no docked column.
+	 */
+	readonly asideSlot: HTMLElement | null;
 }
 
 export const ShellContext = createContext<ShellApi | null>(null);

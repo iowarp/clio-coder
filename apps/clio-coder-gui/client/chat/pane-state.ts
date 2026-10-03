@@ -1,14 +1,15 @@
-// Whether the pane is open and which view it shows, with dismissal kept for the current tab.
+// Whether the pane is open and which view it shows. Docked, it is the shell's right sidebar and its
+// open state is the shell's per-browser preference; as a slide-over on a narrow screen it opens only
+// when asked, for this view.
 
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { ASIDE_DOCK_QUERY, setAsideExpanded, useAsideExpanded } from "../shell/aside-state.js";
 import { type PaneSection, type PaneTarget, paneTargetParts } from "./pane-context.js";
 import { migratedPaneView, type PaneView, ROOT_VIEW } from "./pane-model.js";
 
 const VIEW_KEY = "clio-coder-gui-pane-view";
-const OPEN_KEY = "clio-coder-gui-pane";
 // The previous panel's keys. Read once so an existing preference survives the move.
 const OLD_VIEW_KEY = "clio-coder-gui-session-panel-view";
-const DOCK_QUERY = "(min-width: 1100px)";
 
 function initialView(): PaneView {
 	try {
@@ -18,22 +19,8 @@ function initialView(): PaneView {
 	}
 }
 
-function initialOpen(): boolean {
-	if (typeof matchMedia !== "function" || !matchMedia(DOCK_QUERY).matches) return false;
-	try {
-		return sessionStorage.getItem(OPEN_KEY) !== "closed";
-	} catch {
-		// A docked pane stays visible when storage is unavailable.
-		return true;
-	}
-}
-
-function rememberOpen(open: boolean): void {
-	try {
-		sessionStorage.setItem(OPEN_KEY, open ? "open" : "closed");
-	} catch {
-		// The explicit choice still holds until this view unmounts.
-	}
+function docked(): boolean {
+	return typeof matchMedia === "function" && matchMedia(ASIDE_DOCK_QUERY).matches;
 }
 
 // The section the last show asked for, until the drill that holds it has shown it. The page that
@@ -77,14 +64,27 @@ export interface PaneState {
 
 export function usePaneState(fallbackTrigger: string): PaneState {
 	const [view, setViewState] = useState<PaneView>(initialView);
-	const [open, setOpen] = useState(initialOpen);
+	const expanded = useAsideExpanded();
+	const [wide, setWide] = useState(docked);
+	const [slideOver, setSlideOver] = useState(false);
 	const opener = useRef<string | null>(null);
 	useEffect(() => {
-		const query = matchMedia(DOCK_QUERY);
-		const change = () => setOpen(initialOpen());
+		const query = matchMedia(ASIDE_DOCK_QUERY);
+		const change = () => {
+			setWide(query.matches);
+			setSlideOver(false);
+		};
 		query.addEventListener("change", change);
 		return () => query.removeEventListener("change", change);
 	}, []);
+	const open = wide ? expanded : slideOver;
+	const setOpen = useCallback(
+		(next: boolean) => {
+			if (wide) setAsideExpanded(next);
+			else setSlideOver(next);
+		},
+		[wide],
+	);
 	const storeView = useCallback((next: PaneView) => {
 		setViewState(next);
 		try {
@@ -104,13 +104,12 @@ export function usePaneState(fallbackTrigger: string): PaneState {
 		requestSection(null);
 		const dismissed = document.activeElement;
 		setOpen(false);
-		rememberOpen(false);
 		requestAnimationFrame(() => {
 			const current = document.activeElement;
 			if (current === dismissed || current === document.body || current?.closest(".pane"))
 				document.getElementById(opener.current ?? fallbackTrigger)?.focus();
 		});
-	}, [fallbackTrigger]);
+	}, [fallbackTrigger, setOpen]);
 	const show = useCallback(
 		(target: PaneTarget, trigger: string) => {
 			const { view: next, section } = paneTargetParts(target);
@@ -118,9 +117,8 @@ export function usePaneState(fallbackTrigger: string): PaneState {
 			requestSection(section);
 			storeView(next);
 			setOpen(true);
-			rememberOpen(true);
 		},
-		[storeView],
+		[storeView, setOpen],
 	);
 	const toggle = useCallback(
 		(next: PaneView, trigger: string) => {

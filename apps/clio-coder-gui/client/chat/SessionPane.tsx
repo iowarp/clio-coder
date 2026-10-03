@@ -1,12 +1,13 @@
 import { useQuery } from "@tanstack/react-query";
 import { memo, useEffect, useId, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { routes } from "../../contracts/routes.js";
 import type { Client } from "../api/client.js";
 import { Icon } from "../design/icons.js";
-import { Splitter, TASK_PANE } from "../design/Splitter.js";
 import { KEYBINDINGS, matchesKeybinding } from "../interaction/keybindings.js";
 import { useShortcutLayer } from "../interaction/use-shortcut.js";
 import { countRender } from "../render/render-probe.js";
+import { useShell } from "../shell/shell-context.js";
 import { ChangesView } from "./ChangesView.js";
 import { ContextPanel } from "./ContextPanel.js";
 import { changeCounts, NO_CHANGES, summarizeChanges } from "./changes-model.js";
@@ -48,6 +49,7 @@ export const SessionPane = memo(function SessionPane({
 	const headId = useId();
 	const requested = usePaneSection();
 	const aside = useRef<HTMLElement>(null);
+	const slot = useShell()?.asideSlot ?? null;
 	const dialog = useRef<HTMLDialogElement>(null);
 	const [wide, setWide] = useState(() => typeof window === "undefined" || matchMedia("(min-width: 1100px)").matches);
 	const [visited, setVisited] = useState<ReadonlySet<PaneView>>(() => new Set([view]));
@@ -100,7 +102,7 @@ export const SessionPane = memo(function SessionPane({
 	}, [open, wide, pane?.id]);
 	useEffect(() => {
 		const node = aside.current;
-		if (!open || !wide || !node) return;
+		if (!open || !wide || !slot || !node) return;
 		const dismissKey = (event: KeyboardEvent) => {
 			if (matchesKeybinding(KEYBINDINGS.escape, event)) {
 				event.stopPropagation();
@@ -111,7 +113,7 @@ export const SessionPane = memo(function SessionPane({
 		};
 		node.addEventListener("keydown", dismissKey);
 		return () => node.removeEventListener("keydown", dismissKey);
-	}, [open, wide, onClose, view, onViewChange]);
+	}, [open, wide, slot, onClose, view, onViewChange]);
 
 	if (!pane) return null;
 	const drilled = view !== ROOT_VIEW;
@@ -174,8 +176,14 @@ export const SessionPane = memo(function SessionPane({
 				<h2 className="pane__title" id={`${headId}-title`} tabIndex={-1}>
 					{paneViewLabel(view)}
 				</h2>
-				<button type="button" className="wb-icon" onClick={onClose} aria-label="Close pane" title="Close pane">
-					<Icon name="close" />
+				<button
+					type="button"
+					className="wb-icon"
+					onClick={onClose}
+					aria-label={wide ? "Hide right sidebar" : "Close pane"}
+					title={wide ? "Hide right sidebar (Ctrl/⌘ Shift \\)" : "Close pane"}
+				>
+					<Icon name={wide ? "panelRight" : "close"} />
 				</button>
 			</header>
 			<div className="pane__body">
@@ -187,39 +195,38 @@ export const SessionPane = memo(function SessionPane({
 			</div>
 		</div>
 	);
+	if (wide) {
+		// Docked, the pane is the shell's right sidebar. Until the shell's column exists there is
+		// nothing to draw, and never a modal.
+		if (!slot || !open) return null;
+		return createPortal(
+			<aside className="pane" aria-label="Task sidebar" ref={aside}>
+				{content}
+			</aside>,
+			slot,
+		);
+	}
 	return (
-		<aside
-			className="pane"
-			data-modal={!wide}
-			role={wide ? "complementary" : "presentation"}
-			aria-label={wide ? "Task pane" : undefined}
-			hidden={!open}
-			ref={aside}
-		>
-			{wide ? <Splitter spec={TASK_PANE} edge="start" label="Resize pane" host=".conversation" /> : null}
-			{wide ? (
-				<div className="pane__dialog">{content}</div>
-			) : (
-				<dialog
-					ref={dialog}
-					className="pane__dialog"
-					aria-label="Task pane"
-					onKeyDown={(event) => {
-						if (matchesKeybinding(KEYBINDINGS.sessionPanel, event)) {
-							event.preventDefault();
-							onClose();
-						}
-					}}
-					onCancel={(event) => {
+		<aside className="pane" data-modal="true" role="presentation" hidden={!open} ref={aside}>
+			<dialog
+				ref={dialog}
+				className="pane__dialog"
+				aria-label="Task pane"
+				onKeyDown={(event) => {
+					if (matchesKeybinding(KEYBINDINGS.sessionPanel, event)) {
 						event.preventDefault();
-						// The slide-over steps back from a drill-in first, as the docked pane does.
-						if (view !== ROOT_VIEW) onViewChange(ROOT_VIEW);
-						else onClose();
-					}}
-				>
-					{content}
-				</dialog>
-			)}
+						onClose();
+					}
+				}}
+				onCancel={(event) => {
+					event.preventDefault();
+					// The slide-over steps back from a drill-in first, as the docked pane does.
+					if (view !== ROOT_VIEW) onViewChange(ROOT_VIEW);
+					else onClose();
+				}}
+			>
+				{content}
+			</dialog>
 		</aside>
 	);
 });
@@ -253,6 +260,7 @@ export const PaneToggles = memo(function PaneToggles({
 		[pane, workspaceRoot],
 	);
 	const stat = changeCounts(changes);
+	const docked = useShell()?.asideSlot != null;
 	return (
 		<>
 			<button
@@ -271,18 +279,20 @@ export const PaneToggles = memo(function PaneToggles({
 					</span>
 				) : null}
 			</button>
-			<button
-				id={ids.pane}
-				type="button"
-				className="wb-icon wb-icon--text"
-				aria-pressed={open}
-				aria-label={open ? "Hide task pane" : "Show task pane"}
-				title="Task pane (Ctrl/⌘ Shift \\)"
-				onClick={() => onToggle(view, ids.pane)}
-			>
-				<Icon name="panelRight" />
-				<span>Pane</span>
-			</button>
+			{/* Docked and showing, the sidebar carries its own hide control, as the left rail does. */}
+			{docked && open ? null : (
+				<button
+					id={ids.pane}
+					type="button"
+					className="wb-icon"
+					aria-pressed={open}
+					aria-label={open ? "Hide task sidebar" : "Show task sidebar"}
+					title="Task sidebar (Ctrl/⌘ Shift \\)"
+					onClick={() => onToggle(view, ids.pane)}
+				>
+					<Icon name="panelRight" />
+				</button>
+			)}
 		</>
 	);
 });

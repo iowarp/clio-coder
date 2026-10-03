@@ -13,10 +13,11 @@ import { RouteFocus, SIDEBAR_ID, useSidebarCollapsed } from "./design/navigation
 import { dismissAll, LiveRegions, NoticeToasts, reportProblem, useNotices } from "./design/notifications.js";
 import { PwaBoot } from "./design/pwa.js";
 import { Reconnect } from "./design/reconnect.js";
-import { LEFT_SIDEBAR, Splitter } from "./design/Splitter.js";
+import { LEFT_SIDEBAR, RIGHT_SIDEBAR, Splitter } from "./design/Splitter.js";
 import { appCommands, type PaletteTask } from "./interaction/commands.js";
 import { useLayersActive, useShortcut } from "./interaction/use-shortcut.js";
 import { useSetupStatus } from "./pages/target-onboarding.js";
+import { ASIDE_DOCK_QUERY, toggleAside, useAsideExpanded } from "./shell/aside-state.js";
 import { OpenWorkspaceDialog } from "./shell/OpenWorkspaceDialog.js";
 import { SettingsSidebar } from "./shell/SettingsSidebar.js";
 import { type ShellApi, ShellContext } from "./shell/shell-context.js";
@@ -49,12 +50,27 @@ function usePhone(): boolean {
 	return phone;
 }
 
+function useDocked(): boolean {
+	const [docked, setDocked] = useState(() => typeof matchMedia === "function" && matchMedia(ASIDE_DOCK_QUERY).matches);
+	useEffect(() => {
+		const query = matchMedia(ASIDE_DOCK_QUERY);
+		const change = () => setDocked(query.matches);
+		query.addEventListener("change", change);
+		change();
+		return () => query.removeEventListener("change", change);
+	}, []);
+	return docked;
+}
+
 export function App({ client }: { client: Client }) {
 	useApplyTheme();
 	const queries = useQueryClient();
 	const navigate = useNavigate();
 	const location = useLocation();
 	const phone = usePhone();
+	const docked = useDocked();
+	const asideExpanded = useAsideExpanded();
+	const [asideSlot, setAsideSlot] = useState<HTMLElement | null>(null);
 	const [connection, setConnection] = useState<ConnectionState>(client.token ? "Connecting…" : "Not connected");
 	const [paletteOpen, setPaletteOpen] = useState(false);
 	const [helpOpen, setHelpOpen] = useState(false);
@@ -297,8 +313,20 @@ export function App({ client }: { client: Client }) {
 			openHelp,
 			activeWorkspaceId,
 			starting: actions.launch.busy,
+			asideSlot: docked && mode === "work" ? asideSlot : null,
 		}),
-		[sidebarCollapsed, revealSidebar, startTask, openWorkspace, openHelp, activeWorkspaceId, actions.launch.busy],
+		[
+			sidebarCollapsed,
+			revealSidebar,
+			startTask,
+			openWorkspace,
+			openHelp,
+			activeWorkspaceId,
+			actions.launch.busy,
+			docked,
+			mode,
+			asideSlot,
+		],
 	);
 
 	const collapsed = sidebarCollapsed && !phone;
@@ -330,6 +358,7 @@ export function App({ client }: { client: Client }) {
 			className="wb"
 			data-sidebar={collapsed ? "collapsed" : "expanded"}
 			data-drawer={drawer ? "open" : "closed"}
+			data-aside={docked && mode === "work" && authed && asideExpanded ? "expanded" : "collapsed"}
 			data-mode={mode}
 		>
 			<RouteFocus />
@@ -411,6 +440,13 @@ export function App({ client }: { client: Client }) {
 					<HelpDialog open onClose={() => setHelpOpen(false)} bundledDocsPath={meta.data?.bundledDocsPath} />
 				) : null}
 			</Suspense>
+			{/* The right sidebar, the left rail's mirror in the same chrome. Pages portal into its body. */}
+			{docked && mode === "work" && authed ? (
+				<aside className="wb-aside" aria-label="This task and project" inert={layered} hidden={!asideExpanded}>
+					<Splitter spec={RIGHT_SIDEBAR} edge="start" label="Resize right sidebar" host=".wb" onCollapse={toggleAside} />
+					<div className="wb-aside__slot" ref={setAsideSlot} />
+				</aside>
+			) : null}
 			<LiveRegions />
 			<NoticeToasts />
 		</div>
