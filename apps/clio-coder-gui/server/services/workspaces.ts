@@ -1,11 +1,9 @@
 import { createHash } from "node:crypto";
-import type { Dirent } from "node:fs";
-import { readdir, realpath, stat } from "node:fs/promises";
-import { homedir } from "node:os";
-import { basename, dirname, isAbsolute, join } from "node:path";
+import { realpath, stat } from "node:fs/promises";
+import { basename, isAbsolute } from "node:path";
 import { Type } from "typebox";
 import { Value } from "typebox/value";
-import { type PathCompletion, Workspace, type WorkspaceFolders, type WorkspacePick } from "../../contracts/sessions.js";
+import { type PathCompletion, Workspace, type WorkspacePick } from "../../contracts/sessions.js";
 import { runFolderPicker } from "../process-policy.js";
 import type { AppFiles } from "../state/files.js";
 import type { WorkerHost } from "../worker/host.js";
@@ -59,50 +57,6 @@ export class WorkspaceService {
 		} finally {
 			this.picking = false;
 		}
-	}
-	async browse(requested?: string, hidden = false): Promise<WorkspaceFolders> {
-		const start = requested ?? process.cwd();
-		if (!isAbsolute(start)) throw new AppProblem("validation", "Choose an absolute directory path.");
-		let path: string;
-		try {
-			path = await realpath(start);
-			if (!(await stat(path)).isDirectory()) throw new Error("directory");
-		} catch {
-			throw new AppProblem("validation", "This folder is not available. Choose an existing directory.");
-		}
-		let entries: Dirent[];
-		try {
-			entries = await readdir(path, { withFileTypes: true });
-		} catch {
-			throw new AppProblem("unavailable", "Clio Coder cannot read this folder.");
-		}
-		const candidates = entries
-			.filter((entry) => (entry.isDirectory() || entry.isSymbolicLink()) && (hidden || !entry.name.startsWith(".")))
-			.map((entry) => ({ entry, path: join(path, entry.name) }))
-			.filter(({ path: candidate }) => candidate.length <= 4096);
-		const directories = (
-			await Promise.all(
-				candidates.map(async ({ entry, path: candidate }) => {
-					if (entry.isDirectory()) return { name: entry.name, path: candidate };
-					try {
-						return (await stat(candidate)).isDirectory() ? { name: entry.name, path: candidate } : null;
-					} catch {
-						return null;
-					}
-				}),
-			)
-		)
-			.filter((entry): entry is { name: string; path: string } => entry !== null)
-			.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
-		const parent = dirname(path);
-		return {
-			path,
-			parent: parent === path ? null : parent,
-			homePath: homedir(),
-			launchPath: process.cwd(),
-			directories: directories.slice(0, 200),
-			truncated: directories.length > 200,
-		};
 	}
 	private async fromLedger(): Promise<Workspace[]> {
 		if (!this.ledger) return [];
@@ -158,7 +112,9 @@ export class WorkspaceService {
 		if (path !== row.path) throw new AppProblem("conflict", "Workspace path changed; open its canonical path again.");
 		return row;
 	}
-	async open(path: string): Promise<Workspace> {
+	async open(typed: string): Promise<Workspace> {
+		// The path box completes `~`, drive and WSL share spellings, so opening accepts the same ones.
+		const path = toServerPath(typed.trim(), this.pathHost()) ?? typed;
 		if (!isAbsolute(path)) throw new AppProblem("validation", "Workspace path must be absolute.");
 		let canonical: string;
 		try {

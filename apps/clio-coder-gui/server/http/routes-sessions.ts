@@ -148,7 +148,6 @@ export function sessionRoutes(
 		),
 	);
 	register(app, hub, routes.workspaces, () => workspaces.list());
-	register(app, hub, routes.workspaceFolders, ({ query }) => workspaces.browse(query.path, query.hidden));
 	// Both register before routes.workspace: "complete" and "pick" would otherwise match its :id segment.
 	register(app, hub, routes.workspacePathComplete, ({ query }) => workspaces.complete(query.input, query.hidden));
 	register(app, hub, routes.workspacePick, (_input, context) => workspaces.pick(context.req.raw.signal));

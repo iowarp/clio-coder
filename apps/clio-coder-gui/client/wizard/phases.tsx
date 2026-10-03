@@ -6,8 +6,8 @@ import { useEffect, useId, useRef, useState } from "react";
 import { routes } from "../../contracts/routes.js";
 import { type Client, emptyInput } from "../api/client.js";
 import { Icon } from "../design/icons.js";
-import { WorkspaceBrowser } from "../pages/workspace-browser.js";
 import { ClioPulse, PULSE_SIZE } from "../shell/ClioMark.js";
+import { PathField } from "../shell/PathField.js";
 import { rememberWorkspace } from "../shell/tasks.js";
 import type { SignIn, WizardView } from "./wizard-model.js";
 
@@ -169,15 +169,14 @@ export function WorkspaceStep({ client, onOpened }: { client: Client; onOpened: 
 			>
 				<label htmlFor={field}>Project folder</label>
 				<div className="wizard-field__row">
-					<input
+					<PathField
+						client={client}
 						id={field}
-						data-autofocus
 						className="wizard-mono"
 						value={path}
-						onChange={(event) => setPath(event.target.value)}
-						placeholder="/absolute/path/to/project"
-						autoComplete="off"
-						spellCheck={false}
+						onChange={setPath}
+						onPicked={submit}
+						autoFocusMark
 					/>
 					<button type="submit" className="primary wizard-button" disabled={open.isPending || path.trim() === ""}>
 						{open.isPending ? (
@@ -196,14 +195,6 @@ export function WorkspaceStep({ client, onOpened }: { client: Client; onOpened: 
 					</p>
 				) : null}
 			</form>
-			<WorkspaceBrowser
-				client={client}
-				embedded
-				initialPath={path}
-				onChoose={setPath}
-				onStart={(selected) => submit(selected)}
-				onClose={() => undefined}
-			/>
 		</section>
 	);
 }
