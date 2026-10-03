@@ -15,9 +15,13 @@ import { writeToolOffload } from "./result-shaping.js";
 import { DEFAULT_MAX_LINES, truncateTail } from "./truncate.js";
 import { byteLength, truncateUtf8 } from "./truncate-utf8.js";
 
-// The registry's bounded model projection and operator presentation share this
-// cap. Both are tail-biased for Bash because diagnostics usually land last.
+// Operator presentation cap, tail-biased because diagnostics usually land last.
 const BASH_DISPLAY_MAX_BYTES = 16 * 1024;
+// What a bounded result leaves in the model's context, which every later
+// request resends. A 16 KB tail kept the least useful end of a search: three
+// rg results held 51 KB of campaign T3's transcript. Head and tail keep the
+// first matches and the closing diagnostics, at the 10 KiB Codex CLI uses.
+const BASH_CONTEXT_MAX_BYTES = 10 * 1024;
 export type BashOutputPolicy = "full" | "bounded" | "summary" | "metadata-only";
 
 const BASH_OUTPUT_POLICIES = new Set<BashOutputPolicy>(["full", "bounded", "summary", "metadata-only"]);
@@ -35,7 +39,7 @@ function bashContextDisposition(policy: BashOutputPolicy): ToolResultContextDisp
 		};
 	}
 	if (policy === "metadata-only") return { mode: "metadata-only", maxBytes: BASH_DISPLAY_MAX_BYTES };
-	return { mode: "bounded", maxBytes: BASH_DISPLAY_MAX_BYTES, excerpt: "tail" };
+	return { mode: "bounded", maxBytes: BASH_CONTEXT_MAX_BYTES, excerpt: "head-tail" };
 }
 
 /** Canonical default attached by the builtin catalog and reused by direct registries. */
@@ -249,15 +253,15 @@ function observeToolsNudge(command: string, sessionId: string | undefined): stri
 	observeNudgeSeenSessions.add(key);
 	return (
 		"\n\n[note: prefer the structured observe tools over shell file inspection: read pages files with " +
-		"offset/limit, ls lists directories, grep and find search, code_nav maps symbols. Their results are " +
-		"capped and continuable; keep bash for builds, git, and scripts.]"
+		"offset/limit; grep, find, ls and code_nav, direct or through gateway, search and map symbols. Their " +
+		"results are capped and continuable; keep bash for builds, git, and scripts.]"
 	);
 }
 
 export const bashTool: ToolSpec = {
 	name: ToolNames.Bash,
 	description:
-		"Execute a bash command in a fresh child at the workspace root (or explicit cwd); shell state does not persist across calls. Combined output has a 16 MiB hard cap that stops the child; run_script streams unbounded output. The default timeout is 300s.",
+		"Execute a bash command in a fresh child at the workspace root (or explicit cwd); shell state does not persist across calls. Combined output has a 16 MiB hard cap that stops the child; run_script streams unbounded output. The default timeout is 300s; use panes for long-lived processes or an explicit timeout_ms. Network reachability follows the host and OS isolation; disabling web_fetch does not isolate bash networking.",
 	parameters: Type.Object({
 		command: Type.String({ description: "Bash command to execute." }),
 		cwd: Type.Optional(
