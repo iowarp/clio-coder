@@ -8,6 +8,7 @@ import type { SessionConfig } from "../../contracts/session-config.js";
 import type { SafeSettingsPatch } from "../../contracts/settings-safe.js";
 import type { Client } from "../api/client.js";
 import { formatTime } from "../api/clock.js";
+import { Icon } from "../design/icons.js";
 import { TONE_GLYPHS } from "../design/status.js";
 import { announce } from "../interaction/announcer.js";
 import { useDetailsDismiss } from "../interaction/use-details-dismiss.js";
@@ -28,8 +29,10 @@ function RouteFace({ route }: { route: RouteFacts }) {
 				{TONE_GLYPHS[route.tone]}
 			</span>
 			<span className="route-chip__text">{route.model ?? route.text}</span>
+			{/* A bare level beside a model name reads as nothing in particular, so the level carries its noun. */}
 			{route.thinking ? (
 				<span className="route-chip__thinking" aria-hidden="true">
+					<span className="route-chip__thinking-label">Thinking </span>
 					{route.thinking}
 				</span>
 			) : null}
@@ -71,8 +74,8 @@ export function RoutePicker({
 			<summary className="route-chip" data-tone={route.tone} title={route.title}>
 				<span className="sr-only">Model for the next request: </span>
 				<RouteFace route={route} />
-				<span className="route-chip__caret" aria-hidden="true">
-					▾
+				<span className="route-chip__caret">
+					<Icon name="chevronDown" />
 				</span>
 			</summary>
 			{open ? (

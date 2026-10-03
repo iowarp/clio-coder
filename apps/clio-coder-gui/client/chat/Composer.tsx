@@ -36,6 +36,7 @@ import {
 	type FileAttachment,
 	type ImageAttachment,
 } from "./attachments-model.js";
+import { fitComposerField, initialEnterSends, rememberEnterSends } from "./composer-field.js";
 import {
 	capabilityRefusal,
 	composerKeyAction,
@@ -67,30 +68,11 @@ import {
 	slashEntries,
 	slashQuery,
 } from "./slash-model.js";
+import "./composer-box.css";
 import "./composer.css";
 
 /** Focus handlers keyed by session, so a retry elsewhere in the turn can fill and focus this field. */
 const focusHandlers = new Map<string, () => void>();
-const ENTER_SENDS_KEY = "clio-coder-enter-sends";
-
-function initialEnterSends(): boolean {
-	try {
-		const saved = localStorage.getItem(ENTER_SENDS_KEY);
-		if (saved === "true" || saved === "false") return saved === "true";
-	} catch {
-		// The choice still works for this page when browser storage is unavailable.
-	}
-	return typeof matchMedia !== "function" || matchMedia("(pointer: fine)").matches;
-}
-
-/** Grow with the draft until CSS applies its cap; after that, keep scrolling inside the field. */
-function fitComposerField(field: HTMLTextAreaElement | null): void {
-	if (field === null) return;
-	field.style.height = "auto";
-	field.style.height = `${field.scrollHeight}px`;
-	field.style.overflowY = field.scrollHeight > field.clientHeight ? "auto" : "hidden";
-}
-
 /** Up to four letters of a file's extension, for the tile beside its name. */
 function fileBadge(name: string): string {
 	const extension = /\.([A-Za-z0-9]{1,4})$/u.exec(name)?.[1];
@@ -180,13 +162,7 @@ export const Composer = memo(function Composer({
 		window.addEventListener("resize", fit);
 		return () => window.removeEventListener("resize", fit);
 	}, []);
-	useEffect(() => {
-		try {
-			localStorage.setItem(ENTER_SENDS_KEY, String(enterSends));
-		} catch {
-			// The in-memory choice remains usable.
-		}
-	}, [enterSends]);
+	useEffect(() => rememberEnterSends(enterSends), [enterSends]);
 
 	// Read once per session and keep. Every steering route answers 409 when the
 	// agent announced nothing, so this decides what is rendered at all.
@@ -360,6 +336,17 @@ export const Composer = memo(function Composer({
 			field.current?.focus();
 		},
 	});
+	// What the engine said about one turn's interrupt, stop or queue is not a fact about the next
+	// turn: without this an interrupt refusal stayed under the composer for the rest of the session.
+	const resetInterrupt = interrupt.reset;
+	const resetStop = stop.reset;
+	const resetDrain = drain.reset;
+	// biome-ignore lint/correctness/useExhaustiveDependencies: the turn id is the trigger; the resets are stable.
+	useEffect(() => {
+		resetInterrupt();
+		resetStop();
+		resetDrain();
+	}, [runningTurnId]);
 
 	const steeringUnavailable: "checking" | "failed" | undefined = capabilities.data
 		? undefined
@@ -380,6 +367,11 @@ export const Composer = memo(function Composer({
 	const canAttachFiles = capabilities.data?.embeddedContext === true && sessionState === "open";
 	const canAttach = canAttachImages || canAttachFiles;
 	const attachBlock = attachmentRefusal(attachments, running);
+	// The delivery switch takes the route's place in the row, and only once there is a message to
+	// deliver: an empty field mid-turn offers Stop alone.
+	const steerChoice = running && modes.length > 1 && draft.text.trim() !== "";
+	// The palette reads the whole draft as its query, so it cannot open over a message in progress.
+	const commandsReachable = sessionState === "open" && (draft.text.trim() === "" || slashDraft);
 	// An image goes as an image when the agent takes them; anything else is offered as text.
 	const readPicked = async (file: File): Promise<Attachment> => {
 		if (file.type.startsWith("image/") && canAttachImages) return readAttachment(file, crypto.randomUUID());
@@ -459,6 +451,7 @@ export const Composer = memo(function Composer({
 		<>
 			<form
 				className="composer"
+				data-steering={steerChoice ? "" : undefined}
 				onSubmit={(event) => {
 					event.preventDefault();
 					submit();
@@ -518,8 +511,8 @@ export const Composer = memo(function Composer({
 							? "This conversation is not open"
 							: running
 								? steering.steer || steering.queue
-									? "Add direction for Clio Coder while it works"
-									: "Draft your next message while Clio Coder works"
+									? "Steer Clio Coder while it works"
+									: "Draft your next message"
 								: "Describe a task or ask a question"
 					}
 					onChange={(event) => {
@@ -704,56 +697,25 @@ export const Composer = memo(function Composer({
 					{enterSends ? "Shift+Enter adds a line" : "Enter adds a line · Ctrl/⌘+Enter sends"} · @path adds a project file
 					{attachments.length > 0 ? ` · ${attachmentSummary(attachments)}` : ""}
 				</p>
-				{running && modes.length > 1 ? (
-					<fieldset className="composer__delivery">
-						<legend className="sr-only">Message delivery</legend>
-						<span>Deliver</span>
-						{modes.map((offer) => (
-							<button
-								key={offer.mode}
-								type="button"
-								aria-pressed={draft.mode === offer.mode}
-								title={offer.lands}
-								disabled={send.isPending}
-								onClick={() => {
-									store.chooseMode(offer.mode);
-									if (!send.isPending) send.reset();
-								}}
-							>
-								{offer.label}
-							</button>
-						))}
-					</fieldset>
-				) : null}
 				<div className="composer__actions">
 					<div className="composer__tools">
 						{canAttach ? (
-							<>
-								<input
-									ref={picker}
-									id={pickerId}
-									hidden
-									type="file"
-									{...(canAttachFiles ? {} : { accept: "image/png,image/jpeg,image/gif,image/webp" })}
-									multiple
-									onChange={(event) => {
-										const files = [...(event.target.files ?? [])];
-										event.target.value = "";
-										void attach(files);
-									}}
-								/>
-								<button
-									type="button"
-									className="composer__icon-button composer__attach"
-									onClick={() => picker.current?.click()}
-									aria-label={attachLabel}
-									title={`${attachLabel} to this request. You can also ${canAttachImages ? "paste or " : ""}drop them here.`}
-								>
-									<Icon name="plus" />
-								</button>
-							</>
+							<input
+								ref={picker}
+								id={pickerId}
+								hidden
+								type="file"
+								{...(canAttachFiles ? {} : { accept: "image/png,image/jpeg,image/gif,image/webp" })}
+								multiple
+								onChange={(event) => {
+									const files = [...(event.target.files ?? [])];
+									event.target.value = "";
+									void attach(files);
+								}}
+							/>
 						) : null}
-						<AutonomyPill client={client} sessionId={sessionId} capabilities={capabilities.data} locked={running} />
+						{/* One menu for everything that adds to a message or changes how it is typed. The file
+						    input stays outside it, so a closed menu never unmounts a picker that is open. */}
 						<details
 							className="composer__options"
 							ref={options}
@@ -764,57 +726,70 @@ export const Composer = memo(function Composer({
 								closeOptions();
 							}}
 						>
-							<summary aria-label="Message options" title="Keyboard and message delivery options">
-								<Icon name="sliders" />
-								{running && modes.length > 1 ? (
-									<span className="composer__delivery-label">
-										{modes.find((offer) => offer.mode === draft.mode)?.label ?? modes[0]?.label}
-									</span>
-								) : null}
+							<summary aria-label="Add to message" title="Attach files, run a command, keyboard options">
+								<Icon name="plus" />
 							</summary>
 							<div className="composer__options-panel">
-								<p className="composer__options-title">Message options</p>
+								{canAttach ? (
+									<button
+										type="button"
+										className="composer__menu-item"
+										title={`You can also ${canAttachImages ? "paste or " : ""}drop them on the message box.`}
+										onClick={() => {
+											closeOptions();
+											picker.current?.click();
+										}}
+									>
+										<Icon name="paperclip" />
+										{attachLabel}
+									</button>
+								) : null}
+								<button
+									type="button"
+									className="composer__menu-item"
+									disabled={!commandsReachable}
+									title={
+										commandsReachable
+											? "Clio Coder commands and this task's actions"
+											: "A command is a line of its own. Send or clear the draft first."
+									}
+									onClick={() => {
+										if (options.current) options.current.open = false;
+										setDismissed(null);
+										setActiveIndex(0);
+										store.write("/");
+										placeCaretAtEnd();
+									}}
+								>
+									<Icon name="system" />
+									Commands
+									<kbd>/</kbd>
+								</button>
+								{running && steering.interrupt ? (
+									<button
+										type="button"
+										className="composer__menu-item"
+										disabled={interrupt.isPending}
+										title="Ask Clio Coder to put down what it is doing and take new direction. The turn stays open."
+										onClick={() => {
+											closeOptions();
+											interrupt.mutate();
+										}}
+									>
+										<Icon name="stop" />
+										{interrupt.isPending ? "Interrupting…" : "Interrupt"}
+									</button>
+								) : null}
 								<label className="composer__enter-mode">
 									<input type="checkbox" checked={enterSends} onChange={(event) => setEnterSends(event.target.checked)} />
 									Enter sends
 								</label>
-								<p>{enterSends ? "Shift+Enter adds a new line." : "Enter adds a line. Ctrl/⌘+Enter sends."}</p>
-								<p>Use @path to add a project file to your message.</p>
-								{running && modes.length > 1 ? (
-									<fieldset className="composer__modes">
-										<legend>Deliver this</legend>
-										{modes.map((offer) => (
-											<label key={offer.mode} className="composer__mode" title={offer.lands}>
-												<input
-													type="radio"
-													name={`${fieldId}-mode`}
-													checked={draft.mode === offer.mode}
-													onChange={() => {
-														store.chooseMode(offer.mode);
-														if (!send.isPending) send.reset();
-													}}
-												/>
-												{offer.label}
-											</label>
-										))}
-										<span className="composer__mode-lands">
-											{modes.find((offer) => offer.mode === draft.mode)?.lands ?? modes[0]?.lands}
-										</span>
-									</fieldset>
-								) : null}
-								{running && steering.interrupt ? (
-									<button
-										className="composer__secondary"
-										type="button"
-										disabled={interrupt.isPending}
-										onClick={() => interrupt.mutate()}
-										title="Ask Clio Coder to put down what it is doing and take new direction. The turn stays open."
-									>
-										{interrupt.isPending ? "Interrupting…" : "Interrupt"}
-									</button>
-								) : null}
+								<p className="composer__options-note">
+									{enterSends ? "Shift+Enter adds a line." : "Enter adds a line. Ctrl/⌘+Enter sends."} @path adds a project file.
+								</p>
 							</div>
 						</details>
+						<AutonomyPill client={client} sessionId={sessionId} capabilities={capabilities.data} locked={running} />
 					</div>
 					<div className="composer__route-actions">
 						<RoutePicker
@@ -824,6 +799,28 @@ export const Composer = memo(function Composer({
 							running={running}
 							capabilities={capabilities.data}
 						/>
+						{steerChoice ? (
+							<fieldset className="composer__delivery">
+								<legend className="sr-only">Deliver this message</legend>
+								{modes.map((offer) => (
+									<button
+										key={offer.mode}
+										type="button"
+										aria-pressed={draft.mode === offer.mode}
+										aria-label={offer.label}
+										title={`${offer.label}. ${offer.lands}`}
+										disabled={send.isPending}
+										onClick={() => {
+											store.chooseMode(offer.mode);
+											if (!send.isPending) send.reset();
+										}}
+									>
+										<span className="composer__delivery-full">{offer.label}</span>
+										<span className="composer__delivery-short">{offer.short}</span>
+									</button>
+								))}
+							</fieldset>
+						) : null}
 						{running ? (
 							<button
 								className="composer__icon-button composer__stop composer__stop--live"
@@ -833,7 +830,8 @@ export const Composer = memo(function Composer({
 								aria-label={stop.isPending ? "Stopping…" : "Stop turn"}
 								title="End this turn now. Nothing further is run."
 							>
-								{sessionState === "open" ? <ClioPulse size={PULSE_SIZE.row} /> : <Icon name="stop" />}
+								{sessionState === "open" ? <ClioPulse size={PULSE_SIZE.row} /> : null}
+								<Icon name="stop" />
 								<span aria-hidden="true">{stop.isPending ? "Stopping" : "Stop"}</span>
 							</button>
 						) : null}

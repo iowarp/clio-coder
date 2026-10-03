@@ -21,8 +21,6 @@ import {
 	STEER_TEXT_MAX_BYTES,
 	type SteerMode,
 } from "../../contracts/steering.js";
-import type { KeyEventLike } from "../interaction/keybindings.js";
-import { KEYBINDINGS, matchesKeybinding } from "../interaction/keybindings.js";
 
 /** `routes.turn` bounds its text at this many characters, so the composer refuses past it locally. */
 export const PROMPT_TEXT_MAX_CHARACTERS = 32000;
@@ -297,6 +295,8 @@ export function steeringAffordances(capabilities: AgentCapabilities | null | und
 export interface SteerModeOffer {
 	readonly mode: SteerMode;
 	readonly label: string;
+	/** One word for the switch beside Send on a narrow composer; `label` stays the accessible name. */
+	readonly short: string;
 	readonly lands: string;
 }
 
@@ -305,8 +305,12 @@ export interface SteerModeOffer {
  * their names, so the surface names the consequence rather than the queue.
  */
 const MODE_COPY: Readonly<Record<SteerMode, Omit<SteerModeOffer, "mode">>> = {
-	"next-slot": { label: "Now", lands: "Lands between tool calls, while this turn is still running." },
-	"end-of-turn": { label: "After this turn", lands: "Waits in the follow-up queue until the whole turn has settled." },
+	"next-slot": { label: "Now", short: "Now", lands: "Lands between tool calls, while this turn is still running." },
+	"end-of-turn": {
+		label: "After this turn",
+		short: "After",
+		lands: "Waits in the follow-up queue until the whole turn has settled.",
+	},
 };
 
 export function steerModeOffers(affordances: SteeringAffordances): readonly SteerModeOffer[] {
@@ -433,35 +437,9 @@ export function slashNotice(text: string, catalog: CommandCatalog | undefined): 
 // The Enter policy
 // ---------------------------------------------------------------------------
 
-export type ComposerKeyAction = "send" | "newline" | "ignore";
-
-export interface ComposerKeyContext {
-	/** True while a dialog, the palette or any other layer owns the keyboard. */
-	readonly layerOwned: boolean;
-	/** True mid-IME-composition, where Enter commits a candidate and must never send. */
-	readonly composing: boolean;
-	/** False when plain Enter should add a line, as on touch keyboards or by operator choice. */
-	readonly plainEnterSends?: boolean;
-}
-
-/**
- * Enter follows the operator's composer choice, Shift+Enter inserts a newline,
- * and the declared `send` chord (Ctrl or Cmd + Enter) always sends so the
- * registry's own binding keeps working from the composer.
- *
- * Plain Enter is deliberately NOT a registry entry. `tests/interaction.test.ts`
- * asserts the table never binds a bare printable key, and rightly so: a bare
- * Enter is a composer-local policy that depends on which field has focus, not a
- * document-level chord. The registry keeps the chord; this keeps the policy.
- */
-export function composerKeyAction(event: KeyEventLike, context: ComposerKeyContext): ComposerKeyAction {
-	if (event.key !== "Enter") return "ignore";
-	if (context.composing) return "newline";
-	if (context.layerOwned) return "newline";
-	if (matchesKeybinding(KEYBINDINGS.send, event)) return "send";
-	if (event.shiftKey || event.altKey || event.ctrlKey || event.metaKey) return "newline";
-	return context.plainEnterSends === false ? "newline" : "send";
-}
+// The policy lives with the field's other shared behaviour, where the new-task screen can reach it
+// without loading this module into the shell's first chunk.
+export { type ComposerKeyAction, type ComposerKeyContext, composerKeyAction } from "./composer-field.js";
 
 // ---------------------------------------------------------------------------
 // The queue waiting on the engine

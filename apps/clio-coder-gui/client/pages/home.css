@@ -43,63 +43,9 @@
 	color: var(--ink-muted);
 }
 
-/* The input card shared with the conversation composer. */
+/* The input card is the conversation composer's box (chat/composer-box.css); only its width is set here. */
 .newtask__composer {
-	display: grid;
-	gap: var(--space-2);
 	width: 100%;
-	padding: var(--space-3) var(--space-3) var(--space-2);
-	border: 1px solid var(--line-strong);
-	border-radius: 18px;
-	background: color-mix(in srgb, var(--ink) 4%, var(--surface));
-	transition: border-color var(--motion-fast) var(--ease-standard);
-}
-.newtask__composer:focus-within {
-	border-color: var(--accent);
-}
-.newtask__composer textarea {
-	min-height: 60px;
-	padding: var(--space-2) var(--space-2) 0;
-	border: 0;
-	border-radius: 0;
-	background: transparent;
-	font-size: var(--text-reading);
-	line-height: 1.5;
-	resize: none;
-}
-.newtask__composer textarea:focus-visible {
-	outline: none;
-	box-shadow: none;
-}
-.newtask__row {
-	display: flex;
-	align-items: center;
-	gap: var(--space-2);
-}
-.newtask__spacer {
-	flex: 1;
-}
-.newtask__send {
-	display: inline-grid;
-	place-items: center;
-	flex: none;
-	width: 34px;
-	height: 34px;
-	min-height: 0;
-	padding: 0;
-	border: 0;
-	border-radius: 50%;
-	background: var(--primary-fill);
-	color: var(--on-primary);
-}
-.newtask__send:hover:not(:disabled) {
-	background: var(--accent);
-	color: var(--on-accent);
-}
-.newtask__send:disabled {
-	background: color-mix(in srgb, var(--ink) 14%, transparent);
-	color: var(--ink-muted);
-	opacity: 1;
 }
 .newtask__error {
 	margin: 0;
@@ -218,9 +164,29 @@
 	border-top: 1px solid var(--line);
 	border-radius: 0 0 var(--radius-sm) var(--radius-sm);
 }
+/* In the composer's row the workspace is the same frameless control as the working-freedom chip
+   beside it in a conversation, not the shell's bordered pill. */
 .ws-menu .wb-chip {
-	height: 30px;
+	height: 32px;
+	padding: 4px 10px;
+	border-color: transparent;
+	border-radius: 8px;
+	background: transparent;
 	color: var(--ink);
+}
+.ws-menu .wb-chip:hover,
+.ws-menu[open] .wb-chip {
+	border-color: transparent;
+	background: var(--wb-active);
+}
+.ws-menu .wb-chip .icon {
+	width: var(--icon-md);
+	height: var(--icon-md);
+}
+.ws-menu .wb-chip .icon:last-child {
+	width: var(--icon-sm);
+	height: var(--icon-sm);
+	margin-inline-start: -2px;
 }
 
 /* ---- first run ----------------------------------------------------------------

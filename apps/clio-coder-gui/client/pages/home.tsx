@@ -1,10 +1,11 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router";
 import { routes } from "../../contracts/routes.js";
 import type { Workspace } from "../../contracts/sessions.js";
 import { type Client, emptyInput } from "../api/client.js";
 import { sessionBuffer } from "../api/sessions.js";
+import { composerKeyAction, fitComposerField, initialEnterSends } from "../chat/composer-field.js";
 import { STARTER_PROMPTS } from "../chat/starter-prompts.js";
 import { Icon } from "../design/icons.js";
 import { useDetailsDismiss } from "../interaction/use-details-dismiss.js";
@@ -16,6 +17,7 @@ import { useShell } from "../shell/shell-context.js";
 import { isUntouched } from "../shell/shell-model.js";
 import { TopBar } from "../shell/TopBar.js";
 import { rememberWorkspace } from "../shell/tasks.js";
+import "../chat/composer-box.css";
 import "./home.css";
 import { setupLink, useSetupStatus } from "./target-onboarding.js";
 
@@ -189,12 +191,7 @@ export function Home({ client }: { client: Client }) {
 		if (window.matchMedia("(pointer: fine)").matches) field.current?.focus();
 	}, []);
 	// biome-ignore lint/correctness/useExhaustiveDependencies: the text is the resize trigger; the DOM read happens in the callback.
-	useEffect(() => {
-		const node = field.current;
-		if (!node) return;
-		node.style.height = "auto";
-		node.style.height = `${Math.min(node.scrollHeight, 320)}px`;
-	}, [text]);
+	useLayoutEffect(() => fitComposerField(field.current), [text]);
 	const needsSetup = setup.isSuccess && !ready;
 	const needsWorkspace = workspaces.isSuccess && list.length === 0;
 	const onboarding = needsSetup || needsWorkspace;
@@ -244,8 +241,10 @@ export function Home({ client }: { client: Client }) {
 						/>
 					) : (
 						<>
+							{/* The conversation composer's box (chat/composer-box.css) with the one control a task
+							    needs before it exists: where it runs. The rest of the row arrives with the session. */}
 							<form
-								className="newtask__composer"
+								className="composer newtask__composer"
 								onSubmit={(event) => {
 									event.preventDefault();
 									submit();
@@ -257,34 +256,48 @@ export function Home({ client }: { client: Client }) {
 								<textarea
 									id={fieldId}
 									ref={field}
-									rows={2}
+									className="composer__field"
+									rows={1}
 									value={text}
 									placeholder="Describe a task or ask a question"
 									onChange={(event) => setText(event.target.value)}
 									onKeyDown={(event) => {
-										if (event.key !== "Enter" || event.shiftKey || event.nativeEvent.isComposing) return;
-										if (event.ctrlKey || event.metaKey || window.matchMedia("(pointer: fine)").matches) {
-											event.preventDefault();
-											submit();
-										}
+										if (event.key !== "Enter") return;
+										// The same Enter policy and stored preference as the conversation composer.
+										const action = composerKeyAction(
+											{
+												key: event.key,
+												altKey: event.altKey,
+												ctrlKey: event.ctrlKey,
+												metaKey: event.metaKey,
+												shiftKey: event.shiftKey,
+											},
+											{ layerOwned: false, composing: event.nativeEvent.isComposing, plainEnterSends: initialEnterSends() },
+										);
+										if (action !== "send") return;
+										event.preventDefault();
+										submit();
 									}}
 								/>
-								<div className="newtask__row">
-									<WorkspaceMenu
-										workspaces={list}
-										value={workspaceId}
-										onChange={setChosen}
-										onOpen={() => shell?.openWorkspace()}
-									/>
-									<span className="newtask__spacer" />
-									<button
-										className="newtask__send"
-										type="submit"
-										disabled={!canSend}
-										aria-label={send.isPending ? "Starting task…" : "Start task"}
-									>
-										{send.isPending ? <ClioPulse size={PULSE_SIZE.row} /> : <Icon name="arrowUp" />}
-									</button>
+								<div className="composer__actions">
+									<div className="composer__tools">
+										<WorkspaceMenu
+											workspaces={list}
+											value={workspaceId}
+											onChange={setChosen}
+											onOpen={() => shell?.openWorkspace()}
+										/>
+									</div>
+									<div className="composer__route-actions">
+										<button
+											className="composer__submit primary"
+											type="submit"
+											disabled={!canSend}
+											aria-label={send.isPending ? "Starting task…" : "Start task"}
+										>
+											{send.isPending ? <ClioPulse size={PULSE_SIZE.row} /> : <Icon name="arrowUp" />}
+										</button>
+									</div>
 								</div>
 							</form>
 							{send.error ? (

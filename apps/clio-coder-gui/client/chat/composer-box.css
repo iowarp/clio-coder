@@ -1,0 +1,132 @@
+/* The composer's box: the raised sheet, the field that grows inside it, the one row of controls
+   under the field, and Send. The conversation composer (Composer.tsx) and the new-task screen
+   (pages/home.tsx) are the same object, so both take it from here; everything a conversation adds
+   to the row is in composer.css. Every colour is a token from client/design/tokens.css. */
+
+/* The composer is the one raised object on the page: a paler sheet with a seated shadow in light, a
+   lighter tone in dark. Focus draws the accent outline and a soft halo of the same teal. */
+.composer {
+	position: relative;
+	/* The row below the field lays itself out by the composer's own width, not the window's: a pane
+	   or a sidebar narrows it as surely as a phone does. Containment makes this a stacking context,
+	   so it takes the level its panels used to hold on their own. */
+	container: composer / inline-size;
+	z-index: 6;
+	display: grid;
+	gap: var(--space-1);
+	margin-top: 0;
+	padding: var(--space-3) var(--space-3) var(--space-2) var(--space-4);
+	background: var(--raised);
+	border: 1px solid var(--line-float);
+	border-radius: 18px;
+	box-shadow: var(--shadow-raised);
+	transition:
+		border-color var(--motion-fast) var(--ease-standard),
+		box-shadow var(--motion-fast) var(--ease-standard);
+}
+.composer:focus-within {
+	border-color: var(--accent);
+	box-shadow:
+		var(--shadow-raised),
+		0 0 0 3px color-mix(in srgb, var(--accent) 16%, transparent);
+}
+.composer__label {
+	font-size: var(--text-meta);
+	color: var(--ink-muted);
+}
+.composer__field {
+	width: 100%;
+	resize: none;
+	/* One line at rest. `fitComposerField` grows it with the draft up to the cap below. */
+	max-height: min(14rem, 28dvh);
+	overflow-y: hidden;
+	border: 0;
+	border-radius: var(--radius-sm);
+	padding: var(--space-2) 0;
+	font: inherit;
+	font-size: var(--text-reading);
+	line-height: var(--leading-body);
+	color: var(--ink);
+	background: transparent;
+}
+/* Focus changes the boundary of the unified input; the field has no second inset frame.
+   Forced colours retain the browser's own field outline. */
+@media (forced-colors: none) {
+	.composer__field:focus-visible {
+		outline: none;
+		box-shadow: none;
+	}
+}
+.composer__field:disabled {
+	color: var(--ink-subtle);
+	background: transparent;
+}
+/* A placeholder is a hint, never content: it stays on its one line and gives way to an ellipsis, so
+   a narrow composer does not rest two lines tall on words nobody typed. */
+.composer__field::placeholder {
+	overflow: hidden;
+	white-space: nowrap;
+	text-overflow: ellipsis;
+}
+
+.composer__actions {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: var(--space-2);
+	min-width: 0;
+}
+.composer__tools,
+.composer__route-actions {
+	display: flex;
+	align-items: center;
+	gap: var(--space-1);
+	min-width: 0;
+}
+.composer__tools {
+	flex: none;
+}
+.composer__route-actions {
+	flex: 1;
+	justify-content: flex-end;
+}
+.composer__submit.primary {
+	display: grid;
+	place-items: center;
+	flex: none;
+	width: 34px;
+	min-height: 34px;
+	height: 34px;
+	padding: 0;
+	border: 0;
+	border-radius: 50%;
+	background: var(--primary-fill);
+	color: var(--on-primary);
+	cursor: pointer;
+	transition:
+		background-color var(--motion-fast) var(--ease-standard),
+		color var(--motion-fast) var(--ease-standard),
+		box-shadow var(--motion-fast) var(--ease-standard);
+}
+.composer__submit.primary:hover:not(:disabled) {
+	background: color-mix(in srgb, var(--primary-fill) 86%, var(--ink));
+	color: var(--on-primary);
+}
+/* Nothing to send: an empty ring, so the filled teal means exactly one thing. */
+.composer__submit.primary:disabled {
+	background: transparent;
+	color: var(--ink-muted);
+	box-shadow: inset 0 0 0 1px var(--line-float);
+	cursor: not-allowed;
+	opacity: 1;
+}
+.composer__submit .icon {
+	width: var(--icon-lg);
+	height: var(--icon-lg);
+}
+
+@media (max-width: 650px) {
+	.composer {
+		padding-inline: var(--space-3);
+	}
+}

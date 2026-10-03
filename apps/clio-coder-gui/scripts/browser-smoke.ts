@@ -252,13 +252,9 @@ try {
 		assert.equal(await page.locator("footer").count(), 0);
 		const header = await page.locator(".wb-bar").boundingBox();
 		assert.ok(header && header.height <= 60);
-		assert.equal(
-			await page
-				.locator(".wb-brand img")
-				.first()
-				.evaluate((image) => (image as HTMLImageElement).naturalWidth > 0),
-			true,
-		);
+		// The brand is the drawn Clio mark, an inline SVG that animates while a task works.
+		const brand = await page.locator(".wb-brand svg").first().boundingBox();
+		assert.ok(brand !== null && brand.width > 0, "the brand mark is drawn");
 		assert.equal(await page.evaluate(() => localStorage.getItem("clio-coder-gui-theme")), null);
 		await page.emulateMedia({ colorScheme: "dark" });
 		assert.equal(await page.locator("html").getAttribute("data-theme"), null);
@@ -778,7 +774,8 @@ try {
 			return {
 				pageScrolls: (document.scrollingElement?.scrollHeight ?? 0) > innerHeight + 2,
 				mainScrolls: !!main && (main.scrollTop !== 0 || main.scrollLeft !== 0),
-				transcriptScrolls: !!transcript && transcript.scrollHeight > transcript.clientHeight,
+				// The transcript owns scrolling whether or not this fixture's content happens to overflow it.
+				transcriptScrolls: !!transcript && ["auto", "scroll"].includes(getComputedStyle(transcript).overflowY),
 				headerVisible: !!header && header.getBoundingClientRect().top >= 0 && header.getBoundingClientRect().height > 0,
 				composerVisible: !!composer && composer.getBoundingClientRect().bottom <= innerHeight,
 			};
@@ -821,7 +818,7 @@ try {
 		const pane = page.locator(".pane:not([hidden])");
 		// The pane docks open from 1100px; narrower it is a modal slide-over behind the top bar's toggle.
 		async function openPane() {
-			if (!(await pane.count())) await page.getByRole("button", { name: "Show task pane", exact: true }).click();
+			if (!(await pane.count())) await page.getByRole("button", { name: "Show task sidebar", exact: true }).click();
 			await pane.locator(".pane__body").waitFor();
 			const back = pane.getByRole("button", { name: "Back to Session", exact: true });
 			if (await back.count()) await back.click();
@@ -834,7 +831,8 @@ try {
 		}
 		async function closePane() {
 			if (!(await pane.count())) return;
-			await pane.getByRole("button", { name: "Close pane", exact: true }).click();
+			// Docked, the sidebar hides itself like the rail; as a slide-over it closes.
+			await pane.getByRole("button", { name: /^(Hide right sidebar|Close pane)$/ }).click();
 			await pane.waitFor({ state: "detached" });
 		}
 		await openPane();
@@ -1053,7 +1051,10 @@ try {
 		await closePane();
 		// An image and a text file ride a request when the agent announces image prompts and embedded
 		// context: attach both, see them listed, send, see each counted. A binary is refused by name.
+		// Attaching is the first row of the composer's + menu.
+		await page.locator(".composer__options > summary").click();
 		await page.getByRole("button", { name: "Attach files", exact: true }).waitFor();
+		await page.keyboard.press("Escape");
 		const picker = page.locator('.composer input[type="file"]');
 		await picker.setInputFiles({
 			name: "fixture.png",
@@ -1184,9 +1185,8 @@ try {
 		// Mid-turn steering from the composer: queue a message for after the turn, see it listed,
 		// take it back into the field, then hear the engine's refusal to interrupt as a sentence.
 		await page.getByLabel("Message Clio Coder", { exact: true }).fill("Then summarise it.");
-		await page.locator(".composer__options > summary").click();
-		await page.getByLabel("After this turn", { exact: true }).check();
-		await page.keyboard.press("Escape");
+		// The delivery switch sits beside Send once there is a message to deliver.
+		await page.locator(".composer__delivery").getByRole("button", { name: "After this turn", exact: true }).click();
 		await page.locator(".composer__submit").click();
 		await page.locator(".composer__queue-row").getByText("Then summarise it.", { exact: true }).waitFor();
 		await check("composer-queue");

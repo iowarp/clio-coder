@@ -1,141 +1,63 @@
-/* The composer, the per-message action row and the outcome footer. Every colour
-   is a token from client/design/tokens.css; nothing here names a raw value, and
-   no state is carried by colour alone. */
+/* The conversation composer's controls, the per-message action row and the outcome footer. The box
+   itself, its field, its row and Send are in composer-box.css, which the new-task screen shares.
+   Every colour is a token from client/design/tokens.css; nothing here names a raw value, and no
+   state is carried by colour alone. */
 
-.composer {
-	position: relative;
-	display: grid;
-	gap: var(--space-1);
-	margin-top: 0;
-	padding: var(--space-3) var(--space-3) var(--space-2) var(--space-4);
-	background: color-mix(in srgb, var(--ink) 4%, var(--surface));
-	border: 1px solid var(--line-strong);
-	border-radius: 18px;
-	box-shadow: var(--shadow-none);
-	transition: border-color var(--motion-fast) var(--ease-standard);
-}
-.composer:focus-within {
-	border-color: var(--accent);
-}
-.composer__label {
-	font-size: var(--text-meta);
-	color: var(--ink-muted);
-}
-.composer__field {
-	width: 100%;
-	resize: none;
-	min-height: 64px;
-	max-height: min(14rem, 28dvh);
-	overflow-y: hidden;
-	border: 0;
-	border-radius: var(--radius-sm);
-	padding: var(--space-2) 0;
-	font: inherit;
-	font-size: var(--text-reading);
-	line-height: var(--leading-body);
-	color: var(--ink);
-	background: transparent;
-}
-/* Focus changes the boundary of the unified input; the field has no second inset frame.
-   Forced colours retain the browser's own field outline. */
-@media (forced-colors: none) {
-	.composer__field:focus-visible {
-		outline: none;
-		box-shadow: none;
-	}
-}
-.composer__field:disabled {
-	color: var(--ink-subtle);
-	background: transparent;
-}
+/* The delivery choice is one control with two positions, so its buttons are joined into a single
+   segmented switch; the chosen side takes the accent wash and the accent edge. */
 .composer__delivery {
 	display: flex;
+	flex: none;
 	align-items: center;
-	flex-wrap: wrap;
-	gap: var(--space-1);
+	gap: 0;
+	min-width: 0;
 	font-size: var(--text-exact);
 	color: var(--ink-muted);
 	border: 0;
 	margin: 0;
 	padding: 0;
 }
-.composer__delivery > span {
-	margin-inline-end: var(--space-2);
+.composer__delivery-short {
+	display: none;
 }
 .composer__delivery button {
-	padding: var(--space-1) var(--space-2);
-	border: 1px solid transparent;
-	border-radius: var(--radius-sm);
+	position: relative;
+	min-height: 28px;
+	padding: 0 var(--space-3);
+	border: 1px solid var(--line-float);
+	border-radius: 0;
+	white-space: nowrap;
 	background: transparent;
+	color: var(--ink-muted);
 	font-size: inherit;
+	font-weight: 500;
+}
+.composer__delivery button + button {
+	margin-inline-start: -1px;
+}
+.composer__delivery button:first-of-type {
+	border-start-start-radius: var(--radius-sm);
+	border-end-start-radius: var(--radius-sm);
+}
+.composer__delivery button:last-of-type {
+	border-start-end-radius: var(--radius-sm);
+	border-end-end-radius: var(--radius-sm);
+}
+.composer__delivery button:hover:not(:disabled) {
+	color: var(--ink);
 }
 .composer__delivery button[aria-pressed="true"] {
+	z-index: 1;
 	border-color: var(--accent);
 	color: var(--accent);
 	background: var(--accent-soft);
 }
 
-/* Mid-turn delivery. The two modes are not interchangeable, so the chosen one
-   states where it lands rather than leaving the operator to infer it. */
-.composer__modes {
-	display: flex;
-	flex-wrap: wrap;
-	align-items: baseline;
-	gap: var(--space-2) var(--space-4);
+/* The global `details` rule gives every disclosure a block margin; in this row it made the row 24px
+   taller than its tallest control. */
+.composer__options,
+.route-picker {
 	margin: 0;
-	padding: var(--space-2) var(--space-3);
-	border: 1px solid var(--line);
-	border-radius: var(--radius-md);
-	background: var(--well);
-}
-.composer__modes legend {
-	font-size: var(--text-instrument);
-	letter-spacing: var(--tracking-instrument);
-	text-transform: uppercase;
-	color: var(--ink-muted);
-	padding-inline: var(--space-1);
-}
-.composer__mode {
-	display: inline-flex;
-	flex: none;
-	align-items: center;
-	gap: var(--space-2);
-	font-size: var(--text-meta);
-	color: var(--ink);
-	white-space: nowrap;
-}
-/* The global field rule stretches every input; a radio must stay its own size. */
-.composer__mode input {
-	flex: none;
-	inline-size: auto;
-	margin: 0;
-}
-.composer__mode-lands {
-	flex: 1 1 24ch;
-	font-size: var(--text-exact);
-	color: var(--ink-muted);
-}
-
-.composer__actions {
-	display: flex;
-	align-items: center;
-	justify-content: space-between;
-	gap: var(--space-2);
-	min-width: 0;
-}
-.composer__tools,
-.composer__route-actions {
-	display: flex;
-	align-items: center;
-	gap: var(--space-1);
-	min-width: 0;
-}
-.composer__tools {
-	flex: none;
-}
-.composer__route-actions {
-	flex: 1;
-	justify-content: flex-end;
 }
 .composer__icon-button,
 .composer__options > summary {
@@ -158,9 +80,14 @@
 	background: var(--wb-active);
 	color: var(--ink);
 }
-.composer__icon-button .icon {
-	width: 18px;
-	height: 18px;
+.composer__icon-button .icon,
+.composer__options > summary .icon {
+	width: var(--icon-md);
+	height: var(--icon-md);
+}
+.composer__icon-button:active:not(:disabled),
+.composer__options > summary:active {
+	background: var(--wb-active);
 }
 .composer__options > summary {
 	gap: var(--space-2);
@@ -169,42 +96,95 @@
 .composer__options > summary::-webkit-details-marker {
 	display: none;
 }
-.composer__delivery-label {
-	font-size: var(--text-meta);
-	white-space: nowrap;
+/* Every panel that opens from the composer row is the same sheet: the raised ground, the float line,
+   one radius, one shadow, and one short rise from the row it belongs to. */
+.composer__options-panel,
+.route-picker__panel,
+.autonomy__panel {
+	border: 1px solid var(--line-float);
+	border-radius: var(--radius-lg);
+	background: var(--raised);
+	box-shadow: var(--shadow-panel);
+	animation: composer-panel-open var(--motion-fast) var(--ease-standard);
 }
+@keyframes composer-panel-open {
+	from {
+		opacity: 0;
+		transform: translateY(4px);
+	}
+}
+/* The + menu: the rows of the shell's own menus (`.wb-menu__item`), then the one typing preference
+   under a rule, because it is a setting and the rows above it are actions. */
 .composer__options-panel {
 	position: absolute;
 	left: 0;
 	bottom: calc(100% + var(--space-2));
 	z-index: 6;
 	display: grid;
-	gap: var(--space-3);
-	width: min(24rem, 100%);
+	gap: 1px;
+	width: min(17rem, 100%);
 	max-height: 70dvh;
 	overflow: auto;
-	padding: var(--space-4);
-	border: 1px solid var(--line);
-	border-radius: var(--radius-lg);
-	background: var(--overlay);
-	box-shadow: var(--shadow-panel);
+	padding: 5px;
 	font-size: var(--text-meta);
 	color: var(--ink-muted);
 }
-.composer__options-panel p {
-	margin: 0;
-}
-.composer__options-title {
-	font-weight: 600;
+.composer__menu-item {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	width: 100%;
+	min-height: 32px;
+	padding: 0 10px;
+	border: 0;
+	border-radius: var(--radius-sm);
+	background: transparent;
 	color: var(--ink);
+	text-align: left;
+	font-size: var(--text-meta);
+	white-space: nowrap;
+}
+.composer__menu-item:hover:not(:disabled) {
+	background: var(--wb-hover);
+}
+.composer__menu-item:active:not(:disabled) {
+	background: var(--wb-active);
+}
+.composer__menu-item:disabled {
+	color: var(--ink-muted);
+	cursor: not-allowed;
+}
+.composer__menu-item .icon {
+	flex: none;
+	width: var(--icon-md);
+	height: var(--icon-md);
+	color: var(--ink-muted);
+}
+.composer__menu-item:hover:not(:disabled) .icon {
+	color: var(--ink);
+}
+.composer__menu-item kbd {
+	margin-inline-start: auto;
+	color: var(--ink-muted);
+	font-size: 11.5px;
 }
 .composer__enter-mode {
-	display: inline-flex;
+	display: flex;
 	align-items: center;
-	gap: var(--space-2);
-	min-height: 44px;
+	gap: 10px;
+	min-height: 32px;
+	margin-top: 5px;
+	padding: 5px 10px 0;
+	border-top: 1px solid var(--line);
 	color: var(--ink);
 	cursor: pointer;
+}
+.composer__options-note {
+	margin: 0;
+	padding: 0 10px 5px;
+	font-size: var(--text-exact);
+	line-height: var(--leading-body);
+	color: var(--ink-muted);
 }
 /* The global field rule stretches inputs; the preference checkbox keeps its own size. */
 .composer__enter-mode input {
@@ -231,6 +211,8 @@
 .route-chip__glyph {
 	flex: none;
 	font-family: var(--font-mono);
+	font-size: var(--text-body);
+	line-height: 1;
 }
 .route-chip[data-tone="success"] .route-chip__glyph {
 	color: var(--status-success-fg);
@@ -247,10 +229,12 @@
 	text-overflow: ellipsis;
 	color: var(--ink);
 }
+/* The level sits behind a hairline with its noun, so "off" is never read as the model's state. */
 .route-chip__thinking {
 	flex: none;
+	padding-inline-start: var(--space-2);
+	border-inline-start: 1px solid var(--line-float);
 	color: var(--ink-muted);
-	text-transform: capitalize;
 }
 .route-picker {
 	display: flex;
@@ -260,8 +244,8 @@
 .route-picker > summary {
 	align-items: center;
 	min-height: 32px;
-	max-width: 24rem;
-	padding: 4px 10px;
+	max-width: 26rem;
+	padding: 4px 6px 4px 10px;
 	border: 0;
 	border-radius: 8px;
 	cursor: pointer;
@@ -279,8 +263,13 @@
 	background: var(--wb-active);
 }
 .route-chip__caret {
+	display: inline-flex;
 	flex: none;
-	font-size: var(--text-exact);
+	margin-inline-start: -2px;
+}
+.route-chip__caret .icon {
+	width: var(--icon-sm);
+	height: var(--icon-sm);
 }
 /* The panel hangs above the whole composer, right-aligned, so it never runs off a narrow screen. */
 .route-picker__panel {
@@ -294,10 +283,6 @@
 	max-height: min(70dvh, 36rem);
 	overflow: auto;
 	padding: var(--space-4) var(--space-5);
-	border: 1px solid var(--line-strong);
-	border-radius: var(--radius-lg);
-	background: var(--overlay);
-	box-shadow: var(--shadow-panel);
 	font-size: var(--text-meta);
 	color: var(--ink);
 }
@@ -356,7 +341,7 @@
 .composer__secondary:hover:not(:disabled) {
 	background: var(--paper);
 }
-.composer__submit.primary,
+/* Stop is the send button's twin: the same round seat in the same place. */
 .composer__stop {
 	display: grid;
 	place-items: center;
@@ -367,28 +352,13 @@
 	padding: 0;
 	border: 0;
 	border-radius: 50%;
-	cursor: pointer;
-}
-.composer__submit.primary {
-	background: var(--primary-fill);
-	color: var(--on-primary);
-}
-.composer__stop {
 	background: var(--ink);
 	color: var(--paper);
-}
-.composer__submit.primary:hover:not(:disabled) {
-	background: var(--accent);
-	color: var(--on-accent);
+	cursor: pointer;
 }
 .composer__stop:hover:not(:disabled) {
 	background: var(--ink-muted);
 	color: var(--paper);
-}
-.composer__submit.primary:disabled {
-	background: color-mix(in srgb, var(--ink) 14%, transparent);
-	color: var(--ink-muted);
-	opacity: 1;
 }
 /* A turn is running: the stop control carries the Clio spinner and the word, not a bare square. */
 .composer__stop.composer__stop--live {
@@ -408,12 +378,13 @@
 	background: var(--wb-hover);
 	color: var(--ink);
 }
-.composer__submit .icon,
 .composer__stop .icon {
-	width: 18px;
-	height: 18px;
+	width: var(--icon-lg);
+	height: var(--icon-lg);
 }
-.composer__submit:disabled,
+.composer__stop--live .clio-pulse + .icon {
+	display: none;
+}
 .composer__secondary:disabled,
 .composer__icon-button:disabled {
 	cursor: not-allowed;
@@ -494,9 +465,11 @@
 		transition: none;
 	}
 }
+/* The same quiet shape as the copy action it sits beside: no frame until it is pointed at. */
 .message-actions__button {
-	border: 1px solid var(--line);
-	border-radius: var(--radius-xs);
+	min-height: 0;
+	border: 1px solid transparent;
+	border-radius: var(--radius-sm);
 	background: transparent;
 	padding: var(--space-1) var(--space-2);
 	font: inherit;
@@ -504,9 +477,9 @@
 	color: var(--ink-muted);
 	cursor: pointer;
 }
-.message-actions__button:hover {
+.message-actions__button:hover:not(:disabled) {
 	color: var(--ink);
-	border-color: var(--line-strong);
+	background: var(--well);
 }
 
 /* The outcome footer. The tone is supplementary; StatusMark carries the glyph
@@ -580,25 +553,24 @@
 	}
 }
 
-@media (max-width: 650px) {
-	.composer {
-		padding-inline: var(--space-3);
+/* The row, by the composer's own width. Each step gives up the least important words first and
+   never a control: the route's thinking level, then the long delivery names and the word on Stop
+   while a message is being steered, then the working-freedom name, whose chip keeps its colour. */
+@container composer (max-width: 640px) {
+	/* A turn is running and a message is being written into it: the route is locked until the turn
+	   settles, so its place goes to the delivery switch. */
+	.composer[data-steering] .route-picker,
+	.composer[data-steering] .composer__route-actions > .route-chip {
+		display: none;
 	}
+}
+@container composer (max-width: 560px) {
 	.composer__actions,
 	.route-chip {
 		gap: var(--space-1);
 	}
-	.composer__route-actions .route-picker {
-		flex: 1 1 0;
-		justify-content: flex-end;
-	}
-	.route-picker > summary {
-		max-width: 100%;
-		min-width: 0;
-		padding-inline: var(--space-1);
-	}
-	.route-chip__text {
-		max-width: 12rem;
+	.route-chip__thinking {
+		display: none;
 	}
 	.route-picker__panel {
 		padding-inline: var(--space-4);
@@ -611,10 +583,35 @@
 		margin-top: var(--space-2);
 	}
 }
-
-/* Below this the tools, the route and the send button cannot share one row with words, so the
-   working-freedom pill keeps its icon and its name moves out of sight but stays announced. */
-@media (max-width: 380px) {
+@container composer (max-width: 440px) {
+	.composer__delivery-full {
+		display: none;
+	}
+	.composer__delivery-short {
+		display: inline;
+	}
+	.composer__delivery button {
+		padding-inline: var(--space-2);
+	}
+	.composer[data-steering] .composer__stop.composer__stop--live {
+		width: 34px;
+		padding: 0;
+		justify-content: center;
+	}
+	.composer[data-steering] .composer__stop--live > span,
+	.composer[data-steering] .composer__stop--live .clio-pulse {
+		display: none;
+	}
+	.composer[data-steering] .composer__stop--live .clio-pulse + .icon {
+		display: block;
+		width: var(--icon-md);
+		height: var(--icon-md);
+	}
+}
+@container composer (max-width: 300px) {
+	.autonomy > summary {
+		padding-inline: var(--space-2);
+	}
 	.autonomy > summary > span {
 		position: absolute;
 		width: 1px;
@@ -623,17 +620,8 @@
 		clip-path: inset(50%);
 		white-space: nowrap;
 	}
-	.composer__submit {
-		flex: none;
-	}
-}
-@media (max-width: 420px) {
-	.composer__delivery-label,
 	.route-chip__glyph {
 		display: none;
-	}
-	.route-chip__thinking {
-		font-size: var(--text-exact);
 	}
 }
 
@@ -692,11 +680,6 @@
 	font-size: var(--text-exact);
 	font-variant-numeric: tabular-nums;
 	color: var(--ink-muted);
-}
-.composer__attach {
-	display: inline-flex;
-	align-items: center;
-	gap: var(--space-1);
 }
 .composer__paste-note {
 	display: flex;
@@ -764,11 +747,26 @@
 	color: var(--ink);
 }
 .autonomy > summary .icon {
-	width: 15px;
-	height: 15px;
+	width: var(--icon-md);
+	height: var(--icon-md);
 }
-.autonomy[data-level="yolo"] > summary {
-	color: var(--status-warn-fg);
+/* The caret is punctuation, not a second icon. */
+.autonomy > summary .icon:last-child {
+	width: var(--icon-sm);
+	height: var(--icon-sm);
+	margin-inline-start: -2px;
+}
+/* Asking first is Clio's own teal on the shield; running without asking wears the approval family's
+   copper as a filled chip, so the risk reads before the words do and survives the icon-only row. */
+.autonomy[data-level="default"] > summary .icon:first-child {
+	color: var(--accent);
+}
+.autonomy[data-level="yolo"] > summary,
+.autonomy[data-level="yolo"] > summary:hover,
+.autonomy[data-level="yolo"][open] > summary {
+	color: var(--action-fg);
+	background: var(--action-tint);
+	box-shadow: inset 0 0 0 1px var(--action-line);
 }
 .autonomy__panel {
 	position: absolute;
@@ -781,10 +779,6 @@
 	min-width: 0;
 	margin: 0;
 	padding: var(--space-2);
-	border: 1px solid var(--line-strong);
-	border-radius: var(--radius-lg);
-	background: var(--overlay);
-	box-shadow: var(--shadow-panel);
 	color: var(--ink);
 }
 .autonomy__title {
@@ -815,10 +809,13 @@
 }
 .autonomy__option .icon {
 	flex: none;
-	width: 16px;
-	height: 16px;
+	width: var(--icon-md);
+	height: var(--icon-md);
 	margin-top: 2px;
 	color: var(--ink-muted);
+}
+.autonomy__option strong {
+	font-weight: 600;
 }
 .autonomy__option[aria-pressed="true"] .icon {
 	color: var(--accent);
