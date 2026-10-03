@@ -123,6 +123,8 @@ export interface AgentRecipe {
 	skills: ReadonlyArray<string>;
 	/** Discovery-resolved paths for bound skills; never parsed from frontmatter. */
 	boundSkillPaths: ReadonlyArray<string>;
+	/** Each bound skill's own description, in `skills` order; never parsed from frontmatter. */
+	boundSkillDescriptions?: ReadonlyArray<string>;
 	audience: AgentAudience;
 	category: AgentCategory;
 	capabilityClass: AgentCapabilityClass;

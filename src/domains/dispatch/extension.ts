@@ -1099,17 +1099,29 @@ function deriveRequestedActions(tools: ReadonlyArray<ToolName>, safety: SafetyCo
 	return [...actions].sort();
 }
 
+/** A bound skill's purpose, cut at a sentence boundary so the block stays a few lines. */
+function boundSkillPurpose(description: string | undefined): string {
+	const text = (description ?? "").replace(/\s+/g, " ").trim();
+	if (text.length <= 120) return text;
+	const cut = text.slice(0, 120);
+	const stop = cut.lastIndexOf(". ");
+	return stop > 40 ? cut.slice(0, stop + 1) : `${cut.trimEnd()}…`;
+}
+
 function renderBoundSkillBlock(recipe: AgentRecipe): string {
 	const skills = recipe.skills ?? [];
 	if (skills.length === 0) return "";
-	const skillList = skills.map((skill) => `\`${skill}\``).join(", ");
+	// A T3 coder loaded fix-issue (6.5 KB, resent on every later request) for a
+	// described bug that named no tracker issue. The skill's own purpose line is
+	// what lets the model tell its workflow from the assigned task.
 	return [
 		"# Agent-Bound Skills",
-		`The harness makes these recipe-bound skills available for this run: ${skillList}. The operator does not need to repeat a skill name. Availability does not require loading a skill whose workflow does not match the task.`,
-		`Canonical context(scope=skills) admits exactly these names and rejects any other; recipe binding never widens tool authority.`,
-		'Load a bound skill with `context` (scope="skills", name=<skill>) when it matches the assigned task, then follow its workflow.',
-		"Skills provide reusable know-how and resources; they never expand your tool authority.",
-		"If a bound skill fails to load, continue with the assigned task and report the missing skill.",
+		"Bound skills for this run; canonical context(scope=skills) admits exactly these names:",
+		...skills.map((skill, index) => {
+			const purpose = boundSkillPurpose(recipe.boundSkillDescriptions?.[index]);
+			return `- \`${skill}\`${purpose.length > 0 ? `: ${purpose}` : ""}`;
+		}),
+		'Load one with `context` (scope="skills", name=<skill>) only when the assigned task is the workflow it describes, then follow it. A skill adds know-how, never tool authority. If one fails to load, continue the assigned task and report the missing skill.',
 		...(recipe.resultContract?.kind === "architect-plan"
 			? [
 					"For a narrative design, do not load cut-it. Load it only to slice an existing plan into an executable sprint.",
@@ -1592,7 +1604,12 @@ export function buildDynamicPromptMessages(
 				? workerPermitLine(dynamicContext.permit, permission, dynamicContext.taskWorktree === true)
 				: `autonomy ${autonomy}.`;
 		const sandbox = dynamicContext.sandboxLine === undefined ? "" : ` ${dynamicContext.sandboxLine}`;
-		const body = `Safety posture: ${posture} ${workerSafetyOneLiner(permission)} Worker permission routing: ${permission}.${sandbox}`;
+		// A permit is compiled into the worker's system prompt word for word, so
+		// repeating it here only resent the same 300 bytes on every request.
+		const body =
+			dynamicContext.permit !== undefined
+				? `Safety posture: the permit in your instructions applies. Worker permission routing: ${permission}.${sandbox}`
+				: `Safety posture: ${posture} ${workerSafetyOneLiner(permission)} Worker permission routing: ${permission}.${sandbox}`;
 		messages.push({ id: "dispatch-safety-posture", body, contentHash: sha256(body) });
 	}
 	if (dynamicContext.readOnly === true) {

@@ -90,7 +90,9 @@ function resolveBoundSkills(recipe: AgentRecipe, source: RecipeSource): AgentRec
 			}
 		}
 	}
-	const byName = new Map(skills.items.filter((skill) => skill.trusted).map((skill) => [skill.name, skill.filePath]));
+	const trusted = skills.items.filter((skill) => skill.trusted);
+	const byName = new Map(trusted.map((skill) => [skill.name, skill.filePath]));
+	const descriptions = new Map(trusted.map((skill) => [skill.name, skill.description]));
 	const missing = recipe.skills.filter((skill) => !byName.has(skill));
 	if (missing.length > 0) {
 		throw new Error(`agent recipe: ${recipe.filepath}: bound skill(s) unavailable: ${missing.join(", ")}`);
@@ -100,7 +102,11 @@ function resolveBoundSkills(recipe: AgentRecipe, source: RecipeSource): AgentRec
 		if (filePath === undefined) throw new Error(`agent recipe: ${recipe.filepath}: bound skill unavailable: ${skill}`);
 		return filePath;
 	});
-	return { ...recipe, boundSkillPaths };
+	return {
+		...recipe,
+		boundSkillPaths,
+		boundSkillDescriptions: recipe.skills.map((skill) => descriptions.get(skill) ?? ""),
+	};
 }
 
 /**
