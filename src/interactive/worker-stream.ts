@@ -134,6 +134,8 @@ export function isContextOperationRun(run: { agentId: string; requestOrigin?: st
 export interface WorkerEntryState {
 	/** Local presentation clock; never restored as a live timer from a receipt. */
 	startedAtMs?: number;
+	/** Admitted tool-call ceiling for the current attempt; absent on legacy replay and ACP. */
+	toolCallLimit?: number;
 	/** Compact agent-to-agent presentation, selected from the admitted audience. */
 	helper?: true;
 	task?: string;
@@ -358,6 +360,9 @@ export function createWorkerStream(options: WorkerStreamOptions = {}): WorkerStr
 				existing.runtime = runtime;
 				existing.pending = true;
 				existing.startedAtMs = Date.now();
+				const toolCallLimit = finiteNumber(payload.budget?.effective.ceiling ?? payload.budget?.effective.toolCalls);
+				if (toolCallLimit === undefined) delete existing.toolCallLimit;
+				else existing.toolCallLimit = toolCallLimit;
 				delete existing.receipt;
 				existing.attempts.push({ runId, targetLabel: workerTargetLabel(runtime) });
 				assignmentByRun.set(runId, assignmentId);
@@ -385,6 +390,9 @@ export function createWorkerStream(options: WorkerStreamOptions = {}): WorkerStr
 				tools: [],
 				progress: progress.snapshot(),
 				startedAtMs: Date.now(),
+				...(payload.budget === undefined
+					? {}
+					: { toolCallLimit: payload.budget.effective.ceiling ?? payload.budget.effective.toolCalls }),
 				attempts: [{ runId, targetLabel: workerTargetLabel(runtime) }],
 				pending: true,
 				...(payload.council !== undefined ? { council: { ...payload.council } } : {}),

@@ -43,6 +43,7 @@ import {
 	toolFoldFamily,
 	toolRowTitle,
 } from "./renderers/tool-execution.js";
+import type { WorkerEntryRenderOptions } from "./renderers/worker-entry.js";
 import { renderWorkerEntryLines } from "./renderers/worker-entry.js";
 import {
 	compactReasoningTokens,
@@ -1237,6 +1238,7 @@ function renderEntryLines(
 	detail: TranscriptDetailPolicy,
 	terminalRows: number,
 	previous?: TranscriptEntry,
+	workerOptions?: Pick<WorkerEntryRenderOptions, "siblings" | "showGroupHeader">,
 ): string[] {
 	if (entry.role === "replayBlock") {
 		return entry.renderBlock(width, detail, unboundedToolBodies, terminalRows);
@@ -1249,6 +1251,7 @@ function renderEntryLines(
 	}
 	if (entry.role === "worker") {
 		return renderWorkerEntryLines(entry.state, width, {
+			...workerOptions,
 			detail,
 			terminalRows,
 			unbounded: unboundedToolBodies,
@@ -1463,6 +1466,16 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 	const transcript: TranscriptEntry[] = [];
 	/** Assignment to its placed block, in placement order, so a streaming delta is O(1) to route. */
 	const workerEntries = new Map<string, WorkerTranscriptEntry>();
+	const dispatchGroups = new Map<string, WorkerTranscriptEntry[]>();
+	const workerRenderOptions = (
+		entry: TranscriptEntry,
+	): Pick<WorkerEntryRenderOptions, "siblings" | "showGroupHeader"> => {
+		if (entry.role !== "worker" || entry.state.parentToolCallId === undefined) return {};
+		const siblings = dispatchGroups.get(entry.state.parentToolCallId);
+		return siblings === undefined
+			? {}
+			: { siblings: siblings.map((sibling) => sibling.state), showGroupHeader: siblings[0] === entry };
+	};
 	let dirty = true;
 	let runStartedAt: number | undefined;
 	/** Why the current run's prompt cache may be cold, from the chat loop's cache notice. */
@@ -1971,6 +1984,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 					detail,
 					terminalRows,
 					previous,
+					workerRenderOptions(entry),
 				);
 				for (const line of renderedEntry) out.push(line);
 				if (cacheable) {
@@ -2050,6 +2064,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 					transcriptDetail(style),
 					job.terminalRows,
 					transcript[index - 1],
+					workerRenderOptions(entry),
 				);
 				const byKey = renders ?? new Map<string, string[]>();
 				byKey.set(key, lines);
@@ -2109,11 +2124,19 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 				// The reducer mutated the same state object this entry already holds,
 				// so nothing is re-linked; only the cached render is now stale.
 				invalidateEntryCache(existing);
+				const lead = state.parentToolCallId === undefined ? undefined : dispatchGroups.get(state.parentToolCallId)?.[0];
+				if (lead !== undefined && lead !== existing) invalidateEntryCache(lead);
 				markDirty();
 				return;
 			}
 			const entry: WorkerTranscriptEntry = { role: "worker", state, at: stamp() };
 			workerEntries.set(state.assignmentId, entry);
+			if (state.parentToolCallId !== undefined) {
+				const siblings = dispatchGroups.get(state.parentToolCallId) ?? [];
+				for (const sibling of siblings) invalidateEntryCache(sibling);
+				siblings.push(entry);
+				dispatchGroups.set(state.parentToolCallId, siblings);
+			}
 			// The card is the run's row from here on: the call that spawned it drops
 			// the task and outcome it would otherwise state. A helper's `↳` row is
 			// the run's row too when a dispatch started it (the model's shadow
@@ -2257,6 +2280,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 			runStartIndex = undefined;
 			runColdReasons = [];
 			workerEntries.clear();
+			dispatchGroups.clear();
 			clearRenderCaches();
 			markDirty();
 		},
