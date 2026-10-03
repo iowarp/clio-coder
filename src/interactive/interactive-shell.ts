@@ -1,5 +1,5 @@
-import type { Component, Terminal, TuiMode, TuiRenderObserver } from "../engine/tui.js";
-import { InstrumentedTuiAltScreen, InstrumentedTuiMainScreen, ProcessTerminal, type TUI } from "../engine/tui.js";
+import type { ApplicationInputTui, Component, Terminal, TuiMode, TuiRenderObserver } from "../engine/tui.js";
+import { InstrumentedTuiAltScreen, InstrumentedTuiMainScreen, ProcessTerminal } from "../engine/tui.js";
 import {
 	createRenderTrace,
 	type RenderTrace,
@@ -198,10 +198,10 @@ export function createProcessInteractiveShell(
 		/** Construction fault seams for process-global rollback contracts. */
 		testing?: {
 			createTerminal?: () => ProcessTerminal;
-			createTui?: (terminal: ProcessTerminal) => TUI;
+			createTui?: (terminal: ProcessTerminal) => ApplicationInputTui;
 		};
 	} = {},
-): InteractiveShell<ProcessTerminal, TUI> {
+): InteractiveShell<ProcessTerminal, ApplicationInputTui> {
 	const tracePath = renderTracePath();
 	let restoreStdout: (() => void) | null = null;
 	let restoreFirstFrameStdout: (() => void) | null = null;
@@ -338,7 +338,7 @@ export function createProcessInteractiveShell(
 		})();
 		return instrumentationCleanupPromise;
 	};
-	let shell: InteractiveShell<ProcessTerminal, TUI>;
+	let shell: InteractiveShell<ProcessTerminal, ApplicationInputTui>;
 	try {
 		setStreamPacingActive(options.streamPacingActive === true);
 		shell = createInteractiveShell({
@@ -366,7 +366,7 @@ export function createProcessInteractiveShell(
 		},
 		async commitCurrentFrame(timeoutMs = 30_000): Promise<number | null> {
 			return await settleLatestInteractiveFrame(backpressure, timeoutMs, async () => {
-				const tui = shell.tui as TUI & { renderNow(force?: boolean): void };
+				const tui = shell.tui as ApplicationInputTui & { renderNow(force?: boolean): void };
 				const waiter: { resolve: (frameId: number) => void } = { resolve: () => {} };
 				const frame = new Promise<number>((resolve) => {
 					waiter.resolve = resolve;

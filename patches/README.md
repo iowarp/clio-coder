@@ -5,13 +5,14 @@
 `@earendil-works__pi-tui@1.0.0.patch` is the sole Pi dependency patch, applied
 by pnpm's exact `patchedDependencies` entry. **pi-agent-core and pi-ai are
 unpatched.** Every existing hunk was rebased against the published, unmodified
-1.0.0 package without changing its behavior. Stock 1.0.0 still lacks the editor,
-search and application-first keyboard seams below. Its ANSI search highlighting,
-weak render caches, and slash completion fixes are inherited alongside the patch.
+1.0.0 package without changing its behavior. Stock 1.0.0 still lacks the editor
+and search seams below. Its ANSI search highlighting, weak render caches, and
+slash completion fixes are inherited alongside the patch. Application-first
+keyboard routing needs no patch: an engine subclass in
+`src/engine/application-input-tui.ts` owns it.
 
 | Added API | Required behavior | Why stock 1.0.0 is insufficient |
 | --- | --- | --- |
-| `TuiBase.setApplicationInputPolicy` | Clio's single keyboard owner runs before viewport shortcuts and focused widgets. Key releases are ignored; bracketed-paste contents remain literal data. The returned disposer removes only its own policy. | Public `addInputListener` appends to a listener set. The alternate-screen viewport installs its listener during construction, so later application listeners cannot consume conflicting keys first. There is no public prepend/priority option. |
 | `Editor.applyEdit` and `Input.applyEdit` | Invoke undo and deletion directly after Clio resolves a semantic keyboard action, without passing through submission or a second keybinding lookup. Input clear retains undo and kill-ring behavior. | The underlying edit operations are private and `handleInput` interprets bytes against configurable bindings. `setText` / `setValue` alone do not express the same undo, cursor and kill-ring semantics. |
 | Search focus, query undo, prompt navigation, and search navigation methods | Clio can route Escape, undo, history, and navigation to the current owner, including the native search overlay, and keep overlay focus/rendering correct. | Search focus and these navigation methods are private; the public viewport scroll methods cannot query or manipulate search ownership or its undo history. |
 | `wrapTextWithAnsi` whitespace tokens | A space token that carries the closing codes of the styled word before it is treated as whitespace, and its codes apply before the next row opens. | A styled word that exactly filled a row stranded the following space at the start of the next row. |
@@ -22,11 +23,13 @@ editor and overlays under `src/interactive/`, through `src/engine/tui.ts`.
 
 ## Alternatives considered
 
-- **Use stock input listeners and keybindings:** public and preferable once Pi
-  exposes application-first priority, but currently viewport bindings can
-  consume a key before Clio applies modal ownership or cancellation policy.
-  Removing every overlapping viewport binding also disables native behavior
-  that Clio deliberately retains.
+- **Use stock input listeners and keybindings:** adopted for application-first
+  routing. The engine subclass registers one gate through the public
+  `addInputListener` before the viewport listener, which `TuiAltScreen`
+  registers in its constructor, so the application policy sees a key before
+  viewport bindings can consume it. Removing every overlapping viewport binding
+  was rejected because it also disables native behavior that Clio deliberately
+  retains.
 - **Synthesize control-key sequences:** goes through another configurable
   binding lookup. A deletion or undo action can become submission or a
   different action under user bindings; this fails the semantic-action contract.
