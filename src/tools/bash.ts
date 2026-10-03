@@ -20,8 +20,8 @@ const BASH_DISPLAY_MAX_BYTES = 16 * 1024;
 // What a bounded result leaves in the model's context, which every later
 // request resends. A 16 KB tail kept the least useful end of a search: three
 // rg results held 51 KB of campaign T3's transcript. Head and tail keep the
-// first matches and the closing diagnostics, at the 10 KiB Codex CLI uses.
-const BASH_CONTEXT_MAX_BYTES = 10 * 1024;
+// first matches and the closing diagnostics, at 16 KiB in total.
+const BASH_CONTEXT_MAX_BYTES = 16 * 1024;
 export type BashOutputPolicy = "full" | "bounded" | "summary" | "metadata-only";
 
 const BASH_OUTPUT_POLICIES = new Set<BashOutputPolicy>(["full", "bounded", "summary", "metadata-only"]);
