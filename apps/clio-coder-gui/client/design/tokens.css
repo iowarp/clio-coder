@@ -95,12 +95,9 @@
 	--leading-reading: 1.7;
 	--tracking-instrument: 0.12em;
 
-	/* ---- radii (shallow; instruments, not consumer bubbles) ------------ */
-	--radius-xs: 3px;
-	--radius-sm: 6px;
-	--radius-md: 10px;
-	--radius-lg: 14px;
-	--radius-pill: 999px;
+	/* ---- radii: two steps. Circles are 50%, written where the element is a dot or a round icon button. */
+	--radius-sm: 2px; /* controls, chips, rows, inline code */
+	--radius-md: 4px; /* surfaces: menus, panels, cards, dialogs, composer */
 
 	/* ---- elevation. Shell hierarchy only; a card never floats. --------- */
 	--shadow-none: none;

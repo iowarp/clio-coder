@@ -11,6 +11,8 @@ import {
 	DecisionCapability,
 	EMPTY_CAPABILITIES,
 	EventsCapability,
+	QueueCapability,
+	ShellCapability,
 	SteeringCapability,
 	ToolProgressCapability,
 } from "../../contracts/capabilities.js";
@@ -70,6 +72,8 @@ function readCapabilities(result: unknown): AgentCapabilities {
 		...maybe("settings", optional(Settings, meta["clio-coder/settings"])),
 		...maybe("targets", optional(Targets, meta["clio-coder/targets"])),
 		...maybe("steering", optional(SteeringCapability, meta["clio-coder/steering"])),
+		...maybe("queue", optional(QueueCapability, meta["clio-coder/queue"])),
+		...maybe("shell", optional(ShellCapability, meta["clio-coder/shell"])),
 		...maybe("commands", optional(CommandsCapability, meta["clio-coder/commands"])),
 		...maybe("toolProgress", optional(ToolProgressCapability, meta["clio-coder/toolProgress"])),
 		...maybe("decision", optional(DecisionCapability, meta["clio-coder/decision"])),
@@ -122,6 +126,15 @@ export function acpProblem(error: unknown) {
 				"upstream_acp",
 				"Clio could not complete this turn. Probe the selected target and check this session's trace for the cause, then retry. (turn_failed)",
 			);
+		if (code === "prompt_active" || code === "shell_active")
+			return new AppProblem(
+				"conflict",
+				code === "shell_active"
+					? "A shell line is running in this task. Wait for it or stop it."
+					: "A shell line runs between turns. Wait for this turn or stop it.",
+			);
+		if (code === "shell_failed")
+			return new AppProblem("upstream_acp", "Clio could not run or record that shell line. (shell_failed)");
 		if (code === "unknown_command")
 			return new AppProblem(
 				"upstream_acp",
@@ -175,6 +188,8 @@ export class AcpClient {
 					// the running row's partial text rather than appending, which is
 					// the whole reason the stream is an opt-in.
 					"clio-coder/toolProgress": { version: 1 },
+					// Opting in turns on `_clio-coder/session/queue_changed`, so the queue is pushed and not polled.
+					"clio-coder/queue": { version: 1 },
 					"clio-coder/interviews": { version: 1, request: INTERVIEW_REQUEST_METHOD, cancel: INTERVIEW_CANCEL_METHOD },
 					// A dispatched worker's escalation reaches the approval card as a permission request,
 					// and a withdrawn one retires the card, because the wire cannot cancel a single ask.

@@ -82,7 +82,7 @@
 	display: block;
 	/* The context meter's weight, so every bar in the sidebar is one instrument. */
 	height: 6px;
-	border-radius: var(--radius-pill);
+	border-radius: var(--radius-sm);
 	background: var(--wb-active);
 	overflow: hidden;
 }

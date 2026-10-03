@@ -94,7 +94,7 @@
 .markdown code {
 	display: inline;
 	padding: 2px 5px;
-	border-radius: 3px;
+	border-radius: var(--radius-sm);
 	background: var(--inset);
 	color: var(--code-ink);
 	font: 0.9em var(--font-mono);
@@ -107,15 +107,22 @@
 	font: inherit;
 	overflow-wrap: normal;
 }
+.md-table-frame {
+	position: relative;
+	min-width: 0;
+}
+/* A long table scrolls inside its frame with the header pinned, so the columns keep their names. */
 .md-table {
 	overflow: auto;
 	max-width: 100%;
+	max-height: min(36rem, 70dvh);
 	border: 1px solid var(--line);
-	border-radius: 4px;
+	border-radius: var(--radius-md);
 }
 .markdown table {
 	min-width: 100%;
-	border-collapse: collapse;
+	border-collapse: separate;
+	border-spacing: 0;
 	font-size: var(--text-meta);
 }
 .markdown td,
@@ -123,9 +130,55 @@
 	padding: 9px 13px;
 	border-bottom: 1px solid var(--line);
 	text-align: left;
+	vertical-align: top;
 }
 .markdown th {
+	position: sticky;
+	top: 0;
+	z-index: 1;
 	background: var(--inset);
+	font-weight: 600;
+}
+.markdown tbody tr:last-child td {
+	border-bottom: 0;
+}
+.markdown tbody tr:hover td {
+	background: color-mix(in srgb, var(--accent) 6%, transparent);
+}
+.markdown .md-table__number {
+	text-align: right;
+	font-variant-numeric: tabular-nums;
+	white-space: nowrap;
+}
+/* Copy sits over the header's end, out of the way until the table is pointed at or focused. A
+   device without hover always shows it. */
+.md-table__action {
+	position: absolute;
+	top: 5px;
+	right: 5px;
+	z-index: 2;
+	opacity: 0;
+	transition: opacity var(--motion-fast) ease;
+}
+.md-table-frame:is(:hover, :focus-within) .md-table__action {
+	opacity: 1;
+}
+@media (hover: none) {
+	.md-table__action {
+		opacity: 1;
+	}
+}
+.md-table__action button {
+	min-height: 26px;
+	padding: 2px var(--space-2);
+	border: 1px solid var(--line);
+	border-radius: var(--radius-sm);
+	background: var(--surface);
+	color: var(--ink-muted);
+	font: var(--text-meta) / 1.4 var(--font-ui);
+}
+.md-table__action button:hover {
+	color: var(--ink);
 }
 /* A column keeps its words whole. The document sets overflow-wrap: anywhere so long paths cannot
    push the page wide, but inside a table that lets the layout shrink a label column to one
@@ -266,9 +319,20 @@
 }
 .diagram__canvas svg {
 	display: block;
-	max-width: 100%;
+	/* Never wider than the column, and never scaled up past the size it was drawn at. */
+	max-width: min(100%, var(--diagram-width, 100%));
 	height: auto;
 	margin-inline: auto;
+}
+/* At full size a large diagram keeps its drawn scale and the canvas scrolls, instead of shrinking
+   every label to fit the column. */
+.diagram[data-zoom] .diagram__canvas {
+	max-height: min(44rem, 80dvh);
+}
+.diagram[data-zoom] .diagram__canvas svg {
+	width: var(--diagram-width);
+	max-width: none;
+	margin-inline: 0;
 }
 .diagram__status {
 	padding: 0 var(--space-4) var(--space-3);

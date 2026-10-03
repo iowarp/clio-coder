@@ -150,7 +150,7 @@
 .approval-chip {
 	padding: 2px var(--space-2);
 	border: 1px solid var(--line-strong);
-	border-radius: var(--radius-pill);
+	border-radius: var(--radius-sm);
 	color: var(--ink-muted);
 }
 .approval-card__facts {
@@ -281,7 +281,7 @@
 	line-height: var(--leading-body);
 	color: var(--code-ink);
 	background: var(--code-paper);
-	border-radius: var(--radius-xs);
+	border-radius: var(--radius-sm);
 }
 
 .approval-raw {

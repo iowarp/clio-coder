@@ -39,7 +39,7 @@
 	padding: 0;
 	list-style: none;
 	border: 1px solid var(--line);
-	border-radius: 14px;
+	border-radius: var(--radius-md);
 	overflow: hidden;
 }
 .taskpage__row {

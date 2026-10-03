@@ -14,7 +14,7 @@
 	--wb-side: 320px;
 	--wb-aside: 400px;
 	--wb-gap: 8px;
-	--wb-radius: 14px;
+	--wb-radius: var(--radius-md);
 	--wb-row: 40px;
 	display: grid;
 	grid-template-columns: var(--wb-side) minmax(0, 1fr) 0;
@@ -124,7 +124,7 @@
 	color: var(--ink-muted);
 	padding: 6px 8px;
 	margin-left: -8px;
-	border-radius: 8px;
+	border-radius: var(--radius-sm);
 }
 .wb-back:hover {
 	background: var(--wb-hover);
@@ -141,7 +141,7 @@
 	min-height: 0;
 	margin: 0;
 	border: 0;
-	border-radius: 8px;
+	border-radius: var(--radius-sm);
 	background: transparent;
 	color: var(--ink);
 	font: inherit;
@@ -282,7 +282,7 @@
 	padding: 0 10px;
 	font-size: var(--text-meta);
 	border: 1px solid var(--line);
-	border-radius: 8px;
+	border-radius: var(--radius-sm);
 	background: var(--wb-faint);
 }
 .wb-side__sections {
@@ -380,7 +380,7 @@
 	position: relative;
 	display: flex;
 	align-items: center;
-	border-radius: 8px;
+	border-radius: var(--radius-sm);
 }
 .wb-task__main {
 	display: flex;
@@ -738,7 +738,7 @@
 	max-width: 14rem;
 	padding: 0 10px;
 	border: 1px solid var(--line);
-	border-radius: var(--radius-pill);
+	border-radius: var(--radius-sm);
 	background: var(--wb-faint);
 	color: var(--ink-muted);
 	font-size: var(--text-exact);
@@ -822,7 +822,7 @@ button.wb-chip:hover:not(:disabled) {
 	margin: 0;
 	padding: 0 8px;
 	border-color: transparent;
-	border-radius: 8px;
+	border-radius: var(--radius-sm);
 	background: transparent;
 	transition:
 		background var(--motion-fast) var(--ease-standard),
@@ -857,7 +857,7 @@ button.wb-chip:hover:not(:disabled) {
 	height: 26px;
 	padding-inline: 10px;
 	border-color: var(--action-line);
-	border-radius: var(--radius-pill);
+	border-radius: var(--radius-sm);
 	background: var(--action-tint);
 }
 /* What a tight bar gives up, in order: the title down to its minimum, then the token count (the
@@ -1114,7 +1114,7 @@ button.wb-chip:hover:not(:disabled) {
 	min-height: 0;
 	padding: 0 8px;
 	border: 1px solid var(--accent);
-	border-radius: 6px;
+	border-radius: var(--radius-sm);
 	background: var(--surface);
 	color: var(--ink);
 	font: inherit;
@@ -1134,7 +1134,7 @@ button.wb-chip:hover:not(:disabled) {
 	margin-inline: -6px;
 	overflow: hidden;
 	border: 1px solid transparent;
-	border-radius: 6px;
+	border-radius: var(--radius-sm);
 	background: transparent;
 	color: inherit;
 	font: inherit;

@@ -57,6 +57,23 @@ export const ToolProgressCapability = Type.Object(
 	closed,
 );
 export type ToolProgressCapability = Static<typeof ToolProgressCapability>;
+/** Per-entry queue operations and the notification that pushes the queue after every change. */
+export const QueueCapability = Type.Object(
+	{
+		version: Type.Literal(1),
+		edit: method,
+		ops: Type.Array(Type.String({ maxLength: 32 }), { maxItems: 16 }),
+		notification: method,
+	},
+	closed,
+);
+export type QueueCapability = Static<typeof QueueCapability>;
+/** The operator's `!` line. `timeoutMs` is how long the engine lets one line run. */
+export const ShellCapability = Type.Object(
+	{ version: Type.Literal(1), run: method, timeoutMs: Type.Integer({ minimum: 1 }) },
+	closed,
+);
+export type ShellCapability = Static<typeof ShellCapability>;
 export const DecisionCapability = Type.Object(
 	{
 		version: Type.Literal(1),
@@ -92,6 +109,10 @@ export const AgentCapabilities = Type.Object(
 		settings: Type.Optional(Type.Object({ get_safe: Type.Boolean(), patch_safe: Type.Boolean() }, closed)),
 		targets: Type.Optional(Type.Object({ list: Type.Boolean(), probe: Type.Boolean() }, closed)),
 		steering: Type.Optional(SteeringCapability),
+		/** Edit, reorder and send one waiting message. */
+		queue: Type.Optional(QueueCapability),
+		/** Run a shell line as the operator, between turns. */
+		shell: Type.Optional(ShellCapability),
 		commands: Type.Optional(CommandsCapability),
 		toolProgress: Type.Optional(ToolProgressCapability),
 		decision: Type.Optional(DecisionCapability),

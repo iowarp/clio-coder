@@ -12,11 +12,13 @@
  *    diff that merely stops looks complete.
  */
 
-import { memo, useState } from "react";
+import { memo, useMemo, useState } from "react";
 import { StatusMark } from "../design/status.js";
 import { CopyButton } from "../render/Markdown.js";
 import {
+	type ChangeSpan,
 	type CollapsePlan,
+	changeSpans,
 	collapsePlan,
 	type DiffPanel,
 	diffCopyText,
@@ -24,8 +26,22 @@ import {
 	type ParsedDiff,
 } from "./diff-model.js";
 
+/** One rewritten line with the part that changed marked, so a one-word edit does not read as a new line. */
+function ChangedText({ text, span }: { text: string; span: ChangeSpan | undefined }) {
+	if (span === undefined) return text;
+	return (
+		<>
+			{text.slice(0, span.start)}
+			<span className="diff__change">{text.slice(span.start, span.end)}</span>
+			{text.slice(span.end)}
+		</>
+	);
+}
+
 function DiffRows({ diff, plan }: { diff: ParsedDiff; plan: CollapsePlan }) {
 	const rows = diff.rows.slice(plan.start, plan.end + 1);
+	// Over the whole diff, so a pair split by the collapsed window keeps its emphasis.
+	const spans = useMemo(() => changeSpans(diff.rows), [diff.rows]);
 	return (
 		<div className="diff__grid" role="presentation">
 			{rows.map((row) => (
@@ -38,7 +54,9 @@ function DiffRows({ diff, plan }: { diff: ParsedDiff; plan: CollapsePlan }) {
 					<span className="diff__num" aria-hidden="true">
 						{row.newLine ?? ""}
 					</span>
-					<code className="diff__text">{row.text}</code>
+					<code className="diff__text">
+						{spans.has(row.id) ? <ChangedText text={row.text} span={spans.get(row.id)} /> : row.text}
+					</code>
 				</div>
 			))}
 		</div>

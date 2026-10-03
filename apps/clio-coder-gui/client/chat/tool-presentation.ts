@@ -273,7 +273,8 @@ export function stripResultEnvelope(text: string): string {
  *   - `{content: [...]}`, what the GUI supervisor substitutes when a terminal
  *     frame carried content but no rawOutput (supervisor.ts:394);
  *   - `{truncated: true, snippet}`, what the supervisor substitutes for a
- *     record over 32 KiB (supervisor.ts:410).
+ *     record over 32 KiB (supervisor.ts:410);
+ *   - `{exitCode, content, …}`, what `_clio-coder/session/shell` reports for an operator shell line.
  *
  * A failed tool returns `{kind:"error", message}` with no `output` field, so the
  * result text is read from `message` as well as `output`.
@@ -302,8 +303,10 @@ export function readWire(item: Pick<TimelineItem, "rawInput" | "rawOutput">): To
 			isError: false,
 			rawTruncated: true,
 		};
-	const result = record(output.result);
-	const details = record(result?.details);
+	// The operator's shell line answers flat: its exit code sits beside the content, with no `result`.
+	const shell = output.result === undefined && typeof output.exitCode === "number" ? output : undefined;
+	const result = record(output.result) ?? shell;
+	const details = record(result?.details) ?? shell;
 	const operator = operatorText(details);
 	const modelText =
 		str(result?.output) ?? str(result?.message) ?? contentText(output.content) ?? contentText(result?.content) ?? null;
@@ -473,6 +476,9 @@ function terminalFacts(details: Record<string, unknown> | undefined): ToolFact[]
 	const stderr = num(details.stderrBytes);
 	if (stdout !== null) facts.push({ label: "stdout", value: formatBytes(stdout) });
 	if (stderr !== null && stderr > 0) facts.push({ label: "stderr", value: formatBytes(stderr) });
+	// An operator shell line run with `!!`: recorded, and not given to the model.
+	if (details.excludedFromContext === true) facts.push({ label: "context", value: "kept from Clio" });
+	if (details.timedOut === true) facts.push({ label: "outcome", value: "timed out", tone: "warn" });
 	const outcome = str(details.outcome);
 	if (outcome !== null && outcome !== "success")
 		facts.push({ label: "outcome", value: outcome, tone: outcome === "nonzero" ? "fail" : "warn" });

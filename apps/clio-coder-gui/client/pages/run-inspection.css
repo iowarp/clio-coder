@@ -36,7 +36,7 @@
 	padding: var(--space-4);
 	background: var(--wb-faint);
 	border: 1px solid var(--line);
-	border-radius: var(--radius-lg);
+	border-radius: var(--radius-md);
 	margin: var(--space-5) 0;
 }
 .evidence-actions label,

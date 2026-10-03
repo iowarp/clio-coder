@@ -3,6 +3,7 @@ import type { Event } from "../../contracts/events.js";
 import type { Operation } from "../../contracts/operations.js";
 import { routes } from "../../contracts/routes.js";
 import { type SessionDelta, SessionDeltas, type SessionSnapshot } from "../../contracts/sessions.js";
+import type { QueueSnapshot } from "../../contracts/steering.js";
 import { onTokenRejected, tokenRejected } from "./auth-state.js";
 import { type Client, emptyInput } from "./client.js";
 import { clock } from "./clock.js";
@@ -114,6 +115,15 @@ export function subscribe(
 				void queries.cancelQueries({ queryKey: ["session-interview", event.payload.resource], exact: true });
 				queries.setQueryData(["session-interview", event.payload.resource], event.payload.round);
 			}
+			if (event.type === "queue.changed") {
+				const { resource, entries } = event.payload;
+				void queries.cancelQueries({ queryKey: ["session-queue", resource], exact: true });
+				queries.setQueryData<QueueSnapshot>(["session-queue", resource], {
+					steer: entries.filter((entry) => entry.kind === "steer").map((entry) => entry.text),
+					followUp: entries.filter((entry) => entry.kind === "follow-up").map((entry) => entry.text),
+					entries,
+				});
+			}
 			if (event.type === "toolchain.changed") invalidate.add("tools");
 			if (event.type === "app.launch" && clock.now() - Date.parse(event.at) < LAUNCH_FRESH_MS)
 				launched = event.payload.path;
@@ -159,6 +169,7 @@ export function subscribe(
 			"operation.finished",
 			"toolchain.changed",
 			"interview.changed",
+			"queue.changed",
 			"app.launch",
 			...Object.keys(SessionDeltas),
 		])

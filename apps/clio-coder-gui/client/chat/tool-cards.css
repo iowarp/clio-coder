@@ -113,7 +113,7 @@
 }
 .tool-card__agent {
 	border: 1px dashed var(--line-strong);
-	border-radius: var(--radius-pill);
+	border-radius: var(--radius-sm);
 	padding: 0 var(--space-2);
 	font-family: var(--font-ui);
 }
@@ -220,7 +220,7 @@
 	background: var(--code-surface);
 	color: var(--code-ink);
 	border: 1px solid var(--code-line);
-	border-radius: var(--radius-xs);
+	border-radius: var(--radius-sm);
 	font-family: var(--font-mono);
 	font-size: var(--text-exact);
 	line-height: var(--leading-body);
@@ -296,7 +296,7 @@
 	display: grid;
 	gap: var(--space-2);
 	border: 1px solid var(--line);
-	border-radius: var(--radius-xs);
+	border-radius: var(--radius-sm);
 	padding: var(--space-2);
 	background: var(--well);
 }
@@ -332,7 +332,7 @@
 	justify-self: start;
 	background: none;
 	border: 1px solid var(--line-strong);
-	border-radius: var(--radius-xs);
+	border-radius: var(--radius-sm);
 	color: var(--ink);
 	font-size: var(--text-exact);
 	padding: var(--space-1) var(--space-2);
@@ -346,7 +346,7 @@
 .diff__grid {
 	background: var(--surface);
 	border: 1px solid var(--line-strong);
-	border-radius: var(--radius-xs);
+	border-radius: var(--radius-sm);
 	overflow-x: auto;
 	font-family: var(--font-mono);
 	font-size: var(--text-exact);
@@ -395,6 +395,11 @@
 }
 .diff__row.is-del .diff__text::before {
 	content: "− ";
+}
+/* The changed part of a rewritten line takes a deeper wash of the row's own colour. */
+.diff__change {
+	border-radius: var(--radius-sm);
+	background: color-mix(in srgb, currentColor 16%, transparent);
 }
 .diff__row.is-elision .diff__text,
 .diff__row.is-hunk .diff__text {

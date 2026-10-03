@@ -3,6 +3,7 @@ import { Id } from "./common.js";
 import { InterviewRound } from "./interviews.js";
 import { Operation, Progress } from "./operations.js";
 import { SessionDeltas } from "./sessions.js";
+import { QUEUE_MAX_ENTRIES, QueueEntry } from "./steering.js";
 
 const base = { v: Type.Literal(1), epoch: Id, seq: Type.Integer({ minimum: 0 }), at: Type.String() };
 const cursor = { epoch: Id, seq: Type.Integer({ minimum: 0 }) };
@@ -13,6 +14,11 @@ export const Event = Type.Union([
 		...base,
 		type: Type.Literal("interview.changed"),
 		payload: Type.Object({ resource: Id, round: Type.Union([InterviewRound, Type.Null()]) }),
+	}),
+	Type.Object({
+		...base,
+		type: Type.Literal("queue.changed"),
+		payload: Type.Object({ resource: Id, entries: Type.Array(QueueEntry, { maxItems: QUEUE_MAX_ENTRIES }) }),
 	}),
 	Type.Object({ ...base, type: Type.Literal("turn.started"), payload: SessionDeltas["turn.started"] }),
 	Type.Object({ ...base, type: Type.Literal("turn.admitted"), payload: SessionDeltas["turn.admitted"] }),

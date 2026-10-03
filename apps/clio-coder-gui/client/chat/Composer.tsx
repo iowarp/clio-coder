@@ -16,7 +16,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { memo, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { routes } from "../../contracts/routes.js";
 import type { SessionSnapshot } from "../../contracts/sessions.js";
-import type { CommandRequest } from "../../contracts/steering.js";
+import type { CommandRequest, QueueEditRequest, QueueSnapshot } from "../../contracts/steering.js";
 import type { Client } from "../api/client.js";
 import { Icon } from "../design/icons.js";
 import { StatusMark } from "../design/status.js";
@@ -39,15 +39,19 @@ import {
 import { fitComposerField, initialEnterSends, rememberEnterSends } from "./composer-field.js";
 import { type HistoryBrowse, readHistory, rememberPrompt, stepHistory } from "./composer-history.js";
 import {
+	type ComposerNotice,
 	capabilityRefusal,
 	composerKeyAction,
 	draftStore,
 	noticeForError,
+	noticeForQueueEdit,
 	noticeForRefusal,
 	projectQueue,
+	queueActions,
 	queueSummary,
 	restoredDraft,
 	type SubmitIntent,
+	shellNotice,
 	slashNotice,
 	steeringAffordances,
 	steerModeOffers,
@@ -292,9 +296,11 @@ export const Composer = memo(function Composer({
 		queryFn: () => client.call(routes.sessionQueue, params),
 		enabled: steering.queue && running,
 		retry: false,
-		refetchInterval: running ? 3_000 : false,
+		// An agent with the queue capability pushes every change; an older one is asked.
+		refetchInterval: running && !capabilities.data?.queue ? 3_000 : false,
 	});
 	const queued = projectQueue(queue.data);
+	const queueOps = capabilities.data?.queue?.ops;
 
 	const send = useMutation({
 		mutationFn: async ({
@@ -316,6 +322,20 @@ export const Composer = memo(function Composer({
 							text: intent.text,
 							...(images.length > 0 ? { images: images.map(({ mimeType, data }) => ({ mimeType, data })) } : {}),
 							...(files.length > 0 ? { files: files.map(({ name, text }) => ({ name, text })) } : {}),
+						},
+					},
+					intent.idempotencyKey,
+				);
+				return null;
+			}
+			if (intent.kind === "shell") {
+				await client.call(
+					routes.shellSession,
+					{
+						...params,
+						body: {
+							command: intent.command,
+							...(intent.excludeFromContext ? { excludeFromContext: true } : {}),
 						},
 					},
 					intent.idempotencyKey,
@@ -458,6 +478,26 @@ export const Composer = memo(function Composer({
 			field.current?.focus();
 		},
 	});
+	const [queueNote, setQueueNote] = useState<ComposerNotice | null>(null);
+	const edit = useMutation({
+		mutationFn: (request: QueueEditRequest) =>
+			client.call(routes.editSessionQueue, { ...params, body: request }, crypto.randomUUID()),
+		onMutate: () => setQueueNote(null),
+		onSuccess: (result, request) => {
+			queries.setQueryData<QueueSnapshot>(["session-queue", sessionId], {
+				steer: result.entries.filter((entry) => entry.kind === "steer").map((entry) => entry.text),
+				followUp: result.entries.filter((entry) => entry.kind === "follow-up").map((entry) => entry.text),
+				entries: result.entries,
+			});
+			setQueueNote(noticeForQueueEdit(result));
+			if (request.op === "restore" && result.applied && result.text !== undefined) {
+				store.write(restoredDraft(store.snapshot().text, [result.text]));
+				placeCaretAtEnd();
+			}
+			if (request.op === "send_now") void queries.invalidateQueries({ queryKey: ["session", sessionId] });
+		},
+		onError: (error) => setQueueNote(noticeForError(error)),
+	});
 	// What the engine said about one turn's interrupt, stop or queue is not a fact about the next
 	// turn: without this an interrupt refusal stayed under the composer for the rest of the session.
 	const resetInterrupt = interrupt.reset;
@@ -468,6 +508,7 @@ export const Composer = memo(function Composer({
 		resetInterrupt();
 		resetStop();
 		resetDrain();
+		setQueueNote(null);
 	}, [runningTurnId]);
 
 	const steeringUnavailable: "checking" | "failed" | undefined = capabilities.data
@@ -483,12 +524,16 @@ export const Composer = memo(function Composer({
 		sending: send.isPending,
 		steering,
 		...(steeringUnavailable === undefined ? {} : { steeringUnavailable }),
+		shell: capabilities.data?.shell !== undefined,
 	} as const;
 	const intent = submitIntent(draft, situation);
 	const canAttachImages = capabilities.data?.images === true && sessionState === "open";
 	const canAttachFiles = capabilities.data?.embeddedContext === true && sessionState === "open";
 	const canAttach = canAttachImages || canAttachFiles;
-	const attachBlock = attachmentRefusal(attachments, running);
+	const shellBlock = (kind: SubmitIntent["kind"], count: number) =>
+		kind === "shell" && count > 0 ? "A shell line takes no attachments. Remove them, or send a message instead." : null;
+	const attachBlock = shellBlock(intent.kind, attachments.length) ?? attachmentRefusal(attachments, running);
+	const shellHint = shellNotice(draft.text, situation.shell);
 	// The delivery switch takes the route's place in the row, and only once there is a message to
 	// deliver: an empty field mid-turn offers Stop alone.
 	const steerChoice = running && modes.length > 1 && draft.text.trim() !== "";
@@ -573,7 +618,11 @@ export const Composer = memo(function Composer({
 			}
 		}
 		const next = submitIntent(current, situation);
-		if (next.kind !== "blocked" && attachmentRefusal(attached.current, running) === null) {
+		if (
+			next.kind !== "blocked" &&
+			shellBlock(next.kind, attached.current.length) === null &&
+			attachmentRefusal(attached.current, running) === null
+		) {
 			sending.current = true;
 			browse.current = null;
 			rememberPrompt(current.text);
@@ -590,6 +639,7 @@ export const Composer = memo(function Composer({
 
 	const notice =
 		noticeForError(send.error ?? interrupt.error ?? stop.error ?? drain.error) ??
+		queueNote ??
 		noticeForRefusal(send.data) ??
 		noticeForRefusal(interrupt.data);
 
@@ -691,6 +741,21 @@ export const Composer = memo(function Composer({
 									<StatusMark tone="warn" label={message.queue === "steer" ? "Now" : "After this turn"} />
 									<span className="composer__queue-text" title={message.text}>
 										{message.text}
+									</span>
+									<span className="composer__queue-actions">
+										{queueActions(message, queued, queueOps).map((action) => (
+											<button
+												key={action.key}
+												className={`composer__attachment-action${action.icon ? " composer__attachment-remove" : ""}`}
+												type="button"
+												disabled={edit.isPending}
+												aria-label={action.icon ? `${action.label}: ${message.text.slice(0, 80)}` : undefined}
+												title={action.title}
+												onClick={() => edit.mutate(action.request)}
+											>
+												{action.icon ? <Icon name={action.icon} /> : action.label}
+											</button>
+										))}
 									</span>
 								</li>
 							))}
@@ -1156,6 +1221,12 @@ export const Composer = memo(function Composer({
 								Retry control check
 							</button>
 						) : null}
+					</p>
+				) : null}
+				{shellHint !== null && intent.kind === "shell" && attachBlock === null ? (
+					<p className="composer__notice" role="status">
+						<StatusMark tone="neutral" label="Shell" />
+						{shellHint}
 					</p>
 				) : null}
 				{slash && !send.isPending ? (

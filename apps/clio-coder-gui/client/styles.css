@@ -43,7 +43,7 @@ pre,
 	::-webkit-scrollbar-thumb {
 		background: var(--scroll-thumb);
 		border: 2px solid transparent;
-		border-radius: 999px;
+		border-radius: var(--radius-sm);
 		background-clip: content-box;
 	}
 	::-webkit-scrollbar-thumb:hover {
@@ -90,7 +90,7 @@ button {
 	min-height: 34px;
 	padding: 6px 13px;
 	border: 1px solid var(--line-strong);
-	border-radius: 8px;
+	border-radius: var(--radius-sm);
 	color: var(--ink);
 	background: transparent;
 	font-size: var(--text-meta);
@@ -117,7 +117,7 @@ textarea {
 	width: 100%;
 	padding: 8px 12px;
 	border: 1px solid var(--line-strong);
-	border-radius: 8px;
+	border-radius: var(--radius-sm);
 	color: var(--ink);
 	background: var(--wb-faint);
 	font-size: var(--text-meta);
@@ -331,7 +331,7 @@ nav a:hover {
 }
 .count {
 	border: 1px solid var(--line-strong);
-	border-radius: var(--radius-pill);
+	border-radius: var(--radius-sm);
 	padding: 9px 14px;
 	font-size: var(--text-exact);
 	font-variant-numeric: tabular-nums;
@@ -354,7 +354,7 @@ nav a:hover {
 	gap: 6px;
 	padding: 2px var(--space-2);
 	border: 1px solid var(--status-neutral-line);
-	border-radius: var(--radius-pill);
+	border-radius: var(--radius-sm);
 	font-family: var(--font-ui);
 	font-size: var(--text-exact);
 	font-weight: 600;
@@ -418,7 +418,7 @@ nav a:hover {
 /* Dialogs and notifications */
 .app-dialog {
 	border: 1px solid var(--line-float);
-	border-radius: var(--radius-lg);
+	border-radius: var(--radius-md);
 	background: var(--raised);
 	color: var(--ink);
 	padding: var(--space-6);
@@ -577,7 +577,7 @@ nav a:hover {
 .home-resume {
 	padding: var(--space-6);
 	border: 1px solid var(--line-strong);
-	border-radius: var(--radius-lg);
+	border-radius: var(--radius-md);
 	background: var(--surface);
 }
 .home-resume__heading {
@@ -801,7 +801,7 @@ nav a:hover {
 	line-height: 1.5;
 	padding: 1px 9px;
 	border: 1px solid var(--status-neutral-line);
-	border-radius: var(--radius-pill);
+	border-radius: var(--radius-sm);
 	background: var(--status-neutral-tint);
 	color: var(--status-neutral-fg);
 }
@@ -826,7 +826,7 @@ nav a:hover {
 	margin-top: var(--space-5);
 	border: 1px solid var(--line);
 	padding: var(--space-5) var(--space-6);
-	border-radius: var(--radius-lg);
+	border-radius: var(--radius-md);
 	background: var(--wb-faint);
 	min-width: 0;
 }
@@ -875,7 +875,7 @@ nav a:hover {
 .trace-panel button,
 .trace-filters button {
 	border: 1px solid var(--line-strong);
-	border-radius: 8px;
+	border-radius: var(--radius-sm);
 	background: transparent;
 	color: var(--ink);
 }
@@ -927,7 +927,7 @@ nav a:hover {
 	padding: var(--space-4);
 	font-size: var(--text-exact);
 	line-height: 1.6;
-	border-radius: var(--radius-xs);
+	border-radius: var(--radius-sm);
 }
 .trace-warning {
 	color: var(--status-warn-fg);

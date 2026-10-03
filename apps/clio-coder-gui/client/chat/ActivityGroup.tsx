@@ -32,7 +32,7 @@ import { observeStart } from "./chat-turn.js";
 import { ReasoningDisclosure } from "./Reasoning.js";
 import { WorkerReceipt } from "./ReceiptLine.js";
 import { ToolCard } from "./tool-cards.js";
-import { describeTool } from "./tool-presentation.js";
+import { describeTool, presentTool } from "./tool-presentation.js";
 import "./chat-turn.css";
 
 export interface ActivityGroupProps {
@@ -92,20 +92,29 @@ export function ActivityGroup({ items, settled, client, session, workspaceRoot, 
 	// Null means "nobody has touched this". Once the operator toggles, their choice wins forever.
 	const [userOpen, setUserOpen] = useState<boolean | null>(null);
 	const summary = summarizeActivity(items);
-	const open = activityOpen(userOpen, settled, summary);
 	const running = runningItem(items);
 	// While a request is waiting, its card is the statement; the engine's "pending" notice beside it
 	// says the same thing twice. Once answered, the notice is the record.
 	const waiting = session.permissions.some(isAwaitingAnswer);
 	const rows = waiting ? items.filter((item) => item.kind !== "notice" || item.toolKind === "safety") : items;
+	// One settled call needs no group around it: "1 tool completed" over a single row is two clicks to
+	// read one line. The row stands in the transcript by itself. A change is left grouped, because its
+	// row opens to a diff and the turn already lists its changes at the end. The markup stays the same
+	// either way, so a row the operator opened while it ran keeps its state when the group settles.
+	const only = rows.length === 1 && items.length === 1 ? rows[0] : undefined;
+	const solo =
+		settled &&
+		only?.kind === "tool" &&
+		presentTool(only, workspaceRoot === undefined ? {} : { workspaceRoot }).body !== "diff";
+	const open = solo || activityOpen(userOpen, settled, summary);
 	const detail =
 		summary.waiting > 0 ? null : running !== null ? describeTool(running, workspaceRoot) : activityDigest(items);
 	return (
 		<details
-			className={`activity activity--${summary.tone}`}
+			className={`activity activity--${summary.tone}${solo ? " activity--solo" : ""}`}
 			open={open}
 			onToggle={(event) => {
-				if (event.currentTarget.open !== open) setUserOpen(event.currentTarget.open);
+				if (!solo && event.currentTarget.open !== open) setUserOpen(event.currentTarget.open);
 			}}
 		>
 			<summary className="activity__summary">

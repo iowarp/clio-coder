@@ -6,7 +6,7 @@
 	color: var(--ink);
 	background: var(--surface);
 	border: 1px solid var(--line-strong);
-	border-radius: var(--radius-lg);
+	border-radius: var(--radius-md);
 	box-shadow: var(--shadow-float);
 	overflow: hidden;
 }

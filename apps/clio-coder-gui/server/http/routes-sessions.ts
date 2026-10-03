@@ -39,6 +39,12 @@ export function sessionRoutes(
 	register(app, hub, routes.clearSessionQueue, ({ params }, context) =>
 		commands.run(`queue.clear:${params.id}`, idempotencyKey(context), {}, () => supervisor.clearQueue(params.id)),
 	);
+	register(app, hub, routes.editSessionQueue, ({ params, body }, context) =>
+		commands.run(`queue.edit:${params.id}`, idempotencyKey(context), body, () => supervisor.editQueue(params.id, body)),
+	);
+	register(app, hub, routes.shellSession, ({ params, body }, context) =>
+		commands.run(`shell:${params.id}`, idempotencyKey(context), body, async () => supervisor.shell(params.id, body)),
+	);
 	register(app, hub, routes.interruptSession, ({ params, body }, context) =>
 		commands.run(`interrupt:${params.id}`, idempotencyKey(context), body, () =>
 			supervisor.interrupt(params.id, body.reason),

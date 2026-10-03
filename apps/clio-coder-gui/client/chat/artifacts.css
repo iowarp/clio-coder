@@ -52,7 +52,7 @@
 	padding: 12px 4px;
 	text-align: left;
 	border: 0;
-	border-radius: 8px;
+	border-radius: var(--radius-sm);
 	background: transparent;
 }
 .artifacts__list button:hover {
@@ -80,7 +80,7 @@
 	padding: 14px;
 	background: var(--code-paper);
 	border: 1px solid var(--line);
-	border-radius: 10px;
+	border-radius: var(--radius-md);
 	font-size: 12px;
 }
 .artifacts__paging {
@@ -95,7 +95,7 @@
 	padding: 12px;
 	background: var(--wb-faint);
 	border: 1px solid var(--line);
-	border-radius: 10px;
+	border-radius: var(--radius-md);
 	overflow-wrap: anywhere;
 }
 .project-trust {
@@ -105,7 +105,7 @@
 	padding: 12px 16px;
 	background: var(--raised);
 	border: 1px solid var(--line-float);
-	border-radius: 14px;
+	border-radius: var(--radius-md);
 	font-size: 13px;
 }
 .project-trust summary {

@@ -125,7 +125,7 @@ code.agents-mono {
 	min-height: 26px;
 	padding: 0 10px;
 	border: 1px solid var(--line-float);
-	border-radius: var(--radius-pill);
+	border-radius: var(--radius-sm);
 	color: var(--ink-muted);
 	font-size: 12px;
 }

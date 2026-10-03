@@ -17,6 +17,8 @@ import type { SessionSnapshot, Turn, Usage } from "../../contracts/sessions.js";
 import {
 	type CommandCatalog,
 	QUEUE_MAX_ENTRIES,
+	type QueueEditRequest,
+	type QueueEditResult,
 	type QueueSnapshot,
 	STEER_TEXT_MAX_BYTES,
 	type SteerMode,
@@ -325,6 +327,12 @@ export function steerModeOffers(affordances: SteeringAffordances): readonly Stee
 export type SubmitIntent =
 	| { readonly kind: "prompt"; readonly text: string; readonly idempotencyKey: string }
 	| { readonly kind: "steer"; readonly text: string; readonly mode: SteerMode; readonly idempotencyKey: string }
+	| {
+			readonly kind: "shell";
+			readonly command: string;
+			readonly excludeFromContext: boolean;
+			readonly idempotencyKey: string;
+	  }
 	| { readonly kind: "blocked"; readonly reason: string };
 
 export interface ComposerSituation {
@@ -335,6 +343,31 @@ export interface ComposerSituation {
 	readonly steering: SteeringAffordances;
 	/** Absent when the agent's capability answer is available. */
 	readonly steeringUnavailable?: "checking" | "failed";
+	/** The agent announced the operator shell line, so a draft that opens with `!` runs instead of being sent. */
+	readonly shell?: boolean;
+}
+
+export interface ShellLine {
+	readonly command: string;
+	/** `!!`: the output is recorded and kept out of Clio's context. */
+	readonly excludeFromContext: boolean;
+}
+
+/** The terminal's rule: a draft that opens with `!` is a shell line, and `!!` keeps its output from Clio. */
+export function shellLine(text: string): ShellLine | null {
+	const trimmed = text.trim();
+	if (!trimmed.startsWith("!")) return null;
+	const excludeFromContext = trimmed.startsWith("!!");
+	return { command: trimmed.slice(excludeFromContext ? 2 : 1).trim(), excludeFromContext };
+}
+
+/** Says what Enter will do before it does it, because a shell line runs as the operator and not through Clio. */
+export function shellNotice(text: string, shell: boolean): string | null {
+	const line = shell ? shellLine(text) : null;
+	if (line === null) return null;
+	return line.excludeFromContext
+		? "Runs in this task's shell as you. The output is recorded and kept out of Clio's context."
+		: "Runs in this task's shell as you. Clio sees the command and its output. Start with !! to keep the output from her.";
 }
 
 const CLOSED_SESSION_REASON: Readonly<Record<string, string>> = {
@@ -374,6 +407,14 @@ export function submitIntent(draft: Draft, situation: ComposerSituation): Submit
 		return blocked(CLOSED_SESSION_REASON[situation.sessionState] ?? "This task cannot take a message.");
 	const text = draft.text.trim();
 	if (text === "") return blocked("Write a message first.");
+	const line = situation.shell ? shellLine(text) : null;
+	if (line !== null) {
+		if (line.command === "") return blocked("Write a command after the !.");
+		if (/[\n\r]/u.test(line.command)) return blocked("A shell line is one line. Join the commands with && or ;.");
+		if (situation.turnRunning) return blocked("A shell line runs between turns. Wait for this turn or stop it.");
+		const over = tooLong(line.command, STEER_TEXT_MAX_BYTES, STEER_TEXT_MAX_BYTES);
+		return over === null ? { kind: "shell", ...line, idempotencyKey: draft.key } : blocked(over);
+	}
 	if (situation.turnRunning) {
 		if (situation.steeringUnavailable === "checking")
 			return blocked("Checking whether this agent can accept a message during the current turn.");
@@ -396,6 +437,7 @@ export function submitIntent(draft: Draft, situation: ComposerSituation): Submit
 export function submitLabel(intent: SubmitIntent, situation: ComposerSituation, mode?: SteerMode): string {
 	if (intent.kind === "steer") return intent.mode === "next-slot" ? "Send now" : "Queue for after";
 	if (intent.kind === "prompt") return "Send";
+	if (intent.kind === "shell") return "Run";
 	// A blocked button (empty draft) still names what the chosen delivery mode would do.
 	if (!(situation.turnRunning && situation.steering.steer)) return "Send";
 	return mode === "end-of-turn" ? "Queue for after" : "Send now";
@@ -455,6 +497,10 @@ export interface QueuedMessage {
 	readonly position: number;
 	readonly text: string;
 	readonly lands: string;
+	/** The engine's id for the entry; absent from an engine that reports texts only, which offers no per-message control. */
+	readonly entryId?: string;
+	/** The operator chose this slot, so steering triage leaves it there. */
+	readonly pinned?: boolean;
 }
 
 /**
@@ -466,6 +512,20 @@ export interface QueuedMessage {
 export function projectQueue(snapshot: QueueSnapshot | null | undefined): readonly QueuedMessage[] {
 	if (!snapshot) return [];
 	const rows: QueuedMessage[] = [];
+	if (snapshot.entries) {
+		const seen: Record<QueueName, number> = { steer: 0, "follow-up": 0 };
+		for (const entry of snapshot.entries.slice(0, QUEUE_MAX_ENTRIES))
+			rows.push({
+				id: entry.id,
+				queue: entry.kind,
+				position: ++seen[entry.kind],
+				text: entry.text,
+				lands: MODE_COPY[entry.kind === "steer" ? "next-slot" : "end-of-turn"].lands,
+				entryId: entry.id,
+				pinned: entry.pinned,
+			});
+		return rows;
+	}
 	const push = (queue: QueueName, texts: readonly string[], lands: string) => {
 		for (const [index, text] of texts.slice(0, QUEUE_MAX_ENTRIES).entries())
 			rows.push({ id: `${queue}:${index}`, queue, position: index + 1, text, lands });
@@ -483,6 +543,105 @@ export function queueSummary(messages: readonly QueuedMessage[]): string {
 	if (steering > 0) parts.push(`${steering} waiting for the next tool call`);
 	if (followUp > 0) parts.push(`${followUp} waiting for the turn to end`);
 	return `${parts.join(" · ")}.`;
+}
+
+export interface QueueAction {
+	readonly key: string;
+	readonly request: QueueEditRequest;
+	readonly label: string;
+	readonly title: string;
+	readonly icon: "bolt" | "arrowUp" | "arrowDown" | "pencil" | "close" | null;
+}
+
+/**
+ * The controls one waiting message carries, limited to the operations the agent announced. A move
+ * past either end of the message's own queue is left out, since the engine would answer `at-edge`.
+ */
+export function queueActions(
+	message: QueuedMessage,
+	messages: readonly QueuedMessage[],
+	ops: readonly string[] | undefined,
+): readonly QueueAction[] {
+	const id = message.entryId;
+	if (id === undefined || ops === undefined) return [];
+	const actions: QueueAction[] = [];
+	const siblings = messages.filter((row) => row.queue === message.queue).length;
+	if (ops.includes("send_now"))
+		actions.push({
+			key: "send_now",
+			request: { id, op: "send_now" },
+			label: "Send now",
+			title: "Interrupt the turn and send this message now. The rest of the queue waits for the new run.",
+			icon: "bolt",
+		});
+	if (ops.includes("move") && message.position > 1)
+		actions.push({
+			key: "up",
+			request: { id, op: "move", delta: -1 },
+			label: "Move earlier",
+			title: "Deliver this message one place earlier.",
+			icon: "arrowUp",
+		});
+	if (ops.includes("move") && message.position < siblings)
+		actions.push({
+			key: "down",
+			request: { id, op: "move", delta: 1 },
+			label: "Move later",
+			title: "Deliver this message one place later.",
+			icon: "arrowDown",
+		});
+	if (ops.includes("set_kind")) {
+		const after = message.queue === "steer";
+		actions.push({
+			key: "set_kind",
+			request: { id, op: "set_kind", kind: after ? "follow-up" : "steer" },
+			label: after ? "After" : "Now",
+			title: after
+				? "Hold this message until the whole turn has settled."
+				: "Deliver this message between tool calls, while the turn is still running.",
+			icon: null,
+		});
+	}
+	if (ops.includes("restore"))
+		actions.push({
+			key: "restore",
+			request: { id, op: "restore" },
+			label: "Edit",
+			title: "Take this message out of the queue and back into the field.",
+			icon: "pencil",
+		});
+	if (ops.includes("remove"))
+		actions.push({
+			key: "remove",
+			request: { id, op: "remove" },
+			label: "Remove",
+			title: "Remove this message from the queue.",
+			icon: "close",
+		});
+	return actions;
+}
+
+const QUEUE_REFUSAL: Readonly<Record<string, string>> = {
+	"stale-entry": "That message already left the queue.",
+	"at-edge": "That message is already at the end of its queue.",
+	"no-active-prompt": "No turn is running, so there is nothing to interrupt. Send the message as a new turn.",
+	"prompt-ending": "The turn is ending. The message goes out when it settles.",
+	"not-streaming": "The turn is not at a point where it can be interrupted. The message stays in the queue.",
+};
+
+/** What a queue edit reported that the operator has to know: a named refusal, or an interrupt the engine declined. */
+export function noticeForQueueEdit(result: QueueEditResult): ComposerNotice | null {
+	if (!result.applied)
+		return {
+			tone: "warn",
+			message: QUEUE_REFUSAL[result.reason ?? ""] ?? "The engine did not change the queue, and reported no reason.",
+		};
+	if (result.delivery === "next-slot")
+		return {
+			tone: "warn",
+			message: `${result.refusal ?? "The engine could not interrupt the turn."} The message is first in the queue.`,
+		};
+	return null;
 }
 
 /**

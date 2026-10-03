@@ -30,14 +30,88 @@ export const SteerResult = Type.Object(
 	closed,
 );
 export type SteerResult = Static<typeof SteerResult>;
+export const QueueKind = Type.Union([Type.Literal("steer"), Type.Literal("follow-up")]);
+export type QueueKind = Static<typeof QueueKind>;
+/** One waiting message. `pinned` means the operator chose its slot, so steering triage leaves it there. */
+export const QueueEntry = Type.Object(
+	{
+		id: Type.String({ minLength: 1, maxLength: 128 }),
+		kind: QueueKind,
+		text: Type.String({ maxLength: STEER_TEXT_MAX_BYTES }),
+		enqueuedAt: Type.Number(),
+		pinned: Type.Boolean(),
+	},
+	closed,
+);
+export type QueueEntry = Static<typeof QueueEntry>;
+const queueEntries = Type.Array(QueueEntry, { maxItems: QUEUE_MAX_ENTRIES });
+/** `entries` is the queue in delivery order, with ids; an engine without the `queue` capability omits it. */
 export const QueueSnapshot = Type.Object(
 	{
 		steer: Type.Array(Type.String({ maxLength: STEER_TEXT_MAX_BYTES }), { maxItems: QUEUE_MAX_ENTRIES }),
 		followUp: Type.Array(Type.String({ maxLength: STEER_TEXT_MAX_BYTES }), { maxItems: QUEUE_MAX_ENTRIES }),
+		entries: Type.Optional(queueEntries),
 	},
 	closed,
 );
 export type QueueSnapshot = Static<typeof QueueSnapshot>;
+/** `_clio-coder/session/queue_changed`, as the event stream carries it. */
+export const QueueChanged = Type.Object({ sessionId: Type.String({ maxLength: 128 }), entries: queueEntries }, closed);
+/** `delta` goes only with `move` and `kind` only with `set_kind`; the engine refuses any other pairing. */
+export const QueueEditRequest = Type.Object(
+	{
+		id: Type.String({ minLength: 1, maxLength: 128 }),
+		op: Type.Union([
+			Type.Literal("remove"),
+			Type.Literal("restore"),
+			Type.Literal("move"),
+			Type.Literal("set_kind"),
+			Type.Literal("send_now"),
+		]),
+		delta: Type.Optional(Type.Union([Type.Literal(-1), Type.Literal(1)])),
+		kind: Type.Optional(QueueKind),
+	},
+	closed,
+);
+export type QueueEditRequest = Static<typeof QueueEditRequest>;
+/**
+ * `applied: false` names why in `reason` (`stale-entry`, `at-edge`, and for
+ * `send_now` `no-active-prompt`, `prompt-ending`, `not-streaming`). `text` is
+ * what `restore` and `send_now` took out; `delivery: "next-slot"` with a
+ * `refusal` means the engine could not interrupt and queued the text first.
+ */
+export const QueueEditResult = Type.Object(
+	{
+		applied: Type.Boolean(),
+		reason: Type.Optional(name),
+		text: Type.Optional(Type.String({ maxLength: STEER_TEXT_MAX_BYTES })),
+		delivery: Type.Optional(Type.Union([Type.Literal("interrupt"), Type.Literal("next-slot")])),
+		refusal: Type.Optional(copy),
+		entries: queueEntries,
+	},
+	closed,
+);
+export type QueueEditResult = Static<typeof QueueEditResult>;
+/** The terminal's `!` line: one line, run in the session's sandbox between turns. */
+export const ShellRequest = Type.Object(
+	{
+		command: Type.String({ minLength: 1, maxLength: STEER_TEXT_MAX_BYTES, pattern: "^[^\\n\\r]*\\S[^\\n\\r]*$" }),
+		/** The terminal's `!!`: the output is recorded and kept out of Clio's context. */
+		excludeFromContext: Type.Optional(Type.Boolean()),
+	},
+	closed,
+);
+export type ShellRequest = Static<typeof ShellRequest>;
+/** What `_clio-coder/session/shell` answers once the line has ended; the output itself arrives as tool frames. */
+export const ShellOutcome = Type.Object(
+	{
+		cancelled: Type.Boolean(),
+		timedOut: Type.Boolean(),
+		excludedFromContext: Type.Boolean(),
+		unlabeled: Type.Optional(Type.Boolean()),
+	},
+	closed,
+);
 /** Both queues drain together, and the returned texts are the client's to re-send. */
 export const QueueCleared = Type.Object(
 	{ restored: Type.Array(Type.String({ maxLength: STEER_TEXT_MAX_BYTES }), { maxItems: 2 * QUEUE_MAX_ENTRIES }) },

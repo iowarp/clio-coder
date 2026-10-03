@@ -13,7 +13,7 @@
 	content: "";
 	inline-size: 6px;
 	block-size: 6px;
-	border-radius: var(--radius-pill);
+	border-radius: var(--radius-sm);
 	background: var(--status-running-line);
 }
 .trace-live[data-state="live"] {

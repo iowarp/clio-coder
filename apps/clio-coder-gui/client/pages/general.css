@@ -109,7 +109,7 @@
 .shortcut-list kbd {
 	padding: 2px 8px;
 	border: 1px solid var(--line-strong);
-	border-radius: var(--radius-xs);
+	border-radius: var(--radius-sm);
 	font: 12px var(--font-mono);
 	color: var(--ink-muted);
 	white-space: nowrap;

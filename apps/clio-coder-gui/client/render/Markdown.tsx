@@ -21,7 +21,10 @@ import {
 	lexMarkdown,
 	type MarkdownToken,
 	mermaidSourceProblem,
+	numericColumns,
 	safeHref,
+	tableText,
+	tokenText,
 } from "./markdown-model.js";
 import { type MermaidResult, mermaidThemeKey, renderMermaid, subscribeMermaidTheme } from "./mermaid.js";
 
@@ -297,6 +300,9 @@ export const MermaidBlock = memo(function MermaidBlock({ source, settled }: Merm
 	const [rendered, setRendered] = useState<{ source: string; result: MermaidResult } | null>(null);
 	const result = rendered?.source === source ? rendered.result : null;
 	const [showSource, setShowSource] = useState(false);
+	// Offered only when the drawing is wider than its column, which is when fitting it shrinks the labels.
+	const [shrunk, setShrunk] = useState(false);
+	const [fullSize, setFullSize] = useState(false);
 	const problem = mermaidSourceProblem(source);
 	const wantsRender = settled && !streaming && near && problem === null;
 	// Mermaid bakes its colours into the drawing, so a theme change draws it again from the new tokens.
@@ -333,9 +339,25 @@ export const MermaidBlock = memo(function MermaidBlock({ source, settled }: Merm
 						: null;
 	const sourceVisible = state !== "rendered" || showSource;
 	return (
-		<figure className={`diagram is-${state}`} ref={container} aria-label="Mermaid diagram">
+		<figure
+			className={`diagram is-${state}`}
+			ref={container}
+			aria-label="Mermaid diagram"
+			data-zoom={state === "rendered" && fullSize && shrunk ? "" : undefined}
+		>
 			<div className="code-block__head">
 				<span className="code-block__lang">mermaid</span>
+				{state === "rendered" && shrunk && (
+					<button
+						type="button"
+						className="code-block__copy"
+						aria-pressed={fullSize}
+						title="Draw the diagram at its own size and scroll it, instead of shrinking it to the column"
+						onClick={() => setFullSize((current) => !current)}
+					>
+						Full size
+					</button>
+				)}
 				{state === "rendered" && (
 					<button
 						type="button"
@@ -350,7 +372,7 @@ export const MermaidBlock = memo(function MermaidBlock({ source, settled }: Merm
 			</div>
 			{state === "rendered" && result !== null && result.ok && (
 				// Strict Mermaid output is sanitized by DOMPurify before DOM import.
-				<SanitizedDiagram svg={result.svg} />
+				<SanitizedDiagram svg={result.svg} onShrunk={setShrunk} />
 			)}
 			{sourceVisible && (
 				<CodeViewport>
@@ -543,35 +565,8 @@ const Block = memo(function Block({ token, settled }: { token: MarkdownToken; se
 			if (codeLanguage(code.lang).mermaid) return <MermaidBlock source={code.text} settled={settled} />;
 			return <CodeBlock code={code.text} info={code.lang} settled={settled} />;
 		}
-		case "table": {
-			const table = token as Tokens.Table;
-			return (
-				<TableViewport>
-					<table>
-						<thead>
-							<tr>
-								{table.header.map((cell, index) => (
-									<th scope="col" style={cell.align ? { textAlign: cell.align } : undefined} key={tokenKey(index)}>
-										<Inline tokens={cell.tokens} />
-									</th>
-								))}
-							</tr>
-						</thead>
-						<tbody>
-							{table.rows.map((row, index) => (
-								<tr key={tokenKey(index)}>
-									{row.map((cell, cellIndex) => (
-										<td style={cell.align ? { textAlign: cell.align } : undefined} key={tokenKey(cellIndex)}>
-											<Inline tokens={cell.tokens} />
-										</td>
-									))}
-								</tr>
-							))}
-						</tbody>
-					</table>
-				</TableViewport>
-			);
-		}
+		case "table":
+			return <TableBlock table={token as Tokens.Table} settled={settled} />;
 		case "hr":
 			return <hr />;
 		case "html": {
@@ -594,6 +589,53 @@ const Block = memo(function Block({ token, settled }: { token: MarkdownToken; se
 		}
 	}
 });
+
+/**
+ * A table reads as data: a column of numbers is set right-aligned in tabular figures unless the
+ * author aligned it, the header stays in view while a long table scrolls, and a settled table can
+ * be copied as cells.
+ */
+function TableBlock({ table, settled }: { table: Tokens.Table; settled: boolean }) {
+	const cells = useMemo(() => {
+		const header = table.header.map((cell) => tokenText(cell.tokens));
+		const rows = table.rows.map((row) => row.map((cell) => tokenText(cell.tokens)));
+		return { header, rows, numeric: numericColumns(rows, header.length) };
+	}, [table]);
+	const cellProps = (align: Tokens.TableCell["align"], column: number) =>
+		align ? { style: { textAlign: align } } : cells.numeric[column] ? { className: "md-table__number" } : {};
+	return (
+		<TableViewport
+			action={
+				settled && table.rows.length > 0 ? (
+					<CopyButton text={tableText(cells.header, cells.rows)} label="Copy table" />
+				) : null
+			}
+		>
+			<table>
+				<thead>
+					<tr>
+						{table.header.map((cell, index) => (
+							<th scope="col" {...cellProps(cell.align, index)} key={tokenKey(index)}>
+								<Inline tokens={cell.tokens} />
+							</th>
+						))}
+					</tr>
+				</thead>
+				<tbody>
+					{table.rows.map((row, index) => (
+						<tr key={tokenKey(index)}>
+							{row.map((cell, cellIndex) => (
+								<td {...cellProps(cell.align, cellIndex)} key={tokenKey(cellIndex)}>
+									<Inline tokens={cell.tokens} />
+								</td>
+							))}
+						</tr>
+					))}
+				</tbody>
+			</table>
+		</TableViewport>
+	);
+}
 
 export const Blocks = memo(function Blocks({
 	tokens,
@@ -669,7 +711,7 @@ const NO_TOKENS: readonly MarkdownToken[] = [];
  * so the keyboard can move it, but a table that fits should not add a Tab stop, so focus and the
  * label follow the measured overflow. Sections that are closed measure zero and update on opening.
  */
-function TableViewport({ children }: { children: ReactNode }) {
+function TableViewport({ children, action }: { children: ReactNode; action: ReactNode }) {
 	const wrapper = useRef<HTMLDivElement>(null);
 	const [scrolls, setScrolls] = useState(false);
 	useEffect(() => {
@@ -690,8 +732,11 @@ function TableViewport({ children }: { children: ReactNode }) {
 	// Name and focus the scroll container without adding a page landmark for every table.
 	const scrolling = scrolls ? ({ tabIndex: 0, role: "group", "aria-label": "Scrollable table" } as const) : {};
 	return (
-		<div className="md-table" ref={wrapper} {...scrolling}>
-			{children}
+		<div className="md-table-frame">
+			<div className="md-table" ref={wrapper} {...scrolling}>
+				{children}
+			</div>
+			{action === null ? null : <div className="md-table__action">{action}</div>}
 		</div>
 	);
 }
@@ -725,7 +770,7 @@ function highlightKey(token: object) {
 	return key;
 }
 /** Only renderMermaid's sanitized SVG enters this sink; model Markdown always uses React text nodes. */
-function SanitizedDiagram({ svg }: { svg: string }) {
+function SanitizedDiagram({ svg, onShrunk }: { svg: string; onShrunk: (shrunk: boolean) => void }) {
 	const ref = useRef<HTMLDivElement>(null);
 	useEffect(() => {
 		const root = ref.current;
@@ -734,6 +779,7 @@ function SanitizedDiagram({ svg }: { svg: string }) {
 		if (document.documentElement.localName !== "svg") return;
 		root.replaceChildren(root.ownerDocument.importNode(document.documentElement, true));
 		let cancelled = false;
+		let observer: ResizeObserver | null = null;
 		// Some Mermaid layouts compute a viewBox before translated nodes settle.
 		// Fit the sanitized, mounted drawing once, after local fonts are ready.
 		void root.ownerDocument.fonts.ready.then(() => {
@@ -743,12 +789,21 @@ function SanitizedDiagram({ svg }: { svg: string }) {
 			const box = drawing.getBBox();
 			if (![box.x, box.y, box.width, box.height].every(Number.isFinite) || box.width <= 0 || box.height <= 0) return;
 			drawing.setAttribute("viewBox", `${box.x - 8} ${box.y - 8} ${box.width + 16} ${box.height + 16}`);
-			drawing.style.maxWidth = `${box.width + 16}px`;
+			const natural = box.width + 16;
+			drawing.style.setProperty("--diagram-width", `${natural}px`);
+			// The canvas pads 16px a side; a drawing wider than what is left is being scaled down.
+			const measure = () => onShrunk(natural > root.clientWidth - 32 + 1);
+			measure();
+			if (typeof ResizeObserver !== "undefined") {
+				observer = new ResizeObserver(measure);
+				observer.observe(root);
+			}
 		});
 		return () => {
 			cancelled = true;
+			observer?.disconnect();
 			root.replaceChildren();
 		};
-	}, [svg]);
+	}, [svg, onShrunk]);
 	return <div className="diagram__canvas" ref={ref} />;
 }

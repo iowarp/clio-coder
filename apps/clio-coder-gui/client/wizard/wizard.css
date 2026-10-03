@@ -318,7 +318,7 @@
 }
 .wizard-code {
 	padding: 2px 8px;
-	border-radius: var(--radius-xs);
+	border-radius: var(--radius-sm);
 	background: var(--well);
 	font-family: var(--font-mono);
 	font-size: var(--text-body);
@@ -493,7 +493,7 @@
 	flex: none;
 	width: 36px;
 	height: 36px;
-	border-radius: var(--radius-xs);
+	border-radius: var(--radius-sm);
 	background: var(--well);
 	color: var(--secondary);
 	font: 500 var(--text-exact) / 1 var(--font-mono);

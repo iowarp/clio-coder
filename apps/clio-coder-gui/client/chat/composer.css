@@ -69,7 +69,7 @@
 	min-height: 32px;
 	padding: 6px;
 	border: 0;
-	border-radius: 8px;
+	border-radius: var(--radius-sm);
 	background: transparent;
 	color: var(--ink-muted);
 	cursor: pointer;
@@ -102,7 +102,7 @@
 .route-picker__panel,
 .autonomy__panel {
 	border: 1px solid var(--line-float);
-	border-radius: var(--radius-lg);
+	border-radius: var(--radius-md);
 	background: var(--raised);
 	box-shadow: var(--shadow-panel);
 	animation: composer-panel-open var(--motion-fast) var(--ease-standard);
@@ -247,7 +247,7 @@
 	max-width: 26rem;
 	padding: 4px 6px 4px 10px;
 	border: 0;
-	border-radius: 8px;
+	border-radius: var(--radius-sm);
 	cursor: pointer;
 	list-style: none;
 	transition:
@@ -373,7 +373,7 @@
 	width: auto;
 	padding: 0 var(--space-3) 0 var(--space-2);
 	border: 1px solid var(--line-strong);
-	border-radius: var(--radius-pill);
+	border-radius: var(--radius-sm);
 	background: var(--paper);
 	color: var(--ink);
 	font-size: var(--text-meta);
@@ -452,6 +452,25 @@
 	overflow: hidden;
 	text-overflow: ellipsis;
 	white-space: nowrap;
+}
+.composer__queue-actions {
+	display: inline-flex;
+	flex: none;
+	align-items: center;
+	align-self: center;
+	gap: 2px;
+}
+/* A narrow composer gives the message the whole line and puts its controls under it. */
+@container composer (max-width: 520px) {
+	.composer__queue-row {
+		flex-wrap: wrap;
+	}
+	.composer__queue-text {
+		flex-basis: 60%;
+	}
+	.composer__queue-actions {
+		margin-left: auto;
+	}
 }
 /* A queue row's mark is a glyph and a word, not a pill. The toned selector is needed because a tone's
    tint is declared later and would otherwise win on load order. */
@@ -690,7 +709,7 @@
 	height: 36px;
 	padding: 0 4px;
 	border: 1px solid var(--line);
-	border-radius: 8px;
+	border-radius: var(--radius-sm);
 	background: var(--wb-faint);
 }
 .composer__attachments img,
@@ -698,7 +717,7 @@
 	flex: none;
 	width: 28px;
 	height: 28px;
-	border-radius: 6px;
+	border-radius: var(--radius-sm);
 }
 .composer__attachments img {
 	object-fit: cover;
@@ -743,7 +762,7 @@
 	height: 24px;
 	padding: 0 6px;
 	border: 1px solid transparent;
-	border-radius: 8px;
+	border-radius: var(--radius-sm);
 	background: transparent;
 	color: var(--ink-muted);
 	font-size: var(--text-meta);
@@ -762,7 +781,8 @@
 	height: var(--icon-sm);
 }
 /* The queue's one action reuses the chip control at the summary's size; it follows that control so it wins. */
-.composer__queue-head .composer__attachment-action {
+.composer__queue-head .composer__attachment-action,
+.composer__queue-actions .composer__attachment-action {
 	font-size: var(--text-exact);
 }
 /* What a large paste did, in the stack above the field with the queue and the attachment chips. */
@@ -834,7 +854,7 @@
 	padding: var(--space-2) var(--space-3);
 	overflow: auto;
 	border: 1px solid var(--code-line);
-	border-radius: 8px;
+	border-radius: var(--radius-md);
 	background: var(--code-paper);
 	color: var(--code-ink);
 	white-space: pre-wrap;
@@ -856,7 +876,7 @@
 	gap: 6px;
 	min-height: 32px;
 	padding: 4px 10px;
-	border-radius: 8px;
+	border-radius: var(--radius-sm);
 	list-style: none;
 	cursor: pointer;
 	white-space: nowrap;

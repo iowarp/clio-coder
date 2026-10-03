@@ -11068,6 +11068,52 @@
 											},
 											"additionalProperties": false
 										},
+										"queue": {
+											"type": "object",
+											"required": ["version", "edit", "ops", "notification"],
+											"properties": {
+												"version": {
+													"type": "number",
+													"const": 1
+												},
+												"edit": {
+													"type": "string",
+													"maxLength": 128
+												},
+												"ops": {
+													"type": "array",
+													"items": {
+														"type": "string",
+														"maxLength": 32
+													},
+													"maxItems": 16
+												},
+												"notification": {
+													"type": "string",
+													"maxLength": 128
+												}
+											},
+											"additionalProperties": false
+										},
+										"shell": {
+											"type": "object",
+											"required": ["version", "run", "timeoutMs"],
+											"properties": {
+												"version": {
+													"type": "number",
+													"const": 1
+												},
+												"run": {
+													"type": "string",
+													"maxLength": 128
+												},
+												"timeoutMs": {
+													"type": "integer",
+													"minimum": 1
+												}
+											},
+											"additionalProperties": false
+										},
 										"commands": {
 											"type": "object",
 											"required": ["version", "list", "invoke"],
@@ -11741,6 +11787,44 @@
 												"maxLength": 16384
 											},
 											"maxItems": 64
+										},
+										"entries": {
+											"type": "array",
+											"items": {
+												"type": "object",
+												"required": ["id", "kind", "text", "enqueuedAt", "pinned"],
+												"properties": {
+													"id": {
+														"type": "string",
+														"minLength": 1,
+														"maxLength": 128
+													},
+													"kind": {
+														"anyOf": [
+															{
+																"type": "string",
+																"const": "steer"
+															},
+															{
+																"type": "string",
+																"const": "follow-up"
+															}
+														]
+													},
+													"text": {
+														"type": "string",
+														"maxLength": 16384
+													},
+													"enqueuedAt": {
+														"type": "number"
+													},
+													"pinned": {
+														"type": "boolean"
+													}
+												},
+												"additionalProperties": false
+											},
+											"maxItems": 64
 										}
 									},
 									"additionalProperties": false
@@ -11892,6 +11976,427 @@
 												"maxLength": 16384
 											},
 											"maxItems": 128
+										}
+									},
+									"additionalProperties": false
+								}
+							}
+						},
+						"headers": {
+							"X-Clio-Epoch": {
+								"schema": {
+									"type": "string"
+								},
+								"description": "Server epoch"
+							},
+							"X-Clio-Seq": {
+								"schema": {
+									"type": "integer"
+								},
+								"description": "Sequence before assembling the snapshot"
+							}
+						}
+					},
+					"default": {
+						"description": "Problem",
+						"content": {
+							"application/problem+json": {
+								"schema": {
+									"type": "object",
+									"required": ["type", "title", "status", "detail", "code", "instance"],
+									"properties": {
+										"type": {
+											"type": "string"
+										},
+										"title": {
+											"type": "string"
+										},
+										"status": {
+											"type": "integer"
+										},
+										"detail": {
+											"type": "string"
+										},
+										"code": {
+											"anyOf": [
+												{
+													"type": "string",
+													"const": "validation"
+												},
+												{
+													"type": "string",
+													"const": "unauthorized"
+												},
+												{
+													"type": "string",
+													"const": "not_found"
+												},
+												{
+													"type": "string",
+													"const": "conflict"
+												},
+												{
+													"type": "string",
+													"const": "unsupported"
+												},
+												{
+													"type": "string",
+													"const": "unavailable"
+												},
+												{
+													"type": "string",
+													"const": "upstream_acp"
+												},
+												{
+													"type": "string",
+													"const": "operation_failed"
+												},
+												{
+													"type": "string",
+													"const": "internal"
+												}
+											]
+										},
+										"instance": {
+											"type": "string"
+										}
+									},
+									"additionalProperties": false
+								}
+							}
+						}
+					}
+				}
+			}
+		},
+		"/api/sessions/{id}/queue/edit": {
+			"post": {
+				"operationId": "editSessionQueue",
+				"summary": "Remove, take back, move, re-slot or send one waiting message",
+				"security": [
+					{
+						"bearer": []
+					}
+				],
+				"parameters": [
+					{
+						"name": "id",
+						"in": "path",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+						}
+					},
+					{
+						"name": "Idempotency-Key",
+						"in": "header",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"minLength": 1,
+							"maxLength": 128
+						}
+					}
+				],
+				"requestBody": {
+					"required": true,
+					"content": {
+						"application/json": {
+							"schema": {
+								"type": "object",
+								"required": ["id", "op"],
+								"properties": {
+									"id": {
+										"type": "string",
+										"minLength": 1,
+										"maxLength": 128
+									},
+									"op": {
+										"anyOf": [
+											{
+												"type": "string",
+												"const": "remove"
+											},
+											{
+												"type": "string",
+												"const": "restore"
+											},
+											{
+												"type": "string",
+												"const": "move"
+											},
+											{
+												"type": "string",
+												"const": "set_kind"
+											},
+											{
+												"type": "string",
+												"const": "send_now"
+											}
+										]
+									},
+									"delta": {
+										"anyOf": [
+											{
+												"type": "number",
+												"const": -1
+											},
+											{
+												"type": "number",
+												"const": 1
+											}
+										]
+									},
+									"kind": {
+										"anyOf": [
+											{
+												"type": "string",
+												"const": "steer"
+											},
+											{
+												"type": "string",
+												"const": "follow-up"
+											}
+										]
+									}
+								},
+								"additionalProperties": false
+							}
+						}
+					}
+				},
+				"responses": {
+					"200": {
+						"description": "Success",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"required": ["applied", "entries"],
+									"properties": {
+										"applied": {
+											"type": "boolean"
+										},
+										"reason": {
+											"type": "string",
+											"maxLength": 64
+										},
+										"text": {
+											"type": "string",
+											"maxLength": 16384
+										},
+										"delivery": {
+											"anyOf": [
+												{
+													"type": "string",
+													"const": "interrupt"
+												},
+												{
+													"type": "string",
+													"const": "next-slot"
+												}
+											]
+										},
+										"refusal": {
+											"type": "string",
+											"maxLength": 512
+										},
+										"entries": {
+											"type": "array",
+											"items": {
+												"type": "object",
+												"required": ["id", "kind", "text", "enqueuedAt", "pinned"],
+												"properties": {
+													"id": {
+														"type": "string",
+														"minLength": 1,
+														"maxLength": 128
+													},
+													"kind": {
+														"anyOf": [
+															{
+																"type": "string",
+																"const": "steer"
+															},
+															{
+																"type": "string",
+																"const": "follow-up"
+															}
+														]
+													},
+													"text": {
+														"type": "string",
+														"maxLength": 16384
+													},
+													"enqueuedAt": {
+														"type": "number"
+													},
+													"pinned": {
+														"type": "boolean"
+													}
+												},
+												"additionalProperties": false
+											},
+											"maxItems": 64
+										}
+									},
+									"additionalProperties": false
+								}
+							}
+						},
+						"headers": {
+							"X-Clio-Epoch": {
+								"schema": {
+									"type": "string"
+								},
+								"description": "Server epoch"
+							},
+							"X-Clio-Seq": {
+								"schema": {
+									"type": "integer"
+								},
+								"description": "Sequence before assembling the snapshot"
+							}
+						}
+					},
+					"default": {
+						"description": "Problem",
+						"content": {
+							"application/problem+json": {
+								"schema": {
+									"type": "object",
+									"required": ["type", "title", "status", "detail", "code", "instance"],
+									"properties": {
+										"type": {
+											"type": "string"
+										},
+										"title": {
+											"type": "string"
+										},
+										"status": {
+											"type": "integer"
+										},
+										"detail": {
+											"type": "string"
+										},
+										"code": {
+											"anyOf": [
+												{
+													"type": "string",
+													"const": "validation"
+												},
+												{
+													"type": "string",
+													"const": "unauthorized"
+												},
+												{
+													"type": "string",
+													"const": "not_found"
+												},
+												{
+													"type": "string",
+													"const": "conflict"
+												},
+												{
+													"type": "string",
+													"const": "unsupported"
+												},
+												{
+													"type": "string",
+													"const": "unavailable"
+												},
+												{
+													"type": "string",
+													"const": "upstream_acp"
+												},
+												{
+													"type": "string",
+													"const": "operation_failed"
+												},
+												{
+													"type": "string",
+													"const": "internal"
+												}
+											]
+										},
+										"instance": {
+											"type": "string"
+										}
+									},
+									"additionalProperties": false
+								}
+							}
+						}
+					}
+				}
+			}
+		},
+		"/api/sessions/{id}/shell": {
+			"post": {
+				"operationId": "shellSession",
+				"summary": "Run one operator shell line between turns",
+				"security": [
+					{
+						"bearer": []
+					}
+				],
+				"parameters": [
+					{
+						"name": "id",
+						"in": "path",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+						}
+					},
+					{
+						"name": "Idempotency-Key",
+						"in": "header",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"minLength": 1,
+							"maxLength": 128
+						}
+					}
+				],
+				"requestBody": {
+					"required": true,
+					"content": {
+						"application/json": {
+							"schema": {
+								"type": "object",
+								"required": ["command"],
+								"properties": {
+									"command": {
+										"type": "string",
+										"minLength": 1,
+										"maxLength": 16384,
+										"pattern": "^[^\\n\\r]*\\S[^\\n\\r]*$"
+									},
+									"excludeFromContext": {
+										"type": "boolean"
+									}
+								},
+								"additionalProperties": false
+							}
+						}
+					}
+				},
+				"responses": {
+					"202": {
+						"description": "Accepted",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"required": ["turnId"],
+									"properties": {
+										"turnId": {
+											"type": "string",
+											"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
 										}
 									},
 									"additionalProperties": false
@@ -39454,6 +39959,79 @@
 												"type": "null"
 											}
 										]
+									}
+								}
+							}
+						}
+					},
+					{
+						"type": "object",
+						"required": ["v", "epoch", "seq", "at", "type", "payload"],
+						"properties": {
+							"v": {
+								"type": "number",
+								"const": 1
+							},
+							"epoch": {
+								"type": "string",
+								"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+							},
+							"seq": {
+								"type": "integer",
+								"minimum": 0
+							},
+							"at": {
+								"type": "string"
+							},
+							"type": {
+								"type": "string",
+								"const": "queue.changed"
+							},
+							"payload": {
+								"type": "object",
+								"required": ["resource", "entries"],
+								"properties": {
+									"resource": {
+										"type": "string",
+										"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+									},
+									"entries": {
+										"type": "array",
+										"items": {
+											"type": "object",
+											"required": ["id", "kind", "text", "enqueuedAt", "pinned"],
+											"properties": {
+												"id": {
+													"type": "string",
+													"minLength": 1,
+													"maxLength": 128
+												},
+												"kind": {
+													"anyOf": [
+														{
+															"type": "string",
+															"const": "steer"
+														},
+														{
+															"type": "string",
+															"const": "follow-up"
+														}
+													]
+												},
+												"text": {
+													"type": "string",
+													"maxLength": 16384
+												},
+												"enqueuedAt": {
+													"type": "number"
+												},
+												"pinned": {
+													"type": "boolean"
+												}
+											},
+											"additionalProperties": false
+										},
+										"maxItems": 64
 									}
 								}
 							}

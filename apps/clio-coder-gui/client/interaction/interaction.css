@@ -16,7 +16,7 @@
 	background: var(--raised);
 	color: var(--ink);
 	border: 1px solid var(--line-float);
-	border-radius: var(--radius-lg);
+	border-radius: var(--radius-md);
 	box-shadow: var(--shadow-float);
 	width: min(560px, 100%);
 	max-height: min(80vh, 760px);
@@ -121,7 +121,7 @@
 	gap: 8px;
 	padding: 0 10px;
 	border: 1px solid var(--line-strong);
-	border-radius: 8px;
+	border-radius: var(--radius-sm);
 	background: var(--wb-faint);
 }
 .filter__field:focus-within {
@@ -287,7 +287,7 @@
 	min-height: 26px;
 	padding: 2px 9px 2px 8px;
 	border: 1px solid var(--line);
-	border-radius: 999px;
+	border-radius: var(--radius-sm);
 	background: transparent;
 	color: var(--muted);
 	font-size: 13px;

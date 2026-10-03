@@ -214,3 +214,29 @@ export function tokenText(tokens: readonly MarkdownToken[]): string {
 	}
 	return text;
 }
+
+/** A count, an amount or a measurement: digits with an optional sign, currency mark, separators and a short unit. */
+const NUMERIC_CELL = /^[+\-−±~≈<>]?\s?[$€£¥]?\d[\d,._\u00a0 ]*(?:[eE][+-]?\d+)?\s?(?:%|‰|×|x|[A-Za-zµ°/]{1,6})?$/u;
+
+/**
+ * Which columns hold only numbers, so they can be set right-aligned in tabular figures and compared
+ * by eye. A column with no value at all is not numeric, and an empty cell or a dash does not disqualify one.
+ */
+export function numericColumns(rows: readonly (readonly string[])[], columns: number): readonly boolean[] {
+	return Array.from({ length: columns }, (_, column) => {
+		let seen = 0;
+		for (const row of rows) {
+			const cell = (row[column] ?? "").trim();
+			if (cell === "" || cell === "-" || cell === "–" || cell === "—") continue;
+			if (!NUMERIC_CELL.test(cell)) return false;
+			seen += 1;
+		}
+		return seen > 0;
+	});
+}
+
+/** The table as tab-separated text, which pastes into a spreadsheet as cells. */
+export function tableText(header: readonly string[], rows: readonly (readonly string[])[]): string {
+	const clean = (cell: string) => cell.replace(/[\t\n\r]+/gu, " ").trim();
+	return [header, ...rows].map((row) => row.map(clean).join("\t")).join("\n");
+}

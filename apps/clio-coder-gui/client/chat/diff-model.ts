@@ -492,6 +492,60 @@ export function collapsePlan(diff: ParsedDiff, firstChangedLine: number | null):
 	return { start, end, collapsed: true, hiddenRows: total - (end - start + 1) };
 }
 
+/** The part of one changed line that differs from the line it replaced, or that replaced it. */
+export interface ChangeSpan {
+	readonly start: number;
+	readonly end: number;
+}
+
+/** Past this many lines a run is a rewrite, and pairing its lines by position would be a guess. */
+const PAIRED_RUN_MAX = 40;
+
+/**
+ * Where a rewritten line actually changed. A run of removed lines followed by as many added lines is
+ * read as line-for-line edits: each pair keeps its common start and end, and the middle is the change.
+ * A pair that shares less than a third of its shorter line is two different lines, not an edit, and
+ * gets no span, so the emphasis never claims a relation the text does not show.
+ */
+export function changeSpans(rows: readonly DiffRow[]): ReadonlyMap<string, ChangeSpan> {
+	const spans = new Map<string, ChangeSpan>();
+	let index = 0;
+	while (index < rows.length) {
+		if (rows[index]?.kind !== "del") {
+			index += 1;
+			continue;
+		}
+		let adds = index;
+		while (rows[adds]?.kind === "del") adds += 1;
+		let end = adds;
+		while (rows[end]?.kind === "add") end += 1;
+		const count = adds - index;
+		if (count === end - adds && count <= PAIRED_RUN_MAX)
+			for (let offset = 0; offset < count; offset += 1) {
+				const before = rows[index + offset];
+				const after = rows[adds + offset];
+				if (before === undefined || after === undefined || before.lineCapped || after.lineCapped) continue;
+				const shorter = Math.min(before.text.length, after.text.length);
+				let prefix = 0;
+				while (prefix < shorter && before.text[prefix] === after.text[prefix]) prefix += 1;
+				let suffix = 0;
+				while (
+					suffix < shorter - prefix &&
+					before.text[before.text.length - 1 - suffix] === after.text[after.text.length - 1 - suffix]
+				)
+					suffix += 1;
+				if (before.text.trim() === "" || after.text.trim() === "") continue;
+				const shared =
+					before.text.slice(0, prefix).trim().length + before.text.slice(before.text.length - suffix).trim().length;
+				if (shared * 3 < Math.min(before.text.trim().length, after.text.trim().length)) continue;
+				if (before.text.length - suffix > prefix) spans.set(before.id, { start: prefix, end: before.text.length - suffix });
+				if (after.text.length - suffix > prefix) spans.set(after.id, { start: prefix, end: after.text.length - suffix });
+			}
+		index = Math.max(end, index + 1);
+	}
+	return spans;
+}
+
 /** `+12 −3` for the header strip, with the real minus sign. */
 export function diffCounts(diff: ParsedDiff): string {
 	return `+${diff.adds} −${diff.dels}`;

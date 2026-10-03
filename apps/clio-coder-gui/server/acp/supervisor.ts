@@ -51,8 +51,13 @@ import {
 	type DispatchSteerRequest,
 	DispatchSteerResult,
 	InterruptResult,
+	QueueChanged,
 	QueueCleared,
+	type QueueEditRequest,
+	QueueEditResult,
 	QueueSnapshot,
+	ShellOutcome,
+	type ShellRequest,
 	type SteerRequest,
 	SteerResult,
 } from "../../contracts/steering.js";
@@ -412,6 +417,11 @@ export class Supervisor {
 				const withdrawn = record(params);
 				if (withdrawn.sessionId === owned.id) owned.permissions?.withdraw(withdrawn.requestId);
 			});
+			transport.onNotification("_clio-coder/session/queue_changed", (params) => {
+				const changed = Value.Clean(QueueChanged, structuredClone(params));
+				if (Value.Check(QueueChanged, changed) && changed.sessionId === owned.id)
+					this.hub.publish({ type: "queue.changed", payload: { resource: owned.id, entries: changed.entries } });
+			});
 			transport.onNotification("session/update", (params) => {
 				try {
 					this.update(owned, params);
@@ -752,7 +762,10 @@ export class Supervisor {
 			const partial = settled ? undefined : toolProgressText(update.content);
 			if (partial !== undefined) item.partialOutput = boundedText(partial, 16384);
 			else if (settled) delete item.partialOutput;
-			if (update.rawOutput) item.rawOutput = this.raw(update.rawOutput);
+			// A shell line's terminal frame has its facts in `rawOutput` and its output only in `content`.
+			if (update.rawOutput && settled && update.content && meta["clio-coder/shell"] !== undefined)
+				item.rawOutput = this.raw({ ...record(update.rawOutput), content: update.content });
+			else if (update.rawOutput) item.rawOutput = this.raw(update.rawOutput);
 			else if (settled && update.content) item.rawOutput = this.raw({ content: update.content });
 			this.publish({ type: "turn.tool", payload: { resource: entry.id, revision: this.revision(entry.id), item } });
 			return;
@@ -908,6 +921,75 @@ export class Supervisor {
 	clearQueue(id: string) {
 		this.steering(id);
 		return this.projected(id, "_clio-coder/session/queue_clear", { sessionId: id }, QueueCleared);
+	}
+	editQueue(id: string, body: Static<typeof QueueEditRequest>) {
+		const entry = this.steering(id);
+		const queue = entry.client.capabilities.queue;
+		if (!queue?.ops.includes(body.op))
+			throw new AppProblem("conflict", "This Clio Coder build cannot change one waiting message.");
+		return this.projected(id, queue.edit, { sessionId: id, ...body }, QueueEditResult);
+	}
+	/**
+	 * The terminal's `!` line. The agent sends its tool frames outside any prompt, and a frame without
+	 * a turn ends the child, so the line is recorded as a turn of its own: the frames land in it and
+	 * Stop cancels it like any other.
+	 */
+	shell(id: string, body: Static<typeof ShellRequest>) {
+		const entry = this.entries.get(id);
+		if (!entry || entry.closing || this.snapshot(id).state !== "open")
+			throw new AppProblem("conflict", "Session is not available for a shell line.");
+		const shell = entry.client.capabilities.shell;
+		if (!shell) throw new AppProblem("conflict", "This Clio Coder build does not run shell lines from this app.");
+		if (entry.turnId) throw new AppProblem("conflict", "A shell line runs between turns. Wait for this turn or stop it.");
+		if (this.configuring.has(id)) throw new AppProblem("conflict", "Session configuration is being changed.");
+		if (entry.rebase) throw new AppProblem("conflict", "The conversation is moving to another branch.");
+		if (entry.drafting) throw new AppProblem("conflict", "Clio Coder is drawing up a handoff for this conversation.");
+		const command = body.command.trim();
+		const excludeFromContext = body.excludeFromContext === true;
+		entry.replay = null;
+		entry.activeAt = performance.now();
+		const turnId = this.begin(entry, `${excludeFromContext ? "!!" : "!"}${command}`, "live");
+		entry.prompt = entry.client
+			.request<unknown>(
+				shell.run,
+				{ sessionId: id, command, ...(excludeFromContext ? { excludeFromContext } : {}) },
+				// The engine ends the line at its own limit; the margin is for the entry to land.
+				shell.timeoutMs + 15_000,
+			)
+			.then((raw) => {
+				if (entry.turnId !== turnId) return;
+				const outcome = Value.Clean(ShellOutcome, structuredClone(raw));
+				if (!Value.Check(ShellOutcome, outcome))
+					throw new AppProblem("upstream_acp", "Clio returned an invalid shell result.");
+				const note = outcome.timedOut
+					? `The line was stopped at its ${Math.round(shell.timeoutMs / 1000)} s limit.`
+					: outcome.unlabeled
+						? "The output was kept out of Clio's context because its information-flow label could not be recorded."
+						: null;
+				if (note !== null)
+					this.publish({
+						type: "turn.tool",
+						payload: {
+							resource: entry.id,
+							revision: this.revision(entry.id),
+							item: {
+								id: randomUUID(),
+								turnId,
+								sequence: 0,
+								kind: "notice",
+								toolKind: "transcript",
+								text: note,
+								status: "completed",
+								origin: "live",
+							},
+						},
+					});
+				this.finish(entry, outcome.cancelled ? "cancelled" : "end_turn", null, null, new Date().toISOString());
+			})
+			.catch((error) => {
+				if (entry.turnId === turnId) this.failTurn(entry, acpProblem(error));
+			});
+		return { turnId };
 	}
 	interrupt(id: string, reason?: string) {
 		this.steering(id);

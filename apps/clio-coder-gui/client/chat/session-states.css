@@ -23,7 +23,7 @@
 .task-skeleton__line {
 	height: 14px;
 	width: 72%;
-	border-radius: 7px;
+	border-radius: var(--radius-sm);
 	background: var(--wb-active);
 	animation: skeleton-breathe var(--motion-feedback) var(--ease-standard) var(--motion-entry) infinite alternate;
 }
@@ -40,7 +40,7 @@
 	justify-self: end;
 	width: 38%;
 	height: 38px;
-	border-radius: 14px;
+	border-radius: var(--radius-md);
 }
 .task-skeleton__line--wide {
 	width: 92%;
@@ -104,7 +104,7 @@
 	margin: 0 auto var(--space-2);
 	padding: var(--space-2) var(--space-3);
 	border: 1px solid var(--line);
-	border-radius: 10px;
+	border-radius: var(--radius-md);
 	background: var(--wb-faint);
 	font-size: var(--text-meta);
 	box-sizing: border-box;

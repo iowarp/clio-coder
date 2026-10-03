@@ -142,7 +142,7 @@
 	min-height: 36px;
 	margin-inline: calc(var(--pane-bleed) * -1);
 	padding-inline: var(--pane-bleed);
-	border-radius: 8px;
+	border-radius: var(--radius-sm);
 	transition:
 		background var(--motion-fast) var(--ease-standard),
 		box-shadow var(--motion-fast) var(--ease-standard);
@@ -194,7 +194,7 @@
 	margin: 0;
 	padding: 0;
 	border: 0;
-	border-radius: 8px;
+	border-radius: var(--radius-sm);
 	background: transparent;
 	color: inherit;
 	font: inherit;
@@ -331,7 +331,7 @@
 .pane-stack {
 	display: flex;
 	height: 8px;
-	border-radius: var(--radius-pill);
+	border-radius: var(--radius-sm);
 	background: var(--wb-active);
 	overflow: hidden;
 }
@@ -381,7 +381,7 @@
 	content: "";
 	width: 7px;
 	height: 7px;
-	border-radius: 2px;
+	border-radius: var(--radius-sm);
 	background: var(--part);
 }
 .pane-legend span {
@@ -404,7 +404,7 @@
 	gap: var(--space-2);
 	min-height: 30px;
 	padding-inline: var(--pane-bleed);
-	border-radius: 8px;
+	border-radius: var(--radius-sm);
 	font-size: var(--text-meta);
 }
 /* A static mark: the rail's row for the same task carries the moving one. */
@@ -445,7 +445,7 @@
 .pane-hint kbd {
 	padding: 1px 5px;
 	border: 1px solid var(--line-float);
-	border-radius: 4px;
+	border-radius: var(--radius-sm);
 	background: var(--wb-faint);
 	font: var(--text-exact) / 1.5 var(--font-mono);
 	color: var(--ink);
@@ -512,7 +512,7 @@
 	padding: 3px 7px;
 	margin-right: -7px;
 	border: 0;
-	border-radius: 6px;
+	border-radius: var(--radius-sm);
 	background: transparent;
 	color: var(--accent);
 	font-size: var(--text-exact);
@@ -636,7 +636,7 @@
 	min-height: 40px;
 	padding: 4px var(--space-2);
 	border: 0;
-	border-radius: 8px;
+	border-radius: var(--radius-sm);
 	background: transparent;
 	text-align: left;
 	color: var(--ink);
@@ -656,7 +656,7 @@
 	min-width: 30px;
 	padding: 2px 4px;
 	border: 1px solid var(--line-strong);
-	border-radius: 5px;
+	border-radius: var(--radius-sm);
 	font: 500 var(--text-instrument) / var(--leading-tight) var(--font-mono);
 	letter-spacing: 0.04em;
 	text-align: center;
@@ -688,7 +688,7 @@
 	flex: none;
 	padding: 1px 7px;
 	border: 1px solid var(--status-warn-line);
-	border-radius: var(--radius-pill);
+	border-radius: var(--radius-sm);
 	font-size: var(--text-exact);
 	color: var(--status-warn-fg);
 }
@@ -710,7 +710,7 @@
 	gap: var(--space-2);
 	min-height: 32px;
 	padding: 0 var(--space-2);
-	border-radius: 8px;
+	border-radius: var(--radius-sm);
 	font-size: var(--text-meta);
 	color: var(--ink-muted);
 	cursor: pointer;
@@ -791,7 +791,7 @@
 .turn-changes {
 	margin-top: var(--space-4);
 	border: 1px solid var(--line);
-	border-radius: 14px;
+	border-radius: var(--radius-md);
 	background: var(--wb-faint);
 	overflow: hidden;
 }
