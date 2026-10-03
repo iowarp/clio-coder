@@ -1,9 +1,11 @@
+import type { Context, SimpleStreamOptions } from "@earendil-works/pi-ai";
 import {
 	GATEWAY_SCHEMA_RUNTIME_ID,
 	RESPONSE_SCHEMA_RUNTIME_ID,
 	type ResponseSchemaDialect,
 	responseSchemaDialectFor,
 } from "../core/response-schema.js";
+import { resolvedRequestContext } from "./context.js";
 import type { EngineModel } from "./types.js";
 
 function isOpenAIResponsesApi(api: string): boolean {
@@ -109,19 +111,84 @@ function namedToolDefinitions(tools: unknown, toolName: string): unknown[] | nul
 	return narrowed.length > 0 ? narrowed : null;
 }
 
+/** One model round's tool routing, derived from the host's lock and middleware state. */
+export type ToolRound = { kind: "text-only" };
+
+export interface ControlledRequest {
+	context: Context;
+	options: SimpleStreamOptions | undefined;
+}
+
+function hasToolHistory(messages: Context["messages"]): boolean {
+	return messages.some(
+		(message) =>
+			message.role === "toolResult" ||
+			(message.role === "assistant" && message.content.some((block) => block.type === "toolCall")),
+	);
+}
+
 /**
- * Force a text-only round by setting the request-level tool-choice knob to
- * "none". Used while a loop-guard synthesis lockout is active: the lockout
+ * Force a text-only round through Pi's `toolChoice: "none"`. Used while a
+ * loop-guard synthesis lockout or a middleware lock is active: the lockout
  * directive alone relies on model compliance, and measured local models kept
  * calling tools until the backstop stopped the turn, throwing away everything
  * the turn had gathered. The tool schema bytes are untouched (the prompt
  * prefix and tool surface stay byte-stable); only this request's routing
  * changes, so prompt-prefix caches are unaffected.
  *
- * Returns undefined when the payload carries no tool surface (nothing to
- * lock) or is not a record (unknown provider shape; leave it alone).
+ * Returns undefined when the request carries no tool surface (nothing to lock).
  */
-export function patchToolChoiceNonePayload(payload: unknown, model: EngineModel): unknown | undefined {
+function textOnlyRound(
+	model: EngineModel,
+	context: Context,
+	options: SimpleStreamOptions | undefined,
+): ControlledRequest | undefined {
+	const resolved = resolvedRequestContext(context);
+	// Pi adds `tools: []` beside tool history on completions, a surface Clio has
+	// always locked; every other API serializes a tool surface only when tools
+	// are declared.
+	const hasSurface =
+		(resolved.tools?.length ?? 0) > 0 || (model.api === "openai-completions" && hasToolHistory(resolved.messages));
+	if (!hasSurface) return undefined;
+	// Pi answers "none" on Converse by dropping toolConfig, which Bedrock rejects
+	// beside toolUse and toolResult history. The lock stays off there, as it
+	// always was, instead of failing every locked round with a ValidationException.
+	if (model.api === "bedrock-converse-stream") return undefined;
+	return { context, options: { ...options, toolChoice: "none" } };
+}
+
+function applyToolRound(
+	model: EngineModel,
+	context: Context,
+	options: SimpleStreamOptions | undefined,
+	round: ToolRound,
+): ControlledRequest | undefined {
+	switch (round.kind) {
+		case "text-only":
+			return textOnlyRound(model, context, options);
+	}
+}
+
+/** Apply the first round that changes this request; later rounds are fallbacks. */
+export function applyToolRounds(
+	model: EngineModel,
+	context: Context,
+	options: SimpleStreamOptions | undefined,
+	rounds: readonly (ToolRound | undefined)[],
+): ControlledRequest {
+	for (const round of rounds) {
+		const controlled = round === undefined ? undefined : applyToolRound(model, context, options, round);
+		if (controlled !== undefined) return controlled;
+	}
+	return { context, options };
+}
+
+/**
+ * Anthropic's leg of the worker synthesis lock, which keeps the tool_choice knob
+ * instead of removing declarations. Plain text-only rounds go through
+ * {@link applyToolRounds}.
+ */
+function patchToolChoiceNonePayload(payload: unknown, model: EngineModel): unknown | undefined {
 	if (!isRecord(payload)) return undefined;
 	if (!("tools" in payload) || payload.tools === undefined || payload.tools === null) return undefined;
 	if (isAnthropicMessagesApi(model.api)) return { ...payload, tool_choice: { type: "none" } };
@@ -278,7 +345,6 @@ export interface WorkerPayloadPatchOptions {
 	/** Generated context opts into stable sampling only on compatible local APIs. */
 	sampling?: "deterministic";
 	responseSchema?: Record<string, unknown>;
-	toolChoiceNone?: boolean;
 	toolChoiceName?: string;
 	/** Synthesis-locked round: remove the tool surface, see {@link patchToolSurfaceLockedPayload}. */
 	toolSurfaceLocked?: boolean;
@@ -350,12 +416,6 @@ export function patchWorkerRequestPayload(
 		const lockedPatched = patchToolSurfaceLockedPayload(patched, model);
 		if (lockedPatched !== undefined) {
 			patched = lockedPatched;
-			changed = true;
-		}
-	} else if (options.toolChoiceNone === true) {
-		const toolChoicePatched = patchToolChoiceNonePayload(patched, model);
-		if (toolChoicePatched !== undefined) {
-			patched = toolChoicePatched;
 			changed = true;
 		}
 	} else if (options.toolChoiceName !== undefined) {

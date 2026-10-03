@@ -36,7 +36,7 @@ import { cleanupEngineSessionResources } from "../engine/ai.js";
 import { engineStreamSimple } from "../engine/api-registry.js";
 import { setGlobalDefaultMaxOutputTokens } from "../engine/apis/index.js";
 import { lockedSynthesisSystemPrompt, sanitizeLockedSynthesisMessage } from "../engine/loop-guard.js";
-import { patchToolChoiceNamedPayload, patchToolChoiceNonePayload } from "../engine/provider-payload.js";
+import { applyToolRounds, patchToolChoiceNamedPayload } from "../engine/provider-payload.js";
 import type { AgentEvent, AgentMessage, EngineModel, Usage } from "../engine/types.js";
 import type { resolveAgentTools, ToolFinishEvent, ToolTelemetry } from "../tools/agent-tools.js";
 import { effectiveToolCall } from "../tools/surface.js";
@@ -580,12 +580,15 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 		let unsettledSpendUsd = 0;
 		const handle = deps.createAgent({
 			transcriptStreamFn: (currentModel, currentContext, options) => {
-				if (!state.synthesisToolLock) return engineStreamSimple(currentModel, currentContext, options);
-				const request = resolvedRequestContext(currentContext);
+				const controlled = applyToolRounds(currentModel, currentContext, options, [
+					state.synthesisToolLock || middlewareToolChoice.current().kind === "none" ? { kind: "text-only" } : undefined,
+				]);
+				if (!state.synthesisToolLock) return engineStreamSimple(currentModel, controlled.context, controlled.options);
+				const request = resolvedRequestContext(controlled.context);
 				return engineStreamSimple(
 					currentModel,
 					{ ...request, systemPrompt: lockedSynthesisSystemPrompt(request.systemPrompt ?? "") },
-					options,
+					controlled.options,
 				);
 			},
 			initialState: {
@@ -675,17 +678,13 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 				apiCallFirstDeltaAt = null;
 			},
 			onPayload: async (payload, currentModel) => {
-				if (state.synthesisToolLock) {
-					return patchToolChoiceNonePayload(payload, currentModel);
-				}
+				// A locked round is already text-only through transcriptStreamFn, and a
+				// named choice here would reopen its tool surface.
+				if (state.synthesisToolLock) return undefined;
 				const middlewareChoice = middlewareToolChoice.current();
-				if (middlewareChoice.kind === "none") {
-					return patchToolChoiceNonePayload(payload, currentModel);
-				}
-				if (middlewareChoice.kind === "required") {
-					return patchToolChoiceNamedPayload(payload, currentModel, middlewareChoice.toolName);
-				}
-				return undefined;
+				return middlewareChoice.kind === "required"
+					? patchToolChoiceNamedPayload(payload, currentModel, middlewareChoice.toolName)
+					: undefined;
 			},
 			getApiKey: async () => {
 				if (!targetRequiresAuth(target.target, target.runtime)) {

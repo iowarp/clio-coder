@@ -1,7 +1,9 @@
 import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
+import { Type } from "typebox";
 
 import { ToolNames } from "../../src/core/tool-names.js";
+import { engineStreamSimple } from "../../src/engine/api-registry.js";
 import {
 	createLoopGuardRegistration,
 	isLockedSynthesisFallbackOnly,
@@ -11,17 +13,50 @@ import {
 	lockedSynthesisSystemPrompt,
 	sanitizeLockedSynthesisMessage,
 } from "../../src/engine/loop-guard.js";
-import { patchWorkerRequestPayload } from "../../src/engine/provider-payload.js";
+import { applyToolRounds, patchWorkerRequestPayload } from "../../src/engine/provider-payload.js";
 import type { AgentMessage, EngineModel } from "../../src/engine/types.js";
 import { createWorkerSafety } from "../../src/engine/worker-tools.js";
 
-const model = { id: "m", provider: "llamacpp", api: "openai-completions" } as unknown as EngineModel;
+const model = {
+	id: "m",
+	provider: "llamacpp",
+	api: "openai-completions",
+	baseUrl: "http://127.0.0.1:1",
+	reasoning: false,
+	input: ["text"],
+	cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+	contextWindow: 32768,
+	maxTokens: 4096,
+} as unknown as EngineModel;
 const anthropicModel = { id: "m", provider: "anthropic", api: "anthropic-messages" } as unknown as EngineModel;
 const payload = () => ({
 	model: "m",
 	messages: [{ role: "user", content: "hi" }],
 	tools: [{ type: "function", function: { name: "read", parameters: { type: "object" } } }],
 });
+
+/** The wire body Pi's serializer builds for a text-only round; the hook stops before any network I/O. */
+async function textOnlyWire(target: EngineModel): Promise<Record<string, unknown>> {
+	const controlled = applyToolRounds(
+		target,
+		{
+			systemPrompt: "lock",
+			tools: [{ name: "read", description: "read", parameters: Type.Object({ path: Type.String() }) }],
+			messages: [{ role: "user", content: "hi", timestamp: 1 }],
+		},
+		{ apiKey: "fixture" },
+		[{ kind: "text-only" }],
+	);
+	let body: Record<string, unknown> = {};
+	await engineStreamSimple(target, controlled.context, {
+		...controlled.options,
+		onPayload: async (payload) => {
+			body = structuredClone(payload) as Record<string, unknown>;
+			throw new Error("captured before network I/O");
+		},
+	}).result();
+	return body;
+}
 
 describe("worker synthesis lock", () => {
 	it("retires earlier tool-use guidance without replacing task or safety instructions", () => {
@@ -106,18 +141,15 @@ describe("worker synthesis lock", () => {
 		deepStrictEqual(anthropic.tool_choice, { type: "none" });
 	});
 
-	it("keeps the schemas and sends the string tool_choice none for a middleware lock", () => {
+	it("keeps the schemas and sends the string tool_choice none for a middleware lock", async () => {
 		// The `lock_tools` middleware effect and the interactive synthesis lockout
 		// route here instead of the strip, and on a generic OpenAI-compatible
 		// server the spelling has to be the string: LM Studio and llama.cpp answer
 		// HTTP 400 on the object form ("Invalid tool_choice type: 'object'"), and
 		// "auto" would leave the turn calling tools past the lockout with nothing
 		// failing loudly.
-		const locked = patchWorkerRequestPayload(payload(), model, {
-			runtimeId: "llamacpp",
-			toolChoiceNone: true,
-		}) as Record<string, unknown>;
-		deepStrictEqual(locked.tools, payload().tools);
+		const locked = await textOnlyWire(model);
+		strictEqual((locked.tools as unknown[]).length, 1);
 		strictEqual(locked.tool_choice, "none");
 	});
 

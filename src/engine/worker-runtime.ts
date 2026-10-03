@@ -121,7 +121,7 @@ import {
 	sanitizeLockedSynthesisMessage,
 	workerLoopBlockBudget,
 } from "./loop-guard.js";
-import { patchWorkerRequestPayload, supportsNamedToolChoice } from "./provider-payload.js";
+import { applyToolRounds, patchWorkerRequestPayload, supportsNamedToolChoice } from "./provider-payload.js";
 import type { AgentEvent, AgentMessage, EngineModel } from "./types.js";
 import type { ClioWorkerEvent } from "./worker-events.js";
 import { createWorkerSafety, createWorkerToolRegistry, INTERNAL_HELPER_RESULT_TOOL } from "./worker-tools.js";
@@ -1066,8 +1066,11 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 				}
 				throw error;
 			}
-			const request = (projected: AgentMessage[]) =>
-				engineStreamSimple(
+			// Routed per attempt: the lock and the middleware choice can flip between
+			// the first call and the overflow retry. A locked round already loses its
+			// tool surface in onPayload, so the middleware text-only round yields to it.
+			const request = (projected: AgentMessage[]) => {
+				const controlled = applyToolRounds(
 					currentModel,
 					{
 						...currentContext,
@@ -1075,7 +1078,10 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 						messages: projected as typeof currentContext.messages,
 					},
 					streamOptions,
+					[middlewareToolChoice.current().kind === "none" && !synthesisToolLock ? { kind: "text-only" } : undefined],
 				);
+				return engineStreamSimple(currentModel, controlled.context, controlled.options);
+			};
 			const first = request(messages);
 			// The server is the authority on its own limit. An unreported window, a
 			// window that changed since it was resolved, or a server tokenizer that
@@ -1104,7 +1110,6 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 				...(helperToolAvailable && (synthesisToolLock || helperTerminalPhase) && supportsNamedToolChoice(currentModel.api)
 					? { terminalToolName: INTERNAL_HELPER_RESULT_TOOL }
 					: {}),
-				toolChoiceNone: middlewareChoice.kind === "none",
 				...(middlewareChoice.kind === "required" ? { toolChoiceName: middlewareChoice.toolName } : {}),
 			});
 		},
