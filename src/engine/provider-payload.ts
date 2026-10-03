@@ -4,14 +4,7 @@ import {
 	type ResponseSchemaDialect,
 	responseSchemaDialectFor,
 } from "../core/response-schema.js";
-import type { ThinkingLevel } from "../domains/providers/index.js";
 import type { EngineModel } from "./types.js";
-
-function reasoningSummaryForLevel(level: ThinkingLevel | undefined): "concise" | "detailed" | undefined {
-	if (!level || level === "off") return undefined;
-	if (level === "minimal" || level === "low") return "concise";
-	return "detailed";
-}
 
 function isOpenAIResponsesApi(api: string): boolean {
 	return api === "openai-codex-responses" || api === "openai-responses" || api === "azure-openai-responses";
@@ -114,44 +107,6 @@ function namedToolDefinitions(tools: unknown, toolName: string): unknown[] | nul
 		}
 	}
 	return narrowed.length > 0 ? narrowed : null;
-}
-
-function patchOpenAIReasoningSummaryPayload(
-	payload: unknown,
-	model: EngineModel,
-	thinkingLevel: ThinkingLevel | undefined,
-): unknown | undefined {
-	if (!isOpenAIResponsesApi(model.api)) return undefined;
-	const summary = reasoningSummaryForLevel(thinkingLevel);
-	if (!summary || !isRecord(payload)) return undefined;
-	const record = payload;
-	const reasoning = record.reasoning;
-	if (!isRecord(reasoning)) return undefined;
-	return {
-		...record,
-		reasoning: {
-			...reasoning,
-			summary,
-		},
-	};
-}
-
-/**
- * Align provider payloads with Clio's effective thinking level.
- *
- * OpenAI Responses defaults reasoning summaries to "auto", which can yield no
- * visible thinking blocks, and the agent loop has no option for the summary
- * field, so it is set here. Anthropic thinking is pi-owned: pi-ai's
- * `streamSimple` maps the agent's thinking level onto adaptive effort (via
- * `model.thinkingLevelMap` and `compat.forceAdaptiveThinking`) or a bounded
- * `budget_tokens`, so the payload is left untouched for that API.
- */
-export function patchProviderThinkingPayload(
-	payload: unknown,
-	model: EngineModel,
-	thinkingLevel: ThinkingLevel | undefined,
-): unknown | undefined {
-	return patchOpenAIReasoningSummaryPayload(payload, model, thinkingLevel);
 }
 
 /**
@@ -322,7 +277,6 @@ export interface WorkerPayloadPatchOptions {
 	runtimeId: string;
 	/** Generated context opts into stable sampling only on compatible local APIs. */
 	sampling?: "deterministic";
-	thinkingLevel?: ThinkingLevel;
 	responseSchema?: Record<string, unknown>;
 	toolChoiceNone?: boolean;
 	toolChoiceName?: string;
@@ -380,12 +334,6 @@ export function patchWorkerRequestPayload(
 			patched = samplingPatched;
 			changed = true;
 		}
-	}
-
-	const thinkingPatched = patchProviderThinkingPayload(patched, model, options.thinkingLevel);
-	if (thinkingPatched !== undefined) {
-		patched = thinkingPatched;
-		changed = true;
 	}
 
 	const schemaPatched = patchLlamaCppResponseSchemaPayload(patched, options.runtimeId, options.responseSchema);

@@ -36,11 +36,7 @@ import { cleanupEngineSessionResources } from "../engine/ai.js";
 import { engineStreamSimple } from "../engine/api-registry.js";
 import { setGlobalDefaultMaxOutputTokens } from "../engine/apis/index.js";
 import { lockedSynthesisSystemPrompt, sanitizeLockedSynthesisMessage } from "../engine/loop-guard.js";
-import {
-	patchProviderThinkingPayload,
-	patchToolChoiceNamedPayload,
-	patchToolChoiceNonePayload,
-} from "../engine/provider-payload.js";
+import { patchToolChoiceNamedPayload, patchToolChoiceNonePayload } from "../engine/provider-payload.js";
 import type { AgentEvent, AgentMessage, EngineModel, Usage } from "../engine/types.js";
 import type { resolveAgentTools, ToolFinishEvent, ToolTelemetry } from "../tools/agent-tools.js";
 import { effectiveToolCall } from "../tools/surface.js";
@@ -679,19 +675,17 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 				apiCallFirstDeltaAt = null;
 			},
 			onPayload: async (payload, currentModel) => {
-				const thinkingPatched = patchProviderThinkingPayload(payload, currentModel, state.currentThinkingLevel);
-				const basePayload = thinkingPatched ?? payload;
 				if (state.synthesisToolLock) {
-					return patchToolChoiceNonePayload(basePayload, currentModel) ?? thinkingPatched;
+					return patchToolChoiceNonePayload(payload, currentModel);
 				}
 				const middlewareChoice = middlewareToolChoice.current();
 				if (middlewareChoice.kind === "none") {
-					return patchToolChoiceNonePayload(basePayload, currentModel) ?? thinkingPatched;
+					return patchToolChoiceNonePayload(payload, currentModel);
 				}
 				if (middlewareChoice.kind === "required") {
-					return patchToolChoiceNamedPayload(basePayload, currentModel, middlewareChoice.toolName) ?? thinkingPatched;
+					return patchToolChoiceNamedPayload(payload, currentModel, middlewareChoice.toolName);
 				}
-				return thinkingPatched;
+				return undefined;
 			},
 			getApiKey: async () => {
 				if (!targetRequiresAuth(target.target, target.runtime)) {

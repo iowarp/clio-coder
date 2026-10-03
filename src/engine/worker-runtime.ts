@@ -1097,7 +1097,6 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 			const middlewareChoice = middlewareToolChoice.current();
 			return patchWorkerRequestPayload(payload, currentModel, {
 				runtimeId: input.runtime.id,
-				thinkingLevel: effectiveThinkingLevel,
 				...(input.responseSchema !== undefined ? { responseSchema: input.responseSchema } : {}),
 				// Apply stable sampling to every context-generation round, including terminal repairs.
 				...(input.sampling !== undefined ? { sampling: input.sampling } : {}),
