@@ -489,6 +489,42 @@ export const Composer = memo(function Composer({
 				<p className="sr-only" role="status">
 					{paletteOpen ? `${matches.length} slash ${matches.length === 1 ? "command" : "commands"}` : ""}
 				</p>
+				{attachments.length > 0 ? (
+					<ul className="composer__attachments" aria-label="Attachments to send with this request">
+						{attachments.map((item) => (
+							<li key={item.id}>
+								{item.kind === "image" ? (
+									<img src={`data:${item.mimeType};base64,${item.data}`} alt="" width={28} height={28} />
+								) : (
+									<span className="composer__attachment-file" aria-hidden="true">
+										{fileBadge(item.name)}
+									</span>
+								)}
+								<span className="composer__attachment-name">
+									<span className="composer__attachment-title" title={item.name}>
+										{item.name}
+									</span>
+									<small>
+										{item.kind === "image"
+											? `${item.width}×${item.height}`
+											: `text, ${Math.max(1, Math.round(item.bytes / 1024))} KiB`}
+									</small>
+								</span>
+								<button type="button" className="composer__attachment-action" onClick={() => saveAttachment(item)}>
+									Save<span className="sr-only"> {item.name}</span>
+								</button>
+								<button
+									type="button"
+									className="composer__attachment-action composer__attachment-remove"
+									onClick={() => detach(item.id)}
+								>
+									<Icon name="close" />
+									<span className="sr-only">Remove {item.name}</span>
+								</button>
+							</li>
+						))}
+					</ul>
+				) : null}
 				<textarea
 					id={fieldId}
 					ref={field}
@@ -651,37 +687,6 @@ export const Composer = memo(function Composer({
 						</button>
 					</p>
 				)}
-				{attachments.length > 0 ? (
-					<ul className="composer__attachments" aria-label="Attachments to send with this request">
-						{attachments.map((item) => (
-							<li key={item.id}>
-								{item.kind === "image" ? (
-									<img src={`data:${item.mimeType};base64,${item.data}`} alt="" width={48} height={48} />
-								) : (
-									<span className="composer__attachment-file" aria-hidden="true">
-										{fileBadge(item.name)}
-									</span>
-								)}
-								<span className="composer__attachment-name">
-									{item.name}
-									<small>
-										{item.kind === "image"
-											? `${item.width}×${item.height}`
-											: `text, ${Math.max(1, Math.round(item.bytes / 1024))} KiB`}
-									</small>
-								</span>
-								<span className="composer__attachment-actions">
-									<button type="button" className="composer__secondary" onClick={() => saveAttachment(item)}>
-										Save<span className="sr-only"> {item.name}</span>
-									</button>
-									<button type="button" className="composer__secondary" onClick={() => detach(item.id)}>
-										Remove<span className="sr-only"> {item.name}</span>
-									</button>
-								</span>
-							</li>
-						))}
-					</ul>
-				) : null}
 				{attachments.length > 0 && !attachmentsStored ? (
 					<p className="composer__paste-note" role="status">
 						Browser draft storage is unavailable. These attachments are kept in memory; save them before reloading this tab.
