@@ -5,6 +5,7 @@ import { parseWorkerContextSeed } from "../../worker/context-seed.js";
 import { WORKER_STDIN_FRAME_MAX_BYTES } from "../../worker/protocol.js";
 import { WORKER_CONTEXT_PREAMBLE } from "../context/worker/select.js";
 import { persistWorkerContextSeed } from "../context/worker/store.js";
+import { ensureClaudeAgentSdk } from "../lifecycle/claude-sdk-install.js";
 import type { WorkerFlowPolicyInput } from "../safety/information-flow.js";
 import {
 	compileWorkerFlowPolicy,
@@ -4898,6 +4899,33 @@ export function createDispatchBundle(
 				providers,
 			);
 		let target = resolveTarget();
+		if (target.runtime.id === "claude-sdk") {
+			const operator = options?.operatorAsk;
+			await ensureClaudeAgentSdk({
+				...(signal ? { signal } : {}),
+				...(operator?.available() === true
+					? {
+							confirm: async (question: string) => {
+								const result = await operator.ask(
+									[
+										{
+											question,
+											header: "Claude SDK",
+											options: [{ label: "Install now" }, { label: "Not now" }],
+											defaultOption: 1,
+										},
+									],
+									signal ? { signal } : undefined,
+								);
+								const answer = result.answers[0];
+								return (
+									!result.cancelled && (answer?.answer === "Install now" || answer?.options?.includes("Install now") === true)
+								);
+							},
+						}
+					: {}),
+			});
+		}
 		assertWorkerContextRequest(req, target.runtime.kind === "http");
 		const identity = (resolved: ResolvedTarget): string =>
 			JSON.stringify([

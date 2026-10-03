@@ -39,6 +39,7 @@ import { closestRuntimeId, getRuntimeRegistry } from "../domains/providers/regis
 import { registerBuiltinRuntimes } from "../domains/providers/runtimes/builtins.js";
 import { greetLmStudio } from "../domains/providers/runtimes/common/lmstudio-http.js";
 import type { ProbeResult, RuntimeDescriptor } from "../domains/providers/types/runtime-descriptor.js";
+import { ensureClaudeAgentSdk } from "../domains/lifecycle/claude-sdk-install.js";
 import type { TargetDescriptor } from "../domains/providers/types/target-descriptor.js";
 import { autonomyFromUserInput } from "../domains/safety/index.js";
 import {
@@ -460,6 +461,14 @@ async function runNonInteractive(runtime: RuntimeDescriptor, args: ParsedArgs): 
 		);
 		return 2;
 	}
+	if (runtime.id === "claude-sdk") {
+		try {
+			await ensureClaudeAgentSdk();
+		} catch (error) {
+			printError(error instanceof Error ? error.message : String(error));
+			return 1;
+		}
+	}
 	initializeClioHome();
 	const settings = readSettings();
 	const auth = openAuthStorage();
@@ -759,6 +768,18 @@ async function runTargetSetupInteractive(
 	runtime: RuntimeDescriptor,
 	defaults: ParsedArgs,
 ): Promise<number> {
+	if (runtime.id === "claude-sdk") {
+		try {
+			await ensureClaudeAgentSdk({
+				...((rl.input as { isTTY?: boolean }).isTTY === true
+					? { confirm: (question: string) => askYesNo(rl, question, false) }
+					: {}),
+			});
+		} catch (error) {
+			printError(error instanceof Error ? error.message : String(error));
+			return 1;
+		}
+	}
 	const auth = openAuthStorage();
 	const settings = readSettings();
 	let support = buildProviderSupportEntry(runtime);
