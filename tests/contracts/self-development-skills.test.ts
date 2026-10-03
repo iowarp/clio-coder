@@ -10,6 +10,7 @@ import {
 	clearPluginSnapshots,
 	disablePlugin,
 	installPlugin,
+	listInstalledPlugins,
 	pluginContentDigest,
 } from "../../src/domains/plugins/index.js";
 import type { SessionPromptInputs } from "../../src/domains/prompts/compiler.js";
@@ -17,6 +18,7 @@ import { createPromptsBundle } from "../../src/domains/prompts/extension.js";
 import { loadSkills, modelVisibleSkills } from "../../src/domains/resources/skills/loader.js";
 import { AUTONOMY_LEVELS, modelMayActivateSkills } from "../../src/domains/safety/autonomy.js";
 import { createContextTool } from "../../src/tools/context/index.js";
+import { trustProjectPackages } from "../harness/project-trust.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
 
 async function fixture(t: TestContext, worktree = false) {
@@ -142,9 +144,13 @@ it("installed ownership prevents disabled or damaged packages from falling back 
 			expectedId: name,
 			expectedDigest: pluginContentDigest(source),
 		});
-		ok(installed.plugin?.loadable, JSON.stringify(installed.diagnostics));
-		if (state === "disabled") disablePlugin(name, { cwd, scope: "project" });
-		else writeFileSync(path.join(installed.plugin.rootPath, "SKILL.md"), "damaged\n");
+		trustProjectPackages(cwd, "plugins");
+		const plugin = listInstalledPlugins(cwd).find((entry) => entry.id === name);
+		ok(plugin?.loadable, JSON.stringify(installed.diagnostics));
+		if (state === "disabled") {
+			disablePlugin(name, { cwd, scope: "project" });
+			trustProjectPackages(cwd, "plugins");
+		} else writeFileSync(path.join(plugin.rootPath, "SKILL.md"), "damaged\n");
 	}
 	clearPluginSnapshots();
 	for (const directory of [cwd, path.join(cwd, "src")]) {

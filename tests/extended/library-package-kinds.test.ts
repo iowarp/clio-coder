@@ -19,6 +19,7 @@ import {
 import { LIBRARY_KINDS, type LibraryEntryKind } from "../../src/domains/resources/library-types.js";
 import { loadPromptTemplates } from "../../src/domains/resources/prompts/loader.js";
 import { loadSkills } from "../../src/domains/resources/skills/loader.js";
+import { trustProjectPackages } from "../harness/project-trust.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
 
 function write(root: string, file: string, body: string): void {
@@ -71,10 +72,14 @@ for (const kind of LIBRARY_KINDS)
 				equal(result.plugin.kind, kind);
 				equal(readPluginInstallRecord("example", { cwd, scope })?.contentDigest, digest);
 			}
+			trustProjectPackages(cwd, "plugins");
 			equal(listInstalledPlugins(cwd, { all: true }).filter((e) => e.id === "example").length, 2);
 			ok(disablePlugin("example", { cwd, scope: "project" }).plugin?.enabled === false);
+			trustProjectPackages(cwd, "plugins");
 			equal(listInstalledPlugins(cwd).find((p) => p.id === "example")?.loadable, false);
-			ok(enablePlugin("example", { cwd, scope: "project" }).plugin?.loadable);
+			ok(enablePlugin("example", { cwd, scope: "project" }).plugin);
+			trustProjectPackages(cwd, "plugins");
+			ok(listInstalledPlugins(cwd, { scope: "project" }).find((p) => p.id === "example")?.loadable);
 			fixture(source, kind, "1.1.0");
 			ok(updatePlugin("example", { cwd, scope: "project" }).plugin?.version === "1.1.0");
 			const installed = listInstalledPlugins(cwd, { scope: "project", all: true })[0];

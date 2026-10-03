@@ -74,6 +74,8 @@ export interface InstalledExtension {
 	/** Whether this package admits the running Clio version. */
 	compatible: boolean;
 	effective: boolean;
+	/** Set on a project copy in a workspace whose project extensions the operator has not approved. */
+	trustBlocked?: true;
 	/** The single admission decision for extension-owned tools and hooks. */
 	loadable: boolean;
 	/** Present exactly when the installed tree and manifest bytes were reverified. */

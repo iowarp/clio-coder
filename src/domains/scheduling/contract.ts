@@ -9,6 +9,7 @@ export interface BudgetPreflight {
 }
 
 export interface SchedulingContract {
+	/** The configured session ceiling in USD; 0 means no ceiling. */
 	ceilingUsd(): number;
 	/**
 	 * Evaluate the running session cost against the ceiling. Scheduling owns the

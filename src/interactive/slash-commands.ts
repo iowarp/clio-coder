@@ -578,7 +578,7 @@ async function handleCouncil(task: string, options: CouncilCommandOptions, ctx: 
 	}
 	const rosters = ctx.getWorkerRosters?.();
 	if (rosters === undefined) {
-		ctx.notice("error", "/council needs workers.rosters, which is not wired in this session");
+		ctx.notice("error", "/council needs fleet.rosters, which is not wired in this session");
 		return;
 	}
 	const resolved = resolveCouncilRoster(options.roster, rosters);
@@ -795,7 +795,7 @@ export interface SlashCommandContext {
 	 */
 	oracleBriefing?: () => Omit<OracleDigestSources, "question">;
 	/**
-	 * Configured `workers.rosters`, which is what `/council` seats a council
+	 * Configured `fleet.rosters`, which is what `/council` seats a council
 	 * from. Absent on a host with no settings, in which case the command says so
 	 * rather than dispatching a roster name it could not check.
 	 */

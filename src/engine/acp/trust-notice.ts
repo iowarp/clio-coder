@@ -1,8 +1,8 @@
 /**
  * Project files whose authority Clio withheld because the operator never
- * approved their bytes. The settings, hooks and safety loaders drop them
- * quietly, so a client whose project-level model "doesn't work" needs the
- * reason at session start (C-4).
+ * approved their bytes. The settings, hooks, safety, extension and plugin
+ * loaders drop them quietly, so a client whose project-level model "doesn't
+ * work" needs the reason at session start (C-4).
  */
 import {
 	captureProjectSurface,
@@ -12,7 +12,7 @@ import {
 
 export const ACP_TRUST_META_KEY = "clio-coder/trust";
 
-const TRUST_SURFACES: ReadonlyArray<ProjectTrustSurface> = ["settings", "hooks", "safety"];
+const TRUST_SURFACES: ReadonlyArray<ProjectTrustSurface> = ["settings", "hooks", "safety", "extensions", "plugins"];
 
 export interface AcpIgnoredProjectSurface {
 	surface: ProjectTrustSurface;

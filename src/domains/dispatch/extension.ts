@@ -178,7 +178,7 @@ import {
 	type WorkerPermit,
 	workerPermissionModeForPermit,
 } from "../safety/worker-permit.js";
-import { SESSION_COST_CEILING_REASON, SessionCostCeilingError } from "../scheduling/budget.js";
+import { SESSION_COST_CEILING_REASON, SessionCostCeilingError, sessionCeilingReached } from "../scheduling/budget.js";
 import type { SchedulingContract } from "../scheduling/contract.js";
 import { resolveGlobalConcurrency } from "../scheduling/local-capacity.js";
 import {
@@ -3643,7 +3643,7 @@ export function createDispatchBundle(
 				});
 			} else {
 				const { currentUsd, ceilingUsd } = scheduling.preflight();
-				if (currentUsd >= ceilingUsd) throw new SessionCostCeilingError(currentUsd, ceilingUsd);
+				if (sessionCeilingReached(currentUsd, ceilingUsd)) throw new SessionCostCeilingError(currentUsd, ceilingUsd);
 			}
 		} catch (error) {
 			if (error instanceof SessionCostCeilingError) {

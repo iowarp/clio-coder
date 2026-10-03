@@ -316,9 +316,7 @@ export function buildDispatchParameters(composition: DispatchSchemaComposition =
 				[
 					Type.Boolean(),
 					Type.Object({
-						reviewer: Type.Optional(
-							Type.String({ description: "Reviewer recipe id (default: the builder's agent, read-only)." }),
-						),
+						reviewer: Type.Optional(Type.String({ description: "Reviewer recipe id (default: verifier, read-only)." })),
 						max_cycles: Type.Optional(
 							Type.Number({ description: "Review/revise cycles before an operator decision (default 2, max 4)." }),
 						),
@@ -338,7 +336,7 @@ export function buildDispatchParameters(composition: DispatchSchemaComposition =
 					judge: Type.Optional(
 						Type.Object(
 							{
-								agent: Type.Optional(Type.String({ description: "Judge recipe id (default: the builder's agent)." })),
+								agent: Type.Optional(Type.String({ description: "Judge recipe id (default: verifier)." })),
 								model: Type.Optional(Type.String()),
 								target: Type.Optional(Type.String()),
 								node: Type.Optional(Type.String({ description: "Fleet node pin for the judge." })),

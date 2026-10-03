@@ -11,6 +11,7 @@ import {
 import { loadManifestFromRoot, parseExtensionManifest } from "../../src/domains/extensions/discovery.js";
 import { enableExtension, installExtension, listInstalledExtensions } from "../../src/domains/extensions/index.js";
 import { getVersionInfo } from "../../src/domains/lifecycle/version.js";
+import { trustProjectPackages } from "../harness/project-trust.js";
 
 const roots: string[] = [];
 
@@ -119,7 +120,10 @@ describe("contracts/extension Clio compatibility", () => {
 		ok(result.extension);
 		deepStrictEqual(result.diagnostics, []);
 		strictEqual(result.extension.compatible, true);
-		strictEqual(result.extension.effective, true);
+		trustProjectPackages(project, "extensions");
+		const [listed] = listInstalledExtensions(project, { scope: "project", all: true });
+		strictEqual(listed?.compatible, true);
+		strictEqual(listed?.effective, true);
 	});
 
 	it("refuses an incompatible package at load while keeping its diagnostic visible", () => {
@@ -149,6 +153,7 @@ describe("contracts/extension Clio compatibility", () => {
 
 		writeManifest(projectSource, "winner-contract", ">=0.0.0");
 		ok(installExtension(projectSource, { cwd: project, scope: "project" }).extension);
+		trustProjectPackages(project, "extensions");
 		const projectRoot = path.join(project, ".clio-coder", "extensions", "winner-contract");
 		mkdirSync(path.join(outside, "payload"));
 		symlinkSync(path.join(outside, "payload"), path.join(projectRoot, "payload"), "dir");
@@ -166,7 +171,10 @@ describe("contracts/extension Clio compatibility", () => {
 		ok(projectEntry?.diagnostics.some((diagnostic) => diagnostic.message.includes("symbolic link")));
 
 		const enabled = enableExtension("winner-contract", { cwd: project, scope: "project" });
+		trustProjectPackages(project, "extensions");
 		strictEqual(enabled.extension?.enabled, true);
-		strictEqual(enabled.extension?.loadable, false, "enabling cannot override package admission");
+		const reenabled = listInstalledExtensions(project, { scope: "project" }).find((entry) => entry.scope === "project");
+		strictEqual(reenabled?.enabled, true);
+		strictEqual(reenabled?.loadable, false, "enabling cannot override package admission");
 	});
 });

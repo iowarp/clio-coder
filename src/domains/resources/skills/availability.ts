@@ -30,17 +30,19 @@ export function installedSkillPackages(skills: ReadonlyArray<Skill>, cwd: string
 					? "incompatible"
 					: !pkg.enabled
 						? "disabled"
-						: !pkg.effective
-							? "shadowed"
-							: !pkg.loadable
-								? "damaged"
-								: pkg.trust === "foreign" && !trustImports
-									? "requires trust"
-									: active
-										? "ready"
-										: admitted
-											? "no ready skills; inspect /library"
-											: "pending reload; run /library reload";
+						: pkg.trustBlocked
+							? "requires trust"
+							: !pkg.effective
+								? "shadowed"
+								: !pkg.loadable
+									? "damaged"
+									: pkg.trust === "foreign" && !trustImports
+										? "requires trust"
+										: active
+											? "ready"
+											: admitted
+												? "no ready skills; inspect /library"
+												: "pending reload; run /library reload";
 			const record = readPluginInstallRecord(pkg.id, { cwd, scope: pkg.scope });
 			const origin = typeof record?.origin === "object" ? record.origin.kind : (record?.origin ?? "local");
 			return { name: pkg.id, names, scope: pkg.scope, state, origin, path: pkg.rootPath };

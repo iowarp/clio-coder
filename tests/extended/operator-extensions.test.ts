@@ -16,6 +16,7 @@ import {
 	disableExtension,
 	enableExtension,
 	installExtension,
+	listInstalledExtensions,
 	removeExtension,
 } from "../../src/domains/extensions/state.js";
 import { isLoadableExtension } from "../../src/domains/extensions/types.js";
@@ -29,6 +30,7 @@ import {
 } from "../../src/interactive/slash-commands.js";
 import { registerHarnessExtensionTools } from "../../src/tools/harness-extensions.js";
 import { createRegistry } from "../../src/tools/registry.js";
+import { trustProjectPackages } from "../harness/project-trust.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
 
 const declaration = {
@@ -40,6 +42,16 @@ const declaration = {
 };
 const normal =
 	'export default api => { let n=0; api.handle("inspect", (args,ctx) => ({text:JSON.stringify({args,n:++n,snapshot:ctx.snapshot,secret:process.env.CLIO_CODER_TEST_SECRET??null}),status:{text:"SYNTHETIC fixture ready"}})); };';
+/** Install into the project and approve it as `config trust extensions` would, returning the entry as it now lists. */
+function installProject(source: string, cwd: string, options: { force?: boolean } = {}) {
+	const result = installExtension(source, { cwd, scope: "project", ...options });
+	trustProjectPackages(cwd, "extensions");
+	const id = result.extension?.id;
+	const extension = id
+		? listInstalledExtensions(cwd, { scope: "project", all: true }).find((entry) => entry.id === id)
+		: undefined;
+	return { ...result, extension };
+}
 async function fixture(t: TestContext, script = normal, overrides: Record<string, unknown> = {}) {
 	const env = await isolateClioEnv("clio-coder-operator-test-");
 	const source = path.join(env.dir, "source");
@@ -55,7 +67,7 @@ async function fixture(t: TestContext, script = normal, overrides: Record<string
 	};
 	writeFileSync(path.join(source, "clio-coder-extension.json"), JSON.stringify(manifest));
 	writeFileSync(path.join(source, "extension.mjs"), script);
-	const result = installExtension(source, { cwd, scope: "project" });
+	const result = installProject(source, cwd);
 	ok(result.extension && isLoadableExtension(result.extension), JSON.stringify(result.diagnostics));
 	const extension = result.extension;
 	let sessionId = "clio-coder-session-one";
@@ -139,18 +151,18 @@ test("commands and UI carry runtime generation; relative helpers change only aft
 		'import {label} from "./helper.mjs"; export default api=>api.handle("inspect",()=>({text:label,status:{text:label}}));';
 	const f = await fixture(t, script);
 	writeFileSync(path.join(f.source, "helper.mjs"), 'export const label="synthetic-first";');
-	ok(installExtension(f.source, { cwd: f.cwd, scope: "project", force: true }).extension?.loadable);
+	ok(installProject(f.source, f.cwd, { force: true }).extension?.loadable);
 	equal((await f.runtime.reload("startup")).status, "committed");
 	const command = "ext:lab_status.v1:inspect";
 	equal((await f.runtime.invoke(command, "")).text, "synthetic-first");
 	writeFileSync(path.join(f.source, "helper.mjs"), 'export const label="synthetic-second";');
-	ok(installExtension(f.source, { cwd: f.cwd, scope: "project", force: true }).extension?.loadable);
+	ok(installProject(f.source, f.cwd, { force: true }).extension?.loadable);
 	await rejects(f.runtime.invoke(command, ""), /reload|revoked/);
 	equal(f.runtime.entries()[0]?.status, undefined);
 	await f.runtime.reload();
 	equal((await f.runtime.invoke(command, "")).text, "synthetic-second");
 	equal(f.runtime.activeGeneration, 2);
-	const installed = installExtension(f.source, { cwd: f.cwd, scope: "project", force: true }).extension;
+	const installed = installProject(f.source, f.cwd, { force: true }).extension;
 	ok(installed?.provenance);
 	deepStrictEqual(f.runtime.entries()[0]?.provenance, installed.provenance);
 	ok(f.runtime.entries()[0]?.provenance?.contentDigest !== f.extension.provenance.contentDigest);
@@ -162,6 +174,7 @@ test("disabled project suppresses user runtime and removal reveals user copy", a
 	await f.runtime.reload();
 	equal(f.runtime.commands()[0]?.scope, "project");
 	disableExtension(f.extension.id, { cwd: f.cwd, scope: "project" });
+	trustProjectPackages(f.cwd, "extensions");
 	f.runtime.reconcile();
 	await rejects(f.runtime.invoke("ext:lab_status.v1:inspect", ""), /not enabled|revoked|disabled/);
 	await f.runtime.reload();
@@ -170,6 +183,7 @@ test("disabled project suppresses user runtime and removal reveals user copy", a
 		false,
 	);
 	enableExtension(f.extension.id, { cwd: f.cwd, scope: "project" });
+	trustProjectPackages(f.cwd, "extensions");
 	await f.runtime.reload();
 	ok(f.runtime.commands()[0]?.available);
 	removeExtension(f.extension.id, { cwd: f.cwd, scope: "project" });
@@ -198,7 +212,7 @@ test("real import failure and missing/undeclared handlers report degraded readin
 	await rejects(f.runtime.invoke("ext:lab_status.v1:inspect", ""), /synthetic import failure/);
 	for (const script of ["export default ()=>{}", 'export default api=>api.handle("undeclared",()=>({text:"bad"}))']) {
 		writeFileSync(path.join(f.source, "extension.mjs"), script);
-		installExtension(f.source, { cwd: f.cwd, scope: "project", force: true });
+		installProject(f.source, f.cwd, { force: true });
 		await f.runtime.reload();
 		equal(f.runtime.commands()[0]?.available, false);
 	}
@@ -253,6 +267,7 @@ test("install change while staging rejects candidate and starts no substituted b
 	const reload = f.runtime.reload();
 	await delay(30);
 	disableExtension(f.extension.id, { cwd: f.cwd, scope: "project" });
+	trustProjectPackages(f.cwd, "extensions");
 	equal((await reload).status, "rejected");
 	equal(
 		f.runtime.commands().some((row) => row.available),
@@ -340,7 +355,7 @@ test("scientific examples are valid packages and the real dashboard labels synth
 	for (const name of ["lab-status", "measurements"]) {
 		const source = path.resolve("examples/extensions", name);
 		ok(loadManifestFromRoot(source).valid, name);
-		ok(installExtension(source, { cwd: f.cwd, scope: "project" }).extension?.loadable);
+		ok(installProject(source, f.cwd).extension?.loadable);
 	}
 	await f.runtime.reload();
 	const output = await f.runtime.invoke("ext:lab-status:dashboard", "");
@@ -375,7 +390,7 @@ test("startup CPU loop has a real deadline and disposal kills hanging hooks and 
 		path.join(f.source, "extension.mjs"),
 		'import {spawn} from "node:child_process";export default api=>{let child;api.handle("inspect",()=>{child=spawn(process.execPath,["-e","setInterval(()=>{},1000)"],{stdio:"ignore"});return {text:String(child.pid)}});api.onDispose(()=>new Promise(()=>{}));};',
 	);
-	installExtension(f.source, { cwd: f.cwd, scope: "project", force: true });
+	installProject(f.source, f.cwd, { force: true });
 	await f.runtime.reload();
 	const pid = Number((await f.runtime.invoke("ext:lab_status.v1:inspect", "")).text);
 	await f.runtime.dispose();
@@ -416,7 +431,7 @@ test("four-runtime cap is explicit and command-only packages consume no process"
 			path.join(f.source, "clio-coder-extension.json"),
 			JSON.stringify({ ...f.manifest, id: `clio-coder-fixture-${i}` }),
 		);
-		ok(installExtension(f.source, { cwd: f.cwd, scope: "project" }).extension?.loadable);
+		ok(installProject(f.source, f.cwd).extension?.loadable);
 	}
 	await f.runtime.reload();
 	equal(f.runtime.entries().filter((entry) => entry.state === "ready").length, 4);
@@ -537,6 +552,7 @@ test("operator dispatch joins local admission and preserves unavailable drafts",
 	await operations[0]?.();
 	equal(JSON.parse(outputs[0] ?? "null").args, "queued args");
 	disableExtension(f.extension.id, { cwd: f.cwd, scope: "project" });
+	trustProjectPackages(f.cwd, "extensions");
 	f.runtime.reconcile();
 	equal(dispatchSlashCommand(parseSlashCommand(`/${invocation}`), ctx), "rejected");
 	equal(dispatchSlashCommand(parseSlashCommand("/ext:unknown:missing"), ctx), "rejected");
@@ -684,14 +700,14 @@ test("frozen registry provenance detects a package changed between tool bootstra
 	};
 	writeFileSync(path.join(f.source, "clio-coder-extension.json"), JSON.stringify(manifest));
 	writeFileSync(path.join(f.source, "measure.cjs"), 'console.log("42")');
-	installExtension(f.source, { cwd: f.cwd, scope: "project" });
+	installProject(f.source, f.cwd);
 	const registry = createRegistry({ safety: createWorkerSafety({ cwd: f.cwd }) });
 	registerHarnessExtensionTools(registry, f.cwd);
 	const frozenTools = registry
 		.listAll()
 		.flatMap((tool) => (tool.sourceInfo?.extension ? [tool.sourceInfo.extension] : []));
 	writeFileSync(path.join(f.source, "extension.mjs"), `${normal}\n// UI-only changed after schema bootstrap`);
-	installExtension(f.source, { cwd: f.cwd, scope: "project", force: true });
+	installProject(f.source, f.cwd, { force: true });
 	const runtime = new OperatorExtensionRuntime({
 		context: () => ({ workspace: f.cwd, sessionId: null, mode: "interactive" }),
 		isIdle: () => true,

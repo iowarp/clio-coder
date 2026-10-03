@@ -54,6 +54,7 @@ import {
 } from "../../src/interactive/slash-commands.js";
 import { registerHarnessExtensionTools } from "../../src/tools/harness-extensions.js";
 import { createRegistry } from "../../src/tools/registry.js";
+import { trustProjectPackages } from "../harness/project-trust.js";
 import { type IsolatedClioEnv, isolateClioEnv } from "../harness/scratch-env.js";
 
 let env: IsolatedClioEnv;
@@ -118,8 +119,10 @@ describe("library import of foreign plugin packages", () => {
 	it("keeps Materio, foreign recipe imports and real harness runtimes independently owned across reloads", async () => {
 		for (const name of ["lab-status", "measurements"]) {
 			const installed = installExtension(path.resolve("examples/extensions", name), { cwd, scope: "project" });
-			ok(installed.extension?.loadable, JSON.stringify(installed.diagnostics));
+			ok(installed.extension, JSON.stringify(installed.diagnostics));
 		}
+		trustProjectPackages(cwd, "extensions");
+		ok(listInstalledExtensions(cwd, { scope: "project" }).every((entry) => entry.loadable));
 		const registry = createRegistry({ safety: createWorkerSafety({ cwd }) });
 		registerHarnessExtensionTools(registry, cwd);
 		const frozenTools = registry
@@ -168,8 +171,11 @@ describe("library import of foreign plugin packages", () => {
 					scope: "project",
 					origin: { kind: "catalog", source: materioSource },
 				});
-				ok(result.plugin?.loadable, JSON.stringify(result.diagnostics));
-				return result.plugin.rootPath;
+				ok(result.plugin, JSON.stringify(result.diagnostics));
+				trustProjectPackages(cwd, "plugins");
+				const installed = listInstalledPlugins(cwd, { scope: "project" }).find((entry) => entry.id === "materio");
+				ok(installed?.loadable, JSON.stringify(result.diagnostics));
+				return installed.rootPath;
 			};
 			const materioRoot = installMaterio();
 			reloadRecipes();
@@ -208,6 +214,7 @@ describe("library import of foreign plugin packages", () => {
 			const imported = applyLibraryImport(plan, true, { trustProjectImports: false });
 			strictEqual(imported.published, true, JSON.stringify(imported.diagnostics));
 			strictEqual(imported.admission?.trust, "foreign");
+			trustProjectPackages(cwd, "plugins");
 			reloadRecipes();
 			const importedRoot = path.join(cwd, ".clio-coder/plugins/claude-pack");
 			ok(!existsSync(path.join(importedRoot, "hooks")) && !existsSync(path.join(importedRoot, "scripts")));
@@ -246,10 +253,12 @@ describe("library import of foreign plugin packages", () => {
 			);
 			rmSync(collision);
 			ok(removePlugin("claude-pack", { cwd, scope: "project" }).removed);
+			trustProjectPackages(cwd, "plugins");
 			reloadRecipes();
 
 			for (const operation of [disablePlugin, enablePlugin, removePlugin]) {
 				deepStrictEqual(operation("materio", { cwd, scope: "project" }).diagnostics, []);
+				trustProjectPackages(cwd, "plugins");
 				reloadRecipes();
 				strictEqual(materioResources().length, operation === enablePlugin ? 30 : 0);
 				strictEqual(existsSync(materioRoot), operation !== removePlugin);
@@ -264,6 +273,7 @@ describe("library import of foreign plugin packages", () => {
 			reloadRecipes();
 			for (const operation of [disableExtension, enableExtension, removeExtension]) {
 				deepStrictEqual(operation("lab-status", { cwd, scope: "project" }).diagnostics, []);
+				trustProjectPackages(cwd, "extensions");
 				strictEqual((await runtime.reload()).status, "committed");
 				strictEqual(
 					runtime.commands().some((row) => row.invocation === invocation && row.available),

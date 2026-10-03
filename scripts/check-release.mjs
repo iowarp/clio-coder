@@ -57,6 +57,18 @@ const ENTRIES = ["dist/cli/index.js", "dist/worker/entry.js"];
 const MAX_TARBALL_BYTES = 14_000_000;
 const MAX_UNPACKED_BYTES = 60_000_000;
 
+// The installers ship: `clio-coder upgrade` re-runs the installed copy for an
+// install.sh or install.ps1 installation (src/domains/lifecycle/install-method.ts),
+// install.cmd bootstraps install.ps1 from cmd.exe, and both installers call the
+// installed native-install.cjs. Keep in step with the `scripts/` entries of the
+// package.json `files` allowlist.
+const SHIPPED_SCRIPTS = new Set([
+	"scripts/install.sh",
+	"scripts/install.ps1",
+	"scripts/install.cmd",
+	"scripts/native-install.cjs",
+]);
+
 const FORBIDDEN = [
 	{
 		test: (f) => f.startsWith("patches/"),
@@ -76,9 +88,7 @@ const FORBIDDEN = [
 		reason: "benchmarks are not part of the package",
 	},
 	{
-		// The installers ship: `clio-coder upgrade` re-runs the installed copy for an
-		// install.sh or install.ps1 installation (src/domains/lifecycle/install-method.ts).
-		test: (f) => f.startsWith("scripts/") && f !== "scripts/install.sh" && f !== "scripts/install.ps1",
+		test: (f) => f.startsWith("scripts/") && !SHIPPED_SCRIPTS.has(f),
 		reason: "repo scripts operate on a source checkout only",
 	},
 	{ test: (f) => f.endsWith(".tsbuildinfo"), reason: "typescript build cache" },

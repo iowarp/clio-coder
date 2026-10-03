@@ -14,6 +14,7 @@ import {
 	parseLibraryResourceKey,
 	readLibraryInventory,
 } from "../../src/domains/resources/library-inventory.js";
+import { trustProjectPackages } from "../harness/project-trust.js";
 import { isolateClioEnv, scratchClioEnvVars } from "../harness/scratch-env.js";
 
 const materioSource = fileURLToPath(new URL("../../library/plugins/materio/", import.meta.url));
@@ -314,7 +315,8 @@ describe("library inventory", () => {
 			const source = join(env.dir, "source");
 			fixture(source, "twin");
 			ok(installPlugin(source, { cwd, scope: "user" }).plugin?.loadable);
-			ok(installPlugin(source, { cwd, scope: "project" }).plugin?.loadable);
+			ok(installPlugin(source, { cwd, scope: "project" }).plugin);
+			trustProjectPackages(cwd, "plugins");
 
 			let inventory = readLibraryInventory({ cwd, home: env.dir, ref: "plugin:twin" });
 			deepStrictEqual(
@@ -338,6 +340,7 @@ describe("library inventory", () => {
 			strictEqual(userInspection.copy.loadable, false);
 
 			deepStrictEqual(disablePlugin("twin", { cwd, scope: "project" }).diagnostics, []);
+			trustProjectPackages(cwd, "plugins");
 			inventory = readLibraryInventory({ cwd, home: env.dir, ref: "plugin:twin" });
 			deepStrictEqual(
 				inventory.copies.map((item) => [item.scope, item.state, item.enabled, item.effective]),
@@ -362,6 +365,7 @@ describe("library inventory", () => {
 			);
 
 			ok(removePlugin("twin", { cwd, scope: "project" }).removed);
+			trustProjectPackages(cwd, "plugins");
 			inventory = readLibraryInventory({ cwd, home: env.dir, ref: "plugin:twin" });
 			deepStrictEqual(
 				inventory.copies.map((item) => [item.scope, item.state]),
@@ -395,7 +399,8 @@ describe("library inventory", () => {
 			const invalidSource = join(env.dir, "invalid");
 			fixture(invalidSource, "invalid");
 			const invalid = installPlugin(invalidSource, { cwd, scope: "project" });
-			ok(invalid.plugin?.loadable);
+			ok(invalid.plugin);
+			trustProjectPackages(cwd, "plugins");
 			rmSync(join(invalid.plugin.rootPath, "plugin.json"));
 
 			skill(cwd, ".clio-coder/skills/shared", "shared-skill", "project copy");
@@ -593,9 +598,9 @@ describe("library inventory", () => {
 			const cwd = join(env.dir, "workspace");
 			mkdirSync(cwd);
 			ok(
-				installPlugin(materioSource, { cwd, scope: "project", origin: { kind: "catalog", source: materioSource } }).plugin
-					?.loadable,
+				installPlugin(materioSource, { cwd, scope: "project", origin: { kind: "catalog", source: materioSource } }).plugin,
 			);
+			trustProjectPackages(cwd, "plugins");
 			skill(cwd, ".clio-coder/skills/local", "local-skill");
 
 			const gui = cli(env, cwd, ["inventory", "--json"]);

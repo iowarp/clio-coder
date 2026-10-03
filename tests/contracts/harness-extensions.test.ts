@@ -28,6 +28,7 @@ import { createRegistry } from "../../src/tools/registry.js";
 import { toolSignatureOf } from "../../src/worker/protocol.js";
 import { makeDispatchBundle } from "../harness/dispatch.js";
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
+import { trustProjectPackages } from "../harness/project-trust.js";
 
 const roots: string[] = [];
 const envBefore = { ...process.env };
@@ -75,7 +76,9 @@ function fixture(
 function installed(script?: string) {
 	const data = fixture(script);
 	const result = installExtension(data.source, { cwd: data.cwd, scope: "project" });
-	ok(result.extension?.loadable, JSON.stringify(result.diagnostics));
+	trustProjectPackages(data.cwd, "extensions");
+	const extension = listInstalledExtensions(data.cwd).find((entry) => entry.id === "fixture");
+	ok(extension?.loadable, JSON.stringify(result.diagnostics));
 	const registry = createRegistry({ safety: createWorkerSafety({ cwd: data.cwd }), autonomy: () => "yolo" });
 	deepStrictEqual(registerHarnessExtensionTools(registry, data.cwd), []);
 	registry.onPermissionRequired((_call, decision, meta) => {
@@ -85,7 +88,7 @@ function installed(script?: string) {
 			requestedBy: "test",
 		});
 	});
-	return { ...data, registry, extension: result.extension };
+	return { ...data, registry, extension };
 }
 
 describe("harness extension executable capabilities", () => {
@@ -173,15 +176,20 @@ describe("harness extension executable capabilities", () => {
 		const tool = data.registry.get(testName);
 		ok(tool);
 		disableExtension("fixture", { cwd: data.cwd, scope: "project" });
+		trustProjectPackages(data.cwd, "extensions");
 		equal((await tool.run({ text: "test" })).kind, "error");
 		enableExtension("fixture", { cwd: data.cwd, scope: "project" });
+		trustProjectPackages(data.cwd, "extensions");
 		writeFileSync(path.join(data.extension.rootPath, "command.cjs"), "console.log('{}')");
 		equal((await tool.run({ text: "test" })).kind, "error");
 		installExtension(data.source, { cwd: data.cwd, scope: "project", force: true });
+		trustProjectPackages(data.cwd, "extensions");
 		writeFileSync(path.join(data.source, "command.cjs"), "console.log('null')");
 		installExtension(data.source, { cwd: data.cwd, scope: "project", force: true });
+		trustProjectPackages(data.cwd, "extensions");
 		equal((await tool.run({ text: "test" })).kind, "error");
 		removeExtension("fixture", { cwd: data.cwd, scope: "project" });
+		trustProjectPackages(data.cwd, "extensions");
 		equal((await tool.run({ text: "test" })).kind, "error");
 	});
 	it("protects registered names from collisions without overwriting the existing tool", () => {
@@ -287,7 +295,9 @@ describe("harness extension executable capabilities", () => {
 			const data = fixture(script);
 			Object.assign(data.manifest.capabilities.tools[0] ?? {}, limits);
 			writeFileSync(path.join(data.source, "clio-coder-extension.json"), JSON.stringify(data.manifest));
-			ok(installExtension(data.source, { cwd: data.cwd, scope: "project" }).extension?.loadable);
+			installExtension(data.source, { cwd: data.cwd, scope: "project" });
+			trustProjectPackages(data.cwd, "extensions");
+			ok(listInstalledExtensions(data.cwd).find((entry) => entry.id === "fixture")?.loadable);
 			const registry = createRegistry({ safety: createWorkerSafety({ cwd: data.cwd }) });
 			registerHarnessExtensionTools(registry, data.cwd);
 			const result = await registry.get(testName)?.run({ text: "test" });
@@ -354,7 +364,9 @@ describe("harness extension executable capabilities", () => {
 			}),
 		);
 		writeFileSync(path.join(data.source, "hooks.yaml"), "[]\n");
-		ok(installExtension(data.source, { cwd: data.cwd, scope: "project" }).extension?.loadable);
+		installExtension(data.source, { cwd: data.cwd, scope: "project" });
+		trustProjectPackages(data.cwd, "extensions");
+		ok(listInstalledExtensions(data.cwd).find((entry) => entry.id === "hooks-only")?.loadable);
 		const registry = createRegistry({ safety: createWorkerSafety({ cwd: data.cwd }) });
 		registerHarnessExtensionTools(registry, data.cwd);
 		equal(registry.listRegistered().length, 0);

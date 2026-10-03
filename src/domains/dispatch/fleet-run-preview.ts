@@ -273,7 +273,7 @@ export function compileFleetRunPreview(input: FleetRunPreviewInput): FleetRunPre
 	if (input.budget) {
 		if (input.budget.verdict === "over" || input.budget.verdict === "at") {
 			diagnostics.push(`budget ceiling crossed: ${formatUsd(budget.currentUsd)} / ${formatUsd(budget.ceilingUsd)}`);
-		} else if (contract.budgetUsd !== null) {
+		} else if (contract.budgetUsd !== null && budget.ceilingUsd > 0) {
 			const remaining = budget.ceilingUsd - budget.currentUsd;
 			if (contract.budgetUsd > remaining) {
 				diagnostics.push(

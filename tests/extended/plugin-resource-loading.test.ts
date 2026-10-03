@@ -8,11 +8,17 @@ import { createSafeEventBus } from "../../src/core/event-bus.js";
 import { createAgentsBundle } from "../../src/domains/agents/extension.js";
 import { listFleetContracts, loadFleetContract } from "../../src/domains/agents/fleet-contract.js";
 import { discoverAgentRecipes } from "../../src/domains/agents/registry.js";
-import { disablePlugin, installPlugin, reloadPluginResources } from "../../src/domains/plugins/index.js";
+import {
+	disablePlugin,
+	installPlugin,
+	listInstalledPlugins,
+	reloadPluginResources,
+} from "../../src/domains/plugins/index.js";
 import { resolvePackageReferences } from "../../src/domains/resources/package-references.js";
 import { loadPromptTemplates } from "../../src/domains/resources/prompts/loader.js";
 import { loadSkills } from "../../src/domains/resources/skills/loader.js";
 import { reloadPluginResourcesAndNotify } from "../../src/entry/plugin-reload.js";
+import { trustProjectPackages } from "../harness/project-trust.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
 
 function write(root: string, name: string, text: string): void {
@@ -176,8 +182,11 @@ it("keeps peer plugin namespaces and user overrides; disabled project plugin sup
 			"User override",
 		);
 		ok(loadPromptTemplates({ cwd }).items.some((item) => item.name === "wtfp:help"));
-		ok(installPlugin(source, { cwd, scope: "project" }).plugin?.loadable);
+		installPlugin(source, { cwd, scope: "project" });
+		trustProjectPackages(cwd, "plugins");
+		ok(listInstalledPlugins(cwd, { all: true, scope: "project" })[0]?.loadable);
 		disablePlugin("resource-fixture", { cwd, scope: "project" });
+		trustProjectPackages(cwd, "plugins");
 		reloadPluginResources(cwd);
 		ok(!discoverAgentRecipes(cwd).some((item) => item.id === "materio-researcher"));
 		ok(

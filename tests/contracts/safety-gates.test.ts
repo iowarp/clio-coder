@@ -839,7 +839,6 @@ describe("safety gate boundary", () => {
 					"library install plugin:example",
 					"library --kind skill install example --force",
 					"library enable example",
-					"library disable example --dry-run",
 					"library update example",
 					"library register ./package",
 					"interop adopt claude-code --yes",
@@ -854,6 +853,7 @@ describe("safety gate boundary", () => {
 				for (const args of [
 					"library install example --dry-run",
 					"library update example --dry-run",
+					"library disable example --dry-run",
 					"library inspect example",
 					"library drift example",
 					"library install --help",

@@ -5,11 +5,12 @@ import path from "node:path";
 import { afterEach, describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
 import { configureGuardrails } from "../../src/core/guardrails.js";
-import { installPlugin, pluginContentDigest } from "../../src/domains/plugins/index.js";
+import { installPlugin, listInstalledPlugins, pluginContentDigest } from "../../src/domains/plugins/index.js";
 import { readLibraryInventory } from "../../src/domains/resources/library-inventory.js";
 import { createContextTool } from "../../src/tools/context/index.js";
 import { createClioLibraryTool } from "../../src/tools/gateway/clio-context-tools.js";
 import type { ToolInvokeOptions } from "../../src/tools/registry.js";
+import { trustProjectPackages } from "../harness/project-trust.js";
 
 /**
  * clio_library, the gateway capability that took over context(scope="library"),
@@ -37,7 +38,11 @@ function withMaterio(): string {
 		expectedDigest: pluginContentDigest(materioSource),
 		expectedId: "materio",
 	});
-	ok(result.plugin?.loadable, JSON.stringify(result.diagnostics));
+	trustProjectPackages(project, "plugins");
+	ok(
+		listInstalledPlugins(project).find((entry) => entry.id === "materio")?.loadable,
+		JSON.stringify(result.diagnostics),
+	);
 	return project;
 }
 

@@ -21,6 +21,7 @@ const home = mkdtempSync(join(tmpdir(), "clio-coder-plugin-walks-"));
 Object.assign(process.env, scratchClioEnvVars(home), { HOME: home });
 await installFsCounters();
 const plugins = await import("../../src/domains/plugins/index.js");
+const { trustProjectPackages } = await import("../harness/project-trust.js");
 const { createResourcesLoader } = await import("../../src/domains/resources/loader.js");
 const { readLibraryInventory } = await import("../../src/domains/resources/library-inventory.js");
 const { expandInteractiveSubmitAsync } = await import("../../src/interactive/interactive-application.js");
@@ -75,6 +76,7 @@ function project(count: number): string {
 	scratch.push(cwd);
 	for (let index = 0; index < count; index++)
 		ok(plugins.installPlugin(resourcePlugin(`walk-kit-${index}`), { cwd, scope: "project" }).plugin);
+	trustProjectPackages(cwd, "plugins");
 	return cwd;
 }
 

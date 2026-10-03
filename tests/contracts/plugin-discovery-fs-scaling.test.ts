@@ -16,6 +16,7 @@ const home = mkdtempSync(join(tmpdir(), "clio-coder-plugin-discovery-fs-"));
 Object.assign(process.env, scratchClioEnvVars(home));
 await installFsCounters();
 const { PLUGIN_SCHEMA, clearPluginSnapshots, installPlugin } = await import("../../src/domains/plugins/index.js");
+const { trustProjectPackages } = await import("../harness/project-trust.js");
 const { discoverAgentRecipes } = await import("../../src/domains/agents/registry.js");
 const { loadSkills } = await import("../../src/domains/resources/skills/loader.js");
 
@@ -88,6 +89,7 @@ function project(skillPlugins: number): string {
 	const installs = [agentPlugin("bound-agents")];
 	for (let index = 0; index < skillPlugins; index++) installs.push(skillPlugin(`scale-kit-${index}`));
 	for (const source of installs) ok(installPlugin(source, { cwd, scope: "project" }).plugin, source);
+	trustProjectPackages(cwd, "plugins");
 	return cwd;
 }
 

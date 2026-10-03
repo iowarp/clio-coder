@@ -123,7 +123,7 @@ export interface DispatchPlanView {
 	text: string;
 	/** sha256 of the rendered artifact. */
 	hash: string;
-	/** Scheduling ceiling visible in the approved artifact. */
+	/** Scheduling ceiling visible in the approved artifact; 0 means no session ceiling. */
 	costCeilingUsd?: number;
 	/** Whole-plan deadline for a Scout dependency plan. */
 	deadlineMs?: number;
@@ -427,7 +427,7 @@ function renderPlanText(
 ): string {
 	const lines = [
 		`dispatch plan: topology=${topology} tasks=${tasks.length}`,
-		`advisory session cost baseline: ${costCeilingUsd === undefined ? "unavailable" : `$${costCeilingUsd.toFixed(4)}`}`,
+		`advisory session cost baseline: ${costCeilingUsd === undefined ? "unavailable" : costCeilingUsd === 0 ? "no ceiling" : `$${costCeilingUsd.toFixed(4)}`}`,
 		`deadline: ${deadlineMs === null ? "none (advisory planning)" : `${deadlineMs}ms whole-plan`}`,
 	];
 	if (confirmation !== undefined) {
@@ -815,7 +815,7 @@ export function resolvedDispatchPlanFromArgs(args: Record<string, unknown>): Res
 	) {
 		return null;
 	}
-	if (typeof value.costCeilingUsd !== "number" || !Number.isFinite(value.costCeilingUsd) || value.costCeilingUsd <= 0) {
+	if (typeof value.costCeilingUsd !== "number" || !Number.isFinite(value.costCeilingUsd) || value.costCeilingUsd < 0) {
 		return null;
 	}
 	const source = parsePlanSource(value.source);

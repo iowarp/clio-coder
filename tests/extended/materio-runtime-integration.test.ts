@@ -11,7 +11,12 @@ import { listFleetContracts, parseFleetContract } from "../../src/domains/agents
 import type { DispatchContract } from "../../src/domains/dispatch/contract.js";
 import { compileFleetExecutionPlan } from "../../src/domains/dispatch/fleet-plan.js";
 import { executeFleetRun } from "../../src/domains/dispatch/fleet-run.js";
-import { disablePlugin, installPlugin, reloadPluginResources } from "../../src/domains/plugins/index.js";
+import {
+	disablePlugin,
+	installPlugin,
+	listInstalledPlugins,
+	reloadPluginResources,
+} from "../../src/domains/plugins/index.js";
 import { loadPromptTemplates } from "../../src/domains/resources/prompts/loader.js";
 import { loadSkills } from "../../src/domains/resources/skills/loader.js";
 import { reloadPluginResourcesAndNotify } from "../../src/entry/plugin-reload.js";
@@ -19,6 +24,7 @@ import {
 	createInteractiveSlashRuntime,
 	type InteractiveSlashRuntimeDeps,
 } from "../../src/interactive/interactive-slash-runtime.js";
+import { trustProjectPackages } from "../harness/project-trust.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
 
 const source = fileURLToPath(new URL("../../library/plugins/materio/", import.meta.url));
@@ -35,7 +41,12 @@ it("reloads the actual materials bundle through the interactive slash runtime an
 		reloadPluginResources(cwd);
 		await agents.extension.start();
 		const installed = installPlugin(source, { cwd, scope: "project" });
-		ok(installed.plugin?.loadable, JSON.stringify(installed.diagnostics));
+		ok(installed.plugin?.valid, JSON.stringify(installed.diagnostics));
+		trustProjectPackages(cwd, "plugins");
+		ok(
+			listInstalledPlugins(cwd).find((entry) => entry.id === "materio")?.loadable,
+			JSON.stringify(installed.diagnostics),
+		);
 		strictEqual(agents.contract.list().filter((x) => x.source === "plugin").length, 0);
 		let reloads = 0;
 		const runtime = createInteractiveSlashRuntime({
@@ -67,6 +78,7 @@ it("reloads the actual materials bundle through the interactive slash runtime an
 			ok(!/\$\{(?:pluginRoot|component:)/.test(recipe.body));
 		}
 		disablePlugin("materio", { cwd, scope: "project" });
+		trustProjectPackages(cwd, "plugins");
 		runtime.dispatchCommand("/library reload");
 		strictEqual(reloads, 2);
 		strictEqual(agents.contract.list().filter((x) => x.source === "plugin").length, 0);

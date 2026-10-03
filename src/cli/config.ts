@@ -3,7 +3,7 @@ import { runConfigTrustCommand } from "./config-trust.js";
 import { printError } from "./shared.js";
 
 const HELP = `clio-coder config inspect [--json]
-clio-coder config trust safety|hooks|settings [--json | --hash SHA256 | --revoke]
+clio-coder config trust safety|hooks|settings|extensions|plugins [--json | --hash SHA256 | --revoke]
 
 Print the effective-customization graph: what settings, context files, rules,
 skills, prompts, agents, fleets, extensions, safety, memory, hooks, and the operator
@@ -16,6 +16,8 @@ scripts instead of the table.
 Trust previews show the captured project files and their digest. Approve only
 the reviewed digest with --hash, or remove a surface's approval with --revoke.
 Settings and safety reload on restart; project hooks also check trust before execution.
+Project extensions and plugins load only after their surface is approved; approve, then
+reload extensions or the library.
 `;
 
 function renderText(cwd: string): string {

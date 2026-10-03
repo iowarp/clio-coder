@@ -123,8 +123,11 @@ export interface SystemOneSettings {
  * have no subscriber, so the timeout fallback governs. In permit terms
  * escalate is asks main with operator approval authority: the main agent's
  * card, always decided by a person. "main" is the explicit opt-in for the
- * main agent to grant ordinary worker asks itself; until the grant broker
- * ships, every such ask is denied with a reason saying so.
+ * main agent to grant ordinary worker asks on native local workers through the
+ * grant broker (src/domains/dispatch/grant-broker.ts): the main agent grants
+ * them at yolo and forwards them to the operator at any other autonomy level.
+ * Operator-authority asks always go to the operator, and an ask no one can
+ * answer is denied.
  */
 export type WorkerPermissionMode = "deny" | "fail" | "escalate" | "main";
 

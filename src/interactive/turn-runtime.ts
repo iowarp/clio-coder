@@ -28,7 +28,7 @@ import {
 	type TargetStatus,
 	targetRequiresAuth,
 } from "../domains/providers/index.js";
-import { SessionCostCeilingError } from "../domains/scheduling/budget.js";
+import { SessionCostCeilingError, sessionCeilingReached } from "../domains/scheduling/budget.js";
 import type { SchedulingContract } from "../domains/scheduling/contract.js";
 import type { RetrySettings } from "../domains/session/retry.js";
 import type { createEngineAgent } from "../engine/agent.js";
@@ -664,7 +664,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 							});
 						} else {
 							const { currentUsd, ceilingUsd } = deps.scheduling.preflight();
-							if (currentUsd + unsettledSpendUsd >= ceilingUsd) {
+							if (sessionCeilingReached(currentUsd + unsettledSpendUsd, ceilingUsd)) {
 								throw new SessionCostCeilingError(currentUsd + unsettledSpendUsd, ceilingUsd);
 							}
 						}

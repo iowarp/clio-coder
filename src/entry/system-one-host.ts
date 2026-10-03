@@ -18,7 +18,7 @@ import type { ObservabilityContract } from "../domains/observability/contract.js
 import { appendOutOfTurnUsageRow } from "../domains/observability/out-of-turn-usage.js";
 import { resolveEffectivePricing } from "../domains/providers/catalog.js";
 import type { ProvidersContract } from "../domains/providers/contract.js";
-import { SessionCostCeilingError } from "../domains/scheduling/budget.js";
+import { SessionCostCeilingError, sessionCeilingReached } from "../domains/scheduling/budget.js";
 import type { SchedulingContract } from "../domains/scheduling/contract.js";
 import { operatorTextOfUserPayload } from "../domains/session/history.js";
 import type { SessionEntry } from "../domains/session/index.js";
@@ -73,7 +73,7 @@ export function createSystemOneRequestAdmission(deps: {
 				} else {
 					const currentUsd = deps.observability?.sessionCost() ?? 0;
 					const ceilingUsd = deps.getCeilingUsd();
-					if (currentUsd >= ceilingUsd) throw new SessionCostCeilingError(currentUsd, ceilingUsd);
+					if (sessionCeilingReached(currentUsd, ceilingUsd)) throw new SessionCostCeilingError(currentUsd, ceilingUsd);
 				}
 			}
 			signal.throwIfAborted();

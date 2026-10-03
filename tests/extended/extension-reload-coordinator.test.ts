@@ -14,7 +14,7 @@ import type {
 import { buildExtensionSnapshot } from "../../src/domains/extensions/snapshot.js";
 import { extensionSnapshotFor } from "../../src/domains/extensions/snapshot-access.js";
 import { bindExtensionSnapshotStore } from "../../src/domains/extensions/snapshot-store.js";
-import { installExtension } from "../../src/domains/extensions/state.js";
+import { installExtension, listInstalledExtensions } from "../../src/domains/extensions/state.js";
 import { createMiddlewareBundle } from "../../src/domains/middleware/extension.js";
 import type { HookReceipt } from "../../src/domains/middleware/hooks.js";
 import type {
@@ -29,6 +29,7 @@ import {
 	type ExtensionGenerationCommitted,
 	type ExtensionReloadCoordinatorDeps,
 } from "../../src/entry/extension-reload.js";
+import { trustProjectPackages } from "../harness/project-trust.js";
 
 const roots: string[] = [];
 const domainContext: DomainContext = { bus: {} as DomainContext["bus"], getContract: () => undefined };
@@ -55,7 +56,11 @@ function installFixture(project: string, id: string, hookId = `${id}.hook`, mess
 	const source = scratch();
 	writePackage(source, id, hookId, message);
 	const result = installExtension(source, { cwd: project, scope: "project" });
-	ok(result.extension?.loadable, result.diagnostics.map((diagnostic) => diagnostic.message).join("; "));
+	trustProjectPackages(project, "extensions");
+	ok(
+		listInstalledExtensions(project, { scope: "project", all: true }).find((entry) => entry.id === id)?.loadable,
+		result.diagnostics.map((diagnostic) => diagnostic.message).join("; "),
+	);
 }
 
 function writeProjectHooks(project: string, hookId: string, message: string): void {

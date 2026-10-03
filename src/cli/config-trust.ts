@@ -8,13 +8,20 @@ import {
 import { forgetApprovedFlowPolicy } from "../domains/safety/flow-policy-snapshot.js";
 import { printError } from "./shared.js";
 
-const SURFACES: ReadonlyArray<ProjectTrustSurface> = ["safety", "hooks", "settings"];
+const SURFACES: ReadonlyArray<ProjectTrustSurface> = ["safety", "hooks", "settings", "extensions", "plugins"];
+
+const PACKAGE_RELOAD: Partial<Record<ProjectTrustSurface, string>> = {
+	extensions: "Reload extensions (/extensions reload) to apply it.",
+	plugins: "Reload the library (/library reload) to apply it.",
+};
 
 /** Review is read-only. Approval names the digest the operator reviewed, so edits cannot borrow stale consent. */
 export function runConfigTrustCommand(args: ReadonlyArray<string>, cwd = process.cwd()): number {
 	const surface = args[0] as ProjectTrustSurface | undefined;
 	if (surface === undefined || !SURFACES.includes(surface)) {
-		printError("usage: clio-coder config trust safety|hooks|settings [--json | --hash SHA256 | --revoke]");
+		printError(
+			"usage: clio-coder config trust safety|hooks|settings|extensions|plugins [--json | --hash SHA256 | --revoke]",
+		);
 		return 2;
 	}
 	const rest = args.slice(1);
@@ -33,7 +40,7 @@ export function runConfigTrustCommand(args: ReadonlyArray<string>, cwd = process
 				if (failure !== null) throw new Error(failure);
 			}
 			process.stdout.write(
-				`Project ${surface} trust revoked. Restart to reload settings and safety; project hooks stop before their next execution.\n`,
+				`Project ${surface} trust revoked. ${PACKAGE_RELOAD[surface] ?? "Restart to reload settings and safety; project hooks stop before their next execution."}\n`,
 			);
 			return 0;
 		}
@@ -58,7 +65,7 @@ export function runConfigTrustCommand(args: ReadonlyArray<string>, cwd = process
 		}
 		recordProjectSurfaceTrust(snapshot.workspaceRoot, surface, snapshot.contentHash);
 		process.stdout.write(
-			`Project ${surface} approved for ${snapshot.workspaceRoot} at ${snapshot.contentHash}. Restart to reload settings and safety; reload extensions to register newly approved hooks.\n`,
+			`Project ${surface} approved for ${snapshot.workspaceRoot} at ${snapshot.contentHash}. ${PACKAGE_RELOAD[surface] ?? "Restart to reload settings and safety; reload extensions to register newly approved hooks."}\n`,
 		);
 		return 0;
 	} catch (error) {

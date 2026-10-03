@@ -550,7 +550,7 @@ export function validateJobSpec(spec: unknown): Validated {
 	if ("plan" in spec && spec.plan !== undefined) {
 		if (!isValidPlan(spec.plan)) {
 			errors.push(
-				"plan must carry hash (non-empty), topology (parallel|sequential|pipeline|review|compete|detached), taskCount >= 1, approval (operator|yolo), optional costCeilingUsd > 0",
+				"plan must carry hash (non-empty), topology (parallel|sequential|pipeline|review|compete|detached), taskCount >= 1, approval (operator|yolo), optional costCeilingUsd >= 0",
 			);
 		}
 	}
@@ -821,7 +821,7 @@ function isValidPlan(value: unknown): value is RunPlanProvenance {
 	) {
 		return false;
 	}
-	if (value.costCeilingUsd !== undefined && (typeof value.costCeilingUsd !== "number" || value.costCeilingUsd <= 0)) {
+	if (value.costCeilingUsd !== undefined && (typeof value.costCeilingUsd !== "number" || value.costCeilingUsd < 0)) {
 		return false;
 	}
 	return true;

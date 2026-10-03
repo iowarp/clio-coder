@@ -15,7 +15,9 @@ import {
 	type InstalledExtensionRecord,
 	installExtension,
 	listInstalledExtensionRecords,
+	listInstalledExtensions,
 } from "../../src/domains/extensions/state.js";
+import { trustProjectPackages } from "../harness/project-trust.js";
 
 const roots: string[] = [];
 
@@ -40,8 +42,9 @@ function writePackage(root: string, id: string, hookMessage = "generation one"):
 function installFixture(project: string, id = "snapshot-fixture"): string {
 	const source = scratch();
 	writePackage(source, id);
-	const result = installExtension(source, { cwd: project, scope: "project" });
-	ok(result.extension?.loadable);
+	installExtension(source, { cwd: project, scope: "project" });
+	trustProjectPackages(project, "extensions");
+	ok(listInstalledExtensions(project, { scope: "project", all: true }).find((entry) => entry.id === id)?.loadable);
 	return path.join(project, ".clio-coder", "extensions", id);
 }
 

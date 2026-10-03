@@ -1487,7 +1487,10 @@ const SECTION_CONTENT: Record<SettingsSectionId, Pick<SectionSpec, "fields" | "a
 			return [
 				["Autonomy level", settings.safety.autonomy],
 				["Worker permissions", settings.fleet.permissions.mode],
-				["Session cost limit", `$${settings.safety.limits.sessionCostUsd} USD`],
+				[
+					"Session cost limit",
+					settings.safety.limits.sessionCostUsd === 0 ? "none" : `$${settings.safety.limits.sessionCostUsd} USD`,
+				],
 				["Turn tool budget", String(settings.safety.limits.chatToolCallsPerTurn)],
 				["Review watchdog", onOff(settings.safety.review.enabled)],
 				["External agent governance", settings.integrations.externalAgents.defaults.toolGovernance],
@@ -1533,17 +1536,17 @@ const SECTION_CONTENT: Record<SettingsSectionId, Pick<SectionSpec, "fields" | "a
 				hint: "USD",
 				run: async (io) => {
 					const current = readSettings().safety.limits.sessionCostUsd;
-					const answer = await ask(io.rl, "Session cost limit in USD", String(current));
+					const answer = await ask(io.rl, "Session cost limit in USD (0 for no limit)", String(current));
 					if (answer === null) return;
 					const parsed = Number(answer);
-					if (!Number.isFinite(parsed) || parsed <= 0) {
-						io.warn(`Session cost limit must be greater than 0; left at $${current}\n`);
+					if (!Number.isFinite(parsed) || parsed < 0) {
+						io.warn(`Session cost limit must be 0 or greater; left at $${current}\n`);
 						return;
 					}
 					updateSettings((draft) => {
 						draft.safety.limits.sessionCostUsd = parsed;
 					});
-					io.ok(`Session cost limit set to $${parsed} USD`);
+					io.ok(parsed === 0 ? "Session cost limit removed" : `Session cost limit set to $${parsed} USD`);
 				},
 			},
 			{

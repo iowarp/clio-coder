@@ -146,7 +146,8 @@ export async function runScoutContinuationPlan<T, S>(input: {
 			},
 			reserve(_plan, admissions) {
 				const cost = admissions.reduce((sum, admission) => sum + admission.costUpperBoundUsd, 0);
-				if (!Number.isFinite(cost) || cost > input.artifact.costCeilingUsd) {
+				const ceilingUsd = input.artifact.costCeilingUsd;
+				if (!Number.isFinite(cost) || (ceilingUsd > 0 && cost > ceilingUsd)) {
 					throw new Error("Scout dependency plan drifted above its approved cost ceiling");
 				}
 				return { ownerId: input.reservationOwnerId };

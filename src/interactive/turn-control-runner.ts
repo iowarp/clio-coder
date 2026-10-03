@@ -364,7 +364,7 @@ export function createTurnControlRunner(deps: TurnControlRunnerDeps): TurnContro
 								agentSpecs: specs,
 							});
 							const ceiling = settings.orientation.maxCostUsdPerTurn ?? dispatch.costCeilingUsd?.();
-							if (ceiling === undefined || !Number.isFinite(ceiling) || ceiling <= 0)
+							if (ceiling === undefined || !Number.isFinite(ceiling) || ceiling < 0)
 								throw new Error("dispatch scheduling cost ceiling is unavailable");
 							const continuation = prepareScoutContinuation({
 								source,

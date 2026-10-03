@@ -29,6 +29,7 @@ import {
 } from "../../src/domains/resources/library-actions.js";
 import { readLibraryInventory } from "../../src/domains/resources/library-inventory.js";
 import { installSkill } from "../../src/domains/resources/skills/marketplace.js";
+import { trustProjectPackages } from "../harness/project-trust.js";
 
 let root: string;
 let previousConfig: string | undefined;
@@ -199,13 +200,16 @@ describe("library lifecycle plans", () => {
 		catalog([source({ name: "shared", kind: "skill" })]);
 		install("skill:shared", "user");
 		install("skill:shared", "project");
+		trustProjectPackages(root, "plugins");
 		const disable = planLibraryLifecycle({ operation: "disable", ref: "skill:shared", scope: "project", cwd: root });
 		equal(disable.steps[0]?.effectiveAfter?.scope, "project");
 		equal(disable.steps[0]?.effectiveAfter?.loadable, false);
 		match(disable.steps[0]?.fallbackNote ?? "", /still shadows the user copy/);
 		const disabled = applyLibraryLifecycle(disable);
 		equal(disabled.committed, 1);
-		deepStrictEqual(disabled.outcomes[0]?.verification?.effective, { scope: "project", loadable: false });
+		// The disable rewrote the project state bytes, so the approval is stale until re-approved.
+		deepStrictEqual(disabled.outcomes[0]?.verification?.effective, { scope: "user", loadable: true });
+		trustProjectPackages(root, "plugins");
 		equal(copy("user", "shared")?.loadable, false);
 
 		const remove = planLibraryLifecycle({ operation: "remove", ref: "skill:shared", scope: "project", cwd: root });
@@ -455,6 +459,7 @@ describe("library lifecycle plans", () => {
 		equal(plan.action, "install", plan.reasons.join("; "));
 		const result = applyLibraryImport(plan, true, { trustProjectImports: false });
 		equal(result.published, true);
+		trustProjectPackages(root, "plugins");
 		const outcome = libraryImportOutcome(plan, result);
 		equal(outcome.status, "committed");
 		equal(outcome.identity.ref, "skill:imported");
@@ -475,6 +480,7 @@ describe("library lifecycle plans", () => {
 			ok(existsSync(installed.path));
 			ok(copy(scope, "architecture")?.valid);
 		}
+		trustProjectPackages(root, "plugins");
 		equal(copy("project", "architecture")?.loadable, true);
 		equal(copy("user", "architecture")?.effective, false);
 	});

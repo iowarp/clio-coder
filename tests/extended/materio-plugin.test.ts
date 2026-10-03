@@ -8,10 +8,16 @@ import { fileURLToPath } from "node:url";
 import { parseFleetContract } from "../../src/domains/agents/fleet-contract.js";
 import { type AgentRecipeDiagnostic, loadRecipesFromDir } from "../../src/domains/agents/registry.js";
 import { normalizeAgentSpec, resolveAgentToolCompatibility } from "../../src/domains/agents/spec.js";
-import { installPlugin, pluginContentDigest, readPluginManifest } from "../../src/domains/plugins/index.js";
+import {
+	installPlugin,
+	listInstalledPlugins,
+	pluginContentDigest,
+	readPluginManifest,
+} from "../../src/domains/plugins/index.js";
 import { resolvePackageReferences } from "../../src/domains/resources/package-references.js";
 import { loadPromptTemplates } from "../../src/domains/resources/prompts/loader.js";
 import { loadSkills } from "../../src/domains/resources/skills/loader.js";
+import { trustProjectPackages } from "../harness/project-trust.js";
 
 const source = fileURLToPath(new URL("../../library/plugins/materio/", import.meta.url));
 const temporary: string[] = [];
@@ -43,8 +49,11 @@ describe("materio plugin", () => {
 			expectedDigest: pluginContentDigest(source),
 			expectedId: "materio",
 		});
-		ok(result.plugin?.loadable, JSON.stringify(result.diagnostics));
-		const root = result.plugin.rootPath;
+		ok(result.plugin?.valid, JSON.stringify(result.diagnostics));
+		trustProjectPackages(project, "plugins");
+		const installed = listInstalledPlugins(project).find((entry) => entry.id === "materio");
+		ok(installed?.loadable, JSON.stringify(result.diagnostics));
+		const root = installed.rootPath;
 		const prompts = loadPromptTemplates({
 			cwd: project,
 			roots: [{ path: path.join(root, "ai.iowarp.clio/prompts"), rootPath: root, plugin: true, scope: "project" }],

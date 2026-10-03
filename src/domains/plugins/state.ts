@@ -15,6 +15,7 @@ import {
 import path from "node:path";
 import { canonicalizeExistingPath } from "../../core/path-canonical.js";
 import { safeResourceWrite } from "../../core/safe-resource-write.js";
+import { projectPackagesTrusted } from "../../core/workspace-trust.js";
 import { clioConfigDir } from "../../core/xdg.js";
 import { evaluateClioCompatibility } from "../extensions/compatibility.js";
 import { isLibraryKind, type LibraryRequirementRef } from "../resources/library-types.js";
@@ -290,17 +291,21 @@ function assertExpectedState(expect: PluginExpectedState | undefined, cwd: strin
 	}
 }
 
-/** The one precedence rule: valid, compatible copies compete and project wins. */
+/**
+ * The one precedence rule: valid, compatible copies compete and project wins.
+ * A project copy the operator has not approved sits out, so it neither loads
+ * nor shadows a user copy.
+ */
 export function resolvePluginPrecedence(entries: InstalledPlugin[]): void {
 	for (const entry of entries) {
 		const winner = entries
-			.filter((peer) => peer.id === entry.id && peer.valid && peer.compatible)
+			.filter((peer) => peer.id === entry.id && peer.valid && peer.compatible && !peer.trustBlocked)
 			.sort((a, b) => Number(a.scope === "project") - Number(b.scope === "project"))
 			.at(-1);
 		entry.effective = entry === winner;
 		entry.loadable = entry.valid && entry.compatible && entry.enabled && entry.effective;
 		delete entry.overriddenBy;
-		if (winner && winner !== entry) entry.overriddenBy = winner.scope;
+		if (winner && winner !== entry && !entry.trustBlocked) entry.overriddenBy = winner.scope;
 	}
 }
 
@@ -490,12 +495,35 @@ function scopeEntries(scope: PluginScope, cwd: string): InstalledPlugin[] {
 	return entries;
 }
 
+/**
+ * A project copy installs from the repository's own state, so its digest check
+ * proves integrity and not consent. Workspace trust supplies the consent: until
+ * the operator approves the project's plugin state, its copies do not load, and
+ * user-scoped plugins are unaffected.
+ */
+function blockUntrustedProjectPlugins(entries: ReadonlyArray<InstalledPlugin>, cwd: string): void {
+	const project = entries.filter((entry) => entry.scope === "project");
+	if (project.length === 0 || projectPackagesTrusted(cwd, "plugins")) return;
+	for (const entry of project) {
+		entry.trustBlocked = true;
+		if (entry.valid && entry.compatible && entry.enabled) {
+			entry.diagnostics.push({
+				type: "warning",
+				message:
+					"project plugins are not trusted for this workspace and are not loaded; review with clio-coder config trust plugins",
+				path: pluginStatePath("project", cwd),
+			});
+		}
+	}
+}
+
 export function listInstalledPlugins(cwd = process.cwd(), options: PluginListOptions = {}): InstalledPlugin[] {
 	const scopes: PluginScope[] = options.scope ? [options.scope] : ["user", "project"];
 	const entries = scopes.flatMap((scope) => scopeEntries(scope, cwd));
+	blockUntrustedProjectPlugins(entries, cwd);
 	resolvePluginPrecedence(entries);
 	return entries
-		.filter((entry) => options.all || entry.effective || !entry.valid || !entry.compatible)
+		.filter((entry) => options.all || entry.effective || entry.trustBlocked || !entry.valid || !entry.compatible)
 		.sort((a, b) => a.id.localeCompare(b.id) || a.scope.localeCompare(b.scope));
 }
 

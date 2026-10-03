@@ -992,10 +992,27 @@ function resourceCliMutatesSkills(
 		return ["install", "update", "remove", "enable", "disable", "pin"].includes(verb ?? "");
 	if (resource === "interop") return verb === "adopt" && confirmed && !dryRun;
 	// A package of any kind may carry skills or require a skill dependency.
-	// Only install/update implement a dry-run; other mutations cannot spend it.
-	if ((verb === "install" || verb === "update") && dryRun) return false;
-	return ["install", "update", "remove", "enable", "disable", "pin", "register", "sync"].includes(verb ?? "");
+	// A dry run builds the plan and writes nothing, so it never needs a confirmation.
+	if (dryRun && LIBRARY_DRY_RUN_VERBS.includes(verb ?? "")) return false;
+	return LIBRARY_MUTATION_VERBS.includes(verb ?? "");
 }
+
+/** The library verbs that implement --dry-run (src/cli/library.ts, src/cli/library-import.ts). */
+const LIBRARY_DRY_RUN_VERBS = ["install", "import", "update", "enable", "disable", "remove"];
+
+const LIBRARY_MUTATION_VERBS = [
+	"install",
+	"import",
+	"update",
+	"remove",
+	"enable",
+	"disable",
+	"pin",
+	"register",
+	"sync",
+	"push",
+	"remote",
+];
 
 const STANDARD_DEV_TARGETS = new Set(["/dev/null", "/dev/stdout", "/dev/stderr", "/dev/tty", "/dev/zero"]);
 

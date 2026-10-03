@@ -105,6 +105,7 @@ function stateLabel(extension: InstalledExtension): string {
 	if (!extension.valid) return "invalid";
 	if (!extension.compatible) return "incompatible";
 	if (!extension.enabled) return "disabled";
+	if (extension.trustBlocked) return "untrusted";
 	if (!extension.effective) return `shadowed:${extension.overriddenBy ?? "higher"}`;
 	return extension.loadable ? "eligible" : "inactive";
 }

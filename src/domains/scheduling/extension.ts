@@ -8,7 +8,7 @@ import { type BudgetAlertPayload, BusChannels } from "../../core/bus-events.js";
 import type { DomainBundle, DomainContext, DomainExtension } from "../../core/domain-loader.js";
 import type { ConfigContract } from "../config/contract.js";
 import type { ObservabilityContract } from "../observability/contract.js";
-import { createBudgetState, SessionCostCeilingError } from "./budget.js";
+import { createBudgetState, SessionCostCeilingError, sessionCeilingReached } from "./budget.js";
 import { createFleetRegistry, LOCAL_NODE_ID } from "./cluster.js";
 import type { SchedulingContract } from "./contract.js";
 import {
@@ -90,7 +90,7 @@ export function createSchedulingBundle(
 				const { currentUsd } = evaluate();
 				const spend = currentUsd + additionalUsd;
 				const ceilingUsd = getCeilingUsd?.() ?? budget.ceilingUsd;
-				if (spend < ceilingUsd) return;
+				if (!sessionCeilingReached(spend, ceilingUsd)) return;
 				if (!waitForRaise) throw new SessionCostCeilingError(spend, ceilingUsd);
 				if (signal?.aborted) throw signal.reason ?? new Error("budget wait aborted");
 				if (!alerted) {

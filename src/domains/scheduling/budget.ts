@@ -20,6 +20,15 @@ export class SessionCostCeilingError extends Error {
 	}
 }
 
+/**
+ * `safety.limits.sessionCostUsd: 0` means no ceiling. Every reader that
+ * compares spend against the configured value goes through here so none of
+ * them treats zero as a ceiling already crossed.
+ */
+export function sessionCeilingReached(spendUsd: number, ceilingUsd: number): boolean {
+	return ceilingUsd > 0 && spendUsd >= ceilingUsd;
+}
+
 export interface BudgetState {
 	ceilingUsd: number;
 	checkCeiling(currentUsd: number): BudgetVerdict;
@@ -35,6 +44,7 @@ export function createBudgetState(initialCeilingUsd: number): BudgetState {
 			return ceiling;
 		},
 		checkCeiling(currentUsd) {
+			if (ceiling === 0) return "under";
 			if (currentUsd > ceiling) return "over";
 			if (currentUsd === ceiling) return "at";
 			return "under";

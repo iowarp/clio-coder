@@ -85,7 +85,9 @@ export function formatBudgetLine(preview: FleetRunPreview): string {
 		preview.budget.contractUsd === null
 			? "contract declares no ceiling"
 			: `contract ceiling $${preview.budget.contractUsd.toFixed(2)}`;
-	return `budget: admitted under $${preview.budget.ceilingUsd.toFixed(2)} session ceiling, ${formatUsd(preview.budget.currentUsd)} spent, ${contract}`;
+	const ceiling =
+		preview.budget.ceilingUsd === 0 ? "no session ceiling" : `$${preview.budget.ceilingUsd.toFixed(2)} session ceiling`;
+	return `budget: admitted under ${ceiling}, ${formatUsd(preview.budget.currentUsd)} spent, ${contract}`;
 }
 
 /**

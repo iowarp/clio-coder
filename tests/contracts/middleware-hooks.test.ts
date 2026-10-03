@@ -7,7 +7,7 @@ import { Type } from "typebox";
 import { ToolNames } from "../../src/core/tool-names.js";
 import { createDispatchDedupRegistration } from "../../src/domains/dispatch/dedup.js";
 import { buildExtensionSnapshot } from "../../src/domains/extensions/snapshot.js";
-import { installExtension } from "../../src/domains/extensions/state.js";
+import { installExtension, listInstalledExtensions } from "../../src/domains/extensions/state.js";
 import { createDecisionHintsRegistration } from "../../src/domains/middleware/decision-hints.js";
 import { createReadOnlyExplorationNudgeRegistration } from "../../src/domains/middleware/dispatch-nudge.js";
 import { createMiddlewareBundle } from "../../src/domains/middleware/extension.js";
@@ -31,6 +31,7 @@ import { capturedHookSourcesFor } from "../../src/entry/extension-hook-sources.j
 import { createTurnOutcomeCollector } from "../../src/interactive/turn-outcome-collector.js";
 import type { ToolInvokeOptions } from "../../src/tools/registry.js";
 import { createRegistry } from "../../src/tools/registry.js";
+import { trustProjectPackages } from "../harness/project-trust.js";
 
 function registration(
 	id: string,
@@ -180,7 +181,9 @@ describe("middleware hook boundary", () => {
 			path.join(source, "hooks.yaml"),
 			"- id: receipted\n  on: turn_start\n  kind: prompt\n  message: verify\n",
 		);
-		const installed = installExtension(source, { cwd: project, scope: "project" }).extension;
+		installExtension(source, { cwd: project, scope: "project" });
+		trustProjectPackages(project, "extensions");
+		const installed = listInstalledExtensions(project).find((entry) => entry.id === "receipt-hooks");
 		strictEqual(installed?.loadable, true);
 		const second = buildExtensionSnapshot({ cwd: project, generation: 2 });
 		const [captured] = second.hookSources;

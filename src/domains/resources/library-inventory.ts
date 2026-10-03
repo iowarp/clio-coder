@@ -402,6 +402,8 @@ export function libraryCopyState(plugin: InstalledPlugin): LibraryCopyState {
 	if (plugin.diagnostics.some((item) => item.message.includes("content drift"))) return "damaged";
 	if (!plugin.valid) return "invalid";
 	if (!plugin.enabled) return "disabled";
+	// A project copy awaiting workspace trust is blocked, not shadowed by another copy.
+	if (plugin.trustBlocked) return "invalid";
 	if (!plugin.effective) return "shadowed";
 	return "invalid";
 }

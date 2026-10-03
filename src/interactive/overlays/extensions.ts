@@ -16,9 +16,11 @@ export function openExtensionsOverlay(tui: TUI, ctx: SlashCommandContext, onClos
 				? "incompatible"
 				: !ext.enabled
 					? "disabled"
-					: ext.loadable
-						? "eligible"
-						: `shadowed:${ext.overriddenBy ?? "higher"}`;
+					: ext.trustBlocked
+						? "untrusted"
+						: ext.loadable
+							? "eligible"
+							: `shadowed:${ext.overriddenBy ?? "higher"}`;
 
 		const runtime = ctx.operatorExtensions?.entries().find((entry) => entry.id === ext.id && entry.scope === ext.scope);
 		let meta = ext.runtime ? `${state}; runtime ${runtime?.state ?? "not started"}` : state;

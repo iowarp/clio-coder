@@ -15,6 +15,7 @@ import { loadSkills, parsePendingSkillRequests } from "../../src/domains/resourc
 import { reloadPluginResourcesAndNotify } from "../../src/entry/plugin-reload.js";
 import { createPendingSkillToolPolicy } from "../../src/interactive/chat-loop-messages.js";
 import { createContextTool } from "../../src/tools/context/index.js";
+import { trustProjectPackages } from "../harness/project-trust.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
 
 const herdr = new URL("../../library/skills/meta/herdr/", import.meta.url);
@@ -111,6 +112,9 @@ for (const scope of ["user", "project"] as const) {
 			const installedFile = path.join(installedRoot, "SKILL.md");
 
 			if (scope === "project") {
+				// A project package loads only after the operator approves the project's package state.
+				trustProjectPackages(cwd, "plugins");
+				refresh(cwd);
 				// The same physical file can also be visible through a peer-agent root.
 				const alias = path.join(cwd, ".agents/skills/herdr");
 				mkdirSync(path.dirname(alias), { recursive: true });

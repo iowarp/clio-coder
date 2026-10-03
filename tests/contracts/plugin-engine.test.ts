@@ -33,6 +33,7 @@ import {
 	removePlugin,
 	updatePlugin,
 } from "../../src/domains/plugins/index.js";
+import { trustProjectPackages } from "../harness/project-trust.js";
 import { type IsolatedClioEnv, isolateClioEnv } from "../harness/scratch-env.js";
 
 let env: IsolatedClioEnv;
@@ -133,10 +134,15 @@ describe("agent plugin engine", () => {
 				},
 			};
 		});
-		const installed = installPlugin(root, { cwd: project, scope: "project" }).plugin;
+		const untrusted = installPlugin(root, { cwd: project, scope: "project" }).plugin;
+		ok(untrusted);
+		strictEqual(untrusted.loadable, false);
+		deepStrictEqual(enabledPluginResourceRoots("prompts", project), []);
+		trustProjectPackages(project, "plugins");
+		const installed = listInstalledPlugins(project).find((entry) => entry.id === "research-kit");
 		ok(installed);
-		strictEqual(installed?.loadable, true);
-		strictEqual(installed?.rootPath, join(project, ".clio-coder", "plugins", "research-kit"));
+		strictEqual(installed.loadable, true);
+		strictEqual(installed.rootPath, join(project, ".clio-coder", "plugins", "research-kit"));
 		strictEqual(
 			enabledPluginResourceRoots("prompts", project)[0]?.path,
 			join(installed.rootPath, "ai.iowarp.clio", "prompts"),
@@ -229,10 +235,14 @@ describe("agent plugin engine", () => {
 		const root = fixture();
 		installPlugin(root, { cwd: project, scope: "user" });
 		installPlugin(root, { cwd: project, scope: "project" });
+		strictEqual(listInstalledPlugins(project).find((entry) => entry.effective)?.scope, "user");
+		trustProjectPackages(project, "plugins");
 		strictEqual(listInstalledPlugins(project).find((entry) => entry.effective)?.scope, "project");
 		disablePlugin("research-kit", { cwd: project, scope: "project" });
+		trustProjectPackages(project, "plugins");
 		deepStrictEqual(enabledPluginResourceRoots("skills", project), []);
 		enablePlugin("research-kit", { cwd: project, scope: "project" });
+		trustProjectPackages(project, "plugins");
 		strictEqual(enabledPluginResourceRoots("skills", project)[0]?.scope, "project");
 	});
 

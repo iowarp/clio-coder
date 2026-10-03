@@ -417,7 +417,8 @@ export function createDispatchAdmissionController(deps: DispatchToolDeps): Dispa
 		const injected = deps.getCostCeilingUsd?.();
 		if (injected !== undefined && Number.isFinite(injected) && injected > 0) return injected;
 		const ceiling = deps.dispatch.costCeilingUsd?.();
-		if (ceiling === undefined || !Number.isFinite(ceiling) || ceiling <= 0) {
+		// Zero is `safety.limits.sessionCostUsd: 0`, no session ceiling.
+		if (ceiling === undefined || !Number.isFinite(ceiling) || ceiling < 0) {
 			throw new Error("dispatch scheduling cost ceiling is unavailable");
 		}
 		return ceiling;

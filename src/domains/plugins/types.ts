@@ -130,6 +130,8 @@ export interface InstalledPlugin {
 	valid: boolean;
 	compatible: boolean;
 	effective: boolean;
+	/** Set on a project copy in a workspace whose project plugins the operator has not approved. */
+	trustBlocked?: true;
 	loadable: boolean;
 	resources: PluginResources;
 	manifest?: PluginManifest;

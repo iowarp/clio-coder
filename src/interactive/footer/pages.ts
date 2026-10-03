@@ -483,7 +483,14 @@ function statusPage(state: FooterDashboardRenderState, width: number): string[] 
 	const left: [string, string][] = [
 		["Target", state.session.target ?? "No model selected"],
 		["Tracked cost", formatCostAggregate(state.sessionCost) ?? "not yet priced"],
-		["Clio ceiling", state.costCeilingUsd === undefined ? "unknown" : `$${state.costCeilingUsd} · tracked pricing only`],
+		[
+			"Clio ceiling",
+			state.costCeilingUsd === undefined
+				? "unknown"
+				: state.costCeilingUsd === 0
+					? "none"
+					: `$${state.costCeilingUsd} · tracked pricing only`,
+		],
 		["MCP connected", names(state.connections?.mcp)],
 		["Plugins active", names(state.connections?.plugins)],
 		[

@@ -14,7 +14,7 @@ Serve Clio Coder as an Agent Client Protocol v1 agent over stdio.
                            it, the first workspace request selects the root.
   --permission-timeout MS  How long a mediated permission request may wait for the
                            client before the prompt expires. Defaults to the configured
-                           delegation.defaults.permissionTimeoutMs.
+                           integrations.externalAgents.defaults.permissionTimeoutMs.
   auth login               Open interactive Quick Connect for terminal ACP authentication.
 
 This command is intended for ACP frontends to spawn. Interactive delegation remains

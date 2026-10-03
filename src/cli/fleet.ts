@@ -315,7 +315,7 @@ function preflightFleet(contract: FleetContract, deps: FleetPreflightDeps): stri
 		if (budget.verdict === "over" || budget.verdict === "at") {
 			return `budget ceiling crossed: $${budget.currentUsd.toFixed(4)} / $${budget.ceilingUsd.toFixed(4)}`;
 		}
-		if (contract.budgetUsd !== null) {
+		if (contract.budgetUsd !== null && budget.ceilingUsd > 0) {
 			const remaining = budget.ceilingUsd - budget.currentUsd;
 			if (contract.budgetUsd > remaining) {
 				return `fleet budget $${contract.budgetUsd.toFixed(2)} exceeds remaining session budget $${remaining.toFixed(2)}`;

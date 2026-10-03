@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync } from "node:fs";
 import path from "node:path";
 import { safeResourceWrite } from "../../core/safe-resource-write.js";
+import { projectPackagesTrusted } from "../../core/workspace-trust.js";
 import { clioConfigDir } from "../../core/xdg.js";
 import { evaluateClioCompatibility } from "./compatibility.js";
 import { isRecord, loadManifestFromRoot, trimString } from "./discovery.js";
@@ -222,12 +223,35 @@ export function listInstalledExtensions(cwd = process.cwd(), options: ExtensionL
 	return listInstalledExtensionRecords(cwd, options).map((record) => record.entry);
 }
 
+/**
+ * A project copy installs from the repository's own state, so its digest check
+ * proves integrity and not consent. Workspace trust supplies the consent: until
+ * the operator approves the project's extension state, its copies neither load
+ * nor shadow a user copy, and user-scoped extensions are unaffected.
+ */
+function blockUntrustedProjectExtensions(records: ReadonlyArray<InstalledExtensionRecord>, cwd: string): void {
+	const project = records.filter((record) => record.entry.scope === "project");
+	if (project.length === 0 || projectPackagesTrusted(cwd, "extensions")) return;
+	for (const { entry } of project) {
+		entry.trustBlocked = true;
+		if (entry.valid && entry.compatible && entry.enabled) {
+			entry.diagnostics.push({
+				type: "warning",
+				message:
+					"project extensions are not trusted for this workspace and are not loaded; review with clio-coder config trust extensions",
+				path: statePath("project", cwd),
+			});
+		}
+	}
+}
+
 export function listInstalledExtensionRecords(
 	cwd = process.cwd(),
 	options: ExtensionListOptions = {},
 ): InstalledExtensionRecord[] {
 	const scopes: ExtensionScope[] = options.scope ? [options.scope] : ["user", "project"];
 	const records = scopes.flatMap((scope) => listScope(scope, cwd));
+	blockUntrustedProjectExtensions(records, cwd);
 	const byId = new Map<string, InstalledExtensionRecord[]>();
 	for (const record of records) {
 		const entry = record.entry;
@@ -237,20 +261,24 @@ export function listInstalledExtensionRecords(
 	}
 	for (const group of byId.values()) {
 		const winner = group
-			.filter((record) => record.entry.valid && record.entry.compatible)
+			.filter((record) => record.entry.valid && record.entry.compatible && !record.entry.trustBlocked)
 			.sort((a, b) => scopeRank(a.entry.scope) - scopeRank(b.entry.scope))
 			.at(-1);
 		for (const record of group) {
 			const entry = record.entry;
 			entry.effective = record === winner;
 			entry.loadable = entry.valid && entry.compatible && entry.enabled && entry.effective;
-			if (entry.valid && entry.compatible && !entry.effective && winner) entry.overriddenBy = winner.entry.scope;
+			if (entry.valid && entry.compatible && !entry.trustBlocked && !entry.effective && winner) {
+				entry.overriddenBy = winner.entry.scope;
+			}
 		}
 	}
 	// Invalid and incompatible packages remain visible by default so the load
 	// refusal and its diagnostic cannot disappear with the capabilities it suppresses.
 	const all =
-		options.all === true ? records : records.filter(({ entry }) => entry.effective || !entry.valid || !entry.compatible);
+		options.all === true
+			? records
+			: records.filter(({ entry }) => entry.effective || entry.trustBlocked || !entry.valid || !entry.compatible);
 	return all.sort((a, b) => {
 		const id = a.entry.id.localeCompare(b.entry.id);
 		if (id !== 0) return id;

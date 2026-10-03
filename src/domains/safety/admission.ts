@@ -46,7 +46,7 @@ export interface AdmissionConstraints {
 /**
  * Who may discharge an ask. Every safety-net rail and tool confirmation is
  * `operator`: only a person clears it. Only a worker's autonomy ask is `main`,
- * which means the main agent may answer it once the grant broker exists
+ * which means the main agent may answer it through the grant broker
  * (Phase D); the operator can always answer it too.
  */
 export type ApprovalAuthority = "main" | "operator";

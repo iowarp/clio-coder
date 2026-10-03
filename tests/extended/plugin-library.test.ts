@@ -45,6 +45,7 @@ import { discoverMarketplaceSkills } from "../../src/domains/resources/skills/ma
 import { LIBRARY_TABS } from "../../src/interactive/overlays/library-tabs.js";
 import { createSlashCommandAutocompleteProvider } from "../../src/interactive/slash-autocomplete.js";
 import { parseSlashCommand } from "../../src/interactive/slash-commands.js";
+import { trustProjectPackages } from "../harness/project-trust.js";
 
 let root: string;
 let previousConfig: string | undefined;
@@ -504,6 +505,7 @@ describe("plugin library lifecycle", () => {
 	it("keeps kind-qualified lifecycle actions on the matching scope when another kind shadows its name", async () => {
 		const pluginSource = bundle();
 		installLibraryPlan(planLibraryInstall(entry(pluginSource), { scope: "project" }));
+		trustProjectPackages(root, "plugins");
 		const skillSource = bundle("skill-source");
 		const manifestFile = path.join(skillSource, "plugin.json");
 		const manifest = JSON.parse(readFileSync(manifestFile, "utf8"));

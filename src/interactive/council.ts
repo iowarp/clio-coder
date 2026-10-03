@@ -62,8 +62,8 @@ export type CouncilRosterResolution = { ok: true; roster: string } | { ok: false
  * without a roster has not made a mistake. They have not declared one yet.
  */
 export const COUNCIL_NO_ROSTER_NOTICE =
-	`/council needs a roster. Declare one under workers.rosters in settings.yaml, for example ` +
-	`workers.rosters.${COUNCIL_DEFAULT_ROSTER} with two to five members, each with a label and a target, ` +
+	`/council needs a roster. Declare one under fleet.rosters in settings.yaml, for example ` +
+	`fleet.rosters.${COUNCIL_DEFAULT_ROSTER} with two to five members, each with a label and a target, ` +
 	`then run /council <task> or name another roster with --roster <name>.`;
 
 function knownRosterNames(rosters: CouncilRosters): string[] {
@@ -72,7 +72,7 @@ function knownRosterNames(rosters: CouncilRosters): string[] {
 
 /**
  * Which roster this council runs. A named roster must exist; an unnamed one
- * resolves to `workers.rosters.default` when that roster exists. Neither is
+ * resolves to `fleet.rosters.default` when that roster exists. Neither is
  * guessed from the roster list: seating a council from whichever roster happens
  * to be first would run models the operator never chose.
  */
@@ -82,7 +82,7 @@ export function resolveCouncilRoster(requested: string | undefined, rosters: Cou
 	if (wanted !== undefined && wanted.length > 0) {
 		if (Object.hasOwn(rosters, wanted)) return { ok: true, roster: wanted };
 		const names = known.length === 0 ? "none are configured" : `configured rosters: ${known.join(", ")}`;
-		return { ok: false, reason: `no roster named "${wanted}" in workers.rosters (${names})` };
+		return { ok: false, reason: `no roster named "${wanted}" in fleet.rosters (${names})` };
 	}
 	if (Object.hasOwn(rosters, COUNCIL_DEFAULT_ROSTER)) return { ok: true, roster: COUNCIL_DEFAULT_ROSTER };
 	return { ok: false, reason: COUNCIL_NO_ROSTER_NOTICE };

@@ -13,7 +13,7 @@ import { withStateFileLockSync } from "./state-file-lock.js";
 import { clioStateDir, clioStatePath, stateRootRemoved } from "./xdg.js";
 
 export type WorkspaceTrustVerdict = "trusted" | "untrusted" | "changed";
-export type ProjectTrustSurface = "safety" | "hooks" | "settings";
+export type ProjectTrustSurface = "safety" | "hooks" | "settings" | "extensions" | "plugins";
 
 export interface ProjectSurfaceFile {
 	path: string;
@@ -39,7 +39,7 @@ interface WorkspaceTrustRecord {
 }
 
 const SHA256 = /^[a-f0-9]{64}$/;
-const SURFACES: ReadonlyArray<ProjectTrustSurface> = ["safety", "hooks", "settings"];
+const SURFACES: ReadonlyArray<ProjectTrustSurface> = ["safety", "hooks", "settings", "extensions", "plugins"];
 
 function sha256(value: string | Buffer): string {
 	return createHash("sha256").update(value).digest("hex");
@@ -130,6 +130,12 @@ export function revokeProjectSurfaceTrust(workspaceRoot: string, surface: Projec
 }
 
 function surfacePaths(root: string, surface: ProjectTrustSurface): string[] {
+	if (surface === "extensions" || surface === "plugins") {
+		// The install state records every project package's content digest and the
+		// loaders reverify each tree against it, so this one file's bytes pin the
+		// exact set of project packages the operator reviewed.
+		return [join(root, ".clio-coder", surface, "state.json")];
+	}
 	if (surface !== "safety") {
 		return [join(root, ".clio-coder", `${surface}.yaml`), join(root, ".clio-coder", `${surface}.local.yaml`)];
 	}
@@ -182,6 +188,16 @@ export function captureProjectSurface(workspaceRoot: string, surface: ProjectTru
 		contentHash,
 		verdict: contentHash === null ? "untrusted" : projectSurfaceTrust(root, surface, contentHash),
 	};
+}
+
+/** Whether the operator approved this workspace's project-scoped extensions or plugins. */
+export function projectPackagesTrusted(workspaceRoot: string, surface: "extensions" | "plugins"): boolean {
+	try {
+		return captureProjectSurface(workspaceRoot, surface).verdict === "trusted";
+	} catch {
+		// Authority that cannot be read is never consent.
+		return false;
+	}
 }
 
 export function projectSurfaceTrustNotice(snapshot: ProjectSurfaceSnapshot, filePath: string): string {

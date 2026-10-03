@@ -33,6 +33,7 @@ import {
 } from "../../src/domains/extensions/state.js";
 import { expandPromptTemplateInput, loadPromptTemplates } from "../../src/domains/resources/prompts/loader.js";
 import { createShareArchive, importShareArchive, planShareImport } from "../../src/domains/share/archive.js";
+import { trustProjectPackages } from "../harness/project-trust.js";
 
 const roots: string[] = [];
 
@@ -40,6 +41,16 @@ function scratch(): string {
 	const root = mkdtempSync(join(tmpdir(), "clio-coder-extension-resources-"));
 	roots.push(root);
 	return root;
+}
+
+/** Install into a project and approve it as `config trust extensions` would, returning the entry as it now lists. */
+function installTrusted(source: string, project: string, options: { force?: boolean } = {}) {
+	const result = installExtension(source, { cwd: project, scope: "project", ...options });
+	trustProjectPackages(project, "extensions");
+	const extension = result.extension
+		? listInstalledExtensions(project, { scope: "project", all: true }).find((entry) => entry.id === result.extension?.id)
+		: undefined;
+	return { ...result, extension };
 }
 
 function writeManifest(root: string, id: string, extra = ""): void {
@@ -184,7 +195,7 @@ describe("harness extension package boundary", () => {
 		const source = scratch();
 		const outside = scratch();
 		writeManifest(source, "hardlink-package");
-		strictEqual(installExtension(source, { cwd: project, scope: "project" }).extension?.loadable, true);
+		strictEqual(installTrusted(source, project).extension?.loadable, true);
 
 		const installedRoot = join(project, ".clio-coder", "extensions", "hardlink-package");
 		writeFileSync(join(outside, "shared.md"), "shared bytes\n");
@@ -324,7 +335,7 @@ describe("harness extension package boundary", () => {
 		const project = scratch();
 		const source = scratch();
 		writeManifest(source, "special-entry");
-		strictEqual(installExtension(source, { cwd: project, scope: "project" }).extension?.loadable, true);
+		strictEqual(installTrusted(source, project).extension?.loadable, true);
 
 		const installedRoot = join(project, ".clio-coder", "extensions", "special-entry");
 		const fifoPath = join(installedRoot, "resource.fifo");
@@ -343,7 +354,7 @@ describe("harness extension package boundary", () => {
 		const source = scratch();
 		const outside = scratch();
 		writeManifest(source, "escaping-tree");
-		strictEqual(installExtension(source, { cwd: project, scope: "project" }).extension?.loadable, true);
+		strictEqual(installTrusted(source, project).extension?.loadable, true);
 
 		const installedRoot = join(project, ".clio-coder", "extensions", "escaping-tree");
 		mkdirSync(join(outside, "payload"));
@@ -373,7 +384,7 @@ describe("harness extension package boundary", () => {
 		const replacement = scratch();
 		writeManifest(original, "staged-rollback");
 		writeFileSync(join(original, "marker.txt"), "original\n");
-		const first = installExtension(original, { cwd: project, scope: "project" });
+		const first = installTrusted(original, project);
 		ok(first.extension?.loadable);
 		const originalDigest = first.extension.provenance?.contentDigest;
 
@@ -386,7 +397,7 @@ describe("harness extension package boundary", () => {
 		strictEqual(loadManifestFromRoot(replacement).valid, true);
 		ok(extensionContentDigest(replacement).length > 0, "the link is contained at its source location");
 
-		const forced = installExtension(replacement, { cwd: project, scope: "project", force: true });
+		const forced = installTrusted(replacement, project, { force: true });
 		strictEqual(forced.extension, undefined);
 		ok(forced.diagnostics.some((diagnostic) => diagnostic.message.includes("escapes the extension root")));
 		const installedRoot = join(project, ".clio-coder", "extensions", "staged-rollback");
@@ -403,7 +414,7 @@ describe("harness extension package boundary", () => {
 		const replacement = scratch();
 		writeManifest(original, "state-rollback");
 		writeFileSync(join(original, "marker.txt"), "original\n");
-		const first = installExtension(original, { cwd: project, scope: "project" });
+		const first = installTrusted(original, project);
 		strictEqual(first.extension?.loadable, true);
 		const originalDigest = first.extension?.provenance?.contentDigest;
 
@@ -418,9 +429,9 @@ describe("harness extension package boundary", () => {
 			return originalRenameSync(from, to);
 		}) as typeof renameSync;
 		syncBuiltinESMExports();
-		let forced: ReturnType<typeof installExtension>;
+		let forced: ReturnType<typeof installTrusted>;
 		try {
-			forced = installExtension(replacement, { cwd: project, scope: "project", force: true });
+			forced = installTrusted(replacement, project, { force: true });
 		} finally {
 			fs.renameSync = originalRenameSync;
 			syncBuiltinESMExports();
@@ -440,7 +451,7 @@ describe("harness extension package boundary", () => {
 		const source = scratch();
 		writeManifest(source, "drift-contract");
 		writeFileSync(join(source, "hooks.yaml"), "[]\n");
-		const result = installExtension(source, { cwd: project, scope: "project" });
+		const result = installTrusted(source, project);
 		ok(result.extension?.loadable);
 		const installedRoot = join(project, ".clio-coder", "extensions", "drift-contract");
 		writeFileSync(join(installedRoot, "hooks.yaml"), "# changed after install\n[]\n");
@@ -469,7 +480,7 @@ describe("harness extension package boundary", () => {
 		deepStrictEqual(direct.captured.get("hooks.yaml"), hookBytes);
 		strictEqual(direct.captured.has("absent.txt"), false);
 
-		const installed = installExtension(source, { cwd: project, scope: "project" }).extension;
+		const installed = installTrusted(source, project).extension;
 		ok(installed?.loadable);
 		const [record] = listInstalledExtensionRecords(project, { scope: "project", all: true });
 		ok(record?.entry.provenance);
@@ -537,10 +548,10 @@ describe("harness extension package boundary", () => {
 		writeManifest(replacement, "corrupt-reinstall");
 		writeFileSync(join(replacement, "marker.txt"), "verified replacement\n", "utf8");
 
-		const refused = installExtension(replacement, { cwd: reinstallProject, scope: "project" });
+		const refused = installTrusted(replacement, reinstallProject);
 		strictEqual(refused.extension, undefined);
 		ok(refused.diagnostics.some((diagnostic) => diagnostic.message.includes("retry with --force")));
-		const reinstalled = installExtension(replacement, { cwd: reinstallProject, scope: "project", force: true });
+		const reinstalled = installTrusted(replacement, reinstallProject, { force: true });
 		strictEqual(reinstalled.extension?.loadable, true);
 		ok(reinstalled.recovery?.stateBackup);
 		ok(reinstalled.recovery?.packageBackup);
@@ -557,7 +568,7 @@ describe("harness extension package boundary", () => {
 		const source = scratch();
 		writeManifest(source, "shared-extension");
 		writeFileSync(join(source, "hooks.yaml"), "[]\n", "utf8");
-		const exportedInstall = installExtension(source, { cwd: exporter, scope: "project" });
+		const exportedInstall = installTrusted(source, exporter);
 		strictEqual(exportedInstall.extension?.loadable, true);
 		const archive = createShareArchive({ cwd: exporter, scope: "project", includeExtensions: true });
 		ok(archive.files.every((file) => file.type === "extension"));
@@ -579,6 +590,8 @@ describe("harness extension package boundary", () => {
 			imported.diagnostics.filter((diagnostic) => diagnostic.type !== "warning"),
 			[],
 		);
+		strictEqual(listInstalledExtensions(destination, { scope: "project" })[0]?.loadable, false);
+		trustProjectPackages(destination, "extensions");
 		const [installed] = listInstalledExtensions(destination, { scope: "project" });
 		strictEqual(installed?.id, "shared-extension");
 		strictEqual(installed?.loadable, true);
@@ -606,7 +619,7 @@ describe("harness extension package boundary", () => {
 		const source = scratch();
 		writeManifest(source, "shared-recovery");
 		writeFileSync(join(source, "marker.txt"), "verified archive bytes\n", "utf8");
-		strictEqual(installExtension(source, { cwd: exporter, scope: "project" }).extension?.loadable, true);
+		strictEqual(installTrusted(source, exporter).extension?.loadable, true);
 		const archive = createShareArchive({ cwd: exporter, scope: "project", includeExtensions: true });
 		const archivePath = join(scratch(), "recovery.clio-coder-share.json");
 		writeFileSync(archivePath, `${JSON.stringify(archive)}\n`, "utf8");
@@ -636,6 +649,7 @@ describe("harness extension package boundary", () => {
 					readFileSync(join(backup, "marker.txt"), "utf8") === "unverified destination bytes\n",
 			),
 		);
+		trustProjectPackages(destination, "extensions");
 		const [installed] = listInstalledExtensions(destination, { scope: "project" });
 		strictEqual(installed?.loadable, true);
 		strictEqual(readFileSync(join(oldRoot, "marker.txt"), "utf8"), "verified archive bytes\n");

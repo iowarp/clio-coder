@@ -1466,7 +1466,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		options.acp === undefined &&
 		process.env.CLIO_CODER_INTERACTIVE === "1";
 	const heldTrustNotices: string[] = [];
-	for (const surface of ["safety", "settings"] as const) {
+	for (const surface of ["safety", "settings", "extensions", "plugins"] as const) {
 		const snapshot = captureProjectSurface(process.cwd(), surface);
 		if (snapshot.verdict === "trusted") continue;
 		for (const file of snapshot.files) {
