@@ -9,6 +9,7 @@ import { sessionBuffer } from "../api/sessions.js";
 import { ApprovalBanner, pendingPermission } from "../chat/Approval.js";
 import { ChatTurnView } from "../chat/ChatTurn.js";
 import { Composer, fillComposer } from "../chat/Composer.js";
+import { ComposerRail } from "../chat/ComposerRail.js";
 import { CONTEXT_WARNING_LABEL, placeHealthRows, STARTER_PROMPTS, TRUNCATION_NOTE } from "../chat/chat-turn.js";
 import { LiveWorkers, workerCount } from "../chat/FleetStrip.js";
 import { foldFleetRuns, isLiveRun } from "../chat/fleet-facts.js";
@@ -404,6 +405,7 @@ function SessionView({ client, id }: { client: Client; id: string }) {
 							runningTurnId={turn?.status === "running" ? turn.id : null}
 							route={route}
 						/>
+						<ComposerRail client={client} sessionId={snapshot.id} state={snapshot.state} turns={snapshot.turns} />
 					</div>
 					<Interview
 						client={client}

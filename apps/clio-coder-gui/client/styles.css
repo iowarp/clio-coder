@@ -1133,7 +1133,8 @@ nav a:hover {
 }
 .conversation__dock {
 	min-width: 0;
-	padding-block: var(--space-2) var(--space-5);
+	/* The composer rail under the field carries its own line, so the dock's foot is short. */
+	padding-block: var(--space-2) var(--space-3);
 }
 
 .conversation__approval {
