@@ -101,4 +101,12 @@ describe("worker execute refusals", () => {
 			final,
 		);
 	});
+
+	it("names the refused command and its rule to the model and the receipt", { timeout: 30_000 }, async () => {
+		const longArg = "x".repeat(400);
+		const run = await runDenyWorker([[mark(longArg)], { text: "done" }]);
+		const named = `bash \`./mark.sh ${"x".repeat(190)}…\` refused by rule bash-unrecognized`;
+		ok(run.resolved[0]?.startsWith(`permission denied by policy: ${named}; `), run.resolved[0]);
+		ok(run.toolResults[0]?.includes(named), "the line cap keeps the command and rule");
+	});
 });

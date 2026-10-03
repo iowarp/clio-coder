@@ -131,7 +131,12 @@ import { applyToolRounds, deterministicSampling, supportsNamedToolChoice } from 
 import type { AgentEvent, AgentMessage, EngineModel } from "./types.js";
 import type { ClioWorkerEvent } from "./worker-events.js";
 import type { WorkerRefusal } from "./worker-refusals.js";
-import { describeWorkerRefusal, WORKER_REFUSAL_LIMIT, workerRefusalLimitReason } from "./worker-refusals.js";
+import {
+	describeWorkerRefusal,
+	formatWorkerRefusal,
+	WORKER_REFUSAL_LIMIT,
+	workerRefusalLimitReason,
+} from "./worker-refusals.js";
 import { createWorkerSafety, createWorkerToolRegistry, INTERNAL_HELPER_RESULT_TOOL } from "./worker-tools.js";
 
 /** Room left for the frame envelope under the 16 KiB control-lane bound, counted in the UTF-8 bytes the host limit counts. */
@@ -1526,12 +1531,19 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 
 	// Exact, byte-stable denial reasons for the deny/fail postures. Escalate
 	// timeouts and operator denials use their own wording below.
-	const denyReason = (tool: string, actionClass: string): string =>
-		unattendedEscalation
+	// A refused command leads the sentence so it survives the model-facing
+	// 300-character line cap (rejection-feedback.ts).
+	const denyReason = (tool: string, actionClass: string, refused?: WorkerRefusal): string => {
+		const head =
+			refused === undefined
+				? "permission denied by policy: "
+				: `permission denied by policy: ${formatWorkerRefusal(refused)}; `;
+		return unattendedEscalation
 			? mainRoutedPermit
-				? `permission denied by policy: no operator or granting main agent can answer worker asks for this dispatch (fleet.permissions.mode=main, fallback=deny); ${tool} requires ${actionClass} confirmation`
-				: `permission denied by policy: no operator can answer worker escalations for this dispatch (fleet.permissions.mode=escalate, fallback=deny); ${tool} requires ${actionClass} confirmation`
-			: `permission denied by policy: dispatched workers run non-interactively (fleet.permissions.mode=deny); ${tool} requires ${actionClass} confirmation`;
+				? `${head}no operator or granting main agent can answer worker asks for this dispatch (fleet.permissions.mode=main, fallback=deny); ${tool} requires ${actionClass} confirmation`
+				: `${head}no operator can answer worker escalations for this dispatch (fleet.permissions.mode=escalate, fallback=deny); ${tool} requires ${actionClass} confirmation`
+			: `${head}dispatched workers run non-interactively (fleet.permissions.mode=deny); ${tool} requires ${actionClass} confirmation`;
+	};
 	const failReason = (tool: string, actionClass: string): string =>
 		unattendedEscalation
 			? `permission required for ${tool} (${actionClass}); no operator can answer worker escalations for this dispatch and fallback=fail ends this run`
@@ -1868,19 +1880,21 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 		]
 			.slice(0, 3)
 			.join(" ");
-		const deniedReason =
-			onPermission === "fail"
-				? failReason(call.tool, actionClass)
-				: policyDetail.length > 0
-					? `${denyReason(call.tool, actionClass)}. ${policyDetail}`
-					: denyReason(call.tool, actionClass);
 		// A refused command reaches the model as a tool result and the turn goes
 		// on, so it can take another route (P1 mode B ended at its first refused
 		// verify). Changing the command still cannot create an absent execute
 		// approval route, so the third refusal ends the run as permission_required.
-		if (onPermission !== "fail" && actionClass === "execute") {
-			executeRefusals.push(describeWorkerRefusal(call, decision));
-		}
+		const refusal = onPermission !== "fail" && actionClass === "execute" ? describeWorkerRefusal(call, decision) : null;
+		if (refusal !== null) executeRefusals.push(refusal);
+		// The refusal names the command and its rule: "outside the no-prompt set"
+		// alone left the model and the receipt guessing which call was refused.
+		const deniedHead = denyReason(call.tool, actionClass, refusal ?? undefined);
+		const deniedReason =
+			onPermission === "fail"
+				? failReason(call.tool, actionClass)
+				: policyDetail.length > 0
+					? `${deniedHead}. ${policyDetail}`
+					: deniedHead;
 		const refusalLimitReached = executeRefusals.length >= WORKER_REFUSAL_LIMIT;
 		const reason = refusalLimitReached ? workerRefusalLimitReason(executeRefusals) : deniedReason;
 		emit({
