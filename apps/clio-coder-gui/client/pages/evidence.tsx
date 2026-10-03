@@ -287,7 +287,7 @@ export function EvidencePage({ client }: { client: Client }) {
 			<p className="panel-note">Collected reports · installation history · filters apply to loaded pages</p>
 			{!live && <p role="status">Updating inventory. Bundle links return when the refresh finishes.</p>}
 			{(q || verdict) && <Link to={listDestination("/evidence", search, ["run"])}>Clear filters</Link>}
-			<div className="actions">
+			<div className="actions inspection-refresh">
 				<button type="button" disabled={inventory.isFetching} onClick={() => void inventory.refetch()}>
 					Refresh evidence
 				</button>

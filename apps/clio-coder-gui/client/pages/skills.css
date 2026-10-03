@@ -1,17 +1,16 @@
 /* The skills available in a workspace: a calm list, nothing to configure. */
+/* The same frame as the project task list (tasks.css), so both pages start on one left edge. */
 .skills {
 	flex: 1;
 	min-height: 0;
 	overflow-y: auto;
+	padding: var(--space-4) var(--space-6) var(--space-12);
 }
 .skills__inner {
 	display: grid;
 	gap: var(--space-4);
-	width: 100%;
-	max-width: 760px;
-	margin-inline: auto;
-	padding: var(--space-8) var(--space-6) var(--space-12);
-	box-sizing: border-box;
+	width: min(100%, 820px);
+	margin: 0 auto;
 }
 .skills__lede {
 	margin: 0;
@@ -67,13 +66,16 @@
 	font-size: var(--text-meta);
 	color: var(--ink-muted);
 }
+/* The global code rule is a padded block; inside the meta line the invocation is part of the line. */
 .skill__meta code {
+	display: inline;
+	padding: 0;
 	font-family: var(--font-mono);
 	font-size: var(--text-exact);
 }
 
-@media (max-width: 650px) {
-	.skills__inner {
-		padding: var(--space-5) var(--space-4) var(--space-8);
+@media (max-width: 760px) {
+	.skills {
+		padding-inline: var(--space-4);
 	}
 }

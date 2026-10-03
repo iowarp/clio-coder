@@ -38,9 +38,7 @@ export function TraceRuns({ client }: { client: Client }) {
 	return (
 		<section className="run-inspection">
 			<p className="eyebrow">Execution history</p>
-			<h1>
-				Traces<span className="period">.</span>
-			</h1>
+			<h1>Traces</h1>
 			<p className="intro">Follow a run from its first decision to its final evidence.</p>
 			<form
 				className="trace-filters"

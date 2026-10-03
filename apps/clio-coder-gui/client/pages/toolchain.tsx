@@ -59,11 +59,7 @@ export function Toolchain({
 					<PanelHeading
 						panel={PANELS.toolchain}
 						level={1}
-						title={
-							<>
-								Toolchain<span className="period">.</span>
-							</>
-						}
+						title="Toolchain"
 						action={<span className="count">{tools.data?.length ?? "—"} pinned tools</span>}
 					/>
 					<p className="intro">Inspect the executable Clio resolves and manage its pinned, vendored copy.</p>

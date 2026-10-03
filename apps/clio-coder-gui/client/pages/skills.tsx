@@ -107,8 +107,7 @@ export function SkillsPage({ client }: { client: Client }) {
 						<p className="skills__note">The list is longer than what was read. Search narrows it.</p>
 					) : null}
 					<p className="skills__foot">
-						Install or remove packages, agents, extensions and verifiers in{" "}
-						<Link to="/library">Settings, under Advanced</Link>.
+						Install or remove packages, agents, extensions and verifiers in the <Link to="/library">Library</Link>.
 					</p>
 				</div>
 			</div>

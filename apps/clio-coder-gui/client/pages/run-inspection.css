@@ -9,15 +9,28 @@
 	gap: var(--space-4);
 	align-items: baseline;
 }
+/* In-page jump links are a quiet row of links, not tabs: no rules around them and no selected state. */
 .inspection-jumps {
-	margin: var(--space-5) 0;
-	padding: var(--space-3) 0;
-	border-block: 1px solid var(--line);
+	margin: var(--space-4) 0;
+	font-size: var(--text-meta);
+	font-weight: 500;
 }
+/* The global `nav a` rule is a padded 14px menu item; a jump link takes none of that. */
 .inspection-jumps a {
 	min-height: 32px;
 	display: inline-flex;
 	align-items: center;
+	padding: 0;
+	border-radius: 0;
+	font-size: inherit;
+	font-weight: inherit;
+	color: var(--ink-muted);
+	text-decoration: none;
+}
+.inspection-jumps a:is(:hover, :focus-visible) {
+	background: none;
+	color: var(--ink);
+	text-decoration: underline;
 }
 .run-inspection .trace-filters {
 	padding: var(--space-4);
@@ -35,6 +48,9 @@
 .run-inspection .trace-filters label {
 	font-size: var(--text-meta);
 	min-width: 0;
+}
+.inspection-refresh {
+	margin-bottom: var(--space-4);
 }
 .run-inspection input,
 .run-inspection select {

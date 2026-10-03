@@ -60,7 +60,9 @@
 	-webkit-box-orient: vertical;
 	overflow: hidden;
 }
+/* The origin line and the inspect button are separate lines, so the button never touches the text at any width. */
 .library-package__identity small {
+	display: block;
 	color: var(--ink-muted);
 }
 .library-package__copies {
@@ -193,6 +195,7 @@
 	margin-block: var(--space-4);
 }
 .library-inspect {
+	display: block;
 	margin-top: var(--space-3);
 }
 .library-package__detail {
