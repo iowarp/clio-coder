@@ -9,7 +9,6 @@ import { redactSecretString } from "../domains/safety/redaction.js";
 import { settledPrefixLength } from "../engine/apis/diffusion-frames.js";
 import {
 	type Component,
-	lexMarkdownBlocks,
 	Markdown,
 	Marked,
 	stripTerminalSequences,
@@ -71,16 +70,23 @@ import { type TranscriptDetailPolicy, transcriptDetail } from "./transcript-deta
 import type { ViewArtifact } from "./view/artifacts.js";
 import type { WorkerEntryState } from "./worker-stream.js";
 
-// A top-level code block is drawn by `codeBlockRows` below. Fenced code nested
-// in a list or quote still reaches the screen through pi-tui's Markdown
-// component, which exposes the MarkdownTheme.highlightCode hook: it hands over
-// the raw fence text plus its language tag before pi-tui draws the fence
-// borders and indent. Wiring code ink through that hook colors only the ink,
-// and nothing post-processes already-rendered output.
-const CHAT_MARKDOWN_THEME = markdownTheme(clioTheme(), (code, lang) => codeInk(lang, code.split("\n")));
+// Every fenced code block, top level or nested in a list or quote, reaches the
+// screen through pi-tui's Markdown component, which exposes the
+// MarkdownTheme.highlightCode hook: it hands over the raw fence text plus the
+// fence's whole info string before pi-tui draws the fence borders and indent.
+// Wiring code ink through that hook colors only the ink, and nothing
+// post-processes already-rendered output. codeInk matches the language word
+// only, so the hook drops the rest of an info string such as `ts title="a.ts"`.
+const CHAT_MARKDOWN_THEME = markdownTheme(clioTheme(), (code, lang) =>
+	codeInk(lang?.trim().split(/\s+/u, 1)[0], code.split("\n")),
+);
 const mermaidTransform = createMermaidMarkdownTransform(clioTheme());
 const CHAT_MARKDOWN_OPTIONS = {
-	transform: (text: string, width: number) => mermaidTransform(fitMarkdownTables(text, width), width),
+	transform: (text: string, width: number) => {
+		// Both transforms lex the whole answer; a table needs a pipe and a diagram needs its name.
+		const fitted = text.includes("|") ? fitMarkdownTables(text, width) : text;
+		return /mermaid/iu.test(fitted) ? mermaidTransform(fitted, width) : fitted;
+	},
 	renderLatex: true,
 } as const;
 // TuiAltScreen uses Pi's OSC 133 prompt-start marker for semantic prompt
@@ -109,9 +115,9 @@ const USER_BAR = GLYPH.userBar;
  * appended at the end. The segment list preserves the stream order instead.
  *
  * Each text segment tracks whether it has been finalized by a `message_end`.
- * Streaming deltas render as plain lines; only finalized text is piped
- * through the Markdown renderer. Partial markdown (unclosed fence, half-typed
- * bullet) would otherwise paint garbage at ~60 fps under streaming.
+ * Streaming and settled text render through the same Markdown component, so
+ * finalizing restyles at most the block that was still open and the rows
+ * already streamed stay put.
  */
 export type { ReasoningTokenProvenance } from "./status/index.js";
 
@@ -169,21 +175,8 @@ type TextSegment = {
 	finalized: boolean;
 	/** Cached prose policy for live, replayed and rewritten model output. */
 	prose?: AssistantProseProjection;
-	/**
-	 * The segment's Markdown, block by block. Every top-level block the model
-	 * has finished is a chunk with its own pi-tui Markdown instance, which
-	 * caches by (text, width), so a stable block costs nothing per frame.
-	 */
-	blocks?: MarkdownBlocks;
-	/**
-	 * Wrapped output of the open tail block's source lines except the last,
-	 * plus the width, the tail's start offset and the line count it was built
-	 * at. The tail only grows while streaming: lines before its last one are
-	 * newline-terminated and never change, yet every frame re-wrapped all of
-	 * them. On a 16k-char answer that was 5-22 ms per frame to reproduce
-	 * identical rows.
-	 */
-	wrapCache?: { width: number; start: number; completedLines: number; lines: string[] };
+	/** The segment's stock Markdown component and the source it last rendered. */
+	markdown?: { view: Markdown; source: string };
 	/**
 	 * Live denoising state while a diffusion model streams whole frames. The
 	 * text before `settled` agreed between the last two frames and is shown as
@@ -686,13 +679,8 @@ function skillSuggestionSplit(seg: TextSegment): { suggestion: string; answer: T
 	split.suggestion = seg.text.slice(found.start, found.end).replace(/\r$/, "");
 	const answer = split.answer;
 	if (answer.text === answerText && answer.finalized === seg.finalized) return split;
-	// The answer half follows the same cache rules as any other segment: the
-	// streaming wrap cache assumes append-only text, so a rewrite or a
-	// finalization drops it and a delta keeps it.
-	const appendOnly = !seg.finalized && answer.finalized === seg.finalized && answerText.startsWith(answer.text);
 	answer.text = answerText;
 	answer.finalized = seg.finalized;
-	if (!appendOnly) delete answer.wrapCache;
 	return split;
 }
 
@@ -720,145 +708,11 @@ function renderDiffusionFrameLines(seg: TextSegment, settled: number, width: num
 	return lines.map((line) => clioTheme().base("assistantProse", line));
 }
 
-/**
- * One finished top-level Markdown block and the blank rows (`space` tokens)
- * that follow it. `firstType` and `lastType` are the block's first and last
- * token types, which decide the spacing Markdown puts between two blocks.
- */
-interface MarkdownChunk {
-	raw: string;
-	firstType: string;
-	lastType: string;
-	/** Renders the chunk; absent for a code block Clio draws itself. */
-	md?: Markdown;
-	code?: CodeBlock;
-	/** Rows of `code` at one width; a finished block is not inked or wrapped again per frame. */
-	codeRows?: { width: number; rows: string[] };
-}
-
-interface MarkdownBlocks {
-	/**
-	 * Tab-expanded source the finished chunks cover, always a prefix of the
-	 * segment's tab-expanded text. Tabs expand one for one, so a prefix of the
-	 * text expands to a prefix of its expansion.
-	 */
-	covered: string;
-	chunks: MarkdownChunk[];
-	/** Markdown for an open growing block (fence, list, quote) at the tail, reused across frames. */
-	openFence?: Markdown;
-}
-
-/**
- * Split tab-expanded Markdown into top-level chunks with pi-tui's own block
- * lexer: each non-space token opens a chunk and the blank-line tokens after it
- * stay with it. Concatenated, the chunks' `raw` reproduce the source, so a
- * caller can track how much of the text a run of chunks covers.
- */
-function markdownChunks(source: string): Array<{ raw: string; firstType: string; lastType: string }> {
-	const chunks: Array<{ raw: string; firstType: string; lastType: string }> = [];
-	let leading = "";
-	for (const token of lexMarkdownBlocks(source)) {
-		const raw = token.raw;
-		if (token.type === "space") {
-			const last = chunks[chunks.length - 1];
-			if (last === undefined) leading += raw;
-			else {
-				last.raw += raw;
-				last.lastType = "space";
-			}
-			continue;
-		}
-		chunks.push({ raw: `${leading}${raw}`, firstType: token.type, lastType: token.type });
-		leading = "";
-	}
-	if (leading.length > 0) chunks.push({ raw: leading, firstType: "space", lastType: "space" });
-	return chunks;
-}
-
-/**
- * Whether Markdown puts a blank row between two adjacent blocks, per pi-tui's
- * renderer: after a heading, code, quote, rule, LaTeX block or table when a
- * non-space block follows, and after a paragraph unless a list follows. A
- * chunk that ends in blank-line tokens already renders its own blank row.
- */
-function blankBetweenBlocks(previousLast: string, nextFirst: string): boolean {
-	if (previousLast === "space" || nextFirst === "space") return false;
-	if (previousLast === "paragraph") return nextFirst !== "list";
-	return ["heading", "code", "blockquote", "hr", "latexBlock", "table"].includes(previousLast);
-}
-
-/**
- * A top-level code block. pi-tui's Markdown draws one between literal
- * ```lang and ``` rows and wraps a long code row back to column 0 after its
- * indent, so the transcript draws it itself: the language as a quiet label
- * row, then the ink rows with wrapped rows hung under the same indent.
- */
-interface CodeBlock {
-	lang: string | undefined;
-	text: string;
-	/** A blank-line token follows the block, which Markdown renders as one blank row. */
-	blankAfter: boolean;
-}
-
-const CODE_INDENT = "  ";
-const codeBlockParser = new Marked();
-
-/**
- * The code block a chunk holds, or null when Markdown should render it: a
- * Mermaid fence goes through the Mermaid transform, and anything but a lone
- * code token is not this function's to draw.
- */
-function parseCodeChunk(raw: string): CodeBlock | null {
-	let token: Tokens.Code | undefined;
-	let blankAfter = false;
-	for (const next of codeBlockParser.lexer(raw)) {
-		if (next.type === "space") {
-			blankAfter = token !== undefined;
-			continue;
-		}
-		if (next.type !== "code" || token !== undefined) return null;
-		token = next as Tokens.Code;
-	}
-	if (token === undefined) return null;
-	const lang = token.lang?.trim().split(/\s+/u, 1)[0] || undefined;
-	if (lang?.toLowerCase() === "mermaid") return null;
-	let text = token.text;
-	// A streamed partial closing fence is not code yet; pi-tui trims it the same way.
-	const marker = /^(`{3,}|~{3,})/u.exec(token.raw)?.[1];
-	const lastLine = token.raw.split("\n").pop();
-	if (
-		marker !== undefined &&
-		lastLine &&
-		lastLine.length < marker.length &&
-		lastLine === marker.slice(0, 1).repeat(lastLine.length)
-	) {
-		text = text.slice(0, -lastLine.length).replace(/\n$/u, "");
-	}
-	return { lang, text, blankAfter };
-}
-
-function codeBlockRows(block: CodeBlock, width: number): string[] {
-	const rows: string[] = [];
-	if (block.lang !== undefined) rows.push(clioTheme().fg("annotation", block.lang));
-	if (block.text.length > 0) {
-		const inner = Math.max(1, width - CODE_INDENT.length);
-		for (const inked of codeInk(block.lang, block.text.split("\n"))) {
-			for (const part of wrapTextWithAnsi(inked, inner)) rows.push(`${CODE_INDENT}${part}`);
-		}
-	}
-	if (block.blankAfter) rows.push("");
-	return rows.map((row) => clioTheme().base("assistantProse", row.replace(/ +$/, "")));
-}
-
-function chunkRows(chunk: MarkdownChunk, width: number): string[] {
-	if (chunk.md !== undefined) return markdownRows(chunk.md, width);
-	if (chunk.code === undefined) return [];
-	if (chunk.codeRows?.width !== width) chunk.codeRows = { width, rows: codeBlockRows(chunk.code, width) };
-	return chunk.codeRows.rows;
-}
+// Lexer for fitMarkdownTables, which runs inside Markdown's transform hook.
+const tableParser = new Marked();
 
 function fitMarkdownTables(text: string, width: number): string {
-	return codeBlockParser
+	return tableParser
 		.lexer(text)
 		.map((token) => {
 			if (token.type !== "table") return token.raw;
@@ -879,55 +733,32 @@ function chatMarkdown(text: string): Markdown {
 }
 
 /**
- * pi-tui Markdown right-pads lines to the render width. A streamed row is
- * unpadded, so the padding is trimmed to keep the two shapes identical.
+ * pi-tui Markdown right-pads every row to the render width, while transcript
+ * rows are unpadded for hangProseLines. The padding is trimmed before the
+ * width check because wrapping or truncating a padded row costs far more per
+ * frame than the same row trimmed first. The regex keeps a trailing no-break
+ * space, which Mermaid rows use.
  */
 function markdownRows(md: Markdown, width: number): string[] {
-	return md
-		.render(width)
-		.flatMap((line) => (visibleWidth(line) > width ? wrapTextWithAnsi(line, width) : [line]))
-		.map((line) => clioTheme().base("assistantProse", truncateToWidth(line.replace(/ +$/, ""), width, "")));
-}
-
-/**
- * The open tail block while it streams, as plain wrapped source. Lines before
- * the last are newline-terminated and final, so their wrapped rows are cached.
- */
-function plainTailRows(seg: TextSegment, text: string, start: number, width: number): string[] {
-	const source = text.slice(start).split("\n");
-	const completedCount = source.length - 1;
-	const cache = seg.wrapCache;
-	const reusable =
-		cache !== undefined && cache.width === width && cache.start === start && cache.completedLines <= completedCount;
-	const completed = reusable ? cache.lines.slice() : [];
-	for (let i = reusable ? cache.completedLines : 0; i < completedCount; i += 1) {
-		for (const line of wrapTextWithAnsi(source[i] ?? "", width)) completed.push(line);
+	const rows: string[] = [];
+	for (const padded of md.render(width)) {
+		const line = padded.replace(/ +$/u, "");
+		const parts = visibleWidth(line) > width ? wrapTextWithAnsi(line, width) : [line];
+		for (const part of parts) {
+			const fitted = visibleWidth(part) > width ? truncateToWidth(part, width, "") : part;
+			rows.push(clioTheme().base("assistantProse", fitted));
+		}
 	}
-	seg.wrapCache = { width, start, completedLines: completedCount, lines: completed };
-	const wrapped = completed.slice();
-	for (const line of wrapTextWithAnsi(source[completedCount] ?? "", width)) wrapped.push(line);
-	return wrapped.map((row) => clioTheme().base("assistantProse", row));
+	return rows;
 }
 
 /**
- * Open blocks whose Markdown rendering only grows at the end as text arrives:
- * a fence renders as a code block that gains rows, a list or quote gains items
- * and lines. They render through Markdown while open, so a tall one is never
- * restyled after its top has scrolled away. A paragraph or table stays plain
- * until it is finished, because a half-typed emphasis marker or a new column
- * width would restyle rows already shown.
- */
-const GROWING_BLOCKS: ReadonlySet<string> = new Set(["code", "list", "blockquote"]);
-
-/**
- * A text segment renders block by block, streaming or settled. Each finished
- * top-level block renders through Markdown as soon as a later block begins;
- * only the open block at the tail stays plain while it streams, unless it is
- * one whose rendering only grows (a fence, a list, a quote). A settled
- * answer renders from the same chunks, so finalizing rewrites at most the
- * tail block. Rendering the whole answer through Markdown only at the end
- * changed every row it had streamed, and on a regular-screen terminal a
- * changed row above the viewport costs a full redraw of the transcript.
+ * A text segment renders through one stock Markdown component, streaming or
+ * settled. Markdown renders each top-level block independently and caches by
+ * (text, width), so the rows above the open block stay byte-stable while text
+ * arrives, and a regular-screen terminal does not redraw the transcript when
+ * the answer finalizes. setText always invalidates that cache, so it runs only
+ * when the projected text changed.
  */
 function renderTextSegmentLines(seg: TextSegment, width: number): string[] {
 	if (!seg.finalized && seg.diffusion) {
@@ -935,51 +766,12 @@ function renderTextSegmentLines(seg: TextSegment, width: number): string[] {
 	}
 	seg.prose ??= new AssistantProseProjection();
 	const prose = seg.prose.project(seg.text, seg.finalized);
-	const source = prose.includes("\t") ? prose.replace(/\t/g, "   ") : prose;
-	let blocks = seg.blocks;
-	if (blocks === undefined || !source.startsWith(blocks.covered)) {
-		blocks = { covered: "", chunks: [] };
-		seg.blocks = blocks;
-		delete seg.wrapCache;
+	if (seg.markdown === undefined) seg.markdown = { view: chatMarkdown(prose), source: prose };
+	else if (seg.markdown.source !== prose) {
+		seg.markdown.view.setText(prose);
+		seg.markdown.source = prose;
 	}
-	const pending = markdownChunks(source.slice(blocks.covered.length));
-	// A block is finished once another block follows it; a settled segment has no open block.
-	const finished = seg.finalized ? pending.length : Math.max(0, pending.length - 1);
-	for (let index = 0; index < finished; index += 1) {
-		const chunk = pending[index];
-		if (chunk === undefined) continue;
-		const code = chunk.firstType === "code" ? parseCodeChunk(chunk.raw) : null;
-		blocks.chunks.push(code === null ? { ...chunk, md: chatMarkdown(chunk.raw) } : { ...chunk, code });
-		blocks.covered += chunk.raw;
-	}
-	const lines: string[] = [];
-	let previousLast: string | undefined;
-	for (const chunk of blocks.chunks) {
-		if (previousLast !== undefined && blankBetweenBlocks(previousLast, chunk.firstType)) lines.push("");
-		for (const row of chunkRows(chunk, width)) lines.push(row);
-		previousLast = chunk.lastType;
-	}
-	const open = seg.finalized ? undefined : pending[finished];
-	if (open === undefined) {
-		delete blocks.openFence;
-		return withoutLeadingBlanks(lines);
-	}
-	if (previousLast !== undefined && blankBetweenBlocks(previousLast, open.firstType)) lines.push("");
-	const openCode = open.firstType === "code" ? parseCodeChunk(open.raw) : null;
-	if (openCode !== null) {
-		delete blocks.openFence;
-		for (const row of codeBlockRows(openCode, width)) lines.push(row);
-		return withoutLeadingBlanks(lines);
-	}
-	if (GROWING_BLOCKS.has(open.firstType)) {
-		blocks.openFence ??= chatMarkdown(open.raw);
-		blocks.openFence.setText(open.raw);
-		for (const row of markdownRows(blocks.openFence, width)) lines.push(row);
-		return withoutLeadingBlanks(lines);
-	}
-	delete blocks.openFence;
-	for (const row of plainTailRows(seg, source, blocks.covered.length, width)) lines.push(row);
-	return withoutLeadingBlanks(lines);
+	return withoutLeadingBlanks(markdownRows(seg.markdown.view, width));
 }
 
 /**
@@ -1894,9 +1686,8 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 
 	/**
 	 * Replace this message's live text segment with one whole diffusion frame.
-	 * The wrap cache assumes append-only text and a frame rewrites anywhere, so
-	 * it is dropped; the settled prefix is what the previous frame and this one
-	 * agree on.
+	 * A frame rewrites anywhere in the text; the settled prefix is what the
+	 * previous frame and this one agree on.
 	 *
 	 * The frame targets the message's frame segment wherever it sits, not the
 	 * tail. Mercury repeats the whole frame on every chunk that carries a
@@ -1926,7 +1717,6 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 		if (live) {
 			const settled = progress >= 1 ? text.length : settledPrefixLength(live.text, text);
 			live.text = text;
-			delete live.wrapCache;
 			live.diffusion = { progress, settled };
 			return;
 		}
@@ -1973,10 +1763,6 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 			segment.text = value;
 			segment.finalized = true;
 			delete segment.diffusion;
-			// The plain-tail wrap cache is dead once nothing is open. The finished
-			// blocks stay: they cover a prefix of the settled text, and a rewrite
-			// that breaks that prefix resets them on the next render.
-			delete segment.wrapCache;
 		};
 		if (replaceTail && streamed.length > 0) {
 			const [first, ...rest] = streamed;
