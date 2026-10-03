@@ -3764,7 +3764,11 @@ export function createDispatchBundle(
 		settleCanceled: () => void;
 	}
 	const retryQueue = new Map<string, RetryQueueEntry>();
-	/** Worker-run retry attempts per member control root; the delay doubles from 500 ms to a 60 s cap. */
+	/** Delay before the first retry of a member's worker run; each further attempt doubles it. */
+	const RETRY_BACKOFF_BASE_MS = 500;
+	/** Ceiling the doubled retry delay never exceeds. */
+	const RETRY_BACKOFF_CAP_MS = 60_000;
+	/** Retry attempts per member control root; the count sets the delay between the base and the cap above. */
 	const retryBackoff = new Map<string, number>();
 	const retryReasons = new Map<string, string>();
 	const assignmentRootsByAttempt = new Map<string, string>();
@@ -4016,7 +4020,7 @@ export function createDispatchBundle(
 		}
 		const backoffAttempt = (retryBackoff.get(controlRoot) ?? 0) + 1;
 		retryBackoff.set(controlRoot, backoffAttempt);
-		const backoffDelayMs = engineRetryDelayMs(500, 60_000, backoffAttempt);
+		const backoffDelayMs = engineRetryDelayMs(RETRY_BACKOFF_BASE_MS, RETRY_BACKOFF_CAP_MS, backoffAttempt);
 		// An in-flight assignment is governed by maxRetries and backoff alone. The
 		// target cooldown it just created protects new work, not this chain.
 		const delayMs = Math.max(backoffDelayMs, decision.retryAfterMs ?? 0);

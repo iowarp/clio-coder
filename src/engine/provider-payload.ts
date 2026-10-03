@@ -187,15 +187,18 @@ function lockableContext(model: EngineModel, context: Context): Context | undefi
 }
 
 /**
- * Force a text-only round through Pi's `toolChoice: "none"`. Used while a
- * loop-guard synthesis lockout or a middleware lock is active: the lockout
- * directive alone relies on model compliance, and measured local models kept
- * calling tools until the backstop stopped the turn, throwing away everything
- * the turn had gathered. The tool schema bytes are untouched (the prompt
- * prefix and tool surface stay byte-stable); only this request's routing
- * changes, so prompt-prefix caches are unaffected.
+ * Force a text-only round through Pi's `toolChoice: "none"`. The interactive
+ * loop uses it for both the loop-guard synthesis lockout and a middleware lock.
+ * A worker uses it only for a middleware lock, because its synthesis lock goes
+ * through {@link toolsRemovedRound}. The lockout directive alone relies on
+ * model compliance, and measured local models kept calling tools until the
+ * backstop stopped the turn, throwing away everything the turn had gathered.
+ * The tool schema bytes are untouched (the prompt prefix and tool surface stay
+ * byte-stable); only this request's routing changes, so prompt-prefix caches
+ * are unaffected.
  *
- * Returns undefined when the request carries no tool surface (nothing to lock).
+ * Returns undefined when the request carries no tool surface (nothing to lock)
+ * and on Bedrock Converse, where the lock stays off (see {@link lockableContext}).
  */
 function textOnlyRound(
 	model: EngineModel,
@@ -208,16 +211,18 @@ function textOnlyRound(
 
 /**
  * Force a text-only round the hard way: remove the tool declarations from the
- * request. Used for a worker's synthesis-locked rounds (the loop-guard lockout
- * and the terminal result-contract repair). {@link textOnlyRound} is not enough
- * there: llama.cpp honors tool_choice "none" by disabling its tool-call parser
- * while the chat template still renders every tool schema, so a local model
- * that decides to call a tool anyway hands its markup back as content, the loop
- * guard strips it, and the worker ends with no result at all (a coder run that
- * had written and tested its file returned zero output this way, #78). With no
- * tools in the prompt the template renders no tool block and the model has
- * nothing to call. The prompt prefix changes for these one or two rounds; that
- * is the price of a usable answer.
+ * request. Used for a worker's synthesis-locked rounds, which cover the
+ * loop-guard lockout and the final-only result-contract repair. A terminal
+ * handoff round goes first when the run has a helper result tool and the API
+ * can name a tool, so this round serves the locked rounds without a handoff.
+ * {@link textOnlyRound} is not enough there: llama.cpp honors tool_choice "none"
+ * by disabling its tool-call parser while the chat template still renders every
+ * tool schema, so a local model that decides to call a tool anyway hands its
+ * markup back as content, the loop guard strips it, and the worker ends with no
+ * result at all (a coder run that had written and tested its file returned zero
+ * output this way, #78). With no tools in the prompt the template renders no
+ * tool block and the model has nothing to call. The prompt prefix changes for
+ * these one or two rounds; that is the price of a usable answer.
  *
  * Anthropic keeps the tool_choice knob instead: its API rejects a history that
  * carries tool_use blocks unless tools are defined, and it honors none
@@ -244,10 +249,11 @@ function toolsRemovedRound(
  *
  * Claude models that accept a forced choice cannot think beside it, so the
  * round drops `reasoning`; the next round without one resumes the configured
- * level. They keep the full tool array on a work round so the cacheable schema
- * prefix stays intact; only a terminal handoff drops the work surface. Models
- * that reject a forced choice stay on "auto" over the narrowed surface and
- * keep their thinking.
+ * level. On the Anthropic API they keep the full tool array on a work round so
+ * the cacheable schema prefix stays intact, and only a terminal handoff drops
+ * the work surface. Bedrock Claude always narrows to the one tool. Models that
+ * reject a forced choice stay on "auto" over the narrowed surface and keep
+ * their thinking.
  */
 function requiredRound(
 	model: EngineModel,

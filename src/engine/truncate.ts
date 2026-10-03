@@ -3,7 +3,7 @@
 /**
  * Shared truncation utilities for tool outputs.
  *
- * Truncation is based on two independent limits - whichever is hit first wins:
+ * Truncation is based on two independent limits, and whichever is hit first wins:
  * - Line limit (default: 2000 lines)
  * - Byte limit (default: 50KB)
  *

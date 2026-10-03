@@ -612,7 +612,8 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 	});
 	// Flipped by the loop guard's lockout callback; read by streamFn below to
 	// force the remaining model rounds text-only by removing the tool
-	// declarations (tool_choice none on Anthropic; see toolsRemovedRound).
+	// declarations (Anthropic, Google and Vertex keep them and send tool choice
+	// none instead; see toolsRemovedRound).
 	let synthesisToolLock = false;
 	let lockedSynthesisReprompts = 0;
 	let workerBoundFailure: string | null = null;

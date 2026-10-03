@@ -212,7 +212,8 @@ function isContentFilterErrorFrame(error: unknown): boolean {
 /**
  * The OpenAI SDK throws on an in-stream error frame before Pi's hook can see
  * it, and Pi's error text drops the frame's code. This scan is the only
- * remaining read of the transport bytes.
+ * remaining read of the SSE stream; `captureErrorBody` still reads a non-2xx
+ * body from a clone.
  */
 function observeErrorFrameBytes(chunk: Uint8Array | undefined, capture: ResponseModelIdCapture, flush = false): void {
 	if (!capture.decoder) return;
@@ -477,7 +478,8 @@ function lmStudioWireEffort(model: Model<Api>, resolved: ResolvedModelRuntimeCap
 }
 
 /**
- * Body fields the runtime reads for one request on a Clio-synthesized target.
+ * Body fields the runtime reads for one request on a local runtime target.
+ * Only `synthLocalModel` sets `clioCoder.runtimeId`, and that id is the gate.
  * Pi merges `StreamOptions.samplingParams` into the request body after its own
  * fields, so these ride that public pass-through instead of a payload rewrite,
  * and a caller's samplingParams key replaces the value computed here. Pi's
@@ -486,8 +488,10 @@ function lmStudioWireEffort(model: Model<Api>, resolved: ResolvedModelRuntimeCap
  * `model.reasoning` while Clio's family kwargs apply regardless, and has no
  * field for `allowed_openai_params`, `cache_prompt`, `ttl` or `draft_model`.
  * `none` and `always-on` leave `reasoning_effort` to the backend or to
- * model.samplingParams (Mercury's pinned `instant`). Pi catalog models carry no
- * runtime metadata and keep Pi's thinking handling.
+ * model.samplingParams (Mercury's pinned `instant`). A model without a runtime
+ * id keeps Pi's thinking handling. That includes Pi catalog models and
+ * catalog-backed targets, which can carry `clioCoder` cache metadata but never
+ * a runtime id.
  */
 function runtimeBodyFields(
 	model: Model<"openai-completions">,
@@ -621,9 +625,9 @@ function hasHeader(headers: Readonly<Record<string, unknown>> | undefined, name:
  * Apply LiteLLM's request-control headers at the final transport boundary.
  *
  * Pi's adapter already makes zero client attempts unless `maxRetries` is set, so
- * only the optional `numRetries` header remains: it controls the proxy router
- * itself, where any configured attempts stay observable. A physical-routing
- * gateway should leave it at zero.
+ * the only retry control left here is the optional `numRetries` header: it
+ * configures the proxy router itself, where any attempts stay observable. A
+ * physical-routing gateway should leave `numRetries` at zero.
  */
 function withLiteLLMRequestOptions<TOptions extends StreamOptions>(
 	model: Model<"openai-completions">,

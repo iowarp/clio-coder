@@ -475,7 +475,8 @@ function runStream(
 			signal?.throwIfAborted();
 			const pin = await reconcileOllamaResidency(model, headers, signal);
 			signal?.throwIfAborted();
-			// Native Ollama runs the payload hook too, so worker request patches reach its body.
+			// Native Ollama runs the payload hook like Pi's adapters, so the request-local
+			// edits in provider-payload.ts and the provider diagnostics dump see its body.
 			const request = buildRequest(model, context, options, thinkingLevel, pin);
 			const patchedRequest = (await options?.onPayload?.(request, model)) ?? request;
 			const iterator = streamOllamaChat(model.baseUrl, patchedRequest as typeof request, {

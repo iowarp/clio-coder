@@ -61,10 +61,11 @@ export type ResponseSchemaDialect = "llamacpp-json-object" | "openai-json-schema
  * Deliberately a name check, for the reason {@link RESPONSE_SCHEMA_RUNTIME_ID}
  * gives: a generic OpenAI-compatible gateway answers HTTP 200 to a spelling it
  * does not implement and returns unconstrained JSON, so a capability flag would
- * turn a known non-enforcement into a silent one. This is the out-of-turn
- * seam's table; the worker seam keeps the narrower
- * {@link runtimeSpeaksResponseSchemaDialect} check, because a worker that
- * cannot enforce a contract must refuse admission rather than degrade.
+ * turn a known non-enforcement into a silent one. This table gives the spelling
+ * for both the out-of-turn seam and the worker seam. Admission to the worker
+ * stays on the narrower {@link runtimeSpeaksResponseSchemaDialect} check,
+ * because a worker that cannot enforce a contract must refuse admission rather
+ * than degrade.
  */
 export function responseSchemaDialectFor(runtimeId: string): ResponseSchemaDialect | null {
 	if (runtimeId === RESPONSE_SCHEMA_RUNTIME_ID) return "llamacpp-json-object";

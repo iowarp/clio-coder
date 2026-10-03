@@ -66,11 +66,11 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 /**
- * Record one wire chunk's frame, in arrival order. pi-ai emits exactly one
- * `text_delta` for each chunk whose `delta.content` is non-empty, and the
- * observer sees the bytes before pi-ai parses them, so the queue lines up with
- * the events that follow. A chunk without `diffusion_meta` is an ordinary
- * delta and records nothing.
+ * Record one parsed chunk's frame, in arrival order. pi-ai emits exactly one
+ * `text_delta` for each chunk whose `delta.content` is non-empty, and Pi's
+ * `onProviderStreamEvent` hook hands over the chunk before it emits that
+ * chunk's events, so each queued frame precedes its `text_delta`. A chunk
+ * without `diffusion_meta` is an ordinary delta and records nothing.
  */
 export function observeDiffusionFrameChunk(payload: Record<string, unknown>, queue: QueuedFrame[]): void {
 	const meta = payload.diffusion_meta;

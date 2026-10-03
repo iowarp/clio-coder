@@ -41,9 +41,8 @@ let globalDefaultMaxOutputTokens = 0;
 
 /**
  * Install the global default output budget. {@link remainingContextMaxTokens}
- * uses it as the requested value when the caller passes no explicit maxTokens
- * and no more-specific tool-turn limit applies. The value is always clamped
- * down to the model's cap and the remaining context window, so a model that
+ * uses it as the requested value when the caller passes no explicit maxTokens.
+ * The value is always clamped down to the model's cap and the remaining context window, so a model that
  * supports less still gets less. Non-positive values disable the default.
  */
 export function setGlobalDefaultMaxOutputTokens(value: number): void {

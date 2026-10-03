@@ -86,8 +86,6 @@ export interface ChatTurnState {
 	turnPreparation: TurnPreparationPhase;
 	/** When the current preparation window opened, for its elapsed counter. */
 	turnPreparationSince: number;
-	/** Thinking level the active request runs under; read by onPayload. */
-	currentThinkingLevel: ThinkingLevel;
 	/** Provider context rebuilt on session switch, consumed by the next runtime build. */
 	replayedContextMessages: AgentMessage[];
 	/** The user turn id of the in-flight submit; null between turns. */
@@ -150,14 +148,18 @@ export interface ChatTurnState {
 	lastRunSnapshot: ChatLoopRunSnapshot | null;
 }
 
-export function createTurnState(initialThinkingLevel: ThinkingLevel): ChatTurnState {
+/**
+ * The thinking level argument is ignored: the agent state owns the level and
+ * turn state keeps no copy. The parameter stays optional because existing test
+ * call sites still pass one, and removing it from them is test work.
+ */
+export function createTurnState(_initialThinkingLevel?: ThinkingLevel): ChatTurnState {
 	return {
 		runtime: null,
 		lastTurnId: null,
 		streaming: false,
 		turnPreparation: "idle",
 		turnPreparationSince: 0,
-		currentThinkingLevel: initialThinkingLevel,
 		replayedContextMessages: [],
 		activeUserTurnId: null,
 		activeInterruptReason: null,

@@ -1190,8 +1190,9 @@
     # runtime and adds LM Studio's reasoning_effort spelling on that one, so
     # both surfaces get a dial that reaches the model.
     #
-    # reasoning=false previously resolved to mechanism "none", and mechanism
-    # "none" makes openai-completions strip reasoning_effort from the payload.
+    # reasoning=false previously resolved to mechanism "none", which sends no
+    # reasoning_effort: Pi's reasoning_effort branches all require
+    # model.reasoning, and Clio's runtime body fields skip mechanism "none".
     # The flag set to suppress thinking was the reason it could not be
     # suppressed.
     reasoning: true
