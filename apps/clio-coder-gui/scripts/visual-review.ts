@@ -276,7 +276,7 @@ if (values.serve) {
 				}
 				if (want("pane")) {
 					if ((await page.locator(".pane:not([hidden])").count()) === 0)
-						await page.getByRole("button", { name: "Show task pane", exact: true }).click();
+						await page.getByRole("button", { name: "Show task sidebar", exact: true }).click();
 					await page.locator(".pane:not([hidden]) .pane__body").waitFor();
 					await shot("pane");
 				}

@@ -152,6 +152,17 @@
 	width: var(--icon-sm);
 	height: var(--icon-sm);
 }
+/* A finger needs a larger target; the glyph keeps its size. */
+@media (pointer: coarse) {
+	.wb-icon {
+		width: 40px;
+		height: 40px;
+	}
+	.wb-icon--small {
+		width: 36px;
+		height: 36px;
+	}
+}
 .wb-icon:active:not(:disabled),
 .wb-action:active:not(:disabled),
 .wb-task__main:active:not(:disabled) {

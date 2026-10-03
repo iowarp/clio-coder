@@ -12,22 +12,32 @@
 }
 /* Section tabs are the site's chapter navigation: text on one rule, the current one marked by an
    accent rule that sits on the shared line, never a row of bordered pills. */
+/* One row that never wraps: on a phone it scrolls sideways, so the selected tab's underline always sits on
+   the row's own hairline. The hairline is an inset shadow because a scroll box would clip a tab that
+   overlaps its border. */
 .settings-tabs {
 	display: flex;
-	flex-wrap: wrap;
+	flex-wrap: nowrap;
 	gap: 0 var(--space-6);
 	margin-block: var(--space-6) var(--space-8);
-	border-bottom: 1px solid var(--line);
+	overflow-x: auto;
+	overscroll-behavior-x: contain;
+	scrollbar-width: none;
+	box-shadow: inset 0 -1px 0 var(--line);
+}
+.settings-tabs::-webkit-scrollbar {
+	display: none;
 }
 .settings-tabs > :is(a, button) {
 	position: relative;
 	display: inline-flex;
 	align-items: center;
+	flex: none;
 	min-height: 44px;
-	margin-bottom: -1px;
 	padding: 0;
 	border: 0;
 	border-bottom: 2px solid transparent;
+	white-space: nowrap;
 	border-radius: 0;
 	background: none;
 	color: var(--ink-muted);

@@ -72,9 +72,7 @@ export function TraceRuns({ client }: { client: Client }) {
 						))}
 					</select>
 				</label>
-				<button type="submit" className="primary">
-					Filter
-				</button>
+				<button type="submit">Filter</button>
 			</form>
 			{availability.error || runs.error ? (
 				<p role="alert">
