@@ -63,7 +63,14 @@ function apiKeyEnvVars(provider: string): readonly string[] | undefined {
 	return name ? [name] : undefined;
 }
 
-/** Synchronous provider-key discovery pinned to pi-ai 0.87.1's public behavior. */
+/**
+ * Synchronous provider-key discovery. Pi 1.0.0 exports `findEnvKeys` and
+ * `getEnvApiKey` only from `pi-ai/compat`, a 221 to 242 ms import with +40 MB
+ * RSS that would land on the synchronous pre-TUI preflight (`bootAuthStatus`).
+ * Pi's own provider auth is async (`AuthContext.env` returns a Promise), so
+ * this module stays Pi-free until the sync callers can go async. The table
+ * equals Pi 1.0.0's 38 env entries plus Clio's `inception` row.
+ */
 export function findEngineEnvKeys(provider: string, env?: ProviderEnv): string[] | undefined {
 	const names = apiKeyEnvVars(provider);
 	if (!names) return undefined;

@@ -198,7 +198,7 @@ const STAGE0_SEAMS: ReadonlyArray<Stage0Seam> = [
 	{
 		module: "src/engine/oauth.ts",
 		reason:
-			"OAuth provider registration for `auth`/`configure` and the prompt shape `oauth-select` renders. Reaches only alcf-oauth and env-api-keys, none of it terminal rendering.",
+			"OAuth provider registration for `auth`/`configure` and the prompt shape `oauth-select` renders. Reaches only alcf-oauth, none of it terminal rendering.",
 	},
 	{
 		module: "src/engine/session.ts",
