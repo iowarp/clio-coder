@@ -1,81 +1,123 @@
+/*
+ * One icon family, drawn here and nowhere else. Every glyph sits on a 24 unit grid inside a 2 unit
+ * margin, with round caps and joins and a 2 unit radius on a container corner, so no icon looks a
+ * size larger or a weight heavier than its neighbour. The stroke does not scale with the glyph
+ * (`vector-effect` below): a 14px icon in a dense row and an 18px icon in the rail carry the same
+ * line, set once by --icon-stroke.
+ */
+
+const n = (value: number) => Number(value.toFixed(2));
+
+/** A rounded rectangle as a closed subpath. */
+const box = (x: number, y: number, w: number, h: number, r = 2) =>
+	`M${x + r} ${y}h${w - 2 * r}a${r} ${r} 0 0 1 ${r} ${r}v${h - 2 * r}a${r} ${r} 0 0 1-${r} ${r}h-${w - 2 * r}a${r} ${r} 0 0 1-${r}-${r}v-${h - 2 * r}a${r} ${r} 0 0 1 ${r}-${r}Z`;
+
+/** A circle as a closed subpath. */
+const ring = (cx: number, cy: number, r: number) =>
+	`M${cx - r} ${cy}a${r} ${r} 0 1 0 ${2 * r} 0a${r} ${r} 0 1 0-${2 * r} 0Z`;
+
+/** A cog outline: flat teeth between a root circle and a tip circle, softened by the round joins. */
+const cog = (teeth: number, tip: number, root: number) => {
+	const at = (radius: number, angle: number) =>
+		`${n(12 + radius * Math.sin(angle))} ${n(12 - radius * Math.cos(angle))}`;
+	const step = (2 * Math.PI) / teeth;
+	const points: string[] = [];
+	for (let tooth = 0; tooth < teeth; tooth += 1) {
+		const centre = tooth * step;
+		points.push(
+			at(root, centre - step * 0.3),
+			at(tip, centre - step * 0.19),
+			at(tip, centre + step * 0.19),
+			at(root, centre + step * 0.3),
+		);
+	}
+	return `M${points.join("L")}Z`;
+};
+
+/** A sheet with a folded corner; the document icons write on it. */
+const SHEET = "M7 3h7l5 5v11a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2ZM14 3v5h5";
+const SLIDERS = `M3 7h9.5M17.5 7H21M3 17h3.5M11.5 17H21${ring(15, 7, 2.5)}${ring(9, 17, 2.5)}`;
+
 const paths = {
-	overview: "M3 3h7v7H3zM14 3h7v7h-7zM3 14h7v7H3zM14 14h7v7h-7z",
-	sessions: "M21 11.5a8.5 8.5 0 0 1-8.5 8.5H4l-2 2V11.5a9.5 9.5 0 0 1 19 0ZM7 9h10M7 14h6",
+	overview: box(3, 3, 7, 7, 1.5) + box(14, 3, 7, 7, 1.5) + box(3, 14, 7, 7, 1.5) + box(14, 14, 7, 7, 1.5),
+	sessions: "M6 4h12a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-8l-4.5 4v-4A2 2 0 0 1 4 14V6a2 2 0 0 1 2-2ZM8 8.5h8M8 12h5",
 	traces: "M3 12h4l3-8 4 16 3-8h4",
-	toolchain: "m14 6 4 4M4 20l-1-3L15 5l4-2 2 2-2 4L7 21Z",
-	docs: "M12 5v16M12 5C8 2 4 3 2 4v15c3-1 7-1 10 2 3-3 7-3 10-2V4c-2-1-6-2-10 1Z",
-	settings: "M4 7h9m4 0h3M4 17h3m4 0h9M13 4v6M7 14v6",
-	fleet: "M12 8v5M5 16v-3h14v3M9 2h6v6H9zM2 16h6v6H2zM16 16h6v6h-6z",
-	evidence: "M8 3H5v18h14V3h-3M8 2h8v4H8zM8 12l2 2 5-5M8 18h8",
-	library: "M3 3h4v18H3zM10 3h4v18h-4zM17 4l3-1 3 17-3 1z",
-	system: "M3 4h18v13H3zM8 21h8m-4-4v4M6 8l3 3-3 3m6 0h5",
-	sun: "M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8ZM12 2v2m0 16v2M2 12h2m16 0h2M5 5l1.5 1.5m11 11L19 19M5 19l1.5-1.5m11-11L19 5",
-	moon: "M20.8 13A9 9 0 0 1 11 3.2 9 9 0 1 0 20.8 13Z",
+	toolchain:
+		"M16.5 3.2 13.8 5.9l.7 2.9 2.9.7 2.7-2.7a5.2 5.2 0 0 1-6.9 6.1l-6 6a2.1 2.1 0 0 1-3-3l6-6a5.2 5.2 0 0 1 6.3-6.7Z",
+	docs: "M12 6.5C10 4.6 6.5 4 3 4.5V19c3.5-.5 7 .1 9 2 2-1.9 5.5-2.5 9-2V4.5c-3.5-.5-7 .1-9 2ZM12 6.5V21",
+	settings: SLIDERS,
+	fleet: `${box(9, 2, 6, 6, 1.5) + box(2, 16, 6, 6, 1.5) + box(16, 16, 6, 6, 1.5)}M12 8v4M5 16v-2a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v2`,
+	evidence: `${box(8, 2, 8, 4, 1)}M16 4h1a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h1M9 14l2 2 4-4`,
+	library: "M4 4v16M8.5 4v16M13 7v13M16.5 7.6l3.8 12.2",
+	system: `${box(2, 3, 20, 14)}M8 21h8M12 17v4M6.5 7.5l3 2.5-3 2.5M12.5 12.5h4`,
+	sun: `${ring(12, 12, 4)}M12 2v2M12 20v2M2 12h2M20 12h2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4`,
+	moon: "M20.5 14A9 9 0 1 1 10 3.5a7 7 0 0 0 10.5 10.5Z",
 	menu: "M4 6h16M4 12h16M4 18h16",
-	sidebar: "M4 4h16v16H4zM9 4v16",
-	close: "m6 6 12 12M6 18 18 6",
-	more: "M5 11v2m7-2v2m7-2v2",
+	sidebar: `${box(3, 4, 18, 16)}M9 4v16`,
+	close: "M6 6l12 12M18 6 6 18",
+	more: ring(5, 12, 1) + ring(12, 12, 1) + ring(19, 12, 1),
 	// Status glyphs mirror client/design/status.tsx: shape, never hue alone.
-	running: "M10 8l6 4-6 4V8ZM12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18Z",
-	success: "m8 12 3 3 5-6M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18Z",
+	running: `${ring(12, 12, 9)}M10 8.5v7l5.5-3.5Z`,
+	success: `${ring(12, 12, 9)}M8.5 12.2l2.4 2.4 4.6-5`,
 	warn: "M12 9v4m0 3v.5M10.3 4.2 2.6 17.4A2 2 0 0 0 4.3 20.5h15.4a2 2 0 0 0 1.7-3.1L13.7 4.2a2 2 0 0 0-3.4 0Z",
-	fail: "m9 9 6 6m-6 0 6-6M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18Z",
+	fail: `${ring(12, 12, 9)}M9 9l6 6M15 9l-6 6`,
 	unverified:
 		"M12 3a9 9 0 0 1 4.5 1.2M20 8a9 9 0 0 1 .8 5.4M18.5 18a9 9 0 0 1-4.7 2.8M9 20.6A9 9 0 0 1 4.6 18M3.2 13.4A9 9 0 0 1 4.9 7.2",
 	chevronDown: "m6 9 6 6 6-6",
 	chevronRight: "m9 6 6 6-6 6",
-	copy: "M9 9h10v12H9zM5 15H3V3h12v2",
-	search: "M11 4a7 7 0 1 0 0 14 7 7 0 0 0 0-14ZM21 21l-5-5",
-	diff:
-		"M6 3v12m0 6v-2M6 15a3 3 0 1 0 0 6 3 3 0 0 0 0-6ZM18 21V9m0-6v2M18 3a3 3 0 1 0 0 6 3 3 0 0 0 0-6ZM9 6h4a5 5 0 0 1 5 5",
+	copy: `${box(9, 9, 12, 12)}M5 15h-.5A1.5 1.5 0 0 1 3 13.5v-9A1.5 1.5 0 0 1 4.5 3h9A1.5 1.5 0 0 1 15 4.5V5`,
+	search: `${ring(11, 11, 7)}M20.5 20.5 16 16`,
+	diff: `${ring(6, 6, 2.5) + ring(18, 18, 2.5)}M12 6h4a2 2 0 0 1 2 2v7.5M12 18H8a2 2 0 0 1-2-2V8.5`,
 	plus: "M12 5v14M5 12h14",
-	folder: "M3 7V5h6l2 2h10v13H3Z",
-	arrowUp: "M12 19V5m-6 6 6-6 6 6",
-	paperclip: "m8 13 7-7a3 3 0 0 1 4 4l-9 9a5 5 0 0 1-7-7l9-9m-5 12 8-8",
-	keyboard: "M2 5h20v14H2zM6 9h1m4 0h1m4 0h1M6 13h1m4 0h1m4 0h1M7 16h10",
-	artifacts: "M4 3h12l4 4v14H4ZM16 3v5h4M8 12h8M8 16h8",
-	gear:
-		"M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6ZM19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1Z",
-	filter: "M3 5h18l-7 8v6l-4 2v-8Z",
-	external: "M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5",
-	play: "M7 5l12 7-12 7V5Z",
-	stop: "M6 6h12v12H6z",
+	folder: "M3 6a2 2 0 0 1 2-2h4l2.5 3H19a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z",
+	arrowUp: "M12 19V5M5.5 11.5 12 5l6.5 6.5",
+	paperclip: "M20 11.5l-8.2 8.2a5 5 0 0 1-7.1-7.1l8.5-8.5a3.3 3.3 0 0 1 4.7 4.7l-8.5 8.5a1.7 1.7 0 0 1-2.4-2.4l7.8-7.8",
+	artifacts: `${SHEET}M9 13h6M9 17h6`,
+	gear: cog(8, 9.8, 7.6) + ring(12, 12, 3),
+	filter: "M4 5h16l-6 7.5V19l-4 1.5v-8Z",
+	external: "M14 4h6v6M20 4l-9 9M18 14v4a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4",
+	play: "M7 4.5v15l12-7.5Z",
+	stop: box(6, 6, 12, 12),
 	// Workbench shell.
-	compose: "M11 4H5a1 1 0 0 0-1 1v14a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-6M17.5 3.5l3 3L12 15l-4 1 1-4Z",
-	folderOpen: "M3 19V5h6l2 2h8v3M3 19l3-9h16l-3 9Z",
+	compose: "M11 4H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-5M18.4 3.6a2 2 0 0 1 2.8 2.8l-8.7 8.8L9 16l.8-3.5Z",
+	folderOpen:
+		"M3 18V6a2 2 0 0 1 2-2h4l2.5 3H18a2 2 0 0 1 2 2v1M3 18l2.3-6.6A2 2 0 0 1 7.2 10h13.4a1 1 0 0 1 .95 1.32l-2.1 7.3A2 2 0 0 1 17.5 20H5a2 2 0 0 1-2-2Z",
 	skills:
 		"M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8ZM19 15l.7 1.8 1.8.7-1.8.7L19 20l-.7-1.8-1.8-.7 1.8-.7Z",
-	models: "M7 7h10v10H7zM10 10h4v4h-4zM9 3v4m6-4v4M9 17v4m6-4v4M3 9h4m10 0h4M3 15h4m10 0h4",
-	sliders: "M4 7h9m4 0h3M4 17h3m4 0h9M13 4v6M7 14v6",
-	usage: "M5 20V10M12 20V4M19 20v-7",
-	panelRight: "M4 4h16v16H4zM15 4v16",
-	check: "m5 12 4.5 4.5L19 7",
-	branch: "M6 3v12M6 15a3 3 0 1 0 0 6 3 3 0 0 0 0-6ZM18 3a3 3 0 1 0 0 6 3 3 0 0 0 0-6ZM18 9a6 6 0 0 1-6 6H9",
-	arrowLeft: "M19 12H5m6-6-6 6 6 6",
-	trash: "M4 7h16M10 11v6m4-6v6M6 7l1 13h10l1-13M9 7V4h6v3",
-	pencil: "m4 20 1-4L16.5 4.5a2.1 2.1 0 0 1 3 3L8 19Z",
-	archive: "M4 4h16v4H4zM5 8v12h14V8M10 12h4",
-	clock: "M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18ZM12 7v5l3 2",
-	circle: "M12 4a8 8 0 1 0 0 16 8 8 0 0 0 0-16Z",
-	fileDiff: "M7 3h8l4 4v14H7zM15 3v4h4M10 12h6M13 9v6M10 17h6",
+	models: `${box(5, 5, 14, 14) + box(9, 9, 6, 6, 1)}M9 2v3M15 2v3M9 19v3M15 19v3M2 9h3M2 15h3M19 9h3M19 15h3`,
+	sliders: SLIDERS,
+	usage: "M5 20v-9M12 20V4M19 20v-6",
+	panelRight: `${box(3, 4, 18, 16)}M15 4v16`,
+	check: "m5 12.5 4.5 4.5L19 7",
+	branch: `${ring(6, 18, 2.5) + ring(18, 6, 2.5)}M6 3v12.5M18 8.5c0 5-3.5 8.5-9.5 9.5`,
+	arrowLeft: "M19 12H5M11.5 5.5 5 12l6.5 6.5",
+	trash:
+		"M4 7h16M9.5 7V4.5a.5.5 0 0 1 .5-.5h4a.5.5 0 0 1 .5.5V7M6 7l.8 12.1a2 2 0 0 0 2 1.9h6.4a2 2 0 0 0 2-1.9L18 7M10 11v6M14 11v6",
+	pencil: "M4 20l1-4.5L16.4 4.1a2.1 2.1 0 0 1 3 3L8 18.6ZM14.5 6l3 3",
+	archive: `${box(3, 4, 18, 4, 1)}M5 8v10a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8M10 12h4`,
+	clock: `${ring(12, 12, 9)}M12 7v5l3 2`,
+	circle: ring(12, 12, 8),
+	fileDiff: `${SHEET}M9.5 11.5h5M12 9v5M9.5 17.5h5`,
 	shield: "M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6Z",
-	layers: "M12 3 3 8l9 5 9-5ZM3 13l9 5 9-5M3 17.5l9 5 9-5",
-	listChecks: "M4 6l1.5 1.5L8 5M4 12l1.5 1.5L8 11M4 18l1.5 1.5L8 17M11 6h9M11 12h9M11 18h9",
+	bolt: "M13 2.5 4.5 13.5H11l-1 8 8.5-11H12Z",
+	layers: "M12 2.5 3 7.5l9 5 9-5ZM3 12l9 5 9-5M3 16.5l9 5 9-5",
+	listChecks: "M3 6.5 4.5 8l3-3M3 12.5 4.5 14l3-3M3 18.5 4.5 20l3-3M11 6.5h10M11 12.5h10M11 18.5h10",
 } as const;
 
-export function Icon({ name }: { name: keyof typeof paths }) {
+export type IconName = keyof typeof paths;
+
+export function Icon({ name }: { name: IconName }) {
 	return (
 		<svg
 			className="icon"
 			viewBox="0 0 24 24"
 			fill="none"
 			stroke="currentColor"
-			strokeWidth="1.6"
 			strokeLinecap="round"
 			strokeLinejoin="round"
 			aria-hidden="true"
 		>
-			<path d={paths[name]} />
+			<path d={paths[name]} vectorEffect="non-scaling-stroke" />
 		</svg>
 	);
 }

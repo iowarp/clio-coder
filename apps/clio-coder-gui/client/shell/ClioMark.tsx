@@ -3,8 +3,10 @@ import { useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
 /**
  * The sizes ClioPulse is drawn at, defined once. An inline mark beside a word, a list or task row,
  * a step in a plan, and a stage (the setup wizard, an empty state). Pass one of these, not a number.
+ * The smallest is 14px because that is the least room in which the copper core and two teal rings
+ * stay apart; with fewer rings the glyph reads as a letter C, not as Clio.
  */
-export const PULSE_SIZE = { inline: 12, row: 14, step: 16, stage: 24 } as const;
+export const PULSE_SIZE = { inline: 14, row: 16, step: 16, stage: 24 } as const;
 
 /** One ring of the mark: a C that opens to the right, optionally cut like the maze in the logo. */
 export type Ring = { r: number; w: number; gap: number; tone: "accent" | "secondary"; cuts?: readonly number[] };
@@ -13,45 +15,46 @@ type Geometry = { box: number; cycle: number; stagger: number; rings: readonly R
 
 /*
  * Geometry per rendered size, drawn in device pixels at the bucket's own size so every ring keeps a
- * stroke of at least 1.3px and a clear gap of about 1px. A 12px glyph cannot hold four rings without
- * them fusing into a blob, so the small buckets keep the outer ring and the copper core and drop rings
- * inward as room runs out. The large bucket carries the logo's maze cuts.
+ * stroke of at least 1.1px and a clear gap of about 1px. Every bucket holds the copper core inside at
+ * least two teal rings, which is the least that still reads as the logo. The large bucket carries the
+ * logo's maze cuts.
  */
 const XS: Geometry = {
-	cycle: 1500,
-	stagger: 120,
-	box: 12,
+	cycle: 2000,
+	stagger: 130,
+	box: 14,
 	rings: [
-		{ r: 4.6, w: 1.6, gap: 24, tone: "accent" },
-		{ r: 1.75, w: 1.5, gap: 30, tone: "secondary" },
+		{ r: 6.3, w: 1.2, gap: 22, tone: "accent" },
+		{ r: 4.05, w: 1.1, gap: 25, tone: "accent" },
+		{ r: 1.8, w: 1.2, gap: 30, tone: "secondary" },
 	],
-	check: "M3 6.2 5.2 8.4 9.2 3.8",
+	check: "M3.4 7.3 5.9 9.8 10.7 4.5",
 };
 const SM: Geometry = {
-	cycle: 1700,
-	stagger: 100,
+	cycle: 2000,
+	stagger: 130,
 	box: 16,
 	rings: [
-		{ r: 6.6, w: 1.5, gap: 22, tone: "accent" },
-		{ r: 4.3, w: 1.1, gap: 24, tone: "accent" },
-		{ r: 2, w: 1.4, gap: 30, tone: "secondary" },
+		{ r: 7.1, w: 1.4, gap: 22, tone: "accent" },
+		{ r: 4.55, w: 1.2, gap: 24, tone: "accent" },
+		{ r: 2.05, w: 1.4, gap: 30, tone: "secondary" },
 	],
 	check: "M4 8.3 6.8 11.1 12.2 5.2",
 };
 const MD: Geometry = {
-	cycle: 1900,
-	stagger: 110,
+	cycle: 2200,
+	stagger: 140,
 	box: 24,
 	rings: [
-		{ r: 10.2, w: 2.4, gap: 20, tone: "accent" },
-		{ r: 6.9, w: 1.8, gap: 22, tone: "accent" },
-		{ r: 3.5, w: 2.2, gap: 28, tone: "secondary" },
+		{ r: 10.6, w: 2.2, gap: 20, tone: "accent" },
+		{ r: 7, w: 1.8, gap: 22, tone: "accent" },
+		{ r: 3.4, w: 2.2, gap: 28, tone: "secondary" },
 	],
 	check: "M6 12.4 10.2 16.6 18.2 7.8",
 };
 export const LG: Geometry = {
-	cycle: 2600,
-	stagger: 140,
+	cycle: 2800,
+	stagger: 160,
 	box: 48,
 	rings: [
 		{ r: 20.5, w: 5, gap: 19, tone: "accent", cuts: [25, 50, 75] },
@@ -63,7 +66,7 @@ export const LG: Geometry = {
 };
 
 function geometry(size: number): { name: string; shape: Geometry } {
-	if (size <= 13) return { name: "xs", shape: XS };
+	if (size <= 14) return { name: "xs", shape: XS };
 	if (size <= 19) return { name: "sm", shape: SM };
 	if (size <= 35) return { name: "md", shape: MD };
 	return { name: "lg", shape: LG };
@@ -89,10 +92,12 @@ export function dashes({ gap, cuts = [] }: Ring): string {
 	return out.map((value) => Number(value.toFixed(2))).join(" ");
 }
 
-type Phase = "working" | "settling" | "done";
+/** What the mark is asked to show: the logo at rest, the logo turning, or the check it resolves to. */
+type Mode = "rest" | "working" | "done";
+type Phase = Mode | "settling";
 
 /** The fraction of a beat at which a ring lands back in the mark; the rest of the beat is the mark at rest. */
-const LANDS = 0.58;
+const LANDS = 0.6;
 
 const STILL = "(prefers-reduced-motion: reduce)";
 const subscribeStill = (notify: () => void) => {
@@ -106,47 +111,52 @@ export function useStill(): boolean {
 	return useSyncExternalStore(subscribeStill, prefersStill, () => true);
 }
 
-let ease: string | undefined;
-/** The site's easing, read once from the generated brand tokens so the pulse has no curve of its own. */
+const curves = new Map<string, string>();
+function curve(token: string, fallback: string): string {
+	let value = curves.get(token);
+	if (value === undefined) {
+		value = getComputedStyle(document.documentElement).getPropertyValue(token).trim() || fallback;
+		curves.set(token, value);
+	}
+	return value;
+}
+/** The site's easing, read once from the generated brand tokens so an entrance has no curve of its own. */
 export function brandEase(): string {
-	ease ??= getComputedStyle(document.documentElement).getPropertyValue("--ease-standard").trim() || "ease-out";
-	return ease;
+	return curve("--ease-standard", "ease-out");
 }
 
 /** One eased turn that lands back in the mark at LANDS and rests there for the rest of the beat. */
 function turn(direction: 1 | -1): Keyframe[] {
 	const home = `rotate(${360 * direction}deg)`;
 	return [
-		{ offset: 0, transform: "rotate(0deg)", easing: brandEase() },
+		{ offset: 0, transform: "rotate(0deg)", easing: curve("--ease-turn", "ease-in-out") },
 		{ offset: LANDS, transform: home },
 		{ offset: 1, transform: home },
 	];
 }
 
 /**
- * The brand's concentric C as the "Clio is working" indicator. Each ring makes one eased turn and
- * lands back in its place in the mark, outer ring first, so every beat ends on the logo itself and the
- * reduced-motion still is the mark. Rings rotate as separate SVG layers, transform only, and every
- * pulse starts at the document timeline's origin so a rail of running tasks beats together.
+ * The brand's concentric C, at rest or working. Working, the teal rings turn around the copper core
+ * like the tumblers of a lock: neighbours in opposite directions, the outer one first, each making one
+ * eased turn and landing back in its place. The core never moves, so the mark stays recognisable in
+ * the middle of a turn, every beat ends on the logo itself, and the reduced-motion still is the logo.
+ * Rings rotate as separate SVG layers, transform only, and every mark starts at the document
+ * timeline's origin so a rail of running tasks beats together.
  *
  * The turns use the Web Animations API, not CSS keyframes. React listens for animation events at its
  * root, and while anything listens Chrome dispatches every CSS animationiteration on the main thread,
  * which measured at a style recalc per frame with a few dozen pulses on screen. Script-created
  * animations fire no iteration events and stay on the compositor.
  *
- * It means Clio, a worker, a tool or the setup child is doing something right now. It is never
- * decoration and never stands for ordinary data loading. It is decorative to assistive technology
- * unless it gets a `label`, so pair it with a word that carries the state.
- *
- * `done` resolves it: rings finish the turn they are on, the mark holds a beat, then gives way to a
- * check. A pulse mounted already done shows the check without replaying the resolve.
+ * Leaving `working`, the rings finish the turn they are on before the mark rests or resolves, so a
+ * state change never snaps a ring back.
  */
-export function ClioPulse({ size = 16, label, done = false }: { size?: number; label?: string; done?: boolean }) {
+function Mark({ size, mode, label, variant }: { size: number; mode: Mode; label?: string; variant: "pulse" | "logo" }) {
 	const { name, shape } = geometry(size);
 	const root = useRef<HTMLSpanElement>(null);
 	const turns = useRef<Animation[]>([]);
 	const still = useStill();
-	const [phase, setPhase] = useState<Phase>(done ? "done" : "working");
+	const [phase, setPhase] = useState<Phase>(mode);
 	const current = useRef(phase);
 	current.current = phase;
 	// A fresh key remounts the rings when work resumes, so a new beat starts from the rest pose.
@@ -155,7 +165,7 @@ export function ClioPulse({ size = 16, label, done = false }: { size?: number; l
 	// biome-ignore lint/correctness/useExhaustiveDependencies: a new lap remounts the rings and needs new turns.
 	useLayoutEffect(() => {
 		if (still || current.current !== "working") return;
-		const rings = root.current?.querySelectorAll<SVGSVGElement>("svg.clio-pulse__ring") ?? [];
+		const rings = root.current?.querySelectorAll<SVGSVGElement>("svg.clio-pulse__ring--accent") ?? [];
 		turns.current = [...rings].map((ring, index) => {
 			const animation = ring.animate(turn(index % 2 === 0 ? 1 : -1), {
 				duration: shape.cycle,
@@ -172,43 +182,45 @@ export function ClioPulse({ size = 16, label, done = false }: { size?: number; l
 	}, [lap, still, shape]);
 
 	useLayoutEffect(() => {
-		if (!done) {
+		if (mode === "working") {
 			if (current.current !== "working") {
 				setPhase("working");
 				setLap((value) => value + 1);
 			}
 			return;
 		}
-		if (current.current !== "working") return;
 		const running = turns.current;
-		if (running.length === 0) {
-			setPhase("done");
+		const turning = current.current === "working" || current.current === "settling";
+		if (!turning || running.length === 0) {
+			setPhase(mode);
 			return;
 		}
-		setPhase("settling");
-		for (const animation of running) {
-			const timing = animation.effect?.getComputedTiming();
-			// Before its stagger delay a ring has no iteration yet and already rests in the mark.
-			const iteration = timing?.currentIteration ?? 0;
-			const progress = timing?.progress ?? 0;
-			// A turning ring ends where it lands; a resting one ends now. Either way it stops in the mark.
-			const end = progress < LANDS ? iteration + LANDS : iteration + progress;
-			animation.effect?.updateTiming({ iterations: end, fill: "forwards" });
+		if (current.current === "working") {
+			setPhase("settling");
+			for (const animation of running) {
+				const timing = animation.effect?.getComputedTiming();
+				// Before its stagger delay a ring has no iteration yet and already rests in the mark.
+				const iteration = timing?.currentIteration ?? 0;
+				const progress = timing?.progress ?? 0;
+				// A turning ring ends where it lands; a resting one ends now. Either way it stops in the mark.
+				const end = progress < LANDS ? iteration + LANDS : iteration + progress;
+				animation.effect?.updateTiming({ iterations: end, fill: "forwards" });
+			}
 		}
 		let live = true;
 		void Promise.allSettled(running.map((animation) => animation.finished)).then(() => {
-			if (live) setPhase("done");
+			if (live) setPhase(mode);
 		});
 		return () => {
 			live = false;
 		};
-	}, [done]);
+	}, [mode]);
 
 	const half = shape.box / 2;
 	return (
 		<span
 			ref={root}
-			className="clio-pulse"
+			className={variant === "logo" ? "clio-pulse clio-logo" : "clio-pulse"}
 			data-size={name}
 			data-phase={phase}
 			style={{ width: size, height: size }}
@@ -235,13 +247,33 @@ export function ClioPulse({ size = 16, label, done = false }: { size?: number; l
 					</svg>
 				))}
 			</span>
-			<svg className="clio-pulse__check" viewBox={`0 0 ${shape.box} ${shape.box}`} aria-hidden="true">
-				<path d={shape.check} strokeWidth={shape.rings[0]?.w} />
-			</svg>
+			{variant === "pulse" ? (
+				<svg className="clio-pulse__check" viewBox={`0 0 ${shape.box} ${shape.box}`} aria-hidden="true">
+					<path d={shape.check} strokeWidth={shape.rings[0]?.w} />
+				</svg>
+			) : null}
 		</span>
 	);
 }
 
-export function ClioLogo({ size = 24 }: { size?: number }) {
-	return <img src="/clio-coder-logo.webp" alt="" width={size} height={Math.round((size * 128) / 117)} />;
+/**
+ * The "Clio is working" indicator. It means Clio, a worker, a tool or the setup child is doing
+ * something right now. It is never decoration and never stands for ordinary data loading. It is
+ * decorative to assistive technology unless it gets a `label`, so pair it with a word that carries
+ * the state.
+ *
+ * `done` resolves it: rings finish the turn they are on, the mark holds a beat, then gives way to a
+ * check. A pulse mounted already done shows the check without replaying the resolve.
+ */
+export function ClioPulse({ size = 16, label, done = false }: { size?: number; label?: string; done?: boolean }) {
+	return <Mark size={size} mode={done ? "done" : "working"} variant="pulse" {...(label ? { label } : {})} />;
+}
+
+/**
+ * The Clio mark as the product's logo, drawn from the theme's own teal and copper so it sits in the
+ * light theme as it does in the dark one. `working` turns its rings the way ClioPulse does, for the
+ * places where the logo itself should show that Clio is busy.
+ */
+export function ClioLogo({ size = 24, working = false }: { size?: number; working?: boolean }) {
+	return <Mark size={size} mode={working ? "working" : "rest"} variant="logo" />;
 }

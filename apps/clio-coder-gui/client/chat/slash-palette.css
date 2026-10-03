@@ -11,9 +11,9 @@
 	display: grid;
 	gap: var(--space-1);
 	padding: var(--space-2);
-	border: 1px solid var(--line);
+	border: 1px solid var(--line-float);
 	border-radius: var(--radius-lg);
-	background: var(--overlay);
+	background: var(--raised);
 	box-shadow: var(--shadow-panel);
 }
 .slash-palette__list {
@@ -37,9 +37,12 @@
 	align-items: baseline;
 	justify-content: space-between;
 	gap: var(--space-4);
-	padding: var(--space-2);
+	padding: 7px var(--space-3);
 	border-radius: var(--radius-sm);
 	cursor: default;
+}
+.slash-palette__option:hover:not([data-active="true"]) {
+	background: var(--wb-faint);
 }
 .slash-palette__option[data-active="true"] {
 	background: var(--accent-soft);
@@ -67,9 +70,9 @@
 }
 .slash-palette__keys {
 	margin: 0;
-	padding: var(--space-1) var(--space-2) 0;
+	padding: var(--space-2) var(--space-3) var(--space-1);
 	border-top: 1px solid var(--line);
-	color: var(--ink-subtle);
+	color: var(--ink-muted);
 	font-size: var(--text-exact);
 }
 .slash-palette__keys kbd {

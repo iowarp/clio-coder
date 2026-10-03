@@ -112,10 +112,6 @@
 	background: var(--wb-hover);
 	color: var(--ink);
 }
-.wb-brand img {
-	display: block;
-	object-fit: contain;
-}
 
 /* One reset for every control in the rail, so the global bordered `button` never leaks in. */
 .wb-icon,
@@ -143,17 +139,23 @@
 	padding: 0;
 	color: var(--ink-muted);
 }
+/* An even glyph in an even button: an odd one sits on a half pixel and its strokes blur. */
 .wb-icon .icon {
-	width: 17px;
-	height: 17px;
+	width: var(--icon-md);
+	height: var(--icon-md);
 }
 .wb-icon--small {
 	width: 26px;
 	height: 26px;
 }
 .wb-icon--small .icon {
-	width: 15px;
-	height: 15px;
+	width: var(--icon-sm);
+	height: var(--icon-sm);
+}
+.wb-icon:active:not(:disabled),
+.wb-action:active:not(:disabled),
+.wb-task__main:active:not(:disabled) {
+	background: var(--wb-active);
 }
 .wb-icon:hover:not(:disabled),
 .wb-action:hover:not(:disabled),
@@ -184,8 +186,8 @@
 	text-align: left;
 }
 .wb-action .icon {
-	width: 17px;
-	height: 17px;
+	width: var(--icon-md);
+	height: var(--icon-md);
 	color: var(--ink-muted);
 }
 .wb-action--primary .icon {
@@ -353,8 +355,8 @@
 	display: inline-grid;
 	place-items: center;
 	flex: none;
-	width: 14px;
-	height: 14px;
+	width: 16px;
+	height: 16px;
 }
 .wb-task__title {
 	flex: 1;
@@ -787,41 +789,80 @@ button.wb-chip:hover:not(:disabled) {
 	z-index: 20;
 	display: grid;
 	gap: 1px;
-	min-width: 13rem;
-	padding: var(--space-1);
-	border: 1px solid var(--line-strong);
+	min-width: 12.5rem;
+	padding: 5px;
+	border: 1px solid var(--line-float);
 	border-radius: var(--radius-md);
-	background: var(--overlay);
+	background: var(--raised);
 	box-shadow: var(--shadow-panel);
+	animation: wb-menu-open var(--motion-fast) var(--ease-standard);
+}
+/* The task's menu follows its title at the left of the bar, so it opens toward the free side
+   instead of back over the name it belongs to. */
+.wb-bar > .wb-menu > .wb-menu__panel {
+	right: auto;
+	left: 0;
+}
+/* No scale: Menu.tsx measures the panel while it opens to place a floating one. */
+@keyframes wb-menu-open {
+	from {
+		opacity: 0;
+		transform: translateY(-4px);
+	}
 }
 .wb-menu__item {
 	display: flex;
 	align-items: center;
-	gap: var(--space-3);
+	gap: 10px;
 	width: 100%;
-	min-height: 0;
-	padding: 8px 10px;
+	min-height: 32px;
+	padding: 0 10px;
 	border: 0;
 	border-radius: var(--radius-sm);
 	background: transparent;
 	color: var(--ink);
 	text-align: left;
 	font-size: var(--text-meta);
+	white-space: nowrap;
 }
 .wb-menu__item:hover:not(:disabled) {
 	background: var(--wb-hover);
 	border-color: transparent;
 }
+.wb-menu__item:active:not(:disabled) {
+	background: var(--wb-active);
+}
 .wb-menu__item .icon {
-	width: 16px;
-	height: 16px;
+	width: var(--icon-md);
+	height: var(--icon-md);
 	color: var(--ink-muted);
 }
+.wb-menu__item:hover:not(:disabled) .icon {
+	color: var(--ink);
+}
+/* A destructive item sits apart from the ones above it and answers a hover in its own tone. */
 .wb-menu__item[data-tone="danger"] {
 	color: var(--status-fail-fg);
 }
-.wb-menu__item[data-tone="danger"] .icon {
+.wb-menu__item[data-tone="danger"]:hover:not(:disabled) {
+	background: var(--status-fail-tint);
+}
+.wb-menu__item[data-tone="danger"] .icon,
+.wb-menu__item[data-tone="danger"]:hover:not(:disabled) .icon {
 	color: inherit;
+}
+.wb-menu__item:not([data-tone="danger"]) + .wb-menu__item[data-tone="danger"] {
+	margin-top: 5px;
+}
+.wb-menu__item:not([data-tone="danger"]) + .wb-menu__item[data-tone="danger"]::before {
+	content: "";
+	position: absolute;
+	inset: -3px 0 auto;
+	height: 1px;
+	background: var(--line);
+}
+.wb-menu__item[data-tone="danger"] {
+	position: relative;
 }
 
 /* Touch screens have no chords to print, and a narrow bar keeps the title rather than the project chip. */

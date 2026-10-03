@@ -10,16 +10,34 @@
 	padding: 24px;
 	background: var(--scrim);
 }
+/* A dialog is the highest thing on the page: the raised ground, the float line and the deepest shadow.
+   It rises a few pixels into place so it reads as arriving over the work, not replacing it. */
 .dialog {
-	background: var(--paper);
+	background: var(--raised);
 	color: var(--ink);
-	border: 1px solid var(--line);
-	border-radius: 8px;
+	border: 1px solid var(--line-float);
+	border-radius: var(--radius-lg);
+	box-shadow: var(--shadow-float);
 	width: min(560px, 100%);
 	max-height: min(80vh, 760px);
 	display: grid;
 	grid-template-rows: auto minmax(0, 1fr);
 	overflow: hidden;
+	animation: dialog-open var(--motion-base) var(--ease-standard);
+}
+@keyframes dialog-open {
+	from {
+		opacity: 0;
+		transform: translateY(8px);
+	}
+}
+.dialog-backdrop {
+	animation: dialog-scrim var(--motion-fast) linear;
+}
+@keyframes dialog-scrim {
+	from {
+		opacity: 0;
+	}
 }
 .dialog--wide {
 	width: min(900px, 100%);
@@ -33,8 +51,11 @@
 	border-bottom: 1px solid var(--line);
 }
 .dialog__header h2 {
-	font-size: 19px;
-	font-weight: 500;
+	font-family: var(--font-ui);
+	font-size: 17px;
+	font-weight: 600;
+	letter-spacing: -0.2px;
+	line-height: var(--leading-tight);
 	margin: 0;
 }
 .dialog__header .eyebrow {
@@ -45,6 +66,11 @@
 .dialog__body {
 	overflow: auto;
 	padding: 18px 20px 22px;
+}
+/* The page-wide `code` is a block for command listings; in a sentence it has to stay in the line. */
+:where(.dialog__body) :is(p, li, dd) > code {
+	display: inline;
+	padding: 0;
 }
 
 .drawer-layer {
@@ -66,9 +92,10 @@
 	display: grid;
 	grid-template-rows: auto minmax(0, 1fr);
 	width: min(360px, 88vw);
-	background: var(--paper);
+	background: var(--raised);
 	color: var(--ink);
-	border-inline: 1px solid var(--line);
+	border-inline: 1px solid var(--line-float);
+	box-shadow: var(--shadow-float);
 }
 
 .help-reference {
@@ -93,9 +120,9 @@
 	align-items: center;
 	gap: 8px;
 	padding: 0 10px;
-	border: 1px solid var(--line);
-	border-radius: 4px;
-	background: var(--surface);
+	border: 1px solid var(--line-strong);
+	border-radius: 8px;
+	background: var(--wb-faint);
 }
 .filter__field:focus-within {
 	border-color: var(--accent);
@@ -110,8 +137,10 @@
 	background: transparent;
 	color: inherit;
 }
+/* The global focus rule also paints a halo; inside the wrapper it shows as a notch at the field's edge. */
 .filter__field input:focus-visible {
 	outline: none;
+	box-shadow: none;
 }
 .filter__field button {
 	border: 0;
@@ -200,12 +229,18 @@
 	align-items: center;
 	justify-content: space-between;
 	gap: 12px;
-	padding: 8px 10px;
-	border-radius: 4px;
+	min-height: 34px;
+	padding: 6px 12px;
+	border-radius: var(--radius-sm);
+	font-size: var(--text-meta);
 	cursor: default;
 }
+.palette__option:hover:not([data-active="true"]) {
+	background: var(--wb-faint);
+}
+/* The same active row as the composer's slash palette: the accent wash and a rule at the edge. */
 .palette__option[data-active="true"] {
-	background: color-mix(in srgb, var(--accent) 12%, transparent);
+	background: var(--accent-soft);
 	box-shadow: inset 2px 0 0 var(--accent);
 }
 .palette__option kbd {
@@ -258,9 +293,9 @@
 	font-size: 13px;
 	line-height: 1.2;
 	transition:
-		border-color 120ms ease,
-		color 120ms ease,
-		background 120ms ease;
+		border-color var(--motion-fast) var(--ease-standard),
+		color var(--motion-fast) var(--ease-standard),
+		background var(--motion-fast) var(--ease-standard);
 }
 /* The pressed state is carried by the filled dot and the border, not by colour alone. */
 .filter__chip::before {
@@ -341,11 +376,12 @@
 	min-height: 44px;
 }
 .notice {
-	padding: 16px 18px;
-	background: var(--surface);
+	padding: 14px 16px;
+	background: var(--raised);
 	color: var(--ink);
-	border: 1px solid var(--line);
-	border-left: 4px solid var(--status-neutral-line);
+	border: 1px solid var(--line-float);
+	border-left: 3px solid var(--status-neutral-line);
+	border-radius: var(--radius-md);
 	box-shadow: var(--shadow-panel);
 }
 .notice--error {
@@ -414,7 +450,7 @@
 /* Opacity only: a slide-in transform fights a list that is already moving under it. */
 @media (prefers-reduced-motion: no-preference) {
 	.notice {
-		animation: notice-in 120ms ease-out;
+		animation: notice-in var(--motion-fast) var(--ease-standard);
 	}
 }
 @keyframes notice-in {

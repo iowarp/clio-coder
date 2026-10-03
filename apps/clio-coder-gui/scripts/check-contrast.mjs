@@ -35,6 +35,10 @@ const CHECKS = [
 	["--ink", "--well", TEXT],
 	["--ink-muted", "--well", TEXT],
 	["--accent", "--well", TEXT],
+	["--ink", "--raised", TEXT],
+	["--ink-muted", "--raised", TEXT],
+	["--accent", "--raised", TEXT],
+	["--line-strong", "--raised", NON_TEXT],
 	// --ink-subtle is a LARGE_TEXT token on purpose: it clears 3:1 but not 4.5:1
 	// in light, so it belongs on >=16px text or decoration. Axe caught it at 12px
 	// on .tool-number once already; reach for --ink-muted in a dense row.
@@ -59,6 +63,7 @@ const CHECKS = [
 	...TONES.flatMap((t) => [
 		[`--status-${t}-fg`, "--paper", TEXT],
 		[`--status-${t}-fg`, "--surface-sunken", TEXT],
+		[`--status-${t}-fg`, "--raised", TEXT],
 		[`--status-${t}-fg`, `--status-${t}-tint`, TEXT],
 		[`--status-${t}-line`, "--paper", NON_TEXT],
 	]),

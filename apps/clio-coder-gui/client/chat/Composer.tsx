@@ -765,7 +765,7 @@ export const Composer = memo(function Composer({
 							}}
 						>
 							<summary aria-label="Message options" title="Keyboard and message delivery options">
-								<Icon name="keyboard" />
+								<Icon name="sliders" />
 								{running && modes.length > 1 ? (
 									<span className="composer__delivery-label">
 										{modes.find((offer) => offer.mode === draft.mode)?.label ?? modes[0]?.label}

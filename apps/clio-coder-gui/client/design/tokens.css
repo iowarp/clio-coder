@@ -19,6 +19,12 @@
 	/* A sunken fill for wells, chips and inputs. The brand's paper-sunk is its line colour in light,
 	   which reads as mud when used as a fill; dark keeps the brand's graphite. */
 	--well: #efe9de;
+	/* The ground of anything that sits above the page: the composer, menus, popovers and dialogs. Light
+	   lifts with a paler sheet and a shadow; dark has no shadow to cast on black, so it lifts by tone. */
+	--raised: #fffdfa;
+	/* The edge of a raised surface. A control keeps --line-strong for its 3:1 boundary; a floating panel
+	   is bounded by its shadow and ground as well, so its line sits between the two rules. */
+	--line-float: color-mix(in srgb, var(--line-strong) 40%, var(--line));
 
 	/* ---- status ramp: neutral / running / success / warn / fail /
 	   unverified. Each tone is fg (text), tint (surface), line (boundary). */
@@ -93,13 +99,23 @@
 
 	/* ---- elevation. Shell hierarchy only; a card never floats. --------- */
 	--shadow-none: none;
+	/* Two layers each: a tight contact shadow that seats the edge and a wide soft one that lifts it. */
 	--shadow-raised: 0 1px 2px rgb(26 22 18 / 6%);
-	--shadow-panel: 0 12px 32px rgb(26 22 18 / 10%);
-	--shadow-float: 0 24px 64px rgb(26 22 18 / 18%);
+	--shadow-panel: 0 1px 3px rgb(26 22 18 / 7%), 0 14px 32px -8px rgb(26 22 18 / 16%);
+	--shadow-float: 0 2px 8px rgb(26 22 18 / 8%), 0 28px 64px -12px rgb(26 22 18 / 24%);
 
 	/* ---- motion --------------------------------------------------------- */
 	--motion-instant: var(--motion-fast);
 	--motion-slow: var(--motion-base);
+	/* A turn that starts and stops at rest. The brand curve leaves at full speed, which reads as a
+	   lurch when the same ring repeats it every beat. */
+	--ease-turn: cubic-bezier(0.65, 0, 0.35, 1);
+
+	/* ---- icons: one stroke weight at every drawn size, and the sizes they are drawn at ---------- */
+	--icon-stroke: 1.4px;
+	--icon-sm: 14px;
+	--icon-md: 16px;
+	--icon-lg: 18px;
 
 	/* ---- shell metrics --------------------------------------------------- */
 	--masthead-height: 58px;
@@ -146,6 +162,7 @@
 	--scrim: rgb(0 0 0 / 72%);
 	--glint: var(--ink);
 	--well: #151412;
+	--raised: #171614;
 
 	--status-neutral-fg: #a89e8f;
 	--status-neutral-tint: #151412;
@@ -194,6 +211,7 @@
 		--scrim: rgb(0 0 0 / 72%);
 		--glint: var(--ink);
 		--well: #151412;
+		--raised: #171614;
 
 		--status-neutral-fg: #a89e8f;
 		--status-neutral-tint: #151412;

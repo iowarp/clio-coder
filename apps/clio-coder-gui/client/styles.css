@@ -103,6 +103,9 @@ button {
 button:hover:not(:disabled) {
 	background: var(--wb-hover);
 }
+button:active:not(:disabled) {
+	background: var(--wb-active);
+}
 button:disabled {
 	opacity: 0.5;
 	cursor: not-allowed;
@@ -192,10 +195,12 @@ h1 em {
 	font-size: var(--text-exact);
 	overflow-wrap: anywhere;
 }
+/* One line weight at every size: icons.tsx keeps the stroke from scaling with the glyph. */
 .icon {
-	width: 18px;
-	height: 18px;
+	width: var(--icon-lg);
+	height: var(--icon-lg);
 	flex-shrink: 0;
+	stroke-width: var(--icon-stroke);
 }
 .icon-button {
 	display: inline-flex;
@@ -297,10 +302,16 @@ nav a:hover {
 	gap: 12px;
 	justify-content: space-between;
 }
+/* The fill and the accent are the same colour, so a hover has to move toward the ink to show at all.
+   That deepens the teal in light and lifts it in dark; either way the label gains contrast. */
 .primary:hover:not(:disabled) {
-	background: var(--accent);
-	border-color: var(--accent);
-	color: var(--on-accent);
+	background: color-mix(in srgb, var(--primary-fill) 86%, var(--ink));
+	border-color: color-mix(in srgb, var(--primary-fill) 86%, var(--ink));
+	color: var(--on-primary);
+}
+.primary:active:not(:disabled) {
+	background: color-mix(in srgb, var(--primary-fill) 74%, var(--ink));
+	border-color: color-mix(in srgb, var(--primary-fill) 74%, var(--ink));
 }
 .secondary {
 	border: 0;
@@ -399,9 +410,9 @@ nav a:hover {
 
 /* Dialogs and notifications */
 .app-dialog {
-	border: 1px solid var(--line-strong);
+	border: 1px solid var(--line-float);
 	border-radius: var(--radius-lg);
-	background: var(--overlay);
+	background: var(--raised);
 	color: var(--ink);
 	padding: var(--space-6);
 	width: min(460px, calc(100vw - 32px));
@@ -1008,91 +1019,6 @@ nav a:hover {
 .trace-histogram strong {
 	font-family: var(--font-mono);
 }
-
-/* Workspace and conversation */
-.workspace-browser {
-	display: grid;
-	gap: var(--space-4);
-	max-width: 54rem;
-	margin: calc(-1 * var(--space-8)) 0 var(--space-10);
-	padding: var(--space-5);
-	border: 1px solid var(--line-strong);
-	border-radius: var(--radius-md);
-	background: var(--surface);
-}
-.workspace-browser__head,
-.workspace-browser__navigation,
-.workspace-browser__current {
-	display: flex;
-	align-items: center;
-	justify-content: space-between;
-	flex-wrap: wrap;
-	gap: var(--space-2);
-}
-.workspace-browser__head h2 {
-	margin: 0;
-}
-.workspace-browser__head .eyebrow {
-	margin: 0 0 var(--space-1);
-}
-.workspace-browser__navigation {
-	justify-content: flex-start;
-}
-.workspace-browser__hidden {
-	display: inline-flex;
-	align-items: center;
-	gap: var(--space-2);
-	margin-left: auto;
-	font-size: var(--text-meta);
-}
-.workspace-browser__hidden input {
-	width: auto;
-}
-.workspace-browser__current {
-	padding: var(--space-3);
-	background: var(--well);
-	border-radius: var(--radius-sm);
-}
-.workspace-browser__current code {
-	font-family: var(--font-mono);
-	font-size: var(--text-exact);
-	overflow-wrap: anywhere;
-	min-width: 0;
-}
-.workspace-browser__actions {
-	display: flex;
-	flex-wrap: wrap;
-	gap: var(--space-2);
-}
-.workspace-browser__folders {
-	display: grid;
-	grid-template-columns: repeat(auto-fit, minmax(min(100%, 15rem), 1fr));
-	gap: var(--space-2);
-	max-height: 19rem;
-	overflow: auto;
-	margin: 0;
-	padding: 0;
-	list-style: none;
-}
-.workspace-browser__folders button {
-	display: flex;
-	align-items: center;
-	gap: var(--space-2);
-	width: 100%;
-	min-width: 0;
-	text-align: left;
-	background: var(--well);
-}
-.workspace-browser__folders button span:nth-child(2) {
-	flex: 1;
-	min-width: 0;
-	overflow-wrap: anywhere;
-}
-.workspace-browser__empty {
-	margin: 0;
-	color: var(--ink-muted);
-	font-size: var(--text-meta);
-}
 .conversation__approval,
 .conversation__dock,
 .chat-transcript__content,
@@ -1390,16 +1316,4 @@ main :is(pre, .table-scroll) {
 	background: var(--primary-fill);
 	color: var(--on-primary);
 	border-color: var(--primary-fill);
-}
-
-/* Inside the Open workspace dialog the browser drops its own frame; the dialog supplies it. */
-.workspace-browser[data-embedded="true"] {
-	max-width: none;
-	margin: 0;
-	padding: 0;
-	border: 0;
-	background: transparent;
-}
-.workspace-browser__head[hidden] {
-	display: none;
 }

@@ -9,22 +9,23 @@ import { useDetailsDismiss } from "../interaction/use-details-dismiss.js";
 /** The two levels the agent reports, as the contract spells them. */
 type AutonomyLevel = "default" | "yolo";
 
-const LEVELS: Readonly<Record<AutonomyLevel, { label: string; short: string; lands: string; icon: "check" | "play" }>> =
-	{
-		default: {
-			label: "Ask first",
-			short: "Ask first",
-			lands:
-				"Reads, edits and recognised commands run. Unrecognised shell commands, plan-scale dispatch and anything that publishes outside the project wait for your approval.",
-			icon: "check",
-		},
-		yolo: {
-			label: "Run without asking",
-			short: "Auto-run",
-			lands: "Nothing waits for approval in this task. Clio runs commands and edits on its own judgement.",
-			icon: "play",
-		},
-	};
+const LEVELS: Readonly<
+	Record<AutonomyLevel, { label: string; short: string; lands: string; icon: "shield" | "bolt" }>
+> = {
+	default: {
+		label: "Ask first",
+		short: "Ask first",
+		lands:
+			"Reads, edits and recognised commands run. Unrecognised shell commands, plan-scale dispatch and anything that publishes outside the project wait for your approval.",
+		icon: "shield",
+	},
+	yolo: {
+		label: "Run without asking",
+		short: "Auto-run",
+		lands: "Nothing waits for approval in this task. Clio runs commands and edits on its own judgement.",
+		icon: "bolt",
+	},
+};
 
 /**
  * How much Clio may do without asking, for this task only. Turning approvals off takes a second,
