@@ -379,9 +379,10 @@ The off request depends on runtime and model metadata: llama.cpp reads
 with the off value selected by model family. A gateway needs a recognized,
 unanimous upstream runtime declaration to establish the request dialect.
 
-Servers may still return reasoning. The catalog marks always-on reasoning models
-as `forced`, including `qwopus3.5-9b-v3`. The parser discards reasoning blocks and
-keeps the envelope; the output budget allows room for a reasoning preamble.
+Servers may still return reasoning. The packaged gpt-oss-20b profile has no
+upstream thinking-off mode, so an off request resolves to low effort. The parser
+discards reasoning blocks and keeps the envelope; the output budget allows room
+for a reasoning preamble.
 
 No memory model is selected by default. The role uses the same target machinery
 as chat and workers, so its model can be local, remote, or shared with chat when
@@ -431,8 +432,8 @@ An example gateway topology keeps the three backend routes distinct:
 | Role | Target | Runtime and endpoint | Model | Capacity |
 | --- | --- | --- | --- | --- |
 | Chat and memory fallback | `chat-target` | LiteLLM at `http://192.168.1.20:4000` | `chat-profile/qwen3.8-27b` | Gateway-owned unless an explicit or observed endpoint bound is available |
-| Preferred background memory | `memory-dedicated` | Same LiteLLM gateway | `memory-profile/ornith-1.5-35b-a3b` | Same capacity evidence rules |
-| Alternative memory candidate | `memory-fallback` | Same LiteLLM gateway | `memory-profile/ornith1.5-35b-moe` | Same capacity evidence rules |
+| Preferred background memory | `memory-dedicated` | Same LiteLLM gateway | `memory-profile/qwen3.5-4b` | Same capacity evidence rules |
+| Alternative memory candidate | `memory-fallback` | Same LiteLLM gateway | `memory-profile/nemotron-3.5-lightning-30b-a3b` | Same capacity evidence rules |
 
 The corresponding role selection in `settings.yaml` is:
 
@@ -443,7 +444,7 @@ chat:
 context:
   memory:
     target: memory-dedicated
-    model: memory-profile/ornith-1.5-35b-a3b
+    model: memory-profile/qwen3.5-4b
 ```
 
 These are example configured target/model IDs, not built-in routes. Compare a

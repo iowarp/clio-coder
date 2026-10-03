@@ -385,7 +385,7 @@ Profile claims merge under live reports and target settings ([`capabilities.ts`]
 
 When `chat.maxOutputTokens` is `0` and the request sets no limit, the profile's `recommendations.outputTokens` becomes the output budget, clamped to the model's output cap and the remaining window ([`output-budget.ts`](../../src/engine/apis/output-budget.ts)). Sampling presets still come from the [local model catalog](../../src/domains/providers/models/local-models/clio-coder-local-coding-targets.yaml), so a profile's `recommendations.sampling` is not applied.
 
-`behavior.thinking` names the mechanism (`effort-levels`, `budget-tokens`, `on-off`, `always-on` or `none`) and, for `effort-levels`, the effort string each Clio level sends in `effortByLevel`. Beyond `off`, the thinking picker offers only the mapped levels. The ThinkingCap-Qwen3.8-27B (`thinkingcap-qwen3.8-27b`) and Qwopus3.8-27B-Flash-V2 (`qwopus3.8v2-27b-dense`) profiles map levels onto `low`, `medium` and `xhigh`, the only efforts their chat templates accept. A requested `high` or `max` is sent as `xhigh`.
+`behavior.thinking` names the mechanism (`effort-levels`, `budget-tokens`, `on-off`, `always-on` or `none`) and, for `effort-levels`, the effort string each Clio level sends in `effortByLevel`. Beyond `off`, the thinking picker offers only the mapped levels. The packaged Qwen3.8-27B (`qwen3.8-27b`) profile maps levels onto `low`, `medium` and `xhigh`, the only efforts its upstream chat template accepts. A requested `high` or `max` is sent as `xhigh`.
 
 ### User override file
 

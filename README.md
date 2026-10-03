@@ -24,17 +24,17 @@ Your models. Your machines. Work you can inspect.
   <a href="docs/README.md">Documentation</a>
 </p>
 
-Clio Coder is a coding agent for people who maintain scientific and research
-software. She connects the model you choose to repository tools, project
-context, verification, and worker delegation, so you can understand a codebase,
-investigate a failing check, implement a change, or coordinate work across local
-and SSH workers. Every run leaves tool activity, changes, checks, and run
-receipts you can review.
+Clio Coder connects your choice of model to a coding workspace: repository
+context, tools, verification, and delegated workers. Use her in the terminal,
+in the desktop app (alpha), in unattended scripts with `clio-coder run`, or
+inside an editor through ACP. Chat and workers can use different models on your
+workstation, an institutional gateway, or a cloud service.
 
-Clio is built for simulation kernels, numerical libraries, data pipelines, and
-mixed-language builds, and works for general software development too. Chat and
-workers can use different models on your workstation, an institutional gateway,
-or a cloud service.
+Built for scientific and research software, Clio also handles everyday
+engineering: understanding a mixed-language build, investigating a failing
+check, implementing a change, or coordinating a fleet. Tool activity, diffs,
+verification results, and sealed worker receipts make the work inspectable.
+You choose the tools, model connections, and authority each workflow receives.
 
 **Experimental software.** Clio Coder is open-source, pre-1.0 software in active
 development. Settings, commands and interfaces may change between minor
@@ -45,8 +45,9 @@ contributions start with the [contributor guide](CONTRIBUTING.md).
 ## Get started
 
 You need a model with tool calling. Linux and macOS are the primary platforms.
-The installer brings its own Node.js 24 LTS, needs no root, and works on HPC login
-nodes with an old glibc or no usable `module load nodejs`:
+The installer brings its own Node.js 24, needs no root, and supports older
+x64 Linux hosts with glibc 2.17 or newer, including HPC login nodes without a
+usable `module load nodejs`:
 
 ```bash
 curl -fsSL https://coder.iowarp.ai/install.sh | sh
@@ -56,8 +57,9 @@ clio-coder
 
 If coder.iowarp.ai is unreachable, use the copy attached to each GitHub release:
 `curl -fsSL https://github.com/iowarp/clio-coder/releases/latest/download/install.sh | sh`
-(`install.ps1` sits next to it). The installer verifies the Node download against
-SHASUMS256.txt and the Node.js release keys, installs under
+(`install.ps1` sits next to it). The installer checks the Node download against
+SHASUMS256.txt and attempts release-signature verification when `gpgv` or `gpg`
+is available. It installs under
 `~/.local/share/clio-coder-install` (`~/Library/Application Support/clio-coder/install`
 on macOS), and writes the launcher to `~/.local/bin/clio-coder`. On a Linux
 terminal it also offers the desktop app, which starts at login and appears in
@@ -76,9 +78,9 @@ Native Windows support is best effort. In PowerShell, run
 `curl.exe -fsSL https://coder.iowarp.ai/install.cmd -o install.cmd && install.cmd && del install.cmd`.
 Both install under `%LOCALAPPDATA%\clio-coder\install` with the launcher
 `%USERPROFILE%\.local\bin\clio-coder.cmd`, need no administrator rights, and add
-the launcher directory to your user `PATH` only with `-AddToPath`. A complete
-native Windows install of 0.6.0 has not yet been verified end to end, and the
-terminal session itself is not routinely tested there.
+the launcher directory to your user `PATH` only with `-AddToPath`. CI builds and
+boots the binary on Windows and tests selected subprocess contracts, but the native Windows installed-package flow is not CI-verified.
+Interactive terminal use there remains best effort.
 
 **First run.**
 
@@ -160,33 +162,46 @@ upgrade, launcher, background service, and uninstall options.
 
 ## Interfaces
 
-One runtime serves three surfaces, and they share your saved connections,
-settings, and sessions.
+Choose the surface that fits the task. All use Clio's model connections,
+project context, tools, and execution policy.
 
-**Terminal.** Bare `clio-coder` opens the terminal workspace: conversation, tool
-calls, permissions, fleet activity, and context accounting in one screen.
+**Terminal.** Bare `clio-coder` opens the conversation with inline tool calls,
+diffs, approval cards, and worker activity. During a turn, Enter queues your
+message for the next steering slot; `Alt+K` opens the queue to edit, reorder,
+remove, or defer messages, and `Alt+S` interrupts with your draft. `/resume`
+reopens a saved session. Partial project-instruction coverage appears as a
+brief footer notice, keeping the welcome screen quiet.
 
-**Headless and ACP.** `clio-coder run` executes one task without a terminal UI,
-for scripts and CI, and `clio-coder acp` serves editors and other hosts over the
-Agent Client Protocol:
+**Desktop app (alpha).** `clio-coder gui` opens a workspace with a task rail per
+project and a Session column for model health, context, spend, branches,
+evidence, artifacts, workers, and session notices. First-run setup connects a
+model before you start. Multiple tasks can stay open, with up to four active
+turns; idle tasks park after five minutes and resume when shown again.
+
+The app runs through a local server and browser. `clio-coder gui` reuses the
+installed desktop service when available; otherwise it starts a private server
+for the terminal. On Linux, `clio-coder gui background install` adds the desktop
+launcher and login service through a systemd user session. Focusing one existing window requires the installed
+Chrome or Edge app; the native Linux launcher opens a browser tab per launch.
+See the [GUI guide](docs/guide/commands-and-modes.md#graphical-application).
+
+**Headless runs.** `clio-coder run` executes a task for scripts and CI. Text mode
+writes the answer to stdout and diagnostics to stderr; `--json` streams JSONL.
+There is no operator to answer questions or permissions, so put decisions in
+the task prompt and expect permission asks to be denied. `--allow-tools` limits
+the main agent's capabilities, while `--delegate-tools` separately limits what
+her dispatched workers may hold.
 
 ```bash
-clio-coder run "Summarize this repository's entry points."
+clio-coder run "Summarize this repository's entry points. Do not change files."
 clio-coder run --json --timeout 300 "Run the existing parser tests and report the results."
-clio-coder acp
 ```
 
-Headless text mode writes the answer to stdout and diagnostics to stderr;
-`--json` emits JSONL, and calls that would ask for permission are denied.
-
-**Browser.** `clio-coder gui` opens the browser workspace: projects,
-conversations, session controls, fleet previews, traces, evidence, and
-configuration. It reuses this installation's desktop app when one is
-installed, and otherwise starts a private server for this terminal. If Clio is
-not configured yet, **Guided setup** in the browser connects a model and reviews
-the connection before saving. On Linux, `clio-coder gui background install`
-adds the desktop app later. The browser interface is in alpha; see the
-[GUI guide](docs/guide/commands-and-modes.md#graphical-application).
+**Editors and ACP.** `clio-coder acp` serves an editor or another host over the
+Agent Client Protocol. Attended clients can handle approvals and questions;
+Clio sends live usage, plan, and workspace updates. Clio's ACP extensions expose
+artifacts, worker receipts, shell commands, and steering-queue controls. Client
+support determines which extensions are available in your editor.
 
 <p align="center">
   <a href="https://raw.githubusercontent.com/iowarp/clio-coder/main/assets/screenshots/tui-boot.png"><img src="https://raw.githubusercontent.com/iowarp/clio-coder/main/assets/screenshots/tui-boot.webp" alt="Clio Coder terminal boot with the model, workspace, fleet, composer, and guidance footer" width="1000" /></a>
@@ -200,14 +215,13 @@ adds the desktop app later. The browser interface is in alpha; see the
 </p>
 
 <details>
-<summary><strong>Browser conversation view</strong></summary>
+<summary><strong>Conversation and evidence views</strong></summary>
 
-During a conversation, the left sidebar switches between project sessions,
-recorded runs, and configuration tools while your chat stays open. The collapsible
-Artifacts panel holds recorded file activity, results, and linked evidence.
-Open a dedicated trace or evidence viewer when you need more inspection space.
-Scroll up to read earlier messages; **Jump to latest** returns immediately to the
-newest output and resumes following the stream.
+Use the task rail to move between conversations and the Session column to
+inspect the active task. Session notices sit with the model, context, and trust
+facts they describe. Trace and evidence views provide deeper inspection of
+recorded work. The captures below show earlier browser layouts; the desktop
+app now groups these controls in the task rail and Session column.
 
 <p align="center">
   <a href="https://raw.githubusercontent.com/iowarp/clio-coder/main/assets/screenshots/gui-conversation.png"><picture>
@@ -241,7 +255,9 @@ newest output and resumes following the stream.
   observations, inspect `/context`, and branch, resume, or prepare a handoff.
 - **Workers and fleets.** Assign recipes with declared tools, scope, model, and
   result contracts. Compose parallel, sequential, review, and other workflows;
-  use worktrees and SSH nodes, and review compiled fleet plans before execution.
+  use isolated task worktrees, and review compiled fleet plans before execution.
+  Worker receipts record outcomes, validation, and the model that ran the task.
+  SSH worker nodes are experimental; see the experimental features below.
 - **Inspectable execution.** View tool activity, diffs, traces, token and cost
   accounting, checks, and sealed run records. Review and accept memory proposals
   linked to recorded evidence.
@@ -253,10 +269,12 @@ newest output and resumes following the stream.
   shows the bindings. See [System One](docs/guide/system-one.md).
 - **Scientific infrastructure and agent interoperability.** Connect MCP
   servers, including clio-kit Slurm workflows. Delegate through supported
-  coding-agent connectors or open companion panes with Herdr and Yazi.
+  coding-agent connectors, subject to their trust and tool-governance limits.
 - **Reusable procedures and extensions.** Install or author skills, agents,
-  prompts, fleets, and plugins. Add executable command tools through declared
-  harness extensions.
+  prompts, fleets, and plugins through `clio-coder library` or `/library`.
+  Library packages can be pinned and checked for drift. Add executable command
+  tools through declared harness extensions; project plugins and extensions
+  require workspace trust before they load.
 
 <details>
 <summary><strong>Everyday commands and automation</strong></summary>
@@ -267,13 +285,13 @@ newest output and resumes following the stream.
 | Attach a workspace file | Type `@` and choose a path |
 | Inspect tool details, context, memory, or usage | `/view`, `/context`, `/memory`, `/usage` |
 | Browse the resource library | `/library` or `Alt+L` |
-| Inspect workers and operator tasks | `Alt+W`, `/tasks` |
+| Inspect workers and operator tasks | `/fleet`, `/tasks` |
 | Branch or recover a conversation | `/tree`, `/fork`, `/resume` |
 | Export a transcript | `/export`, `/export notes.md` |
 
-During a terminal turn, **Enter** steers, **Ctrl+Q** queues a follow-up, and
-**Escape** interrupts. On permission cards, **Deny** skips a call and **Stop**
-ends the turn.
+During a terminal turn, **Enter** queues for the next steering slot, **Alt+K**
+opens the queue, and **Escape** interrupts. On permission cards, **Deny** skips
+a call and **Stop** ends the turn.
 
 ```bash
 # Prepare project guidance and the codemap
@@ -296,6 +314,28 @@ See [commands and modes](docs/guide/commands-and-modes.md),
 
 </details>
 
+<details>
+<summary><strong>Experimental features</strong></summary>
+
+These features are experimental, and their configuration and behavior may change:
+
+- **System One** binds fast decision engines to typed sites and applies decisions
+  only with fitted cuts. See [System One](docs/guide/system-one.md).
+- **Steering triage** (`chat.steering.triage`) is off by default. A side model can
+  classify queued messages, defer unrelated work, or interrupt for a confident
+  stop request.
+- **Speculative dispatch** (`fleet.speculativeDispatch`) is off by default.
+- **SSH worker nodes** use `clio-coder fleet nodes` to add, test, and install
+  nodes. A node needs a passing recorded `test --record` before dispatch;
+  `fleet.defaultNode` sets a standing preference.
+- **Docks and music** require Herdr and are off by default. Worker (`Alt+W`),
+  Yazi file (`Alt+E`), and music (`Alt+A`) docks hide and show without stopping
+  their process; a second tap within 400 ms closes the dock. `/music` needs
+  cliamp and `integrations.music.enabled`; the optional model-controlled
+  `music` tool also needs `integrations.music.agentControl`.
+
+</details>
+
 ## Models
 
 A saved model connection is a **target**. Chat and workers can use different
@@ -310,28 +350,54 @@ targets, models, and thinking settings. `/model` changes the current session;
 | Subscription sign-in | ChatGPT through `openai-codex`; Claude through `anthropic-max` |
 | Institutional inference | Argonne ALCF Sophia and Metis through Globus OAuth |
 
-Clio takes serving windows and capabilities from the live inference server
-first, then from its packaged model profiles and an optional
-`model-profiles.yaml` in your config directory, which can lower a reported
-capability but never raise it. `/context` shows where the window came from, and
-an unknown window stays unknown instead of guessed. Configure a model with the
-tool calling, context window, vision, and reasoning support your workflow
-requires. See [connections and targets](docs/guide/configuration-and-targets.md).
+Serving limits come from the live inference server, explicit target settings,
+or a labeled cloud-catalog estimate. Model profiles describe capabilities and
+thinking controls; a profile's maximum context is never the loaded serving
+window. Live reports decide tool calling, vision, and reasoning support; a
+target override can lower those capabilities but cannot raise them. An unreported window stays
+unknown. See [connections and targets](docs/guide/configuration-and-targets.md).
+
+The five packaged local profiles are **gpt-oss-20b, Qwen3.8-27B, Gemma 4
+26B-A4B, Nemotron 3.5 Lightning 30B-A3B, and Qwen3.5-4B**, checked against their
+upstream model cards and templates. They describe upstream behavior, not a
+benchmark or a guarantee for every runtime or quantization. Add local profiles
+in your config directory's `model-profiles.yaml`; profiles for earlier
+finetunes are no longer packaged.
 
 ## Execution policy
 
-The default policy admits workspace reads, edits, and recognized checks, and
-requests permission for unfamiliar commands and outward actions. Permission
-cards show the invocation. **Yolo** removes ordinary approval prompts; protected
-paths, hard blocks, and damage-control rules continue to apply. In the terminal,
-`Ctrl+G` then `y` switches the current session between the default policy and
-Yolo without changing saved settings.
+**Approvals and trust.** The default policy admits workspace reads, edits, and
+recognized checks, and requests permission for unfamiliar commands and outward
+actions. Approval cards name the tool, target, effect, and requester; Bash
+approvals describe the command's consequence. **Yolo** removes ordinary approval
+prompts while protected paths, hard blocks, and damage-control rules still apply.
+In the terminal, `Ctrl+G` then `y` toggles the session's autonomy.
 
-Commands execute with your operating-system permissions. Clio's runtime policy
-controls tool admission, while project tests, numerical references, performance
-budgets, and human review supply your acceptance criteria. See the
-[safety model](docs/architecture/safety-model.md) and
-[quality policies](docs/guide/quality-policy.md).
+Project plugins and extensions stay unloaded until approved with
+`clio-coder config trust plugins` or `clio-coder config trust extensions`.
+An ignored project copy does not shadow your own trusted copy. Review project
+safety grants with `clio-coder config trust safety`.
+
+**Worker boundaries.** Each dispatched worker receives an immutable permit for
+its tools, asks, and Git allowance. Native worker commands use an OS sandbox
+when `safety.sandbox: auto` finds a backend: bubblewrap on Linux or Seatbelt on
+macOS. Writes are confined to the worker's roots and private scratch space;
+`.git` and `.clio-coder` remain read-only to those commands. Network is off
+unless the worker holds `web_fetch` or `safety.sandboxNetwork` is enabled.
+Set `safety.sandbox: required` to refuse commands when no backend is available.
+Main-agent commands are not OS-sandboxed. External agents that manage their own
+tool loop require `trustedUnmediated: true` for write-capable work.
+
+**Information flow (advanced and opt-in).** Rules in `.clio-coder/safety.yaml`
+can restrict named paths or tool content to approved model recipients. Those
+restrictions follow workers, resume, and compaction, and still apply at Yolo.
+The policy format may change; a project with no rules keeps the default behavior.
+
+Commands execute with your operating-system permissions, subject to the worker
+sandbox where active. Clio's runtime policy controls tool admission; project
+tests, numerical references, performance budgets, and human review supply the
+acceptance criteria. See the [safety model](docs/architecture/safety-model.md)
+and [quality policies](docs/guide/quality-policy.md).
 
 ## Documentation
 
