@@ -472,6 +472,11 @@
 		transform: scale(0.5) rotate(-25deg);
 	}
 }
+/* A running step: the ring in the accent with a still dot, on whatever ground the sidebar has. */
+.pane-step__glyph.is-running {
+	border-color: var(--accent);
+	background: radial-gradient(circle, var(--accent) 0 3px, transparent 3.5px);
+}
 .pane-step__glyph.is-blocked {
 	border-color: var(--status-warn-line);
 }

@@ -31,6 +31,9 @@ export const ContextPanel = memo(function ContextPanel({
 		queryFn: () => client.call(routes.sessionContext, { params: { id: sessionId }, query: {}, body: {} }),
 		enabled: sessionOpen && supported,
 		retry: false,
+		// The next settled turn changes the key; the last answer stays on screen until the new one lands,
+		// so rows (and the focus a row holds) do not vanish between the two reads.
+		placeholderData: (previous) => previous,
 	});
 	const view = ledger.data ? contextView(ledger.data) : null;
 	const meter = ledger.data ? contextMeter(ledger.data) : null;

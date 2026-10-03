@@ -52,6 +52,9 @@ export const SessionBoardPanel = memo(function SessionBoardPanel({
 		queryFn: () => client.call(routes.sessionBoard, params),
 		enabled: sessionOpen && supported,
 		retry: false,
+		// The next settled turn changes the key; the last answer stays on screen until the new one lands,
+		// so rows (and the focus a row holds) do not vanish between the two reads.
+		placeholderData: (previous) => previous,
 	});
 	const change = useMutation({
 		mutationFn: (argv: string[]) =>

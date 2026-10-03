@@ -10,14 +10,7 @@ import { countRender } from "../render/render-probe.js";
 import { ClioPulse, PULSE_SIZE } from "../shell/ClioMark.js";
 import { boardView, type PlanRow } from "./board-model.js";
 import { changeCounts, summarizeChanges } from "./changes-model.js";
-import {
-	FLEET_STATE_LABELS,
-	FLEET_STATE_TONES,
-	fleetEvidence,
-	foldFleetRuns,
-	isLiveRun,
-	isWorkingRun,
-} from "./fleet-facts.js";
+import { FLEET_STATE_LABELS, FLEET_STATE_TONES, fleetEvidence, foldFleetRuns, isLiveRun } from "./fleet-facts.js";
 import { compactDuration, contextMeter, contextSegments, taskOverview } from "./overview-model.js";
 import type { PaneSession, PaneView } from "./pane-model.js";
 import {
@@ -29,20 +22,15 @@ import {
 	useSessionUsage,
 } from "./session-telemetry.js";
 
-function PlanGlyph({ tone, live }: { tone: PlanRow["tone"]; live: boolean }) {
+function PlanGlyph({ tone }: { tone: PlanRow["tone"] }) {
 	if (tone === "success")
 		return (
 			<span className="pane-step__glyph is-done" aria-hidden="true">
 				<Icon name="check" />
 			</span>
 		);
-	// A step the plan records as running spins only while the task is working; afterwards it is a record.
-	if (tone === "running")
-		return live ? (
-			<ClioPulse size={PULSE_SIZE.step} />
-		) : (
-			<span className="pane-step__glyph is-blocked" aria-hidden="true" />
-		);
+	// One moving mark per column: the Task state carries it, so a running step is a still glyph.
+	if (tone === "running") return <span className="pane-step__glyph is-running" aria-hidden="true" />;
 	if (tone === "fail" || tone === "warn") return <span className="pane-step__glyph is-blocked" aria-hidden="true" />;
 	return <span className="pane-step__glyph" aria-hidden="true" />;
 }
@@ -112,6 +100,9 @@ export function SessionOverview({
 		queryFn: () => client.call(routes.sessionBoard, params),
 		enabled: open && capabilities.data?.board !== undefined,
 		retry: false,
+		// The next settled turn changes the key; the last answer stays on screen until the new one lands,
+		// so rows (and the focus a row holds) do not vanish between the two reads.
+		placeholderData: (previous) => previous,
 	});
 	const ledger = useContextLedger(client, session.id, settled, open && !!capabilities.data?.context);
 	const usage = useSessionUsage(client, session.id, settled, open && !!capabilities.data?.usage);
@@ -228,7 +219,7 @@ export function SessionOverview({
 					<ol className="pane-steps">
 						{plan.rows.map((row) => (
 							<li key={row.id} data-tone={row.tone}>
-								<PlanGlyph tone={row.tone} live={working} />
+								<PlanGlyph tone={row.tone} />
 								<span>
 									{row.title}
 									{row.reason ? <small>{row.reason}</small> : null}
@@ -302,11 +293,7 @@ export function SessionOverview({
 								<li key={run.runId}>
 									<strong>{run.agentId}</strong>
 									<span>{run.taskPreview ?? "Task preview not reported"}</span>
-									<StatusMark
-										live={open && isWorkingRun(run)}
-										tone={FLEET_STATE_TONES[run.state]}
-										label={FLEET_STATE_LABELS[run.state]}
-									/>
+									<StatusMark tone={FLEET_STATE_TONES[run.state]} label={FLEET_STATE_LABELS[run.state]} />
 								</li>
 							))}
 						</ul>
