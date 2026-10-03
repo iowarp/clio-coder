@@ -107,6 +107,8 @@ export interface ExecutionSchedulerAdapter {
 		 * request it builds; the scheduler owns the ledger's lifetime.
 		 */
 		ledger?: { id: string; sequence: number },
+		/** Aborted when the plan stops, including while nested work is launching. */
+		signal?: AbortSignal,
 	): Promise<{ assignmentId: string; result: Promise<ExecutionStepResult> }>;
 	/**
 	 * Execute a deterministic step. It takes no reservation because it holds no
@@ -652,6 +654,7 @@ export async function executePlan(
 								handoffs,
 								{ ownerId: reservationByStep.get(step.id) ?? reservation.ownerId, memberId: step.id },
 								ledger,
+								codeAbort.signal,
 							);
 							owned.assignmentId = handle.assignmentId;
 							memberIds.add(handle.assignmentId);
