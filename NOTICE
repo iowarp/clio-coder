@@ -60,7 +60,7 @@ git.yazi (https://github.com/yazi-rs/plugins/tree/main/git.yazi)
 Bundled terminal compatibility code
 ----------------------------------
 Clio bundles the JavaScript from @earendil-works/pi-tui 1.0.0 with a local
-input-policy/search/semantic-edit patch, plus marked and get-east-asian-width.
+search/semantic-edit and wrapping patch, plus marked and get-east-asian-width.
 Their MIT notices are distributed in dist/assets/tui-notices/. The pinned
 pi-tui runtime package remains installed for its Darwin and Windows native
 helpers; Clio does not modify consumer dependencies during installation.
@@ -69,7 +69,10 @@ Copied Pi utility code
 ----------------------
 The truncation, prompt-argument and message-replay utility blocks in
 src/engine/truncate.ts, src/engine/prompt-templates.ts and src/engine/messages.ts
-are copied from Pi packages/agent/src/harness/ at tag v0.99.1.
+derive from the pi-coding-agent sources packages/coding-agent/src/core/tools/truncate.ts,
+packages/coding-agent/src/core/prompt-templates.ts and
+packages/coding-agent/src/core/messages.ts at tag v1.0.0
+(commit a13d35a742c6ef8462812a28fbe1d8c8b7431c32).
 Copyright (c) 2025 Mario Zechner. Licensed under the MIT License.
 The upstream MIT license is preserved in src/engine/notices/pi-tui-LICENSE
 and distributed in dist/assets/tui-notices/pi-tui-LICENSE.
