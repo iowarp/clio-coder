@@ -278,6 +278,8 @@ function Install-ClioCoder {
 		}
 		if ($envKey) { $envKey.Dispose() }
 		Write-Host "Run: clio-coder"
+		# Native Windows has no background service yet; `clio-coder gui` starts a private server and prints its link.
+		Write-Host "Desktop app: clio-coder gui"
 	} finally {
 		Remove-Item -LiteralPath $lock -Recurse -Force -ErrorAction SilentlyContinue
 		if ($work) { Remove-Item -LiteralPath $work -Recurse -Force -ErrorAction SilentlyContinue }

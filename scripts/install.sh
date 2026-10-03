@@ -80,6 +80,11 @@ Options:
   --auto-update         Enable background updates (unpinned native installs only).
   --rollback            Point the launcher back at the previous installed version.
   --no-post-install     Skip `clio-coder upgrade --post-install` after installing.
+  --gui                 Also set up the desktop app (Linux: starts at login and
+                        appears in the app menu; under WSL also in the Windows
+                        Start Menu). Env: CLIO_CODER_INSTALL_GUI=1
+  --no-gui              Skip the desktop app. Default: ask on a terminal, skip
+                        otherwise. Env: CLIO_CODER_INSTALL_GUI=0
   --force               Replace a clio-coder launcher this installer did not write.
   --dry-run             Print the plan; download and change nothing.
   -h, --help            Show this help.
@@ -566,6 +571,31 @@ warn_about_shadowing_clio() {
 
 print_next_steps() {
 	printf 'Run: clio-coder\n'
+	printf 'Desktop app: clio-coder gui\n'
+}
+
+# The desktop app is the GUI's background service: one `gui background install` adds the login
+# service, the app-menu entry and, under WSL, the Windows Start Menu shortcut. It needs Linux
+# with a systemd user session, so other platforms keep the `clio-coder gui` hint only.
+offer_gui() {
+	[ "$install_gui" != 0 ] || return 0
+	[ "$(uname -s 2>/dev/null)" = Linux ] || return 0
+	if "$node_bin" "$entry" gui background status </dev/null 2>/dev/null | grep -q '"status": "installed"'; then
+		return 0
+	fi
+	if [ "$install_gui" = ask ]; then
+		# curl | sh leaves stdin on the pipe; the question goes to the terminal or is not asked.
+		[ -t 1 ] && { : </dev/tty; } 2>/dev/null || return 0
+		printf '[install] Add the Clio Coder desktop app? It starts at login and appears in your app menu. [Y/n] '
+		answer=""
+		read -r answer </dev/tty || answer=n
+		case "$answer" in "" | [Yy]*) ;; *) return 0 ;; esac
+	fi
+	if "$node_bin" "$entry" gui background install </dev/null; then
+		ok "desktop app installed; search for Clio Coder in your app menu, or run: clio-coder gui"
+	else
+		warn "the desktop app was not set up (it needs a systemd user session). Retry later with: clio-coder gui background install"
+	fi
 }
 
 default_install_root() {
@@ -636,6 +666,7 @@ main() {
 	lock_owned=0
 	rollback=0
 	post_install=1
+	install_gui="${CLIO_CODER_INSTALL_GUI:-ask}"
 	refresh_runtime=0
 	force=0
 	dry_run=0
@@ -671,6 +702,8 @@ main() {
 			--auto-update) auto_update=1 ;;
 			--rollback) rollback=1 ;;
 			--no-post-install) post_install=0 ;;
+			--gui) install_gui=1 ;;
+			--no-gui) install_gui=0 ;;
 			--refresh-runtime) refresh_runtime=1 ;;
 			--force | -f) force=1 ;;
 			--dry-run) dry_run=1 ;;
@@ -850,6 +883,7 @@ main() {
 	if [ "$post_install" = 1 ] && version_ge "${installed_version%%-*}" "0.6.0"; then
 		"$node_bin" "$entry" upgrade --post-install </dev/null || fail "package is installed, but local migrations/initialization need attention; run: $launcher upgrade --post-install. Previous binary remains available via --rollback."
 	fi
+	if version_ge "${installed_version%%-*}" "0.6.0"; then offer_gui; fi
 	report_path
 	warn_about_shadowing_clio
 	print_next_steps
