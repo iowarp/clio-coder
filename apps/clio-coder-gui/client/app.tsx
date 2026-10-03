@@ -13,6 +13,7 @@ import { RouteFocus, SIDEBAR_ID, useSidebarCollapsed } from "./design/navigation
 import { dismissAll, LiveRegions, NoticeToasts, reportProblem, useNotices } from "./design/notifications.js";
 import { PwaBoot } from "./design/pwa.js";
 import { Reconnect } from "./design/reconnect.js";
+import { LEFT_SIDEBAR, Splitter } from "./design/Splitter.js";
 import { appCommands, type PaletteTask } from "./interaction/commands.js";
 import { useLayersActive, useShortcut } from "./interaction/use-shortcut.js";
 import { useSetupStatus } from "./pages/target-onboarding.js";
@@ -331,6 +332,9 @@ export function App({ client }: { client: Client }) {
 							onNavigate={closeDrawer}
 						/>
 					)
+				) : null}
+				{authed && !phone && !collapsed ? (
+					<Splitter spec={LEFT_SIDEBAR} edge="end" label="Resize sidebar" host=".wb" onCollapse={toggleSidebar} />
 				) : null}
 			</aside>
 			<button type="button" className="wb-scrim" aria-label="Close sidebar" tabIndex={-1} onClick={closeDrawer} />

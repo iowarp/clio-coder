@@ -28,6 +28,7 @@
 
 /* ---- rail ---------------------------------------------------------------- */
 .wb-sidebar {
+	position: relative;
 	min-width: 0;
 	overflow: hidden;
 	font-size: var(--text-meta);

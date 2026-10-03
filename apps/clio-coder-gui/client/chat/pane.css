@@ -14,25 +14,6 @@
 .pane[data-modal="true"] {
 	display: contents;
 }
-.pane__grip {
-	position: absolute;
-	inset: 0 auto 0 -3px;
-	z-index: 3;
-	width: 7px;
-	cursor: col-resize;
-	touch-action: none;
-}
-.pane__grip::after {
-	content: "";
-	position: absolute;
-	inset: 0 3px;
-	background: transparent;
-	transition: background var(--motion-fast) var(--ease-standard);
-}
-.pane__grip:hover::after,
-.pane__grip:focus-visible::after {
-	background: var(--accent);
-}
 .pane__dialog {
 	width: min(440px, 100vw);
 	height: 100dvh;

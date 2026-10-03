@@ -1,0 +1,50 @@
+/* The grip between a panel and the work: invisible until hovered, focused or dragged. */
+
+.splitter {
+	position: absolute;
+	inset-block: 0;
+	z-index: 4;
+	width: 9px;
+	cursor: col-resize;
+	touch-action: none;
+}
+/* Inside the panel's own edge: the rail clips its overflow so it can collapse. */
+.splitter[data-edge="end"] {
+	right: 0;
+}
+.splitter[data-edge="start"] {
+	left: -5px;
+}
+.splitter::after {
+	content: "";
+	position: absolute;
+	inset-block: 0;
+	left: 4px;
+	width: 1px;
+	background: transparent;
+	transition:
+		background var(--motion-fast) var(--ease-standard),
+		box-shadow var(--motion-fast) var(--ease-standard);
+}
+.splitter:hover::after,
+.splitter:focus-visible::after,
+:root[data-resizing] .splitter:active::after {
+	background: var(--accent);
+	box-shadow: 0 0 0 1px var(--accent-soft);
+}
+.splitter:focus-visible {
+	outline: none;
+}
+/* Past the collapse point the line warns that letting go hides the panel. */
+.splitter[data-collapse="true"]::after {
+	background: var(--ink-subtle);
+}
+
+/* While a drag is live the shell's column does not animate and nothing selects, so the layout tracks the pointer. */
+:root[data-resizing] {
+	cursor: col-resize;
+	user-select: none;
+}
+:root[data-resizing] .wb {
+	transition: none;
+}

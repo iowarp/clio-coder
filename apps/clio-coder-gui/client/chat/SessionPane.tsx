@@ -1,8 +1,9 @@
 import { useQuery } from "@tanstack/react-query";
-import { memo, useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
+import { memo, useEffect, useId, useMemo, useRef, useState } from "react";
 import { routes } from "../../contracts/routes.js";
 import type { Client } from "../api/client.js";
 import { Icon } from "../design/icons.js";
+import { Splitter, TASK_PANE } from "../design/Splitter.js";
 import { KEYBINDINGS, matchesKeybinding } from "../interaction/keybindings.js";
 import { useShortcutLayer } from "../interaction/use-shortcut.js";
 import { countRender } from "../render/render-probe.js";
@@ -15,19 +16,6 @@ import { SessionPanel } from "./SessionPanel.js";
 import { selectSessionPanel } from "./session-panel-model.js";
 import { WorkerGraph } from "./WorkerGraph.js";
 import "./pane.css";
-
-const WIDTH_KEY = "clio-coder-gui-pane-width";
-const MIN_WIDTH = 340;
-const MAX_WIDTH = 800;
-
-function storedWidth(): number | null {
-	try {
-		const value = Number(localStorage.getItem(WIDTH_KEY));
-		return Number.isFinite(value) && value >= MIN_WIDTH ? Math.min(value, MAX_WIDTH) : null;
-	} catch {
-		return null;
-	}
-}
 
 /**
  * The pane beside the conversation. At 1100px and wider it docks and can be resized; narrower, the
@@ -59,7 +47,6 @@ export const SessionPane = memo(function SessionPane({
 	const aside = useRef<HTMLElement>(null);
 	const dialog = useRef<HTMLDialogElement>(null);
 	const [wide, setWide] = useState(() => typeof window === "undefined" || matchMedia("(min-width: 1100px)").matches);
-	const [width, setWidth] = useState<number>(() => storedWidth() ?? 420);
 	const [visited, setVisited] = useState<ReadonlySet<PaneView>>(() => new Set([view]));
 	useEffect(() => {
 		if (open) setVisited((previous) => (previous.has(view) ? previous : new Set([...previous, view])));
@@ -110,25 +97,6 @@ export const SessionPane = memo(function SessionPane({
 		node.addEventListener("keydown", dismissKey);
 		return () => node.removeEventListener("keydown", dismissKey);
 	}, [open, wide, onClose]);
-
-	// Width: a CSS variable on the conversation, so the grid column follows the drag with no re-render.
-	useEffect(() => {
-		const width = storedWidth();
-		const host = aside.current?.closest<HTMLElement>(".conversation");
-		if (width !== null && host) host.style.setProperty("--pane-w", `${width}px`);
-	}, []);
-	const resize = useCallback((next: number) => {
-		const host = aside.current?.closest<HTMLElement>(".conversation");
-		if (!host) return;
-		const bound = Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, next), host.clientWidth * 0.62);
-		host.style.setProperty("--pane-w", `${Math.round(bound)}px`);
-		setWidth(Math.round(bound));
-		try {
-			localStorage.setItem(WIDTH_KEY, String(Math.round(bound)));
-		} catch {
-			// The width holds for this tab.
-		}
-	}, []);
 
 	if (!pane) return null;
 	const primary = PANE_VIEWS.filter((entry) => entry.primary);
@@ -230,42 +198,7 @@ export const SessionPane = memo(function SessionPane({
 			hidden={!open}
 			ref={aside}
 		>
-			{wide ? (
-				// biome-ignore lint/a11y/useSemanticElements: a separator that can be focused and moved is the window-splitter pattern.
-				<div
-					className="pane__grip"
-					role="separator"
-					aria-orientation="vertical"
-					aria-label="Resize pane"
-					aria-valuemin={MIN_WIDTH}
-					aria-valuemax={MAX_WIDTH}
-					aria-valuenow={width}
-					tabIndex={0}
-					onPointerDown={(event) => {
-						event.preventDefault();
-						const grip = event.currentTarget;
-						grip.setPointerCapture(event.pointerId);
-						const move = (moved: PointerEvent) => {
-							const host = aside.current?.closest<HTMLElement>(".conversation");
-							if (host) resize(host.getBoundingClientRect().right - moved.clientX);
-						};
-						const stop = () => {
-							grip.removeEventListener("pointermove", move);
-							grip.removeEventListener("pointerup", stop);
-							grip.removeEventListener("pointercancel", stop);
-						};
-						grip.addEventListener("pointermove", move);
-						grip.addEventListener("pointerup", stop);
-						grip.addEventListener("pointercancel", stop);
-					}}
-					onKeyDown={(event) => {
-						if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
-						event.preventDefault();
-						const width = aside.current?.getBoundingClientRect().width ?? MIN_WIDTH;
-						resize(width + (event.key === "ArrowLeft" ? 24 : -24));
-					}}
-				/>
-			) : null}
+			{wide ? <Splitter spec={TASK_PANE} edge="start" label="Resize pane" host=".conversation" /> : null}
 			{wide ? (
 				<div className="pane__dialog">{content}</div>
 			) : (

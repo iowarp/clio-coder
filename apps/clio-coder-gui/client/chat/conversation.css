@@ -4,7 +4,8 @@
 
 .conversation {
 	--chat-gutter: var(--space-8);
-	--pane-w: clamp(360px, 30vw, 480px);
+	/* The default until the operator drags the grip; client/design/Splitter.tsx bounds the drag. */
+	--pane-w: clamp(340px, 28vw, 420px);
 	flex: 1;
 	min-width: 0;
 	min-height: 0;
