@@ -31,6 +31,7 @@ import type { ClioSettings } from "../core/config.js";
 import type { SafeEventBus } from "../core/event-bus.js";
 import type { PrecomputedRanking } from "../core/precomputed-rank.js";
 import { residencyTargetKey } from "../core/residency-target-key.js";
+import type { RouteName, RouteSource } from "../core/route-provenance.js";
 import type { PendingSkillToolPolicy } from "../core/skill-activation.js";
 import { isBuiltinToolName, ToolNames } from "../core/tool-names.js";
 import type { BudgetInspection } from "../domains/context/budget/inspection.js";
@@ -172,6 +173,8 @@ export interface TurnContextDeps {
 		| ((request: MemoryPromptRequest) => Promise<PrecomputedRanking | undefined> | PrecomputedRanking | undefined)
 		| undefined;
 	getReadySkillCount?: (() => number) | undefined;
+	/** Live source of each active route for the attended prompt; absent for headless runs. */
+	getRouteSources?: (() => Readonly<Record<RouteName, RouteSource>>) | undefined;
 	/**
 	 * Optional continuity projections carried into the live budget view. They
 	 * are injected interfaces: this module never reads, writes, or validates the
@@ -1998,6 +2001,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 				demo: deps.interactiveGuidance === true && settings.interface.demo,
 				provider: agentRuntime.targetId,
 				model: agentRuntime.wireModelId,
+				...(deps.getRouteSources ? { routeSources: deps.getRouteSources() } : {}),
 				contextWindow,
 				providerSupportsTools: runtimeSupportsTools(agentRuntime),
 				toolNames,

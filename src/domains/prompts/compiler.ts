@@ -1,6 +1,8 @@
 import { join } from "node:path";
 import { resolvePackageRoot } from "../../core/package-root.js";
 import { normalizePromptHint } from "../../core/prompt-hint.js";
+import type { RouteName, RouteSource } from "../../core/route-provenance.js";
+import { formatRouteSources } from "../../core/route-provenance.js";
 import type { ToolName } from "../../core/tool-names.js";
 import type { TurnConstraints } from "../../core/turn-constraints.js";
 import { turnAllowsTool } from "../../core/turn-constraints.js";
@@ -54,6 +56,8 @@ export interface SessionPromptInputs {
 	demo?: boolean;
 	provider?: string | null;
 	model?: string | null;
+	/** Live source of each active route, recomputed per compile so compaction cannot lose it (DF-7). */
+	routeSources?: Readonly<Record<RouteName, RouteSource>>;
 	contextWindow?: number | null;
 	providerSupportsTools?: boolean | null;
 	/** Model-stable thinking guidance from local-model quirks (changes only on model change). */
@@ -267,6 +271,7 @@ function renderRuntimeBlock(inputs: SessionPromptInputs): string {
 	const model = inputs.model ?? "";
 	if (provider.length > 0) lines.push(`Provider: ${provider}`);
 	if (model.length > 0) lines.push(`Model: ${model}`);
+	if (inputs.routeSources) lines.push(formatRouteSources(inputs.routeSources));
 	if (typeof inputs.contextWindow === "number" && inputs.contextWindow > 0) {
 		lines.push(`Context window: ${inputs.contextWindow}`);
 	}

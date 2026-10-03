@@ -19,6 +19,7 @@ import { configureGuardrails, guardrailValuesFromSettings } from "../core/guardr
 import { HEADLESS_PERMISSION_DENIED_REASON } from "../core/headless-permission.js";
 import { rememberRecentModel } from "../core/recent-models.js";
 import { protectedResidencyModels } from "../core/residency-protection.js";
+import { type RouteProvenance, resolveRouteProvenance } from "../core/route-provenance.js";
 import {
 	applyOverrides,
 	applyRoutingPatch,
@@ -38,7 +39,7 @@ import {
 	seedSessionRouting,
 	setAtPath,
 } from "../core/session-routing.js";
-import { updateProjectLocalSettings } from "../core/settings-layers.js";
+import { settingsSourceFor, updateProjectLocalSettings } from "../core/settings-layers.js";
 import { getSharedBus } from "../core/shared-bus.js";
 import { isSkillActivation } from "../core/skill-activation.js";
 import { StartupTimer } from "../core/startup-timer.js";
@@ -2359,6 +2360,14 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		return view;
 	};
 	effectiveSettingsForDispatch = getCurrentSettings;
+	// Recomputed on every read from live state, so a compaction summary that
+	// dropped a session-only route cannot change what Clio says about it (DF-7).
+	const routeProvenance = (): RouteProvenance => {
+		const sources = config?.sources?.() ?? {};
+		return resolveRouteProvenance(getCurrentSettings(), config?.get() ?? readSettings(), (path) =>
+			settingsSourceFor(sources, path),
+		);
+	};
 	bumpSessionState();
 	// The config bundle publishes saved values on reload; session-scoped
 	// overrides must win, so re-derive every process-local projection from the
@@ -2599,6 +2608,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		getContextBudget: () => chat.inspectLiveBudget(),
 		requestSelfCompact: (note, toolCallId, signal) => chat.requestSelfCompact(note, toolCallId, signal),
 		getSettings: () => getCurrentSettings(),
+		getRouteProvenance: routeProvenance,
 		termination,
 		captureWorkerContext: () => chat.captureWorkerContext?.() ?? null,
 		...(session
@@ -3200,6 +3210,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		getTaskEstablished: taskEstablished,
 		visionSidecar,
 		getReadySkillCount,
+		...(options.headless === undefined ? { getRouteSources: () => routeProvenance().active } : {}),
 		interactiveGuidance: !options.headless && !options.acp,
 		...(acpInterviews ? { operatorInterviews: true } : {}),
 		headless: options.headless !== undefined,

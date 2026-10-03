@@ -7,6 +7,7 @@ export { createTurnControlRunner } from "./turn-control-runner.js";
 
 import { isPlanOnlyRequest, stripPlanCloseOptions } from "../core/plan-request.js";
 import type { PrecomputedRanking } from "../core/precomputed-rank.js";
+import type { RouteName, RouteSource } from "../core/route-provenance.js";
 import { ToolNames } from "../core/tool-names.js";
 import type { LiveBudgetView } from "../domains/context/budget/live-view.js";
 import type { WorkerContextSnapshot } from "../domains/context/worker/contract.js";
@@ -949,6 +950,8 @@ export interface CreateChatLoopDeps {
 		facts: Readonly<Record<string, unknown>>;
 	}) => void;
 	getReadySkillCount?: () => number;
+	/** Live source of each active route for the attended prompt (DF-7). */
+	getRouteSources?: () => Readonly<Record<RouteName, RouteSource>>;
 	/** Structured, redacted task-bank export supplied only to an explicit context-handoff skill request. */
 	getTaskMemoryHandoffSource?: () => string;
 	/**
@@ -1348,6 +1351,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		...(deps.getMemoryRelevance ? { getMemoryRelevance: deps.getMemoryRelevance } : {}),
 		memoryCommitBridge: deps.memoryCommitBridge,
 		getReadySkillCount: deps.getReadySkillCount,
+		...(deps.getRouteSources ? { getRouteSources: deps.getRouteSources } : {}),
 		getPendingHandoff: () => {
 			const sessionId = deps.session?.current()?.id;
 			if (!sessionId) return null;

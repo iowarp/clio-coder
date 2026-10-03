@@ -1,4 +1,5 @@
 import type { ClioSettings, SettingsMutator } from "../../core/config.js";
+import type { SettingsOrigin } from "../../core/settings-layers.js";
 import type { ChangeKind, ConfigDiff } from "./classify.js";
 
 /**
@@ -7,6 +8,8 @@ import type { ChangeKind, ConfigDiff } from "./classify.js";
  */
 export interface ConfigContract {
 	get(): Readonly<ClioSettings>;
+	/** Layer that set each saved leaf of `get()`; a missing path is a built-in default. */
+	sources?(): Readonly<Record<string, SettingsOrigin>>;
 	/**
 	 * Cross-process-safe read-modify-write: the mutator runs against the
 	 * freshest on-disk settings while holding the advisory settings lock, so

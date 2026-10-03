@@ -3,6 +3,7 @@ import path from "node:path";
 import type { ContextRecalledPayload } from "../../core/bus-events.js";
 import type { ClioSettings } from "../../core/config.js";
 import type { PrecomputedRanking } from "../../core/precomputed-rank.js";
+import type { RouteProvenance } from "../../core/route-provenance.js";
 import { settingsAwareness } from "../../core/settings-awareness.js";
 import { SKILL_SUGGESTION_ANCHOR, type SkillLoadRefusal, type SkillRefusalKind } from "../../core/skill-activation.js";
 import { ToolNames } from "../../core/tool-names.js";
@@ -86,6 +87,8 @@ export interface ContextToolDeps {
 	getContextBudget?: BudgetProvider;
 	/** Live session view, including overrides. Omit when no authoritative settings snapshot exists. */
 	getSettings?: () => Readonly<ClioSettings>;
+	/** Source of each active and saved route, recomputed per read (DF-7). */
+	getRouteProvenance?: () => RouteProvenance;
 	/** Run-scoped evidence port; never reads or appends the parent session. */
 	workerRecall?: WorkerRecall;
 	getCwd?: () => string;
@@ -971,6 +974,7 @@ export function createContextTool(deps: ContextToolDeps = {}): ToolSpec {
 					typeof args.query === "string" ? args.query : "",
 					offset,
 					limit,
+					deps.getRouteProvenance?.(),
 				);
 				return finalizeObservation({
 					tool: ToolNames.Context,
