@@ -55,7 +55,7 @@ export function resolveEffectivePricing(
 	runtime: PricingRuntime,
 	wireModelId: string,
 ): EffectivePricing {
-	if (target.pricing) {
+	if (target.pricing && target.pricing !== "free") {
 		const rates = {
 			input: target.pricing.input,
 			output: target.pricing.output,
@@ -67,6 +67,7 @@ export function resolveEffectivePricing(
 			provenance: Object.values(rates).every((rate) => rate === 0) ? "known_free" : "known",
 		};
 	}
+	if (target.pricing === "free") return { rates: { ...FREE_RATES }, provenance: "known_free" };
 	// A runtime that is local by kind (LM Studio, llama.cpp, Ollama, vLLM, SGLang,
 	// Lemonade) bills nothing: 109 of 142 campaign receipts read "unknown" only
 	// because those targets declare no price. Proxies such as LiteLLM are protocol
@@ -167,7 +168,7 @@ export function synthesizeCatalogBackedModel(input: CatalogBackedSynthesisInput)
 		delete catalogFields.compat;
 		delete catalogFields.thinkingLevelMap;
 	}
-	const pricing = input.target.pricing;
+	const pricing = input.target.pricing === "free" ? FREE_RATES : input.target.pricing;
 	const targetHeaders = input.target.auth?.headers;
 	const model: Model<Api> & { clioCoder?: { cache: NonNullable<TargetDescriptor["cache"]> } } = {
 		...catalogFields,
@@ -194,7 +195,7 @@ export function synthesizeCatalogBackedModel(input: CatalogBackedSynthesisInput)
 					cacheRead: pricing.cacheRead ?? 0,
 					cacheWrite: pricing.cacheWrite ?? 0,
 				}
-			: structuredClone(builtin?.cost ?? { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }),
+			: structuredClone(builtin?.cost ?? FREE_RATES),
 		contextWindow: caps.contextWindow,
 		maxTokens: caps.maxTokens,
 		...(input.target.cache === undefined ? {} : { clioCoder: { cache: structuredClone(input.target.cache) } }),

@@ -215,7 +215,7 @@ export function createTurnPrewarm(deps: TurnPrewarmDeps): TurnPrewarm {
 		if (target.cache?.deployment?.backend === "lmstudio" && target.cache.warm?.startup !== true)
 			return { ran: false, reason: "disabled", detail: "local-warming-not-enabled" };
 		if (target.cache?.retention === "none") return { ran: false, reason: "disabled" };
-		if (target.pricing && Object.values(target.pricing).some((rate) => rate > 0))
+		if (target.pricing && target.pricing !== "free" && Object.values(target.pricing).some((rate) => rate > 0))
 			return { ran: false, reason: "deployment", detail: "paid-warming-disabled" };
 		const cooldown = Math.max(1000, target.cache?.warm?.cooldownMs ?? 60000);
 		if (Date.now() - lastFinished < cooldown) return { ran: false, reason: "cooldown" };

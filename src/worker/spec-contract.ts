@@ -521,6 +521,7 @@ function validateTargetAuth(value: unknown): void {
 }
 
 function validateTargetPricing(value: unknown): void {
+	if (value === "free") return;
 	const pricing = readRecord(value, "WorkerSpec.target.pricing");
 	const input = pricing.input;
 	const output = pricing.output;
