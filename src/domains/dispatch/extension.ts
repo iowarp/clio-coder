@@ -119,6 +119,7 @@ import {
 	isUserVisibleAgent,
 	normalizeAgentSpec,
 	resolveAgentToolCompatibility,
+	userOriginAudienceRefusal,
 } from "../agents/spec.js";
 import type { ConfigContract } from "../config/contract.js";
 import { renderProjectContextFragment } from "../context/clio-md.js";
@@ -4852,9 +4853,7 @@ export function createDispatchBundle(
 		dispatchResultContract(req, recipe);
 		const spec = normalizeAgentSpec(recipe);
 		if (req.requestOrigin === "user" && !isUserVisibleAgent(spec)) {
-			throw new Error(
-				`dispatch: agent '${req.agentId}' is a ${spec.audience} agent reserved for Clio internal orchestration`,
-			);
+			throw new Error(userOriginAudienceRefusal(spec));
 		}
 		if (req.requestOrigin === "harness" && spec.capabilityClass !== "read-only") {
 			throw new Error(
@@ -8377,9 +8376,7 @@ export function createDispatchBundle(
 		if (!recipe) throw new Error(`dispatch: unknown agent recipe: ${req.agentId}`);
 		const agentSpec = normalizeAgentSpec(recipe);
 		if (req.requestOrigin === "user" && !isUserVisibleAgent(agentSpec)) {
-			throw new Error(
-				`dispatch: agent '${req.agentId}' is a ${agentSpec.audience} agent reserved for Clio internal orchestration`,
-			);
+			throw new Error(userOriginAudienceRefusal(agentSpec));
 		}
 		if (hasCallerPersonaOverride(req) && (agentSpec.audience === "shadow" || agentSpec.audience === "internal")) {
 			throw new Error(`dispatch: persona overrides are not allowed for ${agentSpec.audience} agent '${req.agentId}'`);

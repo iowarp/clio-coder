@@ -306,6 +306,20 @@ export function isUserVisibleAgent(spec: AgentSpec): boolean {
 	return spec.audience === "base" || spec.audience === "custom";
 }
 
+/**
+ * Every shipped shadow recipe is read-only and no user-facing recipe is, so an
+ * operator reaches that work through `coder` narrowed by `--read-only`. Clio
+ * once recommended `run --agent scout`, which the audience gate refuses (DF-3).
+ */
+export const SHADOW_AGENT_OPERATOR_STAND_IN = "coder";
+
+/** The refusal a user-origin request for a non-visible agent gets; shadow ones name their stand-in. */
+export function userOriginAudienceRefusal(spec: AgentSpec): string {
+	const refusal = `dispatch: agent '${spec.id}' is a ${spec.audience} agent reserved for Clio internal orchestration`;
+	if (spec.audience !== "shadow") return refusal;
+	return `${refusal}; for the same read-only work use the user-facing agent '${SHADOW_AGENT_OPERATOR_STAND_IN}' with --read-only`;
+}
+
 export function isShadowAgent(spec: AgentSpec): boolean {
 	return spec.audience === "shadow" || spec.audience === "internal";
 }

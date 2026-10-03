@@ -12,6 +12,7 @@ import { getTerminationCoordinator } from "../core/termination.js";
 import { clioDataDir } from "../core/xdg.js";
 import type { AgentsContract } from "../domains/agents/contract.js";
 import { AgentsDomainModule } from "../domains/agents/index.js";
+import { SHADOW_AGENT_OPERATOR_STAND_IN } from "../domains/agents/spec.js";
 import type { ConfigContract } from "../domains/config/contract.js";
 import { ConfigDomainModule } from "../domains/config/index.js";
 import { createContextDomainModule } from "../domains/context/runtime.js";
@@ -723,6 +724,9 @@ async function runDispatch(
 		}
 		const msg = err instanceof Error ? err.message : String(err);
 		process.stderr.write(`clio-coder run failed: ${msg}\n`);
+		if (runAgents?.getSpec(parsed.agentId)?.audience === "shadow") {
+			process.stderr.write(`clio-coder run: instead run: ${shadowStandInCommand(parsed)}\n`);
+		}
 		await loaded.stop();
 		if (err instanceof SessionCostCeilingError) return SESSION_COST_CEILING_EXIT_CODE;
 		if (/target '.+' not found/.test(msg)) return 2;
@@ -735,6 +739,18 @@ async function runDispatch(
 			return 2;
 		return 1;
 	}
+}
+
+/** The refused shadow run as the user-facing command that covers it, keeping the route flags (DF-3). */
+function shadowStandInCommand(parsed: RunCliArgs): string {
+	const quote = (value: string): string => (/^[\w./@:=+-]+$/u.test(value) ? value : JSON.stringify(value));
+	const parts = ["clio-coder run", "--agent", SHADOW_AGENT_OPERATOR_STAND_IN, "--read-only"];
+	if (parsed.cwd !== undefined) parts.push("--cwd", quote(parsed.cwd));
+	if (parsed.target !== undefined) parts.push("--target", quote(parsed.target));
+	if (parsed.model !== undefined) parts.push("--model", quote(parsed.model));
+	if (parsed.thinking !== undefined) parts.push("--thinking", parsed.thinking);
+	parts.push('"<task>"');
+	return parts.join(" ");
 }
 
 function formatReceipt(r: RunReceipt): string {

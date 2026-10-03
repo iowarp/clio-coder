@@ -1,5 +1,5 @@
 import type { AgentSpec } from "./spec.js";
-import { isUserVisibleAgent } from "./spec.js";
+import { isUserVisibleAgent, SHADOW_AGENT_OPERATOR_STAND_IN } from "./spec.js";
 
 const DEFAULT_DISPATCH_AGENT_ID = "coder";
 
@@ -63,7 +63,7 @@ export function renderAgentCatalogSectionsFromSpecs(input: ReadonlyArray<AgentSp
 		"Clio manages a small fleet of coding agents. Recipes are Markdown files; normalized specs carry audience, category, capability, tools, skills, latency, and worker-budget hints.",
 		"Use the `dispatch` tool to invoke one by `agent_id` when delegation helps.",
 		`Default dispatch agent: ${DEFAULT_DISPATCH_AGENT_ID}.`,
-		"User-facing agents are base/custom. Shadow agents are internal helpers for context, research, and provenance; do not recommend them as normal `/run` choices.",
+		`User-facing agents are base/custom. Shadow agents are internal helpers that run only through \`dispatch\`; \`/run\`, \`/delegate\` and \`clio-coder run --agent\` refuse them, so offer an operator \`${SHADOW_AGENT_OPERATOR_STAND_IN}\` with \`--read-only\` instead.`,
 		"Prefer fast read-only agents for orientation, verification agents for gates, and workspace-edit agents only for bounded coding tasks.",
 		"When a task matches a skill named on an agent line (skills=...), prefer the recipe that binds it; its worker is told to load bound skills for the run.",
 		FLEET_EVIDENCE_GUIDANCE,
