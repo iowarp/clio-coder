@@ -9,6 +9,7 @@ import { parseArgs } from "node:util";
 import { serve } from "@hono/node-server";
 import { chromium, type Page } from "playwright-core";
 import { harness } from "../tests/harness/app.js";
+import { seedSettings } from "../tests/harness/settings-fixture.js";
 
 const { values } = parseArgs({
 	options: {
@@ -159,6 +160,8 @@ const h = await harness(
 		env: { CLIO_CODER_WEB_FIXTURE_ROUTE: "1" },
 	},
 );
+// A saved connection, or the app opens the setup wizard instead of the home composer.
+await seedSettings(h.home.path, h.home.env);
 const project = join(h.home.path, "atlas-field-study");
 await mkdir(join(project, "analysis"), { recursive: true });
 await writeFile(join(project, "analysis", "convergence-notes.md"), "mesh convergence\n");
@@ -202,14 +205,18 @@ try {
 	page.on("console", (message) => {
 		if (message.type() === "error") errors.push(message.text());
 	});
+	// A task starts from the home composer; its first, plain turn settles before measuring begins.
 	await page.goto(`${origin}/#token=test-token`);
-	await page.getByRole("heading", { level: 1 }).waitFor();
-	await page.goto(`${origin}/workspaces/${workspace.id}/sessions`);
-	await page.getByRole("button", { name: "New conversation", exact: true }).click();
+	const home = page.getByPlaceholder("Describe a task or ask a question");
+	await home.fill("Ready when you are.");
+	await home.press("Enter");
+	await page.waitForURL(/\/sessions\/[^/]+$/);
 	const composer = page.getByLabel("Message Clio Coder", { exact: true });
 	await composer.waitFor();
+	const stop = page.getByRole("button", { name: "Stop turn", exact: true });
+	await stop.waitFor({ state: "detached" });
 	await page.waitForTimeout(500);
-	const status = page.locator(".session-status");
+	const working = page.locator('.wb-chip--status[data-tone="working"]');
 	const turns: unknown[] = [];
 	for (let turn = 1; turn <= TURNS; turn += 1) {
 		const quiet = turn === 1;
@@ -218,7 +225,7 @@ try {
 		const started = performance.now();
 		await composer.fill(`${WORKLOAD} Audit the convergence notes, turn ${turn}.`);
 		await page.locator(".composer__submit").click();
-		await status.getByText("Clio Coder is working").waitFor();
+		await working.waitFor();
 		let scroll: Record<string, unknown> | null = null;
 		if (!quiet) {
 			await page.waitForTimeout(700);
@@ -238,7 +245,7 @@ try {
 				jumpPill: (await page.locator(".jump-to-latest").count()) > 0,
 			};
 		}
-		await status.getByText("Ready for your message").waitFor({ timeout: 120_000 });
+		await stop.waitFor({ state: "detached", timeout: 120_000 });
 		const durationMs = performance.now() - started;
 		// Diagrams render after the turn settles; a diagram the view followed past counts as near.
 		const turnElement = page.locator(".chat-turn").last();
