@@ -1,6 +1,7 @@
+import { Fragment } from "react";
 import { Link, useLocation } from "react-router";
 import { Icon } from "../design/icons.js";
-import { SETTINGS_SECTIONS, type SettingsSection, settingsSectionFor } from "./shell-model.js";
+import { SETTINGS_GROUPS, SETTINGS_SECTIONS, type SettingsSection, settingsSectionFor } from "./shell-model.js";
 
 function SectionLink({
 	section,
@@ -25,7 +26,7 @@ function SectionLink({
 	);
 }
 
-/** Settings mode swaps the task list for a short list of places, with one obvious way back. */
+/** The second rail swaps the task list for a short list of places, with one obvious way back. */
 export function SettingsSidebar({
 	backTo,
 	onNavigate,
@@ -51,13 +52,13 @@ export function SettingsSidebar({
 				</button>
 			</div>
 			<nav className="wb-side__sections" aria-label="Settings">
-				<h2 className="wb-side__label">Settings</h2>
-				{SETTINGS_SECTIONS.filter((section) => section.group === "main").map((section) => (
-					<SectionLink key={section.id} section={section} active={current?.id === section.id} onNavigate={onNavigate} />
-				))}
-				<h2 className="wb-side__label">Advanced</h2>
-				{SETTINGS_SECTIONS.filter((section) => section.group === "advanced").map((section) => (
-					<SectionLink key={section.id} section={section} active={current?.id === section.id} onNavigate={onNavigate} />
+				{SETTINGS_GROUPS.map((group) => (
+					<Fragment key={group.id}>
+						<h2 className="wb-side__label">{group.label}</h2>
+						{SETTINGS_SECTIONS.filter((section) => section.group === group.id).map((section) => (
+							<SectionLink key={section.id} section={section} active={current?.id === section.id} onNavigate={onNavigate} />
+						))}
+					</Fragment>
 				))}
 			</nav>
 			<div className="wb-side__foot wb-side__foot--plain">

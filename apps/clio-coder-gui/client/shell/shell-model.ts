@@ -162,14 +162,26 @@ export interface SettingsSection {
 		| "system"
 		| "shield"
 		| "layers";
-	readonly group: "main" | "advanced";
+	readonly group: SettingsGroup;
 	/** First path segments, or full-prefix matches, that keep this section highlighted. */
 	readonly owns: readonly string[];
 }
 
 /**
- * A few calm pages first, built from the runtime registry (General is the app's own). Everything else
- * is under Advanced: every remaining setting with search, the raw views, and the inspection pages.
+ * The second rail lists three kinds of place, named for what the operator comes to do there: change
+ * how Clio behaves, see and extend what Clio can use, and read back what Clio did. They were once
+ * "Settings" and "Advanced", which filed the spend report and the run history under a gear.
+ */
+export type SettingsGroup = "settings" | "capabilities" | "activity";
+export const SETTINGS_GROUPS: readonly { readonly id: SettingsGroup; readonly label: string }[] = [
+	{ id: "settings", label: "Settings" },
+	{ id: "capabilities", label: "Capabilities" },
+	{ id: "activity", label: "Activity" },
+];
+
+/**
+ * A few calm settings pages first, built from the runtime registry (General is the app's own), then
+ * every remaining setting with search and the raw views.
  */
 export const SETTINGS_SECTIONS: readonly SettingsSection[] = [
 	{
@@ -177,7 +189,7 @@ export const SETTINGS_SECTIONS: readonly SettingsSection[] = [
 		label: "General",
 		path: "/settings/general",
 		icon: "gear",
-		group: "main",
+		group: "settings",
 		owns: ["/settings/general"],
 	},
 	{
@@ -185,7 +197,7 @@ export const SETTINGS_SECTIONS: readonly SettingsSection[] = [
 		label: "Models",
 		path: "/settings/models",
 		icon: "models",
-		group: "main",
+		group: "settings",
 		owns: ["/settings/models", "/settings/targets", "/settings/routing"],
 	},
 	{
@@ -193,7 +205,7 @@ export const SETTINGS_SECTIONS: readonly SettingsSection[] = [
 		label: "Safety",
 		path: "/settings/safety",
 		icon: "shield",
-		group: "main",
+		group: "settings",
 		owns: ["/settings/safety"],
 	},
 	{
@@ -201,7 +213,7 @@ export const SETTINGS_SECTIONS: readonly SettingsSection[] = [
 		label: "Context and memory",
 		path: "/settings/context",
 		icon: "layers",
-		group: "main",
+		group: "settings",
 		owns: ["/settings/context"],
 	},
 	{
@@ -209,23 +221,23 @@ export const SETTINGS_SECTIONS: readonly SettingsSection[] = [
 		label: "All settings",
 		path: "/settings/advanced",
 		icon: "sliders",
-		group: "advanced",
+		group: "settings",
 		owns: ["/settings", "/settings/advanced", "/settings/effective", "/settings/why"],
 	},
-	{ id: "library", label: "Library", path: "/library", icon: "skills", group: "advanced", owns: ["/library"] },
+	{ id: "library", label: "Library", path: "/library", icon: "skills", group: "capabilities", owns: ["/library"] },
 	{
 		id: "toolchain",
 		label: "Toolchain",
 		path: "/toolchain",
 		icon: "toolchain",
-		group: "advanced",
+		group: "capabilities",
 		owns: ["/toolchain"],
 	},
-	{ id: "usage", label: "Usage", path: "/usage", icon: "usage", group: "advanced", owns: ["/usage"] },
-	{ id: "traces", label: "Traces", path: "/traces", icon: "traces", group: "advanced", owns: ["/traces"] },
-	{ id: "fleet", label: "Fleet", path: "/fleet", icon: "fleet", group: "advanced", owns: ["/fleet"] },
-	{ id: "evidence", label: "Evidence", path: "/evidence", icon: "evidence", group: "advanced", owns: ["/evidence"] },
-	{ id: "system", label: "System", path: "/system", icon: "system", group: "advanced", owns: ["/system"] },
+	{ id: "usage", label: "Usage", path: "/usage", icon: "usage", group: "activity", owns: ["/usage"] },
+	{ id: "traces", label: "Traces", path: "/traces", icon: "traces", group: "activity", owns: ["/traces"] },
+	{ id: "fleet", label: "Fleet", path: "/fleet", icon: "fleet", group: "activity", owns: ["/fleet"] },
+	{ id: "evidence", label: "Evidence", path: "/evidence", icon: "evidence", group: "activity", owns: ["/evidence"] },
+	{ id: "system", label: "System", path: "/system", icon: "system", group: "capabilities", owns: ["/system"] },
 ];
 
 /** The section a pathname belongs to. The longest matching prefix wins so `/settings/targets` is Models, not Harness. */
