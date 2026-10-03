@@ -1,18 +1,21 @@
-import { deepStrictEqual, match, ok, strictEqual, throws } from "node:assert/strict";
+import { deepStrictEqual, match, ok, rejects, strictEqual, throws } from "node:assert/strict";
 import { join } from "node:path";
 import type { TestContext } from "node:test";
 import { afterEach, beforeEach, describe, it } from "node:test";
+import { setImmediate } from "node:timers/promises";
 import { BusChannels } from "../../src/core/bus-events.js";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { runCommandVector } from "../../src/core/safe-exec.js";
 import type { AgentsContract } from "../../src/domains/agents/contract.js";
 import { readAgentLedger } from "../../src/domains/dispatch/agent-ledger-store.js";
+import { capacityLeaseUsage } from "../../src/domains/dispatch/capacity-lease.js";
 import type { DispatchRequest } from "../../src/domains/dispatch/contract.js";
 import { compileExecutionPlan } from "../../src/domains/dispatch/execution-plan.js";
 import { executeFleetRun } from "../../src/domains/dispatch/fleet-run.js";
 import { verifyReceiptIntegrity } from "../../src/domains/dispatch/receipt-integrity.js";
 import { getDispatchReservation } from "../../src/domains/dispatch/reservation-store.js";
 import type { SpawnedWorker, SpawnedWorkerResult } from "../../src/domains/dispatch/worker-spawn.js";
+import type { SchedulingContract } from "../../src/domains/scheduling/contract.js";
 import { makeDispatchBundle } from "../harness/dispatch.js";
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
 import type { IsolatedClioEnv } from "../harness/scratch-env.js";
@@ -626,6 +629,135 @@ describe("dispatch member controls", () => {
 			ok(stored);
 			strictEqual(stored.status, "succeeded");
 			for (const receipt of outcome.receipts) ok(stored.attempts.includes(receipt.runId));
+		} finally {
+			await f.stop();
+		}
+	});
+
+	it("fleet proposals overlap within admitted capacity and retain roster order after failure", {
+		timeout: 10_000,
+	}, async () => {
+		const started = Array.from({ length: 6 }, () => deferred<void>());
+		const f = await fixture(0, (worker, count) => {
+			worker.worker.events = (async function* () {
+				const outcome = await worker.worker.promise;
+				if (outcome.exitCode === 0)
+					yield {
+						type: "message_end",
+						message: { role: "assistant", stopReason: "stop", content: `proposal-${count}` },
+					};
+			})();
+			started[count - 1]?.resolve();
+			if (count === 4) worker.finish({ exitCode: 1, signal: null });
+		});
+		const scheduling = f.ctx.getContract<SchedulingContract>("scheduling");
+		ok(scheduling);
+		scheduling.maxWorkers = () => 2;
+		const roster = ["verifier", "architect", "tester"];
+		const plan = compileExecutionPlan({
+			topology: "fleet",
+			rootTask: "proposal order",
+			maxWorkers: 4,
+			onFailure: "stop",
+			steps: [
+				{
+					kind: "agent",
+					id: "planner",
+					agentId: "verifier",
+					executionRole: "researcher",
+					scope: "readonly",
+					expectedResultContract: "delegation-plan",
+					requestedAuthority: "verification",
+					approvedAuthority: "verification",
+					dependencies: [],
+					task: "Plan from proposals.",
+					plan: { roster, maxTasks: 1, proposals: true },
+				},
+			],
+		});
+		let briefing: string | undefined;
+		let ownerId: string | undefined;
+		const dispatch = {
+			...f.contract,
+			async dispatch(...args: Parameters<typeof f.contract.dispatch>) {
+				const [request] = args;
+				ownerId ??= request.reservation?.ownerId;
+				if (request.resultContractOverride?.kind === "delegation-plan") briefing = request.briefing;
+				return f.contract.dispatch(...args);
+			},
+		};
+		try {
+			const agents = f.ctx.getContract<AgentsContract>("agents");
+			ok(agents);
+			const pending = executeFleetRun({
+				plan,
+				dispatch,
+				agents,
+				contractName: "proposals",
+				commands: null,
+				workspaceRoot: scratch.dir,
+				fleetRootId: "fleet-proposals",
+				attributionEnabled: false,
+			});
+			await started[1]?.promise;
+			await setImmediate();
+			strictEqual(f.workers.length, 2, "two proposals run before either settles; the third waits for capacity");
+			strictEqual(capacityLeaseUsage().global, 2, "each active proposal owns a capacity lease");
+			ok(ownerId);
+			strictEqual(getDispatchReservation(ownerId)?.members.length, 4, "proposals and planner share the reservation");
+			f.workers[1]?.finish();
+			await started[2]?.promise;
+			strictEqual(f.workers.length, 3, "the freed slot starts the third proposal while the first still runs");
+			f.workers[2]?.finish({ exitCode: 1, signal: null });
+			f.workers[0]?.finish();
+			const outcome = await pending;
+			strictEqual(
+				briefing,
+				"PROPOSAL verifier\nproposal-1\n\nPROPOSAL architect\nproposal-2\n\nPROPOSAL tester\n[proposal failed]",
+			);
+			deepStrictEqual(
+				outcome.receipts.slice(0, 3).map((receipt) => receipt.agentId),
+				roster,
+			);
+			for (const receipt of outcome.receipts.slice(0, 3)) {
+				deepStrictEqual(receipt.lineage, {
+					parentRunId: "fleet-proposals",
+					rootRunId: "fleet-proposals",
+					attempt: 0,
+					depth: 1,
+				});
+				const envelope = f.contract.getRun(receipt.runId);
+				ok(envelope);
+				strictEqual(verifyReceiptIntegrity(receipt, envelope).ok, true);
+			}
+			strictEqual(getDispatchReservation(ownerId)?.status, "released");
+			await f.contract.assignments?.flushWrites?.();
+			await setImmediate();
+			strictEqual(capacityLeaseUsage().global, 0);
+			const controller = new AbortController();
+			const canceled = executeFleetRun({
+				plan,
+				dispatch,
+				agents,
+				contractName: "proposals",
+				commands: null,
+				workspaceRoot: scratch.dir,
+				fleetRootId: "fleet-proposals-cancel",
+				attributionEnabled: false,
+				signal: controller.signal,
+			});
+			const canceledResult = rejects(canceled);
+			await started[5]?.promise;
+			controller.abort();
+			await canceledResult;
+			deepStrictEqual(
+				f.workers.slice(4).map((worker) => worker.aborts()),
+				[1, 1],
+			);
+			strictEqual(f.workers.length, 6, "cancellation prevents the queued proposal and planner from launching");
+			await f.contract.assignments?.flushWrites?.();
+			await setImmediate();
+			strictEqual(capacityLeaseUsage().global, 0);
 		} finally {
 			await f.stop();
 		}

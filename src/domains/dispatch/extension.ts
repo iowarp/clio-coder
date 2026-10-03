@@ -9344,6 +9344,7 @@ export function createDispatchBundle(
 			get: getDispatchReservation,
 		},
 		costCeilingUsd: () => scheduling.ceilingUsd(),
+		maxWorkers: () => configuredGlobalCapacity(getEffectiveSettings()),
 		speculate,
 		releaseSpeculative: (reason) => heldWorkers?.releaseAll(reason) ?? 0,
 		speculativeStats: () => heldWorkers?.stats() ?? { held: 0, adopted: 0, discarded: 0, live: 0 },

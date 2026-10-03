@@ -401,6 +401,8 @@ export interface DispatchContract {
 	};
 	/** Session scheduling ceiling captured in the same immutable approval artifact. */
 	costCeilingUsd?(): number;
+	/** Configured global worker capacity, shared with durable reservation admission. */
+	maxWorkers?(): number;
 	/** Current trusted hard-block state for coordinator-side merge validation. */
 	protectedArtifactState?(): ProtectedArtifactState;
 	/** Validate + admit + spawn a native worker. Returns run id + promise. */

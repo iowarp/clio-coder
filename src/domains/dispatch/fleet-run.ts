@@ -28,16 +28,18 @@ import type { DecisionLedgerEntry } from "../session/entries.js";
 import { claimAssignmentVerdict, recordAssignmentAttempt, settleStoredAssignment } from "./assignment-store.js";
 import { runCodeStep } from "./code-step.js";
 import { codeStepDir, writeCodeStepRecord } from "./code-step-store.js";
-import type { DispatchContract, DispatchRequest } from "./contract.js";
+import type { DispatchContract, DispatchPlanTaskResolution, DispatchRequest } from "./contract.js";
 import { buildDelegationProposalBriefing, validateDelegationPlan } from "./delegation-plan.js";
 import {
 	type ExecutionPlan,
 	type ExecutionPlanCodeStep,
 	type ExecutionPlanStep,
 	executionPlanAncestors,
+	executionPlanWaves,
 	spliceExecutionPlan,
 } from "./execution-plan.js";
 import { gateRouteCorrelation, requestExecutionRole } from "./execution-role.js";
+import type { ExecutionSchedulerAdapter } from "./execution-scheduler.js";
 import { type ExecutionPlanResult, type ExecutionStepResult, executePlan } from "./execution-scheduler.js";
 import { deriveFleetCommitAttribution } from "./fleet-commit-attribution.js";
 import { gateBaselineFailure, gateFailureLines } from "./fleet-gate.js";
@@ -194,6 +196,8 @@ export interface ExecuteFleetRunInput {
 	agents: FleetRunAgentAccess;
 	/** Whether a commit node stamps Clio's attribution trailers. */
 	attributionEnabled: boolean;
+	/** Cancel the fleet, including queued and running proposals. */
+	signal?: AbortSignal;
 	/** Variables rendered into the contract body and sealed into the run record. */
 	vars?: Readonly<Record<string, string>>;
 	/** A validated prior run and the successful prefix retained from it. */
@@ -369,14 +373,12 @@ export async function executeFleetRun(input: ExecuteFleetRunInput): Promise<Flee
 	const receipts: RunReceipt[] = [];
 	const receiptsByStep = new Map<string, RunReceipt>();
 	const attemptRunIdsByStep = new Map<string, ReadonlyArray<string>>();
-	const collectMemberReceipts = async (
-		runId: string,
-		firstReceipt: RunReceipt,
+	const memberReceipts = async (runId: string, firstReceipt: RunReceipt) =>
+		dispatch.waitForMember ? dispatch.waitForMember(runId) : { receipt: firstReceipt, receipts: [firstReceipt] };
+	const recordMemberReceipts = async (
+		member: { receipt: RunReceipt; receipts: ReadonlyArray<RunReceipt> },
 		stepId?: string,
 	): Promise<RunReceipt> => {
-		const member = dispatch.waitForMember
-			? await dispatch.waitForMember(runId)
-			: { receipt: firstReceipt, receipts: [firstReceipt] };
 		if (stepId !== undefined) {
 			const runIds = member.receipts.map((receipt) => receipt.runId);
 			attemptRunIdsByStep.set(stepId, runIds);
@@ -389,6 +391,8 @@ export async function executeFleetRun(input: ExecuteFleetRunInput): Promise<Flee
 		}
 		return member.receipt;
 	};
+	const collectMemberReceipts = async (runId: string, firstReceipt: RunReceipt, stepId?: string) =>
+		recordMemberReceipts(await memberReceipts(runId, firstReceipt), stepId);
 	for (const [stepId, replayedResult] of replayed) {
 		try {
 			const receipt = JSON.parse(
@@ -422,6 +426,7 @@ export async function executeFleetRun(input: ExecuteFleetRunInput): Promise<Flee
 		await fileStepAttempt(replayedResult.terminalRunId);
 	}
 	const planStep = (stepId: string) => livePlan.steps.find((entry) => entry.id === stepId);
+	const proposalMembers = new Map<string, Array<{ memberId: string; request: DispatchRequest }>>();
 
 	// Freshness is coordinator-owned execution state. Worker prose cannot set
 	// either flag: a successful deterministic verification sets the first, and
@@ -455,7 +460,7 @@ export async function executeFleetRun(input: ExecuteFleetRunInput): Promise<Flee
 
 	let result: ExecutionPlanResult;
 	try {
-		result = await executePlan(livePlan, {
+		const adapter: ExecutionSchedulerAdapter = {
 			preflight(step) {
 				// The fleet write boundary is deliberately enforced after the step. The enforcer in
 				// write-boundary-enforcer.ts snapshots and verifies the step window. Pre-emptive
@@ -486,25 +491,71 @@ export async function executeFleetRun(input: ExecuteFleetRunInput): Promise<Flee
 				// capacity. The reservation authority refuses an empty reservation,
 				// correctly: there is nothing to reserve, so nothing is asked of it.
 				if (admissions.length === 0) return { ownerId: NO_WORKER_RESERVATION };
+				const tasks: Array<{ memberId: string; resolution: DispatchPlanTaskResolution }> = [];
+				const memberIds = new Set(reservedPlan.steps.map((step) => step.id));
+				for (const { step } of admissions) {
+					const members: Array<{ memberId: string; request: DispatchRequest }> = [];
+					if (step.plan?.proposals === true) {
+						for (const [index, agentId] of step.plan.roster.entries()) {
+							let memberId = `proposal:${step.id}:${index}`;
+							while (memberIds.has(memberId)) memberId = `proposal:${memberId}`;
+							memberIds.add(memberId);
+							const request: DispatchRequest = {
+								agentId,
+								executionRole: "researcher",
+								task: step.task,
+								cwd: workspaceRoot,
+								requestOrigin: "user",
+								...(decisionRefs.length > 0 ? { decisionRefs } : {}),
+								readOnly: true,
+								lineage: { parentRunId: fleetRootId, rootRunId: fleetRootId, attempt: 0, depth: 1 },
+								resultContractOverride: { kind: "artifact-report" },
+								...(step.target !== undefined ? { target: step.target } : {}),
+								...(step.profile !== undefined ? { workerProfile: step.profile } : {}),
+							};
+							const resolution = dispatch.preview?.(request);
+							if (!resolution) throw new Error(`fleet preflight cannot resolve proposal '${memberId}'`);
+							members.push({ memberId, request });
+							tasks.push({ memberId, resolution });
+						}
+					}
+					proposalMembers.set(step.id, members);
+					tasks.push({
+						memberId: step.id,
+						resolution: dispatch.preview?.({
+							agentId: step.agentId,
+							executionRole: step.executionRole,
+							task: step.task,
+							...(decisionRefs.length > 0 ? { decisionRefs } : {}),
+							...(step.target !== undefined ? { target: step.target } : {}),
+							...(step.profile !== undefined ? { workerProfile: step.profile } : {}),
+						}) as DispatchPlanTaskResolution,
+					});
+				}
+				const resolutions = new Map(tasks.map((task) => [task.memberId, task.resolution]));
+				const concurrency = Math.min(reservedPlan.maxWorkers, dispatch.maxWorkers?.() ?? reservedPlan.maxWorkers);
+				const waves = reservedPlan.waves.flatMap((wave) => {
+					const members = wave.flatMap((stepId) => proposalMembers.get(stepId) ?? []);
+					const proposalWaves =
+						members.length === 0
+							? []
+							: executionPlanWaves(
+									members.map(({ memberId }) => {
+										const endpoint = resolutions.get(memberId)?.endpoint;
+										return { id: memberId, dependencies: [], ...(endpoint ? { endpoint } : {}) };
+									}),
+									concurrency,
+								);
+					return [...proposalWaves, wave];
+				});
 				const reservation = dispatch.reservations?.prepare({
 					topology: "parallel",
-					tasks: admissions.map((admission) => ({
-						memberId: admission.step.id,
-						wave: fleetPlanWaveIndex(reservedPlan, admission.step.id),
-						resolution: dispatch.preview?.({
-							agentId: admission.step.agentId,
-							executionRole: admission.step.executionRole,
-							task: admission.step.task,
-							...(decisionRefs.length > 0 ? { decisionRefs } : {}),
-							...(admission.step.target !== undefined ? { target: admission.step.target } : {}),
-							...(admission.step.profile !== undefined ? { workerProfile: admission.step.profile } : {}),
-						}) as NonNullable<ReturnType<NonNullable<DispatchContract["preview"]>>>,
-					})),
+					tasks: tasks.map((task) => ({ ...task, wave: waves.findIndex((wave) => wave.includes(task.memberId)) })),
 				});
 				if (!reservation) throw new Error("fleet whole-plan reservation is unavailable");
 				return { ownerId: reservation.ownerId };
 			},
-			async run(step, handoffs, reservation, ledger) {
+			async run(step, handoffs, reservation, ledger, signal) {
 				// A loop repair is attempt n of the same logical work, so it enters
 				// the run ledger as one: recovery evidence, not a fresh observation.
 				const attempt = step.loop?.role === "repair" ? step.loop.attempt : 0;
@@ -567,32 +618,68 @@ export async function executeFleetRun(input: ExecuteFleetRunInput): Promise<Flee
 							: {}),
 				};
 				if (step.plan?.proposals === true) {
-					const proposals: Array<{ agent: string; output: string }> = [];
-					for (const agentId of step.plan.roster) {
-						const proposal = await dispatch.dispatch({
-							agentId,
-							executionRole: "researcher",
-							task: step.task,
-							cwd: workspaceRoot,
-							requestOrigin: "user",
-							...(decisionRefs.length > 0 ? { decisionRefs } : {}),
-							readOnly: true,
-							lineage: { parentRunId: fleetRootId, rootRunId: fleetRootId, attempt: 0, depth: 1 },
-							resultContractOverride: { kind: "artifact-report" },
-							...(step.target !== undefined ? { target: step.target } : {}),
-							...(step.profile !== undefined ? { workerProfile: step.profile } : {}),
-						});
-						void (async () => {
-							for await (const _event of proposal.events) {
-								/* Proposal events are drained while their final answers are collected. */
+					const members = await Promise.all(
+						(proposalMembers.get(step.id) ?? []).map(async ({ memberId, request: proposalRequest }) => {
+							try {
+								// Each proposal owns capacity independently; hostRun preserves its published fleet lineage.
+								const proposal = await dispatch.dispatch(
+									{
+										...proposalRequest,
+										lineage: {
+											parentRunId: fleetRootId,
+											rootRunId: `${reservation.ownerId}:${memberId}`,
+											attempt: 0,
+											depth: 1,
+										},
+										reservation: { ownerId: reservation.ownerId, memberId },
+									},
+									undefined,
+									{
+										...(signal ? { signal } : {}),
+										hostRun: {
+											runId: fleetRootId,
+											lineage: { parentRunId: null, rootRunId: fleetRootId, attempt: 0, depth: 0 },
+										},
+									},
+								);
+								const cancel = () => dispatch.abort(proposal.runId);
+								signal?.addEventListener("abort", cancel, { once: true });
+								if (signal?.aborted) cancel();
+								void (async () => {
+									for await (const _event of proposal.events) {
+										/* Proposal events are drained while their final answers are collected. */
+									}
+								})().catch(() => {});
+								try {
+									const member = await memberReceipts(proposal.runId, await proposal.finalPromise);
+									return { agent: proposalRequest.agentId, member };
+								} finally {
+									try {
+										await dispatch.drainMember?.(proposal.runId);
+									} finally {
+										signal?.removeEventListener("abort", cancel);
+									}
+								}
+							} catch {
+								// A proposal is advisory; admission or worker failure must not cancel its siblings.
+								return { agent: proposalRequest.agentId, member: null };
 							}
-						})().catch(() => {});
-						const receipt = await collectMemberReceipts(proposal.runId, await proposal.finalPromise);
-						const answer = receipt.output?.state === "final" ? receipt.output.text : "[proposal failed]";
-						proposals.push({ agent: agentId, output: answer });
+						}),
+					);
+					const proposals: Array<{ agent: string; output: string }> = [];
+					for (const { agent, member } of members) {
+						const receipt = member === null ? null : await recordMemberReceipts(member);
+						const output =
+							receipt?.exitCode === 0 &&
+							(receipt.outcome === undefined || receipt.outcome === "succeeded") &&
+							receipt.output?.state === "final"
+								? receipt.output.text
+								: "[proposal failed]";
+						proposals.push({ agent, output });
 					}
 					request.briefing = buildDelegationProposalBriefing(proposals);
 				}
+				signal?.throwIfAborted();
 				const handle = await dispatch.dispatch(request);
 				const waveIndex = fleetPlanWaveIndex(livePlan, step.id);
 				input.onStepDispatched?.({
@@ -906,7 +993,8 @@ export async function executeFleetRun(input: ExecuteFleetRunInput): Promise<Flee
 				return livePlan;
 			},
 			replayed,
-		});
+		};
+		result = await executePlan(livePlan, adapter, input.signal);
 	} catch (error) {
 		fleetRunRecord.endedAt = new Date().toISOString();
 		await writeFleetRun(fleetRunRecord);
