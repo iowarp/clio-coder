@@ -1,8 +1,8 @@
 {
 	"$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
-	"name": "grill-me",
-	"version": "0.5.1",
-	"description": "Stress-tests a plan, design, or idea through a phased one-question-at-a-time interview before code is written, ending in a compact decision log. Not for a multi-perspective debate; use design-council.",
+	"name": "map-codebase",
+	"version": "0.2.0",
+	"description": "Interactive codebase maps from verified repository structure, symbols and imports, rendered natively as standalone HTML.",
 	"license": "Apache-2.0",
 	"extensions": {
 		"ai.iowarp.clio": {
@@ -14,7 +14,7 @@
 			"components": [
 				{
 					"kind": "skill",
-					"id": "grill-me",
+					"id": "map-codebase",
 					"path": "SKILL.md"
 				}
 			]

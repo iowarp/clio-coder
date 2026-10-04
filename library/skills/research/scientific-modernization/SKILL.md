@@ -8,7 +8,7 @@ triggers:
   - migrate the scientific build system
   - create a maintained fork
   - preserve scientific parity
-version: 0.4.1
+version: 0.4.2
 license: Apache-2.0
 allowed-tools:
   - read
@@ -24,7 +24,6 @@ clio-coder:
   registry-id: iowarp/clio-coder
   source-url: https://github.com/iowarp/clio-coder/tree/main/library/skills/research/scientific-modernization
   audit: pass
-  provenance: designed
   model-size: large
 ---
 

@@ -8,7 +8,7 @@ triggers:
   - diagnose NaNs
   - debug with falsifiable hypotheses
   - scientific root cause
-version: 0.3.1
+version: 0.3.2
 license: Apache-2.0
 allowed-tools:
   - read
@@ -23,7 +23,6 @@ clio-coder:
   registry-id: iowarp/clio-coder
   source-url: https://github.com/iowarp/clio-coder/tree/main/library/skills/research/scientific-debugging
   audit: pass
-  provenance: designed
   model-size: any
 ---
 

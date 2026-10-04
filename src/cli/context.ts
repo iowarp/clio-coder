@@ -25,7 +25,7 @@ Project context commands:
   clio-coder context wiki         generate or inspect the agent-authored Markdown wiki
   clio-coder context reset        clear accumulated project context artifacts
   clio-coder context index        build the codemap index without model calls
-  clio-coder context map          write an archify architecture seed from the codemap index
+  clio-coder context map          create a native interactive HTML codebase map
   clio-coder context replay       compare working-set policies over Clio ledgers
   clio-coder context working-set  inspect one session's working-set fold and path index
 `;

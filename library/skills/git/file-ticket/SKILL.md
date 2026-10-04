@@ -7,7 +7,7 @@ triggers:
   - log this bug
   - ticket this behavior
   - create a tracker issue
-version: 0.3.0
+version: 0.3.1
 license: Apache-2.0
 compatibility: git >=2.30.0, gh CLI >=2.0.0 (authenticated for issue operations), POSIX-compatible shell
 allowed-tools:
@@ -22,7 +22,6 @@ clio-coder:
   registry-id: iowarp/clio-coder
   source-url: https://github.com/iowarp/clio-coder/tree/main/library/skills/git/file-ticket
   audit: pass
-  provenance: designed
   model-size: any
   agents:
     - main

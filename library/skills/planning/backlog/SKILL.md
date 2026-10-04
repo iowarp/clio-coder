@@ -1,13 +1,13 @@
 ---
 name: backlog
-description: Turns a finished PRD or architecture doc into a ticket backlog of small stories with verifiable acceptance criteria, confirmed, then created as GitHub issues or in another configured tracker. Not for local sprint slicing into a SPRINT.md; use cut-it.
+description: Turns a finished PRD or architecture doc into a ticket backlog of small stories with verifiable acceptance criteria, confirmed, then created as GitHub issues or in another configured tracker. Not for local sprint slicing into a SPRINT.md; use sprint-plan.
 triggers:
   - create the stories
   - turn this PRD into issues
   - build the backlog
   - decompose this plan into tickets
   - create GitHub issues from this architecture
-version: 0.4.1
+version: 0.4.2
 license: Apache-2.0
 allowed-tools:
   - read
@@ -21,8 +21,6 @@ clio-coder:
   registry-id: iowarp/clio-coder
   source-url: https://github.com/iowarp/clio-coder/tree/main/library/skills/planning/backlog
   audit: pass
-  provenance: adapted
-  origin: https://github.com/coleam00/skills/tree/main/.claude/skills/backlog
   model-size: any
   agents:
     - main

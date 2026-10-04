@@ -29,7 +29,7 @@ import type { ToolResult, ToolSpec } from "./registry.js";
  *
  * Skills are not artifacts: a skill is a SKILL.md folder written with the
  * ordinary write tool and validated by the skills loader on load. The
- * skill-craft shipped skill documents the format.
+ * skill-authoring shipped skill documents the format.
  */
 
 const ARTIFACT_KINDS = ["plan", "review", "report"] as const;

@@ -1134,8 +1134,8 @@ function renderBoundSkillBlock(recipe: AgentRecipe): string {
 		'Load one with `context` (scope="skills", name=<skill>) only when the assigned task is the workflow it describes, then follow it. A skill adds know-how, never tool authority. If one fails to load, continue the assigned task and report the missing skill.',
 		...(recipe.resultContract?.kind === "architect-plan"
 			? [
-					"For a narrative design, do not load cut-it. Load it only to slice an existing plan into an executable sprint.",
-					'For both design and sprint tasks, deliver the required plan with artifact(kind="plan") and no path argument. The result contract reserves the already admitted artifact tool under skill allow-lists; explicit denials and safety gates still apply. In this role, put cut-it\'s sprint content in that plan artifact rather than using write for SPRINT.md. Artifact delivery ends the run.',
+					"For a narrative design, do not load sprint-plan. Load it only to slice an existing plan into an executable sprint.",
+					'For both design and sprint tasks, deliver the required plan with artifact(kind="plan") and no path argument. The result contract reserves the already admitted artifact tool under skill allow-lists; explicit denials and safety gates still apply. In this role, put sprint-plan\'s sprint content in that plan artifact rather than using write for SPRINT.md. Artifact delivery ends the run.',
 				]
 			: []),
 	].join("\n");

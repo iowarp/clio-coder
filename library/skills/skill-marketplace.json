@@ -12,7 +12,7 @@
 				"grep returns too much noise"
 			],
 			"sourceUrl": "https://github.com/iowarp/clio-coder/tree/main/library/skills/coding/ast-grep",
-			"version": "0.3.0",
+			"version": "0.3.1",
 			"audit": "pass",
 			"category": "coding"
 		},
@@ -27,7 +27,7 @@
 				"functional core imperative shell"
 			],
 			"sourceUrl": "https://github.com/iowarp/clio-coder/tree/main/library/skills/coding/coding-standards",
-			"version": "0.4.0",
+			"version": "0.4.1",
 			"audit": "pass",
 			"category": "coding"
 		},
@@ -42,7 +42,7 @@
 				"what should this UI look like"
 			],
 			"sourceUrl": "https://github.com/iowarp/clio-coder/tree/main/library/skills/coding/prototype",
-			"version": "0.4.0",
+			"version": "0.4.1",
 			"audit": "pass",
 			"category": "coding"
 		},
@@ -57,7 +57,7 @@
 				"reproduce the bug with a test"
 			],
 			"sourceUrl": "https://github.com/iowarp/clio-coder/tree/main/library/skills/coding/tdd",
-			"version": "0.4.0",
+			"version": "0.4.1",
 			"audit": "pass",
 			"category": "coding"
 		},
@@ -72,7 +72,7 @@
 				"write a continuation brief"
 			],
 			"sourceUrl": "https://github.com/iowarp/clio-coder/tree/main/library/skills/context/context-handoff",
-			"version": "0.5.2",
+			"version": "0.5.3",
 			"audit": "pass",
 			"category": "context"
 		},
@@ -87,7 +87,7 @@
 				"resume repository work after a break"
 			],
 			"sourceUrl": "https://github.com/iowarp/clio-coder/tree/main/library/skills/context/context-prime",
-			"version": "0.4.1",
+			"version": "0.4.2",
 			"audit": "pass",
 			"category": "context"
 		},
@@ -102,7 +102,7 @@
 				"branch-closeout"
 			],
 			"sourceUrl": "https://github.com/iowarp/clio-coder/tree/main/library/skills/git/branch-closeout",
-			"version": "0.1.0",
+			"version": "0.1.1",
 			"audit": "pass",
 			"category": "git"
 		},
@@ -117,7 +117,7 @@
 				"create a tracker issue"
 			],
 			"sourceUrl": "https://github.com/iowarp/clio-coder/tree/main/library/skills/git/file-ticket",
-			"version": "0.3.0",
+			"version": "0.3.1",
 			"audit": "pass",
 			"category": "git"
 		},
@@ -132,7 +132,7 @@
 				"fix a GitHub issue end to end"
 			],
 			"sourceUrl": "https://github.com/iowarp/clio-coder/tree/main/library/skills/git/fix-issue",
-			"version": "0.3.1",
+			"version": "0.3.2",
 			"audit": "pass",
 			"category": "git"
 		},
@@ -147,7 +147,7 @@
 				"resolve conflict markers"
 			],
 			"sourceUrl": "https://github.com/iowarp/clio-coder/tree/main/library/skills/git/resolve-merge-conflicts",
-			"version": "0.4.0",
+			"version": "0.4.1",
 			"audit": "pass",
 			"category": "git"
 		},
@@ -162,7 +162,7 @@
 				"get this up for review"
 			],
 			"sourceUrl": "https://github.com/iowarp/clio-coder/tree/main/library/skills/git/ship",
-			"version": "0.5.1",
+			"version": "0.5.2",
 			"audit": "pass",
 			"category": "git"
 		},
@@ -176,7 +176,7 @@
 				"prepare parallel worktrees"
 			],
 			"sourceUrl": "https://github.com/iowarp/clio-coder/tree/main/library/skills/git/worktree-create",
-			"version": "0.6.0",
+			"version": "0.6.1",
 			"audit": "pass",
 			"category": "git"
 		},
@@ -190,7 +190,7 @@
 				"land finished worktrees"
 			],
 			"sourceUrl": "https://github.com/iowarp/clio-coder/tree/main/library/skills/git/worktree-merge",
-			"version": "0.6.0",
+			"version": "0.6.1",
 			"audit": "pass",
 			"category": "git"
 		},
@@ -204,7 +204,7 @@
 				"edit Clio skills tools or prompts"
 			],
 			"sourceUrl": "https://github.com/iowarp/clio-coder/tree/main/library/skills/meta/clio-coder-dev",
-			"version": "0.5.0",
+			"version": "0.5.1",
 			"audit": "pass",
 			"category": "meta"
 		},
@@ -218,7 +218,7 @@
 				"choose Clio test gates"
 			],
 			"sourceUrl": "https://github.com/iowarp/clio-coder/tree/main/library/skills/meta/clio-coder-test",
-			"version": "0.4.0",
+			"version": "0.4.1",
 			"audit": "pass",
 			"category": "meta"
 		},
@@ -234,13 +234,13 @@
 				"secret leaked"
 			],
 			"sourceUrl": "https://github.com/iowarp/clio-coder/tree/main/library/skills/meta/credentials",
-			"version": "0.2.0",
+			"version": "0.2.1",
 			"audit": "pass",
 			"category": "meta"
 		},
 		{
 			"name": "find-skills",
-			"description": "Finds published skills and prepares their Library installation for the operator when the user asks whether a capability exists as a skill. Not for authoring a new skill; use skill-craft.",
+			"description": "Finds published skills and prepares their Library installation for the operator when the user asks whether a capability exists as a skill. Not for authoring a new skill; use skill-authoring.",
 			"triggers": [
 				"find a skill",
 				"is there a skill for this",
@@ -249,12 +249,27 @@
 				"search the skills marketplace"
 			],
 			"sourceUrl": "https://github.com/iowarp/clio-coder/tree/main/library/skills/meta/find-skills",
-			"version": "0.2.1",
+			"version": "0.2.2",
 			"audit": "pass",
 			"category": "meta"
 		},
 		{
-			"name": "herdr",
+			"name": "skill-authoring",
+			"description": "Writes, reviews, or prunes a SKILL.md, judging whether its description, body, and length earn their cost. Not for packaging a workflow that just happened; use workflow-capture.",
+			"triggers": [
+				"write a SKILL.md",
+				"create a new skill",
+				"improve this skill",
+				"why isn't this skill firing",
+				"prune a skill body"
+			],
+			"sourceUrl": "https://github.com/iowarp/clio-coder/tree/main/library/skills/meta/skill-authoring",
+			"version": "0.3.2",
+			"audit": "pass",
+			"category": "meta"
+		},
+		{
+			"name": "terminal-control",
 			"description": "Launches, drives, or inspects another agent or command in a Herdr pane, tab, or workspace, including a second Clio Coder instance; requires HERDR_ENV=1. Not for background work a plain shell or dispatch already covers.",
 			"triggers": [
 				"use Herdr",
@@ -263,49 +278,14 @@
 				"start a second Clio Coder instance",
 				"drive a command in a Herdr workspace"
 			],
-			"sourceUrl": "https://github.com/iowarp/clio-coder/tree/main/library/skills/meta/herdr",
-			"version": "0.2.0",
+			"sourceUrl": "https://github.com/iowarp/clio-coder/tree/main/library/skills/meta/terminal-control",
+			"version": "0.2.1",
 			"audit": "pass",
 			"category": "meta"
-		},
-		{
-			"name": "skill-craft",
-			"description": "Writes, reviews, or prunes a SKILL.md, judging whether its description, body, and length earn their cost. Not for packaging a workflow that just happened; use workflow-distiller.",
-			"triggers": [
-				"write a SKILL.md",
-				"create a new skill",
-				"improve this skill",
-				"why isn't this skill firing",
-				"prune a skill body"
-			],
-			"sourceUrl": "https://github.com/iowarp/clio-coder/tree/main/library/skills/meta/skill-craft",
-			"version": "0.3.1",
-			"audit": "pass",
-			"category": "meta"
-		},
-		{
-			"name": "archify",
-			"description": "Validated interactive system maps and diagrams as standalone HTML from a typed JSON spec, for one of five diagram types (architecture, workflow, sequence, dataflow, lifecycle). Use when the user asks to visualize architecture, a workflow, a call sequence, a data pipeline, or a state machine, or to map this repository. Not for ad hoc drawings or slide art, and not for Mermaid output; use the artifact tool for plain Markdown.",
-			"triggers": [
-				"architecture diagram",
-				"system map",
-				"map this repository",
-				"sequence diagram",
-				"data flow diagram",
-				"state machine diagram",
-				"visualize the architecture"
-			],
-			"sourceUrl": "https://github.com/tt-a1i/archify/tree/v2.16.0/archify",
-			"version": "0.1.0",
-			"audit": "pass",
-			"category": "planning",
-			"origin": "remote",
-			"overlay": "library/skills/planning/archify",
-			"exclude": ["test", "package-lock.json"]
 		},
 		{
 			"name": "architecture",
-			"description": "Decides the engineering approach for an intent in an interactive session: investigates, proposes two or three genuinely different approaches with trade-offs, recommends, lets the user decide, and writes the decision doc. Not a task-by-task plan; use cut-it. Not a multi-perspective debate; use design-council. Not product intent; use product-intent. Not a typed implementation handoff; use tech-spec.",
+			"description": "Decides the engineering approach for an intent in an interactive session: investigates, proposes two or three genuinely different approaches with trade-offs, recommends, lets the user decide, and writes the decision doc. Not a task-by-task plan; use sprint-plan. Not a multi-perspective debate; use design-council. Not product intent; use product-intent. Not a typed implementation handoff; use tech-spec.",
 			"triggers": [
 				"how should we build this",
 				"pick the stack",
@@ -314,13 +294,13 @@
 				"compare architecture options"
 			],
 			"sourceUrl": "https://github.com/iowarp/clio-coder/tree/main/library/skills/planning/architecture",
-			"version": "0.4.1",
+			"version": "0.4.2",
 			"audit": "pass",
 			"category": "planning"
 		},
 		{
 			"name": "backlog",
-			"description": "Turns a finished PRD or architecture doc into a ticket backlog of small stories with verifiable acceptance criteria, confirmed, then created as GitHub issues or in another configured tracker. Not for local sprint slicing into a SPRINT.md; use cut-it.",
+			"description": "Turns a finished PRD or architecture doc into a ticket backlog of small stories with verifiable acceptance criteria, confirmed, then created as GitHub issues or in another configured tracker. Not for local sprint slicing into a SPRINT.md; use sprint-plan.",
 			"triggers": [
 				"create the stories",
 				"turn this PRD into issues",
@@ -329,7 +309,16 @@
 				"create GitHub issues from this architecture"
 			],
 			"sourceUrl": "https://github.com/iowarp/clio-coder/tree/main/library/skills/planning/backlog",
-			"version": "0.4.1",
+			"version": "0.4.2",
+			"audit": "pass",
+			"category": "planning"
+		},
+		{
+			"name": "map-codebase",
+			"description": "Create a clear interactive visual map of a codebase from verified structure, symbols and imports. Use for map this repository, visualize repo, codebase overview, or architecture diagram requests. Delivers a standalone HTML artifact with a readable overview and expandable source evidence.",
+			"triggers": ["map this repository", "map codebase", "visualize repo", "codebase overview", "architecture diagram"],
+			"sourceUrl": "https://github.com/iowarp/clio-coder/tree/main/library/skills/planning/map-codebase",
+			"version": "0.2.0",
 			"audit": "pass",
 			"category": "planning"
 		},
@@ -344,7 +333,7 @@
 				"create milestone prompts"
 			],
 			"sourceUrl": "https://github.com/iowarp/clio-coder/tree/main/library/skills/planning/prd",
-			"version": "0.4.1",
+			"version": "0.4.2",
 			"audit": "pass",
 			"category": "planning"
 		},
@@ -359,7 +348,7 @@
 				"greenfield product intent"
 			],
 			"sourceUrl": "https://github.com/iowarp/clio-coder/tree/main/library/skills/planning/product-intent",
-			"version": "0.4.1",
+			"version": "0.4.2",
 			"audit": "pass",
 			"category": "planning"
 		},
@@ -374,7 +363,7 @@
 				"specify execution flows"
 			],
 			"sourceUrl": "https://github.com/iowarp/clio-coder/tree/main/library/skills/planning/tech-spec",
-			"version": "0.3.1",
+			"version": "0.3.2",
 			"audit": "pass",
 			"category": "planning"
 		},
@@ -389,7 +378,7 @@
 				"build a literature survey"
 			],
 			"sourceUrl": "https://github.com/iowarp/clio-coder/tree/main/library/skills/research/arxiv-literature",
-			"version": "0.5.1",
+			"version": "0.5.2",
 			"audit": "pass",
 			"category": "research"
 		},
@@ -405,7 +394,7 @@
 				"compare solver accuracy"
 			],
 			"sourceUrl": "https://github.com/iowarp/clio-coder/tree/main/library/skills/research/experiment-protocol",
-			"version": "0.3.1",
+			"version": "0.3.2",
 			"audit": "pass",
 			"category": "research"
 		},
@@ -421,7 +410,7 @@
 				"scientific root cause"
 			],
 			"sourceUrl": "https://github.com/iowarp/clio-coder/tree/main/library/skills/research/scientific-debugging",
-			"version": "0.3.1",
+			"version": "0.3.2",
 			"audit": "pass",
 			"category": "research"
 		},
@@ -437,7 +426,7 @@
 				"preserve scientific parity"
 			],
 			"sourceUrl": "https://github.com/iowarp/clio-coder/tree/main/library/skills/research/scientific-modernization",
-			"version": "0.4.1",
+			"version": "0.4.2",
 			"audit": "pass",
 			"category": "research"
 		},
@@ -453,28 +442,13 @@
 				"is the queue busy"
 			],
 			"sourceUrl": "https://github.com/iowarp/clio-coder/tree/main/library/skills/research/slurm-jobs",
-			"version": "0.1.0",
+			"version": "0.1.1",
 			"audit": "pass",
 			"category": "research"
 		},
 		{
-			"name": "cut-it",
-			"description": "Slices an existing plan, PRD, or milestone into an executable sprint of dependency-ordered vertical slices sized for one agent run each, with done-when verification per slice; never fabricates a plan. Not for deciding the approach; use architecture.",
-			"triggers": [
-				"cut it",
-				"slice this plan",
-				"make this plan executable",
-				"turn this milestone into a sprint",
-				"write dependency-ordered vertical slices"
-			],
-			"sourceUrl": "https://github.com/iowarp/clio-coder/tree/main/library/skills/workflow/cut-it",
-			"version": "0.4.1",
-			"audit": "pass",
-			"category": "workflow"
-		},
-		{
 			"name": "design-council",
-			"description": "Convenes several expert perspectives that challenge each other on a design decision with real trade-offs before code is written; quick mode runs a single round. Not for a one-question-at-a-time interrogation of a plan; use grill-me. Not for splitting implementation across workers; use dispatch directly.",
+			"description": "Convenes several expert perspectives that challenge each other on a design decision with real trade-offs before code is written; quick mode runs a single round. Not for a one-question-at-a-time interrogation of a plan; use plan-interview. Not for splitting implementation across workers; use dispatch directly.",
 			"triggers": [
 				"convene a design council",
 				"debate this design",
@@ -483,28 +457,43 @@
 				"what would experts say"
 			],
 			"sourceUrl": "https://github.com/iowarp/clio-coder/tree/main/library/skills/workflow/design-council",
-			"version": "0.6.0",
+			"version": "0.6.1",
 			"audit": "pass",
 			"category": "workflow"
 		},
 		{
-			"name": "grill-me",
+			"name": "plan-interview",
 			"description": "Stress-tests a plan, design, or idea through a phased one-question-at-a-time interview before code is written, ending in a compact decision log. Not for a multi-perspective debate; use design-council.",
 			"triggers": [
-				"grill me",
+				"review this plan through an interview",
 				"interview me about this plan",
 				"stress-test this design",
 				"poke holes in this idea",
 				"clarify this plan one question at a time"
 			],
-			"sourceUrl": "https://github.com/iowarp/clio-coder/tree/main/library/skills/workflow/grill-me",
-			"version": "0.5.1",
+			"sourceUrl": "https://github.com/iowarp/clio-coder/tree/main/library/skills/workflow/plan-interview",
+			"version": "0.5.2",
 			"audit": "pass",
 			"category": "workflow"
 		},
 		{
-			"name": "workflow-distiller",
-			"description": "Packages a workflow that just happened into a reusable SKILL.md: reconstructs it from the session record, checks overlap with installed skills, gates on approval, then writes it following skill-craft. Not for authoring a skill with no prior workflow; use skill-craft.",
+			"name": "sprint-plan",
+			"description": "Slices an existing plan, PRD, or milestone into an executable sprint of dependency-ordered vertical slices sized for one agent run each, with done-when verification per slice; never fabricates a plan. Not for deciding the approach; use architecture.",
+			"triggers": [
+				"plan an executable sprint",
+				"slice this plan",
+				"make this plan executable",
+				"turn this milestone into a sprint",
+				"write dependency-ordered vertical slices"
+			],
+			"sourceUrl": "https://github.com/iowarp/clio-coder/tree/main/library/skills/workflow/sprint-plan",
+			"version": "0.4.2",
+			"audit": "pass",
+			"category": "workflow"
+		},
+		{
+			"name": "workflow-capture",
+			"description": "Packages a workflow that just happened into a reusable SKILL.md: reconstructs it from the session record, checks overlap with installed skills, gates on approval, then writes it following skill-authoring. Not for authoring a skill with no prior workflow; use skill-authoring.",
 			"triggers": [
 				"make this workflow a skill",
 				"package what we just did",
@@ -512,8 +501,8 @@
 				"distill this repeated process",
 				"create a skill from this session"
 			],
-			"sourceUrl": "https://github.com/iowarp/clio-coder/tree/main/library/skills/workflow/workflow-distiller",
-			"version": "0.4.2",
+			"sourceUrl": "https://github.com/iowarp/clio-coder/tree/main/library/skills/workflow/workflow-capture",
+			"version": "0.4.3",
 			"audit": "pass",
 			"category": "workflow"
 		}

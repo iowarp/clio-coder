@@ -519,8 +519,8 @@ export async function runUsageCommand(argv: ReadonlyArray<string>): Promise<numb
 		const bareIds = [...ids].filter((id) => !sessionsWithSkills.has(id));
 		if (bareIds.length < 3) continue;
 		opportunities.push({
-			kind: "workflow-distiller",
-			suggestion: `bash shape "${shape}" recurs with no skill activation; consider /skill workflow-distiller to distill it`,
+			kind: "workflow-capture",
+			suggestion: `bash shape "${shape}" recurs with no skill activation; consider /skill workflow-capture to distill it`,
 			evidence: `${bareIds.length} sessions: ${bareIds.slice(0, 5).join(", ")}${bareIds.length > 5 ? ", ..." : ""}`,
 		});
 	}
@@ -1116,7 +1116,7 @@ function bashShape(command: string): string {
 
 /**
  * Shell furniture whose recurrence says nothing about a distillable workflow.
- * Applies to the workflow-distiller opportunity only; the facts table still
+ * Applies to the workflow-capture opportunity only; the facts table still
  * reports these shapes.
  */
 const TRIVIAL_SHAPE_VERBS = new Set([

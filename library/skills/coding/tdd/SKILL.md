@@ -7,7 +7,7 @@ triggers:
   - red green
   - build this test-first
   - reproduce the bug with a test
-version: 0.4.0
+version: 0.4.1
 license: Apache-2.0
 allowed-tools:
   - read
@@ -20,8 +20,6 @@ clio-coder:
   registry-id: iowarp/clio-coder
   source-url: https://github.com/iowarp/clio-coder/tree/main/library/skills/coding/tdd
   audit: pass
-  provenance: adapted
-  origin: https://github.com/mattpocock/skills/tree/main/skills/engineering/tdd
   model-size: any
   agents:
     - main

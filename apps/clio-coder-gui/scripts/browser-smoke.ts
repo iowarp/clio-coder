@@ -533,11 +533,11 @@ try {
 			await page.screenshot({ path: join(output, `usage-${width}.png`), fullPage: true });
 		await navigate("Library");
 		// The catalog is the landing collection: plan, review, apply, then remove, all against the bundled index.
-		const offer = page.locator("main").getByRole("listitem", { name: "skill:archify", exact: true });
+		const offer = page.locator("main").getByRole("listitem", { name: "skill:map-codebase", exact: true });
 		await offer.waitFor();
 		await check("library-catalog");
-		await offer.getByRole("button", { name: "Install skill:archify for me", exact: true }).click();
-		const review = page.getByRole("dialog", { name: "Install skill:archify", exact: true });
+		await offer.getByRole("button", { name: "Install skill:map-codebase for me", exact: true }).click();
+		const review = page.getByRole("dialog", { name: "Install skill:map-codebase", exact: true });
 		await review.getByText("This is exactly what will be applied. Nothing has been written yet.").waitFor();
 		await review.getByText("Staged and verified").waitFor();
 		await check("library-plan");
@@ -552,9 +552,9 @@ try {
 		await review.getByRole("button", { name: "Done", exact: true }).click();
 		await offer.locator(".status-mark", { hasText: "Ready" }).waitFor();
 		// A second user install is no longer offered; the project scope still is.
-		if (await offer.getByRole("button", { name: "Install skill:archify for me", exact: true }).count())
+		if (await offer.getByRole("button", { name: "Install skill:map-codebase for me", exact: true }).count())
 			throw new Error("An installed user copy still offers a user install.");
-		await offer.getByRole("button", { name: "Install skill:archify in this project", exact: true }).waitFor();
+		await offer.getByRole("button", { name: "Install skill:map-codebase in this project", exact: true }).waitFor();
 		await page
 			.locator("main")
 			.getByRole("button", { name: /^Installed only · [1-9]/ })
@@ -566,8 +566,8 @@ try {
 		await check("library-installed-dark");
 		if (width === 1600) await page.screenshot({ path: join(output, "library-installed-dark.png"), fullPage: true });
 		await dark(false);
-		await offer.getByRole("button", { name: "Remove the user copy of skill:archify", exact: true }).click();
-		const removal = page.getByRole("dialog", { name: "Remove skill:archify", exact: true });
+		await offer.getByRole("button", { name: "Remove the user copy of skill:map-codebase", exact: true }).click();
+		const removal = page.getByRole("dialog", { name: "Remove skill:map-codebase", exact: true });
 		await removal.getByRole("button", { name: "Apply this change", exact: true }).click();
 		await removal.getByText("The files and the install record are gone.").waitFor();
 		await removal.getByRole("button", { name: "Done", exact: true }).click();

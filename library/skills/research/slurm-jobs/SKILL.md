@@ -8,13 +8,12 @@ triggers:
   - check my slurm job
   - cancel my slurm job
   - is the queue busy
-version: 0.1.0
+version: 0.1.1
 license: Apache-2.0
 clio-coder:
   registry-id: iowarp/clio-coder
   source-url: https://github.com/iowarp/clio-coder/tree/main/library/skills/research/slurm-jobs
   audit: pass
-  provenance: designed
   model-size: any
 ---
 

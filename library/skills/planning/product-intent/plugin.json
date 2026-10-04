@@ -1,7 +1,7 @@
 {
 	"$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
 	"name": "product-intent",
-	"version": "0.4.1",
+	"version": "0.4.2",
 	"description": "Writes a problem-first product document for a greenfield effort: interviews for the problem, evidence, and a falsifiable hypothesis, with zero engineering decisions. Not for engineering decisions; use architecture. Not for turning a locked idea into milestone build prompts; use prd.",
 	"license": "Apache-2.0",
 	"extensions": {

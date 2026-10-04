@@ -7,7 +7,7 @@ triggers:
   - compare these papers
   - find recent research papers
   - build a literature survey
-version: 0.5.1
+version: 0.5.2
 license: Apache-2.0
 allowed-tools:
   - web_fetch
@@ -20,7 +20,6 @@ clio-coder:
   registry-id: iowarp/clio-coder
   source-url: https://github.com/iowarp/clio-coder/tree/main/library/skills/research/arxiv-literature
   audit: pass
-  provenance: designed
   model-size: any
   agents:
     - researcher

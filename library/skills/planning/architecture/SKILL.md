@@ -1,13 +1,13 @@
 ---
 name: architecture
-description: "Decides the engineering approach for an intent in an interactive session: investigates, proposes two or three genuinely different approaches with trade-offs, recommends, lets the user decide, and writes the decision doc. Not a task-by-task plan; use cut-it. Not a multi-perspective debate; use design-council. Not product intent; use product-intent. Not a typed implementation handoff; use tech-spec."
+description: "Decides the engineering approach for an intent in an interactive session: investigates, proposes two or three genuinely different approaches with trade-offs, recommends, lets the user decide, and writes the decision doc. Not a task-by-task plan; use sprint-plan. Not a multi-perspective debate; use design-council. Not product intent; use product-intent. Not a typed implementation handoff; use tech-spec."
 triggers:
   - how should we build this
   - pick the stack
   - architecture for this feature
   - decide the engineering approach
   - compare architecture options
-version: 0.4.1
+version: 0.4.2
 license: Apache-2.0
 allowed-tools:
   - read
@@ -24,8 +24,6 @@ clio-coder:
   registry-id: iowarp/clio-coder
   source-url: https://github.com/iowarp/clio-coder/tree/main/library/skills/planning/architecture
   audit: pass
-  provenance: adapted
-  origin: https://github.com/coleam00/skills/tree/main/.claude/skills/architecture
   model-size: large
   agents:
     - main
@@ -161,13 +159,13 @@ The doc exists at a confirmed location, every section is either filled or
 explicitly marked skipped, every one-way-door call has a spike or a user
 decision, and the user has been offered the next moves without a forced
 pipeline: slice into tickets (`backlog`), slice into a local
-sprint (`cut-it`), spike a flagged risk now, or keep refining here.
+sprint (`sprint-plan`), spike a flagged risk now, or keep refining here.
 
 ## Red flags
 
 - A document produced in one shot with no user calls in between.
 - One foregone conclusion instead of real alternatives.
-- File-by-file edit lists (that is cut-it's altitude).
+- File-by-file edit lists (that is sprint-plan's altitude).
 - A one-way door decided by vibe instead of a spike.
 - A decision doc at any filename other than the three valid locations
   above — `final_report.md`, `REPORT.md`, and similar are wrong every time.

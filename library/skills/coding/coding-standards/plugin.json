@@ -1,7 +1,7 @@
 {
 	"$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
 	"name": "coding-standards",
-	"version": "0.4.0",
+	"version": "0.4.1",
 	"description": "Correct-by-construction TypeScript rules (errors as values, parse don't validate, illegal states unrepresentable, deep modules) for writing or refactoring TypeScript when the project has not pinned its own standards.",
 	"license": "Apache-2.0",
 	"extensions": {

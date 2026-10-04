@@ -1,13 +1,13 @@
 ---
-name: skill-craft
-description: Writes, reviews, or prunes a SKILL.md, judging whether its description, body, and length earn their cost. Not for packaging a workflow that just happened; use workflow-distiller.
+name: skill-authoring
+description: Writes, reviews, or prunes a SKILL.md, judging whether its description, body, and length earn their cost. Not for packaging a workflow that just happened; use workflow-capture.
 triggers:
   - write a SKILL.md
   - create a new skill
   - improve this skill
   - why isn't this skill firing
   - prune a skill body
-version: 0.3.1
+version: 0.3.2
 license: Apache-2.0
 allowed-tools:
   - read
@@ -17,13 +17,12 @@ allowed-tools:
   - bash
 clio-coder:
   registry-id: iowarp/clio-coder
-  source-url: https://github.com/iowarp/clio-coder/tree/main/library/skills/meta/skill-craft
+  source-url: https://github.com/iowarp/clio-coder/tree/main/library/skills/meta/skill-authoring
   audit: pass
-  provenance: designed
   model-size: large
 ---
 
-# Skill Craft
+# Skill Authoring
 
 A skill exists to wrangle predictability out of a stochastic system: the same
 process every run, not the same output. Every rule below is a lever on that
@@ -66,9 +65,10 @@ Frontmatter contract (Agent Skills compatible):
 - `requires`: `skill:<name>` dependencies; the loader warns when one is
   missing. Reference an installed skill by name instead of restating its job.
 - `clio-coder:`: the reserved publication block (`registry-id`, `source-url`,
-  `audit`, `provenance` designed|adapted|imported with `origin` when not
-  designed, optional `model-size` and `agents`). Required for catalog skills;
-  approval is judged against it (library/skills/README.md).
+  `audit`, optional `model-size` and `agents`). Required for catalog skills.
+  These are publication and review fields, not authorship claims. Preserve
+  required notices for retained third-party material; do not invent ancestry
+  or replacement originality declarations.
 
 Sibling files (`references/*.md`, scripts) ride along in the folder and load
 only when the body points at them.

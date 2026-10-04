@@ -1,4 +1,4 @@
-import { deepStrictEqual, match, ok, strictEqual } from "node:assert/strict";
+import { match, ok, strictEqual } from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
@@ -8,7 +8,7 @@ import { describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
 import { readCodewiki, writeCodewiki } from "../../src/domains/context/codewiki/artifact.js";
 import { buildCodewiki } from "../../src/domains/context/codewiki/indexer.js";
-import type { ArchitectureSeed } from "../../src/domains/context/wiki/map-seed.js";
+
 import { makeScratchHome } from "../harness/scratch-env.js";
 
 const require = createRequire(import.meta.url);
@@ -47,7 +47,7 @@ async function fixture(run: (cwd: string, env: NodeJS.ProcessEnv) => Promise<voi
 	}
 }
 
-function mapRepository(cwd: string, env: NodeJS.ProcessEnv) {
+function mapRepository(cwd: string, env: NodeJS.ProcessEnv, args = ["--json"]) {
 	// Import only this deterministic subcommand, without booting the CLI or providers.
 	const stdout = execFileSync(
 		process.execPath,
@@ -56,7 +56,7 @@ function mapRepository(cwd: string, env: NodeJS.ProcessEnv) {
 			loader,
 			"--input-type=module",
 			"-e",
-			`const { runContextMapCommand } = await import(${JSON.stringify(command)}); process.exitCode = await runContextMapCommand(["--json"]);`,
+			`const { runContextMapCommand } = await import(${JSON.stringify(command)}); process.exitCode = await runContextMapCommand(${JSON.stringify(args)});`,
 		],
 		{ cwd, env, encoding: "utf8", timeout: 30_000 },
 	);
@@ -66,12 +66,12 @@ function mapRepository(cwd: string, env: NodeJS.ProcessEnv) {
 		index: string;
 		sourceState: string;
 	};
-	return { result, seed: JSON.parse(readFileSync(result.path, "utf8")) as ArchitectureSeed };
+	return { result, html: readFileSync(result.path, "utf8") };
 }
 
-function uncited(seed: ArchitectureSeed): void {
-	strictEqual(seed.meta.repository, undefined);
-	ok(seed.components.every((component) => component.sources === undefined));
+function uncited(html: string): void {
+	ok(!html.includes("/blob/"));
+	match(html, /local files at generation time/);
 }
 
 describe("context map current source evidence", () => {
@@ -83,16 +83,15 @@ describe("context map current source evidence", () => {
 			);
 			git(cwd, "add", ".");
 			git(cwd, "commit", "-qm", "move symbol");
-			const { result, seed } = mapRepository(cwd, env);
-			deepStrictEqual(seed.components.find((component) => component.label === "app")?.sources, [
-				{ path: "app/main.ts", line: 5 },
-			]);
+			const { result, html } = mapRepository(cwd, env);
+			match(html, /app\/main.ts:5/);
+			match(html, /github.com\/example\/map-fixture\/blob\//);
 			strictEqual(result.index, "reconciled");
 			strictEqual(result.sourceState, "clean");
 			strictEqual(result.repository?.revision, git(cwd, "rev-parse", "HEAD"));
 			ok(readCodewiki(cwd)?.symbols.some((symbol) => symbol.name === "current" && symbol.line === 5));
 			const second = mapRepository(cwd, env);
-			deepStrictEqual(second.seed, seed);
+			strictEqual(second.html, html);
 		});
 	});
 
@@ -105,12 +104,13 @@ describe("context map current source evidence", () => {
 				join(cwd, "app/main.ts"),
 				'import { current } from "../service/current.js";\n\nexport function changed() { return current; }\n',
 			);
-			const { result, seed } = mapRepository(cwd, env);
-			uncited(seed);
+			const { result, html } = mapRepository(cwd, env);
+			uncited(html);
 			strictEqual(result.sourceState, "dirty");
 			strictEqual(result.repository, null);
-			deepStrictEqual(seed.components.map((component) => component.label).sort(), ["app", "service"]);
-			ok(seed.connections.some((edge) => edge.from === "app" && edge.to === "service"));
+			match(html, /service\/current.ts/);
+			ok(!html.includes("store/value.ts"));
+			match(html, /app\/main.ts.*→.*service\/current.ts/);
 			ok(!readCodewiki(cwd)?.symbols.some((symbol) => symbol.name === "main" || symbol.name === "value"));
 		});
 	});
@@ -120,43 +120,68 @@ describe("context map current source evidence", () => {
 			git(cwd, "update-index", "--assume-unchanged", "app/main.ts");
 			writeFileSync(join(cwd, "app/main.ts"), "\n\nexport function hiddenChange() {}\n");
 			strictEqual(git(cwd, "status", "--porcelain"), "");
-			const { result, seed } = mapRepository(cwd, env);
-			uncited(seed);
+			const { result, html } = mapRepository(cwd, env);
+			uncited(html);
 			strictEqual(result.sourceState, "dirty");
 			ok(readCodewiki(cwd)?.symbols.some((symbol) => symbol.name === "hiddenChange" && symbol.line === 3));
 		});
 	});
 
-	it("keeps a refreshed seed usable when Git evidence is unavailable", async () => {
+	it("keeps a refreshed map usable when Git evidence is unavailable", async () => {
 		await fixture(async (cwd, env) => {
 			writeFileSync(join(cwd, "app/main.ts"), "\nexport function withoutGit() {}\n");
-			const { result, seed } = mapRepository(cwd, env);
+			const { result, html } = mapRepository(cwd, env);
 			strictEqual(result.sourceState, "unknown");
 			strictEqual(result.index, "reconciled");
-			uncited(seed);
-			ok(seed.components.length > 0);
+			uncited(html);
+			match(html, /<svg/);
 			ok(readCodewiki(cwd)?.symbols.some((symbol) => symbol.name === "withoutGit" && symbol.line === 2));
 		}, false);
 	});
 
 	it("keeps unavailable Git executable evidence unknown", async () => {
 		await fixture(async (cwd, env) => {
-			const { result, seed } = mapRepository(cwd, { ...env, PATH: join(cwd, "no-executables") });
+			const { result, html } = mapRepository(cwd, { ...env, PATH: join(cwd, "no-executables") });
 			strictEqual(result.sourceState, "unknown");
 			strictEqual(result.index, "reconciled");
-			uncited(seed);
-			ok(seed.components.length > 0);
+			uncited(html);
+			match(html, /<svg/);
 		});
 	});
 
 	it("reports clean separately from a missing supported origin", async () => {
 		await fixture(async (cwd, env) => {
 			git(cwd, "remote", "remove", "origin");
-			const { result, seed } = mapRepository(cwd, env);
+			const { result, html } = mapRepository(cwd, env);
 			strictEqual(result.sourceState, "clean");
 			strictEqual(result.repository, null);
-			uncited(seed);
-			match(readFileSync(result.path, "utf8"), /architecture/);
+			uncited(html);
+			match(readFileSync(result.path, "utf8"), /Codebase map/);
 		});
 	});
+});
+
+it("builds a missing index and honors the requested HTML destination", async () => {
+	await fixture(async (cwd, env) => {
+		rmSync(join(cwd, ".clio-coder"), { recursive: true, force: true });
+		const { result, html } = mapRepository(cwd, env, ["--out", "deliverables/overview.html", "--json"]);
+		strictEqual(result.path, join(cwd, "deliverables/overview.html"));
+		match(html, /app\/main.ts:2/);
+		ok(readCodewiki(cwd));
+	}, false);
+});
+
+it("rejects a non-HTML output without overwriting it", async () => {
+	await fixture(async (cwd, env) => {
+		const target = join(cwd, "input.json");
+		writeFileSync(target, "operator contents");
+		let failed = false;
+		try {
+			mapRepository(cwd, env, ["--out", "input.json", "--json"]);
+		} catch {
+			failed = true;
+		}
+		ok(failed);
+		strictEqual(readFileSync(target, "utf8"), "operator contents");
+	}, false);
 });

@@ -7,7 +7,7 @@ triggers:
   - prototype this state model
   - sanity-check this logic
   - what should this UI look like
-version: 0.4.0
+version: 0.4.1
 license: Apache-2.0
 allowed-tools:
   - read
@@ -22,8 +22,6 @@ clio-coder:
   registry-id: iowarp/clio-coder
   source-url: https://github.com/iowarp/clio-coder/tree/main/library/skills/coding/prototype
   audit: pass
-  provenance: adapted
-  origin: https://github.com/mattpocock/skills/tree/main/skills/engineering/prototype
   model-size: any
   agents:
     - main

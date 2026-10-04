@@ -1,13 +1,13 @@
 ---
 name: find-skills
-description: Finds published skills and prepares their Library installation for the operator when the user asks whether a capability exists as a skill. Not for authoring a new skill; use skill-craft.
+description: Finds published skills and prepares their Library installation for the operator when the user asks whether a capability exists as a skill. Not for authoring a new skill; use skill-authoring.
 triggers:
   - find a skill
   - is there a skill for this
   - install a skill
   - add an agent skill
   - search the skills marketplace
-version: 0.2.1
+version: 0.2.2
 license: Apache-2.0
 allowed-tools:
   - bash
@@ -19,7 +19,6 @@ clio-coder:
   registry-id: iowarp/clio-coder
   source-url: https://github.com/iowarp/clio-coder/tree/main/library/skills/meta/find-skills
   audit: pass
-  provenance: designed
   model-size: any
 ---
 

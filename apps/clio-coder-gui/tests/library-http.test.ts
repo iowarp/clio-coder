@@ -130,7 +130,7 @@ test("a catalog package installs and removes through one reviewed plan, and a pl
 
 		assert.equal((await h.post(`${base}/plans`, { operation: "remove", ref: offer.ref })).status, 404);
 		assert.equal((await h.post(`${base}/plans`, { operation: "install", ref: "skill:no-such-package" })).status, 404);
-		for (const ref of ["../extension-source", "https://github.com/a/b/tree/main/x", "archify"])
+		for (const ref of ["../extension-source", "https://github.com/a/b/tree/main/x", "map-codebase"])
 			assert.equal((await h.post(`${base}/plans`, { operation: "install", ref })).status, 422);
 		assert.equal((await h.post(`${base}/plans`, { operation: "import", ref: offer.ref })).status, 422);
 	} finally {

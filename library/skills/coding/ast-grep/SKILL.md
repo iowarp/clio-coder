@@ -7,7 +7,7 @@ triggers:
   - find calls with this argument shape
   - find code inside a function
   - grep returns too much noise
-version: 0.3.0
+version: 0.3.1
 license: Apache-2.0
 allowed-tools:
   - bash
@@ -20,8 +20,6 @@ clio-coder:
   registry-id: iowarp/clio-coder
   source-url: https://github.com/iowarp/clio-coder/tree/main/library/skills/coding/ast-grep
   audit: pass
-  provenance: adapted
-  origin: https://github.com/coleam00/skills/tree/main/.claude/skills/ast-grep
   model-size: any
   agents:
     - main

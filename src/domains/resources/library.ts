@@ -479,10 +479,11 @@ export function planLibraryUpdate(
 				(entry) => entry.kind === identity.kind && entry.name === identity.name && entry.origin !== "installed",
 			)
 		: undefined;
-	if (catalogOrigin && !catalog)
+	if (catalogOrigin && !catalog) {
 		throw new Error(
 			`plugin catalog source unavailable: ${id}; restore its pinned catalog entry or explicitly install a new source`,
 		);
+	}
 	const entry = catalog ?? (pin ? resolveLibraryPackage(pin.sourceUrl, options) : undefined);
 	if (!entry) throw new Error(`plugin has no update source: ${id}`);
 	if (entry.name !== identity.name || entry.kind !== identity.kind)

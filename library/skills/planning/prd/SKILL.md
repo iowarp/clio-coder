@@ -7,7 +7,7 @@ triggers:
   - define this feature
   - structure this product brain dump
   - create milestone prompts
-version: 0.4.1
+version: 0.4.2
 license: Apache-2.0
 allowed-tools:
   - read
@@ -24,8 +24,6 @@ clio-coder:
   registry-id: iowarp/clio-coder
   source-url: https://github.com/iowarp/clio-coder/tree/main/library/skills/planning/prd
   audit: pass
-  provenance: adapted
-  origin: buildermethods/bm-prd-creator
   model-size: large
 ---
 
@@ -112,7 +110,7 @@ wrote with `grep`, `read`, and `find`, never `bash`.
   from the PRD, and done-when criteria. A reader must not need the PRD open
   to act on it.
 
-Offer the natural next step: run `cut-it` on a milestone prompt to slice it
+Offer the natural next step: run `sprint-plan` on a milestone prompt to slice it
 into a sprint.
 
 ## Red flags (you are doing it wrong)

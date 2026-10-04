@@ -1,7 +1,7 @@
 {
 	"$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
 	"name": "ast-grep",
-	"version": "0.3.0",
+	"version": "0.3.1",
 	"description": "Structural code search with ast-grep rules: finds code by shape when grep on text is too noisy, and never rewrites it. Not for plain string or filename lookups; use grep or find.",
 	"license": "Apache-2.0",
 	"extensions": {

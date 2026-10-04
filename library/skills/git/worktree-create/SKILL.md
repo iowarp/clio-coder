@@ -6,7 +6,7 @@ triggers:
   - set up worktrees for these branches
   - spin up parallel branches
   - prepare parallel worktrees
-version: 0.6.0
+version: 0.6.1
 license: Apache-2.0
 compatibility: git >=2.30.0, POSIX-compatible shell
 allowed-tools:
@@ -23,8 +23,6 @@ clio-coder:
   registry-id: iowarp/clio-coder
   source-url: https://github.com/iowarp/clio-coder/tree/main/library/skills/git/worktree-create
   audit: pass
-  provenance: adapted
-  origin: https://github.com/coleam00/skills/tree/main/.claude/skills/worktree-create
   model-size: any
   agents:
     - main

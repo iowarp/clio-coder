@@ -1,5 +1,5 @@
 ---
-name: herdr
+name: terminal-control
 description: Launches, drives, or inspects another agent or command in a Herdr pane, tab, or workspace, including a second Clio Coder instance; requires HERDR_ENV=1. Not for background work a plain shell or dispatch already covers.
 triggers:
   - use Herdr
@@ -7,7 +7,7 @@ triggers:
   - inspect a Herdr agent
   - start a second Clio Coder instance
   - drive a command in a Herdr workspace
-version: 0.2.0
+version: 0.2.1
 license: Apache-2.0
 allowed-tools:
   - bash
@@ -15,16 +15,14 @@ allowed-tools:
   - ask_user
 clio-coder:
   registry-id: iowarp/clio-coder
-  source-url: https://github.com/iowarp/clio-coder/tree/main/library/skills/meta/herdr
+  source-url: https://github.com/iowarp/clio-coder/tree/main/library/skills/meta/terminal-control
   audit: pass
-  provenance: adapted
-  origin: https://github.com/herdrdev/herdr/tree/master/skills/herdr
   model-size: any
   agents:
     - main
 ---
 
-# Herdr
+# Terminal Control
 
 Herdr organizes terminals into workspaces, tabs, and panes, recognizes coding
 agents running inside panes, and exposes the session through the `herdr` CLI.

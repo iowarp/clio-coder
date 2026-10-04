@@ -6,7 +6,6 @@ license: Apache-2.0
 clio-coder:
   registry-id: dataset-curation
   source-url: https://github.com/iowarp/clio-coder/tree/main/library/_authoring/templates/plugin
-  provenance: designed
 triggers:
   - curate dataset
   - fair data check

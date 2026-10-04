@@ -8,7 +8,7 @@ triggers:
   - define numerical tolerances
   - reproduce these results
   - compare solver accuracy
-version: 0.3.1
+version: 0.3.2
 license: Apache-2.0
 allowed-tools:
   - read
@@ -24,7 +24,6 @@ clio-coder:
   registry-id: iowarp/clio-coder
   source-url: https://github.com/iowarp/clio-coder/tree/main/library/skills/research/experiment-protocol
   audit: pass
-  provenance: designed
   model-size: any
 ---
 

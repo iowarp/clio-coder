@@ -6,13 +6,12 @@ triggers:
   - test Clio context compaction or memory
   - verify Clio skill activation
   - choose Clio test gates
-version: 0.4.0
+version: 0.4.1
 license: Apache-2.0
 clio-coder:
   registry-id: iowarp/clio-coder
   source-url: https://github.com/iowarp/clio-coder/tree/main/library/skills/meta/clio-coder-test
   audit: pass
-  provenance: designed
   model-size: any
 ---
 

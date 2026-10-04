@@ -784,12 +784,6 @@
 			"library/skills/meta/credentials/plugin.json": "98bedaa5a5316f5a04fc3ed0a4783f6853b4db8b5a0af68bb821f33cfa7a31b9",
 			"library/skills/meta/find-skills/SKILL.md": "09810e4e0459ce7efa6766bc7432a61540116bbec991736a6f67ec40d5032f19",
 			"library/skills/meta/find-skills/plugin.json": "8dd8f6813f834facdbacc2deca32e7afee785d13ee819c1d7be1df6f358aa265",
-			"library/skills/meta/herdr/SKILL.md": "4561c152add7fc075b12455d94a49cd351a9e19983aaf10be948f24acde73c3d",
-			"library/skills/meta/herdr/plugin.json": "4a22f762ca96593680471def7889301d326e8f22b19fd954d0c5f85712a68ff6",
-			"library/skills/meta/skill-craft/SKILL.md": "7b5b6b1b4082c1eaa425a1d4fba93d48fb2450e4e6f5163b6eb9140ae0629eee",
-			"library/skills/meta/skill-craft/plugin.json": "57ab068cc7290574d59bffe4168990304575b752343df7907fabb48af1b94b4a",
-			"library/skills/planning/archify/SKILL.md": "10fe9c020b9eb9e03dfab28665ec5c3410a21bee8ab308570864b28779fd1ed9",
-			"library/skills/planning/archify/plugin.json": "97dd3bf0539b686807d670cfb7aff82dd644d25221ea2d6e3da8ec876ded4409",
 			"library/skills/planning/architecture/SKILL.md": "f35ca9ea7c5c27bc8896a3533bc25e1683f4df9a090c38eed3b26bde25f09f3e",
 			"library/skills/planning/architecture/plugin.json": "27c10b7d8a851fe04267c168950d8dfe6cf9cd9c4614d88cd45b5cf6500e2a94",
 			"library/skills/planning/backlog/SKILL.md": "d40b2cd1a95be4f28bcc8775674dc74f8b2c1e655171f85470ad7e5ceaae8eb7",
@@ -813,14 +807,8 @@
 			"library/skills/research/slurm-jobs/SKILL.md": "3d9863e5c00a8406189615aac7bd5b7898d31389ca01934d42689570d88bbfad",
 			"library/skills/research/slurm-jobs/plugin.json": "ed896a41b35eb4dcf4b9af9ebea799aa33d957d80231214390d143fbfe5941ac",
 			"library/skills/skill-marketplace.json": "a3ed90e3e15cda345a99259e8aa977f97c1cabad295d63310b650276a962503a",
-			"library/skills/workflow/cut-it/SKILL.md": "8d4ba9bc9bfd86e317a4813496153f703847bda77da756b10c652e50c490848a",
-			"library/skills/workflow/cut-it/plugin.json": "9ec864e9283ae75810f1a5ac85443e792dfcafcc2f498ee309bf72ab24ddfc79",
 			"library/skills/workflow/design-council/SKILL.md": "39a60a8dd83d4566cbcaf0e2b033d2b7b7fbcdc01674ff600c60467bc6952df1",
 			"library/skills/workflow/design-council/plugin.json": "6f365209ceecff7fa8385f959c6830e01b3703ae1d8c3ae5f682a5a2af2f55b2",
-			"library/skills/workflow/grill-me/SKILL.md": "af5f52b194b79085243d18a839ad90d0b60bf3752ba36f460781fb56a150ef45",
-			"library/skills/workflow/grill-me/plugin.json": "d818db1754ed81718e5f814dddcfaa6a088e40c2744b3582740965a6e80aff77",
-			"library/skills/workflow/workflow-distiller/SKILL.md": "58f0bc2257b74c1ea1b68eafe66fa91be04e28dde22a822912a1e1c68ba772c6",
-			"library/skills/workflow/workflow-distiller/plugin.json": "a60fee75a563d4e340f84a173821cb9c544e93b71fd31880e3a05e8d27cea519",
 			"package.json": "4d50bd1456c701b15f2a4678bff30b7047c2838ac91ebc4eae06e6b51a06a43b",
 			"patches/@earendil-works__pi-tui@0.87.1.patch": "97376094ab159da8614b95e8b898a56c4ba8517ef144574c5961efdfe07d5f29",
 			"patches/README.md": "f26f57c6a2f256aa20d41ae3f7a2ba3fad3c662a6308a50fdf0329462c77ee94",
@@ -1208,7 +1196,7 @@
 			"src/domains/context/wiki/frontmatter.ts": "defaf9c96e509e6ddec19a9c9310427490c24090113742006c07012d2220bb13",
 			"src/domains/context/wiki/generate.ts": "79829a44f37f9fafff281ba1281e7fee960dfb143fc27b0405c4fcf05c626ff5",
 			"src/domains/context/wiki/layout.ts": "7485f3f973c81822252b84403430f2f97855bf779d0ba841a56c8b1c2d34489b",
-			"src/domains/context/wiki/map-seed.ts": "c470f33ee42e7354733f9e5496741005576079b85fc721adb5d4130fcb3848f4",
+			"src/domains/context/wiki/repo-map.ts": "883d311e0e9f1949bf46a6e7973154d12bdad145eef11b2a21e5e73d23590fac",
 			"src/domains/context/wiki/meta.ts": "c418aeb77ba50539d8e89e784be92965a80889a0697bc29764c07af802a809f1",
 			"src/domains/context/wiki/plan-store.ts": "78d6b07d03af6f247657f30cc161a6b02333fd63b28a3b1a0eece2c9261b8e23",
 			"src/domains/context/wiki/plan.ts": "c7bd4044622a26d5753958ac486d65d0da87ba04730cd32e18220a38c18b19f1",
@@ -2507,7 +2495,7 @@
 			"tests/extended/context-handbook-fidelity.test.ts": "e315c81ac85632a11ed95c3710340a03ff41b981941b9b7fde05f1fdcfae493e",
 			"tests/extended/context-lifecycle.test.ts": "1ab5bec16cb4650602bc6f78eb09d0838608cc7f9cbdc4ba7d68cf1763d193f6",
 			"tests/extended/context-map-freshness.test.ts": "f7f88ce3d21162a7c0aede8e9853b10c602a176f63af62839f2590963b05534f",
-			"tests/extended/context-map-seed.test.ts": "76f247d6ce23f9d323d2d252cbdcf968189f9a9cecc14fee5d3b02adf457fd2a",
+			"tests/extended/repo-map.test.ts": "b6fd19502ef2f62bf0270d0897a4a6aa8747f0ee440032ae095a097ad94f86d0",
 			"tests/extended/continuation-proposal-scope.test.ts": "fd32238f0b6e2f01cdc1a397d95b3c09c132f335976ad64d1c613e2039bcfddc",
 			"tests/extended/data-stress.test.ts": "80f76bf794ae0136500805faba6927ba6f89df76cb5ea3b316a8acd6d21aa968",
 			"tests/extended/demo-guidance.test.ts": "dacbf745076452ec980ff591d0425bb12e3143f547fdd4a659c2eb37813421ab",
@@ -3055,7 +3043,7 @@
 					"src/domains/context/adoption.ts",
 					"src/domains/context/codewiki/tree-sitter.ts",
 					"src/domains/context/wiki/generate.ts",
-					"src/domains/context/wiki/map-seed.ts"
+					"src/domains/context/wiki/repo-map.ts"
 				],
 				"status": "pending",
 				"attempts": 1,
@@ -3074,7 +3062,7 @@
 					"src/domains/context/codewiki/tree-sitter.ts",
 					"src/domains/context/codewiki/coordinator.ts",
 					"src/domains/context/wiki/generate.ts",
-					"src/domains/context/wiki/map-seed.ts",
+					"src/domains/context/wiki/repo-map.ts",
 					"src/domains/context/wiki/plan.ts",
 					"src/domains/context/working-set/policies/index.ts",
 					"src/domains/context/working-set/policies/structural.ts",
@@ -3082,7 +3070,7 @@
 					"src/domains/context/state.ts",
 					"src/domains/context/fingerprint.ts",
 					"tests/contracts/context-pressure.test.ts",
-					"tests/extended/context-map-seed.test.ts"
+					"tests/extended/repo-map.test.ts"
 				]
 			},
 			{
@@ -4047,7 +4035,6 @@
 				"attempts": 1,
 				"lastFailure": {
 					"phase": "validation",
-					"detail": "evidence check failed: Replace or remove unresolved repository reference \"tests/contracts/pane-remedies.test.ts\"; inspect the current file path.; Replace or remove unresolved repository reference \"$XDG_CONFIG_HOME/herdr/sessions/$HERDR_SESSION/herdr.sock\"; inspect the current file path.; Replace or remove unresolved repository reference \"$XDG_CONFIG_HOME/herdr/herdr.sock\"; inspect the current file path.; Replace or remove unresolved repository reference \"types.ts\"; inspect the current file path.",
 					"runId": "395msvo3d48z"
 				},
 				"dependencies": [

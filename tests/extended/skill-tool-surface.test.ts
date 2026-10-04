@@ -51,15 +51,15 @@ import { isolateClioEnv } from "../harness/scratch-env.js";
 
 const roots: string[] = [];
 
-it("keeps Architect's admitted artifact available under cut-it without widening other tools", () => {
+it("keeps Architect's admitted artifact available under sprint-plan without widening other tools", () => {
 	const catalog = loadSkills({
 		cwd: process.cwd(),
 		disableDiscovery: true,
-		explicitSkillPaths: [new URL("../../library/skills/workflow/cut-it", import.meta.url).pathname],
+		explicitSkillPaths: [new URL("../../library/skills/workflow/sprint-plan", import.meta.url).pathname],
 	});
-	const skill = catalog.items.find((entry) => entry.name === "cut-it");
+	const skill = catalog.items.find((entry) => entry.name === "sprint-plan");
 	ok(skill);
-	const policy = agentSkillToolPolicy(["cut-it"], [ToolNames.Artifact]);
+	const policy = agentSkillToolPolicy(["sprint-plan"], [ToolNames.Artifact]);
 	ok(policy);
 	policy.loadedSkillNames.add(skill.name);
 	policy.loadedSkillPolicies.set(skill.name, skill);

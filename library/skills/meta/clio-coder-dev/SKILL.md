@@ -6,13 +6,12 @@ triggers:
   - implement a Clio sprint packet
   - change Clio context or session lifecycle
   - edit Clio skills tools or prompts
-version: 0.5.0
+version: 0.5.1
 license: Apache-2.0
 clio-coder:
   registry-id: iowarp/clio-coder
   source-url: https://github.com/iowarp/clio-coder/tree/main/library/skills/meta/clio-coder-dev
   audit: pass
-  provenance: designed
   model-size: any
 ---
 

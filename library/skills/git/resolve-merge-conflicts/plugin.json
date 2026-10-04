@@ -1,7 +1,7 @@
 {
 	"$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
 	"name": "resolve-merge-conflicts",
-	"version": "0.4.0",
+	"version": "0.4.1",
 	"description": "Resolves a merge, rebase, or cherry-pick stopped on conflicts by reconstructing both sides' intent, validating with the project's own checks, and completing the operation. Not for integrating many branches; use worktree-merge.",
 	"license": "Apache-2.0",
 	"extensions": {

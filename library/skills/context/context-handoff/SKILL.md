@@ -7,7 +7,7 @@ triggers:
   - handoff to another agent
   - context is about to be lost
   - write a continuation brief
-version: 0.5.2
+version: 0.5.3
 license: Apache-2.0
 allowed-tools:
   - read
@@ -23,7 +23,6 @@ clio-coder:
   registry-id: iowarp/clio-coder
   source-url: https://github.com/iowarp/clio-coder/tree/main/library/skills/context/context-handoff
   audit: pass
-  provenance: designed
   model-size: any
 ---
 

@@ -21,7 +21,7 @@ The core thesis of Clio's context architecture is that **context management must
 | Recover an interrupted compaction | `/context recover <handoffId> <reduce\|deliver>` | Branch-bound transaction recovery with preserved continuity identity. |
 | Inspect an evicted tool observation | `/context recall <ref>` | Shows the original body in the transcript; model recall uses the context tool. |
 | Initialize or refresh structural index | `clio-coder context index` / `refresh` (`/context refresh` in a session) | Model-free indexing of symbols, files, and dependencies into `.clio-coder/codemap.json`. `context init` (`/context init`) also generates a handbook. |
-| Seed an architecture map | `clio-coder context map` | Model-free `archify` seed derived from the codemap. |
+| Visualize the codebase | `clio-coder context map` | Native interactive HTML from current repository evidence. |
 | Generate architectural Markdown wiki | `clio-coder context wiki` | Dispatched worker generation of persistent documentation under `.clio-coder/wiki/`. |
 | Clear accumulated project context | `clio-coder context reset` (`/context reset`) | Removes `codemap.json`, `codewiki.json`, `state.json`, `.clio-coder/handoffs/` and `.clio-coder/proposals/`; keeps handbooks, agents, skills and the wiki. |
 | Compare working-set policies on saved ledgers | `clio-coder context replay`, `clio-coder context working-set --session <id\|path>` | Read-only replay and fold inspection, see [Working Set](context-working-set.md). |
@@ -231,7 +231,7 @@ Repository Source Code
 - **Dependencies**: Explicit import specifiers and internal module references.
 - **Fast Navigation**: Powers the `code_nav` tool (modes `symbol`, `path`, `entries`, `outline`, `deps`, `dependents`, `wiki` and `project`), allowing the agent to locate symbols and callers without running full repository text searches.
 
-`clio-coder context map [--out <path>] [--json]` reconciles the index with the current files, then writes an `archify` architecture seed without a model call: components are the largest directory areas and connections are collapsed import edges. Source citations are pinned to a Git revision only when the working tree is clean, every indexed file matches its Git blob, and a GitHub origin exists. Otherwise the seed carries no citations.
+`clio-coder context map [--out <path>] [--json]` builds or reconciles the index with current files and writes a standalone HTML codebase map without a model call or renderer installation. The overview shows up to eight areas with inferred responsibility headings. Expand an area to inspect symbols, local source lines, directional imports, and external import names. Static imports are observed evidence, not runtime calls. All local locations describe the working tree at generation time. Remote links pin a Git revision only when clean status, indexed hashes, Git blobs, workspace root and a GitHub origin agree. The default artifact is `.clio-coder/artifacts/maps/<repo>.html`; `--out` honors an explicit HTML destination and `--json` prints a receipt including bytes and SHA-256. Output destinations must use `.html` or `.htm`. Use `/skill map-codebase` for Clio to explain and refine the map using code navigation and source reading.
 
 `code_nav` results also take part in the working set. A path-keyed call is evicted once the file changes, and an identical rerun supersedes the earlier one, see [Working Set](context-working-set.md).
 

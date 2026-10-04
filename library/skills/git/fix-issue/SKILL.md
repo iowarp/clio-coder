@@ -7,7 +7,7 @@ triggers:
   - resolve the bug in issue
   - implement this tracker issue
   - fix a GitHub issue end to end
-version: 0.3.1
+version: 0.3.2
 license: Apache-2.0
 compatibility: git >=2.30.0, gh CLI >=2.0.0 (authenticated for issue viewing), POSIX-compatible shell
 allowed-tools:
@@ -28,7 +28,6 @@ clio-coder:
   registry-id: iowarp/clio-coder
   source-url: https://github.com/iowarp/clio-coder/tree/main/library/skills/git/fix-issue
   audit: pass
-  provenance: designed
   model-size: any
   agents:
     - main

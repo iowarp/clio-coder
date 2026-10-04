@@ -7,7 +7,7 @@ triggers:
   - remove merged worktree
   - closeout branch
   - branch-closeout
-version: 0.1.0
+version: 0.1.1
 license: Apache-2.0
 compatibility: git >=2.30.0, gh CLI >=2.0.0 (optional for remote PR verification), POSIX-compatible shell
 allowed-tools:
@@ -22,7 +22,6 @@ clio-coder:
   registry-id: iowarp/clio-coder
   source-url: https://github.com/iowarp/clio-coder/tree/main/library/skills/git/branch-closeout
   audit: pass
-  provenance: designed
   model-size: any
   agents:
     - main

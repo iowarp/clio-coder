@@ -1,13 +1,13 @@
 ---
-name: grill-me
+name: plan-interview
 description: Stress-tests a plan, design, or idea through a phased one-question-at-a-time interview before code is written, ending in a compact decision log. Not for a multi-perspective debate; use design-council.
 triggers:
-  - grill me
+  - review this plan through an interview
   - interview me about this plan
   - stress-test this design
   - poke holes in this idea
   - clarify this plan one question at a time
-version: 0.5.1
+version: 0.5.2
 license: Apache-2.0
 allowed-tools:
   - read
@@ -20,13 +20,12 @@ allowed-tools:
   - ask_user
 clio-coder:
   registry-id: iowarp/clio-coder
-  source-url: https://github.com/iowarp/clio-coder/tree/main/library/skills/workflow/grill-me
+  source-url: https://github.com/iowarp/clio-coder/tree/main/library/skills/workflow/plan-interview
   audit: pass
-  provenance: designed
   model-size: large
 ---
 
-# Grill Me
+# Plan Interview
 
 Run a rigorous, repo-aware interview that turns a vague plan into explicit
 decisions. The point is not to interrogate for sport; it is to surface hidden
@@ -35,10 +34,10 @@ branches before anyone writes code.
 ## Arguments
 
 ```text
-grill me on <plan, feature, or idea>
+/skill plan-interview <plan, feature, or idea>
 ```
 
-There is no flag syntax; the trigger is conversational — "grill me on X",
+There is no flag syntax; the trigger is conversational — "interview me about X",
 "stress-test this design", "poke holes in this idea". Whatever the user
 names is the subject. A referenced file, doc, or repo path in the same
 request is Step 1's grounding to read first, not a separate argument.
@@ -81,7 +80,7 @@ ls`; check repo state with the `git` tool, not shell `git`.
   the user's answer between rounds. In a headless run, see Arguments above.
 - For every interview round, call `ask_user` with `mode: "single_question"` and
   exactly one question.
-- On the first ask for a normal grill-me run, set `max_rounds` to a bounded
+- On the first ask for a normal plan-interview run, set `max_rounds` to a bounded
   value, usually `12` and at most `16` unless the user explicitly asked for a
   very deep interview.
 - Put your recommended answer first when options are natural. Include 2-3 real
@@ -102,7 +101,7 @@ or "fill" when the decision is genuinely missing.
 | 2 | Current state: existing code, constraints, conventions, integration points, prior attempts | Review |
 | 3 | Shape: data model, API/UX surface, ownership boundaries, naming, compatibility | Fill |
 | 4 | Risk: failure modes, migrations, rollout, test strategy, observability, reversibility | Fill |
-| 5 | Delivery: first slice, done-when checks, deferrals, handoff target (`prd`, `cut-it`, or direct implementation) | Review then complete |
+| 5 | Delivery: first slice, done-when checks, deferrals, handoff target (`prd`, `sprint-plan`, or direct implementation) | Review then complete |
 
 ## Workflow
 
@@ -219,7 +218,7 @@ Open risks:
 - <risk or unresolved branch>
 
 Recommended next step:
-- <prd | cut-it | direct implementation> - <why>
+- <prd | sprint-plan | direct implementation> - <why>
 ```
 
 ## Question Priority

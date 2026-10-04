@@ -7,7 +7,7 @@ triggers:
   - problem-first PRD
   - define a falsifiable product hypothesis
   - greenfield product intent
-version: 0.4.1
+version: 0.4.2
 license: Apache-2.0
 allowed-tools:
   - read
@@ -22,8 +22,6 @@ clio-coder:
   registry-id: iowarp/clio-coder
   source-url: https://github.com/iowarp/clio-coder/tree/main/library/skills/planning/product-intent
   audit: pass
-  provenance: adapted
-  origin: https://github.com/coleam00/skills/tree/main/.claude/skills/product-intent
   model-size: large
   agents:
     - main

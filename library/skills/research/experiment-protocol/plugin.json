@@ -1,7 +1,7 @@
 {
 	"$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
 	"name": "experiment-protocol",
-	"version": "0.3.1",
+	"version": "0.3.2",
 	"description": "Pre-registers a performance study, numerical comparison, parameter sweep, or benchmark: thresholds, tolerances, environment pins, and verdict conditions locked into the validation contract before any measurement. Not for diagnosing a stalled bug; use scientific-debugging.",
 	"license": "Apache-2.0",
 	"extensions": {

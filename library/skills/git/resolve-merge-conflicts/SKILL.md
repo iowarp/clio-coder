@@ -7,7 +7,7 @@ triggers:
   - finish the merge
   - finish the rebase
   - resolve conflict markers
-version: 0.4.0
+version: 0.4.1
 license: Apache-2.0
 compatibility: git >=2.30.0, POSIX-compatible shell
 allowed-tools:
@@ -25,8 +25,6 @@ clio-coder:
   registry-id: iowarp/clio-coder
   source-url: https://github.com/iowarp/clio-coder/tree/main/library/skills/git/resolve-merge-conflicts
   audit: pass
-  provenance: adapted
-  origin: https://github.com/mattpocock/skills/tree/main/skills/engineering/resolve-merge-conflicts
   model-size: any
   agents:
     - main

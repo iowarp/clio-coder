@@ -8,7 +8,7 @@ triggers:
   - permission denied
   - add a secret
   - secret leaked
-version: 0.2.0
+version: 0.2.1
 license: Apache-2.0
 allowed-tools:
   - read
@@ -22,7 +22,6 @@ clio-coder:
   registry-id: iowarp/clio-coder
   source-url: https://github.com/iowarp/clio-coder/tree/main/library/skills/meta/credentials
   audit: pass
-  provenance: designed
   model-size: any
 ---
 

@@ -104,7 +104,7 @@ test("a vocabulary key reads its wire word as words, and an identifier is never 
 	assert.equal(scalarText("kind", "acp_adapter").text, "ACP adapter");
 	// The key decides. The same shapes under an identifier key stay exactly as written, and stay mono.
 	assert.deepEqual(scalarText("id", "historical-persisted-format"), { text: "historical-persisted-format", mono: true });
-	assert.equal(scalarText("name", "cut-it").text, "cut-it");
+	assert.equal(scalarText("name", "sprint-plan").text, "sprint-plan");
 	assert.equal(scalarText("model", "qwen3-coder").text, "qwen3-coder");
 	assert.equal(scalarText("skill", "not_observed").text, "not_observed");
 	// Free text and mixed case under a vocabulary key are prose or names, not wire words.

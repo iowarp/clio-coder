@@ -55,7 +55,7 @@ export function humanizeKey(key: string): string {
 
 /**
  * Keys that hold a word from a closed vocabulary rather than an identifier: `state`, `reason`,
- * `sourceKind`, `reloadClass`. The key decides, never the value, so an agent id such as `cut-it` or a
+ * `sourceKind`, `reloadClass`. The key decides, never the value, so an agent id such as `sprint-plan` or a
  * model id such as `qwen3-coder` under `id`, `name` or `model` is left exactly as written.
  */
 const VOCABULARY_KEY =

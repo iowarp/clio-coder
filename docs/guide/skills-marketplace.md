@@ -5,9 +5,9 @@
 Skills are one kind of [library package](resource-library.md). `/skills` opens the Library on its Skills tab, while `/library` opens the full overlay (skills, agents, prompts, fleets, and plugins). `/skill <name> [task]` invokes a skill, `/skill off` clears the session's skill tool-surface narrowing without erasing instructions already loaded in the transcript, and bare `/skill` returns a usage error pointing to `/skills`. Skill packages use the same manifest, version, full-tree digest, origins, scope and lifecycle as every other package. The SKILL.md format, discovery roots, collision order and trust rules are in [extensions-and-sharing.md](extensions-and-sharing.md#skills).
 
 ```bash
-clio-coder library search grill --kind skill
-clio-coder library install skill:grill-me --project --dry-run
-clio-coder library install skill:grill-me --project
+clio-coder library search interview --kind skill
+clio-coder library install skill:plan-interview --project --dry-run
+clio-coder library install skill:plan-interview --project
 clio-coder library skills --all --json
 ```
 
@@ -81,12 +81,11 @@ Every distributable byte is pinned by SHA-256, and the pins are generated, never
 | `library/registry.yaml` | The bundled library index. One row per package with its full-tree `sha256`, version, `triggers`, `audit`, and `provides` hints. The runtime resolves installs from it. |
 | `library/skills/registry.yaml` | Normalized skill-body hashes (install-lifecycle provenance stripped). At activation, an installed skill carrying `registry-id` provenance is compared with its pinned hash and a mismatch surfaces a drift warning. This is authoring and provenance evidence, not an installation pin. |
 | `library/skills/skill-marketplace.json` | Published by `skills:pin` for authoring and provenance inspection. Runtime discovery and installation use `library/registry.yaml`, so this is not a second installation authority. |
-| `library/skills/remote.yaml` | Skills whose content lives in another repository at a pinned ref. Each entry names a GitHub tree URL, a catalog overlay package whose files land on top at install, and upstream top-level members to drop. Clio never vendors the upstream. |
 | `.claude-plugin/marketplace.json` | A projection of the pins for Claude Code, so another agent can install the packages from the repository. |
 
 `pnpm library:pin` runs four stages. It validates every package under `library/{skills,agents,prompts,fleets,plugins}` and the authoring templates, requiring the package kind to match its kind directory and identities to be unique. It refreshes the normalized skill evidence, the same work as `pnpm skills:pin`. It writes `library/registry.yaml` from the actual manifests and complete package trees, and it re-fetches each blessed remote row (a GitHub tree `sourceUrl`, such as the `wtfp` plugin) to verify its digest, keeping the previous pin with a warning when the fetch fails. Finally it regenerates `.claude-plugin/marketplace.json`. `pnpm library:check` repeats every stage as a check, fails on stale metadata or digests, and runs inside `pnpm lint` as the `library-pin` hygiene gate. `pnpm skills:pin` and `pnpm skills:check` run the skill-evidence stage alone.
 
-A catalog skill must carry `name`, `description`, `version` and `license` frontmatter and a nested `clio-coder:` block with `registry-id`, `source-url` (ending in its catalog path), `provenance` (`designed`, `adapted` or `imported`, with an `origin` for the last two) and `audit: pass`. Tool-surface lists must use Clio tool names in lowercase. `triggers`, when present, is a non-empty list of strings.
+A catalog skill must carry `name`, `description`, `version` and `license` frontmatter and a nested `clio-coder:` block with `registry-id`, `source-url` (ending in its catalog path) and `audit: pass`. Tool-surface lists must use Clio tool names in lowercase. `triggers`, when present, is a non-empty list of strings.
 
 The marketplace file makes the packages installable from the repository: `claude plugin marketplace add iowarp/clio-coder`, then `claude plugin install <name>@clio-coder`. Codex can read the same canonical directories once you link them into `~/.agents/skills`; the checkout does not ship those links. Neither surface holds a copied recipe body, and `library:check` fails on a stale one. A package publishes there only when a peer host would load a real skill surface from it and nothing it would default-scan into a native component. The pin run prints each package it left out and why, and leaving one out is not a failure. See [coding agent interoperability](interop.md).
 
@@ -94,4 +93,25 @@ The marketplace file makes the packages installable from the repository: `claude
 
 To publish a skill, prepare a complete skill package with `SKILL.md` and a portable root `plugin.json` that declares kind `skill`, an explicit Semantic Version, the skill resource root and one public skill component; the [contributor journey](authoring-plugins.md#authoring-templates-and-contributor-journey) walks the steps. Validate with `clio-coder library validate ./my-skill`, register its local source with `clio-coder library register ./my-skill --project` (which records its full-tree digest without installing), install the candidate with `clio-coder library install skill:<name> --project`, and verify its behavior before sharing.
 
-For a curated contribution, add the reviewed package beneath `library/skills/<category>/<name>/` with `SKILL.md` and a package `plugin.json`, then run `pnpm library:pin`. A shared remote index must name an explicit supported GitHub tree source, version and full-tree SHA-256. Publishing does not itself install or activate the skill for another operator. The `skill-craft` shipped skill documents the frontmatter contract and craft rules.
+For a curated contribution, add the reviewed package beneath `library/skills/<category>/<name>/` with `SKILL.md` and a package `plugin.json`, then run `pnpm library:pin`. A shared remote index must name an explicit supported GitHub tree source, version and full-tree SHA-256. Publishing does not itself install or activate the skill for another operator. The `skill-authoring` shipped skill documents the frontmatter contract and craft rules.
+
+## Native workflow skills
+
+Use names that describe the work: `plan-interview`, `sprint-plan`,
+`map-codebase`, `terminal-control`, `skill-authoring`, and `workflow-capture`.
+The catalog, package identities, and worker bindings use these names directly.
+
+`map-codebase` uses Clio's own repository index, navigation and HTML rendering.
+Install with `clio-coder library install skill:map-codebase --user` (or
+`--project`), inspect with `clio-coder library inspect skill:map-codebase`,
+and reload the Library. Invoke `/skill map-codebase` for Clio to explain and
+refine the map, or run `clio-coder context map` to generate it directly.
+Use `--out <path.html>` for a requested destination. The standalone HTML opens
+without network access or a separate renderer. Clio verifies the final artifact
+using her frontend check and reports the actual browser outcome.
+
+Curated publication metadata no longer requires or emits `provenance` ancestry
+categories or `origin` author claims. `registry-id`, `source-url`, `audit`,
+normalized instruction hashes, complete-package SHA-256 pins, install records,
+and trust controls remain. Required notices for retained third-party material
+remain with that material.

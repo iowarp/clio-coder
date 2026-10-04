@@ -1,13 +1,13 @@
 ---
 name: design-council
-description: Convenes several expert perspectives that challenge each other on a design decision with real trade-offs before code is written; quick mode runs a single round. Not for a one-question-at-a-time interrogation of a plan; use grill-me. Not for splitting implementation across workers; use dispatch directly.
+description: Convenes several expert perspectives that challenge each other on a design decision with real trade-offs before code is written; quick mode runs a single round. Not for a one-question-at-a-time interrogation of a plan; use plan-interview. Not for splitting implementation across workers; use dispatch directly.
 triggers:
   - convene a design council
   - debate this design
   - get multiple expert perspectives
   - weigh the architecture options
   - what would experts say
-version: 0.6.0
+version: 0.6.1
 license: Apache-2.0
 allowed-tools:
   - dispatch
@@ -22,7 +22,6 @@ clio-coder:
   registry-id: iowarp/clio-coder
   source-url: https://github.com/iowarp/clio-coder/tree/main/library/skills/workflow/design-council
   audit: pass
-  provenance: designed
   model-size: large
   agents:
     - scout
@@ -204,7 +203,7 @@ format. Label the output as degraded (single-model debate, no receipts).
 ## Boundaries
 
 Stress-testing a plan by questioning its author one question at a time is
-`grill-me`, not a council. Splitting implementation work across workers is
+`plan-interview`, not a council. Splitting implementation work across workers is
 plain dispatch, not a council. Council workers analyze; they never build.
 For a lightweight built-in alternative with no skill workflow, the TUI
 ships `/council [--roster] [--rounds] [--synthesis judge|vote|none]`; use

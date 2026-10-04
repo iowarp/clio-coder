@@ -1,8 +1,8 @@
 {
 	"$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
 	"name": "find-skills",
-	"version": "0.2.1",
-	"description": "Finds published skills and prepares their Library installation for the operator when the user asks whether a capability exists as a skill. Not for authoring a new skill; use skill-craft.",
+	"version": "0.2.2",
+	"description": "Finds published skills and prepares their Library installation for the operator when the user asks whether a capability exists as a skill. Not for authoring a new skill; use skill-authoring.",
 	"license": "Apache-2.0",
 	"extensions": {
 		"ai.iowarp.clio": {

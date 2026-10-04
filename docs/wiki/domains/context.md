@@ -11,7 +11,7 @@ sources:
   - "src/domains/context/codewiki/tree-sitter.ts"
   - "src/domains/context/codewiki/coordinator.ts"
   - "src/domains/context/wiki/generate.ts"
-  - "src/domains/context/wiki/map-seed.ts"
+  - "src/domains/context/wiki/repo-map.ts"
   - "src/domains/context/wiki/plan.ts"
   - "src/domains/context/working-set/policies/index.ts"
   - "src/domains/context/working-set/policies/structural.ts"
@@ -35,14 +35,14 @@ symbols:
   - "readClioState"
 tests:
   - "tests/contracts/context-pressure.test.ts"
-  - "tests/extended/context-map-seed.test.ts"
+  - "tests/extended/repo-map.test.ts"
 invariants:
   - "The codewiki coordinator serializes all writes per workspace through an in-process queue and a cross-process file lease; no two writers can produce overlapping generations."
   - "The structural-v2 working-set policy is the default eviction strategy; it is a pure function of PolicyInput, so live and replay execution produce identical selections."
   - "Wiki generation acquires a single-flight lock at .clio-coder/wiki.lock before any write; a live holder blocks the run and a stale lock is reclaimed by pid liveness."
   - "The codewiki index is deterministic for a given tree: file ids are sha256 of the path, content hashes are sha256 of the text, and symbols are sorted by line, name, and kind."
 validate:
-  - "npx pnpm run test:file -- tests/contracts/context-pressure.test.ts tests/extended/context-map-seed.test.ts"
+  - "npx pnpm run test:file -- tests/contracts/context-pressure.test.ts tests/extended/repo-map.test.ts"
 ---
 
 # Context Domain
@@ -119,7 +119,7 @@ The plan skeleton is built by `planWikiGeneration` in `src/domains/context/wiki/
 
 ### Architecture Seed
 
-`buildArchitectureSeed` in `src/domains/context/wiki/map-seed.ts` produces a model-free archify architecture specification derived from the codewiki index. Components are the index's largest directory areas (up to 12), connections are import edges collapsed area-to-area, and source citations reference the index's recorded file and line numbers. The seed is deterministic for one index: keys are sorted, ids derive from area paths, and rankings break ties on path order.
+`buildRepoMap` and `renderRepoMap` in `src/domains/context/wiki/repo-map.ts` group current index evidence into a bounded overview and render a standalone HTML artifact with expandable files, symbols, directional imports and external import names. Local locations remain useful for dirty and non-Git repositories; immutable remote links require verified clean source evidence.
 
 ## Working-Set Policies
 
@@ -170,4 +170,4 @@ The domain invites changes in several areas:
 ## Focused Tests
 
 - `tests/contracts/context-pressure.test.ts` exercises pressure policy resolution, phase transitions across window sizes, request admission against the output reserve, advisory hysteresis, no-useful-cut suppression, and material identity versus ordinary revision growth.
-- `tests/extended/context-map-seed.test.ts` exercises `buildArchitectureSeed` with colliding directory and package identities, internal versus external import counts, component caps, grid placement, edge collapsing, deterministic serialization, and repository pinning for source citations.
+- `tests/extended/repo-map.test.ts` checks bounded overviews with complete file detail, directional import evidence, package grouping, escaped repository text, and clean-only remote source links.

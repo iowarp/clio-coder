@@ -31,7 +31,7 @@ Markdown.
 | RCA write-ups for fixes | An issue comment posted only with the operator's confirmation, never a committed file (the `fix-issue` skill) | Human deliverable |
 | Codemap index | `.clio-coder/codemap.json` (a legacy `.clio-coder/codewiki.json` is read when it is absent) | Agent-to-agent |
 | Markdown wiki | `.clio-coder/wiki/` | Human transient |
-| Architecture maps: `context map` seeds and archify-delivered HTML | `.clio-coder/artifacts/maps/` | Human transient |
+| Codebase maps: native `context map` HTML | `.clio-coder/artifacts/maps/` | Human transient |
 | Session exports from `/export` | `.clio-coder/exports/<sessionId>-<date>.html` unless a path is named | Human transient |
 | Session context state | `.clio-coder/state.json` | Agent-to-agent |
 | Task-memory handoffs | `.clio-coder/handoffs/handoff-YYYY-MM-DD[-slug].md` | Agent-to-agent |

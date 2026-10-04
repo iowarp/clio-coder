@@ -18,7 +18,7 @@ import { createContextTool } from "../../src/tools/context/index.js";
 import { trustProjectPackages } from "../harness/project-trust.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
 
-const herdr = new URL("../../library/skills/meta/herdr/", import.meta.url);
+const terminalControl = new URL("../../library/skills/meta/terminal-control/", import.meta.url);
 
 function automaticPolicy() {
 	const policy = withModelSkillActivation(undefined, true);
@@ -88,8 +88,8 @@ for (const scope of ["user", "project"] as const) {
 		try {
 			process.env.HOME = env.dir;
 			const cwd = path.join(env.dir, "project");
-			const foreign = path.join(cwd, ".claude/skills/herdr");
-			cpSync(herdr, foreign, { recursive: true });
+			const foreign = path.join(cwd, ".claude/skills/terminal-control");
+			cpSync(terminalControl, foreign, { recursive: true });
 			const foreignFile = path.join(foreign, "SKILL.md");
 			const foreignBytes = readFileSync(foreignFile, "utf8");
 			const generations: number[] = [];
@@ -102,7 +102,7 @@ for (const scope of ["user", "project"] as const) {
 			};
 			refresh(cwd); // The already-running session initially has no native installation.
 			const context = createContextTool({ getCwd: () => cwd });
-			const plan = planLibraryLifecycle({ operation: "install", ref: "skill:herdr", scope, cwd });
+			const plan = planLibraryLifecycle({ operation: "install", ref: "skill:terminal-control", scope, cwd });
 			const applied = applyLibraryLifecycle(plan, { refresh });
 			strictEqual(applied.committed, 1, JSON.stringify(applied));
 			strictEqual(applied.refresh.status, "refreshed");
@@ -116,34 +116,37 @@ for (const scope of ["user", "project"] as const) {
 				trustProjectPackages(cwd, "plugins");
 				refresh(cwd);
 				// The same physical file can also be visible through a peer-agent root.
-				const alias = path.join(cwd, ".agents/skills/herdr");
+				const alias = path.join(cwd, ".agents/skills/terminal-control");
 				mkdirSync(path.dirname(alias), { recursive: true });
 				symlinkSync(installedRoot, alias, "junction");
 			}
 			const listing = await context.run({ scope: "skills" });
 			ok(listing.kind === "ok");
-			match(listing.output, /herdr \(source: plugin; scope: package\)/);
-			const activated = await context.run({ scope: "skills", name: "herdr" }, { pendingSkillPolicy: automaticPolicy() });
+			match(listing.output, /terminal-control \(source: plugin; scope: package\)/);
+			const activated = await context.run(
+				{ scope: "skills", name: "terminal-control" },
+				{ pendingSkillPolicy: automaticPolicy() },
+			);
 			ok(activated.kind === "ok", JSON.stringify(activated));
 			strictEqual(skillActivationFromToolDetails(activated.details, "native-load")?.filePath, installedFile);
-			match(activated.output, /# Herdr/);
-			const rows = readLibraryInventory({ cwd, kinds: ["skill"], query: "herdr" }).resources;
-			ok(rows.some((row) => row.owner?.ref === "skill:herdr" && row.availability === "available"));
+			match(activated.output, /# Terminal Control/);
+			const rows = readLibraryInventory({ cwd, kinds: ["skill"], query: "terminal-control" }).resources;
+			ok(rows.some((row) => row.owner?.ref === "skill:terminal-control" && row.availability === "available"));
 			ok(rows.some((row) => row.path === foreignFile && row.availability === "shadowed"));
 
 			// A slash request resolves to the same native owner as automatic activation.
 			const list = loadSkills({ cwd });
-			const pending = parsePendingSkillRequests("/skill herdr inspect the pane", list, { cwd });
+			const pending = parsePendingSkillRequests("/skill terminal-control inspect the pane", list, { cwd });
 			const pendingSkillPolicy = createPendingSkillToolPolicy(pending.pendingSkillRequests);
 			ok(pendingSkillPolicy);
-			const explicit = await context.run({ scope: "skills", name: "herdr" }, { pendingSkillPolicy });
+			const explicit = await context.run({ scope: "skills", name: "terminal-control" }, { pendingSkillPolicy });
 			ok(explicit.kind === "ok", JSON.stringify(explicit));
 			strictEqual(skillActivationFromToolDetails(explicit.details, "slash-load")?.filePath, installedFile);
 			strictEqual(readFileSync(foreignFile, "utf8"), foreignBytes);
 
 			// Trusting discovery roots alone does not import loose foreign skills.
 			const trusted = loadSkills({ cwd, trustProjectCompatRoots: true });
-			strictEqual(trusted.items.find((skill) => skill.name === "herdr")?.scope, "package");
+			strictEqual(trusted.items.find((skill) => skill.name === "terminal-control")?.scope, "package");
 			strictEqual(readFileSync(foreignFile, "utf8"), foreignBytes);
 		} finally {
 			clearPluginSnapshots();

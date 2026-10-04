@@ -7,7 +7,7 @@ triggers:
   - code-shaped contracts
   - implementation-ready technical specification
   - specify execution flows
-version: 0.3.1
+version: 0.3.2
 license: Apache-2.0
 disable-model-invocation: true
 allowed-tools:
@@ -26,8 +26,6 @@ clio-coder:
   registry-id: iowarp/clio-coder
   source-url: https://github.com/iowarp/clio-coder/tree/main/library/skills/planning/tech-spec
   audit: pass
-  provenance: adapted
-  origin: https://github.com/dmmulroy/skills/tree/main/tech-spec
   model-size: large
   provisional: true
   agents:
@@ -87,7 +85,7 @@ with `grep`, `read`, and `find`, never `bash`.
   already describe the change.
 - **Path B — interview first**: not enough problem, constraints, or
   acceptance criteria exist. Say so, then interview one question at a time
-  with a recommended answer per question (the grill-me posture); anything
+  with a recommended answer per question (the plan-interview posture); anything
   answerable by exploring the codebase is explored, not asked. When context
   suffices, run Path A. Never invent requirements to skip the interview.
   See Arguments above for how a headless run carries every question

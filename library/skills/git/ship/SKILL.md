@@ -7,7 +7,7 @@ triggers:
   - commit and open the PR
   - push and open a pull request
   - get this up for review
-version: 0.5.1
+version: 0.5.2
 license: Apache-2.0
 compatibility: git >=2.30.0, gh CLI >=2.0.0 (required for pr mode), POSIX-compatible shell
 allowed-tools:
@@ -23,7 +23,6 @@ clio-coder:
   registry-id: iowarp/clio-coder
   source-url: https://github.com/iowarp/clio-coder/tree/main/library/skills/git/ship
   audit: pass
-  provenance: designed
   model-size: any
   agents:
     - main

@@ -197,7 +197,15 @@ function validateHtmlStructure(content: string, checks: FrontendCheck[], artifac
 	const scan = content.replace(/<!--[\s\S]*?-->/g, (m) => m.replace(/[^\n]/g, " "));
 	const tagRe = /<\/?\s*([a-zA-Z][\w:-]*)(?:\s[^<>]*)?>/g;
 	const stack: Array<{ tag: string; line: number }> = [];
+	// Native repository maps carry many source locations; count lines once rather
+	// than rescanning the entire prefix for every opening tag.
+	let line = 1;
+	let nextNewline = scan.indexOf("\n");
 	for (let match = tagRe.exec(scan); match !== null; match = tagRe.exec(scan)) {
+		while (nextNewline >= 0 && nextNewline < match.index) {
+			line += 1;
+			nextNewline = scan.indexOf("\n", nextNewline + 1);
+		}
 		const raw = match[0];
 		if (/^<!|^<\?/u.test(raw)) continue;
 		const tag = (match[1] ?? "").toLowerCase();
@@ -224,7 +232,7 @@ function validateHtmlStructure(content: string, checks: FrontendCheck[], artifac
 			checks.push({
 				name: "html structure",
 				status: "fail",
-				message: `unexpected </${tag}> on line ${lineAt(scan, match.index)}${expected}`,
+				message: `unexpected </${tag}> on line ${line}${expected}`,
 				path: artifactPath,
 			});
 			return;
@@ -238,7 +246,7 @@ function validateHtmlStructure(content: string, checks: FrontendCheck[], artifac
 				checks.push({
 					name: "html structure",
 					status: "fail",
-					message: `missing </${tag}> for opening tag on line ${lineAt(scan, match.index)}`,
+					message: `missing </${tag}> for opening tag on line ${line}`,
 					path: artifactPath,
 				});
 				return;
@@ -246,7 +254,7 @@ function validateHtmlStructure(content: string, checks: FrontendCheck[], artifac
 			tagRe.lastIndex = close.index + close[0].length;
 			continue;
 		}
-		stack.push({ tag, line: lineAt(scan, match.index) });
+		stack.push({ tag, line });
 	}
 	// Any elements still open whose end tag is optional are validly closed at EOF.
 	while (stack.length > 0 && OPTIONAL_END_TAGS.has(stack[stack.length - 1]?.tag ?? "")) {

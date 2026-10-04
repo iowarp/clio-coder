@@ -1,29 +1,27 @@
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import path from "node:path";
 import { CLIO_ARTIFACT_DIR } from "../core/artifact-paths.js";
 import { type CodewikiCoordinatedResult, coordinateCodewikiWrite } from "../domains/context/codewiki/coordinator.js";
 import type { Codewiki } from "../domains/context/codewiki/schema.js";
-import { buildArchitectureSeed, serializeArchitectureSeed } from "../domains/context/wiki/map-seed.js";
+import { buildRepoMap, renderRepoMap } from "../domains/context/wiki/repo-map.js";
+import { publishFileAtomically, withFileMutationQueue } from "../tools/file-mutation-queue.js";
 
 const HELP = `Usage:
   clio-coder context map [--out <path>] [--json]
 
-Write an archify architecture seed for the current repository from the codemap
-index, without model calls. The seed is the starting spec for the archify skill:
-components are the largest directory areas, connections are collapsed import
-edges. The index is reconciled with current files before mapping; sources are
-pinned only when clean Git evidence matches those files.
+Create a standalone interactive HTML map from current repository evidence,
+without model calls or a separate renderer. Builds or refreshes the index.
 
 Options:
-  --out <path>    where to write the seed (default: ${CLIO_ARTIFACT_DIR}/maps/<repo>.architecture.json)
-  --json          print machine-readable details about the written seed
+  --out <path>    HTML destination (default: ${CLIO_ARTIFACT_DIR}/maps/<repo>.html)
+  --json         print an artifact receipt
 `;
 
-/** Where the seed lands when the operator names no path: a human-transient map artifact. */
-function defaultMapSeedPath(cwd: string): string {
-	return path.join(cwd, CLIO_ARTIFACT_DIR, "maps", `${path.basename(cwd)}.architecture.json`);
+/** Where the map lands when the operator names no path: a human-transient map artifact. */
+function defaultRepoMapPath(cwd: string): string {
+	return path.join(cwd, CLIO_ARTIFACT_DIR, "maps", `${path.basename(cwd)}.html`);
 }
 
 function gitValue(cwd: string, args: string[]): string | null {
@@ -49,7 +47,7 @@ function repositoryFacts(
 	const status = gitValue(cwd, ["status", "--porcelain", "--untracked-files=normal"]);
 	if (!revision || status === null) return { sourceState: "unknown" };
 	if (status !== "" || revision !== indexedHead) return { sourceState: "dirty" };
-	// Source paths in the seed are workspace-relative. A nested workspace has
+	// Source paths in the map are workspace-relative. A nested workspace has
 	// no proven repository-relative path mapping, so cannot supply citations.
 	if (gitValue(cwd, ["rev-parse", "--show-prefix"]) !== "") return { sourceState: "unknown" };
 	const tree = gitValue(cwd, ["ls-tree", "-r", "-z", revision]);
@@ -107,24 +105,20 @@ export async function runContextMapCommand(args: string[]): Promise<number> {
 		return 2;
 	}
 	const cwd = process.cwd();
+	const target = out ? path.resolve(cwd, out) : defaultRepoMapPath(cwd);
+	if (!/\.html?$/i.test(target)) {
+		process.stderr.write("clio-coder context map: output path must end in .html or .htm\n");
+		return 2;
+	}
 	let reconciled: CodewikiCoordinatedResult | null;
 	try {
-		reconciled = await coordinateCodewikiWrite(
-			cwd,
-			(current, workspace) =>
-				current
-					? {
-							kind: "ensure",
-							cwd: workspace,
-							current,
-							language: current.language,
-							// Map evidence must reconcile actual inputs, even if a state file
-							// happens to carry a matching fingerprint from another operation.
-							previous: null,
-						}
-					: null,
-			{ requireExisting: true },
-		);
+		reconciled = await coordinateCodewikiWrite(cwd, (current, workspace) => ({
+			kind: "ensure",
+			cwd: workspace,
+			current,
+			...(current ? { language: current.language } : {}),
+			previous: null,
+		}));
 	} catch (error) {
 		process.stderr.write(
 			`clio-coder context map: index refresh failed: ${error instanceof Error ? error.message : String(error)}\n`,
@@ -132,44 +126,36 @@ export async function runContextMapCommand(args: string[]): Promise<number> {
 		return 1;
 	}
 	if (!reconciled) {
-		process.stderr.write(
-			"clio-coder context map: no codemap index in .clio-coder/codemap.json; run `clio-coder context index` first\n",
-		);
+		process.stderr.write("clio-coder context map: could not build a repository index\n");
 		return 1;
 	}
 	const facts = repositoryFacts(cwd, reconciled.codewiki, reconciled.worker.fingerprint.gitHead);
-	const seed = buildArchitectureSeed(reconciled.codewiki, {
-		title: path.basename(cwd),
-		repository: facts.repository,
-	});
-	const target = out ? path.resolve(cwd, out) : defaultMapSeedPath(cwd);
-	mkdirSync(path.dirname(target), { recursive: true });
-	writeFileSync(target, serializeArchitectureSeed(seed), "utf8");
+	const map = buildRepoMap(reconciled.codewiki, path.basename(cwd));
+
+	const html = renderRepoMap(map, facts);
+	try {
+		await withFileMutationQueue(target, () => publishFileAtomically(target, html));
+	} catch (error) {
+		process.stderr.write(`clio-coder context map: ${error instanceof Error ? error.message : String(error)}\n`);
+		return 1;
+	}
 	const payload = {
 		path: target,
-		components: seed.components.length,
-		connections: seed.connections.length,
-		repository: seed.meta.repository ?? null,
+		format: "html",
+		areas: map.areas.length,
+		relationships: map.relationships.length,
+		files: map.fileCount,
+		bytes: Buffer.byteLength(html),
+		sha256: createHash("sha256").update(html).digest("hex"),
+		repository:
+			facts.repository && /^https:\/\/github\.com\/[\w.-]+\/[\w.-]+$/.test(facts.repository.url) ? facts.repository : null,
 		index: "reconciled",
 		sourceState: facts.sourceState,
 	};
-	if (json) {
-		process.stdout.write(`${JSON.stringify(payload, null, 2)}\n`);
-		return 0;
-	}
 	process.stdout.write(
-		[
-			`clio-coder context map wrote ${target}`,
-			`  ${payload.components} components, ${payload.connections} connections${
-				payload.repository
-					? `, sources pinned at ${payload.repository.revision.slice(0, 12)}`
-					: `; no source citations (source state: ${payload.sourceState}; requires verified clean files and a GitHub origin at a full revision)`
-			}`,
-			payload.repository
-				? "  next: validate and deliver it with the archify skill, passing --repo-root ."
-				: "  next: validate and deliver it with the archify skill (without --repo-root)",
-			"",
-		].join("\n"),
+		json
+			? `${JSON.stringify(payload, null, 2)}\n`
+			: `clio-coder context map wrote ${target}\n  ${payload.files} files, ${payload.areas} areas, ${payload.relationships} import relationships\n  Open the HTML in a browser, or use /skill map-codebase for Clio's guided explanation.\n`,
 	);
 	return 0;
 }

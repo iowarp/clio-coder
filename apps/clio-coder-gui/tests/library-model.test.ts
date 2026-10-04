@@ -18,7 +18,7 @@ const agent = (configuration: Record<string, unknown>): Agent => ({
 	source: "builtin",
 	audience: "base",
 	category: "plan",
-	skills: ["cut-it"],
+	skills: ["sprint-plan"],
 	tools: ["read", "grep"],
 	configuration,
 });
@@ -55,7 +55,7 @@ test("an agent card leads with capability, context tier, tool-call budget and re
 			["Read reserve", "5–16"],
 		],
 	);
-	assert.deepEqual(card.skills, ["cut-it"]);
+	assert.deepEqual(card.skills, ["sprint-plan"]);
 	assert.deepEqual(card.tools, ["read", "grep"]);
 	assert.deepEqual(card.footer, ["Architect plan result contract", "Text synthesis at boundary"]);
 });

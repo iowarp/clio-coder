@@ -1,13 +1,13 @@
 ---
-name: cut-it
+name: sprint-plan
 description: Slices an existing plan, PRD, or milestone into an executable sprint of dependency-ordered vertical slices sized for one agent run each, with done-when verification per slice; never fabricates a plan. Not for deciding the approach; use architecture.
 triggers:
-  - cut it
+  - plan an executable sprint
   - slice this plan
   - make this plan executable
   - turn this milestone into a sprint
   - write dependency-ordered vertical slices
-version: 0.4.1
+version: 0.4.2
 license: Apache-2.0
 allowed-tools:
   - read
@@ -21,16 +21,14 @@ allowed-tools:
   - ask_user
 clio-coder:
   registry-id: iowarp/clio-coder
-  source-url: https://github.com/iowarp/clio-coder/tree/main/library/skills/workflow/cut-it
+  source-url: https://github.com/iowarp/clio-coder/tree/main/library/skills/workflow/sprint-plan
   audit: pass
-  provenance: adapted
-  origin: https://github.com/TheOrcDev/skills
   model-size: any
   agents:
     - architect
 ---
 
-# Cut It
+# Sprint Plan
 
 Transform an existing plan into ordered execution slices that a coding agent
 can run one at a time, leaving the build green after every slice. The output
@@ -40,10 +38,10 @@ required.
 ## Arguments
 
 ```text
-cut it [<path to plan>]
+/skill sprint-plan [<path to plan>]
 ```
 
-There is no flag syntax; the trigger is conversational — "cut it", "slice
+There is no flag syntax; the trigger is conversational — "plan a sprint", "slice
 this plan", "turn this milestone into a sprint". A path the user names in
 the same request (a specific `PLAN.md`, `PRD.md`, or `milestones/*/prompt.md`)
 is the plan to slice; a path with no plan words near it, or a bare
@@ -78,7 +76,7 @@ uncommitted changes.
 In priority order: a file the user names, a plan in the conversation,
 `PLAN.md` / `PRD.md` / `milestones/*/prompt.md` in the repo. **Never fabricate
 the plan.** If none exists, or what exists is too vague to slice honestly,
-stop and say so — recommend `grill-me` to resolve intent first. Artificial
+stop and say so — recommend `plan-interview` to resolve intent first. Artificial
 slicing of a vague plan hides gaps; flagging them is the deliverable.
 
 ## Step 2 — Apply the cutting rules

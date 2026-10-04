@@ -7,7 +7,7 @@ triggers:
   - parse don't validate
   - illegal states unrepresentable
   - functional core imperative shell
-version: 0.4.0
+version: 0.4.1
 license: Apache-2.0
 allowed-tools:
   - read
@@ -22,8 +22,6 @@ clio-coder:
   registry-id: iowarp/clio-coder
   source-url: https://github.com/iowarp/clio-coder/tree/main/library/skills/coding/coding-standards
   audit: pass
-  provenance: adapted
-  origin: https://github.com/dmmulroy/skills/tree/main/coding-standards
   model-size: any
   provisional: true
   agents:

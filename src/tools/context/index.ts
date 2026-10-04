@@ -654,7 +654,10 @@ function runSkillsScope(
 		}
 		const available = visible.map((item) => item.name).join(", ");
 		const suffix = available.length > 0 ? ` Available skills: ${available}.` : " No skills are currently available.";
-		return skillRefusal(`context: unknown skill "${name}".${suffix}`, { name, kind: "unknown" });
+		return skillRefusal(`context: unknown skill "${name}".${suffix}`, {
+			name,
+			kind: "unknown",
+		});
 	}
 	const includeTree = args.include_tree === true;
 	const tree = includeTree ? buildResourceTree(skill.baseDir, DEFAULT_TREE_ENTRIES) : null;

@@ -1,13 +1,13 @@
 ---
-name: workflow-distiller
-description: "Packages a workflow that just happened into a reusable SKILL.md: reconstructs it from the session record, checks overlap with installed skills, gates on approval, then writes it following skill-craft. Not for authoring a skill with no prior workflow; use skill-craft."
+name: workflow-capture
+description: "Packages a workflow that just happened into a reusable SKILL.md: reconstructs it from the session record, checks overlap with installed skills, gates on approval, then writes it following skill-authoring. Not for authoring a skill with no prior workflow; use skill-authoring."
 triggers:
   - make this workflow a skill
   - package what we just did
   - turn this into a reusable workflow
   - distill this repeated process
   - create a skill from this session
-version: 0.4.2
+version: 0.4.3
 license: Apache-2.0
 allowed-tools:
   - read
@@ -18,29 +18,27 @@ allowed-tools:
   - write
   - ask_user
 requires:
-  - skill:skill-craft
+  - skill:skill-authoring
 clio-coder:
   registry-id: iowarp/clio-coder
-  source-url: https://github.com/iowarp/clio-coder/tree/main/library/skills/workflow/workflow-distiller
+  source-url: https://github.com/iowarp/clio-coder/tree/main/library/skills/workflow/workflow-capture
   audit: pass
-  provenance: designed
   model-size: large
 ---
 
-# Workflow Distiller
+# Workflow Capture
 
-Turn a workflow that actually ran into a reusable skill. The distiller's
-identity is runtime truth: it reconstructs what happened from the visible
+Turn a workflow that actually ran into a reusable skill. Capture the actual sequence: it reconstructs what happened from the visible
 session record, not from anyone's memory of it. Skip the ceremony when there
 is no prior workflow; a from-scratch skill is a SKILL.md written directly,
-following skill-craft. skill-craft also governs how every skill this
-distiller produces is written: description, body, and pruning rules live
+following skill-authoring. skill-authoring also governs how every skill this
+workflow produces is written: description, body, and pruning rules live
 there, not here.
 
 ## Arguments
 
 ```text
-/skill workflow-distiller [<what to distill>]
+/skill workflow-capture [<what to distill>]
 ```
 
 With arguments, the text names the workflow to distill; without, distill
@@ -81,7 +79,7 @@ disagreement is worth a question.
 ## Phase 2 - Interview
 
 Use `ask_user` with `mode: "single_question"`, one question per round, bounded
-rounds (default 8, max 12), following the grill-me operating contract:
+rounds (default 8, max 12), following the plan-interview operating contract:
 recommended answer first when options are natural, stop signals ("stop",
 "enough", "later", cancel) respected immediately, answers translated into
 compact decisions. Question bank, roots before leaves:
@@ -132,9 +130,9 @@ Write `SKILL.md` under `draft-skills/<approved-name>/`, outside protected active
 skill and installed package roots, with the
 frontmatter contract below - a triggers-only third-person description, and
 the pruning pass - with `requires: [skill:<name>]` for every skill the
-overlap check referenced. Do not try to load skill-craft's own file mid-run
+overlap check referenced. Do not try to load skill-authoring's own file mid-run
 to check this: only one skill can be active at a time, and a second
-`context(scope="skills", name="skill-craft")` call is refused while this
+`context(scope="skills", name="skill-authoring")` call is refused while this
 skill is still pending. The frontmatter contract, current as of this
 writing: `name`, `description` (third-person triggers, no "I"/"you"),
 `triggers` (a non-empty list), `version` (start `0.1.0`), `license`,
@@ -143,7 +141,7 @@ capitalized or spelled differently is rejected), and `requires` when Phase 3
 found a reference. If in doubt about the exact shape, `read` an already-
 installed skill's `SKILL.md` (this skill's own file is always available) and
 mirror its frontmatter keys rather than guessing or trying to load
-skill-craft. The proposed installation scope defaults to project; suggest user
+skill-authoring. The proposed installation scope defaults to project; suggest user
 scope only when the user said the workflow crosses repositories. Creation here
 produces a draft. The operator later reviews a portable package envelope and
 installs through the Library; never write into an active skill store directly. Placeholders replace every

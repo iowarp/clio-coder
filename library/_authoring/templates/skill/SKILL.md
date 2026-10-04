@@ -6,7 +6,6 @@ license: Apache-2.0
 clio-coder:
   registry-id: citation-check
   source-url: https://github.com/iowarp/clio-coder/tree/main/library/_authoring/templates/skill
-  provenance: designed
 triggers:
   - citation check
   - verify citations

@@ -108,7 +108,7 @@ test("models and skills keep the report's order and nothing else is dropped", ()
 			{ name: "tokens", values: tokens },
 			{ name: "model-usage", values: { attributedModelId: "big", totalTokens: 2000 } },
 			{ name: "model-usage", values: { attributedModelId: "small", totalTokens: 400 } },
-			{ name: "skill-activated", values: { skill: "archify", activations: 2 } },
+			{ name: "skill-activated", values: { skill: "map-codebase", activations: 2 } },
 			{ name: "skill-never-activated", values: { skill: "slurm-jobs" } },
 			{ name: "memory", values: { approved: 1, pending: 0 } },
 		]),
