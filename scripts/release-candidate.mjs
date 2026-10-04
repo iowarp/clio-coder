@@ -3,7 +3,7 @@ import { execFileSync, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { basename, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { runTests } from "./ci-tests.mjs";
@@ -13,6 +13,12 @@ export const root = fileURLToPath(new URL("..", import.meta.url));
 export const installers = ["install.sh", "install.ps1", "install.cmd", "native-install.cjs"];
 export const sha256 = (bytes) => createHash("sha256").update(bytes).digest("hex");
 export function run(command, args, options = {}) {
+	if (process.platform === "win32" && command === "tar")
+		command = join(process.env.SystemRoot ?? "C:\\Windows", "System32", "tar.exe");
+	if (process.platform === "win32" && command === "npm") {
+		args = [join(dirname(process.execPath), "node_modules", "npm", "bin", "npm-cli.js"), ...args];
+		command = process.execPath;
+	}
 	return execFileSync(command, args, {
 		cwd: root,
 		stdio: "inherit",
@@ -241,9 +247,10 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
 				await prepare(directory);
 				await testCandidate(directory, commit);
 			}
-			if (!existsSync(join(directory, "boot-passed"))) {
+			const marker = `${commit}:${sha256(readFileSync(verifyCandidate(directory, commit).tarball))}:${process.platform}:${process.version}`;
+			if (!existsSync(join(directory, "boot-passed")) || readFileSync(join(directory, "boot-passed"), "utf8") !== marker) {
 				smokeCandidate(directory, commit);
-				writeFileSync(join(directory, "boot-passed"), commit);
+				writeFileSync(join(directory, "boot-passed"), marker);
 			}
 		} else
 			throw new Error(

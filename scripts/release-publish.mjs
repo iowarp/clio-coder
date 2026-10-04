@@ -167,8 +167,9 @@ export async function preflight(directory, commit, runId, branch, rehearse = fal
 		const errors = releaseVersionErrors({ version: receipt.version, changelog, releaseContext: true });
 		const section = changelog.split(/^## /mu)[1];
 		if (!section?.slice(section.indexOf("\n") + 1).trim()) errors.push("Release notes must not be empty.");
-		if (JSON.parse(readFileSync(join(root, "site/product.json"), "utf8")).version !== receipt.version)
-			errors.push("Set site/product.json to the final release version before qualification.");
+		const site = JSON.parse(readFileSync(join(root, "site/product.json"), "utf8"));
+		if (site.version !== receipt.version || site.publishedVersion !== receipt.version)
+			errors.push("Set site/product.json version and publishedVersion to the final release version before qualification.");
 		if (errors.length) throw new Error(errors.join("\n"));
 		const remote = git("ls-remote", "--heads", "origin", `refs/heads/${branch}`).split(/\s/u)[0];
 		if (remote !== commit) throw new Error("Version branch moved; prepare a release from its current head.");

@@ -130,7 +130,8 @@ on a native Windows clone with `core.autocrlf=false` before pushing them.
 To cut a release:
 
 1. Set the agreed version consistently in `package.json`, the GUI manifest,
-   `assets/acp-registry/agent.json`, and `site/product.json`. Add dated release
+   `assets/acp-registry/agent.json`, and both `version` and `publishedVersion`
+   in `site/product.json`. Add dated release
    notes in `CHANGELOG.md` and update version references such as the README
    source-install command. Commit the candidate on the version branch. The
    script refuses a dirty tree or inconsistent versions; it does not invent
