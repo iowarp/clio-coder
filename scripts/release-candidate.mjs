@@ -64,8 +64,7 @@ function prepareWebsite(directory, commit, version) {
 		run("git", ["worktree", "add", "--detach", checkout, commit]);
 		const site = join(checkout, "site");
 		const product = json(join(site, "product.json"));
-		if (product.version !== version)
-			throw new Error("Set site/product.json to the release version before qualification.");
+		product.version = version;
 		product.publishedVersion = version;
 		writeFileSync(join(site, "product.json"), `${JSON.stringify(product, null, "\t")}\n`);
 		// Commit snapshots are immutable and available before the public tag.
@@ -88,7 +87,7 @@ export async function prepare(directory) {
 	const commit = source();
 	const pkg = json(join(root, "package.json"));
 	const changelog = readFileSync(join(root, "CHANGELOG.md"), "utf8");
-	const errors = releaseVersionErrors({ version: pkg.version, changelog, releaseContext: true });
+	const errors = releaseVersionErrors({ version: pkg.version, changelog, releaseContext: false });
 	if (
 		json(join(root, "assets/acp-registry/agent.json")).version !== pkg.version ||
 		json(join(root, "apps/clio-coder-gui/package.json")).version !== pkg.version
@@ -120,7 +119,7 @@ export async function prepare(directory) {
 	run(
 		process.execPath,
 		["scripts/check-release.mjs", "--tarball", join(directory, report.filename), "--report", reportPath],
-		{ env: { ...process.env, CLIO_CODER_RELEASE_CONTEXT: "publish" } },
+		{ env: { ...process.env, CLIO_CODER_RELEASE_CONTEXT: "qualification" } },
 	);
 	rmSync(reportPath);
 	for (const name of installers)
@@ -128,10 +127,12 @@ export async function prepare(directory) {
 			join(directory, name),
 			run("tar", ["-xzOf", join(directory, report.filename), `package/scripts/${name}`], { stdio: "pipe" }),
 		);
-	const section = changelog.split(/^## /mu).find((text) => text.startsWith(`${pkg.version} - `));
+	const section = changelog.split(/^## /mu)[1];
 	const notes = section?.slice(section.indexOf("\n") + 1).trim();
-	if (!notes) throw new Error("Release notes must not be empty.");
-	writeFileSync(join(directory, "release-notes.md"), `${notes}\n`);
+	writeFileSync(
+		join(directory, "release-notes.md"),
+		`${notes || "Development qualification; release notes are not final."}\n`,
+	);
 	prepareWebsite(directory, commit, pkg.version);
 	if (source() !== commit) throw new Error("Source changed during candidate preparation.");
 	const files = Object.fromEntries(

@@ -5,7 +5,8 @@ import { tmpdir } from "node:os";
 import { basename, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
-import { git, installers, run, verifyCandidate } from "./release-candidate.mjs";
+import { git, installers, root, run, verifyCandidate } from "./release-candidate.mjs";
+import { releaseVersionErrors } from "./release-version-policy.mjs";
 
 const repository = "iowarp/clio-coder";
 export function publicationPlan(receipt, branch) {
@@ -162,6 +163,13 @@ export async function preflight(directory, commit, runId, branch, rehearse = fal
 	const plan = publicationPlan(receipt, branch);
 	requireFastForward(commit);
 	if (!rehearse) {
+		const changelog = run("tar", ["-xzOf", receipt.tarball, "package/CHANGELOG.md"], { encoding: "utf8", stdio: "pipe" });
+		const errors = releaseVersionErrors({ version: receipt.version, changelog, releaseContext: true });
+		const section = changelog.split(/^## /mu)[1];
+		if (!section?.slice(section.indexOf("\n") + 1).trim()) errors.push("Release notes must not be empty.");
+		if (JSON.parse(readFileSync(join(root, "site/product.json"), "utf8")).version !== receipt.version)
+			errors.push("Set site/product.json to the final release version before qualification.");
+		if (errors.length) throw new Error(errors.join("\n"));
 		const remote = git("ls-remote", "--heads", "origin", `refs/heads/${branch}`).split(/\s/u)[0];
 		if (remote !== commit) throw new Error("Version branch moved; prepare a release from its current head.");
 		const tag = tagCommit(plan.tag);
@@ -271,7 +279,7 @@ export async function publish(directory, commit, runId, branch) {
 		throw new Error("Publication is restricted to the approved release.yml job on the exact candidate commit.");
 	const { receipt, plan } = await preflight(directory, commit, runId, branch);
 	const published = await registryVersion(receipt.name, receipt.version);
-	if (!published) run("npm", ["publish", receipt.tarball, "--access", "public", "--tag", plan.channel]);
+	if (!published) run("npm", ["publish", receipt.tarball, "--access", "public", "--provenance", "--tag", plan.channel]);
 	else {
 		requireIntegrity(published, receipt);
 		console.log("npm already contains the qualified bytes; continuing publication.");

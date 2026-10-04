@@ -98,7 +98,12 @@ services: publish npm first, then the GitHub tag/release, then promote `main` an
 a published tag, rebuild a published candidate, or republish different bytes.
 
 Pushes and pull requests launch no Actions runs. Qualification is deliberate;
-the required check names remain `ci (22)` and `ci (24)`. One manual `ci.yml` run
+the required check names remain `ci (22)` and `ci (24)`. Development qualification
+accepts an `Unreleased` changelog and prepares an isolated website preview from
+the candidate version. Publication separately requires a final version, dated
+nonempty release notes, and matching committed website metadata. Full
+investigation also limits concurrent test files to two so subprocess fixtures
+do not compete with hundreds of cold boots. One manual `ci.yml` run
 checks source, builds and packs once, tests selected root/GUI behavior and the
 installed package, and boots that same archive on Node 24. Its immutable
 `candidate-<sha>` artifact includes the versioned npm tarball, SHA-256 receipt,

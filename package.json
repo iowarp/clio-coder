@@ -112,7 +112,7 @@
 		"library:pin": "node --import tsx scripts/pin-library.ts",
 		"library:check": "node --import tsx scripts/pin-library.ts --check",
 		"pretest:full": "node scripts/check-dist.mjs",
-		"test:full": "node --import tsx --import ./tests/harness/tmp-root.ts --test tests/contracts/*.test.ts tests/extended/*.test.ts tests/smoke/*.test.ts tests/extended-smoke/*.test.ts",
+		"test:full": "node --import tsx --import ./tests/harness/tmp-root.ts --test --test-concurrency=2 tests/contracts/*.test.ts tests/extended/*.test.ts tests/smoke/*.test.ts tests/extended-smoke/*.test.ts",
 		"test:package": "node scripts/ci-tests.mjs package",
 		"release:preflight": "node scripts/release-candidate.mjs preflight",
 		"test:gui:full": "pnpm --filter @iowarp/clio-coder-gui test:full",
