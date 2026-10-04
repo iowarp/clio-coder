@@ -95,7 +95,7 @@ A release is one dispatched run of `.github/workflows/release.yml`, and nobody p
 1. Commit the release version in `package.json` and `assets/acp-registry/agent.json`, and title the top `CHANGELOG.md` section `## X.Y.Z - YYYY-MM-DD`. Push the version branch.
 2. Optionally rehearse: `pnpm run ci:release` qualifies the commit locally, and a push to a `ci-scratch-*` branch runs the same gates hosted.
 3. Dispatch the workflow on the branch whose head is the release commit: `gh workflow run release.yml --ref v060 -f sha=<full sha>`. The run refuses a sha that is not that head and a version whose tag already exists.
-4. The run executes every CI gate, then qualifies the exact package: the full root and GUI test tiers (`test:full`, `test:gui:full`), the package audit, and the installed-tarball suite.
+4. The run executes every CI gate, then qualifies the exact package: the package audit and the installed-tarball suite. The full root and GUI test tiers (`test:full`, `test:gui:full`) run in the local `pnpm run ci:release`, not on the hosted runner.
 5. Only then does the `release` job publish that qualified `candidate.tgz` to npm through trusted publishing with provenance, and create the `vX.Y.Z` tag and the GitHub release from the same file. Its sha256 is printed in the run summary, so the npm tarball and the release asset are the same bytes.
 6. Fast-forward `main` to the released commit.
 
