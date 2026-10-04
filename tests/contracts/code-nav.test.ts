@@ -108,6 +108,7 @@ describe("code_nav tool", () => {
 	it("rejects an invalid mode without reading source", { skip: process.platform === "win32" }, () => {
 		// A source FIFO makes an accidental index build hang in a bounded child.
 		// Artifact absence alone would not detect a private read-only build.
+		// Allow cold TypeScript loading under contention; this is not a boot benchmark.
 		execFileSync("mkfifo", [join(workspace, "blocked.ts")]);
 		const module = new URL("../../src/tools/codewiki/code-nav.ts", import.meta.url).href;
 		const loader = new URL("../../node_modules/tsx/dist/loader.mjs", import.meta.url).pathname;
@@ -120,7 +121,7 @@ describe("code_nav tool", () => {
 				"-e",
 				`import {codeNavTool} from ${JSON.stringify(module)}; console.log(JSON.stringify(await codeNavTool.run({mode:"invalid"})))`,
 			],
-			{ cwd: workspace, timeout: 5000, encoding: "utf8" },
+			{ cwd: workspace, timeout: 30_000, encoding: "utf8" },
 		);
 		match(output, /mode must be/);
 		strictEqual(existsSync(join(workspace, ".clio-coder")), false);
