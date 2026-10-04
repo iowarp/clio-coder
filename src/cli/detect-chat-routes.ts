@@ -205,7 +205,16 @@ export function describeAdoptedRoute({ route, persisted }: Pick<AdoptedChatRoute
 
 /** A returning user's first detected route with a model, taken as their chat route. Null when nothing is found. */
 export async function adoptDetectedChatRoute(settings: Readonly<ClioSettings>): Promise<AdoptedChatRoute | null> {
-	const found = (await detectChatRoutes(settings)).find((candidate) => candidate.model);
+	// The target dedicated to background memory is not a chat choice anyone made;
+	// taking it without asking would put the visible turn on the memory endpoint.
+	const memoryTarget = settings.targets.find((entry) => entry.id === settings.context.memory.target);
+	const found = (await detectChatRoutes(settings)).find(
+		(candidate) =>
+			candidate.model &&
+			(memoryTarget === undefined ||
+				(candidate.target.id !== memoryTarget.id &&
+					(memoryTarget.url === undefined || candidate.target.url !== memoryTarget.url))),
+	);
 	if (!found?.model) return null;
 	const route = { ...found, model: found.model };
 	return { route, ...useDetectedChatRoute(settings, route) };

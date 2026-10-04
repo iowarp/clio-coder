@@ -2,7 +2,7 @@ import { formatBootTrace } from "../core/boot-trace.js";
 import { initializeClioHome } from "../core/init.js";
 import { readLayeredSettings, readStrictLayeredSettings } from "../core/settings-layers.js";
 import type { BootOptions } from "../entry/boot-options.js";
-import { classifyDefaultTarget, describeVerdict, homeIsReturning } from "./default-target.js";
+import { classifyDefaultTarget, describeKeptChatRoute, describeVerdict, homeIsReturning } from "./default-target.js";
 
 /** Headless and ACP keep their established non-TUI transports even when an
  * embedding process leaves the interactive marker in the environment. */
@@ -51,7 +51,20 @@ export async function runClioCommand(
 		startupSettings = readStrictLayeredSettings(process.cwd()).settings;
 		const verdict = classifyDefaultTarget(startupSettings);
 		let detected = false;
-		if (existingHome && verdict.kind !== "usable") {
+		// A saved chat route stays the user's choice when it cannot be used: no
+		// other target is borrowed for the session. One that only lacks its
+		// credential still opens, unavailable; one that cannot drive a session at
+		// all stops here with the reason. An unset route keeps discovery below.
+		const keptRoute = existingHome && verdict.kind !== "usable" && verdict.kind !== "no-target";
+		if (keptRoute) {
+			if (verdict.kind !== "missing-credential") {
+				process.stderr.write(
+					`${describeVerdict(verdict)} Your saved chat route is kept and no other target is used. Run \`clio-coder configure\` to fix it.\n`,
+				);
+				return 2;
+			}
+			process.stdout.write(`${describeKeptChatRoute(startupSettings, verdict)}\n`);
+		} else if (existingHome && verdict.kind !== "usable") {
 			const { adoptDetectedChatRoute, describeAdoptedRoute } = await import("./detect-chat-routes.js");
 			const adopted = await adoptDetectedChatRoute(startupSettings);
 			if (adopted) {
@@ -60,7 +73,7 @@ export async function runClioCommand(
 				process.stdout.write(`${describeAdoptedRoute(adopted)} Change it with /config.\n`);
 			}
 		}
-		if (!detected && verdict.kind !== "usable") {
+		if (!detected && !keptRoute && verdict.kind !== "usable") {
 			process.stdout.write(`${describeVerdict(verdict)} Starting \`clio-coder configure\`.\n`);
 			const { runConfigureCommand } = await import("./configure.js");
 			const configured = await runConfigureCommand([], process.stdin, process.stdout, true);

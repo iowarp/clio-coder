@@ -65,3 +65,24 @@ export function describeVerdict(verdict: DefaultTargetVerdict): string {
 			return "No usable default target is configured.";
 	}
 }
+
+/**
+ * The startup line for a saved chat route whose credential is missing.
+ *
+ * The route is the user's explicit choice, so startup keeps it and says what
+ * is wrong with it. Discovery used to replace it for the session with the first
+ * reachable target, which could be the endpoint dedicated to background memory.
+ * Only names are printed: the target, its model, and where a credential is read.
+ */
+export function describeKeptChatRoute(
+	settings: Readonly<ClioSettings>,
+	verdict: Extract<DefaultTargetVerdict, { kind: "missing-credential" }>,
+): string {
+	const target = settings.targets.find((entry) => entry.id === verdict.targetId);
+	const model = settings.chat.model ?? target?.defaultModel;
+	const envVar = target?.auth?.apiKeyEnvVar?.trim();
+	const source = envVar
+		? `environment variable ${envVar} is not set and no credential is stored for '${verdict.store}'`
+		: `no credential is stored for '${verdict.store}'`;
+	return `Chat: ${verdict.targetId}${model ? ` / ${model}` : ""} is unavailable: ${source}. Your saved chat route is kept; fix the connection with /config.`;
+}

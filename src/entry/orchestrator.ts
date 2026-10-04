@@ -111,6 +111,7 @@ import {
 } from "../domains/memory/task-bank-store.js";
 import type { TaskMemoryModelRequest } from "../domains/memory/task-memory-policy.js";
 import { TaskMemoryInformationFlowBlockedError } from "../domains/memory/task-memory-policy.js";
+import { createHistoryReviewActivity, projectTaskMemoryActivity } from "../domains/memory/task-memory-status.js";
 import { createCapabilityGate } from "../domains/middleware/capability-gate.js";
 import { createDecisionHintsRegistration } from "../domains/middleware/decision-hints.js";
 import {
@@ -135,6 +136,7 @@ import type { MemoryGuardian, MemoryGuardianState } from "../domains/middleware/
 import { createMemoryGuardian } from "../domains/middleware/memory-guardian.js";
 import {
 	createMemoryInterventionRegistration,
+	MEMORY_INTERVENTION_ACTIVITY_LIMIT,
 	type MemoryDeliveryOutcome,
 	type MemoryKnowledgeReview,
 } from "../domains/middleware/memory-intervention.js";
@@ -2259,6 +2261,11 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	const getCurrentMemoryEnabled = (): boolean =>
 		(effectiveSettingsForDispatch?.().context.memory ?? memorySettings).enabled;
 	const memoryTelemetry = createTaskMemoryTelemetrySink();
+	const historyReviews = createHistoryReviewActivity(
+		memoryTelemetry,
+		() => session?.current()?.id ?? null,
+		MEMORY_INTERVENTION_ACTIVITY_LIMIT,
+	);
 	const memoryWorkspaceRoot = (): string => session?.current()?.cwd || process.cwd();
 	const keptRepositoryLessons = () =>
 		eligibleMemoryRecords(loadMemoryRecordsSync(clioDataDir()), {
@@ -2401,7 +2408,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		getKeptLessons: keptRepositoryLessons,
 		onHistoryLessons: fileHistoryLessons,
 		captureStepUsage: captureBackgroundMemoryUsage,
-		telemetry: memoryTelemetry,
+		telemetry: historyReviews.telemetry,
 		onStateChange: publishGuardianState,
 	});
 	const guardedMemory = memoryGuardian;
@@ -4796,9 +4803,12 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 				enabled: settings.context.memory.enabled,
 				tier: taskMemoryTier(),
 				size: taskMemoryBankSize(bank),
-				lastDecision: memoryIntervention.lastDecision(),
 				bank,
-				activity: memoryIntervention.recentActivity(),
+				...projectTaskMemoryActivity(
+					{ activity: memoryIntervention.recentActivity(), lastDecision: memoryIntervention.lastDecision() },
+					historyReviews.recent(session?.current()?.id ?? null),
+					MEMORY_INTERVENTION_ACTIVITY_LIMIT,
+				),
 				stepInFlight: memoryIntervention.stepInFlight(),
 				guardian: currentGuardianState(),
 				// Folded from the telemetry ledger, which is durable across sessions,
