@@ -63,6 +63,7 @@ Rules:
 - The lesson must still be true after this task is finished. The bug that was fixed, the code that was written, the files this change touched, and the progress made are never lessons.
 - Generic advice is never a lesson: anything that would hold in any repository ("run the tests before committing", "read the error message", "check git status") is excluded. A lesson names this repository's own scripts, paths, flags or conventions.
 - "command" is one whole line of the turn marked ok, copied character for character: everything after "ok: ", including any leading "cd ... &&" and any trailing "2>&1". Never shorten it, join two lines, or change a path or flag. The lesson text must contain that same whole command inside backticks.
+- Inside the JSON, write every " of a command or quote as \\" and still close the string with ": the line ok: node -e "f()" becomes "command":"node -e \\"f()\\"".
 - A fact learned from reading code cites "source" and "quote" instead: the path of a read marked ok and at least a few words copied exactly from the text shown after "=>" on that line. The lesson text must contain the same quote.
 - A lesson with neither omits both fields and waits for a person to review it.
 - Use repository-relative paths.
@@ -104,6 +105,7 @@ Rules:
 - The lesson must still be true long after that session ended. What that session fixed, wrote or changed, and its progress, are never lessons.
 - Generic advice is never a lesson: anything that would hold in any repository is excluded. A lesson names this repository's own scripts, paths, flags or conventions.
 - "command" is one whole line of the excerpt marked ok, copied character for character: everything after "ok: ". Never shorten it, join two lines, or change a path or flag. The lesson text must contain that same whole command inside backticks.
+- Inside the JSON, write every " of a command or quote as \\" and still close the string with ": the line ok: node -e "f()" becomes "command":"node -e \\"f()\\"".
 - A fact learned from reading code cites "source" and "quote" instead: the path of a read line and at least a few words copied exactly from the text shown after "=>" on that line. The lesson text must contain the same quote.
 - A lesson with neither omits both fields and waits for a person to review it.
 - Use repository-relative paths.

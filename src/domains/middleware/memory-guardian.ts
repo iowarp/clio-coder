@@ -6,13 +6,21 @@
  * not cover, steps that yielded to a busy endpoint, and the repository's
  * earlier sessions were never reviewed. The guardian owns that time. It is a
  * wake-driven loop, not a cadence: it keeps running while there is useful work
- * and the endpoint admits it, and parks with no timer when there is none.
+ * and the endpoint admits it. When there is none it stops making model calls,
+ * and once all history is reviewed only a slow ledger-stat discovery timer
+ * remains armed.
  *
  * Priorities, in order:
  *   1. Pending live work after a turn has settled: triggers that yielded to
  *      occupancy, or shell activity no lesson pass has seen.
  *   2. Repository history: the current repository's and its linked worktrees'
  *      earlier sessions, read incrementally from durable cursors.
+ *
+ * Past the deepest horizon there is no deeper history to open, but the main
+ * checkout and its linked worktrees keep writing sessions while this one sits
+ * idle. The guardian then looks again on a slow, doubling discovery timer.
+ * Each look is a directory listing and ledger stats against the durable
+ * cursors, so unchanged ledgers never reach a model.
  *
  * Idle time sets depth, never a quota. Right after a turn, and during one, the
  * guardian reads only the newest history in short excerpts; the longer the
@@ -71,10 +79,17 @@ const DEPTHS: ReadonlyArray<GuardianDepth> = [
 const WAKE_DEBOUNCE_MS = 1_500;
 const CAPACITY_RETRY_MIN_MS = 2_000;
 const CAPACITY_RETRY_MAX_MS = 30_000;
+/** Discovery looks for new related-checkout sessions once the deepest horizon is exhausted. */
+const DISCOVERY_MIN_MS = 60_000;
+const DISCOVERY_MAX_MS = 10 * 60_000;
 /** Ledger bytes one wake may read before it yields to the event loop. */
 const HISTORY_READ_BYTES_PER_WAKE = 8 * 1024 * 1024;
-/** Two full deadlines in a row park the model tier until the next turn, like the boundary steps' backoff. */
-const HISTORY_TIMEOUT_LIMIT = 2;
+/**
+ * Two unusable answers in a row (full deadlines or malformed envelopes) park
+ * the model tier until the next turn, like the boundary steps' backoff. The
+ * excerpt stays unreviewed and is offered again after that wake.
+ */
+const HISTORY_UNANSWERED_LIMIT = 2;
 
 export interface MemoryGuardianClient {
 	getModelClient(): TaskMemoryModelClient | null;
@@ -136,7 +151,8 @@ export function createMemoryGuardian(deps: MemoryGuardianDeps): MemoryGuardian {
 	let idleSinceMs = performance.now();
 	let controller = new AbortController();
 	let capacityRetryMs = CAPACITY_RETRY_MIN_MS;
-	let historyTimeouts = 0;
+	let discoveryMs = DISCOVERY_MIN_MS;
+	let historyUnanswered = 0;
 	/** The model tier failed; stay parked until a turn or settings change says to look again. */
 	let parkedUnavailable = false;
 	let source: HistoryReviewSource | null = null;
@@ -170,9 +186,10 @@ export function createMemoryGuardian(deps: MemoryGuardianDeps): MemoryGuardian {
 		if (timer !== null) clearTimeout(timer);
 		timer = null;
 		source = null;
-		historyTimeouts = 0;
+		historyUnanswered = 0;
 		parkedUnavailable = false;
 		capacityRetryMs = CAPACITY_RETRY_MIN_MS;
+		discoveryMs = DISCOVERY_MIN_MS;
 		idleSinceMs = performance.now();
 	};
 
@@ -252,11 +269,19 @@ export function createMemoryGuardian(deps: MemoryGuardianDeps): MemoryGuardian {
 			if (!exhausted) return 0;
 			setState("idle");
 			// Nothing new in range. A deeper horizon opens only with more idle time;
-			// past the deepest one the guardian parks until something wakes it.
+			// mid-turn, the turn's end wakes the guardian.
+			if (foreground) return null;
 			const deeper = DEPTHS[depthIndex + 1];
-			if (foreground || deeper === undefined) return null;
-			return Math.max(0, idleSinceMs + deeper.afterIdleMs - performance.now());
+			if (deeper !== undefined) return Math.max(0, idleSinceMs + deeper.afterIdleMs - performance.now());
+			// All history is reviewed, but a related checkout may still record
+			// sessions. Rebuild the source on the next look so a newly linked
+			// worktree and another process's cursor progress are both seen.
+			source = null;
+			const delay = discoveryMs;
+			discoveryMs = Math.min(DISCOVERY_MAX_MS, discoveryMs * 2);
+			return delay;
 		}
+		discoveryMs = DISCOVERY_MIN_MS;
 		setState("reviewing");
 		const outcome = await reviewHistory(slice, depth, stepGeneration);
 		if (stepGeneration !== generation) return null;
@@ -336,12 +361,14 @@ export function createMemoryGuardian(deps: MemoryGuardianDeps): MemoryGuardian {
 		if (result.reason === "endpoint_busy" || result.reason === "endpoint_preempted") return "yielded";
 		if (result.reason === "client_error" || result.reason === "information_flow_blocked" || result.reason === "no_client")
 			return "unavailable";
-		if (result.decision === "timeout") {
-			historyTimeouts += 1;
-			return historyTimeouts >= HISTORY_TIMEOUT_LIMIT ? "unavailable" : "ran";
+		// A malformed envelope is a rejected answer, not a review: committing it
+		// would retire the excerpt with nothing learned from it.
+		if (result.decision === "timeout" || result.decision === "malformed") {
+			historyUnanswered += 1;
+			return historyUnanswered >= HISTORY_UNANSWERED_LIMIT ? "unavailable" : "ran";
 		}
-		historyTimeouts = 0;
-		// The excerpt was answered, whatever the answer said: it is reviewed.
+		historyUnanswered = 0;
+		// The excerpt was answered, whatever the answer chose to keep: it is reviewed.
 		source?.commit(slice);
 		const lessons = bank.snapshot().knowledge.filter((entry) => entry.durable === true);
 		const root = deps.workspaceRoot();
@@ -397,10 +424,13 @@ export function createMemoryGuardian(deps: MemoryGuardianDeps): MemoryGuardian {
 		state: () => current,
 		wake(reason) {
 			if (disposed) return;
-			if (reason === "turn-end" || reason === "turn-start") idleSinceMs = performance.now();
+			if (reason === "turn-end" || reason === "turn-start") {
+				idleSinceMs = performance.now();
+				discoveryMs = DISCOVERY_MIN_MS;
+			}
 			if (reason === "turn-end" || reason === "settings") {
 				parkedUnavailable = false;
-				historyTimeouts = 0;
+				historyUnanswered = 0;
 				capacityRetryMs = CAPACITY_RETRY_MIN_MS;
 			}
 			schedule(reason === "turn-end" ? WAKE_DEBOUNCE_MS : 0);
