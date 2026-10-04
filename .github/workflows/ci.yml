@@ -68,7 +68,7 @@ jobs:
   ci:
     name: ci (22)
     needs: prepare
-    if: ${{ always() }}
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -107,7 +107,7 @@ jobs:
   runtime-compatibility:
     name: ci (24)
     needs: prepare
-    if: ${{ always() }}
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     timeout-minutes: 3
     steps:

@@ -47,6 +47,7 @@ async function watch(record) {
 
 async function main() {
 	const { values } = parseArgs({
+		args: process.argv.slice(2).filter((argument) => argument !== "--"),
 		options: { rehearse: { type: "boolean" }, platforms: { type: "boolean" }, help: { type: "boolean" } },
 	});
 	if (values.help) {

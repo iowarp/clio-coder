@@ -12,7 +12,7 @@ test("manual qualification prepares one artifact and both required runtimes cons
 	ok(workflow.jobs.prepare.steps.some((step: { run?: string }) => step.run?.includes("release-candidate.mjs prepare")));
 	for (const key of ["ci", "runtime-compatibility"]) {
 		strictEqual(workflow.jobs[key].needs, "prepare");
-		strictEqual(workflow.jobs[key].if, `\${{ always() }}`);
+		strictEqual(workflow.jobs[key].if, `\${{ !cancelled() }}`);
 		ok(workflow.jobs[key].steps.some((step: { run?: string }) => step.run?.includes('test "$PREPARE_RESULT" = success')));
 		ok(workflow.jobs[key].steps.some((step: { uses?: string }) => step.uses?.startsWith("actions/download-artifact@")));
 		ok(!workflow.jobs[key].steps.some((step: { run?: string }) => /build|npm pack/u.test(step.run ?? "")));
