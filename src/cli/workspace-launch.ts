@@ -169,11 +169,13 @@ export async function maybeLaunchWorkspace(
 	if (resolution.binaryPath === null) return null;
 
 	const { launchWorkspace } = await import("../domains/mux/workspace/launch.js");
+	const { clioPaneEnv } = await import("../domains/mux/child-env.js");
 	const result = await launchWorkspace({
 		herdrPath: resolution.binaryPath,
 		herdrVersion: resolution.version,
 		cwd: process.cwd(),
 		clioArgv: clioArgv(),
+		clioEnv: clioPaneEnv(process.env, settings.targets),
 	});
 	if (result.status === "fallback") {
 		process.stderr.write(`Clio Coder: ${result.reason}. Continuing in this terminal.\n`);

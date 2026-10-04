@@ -81,6 +81,12 @@ export interface WorkspaceLaunchOptions {
 	cwd: string;
 	/** The command line that starts Clio inside the pane, one word per element. */
 	clioArgv: ReadonlyArray<string>;
+	/**
+	 * What the Clio in the pane needs from this launch's environment
+	 * (src/domains/mux/child-env.ts). The server may be an earlier launch's, so
+	 * its own environment says nothing about this one.
+	 */
+	clioEnv?: Readonly<Record<string, string>>;
 	env?: NodeJS.ProcessEnv;
 	log?: MuxLog;
 }
@@ -380,7 +386,12 @@ async function openWorkspace(host: Host): Promise<Opened> {
 				workspaceNonce,
 			};
 		}
-		const created = await client.workspaceCreate({ cwd: host.cwd, label: workspaceLabel(host.cwd), focus: true });
+		const created = await client.workspaceCreate({
+			cwd: host.cwd,
+			label: workspaceLabel(host.cwd),
+			focus: true,
+			...(host.options.clioEnv ? { env: host.options.clioEnv } : {}),
+		});
 		const clioPane = created.rootPane;
 		createdWorkspaceId = created.workspace.workspaceId;
 		// Tag before starting Clio: another launcher must see the pending child even before its first self-report.

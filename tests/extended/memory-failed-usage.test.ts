@@ -349,7 +349,7 @@ test("production callbacks use gateway capacity evidence and count foreground, l
 	const release = registerForegroundStream(key);
 	t.after(release);
 	assert.ok(callbacks.getModelClient());
-	assert.equal(callbacks.backgroundEndpointBusy(), false, "a gateway URL alone does not declare one slot");
+	assert.equal(callbacks.backgroundEndpointBusy(), true, "unknown memory capacity defaults to one occupied slot");
 	for (const slots of [1, 2, 4]) {
 		target.maxConcurrentRequests = slots;
 		assert.ok(callbacks.getModelClient());

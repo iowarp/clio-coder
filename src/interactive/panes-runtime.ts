@@ -28,6 +28,7 @@ import {
 	runEventJournalPath,
 	runEventJournalRoot,
 } from "../domains/dispatch/run-event-journal.js";
+import { clioPaneEnv } from "../domains/mux/child-env.js";
 import type { MuxContract, MuxPaneRecord } from "../domains/mux/index.js";
 import type { MusicState } from "../domains/mux/music-operations.js";
 import {
@@ -488,7 +489,14 @@ export function createPanesRuntime(deps: PanesRuntimeDeps): PanesOperations {
 			const label = `${request.peer}${PANE_HANDOFF_LABEL_SUFFIX}`;
 			const pendingId = beginPendingOpen(label);
 			try {
-				const ref = await deps.mux.openUtilityPane({ argv, cwd, label, title: label });
+				const ref = await deps.mux.openUtilityPane({
+					argv,
+					cwd,
+					label,
+					title: label,
+					// A second Clio must run against this Clio's directories and keys, not the pane host's.
+					...(request.peer === "clio" ? { env: clioPaneEnv(process.env, deps.getSettings().targets) } : {}),
+				});
 				if (ref === null) return { status: "unavailable", reason: `pane host refused to open ${label}` };
 				return { status: "opened", label, paneId: ref.paneId, cwd };
 			} finally {

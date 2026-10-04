@@ -531,7 +531,8 @@ export function createEditorSubmitController(deps: EditorSubmitDeps): EditorSubm
 			// An empty draft with a queue means "send the queue now": the first
 			// entry becomes the fresh prompt and the rest ride the engine's opening
 			// poll, so all of them reach the first model call of the new run.
-			const [first] = streaming ? deps.chat.queueEntries() : [];
+			// A peer's queued prompt is not the operator's to send as their own.
+			const first = streaming ? deps.chat.queueEntries().find((entry) => entry.origin === undefined) : undefined;
 			if (!first) return;
 			const refusal = deps.chat.interruptRefusal();
 			if (refusal !== null) {

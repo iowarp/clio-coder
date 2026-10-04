@@ -904,20 +904,11 @@ try {
 		assert.match((await route.locator("summary").getAttribute("title")) ?? "", /Thinking: high/);
 		assert.equal(await route.locator("summary").evaluate((element) => document.activeElement === element), true);
 		await route.locator("summary").click();
-		await route.getByLabel("Apply to", { exact: true }).selectOption("every-project");
-		await route.getByText("Saved for every project.", { exact: true }).waitFor();
-		await route.getByLabel("Connection", { exact: true }).selectOption("field-station");
-		assert.equal(await route.getByLabel("Model", { exact: true }).inputValue(), "");
-		await route.getByLabel("Model", { exact: true }).selectOption("survey-small");
-		await route.getByText(/^field-station answered at /).waitFor();
+		await route.getByText("This conversation.", { exact: true }).waitFor();
+		assert.equal(await route.getByLabel("Apply to", { exact: true }).count(), 0);
 		await check("route-picker");
 		if (width === 1600 || width === 390) await page.screenshot({ path: join(output, `route-picker-${width}.png`) });
-		await route.getByRole("button", { name: "Save for every project", exact: true }).click();
-		await route.locator("summary .route-chip__text").getByText("survey-small", { exact: true }).waitFor();
-		assert.match(
-			(await route.locator("summary").getAttribute("title")) ?? "",
-			/Target: field-station\. Model: survey-small\./,
-		);
+		await page.keyboard.press("Escape");
 		await page.waitForFunction(() => !(document.querySelector(".route-picker") as HTMLDetailsElement).open);
 		assert.equal(await route.evaluate((element) => (element as HTMLDetailsElement).open), false);
 		assert.equal(await route.locator("summary").evaluate((element) => document.activeElement === element), true);

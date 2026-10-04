@@ -130,7 +130,11 @@ export interface TurnQueues {
 	setEntryKind(id: string, kind: QueuedMessageKind): boolean;
 	/** A producer's advisory labels, and a new kind unless the operator pinned the entry. */
 	relabel(id: string, labels: Readonly<Record<string, string>>, kind?: QueuedMessageKind): boolean;
-	/** Drain Clio's queue, the in-flight list and both engine queues; returns the drained entries. */
+	/**
+	 * Drain Clio's queue, the in-flight list and both engine queues. Returns the
+	 * operator's entries for the caller to restore; machine-origin entries are
+	 * retired with a notice and never returned.
+	 */
 	clearQueuedMirror(): QueuedChatMessage[];
 	/**
 	 * Hand next-slot entries to the engine after a tool batch, before Pi polls.
@@ -231,6 +235,21 @@ export function createTurnQueues(deps: TurnQueuesDeps): TurnQueues {
 		for (const entry of entries) report({ type: "removed", entry: { ...entry }, reason, waitedMs: waited(entry) });
 	};
 
+	/**
+	 * A machine-origin entry that leaves the queue unrun is retired, never
+	 * restored: its sender was told it was accepted, and its text is not the
+	 * operator's to find in the composer and send as their own. The transcript
+	 * says what was dropped and why, which is the only place the sender can
+	 * still read it.
+	 */
+	const retire = (entries: ReadonlyArray<QueuedChatMessage>, why: string): void => {
+		removed(entries, "cancelled");
+		for (const entry of entries) {
+			deps.emitNotice(`[Clio Coder] ${entry.origin} was accepted into the queue and dropped unrun: ${why}.`);
+		}
+	};
+	const fromMachine = (entry: QueuedChatMessage): boolean => entry.origin !== undefined;
+
 	const find = (id: string): number => queue.findIndex((entry) => entry.id === id);
 
 	/** Hand every entry of `kind` to the engine; returns how many went. */
@@ -263,9 +282,13 @@ export function createTurnQueues(deps: TurnQueuesDeps): TurnQueues {
 		removeEntry(id, reason = "removed") {
 			const idx = find(id);
 			if (idx < 0) return null;
+			// Moving an entry to the editor or sending it now makes its text the
+			// operator's own submission; a machine prompt can only be deleted.
+			if (queue[idx]?.origin !== undefined && (reason === "to-editor" || reason === "sent-now")) return null;
 			const [entry] = queue.splice(idx, 1);
 			emitQueueUpdate();
-			if (entry) removed([entry], reason);
+			if (entry && fromMachine(entry)) retire([entry], "the operator removed it");
+			else if (entry) removed([entry], reason);
 			return entry ?? null;
 		},
 		moveEntry(id, delta) {
@@ -280,7 +303,8 @@ export function createTurnQueues(deps: TurnQueuesDeps): TurnQueues {
 		},
 		setEntryKind(id, kind) {
 			const entry = queue[find(id)];
-			if (!entry) return false;
+			// A machine prompt stays a follow-up: it is never a steer, whoever asks.
+			if (!entry || fromMachine(entry)) return false;
 			entry.kind = kind;
 			entry.pinned = true;
 			emitQueueUpdate();
@@ -304,8 +328,10 @@ export function createTurnQueues(deps: TurnQueuesDeps): TurnQueues {
 				state.runtime.agent.clearAllQueues();
 			}
 			if (drained.length > 0) emitQueueUpdate();
-			removed(drained, "restored");
-			return drained;
+			const restored = drained.filter((entry) => !fromMachine(entry));
+			removed(restored, "restored");
+			retire(drained.filter(fromMachine), "the queue was cleared");
+			return restored;
 		},
 		handOverAtFinishTurn(final) {
 			const agent = state.runtime?.agent;
@@ -331,7 +357,14 @@ export function createTurnQueues(deps: TurnQueuesDeps): TurnQueues {
 		onRunCancelled({ hold }) {
 			const changed = inFlight.length > 0 || queue.length > 0;
 			queue.unshift(...inFlight.splice(0, inFlight.length));
-			if (!hold) removed(queue.splice(0, queue.length), "cancelled");
+			if (!hold) {
+				const dropped = queue.splice(0, queue.length);
+				removed(
+					dropped.filter((entry) => !fromMachine(entry)),
+					"cancelled",
+				);
+				retire(dropped.filter(fromMachine), "the run was cancelled");
+			}
 			held = hold && queue.length > 0;
 			state.runtime?.agent.clearAllQueues();
 			if (changed) emitQueueUpdate();
@@ -407,6 +440,7 @@ export function createTurnQueues(deps: TurnQueuesDeps): TurnQueues {
 			await deps.submit("", { requestContinuation: true });
 		},
 		reset(): void {
+			retire([...inFlight, ...queue].filter(fromMachine), "the session was reset");
 			queue.length = 0;
 			inFlight.length = 0;
 			persistedUserEchoes.length = 0;

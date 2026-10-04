@@ -13,7 +13,7 @@ export function targetsRoutes(app: Hono, hub: EventHub, targets: TargetsService,
 		setup.answer(params.id, body, idempotencyKey(context)),
 	);
 	register(app, hub, routes.setupCancel, ({ params }) => setup.cancel(params.id));
-	register(app, hub, routes.targetsList, ({ params }) => targets.list(params.id));
+	register(app, hub, routes.targetsList, ({ params }, context) => targets.list(params.id, context.req.raw.signal));
 	register(app, hub, routes.routing, ({ params }) => targets.routing(params.id));
 	register(app, hub, routes.targetsProbe, async ({ params }, context) => ({
 		operationId: await targets.mutate(params.id, params.targetId, "probe", idempotencyKey(context)),

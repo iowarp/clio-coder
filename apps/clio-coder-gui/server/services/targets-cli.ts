@@ -66,8 +66,8 @@ export class TargetsService {
 		private readonly operations: OperationRegistry,
 		private readonly supervisor: Supervisor,
 	) {}
-	async list(workspaceId: string) {
-		return this.supervisor.workspaceControl(workspaceId, readTargets);
+	async list(workspaceId: string, signal?: AbortSignal) {
+		return this.supervisor.workspaceControl(workspaceId, readTargets, signal);
 	}
 	async mutate(workspaceId: string, id: string, action: "probe" | "use" | "remove" | "signout", key: string) {
 		const workspace = await this.workspaces.get(workspaceId);

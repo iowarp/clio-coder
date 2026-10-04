@@ -272,7 +272,10 @@ test("memory refuses an endpoint changed while metadata was pending", async () =
 
 for (const stage of ["metadata", "auth"] as const) {
 	for (const capacity of [1, 2, undefined]) {
-		test(`memory rechecks ${capacity ?? "unbounded"} endpoint capacity after ${stage}`, { timeout: 5000 }, async () => {
+		test(`memory rechecks ${capacity ?? "unknown (one-slot default)"} endpoint capacity after ${stage}`, {
+			timeout: 5000,
+		}, async () => {
+			const singleSlot = capacity === undefined || capacity === 1;
 			let release!: () => void;
 			let entered!: () => void;
 			const gate = new Promise<void>((resolve) => {
@@ -328,14 +331,14 @@ for (const stage of ["metadata", "auth"] as const) {
 				await started;
 				strictEqual(endpointCapacityUsage()[key] ?? 0, 0, "metadata/auth is not inference capacity");
 				releaseForeground = registerForegroundStream(key);
-				strictEqual(routing.backgroundEndpointBusy(), capacity === 1);
+				strictEqual(routing.backgroundEndpointBusy(), singleSlot);
 				release();
 				const result = await pending;
-				strictEqual(f.fixture.requests.length, capacity === 1 ? 0 : 1);
-				deepStrictEqual(occupancy, capacity === 1 ? [] : [2]);
+				strictEqual(f.fixture.requests.length, singleSlot ? 0 : 1);
+				deepStrictEqual(occupancy, singleSlot ? [] : [2]);
 				strictEqual(endpointCapacityUsage()[key] ?? 0, 1, "only the foreground hold remains");
-				strictEqual(disturbances, capacity === 1 ? 0 : 1);
-				if (capacity === 1) {
+				strictEqual(disturbances, singleSlot ? 0 : 1);
+				if (singleSlot) {
 					strictEqual(result.reason, "endpoint_busy");
 					strictEqual(result.usage, null);
 					strictEqual(telemetry.at(-1)?.decision, "dropped");

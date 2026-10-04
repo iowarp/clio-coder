@@ -164,7 +164,9 @@ export function sessionRoutes(
 	register(app, hub, routes.openWorkspace, ({ body }, context) =>
 		commands.run("workspace.open", idempotencyKey(context), body, () => workspaces.open(body.path)),
 	);
-	register(app, hub, routes.sessionHistory, ({ params }) => sessions.history(params.id));
+	register(app, hub, routes.sessionHistory, ({ params }, context) =>
+		sessions.history(params.id, context.req.raw.signal),
+	);
 	register(app, hub, routes.newSession, ({ params }, context) =>
 		commands.run(`session.new:${params.id}`, idempotencyKey(context), {}, () => supervisor.open(params.id)),
 	);

@@ -219,10 +219,7 @@ if (values.serve) {
 				if (want("picker") && values.route) {
 					const picker = page.locator(".route-picker");
 					await picker.locator("summary").click();
-					// A conversation keeps its connection, so the choice is made for every project.
-					await picker.getByLabel("Apply to", { exact: true }).selectOption("every-project");
-					await picker.getByLabel("Connection", { exact: true }).selectOption("field-station");
-					await picker.getByText(/^field-station answered at /).waitFor();
+					await picker.getByText("This conversation.", { exact: true }).waitFor();
 					await shot("picker");
 					await page.keyboard.press("Escape");
 				}
