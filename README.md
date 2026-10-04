@@ -80,7 +80,9 @@ Both install under `%LOCALAPPDATA%\clio-coder\install` with the launcher
 `%USERPROFILE%\.local\bin\clio-coder.cmd`, need no administrator rights, and add
 the launcher directory to your user `PATH` only with `-AddToPath`. CI builds and
 boots the binary on Windows and tests selected subprocess contracts, but the native Windows installed-package flow is not CI-verified.
-Interactive terminal use there remains best effort.
+The 0.6.1 installer was checked by hand on one x64 host with PowerShell 5.1
+(install, repair, rollback and uninstall); 0.6.0's installer fails there, so
+install 0.6.1 or newer. Interactive terminal use there remains best effort.
 
 **First run.**
 
