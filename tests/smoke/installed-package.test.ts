@@ -127,7 +127,7 @@ function emittedFilesContaining(packageRoot: string, marker: string): Set<string
 	for (const entry of readdirSync(join(packageRoot, "dist"), { recursive: true, withFileTypes: true })) {
 		if (!entry.isFile() || !entry.name.endsWith(".js")) continue;
 		const path = join(entry.parentPath, entry.name);
-		if (readFileSync(path, "utf8").includes(marker)) matches.add(realpathSync(path));
+		if (readFileSync(path, "utf8").includes(marker)) matches.add(realpathSync.native(path));
 	}
 	return matches;
 }
@@ -476,7 +476,7 @@ async function assertInstalledWebApp(packageRoot: string, bin: string, prefix: s
 		strictEqual(opened.status, 200, openedText);
 		const workspace = JSON.parse(openedText) as { id: string; path: string };
 		match(workspace.id, /^[a-f0-9]{32}$/u);
-		strictEqual(workspace.path, realpathSync(foreign));
+		strictEqual(workspace.path, realpathSync.native(foreign));
 		const targets = await request(`/api/workspaces/${workspace.id}/targets`);
 		strictEqual(targets.status, 200, `targets through the installed CLI: ${await targets.text()}`);
 
@@ -608,7 +608,7 @@ function coveredFiles(directory: string): Set<string> {
 		for (const script of payload.result ?? []) {
 			if (!script.url?.startsWith("file:")) continue;
 			try {
-				files.add(realpathSync(fileURLToPath(script.url)));
+				files.add(realpathSync.native(fileURLToPath(script.url)));
 			} catch {
 				// Ignore builtins and transient files outside the installed package.
 			}
