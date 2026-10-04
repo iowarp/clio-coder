@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { CLIO_ARTIFACT_DIR } from "../core/artifact-paths.js";
+import { codemapPath, legacyCodewikiPath } from "../domains/context/codewiki/artifact.js";
 import { type CodewikiCoordinatedResult, coordinateCodewikiWrite } from "../domains/context/codewiki/coordinator.js";
 import type { Codewiki } from "../domains/context/codewiki/schema.js";
 import { buildRepoMap, renderRepoMap } from "../domains/context/wiki/repo-map.js";
@@ -24,12 +25,11 @@ function defaultRepoMapPath(cwd: string): string {
 	return path.join(cwd, CLIO_ARTIFACT_DIR, "maps", `${path.basename(cwd)}.html`);
 }
 
-function gitValue(cwd: string, args: string[]): string | null {
+function gitValue(cwd: string, args: string[], raw = false): string | null {
 	try {
-		const out = execFileSync("git", args, { cwd, timeout: 5000, stdio: ["ignore", "pipe", "ignore"] })
-			.toString("utf8")
-			.trim();
-		return out;
+		const out = execFileSync("git", args, { cwd, timeout: 5000, stdio: ["ignore", "pipe", "ignore"] }).toString("utf8");
+		// Porcelain status columns start with a meaningful space; trimming would shift them.
+		return raw ? out : out.trim();
 	} catch {
 		return null;
 	}
@@ -37,16 +37,53 @@ function gitValue(cwd: string, args: string[]): string | null {
 
 type SourceState = "clean" | "dirty" | "unknown";
 
+/**
+ * Status entries that make the working tree differ from HEAD, minus this
+ * command's own untracked outputs.
+ *
+ * The map writes its index and its HTML before provenance is read again on the
+ * next run, so counting them made every repeat map of a clean checkout dirty.
+ * Only an untracked entry at exactly one of `generated` is dropped. Untracked
+ * files are listed individually (`--untracked-files=all`), because the
+ * default collapses a wholly untracked `.clio-coder/` into one entry, and
+ * dropping that would hide every other file in it. Tracked changes, renames
+ * and any other untracked path still count.
+ */
+function workingTreeChanges(cwd: string, generated: ReadonlyArray<string>): string[] | null {
+	const status = gitValue(cwd, ["status", "--porcelain", "-z", "--untracked-files=all"], true);
+	const top = gitValue(cwd, ["rev-parse", "--show-toplevel"]);
+	if (status === null || top === null) return null;
+	const own = new Set(
+		generated.flatMap((file) => {
+			const inside = path.relative(top, file);
+			return inside === "" || inside.startsWith("..") || path.isAbsolute(inside) ? [] : [inside.split(path.sep).join("/")];
+		}),
+	);
+	const changes: string[] = [];
+	const records = status.split("\0");
+	for (let index = 0; index < records.length; index += 1) {
+		const record = records[index] as string;
+		if (record.length < 4) continue;
+		const code = record.slice(0, 2);
+		// A rename or copy carries its original path as the next record.
+		if (code.includes("R") || code.includes("C")) index += 1;
+		if (code === "??" && own.has(record.slice(3))) continue;
+		changes.push(record);
+	}
+	return changes;
+}
+
 /** A successful empty status means clean; unavailable Git evidence never does. */
 function repositoryFacts(
 	cwd: string,
 	codewiki: Codewiki,
 	indexedHead: string | null,
+	generated: ReadonlyArray<string>,
 ): { sourceState: SourceState; repository?: { url: string; revision: string } } {
 	const revision = gitValue(cwd, ["rev-parse", "--verify", "HEAD"]);
-	const status = gitValue(cwd, ["status", "--porcelain", "--untracked-files=normal"]);
-	if (!revision || status === null) return { sourceState: "unknown" };
-	if (status !== "" || revision !== indexedHead) return { sourceState: "dirty" };
+	const changes = workingTreeChanges(cwd, generated);
+	if (!revision || changes === null) return { sourceState: "unknown" };
+	if (changes.length > 0 || revision !== indexedHead) return { sourceState: "dirty" };
 	// Source paths in the map are workspace-relative. A nested workspace has
 	// no proven repository-relative path mapping, so cannot supply citations.
 	if (gitValue(cwd, ["rev-parse", "--show-prefix"]) !== "") return { sourceState: "unknown" };
@@ -129,7 +166,15 @@ export async function runContextMapCommand(args: string[]): Promise<number> {
 		process.stderr.write("clio-coder context map: could not build a repository index\n");
 		return 1;
 	}
-	const facts = repositoryFacts(cwd, reconciled.codewiki, reconciled.worker.fingerprint.gitHead);
+	// Exactly what this command writes into the workspace: the index (canonical
+	// or the legacy file it may still be reconciling), this run's HTML, and the
+	// fixed default HTML an earlier run without --out left behind.
+	const facts = repositoryFacts(cwd, reconciled.codewiki, reconciled.worker.fingerprint.gitHead, [
+		codemapPath(cwd),
+		legacyCodewikiPath(cwd),
+		target,
+		defaultRepoMapPath(cwd),
+	]);
 	const map = buildRepoMap(reconciled.codewiki, path.basename(cwd));
 
 	const html = renderRepoMap(map, facts);
