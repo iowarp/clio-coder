@@ -2,7 +2,7 @@ import { MutationCache, QueryCache, QueryClient, QueryClientProvider } from "@ta
 import { useEffect } from "react";
 import { createRoot } from "react-dom/client";
 import { createBrowserRouter, RouterProvider, useRouteError } from "react-router";
-import { createClient } from "./api/client.js";
+import { ApiProblem, createClient } from "./api/client.js";
 import { launchToken } from "./api/token.js";
 import { App } from "./app.js";
 import { reportProblem } from "./design/notifications.js";
@@ -15,7 +15,21 @@ const client = createClient(launchToken());
 const queries = new QueryClient({
 	// A few seconds of freshness stops two views that mount together from asking for the same thing twice.
 	defaultOptions: { queries: { retry: false, staleTime: 5_000 } },
-	queryCache: new QueryCache({ onError: reportProblem }),
+	queryCache: new QueryCache({
+		onError: (error, query) => {
+			// A link to a saved task this server has not opened answers not_found on the first read, and
+			// the task page shows that state with its own way to resume. Only that first read is quiet:
+			// a snapshot that was loaded and then goes missing is still reported, as is everything else.
+			if (
+				query.queryKey[0] === "session" &&
+				query.state.data === undefined &&
+				error instanceof ApiProblem &&
+				error.problem.code === "not_found"
+			)
+				return;
+			reportProblem(error);
+		},
+	}),
 	mutationCache: new MutationCache({ onError: reportProblem }),
 });
 function RouteError() {

@@ -13,7 +13,7 @@ import { getTerminationCoordinator } from "../core/termination.js";
 import { clioDataDir } from "../core/xdg.js";
 import type { AgentsContract } from "../domains/agents/contract.js";
 import { AgentsDomainModule } from "../domains/agents/index.js";
-import { SHADOW_AGENT_OPERATOR_STAND_IN } from "../domains/agents/spec.js";
+import { SHADOW_AGENT_OPERATOR_STAND_IN, userOriginAudienceRefusal } from "../domains/agents/spec.js";
 import type { ConfigContract } from "../domains/config/contract.js";
 import { ConfigDomainModule } from "../domains/config/index.js";
 import { createContextDomainModule } from "../domains/context/runtime.js";
@@ -747,11 +747,16 @@ async function runDispatch(
 		}
 		const msg = err instanceof Error ? err.message : String(err);
 		process.stderr.write(`clio-coder run failed: ${msg}\n`);
-		if (runAgents?.getSpec(parsed.agentId)?.audience === "shadow") {
+		const failedSpec = runAgents?.getSpec(parsed.agentId);
+		if (failedSpec?.audience === "shadow") {
 			process.stderr.write(`clio-coder run: instead run: ${shadowStandInCommand(parsed)}\n`);
 		}
 		await loaded.stop();
 		if (err instanceof SessionCostCeilingError) return SESSION_COST_CEILING_EXIT_CODE;
+		// Asking for an agent reserved for internal orchestration is an admission
+		// refusal like any other, and no model was called. Matched against the
+		// refusal the spec's own audience produces, not against failure text at large.
+		if (failedSpec && msg === userOriginAudienceRefusal(failedSpec)) return 2;
 		if (/target '.+' not found/.test(msg)) return 2;
 		if (
 			msg.includes("unknown agent recipe") ||

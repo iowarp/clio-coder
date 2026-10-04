@@ -2312,6 +2312,7 @@ function assertPostRuntimeToolCompatibility(
 	effectiveTools: ReadonlyArray<ToolName>,
 	target: ResolvedTarget,
 	writeConfined: boolean,
+	explicitReadOnly: boolean,
 ): void {
 	// The shipped coder may use a named subprocess peer. Its native Clio tool
 	// requirements cannot be matched to the peer's opaque tool loop. Keep custom
@@ -2322,6 +2323,7 @@ function assertPostRuntimeToolCompatibility(
 	if (target.runtime.kind === "subprocess" && spec.source === "builtin" && spec.id === "coder") return;
 	const compatibility = resolveAgentToolCompatibility(spec, effectiveTools, {
 		mediatesDispatch: WORKER_RUNTIME_MEDIATES_CLIO_DISPATCH,
+		explicitReadOnly,
 	});
 	if (compatibility.compatible) return;
 	// Name the narrowing that removed the tool: blaming the runtime sends the
@@ -4961,7 +4963,7 @@ export function createDispatchBundle(
 					"[dispatch scope] Narrow write roots have no OS sandbox enforcing them, so bash and verify are withheld and the worker cannot run checks. Enable safety.sandbox (auto or required) with a usable local bubblewrap backend to keep these tools while enforcing the write roots.",
 			});
 		}
-		assertPostRuntimeToolCompatibility(req.agentId, spec, effectiveTools, target, writeConfined);
+		assertPostRuntimeToolCompatibility(req.agentId, spec, effectiveTools, target, writeConfined, req.readOnly === true);
 		assertTurnConstraintCompatibility(req, effectiveTools, target.runtime.kind === "http");
 		const permit = resolveDispatchPermit(req, recipe, spec, effectiveTools, readOnly, pathScope, settings, target);
 		assertMainGrantRoutable(req, target.runtime, permit);
@@ -8430,7 +8432,14 @@ export function createDispatchBundle(
 			effectiveToolNames(admission.allowedTools, target, writeConfined, deniedToolNames(req), req.cwd ?? process.cwd()),
 			req,
 		);
-		assertPostRuntimeToolCompatibility(req.agentId, agentSpec, effectiveTools, target, writeConfined);
+		assertPostRuntimeToolCompatibility(
+			req.agentId,
+			agentSpec,
+			effectiveTools,
+			target,
+			writeConfined,
+			req.readOnly === true,
+		);
 		assertTurnConstraintCompatibility(req, effectiveTools, target.runtime.kind === "http");
 		// Preview refuses exactly what dispatch would: a widening narrowing, an
 		// orchestration worker, or a route the runtime cannot honor.

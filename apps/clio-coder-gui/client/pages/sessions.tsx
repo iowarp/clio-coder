@@ -3,6 +3,7 @@ import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react"
 import { Link, Navigate, useNavigate, useOutletContext, useParams } from "react-router";
 import { routes } from "../../contracts/routes.js";
 import type { Client } from "../api/client.js";
+import { ApiProblem, emptyInput } from "../api/client.js";
 import { clock, formatDuration } from "../api/clock.js";
 import type { ConnectionState } from "../api/events.js";
 import { SESSION_CACHES, sessionBuffer } from "../api/sessions.js";
@@ -35,7 +36,7 @@ import { ClioLogo, ClioPulse, PULSE_SIZE } from "../shell/ClioMark.js";
 import { Menu, MenuItem } from "../shell/Menu.js";
 import { taskTitle } from "../shell/shell-model.js";
 import { TopBar } from "../shell/TopBar.js";
-import { useRenameTask } from "../shell/tasks.js";
+import { rememberedWorkspace, useRenameTask } from "../shell/tasks.js";
 import { openAppWindow } from "../shell/windows.js";
 import "../chat/chat-turn.css";
 import "../chat/conversation.css";
@@ -48,6 +49,51 @@ export { Sessions } from "./tasks.js";
 export function Session({ client }: { client: Client }) {
 	const { id = "" } = useParams();
 	return <SessionView key={id} client={client} id={id} />;
+}
+
+export interface LocatedTask {
+	/** The project whose ledger holds the task, or null when none of the projects read has it. */
+	workspace: { id: string; name: string } | null;
+	/** Projects whose ledger could not be read, so "not found" is not a fact about them. */
+	unread: number;
+}
+
+/**
+ * Find the project a task is saved in, for a link to a task this server has not opened.
+ *
+ * The link carries only the task id, and resuming needs the project. The projects are read one at a
+ * time, the last one used first, and the search stops at the first ledger that has the task. Leaving
+ * the page cancels the read in flight and reads no further project.
+ */
+export async function locateTask(
+	client: Pick<Client, "call">,
+	id: string,
+	signal: AbortSignal,
+	preferred: string | null = rememberedWorkspace(),
+): Promise<LocatedTask> {
+	const all = await client.call(routes.workspaces, emptyInput, undefined, signal);
+	const projects = [...all.filter((row) => row.id === preferred), ...all.filter((row) => row.id !== preferred)];
+	let unread = 0;
+	for (const project of projects) {
+		signal.throwIfAborted();
+		try {
+			const history = await client.call(
+				routes.sessionHistory,
+				{ params: { id: project.id }, query: {}, body: {} },
+				undefined,
+				signal,
+			);
+			if (history.some((row) => row.id === id)) {
+				return { workspace: { id: project.id, name: project.name }, unread };
+			}
+		} catch {
+			// A cancelled read is the page being left, not an unreadable project.
+			signal.throwIfAborted();
+			// One unreadable project must not hide the task in the next one; it is counted and reported.
+			unread += 1;
+		}
+	}
+	return { workspace: null, unread };
 }
 
 /**
@@ -105,10 +151,21 @@ function SessionView({ client, id }: { client: Client; id: string }) {
 	const input = { params: { id }, query: {}, body: {} };
 	const session = useQuery({
 		queryKey: ["session", id],
-		queryFn: async () => {
-			const snapshot = await client.call(routes.session, input);
+		queryFn: async ({ signal }) => {
+			const snapshot = await client.call(routes.session, input, undefined, signal);
 			return sessionBuffer(id).snapshot(snapshot) ?? snapshot;
 		},
+	});
+	// A saved task this server has not opened answers not_found. Only that answer starts the search for
+	// its project; a task that loads, and a server that cannot be reached, never do.
+	const notOpen =
+		session.data === undefined && session.error instanceof ApiProblem && session.error.problem.code === "not_found";
+	const located = useQuery({
+		queryKey: ["session-locate", id],
+		queryFn: ({ signal }) => locateTask(client, id, signal),
+		enabled: notOpen,
+		retry: false,
+		staleTime: Number.POSITIVE_INFINITY,
 	});
 	const workspaceId = session.data?.workspaceId ?? "";
 	const workspace = useQuery({
@@ -192,6 +249,51 @@ function SessionView({ client, id }: { client: Client; id: string }) {
 			),
 		[settings, health, config],
 	);
+	if (notOpen && !snapshot && !located.error) {
+		const found = located.data?.workspace ?? null;
+		const unread = located.data?.unread ?? 0;
+		return (
+			<>
+				<TopBar />
+				<div className="task-state" role={located.data ? "alert" : "status"}>
+					<Icon name="warn" />
+					<h1>This task is not open</h1>
+					{located.data === undefined ? (
+						<p>Looking for it in your projects…</p>
+					) : found ? (
+						<p>It is saved in {found.name}. Resuming starts Clio for it and continues the conversation.</p>
+					) : (
+						<p>
+							None of your projects has a saved task with this link.
+							{unread > 0 ? ` ${unread} ${unread === 1 ? "project" : "projects"} could not be read.` : ""}
+						</p>
+					)}
+					{resume.error ? <p>Could not resume this task. {resume.error.message}</p> : null}
+					<div className="task-state__actions">
+						{found ? (
+							<button type="button" className="primary" disabled={resume.isPending} onClick={() => resume.mutate(found.id)}>
+								{resume.isPending ? "Resuming…" : "Resume task"}
+							</button>
+						) : located.data ? (
+							<button type="button" className="primary" disabled={located.isFetching} onClick={() => void located.refetch()}>
+								{located.isFetching ? "Looking again…" : "Look again"}
+							</button>
+						) : null}
+						<Link to="/">Back to a new task</Link>
+					</div>
+				</div>
+			</>
+		);
+	}
+	// The project list itself could not be read: that failure is the one to show and to retry.
+	if (notOpen && !snapshot && located.error)
+		return (
+			<TaskUnavailable
+				message={located.error.message}
+				retrying={located.isFetching}
+				onRetry={() => void located.refetch()}
+			/>
+		);
 	if (session.error && !snapshot)
 		return (
 			<TaskUnavailable
@@ -235,7 +337,10 @@ function SessionView({ client, id }: { client: Client; id: string }) {
 								: null;
 	const memoryMark = memoryGuardianMark(
 		snapshot.telemetry?.memory,
-		snapshot.state !== "parked" && snapshot.state !== "closed" && snapshot.state !== "unknown" && snapshot.state !== "failed",
+		snapshot.state !== "parked" &&
+			snapshot.state !== "closed" &&
+			snapshot.state !== "unknown" &&
+			snapshot.state !== "failed",
 	);
 	return (
 		<PaneContext.Provider value={paneActions}>

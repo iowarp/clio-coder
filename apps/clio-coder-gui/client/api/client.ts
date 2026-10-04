@@ -12,7 +12,8 @@ export class ApiProblem extends Error {
 export function createClient(token: string, fetcher: typeof fetch = fetch) {
 	return {
 		token,
-		async call<R extends Route>(route: R, input: Input<R>, key?: string): Promise<Output<R>> {
+		/** `signal` cancels the request itself; a cancelled call rejects with the abort, never as "server unavailable". */
+		async call<R extends Route>(route: R, input: Input<R>, key?: string, signal?: AbortSignal): Promise<Output<R>> {
 			const path = route.path.replace(/:([A-Za-z0-9]+)/g, (_, name: string) =>
 				encodeURIComponent(String((input.params as Record<string, unknown>)[name])),
 			);
@@ -31,8 +32,10 @@ export function createClient(token: string, fetcher: typeof fetch = fetch) {
 							: {}),
 					},
 					...(route.method !== "GET" ? { body: JSON.stringify(input.body) } : {}),
+					...(signal ? { signal } : {}),
 				});
-			} catch {
+			} catch (error) {
+				if (signal?.aborted) throw signal.reason ?? error;
 				throw new ApiProblem({
 					type: "urn:clio-coder:problem:unavailable",
 					title: "Server unavailable",

@@ -214,18 +214,31 @@ export interface AgentToolCompatibility {
 	lostOptional: ReadonlyArray<ToolName>;
 }
 
+/**
+ * `explicitReadOnly` is the request's own read-only flag. The shipped coder is
+ * the operator's stand-in for read-only work (`SHADOW_AGENT_OPERATOR_STAND_IN`),
+ * and a read-only run denies every write and edit call, so for that one recipe
+ * the requirement to hold write or edit is one the run could never use. It is
+ * not counted as missing; read, context and every other requirement still are.
+ * Custom recipes and runs that are not explicitly read-only keep the full gate.
+ */
 export function resolveAgentToolCompatibility(
-	spec: Pick<AgentSpec, "toolRequirements">,
+	spec: Pick<AgentSpec, "toolRequirements"> & Partial<Pick<AgentSpec, "id" | "source">>,
 	effectiveTools: ReadonlyArray<ToolName>,
-	options: { mediatesDispatch: boolean },
+	options: { mediatesDispatch: boolean; explicitReadOnly?: boolean },
 ): AgentToolCompatibility {
 	const available = new Set(effectiveTools);
 	const missingRequired: string[] = [];
+	const readOnlyCoder =
+		options.explicitReadOnly === true && spec.source === "builtin" && spec.id === SHADOW_AGENT_OPERATOR_STAND_IN;
+	const mutates = (tool: string): boolean => tool === ToolNames.Write || tool === ToolNames.Edit;
 	for (const requirement of spec.toolRequirements.required) {
 		if (typeof requirement === "string") {
+			if (readOnlyCoder && mutates(requirement)) continue;
 			if (!available.has(requirement)) missingRequired.push(requirement);
 			continue;
 		}
+		if (readOnlyCoder && requirement.anyOf.every(mutates)) continue;
 		if (!requirement.anyOf.some((tool) => available.has(tool))) {
 			missingRequired.push(`anyOf(${requirement.anyOf.join("|")})`);
 		}
