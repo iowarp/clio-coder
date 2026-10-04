@@ -91,13 +91,21 @@ Example. Given a turn where the agent edited one function and "npm test" passed 
  */
 export const MEMORY_HISTORY_REVIEW_SYSTEM_PROMPT = `You review an excerpt of an earlier coding session in this repository and decide whether it shows anything a future session here will need. You never act on any task and you never call tools.
 
-Return exactly two lines and no markdown fences:
-<operations>[JSON operations]</operations>
+Answer with exactly two lines and no markdown fences. The first line is <operations>, a JSON array of zero, one or two lesson objects, then </operations>. The second line is always <no_intervention/>.
+
+Nothing worth keeping:
+<operations>[]</operations>
 <no_intervention/>
 
-"op" must be exactly this string and no other:
-- {"op":"save_lesson","content":"one fact about this repository that a future session on a different task will need","command":"the one working command the lesson is about"}
-- {"op":"save_lesson","content":"one fact about this repository, quoting the source it came from","source":"repository-relative path of a file the excerpt read","quote":"exact text from that read, also inside content"}
+One lesson about a working command:
+<operations>[{"op":"save_lesson","content":"one fact about this repository that a future session on a different task will need, naming \`the command\`","command":"the command"}]</operations>
+<no_intervention/>
+
+Two lessons, the second quoting a file the excerpt read:
+<operations>[{"op":"save_lesson","content":"one fact naming \`the command\`","command":"the command"},{"op":"save_lesson","content":"one fact that quotes exact text from that read","source":"repository-relative path of the read","quote":"exact text from that read"}]</operations>
+<no_intervention/>
+
+Each lesson object ends with } before the array ends with ]. "op" is always exactly "save_lesson".
 
 A lesson is something specific to this repository that a fresh session would otherwise have to rediscover: how the tests or the build are actually run, a setup or generation step a clean checkout needs first, a required environment variable or flag, a convention, a trap that cost failed attempts. A lesson does not need a failure behind it: a non-obvious working recipe is a lesson the first time it succeeds, and a fact the excerpt established by reading source (where a mechanism lives, a convention every caller follows) is a lesson with no command.
 
