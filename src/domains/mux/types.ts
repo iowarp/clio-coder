@@ -56,6 +56,26 @@ export interface MuxTab {
 	agentState: MuxAgentState;
 }
 
+/** One workspace, projected from the server's workspace record. */
+export interface MuxWorkspace {
+	workspaceId: string;
+	label: string;
+	focused: boolean;
+	paneCount: number;
+	agentState: MuxAgentState;
+}
+
+/** Which slice of a pane's terminal a read returns. */
+export type MuxReadSource = "visible" | "recent" | "recent_unwrapped";
+
+/** One read of a pane's terminal text. */
+export interface MuxPaneRead {
+	paneId: string;
+	text: string;
+	/** True when the server cut the text to its own limit. */
+	truncated: boolean;
+}
+
 /** Git worktree metadata projected from herdr's worktree API. */
 export interface MuxWorktree {
 	path: string;
@@ -169,6 +189,8 @@ export type MuxErrorKind =
 	| "feature_disabled"
 	| "agent_prompt_stalled"
 	| "timeout"
+	/** The caller's own abort signal ended the request; nothing is wrong with the host. */
+	| "aborted"
 	| "transport"
 	| "protocol"
 	| "unknown";

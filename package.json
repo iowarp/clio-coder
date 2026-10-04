@@ -93,6 +93,7 @@
 		"lint": "biome check . && node --import tsx scripts/check-hygiene.ts",
 		"pi:surface-diff": "node --import tsx scripts/pi-surface-diff.ts",
 		"pi:surface-snapshot": "node --import tsx scripts/pi-surface-diff.ts --write",
+		"herdr:pin": "node --import tsx scripts/herdr-pin.ts",
 		"test:file": "node --import tsx --import ./tests/harness/tmp-root.ts --test",
 		"pretest": "node scripts/check-dist.mjs",
 		"test": "node scripts/ci-tests.mjs core",

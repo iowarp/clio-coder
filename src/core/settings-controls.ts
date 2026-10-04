@@ -138,7 +138,7 @@ export const SETTINGS_DESCRIPTIONS_BY_ID = {
 	"routing.activeRoles": "Types of worker allowed to use an automatically selected model.",
 	"routing.activePostures": "Priorities that automatic model selection may use for workers.",
 	"routing.agentAutomation.activeAgentRoles": "Specific agents allowed to use automatic model selection.",
-	"panes.enabled": "Allow Clio to open companion panes when a pane host is available.",
+	"panes.enabled": "Open Clio in a workspace with companion panes, powered by herdr. Takes effect on the next start.",
 	"panes.notifications": "Choose which worker updates show a pane notification.",
 	"panes.layout": "Choose which companion panes open when Clio starts.",
 	"panes.workers.ratio": "Share of the width the workers dock takes, at most half.",
@@ -341,11 +341,9 @@ export const SETTINGS_VALUE_HELP_BY_ID: Partial<Record<string, Record<string, st
 		true: "compact automatically before a turn crosses the threshold",
 		false: "context is only compacted when you run /context compact",
 	},
-	// `embedded` is a declared rung with no implementation behind it yet; it
-	// refuses until Clio can own a pane host, and the hint says so.
 	"panes.enabled": {
-		auto: "detect a herdr session and join it as a guest; no pane host, no panes",
-		embedded: "not available; use auto with an existing pane host, or off",
+		embedded: "open Clio in its own workspace with panes; inside an existing pane host, join it",
+		auto: "join a pane host only when Clio is started inside one; never start one",
 		off: "never detect or open a pane",
 	},
 	"retry.enabled": {
@@ -449,7 +447,7 @@ const CHOICES: Record<string, readonly string[]> = {
 	"interface.outputDetail": ["compact", "standard", "detailed"],
 	"interface.fullscreenScrollbar": ["hidden", "auto", "always"],
 	"interface.smoothStreaming": ["off", "auto", "on"],
-	"interface.panes.enabled": ["off", "auto"],
+	"interface.panes.enabled": ["embedded", "auto", "off"],
 	"interface.panes.layout": ["off", "workers", "cockpit"],
 	"interface.panes.notifications": ["failures", "all", "off"],
 	"interface.panes.files.mode": ["companion", "chooser"],

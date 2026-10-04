@@ -37,6 +37,7 @@ import type {
 	MuxWorktreeCreateRequest,
 } from "./socket-client.js";
 import {
+	type MuxAgentState,
 	MuxError,
 	type MuxEvent,
 	type MuxLog,
@@ -104,6 +105,15 @@ export interface MuxNotifyRequest {
 	sound?: MuxNotificationSound;
 }
 
+export const MUX_INTERRUPT_KEYS = ["esc", "ctrl+c"] as const;
+export type MuxInterruptKey = (typeof MUX_INTERRUPT_KEYS)[number];
+
+export type MuxPromptOutcome =
+	| { status: "sent" }
+	/** `unsupported`: the host admits prompts only for agent kinds it supports natively. */
+	| { status: "refused"; why: "blocked" | "no-agent" | "not-owned" | "unsupported" }
+	| { status: "failed"; reason: string };
+
 export interface MuxContract extends DomainContract {
 	readonly mode: MuxMode;
 	/** `mode !== "none"` and the socket is currently healthy. */
@@ -117,6 +127,35 @@ export interface MuxContract extends DomainContract {
 	openUtilityPane(request: MuxOpenUtilityPaneRequest): Promise<MuxPaneRef | null>;
 	/** Close one Clio-created pane by pane id. Refuses a pane Clio did not create. */
 	closePane(paneId: string): Promise<boolean>;
+	/** The recent terminal text of one Clio-created pane, or null when it cannot be read. */
+	readPane(paneId: string, lines: number): Promise<{ text: string; truncated: boolean } | null>;
+	/**
+	 * Submit a prompt to the agent in one Clio-created pane through the host's
+	 * own admission, and only through it: a host refusal stays a refusal, and
+	 * nothing is typed into the pane by any other route. `refused` carries why.
+	 */
+	promptPane(paneId: string, text: string): Promise<MuxPromptOutcome>;
+	/**
+	 * Interrupt whatever is running in one Clio-created pane. The only keys this
+	 * layer ever presses on its own are these two, because neither can accept
+	 * an approval. False when the pane is not Clio's or the host refused.
+	 */
+	interruptPane(paneId: string, key: MuxInterruptKey): Promise<boolean>;
+	/**
+	 * The pane host's view of one Clio-created pane: which agent it recognizes
+	 * there, if any, and that agent's state. Null when the pane is gone or the
+	 * host could not be asked, which callers must not read as any state at all.
+	 */
+	paneAgent(
+		paneId: string,
+		options?: { timeoutMs?: number; signal?: AbortSignal },
+	): Promise<{ agent: string | null; state: MuxAgentState; tokens: Readonly<Record<string, string>> } | null>;
+	/**
+	 * Publish, or with null withdraw, one metadata token on Clio's own hosting
+	 * pane. The peer inbox id travels this way; a value over the host's 80
+	 * character limit is refused here rather than truncated there.
+	 */
+	advertiseSelfToken(key: string, value: string | null): Promise<boolean>;
 	/**
 	 * Re-adopt one pane of the given purpose that outlived the process that made
 	 * it. A fresh `session.snapshot` is scanned for a pane carrying Clio's owner
@@ -479,6 +518,75 @@ export function createMuxRuntime(options: MuxRuntimeOptions): MuxRuntime {
 			);
 		},
 
+		// The methods below are how the model drives a peer it handed off to.
+		// They carry the same ownership rule as `closePane`: a pane the registry
+		// does not hold is never read from or typed into.
+		async readPane(paneId: string, lines: number): Promise<{ text: string; truncated: boolean } | null> {
+			if (!registry.owns(paneId)) return null;
+			return await attempt(
+				"readPane",
+				async (live) => {
+					const read = await live.paneRead({ paneId, lines });
+					return { text: read.text, truncated: read.truncated };
+				},
+				null,
+			);
+		},
+
+		async promptPane(paneId: string, text: string): Promise<MuxPromptOutcome> {
+			if (!registry.owns(paneId)) return { status: "refused", why: "not-owned" };
+			if (!usable() || client === null) return { status: "failed", reason: "the pane host is not reachable" };
+			try {
+				await client.agentPrompt(paneId, text);
+				healthy = true;
+				return { status: "sent" };
+			} catch (error) {
+				// The host's refusals are answers, not faults, and must not degrade
+				// the pane layer the way a dead socket does. None of them is worked
+				// around: `agent_not_ready` is what herdr answers for an agent kind it
+				// does not support natively, which includes a second Clio (measured
+				// on 0.9.3; `agent.start` rejects the kind at 0.7.5 and 0.9.3 alike),
+				// and typing the text in by another route would be Clio deciding to
+				// admit what the host declined.
+				if (error instanceof MuxError && error.kind === "agent_blocked") return { status: "refused", why: "blocked" };
+				if (error instanceof MuxError && error.kind === "not_found") return { status: "refused", why: "no-agent" };
+				if (error instanceof MuxError && error.wireCode === "agent_not_ready") {
+					return { status: "refused", why: "unsupported" };
+				}
+				degrade("promptPane", error);
+				return { status: "failed", reason: error instanceof Error ? error.message : String(error) };
+			}
+		},
+
+		async interruptPane(paneId: string, key: MuxInterruptKey): Promise<boolean> {
+			if (!registry.owns(paneId) || !MUX_INTERRUPT_KEYS.includes(key)) return false;
+			return await attempt(
+				"interruptPane",
+				async (live) => {
+					await live.paneSendKeys(paneId, [key]);
+					return true;
+				},
+				false,
+			);
+		},
+
+		async paneAgent(
+			paneId: string,
+			options: { timeoutMs?: number; signal?: AbortSignal } = {},
+		): Promise<{ agent: string | null; state: MuxAgentState; tokens: Readonly<Record<string, string>> } | null> {
+			const ref = registry.list().find((record) => record.ref.paneId === paneId)?.ref;
+			if (ref === undefined || !usable() || client === null) return null;
+			try {
+				const pane = (await client.paneList(ref.workspaceId, options)).find((candidate) => candidate.paneId === paneId);
+				healthy = true;
+				return pane === undefined ? null : { agent: pane.agent, state: pane.agentState, tokens: pane.tokens };
+			} catch (error) {
+				// A cancelled request says nothing about the host's health.
+				if (!(error instanceof MuxError && error.kind === "aborted")) degrade("paneAgent", error);
+				return null;
+			}
+		},
+
 		async adoptPane(request: { purpose: MuxPanePurpose; label: string; dock?: DockSlot }): Promise<MuxPaneRef | null> {
 			const existing = registry.byPurpose(request.purpose);
 			if (existing) return existing.ref;
@@ -702,6 +810,20 @@ export function createMuxRuntime(options: MuxRuntimeOptions): MuxRuntime {
 			return registry.list();
 		},
 
+		async advertiseSelfToken(key: string, value: string | null): Promise<boolean> {
+			const paneId = detection.self.paneId;
+			if (detection.mode !== "guest" || !paneId) return false;
+			if (value !== null && value.length > 80) return false;
+			return await attempt(
+				"advertiseSelfToken",
+				async (live) => {
+					await live.paneReportMetadata({ paneId, source: METADATA_SOURCE, tokens: { [key]: value } });
+					return true;
+				},
+				false,
+			);
+		},
+
 		async reportSelf(report: MuxSelfReport): Promise<boolean> {
 			const paneId = detection.self.paneId;
 			if (detection.mode !== "guest" || !paneId) return false;
@@ -714,6 +836,14 @@ export function createMuxRuntime(options: MuxRuntimeOptions): MuxRuntime {
 						agent: "clio-coder",
 						state: report.state,
 						...(report.message ? { message: report.message } : {}),
+						// No sequence number, on purpose. herdr keeps a high-water mark
+						// per source that survives a release, and once a source has sent
+						// one it drops every report that carries none or a lower one
+						// (measured on 0.7.5 and 0.9.3). A counter that restarts with the
+						// process would therefore lock a restarted Clio out of its own
+						// pane. Ordering needs no number here: these reports are sent one
+						// at a time on an awaited chain, and a Clio that has exited has no
+						// request in flight to arrive late.
 					});
 					if (report.tokens || report.stateLabels || report.ttlMs !== undefined) {
 						await live.paneReportMetadata({

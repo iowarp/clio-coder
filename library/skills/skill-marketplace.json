@@ -269,21 +269,6 @@
 			"category": "meta"
 		},
 		{
-			"name": "terminal-control",
-			"description": "Launches, drives, or inspects another agent or command in a Herdr pane, tab, or workspace, including a second Clio Coder instance; requires HERDR_ENV=1. Not for background work a plain shell or dispatch already covers.",
-			"triggers": [
-				"use Herdr",
-				"launch an agent in a Herdr pane",
-				"inspect a Herdr agent",
-				"start a second Clio Coder instance",
-				"drive a command in a Herdr workspace"
-			],
-			"sourceUrl": "https://github.com/iowarp/clio-coder/tree/main/library/skills/meta/terminal-control",
-			"version": "0.2.1",
-			"audit": "pass",
-			"category": "meta"
-		},
-		{
 			"name": "architecture",
 			"description": "Decides the engineering approach for an intent in an interactive session: investigates, proposes two or three genuinely different approaches with trade-offs, recommends, lets the user decide, and writes the decision doc. Not a task-by-task plan; use sprint-plan. Not a multi-perspective debate; use design-council. Not product intent; use product-intent. Not a typed implementation handoff; use tech-spec.",
 			"triggers": [

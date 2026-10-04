@@ -76,7 +76,7 @@ Usage:
   clio-coder verifiers            discover, inspect, author, validate, edit, or dry-run project checks
   clio-coder tools list|status|install|remove <id>  pinned external programs Clio can drive
   clio-coder interop inspect --json  detected external coding agents and how far each one is wired
-  clio-coder panes install|theme  install the pane multiplexer (alias for 'tools install herdr'), or print Clio's theme as a herdr block
+  clio-coder panes install|theme|workspace  install the pane multiplexer, print Clio's theme as a herdr block, or manage the remembered workspace answer (on|off|ask|status)
   clio-coder dev <command>        harness instruments and power-user surfaces; run 'clio-coder dev' for the list
   clio-coder --demo|--no-demo      full welcome and guidance, or compact startup for this session
   clio-coder --help, -h           this message

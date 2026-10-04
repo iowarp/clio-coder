@@ -98,7 +98,7 @@ For a curated contribution, add the reviewed package beneath `library/skills/<ca
 ## Native workflow skills
 
 Use names that describe the work: `plan-interview`, `sprint-plan`,
-`map-codebase`, `terminal-control`, `skill-authoring`, and `workflow-capture`.
+`map-codebase`, `skill-authoring`, and `workflow-capture`.
 The catalog, package identities, and worker bindings use these names directly.
 
 `map-codebase` uses Clio's own repository index, navigation and HTML rendering.

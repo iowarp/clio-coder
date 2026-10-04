@@ -4615,6 +4615,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		...(withPanes
 			? {
 					createMuxBridge: withPanes.createMuxBridge,
+					createPeerInbox: withPanes.createPeerInbox,
 					createYaziBridge: withPanes.createYaziBridge,
 					createWatchPane: withPanes.createWatchPaneController,
 				}

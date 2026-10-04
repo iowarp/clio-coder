@@ -155,12 +155,16 @@ describe("run --delegate-tools", () => {
 });
 
 describe("--with-panes", () => {
-	it("activates guest detection even over the unimplemented embedded rung", () => {
-		equal(resolvePanesEnablement("with", "embedded"), "auto");
-		equal(resolvePanesEnablement("with", "off"), "auto");
-		equal(resolvePanesEnablement("with", undefined), "auto");
-		equal(resolvePanesEnablement("without", "embedded"), "off");
-		equal(resolvePanesEnablement(undefined, "embedded"), "embedded");
+	it("activates guest detection, and embedded joins a pane host only from inside one", () => {
+		equal(resolvePanesEnablement("with", "embedded", {}), "auto");
+		equal(resolvePanesEnablement("with", "off", {}), "auto");
+		equal(resolvePanesEnablement("with", undefined, {}), "auto");
+		equal(resolvePanesEnablement("without", "embedded", { HERDR_ENV: "1" }), "off");
+		// Hosting is the launcher's job, so `embedded` reaching the boot is a guest
+		// inside a pane host and a plain session outside one.
+		equal(resolvePanesEnablement(undefined, "embedded", { HERDR_ENV: "1" }), "auto");
+		equal(resolvePanesEnablement(undefined, "embedded", {}), "off");
+		equal(resolvePanesEnablement(undefined, undefined, {}), "off");
 	});
 });
 

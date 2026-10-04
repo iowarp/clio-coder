@@ -641,6 +641,11 @@ export function classify(rawCall: ClassifierCall): Classification {
 	if (call.tool === ToolNames.Panes && call.args?.action === "handoff") {
 		return { actionClass: "dispatch", reasons: ["panes:interactive-peer-handoff"] };
 	}
+	// Input typed into a peer is work handed to another agent, the same act as
+	// the handoff that opened it, so it is admitted the same way.
+	if (call.tool === ToolNames.Panes && call.args?.action === "send") {
+		return { actionClass: "dispatch", reasons: ["panes:interactive-peer-input"] };
+	}
 	if (call.tool === ToolNames.WebFetch && webFetchIsOutward(call.args)) {
 		return { actionClass: "write", reasons: ["web-fetch:outward"] };
 	}

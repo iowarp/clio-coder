@@ -79,10 +79,6 @@ skills:
     path: meta/skill-authoring
     version: 0.3.2
     sha256: 45adfa13e1ac2033d87d549b410e7273324317eaa927f3d95826661ff926eb42
-  - name: terminal-control
-    path: meta/terminal-control
-    version: 0.2.1
-    sha256: 108e46575aa59d06e63f114dd5bef1e072a593422fcd6372c91afa66c8dc834b
   # ── planning ──
   - name: architecture
     path: planning/architecture

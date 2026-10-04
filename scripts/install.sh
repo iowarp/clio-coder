@@ -86,6 +86,9 @@ Options:
                         Start Menu). Env: CLIO_CODER_INSTALL_GUI=1
   --no-gui              Skip the desktop app. Default: ask on a terminal, skip
                         otherwise. Env: CLIO_CODER_INSTALL_GUI=0
+  --no-workspace        Skip the workspace pane host (herdr). Default: use a herdr
+                        already on PATH, otherwise download Clio Coder's pinned
+                        copy. Env: CLIO_CODER_INSTALL_WORKSPACE=0
   --force               Replace a clio-coder launcher this installer did not write.
   --dry-run             Print the plan; download and change nothing.
   -h, --help            Show this help.
@@ -627,6 +630,20 @@ offer_gui() {
 	fi
 }
 
+# The workspace is what bare `clio-coder` opens: the session beside terminal panes, hosted by
+# a pinned herdr. A herdr already on PATH at a usable version is used as it is and nothing is
+# downloaded. A failure here never fails the install: Clio asks again on first launch, and
+# runs in the plain terminal without it.
+provision_workspace() {
+	[ "$install_workspace" != 0 ] || return 0
+	case "$(uname -s 2>/dev/null)" in Linux | Darwin) ;; *) return 0 ;; esac
+	if "$node_bin" "$entry" panes install --if-missing </dev/null >"$work/workspace.out" 2>&1; then
+		ok "workspace ready: $(grep -E 'installed herdr|already resolves' "$work/workspace.out" | tail -n 1 | sed 's/^ok: //')"
+	else
+		warn "the workspace pane host was not installed; Clio Coder will offer it on first launch, or run: clio-coder panes install"
+	fi
+}
+
 default_install_root() {
 	if [ -n "${CLIO_CODER_INSTALL_DIR:-}" ]; then
 		printf '%s\n' "$CLIO_CODER_INSTALL_DIR"
@@ -696,6 +713,7 @@ main() {
 	rollback=0
 	post_install=1
 	install_gui="${CLIO_CODER_INSTALL_GUI:-ask}"
+	install_workspace="${CLIO_CODER_INSTALL_WORKSPACE:-1}"
 	refresh_runtime=0
 	force=0
 	dry_run=0
@@ -733,6 +751,7 @@ main() {
 			--no-post-install) post_install=0 ;;
 			--gui) install_gui=1 ;;
 			--no-gui) install_gui=0 ;;
+			--no-workspace) install_workspace=0 ;;
 			--refresh-runtime) refresh_runtime=1 ;;
 			--force | -f) force=1 ;;
 			--dry-run) dry_run=1 ;;
@@ -922,6 +941,7 @@ main() {
 	if [ "$post_install" = 1 ] && version_ge "${installed_version%%-*}" "0.6.0"; then
 		"$node_bin" "$entry" upgrade --post-install </dev/null || fail "package is installed, but local migrations/initialization need attention; run: $launcher upgrade --post-install. Previous binary remains available via --rollback."
 	fi
+	if version_ge "${installed_version%%-*}" "0.6.2"; then provision_workspace; fi
 	if version_ge "${installed_version%%-*}" "0.6.0"; then offer_gui; fi
 	report_path
 	warn_about_shadowing_clio

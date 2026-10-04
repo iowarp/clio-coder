@@ -190,6 +190,13 @@ export function createMuxBridge(deps: MuxBridgeDeps): MuxBridge {
 		}),
 	];
 
+	// A session that has not taken a turn yet has had no status transition, so
+	// without this the pane host shows an anonymous terminal until the first
+	// prompt. herdr 0.8 guessed the agent from the process; 0.9 does not, and
+	// the workspace launcher finds a running Clio by this report.
+	pendingSelf = "idle";
+	schedule();
+
 	return {
 		flush(): Promise<void> {
 			if (timer !== null) {
@@ -208,3 +215,7 @@ export function createMuxBridge(deps: MuxBridgeDeps): MuxBridge {
 		},
 	};
 }
+
+// Re-exported so the panes composition root (src/entry/with-panes.ts) reaches
+// the peer inbox through this module's existing seam.
+export { createPeerInbox } from "./peer-inbox.js";

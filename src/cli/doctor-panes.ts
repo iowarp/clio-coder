@@ -31,6 +31,9 @@ function journalWritabilityFinding(root = join(resolveClioDirs().state, "runs"))
 		accessSync(root, constants.W_OK);
 		return { ok: true, name: "panes journal dir", detail: `${root} is writable` };
 	} catch (error) {
+		if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+			return { ok: true, name: "panes journal dir", detail: `${root} has no run journal yet` };
+		}
 		return {
 			ok: true,
 			level: "warn",
@@ -72,6 +75,22 @@ export async function panesFindings(env: NodeJS.ProcessEnv = process.env): Promi
 				ok: true,
 				name: "panes mode",
 				detail: "off by choice",
+			},
+			layoutRow,
+		];
+	}
+
+	// `embedded` outside a pane host is the ordinary state of a machine where
+	// Clio hosts its own workspace: bare `clio-coder` starts one, and a command
+	// like this one, run from a plain terminal, is simply not in it. There is no
+	// socket to expect, so probing for one and warning about its absence would
+	// put three warnings on every healthy fresh install.
+	if (enabled === "embedded" && env.HERDR_ENV !== "1") {
+		return [
+			{
+				ok: true,
+				name: "panes mode",
+				detail: "workspace (panes.enabled=embedded); this command is not running inside one",
 			},
 			layoutRow,
 		];

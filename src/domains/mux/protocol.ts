@@ -22,6 +22,13 @@
 
 import type { MuxServerInfo } from "./types.js";
 
+/**
+ * The oldest protocol Clio drives at all: the one herdr 0.7.5 speaks, which is
+ * the registry's PATH floor and the oldest schema read. The workspace launcher
+ * will not reuse a running server below it.
+ */
+export const MUX_MIN_PROTOCOL = 17;
+
 /** Wire methods with explicit protocol floors. Basic discovery methods are unconditional. */
 export type MuxGatedMethod =
 	| "notification.show"

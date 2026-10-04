@@ -50,7 +50,7 @@ import type { ToolRegistry } from "../tools/registry.js";
 import type { ApplicationController } from "./application-controller.js";
 import { warmTranscriptRender } from "./chat-panel.js";
 import { emitCommandNotice } from "./command-fallbacks.js";
-import { appendNotice, OPERATOR_COMMAND_ENTRY } from "./command-output.js";
+import { appendNotice, appendOperatorAside, OPERATOR_COMMAND_ENTRY } from "./command-output.js";
 import { dispatchCouncilThroughRegistry } from "./council-dispatch.js";
 import { createDispatchSteering } from "./dispatch-steering.js";
 import { createEditorSubmitController, EDITOR_BASH_SHUTDOWN_MS } from "./editor-submit.js";
@@ -70,6 +70,7 @@ import { createOverlayLifecycle, type OverlayLifecycleController } from "./overl
 import { interopOverlaySurface } from "./overlays/interop.js";
 import { paneWatchDecision } from "./pane-policy.js";
 import { describePanesLeftBehind } from "./panes-runtime.js";
+import type { createPeerInbox } from "./peer-inbox.js";
 import { writeInputWedgeDump } from "./render-trace.js";
 import { settleChatBeforeSessionSwitch } from "./session-switch-settlement.js";
 import { createSessionTranscript } from "./session-transcript.js";
@@ -162,6 +163,8 @@ export interface InteractiveDeps {
 	 * it without a TUI. Production leaves it unset and gets `createMuxBridge`.
 	 */
 	createMuxBridge?: typeof createMuxBridge;
+	/** The peer prompt inbox, from the same composition root; absent on a plain boot. */
+	createPeerInbox?: typeof createPeerInbox;
 	/** Bind the file-pane return path after the composer and TUI exist. */
 	attachYaziBridge?: (bridge: YaziBridge) => () => void;
 	/**
@@ -1301,6 +1304,26 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 					notice: (level, text) => appendNotice(level, text, busNoticeSink),
 				})
 			: null;
+	// Another Clio that opened this one in a pane reaches it here, as a turn on
+	// the queue rather than as keys in the terminal.
+	const peerInbox =
+		mux && mux.mode === "guest" && deps.createPeerInbox
+			? deps.createPeerInbox({
+					bus: deps.bus,
+					mux,
+					chat: deps.chat,
+					stateDir: clioStateDir(),
+					showTurn: (text, origin) => {
+						chatRenderer.mutate(() => chatPanel.appendUser(text), "user-submit");
+						appendOperatorAside(origin, {
+							appendReplayBlock: (renderBlock) =>
+								chatRenderer.mutate(() => chatPanel.appendReplayBlock(renderBlock), "slash-output"),
+							requestRender: () => tui.requestRender(),
+						});
+						tui.requestRender();
+					},
+				})
+			: null;
 	// The workers dock: the workers dashboard beside Clio, opened and hidden by
 	// the workers key, taken over for one run by Enter in the Fleet Runs board,
 	// `/panes show` and the panes tool through the shared operations object.
@@ -1583,6 +1606,7 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 				detachWatchPane?.();
 				watchPane?.dispose();
 				muxBridge?.dispose();
+				peerInbox?.dispose();
 				interactiveSubscriptions.dispose();
 				exitSummary.dispose();
 			},

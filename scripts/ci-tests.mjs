@@ -70,6 +70,7 @@ export const coreTests = [
 	"mcp-stdio-client",
 	"mutation-atomicity",
 	"native-install-hardening",
+	"panes-tool",
 	"peer-default-readonly",
 	"physical-dotdot",
 	"project-settings-save",
@@ -117,6 +118,7 @@ export const coreTests = [
 ]
 	.map((name) => `tests/contracts/${name}.test.ts`)
 	.concat([
+		"tests/extended/session-title-typed-input.test.ts",
 		"tests/smoke/acp-boundary.test.ts",
 		"tests/smoke/real-binary-boot.test.ts",
 		"tests/smoke/process-lifecycle.test.ts",

@@ -52,7 +52,7 @@ describe("settings and migration boundary", () => {
 		strictEqual(defaults.settings.context.memory.target, null);
 		strictEqual(defaults.settings.interface.mode, "regular");
 		strictEqual(defaults.settings.interface.smoothStreaming, "auto");
-		strictEqual(defaults.settings.interface.panes.enabled, "off");
+		strictEqual(defaults.settings.interface.panes.enabled, "embedded");
 		strictEqual(defaults.settings.interface.panes.layout, "off");
 		strictEqual(defaults.settings.interface.panes.files.enabled, false);
 		strictEqual(defaults.settings.context.toolResultMaxBytes, 65_536);
@@ -133,7 +133,7 @@ targets:
 		await settingsV2.up(stateDir);
 		strictEqual(readFileSync(settingsFile, "utf8"), firstWrite);
 		strictEqual(readFileSync(`${settingsFile}.v1.bak`, "utf8"), original);
-		strictEqual(readSettings().interface.panes.enabled, "off");
+		strictEqual(readSettings().interface.panes.enabled, "embedded");
 		strictEqual(readSettings().interface.panes.layout, "off");
 		strictEqual(readSettings().interface.panes.files.enabled, false);
 		strictEqual(readSettings().context.toolResultMaxBytes, 65_536);

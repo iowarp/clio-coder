@@ -14,7 +14,7 @@ import { detectMux, type MuxEnablement } from "./detect.js";
 import type { MuxLog } from "./types.js";
 
 export interface MuxDomainOptions {
-	/** `off` skips detection; unsupported `embedded` hosting is refused as `none`. */
+	/** `off` skips detection; `embedded` and `auto` both run the guest ladder. */
 	enabled?: MuxEnablement;
 	env?: NodeJS.ProcessEnv;
 	log?: MuxLog;

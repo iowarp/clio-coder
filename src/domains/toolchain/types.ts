@@ -37,6 +37,13 @@ export interface PinnedToolDownload {
 	 * release asset. Each lands under its basename in the version directory.
 	 */
 	documentMembers: ReadonlyArray<string>;
+	/**
+	 * Files the binary loads at run time from a fixed place beside itself, given
+	 * as paths inside the archive. Each keeps its relative path under the version
+	 * directory, because that layout is the contract: herdr on Windows looks for
+	 * `conpty/conpty.dll` next to `herdr.exe` and nowhere else.
+	 */
+	runtimeMembers?: ReadonlyArray<string>;
 }
 
 /**

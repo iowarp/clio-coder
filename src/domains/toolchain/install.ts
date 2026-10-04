@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
-import { basename, join } from "node:path";
+import { basename, dirname, isAbsolute, join, normalize } from "node:path";
 import { type ArchiveEntry, readTarGzEntries, readZipEntries } from "./archive.js";
 import { ensureToolchainRoot } from "./paths.js";
 import { currentToolPlatform, findPinnedTool } from "./registry.js";
@@ -155,9 +155,17 @@ export async function installPinnedTool(
 			return failure(entry.id, entry.version, dir, `the asset does not contain ${memberPath || entry.primaryBinary}`);
 		}
 	}
-	for (const memberPath of download.documentMembers) {
+	for (const memberPath of [...download.documentMembers, ...(download.runtimeMembers ?? [])]) {
 		if (!members.has(memberPath)) {
 			return failure(entry.id, entry.version, dir, `the asset does not contain ${memberPath}`);
+		}
+	}
+	for (const memberPath of download.runtimeMembers ?? []) {
+		// The registry is trusted input, but a relative path is written under the
+		// version directory verbatim, so one that climbs out is refused here.
+		const clean = normalize(memberPath);
+		if (isAbsolute(clean) || clean.startsWith("..")) {
+			return failure(entry.id, entry.version, dir, `runtime member ${memberPath} escapes the install directory`);
 		}
 	}
 
@@ -185,6 +193,13 @@ export async function installPinnedTool(
 			const target = join(staging, basename(memberPath));
 			writeFileSync(target, member.data, { mode: 0o644 });
 			documents.push(join(dir, basename(memberPath)));
+		}
+		for (const memberPath of download.runtimeMembers ?? []) {
+			const member = members.get(memberPath);
+			if (member === undefined) continue;
+			const target = join(staging, memberPath);
+			mkdirSync(dirname(target), { recursive: true });
+			writeFileSync(target, member.data, { mode: 0o755 });
 		}
 		for (const [name, bytes] of documentBytes) {
 			writeFileSync(join(staging, name), bytes, { mode: 0o644 });

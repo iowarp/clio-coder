@@ -32,7 +32,7 @@ import type { PinnedTool, ToolPlatform } from "./types.js";
 export const PINNED_TOOLS: ReadonlyArray<PinnedTool> = [
 	{
 		id: "herdr",
-		version: "0.8.2",
+		version: "0.9.3",
 		summary: "terminal multiplexer with an agent-aware socket API; powers Clio panes",
 		homepage: "https://herdr.dev",
 		license: "Apache-2.0",
@@ -40,9 +40,10 @@ export const PINNED_TOOLS: ReadonlyArray<PinnedTool> = [
 		primaryBinary: "herdr",
 		// Lowered from the pin on evidence, which is the bar this file sets for
 		// moving a floor. `herdr api schema --json` was read from 0.7.5
-		// (protocol 17) and 0.8.2 (protocol 20): every method the mux domain
-		// sends exists in both, and the only two 0.8.2 adds, `workspace.move_block`
-		// and `workspace.reordered`, are ones Clio never sends. The two methods
+		// (protocol 17), 0.8.2 (protocol 20) and the pinned 0.9.3 (protocol 22):
+		// every method the mux domain sends exists in all three, including the
+		// workspace, read, send-keys and wait methods the workspace launcher and
+		// the panes tool use. The two methods
 		// that are not universal are already gated at runtime by protocol number
 		// in `src/domains/mux/protocol.ts`, whose own floor is 17, so an operator's
 		// 0.7.5 takes the documented fallback rather than failing. 0.7.5 is the
@@ -51,50 +52,61 @@ export const PINNED_TOOLS: ReadonlyArray<PinnedTool> = [
 		versionArgs: ["--version"],
 		downloads: {
 			"linux-x64": {
-				url: "https://github.com/herdrdev/herdr/releases/download/v0.8.2/herdr-linux-x86_64",
-				sha256: "976150a14d490c94b243ea2e1a7eb2dfb67f12e36b182db90936f6728e6aecf4",
+				url: "https://github.com/herdrdev/herdr/releases/download/v0.9.3/herdr-linux-x86_64",
+				sha256: "18a8dc65f1c2fa485884344356dea1cfd911c6f06cf46fa78e193f4087f4dba7",
 				archive: "raw",
 				binaryMembers: { herdr: "" },
 				documentMembers: [],
 			},
 			"linux-arm64": {
-				url: "https://github.com/herdrdev/herdr/releases/download/v0.8.2/herdr-linux-aarch64",
-				sha256: "f55610658e1c2e0d2aaef730b4b2ab885f7f8ba00285ab372bfb14f2e3d5b40d",
+				url: "https://github.com/herdrdev/herdr/releases/download/v0.9.3/herdr-linux-aarch64",
+				sha256: "4de7aa3e25678812e92960de64f7c2aaa1bca1f0f80a3c5e559837e231e1f5c0",
 				archive: "raw",
 				binaryMembers: { herdr: "" },
 				documentMembers: [],
 			},
 			"darwin-x64": {
-				url: "https://github.com/herdrdev/herdr/releases/download/v0.8.2/herdr-macos-x86_64",
-				sha256: "ab50262c8190cd7aa9056d249d255c08c328c3e8716de9cfa29db4f131b8e2c1",
+				url: "https://github.com/herdrdev/herdr/releases/download/v0.9.3/herdr-macos-x86_64",
+				sha256: "db62d548ff3e832b087a96b1894a08d26be3905f1830309cd556783f215d4054",
 				archive: "raw",
 				binaryMembers: { herdr: "" },
 				documentMembers: [],
 			},
 			"darwin-arm64": {
-				url: "https://github.com/herdrdev/herdr/releases/download/v0.8.2/herdr-macos-aarch64",
-				sha256: "a5d4f4d504d8b309c91f811050559300faba31258425f53c50852fc96f6ae574",
+				url: "https://github.com/herdrdev/herdr/releases/download/v0.9.3/herdr-macos-aarch64",
+				sha256: "5173a3e0ae42d5d1ab7ebfa5d5e6329f7c3d23f8e1a3677c7ce3231da2884157",
 				archive: "raw",
 				binaryMembers: { herdr: "" },
 				documentMembers: [],
 			},
+			// The Windows asset is a zip: `herdr.exe` plus the ConPTY runtime it
+			// loads from `conpty/` beside itself, so those members keep their
+			// relative paths. The pin installs and resolves on Windows; the workspace
+			// launcher and the pane client still speak Unix sockets only, so panes
+			// stay off there until the named-pipe transport exists.
+			"win32-x64": {
+				url: "https://github.com/herdrdev/herdr/releases/download/v0.9.3/herdr-windows-x86_64.zip",
+				sha256: "c75b1fa49f7a3ba4b8b11789912a6147e4214a3b6fd3556d0f80076c8887d795",
+				archive: "zip",
+				binaryMembers: { herdr: "herdr.exe" },
+				documentMembers: [
+					"THIRD-PARTY-NOTICES/Microsoft.Windows.Console.ConPTY-LICENSE.txt",
+					"THIRD-PARTY-NOTICES/Microsoft.Windows.Console.ConPTY-NOTICE.md",
+				],
+				runtimeMembers: [
+					"conpty/conpty.dll",
+					"conpty/herdr-conpty.json",
+					"conpty/x64/OpenConsole.exe",
+					"conpty/arm64/OpenConsole.exe",
+				],
+			},
 		},
-		// No `win32-x64` entry, and not for want of an asset. herdr publishes
-		// `herdr-windows-x86_64.zip` for this tag and it was downloaded and read:
-		// alongside `herdr.exe` it carries a ConPTY runtime, `conpty/conpty.dll`
-		// and `conpty/x64/OpenConsole.exe`, that has to sit in a subdirectory
-		// beside the executable. The installer places every declared member flat
-		// under its basename, so declaring this asset would install a `herdr.exe`
-		// with its runtime scattered next to it, which is a broken install that
-		// checksums and unpacks cleanly. Windows herdr waits on the installer
-		// learning to preserve a member's relative path.
-		//
-		// The release asset is a bare executable, so the Apache-2.0 text comes
+		// The Unix assets are bare executables, so the Apache-2.0 text comes
 		// from the repository at the pinned tag.
 		documents: [
 			{
 				name: "LICENSE",
-				url: "https://raw.githubusercontent.com/herdrdev/herdr/v0.8.2/LICENSE",
+				url: "https://raw.githubusercontent.com/herdrdev/herdr/v0.9.3/LICENSE",
 				sha256: "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4",
 			},
 		],

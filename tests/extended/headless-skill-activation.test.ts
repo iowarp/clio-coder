@@ -206,20 +206,20 @@ describe("headless skill activation by autonomy level", () => {
 		const scratch = scratchHome();
 		const cwd = join(scratch.root, "project");
 		const env = { ...scratch.env, HOME: scratch.root };
-		const foreign = join(cwd, ".claude/skills/terminal-control");
-		cpSync(join(ROOT, "library/skills/meta/terminal-control"), foreign, { recursive: true });
+		const foreign = join(cwd, ".claude/skills/find-skills");
+		cpSync(join(ROOT, "library/skills/meta/find-skills"), foreign, { recursive: true });
 		writeFileSync(
 			join(foreign, "SKILL.md"),
 			`${readFileSync(join(foreign, "SKILL.md"), "utf8")}\nFOREIGN_COPY_MUST_NOT_LOAD\n`,
 		);
 		const fixed = await runCli(["doctor", "--fix"], { env, cwd });
 		strictEqual(fixed.code, 0, fixed.stderr);
-		const installed = await runCli(["library", "install", "skill:terminal-control", "--user", "--json"], { env, cwd });
+		const installed = await runCli(["library", "install", "skill:find-skills", "--user", "--json"], { env, cwd });
 		strictEqual(installed.code, 0, installed.stderr);
 		const fixture = await startOpenAICompatFixture("done", {
 			toolCall: {
 				name: "gateway",
-				arguments: { op: "call", capability: "context", args: { scope: "skills", name: "terminal-control" } },
+				arguments: { op: "call", capability: "context", args: { scope: "skills", name: "find-skills" } },
 			},
 		});
 		fixtures.push(fixture);
@@ -232,14 +232,14 @@ describe("headless skill activation by autonomy level", () => {
 				"yolo",
 				"--json-events",
 				"full",
-				"Load the installed terminal-control skill.",
+				"Load the installed find-skills skill.",
 			],
 			{ env, cwd },
 		);
 		strictEqual(turn.code, 0, turn.stderr);
 		const result = contextToolResult(jsonEvents(turn.stdout));
-		match(result, /# Terminal Control/);
-		match(result, /plugin:user:terminal-control/);
+		match(result, /# Find Skills/);
+		match(result, /plugin:user:find-skills/);
 		ok(!result.includes("FOREIGN_COPY_MUST_NOT_LOAD"));
 	});
 

@@ -73,6 +73,29 @@ export async function runClioCommand(
 			}
 		}
 	}
+	if (startupSettings) {
+		// The workspace launcher runs after the configuration gate, so a first
+		// run answers its questions in the plain terminal, and before the lease,
+		// so nothing has claimed the terminal the pane host is about to take.
+		const { maybeLaunchWorkspace } = await import("./workspace-launch.js");
+		const launched = await maybeLaunchWorkspace(options, startupSettings);
+		if (launched !== null) return launched;
+	}
+	if (terminalLeaseEligible(options) && process.env.HERDR_ENV === "1") {
+		// Hosted in a Clio workspace: a clean quit tells the launcher this pane is
+		// done so it can hand the operator's own terminal back. Interactive
+		// shutdown ends the process itself, so the exit event is the one place
+		// every clean path passes through.
+		const { clearWorkspaceExit, hostedInWorkspace, markWorkspaceExit } = await import(
+			"../domains/mux/workspace/exit-marker.js"
+		);
+		if (hostedInWorkspace()) {
+			clearWorkspaceExit();
+			process.once("exit", (code) => {
+				if (code === 0) markWorkspaceExit();
+			});
+		}
+	}
 	let terminalLease: import("../interactive/terminal-lease.js").TerminalLease | undefined;
 	try {
 		if (terminalLeaseEligible(options)) {

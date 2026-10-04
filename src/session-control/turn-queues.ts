@@ -47,6 +47,14 @@ export interface QueuedChatMessage {
 	/** True once the operator set the kind by hand; a producer never relabels a pinned entry. */
 	pinned?: boolean;
 	/**
+	 * Who submitted this entry when it was not the operator, in words for the
+	 * transcript (a peer Clio's pane). It is persisted on the user turn, so a
+	 * replay still says the prompt was not typed here. An entry with an origin
+	 * is pinned: no producer may turn its follow-up into a steer or an
+	 * interrupt.
+	 */
+	origin?: string;
+	/**
 	 * Paths whose content the expansion inlined into `text`. Their information-flow
 	 * labels are absorbed when the entry is queued, since the text reaches the
 	 * model at the next slot without passing the fresh-prompt path again.
@@ -71,6 +79,8 @@ export type QueueEvent =
 
 export interface QueueEnqueueOptions {
 	front?: boolean;
+	/** Machine provenance; see {@link QueuedChatMessage.origin}. */
+	origin?: string;
 	referencedPaths?: ReadonlyArray<string>;
 }
 
@@ -95,7 +105,7 @@ export interface TurnQueuesDeps {
 	/** Late-bound `ChatLoop.submit`; wired by the loop after API construction. */
 	submit: (
 		text: string,
-		options?: { requestContinuation?: boolean; workingContextPaths?: ReadonlyArray<string> },
+		options?: { requestContinuation?: boolean; workingContextPaths?: ReadonlyArray<string>; origin?: string },
 	) => Promise<void>;
 	now?: () => number;
 }
@@ -144,8 +154,8 @@ export interface TurnQueues {
 	/** True (and consumed) when the loop already persisted this exact user text. */
 	consumePersistedEcho(text: string): boolean;
 	markPersistedUserEcho(text: string, prompt: () => Promise<void>): Promise<void>;
-	/** The engine injected this text: it leaves the queue panel and enters the transcript. */
-	acknowledgeInjected(text: string): void;
+	/** The engine injected this text: it leaves the queue panel and enters the transcript. Returns the entry it was. */
+	acknowledgeInjected(text: string): QueuedChatMessage | null;
 	/** Resubmit entries the run never took as a fresh prompt; true when one was sent. */
 	resubmitStranded(): Promise<boolean>;
 	resubmitRequestContinuation(): Promise<void>;
@@ -201,6 +211,7 @@ export function createTurnQueues(deps: TurnQueuesDeps): TurnQueues {
 			enqueuedAt: now(),
 			...(display ? { display } : {}),
 			...(paths.length > 0 ? { referencedPaths: [...paths] } : {}),
+			...(options?.origin !== undefined ? { origin: options.origin, pinned: true } : {}),
 		};
 		if (options?.front === true) queue.unshift(entry);
 		else queue.push(entry);
@@ -340,7 +351,7 @@ export function createTurnQueues(deps: TurnQueuesDeps): TurnQueues {
 				if (idx >= 0) persistedUserEchoes.splice(idx, 1);
 			}
 		},
-		acknowledgeInjected(text: string): void {
+		acknowledgeInjected(text: string): QueuedChatMessage | null {
 			let idx = inFlight.findIndex((entry) => entry.text === text);
 			let entry: QueuedChatMessage | undefined;
 			if (idx >= 0) {
@@ -349,13 +360,14 @@ export function createTurnQueues(deps: TurnQueuesDeps): TurnQueues {
 				// Defensive: a text the engine produced from the queue without a
 				// hand-over this module saw still leaves the panel.
 				idx = queue.findIndex((candidate) => candidate.text === text);
-				if (idx < 0) return;
+				if (idx < 0) return null;
 				[entry] = queue.splice(idx, 1);
 				emitQueueUpdate();
 			}
 			// The engine just injected this message into the run: this is the
 			// moment it moves from the queue panel into the transcript.
 			if (entry) deps.emitQueuedUserTurn({ ...entry });
+			return entry ?? null;
 		},
 		/**
 		 * Stranded fallback. Hand-over happens at `finishTurn`, so a message can
@@ -385,6 +397,7 @@ export function createTurnQueues(deps: TurnQueuesDeps): TurnQueues {
 				...(first.referencedPaths && first.referencedPaths.length > 0
 					? { workingContextPaths: first.referencedPaths }
 					: {}),
+				...(first.origin !== undefined ? { origin: first.origin } : {}),
 			});
 			return true;
 		},

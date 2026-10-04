@@ -52,7 +52,8 @@ export interface TurnPersistenceDeps {
 	/** Consume a user text the loop already persisted itself (echo dedupe). */
 	consumePersistedEcho: (text: string) => boolean;
 	/** Remove a queued-mirror entry once the engine injects it. */
-	removeQueuedMirrorEntry: (text: string) => void;
+	/** Returns the machine origin of the queued entry this text was, when it had one. */
+	removeQueuedMirrorEntry: (text: string) => string | undefined;
 	/** Prompt-cache record for a persisted assistant call (T3.2 + cold stamp). */
 	promptCachePayloadForAssistant: (usage: Usage, backend?: BackendCompletionTimings) => Record<string, unknown>;
 	/**
@@ -120,6 +121,8 @@ export interface TurnPersistence {
 		operatorText?: string,
 		displayText?: string,
 		id?: string,
+		/** Machine provenance, persisted as `origin` so a replay attributes the turn. */
+		origin?: string,
 	): string | null;
 	appendRetryStatus(status: RetryStatusPayload): void;
 	appendModelChangeEntry(target: ChatLoopTarget): void;
@@ -396,7 +399,7 @@ export function createTurnPersistence(deps: TurnPersistenceDeps): TurnPersistenc
 			const text = extractUserText(message);
 			if (text.trim().length === 0) return;
 			if (deps.consumePersistedEcho(text)) return;
-			deps.removeQueuedMirrorEntry(text);
+			const origin = deps.removeQueuedMirrorEntry(text);
 			if (!deps.session) return;
 			if (!deps.session.current()) {
 				const settings = deps.getSettings();
@@ -407,7 +410,7 @@ export function createTurnPersistence(deps: TurnPersistenceDeps): TurnPersistenc
 			}
 			const userTurn = appendTurn(deps.session, {
 				kind: "user",
-				payload: { text },
+				payload: origin === undefined ? { text } : { text, origin },
 			});
 			state.lastTurnId = userTurn.id;
 			state.activeUserTurnId = userTurn.id;
@@ -567,7 +570,7 @@ export function createTurnPersistence(deps: TurnPersistenceDeps): TurnPersistenc
 			finishTracedTurn("success", null);
 		},
 
-		appendSubmittedUserTurn(agentRuntime, text, images, synthetic, operatorText, displayText, id): string | null {
+		appendSubmittedUserTurn(agentRuntime, text, images, synthetic, operatorText, displayText, id, origin): string | null {
 			if (!deps.session) return null;
 			if (!deps.session.current()) {
 				deps.session.create({
@@ -579,6 +582,7 @@ export function createTurnPersistence(deps: TurnPersistenceDeps): TurnPersistenc
 			const payload: Record<string, unknown> = images ? { content: [{ type: "text", text }, ...images] } : { text };
 			if (operatorText !== undefined && operatorText !== text) payload.operatorText = operatorText;
 			if (displayText !== undefined && displayText !== (operatorText ?? text)) payload.displayText = displayText;
+			if (origin !== undefined) payload.origin = origin;
 			if (synthetic) {
 				payload.synthetic = true;
 				payload.source = "middleware_request_continuation";

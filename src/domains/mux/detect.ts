@@ -1,19 +1,17 @@
 /**
  * The capability ladder from spec 4.2.
  *
- * Guest mode requires all of: `HERDR_ENV=1`, a connectable socket, and a `ping`
- * answered inside one second. The three conditions are checked in that order
+ * Guest mode requires all of: `HERDR_ENV=1`, the one socket this process is
+ * bound to being connectable, and a `ping` answered inside one second. The three conditions are checked in that order
  * and the first one that fails ends detection, which is what makes the `none`
  * path free: with `HERDR_ENV` unset nothing here opens a file descriptor, and a
  * contract test pins that by making `net.connect` throw for the duration of the
  * call.
  *
- * Embedded pane hosting is not implemented, so it resolves to `none`.
- * Asking for it is not an error, but it is a refusal rather than a quiet
- * degrade: the detection carries `refused: true`, the boot prints the reason on
- * stderr, and doctor's mode row warns. A session that asked for panes and got
- * none should never have to guess why, and `embedded` costs guest mode too, so
- * the reason names `auto` as the rung that works today.
+ * Embedded hosting does not happen here. The workspace launcher
+ * (src/cli/workspace-launch.ts) starts the pane host and runs Clio in one of
+ * its panes, so the Clio that reaches this ladder under `embedded` is already
+ * a guest of the host Clio started, and `embedded` detects exactly like `auto`.
  */
 
 import { homedir } from "node:os";
@@ -62,25 +60,38 @@ export interface DetectMuxOptions {
  * and the spec's literal `~/.config/herdr` would miss every one of their
  * sockets.
  */
-function herdrConfigDir(env: NodeJS.ProcessEnv): string {
+export function herdrConfigDir(env: NodeJS.ProcessEnv): string {
 	const xdg = env.XDG_CONFIG_HOME;
 	if (typeof xdg === "string" && xdg.length > 0) return join(xdg, "herdr");
 	const home = typeof env.HOME === "string" && env.HOME.length > 0 ? env.HOME : homedir();
 	return join(home, ".config", "herdr");
 }
 
-/** Socket paths to try, in the order spec 4.2 fixes. */
+/**
+ * The socket this process is bound to. Exactly one, chosen by the most
+ * explicit identity the environment carries.
+ *
+ * `HERDR_SOCKET_PATH` is what a pane host hands every pane it owns, so when it
+ * is set it is the only target: the pane ids beside it (`HERDR_PANE_ID` and
+ * the rest) mean something on that server and nowhere else. `HERDR_SESSION`
+ * names a session and binds the same way. Only with neither does detection
+ * look at the default session.
+ *
+ * There is deliberately no fallback from an explicit identity to the default
+ * socket. Pane ids are small and repeat across servers (`w1:p1` exists in most
+ * of them), so a Clio whose own server has died and that fell back would report
+ * its state onto, and open panes beside, whatever pane carries the same id in
+ * the operator's default session. A dead explicit socket means no pane host.
+ */
 export function resolveSocketCandidates(env: NodeJS.ProcessEnv): ReadonlyArray<string> {
-	const candidates: string[] = [];
 	const explicit = env.HERDR_SOCKET_PATH;
-	if (typeof explicit === "string" && explicit.length > 0) candidates.push(explicit);
+	if (typeof explicit === "string" && explicit.length > 0) return [explicit];
 	const configDir = herdrConfigDir(env);
 	const session = env.HERDR_SESSION;
 	if (typeof session === "string" && session.length > 0) {
-		candidates.push(join(configDir, "sessions", session, "herdr.sock"));
+		return [join(configDir, "sessions", session, "herdr.sock")];
 	}
-	candidates.push(join(configDir, "herdr.sock"));
-	return [...new Set(candidates)];
+	return [join(configDir, "herdr.sock")];
 }
 
 function readSelfLocation(env: NodeJS.ProcessEnv): MuxSelfLocation {
@@ -125,11 +136,10 @@ export async function detectMux(options: DetectMuxOptions = {}): Promise<MuxDete
 	if (enabled === "off") {
 		return { detection: none("panes are turned off"), client: null };
 	}
-	if (enabled === "embedded") {
-		const reason = "embedded pane hosting is not implemented; use auto or guest";
-		log("warning", reason);
-		return { detection: none(reason, [], true), client: null };
-	}
+	// `embedded` hosting is the launcher's job (src/cli/workspace-launch.ts): it
+	// puts Clio in a pane before this runs. What reaches here under `embedded`
+	// is therefore the same question as `auto`, asked from inside or outside a
+	// pane host, and takes the same ladder.
 	if (env.HERDR_ENV !== "1") {
 		return { detection: none("HERDR_ENV is not 1, so Clio is not running inside a pane host"), client: null };
 	}
@@ -162,9 +172,7 @@ export async function detectMux(options: DetectMuxOptions = {}): Promise<MuxDete
 
 	return {
 		detection: none(
-			candidates.length > 0
-				? `no herdr socket answered a ping: tried ${candidates.join(", ")}`
-				: "no herdr socket candidates resolved",
+			`the pane host socket this session is bound to did not answer a ping: ${candidates.join(", ")}`,
 			candidates,
 		),
 		client: null,

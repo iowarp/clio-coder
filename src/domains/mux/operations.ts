@@ -47,7 +47,7 @@ export const PANES_PRESETS = [
 export type PanesPresetId = (typeof PANES_PRESETS)[number]["id"];
 
 /** Fixed interactive coding peers. The pane tool never accepts an executable name. */
-export const PANE_PEER_IDS = ["claude-code", "codex", "opencode", "antigravity", "pi"] as const;
+export const PANE_PEER_IDS = ["clio", "claude-code", "codex", "opencode", "antigravity", "pi"] as const;
 export type PanePeerId = (typeof PANE_PEER_IDS)[number];
 
 export const PANES_PRESET_IDS: ReadonlyArray<PanesPresetId> = PANES_PRESETS.map((preset) => preset.id);
@@ -208,6 +208,37 @@ export type PanesZoomResult =
 	| { status: "not-found"; target: string }
 	| { status: "unavailable"; reason: string };
 
+/** The keys `send` may press: both cancel, neither approves. */
+export const PANE_INTERRUPT_KEYS = ["esc", "ctrl+c"] as const;
+export type PaneInterruptKey = (typeof PANE_INTERRUPT_KEYS)[number];
+
+/** How a handoff pane's label ends; `read`, `send` and `wait` address only these panes. */
+export const PANE_HANDOFF_LABEL_SUFFIX = " handoff";
+
+export type PanesReadResult =
+	| { status: "read"; paneId: string; label: string; text: string; truncated: boolean }
+	| { status: "not-found"; target: string }
+	| { status: "unavailable"; reason: string };
+
+export type PanesSendResult =
+	/** `queued` is set when a Clio peer was mid-run and holds the prompt until its current turn ends. */
+	| { status: "sent"; paneId: string; label: string; queued?: boolean }
+	/** A Clio peer took the request and has not confirmed; it may or may not be on its queue. */
+	| { status: "unconfirmed"; paneId: string; label: string; reason: string }
+	| { status: "not-found"; target: string }
+	| { status: "refused"; reason: string }
+	| { status: "unavailable"; reason: string };
+
+export type PanesWaitResult =
+	/** `blocked` means the peer is asking its operator something. Never `unknown`: that is not an answer. */
+	| { status: "settled"; paneId: string; label: string; state: "idle" | "done" | "blocked" }
+	/** `state` is the last reading, which may be `unknown` or `unrecognized`; nothing is known to have finished. */
+	| { status: "timed-out"; paneId: string; label: string; state: string }
+	| { status: "cancelled"; paneId: string; label: string }
+	| { status: "gone"; target: string }
+	| { status: "not-found"; target: string }
+	| { status: "unavailable"; reason: string };
+
 export type PanesCloseResult =
 	| { status: "closed"; closed: number; labels: ReadonlyArray<string> }
 	| { status: "not-found"; target: string }
@@ -268,6 +299,28 @@ export interface PanesOperations {
 	 */
 	zoom(target: string): Promise<PanesZoomResult>;
 	close(target: string): Promise<PanesCloseResult>;
+	/**
+	 * Read, prompt, interrupt and wait on a peer Clio handed off to. All match
+	 * like `close` but only among handoff panes, so a shell or files pane is
+	 * never a target.
+	 *
+	 * `send` has exactly two forms and never both at once. `text` is a prompt.
+	 * For a Clio peer it goes through that peer's own inbox onto its turn
+	 * queue (src/domains/mux/peer-inbox.ts) and never into its terminal. For
+	 * any other peer it goes through the pane host's agent admission, which
+	 * refuses a blocked agent; a refusal there is final. `interrupt` presses
+	 * esc or ctrl+c, the only keys Clio presses on its own, because neither can
+	 * accept an approval. There is no way to send text followed by arbitrary
+	 * keys, which is what could answer a dialog the text itself opened.
+	 */
+	read(target: string, lines?: number): Promise<PanesReadResult>;
+	send(request: {
+		target: string;
+		text?: string;
+		interrupt?: PaneInterruptKey;
+		signal?: AbortSignal;
+	}): Promise<PanesSendResult>;
+	wait(target: string, options?: { timeoutMs?: number; signal?: AbortSignal }): Promise<PanesWaitResult>;
 	/**
 	 * The files pane as one operator verb. `toggle` is the keybinding's single
 	 * tap: it opens or reveals the pane and moves the keyboard in, or parks it

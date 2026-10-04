@@ -18,7 +18,10 @@
 
 import { realpathSync, statSync } from "node:fs";
 import { isAbsolute, resolve } from "node:path";
+import { performance } from "node:perf_hooks";
+import { setTimeout as sleep } from "node:timers/promises";
 import type { ClioSettings } from "../core/config.js";
+import { resolveClioDirs } from "../core/xdg.js";
 import type { DispatchSnapshot } from "../domains/dispatch/contract.js";
 import {
 	newestRunEventJournalRunId,
@@ -28,6 +31,8 @@ import {
 import type { MuxContract, MuxPaneRecord } from "../domains/mux/index.js";
 import type { MusicState } from "../domains/mux/music-operations.js";
 import {
+	PANE_HANDOFF_LABEL_SUFFIX,
+	PANE_INTERRUPT_KEYS,
 	PANE_PEER_IDS,
 	PANES_PRESETS,
 	type PanesCloseResult,
@@ -36,14 +41,18 @@ import {
 	type PanesInventoryEntry,
 	type PanesOpenResult,
 	type PanesOperations,
+	type PanesReadResult,
+	type PanesSendResult,
 	type PanesShowResult,
 	type PanesStatus,
+	type PanesWaitResult,
 	type PanesWatchController,
 	type PanesYaziController,
 	type PanesYaziStatus,
 	type PanesZoomResult,
 	resolvePanesPresetId,
 } from "../domains/mux/operations.js";
+import { deliverPeerPrompt, PEER_INBOX_TOKEN } from "../domains/mux/peer-inbox.js";
 import { resolveBinary } from "../tools/executables.js";
 import { type PaneWatchSource, paneWatchDecision } from "./pane-policy.js";
 
@@ -88,6 +97,34 @@ function matchOwnedPane(owned: ReadonlyArray<MuxPaneRecord>, target: string): Mu
 	);
 }
 
+const DEFAULT_READ_LINES = 120;
+const MAX_READ_LINES = 400;
+const DEFAULT_WAIT_MS = 120_000;
+const MAX_WAIT_MS = 600_000;
+const WAIT_GRACE_MS = 5_000;
+const WAIT_POLL_MS = 500;
+/** How long a send waits for a Clio peer to confirm it has the prompt. */
+const PEER_RECEIPT_MS = 10_000;
+/** Ceiling on one agent-state request inside a wait; the wait's own budget can only shorten it. */
+const AGENT_RPC_MS = 5_000;
+
+function noAgentReason(label: string): string {
+	return `the pane host recognizes no running agent in ${label}: the peer has not finished starting, or it has exited`;
+}
+
+function unsupportedReason(label: string): string {
+	return `the pane host does not admit prompts for ${label}, and Clio does not type into a peer by any other route. Ask the operator to give that pane its input`;
+}
+
+function blockedReason(label: string): string {
+	return `${label} is blocked on an approval or a question for its operator; Clio does not answer for them`;
+}
+
+/** The panes `read`, `send` and `wait` may address: peers Clio handed off to, nothing else. */
+function handoffPanes(owned: ReadonlyArray<MuxPaneRecord>): ReadonlyArray<MuxPaneRecord> {
+	return owned.filter((record) => record.label.endsWith(PANE_HANDOFF_LABEL_SUFFIX));
+}
+
 function inventory(records: ReadonlyArray<MuxPaneRecord>): ReadonlyArray<PanesInventoryEntry> {
 	return records.map((record) => ({
 		paneId: record.ref.paneId,
@@ -126,6 +163,8 @@ export function createPanesRuntime(deps: PanesRuntimeDeps): PanesOperations {
 	let watchController: PanesWatchController | null = null;
 	let nextPendingOpen = 0;
 	const pendingOpens = new Map<string, PanesInventoryEntry>();
+	/** Request ids of sends a peer took but never confirmed, so a repeat reuses the id and cannot double-deliver. */
+	const unconfirmedPeerRequests = new Map<string, string>();
 	const beginPendingOpen = (label: string): string => {
 		nextPendingOpen += 1;
 		const id = `pending:${nextPendingOpen}`;
@@ -413,7 +452,14 @@ export function createPanesRuntime(deps: PanesRuntimeDeps): PanesOperations {
 					reason: `peer handoff workspace is not an existing directory: ${request.cwd ?? deps.getCwd()}`,
 				};
 			}
-			const binary = request.peer === "claude-code" ? "claude" : request.peer === "antigravity" ? "agy" : request.peer;
+			const binary =
+				request.peer === "claude-code"
+					? "claude"
+					: request.peer === "antigravity"
+						? "agy"
+						: request.peer === "clio"
+							? "clio-coder"
+							: request.peer;
 			const binaryPath = probe(binary);
 			if (binaryPath === null) {
 				return {
@@ -426,12 +472,20 @@ export function createPanesRuntime(deps: PanesRuntimeDeps): PanesOperations {
 			}
 			const argv = [binaryPath];
 			if (brief) {
+				// A second Clio takes no prompt on its command line; its task is typed in.
+				if (request.peer === "clio") {
+					return {
+						status: "refused",
+						reason:
+							"a second Clio takes no brief on its command line: open it without one, then give it its task with action=send",
+					};
+				}
 				if (request.peer === "antigravity") argv.push("--prompt-interactive", brief);
 				else if (request.peer === "opencode") argv.push("--prompt", brief);
 				else if (request.peer === "pi") argv.push("--", brief);
 				else argv.push(brief);
 			}
-			const label = `${request.peer} handoff`;
+			const label = `${request.peer}${PANE_HANDOFF_LABEL_SUFFIX}`;
 			const pendingId = beginPendingOpen(label);
 			try {
 				const ref = await deps.mux.openUtilityPane({ argv, cwd, label, title: label });
@@ -468,6 +522,165 @@ export function createPanesRuntime(deps: PanesRuntimeDeps): PanesOperations {
 			if (!match) return { status: "not-found", target };
 			const closed = await deps.mux.closePane(match.ref.paneId);
 			return closed ? { status: "closed", closed: 1, labels: [match.label] } : { status: "not-found", target };
+		},
+
+		async read(target: string, lines = DEFAULT_READ_LINES): Promise<PanesReadResult> {
+			if (!deps.mux.available()) return { status: "unavailable", reason: unavailableReason(deps.mux) };
+			const match = matchOwnedPane(handoffPanes(deps.mux.list()), target);
+			if (!match) return { status: "not-found", target };
+			const read = await deps.mux.readPane(match.ref.paneId, Math.max(1, Math.min(MAX_READ_LINES, Math.trunc(lines))));
+			if (read === null) return { status: "unavailable", reason: `the pane host could not read ${match.label}` };
+			return { status: "read", paneId: match.ref.paneId, label: match.label, text: read.text, truncated: read.truncated };
+		},
+
+		async send(request): Promise<PanesSendResult> {
+			const refusal = deps.agentRefusal?.() ?? null;
+			if (refusal !== null) return { status: "refused", reason: refusal };
+			if (!deps.mux.available()) return { status: "unavailable", reason: unavailableReason(deps.mux) };
+			const text = request.text ?? "";
+			const interrupt = request.interrupt;
+			if (text.length > 0 && interrupt !== undefined) {
+				return { status: "refused", reason: "send takes text or an interrupt, never both in one call" };
+			}
+			if (text.length === 0 && interrupt === undefined) {
+				return { status: "refused", reason: "nothing to send: give text, or interrupt with esc or ctrl+c" };
+			}
+			if (interrupt !== undefined && !PANE_INTERRUPT_KEYS.includes(interrupt)) {
+				return {
+					status: "refused",
+					reason: `the only keys Clio presses in a peer are ${PANE_INTERRUPT_KEYS.join(" and ")}`,
+				};
+			}
+			if (Buffer.byteLength(text, "utf8") > 8_192) {
+				return { status: "refused", reason: "pane input exceeds 8192 UTF-8 bytes" };
+			}
+			const match = matchOwnedPane(handoffPanes(deps.mux.list()), request.target);
+			if (!match) return { status: "not-found", target: request.target };
+			const paneId = match.ref.paneId;
+			// Both forms need a live recognized peer that is not blocked. For text
+			// the host checks again under its own lock; for an interrupt this
+			// reading is the check, and an interrupt cannot approve anything.
+			const peer = await deps.mux.paneAgent(paneId);
+			if (peer === null) return { status: "unavailable", reason: `the pane host could not report on ${match.label}` };
+			if (peer.agent === null) return { status: "refused", reason: noAgentReason(match.label) };
+			if (peer.state === "blocked") return { status: "refused", reason: blockedReason(match.label) };
+			if (interrupt !== undefined) {
+				if (!(await deps.mux.interruptPane(paneId, interrupt))) {
+					return { status: "unavailable", reason: `the pane host refused the interrupt for ${match.label}` };
+				}
+				return { status: "sent", paneId, label: match.label };
+			}
+			// A Clio peer is reached through its own inbox, never its terminal: the
+			// pane host admits prompts only for agent kinds it knows, and text typed
+			// into a Clio could land in an approval dialog.
+			if (match.label === `clio${PANE_HANDOFF_LABEL_SUFFIX}`) {
+				const detection = deps.mux.detection();
+				const key = `${paneId}\u0000${text}`;
+				const delivery = await deliverPeerPrompt({
+					stateDir: resolveClioDirs().state,
+					token: peer.tokens[PEER_INBOX_TOKEN],
+					paneId,
+					socketPath: detection.socketPath ?? "",
+					fromPaneId: detection.self.paneId ?? "",
+					text,
+					timeoutMs: PEER_RECEIPT_MS,
+					...(unconfirmedPeerRequests.has(key) ? { requestId: unconfirmedPeerRequests.get(key) as string } : {}),
+					...(request.signal ? { signal: request.signal } : {}),
+				});
+				if (delivery.status === "unconfirmed") unconfirmedPeerRequests.set(key, delivery.requestId);
+				else unconfirmedPeerRequests.delete(key);
+				if (delivery.status === "accepted") {
+					return { status: "sent", paneId, label: match.label, ...(delivery.via === "queue" ? { queued: true } : {}) };
+				}
+				if (delivery.status === "refused") {
+					return {
+						status: "refused",
+						reason:
+							delivery.reason === "blocked"
+								? blockedReason(match.label)
+								: `${match.label} did not take the prompt (${delivery.reason}): ${delivery.detail}`,
+					};
+				}
+				if (delivery.status === "unconfirmed") {
+					return {
+						status: "unconfirmed",
+						paneId,
+						label: match.label,
+						reason: `${delivery.reason}. It may already be on its queue: read the pane before deciding, and a repeat of the same text is delivered at most once`,
+					};
+				}
+				return { status: "refused", reason: `nothing was delivered to ${match.label}: ${delivery.reason}` };
+			}
+			const outcome = await deps.mux.promptPane(paneId, text);
+			if (outcome.status === "sent") return { status: "sent", paneId, label: match.label };
+			if (outcome.status === "failed") return { status: "unavailable", reason: outcome.reason };
+			return {
+				status: "refused",
+				reason:
+					outcome.why === "blocked"
+						? blockedReason(match.label)
+						: outcome.why === "unsupported"
+							? unsupportedReason(match.label)
+							: noAgentReason(match.label),
+			};
+		},
+
+		async wait(target: string, options = {}): Promise<PanesWaitResult> {
+			if (!deps.mux.available()) return { status: "unavailable", reason: unavailableReason(deps.mux) };
+			const match = matchOwnedPane(handoffPanes(deps.mux.list()), target);
+			if (!match) return { status: "not-found", target };
+			const paneId = match.ref.paneId;
+			const signal = options.signal;
+			const budget = Math.max(1_000, Math.min(MAX_WAIT_MS, Math.trunc(options.timeoutMs ?? DEFAULT_WAIT_MS)));
+			const started = performance.now();
+			// A prompt sent a moment ago has not flipped the peer to `working` yet,
+			// so an idle reading inside the grace window is not a settled one.
+			let sawWorking = false;
+			let last = "unknown";
+			const cancelled = (): PanesWaitResult => ({ status: "cancelled", paneId, label: match.label });
+			for (;;) {
+				const remaining = budget - (performance.now() - started);
+				if (remaining <= 0) break;
+				if (signal?.aborted) return cancelled();
+				// The reading carries the abort and what is left of the budget, so a
+				// host that stops answering cannot hold the wait past either.
+				const peer = await deps.mux.paneAgent(paneId, {
+					timeoutMs: Math.max(1, Math.min(AGENT_RPC_MS, Math.ceil(remaining))),
+					...(signal ? { signal } : {}),
+				});
+				// An abort that landed while the reading was in flight wins over
+				// whatever the reading says.
+				if (signal?.aborted) return cancelled();
+				if (peer === null) {
+					// Either the pane closed or the host did not answer. Only the
+					// registry can tell them apart, and only the first is an ending.
+					if (!deps.mux.list().some((record) => record.ref.paneId === paneId)) {
+						return { status: "gone", target: match.label };
+					}
+					last = "unknown";
+				} else if (peer.agent === null) {
+					last = "unrecognized";
+				} else {
+					last = peer.state;
+					if (peer.state === "working") sawWorking = true;
+					else if (peer.state === "blocked") return { status: "settled", paneId, label: match.label, state: "blocked" };
+					else if (
+						(peer.state === "idle" || peer.state === "done") &&
+						(sawWorking || performance.now() - started >= WAIT_GRACE_MS)
+					) {
+						return { status: "settled", paneId, label: match.label, state: peer.state };
+					}
+				}
+				const left = budget - (performance.now() - started);
+				if (left <= 0) break;
+				try {
+					await sleep(Math.min(WAIT_POLL_MS, left), undefined, signal ? { signal } : {});
+				} catch {
+					// The only way this sleep rejects is the abort.
+					return cancelled();
+				}
+			}
+			return { status: "timed-out", paneId, label: match.label, state: last };
 		},
 
 		attachYazi(controller: PanesYaziController): () => void {

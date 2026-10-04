@@ -476,6 +476,15 @@ export interface ChatSubmitOptions {
 	constraints?: TurnConstraints;
 	/** Presentation only; never part of the model message or persisted text. */
 	display?: { text: string; note?: string };
+	/**
+	 * Set when this turn was not typed by the operator: who sent it, in words.
+	 * Persisted on the user turn and carried through the queue, so the
+	 * transcript and any replay attribute it. Never parsed, never sent to the
+	 * model.
+	 */
+	origin?: string;
+	/** Rechecked after admission awaits; a retired peer inbox cannot start a turn. */
+	isAdmissionCurrent?: () => boolean;
 	/** Host-owned run identity, scoped to this submit and its internal continuations. */
 	hostRun?: ToolInvokeOptions["hostRun"];
 	images?: ReadonlyArray<ImageContent>;
@@ -596,7 +605,7 @@ export interface ChatLoop {
 	submit(text: string, options?: ChatSubmitOptions): Promise<void>;
 	currentTurnConstraints?(): TurnConstraints | undefined;
 	steer(text: string): boolean;
-	queueFollowUp(text: string, display?: { text: string; note?: string }): boolean;
+	queueFollowUp(text: string, display?: { text: string; note?: string }, origin?: string): boolean;
 	/** The queued entries still in Clio's hands, in delivery order. */
 	queueEntries(): QueuedChatMessage[];
 	/** Remove one queued entry; returns it, or null when it already left the queue. `reason` is recorded, never acted on. */
@@ -718,6 +727,8 @@ export interface ChatLoop {
 	 * from the selected session entries; omit it for a fresh session.
 	 */
 	resetForSession(leafTurnId: string | null, replayMessages?: ReadonlyArray<AgentMessage>): void;
+	/** Synchronous reset barrier, including an empty /new; ordinary first-turn creation does not fire it. */
+	onSessionReset?(handler: () => void): () => void;
 	/**
 	 * Resolves once the queued or in-flight session pre-warm has settled, with
 	 * the outcome, or null when none ran. Diagnostics and contracts only: no
@@ -1051,6 +1062,7 @@ function lastAssistantText(messages: ReadonlyArray<AgentMessage>): string {
 
 export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 	const listeners = new Set<(event: ChatLoopEvent) => void>();
+	const sessionResetListeners = new Set<() => void>();
 	const createAgent = deps.createAgent ?? createEngineAgent;
 	const sideQuestionRound = deps.runSideQuestion ?? runSideQuestion;
 	const handoffRound = deps.runHandoffRound ?? runHandoffRound;
@@ -1520,7 +1532,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		getSettings: deps.getSettings,
 		middlewareToolChoice,
 		consumePersistedEcho: (text) => queues.consumePersistedEcho(text),
-		removeQueuedMirrorEntry: (text) => queues.acknowledgeInjected(text),
+		removeQueuedMirrorEntry: (text) => queues.acknowledgeInjected(text)?.origin,
 		promptCachePayloadForAssistant: (usage, backend) => context.promptCachePayloadForAssistant(usage, backend),
 		promptSideTokens: () => context.promptSideTokens(),
 		observability: deps.observability,
@@ -2189,7 +2201,8 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 
 	const api: ChatLoop = {
 		steer: (text) => queues.steer(text) !== null,
-		queueFollowUp: (text, display) => queues.queueFollowUp(text, display) !== null,
+		queueFollowUp: (text, display, origin) =>
+			queues.queueFollowUp(text, display, origin === undefined ? undefined : { origin }) !== null,
 		queueEntries: () => queues.entries(),
 		removeQueuedEntry: (id, reason) => queues.removeEntry(id, reason),
 		moveQueuedEntry: (id, delta) => queues.moveEntry(id, delta),
@@ -2210,10 +2223,12 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		queuedMessages: () => queues.queuedMessages(),
 
 		async submit(text: string, options: ChatSubmitOptions = {}): Promise<void> {
+			const admissionCurrent = (): boolean => options.isAdmissionCurrent?.() !== false;
+			if (!admissionCurrent()) return;
 			const submittedAt = performance.now();
 			let interrupted = false;
 			if (state.streaming) {
-				let mode: SteeringMode = options.steering ?? DEFAULT_STEERING_MODE;
+				let mode: SteeringMode = options.origin !== undefined ? "end-of-turn" : (options.steering ?? DEFAULT_STEERING_MODE);
 				let front = options.queueFront === true;
 				const trimmed = text.trim();
 				if (mode === "interrupt" && trimmed.length > 0) {
@@ -2233,6 +2248,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 							auditReason: "operator interrupted the run with a message",
 						});
 						await prior;
+						if (!admissionCurrent()) return;
 						if (!state.streaming) {
 							interrupted = true;
 						} else {
@@ -2274,7 +2290,10 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 						// payload contract applies to it too (issue #244).
 						const entry =
 							mode === "end-of-turn"
-								? queues.queueFollowUp(text, options.display, { referencedPaths })
+								? queues.queueFollowUp(text, options.display, {
+										referencedPaths,
+										...(options.origin !== undefined ? { origin: options.origin } : {}),
+									})
 								: queues.steer(text, options.display, { front, referencedPaths });
 						if (entry !== null && deps.readSteer) {
 							const entries = queues.entries();
@@ -2301,6 +2320,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			let agentRuntime: AgentRuntime | null;
 			try {
 				await turnRuntime.ensureLiveCapabilitiesForSelectedModel();
+				if (!admissionCurrent()) return;
 				agentRuntime = turnRuntime.ensureRuntime();
 			} catch (err) {
 				emitAdmissionNotice(
@@ -2328,7 +2348,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 					try {
 						const question = operatorText.trim() || "Describe the attached image and any visible text.";
 						const analysis = await sidecar.analyze(options.images, question, controller.signal);
-						if (controller.signal.aborted) return;
+						if (controller.signal.aborted || !admissionCurrent()) return;
 						sidecarObservation = visionObservationText(analysis);
 						text = [operatorText, sidecarObservation].filter(Boolean).join("\n\n");
 						emitNotice(`[Clio Coder] Image processed with ${analysis.model}.`);
@@ -2485,6 +2505,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				} finally {
 					if (pendingPreTurnRead === controllerAbort) pendingPreTurnRead = null;
 				}
+				if (!admissionCurrent()) return;
 				if (controllerAbort.signal.aborted) {
 					await recordCanceledBeforeAdmission({
 						userTurnId: reservedUserTurnId,
@@ -2582,8 +2603,11 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				endPreparationCompaction();
 			}
 
+			if (!admissionCurrent()) return;
+
 			// 3. Ensure the session prompt (compiles only on explicit events)
 			const compiledPrompt = await context.ensureSessionPrompt(agentRuntime);
+			if (!admissionCurrent()) return;
 			submittedText = composeSubmittedText();
 
 			// 4. Preflight overflow check, before the user turn is committed.
@@ -2627,6 +2651,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 						failure = error instanceof Error ? error.message : String(error);
 					})
 					.finally(endPreparationCompaction);
+				if (!admissionCurrent()) return;
 				// An operator cancel is not an admission failure: record it like the
 				// pre-admission cancels above and leave no window-exceeded notice.
 				if (canceled) {
@@ -2653,6 +2678,8 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				turnSnapshot = captureTurnSnapshot("pending");
 			}
 
+			if (!admissionCurrent()) return;
+
 			// 5. Append the user turn, then stamp and persist the snapshot.
 			// PendingSkillRequest is intent only; SkillActivation ledger entries
 			// are recorded on skill-load success.
@@ -2664,6 +2691,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				operatorText,
 				options.display?.text,
 				reservedUserTurnId,
+				options.origin,
 			);
 			if (referencedPaths.length > 0) deps.labelReferencedPaths?.(referencedPaths);
 			const turnIndex = operatorTurnIndex(userTurnId ?? undefined);
@@ -3105,8 +3133,21 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		refreshLiveBudget: () => context.refreshLiveBudget(),
 		whenSettled: () => activeSubmit,
 		whenPrewarmSettled: () => prewarm.settled(),
+		onSessionReset(handler): () => void {
+			sessionResetListeners.add(handler);
+			return () => {
+				sessionResetListeners.delete(handler);
+			};
+		},
 
 		resetForSession(leafTurnId: string | null, replayMessages?: ReadonlyArray<AgentMessage>): void {
+			for (const listener of sessionResetListeners) {
+				try {
+					listener();
+				} catch {
+					// A host observer must not interrupt canonical replay and state cleanup.
+				}
+			}
 			// Local shell completion and tree navigation also refresh the same transcript.
 			eggs.syncConversation();
 			operatorTurnsBefore = null;
@@ -3151,6 +3192,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		},
 
 		dispose(): void {
+			sessionResetListeners.clear();
 			unsubscribeEggSession?.();
 			eggs.reset();
 			pendingVisionSidecar?.abort();
@@ -3443,6 +3485,10 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			} catch {
 				// A presentation observer cannot refuse a turn after the editor has
 				// consumed it. The ordinary render path can recover on its next tick.
+			}
+			if (options.isAdmissionCurrent?.() === false) {
+				releaseTicket();
+				return;
 			}
 			return hostRunContext
 				.run(hostRun, () =>

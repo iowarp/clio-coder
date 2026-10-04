@@ -358,7 +358,7 @@ describe("smoke/built CLI core", { concurrency: false }, () => {
 			strictEqual(fixedReport.fix, true);
 			ok(existsSync(join(scratch.root, "config", "settings.yaml")));
 			const freshSettings = readFileSync(join(scratch.root, "config", "settings.yaml"), "utf8");
-			match(freshSettings, /panes:\n {4}enabled: off[\s\S]*layout: off[\s\S]*files:\n {6}enabled: false/u);
+			match(freshSettings, /panes:\n {4}enabled: embedded[\s\S]*layout: off[\s\S]*files:\n {6}enabled: false/u);
 			for (const finding of fixedReport.findings.filter((entry) =>
 				/panes|yazi|external tool (herdr|yazi)/u.test(entry.name),
 			)) {

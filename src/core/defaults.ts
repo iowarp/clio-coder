@@ -753,7 +753,7 @@ export const DEFAULT_SETTINGS = {
 		smoothStreaming: "auto",
 		desktopNotifications: false,
 		panes: {
-			enabled: "off",
+			enabled: "embedded",
 			notifications: "failures",
 			layout: "off",
 			workers: { ratio: 0.34 },
@@ -937,7 +937,7 @@ interface:
   terminalProgress: false
   desktopNotifications: false
   panes:
-    enabled: off
+    enabled: embedded
     notifications: failures
     layout: off
     workers:

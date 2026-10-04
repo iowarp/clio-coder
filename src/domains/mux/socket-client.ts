@@ -32,6 +32,7 @@
  */
 
 import * as net from "node:net";
+import { performance } from "node:perf_hooks";
 import {
 	MuxError,
 	type MuxEvent,
@@ -41,7 +42,9 @@ import {
 	type MuxLog,
 	type MuxNotificationSound,
 	type MuxPane,
+	type MuxPaneRead,
 	type MuxPaneRef,
+	type MuxReadSource,
 	type MuxRect,
 	type MuxReportableAgentState,
 	MuxRequestTimeout,
@@ -49,6 +52,7 @@ import {
 	type MuxSnapshot,
 	type MuxTab,
 	type MuxTabGeometry,
+	type MuxWorkspace,
 	type MuxWorktree,
 	type MuxWorktreeSource,
 	muxErrorKind,
@@ -130,6 +134,28 @@ export interface MuxReportAgentRequest {
 	agent: string;
 	state: MuxReportableAgentState;
 	message?: string;
+}
+
+export interface MuxWorkspaceCreateRequest {
+	cwd?: string;
+	label?: string;
+	env?: Readonly<Record<string, string>>;
+	focus?: boolean;
+}
+
+export interface MuxPaneReadRequest {
+	paneId: string;
+	source?: MuxReadSource;
+	lines?: number;
+}
+
+export interface MuxPaneWaitRequest {
+	paneId: string;
+	/** A literal substring, or a Rust-syntax regex when `regex` is true. */
+	match: string;
+	regex?: boolean;
+	lines?: number;
+	timeoutMs: number;
 }
 
 export interface MuxReportMetadataRequest {
@@ -223,7 +249,11 @@ export interface MuxClient {
 	ping(options?: { timeoutMs?: number }): Promise<MuxServerInfo>;
 	snapshot(): Promise<MuxSnapshot>;
 	paneCurrent(callerPaneId?: string): Promise<MuxPane>;
-	paneList(workspaceId?: string): Promise<ReadonlyArray<MuxPane>>;
+	/** `options` bounds this one request: its own deadline, and a signal that ends it in flight. */
+	paneList(
+		workspaceId?: string,
+		options?: { timeoutMs?: number; signal?: AbortSignal },
+	): Promise<ReadonlyArray<MuxPane>>;
 	paneSplit(request: MuxSplitRequest): Promise<MuxPane>;
 	/** Set the pane's operator-facing label. Available on herdr protocol 17. */
 	paneRename(paneId: string, label: string): Promise<void>;
@@ -271,6 +301,28 @@ export interface MuxClient {
 	 * was asked to run.
 	 */
 	paneSendText(paneId: string, text: string): Promise<void>;
+	/** Named key presses (`enter`, `esc`, `ctrl+c`); the server validates them before writing any byte. */
+	paneSendKeys(paneId: string, keys: ReadonlyArray<string>): Promise<void>;
+	/**
+	 * Submit a prompt to the agent in a pane through the host's own admission.
+	 * It refuses a blocked agent (`agent_blocked`), an unknown target, and an
+	 * agent of a kind herdr does not support natively (`agent_not_ready`),
+	 * which includes every Clio.
+	 */
+	agentPrompt(target: string, text: string): Promise<void>;
+	paneRead(request: MuxPaneReadRequest): Promise<MuxPaneRead>;
+	/**
+	 * Block until the pane's output matches, including output already there.
+	 * Rejects with a timeout when nothing matched inside `timeoutMs`.
+	 */
+	paneWaitForOutput(request: MuxPaneWaitRequest): Promise<MuxPaneRead>;
+	workspaceList(): Promise<ReadonlyArray<MuxWorkspace>>;
+	workspaceCreate(request: MuxWorkspaceCreateRequest): Promise<{ workspace: MuxWorkspace; rootPane: MuxPane }>;
+	workspaceFocus(workspaceId: string): Promise<void>;
+	tabRename(tabId: string, label: string): Promise<void>;
+	workspaceClose(workspaceId: string): Promise<void>;
+	/** Stop the server this socket belongs to. Its panes end with it. */
+	serverStop(): Promise<void>;
 	/** Takes agent authority over a pane. Only ever called on Clio-owned panes and Clio's own pane. */
 	paneReportAgent(request: MuxReportAgentRequest): Promise<void>;
 	paneReportMetadata(request: MuxReportMetadataRequest): Promise<void>;
@@ -288,31 +340,44 @@ export interface MuxClient {
 	close(): Promise<void>;
 }
 
-/** Opens one socket, or rejects with a typed transport error. */
-function connectSocket(socketPath: string, timeoutMs: number): Promise<net.Socket> {
+/**
+ * Opens one socket, or rejects with a typed error: `transport` when the host
+ * could not be reached inside `timeoutMs`, `aborted` when the caller's signal
+ * ended the attempt first. An abort destroys the half-open socket, so a
+ * connect that never completes cannot outlive the caller's interest in it.
+ */
+function connectSocket(socketPath: string, timeoutMs: number, signal?: AbortSignal): Promise<net.Socket> {
 	return new Promise((resolve, reject) => {
+		if (signal?.aborted) {
+			reject(new MuxError("aborted", `mux socket connect to ${socketPath} was cancelled`));
+			return;
+		}
 		const socket = net.connect({ path: socketPath });
 		socket.setNoDelay(true);
-		const timer = setTimeout(() => {
-			socket.destroy();
-			reject(new MuxError("transport", `mux socket connect to ${socketPath} timed out after ${timeoutMs}ms`));
-		}, timeoutMs);
-		timer.unref?.();
-		const settle = (error: Error | null): void => {
+		const finish = (outcome: MuxError | null): void => {
 			clearTimeout(timer);
+			signal?.removeEventListener("abort", onAbort);
 			socket.removeListener("connect", onConnect);
 			socket.removeListener("error", onError);
-			if (error) {
+			if (outcome) {
 				socket.destroy();
-				reject(new MuxError("transport", `mux socket connect to ${socketPath} failed: ${error.message}`));
+				reject(outcome);
 				return;
 			}
 			resolve(socket);
 		};
-		const onConnect = (): void => settle(null);
-		const onError = (error: Error): void => settle(error);
+		const timer = setTimeout(
+			() => finish(new MuxError("transport", `mux socket connect to ${socketPath} timed out after ${timeoutMs}ms`)),
+			timeoutMs,
+		);
+		timer.unref?.();
+		const onAbort = (): void => finish(new MuxError("aborted", `mux socket connect to ${socketPath} was cancelled`));
+		const onConnect = (): void => finish(null);
+		const onError = (error: Error): void =>
+			finish(new MuxError("transport", `mux socket connect to ${socketPath} failed: ${error.message}`));
 		socket.once("connect", onConnect);
 		socket.once("error", onError);
+		signal?.addEventListener("abort", onAbort, { once: true });
 	});
 }
 
@@ -421,6 +486,28 @@ function readTab(value: unknown): MuxTab {
 		focused: source.focused === true,
 		paneCount: typeof paneCount === "number" ? paneCount : 0,
 		agentState: readAgentState(source.agent_status),
+	};
+}
+
+function readWorkspace(value: unknown): MuxWorkspace {
+	const record = asRecord(value);
+	if (!record) throw new MuxError("protocol", "mux workspace record is not an object");
+	return {
+		workspaceId: requireString(record, "workspace_id", "workspace"),
+		label: optionalString(record, "label") ?? "",
+		focused: record.focused === true,
+		paneCount: typeof record.pane_count === "number" ? record.pane_count : 0,
+		agentState: readAgentState(record.agent_status),
+	};
+}
+
+function readPaneRead(value: unknown, method: string): MuxPaneRead {
+	const record = asRecord(value);
+	if (!record) throw new MuxError("protocol", `mux ${method} returned no read`, { method });
+	return {
+		paneId: requireString(record, "pane_id", method),
+		text: typeof record.text === "string" ? record.text : "",
+		truncated: record.truncated === true,
 	};
 }
 
@@ -642,16 +729,37 @@ export function createMuxClient(options: MuxClientOptions): MuxClient {
 	 * what was asked, but there is no pending map: a connection carries exactly
 	 * one outstanding call and is destroyed as soon as it settles.
 	 */
-	const call = async (method: string, callParams: Record<string, unknown>, timeoutMs?: number): Promise<unknown> => {
+	const call = async (
+		method: string,
+		callParams: Record<string, unknown>,
+		timeoutMs?: number,
+		signal?: AbortSignal,
+	): Promise<unknown> => {
 		if (disposed) throw new MuxError("transport", "mux client is closed");
+		if (signal?.aborted) throw new MuxError("aborted", `mux request ${method} was cancelled`, { method });
 		const waitMs = retryAt - Date.now();
 		if (waitMs > 0) {
 			throw new MuxError("transport", `mux socket ${socketPath} is in backoff for another ${waitMs}ms`);
 		}
+		// One deadline for the whole request, on the monotonic clock. Connecting
+		// spends from the same budget the reply does, so a slow connect cannot
+		// push a request past what its caller allowed.
+		const budget = timeoutMs ?? requestTimeoutMs;
+		const deadline = performance.now() + budget;
+		const connectBudget = Math.min(connectTimeoutMs, budget);
 		let socket: net.Socket;
 		try {
-			socket = await connectSocket(socketPath, connectTimeoutMs);
+			socket = await connectSocket(socketPath, connectBudget, signal);
 		} catch (error) {
+			// A cancelled connect says nothing about the host, and neither does one
+			// cut short by a caller budget smaller than the connect timeout. Only a
+			// refusal or a full-length connect timeout counts against the socket.
+			if (error instanceof MuxError && error.kind === "aborted") {
+				throw new MuxError("aborted", `mux request ${method} was cancelled`, { method });
+			}
+			if (connectBudget < connectTimeoutMs && performance.now() >= deadline) {
+				throw new MuxRequestTimeout(method, budget);
+			}
 			connectFailures += 1;
 			retryAt = Date.now() + delayFor(connectFailures);
 			reachable = false;
@@ -659,21 +767,33 @@ export function createMuxClient(options: MuxClientOptions): MuxClient {
 		}
 		connectFailures = 0;
 		retryAt = 0;
+		const replyBudget = deadline - performance.now();
+		if (signal?.aborted || replyBudget <= 0) {
+			socket.destroy();
+			if (signal?.aborted) throw new MuxError("aborted", `mux request ${method} was cancelled`, { method });
+			throw new MuxRequestTimeout(method, budget);
+		}
 		nextId += 1;
 		const id = `clio-${nextId}`;
-		const budget = timeoutMs ?? requestTimeoutMs;
 		try {
 			const result = await new Promise<unknown>((resolve, reject) => {
 				let settled = false;
+				// An abort ends the request itself, not just the caller's interest in
+				// it: the socket is destroyed, so a host that never answers cannot
+				// hold the caller past its own cancellation.
+				const onAbort = (): void =>
+					finish(() => reject(new MuxError("aborted", `mux request ${method} was cancelled`, { method })));
 				const finish = (settle: () => void): void => {
 					if (settled) return;
 					settled = true;
 					clearTimeout(timer);
+					signal?.removeEventListener("abort", onAbort);
 					socket.destroy();
 					settle();
 				};
-				const timer = setTimeout(() => finish(() => reject(new MuxRequestTimeout(method, budget))), budget);
+				const timer = setTimeout(() => finish(() => reject(new MuxRequestTimeout(method, budget))), replyBudget);
 				timer.unref?.();
+				signal?.addEventListener("abort", onAbort, { once: true });
 				readJsonLines(
 					socket,
 					(line) => {
@@ -728,8 +848,9 @@ export function createMuxClient(options: MuxClientOptions): MuxClient {
 		method: string,
 		callParams: Record<string, unknown>,
 		timeoutMs?: number,
+		signal?: AbortSignal,
 	): Promise<Record<string, unknown>> => {
-		const result = asRecord(await call(method, callParams, timeoutMs));
+		const result = asRecord(await call(method, callParams, timeoutMs, signal));
 		if (!result) throw new MuxError("protocol", `mux ${method} returned a non-object result`, { method });
 		return result;
 	};
@@ -853,8 +974,16 @@ export function createMuxClient(options: MuxClientOptions): MuxClient {
 			const result = await callObject("pane.current", params({ caller_pane_id: callerPaneId }));
 			return readPane(result.pane);
 		},
-		async paneList(workspaceId?: string): Promise<ReadonlyArray<MuxPane>> {
-			const result = await callObject("pane.list", params({ workspace_id: workspaceId }));
+		async paneList(
+			workspaceId?: string,
+			options: { timeoutMs?: number; signal?: AbortSignal } = {},
+		): Promise<ReadonlyArray<MuxPane>> {
+			const result = await callObject(
+				"pane.list",
+				params({ workspace_id: workspaceId }),
+				options.timeoutMs,
+				options.signal,
+			);
 			return readArray(result, "panes").map(readPane);
 		},
 		async paneSplit(request: MuxSplitRequest): Promise<MuxPane> {
@@ -1005,6 +1134,64 @@ export function createMuxClient(options: MuxClientOptions): MuxClient {
 		},
 		async paneSendText(paneId: string, text: string): Promise<void> {
 			await call("pane.send_text", { pane_id: paneId, text });
+		},
+		async paneSendKeys(paneId: string, keys: ReadonlyArray<string>): Promise<void> {
+			await call("pane.send_keys", { pane_id: paneId, keys: [...keys] });
+		},
+		async agentPrompt(target: string, text: string): Promise<void> {
+			await call("agent.prompt", { target, text });
+		},
+		async paneRead(request: MuxPaneReadRequest): Promise<MuxPaneRead> {
+			const result = await callObject(
+				"pane.read",
+				params({
+					pane_id: request.paneId,
+					source: request.source ?? "recent_unwrapped",
+					lines: request.lines,
+					strip_ansi: true,
+				}),
+			);
+			return readPaneRead(result.read, "pane.read");
+		},
+		async paneWaitForOutput(request: MuxPaneWaitRequest): Promise<MuxPaneRead> {
+			const result = await callObject(
+				"pane.wait_for_output",
+				params({
+					pane_id: request.paneId,
+					source: "recent_unwrapped",
+					match: { type: request.regex ? "regex" : "substring", value: request.match },
+					lines: request.lines,
+					strip_ansi: true,
+					timeout_ms: request.timeoutMs,
+				}),
+				// The server holds the request open for the whole wait, so the local
+				// budget has to outlast it or every long wait reads as a dead socket.
+				request.timeoutMs + requestTimeoutMs,
+			);
+			return readPaneRead(result.read, "pane.wait_for_output");
+		},
+		async workspaceList(): Promise<ReadonlyArray<MuxWorkspace>> {
+			const result = await callObject("workspace.list", {});
+			return readArray(result, "workspaces").map(readWorkspace);
+		},
+		async workspaceCreate(request: MuxWorkspaceCreateRequest): Promise<{ workspace: MuxWorkspace; rootPane: MuxPane }> {
+			const result = await callObject(
+				"workspace.create",
+				params({ cwd: request.cwd, label: request.label, env: request.env, focus: request.focus ?? true }),
+			);
+			return { workspace: readWorkspace(result.workspace), rootPane: readPane(result.root_pane) };
+		},
+		async workspaceFocus(workspaceId: string): Promise<void> {
+			await call("workspace.focus", { workspace_id: workspaceId });
+		},
+		async tabRename(tabId: string, label: string): Promise<void> {
+			await call("tab.rename", { tab_id: tabId, label });
+		},
+		async serverStop(): Promise<void> {
+			await call("server.stop", {});
+		},
+		async workspaceClose(workspaceId: string): Promise<void> {
+			await call("workspace.close", { workspace_id: workspaceId });
 		},
 		async paneReportAgent(request: MuxReportAgentRequest): Promise<void> {
 			await call(
