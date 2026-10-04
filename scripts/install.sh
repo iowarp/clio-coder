@@ -487,6 +487,18 @@ check_existing_launcher() {
 	if [ -L "$launcher" ]; then
 		target="$(readlink "$launcher")"
 		case "$target" in
+			/*) checkout_entry="$target" ;;
+			*) checkout_entry="$bin_dir/$target" ;;
+		esac
+		case "$checkout_entry" in
+			*/dist/cli/index.js)
+				checkout_root="${checkout_entry%/dist/cli/index.js}"
+				if [ -e "$checkout_root/.git" ] && [ -f "$checkout_root/src/cli/index.ts" ]; then
+					[ "$force" = 1 ] || fail "source checkout detected at $checkout_root. Keep using that checkout: cd \"$checkout_root\" && pnpm run install:local. Switch this launcher to the managed release: rerun this installer with --force (the checkout is kept). Choose --bin-dir for a separate launcher."
+				fi
+				;;
+		esac
+		case "$target" in
 			*lib/node_modules/@iowarp/clio-coder/*)
 				warn "replacing $launcher, a link into an npm install of Clio Coder ($target)"
 				warn "that npm copy stays on disk; remove it with the npm that installed it: npm uninstall -g --prefix <that prefix> $PACKAGE"
@@ -588,7 +600,7 @@ offer_gui() {
 		# curl | sh leaves stdin on the pipe; the question goes to the terminal or is not asked.
 		[ -t 1 ] && { : </dev/tty; } 2>/dev/null || return 0
 	fi
-	if "$node_bin" "$entry" gui background status </dev/null 2>/dev/null | grep -q '"status": "installed"'; then
+	if [ "$install_gui" = ask ] && "$node_bin" "$entry" gui background status </dev/null 2>/dev/null | grep -q '"status": "installed"'; then
 		return 0
 	fi
 	if [ "$install_gui" = ask ]; then
@@ -598,7 +610,7 @@ offer_gui() {
 		case "$answer" in "" | [Yy]*) ;; *) return 0 ;; esac
 	fi
 	# The command's report is JSON for scripts; the installer states the outcome in its own words.
-	if "$node_bin" "$entry" gui background install </dev/null >"$work/gui.out"; then
+	if "$node_bin" "$entry" gui background install --handover </dev/null >"$work/gui.out"; then
 		if sed -n '/"windows"/,/}/p' "$work/gui.out" | grep -q '"status": "installed"'; then
 			ok "desktop app installed; open Clio Coder from the Windows Start Menu or your app menu, or run: clio-coder gui"
 		else
@@ -606,7 +618,7 @@ offer_gui() {
 		fi
 		log "the desktop app uses Clio Coder's saved credentials; save a key that lives only in your shell with: clio-coder auth login <target>"
 	else
-		warn "the desktop app was not set up (it needs a systemd user session). Retry later with: clio-coder gui background install"
+		warn "the desktop app was not set up. Retry with: clio-coder doctor --fix (verified service handover waits until active work finishes)"
 	fi
 }
 
@@ -883,14 +895,14 @@ main() {
 
 	helper="$final_prefix/lib/node_modules/@iowarp/clio-coder/scripts/native-install.cjs"
 	if version_ge "${installed_version%%-*}" "0.6.0"; then
-		[ -f "$helper" ] || fail "candidate has no managed lifecycle helper; previous install remains active"
+		[ -f "$helper" ] || fail "candidate has no managed lifecycle helper; previous install remains active. Run: clio-coder doctor --fix"
 		pin=""
 		case "$version_spec" in [0-9]* | v[0-9]*) pin="$installed_version" ;; esac
 		if [ -n "$package_file" ]; then pin="$installed_version"; fi
 		"$node_bin" "$helper" activate "$install_root" "$node_bin" "$node_version" "$node_build" "$final_prefix" "$launcher" "$channel" "$pin" "$auto_update" "$post_install" </dev/null ||
-			fail "candidate checks failed; previous install remains active"
+			fail "candidate checks failed; previous install remains active. Run: clio-coder doctor --fix"
 	else
-		"$node_bin" "$entry" --version </dev/null || fail "candidate does not run; previous install remains active"
+		"$node_bin" "$entry" --version </dev/null || fail "candidate does not run; previous install remains active. Run: clio-coder doctor --fix"
 		if [ -d "$install_root/launchers" ]; then fail "refusing to replace a lifecycle-capable install with a legacy package; use rollback"; fi
 		write_launcher "$node_bin" "$entry"
 		write_manifest "$node_bin" "$node_version" "$node_build" "$final_prefix" "$previous"

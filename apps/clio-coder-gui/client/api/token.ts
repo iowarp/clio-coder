@@ -64,7 +64,11 @@ export function dropStoredToken() {
 		}
 }
 /** Adopt a token the operator pasted. It goes through the same launch path as a link, so it is validated once. */
-export function adoptToken(token: string) {
+export function adoptToken(token: string, origin = location.origin) {
+	if (origin !== location.origin) {
+		location.assign(`${origin}/#token=${encodeURIComponent(token)}`);
+		return;
+	}
 	location.hash = `token=${encodeURIComponent(token)}`;
 	location.reload();
 }

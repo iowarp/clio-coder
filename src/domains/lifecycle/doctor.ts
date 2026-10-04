@@ -1,10 +1,12 @@
 import { accessSync, chmodSync, constants, type Dirent, existsSync, readdirSync, type Stats, statSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { isDevVersion, readClioVersionLabel } from "../../core/build-info.js";
+import type { SettingsScalarRepair } from "../../core/config.js";
 import { formatSettingsIssues, readSettings, validateSettingsFile } from "../../core/config.js";
 import { initializeClioHome } from "../../core/init.js";
 import { readLayeredSettings } from "../../core/settings-layers.js";
 import { repairSettingsCoercions, type SettingsRepairResult } from "../../core/settings-repair.js";
+import { shellQuote } from "../../core/shell-quote.js";
 import { clioDirLayoutProblems, resolveClioDirs } from "../../core/xdg.js";
 import { readSessionFileEntries, type SessionJsonlWarning } from "../../engine/session.js";
 import { detectInteropAgents, interopAgentKind, resolveOnPath } from "../interop/index.js";
@@ -112,7 +114,11 @@ function directoryFinding(name: string, path: string): DoctorFinding {
 		})
 		.map(([label]) => label);
 	if (missing.length > 0) {
-		return { ok: false, name, detail: `${path} is not ${missing.join(" or ")} (run \`chmod u+rwx\` on it)` };
+		return {
+			ok: false,
+			name,
+			detail: `${path} is not ${missing.join(" or ")} (run \`chmod u+rwx ${shellQuote(path)}\`; \`clio-coder doctor --fix\` repairs owned directory modes)`,
+		};
 	}
 	return { ok: true, name, detail: path };
 }
@@ -367,6 +373,15 @@ export function runDoctor(options: DoctorOptions = {}): DoctorFinding[] {
 		// command that explains the damage printed nothing. Record it and carry on;
 		// the rows below are what say which root is wrong.
 		try {
+			const roots = resolveClioDirs();
+			if (process.platform !== "win32" && clioDirLayoutProblems(roots).length === 0) {
+				for (const path of Object.values(roots)) {
+					if (!existsSync(path)) continue;
+					const stat = statSync(path);
+					if (stat.isDirectory() && stat.uid === process.getuid?.() && (stat.mode & 0o700) !== 0o700)
+						chmodSync(path, (stat.mode & 0o777) | 0o700);
+				}
+			}
 			initializeClioHome();
 			settingsRepair = repairSettingsCoercions();
 			settingsTightenedFrom = tightenToOwnerOnly(join(resolveClioDirs().config, "settings.yaml"));
@@ -481,10 +496,16 @@ export function runDoctor(options: DoctorOptions = {}): DoctorFinding[] {
 				level: "warn",
 				name: "settings.yaml retired keys",
 				detail: foldDetail(
-					`${validation.retired.map((entry) => entry.path).join(", ")} retired and ignored (${validation.retired[0]?.reason ?? ""}); remove them from settings.yaml`,
+					`${validation.retired.map((entry) => entry.path).join(", ")} retired and ignored (${validation.retired[0]?.reason ?? ""}); run \`clio-coder doctor --fix\``,
 				),
 			});
 		}
+		if (settingsRepair?.removed?.length)
+			findings.push({
+				ok: true,
+				name: "settings.yaml retired keys",
+				detail: `removed ${settingsRepair.removed.join(", ")}`,
+			});
 		const retiredValues = validation.issues.flatMap((issue) => (issue.repair !== undefined ? [issue.repair] : []));
 		if (retiredValues.length > 0) {
 			findings.push({
@@ -633,12 +654,31 @@ function foldDetail(detail: string): string {
 }
 
 export function formatDoctorReport(findings: DoctorFinding[]): string {
-	const lines = findings.map((f) => {
+	const lines = findings.map(withDoctorCommand).map((f) => {
 		const level = f.level ?? (f.ok ? "ok" : "error");
 		const badge = level === "ok" ? "OK" : level === "info" ? "INFO" : level === "warn" ? "WARN" : "!! ";
 		return `${badge.padEnd(4)} ${f.name.padEnd(22)} ${foldDetail(f.detail)}`;
 	});
 	return lines.join("\n");
+}
+
+/** Keep CLI, JSON and in-session warnings actionable even when an optional check only supplies a diagnosis. */
+export function withDoctorCommand(finding: DoctorFinding): DoctorFinding {
+	if (finding.ok && finding.level !== "warn" && finding.level !== "error") return finding;
+	if (/`(?:clio-coder(?:`| [^`<>]+`)|pnpm [^`]+`|chmod [^`]+`)/.test(finding.detail)) return finding;
+	const name = finding.name;
+	const command = /^(?:settings|credentials|repair|state metadata|.* dir$|installation files)/.test(name)
+		? "clio-coder doctor --fix"
+		: /^(?:chat|connection |model |target |tools |cache |system one.*engine)/.test(name)
+			? "clio-coder configure"
+			: name.startsWith("interop")
+				? "clio-coder configure --interop"
+				: name.startsWith("GUI")
+					? "clio-coder gui background status"
+					: /^(?:install method|engine runtime|node version)/.test(name)
+						? "clio-coder upgrade"
+						: "clio-coder config inspect --json";
+	return { ...finding, detail: `${finding.detail}; next: \`${command}\`` };
 }
 
 /**
@@ -805,6 +845,7 @@ export async function runDoctorRuntimeChecks(): Promise<DoctorFinding[]> {
 interface ConfiguredModelRole {
 	role: string;
 	model: string;
+	path?: string;
 }
 
 function configuredModelRoles(
@@ -812,12 +853,17 @@ function configuredModelRoles(
 	target: TargetDescriptor,
 ): ConfiguredModelRole[] {
 	const roles: ConfiguredModelRole[] = [];
-	if (target.defaultModel) roles.push({ role: "defaultModel", model: target.defaultModel });
+	if (target.defaultModel)
+		roles.push({
+			role: "defaultModel",
+			model: target.defaultModel,
+			path: `targets[${settings.targets.indexOf(target)}].defaultModel`,
+		});
 	if (settings.chat.target === target.id && settings.chat.model) {
 		roles.push({ role: "chat.model", model: settings.chat.model });
 	}
 	if (settings.context.memory.target === target.id && settings.context.memory.model) {
-		roles.push({ role: "memory.model", model: settings.context.memory.model });
+		roles.push({ role: "memory.model", model: settings.context.memory.model, path: "context.memory.model" });
 	}
 	if (settings.fleet.default.target === target.id && settings.fleet.default.model) {
 		roles.push({ role: "fleet.default.model", model: settings.fleet.default.model });
@@ -827,9 +873,13 @@ function configuredModelRoles(
 			roles.push({ role: `fleet.profiles.${name}.model`, model: profile.model });
 	}
 	for (const [name, roster] of Object.entries(settings.fleet.rosters)) {
-		for (const member of roster.members) {
+		for (const [index, member] of roster.members.entries()) {
 			if (member.target === target.id && member.model)
-				roles.push({ role: `fleet.rosters.${name}.${member.label}.model`, model: member.model });
+				roles.push({
+					role: `fleet.rosters.${name}.${member.label}.model`,
+					model: member.model,
+					path: `fleet.rosters.${name}.members[${index}].model`,
+				});
 		}
 	}
 	return roles;
@@ -940,7 +990,31 @@ async function probeAdvertisedModels(
  * becomes a WARN row of its own, since the models can check out while every
  * returning prompt still pays for a restore the operator can switch off.
  */
-export async function runDoctorModelChecks(): Promise<DoctorFinding[]> {
+/** Catalog similarity suggests a choice; only an operator confirmation authorizes changing routing. */
+function nearestModelId(model: string, catalog: readonly string[]): string | null {
+	const normalize = (value: string) => value.toLowerCase().replace(/[^a-z0-9]/g, "");
+	const left = normalize(model);
+	const distance = (right: string) => {
+		let row = Array.from({ length: right.length + 1 }, (_, index) => index);
+		for (let i = 0; i < left.length; i++) {
+			const next = [i + 1];
+			for (let j = 0; j < right.length; j++)
+				next.push(Math.min((next[j] ?? 0) + 1, (row[j + 1] ?? 0) + 1, (row[j] ?? 0) + (left[i] === right[j] ? 0 : 1)));
+			row = next;
+		}
+		return row[right.length] ?? 0;
+	};
+	return (
+		[...catalog].sort(
+			(a, b) => distance(normalize(a)) - distance(normalize(b)) || a.length - b.length || a.localeCompare(b),
+		)[0] ?? null
+	);
+}
+
+export async function runDoctorModelChecks(
+	options: { fix?: boolean; confirm?: (question: string) => Promise<boolean> } = {},
+): Promise<DoctorFinding[]> {
+	const proposals: Array<{ row: DoctorFinding; repair: SettingsScalarRepair }> = [];
 	let settings: ReturnType<typeof readSettings>;
 	try {
 		settings = readSettings();
@@ -1018,7 +1092,7 @@ export async function runDoctorModelChecks(): Promise<DoctorFinding[]> {
 				const stored = openAuthStorage().get(status.providerId);
 				if (status.source === "stored-oauth" && stored?.type === "oauth" && stored.expires <= Date.now()) {
 					credentialAvailable = !requiredCredential;
-					credentialDetail = "stored sign-in expired; standard doctor does not refresh credentials";
+					credentialDetail = `stored sign-in expired; operator sign-in required: run \`clio-coder auth login ${target.id}\``;
 				} else if (status.available && status.source !== "not-required")
 					credentialDetail = `credential available from ${status.source}`;
 			} catch (error) {
@@ -1119,19 +1193,51 @@ export async function runDoctorModelChecks(): Promise<DoctorFinding[]> {
 					? observation.resident.join(", ")
 					: "none reported"
 				: "not checked";
-			return [
-				connection,
-				{
-					ok: !active || !live,
-					...(!active || !live ? { level: "warn" as const } : {}),
-					name: `model ${target.id}`,
-					detail: `${missing.map((entry) => `${entry.role} '${entry.model}'`).join(", ")} not found in ${source} (${advertised.length} ids). Resident instances: ${resident}. Open Configure → Chat, Fleet, or Context & Memory and choose from the listed models.`,
-				},
-				...cache,
-			];
+			const row: DoctorFinding = {
+				ok: !active || !live,
+				...(!active || !live ? { level: "warn" as const } : {}),
+				name: `model ${target.id}`,
+				detail: `${missing.map((entry) => `${entry.role} '${entry.model}'`).join(", ")} not found in ${source} (${advertised.length} ids). Resident instances: ${resident}.`,
+			};
+			for (const entry of missing) {
+				const to = nearestModelId(entry.model, advertised);
+				if (to) {
+					row.detail += ` Proposed ${entry.role}: '${entry.model}' -> '${to}'; confirmation required.`;
+					proposals.push({ row, repair: { path: entry.path ?? entry.role, from: entry.model, to } });
+				}
+			}
+			row.detail += " Run `clio-coder doctor --fix`.";
+			return [connection, row, ...cache];
 		}),
 	);
 	const findings = results.flat();
+	const applied = new Set<SettingsScalarRepair>();
+	// Prompts and locked writes are serialized even though passive catalog reads run concurrently.
+	for (const { row, repair } of proposals) {
+		if (
+			!options.fix ||
+			!options.confirm ||
+			!(await options.confirm(`Replace ${repair.path}: '${repair.from}' with '${repair.to}'?`))
+		)
+			continue;
+		try {
+			const result = repairSettingsCoercions([repair]);
+			if (result.rewritten.some((entry) => entry.path === repair.path)) applied.add(repair);
+			row.detail += result.rewritten.some((entry) => entry.path === repair.path)
+				? ` Applied ${repair.path}: '${repair.to}'.`
+				: ` ${repair.path} was changed meanwhile or cannot be safely edited; run \`clio-coder configure\`.`;
+		} catch (error) {
+			row.detail += ` Repair failed: ${error instanceof Error ? error.message : String(error)}; run \`clio-coder doctor --fix\`.`;
+		}
+	}
+	for (const row of new Set(proposals.map((entry) => entry.row))) {
+		const changes = proposals.filter((entry) => entry.row === row);
+		if (changes.every((entry) => applied.has(entry.repair))) {
+			row.ok = true;
+			delete row.level;
+			row.detail = `repaired after confirmation: ${changes.map(({ repair }) => `${repair.path}: '${repair.from}' -> '${repair.to}'`).join(", ")}`;
+		}
+	}
 	return [...findings, ...(await systemOneFindings(registry, findings, observations))];
 }
 

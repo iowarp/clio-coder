@@ -6,6 +6,10 @@ import { readClioVersion } from "./package-root.js";
  */
 declare const __CLIO_BUILD_COMMIT__: string | undefined;
 declare const __CLIO_BUILD_DIRTY__: boolean | undefined;
+declare const __CLIO_BUILD_ID__: string | undefined;
+
+/** Captured in the loaded module; reading disk here would hide processes that outlive a rebuild. */
+export const runningBuildId = typeof __CLIO_BUILD_ID__ === "string" ? __CLIO_BUILD_ID__ : null;
 
 interface BuildProvenance {
 	/** Short commit hash the bundle was built from. */

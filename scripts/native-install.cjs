@@ -64,7 +64,7 @@ function packageVersion(prefix) {
 	}
 }
 
-function check(node, prefix, postInstall, echo = true) {
+function checkCandidate(node, prefix, postInstall, echo = true) {
 	for (const args of [[entry(prefix), "--version"], ...(postInstall ? [[entry(prefix), "doctor", "--json"]] : [])]) {
 		const result = spawnSync(node, args, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], maxBuffer: 1024 * 1024 });
 		if (
@@ -85,6 +85,7 @@ function check(node, prefix, postInstall, echo = true) {
 			}
 			const integrity = new Set([
 				"engine runtime",
+				"installation files",
 				"directory layout",
 				"config dir",
 				"data dir",
@@ -100,6 +101,21 @@ function check(node, prefix, postInstall, echo = true) {
 			if (failures.length) throw new Error(failures.map((finding) => `${finding.name}: ${finding.detail}`).join("\n"));
 		} else if (echo) process.stdout.write(result.stdout);
 		process.stderr.write(result.stderr);
+	}
+}
+
+function check(node, prefix, postInstall, echo = true) {
+	try {
+		checkCandidate(node, prefix, postInstall, echo);
+	} catch (error) {
+		// Older candidates can embed destructive reset advice in validation errors.
+		const detail = (error instanceof Error ? error.message : String(error)).replace(
+			/clio-coder reset[^`\r\n]*/g,
+			"clio-coder doctor --fix",
+		);
+		throw new Error(
+			`${detail}\nRun: clio-coder doctor --fix. Then retry the installer; the previous installation remains active.`,
+		);
 	}
 }
 

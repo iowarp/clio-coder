@@ -680,10 +680,12 @@ console.log(
 	`Built ${urls.length} public pages (${index.length} guides, ${tutorials.length} tutorials, ${experimental.length} experimental articles).`,
 );
 
-// Installers are copied, never rewritten: the site must serve the exact bytes
-// of this commit's scripts, and check.py compares them.
+// Stable bootstraps follow released assets even while the rest of the site awaits a redeploy.
 for (const name of ["install.sh", "install.ps1", "install.cmd"])
-	await cp(join(root, "..", "scripts", name), join(out, name));
+	await cp(
+		join(root, "..", "scripts", ...(name === "install.cmd" ? [] : ["installer-bootstrap"]), name),
+		join(out, name),
+	);
 await writeFile(join(out, "CNAME"), `${new URL(product.origin).hostname}\n`);
 await writeFile(join(out, ".nojekyll"), "");
 await writeFile(

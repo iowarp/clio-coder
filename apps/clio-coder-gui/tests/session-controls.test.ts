@@ -655,3 +655,17 @@ test("all twelve opted-in ACP event kinds reach valid bounded global envelopes, 
 	assert.equal(state.turns.at(-1)?.status, "succeeded");
 	assert.equal(state.state, "open");
 });
+
+test("resting reloadable conversations permit restart while active turns still prevent it", async (t) => {
+	const h = await harness({}, { scenario: "permission", permissionTimers: { escalateMs: 80, budgetMs: 400 } });
+	t.after(h.close);
+	const workspace = await h.workspaces.open(h.home.path);
+	const session = await h.supervisor.open(workspace.id);
+	assert.equal(h.supervisor.hasOpenSessions, true);
+	assert.equal(h.supervisor.restartSafe, true);
+	h.supervisor.startTurn(session.id, "Wait for approval");
+	assert.equal(h.supervisor.restartSafe, false);
+	await until(() => h.supervisor.get(session.id).turns.at(-1)?.status === "cancelled");
+	await until(() => h.supervisor.restartSafe);
+	assert.equal(h.supervisor.hasOpenSessions, true);
+});

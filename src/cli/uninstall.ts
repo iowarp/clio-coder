@@ -160,10 +160,9 @@ function firstRecordedCwd(hashDir: string): string | null {
 
 /**
  * Delete `paths`, then `emptyRoot` if nothing else is left in it, from a
- * detached cmd.exe once this process and its .cmd launcher have exited. A
- * one-line `cmd /c` cannot wait on a PID, so it waits a few seconds and makes a
- * second pass for a slow exit. cmd.exe, not PowerShell: a detached PowerShell
- * gets no console and exits before running anything.
+ * detached cmd.exe once this process and its .cmd launcher have exited.
+ * cmd gives PowerShell the console it needs to wait on the PID and retry locked
+ * files; launching detached PowerShell directly exits before running the script.
  */
 function scheduleRemovalAfterExit(paths: string[], emptyRoot: string | null): void {
 	const literal = (value: string) => `'${value.replaceAll("'", "''")}'`;
@@ -175,14 +174,12 @@ function scheduleRemovalAfterExit(paths: string[], emptyRoot: string | null): vo
 			? `if (-not ($targets | Where-Object { Test-Path -LiteralPath $_ })) { Remove-Item -LiteralPath ${literal(join(emptyRoot, ".install-lock"))} -Recurse -Force -ErrorAction SilentlyContinue; if (-not (Get-ChildItem -LiteralPath ${literal(emptyRoot)} -Force)) { Remove-Item -LiteralPath ${literal(emptyRoot)} -Force } } else { [Console]::Error.WriteLine('Deferred cleanup incomplete; retained install lock for recovery') }`
 			: "");
 	spawn(
-		"powershell.exe",
+		"cmd.exe",
 		[
-			"-NoProfile",
-			"-NonInteractive",
-			"-ExecutionPolicy",
-			"Bypass",
-			"-EncodedCommand",
-			Buffer.from(script, "utf16le").toString("base64"),
+			"/d",
+			"/s",
+			"/c",
+			`powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand ${Buffer.from(script, "utf16le").toString("base64")}`,
 		],
 		{
 			detached: true,
@@ -306,7 +303,7 @@ function otherClioOnPath(pathClio: string | null, localLink: string): string | n
  * shell. Naming the file and leaving the edit to the operator is the honest
  * trade, so these rows are listed as kept rather than as removals.
  */
-function detectShellRcEdits(): string[] {
+function detectShellRcEdits(): Array<{ file: string; lines: number[] }> {
 	const home = homedir();
 	const zdotdir = process.env.ZDOTDIR?.trim();
 	const xdgConfig = process.env.XDG_CONFIG_HOME?.trim();
@@ -318,11 +315,21 @@ function detectShellRcEdits(): string[] {
 		join(home, ".profile"),
 		join(xdgConfig && isAbsolute(xdgConfig) ? xdgConfig : join(home, ".config"), "fish", "config.fish"),
 	];
-	const results: string[] = [];
+	const results: Array<{ file: string; lines: number[] }> = [];
 	for (const file of new Set(candidates)) {
 		try {
 			const content = readFileSync(file, "utf8");
-			if (content.includes("clio-coder") || content.includes("CLIO_CODER")) results.push(file);
+			const text = content.split("\n");
+			const lines = text.flatMap((line, index) => {
+				if (
+					line.includes("clio-coder") ||
+					line.includes("CLIO_CODER") ||
+					text[index - 1]?.includes("# added by clio-coder install.sh")
+				)
+					return [index + 1];
+				return [];
+			});
+			if (lines.length) results.push({ file, lines });
 		} catch {
 			// Absent or unreadable says nothing to report.
 		}
@@ -500,8 +507,13 @@ export async function runUninstallCommand(argv: ReadonlyArray<string>): Promise<
 	}
 
 	// A login file is reported, never edited; see detectShellRcEdits.
-	for (const file of shellEdits) {
-		items.push({ label: "Shell config", path: file, status: "skip", detail: "mentions clio-coder; edit it by hand" });
+	for (const { file, lines } of shellEdits) {
+		items.push({
+			label: "Shell config",
+			path: file,
+			status: "skip",
+			detail: `mentions clio-coder on lines ${lines.join(", ")}; edit it by hand`,
+		});
 	}
 
 	presenter.listItems("The following will be removed", items);

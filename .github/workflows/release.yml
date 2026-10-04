@@ -145,6 +145,10 @@ jobs:
           case "$VERSION" in *-*) channel=(--prerelease --latest=false) ;; esac
           # The installers ride along so `releases/latest/download/install.sh` and
           # `install.ps1` are stable URLs until coder.iowarp.ai serves them.
-          gh release create "v$VERSION" "$RUNNER_TEMP/qualified-package/candidate.tgz" scripts/install.sh scripts/install.ps1 \
+          # Extract the exact npm-qualified bytes; a checkout copy can no longer drift from the package.
+          mkdir -p "$RUNNER_TEMP/released-installers"
+          tar -xzf "$RUNNER_TEMP/qualified-package/candidate.tgz" -C "$RUNNER_TEMP/released-installers" \
+            package/scripts/install.sh package/scripts/install.ps1 package/scripts/install.cmd package/scripts/native-install.cjs
+          gh release create "v$VERSION" "$RUNNER_TEMP/qualified-package/candidate.tgz" "$RUNNER_TEMP/released-installers/package/scripts/"* \
             --target "$GITHUB_SHA" --title "Clio Coder $VERSION" --notes-file "$RUNNER_TEMP/release-notes.md" \
             "${channel[@]}"

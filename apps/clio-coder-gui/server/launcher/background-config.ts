@@ -45,7 +45,7 @@ export async function readBackgroundConfig(file: string): Promise<BackgroundConf
 			!stat.isFile() ||
 			stat.nlink !== 1 ||
 			stat.size > 16_384 ||
-			(stat.mode & 0o077) !== 0 ||
+			(process.platform !== "win32" && (stat.mode & 0o077) !== 0) ||
 			(process.getuid && stat.uid !== process.getuid())
 		)
 			throw new Error("Background credentials must be a private regular file owned by this user.");

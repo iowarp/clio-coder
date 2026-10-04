@@ -20,6 +20,7 @@
 #
 # Everything runs inside Install-ClioCoder, called on the last line, so a
 # truncated download fails to parse and runs nothing.
+[CmdletBinding()]
 param(
 	[string]$Version = $env:CLIO_CODER_VERSION,
 	[string]$Channel = $(if ($env:CLIO_CODER_CHANNEL) { $env:CLIO_CODER_CHANNEL } else { "latest" }),
@@ -248,13 +249,13 @@ function Install-ClioCoder {
 		Ok "installed $PackageName $($pkg.version)"
 
 		$helper = Join-Path $final "lib\node_modules\@iowarp\clio-coder\scripts\native-install.cjs"
-		if (-not (Test-Path -LiteralPath $helper)) { Fail "candidate lacks lifecycle helper; previous install remains active" }
+		if (-not (Test-Path -LiteralPath $helper)) { Fail "candidate lacks lifecycle helper; previous install remains active. Run: clio-coder doctor --fix" }
 		$pin = if ($Options.Package -or $Options.Version -match "^v?\d+\.\d+\.\d+") { [string]$pkg.version } else { "-" }
 		$auto = if ($Options.NoAutoUpdate -or $env:CLIO_CODER_AUTO_UPDATE -eq "0") { "0" } elseif ($env:CLIO_CODER_AUTO_UPDATE -eq "1") { "1" } else { "preserve" }
 		if ($Options.AutoUpdate) { $auto = "1" }
 		$post = if ($Options.NoPostInstall) { "0" } else { "1" }
 		& $node $helper activate $installRoot $node $nodeVersion $build $final $launcher $Options.Channel $pin $auto $post
-		if ($LASTEXITCODE -ne 0) { Fail "candidate checks failed; previous install remains active" }
+		if ($LASTEXITCODE -ne 0) { Fail "candidate checks failed; previous install remains active. Run: clio-coder doctor --fix" }
 		if (-not $Options.NoPostInstall) {
 			& $node $entry upgrade --post-install
 			if ($LASTEXITCODE -ne 0) { Fail "package installed, but local migrations/initialization need attention. Run clio-coder upgrade --post-install; the previous version remains available with: clio-coder upgrade --rollback" }

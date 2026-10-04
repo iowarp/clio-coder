@@ -1,6 +1,12 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { markTokenRejected, onTokenRejected, tokenFromLaunchInput, tokenRejected } from "../client/api/auth-state.js";
+import {
+	markTokenRejected,
+	onTokenRejected,
+	originFromLaunchInput,
+	tokenFromLaunchInput,
+	tokenRejected,
+} from "../client/api/auth-state.js";
 import { createClient } from "../client/api/client.js";
 import { routes } from "../contracts/routes.js";
 
@@ -50,4 +56,11 @@ test("only a 401 marks the token refused: a wrong-host 421 and a 503 leave the b
 	// A subscriber that arrives after the refusal is told at once.
 	onTokenRejected(() => told++);
 	assert.equal(told, 2);
+});
+
+test("recovery retains the new local origin and refuses remote launch links", () => {
+	assert.equal(originFromLaunchInput(`[clio-coder:gui] http://127.0.0.1:4343/#token=${token}`), "http://127.0.0.1:4343");
+	assert.equal(originFromLaunchInput(`http://127.0.0.1:7373/#token=${token}`), "http://127.0.0.1:7373");
+	assert.equal(tokenFromLaunchInput(`http://example.com/#token=${token}`), null);
+	assert.equal(tokenFromLaunchInput(`http://127.0.0.1@evil.example/#token=${token}`), null);
 });

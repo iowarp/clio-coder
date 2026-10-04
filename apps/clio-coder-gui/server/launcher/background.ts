@@ -165,6 +165,7 @@ export async function installBackground(
 	proposed: BackgroundConfig,
 	control: Control = controlService,
 	ready: Ready = waitForLocalServer,
+	options: { handover?: boolean; probe?: typeof findLocalServer } = {},
 ) {
 	if (process.platform !== "linux")
 		throw new Error("Background setup currently requires Linux with a systemd user session.");
@@ -179,7 +180,7 @@ export async function installBackground(
 		throw new Error("Background directory must be a private, canonical directory owned by this user.");
 	const state = await owned(directory),
 		files = state.files;
-	await serviceState(files, control);
+	const service = await serviceState(files, control);
 	let config = proposed;
 	let launchMoved = false;
 	if (state.status === "installed") {
@@ -187,11 +188,28 @@ export async function installBackground(
 			throw new Error(
 				"Background setup already has a stable port and desktop location. Uninstall it before changing them.",
 			);
-		if (!(await sameInstallation(state.config.packageRoot, proposed.packageRoot)))
+		const foreign = !(await sameInstallation(state.config.packageRoot, proposed.packageRoot));
+		if (foreign && !options.handover)
 			throw new Error(
-				"Background setup belongs to another installation. Run gui background uninstall before installing this one.",
+				"Background setup belongs to another installation. Run: clio-coder gui background install --handover",
 			);
-		launchMoved = !sameLaunch(state.config.launch, proposed.launch);
+		if (foreign) {
+			if (
+				Object.entries(state.config.roots).some(
+					([key, value]) => proposed.roots[key as keyof typeof proposed.roots] !== value,
+				)
+			)
+				throw new Error("Background handover requires the same Clio data roots. Run: clio-coder gui background status");
+			await assertWindowsLauncherRemovable(directory);
+		}
+		launchMoved = foreign || !sameLaunch(state.config.launch, proposed.launch);
+		if (launchMoved) {
+			const running = await (options.probe ?? findLocalServer)(state.config.port, state.config.token);
+			if ((running && running.idle !== true) || (!running && service.ActiveState === "active"))
+				throw new Error(
+					"Background app has active work or cannot report idleness. Finish the work, then run: clio-coder gui background install --handover",
+				);
+		}
 		config = launchMoved ? { ...state.config, packageRoot: proposed.packageRoot, launch: proposed.launch } : state.config;
 	}
 	const desktopConfig = state.status === "installed" ? state.config : config;
@@ -204,6 +222,7 @@ export async function installBackground(
 		await control("reload", files.unit, files.unitFile);
 	}
 	await control("enable", files.unit, files.unitFile);
+	if (launchMoved) await control("restart", files.unit, files.unitFile);
 	// The app falls back to its second port while another program holds the first; report where it listens.
 	const port = serverReport(await ready(config.port, config.token)).port ?? config.port;
 	await installLauncher(config.desktopPrefix, { ...config.launch, background: directory });
@@ -235,6 +254,33 @@ export async function backgroundStatus(
 		windows: await windowsLauncherStatus(directory),
 	};
 }
+
+/** Doctor may transfer only hash-verified files and an idle service belonging to these data roots. */
+export async function inspectBackground(directory: string, launch: LaunchPaths, fix: boolean) {
+	const state = await owned(directory);
+	if (state.status === "absent") return [];
+	const config = await newBackgroundConfig(state.config.port, launch, state.config.desktopPrefix);
+	const foreign = !(await sameInstallation(state.config.packageRoot, config.packageRoot));
+	const moved = !sameLaunch(state.config.launch, config.launch);
+	let status = await backgroundStatus(directory);
+	const needsRepair = foreign || moved || status.desktop === "absent" || status.windows === "absent" || !status.ready;
+	if (fix && needsRepair) {
+		await installBackground(directory, config, undefined, undefined, { handover: true });
+		await installWindowsLauncher(directory, { ...config.launch, background: directory });
+		status = await backgroundStatus(directory);
+	}
+	return [
+		{
+			ok: true,
+			...(!fix && needsRepair ? { level: "warn" as const } : {}),
+			name: "GUI background",
+			detail:
+				!fix && needsRepair
+					? `${foreign ? `owned by ${state.config.packageRoot}; handover available` : "service or launchers need repair"}; run \`clio-coder doctor --fix\``
+					: `${fix && needsRepair ? "repaired; " : ""}${status.origin}; launchers resolve the current address; run \`clio-coder gui\` to renew the browser connection`,
+		},
+	];
+}
 type Installed = Extract<Awaited<ReturnType<typeof owned>>, { status: "installed" }>;
 async function pinCurrentLaunch(
 	state: Installed,
@@ -253,6 +299,8 @@ async function pinCurrentLaunch(
 	await publishOwned(directory, config, state.files, true);
 	await control("reload", state.files.unit, state.files.unitFile);
 	await installLauncher(config.desktopPrefix, { ...config.launch, background: directory });
+	if ((await windowsLauncherStatus(directory)) === "installed")
+		await installWindowsLauncher(directory, { ...config.launch, background: directory });
 	return { ...state, config };
 }
 async function startOwned(state: Installed, control: Control, ready: Ready, action: "start" | "restart" = "start") {
@@ -419,6 +467,7 @@ export async function background(args: string[], launch: LaunchPaths) {
 			port: { type: "string" },
 			open: { type: "boolean" },
 			"if-idle": { type: "boolean" },
+			handover: { type: "boolean" },
 		},
 	});
 	const command = positionals[0];
@@ -433,6 +482,8 @@ export async function background(args: string[], launch: LaunchPaths) {
 		throw new Error("--port, --prefix and --open apply to background install only.");
 	if (command !== "restart" && values["if-idle"] !== undefined)
 		throw new Error("--if-idle applies to background restart only.");
+	if (command !== "install" && values.handover !== undefined)
+		throw new Error("--handover applies to background install only.");
 	const directory = values.directory ?? join(resolveClioDirs().state, "gui/background");
 	if (!isAbsolute(directory) || resolve(directory) !== directory)
 		throw new Error("--directory must be an absolute normalized path.");
@@ -463,11 +514,14 @@ export async function background(args: string[], launch: LaunchPaths) {
 					: DEFAULT_GUI_PORT;
 		const prefix =
 			values.prefix ??
+			(installed.status === "installed" ? installed.config.desktopPrefix : undefined) ??
 			(process.env.XDG_DATA_HOME && isAbsolute(process.env.XDG_DATA_HOME)
 				? process.env.XDG_DATA_HOME
 				: join(homedir(), ".local/share"));
 		const config = await newBackgroundConfig(port, launch, prefix);
-		const result = await installBackground(directory, config);
+		const result = await installBackground(directory, config, undefined, undefined, {
+			handover: values.handover === true,
+		});
 		// Windows entries are a convenience around a service that already works, so their failure is reported, not fatal.
 		const windows = await installWindowsLauncher(directory, { ...config.launch, background: directory }).catch(
 			(error: unknown) => ({ status: "failed" as const, reason: error instanceof Error ? error.message : String(error) }),

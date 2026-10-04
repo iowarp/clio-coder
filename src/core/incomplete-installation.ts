@@ -1,6 +1,9 @@
-import { isAbsolute, join, relative } from "node:path";
+import { existsSync, readFileSync } from "node:fs";
+import { dirname, isAbsolute, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
+import { runningBuildId } from "./build-info.js";
 import { resolvePackageRoot } from "./package-root.js";
+import { shellQuote } from "./shell-quote.js";
 
 function missingModulePath(message: string): string | null {
 	const specifier = /Cannot find (?:module|package) ['"]([^'"]+)['"]/.exec(message)?.[1];
@@ -33,6 +36,15 @@ export function incompleteInstallationAdvice(err: unknown): string | null {
 	if (!missing) return null;
 	const fromOutput = relative(outputDir, missing);
 	if (fromOutput === "" || fromOutput.startsWith("..") || isAbsolute(fromOutput)) return null;
+	try {
+		const disk = JSON.parse(readFileSync(join(outputDir, "build.json"), "utf8"));
+		if (runningBuildId && disk.id && disk.id !== runningBuildId)
+			return `${message}\nThis running Clio loaded a build that has since been replaced. Finish active work and restart it: clio-coder. Run clio-coder doctor to identify other stale processes.`;
+	} catch {
+		// Older and interrupted builds have no completion record; use the repair advice below.
+	}
+	if (existsSync(join(dirname(outputDir), ".git")))
+		return `${message}\nThis checkout build is incomplete. Run: pnpm --dir ${shellQuote(dirname(outputDir))} run build. Then restart Clio. If doctor still starts, clio-coder doctor --fix performs the rebuild.`;
 	return [
 		`${message}`,
 		"",

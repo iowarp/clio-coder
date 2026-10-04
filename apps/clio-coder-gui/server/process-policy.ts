@@ -266,9 +266,7 @@ export async function focusAppWindow() {
  * no such browser is installed, it is the ordinary opener. Only launcher entry points use it, so a foreground
  * server or a test that asks for a browser still goes through the system opener it was given.
  *
- * The app has one window unless the operator asks for another from inside it, so a launch that finds
- * an app window focuses it and stops there. The answer says which happened, because a focused window
- * is still on its own page and the caller may have been asked for another.
+ * Each launch delivers a fresh local link, so a window left on a retired port or token can reconnect.
  */
 export async function openApp(url: string, env: NodeJS.ProcessEnv = process.env): Promise<"focused" | "opened"> {
 	const app = windowsAppCommand(url, env);
@@ -276,7 +274,7 @@ export async function openApp(url: string, env: NodeJS.ProcessEnv = process.env)
 		await openBrowser(url, env);
 		return "opened";
 	}
-	if (await focusAppWindow()) return "focused";
+	// A title cannot prove that a window has the current origin or token. Always deliver the launch link.
 	// A first launch keeps this process alive for the browser's whole life, so it is released, not awaited.
 	const child = spawn(app.file, app.argv, { cwd: "/mnt/c/Windows", env, shell: false, detached: true, stdio: "ignore" });
 	await new Promise<void>((resolve, reject) => {

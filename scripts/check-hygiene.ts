@@ -1198,6 +1198,8 @@ function shipsUnder(packageFiles: string[], dir: string): boolean {
 
 const NPM_IMPLICIT_FILES = new Set(["package.json"]);
 const ROOT_ONLY_RESOLVERS = new Set([
+	// Lifecycle receipts bind a running process to the entire installation across rebuilds.
+	"src/core/running-build.ts",
 	// Hands the root to the component scanner, which walks whatever is present.
 	"src/cli/components.ts",
 	// Installation identity uses the root's layout to preserve its package-manager prefix.

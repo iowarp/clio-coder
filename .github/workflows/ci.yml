@@ -164,8 +164,6 @@ jobs:
       - name: Boot the built binary
         run: pnpm run test:file tests/smoke/real-binary-boot.test.ts
       - name: Pack and test the installed package
-        # Known Windows gap: 'loads bundled library packages, agent recipes, and lazy codewiki from an installed package'.
-        if: ${{ runner.os != 'Windows' }}
         run: |
           tarball="$(npm pack --pack-destination "$RUNNER_TEMP" --silent)"
           CLIO_CODER_RELEASE_TARBALL="$RUNNER_TEMP/$tarball" pnpm run test:file tests/smoke/installed-package.test.ts

@@ -2,10 +2,12 @@ import assert from "node:assert/strict";
 import { execFile, spawn } from "node:child_process";
 import { once } from "node:events";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { hostname } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { legacyDocsBirthVerified } from "../../src/cli/legacy-docs-cleanup.js";
 import { processAlive, processBirthToken } from "../../src/core/process-identity.js";
+import { missingBuildFiles, staleRunningBuilds } from "../../src/core/running-build.js";
 import { makeScratchHome } from "../harness/scratch-env.js";
 
 test("legacy documentation cleanup refuses PID ownership without verified OS birth tokens", () => {
@@ -128,4 +130,44 @@ test("reset refuses to orphan a background service when its ownership cannot be 
 	assert.equal(result.status, 1, result.stderr + result.stdout);
 	assert.ok(existsSync(f.history));
 	assert.ok(existsSync(join(directory, "owner.json")));
+});
+
+test("doctor detects missing checkout chunks and a live process from another build", async (t) => {
+	const f = fixture();
+	t.after(f.home.cleanup);
+	const root = join(f.state, "checkout");
+	mkdirSync(join(root, "dist"), { recursive: true });
+	writeFileSync(join(root, "dist/build.json"), JSON.stringify({ id: "new-build", files: ["chunk.js"] }));
+	assert.deepEqual(missingBuildFiles(root), ["dist/chunk.js"]);
+	writeFileSync(join(root, "dist/chunk.js"), "export {};\n");
+	assert.deepEqual(missingBuildFiles(root), []);
+	const records = join(f.state, "running-builds");
+	mkdirSync(records);
+	writeFileSync(
+		join(records, `${process.pid}.json`),
+		JSON.stringify({
+			pid: process.pid,
+			host: hostname(),
+			birth: processBirthToken(),
+			root,
+			build: "old-build",
+			surface: "tui",
+		}),
+	);
+	assert.ok(staleRunningBuilds(f.state).some((entry) => entry.pid === process.pid && entry.root === root));
+	writeFileSync(
+		join(records, `${process.pid}.json`),
+		JSON.stringify({
+			pid: process.pid,
+			host: hostname(),
+			birth: processBirthToken(),
+			root,
+			build: "new-build",
+			surface: "tui",
+		}),
+	);
+	assert.equal(
+		staleRunningBuilds(f.state).some((entry) => entry.pid === process.pid),
+		false,
+	);
 });

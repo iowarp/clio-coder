@@ -230,6 +230,10 @@ export class Supervisor {
 			) || [...this.entries.values()].some((entry) => entry.turnId !== null || !!entry.closing)
 		);
 	}
+	/** Resting, reloadable conversations survive restart; pending RPCs and unsaved work do not. */
+	get restartSafe() {
+		return !this.busy && [...this.entries.values()].every((entry) => this.resting(entry));
+	}
 	private publish(event: SessionDelta) {
 		const current = this.snapshots.get(event.payload.resource);
 		if (!current) return;

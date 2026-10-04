@@ -1428,6 +1428,8 @@ function advanceScopedTarget(
 }
 
 export async function bootOrchestrator(options: BootOptions = {}): Promise<BootResult> {
+	const { registerRunningBuild } = await import("../core/running-build.js");
+	registerRunningBuild(options.acp ? "acp" : options.headless ? "run" : "tui");
 	let capabilityGate = createCapabilityGate();
 	const bootStdout = (text: string): void => {
 		if (options.terminalLease) options.terminalLease.writeDiagnostic("stdout", text);

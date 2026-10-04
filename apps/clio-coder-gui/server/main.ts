@@ -8,7 +8,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { createAdaptorServer } from "@hono/node-server";
 import { Supervisor } from "./acp/supervisor.js";
 import { createApp } from "./app.js";
-import { getVersionInfo, resolveClioDirs, resolvePackageRoot } from "./clio/http-shims.js";
+import { getVersionInfo, registerRunningBuild, resolveClioDirs, resolvePackageRoot } from "./clio/http-shims.js";
 import { backgroundEnvironment, readBackgroundConfig } from "./launcher/background-config.js";
 import { listenPorts } from "./launcher/ports.js";
 import { showPage } from "./local-server.js";
@@ -40,6 +40,18 @@ export { openBrowser } from "./process-policy.js";
 
 declare const __CLIO_GUI_BUNDLED__: boolean;
 const bundled = typeof __CLIO_GUI_BUNDLED__ !== "undefined" && __CLIO_GUI_BUNDLED__;
+export async function inspectGuiBackground(fix: boolean) {
+	const { inspectBackground } = await import("./launcher/background.js");
+	return inspectBackground(
+		join(resolveClioDirs().state, "gui/background"),
+		{
+			node: process.execPath,
+			entry: fileURLToPath(import.meta.url),
+			icon: join(resolvePackageRoot(), "dist/gui/client/icon-192.png"),
+		},
+		fix,
+	);
+}
 export async function main(args = process.argv.slice(2)) {
 	const appClient = fileURLToPath(new URL(bundled ? "./client/" : "../dist/client/", import.meta.url));
 	const clientDir =
@@ -140,6 +152,7 @@ export async function main(args = process.argv.slice(2)) {
 			}
 		: process.env;
 	const settings = { fixture: values.fixture, installDelayMs: 900 };
+	if (!scratch) registerRunningBuild("gui");
 	const compiledDirectory = bundled ? new URL("./", import.meta.url) : undefined;
 	const reads = new WorkerHost("reads", settings, env, compiledDirectory),
 		ops = new WorkerHost("ops", settings, env, compiledDirectory);
@@ -187,8 +200,7 @@ export async function main(args = process.argv.slice(2)) {
 		evidence: new EvidenceService(reads, cli, workspaces, operations),
 		targets: new TargetsService(cli, workspaces, settingsService, operations),
 		sessions,
-		idle: () =>
-			!(operations.activeCount || cli.activeCount || setup.busy || supervisor.busy || supervisor.hasOpenSessions),
+		idle: () => !(operations.activeCount || cli.activeCount || setup.busy) && supervisor.restartSafe,
 		clientDir,
 		pwa: !!persistent,
 		...(process.env.NODE_ENV === "test"

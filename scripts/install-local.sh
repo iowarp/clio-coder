@@ -288,7 +288,7 @@ if [[ $dry_run -eq 1 ]]; then
 fi
 
 log "running: node $cli_target upgrade --post-install"
-node "$cli_target" upgrade --post-install || fail "post-install migrations did not finish; resolve the error above and rerun this installer"
+node "$cli_target" upgrade --post-install || fail "post-install migrations did not finish; run: clio-coder doctor --fix. Then rerun this installer."
 log "running: node $cli_target doctor --fix"
 node "$cli_target" doctor --fix || fail "doctor --fix could not bring the install to green; inspect the output above"
 

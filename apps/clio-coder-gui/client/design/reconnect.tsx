@@ -1,5 +1,5 @@
 import { useId, useState } from "react";
-import { tokenFromLaunchInput } from "../api/auth-state.js";
+import { originFromLaunchInput, tokenFromLaunchInput } from "../api/auth-state.js";
 import { adoptToken } from "../api/token.js";
 
 /**
@@ -25,7 +25,7 @@ export function Reconnect({ refused }: { refused: boolean }) {
 			<form
 				onSubmit={(event) => {
 					event.preventDefault();
-					if (token) adoptToken(token);
+					if (token) adoptToken(token, originFromLaunchInput(text) ?? location.origin);
 				}}
 			>
 				<label htmlFor={field}>Launch link or token</label>
@@ -34,7 +34,7 @@ export function Reconnect({ refused }: { refused: boolean }) {
 					value={text}
 					autoComplete="off"
 					spellCheck={false}
-					placeholder="http://127.0.0.1:4317/#token=…"
+					placeholder="http://127.0.0.1:4343/#token=…"
 					onChange={(event) => setText(event.target.value)}
 				/>
 				{text.trim() !== "" && !token && <p className="reconnect__problem">That text holds no launch token.</p>}

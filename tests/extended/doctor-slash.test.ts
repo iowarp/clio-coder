@@ -184,7 +184,7 @@ describe("collectDoctorFindings with the session's providers", () => {
 				ok: true,
 				name: "tools session-target",
 				level: "warn",
-				detail: "failed (m:latest): no tool call in the stream",
+				detail: "failed (m:latest): no tool call in the stream; next: `clio-coder configure`",
 			},
 		);
 		ok(deep.some((f) => f.name === "toolchain python3"));

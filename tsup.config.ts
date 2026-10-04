@@ -1,5 +1,6 @@
 import { execFileSync } from "node:child_process";
-import { cpSync, existsSync, mkdirSync, rmSync } from "node:fs";
+import { randomUUID } from "node:crypto";
+import { cpSync, existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -9,6 +10,7 @@ import { GRAMMAR_ASSETS, type GrammarAssetSource } from "./src/domains/context/c
 
 const require = createRequire(import.meta.url);
 const buildStartedAt = performance.now();
+const buildId = randomUUID();
 
 /**
  * Commit and dirty flag of the checkout being bundled, injected as constants so
@@ -87,7 +89,7 @@ const entries = {
 
 export default defineConfig({
 	entry: entries,
-	define: { __CLIO_GUI_BUNDLED__: "true", ...buildProvenanceDefines() },
+	define: { __CLIO_GUI_BUNDLED__: "true", __CLIO_BUILD_ID__: JSON.stringify(buildId), ...buildProvenanceDefines() },
 	format: ["esm"],
 	target: "node22",
 	platform: "node",
@@ -165,6 +167,10 @@ export default defineConfig({
 			cpSync(join(directory, "LICENSE"), join(notices, `${name.replace("/", "__")}-LICENSE`));
 		}
 		reportBuildStage("Runtime assets", assetsStartedAt, artifactBytes("dist/assets"));
+		const files = readdirSync("dist", { recursive: true, withFileTypes: true })
+			.filter((entry) => entry.isFile() && /\.(?:js|wasm|html)$/.test(entry.name))
+			.map((entry) => join(entry.parentPath, entry.name).slice("dist/".length).replaceAll("\\", "/"));
+		writeFileSync("dist/build.json", `${JSON.stringify({ id: buildId, files })}\n`);
 	},
 	// tsup already externalizes every package.json `dependencies` entry, so the
 	// runtime deps need no listing here. `optionalDependencies` is not part of

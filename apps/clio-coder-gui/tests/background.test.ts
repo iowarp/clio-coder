@@ -225,11 +225,11 @@ test("installed background configuration launches plain Node and preserves a bra
 		config.desktopPrefix,
 	);
 	const moved = { ...current, packageRoot: packageAlias };
-	await installBackground(directory, moved, control, async () => {});
+	await installBackground(directory, moved, control, async () => {}, { probe: async () => null });
 	const repinned = await readBackgroundConfig(backgroundPaths(directory).config);
 	assert.equal(repinned.token, config.token);
 	assert.equal(repinned.launch.entry, movedEntry);
-	assert.deepEqual(calls.slice(-2), ["reload", "enable"]);
+	assert.deepEqual(calls.slice(-3), ["reload", "enable", "restart"]);
 	const movedDesktop = await launcherStatus(config.desktopPrefix);
 	assert.equal(movedDesktop.status, "installed");
 	assert.equal(await readFile(movedDesktop.entry, "utf8"), desktopEntry({ ...repinned.launch, background: directory }));
@@ -447,4 +447,44 @@ test("restart --if-idle restarts only an idle background app and says why it lef
 		running: null,
 	});
 	assert.equal((await uninstallBackground(directory, control)).status, "absent");
+});
+
+test("explicit handover preserves a verified service identity and refuses active work", async (t) => {
+	const root = await mkdtemp(join(tmpdir(), "clio-web-handover-"));
+	t.after(() => rm(root, { recursive: true, force: true }));
+	const directory = join(root, "background");
+	const oldRoot = join(root, "old-checkout");
+	const newRoot = join(root, "release");
+	await mkdir(oldRoot);
+	await mkdir(newRoot);
+	await writeFile(join(newRoot, "server.js"), "export {};\n");
+	const config = { ...(await newBackgroundConfig(4343, launch, join(root, "desktop"))), packageRoot: oldRoot };
+	const files = backgroundPaths(directory);
+	const calls: string[] = [];
+	const control: typeof controlService = async (action) => {
+		calls.push(action);
+		return `FragmentPath=${calls.includes("enable") ? files.unitFile : ""}\nActiveState=active`;
+	};
+	const ready = async () => ({ clio: "0.6.0", idle: true, port: 7373 });
+	await installBackground(directory, config, control, ready);
+	const proposed = { ...config, packageRoot: newRoot, launch: { ...launch, entry: join(newRoot, "server.js") } };
+	await assert.rejects(installBackground(directory, proposed, control, ready), /--handover/);
+	await assert.rejects(
+		installBackground(directory, proposed, control, ready, {
+			handover: true,
+			probe: async () => ({ clio: "0.6.0", idle: false }),
+		}),
+		/active work/,
+	);
+	assert.equal((await readBackgroundConfig(files.config)).packageRoot, oldRoot);
+	const changed = await installBackground(directory, proposed, control, ready, { handover: true, probe: ready });
+	assert.equal(changed.origin, "http://127.0.0.1:7373");
+	const saved = await readBackgroundConfig(files.config);
+	assert.equal(saved.packageRoot, newRoot);
+	assert.equal(saved.token, config.token);
+	assert.equal(saved.port, 4343);
+	assert.ok(calls.includes("restart"));
+	assert.ok((await readFile(files.unitFile, "utf8")).includes(newRoot));
+	await uninstallBackground(directory, control);
+	assert.equal((await launcherStatus(config.desktopPrefix)).status, "absent");
 });

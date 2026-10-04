@@ -152,7 +152,11 @@ export async function windowsLauncherStatus(directory: string): Promise<WindowsL
 	return changed || gone ? "modified" : "installed";
 }
 
-export async function installWindowsLauncher(directory: string, launch: LaunchPaths) {
+export async function installWindowsLauncher(
+	directory: string,
+	launch: LaunchPaths,
+	folders?: readonly [string, string, string],
+) {
 	if (!isWsl()) return { status: "unsupported" as const };
 	const distro = process.env.WSL_DISTRO_NAME ?? "",
 		user = userInfo().username;
@@ -169,10 +173,12 @@ export async function installWindowsLauncher(directory: string, launch: LaunchPa
 		if (!gone && existing.launch === launchKey)
 			return { status: "installed" as const, files: existing.files.map((file) => file.path) };
 	}
-	const [programs, startup, local] = (await runWindowsPowerShell(foldersScript)).trim().split("\n");
+	const [programs, startup, local] = folders ?? (await runWindowsPowerShell(foldersScript)).trim().split("\n");
 	if (!programs || !startup || !local) throw new Error("Windows did not report its shortcut folders.");
 	const menu = join(windowsToWsl(programs), menuName),
 		boot = join(windowsToWsl(startup), startupName);
+	await mkdir(dirname(menu), { recursive: true });
+	await mkdir(dirname(boot), { recursive: true });
 	if (!existing)
 		for (const path of [menu, boot])
 			if ((await bytes(path)) !== null)

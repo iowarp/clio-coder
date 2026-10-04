@@ -115,8 +115,7 @@ export class SettingsValidationError extends Error {
 		super(
 			`${headline}\n${lines.join("\n")}\n\n` +
 				`${settingsRemedy(kind, path)}\n` +
-				"`clio-coder doctor --fix` repairs retired enum values and YAML 1.1 on/off booleans, directories, and credential permissions.\n" +
-				"To discard these settings and start from defaults instead, run `clio-coder reset --config --force`.",
+				"Run `clio-coder doctor --fix` to repair retired settings, YAML 1.1 on/off booleans, directories, and credential permissions without discarding your configuration.",
 		);
 		this.name = "SettingsValidationError";
 		this.issues = issues;
@@ -176,9 +175,8 @@ export function formatSettingsIssues(issues: ReadonlyArray<SettingsIssue>): stri
 		kind === "schema"
 			? issues.map((issue) => `${issue.path}: ${issue.message}`).join("; ")
 			: issues.map((issue) => issue.message.replace(/^(?:invalid YAML|unreadable): /u, "")).join("; ");
-	const discard = "`clio-coder reset --config --force` to start from defaults";
 	return foldToOneLine(
-		`${settingsFailureHeadline(kind)}: ${settingsRemedyInline(kind, path)}, or ${discard}. ${detail}`,
+		`${settingsFailureHeadline(kind)}: ${settingsRemedyInline(kind, path)}. Run \`clio-coder doctor --fix\` for safe repairs. ${detail}`,
 	);
 }
 

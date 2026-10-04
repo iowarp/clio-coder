@@ -8,6 +8,7 @@ import {
 	runDoctorInteropChecks,
 	runDoctorModelChecks,
 	runDoctorRuntimeChecks,
+	withDoctorCommand,
 } from "../domains/lifecycle/doctor.js";
 import type { ProvidersContract } from "../domains/providers/contract.js";
 import { type AutonomyLevel, DEFAULT_AUTONOMY_LEVEL } from "../domains/safety/autonomy.js";
@@ -18,6 +19,7 @@ import {
 } from "../domains/scheduling/local-capacity.js";
 import { classifyDefaultTarget, describeVerdict } from "./default-target.js";
 import { hpcToolchainFindings } from "./doctor-hpc.js";
+import { installationFindings } from "./doctor-installation.js";
 import { namingHistoryFindings } from "./doctor-naming.js";
 import { panesFindings } from "./doctor-panes.js";
 import { slurmMcpFindings } from "./doctor-slurm.js";
@@ -25,6 +27,7 @@ import { stateStorageFinding } from "./doctor-state-size.js";
 import { taskWorktreeFindings } from "./doctor-task-worktrees.js";
 import { toolchainFindings } from "./doctor-toolchain.js";
 import { validationContractFinding } from "./doctor-validation-contract.js";
+import { createLifecyclePresenter } from "./lifecycle-presenter.js";
 import { printError } from "./shared.js";
 
 const HELP = `clio-coder doctor [--fix] [--json] [--verbose] [--deep [--tools-timeout <seconds>]]
@@ -33,8 +36,11 @@ Diagnose Clio Coder state without creating files. The first row says whether
 chat can run and what to run when it cannot. On a home Clio has never
 written to, doctor says so in one row and exits 0. Use --fix to repair structure:
 missing directories, missing template files, and credential permissions.
---fix also repairs retired enum values and YAML 1.1 on/off booleans in settings,
-preserving comments and formatting. Plain doctor reports the proposed repairs.
+--fix also removes retired keys and repairs retired enum values and YAML 1.1
+on/off booleans, preserving comments and formatting. It repairs GUI ownership
+and launchers, and rebuilds incomplete source checkouts. Model IDs are corrected
+only after interactive confirmation; sign-ins still require the operator.
+Plain doctor reports the proposed repairs and running builds that need a restart.
 --fix also records the fleet preflight, which is what admits an SSH node to
 dispatch for the current project root; plain doctor only reports it.
 Settings are validated directly against the current schema.
@@ -59,6 +65,7 @@ export interface DoctorDeepOptions {
 
 export interface DoctorCollectOptions {
 	fix?: boolean;
+	confirm?: (question: string) => Promise<boolean>;
 	/** Run the deep checks as well. */
 	deep?: DoctorDeepOptions | false;
 	workspaceRoot?: string;
@@ -286,7 +293,7 @@ export async function collectDoctorFindings(options: DoctorCollectOptions = {}):
 	const runtimeChecks = await runDoctorRuntimeChecks();
 	// Every model pointer is checked against what its target advertises, so a
 	// placeholder id saved by configure is reported here and not on the first turn.
-	const modelChecks = await runDoctorModelChecks();
+	const modelChecks = await runDoctorModelChecks({ fix, ...(options.confirm ? { confirm: options.confirm } : {}) });
 	// The interop and fleet sweeps read the state and config roots through the
 	// ensuring accessors, which create them, and there is no fleet or interop
 	// state to inspect before Clio has ever written anything. On a home Clio has
@@ -319,9 +326,12 @@ export async function collectDoctorFindings(options: DoctorCollectOptions = {}):
 	// git; it removes nothing.
 	const worktreeChecks = taskWorktreeFindings(workspaceRoot, { fix });
 	const deepChecks = options.deep ? await deepFindings(untouched, workspaceRoot, options.deep) : [];
+	// A checkout repair replaces lazy chunks. Finish every other dynamic check before rebuilding disk.
+	const installChecks = await installationFindings(fix);
 	return [
 		chatReadinessFinding(untouched, modelChecks),
 		...findings,
+		...installChecks,
 		localCapacity,
 		...storageChecks,
 		...runtimeChecks,
@@ -336,7 +346,7 @@ export async function collectDoctorFindings(options: DoctorCollectOptions = {}):
 		...contractChecks,
 		...worktreeChecks,
 		...deepChecks,
-	];
+	].map(withDoctorCommand);
 }
 
 /**
@@ -400,6 +410,9 @@ export async function runDoctorCommand(args: ReadonlyArray<string> = []): Promis
 	const { fix, json } = parsed;
 	const all = await collectDoctorFindings({
 		fix,
+		...(fix && !json && process.stdin.isTTY
+			? { confirm: (question: string) => createLifecyclePresenter().confirm(question) }
+			: {}),
 		deep: parsed.deep ? (parsed.toolsTimeoutMs !== undefined ? { toolsTimeoutMs: parsed.toolsTimeoutMs } : {}) : false,
 	});
 	const ok = all.every((f) => f.ok);

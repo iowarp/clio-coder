@@ -2,13 +2,21 @@ import { existsSync, lstatSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { resolvePackageRoot } from "../core/package-root.js";
+import type { DoctorFinding } from "../domains/lifecycle/doctor.js";
 import { printError } from "./argv.js";
+
+export async function inspectGuiBackground(fix: boolean): Promise<DoctorFinding[]> {
+	const root = resolvePackageRoot();
+	const entry = join(root, "dist/gui/server.js");
+	const server = await import(pathToFileURL(entry).href);
+	return server.inspectGuiBackground(fix);
+}
 
 const HELP = `Clio Coder graphical application
 
 Usage:
   clio-coder gui [--path </app/path>] [--open | --no-open] [--foreground]
-  clio-coder gui background install [--open] [--port <1-65535>]
+  clio-coder gui background install [--handover] [--open] [--port <1-65535>]
   clio-coder gui background status|start|open|restart [--if-idle]|stop|uninstall
   clio-coder gui launcher install|status|uninstall
 
@@ -27,7 +35,8 @@ On Linux with a systemd user session, background install keeps the app at a
 stable address from login, so the browser can install it as an app. That
 address is 127.0.0.1:4343, or 127.0.0.1:7373 while another program holds 4343;
 --port pins a different one. Background restart loads a newly installed
-version; --if-idle leaves it alone when work or a conversation is open. Stop
+version; --if-idle leaves it alone while work is active. --handover transfers a
+verified idle service from another installation while retaining its address and credentials. Stop
 stops it until the next login or the next clio-coder gui, and uninstall also
 removes its login, desktop and Windows entries.
 Under WSL, background install also adds a Clio Coder Start Menu shortcut and a
