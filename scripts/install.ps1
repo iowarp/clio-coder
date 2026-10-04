@@ -255,7 +255,8 @@ function Install-ClioCoder {
 		if ($Options.AutoUpdate) { $auto = "1" }
 		$post = if ($Options.NoPostInstall) { "0" } else { "1" }
 		& $node $helper activate $installRoot $node $nodeVersion $build $final $launcher $Options.Channel $pin $auto $post
-		if ($LASTEXITCODE -ne 0) { Fail "candidate checks failed; previous install remains active. Run: clio-coder doctor --fix" }
+		# The clio-coder on PATH is still the previous version, and a version that predates a repair reports nothing to fix.
+		if ($LASTEXITCODE -ne 0) { Fail "candidate checks failed; previous install remains active. Repair with the new version itself, then rerun this installer: & `"$node`" `"$entry`" doctor --fix" }
 		if (-not $Options.NoPostInstall) {
 			& $node $entry upgrade --post-install
 			if ($LASTEXITCODE -ne 0) { Fail "package installed, but local migrations/initialization need attention. Run clio-coder upgrade --post-install; the previous version remains available with: clio-coder upgrade --rollback" }

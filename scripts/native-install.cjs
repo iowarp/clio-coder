@@ -114,7 +114,7 @@ function check(node, prefix, postInstall, echo = true) {
 			"clio-coder doctor --fix",
 		);
 		throw new Error(
-			`${detail}\nRun: clio-coder doctor --fix. Then retry the installer; the previous installation remains active.`,
+			`${detail}\nThe previous installation remains active, and it may predate this repair. Run the new version's own repair, then retry the installer: "${node}" "${path.join(prefix, "lib", "node_modules", "@iowarp", "clio-coder", "dist", "cli", "index.js")}" doctor --fix`,
 		);
 	}
 }

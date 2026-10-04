@@ -900,7 +900,8 @@ main() {
 		case "$version_spec" in [0-9]* | v[0-9]*) pin="$installed_version" ;; esac
 		if [ -n "$package_file" ]; then pin="$installed_version"; fi
 		"$node_bin" "$helper" activate "$install_root" "$node_bin" "$node_version" "$node_build" "$final_prefix" "$launcher" "$channel" "$pin" "$auto_update" "$post_install" </dev/null ||
-			fail "candidate checks failed; previous install remains active. Run: clio-coder doctor --fix"
+			# The clio-coder on PATH is still the previous version, and a version that predates a repair reports nothing to fix.
+			fail "candidate checks failed; previous install remains active. Repair with the new version itself, then rerun this installer: \"$node_bin\" \"$entry\" doctor --fix"
 	else
 		"$node_bin" "$entry" --version </dev/null || fail "candidate does not run; previous install remains active. Run: clio-coder doctor --fix"
 		if [ -d "$install_root/launchers" ]; then fail "refusing to replace a lifecycle-capable install with a legacy package; use rollback"; fi
