@@ -11,7 +11,8 @@ function atomic(file, text, mode = 0o600) {
 	const temp = `${file}.${crypto.randomUUID()}.tmp`;
 	try {
 		fs.writeFileSync(temp, text, { mode });
-		const fd = fs.openSync(temp, "r");
+		// Windows FlushFileBuffers needs a writable handle; a read-only one fails with EPERM.
+		const fd = fs.openSync(temp, process.platform === "win32" ? "r+" : "r");
 		try {
 			fs.fsyncSync(fd);
 		} finally {

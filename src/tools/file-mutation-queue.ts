@@ -139,16 +139,19 @@ export async function publishFileAtomically(
 		};
 		// Rename is the commit point. A later durability failure cannot honestly
 		// be described as an unpublished write or safely rolled back over other writers.
-		try {
-			const directory = await open(dirname(target), "r");
+		// Windows has no directory fsync (opening one to flush fails with EPERM every time), so
+		// the attempt there only puts a warning on every write.
+		if (process.platform !== "win32")
 			try {
-				await directory.sync();
-			} finally {
-				await directory.close();
+				const directory = await open(dirname(target), "r");
+				try {
+					await directory.sync();
+				} finally {
+					await directory.close();
+				}
+			} catch (error) {
+				result.durabilityWarning = `Published, but directory fsync was unavailable or failed: ${String(error)}`;
 			}
-		} catch (error) {
-			result.durabilityWarning = `Published, but directory fsync was unavailable or failed: ${String(error)}`;
-		}
 		return result;
 	} catch (error) {
 		let cleanup = "";
