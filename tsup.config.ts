@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
-import { randomUUID } from "node:crypto";
-import { cpSync, existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { createHash, randomUUID } from "node:crypto";
+import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -166,6 +166,23 @@ export default defineConfig({
 			}
 			cpSync(join(directory, "LICENSE"), join(notices, `${name.replace("/", "__")}-LICENSE`));
 		}
+		const sanitizerEntry = appRequire.resolve("dompurify");
+		const sanitizerPackage = JSON.parse(readFileSync(join(dirname(sanitizerEntry), "..", "package.json"), "utf8"));
+		writeFileSync(
+			join(notices, "dompurify.json"),
+			`${JSON.stringify(
+				{
+					name: sanitizerPackage.name,
+					version: sanitizerPackage.version,
+					source: `https://registry.npmjs.org/dompurify/-/dompurify-${sanitizerPackage.version}.tgz`,
+					sourceSha256: createHash("sha256").update(readFileSync(sanitizerEntry)).digest("hex"),
+					license: sanitizerPackage.license,
+					notices: "../../gui/client/THIRD_PARTY_LICENSES.md",
+				},
+				null,
+				"\t",
+			)}\n`,
+		);
 		reportBuildStage("Runtime assets", assetsStartedAt, artifactBytes("dist/assets"));
 		const files = readdirSync("dist", { recursive: true, withFileTypes: true })
 			.filter((entry) => entry.isFile() && /\.(?:js|wasm|html)$/.test(entry.name))

@@ -6,6 +6,7 @@ settings:
 
 overrides:
   esbuild: 0.28.1
+  dompurify: 3.4.16
   fast-uri@<3.1.8: 3.1.8
   ip-address@<10.7.1: 10.7.2
 
@@ -28,18 +29,18 @@ importers:
         specifier: 1.0.0
         version: 1.0.0(patch_hash=152c336b060c686288855554b4b7e12e52fbf328d5ec8336b37acce3fcaba0fb)
       '@silvia-odwyer/photon-node':
-        specifier: ^0.3.4
+        specifier: 0.3.4
         version: 0.3.4
       grok-mermaid:
         specifier: 0.2.2
         version: 0.2.2
-      ollama:
-        specifier: 0.6.3
-        version: 0.6.3
       smol-toml:
         specifier: 1.8.0
         version: 1.8.0
     devDependencies:
+      '@anthropic-ai/claude-agent-sdk':
+        specifier: 0.3.186
+        version: 0.3.186(@anthropic-ai/sdk@0.124.0(zod@4.5.4))(@modelcontextprotocol/sdk@1.30.0(zod@4.5.4))(zod@4.5.4)
       '@biomejs/biome':
         specifier: 2.5.1
         version: 2.5.1
@@ -47,7 +48,7 @@ importers:
         specifier: 24.12.2
         version: 24.12.2
       '@vscode/tree-sitter-wasm':
-        specifier: ^0.3.1
+        specifier: 0.3.1
         version: 0.3.1
       chalk:
         specifier: 5.6.2
@@ -61,8 +62,11 @@ importers:
       node-pty:
         specifier: 1.1.0
         version: 1.1.0
+      ollama:
+        specifier: 0.6.3
+        version: 0.6.3
       tree-sitter-wasms:
-        specifier: ^0.1.13
+        specifier: 0.1.13
         version: 0.1.13
       tsup:
         specifier: 8.5.1
@@ -82,10 +86,6 @@ importers:
       yaml:
         specifier: 2.9.0
         version: 2.9.0
-    optionalDependencies:
-      '@anthropic-ai/claude-agent-sdk':
-        specifier: 0.3.186
-        version: 0.3.186(@anthropic-ai/sdk@0.124.0(zod@4.5.4))(@modelcontextprotocol/sdk@1.30.0(zod@4.5.4))(zod@4.5.4)
 
   apps/clio-coder-gui:
     dependencies:
@@ -96,8 +96,8 @@ importers:
         specifier: 5.102.8
         version: 5.102.8(react@19.3.0)
       dompurify:
-        specifier: 3.4.14
-        version: 3.4.14
+        specifier: 3.4.16
+        version: 3.4.16
       hono:
         specifier: 4.13.12
         version: 4.13.12
@@ -1398,8 +1398,8 @@ packages:
     resolution: {integrity: sha512-svtcdpS8CgJyqAjEQIXdb3OjhFVVYjzGAPO8WGCmRbrml64SPw/jJD4GoE98aR7r25A0XcgrK3F02yw9R/vhQw==}
     engines: {node: '>=0.3.1'}
 
-  dompurify@3.4.14:
-    resolution: {integrity: sha512-dVoH9z+MY+C9IilgGCk3YfFqjLi3fChm2OiKJMzh6axrJ5qwxqWaZamgmHrpv22CN/KdbZJuGEGgfQoL00LTdg==}
+  dompurify@3.4.16:
+    resolution: {integrity: sha512-sqo+pNp3qRhCIpbgRi1y8Tgk27Bo2Ry7w0dC1NBeNTdZChWjz9Xb/KOoZbRP/R6pQZ80Qw8YhXw13hWWBbMRnQ==}
 
   dunder-proto@1.0.1:
     resolution: {integrity: sha512-KIN/nDJBQRcXw0MLVhZE9iQHmG68qAVIBg9CqmUYjmQIhgij9U5MFvrqkUL5FbtyyzZuOeOt0zdeRe4UY7ct+A==}
@@ -2343,7 +2343,6 @@ snapshots:
       '@anthropic-ai/claude-agent-sdk-linux-x64-musl': 0.3.186
       '@anthropic-ai/claude-agent-sdk-win32-arm64': 0.3.186
       '@anthropic-ai/claude-agent-sdk-win32-x64': 0.3.186
-    optional: true
 
   '@anthropic-ai/sdk@0.124.0(zod@4.5.4)':
     dependencies:
@@ -2791,7 +2790,6 @@ snapshots:
       zod-to-json-schema: 3.25.2(zod@4.5.4)
     transitivePeerDependencies:
       - supports-color
-    optional: true
 
   '@oxc-project/types@0.148.0': {}
 
@@ -3137,7 +3135,6 @@ snapshots:
     dependencies:
       mime-types: 3.0.2
       negotiator: 1.1.0
-    optional: true
 
   acorn@8.16.0: {}
 
@@ -3152,7 +3149,6 @@ snapshots:
   ajv-formats@3.0.1(ajv@8.20.0):
     optionalDependencies:
       ajv: 8.20.0
-    optional: true
 
   ajv@8.20.0:
     dependencies:
@@ -3184,7 +3180,6 @@ snapshots:
       type-is: 2.1.0
     transitivePeerDependencies:
       - supports-color
-    optional: true
 
   bowser@2.14.1: {}
 
@@ -3195,8 +3190,7 @@ snapshots:
       esbuild: 0.28.1
       load-tsconfig: 0.2.5
 
-  bytes@3.1.2:
-    optional: true
+  bytes@3.1.2: {}
 
   cac@6.7.14: {}
 
@@ -3204,13 +3198,11 @@ snapshots:
     dependencies:
       es-errors: 1.3.0
       function-bind: 1.1.2
-    optional: true
 
   call-bound@1.0.4:
     dependencies:
       call-bind-apply-helpers: 1.0.2
       get-intrinsic: 1.3.0
-    optional: true
 
   call-me-maybe@1.0.2: {}
 
@@ -3230,28 +3222,22 @@ snapshots:
 
   consola@3.4.2: {}
 
-  content-disposition@1.1.0:
-    optional: true
+  content-disposition@1.1.0: {}
 
-  content-type@1.0.5:
-    optional: true
+  content-type@1.0.5: {}
 
-  content-type@2.1.0:
-    optional: true
+  content-type@2.1.0: {}
 
   cookie-es@3.1.1: {}
 
-  cookie-signature@1.2.2:
-    optional: true
+  cookie-signature@1.2.2: {}
 
-  cookie@0.7.2:
-    optional: true
+  cookie@0.7.2: {}
 
   cors@2.8.6:
     dependencies:
       object-assign: 4.1.1
       vary: 1.1.2
-    optional: true
 
   cose-base@1.0.3:
     dependencies:
@@ -3266,7 +3252,6 @@ snapshots:
       path-key: 3.1.1
       shebang-command: 2.0.0
       which: 2.0.2
-    optional: true
 
   csstype@3.2.3: {}
 
@@ -3466,14 +3451,13 @@ snapshots:
     dependencies:
       robust-predicates: 3.0.3
 
-  depd@2.0.0:
-    optional: true
+  depd@2.0.0: {}
 
   detect-libc@2.1.2: {}
 
   diff@9.0.0: {}
 
-  dompurify@3.4.14:
+  dompurify@3.4.16:
     optionalDependencies:
       '@types/trusted-types': 2.0.7
 
@@ -3482,28 +3466,22 @@ snapshots:
       call-bind-apply-helpers: 1.0.2
       es-errors: 1.3.0
       gopd: 1.2.0
-    optional: true
 
   ecdsa-sig-formatter@1.0.11:
     dependencies:
       safe-buffer: 5.2.1
 
-  ee-first@1.1.1:
-    optional: true
+  ee-first@1.1.1: {}
 
-  encodeurl@2.0.0:
-    optional: true
+  encodeurl@2.0.0: {}
 
-  es-define-property@1.0.1:
-    optional: true
+  es-define-property@1.0.1: {}
 
-  es-errors@1.3.0:
-    optional: true
+  es-errors@1.3.0: {}
 
   es-object-atoms@1.1.2:
     dependencies:
       es-errors: 1.3.0
-    optional: true
 
   es-toolkit@1.52.0: {}
 
@@ -3536,19 +3514,15 @@ snapshots:
       '@esbuild/win32-ia32': 0.28.1
       '@esbuild/win32-x64': 0.28.1
 
-  escape-html@1.0.3:
-    optional: true
+  escape-html@1.0.3: {}
 
-  etag@1.8.1:
-    optional: true
+  etag@1.8.1: {}
 
-  eventsource-parser@3.1.1:
-    optional: true
+  eventsource-parser@3.1.1: {}
 
   eventsource@3.0.7:
     dependencies:
       eventsource-parser: 3.1.1
-    optional: true
 
   express-rate-limit@8.7.0(express@5.2.1):
     dependencies:
@@ -3557,7 +3531,6 @@ snapshots:
       ip-address: 10.7.2
     transitivePeerDependencies:
       - supports-color
-    optional: true
 
   express@5.2.1:
     dependencies:
@@ -3591,7 +3564,6 @@ snapshots:
       vary: 1.1.2
     transitivePeerDependencies:
       - supports-color
-    optional: true
 
   extend@3.0.2: {}
 
@@ -3628,7 +3600,6 @@ snapshots:
       statuses: 2.0.2
     transitivePeerDependencies:
       - supports-color
-    optional: true
 
   fix-dts-default-cjs-exports@1.0.1:
     dependencies:
@@ -3640,17 +3611,14 @@ snapshots:
     dependencies:
       fetch-blob: 3.2.0
 
-  forwarded@0.2.0:
-    optional: true
+  forwarded@0.2.0: {}
 
-  fresh@2.0.0:
-    optional: true
+  fresh@2.0.0: {}
 
   fsevents@2.3.3:
     optional: true
 
-  function-bind@1.1.2:
-    optional: true
+  function-bind@1.1.2: {}
 
   gaxios@7.3.1:
     dependencies:
@@ -3682,13 +3650,11 @@ snapshots:
       has-symbols: 1.1.0
       hasown: 2.0.4
       math-intrinsics: 1.1.0
-    optional: true
 
   get-proto@1.0.1:
     dependencies:
       dunder-proto: 1.0.1
       es-object-atoms: 1.1.2
-    optional: true
 
   google-auth-library@10.9.1:
     dependencies:
@@ -3703,20 +3669,17 @@ snapshots:
 
   google-logging-utils@1.1.3: {}
 
-  gopd@1.2.0:
-    optional: true
+  gopd@1.2.0: {}
 
   grok-mermaid@0.2.2: {}
 
   hachure-fill@0.5.2: {}
 
-  has-symbols@1.1.0:
-    optional: true
+  has-symbols@1.1.0: {}
 
   hasown@2.0.4:
     dependencies:
       function-bind: 1.1.2
-    optional: true
 
   hono@4.13.12: {}
 
@@ -3727,7 +3690,6 @@ snapshots:
       setprototypeof: 1.2.0
       statuses: 2.0.2
       toidentifier: 1.0.1
-    optional: true
 
   http-proxy-agent@9.1.0:
     dependencies:
@@ -3761,31 +3723,24 @@ snapshots:
   iconv-lite@0.7.3:
     dependencies:
       safer-buffer: 2.1.2
-    optional: true
 
   import-meta-resolve@4.2.0: {}
 
-  inherits@2.0.4:
-    optional: true
+  inherits@2.0.4: {}
 
   internmap@1.0.1: {}
 
   internmap@2.0.3: {}
 
-  ip-address@10.7.2:
-    optional: true
+  ip-address@10.7.2: {}
 
-  ipaddr.js@1.9.1:
-    optional: true
+  ipaddr.js@1.9.1: {}
 
-  is-promise@4.0.0:
-    optional: true
+  is-promise@4.0.0: {}
 
-  isexe@2.0.0:
-    optional: true
+  isexe@2.0.0: {}
 
-  jose@6.2.10:
-    optional: true
+  jose@6.2.10: {}
 
   joycon@3.1.1: {}
 
@@ -3804,8 +3759,7 @@ snapshots:
 
   json-schema-traverse@1.0.0: {}
 
-  json-schema-typed@8.0.2:
-    optional: true
+  json-schema-typed@8.0.2: {}
 
   jwa@2.0.1:
     dependencies:
@@ -3895,14 +3849,11 @@ snapshots:
 
   marked@18.0.11: {}
 
-  math-intrinsics@1.1.0:
-    optional: true
+  math-intrinsics@1.1.0: {}
 
-  media-typer@1.1.1:
-    optional: true
+  media-typer@1.1.1: {}
 
-  merge-descriptors@2.0.0:
-    optional: true
+  merge-descriptors@2.0.0: {}
 
   mermaid@11.17.2:
     dependencies:
@@ -3918,7 +3869,7 @@ snapshots:
       d3-sankey: 0.12.3
       dagre-d3-es: 7.0.14
       dayjs: 1.11.23
-      dompurify: 3.4.14
+      dompurify: 3.4.16
       es-toolkit: 1.52.0
       fastdom: 1.0.12
       katex: 0.16.47
@@ -3929,13 +3880,11 @@ snapshots:
       ts-dedent: 2.3.0
       uuid: 14.0.1
 
-  mime-db@1.54.0:
-    optional: true
+  mime-db@1.54.0: {}
 
   mime-types@3.0.2:
     dependencies:
       mime-db: 1.54.0
-    optional: true
 
   mlly@1.8.2:
     dependencies:
@@ -3957,7 +3906,6 @@ snapshots:
   negotiator@1.1.0:
     dependencies:
       content-type: 2.1.0
-    optional: true
 
   node-addon-api@7.1.1: {}
 
@@ -3975,8 +3923,7 @@ snapshots:
 
   object-assign@4.1.1: {}
 
-  object-inspect@1.13.4:
-    optional: true
+  object-inspect@1.13.4: {}
 
   ollama@0.6.3:
     dependencies:
@@ -3985,12 +3932,10 @@ snapshots:
   on-finished@2.4.1:
     dependencies:
       ee-first: 1.1.1
-    optional: true
 
   once@1.4.0:
     dependencies:
       wrappy: 1.0.2
-    optional: true
 
   openai@7.19.0(@aws-sdk/credential-provider-node@3.972.82)(@smithy/signature-v4@5.7.3)(ws@8.21.3)(zod@4.5.4):
     optionalDependencies:
@@ -4008,18 +3953,15 @@ snapshots:
 
   package-manager-detector@1.8.0: {}
 
-  parseurl@1.3.3:
-    optional: true
+  parseurl@1.3.3: {}
 
   partial-json@0.1.7: {}
 
   path-data-parser@0.1.0: {}
 
-  path-key@3.1.1:
-    optional: true
+  path-key@3.1.1: {}
 
-  path-to-regexp@8.4.2:
-    optional: true
+  path-to-regexp@8.4.2: {}
 
   pathe@2.0.3: {}
 
@@ -4031,8 +3973,7 @@ snapshots:
 
   pirates@4.0.7: {}
 
-  pkce-challenge@5.0.1:
-    optional: true
+  pkce-challenge@5.0.1: {}
 
   pkg-types@1.3.1:
     dependencies:
@@ -4083,7 +4024,6 @@ snapshots:
     dependencies:
       forwarded: 0.2.0
       ipaddr.js: 1.9.1
-    optional: true
 
   proxy-agent-negotiate@1.1.0: {}
 
@@ -4091,10 +4031,8 @@ snapshots:
     dependencies:
       es-define-property: 1.0.1
       side-channel: 1.1.1
-    optional: true
 
-  range-parser@1.3.0:
-    optional: true
+  range-parser@1.3.0: {}
 
   raw-body@3.0.2:
     dependencies:
@@ -4102,7 +4040,6 @@ snapshots:
       http-errors: 2.0.1
       iconv-lite: 0.7.3
       unpipe: 1.0.0
-    optional: true
 
   react-dom@19.3.0(react@19.3.0):
     dependencies:
@@ -4196,7 +4133,6 @@ snapshots:
       path-to-regexp: 8.4.2
     transitivePeerDependencies:
       - supports-color
-    optional: true
 
   rw@1.3.3: {}
 
@@ -4221,7 +4157,6 @@ snapshots:
       statuses: 2.0.2
     transitivePeerDependencies:
       - supports-color
-    optional: true
 
   serve-static@2.2.1:
     dependencies:
@@ -4231,24 +4166,19 @@ snapshots:
       send: 1.2.1
     transitivePeerDependencies:
       - supports-color
-    optional: true
 
-  setprototypeof@1.2.0:
-    optional: true
+  setprototypeof@1.2.0: {}
 
   shebang-command@2.0.0:
     dependencies:
       shebang-regex: 3.0.0
-    optional: true
 
-  shebang-regex@3.0.0:
-    optional: true
+  shebang-regex@3.0.0: {}
 
   side-channel-list@1.0.1:
     dependencies:
       es-errors: 1.3.0
       object-inspect: 1.13.4
-    optional: true
 
   side-channel-map@1.0.1:
     dependencies:
@@ -4256,7 +4186,6 @@ snapshots:
       es-errors: 1.3.0
       get-intrinsic: 1.3.0
       object-inspect: 1.13.4
-    optional: true
 
   side-channel-weakmap@1.0.2:
     dependencies:
@@ -4265,7 +4194,6 @@ snapshots:
       get-intrinsic: 1.3.0
       object-inspect: 1.13.4
       side-channel-map: 1.0.1
-    optional: true
 
   side-channel@1.1.1:
     dependencies:
@@ -4274,7 +4202,6 @@ snapshots:
       side-channel-list: 1.0.1
       side-channel-map: 1.0.1
       side-channel-weakmap: 1.0.2
-    optional: true
 
   smol-toml@1.8.0: {}
 
@@ -4287,8 +4214,7 @@ snapshots:
       '@stablelib/base64': 1.0.1
       fast-sha256: 1.3.0
 
-  statuses@2.0.2:
-    optional: true
+  statuses@2.0.2: {}
 
   strictdom@1.0.1: {}
 
@@ -4326,8 +4252,7 @@ snapshots:
       fdir: 6.5.0(picomatch@4.0.7)
       picomatch: 4.0.7
 
-  toidentifier@1.0.1:
-    optional: true
+  toidentifier@1.0.1: {}
 
   tree-kill@1.2.2: {}
 
@@ -4380,7 +4305,6 @@ snapshots:
       content-type: 2.1.0
       media-typer: 1.1.1
       mime-types: 3.0.2
-    optional: true
 
   typebox@1.3.0: {}
 
@@ -4392,13 +4316,11 @@ snapshots:
 
   undici-types@7.16.0: {}
 
-  unpipe@1.0.0:
-    optional: true
+  unpipe@1.0.0: {}
 
   uuid@14.0.1: {}
 
-  vary@1.1.2:
-    optional: true
+  vary@1.1.2: {}
 
   vite@8.3.0(@types/node@24.12.2)(esbuild@0.28.1)(tsx@4.22.4)(yaml@2.9.0):
     dependencies:
@@ -4421,10 +4343,8 @@ snapshots:
   which@2.0.2:
     dependencies:
       isexe: 2.0.0
-    optional: true
 
-  wrappy@1.0.2:
-    optional: true
+  wrappy@1.0.2: {}
 
   ws@8.21.3: {}
 
@@ -4433,7 +4353,5 @@ snapshots:
   zod-to-json-schema@3.25.2(zod@4.5.4):
     dependencies:
       zod: 4.5.4
-    optional: true
 
-  zod@4.5.4:
-    optional: true
+  zod@4.5.4: {}

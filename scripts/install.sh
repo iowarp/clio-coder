@@ -71,8 +71,8 @@ Options:
                         $CLIO_CODER_HOME/install when CLIO_CODER_HOME is set.
   --bin-dir <dir>       Where the clio-coder launcher goes. Default ~/.local/bin.
                         Env: CLIO_CODER_BIN_DIR
-  --include-claude-sdk  Include the optional Claude Agent SDK (about 224 MB).
-                        Default: skip it; Clio offers to fetch it on first use.
+  --include-claude-sdk  Provision the separate Claude Agent SDK component.
+                        Default: skip it; interactive Claude setup asks before provisioning.
   --omit-optional       Accepted for compatibility; skipping is already default.
   --no-modify-path      Keep shell startup files unchanged (default).
   --modify-path         Append a PATH line for the bin dir to your shell's
@@ -896,6 +896,9 @@ main() {
 	mv "$staging" "$final_prefix"
 	entry="$final_prefix/lib/node_modules/@iowarp/clio-coder/dist/cli/index.js"
 	[ -f "$entry" ] || fail "the installed package has no dist/cli/index.js"
+	if [ "$omit_optional" = 0 ]; then
+		"$node_bin" "$entry" tools install claude-sdk </dev/null || fail "Claude SDK provisioning failed; previous launcher remains active."
+	fi
 	ok "installed $PACKAGE $installed_version"
 
 	helper="$final_prefix/lib/node_modules/@iowarp/clio-coder/scripts/native-install.cjs"

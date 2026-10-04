@@ -118,27 +118,25 @@
 		"test:gui:full": "pnpm --filter @iowarp/clio-coder-gui test:full",
 		"test:maintenance": "pnpm run test:file -- tests/extended/keyboard-routing.test.ts tests/extended/keyboard-drafts.test.ts"
 	},
-	"optionalDependencies": {
-		"@anthropic-ai/claude-agent-sdk": "0.3.186"
-	},
 	"dependencies": {
 		"@earendil-works/pi-agent-core": "1.0.0",
 		"@earendil-works/pi-ai": "1.0.0",
 		"@earendil-works/pi-tui": "1.0.0",
-		"@silvia-odwyer/photon-node": "^0.3.4",
+		"@silvia-odwyer/photon-node": "0.3.4",
 		"grok-mermaid": "0.2.2",
-		"ollama": "0.6.3",
 		"smol-toml": "1.8.0"
 	},
 	"devDependencies": {
+		"@anthropic-ai/claude-agent-sdk": "0.3.186",
 		"@biomejs/biome": "2.5.1",
 		"@types/node": "24.12.2",
-		"@vscode/tree-sitter-wasm": "^0.3.1",
+		"@vscode/tree-sitter-wasm": "0.3.1",
 		"chalk": "5.6.2",
 		"diff": "9.0.0",
 		"esbuild": "0.28.1",
 		"node-pty": "1.1.0",
-		"tree-sitter-wasms": "^0.1.13",
+		"ollama": "0.6.3",
+		"tree-sitter-wasms": "0.1.13",
 		"tsup": "8.5.1",
 		"tsx": "4.22.4",
 		"typebox": "1.3.0",

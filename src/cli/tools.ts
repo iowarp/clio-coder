@@ -1,3 +1,4 @@
+import { installClaudeAgentSdk } from "../domains/lifecycle/claude-sdk-install.js";
 import { describeYaziProfile, inspectCurrentYaziProfile, resetYaziProfile } from "../domains/mux/index.js";
 import {
 	describeFloorRejection,
@@ -24,6 +25,7 @@ wins over Clio's own as long as it clears the pinned minimum.
 Commands:
   clio-coder tools list [--json]           the pinned table and where each resolves
   clio-coder tools status <id> [--json] [--reset-profile]  one tool in detail
+  clio-coder tools install claude-sdk      provision the separate Claude SDK component
   clio-coder tools install <id> [--force] [--json]  download, verify, and vendor a tool
   clio-coder tools remove <id>|--all [--json]  delete every vendored version of a tool
 
@@ -75,6 +77,23 @@ export async function runToolsCommand(argv: ReadonlyArray<string> = []): Promise
 			return statusTool(parsed.positional[0], parsed.json, parsed.resetProfile);
 		case "install":
 			if (parsed.resetProfile) return invalidResetProfile();
+			if (parsed.positional[0] === "claude-sdk") {
+				if (parsed.force || parsed.positional.length !== 1) {
+					printError(
+						"claude-sdk installation accepts no extra arguments or --force; pinned versions have separate locations.",
+					);
+					return 2;
+				}
+				try {
+					const path = await installClaudeAgentSdk();
+					if (parsed.json) process.stdout.write(`${JSON.stringify({ id: "claude-sdk", path })}\n`);
+					else printOk(`Claude SDK component available at ${path}`);
+					return 0;
+				} catch (error) {
+					printError(error instanceof Error ? error.message : String(error));
+					return 1;
+				}
+			}
 			return installOne(parsed.positional[0], parsed.force, parsed.json);
 		case "remove":
 			if (parsed.resetProfile) return invalidResetProfile();

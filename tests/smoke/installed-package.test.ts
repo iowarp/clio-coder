@@ -657,7 +657,6 @@ describe("smoke/installed package", { concurrency: false }, () => {
 					"install",
 					"--prefix",
 					prefix,
-					"--omit=optional",
 					"--package-lock=false",
 					"--no-audit",
 					"--no-fund",
@@ -673,6 +672,28 @@ describe("smoke/installed package", { concurrency: false }, () => {
 
 			const packageRoot = join(prefix, "node_modules", "@iowarp", "clio-coder");
 			const bin = join(packageRoot, "dist", "cli", "index.js");
+			const sdkChunks = emittedFilesContaining(packageRoot, "async function ensureClaudeAgentSdk(");
+			strictEqual(sdkChunks.size, 1);
+			const sdkChunk = [...sdkChunks][0];
+			ok(sdkChunk);
+			const sdkHome = join(work, "sdk-home");
+			mkdirSync(sdkHome);
+			const sdkProbe = `
+			 import assert from "node:assert/strict";
+			 import { createRequire } from "node:module";
+			 import { pathToFileURL } from "node:url";
+			 const api = await import(pathToFileURL(process.argv[1]));
+			 const require = createRequire(pathToFileURL(process.argv[1]));
+			 assert.throws(() => require.resolve("@anthropic-ai/claude-agent-sdk"), { code: "MODULE_NOT_FOUND" });
+			 assert.equal(api.resolveClaudeAgentSdkEntry(), null);
+			 await assert.rejects(api.ensureClaudeAgentSdk(), { code: "CLAUDE_AGENT_SDK_UNAVAILABLE" });
+			`;
+			execFileSync(process.execPath, ["--input-type=module", "-e", sdkProbe, sdkChunk], {
+				cwd: sdkHome,
+				env: isolatedEnv(sdkHome),
+				stdio: "pipe",
+			});
+
 			ok(existsSync(join(prefix, "node_modules", ".bin", "clio-coder")), "npm must link the package bin");
 			const version = await run(bin, ["--version"], foreign, isolatedEnv(home));
 			strictEqual(version.code, 0, version.stderr);

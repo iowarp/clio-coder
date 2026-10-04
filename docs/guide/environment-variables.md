@@ -45,6 +45,7 @@ The `environment-variable-inventory` check in [check-hygiene.ts](../../scripts/c
 | Variable | Default | Controls |
 | --- | --- | --- |
 | `CLIO_CODER_HOME` | unset | Single-tree install root; the per-role vars below beat it ([xdg.ts](../../src/core/xdg.ts)). |
+| `CLIO_CODER_CLAUDE_SDK_DIR` | unset | Absolute administrator-prepared component prefix containing `node_modules/@anthropic-ai/claude-agent-sdk`. This prefix takes precedence and is never modified. Unset, explicit `clio-coder tools install claude-sdk` provisions the pinned SDK under the per-user data directory, separately from Clio; existing package-local installations remain a fallback. |
 | `CLIO_CODER_CONFIG_DIR`, `CLIO_CODER_DATA_DIR`, `CLIO_CODER_STATE_DIR`, `CLIO_CODER_CACHE_DIR` | XDG platform defaults | Per-role directory overrides (`src/core/xdg.ts`). |
 | `XDG_CONFIG_HOME`, `XDG_DATA_HOME`, `XDG_STATE_HOME`, `XDG_CACHE_HOME` | platform/user defaults | Linux base directories used when the corresponding `CLIO_CODER_*_DIR` and `CLIO_CODER_HOME` variables are unset (`src/core/xdg.ts`). |
 | `APPDATA`, `LOCALAPPDATA` | Windows profile defaults | Windows roaming and local base directories used when Clio-specific directory overrides are unset (`src/core/xdg.ts`). |

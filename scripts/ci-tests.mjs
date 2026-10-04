@@ -29,6 +29,7 @@ export const coreTests = [
 	"bash-timeout-diagnostic",
 	"bootstrap-route",
 	"builtin-runtime-boot-manifest",
+	"claude-sdk-install",
 	"cli-ignored-flags",
 	"clio-command",
 	"code-nav",

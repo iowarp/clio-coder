@@ -205,11 +205,7 @@ export function smokeCandidate(directory, commit) {
 			XDG_CACHE_HOME: join(home, "xdg-cache"),
 			npm_config_cache: join(scratch, "npm-cache"),
 		};
-		run(
-			"npm",
-			["install", "--prefix", prefix, "--no-save", "--omit=optional", "--no-audit", "--no-fund", receipt.tarball],
-			{ env },
-		);
+		run("npm", ["install", "--prefix", prefix, "--no-save", "--no-audit", "--no-fund", receipt.tarball], { env });
 		const entry = join(prefix, "node_modules", "@iowarp", "clio-coder", "bin", "clio-coder.cjs");
 		const label = run(process.execPath, [entry, "--version"], { cwd: home, env, stdio: "pipe", encoding: "utf8" });
 		if (!label.includes(receipt.version)) throw new Error(`Installed version differs: ${label.trim()}`);

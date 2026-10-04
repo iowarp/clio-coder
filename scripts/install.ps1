@@ -254,6 +254,10 @@ function Install-ClioCoder {
 		if (Test-Path -LiteralPath $final) { $final = "$final-$(Get-Date -Format yyyyMMddHHmmss)-$PID" }
 		Move-Item -LiteralPath $staging -Destination $final
 		$entry = Join-Path $final "lib\node_modules\@iowarp\clio-coder\dist\cli\index.js"
+		if ($Options.IncludeClaudeSdk) {
+			& $node $entry tools install claude-sdk
+			if ($LASTEXITCODE -ne 0) { Fail "Claude SDK provisioning failed; previous launcher remains active." }
+		}
 		Ok "installed $PackageName $($pkg.version)"
 
 		$helper = Join-Path $final "lib\node_modules\@iowarp\clio-coder\scripts\native-install.cjs"
