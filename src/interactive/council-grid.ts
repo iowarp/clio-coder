@@ -14,7 +14,7 @@
  */
 
 import { truncateToWidth, wrapTextWithAnsi } from "../engine/tui.js";
-import { COUNCIL_SYNTHESIS_LABEL } from "./council.js";
+import { COUNCIL_SYNTHESIS_LABEL } from "../session-control/council.js";
 import type { ClioTheme, ClioToken } from "./theme/index.js";
 import { dotSep, GLYPH, innerDivider, isClioToken, padAnsi, paintHex } from "./theme/index.js";
 

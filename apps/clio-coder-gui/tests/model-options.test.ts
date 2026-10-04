@@ -7,7 +7,7 @@ import {
 	modelAfterTargetChange,
 	modelOptions,
 	OTHER_MODEL,
-} from "../client/pages/model-options.js";
+} from "../client/pages/model-picker-model.js";
 
 test("modelOptions offers the target's catalog, keeps a saved id it lacks, and ends with a typed escape", () => {
 	const options = modelOptions(["mercury-2.5", "mercury-2", "mercury-2.5"], "mercury-2", "mercury-2.5");

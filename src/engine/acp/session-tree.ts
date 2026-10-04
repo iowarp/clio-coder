@@ -1,3 +1,8 @@
+import type { AcpSessionTree } from "./types.js";
+
+export type { AcpSessionTree, AcpTreeNodeKind } from "./types.js";
+export { ACP_SESSION_FORK_METHOD, ACP_SESSION_SWITCH_TURN_METHOD, ACP_SESSION_TREE_METHOD } from "./types.js";
+
 /**
  * `_clio-coder/session/tree`: the terminal's /tree navigator as one bounded
  * projection, plus the two operations it leads to.
@@ -14,48 +19,10 @@
 
 import type { TreeSnapshot } from "../../domains/session/tree/navigator.js";
 
-export const ACP_SESSION_TREE_METHOD = "_clio-coder/session/tree";
-export const ACP_SESSION_SWITCH_TURN_METHOD = "_clio-coder/session/switch_turn";
-export const ACP_SESSION_FORK_METHOD = "_clio-coder/session/fork";
 /** Nodes one answer carries; the active path is always kept whole within it. */
 export const ACP_SESSION_TREE_MAX_NODES = 400;
 const MAX_PREVIEW_BYTES = 240;
 const MAX_LABEL_BYTES = 256;
-
-export type AcpTreeNodeKind =
-	| "user"
-	| "assistant"
-	| "tool_call"
-	| "tool_result"
-	| "system"
-	| "checkpoint"
-	| "compaction"
-	| "branch";
-
-export interface AcpSessionTree {
-	version: 1;
-	sessionId: string;
-	/** The turn the next request appends under; null for an empty session. */
-	leafId: string | null;
-	/** Where this session was forked from, when it was. */
-	parentSessionId: string | null;
-	parentTurnId: string | null;
-	/** Oldest first, so a parent always precedes its children. */
-	nodes: Array<{
-		id: string;
-		parentId: string | null;
-		kind: AcpTreeNodeKind;
-		at: string;
-		label: string | null;
-		preview: string | null;
-		/** On the path from the root to {@link AcpSessionTree.leafId}. */
-		active: boolean;
-		/** Structural rows (a compaction, a returned-from branch) are not a place to continue from. */
-		selectable: boolean;
-	}>;
-	/** True when nodes were cut at {@link ACP_SESSION_TREE_MAX_NODES}. */
-	truncated: boolean;
-}
 
 function bounded(text: string, maxBytes: number): string {
 	const oneLine = text.replace(/\s+/gu, " ").trim();

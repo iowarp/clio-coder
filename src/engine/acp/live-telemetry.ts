@@ -1,3 +1,11 @@
+import type { AcpTurnUsage, AcpWorkspaceView } from "./types.js";
+
+export type { AcpTurnUsage, AcpWorkspaceView } from "./types.js";
+
+import { ACP_PLAN_META_KEY, ACP_WORKSPACE_META_KEY } from "./types.js";
+
+export { ACP_PLAN_META_KEY, ACP_WORKSPACE_META_KEY } from "./types.js";
+
 /**
  * Pushed session telemetry: the standard `usage_update` and `plan` session
  * updates, and the workspace snapshot on `session_info_update`.
@@ -22,25 +30,12 @@ import { ACP_CONTEXT_META_KEY, projectContextLedger } from "./context-ledger.js"
 import { ACP_USAGE_META_KEY } from "./types.js";
 import type { AcpCostAggregate, AcpUsageRow } from "./usage.js";
 
-export const ACP_WORKSPACE_META_KEY = "clio-coder/workspace";
-export const ACP_PLAN_META_KEY = "clio-coder/plan";
 const MAX_PLAN_ENTRIES = 100;
 const MAX_TEXT_BYTES = 1024;
 /** A wedged git must not hold a prompt response; the frame still lands when the probe does. */
 const WORKSPACE_SETTLE_BOUND_MS = 2000;
 
 /** The per-turn accumulator the server keeps, structurally. */
-export interface AcpTurnUsage {
-	input: number;
-	output: number;
-	cacheRead: number;
-	cacheWrite: number;
-	reasoning: number;
-	totalTokens: number;
-	costUsd: number;
-	costProvenance: CostProvenance;
-	costProvenanceObserved: boolean;
-}
 
 /** `_meta["clio-coder/usage"]` on the prompt response and on in-turn `usage_update` frames: one shape, so the last frame equals the response. */
 export function turnUsageMeta(usage: AcpTurnUsage) {
@@ -54,19 +49,6 @@ export function turnUsageMeta(usage: AcpTurnUsage) {
 		costUsd: usage.costUsd,
 		costProvenance: usage.costProvenance,
 	};
-}
-
-export interface AcpWorkspaceView {
-	version: 1;
-	cwd: string;
-	isGit: boolean;
-	branch: string | null;
-	dirty: boolean | null;
-	ahead: number | null;
-	behind: number | null;
-	remoteUrl: string | null;
-	projectType: string;
-	capturedAt: string;
 }
 
 function bounded(text: string): string {

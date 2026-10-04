@@ -6,6 +6,14 @@ import inceptionRuntime from "../../src/domains/providers/runtimes/cloud/incepti
 import { draftTakenOutcome } from "../../src/domains/system-one/outcomes.js";
 import { setDiffusionFramesEnabled } from "../../src/engine/apis/diffusion-frames.js";
 import { registerClioApiProviders } from "../../src/engine/apis/index.js";
+import type { OverlayGeneralOpenersDeps } from "../../src/interactive/overlay-general-openers.js";
+import { createOverlayGeneralOpeners } from "../../src/interactive/overlay-general-openers.js";
+import {
+	type DraftOverlayState,
+	formatDraftOverlayBody,
+	type OpenDraftOverlayOptions,
+	takenDraft,
+} from "../../src/interactive/overlays/draft.js";
 import {
 	DRAFT_DEFAULT,
 	DRAFT_SYSTEM_PROMPT,
@@ -17,16 +25,8 @@ import {
 	isTemperatureRejection,
 	parseDraftArgs,
 	runDraftWithSamplerFallback,
-} from "../../src/interactive/drafts.js";
-import type { OverlayGeneralOpenersDeps } from "../../src/interactive/overlay-general-openers.js";
-import { createOverlayGeneralOpeners } from "../../src/interactive/overlay-general-openers.js";
-import {
-	type DraftOverlayState,
-	formatDraftOverlayBody,
-	type OpenDraftOverlayOptions,
-	takenDraft,
-} from "../../src/interactive/overlays/draft.js";
-import { runOutOfTurnRound } from "../../src/interactive/side-question.js";
+} from "../../src/session-control/drafts.js";
+import { runOutOfTurnRound } from "../../src/session-control/side-question.js";
 
 afterEach(() => setDiffusionFramesEnabled(false));
 

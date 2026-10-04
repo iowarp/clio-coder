@@ -12,7 +12,7 @@ import {
 	dispatchSlashCommand,
 	parseSlashCommand,
 	type SlashCommandContext,
-} from "../../src/interactive/slash-commands.js";
+} from "../../src/session-control/slash-commands.js";
 import { toolPromptHintsForNames } from "../../src/tools/builtin-tool-catalog.js";
 import type { ToolSpec } from "../../src/tools/registry.js";
 import { createTasksTool } from "../../src/tools/tasks.js";

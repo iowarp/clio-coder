@@ -9,6 +9,7 @@ import {
 	visibleWidth,
 	wrapTextWithAnsi,
 } from "../engine/tui.js";
+import type { TurnPreparationPhase } from "../session-control/turn-state.js";
 import { type DockEntry, dockAdaptiveRows, dockBodyRows, dockGrowthRows, dockTop } from "./dock.js";
 import { guardPastedEditorOperator } from "./editor-bash.js";
 import { type EditorRailState, renderEditorRail } from "./editor-rails.js";
@@ -29,7 +30,6 @@ import {
 } from "./theme/index.js";
 import { modelNickname, type TargetIdentity } from "./theme/labels.js";
 import { createComposerSurfacePainter } from "./theme/yolo-surface.js";
-import type { TurnPreparationPhase } from "./turn-state.js";
 
 /**
  * The slice of Pi's Editor the suggestion list needs and keeps private. Pi

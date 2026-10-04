@@ -16,9 +16,9 @@ import type { PromptsContract } from "../../src/domains/prompts/contract.js";
 import { loadFragments } from "../../src/domains/prompts/fragment-loader.js";
 import type { ProvidersContract } from "../../src/domains/providers/contract.js";
 import { AUTONOMY_LEVELS } from "../../src/domains/safety/autonomy.js";
-import { createTurnContext } from "../../src/interactive/turn-context.js";
-import type { TurnMiddleware } from "../../src/interactive/turn-middleware.js";
-import { type AgentRuntime, createTurnState } from "../../src/interactive/turn-state.js";
+import { createTurnContext } from "../../src/session-control/turn-context.js";
+import type { TurnMiddleware } from "../../src/session-control/turn-middleware.js";
+import { type AgentRuntime, createTurnState } from "../../src/session-control/turn-state.js";
 import { type IsolatedClioEnv, isolateClioEnv } from "../harness/scratch-env.js";
 
 // A headless `clio-coder run` has no operator: its permission listener denies

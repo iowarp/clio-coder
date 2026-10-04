@@ -11,8 +11,8 @@ import type { Component, TUI } from "../../src/engine/tui.js";
 import { stripTerminalSequences, visibleWidth } from "../../src/engine/tui.js";
 import { dockTop } from "../../src/interactive/dock.js";
 import { buildSettingItems, openSettingsOverlay } from "../../src/interactive/overlays/settings.js";
-import { parseSlashCommand } from "../../src/interactive/slash-commands.js";
 import { TargetWizardSurface } from "../../src/interactive/target-wizard.js";
+import { parseSlashCommand } from "../../src/session-control/slash-commands.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
 
 test("/config runs setup while /settings retains its areas", () => {

@@ -22,7 +22,7 @@ async function finished(h: Awaited<ReturnType<typeof harness>>, id: string) {
 }
 
 test("targets HTTP: real CLI use/remove, typed follow-up reads, redaction and offline routing parity", async () => {
-	const h = await harness();
+	const h = await harness({}, { scenario: "markdown", env: { CLIO_CODER_WEB_FIXTURE_ROUTE: "1" } });
 	try {
 		await seedSettings(h.home.path, h.home.env);
 		const configFile = join(h.home.path, "config/settings.yaml");
@@ -40,10 +40,14 @@ test("targets HTTP: real CLI use/remove, typed follow-up reads, redaction and of
 		const listed = await json(await h.request(`${path}/targets`), CliTargets);
 		assert.deepEqual(
 			listed.targets.map((target) => target.id),
-			["fixture-target"],
+			["fixture", "field-station"],
 		);
-		assert.equal(listed.targets[0]?.runtime, "openai-compat");
-		assert.ok(!JSON.stringify(listed).includes("fixture-header-secret"));
+		assert.equal(listed.targets[0]?.runtime, "openai-compatible");
+		assert.equal(listed.targets[0]?.health, "unknown");
+		assert.equal(listed.targets[0]?.url, null);
+		assert.equal(listed.targets[0]?.defaultModel, null);
+		assert.equal(listed.targets[0]?.contextWindow, null);
+		assert.doesNotMatch(JSON.stringify(listed), /fixture-header-secret|must-be-stripped|apiKey/);
 		const routing = await json(await h.request(`${path}/routing`), Routing);
 		const cliProfiles = await h.cli.run({ kind: "routing.profiles" }, cwd);
 		assert.deepEqual(routing.profiles, cliProfiles);
@@ -65,10 +69,14 @@ test("targets HTTP: real CLI use/remove, typed follow-up reads, redaction and of
 			assert.ok(op.status === "succeeded" && "kind" in op.result && op.result.kind === "targets");
 			assert.equal(op.result.exitCode, 0);
 			assert.equal(op.cancellable, false);
-			assert.equal(op.result.targets.targets.length, action === "use" ? 1 : 0);
+			assert.deepEqual(op.result.targets, listed);
 			const settings = await json(await h.request(`${path}/settings`), SettingsReport);
 			assert.equal(
 				settings.rows.find((row) => row.key === "chat.target")?.value,
+				action === "use" ? "fixture-target" : null,
+			);
+			assert.equal(
+				settings.rows.find((row) => row.key === "fleet.default.target")?.value,
 				action === "use" ? "fixture-target" : null,
 			);
 			if (action === "use") assert.deepEqual(op.result.settings, settings);
@@ -80,38 +88,41 @@ test("targets HTTP: real CLI use/remove, typed follow-up reads, redaction and of
 	}
 });
 
-test("targets HTTP: probe cancellation reaps its child and failed CLI exits expose only sanitized problems", async () => {
-	for (const scenario of ["slow", "fail"]) {
+test("targets HTTP: ACP probe reaps its child and failed administrative CLI exits expose only sanitized problems", async () => {
+	for (const scenario of ["probe", "fail"]) {
 		const h = await harness(
 			{},
 			{
+				scenario: "markdown",
 				env: {
+					CLIO_CODER_WEB_FIXTURE_ROUTE: "1",
 					CLIO_CODER_WEB_CLI: fileURLToPath(new URL("./fixtures/cli-command-child.mjs", import.meta.url)),
 					CLIO_CODER_WEB_COMMAND_SCENARIO: scenario,
 				},
 			},
 		);
 		try {
-			const log = join(h.home.path, "command.jsonl");
 			// The fixture's command log is relative to its canonical workspace.
 			await writeFile(join(h.home.path, "record-commands"), "");
 			const workspace = await json(await h.post("/api/workspaces", { path: h.home.path }), Workspace);
-			const accepted = await json(await h.post(`/api/workspaces/${workspace.id}/targets/local/probe`), Accepted);
-			if (scenario === "slow") {
-				let pid = 0;
-				for (let i = 0; i < 200; i++) {
-					const line = await readFile(log, "utf8").catch(() => "");
-					if (line) {
-						pid = JSON.parse(line.split("\n")[0] ?? "{}").pid;
-						break;
-					}
-					await setTimeout(10);
-				}
-				assert.ok(pid);
-				assert.equal((await h.post(`/api/operations/${accepted.operationId}/cancel`)).status, 200);
-				assert.equal((await finished(h, accepted.operationId)).status, "cancelled");
-				assert.match(await readFile(log, "utf8"), /SIGTERM/);
-				assert.throws(() => process.kill(pid, 0), { code: "ESRCH" });
+			const accepted = await json(
+				await h.post(`/api/workspaces/${workspace.id}/targets/local/${scenario === "probe" ? "probe" : "remove"}`),
+				Accepted,
+			);
+			if (scenario === "probe") {
+				const op = await finished(h, accepted.operationId);
+				assert.equal(op.status, "succeeded", JSON.stringify(op));
+				assert.ok(op.status === "succeeded" && "kind" in op.result && op.result.kind === "targets");
+				assert.equal(op.cancellable, true);
+				assert.match(op.result.message, /reachable.*5 ms/);
+				const frames = (await readFile(join(h.home.path, "acp.jsonl"), "utf8"))
+					.split("\n")
+					.filter(Boolean)
+					.map((line) => JSON.parse(line));
+				assert.ok(frames.some((frame) => frame.method === "_clio-coder/targets/probe"));
+				assert.ok(frames.some((frame) => frame.method === "_clio-coder/targets/list"));
+				assert.ok(!frames.some((frame) => frame.method === "session/new"));
+				assert.deepEqual(await h.supervisor.children.rows(), []);
 			} else {
 				const op = await finished(h, accepted.operationId);
 				assert.ok(op.status === "failed");

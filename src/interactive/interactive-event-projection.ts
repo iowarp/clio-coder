@@ -11,6 +11,14 @@ import { readDispatchScopeNotice } from "../core/dispatch-scope-notice.js";
 import type { SafeEventBus } from "../core/event-bus.js";
 import { routingChangeNotices } from "../core/session-routing.js";
 import { ToolNames } from "../core/tool-names.js";
+import type { ChatCancelOptions, ChatLoopEvent, QueuedChatMessage } from "../session-control/chat-loop.js";
+import {
+	loopBlockedAuditReason,
+	loopBlockedStopReason,
+	toolBudgetAuditReason,
+	toolBudgetStopReason,
+} from "../session-control/loop-guard-interrupt.js";
+import type { NoticeSource } from "../session-control/notice-source.js";
 import { chainStepToolCallId, displayToolCall, gatewayChainSteps } from "../tools/gateway-display.js";
 import { effectiveToolCall, gatewayChainReceipts } from "../tools/surface.js";
 import {
@@ -19,15 +27,7 @@ import {
 	restartRequiredNotice,
 	safetyBlockedNotice,
 } from "./bus-notices.js";
-import type { ChatCancelOptions, ChatLoopEvent, QueuedChatMessage } from "./chat-loop.js";
 import { classifyNoticeLevel } from "./footer/notifications.js";
-import {
-	loopBlockedAuditReason,
-	loopBlockedStopReason,
-	toolBudgetAuditReason,
-	toolBudgetStopReason,
-} from "./loop-guard-interrupt.js";
-import type { NoticeSource } from "./notice-source.js";
 import type { AgentStatus, TurnSummary } from "./status/index.js";
 
 export type InteractiveProjectionNoticeLevel = "info" | "success" | "warning" | "error";

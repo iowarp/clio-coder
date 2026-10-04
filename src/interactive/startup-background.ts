@@ -6,7 +6,7 @@ import { observeCacheDeployment } from "../domains/providers/cache-deployment.js
 import type { ProvidersContract, TargetStatus } from "../domains/providers/contract.js";
 import { canonicalEndpointKey, registerForegroundStream } from "../domains/providers/endpoint-capacity.js";
 import { type PrewarmRoundResult, runPrewarmRound } from "../engine/prewarm.js";
-import { recordStartupDiagnostic } from "./startup-diagnostics.js";
+import { recordStartupDiagnostic } from "../session-control/startup-diagnostics.js";
 
 interface StartupPreparation {
 	settings: Readonly<ClioSettings>;

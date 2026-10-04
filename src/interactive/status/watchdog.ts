@@ -1,4 +1,4 @@
-import type { WatchdogTier } from "./types.js";
+import type { WatchdogTier } from "../../session-control/status-types.js";
 
 export const TIER_THRESHOLDS_MS = {
 	tier1: 10_000,

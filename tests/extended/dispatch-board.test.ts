@@ -33,7 +33,7 @@ import { renderToolSubline } from "../../src/interactive/renderers/tool-executio
 import { renderWorkerEntryLines } from "../../src/interactive/renderers/worker-entry.js";
 import { clioTheme, GLYPH } from "../../src/interactive/theme/index.js";
 import { transcriptDetail } from "../../src/interactive/transcript-detail.js";
-import { createWorkerStream } from "../../src/interactive/worker-stream.js";
+import { createWorkerStream } from "../../src/session-control/worker-stream.js";
 import { createMonitorTool } from "../../src/tools/monitor.js";
 import { fixtureEnvelope, fixtureReceiptDraft } from "../harness/receipt.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";

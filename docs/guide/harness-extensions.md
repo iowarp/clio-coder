@@ -6,7 +6,7 @@ Harness extensions add executable capabilities to Clio: model-callable command t
 
 An extension declares its capabilities in `clio-coder-extension.yaml`, `.yml`, or `.json`. Clio discovers and validates declarations without importing or executing package code. Command tools become available in a new session after installation. Native workers can use a tool when their admitted recipe includes its qualified name; narrower profiles such as `minimal-local` exclude extension commands.
 
-Source: `src/domains/extensions/`, [harness-extensions.ts](../../src/tools/harness-extensions.ts), [slash-commands.ts](../../src/interactive/slash-commands.ts), and [extensions.ts](../../src/cli/extensions.ts).
+Source: `src/domains/extensions/`, [harness-extensions.ts](../../src/tools/harness-extensions.ts), [slash-commands.ts](../../src/session-control/slash-commands.ts), and [extensions.ts](../../src/cli/extensions.ts).
 
 ## Package manifest
 

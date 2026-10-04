@@ -8,6 +8,7 @@ import {
 	WorkerAskFacts,
 } from "../../contracts/permissions.js";
 import type { TimelineItem } from "../../contracts/sessions.js";
+import { ACP_DECISION_META_KEY, ACP_DISPATCH_PLAN_META_KEY, ACP_WORKER_ASK_META_KEY } from "../../contracts/wire.js";
 import type { AcpRequestPermissionResponse } from "../clio/http-shims.js";
 import { AppProblem } from "../services/problem.js";
 import { record } from "./client.js";
@@ -31,21 +32,21 @@ type Pending = {
  * UI only uses for a badge would park a turn forever.
  */
 function decisionFacts(meta: unknown): Permission["decision"] {
-	const value = record(meta)["clio-coder/decision"];
+	const value = record(meta)[ACP_DECISION_META_KEY];
 	if (value === undefined) return undefined;
 	const projected = Value.Clean(PermissionDecisionFacts, structuredClone(value));
 	return Value.Check(PermissionDecisionFacts, projected) ? projected : undefined;
 }
 /** The plan the agent admitted for a dispatch ask, read as leniently as the decision facts. */
 function dispatchPlan(meta: unknown): Permission["plan"] {
-	const value = record(meta)["clio-coder/dispatchPlan"];
+	const value = record(meta)[ACP_DISPATCH_PLAN_META_KEY];
 	if (value === undefined) return undefined;
 	const projected = Value.Clean(DispatchPlanFacts, structuredClone(value));
 	return Value.Check(DispatchPlanFacts, projected) ? projected : undefined;
 }
 /** The forwarded worker ask's provenance, read as leniently as the decision facts. */
 function workerAsk(meta: unknown): Permission["worker"] {
-	const value = record(meta)["clio-coder/workerAsk"];
+	const value = record(meta)[ACP_WORKER_ASK_META_KEY];
 	if (value === undefined) return undefined;
 	const projected = Value.Clean(WorkerAskFacts, structuredClone(value));
 	return Value.Check(WorkerAskFacts, projected) ? projected : undefined;

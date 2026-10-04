@@ -11,8 +11,8 @@ import { rehydrateChatPanelFromTurns } from "../../src/interactive/chat-renderer
 import { createDispatchBoardView, type DispatchBoardRow } from "../../src/interactive/dispatch-board.js";
 import { renderWorkerEntryLines } from "../../src/interactive/renderers/worker-entry.js";
 import { transcriptDetail } from "../../src/interactive/transcript-detail.js";
-import { readWorkerReceiptFactsForReplay } from "../../src/interactive/worker-receipts.js";
-import type { WorkerEntryState } from "../../src/interactive/worker-stream.js";
+import { readWorkerReceiptFactsForReplay } from "../../src/session-control/worker-receipts.js";
+import type { WorkerEntryState } from "../../src/session-control/worker-stream.js";
 import { fixtureEnvelope, fixtureReceiptDraft } from "../harness/receipt.js";
 
 function worker(

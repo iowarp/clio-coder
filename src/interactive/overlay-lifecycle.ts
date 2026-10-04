@@ -1,7 +1,7 @@
 import type { LibraryEntryKind } from "../domains/resources/index.js";
 import { TOOL_CALL_CARD_SITE } from "../domains/system-one/sites/tool-call.js";
+import { judgeDraftsAtSite } from "../session-control/drafts.js";
 import { appendInterviewRecord, appendNotice } from "./command-output.js";
-import { judgeDraftsAtSite } from "./drafts.js";
 import type { OverlayAskUserLifecycle } from "./overlay-ask-user-lifecycle.js";
 import { createOverlayAskUserLifecycle } from "./overlay-ask-user-lifecycle.js";
 import { createOverlayAuthLifecycle } from "./overlay-auth-lifecycle.js";
@@ -87,7 +87,7 @@ export interface OverlayLifecycleRuntimeDeps {
 	footer: import("./footer/dashboard.js").FooterDashboardPanel;
 	interactiveTickers: import("./interactive-tickers.js").InteractiveTickers;
 	busNoticeSink: Parameters<typeof import("./command-output.js").appendNotice>[2];
-	chatRenderer: { applyEvent(event: import("./chat-loop.js").ToolApprovalStateEvent): void };
+	chatRenderer: { applyEvent(event: import("../session-control/chat-loop.js").ToolApprovalStateEvent): void };
 	notify: (level: import("./interactive-subscriptions.js").InteractiveNoticeLevel, text: string, key?: string) => void;
 	terminal: Pick<import("../engine/tui.js").ProcessTerminal, "columns">;
 	dispatchBoard: ReturnType<typeof import("./dispatch-board.js").createDispatchBoardView>;
@@ -104,7 +104,7 @@ export interface OverlayLifecycleRuntimeDeps {
 	suspendTerminal: <T>(run: () => T) => T;
 	/** Keep the same terminal owner suspended until setup releases stdin. */
 	suspendTerminalAsync?: <T>(run: () => Promise<T>) => Promise<T>;
-	io: import("./slash-commands.js").RunIo;
+	io: import("../session-control/slash-commands.js").RunIo;
 	readStructuredEntries: (sessionId: string) => import("../domains/session/index.js").SessionEntry[];
 	announceTaskMemorySeedOffer: () => void;
 	/** Rescopes the footer's last-turn line when a session overlay changes the branch. */
@@ -113,11 +113,11 @@ export interface OverlayLifecycleRuntimeDeps {
 	editor: Pick<import("./clio-editor.js").ClioEditor, "getText" | "render" | "setText">;
 	/** Editor-side actions of the queue navigator; the queue itself comes from `app.chat`. */
 	queueNavigator?: {
-		toEditor(entry: import("./chat-loop.js").QueuedChatMessage): void;
-		sendNow(entry: import("./chat-loop.js").QueuedChatMessage): void;
+		toEditor(entry: import("../session-control/chat-loop.js").QueuedChatMessage): void;
+		sendNow(entry: import("../session-control/chat-loop.js").QueuedChatMessage): void;
 		restoreAll(): void;
 	};
-	getSlashContext: () => import("./slash-commands.js").SlashCommandContext;
+	getSlashContext: () => import("../session-control/slash-commands.js").SlashCommandContext;
 	/**
 	 * A worker permission or ask_user request parked waiting for the operator.
 	 * Wired to the desktop notification; absent hosts simply do not notify.

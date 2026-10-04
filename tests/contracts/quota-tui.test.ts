@@ -17,10 +17,10 @@ import { buildFooterDashboard } from "../../src/interactive/footer/dashboard.js"
 import type { OverlayKeyDeps } from "../../src/interactive/overlay-key-routing.js";
 import { routeOverlayKey } from "../../src/interactive/overlay-key-routing.js";
 import { createSlashCommandAutocompleteProvider } from "../../src/interactive/slash-autocomplete.js";
-import type { SlashCommandContext } from "../../src/interactive/slash-commands.js";
-import { dispatchSlashCommand, parseSlashCommand } from "../../src/interactive/slash-commands.js";
 import { openUsageOverlay } from "../../src/interactive/usage-overlay.js";
 import { createWelcomeDashboard } from "../../src/interactive/welcome-dashboard.js";
+import type { SlashCommandContext } from "../../src/session-control/slash-commands.js";
+import { dispatchSlashCommand, parseSlashCommand } from "../../src/session-control/slash-commands.js";
 
 function accounts(): UsageSnapshot[] {
 	return [

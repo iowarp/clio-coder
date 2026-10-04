@@ -6,8 +6,8 @@ import { assessFinishContract } from "../../src/domains/safety/finish-contract.j
 import type { SessionEntry } from "../../src/domains/session/entries.js";
 import { activeUserTaskAcceptance } from "../../src/domains/user-tasks/active-acceptance.js";
 import { validateEngineToolArguments } from "../../src/engine/ai.js";
-import { createAskUserToolPolicy, pendingSkillRequestPreamble } from "../../src/interactive/chat-loop-messages.js";
-import { assessToolProseLoop } from "../../src/interactive/tool-prose-loop.js";
+import { createAskUserToolPolicy, pendingSkillRequestPreamble } from "../../src/session-control/chat-loop-messages.js";
+import { assessToolProseLoop } from "../../src/session-control/tool-prose-loop.js";
 import { coordinatorDispatchParameters } from "../../src/tools/dispatch-schema.js";
 
 function gatewayCall(toolCallId: string, capability: string, args: Record<string, unknown>): unknown {

@@ -11,10 +11,10 @@ import type { SessionContract, SessionMeta } from "../../src/domains/session/con
 import type { MessageEntry, SessionEntry } from "../../src/domains/session/entries.js";
 import { createEngineAgent, setEngineSystemPrompt } from "../../src/engine/agent.js";
 import type { AgentMessage, Usage } from "../../src/engine/types.js";
-import { buildModelReplayAgentMessagesFromTurns } from "../../src/interactive/model-session-replay.js";
-import { createTurnContext, type TurnContextDeps } from "../../src/interactive/turn-context.js";
-import type { TurnMiddleware } from "../../src/interactive/turn-middleware.js";
-import { type AgentRuntime, createTurnState } from "../../src/interactive/turn-state.js";
+import { buildModelReplayAgentMessagesFromTurns } from "../../src/session-control/model-session-replay.js";
+import { createTurnContext, type TurnContextDeps } from "../../src/session-control/turn-context.js";
+import type { TurnMiddleware } from "../../src/session-control/turn-middleware.js";
+import { type AgentRuntime, createTurnState } from "../../src/session-control/turn-state.js";
 import { type IsolatedClioEnv, isolateClioEnv } from "../harness/scratch-env.js";
 
 function usage(input = 20281, output = 61): Usage {

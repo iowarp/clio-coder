@@ -1,5 +1,5 @@
 import { truncateToWidth, wrapTextWithAnsi } from "../../engine/tui.js";
-import type { RetryStatusPayload } from "../chat-loop.js";
+import type { RetryStatusPayload } from "../../session-control/chat-loop.js";
 import { clioTheme } from "../theme/index.js";
 import type { TranscriptDetailPolicy } from "../transcript-detail.js";
 import { renderNoticeRow } from "./notice.js";

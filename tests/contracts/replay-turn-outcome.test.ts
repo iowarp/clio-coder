@@ -12,8 +12,6 @@ import type { ProvidersContract } from "../../src/domains/providers/index.js";
 import type { SessionContract } from "../../src/domains/session/contract.js";
 import type { SessionEntry } from "../../src/domains/session/entries.js";
 import { stripTerminalSequences } from "../../src/engine/tui.js";
-import { type ChatLoopEvent, type CreateChatLoopDeps, createChatLoop } from "../../src/interactive/chat-loop.js";
-import { toolResultSummary } from "../../src/interactive/chat-loop-messages.js";
 import { createChatPanel } from "../../src/interactive/chat-panel.js";
 import { buildReplayAgentMessagesFromTurns, rehydrateChatPanelFromTurns } from "../../src/interactive/chat-renderer.js";
 import { appendOperatorCommand } from "../../src/interactive/command-output.js";
@@ -22,10 +20,12 @@ import {
 	type InteractiveSlashRuntimeDeps,
 } from "../../src/interactive/interactive-slash-runtime.js";
 import { createInteractiveSubscriptions } from "../../src/interactive/interactive-subscriptions.js";
-import { createTurnPersistence } from "../../src/interactive/turn-persistence.js";
-import type { ChatTurnState } from "../../src/interactive/turn-state.js";
 import type { WorkerRunEntryFields, WorkerSettledFields } from "../../src/interactive/worker-replay.js";
-import type { WorkerEntryState, WorkerReceiptFacts } from "../../src/interactive/worker-stream.js";
+import { type ChatLoopEvent, type CreateChatLoopDeps, createChatLoop } from "../../src/session-control/chat-loop.js";
+import { toolResultSummary } from "../../src/session-control/chat-loop-messages.js";
+import { createTurnPersistence } from "../../src/session-control/turn-persistence.js";
+import type { ChatTurnState } from "../../src/session-control/turn-state.js";
+import type { WorkerEntryState, WorkerReceiptFacts } from "../../src/session-control/worker-stream.js";
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
 
 const usage = {

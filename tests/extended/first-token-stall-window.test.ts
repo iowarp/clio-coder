@@ -8,7 +8,7 @@ import litellm from "../../src/domains/providers/runtimes/protocol/litellm.js";
 import { createEngineAgent } from "../../src/engine/agent.js";
 import { openAICompletionsApiProvider } from "../../src/engine/apis/openai-completions.js";
 import type { Model } from "../../src/engine/types.js";
-import { type ChatLoopEvent, createChatLoop } from "../../src/interactive/chat-loop.js";
+import { type ChatLoopEvent, createChatLoop } from "../../src/session-control/chat-loop.js";
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
 import { type IsolatedClioEnv, isolateClioEnv } from "../harness/scratch-env.js";
 

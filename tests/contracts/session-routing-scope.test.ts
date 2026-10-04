@@ -18,7 +18,7 @@ import { getRuntimeRegistry } from "../../src/domains/providers/registry.js";
 import type { SessionContract, SessionMeta } from "../../src/domains/session/contract.js";
 import type { SessionEntry } from "../../src/domains/session/entries.js";
 import { resumedSessionRoute } from "../../src/domains/session/resumed-route.js";
-import { type CreateChatLoopDeps, createChatLoop } from "../../src/interactive/chat-loop.js";
+import { type CreateChatLoopDeps, createChatLoop } from "../../src/session-control/chat-loop.js";
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
 

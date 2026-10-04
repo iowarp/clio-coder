@@ -13,7 +13,7 @@ import { registerEngineFauxProvider } from "../../src/engine/api-registry.js";
 import { estimateInputTokensFromContext } from "../../src/engine/apis/output-budget.js";
 import { resolvedRequestContext } from "../../src/engine/context.js";
 import type { AgentMessage, AgentTool } from "../../src/engine/types.js";
-import { runSideQuestion, SIDE_QUESTION_SYSTEM_PROMPT } from "../../src/interactive/side-question.js";
+import { runSideQuestion, SIDE_QUESTION_SYSTEM_PROMPT } from "../../src/session-control/side-question.js";
 
 const user: AgentMessage = { role: "user", content: "retained task", timestamp: 1 };
 const tool: AgentTool = {

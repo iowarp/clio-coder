@@ -11,8 +11,8 @@ import { TraceReader, TraceStore } from "../../src/domains/observability/trace-s
 import type { CostProvenance } from "../../src/domains/providers/index.js";
 import type { SessionContract } from "../../src/domains/session/contract.js";
 import type { AgentMessage } from "../../src/engine/types.js";
-import { createTurnPersistence } from "../../src/interactive/turn-persistence.js";
-import type { AgentRuntime, ChatTurnState } from "../../src/interactive/turn-state.js";
+import { createTurnPersistence } from "../../src/session-control/turn-persistence.js";
+import type { AgentRuntime, ChatTurnState } from "../../src/session-control/turn-state.js";
 
 it("session traces retain tokens but withhold an unpriced total, including mixed-price turns", () => {
 	const scratch = mkdtempSync(join(tmpdir(), "clio-coder-session-trace-cost-"));

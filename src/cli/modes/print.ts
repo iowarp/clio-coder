@@ -40,8 +40,8 @@ import { SESSION_COST_CEILING_EXIT_CODE, SESSION_COST_CEILING_REASON } from "../
 import { readPiMonoVersion } from "../../engine/pi-mono-names.js";
 import type { AgentMessage, ImageContent } from "../../engine/types.js";
 import type { HeadlessRunDeadline } from "../../entry/boot-options.js";
-import type { ChatLoop, ChatLoopEvent } from "../../interactive/chat-loop.js";
-import { type RunUsageSummary, sumRunUsage } from "../../interactive/chat-loop-messages.js";
+import type { ChatLoop, ChatLoopEvent } from "../../session-control/chat-loop.js";
+import { type RunUsageSummary, sumRunUsage } from "../../session-control/chat-loop-messages.js";
 import { TOOL_PLANES } from "../../tools/policy.js";
 import { effectiveToolCall, gatewayChainReceipts } from "../../tools/surface.js";
 import { flushRawStdout, writeRawStdout } from "../output-guard.js";
@@ -53,7 +53,9 @@ import {
 	settleDispatchedRuns,
 } from "./headless-dispatched-runs.js";
 import { createHeadlessJsonProjector } from "./json-stream.js";
-import { serializeJsonLine } from "./jsonl.js";
+import { writeFrame } from "./jsonl.js";
+import type { RunJsonMainFrame, RunJsonMainSessionFrame } from "./run-json-schema.js";
+import { RUN_JSON_SCHEMA_VERSION } from "./run-json-schema.js";
 
 export interface HeadlessSamplingOverrides {
 	temperature?: number;
@@ -87,7 +89,7 @@ export interface HeadlessMainAgentOptions {
 	mode?: "text" | "json";
 	jsonEvents?: "full" | "terminal";
 	steerChannel?: string;
-	getSessionHeader?: () => unknown | null;
+	getSessionHeader?: () => RunJsonMainSessionFrame | null;
 	shutdown?: HeadlessShutdownHooks;
 	/**
 	 * Also fail when all attempted tools failed without a block. Blocked runs
@@ -802,27 +804,54 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 		await sealReceipt(interruptedTerminal());
 	});
 
+	// Fresh sessions acquire their identity during submit, after admission notices
+	// and terminal turn_start can arrive. Keep those frames behind their header.
+	const pendingJsonFrames: RunJsonMainFrame[] = [];
 	let jsonHeaderWritten = false;
-	const writeJsonHeader = (allowFallback: boolean): void => {
+	const writeMainFrame = (frame: RunJsonMainFrame): void => {
+		if (!jsonHeaderWritten) pendingJsonFrames.push(frame);
+		else writeFrame(frame);
+	};
+	const writeJsonHeader = (allowFallback: boolean, allowPending = false): void => {
 		if (jsonHeaderWritten) return;
 		const header = options.getSessionHeader?.();
-		if (header === undefined || header === null) {
+		if (header !== undefined && header !== null) {
+			writeFrame(header);
+		} else {
 			if (!allowFallback) return;
 			const sessionId = chat.getSessionId();
-			if (sessionId === null) return;
-			jsonHeaderWritten = true;
-			writeRawStdout(serializeJsonLine({ type: "session", id: sessionId, timestamp: startedAt, cwd: process.cwd() }));
-			return;
+			if (sessionId === null) {
+				if (!allowPending || pendingJsonFrames.length === 0) return;
+				writeFrame({
+					type: "session",
+					schemaVersion: RUN_JSON_SCHEMA_VERSION,
+					mode: "main",
+					id: null,
+					pending: true,
+					timestamp: startedAt,
+					cwd: process.cwd(),
+				});
+			} else {
+				writeFrame({
+					type: "session",
+					schemaVersion: RUN_JSON_SCHEMA_VERSION,
+					mode: "main",
+					id: sessionId,
+					timestamp: startedAt,
+					cwd: process.cwd(),
+				});
+			}
 		}
 		jsonHeaderWritten = true;
-		writeRawStdout(serializeJsonLine(header));
+		for (const frame of pendingJsonFrames) writeFrame(frame);
+		pendingJsonFrames.length = 0;
 	};
 	let terminalTurnStartWritten = false;
 	const writeTerminalTurnStart = (): void => {
 		if (terminalTurnStartWritten) return;
 		terminalTurnStartWritten = true;
 		writeJsonHeader(true);
-		writeRawStdout(serializeJsonLine({ type: "turn_start", startedAt }));
+		writeMainFrame({ type: "turn_start", startedAt });
 	};
 	// A text-mode run has no `session` event, so the id a later `--session`
 	// would name is written to stderr the moment it exists. Stdout stays the
@@ -844,11 +873,11 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 				writeTerminalTurnStart();
 				writeJsonHeader(true);
 				if (TERMINAL_JSON_EVENT_TYPES.has(event.type)) {
-					for (const frame of frames) writeRawStdout(serializeJsonLine(frame));
+					for (const frame of frames) writeMainFrame(frame);
 				}
 			} else {
-				writeJsonHeader(false);
-				for (const frame of frames) writeRawStdout(serializeJsonLine(frame));
+				writeJsonHeader(true);
+				for (const frame of frames) writeMainFrame(frame);
 			}
 		}
 		if (mode === "text" && event.type === "notice" && event.surface === "transcript") {
@@ -880,8 +909,8 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 		if (mode === "json") {
 			// The terminal stream carries only the events a driver reads at the end.
 			if (jsonEvents === "terminal") return;
-			writeJsonHeader(false);
-			writeRawStdout(serializeJsonLine({ type: "dispatch_scope_notice", ...notice }));
+			writeJsonHeader(true);
+			writeMainFrame({ type: "dispatch_scope_notice", ...notice });
 			return;
 		}
 		process.stderr.write(`clio-coder run: ${notice.message}\n`);
@@ -915,6 +944,7 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 			},
 		);
 	} finally {
+		if (mode === "json") writeJsonHeader(true, true);
 		if (cleanupSteer) {
 			cleanupSteer();
 		}
@@ -928,13 +958,11 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 		: { live: [], undelivered: [] };
 	if (mode === "json" && (settlement.live.length > 0 || settlement.undelivered.length > 0)) {
 		writeJsonHeader(true);
-		writeRawStdout(
-			serializeJsonLine({
-				type: "dispatch_settlement",
-				live: settlement.live.map(projectDispatchedRunOutcome),
-				undelivered: settlement.undelivered.map(projectDispatchedRunOutcome),
-			}),
-		);
+		writeMainFrame({
+			type: "dispatch_settlement",
+			live: settlement.live.map(projectDispatchedRunOutcome),
+			undelivered: settlement.undelivered.map(projectDispatchedRunOutcome),
+		});
 	}
 	// The turn has settled. Nothing between here and the seal yields to a
 	// timer, so a deadline that has not fired by now never will, and one that
@@ -1043,16 +1071,14 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 
 	if (mode === "json" && jsonEvents === "terminal") {
 		writeJsonHeader(true);
-		writeRawStdout(
-			serializeJsonLine({
-				type: "turn_end",
-				startedAt,
-				endedAt,
-				exitCode,
-				text: result.sawTerminatingToolResult ? result.terminatingToolText : result.text,
-				...(terminal.failureMessage !== null ? { error: terminal.failureMessage } : {}),
-			}),
-		);
+		writeMainFrame({
+			type: "turn_end",
+			startedAt,
+			endedAt,
+			exitCode,
+			text: result.sawTerminatingToolResult ? result.terminatingToolText : result.text,
+			...(terminal.failureMessage !== null ? { error: terminal.failureMessage } : {}),
+		});
 	}
 
 	await sealReceipt(terminal);
@@ -1063,6 +1089,7 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 	if (stdoutMessage !== null) {
 		writeRawStdout(`${stdoutMessage}\n`);
 	}
+	if (mode === "json") writeJsonHeader(true, true);
 	await flushRawStdout();
 	return exitCode;
 }

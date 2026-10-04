@@ -5,6 +5,7 @@ import { type ClioSettings, readSettings } from "../core/config.js";
 import { readDispatchScopeNotice } from "../core/dispatch-scope-notice.js";
 import { loadDomains } from "../core/domain-loader.js";
 import { readFileArgsAsync } from "../core/file-references.js";
+import { readClioVersion } from "../core/package-root.js";
 import { withRunOverrides } from "../core/run-overrides.js";
 import { readStrictLayeredSettings } from "../core/settings-layers.js";
 import { getSharedBus } from "../core/shared-bus.js";
@@ -41,10 +42,14 @@ import type { ImageContent } from "../engine/types.js";
 import type { HeadlessRunDeadline } from "../entry/boot-options.js";
 import { assistantTextFromEvent } from "../tools/dispatch-event-text.js";
 import { isToolProfileName } from "../tools/profiles.js";
+import { WORKER_EXIT_PERMISSION_REQUIRED } from "../worker/spec-contract.js";
 import { parseRunCliArgs, type RunCliArgs } from "./args.js";
 import { runClioCommand } from "./clio.js";
 import { buildInitialMessage, readPipedStdin, shouldReadPipedStdin } from "./initial-message.js";
 import { projectDispatchJsonEvent } from "./modes/json-stream.js";
+import { writeFrame } from "./modes/jsonl.js";
+import type { RunJsonAgentFrame } from "./modes/run-json-schema.js";
+import { RUN_JSON_SCHEMA_VERSION } from "./modes/run-json-schema.js";
 import { flushRawStdout, restoreStdout, takeOverStdout } from "./output-guard.js";
 import { formatDispatchHumanOutput } from "./run-output.js";
 import { setupSteerChannel } from "./steer-channel.js";
@@ -75,7 +80,8 @@ Flags:
   --frequency-penalty <N>   one-run frequency penalty override
   --repeat-penalty <N>      one-run repeat penalty override
   --max-context-tokens <N>  cap this run's context budget without enlarging the server window
-  --json                    stream JSONL events for the main-agent path; dispatch streams events and receipt JSON
+  --json                    stream JSONL frames, one JSON object per line; the first is a "session" header
+                           carrying schemaVersion, and with --agent the last is {"type":"receipt",...}
   --json-events <mode>      full: progress and final answer in turn_end.message.content
                            terminal: accounting and final answer in turn_end.text
                            implies --json; refused with --agent
@@ -131,6 +137,11 @@ running bash tool's process group is signalled, and the receipt is sealed with
 outcome "timed_out" before the process exits 124, the code timeout(1) uses. An
 external SIGTERM still seals "canceled" with exit 143. A timeout during boot,
 before the turn starts, exits 124 with no receipt. Main agent only.
+
+With --agent the exit code is the dispatch receipt's: 0 on success, 2 for a
+usage or admission error, 3 when the worker stopped on a refused permission
+(outcome "failed" with permission_required detail), 4 when the session cost ceiling ended the
+run, and 1 for every other failure.
 
 A turn that ends by writing an artifact (plan/review/report) has no assistant
 message after it, because writing the artifact is the answer. Text mode prints
@@ -290,7 +301,7 @@ type HeadlessSlashPreflight = { refusal: string } | { display: string } | null;
 
 async function headlessSlashPreflight(task: string): Promise<HeadlessSlashPreflight> {
 	if (!task.trim().startsWith("/")) return null;
-	const { parseSlashCommand } = await import("../interactive/slash-commands.js");
+	const { parseSlashCommand } = await import("../session-control/slash-commands.js");
 	const command = parseSlashCommand(task);
 	if (command.kind === "skill-invocation" || command.kind === "unknown" || command.kind === "empty") return null;
 	if (command.kind !== "unknown-command") {
@@ -329,7 +340,7 @@ export async function runClioRun(
 		},
 		async () => {
 			if (parsed.help) {
-				process.stdout.write(HELP);
+				(parsed.json ? process.stderr : process.stdout).write(HELP);
 				return 0;
 			}
 			for (const diagnostic of parsed.diagnostics) {
@@ -418,7 +429,7 @@ export async function runClioRun(
 						return 2;
 					}
 					if (preflight !== null) {
-						process.stdout.write(`${preflight.display}\n`);
+						(parsed.json ? process.stderr : process.stdout).write(`${preflight.display}\n`);
 						return 0;
 					}
 					// An explicit --target override is a one-run target; a missing id is an
@@ -469,11 +480,18 @@ export async function runClioRun(
 					}
 				}
 
-				return await runDispatch(parsed as RunCliArgs & { agentId: string }, assembled.prompt, {
-					...options,
-					noSkills,
-					skillPaths,
-				});
+				if (parsed.json) takeOverStdout();
+				try {
+					const code = await runDispatch(parsed as RunCliArgs & { agentId: string }, assembled.prompt, {
+						...options,
+						noSkills,
+						skillPaths,
+					});
+					if (parsed.json) await flushRawStdout();
+					return code;
+				} finally {
+					if (parsed.json) restoreStdout();
+				}
 			} finally {
 				deadline?.settle();
 			}
@@ -642,6 +660,28 @@ async function runDispatch(
 	}
 	if (memorySection.length > 0) dispatchReq.memorySection = memorySection;
 
+	// Narrower than the writer's parameter so a frame built here is checked
+	// against the agent-mode stream, not the main-agent one.
+	const writeAgentFrame = (frame: RunJsonAgentFrame): void => writeFrame(frame);
+	// The header is the stream's first line. A scope notice can fire during
+	// admission, before the run id exists, so the header goes out with whichever
+	// comes first and carries the run id only when it is known.
+	let jsonHeaderWritten = false;
+	const writeJsonHeader = (runId?: string): void => {
+		if (!parsed.json || jsonHeaderWritten) return;
+		jsonHeaderWritten = true;
+		writeAgentFrame({
+			type: "session",
+			schemaVersion: RUN_JSON_SCHEMA_VERSION,
+			mode: "agent",
+			agentId: dispatchReq.agentId,
+			timestamp: new Date().toISOString(),
+			cwd: process.cwd(),
+			clioCoderVersion: readClioVersion(),
+			...(runId !== undefined ? { runId } : {}),
+		});
+	};
+
 	let cleanupSteer: (() => void) | undefined;
 	// A dispatch's scope entry can change what the worker may touch without saying
 	// so in the request, so the headless run reports it where an operator would see
@@ -649,11 +689,14 @@ async function runDispatch(
 	const unsubscribeScopeNotices = getSharedBus().on(BusChannels.DispatchScopeNotice, (payload) => {
 		const notice = readDispatchScopeNotice(payload);
 		if (notice === null) return;
-		if (parsed.json) process.stdout.write(`${JSON.stringify({ type: "dispatch_scope_notice", ...notice })}\n`);
-		else process.stderr.write(`clio-coder run: ${notice.message}\n`);
+		if (parsed.json) {
+			writeJsonHeader();
+			writeAgentFrame({ type: "dispatch_scope_notice", ...notice });
+		} else process.stderr.write(`clio-coder run: ${notice.message}\n`);
 	});
 	try {
 		const handle = await dispatch.dispatch(dispatchReq);
+		writeJsonHeader(handle.runId);
 		if (parsed.steerChannel) {
 			cleanupSteer = setupSteerChannel(parsed.steerChannel, (line) => {
 				try {
@@ -676,7 +719,7 @@ async function runDispatch(
 		let lastAssistantText = "";
 		for await (const event of handle.events) {
 			if (parsed.json) {
-				process.stdout.write(`${JSON.stringify(projectDispatchJsonEvent(event))}\n`);
+				writeAgentFrame(projectDispatchJsonEvent(event));
 				continue;
 			}
 			const e = event as { type?: string; text?: string };
@@ -701,7 +744,7 @@ async function runDispatch(
 			cleanupSteer = undefined;
 		}
 		if (parsed.json) {
-			process.stdout.write(`\n${JSON.stringify(receipt, null, 2)}\n`);
+			writeAgentFrame({ type: "receipt", receipt });
 		} else {
 			const answer = lastAssistantText.length > 0 ? lastAssistantText : accumulatedText.trim();
 			process.stdout.write(formatDispatchHumanOutput(answer, receipt));
@@ -749,7 +792,14 @@ function shadowStandInCommand(parsed: RunCliArgs): string {
 	return parts.join(" ");
 }
 
+/** Exit codes a dispatch receipt passes to the shell unchanged; every other failure is 1. */
+const PASS_THROUGH_EXIT_CODES: ReadonlySet<number> = new Set([
+	0,
+	2,
+	WORKER_EXIT_PERMISSION_REQUIRED,
+	SESSION_COST_CEILING_EXIT_CODE,
+]);
+
 function mapExitCode(r: RunReceipt): number {
-	if (r.exitCode === 0) return 0;
-	return r.exitCode === 2 || r.exitCode === SESSION_COST_CEILING_EXIT_CODE ? r.exitCode : 1;
+	return PASS_THROUGH_EXIT_CODES.has(r.exitCode) ? r.exitCode : 1;
 }

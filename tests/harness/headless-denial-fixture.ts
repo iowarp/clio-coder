@@ -4,7 +4,7 @@ import { HEADLESS_PERMISSION_DENIED_REASON } from "../../src/core/headless-permi
 import type { ProvidersContract } from "../../src/domains/providers/contract.js";
 import type { AgentEvent, AgentMessage } from "../../src/engine/types.js";
 import { createWorkerSafety } from "../../src/engine/worker-tools.js";
-import { type ChatLoopEvent, type CreateChatLoopDeps, createChatLoop } from "../../src/interactive/chat-loop.js";
+import { type ChatLoopEvent, type CreateChatLoopDeps, createChatLoop } from "../../src/session-control/chat-loop.js";
 import { bashTool } from "../../src/tools/bash.js";
 import { createRegistry } from "../../src/tools/registry.js";
 

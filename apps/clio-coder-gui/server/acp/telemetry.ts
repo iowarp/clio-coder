@@ -8,6 +8,14 @@ import {
 	SessionPlan,
 	SessionWorkspace,
 } from "../../contracts/session-telemetry.js";
+import {
+	ACP_CONTEXT_META_KEY,
+	ACP_EGGS_META_KEY,
+	ACP_PLAN_META_KEY,
+	ACP_TRUST_META_KEY,
+	ACP_USAGE_META_KEY,
+	ACP_WORKSPACE_META_KEY,
+} from "../../contracts/wire.js";
 import { AppProblem } from "../services/problem.js";
 
 const record = (value: unknown): Record<string, unknown> =>
@@ -22,27 +30,27 @@ export function projectTelemetryValue<S extends TSchema>(schema: S, value: unkno
 export function sessionResultTelemetry(result: unknown): SessionTelemetry {
 	const meta = record(record(result)._meta);
 	return {
-		...(meta["clio-coder/workspace"] !== undefined
-			? { workspace: projectTelemetryValue(SessionWorkspace, meta["clio-coder/workspace"]) }
+		...(meta[ACP_WORKSPACE_META_KEY] !== undefined
+			? { workspace: projectTelemetryValue(SessionWorkspace, meta[ACP_WORKSPACE_META_KEY]) }
 			: {}),
-		...(meta["clio-coder/trust"] !== undefined
-			? { trust: projectTelemetryValue(ProjectTrust, meta["clio-coder/trust"]) }
+		...(meta[ACP_TRUST_META_KEY] !== undefined
+			? { trust: projectTelemetryValue(ProjectTrust, meta[ACP_TRUST_META_KEY]) }
 			: {}),
 	};
 }
 
 export function sessionUpdateTelemetry(update: Record<string, unknown>): SessionTelemetry | null {
 	const meta = record(update._meta);
-	if (update.sessionUpdate === "session_info_update" && meta["clio-coder/eggs"] !== undefined)
-		return { eggs: projectTelemetryValue(ActiveEggs, meta["clio-coder/eggs"]) };
+	if (update.sessionUpdate === "session_info_update" && meta[ACP_EGGS_META_KEY] !== undefined)
+		return { eggs: projectTelemetryValue(ActiveEggs, meta[ACP_EGGS_META_KEY]) };
 	if (update.sessionUpdate === "usage_update") {
-		const usage = record(meta["clio-coder/usage"]);
+		const usage = record(meta[ACP_USAGE_META_KEY]);
 		return {
 			usage: projectTelemetryValue(LiveUsage, {
 				used: update.used,
 				size: update.size,
 				...(update.cost !== undefined ? { cost: update.cost } : {}),
-				...(meta["clio-coder/context"] !== undefined ? { context: meta["clio-coder/context"] } : {}),
+				...(meta[ACP_CONTEXT_META_KEY] !== undefined ? { context: meta[ACP_CONTEXT_META_KEY] } : {}),
 				...(usage.session != null ? { session: usage.session } : {}),
 			}),
 		};
@@ -51,10 +59,10 @@ export function sessionUpdateTelemetry(update: Record<string, unknown>): Session
 		if (!Array.isArray(update.entries)) throw new AppProblem("upstream_acp", "Clio returned invalid plan entries.");
 		return {
 			plan: projectTelemetryValue(SessionPlan, {
-				title: record(meta["clio-coder/plan"]).title ?? null,
+				title: record(meta[ACP_PLAN_META_KEY]).title ?? null,
 				entries: update.entries.map((value, index) => {
 					const entry = record(value),
-						detail = record(record(entry._meta)["clio-coder/plan"]);
+						detail = record(record(entry._meta)[ACP_PLAN_META_KEY]);
 					return {
 						id: detail.id ?? String(index),
 						content: entry.content,
@@ -62,11 +70,11 @@ export function sessionUpdateTelemetry(update: Record<string, unknown>): Session
 						reason: detail.reason ?? null,
 					};
 				}),
-				truncated: record(meta["clio-coder/plan"]).truncated === true,
+				truncated: record(meta[ACP_PLAN_META_KEY]).truncated === true,
 			}),
 		};
 	}
-	if (update.sessionUpdate === "session_info_update" && meta["clio-coder/workspace"] !== undefined)
-		return { workspace: projectTelemetryValue(SessionWorkspace, meta["clio-coder/workspace"]) };
+	if (update.sessionUpdate === "session_info_update" && meta[ACP_WORKSPACE_META_KEY] !== undefined)
+		return { workspace: projectTelemetryValue(SessionWorkspace, meta[ACP_WORKSPACE_META_KEY]) };
 	return null;
 }

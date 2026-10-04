@@ -27,18 +27,9 @@ import type { UserTaskAcceptance } from "../domains/user-tasks/acceptance.js";
 import type { UserTasksStore } from "../domains/user-tasks/store.js";
 import { stripTerminalSequences } from "../engine/tui.js";
 import type { ImageContent } from "../engine/types.js";
-import type { AskUserHandler } from "../tools/ask-user.js";
-import type { ChatLoop } from "./chat-loop.js";
-import { type ChatPanel, createChatPanel } from "./chat-panel.js";
-import { rehydrateChatPanelFromTurns } from "./chat-renderer.js";
-import { runCompactWithNotice } from "./command-fallbacks.js";
-import { appendNotice, appendOperatorAside, appendOperatorCommand, appendReferenceCard } from "./command-output.js";
-import { renderSessionHtml } from "./export-html/index.js";
-import { dateLocal } from "./format-time.js";
-import { withContinuityReplay } from "./model-session-replay.js";
-import { type OracleDigestSources, oracleBriefingFromEntries } from "./oracle.js";
-import type { PendingModelScope } from "./overlays/model-scope.js";
-import { renderDoctorReport } from "./renderers/doctor-report.js";
+import type { ChatLoop } from "../session-control/chat-loop.js";
+import { withContinuityReplay } from "../session-control/model-session-replay.js";
+import { type OracleDigestSources, oracleBriefingFromEntries } from "../session-control/oracle.js";
 import {
 	type ContextClearCommandOptions,
 	type CouncilDispatchOutcome,
@@ -51,8 +42,17 @@ import {
 	type SlashCommandContext,
 	type SlashCommandDispatchResult,
 	type TaskMemorySeedCommandResult,
-} from "./slash-commands.js";
-import type { WorkerEntryState } from "./worker-stream.js";
+} from "../session-control/slash-commands.js";
+import type { WorkerEntryState } from "../session-control/worker-stream.js";
+import type { AskUserHandler } from "../tools/ask-user.js";
+import { type ChatPanel, createChatPanel } from "./chat-panel.js";
+import { rehydrateChatPanelFromTurns } from "./chat-renderer.js";
+import { runCompactWithNotice } from "./command-fallbacks.js";
+import { appendNotice, appendOperatorAside, appendOperatorCommand, appendReferenceCard } from "./command-output.js";
+import { renderSessionHtml } from "./export-html/index.js";
+import { dateLocal } from "./format-time.js";
+import type { PendingModelScope } from "./overlays/model-scope.js";
+import { renderDoctorReport } from "./renderers/doctor-report.js";
 
 const EXPORT_RENDER_WIDTH = 100;
 

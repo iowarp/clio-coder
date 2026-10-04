@@ -1,3 +1,26 @@
+import {
+	ACP_SESSION_TRUST_METHOD,
+	AcpSettingsCapability,
+	AcpTargetsCapability,
+	AcpCommandsCapability as CommandsCapability,
+	AcpDecisionCapability as DecisionCapability,
+	AcpEventsCapability as EventsCapability,
+	AcpQueueCapability as QueueCapability,
+	AcpShellCapability as ShellCapability,
+	AcpSteeringCapability as SteeringCapability,
+	AcpToolProgressCapability as ToolProgressCapability,
+} from "./wire.js";
+
+export {
+	CommandsCapability,
+	DecisionCapability,
+	EventsCapability,
+	QueueCapability,
+	ShellCapability,
+	SteeringCapability,
+	ToolProgressCapability,
+};
+
 import { type Static, Type } from "typebox";
 import { ArtifactsCapability } from "./artifacts.js";
 import { AsideCapability } from "./aside.js";
@@ -11,7 +34,6 @@ import { InterviewCapability } from "./interviews.js";
 import { UsageCapability } from "./usage.js";
 
 const closed = { additionalProperties: false };
-const method = Type.String({ maxLength: 128 });
 
 /**
  * What the agent announced at `initialize`, projected to the parts this app
@@ -24,74 +46,6 @@ const method = Type.String({ maxLength: 128 });
  * nothing under `_meta`, and the UI must degrade to the v1 surface rather than
  * refuse to open a session.
  */
-export const SteeringCapability = Type.Object(
-	{
-		version: Type.Literal(1),
-		main: Type.Boolean(),
-		dispatch: Type.Boolean(),
-		modes: Type.Array(Type.String({ maxLength: 32 }), { maxItems: 8 }),
-		interrupt: Type.Boolean(),
-		methods: Type.Object({ steer: method, queue: method, clear: method, interrupt: method, dispatch: method }, closed),
-	},
-	closed,
-);
-export type SteeringCapability = Static<typeof SteeringCapability>;
-export const CommandsCapability = Type.Object(
-	{
-		version: Type.Literal(1),
-		list: method,
-		invoke: method,
-		count: Type.Optional(Type.Integer({ minimum: 0 })),
-		promptTurns: Type.Optional(Type.Boolean()),
-	},
-	closed,
-);
-export type CommandsCapability = Static<typeof CommandsCapability>;
-export const ToolProgressCapability = Type.Object(
-	{
-		version: Type.Literal(1),
-		minIntervalMs: Type.Integer({ minimum: 0 }),
-		maxFramesPerCall: Type.Integer({ minimum: 0 }),
-		maxContentBytes: Type.Integer({ minimum: 0 }),
-	},
-	closed,
-);
-export type ToolProgressCapability = Static<typeof ToolProgressCapability>;
-/** Per-entry queue operations and the notification that pushes the queue after every change. */
-export const QueueCapability = Type.Object(
-	{
-		version: Type.Literal(1),
-		edit: method,
-		ops: Type.Array(Type.String({ maxLength: 32 }), { maxItems: 16 }),
-		notification: method,
-	},
-	closed,
-);
-export type QueueCapability = Static<typeof QueueCapability>;
-/** The operator's `!` line. `timeoutMs` is how long the engine lets one line run. */
-export const ShellCapability = Type.Object(
-	{ version: Type.Literal(1), run: method, timeoutMs: Type.Integer({ minimum: 1 }) },
-	closed,
-);
-export type ShellCapability = Static<typeof ShellCapability>;
-export const DecisionCapability = Type.Object(
-	{
-		version: Type.Literal(1),
-		meta: Type.String({ maxLength: 64 }),
-		options: Type.Array(Type.String({ maxLength: 128 }), { maxItems: 8 }),
-	},
-	closed,
-);
-export type DecisionCapability = Static<typeof DecisionCapability>;
-export const EventsCapability = Type.Object(
-	{
-		version: Type.Literal(1),
-		notification: Type.String({ maxLength: 64 }),
-		kinds: Type.Array(Type.String({ maxLength: 64 }), { maxItems: 16 }),
-		workspaceInstanceId: Type.String({ maxLength: 128 }),
-	},
-	closed,
-);
 export const SessionCapability = Type.Object(
 	{
 		close: Type.Boolean(),
@@ -105,10 +59,10 @@ export const SessionCapability = Type.Object(
 export const AgentCapabilities = Type.Object(
 	{
 		loadSession: Type.Boolean(),
-		trustRefresh: Type.Optional(Type.Literal("_clio-coder/session/trust")),
+		trustRefresh: Type.Optional(Type.Literal(ACP_SESSION_TRUST_METHOD)),
 		session: Type.Optional(SessionCapability),
-		settings: Type.Optional(Type.Object({ get_safe: Type.Boolean(), patch_safe: Type.Boolean() }, closed)),
-		targets: Type.Optional(Type.Object({ list: Type.Boolean(), probe: Type.Boolean() }, closed)),
+		settings: Type.Optional(AcpSettingsCapability),
+		targets: Type.Optional(AcpTargetsCapability),
 		steering: Type.Optional(SteeringCapability),
 		/** Edit, reorder and send one waiting message. */
 		queue: Type.Optional(QueueCapability),

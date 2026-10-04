@@ -1,6 +1,6 @@
 import type { Component } from "../engine/tui.js";
 import { truncateToWidth } from "../engine/tui.js";
-import type { QueuedChatMessage } from "./chat-loop.js";
+import type { QueuedChatMessage } from "../session-control/chat-loop.js";
 import { formatQueueAge, queueEntryMarks, queueSlotWord } from "./overlays/queue-navigator.js";
 import { clioTheme, frame, GLYPH } from "./theme/index.js";
 

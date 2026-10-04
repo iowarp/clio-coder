@@ -1,3 +1,10 @@
+import type { AcpErrorDetail } from "./types.js";
+
+export type { AcpErrorDetail } from "./types.js";
+
+import { ACP_ERROR_META_KEY } from "./types.js";
+
+export { ACP_ERROR_META_KEY } from "./types.js";
 export class AcpError extends Error {
 	readonly code: string;
 	readonly data?: unknown;
@@ -65,7 +72,6 @@ export const ACP_INTERNAL_ERROR_MESSAGE = "internal error";
 export const ACP_METHOD_NOT_FOUND_MESSAGE = "method not found";
 
 /** `_meta` key carrying Clio's machine-readable error detail (CONTRACT C001 §0). */
-export const ACP_ERROR_META_KEY = "clio-coder/error";
 
 /** Version of the `clio-coder/error` payload shape. */
 export const ACP_ERROR_META_VERSION = 1;
@@ -75,11 +81,6 @@ export const ACP_ERROR_META_VERSION = 1;
  * branches on; `reason` and `supported` are the two optional refinements the
  * profile defines (admission reason, supported protocol versions).
  */
-export interface AcpErrorDetail {
-	code: string;
-	reason?: string;
-	supported?: number[];
-}
 
 /**
  * A failure whose JSON-RPC code and machine-readable detail the thrower chooses.

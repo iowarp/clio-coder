@@ -711,6 +711,7 @@ test("conversation routing takes reported current values and keeps target change
 	assert.ok(draft);
 	const next = { target: "other-target", model: "next-model", thinking: "low" };
 	assert.deepEqual(conversationChanges(next, draft), [
+		{ configId: "target", value: "other-target" },
 		{ configId: "model", value: "next-model" },
 		{ configId: "thinkingLevel", value: "low" },
 	]);

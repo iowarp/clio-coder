@@ -10,10 +10,10 @@ import type { CompiledSessionPrompt } from "../../src/domains/prompts/compiler.j
 import type { PromptsContract } from "../../src/domains/prompts/contract.js";
 import type { ProvidersContract } from "../../src/domains/providers/contract.js";
 import type { SessionContract, SessionMeta } from "../../src/domains/session/contract.js";
-import { type CreateChatLoopDeps, createChatLoop } from "../../src/interactive/chat-loop.js";
-import { createTurnContext } from "../../src/interactive/turn-context.js";
-import type { TurnMiddleware } from "../../src/interactive/turn-middleware.js";
-import { type AgentRuntime, createTurnState } from "../../src/interactive/turn-state.js";
+import { type CreateChatLoopDeps, createChatLoop } from "../../src/session-control/chat-loop.js";
+import { createTurnContext } from "../../src/session-control/turn-context.js";
+import type { TurnMiddleware } from "../../src/session-control/turn-middleware.js";
+import { type AgentRuntime, createTurnState } from "../../src/session-control/turn-state.js";
 
 function compiled(systemPrompt: string): CompiledSessionPrompt {
 	return {

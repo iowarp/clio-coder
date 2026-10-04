@@ -33,9 +33,9 @@ import { ListOverlayView } from "../../src/interactive/overlays/list-overlay.js"
 import { ModelOverlayView } from "../../src/interactive/overlays/model-selector.js";
 import { openSessionOverlay } from "../../src/interactive/overlays/session-selector.js";
 import { SettingsCenter } from "../../src/interactive/overlays/settings.js";
-import type { SlashCommandContext } from "../../src/interactive/slash-commands.js";
 import { createProcessTerminalLease } from "../../src/interactive/terminal-lease.js";
 import { ViewOverlayView } from "../../src/interactive/view/view-overlay.js";
+import type { SlashCommandContext } from "../../src/session-control/slash-commands.js";
 import { libraryApplyFixture, libraryPlanFixture } from "../harness/library-plan-fixture.js";
 
 class KeyboardTerminal implements Terminal {

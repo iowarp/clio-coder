@@ -4,7 +4,7 @@ import { test } from "node:test";
 import { type HeadlessShutdownHooks, runHeadlessMainAgent } from "../../src/cli/modes/print.js";
 import { verifyReceiptIntegrity } from "../../src/domains/dispatch/receipt-integrity.js";
 import type { AgentMessage } from "../../src/engine/types.js";
-import type { ChatLoop, ChatLoopEvent } from "../../src/interactive/chat-loop.js";
+import type { ChatLoop, ChatLoopEvent } from "../../src/session-control/chat-loop.js";
 import { readRunJournal } from "../harness/run-journal.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
 
@@ -343,6 +343,15 @@ for (const scenario of [
 					shutdown,
 				});
 				if (shuttingDown) await drain?.();
+				if (mode !== "text") {
+					const frames = stdout
+						.trim()
+						.split("\n")
+						.map((line) => JSON.parse(line));
+					strictEqual(frames[0].type, "session");
+					strictEqual(frames[0].schemaVersion, 1);
+					strictEqual(frames[0].mode, "main");
+				}
 				const journal = readRunJournal(join(scratch.dir, "state"));
 				ok(journal);
 				strictEqual(journal.receipts.length, 1);

@@ -21,8 +21,9 @@ import type { UsageSnapshot } from "../domains/quota/types.js";
 import { sanitizeCallTargetText } from "../domains/safety/call-target.js";
 import type { Component } from "../engine/tui.js";
 import { truncateToWidth, visibleWidth, wrapTextWithAnsi } from "../engine/tui.js";
+import { COUNCIL_SYNTHESIS_LABEL } from "../session-control/council.js";
+import { isHelperRun } from "../session-control/worker-stream.js";
 import { formatWorkerContextMeter } from "./context-meter.js";
-import { COUNCIL_SYNTHESIS_LABEL } from "./council.js";
 import type { CouncilGroupView, CouncilMemberView } from "./council-grid.js";
 import { councilGroupBody, councilIslandLines } from "./council-grid.js";
 import { formatFooterTokens } from "./footer-panel.js";
@@ -46,7 +47,6 @@ import {
 } from "./theme/index.js";
 import { fitIdentityLabel } from "./theme/labels.js";
 import { workerActivityWords } from "./worker-activity.js";
-import { isHelperRun } from "./worker-stream.js";
 
 export type DispatchBoardStatus = ObservabilityRunSummary["status"];
 

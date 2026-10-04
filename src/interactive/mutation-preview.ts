@@ -20,6 +20,7 @@ import { readFileSync } from "node:fs";
 import { readFile, stat } from "node:fs/promises";
 import { ToolNames } from "../core/tool-names.js";
 import { sanitizeCallTargetText, sanitizeMultilineDisplayText } from "../domains/safety/call-target.js";
+import type { MutationFacts } from "../session-control/approval-request-view.js";
 import {
 	applyEditsToNormalizedContent,
 	type Edit,
@@ -41,21 +42,7 @@ export const MUTATION_PREVIEW_VISIBLE_ROWS = 16;
  */
 export const MUTATION_PREVIEW_MAX_CHARS = 262_144;
 
-/**
- * Facts about a parked mutation that may cross every process boundary: what
- * kind it is, how big it is, and the digest that binds a preview to it. No part
- * of the mutation text appears here, which is why this is the shape the
- * approval view, the transcript row, and any notice may carry.
- */
-export interface MutationFacts {
-	kind: "write" | "edit";
-	/** Bytes of proposed content (write), or of the replacement text across every edit. */
-	bytes: number;
-	/** Replacements in the edit list. One for a write. */
-	replacements: number;
-	/** Truncated SHA-256 over the exact call arguments this decision applies to. */
-	digest: string;
-}
+export type { MutationFacts } from "../session-control/approval-request-view.js";
 
 export interface MutationPreview {
 	facts: MutationFacts;

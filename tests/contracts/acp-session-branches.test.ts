@@ -13,7 +13,7 @@ import { ACP_SESSION_TREE_MAX_NODES, projectSessionTree } from "../../src/engine
 import type { AcpJsonRpcPeerTransport } from "../../src/engine/acp/transport.js";
 import { openSession, sessionPaths } from "../../src/engine/session.js";
 import type { AgentMessage } from "../../src/engine/types.js";
-import { buildModelReplayAgentMessagesFromTurns } from "../../src/interactive/model-session-replay.js";
+import { buildModelReplayAgentMessagesFromTurns } from "../../src/session-control/model-session-replay.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
 
 const AT = (second: number) => `2026-09-26T09:00:${String(second).padStart(2, "0")}.000Z`;

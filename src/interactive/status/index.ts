@@ -1,3 +1,15 @@
+export {
+	type AgentStatus,
+	type AgentStatusChangedPayload,
+	type AgentStatusEvent,
+	INITIAL_STATUS,
+	type ReasoningTokenProvenance,
+	type RunTally,
+	type StatusPhase,
+	type TurnStopReason,
+	type TurnSummary,
+	type WatchdogTier,
+} from "../../session-control/status-types.js";
 export type { StatusController, StatusControllerDeps } from "./controller.js";
 export { createStatusController } from "./controller.js";
 export {
@@ -11,18 +23,6 @@ export {
 } from "./reasoning.js";
 export { type ReduceContext, reduceStatus, type StatusInputEvent } from "./state-machine.js";
 export { type BuildSummaryInput, buildSummary, emptyRunTally, foldMessageIntoRunTally } from "./summary.js";
-export {
-	type AgentStatus,
-	type AgentStatusChangedPayload,
-	type AgentStatusEvent,
-	INITIAL_STATUS,
-	type ReasoningTokenProvenance,
-	type RunTally,
-	type StatusPhase,
-	type TurnStopReason,
-	type TurnSummary,
-	type WatchdogTier,
-} from "./types.js";
 export {
 	resolveFooterVerb,
 	spinnerFrame,

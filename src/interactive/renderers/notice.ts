@@ -17,7 +17,7 @@
 import { taskMemoryNoteForDisplay } from "../../domains/memory/task-memory-ref.js";
 import { sanitizeCallTargetText } from "../../domains/safety/call-target.js";
 import { visibleWidth, wrapTextWithAnsi } from "../../engine/tui.js";
-import type { NoticeSource } from "../notice-source.js";
+import type { NoticeSource } from "../../session-control/notice-source.js";
 import { type ClioToken, clioTheme, frame, GLYPH } from "../theme/index.js";
 
 const theme = clioTheme();

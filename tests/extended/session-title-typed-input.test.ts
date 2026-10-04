@@ -7,9 +7,9 @@ import type { ProvidersContract } from "../../src/domains/providers/index.js";
 import { createSessionBundle } from "../../src/domains/session/extension.js";
 import { isSessionEntry, isSessionHeader, type SessionEntry } from "../../src/domains/session/index.js";
 import { readSessionFileEntries, sessionPaths } from "../../src/engine/session.js";
-import { type CreateChatLoopDeps, createChatLoop } from "../../src/interactive/chat-loop.js";
 import { createChatPanel } from "../../src/interactive/chat-panel.js";
 import { rehydrateChatPanelFromTurns } from "../../src/interactive/chat-renderer.js";
+import { type CreateChatLoopDeps, createChatLoop } from "../../src/session-control/chat-loop.js";
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
 import { type IsolatedClioEnv, isolateClioEnv } from "../harness/scratch-env.js";
 

@@ -1,13 +1,7 @@
 import { BusChannels, type DispatchRunIdentity } from "../core/bus-events.js";
 import type { SafeEventBus } from "../core/event-bus.js";
 import { sanitizeCallTargetText } from "../domains/safety/call-target.js";
-import { readWorkerReceiptFacts } from "./worker-receipts.js";
-import {
-	type WorkerRunEntryFields,
-	type WorkerSettledFields,
-	workerRunEntryFields,
-	workerSettledFields,
-} from "./worker-replay.js";
+import { readWorkerReceiptFacts } from "../session-control/worker-receipts.js";
 import {
 	createWorkerStream,
 	isContextOperationRun,
@@ -15,7 +9,13 @@ import {
 	type WorkerReceiptReader,
 	type WorkerStream,
 	type WorkerStreamChange,
-} from "./worker-stream.js";
+} from "../session-control/worker-stream.js";
+import {
+	type WorkerRunEntryFields,
+	type WorkerSettledFields,
+	workerRunEntryFields,
+	workerSettledFields,
+} from "./worker-replay.js";
 
 export type InteractiveNoticeLevel = "info" | "success" | "warning" | "error";
 

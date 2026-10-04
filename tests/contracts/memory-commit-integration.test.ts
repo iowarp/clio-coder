@@ -3,8 +3,8 @@ import { test } from "node:test";
 import { TaskMemoryBank } from "../../src/domains/memory/task-bank.js";
 import type { TaskMemoryModelResponse } from "../../src/domains/memory/task-memory-policy.js";
 import { createMemoryInterventionRegistration } from "../../src/domains/middleware/memory-intervention.js";
-import { createTurnMiddleware } from "../../src/interactive/turn-middleware.js";
-import { createTurnState } from "../../src/interactive/turn-state.js";
+import { createTurnMiddleware } from "../../src/session-control/turn-middleware.js";
+import { createTurnState } from "../../src/session-control/turn-state.js";
 
 const scope = { sessionId: "session", branchAnchorTurnId: "branch" };
 const commit = { ...scope, kind: "continuity" as const, commitId: "commit", outcome: "summarized" as const };

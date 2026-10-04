@@ -14,7 +14,7 @@ import {
 import lmstudio from "../../src/domains/providers/runtimes/local-native/lmstudio.js";
 import { FileKnowledgeBase } from "../../src/domains/providers/types/knowledge-base.js";
 import { createWorkerToolRegistry } from "../../src/engine/worker-tools.js";
-import { type ChatNoticeEvent, createChatLoop } from "../../src/interactive/chat-loop.js";
+import { type ChatNoticeEvent, createChatLoop } from "../../src/session-control/chat-loop.js";
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
 import { startGatewayThinkingFixture } from "../harness/gateway-thinking-fixture.js";
 

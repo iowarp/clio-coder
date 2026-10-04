@@ -428,7 +428,7 @@ The render trace is opt-in and content-free. `CLIO_CODER_RENDER_TRACE` names a J
 
 ## Command spec
 
-Interactive slash commands in Clio Coder are governed by a declarative command specification registry (`BUILTIN_SLASH_COMMANDS` in [slash-commands.ts](../../src/interactive/slash-commands.ts)). Each entry defines the name, flags, positionals, and subcommands of one command. The central registry is the single source of truth for command matching, argument parsing, autocomplete suggestion generation, and usage help output. The parser turns an input string into a structured argument object and a canonical command representation using these specifications. The headless refusal in `src/cli/run.ts` and the ACP command projection read the same registry, so every surface agrees on which tokens name a command.
+Interactive slash commands in Clio Coder are governed by a declarative command specification registry (`BUILTIN_SLASH_COMMANDS` in [slash-commands.ts](../../src/session-control/slash-commands.ts)). Each entry defines the name, flags, positionals, and subcommands of one command. The central registry is the single source of truth for command matching, argument parsing, autocomplete suggestion generation, and usage help output. The parser turns an input string into a structured argument object and a canonical command representation using these specifications. The headless refusal in `src/cli/run.ts` and the ACP command projection read the same registry, so every surface agrees on which tokens name a command.
 
 ---
 

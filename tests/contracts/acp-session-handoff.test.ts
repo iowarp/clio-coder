@@ -17,7 +17,7 @@ import { serveClioAcpAgent } from "../../src/engine/acp/server.js";
 import type { AcpJsonRpcPeerTransport } from "../../src/engine/acp/transport.js";
 import { openSession, sessionPaths } from "../../src/engine/session.js";
 import type { AgentMessage } from "../../src/engine/types.js";
-import { buildModelReplayAgentMessagesFromTurns } from "../../src/interactive/model-session-replay.js";
+import { buildModelReplayAgentMessagesFromTurns } from "../../src/session-control/model-session-replay.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
 
 const GOAL = "finish the survey report and its figures";

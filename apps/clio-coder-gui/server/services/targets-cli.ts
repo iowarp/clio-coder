@@ -1,6 +1,16 @@
 import { Value } from "typebox/value";
 import { SettingsOrigin } from "../../contracts/settings.js";
 import { CliTargets, Routing, type TargetOperationResult } from "../../contracts/targets-cli.js";
+import {
+	ACP_TARGET_MODEL_LIMIT,
+	ACP_TARGETS_LIST_METHOD,
+	ACP_TARGETS_PROBE_METHOD,
+	ACP_TRUNCATED_META_KEY,
+	AcpTargetList,
+	AcpTargetProbe,
+} from "../../contracts/wire.js";
+import type { AcpClient } from "../acp/client.js";
+import type { Supervisor } from "../acp/supervisor.js";
 import type { CliRunner } from "./cli-runner.js";
 import { fingerprint, type OperationRegistry } from "./operations.js";
 import { AppProblem } from "./problem.js";
@@ -23,49 +33,29 @@ function items(value: unknown): unknown[] {
 		throw new AppProblem("operation_failed", "CLI returned an invalid inventory collection.");
 	return value;
 }
-function safeUrl(value: unknown) {
-	if (typeof value !== "string") return null;
-	try {
-		const url = new URL(value);
-		if (!["http:", "https:"].includes(url.protocol)) return null;
-		url.username = "";
-		url.password = "";
-		url.search = "";
-		url.hash = "";
-		return url.href.slice(0, 2048);
-	} catch {
-		return null;
-	}
-}
-export function projectTargets(raw: unknown): CliTargets {
-	const rows = items(object(raw).targets);
+async function readTargets(client: AcpClient): Promise<CliTargets> {
+	if (!client.capabilities.targets?.list)
+		throw new AppProblem("unsupported", "This Clio build does not expose target inventory.");
+	const raw = Value.Clean(AcpTargetList, await client.request(ACP_TARGETS_LIST_METHOD, {}));
+	if (!Value.Check(AcpTargetList, raw))
+		throw new AppProblem("upstream_acp", "Clio returned an invalid target inventory.");
 	const result = {
-		targets: rows.slice(0, 200).map((value) => {
-			const row = object(value),
-				target = object(row.target),
-				models = items(row.discoveredModels);
-			const capabilities = object(row.capabilities),
-				health = object(row.health);
-			return {
-				id: text(target.id),
-				runtime: text(target.runtime),
-				url: safeUrl(target.url),
-				defaultModel: optionalText(target.defaultModel),
-				available: row.available,
-				health: text(health.status),
-				tier: text(row.tier),
-				models: models.slice(0, 200).map(text),
-				modelsTruncated: models.length > 200,
-				contextWindow:
-					typeof capabilities.contextWindow === "number" && capabilities.contextWindow > 0
-						? capabilities.contextWindow
-						: null,
-			};
-		}),
-		truncated: rows.length > 200,
+		targets: raw.targets.map((target) => ({
+			id: target.id,
+			runtime: target.runtime,
+			url: target.url ?? null,
+			defaultModel: target.defaultModel ?? null,
+			available: target.available ?? false,
+			health: target.health ?? "unknown",
+			tier: target.tier ?? "unknown",
+			models: target.models,
+			modelsTruncated: target.modelsTruncated ?? target.models.length >= ACP_TARGET_MODEL_LIMIT,
+			contextWindow: target.contextWindow ?? null,
+		})),
+		truncated: raw._meta?.[ACP_TRUNCATED_META_KEY] === true,
 	};
 	if (!Value.Check(CliTargets, result))
-		throw new AppProblem("operation_failed", "CLI returned an invalid target projection.");
+		throw new AppProblem("upstream_acp", "Clio returned an invalid target projection.");
 	return result;
 }
 export class TargetsService {
@@ -74,10 +64,10 @@ export class TargetsService {
 		private readonly workspaces: WorkspaceService,
 		private readonly settings: SettingsService,
 		private readonly operations: OperationRegistry,
+		private readonly supervisor: Supervisor,
 	) {}
 	async list(workspaceId: string) {
-		const workspace = await this.workspaces.get(workspaceId);
-		return projectTargets(await this.runner.run({ kind: "targets.list" }, workspace.path));
+		return this.supervisor.workspaceControl(workspaceId, readTargets);
 	}
 	async mutate(workspaceId: string, id: string, action: "probe" | "use" | "remove" | "signout", key: string) {
 		const workspace = await this.workspaces.get(workspaceId);
@@ -90,14 +80,35 @@ export class TargetsService {
 			run: async (progress, signal): Promise<TargetOperationResult> => {
 				progress(
 					action === "probe"
-						? "Clio is probing configured targets."
+						? "Clio is probing the selected target."
 						: action === "signout"
 							? "Clio is removing the stored credential."
 							: "Clio is updating user target settings.",
 				);
-				let result: unknown;
+				let probe: AcpTargetProbe | undefined;
+				let probedTargets: CliTargets | undefined;
 				try {
-					result = await this.runner.run({ kind: `targets.${action}`, id }, workspace.path, signal);
+					if (action === "probe") {
+						const result = await this.supervisor.workspaceControl(
+							workspaceId,
+							async (client) => {
+								if (!client.capabilities.targets?.probe)
+									throw new AppProblem("unsupported", "This Clio build does not expose target probes.");
+								const probe = Value.Clean(
+									AcpTargetProbe,
+									await client.request(ACP_TARGETS_PROBE_METHOD, { targetId: id }, 60_000),
+								);
+								if (!Value.Check(AcpTargetProbe, probe) || probe.targetId !== id)
+									throw new AppProblem("upstream_acp", "Clio returned an invalid target probe.");
+								return { probe, targets: await readTargets(client) };
+							},
+							signal,
+						);
+						probe = result.probe;
+						probedTargets = result.targets;
+					} else {
+						await this.runner.run({ kind: `targets.${action}`, id }, workspace.path, signal);
+					}
 				} catch (error) {
 					// The runner keeps no stderr, so the two reasons `auth logout` exits non-zero are named here.
 					if (action === "signout" && error instanceof AppProblem && /exit code 1\b/.test(error.message))
@@ -110,7 +121,7 @@ export class TargetsService {
 				let targets: CliTargets;
 				let settings: Awaited<ReturnType<SettingsService["settings"]>> | undefined;
 				try {
-					targets = action === "probe" ? projectTargets(result) : await this.list(workspaceId);
+					targets = probedTargets ?? (await this.list(workspaceId));
 					if (action === "use") settings = await this.settings.settings(workspaceId);
 				} catch (error) {
 					if (action === "probe") throw error;
@@ -125,7 +136,9 @@ export class TargetsService {
 					exitCode: 0,
 					message:
 						action === "probe"
-							? "Target probe completed."
+							? probe?.healthy
+								? `Target is reachable${probe.latencyMs === null ? "" : ` · ${probe.latencyMs} ms`}.`
+								: `Target probe completed: ${probe?.reason ?? "health unknown"}.`
 							: action === "signout"
 								? `Signed out of ${id}. Its stored credential is removed; the connection stays configured and needs a new sign-in before it is used.`
 								: "User target settings updated.",

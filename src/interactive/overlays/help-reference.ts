@@ -1,9 +1,9 @@
 import type { ExtensionCommandRow } from "../../domains/extensions/operator-commands.js";
 import type { OverlayHandle, TUI } from "../../engine/tui.js";
+import { commandReference, SLASH_COMMAND_GROUPS } from "../../session-control/slash-commands.js";
 import { CLOSED_ACTION_ORDER, GLOBAL_ACTION_ORDER } from "../application-controller.js";
 import type { ClioKeybindingManager } from "../keybinding-manager.js";
 import { compactArgumentHint } from "../slash-autocomplete.js";
-import { commandReference, SLASH_COMMAND_GROUPS } from "../slash-commands.js";
 import { formatKeybindingDetailBodyLines } from "./keybinding-detail.js";
 import { type ListOverlayItem, openListOverlay } from "./list-overlay.js";
 

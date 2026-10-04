@@ -195,7 +195,7 @@ The `ProjectPreloadClass` tracks mode, included vs. available characters and lin
 
 ## Control flow through a real caller
 
-The upstream caller is `src/interactive/turn-context.ts`, which calls `deps.prompts.compileSessionPrompt` via `ensureSessionPrompt`. The flow:
+The upstream caller is `src/session-control/turn-context.ts`, which calls `deps.prompts.compileSessionPrompt` via `ensureSessionPrompt`. The flow:
 
 1. **Turn context** builds a `CompileSessionPromptInput` with `sessionId`, `sessionInputs` (provider, model, tool surface, constraints, etc.), `autonomy`, and `cwd`.
 2. **`createPromptsBundle.compileSessionPrompt`** resolves the session source snapshot, selects project preload, renders fleet roster, and calls `compile` with `additionalFragments` from the snapshot.

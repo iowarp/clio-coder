@@ -16,7 +16,7 @@ import {
 import { verifyReceiptIntegrity } from "../../src/domains/dispatch/receipt-integrity.js";
 import type { SafetyBlockedAttempt } from "../../src/domains/dispatch/types.js";
 import { createWorkerSafety } from "../../src/engine/worker-tools.js";
-import type { ChatLoopEvent } from "../../src/interactive/chat-loop.js";
+import type { ChatLoopEvent } from "../../src/session-control/chat-loop.js";
 import { resolveAgentTools } from "../../src/tools/agent-tools.js";
 import { bashTool } from "../../src/tools/bash.js";
 import { createRegistry } from "../../src/tools/registry.js";

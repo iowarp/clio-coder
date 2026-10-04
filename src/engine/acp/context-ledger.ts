@@ -1,3 +1,8 @@
+import type { AcpContextLedger } from "./types.js";
+
+export type { AcpContextLedger } from "./types.js";
+export { ACP_CONTEXT_LEDGER_METHOD, ACP_CONTEXT_META_KEY } from "./types.js";
+
 /**
  * `_clio-coder/context/ledger`: the terminal's `/context` window view as one
  * bounded projection of `chat.contextLedger()`.
@@ -12,42 +17,9 @@
 
 import type { ContextLedger } from "../../domains/session/context-ledger.js";
 
-export const ACP_CONTEXT_META_KEY = "clio-coder/context";
-export const ACP_CONTEXT_LEDGER_METHOD = "_clio-coder/context/ledger";
 const MAX_GROUPS = 32;
 const MAX_HANDBOOK_FILES = 16;
 const MAX_TEXT_BYTES = 256;
-
-export interface AcpContextLedger {
-	version: 1;
-	provider: string | null;
-	model: string | null;
-	/** Tokens; 0 when unknown. */
-	contextWindow: number;
-	contextWindowSource: string | null;
-	contextWindowSlots: { slots: number; totalTokens: number } | null;
-	usedTokens: number;
-	reserveTokens: number;
-	freeTokens: number;
-	/** used/window; null when the window is unknown. */
-	percent: number | null;
-	/** True when the total is anchored to provider-measured usage, false when estimated. */
-	measured: boolean;
-	compactionThreshold: number | null;
-	compactionAuto: boolean;
-	projectPreload: string | null;
-	projectHandbookFiles: string[] | null;
-	toolCount: number;
-	groups: Array<{ category: string; label: string; tokens: number; percent: number | null }>;
-	lastCompaction: { stage: string; tokensBefore: number; tokensAfter: number; trigger: string } | null;
-	promptCache: {
-		shellReused: boolean;
-		cacheReadTokens: number | null;
-		cacheWriteTokens: number | null;
-		uncachedInputTokens: number | null;
-		backendVerdict: "hot" | "partial" | "cold" | "small" | "unknown" | null;
-	} | null;
-}
 
 function bounded(text: string): string {
 	let safe = "";

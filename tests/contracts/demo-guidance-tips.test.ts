@@ -21,9 +21,9 @@ import {
 import { createMiddlewareToolChoiceControl } from "../../src/domains/middleware/tool-choice-control.js";
 import type { MiddlewareEffect, MiddlewareHookInput } from "../../src/domains/middleware/types.js";
 import type { AgentMessage } from "../../src/engine/types.js";
-import { BUILTIN_SLASH_COMMANDS } from "../../src/interactive/slash-commands.js";
-import { createTurnMiddleware } from "../../src/interactive/turn-middleware.js";
-import { type AgentRuntime, createTurnState } from "../../src/interactive/turn-state.js";
+import { BUILTIN_SLASH_COMMANDS } from "../../src/session-control/slash-commands.js";
+import { createTurnMiddleware } from "../../src/session-control/turn-middleware.js";
+import { type AgentRuntime, createTurnState } from "../../src/session-control/turn-state.js";
 import { type IsolatedClioEnv, isolateClioEnv } from "../harness/scratch-env.js";
 
 // Demo guidance shows the operator one capability tip after a turn, picked by

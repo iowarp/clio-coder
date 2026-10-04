@@ -28,13 +28,14 @@ import { draftTakenOutcome } from "../domains/system-one/outcomes.js";
 import { formatUserTaskHandoff } from "../domains/user-tasks/handoff.js";
 import type { UserTasksStore } from "../domains/user-tasks/store.js";
 import type { TUI } from "../engine/tui.js";
-import type { DraftOutcome } from "./chat-loop.js";
+import type { DraftOutcome } from "../session-control/chat-loop.js";
+import type { DraftVerdict } from "../session-control/drafts.js";
+import { draftsToJudge } from "../session-control/drafts.js";
+import type { ContextClearCommandOptions } from "../session-control/slash-commands.js";
 import type { OpenContextOverlayOptions } from "./context-overlay.js";
 import { openContextOverlay } from "./context-overlay.js";
 import type { createDispatchBoardView } from "./dispatch-board.js";
 import { isDispatchBoardRowCancellable, isDispatchBoardRowSteerable } from "./dispatch-board.js";
-import type { DraftVerdict } from "./drafts.js";
-import { draftsToJudge } from "./drafts.js";
 import { openMemoryOverlay } from "./memory-overlay.js";
 import type { HintEntry } from "./overlay-frame.js";
 import { buildResponsiveHint, showClioOverlayFrame } from "./overlay-frame.js";
@@ -46,7 +47,6 @@ import { openDraftOverlay, type TakenDraft } from "./overlays/draft.js";
 import { openFleetRunApprovalOverlay } from "./overlays/fleet-run-approval.js";
 import { openQueueNavigatorOverlay } from "./overlays/queue-navigator.js";
 import { openSideQuestionOverlay } from "./overlays/side-question.js";
-import type { ContextClearCommandOptions } from "./slash-commands.js";
 import { openTasksOverlay } from "./tasks-overlay.js";
 import { abbreviateModelId } from "./theme/labels.js";
 import { openUsageOverlay } from "./usage-overlay.js";
@@ -107,11 +107,11 @@ export interface OverlayGeneralOpenersDeps {
 	 */
 	queueNavigator?: {
 		chat: Pick<
-			import("./chat-loop.js").ChatLoop,
+			import("../session-control/chat-loop.js").ChatLoop,
 			"queueEntries" | "removeQueuedEntry" | "moveQueuedEntry" | "setQueuedEntryKind"
 		>;
-		toEditor(entry: import("./chat-loop.js").QueuedChatMessage): void;
-		sendNow(entry: import("./chat-loop.js").QueuedChatMessage): void;
+		toEditor(entry: import("../session-control/chat-loop.js").QueuedChatMessage): void;
+		sendNow(entry: import("../session-control/chat-loop.js").QueuedChatMessage): void;
 		restoreAll(): void;
 		restoreAllLabel(): string;
 		matchesRestoreAll(data: string): boolean;

@@ -1,4 +1,4 @@
-import type { ReasoningTokenProvenance, RunTally, TurnSummary } from "./types.js";
+import type { ReasoningTokenProvenance, RunTally, TurnSummary } from "../../session-control/status-types.js";
 
 /**
  * One projection of a turn's reasoning spend for every surface that shows it.

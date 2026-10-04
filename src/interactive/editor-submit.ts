@@ -5,7 +5,13 @@ import type { PendingSkillRequest } from "../core/skill-activation.js";
 import type { DispatchContract } from "../domains/dispatch/contract.js";
 import type { SessionContract, SessionEntry } from "../domains/session/index.js";
 import { runOperatorShellLine } from "../domains/session/operator-shell.js";
-import type { ChatLoop, QueuedChatMessage } from "./chat-loop.js";
+import type { ChatLoop, QueuedChatMessage } from "../session-control/chat-loop.js";
+import {
+	parseSlashCommand,
+	type RunIo,
+	type SlashCommand,
+	type SlashCommandDispatchResult,
+} from "../session-control/slash-commands.js";
 import type { ChatPanel } from "./chat-panel.js";
 import { parseEditorBashCommand, unguardPastedEditorOperator } from "./editor-bash.js";
 import {
@@ -15,7 +21,6 @@ import {
 	resolveSteerTarget,
 } from "./editor-steer.js";
 import { type BashTranscriptExecution, renderBashTranscriptExecution } from "./renderers/tool-execution.js";
-import { parseSlashCommand, type RunIo, type SlashCommand, type SlashCommandDispatchResult } from "./slash-commands.js";
 
 /** Existing bash TERM-to-KILL grace (5s), plus settlement and session append. */
 export const EDITOR_BASH_SHUTDOWN_MS = 6000;

@@ -28,7 +28,7 @@ import {
 import type { MiddlewareEffect, MiddlewareHookInput, MiddlewareRule } from "../../src/domains/middleware/types.js";
 import { createWorkerSafety } from "../../src/engine/worker-tools.js";
 import { capturedHookSourcesFor } from "../../src/entry/extension-hook-sources.js";
-import { createTurnOutcomeCollector } from "../../src/interactive/turn-outcome-collector.js";
+import { createTurnOutcomeCollector } from "../../src/session-control/turn-outcome-collector.js";
 import type { ToolInvokeOptions } from "../../src/tools/registry.js";
 import { createRegistry } from "../../src/tools/registry.js";
 import { trustProjectPackages } from "../harness/project-trust.js";

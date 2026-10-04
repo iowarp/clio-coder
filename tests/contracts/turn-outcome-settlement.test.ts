@@ -12,9 +12,9 @@ import type { SessionContract, TurnInput } from "../../src/domains/session/contr
 import type { SessionEntry } from "../../src/domains/session/entries.js";
 import type { TurnOutcomeRecord } from "../../src/domains/turn-control/index.js";
 import type { AgentEvent, AgentMessage } from "../../src/engine/types.js";
-import type { CreateChatLoopDeps } from "../../src/interactive/chat-loop.js";
-import { createChatLoop } from "../../src/interactive/chat-loop.js";
-import { createTurnOutcomeCollector } from "../../src/interactive/turn-outcome-collector.js";
+import type { CreateChatLoopDeps } from "../../src/session-control/chat-loop.js";
+import { createChatLoop } from "../../src/session-control/chat-loop.js";
+import { createTurnOutcomeCollector } from "../../src/session-control/turn-outcome-collector.js";
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
 

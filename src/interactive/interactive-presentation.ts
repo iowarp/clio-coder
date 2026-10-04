@@ -20,8 +20,11 @@ import type { LocalCapacity } from "../domains/scheduling/local-capacity.js";
 import type { SessionContract, TaskBoardSnapshot } from "../domains/session/index.js";
 import type { UserTasksStore } from "../domains/user-tasks/store.js";
 import type { Component, ScrollView, TUI } from "../engine/tui.js";
-import { createAssistantGenerationTiming } from "./assistant-generation-timing.js";
-import type { ChatLoop, ChatLoopEvent } from "./chat-loop.js";
+import { createAssistantGenerationTiming } from "../session-control/assistant-generation-timing.js";
+import type { ChatLoop, ChatLoopEvent } from "../session-control/chat-loop.js";
+import type { RunIo } from "../session-control/slash-commands.js";
+import { parseSlashCommand } from "../session-control/slash-commands.js";
+import { readWorkerReceiptFacts } from "../session-control/worker-receipts.js";
 import type { ChatPanel } from "./chat-panel.js";
 import { createChatPanel } from "./chat-panel.js";
 import type { CoalescingChatRenderer } from "./chat-renderer.js";
@@ -50,8 +53,6 @@ import { createKeybindingManager, formatKeyLabel } from "./keybinding-manager.js
 import { buildLayout, preserveTranscriptScroll } from "./layout.js";
 import type { SessionTranscript } from "./session-transcript.js";
 import { createSlashCommandAutocompleteProvider } from "./slash-autocomplete.js";
-import type { RunIo } from "./slash-commands.js";
-import { parseSlashCommand } from "./slash-commands.js";
 import type { StatusController, TurnSummary } from "./status/index.js";
 import { createStatusController } from "./status/index.js";
 import type { SmoothStreamingMode } from "./stream-pacer.js";
@@ -59,7 +60,6 @@ import { processAutoPacingAllowed } from "./stream-pacing-policy.js";
 import { ATTENTION_STEP_MS } from "./theme/glyphs.js";
 import type { WelcomeDashboardComponent } from "./welcome-dashboard.js";
 import { createWelcomeDashboard } from "./welcome-dashboard.js";
-import { readWorkerReceiptFacts } from "./worker-receipts.js";
 import type { WorkspaceFacts } from "./workspace-facts.js";
 
 export interface PresentationTickerHandle {

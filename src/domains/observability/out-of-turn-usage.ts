@@ -7,7 +7,7 @@ import { writeDiagnostic } from "../../core/diagnostics.js";
  * These rounds deliberately append nothing to the session JSONL. A fleet run
  * briefs its workers from the transcript, so a question the operator asked to
  * orient themselves must not become context those workers inherit, and
- * `src/interactive/side-question.ts` states that promise as a contract. The
+ * `src/session-control/side-question.ts` states that promise as a contract. The
  * money was still spent, though, and until this store existed the only record
  * of it was the in-process cost tracker: `/cost` showed it for as long as the
  * process lived, and `clio-coder usage report`, which reads the archive on

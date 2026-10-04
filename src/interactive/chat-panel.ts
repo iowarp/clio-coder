@@ -19,9 +19,10 @@ import {
 	wrapTextWithAnsi,
 } from "../engine/tui.js";
 import type { AgentMessage } from "../engine/types.js";
-import type { ChatLoopEvent, RetryStatusPayload, SpeculativeDispatchCounts } from "./chat-loop.js";
-import { extractText, isSelfExplainingAbort } from "./chat-loop-messages.js";
-import { coldReasonText } from "./cold-reasons.js";
+import type { ChatLoopEvent, RetryStatusPayload, SpeculativeDispatchCounts } from "../session-control/chat-loop.js";
+import { extractText, isSelfExplainingAbort } from "../session-control/chat-loop-messages.js";
+import { coldReasonText } from "../session-control/cold-reasons.js";
+import type { WorkerEntryState } from "../session-control/worker-stream.js";
 import { editPreviewDiff } from "./mutation-preview.js";
 import type { ApprovalRequestView } from "./permission-overlay.js";
 import { codeInk } from "./renderers/code-ink.js";
@@ -69,7 +70,6 @@ import {
 	SGR_RESET,
 } from "./theme/index.js";
 import { type TranscriptDetailPolicy, transcriptDetail } from "./transcript-detail.js";
-import type { WorkerEntryState } from "./worker-stream.js";
 
 // Every fenced code block, top level or nested in a list or quote, reaches the
 // screen through pi-tui's Markdown component, which exposes the

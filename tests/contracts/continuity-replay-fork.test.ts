@@ -31,7 +31,7 @@ import {
 	buildModelReplayAgentMessagesFromTurns,
 	continuityContextFromSession,
 	withContinuityReplay,
-} from "../../src/interactive/model-session-replay.js";
+} from "../../src/session-control/model-session-replay.js";
 import { type IsolatedClioEnv, isolateClioEnv } from "../harness/scratch-env.js";
 
 /**

@@ -1,14 +1,12 @@
-import type { ActionClass } from "../domains/safety/action-classifier.js";
-import type { AutonomyExposure } from "../domains/safety/autonomy.js";
 import {
 	classifyDecisionPresentation,
 	type DecisionPresentation,
 	decisionFactsForPermission,
 } from "../domains/safety/decision-presentation.js";
 import { type Component, visibleWidth, wrapTextWithAnsi } from "../engine/tui.js";
+import type { ApprovalRequestView } from "../session-control/approval-request-view.js";
 import {
 	MUTATION_PREVIEW_VISIBLE_ROWS,
-	type MutationFacts,
 	type MutationInspector,
 	type MutationPreview,
 	mutationFactsLine,
@@ -28,6 +26,7 @@ import { clioTheme } from "./theme/index.js";
 
 export { type AskAxis, askAxis } from "../domains/safety/approval-axis.js";
 export { describeCallTarget, sanitizeCallTargetText } from "../domains/safety/call-target.js";
+export type { ApprovalRequestView } from "../session-control/approval-request-view.js";
 export {
 	MUTATION_PREVIEW_KEY,
 	PERMISSION_TERMS_KEY,
@@ -35,60 +34,6 @@ export {
 	type PermissionTermsHint,
 	permissionHintEntries,
 } from "./permission-hint.js";
-
-export interface ApprovalRequestView {
-	requestId: string;
-	tool: string;
-	actionClass: ActionClass;
-	axis: { kind: "net"; ruleId: string } | { kind: "autonomy"; level: string };
-	origin: { kind: "main" } | { kind: "worker"; agentId: string; runId: string };
-	/** Admission-normalized exposure. Caller prose never supplies presentation fields. */
-	exposure?: AutonomyExposure;
-	reason: string;
-	/**
-	 * The safety-net rule's own reason text, set for a net-axis ask so the card can say what
-	 * triggered it. `reason` is the raw rejection short and stays off the card.
-	 */
-	netReason?: string;
-	/**
-	 * What a bash command would do, one sentence per step, from the pure
-	 * classifier in `command-consequence`. Text for the card only: admission never
-	 * reads it and no ask or block depends on it.
-	 */
-	consequence?: ReadonlyArray<string>;
-	/** Typed, sanitized multi-line artifact that this one approval authorizes. */
-	artifact?: { kind: "dispatch-plan"; text: string };
-	/**
-	 * One-line preview of the call's allowlisted object fields. The operator is
-	 * deciding whether to allow this exact call, so the overlay must show what
-	 * the call will touch, not just the tool name. Unlisted fields appear only as
-	 * type-and-size summaries. Main-agent asks derive it from the parked call's
-	 * args; worker escalations carry it in the escalation payload. Absent only
-	 * when nothing meaningful is derivable.
-	 */
-	target?: string;
-	/**
-	 * Size and digest facts for a parked `write` or `edit`, and nothing else
-	 * about it. The mutation text is deliberately absent: this view is what
-	 * reaches the transcript row, the parked notice, and the approval-state
-	 * event, so anything on it has already left the overlay. The text itself is
-	 * held by the inspector the overlay opener is given (issue #254).
-	 */
-	mutation?: MutationFacts;
-	queueDepth?: number;
-	/**
-	 * The build that answered the System One gate, set only on the card the gate
-	 * raised. The card and the transcript rows name it so an operator can tell
-	 * which build's judgment they overrode.
-	 */
-	gateBuild?: string;
-	/**
-	 * A worker ask routed through the main agent (Phase D): who may discharge
-	 * it, and whether the main agent asked for it. The card names both so the
-	 * operator knows whose request they are answering.
-	 */
-	workerGrant?: { authority: "main" | "operator"; forwardedByMain: boolean };
-}
 
 /** The consequence sentences, one row each, under one `Effect:` label that later rows hang beneath. */
 function consequenceFields(view: ApprovalRequestView, width: number): string[] {

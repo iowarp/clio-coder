@@ -17,9 +17,9 @@ import { detectRunIdentity } from "../../src/domains/dispatch/run-identity.js";
 import { createPromptsBundle } from "../../src/domains/prompts/extension.js";
 import type { PromptsContract } from "../../src/domains/prompts/index.js";
 import type { ProvidersContract } from "../../src/domains/providers/index.js";
-import { createTurnContext } from "../../src/interactive/turn-context.js";
-import type { TurnMiddleware } from "../../src/interactive/turn-middleware.js";
-import { type AgentRuntime, createTurnState } from "../../src/interactive/turn-state.js";
+import { createTurnContext } from "../../src/session-control/turn-context.js";
+import type { TurnMiddleware } from "../../src/session-control/turn-middleware.js";
+import { type AgentRuntime, createTurnState } from "../../src/session-control/turn-state.js";
 
 import { isolateClioEnv } from "../harness/scratch-env.js";
 

@@ -35,10 +35,19 @@ import type { OutcomeRecord, SystemOne } from "../domains/system-one/index.js";
 import type { UserTasksStore } from "../domains/user-tasks/store.js";
 import { setDiffusionFramesEnabled } from "../engine/apis/diffusion-frames.js";
 import { createAgentProgress } from "../engine/tui.js";
+import type { ChatLoop, ChatLoopEvent } from "../session-control/chat-loop.js";
+import type {
+	ContextClearCommandOptions,
+	InitCommandOptions,
+	RunIo,
+	SlashCommandContext,
+	TaskMemorySeedCommandResult,
+} from "../session-control/slash-commands.js";
+import { recordStartupDiagnostic } from "../session-control/startup-diagnostics.js";
+import { readWorkerReceiptFacts } from "../session-control/worker-receipts.js";
 import type { AskUserHandler } from "../tools/ask-user.js";
 import type { ToolRegistry } from "../tools/registry.js";
 import type { ApplicationController } from "./application-controller.js";
-import type { ChatLoop, ChatLoopEvent } from "./chat-loop.js";
 import { warmTranscriptRender } from "./chat-panel.js";
 import { emitCommandNotice } from "./command-fallbacks.js";
 import { appendNotice, OPERATOR_COMMAND_ENTRY } from "./command-output.js";
@@ -64,33 +73,13 @@ import { describePanesLeftBehind } from "./panes-runtime.js";
 import { writeInputWedgeDump } from "./render-trace.js";
 import { settleChatBeforeSessionSwitch } from "./session-switch-settlement.js";
 import { createSessionTranscript } from "./session-transcript.js";
-import type {
-	ContextClearCommandOptions,
-	InitCommandOptions,
-	RunIo,
-	SlashCommandContext,
-	TaskMemorySeedCommandResult,
-} from "./slash-commands.js";
-import { recordStartupDiagnostic } from "./startup-diagnostics.js";
 import { processAutoPacingAllowed } from "./stream-pacing-policy.js";
 import type { BootInteractivity, TerminalLease } from "./terminal-lease.js";
 import type { createWatchPaneController } from "./watch-pane.js";
-import { readWorkerReceiptFacts } from "./worker-receipts.js";
 import { WORKER_SETTLED_ENTRY } from "./worker-replay.js";
 import { createWorkspaceFacts } from "./workspace-facts.js";
 import type { createYaziBridge, YaziBridge } from "./yazi-bridge.js";
 
-export {
-	IDLE_LEADER_STATE,
-	type LeaderKeyController,
-	type LeaderKeyControllerDeps,
-	type LeaderKeyRouteDeps,
-	type LeaderKeyRouteResult,
-	type LeaderKeyState,
-	type LeaderTarget,
-	routeLeaderKey,
-} from "./leader-key.js";
-export * from "./overlay-lifecycle.js";
 // Re-exports preserve the public surface for diag scripts that import these
 // names from "interactive/index.js"; the implementations live in
 // slash-commands.ts.
@@ -107,7 +96,18 @@ export {
 	type SlashCommand,
 	type SlashCommandContext,
 	type SlashCommandKind,
-} from "./slash-commands.js";
+} from "../session-control/slash-commands.js";
+export {
+	IDLE_LEADER_STATE,
+	type LeaderKeyController,
+	type LeaderKeyControllerDeps,
+	type LeaderKeyRouteDeps,
+	type LeaderKeyRouteResult,
+	type LeaderKeyState,
+	type LeaderTarget,
+	routeLeaderKey,
+} from "./leader-key.js";
+export * from "./overlay-lifecycle.js";
 
 export interface InteractiveDeps {
 	getConnections?: () => { mcp: string[]; plugins: string[] };

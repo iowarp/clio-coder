@@ -19,7 +19,7 @@ import {
 } from "../../src/domains/plugins/index.js";
 import { loadPromptTemplates } from "../../src/domains/resources/prompts/loader.js";
 import { loadSkills } from "../../src/domains/resources/skills/loader.js";
-import { parseSlashCommand } from "../../src/interactive/slash-commands.js";
+import { parseSlashCommand } from "../../src/session-control/slash-commands.js";
 import { type IsolatedClioEnv, isolateClioEnv } from "../harness/scratch-env.js";
 
 let env: IsolatedClioEnv;

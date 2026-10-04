@@ -10,7 +10,7 @@ import {
 	formatExtensionReloadNotice,
 	parseSlashCommand,
 	type SlashCommandContext,
-} from "../../src/interactive/slash-commands.js";
+} from "../../src/session-control/slash-commands.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
 
 const committed: ExtensionReloadOutcome = {

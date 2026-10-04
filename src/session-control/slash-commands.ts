@@ -50,7 +50,6 @@ import type { UserTask } from "../domains/user-tasks/store.js";
 import type { ExtensionReloadOutcome } from "../entry/extension-reload.js";
 import type { ToolProfileName } from "../tools/profiles.js";
 import { isToolProfileName, TOOL_PROFILE_NAMES } from "../tools/profiles.js";
-import type { NoticeLevel } from "./command-output.js";
 import type { CouncilCommandOptions, CouncilRosters } from "./council.js";
 import {
 	buildCouncilDispatchArgs,
@@ -61,6 +60,7 @@ import {
 	resolveCouncilRoster,
 } from "./council.js";
 import { parseDraftArgs } from "./drafts.js";
+import type { NoticeLevel } from "./notice-source.js";
 import type { OracleDigestSources } from "./oracle.js";
 import { formatOracleAnswer, ORACLE_AGENT_ID, ORACLE_TASK, packOracleDigest } from "./oracle.js";
 import { promptSourceLabel } from "./prompt-source-label.js";
@@ -660,7 +660,7 @@ export interface PromptReferenceCard {
  * injected at startInteractive construction time; handlers never reach into
  * the TUI, chat loop, or overlay module graph directly.
  */
-export interface SlashCommandContext {
+export interface SessionCommandContext {
 	eggsCommand?: (action: "status" | "off", id?: string) => string;
 	keyboardActions?: {
 		background(): void;
@@ -700,7 +700,7 @@ export interface SlashCommandContext {
 	/** Worker blocks this session folded, oldest first. `/share` picks from these. */
 	listWorkerRuns?: () => ReadonlyArray<WorkerEntryState>;
 	/** Fire-and-forget shutdown. Handler must not await. */
-	shutdown: () => void;
+	shutdown?: () => void;
 	runInit: (options: InitCommandOptions) => void;
 	/** Write the current session transcript (all tool segments expanded, ANSI-stripped) to a Markdown file. */
 	exportTranscript: (path?: string) => void;
@@ -730,7 +730,7 @@ export interface SlashCommandContext {
 	 * cleared something. A host without that row prints the reply.
 	 */
 	statesSkillSurface?: boolean;
-	listPrompts: () => ResourceList<PromptTemplate>;
+	listPrompts?: () => ResourceList<PromptTemplate>;
 	/**
 	 * Prompt templates from the committed plugin snapshot, without re-verifying
 	 * plugin trees. For views that only name templates, such as /help and the
@@ -761,10 +761,10 @@ export interface SlashCommandContext {
 		accept: (kind: InteropAgentId) => void;
 		decline: (kind: InteropAgentId) => void;
 	};
-	listAgents: () => ReadonlyArray<AgentSpec>;
+	listAgents?: () => ReadonlyArray<AgentSpec>;
 	exportShareArchive?: (outPath: string) => { fileCount: number; path: string };
 	importShareArchive?: (path: string, options: { dryRun?: boolean; force?: boolean }) => ShareImportPlan;
-	openUsage: () => void;
+	openUsage?: () => void;
 	/**
 	 * `/doctor [deep]`: the CLI doctor's findings, rendered as one notice.
 	 * `deep` adds the live tool probe on the session's targets and the
@@ -787,9 +787,9 @@ export interface SlashCommandContext {
 	 * board, so the workers a fleet run briefs never see the question or its
 	 * answer.
 	 */
-	openSideQuestion: (question: string) => void;
+	openSideQuestion?: (question: string) => void;
 	/** `/draft [N] <request>`: N candidates side by side, judged by a decision model. */
-	openDraft: (request: string, count: number) => void;
+	openDraft?: (request: string, count: number) => void;
 	/**
 	 * The record `/oracle` briefs its advisor on: settled decisions, the task
 	 * board, and the last compaction summary. Absent on a host with no session,
@@ -821,7 +821,7 @@ export interface SlashCommandContext {
 	 * operation only. It writes no memory promotion candidate and never calls
 	 * the task-memory bank.
 	 */
-	startHandoff: (goal: string) => void;
+	startHandoff?: (goal: string) => void;
 	/**
 	 * `/fleet run <name>`: compile the contract's plan, show every wave, agent,
 	 * target, boundary, budget, and code-step argv for approval, and dispatch
@@ -829,11 +829,11 @@ export interface SlashCommandContext {
 	 */
 	startFleetRun?: (name: string, vars: Readonly<Record<string, string>>) => void;
 	/** Open the read-only `/context` overlay: categorized context-window ledger. */
-	openContextView: () => void;
+	openContextView?: () => void;
 	/** Open the read-only `/tasks` overlay: the session task board with receipts. */
-	openTasks: () => void;
+	openTasks?: () => void;
 	/** Open the settled, branch-local interview decision board. */
-	openDecisions: () => void;
+	openDecisions?: () => void;
 	/** Project-scoped operator task inbox backing `/tasks` mutations. */
 	userTasks?: {
 		add(title: string, acceptance?: UserTaskAcceptance): UserTask;
@@ -842,11 +842,11 @@ export interface SlashCommandContext {
 		drop(id: string): UserTask;
 	};
 	/** Open `/memory` for approved lessons, the live task bank, and reviewed promotion. */
-	openMemory: () => void;
+	openMemory?: () => void;
 	/** Opt-in import from the newest structured handoff; absent when the host has no task bank. */
 	seedTaskMemory?: () => TaskMemorySeedCommandResult;
 	/** Open `/view`, the full observability artifact viewer. */
-	openView: (filter?: string) => void;
+	openView?: (filter?: string) => void;
 	/**
 	 * The pane layer's operator surface. It remains present when mux resolves to
 	 * `none` because the Yazi preset can borrow the terminal for one selection;
@@ -873,7 +873,7 @@ export interface SlashCommandContext {
 	thinkingLevelChoices?: () => ReadonlyArray<{ value: string; label: string }>;
 	openThinkingPicker?: () => void;
 	/** Apply a transcript verbosity named on the command line; refused values are reported by the caller. */
-	openModel: () => void;
+	openModel?: () => void;
 	/** Live providers contract used by `/model <pattern>` to resolve directly. */
 	providers: ProvidersContract;
 	/**
@@ -881,17 +881,17 @@ export interface SlashCommandContext {
 	 * means the operator has yet to choose session or global and nothing has
 	 * changed; the dialog reports the outcome itself.
 	 */
-	applyModelRef: (ref: ResolvedModelRef) => "applied" | "pending";
+	applyModelRef?: (ref: ResolvedModelRef) => "applied" | "pending";
 	openConfigure?: () => void;
-	openSettings: (area?: SettingsAreaId, group?: string) => void;
+	openSettings?: (area?: SettingsAreaId, group?: string) => void;
 	openFleetRuns?: () => void;
 	/** Resume `target` (an id or unique id prefix) directly, or open the picker. */
-	openResume: (target?: string) => void;
-	startNewSession: () => void;
-	openTree: () => void;
-	openMessagePicker: () => void;
-	openHelp: (query?: string) => void;
-	openExtensions: () => void;
+	openResume?: (target?: string) => void;
+	startNewSession?: () => void;
+	openTree?: () => void;
+	openMessagePicker?: () => void;
+	openHelp?: (query?: string) => void;
+	openExtensions?: () => void;
 	openInterop?: () => void;
 	setEditorText?: (text: string) => void;
 	/**
@@ -907,7 +907,7 @@ export interface SlashCommandContext {
 	 * and emit an actionable verification block. Kept on the context so the registry does
 	 * not import the overlay module.
 	 */
-	verifyReceipt: (runId: string) => ReceiptIntegrityOutcome & {
+	verifyReceipt?: (runId: string) => ReceiptIntegrityOutcome & {
 		receiptPath?: string;
 		sealedDigest?: string | null;
 		trustSummary?: string | null;
@@ -923,10 +923,12 @@ export interface SlashCommandContext {
 	 */
 	submitChat: (text: string) => void;
 	/** Re-render request; wraps tui.requestRender so handlers do not import TUI. */
-	render: () => void;
+	render?: () => void;
 }
 
-type SlashReceiptVerification = ReturnType<SlashCommandContext["verifyReceipt"]>;
+export type SlashCommandContext = SessionCommandContext;
+
+type SlashReceiptVerification = ReturnType<NonNullable<SlashCommandContext["verifyReceipt"]>>;
 
 /** The full receipt and individual checks remain in the viewer's details. */
 function formatReceiptVerificationBlock(runId: string, result: SlashReceiptVerification): string {
@@ -940,7 +942,16 @@ function formatReceiptVerificationBlock(runId: string, result: SlashReceiptVerif
 export const SLASH_COMMAND_GROUPS = ["Work", "Inspect", "Configure", "Session"] as const;
 export type SlashCommandGroup = (typeof SLASH_COMMAND_GROUPS)[number];
 
+export interface CommandAcpAdmission {
+	subcommands?: ReadonlyArray<string>;
+	streams?: "dispatch";
+	injectsUserTurn?: true;
+	promptTurn?: true;
+	promptTurnSubcommands?: ReadonlyArray<string>;
+}
+
 export interface BuiltinSlashCommand {
+	acp: false | CommandAcpAdmission;
 	name: string;
 	description: string;
 	group: SlashCommandGroup;
@@ -1033,6 +1044,7 @@ function formatPanesStatus(status: PanesStatus): ReadonlyArray<string> {
 const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	{
 		name: "background",
+		acp: false,
 		description: "Detach the newest eligible attached dispatch",
 		group: "Work",
 		kinds: ["background"],
@@ -1048,6 +1060,7 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	},
 	{
 		name: "editor",
+		acp: false,
 		description: "Edit explicit text (or an empty buffer) externally",
 		group: "Work",
 		kinds: ["editor"],
@@ -1067,6 +1080,7 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	},
 	{
 		name: "interrupt",
+		acp: false,
 		description: "Interrupt the active run and send this text",
 		group: "Work",
 		kinds: ["interrupt"],
@@ -1090,6 +1104,7 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	},
 	{
 		name: "eggs",
+		acp: {},
 		description: "Show active conversation eggs or turn them off",
 		group: "Inspect",
 		kinds: ["eggs"],
@@ -1107,6 +1122,7 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	},
 	{
 		name: "notifications",
+		acp: false,
 		description: "Dismiss the oldest notification or explicitly dismiss all",
 		group: "Inspect",
 		kinds: ["notifications-dismiss"],
@@ -1129,17 +1145,19 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	},
 	{
 		name: "quit",
+		acp: false,
 		description: "Exit Clio Coder",
 		group: "Session",
 		kinds: ["quit"],
 		args: {},
 		fromArgs: fromArgsOrUsage("quit", { kind: "quit" }),
 		handle(_command, ctx) {
-			ctx.shutdown();
+			ctx.shutdown?.();
 		},
 	},
 	{
 		name: "help",
+		acp: false,
 		description: "Open the help center for commands and keys",
 		group: "Inspect",
 		kinds: ["help"],
@@ -1150,11 +1168,12 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 			return { kind: "help", ...(parsed.rest ? { query: parsed.rest } : {}) };
 		},
 		handle(command, ctx) {
-			ctx.openHelp(command.kind === "help" ? command.query : undefined);
+			ctx.openHelp?.(command.kind === "help" ? command.query : undefined);
 		},
 	},
 	{
 		name: "skill",
+		acp: { injectsUserTurn: true },
 		description: "Invoke a skill, or use `off` to clear active skill tools",
 		group: "Work",
 		kinds: ["skill-invocation", "skill-surface-clear"],
@@ -1194,6 +1213,7 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	},
 	{
 		name: "library",
+		acp: false,
 		description: "Browse recipes, or review a package install, removal or reload",
 		group: "Inspect",
 		kinds: ["resources"],
@@ -1312,7 +1332,7 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 			}
 			if (command.family === "extensions") {
 				if (command.action === "reload") reloadExtensionsCommand(ctx);
-				else ctx.openExtensions();
+				else ctx.openExtensions?.();
 				return;
 			}
 			ctx.openSkillsHub?.({
@@ -1326,6 +1346,7 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	},
 	{
 		name: "skills",
+		acp: false,
 		description: "Open the Library on Skills",
 		group: "Inspect",
 		kinds: [],
@@ -1337,6 +1358,7 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	},
 	{
 		name: "prompts",
+		acp: false,
 		description: "Open the Library on Prompts",
 		group: "Inspect",
 		kinds: [],
@@ -1348,6 +1370,7 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	},
 	{
 		name: "mcp",
+		acp: {},
 		description: "List MCP servers, or trust or untrust one by id",
 		group: "Inspect",
 		kinds: ["mcp"],
@@ -1371,6 +1394,7 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	},
 	{
 		name: "doctor",
+		acp: {},
 		description: "Check this install; `deep` adds live tool probes and a contract dry run",
 		group: "Inspect",
 		kinds: ["doctor"],
@@ -1402,12 +1426,13 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 				} catch (error) {
 					ctx.notice("error", `doctor failed: ${error instanceof Error ? error.message : String(error)}`);
 				}
-				ctx.render();
+				ctx.render?.();
 			})();
 		},
 	},
 	{
 		name: "upgrade",
+		acp: false,
 		description: "Review and approve a Clio Coder update, then restart when it succeeds",
 		group: "Configure",
 		kinds: ["upgrade"],
@@ -1423,6 +1448,7 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	},
 	{
 		name: "extensions",
+		acp: false,
 		description: "Inspect harness extensions or reload their commands, hooks and operator UI",
 		group: "Inspect",
 		// Harness navigation uses the shared overlay dispatcher, independently of recipe reload.
@@ -1437,11 +1463,12 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 		handle(command, ctx) {
 			if (command.kind !== "resources" || command.family !== "extensions") return;
 			if (command.action === "reload") reloadExtensionsCommand(ctx);
-			else ctx.openExtensions();
+			else ctx.openExtensions?.();
 		},
 	},
 	{
 		name: "share",
+		acp: { injectsUserTurn: true },
 		description: "Share a worker result with the main agent",
 		group: "Work",
 		kinds: ["share"],
@@ -1464,6 +1491,7 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	},
 	{
 		name: "archive",
+		acp: {},
 		description: "Export or import a full Clio archive",
 		group: "Session",
 		kinds: ["archive-export", "archive-import", "archive-usage"],
@@ -1539,6 +1567,7 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	},
 	{
 		name: "run",
+		acp: { streams: "dispatch" },
 		description: "Run a fleet agent on a task",
 		group: "Work",
 		kinds: ["run", "run-usage"],
@@ -1630,12 +1659,13 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 					},
 					options,
 				);
-				ctx.render();
+				ctx.render?.();
 			})();
 		},
 	},
 	{
 		name: "delegate",
+		acp: { streams: "dispatch" },
 		description: "Hand a task to an external ACP agent",
 		group: "Work",
 		kinds: ["delegate", "delegate-usage"],
@@ -1684,12 +1714,13 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 					},
 					{ share, readOnly: command.readOnly === true },
 				);
-				ctx.render();
+				ctx.render?.();
 			})();
 		},
 	},
 	{
 		name: "btw",
+		acp: false,
 		description: "Ask a side question that never enters the session transcript",
 		group: "Work",
 		kinds: ["btw", "btw-usage"],
@@ -1708,11 +1739,12 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 				return;
 			}
 			if (command.kind !== "btw") return;
-			ctx.openSideQuestion(command.question);
+			ctx.openSideQuestion?.(command.question);
 		},
 	},
 	{
 		name: "draft",
+		acp: false,
 		description: "Draft 2-4 answers in parallel and pick the strongest",
 		group: "Work",
 		kinds: ["draft", "draft-usage"],
@@ -1733,11 +1765,12 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 				return;
 			}
 			if (command.kind !== "draft") return;
-			ctx.openDraft(command.request, command.count);
+			ctx.openDraft?.(command.request, command.count);
 		},
 	},
 	{
 		name: "oracle",
+		acp: { streams: "dispatch", injectsUserTurn: true },
 		description: "Have a read-only advisor challenge a question against settled decisions",
 		group: "Work",
 		kinds: ["oracle", "oracle-usage"],
@@ -1758,13 +1791,14 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 			if (command.kind !== "oracle") return;
 			const operation = (async () => {
 				await handleOracle(command.question, ctx);
-				ctx.render();
+				ctx.render?.();
 			})();
 			ctx.holdReplyFor?.(operation);
 		},
 	},
 	{
 		name: "council",
+		acp: { streams: "dispatch", promptTurn: true },
 		description: "Ask several read-only agents the same task, then vote or synthesize",
 		group: "Work",
 		kinds: ["council", "council-usage"],
@@ -1814,13 +1848,14 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 			ctx.echoOperatorCommand?.(command.source);
 			const operation = (async () => {
 				await handleCouncil(command.task, command.options, ctx);
-				ctx.render();
+				ctx.render?.();
 			})();
 			ctx.holdReplyFor?.(operation);
 		},
 	},
 	{
 		name: "interop",
+		acp: false,
 		description: "Inspect coding agents and adopt safe resources",
 		group: "Inspect",
 		kinds: ["agents"],
@@ -1835,6 +1870,7 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	},
 	{
 		name: "agents",
+		acp: false,
 		description: "Open the Library on Agents",
 		group: "Inspect",
 		kinds: [],
@@ -1854,17 +1890,22 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	},
 	{
 		name: "usage",
+		acp: false,
 		description: "Show subscription quota, credits, and session token and cost totals",
 		group: "Inspect",
 		kinds: ["usage"],
 		args: {},
 		fromArgs: fromArgsOrUsage("usage", { kind: "usage" }),
 		handle(_command, ctx) {
-			ctx.openUsage();
+			ctx.openUsage?.();
 		},
 	},
 	{
 		name: "context",
+		acp: {
+			subcommands: ["compact", "recall", "init", "refresh", "reset", "recover"],
+			promptTurnSubcommands: ["recover"],
+		},
 		description: "Show the context window, or manage session and project context",
 		group: "Inspect",
 		kinds: ["context-view", "compact", "context-recover", "context-recall", "init", "context-clear", "context-refresh"],
@@ -1944,7 +1985,7 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 		handle(command, ctx) {
 			switch (command.kind) {
 				case "context-view":
-					ctx.openContextView();
+					ctx.openContextView?.();
 					return;
 				case "compact":
 					ctx.runCompact(command.instructions);
@@ -1980,6 +2021,7 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	},
 	{
 		name: "fleet",
+		acp: false,
 		description: "Show live fleet runs, or preview and run a fleet contract",
 		group: "Work",
 		kinds: ["fleet", "fleet-run", "fleet-run-usage"],
@@ -2030,6 +2072,7 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	},
 	{
 		name: "decisions",
+		acp: false,
 		description: "Show settled interview decisions and operator revisions",
 		group: "Inspect",
 		kinds: ["decisions"],
@@ -2038,11 +2081,12 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 			return { kind: "decisions" };
 		},
 		handle(_command, ctx) {
-			ctx.openDecisions();
+			ctx.openDecisions?.();
 		},
 	},
 	{
 		name: "tasks",
+		acp: { subcommands: ["add", "hand", "done", "drop"], injectsUserTurn: true },
 		description: "Show the session task board, or manage project tasks",
 		group: "Inspect",
 		kinds: ["tasks", "tasks-add", "tasks-hand", "tasks-done", "tasks-drop"],
@@ -2096,7 +2140,7 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 		},
 		handle(command, ctx) {
 			if (command.kind === "tasks") {
-				ctx.openTasks();
+				ctx.openTasks?.();
 				return;
 			}
 			if (!ctx.userTasks) {
@@ -2134,6 +2178,7 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	},
 	{
 		name: "memory",
+		acp: { subcommands: ["seed"] },
 		description: "Inspect, promote, or seed task memory",
 		group: "Inspect",
 		kinds: ["memory", "memory-seed"],
@@ -2145,7 +2190,7 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 		},
 		handle(command, ctx) {
 			if (command.kind === "memory") {
-				ctx.openMemory();
+				ctx.openMemory?.();
 				return;
 			}
 			if (command.kind !== "memory-seed") return;
@@ -2167,6 +2212,7 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	},
 	{
 		name: "view",
+		acp: false,
 		description: "Browse session artifacts and verify receipts",
 		group: "Inspect",
 		kinds: ["view", "view-verify", "view-usage"],
@@ -2190,7 +2236,7 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 			const entry = BUILTIN_SLASH_COMMANDS.find((e) => e.name === "view");
 			if (!entry) return;
 			if (command.kind === "view") {
-				ctx.openView(command.filter);
+				ctx.openView?.(command.filter);
 				return;
 			}
 			if (command.kind === "view-usage") {
@@ -2198,6 +2244,10 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 				return;
 			}
 			if (command.kind !== "view-verify") return;
+			if (!ctx.verifyReceipt) {
+				ctx.notice("warn", "Receipt verification is unavailable on this surface");
+				return "rejected";
+			}
 			const result = ctx.verifyReceipt(command.runId);
 			const block = formatReceiptVerificationBlock(command.runId, result);
 			if (result.ok) {
@@ -2214,6 +2264,7 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	},
 	{
 		name: "peer",
+		acp: false,
 		description: "Open a coding peer in a Clio-owned interactive pane",
 		group: "Work",
 		kinds: ["peer-pane", "peer-pane-usage"],
@@ -2273,6 +2324,7 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	},
 	{
 		name: "panes",
+		acp: false,
 		description: "Show pane status, watch a run in a pane, or open a utility pane",
 		group: "Inspect",
 		kinds: ["panes", "panes-show", "panes-open", "panes-zoom", "panes-close", "panes-usage"],
@@ -2345,7 +2397,7 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 			if (command.kind === "panes") {
 				runLocal(async () => {
 					for (const line of formatPanesStatus(panes.status())) ctx.io.stdout(`${line}\n`);
-					ctx.render();
+					ctx.render?.();
 				});
 				return;
 			}
@@ -2387,7 +2439,7 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 						// notification. It remains visible when no pane was ever created and
 						// reuses the exact doctor/tools diagnostic including the install hint.
 						ctx.io.stdout(`${result.detail}\n`);
-						ctx.render();
+						ctx.render?.();
 					} else {
 						ctx.notice("warn", result.reason);
 					}
@@ -2423,6 +2475,7 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	},
 	{
 		name: "files",
+		acp: false,
 		description: "Show or hide the files pane; picks land in the composer as @ mentions",
 		group: "Inspect",
 		kinds: ["files", "files-usage"],
@@ -2477,7 +2530,7 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 					ctx.notice("info", "files pane closed");
 				} else if (result.status === "missing-binary") {
 					ctx.io.stdout(`${result.detail}\n`);
-					ctx.render();
+					ctx.render?.();
 				} else {
 					ctx.notice("warn", result.reason);
 				}
@@ -2486,6 +2539,7 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	},
 	{
 		name: "music",
+		acp: false,
 		description: "Show or hide the focus-radio music pane (cliamp in a herdr dock)",
 		group: "Inspect",
 		kinds: ["music", "music-station", "music-usage"],
@@ -2552,6 +2606,7 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	},
 	{
 		name: "thinking",
+		acp: false,
 		description: "Set the chat thinking level",
 		group: "Configure",
 		kinds: ["thinking-set", "thinking-picker"],
@@ -2576,11 +2631,12 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 			} else {
 				ctx.notice("error", "thinking level cannot be set right now");
 			}
-			ctx.render();
+			ctx.render?.();
 		},
 	},
 	{
 		name: "model",
+		acp: false,
 		description: "Pick a model, or set one by name",
 		group: "Configure",
 		kinds: ["model", "model-set"],
@@ -2596,7 +2652,7 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 		},
 		handle(command, ctx) {
 			if (command.kind === "model") {
-				ctx.openModel();
+				ctx.openModel?.();
 				return;
 			}
 			if (command.kind !== "model-set") return;
@@ -2610,14 +2666,14 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 				const result = resolveModelReference(command.pattern, ctx.providers);
 				if (!result.ref) {
 					ctx.notice("error", result.error ?? `no match for "${command.pattern}"`);
-					ctx.render();
+					ctx.render?.();
 					return;
 				}
 				if (result.warning) ctx.notice("warn", result.warning);
 				// "pending" means the scope dialog is up: it says what landed and
 				// where, so announcing a swap here would be announcing a choice the
 				// operator has not made yet.
-				if (ctx.applyModelRef(result.ref) === "applied") {
+				if (ctx.applyModelRef?.(result.ref) === "applied") {
 					const suffix = result.ref.thinkingLevel ? ` thinking=${result.ref.thinkingLevel}` : "";
 					const status = ctx.providers.list().find((candidate) => candidate.target.id === result.ref?.target);
 					const caps = status ? resolveModelCapabilities(status, result.ref.model, ctx.providers.knowledgeBase) : null;
@@ -2627,12 +2683,13 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 						`active this session: ${result.ref.target}/${result.ref.model}${suffix} · image input ${imageInput}`,
 					);
 				}
-				ctx.render();
+				ctx.render?.();
 			})();
 		},
 	},
 	{
 		name: "config",
+		acp: false,
 		description: "Run setup and apply saved changes to this session",
 		group: "Configure",
 		kinds: ["config"],
@@ -2652,6 +2709,7 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	},
 	{
 		name: "settings",
+		acp: false,
 		description: "Open interactive settings",
 		group: "Configure",
 		kinds: ["settings"],
@@ -2676,11 +2734,12 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 			return { kind: "settings", area, ...(parsed.positionals[1] ? { group: parsed.positionals[1] } : {}) };
 		},
 		handle(command, ctx) {
-			if (command.kind === "settings") ctx.openSettings(command.area, command.group);
+			if (command.kind === "settings") ctx.openSettings?.(command.area, command.group);
 		},
 	},
 	{
 		name: "resume",
+		acp: false,
 		description: "Resume a past session; an id or unique id prefix skips the picker",
 		group: "Session",
 		kinds: ["resume"],
@@ -2691,22 +2750,24 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 			return target ? { kind: "resume", target } : { kind: "resume" };
 		},
 		handle(command, ctx) {
-			if (command.kind === "resume") ctx.openResume(command.target);
+			if (command.kind === "resume") ctx.openResume?.(command.target);
 		},
 	},
 	{
 		name: "new",
+		acp: false,
 		description: "Start a fresh session",
 		group: "Session",
 		kinds: ["new"],
 		args: {},
 		fromArgs: fromArgsOrUsage("new", { kind: "new" }),
 		handle(_command, ctx) {
-			ctx.startNewSession();
+			ctx.startNewSession?.();
 		},
 	},
 	{
 		name: "handoff",
+		acp: false,
 		description: "Hand this session's working state to a fresh session for a stated goal",
 		group: "Session",
 		kinds: ["handoff", "handoff-usage"],
@@ -2725,33 +2786,36 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 				return;
 			}
 			if (command.kind !== "handoff") return;
-			ctx.startHandoff(command.goal);
+			ctx.startHandoff?.(command.goal);
 		},
 	},
 	{
 		name: "tree",
+		acp: false,
 		description: "Open session tree navigator",
 		group: "Session",
 		kinds: ["tree"],
 		args: {},
 		fromArgs: fromArgsOrUsage("tree", { kind: "tree" }),
 		handle(_command, ctx) {
-			ctx.openTree();
+			ctx.openTree?.();
 		},
 	},
 	{
 		name: "fork",
+		acp: false,
 		description: "Fork from an assistant turn",
 		group: "Session",
 		kinds: ["fork"],
 		args: {},
 		fromArgs: fromArgsOrUsage("fork", { kind: "fork" }),
 		handle(_command, ctx) {
-			ctx.openMessagePicker();
+			ctx.openMessagePicker?.();
 		},
 	},
 	{
 		name: "export",
+		acp: {},
 		description: "Export the transcript as HTML, or as Markdown for a .md path",
 		group: "Session",
 		kinds: ["export"],
@@ -2777,6 +2841,7 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 				{
 					...contextCommand,
 					name: "compact",
+					acp: false as const,
 					kinds: [],
 					description: "Shrink session context (alias for /context compact)",
 					args: { positionals: [...COMPACT_POSITIONALS] },
@@ -2883,7 +2948,7 @@ function reloadExtensionsCommand(ctx: SlashCommandContext): void {
 	const [level, text] = formatExtensionReloadNotice(outcome);
 	ctx.notice(level, text);
 	for (const line of outcome.lines) ctx.notice("warn", line);
-	if (outcome.status === "committed") ctx.openExtensions();
+	if (outcome.status === "committed") ctx.openExtensions?.();
 }
 
 export function parseSlashCommand(input: string): SlashCommand {
@@ -2952,7 +3017,7 @@ export function dispatchSlashCommand(command: SlashCommand, ctx: SlashCommandCon
 			};
 			if (ctx.showReference) ctx.showReference(card);
 			else ctx.io.stdout(`/${card.command} (${card.source})\n${card.text}\n`);
-			ctx.render();
+			ctx.render?.();
 			return "accepted";
 		}
 		// A template that exists and refused is not a typo. Its reason reaches the
@@ -2960,11 +3025,11 @@ export function dispatchSlashCommand(command: SlashCommand, ctx: SlashCommandCon
 		const refusal = expansion?.expanded === false ? expansion.refusal : undefined;
 		if (!refusal && isExtensionCommandToken(command.token) && ctx.operatorExtensions) {
 			const runtime = ctx.operatorExtensions;
-			const promptNames = ctx.listPrompts().items.map((prompt) => prompt.name);
+			const promptNames = (ctx.listPrompts?.().items ?? []).map((prompt) => prompt.name);
 			const row = runtime.commands(promptNames).find((row) => row.invocation === command.token);
 			if (!row?.available) {
 				ctx.notice("error", row?.reason ?? `/${command.token} is not an available extension command`);
-				ctx.render();
+				ctx.render?.();
 				return "rejected";
 			}
 			const args = command.text.slice(command.token.length + 1).trim();
@@ -2974,7 +3039,7 @@ export function dispatchSlashCommand(command: SlashCommand, ctx: SlashCommandCon
 					const output = await runtime.invoke(
 						command.token,
 						args,
-						ctx.listPrompts().items.map((prompt) => prompt.name),
+						(ctx.listPrompts?.().items ?? []).map((prompt) => prompt.name),
 					);
 					if (ctx.showExtensionOutput) ctx.showExtensionOutput(command.token, output);
 					else ctx.io.stdout(`${output.text}\n`);
@@ -2985,7 +3050,7 @@ export function dispatchSlashCommand(command: SlashCommand, ctx: SlashCommandCon
 			return "accepted";
 		}
 		ctx.notice("error", refusal ? refusal.message : `/${command.token} is not a command. Type /help for the list.`);
-		ctx.render();
+		ctx.render?.();
 		return "rejected";
 	}
 	if (command.kind === "usage-error") {
@@ -2996,7 +3061,7 @@ export function dispatchSlashCommand(command: SlashCommand, ctx: SlashCommandCon
 				? `Use ${ctx.keyboardActions.outputLabel()} to cycle Output style, or /settings interface to save a default`
 				: command.reason;
 		ctx.notice("error", `${reason}.${usage}`);
-		ctx.render();
+		ctx.render?.();
 		return "rejected";
 	}
 	const entry = HANDLER_BY_KIND.get(command.kind);

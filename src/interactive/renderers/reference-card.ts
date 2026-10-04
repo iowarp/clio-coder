@@ -1,5 +1,5 @@
 import { wrapTextWithAnsi } from "../../engine/tui.js";
-import type { PromptReferenceCard } from "../slash-commands.js";
+import type { PromptReferenceCard } from "../../session-control/slash-commands.js";
 import { clioTheme, GLYPH } from "../theme/index.js";
 
 /** Matches the transcript's prose gutter so the card's body aligns with turns. */

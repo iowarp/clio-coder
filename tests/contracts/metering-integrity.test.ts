@@ -8,8 +8,8 @@ import {
 	setGlobalDefaultMaxOutputTokens,
 } from "../../src/engine/apis/output-budget.js";
 import type { AgentMessage } from "../../src/engine/types.js";
-import { estimatedUsageForInterruptedTurn } from "../../src/interactive/chat-loop-messages.js";
 import { reseedSessionUsageFromLedger } from "../../src/interactive/session-usage-reseed.js";
+import { estimatedUsageForInterruptedTurn } from "../../src/session-control/chat-loop-messages.js";
 
 const zeroUsage = {
 	input: 0,

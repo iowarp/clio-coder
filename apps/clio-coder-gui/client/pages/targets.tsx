@@ -72,7 +72,7 @@ export function TargetsPage({ client, view }: { client: Client; view: "targets" 
 			{view === "targets" ? (
 				<>
 					<p>Use a connection for chat and fleet, inspect its current health, or add a new connection.</p>
-					<p>Clio’s probe checks all configured endpoints before returning the selected connection’s result.</p>
+					<p>Clio’s probe checks the selected connection.</p>
 					{targets.isPending && id && <p>Reading connections…</p>}
 					{targets.error && <p role="alert">{targets.error.message}</p>}
 					{targets.data?.truncated && <PanelEmpty>{emptyState.bounded("connections", "Later")}</PanelEmpty>}
@@ -126,13 +126,13 @@ export function TargetsPage({ client, view }: { client: Client; view: "targets" 
 								</p>
 								<p className="panel-marks">
 									<StatusMark
-										tone={target.available ? "success" : "warn"}
-										label={target.available ? "Available" : "Unavailable"}
+										tone={target.health === "unknown" ? "unverified" : target.available ? "success" : "warn"}
+										label={target.health === "unknown" ? "Availability unknown" : target.available ? "Available" : "Unavailable"}
 									/>
 									<span>Health {humanizeKey(target.health).toLowerCase()}</span>
 								</p>
-								<p className="config-path">{target.url ?? "Runtime default endpoint"}</p>
-								<p>Default model: {target.defaultModel ?? "Not configured"}</p>
+								<p className="config-path">{target.url ?? "Endpoint not reported"}</p>
+								<p>Default model: {target.defaultModel ?? "Not reported"}</p>
 								<details>
 									<summary>
 										Known models · {target.models.length}

@@ -1,9 +1,9 @@
 import { doesNotMatch, match, ok, strictEqual } from "node:assert/strict";
 import { test } from "node:test";
 import { stripTerminalSequences } from "../../src/engine/tui.js";
-import type { ChatLoopEvent } from "../../src/interactive/chat-loop.js";
 import { createChatPanel } from "../../src/interactive/chat-panel.js";
 import type { ApprovalRequestView } from "../../src/interactive/permission-overlay.js";
+import type { ChatLoopEvent } from "../../src/session-control/chat-loop.js";
 
 // BT-003: after Enter on an `Approve system change` card the only surviving row
 // was `$ ran \`git restore .\` · exit 0 …`, identical to a call that never asked.

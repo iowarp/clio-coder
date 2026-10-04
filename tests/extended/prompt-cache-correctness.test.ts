@@ -16,17 +16,17 @@ import {
 	readPromptCompileManifest,
 } from "../../src/domains/session/prompt-manifest.js";
 import { createEngineAgent } from "../../src/engine/agent.js";
-import { toolSignatureFromState } from "../../src/interactive/chat-loop-messages.js";
 import { buildReplayAgentMessagesFromTurns } from "../../src/interactive/chat-renderer.js";
+import { toolSignatureFromState } from "../../src/session-control/chat-loop-messages.js";
 import {
 	attachedToolSchemaBytes,
 	attachedToolSchemasFromState,
 	type MainPromptCacheIdentityInput,
 	mainPromptCacheIdentity,
-} from "../../src/interactive/prompt-cache-identity.js";
-import { createTurnContext } from "../../src/interactive/turn-context.js";
-import type { TurnMiddleware } from "../../src/interactive/turn-middleware.js";
-import { type AgentRuntime, createTurnState } from "../../src/interactive/turn-state.js";
+} from "../../src/session-control/prompt-cache-identity.js";
+import { createTurnContext } from "../../src/session-control/turn-context.js";
+import type { TurnMiddleware } from "../../src/session-control/turn-middleware.js";
+import { type AgentRuntime, createTurnState } from "../../src/session-control/turn-state.js";
 import type { ToolRegistry } from "../../src/tools/registry.js";
 
 function identityInput(): MainPromptCacheIdentityInput {

@@ -1,10 +1,10 @@
 import { match, ok, strictEqual } from "node:assert/strict";
 import { test } from "node:test";
 import { stripTerminalSequences, visibleWidth } from "../../src/engine/tui.js";
-import { COUNCIL_SYNTHESIS_LABEL } from "../../src/interactive/council.js";
 import type { DispatchBoardRow } from "../../src/interactive/dispatch-board.js";
 import { createDispatchBoardView } from "../../src/interactive/dispatch-board.js";
 import { GLYPH } from "../../src/interactive/theme/index.js";
+import { COUNCIL_SYNTHESIS_LABEL } from "../../src/session-control/council.js";
 import { footerState } from "../harness/footer-fixture.js";
 
 test("council focus traverses only the members rendered in the current projection", () => {

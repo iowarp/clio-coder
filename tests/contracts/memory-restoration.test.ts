@@ -36,7 +36,7 @@ const audit: TaskMemorySnapshot = {
 		entry(
 			"tm-p-b",
 			"procedural",
-			"Source sampling shows captureRuntimeContextSnapshot identity lives near src/domains/session/context-accounting.ts (compactionThresholds, effectiveContextWindow) while TurnContext is defined in src/interactive/turn-context.ts; these are the seams to cite for budget/runtime contracts.",
+			"Source sampling shows captureRuntimeContextSnapshot identity lives near src/domains/session/context-accounting.ts (compactionThresholds, effectiveContextWindow) while TurnContext is defined in src/session-control/turn-context.ts; these are the seams to cite for budget/runtime contracts.",
 		),
 	],
 };

@@ -5,7 +5,7 @@ import type { PromptsContract } from "../../src/domains/prompts/contract.js";
 import type { ProvidersContract } from "../../src/domains/providers/contract.js";
 import { createEngineAgent } from "../../src/engine/agent.js";
 import { setGlobalDefaultMaxOutputTokens } from "../../src/engine/apis/output-budget.js";
-import { type CreateChatLoopDeps, createChatLoop } from "../../src/interactive/chat-loop.js";
+import { type CreateChatLoopDeps, createChatLoop } from "../../src/session-control/chat-loop.js";
 
 for (const api of ["openai-completions", "ollama-native"]) {
 	for (const { oversizedInput, unknownWindow } of [

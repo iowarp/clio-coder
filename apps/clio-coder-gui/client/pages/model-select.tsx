@@ -1,5 +1,5 @@
 import { type ReactNode, useState } from "react";
-import { type ModelOption, modelOptions, OTHER_MODEL } from "./model-options.js";
+import { type ModelOption, modelOptions, OTHER_MODEL } from "./model-picker-model.js";
 import "./model-select.css";
 
 /**

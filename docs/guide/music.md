@@ -1,6 +1,6 @@
 # Music Pane
 
-`/music` and `Alt+A` show cliamp, a terminal music player, in a Herdr dock below the Clio pane and play focus radio while Clio works. The pane can be hidden with the player still running. The feature is opt-in. `integrations.music.enabled` is `false` by default, and a second switch, `integrations.music.agentControl`, lets Clio start, pause, stop and skip the station herself through a `music` tool. Source lives in `src/domains/mux/cliamp/`, the tool in `src/tools/music.ts`, and the command in `src/interactive/slash-commands.ts`.
+`/music` and `Alt+A` show cliamp, a terminal music player, in a Herdr dock below the Clio pane and play focus radio while Clio works. The pane can be hidden with the player still running. The feature is opt-in. `integrations.music.enabled` is `false` by default, and a second switch, `integrations.music.agentControl`, lets Clio start, pause, stop and skip the station herself through a `music` tool. Source lives in `src/domains/mux/cliamp/`, the tool in `src/tools/music.ts`, and the command in `src/session-control/slash-commands.ts`.
 
 Music is an interactive-session feature. Headless runs, `clio-coder acp` sessions and sessions started without the pane layer have no music pane.
 

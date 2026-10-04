@@ -63,7 +63,7 @@ import {
 	createWorkerStream,
 	type WorkerEntryState,
 	type WorkerReceiptFacts,
-} from "../../src/interactive/worker-stream.js";
+} from "../../src/session-control/worker-stream.js";
 
 import { fixtureEnvelope, fixtureReceiptDraft } from "../harness/receipt.js";
 

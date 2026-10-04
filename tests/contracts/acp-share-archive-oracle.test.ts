@@ -9,7 +9,7 @@ import type { DispatchRequest } from "../../src/domains/dispatch/index.js";
 import { createShareBundle } from "../../src/domains/share/extension.js";
 import { archiveCommandHost } from "../../src/domains/share/index.js";
 import { type AcpCommandHost, acpCommandControl } from "../../src/engine/acp/commands.js";
-import { followWorkerRuns } from "../../src/interactive/worker-run-ledger.js";
+import { followWorkerRuns } from "../../src/session-control/worker-run-ledger.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
 
 const refuse = (member: string) =>

@@ -4,6 +4,7 @@ import { FleetItem, HealthItem } from "./fleet-events.js";
 import { Permission } from "./permissions.js";
 import { SessionConfig } from "./session-config.js";
 import { SessionTelemetry } from "./session-telemetry.js";
+import { AcpTurnMetaSchema, AcpUsageMetaSchema } from "./wire.js";
 
 const closed = { additionalProperties: false };
 const string = Type.String();
@@ -85,17 +86,10 @@ export const SessionSummary = Type.Object(
 	closed,
 );
 export type SessionSummary = Static<typeof SessionSummary>;
-export const Usage = Type.Object(
-	{
-		input: Type.Integer({ minimum: 0 }),
-		output: Type.Integer({ minimum: 0 }),
-		cacheRead: Type.Integer({ minimum: 0 }),
-		cacheWrite: Type.Integer({ minimum: 0 }),
-		reasoning: Type.Integer({ minimum: 0 }),
-		// Clio reports its own cost; the contract has to admit it or Value.Clean drops it before a turn records it.
-		costUsd: Type.Optional(Type.Number({ minimum: 0 })),
-	},
-	closed,
+export const Usage = Type.Pick(
+	AcpUsageMetaSchema,
+	["input", "output", "cacheRead", "cacheWrite", "reasoning", "costUsd"],
+	{ additionalProperties: false },
 );
 export type Usage = Static<typeof Usage>;
 export const Provenance = Type.Array(
@@ -152,14 +146,7 @@ export const TimelineItem = Type.Object(
 	closed,
 );
 export type TimelineItem = Static<typeof TimelineItem>;
-export const TurnDetails = Type.Object(
-	{
-		model: Type.Optional(Type.String({ maxLength: 256 })),
-		outputTokensPerSecond: Type.Optional(Type.Number({ minimum: 0 })),
-		ttftMs: Type.Optional(Type.Number({ minimum: 0 })),
-	},
-	closed,
-);
+export const TurnDetails = AcpTurnMetaSchema;
 export const Turn = Type.Object(
 	{
 		id: Id,

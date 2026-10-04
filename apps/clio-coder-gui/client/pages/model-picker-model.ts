@@ -1,11 +1,11 @@
+import { ACP_TARGET_MODEL_LIMIT } from "../../contracts/wire.js";
+
+export { ACP_TARGET_MODEL_LIMIT, MODEL_TARGET_PATHS } from "../../contracts/wire.js";
 // The model picker's decisions: which ids a target offers, how the saved value sits among them, and
 // which setting names the target a model field belongs to. Pure, so node:test covers it.
 
 /** Not a model id anyone can save: an id is a non-empty string without a NUL byte. */
 export const OTHER_MODEL = "\u0000other";
-
-/** Clio Coder's ACP target list carries at most this many models per target (src/engine/acp/server.ts). */
-export const ACP_TARGET_MODEL_LIMIT = 64;
 
 export interface ModelOption {
 	readonly value: string;
@@ -41,17 +41,6 @@ export function modelOptions(
 /** True when the catalog is as long as the wire allows, so a model the operator wants may be cut. */
 export const catalogMayBeCut = (models: readonly string[], limit = ACP_TARGET_MODEL_LIMIT): boolean =>
 	models.length >= limit;
-
-/**
- * The target setting a model setting belongs to. Compaction runs on the orchestrator, so its model
- * is one of the chat target's.
- */
-export const MODEL_TARGET_PATHS: Readonly<Record<string, string>> = {
-	"chat.model": "chat.target",
-	"fleet.default.model": "fleet.default.target",
-	"context.memory.model": "context.memory.target",
-	"context.compaction.model": "chat.target",
-};
 
 /** After a target change, keep the model only if the new target lists it; otherwise use its default. */
 export function modelAfterTargetChange(model: string, models: readonly string[] | null): string {

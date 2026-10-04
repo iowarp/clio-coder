@@ -6,7 +6,7 @@ import { WORKER_LIVE_TAIL_MAX_BYTES } from "../../src/domains/observability/work
 import { stripTerminalSequences, visibleWidth } from "../../src/engine/tui.js";
 import { renderWorkerEntryLines } from "../../src/interactive/renderers/worker-entry.js";
 import { transcriptDetail } from "../../src/interactive/transcript-detail.js";
-import { createWorkerStream, type WorkerReceiptFacts } from "../../src/interactive/worker-stream.js";
+import { createWorkerStream, type WorkerReceiptFacts } from "../../src/session-control/worker-stream.js";
 import { fixtureEnvelope, fixtureReceiptDraft } from "../harness/receipt.js";
 
 /**

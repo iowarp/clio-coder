@@ -1,7 +1,7 @@
 import { match, strictEqual } from "node:assert/strict";
 import { it } from "node:test";
 import { mergeHandoffDecisions, renderHandoffDocument } from "../../src/domains/session/handoff.js";
-import { packOracleDigest } from "../../src/interactive/oracle.js";
+import { packOracleDigest } from "../../src/session-control/oracle.js";
 import { agentDecision } from "../harness/decision.js";
 
 it("handoff and oracle preserve the agent's alternatives and rationale", async () => {

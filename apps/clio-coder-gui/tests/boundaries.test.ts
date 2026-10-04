@@ -107,6 +107,8 @@ function violations(file: string, source: string): string[] {
 			name !== "server/process-policy.ts"
 		)
 			errors.push("Worker outside chokepoint");
+		if (production && /^(?:client|contracts)\//.test(name) && /^(node:)/.test(specifier) && !typeOnly)
+			errors.push("Node runtime dependency on browser surface");
 		if (!specifier.startsWith(".")) return;
 		const target = resolve(dirname(file), specifier).replace(/\.js$/, ".ts");
 		const localTarget = relative(app, target),
@@ -119,9 +121,14 @@ function violations(file: string, source: string): string[] {
 			names.some((symbol) => symbol === "createStdioTransport" || symbol === "*")
 		)
 			errors.push("ACP process creation outside chokepoint");
+		if (production && /^(?:client|contracts)\//.test(name) && localTarget === "server/clio/http-shims.ts" && !typeOnly)
+			errors.push("process shim on browser surface");
 		if (rootTarget.startsWith("src/") || rootTarget.startsWith("tests/")) {
 			if (!existsSync(target)) errors.push(`root target does not exist: ${rootTarget}`);
-			if (name === "server/clio/http-shims.ts") {
+			if (name === "server/clio/wire-shims.ts") {
+				if (rootTarget !== "src/engine/acp/types.ts" || names.some((symbol) => symbol !== "*"))
+					errors.push(`wire shim allowlist: ${rootTarget} ${names}`);
+			} else if (name === "server/clio/http-shims.ts") {
 				const allowed = httpModules.get(rootTarget);
 				if (!allowed || names.some((symbol) => !allowed.has(symbol)))
 					errors.push(`HTTP shim allowlist: ${rootTarget} ${names}`);

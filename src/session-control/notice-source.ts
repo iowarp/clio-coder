@@ -22,3 +22,6 @@ export type NoticeSource = (typeof NOTICE_SOURCES)[number];
 export function isNoticeSource(value: unknown): value is NoticeSource {
 	return typeof value === "string" && (NOTICE_SOURCES as readonly string[]).includes(value);
 }
+
+/** Severity of a transcript notice, shared by every surface that reports one. */
+export type NoticeLevel = "info" | "success" | "warn" | "error";

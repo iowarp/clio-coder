@@ -1,3 +1,22 @@
+import type {
+	AcpCommandArgsSpec,
+	AcpCommandCatalog,
+	AcpCommandDescriptor,
+	AcpCommandFlagSpec,
+	AcpCommandPositionalSpec,
+	AcpCommandResult,
+	AcpCommandsCapability,
+} from "./types.js";
+
+export type {
+	AcpCommandArgsSpec,
+	AcpCommandCatalog,
+	AcpCommandDescriptor,
+	AcpCommandFlagSpec,
+	AcpCommandPositionalSpec,
+	AcpCommandResult,
+} from "./types.js";
+
 /**
  * The operator command catalog, projected onto ACP.
  *
@@ -7,25 +26,20 @@
  * `sessionUpdate` kind or a top-level response field, so protocolVersion stays
  * at 1.
  *
- * The registry in `src/interactive/slash-commands.ts` owns 40 commands. Most of
- * them exist to open a full-screen overlay and have no result a wire client
- * could render, and several reach `ctx.keyboardActions`, which a process with
- * no TUI does not have. So this module does not forward what a client asks for:
- * it forwards what {@link ACP_COMMAND_RULES} names, and refuses everything
- * else before a line is ever handed to the parser. An allowlist is the whole
- * security posture here, because `dispatchSlashCommand` on peer-chosen text
- * would reach `/quit`, `/archive import --force`, and the editor.
+ * Each definition in the shared session command registry owns its ACP
+ * admission and turn/stream behavior. This adapter projects that metadata and
+ * supplies the host's operations and output sink.
  */
 import type { PendingSkillRequest } from "../../core/skill-activation.js";
-import type { NoticeLevel } from "../../interactive/command-output.js";
-import type { SlashCommand, SlashCommandContext, SlashCommandKind } from "../../interactive/slash-commands.js";
+import type { NoticeLevel } from "../../session-control/notice-source.js";
+import type { SlashCommand, SlashCommandContext, SlashCommandKind } from "../../session-control/slash-commands.js";
 import {
 	BUILTIN_SLASH_COMMANDS,
 	commandReference,
 	dispatchSlashCommand,
 	parseSlashCommand,
-} from "../../interactive/slash-commands.js";
-import type { CommandArgsSpec, CommandFlagSpec, CommandPositionalSpec } from "../../interactive/slash-spec.js";
+} from "../../session-control/slash-commands.js";
+import type { CommandArgsSpec, CommandFlagSpec, CommandPositionalSpec } from "../../session-control/slash-spec.js";
 import { AcpRequestError } from "./errors.js";
 import { ACP_COMMANDS_INVOKE_METHOD, ACP_COMMANDS_LIST_METHOD, ACP_COMMANDS_META_KEY } from "./types.js";
 
@@ -107,31 +121,9 @@ export interface AcpCommandRule {
  * reaches `keyboardActions`, an overlay, or the editor) or already reachable
  * over ACP by other means, and is refused by name.
  */
-export const ACP_COMMAND_RULES: ReadonlyArray<AcpCommandRule> = [
-	{ name: "eggs" },
-	{ name: "mcp" },
-	{ name: "doctor" },
-	// `/share` and `/oracle` both end in `submitOperatorNote`.
-	{ name: "share", injectsUserTurn: true },
-	{ name: "archive" },
-	{ name: "run", streams: "dispatch" },
-	{ name: "delegate", streams: "dispatch" },
-	{ name: "oracle", streams: "dispatch", injectsUserTurn: true },
-	{ name: "council", streams: "dispatch", promptTurn: true },
-	// `/skill <name>` submits the expanded skill as a user turn; `/skill off` does not.
-	{ name: "skill", injectsUserTurn: true },
-	// `recover` continues the engine with no new input, so its model output
-	// streams inside the prompt turn that asked for it.
-	{
-		name: "context",
-		subcommands: ["compact", "recall", "init", "refresh", "reset", "recover"],
-		promptTurnSubcommands: ["recover"],
-	},
-	// `/tasks hand` submits the handoff text as a user turn; add/done/drop do not.
-	{ name: "tasks", subcommands: ["add", "hand", "done", "drop"], injectsUserTurn: true },
-	{ name: "memory", subcommands: ["seed"] },
-	{ name: "export" },
-];
+export const ACP_COMMAND_RULES: ReadonlyArray<AcpCommandRule> = BUILTIN_SLASH_COMMANDS.flatMap((entry) =>
+	entry.acp === false ? [] : [{ name: entry.name, ...entry.acp }],
+);
 
 /** Host capabilities required by each advertised operation. Grammar stays in the slash registry. */
 const COMMAND_REQUIREMENTS: Record<string, ReadonlyArray<keyof AcpCommandHost>> = {
@@ -186,50 +178,6 @@ export const ACP_COMMANDS_CAPABILITY = {
 /* -------------------------------------------------------------------------- */
 /* Catalog projection                                                          */
 /* -------------------------------------------------------------------------- */
-
-export interface AcpCommandFlagSpec {
-	name: string;
-	takesValue?: boolean;
-	repeatable?: boolean;
-	values?: string[];
-	valueName?: string;
-	completionSlot?: string;
-}
-
-export interface AcpCommandPositionalSpec {
-	name: string;
-	required: boolean;
-	values?: string[];
-	rest?: boolean;
-	completionSlot?: string;
-}
-
-export interface AcpCommandArgsSpec {
-	flags?: AcpCommandFlagSpec[];
-	positionals?: AcpCommandPositionalSpec[];
-	subcommands?: Record<string, AcpCommandArgsSpec>;
-}
-
-export interface AcpCommandDescriptor {
-	name: string;
-	summary: string;
-	/** The registry's own usage line, already rendered from the grammar below. */
-	usage: string;
-	group: string;
-	args: AcpCommandArgsSpec;
-	subcommandSummaries?: Record<string, string>;
-	/** The bare command is refused; only the projected subcommands are admitted. */
-	requiresSubcommand?: true;
-	streams?: "dispatch";
-	injectsUserTurn?: true;
-	promptTurn?: true;
-	promptTurnSubcommands?: string[];
-}
-
-export interface AcpCommandCatalog {
-	version: 1;
-	commands: AcpCommandDescriptor[];
-}
 
 function projectValues(values: ReadonlyArray<string> | undefined): string[] | undefined {
 	if (values === undefined || values.length === 0) return undefined;
@@ -433,18 +381,8 @@ export type AcpPromptLineVerdict =
 	| { kind: "reference"; lines: string[] }
 	| { kind: "refuse"; code: "unknown_command" | "command_unavailable"; message: string };
 
-export interface AcpCommandResult {
-	level: NoticeLevel;
-	lines: string[];
-}
-
 /** A result's level is the loudest notice the command emitted, so the levels need an order. */
 const NOTICE_LEVELS: ReadonlyArray<NoticeLevel> = ["info", "success", "warn", "error"];
-
-/** A handler that reaches one of these was dispatched by mistake; failing loudly beats handing it undefined. */
-function unreachable(member: string): never {
-	throw new Error(`acp commands: ${member} is not reachable from an allowlisted command`);
-}
 
 /** Every refusal on this surface is the client's mistake, so they all carry one shape. */
 function invalid(reason: string, message: string): AcpRequestError {
@@ -564,7 +502,7 @@ export function invokeAcpCommand(
 			);
 	}
 	const pending: Promise<void>[] = [];
-	const ctx = headlessContext(host, notice, push, pending);
+	const ctx = sessionCommandContext(host, notice, push, pending);
 	let outcome: ReturnType<typeof dispatchSlashCommand>;
 	try {
 		outcome = dispatchSlashCommand(parsed, ctx);
@@ -595,15 +533,11 @@ function isHostReport(value: unknown): value is AcpHostReport {
 /**
  * A `SlashCommandContext` with no terminal behind it.
  *
- * `echoOperatorCommand`, `showReference` and `showDoctor` are left undefined on
- * purpose: each is optional precisely so a host without a chat panel can omit
- * it, and the registry falls back to `io.stdout` or to nothing. `render` is a
- * required member rather than an optional one, so it is a no-op here: there is
- * no frame to schedule. The members below that call `unreachable` belong to
- * commands the allowlist does not expose; they are typed as required by the
- * context, not reachable by any line this module will build.
+ * Presentation callbacks are optional adapter ports. ACP supplies only
+ * session operations and an output sink; admitted commands use their neutral
+ * output fallbacks without constructing terminal behavior.
  */
-function headlessContext(
+function sessionCommandContext(
 	host: AcpCommandHost,
 	notice: (level: NoticeLevel, text: string) => void,
 	push: (text: string) => void,
@@ -738,29 +672,6 @@ function headlessContext(
 				expansion.pendingSkillRequests.length > 0 ? { pendingSkillRequests: expansion.pendingSkillRequests } : {},
 			);
 		},
-		render: () => {},
-		listPrompts: () => unreachable("listPrompts"),
-		listAgents: () => unreachable("listAgents"),
-		shutdown: () => unreachable("shutdown"),
-		openUsage: () => unreachable("openUsage"),
-		openSideQuestion: () => unreachable("openSideQuestion"),
-		openDraft: () => unreachable("openDraft"),
-		startHandoff: () => unreachable("startHandoff"),
-		openContextView: () => unreachable("openContextView"),
-		openTasks: () => unreachable("openTasks"),
-		openDecisions: () => unreachable("openDecisions"),
-		openMemory: () => unreachable("openMemory"),
-		openView: () => unreachable("openView"),
-		openModel: () => unreachable("openModel"),
-		applyModelRef: () => unreachable("applyModelRef"),
-		openSettings: () => unreachable("openSettings"),
-		openResume: () => unreachable("openResume"),
-		startNewSession: () => unreachable("startNewSession"),
-		openTree: () => unreachable("openTree"),
-		openMessagePicker: () => unreachable("openMessagePicker"),
-		openHelp: () => unreachable("openHelp"),
-		openExtensions: () => unreachable("openExtensions"),
-		verifyReceipt: () => unreachable("verifyReceipt"),
 	};
 }
 
@@ -788,7 +699,7 @@ export interface AcpCommandControl {
 	/** True when this command, or its subcommand in `argv[0]`, must run inside a `session/prompt` turn; absent reads as false. */
 	promptTurn?(command: unknown, argv?: unknown): boolean;
 	/** Announced verbatim under `clio-coder/commands`. */
-	capability: Readonly<Record<string, unknown>>;
+	capability: Partial<AcpCommandsCapability> & { count?: number };
 	/** Screen a prompt line that did not name an admitted command. */
 	screenPrompt?(text: string): AcpPromptLineVerdict;
 	/** Names of the loaded prompt templates; read per call because a library reload changes them. */

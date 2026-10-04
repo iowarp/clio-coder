@@ -13,7 +13,7 @@ import {
 import { readLibraryInventory } from "../../src/domains/resources/library-inventory.js";
 import { loadSkills, parsePendingSkillRequests } from "../../src/domains/resources/skills/loader.js";
 import { reloadPluginResourcesAndNotify } from "../../src/entry/plugin-reload.js";
-import { createPendingSkillToolPolicy } from "../../src/interactive/chat-loop-messages.js";
+import { createPendingSkillToolPolicy } from "../../src/session-control/chat-loop-messages.js";
 import { createContextTool } from "../../src/tools/context/index.js";
 import { trustProjectPackages } from "../harness/project-trust.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";

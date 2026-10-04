@@ -9,7 +9,7 @@
 
 import type { Component, OverlayHandle, TUI } from "../../engine/tui.js";
 import { isKeyRelease, matchesKey, truncateToWidth } from "../../engine/tui.js";
-import type { QueuedChatMessage } from "../chat-loop.js";
+import type { QueuedChatMessage } from "../../session-control/chat-loop.js";
 import { buildHint, fitRow, selectionLabel, selectionMark, showClioOverlayFrame } from "../overlay-frame.js";
 import { clioTheme, GLYPH } from "../theme/index.js";
 

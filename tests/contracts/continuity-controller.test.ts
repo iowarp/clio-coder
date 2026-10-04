@@ -8,7 +8,10 @@ import { isSessionEntry, type SessionEntry } from "../../src/domains/session/ent
 import { createEngineAgent } from "../../src/engine/agent.js";
 import type { EngineModel } from "../../src/engine/types.js";
 import { createWorkerSafety } from "../../src/engine/worker-tools.js";
-import { ContinuityController, type ContinuityReductionHooks } from "../../src/interactive/continuity-controller.js";
+import {
+	ContinuityController,
+	type ContinuityReductionHooks,
+} from "../../src/session-control/continuity-controller.js";
 import { resolveAgentTools } from "../../src/tools/agent-tools.js";
 import { registerAllTools } from "../../src/tools/bootstrap.js";
 import { createRegistry } from "../../src/tools/registry.js";

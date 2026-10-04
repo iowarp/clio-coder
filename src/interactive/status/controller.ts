@@ -2,9 +2,13 @@ import { BusChannels, isRunAbortedPayload } from "../../core/bus-events.js";
 import type { ClioSettings } from "../../core/config.js";
 import type { SafeEventBus } from "../../core/event-bus.js";
 import type { ProvidersContract } from "../../domains/providers/index.js";
-import type { ChatLoop, ChatLoopEvent } from "../chat-loop.js";
+import type { ChatLoop, ChatLoopEvent } from "../../session-control/chat-loop.js";
+import {
+	type AgentStatus,
+	type AgentStatusChangedPayload,
+	INITIAL_STATUS,
+} from "../../session-control/status-types.js";
 import { reduceStatus, type StatusInputEvent } from "./state-machine.js";
-import { type AgentStatus, type AgentStatusChangedPayload, INITIAL_STATUS } from "./types.js";
 import { TIER_THRESHOLDS_MS } from "./watchdog.js";
 
 export interface StatusControllerDeps {

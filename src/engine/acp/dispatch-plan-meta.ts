@@ -1,3 +1,8 @@
+import type { AcpDispatchPlanMeta } from "./types.js";
+
+export type { AcpDispatchPlanMeta } from "./types.js";
+export { ACP_DISPATCH_PLAN_META_KEY } from "./types.js";
+
 /**
  * The dispatch plan admission rendered, projected onto a permission ask under
  * `clio-coder/dispatchPlan`. A client approving a dispatch used to see only the
@@ -13,40 +18,10 @@
 
 import type { DispatchPlanView } from "../../tools/dispatch-plan.js";
 
-export const ACP_DISPATCH_PLAN_META_KEY = "clio-coder/dispatchPlan";
 export const ACP_DISPATCH_PLAN_MAX_TASKS = 32;
 const MAX_TASK_BYTES = 1024;
 const MAX_FIELD_BYTES = 256;
 const MAX_DEPENDENCIES = 8;
-
-export interface AcpDispatchPlanMeta {
-	version: 1;
-	topology: DispatchPlanView["topology"];
-	taskCount: number;
-	/** True when one approval covers several runs, a remote placement, or a gate. */
-	planScale: boolean;
-	/** sha256 of the rendered plan; a plan-scale run seals exactly this. */
-	hash: string;
-	costCeilingUsd?: number;
-	deadlineMs?: number;
-	tasks: Array<{
-		agent: string;
-		task: string;
-		role?: string;
-		position?: number;
-		target?: string;
-		model?: string;
-		node?: string;
-		nodeKind?: "local" | "ssh";
-		worktree?: true;
-		apply?: "merge" | "preserve";
-		stepId?: string;
-		dependencies: string[];
-		wave?: number;
-	}>;
-	/** True when tasks were cut at {@link ACP_DISPATCH_PLAN_MAX_TASKS}. */
-	truncated: boolean;
-}
 
 function clean(value: string, maxBytes: number): string {
 	let safe = "";

@@ -16,7 +16,7 @@ import { EMPTY_CAPABILITIES } from "../../src/domains/providers/index.js";
 import type { SafetyContract } from "../../src/domains/safety/contract.js";
 import { createEngineAgent } from "../../src/engine/agent.js";
 import type { AgentEvent, AgentMessage } from "../../src/engine/types.js";
-import { type CreateChatLoopDeps, createChatLoop } from "../../src/interactive/chat-loop.js";
+import { type CreateChatLoopDeps, createChatLoop } from "../../src/session-control/chat-loop.js";
 import { createDispatchTool } from "../../src/tools/dispatch.js";
 import { createMonitorTool } from "../../src/tools/monitor.js";
 import { createRegistry, type ToolInvokeOptions } from "../../src/tools/registry.js";

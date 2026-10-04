@@ -1,6 +1,6 @@
 # Commands and Modes
 
-This guide covers the installed CLI, headless run behavior, interactive commands, keyboard controls, and operator workflows. The command registry and parser are authoritative: the [CLI command table](../../src/cli/index.ts), [startup flags](../../src/cli/argv.ts), [run arguments](../../src/cli/args.ts), the [slash-command registry](../../src/interactive/slash-commands.ts), and the [keybinding manager](../../src/interactive/keybinding-manager.ts). Exit codes and stdout guarantees are in [Exit codes and output](exit-codes-and-output.md). The TUI's layout, theme and rendering contracts are in [TUI design](../architecture/tui-design.md).
+This guide covers the installed CLI, headless run behavior, interactive commands, keyboard controls, and operator workflows. The command registry and parser are authoritative: the [CLI command table](../../src/cli/index.ts), [startup flags](../../src/cli/argv.ts), [run arguments](../../src/cli/args.ts), the [slash-command registry](../../src/session-control/slash-commands.ts), and the [keybinding manager](../../src/interactive/keybinding-manager.ts). Exit codes and stdout guarantees are in [Exit codes and output](exit-codes-and-output.md). The TUI's layout, theme and rendering contracts are in [TUI design](../architecture/tui-design.md).
 
 ## Demo presentation and guidance
 
@@ -480,7 +480,7 @@ show equal percentages are never merged.
 | `/tasks` | Inspect session tasks and the durable project task inbox. ↑/↓ select a row, Tab and Shift+Tab jump between sections, and a board taller than the dock scrolls to keep the selection in view, pages with PgUp/PgDn, and shows its position. `a` adds an operator task; `h`, `d` and `x` hand, finish or drop the selected one. Acceptance checks travel with handed tasks; receipts show whether they passed. |
 | Unknown slash command | Rejected before model submission. Use `\/text` to send text that begins with a slash. The command list is [above](#interactive-slash-commands). |
 
-The command spellings and arguments are the [slash-command registry](../../src/interactive/slash-commands.ts); this table calls out only session workflows that need explanation.
+The command spellings and arguments are the [slash-command registry](../../src/session-control/slash-commands.ts); this table calls out only session workflows that need explanation.
 
 ### Resuming sessions
 

@@ -33,7 +33,6 @@ export interface Methods {
 	"settings.controls": { params: { cwd: string }; result: unknown };
 	"settings.write": { params: { cwd: string; write: SettingWrite }; result: unknown };
 	"config.graph": { params: { cwd: string }; result: unknown };
-	"sessions.list": { params: { cwd: string }; result: unknown };
 	"sessions.workspaces": { params: Record<string, never>; result: unknown };
 	"workspace.files": { params: { cwd: string; input: string }; result: unknown };
 	"sessions.recover": { params: { cwd: string; sessionId: string }; result: boolean };

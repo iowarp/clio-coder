@@ -31,15 +31,15 @@ import { isSessionEntry, isSessionHeader, type SessionEntry } from "../../src/do
 import { readSessionFileEntries, sessionPaths } from "../../src/engine/session.js";
 import { stripTerminalSequences } from "../../src/engine/tui.js";
 import type { AgentEvent, AgentMessage } from "../../src/engine/types.js";
-import { type ChatLoopEvent, type CreateChatLoopDeps, createChatLoop } from "../../src/interactive/chat-loop.js";
-import { createPendingSkillToolPolicy } from "../../src/interactive/chat-loop-messages.js";
 import { createChatPanel } from "../../src/interactive/chat-panel.js";
 import { rehydrateChatPanelFromTurns } from "../../src/interactive/chat-renderer.js";
 import {
 	createInteractiveSlashRuntime,
 	type InteractiveSlashRuntimeDeps,
 } from "../../src/interactive/interactive-slash-runtime.js";
-import { parseSlashCommand } from "../../src/interactive/slash-commands.js";
+import { type ChatLoopEvent, type CreateChatLoopDeps, createChatLoop } from "../../src/session-control/chat-loop.js";
+import { createPendingSkillToolPolicy } from "../../src/session-control/chat-loop-messages.js";
+import { parseSlashCommand } from "../../src/session-control/slash-commands.js";
 import { bashTool } from "../../src/tools/bash.js";
 import { createContextTool } from "../../src/tools/context/index.js";
 import { limitationTool } from "../../src/tools/limitation.js";

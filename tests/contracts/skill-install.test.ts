@@ -11,7 +11,7 @@ import {
 	parseSkillSourceSpec,
 } from "../../src/domains/resources/skills/install.js";
 import { loadSkills, parsePendingSkillRequests } from "../../src/domains/resources/skills/loader.js";
-import { createPendingSkillToolPolicy } from "../../src/interactive/chat-loop-messages.js";
+import { createPendingSkillToolPolicy } from "../../src/session-control/chat-loop-messages.js";
 import { createContextTool } from "../../src/tools/context/index.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
 

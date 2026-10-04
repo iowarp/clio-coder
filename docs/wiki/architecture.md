@@ -107,7 +107,7 @@ For a `clio-coder run "<task>"` invocation:
 1. `src/cli/index.ts` parses flags, dispatches to the `run` handler, which dynamically imports `src/cli/run.ts`.
 2. `src/cli/run.ts` calls `bootOrchestrator` with headless options.
 3. `bootOrchestrator` in `src/entry/orchestrator.ts` loads all domains via `loadDomains`, resolves the model target through the Providers contract, and registers background memory routing.
-4. The chat loop (`src/interactive/chat-loop.ts`) executes the turn, invoking tools through the registry.
+4. The chat loop (`src/session-control/chat-loop.ts`) executes the turn, invoking tools through the registry.
 5. Tool results pass through the observation budget system (`src/tools/observation.ts`) for per-turn byte caps.
 6. The session domain persists entries to the JSONL ledger.
 7. On completion, the termination coordinator drains dispatch and closes all extensions in reverse order.

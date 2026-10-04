@@ -1,5 +1,9 @@
 import type { SessionConfig, SetConfigOption } from "../../contracts/session-config.js";
-import type { SafeSettings, SafeSettingsPatch } from "../../contracts/settings-safe.js";
+import type {
+	AcpSafeSettings as SafeSettings,
+	AcpSafeSettingsPatch as SafeSettingsPatch,
+} from "../../contracts/wire.js";
+import type { ModelOption } from "../pages/model-picker-model.js";
 
 export type RouteScope = "conversation" | "every-project";
 export type RouteDraft = { target: string; model: string; thinking: string };
@@ -25,7 +29,8 @@ export function routeDraft(
 
 export function conversationChanges(draft: RouteDraft, reported: RouteDraft): SetConfigOption[] {
 	const changes: SetConfigOption[] = [];
-	if (draft.model !== reported.model) changes.push({ configId: "model", value: draft.model });
+	if (draft.target !== reported.target) changes.push({ configId: "target", value: draft.target });
+	if (draft.model !== "" && draft.model !== reported.model) changes.push({ configId: "model", value: draft.model });
 	if (draft.thinking !== reported.thinking) changes.push({ configId: "thinkingLevel", value: draft.thinking });
 	return changes;
 }
@@ -58,4 +63,31 @@ export function modelThinkingLevels(
 export function draftWithSupportedThinking(draft: RouteDraft | null, levels: readonly string[]): RouteDraft | null {
 	if (!draft || levels.length === 0 || levels.includes(draft.thinking)) return draft;
 	return { ...draft, thinking: draft.thinking === "off" ? (levels[0] ?? "off") : (levels.at(-1) ?? "off") };
+}
+
+/** Session configuration is the authority for eligible connections and current model choices. */
+export function routePickerChoices(
+	config: SessionConfig | undefined,
+	draft: RouteDraft,
+	inventory: ReadonlyArray<{ id: string; models: readonly string[] }> | undefined,
+): { targets: ModelOption[]; models: ModelOption[]; targetEditable: boolean; modelEditable: boolean } {
+	const targetControl = config?.options.find((option) => option.id === "target");
+	const modelControl = config?.options.find((option) => option.id === "model");
+	const targets: ModelOption[] = (inventory ?? [])
+		.filter((row) => targetControl?.options.some((option) => option.value === row.id) ?? row.id === config?.target)
+		.map((row) => ({ value: row.id, label: row.id }));
+	if (draft.target && !targets.some((row) => row.value === draft.target))
+		targets.unshift({ value: draft.target, label: draft.target });
+	if (!draft.target) targets.unshift({ value: "", label: "Connection not reported" });
+	const current = draft.target === config?.target;
+	const models: ModelOption[] = current
+		? (modelControl?.options ?? []).map((row) => ({ value: row.value, label: row.name }))
+		: (inventory?.find((row) => row.id === draft.target)?.models ?? []).map((model) => ({ value: model, label: model }));
+	if (!draft.model) models.push({ value: "", label: "Use connection default" });
+	return {
+		targets,
+		models,
+		targetEditable: targetControl !== undefined,
+		modelEditable: !current || modelControl !== undefined,
+	};
 }

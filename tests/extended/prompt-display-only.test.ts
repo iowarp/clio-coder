@@ -10,19 +10,19 @@ import {
 	promptTemplateDisplayText,
 } from "../../src/domains/resources/prompts/loader.js";
 import { stripTerminalSequences, visibleWidth } from "../../src/engine/tui.js";
-import { promptSourceLabel } from "../../src/interactive/prompt-source-label.js";
 import { renderReferenceCard } from "../../src/interactive/renderers/reference-card.js";
 import {
 	createSlashCommandAutocompleteProvider,
 	REFERENCE_TEMPLATE_MARKER,
 	type SlashCompletionItem,
 } from "../../src/interactive/slash-autocomplete.js";
+import { promptSourceLabel } from "../../src/session-control/prompt-source-label.js";
 import {
 	dispatchSlashCommand,
 	type PromptReferenceCard,
 	parseSlashCommand,
 	type SlashCommandContext,
-} from "../../src/interactive/slash-commands.js";
+} from "../../src/session-control/slash-commands.js";
 
 const HELP_BLOCK = [
 	"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",

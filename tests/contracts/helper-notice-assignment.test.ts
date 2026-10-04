@@ -2,10 +2,10 @@ import { deepStrictEqual } from "node:assert/strict";
 import { test } from "node:test";
 import { BusChannels } from "../../src/core/bus-events.js";
 import { createSafeEventBus } from "../../src/core/event-bus.js";
-import type { ChatLoopEvent } from "../../src/interactive/chat-loop.js";
 import { createNotificationCenter } from "../../src/interactive/footer/notifications.js";
 import { createInteractiveEventProjection } from "../../src/interactive/interactive-event-projection.js";
 import { createInteractiveSubscriptions } from "../../src/interactive/interactive-subscriptions.js";
+import type { ChatLoopEvent } from "../../src/session-control/chat-loop.js";
 
 const identity = {
 	agentId: "scout",

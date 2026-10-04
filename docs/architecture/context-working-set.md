@@ -2,7 +2,7 @@
 
 The working set is the part of the session ledger the model actually receives on the next request. When context pressure crosses `context.compaction.threshold`, Clio narrows that view before it considers summarizing anything: selected tool-result bodies and closed-turn thinking blocks stop being replayed, and a one-line marker takes each body's place. Nothing is deleted. The ledger keeps every byte the tools produced, the transcript keeps showing them, and the model can ask for any evicted body back by ref.
 
-Source of truth is `src/domains/context/working-set/` (`contract.ts`, `fold.ts`, `project.ts`, `marker.ts`, `protect.ts`, `payload.ts`, `path-index.ts`, `engine.ts`, `recall.ts`, `policies/`), the ledger records in [entries.ts](../../src/domains/session/entries.ts), and the compaction stage in [turn-context.ts](../../src/interactive/turn-context.ts) (`runAutoCompact`).
+Source of truth is `src/domains/context/working-set/` (`contract.ts`, `fold.ts`, `project.ts`, `marker.ts`, `protect.ts`, `payload.ts`, `path-index.ts`, `engine.ts`, `recall.ts`, `policies/`), the ledger records in [entries.ts](../../src/domains/session/entries.ts), and the compaction stage in [turn-context.ts](../../src/session-control/turn-context.ts) (`runAutoCompact`).
 
 > [!WARNING]
 > This is an experimental community alpha surface. The default policy is `structural-v2`. `structural-v1` is the same composition without `offloaded_body` and the recalled-twice pin. `age-horizon` is the age-based selection with the low-yield token floor.
@@ -71,7 +71,7 @@ Field order is `ref`, `reason`, `by`, `tool`, `path`, `size`, `offload`, `recall
 ```
 
 ```text
-[evicted ref=r7 reason=failure_resolved by=0198f3c3-0002-7ab1-9c33-14ff90bb2c07 tool=bash size=4 lines/152B recall=context(scope="recall", ref="r7") first_line="src/interactive/turn-context.ts(466,15): error TS2345: Argument of type 'PolicyInput' is not assignable to parameter of "]
+[evicted ref=r7 reason=failure_resolved by=0198f3c3-0002-7ab1-9c33-14ff90bb2c07 tool=bash size=4 lines/152B recall=context(scope="recall", ref="r7") first_line="src/session-control/turn-context.ts(466,15): error TS2345: Argument of type 'PolicyInput' is not assignable to parameter of "]
 ```
 
 ```text

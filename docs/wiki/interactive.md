@@ -4,9 +4,9 @@ summary: "The terminal user interface that hosts the chat loop, the streaming tr
 sources:
   - "src/interactive/index.ts"
   - "src/interactive/interactive-application.ts"
-  - "src/interactive/chat-loop.ts"
+  - "src/session-control/chat-loop.ts"
   - "src/interactive/chat-panel.ts"
-  - "src/interactive/turn-context.ts"
+  - "src/session-control/turn-context.ts"
   - "src/interactive/status/index.ts"
   - "src/interactive/status/controller.ts"
   - "src/interactive/status/state-machine.ts"
@@ -238,7 +238,7 @@ and that every ANSI tail after the first is a well-formed SGR sequence.
 `createTurnContext` publishes through. It constructs `LiveBudgetInput` rows with a 32768-token
 window and a model max of 8192, feeds them through `createLiveBudgetProducer`, and asserts the
 reduction policy, the effective window, and the input accounting. It imports `resolveTurnOutputReserve`
-from `src/interactive/output-reserve.ts` and `createTurnContext` from `src/interactive/turn-context.ts`,
+from `src/session-control/output-reserve.ts` and `createTurnContext` from `src/session-control/turn-context.ts`,
 confirming the turn-context is the owner of the budget publication the footer meter reads.
 
 ## Things to watch when editing

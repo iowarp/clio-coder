@@ -1,6 +1,7 @@
 import type { ExtensionPanel } from "../domains/extensions/public-api.js";
 import type { LibraryEntryKind, ResourcesContract } from "../domains/resources/index.js";
 import type { TUI } from "../engine/tui.js";
+import type { LibraryBrowseRequest, SlashCommandContext } from "../session-control/slash-commands.js";
 import type { ClioEditor } from "./clio-editor.js";
 import type { ClioKeybindingManager } from "./keybinding-manager.js";
 import type { OverlayTransitions } from "./overlay-transitions.js";
@@ -10,9 +11,8 @@ import { openHelpOverlay } from "./overlays/help-reference.js";
 import { openInteropOverlay } from "./overlays/interop.js";
 import { openLibraryOverlay } from "./overlays/library.js";
 import { createLibraryLifecycle, libraryRefreshHost } from "./overlays/library-lifecycle.js";
-import type { LibraryBrowseRequest, SlashCommandContext } from "./slash-commands.js";
 
-export type { LibraryBrowseRequest as LibraryOpenRequest } from "./slash-commands.js";
+export type { LibraryBrowseRequest as LibraryOpenRequest } from "../session-control/slash-commands.js";
 
 export interface OverlayResourceOpenersDeps {
 	tui: TUI;
@@ -58,7 +58,7 @@ export function createOverlayResourceOpeners(deps: OverlayResourceOpenersDeps): 
 			deps.closeOverlay,
 			query,
 			ctx.operatorExtensions?.commands(
-				(ctx.listPromptsForDisplay ?? ctx.listPrompts)().items.map((prompt) => prompt.name),
+				(ctx.listPromptsForDisplay ?? ctx.listPrompts)?.().items.map((prompt) => prompt.name) ?? [],
 			),
 		);
 		deps.tui.requestRender();

@@ -16,7 +16,7 @@ import { createRunEffectsRecorder, recordToolExecutionEffects } from "../../src/
 import { captureSkillContext } from "../../src/domains/session/compaction/compact.js";
 import { type SessionEntry, SKILL_CONTEXT_STATE, type SkillContextState } from "../../src/domains/session/entries.js";
 import { createWorkerSafety } from "../../src/engine/worker-tools.js";
-import { buildModelReplayAgentMessagesFromTurns } from "../../src/interactive/model-session-replay.js";
+import { buildModelReplayAgentMessagesFromTurns } from "../../src/session-control/model-session-replay.js";
 import { registerAllTools } from "../../src/tools/bootstrap.js";
 import { runGatewayChain } from "../../src/tools/gateway/chain.js";
 import { gatewayChainSteps } from "../../src/tools/gateway-display.js";

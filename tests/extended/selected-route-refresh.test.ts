@@ -5,7 +5,7 @@ import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { createSafeEventBus } from "../../src/core/event-bus.js";
 import type { ProvidersContract } from "../../src/domains/providers/contract.js";
 import { createEngineAgent } from "../../src/engine/agent.js";
-import { createChatLoop } from "../../src/interactive/chat-loop.js";
+import { createChatLoop } from "../../src/session-control/chat-loop.js";
 
 it("refreshes the attached serving window after the selected-route TTL without a new turn", {
 	timeout: 12_000,

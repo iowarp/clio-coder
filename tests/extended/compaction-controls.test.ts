@@ -43,15 +43,15 @@ import {
 	type ApplicationControllerDeps,
 	createApplicationController,
 } from "../../src/interactive/application-controller.js";
-import { createChatLoop } from "../../src/interactive/chat-loop.js";
-import { buildModelReplayAgentMessagesFromTurns } from "../../src/interactive/model-session-replay.js";
 import {
 	renderCompactionSummaryEntry,
 	renderCompactionSummaryLine,
 } from "../../src/interactive/renderers/compaction-summary.js";
-import { createTurnContext } from "../../src/interactive/turn-context.js";
-import type { TurnMiddleware } from "../../src/interactive/turn-middleware.js";
-import { type AgentRuntime, createTurnState } from "../../src/interactive/turn-state.js";
+import { createChatLoop } from "../../src/session-control/chat-loop.js";
+import { buildModelReplayAgentMessagesFromTurns } from "../../src/session-control/model-session-replay.js";
+import { createTurnContext } from "../../src/session-control/turn-context.js";
+import type { TurnMiddleware } from "../../src/session-control/turn-middleware.js";
+import { type AgentRuntime, createTurnState } from "../../src/session-control/turn-state.js";
 import { syntheticCompactionSummary } from "../harness/compaction-summary.js";
 import { type IsolatedClioEnv, isolateClioEnv } from "../harness/scratch-env.js";
 

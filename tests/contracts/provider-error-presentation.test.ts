@@ -4,15 +4,15 @@ import { stripVTControlCharacters } from "node:util";
 import { liteLLMRouteFailureMessage } from "../../src/core/gateway-routing.js";
 import type { CustomEntry } from "../../src/domains/session/entries.js";
 import type { AgentMessage } from "../../src/engine/types.js";
-import type { ChatLoopEvent } from "../../src/interactive/chat-loop.js";
 import { createChatPanel } from "../../src/interactive/chat-panel.js";
 import { rehydrateChatPanelFromTurns } from "../../src/interactive/chat-renderer.js";
 import { presentProviderError, providerErrorEvidence } from "../../src/interactive/renderers/provider-error.js";
 import { formatRetryStatus } from "../../src/interactive/renderers/retry-status.js";
-import type { TurnContext } from "../../src/interactive/turn-context.js";
-import type { TurnPersistence } from "../../src/interactive/turn-persistence.js";
-import { createTurnRecovery, type RetryStatusPayload } from "../../src/interactive/turn-recovery.js";
-import type { AgentRuntime, ChatTurnState } from "../../src/interactive/turn-state.js";
+import type { ChatLoopEvent } from "../../src/session-control/chat-loop.js";
+import type { TurnContext } from "../../src/session-control/turn-context.js";
+import type { TurnPersistence } from "../../src/session-control/turn-persistence.js";
+import { createTurnRecovery, type RetryStatusPayload } from "../../src/session-control/turn-recovery.js";
+import type { AgentRuntime, ChatTurnState } from "../../src/session-control/turn-state.js";
 
 const plain = (rows: string[]) => stripVTControlCharacters(rows.join("\n"));
 function failure(errorMessage: string): Extract<ChatLoopEvent, { type: "message_end" }> {

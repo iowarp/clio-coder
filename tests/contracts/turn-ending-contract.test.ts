@@ -14,7 +14,7 @@ import type { ProvidersContract } from "../../src/domains/providers/contract.js"
 import type { RuntimeDescriptor } from "../../src/domains/providers/types/runtime-descriptor.js";
 import { createEngineAgent } from "../../src/engine/agent.js";
 import { registerEngineFauxProvider } from "../../src/engine/api-registry.js";
-import { createChatLoop } from "../../src/interactive/chat-loop.js";
+import { createChatLoop } from "../../src/session-control/chat-loop.js";
 import { type IsolatedClioEnv, isolateClioEnv } from "../harness/scratch-env.js";
 
 describe("turn-ending contract in the session prompt", () => {

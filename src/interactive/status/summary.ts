@@ -1,7 +1,13 @@
 import { responseModelIdObservationFromRecord } from "../../core/response-model-id.js";
 import { estimateReasoningTextTokens, extractReasoningTokens } from "../../domains/session/context-accounting.js";
 import type { AgentMessage } from "../../engine/types.js";
-import type { ReasoningTokenProvenance, RunTally, TurnStopReason, TurnSummary, WatchdogTier } from "./types.js";
+import type {
+	ReasoningTokenProvenance,
+	RunTally,
+	TurnStopReason,
+	TurnSummary,
+	WatchdogTier,
+} from "../../session-control/status-types.js";
 
 export interface BuildSummaryInput {
 	startedAt: number;

@@ -1,18 +1,17 @@
+import { AcpInterviewsCapability as InterviewCapability } from "./wire.js";
+
+export { InterviewCapability };
+
 import { type Static, Type } from "typebox";
 import { Id } from "./common.js";
 
 const closed = { additionalProperties: false };
-export const INTERVIEW_REQUEST_METHOD = "_clio-coder/interview/request";
-export const INTERVIEW_CANCEL_METHOD = "_clio-coder/interview/cancel";
+
+export {
+	ACP_INTERVIEW_CANCEL_METHOD as INTERVIEW_CANCEL_METHOD,
+	ACP_INTERVIEW_REQUEST_METHOD as INTERVIEW_REQUEST_METHOD,
+} from "./wire.js";
 /** Additive ACP bridge. The current runtime must opt in before the GUI enables it. */
-export const InterviewCapability = Type.Object(
-	{
-		version: Type.Literal(1),
-		request: Type.Literal(INTERVIEW_REQUEST_METHOD),
-		cancel: Type.Optional(Type.Literal(INTERVIEW_CANCEL_METHOD)),
-	},
-	closed,
-);
 export const InterviewQuestion = Type.Object(
 	{
 		question: Type.String({ minLength: 1, maxLength: 8192 }),

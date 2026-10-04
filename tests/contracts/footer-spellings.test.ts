@@ -5,9 +5,9 @@ import { stripTerminalSequences, visibleWidth } from "../../src/engine/tui.js";
 import { renderDashboardPage } from "../../src/interactive/footer/pages.js";
 import { activityQuadrant } from "../../src/interactive/footer/widgets.js";
 import { throughputSegment, tokensSegment } from "../../src/interactive/footer-panel.js";
-import type { TurnSummary } from "../../src/interactive/status/types.js";
 import { resolveFooterVerb } from "../../src/interactive/status/verbs.js";
 import { GLYPH } from "../../src/interactive/theme/index.js";
+import type { TurnSummary } from "../../src/session-control/status-types.js";
 import { footerState } from "../harness/footer-fixture.js";
 
 test("footer status, counts and token units use one vocabulary at release widths", () => {

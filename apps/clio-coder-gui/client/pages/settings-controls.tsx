@@ -8,7 +8,7 @@ import { type Client, emptyInput } from "../api/client.js";
 import { formatTime } from "../api/clock.js";
 import { useOperation } from "../api/queries.js";
 import { Switch } from "../design/Switch.js";
-import { MODEL_TARGET_PATHS } from "./model-options.js";
+import { MODEL_TARGET_PATHS } from "./model-picker-model.js";
 import { ModelSelect } from "./model-select.js";
 import { StructuredSettingsEditor } from "./StructuredSettingsEditor.js";
 import {

@@ -5,7 +5,7 @@ import { type LoadResult, loadDomains } from "../../src/core/domain-loader.js";
 import { createConfigDomainModule } from "../../src/domains/config/index.js";
 import { type ProvidersContract, ProvidersDomainModule } from "../../src/domains/providers/index.js";
 import { resolveReservedOutputTokens, setGlobalDefaultMaxOutputTokens } from "../../src/engine/apis/output-budget.js";
-import { type ChatLoop, createChatLoop } from "../../src/interactive/chat-loop.js";
+import { type ChatLoop, createChatLoop } from "../../src/session-control/chat-loop.js";
 import { closeServer, startOpenAICompatFixture } from "../harness/openai-compat-fixture.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
 

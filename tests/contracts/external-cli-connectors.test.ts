@@ -21,8 +21,8 @@ import { buildOpenCodeCliArgs, OPENCODE_CLI_CONNECTOR } from "../../src/engine/e
 import { buildPiCliArgs, PI_CLI_CONNECTOR } from "../../src/engine/external-cli/pi.js";
 import type { AgentMessage } from "../../src/engine/types.js";
 import type { WorkerRunInput } from "../../src/engine/worker-runtime.js";
-import { handleRun, parseSlashCommand } from "../../src/interactive/slash-commands.js";
-import { formatWorkerShareNote } from "../../src/interactive/worker-share.js";
+import { handleRun, parseSlashCommand } from "../../src/session-control/slash-commands.js";
+import { formatWorkerShareNote } from "../../src/session-control/worker-share.js";
 
 const directories: string[] = [];
 afterEach(() => {

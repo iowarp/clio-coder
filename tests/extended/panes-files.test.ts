@@ -28,8 +28,8 @@ import { renderHerdrThemeBlock, renderYaziTheme } from "../../src/domains/mux/ya
 import { classify } from "../../src/domains/safety/action-classifier.js";
 import { GLOBAL_ACTION_ORDER } from "../../src/interactive/application-controller.js";
 import { createPanesRuntime } from "../../src/interactive/panes-runtime.js";
-import { BUILTIN_SLASH_COMMANDS, parseSlashCommand } from "../../src/interactive/slash-commands.js";
 import { createYaziBridge } from "../../src/interactive/yazi-bridge.js";
+import { BUILTIN_SLASH_COMMANDS, parseSlashCommand } from "../../src/session-control/slash-commands.js";
 import { createPanesTool } from "../../src/tools/panes.js";
 import { panesToolSurface } from "../../src/tools/panes-surface.js";
 

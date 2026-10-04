@@ -76,7 +76,7 @@ This document defines the core architectural concepts and terminology used throu
 
 ### 18. Worker Block
 - **Definition**: The attributed transcript segment rendering a worker's streaming execution. It includes a header with origin glyph and route, a rail for worker prose, coalesced tool names, and a one-line receipt footer.
-- **Owning Type**: `WorkerEntryState` in [worker-stream.ts](../../src/interactive/worker-stream.ts).
+- **Owning Type**: `WorkerEntryState` in [worker-stream.ts](../../src/session-control/worker-stream.ts).
 
 ### 19. Origin Glyphs (`◇`/`◆`)
 - **Definition**: Transcript and fleet board indicators that identify who requested a run. The glyph `◇` marks operator-typed runs, `◆` marks model-requested dispatches, and a dim dot marks internal Clio runs and harness-started runs. Transcript worker entries admit only user and agent origins; internal and harness runs can appear on dispatch surfaces but never become transcript worker entries.
@@ -84,7 +84,7 @@ This document defines the core architectural concepts and terminology used throu
 
 ### 20. Share Note
 - **Definition**: A bounded operator note formatted as `[worker result] <agent> · run <id> · <outcome> · shared by the operator` that delivers a finished worker answer into the main agent context over the user-turn path.
-- **Owning Type**: `WorkerShareFacts` in [worker-share.ts](../../src/interactive/worker-share.ts).
+- **Owning Type**: `WorkerShareFacts` in [worker-share.ts](../../src/session-control/worker-share.ts).
 
 ### 21. Fold
 - **Definition**: Presenting an action as a short summary in the current Output style. `Alt+O` cycles Compact, Standard, and Detailed. Use `/view transcript` for full available details.

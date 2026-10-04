@@ -26,16 +26,16 @@ import { ToolNames } from "../../core/tool-names.js";
 import { proposeTaskBankPromotion, type TaskMemorySnapshot } from "../../domains/memory/index.js";
 import { sanitizeCallTargetText } from "../../domains/safety/call-target.js";
 import type { DecisionBoardStore } from "../../domains/session/decision-board.js";
-import { formatDecisionCorrectionTurn } from "../../interactive/overlays/decisions.js";
-import type { CouncilDispatchOutcome } from "../../interactive/slash-commands.js";
+import { formatDecisionCorrectionTurn } from "../../session-control/decision-correction.js";
+import type { CouncilDispatchOutcome } from "../../session-control/slash-commands.js";
 import type { AskUserHandler, AskUserQuestion, AskUserResult } from "../../tools/ask-user.js";
 import type { ToolRegistry } from "../../tools/registry.js";
 import type { AcpBoardActions, AcpInterviewBinding, AcpInterviewChannel } from "./server.js";
 import { ACP_INTERVIEW_CANCEL_METHOD, ACP_INTERVIEW_REQUEST_METHOD } from "./types.js";
 
-export { draftsToJudge, judgeDraftsAtSite } from "../../interactive/drafts.js";
-export { oracleBriefingFromEntries } from "../../interactive/oracle.js";
-export { followWorkerRuns } from "../../interactive/worker-run-ledger.js";
+export { draftsToJudge, judgeDraftsAtSite } from "../../session-control/drafts.js";
+export { oracleBriefingFromEntries } from "../../session-control/oracle.js";
+export { followWorkerRuns } from "../../session-control/worker-run-ledger.js";
 
 export interface HostToolEvents {
 	emit(event: Record<string, unknown>): void;

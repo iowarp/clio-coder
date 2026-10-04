@@ -6,9 +6,9 @@ import type { ProvidersContract } from "../../src/domains/providers/contract.js"
 import llamacpp from "../../src/domains/providers/runtimes/local-native/llamacpp.js";
 import { createEngineAgent } from "../../src/engine/agent.js";
 import type { PrewarmRoundInput, PrewarmRoundResult } from "../../src/engine/prewarm.js";
-import type { TurnContext } from "../../src/interactive/turn-context.js";
-import { createTurnPrewarm } from "../../src/interactive/turn-prewarm.js";
-import { type AgentRuntime, createTurnState } from "../../src/interactive/turn-state.js";
+import type { TurnContext } from "../../src/session-control/turn-context.js";
+import { createTurnPrewarm } from "../../src/session-control/turn-prewarm.js";
+import { type AgentRuntime, createTurnState } from "../../src/session-control/turn-state.js";
 import { type IsolatedClioEnv, isolateClioEnv } from "../harness/scratch-env.js";
 
 let scratch: IsolatedClioEnv;

@@ -84,8 +84,8 @@ or a labeled prompt section, never a tool or a permission.
 | Channel | When | Content | Source |
 | --- | --- | --- | --- |
 | Tool-result annotation | The second identical failure in the bounded trajectory, at most once per operation per turn | One cited `Memory:` line appended to the failing tool's own result | `annotateRepeatedFailure` in `src/domains/middleware/memory-intervention.ts` |
-| Deferred or turn-end reminder | At a native tool-batch boundary while the turn runs, at turn end for the rules tier, or on the next accepted prompt for a finished background step | A `Memory:` block inside `<system-reminder>`, recorded in the session ledger | `src/interactive/turn-middleware.ts` |
-| Post-compaction restoration | After a durable continuity or summary commit is installed | Status (when no handoff note or summary already carries current state), knowledge and procedural entries, labeled unverified | `src/domains/memory/restoration.ts`, `src/interactive/turn-context.ts` |
+| Deferred or turn-end reminder | At a native tool-batch boundary while the turn runs, at turn end for the rules tier, or on the next accepted prompt for a finished background step | A `Memory:` block inside `<system-reminder>`, recorded in the session ledger | `src/session-control/turn-middleware.ts` |
+| Post-compaction restoration | After a durable continuity or summary commit is installed | Status (when no handoff note or summary already carries current state), knowledge and procedural entries, labeled unverified | `src/domains/memory/restoration.ts`, `src/session-control/turn-context.ts` |
 | Approved durable memory | Every prepared operator turn, as part of the compiled system prompt | A `# Memory` section of at most 5 approved records within 400 estimated tokens | `src/domains/memory/prompt-section.ts`, selection rules in the [evidence and memory contract](../architecture/evidence-and-memory.md#prompt-injection-rules) |
 
 A background model never writes to the system prompt. The unreviewed bank can

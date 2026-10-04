@@ -9,9 +9,9 @@ import { aggregateCostEntries } from "../domains/observability/cost-rows.js";
 import type { CostAggregate, ObservabilityContract } from "../domains/observability/index.js";
 import { mutatingReceipts } from "../domains/safety/finish-contract.js";
 import type { SessionContract } from "../domains/session/contract.js";
+import type { ChatLoopEvent } from "../session-control/chat-loop.js";
+import type { WorkerReceiptFacts } from "../session-control/worker-stream.js";
 import { effectiveToolCall } from "../tools/surface.js";
-import type { ChatLoopEvent } from "./chat-loop.js";
-import type { WorkerReceiptFacts } from "./worker-stream.js";
 
 export interface ExitSummarySnapshot {
 	sessionId: string;

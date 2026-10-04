@@ -16,7 +16,7 @@ import { yesNo } from "../../src/domains/system-one/questions.js";
 import { createRunner } from "../../src/domains/system-one/runner.js";
 import type { DecisionEngine, DecisionRecord, SiteDefinition } from "../../src/domains/system-one/types.js";
 import { createSystemOneRequestAdmission } from "../../src/entry/system-one-host.js";
-import { runOutOfTurnRound } from "../../src/interactive/side-question.js";
+import { runOutOfTurnRound } from "../../src/session-control/side-question.js";
 
 /**
  * Every System One request to a priced target passes the host's admission,

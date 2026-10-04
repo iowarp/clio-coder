@@ -816,7 +816,7 @@ export interface MiddlewareHookFailedPayload {
 /**
  * Status phases for the interactive agent loop. Owned here (not in
  * src/interactive) because the phase taxonomy rides the bus into the safety
- * domain's audit trail; src/interactive/status/types.ts re-exports it.
+ * domain's audit trail; src/session-control/status-types.ts re-exports it.
  */
 export type StatusPhase =
 	| "idle"

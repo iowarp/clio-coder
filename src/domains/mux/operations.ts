@@ -4,7 +4,7 @@
  *
  * It is a leaf with no imports, and it lives in the domain rather than beside
  * either caller because both callers are forbidden from reaching the other's
- * tree. `src/interactive/slash-commands.ts` is a CLI seam whose value closure
+ * tree. `src/session-control/slash-commands.ts` is a CLI seam whose value closure
  * must stay off the render graph, and `src/tools/**` may not import
  * `src/interactive/**` at all (boundaries rule4). A shared leaf here is the
  * only place both can name the same preset ids and the same result shapes.

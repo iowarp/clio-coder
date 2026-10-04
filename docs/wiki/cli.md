@@ -293,7 +293,7 @@ through `sanitizeBounded` because they cross the operator/worker trust seam.
   6 specifically governs the CLI: a CLI file may reach `src/interactive/**` and
   `src/engine/**` only through a seam declared in `STAGE0_SEAMS`. The declared
   seams for the CLI include `src/engine/tui-primitives.ts` (used by
-  `src/cli/fleet-view.ts`), `src/interactive/slash-commands.ts` (used by
+  `src/cli/fleet-view.ts`), `src/session-control/slash-commands.ts` (used by
   `src/cli/run.ts`), and `src/engine/oauth.ts` (used by `configure` and
   `auth`).
 

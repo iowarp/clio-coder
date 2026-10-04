@@ -280,7 +280,7 @@ function checkBoundaries(): void {
 			{
 				name: "chat-loop turn module importing the entry point",
 				files: {
-					"src/interactive/turn-runtime.ts":
+					"src/session-control/turn-runtime.ts":
 						'import { bootOrchestrator } from "../entry/orchestrator.js";\nexport const boot = bootOrchestrator;',
 					"src/entry/orchestrator.ts": "export function bootOrchestrator() {}",
 				},
@@ -385,13 +385,11 @@ function checkBoundaries(): void {
 			{
 				name: "cli seam whose own closure reaches the Stage 0 closure",
 				files: {
-					"src/cli/run.ts": 'export const load = () => import("../interactive/slash-commands.js");',
-					"src/interactive/slash-commands.ts":
-						'import { SECTIONS } from "./overlays/settings.js";\nexport const parseSlashCommand = () => SECTIONS;',
-					"src/interactive/overlays/settings.ts":
-						'import { theme } from "../theme/index.js";\nexport const SECTIONS = [theme];',
-					"src/interactive/terminal-lease.ts": 'import { theme } from "./theme/index.js";\nexport const lease = theme;',
-					"src/interactive/theme/index.ts": "export const theme = {};",
+					"src/cli/run.ts": 'export const load = () => import("../session-control/slash-commands.js");',
+					"src/session-control/slash-commands.ts":
+						'import { tui } from "../engine/tui.js";\nexport const parseSlashCommand = () => tui;',
+					"src/interactive/terminal-lease.ts": 'import { tui } from "../engine/tui.js";\nexport const lease = tui;',
+					"src/engine/tui.ts": "export const tui = {};",
 				},
 				expectRule: "rule6",
 			},
@@ -399,23 +397,21 @@ function checkBoundaries(): void {
 				name: "domain seam whose own closure reaches the Stage 0 closure",
 				files: {
 					"src/domains/mux/yazi/theme.ts":
-						'import { parseSlashCommand } from "../../../interactive/slash-commands.js";\nexport const parse = parseSlashCommand;',
-					"src/interactive/slash-commands.ts":
-						'import { SECTIONS } from "./overlays/settings.js";\nexport const parseSlashCommand = () => SECTIONS;',
-					"src/interactive/overlays/settings.ts":
-						'import { theme } from "../theme/index.js";\nexport const SECTIONS = [theme];',
-					"src/interactive/terminal-lease.ts": 'import { theme } from "./theme/index.js";\nexport const lease = theme;',
-					"src/interactive/theme/index.ts": "export const theme = {};",
+						'import { parseSlashCommand } from "../../../session-control/slash-commands.js";\nexport const parse = parseSlashCommand;',
+					"src/session-control/slash-commands.ts":
+						'import { tui } from "../engine/tui.js";\nexport const parseSlashCommand = () => tui;',
+					"src/interactive/terminal-lease.ts": 'import { tui } from "../engine/tui.js";\nexport const lease = tui;',
+					"src/engine/tui.ts": "export const tui = {};",
 				},
 				expectRule: "rule6",
 			},
 			{
 				name: "cli seam whose closure stays off the Stage 0 closure (allowed)",
 				files: {
-					"src/cli/run.ts": 'export const load = () => import("../interactive/slash-commands.js");',
-					"src/interactive/slash-commands.ts":
-						'import { SECTIONS } from "./overlays/settings-sections.js";\nexport const parseSlashCommand = () => SECTIONS;',
-					"src/interactive/overlays/settings-sections.ts": "export const SECTIONS = [];",
+					"src/cli/run.ts": 'export const load = () => import("../session-control/slash-commands.js");',
+					"src/session-control/slash-commands.ts":
+						'import { SECTIONS } from "../core/settings-sections.js";\nexport const parseSlashCommand = () => SECTIONS;',
+					"src/core/settings-sections.ts": "export const SECTIONS = [];",
 					"src/interactive/terminal-lease.ts": 'import { theme } from "./theme/index.js";\nexport const lease = theme;',
 					"src/interactive/theme/index.ts": "export const theme = {};",
 				},

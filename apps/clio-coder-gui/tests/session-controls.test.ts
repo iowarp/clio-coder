@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { setTimeout } from "node:timers/promises";
 import { Value } from "typebox/value";
+import { Problem } from "../contracts/common.js";
 import { Event } from "../contracts/events.js";
 import { ACP_TO_WEB_EVENT } from "../contracts/fleet-events.js";
 import { routes } from "../contracts/routes.js";
@@ -31,7 +32,9 @@ test("session config retains open/load options, publishes updates, and never sav
 	const events: Event[] = [];
 	t.after(h.hub.connect(undefined, (event) => events.push(event)));
 	const before = await readFile(join(h.home.path, "acp.jsonl"), "utf8");
-	assert.equal((await h.post(`${base}/config`, { configId: "target", value: "other" })).status, 422);
+	const unavailableTarget = await h.post(`${base}/config`, { configId: "target", value: "other" });
+	assert.equal(unavailableTarget.status, 409);
+	assert.equal((await json(unavailableTarget, Problem)).code, "conflict");
 	assert.equal((await h.post(`${base}/config`, { configId: "model", value: "not-listed" })).status, 422);
 	assert.equal(await readFile(join(h.home.path, "acp.jsonl"), "utf8"), before);
 	const choice = { configId: "model", value: "fixture-small" };
@@ -585,7 +588,7 @@ test("cancel mid-stream has one terminal and an old cancel cannot cancel the nex
 test("safe settings reject extra keys before ACP, project four keys, and expose bounded targets/probes/autonomy", {
 	timeout: 15000,
 }, async (t) => {
-	const h = await harness();
+	const h = await harness({}, { scenario: "markdown", env: { CLIO_CODER_WEB_FIXTURE_ROUTE: "1" } });
 	t.after(h.close);
 	const workspace = await h.workspaces.open(h.home.path),
 		session = await h.supervisor.open(workspace.id),

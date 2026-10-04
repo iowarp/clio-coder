@@ -42,6 +42,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { BusChannels, type RunAbortSource } from "../core/bus-events.js";
 import type { ClioSettings } from "../core/config.js";
+import { formatFooterTokens } from "../core/display-units.js";
 import type { SafeEventBus } from "../core/event-bus.js";
 import {
 	armedSkillSurface,
@@ -110,6 +111,7 @@ import { finalizeAskUserInterviewForHost } from "../tools/ask-user.js";
 import { isGatewayChain } from "../tools/gateway-display.js";
 import type { AskUserToolPolicy, ToolInvokeOptions, ToolRegistry } from "../tools/registry.js";
 import { effectiveToolCall } from "../tools/surface.js";
+import type { ApprovalRequestView } from "./approval-request-view.js";
 import {
 	createAskUserToolPolicy,
 	createPendingSkillToolPolicy,
@@ -125,7 +127,6 @@ import {
 	toolSignatureFromState,
 } from "./chat-loop-messages.js";
 import { normalizeRetrySettings } from "./chat-loop-policy.js";
-import { retireActiveUserContextForNextOperator } from "./chat-renderer.js";
 import { coldReasonText } from "./cold-reasons.js";
 import {
 	DRAFT_MAX_TOKENS,
@@ -134,13 +135,12 @@ import {
 	draftTemperature,
 	runDraftWithSamplerFallback,
 } from "./drafts.js";
-import { formatFooterTokens } from "./footer-panel.js";
 import { type HandoffRepairInput, runHandoffRound } from "./handoff-round.js";
 import type { NoticeSource } from "./notice-source.js";
-import type { ApprovalRequestView } from "./permission-overlay.js";
 import type { runPrewarmRound } from "./prewarm.js";
+import { retireActiveUserContextForNextOperator } from "./session-replay-messages.js";
 import { runOutOfTurnRound, runSideQuestion, type SideQuestionResult, sideQuestionUsage } from "./side-question.js";
-import type { AgentStatusEvent } from "./status/types.js";
+import type { AgentStatusEvent } from "./status-types.js";
 import {
 	parseTriageAnswer,
 	TRIAGE_MAX_TOKENS,
@@ -1035,7 +1035,7 @@ function reloadProtectedArtifactsForSession(
 function lastAssistantText(messages: ReadonlyArray<AgentMessage>): string {
 	for (let index = messages.length - 1; index >= 0; index -= 1) {
 		const message = messages[index] as { role?: unknown; content?: unknown } | undefined;
-		if (!message || message.role !== "assistant") continue;
+		if (message?.role !== "assistant") continue;
 		if (typeof message.content === "string") return message.content;
 		if (!Array.isArray(message.content)) return "";
 		return message.content

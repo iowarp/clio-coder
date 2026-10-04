@@ -2,8 +2,11 @@ import type { ClioSettings } from "../core/config.js";
 import { collectSessionEntries } from "../domains/session/compaction/session-entries.js";
 import type { SessionContract, SessionEntry } from "../domains/session/index.js";
 import { openSession, sessionPaths } from "../engine/session.js";
-import type { ChatLoop } from "./chat-loop.js";
-import { buildModelReplayAgentMessagesFromTurns, continuityContextFromSession } from "./model-session-replay.js";
+import type { ChatLoop } from "../session-control/chat-loop.js";
+import {
+	buildModelReplayAgentMessagesFromTurns,
+	continuityContextFromSession,
+} from "../session-control/model-session-replay.js";
 
 type SessionOwner = Pick<SessionContract, "create" | "current">;
 type SessionChat = Pick<ChatLoop, "resetForSession">;

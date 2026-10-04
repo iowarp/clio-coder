@@ -4,7 +4,7 @@ import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import type { MuxContract } from "../../src/domains/mux/contract.js";
 import { detectMux } from "../../src/domains/mux/detect.js";
 import { createPanesRuntime } from "../../src/interactive/panes-runtime.js";
-import { BUILTIN_SLASH_COMMANDS, type SlashCommandContext } from "../../src/interactive/slash-commands.js";
+import { BUILTIN_SLASH_COMMANDS, type SlashCommandContext } from "../../src/session-control/slash-commands.js";
 
 describe("contracts/pane refusal remedies", () => {
 	it("refuses embedded pane hosting with an actionable reason", async () => {

@@ -26,7 +26,7 @@ import {
 	type WorkerReceiptReader,
 	workerReceiptSummary,
 	workerTargetLabel,
-} from "./worker-stream.js";
+} from "../session-control/worker-stream.js";
 
 /** The `workerRun` entry a live block is worth, minus the fields the ledger stamps. */
 export type WorkerRunEntryInput = Extract<SessionEntryInput, { kind: "workerRun" }>;

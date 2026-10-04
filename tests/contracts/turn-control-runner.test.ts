@@ -8,8 +8,8 @@ import type { DetachedBatchRecord } from "../../src/domains/dispatch/batch-store
 import type { DispatchContract, DispatchRequest } from "../../src/domains/dispatch/contract.js";
 import type { RunReceipt } from "../../src/domains/dispatch/types.js";
 import type { TurnInterpretation } from "../../src/domains/turn-control/index.js";
-import type { TurnControlRunnerDeps } from "../../src/interactive/turn-control-runner.js";
-import { createTurnControlRunner } from "../../src/interactive/turn-control-runner.js";
+import type { TurnControlRunnerDeps } from "../../src/session-control/turn-control-runner.js";
+import { createTurnControlRunner } from "../../src/session-control/turn-control-runner.js";
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
 
 const interpretation: TurnInterpretation = {

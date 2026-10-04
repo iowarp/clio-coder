@@ -34,8 +34,8 @@ const { createMiddlewareBundle } = await import("../../src/domains/middleware/ex
 const { createMarketplaceOfferRegistration } = await import("../../src/domains/middleware/marketplace-offer.js");
 const { createSkillsReminderRegistration } = await import("../../src/domains/middleware/skills-reminder.js");
 const { createMiddlewareToolChoiceControl } = await import("../../src/domains/middleware/tool-choice-control.js");
-const { createTurnMiddleware } = await import("../../src/interactive/turn-middleware.js");
-const { createTurnState } = await import("../../src/interactive/turn-state.js");
+const { createTurnMiddleware } = await import("../../src/session-control/turn-middleware.js");
+const { createTurnState } = await import("../../src/session-control/turn-state.js");
 
 const PLUGINS = 6;
 const scratch: string[] = [home];
@@ -145,7 +145,7 @@ function firstTurnStart(cwd: string): void {
 		runtimeId: "fixture",
 		runtimeResolution: {},
 		agent: { state: { tools: [], messages: [] } },
-	} as unknown as import("../../src/interactive/turn-state.js").AgentRuntime;
+	} as unknown as import("../../src/session-control/turn-state.js").AgentRuntime;
 	createTurnMiddleware({
 		state: createTurnState("off"),
 		middleware: contract,

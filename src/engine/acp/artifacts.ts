@@ -1,3 +1,8 @@
+import type { AcpArtifactPage, AcpArtifactReadRequest, AcpArtifactRow } from "./types.js";
+
+export type { AcpArtifactPage, AcpArtifactReadRequest, AcpArtifactRow } from "./types.js";
+export { ACP_ARTIFACTS_LIST_METHOD, ACP_ARTIFACTS_META_KEY, ACP_ARTIFACTS_READ_METHOD } from "./types.js";
+
 /**
  * `_clio-coder/artifacts/list` and `_clio-coder/artifacts/read`: the session's
  * `/view` artifacts for an ACP client (ACP ask 03).
@@ -21,10 +26,6 @@ import type {
 	ViewArtifactFormat,
 } from "../../domains/session/view-artifacts.js";
 import { AcpRequestError } from "./errors.js";
-
-export const ACP_ARTIFACTS_META_KEY = "clio-coder/artifacts";
-export const ACP_ARTIFACTS_LIST_METHOD = "_clio-coder/artifacts/list";
-export const ACP_ARTIFACTS_READ_METHOD = "_clio-coder/artifacts/read";
 
 /**
  * Every `/view` category except `transcript`, which is the terminal chat
@@ -57,37 +58,6 @@ const MAX_SUBTITLE_BYTES = 1_024;
 /** The bound session's provider inputs; null when `sessionId` is not the session this host is running. */
 export interface AcpArtifactsSource {
 	deps(sessionId: string): ArtifactProviderDeps | null;
-}
-
-export interface AcpArtifactRow {
-	/** `<category>/<provider id>`; provider ids are unique only inside a category. */
-	id: string;
-	category: ViewArtifactCategory;
-	title: string;
-	subtitle?: string;
-	/** ISO time the artifact was produced, absent when unknown. */
-	at?: string;
-	sizeBytes?: number;
-	/** The format a read is expected to return; the read's own `format` is authoritative. */
-	format: ViewArtifactFormat;
-	/** Set when a read returns the protection record and a refusal instead of content. */
-	protected?: true;
-}
-
-export interface AcpArtifactPage {
-	id: string;
-	category: ViewArtifactCategory;
-	title: string;
-	format: ViewArtifactFormat;
-	lines: string[];
-	offset: number;
-	totalLines: number;
-	nextOffset: number | null;
-	/** Lines cut to fit one page; reassembly is exact only when this is absent. */
-	clippedLines?: number;
-	/** The overlay's `i` view, read with `details: true`. */
-	details?: { format: ViewArtifactFormat; lineCount: number };
-	refused?: { reason: string };
 }
 
 const loadProviders = async (): Promise<typeof import("../../domains/session/view-artifacts.js")> =>
@@ -187,13 +157,6 @@ export async function listAcpArtifacts(
 		});
 	}
 	return { artifacts, truncated };
-}
-
-export interface AcpArtifactReadRequest {
-	id: string;
-	offset?: number;
-	limit?: number;
-	details?: boolean;
 }
 
 export function parseArtifactReadRequest(params: Record<string, unknown>): AcpArtifactReadRequest {

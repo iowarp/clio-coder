@@ -7,7 +7,7 @@ import type { WorkingSetView } from "../domains/context/working-set/contract.js"
 import { formatContextWindowSlots } from "../domains/providers/index.js";
 import type { ContextLedger, ContextLedgerGroup } from "../domains/session/context-ledger.js";
 import { type OverlayHandle, Text, type TUI, truncateToWidth, visibleWidth } from "../engine/tui.js";
-import { coldReasonText } from "./cold-reasons.js";
+import { coldReasonText } from "../session-control/cold-reasons.js";
 import {
 	contextCategorySwatch,
 	contextPercentRole,

@@ -75,7 +75,12 @@ function control(calls: string[]) {
 			return { level: "info" as const, lines: ["ran"] };
 		},
 		injectsUserTurn: (command: unknown) => command === "share",
-		capability: { version: 1, list: "_clio-coder/commands/list", invoke: "_clio-coder/commands/invoke", count: 13 },
+		capability: {
+			version: 1 as const,
+			list: "_clio-coder/commands/list",
+			invoke: "_clio-coder/commands/invoke",
+			count: 13,
+		},
 	};
 }
 

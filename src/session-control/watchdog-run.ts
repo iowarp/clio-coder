@@ -15,7 +15,7 @@ import { parseVerifierResult } from "../domains/agents/index.js";
 import type { DispatchContract, DispatchRequest } from "../domains/dispatch/contract.js";
 import { type AgentRoleFactsResolver, requestExecutionRole } from "../domains/dispatch/execution-role.js";
 import { WATCHDOG_TASK, type WatchdogTrigger, watchdogBriefing } from "../domains/middleware/index.js";
-import { watchdogBlockersNotice } from "./bus-notices.js";
+import { watchdogBlockersNotice } from "./watchdog-notice.js";
 
 /** The builtin recipe the watchdog reviews with. */
 export const WATCHDOG_AGENT_ID = "verifier";

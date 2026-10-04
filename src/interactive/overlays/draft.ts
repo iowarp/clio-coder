@@ -19,7 +19,12 @@ import {
 	truncateToWidth,
 	wrapTextWithAnsi,
 } from "../../engine/tui.js";
-import { DRAFT_LABELS, type DraftLabel, type DraftVerdict, hasDeadDraftToolCallMarkup } from "../drafts.js";
+import {
+	DRAFT_LABELS,
+	type DraftLabel,
+	type DraftVerdict,
+	hasDeadDraftToolCallMarkup,
+} from "../../session-control/drafts.js";
 import { buildResponsiveHint, FocusBox, showClioOverlayFrame } from "../overlay-frame.js";
 import { codeInk } from "../renderers/code-ink.js";
 import { clioTheme, GLYPH, markdownTheme, rule } from "../theme/index.js";

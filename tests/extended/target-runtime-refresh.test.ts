@@ -7,7 +7,7 @@ import litellm from "../../src/domains/providers/runtimes/protocol/litellm.js";
 import type { TargetDescriptor } from "../../src/domains/providers/types/target-descriptor.js";
 import { createEngineAgent } from "../../src/engine/agent.js";
 import { createWorkerToolRegistry } from "../../src/engine/worker-tools.js";
-import { createChatLoop } from "../../src/interactive/chat-loop.js";
+import { createChatLoop } from "../../src/session-control/chat-loop.js";
 import { startGatewayThinkingFixture } from "../harness/gateway-thinking-fixture.js";
 
 test("editing a selected target refreshes the next request and retains portable conversation", async () => {

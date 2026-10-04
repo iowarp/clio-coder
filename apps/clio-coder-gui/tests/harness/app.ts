@@ -61,7 +61,7 @@ export async function harness(
 		options.permissionTimers,
 	);
 	await supervisor.reconcile();
-	const sessions = new SessionService(supervisor, workspaces, reads);
+	const sessions = new SessionService(supervisor, workspaces);
 	const cli = new CliRunner(env);
 	const settingsService = new SettingsService(reads, workspaces, ops);
 	const setup = new SetupService(reads, env, workspaces);
@@ -79,7 +79,7 @@ export async function harness(
 		library: new LibraryService(reads, cli, workspaces, ops),
 		reports: new ReportsService(cli, workspaces),
 		evidence: new EvidenceService(reads, cli, workspaces, operations),
-		targets: new TargetsService(cli, workspaces, settingsService, operations),
+		targets: new TargetsService(cli, workspaces, settingsService, operations, supervisor),
 		sessions,
 		idle: () =>
 			!(operations.activeCount || cli.activeCount || setup.busy || supervisor.busy || supervisor.hasOpenSessions),

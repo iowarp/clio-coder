@@ -35,11 +35,13 @@
  *     frames and is followed by a start/end pair per settled step, each with
  *     `toolCallId` `<parent>:<step id>` and `parentToolCallId`.
  *   - Every other event passes through unchanged.
+ *
+ * The frame types these rules produce are declared in `run-json-schema.ts`.
  */
 
 import type { AgentMessage } from "../../engine/types.js";
-import type { ChatLoopEvent } from "../../interactive/chat-loop.js";
-import { sumRunUsage } from "../../interactive/chat-loop-messages.js";
+import type { ChatLoopEvent } from "../../session-control/chat-loop.js";
+import { sumRunUsage } from "../../session-control/chat-loop-messages.js";
 import {
 	chainStepToolCallId,
 	displayToolCall,
@@ -47,8 +49,18 @@ import {
 	gatewayChainSteps,
 	VIA_GATEWAY,
 } from "../../tools/gateway-display.js";
+import type {
+	RunJsonAgentEndFrame,
+	RunJsonChatLoopFrame,
+	RunJsonMessage,
+	RunJsonOpaqueWorkerEventFrame,
+	RunJsonToolExecutionEndFrame,
+	RunJsonToolExecutionStartFrame,
+	RunJsonWorkerAgentEndFrame,
+	RunJsonWorkerEventFrame,
+} from "./run-json-schema.js";
 
-export function projectHeadlessJsonEvent(event: ChatLoopEvent): unknown | null {
+export function projectHeadlessJsonEvent(event: ChatLoopEvent): RunJsonChatLoopFrame | null {
 	if (event.type === "message_update") return null;
 	if (event.type === "tool_execution_start" || event.type === "tool_execution_update") {
 		const call = displayToolCall(event.toolName, event.args);
@@ -68,7 +80,7 @@ export function projectHeadlessJsonEvent(event: ChatLoopEvent): unknown | null {
 	if (event.type === "message_end") {
 		return { ...event, message: withoutStreamedContent(event.message) };
 	}
-	if (event.type === "agent_end") return segmentSummary(event.type, event.messages);
+	if (event.type === "agent_end") return segmentSummary(event.messages);
 	if (event.type === "turn_end") {
 		return { type: event.type, message: withoutStreamedContent(event.message, true) };
 	}
@@ -77,7 +89,7 @@ export function projectHeadlessJsonEvent(event: ChatLoopEvent): unknown | null {
 
 export interface HeadlessJsonProjector {
 	/** The wire frames one chat-loop event becomes, in order; empty when the event is dropped. */
-	project(event: ChatLoopEvent): unknown[];
+	project(event: ChatLoopEvent): RunJsonChatLoopFrame[];
 }
 
 /**
@@ -93,13 +105,13 @@ export function createHeadlessJsonProjector(): HeadlessJsonProjector {
 		project(event) {
 			let projected = projectHeadlessJsonEvent(event);
 			if (projected === null) return [];
-			if (event.type === "tool_execution_start" && isRecord(projected) && projected.via === VIA_GATEWAY) {
-				capabilities.set(event.toolCallId, String(projected.toolName));
+			if (projected.type === "tool_execution_start" && projected.via === VIA_GATEWAY) {
+				capabilities.set(projected.toolCallId, projected.toolName);
 			}
-			if (event.type !== "tool_execution_end") return [projected];
+			if (event.type !== "tool_execution_end" || projected.type !== "tool_execution_end") return [projected];
 			const started = capabilities.get(event.toolCallId);
 			capabilities.delete(event.toolCallId);
-			if (started !== undefined && isRecord(projected) && projected.via !== VIA_GATEWAY) {
+			if (started !== undefined && projected.via !== VIA_GATEWAY) {
 				projected = { ...projected, toolName: started, via: VIA_GATEWAY };
 			}
 			const steps = gatewayChainSteps(event.toolName, event.result);
@@ -109,7 +121,10 @@ export function createHeadlessJsonProjector(): HeadlessJsonProjector {
 }
 
 /** One settled chain step as the start/end pair a direct call of its capability would have produced. */
-function chainStepFrames(parentToolCallId: string, step: GatewayChainStep): unknown[] {
+function chainStepFrames(
+	parentToolCallId: string,
+	step: GatewayChainStep,
+): [RunJsonToolExecutionStartFrame, RunJsonToolExecutionEndFrame] {
 	const identity = {
 		toolCallId: chainStepToolCallId(parentToolCallId, step.id),
 		parentToolCallId,
@@ -144,9 +159,14 @@ function chainStepFrames(parentToolCallId: string, step: GatewayChainStep): unkn
  * `toolCall` blocks never stream and are kept whole. A `user` or `toolResult`
  * message is returned untouched, because no delta ever carried it.
  */
-function withoutStreamedContent<T>(message: T, keepText = false): T {
-	if (!isRecord(message) || message.role !== "assistant" || !Array.isArray(message.content)) return message;
-	const content = message.content.map((block: unknown) => {
+function withoutStreamedContent(message: AgentMessage, keepText = false): RunJsonMessage {
+	// The slimmed blocks are built from untyped records, so the result is asserted
+	// to the declared wire shape here, the one place that produces it.
+	const record: unknown = message;
+	if (!isRecord(record) || record.role !== "assistant" || !Array.isArray(record.content)) {
+		return message as RunJsonMessage;
+	}
+	const content = record.content.map((block: unknown) => {
 		if (!isRecord(block)) return block;
 		if (block.type === "text" && typeof block.text === "string") {
 			const { text: _text, textSignature: _signature, ...rest } = block;
@@ -158,7 +178,7 @@ function withoutStreamedContent<T>(message: T, keepText = false): T {
 		}
 		return block;
 	});
-	return { ...message, content } as T;
+	return { ...record, content } as unknown as RunJsonMessage;
 }
 
 /**
@@ -175,16 +195,21 @@ function withoutStreamedContent<T>(message: T, keepText = false): T {
  * carries, which is also what lets a reader check the per-segment and
  * per-message accounts of one run against each other.
  */
-export function projectDispatchJsonEvent(event: unknown): unknown {
-	if (!isRecord(event) || event.type !== "agent_end" || !Array.isArray(event.messages)) return event;
+export function projectDispatchJsonEvent(
+	event: unknown,
+): RunJsonWorkerEventFrame | RunJsonWorkerAgentEndFrame | RunJsonOpaqueWorkerEventFrame {
+	// The receipt consumer reads one object per line keyed on `type`, so a value
+	// that cannot be a frame is wrapped instead of dropped or written bare.
+	if (!isRecord(event) || typeof event.type !== "string") return { type: "worker_event", event };
+	if (event.type !== "agent_end" || !Array.isArray(event.messages)) return { ...event, type: event.type };
 	const { messages: _messages, ...rest } = event;
-	return { ...rest, ...segmentSummary("agent_end", event.messages as AgentMessage[]) };
+	return { ...rest, ...segmentSummary(event.messages as AgentMessage[]) };
 }
 
-function segmentSummary(type: string, messages: ReadonlyArray<AgentMessage>): Record<string, unknown> {
+function segmentSummary(messages: ReadonlyArray<AgentMessage>): RunJsonAgentEndFrame {
 	const usage = sumRunUsage(messages);
 	return {
-		type,
+		type: "agent_end",
 		messageCount: messages.length,
 		usage: {
 			input: usage.input,
@@ -196,7 +221,7 @@ function segmentSummary(type: string, messages: ReadonlyArray<AgentMessage>): Re
 			costUsd: usage.costUsd,
 			apiCalls: usage.apiCalls,
 			measured: usage.hadUsage && usage.estimated !== true,
-			...(usage.estimated === true ? { estimated: true } : {}),
+			...(usage.estimated === true ? { estimated: true as const } : {}),
 		},
 	};
 }

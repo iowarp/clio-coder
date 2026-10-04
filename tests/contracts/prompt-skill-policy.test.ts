@@ -17,7 +17,7 @@ import { compile, compileWorker } from "../../src/domains/prompts/compiler.js";
 import { loadFragments } from "../../src/domains/prompts/fragment-loader.js";
 import { discoverMarketplaceSkills } from "../../src/domains/resources/index.js";
 import { AUTONOMY_LEVELS, type AutonomyLevel, modelMayActivateSkills } from "../../src/domains/safety/autonomy.js";
-import { mainPromptCacheIdentity } from "../../src/interactive/prompt-cache-identity.js";
+import { mainPromptCacheIdentity } from "../../src/session-control/prompt-cache-identity.js";
 import { createContextTool } from "../../src/tools/context/index.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
 

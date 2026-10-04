@@ -9,8 +9,8 @@ import {
 	visibleWidth,
 	wrapTextWithAnsi,
 } from "../../engine/tui.js";
+import type { ContextClearCommandOptions } from "../../session-control/slash-commands.js";
 import { buildHint, DEFAULT_SELECT_THEME, FocusBox, showClioOverlayFrame } from "../overlay-frame.js";
-import type { ContextClearCommandOptions } from "../slash-commands.js";
 import { clioTheme, GLYPH } from "../theme/index.js";
 
 export const CONTEXT_RESET_OVERLAY_WIDTH = 72;

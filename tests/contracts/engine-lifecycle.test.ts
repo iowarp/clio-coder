@@ -202,7 +202,7 @@ function buildRun(
 		},
 	});
 	fixture.agent = handle.agent;
-	// Mirrors src/interactive/turn-runtime.ts: the continuation guard installs as
+	// Mirrors src/session-control/turn-runtime.ts: the continuation guard installs as
 	// `prepareNextTurn` and inspects the agent-state tail exactly as
 	// postToolContinuationGuard does.
 	handle.agent.prepareNextTurn = async () => {

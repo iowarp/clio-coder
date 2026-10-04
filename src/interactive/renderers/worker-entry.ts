@@ -17,6 +17,11 @@ import { retiredIntegrityVersionOf } from "../../domains/evidence/trust-status.j
 import { WORKER_ACTION_TRAIL_LIMIT, type WorkerAction } from "../../domains/observability/worker-progress.js";
 import { stripDeadToolCallMarkup } from "../../engine/loop-guard.js";
 import { truncateToWidth, visibleWidth, wrapTextWithAnsi } from "../../engine/tui.js";
+import {
+	type WorkerEntryState,
+	type WorkerReceiptSummary,
+	workerAskedByModel,
+} from "../../session-control/worker-stream.js";
 import { councilLabelText } from "../council-grid.js";
 import { formatFooterTokens } from "../footer-panel.js";
 import {
@@ -31,7 +36,6 @@ import {
 	toolFunction,
 } from "../theme/index.js";
 import { workerPhaseActivity } from "../worker-activity.js";
-import { type WorkerEntryState, type WorkerReceiptSummary, workerAskedByModel } from "../worker-stream.js";
 
 const theme = clioTheme();
 const meta = (text: string): string => theme.fg("toolMetadata", text);

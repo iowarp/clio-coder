@@ -3,7 +3,7 @@ import { test } from "node:test";
 import { type AssistantMessage, createAssistantMessageEventStream } from "@earendil-works/pi-ai";
 import { createEngineAgent, type EngineAgentOptions } from "../../src/engine/agent.js";
 import type { AgentEvent, EngineModel } from "../../src/engine/types.js";
-import { createAssistantGenerationTiming } from "../../src/interactive/assistant-generation-timing.js";
+import { createAssistantGenerationTiming } from "../../src/session-control/assistant-generation-timing.js";
 
 test("throughput sums generation spans without tool, approval, worker or retry waits", () => {
 	const timing = createAssistantGenerationTiming();

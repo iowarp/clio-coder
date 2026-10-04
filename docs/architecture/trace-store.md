@@ -54,7 +54,7 @@ A database written by an earlier build also has an `envelopes` table and four it
 Dispatch runs and interactive session turns share the `runs` table, distinguished by `runs.source`.
 
 - A dispatched run has one `runs` row keyed by the terminal run id and one `phases` row whose `phase_id` equals the run id, with `seq` 0 and `kind` `agent`. `runs.assignment_id` holds the lineage root run id once the run is terminal. Phase `name` and `owner` hold the agent id, and `attempt` and `retries` come from the dispatch lineage attempt.
-- A session turn has `run_id` `session:<userTurnId>`, `source` `session`, the sentinel `assignment_id = "session"`, and a phase of `kind` `session`. It has no receipt and no worker process. [turn-persistence.ts](../../src/interactive/turn-persistence.ts) opens the pair at the user row, appends `message` and `tool_call` events, and closes it at the final assistant row with the turn's folded usage.
+- A session turn has `run_id` `session:<userTurnId>`, `source` `session`, the sentinel `assignment_id = "session"`, and a phase of `kind` `session`. It has no receipt and no worker process. [turn-persistence.ts](../../src/session-control/turn-persistence.ts) opens the pair at the user row, appends `message` and `tool_call` events, and closes it at the final assistant row with the turn's folded usage.
 - A phase carries timing, status, itemized token spend, total dollar spend, and context occupancy (`context_tokens`, `context_window`).
 
 A missing historical value is `NULL`, never zero. `total_cost_usd` is also `NULL` when the run's cost provenance is `unknown`, and a session turn's cost is `NULL` once any call in the turn was priced `unknown`. See [Cost and Pricing](observability.md#cost-and-pricing).

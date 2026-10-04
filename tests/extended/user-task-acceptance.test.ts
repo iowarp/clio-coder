@@ -17,7 +17,7 @@ import {
 import type { UserTaskAcceptance } from "../../src/domains/user-tasks/acceptance.js";
 import { activeUserTaskAcceptance } from "../../src/domains/user-tasks/active-acceptance.js";
 import { createUserTasksStore, UserTasksStoreError } from "../../src/domains/user-tasks/store.js";
-import { parseSlashCommand } from "../../src/interactive/slash-commands.js";
+import { parseSlashCommand } from "../../src/session-control/slash-commands.js";
 import { createTasksTool } from "../../src/tools/tasks.js";
 
 const acceptance: UserTaskAcceptance = {

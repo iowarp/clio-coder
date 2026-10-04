@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { observeWorkspace } from "../../src/interactive/direction-observations.js";
+import { observeWorkspace } from "../../src/session-control/direction-observations.js";
 import type { ToolInvokeOptions, ToolRegistry } from "../../src/tools/registry.js";
 
 test("direction uses admitted harness reads and bounds directory entries and codemap areas", async () => {
@@ -64,7 +64,7 @@ test("refused git and malformed codemap leave unknown fields while tree survives
 });
 
 test("pre-admission harness reads survive turn_start and direction records execution without run ids", async () => {
-	const { createTurnOutcomeCollector } = await import("../../src/interactive/turn-outcome-collector.js");
+	const { createTurnOutcomeCollector } = await import("../../src/session-control/turn-outcome-collector.js");
 	const collector = createTurnOutcomeCollector();
 	for (const toolName of ["git", "git", "ls", "read"])
 		collector.evaluate({
@@ -95,7 +95,7 @@ test("pre-admission harness reads survive turn_start and direction records execu
 // worker tokens. Recording only successful dispatches left dispatches and the
 // worker token total empty for an operator-aborted refactor.
 test("a failed dispatch that launched a run is recorded as failed and never counts as a duplicate", async () => {
-	const { createTurnOutcomeCollector } = await import("../../src/interactive/turn-outcome-collector.js");
+	const { createTurnOutcomeCollector } = await import("../../src/session-control/turn-outcome-collector.js");
 	const collector = createTurnOutcomeCollector();
 	collector.evaluate({ hook: "turn_start", sessionId: "s1", turnId: "u1" });
 	const args = { agent: "coder", task: "refactor validateSettings" };

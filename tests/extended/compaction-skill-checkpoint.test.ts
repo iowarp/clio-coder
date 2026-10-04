@@ -26,13 +26,13 @@ import {
 import { filterEntriesToActivePath } from "../../src/domains/session/tree/active-path.js";
 import { createEngineAgent, setEngineSystemPrompt } from "../../src/engine/agent.js";
 import type { EngineModel } from "../../src/engine/types.js";
-import { createChatLoop } from "../../src/interactive/chat-loop.js";
-import { buildModelReplayAgentMessagesFromTurns } from "../../src/interactive/model-session-replay.js";
-import { createTurnContext } from "../../src/interactive/turn-context.js";
-import type { TurnMiddleware } from "../../src/interactive/turn-middleware.js";
-import type { TurnPersistence } from "../../src/interactive/turn-persistence.js";
-import { createTurnRecovery } from "../../src/interactive/turn-recovery.js";
-import { type AgentRuntime, createTurnState } from "../../src/interactive/turn-state.js";
+import { createChatLoop } from "../../src/session-control/chat-loop.js";
+import { buildModelReplayAgentMessagesFromTurns } from "../../src/session-control/model-session-replay.js";
+import { createTurnContext } from "../../src/session-control/turn-context.js";
+import type { TurnMiddleware } from "../../src/session-control/turn-middleware.js";
+import type { TurnPersistence } from "../../src/session-control/turn-persistence.js";
+import { createTurnRecovery } from "../../src/session-control/turn-recovery.js";
+import { type AgentRuntime, createTurnState } from "../../src/session-control/turn-state.js";
 import { renderChainOutput } from "../../src/tools/gateway/chain.js";
 import { syntheticCompactionSummary } from "../harness/compaction-summary.js";
 

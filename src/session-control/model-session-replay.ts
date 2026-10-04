@@ -13,7 +13,7 @@ import {
 	activeEntriesBeforeCompactionCut,
 	buildReplayAgentMessagesFromTurns,
 	type RehydrateChatPanelOptions,
-} from "./chat-renderer.js";
+} from "./session-replay-messages.js";
 
 /**
  * The session-ownership facts continuity needs, which a renderer does not have.

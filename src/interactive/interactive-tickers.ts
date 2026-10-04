@@ -3,11 +3,11 @@ import type { TaskBoardSnapshot, TaskBoardStore } from "../domains/session/task-
 import { taskBoardCounts } from "../domains/session/task-board.js";
 import type { TUI } from "../engine/tui.js";
 import { Text, visibleWidth, wrapTextWithAnsi } from "../engine/tui.js";
+import { isHelperRun } from "../session-control/worker-stream.js";
 import type { ContextActivitySnapshot } from "./context-activity.js";
 import type { DispatchBoardRow } from "./dispatch-board.js";
 import { formatTaskIslandLines, TASK_ISLAND_WIDTH } from "./dispatch-board.js";
 import { clioTheme, frame, GLYPH } from "./theme/index.js";
-import { isHelperRun } from "./worker-stream.js";
 
 const TASK_ISLAND_MIN_COLUMNS = 80;
 const TASK_ISLAND_MIN_ROWS = 18;

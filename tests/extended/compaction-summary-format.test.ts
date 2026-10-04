@@ -11,7 +11,7 @@ import type { SessionEntry } from "../../src/domains/session/entries.js";
 import { toTaskLedgerEntryFields } from "../../src/domains/session/task-board.js";
 import { registerEngineFauxProvider } from "../../src/engine/api-registry.js";
 import { resolvedRequestContext } from "../../src/engine/context.js";
-import { buildModelReplayAgentMessagesFromTurns } from "../../src/interactive/model-session-replay.js";
+import { buildModelReplayAgentMessagesFromTurns } from "../../src/session-control/model-session-replay.js";
 import { syntheticCompactionSummary } from "../harness/compaction-summary.js";
 
 function history(text = "Earlier work"): SessionEntry[] {

@@ -1,12 +1,12 @@
 import { sanitizeCallTargetText } from "../domains/safety/call-target.js";
 import { wrapTextWithAnsi } from "../engine/tui.js";
-import type { NoticeSource } from "./notice-source.js";
+import type { NoticeLevel, NoticeSource } from "../session-control/notice-source.js";
+import type { PromptReferenceCard, RunIo } from "../session-control/slash-commands.js";
 import { renderNoticeRow } from "./renderers/notice.js";
 import { renderReferenceCard } from "./renderers/reference-card.js";
-import type { PromptReferenceCard, RunIo } from "./slash-commands.js";
 import { type ClioToken, clioTheme, GLYPH } from "./theme/index.js";
 
-export type NoticeLevel = "info" | "success" | "warn" | "error";
+export type { NoticeLevel } from "../session-control/notice-source.js";
 
 const NOTICE_MARKS = { info: "info", success: "success", warn: "warning", error: "error" } as const;
 

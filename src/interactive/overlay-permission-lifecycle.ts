@@ -8,15 +8,16 @@ import { sanitizeCallTargetText } from "../domains/safety/call-target.js";
 import { COMMAND_CONSEQUENCE_MAX_SEVERE, fitConsequenceLine } from "../domains/safety/command-consequence.js";
 import type { SafetyDecision } from "../domains/safety/contract.js";
 import { decisionActionClass } from "../domains/safety/decision-presentation.js";
+import type { ToolApprovalStateEvent } from "../session-control/chat-loop.js";
+import { resolvePermission } from "../session-control/index.js";
+import type { NoticeSource } from "../session-control/notice-source.js";
 import { askUserExposure } from "../tools/ask-user.js";
 import type { PermissionRequiredMeta, ToolRegistry } from "../tools/registry.js";
 import { resolveVerifyCall, verifyResolutionArgv } from "../tools/verify/resolve.js";
 import { prepareVerifyArguments } from "../tools/verify/surface.js";
 import { approvalParkedNotice } from "./bus-notices.js";
-import type { ToolApprovalStateEvent } from "./chat-loop.js";
 import type { NoticeLevel } from "./command-output.js";
 import { createMutationInspector, type MutationInspector, mutationFacts } from "./mutation-preview.js";
-import type { NoticeSource } from "./notice-source.js";
 import type { OverlayState } from "./overlay-key-routing.js";
 import {
 	type ApprovalRequestView,
@@ -546,28 +547,31 @@ export function createOverlayPermissionLifecycle(deps: OverlayPermissionLifecycl
 				}
 			}
 		} else if (wasConfirmed && permission) {
-			deps.bus.emit(BusChannels.PermissionResolved, {
-				status: "granted",
-				...(permission.meta ? { requestId: permission.meta.requestId } : {}),
-				origin: "main",
-				decidedBy: "operator",
-				tool: permission.call.tool,
-				actionClass: permission.decision.classification.actionClass,
-				requestedBy: "tool",
-				at: Date.now(),
-			});
-			if (permission.meta?.toolCallId !== undefined) {
-				deps.applyApprovalState({
-					type: "tool_approval_state",
-					toolCallId: permission.meta.toolCallId,
-					state: "resumed",
-				});
-			}
-			void deps.toolRegistry?.resumeParkedCalls({
-				actionClass: permission.decision.classification.actionClass,
-				...(permission.meta ? { requestId: permission.meta.requestId } : {}),
-				requestedBy: "tool:one_shot",
-			});
+			void resolvePermission(
+				{ bus: deps.bus, ...(deps.toolRegistry ? { registry: deps.toolRegistry } : {}) },
+				{
+					action: "grant",
+					payload: {
+						status: "granted",
+						...(permission.meta ? { requestId: permission.meta.requestId } : {}),
+						origin: "main",
+						decidedBy: "operator",
+						tool: permission.call.tool,
+						actionClass: permission.decision.classification.actionClass,
+						requestedBy: "tool",
+						at: Date.now(),
+					},
+					grantRequestedBy: "tool:one_shot",
+					beforeRelease: () => {
+						if (permission.meta?.toolCallId !== undefined)
+							deps.applyApprovalState({
+								type: "tool_approval_state",
+								toolCallId: permission.meta.toolCallId,
+								state: "resumed",
+							});
+					},
+				},
+			);
 		} else {
 			// One sentence each. The blocked-call composer always closes with the
 			// standing "do not retry, pivot or report" instruction, so restating it
@@ -575,23 +579,25 @@ export function createOverlayPermissionLifecycle(deps: OverlayPermissionLifecycl
 			const cancellationReason = stopping
 				? "User stopped the turn at this call's approval card. It did not run, and the turn is over."
 				: "User denied this call at the permission prompt. It will not run; no approval is pending.";
-			deps.bus.emit(BusChannels.PermissionResolved, {
-				status: "denied",
-				...(permission?.meta ? { requestId: permission.meta.requestId } : {}),
-				origin: "main",
-				decidedBy: "operator",
-				...(permission ? { tool: permission.call.tool } : {}),
-				...(permission ? { actionClass: permission.decision.classification.actionClass } : {}),
-				reason: "operator cancelled",
-				requestedBy: "tool",
-				at: Date.now(),
-			});
-			// A stop answers every call the turn has parked, not just the one on
-			// screen. Denying the head and re-notifying the next would put the
-			// operator straight back in the loop they asked to leave.
-			if (stopping) deps.toolRegistry?.cancelParkedCalls(cancellationReason);
-			else if (permission?.meta) deps.toolRegistry?.cancelParkedCall(permission.meta.requestId, cancellationReason);
-			else deps.toolRegistry?.cancelParkedCalls(cancellationReason);
+			resolvePermission(
+				{ bus: deps.bus, ...(deps.toolRegistry ? { registry: deps.toolRegistry } : {}) },
+				{
+					action: stopping ? "stop" : "deny",
+					reason: cancellationReason,
+					payload: {
+						status: "denied",
+						...(permission?.meta ? { requestId: permission.meta.requestId } : {}),
+						origin: "main",
+						decidedBy: "operator",
+						...(permission
+							? { tool: permission.call.tool, actionClass: permission.decision.classification.actionClass }
+							: {}),
+						reason: "operator cancelled",
+						requestedBy: "tool",
+						at: Date.now(),
+					},
+				},
+			);
 		}
 		if (stopping) {
 			stopping = false;

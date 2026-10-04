@@ -10,7 +10,7 @@ import type { SessionEntry } from "../../src/domains/session/entries.js";
 import { ledgerUsageCalls } from "../../src/domains/session/usage.js";
 import { completeEngineText, streamSimple } from "../../src/engine/ai.js";
 import type { EngineModel } from "../../src/engine/types.js";
-import { sideQuestionUsage } from "../../src/interactive/side-question.js";
+import { sideQuestionUsage } from "../../src/session-control/side-question.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
 
 for (const api of ["openai-responses", "anthropic-messages"] as const) {

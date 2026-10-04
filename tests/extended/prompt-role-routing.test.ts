@@ -8,9 +8,9 @@ import { createDispatchBundle } from "../../src/domains/dispatch/extension.js";
 import type { CompileWorkerPromptInput, PromptsContract } from "../../src/domains/prompts/contract.js";
 import { createPromptsBundle } from "../../src/domains/prompts/extension.js";
 import type { ProvidersContract } from "../../src/domains/providers/index.js";
-import { createTurnContext } from "../../src/interactive/turn-context.js";
-import type { TurnMiddleware } from "../../src/interactive/turn-middleware.js";
-import { type AgentRuntime, createTurnState } from "../../src/interactive/turn-state.js";
+import { createTurnContext } from "../../src/session-control/turn-context.js";
+import type { TurnMiddleware } from "../../src/session-control/turn-middleware.js";
+import { type AgentRuntime, createTurnState } from "../../src/session-control/turn-state.js";
 import { fastReproducibility, isolateDispatchState, restoreDispatchState } from "../harness/dispatch.js";
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
 

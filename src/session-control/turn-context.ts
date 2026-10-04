@@ -116,10 +116,10 @@ import {
 	toolSignatureFromState,
 } from "./chat-loop-messages.js";
 import { coldReasonText } from "./cold-reasons.js";
+import { renderCompactionSummaryLine, renderEvictionSkipLine } from "./compaction-lines.js";
 import { buildModelReplayAgentMessagesFromTurns, continuityContextFromSession } from "./model-session-replay.js";
 import { resolveTurnOutputReserve } from "./output-reserve.js";
 import { attachedToolSchemasFromState, mainPromptCacheIdentity } from "./prompt-cache-identity.js";
-import { renderCompactionSummaryLine, renderEvictionSkipLine } from "./renderers/compaction-summary.js";
 import type { TurnMiddleware } from "./turn-middleware.js";
 import type { AgentRuntime, ChatTurnState } from "./turn-state.js";
 

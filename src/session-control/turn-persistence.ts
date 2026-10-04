@@ -39,7 +39,7 @@ import {
 	terminalFailureFromAssistantMessage,
 	toolResultSummary,
 } from "./chat-loop-messages.js";
-import { retireActiveUserContextForNextOperator } from "./chat-renderer.js";
+import { retireActiveUserContextForNextOperator } from "./session-replay-messages.js";
 import type { RetryStatusPayload } from "./turn-recovery.js";
 import type { AgentRuntime, ChatLoopTarget, ChatTurnState } from "./turn-state.js";
 

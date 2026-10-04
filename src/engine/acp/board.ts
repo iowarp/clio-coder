@@ -1,3 +1,8 @@
+import type { AcpSessionBoard } from "./types.js";
+
+export type { AcpSessionBoard } from "./types.js";
+export { ACP_BOARD_META_KEY, ACP_BOARD_METHOD } from "./types.js";
+
 /**
  * `_clio-coder/session/board`: the read half of the terminal's /tasks and
  * /decisions overlays and the /memory status line, as one bounded projection.
@@ -14,8 +19,6 @@ import type { DecisionLedgerEntry } from "../../domains/session/entries.js";
 import type { TaskBoardSnapshot } from "../../domains/session/task-board.js";
 import type { UserTask } from "../../domains/user-tasks/store.js";
 
-export const ACP_BOARD_METHOD = "_clio-coder/session/board";
-export const ACP_BOARD_META_KEY = "clio-coder/board";
 export const ACP_BOARD_MAX_ITEMS = 100;
 const MAX_TEXT_BYTES = 1024;
 const MAX_EXPECTED_OUTPUTS = 8;
@@ -26,44 +29,6 @@ export interface AcpBoardSource {
 	plan: TaskBoardSnapshot | null;
 	decisions: ReadonlyArray<DecisionLedgerEntry>;
 	memory: { enabled: boolean; tier: "llm" | "rules"; bank: TaskMemorySnapshot; stepInFlight: boolean } | null;
-}
-
-export interface AcpSessionBoard {
-	version: 1;
-	operatorTasks: Array<{
-		id: string;
-		title: string;
-		status: UserTask["status"];
-		expectedOutputs: string[];
-		verificationChecks: number;
-	}>;
-	plan: {
-		title: string;
-		tasks: Array<{ id: string; title: string; status: string; origin: "agent" | "user"; reason: string | null }>;
-	} | null;
-	decisions: Array<{
-		ref: string;
-		/** With {@link key}, what `_clio-coder/decisions/supersede` names. */
-		interviewId: string;
-		key: string;
-		label: string | null;
-		value: string;
-		status: "active" | "superseded";
-		source: "operator" | "agent" | null;
-		decidedAt: string;
-		rationale: string | null;
-		correction: string | null;
-	}>;
-	memory: {
-		enabled: boolean;
-		tier: "llm" | "rules";
-		entries: number;
-		stepInFlight: boolean;
-		/** Knowledge and procedural entries a person may propose as durable memory; status stays private. */
-		bank: Array<{ id: string; kind: "knowledge" | "procedural"; content: string }>;
-	} | null;
-	/** True when any list was cut at {@link ACP_BOARD_MAX_ITEMS}. */
-	truncated: boolean;
 }
 
 function bounded(text: string): string {

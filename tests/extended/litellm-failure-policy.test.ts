@@ -3,10 +3,10 @@ import { describe, it } from "node:test";
 
 import { isLiteLLMConnectionFailure, liteLLMRouteFailureMessage } from "../../src/core/gateway-routing.js";
 import type { AgentMessage } from "../../src/engine/types.js";
-import type { TurnContext } from "../../src/interactive/turn-context.js";
-import type { TurnPersistence } from "../../src/interactive/turn-persistence.js";
-import { createTurnRecovery } from "../../src/interactive/turn-recovery.js";
-import type { AgentRuntime, ChatTurnState } from "../../src/interactive/turn-state.js";
+import type { TurnContext } from "../../src/session-control/turn-context.js";
+import type { TurnPersistence } from "../../src/session-control/turn-persistence.js";
+import { createTurnRecovery } from "../../src/session-control/turn-recovery.js";
+import type { AgentRuntime, ChatTurnState } from "../../src/session-control/turn-state.js";
 
 describe("LiteLLM interactive failure policy", () => {
 	it("only leaves a pre-output client connection failure eligible for visible same-route recovery", () => {

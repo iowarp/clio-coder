@@ -14,7 +14,7 @@ import {
 	dispatchSlashCommand,
 	parseSlashCommand,
 	type SlashCommandContext,
-} from "../../src/interactive/slash-commands.js";
+} from "../../src/session-control/slash-commands.js";
 
 const legacyOptionRemoved: "listSkills" extends keyof SlashAutocompleteOptions ? false : true = true;
 

@@ -10,13 +10,13 @@ import { createChatPanel } from "../../src/interactive/chat-panel.js";
 import { renderOperatorCommandRows } from "../../src/interactive/command-output.js";
 import { preserveTranscriptScroll } from "../../src/interactive/layout.js";
 import { renderBashTranscriptExecution, renderToolPreview } from "../../src/interactive/renderers/tool-execution.js";
-import { parseSlashCommand } from "../../src/interactive/slash-commands.js";
 import { createStatusController } from "../../src/interactive/status/controller.js";
 import { reduceStatus } from "../../src/interactive/status/state-machine.js";
-import { INITIAL_STATUS } from "../../src/interactive/status/types.js";
 import { resolveFooterVerb } from "../../src/interactive/status/verbs.js";
 import { transcriptDetail } from "../../src/interactive/transcript-detail.js";
 import { ViewOverlayView } from "../../src/interactive/view/view-overlay.js";
+import { parseSlashCommand } from "../../src/session-control/slash-commands.js";
+import { INITIAL_STATUS } from "../../src/session-control/status-types.js";
 
 const plain = (rows: string[]) => rows.map(stripTerminalSequences).join("\n");
 

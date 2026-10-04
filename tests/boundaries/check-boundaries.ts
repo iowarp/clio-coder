@@ -115,9 +115,9 @@ function resolveRelativeImport(fromFile: string, specifier: string): string {
 }
 
 /**
- * The chat loop's turn state machine and its single-owner turn modules.
- * Other interactive files (overlays, panels, the composition root in
- * index.ts) legitimately know about entry-level wiring; these do not.
+ * The chat loop's turn state machine and its single-owner turn modules in
+ * src/session-control. The interactive composition root in index.ts
+ * legitimately knows about entry-level wiring; these do not.
  */
 function isChatLoopTurnModule(filePath: string): boolean {
 	const base = path.basename(filePath);
@@ -133,8 +133,10 @@ function isChatLoopTurnModule(filePath: string): boolean {
 const STAGE_0_OWNER = path.join("src", "interactive", "terminal-lease.ts");
 
 /**
- * Modules an external runtime reacher may enter inside `src/interactive/**` or
- * `src/engine/**`.
+ * Modules an external runtime reacher may enter inside `src/interactive/**`,
+ * `src/session-control/**` or `src/engine/**`. The session-control tree holds
+ * the turn engine that used to live in `src/interactive/**`, so it keeps the
+ * same protection: its chunk membership is part of what Stage 0 is measured on.
  *
  * The first two Stage 0 splits came from `src/cli/**`; the third came from
  * `src/domains/mux/**`. Esbuild responds to both identically: when a module in
@@ -161,7 +163,13 @@ const ORCHESTRATOR = "src/entry/orchestrator.ts";
 
 const STAGE0_SEAMS: ReadonlyArray<Stage0Seam> = [
 	{
-		module: "src/interactive/turn-outcome-collector.ts",
+		module: "src/session-control/index.ts",
+		reason:
+			"the composition root and transports share permission, restore and model decisions through one render-free in-process contract.",
+		allowStage0OverlapFrom: [ORCHESTRATOR],
+	},
+	{
+		module: "src/session-control/turn-outcome-collector.ts",
 		reason:
 			"the composition root registers a surface-neutral observer whose value closure contains only core, pure turn-control, and tool-call shapes, never terminal rendering.",
 	},
@@ -171,17 +179,17 @@ const STAGE0_SEAMS: ReadonlyArray<Stage0Seam> = [
 			"the Stage 0 owner itself. src/cli/clio.ts is the surface that opens the instant shell, so this edge is the budget rather than a leak, and the closure guard below skips it.",
 	},
 	{
-		module: "src/interactive/slash-commands.ts",
+		module: "src/session-control/slash-commands.ts",
 		reason:
 			"one slash parser and one registry-membership source for both surfaces. The headless refusal in src/cli/run.ts and the TUI editor must agree on which tokens name a command, and a second copy of the parser would drift. The registry's own imports are what the closure guard below watches.",
 	},
 	{
-		module: "src/interactive/chat-loop.ts",
+		module: "src/session-control/chat-loop.ts",
 		reason: "the Stage 1 composition root creates the chat loop; CLI event-shape imports are type-only and erase.",
 		allowStage0OverlapFrom: [ORCHESTRATOR],
 	},
 	{
-		module: "src/interactive/chat-loop-messages.ts",
+		module: "src/session-control/chat-loop-messages.ts",
 		reason:
 			"sumRunUsage, the one usage fold both the CLI modes and the TUI report from. Its value closure stays on domains and engine/ai, off the render graph.",
 	},
@@ -310,11 +318,11 @@ const STAGE0_SEAMS: ReadonlyArray<Stage0Seam> = [
 		allowStage0OverlapFrom: [ORCHESTRATOR],
 	},
 	{
-		module: "src/interactive/loop-guard-interrupt.ts",
+		module: "src/session-control/loop-guard-interrupt.ts",
 		reason: "the Stage 1 composition root connects engine loop-guard stops to interactive cancellation.",
 	},
 	{
-		module: "src/interactive/model-session-replay.ts",
+		module: "src/session-control/model-session-replay.ts",
 		reason: "the Stage 1 composition root projects persisted turns back into interactive model messages.",
 		allowStage0OverlapFrom: [ORCHESTRATOR],
 	},
@@ -342,7 +350,7 @@ const STAGE0_SEAMS: ReadonlyArray<Stage0Seam> = [
 		reason: "the Stage 1 composition root registers interactive prose renderers for tool results.",
 	},
 	{
-		module: "src/interactive/watchdog-run.ts",
+		module: "src/session-control/watchdog-run.ts",
 		reason: "the Stage 1 composition root wires watchdog review into the complete interactive application.",
 		allowStage0OverlapFrom: [ORCHESTRATOR],
 	},
@@ -410,11 +418,18 @@ function isAllowedWorkerProviderValueImport(resolved: string, providersDomainRoo
  *      surface-agnostic: headless, interactive, ACP, and worker runs share it,
  *      so a tool reaching into TUI code would make one surface's presentation
  *      a dependency of every surface's execution.
- *   5. The chat loop's turn modules (src/interactive/turn-*.ts, chat-loop.ts)
- *      never import src/entry/**. Composition flows one way: the entry point
- *      composes the loop, never the reverse.
+ *   5. The chat loop's turn modules (src/session-control/turn-*.ts,
+ *      chat-loop.ts) never import src/entry/**. Composition flows one way: the
+ *      entry point composes the loop, never the reverse.
+ *   8. src/session-control/** never imports src/interactive/**, type-only
+ *      included. It is the one session contract the TUI, headless run and the
+ *      ACP server all call, so a render module in its graph would make the
+ *      terminal a dependency of every surface.
+ *   9. src/engine/** never imports src/interactive/**, type-only included.
+ *      The ACP server reaches session behavior through src/session-control.
  *   6. Any value importer outside the computed Stage 0 closure and its
- *      src/interactive/** and src/engine/** trees reaches those trees only
+ *      src/interactive/**, src/session-control/** and src/engine/** trees
+ *      reaches those trees only
  *      through a declared seam in STAGE0_SEAMS. A seam may not lead back into
  *      Stage 0 unless that existing composition-root overlap is explicitly
  *      declared. CLI type edges retain the older declaration requirement.
@@ -429,6 +444,7 @@ export function runBoundaryCheck(projectRoot: string): BoundaryCheckResult {
 	const providersDomainRoot = path.join(domainsRoot, "providers");
 	const toolsRoot = path.join(srcRoot, "tools");
 	const interactiveRoot = path.join(srcRoot, "interactive");
+	const sessionControlRoot = path.join(srcRoot, "session-control");
 	const entryRoot = path.join(srcRoot, "entry");
 	const cliRoot = path.join(srcRoot, "cli");
 	const stage0Owner = path.join(projectRoot, STAGE_0_OWNER);
@@ -448,7 +464,8 @@ export function runBoundaryCheck(projectRoot: string): BoundaryCheckResult {
 		const inWorker = isWithin(filePath, workerRoot);
 		const fromDomain = domainOf(filePath, domainsRoot);
 		const inTools = isWithin(filePath, toolsRoot);
-		const isChatLoopModule = inInteractive && isChatLoopTurnModule(filePath);
+		const inSessionControl = isWithin(filePath, sessionControlRoot);
+		const isChatLoopModule = inSessionControl && isChatLoopTurnModule(filePath);
 		const inCli = isWithin(filePath, cliRoot);
 		const inStage0Closure = stage0Closure.has(filePath);
 
@@ -504,8 +521,19 @@ export function runBoundaryCheck(projectRoot: string): BoundaryCheckResult {
 				return;
 			}
 
-			const protectedTarget = isWithin(resolved, interactiveRoot) || isWithin(resolved, engineRoot);
-			const externalRuntimeReacher = !typeOnly && !inInteractive && !inEngine && !inStage0Closure;
+			if ((inSessionControl || inEngine) && isWithin(resolved, interactiveRoot)) {
+				const qualifier = typeOnly ? " (type-only)" : "";
+				const rule = inSessionControl ? "rule8" : "rule9";
+				const owner = inSessionControl ? "the session contract" : "the engine";
+				violations.push(
+					`${rule}: ${path.relative(projectRoot, filePath)} ${kind}${qualifier} ${specifier} which resolves inside src/interactive; ${owner} is shared by every surface and never depends on terminal rendering`,
+				);
+				return;
+			}
+
+			const protectedTarget =
+				isWithin(resolved, interactiveRoot) || isWithin(resolved, sessionControlRoot) || isWithin(resolved, engineRoot);
+			const externalRuntimeReacher = !typeOnly && !inInteractive && !inSessionControl && !inEngine && !inStage0Closure;
 			if (protectedTarget && (inCli || externalRuntimeReacher)) {
 				const seamPath = path.relative(projectRoot, resolved).split(path.sep).join("/");
 				const seam = STAGE0_SEAMS_BY_MODULE.get(seamPath);
@@ -566,7 +594,9 @@ export function runBoundaryCheck(projectRoot: string): BoundaryCheckResult {
 		if (seam === stage0Owner) continue;
 		const reached = [...valueImportClosure(seam)]
 			.filter((file) => file !== seam && stage0Closure.has(file))
-			.filter((file) => isWithin(file, interactiveRoot) || isWithin(file, engineRoot))
+			.filter(
+				(file) => isWithin(file, interactiveRoot) || isWithin(file, sessionControlRoot) || isWithin(file, engineRoot),
+			)
 			.map((file) => path.relative(projectRoot, file).split(path.sep).join("/"))
 			.sort();
 		if (reached.length === 0) continue;

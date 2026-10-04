@@ -44,7 +44,7 @@ import {
 import { discoverMarketplaceSkills } from "../../src/domains/resources/skills/marketplace.js";
 import { LIBRARY_TABS } from "../../src/interactive/overlays/library-tabs.js";
 import { createSlashCommandAutocompleteProvider } from "../../src/interactive/slash-autocomplete.js";
-import { parseSlashCommand } from "../../src/interactive/slash-commands.js";
+import { parseSlashCommand } from "../../src/session-control/slash-commands.js";
 import { trustProjectPackages } from "../harness/project-trust.js";
 
 let root: string;

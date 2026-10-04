@@ -11,16 +11,15 @@ import { Icon } from "../design/icons.js";
 import { TONE_GLYPHS } from "../design/status.js";
 import { announce } from "../interaction/announcer.js";
 import { useDetailsDismiss } from "../interaction/use-details-dismiss.js";
-import { ACP_TARGET_MODEL_LIMIT, catalogMayBeCut, modelAfterTargetChange } from "../pages/model-options.js";
-import { ModelSelect } from "../pages/model-select.js";
+import { ACP_TARGET_MODEL_LIMIT, catalogMayBeCut, modelAfterTargetChange } from "../pages/model-picker-model.js";
 import type { RouteFacts } from "./route.js";
-import type { RouteDraft, RouteScope } from "./route-picker-model.js";
+import type { RouteDraft } from "./route-picker-model.js";
 import {
 	conversationChanges,
 	draftWithSupportedThinking,
 	modelThinkingLevels,
 	routeDraft,
-	savedRoutePatch,
+	routePickerChoices,
 } from "./route-picker-model.js";
 
 /** Openers keyed by session, so the Session column's Model section can open this composer's picker. */
@@ -80,8 +79,7 @@ export function RoutePicker({
 			if (openers.get(sessionId) === reveal) openers.delete(sessionId);
 		};
 	}, [sessionId]);
-	const global = capabilities?.settings?.get_safe === true && capabilities.settings.patch_safe === true;
-	if (!global && !route.config?.options.length)
+	if (!route.config?.options.length)
 		return (
 			<span className="route-chip" data-tone={route.tone} title={route.title}>
 				<RouteFace route={route} />
@@ -106,7 +104,6 @@ export function RoutePicker({
 					client={client}
 					sessionId={sessionId}
 					running={running}
-					global={global}
 					config={route.config}
 					probe={capabilities?.targets?.probe === true}
 					list={capabilities?.targets?.list === true}
@@ -122,7 +119,6 @@ function RouteForm({
 	client,
 	sessionId,
 	running,
-	global,
 	config,
 	list,
 	probe,
@@ -131,7 +127,6 @@ function RouteForm({
 	client: Client;
 	sessionId: string;
 	running: boolean;
-	global: boolean;
 	config: SessionConfig | undefined;
 	list: boolean;
 	probe: boolean;
@@ -143,26 +138,19 @@ function RouteForm({
 	const modelId = useId();
 	const thinkingId = useId();
 	const scopeId = useId();
-	const scopeSelectId = useId();
-	const [scope, setScope] = useState<RouteScope>(config?.options.length ? "conversation" : "every-project");
-	const settings = useQuery({
-		queryKey: ["session-settings", sessionId],
-		queryFn: () => client.call(routes.sessionSettings, input),
-		enabled: global,
-	});
 	const targets = useQuery({
 		queryKey: ["session-targets", sessionId],
 		queryFn: () => client.call(routes.sessionTargets, input),
 		enabled: list,
 	});
 	const [edited, setEdited] = useState<RouteDraft | null>(null);
-	const reported = routeDraft(settings.data, config, scope);
+	const reported = routeDraft(undefined, config, "conversation");
 	const requested = edited ?? reported;
 	const thinkingLevels = modelThinkingLevels(
 		config,
 		requested?.model ?? "",
 		targets.data?.targets.find((row) => row.id === requested?.target)?.thinkingLevels,
-		scope === "conversation",
+		requested?.target === config?.target,
 	);
 	const draft = draftWithSupportedThinking(requested, thinkingLevels);
 	const chosenTarget = draft?.target ?? "";
@@ -188,49 +176,35 @@ function RouteForm({
 	const save = useMutation({
 		mutationFn: async () => {
 			if (!draft || !reported) return;
-			if (scope === "every-project") {
-				const value = await client.call(routes.patchSessionSettings, { ...input, body: savedRoutePatch(draft, reported) });
-				queries.setQueryData(["session-settings", sessionId], value);
-			} else {
-				for (const body of conversationChanges(draft, reported))
-					await client.call(routes.setSessionConfig, { ...input, body });
-			}
+			for (const body of conversationChanges(draft, reported))
+				await client.call(routes.setSessionConfig, { ...input, body });
 			await queries.invalidateQueries({ queryKey: ["session", sessionId] });
-			await queries.invalidateQueries({ queryKey: ["session-settings", sessionId] });
 		},
 		onSuccess: () => {
-			announce(
-				scope === "conversation"
-					? "Model and thinking changed for this conversation’s next request."
-					: "Route saved for every project.",
-			);
+			announce("Connection, model and thinking changed for this conversation’s next request.");
 			onDone();
 		},
 		onError: () => {
 			// Separate ACP controls can partly succeed. Read the authoritative state before offering a retry.
 			setEdited(null);
 			void queries.invalidateQueries({ queryKey: ["session", sessionId] });
-			void queries.invalidateQueries({ queryKey: ["session-settings", sessionId] });
 		},
 	});
 	if (!draft || !reported)
 		return (
 			<div className="route-picker__panel">
-				{settings.error ? <p role="alert">{settings.error.message}</p> : <p>Reading the model settings…</p>}
+				<p>Reading this conversation’s model controls…</p>
 			</div>
 		);
-	const changed =
-		scope === "conversation"
-			? conversationChanges(draft, reported).length > 0
-			: Object.keys(savedRoutePatch(draft, reported)).length > 0;
-	const modelNeedsTarget = scope === "every-project" && draft.target === "" && draft.model.trim() !== "";
+	const changed = conversationChanges(draft, reported).length > 0;
+	const modelNeedsTarget = draft.target === "" && draft.model.trim() !== "";
 	const edit = (next: Partial<RouteDraft>) => {
 		setEdited({ ...draft, ...next });
 		save.reset();
 	};
 	const cut =
 		models !== null && catalogMayBeCut(models)
-			? ` Clio Coder lists at most ${ACP_TARGET_MODEL_LIMIT} per connection; choose Advanced: unverified model id for one not shown.`
+			? ` Clio Coder lists at most ${ACP_TARGET_MODEL_LIMIT} models per connection.`
 			: "";
 	const count = models === null ? "" : ` ${models.length} ${models.length === 1 ? "model" : "models"}.`;
 	const note =
@@ -245,72 +219,41 @@ function RouteForm({
 						: catalogCheck.error
 							? `The check failed: ${catalogCheck.error.message} These are the models Clio Coder last knew for it.${cut}`
 							: `The models Clio Coder knows for ${chosenTarget}.${count}${cut}`;
+	const choices = routePickerChoices(config, draft, targets.data?.targets);
 	const locked = running || save.isPending;
 	return (
 		<div className="route-picker__panel">
 			<p className="route-picker__title">Model for the next request</p>
 			<div className="route-picker__fields">
-				<label htmlFor={scopeSelectId}>Apply to</label>
-				<select
-					id={scopeSelectId}
-					value={scope}
-					disabled={locked}
-					onChange={(event) => {
-						setScope(event.target.value as RouteScope);
-						setEdited(null);
-						save.reset();
-					}}
-				>
-					{config?.options.length ? <option value="conversation">This conversation</option> : null}
-					{global ? <option value="every-project">Every project</option> : null}
-				</select>
 				<label htmlFor={targetId}>Connection</label>
 				<select
 					id={targetId}
 					value={draft.target}
-					disabled={locked || scope === "conversation"}
+					disabled={locked || !choices.targetEditable}
 					onChange={(event) => {
 						const target = event.target.value;
 						edit({ target, model: modelAfterTargetChange(draft.model, target === "" ? null : catalogFor(target)) });
 					}}
 				>
-					<option value="">Automatic routing</option>
-					{draft.target && !targets.data?.targets.some((row) => row.id === draft.target) ? (
-						<option value={draft.target}>{draft.target}</option>
-					) : null}
-					{targets.data?.targets.map((row) => (
-						<option key={row.id} value={row.id}>
-							{row.id}
+					{choices.targets.map((row) => (
+						<option key={row.value} value={row.value}>
+							{row.label}
 						</option>
 					))}
 				</select>
 				<label htmlFor={modelId}>Model</label>
-				{scope === "conversation" ? (
-					<select
-						id={modelId}
-						value={draft.model}
-						disabled={locked || !config?.options.some((row) => row.id === "model")}
-						onChange={(event) => edit({ model: event.target.value })}
-					>
-						{config?.options
-							.find((row) => row.id === "model")
-							?.options.map((row) => (
-								<option key={row.value} value={row.value}>
-									{row.name}
-								</option>
-							))}
-						{!draft.model ? <option value="">Model not reported</option> : null}
-					</select>
-				) : (
-					<ModelSelect
-						id={modelId}
-						value={draft.model}
-						models={models}
-						disabled={locked || (chosenTarget === "" && draft.model === "")}
-						note={note}
-						onChange={(model) => edit({ model })}
-					/>
-				)}
+				<select
+					id={modelId}
+					value={draft.model}
+					disabled={locked || !choices.modelEditable}
+					onChange={(event) => edit({ model: event.target.value })}
+				>
+					{choices.models.map((row) => (
+						<option key={row.value} value={row.value}>
+							{row.label}
+						</option>
+					))}
+				</select>
 				<label htmlFor={thinkingId}>Thinking</label>
 				<select
 					id={thinkingId}
@@ -323,19 +266,11 @@ function RouteForm({
 					))}
 				</select>
 			</div>
+			<p>{note}</p>
 			{modelNeedsTarget ? <p role="alert">Choose a connection before naming a model.</p> : null}
 			<p className="route-picker__scope" id={scopeId}>
-				{scope === "conversation" ? (
-					<>
-						<strong>This conversation.</strong> Model and thinking apply from its next request. Saved defaults stay as they
-						are. This conversation keeps its connection; choose Every project to change the saved connection.
-					</>
-				) : (
-					<>
-						<strong>Saved for every project.</strong> This conversation uses it from its next request, and so do new
-						conversations, the CLI and the TUI.
-					</>
-				)}
+				<strong>This conversation.</strong> Connection, model and thinking apply from its next request. Saved defaults stay
+				as they are. Change saved defaults in Settings or Connections.
 			</p>
 			{running ? <p className="route-picker__wait">You can change this when the current turn finishes.</p> : null}
 			<div className="route-picker__actions">
@@ -346,7 +281,7 @@ function RouteForm({
 					disabled={locked || !changed || modelNeedsTarget}
 					onClick={() => save.mutate()}
 				>
-					{save.isPending ? "Saving…" : scope === "conversation" ? "Apply to this conversation" : "Save for every project"}
+					{save.isPending ? "Applying…" : "Apply to this conversation"}
 				</button>
 				<button type="button" onClick={onDone}>
 					Cancel

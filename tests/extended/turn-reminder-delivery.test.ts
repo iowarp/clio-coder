@@ -19,8 +19,8 @@ import type { SessionContract } from "../../src/domains/session/contract.js";
 import type { TaskBoardSnapshot } from "../../src/domains/session/task-board.js";
 import { createEngineAgent } from "../../src/engine/agent.js";
 import type { AgentMessage } from "../../src/engine/types.js";
-import { createTurnMiddleware } from "../../src/interactive/turn-middleware.js";
-import { type AgentRuntime, createTurnState } from "../../src/interactive/turn-state.js";
+import { createTurnMiddleware } from "../../src/session-control/turn-middleware.js";
+import { type AgentRuntime, createTurnState } from "../../src/session-control/turn-state.js";
 
 for (const [message, text, key] of [
 	[FINISH_CONTRACT_ADVISORY_MESSAGE, "change not verified; inspect the turn receipt", "finish.unverified"],

@@ -11,7 +11,7 @@
  * the answer coming back. A step that times out still had its whole trajectory
  * prefilled into the single prefix slot, because aborting the HTTP request does
  * not stop a llama.cpp prefill (the measurement is recorded in
- * `src/interactive/turn-prewarm.ts`). Publishing from the usage sink instead
+ * `src/session-control/turn-prewarm.ts`). Publishing from the usage sink instead
  * missed exactly that case, since usage is only assigned once the call resolves.
  *
  * The same request also occupies real endpoint capacity. Both responsibilities

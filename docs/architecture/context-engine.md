@@ -51,7 +51,7 @@ Resolution takes the first applicable layer, most authoritative first:
 
 A request is admitted only when its estimated input plus its output reservation fits the window ($\text{input} + \text{output} \le W$), which `requestFits` in [request-fit.ts](../../src/domains/context/budget/request-fit.ts) decides. Unknown input, output or window values never admit.
 
-- **Output reservation**: `resolveTurnOutputReserve` in `src/interactive/output-reserve.ts` resolves it from the configured output budget, the model's advertised cap, and the remaining-context clamp the transports apply on the wire.
+- **Output reservation**: `resolveTurnOutputReserve` in `src/session-control/output-reserve.ts` resolves it from the configured output budget, the model's advertised cap, and the remaining-context clamp the transports apply on the wire.
 - **Compaction reserve**: the `reserve` category in `/context` is `window × (1 − threshold)`, clamped to the space still free. It is headroom held back so automatic compaction fires before a request is refused, and it is unrelated to the output reservation.
 - **Enforcement points**: the fit check runs at operator submission and at tool-batch continuation. Pressure thresholds are a separate preference layered on top.
 - **Pressure phases**: `evaluatePressure` in [pressure.ts](../../src/domains/context/budget/pressure.ts) labels each budget publication `normal`, `notice`, `prepare`, `reduce` or `recover`, and `/context` prints the label beside the headroom (`Headroom: <tokens> · <phase>`). With the default threshold of 0.8 the phases begin at 0.65 (`notice`), 0.72 (`prepare`) and 0.8 (`reduce`) of the window, scaled proportionally when `context.compaction.threshold` differs. `recover` means input plus output reservation exceeds the window. The phases are advisory labels; the actions come from the threshold and request-fit checks. Keep `context.workingSet.target` below `context.compaction.threshold`: when it is not, the labels fall back to the defaults (0.8 and 0.6) and the live view records the rejected policy, while compaction and eviction keep reading the configured values.
@@ -247,7 +247,7 @@ Repository Source Code
 | Live budget view & pressure | `src/domains/context/budget/` | `requestFits`, `evaluatePressure`, live budget producer |
 | Context Ledger | [context-ledger.ts](../../src/domains/session/context-ledger.ts) | `ContextLedger`, `buildContextLedger` |
 | Compaction summary | [compact.ts](../../src/domains/session/compaction/compact.ts) | `compact`, `captureSkillContext` |
-| Compaction scheduling | [turn-context.ts](../../src/interactive/turn-context.ts) | `runAutoCompact`, automatic failure pause |
+| Compaction scheduling | [turn-context.ts](../../src/session-control/turn-context.ts) | `runAutoCompact`, automatic failure pause |
 | Working set | `src/domains/context/working-set/` | `foldWorkingSet`, `projectWorkingSet`, `planEviction` |
 | Route sources | [route-provenance.ts](../../src/core/route-provenance.ts) | `resolveRouteProvenance`, `formatRouteSources` |
 | Observation pool | [observation.ts](../../src/tools/observation.ts) | per-turn pool sizing |

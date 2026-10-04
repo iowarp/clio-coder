@@ -326,7 +326,7 @@ The three kinds (prompt, effect, command) are a closed set. Adding a fourth requ
 
 ## Upstream Callers
 
-- **`src/interactive/turn-middleware.ts`**: fires `turn_start`, `turn_end`, and `on_compaction` hooks from the chat loop. Owns every `deps.middleware` interaction of the loop.
+- **`src/session-control/turn-middleware.ts`**: fires `turn_start`, `turn_end`, and `on_compaction` hooks from the chat loop. Owns every `deps.middleware` interaction of the loop.
 - **`src/tools/registry.ts`**: fires `before_tool` and `after_tool` hooks during `runSpec`. The registry treats the first `block_tool` as the verdict.
 - **`src/entry/orchestrator.ts`**: constructs the middleware bundle and registers all host registrations (guards, observers, nudges, assessors).
 

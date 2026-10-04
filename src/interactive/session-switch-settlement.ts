@@ -1,4 +1,4 @@
-import type { ChatLoop } from "./chat-loop.js";
+import type { ChatLoop } from "../session-control/chat-loop.js";
 
 type SessionSwitchChat = Pick<ChatLoop, "cancel" | "isStreaming" | "whenSettled">;
 

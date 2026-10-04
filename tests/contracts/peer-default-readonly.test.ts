@@ -12,8 +12,8 @@ import { buildCodexExecArgs } from "../../src/engine/codex/subprocess-runtime.js
 import { buildOpenCodeCliArgs } from "../../src/engine/external-cli/opencode.js";
 import { buildPiCliArgs } from "../../src/engine/external-cli/pi.js";
 import type { WorkerRunInput } from "../../src/engine/worker-runtime.js";
-import type { SlashCommandContext } from "../../src/interactive/slash-commands.js";
-import { dispatchSlashCommand, handleRun, parseSlashCommand } from "../../src/interactive/slash-commands.js";
+import type { SlashCommandContext } from "../../src/session-control/slash-commands.js";
+import { dispatchSlashCommand, handleRun, parseSlashCommand } from "../../src/session-control/slash-commands.js";
 import { headlessScratch, runCli, sealedReceipt } from "../harness/headless-run.js";
 
 function input(readOnly: boolean): WorkerRunInput {

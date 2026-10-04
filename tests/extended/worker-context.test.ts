@@ -11,7 +11,7 @@ import { verifyReceiptIntegrity, withReceiptIntegrity } from "../../src/domains/
 import { adaptRunReceiptContextStatus } from "../../src/domains/evidence/trust-status.js";
 import type { MessageEntry, SessionEntry } from "../../src/domains/session/entries.js";
 import type { AgentMessage } from "../../src/engine/types.js";
-import { buildModelReplayAgentMessagesFromTurns } from "../../src/interactive/model-session-replay.js";
+import { buildModelReplayAgentMessagesFromTurns } from "../../src/session-control/model-session-replay.js";
 import { createContextTool } from "../../src/tools/context/index.js";
 import { createDispatchAdmissionController } from "../../src/tools/dispatch-admission.js";
 import { DISPATCH_PLAN_PREPARATION_ERROR_ARGUMENT } from "../../src/tools/dispatch-plan.js";

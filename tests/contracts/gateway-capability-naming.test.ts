@@ -16,7 +16,6 @@ import type { SessionEntry } from "../../src/domains/session/entries.js";
 import { writeTranscriptExport } from "../../src/domains/session/transcript-export.js";
 import { buildTurnPreview } from "../../src/domains/session/tree/preview.js";
 import { stripTerminalSequences } from "../../src/engine/tui.js";
-import type { ChatLoopEvent } from "../../src/interactive/chat-loop.js";
 import { createInteractiveEventProjection } from "../../src/interactive/interactive-event-projection.js";
 import {
 	renderToolExecution,
@@ -25,6 +24,7 @@ import {
 	toolRowTitle,
 } from "../../src/interactive/renderers/tool-execution.js";
 import { transcriptDetail } from "../../src/interactive/transcript-detail.js";
+import type { ChatLoopEvent } from "../../src/session-control/chat-loop.js";
 
 const event = (value: Record<string, unknown>): ChatLoopEvent => value as unknown as ChatLoopEvent;
 const plain = (rows: readonly string[]): string[] => rows.map((row) => stripTerminalSequences(row));

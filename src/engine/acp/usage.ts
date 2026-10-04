@@ -1,3 +1,8 @@
+import type { AcpCostAggregate, AcpQuotaSnapshot, AcpUsageRow } from "./types.js";
+
+export type { AcpCostAggregate, AcpQuotaSnapshot, AcpUsageRow } from "./types.js";
+export { ACP_ACCOUNTING_META_KEY, ACP_USAGE_READ_METHOD } from "./types.js";
+
 /**
  * `_clio-coder/usage/read`: the numbers the terminal's /usage overlay shows.
  *
@@ -10,61 +15,16 @@
  */
 
 /** Not `clio-coder/usage`, which is the per-turn usage key on every prompt response. */
-export const ACP_ACCOUNTING_META_KEY = "clio-coder/accounting";
-export const ACP_USAGE_READ_METHOD = "_clio-coder/usage/read";
 const MAX_ROWS = 32;
 const MAX_PROVIDERS = 16;
 const MAX_WINDOWS = 8;
 const MAX_TEXT_BYTES = 256;
 
 /** `CostAggregate`, structurally. */
-export interface AcpCostAggregate {
-	knownUsd: number;
-	hasEstimated: boolean;
-	hasUnknown: boolean;
-	allKnownFree: boolean;
-	calls: number;
-}
 
 /** The overlay's `CostRow`, structurally. */
-export interface AcpUsageRow {
-	providerId: string;
-	attributedModelId: string;
-	runs: number;
-	apiCalls: number;
-	tokens: number;
-	input: number;
-	output: number;
-	cacheRead: number;
-	cacheWrite: number;
-	reasoningTokens: number;
-	sideQuestions: number;
-	handoffs: number;
-	prewarms: number;
-	backgroundMemory: number;
-	systemOne?: number;
-	cost: AcpCostAggregate;
-}
 
 /** The quota domain's `UsageSnapshot`, structurally. */
-export interface AcpQuotaSnapshot {
-	providerId: string;
-	displayName: string;
-	status: string;
-	windows: ReadonlyArray<{
-		label: string;
-		usedPct: number;
-		resetsAt: string | null;
-		scope?: string;
-		active?: boolean;
-	}>;
-	credits?: { display: string; usedPct: number | null } | null;
-	plan?: string | null;
-	message?: string | null;
-	retryAfterSeconds?: number | null;
-	stale?: boolean;
-	fetchedAt: string | null;
-}
 
 export interface AcpUsageSource {
 	session(): { cost: AcpCostAggregate; rows: ReadonlyArray<AcpUsageRow> };

@@ -1,6 +1,6 @@
 import { ToolNames } from "../../core/tool-names.js";
+import type { AgentStatus } from "../../session-control/status-types.js";
 import { formatCompactMs, GLYPH, spinnerFrame as themeSpinnerFrame } from "../theme/index.js";
-import type { AgentStatus } from "./types.js";
 
 export interface VerbRender {
 	text: string;

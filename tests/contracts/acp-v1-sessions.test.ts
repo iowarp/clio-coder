@@ -223,6 +223,14 @@ test("ACP stable session list pages SessionInfo and filters cwd", async () => {
 			cwd: peer.cwd,
 			title: "Session 0",
 			updatedAt: "2026-09-25T12:00:00.000Z",
+			_meta: {
+				"clio-coder/session": {
+					createdAt: "2026-09-25T12:00:00.000Z",
+					endedAt: "2026-09-25T12:00:00.000Z",
+					target: "target-a",
+					model: "model-a",
+				},
+			},
 		});
 		strictEqual(typeof first.nextCursor, "string");
 		const second = (await peer.call("session/list", { cursor: first.nextCursor })) as {

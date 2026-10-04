@@ -12,7 +12,7 @@ import {
 	renderProposalEntry,
 } from "../../domains/interop/index.js";
 import type { OverlayHandle, TUI } from "../../engine/tui.js";
-import type { SlashCommandContext } from "../slash-commands.js";
+import type { SlashCommandContext } from "../../session-control/slash-commands.js";
 import { clioTheme } from "../theme/index.js";
 import { type ListOverlayHandle, type ListOverlayItem, openListOverlay } from "./list-overlay.js";
 

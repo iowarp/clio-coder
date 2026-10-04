@@ -1,3 +1,7 @@
+import type { AcpAsideAnswer, AcpDraftOutcome } from "./types.js";
+
+export type { AcpAsideAnswer, AcpDraftOutcome, AcpDraftVerdict } from "./types.js";
+export { ACP_ASIDE_ASK_METHOD, ACP_ASIDE_CANCEL_METHOD, ACP_ASIDE_DRAFT_METHOD, ACP_ASIDE_META_KEY } from "./types.js";
 /**
  * `_clio-coder/aside/*`: the terminal's `/btw` and `/draft` for an ACP client.
  *
@@ -8,39 +12,11 @@
  * way the overlay does, so a client shows the same candidates and verdict.
  */
 
-export const ACP_ASIDE_META_KEY = "clio-coder/aside";
-export const ACP_ASIDE_ASK_METHOD = "_clio-coder/aside/ask";
-export const ACP_ASIDE_DRAFT_METHOD = "_clio-coder/aside/draft";
-export const ACP_ASIDE_CANCEL_METHOD = "_clio-coder/aside/cancel";
 export const ACP_ASIDE_DRAFT_COUNTS = { min: 1, max: 4, default: 3 } as const;
 export const ACP_ASIDE_QUESTION_MAX_CHARS = 8_000;
 const MAX_ANSWER_BYTES = 64 * 1024;
 const MAX_REASON_BYTES = 1024;
 const LABELS = ["A", "B", "C", "D"] as const;
-
-export type AcpAsideAnswer =
-	| { status: "answered"; text: string }
-	| { status: "aborted"; text: string }
-	| { status: "refused"; reason: string }
-	| { status: "failed"; reason: string };
-
-export interface AcpDraftVerdict {
-	picked: string | null;
-	probabilities: Partial<Record<string, number>>;
-	sound: Partial<Record<string, boolean | null>>;
-	source: string;
-	elapsedMs: number;
-}
-
-export type AcpDraftOutcome =
-	| {
-			status: "drafted";
-			aborted: boolean;
-			candidates: ReadonlyArray<{ status: "drafted"; text: string } | { status: "failed"; reason: string }>;
-			/** Absent when the rounds were aborted before a judgment was asked for. */
-			judgment?: { verdict: AcpDraftVerdict } | { reason: string };
-	  }
-	| { status: "refused"; reason: string };
 
 /** The host's two rounds. Each takes the signal `_clio-coder/aside/cancel` aborts. */
 export interface AcpAsideControl {

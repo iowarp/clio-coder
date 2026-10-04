@@ -22,7 +22,7 @@ The assistant must call `self_compact` alone. A batch containing it and another 
 
 Automatic reduction runs before an operator message is submitted and at settled tool-batch boundaries before each continuation request. It fires when the next request crosses `context.compaction.threshold` (default 0.8) of the effective window and `context.compaction.auto` is `true` (default). A threshold of 0 never fires, and an unknown window never fires. Working-set eviction runs first. The summary runs when eviction frees too little or finds nothing evictable. See [Single-threshold compaction](../architecture/context-engine.md#single-threshold-compaction) for the order and the rearm band.
 
-A summary request can fail: a provider error, an unavailable `context.compaction.model` target, an invalid `context.compaction.model` reference, or an unreadable `context.compaction.systemPrompt` file. Each failure raises a `compaction failed: <reason>` context-activity event. Before a submit the operator also sees `[Clio Coder] auto-compaction failed: <reason>` and the turn proceeds. At a tool-batch boundary the continuation stops with `[Clio Coder] post-tool context guard could not compact before continuation: <reason>`. The turn context (`src/interactive/turn-context.ts`) counts consecutive automatic failures. When the count reaches 3 the operator sees one more notice:
+A summary request can fail: a provider error, an unavailable `context.compaction.model` target, an invalid `context.compaction.model` reference, or an unreadable `context.compaction.systemPrompt` file. Each failure raises a `compaction failed: <reason>` context-activity event. Before a submit the operator also sees `[Clio Coder] auto-compaction failed: <reason>` and the turn proceeds. At a tool-batch boundary the continuation stops with `[Clio Coder] post-tool context guard could not compact before continuation: <reason>`. The turn context (`src/session-control/turn-context.ts`) counts consecutive automatic failures. When the count reaches 3 the operator sees one more notice:
 
 ```text
 automatic compaction paused after 3 consecutive failures; run /compact to retry
@@ -97,7 +97,7 @@ Each handoff allows at most two reduction attempts, with at most two summary cal
 | `failed` | `invalid_note`, `note_exceeds_replay_budget`, `budget_unsafe_no_material`, `durability_unresolved`, `state_root_removed`, `origin_changed`, `provider_failed`, `attempts_exhausted` or `deadline_exceeded`. Accepts operator recovery. |
 | `resumed` | The operator command recorded authority to continue. |
 
-Source: `src/interactive/continuity-controller.ts` owns the live transaction. `src/domains/session/continuity/` holds the record shapes, fold and validation.
+Source: `src/session-control/continuity-controller.ts` owns the live transaction. `src/domains/session/continuity/` holds the record shapes, fold and validation.
 
 ## Recovering an interrupted handoff
 

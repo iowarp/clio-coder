@@ -1,32 +1,27 @@
+import type { AcpIgnoredProjectSurface } from "./types.js";
+
+export type { AcpIgnoredProjectSurface } from "./types.js";
+
+import { ACP_SESSION_TRUST_METHOD, ACP_TRUST_META_KEY } from "./types.js";
+
+export { ACP_TRUST_META_KEY } from "./types.js";
+
 /**
  * Project files whose authority Clio withheld because the operator never
  * approved their bytes. The settings, hooks, safety, extension and plugin
  * loaders drop them quietly, so a client whose project-level model "doesn't
  * work" needs the reason at session start (C-4).
  */
-import {
-	captureProjectSurface,
-	type ProjectTrustSurface,
-	type WorkspaceTrustVerdict,
-} from "../../core/workspace-trust.js";
-
-export const ACP_TRUST_META_KEY = "clio-coder/trust";
+import { captureProjectSurface, type ProjectTrustSurface } from "../../core/workspace-trust.js";
 
 const TRUST_SURFACES: ReadonlyArray<ProjectTrustSurface> = ["settings", "hooks", "safety", "extensions", "plugins"];
-
-export interface AcpIgnoredProjectSurface {
-	surface: ProjectTrustSurface;
-	file: string;
-	verdict: Exclude<WorkspaceTrustVerdict, "trusted">;
-	fix: string;
-}
 
 /** Capability entry: the surfaces this build reports and where the report lands. */
 export const ACP_TRUST_CAPABILITY = {
 	version: 1,
 	meta: ACP_TRUST_META_KEY,
 	surfaces: TRUST_SURFACES,
-	refresh: "_clio-coder/session/trust",
+	refresh: ACP_SESSION_TRUST_METHOD,
 	results: ["session/new", "session/load", "session/resume"],
 } as const;
 

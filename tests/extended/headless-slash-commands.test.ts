@@ -102,6 +102,16 @@ it("headless run prints a display-only template to stdout and exits without boot
 			strictEqual(result.stdout, "━━━ pkg ━━━\n /pkg:help   This help\n", task);
 			doesNotMatch(result.stderr, /not found|is not a command/, task);
 			strictEqual(existsSync(join(root, "state", "sessions")), false, `${task}: no session was created`);
+			const json = spawnSync(process.execPath, [CLI, "run", "--json", task], {
+				cwd: root,
+				env,
+				encoding: "utf8",
+				timeout: 15_000,
+			});
+			strictEqual(json.error, undefined, task);
+			strictEqual(json.status, 0, `${task}: ${json.stderr}`);
+			strictEqual(json.stdout, "", `${task}: display-only output must preserve JSONL stdout`);
+			strictEqual(json.stderr, "━━━ pkg ━━━\n /pkg:help   This help\n", task);
 		}
 	} finally {
 		rmSync(root, { recursive: true, force: true });

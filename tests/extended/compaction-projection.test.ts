@@ -15,9 +15,9 @@ import { registerEngineFauxProvider } from "../../src/engine/api-registry.js";
 import { resolvedRequestContext } from "../../src/engine/context.js";
 import type { AgentMessage } from "../../src/engine/types.js";
 import { retireActiveUserContextForNextOperator } from "../../src/interactive/chat-renderer.js";
-import { buildModelReplayAgentMessagesFromTurns } from "../../src/interactive/model-session-replay.js";
-import { createTurnPersistence } from "../../src/interactive/turn-persistence.js";
-import type { ChatTurnState } from "../../src/interactive/turn-state.js";
+import { buildModelReplayAgentMessagesFromTurns } from "../../src/session-control/model-session-replay.js";
+import { createTurnPersistence } from "../../src/session-control/turn-persistence.js";
+import type { ChatTurnState } from "../../src/session-control/turn-state.js";
 import { syntheticCompactionSummary } from "../harness/compaction-summary.js";
 
 const timestamp = "2026-09-06T00:00:00.000Z";

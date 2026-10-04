@@ -21,7 +21,7 @@
  * No I/O. The engine dependencies are the classifier and backoff re-exported by
  * `src/engine/ai.ts`. The chat-loop wiring (which decides whether an
  * agent_end with stopReason "error" triggers a retry) lives in
- * `src/interactive/chat-loop.ts` and consumes this module; keeping the two
+ * `src/session-control/chat-loop.ts` and consumes this module; keeping the two
  * split so the countdown can be exercised in unit tests without spinning up a
  * runtime.
  */

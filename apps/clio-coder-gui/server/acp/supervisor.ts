@@ -43,7 +43,6 @@ import {
 	type TimelineItem,
 	type Turn,
 } from "../../contracts/sessions.js";
-import { type AutonomyLevel, SafeSettings, type SafeSettingsPatch } from "../../contracts/settings-safe.js";
 import {
 	CommandCatalog,
 	type CommandRequest,
@@ -63,6 +62,53 @@ import {
 } from "../../contracts/steering.js";
 import { SessionTargets, TargetProbe } from "../../contracts/targets.js";
 import { SessionUsage } from "../../contracts/usage.js";
+import type { AcpSafeSettingsPatch as SafeSettingsPatch } from "../../contracts/wire.js";
+import {
+	ACP_AGENT_META_KEY,
+	ACP_ARTIFACTS_LIST_METHOD,
+	ACP_ARTIFACTS_READ_METHOD,
+	ACP_ASIDE_ASK_METHOD,
+	ACP_ASIDE_CANCEL_METHOD,
+	ACP_ASIDE_DRAFT_METHOD,
+	ACP_BOARD_METHOD,
+	ACP_COMMANDS_INVOKE_METHOD,
+	ACP_COMMANDS_LIST_METHOD,
+	ACP_CONTEXT_LEDGER_METHOD,
+	ACP_DECISION_SUPERSEDE_METHOD,
+	ACP_DISPATCH_STEER_METHOD,
+	ACP_EVENT_NOTIFICATION,
+	ACP_EXTENSIONS_LIST_METHOD,
+	ACP_EXTENSIONS_RELOAD_METHOD,
+	ACP_FLEET_PREVIEW_METHOD,
+	ACP_FLEET_RUN_METHOD,
+	ACP_HANDOFF_CANCEL_METHOD,
+	ACP_HANDOFF_COMMIT_METHOD,
+	ACP_HANDOFF_PREPARE_METHOD,
+	ACP_LIBRARY_RELOAD_METHOD,
+	ACP_MEMORY_PROPOSE_METHOD,
+	ACP_NOTICE_META_KEY,
+	ACP_QUEUE_CHANGED_NOTIFICATION,
+	ACP_REPLAY_META_KEY,
+	ACP_SESSION_FORK_METHOD,
+	ACP_SESSION_INTERRUPT_METHOD,
+	ACP_SESSION_LABEL_METHOD,
+	ACP_SESSION_META_KEY,
+	ACP_SESSION_QUEUE_CLEAR_METHOD,
+	ACP_SESSION_QUEUE_METHOD,
+	ACP_SESSION_STEER_METHOD,
+	ACP_SESSION_SWITCH_TURN_METHOD,
+	ACP_SESSION_TREE_METHOD,
+	ACP_SETTINGS_GET_SAFE_METHOD,
+	ACP_SETTINGS_PATCH_SAFE_METHOD,
+	ACP_SHELL_META_KEY,
+	ACP_TARGETS_LIST_METHOD,
+	ACP_TARGETS_PROBE_METHOD,
+	ACP_TRUNCATED_META_KEY,
+	ACP_USAGE_READ_METHOD,
+	AcpTargetList,
+	type AcpAutonomyLevelSchema as AutonomyLevel,
+	AcpSafeSettings as SafeSettings,
+} from "../../contracts/wire.js";
 import { childRunning, startAcpChild } from "../process-policy.js";
 import type { EventHub } from "../services/event-hub.js";
 import { AppProblem } from "../services/problem.js";
@@ -152,6 +198,7 @@ export class Supervisor {
 	private floor = 0;
 	private readonly opening = new Set<Promise<SessionSnapshot>>();
 	private readonly controls = new Set<Promise<void>>();
+	private readonly workspaceControls = new Set<AbortController>();
 	private readonly loading = new Set<string>();
 	private readonly configuring = new Set<string>();
 	private stopping = false;
@@ -253,6 +300,17 @@ export class Supervisor {
 	async reconcile() {
 		for (const row of await this.children.rows()) {
 			if (!this.children.orphan(row)) continue;
+			if (row.control) {
+				const job = this.children
+					.reap(row)
+					.then(() => undefined)
+					.catch(() => {
+						// A control child has no ledger; its ownership row alone remains for the next reconciliation.
+					});
+				this.reapers.add(job);
+				void job.finally(() => this.reapers.delete(job));
+				continue;
+			}
 			this.snapshots.set(row.sessionId, emptySession(row.sessionId, row.workspaceId));
 			this.state(row.sessionId, "unknown", true);
 			const job = this.children
@@ -435,7 +493,7 @@ export class Supervisor {
 				const withdrawn = record(params);
 				if (withdrawn.sessionId === owned.id) owned.permissions?.withdraw(withdrawn.requestId);
 			});
-			transport.onNotification("_clio-coder/session/queue_changed", (params) => {
+			transport.onNotification(ACP_QUEUE_CHANGED_NOTIFICATION, (params) => {
 				const changed = Value.Clean(QueueChanged, structuredClone(params));
 				if (Value.Check(QueueChanged, changed) && changed.sessionId === owned.id)
 					this.hub.publish({ type: "queue.changed", payload: { resource: owned.id, entries: changed.entries } });
@@ -457,7 +515,7 @@ export class Supervisor {
 					throw error;
 				}
 			});
-			transport.onNotification("_clio-coder/event", (params) => {
+			transport.onNotification(ACP_EVENT_NOTIFICATION, (params) => {
 				// A resume repeats facts the kept snapshot already holds. A new session can report a fact, such
 				// as a target that is down, before its response binds the server's id; that frame names an id
 				// this entry does not have yet, and failing on it used to end the child before the task opened.
@@ -676,7 +734,7 @@ export class Supervisor {
 		if (update.sessionUpdate === "config_option_update") {
 			const options = projectConfigOptions(update.configOptions);
 			if (options === undefined) throw new AppProblem("upstream_acp", "Clio Coder omitted session configuration.");
-			const target = record(meta["clio-coder/session"]).target;
+			const target = record(meta[ACP_SESSION_META_KEY]).target;
 			const config = {
 				...this.snapshot(entry.id).config,
 				options,
@@ -688,7 +746,7 @@ export class Supervisor {
 			});
 		}
 		if (metadataUpdate || entry.resuming) return;
-		const replay = record(meta["clio-coder/replay"]).turn;
+		const replay = record(meta[ACP_REPLAY_META_KEY]).turn;
 		if (typeof replay === "number" && Number.isInteger(replay) && replay > 0 && replay !== entry.replay) {
 			if (entry.turnId) this.finish(entry, "end_turn", null, null, null);
 			entry.replay = replay;
@@ -696,7 +754,7 @@ export class Supervisor {
 		}
 		if (!entry.turnId) throw new AppProblem("upstream_acp", "ACP update arrived without a turn.");
 		const origin = entry.replay === null ? ("live" as const) : ("replay" as const);
-		const attribution = meta["clio-coder/agent"];
+		const attribution = meta[ACP_AGENT_META_KEY];
 		const projected = attribution === undefined ? undefined : Value.Clean(Provenance, attribution);
 		if (projected !== undefined && !Value.Check(Provenance, projected))
 			throw new AppProblem("upstream_acp", "ACP agent attribution is invalid.");
@@ -713,7 +771,7 @@ export class Supervisor {
 			const content = record(update.content);
 			if (content.type !== "text" || typeof content.text !== "string")
 				throw new AppProblem("upstream_acp", "ACP message is not a text chunk.");
-			if (kind === "agent_message_chunk" && meta["clio-coder/notice"] !== undefined) {
+			if (kind === "agent_message_chunk" && meta[ACP_NOTICE_META_KEY] !== undefined) {
 				const text = boundedText(content.text, 16384).trim();
 				const notices = this.snapshot(entry.id).telemetry?.notices ?? [];
 				if (text && !notices.includes(text))
@@ -774,7 +832,7 @@ export class Supervisor {
 			if (partial !== undefined) item.partialOutput = boundedText(partial, 16384);
 			else if (settled) delete item.partialOutput;
 			// A shell line's terminal frame has its facts in `rawOutput` and its output only in `content`.
-			if (update.rawOutput && settled && update.content && meta["clio-coder/shell"] !== undefined)
+			if (update.rawOutput && settled && update.content && meta[ACP_SHELL_META_KEY] !== undefined)
 				item.rawOutput = this.raw({ ...record(update.rawOutput), content: update.content });
 			else if (update.rawOutput) item.rawOutput = this.raw(update.rawOutput);
 			else if (settled && update.content) item.rawOutput = this.raw({ content: update.content });
@@ -862,7 +920,7 @@ export class Supervisor {
 			}
 		return this.projected(
 			id,
-			patch ? "_clio-coder/settings/patch_safe" : "_clio-coder/settings/get_safe",
+			patch ? ACP_SETTINGS_PATCH_SAFE_METHOD : ACP_SETTINGS_GET_SAFE_METHOD,
 			patch ? { patch } : {},
 			SafeSettings,
 		);
@@ -881,7 +939,12 @@ export class Supervisor {
 			const result = record(await entry.client.request("session/set_config_option", { sessionId: id, ...body }));
 			const options = projectConfigOptions(result.configOptions);
 			if (options === undefined) throw new AppProblem("upstream_acp", "Clio Coder omitted session configuration.");
-			const next = { ...this.snapshot(id).config, options };
+			const target = record(record(result._meta)[ACP_SESSION_META_KEY]).target;
+			const next = {
+				...this.snapshot(id).config,
+				options,
+				...(target === null || typeof target === "string" ? { target } : {}),
+			};
 			this.publish({ type: "session.configured", payload: { resource: id, revision: this.revision(id), config: next } });
 			return next;
 		} finally {
@@ -889,17 +952,23 @@ export class Supervisor {
 		}
 	}
 	async targets(id: string) {
-		const raw = record(await this.active(id).client.request("_clio-coder/targets/list", {}));
+		const client = this.active(id).client;
+		if (!client.capabilities.targets?.list)
+			throw new AppProblem("unsupported", "This Clio build does not expose target inventory.");
+		const raw = Value.Clean(AcpTargetList, await client.request(ACP_TARGETS_LIST_METHOD, {}));
+		if (!Value.Check(AcpTargetList, raw)) throw new AppProblem("upstream_acp", "Clio returned an invalid target list.");
 		const projected = Value.Clean(SessionTargets, {
 			targets: raw.targets,
-			truncated: record(raw._meta)["clio-coder/truncated"] === true,
+			truncated: record(raw._meta)[ACP_TRUNCATED_META_KEY] === true,
 		});
 		if (!Value.Check(SessionTargets, projected))
 			throw new AppProblem("upstream_acp", "Clio returned an invalid target list.");
 		return projected;
 	}
 	probe(id: string, targetId: string) {
-		return this.projected(id, "_clio-coder/targets/probe", { targetId }, TargetProbe);
+		if (!this.active(id).client.capabilities.targets?.probe)
+			throw new AppProblem("unsupported", "This Clio build does not expose target probes.");
+		return this.projected(id, ACP_TARGETS_PROBE_METHOD, { targetId }, TargetProbe);
 	}
 	autonomy(id: string, level?: Static<typeof AutonomyLevel>) {
 		return this.active(id).client.autonomy(id, level);
@@ -923,15 +992,15 @@ export class Supervisor {
 	}
 	steer(id: string, body: Static<typeof SteerRequest>) {
 		this.steering(id);
-		return this.projected(id, "_clio-coder/session/steer", { sessionId: id, ...body }, SteerResult);
+		return this.projected(id, ACP_SESSION_STEER_METHOD, { sessionId: id, ...body }, SteerResult);
 	}
 	queue(id: string) {
 		this.steering(id);
-		return this.projected(id, "_clio-coder/session/queue", { sessionId: id }, QueueSnapshot);
+		return this.projected(id, ACP_SESSION_QUEUE_METHOD, { sessionId: id }, QueueSnapshot);
 	}
 	clearQueue(id: string) {
 		this.steering(id);
-		return this.projected(id, "_clio-coder/session/queue_clear", { sessionId: id }, QueueCleared);
+		return this.projected(id, ACP_SESSION_QUEUE_CLEAR_METHOD, { sessionId: id }, QueueCleared);
 	}
 	editQueue(id: string, body: Static<typeof QueueEditRequest>) {
 		const entry = this.steering(id);
@@ -1006,7 +1075,7 @@ export class Supervisor {
 		this.steering(id);
 		return this.projected(
 			id,
-			"_clio-coder/session/interrupt",
+			ACP_SESSION_INTERRUPT_METHOD,
 			{ sessionId: id, ...(reason ? { reason } : {}) },
 			InterruptResult,
 		);
@@ -1020,7 +1089,7 @@ export class Supervisor {
 		const { runId, action, message } = body;
 		return this.projected(
 			id,
-			"_clio-coder/dispatch/steer",
+			ACP_DISPATCH_STEER_METHOD,
 			{ sessionId: id, runId, action, ...(action === "guide" && message ? { message } : {}) },
 			DispatchSteerResult,
 		);
@@ -1029,7 +1098,7 @@ export class Supervisor {
 		const entry = this.active(id);
 		if (!entry.client.capabilities.board)
 			throw new AppProblem("conflict", "This Clio build does not report tasks and decisions.");
-		return this.projected(id, "_clio-coder/session/board", { sessionId: id }, SessionBoard);
+		return this.projected(id, ACP_BOARD_METHOD, { sessionId: id }, SessionBoard);
 	}
 	private branching(id: string) {
 		const entry = this.active(id);
@@ -1039,7 +1108,7 @@ export class Supervisor {
 	}
 	tree(id: string) {
 		this.branching(id);
-		return this.projected(id, "_clio-coder/session/tree", { sessionId: id }, SessionTree);
+		return this.projected(id, ACP_SESSION_TREE_METHOD, { sessionId: id }, SessionTree);
 	}
 	private beginRebase(id: string, rebase: NonNullable<Entry["rebase"]>) {
 		const entry = this.branching(id);
@@ -1091,7 +1160,7 @@ export class Supervisor {
 		const entry = this.beginRebase(id, { mode: "switch", reset: false });
 		try {
 			const result = record(
-				await entry.client.request("_clio-coder/session/switch_turn", { sessionId: id, turnId }, BRANCH_TIMEOUT_MS),
+				await entry.client.request(ACP_SESSION_SWITCH_TURN_METHOD, { sessionId: id, turnId }, BRANCH_TIMEOUT_MS),
 			);
 			if (result.leafId !== turnId) throw new AppProblem("upstream_acp", "Clio Coder moved to a different turn.");
 			if (entry.rebase?.mode === "switch" && !entry.rebase.reset) this.resetTimeline(entry);
@@ -1129,10 +1198,10 @@ export class Supervisor {
 		const entry = this.beginRebase(id, { mode: "move", moved: false });
 		try {
 			const result = record(
-				await entry.client.request("_clio-coder/session/fork", { sessionId: id, turnId }, BRANCH_TIMEOUT_MS),
+				await entry.client.request(ACP_SESSION_FORK_METHOD, { sessionId: id, turnId }, BRANCH_TIMEOUT_MS),
 			);
 			const forkedId = await this.settleMove(entry, id, result);
-			const sessionMeta = record(record(result._meta)["clio-coder/session"]);
+			const sessionMeta = record(record(result._meta)[ACP_SESSION_META_KEY]);
 			return {
 				sessionId: forkedId,
 				parentSessionId: id,
@@ -1147,20 +1216,20 @@ export class Supervisor {
 		const entry = this.active(id);
 		if (!entry.client.capabilities.artifacts)
 			throw new AppProblem("conflict", "This Clio build does not expose session artifacts.");
-		return this.projected(id, "_clio-coder/artifacts/list", { sessionId: id }, ArtifactList, BRANCH_TIMEOUT_MS);
+		return this.projected(id, ACP_ARTIFACTS_LIST_METHOD, { sessionId: id }, ArtifactList, BRANCH_TIMEOUT_MS);
 	}
 	artifact(id: string, body: Static<typeof ArtifactRead>) {
 		const entry = this.active(id);
 		if (!entry.client.capabilities.artifacts)
 			throw new AppProblem("conflict", "This Clio build does not expose session artifacts.");
-		return this.projected(id, "_clio-coder/artifacts/read", { sessionId: id, ...body }, ArtifactPage, BRANCH_TIMEOUT_MS);
+		return this.projected(id, ACP_ARTIFACTS_READ_METHOD, { sessionId: id, ...body }, ArtifactPage, BRANCH_TIMEOUT_MS);
 	}
 	usage(id: string) {
 		const entry = this.active(id);
 		if (!entry.client.capabilities.usage)
 			throw new AppProblem("conflict", "This Clio Coder build does not report its usage.");
 		// A quota read may reach each signed-in provider once its cache has expired.
-		return this.projected(id, "_clio-coder/usage/read", { sessionId: id }, SessionUsage, BRANCH_TIMEOUT_MS);
+		return this.projected(id, ACP_USAGE_READ_METHOD, { sessionId: id }, SessionUsage, BRANCH_TIMEOUT_MS);
 	}
 	private asiding(id: string) {
 		const entry = this.active(id);
@@ -1171,15 +1240,15 @@ export class Supervisor {
 	// A round beside the conversation reads the history and bills a model; it waits as long as a turn might.
 	askAside(id: string, question: string) {
 		this.asiding(id);
-		return this.projected(id, "_clio-coder/aside/ask", { sessionId: id, question }, AsideAnswer, ASIDE_TIMEOUT_MS);
+		return this.projected(id, ACP_ASIDE_ASK_METHOD, { sessionId: id, question }, AsideAnswer, ASIDE_TIMEOUT_MS);
 	}
 	draftAside(id: string, body: { request: string; count: number }) {
 		this.asiding(id);
-		return this.projected(id, "_clio-coder/aside/draft", { sessionId: id, ...body }, AsideDrafts, ASIDE_TIMEOUT_MS);
+		return this.projected(id, ACP_ASIDE_DRAFT_METHOD, { sessionId: id, ...body }, AsideDrafts, ASIDE_TIMEOUT_MS);
 	}
 	cancelAside(id: string) {
 		this.asiding(id);
-		return this.projected(id, "_clio-coder/aside/cancel", { sessionId: id }, AsideCancelled);
+		return this.projected(id, ACP_ASIDE_CANCEL_METHOD, { sessionId: id }, AsideCancelled);
 	}
 	private extending(id: string) {
 		const entry = this.active(id);
@@ -1189,13 +1258,13 @@ export class Supervisor {
 	}
 	extensions(id: string) {
 		this.extending(id);
-		return this.projected(id, "_clio-coder/extensions/list", { sessionId: id }, SessionExtensions);
+		return this.projected(id, ACP_EXTENSIONS_LIST_METHOD, { sessionId: id }, SessionExtensions);
 	}
 	reloadExtensions(id: string) {
 		const entry = this.extending(id);
 		if (entry.turnId)
 			throw new AppProblem("conflict", "Wait for the current turn to finish before reloading extensions.");
-		return this.projected(id, "_clio-coder/extensions/reload", { sessionId: id }, ExtensionReload, BRANCH_TIMEOUT_MS);
+		return this.projected(id, ACP_EXTENSIONS_RELOAD_METHOD, { sessionId: id }, ExtensionReload, BRANCH_TIMEOUT_MS);
 	}
 	/**
 	 * Ask every open conversation of a workspace to reload its library after a change was applied.
@@ -1225,7 +1294,7 @@ export class Supervisor {
 					try {
 						const result = await this.projected(
 							entry.id,
-							"_clio-coder/library/reload",
+							ACP_LIBRARY_RELOAD_METHOD,
 							{ sessionId: entry.id },
 							LibraryReload,
 							BRANCH_TIMEOUT_MS,
@@ -1259,7 +1328,7 @@ export class Supervisor {
 		const entry = this.active(id);
 		if (!entry.client.capabilities.context)
 			throw new AppProblem("conflict", "This Clio Coder build does not report its context window.");
-		return this.projected(id, "_clio-coder/context/ledger", { sessionId: id }, ContextLedger);
+		return this.projected(id, ACP_CONTEXT_LEDGER_METHOD, { sessionId: id }, ContextLedger);
 	}
 	private fleeting(id: string) {
 		const entry = this.active(id);
@@ -1270,13 +1339,13 @@ export class Supervisor {
 	fleetPreview(id: string, body: Static<typeof FleetPreviewRequest>) {
 		this.fleeting(id);
 		// Compiling reads the contract, the agents and every route; a large fleet is not instant.
-		return this.projected(id, "_clio-coder/fleet/preview", { sessionId: id, ...body }, FleetPreview, BRANCH_TIMEOUT_MS);
+		return this.projected(id, ACP_FLEET_PREVIEW_METHOD, { sessionId: id, ...body }, FleetPreview, BRANCH_TIMEOUT_MS);
 	}
 	fleetRun(id: string, body: Static<typeof FleetRunRequest>) {
 		const entry = this.fleeting(id);
 		if (entry.turnId || entry.rebase || entry.drafting)
 			throw new AppProblem("conflict", "Wait for the current turn to finish before starting a fleet run.");
-		return this.projected(id, "_clio-coder/fleet/run", { sessionId: id, ...body }, FleetRunResult, BRANCH_TIMEOUT_MS);
+		return this.projected(id, ACP_FLEET_RUN_METHOD, { sessionId: id, ...body }, FleetRunResult, BRANCH_TIMEOUT_MS);
 	}
 	private handing(id: string) {
 		const entry = this.active(id);
@@ -1293,7 +1362,7 @@ export class Supervisor {
 			// The extraction is a model round with one repair, as long as a command's.
 			return await this.projected(
 				id,
-				"_clio-coder/session/handoff/prepare",
+				ACP_HANDOFF_PREPARE_METHOD,
 				{ sessionId: id, goal },
 				HandoffDraft,
 				COMMAND_TIMEOUT_MS,
@@ -1307,11 +1376,7 @@ export class Supervisor {
 		this.beginRebase(id, { mode: "move", moved: false });
 		try {
 			const raw = record(
-				await entry.client.request(
-					"_clio-coder/session/handoff/commit",
-					{ sessionId: id, handoffId, document },
-					BRANCH_TIMEOUT_MS,
-				),
+				await entry.client.request(ACP_HANDOFF_COMMIT_METHOD, { sessionId: id, handoffId, document }, BRANCH_TIMEOUT_MS),
 			);
 			if (raw.status === "committed") await this.settleMove(entry, id, raw);
 			const value = Value.Clean(HandoffCommitted, raw);
@@ -1324,7 +1389,7 @@ export class Supervisor {
 	}
 	cancelHandoff(id: string, handoffId: string) {
 		this.handing(id);
-		return this.projected(id, "_clio-coder/session/handoff/cancel", { sessionId: id, handoffId }, HandoffCancelled);
+		return this.projected(id, ACP_HANDOFF_CANCEL_METHOD, { sessionId: id, handoffId }, HandoffCancelled);
 	}
 	private boardWrites(id: string, method: "supersede" | "proposeMemory") {
 		const entry = this.active(id);
@@ -1336,17 +1401,17 @@ export class Supervisor {
 		const entry = this.boardWrites(id, "supersede");
 		if (entry.turnId || entry.rebase || entry.drafting)
 			throw new AppProblem("conflict", "Wait for the current turn to finish before revising a decision.");
-		return this.projected(id, "_clio-coder/decisions/supersede", { sessionId: id, ...body }, DecisionSuperseded);
+		return this.projected(id, ACP_DECISION_SUPERSEDE_METHOD, { sessionId: id, ...body }, DecisionSuperseded);
 	}
 	proposeMemory(id: string, body: Static<typeof MemoryProposeRequest>) {
 		this.boardWrites(id, "proposeMemory");
-		return this.projected(id, "_clio-coder/memory/propose", { sessionId: id, ...body }, MemoryProposed);
+		return this.projected(id, ACP_MEMORY_PROPOSE_METHOD, { sessionId: id, ...body }, MemoryProposed);
 	}
 	commands(id: string) {
 		const entry = this.active(id);
 		if (!entry.client.capabilities.commands)
 			throw new AppProblem("conflict", "This Clio build exposes no operator commands.");
-		return this.projected(id, "_clio-coder/commands/list", {}, CommandCatalog);
+		return this.projected(id, ACP_COMMANDS_LIST_METHOD, {}, CommandCatalog);
 	}
 	async invokeCommand(id: string, body: Static<typeof CommandRequest>) {
 		const entry = this.active(id);
@@ -1390,19 +1455,77 @@ export class Supervisor {
 		}
 		return this.projected(
 			id,
-			"_clio-coder/commands/invoke",
+			ACP_COMMANDS_INVOKE_METHOD,
 			{ sessionId: id, command: body.command, ...(body.argv ? { argv: body.argv } : {}) },
 			CommandResult,
 			// A context command answers when its work ends: compaction or a model-written handbook can take minutes.
 			COMMAND_TIMEOUT_MS,
 		);
 	}
+	/** Workspace reads use an unbound peer so listing never creates or resumes a ledger. */
+	async workspaceControl<T>(
+		workspaceId: string,
+		read: (client: AcpClient, cwd: string) => Promise<T>,
+		signal?: AbortSignal,
+	): Promise<T> {
+		const controller = new AbortController();
+		const abort = () => controller.abort(signal?.reason);
+		signal?.addEventListener("abort", abort, { once: true });
+		if (signal?.aborted) abort();
+		this.workspaceControls.add(controller);
+		const job = this.readWorkspace(workspaceId, read, controller.signal);
+		const settled = job.then(
+			() => undefined,
+			() => undefined,
+		);
+		this.controls.add(settled);
+		try {
+			return await job;
+		} finally {
+			signal?.removeEventListener("abort", abort);
+			this.workspaceControls.delete(controller);
+			this.controls.delete(settled);
+		}
+	}
+	private async readWorkspace<T>(
+		workspaceId: string,
+		read: (client: AcpClient, cwd: string) => Promise<T>,
+		signal?: AbortSignal,
+	): Promise<T> {
+		if (this.stopping) throw new AppProblem("unavailable", "The server is shutting down.");
+		signal?.throwIfAborted();
+		let client: AcpClient | undefined, row: ChildRow | undefined;
+		const abort = () => client?.transport.close();
+		try {
+			const workspace = await this.workspaces.get(workspaceId);
+			if (this.stopping) throw new AppProblem("unavailable", "The server is shutting down.");
+			signal?.throwIfAborted();
+			client = new AcpClient(await startAcpChild(workspace.path, this.env));
+			signal?.addEventListener("abort", abort, { once: true });
+			signal?.throwIfAborted();
+			if (!client.transport.pid) throw new AppProblem("upstream_acp", "ACP inventory child did not start.");
+			row = await this.children.record(client.transport.pid, randomUUID(), workspaceId, true);
+			await client.initialize();
+			signal?.throwIfAborted();
+			return await read(client, workspace.path);
+		} finally {
+			signal?.removeEventListener("abort", abort);
+			try {
+				if (client) {
+					client.transport.close();
+					if (!(await client.transport.waitForExit(500))) await client.transport.forceTerminate();
+				}
+			} finally {
+				if (row && !(await childRunning(row.pid))) await this.children.remove(row);
+			}
+		}
+	}
 	async ledgerCommand(workspaceId: string, id: string, action: "label" | "delete", label?: string) {
 		if (label !== undefined && Buffer.byteLength(label) > 256)
 			throw new AppProblem("validation", "Session label exceeds 256 UTF-8 bytes.");
 		const entry = this.entries.get(id);
 		const params = { sessionId: id, ...(label === undefined ? {} : { label }) };
-		const method = action === "delete" ? "session/delete" : "_clio-coder/session/label";
+		const method = action === "delete" ? "session/delete" : ACP_SESSION_LABEL_METHOD;
 		if (entry) {
 			if (action === "delete" || entry.closing) throw new AppProblem("conflict", "Close the session before deleting it.");
 			await entry.client.request(method, params);
@@ -1429,25 +1552,13 @@ export class Supervisor {
 		if (this.loading.has(id)) throw new AppProblem("conflict", "A session command is already in progress.");
 		this.starting++;
 		this.loading.add(id);
-		let client: AcpClient | undefined, row: ChildRow | undefined;
 		try {
-			const workspace = await this.workspaces.get(workspaceId);
-			client = new AcpClient(await startAcpChild(workspace.path, this.env));
-			if (!client.transport.pid) throw new AppProblem("upstream_acp", "ACP control child did not start.");
-			row = await this.children.record(client.transport.pid, id, workspaceId);
-			await client.initialize();
-			await client.request(method, params);
+			await this.workspaceControl(workspaceId, async (client) => {
+				await client.request(method, params);
+			});
 		} finally {
-			try {
-				if (client) {
-					client.transport.close();
-					if (!(await client.transport.waitForExit(500))) await client.transport.forceTerminate();
-				}
-				if (row && !(await childRunning(row.pid))) await this.children.remove(row);
-			} finally {
-				this.starting--;
-				this.loading.delete(id);
-			}
+			this.starting--;
+			this.loading.delete(id);
 		}
 	}
 	async close(id: string) {
@@ -1527,6 +1638,7 @@ export class Supervisor {
 	}
 	async shutdown() {
 		this.stopping = true;
+		for (const controller of this.workspaceControls) controller.abort();
 		clearInterval(this.monitor);
 		await Promise.allSettled(this.opening);
 		await Promise.allSettled(this.controls);

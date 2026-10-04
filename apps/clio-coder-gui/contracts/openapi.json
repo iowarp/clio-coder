@@ -11301,6 +11301,9 @@
 												"run": {
 													"type": "string",
 													"maxLength": 128
+												},
+												"receiptFacts": {
+													"type": "boolean"
 												}
 											},
 											"additionalProperties": false
@@ -13667,7 +13670,8 @@
 										},
 										"sessionId": {
 											"type": "string",
-											"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+											"minLength": 1,
+											"maxLength": 128
 										},
 										"leafId": {
 											"anyOf": [
@@ -13685,7 +13689,8 @@
 											"anyOf": [
 												{
 													"type": "string",
-													"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+													"minLength": 1,
+													"maxLength": 128
 												},
 												{
 													"type": "null"
@@ -14114,11 +14119,13 @@
 									"properties": {
 										"sessionId": {
 											"type": "string",
-											"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+											"minLength": 1,
+											"maxLength": 128
 										},
 										"parentSessionId": {
 											"type": "string",
-											"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+											"minLength": 1,
+											"maxLength": 128
 										},
 										"parentTurnId": {
 											"type": "string",
@@ -17399,7 +17406,8 @@
 												},
 												"fromSessionId": {
 													"type": "string",
-													"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+													"minLength": 1,
+													"maxLength": 128
 												},
 												"document": {
 													"type": "string",
@@ -17600,11 +17608,13 @@
 												},
 												"sessionId": {
 													"type": "string",
-													"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+													"minLength": 1,
+													"maxLength": 128
 												},
 												"fromSessionId": {
 													"type": "string",
-													"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+													"minLength": 1,
+													"maxLength": 128
 												},
 												"warnings": {
 													"type": "array",
@@ -19035,6 +19045,10 @@
 										"anyOf": [
 											{
 												"type": "string",
+												"const": "target"
+											},
+											{
+												"type": "string",
 												"const": "model"
 											},
 											{
@@ -19084,6 +19098,10 @@
 												"properties": {
 													"id": {
 														"anyOf": [
+															{
+																"type": "string",
+																"const": "target"
+															},
 															{
 																"type": "string",
 																"const": "model"
@@ -19140,7 +19158,7 @@
 												},
 												"additionalProperties": false
 											},
-											"maxItems": 2
+											"maxItems": 3
 										}
 									},
 									"additionalProperties": false
@@ -19301,8 +19319,7 @@
 													"isOrchestrator": {
 														"type": "boolean"
 													}
-												},
-												"additionalProperties": false
+												}
 											},
 											"maxItems": 64
 										},
@@ -20263,11 +20280,11 @@
 																"type": "string",
 																"maxLength": 256
 															},
-															"outputTokensPerSecond": {
+															"ttftMs": {
 																"type": "number",
 																"minimum": 0
 															},
-															"ttftMs": {
+															"outputTokensPerSecond": {
 																"type": "number",
 																"minimum": 0
 															}
@@ -20400,6 +20417,10 @@
 																"anyOf": [
 																	{
 																		"type": "string",
+																		"const": "target"
+																	},
+																	{
+																		"type": "string",
 																		"const": "model"
 																	},
 																	{
@@ -20454,7 +20475,7 @@
 														},
 														"additionalProperties": false
 													},
-													"maxItems": 2
+													"maxItems": 3
 												}
 											},
 											"additionalProperties": false
@@ -24183,11 +24204,11 @@
 																"type": "string",
 																"maxLength": 256
 															},
-															"outputTokensPerSecond": {
+															"ttftMs": {
 																"type": "number",
 																"minimum": 0
 															},
-															"ttftMs": {
+															"outputTokensPerSecond": {
 																"type": "number",
 																"minimum": 0
 															}
@@ -24320,6 +24341,10 @@
 																"anyOf": [
 																	{
 																		"type": "string",
+																		"const": "target"
+																	},
+																	{
+																		"type": "string",
 																		"const": "model"
 																	},
 																	{
@@ -24374,7 +24399,7 @@
 														},
 														"additionalProperties": false
 													},
-													"maxItems": 2
+													"maxItems": 3
 												}
 											},
 											"additionalProperties": false
@@ -26688,11 +26713,11 @@
 																"type": "string",
 																"maxLength": 256
 															},
-															"outputTokensPerSecond": {
+															"ttftMs": {
 																"type": "number",
 																"minimum": 0
 															},
-															"ttftMs": {
+															"outputTokensPerSecond": {
 																"type": "number",
 																"minimum": 0
 															}
@@ -26825,6 +26850,10 @@
 																"anyOf": [
 																	{
 																		"type": "string",
+																		"const": "target"
+																	},
+																	{
+																		"type": "string",
 																		"const": "model"
 																	},
 																	{
@@ -26879,7 +26908,7 @@
 														},
 														"additionalProperties": false
 													},
-													"maxItems": 2
+													"maxItems": 3
 												}
 											},
 											"additionalProperties": false
@@ -29157,11 +29186,11 @@
 																	"type": "string",
 																	"maxLength": 256
 																},
-																"outputTokensPerSecond": {
+																"ttftMs": {
 																	"type": "number",
 																	"minimum": 0
 																},
-																"ttftMs": {
+																"outputTokensPerSecond": {
 																	"type": "number",
 																	"minimum": 0
 																}
@@ -29294,6 +29323,10 @@
 																	"anyOf": [
 																		{
 																			"type": "string",
+																			"const": "target"
+																		},
+																		{
+																			"type": "string",
 																			"const": "model"
 																		},
 																		{
@@ -29348,7 +29381,7 @@
 															},
 															"additionalProperties": false
 														},
-														"maxItems": 2
+														"maxItems": 3
 													}
 												},
 												"additionalProperties": false
@@ -31873,11 +31906,11 @@
 																"type": "string",
 																"maxLength": 256
 															},
-															"outputTokensPerSecond": {
+															"ttftMs": {
 																"type": "number",
 																"minimum": 0
 															},
-															"ttftMs": {
+															"outputTokensPerSecond": {
 																"type": "number",
 																"minimum": 0
 															}
@@ -32010,6 +32043,10 @@
 																"anyOf": [
 																	{
 																		"type": "string",
+																		"const": "target"
+																	},
+																	{
+																		"type": "string",
 																		"const": "model"
 																	},
 																	{
@@ -32064,7 +32101,7 @@
 														},
 														"additionalProperties": false
 													},
-													"maxItems": 2
+													"maxItems": 3
 												}
 											},
 											"additionalProperties": false
@@ -40490,11 +40527,11 @@
 														"type": "string",
 														"maxLength": 256
 													},
-													"outputTokensPerSecond": {
+													"ttftMs": {
 														"type": "number",
 														"minimum": 0
 													},
-													"ttftMs": {
+													"outputTokensPerSecond": {
 														"type": "number",
 														"minimum": 0
 													}
@@ -41250,11 +41287,11 @@
 												"type": "string",
 												"maxLength": 256
 											},
-											"outputTokensPerSecond": {
+											"ttftMs": {
 												"type": "number",
 												"minimum": 0
 											},
-											"ttftMs": {
+											"outputTokensPerSecond": {
 												"type": "number",
 												"minimum": 0
 											}
@@ -42940,6 +42977,10 @@
 															"anyOf": [
 																{
 																	"type": "string",
+																	"const": "target"
+																},
+																{
+																	"type": "string",
 																	"const": "model"
 																},
 																{
@@ -42994,7 +43035,7 @@
 													},
 													"additionalProperties": false
 												},
-												"maxItems": 2
+												"maxItems": 3
 											}
 										},
 										"additionalProperties": false

@@ -64,7 +64,7 @@ test("the aside under an operator turn is one dim row in the prose gutter", () =
 });
 
 test("streaming prompt injection and stranded resubmission retain presentation and full model text", async () => {
-	const { createTurnQueues } = await import("../../src/interactive/turn-queues.js");
+	const { createTurnQueues } = await import("../../src/session-control/turn-queues.js");
 	const expansion = await expandInteractiveSubmitAsync("/interview:daisy", fakeResources(), "/tmp");
 	const model: unknown[] = [];
 	const injected: Array<{ kind: string; text: string; display?: unknown }> = [];
@@ -81,7 +81,7 @@ test("streaming prompt injection and stranded resubmission retain presentation a
 		},
 	};
 	const queues = createTurnQueues({
-		state: state as unknown as import("../../src/interactive/turn-state.js").ChatTurnState,
+		state: state as unknown as import("../../src/session-control/turn-state.js").ChatTurnState,
 		emitQueueUpdateEvent: () => {},
 		emitQueuedUserTurn: (entry) => injected.push({ kind: entry.kind, text: entry.text, display: entry.display }),
 		emitNotice: () => {},

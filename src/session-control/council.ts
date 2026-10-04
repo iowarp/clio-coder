@@ -33,7 +33,7 @@ export const COUNCIL_MAX_ROUNDS = 3;
  * council vocabulary, not presentation: the share path compares against it to
  * decide whether a run seals the whole council or one voice, and that path must
  * stay off the render module graph. See the header of
- * `src/interactive/slash-commands.ts` for the closure budget that depends on it.
+ * `src/session-control/slash-commands.ts` for the closure budget that depends on it.
  */
 export const COUNCIL_SYNTHESIS_LABEL = "synthesis";
 

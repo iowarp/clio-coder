@@ -5,7 +5,7 @@ import { skillInstallOfferTag } from "../../src/core/skill-activation.js";
 import { ToolNames } from "../../src/core/tool-names.js";
 import type { AutonomyLevel } from "../../src/domains/safety/autonomy.js";
 import { createWorkerSafety } from "../../src/engine/worker-tools.js";
-import { createAskUserToolPolicy } from "../../src/interactive/chat-loop-messages.js";
+import { createAskUserToolPolicy } from "../../src/session-control/chat-loop-messages.js";
 import type { AskUserQuestion, AskUserResult } from "../../src/tools/ask-user.js";
 import { registerAllTools } from "../../src/tools/bootstrap.js";
 import { createRegistry, type ToolResult } from "../../src/tools/registry.js";

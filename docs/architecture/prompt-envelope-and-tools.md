@@ -20,7 +20,7 @@ version-2 compile identity hashes the target id, runtime id, wire model id,
 autonomy, session id, working directory, sorted working-context paths, context
 window source, prompt-input epoch, resolved session inputs, and the exact
 attached tool-schema bytes. `mainPromptCacheIdentity` in
-[prompt-cache-identity.ts](../../src/interactive/prompt-cache-identity.ts) owns that list.
+[prompt-cache-identity.ts](../../src/session-control/prompt-cache-identity.ts) owns that list.
 
 The compiled prompt is reused byte-for-byte when the complete identity is unchanged. Host-supplied turn constraints and ready-skill counts are part of the resolved session inputs, so changing them recompiles the appropriate conditional sections. Handbook source bytes and prompt inputs are captured per session, so ordinary recompilation does not silently reload edited files. Init, refresh, and reset invalidate the session snapshot and prompt cache, including partial-write failure paths; config hot-reload also invalidates inputs. Path-scoped rules can recompile when a matching file enters working context. When recompilation changes the text, the ledger records `promptRecompiled` with previous hash, new hash, and token estimate. The bounded handbook preload retains exact safe prefixes; captured-source hashes belong to its accounting/manifest metadata. Model-facing omission notices identify source paths and line ranges, and later filesystem retrieval reads current bytes.
 

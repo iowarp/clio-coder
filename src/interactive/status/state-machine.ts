@@ -1,8 +1,6 @@
 import type { RunAbortSource } from "../../core/bus-events.js";
 import { ToolNames } from "../../core/tool-names.js";
-import { effectiveToolCall } from "../../tools/surface.js";
-import type { ChatLoopEvent, RetryStatusPhase } from "../chat-loop.js";
-import { buildSummary, emptyRunTally, foldMessageIntoRunTally, summaryFromRunTally } from "./summary.js";
+import type { ChatLoopEvent, RetryStatusPhase } from "../../session-control/chat-loop.js";
 import {
 	type AgentStatus,
 	INITIAL_STATUS,
@@ -12,7 +10,9 @@ import {
 	type StatusPhase,
 	type ToolOverlay,
 	type TurnStopReason,
-} from "./types.js";
+} from "../../session-control/status-types.js";
+import { effectiveToolCall } from "../../tools/surface.js";
+import { buildSummary, emptyRunTally, foldMessageIntoRunTally, summaryFromRunTally } from "./summary.js";
 import { computeWatchdogTier } from "./watchdog.js";
 
 export interface ReduceContext {

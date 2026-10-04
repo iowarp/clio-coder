@@ -55,7 +55,9 @@ test("workspace and session routes stream one complete turn with recorded usage 
 		disconnect = h.hub.connect(undefined, (event) => events.push(event));
 	t.after(disconnect);
 	const workspace = await json(await h.post("/api/workspaces", { path: h.home.path }), routes.openWorkspace.response);
-	assert.equal((await h.request(`/api/workspaces/${workspace.id}/sessions`)).status, 200);
+	const legacyHistory = await h.request(`/api/workspaces/${workspace.id}/sessions`);
+	assert.equal(legacyHistory.status, 409);
+	assert.equal((await json(legacyHistory, Problem)).code, "unsupported");
 	const response = await h.post(`/api/workspaces/${workspace.id}/sessions`, {}, "new-session");
 	assert.equal(response.status, 200);
 	const session = await json(response, routes.newSession.response);

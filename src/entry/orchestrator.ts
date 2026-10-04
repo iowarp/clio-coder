@@ -4,6 +4,8 @@ import { join } from "node:path";
 import chalk from "chalk";
 import { modelBootstrapGenerate, resolveBootstrapRoute } from "../cli/bootstrap-generate.js";
 import { runHeadlessMainAgent } from "../cli/modes/print.js";
+import type { RunJsonMainSessionFrame } from "../cli/modes/run-json-schema.js";
+import { RUN_JSON_SCHEMA_VERSION } from "../cli/modes/run-json-schema.js";
 import { formatBootTrace } from "../core/boot-trace.js";
 import { readClioVersionLabel } from "../core/build-info.js";
 import { BusChannels, type PluginsReloadedPayload } from "../core/bus-events.js";
@@ -17,7 +19,6 @@ import { detectSupportedImageMimeType, expandInlineFileReferencesAsync } from ".
 import { setCommitDecisionRefsProvider, setGitCommitAttributionEnabled } from "../core/git-commit-attribution.js";
 import { configureGuardrails, guardrailValuesFromSettings } from "../core/guardrails.js";
 import { HEADLESS_PERMISSION_DENIED_REASON } from "../core/headless-permission.js";
-import { rememberRecentModel } from "../core/recent-models.js";
 import { protectedResidencyModels } from "../core/residency-protection.js";
 import { type RouteProvenance, resolveRouteProvenance } from "../core/route-provenance.js";
 import {
@@ -265,13 +266,14 @@ import {
 } from "../engine/loop-guard.js";
 import { cwdHash, openSession, readSessionTailTurns, sessionCurrentPath, sessionPaths } from "../engine/session.js";
 import type { EngineModel } from "../engine/types.js";
-import { createChatLoop, createTurnControlRunner, runOutOfTurnRound } from "../interactive/chat-loop.js";
 import type { RunIo } from "../interactive/index.js";
+import { createChatLoop, createTurnControlRunner, runOutOfTurnRound } from "../session-control/chat-loop.js";
+import { clampThinkingLevel, replayCurrentSession, resolvePermission, selectModel } from "../session-control/index.js";
 import {
 	buildModelReplayAgentMessagesFromTurns,
 	continuityContextFromSession,
-} from "../interactive/model-session-replay.js";
-import { createTurnOutcomeCollector } from "../interactive/turn-outcome-collector.js";
+} from "../session-control/model-session-replay.js";
+import { createTurnOutcomeCollector } from "../session-control/turn-outcome-collector.js";
 import { effectiveToolNames } from "../tools/agent-tools.js";
 import { surfaceSpecPlacement } from "../tools/surface.js";
 import { resizeImage } from "../utils/image-resize.js";
@@ -295,11 +297,11 @@ import {
 	formatPlatformKeybindingNotice,
 	validateKeybindings,
 } from "../interactive/keybinding-manager.js";
-import { subscribeLoopGuardStop } from "../interactive/loop-guard-interrupt.js";
-import { BUILTIN_SLASH_COMMANDS } from "../interactive/slash-commands.js";
 import type { BootInteractivity } from "../interactive/terminal-lease.js";
 import { createToolProseRegistration } from "../interactive/tool-prose-registration.js";
-import { runWatchdogReview } from "../interactive/watchdog-run.js";
+import { subscribeLoopGuardStop } from "../session-control/loop-guard-interrupt.js";
+import { BUILTIN_SLASH_COMMANDS } from "../session-control/slash-commands.js";
+import { runWatchdogReview } from "../session-control/watchdog-run.js";
 import { type AskUserHandler, cancelledAskUserResult } from "../tools/ask-user.js";
 import { registerAllTools } from "../tools/bootstrap.js";
 import { isGitRepository, recoverCleanupReadyCompeteGroups } from "../tools/compete-worktrees.js";
@@ -355,10 +357,12 @@ function buildBanner(): string {
 `;
 }
 
-function printJsonSessionHeader(meta: SessionMeta | null): Record<string, unknown> | null {
+function printJsonSessionHeader(meta: SessionMeta | null): RunJsonMainSessionFrame | null {
 	if (!meta) return null;
 	return {
 		type: "session",
+		schemaVersion: RUN_JSON_SCHEMA_VERSION,
+		mode: "main",
 		version: meta.sessionFormatVersion ?? 1,
 		id: meta.id,
 		timestamp: meta.createdAt,
@@ -3536,17 +3540,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 				// holds the abandoned branch after the pinned turn, and replaying it
 				// unfiltered seeds the provider with turns the next append does not
 				// parent onto.
-				chat.resetForSession(
-					leafTurnId,
-					buildModelReplayAgentMessagesFromTurns(resumedEntries, {
-						...(leafTurnId ? { activeLeafTurnId: leafTurnId } : {}),
-						// The same ownership the interactive /resume overlay supplies.
-						// Without it this reader owns nothing, the fold finds no
-						// current origin, and a resumed session boots with its accepted
-						// note silently missing from the provider context.
-						continuity: continuityContextFromSession(session),
-					}),
-				);
+				replayCurrentSession({ session, chat, readEntries: () => resumedEntries }, resumedMeta.id, "leaf", leafTurnId);
 			} catch (err) {
 				chat.resetForSession(leafTurnId);
 				bootStderr(
@@ -4149,7 +4143,27 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 					};
 				},
 				setSessionRouting: (patch) => {
-					applyRoutingAtScope({ orchestrator: patch }, "session");
+					const current = getCurrentSettings();
+					const target = patch.target ?? current.chat.target;
+					const model = patch.model ?? current.chat.model;
+					if (target && model && (patch.target !== undefined || patch.model !== undefined)) {
+						selectModel(
+							providers,
+							{ target, model, thinkingLevel: patch.thinkingLevel ?? current.chat.thinkingLevel },
+							(selected) => applyRoutingAtScope({ orchestrator: selected }, "session"),
+							current.chat.modelPicker.recentLimit,
+						);
+					} else {
+						applyRoutingAtScope(
+							{
+								orchestrator: {
+									...patch,
+									thinkingLevel: clampThinkingLevel(providers, target, model, patch.thinkingLevel ?? current.chat.thinkingLevel),
+								},
+							},
+							"session",
+						);
+					}
 				},
 				onActiveSessionAutonomyChange: (level) => {
 					activeAcpSessionAutonomy = level;
@@ -4200,17 +4214,22 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		const unsubscribeLoopGuardStop = subscribeLoopGuardStop(bus, chat);
 		const headlessPermissionReason = HEADLESS_PERMISSION_DENIED_REASON;
 		const unsubscribeHeadlessPermission = toolRegistry.onPermissionRequired((call, decision, meta) => {
-			bus.emit(BusChannels.PermissionResolved, {
-				status: "denied",
-				requestId: meta.requestId,
-				origin: "main",
-				decidedBy: "policy:no-operator",
-				tool: call.tool,
-				actionClass: decision.classification.actionClass,
-				reason: headlessPermissionReason,
-				requestedBy: "headless",
-			});
-			toolRegistry.cancelParkedCalls(headlessPermissionReason);
+			resolvePermission(
+				{ bus, registry: toolRegistry },
+				{
+					action: "stop",
+					payload: {
+						status: "denied",
+						requestId: meta.requestId,
+						origin: "main",
+						decidedBy: "policy:no-operator",
+						tool: call.tool,
+						actionClass: decision.classification.actionClass,
+						reason: headlessPermissionReason,
+						requestedBy: "headless",
+					},
+				},
+			);
 		});
 		try {
 			const parsedSkillRequest = resources?.parsePendingSkillRequests(options.headless.prompt, process.cwd()) ?? {
@@ -4442,34 +4461,19 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			: {}),
 		onSetThinkingLevel: (level, scope) => {
 			const current = getCurrentSettings();
-			const nextLevel =
-				resolveModelRuntimeCapabilitiesForProviders(providers, current.chat.target, current.chat.model, level)?.thinking
-					.effectiveLevel ?? "off";
+			const nextLevel = clampThinkingLevel(providers, current.chat.target, current.chat.model, level);
 			// An unscoped caller gets the scope that cannot outlive this session.
 			applyRoutingAtScope({ orchestrator: { thinkingLevel: nextLevel } }, scope ?? "session");
 		},
 		onCycleThinking: () => routingGestures.cycleThinking(),
 		onSelectModel: ({ target, model }, scope) => {
-			const registry = getRuntimeRegistry();
 			const settings = getCurrentSettings();
-			const descriptor = settings.targets.find((e) => e.id === target);
-			if (descriptor) {
-				const runtime = registry.get(descriptor.runtime);
-				if (!runtime) {
-					throw new Error(
-						`cannot use target '${target}' as orchestrator target because runtime '${descriptor.runtime}' is not registered`,
-					);
-				}
-				if (!isOrchestratorEligibleRuntime(runtime)) {
-					throw new Error(
-						`cannot use target '${target}' as orchestrator target because runtime '${runtime.id}' is not an HTTP/native runtime`,
-					);
-				}
-			}
-			applyRoutingAtScope({ orchestrator: { target, model } }, scope);
-			// Recents live in the state dir, not settings.yaml, and are how a swap
-			// stays reachable in the picker. A session-scoped swap still earns one.
-			rememberRecentModel(`${target}/${model}`, getCurrentSettings().chat.modelPicker.recentLimit);
+			selectModel(
+				providers,
+				{ target, model, thinkingLevel: settings.chat.thinkingLevel },
+				(selected) => applyRoutingAtScope({ orchestrator: selected }, scope),
+				settings.chat.modelPicker.recentLimit,
+			);
 		},
 		writeSettings: (next) => applySettingsBlob(next),
 		commitSetting: (id, next, scope) => commitSetting(id, next, scope),

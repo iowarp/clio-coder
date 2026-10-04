@@ -2,6 +2,7 @@ import { type Static, type TSchema, Type } from "typebox";
 import { ArtifactList, ArtifactPage, ArtifactRead } from "./artifacts.js";
 import { AsideAnswer, AsideAskRequest, AsideCancelled, AsideDraftRequest, AsideDrafts } from "./aside.js";
 import { TURN_FILE_MAX, TURN_IMAGE_MAX, TurnFile, TurnImage } from "./attachments.js";
+import { Autonomy } from "./autonomy.js";
 import {
 	DecisionSuperseded,
 	DecisionSupersedeRequest,
@@ -62,7 +63,6 @@ import {
 } from "./sessions.js";
 import { ConfigGraph, SettingsReport } from "./settings.js";
 import { SettingsControls, SettingWrite, SettingWritten } from "./settings-controls.js";
-import { Autonomy, AutonomyLevel, SafeSettings, SafeSettingsPatch } from "./settings-safe.js";
 import { SetupAnswer, SetupStart, SetupState, SetupStatus } from "./setup.js";
 import {
 	CommandCatalog,
@@ -99,6 +99,11 @@ import {
 	TraceStatus,
 } from "./traces.js";
 import { SessionUsage } from "./usage.js";
+import {
+	AcpAutonomyLevelSchema as AutonomyLevel,
+	AcpSafeSettings as SafeSettings,
+	AcpSafeSettingsPatchSchema as SafeSettingsPatch,
+} from "./wire.js";
 
 export interface Route<
 	P extends TSchema = TSchema,

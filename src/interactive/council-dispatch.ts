@@ -10,8 +10,8 @@
  */
 
 import { ToolNames } from "../core/tool-names.js";
+import type { CouncilDispatchOutcome } from "../session-control/slash-commands.js";
 import type { ToolRegistry } from "../tools/registry.js";
-import type { CouncilDispatchOutcome } from "./slash-commands.js";
 
 /**
  * Invoke the dispatch tool with prepared council arguments and report the

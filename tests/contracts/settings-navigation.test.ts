@@ -11,7 +11,7 @@ import {
 	SETTINGS_SECTION_ROWS,
 	SettingsCenter,
 } from "../../src/interactive/overlays/settings.js";
-import { parseSlashCommand } from "../../src/interactive/slash-commands.js";
+import { parseSlashCommand } from "../../src/session-control/slash-commands.js";
 
 function fixture() {
 	const settings = structuredClone(DEFAULT_SETTINGS);

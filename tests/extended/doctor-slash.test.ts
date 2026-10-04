@@ -11,7 +11,7 @@ import {
 	dispatchSlashCommand,
 	parseSlashCommand,
 	type SlashCommandContext,
-} from "../../src/interactive/slash-commands.js";
+} from "../../src/session-control/slash-commands.js";
 import { type IsolatedClioEnv, isolateClioEnv } from "../harness/scratch-env.js";
 
 function context(overrides: Partial<SlashCommandContext>): {

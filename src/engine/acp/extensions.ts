@@ -1,3 +1,14 @@
+import type { AcpExtensionReloadOutcome, AcpInstalledExtension } from "./types.js";
+
+export type { AcpExtensionReloadOutcome, AcpInstalledExtension } from "./types.js";
+export {
+	ACP_EXTENSIONS_LIST_METHOD,
+	ACP_EXTENSIONS_META_KEY,
+	ACP_EXTENSIONS_RELOAD_METHOD,
+	ACP_LIBRARY_META_KEY,
+	ACP_LIBRARY_RELOAD_METHOD,
+} from "./types.js";
+
 /**
  * `_clio-coder/extensions/list`, `_clio-coder/extensions/reload` and
  * `_clio-coder/library/reload`: what the terminal's /extensions view shows,
@@ -11,45 +22,14 @@
  * reload that did not happen.
  */
 
-export const ACP_EXTENSIONS_META_KEY = "clio-coder/extensions";
-export const ACP_EXTENSIONS_LIST_METHOD = "_clio-coder/extensions/list";
-export const ACP_EXTENSIONS_RELOAD_METHOD = "_clio-coder/extensions/reload";
-export const ACP_LIBRARY_META_KEY = "clio-coder/library";
-export const ACP_LIBRARY_RELOAD_METHOD = "_clio-coder/library/reload";
 const MAX_EXTENSIONS = 64;
 const MAX_LINES = 40;
 const MAX_TEXT_BYTES = 512;
 const MAX_DIAGNOSTICS = 3;
 
 /** The installed-extension fields the list reads; the extensions domain's InstalledExtension, structurally. */
-export interface AcpInstalledExtension {
-	id: string;
-	name: string;
-	version: string;
-	description: string;
-	scope: string;
-	enabled: boolean;
-	valid: boolean;
-	compatible: boolean;
-	loadable: boolean;
-	overriddenBy?: string;
-	runtime?: unknown;
-	diagnostics: ReadonlyArray<{ message: string }>;
-}
 
 /** The reload coordinator's outcome, structurally. */
-export type AcpExtensionReloadOutcome =
-	| {
-			status: "committed";
-			generation: number;
-			changed: boolean;
-			added: ReadonlyArray<unknown>;
-			removed: ReadonlyArray<unknown>;
-			modified: ReadonlyArray<unknown>;
-			hooks: { registered: number; dropped: number; fileIssues: number; issues: number; overridden: number };
-			lines: ReadonlyArray<string>;
-	  }
-	| { status: "rejected"; reason: string; generation: number; lines: ReadonlyArray<string> };
 
 export interface AcpExtensionsControl {
 	list(): ReadonlyArray<AcpInstalledExtension>;

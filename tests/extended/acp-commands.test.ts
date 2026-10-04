@@ -64,6 +64,7 @@ test("the catalog projects all fourteen allowlisted commands", async () => {
 		catalog.commands.map((command) => command.name),
 		[
 			"eggs",
+			"skill",
 			"mcp",
 			"doctor",
 			"share",
@@ -72,7 +73,6 @@ test("the catalog projects all fourteen allowlisted commands", async () => {
 			"delegate",
 			"oracle",
 			"council",
-			"skill",
 			"context",
 			"tasks",
 			"memory",
@@ -148,7 +148,7 @@ test("streams and injectsUserTurn mark exactly the commands that earn them", asy
 	);
 	assert.deepEqual(
 		catalog.commands.filter((command) => command.injectsUserTurn === true).map((command) => command.name),
-		["share", "oracle", "skill", "tasks"],
+		["skill", "share", "oracle", "tasks"],
 	);
 	assert.equal(descriptor("export").streams, undefined);
 	assert.equal(descriptor("export").injectsUserTurn, undefined);

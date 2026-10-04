@@ -51,7 +51,7 @@ import {
 	dispatchSlashCommand,
 	parseSlashCommand,
 	type SlashCommandContext,
-} from "../../src/interactive/slash-commands.js";
+} from "../../src/session-control/slash-commands.js";
 import { registerHarnessExtensionTools } from "../../src/tools/harness-extensions.js";
 import { createRegistry } from "../../src/tools/registry.js";
 import { trustProjectPackages } from "../harness/project-trust.js";

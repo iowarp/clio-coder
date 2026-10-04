@@ -1,6 +1,6 @@
 import { workerData } from "node:worker_threads";
 import { runtimeInfo } from "../clio/adapters/runtime.js";
-import { sessionHistory, sessionWorkspaces } from "../clio/adapters/sessions.js";
+import { sessionWorkspaces } from "../clio/adapters/sessions.js";
 import { toolchainAdapter } from "../clio/adapters/toolchain.js";
 import { TraceAdapter } from "../clio/adapters/traces.js";
 import { restrictNetwork } from "../network-policy.js";
@@ -55,7 +55,6 @@ serveWorker(async (call) => {
 		const { inspectConfigGraph } = await import("../clio/adapters/config-graph.js");
 		return inspectConfigGraph(call.params.cwd);
 	}
-	if (call.method === "sessions.list") return sessionHistory(call.params.cwd);
 	if (call.method === "sessions.workspaces") return sessionWorkspaces();
 	if (call.method === "workspace.files") {
 		const { completeWorkspaceFiles } = await import("../clio/adapters/workspace-files.js");

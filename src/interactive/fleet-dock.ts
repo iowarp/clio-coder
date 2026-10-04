@@ -1,8 +1,8 @@
 import type { UsageSnapshot } from "../domains/quota/types.js";
 import type { Component } from "../engine/tui.js";
+import { isHelperRun } from "../session-control/worker-stream.js";
 import type { DispatchBoardRow } from "./dispatch-board.js";
 import { formatTaskIslandLines } from "./dispatch-board.js";
-import { isHelperRun } from "./worker-stream.js";
 
 export interface FleetDockDeps {
 	getRows: () => ReadonlyArray<DispatchBoardRow>;

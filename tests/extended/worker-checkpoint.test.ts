@@ -2,7 +2,7 @@ import { doesNotMatch, match, ok } from "node:assert/strict";
 import { test } from "node:test";
 import { stripTerminalSequences } from "../../src/engine/tui.js";
 import { renderWorkerEntryLines, workerNeedsInput } from "../../src/interactive/renderers/worker-entry.js";
-import type { WorkerEntryState, WorkerReceiptSummary } from "../../src/interactive/worker-stream.js";
+import type { WorkerEntryState, WorkerReceiptSummary } from "../../src/session-control/worker-stream.js";
 
 function settledWorker(text: string): WorkerEntryState {
 	return {

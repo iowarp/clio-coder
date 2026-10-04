@@ -1,4 +1,4 @@
-import { type Static, type TSchema, Type } from "typebox";
+import type { Static, TSchema } from "typebox";
 import { Value } from "typebox/value";
 import { ArtifactsCapability } from "../../contracts/artifacts.js";
 import { AsideCapability } from "../../contracts/aside.js";
@@ -16,7 +16,6 @@ import {
 	SteeringCapability,
 	ToolProgressCapability,
 } from "../../contracts/capabilities.js";
-import { Id } from "../../contracts/common.js";
 import { ContextCapability } from "../../contracts/context-ledger.js";
 import { ExtensionsCapability, LibraryCapability } from "../../contracts/extensions.js";
 import { FleetCapability } from "../../contracts/fleet-run.js";
@@ -25,14 +24,48 @@ import { INTERVIEW_CANCEL_METHOD, INTERVIEW_REQUEST_METHOD, InterviewCapability 
 import { PERMISSION_WITHDRAW_METHOD } from "../../contracts/permissions.js";
 import type { SessionConfig } from "../../contracts/session-config.js";
 import type { SessionTelemetry } from "../../contracts/session-telemetry.js";
-import { ACP_EVENT_KINDS, TurnDetails, Usage } from "../../contracts/sessions.js";
+import { ACP_EVENT_KINDS, Usage } from "../../contracts/sessions.js";
 import { UsageCapability } from "../../contracts/usage.js";
+import {
+	ACP_ACCOUNTING_META_KEY,
+	ACP_ARTIFACTS_META_KEY,
+	ACP_ASIDE_META_KEY,
+	ACP_BOARD_META_KEY,
+	ACP_BRANCHES_META_KEY,
+	ACP_COMMANDS_META_KEY,
+	ACP_CONTEXT_META_KEY,
+	ACP_DECISION_META_KEY,
+	ACP_ERROR_META_KEY,
+	ACP_EVENTS_META_KEY,
+	ACP_EXTENSIONS_META_KEY,
+	ACP_FLEET_META_KEY,
+	ACP_HANDOFF_META_KEY,
+	ACP_INTERVIEWS_META_KEY,
+	ACP_LIBRARY_META_KEY,
+	ACP_QUEUE_META_KEY,
+	ACP_SESSION_META_KEY,
+	ACP_SESSION_TRUST_METHOD,
+	ACP_SETTINGS_META_KEY,
+	ACP_SHELL_META_KEY,
+	ACP_STEERING_META_KEY,
+	ACP_TARGETS_META_KEY,
+	ACP_TOOL_PROGRESS_META_KEY,
+	ACP_TOOLS_META_KEY,
+	ACP_TRUST_META_KEY,
+	ACP_TURN_META_KEY,
+	ACP_USAGE_META_KEY,
+	ACP_WORKER_PERMISSIONS_META_KEY,
+	AcpInitializeResultSchema as Initialize,
+	AcpSessionIdentitySchema as NewSession,
+	AcpPromptResultSchema as PromptResult,
+	AcpSettingsCapability as Settings,
+	AcpTargetsCapability as Targets,
+} from "../../contracts/wire.js";
 import { type AcpJsonRpcTransport, AcpProtocolError, AcpTimeoutError } from "../clio/http-shims.js";
 import { AppProblem } from "../services/problem.js";
 import { projectConfigOptions } from "./session-config.js";
 import { sessionResultTelemetry } from "./telemetry.js";
 
-const Initialize = Type.Object({ protocolVersion: Type.Literal(1) });
 /**
  * Capabilities are read leniently on purpose. The protocol version is the one
  * hard gate; everything under `agentCapabilities._meta` is an extension this
@@ -52,13 +85,13 @@ function readCapabilities(result: unknown): AgentCapabilities {
 	const capabilities = record(record(result).agentCapabilities);
 	const meta = record(capabilities._meta);
 	const stableSession = record(capabilities.sessionCapabilities);
-	const extensionSession = record(meta["clio-coder/session"]);
+	const extensionSession = record(meta[ACP_SESSION_META_KEY]);
 	return {
 		loadSession: capabilities.loadSession === true,
-		...(record(meta["clio-coder/trust"]).refresh === "_clio-coder/session/trust"
-			? { trustRefresh: "_clio-coder/session/trust" as const }
+		...(record(meta[ACP_TRUST_META_KEY]).refresh === ACP_SESSION_TRUST_METHOD
+			? { trustRefresh: ACP_SESSION_TRUST_METHOD }
 			: {}),
-		mediatedTools: meta["clio-coder/tools"] === "mediated",
+		mediatedTools: meta[ACP_TOOLS_META_KEY] === "mediated",
 		...(record(capabilities.promptCapabilities).image === true ? { images: true } : {}),
 		...(record(capabilities.promptCapabilities).embeddedContext === true ? { embeddedContext: true } : {}),
 		...(Object.keys(stableSession).length > 0 || Object.keys(extensionSession).length > 0
@@ -72,52 +105,39 @@ function readCapabilities(result: unknown): AgentCapabilities {
 					},
 				}
 			: {}),
-		...maybe("settings", optional(Settings, meta["clio-coder/settings"])),
-		...maybe("targets", optional(Targets, meta["clio-coder/targets"])),
-		...maybe("steering", optional(SteeringCapability, meta["clio-coder/steering"])),
-		...maybe("queue", optional(QueueCapability, meta["clio-coder/queue"])),
-		...maybe("shell", optional(ShellCapability, meta["clio-coder/shell"])),
-		...maybe("commands", optional(CommandsCapability, meta["clio-coder/commands"])),
-		...maybe("toolProgress", optional(ToolProgressCapability, meta["clio-coder/toolProgress"])),
-		...maybe("decision", optional(DecisionCapability, meta["clio-coder/decision"])),
-		...maybe("events", optional(EventsCapability, meta["clio-coder/events"])),
-		...maybe("board", optional(BoardCapability, meta["clio-coder/board"])),
-		...maybe("branches", optional(BranchesCapability, meta["clio-coder/branches"])),
-		...maybe("handoff", optional(HandoffCapability, meta["clio-coder/handoff"])),
-		...maybe("fleet", optional(FleetCapability, meta["clio-coder/fleet"])),
-		...maybe("context", optional(ContextCapability, meta["clio-coder/context"])),
-		...maybe("artifacts", optional(ArtifactsCapability, meta["clio-coder/artifacts"])),
-		...maybe("extensions", optional(ExtensionsCapability, meta["clio-coder/extensions"])),
-		...maybe("aside", optional(AsideCapability, meta["clio-coder/aside"])),
-		...maybe("interviews", optional(InterviewCapability, meta["clio-coder/interviews"])),
-		...maybe("usage", optional(UsageCapability, meta["clio-coder/accounting"])),
-		...maybe("library", optional(LibraryCapability, meta["clio-coder/library"])),
+		...maybe("settings", optional(Settings, meta[ACP_SETTINGS_META_KEY])),
+		...maybe("targets", optional(Targets, meta[ACP_TARGETS_META_KEY])),
+		...maybe("steering", optional(SteeringCapability, meta[ACP_STEERING_META_KEY])),
+		...maybe("queue", optional(QueueCapability, meta[ACP_QUEUE_META_KEY])),
+		...maybe("shell", optional(ShellCapability, meta[ACP_SHELL_META_KEY])),
+		...maybe("commands", optional(CommandsCapability, meta[ACP_COMMANDS_META_KEY])),
+		...maybe("toolProgress", optional(ToolProgressCapability, meta[ACP_TOOL_PROGRESS_META_KEY])),
+		...maybe("decision", optional(DecisionCapability, meta[ACP_DECISION_META_KEY])),
+		...maybe("events", optional(EventsCapability, meta[ACP_EVENTS_META_KEY])),
+		...maybe("board", optional(BoardCapability, meta[ACP_BOARD_META_KEY])),
+		...maybe("branches", optional(BranchesCapability, meta[ACP_BRANCHES_META_KEY])),
+		...maybe("handoff", optional(HandoffCapability, meta[ACP_HANDOFF_META_KEY])),
+		...maybe("fleet", optional(FleetCapability, meta[ACP_FLEET_META_KEY])),
+		...maybe("context", optional(ContextCapability, meta[ACP_CONTEXT_META_KEY])),
+		...maybe("artifacts", optional(ArtifactsCapability, meta[ACP_ARTIFACTS_META_KEY])),
+		...maybe("extensions", optional(ExtensionsCapability, meta[ACP_EXTENSIONS_META_KEY])),
+		...maybe("aside", optional(AsideCapability, meta[ACP_ASIDE_META_KEY])),
+		...maybe("interviews", optional(InterviewCapability, meta[ACP_INTERVIEWS_META_KEY])),
+		...maybe("usage", optional(UsageCapability, meta[ACP_ACCOUNTING_META_KEY])),
+		...maybe("library", optional(LibraryCapability, meta[ACP_LIBRARY_META_KEY])),
 	};
 }
-const closed = { additionalProperties: false };
-const Settings = Type.Object({ get_safe: Type.Boolean(), patch_safe: Type.Boolean() }, closed);
-const Targets = Type.Object({ list: Type.Boolean(), probe: Type.Boolean() }, closed);
+
 function maybe<K extends string, V>(key: K, value: V | undefined) {
 	return value === undefined ? {} : ({ [key]: value } as Record<K, V>);
 }
-const NewSession = Type.Object({ sessionId: Id });
-const PromptResult = Type.Object({
-	stopReason: Type.Union([
-		Type.Literal("end_turn"),
-		Type.Literal("cancelled"),
-		Type.Literal("max_tokens"),
-		Type.Literal("max_turn_requests"),
-		Type.Literal("refusal"),
-	]),
-	_meta: Type.Object({ "clio-coder/usage": Usage, "clio-coder/turn": Type.Optional(TurnDetails) }),
-});
 export function record(value: unknown): Record<string, unknown> {
 	return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
 }
 export function acpProblem(error: unknown) {
 	if (error instanceof AppProblem) return error;
 	if (error instanceof AcpProtocolError) {
-		const detail = record(record(record(error.data).data)._meta)["clio-coder/error"];
+		const detail = record(record(record(error.data).data)._meta)[ACP_ERROR_META_KEY];
 		const code = record(detail).code;
 		if (code === "prompt_not_admitted" && record(detail).reason === "authentication-required")
 			return new AppProblem(
@@ -185,18 +205,18 @@ export class AcpClient {
 				fs: { readTextFile: false, writeTextFile: false },
 				terminal: false,
 				_meta: {
-					"clio-coder/events": { version: 1, kinds: [...ACP_EVENT_KINDS] },
+					[ACP_EVENTS_META_KEY]: { version: 1, kinds: [...ACP_EVENT_KINDS] },
 					// Opting in turns on non-terminal `tool_call_update` frames whose
 					// content is the tool's CUMULATIVE output. The projection replaces
 					// the running row's partial text rather than appending, which is
 					// the whole reason the stream is an opt-in.
-					"clio-coder/toolProgress": { version: 1 },
+					[ACP_TOOL_PROGRESS_META_KEY]: { version: 1 },
 					// Opting in turns on `_clio-coder/session/queue_changed`, so the queue is pushed and not polled.
-					"clio-coder/queue": { version: 1 },
-					"clio-coder/interviews": { version: 1, request: INTERVIEW_REQUEST_METHOD, cancel: INTERVIEW_CANCEL_METHOD },
+					[ACP_QUEUE_META_KEY]: { version: 1 },
+					[ACP_INTERVIEWS_META_KEY]: { version: 1, request: INTERVIEW_REQUEST_METHOD, cancel: INTERVIEW_CANCEL_METHOD },
 					// A dispatched worker's escalation reaches the approval card as a permission request,
 					// and a withdrawn one retires the card, because the wire cannot cancel a single ask.
-					"clio-coder/workerPermissions": { version: 1, withdraw: PERMISSION_WITHDRAW_METHOD },
+					[ACP_WORKER_PERMISSIONS_META_KEY]: { version: 1, withdraw: PERMISSION_WITHDRAW_METHOD },
 				},
 			},
 		});
@@ -216,7 +236,7 @@ export class AcpClient {
 		this.telemetry = sessionResultTelemetry(result);
 		const mode = record(record(result).modes).currentModeId;
 		const options = projectConfigOptions(record(result).configOptions);
-		const target = record(record(record(result)._meta)["clio-coder/session"]).target;
+		const target = record(record(record(result)._meta)[ACP_SESSION_META_KEY]).target;
 		if (options !== undefined)
 			this.config = {
 				options,
@@ -290,10 +310,12 @@ export class AcpClient {
 		const projected = Value.Clean(PromptResult, result);
 		if (!Value.Check(PromptResult, projected))
 			throw new AppProblem("upstream_acp", "Clio ACP returned invalid turn usage or stop reason.");
+		const usage = Value.Clean(Usage, projected._meta[ACP_USAGE_META_KEY]);
+		if (!Value.Check(Usage, usage)) throw new AppProblem("upstream_acp", "Clio ACP returned invalid turn usage.");
 		return {
 			stopReason: projected.stopReason,
-			usage: projected._meta["clio-coder/usage"],
-			...(projected._meta["clio-coder/turn"] ? { details: projected._meta["clio-coder/turn"] } : {}),
+			usage,
+			...(projected._meta[ACP_TURN_META_KEY] ? { details: projected._meta[ACP_TURN_META_KEY] } : {}),
 		};
 	}
 	async close(sessionId: string) {

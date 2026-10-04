@@ -4,7 +4,7 @@ import type { WorkerProgressSnapshot } from "../../src/domains/observability/wor
 import { stripTerminalSequences } from "../../src/engine/tui.js";
 import { type DispatchBoardRow, formatTaskIslandLines } from "../../src/interactive/dispatch-board.js";
 import { renderWorkerEntryLines } from "../../src/interactive/renderers/worker-entry.js";
-import type { WorkerEntryState } from "../../src/interactive/worker-stream.js";
+import type { WorkerEntryState } from "../../src/session-control/worker-stream.js";
 
 // BT-007: at 20s the island said `◇ coder · running · 20s` while the inline
 // card on the same run said `◔ starting · 20s`, and at 55s `running` against

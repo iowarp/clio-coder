@@ -17,7 +17,7 @@ import {
 	MODEL_ID_LABEL_WIDTH,
 } from "../../src/interactive/theme/labels.js";
 import { transcriptDetail } from "../../src/interactive/transcript-detail.js";
-import type { WorkerEntryState } from "../../src/interactive/worker-stream.js";
+import type { WorkerEntryState } from "../../src/session-control/worker-stream.js";
 import { footerState } from "../harness/footer-fixture.js";
 
 const widths = [40, 44, 60, 92, 120];

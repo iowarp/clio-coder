@@ -8,12 +8,12 @@ import {
 	truncateToWidth,
 	visibleWidth,
 } from "../engine/tui.js";
-import { resolveFdBinary } from "../tools/executables.js";
 import {
-	createFileReferenceCompletionSource,
-	type FileReferenceCompletionSource,
-} from "./file-reference-completion.js";
-import { commandReference, parseSlashCommand, SETTINGS_AREA_IDS, SLASH_COMMAND_GROUPS } from "./slash-commands.js";
+	commandReference,
+	parseSlashCommand,
+	SETTINGS_AREA_IDS,
+	SLASH_COMMAND_GROUPS,
+} from "../session-control/slash-commands.js";
 import {
 	type ArgCompletion,
 	COMPLETION_SLOT_NAMES,
@@ -21,7 +21,12 @@ import {
 	type CompletionSlotName,
 	completeArgs,
 	renderArgsSpec,
-} from "./slash-spec.js";
+} from "../session-control/slash-spec.js";
+import { resolveFdBinary } from "../tools/executables.js";
+import {
+	createFileReferenceCompletionSource,
+	type FileReferenceCompletionSource,
+} from "./file-reference-completion.js";
 
 export type SlashAutocompleteCommand = SlashCommand;
 

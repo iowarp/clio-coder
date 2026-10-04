@@ -10,12 +10,17 @@ import {
 } from "../domains/session/handoff-service.js";
 import type { SessionContract, SessionEntry } from "../domains/session/index.js";
 import type { TUI } from "../engine/tui.js";
-import type { ChatLoop } from "./chat-loop.js";
+import type { ChatLoop } from "../session-control/chat-loop.js";
+import { replayCurrentSession, restoreSession } from "../session-control/index.js";
+import {
+	buildModelReplayAgentMessagesFromTurns,
+	withContinuityReplay,
+} from "../session-control/model-session-replay.js";
+import type { SlashCommandContext } from "../session-control/slash-commands.js";
 import type { ChatPanel } from "./chat-panel.js";
 import { rehydrateChatPanelFromTurns } from "./chat-renderer.js";
 import { emitCommandNotice } from "./command-fallbacks.js";
 import type { InteractiveNoticeLevel } from "./interactive-subscriptions.js";
-import { buildModelReplayAgentMessagesFromTurns, withContinuityReplay } from "./model-session-replay.js";
 import type { OverlayTransitions } from "./overlay-transitions.js";
 import { openCwdFallbackOverlay } from "./overlays/cwd-fallback.js";
 import { openHandoffReviewOverlay } from "./overlays/handoff-review.js";
@@ -25,7 +30,6 @@ import { openTreeOverlay } from "./overlays/tree-selector.js";
 import { lastTurnSummaryFromLedger } from "./session-last-turn.js";
 import { settleChatBeforeSessionSwitch } from "./session-switch-settlement.js";
 import { reseedSessionUsageFromLedger, type SessionUsageSink } from "./session-usage-reseed.js";
-import type { SlashCommandContext } from "./slash-commands.js";
 import type { TurnSummary } from "./status/index.js";
 
 export interface OverlaySessionLifecycleDeps {
@@ -138,52 +142,31 @@ export function createOverlaySessionLifecycle(deps: OverlaySessionLifecycleDeps)
 	async function resumeSession(session: SessionContract, sessionId: string, preResumeSessionId: string | null) {
 		const settlement = settleChatBeforeSessionSwitch(deps.chat);
 		if (settlement) await settlement;
-		deps.onResumeSession?.(sessionId);
-		// onResumeSession (wired to session.resume) catches and stderr-logs
-		// its own failure rather than throwing here, so this is the only
-		// signal available: a successful switch always leaves session.current()
-		// pointing at the requested id. Without this check, a failed switch
-		// still replayed the target's transcript and moved the chat leaf to
-		// it while session.current() stayed on the session the operator
-		// started on (issue #93), so the next message was appended with a
-		// parent turn from a session that was never actually opened.
-		if (session.current()?.id !== sessionId) {
-			emitCommandNotice(
-				deps.getSlashNotice(),
-				"error",
-				"resume",
-				`could not switch to that session; staying on ${preResumeSessionId ?? "no session"}`,
-			);
-			deps.refreshFooter();
-			deps.requestRender();
-			return;
-		}
 		try {
-			const turns = deps.readStructuredEntries(sessionId);
-			// The leaf is read before the transcript is rebuilt because it is
-			// what the rebuild has to follow. resolveLeafOnOpen prefers a
-			// persisted `/tree` pin over the newest turn, so a session resumed
-			// on a pin extends from the pinned turn while the file still holds
-			// the abandoned branch after it. Replaying the file unfiltered
-			// rendered those abandoned turns as ordinary history above the
-			// prompt, disagreeing with the branch the next message parents onto
-			// and with the tip `/tree` marks (issue #107). The `/tree` switch
-			// path below has always scoped its replay to the selected turn;
-			// this is the same active-path filter, rooted at the leaf resume
-			// actually landed on.
-			const leafTurnId = session.tree(sessionId).leafId;
-			// activeLeafTurnId, not uptoTurnId: this is a live branch about to
-			// be extended, so sidecars anchored to a path turn but written
-			// after it (a compaction summary covering the leaf, above all)
-			// still belong on screen. uptoTurnId is the historical-truncation
-			// variant `/tree` uses.
-			const replayOptions = withContinuityReplay(turns, leafTurnId ? { activeLeafTurnId: leafTurnId } : {}, session);
+			const replay = restoreSession(
+				{
+					session,
+					chat: deps.chat,
+					readEntries: deps.readStructuredEntries,
+					...(deps.onResumeSession ? { resume: deps.onResumeSession } : {}),
+				},
+				sessionId,
+			);
 			deps.resetTranscript();
-			rehydrateChatPanelFromTurns(deps.chatPanel, turns, replayOptions);
-			const replayMessages = buildModelReplayAgentMessagesFromTurns(turns, replayOptions);
-			deps.chat.resetForSession(leafTurnId, replayMessages);
-			rescopeToBranch(session, turns, leafTurnId);
+			rehydrateChatPanelFromTurns(deps.chatPanel, replay.entries, replay.replayOptions);
+			rescopeToBranch(session, [...replay.entries], replay.leafTurnId);
 		} catch (error) {
+			if (session.current()?.id !== sessionId) {
+				emitCommandNotice(
+					deps.getSlashNotice(),
+					"error",
+					"resume",
+					`could not switch to that session; staying on ${preResumeSessionId ?? "no session"}`,
+				);
+				deps.refreshFooter();
+				deps.requestRender();
+				return;
+			}
 			deps.stderr(`[/resume] transcript replay failed: ${error instanceof Error ? error.message : String(error)}\n`);
 		}
 		if (sessionId !== preResumeSessionId) {
@@ -353,18 +336,17 @@ export function createOverlaySessionLifecycle(deps: OverlaySessionLifecycleDeps)
 
 	function replayFork(forkedSessionId: string, parentTurnId: string, session: SessionContract): void {
 		try {
-			const turns = deps.readStructuredEntries(forkedSessionId);
-			const leafTurnId = session.tree(forkedSessionId).leafId ?? parentTurnId;
-			// The child is already current here, so its own id and fork pointers are
-			// what separate the transactions it inherited from any it later mints.
-			const replayOptions = withContinuityReplay(turns, leafTurnId ? { activeLeafTurnId: leafTurnId } : {}, session);
-			rehydrateChatPanelFromTurns(deps.chatPanel, turns, replayOptions);
-			const replayMessages = buildModelReplayAgentMessagesFromTurns(turns, replayOptions);
-			deps.chat.resetForSession(leafTurnId, replayMessages);
-			rescopeToBranch(session, turns, leafTurnId);
+			const replay = replayCurrentSession(
+				{ session, chat: deps.chat, readEntries: deps.readStructuredEntries },
+				forkedSessionId,
+				"leaf",
+				undefined,
+				parentTurnId,
+			);
+			rehydrateChatPanelFromTurns(deps.chatPanel, replay.entries, replay.replayOptions);
+			rescopeToBranch(session, [...replay.entries], replay.leafTurnId);
 		} catch (error) {
 			deps.stderr(`[/fork] transcript replay failed: ${error instanceof Error ? error.message : String(error)}\n`);
-			deps.chat.resetForSession(null);
 		}
 	}
 

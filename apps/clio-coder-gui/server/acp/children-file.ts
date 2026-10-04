@@ -18,6 +18,7 @@ const Row = Type.Object(
 		birthToken: nullableToken,
 		sessionId: Id,
 		workspaceId: Id,
+		control: Type.Optional(Type.Literal(true)),
 	},
 	{ additionalProperties: false },
 );
@@ -32,8 +33,15 @@ export class ChildrenFile {
 			throw new AppProblem("unavailable", "ACP ownership records are invalid; no process was signalled.");
 		return rows;
 	}
-	async record(pid: number, sessionId: string, workspaceId: string): Promise<ChildRow> {
-		const row = { ...this.owner, pid, birthToken: processBirthToken(pid), sessionId, workspaceId };
+	async record(pid: number, sessionId: string, workspaceId: string, control = false): Promise<ChildRow> {
+		const row: ChildRow = {
+			...this.owner,
+			pid,
+			birthToken: processBirthToken(pid),
+			sessionId,
+			workspaceId,
+			...(control ? { control: true as const } : {}),
+		};
 		await this.change((rows) => [...rows, row]);
 		return row;
 	}

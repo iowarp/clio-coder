@@ -1,6 +1,7 @@
 import { classifyDecisionPresentation, decisionFactsForAnswer } from "../../domains/safety/decision-presentation.js";
 import type { DecisionLedgerEntry, DecisionRecord } from "../../domains/session/entries.js";
 import { type Component, Input, matchesKey, type OverlayHandle, type TUI, wrapTextWithAnsi } from "../../engine/tui.js";
+import type { DecisionSelection } from "../../session-control/decision-correction.js";
 import { buildHint, fitRow, selectionLabel, selectionMark, showClioOverlayFrame } from "../overlay-frame.js";
 import { clioTheme, GLYPH, rule } from "../theme/index.js";
 
@@ -8,17 +9,8 @@ const DEFAULT_CONTENT_WIDTH = 88;
 
 export const DECISIONS_OVERLAY_WIDTH = DEFAULT_CONTENT_WIDTH + 4;
 
-export interface DecisionSelection {
-	interviewId: string;
-	key: string;
-	label: string;
-	value: string;
-}
-
-/** The operator-authored turn that makes a durable correction visible to the model. */
-export function formatDecisionCorrectionTurn(selection: DecisionSelection, correction: string): string {
-	return `Decision "${selection.label}" (previously: ${selection.value}) is superseded by the operator. New direction: ${correction}. Acknowledge and adjust the plan.`;
-}
+export type { DecisionSelection } from "../../session-control/decision-correction.js";
+export { formatDecisionCorrectionTurn } from "../../session-control/decision-correction.js";
 
 export interface OpenDecisionsOverlayOptions {
 	onSupersede: (selection: DecisionSelection) => void;

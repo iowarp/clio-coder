@@ -6,7 +6,7 @@ import { test } from "node:test";
 import { captureSkillContext } from "../../src/domains/session/compaction/compact.js";
 import type { SessionEntry } from "../../src/domains/session/entries.js";
 import { isSessionEntry, latestSkillContextState } from "../../src/domains/session/entries.js";
-import { buildModelReplayAgentMessagesFromTurns } from "../../src/interactive/model-session-replay.js";
+import { buildModelReplayAgentMessagesFromTurns } from "../../src/session-control/model-session-replay.js";
 import { runCli } from "../harness/headless-run.js";
 import {
 	closeServer,

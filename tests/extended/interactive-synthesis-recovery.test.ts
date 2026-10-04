@@ -7,7 +7,7 @@ import type { ProvidersContract } from "../../src/domains/providers/index.js";
 import litellm from "../../src/domains/providers/runtimes/protocol/litellm.js";
 import { createEngineAgent } from "../../src/engine/agent.js";
 import { lockedSynthesisFallbackText } from "../../src/engine/loop-guard.js";
-import { createChatLoop } from "../../src/interactive/chat-loop.js";
+import { createChatLoop } from "../../src/session-control/chat-loop.js";
 import { startGatewayThinkingFixture } from "../harness/gateway-thinking-fixture.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
 
