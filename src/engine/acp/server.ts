@@ -5487,7 +5487,8 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 		}
 		const refusal = steerRefusal(session);
 		if (refusal !== null) return { accepted: false, queue, refusal };
-		if (await options.chat.discoverOperatorEgg?.(text)) return { accepted: true, queue };
+		if (options.chat.discoverOperatorEgg && (await options.chat.discoverOperatorEgg(text)))
+			return { accepted: true, queue };
 		// The engine's own admission is the last word: it refuses a steer whose
 		// run stopped streaming between the check above and this call.
 		if (!enqueue.call(options.chat, text)) {
@@ -5970,7 +5971,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 					active.errorMessage = result.lines.join("\n");
 				}
 				active.sawTurnEnd = true;
-			} else if (await options.chat.discoverOperatorEgg?.(promptText(params, false))) {
+			} else if (options.chat.discoverOperatorEgg && (await options.chat.discoverOperatorEgg(promptText(params, false)))) {
 				active.sawTurnEnd = true;
 			} else if (options.expandPrompt === undefined) {
 				await options.chat.submit(withResources(sentText, resources));
