@@ -12,6 +12,8 @@ test("manual qualification prepares one artifact and both required runtimes cons
 	ok(workflow.jobs.prepare.steps.some((step: { run?: string }) => step.run?.includes("release-candidate.mjs prepare")));
 	for (const key of ["ci", "runtime-compatibility"]) {
 		strictEqual(workflow.jobs[key].needs, "prepare");
+		strictEqual(workflow.jobs[key].if, `\${{ always() }}`);
+		ok(workflow.jobs[key].steps.some((step: { run?: string }) => step.run?.includes('test "$PREPARE_RESULT" = success')));
 		ok(workflow.jobs[key].steps.some((step: { uses?: string }) => step.uses?.startsWith("actions/download-artifact@")));
 		ok(!workflow.jobs[key].steps.some((step: { run?: string }) => /build|npm pack/u.test(step.run ?? "")));
 	}
@@ -37,6 +39,14 @@ test("qualification rejects another commit, automatic events, and failed require
 	throws(() => verifyQualificationRecord({ ...record, event: "push" }, jobs, commit), /manual/u);
 	throws(() => verifyQualificationRecord(record, jobs.slice(0, 2), commit), /ci \(24\)/u);
 	throws(() => verifyQualificationRecord({ ...record, conclusion: "failure" }, jobs, commit), /successful/u);
+	const rerun = jobs.map((job, index) => ({ ...job, id: index + 1 }));
+	doesNotThrow(() =>
+		verifyQualificationRecord(record, [...rerun, { id: 4, name: "ci (22)", conclusion: "success" }], commit),
+	);
+	throws(
+		() => verifyQualificationRecord(record, [...rerun, { id: 4, name: "ci (22)", conclusion: "failure" }], commit),
+		/ci \(22\)/u,
+	);
 });
 
 test("candidate checksums bind its archive version, site provenance, and installer bytes", async () => {

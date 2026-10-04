@@ -157,8 +157,8 @@ To cut a release:
 For retries, rerun the failed publication jobs or run `pnpm run release` again
 with the same qualification. Matching bytes already on npm are reused; draft
 GitHub assets can be repaired; main/site closeout can resume. A different npm
-integrity or tag commit stops the operation. An expired artifact requires new
-qualification before any publication. Prereleases use npm `beta` and a GitHub
+integrity or tag commit stops the operation. If an artifact expires, recover the exact archived bytes or prepare a new
+candidate commit; do not silently rebuild a previously qualified commit. Prereleases use npm `beta` and a GitHub
 prerelease, and keep the development branch, stable `main`, and stable site.
 
 ### Owner configuration

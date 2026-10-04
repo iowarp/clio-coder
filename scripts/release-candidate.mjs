@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -84,7 +84,7 @@ function prepareWebsite(directory, commit, version) {
 	}
 }
 
-export function prepare(directory) {
+export async function prepare(directory) {
 	const commit = source();
 	const pkg = json(join(root, "package.json"));
 	const changelog = readFileSync(join(root, "CHANGELOG.md"), "utf8");
@@ -97,7 +97,18 @@ export function prepare(directory) {
 	if (errors.length) throw new Error(errors.join("\n"));
 	mkdirSync(directory, { recursive: true });
 	rmSync(join(directory, "candidate.json"), { force: true });
-	for (const step of ["typecheck", "lint", "check:gui", "build"]) run("pnpm", ["run", step]);
+	const checks = await Promise.allSettled(
+		["typecheck", "lint", "check:gui"].map(
+			(step) =>
+				new Promise((resolve, reject) => {
+					const child = spawn("pnpm", ["run", step], { cwd: root, stdio: "inherit", shell: process.platform === "win32" });
+					child.once("error", reject);
+					child.once("close", (code) => (code === 0 ? resolve() : reject(new Error(`${step} failed (exit ${code})`))));
+				}),
+		),
+	);
+	for (const check of checks) if (check.status === "rejected") throw check.reason;
+	run("pnpm", ["run", "build"]);
 	// Build metadata is qualification evidence, excluded from the npm package.
 	// It lets the Stage 0 budget check inspect the chunks extracted from the archive.
 	writeFileSync(join(directory, "metafile-esm.json"), readFileSync(join(root, "dist/metafile-esm.json")));
@@ -150,8 +161,10 @@ export async function testCandidate(directory, commit) {
 	run("tar", ["-xzf", receipt.tarball, "--strip-components=1", "-C", root, "package/dist"]);
 	writeFileSync(join(root, "dist/metafile-esm.json"), readFileSync(join(directory, "metafile-esm.json")));
 	process.env.CLIO_CODER_RELEASE_TARBALL = receipt.tarball;
-	const counts = {};
-	for (const tier of ["core", "gui", "package"]) counts[tier] = await runTests(tier);
+	const tiers = ["core", "gui", "package"];
+	const outcomes = await Promise.allSettled(tiers.map(runTests));
+	for (const outcome of outcomes) if (outcome.status === "rejected") throw outcome.reason;
+	const counts = Object.fromEntries(outcomes.map((outcome, index) => [tiers[index], outcome.value]));
 	const total = Object.values(counts).reduce((sum, count) => sum + count, 0);
 	if (total + 3 > 2000) throw new Error(`Default qualification exceeds its 2000-test budget: ${total + 3}`);
 	verifyCandidate(directory, commit);
@@ -183,6 +196,7 @@ export function smokeCandidate(directory, commit) {
 			XDG_DATA_HOME: join(home, "xdg-data"),
 			XDG_STATE_HOME: join(home, "xdg-state"),
 			XDG_CACHE_HOME: join(home, "xdg-cache"),
+			npm_config_cache: join(scratch, "npm-cache"),
 		};
 		run(
 			"npm",
@@ -210,7 +224,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
 		const commit = values.sha ?? git("rev-parse", "HEAD");
 		const directory = resolve(values.directory ?? join(tmpdir(), `clio-coder-candidate-${commit}`));
 		const mode = positionals[0];
-		if (mode === "prepare") prepare(directory);
+		if (mode === "prepare") await prepare(directory);
 		else if (mode === "test") await testCandidate(directory, commit);
 		else if (mode === "smoke") smokeCandidate(directory, commit);
 		else if (mode === "verify" || mode === "preflight")
@@ -223,7 +237,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
 					throw new Error("Existing qualification differs from the candidate.");
 				console.log(`Reusing tested ${commit} from ${directory}`);
 			} else {
-				prepare(directory);
+				await prepare(directory);
 				await testCandidate(directory, commit);
 			}
 			if (!existsSync(join(directory, "boot-passed"))) {

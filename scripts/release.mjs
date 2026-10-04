@@ -12,7 +12,7 @@ const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 async function recentRun(workflow, branch, commit, since = "") {
 	return api(
-		`repos/${repository}/actions/workflows/${workflow}/runs?branch=${encodeURIComponent(branch)}&event=workflow_dispatch&per_page=100`,
+		`repos/${repository}/actions/workflows/${workflow}/runs?${branch ? `branch=${encodeURIComponent(branch)}&` : ""}event=workflow_dispatch&head_sha=${commit}&per_page=100`,
 	).workflow_runs.find((record) => record.head_sha === commit && record.created_at >= since);
 }
 
@@ -70,7 +70,18 @@ async function main() {
 		if (!/^v\d{3}$/u.test(branch)) throw new Error("Start from the clean version branch, such as v062.");
 		run("git", ["fetch", "origin"]);
 		run("git", ["merge-base", "--is-ancestor", "origin/main", commit], { stdio: "pipe" });
-		let qualification = await recentRun("ci.yml", branch, commit);
+		let qualification = await recentRun("ci.yml", undefined, commit);
+		if (qualification && !values.rehearse) {
+			if (qualification.status !== "completed") await watch(qualification);
+			else if (qualification.conclusion !== "success") {
+				await ask(
+					`Resume failed qualification jobs in ${qualification.html_url}? Passed jobs keep their artifacts and are not rerun.`,
+				);
+				run("gh", ["run", "rerun", String(qualification.id), "--repo", repository, "--failed"]);
+				await watch({ ...qualification, status: "queued" });
+			}
+			qualification = api(`repos/${repository}/actions/runs/${qualification.id}`);
+		}
 		if (qualification?.conclusion !== "success" || values.rehearse) {
 			await ask(`Qualify ${branch} at ${commit} locally before pushing. Successful qualification is reused on retries.`);
 			run(process.execPath, ["scripts/release-candidate.mjs", "qualify"]);

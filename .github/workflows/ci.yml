@@ -34,6 +34,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
+      - name: Use runner scratch for temporary files
+        run: echo "TMPDIR=$RUNNER_TEMP" >> "$GITHUB_ENV"
       - name: Require the exact candidate
         env:
           CANDIDATE_SHA: ${{ inputs.sha }}
@@ -66,9 +68,16 @@ jobs:
   ci:
     name: ci (22)
     needs: prepare
+    if: ${{ always() }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
+      - name: Use runner scratch for temporary files
+        run: echo "TMPDIR=$RUNNER_TEMP" >> "$GITHUB_ENV"
+      - name: Require successful preparation
+        env:
+          PREPARE_RESULT: ${{ needs.prepare.result }}
+        run: test "$PREPARE_RESULT" = success
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
           persist-credentials: false
@@ -98,9 +107,16 @@ jobs:
   runtime-compatibility:
     name: ci (24)
     needs: prepare
+    if: ${{ always() }}
     runs-on: ubuntu-latest
     timeout-minutes: 3
     steps:
+      - name: Use runner scratch for temporary files
+        run: echo "TMPDIR=$RUNNER_TEMP" >> "$GITHUB_ENV"
+      - name: Require successful preparation
+        env:
+          PREPARE_RESULT: ${{ needs.prepare.result }}
+        run: test "$PREPARE_RESULT" = success
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
           persist-credentials: false
@@ -130,6 +146,8 @@ jobs:
       matrix:
         os: [windows-latest, macos-latest]
     steps:
+      - name: Use runner scratch for temporary files
+        run: echo "TMPDIR=$RUNNER_TEMP" >> "$GITHUB_ENV"
       - name: Preserve committed bytes on Windows
         if: ${{ runner.os == 'Windows' }}
         run: git config --global core.autocrlf false
@@ -149,12 +167,41 @@ jobs:
           CANDIDATE_DIRECTORY: ${{ runner.temp }}/candidate
         run: node scripts/release-candidate.mjs smoke --directory "$CANDIDATE_DIRECTORY" --sha "$CANDIDATE_SHA"
 
-  rehearsal:
+  rehearsal-preflight:
     if: ${{ inputs.rehearse }}
     needs: [ci, runtime-compatibility]
     runs-on: ubuntu-latest
     timeout-minutes: 2
     steps:
+      - name: Use runner scratch for temporary files
+        run: echo "TMPDIR=$RUNNER_TEMP" >> "$GITHUB_ENV"
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version: 24
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: '*-${{ inputs.sha }}'
+          merge-multiple: true
+          path: ${{ runner.temp }}/candidate
+      - name: Verify the staged publication receipt
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CANDIDATE_SHA: ${{ inputs.sha }}
+          VERSION_BRANCH: ${{ inputs.version_branch }}
+        run: node scripts/release-publish.mjs rehearse-preflight --directory "$RUNNER_TEMP/candidate" --sha "$CANDIDATE_SHA" --run "$GITHUB_RUN_ID" --branch "$VERSION_BRANCH"
+
+  rehearsal:
+    if: ${{ inputs.rehearse }}
+    needs: rehearsal-preflight
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Use runner scratch for temporary files
+        run: echo "TMPDIR=$RUNNER_TEMP" >> "$GITHUB_ENV"
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
           fetch-depth: 0

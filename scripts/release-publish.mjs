@@ -37,7 +37,7 @@ export function api(path, method = "GET", body) {
 export async function qualification(runId, commit, { inProgress = false } = {}) {
 	if (!/^\d+$/u.test(String(runId))) throw new Error("A qualification run ID is required.");
 	const record = api(`repos/${repository}/actions/runs/${runId}`);
-	const jobs = api(`repos/${repository}/actions/runs/${runId}/jobs?per_page=100`).jobs;
+	const jobs = api(`repos/${repository}/actions/runs/${runId}/jobs?filter=all&per_page=100`).jobs;
 	verifyQualificationRecord(record, jobs, commit, inProgress);
 	return record;
 }
@@ -51,25 +51,38 @@ export function verifyQualificationRecord(record, jobs, commit, inProgress = fal
 	)
 		throw new Error("Qualification must be a successful manual ci.yml run on this exact commit.");
 	for (const name of ["prepare", "ci (22)", "ci (24)"]) {
-		if (!jobs.some((job) => job.name === name && job.conclusion === "success"))
+		if ([...jobs].sort((a, b) => b.id - a.id).find((job) => job.name === name)?.conclusion !== "success")
 			throw new Error(`Qualification gate did not pass: ${name}`);
 	}
 }
 
-export function rehearseBytes(directory, commit, branch) {
+export async function rehearseBytes(directory, commit, branch) {
 	const receipt = verifyCandidate(directory, commit);
 	const plan = publicationPlan(receipt, branch);
-	const dryRun = JSON.parse(
-		run("npm", ["publish", receipt.tarball, "--dry-run", "--json", "--access", "public", "--tag", plan.channel], {
-			encoding: "utf8",
-			stdio: "pipe",
-			maxBuffer: 64 * 1024 * 1024,
-		}),
-	);
+	let dryRun;
+	try {
+		dryRun = JSON.parse(
+			run("npm", ["publish", receipt.tarball, "--dry-run", "--json", "--access", "public", "--tag", plan.channel], {
+				encoding: "utf8",
+				stdio: "pipe",
+				maxBuffer: 64 * 1024 * 1024,
+			}),
+		);
+	} catch (error) {
+		if (
+			!String(error.stderr).includes(`You cannot publish over the previously published versions: ${receipt.version}.`) ||
+			!(await registryVersion(receipt.name, receipt.version))
+		)
+			throw error;
+		console.log(
+			`npm dry-run correctly refuses the already published ${receipt.version}; no version bump or public write was made.`,
+		);
+	}
 	if (
-		dryRun.name !== receipt.name ||
-		dryRun.version !== receipt.version ||
-		dryRun.integrity !== integrity(receipt.tarball)
+		dryRun &&
+		(dryRun.name !== receipt.name ||
+			dryRun.version !== receipt.version ||
+			dryRun.integrity !== integrity(receipt.tarball))
 	)
 		throw new Error("npm dry-run differs from the qualified archive.");
 	verifyCandidate(directory, commit);
@@ -223,6 +236,7 @@ async function verifyPublic(receipt, plan) {
 	if (!release || release.draft || tagCommit(plan.tag) !== receipt.commit)
 		throw new Error("GitHub release/tag is not public at the qualified commit.");
 	verifyAssets(release, receipt);
+	if (release.prerelease !== (plan.channel === "beta")) throw new Error("GitHub release channel differs from npm.");
 	if (plan.channel === "latest" && api(`repos/${repository}/releases/latest`).tag_name !== plan.tag)
 		throw new Error("GitHub Latest points to another release.");
 	if (plan.channel === "latest") {
@@ -336,10 +350,12 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
 		if (!values.sha || !values.run || !values.branch) throw new Error("Supply --sha, --run, and --branch.");
 		if (positionals[0] === "publish") await publish(directory, values.sha, values.run, values.branch);
 		else if (positionals[0] === "verify") await preflight(directory, values.sha, values.run, values.branch);
+		else if (positionals[0] === "rehearse-preflight")
+			await preflight(directory, values.sha, values.run, values.branch, true);
 		else if (positionals[0] === "rehearse") {
 			const started = performance.now();
 			const result = await preflight(directory, values.sha, values.run, values.branch, true);
-			rehearseBytes(directory, values.sha, values.branch);
+			await rehearseBytes(directory, values.sha, values.branch);
 			console.log(`REHEARSAL_OK ${JSON.stringify(result.plan)} elapsedMs=${Math.round(performance.now() - started)}`);
 		} else
 			throw new Error(
