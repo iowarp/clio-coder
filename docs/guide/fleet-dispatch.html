@@ -34,7 +34,7 @@
 <a href="/docs/guide/troubleshooting.html">Troubleshooting</a>
 <a href="/docs/guide/configuration-reference.html">Configuration essentials</a>
 <a href="/docs/guide/environment-variables.html">Environment essentials</a></details></div></div></details></aside>
-  <article class="doc-article"><div class="doc-toolbar"><p id="doc-path">Workers and fleets</p><a id="doc-github" href="https://github.com/iowarp/clio-coder/blob/8512bcb09ef3b5d647807b65613522a567a7a108/docs/guide/fleet-dispatch.md">Read the full guide <span class="arrow arrow-diagonal" aria-hidden="true">↗</span></a></div><div class="doc" id="doc" data-doc="guide/fleet-dispatch.md"><details class="doc-toc-mobile"><summary>On this page</summary><a href="#delegate-a-focused-task">Delegate a focused task</a>
+  <article class="doc-article"><div class="doc-toolbar"><p id="doc-path">Workers and fleets</p><a id="doc-github" href="https://github.com/iowarp/clio-coder/blob/v0.6.1/docs/guide/fleet-dispatch.md">Read the full guide <span class="arrow arrow-diagonal" aria-hidden="true">↗</span></a></div><div class="doc" id="doc" data-doc="guide/fleet-dispatch.md"><details class="doc-toc-mobile"><summary>On this page</summary><a href="#delegate-a-focused-task">Delegate a focused task</a>
 <a href="#follow-the-work">Follow the work</a>
 <a href="#permissions-sandbox-and-merges">Permissions, sandbox, and merges</a>
 <a href="#compose-a-fleet-when-you-need-one">Compose a fleet when you need one</a></details><h1 id="workers-and-fleets">Workers and fleets</h1>
@@ -56,7 +56,7 @@ clio-coder run &quot;Inspect the parser&#39;s test coverage and report gaps. Do 
 clio-coder fleet status</code></pre></div>
 <p>Fleet recipes combine workers into workflows such as a review gate, competing solutions, or a council. Inspect the recipe and approval preview before starting one. Remote native workers use SSH and need the same Clio version and the project at the same absolute path on each node. Add a node with <code>clio-coder fleet nodes add</code>, or in the terminal under <code>/settings fleet</code>. A node receives work only after <code>clio-coder fleet nodes test &lt;id&gt; --record</code> passes for this project; the record lasts one day. Adding a node moves nothing by itself: unpinned work stays local.</p>
 <p>Start locally with one worker. Use the full guide for remote-node configuration, capacity, recipe contracts, and failure recovery.</p>
-</div><div class="doc-end"><a id="doc-snapshot-source" href="https://github.com/iowarp/clio-coder/tree/8512bcb09ef3b5d647807b65613522a567a7a108" data-source-version="0.6.1" data-source-ref="8512bcb09ef3b5d647807b65613522a567a7a108" data-source-commit="8512bcb09ef3b5d647807b65613522a567a7a108">Guide to v0.6.1</a><a href="https://github.com/iowarp/clio-coder/issues">Suggest an improvement <span class="arrow arrow-diagonal" aria-hidden="true">↗</span></a></div></article>
+</div><div class="doc-end"><a id="doc-snapshot-source" href="https://github.com/iowarp/clio-coder/tree/v0.6.1" data-source-version="0.6.1" data-source-ref="v0.6.1" data-source-commit="eb11be1857846bbd2234b60524f346e6d9ef7d6c">Guide to v0.6.1</a><a href="https://github.com/iowarp/clio-coder/issues">Suggest an improvement <span class="arrow arrow-diagonal" aria-hidden="true">↗</span></a></div></article>
   <aside class="docs-toc" aria-label="On this page"><h2>On this page</h2><a href="#delegate-a-focused-task">Delegate a focused task</a>
 <a href="#follow-the-work">Follow the work</a>
 <a href="#permissions-sandbox-and-merges">Permissions, sandbox, and merges</a>

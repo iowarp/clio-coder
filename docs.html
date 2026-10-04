@@ -34,7 +34,7 @@
 <a href="/docs/guide/troubleshooting.html">Troubleshooting</a>
 <a href="/docs/guide/configuration-reference.html">Configuration essentials</a>
 <a href="/docs/guide/environment-variables.html">Environment essentials</a></details></div></div></details></aside>
-  <article class="doc-article"><div class="doc-toolbar"><p id="doc-path">Install Clio Coder</p><a id="doc-github" href="https://github.com/iowarp/clio-coder/blob/8512bcb09ef3b5d647807b65613522a567a7a108/README.md">Read the full guide <span class="arrow arrow-diagonal" aria-hidden="true">↗</span></a></div><div class="doc" id="doc" data-doc="README.md"><details class="doc-toc-mobile"><summary>On this page</summary><a href="#install">Install</a>
+  <article class="doc-article"><div class="doc-toolbar"><p id="doc-path">Install Clio Coder</p><a id="doc-github" href="https://github.com/iowarp/clio-coder/blob/v0.6.1/README.md">Read the full guide <span class="arrow arrow-diagonal" aria-hidden="true">↗</span></a></div><div class="doc" id="doc" data-doc="README.md"><details class="doc-toc-mobile"><summary>On this page</summary><a href="#install">Install</a>
 <a href="#confirm-the-installation">Confirm the installation</a>
 <a href="#open-a-project">Open a project</a>
 <a href="#update-roll-back-and-remove">Update, roll back and remove</a>
@@ -52,7 +52,7 @@
 <div class="code-block"><p class="code-label eyebrow">Shell</p><pre tabindex="0" aria-label="Code example 2"><code class="language-sh">curl -fsSL https://coder.iowarp.ai/install.sh | sh -s -- --modify-path</code></pre></div>
 <p>On a cluster, read <a href="/docs/guide/hpc-clusters.html">Install on a cluster</a>.</p>
 </div><div class="tab-panel" id="tab-powershell" data-tab="PowerShell" data-tab-platform="windows"><h3 class="tab-label" id="powershell">PowerShell</h3>
-<p>Native Windows is best effort and needs Clio Coder 0.6.0 or newer; a complete native install has not been verified end to end. The install needs no administrator rights. WSL with the macOS, Linux and WSL command is the better-tested route.</p>
+<p>Native Windows is best effort and needs Clio Coder 0.6.1 or newer; the 0.6.0 installer stops at activation there. Install, repair, rollback and uninstall were checked by hand on one x64 machine with PowerShell 5.1, and the native install is not part of the automated release checks. The install needs no administrator rights. WSL with the macOS, Linux and WSL command is the better-tested route.</p>
 <div class="code-block"><p class="code-label eyebrow">PowerShell</p><pre tabindex="0" aria-label="Code example 3"><code class="language-powershell">irm https://coder.iowarp.ai/install.ps1 | iex</code></pre></div>
 <p>PowerShell shows <code>PS C:\&gt;</code> at the prompt. If <code>curl ... | sh</code> reports that <code>sh</code> is not recognized, you are in Windows rather than WSL.</p>
 </div><div class="tab-panel" id="tab-cmd" data-tab="CMD" data-tab-platform="windows"><h3 class="tab-label" id="cmd">CMD</h3>
@@ -106,7 +106,7 @@ clio-coder</code></pre></div>
 <td><code>bun remove -g @iowarp/clio-coder</code></td>
 </tr>
 </tbody></table></div>
-<p>The installer keeps the previous version. <code>clio-coder upgrade --rollback</code> makes it current again. An install made with an exact <code>--version</code> stays pinned to that version until you run the installer with <code>--version latest</code>.</p>
+<p>The installer keeps the previous version. <code>clio-coder upgrade --rollback</code> makes it current again. An install made with an exact <code>--version</code> stays pinned to that version until you run the installer with <code>--version latest</code>. If an upgrade is refused over a setting the installed version cannot repair, the installer prints the new version&#39;s own <code>doctor --fix</code> command to run. The 0.6.1 upgrade, rollback and uninstall were checked on WSL and native Windows, and were not checked by hand on macOS.</p>
 <p><code>clio-coder uninstall</code> removes your settings, credentials, sessions and caches, and the desktop app&#39;s background service, so it previews what it will delete and asks first. Add <code>--keep-config</code> to keep settings and credentials, or <code>--dry-run</code> to only look. Removing the program with npm or bun keeps those files. Project <code>.clio-coder/</code> directories are never removed.</p>
 <p>If coder.iowarp.ai is unreachable, the latest GitHub release carries the same script from 0.6.0 on, at <code>https://github.com/iowarp/clio-coder/releases/latest/download/install.sh</code>.</p>
 <h2 id="give-clio-a-useful-first-task">Give Clio a useful first task</h2>
@@ -125,7 +125,7 @@ clio-coder</code></pre></div>
 </ul>
 <h2 id="when-you-need-more-detail">When you need more detail</h2>
 <p>These web guides cover the essentials. Detailed documentation ships with Clio Coder; ask Clio to look up its bundled guide for the feature you&#39;re using. Each page also links to its full source guide.</p>
-</div><div class="doc-end"><a id="doc-snapshot-source" href="https://github.com/iowarp/clio-coder/tree/8512bcb09ef3b5d647807b65613522a567a7a108" data-source-version="0.6.1" data-source-ref="8512bcb09ef3b5d647807b65613522a567a7a108" data-source-commit="8512bcb09ef3b5d647807b65613522a567a7a108">Guide to v0.6.1</a><a href="https://github.com/iowarp/clio-coder/issues">Suggest an improvement <span class="arrow arrow-diagonal" aria-hidden="true">↗</span></a></div></article>
+</div><div class="doc-end"><a id="doc-snapshot-source" href="https://github.com/iowarp/clio-coder/tree/v0.6.1" data-source-version="0.6.1" data-source-ref="v0.6.1" data-source-commit="eb11be1857846bbd2234b60524f346e6d9ef7d6c">Guide to v0.6.1</a><a href="https://github.com/iowarp/clio-coder/issues">Suggest an improvement <span class="arrow arrow-diagonal" aria-hidden="true">↗</span></a></div></article>
   <aside class="docs-toc" aria-label="On this page"><h2>On this page</h2><a href="#install">Install</a>
 <a href="#confirm-the-installation">Confirm the installation</a>
 <a href="#open-a-project">Open a project</a>

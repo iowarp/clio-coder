@@ -34,7 +34,7 @@
 <a href="/docs/guide/troubleshooting.html">Troubleshooting</a>
 <a href="/docs/guide/configuration-reference.html">Configuration essentials</a>
 <a href="/docs/guide/environment-variables.html">Environment essentials</a></details></div></div></details></aside>
-  <article class="doc-article"><div class="doc-toolbar"><p id="doc-path">Slurm workflows</p><a id="doc-github" href="https://github.com/iowarp/clio-coder/blob/8512bcb09ef3b5d647807b65613522a567a7a108/docs/guide/slurm.md">Read the full guide <span class="arrow arrow-diagonal" aria-hidden="true">↗</span></a></div><div class="doc" id="doc" data-doc="guide/slurm.md"><details class="doc-toc-mobile"><summary>On this page</summary><a href="#work-with-a-scheduler">Work with a scheduler</a>
+  <article class="doc-article"><div class="doc-toolbar"><p id="doc-path">Slurm workflows</p><a id="doc-github" href="https://github.com/iowarp/clio-coder/blob/v0.6.1/docs/guide/slurm.md">Read the full guide <span class="arrow arrow-diagonal" aria-hidden="true">↗</span></a></div><div class="doc" id="doc" data-doc="guide/slurm.md"><details class="doc-toc-mobile"><summary>On this page</summary><a href="#work-with-a-scheduler">Work with a scheduler</a>
 <a href="#use-a-job-workflow">Use a job workflow</a>
 <a href="#choose-approvals-deliberately">Choose approvals deliberately</a></details><h1 id="slurm-workflows">Slurm workflows</h1>
 <p>Connect Clio to supported Slurm tools for cluster work.</p>
@@ -50,7 +50,7 @@
 <h2 id="choose-approvals-deliberately">Choose approvals deliberately</h2>
 <p>With the server declared as <code>slurm</code>, Clio classifies each tool. Listing, describing, and cluster reads run without asking. Submission and cancellation always ask for approval, in <code>yolo</code> too, and a headless run denies those asks.</p>
 <p>A <code>toolActionClasses</code> entry in <code>mcp.yaml</code> can reclassify one tool, but submission and cancellation keep their confirmation. Review the full guide before changing a classification or enabling unattended execution. For small local changes, begin with <a href="/docs/guide/tool-usage.html">ordinary project checks</a>.</p>
-</div><div class="doc-end"><a id="doc-snapshot-source" href="https://github.com/iowarp/clio-coder/tree/8512bcb09ef3b5d647807b65613522a567a7a108" data-source-version="0.6.1" data-source-ref="8512bcb09ef3b5d647807b65613522a567a7a108" data-source-commit="8512bcb09ef3b5d647807b65613522a567a7a108">Guide to v0.6.1</a><a href="https://github.com/iowarp/clio-coder/issues">Suggest an improvement <span class="arrow arrow-diagonal" aria-hidden="true">↗</span></a></div></article>
+</div><div class="doc-end"><a id="doc-snapshot-source" href="https://github.com/iowarp/clio-coder/tree/v0.6.1" data-source-version="0.6.1" data-source-ref="v0.6.1" data-source-commit="eb11be1857846bbd2234b60524f346e6d9ef7d6c">Guide to v0.6.1</a><a href="https://github.com/iowarp/clio-coder/issues">Suggest an improvement <span class="arrow arrow-diagonal" aria-hidden="true">↗</span></a></div></article>
   <aside class="docs-toc" aria-label="On this page"><h2>On this page</h2><a href="#work-with-a-scheduler">Work with a scheduler</a>
 <a href="#use-a-job-workflow">Use a job workflow</a>
 <a href="#choose-approvals-deliberately">Choose approvals deliberately</a></aside>
