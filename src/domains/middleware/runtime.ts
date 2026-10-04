@@ -331,7 +331,12 @@ export function cloneMiddlewareEffect(effect: MiddlewareEffect): MiddlewareEffec
 			return cloned;
 		}
 		case "block_tool":
-			return { kind: "block_tool", reason: effect.reason, severity: effect.severity };
+			return {
+				kind: "block_tool",
+				reason: effect.reason,
+				severity: effect.severity,
+				...(effect.redundantRepeat === true ? { redundantRepeat: true } : {}),
+			};
 		case "protect_path":
 			return { kind: "protect_path", path: effect.path, reason: effect.reason };
 		case "request_continuation": {

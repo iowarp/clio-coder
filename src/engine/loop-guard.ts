@@ -1007,7 +1007,10 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 		repeatCount: number,
 		baseReason: string,
 		now: number,
+		/** The identical call already succeeded this run; see `block_tool.redundantRepeat`. */
+		redundantRepeat = false,
 	): ReadonlyArray<MiddlewareEffect> => {
+		const marker = redundantRepeat ? ({ redundantRepeat: true } as const) : {};
 		lastBlockedCallByTurn.set(turnKey, callIdentity(tool, input.toolArgs));
 		const blocksThisTurn = bumpTurnBlocks(turnKey);
 		const reachedBudget = blocksThisTurn >= budget;
@@ -1020,7 +1023,7 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 			enterLockout(input, turnKey, { tool, repeatCount, blocksThisTurn });
 			options.onSynthesisLockout?.();
 			emitLoopBlocked(input, { tool, repeatCount, blocksThisTurn, disposition: "lockout" }, now);
-			return [{ kind: "block_tool", reason: synthesisLockoutDirective(), severity: "hard-block" }];
+			return [{ kind: "block_tool", reason: synthesisLockoutDirective(), severity: "hard-block", ...marker }];
 		}
 		// Below budget, or a surface without the lockout (workers): the
 		// existing per-block behavior. Reaching the budget without a lockout
@@ -1029,7 +1032,7 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 		const reason = reachedBudget
 			? `${baseReason} Loop budget exhausted (${blocksThisTurn} blocks this turn); the agent is being stopped.`
 			: baseReason;
-		return [{ kind: "block_tool", reason, severity: "hard-block" }];
+		return [{ kind: "block_tool", reason, severity: "hard-block", ...marker }];
 	};
 
 	const readCoverageEffects = (input: MiddlewareHookInput): ReadonlyArray<MiddlewareEffect> => {
@@ -1554,6 +1557,7 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 						verdict.count,
 						loopBlockBaseReason(tool, verdict.count, priorSuccesses),
 						now,
+						priorSuccesses > 0,
 					);
 				}
 

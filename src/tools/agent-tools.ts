@@ -102,6 +102,8 @@ export interface ToolFinishEvent {
 	 * as it always has; this says the block was a refused ask.
 	 */
 	deniedPark?: true;
+	/** The guard withheld a duplicate of a call that already succeeded (`RegistryVerdict.redundantRepeat`). */
+	redundantRepeat?: true;
 	ruleId?: string;
 	reasonCode?: string;
 	policySource?: string;
@@ -213,6 +215,7 @@ async function runValidatedToolCall(input: RunValidatedToolCallInput): Promise<W
 			reason: verdict.reason,
 			...(verdict.kind === "blocked" ? { decision: verdict.decision } : {}),
 			...(verdict.kind === "blocked" && verdict.deniedPark === true ? { deniedPark: true } : {}),
+			...(verdict.kind === "blocked" && verdict.redundantRepeat === true ? { redundantRepeat: true } : {}),
 		});
 		// The model sees only this thrown message. The short verdict reason
 		// starves the next turn of the policy's why and how-to-recover, so
@@ -279,6 +282,7 @@ function emitFinish(
 		terminate?: boolean;
 		decision?: SafetyDecision;
 		deniedPark?: true;
+		redundantRepeat?: true;
 		skillActivation?: SkillActivation;
 		toolCallId?: string;
 	},
@@ -294,6 +298,7 @@ function emitFinish(
 	if (extra?.reason !== undefined) event.reason = extra.reason;
 	if (extra?.terminate === true) event.terminate = true;
 	if (extra?.deniedPark === true) event.deniedPark = true;
+	if (extra?.redundantRepeat === true) event.redundantRepeat = true;
 	if (extra?.decision !== undefined) {
 		event.actionClass = extra.decision.classification.actionClass;
 		const permissionWasRequired =

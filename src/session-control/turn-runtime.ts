@@ -224,6 +224,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 			| "actionClass"
 			| "decision"
 			| "deniedPark"
+			| "redundantRepeat"
 			| "ruleId"
 			| "reasonCode"
 			| "policySource"
@@ -239,6 +240,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 				...(event.actionClass === undefined ? {} : { actionClass: event.actionClass }),
 				...(event.decision === undefined ? {} : { decision: event.decision }),
 				...(event.deniedPark === true ? { deniedPark: true } : {}),
+				...(event.redundantRepeat === true ? { redundantRepeat: true } : {}),
 				...(event.ruleId === undefined ? {} : { ruleId: event.ruleId }),
 				...(event.reasonCode === undefined ? {} : { reasonCode: event.reasonCode }),
 				...(event.policySource === undefined ? {} : { policySource: event.policySource }),
@@ -958,6 +960,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 								...(admission.actionClass === undefined ? {} : { actionClass: admission.actionClass }),
 								...(admission.decision === undefined ? {} : { decision: admission.decision }),
 								...(admission.deniedPark === true ? { deniedPark: true } : {}),
+								...(admission.redundantRepeat === true ? { redundantRepeat: true } : {}),
 								...(admission.ruleId === undefined ? {} : { ruleId: admission.ruleId }),
 								...(admission.reasonCode === undefined ? {} : { reasonCode: admission.reasonCode }),
 								...(admission.policySource === undefined ? {} : { policySource: admission.policySource }),

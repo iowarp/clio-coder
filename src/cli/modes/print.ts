@@ -370,6 +370,7 @@ function recordToolEnd(stats: HeadlessMainAgentReceiptStats, event: ChatLoopEven
 		policySource?: unknown;
 		blockReason?: unknown;
 		deniedPark?: unknown;
+		redundantRepeat?: unknown;
 	};
 	const decision = (event as { decision?: unknown }).decision;
 	// A call that parked for approval and was denied because a headless run has
@@ -402,8 +403,20 @@ function recordToolEnd(stats: HeadlessMainAgentReceiptStats, event: ChatLoopEven
 	// call's tool name is `gateway` rather than `artifact`.
 	const terminating = (event.result as { terminate?: unknown } | undefined)?.terminate === true;
 	const action = typeof actionClass === "string" ? actionClass : "unknown";
+	// A withheld duplicate of a read that already succeeded adds nothing
+	// unresolved: its result is in the conversation, and the guard's own advice
+	// is to answer from it. Only a guard block of the read class is excused, on
+	// the registry's typed flag and never for a refused ask. A repeated command
+	// or write is still an unmet attempt, an earlier unresolved read stays
+	// unresolved, and the call is counted as blocked everywhere else here.
+	const withheldDuplicateRead =
+		outcome === "blocked" &&
+		detail.redundantRepeat === true &&
+		detail.reasonCode === "guard_block" &&
+		detail.deniedPark !== true &&
+		actionClass === "read";
 	if (outcome === "blocked" || decision === "blocked") {
-		stats.unresolvedBlocks.add(action);
+		if (!withheldDuplicateRead) stats.unresolvedBlocks.add(action);
 	} else if (outcome === "ok" || (outcome === undefined && !event.isError)) {
 		const capability =
 			tool === ToolNames.Gateway

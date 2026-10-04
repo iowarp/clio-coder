@@ -117,14 +117,17 @@ function readBlockTool(
 	path: string,
 	issues: MiddlewareValidationIssue[],
 ): MiddlewareEffect | null {
-	rejectUnexpectedFields(record, path, ["kind", "reason", "severity"], issues);
+	rejectUnexpectedFields(record, path, ["kind", "reason", "severity", "redundantRepeat"], issues);
+	if (record.redundantRepeat !== undefined && record.redundantRepeat !== true) {
+		issues.push({ path: `${path}.redundantRepeat`, message: "expected true" });
+	}
 	const reason = readRequiredString(record, `${path}.reason`, issues);
 	const severity = readRequiredString(record, `${path}.severity`, issues);
 	if (severity !== null && severity !== "hard-block") {
 		issues.push({ path: `${path}.severity`, message: "expected hard-block" });
 	}
 	if (reason === null || severity !== "hard-block") return null;
-	return { kind: "block_tool", reason, severity };
+	return { kind: "block_tool", reason, severity, ...(record.redundantRepeat === true ? { redundantRepeat: true } : {}) };
 }
 
 function readProtectPath(

@@ -657,6 +657,8 @@ export type RegistryVerdict =
 			 * repeated denied call.
 			 */
 			deniedPark?: true;
+			/** The guard withheld a duplicate of a call that already succeeded (`block_tool.redundantRepeat`). */
+			redundantRepeat?: true;
 	  }
 	| { kind: "not_visible"; reason: string };
 
@@ -759,7 +761,7 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 					reasonCode: GUARD_BLOCK_REASON_CODE,
 					reasons: [block.reason],
 				});
-				return verdict;
+				return block.redundantRepeat === true ? { ...verdict, redundantRepeat: true } : verdict;
 			}
 			try {
 				const preparedArgs = prepareToolArgs(spec, call.args ?? {});
@@ -1634,6 +1636,7 @@ interface NestedBlockedMarker {
 	reason: string;
 	decision: SafetyDecision;
 	deniedPark?: true;
+	redundantRepeat?: true;
 }
 
 /**
@@ -1647,6 +1650,7 @@ export function nestedBlockedResult(verdict: Extract<RegistryVerdict, { kind: "b
 		reason: verdict.reason,
 		decision: verdict.decision,
 		...(verdict.deniedPark === true ? { deniedPark: true } : {}),
+		...(verdict.redundantRepeat === true ? { redundantRepeat: true } : {}),
 	};
 	return { kind: "error", message: verdict.reason, details: { [NESTED_BLOCKED_DETAIL]: marker } };
 }
@@ -1655,7 +1659,7 @@ function nestedBlockedVerdict(result: ToolResult): Extract<RegistryVerdict, { ki
 	if (result.kind !== "error") return null;
 	const marker = result.details?.[NESTED_BLOCKED_DETAIL];
 	if (typeof marker !== "object" || marker === null) return null;
-	const { reason, decision, deniedPark } = marker as Partial<NestedBlockedMarker>;
+	const { reason, decision, deniedPark, redundantRepeat } = marker as Partial<NestedBlockedMarker>;
 	if (
 		typeof reason !== "string" ||
 		typeof decision !== "object" ||
@@ -1665,7 +1669,13 @@ function nestedBlockedVerdict(result: ToolResult): Extract<RegistryVerdict, { ki
 	) {
 		return null;
 	}
-	return { kind: "blocked", reason, decision, ...(deniedPark === true ? { deniedPark: true } : {}) };
+	return {
+		kind: "blocked",
+		reason,
+		decision,
+		...(deniedPark === true ? { deniedPark: true } : {}),
+		...(redundantRepeat === true ? { redundantRepeat: true } : {}),
+	};
 }
 
 /**

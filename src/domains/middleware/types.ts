@@ -49,7 +49,18 @@ export type MiddlewareEffect =
 			audience?: "model";
 	  }
 	| { kind: "annotate_tool_result"; message: string; severity?: MiddlewareAnnotationSeverity }
-	| { kind: "block_tool"; reason: string; severity: "hard-block" }
+	| {
+			kind: "block_tool";
+			reason: string;
+			severity: "hard-block";
+			/**
+			 * The blocked call repeats, with identical arguments, one that already
+			 * succeeded this run, so its result is already in the conversation.
+			 * Set by the loop guard only. A receipt reads this, not the reason
+			 * text, to tell a withheld duplicate from a refused requirement.
+			 */
+			redundantRepeat?: true;
+	  }
 	| { kind: "protect_path"; path: string; reason: string }
 	/**
 	 * `note` is what the nudge asked, in plain words, for the footer line that
