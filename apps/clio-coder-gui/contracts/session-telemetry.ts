@@ -90,9 +90,25 @@ export const ProjectTrust = Type.Object(
 
 export const ActiveEggs = Type.Array(Type.Literal("duck"), { maxItems: 1 });
 
+/** What Clio's always-on memory guardian is doing, as she last pushed it. */
+export const MemoryGuardian = Type.Object(
+	{
+		state: Type.Union([
+			Type.Literal("off"),
+			Type.Literal("idle"),
+			Type.Literal("reviewing"),
+			Type.Literal("waiting-capacity"),
+			Type.Literal("unavailable"),
+		]),
+	},
+	closed,
+);
+export type MemoryGuardian = Static<typeof MemoryGuardian>;
+
 export const SessionTelemetry = Type.Object(
 	{
 		eggs: Type.Optional(ActiveEggs),
+		memory: Type.Optional(MemoryGuardian),
 		usage: Type.Optional(LiveUsage),
 		plan: Type.Optional(SessionPlan),
 		workspace: Type.Optional(SessionWorkspace),

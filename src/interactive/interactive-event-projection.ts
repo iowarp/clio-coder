@@ -276,6 +276,10 @@ export function createInteractiveEventProjection(deps: InteractiveEventProjectio
 			deps.refreshFooter();
 			deps.requestRender();
 		}),
+		deps.bus.on(BusChannels.MemoryGuardianChanged, () => {
+			deps.refreshFooter();
+			deps.requestRender();
+		}),
 		deps.bus.on(BusChannels.DispatchScopeNotice, (payload) => {
 			const notice = readDispatchScopeNotice(payload);
 			if (notice === null) return;

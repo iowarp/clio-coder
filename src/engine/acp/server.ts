@@ -6,6 +6,7 @@ import {
 	ACP_MAX_MODEL_ID_BYTES,
 	ACP_MAX_TARGET_ID_BYTES,
 	ACP_MAX_TARGETS,
+	ACP_MEMORY_META_KEY,
 	ACP_NOTICE_META_KEY,
 	ACP_SAFE_SETTINGS_KEYS,
 	ACP_SESSION_INTERRUPT_METHOD,
@@ -3725,6 +3726,17 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 				options.transport.notify("session/update", {
 					sessionId,
 					update: { sessionUpdate: "session_info_update", _meta: { [ACP_EGGS_META_KEY]: payload.active } },
+				});
+			}),
+			bus.on(BusChannels.MemoryGuardianChanged, (payload) => {
+				const sessionId = activeSessionId ?? boundSessionId;
+				if (!handshake.initialized || sessionId === null || payload.sessionId !== sessionId) return;
+				options.transport.notify("session/update", {
+					sessionId,
+					update: {
+						sessionUpdate: "session_info_update",
+						_meta: { [ACP_MEMORY_META_KEY]: { state: payload.state } },
+					},
 				});
 			}),
 			bus.on(BusChannels.LoopBlocked, (payload: LoopBlockedPayload) => {

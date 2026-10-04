@@ -41,6 +41,13 @@ export interface TaskMemoryTrajectoryStep {
 /** Admission changed while a client prepared; no inference request was sent. */
 export class TaskMemoryEndpointBusyError extends Error {}
 
+/**
+ * A foreground request claimed the shared endpoint slot this step held, so the
+ * step's transport was aborted. The step yields and runs again once the
+ * endpoint has room; it is neither a route failure nor a deadline.
+ */
+export class TaskMemoryEndpointPreemptedError extends Error {}
+
 /** Restricted context cannot reach the selected background model. */
 export class TaskMemoryInformationFlowBlockedError extends Error {}
 
@@ -155,6 +162,8 @@ export type TaskMemoryPolicyReason =
 	 * A shared gateway URL alone does not establish a one-slot capacity bound.
 	 */
 	| "endpoint_busy"
+	/** A foreground request preempted the step's endpoint slot; it runs again when there is room. */
+	| "endpoint_preempted"
 	/** The model client threw: unreachable route, auth failure, malformed request. */
 	| "client_error"
 	/** Information-flow admission refused the request before inference. */
@@ -236,6 +245,8 @@ export interface TaskMemoryPolicyInput {
 		 * in `retiredLessonIds` and never touches the bank.
 		 */
 		keptLessons?: ReadonlyArray<{ id: string; text: string }>;
+		/** Rendering budget for `trajectoryText`; defaults to the maintenance trajectory budget. */
+		trajectoryMaxChars?: number;
 	};
 }
 
@@ -265,7 +276,7 @@ export interface TaskMemoryPolicyResult {
 type TaskMemoryOperation =
 	| { op: "update_status"; content: string }
 	| { op: "save_knowledge"; content: string; id?: string }
-	| { op: "save_lesson"; content: string; id?: string; command?: string }
+	| { op: "save_lesson"; content: string; id?: string; command?: string; source?: string; quote?: string }
 	| { op: "save_procedural"; content: string; id?: string }
 	| { op: "delete"; id: string };
 
@@ -403,7 +414,9 @@ export async function runTaskMemoryPolicy(
 					? []
 					: ["", "Lessons already kept for this repository:", ...keptLessons.map((item) => `- [${item.id}] ${item.text}`)]),
 			].join("\n"),
-			trajectory: input.pass?.trajectoryText.slice(0, TRAJECTORY_PROMPT_MAX_CHARS) ?? renderTrajectory(input.trajectory),
+			trajectory:
+				input.pass?.trajectoryText.slice(0, positiveInteger(input.pass.trajectoryMaxChars, TRAJECTORY_PROMPT_MAX_CHARS)) ??
+				renderTrajectory(input.trajectory),
 		});
 		const completion = client
 			.complete({
@@ -504,6 +517,7 @@ export async function runTaskMemoryPolicy(
 		return settle("injected", "intervened", { ...counts, reminder });
 	} catch (error) {
 		if (error instanceof TaskMemoryEndpointBusyError) return settle("silent", "endpoint_busy");
+		if (error instanceof TaskMemoryEndpointPreemptedError) return settle("silent", "endpoint_preempted");
 		clientError = errorMessage(error);
 		if (error instanceof TaskMemoryInformationFlowBlockedError)
 			return settle("silent", "information_flow_blocked", { refusalReason: clientError });
@@ -527,6 +541,9 @@ const MAINTENANCE_OPERATIONS: ReadonlySet<TaskMemoryOperation["op"]> = new Set([
 	"delete",
 ]);
 /** The two verbs the turn-end lesson pass documents. */
+/** A quote shorter than this matches too much source to bind a fact to a location. */
+const LESSON_QUOTE_MIN_CHARS = 12;
+
 const LESSON_PASS_OPERATIONS: ReadonlySet<TaskMemoryOperation["op"]> = new Set(["save_lesson", "delete"]);
 
 const OPERATIONS_OPEN = "<operations>";
@@ -726,8 +743,22 @@ function readOperations(
 					"content",
 					...(raw.id === undefined ? [] : ["id"]),
 					...(raw.command === undefined ? [] : ["command"]),
+					...(raw.source === undefined ? [] : ["source"]),
+					...(raw.quote === undefined ? [] : ["quote"]),
 				];
 				if (!hasExactKeys(raw, keys)) return null;
+				// A source citation is a path and the exact text quoted from it, together.
+				if ((raw.source === undefined) !== (raw.quote === undefined)) return null;
+				if (
+					raw.source !== undefined &&
+					(typeof raw.source !== "string" ||
+						raw.source.length === 0 ||
+						raw.source.length > 300 ||
+						typeof raw.quote !== "string" ||
+						raw.quote.trim().length < LESSON_QUOTE_MIN_CHARS ||
+						raw.quote.length > 240)
+				)
+					return null;
 				const content = boundedContent(raw.content);
 				if (content === null) return null;
 				if (raw.id !== undefined && !nonEmptyString(raw.id)) return null;
@@ -740,6 +771,10 @@ function readOperations(
 				if (typeof raw.id === "string") operation.id = raw.id;
 				// Kept byte for byte: the host compares it for equality with a command it ran.
 				if (typeof raw.command === "string" && raw.command.trim().length > 0) operation.command = raw.command;
+				if (typeof raw.source === "string" && typeof raw.quote === "string") {
+					operation.source = raw.source;
+					operation.quote = raw.quote;
+				}
 				operations.push(operation);
 				break;
 			}
@@ -805,11 +840,11 @@ function resolveOperations(
 				}
 				// An id naming nothing, or an entry in the other class, is not an
 				// update the bank can honor. The content still deserves a home.
-				resolved.push(
-					operation.op === "save_lesson" && operation.command !== undefined
-						? { op: operation.op, content: operation.content, command: operation.command }
-						: { op: operation.op, content: operation.content },
-				);
+				if (operation.op === "save_lesson") {
+					// Drop only the unresolvable id; the evidence claims travel with the content.
+					const { id: _id, ...lesson } = operation;
+					resolved.push(lesson);
+				} else resolved.push({ op: operation.op, content: operation.content });
 				break;
 			}
 			case "delete":
@@ -834,6 +869,9 @@ function applyOperations(bank: TaskMemoryBank, operations: ReadonlyArray<TaskMem
 					durable: true,
 					...(operation.id === undefined ? {} : { id: operation.id }),
 					...(operation.command === undefined ? {} : { evidenceCommand: operation.command }),
+					...(operation.source === undefined || operation.quote === undefined
+						? {}
+						: { evidenceSource: { path: operation.source, quote: operation.quote } }),
 				});
 				break;
 			case "save_procedural":

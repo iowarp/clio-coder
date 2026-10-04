@@ -4,6 +4,7 @@ import type { SessionTelemetry } from "../../contracts/session-telemetry.js";
 import {
 	ActiveEggs,
 	LiveUsage,
+	MemoryGuardian,
 	ProjectTrust,
 	SessionPlan,
 	SessionWorkspace,
@@ -11,6 +12,7 @@ import {
 import {
 	ACP_CONTEXT_META_KEY,
 	ACP_EGGS_META_KEY,
+	ACP_MEMORY_META_KEY,
 	ACP_PLAN_META_KEY,
 	ACP_TRUST_META_KEY,
 	ACP_USAGE_META_KEY,
@@ -43,6 +45,8 @@ export function sessionUpdateTelemetry(update: Record<string, unknown>): Session
 	const meta = record(update._meta);
 	if (update.sessionUpdate === "session_info_update" && meta[ACP_EGGS_META_KEY] !== undefined)
 		return { eggs: projectTelemetryValue(ActiveEggs, meta[ACP_EGGS_META_KEY]) };
+	if (update.sessionUpdate === "session_info_update" && meta[ACP_MEMORY_META_KEY] !== undefined)
+		return { memory: projectTelemetryValue(MemoryGuardian, meta[ACP_MEMORY_META_KEY]) };
 	if (update.sessionUpdate === "usage_update") {
 		const usage = record(meta[ACP_USAGE_META_KEY]);
 		return {

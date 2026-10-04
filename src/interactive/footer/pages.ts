@@ -371,9 +371,20 @@ export function renderCompactDashboard(state: FooterDashboardRenderState, width:
 	const workers = state.dispatchRows.filter((row) => ACTIVE_DISPATCH_STATUSES.has(row.status)).length;
 	const skills = state.session.activeSkills ?? [];
 	const weekly = state.quotaRoute ? routeWeeklyQuota(state.quotaRoute, state.quota ?? []) : null;
+	// Idle and off say nothing: the line names memory only while it works or cannot.
+	const guardian = state.session.memoryIntervention?.guardian;
+	const memoryFact =
+		guardian === "reviewing"
+			? theme.fg("activity", "mem reviewing")
+			: guardian === "waiting-capacity"
+				? theme.fg("warning", "mem waiting")
+				: guardian === "unavailable"
+					? theme.fg("unknownValue", "mem unavailable")
+					: "";
 	const facts = [
 		state.session.duckBadge ? theme.fg("counter", "🦆") : "",
 		workers ? theme.fg("activity", `${workers} ${workers === 1 ? "worker" : "workers"}`) : "",
+		memoryFact,
 		skills.length
 			? `${theme.fg("skillAction", "skill ")}${theme.fg("counter", fitNames("", skills.map(clean), Math.max(8, Math.floor(w / 3))))}`
 			: "",
@@ -542,7 +553,7 @@ function statusPage(state: FooterDashboardRenderState, width: number): string[] 
 		[
 			"Memory bank",
 			memory
-				? `${memory.size} entries · ${memory.stepInFlight ? "updating" : (memory.lastDecision ?? "idle")}`
+				? `${memory.size} entries · ${guardianLabel(memory.guardian) ?? (memory.stepInFlight ? "updating" : (memory.lastDecision ?? "idle"))}`
 				: "not reported",
 		],
 		["Context work", state.agent.contextActivity?.message ?? "idle"],
@@ -694,4 +705,20 @@ export function renderDashboardPage(
 	scrollOffset = 0,
 ): string[] {
 	return dashboardPageViewport(state, page, width, terminalRows, cycleKey, scrollOffset).rows;
+}
+
+/** Guardian wording for the expanded memory row; null leaves the step outcome showing. */
+function guardianLabel(
+	state: "off" | "idle" | "reviewing" | "waiting-capacity" | "unavailable" | undefined,
+): string | null {
+	switch (state) {
+		case "reviewing":
+			return "reviewing";
+		case "waiting-capacity":
+			return "waiting for endpoint capacity";
+		case "unavailable":
+			return "model tier unavailable";
+		default:
+			return null;
+	}
 }

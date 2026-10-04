@@ -77,6 +77,8 @@ export const ACP_ERROR_META_KEY = "clio-coder/error";
 export const ACP_REPLAY_META_KEY = "clio-coder/replay";
 export const ACP_NOTICE_META_KEY = "clio-coder/notice";
 export const ACP_EGGS_META_KEY = "clio-coder/eggs";
+/** `{ state }` of the always-on memory guardian, pushed on `session_info_update` when it changes. */
+export const ACP_MEMORY_META_KEY = "clio-coder/memory";
 export const ACP_TURN_META_KEY = "clio-coder/turn";
 export const ACP_TRUNCATED_META_KEY = "clio-coder/truncated";
 export const ACP_TOOLS_META_KEY = "clio-coder/tools";

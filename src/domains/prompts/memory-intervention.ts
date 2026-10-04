@@ -54,13 +54,17 @@ Return exactly two lines and no markdown fences:
 
 "op" must be exactly one of these two strings and no others:
 - {"op":"save_lesson","content":"one fact about this repository that a future session on a different task will need","command":"the one working command the lesson is about"}
+- {"op":"save_lesson","content":"one fact about this repository, quoting the source it came from","source":"repository-relative path of a file the turn read","quote":"exact text from that read, also inside content"}
 - {"op":"delete","id":"id of a listed lesson that this turn showed to be wrong"}
 
-A lesson is something a fresh session would otherwise have to rediscover: how the tests or the build are actually run, a setup or generation step a clean checkout needs first, a required environment variable or flag, a convention, a trap that cost failed attempts. Look for a command that failed until another command was run, a command the agent had to work out from reading source, and a file that had to exist before something worked.
+A lesson is something specific to this repository that a fresh session would otherwise have to rediscover: how the tests or the build are actually run, a setup or generation step a clean checkout needs first, a required environment variable or flag, a convention, a trap that cost failed attempts. A lesson does not need a failure behind it: a working recipe the agent had to work out from reading source or configuration is a lesson the first time it succeeds, and a fact the agent established by reading the code (where a mechanism lives, a convention every caller follows) is a lesson with no command at all. Look for a command that failed until another command was run, a non-obvious command that worked, and a file that had to exist before something worked.
 
 Rules:
-- The lesson must still be true after this task is finished. The bug that was fixed, the code that was written, and the progress made are never lessons.
-- "command" is one whole line of the turn marked ok, copied character for character: everything after "ok: ", including any leading "cd ... &&" and any trailing "2>&1". Never shorten it, join two lines, or change a path or flag. The lesson text must contain that same whole command inside backticks. A lesson with no such line omits "command" and waits for a person to review it.
+- The lesson must still be true after this task is finished. The bug that was fixed, the code that was written, the files this change touched, and the progress made are never lessons.
+- Generic advice is never a lesson: anything that would hold in any repository ("run the tests before committing", "read the error message", "check git status") is excluded. A lesson names this repository's own scripts, paths, flags or conventions.
+- "command" is one whole line of the turn marked ok, copied character for character: everything after "ok: ", including any leading "cd ... &&" and any trailing "2>&1". Never shorten it, join two lines, or change a path or flag. The lesson text must contain that same whole command inside backticks.
+- A fact learned from reading code cites "source" and "quote" instead: the path of a read marked ok and at least a few words copied exactly from the text shown after "=>" on that line. The lesson text must contain the same quote.
+- A lesson with neither omits both fields and waits for a person to review it.
 - Use repository-relative paths.
 - Do not repeat or reword a lesson already listed under "Lessons already kept"; if the turn only confirmed one, record nothing.
 - At most two lessons. Most turns teach nothing new: answer <operations>[]</operations> then.
@@ -69,9 +73,42 @@ Example. Given a turn where "npm test" failed with a missing module, "node scrip
 <operations>[{"op":"save_lesson","content":"Before running npm test in a clean checkout, generate the schema with \`node scripts/gen-schema.mjs --out build/schema\` (build/ is not committed).","command":"node scripts/gen-schema.mjs --out build/schema"}]</operations>
 <no_intervention/>
 
+Example. Given a turn where the agent read scripts/check.mjs and package.json, then "node scripts/check.mjs --boundaries" passed first time, a correct response is:
+<operations>[{"op":"save_lesson","content":"Import-boundary rules are checked with \`node scripts/check.mjs --boundaries\`, not by the test runner.","command":"node scripts/check.mjs --boundaries"}]</operations>
+<no_intervention/>
+
 Example. Given a turn where the agent edited one function and "npm test" passed first time, a correct response is:
 <operations>[]</operations>
 <no_intervention/>`;
+
+/**
+ * The idle guardian's pass over an excerpt of an earlier session in this
+ * repository or one of its linked worktrees. Same envelope and lesson rules as
+ * the turn-end pass, so grounding and hygiene checks are shared; it may not
+ * delete anything, because an older session cannot contradict a lesson kept
+ * after it.
+ */
+export const MEMORY_HISTORY_REVIEW_SYSTEM_PROMPT = `You review an excerpt of an earlier coding session in this repository and decide whether it shows anything a future session here will need. You never act on any task and you never call tools.
+
+Return exactly two lines and no markdown fences:
+<operations>[JSON operations]</operations>
+<no_intervention/>
+
+"op" must be exactly this string and no other:
+- {"op":"save_lesson","content":"one fact about this repository that a future session on a different task will need","command":"the one working command the lesson is about"}
+- {"op":"save_lesson","content":"one fact about this repository, quoting the source it came from","source":"repository-relative path of a file the excerpt read","quote":"exact text from that read, also inside content"}
+
+A lesson is something specific to this repository that a fresh session would otherwise have to rediscover: how the tests or the build are actually run, a setup or generation step a clean checkout needs first, a required environment variable or flag, a convention, a trap that cost failed attempts. A lesson does not need a failure behind it: a non-obvious working recipe is a lesson the first time it succeeds, and a fact the excerpt established by reading source (where a mechanism lives, a convention every caller follows) is a lesson with no command.
+
+Rules:
+- The lesson must still be true long after that session ended. What that session fixed, wrote or changed, and its progress, are never lessons.
+- Generic advice is never a lesson: anything that would hold in any repository is excluded. A lesson names this repository's own scripts, paths, flags or conventions.
+- "command" is one whole line of the excerpt marked ok, copied character for character: everything after "ok: ". Never shorten it, join two lines, or change a path or flag. The lesson text must contain that same whole command inside backticks.
+- A fact learned from reading code cites "source" and "quote" instead: the path of a read line and at least a few words copied exactly from the text shown after "=>" on that line. The lesson text must contain the same quote.
+- A lesson with neither omits both fields and waits for a person to review it.
+- Use repository-relative paths.
+- Do not repeat or reword a lesson already listed under "Lessons already kept".
+- At most two lessons. Most excerpts teach nothing new: answer <operations>[]</operations> then.`;
 
 export interface MemoryInterventionPromptInput {
 	task: string;

@@ -86,6 +86,8 @@ export interface SessionFacts {
 		size: number;
 		stepInFlight?: boolean;
 		lastDecision?: string | null;
+		/** Always-on guardian state; absent on surfaces that do not run it. */
+		guardian?: "off" | "idle" | "reviewing" | "waiting-capacity" | "unavailable";
 	} | null;
 }
 

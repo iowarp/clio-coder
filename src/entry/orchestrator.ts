@@ -79,6 +79,7 @@ import { normalizeYoloGateOutcome } from "../domains/dispatch/yolo-ids.js";
 import { type ExtensionsContract, ExtensionsDomainModule } from "../domains/extensions/index.js";
 import { type InteropContract, InteropDomainModule } from "../domains/interop/index.js";
 import { describeUpgradeNotice, ensureClioState, takeUpgradeNotice } from "../domains/lifecycle/index.js";
+import { createHistoryReviewSource } from "../domains/memory/history-review.js";
 import {
 	buildDispatchMemorySection,
 	canonicalMemoryRepositoryIdentity,
@@ -108,10 +109,8 @@ import {
 	loadTaskBankSnapshot,
 	saveTaskBankSnapshot,
 } from "../domains/memory/task-bank-store.js";
-import {
-	TaskMemoryEndpointBusyError,
-	TaskMemoryInformationFlowBlockedError,
-} from "../domains/memory/task-memory-policy.js";
+import type { TaskMemoryModelRequest } from "../domains/memory/task-memory-policy.js";
+import { TaskMemoryInformationFlowBlockedError } from "../domains/memory/task-memory-policy.js";
 import { createCapabilityGate } from "../domains/middleware/capability-gate.js";
 import { createDecisionHintsRegistration } from "../domains/middleware/decision-hints.js";
 import {
@@ -132,6 +131,8 @@ import {
 	MiddlewareDomainModule,
 	writeMiddlewareDiagnosticToStderr,
 } from "../domains/middleware/index.js";
+import type { MemoryGuardian, MemoryGuardianState } from "../domains/middleware/memory-guardian.js";
+import { createMemoryGuardian } from "../domains/middleware/memory-guardian.js";
 import {
 	createMemoryInterventionRegistration,
 	type MemoryDeliveryOutcome,
@@ -156,6 +157,7 @@ import type { CostProvenance, ProvidersContract, TargetDescriptor, ThinkingLevel
 import {
 	AGENT_ROLE_TOOLS_REQUIRED_REASON,
 	applyModelCapabilityPatch,
+	backgroundMemoryAdmissionLimit,
 	canonicalEndpointKey,
 	createProvidersDomainModule,
 	firstRuntimeResolutionError,
@@ -534,6 +536,7 @@ export function createBackgroundMemoryModelClient(
 				timeoutMs,
 				bus,
 				"dedicated",
+				settings.targets,
 				admitModelFlow,
 			);
 		} catch (error) {
@@ -546,7 +549,16 @@ export function createBackgroundMemoryModelClient(
 	}
 	try {
 		return {
-			...prepareBackgroundMemoryRoute(providers, chatTarget, chatModel, timeoutMs, bus, "chat-fallback", admitModelFlow),
+			...prepareBackgroundMemoryRoute(
+				providers,
+				chatTarget,
+				chatModel,
+				timeoutMs,
+				bus,
+				"chat-fallback",
+				settings.targets,
+				admitModelFlow,
+			),
 			fallbackReason,
 		};
 	} catch {
@@ -633,19 +645,34 @@ function createSystemOneOneShot(providers: ProvidersContract, admitRequest: LlmR
 	};
 }
 
+/**
+ * The slot bound background memory admits against on the route's endpoint.
+ * Unlike dispatch, an endpoint whose capacity nothing proves is one slot here;
+ * see `backgroundMemoryAdmissionLimit`. The middleware's pre-check and the
+ * reservation in the client both read this one function over the same target
+ * set, so route selection, capacity and reservation cannot disagree.
+ */
+function memoryAdmissionLimitFor(
+	providers: ProvidersContract,
+	endpointKey: string,
+	targets: ReadonlyArray<TargetDescriptor>,
+): number {
+	const capacity = resolveEndpointCapacities({
+		statuses: providers.list(),
+		targets,
+		runtimeFor: (id) => providers.getRuntime(id),
+	})[endpointKey];
+	return backgroundMemoryAdmissionLimit(capacity);
+}
+
 function backgroundMemoryEndpointBusy(
 	providers: ProvidersContract,
 	endpointKey: string | null,
 	targets: ReadonlyArray<TargetDescriptor>,
 ): boolean {
 	if (endpointKey === null) return false;
-	const capacity = resolveEndpointCapacities({
-		statuses: providers.list(),
-		targets,
-		runtimeFor: (id) => providers.getRuntime(id),
-	})[endpointKey];
-	// Gateways and non-fixed schedulers have no invented local one-slot cap.
-	return capacity !== undefined && (endpointCapacityUsage()[endpointKey] ?? 0) >= capacity.limit;
+	const limit = memoryAdmissionLimitFor(providers, endpointKey, targets);
+	return (endpointCapacityUsage()[endpointKey] ?? 0) >= limit;
 }
 
 function prepareBackgroundMemoryRoute(
@@ -655,6 +682,7 @@ function prepareBackgroundMemoryRoute(
 	timeoutMs: number,
 	bus: Pick<SafeEventBus, "emit"> | null,
 	selection: BackgroundMemoryRoute["selection"],
+	targets: ReadonlyArray<TargetDescriptor>,
 	admitModelFlow?: AdmitBackgroundModelFlow,
 ): BackgroundMemoryRoute {
 	const initial = prepareBackgroundMemoryModel(providers, targetId, wireModelId);
@@ -689,57 +717,65 @@ function prepareBackgroundMemoryRoute(
 					? (await providers.auth.resolveForTarget(refined.target, refined.runtime, { signal: request.signal })).apiKey
 					: LOCAL_API_KEY_FALLBACK;
 				request.signal.throwIfAborted();
-				// Preparation yielded after the middleware's first check. Recheck current
-				// occupancy immediately before the synchronous foreground-slot registration;
-				// no await may separate this admission from announceMemoryStepEndpoint.
-				if (backgroundMemoryEndpointBusy(providers, endpointKey, [refined.target])) {
-					throw new TaskMemoryEndpointBusyError("background memory endpoint is busy");
-				}
 				const refusal =
 					admitModelFlow?.({ targetId, runtimeId: refined.runtimeId, wireModelId: refined.wireModelId }) ?? null;
 				if (refusal !== null) throw new TaskMemoryInformationFlowBlockedError(refusal);
-				return announceMemoryStepEndpoint({ bus, endpointKey, targetId }, async () => {
-					const startedAt = Date.now();
-					let observedUsage: TaskMemoryStepUsage | undefined;
-					const mapUsage = (completion: Pick<EngineTextCompletionResult, "usage" | "backend">): TaskMemoryStepUsage => ({
-						...completion.usage,
+				// Preparation yielded after the middleware's first check. The wrapper
+				// rechecks occupancy and registers the preemptible hold in one
+				// synchronous step, so no local request can take the last slot between.
+				const admissionLimit =
+					endpointKey === null ? Number.POSITIVE_INFINITY : memoryAdmissionLimitFor(providers, endpointKey, targets);
+				return announceMemoryStepEndpoint(
+					{
+						bus,
+						endpointKey,
 						targetId,
-						attributedModelId: refined.wireModelId,
-						costProvenance,
-						durationMs: Date.now() - startedAt,
-						backend: completion.backend,
-					});
-					const completion = await completeEngineText({
-						model,
-						systemPrompt: request.systemPrompt,
-						userPrompt: request.userPrompt,
-						maxTokens:
-							refined.capabilityDecisions.maxTokens > 0
-								? Math.min(request.maxTokens, refined.capabilityDecisions.maxTokens)
-								: request.maxTokens,
-						// Always off, never the operator's chat thinking level. A model that
-						// reasons anyway still works: `completeEngineText` keeps only text
-						// blocks, and the memory output budget leaves room for the preamble.
-						thinkingLevel: "off",
-						signal: request.signal,
-						timeoutMs,
-						onUsage: (observation) => {
-							observedUsage = mapUsage(observation);
-							request.onUsage?.(observedUsage);
-						},
-						...(apiKey === undefined ? {} : { apiKey }),
-						...(refined.target.auth?.headers ? { headers: refined.target.auth.headers } : {}),
-					});
-					// The step is billed here whatever the policy later decides about the
-					// answer. A model that read a trajectory and chose silence spent the
-					// same prefill as one that produced a reminder.
-					return {
-						text: completion.text,
-						inputTokens: completion.inputTokens,
-						outputTokens: completion.outputTokens,
-						usage: observedUsage ?? mapUsage(completion),
-					};
-				})(request);
+						admissionLimit,
+						admit: () => endpointKey === null || (endpointCapacityUsage()[endpointKey] ?? 0) < admissionLimit,
+					},
+					async (request: TaskMemoryModelRequest) => {
+						const startedAt = Date.now();
+						let observedUsage: TaskMemoryStepUsage | undefined;
+						const mapUsage = (completion: Pick<EngineTextCompletionResult, "usage" | "backend">): TaskMemoryStepUsage => ({
+							...completion.usage,
+							targetId,
+							attributedModelId: refined.wireModelId,
+							costProvenance,
+							durationMs: Date.now() - startedAt,
+							backend: completion.backend,
+						});
+						const completion = await completeEngineText({
+							model,
+							systemPrompt: request.systemPrompt,
+							userPrompt: request.userPrompt,
+							maxTokens:
+								refined.capabilityDecisions.maxTokens > 0
+									? Math.min(request.maxTokens, refined.capabilityDecisions.maxTokens)
+									: request.maxTokens,
+							// Always off, never the operator's chat thinking level. A model that
+							// reasons anyway still works: `completeEngineText` keeps only text
+							// blocks, and the memory output budget leaves room for the preamble.
+							thinkingLevel: "off",
+							signal: request.signal,
+							timeoutMs,
+							onUsage: (observation) => {
+								observedUsage = mapUsage(observation);
+								request.onUsage?.(observedUsage);
+							},
+							...(apiKey === undefined ? {} : { apiKey }),
+							...(refined.target.auth?.headers ? { headers: refined.target.auth.headers } : {}),
+						});
+						// The step is billed here whatever the policy later decides about the
+						// answer. A model that read a trajectory and chose silence spent the
+						// same prefill as one that produced a reminder.
+						return {
+							text: completion.text,
+							inputTokens: completion.inputTokens,
+							outputTokens: completion.outputTokens,
+							usage: observedUsage ?? mapUsage(completion),
+						};
+					},
+				)(request);
 			},
 		},
 	};
@@ -763,6 +799,8 @@ export function createBackgroundMemoryRouting(
 	getSettings: () => Readonly<ClioSettings> | undefined,
 	bus: Pick<SafeEventBus, "emit"> | null,
 	admitModelFlow?: AdmitBackgroundModelFlow,
+	/** False for a second routing instance whose fallback the first already announces. */
+	announceFallback = true,
 ) {
 	let route: BackgroundMemoryRoute | null = null;
 	let snapshot: Readonly<ClioSettings> | undefined;
@@ -776,7 +814,7 @@ export function createBackgroundMemoryRouting(
 		const message = `Memory: ${route.fallbackReason}; selected chat fallback ${route.targetId}/${route.wireModelId} for this step, subject to available endpoint capacity.`;
 		if (message === lastNotice) return;
 		lastNotice = message;
-		if (!bus) return;
+		if (!bus || !announceFallback) return;
 		emitRouteFallbackNotice(
 			{
 				kind: "route-fallback",
@@ -2220,9 +2258,44 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	};
 	const getCurrentMemoryEnabled = (): boolean =>
 		(effectiveSettingsForDispatch?.().context.memory ?? memorySettings).enabled;
+	const memoryTelemetry = createTaskMemoryTelemetrySink();
+	const memoryWorkspaceRoot = (): string => session?.current()?.cwd || process.cwd();
+	const keptRepositoryLessons = () =>
+		eligibleMemoryRecords(loadMemoryRecordsSync(clioDataDir()), {
+			scopes: ["repo"],
+			activeRepository: canonicalMemoryRepositoryIdentity(memoryWorkspaceRoot()),
+		})
+			.slice(0, 10)
+			.map((record) => ({ id: record.id, text: record.lesson }));
+	// Bound late: the guardian needs the registration, and the registration
+	// reports turn boundaries and step activity to the guardian.
+	let memoryGuardian: MemoryGuardian | null = null;
+	let isChatStreaming: () => boolean = () => false;
+	let publishedGuardianState: MemoryGuardianState | null = null;
+	/**
+	 * The one guardian state every surface projects: a boundary step the
+	 * middleware launched counts as reviewing even though the guardian did not
+	 * start it.
+	 */
+	const currentGuardianState = (): MemoryGuardianState => {
+		const state = memoryGuardian?.state() ?? "off";
+		return state !== "off" && memoryIntervention.stepInFlight() ? "reviewing" : state;
+	};
+	const publishGuardianState = (): void => {
+		const state = currentGuardianState();
+		if (state === publishedGuardianState) return;
+		publishedGuardianState = state;
+		bus.emit(BusChannels.MemoryGuardianChanged, { sessionId: session?.current()?.id ?? null, state });
+	};
 	const memoryIntervention = createMemoryInterventionRegistration({
 		bank: taskMemoryBank,
-		telemetry: createTaskMemoryTelemetrySink(),
+		telemetry: memoryTelemetry,
+		workspaceRoot: memoryWorkspaceRoot,
+		onTurnBoundary: (kind) => memoryGuardian?.wake(kind === "end" ? "turn-end" : "turn-start"),
+		onStepActivity: () => {
+			publishGuardianState();
+			memoryGuardian?.wake("step-settled");
+		},
 		...(memoryTrace === null ? {} : { onEnvelope: (envelope) => memoryTrace.record(envelope) }),
 		// A headless run submits no further turn, so a detached step could only
 		// finish after the process that would have read it has exited.
@@ -2243,13 +2316,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		onInjectedEntries: (entries) => proposeInjectedMemoryEntries(entries),
 		onDeliveryOutcomes: settleMemoryDeliveries,
 		onKnowledgeReview: reviewMemoryKnowledge,
-		getKeptLessons: () =>
-			eligibleMemoryRecords(loadMemoryRecordsSync(clioDataDir()), {
-				scopes: ["repo"],
-				activeRepository: canonicalMemoryRepositoryIdentity(session?.current()?.cwd || process.cwd()),
-			})
-				.slice(0, 10)
-				.map((record) => ({ id: record.id, text: record.lesson })),
+		getKeptLessons: keptRepositoryLessons,
 		onKeptLessonsRetired: (memoryIds) => {
 			const sessionId = session?.current()?.id;
 			if (sessionId === undefined) return;
@@ -2268,22 +2335,111 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		},
 	});
 	middleware.registerHook(memoryIntervention);
-	const unsubscribeMemoryLoop = bus.on(BusChannels.LoopBlocked, () => memoryIntervention.signalLoop());
-	const disposeMemoryLifecycle = bindTaskMemoryLifecycle(bus, memoryIntervention, {
-		save: (sessionId) => {
-			saveTaskBankSnapshot(clioStateDir(), sessionId, taskMemoryBank.snapshot());
+	/**
+	 * File lessons the guardian found in an earlier session, with that session
+	 * as provenance. A lesson the host could bind to evidence it observed in
+	 * that session (an exact successful command, or a successful read whose
+	 * quote the current checkout still holds) is observed held; the store's
+	 * gate decides from there. Everything else is filed for operator review.
+	 */
+	const fileHistoryLessons = (input: {
+		sessionId: string;
+		grounded: ReadonlyArray<TaskMemoryEntry>;
+		ungrounded: ReadonlyArray<TaskMemoryEntry>;
+	}): void => {
+		const entries = [...input.grounded, ...input.ungrounded];
+		if (entries.length === 0) return;
+		void proposeInjectedTaskMemory(clioDataDir(), {
+			sessionId: input.sessionId,
+			cwd: memoryWorkspaceRoot(),
+			entries,
+		})
+			.then(async (result) => {
+				for (const error of result.errors) {
+					writeDiagnostic(`[clio-coder:memory] proposed record not written for ${error}\n`);
+				}
+				const held = [
+					...new Set(
+						input.grounded.flatMap((entry) => {
+							const record = result.recordByEntry.get(entry.id);
+							return record === undefined ? [] : [record.id];
+						}),
+					),
+				];
+				if (held.length === 0) return;
+				reportGateOutcome(
+					await recordMemoryObservations(
+						clioDataDir(),
+						held.map((memoryId) => ({ memoryId, sessionId: input.sessionId, kind: "held" as const })),
+					),
+				);
+			})
+			.catch(reportMemoryStoreFailure("history lessons not recorded"));
+	};
+	const memoryRouteConfigured = (): boolean => {
+		const memory = effectiveSettingsForDispatch?.().context.memory ?? memorySettings;
+		return memory.enabled && Boolean(memory.target?.trim()) && Boolean(memory.model?.trim());
+	};
+	memoryGuardian = createMemoryGuardian({
+		// A headless run exits after its turn, so there is no idle time to use.
+		enabled: () => options.headless === undefined && memoryRouteConfigured(),
+		isForegroundActive: () => isChatStreaming(),
+		live: memoryIntervention,
+		scopeKey: () => `${session?.current()?.id ?? ""}\u0000${memoryWorkspaceRoot()}`,
+		historySource: () =>
+			createHistoryReviewSource({
+				stateDir: clioStateDir(),
+				cwd: memoryWorkspaceRoot(),
+				currentSessionId: session?.current()?.id ?? null,
+			}),
+		client: createBackgroundMemoryRouting(providers, () => effectiveSettingsForDispatch?.(), bus, admitMemoryFlow, false),
+		settings: () => {
+			const memory = effectiveSettingsForDispatch?.().context.memory ?? memorySettings;
+			return { maxTokens: memory.maxOutputTokens, timeoutMs: memory.timeoutMs };
 		},
-		restore: (sessionId) => {
-			const snapshot = loadTaskBankSnapshot(clioStateDir(), sessionId);
-			// Consumed on read: a crash after `/tree` cleared the bank must not find
-			// this snapshot again on the next resume.
-			deleteTaskBankSnapshot(clioStateDir(), sessionId);
-			if (snapshot !== null && getCurrentMemoryEnabled()) taskMemoryBank.restore(snapshot);
-		},
-		discard: (sessionId) => deleteTaskBankSnapshot(clioStateDir(), sessionId),
+		workspaceRoot: memoryWorkspaceRoot,
+		getKeptLessons: keptRepositoryLessons,
+		onHistoryLessons: fileHistoryLessons,
+		captureStepUsage: captureBackgroundMemoryUsage,
+		telemetry: memoryTelemetry,
+		onStateChange: publishGuardianState,
 	});
+	const guardedMemory = memoryGuardian;
+	const unsubscribeMemoryLoop = bus.on(BusChannels.LoopBlocked, () => memoryIntervention.signalLoop());
+	const unsubscribeGuardianWakes = [
+		bus.on(BusChannels.SessionStart, () => guardedMemory.reset()),
+		bus.on(BusChannels.ConfigHotReload, () => guardedMemory.wake("settings")),
+		bus.on(BusChannels.ConfigNextTurn, () => guardedMemory.wake("settings")),
+	];
+	const disposeMemoryLifecycle = bindTaskMemoryLifecycle(
+		bus,
+		{
+			reset: () => {
+				memoryIntervention.reset();
+				guardedMemory.reset();
+			},
+			dispose: () => {
+				memoryIntervention.dispose();
+				guardedMemory.dispose();
+			},
+		},
+		{
+			save: (sessionId) => {
+				saveTaskBankSnapshot(clioStateDir(), sessionId, taskMemoryBank.snapshot());
+			},
+			restore: (sessionId) => {
+				const snapshot = loadTaskBankSnapshot(clioStateDir(), sessionId);
+				// Consumed on read: a crash after `/tree` cleared the bank must not find
+				// this snapshot again on the next resume.
+				deleteTaskBankSnapshot(clioStateDir(), sessionId);
+				if (snapshot !== null && getCurrentMemoryEnabled()) taskMemoryBank.restore(snapshot);
+			},
+			discard: (sessionId) => deleteTaskBankSnapshot(clioStateDir(), sessionId),
+		},
+	);
 	termination.onDrain(() => {
 		unsubscribeMemoryLoop();
+		for (const off of unsubscribeGuardianWakes) off();
 		disposeMemoryLifecycle();
 	});
 	if (contextDomain) {
@@ -3721,6 +3877,10 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		isLatencySurface: () => interactive || acpMode,
 		isPrewarmBusy: () => Boolean(options.terminalLease?.editor.getText().trim()),
 	});
+	// The guardian works during a turn only through endpoint admission and
+	// reads history shallowly while one streams, so it needs the live answer.
+	isChatStreaming = () => chat.isStreaming();
+	memoryGuardian.wake("ready");
 
 	// Coordinated shutdown (SIGINT/SIGTERM, TUI quit) must abort any in-flight
 	// turn before domains stop. The agent abort fans out to every running
@@ -4640,6 +4800,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 				bank,
 				activity: memoryIntervention.recentActivity(),
 				stepInFlight: memoryIntervention.stepInFlight(),
+				guardian: currentGuardianState(),
 				// Folded from the telemetry ledger, which is durable across sessions,
 				// so `/memory` answers what the tier has cost since it was turned on
 				// rather than what it cost since this process started.

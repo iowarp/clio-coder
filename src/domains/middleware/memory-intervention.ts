@@ -9,12 +9,14 @@ import {
 	sanitizeToolResultDigest,
 	type ToolResultDigest,
 } from "../../tools/result-disposition.js";
+import { gatewayChainReceipts } from "../../tools/surface.js";
 import {
 	type MemoryCommitScope,
 	MemoryCommitState,
 	type MemoryRestorationOffer,
 	type SuccessfulMemoryContextCommit,
 } from "../memory/commit-state.js";
+import { lessonEvidence, recordObservedRead, repositoryRelativePath } from "../memory/lesson-evidence.js";
 import type { MemoryRestorationInput } from "../memory/restoration.js";
 import { TASK_MEMORY_DEFAULT_PROCEDURAL_CAP, type TaskMemoryBank, type TaskMemoryEntry } from "../memory/task-bank.js";
 import {
@@ -39,6 +41,7 @@ import {
 } from "../memory/task-memory-telemetry.js";
 import { MEMORY_CONSOLIDATION_SYSTEM_PROMPT } from "../prompts/memory-intervention.js";
 import { hashToolCall } from "../safety/loop-detector.js";
+import { redactSecretString } from "../safety/redaction.js";
 import { ceilChars } from "../session/context-accounting.js";
 import type { MiddlewareHookEvaluationContext, MiddlewareHookRegistration } from "./runtime.js";
 import type { MiddlewareEffect, MiddlewareHookInput } from "./types.js";
@@ -78,7 +81,33 @@ export interface MemoryDeliveryOutcome {
 	kind: "held" | "contradicted";
 }
 
-export type MemoryInterventionTriggerReason = "interval" | "tool_error_streak" | "loop_signal" | "turn_end";
+export type MemoryInterventionTriggerReason =
+	| "interval"
+	| "tool_error_streak"
+	| "loop_signal"
+	| "turn_end"
+	| "idle_review";
+
+/** Reasons a step yielded to occupancy; its triggers stay pending and it runs again when the endpoint has room. */
+const YIELDED_REASONS: ReadonlySet<TaskMemoryPolicyReason> = new Set(["endpoint_busy", "endpoint_preempted"]);
+/** Reasons that mean the model tier cannot run right now; deterministic rules keep working. */
+const UNAVAILABLE_REASONS: ReadonlySet<TaskMemoryPolicyReason> = new Set([
+	"no_client",
+	"client_error",
+	"information_flow_blocked",
+	"llm_timeout_backoff",
+]);
+
+/** What one detached step launch came to, for the idle guardian's scheduling. */
+export type MemoryStepLaunchOutcome =
+	/** The model tier answered or timed out; new pending work is up to the next boundary. */
+	| "ran"
+	/** Occupancy refused or preempted the step; its triggers stay pending. */
+	| "yielded"
+	/** The model tier cannot run; rules keep working. */
+	| "unavailable"
+	/** Nothing to do, or the scope changed under the step. */
+	| "none";
 /**
  * Tool calls since the last lesson pass that make a finished turn worth one.
  * Every other trigger fires mid-turn, so the model never saw how the turn
@@ -142,6 +171,7 @@ export interface MemoryKnowledgeReview {
 const TURN_LOG_LIMIT = 40;
 const TURN_LOG_CALL_MAX_CHARS = 300;
 const VERIFIED_COMMAND_LIMIT = 256;
+const TURN_LOG_READ_EXCERPT_CHARS = 240;
 
 /** Reasons that mean the model never produced a usable answer, so the bank it left says nothing. */
 const UNANSWERED_REASONS: ReadonlySet<TaskMemoryPolicyReason> = new Set([
@@ -150,6 +180,7 @@ const UNANSWERED_REASONS: ReadonlySet<TaskMemoryPolicyReason> = new Set([
 	"deadline",
 	"timed_out",
 	"endpoint_busy",
+	"endpoint_preempted",
 	"client_error",
 	"information_flow_blocked",
 	"no_client",
@@ -259,6 +290,12 @@ export interface MemoryInterventionDeps {
 	 * the process. Starting one only spends a model call to throw the result away.
 	 */
 	deliversDeferredReminders?: boolean;
+	/** Turn lifecycle wake signal for the idle guardian. Synchronous and cheap; it never runs a step. */
+	onTurnBoundary?: (kind: "start" | "end") => void;
+	/** A detached step started or settled, so read-only status surfaces can refresh. */
+	onStepActivity?: () => void;
+	/** Checkout source evidence is verified against; defaults to the process workspace. */
+	workspaceRoot?: () => string;
 }
 
 export interface MemoryPromptedStepInput {
@@ -303,6 +340,17 @@ export interface MemoryInterventionRegistration extends MiddlewareHookRegistrati
 	/** True while a detached background memory step is still running. */
 	stepInFlight(): boolean;
 	/**
+	 * Completed activity no step has reviewed yet: pending triggers, including
+	 * ones that yielded to occupancy, or shell work since the last lesson pass.
+	 */
+	pendingWork(): boolean;
+	/**
+	 * Run pending work between turns: yielded triggers first, otherwise a lesson
+	 * pass over completed activity the turn-end pass did not cover. Detached
+	 * from any visible turn; the idle guardian decides when to call it.
+	 */
+	runIdleStep(): Promise<MemoryStepLaunchOutcome>;
+	/**
 	 * Resolves when this generation's detached policy settles. Reset/shutdown
 	 * release the policy immediately; an abort-ignoring transport can still
 	 * finish later, with authority only to report its originating usage.
@@ -346,13 +394,22 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 	 * else.
 	 */
 	const succeededCommands = new Set<string>();
+	/**
+	 * Excerpts of successful read results, by repository-relative path, exactly
+	 * as the turn log showed them to the lesson pass. A source-cited lesson is
+	 * grounded only by a quote inside one of these that the current checkout
+	 * still holds (`lessonEvidence`).
+	 */
+	const observedReads = new Map<string, string[]>();
+	const workspaceRoot = (): string => {
+		try {
+			return deps.workspaceRoot?.() ?? process.cwd();
+		} catch {
+			return process.cwd();
+		}
+	};
 	const lessonIsGrounded = (entry: TaskMemoryEntry): boolean =>
-		entry.durable === true &&
-		entry.evidenceCommand !== undefined &&
-		succeededCommands.has(entry.evidenceCommand) &&
-		// The text has to make the same claim the evidence supports: the exact
-		// command, delimited, so `node a.mjs --quick` does not vouch for `--full`.
-		entry.content.includes(`\`${entry.evidenceCommand}\``);
+		lessonEvidence(entry, { succeededCommands, observedReads, workspaceRoot: workspaceRoot() }) !== null;
 	let toolStep = 0;
 	let lastTurnEndStep = 0;
 	/**
@@ -368,6 +425,15 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 	// Counted apart from the maintenance cadence: an interval step that fired on
 	// a turn's last tools left nothing "since the last step" and starved the pass.
 	let toolsSinceLessonPass = 0;
+	// Shell steps since the last lesson pass. One shell command is enough for an
+	// idle lesson pass; reads alone need as many tools as the turn-end pass does.
+	let shellStepsSinceLessonPass = 0;
+	// The last launch yielded to occupancy. Until the endpoint has room, a new
+	// boundary keeps its triggers pending instead of recording another drop.
+	let lastLaunchYielded = false;
+	// The last launch found the model tier unavailable. Mid-turn boundaries keep
+	// their triggers pending; a turn end or the guardian's recovery wake retries.
+	let lastLaunchUnavailable = false;
 	let consecutiveErrors = 0;
 	let lastPromptedBoundary: string | null = null;
 	let lastInjectedMessage: string | null = null;
@@ -431,6 +497,8 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 		hooks: ["before_tool", "after_tool", "turn_start", "turn_end", "on_compaction"],
 		evaluate(input): ReadonlyArray<MiddlewareEffect> {
 			observeSession(input);
+			if (input.hook === "turn_end") notifyTurnBoundary("end");
+			else if (input.hook === "turn_start" && input.metadata?.requestContinuation !== true) notifyTurnBoundary("start");
 			if (disposed || !settings().enabled) return NO_EFFECTS;
 			try {
 				switch (input.hook) {
@@ -560,49 +628,33 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 				);
 				return NO_EFFECTS;
 			}
+			if (lastLaunchYielded && endpointStillBusy()) return NO_EFFECTS;
+			if (lastLaunchUnavailable && input.hook !== "turn_end") return NO_EFFECTS;
 			lastPromptedBoundary = boundary;
-			const triggers = [...pendingTriggers];
-			pendingTriggers.clear();
-			toolsSinceMemoryStep = 0;
-			if (triggers.includes("turn_end")) toolsSinceLessonPass = 0;
-			consecutiveErrors = 0;
 			// The rules tier may already have spoken for this boundary, either as a
 			// turn_end reminder in prior effects or as a mid-turn tool annotation.
-			const rulesAlreadySpoke =
-				rulesInjectedSincePromptedStep ||
-				(context?.priorEffects.some(
-					(effect) => effect.kind === "inject_reminder" && effect.message.startsWith("Memory:"),
-				) ??
-					false);
-			rulesInjectedSincePromptedStep = false;
-			const stepGeneration = generation;
-			const contentCurrent = captureContentGuard();
-			promptedStepInFlight = true;
-			outstandingStep = runPromptedStep({
-				deterministicTrigger: triggers.some((trigger) => trigger !== "interval" && trigger !== "turn_end"),
-				suppressIntervention: rulesAlreadySpoke,
-				triggerReasons: triggers,
-			})
-				.then((result) => {
-					if (!contentCurrent()) return;
-					// A rules-only reminder can win the visible boundary while the optional
-					// background route resolves to null. Preserve the operator-visible
-					// injected outcome instead of overwriting it with that no-client silence.
-					if (rulesAlreadySpoke && result.decision === "silent") lastDecision = "injected";
-					if (result.reminder === null) return;
-					lastInjectedMessage = result.reminder;
-					deps.onDeferredReminder?.(result.reminder, contentCurrent);
-				})
-				.catch(() => {
-					// runPromptedStep already resolves failures to silence; this only
-					// covers a throwing delivery sink, which must not surface anywhere.
-				})
-				.finally(() => {
-					if (stepGeneration === generation) promptedStepInFlight = false;
-				});
+			const priorRulesReminder =
+				context?.priorEffects.some((effect) => effect.kind === "inject_reminder" && effect.message.startsWith("Memory:")) ??
+				false;
+			void launchPromptedStep(priorRulesReminder);
 			return NO_EFFECTS;
 		},
 		runPromptedStep,
+		pendingWork(): boolean {
+			if (disposed || !settings().enabled) return false;
+			return pendingTriggers.size > 0 || idleLessonWorth();
+		},
+		async runIdleStep(): Promise<MemoryStepLaunchOutcome> {
+			if (disposed || !settings().enabled || promptedStepInFlight) return "none";
+			if (deps.deliversDeferredReminders === false) return "none";
+			if (pendingTriggers.size === 0) {
+				if (!idleLessonWorth()) return "none";
+				pendingTriggers.add("idle_review");
+			}
+			if (lastLaunchYielded && endpointStillBusy()) return "yielded";
+			lastPromptedBoundary = `idle:${toolStep}`;
+			return launchPromptedStep(false);
+		},
 		signalLoop(): void {
 			if (!disposed && settings().enabled) pendingTriggers.add("loop_signal");
 		},
@@ -611,6 +663,120 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 		stepInFlight: () => promptedStepInFlight,
 		whenIdle: () => outstandingStep,
 	};
+
+	/**
+	 * Start one detached step for every pending trigger. A step that yielded to
+	 * endpoint occupancy puts its triggers back, so the work resumes at the next
+	 * boundary or idle wake instead of being lost with the boundary that
+	 * started it.
+	 */
+	function launchPromptedStep(priorRulesReminder: boolean): Promise<MemoryStepLaunchOutcome> {
+		const triggers = [...pendingTriggers];
+		pendingTriggers.clear();
+		const priorToolsSinceMemoryStep = toolsSinceMemoryStep;
+		const priorToolsSinceLessonPass = toolsSinceLessonPass;
+		const priorShellStepsSinceLessonPass = shellStepsSinceLessonPass;
+		const consolidates = triggers.includes("turn_end") || triggers.includes("idle_review");
+		toolsSinceMemoryStep = 0;
+		if (consolidates) {
+			toolsSinceLessonPass = 0;
+			shellStepsSinceLessonPass = 0;
+		}
+		consecutiveErrors = 0;
+		const rulesAlreadySpoke = rulesInjectedSincePromptedStep || priorRulesReminder;
+		rulesInjectedSincePromptedStep = false;
+		const stepGeneration = generation;
+		const contentCurrent = captureContentGuard();
+		promptedStepInFlight = true;
+		notifyStepActivity();
+		let outcome: MemoryStepLaunchOutcome = "none";
+		const settled = runPromptedStep({
+			deterministicTrigger: triggers.some(
+				(trigger) => trigger !== "interval" && trigger !== "turn_end" && trigger !== "idle_review",
+			),
+			suppressIntervention: rulesAlreadySpoke,
+			triggerReasons: triggers,
+		})
+			.then((result) => {
+				if (!contentCurrent()) return;
+				const yielded = YIELDED_REASONS.has(result.reason);
+				const unavailable = UNAVAILABLE_REASONS.has(result.reason);
+				if (yielded || unavailable) {
+					// Nothing was reviewed: restore the work the step claimed so a later
+					// step reviews it. A yielded step retries once the endpoint has room;
+					// an unavailable one parks until a turn end or recovery wake.
+					for (const trigger of triggers) pendingTriggers.add(trigger);
+					toolsSinceMemoryStep += priorToolsSinceMemoryStep;
+					if (consolidates) {
+						toolsSinceLessonPass += priorToolsSinceLessonPass;
+						shellStepsSinceLessonPass += priorShellStepsSinceLessonPass;
+					}
+					lastPromptedBoundary = null;
+					lastLaunchYielded = yielded;
+					lastLaunchUnavailable = unavailable;
+					outcome = yielded ? "yielded" : "unavailable";
+					return;
+				}
+				lastLaunchYielded = false;
+				lastLaunchUnavailable = false;
+				outcome = "ran";
+				// A rules-only reminder can win the visible boundary while the optional
+				// background route resolves to null. Preserve the operator-visible
+				// injected outcome instead of overwriting it with that no-client silence.
+				if (rulesAlreadySpoke && result.decision === "silent") lastDecision = "injected";
+				if (result.reminder === null) return;
+				lastInjectedMessage = result.reminder;
+				deps.onDeferredReminder?.(result.reminder, contentCurrent);
+			})
+			.catch(() => {
+				// runPromptedStep already resolves failures to silence; this only
+				// covers a throwing delivery sink, which must not surface anywhere.
+			})
+			.finally(() => {
+				if (stepGeneration === generation) promptedStepInFlight = false;
+				notifyStepActivity();
+			});
+		outstandingStep = settled;
+		return settled.then(() => outcome);
+	}
+
+	/**
+	 * Completed activity the turn-end pass did not cover is worth an idle lesson
+	 * pass: any shell work, or source investigation of the size the turn-end
+	 * pass itself requires. A source-only fact is reviewable; its lesson is
+	 * filed without a command and waits for the operator.
+	 */
+	function idleLessonWorth(): boolean {
+		return (
+			toolsSinceLessonPass > 0 &&
+			(shellStepsSinceLessonPass > 0 || toolsSinceLessonPass >= MEMORY_INTERVENTION_TURN_END_MIN_TOOLS)
+		);
+	}
+
+	function endpointStillBusy(): boolean {
+		try {
+			return deps.backgroundEndpointBusy?.() === true;
+		} catch {
+			// Unreadable occupancy fails closed: stay yielded rather than pile on.
+			return true;
+		}
+	}
+
+	function notifyTurnBoundary(kind: "start" | "end"): void {
+		try {
+			deps.onTurnBoundary?.(kind);
+		} catch {
+			// A wake signal never affects the turn it was raised from.
+		}
+	}
+
+	function notifyStepActivity(): void {
+		try {
+			deps.onStepActivity?.();
+		} catch {
+			// Status refresh is observability; it never steers a step.
+		}
+	}
 
 	function observeSession(input: MiddlewareHookInput): void {
 		if (input.sessionId === undefined) return;
@@ -657,6 +823,7 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 		pending.clear();
 		turnLog.length = 0;
 		succeededCommands.clear();
+		observedReads.clear();
 		trajectory.length = 0;
 		failures.clear();
 		toolStep = 0;
@@ -667,6 +834,9 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 		currentTask = "(current task unavailable)";
 		toolsSinceMemoryStep = 0;
 		toolsSinceLessonPass = 0;
+		shellStepsSinceLessonPass = 0;
+		lastLaunchYielded = false;
+		lastLaunchUnavailable = false;
 		consecutiveErrors = 0;
 		lastPromptedBoundary = null;
 		lastInjectedMessage = null;
@@ -730,7 +900,8 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 		const triggers = input.triggerReasons?.length ? input.triggerReasons : ["manual" as const];
 		// A finished turn gets the lesson pass in place of bank maintenance: one
 		// call either way, and the mid-turn steps already kept the bank current.
-		const consolidate = input.triggerReasons?.includes("turn_end") === true;
+		const consolidate =
+			input.triggerReasons?.includes("turn_end") === true || input.triggerReasons?.includes("idle_review") === true;
 		let tier: TaskMemoryTelemetryTier = "rules";
 		promptedStepTier = tier;
 		let promptedResult: TaskMemoryPolicyResult;
@@ -853,7 +1024,7 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 				});
 		}
 		if (!isCurrent()) return { ...promptedResult, reminder: null, effects: NO_EFFECTS };
-		if (promptedResult.reason === "endpoint_busy") telemetryDecision = "dropped";
+		if (YIELDED_REASONS.has(promptedResult.reason)) telemetryDecision = "dropped";
 		if (tier === "llm" && promptedResult.decision === "timeout") consecutiveLlmTimeouts += 1;
 		else if (tier === "llm" && telemetryDecision !== "dropped") consecutiveLlmTimeouts = 0;
 		lastDecision = promptedResult.decision;
@@ -1083,6 +1254,7 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 		toolStep += 1;
 		toolsSinceMemoryStep += 1;
 		toolsSinceLessonPass += 1;
+		if (prepared.toolName === ToolNames.Bash) shellStepsSinceLessonPass += 1;
 		const live = settings();
 		if (toolsSinceMemoryStep >= live.everyNTools) pendingTriggers.add("interval");
 		if (outcome === "error") {
@@ -1116,15 +1288,23 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 			// The complete command and nothing derived from it. Splitting a chain
 			// into its parts needs a shell parser to be right: `echo 'a && npm test'`
 			// and `true # && npm test` both succeed without running `npm test`.
-			succeededCommands.add(command);
-			if (succeededCommands.size > VERIFIED_COMMAND_LIMIT) {
-				succeededCommands.delete(succeededCommands.values().next().value ?? command);
-			}
+			rememberSucceededCommand(command);
 		}
+		const readPath =
+			prepared.toolName === ToolNames.Read && outcome === "ok" && typeof input.toolArgs?.path === "string"
+				? repositoryRelativePath(input.toolArgs.path, [workspaceRoot()])
+				: null;
+		// A successful read carries a bounded excerpt of what it returned, so the
+		// lesson pass can quote the source a fact came from. The excerpt is also
+		// the only text that read can later vouch for.
+		const readExcerpt = readPath === null ? "" : shortText(digest.text, TURN_LOG_READ_EXCERPT_CHARS);
+		if (readPath !== null) recordObservedRead(observedReads, readPath, readExcerpt);
+		const excerpt = outcome === "error" ? ` => ${shortText(digest.text, 160)}` : readExcerpt ? ` => ${readExcerpt}` : "";
 		turnLog.push(
-			`${toolStep}. ${outcome === "ok" ? "ok" : "FAILED"}: ${shortText(command ?? prepared.callDescription, TURN_LOG_CALL_MAX_CHARS)}${outcome === "error" ? ` => ${shortText(digest.text, 160)}` : ""}`,
+			`${toolStep}. ${outcome === "ok" ? "ok" : "FAILED"}: ${shortText(command ?? prepared.callDescription, TURN_LOG_CALL_MAX_CHARS)}${excerpt}`,
 		);
-		if (turnLog.length > TURN_LOG_LIMIT) turnLog.shift();
+		observeChainSteps(prepared.toolName, input);
+		while (turnLog.length > TURN_LOG_LIMIT) turnLog.shift();
 		trajectory.push(step);
 		if (trajectory.length > live.windowSteps) trajectory.splice(0, trajectory.length - live.windowSteps);
 		if (outcome === "ok" && WORKSPACE_CHANGING_CLASSES.has(String(input.metadata?.actionClass))) {
@@ -1141,6 +1321,47 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 		if (outcome !== "error") return NO_EFFECTS;
 		rememberFailure(step);
 		return annotateRepeatedFailure(step);
+	}
+
+	function rememberSucceededCommand(command: string): void {
+		succeededCommands.add(command);
+		if (succeededCommands.size > VERIFIED_COMMAND_LIMIT) {
+			succeededCommands.delete(succeededCommands.values().next().value ?? command);
+		}
+	}
+
+	/**
+	 * A gateway chain ran real steps under one outer call. Its settled, admitted
+	 * children (the canonical receipts every other ledger reader expands) add
+	 * their own lesson-log lines and evidence: a shell child's exact command when
+	 * it reported success with exit 0, a read child's excerpt as shown. The
+	 * outer call keeps its single trajectory step, failure episode and
+	 * reminder semantics; a failed or blocked child is logged and proves nothing.
+	 */
+	function observeChainSteps(toolName: string, input: MiddlewareHookInput): void {
+		const children = gatewayChainReceipts(toolName, { details: input.toolResultDetails });
+		for (const child of children) {
+			const details = isPlainRecord(child.result.details) ? child.result.details : {};
+			const settled = child.admission.outcome === "ok" && child.admission.decision === "allowed" && details.kind === "ok";
+			const label = `${toolStep}.${child.id}`;
+			if (child.capability === ToolNames.Bash && typeof child.args.command === "string") {
+				shellStepsSinceLessonPass += 1;
+				const succeeded = settled && details.outcome === "success" && details.exitCode === 0;
+				if (succeeded) rememberSucceededCommand(child.args.command);
+				turnLog.push(`${label} ${succeeded ? "ok" : "FAILED"}: ${shortText(child.args.command, TURN_LOG_CALL_MAX_CHARS)}`);
+				continue;
+			}
+			const path =
+				settled && child.capability === ToolNames.Read && typeof child.args.path === "string"
+					? repositoryRelativePath(child.args.path, [workspaceRoot()])
+					: null;
+			const excerpt =
+				path === null ? "" : shortText(redactSecretString(chainChildText(child.result)), TURN_LOG_READ_EXCERPT_CHARS);
+			if (path !== null) recordObservedRead(observedReads, path, excerpt);
+			turnLog.push(
+				`${label} ${settled ? "ok" : "FAILED"}: ${shortText(`${child.capability}${path === null ? "" : ` ${path}`}`, TURN_LOG_CALL_MAX_CHARS)}${excerpt ? ` => ${excerpt}` : ""}`,
+			);
+		}
 	}
 
 	/**
@@ -1312,6 +1533,19 @@ function prepareToolStep(input: MiddlewareHookInput): PendingToolStep | null {
 			CALL_DESCRIPTION_MAX_CHARS,
 		),
 	};
+}
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+	return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+/** The model-facing text a settled chain step returned. */
+function chainChildText(result: unknown): string {
+	const content = isPlainRecord(result) && Array.isArray(result.content) ? result.content : [];
+	return content
+		.map((block) => (isPlainRecord(block) && typeof block.text === "string" ? block.text : ""))
+		.filter(Boolean)
+		.join("\n");
 }
 
 function pendingKey(input: MiddlewareHookInput, operationFingerprint: string): string {

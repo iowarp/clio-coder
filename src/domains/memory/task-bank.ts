@@ -28,6 +28,18 @@ export interface TaskMemoryEntry {
 	 * successfully; the text of the lesson is never searched for evidence.
 	 */
 	evidenceCommand?: string;
+	/**
+	 * The repository file a lesson says it learned from, and the exact text it
+	 * quotes from it. A claim until the host finds a successful read of that
+	 * path in the reviewed activity and the quote in the current checkout.
+	 */
+	evidenceSource?: TaskMemoryEvidenceSource;
+}
+
+export interface TaskMemoryEvidenceSource {
+	/** Repository-relative POSIX path. */
+	path: string;
+	quote: string;
 }
 
 /** JSON-safe export shape. The bank itself remains session-scoped and in memory. */
@@ -51,6 +63,8 @@ export interface SaveTaskMemoryOptions {
 	durable?: boolean;
 	/** The command the lesson claims works. Lessons only. */
 	evidenceCommand?: string;
+	/** The source location and quote the lesson claims. Lessons only. */
+	evidenceSource?: TaskMemoryEvidenceSource;
 }
 
 /**
@@ -90,6 +104,7 @@ export class TaskMemoryBank {
 			options.id,
 			options.durable === true,
 			options.durable === true ? options.evidenceCommand : undefined,
+			options.durable === true ? options.evidenceSource : undefined,
 		);
 	}
 
@@ -213,6 +228,7 @@ export class TaskMemoryBank {
 		id: string | undefined,
 		durable = false,
 		evidenceCommand?: string,
+		evidenceSource?: TaskMemoryEvidenceSource,
 	): TaskMemoryEntry {
 		const entries = this.#mapFor(kind);
 		const normalized = normalizeContent(content);
@@ -229,6 +245,8 @@ export class TaskMemoryBank {
 		else Reflect.deleteProperty(saved, "durable");
 		if (durable && evidenceCommand !== undefined) saved.evidenceCommand = evidenceCommand;
 		else Reflect.deleteProperty(saved, "evidenceCommand");
+		if (durable && evidenceSource !== undefined) saved.evidenceSource = { ...evidenceSource };
+		else Reflect.deleteProperty(saved, "evidenceSource");
 		entries.set(saved.id, saved);
 		this.#evictOldest(entries, kind === "knowledge" ? this.#knowledgeCap : this.#proceduralCap);
 		return cloneEntry(saved);
@@ -278,7 +296,7 @@ function positiveInteger(value: number | undefined, fallback: number): number {
 }
 
 function cloneEntry(entry: TaskMemoryEntry): TaskMemoryEntry {
-	return { ...entry };
+	return entry.evidenceSource === undefined ? { ...entry } : { ...entry, evidenceSource: { ...entry.evidenceSource } };
 }
 
 function compareForEviction(left: TaskMemoryEntry, right: TaskMemoryEntry): number {

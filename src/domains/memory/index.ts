@@ -142,6 +142,7 @@ export {
 export {
 	describeTaskMemoryActivity,
 	type TaskMemoryActivityEvent,
+	type TaskMemoryGuardianState,
 	type TaskMemoryOperatorStatus,
 	type TaskMemoryTier,
 	taskMemoryBankSize,

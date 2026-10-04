@@ -70,6 +70,7 @@ export const BusChannels = {
 	ContextPruned: "context.pruned",
 	ContextRecalled: "context.recalled",
 	MemoryStepCompleted: "memory.stepCompleted",
+	MemoryGuardianChanged: "memory.guardianChanged",
 	AgentStatusChanged: "agent.status.changed",
 	RunAborted: "run.aborted",
 	BudgetAlert: "budget.alert",
@@ -146,6 +147,16 @@ export type DeclaredRuntimeNotice = RuntimeNoticePayload & { readonly [declaredR
 export interface MemoryStepCompletedPayload {
 	endpointKey: string;
 	targetId: string;
+}
+
+/**
+ * What the always-on memory guardian is doing now, published on
+ * {@link BusChannels.MemoryGuardianChanged} when it changes. Operator surfaces
+ * (the TUI footer, the ACP memory meta the GUI reads) project this one value.
+ */
+export interface MemoryGuardianChangedPayload {
+	sessionId: string | null;
+	state: "off" | "idle" | "reviewing" | "waiting-capacity" | "unavailable";
 }
 
 /** A successful model load or eviction on one residency-managed endpoint. */
@@ -906,6 +917,7 @@ export type BusPayloadMap = {
 	[BusChannels.ContextPruned]: ContextPrunedPayload;
 	[BusChannels.ContextRecalled]: ContextRecalledPayload;
 	[BusChannels.MemoryStepCompleted]: MemoryStepCompletedPayload;
+	[BusChannels.MemoryGuardianChanged]: MemoryGuardianChangedPayload;
 	[BusChannels.AgentStatusChanged]: AgentStatusChangedPayload;
 	[BusChannels.RunAborted]: RunAbortedPayload;
 	[BusChannels.BudgetAlert]: BudgetAlertPayload;

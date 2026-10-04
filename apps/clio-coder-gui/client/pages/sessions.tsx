@@ -21,9 +21,11 @@ import { routeFacts } from "../chat/route.js";
 import { PaneToggles, SessionPane } from "../chat/SessionPane.js";
 import { ConversationBanner, TaskSkeleton, TaskUnavailable } from "../chat/SessionStates.js";
 import { TelemetryChips } from "../chat/TelemetryChips.js";
+import { memoryGuardianMark } from "../chat/telemetry-model.js";
 import { type ChatTurn, groupTurns, turnStatuses } from "../chat/turns.js";
 import { useShown } from "../chat/use-shown.js";
 import { Icon } from "../design/icons.js";
+import { StatusMark } from "../design/status.js";
 import { setPageTitle } from "../interaction/announcer.js";
 import { useShortcut } from "../interaction/use-shortcut.js";
 import { JumpToLatest } from "../render/FollowLatest.js";
@@ -231,6 +233,10 @@ function SessionView({ client, id }: { client: Client; id: string }) {
 							: turn?.status === "failed"
 								? { tone: "failed", label: "Last turn failed" }
 								: null;
+	const memoryMark = memoryGuardianMark(
+		snapshot.telemetry?.memory,
+		snapshot.state !== "parked" && snapshot.state !== "closed" && snapshot.state !== "unknown" && snapshot.state !== "failed",
+	);
 	return (
 		<PaneContext.Provider value={paneActions}>
 			<section className="conversation" data-pane={paneOpen ? "open" : "closed"}>
@@ -257,6 +263,9 @@ function SessionView({ client, id }: { client: Client; id: string }) {
 							>
 								🦆
 							</span>
+						) : null}
+						{memoryMark ? (
+							<StatusMark tone={memoryMark.tone} label={memoryMark.label} title={memoryMark.title} live={memoryMark.live} />
 						) : null}
 						{/* The task's own actions sit with its name, not with the view controls at the far end. */}
 						<Menu label="Task actions">

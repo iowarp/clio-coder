@@ -211,7 +211,98 @@ export function recordEndpointSlotsFromStatus(
  */
 const foregroundStreams = new Map<string, number>();
 
+/**
+ * Hold one slot for a request the operator is waiting on. A background memory
+ * hold on the same endpoint that no longer fits its admitted bound is
+ * preempted in the same synchronous step, so a one-slot server yields to the
+ * foreground instead of making it queue behind optional work.
+ */
 export function registerForegroundStream(endpointKey: string): () => void {
+	const release = countStream(endpointKey);
+	preemptBackgroundStreams(endpointKey);
+	return release;
+}
+
+export function foregroundStreamUsage(): Readonly<Record<string, number>> {
+	return Object.fromEntries(foregroundStreams);
+}
+
+/**
+ * The slot bound background memory admits against on one endpoint.
+ *
+ * Dispatch treats an endpoint with no resolved capacity as unbounded, which is
+ * right for a worker the operator asked for. A background memory step is
+ * optional, so here an endpoint is one slot unless an operator override or a
+ * discovered slot count (this process's probe or a persisted prior) proves
+ * more. A runtime tier or scheduler name is not reported free-slot evidence.
+ */
+export function backgroundMemoryAdmissionLimit(capacity: EndpointCapacity | null | undefined): number {
+	return capacity?.limit ?? 1;
+}
+
+interface BackgroundStreamHolder {
+	limit: number;
+	preempt: () => void;
+	preempted: boolean;
+}
+
+const backgroundStreams = new Map<string, BackgroundStreamHolder[]>();
+
+/**
+ * Hold one endpoint slot for an optional background request.
+ *
+ * The slot counts in the same per-process usage every admission reader sees,
+ * so dispatch and the next memory admission both observe it. Unlike a
+ * foreground hold it is preemptible: a foreground claim that pushes the
+ * endpoint past the bound this request was admitted under calls `preempt`, and
+ * the slot stays counted until the caller releases it after its transport has
+ * actually settled. Releasing on the preempt signal would report a server slot
+ * as free while it may still be finishing the aborted prefill.
+ */
+export function registerBackgroundStream(
+	endpointKey: string,
+	options: { limit: number; preempt: () => void },
+): () => void {
+	const release = countStream(endpointKey);
+	const holder: BackgroundStreamHolder = { limit: options.limit, preempt: options.preempt, preempted: false };
+	const holders = backgroundStreams.get(endpointKey) ?? [];
+	holders.push(holder);
+	backgroundStreams.set(endpointKey, holders);
+	let held = true;
+	return () => {
+		if (!held) return;
+		held = false;
+		const current = backgroundStreams.get(endpointKey)?.filter((candidate) => candidate !== holder) ?? [];
+		if (current.length === 0) backgroundStreams.delete(endpointKey);
+		else backgroundStreams.set(endpointKey, current);
+		release();
+	};
+}
+
+/** Newest background holds yield first, until local usage fits every remaining holder's bound. */
+function preemptBackgroundStreams(endpointKey: string): void {
+	const holders = backgroundStreams.get(endpointKey);
+	if (holders === undefined) return;
+	const used = foregroundStreams.get(endpointKey) ?? 0;
+	let yielded = 0;
+	for (let index = holders.length - 1; index >= 0; index -= 1) {
+		const holder = holders[index];
+		if (holder === undefined || holder.preempted) {
+			if (holder?.preempted) yielded += 1;
+			continue;
+		}
+		if (used - yielded <= holder.limit) continue;
+		holder.preempted = true;
+		yielded += 1;
+		try {
+			holder.preempt();
+		} catch {
+			// A failing preempt callback must not stop the foreground request that claimed the slot.
+		}
+	}
+}
+
+function countStream(endpointKey: string): () => void {
 	foregroundStreams.set(endpointKey, (foregroundStreams.get(endpointKey) ?? 0) + 1);
 	let held = true;
 	return () => {
@@ -221,8 +312,4 @@ export function registerForegroundStream(endpointKey: string): () => void {
 		if (next <= 0) foregroundStreams.delete(endpointKey);
 		else foregroundStreams.set(endpointKey, next);
 	};
-}
-
-export function foregroundStreamUsage(): Readonly<Record<string, number>> {
-	return Object.fromEntries(foregroundStreams);
 }

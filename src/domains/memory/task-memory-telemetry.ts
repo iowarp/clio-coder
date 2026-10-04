@@ -32,6 +32,8 @@ export type TaskMemoryTelemetryTrigger =
 	| "repeated_failure"
 	| "turn_end"
 	| "post_compaction"
+	/** The idle guardian reviewed completed activity or repository history between turns. */
+	| "idle_review"
 	| "manual";
 
 export type TaskMemoryTelemetryTier = "rules" | "llm";
@@ -221,6 +223,7 @@ const TRIGGERS = new Set<TaskMemoryTelemetryTrigger>([
 	"repeated_failure",
 	"turn_end",
 	"post_compaction",
+	"idle_review",
 	"manual",
 ]);
 const DECISIONS = new Set<TaskMemoryTelemetryDecision>([
@@ -246,6 +249,7 @@ const REASONS = new Set<TaskMemoryPolicyReason>([
 	"deadline",
 	"timed_out",
 	"endpoint_busy",
+	"endpoint_preempted",
 	"client_error",
 	"information_flow_blocked",
 	"no_client",

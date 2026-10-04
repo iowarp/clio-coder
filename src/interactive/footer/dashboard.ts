@@ -274,6 +274,7 @@ export function buildFooterDashboard(deps: FooterDashboardDeps): FooterDashboard
 							size: taskMemory.size,
 							stepInFlight: taskMemory.stepInFlight,
 							lastDecision: taskMemory.lastDecision,
+							...(taskMemory.guardian === undefined ? {} : { guardian: taskMemory.guardian }),
 						}
 					: null,
 			},

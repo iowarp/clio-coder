@@ -37,6 +37,7 @@ export type { ProvidersContract, TargetHealth, TargetStatus } from "./contract.j
 export { credentialsPresent } from "./credentials.js";
 export { isDispatchEligibleRuntime, isOrchestratorEligibleRuntime, isTargetEligibleRuntime } from "./eligibility.js";
 export {
+	backgroundMemoryAdmissionLimit,
 	canonicalEndpointKey,
 	type EndpointCapacity,
 	type EndpointCapacityInput,
@@ -49,6 +50,7 @@ export {
 	endpointLabel,
 	foregroundStreamUsage,
 	recordEndpointSlotsFromStatus,
+	registerBackgroundStream,
 	registerForegroundStream,
 	resolveEndpointCapacities,
 } from "./endpoint-capacity.js";

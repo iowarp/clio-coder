@@ -20491,6 +20491,37 @@
 													},
 													"maxItems": 1
 												},
+												"memory": {
+													"type": "object",
+													"required": ["state"],
+													"properties": {
+														"state": {
+															"anyOf": [
+																{
+																	"type": "string",
+																	"const": "off"
+																},
+																{
+																	"type": "string",
+																	"const": "idle"
+																},
+																{
+																	"type": "string",
+																	"const": "reviewing"
+																},
+																{
+																	"type": "string",
+																	"const": "waiting-capacity"
+																},
+																{
+																	"type": "string",
+																	"const": "unavailable"
+																}
+															]
+														}
+													},
+													"additionalProperties": false
+												},
 												"usage": {
 													"type": "object",
 													"required": ["used", "size"],
@@ -24415,6 +24446,37 @@
 													},
 													"maxItems": 1
 												},
+												"memory": {
+													"type": "object",
+													"required": ["state"],
+													"properties": {
+														"state": {
+															"anyOf": [
+																{
+																	"type": "string",
+																	"const": "off"
+																},
+																{
+																	"type": "string",
+																	"const": "idle"
+																},
+																{
+																	"type": "string",
+																	"const": "reviewing"
+																},
+																{
+																	"type": "string",
+																	"const": "waiting-capacity"
+																},
+																{
+																	"type": "string",
+																	"const": "unavailable"
+																}
+															]
+														}
+													},
+													"additionalProperties": false
+												},
 												"usage": {
 													"type": "object",
 													"required": ["used", "size"],
@@ -26924,6 +26986,37 @@
 													},
 													"maxItems": 1
 												},
+												"memory": {
+													"type": "object",
+													"required": ["state"],
+													"properties": {
+														"state": {
+															"anyOf": [
+																{
+																	"type": "string",
+																	"const": "off"
+																},
+																{
+																	"type": "string",
+																	"const": "idle"
+																},
+																{
+																	"type": "string",
+																	"const": "reviewing"
+																},
+																{
+																	"type": "string",
+																	"const": "waiting-capacity"
+																},
+																{
+																	"type": "string",
+																	"const": "unavailable"
+																}
+															]
+														}
+													},
+													"additionalProperties": false
+												},
 												"usage": {
 													"type": "object",
 													"required": ["used", "size"],
@@ -29396,6 +29489,37 @@
 															"const": "duck"
 														},
 														"maxItems": 1
+													},
+													"memory": {
+														"type": "object",
+														"required": ["state"],
+														"properties": {
+															"state": {
+																"anyOf": [
+																	{
+																		"type": "string",
+																		"const": "off"
+																	},
+																	{
+																		"type": "string",
+																		"const": "idle"
+																	},
+																	{
+																		"type": "string",
+																		"const": "reviewing"
+																	},
+																	{
+																		"type": "string",
+																		"const": "waiting-capacity"
+																	},
+																	{
+																		"type": "string",
+																		"const": "unavailable"
+																	}
+																]
+															}
+														},
+														"additionalProperties": false
 													},
 													"usage": {
 														"type": "object",
@@ -32116,6 +32240,37 @@
 														"const": "duck"
 													},
 													"maxItems": 1
+												},
+												"memory": {
+													"type": "object",
+													"required": ["state"],
+													"properties": {
+														"state": {
+															"anyOf": [
+																{
+																	"type": "string",
+																	"const": "off"
+																},
+																{
+																	"type": "string",
+																	"const": "idle"
+																},
+																{
+																	"type": "string",
+																	"const": "reviewing"
+																},
+																{
+																	"type": "string",
+																	"const": "waiting-capacity"
+																},
+																{
+																	"type": "string",
+																	"const": "unavailable"
+																}
+															]
+														}
+													},
+													"additionalProperties": false
 												},
 												"usage": {
 													"type": "object",
@@ -39580,6 +39735,37 @@
 													"const": "duck"
 												},
 												"maxItems": 1
+											},
+											"memory": {
+												"type": "object",
+												"required": ["state"],
+												"properties": {
+													"state": {
+														"anyOf": [
+															{
+																"type": "string",
+																"const": "off"
+															},
+															{
+																"type": "string",
+																"const": "idle"
+															},
+															{
+																"type": "string",
+																"const": "reviewing"
+															},
+															{
+																"type": "string",
+																"const": "waiting-capacity"
+															},
+															{
+																"type": "string",
+																"const": "unavailable"
+															}
+														]
+													}
+												},
+												"additionalProperties": false
 											},
 											"usage": {
 												"type": "object",

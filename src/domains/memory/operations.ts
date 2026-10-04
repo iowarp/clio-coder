@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import { canonicalizeExistingPath } from "../../core/path-canonical.js";
 import { ceilChars } from "../session/context-accounting.js";
@@ -140,6 +140,43 @@ function linkedWorktreeMainRoot(root: string): string | null {
 		// unreadable. Each of those keeps the path identity it always had.
 		return null;
 	}
+}
+
+/** Linked worktrees a repository may have before the guardian stops listing them. */
+const RELATED_WORKTREE_LIMIT = 64;
+
+/**
+ * The checkout roots that share one canonical repository identity: the main
+ * checkout, every linked worktree its `.git/worktrees/<name>/gitdir` records,
+ * and the queried directory itself when it sits below one of them. A worktree
+ * is listed only when its own `.git` pointer resolves back to the same main
+ * root, so a stale record or an unrelated directory never joins the set. Read
+ * from Git's own files; no subprocess runs.
+ */
+export function relatedRepositoryRoots(cwd: string): { repository: MemoryRepositoryIdentity; roots: string[] } | null {
+	const repository = canonicalMemoryRepositoryIdentity(cwd);
+	if (repository === null) return null;
+	const roots = new Set<string>([repository.key]);
+	const current = canonicalizeExistingPath(cwd);
+	if (isUsableAbsoluteRepositoryPath(current)) roots.add(current);
+	let names: string[] = [];
+	try {
+		names = readdirSync(join(repository.key, ".git", "worktrees")).sort();
+	} catch {
+		// No linked worktrees, or `.git` is not a directory here: the main root alone.
+	}
+	for (const name of names) {
+		if (roots.size >= RELATED_WORKTREE_LIMIT) break;
+		try {
+			const gitFile = readFileSync(join(repository.key, ".git", "worktrees", name, "gitdir"), "utf8").trim();
+			if (!isAbsolute(gitFile)) continue;
+			const root = canonicalizeExistingPath(dirname(gitFile));
+			if (canonicalMemoryRepositoryIdentity(root)?.key === repository.key) roots.add(root);
+		} catch {
+			// A pruned or unreadable worktree record names nothing this repository can vouch for.
+		}
+	}
+	return { repository, roots: [...roots] };
 }
 
 function canonicalActiveRepository(

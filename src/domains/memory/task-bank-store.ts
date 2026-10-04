@@ -100,7 +100,23 @@ function parseEntry(value: unknown, kind: TaskMemoryEntry["kind"]): TaskMemoryEn
 		value.evidenceCommand.length <= TASK_MEMORY_CONTENT_MAX_CHARS
 			? { evidenceCommand: value.evidenceCommand }
 			: {}),
+		...(value.durable === true && isEvidenceSource(value.evidenceSource)
+			? { evidenceSource: { path: value.evidenceSource.path, quote: value.evidenceSource.quote } }
+			: {}),
 	};
+}
+
+function isEvidenceSource(value: unknown): value is { path: string; quote: string } {
+	if (value === null || typeof value !== "object") return false;
+	const { path, quote } = value as { path?: unknown; quote?: unknown };
+	return (
+		typeof path === "string" &&
+		path.length > 0 &&
+		path.length <= TASK_MEMORY_CONTENT_MAX_CHARS &&
+		typeof quote === "string" &&
+		quote.length > 0 &&
+		quote.length <= TASK_MEMORY_CONTENT_MAX_CHARS
+	);
 }
 
 function pruneSnapshots(dir: string): void {

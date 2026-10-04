@@ -25,6 +25,9 @@ export interface TaskMemoryActivityEvent {
 	latencyMs: number;
 }
 
+/** What the always-on memory guardian is doing; one value every operator surface projects. */
+export type TaskMemoryGuardianState = "off" | "idle" | "reviewing" | "waiting-capacity" | "unavailable";
+
 /** Read-only projection shared by operator surfaces. */
 export interface TaskMemoryOperatorStatus {
 	enabled: boolean;
@@ -36,6 +39,8 @@ export interface TaskMemoryOperatorStatus {
 	activity: ReadonlyArray<TaskMemoryActivityEvent>;
 	/** True while a detached background memory step is still running. */
 	stepInFlight: boolean;
+	/** Guardian state; absent on a surface that does not run the guardian. */
+	guardian?: TaskMemoryGuardianState;
 	/**
 	 * Lifetime llm-tier spend and hit rate folded from the telemetry ledger. Null
 	 * on a surface that does not read the ledger, which is every surface that
