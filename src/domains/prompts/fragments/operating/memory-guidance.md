@@ -15,9 +15,15 @@ explicitly request context-handoff, export the actual bank snapshot where writes
 are authorized, and run `clio-coder memory promote --from-handoff <path>
 --entry <id> --scope repo --repository <canonical-absolute-path>`.
 If the entry is absent, report that limit; never invent entries, provenance, or
-a memory-writing tool. Promotion persists an unapproved proposal. The operator
+a memory-writing tool. `memory_recall` only reads: it searches task-bank
+knowledge and procedural entries and approved durable records that apply here,
+and no tool writes memory. Promotion persists an unapproved proposal. The operator
 reviews its lesson, citations and scope with `clio-coder memory list`, then
-separately runs `clio-coder memory approve <memoryId>`.
+separately runs `clio-coder memory approve <memoryId>`, or selects it under
+pending review in `/memory` and presses `a` to approve or `x` to reject.
+A repository lesson that reached you as a reminder can approve itself once the
+session shows it held, and withdraw itself when a later session contradicts it;
+global, runtime and agent scope always wait for the operator.
 Do not treat a general request to remember as approval of an unseen record.
 Report proposal, approval and persistence only from observed results; never
 claim retention from acknowledgement, transcript recovery, or unrelated memory.

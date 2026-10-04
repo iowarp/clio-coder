@@ -66,6 +66,7 @@ export const TOOL_PLACEMENT: Readonly<Record<BuiltinToolName, ToolPlacement>> = 
 	[ToolNames.ClioDocs]: "gateway",
 	[ToolNames.ClioLibrary]: "gateway",
 	[ToolNames.Data]: "gateway",
+	[ToolNames.MemoryRecall]: "gateway",
 	[ToolNames.Write]: "direct",
 	[ToolNames.Edit]: "direct",
 	[ToolNames.Bash]: "direct",

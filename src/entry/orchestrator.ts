@@ -63,7 +63,7 @@ import { runOperatorRecall } from "../domains/context/working-set/operator-recal
 import type { ReadRecallPort } from "../domains/context/working-set/reread.js";
 import { createRereadRecallPort } from "../domains/context/working-set/reread.js";
 import { endpointCapacityUsage } from "../domains/dispatch/capacity-lease.js";
-import type { DispatchContract } from "../domains/dispatch/contract.js";
+import type { DispatchContract, DispatchRequest } from "../domains/dispatch/contract.js";
 import { createDispatchDedupRegistration } from "../domains/dispatch/dedup.js";
 import { agentRoleFactsResolver } from "../domains/dispatch/execution-role.js";
 import { readGateDecisionArtifacts, readPendingGateDecisions } from "../domains/dispatch/gate-decisions.js";
@@ -80,10 +80,16 @@ import { type ExtensionsContract, ExtensionsDomainModule } from "../domains/exte
 import { type InteropContract, InteropDomainModule } from "../domains/interop/index.js";
 import { describeUpgradeNotice, ensureClioState, takeUpgradeNotice } from "../domains/lifecycle/index.js";
 import {
+	buildDispatchMemorySection,
+	canonicalMemoryRepositoryIdentity,
 	createTaskMemoryTelemetrySink,
 	createTaskMemoryTrace,
+	loadMemoryRecordsSync,
+	type MemoryGateOutcome,
+	type MemoryRecord,
 	proposeInjectedTaskMemory,
 	readTaskMemorySpendSummary,
+	recordMemoryObservations,
 	renderTaskMemoryHandoffSource,
 	seedTaskMemoryFromNewestHandoff,
 	type TaskMemoryEntry,
@@ -93,9 +99,15 @@ import {
 	taskMemoryHandoffSeedOffer,
 	taskMemoryTracePath,
 } from "../domains/memory/index.js";
+import { eligibleMemoryRecords } from "../domains/memory/operations.js";
 import { createMemoryPromptReader } from "../domains/memory/prompt-cache.js";
 import { createMemoryRelevance } from "../domains/memory/relevance-source.js";
 import { TaskMemoryBank } from "../domains/memory/task-bank.js";
+import {
+	deleteTaskBankSnapshot,
+	loadTaskBankSnapshot,
+	saveTaskBankSnapshot,
+} from "../domains/memory/task-bank-store.js";
 import {
 	TaskMemoryEndpointBusyError,
 	TaskMemoryInformationFlowBlockedError,
@@ -120,7 +132,11 @@ import {
 	MiddlewareDomainModule,
 	writeMiddlewareDiagnosticToStderr,
 } from "../domains/middleware/index.js";
-import { createMemoryInterventionRegistration } from "../domains/middleware/memory-intervention.js";
+import {
+	createMemoryInterventionRegistration,
+	type MemoryDeliveryOutcome,
+	type MemoryKnowledgeReview,
+} from "../domains/middleware/memory-intervention.js";
 import { announceMemoryStepEndpoint } from "../domains/middleware/memory-step-endpoint.js";
 import { createPlanCloseRegistration } from "../domains/middleware/plan-close.js";
 import { createTaskBoardReminderRegistration } from "../domains/middleware/task-board-reminder.js";
@@ -407,6 +423,45 @@ interface CompactionResolution {
 function resolveTarget(providers: ProvidersContract, targetId: string | null | undefined): TargetDescriptor | null {
 	if (!targetId) return null;
 	return providers.getTarget(targetId);
+}
+
+/**
+ * Every attended dispatch path (the dispatch tool, slash commands, turn control)
+ * receives this one contract, so the durable memory section headless `run`
+ * builds is sealed here once rather than at each request builder. A request
+ * that already carries a section keeps it; an unreadable store sends none.
+ */
+function withDispatchMemory(
+	contract: DispatchContract | undefined,
+	getSettings: () => Readonly<ClioSettings> | undefined,
+): DispatchContract | undefined {
+	if (contract === undefined) return undefined;
+	const withMemory = (request: DispatchRequest): DispatchRequest => {
+		if (request.memorySection !== undefined) return request;
+		const settings = getSettings() ?? readSettings();
+		let section = "";
+		try {
+			section = buildDispatchMemorySection({
+				dataDir: clioDataDir(),
+				cwd: process.cwd(),
+				settings,
+				route: {
+					agentId: request.agentId,
+					...(request.target !== undefined ? { target: request.target } : {}),
+					...(request.workerProfile !== undefined ? { workerProfile: request.workerProfile } : {}),
+					...(request.workerRuntime !== undefined ? { workerRuntime: request.workerRuntime } : {}),
+				},
+			});
+		} catch {
+			// Memory is advisory; a store that cannot be read must not block the dispatch.
+		}
+		return section.length > 0 ? { ...request, memorySection: section } : request;
+	};
+	return {
+		...contract,
+		dispatch: (request, observer, preparation) => contract.dispatch(withMemory(request), observer, preparation),
+		dispatchBatch: (requests, preparation) => contract.dispatchBatch(requests.map(withMemory), preparation),
+	};
 }
 
 function settingsTargetRuntime(settings: Readonly<ClioSettings>, targetId: string | null | undefined): string | null {
@@ -1664,7 +1719,9 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	);
 	timer.mark(`domains loaded (${result.loaded.length})`);
 
-	const dispatch = result.getContract<DispatchContract>("dispatch");
+	const dispatch = withDispatchMemory(result.getContract<DispatchContract>("dispatch"), () =>
+		effectiveSettingsForDispatch?.(),
+	);
 	if (dispatch) {
 		termination.onDrain(async () => {
 			await dispatch.drain();
@@ -1981,23 +2038,165 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			...(observability === undefined ? {} : { observability }),
 		});
 	};
-	const proposeInjectedMemoryEntries = (entries: ReadonlyArray<TaskMemoryEntry>): void => {
+	// Bank entry id to the durable proposal it became, held until the guardian
+	// reports what the session saw after delivery. Entry ids restart with every
+	// bank reset, so a final outcome report clears the map.
+	const proposedMemoryByEntry = new Map<
+		string,
+		{
+			content: string;
+			record: Promise<{ memoryId: string; sessionId: string } | null>;
+			/**
+			 * Whether this session already reported the proposal held. Filing and
+			 * evidence are separate: a lesson filed before its command had run is
+			 * still owed its held observation when the command later succeeds.
+			 */
+			held: boolean;
+		}
+	>();
+	const reportGateOutcome = (result: MemoryGateOutcome): void => {
+		const lines = [
+			...result.approved.map((record) => `Memory: kept a repository lesson (${record.id}): ${record.lesson}`),
+			...result.demoted.map((record) => `Memory: withdrew a repository lesson that stopped holding (${record.id}).`),
+		];
+		for (const line of lines) {
+			if (deferredWatchdogNoticeSink) deferredWatchdogNoticeSink(line);
+			else writeDiagnostic(`[clio-coder:memory] ${line}\n`);
+		}
+	};
+	const reportMemoryStoreFailure = (what: string) => (error: unknown) => {
+		writeDiagnostic(`[clio-coder:memory] ${what}: ${error instanceof Error ? error.message : String(error)}\n`);
+	};
+	/** Propose entries at repository scope and record what the session observed about each. */
+	const proposeMemoryEntries = (
+		entries: ReadonlyArray<TaskMemoryEntry>,
+		kind: "delivered" | "held" | null,
+		scopeSessionId?: string,
+	): void => {
 		const meta = session?.current() ?? null;
-		void proposeInjectedTaskMemory(clioDataDir(), {
-			sessionId: meta?.id ?? null,
+		const sessionId = scopeSessionId ?? meta?.id ?? null;
+		const proposal = proposeInjectedTaskMemory(clioDataDir(), {
+			sessionId,
 			cwd: meta?.cwd || process.cwd(),
 			entries,
 		})
-			.then((result) => {
+			.then(async (result) => {
 				for (const error of result.errors) {
 					writeDiagnostic(`[clio-coder:memory] proposed record not written for ${error}\n`);
 				}
+				if (sessionId !== null && kind !== null && result.records.length > 0) {
+					reportGateOutcome(
+						await recordMemoryObservations(
+							clioDataDir(),
+							// Only lessons collect evidence. A cited plain entry is still filed
+							// for the operator, and stays pending without them.
+							[
+								...new Set(
+									entries.flatMap((entry) => {
+										const record = entry.durable === true ? result.recordByEntry.get(entry.id) : undefined;
+										return record === undefined ? [] : [record.id];
+									}),
+								),
+							].map((memoryId) => ({ memoryId, sessionId, kind })),
+						),
+					);
+				}
+				return result.recordByEntry;
 			})
 			.catch((error: unknown) => {
-				writeDiagnostic(
-					`[clio-coder:memory] proposed records not written: ${error instanceof Error ? error.message : String(error)}\n`,
-				);
+				reportMemoryStoreFailure("proposed records not written")(error);
+				return new Map<string, MemoryRecord>();
 			});
+		for (const entry of entries) {
+			proposedMemoryByEntry.set(entry.id, {
+				content: entry.content,
+				held: kind === "held" && entry.durable === true,
+				record: proposal.then((records) => {
+					const record = entry.durable === true ? records.get(entry.id) : undefined;
+					return record === undefined || sessionId === null ? null : { memoryId: record.id, sessionId };
+				}),
+			});
+		}
+	};
+	const proposeInjectedMemoryEntries = (entries: ReadonlyArray<TaskMemoryEntry>): void =>
+		proposeMemoryEntries(entries, "delivered");
+	/**
+	 * A knowledge entry the guardian kept across a later step becomes a
+	 * repository lesson; one it deleted or rewrote takes its lesson back.
+	 */
+	const reviewMemoryKnowledge = (review: MemoryKnowledgeReview): void => {
+		const fresh = review.kept.filter((entry) => proposedMemoryByEntry.get(entry.id)?.content !== entry.content);
+		// Already filed, now grounded: the observation goes to the existing
+		// proposal. The gate still holds a record the operator rejected.
+		const nowHeld = review.kept.flatMap((entry) => {
+			const filed = proposedMemoryByEntry.get(entry.id);
+			if (filed === undefined || filed.content !== entry.content || filed.held) return [];
+			filed.held = true;
+			return [filed.record];
+		});
+		if (fresh.length > 0) proposeMemoryEntries(fresh, "held");
+		if (nowHeld.length > 0) {
+			void Promise.all(nowHeld)
+				.then((resolved) =>
+					recordMemoryObservations(
+						clioDataDir(),
+						resolved.filter((item) => item !== null).map((item) => ({ ...item, kind: "held" as const })),
+					),
+				)
+				.then(reportGateOutcome)
+				.catch(reportMemoryStoreFailure("held lessons not recorded"));
+		}
+		const unfounded = review.ungrounded.filter((entry) => proposedMemoryByEntry.get(entry.id)?.content !== entry.content);
+		if (unfounded.length > 0) proposeMemoryEntries(unfounded, null);
+		const withdrawn = review.withdrawn.flatMap((entry) => {
+			const proposed = proposedMemoryByEntry.get(entry.id);
+			if (proposed?.content !== entry.content) return [];
+			proposedMemoryByEntry.delete(entry.id);
+			return [proposed.record];
+		});
+		if (withdrawn.length === 0) return;
+		void Promise.all(withdrawn)
+			.then((resolved) =>
+				recordMemoryObservations(
+					clioDataDir(),
+					resolved.filter((item) => item !== null).map((item) => ({ ...item, kind: "contradicted" as const })),
+				),
+			)
+			.then(reportGateOutcome)
+			.catch(reportMemoryStoreFailure("withdrawn knowledge not recorded"));
+	};
+	/**
+	 * Feed what the session saw after a delivery into the durable store's gate
+	 * and tell the operator when it changed a record, since nobody reviews these
+	 * by hand any more.
+	 */
+	const settleMemoryDeliveries = (outcomes: ReadonlyArray<MemoryDeliveryOutcome>, final: boolean): void => {
+		const pending = outcomes.flatMap((outcome) =>
+			outcome.entries.map(async (entry) => {
+				// Bound to the fact that was delivered: an entry rewritten since then
+				// holds a different proposal under the same id, and that one was not
+				// what this outcome observed.
+				const current = proposedMemoryByEntry.get(entry.id);
+				if (current?.content !== entry.content) return null;
+				if (outcome.kind === "held") {
+					if (current.held) return null;
+					current.held = true;
+				}
+				const proposed = await current.record;
+				return proposed ? { ...proposed, kind: outcome.kind } : null;
+			}),
+		);
+		if (final) proposedMemoryByEntry.clear();
+		if (pending.length === 0) return;
+		void Promise.all(pending)
+			.then((resolved) =>
+				recordMemoryObservations(
+					clioDataDir(),
+					resolved.filter((item) => item !== null),
+				),
+			)
+			.then(reportGateOutcome)
+			.catch(reportMemoryStoreFailure("delivery outcomes not recorded"));
 	};
 	const memoryFlowNoticedSessions = new Set<string | null>();
 	const admitMemoryFlow: AdmitBackgroundModelFlow = (destination) => {
@@ -2019,6 +2218,8 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		}
 		return refusal;
 	};
+	const getCurrentMemoryEnabled = (): boolean =>
+		(effectiveSettingsForDispatch?.().context.memory ?? memorySettings).enabled;
 	const memoryIntervention = createMemoryInterventionRegistration({
 		bank: taskMemoryBank,
 		telemetry: createTaskMemoryTelemetrySink(),
@@ -2040,10 +2241,47 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		...createBackgroundMemoryRouting(providers, () => effectiveSettingsForDispatch?.(), bus, admitMemoryFlow),
 		captureStepUsage: captureBackgroundMemoryUsage,
 		onInjectedEntries: (entries) => proposeInjectedMemoryEntries(entries),
+		onDeliveryOutcomes: settleMemoryDeliveries,
+		onKnowledgeReview: reviewMemoryKnowledge,
+		getKeptLessons: () =>
+			eligibleMemoryRecords(loadMemoryRecordsSync(clioDataDir()), {
+				scopes: ["repo"],
+				activeRepository: canonicalMemoryRepositoryIdentity(session?.current()?.cwd || process.cwd()),
+			})
+				.slice(0, 10)
+				.map((record) => ({ id: record.id, text: record.lesson })),
+		onKeptLessonsRetired: (memoryIds) => {
+			const sessionId = session?.current()?.id;
+			if (sessionId === undefined) return;
+			void recordMemoryObservations(
+				clioDataDir(),
+				memoryIds.map((memoryId) => ({ memoryId, sessionId, kind: "contradicted" as const })),
+			)
+				.then(reportGateOutcome)
+				.catch(reportMemoryStoreFailure("retired lessons not recorded"));
+		},
+		onScopeEnd: ({ sessionId, lessons }) => {
+			// A lesson a later step already kept is in the store; the rest are filed
+			// without evidence and wait for a later session to learn the same thing.
+			const unfiled = lessons.filter((entry) => proposedMemoryByEntry.get(entry.id)?.content !== entry.content);
+			if (unfiled.length > 0) proposeMemoryEntries(unfiled, null, sessionId);
+		},
 	});
 	middleware.registerHook(memoryIntervention);
 	const unsubscribeMemoryLoop = bus.on(BusChannels.LoopBlocked, () => memoryIntervention.signalLoop());
-	const disposeMemoryLifecycle = bindTaskMemoryLifecycle(bus, memoryIntervention);
+	const disposeMemoryLifecycle = bindTaskMemoryLifecycle(bus, memoryIntervention, {
+		save: (sessionId) => {
+			saveTaskBankSnapshot(clioStateDir(), sessionId, taskMemoryBank.snapshot());
+		},
+		restore: (sessionId) => {
+			const snapshot = loadTaskBankSnapshot(clioStateDir(), sessionId);
+			// Consumed on read: a crash after `/tree` cleared the bank must not find
+			// this snapshot again on the next resume.
+			deleteTaskBankSnapshot(clioStateDir(), sessionId);
+			if (snapshot !== null && getCurrentMemoryEnabled()) taskMemoryBank.restore(snapshot);
+		},
+		discard: (sessionId) => deleteTaskBankSnapshot(clioStateDir(), sessionId),
+	});
 	termination.onDrain(() => {
 		unsubscribeMemoryLoop();
 		disposeMemoryLifecycle();
@@ -2581,6 +2819,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		currentSession: currentSessionId,
 		recording: () => getCurrentSettings().systemOne.record,
 	});
+	let lastMemoryPromptRuntimeId: string | undefined;
 	const memoryReader = createMemoryPromptReader({
 		getDataDir: clioDataDir,
 		// A section built under a ranking joins each record it admitted to that
@@ -2722,6 +2961,25 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			: {}),
 		getContextBudget: () => chat.inspectLiveBudget(),
 		requestSelfCompact: (note, toolCallId, signal) => chat.requestSelfCompact(note, toolCallId, signal),
+		// Read-only recall over the stores the main prompt draws from, under the
+		// same repository and runtime gates; the agent scope stays with workers.
+		memoryRecall: {
+			bank: () => taskMemoryBank.snapshot(),
+			records: () => loadMemoryRecordsSync(clioDataDir()),
+			eligibility: () => {
+				// The session header keeps the target the session was created with;
+				// routing changed in the TUI or over ACP only appends ledger entries.
+				// The prompt path reports the runtime it actually compiled for.
+				const settingsTarget = getCurrentSettings().chat.target;
+				const runtimeId =
+					lastMemoryPromptRuntimeId ?? (settingsTarget ? providers.getTarget(settingsTarget)?.runtime : undefined);
+				return {
+					activeRepository: canonicalMemoryRepositoryIdentity(process.cwd()),
+					activeRuntime: runtimeId === undefined ? null : { kind: "runtime", key: runtimeId },
+					activeAgent: null,
+				};
+			},
+		},
 		getSettings: () => getCurrentSettings(),
 		getRouteProvenance: routeProvenance,
 		termination,
@@ -3359,7 +3617,10 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		bus,
 		...(prompts ? { prompts } : {}),
 		...(session ? { session } : {}),
-		getMemorySection: memoryReader,
+		getMemorySection: (request) => {
+			lastMemoryPromptRuntimeId = request.runtimeId;
+			return memoryReader(request);
+		},
 		// Memory is ranked while the prompt composes, and only when the order decides
 		// what the section carries: more eligible records than it admits and no
 		// ranking pinned earlier in the session.

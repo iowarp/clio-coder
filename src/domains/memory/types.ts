@@ -9,9 +9,9 @@ export type MemoryScope = (typeof MEMORY_SCOPES)[number];
  *
  * `canonical-path` is deliberately conservative: callers must construct it
  * from the active repository root with `canonicalMemoryRepositoryIdentity`.
- * Symlink aliases collapse to the same key, while moved repositories and Git
- * worktrees remain distinct until a stronger, durable repository identifier
- * is introduced. The path scheme also works for non-Git repositories.
+ * Symlink aliases and linked Git worktrees collapse to the main checkout's
+ * key, while moved repositories remain distinct until a stronger, durable
+ * repository identifier is introduced. The path scheme also works for non-Git repositories.
  */
 export interface MemoryRepositoryIdentity {
 	kind: "canonical-path";
@@ -45,6 +45,28 @@ export interface MemoryRecordProvenance {
 	redaction?: MemoryPromotionRedaction;
 }
 
+export const MEMORY_OBSERVATION_KINDS = ["delivered", "held", "contradicted"] as const;
+export type MemoryObservationKind = (typeof MEMORY_OBSERVATION_KINDS)[number];
+/** Oldest observations fall off first; the gate reads only what is retained. */
+export const MEMORY_OBSERVATIONS_MAX = 32;
+
+/**
+ * What a session saw happen after a lesson reached the action agent.
+ * `delivered` says the reminder citing it was shown, `held` that the failures
+ * open at delivery did not come back, `contradicted` that they did.
+ */
+export interface MemoryObservation {
+	at: string;
+	sessionId: string;
+	kind: MemoryObservationKind;
+}
+
+/** Who flipped `approved`. Absent on records approved before the guardian gate existed. */
+export interface MemoryApproval {
+	by: "operator" | "guardian";
+	at: string;
+}
+
 export interface MemoryRecord {
 	id: string;
 	scope: MemoryScope;
@@ -67,6 +89,8 @@ export interface MemoryRecord {
 	agent?: MemoryAgentIdentity;
 	/** Source and pre-persistence redaction facts for reviewed proposals. */
 	provenance?: MemoryRecordProvenance;
+	approval?: MemoryApproval;
+	observations?: MemoryObservation[];
 }
 
 export interface MemoryStoreFile {

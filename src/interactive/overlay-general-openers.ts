@@ -11,7 +11,12 @@ import {
 	fleetRouteResolver,
 } from "../domains/dispatch/index.js";
 import type { MemoryRecord } from "../domains/memory/index.js";
-import { loadMemoryRecordsSync, proposeTaskBankPromotion } from "../domains/memory/index.js";
+import {
+	approveMemoryRecord,
+	loadMemoryRecordsSync,
+	proposeTaskBankPromotion,
+	rejectMemoryRecord,
+} from "../domains/memory/index.js";
 import type { ObservabilityContract } from "../domains/observability/index.js";
 import { renderCostAggregate } from "../domains/observability/index.js";
 import type { ContextLedger } from "../domains/session/context-ledger.js";
@@ -356,6 +361,14 @@ export function createOverlayGeneralOpeners(deps: OverlayGeneralOpenersDeps): Ov
 				const result = await proposeTaskBankPromotion(deps.dataDir, { id: meta.id, cwd: meta.cwd }, entry, scope);
 				records = loadMemoryRecordsSync(deps.dataDir);
 				return result;
+			},
+			onReview: async (record, action) => {
+				const updated =
+					action === "approve"
+						? await approveMemoryRecord(deps.dataDir, record.id)
+						: await rejectMemoryRecord(deps.dataDir, record.id);
+				records = loadMemoryRecordsSync(deps.dataDir);
+				return updated;
 			},
 		});
 		deps.requestRender();

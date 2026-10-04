@@ -7,7 +7,13 @@ import {
 	MEMORY_INTERVENTION_SYSTEM_PROMPT,
 } from "../prompts/memory-intervention.js";
 import type { CostProvenance } from "../providers/index.js";
-import { TASK_MEMORY_CONTENT_MAX_CHARS, type TaskMemoryBank, type TaskMemoryRenderableClass } from "./task-bank.js";
+import {
+	renderTaskMemoryEntries,
+	TASK_MEMORY_CONTENT_MAX_CHARS,
+	type TaskMemoryBank,
+	type TaskMemoryEntry,
+	type TaskMemoryRenderableClass,
+} from "./task-bank.js";
 import { rejectReminder, rejectStoredContent, stripBoundaryControlTokens } from "./task-memory-output.js";
 
 export const TASK_MEMORY_POLICY_MAX_OPERATIONS = 8;
@@ -216,6 +222,21 @@ export interface TaskMemoryPolicyInput {
 	workspaceRoot?: string;
 	/** Opt-in raw-envelope observer. Absent unless an operator turned tracing on. */
 	onEnvelope?: (envelope: TaskMemoryEnvelope) => void;
+	/**
+	 * Run a single-purpose pass instead of the bank-maintenance step: its own
+	 * system prompt over its own rendering of what happened. The answer uses the
+	 * same envelope, so every parse and hygiene check still applies.
+	 */
+	pass?: {
+		systemPrompt: string;
+		trajectoryText: string;
+		/**
+		 * Durable lessons already kept for this repository, shown so the pass does
+		 * not write them again under new wording. A `delete` naming one is reported
+		 * in `retiredLessonIds` and never touches the bank.
+		 */
+		keptLessons?: ReadonlyArray<{ id: string; text: string }>;
+	};
 }
 
 export interface TaskMemoryPolicyResult {
@@ -231,11 +252,20 @@ export interface TaskMemoryPolicyResult {
 	outputTokens: number;
 	/** Provider-reported spend, when the client reported any. Null on every path that made no call. */
 	usage: TaskMemoryStepUsage | null;
+	/** Kept lessons the pass asked to delete because the turn showed them wrong. */
+	retiredLessonIds?: string[];
+	/**
+	 * The bank entries this call's prompt showed, as they read then. Empty when
+	 * no prompt was built. It is the selection the prompt was rendered from, not
+	 * a second rendering.
+	 */
+	presentedEntries: TaskMemoryEntry[];
 }
 
 type TaskMemoryOperation =
 	| { op: "update_status"; content: string }
 	| { op: "save_knowledge"; content: string; id?: string }
+	| { op: "save_lesson"; content: string; id?: string; command?: string }
 	| { op: "save_procedural"; content: string; id?: string }
 	| { op: "delete"; id: string };
 
@@ -311,6 +341,7 @@ export async function runTaskMemoryPolicy(
 	let rawResponse = "";
 	let clientError: string | null = null;
 	let stepUsage: TaskMemoryStepUsage | null = null;
+	let presentedEntries: TaskMemoryEntry[] = [];
 	let usageReported = false;
 	const reportUsage = (usage: TaskMemoryStepUsage): void => {
 		if (usageReported) return;
@@ -339,11 +370,13 @@ export async function runTaskMemoryPolicy(
 			outputTokens: parts.outputTokens ?? stepUsage?.output ?? 0,
 			usage: stepUsage,
 			...(parts.refusalReason === undefined ? {} : { refusalReason: parts.refusalReason }),
+			...(parts.retiredLessonIds === undefined ? {} : { retiredLessonIds: parts.retiredLessonIds }),
+			presentedEntries,
 		};
 		try {
 			if (input.isCurrent?.() !== false)
 				input.onEnvelope?.({
-					systemPrompt: MEMORY_INTERVENTION_SYSTEM_PROMPT,
+					systemPrompt: input.pass?.systemPrompt ?? MEMORY_INTERVENTION_SYSTEM_PROMPT,
 					userPrompt,
 					response: rawResponse,
 					decision,
@@ -360,14 +393,21 @@ export async function runTaskMemoryPolicy(
 	};
 	try {
 		if (input.signal?.aborted || input.isCurrent?.() === false) return settle("silent", "scope_changed");
+		const keptLessons = input.pass?.keptLessons ?? [];
+		presentedEntries = bank.select(input.maxTokens);
 		userPrompt = buildMemoryInterventionUserPrompt({
 			task: input.task.slice(0, TASK_PROMPT_MAX_CHARS),
-			bank: bank.render(input.maxTokens),
-			trajectory: renderTrajectory(input.trajectory),
+			bank: [
+				renderTaskMemoryEntries(presentedEntries),
+				...(keptLessons.length === 0
+					? []
+					: ["", "Lessons already kept for this repository:", ...keptLessons.map((item) => `- [${item.id}] ${item.text}`)]),
+			].join("\n"),
+			trajectory: input.pass?.trajectoryText.slice(0, TRAJECTORY_PROMPT_MAX_CHARS) ?? renderTrajectory(input.trajectory),
 		});
 		const completion = client
 			.complete({
-				systemPrompt: MEMORY_INTERVENTION_SYSTEM_PROMPT,
+				systemPrompt: input.pass?.systemPrompt ?? MEMORY_INTERVENTION_SYSTEM_PROMPT,
 				userPrompt,
 				maxTokens: positiveInteger(input.modelMaxTokens, input.maxTokens),
 				signal: controller.signal,
@@ -394,10 +434,34 @@ export async function runTaskMemoryPolicy(
 			outputTokens: nonNegativeInteger(response.outputTokens ?? stepUsage?.output),
 		};
 		if (input.signal?.aborted || input.isCurrent?.() === false) return settle("silent", "scope_changed", usage);
-		const read = readPolicyStep(rawResponse, userPrompt);
+		const read = readPolicyStep(
+			rawResponse,
+			userPrompt,
+			input.pass === undefined ? MAINTENANCE_OPERATIONS : LESSON_PASS_OPERATIONS,
+		);
 		if (!read.ok) return settle("malformed", read.reason, { ...usage, droppedOperations: read.dropped });
 		const priorKnowledge = new Map(bank.snapshot().knowledge.map((entry) => [entry.id, entry.content]));
-		const operations = resolveOperations(bank, read.step.operations);
+		const keptIds = new Set(keptLessons.map((item) => item.id));
+		const retiredLessonIds = read.step.operations.flatMap((operation) =>
+			operation.op === "delete" && keptIds.has(operation.id) ? [operation.id] : [],
+		);
+		// The lesson pass may delete lessons and nothing else: a kept durable one is
+		// reported for retirement, a bank lesson is removed, and any other id is
+		// left alone and counted as dropped below.
+		const bankLessonIds = new Set(
+			bank
+				.snapshot()
+				.knowledge.filter((entry) => entry.durable === true)
+				.map((entry) => entry.id),
+		);
+		const operations = resolveOperations(
+			bank,
+			read.step.operations.filter(
+				(operation) =>
+					operation.op !== "delete" ||
+					(!keptIds.has(operation.id) && (input.pass === undefined || bankLessonIds.has(operation.id))),
+			),
+		);
 		applyOperations(bank, operations);
 		// A model's operation is dropped either by the grammar, which does not know
 		// the verb, or by identity repair, which could not resolve a delete target.
@@ -405,7 +469,8 @@ export async function runTaskMemoryPolicy(
 		const counts = {
 			...usage,
 			bankOperations: operations.length,
-			droppedOperations: read.dropped + (read.step.operations.length - operations.length),
+			droppedOperations: read.dropped + (read.step.operations.length - retiredLessonIds.length - operations.length),
+			...(retiredLessonIds.length === 0 ? {} : { retiredLessonIds }),
 		};
 		if (read.step.contextRejection !== null) {
 			// A bad completion is a diagnostic for the operator who traces memory, not
@@ -453,6 +518,16 @@ export async function runTaskMemoryPolicy(
 		input.signal?.removeEventListener("abort", cancel);
 	}
 }
+
+/** The four verbs the maintenance prompt documents. A lesson is not one of them. */
+const MAINTENANCE_OPERATIONS: ReadonlySet<TaskMemoryOperation["op"]> = new Set([
+	"update_status",
+	"save_knowledge",
+	"save_procedural",
+	"delete",
+]);
+/** The two verbs the turn-end lesson pass documents. */
+const LESSON_PASS_OPERATIONS: ReadonlySet<TaskMemoryOperation["op"]> = new Set(["save_lesson", "delete"]);
 
 const OPERATIONS_OPEN = "<operations>";
 const OPERATIONS_CLOSE = "</operations>";
@@ -545,7 +620,11 @@ type ReadPolicyStepResult =
  * verb the bank does not have", because those two point at different fixes and
  * the boolean form of this function could not tell them apart.
  */
-function readPolicyStep(response: string, reference: string): ReadPolicyStepResult {
+function readPolicyStep(
+	response: string,
+	reference: string,
+	allowed: ReadonlySet<TaskMemoryOperation["op"]>,
+): ReadPolicyStepResult {
 	const unparseable = { ok: false, reason: "unparseable", dropped: 0 } as const;
 	if (typeof response !== "string" || response.length === 0) return unparseable;
 	const text = stripBoundaryControlTokens(cleanPolicyResponse(response));
@@ -565,7 +644,7 @@ function readPolicyStep(response: string, reference: string): ReadPolicyStepResu
 	} catch {
 		return unparseable;
 	}
-	const read = readOperations(rawOperations, reference);
+	const read = readOperations(rawOperations, reference, allowed);
 	if (read === null) return unparseable;
 	// Recovering nothing is not silence. A step whose every operation was invented
 	// stays malformed so the operator can see the model answered in a shape the
@@ -613,12 +692,22 @@ function readContext(tail: string, reference: string): ReadContextResult {
  * Dropping it costs one operation, which is the same trade `resolveOperations`
  * already makes for an invented entry id.
  */
-function readOperations(value: unknown, reference: string): ReadOperationsResult | null {
+function readOperations(
+	value: unknown,
+	reference: string,
+	allowed: ReadonlySet<TaskMemoryOperation["op"]>,
+): ReadOperationsResult | null {
 	if (!Array.isArray(value) || value.length > TASK_MEMORY_POLICY_MAX_OPERATIONS) return null;
 	const operations: TaskMemoryOperation[] = [];
 	let dropped = 0;
 	for (const raw of value) {
 		if (!isRecord(raw) || typeof raw.op !== "string") return null;
+		// A verb this pass was not offered is dropped before anything applies it,
+		// exactly like a verb the bank has never had.
+		if (!(allowed as ReadonlySet<string>).has(raw.op)) {
+			dropped += 1;
+			continue;
+		}
 		switch (raw.op) {
 			case "update_status": {
 				if (!hasExactKeys(raw, ["op", "content"])) return null;
@@ -629,6 +718,29 @@ function readOperations(value: unknown, reference: string): ReadOperationsResult
 					break;
 				}
 				operations.push({ op: raw.op, content });
+				break;
+			}
+			case "save_lesson": {
+				const keys = [
+					"op",
+					"content",
+					...(raw.id === undefined ? [] : ["id"]),
+					...(raw.command === undefined ? [] : ["command"]),
+				];
+				if (!hasExactKeys(raw, keys)) return null;
+				const content = boundedContent(raw.content);
+				if (content === null) return null;
+				if (raw.id !== undefined && !nonEmptyString(raw.id)) return null;
+				if (raw.command !== undefined && (typeof raw.command !== "string" || raw.command.length > 600)) return null;
+				if (rejectStoredContent(content, reference) !== null) {
+					dropped += 1;
+					break;
+				}
+				const operation: Extract<TaskMemoryOperation, { op: "save_lesson" }> = { op: raw.op, content };
+				if (typeof raw.id === "string") operation.id = raw.id;
+				// Kept byte for byte: the host compares it for equality with a command it ran.
+				if (typeof raw.command === "string" && raw.command.trim().length > 0) operation.command = raw.command;
+				operations.push(operation);
 				break;
 			}
 			case "save_knowledge":
@@ -684,15 +796,20 @@ function resolveOperations(
 				resolved.push(operation);
 				break;
 			case "save_knowledge":
+			case "save_lesson":
 			case "save_procedural": {
-				const expected = operation.op === "save_knowledge" ? "knowledge" : "procedural";
+				const expected = operation.op === "save_procedural" ? "procedural" : "knowledge";
 				if (operation.id !== undefined && classes.get(operation.id) === expected) {
 					resolved.push(operation);
 					break;
 				}
 				// An id naming nothing, or an entry in the other class, is not an
 				// update the bank can honor. The content still deserves a home.
-				resolved.push({ op: operation.op, content: operation.content });
+				resolved.push(
+					operation.op === "save_lesson" && operation.command !== undefined
+						? { op: operation.op, content: operation.content, command: operation.command }
+						: { op: operation.op, content: operation.content },
+				);
 				break;
 			}
 			case "delete":
@@ -711,6 +828,13 @@ function applyOperations(bank: TaskMemoryBank, operations: ReadonlyArray<TaskMem
 				break;
 			case "save_knowledge":
 				bank.saveKnowledge(operation.content, operation.id === undefined ? {} : { id: operation.id });
+				break;
+			case "save_lesson":
+				bank.saveKnowledge(operation.content, {
+					durable: true,
+					...(operation.id === undefined ? {} : { id: operation.id }),
+					...(operation.command === undefined ? {} : { evidenceCommand: operation.command }),
+				});
 				break;
 			case "save_procedural":
 				bank.saveProcedural(operation.content, operation.id === undefined ? {} : { id: operation.id });

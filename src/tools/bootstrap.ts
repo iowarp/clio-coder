@@ -24,6 +24,7 @@ import { createMcpCapabilitySource, type McpCapabilitySource } from "./gateway/i
 import { registerHarnessExtensionTools } from "./harness-extensions.js";
 import { lazyTool } from "./lazy-tool.js";
 import { createLedgerTool } from "./ledger.js";
+import { createMemoryRecallTool, type MemoryRecallDeps } from "./memory-recall.js";
 import { monitorToolSurface } from "./monitor-surface.js";
 import { musicToolSurface } from "./music-surface.js";
 import { panesToolSurface } from "./panes-surface.js";
@@ -36,6 +37,8 @@ export { toolPromptHintsForNames };
 
 export interface ToolBootstrapDeps extends Omit<CoreToolBootstrapDeps, "mcpCapabilities"> {
 	requestSelfCompact?: RequestSelfCompact;
+	/** The session's memory stores. Only the orchestrator owns a task bank, so workers never get the tool. */
+	memoryRecall?: MemoryRecallDeps;
 	captureWorkerContext?: () => WorkerContextSnapshot | null;
 	dispatch?: DispatchContract;
 	bus?: SafeEventBus;
@@ -119,6 +122,10 @@ export function registerAllTools(registry: ToolRegistry, deps: ToolBootstrapDeps
 	if (deps.requestSelfCompact)
 		registry.register(
 			builtin(createSelfCompactTool(deps.requestSelfCompact), { path: "src/tools/self-compact.ts", scope: "core" }),
+		);
+	if (deps.memoryRecall)
+		registry.register(
+			builtin(createMemoryRecallTool(deps.memoryRecall), { path: "src/tools/memory-recall.ts", scope: "core" }),
 		);
 	if (deps.dispatch) {
 		const dispatch = deps.dispatch;

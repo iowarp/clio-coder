@@ -1,8 +1,12 @@
 import { isAbsolute, resolve } from "node:path";
 import {
+	MEMORY_OBSERVATION_KINDS,
+	MEMORY_OBSERVATIONS_MAX,
 	MEMORY_SCOPES,
 	MEMORY_VERSION,
 	type MemoryAgentIdentity,
+	type MemoryApproval,
+	type MemoryObservation,
 	type MemoryPromotionRedaction,
 	type MemoryRecord,
 	type MemoryRecordProvenance,
@@ -72,6 +76,8 @@ function readMemoryRecord(value: unknown, path: string, issues: MemoryValidation
 			"runtime",
 			"agent",
 			"provenance",
+			"approval",
+			"observations",
 		],
 		issues,
 	);
@@ -103,6 +109,8 @@ function readMemoryRecord(value: unknown, path: string, issues: MemoryValidation
 	const runtime = readOptionalNamedIdentity(value, `${path}.runtime`, "runtime", issues);
 	const agent = readOptionalNamedIdentity(value, `${path}.agent`, "agent", issues);
 	const provenance = readOptionalMemoryProvenance(value, `${path}.provenance`, issues);
+	const approval = readOptionalApproval(value, `${path}.approval`, issues);
+	const observations = readOptionalObservations(value, `${path}.observations`, issues);
 	if (approved === true && rejectedAt !== undefined) {
 		issues.push({ path: `${path}.rejectedAt`, message: "approved records must not be rejected" });
 	}
@@ -157,7 +165,64 @@ function readMemoryRecord(value: unknown, path: string, issues: MemoryValidation
 	if (runtime !== undefined) record.runtime = runtime;
 	if (agent !== undefined) record.agent = agent;
 	if (provenance !== undefined) record.provenance = provenance;
+	if (approval !== undefined) record.approval = approval;
+	if (observations !== undefined) record.observations = observations;
 	return record;
+}
+
+function readOptionalApproval(
+	record: Record<string, unknown>,
+	path: string,
+	issues: MemoryValidationIssue[],
+): MemoryApproval | undefined {
+	const field = fieldName(path);
+	if (!Object.hasOwn(record, field)) return undefined;
+	const value = record[field];
+	if (!isRecord(value)) {
+		issues.push({ path, message: "expected object" });
+		return undefined;
+	}
+	rejectUnexpectedFields(value, path, ["by", "at"], issues);
+	const by = readString(value, `${path}.by`, issues);
+	if (by !== null && by !== "operator" && by !== "guardian") {
+		issues.push({ path: `${path}.by`, message: "expected operator or guardian" });
+	}
+	const at = readIsoString(value, `${path}.at`, issues);
+	if ((by !== "operator" && by !== "guardian") || at === null) return undefined;
+	return { by, at };
+}
+
+function readOptionalObservations(
+	record: Record<string, unknown>,
+	path: string,
+	issues: MemoryValidationIssue[],
+): MemoryObservation[] | undefined {
+	const field = fieldName(path);
+	if (!Object.hasOwn(record, field)) return undefined;
+	const value = record[field];
+	if (!Array.isArray(value) || value.length > MEMORY_OBSERVATIONS_MAX) {
+		issues.push({ path, message: `expected array of at most ${MEMORY_OBSERVATIONS_MAX} observations` });
+		return undefined;
+	}
+	const observations: MemoryObservation[] = [];
+	for (let index = 0; index < value.length; index += 1) {
+		const item: unknown = value[index];
+		const itemPath = `${path}[${index}]`;
+		if (!isRecord(item)) {
+			issues.push({ path: itemPath, message: "expected object" });
+			continue;
+		}
+		rejectUnexpectedFields(item, itemPath, ["at", "sessionId", "kind"], issues);
+		const at = readIsoString(item, `${itemPath}.at`, issues);
+		const sessionId = readString(item, `${itemPath}.sessionId`, issues);
+		const kind = readString(item, `${itemPath}.kind`, issues);
+		const known = MEMORY_OBSERVATION_KINDS.find((candidate) => candidate === kind);
+		if (kind !== null && known === undefined) {
+			issues.push({ path: `${itemPath}.kind`, message: "expected delivered, held, or contradicted" });
+		}
+		if (at !== null && sessionId !== null && known !== undefined) observations.push({ at, sessionId, kind: known });
+	}
+	return observations;
 }
 
 function readOptionalMemoryRepositoryIdentity(

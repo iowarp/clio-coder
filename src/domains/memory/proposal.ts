@@ -8,7 +8,7 @@ import {
 	memoryScopeIdentityKey,
 	validateMemoryScopeSelection,
 } from "./promotion.js";
-import { loadMemoryRecords, upsertMemoryRecord } from "./store.js";
+import { insertMemoryRecordIfAbsent } from "./store.js";
 import type { MemoryProposalResult, MemoryRecord, MemoryRepositoryIdentity, MemoryScope } from "./types.js";
 import { validateMemoryRecord } from "./validate.js";
 
@@ -37,11 +37,7 @@ export async function proposeMemoryFromEvidence(
 ): Promise<MemoryProposalResult> {
 	const evidence = await inspectEvidence(dataDir, evidenceId);
 	const record = memoryRecordFromEvidence(evidence.overview, evidence.findings, selection);
-	const existing = (await loadMemoryRecords(dataDir)).find((candidate) => candidate.id === record.id);
-	if (existing !== undefined) return { record: existing, created: false };
-
-	await upsertMemoryRecord(dataDir, record);
-	return { record, created: true };
+	return insertMemoryRecordIfAbsent(dataDir, record);
 }
 
 export function memoryIdFromEvidence(evidenceId: string): string {

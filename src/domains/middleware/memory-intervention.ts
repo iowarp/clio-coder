@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { ToolNames } from "../../core/tool-names.js";
 import {
 	DISPATCH_PLAN_PREPARATION_ERROR_ARGUMENT,
 	RESOLVED_DISPATCH_PLAN_ARGUMENT,
@@ -36,6 +37,7 @@ import {
 	type TaskMemoryTelemetryTrigger,
 	taskMemoryBankDelta,
 } from "../memory/task-memory-telemetry.js";
+import { MEMORY_CONSOLIDATION_SYSTEM_PROMPT } from "../prompts/memory-intervention.js";
 import { hashToolCall } from "../safety/loop-detector.js";
 import { ceilChars } from "../session/context-accounting.js";
 import type { MiddlewareHookEvaluationContext, MiddlewareHookRegistration } from "./runtime.js";
@@ -49,8 +51,41 @@ export const MEMORY_INTERVENTION_DEFAULT_EVERY_N_TOOLS = 10;
 export const MEMORY_INTERVENTION_TIMEOUT_BACKOFF_THRESHOLD = 2;
 
 export const MEMORY_INTERVENTION_ACTIVITY_LIMIT = 20;
+/**
+ * Tool steps a delivered reminder must survive without its failures returning
+ * before it counts as held. Held is the absence of a recurrence over that
+ * window, never proof the lesson is true, which is why a delivery stays
+ * watched afterwards and can still be contradicted.
+ */
+export const MEMORY_DELIVERY_HELD_MIN_STEPS = 3;
+/** Recurrences of a failure that was open at delivery before the reminder counts as contradicted. */
+export const MEMORY_DELIVERY_CONTRADICTED_RECURRENCES = 2;
+const MEMORY_DELIVERY_WATCH_LIMIT = 16;
 
-export type MemoryInterventionTriggerReason = "interval" | "tool_error_streak" | "loop_signal";
+/**
+ * What the session saw after an llm-tier reminder reached the action agent.
+ * This is the only evidence the durable store's approval gate reads, so it is
+ * reported once per delivery and only when it is decided.
+ */
+export interface MemoryDeliveryOutcome {
+	/**
+	 * The entries as they read when the reminder was delivered. Entry ids are
+	 * reused across rewrites, so the content is what binds an outcome to the
+	 * fact it is about: an id alone let a late contradiction of a rewritten
+	 * entry land on the fact that replaced it.
+	 */
+	entries: ReadonlyArray<{ id: string; content: string }>;
+	kind: "held" | "contradicted";
+}
+
+export type MemoryInterventionTriggerReason = "interval" | "tool_error_streak" | "loop_signal" | "turn_end";
+/**
+ * Tool calls since the last lesson pass that make a finished turn worth one.
+ * Every other trigger fires mid-turn, so the model never saw how the turn
+ * ended: in a live session its last step ran before the passing test and it
+ * never learned which of its notes had been right.
+ */
+export const MEMORY_INTERVENTION_TURN_END_MIN_TOOLS = 2;
 
 export interface MemoryInterventionSettings {
 	enabled: boolean;
@@ -96,6 +131,44 @@ interface PendingToolStep {
 
 type TrajectoryStep = TaskMemoryTrajectoryStep;
 
+export interface MemoryKnowledgeReview {
+	/** Lessons kept on a later look that also quote a command this session saw succeed. */
+	kept: ReadonlyArray<TaskMemoryEntry>;
+	withdrawn: ReadonlyArray<TaskMemoryEntry>;
+	/** Lessons kept on a later look with nothing observed to ground them; filed, never evidence. */
+	ungrounded: ReadonlyArray<TaskMemoryEntry>;
+}
+
+const TURN_LOG_LIMIT = 40;
+const TURN_LOG_CALL_MAX_CHARS = 300;
+const VERIFIED_COMMAND_LIMIT = 256;
+
+/** Reasons that mean the model never produced a usable answer, so the bank it left says nothing. */
+const UNANSWERED_REASONS: ReadonlySet<TaskMemoryPolicyReason> = new Set([
+	"unparseable",
+	"all_operations_invalid",
+	"deadline",
+	"timed_out",
+	"endpoint_busy",
+	"client_error",
+	"information_flow_blocked",
+	"no_client",
+	"no_consumer",
+	"step_in_flight",
+	"llm_timeout_backoff",
+	"scope_changed",
+]);
+
+interface DeliveryWatch {
+	entries: Array<{ id: string; content: string }>;
+	step: number;
+	/** Operations that were failing in the window the reminder was written from. */
+	fingerprints: Set<string>;
+	recurrences: number;
+	/** Held was already reported; only a later contradiction is still news. */
+	heldReported: boolean;
+}
+
 interface FailedAttempt {
 	entryId: string;
 	attempts: number;
@@ -136,6 +209,33 @@ export interface MemoryInterventionDeps {
 	 * read. Best effort and content-bearing, exactly like `onEnvelope`.
 	 */
 	onInjectedEntries?: (entries: ReadonlyArray<TaskMemoryEntry>) => void;
+	/**
+	 * Decided outcomes for entries `onInjectedEntries` reported earlier. `final`
+	 * marks the last call for this session scope: deliveries still undecided at
+	 * that point are abandoned, and the entry ids may be reused afterwards.
+	 */
+	onDeliveryOutcomes?: (outcomes: ReadonlyArray<MemoryDeliveryOutcome>, final: boolean) => void;
+	/**
+	 * What one answered model step did to knowledge it had already written.
+	 * `kept` entries were shown to the model again and left unchanged, which is
+	 * the model reaffirming a fact with a newer trajectory in front of it;
+	 * `withdrawn` entries were deleted or rewritten. A live session on a local
+	 * 27B wrote the one fact worth keeping on its first step and stayed silent
+	 * on all three, so a capture path that waits for a delivered reminder
+	 * recorded nothing.
+	 */
+	onKnowledgeReview?: (review: MemoryKnowledgeReview) => void;
+	/**
+	 * Lessons still in the bank when its session scope ends, with the session
+	 * they were written in. A lesson filed on a session's last step never gets a
+	 * second look, so it is handed over to be filed as pending instead of being
+	 * cleared with the bank.
+	 */
+	/** Approved lessons for the active repository, shown to the turn-end pass so it does not rewrite them. */
+	getKeptLessons?: () => ReadonlyArray<{ id: string; text: string }>;
+	/** Kept lessons the turn-end pass deleted because the turn showed them wrong. */
+	onKeptLessonsRetired?: (memoryIds: ReadonlyArray<string>) => void;
+	onScopeEnd?: (scope: { sessionId: string | undefined; lessons: ReadonlyArray<TaskMemoryEntry> }) => void;
 	/** Live next-turn settings view; individual fields above remain test-friendly fallbacks. */
 	getSettings?: () => Readonly<MemoryInterventionSettings>;
 	/** Best-effort content-free telemetry; sink failures never affect intervention. */
@@ -236,6 +336,23 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 	const pending = new Map<string, PendingToolStep>();
 	const trajectory: TrajectoryStep[] = [];
 	const failures = new Map<string, FailedAttempt>();
+	const deliveries: DeliveryWatch[] = [];
+	/** This turn's calls in order, for the turn-end lesson pass. */
+	const turnLog: string[] = [];
+	/**
+	 * Complete commands this session scope executed successfully, each exactly
+	 * as the shell tool received it and taken only from that tool's own success
+	 * receipt. A lesson is grounded by equality with one of these and by nothing
+	 * else.
+	 */
+	const succeededCommands = new Set<string>();
+	const lessonIsGrounded = (entry: TaskMemoryEntry): boolean =>
+		entry.durable === true &&
+		entry.evidenceCommand !== undefined &&
+		succeededCommands.has(entry.evidenceCommand) &&
+		// The text has to make the same claim the evidence supports: the exact
+		// command, delimited, so `node a.mjs --quick` does not vouch for `--full`.
+		entry.content.includes(`\`${entry.evidenceCommand}\``);
 	let toolStep = 0;
 	let lastTurnEndStep = 0;
 	/**
@@ -248,6 +365,9 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 	let lastInjectedOperationFingerprint: string | null = null;
 	let currentTask = "(current task unavailable)";
 	let toolsSinceMemoryStep = 0;
+	// Counted apart from the maintenance cadence: an interval step that fired on
+	// a turn's last tools left nothing "since the last step" and starved the pass.
+	let toolsSinceLessonPass = 0;
 	let consecutiveErrors = 0;
 	let lastPromptedBoundary: string | null = null;
 	let lastInjectedMessage: string | null = null;
@@ -328,6 +448,7 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 						// completed tools. They are not new memory boundaries and must not
 						// replace the prior operator-visible outcome or emit telemetry.
 						if (toolStep <= lastTurnEndStep) return NO_EFFECTS;
+						settleDeliveries(false);
 						// A mid-turn annotation already reported this boundary's rules-tier
 						// outcome. Reporting silence again would double-count one decision.
 						const alreadyReported = annotatedSinceTurnEnd;
@@ -354,7 +475,10 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 						if (!commitBridgeEnabled) reactivateAfterCompaction = true;
 						return NO_EFFECTS;
 					case "turn_start": {
-						if (input.metadata?.requestContinuation !== true) operatorAskedRepeat = false;
+						if (input.metadata?.requestContinuation !== true) {
+							operatorAskedRepeat = false;
+							turnLog.length = 0;
+						}
 						if (input.text?.trim()) {
 							currentTask = shortText(input.text, 2_000);
 							operatorAskedRepeat = operatorRequestsCommandRepeat(input.text);
@@ -401,6 +525,13 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 			}
 			const boundaryHook =
 				input.hook === "turn_end" || (input.hook === "after_tool" && input.metadata?.stage === "tool_batch_end");
+			if (
+				input.hook === "turn_end" &&
+				!disposed &&
+				settings().enabled &&
+				toolsSinceLessonPass >= MEMORY_INTERVENTION_TURN_END_MIN_TOOLS
+			)
+				pendingTriggers.add("turn_end");
 			if (disposed || !settings().enabled || !boundaryHook || pendingTriggers.size === 0) return NO_EFFECTS;
 			const boundary = input.turnId ?? input.metadata?.userTurnId?.toString() ?? `tool-step:${toolStep}`;
 			if (boundary === lastPromptedBoundary) return NO_EFFECTS;
@@ -433,6 +564,7 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 			const triggers = [...pendingTriggers];
 			pendingTriggers.clear();
 			toolsSinceMemoryStep = 0;
+			if (triggers.includes("turn_end")) toolsSinceLessonPass = 0;
 			consecutiveErrors = 0;
 			// The rules tier may already have spoken for this boundary, either as a
 			// turn_end reminder in prior effects or as a mid-turn tool annotation.
@@ -447,7 +579,7 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 			const contentCurrent = captureContentGuard();
 			promptedStepInFlight = true;
 			outstandingStep = runPromptedStep({
-				deterministicTrigger: triggers.some((trigger) => trigger !== "interval"),
+				deterministicTrigger: triggers.some((trigger) => trigger !== "interval" && trigger !== "turn_end"),
 				suppressIntervention: rulesAlreadySpoke,
 				triggerReasons: triggers,
 			})
@@ -508,6 +640,13 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 	}
 
 	function reset(): void {
+		try {
+			const lessons = deps.bank.snapshot().knowledge.filter((entry) => entry.durable === true);
+			if (lessons.length > 0) deps.onScopeEnd?.({ sessionId: observedSessionId, lessons });
+		} catch {
+			// Same contract as onInjectedEntries: the store's failure is not the session's.
+		}
+		settleDeliveries(true);
 		commitState?.dispose();
 		commitState = null;
 		commitScope = null;
@@ -516,6 +655,8 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 		generationController = new AbortController();
 		deps.bank.clear();
 		pending.clear();
+		turnLog.length = 0;
+		succeededCommands.clear();
 		trajectory.length = 0;
 		failures.clear();
 		toolStep = 0;
@@ -525,6 +666,7 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 		lastInjectedOperationFingerprint = null;
 		currentTask = "(current task unavailable)";
 		toolsSinceMemoryStep = 0;
+		toolsSinceLessonPass = 0;
 		consecutiveErrors = 0;
 		lastPromptedBoundary = null;
 		lastInjectedMessage = null;
@@ -567,6 +709,7 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 			inputTokens: 0,
 			outputTokens: 0,
 			usage: null,
+			presentedEntries: [],
 			effects: NO_EFFECTS,
 		});
 		const live = settings();
@@ -585,6 +728,9 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 		// with the client, so a row names the target that actually served the step.
 		let attemptRoute: TaskMemoryRoute | undefined;
 		const triggers = input.triggerReasons?.length ? input.triggerReasons : ["manual" as const];
+		// A finished turn gets the lesson pass in place of bank maintenance: one
+		// call either way, and the mid-turn steps already kept the bank current.
+		const consolidate = input.triggerReasons?.includes("turn_end") === true;
 		let tier: TaskMemoryTelemetryTier = "rules";
 		promptedStepTier = tier;
 		let promptedResult: TaskMemoryPolicyResult;
@@ -624,6 +770,15 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 							maxTokens: live.maxTokens,
 							modelMaxTokens: positiveInteger(deps.getModelMaxTokens?.(live.maxTokens), live.maxTokens),
 							...(input.suppressIntervention === undefined ? {} : { suppressIntervention: input.suppressIntervention }),
+							...(consolidate
+								? {
+										pass: {
+											systemPrompt: MEMORY_CONSOLIDATION_SYSTEM_PROMPT,
+											trajectoryText: turnLog.join("\n"),
+											keptLessons: keptLessonsForPass(),
+										},
+									}
+								: {}),
 							previousReminder: lastInjectedMessage,
 							timeoutMs,
 							...(deps.onEnvelope === undefined
@@ -703,6 +858,19 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 		else if (tier === "llm" && telemetryDecision !== "dropped") consecutiveLlmTimeouts = 0;
 		lastDecision = promptedResult.decision;
 		if (promptedResult.decision === "injected") reportInjectedEntries(promptedResult.reminder);
+		// Exactly the entries the answered call's prompt was rendered from. An
+		// entry cut for budget was never put in front of the model, so its silence
+		// about it says nothing.
+		if (tier === "llm" && !UNANSWERED_REASONS.has(promptedResult.reason)) {
+			reviewKnowledge(promptedResult.presentedEntries.filter((entry) => entry.kind === "knowledge"));
+		}
+		if (promptedResult.retiredLessonIds !== undefined) {
+			try {
+				deps.onKeptLessonsRetired?.(promptedResult.retiredLessonIds);
+			} catch {
+				// Same contract as onInjectedEntries: the store's failure is not the session's.
+			}
+		}
 		emitTelemetry(
 			triggers,
 			tier,
@@ -816,6 +984,86 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 		} catch {
 			// A failing store is the composition root's problem to report, never a
 			// reason to fail the step that produced the reminder.
+			return;
+		}
+		deliveries.push({
+			entries: entries.map((entry) => ({ id: entry.id, content: entry.content })),
+			step: toolStep,
+			fingerprints: new Set(
+				trajectory.filter((step) => step.outcome === "error").map((step) => step.operationFingerprint),
+			),
+			recurrences: 0,
+			heldReported: false,
+		});
+		if (deliveries.length > MEMORY_DELIVERY_WATCH_LIMIT) deliveries.shift();
+	}
+
+	function keptLessonsForPass(): ReadonlyArray<{ id: string; text: string }> {
+		try {
+			return deps.getKeptLessons?.() ?? [];
+		} catch {
+			return [];
+		}
+	}
+
+	function reviewKnowledge(before: ReadonlyArray<TaskMemoryEntry>): void {
+		if (deps.onKnowledgeReview === undefined) return;
+		const after = new Map(deps.bank.snapshot().knowledge.map((entry) => [entry.id, entry]));
+		// Only entries the model filed as lessons. Plain knowledge is a fact about
+		// the task in hand and goes stale with it.
+		const lessons = before.filter((entry) => entry.durable === true);
+		if (lessons.length === 0) return;
+		const unchanged = lessons.filter((entry) => after.get(entry.id)?.content === entry.content);
+		// Grounding reads the live entry: the evidence command is part of what the
+		// model kept, and it has to equal a command the host ran.
+		const kept = unchanged.filter((entry) => {
+			const live = after.get(entry.id);
+			return live !== undefined && lessonIsGrounded(live);
+		});
+		const ungrounded = unchanged.filter((entry) => !kept.includes(entry));
+		const withdrawn = lessons.filter((entry) => after.get(entry.id)?.content !== entry.content);
+		try {
+			deps.onKnowledgeReview({ kept, withdrawn, ungrounded });
+		} catch {
+			// Same contract as onInjectedEntries: the store's failure is not the session's.
+		}
+	}
+
+	/**
+	 * Report deliveries whose outcome is decided. A reminder is contradicted when
+	 * a failure it was written about keeps recurring, and held once the session
+	 * moved on without one. A held delivery stays in the bounded watch list, so
+	 * the same failure returning later in the session still contradicts it; an
+	 * undecided one is dropped at scope end rather than guessed at.
+	 */
+	function settleDeliveries(final: boolean): void {
+		const outcomes: MemoryDeliveryOutcome[] = [];
+		for (let index = deliveries.length - 1; index >= 0; index -= 1) {
+			const watch = deliveries[index];
+			if (watch === undefined) continue;
+			if (watch.recurrences >= MEMORY_DELIVERY_CONTRADICTED_RECURRENCES) {
+				deliveries.splice(index, 1);
+				outcomes.push({ entries: watch.entries, kind: "contradicted" });
+			} else if (
+				!watch.heldReported &&
+				watch.recurrences === 0 &&
+				toolStep - watch.step >= MEMORY_DELIVERY_HELD_MIN_STEPS
+			) {
+				watch.heldReported = true;
+				const bank = deps.bank.snapshot().knowledge;
+				const grounded = watch.entries.filter((delivered) => {
+					const entry = bank.find((candidate) => candidate.id === delivered.id);
+					return entry !== undefined && entry.content === delivered.content && lessonIsGrounded(entry);
+				});
+				if (grounded.length > 0) outcomes.push({ entries: grounded, kind: "held" });
+			}
+		}
+		if (final) deliveries.length = 0;
+		if (outcomes.length === 0 && !final) return;
+		try {
+			deps.onDeliveryOutcomes?.(outcomes, final);
+		} catch {
+			// Same contract as onInjectedEntries: the store's failure is not the session's.
 		}
 	}
 
@@ -834,9 +1082,13 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 		const outcome = input.metadata?.resultKind === "error" ? "error" : "ok";
 		toolStep += 1;
 		toolsSinceMemoryStep += 1;
+		toolsSinceLessonPass += 1;
 		const live = settings();
 		if (toolsSinceMemoryStep >= live.everyNTools) pendingTriggers.add("interval");
 		if (outcome === "error") {
+			for (const watch of deliveries) {
+				if (watch.fingerprints.has(prepared.operationFingerprint)) watch.recurrences += 1;
+			}
 			consecutiveErrors += 1;
 			if (consecutiveErrors >= 2 && !operatorAskedRepeat) pendingTriggers.add("tool_error_streak");
 		} else {
@@ -850,6 +1102,29 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 			resultDigest: digest.text,
 			resultDigestProvenance: digest.provenance,
 		};
+		// The registry passes whatever arguments the model sent, so a `command`
+		// field on a read or a write proves nothing ran. Only the shell tool's own
+		// success receipt does: its name, an ok result, and a zero exit it reported.
+		const command =
+			prepared.toolName === ToolNames.Bash && typeof input.toolArgs?.command === "string" ? input.toolArgs.command : null;
+		if (
+			command !== null &&
+			input.metadata?.resultKind === "ok" &&
+			input.toolResultDetails?.outcome === "success" &&
+			input.toolResultDetails?.exitCode === 0
+		) {
+			// The complete command and nothing derived from it. Splitting a chain
+			// into its parts needs a shell parser to be right: `echo 'a && npm test'`
+			// and `true # && npm test` both succeed without running `npm test`.
+			succeededCommands.add(command);
+			if (succeededCommands.size > VERIFIED_COMMAND_LIMIT) {
+				succeededCommands.delete(succeededCommands.values().next().value ?? command);
+			}
+		}
+		turnLog.push(
+			`${toolStep}. ${outcome === "ok" ? "ok" : "FAILED"}: ${shortText(command ?? prepared.callDescription, TURN_LOG_CALL_MAX_CHARS)}${outcome === "error" ? ` => ${shortText(digest.text, 160)}` : ""}`,
+		);
+		if (turnLog.length > TURN_LOG_LIMIT) turnLog.shift();
 		trajectory.push(step);
 		if (trajectory.length > live.windowSteps) trajectory.splice(0, trajectory.length - live.windowSteps);
 		if (outcome === "ok" && WORKSPACE_CHANGING_CLASSES.has(String(input.metadata?.actionClass))) {
@@ -882,6 +1157,11 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 			(candidate) =>
 				candidate.outcome === "error" &&
 				candidate.operationFingerprint === step.operationFingerprint &&
+				// The same command failing differently is progress, not a repeat: a
+				// live session reran its tests after generating a missing module, got an
+				// assertion failure instead of a load error, and was told it had already
+				// tried that.
+				candidate.resultDigest === step.resultDigest &&
 				candidate.step >= failure.firstStep &&
 				candidate.step > lastWorkspaceChangeStep,
 		).length;
@@ -953,6 +1233,7 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 					(candidate) =>
 						candidate.outcome === "error" &&
 						candidate.operationFingerprint === step.operationFingerprint &&
+						candidate.resultDigest === step.resultDigest &&
 						candidate.step >= failure.firstStep &&
 						candidate.step > lastWorkspaceChangeStep,
 				).length;

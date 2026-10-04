@@ -63,6 +63,7 @@ export const TOOL_PRESENTATION: Readonly<Record<string, ToolPresentationPolicy>>
 	[ToolNames.ClioDocs]: FOLDED,
 	[ToolNames.ClioLibrary]: FOLDED,
 	[ToolNames.Data]: FOLDED,
+	[ToolNames.MemoryRecall]: FOLDED,
 	[ToolNames.Write]: FOLDED_WITH_DIFF,
 	[ToolNames.Edit]: FOLDED_WITH_DIFF,
 	[ToolNames.Bash]: FOLDED,
@@ -468,6 +469,12 @@ export const TOOL_ROWS: Readonly<Record<string, ToolRowSpec>> = {
 		verbsFor: (args) => DATA_VERBS[text(args, "op") ?? ""] ?? null,
 		object: (args, context) => pathObject(pathArg(args, "path", context)),
 		consumes: ["op", "path"],
+	},
+	[ToolNames.MemoryRecall]: {
+		class: "search",
+		verbs: ["recalling", "recalled"],
+		object: (args) => plain(text(args, "query")),
+		consumes: ["query", "limit"],
 	},
 	[ToolNames.CredentialPresent]: {
 		class: "observe",

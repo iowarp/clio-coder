@@ -1,4 +1,5 @@
-import { isAbsolute } from "node:path";
+import { readFileSync } from "node:fs";
+import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import { canonicalizeExistingPath } from "../../core/path-canonical.js";
 import { ceilChars } from "../session/context-accounting.js";
 import { pruneStaleMemoryRecords, sortMemoryRecords, updateMemoryRecord } from "./store.js";
@@ -66,7 +67,7 @@ export function estimateMemoryTokens(record: MemoryRecord): number {
 	return Math.max(1, ceilChars(text.length));
 }
 
-function cloneRecord(record: MemoryRecord): MemoryRecord {
+export function cloneMemoryRecord(record: MemoryRecord): MemoryRecord {
 	const next: MemoryRecord = {
 		id: record.id,
 		scope: record.scope,
@@ -98,6 +99,8 @@ function cloneRecord(record: MemoryRecord): MemoryRecord {
 					}),
 		};
 	}
+	if (record.approval !== undefined) next.approval = { ...record.approval };
+	if (record.observations !== undefined) next.observations = record.observations.map((item) => ({ ...item }));
 	return next;
 }
 
@@ -109,9 +112,34 @@ function cloneRecord(record: MemoryRecord): MemoryRecord {
  */
 export function canonicalMemoryRepositoryIdentity(repositoryPath: string): MemoryRepositoryIdentity | null {
 	if (!isUsableAbsoluteRepositoryPath(repositoryPath)) return null;
-	const key = canonicalizeExistingPath(repositoryPath);
-	if (!isUsableAbsoluteRepositoryPath(key)) return null;
+	const canonical = canonicalizeExistingPath(repositoryPath);
+	if (!isUsableAbsoluteRepositoryPath(canonical)) return null;
+	const key = linkedWorktreeMainRoot(canonical) ?? canonical;
 	return { kind: "canonical-path", key };
+}
+
+/**
+ * The main checkout a linked Git worktree belongs to, or null for anything
+ * else. Fleet lanes each run in their own worktree, and keying memory on the
+ * worktree path meant a lesson learned in a lane applied to no other lane and
+ * never to the checkout it merges into. Read from the worktree's own `.git`
+ * pointer and `commondir`, so no subprocess runs on the prompt-build path.
+ */
+function linkedWorktreeMainRoot(root: string): string | null {
+	try {
+		const pointer = readFileSync(join(root, ".git"), "utf8");
+		const gitDir = /^gitdir: (.+)$/mu.exec(pointer)?.[1]?.trim();
+		if (!gitDir) return null;
+		const absoluteGitDir = resolve(root, gitDir);
+		const commonDir = resolve(absoluteGitDir, readFileSync(join(absoluteGitDir, "commondir"), "utf8").trim());
+		if (basename(commonDir) !== ".git") return null;
+		const mainRoot = canonicalizeExistingPath(dirname(commonDir));
+		return isUsableAbsoluteRepositoryPath(mainRoot) && mainRoot !== root ? mainRoot : null;
+	} catch {
+		// `.git` is a directory (the main checkout), absent (not a repository), or
+		// unreadable. Each of those keeps the path identity it always had.
+		return null;
+	}
 }
 
 function canonicalActiveRepository(
@@ -168,17 +196,21 @@ function isUsableAbsoluteRepositoryPath(value: string): boolean {
 }
 
 function approveRecord(record: MemoryRecord, now: Date): MemoryRecord {
-	const next = cloneRecord(record);
+	const next = cloneMemoryRecord(record);
 	next.approved = true;
 	next.lastVerifiedAt = now.toISOString();
+	next.approval = { by: "operator", at: now.toISOString() };
+	// An operator approval overrides the guardian's demotion along with the rejection.
+	Reflect.deleteProperty(next, "regressions");
 	Reflect.deleteProperty(next, "rejectedAt");
 	return next;
 }
 
 function rejectRecord(record: MemoryRecord, now: Date): MemoryRecord {
-	const next = cloneRecord(record);
+	const next = cloneMemoryRecord(record);
 	next.approved = false;
 	next.rejectedAt = now.toISOString();
+	Reflect.deleteProperty(next, "approval");
 	return next;
 }
 

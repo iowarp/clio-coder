@@ -3,6 +3,7 @@ import { closeSync, openSync, readFileSync, readSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { safeResourceWrite } from "../../core/safe-resource-write.js";
+import { withStateFileLock } from "../../core/state-file-lock.js";
 import { MEMORY_VERSION, type MemoryRecord, type MemoryStatus, type MemoryStoreFile } from "./types.js";
 import { validateMemoryStore } from "./validate.js";
 
@@ -94,7 +95,12 @@ function parseAndValidate(raw: string, source: string): MemoryRecord[] {
 	return sortMemoryRecords(result.store.records);
 }
 
+/** Replaces the whole store under the store lock. Mutations that depend on current content use `mutateMemoryRecords`. */
 export async function writeMemoryRecords(dataDir: string, records: ReadonlyArray<MemoryRecord>): Promise<string> {
+	return withStateFileLock(memoryStorePath(dataDir), () => writeMemoryRecordsUnlocked(dataDir, records));
+}
+
+function writeMemoryRecordsUnlocked(dataDir: string, records: ReadonlyArray<MemoryRecord>): string {
 	const sorted = sortMemoryRecords(records);
 	if (sorted.length > MEMORY_STORE_MAX_RECORDS) {
 		throw new Error(`memory store limit reached (${MEMORY_STORE_MAX_RECORDS}); run clio-coder memory prune --stale`);
@@ -105,12 +111,37 @@ export async function writeMemoryRecords(dataDir: string, records: ReadonlyArray
 	return path;
 }
 
-export async function upsertMemoryRecord(dataDir: string, record: MemoryRecord): Promise<MemoryRecord> {
-	const records = await loadMemoryRecords(dataDir);
-	const existingIndex = records.findIndex((item) => item.id === record.id);
-	const next = existingIndex === -1 ? [...records, record] : replaceAt(records, existingIndex, record);
-	await writeMemoryRecords(dataDir, next);
-	return record;
+/**
+ * The one way to change the store. Several sessions and `clio-coder memory`
+ * share `records.json`, and each mutation used to read the file, edit its copy
+ * and write the whole file back: twelve concurrent observations kept one, and
+ * a background write could replace an operator's approval or rejection with
+ * the copy it read before that decision. The read, the edit and the write now
+ * happen under one cross-process lock. Callers never nest it: a mutation that
+ * needs to look before it writes does both inside `mutate`.
+ */
+export async function mutateMemoryRecords<T>(
+	dataDir: string,
+	mutate: (records: MemoryRecord[]) => { records: ReadonlyArray<MemoryRecord>; result: T } | { result: T },
+): Promise<T> {
+	return withStateFileLock(memoryStorePath(dataDir), () => {
+		const outcome = mutate(loadMemoryRecordsSync(dataDir));
+		if ("records" in outcome) writeMemoryRecordsUnlocked(dataDir, outcome.records);
+		return outcome.result;
+	});
+}
+
+/** Insert `record` unless the store already holds it or `findExisting` names an equivalent. */
+export async function insertMemoryRecordIfAbsent(
+	dataDir: string,
+	record: MemoryRecord,
+	findExisting?: (records: ReadonlyArray<MemoryRecord>) => MemoryRecord | null,
+): Promise<{ record: MemoryRecord; created: boolean }> {
+	return mutateMemoryRecords<{ record: MemoryRecord; created: boolean }>(dataDir, (records) => {
+		const existing = records.find((item) => item.id === record.id) ?? findExisting?.(records) ?? null;
+		if (existing !== null) return { result: { record: existing, created: false } };
+		return { records: [...records, record], result: { record, created: true } };
+	});
 }
 
 export async function updateMemoryRecord(
@@ -118,22 +149,20 @@ export async function updateMemoryRecord(
 	memoryId: string,
 	update: (record: MemoryRecord) => MemoryRecord,
 ): Promise<MemoryRecord> {
-	const records = await loadMemoryRecords(dataDir);
-	const index = records.findIndex((record) => record.id === memoryId);
-	if (index === -1) throw new Error(`memory record not found: ${memoryId}`);
-	const current = records[index];
-	if (current === undefined) throw new Error(`memory record not found: ${memoryId}`);
-	const updated = update(current);
-	await writeMemoryRecords(dataDir, replaceAt(records, index, updated));
-	return updated;
+	return mutateMemoryRecords(dataDir, (records) => {
+		const index = records.findIndex((record) => record.id === memoryId);
+		const current = records[index];
+		if (current === undefined) throw new Error(`memory record not found: ${memoryId}`);
+		const updated = update(current);
+		return { records: replaceAt(records, index, updated), result: updated };
+	});
 }
 
 export async function pruneStaleMemoryRecords(dataDir: string, now: Date = new Date()): Promise<MemoryRecord[]> {
-	const records = await loadMemoryRecords(dataDir);
-	const kept = records.filter((record) => !isStaleMemoryRecord(record, now));
-	const pruned = records.filter((record) => isStaleMemoryRecord(record, now));
-	await writeMemoryRecords(dataDir, kept);
-	return pruned;
+	return mutateMemoryRecords(dataDir, (records) => ({
+		records: records.filter((record) => !isStaleMemoryRecord(record, now)),
+		result: records.filter((record) => isStaleMemoryRecord(record, now)),
+	}));
 }
 
 function isStaleMemoryRecord(record: MemoryRecord, now: Date): boolean {

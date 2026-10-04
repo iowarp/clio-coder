@@ -20,7 +20,7 @@ const REFRESH_MS = 1_000;
 
 export const MEMORY_OVERLAY_WIDTH = DEFAULT_CONTENT_WIDTH + 4;
 
-const EMPTY_MESSAGE = "no approved lessons, task-bank entries, or memory steps captured yet.";
+const EMPTY_MESSAGE = "no durable lessons, task-bank entries, or memory steps captured yet.";
 
 /**
  * The one-line header that stays above the list.
@@ -149,13 +149,25 @@ function buildMemoryOverlayItems(
 	status: TaskMemoryOperatorStatus,
 	records: ReadonlyArray<MemoryRecord>,
 ): ListOverlayItem[] {
-	const approved = records.filter((record) => record.approved && record.rejectedAt === undefined);
+	const approved = records.filter((record) => recordReviewState(record) === "approved");
+	const pending = records.filter((record) => recordReviewState(record) === "pending");
+	const rejected = records.filter((record) => recordReviewState(record) === "rejected");
 	const entries = bankEntries(status.bank);
 	return [
 		...lessonItems(approved, `approved lessons (${approved.length})`),
+		...lessonItems(pending, `pending review (${pending.length})`),
+		...lessonItems(rejected, `rejected (${rejected.length})`),
 		...bankItems(entries, `task bank (${status.size})`),
 		...activityItems(status.activity, `recent steps (${status.activity.length})`),
 	];
+}
+
+type RecordReviewState = "approved" | "pending" | "rejected";
+
+/** Rejection is stamped, so an unapproved record without the stamp still awaits review. */
+function recordReviewState(record: MemoryRecord): RecordReviewState {
+	if (record.rejectedAt !== undefined) return "rejected";
+	return record.approved ? "approved" : "pending";
 }
 
 function decisionToken(decision: TaskMemoryTelemetryDecision): "success" | "warning" | "annotation" {
@@ -189,9 +201,15 @@ function memorySignature(status: TaskMemoryOperatorStatus, records: ReadonlyArra
 	return parts.join("|");
 }
 
-interface OpenMemoryOverlayOptions {
-	onClose?: () => void;
+export type MemoryReviewAction = "approve" | "reject";
+
+interface MemoryOverlayActions {
 	onPromote?: (entry: TaskMemoryEntry, scope: "repo" | "global") => Promise<MemoryProposalResult>;
+	onReview?: (record: MemoryRecord, action: MemoryReviewAction) => Promise<MemoryRecord>;
+}
+
+interface OpenMemoryOverlayOptions extends MemoryOverlayActions {
+	onClose?: () => void;
 }
 
 /** Master-detail memory view: status header, grouped list, scrollable detail pane. */
@@ -208,10 +226,17 @@ export class MemoryOverlayView implements Component {
 		private readonly getRecords: () => ReadonlyArray<MemoryRecord>,
 		onClose: () => void,
 		onChange: () => void,
-		private readonly promotion?: {
-			onPromote: (entry: TaskMemoryEntry, scope: "repo" | "global") => Promise<MemoryProposalResult>;
-		},
+		private readonly handlers: MemoryOverlayActions = {},
 	) {
+		const actions: Record<string, (item: ListOverlayItem) => void> = {};
+		if (handlers.onPromote) {
+			actions.p = (item) => this.promote(item, "repo", onChange);
+			actions.g = (item) => this.promote(item, "global", onChange);
+		}
+		if (handlers.onReview) {
+			actions.a = (item) => this.review(item, "approve", onChange);
+			actions.x = (item) => this.review(item, "reject", onChange);
+		}
 		this.list = new ListOverlayView(
 			{
 				title: "Memory",
@@ -219,18 +244,7 @@ export class MemoryOverlayView implements Component {
 				filterable: true,
 				layout: "split",
 				emptyMessage: EMPTY_MESSAGE,
-				...(promotion
-					? {
-							hints: [
-								{ key: "p", verb: "propose repo" },
-								{ key: "g", verb: "propose global" },
-							],
-							actions: {
-								p: (item: ListOverlayItem) => this.promote(item, "repo", onChange),
-								g: (item: ListOverlayItem) => this.promote(item, "global", onChange),
-							},
-						}
-					: {}),
+				...(Object.keys(actions).length > 0 ? { hints: (item) => this.hintsFor(item), actions } : {}),
 				onClose,
 			},
 			onChange,
@@ -286,8 +300,78 @@ export class MemoryOverlayView implements Component {
 		return status;
 	}
 
+	/** Only the keys the selected row answers to, so a lesson row never advertises promotion. */
+	private hintsFor(item: ListOverlayItem | undefined): ReadonlyArray<{ key: string; verb: string }> {
+		if (item === undefined) return [];
+		if (item.id.startsWith("bank:") && this.handlers.onPromote) {
+			return [
+				{ key: "p", verb: "propose repo" },
+				{ key: "g", verb: "propose global" },
+			];
+		}
+		const record = this.handlers.onReview ? this.selectedRecord(item) : null;
+		if (record === null) return [];
+		const state = recordReviewState(record);
+		return [
+			...(state === "approved" ? [] : [{ key: "a", verb: "approve" }]),
+			...(state === "rejected" ? [] : [{ key: "x", verb: "reject" }]),
+		];
+	}
+
+	private review(item: ListOverlayItem, action: MemoryReviewAction, onChange: () => void): void {
+		const onReview = this.handlers.onReview;
+		if (onReview === undefined || this.promotionInFlight) return;
+		this.pendingGlobalEntryId = null;
+		const record = this.selectedRecord(item);
+		const state = record === null ? null : recordReviewState(record);
+		if (record === null || state === (action === "approve" ? "approved" : "rejected")) {
+			this.promotionMessage = {
+				token: "warning",
+				text:
+					record === null
+						? "select a durable memory record"
+						: `${record.id} is already ${action === "approve" ? "approved" : "rejected"}`,
+			};
+			this.invalidate();
+			onChange();
+			return;
+		}
+		this.promotionInFlight = true;
+		this.promotionMessage = {
+			token: "activity",
+			text: `${action === "approve" ? "approving" : "rejecting"} ${record.id}`,
+		};
+		this.invalidate();
+		onChange();
+		void onReview(record, action)
+			.then((updated) => {
+				this.promotionMessage = {
+					token: "success",
+					text: `${action === "approve" ? "approved" : "rejected"} ${updated.id}`,
+				};
+			})
+			.catch((error: unknown) => {
+				this.promotionMessage = {
+					token: "error",
+					text: `${action} failed: ${error instanceof Error ? error.message : String(error)}`,
+				};
+			})
+			.finally(() => {
+				this.promotionInFlight = false;
+				this.invalidate();
+				onChange();
+			});
+	}
+
+	private selectedRecord(item: ListOverlayItem): MemoryRecord | null {
+		if (!item.id.startsWith("lesson:")) return null;
+		const recordId = item.id.slice("lesson:".length);
+		return this.getRecords().find((record) => record.id === recordId) ?? null;
+	}
+
 	private promote(item: ListOverlayItem, scope: "repo" | "global", onChange: () => void): void {
-		if (this.promotion === undefined || this.promotionInFlight) return;
+		const onPromote = this.handlers.onPromote;
+		if (onPromote === undefined || this.promotionInFlight) return;
 		const entry = this.selectedBankEntry(item);
 		if (entry === null) {
 			this.pendingGlobalEntryId = null;
@@ -311,12 +395,14 @@ export class MemoryOverlayView implements Component {
 		this.promotionMessage = { token: "activity", text: `proposing ${entry.id} with ${scope} scope` };
 		this.invalidate();
 		onChange();
-		void this.promotion
-			.onPromote(entry, scope)
+		void onPromote(entry, scope)
 			.then((result) => {
+				const approval = this.handlers.onReview
+					? "review it under pending review, then press a to approve"
+					: `review, then run clio-coder memory approve ${result.record.id}`;
 				this.promotionMessage = {
 					token: "success",
-					text: `${result.created ? "proposed" : "found existing"} ${result.record.id}; review, then run clio-coder memory approve ${result.record.id}`,
+					text: `${result.created ? "proposed" : "found existing"} ${result.record.id}; ${approval}`,
 				};
 			})
 			.catch((error: unknown) => {
@@ -341,7 +427,7 @@ export class MemoryOverlayView implements Component {
 	}
 }
 
-/** Mount durable lessons and the live task bank with reviewed promotion actions. */
+/** Mount durable lessons and the live task bank with promotion and review actions. */
 export function openMemoryOverlay(
 	tui: TUI,
 	getStatus: () => TaskMemoryOperatorStatus,
@@ -353,7 +439,10 @@ export function openMemoryOverlay(
 		getRecords,
 		() => options.onClose?.(),
 		() => tui.requestRender(),
-		options.onPromote ? { onPromote: options.onPromote } : undefined,
+		{
+			...(options.onPromote ? { onPromote: options.onPromote } : {}),
+			...(options.onReview ? { onReview: options.onReview } : {}),
+		},
 	);
 	const handle = showClioOverlayFrame(tui, view, {
 		anchor: "center",

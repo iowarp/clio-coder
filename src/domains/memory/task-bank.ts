@@ -15,6 +15,19 @@ export interface TaskMemoryEntry {
 	createdAt: string;
 	lastTouchedAt: string;
 	injectionCount: number;
+	/**
+	 * A knowledge entry the guardian filed as a repository lesson: true beyond
+	 * this task, so it is the only kind the durable store takes without an
+	 * operator. Plain knowledge is a fact about the task in hand; a live session
+	 * kept "sum returns a-b" as knowledge a minute before the fix made it false.
+	 */
+	durable?: true;
+	/**
+	 * The one command a lesson says works, exactly as the guardian reported it.
+	 * It is a claim until the host matches it against a command it executed
+	 * successfully; the text of the lesson is never searched for evidence.
+	 */
+	evidenceCommand?: string;
 }
 
 /** JSON-safe export shape. The bank itself remains session-scoped and in memory. */
@@ -34,6 +47,10 @@ export interface TaskMemoryBankOptions {
 export interface SaveTaskMemoryOptions {
 	/** Update an existing entry while preserving its identity. */
 	id?: string;
+	/** File the entry as a repository lesson. Knowledge only. */
+	durable?: boolean;
+	/** The command the lesson claims works. Lessons only. */
+	evidenceCommand?: string;
 }
 
 /**
@@ -67,7 +84,13 @@ export class TaskMemoryBank {
 	}
 
 	saveKnowledge(content: string, options: SaveTaskMemoryOptions = {}): TaskMemoryEntry {
-		return this.#save("knowledge", content, options.id);
+		return this.#save(
+			"knowledge",
+			content,
+			options.id,
+			options.durable === true,
+			options.durable === true ? options.evidenceCommand : undefined,
+		);
 	}
 
 	saveProcedural(content: string, options: SaveTaskMemoryOptions = {}): TaskMemoryEntry {
@@ -90,6 +113,22 @@ export class TaskMemoryBank {
 		this.#nextId = 1;
 	}
 
+	/**
+	 * Replace the bank with a snapshot of the same session, keeping entry ids so
+	 * citations in the resumed transcript still resolve.
+	 */
+	restore(snapshot: TaskMemorySnapshot): void {
+		this.clear();
+		this.#status = snapshot.status === null ? null : cloneEntry(snapshot.status);
+		for (const entry of snapshot.knowledge.slice(-this.#knowledgeCap)) this.#knowledge.set(entry.id, cloneEntry(entry));
+		for (const entry of snapshot.procedural.slice(-this.#proceduralCap))
+			this.#procedural.set(entry.id, cloneEntry(entry));
+		const sequences = [snapshot.status, ...snapshot.knowledge, ...snapshot.procedural].map((entry) =>
+			entry === null ? 0 : Number.parseInt(entry.id.slice(entry.id.lastIndexOf("-") + 1), 36),
+		);
+		this.#nextId = Math.max(0, ...sequences.filter((value) => Number.isSafeInteger(value))) + 1;
+	}
+
 	/** Record attribution after an entry has contributed to a visible reminder. */
 	recordInjection(ids: ReadonlyArray<string>): void {
 		for (const id of new Set(ids)) {
@@ -106,19 +145,33 @@ export class TaskMemoryBank {
 	 * token estimate. Status remains private even if a caller requests it.
 	 */
 	render(budgetTokens: number, kinds: ReadonlyArray<TaskMemoryRenderableClass> = ["knowledge", "procedural"]): string {
-		if (!Number.isFinite(budgetTokens) || budgetTokens <= 0) return "";
+		return renderTaskMemoryEntries(this.select(budgetTokens, kinds));
+	}
+
+	/**
+	 * The entries a render under this budget shows, in render order. This is the
+	 * only budget selection: a caller that needs to know what a prompt presented
+	 * renders these entries rather than searching rendered text for ids, which a
+	 * shown entry quoting a hidden entry's id would fool.
+	 */
+	select(
+		budgetTokens: number,
+		kinds: ReadonlyArray<TaskMemoryRenderableClass> = ["knowledge", "procedural"],
+	): TaskMemoryEntry[] {
+		if (!Number.isFinite(budgetTokens) || budgetTokens <= 0) return [];
 		const allowed = new Set(kinds);
 		const entries = [...this.#knowledge.values(), ...this.#procedural.values()]
 			.filter((entry) => allowed.has(entry.kind as TaskMemoryRenderableClass))
 			.sort(compareForRender);
-		let rendered = "";
+		const selected: TaskMemoryEntry[] = [];
+		let length = 0;
 		for (const entry of entries) {
-			const line = `- [${entry.id}] ${entry.kind}: ${entry.content}`;
-			const candidate = rendered.length === 0 ? line : `${rendered}\n${line}`;
-			if (ceilChars(candidate.length) > budgetTokens) continue;
-			rendered = candidate;
+			const candidate = length === 0 ? entryLine(entry).length : length + 1 + entryLine(entry).length;
+			if (ceilChars(candidate) > budgetTokens) continue;
+			length = candidate;
+			selected.push(cloneEntry(entry));
 		}
-		return rendered;
+		return selected;
 	}
 
 	/**
@@ -154,7 +207,13 @@ export class TaskMemoryBank {
 		};
 	}
 
-	#save(kind: TaskMemoryRenderableClass, content: string, id: string | undefined): TaskMemoryEntry {
+	#save(
+		kind: TaskMemoryRenderableClass,
+		content: string,
+		id: string | undefined,
+		durable = false,
+		evidenceCommand?: string,
+	): TaskMemoryEntry {
 		const entries = this.#mapFor(kind);
 		const normalized = normalizeContent(content);
 		const timestamp = this.#timestamp();
@@ -166,6 +225,10 @@ export class TaskMemoryBank {
 			if (existing === undefined) throw new Error(`task memory entry not found: ${id}`);
 			saved = { ...existing, content: normalized, lastTouchedAt: timestamp };
 		}
+		if (durable) saved.durable = true;
+		else Reflect.deleteProperty(saved, "durable");
+		if (durable && evidenceCommand !== undefined) saved.evidenceCommand = evidenceCommand;
+		else Reflect.deleteProperty(saved, "evidenceCommand");
 		entries.set(saved.id, saved);
 		this.#evictOldest(entries, kind === "knowledge" ? this.#knowledgeCap : this.#proceduralCap);
 		return cloneEntry(saved);
@@ -193,6 +256,15 @@ export class TaskMemoryBank {
 	#timestamp(): string {
 		return this.#now().toISOString();
 	}
+}
+
+function entryLine(entry: TaskMemoryEntry): string {
+	return `- [${entry.id}] ${entry.durable === true ? "lesson" : entry.kind}: ${entry.content}`;
+}
+
+/** Text of exactly these entries, one line each. Pair with `TaskMemoryBank.select`. */
+export function renderTaskMemoryEntries(entries: ReadonlyArray<TaskMemoryEntry>): string {
+	return entries.map(entryLine).join("\n");
 }
 
 function normalizeContent(content: string): string {

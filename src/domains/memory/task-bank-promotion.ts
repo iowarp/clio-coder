@@ -18,7 +18,7 @@
 import { canonicalMemoryRepositoryIdentity } from "./operations.js";
 import { proposeMemoryPromotion } from "./promotion.js";
 import type { TaskMemoryEntry } from "./task-bank.js";
-import type { MemoryRecord } from "./types.js";
+import type { MemoryRecord, MemoryRepositoryIdentity } from "./types.js";
 
 export interface ProposeInjectedTaskMemoryInput {
 	/** Session the reminder was produced in. Without one there is no provenance to file under. */
@@ -31,6 +31,8 @@ export interface ProposeInjectedTaskMemoryInput {
 
 export interface ProposeInjectedTaskMemoryResult {
 	records: MemoryRecord[];
+	/** The record each entry resolved to, new or already held, keyed by entry id. */
+	recordByEntry: Map<string, MemoryRecord>;
 	/** One message per entry the store refused, for the caller to report. */
 	errors: string[];
 }
@@ -39,7 +41,7 @@ export async function proposeInjectedTaskMemory(
 	dataDir: string,
 	input: ProposeInjectedTaskMemoryInput,
 ): Promise<ProposeInjectedTaskMemoryResult> {
-	const result: ProposeInjectedTaskMemoryResult = { records: [], errors: [] };
+	const result: ProposeInjectedTaskMemoryResult = { records: [], recordByEntry: new Map(), errors: [] };
 	const sessionId = input.sessionId;
 	const repository = canonicalMemoryRepositoryIdentity(input.cwd);
 	// No session means no provenance. No canonical repository leaves only global
@@ -49,16 +51,50 @@ export async function proposeInjectedTaskMemory(
 	for (const entry of input.entries) {
 		if (entry.kind === "status") continue;
 		try {
-			const proposal = await proposeMemoryPromotion(
+			const { record } = await proposeMemoryPromotion(
 				dataDir,
 				{ kind: "task-bank-entry", sessionId, evidenceRefs: [`session:${sessionId}`], entry },
 				{ scope: "repo", repository },
 				input.now ?? new Date(),
+				// Only lessons are matched, and only on identical text. Task facts and
+				// attempt logs belong to their session.
+				entry.durable === true ? (records) => similarRepositoryLesson(records, repository, entry.content) : undefined,
 			);
-			result.records.push(proposal.record);
+			result.records.push(record);
+			result.recordByEntry.set(entry.id, record);
 		} catch (error) {
 			result.errors.push(`${entry.id}: ${error instanceof Error ? error.message : String(error)}`);
 		}
 	}
 	return result;
+}
+
+/**
+ * The repository lesson that already says exactly this, if any. Identity is the
+ * text with whitespace collapsed and nothing else: term overlap matched "the
+ * cache is safe across sessions" with "the cache is NOT safe across sessions",
+ * and a changed number or path the same way, so a new and opposite fact would
+ * have counted as a second session holding the old one. A rejected record
+ * matches too, because the operator declined that lesson.
+ */
+function similarRepositoryLesson(
+	records: ReadonlyArray<MemoryRecord>,
+	repository: MemoryRepositoryIdentity,
+	content: string,
+): MemoryRecord | null {
+	const wanted = normalizeLesson(content);
+	if (wanted.length === 0) return null;
+	return (
+		records.find(
+			(record) =>
+				record.scope === "repo" &&
+				record.repository?.key === repository.key &&
+				record.provenance?.sourceEntryKind === "knowledge" &&
+				normalizeLesson(record.lesson) === wanted,
+		) ?? null
+	);
+}
+
+function normalizeLesson(value: string): string {
+	return value.replace(/\s+/gu, " ").trim();
 }

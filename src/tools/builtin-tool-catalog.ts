@@ -217,6 +217,17 @@ const TOOL_METADATA: Readonly<Record<string, ToolMetadata>> = {
 			{ goal: "Select one value from JSON by pointer", args: { op: "select", path: "config.json", pointer: "/version" } },
 		],
 	},
+	[ToolNames.MemoryRecall]: {
+		objective: "Recall task memory and approved durable memory that matches a query, without writing memory.",
+		uiLabel: "Memory",
+		retrySafety: "idempotent",
+		resultSizePolicy: {
+			kind: "bounded",
+			maxBytes: 32_768,
+			followUpHint: "Narrow the query or lower limit.",
+		},
+		costLatency: "local_fast",
+	},
 	// MUTATE: write-class, sequential, file-mutation queue.
 	[ToolNames.Write]: {
 		objective: "Create a file, or replace all of an existing file.",

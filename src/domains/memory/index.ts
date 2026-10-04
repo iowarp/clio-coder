@@ -1,4 +1,18 @@
 export {
+	buildDispatchMemorySection,
+	DISPATCH_MEMORY_SCOPES,
+	type DispatchMemoryRoute,
+	dispatchMemoryRuntimeId,
+} from "./dispatch-section.js";
+export {
+	evaluateMemoryGate,
+	MEMORY_GATE_HELD_SESSIONS,
+	type MemoryGateOutcome,
+	type MemoryGateVerdict,
+	type MemoryObservationInput,
+	recordMemoryObservations,
+} from "./guardian-gate.js";
+export {
 	approveMemoryRecord,
 	canonicalMemoryRepositoryIdentity,
 	estimateMemoryTokens,
@@ -35,6 +49,14 @@ export {
 	memoryRecordFromEvidence,
 	proposeMemoryFromEvidence,
 } from "./proposal.js";
+export {
+	MEMORY_RECALL_DEFAULT_LIMIT,
+	MEMORY_RECALL_MAX_LIMIT,
+	type MemoryRecallHit,
+	type MemoryRecallInput,
+	recallMemory,
+	renderMemoryRecall,
+} from "./recall.js";
 export {
 	MEMORY_PRECOMPUTED_RELEVANCE_VERSION,
 	type PrecomputedMemoryCandidate,
@@ -151,6 +173,9 @@ export {
 } from "./task-memory-trace.js";
 export type {
 	MemoryAgentIdentity,
+	MemoryApproval,
+	MemoryObservation,
+	MemoryObservationKind,
 	MemoryPromotionRedaction,
 	MemoryProposalResult,
 	MemoryPruneResult,

@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { createRedactionTally, redactSecretsText } from "../evidence/redact.js";
 import { canonicalMemoryRepositoryIdentity } from "./operations.js";
-import { loadMemoryRecords, upsertMemoryRecord } from "./store.js";
+import { insertMemoryRecordIfAbsent } from "./store.js";
 import type { TaskMemoryEntry, TaskMemoryRenderableClass } from "./task-bank.js";
 import type {
 	MemoryAgentIdentity,
@@ -97,6 +97,8 @@ export async function proposeMemoryPromotion(
 	source: MemoryPromotionSource,
 	selection: MemoryScopeSelection,
 	now: Date = new Date(),
+	/** Runs inside the store lock, so an equivalent record found here cannot be raced into a duplicate. */
+	findExisting?: (records: ReadonlyArray<MemoryRecord>) => MemoryRecord | null,
 ): Promise<MemoryProposalResult> {
 	validatePromotionSource(source);
 	const validatedScope = validateMemoryScopeSelection(selection, {
@@ -104,10 +106,7 @@ export async function proposeMemoryPromotion(
 		agentIds: source.agentIds ?? [],
 	});
 	const record = memoryRecordFromPromotion(source, validatedScope, now);
-	const existing = (await loadMemoryRecords(dataDir)).find((candidate) => candidate.id === record.id);
-	if (existing !== undefined) return { record: existing, created: false };
-	await upsertMemoryRecord(dataDir, record);
-	return { record, created: true };
+	return insertMemoryRecordIfAbsent(dataDir, record, findExisting);
 }
 
 export function memoryRecordFromPromotion(

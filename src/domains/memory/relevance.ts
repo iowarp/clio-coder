@@ -63,7 +63,8 @@ function normalized(value: string): string {
 	return value.normalize("NFKC").toLowerCase();
 }
 
-function terms(value: string): string[] {
+/** The lexical term set ranking uses, shared so recall scores bank entries the same way. */
+export function memoryTerms(value: string): string[] {
 	return [...new Set(normalized(value.replace(/([a-z])([A-Z])/g, "$1 $2")).match(/[\p{L}\p{N}]+/gu) ?? [])].filter(
 		(term) => term.length >= 2 && !STOP_WORDS.has(term),
 	);
@@ -90,12 +91,12 @@ export function rankMemoryByRelevance(
 	options: Omit<MemoryRetrievalOptions, "tokenBudget">,
 	input: MemoryRelevanceInput,
 ): RankedMemoryCandidate[] {
-	const taskTerms = terms(input.taskText).slice(0, 64);
+	const taskTerms = memoryTerms(input.taskText).slice(0, 64);
 	const paths = [...new Set((input.activePaths ?? []).map(pathKey).filter(Boolean))].slice(0, 32);
 	const symbols = [...new Set((input.activeSymbols ?? []).map(normalized).filter(Boolean))].slice(0, 32);
 	const candidates = eligibleMemoryRecords(records, options).map((record): RankedMemoryCandidate => {
 		const text = [record.key, record.lesson, ...record.appliesWhen].join("\n");
-		const textTerms = new Set(terms(text));
+		const textTerms = new Set(memoryTerms(text));
 		const textPaths = new Set(
 			(text.match(/[\p{L}\p{N}_./\\:-]+/gu) ?? []).map((path) => pathKey(path.replace(/[.:]+$/, ""))),
 		);

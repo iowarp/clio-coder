@@ -23,11 +23,7 @@ import { createDispatchDomainModule } from "../domains/dispatch/index.js";
 import { configureRunEventJournal } from "../domains/dispatch/run-event-journal.js";
 import type { RunReceipt } from "../domains/dispatch/types.js";
 import { ensureClioState } from "../domains/lifecycle/index.js";
-import {
-	buildMemoryPromptSection,
-	canonicalMemoryRepositoryIdentity,
-	loadMemoryRecordsSync,
-} from "../domains/memory/index.js";
+import { buildDispatchMemorySection } from "../domains/memory/index.js";
 import { MiddlewareDomainModule } from "../domains/middleware/index.js";
 import { ObservabilityDomainModule } from "../domains/observability/index.js";
 import { createPromptsDomainModule } from "../domains/prompts/index.js";
@@ -630,29 +626,17 @@ async function runDispatch(
 
 	let memorySection = "";
 	try {
-		const records = loadMemoryRecordsSync(clioDataDir());
-		const boundProfileName = parsed.agentProfile ?? effectiveSettings.fleet.agentProfiles[parsed.agentId];
-		const boundProfile = boundProfileName ? effectiveSettings.fleet.profiles[boundProfileName] : undefined;
-		const configuredRuntime = (targetId: string | null | undefined): string | undefined =>
-			effectiveSettings.targets.find((target) => target.id === targetId)?.runtime;
-		const profileRuntimeId = configuredRuntime(boundProfile?.target);
-		// The memory section is compiled before fleet routing settles. Admit a
-		// runtime-scoped record only when every permitted initial and fallback
-		// route is constrained to the same runtime.
-		const memoryRuntimeId =
-			parsed.target !== undefined
-				? configuredRuntime(parsed.target)
-				: boundProfileName !== undefined
-					? parsed.agentRuntime === profileRuntimeId
-						? profileRuntimeId
-						: undefined
-					: parsed.agentRuntime;
-		memorySection = buildMemoryPromptSection(records, {
-			scopes: ["global", "repo", "runtime", "agent"],
-			activeRepository: canonicalMemoryRepositoryIdentity(process.cwd()),
-			activeRuntime: memoryRuntimeId === undefined ? null : { kind: "runtime", key: memoryRuntimeId },
-			activeAgent: { kind: "agent", key: parsed.agentId },
-		}).section;
+		memorySection = buildDispatchMemorySection({
+			dataDir: clioDataDir(),
+			cwd: process.cwd(),
+			settings: effectiveSettings,
+			route: {
+				agentId: parsed.agentId,
+				...(parsed.target !== undefined ? { target: parsed.target } : {}),
+				...(parsed.agentProfile !== undefined ? { workerProfile: parsed.agentProfile } : {}),
+				...(parsed.agentRuntime !== undefined ? { workerRuntime: parsed.agentRuntime } : {}),
+			},
+		});
 	} catch (err) {
 		process.stderr.write(
 			`clio-coder run: memory load failed: ${err instanceof Error ? err.message : String(err)}; continuing without memory\n`,

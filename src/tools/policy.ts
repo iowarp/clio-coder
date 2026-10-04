@@ -45,6 +45,8 @@ export const TOOL_PLANES: Readonly<Record<BuiltinToolName, PlaneExpectation>> = 
 	[ToolNames.ClioLibrary]: { plane: "observe", actionClass: "read", executionMode: "parallel" },
 	// data streams structured files and never writes; parallel like read.
 	[ToolNames.Data]: { plane: "observe", actionClass: "read", executionMode: "parallel" },
+	// memory_recall reads the session task bank and the durable store and never writes either.
+	[ToolNames.MemoryRecall]: { plane: "observe", actionClass: "read", executionMode: "parallel" },
 	[ToolNames.Write]: { plane: "mutate", actionClass: "write", executionMode: "sequential" },
 	[ToolNames.Edit]: { plane: "mutate", actionClass: "write", executionMode: "sequential" },
 	[ToolNames.Bash]: { plane: "execute", actionClass: "execute", executionMode: "sequential" },
@@ -143,6 +145,8 @@ const LEDGER_BOUND_TOOLS = new Set<ToolName>([ToolNames.Ledger]);
 const DECISION_BOUND_TOOLS = new Set<ToolName>([ToolNames.Consult]);
 /** A separate image model exists only when the session binds a vision profile. */
 const VISION_BOUND_TOOLS = new Set<ToolName>([ToolNames.Vision]);
+/** Registered only on the orchestrator registry, which owns the session task bank. */
+const MEMORY_RECALL_BOUND_TOOLS = new Set<ToolName>([ToolNames.MemoryRecall]);
 /** The RETRIEVE plane, omitted wholesale by a hermetic run (tools/network-policy.ts). */
 const NETWORK_BOUND_TOOLS = new Set<ToolName>([ToolNames.WebRead, ToolNames.WebFetch]);
 
@@ -221,6 +225,7 @@ export function validateBuiltinToolPolicy(
 		if (DECISION_BOUND_TOOLS.has(tool)) required.delete(tool);
 		if (VISION_BOUND_TOOLS.has(tool)) required.delete(tool);
 		if (MUSIC_BOUND_TOOLS.has(tool)) required.delete(tool);
+		if (MEMORY_RECALL_BOUND_TOOLS.has(tool)) required.delete(tool);
 	}
 	for (const tool of required) {
 		if (!registered.has(tool)) errors.push(`builtin tool ${tool} is not registered`);

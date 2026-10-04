@@ -1831,6 +1831,7 @@ const TOOL_CONTRACT_TESTS: Readonly<Record<BuiltinToolName, readonly string[]>> 
 	[ToolNames.ClioDocs]: ["tests/contracts/gateway-web-context.test.ts"],
 	[ToolNames.ClioLibrary]: ["tests/contracts/clio-library.test.ts", "tests/contracts/gateway-web-context.test.ts"],
 	[ToolNames.Data]: ["tests/contracts/data-tool.test.ts", "tests/contracts/gateway-corrections.test.ts"],
+	[ToolNames.MemoryRecall]: ["tests/contracts/memory-recall-tool.test.ts"],
 	[ToolNames.Write]: [
 		"tests/contracts/mutation-atomicity.test.ts",
 		"tests/contracts/symlink-escape.test.ts",
@@ -1898,6 +1899,7 @@ async function registeredToolSources(): Promise<Map<string, string>> {
 			music: {} as MusicOperations,
 			askUser: async () => ({ answers: [] }),
 			requestSelfCompact: async () => "",
+			memoryRecall: { bank: () => null, records: () => [], eligibility: () => ({}) },
 			includeLedgerTools: true,
 			consult: { systemOne: { run: async () => null } },
 			visionSidecar: {
