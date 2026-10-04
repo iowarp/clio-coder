@@ -127,7 +127,7 @@ function emittedFilesContaining(packageRoot: string, marker: string): Set<string
 	for (const entry of readdirSync(join(packageRoot, "dist"), { recursive: true, withFileTypes: true })) {
 		if (!entry.isFile() || !entry.name.endsWith(".js")) continue;
 		const path = join(entry.parentPath, entry.name);
-		if (readFileSync(path, "utf8").includes(marker)) matches.add(realpathSync.native(path));
+		if (readFileSync(path, "utf8").includes(marker)) matches.add(realpathSync(path));
 	}
 	return matches;
 }
@@ -608,7 +608,7 @@ function coveredFiles(directory: string): Set<string> {
 		for (const script of payload.result ?? []) {
 			if (!script.url?.startsWith("file:")) continue;
 			try {
-				files.add(realpathSync.native(fileURLToPath(script.url)));
+				files.add(realpathSync(fileURLToPath(script.url)));
 			} catch {
 				// Ignore builtins and transient files outside the installed package.
 			}
