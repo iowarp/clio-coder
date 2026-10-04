@@ -60,6 +60,7 @@ export function createApp(options: {
 	clientDir?: string;
 	diagnostics?: boolean;
 	pwa?: boolean;
+	installable?: () => Promise<boolean>;
 	idle: () => boolean;
 	runtime?: () => Promise<{ server: Omit<RuntimeInfo, "threadId">; reads: RuntimeInfo; ops: RuntimeInfo }>;
 }) {
@@ -139,6 +140,6 @@ export function createApp(options: {
 		throw new AppProblem("not_found", "API route was not found.");
 	});
 	app.notFound((context) => problemResponse(new AppProblem("not_found", "Route was not found."), context));
-	if (options.clientDir) staticClient(app, options.clientDir, options.pwa);
+	if (options.clientDir) staticClient(app, options.clientDir, options.pwa, options.installable);
 	return app;
 }

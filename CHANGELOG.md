@@ -17,6 +17,8 @@ Clio Coder 0.6.1 repairs installation and upgrade. Native Windows installs compl
 - Every doctor warning or failure names a concrete next command, including the sign-in command for expired credentials.
 - Doctor detects missing checkout build files and running sessions that need a restart after a rebuild, and `clio-coder doctor --fix` rebuilds an incomplete checkout.
 - `clio-coder gui background restart --if-idle` restarts while conversations are resting and preserves active work.
+- Under WSL, the Windows Start Menu and sign-in shortcuts now call the `clio-coder` launcher, so a shortcut pinned to the taskbar keeps working after an upgrade. An existing pin that still names an old version is repaired at the next install.
+- With the Start Menu shortcut installed, the app no longer offers itself for a second install from the browser, which added a duplicate "Clio Coder (1)" entry.
 - Desktop app launches deliver the current address and token, and reconnecting with a fresh local launch link moves the browser to the correct port.
 - Windows uninstall removes the private runtime and installed versions after Clio exits, and uninstall reports the shell configuration lines left for manual removal.
 

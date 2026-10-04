@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { lstat, mkdir, readFile, stat, unlink, writeFile } from "node:fs/promises";
 import { userInfo } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, isAbsolute, join } from "node:path";
 import { isWsl, runWindowsPowerShell } from "../process-policy.js";
 import type { LaunchPaths } from "./desktop-entry.js";
 
@@ -36,6 +36,9 @@ const shortcutScript = [
 	"$b.Description='Starts the Clio Coder background app when you sign in'",
 	"$b.WindowStyle=7",
 	"$b.Save()",
+	// A taskbar pin is a copy made when the user pinned, so it never sees a rewritten Start Menu shortcut.
+	"$t=Join-Path $env:APPDATA 'Microsoft\\Internet Explorer\\Quick Launch\\User Pinned\\TaskBar\\Clio Coder.lnk'",
+	"if (Test-Path -LiteralPath $t) { try { $c=$s.CreateShortcut($t); if ($c.TargetPath -match 'wslg?\\.exe$' -and $c.Arguments.EndsWith($env:CLIO_WIN_PIN_SUFFIX) -and $c.Arguments -ne $env:CLIO_WIN_MENU_ARGS) { $c.TargetPath=$env:CLIO_WIN_TARGET; $c.Arguments=$env:CLIO_WIN_MENU_ARGS; $c.Save() } } catch { } }",
 ].join("; ");
 
 type Owned = { path: string; sha256: string };
@@ -68,12 +71,33 @@ export function windowsArgument(value: string) {
 	if (/^[\w@%+=:,./~-]+$/.test(value)) return value;
 	return `"${value.replace(/(\\*)"/g, '$1$1\\"').replace(/(\\+)$/, "$1$1")}"`;
 }
+/**
+ * The launcher an installer-managed install keeps on PATH. It resolves the current version on every
+ * launch, where the server entry names one version and goes stale in a pinned copy at the next upgrade.
+ */
+export async function stableLauncher(entry: string): Promise<string | null> {
+	const root = /^(.+)\/versions\/[^/]+\/lib\/node_modules\/@iowarp\/clio-coder\/dist\/gui\/server\.js$/.exec(entry)?.[1];
+	if (!root) return null;
+	try {
+		const record = JSON.parse(await readFile(join(root, "install.json"), "utf8")) as {
+			kind?: unknown;
+			launcher?: unknown;
+		};
+		if (record.kind !== "clio-coder-installer" || typeof record.launcher !== "string" || !isAbsolute(record.launcher))
+			return null;
+		return (await stat(record.launcher)).isFile() ? record.launcher : null;
+	} catch {
+		// No readable install record: the versioned entry is the only launcher there is.
+		return null;
+	}
+}
 export function wslLaunchArguments(
 	distro: string,
 	user: string,
 	launch: LaunchPaths,
 	directory: string,
 	verb: "open" | "start",
+	launcher: string | null = null,
 ) {
 	if (!/^[\w.-]{1,64}$/.test(distro) || !/^[\w.-]{1,64}$/.test(user))
 		throw new Error("Unsupported WSL distribution or user name.");
@@ -85,9 +109,9 @@ export function wslLaunchArguments(
 		"--cd",
 		"~",
 		"--",
-		launch.node,
-		...(launch.loader ? ["--import", launch.loader] : []),
-		launch.entry,
+		...(launcher
+			? [launcher, "gui"]
+			: [launch.node, ...(launch.loader ? ["--import", launch.loader] : []), launch.entry]),
 		"background",
 		verb,
 		"--directory",
@@ -160,8 +184,9 @@ export async function installWindowsLauncher(
 	if (!isWsl()) return { status: "unsupported" as const };
 	const distro = process.env.WSL_DISTRO_NAME ?? "",
 		user = userInfo().username;
-	const menuArgs = wslLaunchArguments(distro, user, launch, directory, "open"),
-		startupArgs = wslLaunchArguments(distro, user, launch, directory, "start");
+	const launcher = await stableLauncher(launch.entry);
+	const menuArgs = wslLaunchArguments(distro, user, launch, directory, "open", launcher),
+		startupArgs = wslLaunchArguments(distro, user, launch, directory, "start", launcher);
 	const launchKey = sha(`${menuArgs}\n${startupArgs}`);
 	const existing = await readManifest(directory);
 	if (existing) {
@@ -200,6 +225,7 @@ export async function installWindowsLauncher(
 		CLIO_WIN_TARGET: wslg ? "C:\\Program Files\\WSL\\wslg.exe" : "C:\\Windows\\System32\\wsl.exe",
 		CLIO_WIN_MENU_ARGS: menuArgs,
 		CLIO_WIN_STARTUP_ARGS: startupArgs,
+		CLIO_WIN_PIN_SUFFIX: `background open --directory ${windowsArgument(directory)}`,
 		CLIO_WIN_ICON: `${local}\\clio-coder\\gui\\${iconName},0`,
 	});
 	const files: Owned[] = [];

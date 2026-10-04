@@ -86,6 +86,8 @@ export function AppPreferencesPanel({
 }) {
 	const pwa = useSyncExternalStore(subscribe, read, read);
 	const [note, setNote] = useState("");
+	// The server leaves the manifest out when this installation already put the app in the operating system's menus.
+	const launcherOwned = enabled && !pwa.installed && document.querySelector('link[rel="manifest"]') === null;
 	const message = note || pwa.message;
 	return (
 		<div className="pwa-controls">
@@ -93,7 +95,12 @@ export function AppPreferencesPanel({
 			{enabled ? (
 				<>
 					<p>Keep Clio Coder beside your other apps. It uses the same projects and tasks as this browser.</p>
-					{!pwa.storage ? (
+					{launcherOwned ? (
+						<p>
+							Clio Coder is already in your Start Menu. Open it from there, or run <code>clio-coder gui</code>. Installing it
+							again from the browser would add a second copy.
+						</p>
+					) : !pwa.storage ? (
 						<p role="alert">
 							This browser cannot save your connection. Allow site storage before installing so Clio can reconnect when
 							reopened.

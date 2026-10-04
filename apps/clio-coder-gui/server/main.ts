@@ -3,7 +3,7 @@ import { existsSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { createAdaptorServer } from "@hono/node-server";
 import { Supervisor } from "./acp/supervisor.js";
@@ -11,6 +11,7 @@ import { createApp } from "./app.js";
 import { getVersionInfo, registerRunningBuild, resolveClioDirs, resolvePackageRoot } from "./clio/http-shims.js";
 import { backgroundEnvironment, readBackgroundConfig } from "./launcher/background-config.js";
 import { listenPorts } from "./launcher/ports.js";
+import { windowsLauncherStatus } from "./launcher/windows.js";
 import { showPage } from "./local-server.js";
 import { restrictNetwork } from "./network-policy.js";
 import { serverOptions } from "./options.js";
@@ -203,6 +204,15 @@ export async function main(args = process.argv.slice(2)) {
 		idle: () => !(operations.activeCount || cli.activeCount || setup.busy) && supervisor.restartSafe,
 		clientDir,
 		pwa: !!persistent,
+		...(values.persistent
+			? {
+					// The Start Menu shortcut is the installed app under WSL; the browser must not offer a second one.
+					installable: async () => {
+						const status = await windowsLauncherStatus(dirname(values.persistent as string)).catch(() => "absent");
+						return status !== "installed" && status !== "modified";
+					},
+				}
+			: {}),
 		...(process.env.NODE_ENV === "test"
 			? {
 					runtime: async () => ({
