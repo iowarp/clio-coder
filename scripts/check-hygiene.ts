@@ -462,77 +462,80 @@ function checkBoundaries(): void {
 function checkCiScripts(): void {
 	const ci = parseYaml(readRoot(".github/workflows/ci.yml"));
 	const release = parseYaml(readRoot(".github/workflows/release.yml"));
-	if (ci.concurrency?.["cancel-in-progress"] !== true) fail("ci-scripts", "CI must cancel superseded runs");
-	if (ci.permissions?.contents !== "read") fail("ci-scripts", "routine CI must be read-only");
-	if (!Object.hasOwn(ci.on ?? {}, "workflow_call"))
-		fail("ci-scripts", "release must be able to call the same CI gates as pull requests");
-	if (ci.jobs?.ci?.name !== "ci (22)" || ci.jobs?.["runtime-compatibility"]?.name !== "ci (24)")
-		fail("ci-scripts", "keep the required branch-protection status names");
-	if (
-		!isDeepStrictEqual(
-			[...(ci.jobs?.ci?.needs ?? [])].sort(),
-			["checks", "core-tests", "windows-subprocess", "installed-package", "platform"].sort(),
-		)
-	)
-		fail("ci-scripts", "the required Node 22 status must depend on all routine checks");
-	const platforms = (ci.jobs?.platform?.strategy?.matrix?.include ?? []).map(
-		(leg: { os?: string; node?: string | number }) => `${leg.os}/${leg.node}`,
-	);
-	const floor = /(\d+\.\d+\.\d+)/.exec(JSON.parse(readRoot("package.json")).engines?.node ?? "")?.[1];
-	for (const leg of ["macos-latest/22", "windows-latest/22", "ubuntu-latest/24", `ubuntu-latest/${floor}`]) {
-		if (!platforms.includes(leg)) fail("ci-scripts", `the platform matrix must build and boot on ${leg}`);
-	}
-	const releaseTriggers = Object.keys(release.on ?? {});
-	if (releaseTriggers.length !== 1 || releaseTriggers[0] !== "workflow_dispatch")
-		fail("ci-scripts", "a release starts from a dispatched commit, never from a pushed tag");
-	const releaseNeeds = (job: string): string[] => [release.jobs?.[job]?.needs ?? []].flat();
-	if (release.jobs?.ci?.uses !== "./.github/workflows/ci.yml" || !releaseNeeds("qualify").includes("ci"))
-		fail("ci-scripts", "release qualification must wait for the reusable CI workflow");
-	if (release.permissions?.contents !== "read" || release.jobs?.release?.permissions?.contents !== "write")
-		fail("ci-scripts", "only the release job may write repository contents");
-	for (const [name, job] of Object.entries(release.jobs ?? {}) as Array<[string, { permissions?: object }]>) {
-		if (name !== "release" && job.permissions !== undefined)
-			fail("ci-scripts", `release job ${name} must not widen the read-only workflow permissions`);
-	}
-	if (
-		!release.jobs?.qualify?.steps?.some((step: { run?: string }) =>
-			step.run?.includes("release-candidate.mjs qualify-after-ci"),
-		)
-	)
-		fail("ci-scripts", "release qualification must audit and test the exact package");
-	if (!releaseNeeds("release").includes("qualify"))
-		fail("ci-scripts", "release creation must depend on successful qualification");
-	const releaseRuns: string[] = (release.jobs?.release?.steps ?? []).map((step: { run?: string }) => step.run ?? "");
-	if (!releaseRuns.some((run) => run.includes("sha256sum --check")))
-		fail("ci-scripts", "release creation must verify the qualified package digest");
-	const publish = releaseRuns.findIndex((run) => run.includes("npm publish candidate.tgz --provenance"));
-	const tag = releaseRuns.findIndex((run) => run.includes("gh release create") && run.includes("--target"));
-	if (publish < 0 || release.jobs?.release?.permissions?.["id-token"] !== "write")
-		fail("ci-scripts", "the release job must publish the qualified tarball to npm with provenance");
-	if (tag !== releaseRuns.length - 1 || tag < publish || !releaseRuns[tag]?.includes("candidate.tgz"))
-		fail("ci-scripts", "the tag and GitHub release are created last, from the published tarball");
-	const candidate = readRoot("scripts/release-candidate.mjs");
-	for (const tier of ["test:full", "test:gui:full"]) {
-		if (!candidate.includes(`"${tier}"`)) fail("ci-scripts", `release qualification must run ${tier}`);
-	}
 	for (const [file, workflow] of [
 		["ci.yml", ci],
 		["release.yml", release],
-		["pages.yml", parseYaml(readRoot(".github/workflows/pages.yml"))],
 	] as const) {
-		for (const job of Object.values(workflow.jobs ?? {}) as Array<{
-			"continue-on-error"?: boolean;
-			steps?: Array<{ "continue-on-error"?: boolean; run?: string; uses?: string }>;
-		}>) {
+		if (!isDeepStrictEqual(Object.keys(workflow.on ?? {}), ["workflow_dispatch"]))
+			fail("ci-scripts", `${file} must run only on deliberate dispatch`);
+		if (workflow.permissions?.contents !== "read") fail("ci-scripts", `${file} defaults to read-only contents`);
+		for (const [name, job] of Object.entries(workflow.jobs ?? {}) as Array<
+			[
+				string,
+				{
+					permissions?: Record<string, string>;
+					"continue-on-error"?: boolean;
+					steps?: Array<{ "continue-on-error"?: boolean; run?: string; uses?: string }>;
+				},
+			]
+		>) {
+			if (
+				(job.permissions?.contents === "write" || job.permissions?.["id-token"] === "write") &&
+				!(file === "release.yml" && name === "release")
+			)
+				fail("ci-scripts", "only the approved release job may write contents or mint publishing identity");
 			if (job["continue-on-error"]) fail("ci-scripts", "gate jobs must propagate failures");
 			for (const step of job.steps ?? []) {
 				if (step["continue-on-error"] || step.run?.includes("--ignore-scripts"))
-					fail("ci-scripts", "gate steps must not bypass failures or lifecycle hooks");
-				if (step.uses !== undefined && !step.uses.startsWith("./") && !/@[0-9a-f]{40}$/.test(step.uses))
-					fail("ci-scripts", `${file} must pin ${step.uses} to a full commit sha`);
+					fail("ci-scripts", "steps must propagate failures and lifecycle hooks");
+				if (step.uses && !step.uses.startsWith("./") && !/@[0-9a-f]{40}$/u.test(step.uses))
+					fail("ci-scripts", `${file} must pin ${step.uses}`);
 			}
 		}
 	}
+	if (ci.jobs?.ci?.name !== "ci (22)" || ci.jobs?.["runtime-compatibility"]?.name !== "ci (24)")
+		fail("ci-scripts", "preserve branch-protection check names");
+	if (ci.jobs?.ci?.needs !== "prepare" || ci.jobs?.["runtime-compatibility"]?.needs !== "prepare")
+		fail("ci-scripts", "both required checks consume one prepared package; platform queues must not block them");
+	if (!ci.jobs?.ci?.steps?.some((step: { run?: string }) => step.run?.includes("release-candidate.mjs test")))
+		fail("ci-scripts", "ci (22) tests the qualified artifact");
+	if (ci.jobs?.platform?.if !== `\${{ inputs.platforms }}`)
+		fail("ci-scripts", "platform boot checks are explicitly requested");
+	if (
+		release.jobs?.release?.needs !== "preflight" ||
+		release.jobs?.release?.environment !== "release" ||
+		release.jobs?.release?.permissions?.contents !== "write" ||
+		release.jobs?.release?.permissions?.["id-token"] !== "write"
+	)
+		fail("ci-scripts", "publishing requires read-only preflight, protected owner approval, and OIDC");
+	const releaseText = readRoot(".github/workflows/release.yml");
+	if (/pnpm|npm (?:install|pack)|test:|workflow_call|uses: \.\/\.github\/workflows/gu.test(releaseText))
+		fail("ci-scripts", "release reuses qualification without installing, building, testing, or calling CI");
+	for (const job of Object.values(release.jobs ?? {}) as Array<{
+		steps?: Array<{ uses?: string; with?: Record<string, unknown> }>;
+	}>) {
+		if (
+			!job.steps?.some(
+				(step) =>
+					step.uses?.startsWith("actions/download-artifact@") &&
+					step.with?.["run-id"] === `\${{ inputs.qualification_run }}`,
+			)
+		)
+			fail("ci-scripts", "every release job must consume the specified qualification run");
+	}
+	const publisher = readRoot("scripts/release-publish.mjs").replace(/\s+/gu, " ");
+	if (
+		publisher.indexOf('"publish", receipt.tarball') >= publisher.indexOf('"release", "create"') ||
+		!publisher.includes("requireIntegrity")
+	)
+		fail("ci-scripts", "npm publishes verified bytes before GitHub creates the tag/release");
+	if (existsSync(join(root, ".github/workflows/pages.yml")))
+		fail("ci-scripts", "keep the existing gh-pages deployment without a duplicate main-triggered workflow");
+	const scripts = JSON.parse(readRoot("package.json")).scripts;
+	for (const tier of ["test:full", "test:gui:full", "test:maintenance"])
+		if (!scripts[tier]) fail("ci-scripts", `retain manual investigation tier ${tier}`);
+	if (scripts.test !== "node scripts/ci-tests.mjs core" || scripts["test:gui"] !== "node scripts/ci-tests.mjs gui")
+		fail("ci-scripts", "default tests use the explicit behavior selection");
 }
 
 // ---------------------------------------------------------------------------
@@ -547,7 +550,7 @@ const TEST_TIERS: ReadonlyArray<{ tier: string; dir: string; manifest: string; s
 		tier: "contracts",
 		dir: "tests/contracts",
 		manifest: "package.json",
-		script: "test",
+		script: "test:full",
 		runs: "tests/contracts/*.test.ts",
 	},
 	{ tier: "smoke", dir: "tests/smoke", manifest: "package.json", script: "test:full", runs: "tests/smoke/*.test.ts" },

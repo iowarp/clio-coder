@@ -19,15 +19,42 @@
  * added.
  */
 import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { parseArgs } from "node:util";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { shippedAdvisoryFindings } from "./release-audit.mjs";
 import { releaseVersionErrors } from "./release-version-policy.mjs";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
+const { values } = parseArgs({ options: { tarball: { type: "string" }, report: { type: "string" } } });
+let packageRoot = root;
+let packedReport;
+if (values.tarball || values.report) {
+	if (!values.tarball || !values.report) throw new Error("Supply both --tarball and --report.");
+	packedReport = JSON.parse(readFileSync(values.report, "utf8"));
+	const bytes = readFileSync(values.tarball);
+	if (
+		`sha512-${createHash("sha512").update(bytes).digest("base64")}` !== packedReport.integrity ||
+		bytes.length !== packedReport.size
+	)
+		throw new Error("Pack report does not describe this tarball.");
+	const entries = execFileSync("tar", ["-tzf", values.tarball], { encoding: "utf8" }).trim().split("\n");
+	if (entries.some((path) => !path.startsWith("package/") || path.split("/").includes("..") || path.includes("\\")))
+		throw new Error("Tarball contains an unsafe path.");
+	if (
+		JSON.stringify(entries.map((path) => path.slice(8)).sort()) !==
+		JSON.stringify(packedReport.files.map((file) => file.path).sort())
+	)
+		throw new Error("Pack report file inventory differs from the tarball.");
+	const scratch = mkdtempSync(join(tmpdir(), "clio-release-inspect-"));
+	process.on("exit", () => rmSync(scratch, { recursive: true, force: true }));
+	execFileSync("tar", ["-xzf", values.tarball, "-C", scratch]);
+	packageRoot = join(scratch, "package");
+}
 const SHEBANG = "#!/usr/bin/env node";
 const ENTRIES = ["dist/cli/index.js", "dist/worker/entry.js"];
 
@@ -118,7 +145,7 @@ function firstLine(abs) {
 }
 
 for (const rel of ENTRIES) {
-	const head = firstLine(join(root, rel));
+	const head = firstLine(join(packageRoot, rel));
 	if (head === null) errors.push(`missing ${rel}`);
 	else if (head !== SHEBANG) errors.push(`bad shebang in ${rel}`);
 }
@@ -188,28 +215,30 @@ function checkVersionCoherence() {
 }
 
 const entrySet = new Set(ENTRIES);
-for (const dirent of readdirSync(join(root, "dist"), {
+for (const dirent of readdirSync(join(packageRoot, "dist"), {
 	recursive: true,
 	withFileTypes: true,
 })) {
 	if (!dirent.isFile() || !dirent.name.endsWith(".js")) continue;
 	const abs = join(dirent.parentPath, dirent.name);
-	const rel = abs.slice(root.length).replaceAll("\\", "/");
+	const rel = abs.slice(packageRoot.length + (packageRoot.endsWith("/") ? 0 : 1)).replaceAll("\\", "/");
 	if (entrySet.has(rel)) continue;
 	if (firstLine(abs) === SHEBANG) {
 		errors.push(`unexpected shebang on non-entry chunk: ${rel}`);
 	}
 }
 
-let report;
+let report = packedReport;
 try {
-	const raw = execFileSync("npm", ["pack", "--dry-run", "--json"], {
-		cwd: root,
-		encoding: "utf8",
-		maxBuffer: 64 * 1024 * 1024,
-		stdio: ["ignore", "pipe", "ignore"],
-	});
-	report = JSON.parse(raw)[0];
+	if (!report) {
+		const raw = execFileSync("npm", ["pack", "--dry-run", "--json"], {
+			cwd: root,
+			encoding: "utf8",
+			maxBuffer: 64 * 1024 * 1024,
+			stdio: ["ignore", "pipe", "ignore"],
+		});
+		report = JSON.parse(raw)[0];
+	}
 } catch (err) {
 	process.stderr.write(
 		`check-release: npm pack --dry-run failed: ${err instanceof Error ? err.message : String(err)}\n`,
@@ -258,7 +287,7 @@ const allowedRecipeKeys = new Set([...requiredRecipeKeys, ...optionalRecipeKeys]
 // Builtin recipes ship from their one canonical location, src/domains/agents/
 // builtins/, which is what src/domains/agents/extension.ts reads at runtime.
 // Every recipe must be in the pack and carry the strict v1 frontmatter schema.
-const recipeDir = join(root, "src", "domains", "agents", "builtins");
+const recipeDir = join(packageRoot, "src", "domains", "agents", "builtins");
 for (const name of readdirSync(recipeDir)
 	.filter((entry) => entry.endsWith(".md"))
 	.sort()) {

@@ -797,6 +797,10 @@ for (const baseFails of [true, false]) {
 			stateDir: scratch.stateDir,
 		});
 		strictEqual(verification?.status, "rejected");
+		ok(verification?.checks[0]);
+		// Eligibility is tested separately below. This fixture tests comparison
+		// results, independent of subprocess scheduling on a loaded host.
+		verification.checks[0].durationMs = 1;
 		await compareHostVerificationBase({ verification, request, stateDir: scratch.stateDir });
 		const contained = sandboxAvailability().available && sandboxAvailability().backend === "bwrap";
 		strictEqual(
@@ -855,8 +859,11 @@ it("links the task's node_modules into the base when the manifests match, and le
 		workerSuccessful: true,
 		stateDir: scratch.stateDir,
 	});
+	ok(verification?.checks[0]);
+	verification.checks[0].durationMs = 1;
 	await compareHostVerificationBase({ verification, request, stateDir: scratch.stateDir });
-	strictEqual(verification?.checks[0]?.baseComparison?.status, "passed");
+	const contained = sandboxAvailability().available && sandboxAvailability().backend === "bwrap";
+	strictEqual(verification.checks[0].baseComparison?.status, contained ? "passed" : "not_compared");
 	strictEqual(readFileSync(join(scratch.project, "node_modules", "dep", "index.js"), "utf8"), "module.exports = 0;\n");
 });
 

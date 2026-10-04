@@ -43,7 +43,7 @@ test("saved next-turn settings reach the running guardrail and journal consumers
 						});
 					});
 				});
-				await bootOrchestrator({ acp: { transport } });
+				await bootOrchestrator({ acp: { transport, onReady: () => transport.notify("probe/ready", {}) } });
 				`,
 			],
 			{
@@ -56,6 +56,16 @@ test("saved next-turn settings reach the running guardrail and journal consumers
 			},
 		);
 		try {
+			// The transport exists before ACP registers initialize. Await the
+			// server's readiness callback instead of racing its cold boot.
+			await new Promise<void>((resolve, reject) => {
+				const timer = setTimeout(() => reject(new Error("ACP fixture did not become ready")), 30_000);
+				const unsubscribe = transport.onNotification("probe/ready", () => {
+					clearTimeout(timer);
+					unsubscribe();
+					resolve();
+				});
+			});
 			await transport.request("initialize", { protocolVersion: 1 });
 			const change = async (mutate: SettingsMutator): Promise<unknown> => {
 				let unsubscribe = () => {};

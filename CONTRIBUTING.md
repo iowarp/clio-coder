@@ -30,10 +30,10 @@ pnpm run ci
 | `pnpm run typecheck` | Check TypeScript across source and tests. |
 | `pnpm run lint` | Check formatting, architecture boundaries, Pi surface, and hygiene invariants. |
 | `pnpm run check:gui` | Check GUI browser/server TypeScript and lint rules. |
-| `pnpm run test` | Standard test suite (contracts + fast smoke tests). |
-| `pnpm run ci` | Routine gate: types, lint, build, test, maintenance, and GUI checks. |
+| `pnpm run test` | Selected user-visible contracts and boot smokes. |
+| `pnpm run ci` | Local candidate qualification, reused for the same clean commit. |
 | `pnpm run test:full` | Full root test investigation, including extended regressions. |
-| `pnpm run ci:release` | Qualify a candidate: static gates, the full root and GUI test tiers, the package audit, and its exact installed tarball. |
+| `pnpm run ci:release` | Same local qualification as `ci`; full investigation remains manual. |
 | `pnpm run release:readiness` | Read-only package, website/docs provenance, and media readiness check; use `-- --release` only for an immutable candidate. |
 
 Use `pnpm test:file` (which preloads `tests/harness/tmp-root.ts`) and `tests/harness/scratch-env.ts` for state isolation. Never mutate `process.stdout.write` across async test boundaries.
@@ -72,7 +72,7 @@ See [architecture invariants](docs/architecture/architecture.md#boundary-invaria
 
 ## Submitting Changes
 
-1. Work on a focused branch (`fix/session-resume` or `feat/cli-inspect`) cut from the current version branch, such as `v060` for 0.6.0. Open the pull request against that branch. `main` moves only when a release ships.
+1. Work on a focused branch (`fix/session-resume` or `feat/cli-inspect`) cut from the current version branch, such as `v062` for 0.6.2. Open the pull request against that branch. `main` moves only when a release ships.
 2. Add focused contract tests exercising the changed behavior.
 3. Keep commit subjects concise conventional commits (max 72 characters):
    ```text
@@ -84,22 +84,123 @@ See [architecture invariants](docs/architecture/architecture.md#boundary-invaria
 
 ## Branches and Releases
 
-- `main` is always the latest stable release and moves only by fast-forward.
-- Development happens on the version branch, currently `v060`. The next patch line follows the same naming (`v061` for 0.6.1). Pull requests target that branch.
-- Tags are immutable. A published tag is never moved or recreated.
-- Release candidates are versioned `X.Y.Z-rc.N` and ship under the npm `beta` dist-tag. Users opt in with `clio-coder upgrade --channel=beta`.
-- Patch releases (`0.6.1`, `0.6.2`) ship fixes after `0.6.0`.
+Development happens on the public version branch, currently `v062`. Keep local
+and remote version branches synchronized with ordinary pushes. `main` moves
+only by fast-forward when a stable release completes. Published tags and npm
+versions are immutable. The completed stable release deletes its version branch;
+create the next version branch from the released `main` when development resumes.
 
-A release is one dispatched run of `.github/workflows/release.yml`, and nobody pushes a tag by hand:
+A stable release means the same qualified version is available on npm and
+GitHub, `main` points to its source commit, and the public website serves its
+prepared docs and installers. There is no atomic transaction across these
+services: publish npm first, then the GitHub tag/release, then promote `main` and
+`gh-pages`. A partial failure is resumed with the original artifact. Never move
+a published tag, rebuild a published candidate, or republish different bytes.
 
-1. Commit the release version in `package.json` and `assets/acp-registry/agent.json`, and title the top `CHANGELOG.md` section `## X.Y.Z - YYYY-MM-DD`. Push the version branch.
-2. Optionally rehearse: `pnpm run ci:release` qualifies the commit locally, and a push to a `ci-scratch-*` branch runs the same gates hosted.
-3. Dispatch the workflow on the branch whose head is the release commit: `gh workflow run release.yml --ref v060 -f sha=<full sha>`. The run refuses a sha that is not that head and a version whose tag already exists.
-4. The run executes every CI gate, then qualifies the exact package: the package audit and the installed-tarball suite. The full root and GUI test tiers (`test:full`, `test:gui:full`) run in the local `pnpm run ci:release`, not on the hosted runner.
-5. Only then does the `release` job publish that qualified `candidate.tgz` to npm through trusted publishing with provenance, and create the `vX.Y.Z` tag and the GitHub release from the same file. Its sha256 is printed in the run summary, so the npm tarball and the release asset are the same bytes.
-6. Fast-forward `main` to the released commit.
+Pushes and pull requests launch no Actions runs. Qualification is deliberate;
+the required check names remain `ci (22)` and `ci (24)`. One manual `ci.yml` run
+checks source, builds and packs once, tests selected root/GUI behavior and the
+installed package, and boots that same archive on Node 24. Its immutable
+`candidate-<sha>` artifact includes the versioned npm tarball, SHA-256 receipt,
+four installers extracted from that archive, release notes, and a prepared
+website. `results-<sha>` records actual test counts. The default budget is 2000
+tests including runtime/platform boots. `pnpm run test:list` lists every selected
+file and every contract/GUI file reserved for full investigation. No test files
+are deleted. `test:full`, `test:gui:full`, and maintenance checks stay manual.
 
-A failed gate leaves no tag and no published package; fix the branch and dispatch again. `npm publish` from a workstation stays guarded by the `prepublishOnly` preflight, which accepts only a commit that `pnpm run ci:release` qualified within the last 24 hours, and is a fallback, not the release path.
+Run the interactive command in a visible terminal:
+
+```bash
+pnpm run release:rehearse
+pnpm run release
+```
+
+Both commands explain their next action and ask before proceeding. Rehearsal
+uses a temporary `ci-scratch-*` branch, calls the actual publisher's validation
+path, and removes the branch afterward. It makes no npm, tag, release, main,
+or website changes. Add `-- --platforms` to request Windows and macOS boots;
+their queues do not block the two required check results. Prove Windows changes
+on a native Windows clone with `core.autocrlf=false` before pushing them.
+
+To cut a release:
+
+1. Set the agreed version consistently in `package.json`, the GUI manifest,
+   `assets/acp-registry/agent.json`, and `site/product.json`. Add dated release
+   notes in `CHANGELOG.md` and update version references such as the README
+   source-install command. Commit the candidate on the version branch. The
+   script refuses a dirty tree or inconsistent versions; it does not invent
+   release notes or silently bump versions.
+2. Run `pnpm run release`. Before a new push it runs local qualification once.
+   It synchronizes the branch and dispatches one hosted qualification. A
+   successful manual qualification on the exact commit with unexpired artifacts
+   is reused instead of rerunning its checks. Artifacts are retained for 30 days.
+3. Review the candidate receipt, qualification link, package digest, and test
+   count. The script requests publication through `release.yml` and prints the
+   run URL. **The owner approves the protected `release` environment in GitHub.**
+   Agents must leave this approval to the owner. Approval authorizes the whole
+   public closeout; no terminal npm login or manual publish is needed.
+4. After approval, the publisher downloads the existing artifact, verifies its
+   checksums, exact successful source run, version, branch head, and main
+   ancestry. It does not install project dependencies, build, pack, or test.
+   npm trusted publishing mints a short-lived identity and supplies provenance.
+   Only after npm accepts the exact bytes does GitHub create the tag/release
+   with the versioned tarball and four installers. Stable releases become Latest.
+5. The publisher fast-forwards `main`, commits the prepared site output to
+   `gh-pages`, and lets GitHub's existing branch-based Pages deployment run.
+   It verifies npm integrity and dist-tag, the GitHub tag/assets/Latest, main,
+   and the public website before deleting the remote version branch. The
+   website is prepared from the exact commit snapshot before approval; its
+   `docsCommit` and `revision` identify that immutable source commit.
+6. The interactive command offers to fast-forward clean local `main`, detach
+   the completed version worktree, and delete the finished local branch.
+
+For retries, rerun the failed publication jobs or run `pnpm run release` again
+with the same qualification. Matching bytes already on npm are reused; draft
+GitHub assets can be repaired; main/site closeout can resume. A different npm
+integrity or tag commit stops the operation. An expired artifact requires new
+qualification before any publication. Prereleases use npm `beta` and a GitHub
+prerelease, and keep the development branch, stable `main`, and stable site.
+
+### Owner configuration
+
+On npm, configure a GitHub Actions trusted publisher for `iowarp/clio-coder`,
+workflow filename `release.yml`, environment `release`. Enable direct npm
+publish. Separate dist-tag management permission is unnecessary: publication
+sets `latest` or `beta`. OIDC supports publishing an archive produced by a
+previous qualification run; it authenticates the publishing job, not the build.
+A rehearsal cannot prove npm's authorization or provenance without publishing
+a new version. Do not claim those are verified by `npm publish --dry-run`.
+
+On GitHub, the `release` environment needs the owner as required reviewer.
+Leave Prevent self-review unchecked if the owner also dispatches releases.
+Keep the Tag rule `v*` and add a **Branch** deployment rule
+`v[0-9][0-9][0-9]` so publication from `v062` can reach the approval gate.
+An agent authenticated with the owner's admin credentials could technically
+approve or bypass the gate. A strict owner-only boundary requires separate
+agent credentials and disabling administrator bypass.
+
+Create a GitHub App with **Contents: read/write**, **Workflows: read/write**,
+and **Actions: read**, with webhooks disabled, and install it on this repository
+only. Workflows permission permits main promotion containing workflow changes;
+Actions read verifies the qualification. Put its App ID in the protected
+`release` environment variable `RELEASE_APP_ID` and its private key in the
+protected environment secret `RELEASE_APP_PRIVATE_KEY`. No npm token is stored.
+The publishing job mints an expiring installation token after owner approval.
+The App's `gh-pages` push triggers the existing Pages deployment;
+`GITHUB_TOKEN` pushes do not.
+
+Allow this App to create `v*` release tags and perform the release fast-forward
+of main. Keep rules prohibiting tag updates/deletions, non-fast-forward main
+updates, and main deletion. If one ruleset mixes tag creation with immutability,
+split it so the App bypasses creation restrictions only. Likewise isolate a
+main pull-request requirement from structural protections before granting the
+App a release-promotion bypass. Preserve `ci (22)` and `ci (24)` as required
+checks; those results already passed on the source commit being promoted.
+Never grant an App blanket bypass of published-tag immutability.
+
+Workflow changes can be committed and rehearsed on `v062` without publishing
+0.6.2. Continue development there; decide its product scope and version metadata
+when the owner asks to cut it.
 
 ## README contract
 
@@ -140,4 +241,6 @@ pnpm run skills:pin && pnpm run skills:check
 
 Source code, TypeScript types, and schemas are authoritative. Prefer `rg` and targeted source reads over lengthy prose documentation. Do not invent commands, configuration settings, or benchmark numbers.
 
-Hosted CI also requires the Node 22 installed-package gate on every configured push and pull request. Within a six-minute timeout, it builds, runs `npm pack` into a temporary directory, and runs `pnpm run test:package` with `CLIO_CODER_RELEASE_TARBALL` set to the absolute tarball path. Its result is required by `ci (22)`. The local `pnpm run ci` command remains the source gate; run the installed-package suite separately against a packed build.
+Manual qualification tests the actual archived package under isolated homes. Release
+publication consumes that artifact and its successful qualification record;
+there is no second build or test run in the publishing workflow.

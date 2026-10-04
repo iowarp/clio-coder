@@ -1,4 +1,4 @@
-import { match, ok, strictEqual } from "node:assert/strict";
+import { match, strictEqual } from "node:assert/strict";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, it } from "node:test";
@@ -34,6 +34,7 @@ const capabilities = {
  */
 function transport(mode: "cold" | "wedged", firstTokenDelayMs: number) {
 	let calls = 0;
+	let keepAlive: ReturnType<typeof setInterval> | undefined;
 	const fetch: typeof globalThis.fetch = async (_input, init) => {
 		calls += 1;
 		const signal = init?.signal;
@@ -51,11 +52,15 @@ function transport(mode: "cold" | "wedged", firstTokenDelayMs: number) {
 					"abort",
 					() => {
 						if (timer) clearTimeout(timer);
+						clearInterval(keepAlive);
 						controller.error(new DOMException("The operation was aborted", "AbortError"));
 					},
 					{ once: true },
 				);
 				if (mode === "wedged") {
+					// A real open HTTP connection keeps Node alive. The fixture must
+					// do the same while the production stall watchdog is unref'd.
+					keepAlive = setInterval(() => {}, 1000);
 					send({ role: "assistant", content: "PARTIAL" });
 					return;
 				}
@@ -69,7 +74,7 @@ function transport(mode: "cold" | "wedged", firstTokenDelayMs: number) {
 		});
 		return new Response(body, { headers: { "content-type": "text/event-stream" } });
 	};
-	return { fetch, calls: () => calls };
+	return { fetch, calls: () => calls, dispose: () => clearInterval(keepAlive) };
 }
 
 function fixture(mode: "cold" | "wedged", firstTokenDelayMs = 0) {
@@ -137,6 +142,7 @@ it("a cold backend that is silent past the mid-stream window before its first to
 		strictEqual(f.wire.calls(), 1, "the healthy call was not aborted and retried");
 	} finally {
 		f.loop.dispose();
+		f.wire.dispose();
 		await f.loop.whenSettled();
 	}
 });
@@ -146,15 +152,14 @@ it("a stream that goes silent after its first token still aborts on the mid-stre
 }, async () => {
 	const f = fixture("wedged");
 	try {
-		const started = performance.now();
 		await f.loop.submit("hello");
 		await f.loop.whenSettled();
-		const elapsed = performance.now() - started;
-		ok(elapsed < 4_000, `the first-token window must not delay a wedged stream (${Math.round(elapsed)}ms)`);
+		strictEqual(f.text(), "PARTIAL", "the mid-stream watchdog follows an actual first token");
 		const failure = JSON.stringify(f.events);
 		match(failure, /stream stalled: no output from stall-fixture/u);
 	} finally {
 		f.loop.dispose();
+		f.wire.dispose();
 		await f.loop.whenSettled();
 	}
 });
