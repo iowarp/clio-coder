@@ -14,7 +14,7 @@
 			"codec": "h264",
 			"crf": 23,
 			"audio": false,
-			"matte": "Source RGB retained; alpha ramps from 0 at max RGB 24 to 1 at 56; composite on black or raisedPaper.",
+			"matte": "Dark clip keeps source RGB on black. Light clip and poster subtract the source floor (25), take alpha from max RGB up to 205 gated between 30 and 44, restore edge color, and composite on raisedPaper or transparency.",
 			"posterFrame": 48
 		}
 	},

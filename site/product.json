@@ -3,6 +3,5 @@
 	"version": "0.6.0",
 	"origin": "https://coder.iowarp.ai",
 	"repository": "https://github.com/iowarp/clio-coder",
-	"publishedVersion": "0.5.9",
-	"linkRef": "main"
+	"publishedVersion": "0.6.0"
 }

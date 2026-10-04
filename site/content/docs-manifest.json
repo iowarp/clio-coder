@@ -4,16 +4,16 @@
   "corpusPolicy": "site/public-docs.json",
   "source": {
     "version": "0.6.0",
-    "ref": "9e8d3739dcb54a00e95ca07ad22ae8844e82083d",
-    "commit": "9e8d3739dcb54a00e95ca07ad22ae8844e82083d",
-    "mode": "repository"
+    "ref": "v0.6.0",
+    "commit": "afb8b0ce6bb1882977e6dab06e5578e4919408f9",
+    "mode": "release"
   },
   "files": [
     {
       "path": "README.md",
       "source": "README.md",
       "sha256": "63b04006e3b8bea04c061402ea400d199bdd3e87ae20821bc12e355d3a96fa28",
-      "sourceSha256": "07c2bc175bd86be6255012ca14d9c959079321f1500fff01bd82f9224d42601b"
+      "sourceSha256": "819d1ecb256efec2c472c03077e3c6cff8a5846faeb3995da7d2c9fa2d8dc37d"
     },
     {
       "path": "guide/hpc-clusters.md",
@@ -25,7 +25,7 @@
       "path": "guide/configuration-and-targets.md",
       "source": "docs/guide/configuration-and-targets.md",
       "sha256": "f15392fa33b6139fb0a2873f4c3643695efbc23622e26ad1cd7af631e19c500a",
-      "sourceSha256": "b862c38ff9cebbd3e13cb1c1f39b0713598be0623a7c35b64eea34c14030ec15"
+      "sourceSha256": "df0abe3f82338a2eeb1e2754a2b831bac5eef7f9bc2b0f4a9449fe866bbd6c77"
     },
     {
       "path": "guide/commands-and-modes.md",
