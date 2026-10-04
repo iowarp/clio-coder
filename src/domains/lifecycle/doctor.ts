@@ -474,6 +474,17 @@ export function runDoctor(options: DoctorOptions = {}): DoctorFinding[] {
 				),
 			});
 		}
+		if (validation.retired.length > 0) {
+			// Retired keys with no replacement do nothing; loading proceeds, so this warns.
+			findings.push({
+				ok: true,
+				level: "warn",
+				name: "settings.yaml retired keys",
+				detail: foldDetail(
+					`${validation.retired.map((entry) => entry.path).join(", ")} retired and ignored (${validation.retired[0]?.reason ?? ""}); remove them from settings.yaml`,
+				),
+			});
+		}
 		const retiredValues = validation.issues.flatMap((issue) => (issue.repair !== undefined ? [issue.repair] : []));
 		if (retiredValues.length > 0) {
 			findings.push({

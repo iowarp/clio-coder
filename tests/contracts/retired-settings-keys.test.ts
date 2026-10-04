@@ -1,17 +1,17 @@
-import { match, ok, strictEqual, throws } from "node:assert/strict";
+import { ok, strictEqual } from "node:assert/strict";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 
-import { readSettings, SettingsValidationError } from "../../src/core/config.js";
+import { readSettings, validateSettingsFile } from "../../src/core/config.js";
 import { migrateSettingsV1Document } from "../../src/domains/lifecycle/migrations/2026-09-01-settings-v2.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
 
 // Two validated keys that nothing read: a delegated agent's permission ask is
 // decided at once, and entry labels were never displayed. A user file still
-// naming one is refused with a message that says the key is retired, not that it
-// is unknown.
-test("user settings refuse the retired per-agent keys with a targeted removal message", async (t) => {
+// naming one loads, the key is ignored, and validation lists it as retired so
+// doctor can name it; it must never block loading or an upgrade.
+test("user settings load with retired per-agent keys and list them as retired", async (t) => {
 	const home = await isolateClioEnv("clio-retired-keys-");
 	t.after(() => home.restore());
 	const file = join(home.dir, "config", "settings.yaml");
@@ -30,16 +30,12 @@ test("user settings refuse the retired per-agent keys with a targeted removal me
 	];
 	for (const { yaml, path } of cases) {
 		writeFileSync(file, yaml);
-		throws(
-			() => readSettings(),
-			(error: unknown) => {
-				ok(error instanceof SettingsValidationError, String(error));
-				const hits = error.issues.filter((issue) => issue.path === path);
-				strictEqual(hits.length, 1, `${path}: ${JSON.stringify(error.issues)}`);
-				match(hits[0]?.message ?? "", /^retired without replacement: .+\. Remove this key$/u);
-				return true;
-			},
-		);
+		readSettings();
+		const validation = validateSettingsFile();
+		strictEqual(validation.issues.length, 0, `${path}: ${JSON.stringify(validation.issues)}`);
+		const hits = validation.retired.filter((entry) => entry.path === path);
+		strictEqual(hits.length, 1, `${path}: ${JSON.stringify(validation.retired)}`);
+		ok((hits[0]?.reason ?? "").length > 0);
 	}
 });
 

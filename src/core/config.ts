@@ -217,9 +217,16 @@ export interface SettingsCoercion extends SettingsScalarRepair {
 	to: "on" | "off";
 }
 
+/** A key retired without a replacement: it is ignored, never blocks loading, and doctor names it. */
+export interface SettingsRetiredKey {
+	path: string;
+	reason: string;
+}
+
 class Issues {
 	readonly list: SettingsIssue[] = [];
 	readonly coercions: SettingsCoercion[] = [];
+	readonly retired: SettingsRetiredKey[] = [];
 
 	add(path: string, message: string, repair?: SettingsScalarRepair): void {
 		this.list.push({ path, message, ...(repair !== undefined ? { repair } : {}) });
@@ -227,6 +234,10 @@ class Issues {
 
 	coerced(coercion: SettingsCoercion): void {
 		this.coercions.push(coercion);
+	}
+
+	retire(path: string, reason: string): void {
+		this.retired.push({ path, reason });
 	}
 
 	unknownKeys(path: string, raw: Record<string, unknown>, known: ReadonlyArray<string>): void {
@@ -1075,7 +1086,10 @@ function reportV1Tombstones(issues: Issues, raw: Record<string, unknown>): void 
 			// `init` wrote `fleet.decisionProfiles: {}` from 0.5.3 through 0.5.7, so an empty map is
 			// the default shape of every upgraded file and carries no configuration to lose.
 			if (path === "fleet.decisionProfiles" && isEmptyPlainObject(raw.fleet, "decisionProfiles")) continue;
-			issues.add(match.path, `retired without replacement: ${reason}. Remove this key`);
+			// A key with no replacement does nothing, so it must never block loading or an
+			// upgrade: a 0.5.x interop setup wrote entries[].permissionTimeoutMs by default and
+			// the 0.6.0 installer refused every such home. It is ignored and doctor names it.
+			issues.retire(match.path, reason);
 			reportedRoots.add(match.path.split(/[.[]/u)[0] ?? match.path);
 		}
 	}
@@ -1529,6 +1543,8 @@ export interface SettingsValidationResult {
 	issues: SettingsIssue[];
 	/** YAML 1.1 booleans read as on/off levels. Loading still succeeds; doctor reports them. */
 	coercions: SettingsCoercion[];
+	/** Keys retired without a replacement. Loading still succeeds; doctor reports them. */
+	retired: SettingsRetiredKey[];
 }
 
 /**
@@ -1543,7 +1559,7 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 	const settings = cloneValue(DEFAULT_SETTINGS);
 	if (!isPlainObject(raw)) {
 		issues.add("(root)", `expected a map, got ${describe(raw)}`);
-		return { settings, issues: issues.list, coercions: issues.coercions };
+		return { settings, issues: issues.list, coercions: issues.coercions, retired: issues.retired };
 	}
 	reportV1Tombstones(issues, raw);
 	issues.unknownKeys("", raw, TOP_LEVEL_KEYS);
@@ -2522,12 +2538,12 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 		}
 	}
 
-	return { settings, issues: issues.list, coercions: issues.coercions };
+	return { settings, issues: issues.list, coercions: issues.coercions, retired: issues.retired };
 }
 
 export function validateSettingsFile(): SettingsValidationResult {
 	const path = join(resolveClioDirs().config, "settings.yaml");
-	if (!existsSync(path)) return { settings: cloneValue(DEFAULT_SETTINGS), issues: [], coercions: [] };
+	if (!existsSync(path)) return { settings: cloneValue(DEFAULT_SETTINGS), issues: [], coercions: [], retired: [] };
 	// The read and the parse are separate steps because they fail for separate
 	// reasons: folding them into one try reported `chmod 000` as invalid YAML,
 	// which is a false statement about the file and points at the wrong repair.
@@ -2541,6 +2557,7 @@ export function validateSettingsFile(): SettingsValidationResult {
 				{ path: "(root)", message: `unreadable: ${err instanceof Error ? err.message : String(err)}`, kind: "unreadable" },
 			],
 			coercions: [],
+			retired: [],
 		};
 	}
 	let parsed: unknown;
@@ -2551,6 +2568,7 @@ export function validateSettingsFile(): SettingsValidationResult {
 			settings: cloneValue(DEFAULT_SETTINGS),
 			issues: [{ path: "(root)", message: `invalid YAML: ${yamlErrorSummary(err)}`, kind: "syntax" }],
 			coercions: [],
+			retired: [],
 		};
 	}
 	return validateSettings(parsed);
