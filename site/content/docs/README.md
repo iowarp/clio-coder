@@ -27,7 +27,7 @@ On a cluster, read [Install on a cluster](/docs/guide/hpc-clusters.html).
 
 ### PowerShell
 
-Native Windows is best effort and needs Clio Coder 0.6.0 or newer; a complete native install has not been verified end to end. The install needs no administrator rights. WSL with the macOS, Linux and WSL command is the better-tested route.
+Native Windows is best effort and needs Clio Coder 0.6.1 or newer; the 0.6.0 installer stops at activation there. Install, repair, rollback and uninstall were checked by hand on one x64 machine with PowerShell 5.1, and the native install is not part of the automated release checks. The install needs no administrator rights. WSL with the macOS, Linux and WSL command is the better-tested route.
 
 ```powershell
 irm https://coder.iowarp.ai/install.ps1 | iex
@@ -108,7 +108,7 @@ Interactive sessions show a quiet footer hint when a newer release exists, and `
 | npm | `clio-coder upgrade` | `npm uninstall -g @iowarp/clio-coder` |
 | bun | `bun add -g @iowarp/clio-coder@latest`, then `clio-coder upgrade --post-install` | `bun remove -g @iowarp/clio-coder` |
 
-The installer keeps the previous version. `clio-coder upgrade --rollback` makes it current again. An install made with an exact `--version` stays pinned to that version until you run the installer with `--version latest`.
+The installer keeps the previous version. `clio-coder upgrade --rollback` makes it current again. An install made with an exact `--version` stays pinned to that version until you run the installer with `--version latest`. If an upgrade is refused over a setting the installed version cannot repair, the installer prints the new version's own `doctor --fix` command to run. The 0.6.1 upgrade, rollback and uninstall were checked on WSL and native Windows, and were not checked by hand on macOS.
 
 `clio-coder uninstall` removes your settings, credentials, sessions and caches, and the desktop app's background service, so it previews what it will delete and asks first. Add `--keep-config` to keep settings and credentials, or `--dry-run` to only look. Removing the program with npm or bun keeps those files. Project `.clio-coder/` directories are never removed.
 

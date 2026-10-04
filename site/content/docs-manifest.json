@@ -4,16 +4,16 @@
   "corpusPolicy": "site/public-docs.json",
   "source": {
     "version": "0.6.1",
-    "ref": "8512bcb09ef3b5d647807b65613522a567a7a108",
-    "commit": "8512bcb09ef3b5d647807b65613522a567a7a108",
-    "mode": "repository"
+    "ref": "v0.6.1",
+    "commit": "eb11be1857846bbd2234b60524f346e6d9ef7d6c",
+    "mode": "release"
   },
   "files": [
     {
       "path": "README.md",
       "source": "README.md",
-      "sha256": "63b04006e3b8bea04c061402ea400d199bdd3e87ae20821bc12e355d3a96fa28",
-      "sourceSha256": "c90aab0e3a0694791a32ff3c76c7099cda5e8b85e232b2795c45f4ccdb59aecb"
+      "sha256": "932ae94a4be2588d7d83f1313994ddc7e019fd8b41964299487802751225f9b9",
+      "sourceSha256": "9d72a5a1ffac27fcd90f4bcc7ba1affa1c96415ed0945741b482e61f792e56c8"
     },
     {
       "path": "guide/hpc-clusters.md",
