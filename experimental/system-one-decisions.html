@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src 'self'; frame-src https://www.youtube-nocookie.com; object-src 'none'; base-uri 'self'; form-action 'none'"><meta name="referrer" content="strict-origin-when-cross-origin">
+<title>System One decisions and parallel drafts — Clio Coder experimental</title><meta name="description" content="Bind a small decision model to fixed points in a session, starting with a judge that ranks the candidates from /draft."><meta name="color-scheme" content="dark light"><meta name="clio-default-theme" content="dark"><meta name="theme-color" content="#000000">
+<link rel="canonical" href="https://coder.iowarp.ai/experimental/system-one-decisions.html"><link rel="alternate" hreflang="en" href="https://coder.iowarp.ai/experimental/system-one-decisions.html"><link rel="alternate" hreflang="x-default" href="https://coder.iowarp.ai/experimental/system-one-decisions.html"><link rel="manifest" href="/site.webmanifest"><link rel="icon" href="/assets/responsive/clio-icon-32.png" type="image/png" sizes="32x32"><link rel="apple-touch-icon" href="/assets/responsive/clio-icon-180.png" sizes="180x180">
+<link rel="preload" href="/assets/fonts/plex-sans.woff2" as="font" type="font/woff2" crossorigin><link rel="preload" href="/assets/fonts/news-normal-500.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/css/brand.css"><link rel="stylesheet" href="/css/site.css"><script src="/js/theme.js"></script>
+<meta property="og:locale" content="en_US"><meta property="og:site_name" content="Clio Coder"><meta property="og:type" content="article"><meta property="og:url" content="https://coder.iowarp.ai/experimental/system-one-decisions.html"><meta property="og:title" content="System One decisions and parallel drafts — Clio Coder experimental"><meta property="og:description" content="Bind a small decision model to fixed points in a session, starting with a judge that ranks the candidates from /draft."><meta property="og:image" content="https://coder.iowarp.ai/assets/social-card.png"><meta property="og:image:width" content="1200"><meta property="og:image:height" content="630"><meta property="og:image:alt" content="Clio Coder. An open-source coding agent for scientific software.">
+<meta name="twitter:card" content="summary_large_image"><meta name="twitter:title" content="System One decisions and parallel drafts — Clio Coder experimental"><meta name="twitter:description" content="Bind a small decision model to fixed points in a session, starting with a judge that ranks the candidates from /draft."><meta name="twitter:image" content="https://coder.iowarp.ai/assets/social-card.png"><meta name="twitter:image:alt" content="Clio Coder. An open-source coding agent for scientific software.">
+<meta name="robots" content="index,follow,max-image-preview:large"><script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"WebSite","@id":"https://coder.iowarp.ai/#site","name":"Clio Coder","url":"https://coder.iowarp.ai/"},{"@type":"Article","@id":"https://coder.iowarp.ai/experimental/system-one-decisions.html#page","name":"System One decisions and parallel drafts — Clio Coder experimental","description":"Bind a small decision model to fixed points in a session, starting with a judge that ranks the candidates from /draft.","url":"https://coder.iowarp.ai/experimental/system-one-decisions.html","isPartOf":{"@id":"https://coder.iowarp.ai/#site"},"inLanguage":"en","headline":"System One decisions and parallel drafts","mainEntityOfPage":"https://coder.iowarp.ai/experimental/system-one-decisions.html","author":{"@type":"Organization","name":"The Clio team","url":"https://coder.iowarp.ai/#project"},"image":"https://coder.iowarp.ai/assets/social-card.png","breadcrumb":{"@id":"https://coder.iowarp.ai/experimental/system-one-decisions.html#breadcrumbs"}},{"@type":"BreadcrumbList","@id":"https://coder.iowarp.ai/experimental/system-one-decisions.html#breadcrumbs","itemListElement":[{"@type":"ListItem","position":1,"name":"Clio Coder","item":"https://coder.iowarp.ai/"},{"@type":"ListItem","position":2,"name":"Experimental","item":"https://coder.iowarp.ai/experimental.html"},{"@type":"ListItem","position":3,"name":"System One decisions and parallel drafts","item":"https://coder.iowarp.ai/experimental/system-one-decisions.html"}]}]}</script></head><body>
+<a class="skip" href="#content">Skip to content</a><header class="mast">
+  <div class="mast-row page">
+    <a class="brand" href="/" aria-label="Clio Coder home"><img src="/assets/responsive/clio-mark-64.webp" width="36" height="40" alt="" srcset="/assets/responsive/clio-mark-32.webp 32w, /assets/responsive/clio-mark-64.webp 64w, /assets/responsive/clio-mark-128.webp 128w, /assets/brand/clio-mark.webp 466w" sizes="36px" decoding="async"><span class="brand-name">Clio <span>Coder</span></span></a>
+    <nav class="nav" aria-label="Primary"><a href="/">Overview</a><a href="/docs.html">Docs</a><a href="/learn.html">Tutorials</a><a href="/experimental.html" aria-current="page">Experimental</a></nav>
+    <div class="mast-actions"><a class="source-link" href="https://github.com/iowarp/clio-coder">GitHub <span class="arrow arrow-diagonal" aria-hidden="true">↗</span></a><button class="theme-toggle" type="button" data-theme-toggle aria-label="Switch color theme"><span aria-hidden="true">◐</span></button><a class="btn btn-small" href="/#start">Install Clio Coder <span class="arrow arrow-diagonal" aria-hidden="true">↗</span></a><details class="nav-more"><summary>Menu</summary><nav aria-label="Mobile"><a href="/">Overview</a><a href="/docs.html">Docs</a><a href="/learn.html">Tutorials</a><a href="/experimental.html" aria-current="page">Experimental</a><a href="https://github.com/iowarp/clio-coder">GitHub <span class="arrow arrow-diagonal" aria-hidden="true">↗</span></a><a href="/#start">Install Clio Coder</a></nav></details></div>
+  </div>
+</header>
+<main id="content" class="page guide"><header class="page-intro guide-head"><a class="text-link" href="/experimental.html"><span class="arrow arrow-back" aria-hidden="true">←</span> All experimental</a><p class="guide-review">Experimental, off by default</p><p class="eyebrow"><span class="chapter">Decision engines</span>5 min read</p><h1>System One decisions and parallel drafts</h1><p class="lede">Bind a small decision model to fixed points in a session, starting with a judge that ranks the candidates from /draft.</p><dl class="guide-facts"><div><dt class="eyebrow">Written for</dt><dd>v0.6.0</dd></div><div><dt class="eyebrow">Works in</dt><dd>Terminal</dd></div><div><dt class="eyebrow">Basis</dt><dd>Documented workflow</dd></div></dl></header><div class="guide-layout"><article class="doc guide-body" id="doc"><details class="doc-toc-mobile"><summary>On this page</summary><a href="#before-you-start">Before you start</a>
+<a href="#what-a-decision-site-is">What a decision site is</a>
+<a href="#start-with-drafts">Start with drafts</a>
+<a href="#choose-an-engine">Choose an engine</a>
+<a href="#shadow-first">Shadow first</a></details><p>System One is an optional decision layer. At a few fixed points in a session, Clio Coder can ask a small, fast model a typed question, such as &quot;which of these drafts answers the request best?&quot;, and get back probabilities instead of prose. It never answers you, never edits files, and never removes an approval.</p>
+<aside class="guide-note"><p class="eyebrow">Experimental in v0.6.0</p><p>System One is off until you bind a decision site to an engine. Settings, <code>clio-coder doctor</code>, and <code>/usage</code> label it experimental. Site names, engine options, and the settings format may change between releases.</p>
+</aside><section class="guide-needs"><h2 id="before-you-start">Before you start</h2>
+<ul>
+<li>Clio Coder 0.6.0 with a working chat model.</li>
+<li>One engine: a chat target you already configured, a self-hosted <code>systemone</code> server, or a hosted decision engine account.</li>
+<li>A reason to try it. Nothing else in Clio Coder depends on System One.</li>
+</ul>
+</section><h2 id="what-a-decision-site-is">What a decision site is</h2>
+<p>A site is one place where Clio Coder asks a question. Each site has a deadline in milliseconds or seconds. A site that is unbound, late, or failing behaves as if System One did not exist, and three timeouts in a row pause that engine for five minutes.</p>
+<div class="guide-compare"><div class="doc-table" role="region" aria-label="Reference table 1" tabindex="0"><table>
+<thead>
+<tr>
+<th>Site</th>
+<th>What it reads</th>
+<th>What it can do</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>drafts</code></td>
+<td>The candidates from <code>/draft</code></td>
+<td>Rank them and mark unsound ones</td>
+</tr>
+<tr>
+<td><code>toolCall</code></td>
+<td>A one-line, redacted summary of a pending command</td>
+<td>Add an advisory line to the approval card</td>
+</tr>
+<tr>
+<td><code>turn</code></td>
+<td>Your request at the start of a turn</td>
+<td>Hint scope and orientation, for a fitted engine only</td>
+</tr>
+<tr>
+<td><code>relevance</code></td>
+<td>Skill, capability, and memory catalogs</td>
+<td>Reorder them</td>
+</tr>
+<tr>
+<td><code>consult</code></td>
+<td>A typed question from the agent</td>
+<td>Answer it, up to three times a turn</td>
+</tr>
+<tr>
+<td><code>toolResult</code>, <code>turnEnd</code>, <code>steer</code></td>
+<td>Web and MCP output, the finished reply, queued messages</td>
+<td>Record a reading only</td>
+</tr>
+</tbody></table></div>
+</div><h2 id="start-with-drafts">Start with drafts</h2>
+<p><code>/draft</code> asks your active chat model for several answers to one request, in parallel, and shows them side by side. It works without System One. Binding the <code>drafts</code> site adds a judge.</p>
+<ol class="guide-steps"><li class="guide-step"><span class="step-number" aria-hidden="true">01</span><div><h3 id="bind-the-site-to-a-chat-target">Bind the site to a chat target</h3>
+<p>Add this to your settings file, using the name of a target you already have. <code>/settings</code> lists System One under Advanced, then Experimental.</p>
+<div class="code-block"><p class="code-label eyebrow">settings.yaml</p><pre tabindex="0" aria-label="Code example 1"><code class="language-yaml">systemOne:
+  engines:
+    chat:
+      kind: llm
+      target: my-chat-target
+  sites:
+    drafts: chat</code></pre></div>
+</div></li><li class="guide-step"><span class="step-number" aria-hidden="true">02</span><div><h3 id="ask-for-drafts">Ask for drafts</h3>
+<div class="code-block"><pre tabindex="0" aria-label="Code example 2"><code class="language-text">/draft 3 Write the commit message for the staged change.</code></pre></div>
+<p>The count is 2 to 4 and defaults to 3. Candidates differ by sampling temperature, or by a different angle in the prompt for models that refuse a temperature.</p>
+</div></li><li class="guide-step"><span class="step-number" aria-hidden="true">03</span><div><h3 id="read-the-ranking-then-choose">Read the ranking, then choose</h3>
+<p>Each candidate gets a row with a probability bar. The judge&#39;s choice is marked <strong>picked</strong>, and a candidate it finds incorrect or incomplete is marked <strong>judged unsound</strong>. Enter places the selected draft in the composer without sending it. Escape closes the view.</p>
+</div></li></ol><section class="guide-result"><p class="eyebrow"><span class="chapter">Without a judge</span></p><p>With no <code>drafts</code> binding, the candidates still appear and the view says they were not judged. The ranking is a model&#39;s opinion about text. It did not run your tests.</p>
+</section><h2 id="choose-an-engine">Choose an engine</h2>
+<p>An <code>llm</code> engine is any chat target, and is the quickest way to try a site. Each question costs two model requests when the target returns token probabilities and five when it does not. Those requests pass the same cost ceiling as the rest of the session and appear in <code>/usage</code> as System One calls.</p>
+<p>A <code>systemone</code> engine is a server built for these questions: a hosted decision engine, or a <code>systemone</code> server you run. The guide lists the supported engine profiles and where to place each one.</p>
+<h2 id="shadow-first">Shadow first</h2>
+<p>An engine acts on the <code>turn</code> and <code>relevance</code> sites only when Clio Coder has measured confidence thresholds, called cuts, for that exact model build. Without cuts the engine runs in shadow: its answers are recorded and change nothing. The approval advisory, <code>consult</code>, and <code>/draft</code> show any engine&#39;s answer and name the build that gave it.</p>
+<p><code>clio-coder doctor</code> prints one row per bound site and per engine. To keep a local dataset of decisions and outcomes, set <code>systemOne.record: true</code>, then use <code>clio-coder systemone status</code> and <code>clio-coder systemone export --out &lt;file&gt;</code>. Rows are redacted, kept 30 days by default, and stay on your machine.</p>
+<section class="guide-limits"><p class="eyebrow"><span class="chapter">Know what leaves your machine</span></p><ul>
+<li>State is redacted before any engine sees it, but a hosted engine still receives request text and bounded tool output. A local server keeps that data on your machine.</li>
+<li>A probability is advice. Approvals, permissions, and checks work the same with System One on or off.</li>
+<li>An <code>llm</code> engine spends tokens on every question.</li>
+</ul>
+</section><nav class="guide-next" aria-label="Next steps"><ul>
+<li><a href="https://github.com/iowarp/clio-coder/blob/8512bcb09ef3b5d647807b65613522a567a7a108/docs/guide/system-one.md">System One guide in the repository <span class="arrow arrow-forward" aria-hidden="true">→</span></a></li>
+<li><a href="/tutorials/choose-model-for-your-project.html">Choose a model for your project <span class="arrow arrow-forward" aria-hidden="true">→</span></a></li>
+<li><a href="/experimental/diffusion-models.html">Diffusion models in the terminal <span class="arrow arrow-forward" aria-hidden="true">→</span></a></li>
+</ul>
+</nav></article><aside class="docs-toc guide-toc" aria-label="On this page"><h2>On this page</h2><a href="#before-you-start">Before you start</a>
+<a href="#what-a-decision-site-is">What a decision site is</a>
+<a href="#start-with-drafts">Start with drafts</a>
+<a href="#choose-an-engine">Choose an engine</a>
+<a href="#shadow-first">Shadow first</a></aside></div><div class="tutorial-end"><p class="caption">By The Clio team · Clio Coder</p><a class="text-link" href="/docs.html">Continue with the documentation <span class="arrow arrow-forward" aria-hidden="true">→</span></a></div></main>
+<footer class="colophon page">
+  <div class="footer-top"><a class="brand" href="/"><img src="/assets/responsive/clio-mark-64.webp" width="32" height="35" alt="" srcset="/assets/responsive/clio-mark-32.webp 32w, /assets/responsive/clio-mark-64.webp 64w, /assets/responsive/clio-mark-128.webp 128w, /assets/brand/clio-mark.webp 466w" sizes="36px" decoding="async"><span class="brand-name">Clio <span>Coder</span></span></a><p>An open-source coding agent for scientific software.</p></div>
+  <div class="footer-bottom"><p>Copyright 2026 iowarp.ai</p><div><a href="https://grc.iit.edu">Developed by Gnosis Research Center</a><a href="https://github.com/iowarp/clio-coder/blob/main/LICENSE">Apache 2.0</a><a href="https://github.com/iowarp/clio-coder/blob/main/NOTICE">Notices</a><a href="https://github.com/iowarp/clio-coder/issues">Feedback <span class="arrow arrow-diagonal" aria-hidden="true">↗</span></a></div></div>
+</footer><script src="/js/site.js" defer></script><script src="/js/docs.js" defer></script>
+</body></html>

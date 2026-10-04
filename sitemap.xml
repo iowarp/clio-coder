@@ -8,6 +8,7 @@
   <url><loc>https://coder.iowarp.ai/docs/guide/tool-usage.html</loc></url>
   <url><loc>https://coder.iowarp.ai/docs/guide/context-continuity.html</loc></url>
   <url><loc>https://coder.iowarp.ai/docs/guide/panes-and-files.html</loc></url>
+  <url><loc>https://coder.iowarp.ai/docs/guide/gui.html</loc></url>
   <url><loc>https://coder.iowarp.ai/docs/guide/fleet-dispatch.html</loc></url>
   <url><loc>https://coder.iowarp.ai/docs/guide/resource-library.html</loc></url>
   <url><loc>https://coder.iowarp.ai/docs/guide/plugins.html</loc></url>
@@ -27,5 +28,11 @@
   <url><loc>https://coder.iowarp.ai/tutorials/check-a-change-against-your-repository.html</loc></url>
   <url><loc>https://coder.iowarp.ai/tutorials/add-skills-and-plugins-deliberately.html</loc></url>
   <url><loc>https://coder.iowarp.ai/tutorials/work-from-a-laptop-with-remote-workers.html</loc></url>
+  <url><loc>https://coder.iowarp.ai/experimental/system-one-decisions.html</loc></url>
+  <url><loc>https://coder.iowarp.ai/experimental/diffusion-models.html</loc></url>
+  <url><loc>https://coder.iowarp.ai/experimental/panes-and-docks.html</loc></url>
+  <url><loc>https://coder.iowarp.ai/experimental/remote-workers-and-clusters.html</loc></url>
+  <url><loc>https://coder.iowarp.ai/experimental/information-flow-rules.html</loc></url>
   <url><loc>https://coder.iowarp.ai/learn.html</loc></url>
+  <url><loc>https://coder.iowarp.ai/experimental.html</loc></url>
 </urlset>

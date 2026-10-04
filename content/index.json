@@ -88,9 +88,23 @@
     "excerpt": "Attach files and open companion terminal panes.",
     "headings": [
       "Add a file browser or companion shell",
-      "Use the files pane"
+      "Use the files pane",
+      "Docks hide instead of closing"
     ],
     "url": "/docs/guide/panes-and-files.html"
+  },
+  {
+    "path": "guide/gui.md",
+    "title": "The desktop app",
+    "group": "Everyday use",
+    "excerpt": "Open the desktop alpha, keep tasks in one window, and read the Session column.",
+    "headings": [
+      "Open the desktop app",
+      "One window, many tasks",
+      "Read the Session column",
+      "Approvals"
+    ],
+    "url": "/docs/guide/gui.html"
   },
   {
     "path": "guide/fleet-dispatch.md",

@@ -6,14 +6,32 @@
 		padding-block-start: 2rem;
 	}
 	.meet-clio {
+		position: relative;
 		display: grid;
-		grid-template-columns: 1.4fr 1fr;
+		grid-template-columns: repeat(12, minmax(0, 1fr));
 		align-items: center;
-		gap: 2rem;
+		gap: 0 1.5rem;
 		padding-block: clamp(3rem, 6vw, 6rem) 4rem;
 	}
+	.hero-copy {
+		display: contents;
+	}
 	.hero-copy h1 {
-		font-size: clamp(3.25rem, 6.7vw, 6.5rem);
+		grid-area: 1 / 1 / 2 / 10;
+		position: relative;
+		z-index: 4;
+		font-size: clamp(3.5rem, 6.4vw, 6.5rem);
+		pointer-events: none;
+	}
+	.hero-copy .lede {
+		grid-area: 2 / 1 / 3 / 7;
+		position: relative;
+		z-index: 4;
+	}
+	.hero-copy .hero-try {
+		grid-area: 3 / 1 / 4 / 7;
+		position: relative;
+		z-index: 4;
 	}
 	.hero-copy h1 em {
 		color: var(--accent);
@@ -79,7 +97,7 @@
 		gap: 1rem;
 		padding: 0.4rem 0.4rem 0.4rem 1rem;
 		border: 1px solid var(--code-border);
-		border-radius: var(--radius);
+		border-radius: var(--radius-sm);
 		background: var(--code);
 		color: var(--code-ink);
 	}
@@ -111,7 +129,7 @@
 		padding: 0;
 		border: 1px solid var(--code);
 		background: transparent;
-		border-radius: var(--radius);
+		border-radius: var(--radius-sm);
 		color: var(--code-muted);
 		transition:
 			color var(--motion-fast) var(--motion-ease),
@@ -171,12 +189,36 @@
 	.installer-next .text-link {
 		font-size: 0.8rem;
 	}
-	.hero-copy .installer + .actions {
+	/* The hero offers one command; every other method lives in the install chapter. */
+	.hero-try {
+		max-inline-size: 36rem;
+		margin-block-start: 2.5rem;
+	}
+	.hero-try .eyebrow {
+		margin-block-end: 0.75rem;
+	}
+	.hero-try-links {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.5rem 2rem;
 		margin-block-start: 1.25rem;
 	}
-	.hero-portrait {
-		min-inline-size: 0;
+	.install-steps .installer {
+		margin-block: 0.75rem 1rem;
 	}
+	.hero-portrait {
+		grid-area: 1 / 7 / 4 / -1;
+		min-inline-size: 0;
+		align-self: stretch;
+		display: flex;
+		flex-direction: column;
+		justify-content: center;
+	}
+	.hero-portrait .scene-slot {
+		inline-size: 112%;
+		margin-inline-start: -6%;
+	}
+
 	.clio-scene {
 		position: relative;
 		display: grid;
@@ -224,12 +266,12 @@
 		aspect-ratio: 4 / 3;
 	}
 	.hero-portrait :is(video, .scene-poster) {
-		transform: scale(1.18);
+		transform: none;
 	}
 	.portrait-caption {
 		display: flex;
 		flex-wrap: wrap;
-		justify-content: start;
+		justify-content: center;
 		align-items: center;
 		gap: 0.25rem 1rem;
 		min-block-size: 3.5rem;
@@ -569,12 +611,15 @@
 	}
 	@media (max-width: 850px) {
 		.meet-clio {
-			grid-template-columns: 1.25fr 0.75fr;
-			gap: 1rem;
-			padding-block: 3.5rem;
+			gap: 0 1rem;
+			padding-block: 3rem;
 		}
 		.hero-copy h1 {
-			font-size: clamp(3.25rem, 6.7vw, 5rem);
+			grid-column: 1 / -1;
+			font-size: clamp(3.25rem, 7.8vw, 5rem);
+		}
+		.hero-portrait {
+			grid-area: 2 / 7 / 4 / -1;
 		}
 		.portrait-caption .eyebrow {
 			display: none;
@@ -595,14 +640,20 @@
 			font-size: 0.6rem;
 		}
 		.meet-clio {
-			display: flex;
-			flex-direction: column;
-			align-items: stretch;
-			padding-block: 2.5rem 1.25rem;
-			gap: 1.5rem;
+			display: grid;
+			grid-template-columns: minmax(0, 1fr);
+			padding-block: 0 2rem;
+			gap: 0;
 		}
 		.hero-copy h1 {
-			font-size: clamp(2.8rem, 8.9vw, 4rem);
+			grid-area: 2 / 1;
+			font-size: clamp(2.8rem, 9.6vw, 4rem);
+		}
+		.hero-copy .lede {
+			grid-area: 3 / 1;
+		}
+		.hero-copy .hero-try {
+			grid-area: 4 / 1;
 		}
 		.hero-copy .lede {
 			margin-block-start: 1.5rem;
@@ -619,17 +670,24 @@
 			margin-block-start: 1.5rem;
 		}
 		.hero-portrait {
-			display: grid;
-			grid-template-columns: minmax(0, 1fr) auto;
-			align-items: center;
+			grid-area: 1 / 1;
+			display: block;
+			position: relative;
+			padding-block-end: 1rem;
+		}
+		.hero-portrait .scene-slot {
+			inline-size: min(100%, 360px);
+			margin-inline: auto;
 		}
 		.hero-portrait .clio-scene {
-			aspect-ratio: 4 / 3;
-			max-inline-size: 230px;
+			max-inline-size: none;
 		}
 		.portrait-caption {
+			position: absolute;
+			inset-block-end: 0;
+			inset-inline-end: 0;
 			justify-content: end;
-			inline-size: 8rem;
+			min-block-size: 2.75rem;
 		}
 		.hero-bottom {
 			flex-direction: column;
