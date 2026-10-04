@@ -145,7 +145,7 @@ curl -fsSL https://coder.iowarp.ai/install.sh | sh -s -- --include-claude-sdk
 From source, build the release tag:
 
 ```bash
-git clone --branch v0.6.0 https://github.com/iowarp/clio-coder.git
+git clone --branch v0.6.1 https://github.com/iowarp/clio-coder.git
 cd clio-coder
 corepack enable pnpm
 pnpm run install:local

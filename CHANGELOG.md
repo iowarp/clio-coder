@@ -2,6 +2,27 @@
 
 Notable changes to Clio Coder, following [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Semantic Versioning](https://semver.org/).
 
+## 0.6.1 - 2026-10-03
+
+Clio Coder 0.6.1 repairs installation and upgrade. Native Windows installs complete, homes from 0.5.x upgrade without a settings refusal, and `clio-coder doctor --fix` repairs what it reports.
+
+### Fixed
+
+- A native Windows install of 0.6.0 stopped at activation with `EPERM`. The installer helper now flushes its launcher record through a writable handle, and file edits on Windows no longer carry a durability warning on every call.
+- A settings file holding a key that was retired without a replacement no longer refuses to load, which had blocked upgrades of 0.5.x homes with an interop setup. The key is ignored and `clio-coder doctor` names it as a warning.
+- Installers direct a failed candidate check to `clio-coder doctor --fix` instead of reset, and explain how to keep a source-checkout launcher or replace it with a managed release.
+- `clio-coder doctor --fix` repairs file modes, removes retired settings keys, corrects YAML on/off booleans, and asks before replacing a stale model ID with the nearest provider catalog match.
+- Every doctor warning or failure names a concrete next command, including the sign-in command for expired credentials.
+- Doctor detects missing checkout build files and running sessions that need a restart after a rebuild, and `clio-coder doctor --fix` rebuilds an incomplete checkout.
+- `clio-coder gui background restart --if-idle` restarts while conversations are resting and preserves active work.
+- Desktop app launches deliver the current address and token, and reconnecting with a fresh local launch link moves the browser to the correct port.
+- Windows uninstall removes the private runtime and installed versions after Clio exits, and uninstall reports the shell configuration lines left for manual removal.
+
+### Changed
+
+- `clio-coder gui background install --handover`, the installer's `--gui`, and `clio-coder doctor --fix` can transfer a verified idle background service between installations while preserving its address and credentials.
+- The website installer bootstraps follow the latest GitHub release, and the release installer assets come from the same qualified tarball published to npm.
+
 ## 0.6.0 - 2026-10-03
 
 Clio Coder 0.6.0 brings a desktop app (alpha) with a setup wizard, a task rail and a Session column. A new installer brings its own Node.js to Linux, macOS and Windows. Approvals say what a command would do, and dispatched workers run under immutable permits, with OS sandboxing for native worker commands when a backend is available. Queued messages are held in Clio, where you can reorder, edit or send them now. Editors get live usage, plan and workspace telemetry over ACP. Experimental additions are SSH worker nodes, docks for workers, files and music, and steering triage. The Pi SDK moves to 1.0.0.
