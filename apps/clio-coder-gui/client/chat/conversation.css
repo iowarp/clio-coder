@@ -71,3 +71,10 @@
 	background: linear-gradient(to bottom, var(--surface), transparent);
 	pointer-events: none;
 }
+
+.conversation__duck {
+	color: var(--muted);
+	display: inline-flex;
+	align-items: center;
+	font-size: 1rem;
+}

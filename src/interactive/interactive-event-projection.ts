@@ -272,6 +272,10 @@ export function createInteractiveEventProjection(deps: InteractiveEventProjectio
 	);
 
 	remainingUnsubscribers.push(
+		deps.bus.on(BusChannels.EggsChanged, () => {
+			deps.refreshFooter();
+			deps.requestRender();
+		}),
 		deps.bus.on(BusChannels.DispatchScopeNotice, (payload) => {
 			const notice = readDispatchScopeNotice(payload);
 			if (notice === null) return;

@@ -108,6 +108,7 @@ export interface AcpCommandRule {
  * over ACP by other means, and is refused by name.
  */
 export const ACP_COMMAND_RULES: ReadonlyArray<AcpCommandRule> = [
+	{ name: "eggs" },
 	{ name: "mcp" },
 	{ name: "doctor" },
 	// `/share` and `/oracle` both end in `submitOperatorNote`.
@@ -134,6 +135,7 @@ export const ACP_COMMAND_RULES: ReadonlyArray<AcpCommandRule> = [
 
 /** Host capabilities required by each advertised operation. Grammar stays in the slash registry. */
 const COMMAND_REQUIREMENTS: Record<string, ReadonlyArray<keyof AcpCommandHost>> = {
+	eggs: ["eggsCommand"],
 	doctor: ["runDoctor"],
 	share: ["listWorkerRuns", "submitOperatorNote"],
 	archive: ["exportShareArchive", "importShareArchive"],
@@ -362,6 +364,7 @@ export type AcpCommandHost = Pick<SlashCommandContext, "dispatch" | "bus" | "pro
 	Partial<
 		Pick<
 			SlashCommandContext,
+			| "eggsCommand"
 			| "clearSkillSurface"
 			| "exportShareArchive"
 			| "getAgentRoleFacts"
@@ -666,6 +669,7 @@ function headlessContext(
 				}),
 			);
 		},
+		...(host.eggsCommand ? { eggsCommand: host.eggsCommand } : {}),
 		...(host.clearSkillSurface ? { clearSkillSurface: host.clearSkillSurface } : {}),
 		...(host.seedTaskMemory ? { seedTaskMemory: host.seedTaskMemory } : {}),
 		...(host.userTasks ? { userTasks: host.userTasks } : {}),

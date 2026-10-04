@@ -234,6 +234,7 @@ type SlashCommandVariant =
 
 export type SlashCommand =
 	| SlashCommandVariant
+	| { kind: "eggs"; action: "status" | "off"; id?: string }
 	| { kind: "background" }
 	| { kind: "editor"; text: string }
 	| { kind: "interrupt"; text: string }
@@ -660,6 +661,7 @@ export interface PromptReferenceCard {
  * the TUI, chat loop, or overlay module graph directly.
  */
 export interface SlashCommandContext {
+	eggsCommand?: (action: "status" | "off", id?: string) => string;
 	keyboardActions?: {
 		background(): void;
 		editor(text: string): boolean;
@@ -1084,6 +1086,23 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 				return "rejected";
 			}
 			ctx.keyboardActions.interrupt(command.text);
+		},
+	},
+	{
+		name: "eggs",
+		description: "Show active conversation eggs or turn them off",
+		group: "Inspect",
+		kinds: ["eggs"],
+		args: { subcommands: { status: {}, off: { positionals: [{ name: "id", required: false }] } } },
+		match(text) {
+			if (!/^\/eggs(?:\s|$)/u.test(text)) return null;
+			const match = /^\/eggs(?:\s+(status|off)(?:\s+([a-z][a-z0-9_-]*))?)?$/u.exec(text);
+			if (!match || (match[1] !== "off" && match[2]))
+				return { kind: "usage-error", command: "eggs", reason: "Use /eggs [status] or /eggs off [id]" };
+			return { kind: "eggs", action: match[1] === "off" ? "off" : "status", ...(match[2] ? { id: match[2] } : {}) };
+		},
+		handle(command, ctx) {
+			if (command.kind === "eggs") ctx.notice("info", ctx.eggsCommand?.(command.action, command.id) ?? "No active eggs.");
 		},
 	},
 	{

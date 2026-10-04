@@ -79,7 +79,10 @@ export interface InteractiveSlashSubmitExpansion {
 	display?: { text: string; note?: string };
 }
 
-type SlashChat = Pick<ChatLoop, "clearSkillSurface" | "getSessionId" | "isStreaming" | "submit">;
+type SlashChat = Pick<
+	ChatLoop,
+	"discoverOperatorEgg" | "eggsCommand" | "clearSkillSurface" | "getSessionId" | "isStreaming" | "submit"
+>;
 type SlashChatPanel = Pick<ChatPanel, "appendReplayBlock" | "appendUser">;
 type UserTurnStatus = import("./chat-panel.js").UserTurnStatus;
 type SlashResources = Pick<ResourcesContract, "prompts" | "promptsForDisplay" | "expandPromptTemplate" | "reload">;
@@ -88,6 +91,7 @@ type SlashAgents = Pick<AgentsContract, "getSpec" | "listSpecs">;
 type SlashShare = Pick<ShareContract, "writeArchive" | "planImport" | "importArchive">;
 
 export interface InteractiveSlashRuntimeDeps {
+	openTransientAskUser?: AskUserHandler;
 	/** Note a harness feature the operator used, for demo guidance. */
 	recordFeature?: (feature: string) => void;
 	keyboardActions?: SlashCommandContext["keyboardActions"];
@@ -255,6 +259,7 @@ export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps)
 	let latestAdmission: Promise<void> = Promise.resolve();
 	let latestLocalOperation: Promise<void> = Promise.resolve();
 	let activeAdmissionSignal: AbortSignal | undefined;
+	let activeOperatorText: string | undefined;
 	// True while admitCommand drains a record captured before the shell was
 	// ready (DOGFOOD-F5). Only such a record waits for the end of a live turn.
 	let activeAdmissionCaptured = false;
@@ -367,7 +372,12 @@ export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps)
 		deps.recordFeature(match[1] === "context" && match[2] === "init" ? "/context init" : `/${match[1]}`);
 	};
 
-	const admitChat = async (text: string, signal?: AbortSignal, captured = false): Promise<void> => {
+	const admitChat = async (
+		text: string,
+		signal?: AbortSignal,
+		captured = false,
+		operatorText?: string,
+	): Promise<void> => {
 		try {
 			signal?.throwIfAborted();
 			// submitChat can be called directly, bypassing command dispatch. Keep
@@ -377,6 +387,11 @@ export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps)
 				dispatchSlashCommand(command, context);
 				return;
 			}
+			if (
+				operatorText !== undefined &&
+				(await deps.chat.discoverOperatorEgg?.(operatorText, deps.openTransientAskUser ?? deps.openAskUser))
+			)
+				return;
 			const submitted = typedSkillLine(await deps.expandSubmit(text), text);
 			signal?.throwIfAborted();
 			const uninstalled = submitted.pendingSkillRequests.find((request) => !request.installed);
@@ -484,6 +499,7 @@ export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps)
 		...(resources ? { expandPromptTemplate: (text: string) => resources.expandPromptTemplate(text, cwd()) } : {}),
 		openSkillsHub: deps.openSkillsHub,
 		clearSkillSurface: () => deps.chat.clearSkillSurface(),
+		eggsCommand: (action, id) => deps.chat.eggsCommand?.(action, id) ?? "No active eggs.",
 		statesSkillSurface: true,
 		listExtensions: () => deps.extensions?.list(cwd(), { all: true }) ?? [],
 		...(deps.keyboardActions ? { keyboardActions: deps.keyboardActions } : {}),
@@ -791,7 +807,7 @@ export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps)
 		// worker's output name a file the operator never mentioned.
 		submitOperatorNote: (text) => submitExpanded({ text, images: [], workingContextPaths: [], pendingSkillRequests: [] }),
 		submitChat: (text) => {
-			latestAdmission = admitChat(text, activeAdmissionSignal, activeAdmissionCaptured);
+			latestAdmission = admitChat(text, activeAdmissionSignal, activeAdmissionCaptured, activeOperatorText);
 			void latestAdmission;
 		},
 		runLocalOperation: (operation) => {
@@ -805,7 +821,14 @@ export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps)
 		notice: appendCommandNotice,
 		dispatchCommand: (text) => {
 			recordSlashFeature(text);
-			return dispatchSlashCommand(parseSlashCommand(text), context);
+			const command = parseSlashCommand(text);
+			const previous = activeOperatorText;
+			activeOperatorText = command.kind === "unknown" ? text : undefined;
+			try {
+				return dispatchSlashCommand(command, context);
+			} finally {
+				activeOperatorText = previous;
+			}
 		},
 		admitCommand: async (text, signal) => {
 			signal?.throwIfAborted();
@@ -818,6 +841,8 @@ export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps)
 			const localBefore = latestLocalOperation;
 			const previousSignal = activeAdmissionSignal;
 			const previousCaptured = activeAdmissionCaptured;
+			const previousOperatorText = activeOperatorText;
+			activeOperatorText = command.kind === "unknown" ? text : undefined;
 			activeAdmissionSignal = signal;
 			activeAdmissionCaptured = true;
 			try {
@@ -825,6 +850,7 @@ export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps)
 			} finally {
 				activeAdmissionSignal = previousSignal;
 				activeAdmissionCaptured = previousCaptured;
+				activeOperatorText = previousOperatorText;
 			}
 			if (latestAdmission !== before) await latestAdmission;
 			if (latestLocalOperation !== localBefore) await latestLocalOperation;

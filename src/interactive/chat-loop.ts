@@ -1,5 +1,7 @@
 import { randomUUID } from "node:crypto";
+import { createConversationEggs } from "../domains/session/easter-eggs.js";
 import type { TurnControlRecord, TurnOutcomeRecord } from "../domains/turn-control/index.js";
+import type { AskUserHandler } from "../tools/ask-user.js";
 import type { TurnControlRunner } from "./turn-control-runner.js";
 
 export { runOutOfTurnRound } from "./side-question.js";
@@ -587,6 +589,10 @@ export type SideQuestionOutcome =
 	| { status: "failed"; reason: string };
 
 export interface ChatLoop {
+	/** Live operator adapters call this before expansion; internal submits never discover eggs. */
+	discoverOperatorEgg?(text: string, ask?: AskUserHandler): Promise<boolean>;
+	activeEggs?(): readonly string[];
+	eggsCommand?(action: "status" | "off", id?: string): string;
 	submit(text: string, options?: ChatSubmitOptions): Promise<void>;
 	currentTurnConstraints?(): TurnConstraints | undefined;
 	steer(text: string): boolean;
@@ -731,6 +737,7 @@ export interface ChatLoop {
 }
 
 export interface CreateChatLoopDeps {
+	eggAsk?: AskUserHandler;
 	turnControl?: TurnControlRunner;
 	turnOutcomeCollector?: TurnOutcomeCollector;
 	/** Tokens System One spent on calls joined to this user turn, for the outcome record's `decisionModel` split. */
@@ -1050,9 +1057,25 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 	const draftRound = deps.runDraftRound ?? runOutOfTurnRound;
 	const middlewareToolChoice = deps.middlewareToolChoice ?? createMiddlewareToolChoiceControl();
 	const state = createTurnState();
+	const eggs = createConversationEggs({
+		identity: () => deps.session?.current()?.id ?? null,
+		ensureConversation: () => {
+			if (!deps.session || deps.session.current()) return;
+			const settings = deps.getSettings();
+			deps.session.create({
+				cwd: process.cwd(),
+				...(settings.chat.target ? { target: settings.chat.target } : {}),
+				...(settings.chat.model ? { model: settings.chat.model } : {}),
+			});
+		},
+		notice: (text) => emitNotice(text),
+		changed: (active) =>
+			deps.bus?.emit(BusChannels.EggsChanged, { sessionId: deps.session?.current()?.id ?? null, active }),
+	});
 	const toolStartTimes = new Map<string, number>();
 	let lastHistoricalImageNoticeKey: string | null = null;
 
+	const unsubscribeEggSession = deps.bus?.on(BusChannels.SessionParked, () => eggs.reset());
 	const preparationListeners = new Set<(phase: TurnPreparationPhase) => void>();
 	/**
 	 * Move the consumed prompt to a new preparation phase and tell everything
@@ -2179,6 +2202,10 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			return cleared;
 		},
 		activeSkillSurface: () => skillSurfaceNames(state.activeSkillSurface),
+		activeEggs: eggs.active,
+		eggsCommand: eggs.command,
+		discoverOperatorEgg: (text, ask) =>
+			deps.headless ? Promise.resolve(false) : eggs.discover(text, ask ?? deps.eggAsk),
 		clearQueuedFollowUps: () => queues.clearQueuedMirror().map((entry) => entry.text),
 		queuedMessages: () => queues.queuedMessages(),
 
@@ -3080,6 +3107,8 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		whenPrewarmSettled: () => prewarm.settled(),
 
 		resetForSession(leafTurnId: string | null, replayMessages?: ReadonlyArray<AgentMessage>): void {
+			// Local shell completion and tree navigation also refresh the same transcript.
+			eggs.syncConversation();
 			operatorTurnsBefore = null;
 			lastHistoricalImageNoticeKey = null;
 			pendingVisionSidecar?.abort();
@@ -3122,6 +3151,8 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		},
 
 		dispose(): void {
+			unsubscribeEggSession?.();
+			eggs.reset();
 			pendingVisionSidecar?.abort();
 			turnRuntime.dispose();
 			for (const stop of lateReceiptWatchers) stop();

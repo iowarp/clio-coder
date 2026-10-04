@@ -88,8 +88,11 @@ export const ProjectTrust = Type.Object(
 	closed,
 );
 
+export const ActiveEggs = Type.Array(Type.Literal("duck"), { maxItems: 1 });
+
 export const SessionTelemetry = Type.Object(
 	{
+		eggs: Type.Optional(ActiveEggs),
 		usage: Type.Optional(LiveUsage),
 		plan: Type.Optional(SessionPlan),
 		workspace: Type.Optional(SessionWorkspace),

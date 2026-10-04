@@ -3320,6 +3320,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		},
 	});
 	const chat = createChatLoop({
+		...(acpInterviews ? { eggAsk: askUserBridge } : {}),
 		turnControl,
 		turnOutcomeCollector,
 		...(dispatch ? { outcomeDispatch: dispatch } : {}),
@@ -3881,6 +3882,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 									);
 								},
 								clearSkillSurface: () => chat.clearSkillSurface(),
+								eggsCommand: (action, id) => chat.eggsCommand?.(action, id) ?? "No active eggs.",
 								// Narrowed exactly as `interactive-slash-runtime.ts` narrows it:
 								// the store's `note` parameter has no command-line spelling, and
 								// a handoff is attributed to the session that asked for it.

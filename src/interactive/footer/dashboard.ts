@@ -90,6 +90,7 @@ export interface FooterDashboardDeps {
 	/** Whether a Ctrl+C armed the double tap and its window is still open. */
 	getShutdownArmed?: () => boolean;
 	/** Skills whose tool surface is armed across turns; the compact line names them. */
+	getActiveEggs?: () => readonly string[];
 	getActiveSkillSurface?: () => ReadonlyArray<string>;
 	dismissKeyLabel?: string;
 	now?: () => number;
@@ -265,6 +266,7 @@ export function buildFooterDashboard(deps: FooterDashboardDeps): FooterDashboard
 				leaderArmed: deps.getLeaderArmed?.() ?? false,
 				shutdownArmed: deps.getShutdownArmed?.() ?? false,
 				activeSkills: deps.getActiveSkillSurface?.() ?? [],
+				duckBadge: deps.getActiveEggs?.().includes("duck") ?? false,
 				memoryIntervention: taskMemory
 					? {
 							enabled: taskMemory.enabled,

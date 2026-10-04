@@ -248,6 +248,16 @@ function SessionView({ client, id }: { client: Client; id: string }) {
 							},
 						}}
 					>
+						{snapshot.telemetry?.eggs?.includes("duck") ? (
+							<span
+								className="conversation__duck"
+								role="img"
+								aria-label="Rubber duck badge active for this conversation"
+								title="Rubber duck · /eggs off to let her sleep"
+							>
+								🦆
+							</span>
+						) : null}
 						{/* The task's own actions sit with its name, not with the view controls at the far end. */}
 						<Menu label="Task actions">
 							<MenuItem icon="pencil" onClick={() => setRenaming(true)}>

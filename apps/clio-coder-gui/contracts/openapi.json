@@ -20462,6 +20462,14 @@
 										"telemetry": {
 											"type": "object",
 											"properties": {
+												"eggs": {
+													"type": "array",
+													"items": {
+														"type": "string",
+														"const": "duck"
+													},
+													"maxItems": 1
+												},
 												"usage": {
 													"type": "object",
 													"required": ["used", "size"],
@@ -24374,6 +24382,14 @@
 										"telemetry": {
 											"type": "object",
 											"properties": {
+												"eggs": {
+													"type": "array",
+													"items": {
+														"type": "string",
+														"const": "duck"
+													},
+													"maxItems": 1
+												},
 												"usage": {
 													"type": "object",
 													"required": ["used", "size"],
@@ -26871,6 +26887,14 @@
 										"telemetry": {
 											"type": "object",
 											"properties": {
+												"eggs": {
+													"type": "array",
+													"items": {
+														"type": "string",
+														"const": "duck"
+													},
+													"maxItems": 1
+												},
 												"usage": {
 													"type": "object",
 													"required": ["used", "size"],
@@ -29332,6 +29356,14 @@
 											"telemetry": {
 												"type": "object",
 												"properties": {
+													"eggs": {
+														"type": "array",
+														"items": {
+															"type": "string",
+															"const": "duck"
+														},
+														"maxItems": 1
+													},
 													"usage": {
 														"type": "object",
 														"required": ["used", "size"],
@@ -32040,6 +32072,14 @@
 										"telemetry": {
 											"type": "object",
 											"properties": {
+												"eggs": {
+													"type": "array",
+													"items": {
+														"type": "string",
+														"const": "duck"
+													},
+													"maxItems": 1
+												},
 												"usage": {
 													"type": "object",
 													"required": ["used", "size"],
@@ -39496,6 +39536,14 @@
 									"telemetry": {
 										"type": "object",
 										"properties": {
+											"eggs": {
+												"type": "array",
+												"items": {
+													"type": "string",
+													"const": "duck"
+												},
+												"maxItems": 1
+											},
 											"usage": {
 												"type": "object",
 												"required": ["used", "size"],

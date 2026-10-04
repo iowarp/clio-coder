@@ -54,15 +54,16 @@ function refusalReason(call: () => unknown): string {
 	throw new Error("expected a refusal");
 }
 
-test("the catalog projects all thirteen allowlisted commands", async () => {
+test("the catalog projects all fourteen allowlisted commands", async () => {
 	const catalog = acpCommandCatalog();
 	assert.equal(catalog.version, 1);
-	assert.equal(ACP_COMMAND_RULES.length, 13);
-	assert.equal(catalog.commands.length, 13);
-	assert.equal(ACP_COMMANDS_CAPABILITY.count, 13);
+	assert.equal(ACP_COMMAND_RULES.length, 14);
+	assert.equal(catalog.commands.length, 14);
+	assert.equal(ACP_COMMANDS_CAPABILITY.count, 14);
 	assert.deepEqual(
 		catalog.commands.map((command) => command.name),
 		[
+			"eggs",
 			"mcp",
 			"doctor",
 			"share",
@@ -311,7 +312,7 @@ test("the announced capability names the two methods a client calls", async () =
 			version: 1,
 			list: "_clio-coder/commands/list",
 			invoke: "_clio-coder/commands/invoke",
-			count: 13,
+			count: 14,
 		},
 	);
 });

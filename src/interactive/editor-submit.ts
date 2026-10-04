@@ -70,6 +70,7 @@ export interface EditorSubmitUi {
 
 type EditorSubmitChat = Pick<
 	ChatLoop,
+	| "discoverOperatorEgg"
 	| "clearQueuedFollowUps"
 	| "flushQueueOnNextPrompt"
 	| "interruptRefusal"
@@ -94,6 +95,7 @@ export interface EditorSubmitSessionTranscript {
 }
 
 export interface EditorSubmitDeps {
+	askEgg?: import("../tools/ask-user.js").AskUserHandler;
 	onLocalEntry?: (entry: SessionEntry) => void;
 	onLocalBashRunning?: (running: boolean) => void;
 	/** Note a harness feature the operator used, for demo guidance; see recordOperatorFeature. */
@@ -548,6 +550,10 @@ export function createEditorSubmitController(deps: EditorSubmitDeps): EditorSubm
 		void (async () => {
 			// A flushed entry was expanded when it was queued; its display and the
 			// paths it inlined travel with it instead of being expanded again.
+			if (!flushed && (await deps.chat.discoverOperatorEgg?.(unguardPastedEditorOperator(text), deps.askEgg))) {
+				if (snapshot.owns()) setLiteralText("");
+				return;
+			}
 			const submitted: EditorSubmitExpansion = flushed
 				? {
 						text,

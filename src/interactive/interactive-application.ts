@@ -975,6 +975,7 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 		readStructuredEntries,
 		expandSubmit: (text) => expandInteractiveSubmitAsync(text, deps.resources),
 		openAskUser: (questions, options) => openAskUserOverlayState(questions, options),
+		openTransientAskUser: (questions, options) => openTransientAskUserOverlayState(questions, options),
 		openSkillsHub: (request) => openSkillsHubState(request),
 		openUsage: () => openUsageOverlayState(),
 		openSideQuestion: (question) => openSideQuestionOverlayState(question),
@@ -1038,6 +1039,7 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 		collapseLaunchpadBeforeSubmit: () => presentation.collapseWelcomeDashboard(),
 		expandSubmit: (text) => expandInteractiveSubmitAsync(text, deps.resources),
 		notify,
+		askEgg: (questions, options) => openTransientAskUserOverlayState(questions, options),
 		askSendNow: async (runningTools) => {
 			const stop = "Stop it and send now";
 			const wait = "Send after it finishes";

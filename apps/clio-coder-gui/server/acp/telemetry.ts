@@ -1,7 +1,13 @@
 import type { Static, TSchema } from "typebox";
 import { Value } from "typebox/value";
 import type { SessionTelemetry } from "../../contracts/session-telemetry.js";
-import { LiveUsage, ProjectTrust, SessionPlan, SessionWorkspace } from "../../contracts/session-telemetry.js";
+import {
+	ActiveEggs,
+	LiveUsage,
+	ProjectTrust,
+	SessionPlan,
+	SessionWorkspace,
+} from "../../contracts/session-telemetry.js";
 import { AppProblem } from "../services/problem.js";
 
 const record = (value: unknown): Record<string, unknown> =>
@@ -27,6 +33,8 @@ export function sessionResultTelemetry(result: unknown): SessionTelemetry {
 
 export function sessionUpdateTelemetry(update: Record<string, unknown>): SessionTelemetry | null {
 	const meta = record(update._meta);
+	if (update.sessionUpdate === "session_info_update" && meta["clio-coder/eggs"] !== undefined)
+		return { eggs: projectTelemetryValue(ActiveEggs, meta["clio-coder/eggs"]) };
 	if (update.sessionUpdate === "usage_update") {
 		const usage = record(meta["clio-coder/usage"]);
 		return {

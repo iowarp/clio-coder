@@ -75,6 +75,7 @@ export interface SessionFacts {
 	 * Skills whose tool surface stays armed across turns. Shown on the compact
 	 * line while it lasts, so a narrowed tool set is never implicit.
 	 */
+	duckBadge?: boolean;
 	activeSkills?: ReadonlyArray<string>;
 	/** Explicit mode remains readable after transient setting feedback expires. */
 	autonomy?: string;

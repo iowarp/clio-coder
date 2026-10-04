@@ -232,6 +232,7 @@ export interface AcpBoardActions {
 }
 
 export interface AcpServerChat {
+	discoverOperatorEgg?(text: string): Promise<boolean>;
 	submit(text: string, options?: unknown): Promise<void>;
 	/** Wait for a command's host-injected turn while the ACP prompt owns its subscription. */
 	whenSettled?(): Promise<void>;
@@ -708,13 +709,18 @@ function contentText(value: unknown): string {
  * client's own framing bug looked like a working prompt here and failed
  * against every other agent.
  */
-function promptText(params: unknown): string {
+function promptText(params: unknown, resourceLinks = true): string {
 	if (!isRecord(params) || !Array.isArray(params.prompt)) return "";
 	const parts: string[] = [];
 	for (const block of params.prompt) {
 		if (!isRecord(block)) continue;
 		if (block.type === "text" && typeof block.text === "string") parts.push(block.text);
-		if (block.type === "resource_link" && typeof block.name === "string" && typeof block.uri === "string") {
+		if (
+			resourceLinks &&
+			block.type === "resource_link" &&
+			typeof block.name === "string" &&
+			typeof block.uri === "string"
+		) {
 			parts.push(`Resource: ${block.name} (${block.uri})`);
 		}
 	}
@@ -3658,6 +3664,14 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 	if (options.bus !== undefined) {
 		const bus = options.bus;
 		unsubscribeEvents.push(
+			bus.on(BusChannels.EggsChanged, (payload) => {
+				const sessionId = activeSessionId ?? boundSessionId;
+				if (!handshake.initialized || sessionId === null || payload.sessionId !== sessionId) return;
+				options.transport.notify("session/update", {
+					sessionId,
+					update: { sessionUpdate: "session_info_update", _meta: { "clio-coder/eggs": payload.active } },
+				});
+			}),
 			bus.on(BusChannels.LoopBlocked, (payload: LoopBlockedPayload) => {
 				// Loop blocks describe the turn that is running, so unlike a dispatch
 				// run they are meaningless outside one.
@@ -5454,7 +5468,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 		return null;
 	};
 
-	options.transport.onRequest("_clio-coder/session/steer", (params) => {
+	options.transport.onRequest("_clio-coder/session/steer", async (params) => {
 		requireInitialized();
 		const request = assertParamKeys(params, new Set(["sessionId", "text", "mode"]));
 		const session = getSession(request);
@@ -5473,6 +5487,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 		}
 		const refusal = steerRefusal(session);
 		if (refusal !== null) return { accepted: false, queue, refusal };
+		if (await options.chat.discoverOperatorEgg?.(text)) return { accepted: true, queue };
 		// The engine's own admission is the last word: it refuses a steer whose
 		// run stopped streaming between the check above and this call.
 		if (!enqueue.call(options.chat, text)) {
@@ -5954,6 +5969,8 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 					active.errored = true;
 					active.errorMessage = result.lines.join("\n");
 				}
+				active.sawTurnEnd = true;
+			} else if (await options.chat.discoverOperatorEgg?.(promptText(params, false))) {
 				active.sawTurnEnd = true;
 			} else if (options.expandPrompt === undefined) {
 				await options.chat.submit(withResources(sentText, resources));

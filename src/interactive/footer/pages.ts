@@ -372,6 +372,7 @@ export function renderCompactDashboard(state: FooterDashboardRenderState, width:
 	const skills = state.session.activeSkills ?? [];
 	const weekly = state.quotaRoute ? routeWeeklyQuota(state.quotaRoute, state.quota ?? []) : null;
 	const facts = [
+		state.session.duckBadge ? theme.fg("counter", "🦆") : "",
 		workers ? theme.fg("activity", `${workers} ${workers === 1 ? "worker" : "workers"}`) : "",
 		skills.length
 			? `${theme.fg("skillAction", "skill ")}${theme.fg("counter", fitNames("", skills.map(clean), Math.max(8, Math.floor(w / 3))))}`
@@ -635,7 +636,7 @@ export function dashboardPageViewport(
 			: `${brandMark(theme)} ${theme.style("selectedOption", `${GLYPH.cursor} ${page}`, { bold: true })} ${theme.fg("positionCount", `${DASHBOARD_PAGES.indexOf(page) + 1}/${DASHBOARD_PAGES.length}`)}`;
 
 	const identityRoom = innerWidth - visibleWidth(tabText) - 4;
-	const identity = clean(state.session.target ?? "No model selected");
+	const identity = `${state.session.duckBadge ? "🦆 " : ""}${clean(state.session.target ?? "No model selected")}`;
 	const heading = [
 		truncateToWidth(
 			identityRoom >= 20

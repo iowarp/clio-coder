@@ -32,6 +32,7 @@ import type { SkillActivation } from "./skill-activation.js";
 import type { TerminationPhase } from "./termination.js";
 
 export const BusChannels = {
+	EggsChanged: "session.eggsChanged",
 	SessionStart: "session.start",
 	SessionEnd: "session.end",
 	SessionParked: "session.parked",
@@ -867,6 +868,7 @@ export type EmptyPayload = Record<string, never>;
  * policy.
  */
 export type BusPayloadMap = {
+	[BusChannels.EggsChanged]: { sessionId: string | null; active: readonly string[] };
 	[BusChannels.SessionStart]: SessionStartPayload;
 	[BusChannels.SessionEnd]: SessionEndPayload;
 	[BusChannels.SessionParked]: SessionParkedPayload;
