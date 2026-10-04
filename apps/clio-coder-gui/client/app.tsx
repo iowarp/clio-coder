@@ -87,6 +87,7 @@ export function App({ client }: { client: Client }) {
 	const meta = useQuery({
 		queryKey: ["meta"],
 		queryFn: () => client.call(routes.meta, emptyInput),
+		refetchInterval: 15_000,
 		enabled: !!client.token,
 	});
 	// The launcher brought one window forward and named a page; only that window goes there.
@@ -346,11 +347,24 @@ export function App({ client }: { client: Client }) {
 		],
 	);
 
+	const pendingNotice = meta.data?.pendingVersion ? (
+		<div className="app-update-notice" role="status">
+			<strong>
+				{meta.data.pendingVersion === meta.data.clio
+					? `A different build of Clio Coder ${meta.data.clio} is installed. This app is still running the previous build.`
+					: `Clio Coder ${meta.data.pendingVersion} is installed. This app is still running ${meta.data.clio}.`}
+			</strong>
+			<p>
+				Finish active work, then run <code>clio-coder gui background restart --if-idle</code> and reload this window.
+			</p>
+		</div>
+	) : null;
 	const collapsed = sidebarCollapsed && !phone;
 	const authed = !!client.token && !refused;
 	if (wizardMode !== null && authed && meta.data?.apiVersion === API_VERSION)
 		return (
 			<>
+				{pendingNotice}
 				<Suspense
 					fallback={
 						<p className="route-error" role="status">
@@ -425,6 +439,7 @@ export function App({ client }: { client: Client }) {
 					</button>
 				</div>
 				<main id="main" className="wb-main" data-mode={mode} tabIndex={-1}>
+					{pendingNotice}
 					{!client.token || refused ? (
 						<Reconnect refused={refused} />
 					) : meta.error ? (

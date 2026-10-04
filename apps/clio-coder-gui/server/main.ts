@@ -11,7 +11,6 @@ import { createApp } from "./app.js";
 import { getVersionInfo, registerRunningBuild, resolveClioDirs, resolvePackageRoot } from "./clio/http-shims.js";
 import { backgroundEnvironment, readBackgroundConfig } from "./launcher/background-config.js";
 import { listenPorts } from "./launcher/ports.js";
-import { windowsLauncherStatus } from "./launcher/windows.js";
 import { showPage } from "./local-server.js";
 import { restrictNetwork } from "./network-policy.js";
 import { serverOptions } from "./options.js";
@@ -57,12 +56,29 @@ export async function main(args = process.argv.slice(2)) {
 	const appClient = fileURLToPath(new URL(bundled ? "./client/" : "../dist/client/", import.meta.url));
 	const clientDir =
 		bundled || existsSync(join(appClient, "index.html")) ? appClient : join(resolvePackageRoot(), "dist/gui/client");
-	const launch = () => ({
-		node: process.execPath,
-		...(!bundled ? { loader: fileURLToPath(import.meta.resolve("tsx")) } : {}),
-		entry: fileURLToPath(import.meta.url),
-		icon: join(clientDir, "icon-192.png"),
-	});
+	const launch = () =>
+		process.env.CLIO_CODER_DESKTOP_NODE
+			? {
+					node: process.env.CLIO_CODER_DESKTOP_NODE,
+					entry: join(resolvePackageRoot(), "dist/gui/server.js"),
+					icon: join(resolvePackageRoot(), "dist/gui/client/icon-192.png"),
+				}
+			: {
+					node: process.execPath,
+					...(!bundled ? { loader: fileURLToPath(import.meta.resolve("tsx")) } : {}),
+					entry: fileURLToPath(import.meta.url),
+					icon: join(clientDir, "icon-192.png"),
+				};
+	if (args[0] === "managed-background") {
+		const { background } = await import("./launcher/background.js");
+		const root = resolvePackageRoot();
+		await background(args.slice(1), {
+			node: process.env.CLIO_CODER_DESKTOP_NODE || process.execPath,
+			entry: join(root, "dist/gui/server.js"),
+			icon: join(root, "dist/gui/client/icon-192.png"),
+		});
+		return;
+	}
 	if (args[0] === "background") {
 		const { background } = await import("./launcher/background.js");
 		await background(args.slice(1), launch());
@@ -101,6 +117,7 @@ export async function main(args = process.argv.slice(2)) {
 						undefined,
 						process.platform,
 						version,
+						launch(),
 					);
 		if (reused.kind === "open") {
 			const url = new URL(reused.url);
@@ -204,15 +221,7 @@ export async function main(args = process.argv.slice(2)) {
 		idle: () => !(operations.activeCount || cli.activeCount || setup.busy) && supervisor.restartSafe,
 		clientDir,
 		pwa: !!persistent,
-		...(values.persistent
-			? {
-					// The Start Menu shortcut is the installed app under WSL; the browser must not offer a second one.
-					installable: async () => {
-						const status = await windowsLauncherStatus(dirname(values.persistent as string)).catch(() => "absent");
-						return status !== "installed" && status !== "modified";
-					},
-				}
-			: {}),
+		desktopManaged: () => !!values.persistent && existsSync(join(dirname(values.persistent), "windows.json")),
 		...(process.env.NODE_ENV === "test"
 			? {
 					runtime: async () => ({

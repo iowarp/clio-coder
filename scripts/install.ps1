@@ -92,6 +92,7 @@ function Install-ClioCoder {
 	function Get-AbsolutePath([string]$Path) { $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($Path) }
 	$installRoot = Get-AbsolutePath $installRoot
 	$binDir = Get-AbsolutePath $binDir
+	if (($installRoot + $binDir) -match '[%\r\n"]') { Fail "Windows installer paths cannot contain percent, newline or quote characters" }
 	$launcher = Join-Path $binDir "clio-coder.cmd"
 	$installSpec = if ($Options.Package) { Get-AbsolutePath $Options.Package } else { "$PackageName@$spec" }
 	if ($Options.Package -and -not (Test-Path -LiteralPath $installSpec)) { Fail "-Package $installSpec does not exist" }
@@ -232,6 +233,13 @@ function Install-ClioCoder {
 		$npmArgs = @($npmCli, "install", "--prefix", (Join-Path $staging "lib"), "--no-save", "--loglevel=error")
 		if (-not $Options.IncludeClaudeSdk) { $npmArgs += "--omit=optional" } else { $npmArgs += "--include=optional" }
 		$npmArgs += $installSpec
+		# npm misparses UNC tarball arguments. Stage local packages on the install volume first.
+		if ($Options.Package) {
+			$localPackage = Join-Path $work "candidate.tgz"
+			Copy-Item -LiteralPath $installSpec -Destination $localPackage
+			$installSpec = $localPackage
+			$npmArgs[$npmArgs.Length - 1] = $installSpec
+		}
 		Say "installing $installSpec with the npm bundled in Node v$nodeVersion"
 		$savedPath = $env:Path
 		$env:Path = "$runtimeDir;$env:Path"
@@ -242,12 +250,8 @@ function Install-ClioCoder {
 		$pkg = Get-Content -LiteralPath $pkgJson -Raw | ConvertFrom-Json
 		if ($pkg.name -ne $PackageName) { Fail "npm finished, but $pkgJson is not $PackageName" }
 		if ([version](($pkg.version -split '-')[0]) -lt [version]"0.6.0") { Fail "Native Windows managed lifecycle requires 0.6.0 or later; registry returned $($pkg.version). Previous install and launcher remain active. No package has been published by this installer." }
-		# A refused candidate was never activated, so no session runs from it; a retry replaces it instead of stacking copies.
-		Get-ChildItem -LiteralPath (Join-Path $installRoot "versions") -Directory -ErrorAction SilentlyContinue |
-			Where-Object { Test-Path -LiteralPath (Join-Path $_.FullName ".clio-coder-refused-candidate") } |
-			ForEach-Object { Remove-Item -LiteralPath $_.FullName -Recurse -Force -ErrorAction SilentlyContinue }
 		$final = Join-Path $installRoot "versions\$($pkg.version)"
-		if (Test-Path -LiteralPath $final) { $final = "$final-$(Get-Date -Format yyyyMMddHHmmss)" }
+		if (Test-Path -LiteralPath $final) { $final = "$final-$(Get-Date -Format yyyyMMddHHmmss)-$PID" }
 		Move-Item -LiteralPath $staging -Destination $final
 		$entry = Join-Path $final "lib\node_modules\@iowarp\clio-coder\dist\cli\index.js"
 		Ok "installed $PackageName $($pkg.version)"
@@ -261,7 +265,10 @@ function Install-ClioCoder {
 		& $node $helper activate $installRoot $node $nodeVersion $build $final $launcher $Options.Channel $pin $auto $post
 		# The clio-coder on PATH is still the previous version, and a version that predates a repair reports nothing to fix.
 		if ($LASTEXITCODE -ne 0) { New-Item -ItemType File -Force -Path (Join-Path $final ".clio-coder-refused-candidate") | Out-Null }
-		if ($LASTEXITCODE -ne 0) { Fail "candidate checks failed; previous install remains active. Repair with the new version itself, then rerun this installer: & `"$node`" `"$entry`" doctor --fix" }
+		if ($LASTEXITCODE -ne 0) {
+			$repair = "& '" + $node.Replace("'", "''") + "' '" + $entry.Replace("'", "''") + "' doctor --fix"
+			Fail "candidate checks failed; previous install remains active. Repair with the new version itself, then rerun this installer: $repair"
+		}
 		if (-not $Options.NoPostInstall) {
 			& $node $entry upgrade --post-install
 			if ($LASTEXITCODE -ne 0) { Fail "package installed, but local migrations/initialization need attention. Run clio-coder upgrade --post-install; the previous version remains available with: clio-coder upgrade --rollback" }

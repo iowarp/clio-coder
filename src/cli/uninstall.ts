@@ -416,7 +416,7 @@ export async function runUninstallCommand(argv: ReadonlyArray<string>): Promise<
 
 	presenter.header("Uninstall Clio Coder", "uninstall");
 	presenter.step(
-		`Installation method: ${method === "source" ? "source symlink" : method === "npm" ? "npm global" : method === "installer" ? "install.sh" : method}`,
+		`Installation method: ${method === "source" ? "source symlink" : method === "npm" ? "npm global" : method === "installer" ? "installer" : method}`,
 	);
 
 	const configSize = measurePath(dirs.config);

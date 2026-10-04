@@ -90,3 +90,17 @@ test("desktop quoting survives GLib parsing of spaces, quotes, backslashes, doll
 	}
 	assert.fail("GLib did not execute the entry with literal special characters");
 });
+
+test("concurrent desktop installs leave one owned entry and give a useful retry error", async (t) => {
+	const prefix = await mkdtemp(join(tmpdir(), "clio-launcher-race-"));
+	t.after(() => rm(prefix, { recursive: true, force: true }));
+	const paths = { node: process.execPath, entry: fileURLToPath(new URL("../server/main.ts", import.meta.url)) };
+	const results = await Promise.allSettled(Array.from({ length: 8 }, () => installLauncher(prefix, paths)));
+	assert.ok(results.some((result) => result.status === "fulfilled"));
+	for (const result of results)
+		if (result.status === "rejected") {
+			assert.match(String(result.reason), /Another launcher installation|already exist or differ/);
+			assert.doesNotMatch(String(result.reason), /EEXIST/);
+		}
+	assert.equal((await launcherStatus(prefix)).status, "installed");
+});

@@ -90,7 +90,7 @@ import type { DetectedChatRoute } from "./detect-chat-routes.js";
 import type { LifecyclePresenter } from "./lifecycle-presenter.js";
 import { createLifecyclePresenter, shortenPath } from "./lifecycle-presenter.js";
 import { canSelect, promptSelect, promptText } from "./select.js";
-import { credentialWriteFailed, printPlaintextCredentialWarning } from "./shared.js";
+import { credentialWriteFailed } from "./shared.js";
 import { truncate } from "./text-layout.js";
 
 export interface OnboardingStreams {
@@ -1416,8 +1416,9 @@ async function finish(wizard: Wizard, answers: Answers, peerReview?: () => Promi
 				presenter.done("Nothing written");
 				return 1;
 			}
-			if (wizard.host) presenter.warn("Credentials are stored with mode 0600, not encrypted.");
-			else printPlaintextCredentialWarning();
+			presenter.warn(
+				"API key stored unencrypted (mode 0600). Any process running as you can read it. Use --api-key-env <VAR> to keep the key off disk.",
+			);
 		}
 
 		updateSettings((settings) => applyAnswers(settings, answers, descriptor, chatEligible));

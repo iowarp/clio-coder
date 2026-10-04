@@ -87,7 +87,15 @@ export async function installLauncher(prefix: string, paths: LaunchPaths) {
 		);
 	await mkdir(state.directory, { recursive: true });
 	await launcherFiles(prefix);
-	await writeFile(state.entry, entry, { flag: "wx", mode: 0o644 });
+	try {
+		await writeFile(state.entry, entry, { flag: "wx", mode: 0o644 });
+	} catch (error) {
+		if ((error as NodeJS.ErrnoException).code === "EEXIST")
+			throw new Error(
+				"Another launcher installation created the desktop entry. Wait for it to finish, then retry or inspect launcher status.",
+			);
+		throw error;
+	}
 	try {
 		await writeFile(
 			state.manifest,

@@ -112,7 +112,12 @@ export function GeneralPage({ client }: { client: Client }) {
 					<p>Version, installation and this browser's connection.</p>
 				</div>
 				<div className="general__control">
-					<AppPreferencesPanel enabled={meta.data?.pwa ?? false} version={meta.data?.clio} platform={meta.data?.platform} />
+					<AppPreferencesPanel
+						desktopManaged={meta.data?.desktopManaged ?? false}
+						enabled={meta.data?.pwa ?? false}
+						version={meta.data?.clio}
+						platform={meta.data?.platform}
+					/>
 				</div>
 			</section>
 		</section>

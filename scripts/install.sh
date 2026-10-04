@@ -603,7 +603,7 @@ offer_gui() {
 		# curl | sh leaves stdin on the pipe; the question goes to the terminal or is not asked.
 		[ -t 1 ] && { : </dev/tty; } 2>/dev/null || return 0
 	fi
-	if [ "$install_gui" = ask ] && "$node_bin" "$entry" gui background status </dev/null 2>/dev/null | grep -q '"status": "installed"'; then
+	if [ "$install_gui" = ask ] && "$node_bin" "$entry" gui background status </dev/null 2>/dev/null | "$node_bin" -e 'try { process.exit(JSON.parse(require("node:fs").readFileSync(0, "utf8")).status === "installed" ? 0 : 1); } catch { process.exit(1); }'; then
 		return 0
 	fi
 	if [ "$install_gui" = ask ]; then
@@ -613,12 +613,14 @@ offer_gui() {
 		case "$answer" in "" | [Yy]*) ;; *) return 0 ;; esac
 	fi
 	# The command's report is JSON for scripts; the installer states the outcome in its own words.
-	if "$node_bin" "$entry" gui background install --handover </dev/null >"$work/gui.out"; then
-		if sed -n '/"windows"/,/}/p' "$work/gui.out" | grep -q '"status": "installed"'; then
+	if "$node_bin" "$entry" gui background install --handover --json </dev/null >"$work/gui.out"; then
+		if "$node_bin" -e 'try { process.exit(JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8")).windows?.status === "installed" ? 0 : 1); } catch { process.exit(1); }' "$work/gui.out"; then
 			ok "desktop app installed; open Clio Coder from the Windows Start Menu or your app menu, or run: clio-coder gui"
 		else
 			ok "desktop app installed; it starts at login and is in your app menu as Clio Coder, or run: clio-coder gui"
 		fi
+		gui_warning="$("$node_bin" -e 'try { const w=JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8")).windows; if(w?.status === "failed") process.stdout.write("Windows desktop setup failed: " + String(w.reason || "unknown error") + "; run clio-coder doctor --fix"); } catch { process.stdout.write("Could not read the desktop setup report; run clio-coder doctor"); }' "$work/gui.out")"
+		[ -z "$gui_warning" ] || warn "$gui_warning"
 		log "the desktop app uses Clio Coder's saved credentials; save a key that lives only in your shell with: clio-coder auth login <target>"
 	else
 		warn "the desktop app was not set up. Retry with: clio-coder doctor --fix (verified service handover waits until active work finishes)"
@@ -781,7 +783,7 @@ main() {
 		tar_base="$(basename "$CLIO_CODER_NODE_TARBALL")"
 		node_wanted="$(printf '%s\n' "$tar_base" | sed -n 's/^node-v\([0-9][0-9.]*\)-.*\.tar\.[gx]z$/\1/p')"
 		tar_build="$(printf '%s\n' "$tar_base" | sed -n 's/^node-v[0-9.]*-\(.*\)\.tar\.[gx]z$/\1/p')"
-		{ [ -n "$node_wanted" ] && [ -n "$tar_build" ]; } || fail "--node-tarball must keep its release file name, such as node-v24.11.1-linux-x64.tar.xz"
+		{ single_line "$node_wanted" && printf '%s\n' "$node_wanted" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$' && [ -n "$tar_build" ]; } || fail "--node-tarball must keep its release file name, such as node-v24.11.1-linux-x64.tar.xz"
 		node_build="$tar_build"
 		case "$tar_base" in
 			*.xz) compression=xz ;;
@@ -889,12 +891,8 @@ main() {
 	pkg_dir="$staging/lib/node_modules/@iowarp/clio-coder"
 	installed_version="$("$node_bin" -e 'const p=require(process.argv[1]);if(p.name!=="@iowarp/clio-coder")process.exit(1);process.stdout.write(p.version)' "$pkg_dir/package.json" 2>/dev/null)" ||
 		fail "npm finished, but $pkg_dir is not an @iowarp/clio-coder package"
-	# A refused candidate was never activated, so no session runs from it; a retry replaces it instead of stacking copies.
-	for stale in "$install_root"/versions/*; do
-		if [ -f "$stale/$FAILED_CANDIDATE_MARK" ]; then rm -rf "$stale"; fi
-	done
 	final_prefix="$install_root/versions/$installed_version"
-	if [ -e "$final_prefix" ]; then final_prefix="$final_prefix-$(date -u +%Y%m%d%H%M%S)"; fi
+	if [ -e "$final_prefix" ]; then final_prefix="$final_prefix-$(date -u +%Y%m%d%H%M%S)-$$"; fi
 	mv "$staging" "$final_prefix"
 	entry="$final_prefix/lib/node_modules/@iowarp/clio-coder/dist/cli/index.js"
 	[ -f "$entry" ] || fail "the installed package has no dist/cli/index.js"

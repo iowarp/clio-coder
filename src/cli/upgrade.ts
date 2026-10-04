@@ -455,13 +455,11 @@ export async function runUpgradeCommand(
 	const methodLabel =
 		method === "source"
 			? "source checkout"
-			: opts.postInstall
-				? "package install"
-				: method === "npm"
-					? "npm global"
-					: method === "installer"
-						? "install.sh"
-						: method;
+			: method === "npm"
+				? "npm global"
+				: method === "installer"
+					? "installer"
+					: method;
 	const updateCommand = installationCommand(installation, "upgrade", opts.channel);
 	const sourceAdvice = () => presenter.commandAdvice(SOURCE_UPGRADE_LEAD, updateCommand);
 	const backgroundOwner = join(stateDir, "gui/background/owner.json");

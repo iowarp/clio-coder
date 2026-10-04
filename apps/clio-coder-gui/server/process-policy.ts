@@ -6,7 +6,13 @@ import { delimiter, isAbsolute, join, resolve, win32 } from "node:path";
 import { Worker } from "node:worker_threads";
 import { APP_TITLE } from "../contracts/meta.js";
 import { type CliCommand, commandPlan } from "./cli-commands.js";
-import { createStdioTransport, processAlive, processBirthToken, resolvePackageRoot } from "./clio/http-shims.js";
+import {
+	createStdioTransport,
+	processAlive,
+	processBirthToken,
+	resolveClioDirs,
+	resolvePackageRoot,
+} from "./clio/http-shims.js";
 import { AppProblem } from "./services/problem.js";
 import type { WorkerKind, WorkerSettings } from "./worker/protocol.js";
 
@@ -268,7 +274,15 @@ export async function focusAppWindow() {
  *
  * Each launch delivers a fresh local link, so a window left on a retired port or token can reconnect.
  */
-export async function openApp(url: string, env: NodeJS.ProcessEnv = process.env): Promise<"focused" | "opened"> {
+export async function openApp(
+	url: string,
+	env: NodeJS.ProcessEnv = process.env,
+	directory = join(resolveClioDirs().state, "gui/background"),
+): Promise<"focused" | "opened"> {
+	if (isWsl(env)) {
+		const { openManagedWindowsApp } = await import("./launcher/windows.js");
+		if (await openManagedWindowsApp(url, directory)) return "opened";
+	}
 	const app = windowsAppCommand(url, env);
 	if (!app) {
 		await openBrowser(url, env);

@@ -22,7 +22,7 @@ import {
 	targetApiKeyRef,
 } from "./configure-target.js";
 import { createLifecyclePresenter } from "./lifecycle-presenter.js";
-import { credentialWriteFailed, printPlaintextCredentialWarning } from "./shared.js";
+import { credentialWriteFailed } from "./shared.js";
 
 interface Connection {
 	runtime: RuntimeDescriptor;
@@ -279,7 +279,9 @@ export async function runQuickConnect(prompts: ConfigurePrompts): Promise<"conne
 				auth.setApiKey(descriptor.auth.apiKeyRef, key);
 				if (credentialWriteFailed(auth, "The key was not saved; connection settings were not changed."))
 					throw new Error("The key could not be saved. Check permissions on the credentials file and retry.");
-				printPlaintextCredentialWarning();
+				presenter.warn(
+					"API key stored unencrypted (mode 0600). Any process running as you can read it. Use --api-key-env <VAR> to keep the key off disk.",
+				);
 			}
 			updateSettings(apply);
 			presenter.done(`Connected: ${descriptor.id} / ${model}`);

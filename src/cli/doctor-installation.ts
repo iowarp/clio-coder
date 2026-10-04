@@ -57,7 +57,7 @@ export async function installationFindings(fix: boolean): Promise<DoctorFinding[
 			ok: true,
 			level: "warn",
 			name: `running ${process.surface} ${process.pid}`,
-			detail: `loaded build ${process.build} differs from disk at ${process.root}; finish active work and restart this process; run \`${command}\``,
+			detail: `loaded build ${process.build} at ${process.root} is no longer the activated build; finish active work and restart this process; run \`${command}\``,
 		});
 	}
 

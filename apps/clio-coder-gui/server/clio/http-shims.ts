@@ -1,6 +1,6 @@
 export { resolvePackageRoot } from "../../../../src/core/package-root.js";
 export { processAlive, processBirthToken } from "../../../../src/core/process-identity.js";
-export { registerRunningBuild } from "../../../../src/core/running-build.js";
+export { pendingInstalledVersion, registerRunningBuild } from "../../../../src/core/running-build.js";
 export { clioConfigDir, clioDataDir, clioStateDir, resolveClioDirs } from "../../../../src/core/xdg.js";
 export { getVersionInfo } from "../../../../src/domains/lifecycle/version.js";
 export {

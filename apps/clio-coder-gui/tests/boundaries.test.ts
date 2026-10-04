@@ -8,8 +8,8 @@ import ts from "typescript";
 const app = fileURLToPath(new URL("../", import.meta.url));
 const root = resolve(app, "../..");
 const httpModules = new Map([
-	// The server records its loaded build so lifecycle diagnostics can detect a replaced bundle.
-	["src/core/running-build.ts", new Set(["registerRunningBuild"])],
+	// The server records its loaded build and reads activation so live status can report a pending upgrade.
+	["src/core/running-build.ts", new Set(["registerRunningBuild", "pendingInstalledVersion"])],
 	["src/engine/acp/transport.ts", new Set(["createStdioTransport", "AcpJsonRpcTransport"])],
 	["src/engine/acp/errors.ts", new Set(["AcpProcessError", "AcpTimeoutError", "AcpRequestError", "AcpProtocolError"])],
 	["src/engine/acp/types.ts", new Set(["*"])],

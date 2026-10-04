@@ -36204,6 +36204,19 @@
 										"pwa": {
 											"type": "boolean"
 										},
+										"desktopManaged": {
+											"type": "boolean"
+										},
+										"pendingVersion": {
+											"anyOf": [
+												{
+													"type": "string"
+												},
+												{
+													"type": "null"
+												}
+											]
+										},
 										"idle": {
 											"type": "boolean"
 										},

@@ -1179,3 +1179,14 @@ button.wb-chip:hover:not(:disabled) {
 	border-color: var(--status-fail-line);
 	color: var(--status-fail-fg);
 }
+
+/* Activation can wait for a conversation or setup prompt. Keep that state visible in both shells. */
+.app-update-notice {
+	position: sticky;
+	top: 0;
+	z-index: 2;
+	padding: var(--space-4);
+	border-bottom: 1px solid var(--line);
+	background: var(--paper);
+	color: var(--ink);
+}

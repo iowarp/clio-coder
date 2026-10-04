@@ -5,6 +5,7 @@ const path = require("node:path");
 const { spawnSync } = require("node:child_process");
 const { pathToFileURL } = require("node:url");
 const crypto = require("node:crypto");
+const os = require("node:os");
 const MARK = "# clio-coder-installer launcher";
 
 function atomic(file, text, mode = 0o600) {
@@ -25,6 +26,7 @@ function atomic(file, text, mode = 0o600) {
 }
 
 function inside(root, file) {
+	if (typeof file !== "string" || !path.isAbsolute(file)) return false;
 	const rel = path.relative(root, file);
 	return (
 		path.isAbsolute(file) && rel !== "" && !rel.startsWith(`..${path.sep}`) && rel !== ".." && !path.isAbsolute(rel)
@@ -34,7 +36,18 @@ function inside(root, file) {
 function record(root) {
 	const file = path.join(root, "install.json");
 	if (!fs.existsSync(file)) return null;
-	const value = JSON.parse(fs.readFileSync(file, "utf8"));
+	let value;
+	try {
+		value = JSON.parse(fs.readFileSync(file, "utf8"));
+	} catch {
+		throw new Error(`Invalid installer manifest JSON: ${file}`);
+	}
+	if (
+		!value ||
+		typeof value !== "object" ||
+		["node", "current", "launcher"].some((name) => typeof value[name] !== "string" || !path.isAbsolute(value[name]))
+	)
+		throw new Error(`Incomplete installer manifest: ${file}; expected absolute node, current and launcher paths`);
 	if (![1, 2].includes(value.schema)) throw new Error(`Unsupported installer schema in ${file}`);
 	if (
 		value.kind !== "clio-coder-installer" ||
@@ -42,6 +55,8 @@ function record(root) {
 		!inside(path.join(root, "runtime"), value.node)
 	)
 		throw new Error(`Invalid installer ownership: ${file}`);
+	if (value.desktopManager && !inside(path.join(root, "versions"), value.desktopManager))
+		throw new Error("Desktop manager is outside owned versions");
 	if (value.previous && !inside(path.join(root, "versions"), value.previous))
 		throw new Error("Previous package is outside owned versions");
 	for (const name of ["previousNode", "launcherNode"])
@@ -113,23 +128,122 @@ function check(node, prefix, postInstall, echo = true) {
 			/clio-coder reset[^`\r\n]*/g,
 			"clio-coder doctor --fix",
 		);
+		const quote = (value) =>
+			process.platform === "win32" ? `'${value.replaceAll("'", "''")}'` : `'${value.replaceAll("'", "'\\''")}'`;
+		const repair = `${process.platform === "win32" ? "& " : ""}${quote(node)} ${quote(entry(prefix))} doctor --fix`;
 		throw new Error(
-			`${detail}\nThe previous installation remains active, and it may predate this repair. Run the new version's own repair, then retry the installer: "${node}" "${path.join(prefix, "lib", "node_modules", "@iowarp", "clio-coder", "dist", "cli", "index.js")}" doctor --fix`,
+			`${detail}\nThe previous installation remains active, and it may predate this repair. Run the new version's own repair, then retry the installer: ${repair}`,
 		);
+	}
+}
+
+// Collection requires a complete local process inventory. Unknown platforms, permissions or
+// receipts retain everything. Keep current and rollback unconditionally, and ordinary versions
+// for at least seven days. Refused candidates can be reclaimed sooner, but may run doctor.
+function pruneVersions(root) {
+	if (process.platform !== "linux") return;
+	// A local process inventory cannot prove inactivity on another host sharing this filesystem.
+	const localFilesystems = new Set([0xef53, 0x9123683e, 0x58465342, 0x01021994, 0x794c7630, 0x2fc12fc1, 0xf2f52010]);
+	try {
+		if (!localFilesystems.has(fs.statfsSync(root).type)) return;
+	} catch {
+		return;
+	}
+	const installed = record(root);
+	const versions = path.join(root, "versions");
+	const keep = new Set([installed?.current, installed?.previous, installed?.desktopManager]);
+	const protect = (text) => {
+		for (const candidate of fs.readdirSync(versions)) {
+			const prefix = path.join(versions, candidate);
+			if (text.includes(prefix + path.sep) || text === prefix) keep.add(prefix);
+		}
+	};
+	try {
+		const home = os.homedir();
+		const state =
+			process.env.CLIO_CODER_STATE_DIR ||
+			(process.env.CLIO_CODER_HOME
+				? path.join(process.env.CLIO_CODER_HOME, "state")
+				: path.join(process.env.XDG_STATE_HOME || path.join(home, ".local/state"), "clio-coder"));
+		const background = path.join(state, "gui/background/server.json");
+		if (fs.existsSync(background)) protect(fs.readFileSync(background, "utf8"));
+		const units = path.join(process.env.XDG_CONFIG_HOME || path.join(home, ".config"), "systemd/user");
+		for (const unit of fs.existsSync(units) ? fs.readdirSync(units) : []) {
+			if (/^clio-coder-gui-.*\.service$/.test(unit)) protect(fs.readFileSync(path.join(units, unit), "utf8"));
+		}
+		const receipts = path.join(root, ".active");
+		for (const file of fs.existsSync(receipts) ? fs.readdirSync(receipts) : []) {
+			const receipt = JSON.parse(fs.readFileSync(path.join(receipts, file), "utf8"));
+			if (!Number.isInteger(receipt.pid) || receipt.pid <= 0 || typeof receipt.current !== "string") return;
+			if (receipt.host !== os.hostname()) {
+				protect(receipt.current);
+				continue;
+			}
+			try {
+				process.kill(receipt.pid, 0);
+				protect(receipt.current);
+			} catch (error) {
+				if (error.code !== "ESRCH") return;
+			}
+		}
+		for (const pid of fs.readdirSync("/proc").filter((name) => /^\d+$/.test(name))) {
+			try {
+				if (fs.statSync(`/proc/${pid}`).uid !== process.getuid()) continue;
+				const command = fs.readFileSync(`/proc/${pid}/cmdline`, "utf8");
+				protect(command);
+				if (/(?:^|\/)node(?:\0|$)|clio-coder/.test(command.split("\0")[0])) protect(fs.readlinkSync(`/proc/${pid}/cwd`));
+			} catch (error) {
+				if (error.code !== "ENOENT" && error.code !== "ESRCH") return;
+			}
+		}
+		for (const name of fs.readdirSync(versions)) {
+			const prefix = path.join(versions, name);
+			const info = fs.lstatSync(prefix);
+			if (name.startsWith(".") || !info.isDirectory() || keep.has(prefix)) continue;
+			const refused = fs.existsSync(path.join(prefix, ".clio-coder-refused-candidate"));
+			if (!refused && Date.now() - info.mtimeMs < 7 * 24 * 60 * 60 * 1000) continue;
+			const pkg = JSON.parse(
+				fs.readFileSync(path.join(prefix, "lib/node_modules/@iowarp/clio-coder/package.json"), "utf8"),
+			);
+			if (pkg.name !== "@iowarp/clio-coder") continue;
+			fs.rmSync(prefix, { recursive: true });
+			process.stdout.write(`[install] removed unused version ${name}\n`);
+		}
+	} catch (error) {
+		process.stderr.write(`[install] retained older versions: ${error.message}\n`);
 	}
 }
 
 async function main() {
 	const [action, root, ...args] = process.argv.slice(2);
 	if (action === "launch") {
-		const current = record(root);
+		let current = record(root);
 		if (!current) throw new Error(`No installer manifest in ${root}`);
+		for (const file of [current.node, current.launcher, entry(current.current)]) {
+			try {
+				if (!fs.statSync(file).isFile()) throw new Error("not a file");
+			} catch {
+				throw new Error(
+					`Incomplete managed installation: missing file ${file}; rerun the installer with the same install and bin directories`,
+				);
+			}
+		}
 		const removing = path.join(root, ".install-lock", "uninstall");
 		if (fs.existsSync(removing)) throw new Error("Uninstall is in progress; retry after it exits");
 		const active = path.join(root, ".active");
 		fs.mkdirSync(active, { recursive: true });
 		const receipt = path.join(active, `${process.pid}.json`);
-		atomic(receipt, JSON.stringify({ pid: process.pid, current: current.current, node: current.node }));
+		// Publish before importing, then recheck activation. A launcher paused across upgrades
+		// must follow the new manifest rather than importing a prefix collection just removed.
+		for (;;) {
+			atomic(
+				receipt,
+				JSON.stringify({ pid: process.pid, host: os.hostname(), current: current.current, node: current.node }),
+			);
+			const latest = record(root);
+			if (latest.current === current.current && latest.node === current.node) break;
+			current = latest;
+		}
 		process.on("exit", () => {
 			try {
 				fs.rmSync(receipt, { force: true });
@@ -138,7 +252,26 @@ async function main() {
 			}
 		});
 		if (fs.existsSync(removing)) throw new Error("Uninstall is in progress; retry after it exits");
-		const cli = entry(current.current);
+		let cli = entry(current.current);
+		// The installed desktop host stays capable across rollback to an older CLI. It launches
+		// the activated server, but keeps the owned Windows profile and error handling introduced here.
+		if (current.desktopManager && args[0] === "gui" && (args[1] === "background" || args.length === 1)) {
+			const manager = path.join(current.desktopManager, "lib/node_modules/@iowarp/clio-coder/dist/gui/server.js");
+			const managerArgs = args[1] === "background" ? ["managed-background", ...args.slice(2)] : [];
+			const result = spawnSync(current.node, [manager, ...managerArgs], {
+				stdio: "inherit",
+				env: {
+					...process.env,
+					CLIO_CODER_PACKAGE_ROOT: path.dirname(path.dirname(path.dirname(cli))),
+					CLIO_CODER_DESKTOP_NODE: current.node,
+				},
+			});
+			if (result.error) throw result.error;
+			process.exitCode = result.status ?? 1;
+			return;
+		}
+		// Cleanup must understand desktop state written by the newer installer even after rollback.
+		if (current.desktopManager && args[0] === "uninstall") cli = entry(current.desktopManager);
 		process.argv = [current.node, cli, ...args];
 		if (path.resolve(current.node) === path.resolve(process.execPath)) {
 			await import(pathToFileURL(cli).href);
@@ -150,6 +283,10 @@ async function main() {
 			if (result.error) throw result.error;
 			process.exitCode = result.status ?? 1;
 		}
+		return;
+	}
+	if (action === "prune") {
+		pruneVersions(root);
 		return;
 	}
 	const old = record(root);
@@ -215,6 +352,9 @@ async function main() {
 	if (autoUpdate === "preserve") autoUpdate = old?.autoUpdate === false ? "0" : "1";
 	if (!inside(path.join(root, "versions"), current) || !inside(path.join(root, "runtime"), node))
 		throw new Error("Candidate is outside owned install directories");
+	if (process.platform === "win32" && /[%\r\n"]/u.test([node, old?.launcherNode, old?.node, root, launcher].join("")))
+		throw new Error("Windows installer paths cannot contain percent, newline or quote characters");
+	pruneVersions(root);
 	check(node, current, postInstall === "1");
 	// Activation has one commit point: launchers read this manifest on each invocation.
 	const helper = fs.readFileSync(__filename, "utf8");
@@ -242,6 +382,7 @@ async function main() {
 				nodeVersion,
 				nodeBuild,
 				current,
+				desktopManager: current,
 				previous: old?.current || "",
 				previousNode: old?.node || "",
 				previousNodeVersion: old?.nodeVersion || "",
@@ -260,8 +401,9 @@ async function main() {
 			2,
 		)}\n`,
 	);
+	pruneVersions(root);
 	process.stdout.write(
-		`[install] background updates ${autoUpdate === "1" && (!pin || pin === "-") ? "enabled" : "disabled"}${pin && pin !== "-" ? `; pinned ${pin}` : ""}; previous versions retained for running sessions\n`,
+		`[install] background updates ${autoUpdate === "1" && (!pin || pin === "-") ? "enabled" : "disabled"}${pin && pin !== "-" ? `; pinned ${pin}` : ""}${old ? "; previous version retained for rollback and running sessions" : ""}\n`,
 	);
 }
 

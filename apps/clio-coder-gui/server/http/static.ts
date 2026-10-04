@@ -4,16 +4,7 @@ import type { Hono } from "hono";
 import { isPagePath } from "../../contracts/pages.js";
 import { AppProblem } from "../services/problem.js";
 
-/**
- * `installable` decides whether the page advertises itself to the browser as an app. An OS launcher this
- * installation already wrote is the app; a second browser-installed copy would sit beside it under the same name.
- */
-export function staticClient(
-	app: Hono,
-	directory: string,
-	pwa = false,
-	installable: () => Promise<boolean> = async () => true,
-) {
+export function staticClient(app: Hono, directory: string, pwa = false) {
 	app.all("*", async (context) => {
 		if (context.req.method !== "GET" && context.req.method !== "HEAD")
 			throw new AppProblem("unsupported", "Only GET and HEAD are supported.", 405);
@@ -69,7 +60,7 @@ export function staticClient(
 				return context.body(Uint8Array.from(bytes.subarray(start, end + 1)), 206);
 			}
 		}
-		return path === "index.html" && pwa && (await installable())
+		return path === "index.html" && pwa
 			? context.body(bytes.toString("utf8").replace("<head>", '<head><link rel="manifest" href="/manifest.webmanifest">'))
 			: context.body(Uint8Array.from(bytes));
 	});

@@ -55,6 +55,16 @@ describe("contracts/install-script", () => {
 		}
 	});
 
+	it("rejects malformed local Node release names before creating directories", () => {
+		for (const version of ["24.", "24..1", "24.1", "24.1.2.3"]) {
+			const r = run(["--dry-run", "--node-tarball", `/unused/node-v${version}-linux-x64.tar.xz`]);
+			strictEqual(r.code, 1, r.stderr);
+			match(r.stderr, /must keep its release file name/);
+			ok(!r.created);
+		}
+		strictEqual(run(["--dry-run", "--node-tarball", "/unused/node-v24.11.1-linux-x64.tar.xz"]).code, 0);
+	});
+
 	it("dry run names the plan and writes nothing", () => {
 		const r = run(["--dry-run", "--version", "v0.6.0"]);
 		strictEqual(r.code, 0, r.stderr);

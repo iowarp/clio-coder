@@ -5,7 +5,7 @@ import { API_VERSION, APP_VERSION } from "../contracts/meta.js";
 import { openapi } from "../contracts/openapi.js";
 import { isPagePath } from "../contracts/pages.js";
 import { routes } from "../contracts/routes.js";
-import { getVersionInfo, resolvePackageRoot } from "./clio/http-shims.js";
+import { getVersionInfo, pendingInstalledVersion, resolvePackageRoot } from "./clio/http-shims.js";
 import { auth } from "./http/auth.js";
 import { problemResponse } from "./http/problem.js";
 import { evidenceRoutes } from "./http/routes-evidence.js";
@@ -60,7 +60,7 @@ export function createApp(options: {
 	clientDir?: string;
 	diagnostics?: boolean;
 	pwa?: boolean;
-	installable?: () => Promise<boolean>;
+	desktopManaged?: () => boolean;
 	idle: () => boolean;
 	runtime?: () => Promise<{ server: Omit<RuntimeInfo, "threadId">; reads: RuntimeInfo; ops: RuntimeInfo }>;
 }) {
@@ -92,6 +92,8 @@ export function createApp(options: {
 		apiVersion: API_VERSION as 1,
 		epoch: hub.epoch,
 		pwa: options.pwa ?? false,
+		pendingVersion: pendingInstalledVersion(),
+		desktopManaged: options.desktopManaged?.() ?? false,
 		idle: options.idle(),
 		bundledDocsPath: join(resolvePackageRoot(), "docs"),
 	}));
@@ -140,6 +142,6 @@ export function createApp(options: {
 		throw new AppProblem("not_found", "API route was not found.");
 	});
 	app.notFound((context) => problemResponse(new AppProblem("not_found", "Route was not found."), context));
-	if (options.clientDir) staticClient(app, options.clientDir, options.pwa, options.installable);
+	if (options.clientDir) staticClient(app, options.clientDir, options.pwa);
 	return app;
 }

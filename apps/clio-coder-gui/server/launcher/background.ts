@@ -3,7 +3,7 @@ import { lstat, mkdir, mkdtemp, readFile, realpath, rename, rm, rmdir, unlink, w
 import { homedir } from "node:os";
 import { basename, dirname, isAbsolute, join, resolve, sep } from "node:path";
 import { parseArgs } from "node:util";
-import { resolveClioDirs } from "../clio/http-shims.js";
+import { getVersionInfo, resolveClioDirs } from "../clio/http-shims.js";
 import { findLocalServer, type LocalServerMeta, waitForLocalServer } from "../local-server.js";
 import { controlService, openApp } from "../process-policy.js";
 import {
@@ -250,6 +250,8 @@ export async function backgroundStatus(
 		enabled: service.UnitFileState ?? "unknown",
 		pid: Number(service.MainPID) || null,
 		ready: !!found,
+		running: serverReport(found).running,
+		idle: serverReport(found).idle,
 		desktop: (await desktopOwned(state.config, directory)) ? "installed" : "absent",
 		windows: await windowsLauncherStatus(directory),
 	};
@@ -269,7 +271,19 @@ export async function inspectBackground(directory: string, launch: LaunchPaths, 
 		await installWindowsLauncher(directory, { ...config.launch, background: directory });
 		status = await backgroundStatus(directory);
 	}
+	const latest = getVersionInfo().clio;
+	const pending = status.running && status.running !== latest;
 	return [
+		...(pending
+			? [
+					{
+						ok: true,
+						level: "warn" as const,
+						name: "GUI running version",
+						detail: `app is running ${status.running}; installed ${latest}${status.idle === false ? "; active work is keeping the app on the old version" : ""}; finish active work, run \`clio-coder gui background restart --if-idle\`, then reload the app`,
+					},
+				]
+			: []),
 		{
 			ok: true,
 			...(!fix && needsRepair ? { level: "warn" as const } : {}),
@@ -353,6 +367,7 @@ export async function preferBackground(
 	ready: Ready = waitForLocalServer,
 	platform: NodeJS.Platform = process.platform,
 	version?: string,
+	launch?: LaunchPaths,
 ): Promise<BackgroundPreference> {
 	if (platform !== "linux") return { kind: "absent" };
 	let state: Awaited<ReturnType<typeof owned>>;
@@ -372,6 +387,7 @@ export async function preferBackground(
 			reason: "The background app belongs to another Clio Coder installation, so this one will not take it over.",
 		};
 	try {
+		if (launch) return { kind: "open", ...publicStart(await startCurrentBackground(directory, launch, control, ready)) };
 		const started = await startOwned(state, control, ready);
 		if (version && started.running && started.running !== version && started.idle === true) {
 			const restarted = await startOwned(state, control, ready, "restart");
@@ -455,6 +471,26 @@ export async function backgroundRemoval(directory: string, packageRoot: string, 
 	return { path: directory, remove: () => uninstallBackground(directory, control) };
 }
 
+/** Opening after activation updates the service target, preserving work until it is idle. */
+export async function startCurrentBackground(
+	directory: string,
+	launch: LaunchPaths,
+	control: Control = controlService,
+	ready: Ready = waitForLocalServer,
+) {
+	let state = await owned(directory);
+	if (state.status !== "installed")
+		throw new Error("Background service is not installed. Run background install first.");
+	const moved = !sameLaunch(state.config.launch, launch);
+	let started = await startOwned(state, control, ready);
+	// Keep the old target while busy, so a later open still notices same-version rebuilds.
+	if (started.idle !== true) return started;
+	state = await pinCurrentLaunch(state, directory, launch, control);
+	if (moved || (started.running && started.running !== getVersionInfo().clio))
+		started = await startOwned(state, control, ready, "restart");
+	return started;
+}
+
 export async function background(args: string[], launch: LaunchPaths) {
 	if (process.platform !== "linux")
 		throw new Error("Background setup currently requires Linux with a systemd user session.");
@@ -468,6 +504,7 @@ export async function background(args: string[], launch: LaunchPaths) {
 			open: { type: "boolean" },
 			"if-idle": { type: "boolean" },
 			handover: { type: "boolean" },
+			json: { type: "boolean" },
 		},
 	});
 	const command = positionals[0];
@@ -527,6 +564,7 @@ export async function background(args: string[], launch: LaunchPaths) {
 			(error: unknown) => ({ status: "failed" as const, reason: error instanceof Error ? error.message : String(error) }),
 		);
 		console.log(JSON.stringify({ ...result, windows }, null, 2));
+		if (values.json && !values.open) return;
 		console.log(
 			"Background sessions use Clio Coder's saved credentials. If a target key exists only in your terminal environment, save it with clio-coder auth login <target> before starting a conversation.",
 		);
@@ -559,14 +597,15 @@ export async function background(args: string[], launch: LaunchPaths) {
 		console.log(`Clio Coder background app restarted and ready at ${new URL(restarted.url).origin}.`);
 		return;
 	}
-	const url = await startBackground(directory);
+	const { url } = await startCurrentBackground(directory, launch);
 	if (command === "start") {
 		console.log(`Clio Coder background app is ready at ${new URL(url).origin}.`);
 		return;
 	}
-	// The link is the way in when no desktop can take it, so a failed opener hands it over instead of failing.
-	await openApp(url).catch(() => {
+	// Print a manual fallback, and fail so the Windows host can display the captured error.
+	await openApp(url, process.env, directory).catch((error: unknown) => {
 		console.log(`[clio-coder:gui] ${url}`);
 		console.error("[clio-coder:gui] Could not open the browser. Open the printed URL manually.");
+		throw new Error(`Desktop launch failed: ${error instanceof Error ? error.message : String(error)}`);
 	});
 }

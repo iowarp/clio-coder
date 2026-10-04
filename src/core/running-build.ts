@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
 import { hostname } from "node:os";
-import { isAbsolute, join } from "node:path";
+import { dirname, isAbsolute, join, sep } from "node:path";
 import { runningBuildId } from "./build-info.js";
 import { resolvePackageRoot } from "./package-root.js";
 import { processAlive, processBirthToken, processStartedAtMs } from "./process-identity.js";
@@ -19,6 +19,39 @@ function diskBuild(root: string): { id: string; files: string[] } | null {
 		)
 			return null;
 		return value;
+	} catch {
+		return null;
+	}
+}
+
+/** The currently activated package for a managed version, or the same checkout/package. */
+export function activatedPackageRoot(root: string): string {
+	const suffix = join("lib", "node_modules", "@iowarp", "clio-coder");
+	if (!root.endsWith(`${sep}${suffix}`)) return root;
+	const prefix = root.slice(0, -(suffix.length + 1));
+	const versions = dirname(prefix);
+	try {
+		const record = JSON.parse(readFileSync(join(dirname(versions), "install.json"), "utf8"));
+		if (
+			record.kind === "clio-coder-installer" &&
+			typeof record.current === "string" &&
+			dirname(record.current) === versions &&
+			existsSync(join(record.current, suffix, "package.json"))
+		)
+			return join(record.current, suffix);
+	} catch {
+		/* An unreadable record cannot establish another active package. */
+	}
+	return root;
+}
+
+/** Read on every status request, so an already running GUI sees upgrade and rollback activation. */
+export function pendingInstalledVersion(root = resolvePackageRoot()): string | null {
+	const current = activatedPackageRoot(root);
+	if (current === root) return null;
+	try {
+		const pkg = JSON.parse(readFileSync(join(current, "package.json"), "utf8"));
+		return typeof pkg.version === "string" ? pkg.version : null;
 	} catch {
 		return null;
 	}
@@ -86,9 +119,10 @@ export function staleRunningBuilds(state = resolveClioDirs().state): RunningBuil
 				typeof value.build !== "string"
 			)
 				continue;
-			const disk = diskBuild(value.root);
+			const currentRoot = activatedPackageRoot(value.root);
+			const disk = diskBuild(currentRoot);
 			seen.add(value.pid);
-			if (!disk || disk.id !== value.build) records.push(value);
+			if (currentRoot !== value.root || !disk || disk.id !== value.build) records.push(value);
 		} catch {
 			// A dead process or an incomplete record grants no authority and is ignored.
 		}

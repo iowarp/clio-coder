@@ -15,6 +15,8 @@ export const Meta = Type.Object(
 		apiVersion: Type.Literal(API_VERSION),
 		epoch: Type.String(),
 		pwa: Type.Boolean(),
+		desktopManaged: Type.Optional(Type.Boolean()),
+		pendingVersion: Type.Optional(Type.Union([Type.String(), Type.Null()])),
 		idle: Type.Boolean(),
 		/** Fixed installed reference root; no arbitrary file reads are exposed. */
 		bundledDocsPath: Type.String(),

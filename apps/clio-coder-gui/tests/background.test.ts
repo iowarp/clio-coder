@@ -11,6 +11,7 @@ import {
 	restartBackground,
 	restartBackgroundIfIdle,
 	startBackground,
+	startCurrentBackground,
 	stopBackground,
 	tryStartBackground,
 	uninstallBackground,
@@ -487,4 +488,37 @@ test("explicit handover preserves a verified service identity and refuses active
 	assert.ok((await readFile(files.unitFile, "utf8")).includes(newRoot));
 	await uninstallBackground(directory, control);
 	assert.equal((await launcherStatus(config.desktopPrefix)).status, "absent");
+});
+
+test("opening after activation repins the service and restarts only idle work, including same-version rebuilds", async (t) => {
+	const root = await mkdtemp(join(tmpdir(), "clio-open-current-"));
+	t.after(() => rm(root, { recursive: true, force: true }));
+	const directory = join(root, "background"),
+		files = backgroundPaths(directory);
+	const config = await newBackgroundConfig(4317, launch, join(root, "desktop"));
+	const calls: string[] = [];
+	const control: typeof controlService = async (action) => {
+		calls.push(action);
+		return `FragmentPath=${(await stat(files.unitFile).catch(() => null)) ? files.unitFile : ""}\nActiveState=active\n`;
+	};
+	await installBackground(directory, config, control, async () => {});
+	const newEntry = join(root, "new-server.ts");
+	await writeFile(newEntry, "export {};\n");
+	let idle = false;
+	let running = "0.6.0";
+	const ready = async () => ({ clio: running, idle });
+	calls.length = 0;
+	await startCurrentBackground(directory, { ...launch, entry: newEntry }, control, ready);
+	assert.equal((await readBackgroundConfig(files.config)).launch.entry, launch.entry);
+	assert.ok(!calls.includes("restart"), "busy app keeps its executable until idle");
+	idle = true;
+	running = (await import("../server/clio/http-shims.js")).getVersionInfo().clio;
+	calls.length = 0;
+	await startCurrentBackground(directory, { ...launch, entry: newEntry }, control, ready);
+	assert.equal((await readBackgroundConfig(files.config)).launch.entry, newEntry);
+	assert.ok(calls.includes("restart"), "same-version rebuild is selected once idle");
+	calls.length = 0;
+	await startCurrentBackground(directory, launch, control, ready);
+	assert.equal((await readBackgroundConfig(files.config)).launch.entry, launch.entry);
+	assert.ok(calls.includes("restart"), "rollback opening selects the restored executable once idle");
 });

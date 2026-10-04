@@ -76,31 +76,31 @@ export function PwaBoot({ enabled, token }: { enabled: boolean; token: string })
 /** The install and sign-out controls shown in General settings. */
 export function AppPreferencesPanel({
 	enabled,
+	desktopManaged = false,
 	version,
 	platform,
 }: {
 	enabled: boolean;
+	desktopManaged?: boolean;
 	version: string | undefined;
 	/** The server's `process.platform-arch`, which decides whether background setup exists at all. */
 	platform: string | undefined;
 }) {
 	const pwa = useSyncExternalStore(subscribe, read, read);
 	const [note, setNote] = useState("");
-	// The server leaves the manifest out when this installation already put the app in the operating system's menus.
-	const launcherOwned = enabled && !pwa.installed && document.querySelector('link[rel="manifest"]') === null;
 	const message = note || pwa.message;
 	return (
 		<div className="pwa-controls">
 			<p className="app-version">{version ? `Version ${version}` : "Connecting to Clio…"}</p>
-			{enabled ? (
+			{desktopManaged ? (
+				<p>
+					Clio Coder is installed in the Windows Start Menu. Open it there or run <code>clio-coder gui</code>. You can pin
+					its window to the taskbar.
+				</p>
+			) : enabled ? (
 				<>
 					<p>Keep Clio Coder beside your other apps. It uses the same projects and tasks as this browser.</p>
-					{launcherOwned ? (
-						<p>
-							Clio Coder is already in your Start Menu. Open it from there, or run <code>clio-coder gui</code>. Installing it
-							again from the browser would add a second copy.
-						</p>
-					) : !pwa.storage ? (
+					{!pwa.storage ? (
 						<p role="alert">
 							This browser cannot save your connection. Allow site storage before installing so Clio can reconnect when
 							reopened.
