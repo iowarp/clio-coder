@@ -242,6 +242,10 @@ function Install-ClioCoder {
 		$pkg = Get-Content -LiteralPath $pkgJson -Raw | ConvertFrom-Json
 		if ($pkg.name -ne $PackageName) { Fail "npm finished, but $pkgJson is not $PackageName" }
 		if ([version](($pkg.version -split '-')[0]) -lt [version]"0.6.0") { Fail "Native Windows managed lifecycle requires 0.6.0 or later; registry returned $($pkg.version). Previous install and launcher remain active. No package has been published by this installer." }
+		# A refused candidate was never activated, so no session runs from it; a retry replaces it instead of stacking copies.
+		Get-ChildItem -LiteralPath (Join-Path $installRoot "versions") -Directory -ErrorAction SilentlyContinue |
+			Where-Object { Test-Path -LiteralPath (Join-Path $_.FullName ".clio-coder-refused-candidate") } |
+			ForEach-Object { Remove-Item -LiteralPath $_.FullName -Recurse -Force -ErrorAction SilentlyContinue }
 		$final = Join-Path $installRoot "versions\$($pkg.version)"
 		if (Test-Path -LiteralPath $final) { $final = "$final-$(Get-Date -Format yyyyMMddHHmmss)" }
 		Move-Item -LiteralPath $staging -Destination $final
@@ -256,6 +260,7 @@ function Install-ClioCoder {
 		$post = if ($Options.NoPostInstall) { "0" } else { "1" }
 		& $node $helper activate $installRoot $node $nodeVersion $build $final $launcher $Options.Channel $pin $auto $post
 		# The clio-coder on PATH is still the previous version, and a version that predates a repair reports nothing to fix.
+		if ($LASTEXITCODE -ne 0) { New-Item -ItemType File -Force -Path (Join-Path $final ".clio-coder-refused-candidate") | Out-Null }
 		if ($LASTEXITCODE -ne 0) { Fail "candidate checks failed; previous install remains active. Repair with the new version itself, then rerun this installer: & `"$node`" `"$entry`" doctor --fix" }
 		if (-not $Options.NoPostInstall) {
 			& $node $entry upgrade --post-install

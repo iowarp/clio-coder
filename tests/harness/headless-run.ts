@@ -30,7 +30,8 @@ export function privateCliCopy(): string {
 	const dist = join(ROOT, "dist");
 	cpSync(dist, join(root, "dist"), {
 		recursive: true,
-		filter: (source) => !source.endsWith(".map") && !/metafile[^/]*\.json$/u.test(source) && source !== join(dist, "gui"),
+		// The GUI bundle stays in: doctor checks every file dist/build.json names.
+		filter: (source) => !source.endsWith(".map") && !/metafile[^/]*\.json$/u.test(source),
 	});
 	copyFileSync(join(ROOT, "package.json"), join(root, "package.json"));
 	for (const entry of ["node_modules", "src", "library", "models", "docs", "damage-control-rules.yaml"]) {

@@ -301,7 +301,7 @@ test("standard doctor reads stored sign-in tokens without refreshing or changing
 	const findings = await runDoctorModelChecks();
 	const expired = findings.find((row) => row.name === "connection expired-signin");
 	assert.equal(expired?.ok, false);
-	assert.match(expired?.detail ?? "", /stored sign-in expired.*does not refresh/u);
+	assert.match(expired?.detail ?? "", /stored sign-in expired.*auth login/u);
 	assert.equal(readFileSync(file, "utf8"), before);
 	assert.equal(resolution.mock.callCount(), 0);
 	assert.equal(findings.find((row) => row.name === "connection valid-signin")?.ok, true);

@@ -11,6 +11,7 @@ Clio Coder 0.6.1 repairs installation and upgrade. Native Windows installs compl
 - A native Windows install of 0.6.0 stopped at activation with `EPERM`. The installer helper now flushes its launcher record through a writable handle, and file edits on Windows no longer carry a durability warning on every call.
 - A settings file holding a key that was retired without a replacement no longer refuses to load, which had blocked upgrades of 0.5.x homes with an interop setup. The key is ignored and `clio-coder doctor` names it as a warning.
 - An upgrade refused over a setting the installed version cannot repair, such as `safety.autonomy: auto-edit` from 0.4.x, was a dead end, because the advised `clio-coder doctor --fix` ran the old version. The installer now prints the new version's own repair command.
+- A refused upgrade no longer leaves a copy of the new version behind on every retry; the next run replaces it. Replacing an npm-linked launcher now names the npm prefix to uninstall from.
 - Installers direct a failed candidate check to `clio-coder doctor --fix` instead of reset, and explain how to keep a source-checkout launcher or replace it with a managed release.
 - `clio-coder doctor --fix` repairs file modes, removes retired settings keys, corrects YAML on/off booleans, and asks before replacing a stale model ID with the nearest provider catalog match.
 - Every doctor warning or failure names a concrete next command, including the sign-in command for expired credentials.

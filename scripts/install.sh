@@ -40,6 +40,7 @@ NODE_UNOFFICIAL_BASE="https://unofficial-builds.nodejs.org/download/release"
 NODE_KEYRING_URL="https://github.com/nodejs/release-keys/raw/HEAD/gpg-only-active-keys/pubring.kbx"
 LAUNCHER_MARK="# clio-coder-installer launcher"
 MANIFEST_KIND="clio-coder-installer"
+FAILED_CANDIDATE_MARK=".clio-coder-refused-candidate"
 # Unpacked Node is about 210 MB and one package prefix about 460 MB, half of it
 # the optional Claude Agent SDK binary (--include-claude-sdk opts in). Refuse early
 # rather than die half way through on a quota.
@@ -501,7 +502,9 @@ check_existing_launcher() {
 		case "$target" in
 			*lib/node_modules/@iowarp/clio-coder/*)
 				warn "replacing $launcher, a link into an npm install of Clio Coder ($target)"
-				warn "that npm copy stays on disk; remove it with the npm that installed it: npm uninstall -g --prefix <that prefix> $PACKAGE"
+				npm_prefix="${checkout_entry%/lib/node_modules/@iowarp/clio-coder/*}"
+				npm_prefix="$(cd "$npm_prefix" 2>/dev/null && pwd -P || printf '%s' "$npm_prefix")"
+				warn "that npm copy stays on disk; remove it with the npm that installed it: npm uninstall -g --prefix \"$npm_prefix\" $PACKAGE"
 				return 0
 				;;
 		esac
@@ -886,6 +889,10 @@ main() {
 	pkg_dir="$staging/lib/node_modules/@iowarp/clio-coder"
 	installed_version="$("$node_bin" -e 'const p=require(process.argv[1]);if(p.name!=="@iowarp/clio-coder")process.exit(1);process.stdout.write(p.version)' "$pkg_dir/package.json" 2>/dev/null)" ||
 		fail "npm finished, but $pkg_dir is not an @iowarp/clio-coder package"
+	# A refused candidate was never activated, so no session runs from it; a retry replaces it instead of stacking copies.
+	for stale in "$install_root"/versions/*; do
+		if [ -f "$stale/$FAILED_CANDIDATE_MARK" ]; then rm -rf "$stale"; fi
+	done
 	final_prefix="$install_root/versions/$installed_version"
 	if [ -e "$final_prefix" ]; then final_prefix="$final_prefix-$(date -u +%Y%m%d%H%M%S)"; fi
 	mv "$staging" "$final_prefix"
@@ -899,9 +906,11 @@ main() {
 		pin=""
 		case "$version_spec" in [0-9]* | v[0-9]*) pin="$installed_version" ;; esac
 		if [ -n "$package_file" ]; then pin="$installed_version"; fi
-		"$node_bin" "$helper" activate "$install_root" "$node_bin" "$node_version" "$node_build" "$final_prefix" "$launcher" "$channel" "$pin" "$auto_update" "$post_install" </dev/null ||
+		"$node_bin" "$helper" activate "$install_root" "$node_bin" "$node_version" "$node_build" "$final_prefix" "$launcher" "$channel" "$pin" "$auto_update" "$post_install" </dev/null || {
+			: >"$final_prefix/$FAILED_CANDIDATE_MARK"
 			# The clio-coder on PATH is still the previous version, and a version that predates a repair reports nothing to fix.
 			fail "candidate checks failed; previous install remains active. Repair with the new version itself, then rerun this installer: \"$node_bin\" \"$entry\" doctor --fix"
+		}
 	else
 		"$node_bin" "$entry" --version </dev/null || fail "candidate does not run; previous install remains active. Run: clio-coder doctor --fix"
 		if [ -d "$install_root/launchers" ]; then fail "refusing to replace a lifecycle-capable install with a legacy package; use rollback"; fi
