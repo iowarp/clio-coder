@@ -261,7 +261,7 @@ function observeToolsNudge(command: string, sessionId: string | undefined): stri
 export const bashTool: ToolSpec = {
 	name: ToolNames.Bash,
 	description:
-		"Execute a bash command in a fresh child at the workspace root (or explicit cwd); shell state does not persist across calls. Combined output has a 16 MiB hard cap that stops the child; run_script streams unbounded output. The default timeout is 300s; use panes for long-lived processes or an explicit timeout_ms. Network reachability follows the host and OS isolation; disabling web_fetch does not isolate bash networking.",
+		"Execute a bash command in a fresh child at the workspace root (or explicit cwd); shell state does not persist across calls. Combined output has a 16 MiB hard cap that stops the child; run_script streams unbounded output. The default timeout is 300s; use panes for long-lived processes or an explicit timeout_ms. Network reachability follows the host and OS isolation; disabling web_fetch does not isolate bash networking. Read-only inspection (cat, head, tail, grep, rg, find, ls, wc, sed -n, git log/status/diff) of workspace paths, chained with &&, ||, ; or |, runs without an approval ask; loop variables, $(...), interpreter -e/-c source and redirection to files ask.",
 	parameters: Type.Object({
 		command: Type.String({ description: "Bash command to execute." }),
 		cwd: Type.Optional(
