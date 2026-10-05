@@ -5,6 +5,7 @@ import { parseExtensionCapabilities, resolveExtensionEntrypoint } from "./comman
 import { evaluateClioCompatibility } from "./compatibility.js";
 import { parseExtensionRuntime } from "./runtime-schema.js";
 import { parseExtensionRuntimeV2 } from "./runtime-schema-v2.js";
+import { validateSkin } from "./skin-schema.js";
 import type { ClioExtensionManifest, ExtensionCandidate, ExtensionDiagnostic } from "./types.js";
 
 const MANIFEST_NAMES = ["clio-coder-extension.yaml", "clio-coder-extension.yml", "clio-coder-extension.json"] as const;
@@ -214,14 +215,18 @@ export function loadManifestFromRoot(root: string): ExtensionCandidate {
 		}
 		const runtimeV2 = parsed.manifest?.runtimeV2;
 		if (runtimeV2) {
-			const files = [runtimeV2.entrypoint, ...runtimeV2.workspaces.flatMap((workspace) => workspace.skin ?? [])];
-			for (const file of files) {
+			const files = [
+				{ file: runtimeV2.entrypoint, isSkin: false },
+				...runtimeV2.workspaces.flatMap((workspace) => (workspace.skin ? [{ file: workspace.skin, isSkin: true }] : [])),
+			];
+			for (const { file, isSkin } of files) {
 				try {
 					const resolved = resolveExtensionEntrypoint(root, file);
 					// A skin is data; reading it here keeps a broken one out of an install without running anything.
-					if (file !== runtimeV2.entrypoint) {
+					if (isSkin) {
 						const skin: unknown = JSON.parse(readFileSync(resolved, "utf8"));
-						if (skin === null || typeof skin !== "object" || Array.isArray(skin)) throw new Error("skin must be an object");
+						const validation = validateSkin(skin);
+						if (!validation.ok) throw new Error(`skin ${validation.path}: ${validation.reason}`);
 					}
 				} catch (error) {
 					parsed.diagnostics.push({
