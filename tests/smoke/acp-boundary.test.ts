@@ -1,4 +1,4 @@
-import { doesNotMatch, match, notStrictEqual, ok, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, doesNotMatch, match, notStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { type ChildProcessWithoutNullStreams, spawn } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer, type IncomingMessage, type Server } from "node:http";
@@ -344,10 +344,13 @@ describe("smoke/ACP stdio boundary", { concurrency: false }, () => {
 			strictEqual(rejected.error.data._meta["clio-coder/error"]?.code, "prompt_not_admitted");
 			strictEqual(rejected.error.data._meta["clio-coder/error"]?.reason, "authentication-required");
 			doesNotMatch(JSON.stringify(rejected), /CLIO_ACP_TEST_ONLY_KEY|settings.yaml|credentials.yaml/);
-			strictEqual(
-				client.updates.some((update) => update.sessionUpdate !== "available_commands_update"),
-				false,
-			);
+			for (const update of client.updates) {
+				if (update.sessionUpdate === "available_commands_update") continue;
+				deepStrictEqual(update, {
+					sessionUpdate: "session_info_update",
+					_meta: { "clio-coder/memory": { state: "off" } },
+				});
+			}
 			strictEqual(fixture.requests.length, 0);
 			await client.close(sessionId);
 			strictEqual(await runCli(["auth", "login", "acp-local", "--api-key", "synthetic-service-test-key"], target.env), 0);
