@@ -24,6 +24,7 @@ import { createHash } from "node:crypto";
 import { isAbsolute, resolve } from "node:path";
 import type { MiddlewareHookRegistration } from "./runtime.js";
 import {
+	type DeclarableMiddlewareEffect,
 	isMiddlewareHook,
 	isMiddlewareReminderSeverity,
 	MIDDLEWARE_HOOKS,
@@ -143,7 +144,7 @@ export interface NormalizedPromptHook {
 
 export interface NormalizedEffectHook {
 	kind: "effect";
-	effect: MiddlewareEffect;
+	effect: DeclarableMiddlewareEffect;
 }
 
 export type NormalizedUserHookSpec = NormalizedCommandHook | NormalizedPromptHook | NormalizedEffectHook;

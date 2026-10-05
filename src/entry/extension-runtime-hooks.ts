@@ -28,8 +28,10 @@ export interface ExtensionRuntimeHookOptions {
 	now?: () => number;
 }
 
-function middlewareEffect(effect: ExtensionEffect): MiddlewareEffect | null {
+function middlewareEffect(effect: ExtensionEffect, extensionId: string): MiddlewareEffect | null {
 	switch (effect.kind) {
+		case "rewrite_tool_input":
+			return { kind: "rewrite_tool_input", args: effect.args, reason: effect.reason, source: extensionId };
 		case "block_tool":
 			return { kind: "block_tool", reason: effect.reason, severity: "hard-block" };
 		case "annotate_tool_result":
@@ -60,7 +62,7 @@ function middlewareEffect(effect: ExtensionEffect): MiddlewareEffect | null {
 				...(effect.note !== undefined ? { note: effect.note } : {}),
 			};
 		default:
-			// Rewrites and prompt gates are applied by their own phases, not as middleware effects.
+			// Prompt gates belong to prompt submission, which has no middleware point yet.
 			return null;
 	}
 }
@@ -230,7 +232,7 @@ export function buildExtensionRuntimeHookRegistrations(
 						return fail(input, startedAt, `failed: ${outcome.message}`, hook.onError, "runtime-failed");
 					reported.clear();
 					const effects = outcome.effects.flatMap((effect) => {
-						const mapped = middlewareEffect(effect);
+						const mapped = middlewareEffect(effect, entry.id);
 						return mapped === null ? [] : [mapped];
 					});
 					receipt(input, "runtime-ok", startedAt, effects);

@@ -1,4 +1,5 @@
 import {
+	type DeclarableMiddlewareEffect,
 	isMiddlewareAnnotationSeverity,
 	isMiddlewareEffectKind,
 	isMiddlewareReminderSeverity,
@@ -13,7 +14,7 @@ export interface MiddlewareValidationIssue {
 export type MiddlewareEffectValidationResult =
 	| {
 			valid: true;
-			effect: MiddlewareEffect;
+			effect: DeclarableMiddlewareEffect;
 			issues: [];
 	  }
 	| {
@@ -33,7 +34,7 @@ function readMiddlewareEffect(
 	value: unknown,
 	path: string,
 	issues: MiddlewareValidationIssue[],
-): MiddlewareEffect | null {
+): DeclarableMiddlewareEffect | null {
 	if (!isRecord(value)) {
 		issues.push({ path, message: "expected middleware effect object" });
 		return null;
@@ -72,7 +73,7 @@ function readRequireTool(
 	record: Record<string, unknown>,
 	path: string,
 	issues: MiddlewareValidationIssue[],
-): MiddlewareEffect | null {
+): DeclarableMiddlewareEffect | null {
 	rejectUnexpectedFields(record, path, ["kind", "toolName"], issues);
 	const toolName = readRequiredString(record, `${path}.toolName`, issues);
 	return toolName === null ? null : { kind: "require_tool", toolName };
@@ -82,7 +83,7 @@ function readInjectReminder(
 	record: Record<string, unknown>,
 	path: string,
 	issues: MiddlewareValidationIssue[],
-): MiddlewareEffect | null {
+): DeclarableMiddlewareEffect | null {
 	rejectUnexpectedFields(record, path, ["kind", "message", "severity"], issues);
 	const message = readRequiredString(record, `${path}.message`, issues);
 	const severity = readOptionalString(record, `${path}.severity`, issues);
@@ -99,7 +100,7 @@ function readAnnotateToolResult(
 	record: Record<string, unknown>,
 	path: string,
 	issues: MiddlewareValidationIssue[],
-): MiddlewareEffect | null {
+): DeclarableMiddlewareEffect | null {
 	rejectUnexpectedFields(record, path, ["kind", "message", "severity"], issues);
 	const message = readRequiredString(record, `${path}.message`, issues);
 	const severity = readOptionalString(record, `${path}.severity`, issues);
@@ -116,7 +117,7 @@ function readBlockTool(
 	record: Record<string, unknown>,
 	path: string,
 	issues: MiddlewareValidationIssue[],
-): MiddlewareEffect | null {
+): DeclarableMiddlewareEffect | null {
 	rejectUnexpectedFields(record, path, ["kind", "reason", "severity", "redundantRepeat"], issues);
 	if (record.redundantRepeat !== undefined && record.redundantRepeat !== true) {
 		issues.push({ path: `${path}.redundantRepeat`, message: "expected true" });
@@ -134,7 +135,7 @@ function readProtectPath(
 	record: Record<string, unknown>,
 	path: string,
 	issues: MiddlewareValidationIssue[],
-): MiddlewareEffect | null {
+): DeclarableMiddlewareEffect | null {
 	rejectUnexpectedFields(record, path, ["kind", "path", "reason"], issues);
 	const protectedPath = readRequiredString(record, `${path}.path`, issues);
 	const reason = readRequiredString(record, `${path}.reason`, issues);
@@ -146,7 +147,7 @@ function readRequestContinuation(
 	record: Record<string, unknown>,
 	path: string,
 	issues: MiddlewareValidationIssue[],
-): MiddlewareEffect | null {
+): DeclarableMiddlewareEffect | null {
 	rejectUnexpectedFields(record, path, ["kind", "message"], issues);
 	const message = readRequiredString(record, `${path}.message`, issues);
 	if (message === null) return null;

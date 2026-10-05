@@ -317,7 +317,7 @@ function evaluateRuleDefinition(definition: MiddlewareRuleDefinition, input: Mid
 		if (!definition.toolNames.includes(input.toolName)) return [];
 	}
 	if (definition.predicate !== undefined && !definition.predicate(input)) return [];
-	const declaredKinds = new Set(rule.effectKinds);
+	const declaredKinds = new Set<string>(rule.effectKinds);
 	const emitted: MiddlewareEffect[] = [];
 	for (const effect of definition.effects) {
 		if (!declaredKinds.has(effect.kind)) continue;
@@ -328,6 +328,13 @@ function evaluateRuleDefinition(definition: MiddlewareRuleDefinition, input: Mid
 
 export function cloneMiddlewareEffect(effect: MiddlewareEffect): MiddlewareEffect {
 	switch (effect.kind) {
+		case "rewrite_tool_input":
+			return {
+				kind: "rewrite_tool_input",
+				args: structuredClone(effect.args),
+				reason: effect.reason,
+				source: effect.source,
+			};
 		case "inject_reminder": {
 			const cloned: MiddlewareEffect = { kind: "inject_reminder", message: effect.message };
 			if (effect.severity !== undefined) cloned.severity = effect.severity;

@@ -1,5 +1,6 @@
 import { createHash, randomBytes } from "node:crypto";
 import type { TSchema } from "typebox";
+import { Value } from "typebox/value";
 import { isWorkerToolCallCapExceededReason } from "../core/guardrails.js";
 import { HEADLESS_PERMISSION_DENIED_MARKER } from "../core/headless-permission.js";
 import { normalizePromptHint } from "../core/prompt-hint.js";
@@ -743,6 +744,8 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 		options?: ToolInvokeOptions,
 	): Promise<RegistryVerdict> => {
 		let resultDisposition = spec.metadata?.resultDisposition;
+		// Admission prepared these arguments; a rewrite never takes over their cleanup.
+		const admittedArgs = call.args ?? {};
 		/** When the body started, so an awaited after_tool hook learns how long it ran. */
 		let bodyStartedAt: number | undefined;
 		const bodyMs = (): number => (bodyStartedAt === undefined ? 0 : Math.round(performance.now() - bodyStartedAt));
@@ -772,6 +775,23 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 				const awaited = await runAwaitedToolHook("before_tool", spec, call, decision, options, beforeEffects);
 				beforeEffects = [...beforeEffects, ...awaited];
 				block = firstBlockToolEffect(awaited);
+				const rewrite = block ? undefined : awaited.find((effect) => effect.kind === "rewrite_tool_input");
+				if (rewrite?.kind === "rewrite_tool_input") {
+					const rewritten = admitRewrite(spec, call, rewrite, options);
+					if ("refusal" in rewritten) block = { kind: "block_tool", reason: rewritten.refusal, severity: "hard-block" };
+					else {
+						call = rewritten.call;
+						decision = rewritten.decision;
+						beforeEffects = [
+							...beforeEffects,
+							{
+								kind: "annotate_tool_result",
+								message: `${spec.name} input rewritten by extension ${rewrite.source}: ${rewrite.reason}`,
+								severity: "info",
+							},
+						];
+					}
+				}
 			}
 			if (block) {
 				const verdict = guardBlockedVerdict(decision, call.tool, block.reason);
@@ -897,7 +917,7 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 				};
 			}
 		} finally {
-			disposeAdmissionArgs(spec, call.args ?? {});
+			disposeAdmissionArgs(spec, admittedArgs);
 		}
 	};
 
@@ -930,6 +950,32 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 			// next request, but it must never throw through tool admission.
 		}
 		return effects;
+	};
+
+	/**
+	 * An extension may rewrite a call's input only into one that passes the
+	 * tool's schema and is admitted again without a new decision: a rewrite
+	 * that would need approval, or that safety refuses, refuses the call. The
+	 * original arguments still own admission cleanup.
+	 */
+	const admitRewrite = (
+		spec: ToolSpec,
+		call: ClassifierCall,
+		rewrite: Extract<MiddlewareEffect, { kind: "rewrite_tool_input" }>,
+		options: ToolInvokeOptions | undefined,
+	): { call: ClassifierCall; decision: SafetyDecision } | { refusal: string } => {
+		if (!Value.Check(spec.parameters, rewrite.args))
+			return { refusal: `extension ${rewrite.source} rewrote ${spec.name} input that does not match its schema` };
+		const next: ClassifierCall = { ...call, args: rewrite.args };
+		const outcome = admit(prepareAdmissionCall(spec, next), undefined, options);
+		if (outcome.kind === "execute") return { call: next, decision: outcome.decision };
+		const why =
+			outcome.kind === "park"
+				? "would need operator approval"
+				: outcome.verdict.kind === "blocked"
+					? outcome.verdict.reason
+					: "is not admitted";
+		return { refusal: `extension ${rewrite.source} rewrote ${spec.name} input into a call that ${why}` };
 	};
 
 	/**
