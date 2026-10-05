@@ -10,6 +10,7 @@ import type { ExtensionObservation, ExtensionOutput } from "./public-api.js";
 import type {
 	ExtensionObservationV2,
 	ExtensionOutputV2,
+	ExtensionSkin,
 	ExtensionUiAction,
 	InterviewAnswer,
 	InterviewNext,
@@ -162,6 +163,9 @@ export class OperatorExtensions {
 	}
 	closePanel(extensionId: string): void {
 		this.v2.closePanel(extensionId);
+	}
+	skinFor(extensionId: string, workspaceId: string): ExtensionSkin | null {
+		return this.v2.skinFor(extensionId, workspaceId);
 	}
 	cancel(): void {
 		this.v1.cancel();

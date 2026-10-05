@@ -12,6 +12,8 @@ export interface TranscriptComponent extends Component {
 export interface LayoutParts {
 	banner: Component;
 	chat: TranscriptComponent;
+	/** An extension workspace's board band; empty unless a workspace places one there. */
+	workspace?: Component;
 	pending?: Component;
 	fleet?: Component;
 	contextProgress?: Component;
@@ -106,6 +108,7 @@ function buildFullscreenLayout(parts: LayoutParts, options: LayoutOptions = {}):
 	});
 	options.onTranscript?.(transcript);
 	const dock = new VStack();
+	if (parts.workspace) dock.addChild(parts.workspace, { shrink: 1, minSize: 0 });
 	if (parts.pending) dock.addChild(parts.pending, { shrink: 1, minSize: 0 });
 	if (parts.fleet) dock.addChild(parts.fleet, { shrink: 1, minSize: 0 });
 	if (parts.contextProgress) dock.addChild(parts.contextProgress, { shrink: 1, minSize: 0 });
@@ -179,6 +182,7 @@ class RegularRoot implements Component {
 				out[row++] = "";
 			}
 		}
+		if (this.parts.workspace) write(this.parts.workspace.render(width));
 		if (this.parts.pending) write(this.parts.pending.render(width));
 		if (this.parts.fleet) write(this.parts.fleet.render(width));
 		if (this.parts.contextProgress) write(this.parts.contextProgress.render(width));
@@ -192,6 +196,7 @@ class RegularRoot implements Component {
 		this.heldPrefix = null;
 		this.parts.banner.invalidate();
 		this.parts.chat.invalidate();
+		this.parts.workspace?.invalidate();
 		this.parts.pending?.invalidate();
 		this.parts.fleet?.invalidate();
 		this.parts.contextProgress?.invalidate();

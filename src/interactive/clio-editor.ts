@@ -75,6 +75,8 @@ export interface EditorChrome {
 	getThinkingLabel: () => string;
 	getThinking?: () => { label: string; hasLevels: boolean; supportedLevels?: readonly string[] };
 	getHarnessStatus?: (width: number) => { label: string; glyph: string; token: ClioToken; live: boolean } | null;
+	/** An active extension workspace's rail segment, painted in place of the model nickname. */
+	getWorkspaceRail?: (width: number) => string | null;
 	/** Published context accounting; rendering never refreshes the estimate. */
 	getContextUsage?: () => ContextOccupancyFacts | undefined;
 	getOutputStyle?: () => OutputStyle;
@@ -431,10 +433,15 @@ export class ClioEditor extends Editor {
 		}
 		const route = this.chrome.getModelLabel();
 		const nickname = modelNickname(typeof route === "string" ? route.split("·").at(-1) : route.modelId);
-		const identity = theme.fg(
-			"activeModelIdentity",
-			truncateToWidth(nickname, Math.max(4, Math.min(24, Math.floor(width / 3))), GLYPH.ellipsis, false),
-		);
+		// The approval cue keeps the rail; a workspace replaces only the identity segment.
+		const workspace =
+			mode === "CONFIRM" ? null : (this.chrome.getWorkspaceRail?.(Math.max(4, Math.floor(width / 2))) ?? null);
+		const identity =
+			workspace ??
+			theme.fg(
+				"activeModelIdentity",
+				truncateToWidth(nickname, Math.max(4, Math.min(24, Math.floor(width / 3))), GLYPH.ellipsis, false),
+			);
 		const label = [lead, identity, activity].filter(Boolean).join(" ");
 		const position = hiddenLineCount > 0 ? theme.fg("positionCount", `${GLYPH.up}${hiddenLineCount}`) : "";
 		const draftLabel = mode === "STEER" || (mode === "FOLLOW-UP" && text.length > 0) ? theme.fg("draftState", mode) : "";

@@ -29,6 +29,9 @@ export interface ActiveExtensionWorkspace {
 	extensionId: string;
 	workspaceId: string;
 	title: string;
+	/** The host parts this workspace takes while it is active. */
+	regions: ReadonlyArray<WorkspaceRegion | "islands">;
+	board: "band" | "island";
 }
 
 /** One-shot requests a renderer acts on once. Persistent content is read from the entries. */
@@ -133,7 +136,17 @@ export class ExtensionSurfaceModel {
 			if ("enter" in output.workspace) {
 				const id = output.workspace.enter;
 				const declared = workspaces.find((workspace) => workspace.id === id);
-				if (declared) this.setWorkspace({ extensionId, workspaceId: declared.id, title: declared.title }, events);
+				if (declared)
+					this.setWorkspace(
+						{
+							extensionId,
+							workspaceId: declared.id,
+							title: declared.title,
+							regions: [...declared.regions],
+							board: declared.board ?? "band",
+						},
+						events,
+					);
 			} else if (this.workspace?.extensionId === extensionId) this.setWorkspace(null, events);
 		}
 		if (changed && events.length === 0) events.push(null);

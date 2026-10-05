@@ -239,6 +239,7 @@ export function createProcessTerminalLease(options: CreateProcessTerminalLeaseOp
 		getMotionEnabled: () => editorChrome.getMotionEnabled?.() ?? settings.interface.demo !== false,
 		getThinking: () => editorChrome.getThinking?.() ?? { label: editorChrome.getThinkingLabel(), hasLevels: false },
 		getHarnessStatus: (width) => editorChrome.getHarnessStatus?.(width) ?? null,
+		getWorkspaceRail: (width) => editorChrome.getWorkspaceRail?.(width) ?? null,
 		getContextUsage: () => editorChrome.getContextUsage?.(),
 		getOutputStyle: () => editorChrome.getOutputStyle?.() ?? settings.interface.outputDetail,
 		getAutonomy: () => editorChrome.getAutonomy?.() ?? settings.safety.autonomy,

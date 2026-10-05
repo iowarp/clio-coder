@@ -1,4 +1,5 @@
-import { realpathSync } from "node:fs";
+import { readFileSync, realpathSync } from "node:fs";
+import path from "node:path";
 import { clioStateDir } from "../../core/xdg.js";
 import { type ExtensionCommandRow, extensionInvocation, resolveExtensionCommands } from "./operator-commands.js";
 import type { OperatorReloadResult, OperatorRuntimeEntry } from "./operator-runtime.js";
@@ -7,6 +8,7 @@ import type {
 	ExtensionObservationEventV2,
 	ExtensionObservationV2,
 	ExtensionOutputV2,
+	ExtensionSkin,
 	ExtensionUiAction,
 	InterviewAnswer,
 	InterviewNext,
@@ -16,6 +18,7 @@ import { ExtensionRuntimeProcessV2 } from "./runtime-process-v2.js";
 import { RUNTIME_LIMITS } from "./runtime-schema.js";
 import { RUNTIME_V2_LIMITS } from "./runtime-schema-v2.js";
 import { createExtensionKeyValueHost, extensionDataPaths } from "./runtime-state.js";
+import { validateSkin } from "./skin-schema.js";
 import { listInstalledExtensions } from "./state.js";
 import { type ActiveExtensionWorkspace, ExtensionSurfaceModel } from "./surface-model.js";
 import { type InstalledExtension, isLoadableExtension, type LoadableExtension } from "./types.js";
@@ -601,6 +604,26 @@ export class OperatorExtensionRuntimeV2 {
 	}
 	closePanel(extensionId: string): void {
 		this.surface.closePanel(extensionId);
+	}
+
+	/**
+	 * The validated skin of a workspace, read from the runtime's digest-checked
+	 * private copy rather than the installed root, so a file changed after
+	 * install never paints. Null when the workspace has none or it no longer
+	 * validates.
+	 */
+	skinFor(extensionId: string, workspaceId: string): ExtensionSkin | null {
+		const process = this.processes.get(extensionId);
+		const file = process?.declaration.workspaces.find((workspace) => workspace.id === workspaceId)?.skin;
+		if (!process || !this.current(process) || file === undefined) return null;
+		try {
+			const checked = validateSkin(JSON.parse(readFileSync(path.join(process.copyRoot, "package", file), "utf8")));
+			if (checked.ok) return checked.skin;
+			this.report(`extension ${extensionId}: skin ${file} refused: ${checked.path} ${checked.reason}`);
+		} catch (error) {
+			this.report(`extension ${extensionId}: skin ${file} unreadable: ${message(error)}`);
+		}
+		return null;
 	}
 
 	private apply(

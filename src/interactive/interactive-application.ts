@@ -77,6 +77,7 @@ import { renderContextOperationResult } from "./renderers/context-operation.js";
 import { settleChatBeforeSessionSwitch } from "./session-switch-settlement.js";
 import { createSessionTranscript } from "./session-transcript.js";
 import { processAutoPacingAllowed } from "./stream-pacing-policy.js";
+import { createWorkspaceSurfaces } from "./surfaces/registry.js";
 import type { BootInteractivity, TerminalLease } from "./terminal-lease.js";
 import type { createWatchPaneController } from "./watch-pane.js";
 import { WORKER_SETTLED_ENTRY } from "./worker-replay.js";
@@ -575,11 +576,21 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 				},
 			})
 		: undefined;
+	const workspaceSurfaces = operatorExtensions
+		? createWorkspaceSurfaces({
+				model: operatorExtensions.surface,
+				tui,
+				skinFor: (active) => operatorExtensions.skinFor(active.extensionId, active.workspaceId),
+				leaveHint: () => "/workspace off",
+				isOverlayOpen: () => (overlayLifecycle?.getState() ?? "closed") !== "closed",
+			})
+		: undefined;
 	const presentation = createInteractivePresentation({
 		bus: deps.bus,
 		getLifecycleHint: () => updateMonitor?.text() ?? null,
 		getLeaderArmed: () => leaderArmed,
 		extensionCommands: () => operatorExtensions?.commands() ?? [],
+		...(workspaceSurfaces ? { workspaceSurfaces } : {}),
 		getExtensionStatus: () =>
 			overlayLifecycle?.getState() === "permission-confirm"
 				? []
@@ -1104,6 +1115,7 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 		contextActivityStore,
 		getOverlayState: () => overlayLifecycle?.getState() ?? "closed",
 		isFooterExpanded: () => footer.isExpanded(),
+		...(workspaceSurfaces ? { isTaskIslandYielded: () => workspaceSurfaces.yieldsTaskIsland() } : {}),
 		...(deps.getTaskBoard ? { getTaskBoard: deps.getTaskBoard } : {}),
 	});
 	/**
@@ -1725,6 +1737,7 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 			clearTimeout(operatorTimer);
 			for (const unsubscribe of operatorSubscriptions) unsubscribe();
 			await operatorExtensions?.dispose();
+			workspaceSurfaces?.dispose();
 		},
 		{ timeoutMs: 6500 },
 	);

@@ -56,6 +56,10 @@ export interface FooterDashboardDeps {
 	getQuotaSnapshots?: () => ReadonlyArray<UsageSnapshot>;
 	getConnections?: () => { mcp: string[]; plugins: string[] };
 	getExtensionStatus?: () => ReadonlyArray<string>;
+	/** Owner-labelled, pre-styled extension status facts for the compact second line. */
+	getExtensionFacts?: (width: number) => ReadonlyArray<string>;
+	/** The active extension workspace's footer line, with how to leave it. */
+	getWorkspaceLine?: (width: number) => string | null;
 	getLifecycleHint?: () => string | null;
 	providers: ProvidersContract;
 	getSettings?: () => Readonly<ClioSettings>;
@@ -99,6 +103,8 @@ export interface FooterDashboardDeps {
 }
 
 export interface FooterDashboardRenderState {
+	/** Extension status facts that join the compact second line. */
+	extensionFacts?: ReadonlyArray<string>;
 	quota?: ReadonlyArray<UsageSnapshot>;
 	quotaRoute?: Pick<DispatchBoardRow, "runtimeId" | "wireModelId" | "node">;
 	demoHint?: string | null;
@@ -248,6 +254,7 @@ export function buildFooterDashboard(deps: FooterDashboardDeps): FooterDashboard
 
 		const wireModelId = settings?.chat?.model ?? current?.target.defaultModel ?? null;
 		return {
+			...(deps.getExtensionFacts ? { extensionFacts: deps.getExtensionFacts(width) } : {}),
 			resources: machine.snapshot(),
 			quota: deps.getQuotaSnapshots?.() ?? [],
 			...(current?.runtime && wireModelId
@@ -370,8 +377,10 @@ export function buildFooterDashboard(deps: FooterDashboardDeps): FooterDashboard
 			dashboardMode === "expanded" && contributed.length
 				? [fitDashboardLine(`Extensions: ${contributed.join(" | ")}`, width)]
 				: [];
+		const workspace = deps.getWorkspaceLine?.(width);
+		const workspaceLine = workspace ? [fitDashboardLine(workspace, width)] : [];
 		// Keep the highest-priority notice readable in full; the dismiss hint exposes the next.
-		const supplementary = [...extensionLine, ...lifecycleLine, ...notices];
+		const supplementary = [...workspaceLine, ...extensionLine, ...lifecycleLine, ...notices];
 		const grid =
 			dashboardMode === "expanded"
 				? dashboardPageViewport(

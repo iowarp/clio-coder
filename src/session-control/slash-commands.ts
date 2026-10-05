@@ -183,6 +183,7 @@ type SlashCommandVariant =
 	| { kind: "fleet" }
 	| { kind: "agents"; connect?: boolean }
 	| { kind: "usage" }
+	| { kind: "workspace"; action: "off" | "status" }
 	| { kind: "context-view" }
 	| { kind: "tasks" }
 	| { kind: "decisions" }
@@ -1462,6 +1463,36 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 			if (command.kind !== "resources" || command.family !== "extensions") return;
 			if (command.action === "reload") reloadExtensionsCommand(ctx);
 			else ctx.openExtensions?.();
+		},
+	},
+	{
+		name: "workspace",
+		acp: false,
+		description: "Show or leave the active extension workspace",
+		group: "Inspect",
+		kinds: ["workspace"],
+		args: { positionals: [{ name: "action", required: false, values: ["off"] }] },
+		fromArgs(parsed) {
+			if (parsed.error) return { kind: "usage-error", command: "workspace", reason: parsed.error };
+			const action = parsed.positionals[0];
+			if (action !== undefined && action !== "off")
+				return { kind: "usage-error", command: "workspace", reason: "workspace accepts only off" };
+			return { kind: "workspace", action: action === "off" ? "off" : "status" };
+		},
+		handle(command, ctx) {
+			if (command.kind !== "workspace") return;
+			const runtime = ctx.operatorExtensions;
+			const active = runtime?.surface.activeWorkspace ?? null;
+			if (command.action === "off") {
+				if (!runtime?.leaveWorkspace()) ctx.notice("info", "No extension workspace is active");
+			} else
+				ctx.notice(
+					"info",
+					active
+						? `Workspace ${active.title} from ${active.extensionId} is active; /workspace off leaves it`
+						: "No extension workspace is active",
+				);
+			ctx.render?.();
 		},
 	},
 	{
@@ -3098,6 +3129,7 @@ const COMMAND_ORDER = [
 	"skills",
 	"prompts",
 	"extensions",
+	"workspace",
 	"help",
 	"model",
 	"thinking",

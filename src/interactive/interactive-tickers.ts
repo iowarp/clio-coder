@@ -33,6 +33,8 @@ export interface InteractiveTickersDeps {
 	getOverlayState: () => string;
 	getQuotaSnapshots?: () => ReadonlyArray<UsageSnapshot>;
 	isFooterExpanded: () => boolean;
+	/** True while an extension workspace's islands hold the top-right corner. */
+	isTaskIslandYielded?: () => boolean;
 	/** Bound to TaskBoardStore.cachedSnapshot; repaint must never fold the session ledger. */
 	getTaskBoard?: TaskBoardStore["cachedSnapshot"];
 	scheduleInterval?: (callback: () => void, intervalMs: number) => InteractiveTickerHandle;
@@ -114,6 +116,7 @@ export function createInteractiveTickers(deps: InteractiveTickersDeps): Interact
 		const hidden =
 			deps.getOverlayState() !== "closed" ||
 			deps.isFooterExpanded() ||
+			deps.isTaskIslandYielded?.() === true ||
 			rows.length > 0 ||
 			(rows.length === 0 && !boardHasOpenTasks);
 		const visibilityChanged = taskIslandHidden !== hidden;
