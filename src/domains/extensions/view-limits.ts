@@ -9,6 +9,7 @@ export const VIEW_LIMITS = {
 	textChars: 2000,
 	markdownChars: 8000,
 	artLines: 12,
+	/** Code points per art line, not terminal cells. */
 	artColumns: 120,
 	kvItems: 32,
 	tableColumns: 8,
@@ -22,6 +23,7 @@ export const VIEW_LIMITS = {
 	sparkValues: 64,
 	actions: 6,
 	labelChars: 120,
+	spacerSize: 4,
 } as const;
 
 /** Row and column budgets per surface, in terminal cells. */

@@ -1,4 +1,5 @@
-import type { View, ViewBox, ViewTone, ViewTreeNode } from "../../domains/extensions/view.js";
+import type { View, ViewBox, ViewTableCell, ViewTone, ViewTreeNode } from "../../domains/extensions/view.js";
+import { VIEW_LIMITS } from "../../domains/extensions/view-limits.js";
 import { Markdown, truncateToWidth, visibleWidth, wrapTextWithAnsi } from "../../engine/tui.js";
 import { markdownTheme } from "../theme/components.js";
 import { GLYPH } from "../theme/glyphs.js";
@@ -20,6 +21,8 @@ const TONE_ROLES = {
 
 export interface ViewTarget {
 	row: number;
+	col: number;
+	width: number;
 	action: string;
 	key?: string;
 	hotkey?: string;
@@ -47,7 +50,12 @@ function sideBySide(parts: RenderedView[], widths: number[], gap: string): Rende
 	for (let row = 0; row < height; row++) {
 		output.lines.push(parts.map((part, index) => padAnsi(part.lines[row] ?? "", widths[index] ?? 0)).join(gap));
 	}
-	output.targets = parts.flatMap((part) => part.targets).sort((a, b) => a.row - b.row);
+	let offset = 0;
+	for (const [index, part] of parts.entries()) {
+		output.targets.push(...part.targets.map((target) => ({ ...target, col: target.col + offset })));
+		offset += (widths[index] ?? 0) + visibleWidth(gap);
+	}
+	output.targets.sort((a, b) => a.row - b.row || a.col - b.col);
 	return output;
 }
 
@@ -139,7 +147,7 @@ function drawBox(view: ViewBox, width: number, theme: ClioTheme): RenderedView {
 			...output.lines.map((line) => `${" ".repeat(pad)}${line}${" ".repeat(pad)}`),
 			...Array<string>(pad).fill(""),
 		];
-		output.targets = output.targets.map((target) => ({ ...target, row: target.row + pad }));
+		output.targets = output.targets.map((target) => ({ ...target, row: target.row + pad, col: target.col + pad }));
 	}
 	if (bordered) {
 		output.lines = frame(theme, inline(view.title ?? ""), output.lines, width, {
@@ -150,7 +158,7 @@ function drawBox(view: ViewBox, width: number, theme: ClioTheme): RenderedView {
 			const last = output.lines.length - 1;
 			output.lines[last] = output.lines[last]?.replace("└", "╰").replace("┘", "╯") ?? "";
 		}
-		output.targets = output.targets.map((target) => ({ ...target, row: target.row + 1 }));
+		output.targets = output.targets.map((target) => ({ ...target, row: target.row + 1, col: target.col + 2 }));
 	} else if (view.title !== undefined) {
 		output.lines.unshift(
 			rule(theme, width, {
@@ -163,6 +171,27 @@ function drawBox(view: ViewBox, width: number, theme: ClioTheme): RenderedView {
 	return output;
 }
 
+function fit(output: RenderedView, width: number): RenderedView {
+	return {
+		lines: output.lines.map((line) => truncateToWidth(line, width, GLYPH.ellipsis)),
+		targets: output.targets
+			.map((target) => ({ ...target, width: Math.max(0, Math.min(target.width, width - target.col)) }))
+			.filter((target) => target.width > 0),
+	};
+}
+
+function cellText(cell: ViewTableCell): string {
+	return typeof cell === "string" ? cell : "text" in cell ? cell.text : `${cell.value} / ${cell.max}`;
+}
+
+function meterText(cell: { value: number; max: number; tone?: ViewTone }, width: number, theme: ClioTheme): string {
+	const amount = `${cell.value} / ${cell.max}`;
+	const showAmount = visibleWidth(amount) + 2 <= width;
+	const barWidth = Math.max(0, width - (showAmount ? visibleWidth(amount) + 1 : 0));
+	const filled = Math.min(barWidth, Math.max(0, Math.round((cell.value / cell.max) * barWidth)));
+	return `${theme.fg(TONE_ROLES[cell.tone ?? "accent"], GLYPH.meterFull.repeat(filled))}${theme.fg("divider", GLYPH.meterEmpty.repeat(barWidth - filled))}${showAmount ? ` ${theme.fg("body", amount)}` : ""}`;
+}
+
 function draw(view: View, width: number, theme: ClioTheme): RenderedView {
 	const output = empty();
 	const paint = (text: string, tone: ViewTone = "neutral"): string => theme.fg(TONE_ROLES[tone], text);
@@ -172,11 +201,11 @@ function draw(view: View, width: number, theme: ClioTheme): RenderedView {
 			.split("\n")
 			.flatMap((line) => wrapTextWithAnsi(paint(line, tone), Math.max(1, columns)));
 	const target = (action: string | undefined, key: string, row = output.lines.length): void => {
-		if (action !== undefined) output.targets.push({ row, action, key });
+		if (action !== undefined) output.targets.push({ row, col: 0, width, action, key });
 	};
 	switch (view.t) {
 		case "box":
-			return drawBox(view, width, theme);
+			return fit(drawBox(view, width, theme), width);
 		case "text": {
 			output.lines = view.text
 				.replaceAll("\t", "   ")
@@ -219,14 +248,24 @@ function draw(view: View, width: number, theme: ClioTheme): RenderedView {
 		case "table": {
 			const separator = width >= view.columns.length * 4 - 3 ? ` ${theme.fg("divider", GLYPH.rail)} ` : "";
 			const weights = view.columns.map((column, index) =>
-				Math.max(1, visibleWidth(inline(column)), ...view.rows.map((row) => visibleWidth(inline(row[index] ?? "")))),
+				Math.max(
+					1,
+					visibleWidth(inline(column)),
+					...view.rows.map((row) => visibleWidth(inline(cellText(row[index] ?? "")))),
+				),
 			);
 			const widths = proportional(weights, Math.max(0, width - visibleWidth(separator) * Math.max(0, weights.length - 1)));
-			const row = (values: string[], header = false): string =>
+			const row = (values: ViewTableCell[], header = false): string =>
 				values
 					.map((value, index) =>
 						padAnsi(
-							header ? theme.style("groupHeading", inline(value), { bold: true }) : paint(inline(value)),
+							typeof value === "string"
+								? header
+									? theme.style("groupHeading", inline(value), { bold: true })
+									: paint(inline(value))
+								: "text" in value
+									? paint(inline(value.text), value.tone)
+									: meterText(value, widths[index] ?? 0, theme),
 							widths[index] ?? 0,
 							GLYPH.ellipsis,
 						),
@@ -277,7 +316,8 @@ function draw(view: View, width: number, theme: ClioTheme): RenderedView {
 				);
 				for (const [at, card] of column.cards.entries()) {
 					if (at > 0) part.lines.push("");
-					if (view.action !== undefined) part.targets.push({ row: part.lines.length, action: view.action, key: card.key });
+					if (view.action !== undefined)
+						part.targets.push({ row: part.lines.length, col: 0, width: columnWidth, action: view.action, key: card.key });
 					part.lines.push(...wrapTextWithAnsi(paint(inline(card.title), card.tone), Math.max(1, columnWidth)));
 					if (card.detail !== undefined)
 						part.lines.push(
@@ -296,7 +336,7 @@ function draw(view: View, width: number, theme: ClioTheme): RenderedView {
 				}
 				return part;
 			});
-			if (parallel) return sideBySide(parts, widths, ` ${theme.fg("divider", GLYPH.rail)} `);
+			if (parallel) return fit(sideBySide(parts, widths, ` ${theme.fg("divider", GLYPH.rail)} `), width);
 			for (const [index, part] of parts.entries()) {
 				if (index > 0) output.lines.push("");
 				append(output, part);
@@ -366,12 +406,14 @@ function draw(view: View, width: number, theme: ClioTheme): RenderedView {
 			output.lines.push(rule(theme, width));
 			break;
 		case "spacer":
-			output.lines = Array<string>(Math.min(4, cells(view.size ?? 1))).fill("");
+			output.lines = Array<string>(Math.min(VIEW_LIMITS.spacerSize, cells(view.size ?? 1))).fill("");
 			break;
 		case "actions":
 			for (const item of view.items) {
 				output.targets.push({
 					row: output.lines.length,
+					col: 0,
+					width,
 					action: item.id,
 					...(item.hotkey === undefined ? {} : { hotkey: item.hotkey }),
 				});
@@ -385,15 +427,14 @@ function draw(view: View, width: number, theme: ClioTheme): RenderedView {
 			output.lines = view.lines.map((line) => paint(line.replaceAll("\t", "   "), view.tone));
 			break;
 	}
-	return { ...output, lines: output.lines.map((line) => truncateToWidth(line, width, GLYPH.ellipsis)) };
+	return fit(output, width);
 }
 
 export function renderView(view: View, width: number, options: { maxRows?: number } = {}): RenderedView {
 	const safeWidth = cells(width);
 	if (safeWidth === 0) return empty();
 	const theme = clioTheme();
-	const output = draw(view, safeWidth, theme);
-	output.lines = output.lines.map((line) => truncateToWidth(line, safeWidth, GLYPH.ellipsis));
+	const output = fit(draw(view, safeWidth, theme), safeWidth);
 	if (options.maxRows !== undefined) {
 		const maxRows = cells(options.maxRows);
 		if (output.lines.length > maxRows) {

@@ -3,6 +3,9 @@
  * draws it, owns wrapping, focus and keys, and maps tones to theme roles. An
  * extension never supplies a color, a control sequence or a component.
  * Bounds are in `view-limits.ts`; a view outside them is dropped whole.
+ * The root is depth 1. Every view and every tree node counts toward `nodes`.
+ * Table rows have one cell per column; `keys`, when given, has one entry per row.
+ * Keys, action ids and island keys are non-empty; island keys are unique.
  */
 export type ViewTone = "neutral" | "muted" | "accent" | "brand" | "positive" | "warning" | "error" | "info";
 
@@ -43,11 +46,17 @@ export interface ViewKeyValue {
 	items: Array<{ label: string; value: string; tone?: ViewTone }>;
 }
 
+/** A cell is plain text, toned text, or a meter drawn to the column's width. */
+export type ViewTableCell =
+	| string
+	| { text: string; tone?: ViewTone }
+	| { value: number; max: number; tone?: ViewTone };
+
 /** `keys` names each row for a press; without it a row answers with its index. */
 export interface ViewTable {
 	t: "table";
 	columns: string[];
-	rows: string[][];
+	rows: ViewTableCell[][];
 	keys?: string[];
 	action?: string;
 }
