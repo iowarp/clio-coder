@@ -869,7 +869,7 @@ export const Composer = memo(function Composer({
 							? "This conversation is not open"
 							: running
 								? steering.steer || steering.queue
-									? "Steer Clio while she works"
+									? "Steer Clio while it works"
 									: "Draft your next message"
 								: "Describe a task or ask a question"
 					}
@@ -1125,7 +1125,7 @@ export const Composer = memo(function Composer({
 										type="button"
 										className="composer__menu-item"
 										disabled={interrupt.isPending}
-										title="Ask Clio Coder to put down what she is doing and take new direction. The turn stays open."
+										title="Ask Clio Coder to put down what it is doing and take new direction. The turn stays open."
 										onClick={() => {
 											closeOptions();
 											interrupt.mutate();

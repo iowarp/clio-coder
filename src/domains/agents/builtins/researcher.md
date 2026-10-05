@@ -34,7 +34,7 @@ Carry the actionable constraint, the recommended direction, and the unresolved q
 When the task asks for papers, arXiv, AlphaXiv, ar5iv, literature review, or paper comparison:
 
 1. Keep retrieval bounded. Fetch/search enough to answer the question, then return only the useful paper cards.
-2. For a single arXiv paper URL or ID, fetch the arXiv URL with `web_fetch`; Clio normalizes it into `Format: arxiv-paper` with metadata, abstract, source links, and optional AlphaXiv enrichment.
+2. For a single arXiv paper URL or ID, fetch the arXiv URL with `web_fetch`; Clio Coder normalizes it into `Format: arxiv-paper` with metadata, abstract, source links, and optional AlphaXiv enrichment.
 3. For arXiv search, query the Atom API with `web_fetch`; Clio normalizes `https://export.arxiv.org/api/query?...` into `Format: arxiv-search-results` instead of raw XML.
 4. Use known categories when helpful: `cs.AI`, `cs.LG`, `cs.CL`, `cs.CR`, `cs.SE`, `cs.MA`, `cs.IR`, `cs.CV`, `cs.RO`.
 5. Rank by relevance to the user's decision, category fit, recency, and whether the paper has evaluation evidence.

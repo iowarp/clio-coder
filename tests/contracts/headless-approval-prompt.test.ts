@@ -93,7 +93,11 @@ describe("interactive-only guidance in the session prompt", () => {
 					headless,
 				},
 			}).systemPrompt;
-		const headings = ["# Clio documentation routing", "# Clio settings routing", "# User control and understanding"];
+		const headings = [
+			"# Clio Coder documentation routing",
+			"# Clio Coder settings routing",
+			"# User control and understanding",
+		];
 		deepStrictEqual(
 			headings.map((heading) => prompt(false).includes(heading)),
 			[true, true, true],

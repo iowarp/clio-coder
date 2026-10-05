@@ -23,7 +23,7 @@ export type MusicResult =
 	| { status: "failed"; reason: string };
 
 /**
- * What is true right now, for Clio to read whether or not she may control the
+ * What is true right now, for Clio to read whether or not it may control the
  * player. `playback` is null while the pane is closed. A player that was
  * stopped from inside the pane counts as paused: both are silent with the pane
  * still open.

@@ -68,7 +68,7 @@ describe("gateway in the session prompt", () => {
 			});
 			const hasGateway = surface.providerSupportsTools && surface.toolNames.includes(ToolNames.Gateway);
 			const hasContext = surface.providerSupportsTools && surface.toolNames.includes(ToolNames.Context);
-			strictEqual(compiled.systemPrompt.includes("# Clio documentation routing"), hasGateway);
+			strictEqual(compiled.systemPrompt.includes("# Clio Coder documentation routing"), hasGateway);
 			strictEqual(
 				compiled.fragmentManifest.some((fragment) => fragment.id === "identity.docs-routing"),
 				hasGateway,
@@ -134,9 +134,9 @@ describe("gateway in the session prompt", () => {
 			const lines = compiled.systemPrompt.split("\n");
 			ok(
 				compiled.systemPrompt.includes(
-					'For questions about Clio\'s documented commands, configuration, or behavior, call gateway(op="call", capability="clio_docs", args={query: <the question>}) before answering and before any workspace search.',
+					'For questions about Clio Coder\'s documented commands, configuration, or behavior, call gateway(op="call", capability="clio_docs", args={query: <the question>}) before answering and before any workspace search.',
 				),
-				"The compiled prompt routes documented Clio behavior through gateway before answering or searching the workspace.",
+				"The compiled prompt routes documented Clio Coder behavior through gateway before answering or searching the workspace.",
 			);
 			match(compiled.systemPrompt, /hit's ready-to-use read call/);
 			match(compiled.systemPrompt, /offset, limit, and line_numbers select exactly the cited section/);

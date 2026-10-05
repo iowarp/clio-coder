@@ -92,7 +92,7 @@ A client opts into optional behavior under `initialize.params.clientCapabilities
 
 ### Authentication
 
-`authMethods` is empty unless the client advertises `clientCapabilities.auth.terminal: true`. Then it holds one method, `{id: "clio-login", name: "Clio Target Auth & Setup", type: "terminal", args: ["auth", "login"]}`. A client appends those args to the ACP launch command it already uses, including any `--cwd`, which opens `clio-coder acp auth login` in a terminal. Authentication happens in that separate process, so `authenticate` rejects every method id with `-32602`.
+`authMethods` is empty unless the client advertises `clientCapabilities.auth.terminal: true`. Then it holds one method, `{id: "clio-login", name: "Clio Coder Target Auth & Setup", type: "terminal", args: ["auth", "login"]}`. A client appends those args to the ACP launch command it already uses, including any `--cwd`, which opens `clio-coder acp auth login` in a terminal. Authentication happens in that separate process, so `authenticate` rejects every method id with `-32602`.
 
 `logout` ends the connection's authenticated state and returns `{}`. Afterwards `session/new`, `session/load`, `session/resume`, `session/prompt`, and the other mutating methods fail with `-32000` `authentication_required` until the client reconnects.
 

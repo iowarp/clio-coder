@@ -5,7 +5,7 @@ for this yet, by design.
 
 ## What 5b would do
 
-Wire the self-development boundary so that when Clio edits her OWN harness paths
+Wire the self-development boundary so that when Clio edits its OWN harness paths
 at a high `authorityLevel` (the `HIGH_AUTHORITY_LEVELS` set in `manifest.ts`:
 `tool-implementation`, `middleware`, `runtime`, `safety`, `schema`, `cli`), the
 edit requires a current, validated, evidence-linked change manifest. The
@@ -17,12 +17,12 @@ without evidence that justifies it.
 
 There is no safe enforcement point with all required inputs yet. Clio's edits to
 local source go through the ordinary edit/middleware path, which can see tools,
-paths, and action classes, but does not distinguish "Clio editing her own
+paths, and action classes, but does not distinguish "Clio editing its own
 harness in this repo" from "the user asked Clio to edit this repo's source". A
 naive gate keyed on path globs would block ordinary, user-requested edits, which
 the spec explicitly forbids
 (`v0.2.7-evidence-spine.md`, Slice 5: enforcement "must NOT block ordinary local
-source edits the user requests; it only applies to Clio editing her own harness
+source edits the user requests; it only applies to Clio editing its own harness
 paths"). The spec permits landing 5a in v0.2.7 and tracking 5b rather than
 forcing a fragile gate.
 
@@ -78,7 +78,7 @@ those say what would be touched, not who initiated the intent.
 ## Re-entry condition
 
 5b can land once there is a clean, unambiguous signal in middleware input that
-an edit is Clio modifying her own harness in this repository (as opposed to a
+an edit is Clio modifying its own harness in this repository (as opposed to a
 user-directed source edit). At that point the gate reads: for a high-authority
 self-edit with
 `metadata.selfEditOrigin === "agent-initiated"`, require a manifest whose

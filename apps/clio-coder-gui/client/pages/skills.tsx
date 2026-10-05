@@ -65,7 +65,7 @@ export function SkillsPage({ client }: { client: Client }) {
 			<div className="skills">
 				<div className="skills__inner">
 					<p className="skills__lede">
-						A skill is a set of instructions Clio follows when a task fits it. Clio picks one by name on her own, and you can
+						A skill is a set of instructions Clio follows when a task fits it. Clio picks one by name on its own, and you can
 						ask for one in a message.
 					</p>
 					{id === "" ? <p className="skills__note">Open a workspace to see the skills available in it.</p> : null}

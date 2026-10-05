@@ -9,7 +9,7 @@ An interactive start needs a TTY (the CLI sets `CLIO_CODER_INTERACTIVE=1` when s
 1. Probe the terminal background with an OSC 11 query followed by DA1, capped at 200 ms, so the theme picks a dark, light or neutral palette ([terminal-background.ts](../../src/core/terminal-background.ts)). `CLIO_CODER_THEME=dark|light|neutral` skips the probe. Color-disabled and non-TTY starts skip it too.
 2. Stage 0, the instant shell. The terminal lease mounts the real composer and a welcome built by `createBootWelcome` from the settings already read, before any domain loads. The welcome is cached per width. The first committed frame is the `Stage 0 shell commit` trace point.
 3. Stage 1, hydration. The orchestrator loads the domains and builds the full application. It adopts Stage 0's editor and keybinding manager instead of constructing new ones, and the first committed frame that contains the hydrated root is the `Stage 1 hydration` trace point. The hydrated welcome caches its render by width and a signature of the facts it prints.
-4. Input typed during Stage 0 is held in a visible pending list and drained once hydration completes (see [Typing before Clio has finished starting](../guide/commands-and-modes.md#typing-before-clio-has-finished-starting)).
+4. Input typed during Stage 0 is held in a visible pending list and drained once hydration completes (see [Typing before Clio has finished starting](../guide/commands-and-modes.md#typing-before-clio-coder-has-finished-starting)).
 
 `CLIO_CODER_INSTANT_SHELL=0` disables Stage 0 and waits for the fully hydrated first frame. Unset or any other value keeps it on.
 

@@ -3443,7 +3443,7 @@ export function createAcpHandshake(features: AcpHandshakeFeatures): AcpHandshake
 						? [
 								{
 									id: "clio-login",
-									name: "Clio Target Auth & Setup",
+									name: "Clio Coder Target Auth & Setup",
 									description: "Configure models, API keys, and target endpoints in terminal",
 									type: "terminal",
 									args: ["auth", "login"],

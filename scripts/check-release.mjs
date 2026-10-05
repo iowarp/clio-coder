@@ -62,7 +62,7 @@ const ENTRIES = ["dist/cli/index.js", "dist/worker/entry.js"];
 // node_modules or doubled dist, rather than policing documentation size or
 // enforcing an artificial package diet. Pack composition changed deliberately
 // in #66: about 19MB of vendored tree-sitter grammars (dist/assets/grammars/),
-// Clio's own source (src/**), and her code map (dist/assets/codemap.json)
+// Clio's own source (src/**), and its code map (dist/assets/codemap.json)
 // ride inside the tarball so the install needs neither grammar collection.
 // Raised for 0.3.6 by operator decision: the unpacked ceiling moves to 50MB to
 // carry this release's added source, and the tarball ceiling tightens to 10MB
@@ -78,7 +78,7 @@ const ENTRIES = ["dist/cli/index.js", "dist/worker/entry.js"];
 // node_modules or doubled dist still overshoots 60MB several times.
 // 0.6.0 raises the tarball ceiling to 14MB by operator decision: 0.6.0 packs
 // at 11.85MB. Shipped src/** is load-bearing because code_nav source=clio and
-// read-scope let Clio read her own code, and the grammars stay local for
+// read-scope let Clio read its own code, and the grammars stay local for
 // offline and HPC sites. The next lever is redirecting self-reading to the
 // tagged GitHub source so src/** can leave the tarball.
 // Final 0.6.0 qualification raises the ceilings to 16MB packed / 65MB unpacked

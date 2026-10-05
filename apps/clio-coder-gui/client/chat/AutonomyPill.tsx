@@ -22,7 +22,7 @@ const LEVELS: Readonly<
 	yolo: {
 		label: "Run without asking",
 		short: "Auto-run",
-		lands: "Nothing waits for approval in this task. Clio runs commands and edits on her own judgement.",
+		lands: "Nothing waits for approval in this task. Clio runs commands and edits on its own judgement.",
 		icon: "bolt",
 	},
 };

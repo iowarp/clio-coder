@@ -1,5 +1,5 @@
 /**
- * What the operator has learned about Clio herself, across every project.
+ * What the operator has learned about Clio itself, across every project.
  *
  * Guidance tips read it to stay relevant: a feature the operator already uses
  * needs no tip, a tip already shown twice is retired, and the topics the

@@ -166,8 +166,8 @@ describe("compact prompt contracts", () => {
 			providerSupportsTools: true,
 			toolNames: ALL_TOOL_NAMES.filter((name) => name !== ToolNames.Ledger),
 		});
-		match(compiled.systemPrompt, /You are Clio, the coding agent in IOWarp's CLIO ecosystem/u);
-		match(compiled.systemPrompt, /Her documentation and source ship with the package/u);
+		match(compiled.systemPrompt, /You are Clio Coder, the coding agent in IOWarp's CLIO ecosystem/u);
+		match(compiled.systemPrompt, /Documentation and source ship with the package/u);
 		match(compiled.systemPrompt, /Autonomy: default\./u);
 		match(compiled.systemPrompt, /Hard blocks\s+\(destructive git,/u);
 		match(compiled.systemPrompt, /Use receipts for synthesis/u);
@@ -222,7 +222,10 @@ describe("compact prompt contracts", () => {
 					? ["identity", "operating-contract", "steering", "tool-contract", "safety", "dispatch.read-only", "persona"]
 					: ["identity", "operating-contract", "steering", "tool-contract", "safety", "persona"],
 			);
-			match(compiled.systemPrompt, /You are Clio, IOWarp's coding agent, running as one bounded worker/u);
+			match(
+				compiled.systemPrompt,
+				/You are Clio Coder, the coding agent in IOWarp's CLIO ecosystem for HPC and scientific software, running as one bounded fleet worker/u,
+			);
 			match(compiled.systemPrompt, /The assigned task is authoritative/u);
 			strictEqual(occurrences(compiled.systemPrompt, WORKER_CLAIM_GUIDANCE), 1);
 			match(compiled.systemPrompt, /"mutatedPaths":\[\],"validations"/u);

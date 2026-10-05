@@ -484,7 +484,7 @@ const EXTRA_HELP: Record<string, [string, string]> = {
 	],
 	"integrations.music.agentControl": [
 		"Clio controls music",
-		"Give Clio a music tool to start, stop or skip the station herself. When it is off the tool is not registered and costs no prompt bytes.",
+		"Give Clio a music tool to start, stop or skip the station on its own. When it is off the tool is not registered and costs no prompt bytes.",
 	],
 	"interface.exitSummary": [
 		"Session summary on exit",

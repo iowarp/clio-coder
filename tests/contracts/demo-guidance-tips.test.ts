@@ -176,7 +176,7 @@ describe("demo guidance tips", () => {
 		const worn = fakeProfile();
 		worn.profile.lessons["side-question"] = { shown: LESSON_LIFETIME_SHOWS, lastShownAt: "t" };
 		strictEqual(tipOf(guidance({}, worn).turn("btw, what is this?")), undefined);
-		// Asking Clio through her docs counts as knowing the docs route.
+		// Asking Clio through its docs counts as knowing the docs route.
 		const asked = guidance();
 		asked.turn("how do I add a skill in clio?", {
 			tools: [{ toolName: "gateway", toolArgs: { op: "call", capability: "clio_docs" } }],

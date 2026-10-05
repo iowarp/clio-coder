@@ -171,7 +171,7 @@ export function TargetsPage({ client, view }: { client: Client; view: "targets" 
 										onClick={() => {
 											if (
 												window.confirm(
-													`Sign out of ${target.id}? Clio removes the credential she stored for this connection. The connection stays configured.`,
+													`Sign out of ${target.id}? Clio removes the credential it stored for this connection. The connection stays configured.`,
 												)
 											)
 												mutate.mutate({ workspaceId: id, targetId: target.id, action: "signout" });

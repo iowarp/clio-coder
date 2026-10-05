@@ -613,7 +613,7 @@ prompt. It will not run; no approval is pending.` (`User denied this call and
 stopped the turn. The turn is over.` after `Alt+X`), and a parked *worker*
 permission resolves as `deny`. The session itself keeps running.
 
-### Typing before Clio has finished starting
+### Typing before Clio Coder has finished starting
 
 Interactive startup mounts the editor before it loads its services, so the
 composer accepts input from the first frame. Type and press Enter during

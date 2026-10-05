@@ -3,7 +3,7 @@
  * spends when it runs a native turn.
  *
  * Unlike `claude-code`, this credential belongs to Clio: it is the OAuth
- * record her own auth storage persists under the `anthropic` provider id.
+ * record its own auth storage persists under the `anthropic` provider id.
  * The adapter reads the stored credential without triggering a refresh,
  * because a quota read must never mutate an authentication record.
  *

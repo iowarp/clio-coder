@@ -167,7 +167,7 @@ focused test while iterating and `pnpm run ci` for the deterministic repository
 gate. Maintainers use `pnpm run ci:release` to add the distribution and package
 audit.
 
-## Where Clio finds these docs when it is running in someone else's project
+## Where Clio Coder finds these docs when it is running in someone else's project
 
 Clio Coder's documentation ships with the software, not with your workspace. Everything below
 resolves from the installed package root, never from the directory you launched

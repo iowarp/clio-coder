@@ -25,7 +25,7 @@ Your models. Your machines. Work you can inspect.
 </p>
 
 Clio Coder connects your choice of model to a coding workspace: repository
-context, tools, verification, and delegated workers. Use her in the terminal,
+context, tools, verification, and delegated workers. Use it in the terminal,
 in the desktop app (alpha), in unattended scripts with `clio-coder run`, or
 inside an editor through ACP. Chat and workers can use different models on your
 workstation, an institutional gateway, or a cloud service.
@@ -192,7 +192,7 @@ writes the answer to stdout and diagnostics to stderr; `--json` streams JSONL.
 There is no operator to answer questions or permissions, so put decisions in
 the task prompt and expect permission asks to be denied. `--allow-tools` limits
 the main agent's capabilities, while `--delegate-tools` separately limits what
-her dispatched workers may hold.
+dispatched workers may hold.
 
 ```bash
 clio-coder run "Summarize this repository's entry points. Do not change files."
@@ -404,7 +404,7 @@ and [quality policies](docs/guide/quality-policy.md).
 ## Documentation
 
 Read the [public documentation](https://coder.iowarp.ai/docs.html), open the
-installed package’s `docs/` files in your editor, or ask Clio about her own
+installed package’s `docs/` files in your editor, or ask Clio about its own
 configuration and source through the offline `clio_docs` capability. The package
 includes authored guides, architecture documentation, prompt fragments, agent
 recipes, and runtime source.
@@ -431,7 +431,7 @@ CLI commands use `clio-coder …`; slash commands run inside an interactive sess
 Retrieve documentation through
 `gateway(op="call", capability="clio_docs", args={query: "your question"})`.
 Its citations resolve relative to the installed package root; see the
-[lookup contract](docs/README.md#where-clio-finds-these-docs-when-it-is-running-in-someone-elses-project).
+[lookup contract](docs/README.md#where-clio-coder-finds-these-docs-when-it-is-running-in-someone-elses-project).
 
 </details>
 

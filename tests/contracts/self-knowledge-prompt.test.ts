@@ -6,7 +6,7 @@ import { loadFragments } from "../../src/domains/prompts/fragment-loader.js";
 import { codeNavToolSurface } from "../../src/tools/codewiki/code-nav-surface.js";
 import { type IsolatedClioEnv, isolateClioEnv } from "../harness/scratch-env.js";
 
-// Clio answers questions about herself from live settings, bundled docs and a
+// Clio answers questions about itself from live settings, bundled docs and a
 // shipped code map. These pin that the prompt points at each one whenever the
 // tool that reaches it is on the surface, independent of unrelated switches
 // such as skill discovery, and never at a route that no longer exists.

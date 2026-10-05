@@ -37,7 +37,7 @@ export interface ReadScopeExemptRoot {
  * user skill roots of the agents Clio interoperates with, the offload scratch
  * a truncation stub names, dispatch receipts, and the installed package's own
  * documentation and source, which the system prompt names for questions about
- * Clio herself. They are operator-owned, shipped with the package, or
+ * Clio itself. They are operator-owned, shipped with the package, or
  * Clio-written, the model cannot author them, and zero-access entries still
  * apply inside them. Lexical on purpose: they are resolved again at every
  * admission, because an operator may replace a link after the session starts.

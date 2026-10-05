@@ -32,7 +32,7 @@ describe("turn-ending contract in the session prompt", () => {
 				...inputs,
 			},
 		}).systemPrompt;
-	const identityHalf = "She ends a turn in one of two states.";
+	const identityHalf = "It ends a turn in one of two states.";
 
 	it("teaches both states and the ask_user endings where an operator can answer", () => {
 		const prompt = systemPrompt({ operatorInterviews: true });

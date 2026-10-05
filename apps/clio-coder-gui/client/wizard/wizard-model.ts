@@ -39,7 +39,7 @@ export function stagesFor(_mode: WizardMode, needsWorkspace: boolean): readonly 
 
 /**
  * The film played behind a step, one per stage so the scene changes where the work does: Clio reads when
- * she starts, one dash is set while a provider is chosen, helpers go out and return while the connection
+ * it starts, one dash is set while a provider is chosen, helpers go out and return while the connection
  * is reached, one model is chosen, the sweep inspects what was verified, and the mark settles when saved.
  * Each is a bounded clip from the site's animation set.
  */

@@ -13,7 +13,7 @@ Operational reference for agents and operators. Sections summarize each tool's a
 | Track and record decisions | [`tasks`](#tasks-the-session-task-board), [`decide`](#decide-record-a-design-decision), [`artifact`](#artifact-plans-reviews-and-reports) |
 | Look things up | [`gateway`](#gateway-discover-and-call-secondary-capabilities), [`clio_docs`](#cliodocs-retrieve-bundled-documentation-through-the-gateway), [`clio_library`](#cliolibrary-inspect-the-recipe-catalog-through-the-gateway), [`context`](#context-workspace-skill-activation-and-recall), [`git`](#git-typed-inspection-staging-and-commits), [`data`](#data-inspect-structured-files-through-the-gateway) |
 | Reach outside the machine | [`web_read` and `web_fetch`](#webread-and-webfetch-read-web-pages-or-make-full-http-requests), [`credential_present`](#credentialpresent-check-environment-or-file-for-a-credential-key) |
-| Talk to the operator | [`ask_user`](#askuser-host-owned-operator-interviews), [`panes`](#panes-manage-clio-owned-terminal-panes) |
+| Talk to the operator | [`ask_user`](#askuser-host-owned-operator-interviews), [`panes`](#panes-manage-terminal-panes-owned-by-clio-coder) |
 | Configure and manage the session | [`configure_clio`](#configureclio-change-routing-and-fleet-settings-with-an-approved-preview), [`self_compact`](#selfcompact-save-a-handoff-note-and-compact-context), [`vision`](#vision-ask-the-configured-vision-model-about-an-image), [`consult`](#consult-ask-system-one-a-bounded-question), [`music`](#music-control-the-focus-radio-pane) |
 
 Cross-cutting behavior that applies to every tool is in
@@ -937,7 +937,7 @@ ledger(action="read", kinds=["finding", "review"], since=4)
 ledger(action="post", kind="review", target="e3", passed=true, evidence="confirmed against bootstrap registration")
 ```
 
-## panes: manage Clio-owned terminal panes
+## panes: manage terminal panes owned by Clio Coder
 
 Controls the pane layer shared with the `/panes` operator command. Sources:
 [panes-surface.ts](../../src/tools/panes-surface.ts), [panes.ts](../../src/tools/panes.ts). Read class; sequential. It

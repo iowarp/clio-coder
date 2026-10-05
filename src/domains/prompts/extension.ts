@@ -647,7 +647,7 @@ function clioRepoAwarenessFragments(cwd: string): RenderedPromptFragment[] {
 		"# Clio Source Tree",
 		"This workspace is Clio Coder's own source tree.",
 		`Source repository root: ${JSON.stringify(awareness.repoRoot)}.`,
-		"When running inside this repo, Clio can modify her own TUI, skills, agents, tools, prompts, context/bootstrap, and harness as ordinary local source work when the user asks.",
+		"When running inside this repo, Clio can modify its own TUI, skills, agents, tools, prompts, context/bootstrap, and harness as ordinary local source work when the user asks.",
 		"Shared contribution/publishing/push/PR/release requires explicit user intent and normal Git/GitHub etiquette. Do not imply autonomous publishing.",
 	].join("\n");
 	return [

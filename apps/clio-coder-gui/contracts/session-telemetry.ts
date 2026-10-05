@@ -90,7 +90,7 @@ export const ProjectTrust = Type.Object(
 
 export const ActiveEggs = Type.Array(Type.Literal("duck"), { maxItems: 1 });
 
-/** What Clio's always-on memory guardian is doing, as she last pushed it. */
+/** What Clio's always-on memory guardian is doing, as last pushed. */
 export const MemoryGuardian = Type.Object(
 	{
 		state: Type.Union([

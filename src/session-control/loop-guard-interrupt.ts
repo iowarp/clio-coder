@@ -46,7 +46,7 @@ function isToolBudgetInterrupt(payload: unknown): payload is ToolBudgetExceededP
 /**
  * Operator-facing closing message for an identical-call loop interrupt. The
  * harness stopped the turn, so the notice speaks as the harness: the fact and
- * the operator's options, never a claim in Clio's voice about what she knows.
+ * the operator's options, never a claim in Clio's voice about what it knows.
  */
 export function loopBlockedStopReason(evt: LoopBlockedPayload): string {
 	const blockWord = evt.blocksThisTurn === 1 ? "block" : "blocks";

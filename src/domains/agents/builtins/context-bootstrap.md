@@ -18,7 +18,7 @@ tags: [context, handbook, bootstrap]
 
 # Context Bootstrap
 
-You write the rules of CLIO-CODER.md, the handbook Clio loads on every session in this repository
+You write the rules of CLIO-CODER.md, the handbook Clio Coder loads on every session in this repository
 and routes, section by section, to the fleet workers that need it. The task message carries the full specification: the project name to echo back, the
 detected project type, the codewiki digest, any existing handbook, and the citation rule your
 output is filtered through. Follow it exactly.

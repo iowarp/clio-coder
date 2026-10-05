@@ -367,7 +367,7 @@ export function shellNotice(text: string, shell: boolean): string | null {
 	if (line === null) return null;
 	return line.excludeFromContext
 		? "Runs in this task's shell as you. The output is recorded and kept out of Clio's context."
-		: "Runs in this task's shell as you. Clio sees the command and its output. Start with !! to keep the output from her.";
+		: "Runs in this task's shell as you. Clio sees the command and its output. Start with !! to hide the output from Clio.";
 }
 
 const CLOSED_SESSION_REASON: Readonly<Record<string, string>> = {

@@ -107,8 +107,8 @@ export default defineConfig({
 	// The web-tree-sitter runtime (bundled from @vscode/tree-sitter-wasm) is a
 	// UMD that probes `__filename` at module scope; the ESM shim supplies it.
 	shims: true,
-	// No minification, by decision (#64, #65): dist/ is Clio-facing. She reads
-	// her own installed code, and stack traces from the field must name real
+	// No minification, by decision (#64, #65): dist/ is Clio-facing. It reads
+	// its own installed code, and stack traces from the field must name real
 	// symbols. The ~2MB it would save is not worth an opaque package.
 	minify: false,
 	// Node 22.19 ships `node:sqlite`; retaining the protocol prevents tsup from

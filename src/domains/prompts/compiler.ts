@@ -469,7 +469,7 @@ function renderCapabilityMap(
 
 /**
  * Capabilities a headless run leaves out of its map and usage notes. They serve
- * an attended operator: questions about Clio herself, credential checks,
+ * an attended operator: questions about Clio itself, credential checks,
  * terminal plan and report documents, the decision and task boards, and
  * evidence bundles. A headless run still reaches each through gateway find; it
  * just stops paying for their lines on every request.

@@ -123,7 +123,7 @@ function Onboarding({
 				</span>
 				<div>
 					<h2>Open a workspace</h2>
-					<p>A folder on this machine. Clio reads and edits files inside it, and asks before she changes anything.</p>
+					<p>A folder on this machine. Clio reads and edits files inside it, and asks before changing anything.</p>
 					{hasWorkspace ? null : (
 						<button type="button" className="primary" onClick={onOpenWorkspace}>
 							<Icon name="folderOpen" />

@@ -1,5 +1,5 @@
 /**
- * The ownership claim Clio writes beside the repository when she creates a task
+ * The ownership claim Clio writes beside the repository when it creates a task
  * worktree (`src/tools/task-worktree.ts`), and the one question the claim lets
  * a core leaf answer: which workspace did Clio create this worktree from.
  * Workspace trust uses it to let a worktree inherit its origin's approval.
@@ -19,7 +19,7 @@ export function taskWorktreeClaimParent(projectRoot: string): string {
 
 /**
  * The canonical root of the repository Clio created `workspace` from, or null
- * when `workspace` is not a task worktree she created. The worktree's own
+ * when `workspace` is not a task worktree it created. The worktree's own
  * `.git` file only locates the repository; the authority is the claim inside
  * that repository naming this exact path, which nothing in the worktree can
  * forge.

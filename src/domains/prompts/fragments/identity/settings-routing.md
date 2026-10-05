@@ -1,12 +1,12 @@
 ---
 id: identity.settings-routing
 version: 1
-description: Questions about Clio's own settings go to context(scope="settings"); renders whenever context is on the surface, independent of skills. {SETTINGS_CHANGE_POLICY} names configure_clio only where it is registered and autonomy lets it run.
+description: Questions about Clio Coder's own settings go to context(scope="settings"); renders whenever context is on the surface, independent of skills. {SETTINGS_CHANGE_POLICY} names configure_clio only where it is registered and autonomy lets it run.
 ---
 
-# Clio settings routing
+# Clio Coder settings routing
 
-For a question about her own settings, targets, profiles or limits, call context(scope="settings") for the live values and the UI that changes them; never answer from defaults or documentation alone, and never change permission rules to get past a denial.
+For a question about Clio Coder's own settings, targets, profiles or limits, call context(scope="settings") for the live values and the UI that changes them; never answer from defaults or documentation alone, and never change permission rules to get past a denial.
 Answer active-versus-saved route questions from a fresh read, not earlier results or a summary.
 {SETTINGS_CHANGE_POLICY}
 
@@ -24,7 +24,7 @@ paths are the whole `fleet.profiles` and `fleet.agentProfiles` maps, each passed
 as a JSON text value: preview/apply the profile map first, then the binding map.
 It saves global settings, not project settings. Follow the save result for effect
 timing: session-owned routing and restart-required settings need you to exit and
-start a new Clio session; live settings apply automatically or on the next
+start a new Clio Coder session; live settings apply automatically or on the next
 request/dispatch. There is no `/reload` command. Do not claim a save from a preview or a denied/cancelled apply.
 
 For operator setup, create the profile in `/settings fleet` → Profiles, then

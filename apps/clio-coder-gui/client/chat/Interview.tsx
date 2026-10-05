@@ -267,7 +267,7 @@ function InterviewDialog({ client, sessionId, round }: { client: Client; session
 									placeholder={
 										question.options?.length
 											? "A different answer, a constraint, or a detail Clio should know…"
-											: "Tell Clio what she needs to know…"
+											: "Tell Clio what it needs to know…"
 									}
 									onChange={(event) => edit({ ...answer, text: event.target.value })}
 								/>

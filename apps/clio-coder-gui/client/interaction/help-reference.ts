@@ -101,7 +101,7 @@ export const HELP_SECTIONS: readonly HelpSection[] = [
 		id: "working-freedom",
 		title: "Working freedom",
 		lede:
-			"Autonomy is the freedom Clio Coder has to act without asking. The bound session keeps the level Clio Coder says she is enforcing; the settings value reaches the next session.",
+			"Autonomy is the freedom Clio Coder has to act without asking. The bound session keeps the level Clio Coder says it is enforcing; the settings value reaches the next session.",
 		entries: [
 			{
 				term: "default",

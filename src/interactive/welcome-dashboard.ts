@@ -45,7 +45,7 @@ const SESSION_STARTED_AT = new Intl.DateTimeFormat("en-US", {
 }).format(new Date(performance.timeOrigin));
 
 export const WELCOME_TAGLINES = [
-	"Ask Clio how to use or extend her.",
+	"Ask Clio how to use or extend it.",
 	"The pursuit of excellence does not need justification. Your code does!",
 	"Understanding comes before change.",
 	"Created by researchers who love to code.",
