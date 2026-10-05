@@ -75,16 +75,27 @@ export function createExtensionKeyValueHost(
 	let state: Table = paths.stateFile === null ? {} : read(paths.stateFile);
 	const table = (scope: "state" | "store"): Table => (scope === "state" ? state : read(paths.storeFile));
 	const commit = (scope: "state" | "store", next: Table): void => {
-		const limit = scope === "state" ? RUNTIME_STATE_LIMITS.stateBytes : RUNTIME_STATE_LIMITS.storeBytes;
-		if (Object.keys(next).length > RUNTIME_STATE_LIMITS.keys)
-			throw new Error(`${scope} holds at most ${RUNTIME_STATE_LIMITS.keys} keys`);
-		if (Buffer.byteLength(JSON.stringify(next)) > limit) throw new Error(`${scope} exceeds ${limit} bytes`);
+		checkLimits(scope, next);
 		if (scope === "store") write(paths.storeFile, next);
 		else {
 			state = next;
 			if (paths.stateFile !== null) write(paths.stateFile, next);
 		}
 	};
+	return keyValueHost(table, commit);
+}
+
+function checkLimits(scope: "state" | "store", next: Table): void {
+	const limit = scope === "state" ? RUNTIME_STATE_LIMITS.stateBytes : RUNTIME_STATE_LIMITS.storeBytes;
+	if (Object.keys(next).length > RUNTIME_STATE_LIMITS.keys)
+		throw new Error(`${scope} holds at most ${RUNTIME_STATE_LIMITS.keys} keys`);
+	if (Buffer.byteLength(JSON.stringify(next)) > limit) throw new Error(`${scope} exceeds ${limit} bytes`);
+}
+
+function keyValueHost(
+	table: (scope: "state" | "store") => Table,
+	commit: (scope: "state" | "store", next: Table) => void,
+): ExtensionKeyValueHost {
 	return {
 		get(scope, key) {
 			return table(scope)[key] ?? { value: undefined, version: 0 };
@@ -106,4 +117,16 @@ export function createExtensionKeyValueHost(
 			return Object.keys(table(scope));
 		},
 	};
+}
+
+/** The author kit shares version and compare-and-set behavior with durable runtime state. */
+export function createMemoryExtensionKeyValueHost(): ExtensionKeyValueHost {
+	const tables: Record<"state" | "store", Table> = { state: {}, store: {} };
+	return keyValueHost(
+		(scope) => tables[scope],
+		(scope, next) => {
+			checkLimits(scope, next);
+			tables[scope] = next;
+		},
+	);
 }

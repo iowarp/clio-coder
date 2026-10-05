@@ -76,7 +76,12 @@ const directory = (root: string): string => (root.endsWith(path.sep) ? root : `$
  * restricted here at all.
  */
 export function runtimePermissionArgs(declaration: ExtensionRuntimeDeclarationV2, roots: RuntimeRoots): string[] {
-	const read = new Set([roots.bootstrap, directory(roots.packageCopy), directory(roots.storeDir)]);
+	const read = new Set([
+		roots.bootstrap,
+		path.join(path.dirname(roots.bootstrap), "runtime-registration.mjs"),
+		directory(roots.packageCopy),
+		directory(roots.storeDir),
+	]);
 	for (const entry of declaration.permissions.fs.read) {
 		if (entry === "workspace") read.add(directory(roots.workspace));
 		else if (entry === "home") read.add(directory(roots.home));

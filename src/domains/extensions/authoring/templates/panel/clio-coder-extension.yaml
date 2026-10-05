@@ -1,0 +1,10 @@
+id: __EXTENSION_ID__
+name: __EXTENSION_ID__
+version: 0.1.0
+description: A panel extension for Clio Coder.
+runtime:
+  api: 2
+  entrypoint: runtime/extension.ts
+  commands:
+    - { name: panel, description: Open the task panel. }
+  ui: [panel]

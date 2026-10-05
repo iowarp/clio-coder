@@ -20,6 +20,9 @@ const HELP = `clio-coder extensions <command>
 Manage Clio extension packages.
 
 Commands:
+  clio-coder extensions init <id> [--template status|hook|panel|tool|workspace] [--dir <path>]
+  clio-coder extensions validate <path> [--json]
+  clio-coder extensions test <path>
   clio-coder extensions view --watch <frame-file> [--dock-taps <tap-file>]
   clio-coder extensions list [--all] [--json] [--user|--project]
   clio-coder extensions discover <path> [--json]
@@ -137,6 +140,7 @@ export function runExtensionsCommand(argv: ReadonlyArray<string>): number | Prom
 	if (argv[0] === "view") {
 		return viewCommand(argv.slice(1));
 	}
+	if (argv[0] === "init" || argv[0] === "validate" || argv[0] === "test") return authoringCommand(argv);
 	let parsed: Parsed;
 	try {
 		parsed = parse(argv);
@@ -305,4 +309,9 @@ async function runOperatorCommand(parsed: Parsed): Promise<number> {
 async function viewCommand(argv: ReadonlyArray<string>): Promise<number> {
 	const { runExtensionsView } = await import("./extensions-view.js");
 	return runExtensionsView(argv);
+}
+
+async function authoringCommand(argv: ReadonlyArray<string>): Promise<number> {
+	const { runExtensionsAuthoring } = await import("./extensions-authoring.js");
+	return runExtensionsAuthoring(argv);
 }
