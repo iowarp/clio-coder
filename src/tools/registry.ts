@@ -366,6 +366,14 @@ export interface ToolInvokeOptions {
 	origin?: "harness";
 	/** With `origin: "harness"`, the card whose rounds this is. */
 	harnessHold?: HarnessHold;
+	/** Display and drafts for harness interviews only; never taken from model arguments. */
+	harnessInterview?: {
+		title: string;
+		step: number;
+		total?: number;
+		intro?: (width: number) => string[];
+		initial?: ReadonlyArray<{ selected?: readonly number[]; text?: string }>;
+	};
 	/** Host-owned task scope, preserved on nested gateway calls. */
 	turnConstraints?: TurnConstraints;
 	/** Registry-owned filter bound to the active compiled safety policy. */

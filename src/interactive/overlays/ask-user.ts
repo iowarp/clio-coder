@@ -18,6 +18,7 @@ import {
 } from "../../engine/tui.js";
 import type { AskUserAnswer, AskUserQuestion, AskUserResult } from "../../tools/ask-user.js";
 import { cancelledAskUserResult, unavailableAskUserResult } from "../../tools/ask-user.js";
+import type { ToolInvokeOptions } from "../../tools/registry.js";
 import { dockGrowthRows } from "../dock.js";
 import { scrollTranscriptPage } from "../layout.js";
 import {
@@ -60,6 +61,7 @@ export interface AskUserRoundOptions {
 	 * composer, and a stray Enter must not answer it.
 	 */
 	inputGuardMs?: number;
+	harnessInterview?: ToolInvokeOptions["harnessInterview"];
 }
 
 export interface AskUserOverlaySession extends OverlayHandle {
@@ -109,18 +111,21 @@ function initialMode(question: AskUserQuestion): Mode {
 	return questionHasOptions(question) ? "select" : "text";
 }
 
-function createQuestionState(question: AskUserQuestion): QuestionState {
+function createQuestionState(
+	question: AskUserQuestion,
+	initial?: { selected?: readonly number[]; text?: string },
+): QuestionState {
 	const preferred = question.defaultOption;
 	const focusable = preferred !== undefined && question.options?.[preferred] !== undefined;
 	return {
 		mode: initialMode(question),
-		selected: new Set<number>(),
-		committedSelected: new Set<number>(),
+		selected: new Set(initial?.selected),
+		committedSelected: new Set(initial?.selected),
 		customAnswer: "",
-		inputValue: "",
+		inputValue: initial?.text ?? "",
 		answer: "",
 		rawValue: "",
-		// Focus only. The option is not selected until the operator presses Enter on it.
+		// defaultOption sets focus; harness drafts still need the operator's submission.
 		...(focusable ? { focusedValue: `option:${preferred}` } : {}),
 	};
 }
@@ -442,6 +447,7 @@ class AskUserOverlayView implements Component {
 	private presentation: DecisionPresentation = DEFAULT_ASK_USER_PRESENTATION;
 	/** performance.now() before which input other than Esc is dropped. */
 	private inputGuardUntil = 0;
+	private harnessInterview: ToolInvokeOptions["harnessInterview"];
 
 	constructor(private readonly deps: AskUserOverlayViewDeps) {}
 
@@ -459,7 +465,10 @@ class AskUserOverlayView implements Component {
 		this.status = "";
 		this.questions = [...questions];
 		this.presentation = presentation;
-		this.states = this.questions.map((question) => createQuestionState(question));
+		this.harnessInterview = round?.harnessInterview;
+		this.states = this.questions.map((question, index) =>
+			createQuestionState(question, this.harnessInterview?.initial?.[index]),
+		);
 		this.list = null;
 		this.text = null;
 		this.detailsExpanded = false;
@@ -491,6 +500,10 @@ class AskUserOverlayView implements Component {
 
 	decisionTitle(): string {
 		return this.presentation.title;
+	}
+
+	interviewTitle(): string | undefined {
+		return this.harnessInterview?.title;
 	}
 
 	decisionTone(): ClioToken {
@@ -632,7 +645,9 @@ class AskUserOverlayView implements Component {
 			fitRow(
 				theme.style(
 					"positionCount",
-					`Question ${this.index + 1} of ${this.questions.length} · Round ${this.roundsAnswered + 1}`,
+					this.harnessInterview
+						? `Step ${this.harnessInterview.step}${this.harnessInterview.total === undefined ? "" : ` of ${this.harnessInterview.total}`} · Question ${this.index + 1} of ${this.questions.length}`
+						: `Question ${this.index + 1} of ${this.questions.length} · Round ${this.roundsAnswered + 1}`,
 					{
 						bold: true,
 					},
@@ -645,7 +660,10 @@ class AskUserOverlayView implements Component {
 		const header = this.renderQuestionHeader(question, safeWidth);
 		const details = this.renderDecisionContext(safeWidth);
 		const status = this.status.length > 0 ? wrapTextWithAnsi(clioTheme().fg("annotation", this.status), safeWidth) : [];
-		const body = formatAskUserQuestion(question.question, safeWidth).map((line) => theme.fg("decisionQuestion", line));
+		const body = [
+			...(this.harnessInterview?.intro?.(safeWidth) ?? []),
+			...formatAskUserQuestion(question.question, safeWidth).map((line) => theme.fg("decisionQuestion", line)),
+		];
 		const fixedTop = [...strip, ...header, ...details];
 		// The control is sized after the question has claimed its minimum, so a
 		// long option list cannot push a short question off the box.
@@ -1360,7 +1378,9 @@ export function openAskUserOverlay(tui: TUI, deps: OpenAskUserOverlayDeps): AskU
 		markerId: "ask-user",
 		// Option-heavy interviews grow toward half the terminal; a short question stays compact.
 		adaptiveHeight: true,
-		title: () => (view.isDecisionPending() ? `Clio-Coder interview · ${view.decisionTitle()}` : "Clio-Coder interview"),
+		title: () =>
+			view.interviewTitle() ??
+			(view.isDecisionPending() ? `Clio-Coder interview · ${view.decisionTitle()}` : "Clio-Coder interview"),
 		tone: () => (view.isDecisionPending() ? view.decisionTone() : undefined),
 		awaitingInput: () => view.isDecisionPending(),
 		footerHint: () => `${view.footerHint()} · drag to select/copy`,
