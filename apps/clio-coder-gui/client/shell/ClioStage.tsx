@@ -13,9 +13,9 @@ const GLINT = 1300;
 const FINALE_HOLD = 4200;
 
 /**
- * The first-run stage: setup progress assembles the Clio mark. Pending rings are faint code dashes
- * that drift in place; each finished step sweeps its ring into the mark on the brand ease, inner rings
- * first. Finishing the last step plays the finale from the site's closing film: the outer ring lands,
+ * The first-run stage: setup progress assembles the Clio mark. Pending rings are still, faint code
+ * dashes; each finished step sweeps its ring into the mark on the brand ease, inner rings first.
+ * Finishing the last step plays the finale from the site's closing film: the outer ring lands,
  * a glint travels the ring, and the copper core beats once. The same element is the plain mark on an
  * ordinary new task, so finishing setup flows into the composer without a cut.
  *
@@ -35,31 +35,12 @@ export function ClioStage({ done, total }: { done: number | null; total: number 
 	const core = useRef<SVGSVGElement>(null);
 	const glint = useRef<SVGCircleElement>(null);
 	const rings = useRef<(SVGSVGElement | null)[]>([]);
-	const ghosts = useRef<(SVGSVGElement | null)[]>([]);
 	const mask = `clio-stage-${useId().replace(/[^\w-]/g, "")}`;
 
 	const [finale, setFinale] = useState(false);
 	const sawIncomplete = useRef(false);
 	const lastAssembled = useRef<number | null>(null);
 	const lastWidth = useRef(0);
-
-	// Pending rings drift slowly in opposite directions, like the gathering dashes in the films.
-	useEffect(() => {
-		if (still) return;
-		const drifts = ghosts.current.flatMap((ghost, index) =>
-			ghost
-				? [
-						ghost.animate([{ transform: "rotate(0deg)" }, { transform: `rotate(${index % 2 ? -360 : 360}deg)` }], {
-							duration: 48_000 + index * 12_000,
-							iterations: Number.POSITIVE_INFINITY,
-						}),
-					]
-				: [],
-		);
-		return () => {
-			for (const drift of drifts) drift.cancel();
-		};
-	}, [still]);
 
 	// A ring that joins the mark while the operator watches sweeps in from a turn away.
 	useLayoutEffect(() => {
@@ -136,9 +117,6 @@ export function ClioStage({ done, total }: { done: number | null; total: number 
 				{TEAL.map((ring, index) => (
 					<svg
 						key={`ghost-${ring.r}`}
-						ref={(node) => {
-							ghosts.current[index] = node;
-						}}
 						className="clio-stage__layer clio-stage__ghost"
 						data-lit={lit(index) || undefined}
 						viewBox={`0 0 ${LG.box} ${LG.box}`}

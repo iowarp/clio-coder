@@ -72,8 +72,9 @@ export function useApplyTheme(): void {
 	useLayoutEffect(() => {
 		if (chosen === "system") delete document.documentElement.dataset.theme;
 		else document.documentElement.dataset.theme = chosen;
-		// The browser chrome must match the page ground exactly.
-		document.querySelector('meta[name="theme-color"]')?.setAttribute("content", THEME_COLORS[resolved]);
+		document.documentElement.style.colorScheme = resolved;
+		const paper = getComputedStyle(document.documentElement).getPropertyValue("--paper").trim();
+		document.querySelector('meta[name="theme-color"]')?.setAttribute("content", paper || THEME_COLORS[resolved]);
 	}, [chosen, resolved]);
 }
 

@@ -14,7 +14,7 @@
 }
 .chat-transcript__content {
 	display: grid;
-	gap: var(--space-10);
+	gap: var(--space-8);
 	padding-block: var(--space-8) var(--space-10);
 }
 
@@ -145,7 +145,7 @@
 	padding: var(--space-3) var(--space-4);
 	border-radius: var(--radius-md);
 	background: var(--well);
-	box-shadow: inset 2px 0 0 var(--accent);
+	border: 1px solid var(--line);
 	color: var(--ink-strong);
 	white-space: pre-wrap;
 	overflow-wrap: anywhere;
@@ -195,7 +195,7 @@
 	font-family: var(--font-ui);
 	font-weight: 650;
 	letter-spacing: -0.01em;
-	color: var(--accent-strong);
+	color: var(--ink-strong);
 	margin: 1.4em 0 0.4em;
 }
 .chat-response .markdown > .md-heading:first-child {

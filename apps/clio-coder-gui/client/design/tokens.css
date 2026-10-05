@@ -20,6 +20,8 @@
 	--accent-soft: #e4f1f1;
 	--selection: #dceeed;
 	--scrim: rgb(26 22 18 / 52%);
+	--scrim-pane: color-mix(in srgb, var(--paper) 28%, transparent);
+	--pane-surface: var(--paper);
 	/* The pale highlight that passes over a ring, as in the site's closing film. */
 	--glint: var(--surface);
 	/* A sunken fill for wells, chips and inputs. The brand's paper-sunk is its line colour in light,
@@ -87,18 +89,20 @@
 	--space-16: 64px;
 
 	/* ---- type scale ----------------------------------------------------- */
-	--text-instrument: 14px;
-	--text-exact: 16px;
-	--text-meta: 18px;
-	--text-body: 20px;
-	--text-reading: 24px;
-	--text-h3: 26px;
-	--text-h2: 32px;
-	--text-h1: 40px;
-	--text-display: clamp(32px, 3.4vw, 52px);
+	--text-instrument: 13px;
+	--text-exact: 15px;
+	--text-meta: 16px;
+	--text-body: 18px;
+	--text-reading: 22px;
+	--text-h3: 23px;
+	--text-h2: 29px;
+	--text-h1: 36px;
+	--text-display: clamp(29px, 3.1vw, 47px);
+	--text-hero: clamp(38px, 3.8vw, 61px);
+	--text-welcome: clamp(26px, 2.9vw, 36px);
 	--leading-tight: 1.25;
 	--leading-body: 1.55;
-	--leading-reading: 1.7;
+	--leading-reading: 1.65;
 	--tracking-instrument: 0.12em;
 
 	/* ---- radii: two steps. Circles are 50%, written where the element is a dot or a round icon button. */
@@ -131,7 +135,7 @@
 	--rail-collapsed-width: 68px;
 	--reading-measure: 72ch;
 	/* About 90 characters of reading text: long enough for tables and code, short enough to read. */
-	--conversation-max: 1120px;
+	--conversation-max: 1000px;
 
 	/* ---- code surface: a contained well that follows the theme. Light is a sunken warm paper, the
 	   page's own --well edged by --line, with ink and hues drawn from the brand families. The dark
@@ -344,12 +348,12 @@
 	:root {
 		--text-instrument: 13px;
 		--text-exact: 14px;
-		--text-meta: 16px;
-		--text-body: 18px;
-		--text-reading: 20px;
-		--text-h3: 24px;
-		--text-h2: 28px;
-		--text-h1: 34px;
+		--text-meta: 15px;
+		--text-body: 16px;
+		--text-reading: 18px;
+		--text-h3: 22px;
+		--text-h2: 25px;
+		--text-h1: 31px;
 	}
 }
 

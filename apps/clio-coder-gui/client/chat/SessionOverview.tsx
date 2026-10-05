@@ -62,6 +62,8 @@ function Section({
 	icon,
 	aside,
 	open,
+	summary,
+	expanded = false,
 	children,
 }: {
 	id: string;
@@ -69,8 +71,34 @@ function Section({
 	icon: IconName;
 	aside?: ReactNode;
 	open?: () => void;
+	summary?: string;
+	expanded?: boolean;
 	children: ReactNode;
 }) {
+	if (summary !== undefined)
+		return (
+			<details className="pane-card pane-card--disclosure" open={expanded}>
+				<summary>
+					<span className="pane-card__symbol">
+						<Icon name={icon} />
+					</span>
+					<span id={id} className="pane-card__label">
+						{title}
+					</span>
+					<span className="pane-card__summary">{summary}</span>
+					<Icon name="chevronRight" />
+				</summary>
+				<div className="pane-card__body">
+					{children}
+					{open ? (
+						<button type="button" className="pane-card__details" onClick={open}>
+							Open {title.toLowerCase()}
+							<Icon name="chevronRight" />
+						</button>
+					) : null}
+				</div>
+			</details>
+		);
 	return (
 		<section className="pane-card" aria-labelledby={id}>
 			<header>
@@ -205,6 +233,24 @@ export function SessionOverview({
 		overview.running || !usage.data || usage.isPlaceholderData ? session.telemetry?.usage : undefined,
 	);
 	const used = spendLine(spend);
+	const healthSection =
+		health.rows.length > 0 ? (
+			<Section
+				id="pane-health"
+				title="Health"
+				icon="shield"
+				summary={
+					health.attention ? "Needs attention" : `${health.rows.length} ${health.rows.length === 1 ? "report" : "reports"}`
+				}
+				expanded={health.attention}
+			>
+				{health.rows.map((row) => (
+					<p key={row.id} className="pane-card__facts">
+						<StatusMark tone={row.tone} label={row.label} {...(row.detail ? { detail: row.detail } : {})} />
+					</p>
+				))}
+			</Section>
+		) : null;
 	return (
 		<div className="pane-cards">
 			<section className="pane-card pane-card--lead" aria-labelledby="pane-goal">
@@ -232,7 +278,26 @@ export function SessionOverview({
 					</p>
 				) : null}
 			</section>
-			<Section id="pane-activity" title="App activity" icon="running">
+			{session.telemetry?.trust?.ignored.length ? (
+				<Section id="pane-trust" title="Project trust" icon="shield">
+					<ProjectTrustNotice trust={session.telemetry.trust} />
+				</Section>
+			) : null}
+			{health.attention ? healthSection : null}
+
+			<Section
+				id="pane-activity"
+				title="App activity"
+				icon="running"
+				summary={
+					sessions.data
+						? `${workingCount} working · ${queuedCount} queued${approvalCount > 0 ? ` · ${approvalCount} need approval` : ""}`
+						: sessions.error
+							? "Unavailable"
+							: "Loading…"
+				}
+				expanded={activity.length > 0 || !!sessions.error}
+			>
 				{sessions.data ? (
 					<>
 						<p className="pane-card__facts">
@@ -358,20 +423,7 @@ export function SessionOverview({
 				</Section>
 			) : null}
 
-			{session.telemetry?.trust?.ignored.length ? (
-				<Section id="pane-trust" title="Project trust" icon="shield">
-					<ProjectTrustNotice trust={session.telemetry.trust} />
-				</Section>
-			) : null}
-			{health.rows.length > 0 ? (
-				<Section id="pane-health" title="Health" icon="shield">
-					{health.rows.map((row) => (
-						<p key={row.id} className="pane-card__facts">
-							<StatusMark tone={row.tone} label={row.label} {...(row.detail ? { detail: row.detail } : {})} />
-						</p>
-					))}
-				</Section>
-			) : null}
+			{!health.attention ? healthSection : null}
 			{facts.other.length > 0 ? (
 				<Section id="pane-notes" title="Session notes" icon="sessions">
 					{facts.other.map((text) => (
@@ -386,6 +438,7 @@ export function SessionOverview({
 				id="pane-usage"
 				title="Usage"
 				icon="usage"
+				summary={used || "No usage reported"}
 				{...(capabilities.data?.usage ? { open: () => onOpen("usage") } : {})}
 			>
 				{used ? (
@@ -400,7 +453,7 @@ export function SessionOverview({
 						</div>
 					</dl>
 				) : (
-					<p className="pane-empty">Nothing used yet.</p>
+					<p className="pane-empty">No usage reported yet.</p>
 				)}
 			</Section>
 
@@ -408,6 +461,7 @@ export function SessionOverview({
 				id="pane-plan"
 				title="Plan"
 				icon="listChecks"
+				{...(!plan?.rows.length && !openTasks && !decisions ? { summary: "No published plan" } : {})}
 				{...(capabilities.data?.board ? { open: () => onOpen("board") } : {})}
 				aside={
 					plan && plan.rows.length > 0 ? (
@@ -450,7 +504,7 @@ export function SessionOverview({
 
 			{session.telemetry?.plan?.truncated ? <p className="pane-hint">The plan shows its first 100 steps.</p> : null}
 			{capabilities.data?.artifacts ? (
-				<Section id="pane-artifacts" title="Artifacts" icon="artifacts" open={() => onOpen("artifacts")}>
+				<Section id="pane-artifacts" title="Artifacts" icon="artifacts" summary="Browse" open={() => onOpen("artifacts")}>
 					<p className="pane-empty">Receipts, outputs and session records.</p>
 				</Section>
 			) : null}
@@ -458,6 +512,7 @@ export function SessionOverview({
 				id="pane-changes"
 				title="Changes"
 				icon="fileDiff"
+				{...(changes.files.length === 0 ? { summary: "No files changed" } : {})}
 				{...(changes.files.length > 0 ? { open: () => onOpen("changes") } : {})}
 				aside={
 					changes.applied > 0 ? (
@@ -485,6 +540,7 @@ export function SessionOverview({
 					id="pane-branches"
 					title="Branches"
 					icon="branch"
+					{...(branches.branchPoints === 0 && !branches.forkedFrom ? { summary: "Current branch" } : {})}
 					open={() => onOpen("branches")}
 					aside={
 						branches.branchPoints > 0 ? (
@@ -507,6 +563,7 @@ export function SessionOverview({
 					id="pane-agents"
 					title="Agents"
 					icon="fleet"
+					{...(runs.length === 0 ? { summary: "None dispatched" } : {})}
 					open={() => onOpen("agents")}
 					aside={
 						runs.length > 0 ? (

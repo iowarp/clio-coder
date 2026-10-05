@@ -9,8 +9,8 @@
 	"launch_handler": {
 		"client_mode": "focus-existing"
 	},
-	"background_color": "#000000",
-	"theme_color": "#000000",
+	"background_color": "#0b0a09",
+	"theme_color": "#0b0a09",
 	"icons": [
 		{
 			"src": "/icon-192.png?v=bcd22f337b89",

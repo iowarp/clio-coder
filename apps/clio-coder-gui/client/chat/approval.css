@@ -27,7 +27,7 @@
 	border-left: 3px solid var(--action-line);
 	border-radius: var(--radius-md);
 	background: var(--overlay);
-	box-shadow: var(--shadow-panel);
+	box-shadow: var(--shadow-raised);
 	animation: approval-arrive var(--motion-entry) var(--ease-standard) both;
 }
 .approval-strip {
@@ -128,7 +128,7 @@
 /* A boundary carries a copper rule and a copper label, as boundaries do in the site's guides. */
 .approval-card__eyebrow {
 	margin: 0;
-	font: 500 12px / 1.5 var(--font-ui);
+	font: 500 var(--text-instrument) / 1.5 var(--font-ui);
 	color: var(--action-fg);
 }
 .approval-card__title {

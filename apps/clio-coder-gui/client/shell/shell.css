@@ -262,7 +262,7 @@
 	font-size: var(--text-exact);
 	font-weight: 500;
 	letter-spacing: 0.01em;
-	color: var(--accent);
+	color: var(--ink-muted);
 }
 .wb-side__label {
 	padding: var(--space-4) 10px var(--space-1);
@@ -972,6 +972,7 @@ button.wb-chip:hover:not(:disabled) {
 	display: grid;
 	gap: 1px;
 	min-width: 12.5rem;
+	max-width: min(28rem, calc(100vw - var(--space-4)));
 	padding: 5px;
 	border: 1px solid var(--line-float);
 	border-radius: var(--radius-md);
@@ -1012,14 +1013,15 @@ button.wb-chip:hover:not(:disabled) {
 	gap: 10px;
 	width: 100%;
 	min-height: 40px;
-	padding: 0 10px;
+	padding: var(--space-2) 10px;
 	border: 0;
 	border-radius: var(--radius-sm);
 	background: transparent;
 	color: var(--ink);
 	text-align: left;
 	font-size: var(--text-meta);
-	white-space: nowrap;
+	white-space: normal;
+	overflow-wrap: anywhere;
 }
 .wb-menu__item:hover:not(:disabled) {
 	background: var(--wb-hover);

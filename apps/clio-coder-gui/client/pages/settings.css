@@ -2,7 +2,8 @@
 .settings-filter {
 	display: block;
 	max-width: 45rem;
-	margin-block: 1.5rem;
+	margin-block: var(--space-6);
+	font-size: var(--text-meta);
 }
 .workspace-picker select,
 .settings-filter input {
@@ -66,9 +67,11 @@
 .settings-list > div {
 	display: grid;
 	grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr) 6rem;
-	gap: 1rem;
+	gap: var(--space-4);
 	border-top: 1px solid var(--line);
-	padding-block: 1rem;
+	padding-block: var(--space-4);
+	font-size: var(--text-meta);
+	line-height: var(--leading-body);
 }
 .settings-list dt,
 .settings-list dd,
@@ -85,7 +88,7 @@
 	padding: 0;
 }
 .setting-source {
-	font-size: 0.85rem;
+	font-size: var(--text-instrument);
 }
 .settings-list small {
 	display: block;

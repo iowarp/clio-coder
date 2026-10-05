@@ -15,15 +15,7 @@ import { chordHint } from "./chords.js";
 import { InlineRename } from "./InlineRename.js";
 import { Menu, MenuItem } from "./Menu.js";
 import { SettingsSidebar } from "./SettingsSidebar.js";
-import {
-	isSettingsPath,
-	STATE_LABELS,
-	sessionIdFromPath,
-	shortAge,
-	type TaskRow,
-	taskRows,
-	taskState,
-} from "./shell-model.js";
+import { isSettingsPath, STATE_LABELS, sessionIdFromPath, shortAge, type TaskRow, taskRows } from "./shell-model.js";
 import { type TaskActions, useDeleteTask, useMinuteClock, useRenameTask } from "./tasks.js";
 import { setThemeChoice, themeSwitchLabel, useTheme } from "./theme.js";
 
@@ -83,11 +75,6 @@ export function TaskSidebar({
 	const status = systemStatus(connection, system.data?.findings, system.isError);
 	const platformName = platformLabel(platform);
 	const systemDetail = `Clio runtime · ${platform ?? "Local"}\n${status.detail}${system.data ? `\nLast checked ${formatTime(system.data.checkedAt)}` : ""}`;
-	// The brand mark works while any task does, so Clio's state reads from anywhere in the app.
-	const working = (sessions.data ?? []).some((session) => {
-		const state = taskState(session);
-		return state === "working" || state === "starting";
-	});
 	const activeTask = sessionIdFromPath(location.pathname);
 	const ordered = useMemo(
 		() =>
@@ -106,7 +93,7 @@ export function TaskSidebar({
 					onClick={onNavigate}
 					aria-label={version ? `Clio Coder ${version} home` : "Clio Coder home"}
 				>
-					<ClioLogo size={22} working={working} />
+					<ClioLogo size={22} />
 					<span className="wb-brand__identity">
 						<span>Clio Coder</span>
 						{version ? (

@@ -15,9 +15,9 @@
 	display: grid;
 	gap: var(--space-1);
 	margin-top: 0;
-	padding: var(--space-4) var(--space-4) var(--space-3) var(--space-5);
+	padding: var(--space-3) var(--space-3) var(--space-3) var(--space-4);
 	background: var(--raised);
-	border: 1px solid var(--accent-line);
+	border: 1px solid var(--line-float);
 	border-radius: var(--radius-md);
 	box-shadow: var(--shadow-composer);
 	transition:

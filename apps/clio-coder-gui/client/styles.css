@@ -84,6 +84,7 @@ input,
 select,
 textarea {
 	font: inherit;
+	accent-color: var(--accent);
 }
 button {
 	cursor: pointer;
@@ -161,7 +162,7 @@ h1 {
 }
 h1 {
 	font-weight: 500;
-	font-size: clamp(42px, 4.2vw, 68px);
+	font-size: var(--text-hero);
 	letter-spacing: -1.5px;
 	line-height: 1.06;
 	margin: var(--space-4) 0 var(--space-5);
@@ -1092,7 +1093,7 @@ nav a:hover {
 	container: chat / inline-size;
 }
 .conversation__main > * {
-	--text-reading: clamp(20px, 13.4px + 1.18cqi, 24px);
+	--text-reading: clamp(18px, 12px + 1.08cqi, 22px);
 	--text-h3: calc(var(--text-reading) * 1.083);
 	--text-h2: calc(var(--text-reading) * 1.333);
 }
