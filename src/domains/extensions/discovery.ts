@@ -236,12 +236,6 @@ export function loadManifestFromRoot(root: string): ExtensionCandidate {
 					});
 				}
 			}
-			parsed.diagnostics.push({
-				type: "warning",
-				message:
-					"runtime api 2 is validated but not started by this build; its commands, hooks and workspaces are inactive",
-				path: manifestPath,
-			});
 		}
 		for (const tool of parsed.manifest?.capabilities?.tools ?? []) {
 			try {

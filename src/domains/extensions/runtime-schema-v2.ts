@@ -20,6 +20,8 @@ import { RUNTIME_LIMITS } from "./runtime-schema.js";
 import { SURFACE_LIMITS } from "./view-limits.js";
 
 export const RUNTIME_V2_LIMITS = {
+	/** Live runtimes across both managers. api 1 keeps its own cap of 4 and claims first. */
+	processes: 8,
 	commands: 32,
 	hooks: 16,
 	hookMs: 250,

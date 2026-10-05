@@ -24,7 +24,7 @@ export function openExtensionsOverlay(tui: TUI, ctx: SlashCommandContext, onClos
 
 		const runtime = ctx.operatorExtensions?.entries().find((entry) => entry.id === ext.id && entry.scope === ext.scope);
 		const meta = (): string => {
-			const text = ext.runtime ? `${state}; runtime ${runtime?.state ?? "not started"}` : state;
+			const text = ext.runtime || ext.runtimeV2 ? `${state}; runtime ${runtime?.state ?? "not started"}` : state;
 			return state === "eligible"
 				? clioTheme().fg("success", text)
 				: state === "disabled"
@@ -49,10 +49,12 @@ export function openExtensionsOverlay(tui: TUI, ctx: SlashCommandContext, onClos
 					`**Description:** ${ext.description}`,
 					`**State:** ${state}`,
 				];
-				if (ext.runtime) {
+				if (ext.runtime || ext.runtimeV2) {
 					lines.push(
 						`**Operator runtime:** ${runtime?.state ?? "not started"}; generation ${runtime?.generation ?? 0}`,
-						"Runtime code executes on interactive startup/reload after installation. It has your user account's authority; it is not an OS sandbox.",
+						ext.runtimeV2
+							? "Runtime code executes on interactive startup/reload after installation, under Node permissions built from its manifest. Those are a seat belt, not a sandbox: network is not restricted, and a package allowed to run programs gives them your account's authority."
+							: "Runtime code executes on interactive startup/reload after installation. It has your user account's authority; it is not an OS sandbox.",
 					);
 					if (runtime?.reason) lines.push(runtime.reason);
 					if (runtime?.status) lines.push(`**Status:** ${runtime.status.text}`);

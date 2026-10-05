@@ -12,7 +12,7 @@ import type { ClioKeybinding } from "../domains/config/keybindings.js";
 import type { ContextState } from "../domains/context/index.js";
 import type { DispatchContract, RouteBreakerView } from "../domains/dispatch/contract.js";
 import type { ExtensionsContract } from "../domains/extensions/index.js";
-import { OperatorExtensionRuntime } from "../domains/extensions/operator-runtime.js";
+import { OperatorExtensions } from "../domains/extensions/operator-extensions.js";
 import type { InteropContract } from "../domains/interop/index.js";
 import type { TaskMemoryOperatorStatus } from "../domains/memory/index.js";
 import { openDetachedBatchViews } from "../domains/middleware/index.js";
@@ -544,7 +544,7 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 	let operatorTimer: ReturnType<typeof setTimeout> | undefined;
 	let operatorPanelValid: (() => boolean) | undefined;
 	const operatorExtensions = deps.extensions
-		? new OperatorExtensionRuntime({
+		? new OperatorExtensions({
 				context: () => ({
 					workspace: process.cwd(),
 					sessionId: deps.session?.current()?.id ?? deps.getSessionId?.() ?? null,
@@ -868,13 +868,19 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 		},
 		...(operatorExtensions ? { operatorExtensions } : {}),
 		showExtensionOutput: (invocation, output) => {
-			const generation = operatorExtensions?.activeGeneration;
 			const id = invocation.split(":")[1];
+			const generation = operatorExtensions?.entries().find((entry) => entry.id === id)?.generation;
 			const valid = () =>
 				operatorExtensions
 					?.entries()
 					.some((entry) => entry.id === id && entry.state === "ready" && entry.generation === generation) ?? false;
 			if (!valid()) return;
+			// The api 2 picture lives in the surface model; until its renderers land the text fallback is shown.
+			if (output.api === 2) {
+				if (output.text)
+					slashRuntime.context.showReference?.({ command: invocation, source: "operator extension", text: output.text });
+				return;
+			}
 			if (
 				output.panel &&
 				!deps.chat.isStreaming() &&

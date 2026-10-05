@@ -11,7 +11,8 @@ import {
 	listInstalledExtensions,
 	removeExtension,
 } from "../domains/extensions/index.js";
-import { extensionInvocation, OperatorExtensionRuntime } from "../domains/extensions/operator-runtime.js";
+import { OperatorExtensions } from "../domains/extensions/operator-extensions.js";
+import { extensionInvocation } from "../domains/extensions/operator-runtime.js";
 import { formatColumns, printError, printOk } from "./shared.js";
 
 const HELP = `clio-coder extensions <command>
@@ -255,11 +256,11 @@ async function runOperatorCommand(parsed: Parsed): Promise<number> {
 	const selected = listInstalledExtensions(process.cwd(), { all: true }).find(
 		(entry) => entry.id === id && entry.loadable,
 	);
-	if (!selected?.runtime?.commands.some((entry) => entry.name === command)) {
+	if (!(selected?.runtime ?? selected?.runtimeV2)?.commands.some((entry) => entry.name === command)) {
 		printError(`extension ${id} has no eligible operator command '${command}'`);
 		return 1;
 	}
-	const runtime = new OperatorExtensionRuntime({
+	const runtime = new OperatorExtensions({
 		context: () => ({ workspace: process.cwd(), sessionId: null, mode: "headless" }),
 		isIdle: () => true,
 		onlyId: id,
@@ -275,12 +276,16 @@ async function runOperatorCommand(parsed: Parsed): Promise<number> {
 		const reload = await runtime.reload("startup");
 		if (reload.status !== "committed") throw new Error(reload.message);
 		const provenance = runtime.entries().find((entry) => entry.id === id && entry.state === "ready")?.provenance;
-		const output = await runtime.invoke(extensionInvocation(id, command), args.join(" "), [], controller.signal);
+		const { api: _api, ...output } = await runtime.invoke(
+			extensionInvocation(id, command),
+			args.join(" "),
+			[],
+			controller.signal,
+		);
 		if (!provenance) throw new Error("extension result has no activated provenance");
+		const generation = runtime.entries().find((entry) => entry.id === id)?.generation ?? reload.generation;
 		if (parsed.json)
-			process.stdout.write(
-				`${JSON.stringify({ extensionId: id, command, generation: reload.generation, provenance, output })}\n`,
-			);
+			process.stdout.write(`${JSON.stringify({ extensionId: id, command, generation, provenance, output })}\n`);
 		else process.stdout.write(`${output.text}\n`);
 		return 0;
 	} catch (error) {
