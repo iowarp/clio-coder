@@ -13,7 +13,8 @@
 #   <BinDir>\clio-coder.cmd
 # It downloads the official win-x64 or win-arm64 zip, verifies it against
 # SHASUMS256.txt (and that file's OpenPGP signature when gpg is on PATH), and
-# never changes the user PATH unless -AddToPath (or CLIO_CODER_MODIFY_PATH=1).
+# adds the launcher to the user PATH and the current PowerShell session by
+# default. Use -NoModifyPath (or CLIO_CODER_MODIFY_PATH=0) to opt out.
 #
 # Native Windows is best effort for Clio Coder; Linux, macOS and WSL are the
 # primary platforms.
@@ -283,29 +284,37 @@ function Install-ClioCoder {
 
 		# Read and write the raw registry value: [Environment]::SetEnvironmentVariable
 		# would store it as REG_SZ and stop %USERPROFILE%-style entries expanding.
-		$modifyPath = -not $Options.NoModifyPath -and ($Options.AddToPath -or $env:CLIO_CODER_MODIFY_PATH -eq "1")
-		$envKey = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey("Environment", [bool]$modifyPath)
-		$rawPath = if ($envKey) { [string]$envKey.GetValue("Path", "", [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames) } else { "" }
-		$onPath = @([Environment]::ExpandEnvironmentVariables($rawPath) -split ";" | ForEach-Object { $_.TrimEnd("\") }) -contains $binDir.TrimEnd("\")
-		if ($onPath) {
-			# No PATH hint is needed for an existing entry.
-		} elseif ($modifyPath) {
-			if (-not $envKey) { $envKey = [Microsoft.Win32.Registry]::CurrentUser.CreateSubKey("Environment") }
-			$kind = if ($envKey.GetValueNames() -contains "Path") { $envKey.GetValueKind("Path") } else { [Microsoft.Win32.RegistryValueKind]::ExpandString }
-			$envKey.SetValue("Path", ((@($rawPath.TrimEnd(";"), $binDir) | Where-Object { $_ }) -join ";"), $kind)
-			& $node $helper path-added $installRoot $binDir
-			if ($LASTEXITCODE -ne 0) { Fail "PATH was added but ownership receipt could not be written; review $manifestPath" }
-			# Setting any user variable broadcasts WM_SETTINGCHANGE so new terminals see the change.
-			[Environment]::SetEnvironmentVariable("CLIO_CODER_PATH_REFRESH", $null, "User")
-			if (($env:Path -split ";") -notcontains $binDir) { $env:Path = "$binDir;$env:Path" }
-			Ok "added $binDir to your user PATH and this session; open a new terminal to use it"
-		} else {
-			Warn "$binDir is not on your PATH. Rerun with -AddToPath (or set CLIO_CODER_MODIFY_PATH=1), or add it yourself."
+		$modifyPath = -not $Options.NoModifyPath -and ($Options.AddToPath -or $env:CLIO_CODER_MODIFY_PATH -ne "0")
+		function Path-Contains([string]$Path, [string]$Directory) {
+			$entries = @([Environment]::ExpandEnvironmentVariables($Path) -split ";" | ForEach-Object { $_.Trim().Trim('"').TrimEnd("\") })
+			return $entries -contains $Directory.TrimEnd("\")
 		}
-		if ($envKey) { $envKey.Dispose() }
-		Write-Host "Run: clio-coder"
+		$envKey = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey("Environment", [bool]$modifyPath)
+		try {
+			$rawPath = if ($envKey) { [string]$envKey.GetValue("Path", "", [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames) } else { "" }
+			$onPath = Path-Contains $rawPath $binDir
+			if (-not $onPath -and $modifyPath) {
+				if (-not $envKey) { $envKey = [Microsoft.Win32.Registry]::CurrentUser.CreateSubKey("Environment") }
+				$kind = if ($envKey.GetValueNames() -contains "Path") { $envKey.GetValueKind("Path") } else { [Microsoft.Win32.RegistryValueKind]::ExpandString }
+				$envKey.SetValue("Path", ((@($rawPath.TrimEnd(";"), $binDir) | Where-Object { $_ }) -join ";"), $kind)
+				& $node $helper path-added $installRoot $binDir
+				if ($LASTEXITCODE -ne 0) { Fail "PATH was added but ownership receipt could not be written; review $manifestPath" }
+				# Setting any user variable broadcasts WM_SETTINGCHANGE so new terminals see the change.
+				[Environment]::SetEnvironmentVariable("CLIO_CODER_PATH_REFRESH", $null, "User")
+				Ok "added $binDir to your user PATH"
+			}
+			# A terminal opened before an earlier install still has a stale process PATH.
+			if ($modifyPath -and -not (Path-Contains $env:Path $binDir)) { $env:Path = "$binDir;$env:Path" }
+		} finally {
+			if ($envKey) { $envKey.Dispose() }
+		}
+		$run = if (-not $InvokedAsFile -and (Path-Contains $env:Path $binDir)) { "clio-coder" } else { "& '" + $launcher.Replace("'", "''") + "'" }
+		if (-not $modifyPath -and -not (Path-Contains $env:Path $binDir)) {
+			Say "PATH changes disabled; use the launcher commands below."
+		}
+		Write-Host "Run: $run"
 		# Native Windows has no background service yet; `clio-coder gui` starts a private server and prints its link.
-		Write-Host "Desktop app: clio-coder gui"
+		Write-Host "Desktop app: $run gui"
 	} finally {
 		Remove-Item -LiteralPath $lock -Recurse -Force -ErrorAction SilentlyContinue
 		if ($work) { Remove-Item -LiteralPath $work -Recurse -Force -ErrorAction SilentlyContinue }
