@@ -1,6 +1,16 @@
-import { AcpContextLedgerSchema, AcpContextCapability as ContextCapability } from "./wire.js";
+import { Type } from "typebox";
+import { AcpContextCapability, AcpContextLedgerSchema } from "./wire.js";
 
-export { ContextCapability };
+// Additive core status and invocation fields; older peers keep their ledger-only capability.
+export const ContextCapability = Type.Object(
+	{
+		...AcpContextCapability.properties,
+		status: Type.Optional(Type.String()),
+		activity: Type.Optional(Type.Literal("context.activity")),
+		invoke: Type.Optional(Type.String()),
+	},
+	{ additionalProperties: false },
+);
 
 import type { Static } from "typebox";
 

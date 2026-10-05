@@ -80,6 +80,7 @@ export const SessionWorkspace = Type.Object(
 	},
 	closed,
 );
+export type SessionWorkspace = Static<typeof SessionWorkspace>;
 
 export const ProjectTrust = Type.Object(
 	{

@@ -20,6 +20,7 @@ import {
 import { SessionTree } from "../../contracts/branches.js";
 import { Id } from "../../contracts/common.js";
 import { ContextLedger } from "../../contracts/context-ledger.js";
+import { ContextOperationStatus } from "../../contracts/context-work.js";
 import { ExtensionReload, LibraryReload, SessionExtensions } from "../../contracts/extensions.js";
 import {
 	FleetPreview,
@@ -109,6 +110,7 @@ import {
 	type AcpAutonomyLevelSchema as AutonomyLevel,
 	AcpSafeSettings as SafeSettings,
 } from "../../contracts/wire.js";
+import { ACP_CONTEXT_STATUS_METHOD } from "../clio/http-shims.js";
 import { childRunning, startAcpChild } from "../process-policy.js";
 import type { EventHub } from "../services/event-hub.js";
 import { AppProblem } from "../services/problem.js";
@@ -141,6 +143,7 @@ function toolProgressText(content: unknown): string | undefined {
 
 type Entry = {
 	id: string;
+	cwd: string;
 	client: AcpClient;
 	row: ChildRow;
 	turnId: string | null;
@@ -160,6 +163,8 @@ type Entry = {
 	rebase?: { mode: "move"; moved: boolean } | { mode: "switch"; reset: boolean };
 	/** A handoff document is being drawn up; a request now would make it describe a moving session. */
 	drafting?: boolean;
+	/** Context commands run outside the conversation; they still own its context while pending. */
+	contextCommand?: Promise<Static<typeof CommandResult>>;
 	/** The turn is recorded and waits for a slot: `admit` sends it to the agent, `drop` gives it up. */
 	queued?: { admit(): void; drop(): void };
 	/** When a request, a turn or a window last touched this child, on the monotonic clock. */
@@ -235,6 +240,8 @@ export class Supervisor {
 			!entry.parking &&
 			!entry.closing &&
 			entry.turnId === null &&
+			!entry.contextCommand &&
+			!this.snapshot(entry.id).contextWork?.active &&
 			!entry.rebase &&
 			!entry.drafting &&
 			entry.client.pending === 0 &&
@@ -274,7 +281,14 @@ export class Supervisor {
 				this.loading.size ||
 				this.configuring.size ||
 				this.reapers.size
-			) || [...this.entries.values()].some((entry) => entry.turnId !== null || !!entry.closing)
+			) ||
+			[...this.entries.values()].some(
+				(entry) =>
+					entry.turnId !== null ||
+					!!entry.closing ||
+					entry.client.pending > 0 ||
+					!!this.snapshot(entry.id).contextWork?.active,
+			)
 		);
 	}
 	/** Resting, reloadable conversations survive restart; pending RPCs and unsaved work do not. */
@@ -451,6 +465,7 @@ export class Supervisor {
 			}
 			entry = {
 				id,
+				cwd: workspace.path,
 				client: new AcpClient(transport),
 				row,
 				turnId: null,
@@ -526,6 +541,15 @@ export class Supervisor {
 					// is still checked against the newest number this session saw
 					// rather than against the last one that happened to project.
 					owned.eventSequence = projected.sequence;
+					if (projected.type === "context.activity") {
+						if (projected.activity.operation?.cwd !== owned.cwd)
+							throw new AppProblem("upstream_acp", "ACP context activity identifies another workspace.");
+						this.publish({
+							type: "context.activity",
+							payload: { resource: owned.id, revision: this.revision(owned.id), activity: projected.activity },
+						});
+						return;
+					}
 					if (projected.type === null) {
 						console.error(`[clio-coder:gui] dropped an unrecognized _clio-coder/event kind on session ${owned.id}`);
 						return;
@@ -573,6 +597,7 @@ export class Supervisor {
 			}
 			entry.activeAt = performance.now();
 			this.state(boundId, "open");
+			if (entry.client.capabilities.context?.status === ACP_CONTEXT_STATUS_METHOD) await this.contextStatus(boundId);
 			return this.get(boundId);
 		} catch (error) {
 			if (entry) await this.retire(entry);
@@ -590,6 +615,8 @@ export class Supervisor {
 		if (this.configuring.has(id)) throw new AppProblem("conflict", "Session configuration is being changed.");
 		if (entry.rebase) throw new AppProblem("conflict", "The conversation is moving to another branch.");
 		if (entry.drafting) throw new AppProblem("conflict", "Clio Coder is drawing up a handoff for this conversation.");
+		if (entry.contextCommand || this.snapshot(id).contextWork?.active)
+			throw new AppProblem("conflict", "Context work is running in this task. Wait for it or stop it.");
 		if (images.length > 0 && !entry.client.capabilities.images)
 			throw new AppProblem("conflict", "This Clio Coder build does not accept images with a request.");
 		if (files.length > 0 && !entry.client.capabilities.embeddedContext)
@@ -1330,6 +1357,29 @@ export class Supervisor {
 			throw new AppProblem("conflict", "This Clio Coder build does not report its context window.");
 		return this.projected(id, ACP_CONTEXT_LEDGER_METHOD, { sessionId: id }, ContextLedger);
 	}
+	async contextStatus(id: string) {
+		const entry = this.active(id);
+		if (entry.client.capabilities.context?.status !== ACP_CONTEXT_STATUS_METHOD)
+			throw new AppProblem("unsupported", "This Clio build does not report context operations.");
+		const before = this.snapshot(id).contextWork;
+		const status = await this.projected(id, ACP_CONTEXT_STATUS_METHOD, { sessionId: id }, ContextOperationStatus);
+		if (status.active && !status.active.operation)
+			throw new AppProblem("upstream_acp", "ACP context status has no operation identity.");
+		for (const operation of [status.active?.operation, status.latest])
+			if (operation && (operation.sessionId !== id || operation.cwd !== entry.cwd))
+				throw new AppProblem("upstream_acp", "ACP context status identifies another session or workspace.");
+		if (this.entries.get(id) === entry && this.snapshot(id).contextWork === before)
+			this.publish({ type: "context.status", payload: { resource: id, revision: this.revision(id), status } });
+		return this.snapshot(id).contextWork ?? status;
+	}
+	async cancelContext(id: string, operationId: string) {
+		const entry = this.active(id);
+		const operation = this.snapshot(id).contextWork?.active?.operation;
+		if (!operation || operation.id !== operationId)
+			throw new AppProblem("conflict", "That context operation is no longer active.");
+		await this.cancelEntry(entry);
+		return {};
+	}
 	private fleeting(id: string) {
 		const entry = this.active(id);
 		if (!entry.client.capabilities.fleet)
@@ -1453,14 +1503,22 @@ export class Supervisor {
 				],
 			};
 		}
-		return this.projected(
+		const contextCommand = body.command === "context" || body.command === "compact";
+		if (contextCommand && (entry.contextCommand || entry.turnId !== null || this.snapshot(id).contextWork?.active))
+			throw new AppProblem("conflict", "Context work runs between turns. Wait for the current work to finish.");
+		const request = this.projected(
 			id,
 			ACP_COMMANDS_INVOKE_METHOD,
 			{ sessionId: id, command: body.command, ...(body.argv ? { argv: body.argv } : {}) },
 			CommandResult,
-			// A context command answers when its work ends: compaction or a model-written handbook can take minutes.
 			COMMAND_TIMEOUT_MS,
 		);
+		if (contextCommand) entry.contextCommand = request;
+		try {
+			return await request;
+		} finally {
+			if (contextCommand) delete entry.contextCommand;
+		}
 	}
 	/** Workspace reads use an unbound peer so listing never creates or resumes a ledger. */
 	async workspaceControl<T>(
@@ -1585,13 +1643,17 @@ export class Supervisor {
 	private async retireEntry(entry: Entry) {
 		entry.closing = true;
 		try {
-			if (entry.turnId && !entry.queued && !entry.client.transport.closed) {
+			if (
+				(entry.turnId || entry.contextCommand || this.snapshot(entry.id).contextWork?.active) &&
+				!entry.queued &&
+				!entry.client.transport.closed
+			) {
 				await entry.client.request("session/cancel", { sessionId: entry.id }, 2000);
 				entry.permissions?.cancel();
 				entry.interviews?.cancel();
 				let timer: ReturnType<typeof setTimeout> | undefined;
 				await Promise.race([
-					entry.prompt,
+					entry.contextCommand ?? entry.prompt,
 					new Promise<void>((resolve) => {
 						timer = setTimeout(resolve, 2000);
 					}),
@@ -1608,7 +1670,10 @@ export class Supervisor {
 			await this.children.remove(entry.row);
 			const snapshot = this.snapshots.get(entry.id);
 			// A task nobody typed into has nothing to come back to, so it closes like any other.
-			const parks = entry.parking && !!snapshot && snapshot.turns.length + snapshot.timeline.length > 0;
+			const parks =
+				entry.parking &&
+				!!snapshot &&
+				(snapshot.turns.length + snapshot.timeline.length > 0 || !!snapshot.contextWork?.latest);
 			if (parks) {
 				this.parked.push(entry.id);
 				const level = await entry.client.autonomy(entry.id).catch(() => null);

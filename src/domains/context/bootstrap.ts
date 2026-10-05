@@ -166,6 +166,8 @@ export interface RunBootstrapInput {
 }
 
 export interface RunBootstrapResult {
+	/** Present only after this run successfully wrote .gitignore. */
+	gitignoreChange?: "created" | "updated";
 	clioMdPath: string;
 	statePath: string;
 	siblingFiles: ReadonlyArray<SiblingContextFile>;
@@ -1374,7 +1376,7 @@ function migrateClioGitignore(content: string): string {
 	return `${[...prefix, CLIO_GITIGNORE_LINE].join("\n")}\n`;
 }
 
-async function ensureGitignore(cwd: string, input: RunBootstrapInput): Promise<void> {
+async function ensureGitignore(cwd: string, input: RunBootstrapInput): Promise<"created" | "updated" | undefined> {
 	const gitignorePath = join(cwd, ".gitignore");
 	let content = "";
 	try {
@@ -1386,13 +1388,14 @@ async function ensureGitignore(cwd: string, input: RunBootstrapInput): Promise<v
 		if (hasDynamicOnlyClioIgnore(content)) {
 			writeFileSync(gitignorePath, migrateClioGitignore(content), "utf8");
 			out(input.io, `  .gitignore: updated '${CLIO_GITIGNORE_LINE}' rule\n`);
+			return "updated";
 		}
 		return;
 	}
 	if (hasDynamicOnlyClioIgnore(content)) {
 		writeFileSync(gitignorePath, migrateClioGitignore(content), "utf8");
 		out(input.io, `  .gitignore: updated '${CLIO_GITIGNORE_LINE}' rule\n`);
-		return;
+		return "updated";
 	}
 	const confirmed = input.confirmGitignore ? await input.confirmGitignore() : false;
 	if (!confirmed) {
@@ -1405,8 +1408,10 @@ async function ensureGitignore(cwd: string, input: RunBootstrapInput): Promise<v
 		);
 		return;
 	}
+	const existed = existsSync(gitignorePath);
 	writeFileSync(gitignorePath, migrateClioGitignore(content), "utf8");
 	out(input.io, `  .gitignore: added '${CLIO_GITIGNORE_LINE}'\n`);
+	return existed ? "updated" : "created";
 }
 
 function serializeBootstrapOutput(output: BootstrapStructuredOutput): string {
@@ -1632,6 +1637,7 @@ export async function runBootstrap(input: RunBootstrapInput = {}): Promise<RunBo
 	// Index the repository before generation so the generator can ground CLIO-CODER.md
 	// in the real structure (entry points, key modules), not just sibling prose.
 	progress(input, { phase: "codewiki", status: "started", message: "reconciling codemap index" });
+	let gitignoreChange: RunBootstrapResult["gitignoreChange"];
 	let codewiki: Codewiki;
 	let codewikiFingerprint: Fingerprint;
 	if (input.preview === true) {
@@ -1650,7 +1656,9 @@ export async function runBootstrap(input: RunBootstrapInput = {}): Promise<RunBo
 			}),
 			{
 				onProgress: indexProgressSink(input.onProgress),
-				beforeCommit: (_result, workspace) => ensureGitignore(workspace, input),
+				beforeCommit: async (_result, workspace) => {
+					gitignoreChange = await ensureGitignore(workspace, input);
+				},
 				afterCommit: ({ codewiki: committed, fingerprint }, workspace) =>
 					persistCodewikiForGeneration(workspace, projectType, indexedAt, committed, fingerprint),
 			},
@@ -1952,6 +1960,7 @@ export async function runBootstrap(input: RunBootstrapInput = {}): Promise<RunBo
 		message: `${summary.action} CLIO-CODER.md; ${summary.dirtyFiles} dirty file${summary.dirtyFiles === 1 ? "" : "s"}; project instructions: ${preload.label}`,
 	});
 	return {
+		...(gitignoreChange ? { gitignoreChange } : {}),
 		clioMdPath,
 		statePath,
 		siblingFiles,

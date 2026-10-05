@@ -44,7 +44,7 @@ export const TelemetryChips = memo(function TelemetryChips({
 					usedTokens: telemetry.usage.used,
 					contextWindow: telemetry.usage.size,
 					percent: null,
-					measured: true,
+					measured: null,
 				})
 			: null;
 	const spend = sessionSpend(

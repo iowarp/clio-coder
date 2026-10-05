@@ -179,21 +179,23 @@ export function SessionOverview({
 	const live = runs.filter(isLiveRun);
 	const receipts = runs.filter((run) => run.receipt);
 	const last = session.turns.at(-1);
-	const working = open && overview.running;
+	const working = open && (overview.running || !!session.contextWork?.active);
 	const state =
 		session.state === "parked"
 			? "Paused"
-			: overview.running
-				? "Working"
-				: last?.queued
-					? "Waiting for a slot"
-					: last?.status === "failed"
-						? "Failed"
-						: last?.status === "cancelled"
-							? "Stopped"
-							: last
-								? "Complete"
-								: "Not started";
+			: session.contextWork?.active && open
+				? "Context work"
+				: overview.running
+					? "Working"
+					: last?.queued
+						? "Waiting for a slot"
+						: last?.status === "failed"
+							? "Failed"
+							: last?.status === "cancelled"
+								? "Stopped"
+								: last
+									? "Complete"
+									: "Not started";
 	const done = plan?.rows.filter((row) => row.tone === "success").length ?? 0;
 	const openTasks = view?.tasks.filter((task) => task.actions.length > 0).length ?? 0;
 	const decisions = view?.activeDecisions.length ?? 0;

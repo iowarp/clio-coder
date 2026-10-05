@@ -1,5 +1,7 @@
 import { randomUUID } from "node:crypto";
+import type { Static } from "typebox";
 import { Value } from "typebox/value";
+import { ContextActivity } from "../../contracts/context-work.js";
 import {
 	ACP_TO_WEB_EVENT,
 	FleetFact,
@@ -17,6 +19,7 @@ import { projectTelemetryValue } from "./telemetry.js";
 const HEALTH = new Set<string>(HEALTH_EVENT_TYPES);
 
 export type AcpEvent =
+	| { type: "context.activity"; activity: Static<typeof ContextActivity>; sequence: number }
 	| { type: (typeof ACP_TO_WEB_EVENT)[keyof typeof ACP_TO_WEB_EVENT]; item: FleetItem | HealthItem; sequence: number }
 	| { type: null; item: null; sequence: number };
 
@@ -45,6 +48,12 @@ export function fleetEvent(value: unknown, sessionId: string, previousSequence: 
 	)
 		throw new AppProblem("upstream_acp", "Invalid or out-of-order ACP event envelope.");
 	const sequence = event.sequence as number;
+	if (kind === "context.activity") {
+		const activity = Value.Clean(ContextActivity, structuredClone(event.payload));
+		if (!Value.Check(ContextActivity, activity) || !activity.operation || activity.operation.sessionId !== sessionId)
+			throw new AppProblem("upstream_acp", "ACP context activity does not identify the bound session.");
+		return { type: "context.activity", activity, sequence };
+	}
 	if (!Object.hasOwn(ACP_TO_WEB_EVENT, kind)) return { type: null, item: null, sequence };
 	const type = ACP_TO_WEB_EVENT[kind as keyof typeof ACP_TO_WEB_EVENT];
 	const schema = HEALTH.has(type) ? HealthFact : FleetFact;

@@ -155,6 +155,38 @@ export function applySessionDelta(current: SessionSnapshot, event: SessionDelta)
 		state = { ...state, timeline, timelineTruncated: truncated || text.endsWith(MARKER) };
 	};
 	switch (event.type) {
+		case "context.status": {
+			const latest = event.payload.status.latest;
+			if (latest && latest.id !== state.contextWork?.latest?.id && state.telemetry?.usage) {
+				const { context: _context, ...usage } = state.telemetry.usage;
+				state = { ...state, telemetry: { ...state.telemetry, usage } };
+			}
+			return { ...state, contextWork: event.payload.status };
+		}
+		case "context.activity": {
+			const activity = event.payload.activity;
+			const operation = activity.operation;
+			if (!operation || operation.sessionId !== current.id) return state;
+			const previous = state.contextWork;
+			// A repeated or late phase cannot resurrect an operation whose result is already held.
+			if (!operation.outcome && previous?.latest?.id === operation.id) return state;
+			if (operation.outcome && state.telemetry?.usage) {
+				const { context: _context, ...usage } = state.telemetry.usage;
+				state = { ...state, telemetry: { ...state.telemetry, usage } };
+			}
+			return {
+				...state,
+				contextWork: {
+					version: 1,
+					active: operation.outcome
+						? previous?.active?.operation?.id === operation.id
+							? null
+							: (previous?.active ?? null)
+						: activity,
+					latest: operation.outcome ? operation : (previous?.latest ?? null),
+				},
+			};
+		}
 		case "session.telemetry":
 			return { ...state, telemetry: { ...state.telemetry, ...event.payload.telemetry } };
 		case "session.labelled":
@@ -179,9 +211,10 @@ export function applySessionDelta(current: SessionSnapshot, event: SessionDelta)
 			return { ...state, config: event.payload.config };
 		case "session.reset": {
 			const { usage: _usage, plan: _plan, ...telemetry } = state.telemetry ?? {};
+			const { contextWork: _contextWork, ...branchState } = state;
 			// Turns, their items and their approvals belong to the branch that was left.
 			return {
-				...state,
+				...branchState,
 				timeline: [],
 				timelineTruncated: false,
 				turns: [],

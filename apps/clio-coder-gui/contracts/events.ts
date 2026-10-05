@@ -9,6 +9,8 @@ const base = { v: Type.Literal(1), epoch: Id, seq: Type.Integer({ minimum: 0 }),
 const cursor = { epoch: Id, seq: Type.Integer({ minimum: 0 }) };
 const resource = { resource: Id, revision: Type.Integer({ minimum: 1 }) };
 export const Event = Type.Union([
+	Type.Object({ ...base, type: Type.Literal("context.activity"), payload: SessionDeltas["context.activity"] }),
+	Type.Object({ ...base, type: Type.Literal("context.status"), payload: SessionDeltas["context.status"] }),
 	Type.Object({ ...base, type: Type.Literal("session.telemetry"), payload: SessionDeltas["session.telemetry"] }),
 	Type.Object({
 		...base,

@@ -1,3 +1,4 @@
+import { CONTEXT_OPERATION_CUSTOM_TYPE, createContextOperation } from "../core/context-operation.js";
 import { randomUUID } from "node:crypto";
 import { createConversationEggs } from "../domains/session/easter-eggs.js";
 import type { TurnControlRecord, TurnOutcomeRecord } from "../domains/turn-control/index.js";
@@ -1838,6 +1839,24 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 	let turnActive = false;
 	let pendingPreTurnRead: AbortController | null = null;
 	let pendingVisionSidecar: AbortController | null = null;
+	let pendingCompactionPaint: AbortController | null = null;
+	// Install cancellation before publishing the preparation edge; listeners may cancel synchronously.
+	const prepareCompactionPaint = (): (() => Promise<void>) => {
+		const controller = new AbortController();
+		pendingCompactionPaint = controller;
+		const sessionId = deps.session?.current()?.id;
+		const cwd = process.cwd();
+		return async () => {
+			try {
+				await new Promise<void>((resolve) => setImmediate(resolve));
+				controller.signal.throwIfAborted();
+				if (sessionId !== deps.session?.current()?.id || cwd !== process.cwd())
+					throw new DOMException("Context ownership changed before compaction", "AbortError");
+			} finally {
+				if (pendingCompactionPaint === controller) pendingCompactionPaint = null;
+			}
+		};
+	};
 	/**
 	 * The last operator turn that settled and has not yet been followed by another
 	 * operator message. The next submit reports how it was followed, once.
@@ -2575,8 +2594,11 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 
 			// 2. Pre-submit auto-compaction trigger
 			const forceNow = process.env.CLIO_CODER_FORCE_COMPACT === "1";
+			const paintCompaction = prepareCompactionPaint();
 			try {
 				setTurnPreparation("compacting");
+				await paintCompaction();
+				if (!admissionCurrent()) return;
 				await context.runAutoCompact(
 					agentRuntime,
 					forceNow,
@@ -2631,21 +2653,25 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				admission.effectiveWindow !== null &&
 				!requestFits(admission.inputTokens, admission.outputReserveTokens, admission.effectiveWindow)
 			) {
+				const paintOverflow = prepareCompactionPaint();
 				setTurnPreparation("compacting");
 				let failure: string | undefined;
 				let canceled = false;
-				await context
-					.runAutoCompact(
-						agentRuntime,
-						true,
-						undefined,
-						"overflow",
-						submittedText,
-						pendingSkillPolicy,
-						undefined,
-						undefined,
-						options.requestContinuation !== true,
-					)
+				await paintOverflow()
+					.then(() => {
+						if (!admissionCurrent()) return false;
+						return context.runAutoCompact(
+							agentRuntime,
+							true,
+							undefined,
+							"overflow",
+							submittedText,
+							pendingSkillPolicy,
+							undefined,
+							undefined,
+							options.requestContinuation !== true,
+						);
+					})
 					.catch((error: unknown) => {
 						canceled = error instanceof Error && error.name === "AbortError";
 						failure = error instanceof Error ? error.message : String(error);
@@ -3047,6 +3073,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			continuity.cancel();
 			pendingPreTurnRead?.abort();
 			pendingVisionSidecar?.abort();
+			pendingCompactionPaint?.abort();
 			const wasStreaming = state.streaming;
 			context.cancelCompaction();
 			recovery.cancelRetryCountdown();
@@ -3153,6 +3180,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			operatorTurnsBefore = null;
 			lastHistoricalImageNoticeKey = null;
 			pendingVisionSidecar?.abort();
+			pendingCompactionPaint?.abort();
 			continuity.cancel();
 			void continuity.pause();
 			state.currentTurnConstraints = undefined;
@@ -3196,6 +3224,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			unsubscribeEggSession?.();
 			eggs.reset();
 			pendingVisionSidecar?.abort();
+			pendingCompactionPaint?.abort();
 			turnRuntime.dispose();
 			for (const stop of lateReceiptWatchers) stop();
 			lateReceiptWatchers.clear();
@@ -3352,10 +3381,47 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 					.find((entry) => entry.kind === "message" && entry.role === "user");
 				state.activeUserTurnId = operator?.turnId ?? null;
 			}
+			const operationSession = deps.session?.current()?.id ?? null;
+			const operationCwd = process.cwd();
+			const operation = createContextOperation(
+				{
+					kind: "context-recover",
+					sessionId: operationSession,
+					cwd: operationCwd,
+					origin: "operator",
+					reason: `handoff ${action}`,
+				},
+				(event) => {
+					if (operationSession !== (deps.session?.current()?.id ?? null) || operationCwd !== process.cwd()) return;
+					deps.bus?.emit(BusChannels.ContextActivity, event);
+					if (event.operation?.outcome && operationSession)
+						deps.session?.appendEntry({
+							kind: "custom",
+							customType: CONTEXT_OPERATION_CUSTOM_TYPE,
+							parentTurnId: state.lastTurnId,
+							data: event.operation,
+						});
+				},
+			);
 			state.streaming = true;
+			operation.start("state", "Recovering paused handoff");
 			try {
+				await new Promise<void>((resolve) => setImmediate(resolve));
+				if (
+					state.activeInterruptReason ||
+					operationSession !== (deps.session?.current()?.id ?? null) ||
+					operationCwd !== process.cwd()
+				)
+					throw new DOMException("Handoff recovery cancelled", "AbortError");
 				await continuity.recover(handoffId, action);
 				await continueEngineWithoutInput(runtime.agent);
+				operation.finish(state.activeInterruptReason ? "cancelled" : "completed", "Handoff recovery settled");
+			} catch (error) {
+				operation.finish(
+					error instanceof Error && error.name === "AbortError" ? "cancelled" : "failed",
+					error instanceof Error ? error.message : String(error),
+				);
+				throw error;
 			} finally {
 				state.streaming = false;
 				await continuity.pause();
@@ -3383,9 +3449,11 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				return;
 			}
 			let compacted = false;
+			const paintCompaction = prepareCompactionPaint();
 			enterPreparation();
 			setTurnPreparation("compacting");
 			try {
+				await paintCompaction();
 				compacted = await context.runAutoCompact(agentRuntime, true, instructions, "force");
 			} catch (err) {
 				emitNotice(`[/context compact] ${err instanceof Error ? err.message : String(err)}`);

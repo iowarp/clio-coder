@@ -99,6 +99,12 @@ export function sessionRoutes(
 	);
 	register(app, hub, routes.cancelAside, ({ params }) => supervisor.cancelAside(params.id));
 	register(app, hub, routes.sessionContext, ({ params }) => supervisor.contextLedger(params.id));
+	register(app, hub, routes.sessionContextStatus, ({ params }) => supervisor.contextStatus(params.id));
+	register(app, hub, routes.cancelSessionContext, ({ params, body }, context) =>
+		commands.run(`context.cancel:${params.id}`, idempotencyKey(context), body, () =>
+			supervisor.cancelContext(params.id, body.operationId),
+		),
+	);
 	register(app, hub, routes.previewFleetRun, ({ params, body }) => supervisor.fleetPreview(params.id, body));
 	// A retried start answers from the ledger rather than starting the plan twice.
 	register(app, hub, routes.startFleetRun, ({ params, body }, context) =>

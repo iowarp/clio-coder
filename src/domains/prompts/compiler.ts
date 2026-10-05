@@ -97,6 +97,8 @@ export interface SessionPromptInputs {
 	capabilityMap?: ReadonlyArray<CapabilityMapEntry>;
 	contextFiles?: string;
 	memorySection?: string;
+	/** Bounded host facts from completed operator context operations; never a user message. */
+	contextOperationUpdate?: string;
 }
 
 export interface CompileInputs {
@@ -986,6 +988,7 @@ export function compile(table: FragmentTable, inputs: CompileInputs): CompiledSe
 	for (const fragment of inputs.additionalFragments ?? []) {
 		push(fragment.id, fragment.body);
 	}
+	push("context-operation-update", session.contextOperationUpdate ?? "");
 	push("turn-scope", renderTurnGuidance(session.turnConstraints));
 
 	const systemPrompt = parts.join("\n\n");

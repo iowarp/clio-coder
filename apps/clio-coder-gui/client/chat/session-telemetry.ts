@@ -33,17 +33,29 @@ export function useSessionTelemetry(client: Client, sessionId: string) {
 	}).data;
 }
 
+/** Context work is part of the same snapshot as chat and telemetry, including work between turns. */
+export function useContextWork(client: Client, sessionId: string) {
+	return useQuery({
+		queryKey: ["session", sessionId],
+		queryFn: () => client.call(routes.session, { params: { id: sessionId }, query: {}, body: {} }),
+		enabled: false,
+		select: (snapshot) => snapshot.contextWork,
+	}).data;
+}
+
 export function useContextLedger(client: Client, sessionId: string, settled: number, enabled: boolean) {
 	const live = useSessionTelemetry(client, sessionId)?.usage?.context;
+	const operation = useContextWork(client, sessionId)?.latest;
 	const query = useQuery({
-		queryKey: ["session-context", sessionId, settled],
+		queryKey: ["session-context", sessionId, settled, operation?.id ?? null],
 		queryFn: () => client.call(routes.sessionContext, { params: { id: sessionId }, query: {}, body: {} }),
 		enabled,
 		retry: false,
 		// The previous turn's figure stays on screen while the next one is read, so nothing blinks.
 		placeholderData: (previous: ContextLedger | undefined) => previous,
 	});
-	return { ...query, data: live ?? query.data, isPending: !live && query.isPending, error: live ? null : query.error };
+	const data = live ?? query.data;
+	return { ...query, data, isPending: !data && query.isPending, error: data ? null : query.error };
 }
 
 export function useSessionUsage(client: Client, sessionId: string, settled: number, enabled: boolean) {

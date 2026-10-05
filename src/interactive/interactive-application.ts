@@ -9,7 +9,7 @@ import { getTerminationCoordinator } from "../core/termination.js";
 import { clioStateDir } from "../core/xdg.js";
 import type { AgentsContract } from "../domains/agents/contract.js";
 import type { ClioKeybinding } from "../domains/config/keybindings.js";
-import type { ContextState, RunBootstrapResult } from "../domains/context/index.js";
+import type { ContextState } from "../domains/context/index.js";
 import type { DispatchContract, RouteBreakerView } from "../domains/dispatch/contract.js";
 import type { ExtensionsContract } from "../domains/extensions/index.js";
 import { OperatorExtensionRuntime } from "../domains/extensions/operator-runtime.js";
@@ -51,6 +51,7 @@ import type { ApplicationController } from "./application-controller.js";
 import { warmTranscriptRender } from "./chat-panel.js";
 import { emitCommandNotice } from "./command-fallbacks.js";
 import { appendNotice, appendOperatorAside, OPERATOR_COMMAND_ENTRY } from "./command-output.js";
+import { presentContextCommands } from "./context-command-presentation.js";
 import { dispatchCouncilThroughRegistry } from "./council-dispatch.js";
 import { createDispatchSteering } from "./dispatch-steering.js";
 import { createEditorSubmitController, EDITOR_BASH_SHUTDOWN_MS } from "./editor-submit.js";
@@ -72,6 +73,7 @@ import { paneWatchDecision } from "./pane-policy.js";
 import { describePanesLeftBehind } from "./panes-runtime.js";
 import type { createPeerInbox } from "./peer-inbox.js";
 import { writeInputWedgeDump } from "./render-trace.js";
+import { renderContextOperationResult } from "./renderers/context-operation.js";
 import { settleChatBeforeSessionSwitch } from "./session-switch-settlement.js";
 import { createSessionTranscript } from "./session-transcript.js";
 import { processAutoPacingAllowed } from "./stream-pacing-policy.js";
@@ -273,7 +275,7 @@ export interface InteractiveDeps {
 	onCompact?: (instructions: string | undefined) => Promise<void>;
 	onRecoverHandoff?: (handoffId: string, action: "reduce" | "deliver") => Promise<void>;
 	/** Run /context init for the current working directory. */
-	onInit?: (options: InitCommandOptions, io?: RunIo) => Promise<RunBootstrapResult>;
+	onInit?: (options: InitCommandOptions, io?: RunIo) => Promise<unknown>;
 	/** Run /context reset for the current working directory. */
 	onContextClear?: (options: ContextClearCommandOptions, io?: RunIo) => Promise<void>;
 	/** Run /context refresh: re-index codewiki and refresh .clio-coder state without touching CLIO-CODER.md. */
@@ -422,7 +424,8 @@ export function dispatchInteractiveAction(id: ClioKeybinding, deps: KeyBindingDe
 	}
 }
 
-export async function createInteractiveApplication(deps: InteractiveDeps): Promise<number> {
+export async function createInteractiveApplication(host: InteractiveDeps): Promise<number> {
+	const deps = presentContextCommands(host);
 	const initialInterface = deps.getSettings?.().interface;
 	const initialSmoothStreaming = initialInterface?.demo === false ? "off" : (initialInterface?.smoothStreaming ?? "off");
 	const initialAutoPacingAllowed = processAutoPacingAllowed(false);
@@ -1422,6 +1425,13 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 	};
 	const interactiveSubscriptions = createInteractiveSubscriptions({
 		bus: deps.bus,
+		getSessionId: () => deps.chat.getSessionId(),
+		contextResult: (operation) => {
+			chatRenderer.mutate(
+				() => chatPanel.appendReplayBlock((width) => renderContextOperationResult(operation, width)),
+				"context-result",
+			);
+		},
 		readWorkerReceipt: (runId) => {
 			const receipt = readWorkerReceiptFacts(runId, deps.stateDir);
 			exitSummary.observeReceipt(runId, receipt);

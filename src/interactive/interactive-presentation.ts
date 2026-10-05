@@ -33,6 +33,7 @@ import type { EditorChrome } from "./clio-editor.js";
 import { ClioEditor } from "./clio-editor.js";
 import { createCommandOutputRunIo } from "./command-output.js";
 import { createContextActivityStore, createContextProgressRail } from "./context-activity.js";
+import { admissionHint } from "./context-operation-view.js";
 import type { DispatchBoardView } from "./dispatch-board.js";
 import { createDispatchBoardStore, createDispatchBoardView } from "./dispatch-board.js";
 import { dockTop, setDockFooterRows } from "./dock.js";
@@ -345,7 +346,7 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 		readReceipt: (runId) => readWorkerReceiptFacts(runId),
 	});
 	const dispatchBoardStore = factories.createDispatchBoardStore(deps.observability);
-	const contextActivityStore = factories.createContextActivityStore(deps.bus);
+	const contextActivityStore = factories.createContextActivityStore(deps.bus, () => deps.chat.getSessionId());
 
 	const footerToolCounts = new Map<string, number>();
 	const footerActiveTools = new Set<string>();
@@ -679,7 +680,14 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 				getQuotaSnapshots: () => quotaSummary.peekSnapshots(),
 			}),
 			editor,
-			contextProgress: createContextProgressRail(() => contextActivityStore.current()),
+			contextProgress: createContextProgressRail(
+				() => contextActivityStore.current(),
+				(activity) =>
+					admissionHint(activity, {
+						streaming: deps.chat.isStreaming(),
+						preparation: deps.chat.turnPreparation().phase,
+					}),
+			),
 			footer: footer.view,
 		},
 		{

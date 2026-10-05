@@ -11319,6 +11319,16 @@
 												"ledger": {
 													"type": "string",
 													"maxLength": 128
+												},
+												"status": {
+													"type": "string"
+												},
+												"activity": {
+													"type": "string",
+													"const": "context.activity"
+												},
+												"invoke": {
+													"type": "string"
 												}
 											},
 											"additionalProperties": false
@@ -16672,6 +16682,893 @@
 				}
 			}
 		},
+		"/api/sessions/{id}/context/status": {
+			"get": {
+				"operationId": "sessionContextStatus",
+				"summary": "Current context operation and latest recorded conclusion",
+				"security": [
+					{
+						"bearer": []
+					}
+				],
+				"parameters": [
+					{
+						"name": "id",
+						"in": "path",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+						}
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "Success",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"required": ["version", "active", "latest"],
+									"properties": {
+										"version": {
+											"type": "number",
+											"const": 1
+										},
+										"active": {
+											"anyOf": [
+												{
+													"type": "object",
+													"required": ["kind", "phase", "status", "message", "at"],
+													"properties": {
+														"operation": {
+															"type": "object",
+															"required": ["version", "id", "kind", "sessionId", "cwd", "origin", "reason", "startedAt"],
+															"properties": {
+																"version": {
+																	"type": "number",
+																	"const": 1
+																},
+																"id": {
+																	"type": "string",
+																	"maxLength": 128
+																},
+																"kind": {
+																	"anyOf": [
+																		{
+																			"type": "string",
+																			"const": "context-init"
+																		},
+																		{
+																			"type": "string",
+																			"const": "context-clear"
+																		},
+																		{
+																			"type": "string",
+																			"const": "context-refresh"
+																		},
+																		{
+																			"type": "string",
+																			"const": "context-recall"
+																		},
+																		{
+																			"type": "string",
+																			"const": "context-recover"
+																		},
+																		{
+																			"type": "string",
+																			"const": "compaction"
+																		}
+																	]
+																},
+																"sessionId": {
+																	"anyOf": [
+																		{
+																			"type": "string"
+																		},
+																		{
+																			"type": "null"
+																		}
+																	]
+																},
+																"cwd": {
+																	"type": "string"
+																},
+																"origin": {
+																	"anyOf": [
+																		{
+																			"type": "string",
+																			"const": "operator"
+																		},
+																		{
+																			"type": "string",
+																			"const": "automatic"
+																		}
+																	]
+																},
+																"reason": {
+																	"type": "string"
+																},
+																"startedAt": {
+																	"type": "string"
+																},
+																"elapsedMs": {
+																	"type": "integer",
+																	"minimum": 0
+																},
+																"outcome": {
+																	"anyOf": [
+																		{
+																			"type": "string",
+																			"const": "completed"
+																		},
+																		{
+																			"type": "string",
+																			"const": "previewed"
+																		},
+																		{
+																			"type": "string",
+																			"const": "unchanged"
+																		},
+																		{
+																			"type": "string",
+																			"const": "cancelled"
+																		},
+																		{
+																			"type": "string",
+																			"const": "failed"
+																		}
+																	]
+																},
+																"facts": {
+																	"type": "array",
+																	"items": {
+																		"type": "object",
+																		"required": ["kind", "unit"],
+																		"properties": {
+																			"kind": {
+																				"anyOf": [
+																					{
+																						"type": "string",
+																						"const": "created"
+																					},
+																					{
+																						"type": "string",
+																						"const": "updated"
+																					},
+																					{
+																						"type": "string",
+																						"const": "indexed"
+																					},
+																					{
+																						"type": "string",
+																						"const": "ingested"
+																					},
+																					{
+																						"type": "string",
+																						"const": "preserved"
+																					},
+																					{
+																						"type": "string",
+																						"const": "omitted"
+																					},
+																					{
+																						"type": "string",
+																						"const": "removed"
+																					},
+																					{
+																						"type": "string",
+																						"const": "read"
+																					},
+																					{
+																						"type": "string",
+																						"const": "summarized"
+																					},
+																					{
+																						"type": "string",
+																						"const": "recalled"
+																					}
+																				]
+																			},
+																			"unit": {
+																				"anyOf": [
+																					{
+																						"type": "string",
+																						"const": "paths"
+																					},
+																					{
+																						"type": "string",
+																						"const": "source-files"
+																					},
+																					{
+																						"type": "string",
+																						"const": "rules"
+																					},
+																					{
+																						"type": "string",
+																						"const": "messages"
+																					},
+																					{
+																						"type": "string",
+																						"const": "entries"
+																					},
+																					{
+																						"type": "string",
+																						"const": "observations"
+																					}
+																				]
+																			},
+																			"count": {
+																				"type": "integer",
+																				"minimum": 0
+																			},
+																			"paths": {
+																				"type": "array",
+																				"items": {
+																					"type": "string"
+																				}
+																			}
+																		},
+																		"additionalProperties": false
+																	}
+																},
+																"warnings": {
+																	"type": "array",
+																	"items": {
+																		"type": "string"
+																	}
+																},
+																"tokens": {
+																	"type": "object",
+																	"required": ["before", "after", "basis"],
+																	"properties": {
+																		"before": {
+																			"type": "integer",
+																			"minimum": 0
+																		},
+																		"after": {
+																			"type": "integer",
+																			"minimum": 0
+																		},
+																		"basis": {
+																			"type": "string",
+																			"const": "runtime-estimate"
+																		}
+																	},
+																	"additionalProperties": false
+																}
+															},
+															"additionalProperties": false
+														},
+														"kind": {
+															"anyOf": [
+																{
+																	"type": "string",
+																	"const": "context-init"
+																},
+																{
+																	"type": "string",
+																	"const": "context-clear"
+																},
+																{
+																	"type": "string",
+																	"const": "context-refresh"
+																},
+																{
+																	"type": "string",
+																	"const": "context-recall"
+																},
+																{
+																	"type": "string",
+																	"const": "context-recover"
+																},
+																{
+																	"type": "string",
+																	"const": "compaction"
+																}
+															]
+														},
+														"phase": {
+															"anyOf": [
+																{
+																	"type": "string",
+																	"const": "scan"
+																},
+																{
+																	"type": "string",
+																	"const": "codewiki"
+																},
+																{
+																	"type": "string",
+																	"const": "generate"
+																},
+																{
+																	"type": "string",
+																	"const": "clio-md"
+																},
+																{
+																	"type": "string",
+																	"const": "state"
+																},
+																{
+																	"type": "string",
+																	"const": "compact"
+																},
+																{
+																	"type": "string",
+																	"const": "summarize"
+																},
+																{
+																	"type": "string",
+																	"const": "done"
+																}
+															]
+														},
+														"status": {
+															"anyOf": [
+																{
+																	"type": "string",
+																	"const": "started"
+																},
+																{
+																	"type": "string",
+																	"const": "running"
+																},
+																{
+																	"type": "string",
+																	"const": "completed"
+																},
+																{
+																	"type": "string",
+																	"const": "failed"
+																}
+															]
+														},
+														"message": {
+															"type": "string"
+														},
+														"at": {
+															"type": "number"
+														},
+														"current": {
+															"type": "integer",
+															"minimum": 0
+														},
+														"total": {
+															"type": "integer",
+															"minimum": 0
+														},
+														"detail": {
+															"type": "string"
+														},
+														"stages": {
+															"type": "array",
+															"items": {
+																"anyOf": [
+																	{
+																		"type": "string",
+																		"const": "scan"
+																	},
+																	{
+																		"type": "string",
+																		"const": "codewiki"
+																	},
+																	{
+																		"type": "string",
+																		"const": "generate"
+																	},
+																	{
+																		"type": "string",
+																		"const": "clio-md"
+																	},
+																	{
+																		"type": "string",
+																		"const": "state"
+																	},
+																	{
+																		"type": "string",
+																		"const": "compact"
+																	},
+																	{
+																		"type": "string",
+																		"const": "summarize"
+																	},
+																	{
+																		"type": "string",
+																		"const": "done"
+																	}
+																]
+															}
+														},
+														"timing": {
+															"type": "object",
+															"required": ["runId", "startedAtMs", "timeoutMs"],
+															"properties": {
+																"runId": {
+																	"type": "string"
+																},
+																"startedAtMs": {
+																	"type": "number"
+																},
+																"timeoutMs": {
+																	"type": "number"
+																}
+															},
+															"additionalProperties": false
+														}
+													},
+													"additionalProperties": false
+												},
+												{
+													"type": "null"
+												}
+											]
+										},
+										"latest": {
+											"anyOf": [
+												{
+													"type": "object",
+													"required": ["version", "id", "kind", "sessionId", "cwd", "origin", "reason", "startedAt"],
+													"properties": {
+														"version": {
+															"type": "number",
+															"const": 1
+														},
+														"id": {
+															"type": "string",
+															"maxLength": 128
+														},
+														"kind": {
+															"anyOf": [
+																{
+																	"type": "string",
+																	"const": "context-init"
+																},
+																{
+																	"type": "string",
+																	"const": "context-clear"
+																},
+																{
+																	"type": "string",
+																	"const": "context-refresh"
+																},
+																{
+																	"type": "string",
+																	"const": "context-recall"
+																},
+																{
+																	"type": "string",
+																	"const": "context-recover"
+																},
+																{
+																	"type": "string",
+																	"const": "compaction"
+																}
+															]
+														},
+														"sessionId": {
+															"anyOf": [
+																{
+																	"type": "string"
+																},
+																{
+																	"type": "null"
+																}
+															]
+														},
+														"cwd": {
+															"type": "string"
+														},
+														"origin": {
+															"anyOf": [
+																{
+																	"type": "string",
+																	"const": "operator"
+																},
+																{
+																	"type": "string",
+																	"const": "automatic"
+																}
+															]
+														},
+														"reason": {
+															"type": "string"
+														},
+														"startedAt": {
+															"type": "string"
+														},
+														"elapsedMs": {
+															"type": "integer",
+															"minimum": 0
+														},
+														"outcome": {
+															"anyOf": [
+																{
+																	"type": "string",
+																	"const": "completed"
+																},
+																{
+																	"type": "string",
+																	"const": "previewed"
+																},
+																{
+																	"type": "string",
+																	"const": "unchanged"
+																},
+																{
+																	"type": "string",
+																	"const": "cancelled"
+																},
+																{
+																	"type": "string",
+																	"const": "failed"
+																}
+															]
+														},
+														"facts": {
+															"type": "array",
+															"items": {
+																"type": "object",
+																"required": ["kind", "unit"],
+																"properties": {
+																	"kind": {
+																		"anyOf": [
+																			{
+																				"type": "string",
+																				"const": "created"
+																			},
+																			{
+																				"type": "string",
+																				"const": "updated"
+																			},
+																			{
+																				"type": "string",
+																				"const": "indexed"
+																			},
+																			{
+																				"type": "string",
+																				"const": "ingested"
+																			},
+																			{
+																				"type": "string",
+																				"const": "preserved"
+																			},
+																			{
+																				"type": "string",
+																				"const": "omitted"
+																			},
+																			{
+																				"type": "string",
+																				"const": "removed"
+																			},
+																			{
+																				"type": "string",
+																				"const": "read"
+																			},
+																			{
+																				"type": "string",
+																				"const": "summarized"
+																			},
+																			{
+																				"type": "string",
+																				"const": "recalled"
+																			}
+																		]
+																	},
+																	"unit": {
+																		"anyOf": [
+																			{
+																				"type": "string",
+																				"const": "paths"
+																			},
+																			{
+																				"type": "string",
+																				"const": "source-files"
+																			},
+																			{
+																				"type": "string",
+																				"const": "rules"
+																			},
+																			{
+																				"type": "string",
+																				"const": "messages"
+																			},
+																			{
+																				"type": "string",
+																				"const": "entries"
+																			},
+																			{
+																				"type": "string",
+																				"const": "observations"
+																			}
+																		]
+																	},
+																	"count": {
+																		"type": "integer",
+																		"minimum": 0
+																	},
+																	"paths": {
+																		"type": "array",
+																		"items": {
+																			"type": "string"
+																		}
+																	}
+																},
+																"additionalProperties": false
+															}
+														},
+														"warnings": {
+															"type": "array",
+															"items": {
+																"type": "string"
+															}
+														},
+														"tokens": {
+															"type": "object",
+															"required": ["before", "after", "basis"],
+															"properties": {
+																"before": {
+																	"type": "integer",
+																	"minimum": 0
+																},
+																"after": {
+																	"type": "integer",
+																	"minimum": 0
+																},
+																"basis": {
+																	"type": "string",
+																	"const": "runtime-estimate"
+																}
+															},
+															"additionalProperties": false
+														}
+													},
+													"additionalProperties": false
+												},
+												{
+													"type": "null"
+												}
+											]
+										}
+									},
+									"additionalProperties": false
+								}
+							}
+						},
+						"headers": {
+							"X-Clio-Epoch": {
+								"schema": {
+									"type": "string"
+								},
+								"description": "Server epoch"
+							},
+							"X-Clio-Seq": {
+								"schema": {
+									"type": "integer"
+								},
+								"description": "Sequence before assembling the snapshot"
+							}
+						}
+					},
+					"default": {
+						"description": "Problem",
+						"content": {
+							"application/problem+json": {
+								"schema": {
+									"type": "object",
+									"required": ["type", "title", "status", "detail", "code", "instance"],
+									"properties": {
+										"type": {
+											"type": "string"
+										},
+										"title": {
+											"type": "string"
+										},
+										"status": {
+											"type": "integer"
+										},
+										"detail": {
+											"type": "string"
+										},
+										"code": {
+											"anyOf": [
+												{
+													"type": "string",
+													"const": "validation"
+												},
+												{
+													"type": "string",
+													"const": "unauthorized"
+												},
+												{
+													"type": "string",
+													"const": "not_found"
+												},
+												{
+													"type": "string",
+													"const": "conflict"
+												},
+												{
+													"type": "string",
+													"const": "unsupported"
+												},
+												{
+													"type": "string",
+													"const": "unavailable"
+												},
+												{
+													"type": "string",
+													"const": "upstream_acp"
+												},
+												{
+													"type": "string",
+													"const": "operation_failed"
+												},
+												{
+													"type": "string",
+													"const": "internal"
+												}
+											]
+										},
+										"instance": {
+											"type": "string"
+										}
+									},
+									"additionalProperties": false
+								}
+							}
+						}
+					}
+				}
+			}
+		},
+		"/api/sessions/{id}/context/cancel": {
+			"post": {
+				"operationId": "cancelSessionContext",
+				"summary": "Ask the bound ACP session to stop its active context operation",
+				"security": [
+					{
+						"bearer": []
+					}
+				],
+				"parameters": [
+					{
+						"name": "id",
+						"in": "path",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+						}
+					},
+					{
+						"name": "Idempotency-Key",
+						"in": "header",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"minLength": 1,
+							"maxLength": 128
+						}
+					}
+				],
+				"requestBody": {
+					"required": true,
+					"content": {
+						"application/json": {
+							"schema": {
+								"type": "object",
+								"required": ["operationId"],
+								"properties": {
+									"operationId": {
+										"type": "string",
+										"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+									}
+								},
+								"additionalProperties": false
+							}
+						}
+					}
+				},
+				"responses": {
+					"200": {
+						"description": "Success",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {},
+									"additionalProperties": false
+								}
+							}
+						},
+						"headers": {
+							"X-Clio-Epoch": {
+								"schema": {
+									"type": "string"
+								},
+								"description": "Server epoch"
+							},
+							"X-Clio-Seq": {
+								"schema": {
+									"type": "integer"
+								},
+								"description": "Sequence before assembling the snapshot"
+							}
+						}
+					},
+					"default": {
+						"description": "Problem",
+						"content": {
+							"application/problem+json": {
+								"schema": {
+									"type": "object",
+									"required": ["type", "title", "status", "detail", "code", "instance"],
+									"properties": {
+										"type": {
+											"type": "string"
+										},
+										"title": {
+											"type": "string"
+										},
+										"status": {
+											"type": "integer"
+										},
+										"detail": {
+											"type": "string"
+										},
+										"code": {
+											"anyOf": [
+												{
+													"type": "string",
+													"const": "validation"
+												},
+												{
+													"type": "string",
+													"const": "unauthorized"
+												},
+												{
+													"type": "string",
+													"const": "not_found"
+												},
+												{
+													"type": "string",
+													"const": "conflict"
+												},
+												{
+													"type": "string",
+													"const": "unsupported"
+												},
+												{
+													"type": "string",
+													"const": "unavailable"
+												},
+												{
+													"type": "string",
+													"const": "upstream_acp"
+												},
+												{
+													"type": "string",
+													"const": "operation_failed"
+												},
+												{
+													"type": "string",
+													"const": "internal"
+												}
+											]
+										},
+										"instance": {
+											"type": "string"
+										}
+									},
+									"additionalProperties": false
+								}
+							}
+						}
+					}
+				}
+			}
+		},
 		"/api/sessions/{id}/fleet/preview": {
 			"post": {
 				"operationId": "previewFleetRun",
@@ -21129,6 +22026,632 @@
 											},
 											"additionalProperties": false
 										},
+										"contextWork": {
+											"type": "object",
+											"required": ["version", "active", "latest"],
+											"properties": {
+												"version": {
+													"type": "number",
+													"const": 1
+												},
+												"active": {
+													"anyOf": [
+														{
+															"type": "object",
+															"required": ["kind", "phase", "status", "message", "at"],
+															"properties": {
+																"operation": {
+																	"type": "object",
+																	"required": ["version", "id", "kind", "sessionId", "cwd", "origin", "reason", "startedAt"],
+																	"properties": {
+																		"version": {
+																			"type": "number",
+																			"const": 1
+																		},
+																		"id": {
+																			"type": "string",
+																			"maxLength": 128
+																		},
+																		"kind": {
+																			"anyOf": [
+																				{
+																					"type": "string",
+																					"const": "context-init"
+																				},
+																				{
+																					"type": "string",
+																					"const": "context-clear"
+																				},
+																				{
+																					"type": "string",
+																					"const": "context-refresh"
+																				},
+																				{
+																					"type": "string",
+																					"const": "context-recall"
+																				},
+																				{
+																					"type": "string",
+																					"const": "context-recover"
+																				},
+																				{
+																					"type": "string",
+																					"const": "compaction"
+																				}
+																			]
+																		},
+																		"sessionId": {
+																			"anyOf": [
+																				{
+																					"type": "string"
+																				},
+																				{
+																					"type": "null"
+																				}
+																			]
+																		},
+																		"cwd": {
+																			"type": "string"
+																		},
+																		"origin": {
+																			"anyOf": [
+																				{
+																					"type": "string",
+																					"const": "operator"
+																				},
+																				{
+																					"type": "string",
+																					"const": "automatic"
+																				}
+																			]
+																		},
+																		"reason": {
+																			"type": "string"
+																		},
+																		"startedAt": {
+																			"type": "string"
+																		},
+																		"elapsedMs": {
+																			"type": "integer",
+																			"minimum": 0
+																		},
+																		"outcome": {
+																			"anyOf": [
+																				{
+																					"type": "string",
+																					"const": "completed"
+																				},
+																				{
+																					"type": "string",
+																					"const": "previewed"
+																				},
+																				{
+																					"type": "string",
+																					"const": "unchanged"
+																				},
+																				{
+																					"type": "string",
+																					"const": "cancelled"
+																				},
+																				{
+																					"type": "string",
+																					"const": "failed"
+																				}
+																			]
+																		},
+																		"facts": {
+																			"type": "array",
+																			"items": {
+																				"type": "object",
+																				"required": ["kind", "unit"],
+																				"properties": {
+																					"kind": {
+																						"anyOf": [
+																							{
+																								"type": "string",
+																								"const": "created"
+																							},
+																							{
+																								"type": "string",
+																								"const": "updated"
+																							},
+																							{
+																								"type": "string",
+																								"const": "indexed"
+																							},
+																							{
+																								"type": "string",
+																								"const": "ingested"
+																							},
+																							{
+																								"type": "string",
+																								"const": "preserved"
+																							},
+																							{
+																								"type": "string",
+																								"const": "omitted"
+																							},
+																							{
+																								"type": "string",
+																								"const": "removed"
+																							},
+																							{
+																								"type": "string",
+																								"const": "read"
+																							},
+																							{
+																								"type": "string",
+																								"const": "summarized"
+																							},
+																							{
+																								"type": "string",
+																								"const": "recalled"
+																							}
+																						]
+																					},
+																					"unit": {
+																						"anyOf": [
+																							{
+																								"type": "string",
+																								"const": "paths"
+																							},
+																							{
+																								"type": "string",
+																								"const": "source-files"
+																							},
+																							{
+																								"type": "string",
+																								"const": "rules"
+																							},
+																							{
+																								"type": "string",
+																								"const": "messages"
+																							},
+																							{
+																								"type": "string",
+																								"const": "entries"
+																							},
+																							{
+																								"type": "string",
+																								"const": "observations"
+																							}
+																						]
+																					},
+																					"count": {
+																						"type": "integer",
+																						"minimum": 0
+																					},
+																					"paths": {
+																						"type": "array",
+																						"items": {
+																							"type": "string"
+																						}
+																					}
+																				},
+																				"additionalProperties": false
+																			}
+																		},
+																		"warnings": {
+																			"type": "array",
+																			"items": {
+																				"type": "string"
+																			}
+																		},
+																		"tokens": {
+																			"type": "object",
+																			"required": ["before", "after", "basis"],
+																			"properties": {
+																				"before": {
+																					"type": "integer",
+																					"minimum": 0
+																				},
+																				"after": {
+																					"type": "integer",
+																					"minimum": 0
+																				},
+																				"basis": {
+																					"type": "string",
+																					"const": "runtime-estimate"
+																				}
+																			},
+																			"additionalProperties": false
+																		}
+																	},
+																	"additionalProperties": false
+																},
+																"kind": {
+																	"anyOf": [
+																		{
+																			"type": "string",
+																			"const": "context-init"
+																		},
+																		{
+																			"type": "string",
+																			"const": "context-clear"
+																		},
+																		{
+																			"type": "string",
+																			"const": "context-refresh"
+																		},
+																		{
+																			"type": "string",
+																			"const": "context-recall"
+																		},
+																		{
+																			"type": "string",
+																			"const": "context-recover"
+																		},
+																		{
+																			"type": "string",
+																			"const": "compaction"
+																		}
+																	]
+																},
+																"phase": {
+																	"anyOf": [
+																		{
+																			"type": "string",
+																			"const": "scan"
+																		},
+																		{
+																			"type": "string",
+																			"const": "codewiki"
+																		},
+																		{
+																			"type": "string",
+																			"const": "generate"
+																		},
+																		{
+																			"type": "string",
+																			"const": "clio-md"
+																		},
+																		{
+																			"type": "string",
+																			"const": "state"
+																		},
+																		{
+																			"type": "string",
+																			"const": "compact"
+																		},
+																		{
+																			"type": "string",
+																			"const": "summarize"
+																		},
+																		{
+																			"type": "string",
+																			"const": "done"
+																		}
+																	]
+																},
+																"status": {
+																	"anyOf": [
+																		{
+																			"type": "string",
+																			"const": "started"
+																		},
+																		{
+																			"type": "string",
+																			"const": "running"
+																		},
+																		{
+																			"type": "string",
+																			"const": "completed"
+																		},
+																		{
+																			"type": "string",
+																			"const": "failed"
+																		}
+																	]
+																},
+																"message": {
+																	"type": "string"
+																},
+																"at": {
+																	"type": "number"
+																},
+																"current": {
+																	"type": "integer",
+																	"minimum": 0
+																},
+																"total": {
+																	"type": "integer",
+																	"minimum": 0
+																},
+																"detail": {
+																	"type": "string"
+																},
+																"stages": {
+																	"type": "array",
+																	"items": {
+																		"anyOf": [
+																			{
+																				"type": "string",
+																				"const": "scan"
+																			},
+																			{
+																				"type": "string",
+																				"const": "codewiki"
+																			},
+																			{
+																				"type": "string",
+																				"const": "generate"
+																			},
+																			{
+																				"type": "string",
+																				"const": "clio-md"
+																			},
+																			{
+																				"type": "string",
+																				"const": "state"
+																			},
+																			{
+																				"type": "string",
+																				"const": "compact"
+																			},
+																			{
+																				"type": "string",
+																				"const": "summarize"
+																			},
+																			{
+																				"type": "string",
+																				"const": "done"
+																			}
+																		]
+																	}
+																},
+																"timing": {
+																	"type": "object",
+																	"required": ["runId", "startedAtMs", "timeoutMs"],
+																	"properties": {
+																		"runId": {
+																			"type": "string"
+																		},
+																		"startedAtMs": {
+																			"type": "number"
+																		},
+																		"timeoutMs": {
+																			"type": "number"
+																		}
+																	},
+																	"additionalProperties": false
+																}
+															},
+															"additionalProperties": false
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"latest": {
+													"anyOf": [
+														{
+															"type": "object",
+															"required": ["version", "id", "kind", "sessionId", "cwd", "origin", "reason", "startedAt"],
+															"properties": {
+																"version": {
+																	"type": "number",
+																	"const": 1
+																},
+																"id": {
+																	"type": "string",
+																	"maxLength": 128
+																},
+																"kind": {
+																	"anyOf": [
+																		{
+																			"type": "string",
+																			"const": "context-init"
+																		},
+																		{
+																			"type": "string",
+																			"const": "context-clear"
+																		},
+																		{
+																			"type": "string",
+																			"const": "context-refresh"
+																		},
+																		{
+																			"type": "string",
+																			"const": "context-recall"
+																		},
+																		{
+																			"type": "string",
+																			"const": "context-recover"
+																		},
+																		{
+																			"type": "string",
+																			"const": "compaction"
+																		}
+																	]
+																},
+																"sessionId": {
+																	"anyOf": [
+																		{
+																			"type": "string"
+																		},
+																		{
+																			"type": "null"
+																		}
+																	]
+																},
+																"cwd": {
+																	"type": "string"
+																},
+																"origin": {
+																	"anyOf": [
+																		{
+																			"type": "string",
+																			"const": "operator"
+																		},
+																		{
+																			"type": "string",
+																			"const": "automatic"
+																		}
+																	]
+																},
+																"reason": {
+																	"type": "string"
+																},
+																"startedAt": {
+																	"type": "string"
+																},
+																"elapsedMs": {
+																	"type": "integer",
+																	"minimum": 0
+																},
+																"outcome": {
+																	"anyOf": [
+																		{
+																			"type": "string",
+																			"const": "completed"
+																		},
+																		{
+																			"type": "string",
+																			"const": "previewed"
+																		},
+																		{
+																			"type": "string",
+																			"const": "unchanged"
+																		},
+																		{
+																			"type": "string",
+																			"const": "cancelled"
+																		},
+																		{
+																			"type": "string",
+																			"const": "failed"
+																		}
+																	]
+																},
+																"facts": {
+																	"type": "array",
+																	"items": {
+																		"type": "object",
+																		"required": ["kind", "unit"],
+																		"properties": {
+																			"kind": {
+																				"anyOf": [
+																					{
+																						"type": "string",
+																						"const": "created"
+																					},
+																					{
+																						"type": "string",
+																						"const": "updated"
+																					},
+																					{
+																						"type": "string",
+																						"const": "indexed"
+																					},
+																					{
+																						"type": "string",
+																						"const": "ingested"
+																					},
+																					{
+																						"type": "string",
+																						"const": "preserved"
+																					},
+																					{
+																						"type": "string",
+																						"const": "omitted"
+																					},
+																					{
+																						"type": "string",
+																						"const": "removed"
+																					},
+																					{
+																						"type": "string",
+																						"const": "read"
+																					},
+																					{
+																						"type": "string",
+																						"const": "summarized"
+																					},
+																					{
+																						"type": "string",
+																						"const": "recalled"
+																					}
+																				]
+																			},
+																			"unit": {
+																				"anyOf": [
+																					{
+																						"type": "string",
+																						"const": "paths"
+																					},
+																					{
+																						"type": "string",
+																						"const": "source-files"
+																					},
+																					{
+																						"type": "string",
+																						"const": "rules"
+																					},
+																					{
+																						"type": "string",
+																						"const": "messages"
+																					},
+																					{
+																						"type": "string",
+																						"const": "entries"
+																					},
+																					{
+																						"type": "string",
+																						"const": "observations"
+																					}
+																				]
+																			},
+																			"count": {
+																				"type": "integer",
+																				"minimum": 0
+																			},
+																			"paths": {
+																				"type": "array",
+																				"items": {
+																					"type": "string"
+																				}
+																			}
+																		},
+																		"additionalProperties": false
+																	}
+																},
+																"warnings": {
+																	"type": "array",
+																	"items": {
+																		"type": "string"
+																	}
+																},
+																"tokens": {
+																	"type": "object",
+																	"required": ["before", "after", "basis"],
+																	"properties": {
+																		"before": {
+																			"type": "integer",
+																			"minimum": 0
+																		},
+																		"after": {
+																			"type": "integer",
+																			"minimum": 0
+																		},
+																		"basis": {
+																			"type": "string",
+																			"const": "runtime-estimate"
+																		}
+																	},
+																	"additionalProperties": false
+																}
+															},
+															"additionalProperties": false
+														},
+														{
+															"type": "null"
+														}
+													]
+												}
+											},
+											"additionalProperties": false
+										},
 										"permissions": {
 											"type": "array",
 											"items": {
@@ -25084,6 +26607,632 @@
 											},
 											"additionalProperties": false
 										},
+										"contextWork": {
+											"type": "object",
+											"required": ["version", "active", "latest"],
+											"properties": {
+												"version": {
+													"type": "number",
+													"const": 1
+												},
+												"active": {
+													"anyOf": [
+														{
+															"type": "object",
+															"required": ["kind", "phase", "status", "message", "at"],
+															"properties": {
+																"operation": {
+																	"type": "object",
+																	"required": ["version", "id", "kind", "sessionId", "cwd", "origin", "reason", "startedAt"],
+																	"properties": {
+																		"version": {
+																			"type": "number",
+																			"const": 1
+																		},
+																		"id": {
+																			"type": "string",
+																			"maxLength": 128
+																		},
+																		"kind": {
+																			"anyOf": [
+																				{
+																					"type": "string",
+																					"const": "context-init"
+																				},
+																				{
+																					"type": "string",
+																					"const": "context-clear"
+																				},
+																				{
+																					"type": "string",
+																					"const": "context-refresh"
+																				},
+																				{
+																					"type": "string",
+																					"const": "context-recall"
+																				},
+																				{
+																					"type": "string",
+																					"const": "context-recover"
+																				},
+																				{
+																					"type": "string",
+																					"const": "compaction"
+																				}
+																			]
+																		},
+																		"sessionId": {
+																			"anyOf": [
+																				{
+																					"type": "string"
+																				},
+																				{
+																					"type": "null"
+																				}
+																			]
+																		},
+																		"cwd": {
+																			"type": "string"
+																		},
+																		"origin": {
+																			"anyOf": [
+																				{
+																					"type": "string",
+																					"const": "operator"
+																				},
+																				{
+																					"type": "string",
+																					"const": "automatic"
+																				}
+																			]
+																		},
+																		"reason": {
+																			"type": "string"
+																		},
+																		"startedAt": {
+																			"type": "string"
+																		},
+																		"elapsedMs": {
+																			"type": "integer",
+																			"minimum": 0
+																		},
+																		"outcome": {
+																			"anyOf": [
+																				{
+																					"type": "string",
+																					"const": "completed"
+																				},
+																				{
+																					"type": "string",
+																					"const": "previewed"
+																				},
+																				{
+																					"type": "string",
+																					"const": "unchanged"
+																				},
+																				{
+																					"type": "string",
+																					"const": "cancelled"
+																				},
+																				{
+																					"type": "string",
+																					"const": "failed"
+																				}
+																			]
+																		},
+																		"facts": {
+																			"type": "array",
+																			"items": {
+																				"type": "object",
+																				"required": ["kind", "unit"],
+																				"properties": {
+																					"kind": {
+																						"anyOf": [
+																							{
+																								"type": "string",
+																								"const": "created"
+																							},
+																							{
+																								"type": "string",
+																								"const": "updated"
+																							},
+																							{
+																								"type": "string",
+																								"const": "indexed"
+																							},
+																							{
+																								"type": "string",
+																								"const": "ingested"
+																							},
+																							{
+																								"type": "string",
+																								"const": "preserved"
+																							},
+																							{
+																								"type": "string",
+																								"const": "omitted"
+																							},
+																							{
+																								"type": "string",
+																								"const": "removed"
+																							},
+																							{
+																								"type": "string",
+																								"const": "read"
+																							},
+																							{
+																								"type": "string",
+																								"const": "summarized"
+																							},
+																							{
+																								"type": "string",
+																								"const": "recalled"
+																							}
+																						]
+																					},
+																					"unit": {
+																						"anyOf": [
+																							{
+																								"type": "string",
+																								"const": "paths"
+																							},
+																							{
+																								"type": "string",
+																								"const": "source-files"
+																							},
+																							{
+																								"type": "string",
+																								"const": "rules"
+																							},
+																							{
+																								"type": "string",
+																								"const": "messages"
+																							},
+																							{
+																								"type": "string",
+																								"const": "entries"
+																							},
+																							{
+																								"type": "string",
+																								"const": "observations"
+																							}
+																						]
+																					},
+																					"count": {
+																						"type": "integer",
+																						"minimum": 0
+																					},
+																					"paths": {
+																						"type": "array",
+																						"items": {
+																							"type": "string"
+																						}
+																					}
+																				},
+																				"additionalProperties": false
+																			}
+																		},
+																		"warnings": {
+																			"type": "array",
+																			"items": {
+																				"type": "string"
+																			}
+																		},
+																		"tokens": {
+																			"type": "object",
+																			"required": ["before", "after", "basis"],
+																			"properties": {
+																				"before": {
+																					"type": "integer",
+																					"minimum": 0
+																				},
+																				"after": {
+																					"type": "integer",
+																					"minimum": 0
+																				},
+																				"basis": {
+																					"type": "string",
+																					"const": "runtime-estimate"
+																				}
+																			},
+																			"additionalProperties": false
+																		}
+																	},
+																	"additionalProperties": false
+																},
+																"kind": {
+																	"anyOf": [
+																		{
+																			"type": "string",
+																			"const": "context-init"
+																		},
+																		{
+																			"type": "string",
+																			"const": "context-clear"
+																		},
+																		{
+																			"type": "string",
+																			"const": "context-refresh"
+																		},
+																		{
+																			"type": "string",
+																			"const": "context-recall"
+																		},
+																		{
+																			"type": "string",
+																			"const": "context-recover"
+																		},
+																		{
+																			"type": "string",
+																			"const": "compaction"
+																		}
+																	]
+																},
+																"phase": {
+																	"anyOf": [
+																		{
+																			"type": "string",
+																			"const": "scan"
+																		},
+																		{
+																			"type": "string",
+																			"const": "codewiki"
+																		},
+																		{
+																			"type": "string",
+																			"const": "generate"
+																		},
+																		{
+																			"type": "string",
+																			"const": "clio-md"
+																		},
+																		{
+																			"type": "string",
+																			"const": "state"
+																		},
+																		{
+																			"type": "string",
+																			"const": "compact"
+																		},
+																		{
+																			"type": "string",
+																			"const": "summarize"
+																		},
+																		{
+																			"type": "string",
+																			"const": "done"
+																		}
+																	]
+																},
+																"status": {
+																	"anyOf": [
+																		{
+																			"type": "string",
+																			"const": "started"
+																		},
+																		{
+																			"type": "string",
+																			"const": "running"
+																		},
+																		{
+																			"type": "string",
+																			"const": "completed"
+																		},
+																		{
+																			"type": "string",
+																			"const": "failed"
+																		}
+																	]
+																},
+																"message": {
+																	"type": "string"
+																},
+																"at": {
+																	"type": "number"
+																},
+																"current": {
+																	"type": "integer",
+																	"minimum": 0
+																},
+																"total": {
+																	"type": "integer",
+																	"minimum": 0
+																},
+																"detail": {
+																	"type": "string"
+																},
+																"stages": {
+																	"type": "array",
+																	"items": {
+																		"anyOf": [
+																			{
+																				"type": "string",
+																				"const": "scan"
+																			},
+																			{
+																				"type": "string",
+																				"const": "codewiki"
+																			},
+																			{
+																				"type": "string",
+																				"const": "generate"
+																			},
+																			{
+																				"type": "string",
+																				"const": "clio-md"
+																			},
+																			{
+																				"type": "string",
+																				"const": "state"
+																			},
+																			{
+																				"type": "string",
+																				"const": "compact"
+																			},
+																			{
+																				"type": "string",
+																				"const": "summarize"
+																			},
+																			{
+																				"type": "string",
+																				"const": "done"
+																			}
+																		]
+																	}
+																},
+																"timing": {
+																	"type": "object",
+																	"required": ["runId", "startedAtMs", "timeoutMs"],
+																	"properties": {
+																		"runId": {
+																			"type": "string"
+																		},
+																		"startedAtMs": {
+																			"type": "number"
+																		},
+																		"timeoutMs": {
+																			"type": "number"
+																		}
+																	},
+																	"additionalProperties": false
+																}
+															},
+															"additionalProperties": false
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"latest": {
+													"anyOf": [
+														{
+															"type": "object",
+															"required": ["version", "id", "kind", "sessionId", "cwd", "origin", "reason", "startedAt"],
+															"properties": {
+																"version": {
+																	"type": "number",
+																	"const": 1
+																},
+																"id": {
+																	"type": "string",
+																	"maxLength": 128
+																},
+																"kind": {
+																	"anyOf": [
+																		{
+																			"type": "string",
+																			"const": "context-init"
+																		},
+																		{
+																			"type": "string",
+																			"const": "context-clear"
+																		},
+																		{
+																			"type": "string",
+																			"const": "context-refresh"
+																		},
+																		{
+																			"type": "string",
+																			"const": "context-recall"
+																		},
+																		{
+																			"type": "string",
+																			"const": "context-recover"
+																		},
+																		{
+																			"type": "string",
+																			"const": "compaction"
+																		}
+																	]
+																},
+																"sessionId": {
+																	"anyOf": [
+																		{
+																			"type": "string"
+																		},
+																		{
+																			"type": "null"
+																		}
+																	]
+																},
+																"cwd": {
+																	"type": "string"
+																},
+																"origin": {
+																	"anyOf": [
+																		{
+																			"type": "string",
+																			"const": "operator"
+																		},
+																		{
+																			"type": "string",
+																			"const": "automatic"
+																		}
+																	]
+																},
+																"reason": {
+																	"type": "string"
+																},
+																"startedAt": {
+																	"type": "string"
+																},
+																"elapsedMs": {
+																	"type": "integer",
+																	"minimum": 0
+																},
+																"outcome": {
+																	"anyOf": [
+																		{
+																			"type": "string",
+																			"const": "completed"
+																		},
+																		{
+																			"type": "string",
+																			"const": "previewed"
+																		},
+																		{
+																			"type": "string",
+																			"const": "unchanged"
+																		},
+																		{
+																			"type": "string",
+																			"const": "cancelled"
+																		},
+																		{
+																			"type": "string",
+																			"const": "failed"
+																		}
+																	]
+																},
+																"facts": {
+																	"type": "array",
+																	"items": {
+																		"type": "object",
+																		"required": ["kind", "unit"],
+																		"properties": {
+																			"kind": {
+																				"anyOf": [
+																					{
+																						"type": "string",
+																						"const": "created"
+																					},
+																					{
+																						"type": "string",
+																						"const": "updated"
+																					},
+																					{
+																						"type": "string",
+																						"const": "indexed"
+																					},
+																					{
+																						"type": "string",
+																						"const": "ingested"
+																					},
+																					{
+																						"type": "string",
+																						"const": "preserved"
+																					},
+																					{
+																						"type": "string",
+																						"const": "omitted"
+																					},
+																					{
+																						"type": "string",
+																						"const": "removed"
+																					},
+																					{
+																						"type": "string",
+																						"const": "read"
+																					},
+																					{
+																						"type": "string",
+																						"const": "summarized"
+																					},
+																					{
+																						"type": "string",
+																						"const": "recalled"
+																					}
+																				]
+																			},
+																			"unit": {
+																				"anyOf": [
+																					{
+																						"type": "string",
+																						"const": "paths"
+																					},
+																					{
+																						"type": "string",
+																						"const": "source-files"
+																					},
+																					{
+																						"type": "string",
+																						"const": "rules"
+																					},
+																					{
+																						"type": "string",
+																						"const": "messages"
+																					},
+																					{
+																						"type": "string",
+																						"const": "entries"
+																					},
+																					{
+																						"type": "string",
+																						"const": "observations"
+																					}
+																				]
+																			},
+																			"count": {
+																				"type": "integer",
+																				"minimum": 0
+																			},
+																			"paths": {
+																				"type": "array",
+																				"items": {
+																					"type": "string"
+																				}
+																			}
+																		},
+																		"additionalProperties": false
+																	}
+																},
+																"warnings": {
+																	"type": "array",
+																	"items": {
+																		"type": "string"
+																	}
+																},
+																"tokens": {
+																	"type": "object",
+																	"required": ["before", "after", "basis"],
+																	"properties": {
+																		"before": {
+																			"type": "integer",
+																			"minimum": 0
+																		},
+																		"after": {
+																			"type": "integer",
+																			"minimum": 0
+																		},
+																		"basis": {
+																			"type": "string",
+																			"const": "runtime-estimate"
+																		}
+																	},
+																	"additionalProperties": false
+																}
+															},
+															"additionalProperties": false
+														},
+														{
+															"type": "null"
+														}
+													]
+												}
+											},
+											"additionalProperties": false
+										},
 										"permissions": {
 											"type": "array",
 											"items": {
@@ -27624,6 +29773,632 @@
 											},
 											"additionalProperties": false
 										},
+										"contextWork": {
+											"type": "object",
+											"required": ["version", "active", "latest"],
+											"properties": {
+												"version": {
+													"type": "number",
+													"const": 1
+												},
+												"active": {
+													"anyOf": [
+														{
+															"type": "object",
+															"required": ["kind", "phase", "status", "message", "at"],
+															"properties": {
+																"operation": {
+																	"type": "object",
+																	"required": ["version", "id", "kind", "sessionId", "cwd", "origin", "reason", "startedAt"],
+																	"properties": {
+																		"version": {
+																			"type": "number",
+																			"const": 1
+																		},
+																		"id": {
+																			"type": "string",
+																			"maxLength": 128
+																		},
+																		"kind": {
+																			"anyOf": [
+																				{
+																					"type": "string",
+																					"const": "context-init"
+																				},
+																				{
+																					"type": "string",
+																					"const": "context-clear"
+																				},
+																				{
+																					"type": "string",
+																					"const": "context-refresh"
+																				},
+																				{
+																					"type": "string",
+																					"const": "context-recall"
+																				},
+																				{
+																					"type": "string",
+																					"const": "context-recover"
+																				},
+																				{
+																					"type": "string",
+																					"const": "compaction"
+																				}
+																			]
+																		},
+																		"sessionId": {
+																			"anyOf": [
+																				{
+																					"type": "string"
+																				},
+																				{
+																					"type": "null"
+																				}
+																			]
+																		},
+																		"cwd": {
+																			"type": "string"
+																		},
+																		"origin": {
+																			"anyOf": [
+																				{
+																					"type": "string",
+																					"const": "operator"
+																				},
+																				{
+																					"type": "string",
+																					"const": "automatic"
+																				}
+																			]
+																		},
+																		"reason": {
+																			"type": "string"
+																		},
+																		"startedAt": {
+																			"type": "string"
+																		},
+																		"elapsedMs": {
+																			"type": "integer",
+																			"minimum": 0
+																		},
+																		"outcome": {
+																			"anyOf": [
+																				{
+																					"type": "string",
+																					"const": "completed"
+																				},
+																				{
+																					"type": "string",
+																					"const": "previewed"
+																				},
+																				{
+																					"type": "string",
+																					"const": "unchanged"
+																				},
+																				{
+																					"type": "string",
+																					"const": "cancelled"
+																				},
+																				{
+																					"type": "string",
+																					"const": "failed"
+																				}
+																			]
+																		},
+																		"facts": {
+																			"type": "array",
+																			"items": {
+																				"type": "object",
+																				"required": ["kind", "unit"],
+																				"properties": {
+																					"kind": {
+																						"anyOf": [
+																							{
+																								"type": "string",
+																								"const": "created"
+																							},
+																							{
+																								"type": "string",
+																								"const": "updated"
+																							},
+																							{
+																								"type": "string",
+																								"const": "indexed"
+																							},
+																							{
+																								"type": "string",
+																								"const": "ingested"
+																							},
+																							{
+																								"type": "string",
+																								"const": "preserved"
+																							},
+																							{
+																								"type": "string",
+																								"const": "omitted"
+																							},
+																							{
+																								"type": "string",
+																								"const": "removed"
+																							},
+																							{
+																								"type": "string",
+																								"const": "read"
+																							},
+																							{
+																								"type": "string",
+																								"const": "summarized"
+																							},
+																							{
+																								"type": "string",
+																								"const": "recalled"
+																							}
+																						]
+																					},
+																					"unit": {
+																						"anyOf": [
+																							{
+																								"type": "string",
+																								"const": "paths"
+																							},
+																							{
+																								"type": "string",
+																								"const": "source-files"
+																							},
+																							{
+																								"type": "string",
+																								"const": "rules"
+																							},
+																							{
+																								"type": "string",
+																								"const": "messages"
+																							},
+																							{
+																								"type": "string",
+																								"const": "entries"
+																							},
+																							{
+																								"type": "string",
+																								"const": "observations"
+																							}
+																						]
+																					},
+																					"count": {
+																						"type": "integer",
+																						"minimum": 0
+																					},
+																					"paths": {
+																						"type": "array",
+																						"items": {
+																							"type": "string"
+																						}
+																					}
+																				},
+																				"additionalProperties": false
+																			}
+																		},
+																		"warnings": {
+																			"type": "array",
+																			"items": {
+																				"type": "string"
+																			}
+																		},
+																		"tokens": {
+																			"type": "object",
+																			"required": ["before", "after", "basis"],
+																			"properties": {
+																				"before": {
+																					"type": "integer",
+																					"minimum": 0
+																				},
+																				"after": {
+																					"type": "integer",
+																					"minimum": 0
+																				},
+																				"basis": {
+																					"type": "string",
+																					"const": "runtime-estimate"
+																				}
+																			},
+																			"additionalProperties": false
+																		}
+																	},
+																	"additionalProperties": false
+																},
+																"kind": {
+																	"anyOf": [
+																		{
+																			"type": "string",
+																			"const": "context-init"
+																		},
+																		{
+																			"type": "string",
+																			"const": "context-clear"
+																		},
+																		{
+																			"type": "string",
+																			"const": "context-refresh"
+																		},
+																		{
+																			"type": "string",
+																			"const": "context-recall"
+																		},
+																		{
+																			"type": "string",
+																			"const": "context-recover"
+																		},
+																		{
+																			"type": "string",
+																			"const": "compaction"
+																		}
+																	]
+																},
+																"phase": {
+																	"anyOf": [
+																		{
+																			"type": "string",
+																			"const": "scan"
+																		},
+																		{
+																			"type": "string",
+																			"const": "codewiki"
+																		},
+																		{
+																			"type": "string",
+																			"const": "generate"
+																		},
+																		{
+																			"type": "string",
+																			"const": "clio-md"
+																		},
+																		{
+																			"type": "string",
+																			"const": "state"
+																		},
+																		{
+																			"type": "string",
+																			"const": "compact"
+																		},
+																		{
+																			"type": "string",
+																			"const": "summarize"
+																		},
+																		{
+																			"type": "string",
+																			"const": "done"
+																		}
+																	]
+																},
+																"status": {
+																	"anyOf": [
+																		{
+																			"type": "string",
+																			"const": "started"
+																		},
+																		{
+																			"type": "string",
+																			"const": "running"
+																		},
+																		{
+																			"type": "string",
+																			"const": "completed"
+																		},
+																		{
+																			"type": "string",
+																			"const": "failed"
+																		}
+																	]
+																},
+																"message": {
+																	"type": "string"
+																},
+																"at": {
+																	"type": "number"
+																},
+																"current": {
+																	"type": "integer",
+																	"minimum": 0
+																},
+																"total": {
+																	"type": "integer",
+																	"minimum": 0
+																},
+																"detail": {
+																	"type": "string"
+																},
+																"stages": {
+																	"type": "array",
+																	"items": {
+																		"anyOf": [
+																			{
+																				"type": "string",
+																				"const": "scan"
+																			},
+																			{
+																				"type": "string",
+																				"const": "codewiki"
+																			},
+																			{
+																				"type": "string",
+																				"const": "generate"
+																			},
+																			{
+																				"type": "string",
+																				"const": "clio-md"
+																			},
+																			{
+																				"type": "string",
+																				"const": "state"
+																			},
+																			{
+																				"type": "string",
+																				"const": "compact"
+																			},
+																			{
+																				"type": "string",
+																				"const": "summarize"
+																			},
+																			{
+																				"type": "string",
+																				"const": "done"
+																			}
+																		]
+																	}
+																},
+																"timing": {
+																	"type": "object",
+																	"required": ["runId", "startedAtMs", "timeoutMs"],
+																	"properties": {
+																		"runId": {
+																			"type": "string"
+																		},
+																		"startedAtMs": {
+																			"type": "number"
+																		},
+																		"timeoutMs": {
+																			"type": "number"
+																		}
+																	},
+																	"additionalProperties": false
+																}
+															},
+															"additionalProperties": false
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"latest": {
+													"anyOf": [
+														{
+															"type": "object",
+															"required": ["version", "id", "kind", "sessionId", "cwd", "origin", "reason", "startedAt"],
+															"properties": {
+																"version": {
+																	"type": "number",
+																	"const": 1
+																},
+																"id": {
+																	"type": "string",
+																	"maxLength": 128
+																},
+																"kind": {
+																	"anyOf": [
+																		{
+																			"type": "string",
+																			"const": "context-init"
+																		},
+																		{
+																			"type": "string",
+																			"const": "context-clear"
+																		},
+																		{
+																			"type": "string",
+																			"const": "context-refresh"
+																		},
+																		{
+																			"type": "string",
+																			"const": "context-recall"
+																		},
+																		{
+																			"type": "string",
+																			"const": "context-recover"
+																		},
+																		{
+																			"type": "string",
+																			"const": "compaction"
+																		}
+																	]
+																},
+																"sessionId": {
+																	"anyOf": [
+																		{
+																			"type": "string"
+																		},
+																		{
+																			"type": "null"
+																		}
+																	]
+																},
+																"cwd": {
+																	"type": "string"
+																},
+																"origin": {
+																	"anyOf": [
+																		{
+																			"type": "string",
+																			"const": "operator"
+																		},
+																		{
+																			"type": "string",
+																			"const": "automatic"
+																		}
+																	]
+																},
+																"reason": {
+																	"type": "string"
+																},
+																"startedAt": {
+																	"type": "string"
+																},
+																"elapsedMs": {
+																	"type": "integer",
+																	"minimum": 0
+																},
+																"outcome": {
+																	"anyOf": [
+																		{
+																			"type": "string",
+																			"const": "completed"
+																		},
+																		{
+																			"type": "string",
+																			"const": "previewed"
+																		},
+																		{
+																			"type": "string",
+																			"const": "unchanged"
+																		},
+																		{
+																			"type": "string",
+																			"const": "cancelled"
+																		},
+																		{
+																			"type": "string",
+																			"const": "failed"
+																		}
+																	]
+																},
+																"facts": {
+																	"type": "array",
+																	"items": {
+																		"type": "object",
+																		"required": ["kind", "unit"],
+																		"properties": {
+																			"kind": {
+																				"anyOf": [
+																					{
+																						"type": "string",
+																						"const": "created"
+																					},
+																					{
+																						"type": "string",
+																						"const": "updated"
+																					},
+																					{
+																						"type": "string",
+																						"const": "indexed"
+																					},
+																					{
+																						"type": "string",
+																						"const": "ingested"
+																					},
+																					{
+																						"type": "string",
+																						"const": "preserved"
+																					},
+																					{
+																						"type": "string",
+																						"const": "omitted"
+																					},
+																					{
+																						"type": "string",
+																						"const": "removed"
+																					},
+																					{
+																						"type": "string",
+																						"const": "read"
+																					},
+																					{
+																						"type": "string",
+																						"const": "summarized"
+																					},
+																					{
+																						"type": "string",
+																						"const": "recalled"
+																					}
+																				]
+																			},
+																			"unit": {
+																				"anyOf": [
+																					{
+																						"type": "string",
+																						"const": "paths"
+																					},
+																					{
+																						"type": "string",
+																						"const": "source-files"
+																					},
+																					{
+																						"type": "string",
+																						"const": "rules"
+																					},
+																					{
+																						"type": "string",
+																						"const": "messages"
+																					},
+																					{
+																						"type": "string",
+																						"const": "entries"
+																					},
+																					{
+																						"type": "string",
+																						"const": "observations"
+																					}
+																				]
+																			},
+																			"count": {
+																				"type": "integer",
+																				"minimum": 0
+																			},
+																			"paths": {
+																				"type": "array",
+																				"items": {
+																					"type": "string"
+																				}
+																			}
+																		},
+																		"additionalProperties": false
+																	}
+																},
+																"warnings": {
+																	"type": "array",
+																	"items": {
+																		"type": "string"
+																	}
+																},
+																"tokens": {
+																	"type": "object",
+																	"required": ["before", "after", "basis"],
+																	"properties": {
+																		"before": {
+																			"type": "integer",
+																			"minimum": 0
+																		},
+																		"after": {
+																			"type": "integer",
+																			"minimum": 0
+																		},
+																		"basis": {
+																			"type": "string",
+																			"const": "runtime-estimate"
+																		}
+																	},
+																	"additionalProperties": false
+																}
+															},
+															"additionalProperties": false
+														},
+														{
+															"type": "null"
+														}
+													]
+												}
+											},
+											"additionalProperties": false
+										},
 										"permissions": {
 											"type": "array",
 											"items": {
@@ -30124,6 +32899,632 @@
 															"maxLength": 16384
 														},
 														"maxItems": 32
+													}
+												},
+												"additionalProperties": false
+											},
+											"contextWork": {
+												"type": "object",
+												"required": ["version", "active", "latest"],
+												"properties": {
+													"version": {
+														"type": "number",
+														"const": 1
+													},
+													"active": {
+														"anyOf": [
+															{
+																"type": "object",
+																"required": ["kind", "phase", "status", "message", "at"],
+																"properties": {
+																	"operation": {
+																		"type": "object",
+																		"required": ["version", "id", "kind", "sessionId", "cwd", "origin", "reason", "startedAt"],
+																		"properties": {
+																			"version": {
+																				"type": "number",
+																				"const": 1
+																			},
+																			"id": {
+																				"type": "string",
+																				"maxLength": 128
+																			},
+																			"kind": {
+																				"anyOf": [
+																					{
+																						"type": "string",
+																						"const": "context-init"
+																					},
+																					{
+																						"type": "string",
+																						"const": "context-clear"
+																					},
+																					{
+																						"type": "string",
+																						"const": "context-refresh"
+																					},
+																					{
+																						"type": "string",
+																						"const": "context-recall"
+																					},
+																					{
+																						"type": "string",
+																						"const": "context-recover"
+																					},
+																					{
+																						"type": "string",
+																						"const": "compaction"
+																					}
+																				]
+																			},
+																			"sessionId": {
+																				"anyOf": [
+																					{
+																						"type": "string"
+																					},
+																					{
+																						"type": "null"
+																					}
+																				]
+																			},
+																			"cwd": {
+																				"type": "string"
+																			},
+																			"origin": {
+																				"anyOf": [
+																					{
+																						"type": "string",
+																						"const": "operator"
+																					},
+																					{
+																						"type": "string",
+																						"const": "automatic"
+																					}
+																				]
+																			},
+																			"reason": {
+																				"type": "string"
+																			},
+																			"startedAt": {
+																				"type": "string"
+																			},
+																			"elapsedMs": {
+																				"type": "integer",
+																				"minimum": 0
+																			},
+																			"outcome": {
+																				"anyOf": [
+																					{
+																						"type": "string",
+																						"const": "completed"
+																					},
+																					{
+																						"type": "string",
+																						"const": "previewed"
+																					},
+																					{
+																						"type": "string",
+																						"const": "unchanged"
+																					},
+																					{
+																						"type": "string",
+																						"const": "cancelled"
+																					},
+																					{
+																						"type": "string",
+																						"const": "failed"
+																					}
+																				]
+																			},
+																			"facts": {
+																				"type": "array",
+																				"items": {
+																					"type": "object",
+																					"required": ["kind", "unit"],
+																					"properties": {
+																						"kind": {
+																							"anyOf": [
+																								{
+																									"type": "string",
+																									"const": "created"
+																								},
+																								{
+																									"type": "string",
+																									"const": "updated"
+																								},
+																								{
+																									"type": "string",
+																									"const": "indexed"
+																								},
+																								{
+																									"type": "string",
+																									"const": "ingested"
+																								},
+																								{
+																									"type": "string",
+																									"const": "preserved"
+																								},
+																								{
+																									"type": "string",
+																									"const": "omitted"
+																								},
+																								{
+																									"type": "string",
+																									"const": "removed"
+																								},
+																								{
+																									"type": "string",
+																									"const": "read"
+																								},
+																								{
+																									"type": "string",
+																									"const": "summarized"
+																								},
+																								{
+																									"type": "string",
+																									"const": "recalled"
+																								}
+																							]
+																						},
+																						"unit": {
+																							"anyOf": [
+																								{
+																									"type": "string",
+																									"const": "paths"
+																								},
+																								{
+																									"type": "string",
+																									"const": "source-files"
+																								},
+																								{
+																									"type": "string",
+																									"const": "rules"
+																								},
+																								{
+																									"type": "string",
+																									"const": "messages"
+																								},
+																								{
+																									"type": "string",
+																									"const": "entries"
+																								},
+																								{
+																									"type": "string",
+																									"const": "observations"
+																								}
+																							]
+																						},
+																						"count": {
+																							"type": "integer",
+																							"minimum": 0
+																						},
+																						"paths": {
+																							"type": "array",
+																							"items": {
+																								"type": "string"
+																							}
+																						}
+																					},
+																					"additionalProperties": false
+																				}
+																			},
+																			"warnings": {
+																				"type": "array",
+																				"items": {
+																					"type": "string"
+																				}
+																			},
+																			"tokens": {
+																				"type": "object",
+																				"required": ["before", "after", "basis"],
+																				"properties": {
+																					"before": {
+																						"type": "integer",
+																						"minimum": 0
+																					},
+																					"after": {
+																						"type": "integer",
+																						"minimum": 0
+																					},
+																					"basis": {
+																						"type": "string",
+																						"const": "runtime-estimate"
+																					}
+																				},
+																				"additionalProperties": false
+																			}
+																		},
+																		"additionalProperties": false
+																	},
+																	"kind": {
+																		"anyOf": [
+																			{
+																				"type": "string",
+																				"const": "context-init"
+																			},
+																			{
+																				"type": "string",
+																				"const": "context-clear"
+																			},
+																			{
+																				"type": "string",
+																				"const": "context-refresh"
+																			},
+																			{
+																				"type": "string",
+																				"const": "context-recall"
+																			},
+																			{
+																				"type": "string",
+																				"const": "context-recover"
+																			},
+																			{
+																				"type": "string",
+																				"const": "compaction"
+																			}
+																		]
+																	},
+																	"phase": {
+																		"anyOf": [
+																			{
+																				"type": "string",
+																				"const": "scan"
+																			},
+																			{
+																				"type": "string",
+																				"const": "codewiki"
+																			},
+																			{
+																				"type": "string",
+																				"const": "generate"
+																			},
+																			{
+																				"type": "string",
+																				"const": "clio-md"
+																			},
+																			{
+																				"type": "string",
+																				"const": "state"
+																			},
+																			{
+																				"type": "string",
+																				"const": "compact"
+																			},
+																			{
+																				"type": "string",
+																				"const": "summarize"
+																			},
+																			{
+																				"type": "string",
+																				"const": "done"
+																			}
+																		]
+																	},
+																	"status": {
+																		"anyOf": [
+																			{
+																				"type": "string",
+																				"const": "started"
+																			},
+																			{
+																				"type": "string",
+																				"const": "running"
+																			},
+																			{
+																				"type": "string",
+																				"const": "completed"
+																			},
+																			{
+																				"type": "string",
+																				"const": "failed"
+																			}
+																		]
+																	},
+																	"message": {
+																		"type": "string"
+																	},
+																	"at": {
+																		"type": "number"
+																	},
+																	"current": {
+																		"type": "integer",
+																		"minimum": 0
+																	},
+																	"total": {
+																		"type": "integer",
+																		"minimum": 0
+																	},
+																	"detail": {
+																		"type": "string"
+																	},
+																	"stages": {
+																		"type": "array",
+																		"items": {
+																			"anyOf": [
+																				{
+																					"type": "string",
+																					"const": "scan"
+																				},
+																				{
+																					"type": "string",
+																					"const": "codewiki"
+																				},
+																				{
+																					"type": "string",
+																					"const": "generate"
+																				},
+																				{
+																					"type": "string",
+																					"const": "clio-md"
+																				},
+																				{
+																					"type": "string",
+																					"const": "state"
+																				},
+																				{
+																					"type": "string",
+																					"const": "compact"
+																				},
+																				{
+																					"type": "string",
+																					"const": "summarize"
+																				},
+																				{
+																					"type": "string",
+																					"const": "done"
+																				}
+																			]
+																		}
+																	},
+																	"timing": {
+																		"type": "object",
+																		"required": ["runId", "startedAtMs", "timeoutMs"],
+																		"properties": {
+																			"runId": {
+																				"type": "string"
+																			},
+																			"startedAtMs": {
+																				"type": "number"
+																			},
+																			"timeoutMs": {
+																				"type": "number"
+																			}
+																		},
+																		"additionalProperties": false
+																	}
+																},
+																"additionalProperties": false
+															},
+															{
+																"type": "null"
+															}
+														]
+													},
+													"latest": {
+														"anyOf": [
+															{
+																"type": "object",
+																"required": ["version", "id", "kind", "sessionId", "cwd", "origin", "reason", "startedAt"],
+																"properties": {
+																	"version": {
+																		"type": "number",
+																		"const": 1
+																	},
+																	"id": {
+																		"type": "string",
+																		"maxLength": 128
+																	},
+																	"kind": {
+																		"anyOf": [
+																			{
+																				"type": "string",
+																				"const": "context-init"
+																			},
+																			{
+																				"type": "string",
+																				"const": "context-clear"
+																			},
+																			{
+																				"type": "string",
+																				"const": "context-refresh"
+																			},
+																			{
+																				"type": "string",
+																				"const": "context-recall"
+																			},
+																			{
+																				"type": "string",
+																				"const": "context-recover"
+																			},
+																			{
+																				"type": "string",
+																				"const": "compaction"
+																			}
+																		]
+																	},
+																	"sessionId": {
+																		"anyOf": [
+																			{
+																				"type": "string"
+																			},
+																			{
+																				"type": "null"
+																			}
+																		]
+																	},
+																	"cwd": {
+																		"type": "string"
+																	},
+																	"origin": {
+																		"anyOf": [
+																			{
+																				"type": "string",
+																				"const": "operator"
+																			},
+																			{
+																				"type": "string",
+																				"const": "automatic"
+																			}
+																		]
+																	},
+																	"reason": {
+																		"type": "string"
+																	},
+																	"startedAt": {
+																		"type": "string"
+																	},
+																	"elapsedMs": {
+																		"type": "integer",
+																		"minimum": 0
+																	},
+																	"outcome": {
+																		"anyOf": [
+																			{
+																				"type": "string",
+																				"const": "completed"
+																			},
+																			{
+																				"type": "string",
+																				"const": "previewed"
+																			},
+																			{
+																				"type": "string",
+																				"const": "unchanged"
+																			},
+																			{
+																				"type": "string",
+																				"const": "cancelled"
+																			},
+																			{
+																				"type": "string",
+																				"const": "failed"
+																			}
+																		]
+																	},
+																	"facts": {
+																		"type": "array",
+																		"items": {
+																			"type": "object",
+																			"required": ["kind", "unit"],
+																			"properties": {
+																				"kind": {
+																					"anyOf": [
+																						{
+																							"type": "string",
+																							"const": "created"
+																						},
+																						{
+																							"type": "string",
+																							"const": "updated"
+																						},
+																						{
+																							"type": "string",
+																							"const": "indexed"
+																						},
+																						{
+																							"type": "string",
+																							"const": "ingested"
+																						},
+																						{
+																							"type": "string",
+																							"const": "preserved"
+																						},
+																						{
+																							"type": "string",
+																							"const": "omitted"
+																						},
+																						{
+																							"type": "string",
+																							"const": "removed"
+																						},
+																						{
+																							"type": "string",
+																							"const": "read"
+																						},
+																						{
+																							"type": "string",
+																							"const": "summarized"
+																						},
+																						{
+																							"type": "string",
+																							"const": "recalled"
+																						}
+																					]
+																				},
+																				"unit": {
+																					"anyOf": [
+																						{
+																							"type": "string",
+																							"const": "paths"
+																						},
+																						{
+																							"type": "string",
+																							"const": "source-files"
+																						},
+																						{
+																							"type": "string",
+																							"const": "rules"
+																						},
+																						{
+																							"type": "string",
+																							"const": "messages"
+																						},
+																						{
+																							"type": "string",
+																							"const": "entries"
+																						},
+																						{
+																							"type": "string",
+																							"const": "observations"
+																						}
+																					]
+																				},
+																				"count": {
+																					"type": "integer",
+																					"minimum": 0
+																				},
+																				"paths": {
+																					"type": "array",
+																					"items": {
+																						"type": "string"
+																					}
+																				}
+																			},
+																			"additionalProperties": false
+																		}
+																	},
+																	"warnings": {
+																		"type": "array",
+																		"items": {
+																			"type": "string"
+																		}
+																	},
+																	"tokens": {
+																		"type": "object",
+																		"required": ["before", "after", "basis"],
+																		"properties": {
+																			"before": {
+																				"type": "integer",
+																				"minimum": 0
+																			},
+																			"after": {
+																				"type": "integer",
+																				"minimum": 0
+																			},
+																			"basis": {
+																				"type": "string",
+																				"const": "runtime-estimate"
+																			}
+																		},
+																		"additionalProperties": false
+																	}
+																},
+																"additionalProperties": false
+															},
+															{
+																"type": "null"
+															}
+														]
 													}
 												},
 												"additionalProperties": false
@@ -32875,6 +36276,632 @@
 														"maxLength": 16384
 													},
 													"maxItems": 32
+												}
+											},
+											"additionalProperties": false
+										},
+										"contextWork": {
+											"type": "object",
+											"required": ["version", "active", "latest"],
+											"properties": {
+												"version": {
+													"type": "number",
+													"const": 1
+												},
+												"active": {
+													"anyOf": [
+														{
+															"type": "object",
+															"required": ["kind", "phase", "status", "message", "at"],
+															"properties": {
+																"operation": {
+																	"type": "object",
+																	"required": ["version", "id", "kind", "sessionId", "cwd", "origin", "reason", "startedAt"],
+																	"properties": {
+																		"version": {
+																			"type": "number",
+																			"const": 1
+																		},
+																		"id": {
+																			"type": "string",
+																			"maxLength": 128
+																		},
+																		"kind": {
+																			"anyOf": [
+																				{
+																					"type": "string",
+																					"const": "context-init"
+																				},
+																				{
+																					"type": "string",
+																					"const": "context-clear"
+																				},
+																				{
+																					"type": "string",
+																					"const": "context-refresh"
+																				},
+																				{
+																					"type": "string",
+																					"const": "context-recall"
+																				},
+																				{
+																					"type": "string",
+																					"const": "context-recover"
+																				},
+																				{
+																					"type": "string",
+																					"const": "compaction"
+																				}
+																			]
+																		},
+																		"sessionId": {
+																			"anyOf": [
+																				{
+																					"type": "string"
+																				},
+																				{
+																					"type": "null"
+																				}
+																			]
+																		},
+																		"cwd": {
+																			"type": "string"
+																		},
+																		"origin": {
+																			"anyOf": [
+																				{
+																					"type": "string",
+																					"const": "operator"
+																				},
+																				{
+																					"type": "string",
+																					"const": "automatic"
+																				}
+																			]
+																		},
+																		"reason": {
+																			"type": "string"
+																		},
+																		"startedAt": {
+																			"type": "string"
+																		},
+																		"elapsedMs": {
+																			"type": "integer",
+																			"minimum": 0
+																		},
+																		"outcome": {
+																			"anyOf": [
+																				{
+																					"type": "string",
+																					"const": "completed"
+																				},
+																				{
+																					"type": "string",
+																					"const": "previewed"
+																				},
+																				{
+																					"type": "string",
+																					"const": "unchanged"
+																				},
+																				{
+																					"type": "string",
+																					"const": "cancelled"
+																				},
+																				{
+																					"type": "string",
+																					"const": "failed"
+																				}
+																			]
+																		},
+																		"facts": {
+																			"type": "array",
+																			"items": {
+																				"type": "object",
+																				"required": ["kind", "unit"],
+																				"properties": {
+																					"kind": {
+																						"anyOf": [
+																							{
+																								"type": "string",
+																								"const": "created"
+																							},
+																							{
+																								"type": "string",
+																								"const": "updated"
+																							},
+																							{
+																								"type": "string",
+																								"const": "indexed"
+																							},
+																							{
+																								"type": "string",
+																								"const": "ingested"
+																							},
+																							{
+																								"type": "string",
+																								"const": "preserved"
+																							},
+																							{
+																								"type": "string",
+																								"const": "omitted"
+																							},
+																							{
+																								"type": "string",
+																								"const": "removed"
+																							},
+																							{
+																								"type": "string",
+																								"const": "read"
+																							},
+																							{
+																								"type": "string",
+																								"const": "summarized"
+																							},
+																							{
+																								"type": "string",
+																								"const": "recalled"
+																							}
+																						]
+																					},
+																					"unit": {
+																						"anyOf": [
+																							{
+																								"type": "string",
+																								"const": "paths"
+																							},
+																							{
+																								"type": "string",
+																								"const": "source-files"
+																							},
+																							{
+																								"type": "string",
+																								"const": "rules"
+																							},
+																							{
+																								"type": "string",
+																								"const": "messages"
+																							},
+																							{
+																								"type": "string",
+																								"const": "entries"
+																							},
+																							{
+																								"type": "string",
+																								"const": "observations"
+																							}
+																						]
+																					},
+																					"count": {
+																						"type": "integer",
+																						"minimum": 0
+																					},
+																					"paths": {
+																						"type": "array",
+																						"items": {
+																							"type": "string"
+																						}
+																					}
+																				},
+																				"additionalProperties": false
+																			}
+																		},
+																		"warnings": {
+																			"type": "array",
+																			"items": {
+																				"type": "string"
+																			}
+																		},
+																		"tokens": {
+																			"type": "object",
+																			"required": ["before", "after", "basis"],
+																			"properties": {
+																				"before": {
+																					"type": "integer",
+																					"minimum": 0
+																				},
+																				"after": {
+																					"type": "integer",
+																					"minimum": 0
+																				},
+																				"basis": {
+																					"type": "string",
+																					"const": "runtime-estimate"
+																				}
+																			},
+																			"additionalProperties": false
+																		}
+																	},
+																	"additionalProperties": false
+																},
+																"kind": {
+																	"anyOf": [
+																		{
+																			"type": "string",
+																			"const": "context-init"
+																		},
+																		{
+																			"type": "string",
+																			"const": "context-clear"
+																		},
+																		{
+																			"type": "string",
+																			"const": "context-refresh"
+																		},
+																		{
+																			"type": "string",
+																			"const": "context-recall"
+																		},
+																		{
+																			"type": "string",
+																			"const": "context-recover"
+																		},
+																		{
+																			"type": "string",
+																			"const": "compaction"
+																		}
+																	]
+																},
+																"phase": {
+																	"anyOf": [
+																		{
+																			"type": "string",
+																			"const": "scan"
+																		},
+																		{
+																			"type": "string",
+																			"const": "codewiki"
+																		},
+																		{
+																			"type": "string",
+																			"const": "generate"
+																		},
+																		{
+																			"type": "string",
+																			"const": "clio-md"
+																		},
+																		{
+																			"type": "string",
+																			"const": "state"
+																		},
+																		{
+																			"type": "string",
+																			"const": "compact"
+																		},
+																		{
+																			"type": "string",
+																			"const": "summarize"
+																		},
+																		{
+																			"type": "string",
+																			"const": "done"
+																		}
+																	]
+																},
+																"status": {
+																	"anyOf": [
+																		{
+																			"type": "string",
+																			"const": "started"
+																		},
+																		{
+																			"type": "string",
+																			"const": "running"
+																		},
+																		{
+																			"type": "string",
+																			"const": "completed"
+																		},
+																		{
+																			"type": "string",
+																			"const": "failed"
+																		}
+																	]
+																},
+																"message": {
+																	"type": "string"
+																},
+																"at": {
+																	"type": "number"
+																},
+																"current": {
+																	"type": "integer",
+																	"minimum": 0
+																},
+																"total": {
+																	"type": "integer",
+																	"minimum": 0
+																},
+																"detail": {
+																	"type": "string"
+																},
+																"stages": {
+																	"type": "array",
+																	"items": {
+																		"anyOf": [
+																			{
+																				"type": "string",
+																				"const": "scan"
+																			},
+																			{
+																				"type": "string",
+																				"const": "codewiki"
+																			},
+																			{
+																				"type": "string",
+																				"const": "generate"
+																			},
+																			{
+																				"type": "string",
+																				"const": "clio-md"
+																			},
+																			{
+																				"type": "string",
+																				"const": "state"
+																			},
+																			{
+																				"type": "string",
+																				"const": "compact"
+																			},
+																			{
+																				"type": "string",
+																				"const": "summarize"
+																			},
+																			{
+																				"type": "string",
+																				"const": "done"
+																			}
+																		]
+																	}
+																},
+																"timing": {
+																	"type": "object",
+																	"required": ["runId", "startedAtMs", "timeoutMs"],
+																	"properties": {
+																		"runId": {
+																			"type": "string"
+																		},
+																		"startedAtMs": {
+																			"type": "number"
+																		},
+																		"timeoutMs": {
+																			"type": "number"
+																		}
+																	},
+																	"additionalProperties": false
+																}
+															},
+															"additionalProperties": false
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"latest": {
+													"anyOf": [
+														{
+															"type": "object",
+															"required": ["version", "id", "kind", "sessionId", "cwd", "origin", "reason", "startedAt"],
+															"properties": {
+																"version": {
+																	"type": "number",
+																	"const": 1
+																},
+																"id": {
+																	"type": "string",
+																	"maxLength": 128
+																},
+																"kind": {
+																	"anyOf": [
+																		{
+																			"type": "string",
+																			"const": "context-init"
+																		},
+																		{
+																			"type": "string",
+																			"const": "context-clear"
+																		},
+																		{
+																			"type": "string",
+																			"const": "context-refresh"
+																		},
+																		{
+																			"type": "string",
+																			"const": "context-recall"
+																		},
+																		{
+																			"type": "string",
+																			"const": "context-recover"
+																		},
+																		{
+																			"type": "string",
+																			"const": "compaction"
+																		}
+																	]
+																},
+																"sessionId": {
+																	"anyOf": [
+																		{
+																			"type": "string"
+																		},
+																		{
+																			"type": "null"
+																		}
+																	]
+																},
+																"cwd": {
+																	"type": "string"
+																},
+																"origin": {
+																	"anyOf": [
+																		{
+																			"type": "string",
+																			"const": "operator"
+																		},
+																		{
+																			"type": "string",
+																			"const": "automatic"
+																		}
+																	]
+																},
+																"reason": {
+																	"type": "string"
+																},
+																"startedAt": {
+																	"type": "string"
+																},
+																"elapsedMs": {
+																	"type": "integer",
+																	"minimum": 0
+																},
+																"outcome": {
+																	"anyOf": [
+																		{
+																			"type": "string",
+																			"const": "completed"
+																		},
+																		{
+																			"type": "string",
+																			"const": "previewed"
+																		},
+																		{
+																			"type": "string",
+																			"const": "unchanged"
+																		},
+																		{
+																			"type": "string",
+																			"const": "cancelled"
+																		},
+																		{
+																			"type": "string",
+																			"const": "failed"
+																		}
+																	]
+																},
+																"facts": {
+																	"type": "array",
+																	"items": {
+																		"type": "object",
+																		"required": ["kind", "unit"],
+																		"properties": {
+																			"kind": {
+																				"anyOf": [
+																					{
+																						"type": "string",
+																						"const": "created"
+																					},
+																					{
+																						"type": "string",
+																						"const": "updated"
+																					},
+																					{
+																						"type": "string",
+																						"const": "indexed"
+																					},
+																					{
+																						"type": "string",
+																						"const": "ingested"
+																					},
+																					{
+																						"type": "string",
+																						"const": "preserved"
+																					},
+																					{
+																						"type": "string",
+																						"const": "omitted"
+																					},
+																					{
+																						"type": "string",
+																						"const": "removed"
+																					},
+																					{
+																						"type": "string",
+																						"const": "read"
+																					},
+																					{
+																						"type": "string",
+																						"const": "summarized"
+																					},
+																					{
+																						"type": "string",
+																						"const": "recalled"
+																					}
+																				]
+																			},
+																			"unit": {
+																				"anyOf": [
+																					{
+																						"type": "string",
+																						"const": "paths"
+																					},
+																					{
+																						"type": "string",
+																						"const": "source-files"
+																					},
+																					{
+																						"type": "string",
+																						"const": "rules"
+																					},
+																					{
+																						"type": "string",
+																						"const": "messages"
+																					},
+																					{
+																						"type": "string",
+																						"const": "entries"
+																					},
+																					{
+																						"type": "string",
+																						"const": "observations"
+																					}
+																				]
+																			},
+																			"count": {
+																				"type": "integer",
+																				"minimum": 0
+																			},
+																			"paths": {
+																				"type": "array",
+																				"items": {
+																					"type": "string"
+																				}
+																			}
+																		},
+																		"additionalProperties": false
+																	}
+																},
+																"warnings": {
+																	"type": "array",
+																	"items": {
+																		"type": "string"
+																	}
+																},
+																"tokens": {
+																	"type": "object",
+																	"required": ["before", "after", "basis"],
+																	"properties": {
+																		"before": {
+																			"type": "integer",
+																			"minimum": 0
+																		},
+																		"after": {
+																			"type": "integer",
+																			"minimum": 0
+																		},
+																		"basis": {
+																			"type": "string",
+																			"const": "runtime-estimate"
+																		}
+																	},
+																	"additionalProperties": false
+																}
+															},
+															"additionalProperties": false
+														},
+														{
+															"type": "null"
+														}
+													]
 												}
 											},
 											"additionalProperties": false
@@ -39690,6 +43717,1094 @@
 			},
 			"Event": {
 				"anyOf": [
+					{
+						"type": "object",
+						"required": ["v", "epoch", "seq", "at", "type", "payload"],
+						"properties": {
+							"v": {
+								"type": "number",
+								"const": 1
+							},
+							"epoch": {
+								"type": "string",
+								"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+							},
+							"seq": {
+								"type": "integer",
+								"minimum": 0
+							},
+							"at": {
+								"type": "string"
+							},
+							"type": {
+								"type": "string",
+								"const": "context.activity"
+							},
+							"payload": {
+								"type": "object",
+								"required": ["resource", "revision", "activity"],
+								"properties": {
+									"resource": {
+										"type": "string",
+										"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+									},
+									"revision": {
+										"type": "integer",
+										"minimum": 1
+									},
+									"activity": {
+										"type": "object",
+										"required": ["kind", "phase", "status", "message", "at"],
+										"properties": {
+											"operation": {
+												"type": "object",
+												"required": ["version", "id", "kind", "sessionId", "cwd", "origin", "reason", "startedAt"],
+												"properties": {
+													"version": {
+														"type": "number",
+														"const": 1
+													},
+													"id": {
+														"type": "string",
+														"maxLength": 128
+													},
+													"kind": {
+														"anyOf": [
+															{
+																"type": "string",
+																"const": "context-init"
+															},
+															{
+																"type": "string",
+																"const": "context-clear"
+															},
+															{
+																"type": "string",
+																"const": "context-refresh"
+															},
+															{
+																"type": "string",
+																"const": "context-recall"
+															},
+															{
+																"type": "string",
+																"const": "context-recover"
+															},
+															{
+																"type": "string",
+																"const": "compaction"
+															}
+														]
+													},
+													"sessionId": {
+														"anyOf": [
+															{
+																"type": "string"
+															},
+															{
+																"type": "null"
+															}
+														]
+													},
+													"cwd": {
+														"type": "string"
+													},
+													"origin": {
+														"anyOf": [
+															{
+																"type": "string",
+																"const": "operator"
+															},
+															{
+																"type": "string",
+																"const": "automatic"
+															}
+														]
+													},
+													"reason": {
+														"type": "string"
+													},
+													"startedAt": {
+														"type": "string"
+													},
+													"elapsedMs": {
+														"type": "integer",
+														"minimum": 0
+													},
+													"outcome": {
+														"anyOf": [
+															{
+																"type": "string",
+																"const": "completed"
+															},
+															{
+																"type": "string",
+																"const": "previewed"
+															},
+															{
+																"type": "string",
+																"const": "unchanged"
+															},
+															{
+																"type": "string",
+																"const": "cancelled"
+															},
+															{
+																"type": "string",
+																"const": "failed"
+															}
+														]
+													},
+													"facts": {
+														"type": "array",
+														"items": {
+															"type": "object",
+															"required": ["kind", "unit"],
+															"properties": {
+																"kind": {
+																	"anyOf": [
+																		{
+																			"type": "string",
+																			"const": "created"
+																		},
+																		{
+																			"type": "string",
+																			"const": "updated"
+																		},
+																		{
+																			"type": "string",
+																			"const": "indexed"
+																		},
+																		{
+																			"type": "string",
+																			"const": "ingested"
+																		},
+																		{
+																			"type": "string",
+																			"const": "preserved"
+																		},
+																		{
+																			"type": "string",
+																			"const": "omitted"
+																		},
+																		{
+																			"type": "string",
+																			"const": "removed"
+																		},
+																		{
+																			"type": "string",
+																			"const": "read"
+																		},
+																		{
+																			"type": "string",
+																			"const": "summarized"
+																		},
+																		{
+																			"type": "string",
+																			"const": "recalled"
+																		}
+																	]
+																},
+																"unit": {
+																	"anyOf": [
+																		{
+																			"type": "string",
+																			"const": "paths"
+																		},
+																		{
+																			"type": "string",
+																			"const": "source-files"
+																		},
+																		{
+																			"type": "string",
+																			"const": "rules"
+																		},
+																		{
+																			"type": "string",
+																			"const": "messages"
+																		},
+																		{
+																			"type": "string",
+																			"const": "entries"
+																		},
+																		{
+																			"type": "string",
+																			"const": "observations"
+																		}
+																	]
+																},
+																"count": {
+																	"type": "integer",
+																	"minimum": 0
+																},
+																"paths": {
+																	"type": "array",
+																	"items": {
+																		"type": "string"
+																	}
+																}
+															},
+															"additionalProperties": false
+														}
+													},
+													"warnings": {
+														"type": "array",
+														"items": {
+															"type": "string"
+														}
+													},
+													"tokens": {
+														"type": "object",
+														"required": ["before", "after", "basis"],
+														"properties": {
+															"before": {
+																"type": "integer",
+																"minimum": 0
+															},
+															"after": {
+																"type": "integer",
+																"minimum": 0
+															},
+															"basis": {
+																"type": "string",
+																"const": "runtime-estimate"
+															}
+														},
+														"additionalProperties": false
+													}
+												},
+												"additionalProperties": false
+											},
+											"kind": {
+												"anyOf": [
+													{
+														"type": "string",
+														"const": "context-init"
+													},
+													{
+														"type": "string",
+														"const": "context-clear"
+													},
+													{
+														"type": "string",
+														"const": "context-refresh"
+													},
+													{
+														"type": "string",
+														"const": "context-recall"
+													},
+													{
+														"type": "string",
+														"const": "context-recover"
+													},
+													{
+														"type": "string",
+														"const": "compaction"
+													}
+												]
+											},
+											"phase": {
+												"anyOf": [
+													{
+														"type": "string",
+														"const": "scan"
+													},
+													{
+														"type": "string",
+														"const": "codewiki"
+													},
+													{
+														"type": "string",
+														"const": "generate"
+													},
+													{
+														"type": "string",
+														"const": "clio-md"
+													},
+													{
+														"type": "string",
+														"const": "state"
+													},
+													{
+														"type": "string",
+														"const": "compact"
+													},
+													{
+														"type": "string",
+														"const": "summarize"
+													},
+													{
+														"type": "string",
+														"const": "done"
+													}
+												]
+											},
+											"status": {
+												"anyOf": [
+													{
+														"type": "string",
+														"const": "started"
+													},
+													{
+														"type": "string",
+														"const": "running"
+													},
+													{
+														"type": "string",
+														"const": "completed"
+													},
+													{
+														"type": "string",
+														"const": "failed"
+													}
+												]
+											},
+											"message": {
+												"type": "string"
+											},
+											"at": {
+												"type": "number"
+											},
+											"current": {
+												"type": "integer",
+												"minimum": 0
+											},
+											"total": {
+												"type": "integer",
+												"minimum": 0
+											},
+											"detail": {
+												"type": "string"
+											},
+											"stages": {
+												"type": "array",
+												"items": {
+													"anyOf": [
+														{
+															"type": "string",
+															"const": "scan"
+														},
+														{
+															"type": "string",
+															"const": "codewiki"
+														},
+														{
+															"type": "string",
+															"const": "generate"
+														},
+														{
+															"type": "string",
+															"const": "clio-md"
+														},
+														{
+															"type": "string",
+															"const": "state"
+														},
+														{
+															"type": "string",
+															"const": "compact"
+														},
+														{
+															"type": "string",
+															"const": "summarize"
+														},
+														{
+															"type": "string",
+															"const": "done"
+														}
+													]
+												}
+											},
+											"timing": {
+												"type": "object",
+												"required": ["runId", "startedAtMs", "timeoutMs"],
+												"properties": {
+													"runId": {
+														"type": "string"
+													},
+													"startedAtMs": {
+														"type": "number"
+													},
+													"timeoutMs": {
+														"type": "number"
+													}
+												},
+												"additionalProperties": false
+											}
+										},
+										"additionalProperties": false
+									}
+								},
+								"additionalProperties": false
+							}
+						}
+					},
+					{
+						"type": "object",
+						"required": ["v", "epoch", "seq", "at", "type", "payload"],
+						"properties": {
+							"v": {
+								"type": "number",
+								"const": 1
+							},
+							"epoch": {
+								"type": "string",
+								"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+							},
+							"seq": {
+								"type": "integer",
+								"minimum": 0
+							},
+							"at": {
+								"type": "string"
+							},
+							"type": {
+								"type": "string",
+								"const": "context.status"
+							},
+							"payload": {
+								"type": "object",
+								"required": ["resource", "revision", "status"],
+								"properties": {
+									"resource": {
+										"type": "string",
+										"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+									},
+									"revision": {
+										"type": "integer",
+										"minimum": 1
+									},
+									"status": {
+										"type": "object",
+										"required": ["version", "active", "latest"],
+										"properties": {
+											"version": {
+												"type": "number",
+												"const": 1
+											},
+											"active": {
+												"anyOf": [
+													{
+														"type": "object",
+														"required": ["kind", "phase", "status", "message", "at"],
+														"properties": {
+															"operation": {
+																"type": "object",
+																"required": ["version", "id", "kind", "sessionId", "cwd", "origin", "reason", "startedAt"],
+																"properties": {
+																	"version": {
+																		"type": "number",
+																		"const": 1
+																	},
+																	"id": {
+																		"type": "string",
+																		"maxLength": 128
+																	},
+																	"kind": {
+																		"anyOf": [
+																			{
+																				"type": "string",
+																				"const": "context-init"
+																			},
+																			{
+																				"type": "string",
+																				"const": "context-clear"
+																			},
+																			{
+																				"type": "string",
+																				"const": "context-refresh"
+																			},
+																			{
+																				"type": "string",
+																				"const": "context-recall"
+																			},
+																			{
+																				"type": "string",
+																				"const": "context-recover"
+																			},
+																			{
+																				"type": "string",
+																				"const": "compaction"
+																			}
+																		]
+																	},
+																	"sessionId": {
+																		"anyOf": [
+																			{
+																				"type": "string"
+																			},
+																			{
+																				"type": "null"
+																			}
+																		]
+																	},
+																	"cwd": {
+																		"type": "string"
+																	},
+																	"origin": {
+																		"anyOf": [
+																			{
+																				"type": "string",
+																				"const": "operator"
+																			},
+																			{
+																				"type": "string",
+																				"const": "automatic"
+																			}
+																		]
+																	},
+																	"reason": {
+																		"type": "string"
+																	},
+																	"startedAt": {
+																		"type": "string"
+																	},
+																	"elapsedMs": {
+																		"type": "integer",
+																		"minimum": 0
+																	},
+																	"outcome": {
+																		"anyOf": [
+																			{
+																				"type": "string",
+																				"const": "completed"
+																			},
+																			{
+																				"type": "string",
+																				"const": "previewed"
+																			},
+																			{
+																				"type": "string",
+																				"const": "unchanged"
+																			},
+																			{
+																				"type": "string",
+																				"const": "cancelled"
+																			},
+																			{
+																				"type": "string",
+																				"const": "failed"
+																			}
+																		]
+																	},
+																	"facts": {
+																		"type": "array",
+																		"items": {
+																			"type": "object",
+																			"required": ["kind", "unit"],
+																			"properties": {
+																				"kind": {
+																					"anyOf": [
+																						{
+																							"type": "string",
+																							"const": "created"
+																						},
+																						{
+																							"type": "string",
+																							"const": "updated"
+																						},
+																						{
+																							"type": "string",
+																							"const": "indexed"
+																						},
+																						{
+																							"type": "string",
+																							"const": "ingested"
+																						},
+																						{
+																							"type": "string",
+																							"const": "preserved"
+																						},
+																						{
+																							"type": "string",
+																							"const": "omitted"
+																						},
+																						{
+																							"type": "string",
+																							"const": "removed"
+																						},
+																						{
+																							"type": "string",
+																							"const": "read"
+																						},
+																						{
+																							"type": "string",
+																							"const": "summarized"
+																						},
+																						{
+																							"type": "string",
+																							"const": "recalled"
+																						}
+																					]
+																				},
+																				"unit": {
+																					"anyOf": [
+																						{
+																							"type": "string",
+																							"const": "paths"
+																						},
+																						{
+																							"type": "string",
+																							"const": "source-files"
+																						},
+																						{
+																							"type": "string",
+																							"const": "rules"
+																						},
+																						{
+																							"type": "string",
+																							"const": "messages"
+																						},
+																						{
+																							"type": "string",
+																							"const": "entries"
+																						},
+																						{
+																							"type": "string",
+																							"const": "observations"
+																						}
+																					]
+																				},
+																				"count": {
+																					"type": "integer",
+																					"minimum": 0
+																				},
+																				"paths": {
+																					"type": "array",
+																					"items": {
+																						"type": "string"
+																					}
+																				}
+																			},
+																			"additionalProperties": false
+																		}
+																	},
+																	"warnings": {
+																		"type": "array",
+																		"items": {
+																			"type": "string"
+																		}
+																	},
+																	"tokens": {
+																		"type": "object",
+																		"required": ["before", "after", "basis"],
+																		"properties": {
+																			"before": {
+																				"type": "integer",
+																				"minimum": 0
+																			},
+																			"after": {
+																				"type": "integer",
+																				"minimum": 0
+																			},
+																			"basis": {
+																				"type": "string",
+																				"const": "runtime-estimate"
+																			}
+																		},
+																		"additionalProperties": false
+																	}
+																},
+																"additionalProperties": false
+															},
+															"kind": {
+																"anyOf": [
+																	{
+																		"type": "string",
+																		"const": "context-init"
+																	},
+																	{
+																		"type": "string",
+																		"const": "context-clear"
+																	},
+																	{
+																		"type": "string",
+																		"const": "context-refresh"
+																	},
+																	{
+																		"type": "string",
+																		"const": "context-recall"
+																	},
+																	{
+																		"type": "string",
+																		"const": "context-recover"
+																	},
+																	{
+																		"type": "string",
+																		"const": "compaction"
+																	}
+																]
+															},
+															"phase": {
+																"anyOf": [
+																	{
+																		"type": "string",
+																		"const": "scan"
+																	},
+																	{
+																		"type": "string",
+																		"const": "codewiki"
+																	},
+																	{
+																		"type": "string",
+																		"const": "generate"
+																	},
+																	{
+																		"type": "string",
+																		"const": "clio-md"
+																	},
+																	{
+																		"type": "string",
+																		"const": "state"
+																	},
+																	{
+																		"type": "string",
+																		"const": "compact"
+																	},
+																	{
+																		"type": "string",
+																		"const": "summarize"
+																	},
+																	{
+																		"type": "string",
+																		"const": "done"
+																	}
+																]
+															},
+															"status": {
+																"anyOf": [
+																	{
+																		"type": "string",
+																		"const": "started"
+																	},
+																	{
+																		"type": "string",
+																		"const": "running"
+																	},
+																	{
+																		"type": "string",
+																		"const": "completed"
+																	},
+																	{
+																		"type": "string",
+																		"const": "failed"
+																	}
+																]
+															},
+															"message": {
+																"type": "string"
+															},
+															"at": {
+																"type": "number"
+															},
+															"current": {
+																"type": "integer",
+																"minimum": 0
+															},
+															"total": {
+																"type": "integer",
+																"minimum": 0
+															},
+															"detail": {
+																"type": "string"
+															},
+															"stages": {
+																"type": "array",
+																"items": {
+																	"anyOf": [
+																		{
+																			"type": "string",
+																			"const": "scan"
+																		},
+																		{
+																			"type": "string",
+																			"const": "codewiki"
+																		},
+																		{
+																			"type": "string",
+																			"const": "generate"
+																		},
+																		{
+																			"type": "string",
+																			"const": "clio-md"
+																		},
+																		{
+																			"type": "string",
+																			"const": "state"
+																		},
+																		{
+																			"type": "string",
+																			"const": "compact"
+																		},
+																		{
+																			"type": "string",
+																			"const": "summarize"
+																		},
+																		{
+																			"type": "string",
+																			"const": "done"
+																		}
+																	]
+																}
+															},
+															"timing": {
+																"type": "object",
+																"required": ["runId", "startedAtMs", "timeoutMs"],
+																"properties": {
+																	"runId": {
+																		"type": "string"
+																	},
+																	"startedAtMs": {
+																		"type": "number"
+																	},
+																	"timeoutMs": {
+																		"type": "number"
+																	}
+																},
+																"additionalProperties": false
+															}
+														},
+														"additionalProperties": false
+													},
+													{
+														"type": "null"
+													}
+												]
+											},
+											"latest": {
+												"anyOf": [
+													{
+														"type": "object",
+														"required": ["version", "id", "kind", "sessionId", "cwd", "origin", "reason", "startedAt"],
+														"properties": {
+															"version": {
+																"type": "number",
+																"const": 1
+															},
+															"id": {
+																"type": "string",
+																"maxLength": 128
+															},
+															"kind": {
+																"anyOf": [
+																	{
+																		"type": "string",
+																		"const": "context-init"
+																	},
+																	{
+																		"type": "string",
+																		"const": "context-clear"
+																	},
+																	{
+																		"type": "string",
+																		"const": "context-refresh"
+																	},
+																	{
+																		"type": "string",
+																		"const": "context-recall"
+																	},
+																	{
+																		"type": "string",
+																		"const": "context-recover"
+																	},
+																	{
+																		"type": "string",
+																		"const": "compaction"
+																	}
+																]
+															},
+															"sessionId": {
+																"anyOf": [
+																	{
+																		"type": "string"
+																	},
+																	{
+																		"type": "null"
+																	}
+																]
+															},
+															"cwd": {
+																"type": "string"
+															},
+															"origin": {
+																"anyOf": [
+																	{
+																		"type": "string",
+																		"const": "operator"
+																	},
+																	{
+																		"type": "string",
+																		"const": "automatic"
+																	}
+																]
+															},
+															"reason": {
+																"type": "string"
+															},
+															"startedAt": {
+																"type": "string"
+															},
+															"elapsedMs": {
+																"type": "integer",
+																"minimum": 0
+															},
+															"outcome": {
+																"anyOf": [
+																	{
+																		"type": "string",
+																		"const": "completed"
+																	},
+																	{
+																		"type": "string",
+																		"const": "previewed"
+																	},
+																	{
+																		"type": "string",
+																		"const": "unchanged"
+																	},
+																	{
+																		"type": "string",
+																		"const": "cancelled"
+																	},
+																	{
+																		"type": "string",
+																		"const": "failed"
+																	}
+																]
+															},
+															"facts": {
+																"type": "array",
+																"items": {
+																	"type": "object",
+																	"required": ["kind", "unit"],
+																	"properties": {
+																		"kind": {
+																			"anyOf": [
+																				{
+																					"type": "string",
+																					"const": "created"
+																				},
+																				{
+																					"type": "string",
+																					"const": "updated"
+																				},
+																				{
+																					"type": "string",
+																					"const": "indexed"
+																				},
+																				{
+																					"type": "string",
+																					"const": "ingested"
+																				},
+																				{
+																					"type": "string",
+																					"const": "preserved"
+																				},
+																				{
+																					"type": "string",
+																					"const": "omitted"
+																				},
+																				{
+																					"type": "string",
+																					"const": "removed"
+																				},
+																				{
+																					"type": "string",
+																					"const": "read"
+																				},
+																				{
+																					"type": "string",
+																					"const": "summarized"
+																				},
+																				{
+																					"type": "string",
+																					"const": "recalled"
+																				}
+																			]
+																		},
+																		"unit": {
+																			"anyOf": [
+																				{
+																					"type": "string",
+																					"const": "paths"
+																				},
+																				{
+																					"type": "string",
+																					"const": "source-files"
+																				},
+																				{
+																					"type": "string",
+																					"const": "rules"
+																				},
+																				{
+																					"type": "string",
+																					"const": "messages"
+																				},
+																				{
+																					"type": "string",
+																					"const": "entries"
+																				},
+																				{
+																					"type": "string",
+																					"const": "observations"
+																				}
+																			]
+																		},
+																		"count": {
+																			"type": "integer",
+																			"minimum": 0
+																		},
+																		"paths": {
+																			"type": "array",
+																			"items": {
+																				"type": "string"
+																			}
+																		}
+																	},
+																	"additionalProperties": false
+																}
+															},
+															"warnings": {
+																"type": "array",
+																"items": {
+																	"type": "string"
+																}
+															},
+															"tokens": {
+																"type": "object",
+																"required": ["before", "after", "basis"],
+																"properties": {
+																	"before": {
+																		"type": "integer",
+																		"minimum": 0
+																	},
+																	"after": {
+																		"type": "integer",
+																		"minimum": 0
+																	},
+																	"basis": {
+																		"type": "string",
+																		"const": "runtime-estimate"
+																	}
+																},
+																"additionalProperties": false
+															}
+														},
+														"additionalProperties": false
+													},
+													{
+														"type": "null"
+													}
+												]
+											}
+										},
+										"additionalProperties": false
+									}
+								},
+								"additionalProperties": false
+							}
+						}
+					},
 					{
 						"type": "object",
 						"required": ["v", "epoch", "seq", "at", "type", "payload"],

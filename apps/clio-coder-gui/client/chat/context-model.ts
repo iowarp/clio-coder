@@ -3,6 +3,7 @@
 // rather than printing a zero for it.
 
 import type { ContextLedger } from "../../contracts/context-ledger.js";
+import type { SessionWorkspace } from "../../contracts/session-telemetry.js";
 
 const SOURCE_WORDS: Readonly<Record<string, string>> = {
 	loaded: "read from the loaded model",
@@ -36,6 +37,7 @@ export interface ContextView {
 	lastCompaction: string | null;
 	cache: string | null;
 	handbook: string | null;
+	project: ContextFact[];
 	/** The lead figure: the share when the window is known, and the counts it is a share of. */
 	figure: { percent: string | null; used: string; window: string | null; basis: string };
 	/** The window's settings and recent history as short label and value pairs, for a facts list. */
@@ -51,6 +53,26 @@ export interface ContextFact {
 }
 
 const count = (value: number) => Math.round(value).toLocaleString("en-US");
+
+export function contextWorkspaceFacts(workspace: SessionWorkspace): ContextFact[] {
+	return [
+		{ label: "Workspace", value: null, note: workspace.cwd },
+		{
+			label: "Repository",
+			value: null,
+			note: workspace.isGit ? (workspace.branch ?? "Detached HEAD") : "No Git repository",
+		},
+		...(workspace.isGit
+			? [
+					{
+						label: "Working tree",
+						value: null,
+						note: workspace.dirty === null ? "Not reported" : workspace.dirty ? "Uncommitted changes" : "Clean",
+					},
+				]
+			: []),
+	];
+}
 
 function contextFacts(ledger: ContextLedger): ContextFact[] {
 	const known = ledger.contextWindow > 0;
@@ -88,22 +110,20 @@ function contextFacts(ledger: ContextLedger): ContextFact[] {
 		facts.push({
 			label: "Last compacted",
 			value: `${count(ledger.lastCompaction.tokensBefore)} → ${count(ledger.lastCompaction.tokensAfter)}`,
-			note: ledger.lastCompaction.trigger,
+			note: `runtime estimates; ${ledger.lastCompaction.trigger}`,
 		});
 	if (cache !== null)
 		facts.push({
 			label: "Prompt cache",
 			value: cache.cacheReadTokens === null ? null : count(cache.cacheReadTokens),
 			note: [
-				cache.cacheReadTokens === null ? "provider reported no cache reads" : "read from the provider cache",
+				cache.cacheReadTokens === null ? "cache reads not reported" : "read from the provider cache",
 				cache.shellReused ? "session shell reused" : "session shell rebuilt",
 				cache.backendVerdict === null ? null : VERDICT_WORDS[cache.backendVerdict],
 			]
 				.filter(Boolean)
 				.join("; "),
 		});
-	if (ledger.projectHandbookFiles !== null && ledger.projectHandbookFiles.length > 0)
-		facts.push({ label: "Handbook", value: null, note: ledger.projectHandbookFiles.join(", ") });
 	return facts;
 }
 
@@ -111,11 +131,24 @@ export function contextView(ledger: ContextLedger): ContextView {
 	const known = ledger.contextWindow > 0;
 	const slots = ledger.contextWindowSlots;
 	return {
+		project: [
+			{ label: "Coverage", value: null, note: ledger.projectPreload ?? "Unavailable until a prompt has compiled" },
+			{
+				label: "Selected sources",
+				value: null,
+				note:
+					ledger.projectHandbookFiles === null
+						? "Not reported"
+						: ledger.projectHandbookFiles.length === 0
+							? "No project handbook selected"
+							: ledger.projectHandbookFiles.join(", "),
+			},
+		],
 		figure: {
 			percent: known && ledger.percent !== null ? `${ledger.percent.toFixed(ledger.percent < 10 ? 1 : 0)}%` : null,
 			used: count(ledger.usedTokens),
 			window: known ? count(ledger.contextWindow) : null,
-			basis: ledger.measured ? "Measured by the provider" : "Estimated until the provider reports usage",
+			basis: ledger.measured ? "Total anchored to provider-reported usage" : "Estimated until the provider reports usage",
 		},
 		facts: contextFacts(ledger),
 		route: [ledger.provider, ledger.model].filter(Boolean).join(" · ") || "Route not reported",
@@ -125,7 +158,7 @@ export function contextView(ledger: ContextLedger): ContextView {
 				}.`
 			: "Window size not reported, so no share of it can be shown.",
 		accounting: `${tokens(ledger.usedTokens)} in use${share(ledger.percent)}, ${
-			ledger.measured ? "measured by the provider" : "estimated until the provider reports usage"
+			ledger.measured ? "anchored to provider-reported usage" : "estimated until the provider reports usage"
 		}.`,
 		rows: ledger.groups.map((group) => ({
 			key: group.category,
@@ -143,14 +176,14 @@ export function contextView(ledger: ContextLedger): ContextView {
 		lastCompaction:
 			ledger.lastCompaction === null
 				? null
-				: `Last compaction (${ledger.lastCompaction.trigger}): ${tokens(ledger.lastCompaction.tokensBefore)} to ${tokens(ledger.lastCompaction.tokensAfter)}.`,
+				: `Last compaction (${ledger.lastCompaction.trigger}): estimated ${tokens(ledger.lastCompaction.tokensBefore)} to ${tokens(ledger.lastCompaction.tokensAfter)}.`,
 		cache:
 			ledger.promptCache === null
 				? null
 				: [
 						ledger.promptCache.shellReused ? "Session shell reused" : "Session shell rebuilt",
 						ledger.promptCache.cacheReadTokens === null
-							? "provider reported no cache reads"
+							? "cache reads not reported"
 							: `${tokens(ledger.promptCache.cacheReadTokens)} read from the provider cache`,
 						ledger.promptCache.backendVerdict === null ? null : VERDICT_WORDS[ledger.promptCache.backendVerdict],
 					]

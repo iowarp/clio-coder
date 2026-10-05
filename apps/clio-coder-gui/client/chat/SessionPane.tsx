@@ -191,7 +191,15 @@ export const SessionPane = memo(function SessionPane({
 					capabilities: capabilities.data,
 					settledTurns: pane.turns.filter((turn) => turn.status !== "running").length,
 				};
-				if (id === "context") return <ContextPanel {...facts} />;
+				if (id === "context")
+					return (
+						<ContextPanel
+							{...facts}
+							nowMs={nowMs}
+							running={pane.turns.at(-1)?.status === "running"}
+							{...(pane.telemetry?.workspace ? { workspace: pane.telemetry.workspace } : {})}
+						/>
+					);
 				if (id === "usage")
 					return (
 						<UsagePanel

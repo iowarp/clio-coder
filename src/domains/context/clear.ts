@@ -16,6 +16,8 @@ export interface RunContextClearResult {
 	action: "cleared" | "cancelled";
 	removed: string[];
 	preserved: string[];
+	/** Existing protected paths, measured after the operation. */
+	preservedExisting?: string[];
 }
 
 const ACCUMULATED_CONTEXT_PATHS = [
@@ -61,7 +63,12 @@ export async function runContextClear(input: RunContextClearInput = {}): Promise
 	const confirmed = await input.confirmContext?.();
 	if (confirmed !== true) {
 		out(input.io, "clio-coder context reset cancelled; no files removed.\n");
-		return { action: "cancelled", removed: [], preserved: [...PRESERVED_CONTEXT_PATHS] };
+		return {
+			action: "cancelled",
+			removed: [],
+			preserved: [...PRESERVED_CONTEXT_PATHS],
+			preservedExisting: PRESERVED_CONTEXT_PATHS.filter((path) => existsSync(relativeContextPath(cwd, path))),
+		};
 	}
 
 	// Operator input must not hold the index lease or follow a partial deletion.
@@ -83,9 +90,14 @@ export async function runContextClear(input: RunContextClearInput = {}): Promise
 		input.io,
 		[
 			`clio-coder context reset removed ${removed.length === 0 ? "nothing" : removed.join(", ")}`,
-			`  preserved ${preserved.join(", ")}`,
+			`  protected locations: ${preserved.join(", ")}`,
 			"",
 		].join("\n"),
 	);
-	return { action: "cleared", removed, preserved };
+	return {
+		action: "cleared",
+		removed,
+		preserved,
+		preservedExisting: preserved.filter((path) => existsSync(relativeContextPath(cwd, path))),
+	};
 }

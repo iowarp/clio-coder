@@ -1,3 +1,4 @@
+import { CONTEXT_OPERATION_CUSTOM_TYPE, readContextOperation } from "../../src/core/context-operation.js";
 import { deepStrictEqual, doesNotMatch, match, ok, rejects, strictEqual } from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -5,7 +6,7 @@ import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { createAssistantMessageEventStream } from "@earendil-works/pi-ai";
 import type { FauxResponseFactory } from "@earendil-works/pi-ai/providers/faux";
-import { BusChannels, type ContextPrunedPayload } from "../../src/core/bus-events.js";
+import { BusChannels, type ContextActivityPayload, type ContextPrunedPayload } from "../../src/core/bus-events.js";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { createSafeEventBus } from "../../src/core/event-bus.js";
 import { clioStateDir } from "../../src/core/xdg.js";
@@ -301,7 +302,21 @@ describe("production compaction controls", () => {
 			await loop.compact();
 			strictEqual(notices.filter((notice) => notice === message).length, 2);
 			strictEqual(f.calls.length, 3, "forced no-gain attempts are not memoized");
-			deepStrictEqual(f.entries(), before);
+			deepStrictEqual(
+				f.entries().filter((entry) => entry.kind !== "custom" || entry.customType !== CONTEXT_OPERATION_CUSTOM_TYPE),
+				before,
+			);
+			const operations = f
+				.entries()
+				.flatMap((entry) =>
+					entry.kind === "custom" && entry.customType === CONTEXT_OPERATION_CUSTOM_TYPE
+						? [readContextOperation(entry.data)]
+						: [],
+				);
+			deepStrictEqual(
+				operations.map((operation) => operation?.outcome),
+				["unchanged", "unchanged"],
+			);
 		} finally {
 			loop.dispose();
 		}
@@ -356,7 +371,13 @@ describe("production compaction controls", () => {
 			f.settings.context.workingSet.enabled = false;
 			const submitted: string[] = [];
 			const notices: string[] = [];
+			const bus = createSafeEventBus();
+			const activity: ContextActivityPayload[] = [];
+			bus.on(BusChannels.ContextActivity, (event) => {
+				activity.push(event);
+			});
 			const loop = createChatLoop({
+				bus,
 				getSettings: () => f.settings,
 				providers: f.providers,
 				knownTargets: () => new Set(["chat-target", "summary-target"]),
@@ -439,6 +460,8 @@ describe("production compaction controls", () => {
 			let cancellationObserved = false;
 			const before = f.entries();
 			f.response.beforeReturn = () => {
+				strictEqual(activity[0]?.status, "started", "running lifecycle is published before awaiting the summary provider");
+				strictEqual(activity[0]?.operation?.kind, "compaction");
 				strictEqual(loop.isStreaming(), false, "the chat stream has not started");
 				strictEqual(loop.turnPreparation().phase, "compacting");
 				if (cancelFromAcp) cancelFromAcp();
@@ -460,10 +483,22 @@ describe("production compaction controls", () => {
 				// the reserved turn. It is neither a summary nor a user turn.
 				const isOutcome = (entry: SessionEntry) => entry.kind === "custom" && entry.customType === "turnOutcome";
 				deepStrictEqual(
-					f.entries().filter((entry) => !isOutcome(entry)),
+					f
+						.entries()
+						.filter(
+							(entry) => !isOutcome(entry) && (entry.kind !== "custom" || entry.customType !== CONTEXT_OPERATION_CUSTOM_TYPE),
+						),
 					before,
 					"canceled compaction does not append a summary or pending user turn",
 				);
+				const operations = f
+					.entries()
+					.flatMap((entry) =>
+						entry.kind === "custom" && entry.customType === CONTEXT_OPERATION_CUSTOM_TYPE
+							? [readContextOperation(entry.data)]
+							: [],
+					);
+				if (mode !== "reset" && mode !== "dispose") strictEqual(operations.at(-1)?.outcome, "cancelled");
 				const outcomes = f.entries().filter(isOutcome);
 				// Only a submit reserves a turn to outcome; a manual compaction has none.
 				strictEqual(outcomes.length, mode === "auto" || mode === "overflow" || mode === "acp" ? 1 : 0);
@@ -588,7 +623,10 @@ describe("production compaction controls", () => {
 		f.response.beforeReturn = () => abort.abort();
 		await rejects(context.postToolContinuationGuard(runtime, abort.signal), /abort/i);
 		ok(f.calls.at(-1)?.signal?.aborted, "the engine continuation signal reaches the summarizer");
-		deepStrictEqual(f.entries(), beforeCanceledGuard);
+		deepStrictEqual(
+			f.entries().filter((entry) => entry.kind !== "custom" || entry.customType !== CONTEXT_OPERATION_CUSTOM_TYPE),
+			beforeCanceledGuard.filter((entry) => entry.kind !== "custom" || entry.customType !== CONTEXT_OPERATION_CUSTOM_TYPE),
+		);
 		delete f.response.beforeReturn;
 		const update = await context.postToolContinuationGuard(runtime);
 		ok(update, "grown same-turn history must retry and produce the next provider context");

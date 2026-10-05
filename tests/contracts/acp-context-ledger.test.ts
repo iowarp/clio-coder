@@ -116,9 +116,15 @@ test("the ledger method answers for the bound session and is absent without a le
 			assert.deepEqual(init.agentCapabilities._meta["clio-coder/context"], {
 				version: 1,
 				ledger: "_clio-coder/context/ledger",
+				status: "_clio-coder/context/status",
 			});
 			const ledger = (await call("_clio-coder/context/ledger", { sessionId })) as { usedTokens: number };
 			assert.equal(ledger.usedTokens, 20480);
+			assert.deepEqual(await call("_clio-coder/context/status", { sessionId }), {
+				version: 1,
+				active: null,
+				latest: null,
+			});
 		} else {
 			assert.equal(init.agentCapabilities._meta["clio-coder/context"], undefined);
 			await assert.rejects(

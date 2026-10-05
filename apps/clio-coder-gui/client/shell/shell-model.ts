@@ -36,10 +36,13 @@ export function taskTitle(
 	return prompt?.replace(/\s+/g, " ").trim() || NEW_TASK_TITLE;
 }
 
-export function taskState(session: Pick<SessionSnapshot, "state" | "turns" | "permissions">): TaskState {
+export function taskState(
+	session: Pick<SessionSnapshot, "state" | "turns" | "permissions" | "contextWork">,
+): TaskState {
 	if (session.state === "parked") return "paused";
 	if (session.permissions.some(isAwaitingAnswer)) return "approval";
 	if (session.state === "starting") return "starting";
+	if (session.state === "open" && session.contextWork?.active) return "working";
 	const last = session.turns.at(-1);
 	if (last?.status === "running") return last.queued ? "waiting" : "working";
 	if (last?.status === "failed") return "failed";
@@ -52,8 +55,14 @@ export function isHeld(session: Pick<SessionSnapshot, "state">): boolean {
 }
 
 /** True for an open session nobody has typed into. "New task" reuses it instead of spawning another child. */
-export function isUntouched(session: Pick<SessionSnapshot, "state" | "turns" | "timeline">): boolean {
-	return session.state === "open" && session.turns.length === 0 && session.timeline.length === 0;
+export function isUntouched(session: Pick<SessionSnapshot, "state" | "turns" | "timeline" | "contextWork">): boolean {
+	return (
+		session.state === "open" &&
+		session.turns.length === 0 &&
+		session.timeline.length === 0 &&
+		!session.contextWork?.active &&
+		!session.contextWork?.latest
+	);
 }
 
 function parsed(value: string | undefined): number {
@@ -80,13 +89,19 @@ export function taskRows(
 		...live.map((session): TaskRow => {
 			const turn = session.turns.at(-1);
 			const row = saved.get(session.id);
+			const at = [
+				session.contextWork?.active?.operation?.startedAt,
+				session.contextWork?.latest?.startedAt,
+				turn?.finishedAt ?? turn?.startedAt ?? undefined,
+				row?.lastActivityAt ?? row?.createdAt,
+			].reduce<string | undefined>((latest, value) => (parsed(value) > parsed(latest) ? value : latest), undefined);
 			return {
 				id: session.id,
 				workspaceId,
 				title: taskTitle(session, row),
 				open: true,
 				state: taskState(session),
-				at: turn?.finishedAt ?? turn?.startedAt ?? row?.lastActivityAt ?? row?.createdAt,
+				at,
 			};
 		}),
 		...history

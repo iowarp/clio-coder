@@ -1,4 +1,11 @@
 import {
+	ACP_CONTEXT_STATUS_METHOD,
+	CONTEXT_OPERATION_CUSTOM_TYPE,
+	readContextOperation,
+} from "../../core/context-operation.js";
+import type { ContextOperationStatus } from "../../core/context-operation.js";
+import type { ContextActivityPayload } from "../../core/bus-events.js";
+import {
 	ACP_DISPATCH_STEER_METHOD,
 	ACP_EGGS_META_KEY,
 	ACP_EVENT_NOTIFICATION,
@@ -932,6 +939,7 @@ const ACP_FORWARDABLE_EVENT_KINDS = [
 	"dispatch.failed",
 	"accountability.evidenceReady",
 	"compaction.end",
+	"context.activity",
 	"context.warning",
 	"safety.toolBudgetExceeded",
 	"provider.health",
@@ -3381,7 +3389,17 @@ export function createAcpHandshake(features: AcpHandshakeFeatures): AcpHandshake
 									},
 								}
 							: {}),
-						...(features.contextLedger ? { [ACP_CONTEXT_META_KEY]: { version: 1, ledger: ACP_CONTEXT_LEDGER_METHOD } } : {}),
+						...(features.contextLedger
+							? {
+									[ACP_CONTEXT_META_KEY]: {
+										version: 1,
+										ledger: ACP_CONTEXT_LEDGER_METHOD,
+										status: ACP_CONTEXT_STATUS_METHOD,
+										...(features.bus ? { activity: "context.activity" } : {}),
+										...(features.commandsCapability ? { invoke: ACP_COMMANDS_INVOKE_METHOD } : {}),
+									},
+								}
+							: {}),
 						...(features.artifacts
 							? {
 									[ACP_ARTIFACTS_META_KEY]: {
@@ -3551,6 +3569,8 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 	// context, and the session ledger were all resolved against it during boot.
 	// It is canonicalized once here so a client that passes a symlinked path, a
 	// trailing slash, or a `/.` suffix is recognised rather than refused.
+	let contextActivity: ContextActivityPayload | null = null;
+	let contextCommandInFlight: Promise<unknown> | null = null;
 	const canonicalCwd = realpathSync(options.cwd ?? process.cwd());
 	const permissionTimeoutMs = options.permissionTimeoutMs ?? DEFAULT_DELEGATION_PERMISSION_TIMEOUT_MS;
 	const telemetry: AcpLiveTelemetry = createAcpLiveTelemetry({
@@ -3883,6 +3903,28 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 					findingCount: safeCount(payload.findingCount),
 					tags,
 				});
+			}),
+		);
+		unsubscribeEvents.push(
+			bus.on(BusChannels.ContextActivity, (payload) => {
+				if (!payload.operation || payload.operation.sessionId !== boundSessionId || payload.operation.cwd !== canonicalCwd)
+					return;
+				const operation = readContextOperation(payload.operation);
+				if (!operation) return;
+				contextActivity = {
+					kind: payload.kind,
+					phase: payload.phase,
+					status: payload.status,
+					at: payload.at,
+					message: safeStoredString(payload.message, 1024),
+					operation,
+					...(payload.current === undefined ? {} : { current: payload.current }),
+					...(payload.total === undefined ? {} : { total: payload.total }),
+					...(payload.detail === undefined ? {} : { detail: safeStoredString(payload.detail, 1024) }),
+					...(payload.stages === undefined ? {} : { stages: payload.stages }),
+					...(payload.timing === undefined ? {} : { timing: payload.timing }),
+				};
+				forwardEvent("context.activity", null, operation.outcome !== undefined, { ...contextActivity });
 			}),
 		);
 		unsubscribeEvents.push(
@@ -4586,7 +4628,12 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 	};
 	/** A branch change rewrites the context a running turn is reading, so it waits for the turn. */
 	const requireIdle = (session: AcpServerSession, action: string): void => {
-		if (session.activePrompt !== null || activePromptState !== null || options.chat.isStreaming()) {
+		if (
+			contextCommandInFlight !== null ||
+			session.activePrompt !== null ||
+			activePromptState !== null ||
+			options.chat.isStreaming()
+		) {
 			throw new AcpRequestError(-32602, `cannot ${action} during an active prompt`, { code: "prompt_active" });
 		}
 	};
@@ -4993,6 +5040,30 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 			options.diagnostics?.(`library reload failed: ${acpErrorMessage(error)}`);
 			return { status: "failed" as const, error: boundString(acpErrorMessage(error), 1024) };
 		}
+	});
+
+	options.transport.onRequest(ACP_CONTEXT_STATUS_METHOD, (params): ContextOperationStatus => {
+		requireInitialized();
+		requireAuthenticated();
+		const request = assertParamKeys(params, new Set(["sessionId"]));
+		if (!options.contextLedger) throw new AcpRequestError(-32601, "method not found", { code: "method_not_found" });
+		const session = getSession(request);
+		if (session.id !== boundSessionId)
+			throw new AcpRequestError(-32002, "session is not the bound session", { code: "session_not_bound" });
+		const current =
+			contextActivity?.operation?.sessionId === session.id && contextActivity.operation.cwd === canonicalCwd
+				? contextActivity
+				: null;
+		const recorded = [...(options.readSessionEntries?.(session.id) ?? [])].reverse().flatMap((entry) => {
+			if (entry.kind !== "custom" || entry.customType !== CONTEXT_OPERATION_CUSTOM_TYPE) return [];
+			const operation = readContextOperation(entry.data);
+			return operation?.outcome && operation.sessionId === session.id && operation.cwd === canonicalCwd ? [operation] : [];
+		});
+		return {
+			version: 1,
+			active: current && !current.operation?.outcome ? current : null,
+			latest: current?.operation?.outcome ? current.operation : (recorded[0] ?? null),
+		};
 	});
 
 	// The terminal's /context window view, read and never recomputed.
@@ -5457,6 +5528,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 		requireInitialized();
 		const request = assertParamKeys(params, new Set(["sessionId", "command", "argv"]));
 		const session = getSession(request);
+		if (request.command === "context" || request.command === "compact") requireIdle(session, "run a context operation");
 		if (options.commands === undefined) {
 			throw new AcpRequestError(-32601, "method not found", { code: "method_not_found" });
 		}
@@ -5485,7 +5557,18 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 				code: "prompt_turn_required",
 			});
 		}
-		return options.commands.invoke({ command: request.command, argv: request.argv });
+		if (request.command !== "context" && request.command !== "compact")
+			return options.commands.invoke({ command: request.command, argv: request.argv });
+		if (session.id !== boundSessionId)
+			throw new AcpRequestError(-32002, "session is not the bound session", { code: "session_not_bound" });
+		if (activeShell !== null) throw new AcpRequestError(-32602, "a shell line is running", { code: "shell_active" });
+		const command = Promise.resolve().then(() =>
+			options.commands?.invoke({ command: request.command, argv: request.argv }),
+		);
+		contextCommandInFlight = command;
+		return command.finally(() => {
+			if (contextCommandInFlight === command) contextCommandInFlight = null;
+		});
 	});
 
 	options.transport.onRequest(ACP_TARGETS_LIST_METHOD, (params): AcpTargetList => {
@@ -5579,7 +5662,10 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 		if (activeShell?.sessionId === session.id) activeShell.abort.abort();
 		if (activeSessionId === session.id || activeSessionId === null) permission.cancelPending(reason);
 		if ((activeSessionId ?? boundSessionId) === session.id) options.interviews?.cancel();
-		if (!session.activePrompt) return;
+		if (!session.activePrompt) {
+			if (contextCommandInFlight !== null && session.id === boundSessionId) options.chat.cancel();
+			return;
+		}
 		session.activePrompt.cancelled = true;
 		options.chat.cancel();
 	};
@@ -5814,7 +5900,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 				code: "prompt_active",
 			});
 		}
-		if (activeShell !== null) {
+		if (contextCommandInFlight !== null || activeShell !== null) {
 			throw new AcpRequestError(-32602, "a shell line is already running; cancel it first", { code: "shell_active" });
 		}
 		if (durable.current()?.id !== session.id) durable.resume(session.id);
@@ -6010,6 +6096,8 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 			if (session.activePrompt) {
 				if (promptSettled) await promptSettled;
 			}
+			if (contextCommandInFlight !== null && session.id === boundSessionId)
+				await contextCommandInFlight.catch(() => undefined);
 			// The aborted line still appends its entry; the ledger must outlive that write.
 			if (activeShell?.sessionId === session.id) await activeShell.settled;
 			if (options.session?.current()?.id === session.id) await options.session.close();
@@ -6032,12 +6120,12 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 		requireInitialized();
 		requireAuthenticated();
 		const session = getSession(params);
-		if (session.activePrompt || options.chat.isStreaming()) {
+		if (contextCommandInFlight !== null || session.activePrompt || options.chat.isStreaming()) {
 			throw new AcpRequestError(-32602, "this session already has an active prompt", { code: "prompt_active" });
 		}
 		// The line rebuilds the chat's context when it settles, which aborts a
 		// run in flight, so a turn waits for it exactly as it waits for a turn.
-		if (activeShell !== null) {
+		if (contextCommandInFlight !== null || activeShell !== null) {
 			throw new AcpRequestError(-32602, "a shell line is running; wait for it or cancel it first", {
 				code: "shell_active",
 			});

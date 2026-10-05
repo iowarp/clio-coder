@@ -1,3 +1,4 @@
+export { ACP_CONTEXT_STATUS_METHOD } from "../../../../src/core/context-operation.js";
 export { resolvePackageRoot } from "../../../../src/core/package-root.js";
 export { processAlive, processBirthToken } from "../../../../src/core/process-identity.js";
 export { pendingInstalledVersion, registerRunningBuild } from "../../../../src/core/running-build.js";

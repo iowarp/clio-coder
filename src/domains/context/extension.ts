@@ -1,3 +1,6 @@
+import { boundedExternalDiagnostic } from "../../core/external-diagnostic.js";
+import { CONTEXT_OPERATION_CUSTOM_TYPE, createContextOperation } from "../../core/context-operation.js";
+import { bootstrapOperationFacts, clearOperationFacts, refreshOperationFacts } from "./operation-result.js";
 import { existsSync } from "node:fs";
 import { isAbsolute, join, relative, resolve } from "node:path";
 import { BusChannels, type ContextActivityPayload } from "../../core/bus-events.js";
@@ -317,23 +320,84 @@ export function createContextBundle(
 		}
 	}
 
+	let activeOperation: string | null = null;
+	function beginOperation(kind: "context-init" | "context-clear" | "context-refresh", cwd: string) {
+		if (activeOperation !== null) throw new Error("Another project context operation is still running.");
+		const session = _context.getContract<SessionContract>("session");
+		if (session && !session.current()) session.create({ cwd });
+		const sessionId = session?.current()?.id ?? null;
+		const operation = createContextOperation(
+			{ kind, cwd, sessionId, origin: "operator", reason: "operator command" },
+			(event) => {
+				if (event.operation?.outcome) activeOperation = null;
+				_context.bus.emit(BusChannels.ContextActivity, event);
+				if (
+					event.operation?.outcome &&
+					sessionId &&
+					session?.current()?.id === sessionId &&
+					resolve(process.cwd()) === resolve(cwd)
+				) {
+					try {
+						session.appendEntry({
+							kind: "custom",
+							customType: CONTEXT_OPERATION_CUSTOM_TYPE,
+							parentTurnId: session.tree(sessionId).leafId ?? null,
+							data: event.operation,
+						});
+					} catch {
+						// A ledger failure must not change a completed filesystem operation into a failure.
+					}
+				}
+			},
+		);
+		activeOperation = operation.operation.id;
+		operation.start(
+			kind === "context-init" ? "scan" : kind === "context-refresh" ? "codewiki" : "state",
+			"Preparing project context",
+		);
+		return operation;
+	}
+
 	const contract: ContextContract = {
 		async runBootstrap(input) {
+			const operation = beginOperation("context-init", input?.cwd ?? process.cwd());
+			const warnings: string[] = [];
+			const io = {
+				stdout: (text: string) => input?.io?.stdout(text),
+				stderr: (text: string) => {
+					warnings.push(boundedExternalDiagnostic(text, 1024));
+					input?.io?.stderr(text);
+				},
+			};
 			const emitProgress = (event: Omit<ContextActivityPayload, "kind" | "at">): void => {
-				_context.bus.emit(BusChannels.ContextActivity, { kind: "context-init", at: Date.now(), ...event });
+				if (event.phase !== "done") operation.progress(event);
 				input?.onProgress?.(event);
 			};
 			try {
 				const result = await withPromptSourceBoundary(
 					input?.cwd ?? process.cwd(),
-					() => runBootstrap({ ...input, onProgress: emitProgress }),
+					() => runBootstrap({ ...input, io, onProgress: emitProgress }),
 					(result) => result.summary.action !== "previewed",
 				);
 				const cwd = input?.cwd ?? process.cwd();
 				contextState.invalidate(cwd);
 				if (cwd === lastCwd) startupHints = collectStartupHints(cwd, options);
+				if (result.summary.adoption.conflictCount)
+					warnings.push(`${result.summary.adoption.conflictCount} import conflicts detected.`);
+				if (result.preload.mode === "partial" || result.preload.mode === "synopsis")
+					warnings.push(`Project instructions: ${result.preload.label}`);
+				if (result.summary.action === "proposed") warnings.push("Review the proposal before /context init --apply.");
+				operation.finish(result.summary.action === "previewed" ? "previewed" : "completed", "Context init finished", {
+					facts: bootstrapOperationFacts(result),
+					warnings: warnings.slice(0, 8),
+				});
 				return result;
 			} catch (err) {
+				operation.finish(
+					err instanceof Error && err.name === "AbortError" ? "cancelled" : "failed",
+					err instanceof Error ? err.message : String(err),
+					{ warnings: warnings.slice(0, 8) },
+				);
 				emitProgress({
 					phase: "done",
 					status: "failed",
@@ -344,14 +408,23 @@ export function createContextBundle(
 			}
 		},
 		async runContextClear(input) {
+			const operation = beginOperation("context-clear", input?.cwd ?? process.cwd());
+			const warnings: string[] = [];
+			const io = {
+				stdout: (text: string) => input?.io?.stdout(text),
+				stderr: (text: string) => {
+					warnings.push(boundedExternalDiagnostic(text, 1024));
+					input?.io?.stderr(text);
+				},
+			};
 			const emitProgress = (event: Omit<ContextActivityPayload, "kind" | "at">): void => {
-				_context.bus.emit(BusChannels.ContextActivity, { kind: "context-clear", at: Date.now(), ...event });
+				if (event.phase !== "done") operation.progress(event);
 			};
 			emitProgress({ phase: "state", status: "started", message: "clearing accumulated project context" });
 			try {
 				const result = await withPromptSourceBoundary(
 					input?.cwd ?? process.cwd(),
-					() => runContextClear(input),
+					() => runContextClear({ ...input, io }),
 					(result) => result.action === "cleared",
 				);
 				const cwd = input?.cwd ?? process.cwd();
@@ -362,8 +435,21 @@ export function createContextBundle(
 					status: "completed",
 					message: result.action === "cancelled" ? "context reset cancelled" : "context cleared",
 				});
+				operation.finish(
+					result.action === "cancelled" ? "cancelled" : "completed",
+					result.action === "cancelled" ? "Context reset cancelled" : "Context reset finished",
+					{
+						facts: clearOperationFacts(result),
+						warnings: warnings.slice(0, 8),
+					},
+				);
 				return result;
 			} catch (err) {
+				operation.finish(
+					err instanceof Error && err.name === "AbortError" ? "cancelled" : "failed",
+					err instanceof Error ? err.message : String(err),
+					{ warnings: warnings.slice(0, 8) },
+				);
 				emitProgress({
 					phase: "done",
 					status: "failed",
@@ -374,8 +460,17 @@ export function createContextBundle(
 			}
 		},
 		async runContextRefresh(input) {
+			const operation = beginOperation("context-refresh", input?.cwd ?? process.cwd());
+			const warnings: string[] = [];
+			const io = {
+				stdout: (text: string) => input?.io?.stdout(text),
+				stderr: (text: string) => {
+					warnings.push(boundedExternalDiagnostic(text, 1024));
+					input?.io?.stderr(text);
+				},
+			};
 			const emitProgress = (event: Omit<ContextActivityPayload, "kind" | "at">): void => {
-				_context.bus.emit(BusChannels.ContextActivity, { kind: "context-refresh", at: Date.now(), ...event });
+				if (event.phase !== "done") operation.progress(event);
 				input?.onProgress?.(event);
 			};
 			try {
@@ -384,6 +479,7 @@ export function createContextBundle(
 					async () =>
 						runContextRefresh({
 							...input,
+							io,
 							...(input?.wiki ? { decisions: input.decisions ?? (await currentDecisions(_context)) } : {}),
 							onProgress: emitProgress,
 						}),
@@ -392,8 +488,21 @@ export function createContextBundle(
 				const cwd = input?.cwd ?? process.cwd();
 				contextState.invalidate(cwd);
 				if (cwd === lastCwd) startupHints = collectStartupHints(cwd, options);
+				operation.finish(
+					result.wiki?.status === "failed" ? "failed" : "completed",
+					result.wiki?.status === "failed" ? "Wiki refresh failed; index refreshed" : "Context refresh finished",
+					{
+						facts: refreshOperationFacts(result),
+						warnings: [...warnings, ...(result.hint ? [result.hint] : []), ...(result.wiki?.problems ?? [])].slice(0, 8),
+					},
+				);
 				return result;
 			} catch (err) {
+				operation.finish(
+					err instanceof Error && err.name === "AbortError" ? "cancelled" : "failed",
+					err instanceof Error ? err.message : String(err),
+					{ warnings: warnings.slice(0, 8) },
+				);
 				emitProgress({
 					phase: "done",
 					status: "failed",

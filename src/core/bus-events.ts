@@ -1,3 +1,4 @@
+import type { ContextOperation } from "./context-operation.js";
 /**
  * Canonical channel names and payload contracts for the Clio event bus.
  *
@@ -213,7 +214,13 @@ export interface ContextSourcesChangedPayload {
 	cwd: string;
 }
 
-export type ContextActivityKind = "context-init" | "context-clear" | "context-refresh" | "compaction";
+export type ContextActivityKind =
+	| "context-init"
+	| "context-clear"
+	| "context-refresh"
+	| "context-recall"
+	| "context-recover"
+	| "compaction";
 export type ContextActivityPhase =
 	| "scan"
 	| "codewiki"
@@ -227,6 +234,7 @@ export type ContextActivityStatus = "started" | "running" | "completed" | "faile
 
 /** Structured progress for context operations, rendered above the composer. */
 export interface ContextActivityPayload {
+	operation?: ContextOperation;
 	/** Render-time elapsed and deadline facts for a dispatched context helper. */
 	timing?: { runId: string; startedAtMs: number; timeoutMs: number };
 	kind: ContextActivityKind;

@@ -93,6 +93,9 @@ for (const action of ["interruptFromEditor"] as const) {
 		f.editor.setText("first message");
 		f.controller[action]();
 		f.controller[action]();
+		// The expansion starts after the async egg-discovery seam, so let it
+		// reach its pending state before the draft changes and the deferred resolves.
+		await new Promise((resolve) => setImmediate(resolve));
 		f.editor.setText("new draft typed while expansion waits");
 		resume({ text: "first message", images: [] });
 		await new Promise((resolve) => setImmediate(resolve));

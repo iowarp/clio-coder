@@ -15,6 +15,7 @@ const httpModules = new Map([
 	["src/engine/acp/types.ts", new Set(["*"])],
 	["src/core/xdg.ts", new Set(["clioStateDir", "clioDataDir", "clioConfigDir", "resolveClioDirs"])],
 	["src/core/package-root.ts", new Set(["resolvePackageRoot"])],
+	["src/core/context-operation.ts", new Set(["ACP_CONTEXT_STATUS_METHOD"])],
 	["src/core/process-identity.ts", new Set(["processAlive", "processBirthToken"])],
 	["src/domains/lifecycle/version.ts", new Set(["getVersionInfo"])],
 ]);
@@ -126,7 +127,17 @@ function violations(file: string, source: string): string[] {
 		if (rootTarget.startsWith("src/") || rootTarget.startsWith("tests/")) {
 			if (!existsSync(target)) errors.push(`root target does not exist: ${rootTarget}`);
 			if (name === "server/clio/wire-shims.ts") {
-				if (rootTarget !== "src/engine/acp/types.ts" || names.some((symbol) => symbol !== "*"))
+				const sharedContextTypes = new Map([
+					["src/core/context-operation.ts", new Set(["ContextOperation", "ContextOperationFact", "ContextOperationStatus"])],
+					["src/core/bus-events.ts", new Set(["ContextActivityPayload"])],
+				]);
+				const contextTypes = sharedContextTypes.get(rootTarget);
+				if (
+					!(
+						(rootTarget === "src/engine/acp/types.ts" && names.every((symbol) => symbol === "*")) ||
+						(typeOnly && contextTypes && names.every((symbol) => contextTypes.has(symbol)))
+					)
+				)
 					errors.push(`wire shim allowlist: ${rootTarget} ${names}`);
 			} else if (name === "server/clio/http-shims.ts") {
 				const allowed = httpModules.get(rootTarget);

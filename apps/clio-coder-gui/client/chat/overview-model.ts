@@ -76,13 +76,14 @@ export interface ContextMeter {
  * reported, because a share of an unknown size would be invented.
  */
 export function contextMeter(
-	ledger: Pick<ContextLedger, "usedTokens" | "contextWindow" | "percent" | "measured">,
+	ledger: Pick<ContextLedger, "usedTokens" | "contextWindow" | "percent"> & { measured: boolean | null },
 ): ContextMeter | null {
 	if (ledger.contextWindow <= 0) return null;
 	const raw = ledger.percent ?? (ledger.usedTokens / ledger.contextWindow) * 100;
 	const percent = Math.min(100, Math.max(0, raw));
 	const tone = percent >= 85 ? "full" : percent >= 65 ? "warn" : "ok";
-	const label = `${compactCount(ledger.usedTokens)} of ${compactCount(ledger.contextWindow)} tokens${ledger.measured ? "" : ", estimated"}`;
+	const basis = ledger.measured === null ? ", measurement not reported" : ledger.measured ? "" : ", estimated";
+	const label = `${compactCount(ledger.usedTokens)} of ${compactCount(ledger.contextWindow)} tokens${basis}`;
 	return { percent, tone, label, text: `Context window ${Math.round(percent)}% used, ${label}` };
 }
 

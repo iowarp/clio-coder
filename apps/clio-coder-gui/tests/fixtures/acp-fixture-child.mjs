@@ -556,7 +556,8 @@ async function handle(frame) {
 		switch (frame.method) {
 			case "initialize": {
 				const kinds = frame.params?.clientCapabilities?._meta?.["clio-coder/events"]?.kinds;
-				if (!Array.isArray(kinds) || kinds.length !== 12) throw Error("event_opt_in");
+				if (!Array.isArray(kinds) || kinds.length !== 13 || !kinds.includes("context.activity"))
+					throw Error("event_opt_in");
 				const rows = JSON.parse(readFileSync(join(process.env.CLIO_CODER_STATE_DIR, "gui/children.json"), "utf8"));
 				if (!rows.some((row) => row.pid === process.pid && row.ownerPid === process.ppid))
 					throw Error("not_recorded_before_initialize");

@@ -1,3 +1,4 @@
+import { formatContextOperationResult } from "../core/context-operation.js";
 import { stdin as input, stdout as output } from "node:process";
 import { createInterface } from "node:readline/promises";
 import { runBootstrap } from "../domains/context/index.js";
@@ -9,7 +10,8 @@ import {
 } from "../domains/context/init-options.js";
 import { type ThinkingLevel, VALID_THINKING_LEVELS } from "../domains/providers/index.js";
 import { modelBootstrapGenerate } from "./bootstrap-generate.js";
-import { createContextCliProgress } from "./context-progress.js";
+import { bootstrapOperationFacts } from "../domains/context/operation-result.js";
+import { createContextCliOperation, createContextCliProgress } from "./context-progress.js";
 
 const HELP = `Usage:
   clio-coder context init [--preview] [--heuristic] [--yes] [--json] [--adopt] [--global] [--propose|--apply|--rewrite]
@@ -142,6 +144,8 @@ export async function runInitCommand(args: string[]): Promise<number> {
 	const startedAt = performance.now();
 	const phaseTimings = new Map<string, InitPhaseTiming>();
 	const progress = createContextCliProgress("init");
+	const operation = createContextCliOperation("context-init", progress.update);
+	const warnings: string[] = [];
 	try {
 		const result = await runBootstrap({
 			cwd: process.cwd(),
@@ -149,10 +153,13 @@ export async function runInitCommand(args: string[]): Promise<number> {
 				stdout: (s) => {
 					if (!parsed.json) process.stdout.write(s);
 				},
-				stderr: (s) => process.stderr.write(s),
+				stderr: (s) => {
+					warnings.push(s);
+					process.stderr.write(s);
+				},
 			},
 			onProgress: (event) => {
-				progress.update(event);
+				if (event.phase !== "done") operation.progress(event);
 				const now = performance.now();
 				const timing = phaseTimings.get(event.phase);
 				if (event.status === "started") phaseTimings.set(event.phase, { startedAt: now });
@@ -181,10 +188,17 @@ export async function runInitCommand(args: string[]): Promise<number> {
 					}
 				: {}),
 		});
+		const conclusion = operation.finish(
+			result.summary.action === "previewed" ? "previewed" : "completed",
+			"Context init finished",
+			{ facts: bootstrapOperationFacts(result), warnings: warnings.slice(0, 8) },
+		);
+		if (!parsed.json) process.stdout.write(`${formatContextOperationResult(conclusion)}\n`);
 		if (parsed.json) {
 			process.stdout.write(
 				`${JSON.stringify({
 					version: 1,
+					operation: conclusion,
 					action: result.summary.action,
 					projectType: result.projectType,
 					codewikiEntries: result.summary.codewikiEntries,
@@ -219,6 +233,10 @@ export async function runInitCommand(args: string[]): Promise<number> {
 		}
 		return 0;
 	} catch (err) {
+		operation.finish(
+			err instanceof Error && err.name === "AbortError" ? "cancelled" : "failed",
+			err instanceof Error ? err.message : String(err),
+		);
 		process.stderr.write(`clio-coder context init failed: ${err instanceof Error ? err.message : String(err)}\n`);
 		return 1;
 	} finally {

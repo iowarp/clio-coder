@@ -1,3 +1,5 @@
+import { createContextOperation } from "../core/context-operation.js";
+import type { ContextActivityKind } from "../core/bus-events.js";
 import { stripVTControlCharacters } from "node:util";
 import type { BootstrapProgressEvent } from "../domains/context/index.js";
 
@@ -35,4 +37,17 @@ export function createContextCliProgress(operation: string): {
 		},
 		stop: () => clearInterval(timer),
 	};
+}
+
+/** CLI operations have workspace identity but do not create a conversation session. */
+export function createContextCliOperation(kind: ContextActivityKind, update?: (event: BootstrapProgressEvent) => void) {
+	const operation = createContextOperation(
+		{ kind, sessionId: null, cwd: process.cwd(), origin: "operator", reason: "CLI command" },
+		(event) => update?.(event),
+	);
+	operation.start(
+		kind === "context-init" ? "scan" : kind === "context-refresh" ? "codewiki" : "state",
+		"Preparing project context",
+	);
+	return operation;
 }

@@ -1,4 +1,5 @@
 import { BusChannels, type DispatchRunIdentity } from "../core/bus-events.js";
+import type { ContextOperation } from "../core/context-operation.js";
 import type { SafeEventBus } from "../core/event-bus.js";
 import { sanitizeCallTargetText } from "../domains/safety/call-target.js";
 import { readWorkerReceiptFacts } from "../session-control/worker-receipts.js";
@@ -10,6 +11,7 @@ import {
 	type WorkerStream,
 	type WorkerStreamChange,
 } from "../session-control/worker-stream.js";
+import { showsContextResult } from "./context-operation-view.js";
 import {
 	type WorkerRunEntryFields,
 	type WorkerSettledFields,
@@ -21,6 +23,8 @@ export type InteractiveNoticeLevel = "info" | "success" | "warning" | "error";
 
 export interface InteractiveSubscriptionsDeps {
 	bus: SafeEventBus;
+	getSessionId?: () => string | null;
+	contextResult?: (operation: ContextOperation) => void;
 	refreshFooter: () => void;
 	renderTaskIsland: () => void;
 	renderContextIsland: () => void;
@@ -124,6 +128,8 @@ export function createInteractiveSubscriptions(deps: InteractiveSubscriptionsDep
 			}
 			repaint();
 		};
+	// A settled operation can reach the bus more than once (replayed progress); its card renders once.
+	const renderedContextResults = new Set<string>();
 	const unsubscribers = [
 		deps.bus.on(BusChannels.DispatchEnqueued, repaint),
 		// Every attempt writes its own session entry: a failover is history, and
@@ -156,7 +162,20 @@ export function createInteractiveSubscriptions(deps: InteractiveSubscriptionsDep
 			folded(workers.failed, recordSettled)(payload);
 			deps.onDispatchSettled?.();
 		}),
-		deps.bus.on(BusChannels.ContextActivity, () => {
+		deps.bus.on(BusChannels.ContextActivity, (event) => {
+			const operation = event.operation;
+			if (
+				operation &&
+				(operation.cwd !== process.cwd() || (deps.getSessionId && operation.sessionId !== deps.getSessionId()))
+			)
+				return;
+			if (operation && showsContextResult(operation) && !renderedContextResults.has(operation.id)) {
+				renderedContextResults.add(operation.id);
+				// One id per settled operation is enough for the life of a session.
+				if (renderedContextResults.size > 64)
+					renderedContextResults.delete(renderedContextResults.values().next().value as string);
+				deps.contextResult?.(operation);
+			}
 			deps.refreshFooter();
 			deps.renderContextIsland();
 			deps.renderTaskIsland();

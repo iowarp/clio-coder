@@ -4394,6 +4394,8 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 											},
 											runContextRecall: async (ref: string): Promise<AcpHostReport> => {
 												const outcome = runOperatorRecall(ref, {
+													getSessionId: () => session.current()?.id ?? null,
+													onActivity: (event) => bus.emit(BusChannels.ContextActivity, event),
 													hasSession: () => session.current() !== null,
 													readEntries: readCurrentSessionEntries,
 													activeLeafTurnId: () => {

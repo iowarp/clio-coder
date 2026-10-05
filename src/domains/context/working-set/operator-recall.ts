@@ -1,3 +1,5 @@
+import { CONTEXT_OPERATION_CUSTOM_TYPE, createContextOperation } from "../../../core/context-operation.js";
+import type { ContextActivityPayload } from "../../../core/bus-events.js";
 /**
  * `/context recall <ref>`: the operator's half of working-set recall.
  *
@@ -26,6 +28,9 @@ import { buildRecallFields, recallErrorMessage, recallParentTurnId, resolveRecal
 
 /** Ledger access the command needs, mirroring the context tool's `ContextSessionDeps`. */
 export interface OperatorRecallDeps {
+	getSessionId?: () => string | null;
+	onActivity?: (event: ContextActivityPayload) => void;
+	cwd?: string;
 	hasSession(): boolean;
 	readEntries(): ReadonlyArray<SessionEntry>;
 	/** The live append point (`/tree` pin or tree leaf); undefined lets the fold infer it. */
@@ -66,7 +71,7 @@ function headlineFor(ref: string, tokens: number, state: EvictedState | undefine
 	return `[/context recall] ${parts.join(" · ")}`;
 }
 
-export function runOperatorRecall(ref: string, deps: OperatorRecallDeps): OperatorRecallOutcome {
+function recall(ref: string, deps: OperatorRecallDeps): OperatorRecallOutcome {
 	if (!deps.hasSession()) {
 		return { ok: false, message: "[/context recall] no active session; start one with /new or /resume first" };
 	}
@@ -103,4 +108,43 @@ export function runOperatorRecall(ref: string, deps: OperatorRecallDeps): Operat
 		headline: headlineFor(result.ref.entry, result.tokens, view.evicted.get(result.ref.entry), result.offloadPath),
 		body: result.body,
 	};
+}
+
+export function runOperatorRecall(ref: string, deps: OperatorRecallDeps): OperatorRecallOutcome {
+	const sessionId = deps.getSessionId?.() ?? null;
+	const operation = createContextOperation(
+		{
+			kind: "context-recall",
+			sessionId,
+			cwd: deps.cwd ?? process.cwd(),
+			origin: "operator",
+			reason: "operator recall; body shown to operator only",
+		},
+		(event) => deps.onActivity?.(event),
+	);
+	operation.start("state", "Reading retained observation");
+	try {
+		const result = recall(ref, deps);
+		const conclusion = operation.finish(
+			result.ok ? "completed" : "failed",
+			result.ok ? "Observation recalled" : result.message,
+			result.ok ? { facts: [{ kind: "recalled", unit: "observations", count: 1 }] } : {},
+		);
+		if (sessionId && deps.getSessionId?.() === sessionId) {
+			try {
+				deps.appendEntry({
+					kind: "custom",
+					customType: CONTEXT_OPERATION_CUSTOM_TYPE,
+					parentTurnId: deps.activeLeafTurnId() ?? null,
+					data: conclusion,
+				});
+			} catch {
+				/* Recall's own ledger is authoritative if the result-card append fails. */
+			}
+		}
+		return result;
+	} catch (error) {
+		operation.finish("failed", error instanceof Error ? error.message : String(error));
+		throw error;
+	}
 }

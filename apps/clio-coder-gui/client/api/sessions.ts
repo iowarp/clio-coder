@@ -8,6 +8,9 @@ export const SESSION_CACHES = [
 	"session-settings",
 	"session-targets",
 	"session-autonomy",
+	"session-context",
+	"session-context-work",
+	"session-usage",
 ] as const;
 
 const buffers = new Map<string, SessionBuffer>();

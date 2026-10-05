@@ -3,7 +3,9 @@ import type { BootstrapGenerationState } from "../domains/context/state.js";
 import type { RunWikiGenerateResult } from "../domains/context/wiki/generate.js";
 import type { WikiMeta } from "../domains/context/wiki/meta.js";
 import { MAX_PAGE_ATTEMPTS } from "../domains/context/wiki/plan-store.js";
-import { createContextCliProgress } from "./context-progress.js";
+import { refreshOperationFacts } from "../domains/context/operation-result.js";
+import { formatContextOperationResult } from "../core/context-operation.js";
+import { createContextCliOperation, createContextCliProgress } from "./context-progress.js";
 
 const HELP = `Usage:
   clio-coder context
@@ -159,6 +161,7 @@ async function runRefreshCommand(args: string[]): Promise<number> {
 		return 2;
 	}
 	const progress = createContextCliProgress("refresh");
+	const operation = createContextCliOperation("context-refresh", progress.update);
 	try {
 		const { runContextRefresh, readWikiMeta } = await import("../domains/context/index.js");
 		const wikiEntry = updateWiki ? await import("./wiki-generate.js") : null;
@@ -169,11 +172,22 @@ async function runRefreshCommand(args: string[]): Promise<number> {
 				stderr: (s) => process.stderr.write(s),
 			},
 			wiki: updateWiki,
-			onProgress: progress.update,
+			onProgress: (event) => {
+				if (event.phase !== "done") operation.progress(event);
+			},
 			...(wikiEntry
 				? { wikiGenerate: wikiEntry.modelWikiGenerate(), wikiModel: await wikiEntry.resolveDocumenterModelId() }
 				: {}),
 		});
+		const conclusion = operation.finish(
+			result.wiki?.status === "failed" ? "failed" : "completed",
+			"Context refresh finished",
+			{
+				facts: refreshOperationFacts(result),
+				warnings: [...(result.hint ? [result.hint] : []), ...(result.wiki?.problems ?? [])],
+			},
+		);
+		process.stdout.write(`${formatContextOperationResult(conclusion)}\n`);
 		if (result.hint) process.stdout.write(`${result.hint}\n`);
 		if (result.wiki) {
 			if (result.wiki.status === "failed") {
@@ -186,6 +200,10 @@ async function runRefreshCommand(args: string[]): Promise<number> {
 		}
 		return 0;
 	} catch (err) {
+		operation.finish(
+			err instanceof Error && err.name === "AbortError" ? "cancelled" : "failed",
+			err instanceof Error ? err.message : String(err),
+		);
 		process.stderr.write(`clio-coder context refresh failed: ${err instanceof Error ? err.message : String(err)}\n`);
 		return 1;
 	} finally {

@@ -1,3 +1,6 @@
+import { CONTEXT_OPERATION_CUSTOM_TYPE, createContextOperation } from "../core/context-operation.js";
+import type { ContextOperationFact } from "../core/context-operation.js";
+import { contextOperationAwareness } from "./context-operation-awareness.js";
 import { assistantOutputChars } from "../core/assistant-output.js";
 import type { SuccessfulMemoryContextCommit } from "../domains/memory/commit-state.js";
 import type { MemoryInterventionRegistration } from "../domains/middleware/memory-intervention.js";
@@ -1133,6 +1136,10 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		return refreshedEntries;
 	};
 
+	let compactionOperation: ReturnType<typeof createContextOperation> | null = null;
+	let compactionFacts: ContextOperationFact[] = [];
+	let compactionTokens: { before: number; after: number; basis: "runtime-estimate" } | undefined;
+	let compactionConclusion = "Context compaction finished";
 	let compactionActivityPhase: ContextActivityPhase = "compact";
 	const emitCompactionActivity = (
 		status: ContextActivityStatus,
@@ -1144,15 +1151,15 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 				: "compact",
 	): void => {
 		compactionActivityPhase = phase;
-		deps.bus?.emit(BusChannels.ContextActivity, {
-			kind: "compaction",
+		if (status === "completed" || status === "failed") {
+			compactionConclusion = message;
+			return;
+		}
+		compactionOperation?.progress({
 			phase,
 			status,
 			message,
-			at: Date.now(),
-			...(status === "started"
-				? { stages: phase === "summarize" ? (["compact", "summarize", "state"] as const) : (["compact"] as const) }
-				: {}),
+			...(phase === "summarize" ? { stages: ["compact", "summarize", "state"] as const } : {}),
 		});
 	};
 	const compactionFailureMessage = (error: unknown): string =>
@@ -1243,7 +1250,9 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 							JSON.stringify({
 								turn: activeAutoTurnId,
 								leaf: state.lastTurnId,
-								entries: deps.readSessionEntries(),
+								entries: deps
+									.readSessionEntries()
+									.filter((entry) => entry.kind !== "custom" || entry.customType !== CONTEXT_OPERATION_CUSTOM_TYPE),
 								context: {
 									systemPrompt: agentRuntime.agent.state.systemPrompt,
 									messages: agentRuntime.agent.state.messages.filter((message) => message.role !== "system"),
@@ -1279,6 +1288,45 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		};
 
 		const trigger: CompactionTrigger = triggerOverride ?? (force ? "force" : "auto");
+		const operationCwd = process.cwd();
+		compactionFacts = [];
+		compactionTokens = undefined;
+		compactionConclusion = "No useful reduction available";
+		compactionOperation = createContextOperation(
+			{
+				kind: "compaction",
+				sessionId: originSession ?? null,
+				cwd: operationCwd,
+				origin: trigger === "force" ? "operator" : "automatic",
+				reason: trigger === "auto" ? "automatic threshold" : trigger === "overflow" ? "request overflow" : "manual request",
+			},
+			(event) => {
+				if (
+					originSession !== deps.session?.current()?.id ||
+					originNavigation !== navigationEpoch ||
+					operationCwd !== process.cwd()
+				)
+					return;
+				deps.bus?.emit(BusChannels.ContextActivity, event);
+				if (event.operation?.outcome && originSession && deps.session)
+					deps.session.appendEntry({
+						kind: "custom",
+						customType: CONTEXT_OPERATION_CUSTOM_TYPE,
+						parentTurnId: state.lastTurnId,
+						data: event.operation,
+					});
+			},
+		);
+		compactionOperation.start("compact", `${compactionOperation.operation.reason}; preparing context`);
+		// Give the host a render opportunity before route discovery or the reducer awaits.
+		await new Promise<void>((resolve) => setImmediate(resolve));
+		signal?.throwIfAborted();
+		if (
+			originSession !== deps.session?.current()?.id ||
+			originNavigation !== navigationEpoch ||
+			operationCwd !== process.cwd()
+		)
+			throw new Error("Context ownership changed before compaction.");
 
 		if (pressureEstimate) {
 			const estimate = pressureEstimate;
@@ -1340,6 +1388,8 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 							snapshotIdAfter: postMaskSnapshot.snapshotId,
 							at: Date.now(),
 						} satisfies ContextPrunedPayload);
+						compactionFacts.push({ kind: "omitted", unit: "observations", count: masked.maskedObservations });
+						compactionTokens = { before: estimate.tokens, after: tokensAfterMask, basis: "runtime-estimate" };
 						emitCompactionActivity("completed", `${masked.maskedObservations} observations masked`);
 						const thinkingNote =
 							masked.maskedThinkingBlocks > 0
@@ -1471,6 +1521,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 								evictedItems: planned.items.length,
 								at: Date.now(),
 							} satisfies ContextPrunedPayload);
+							compactionFacts.push({ kind: "omitted", unit: "observations", count: planned.items.length });
 							const itemsWord = planned.items.length === 1 ? "item" : "items";
 							emitCompactionActivity("completed", `${planned.items.length} working-set ${itemsWord} evicted`);
 							deps.emitNotice(
@@ -1484,6 +1535,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 							// projection carry exists to preserve.
 							refreshLiveBudget(pendingUserText);
 							const after = liveContextEstimate(agentRuntime, pendingUserText);
+							compactionTokens = { before: estimate.tokens, after: after.tokens, basis: "runtime-estimate" };
 							if (
 								requiredFit
 									? requestFits(after.tokens, resolveTurnOutputReserve(agentRuntime, after.tokens), after.contextWindow)
@@ -1581,38 +1633,33 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		let summarySignal = compactionController?.signal;
 		try {
 			result = await compactionTrigger.fire(async () => {
-				const controller = new AbortController();
-				compactionController = controller;
-				summarySignal = signal ? AbortSignal.any([signal, controller.signal]) : controller.signal;
-				try {
-					return (
-						(await deps.autoCompact?.(instructions, trigger, {
-							...budget,
-							...handoff,
-							signal: summarySignal,
-							checkpointTokenFigures: (entry) => {
-								const messages = buildModelReplayAgentMessagesFromTurns(
-									[...(deps.readSessionEntries?.() ?? []), { ...entry, timestamp: new Date().toISOString() }],
-									{
-										...(state.lastTurnId ? { activeLeafTurnId: state.lastTurnId } : {}),
-										continuity: continuityContextFromSession(deps.session),
-									},
-								);
-								return {
-									tokensBefore: footerTokensBefore,
-									tokensAfter: liveContextEstimate(agentRuntime, pendingUserText, messages).tokens,
-								};
-							},
-							beforeSummaryCall: async () => {
-								await (handoff?.beforeSummaryCall ?? budget?.beforeSummaryCall)?.();
-								if (!summaryLifecycleStarted) startSummaryLifecycle();
-								emitCompactionActivity("running", "summarizing session history", "summarize");
-							},
-						})) ?? null
-					);
-				} finally {
-					if (compactionController === controller) compactionController = null;
-				}
+				summarySignal = signal;
+				summarySignal?.throwIfAborted();
+				return (
+					(await deps.autoCompact?.(instructions, trigger, {
+						...budget,
+						...handoff,
+						...(summarySignal ? { signal: summarySignal } : {}),
+						checkpointTokenFigures: (entry) => {
+							const messages = buildModelReplayAgentMessagesFromTurns(
+								[...(deps.readSessionEntries?.() ?? []), { ...entry, timestamp: new Date().toISOString() }],
+								{
+									...(state.lastTurnId ? { activeLeafTurnId: state.lastTurnId } : {}),
+									continuity: continuityContextFromSession(deps.session),
+								},
+							);
+							return {
+								tokensBefore: footerTokensBefore,
+								tokensAfter: liveContextEstimate(agentRuntime, pendingUserText, messages).tokens,
+							};
+						},
+						beforeSummaryCall: async () => {
+							await (handoff?.beforeSummaryCall ?? budget?.beforeSummaryCall)?.();
+							if (!summaryLifecycleStarted) startSummaryLifecycle();
+							emitCompactionActivity("running", "summarizing session history", "summarize");
+						},
+					})) ?? null
+				);
 			});
 		} catch (error) {
 			if (!summaryLifecycleStarted) startSummaryLifecycle();
@@ -1625,6 +1672,12 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 				);
 			throw error;
 		}
+		if (
+			originSession !== deps.session?.current()?.id ||
+			originNavigation !== navigationEpoch ||
+			operationCwd !== process.cwd()
+		)
+			throw new Error("Context ownership changed during compaction.");
 		if (result?.noGain) {
 			lastCompactionNoGain = true;
 			const message = "compaction would not reduce context; checkpoint discarded (usage recorded)";
@@ -1695,6 +1748,9 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			snapshotIdAfter: postCompactSnapshot.snapshotId,
 			at: Date.now(),
 		} satisfies ContextPrunedPayload);
+		// The reducer reports selected ledger rows, not just message rows.
+		compactionFacts.push({ kind: "summarized", unit: "entries", count: result.messagesSummarized });
+		compactionTokens = { before: tokensBefore, after: tokensAfter, basis: "runtime-estimate" };
 		emitCompactionActivity("completed", "context compaction complete");
 		autoCompactFailures = 0;
 
@@ -1717,7 +1773,37 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			if (args[7]) return Promise.reject(new Error("Another context reduction is already in progress."));
 			return reductionInFlight;
 		}
-		const operation = performAutoCompact(...args);
+		const controller = new AbortController();
+		compactionController = controller;
+		const operationArgs: Parameters<TurnContext["runAutoCompact"]> = [...args];
+		operationArgs[6] = args[6] ? AbortSignal.any([args[6], controller.signal]) : controller.signal;
+		const operation = performAutoCompact(...operationArgs)
+			.then(
+				(changed) => {
+					compactionOperation?.finish(
+						changed || compactionFacts.length > 0 ? "completed" : "unchanged",
+						compactionConclusion,
+						{
+							facts: compactionFacts,
+							...(compactionTokens ? { tokens: compactionTokens } : {}),
+						},
+					);
+					return changed;
+				},
+				(error: unknown) => {
+					compactionOperation?.finish(
+						error instanceof Error && error.name === "AbortError" ? "cancelled" : "failed",
+						compactionFailureMessage(error),
+						{ facts: compactionFacts, ...(compactionTokens ? { tokens: compactionTokens } : {}) },
+					);
+					deps.bus?.emit(BusChannels.CompactionEnd, { trigger: args[3] ?? (args[1] ? "force" : "auto"), at: Date.now() });
+					throw error;
+				},
+			)
+			.finally(() => {
+				compactionOperation = null;
+				if (compactionController === controller) compactionController = null;
+			});
 		reductionInFlight = operation;
 		void operation
 			.finally(() => {
@@ -2045,6 +2131,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 					);
 				}
 			}
+			sessionInputs.contextOperationUpdate = contextOperationAwareness(deps.readSessionEntries?.() ?? [], sessionId, cwd);
 			const key = mainPromptCacheIdentity({
 				targetId: agentRuntime.targetId,
 				runtimeId: agentRuntime.runtimeId,

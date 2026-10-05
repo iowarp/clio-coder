@@ -122,6 +122,7 @@ export interface ComposerProps {
 	readonly initialFocus: boolean;
 	/** The id of the turn running right now, or null when none is. */
 	readonly runningTurnId: string | null;
+	readonly contextRunning?: boolean;
 	/** Where the next request goes. Memoize it: a new object on every render re-renders the field. */
 	readonly route: RouteFacts;
 }
@@ -133,6 +134,7 @@ export const Composer = memo(function Composer({
 	sessionState,
 	initialFocus,
 	runningTurnId,
+	contextRunning = false,
 	route,
 }: ComposerProps) {
 	countRender("composer");
@@ -394,7 +396,7 @@ export const Composer = memo(function Composer({
 		},
 	});
 	const runCommand = (plan: { request: CommandRequest; description: string }, sent: string | null) => {
-		if (command.isPending) return;
+		if (command.isPending || contextRunning) return;
 		setSlashError(null);
 		command.mutate({ request: plan.request, key: crypto.randomUUID(), description: plan.description, sent });
 	};
@@ -532,7 +534,10 @@ export const Composer = memo(function Composer({
 	const canAttach = canAttachImages || canAttachFiles;
 	const shellBlock = (kind: SubmitIntent["kind"], count: number) =>
 		kind === "shell" && count > 0 ? "A shell line takes no attachments. Remove them, or send a message instead." : null;
-	const attachBlock = shellBlock(intent.kind, attachments.length) ?? attachmentRefusal(attachments, running);
+	const attachBlock =
+		(contextRunning && !running ? "Context work is running. Your draft is kept until it finishes." : null) ??
+		shellBlock(intent.kind, attachments.length) ??
+		attachmentRefusal(attachments, running);
 	const shellHint = shellNotice(draft.text, situation.shell);
 	// The delivery switch takes the route's place in the row, and only once there is a message to
 	// deliver: an empty field mid-turn offers Stop alone.
@@ -575,7 +580,7 @@ export const Composer = memo(function Composer({
 	// Recomputed from the store rather than closed over, so a keystroke that
 	// lands between render and keydown still sends the text the operator sees.
 	const submit = () => {
-		if (sending.current) return;
+		if (sending.current || (contextRunning && !running)) return;
 		const current = store.snapshot();
 		// `@agent text` guides a running worker instead of the main turn. With no worker running the
 		// line is an ordinary message, and its `@word` an ordinary file reference.

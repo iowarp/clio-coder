@@ -1,3 +1,6 @@
+import { clearOperationFacts } from "../domains/context/operation-result.js";
+import { formatContextOperationResult } from "../core/context-operation.js";
+import { createContextCliOperation } from "./context-progress.js";
 import { stdin as input, stdout as output } from "node:process";
 import { createInterface } from "node:readline/promises";
 
@@ -53,9 +56,10 @@ export async function runContextClearCommand(args: string[]): Promise<number> {
 	if (!assumeYes && !input.isTTY) {
 		process.stderr.write("clio-coder context reset: stdin is not a terminal; pass --yes to confirm non-interactively\n");
 	}
+	const operation = createContextCliOperation("context-clear");
 	const answer = (question: string): Promise<boolean> => (assumeYes ? Promise.resolve(true) : confirm(question));
 	try {
-		await runContextClear({
+		const result = await runContextClear({
 			cwd: process.cwd(),
 			all,
 			io: {
@@ -68,8 +72,12 @@ export async function runContextClearCommand(args: string[]): Promise<number> {
 				),
 			confirmAll: () => answer("Also remove CLIO-CODER.md? [y/N] "),
 		});
+		process.stdout.write(
+			`${formatContextOperationResult(operation.finish(result.action === "cancelled" ? "cancelled" : "completed", result.action === "cancelled" ? "Reset cancelled" : "Context reset finished", { facts: clearOperationFacts(result) }))}\n`,
+		);
 		return 0;
 	} catch (err) {
+		operation.finish("failed", err instanceof Error ? err.message : String(err));
 		process.stderr.write(`clio-coder context reset failed: ${err instanceof Error ? err.message : String(err)}\n`);
 		return 1;
 	}

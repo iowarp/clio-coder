@@ -63,6 +63,8 @@ export function subscribe(
 				if (parked && state?.state === "open") resumed.add(state.id);
 				if (held.hasGap) gaps.add(delta.payload.resource);
 				if (
+					delta.type === "context.activity" ||
+					delta.type === "context.status" ||
 					delta.type === "session.changed" ||
 					delta.type === "session.labelled" ||
 					delta.type === "session.configured" ||
@@ -83,6 +85,18 @@ export function subscribe(
 					delta.type === "turn.finished"
 				) {
 					invalidate.add("session-history");
+				}
+				// Completed context work changes accounting and the session's durable projections.
+				if (delta.type === "context.activity" && delta.payload.activity.operation?.outcome !== undefined) {
+					for (const key of [
+						"session-context",
+						"session-context-work",
+						"session-usage",
+						"session-artifacts",
+						"session-tree",
+						"session-board",
+					])
+						invalidate.add(key);
 				}
 				// A sealed evidence bundle changes what the evidence and receipt reads return.
 				if (delta.type === "evidence.ready")

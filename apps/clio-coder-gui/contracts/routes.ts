@@ -14,6 +14,7 @@ import { BranchRequest, BranchSwitched, Forked, SessionTree } from "./branches.j
 import { AgentCapabilities } from "./capabilities.js";
 import { Empty, Id } from "./common.js";
 import { ContextLedger } from "./context-ledger.js";
+import { ContextOperationStatus } from "./context-work.js";
 import { EventCursor } from "./events.js";
 import { EvidenceDetail, EvidencePage } from "./evidence.js";
 import { ExtensionReload, SessionExtensions } from "./extensions.js";
@@ -635,6 +636,22 @@ export const routes = {
 		params: operationParams,
 		response: ContextLedger,
 		summary: "The context window as Clio Coder accounts for it",
+	}),
+	sessionContextStatus: defineRoute({
+		...get,
+		path: "/api/sessions/:id/context/status",
+		params: operationParams,
+		response: ContextOperationStatus,
+		summary: "Current context operation and latest recorded conclusion",
+	}),
+	cancelSessionContext: defineRoute({
+		...post,
+		status: 200,
+		path: "/api/sessions/:id/context/cancel",
+		params: operationParams,
+		body: Type.Object({ operationId: Id }, { additionalProperties: false }),
+		response: Empty,
+		summary: "Ask the bound ACP session to stop its active context operation",
 	}),
 	previewFleetRun: defineRoute({
 		...post,

@@ -5,7 +5,6 @@ import type { ClioSettings } from "../core/config.js";
 import type { SafeEventBus } from "../core/event-bus.js";
 import type { PendingSkillRequest } from "../core/skill-activation.js";
 import type { AgentsContract } from "../domains/agents/contract.js";
-import type { RunBootstrapResult } from "../domains/context/index.js";
 import { runOperatorRecall } from "../domains/context/working-set/operator-recall.js";
 import type { DispatchContract } from "../domains/dispatch/contract.js";
 import { agentRoleFactsResolver } from "../domains/dispatch/execution-role.js";
@@ -53,7 +52,6 @@ import { appendNotice, appendOperatorAside, appendOperatorCommand, appendReferen
 import { renderSessionHtml } from "./export-html/index.js";
 import { dateLocal } from "./format-time.js";
 import type { PendingModelScope } from "./overlays/model-scope.js";
-import { formatContextInitSummary } from "./renderers/context-init.js";
 import { renderDoctorReport } from "./renderers/doctor-report.js";
 
 const EXPORT_RENDER_WIDTH = 100;
@@ -126,7 +124,7 @@ export interface InteractiveSlashRuntimeDeps {
 	onSetThinkingLevel?: (level: ThinkingLevel, scope?: "session" | "project" | "global") => void;
 	onCompact?: (instructions: string | undefined) => Promise<void>;
 	onRecoverHandoff?: (handoffId: string, action: "reduce" | "deliver") => Promise<void>;
-	onInit?: (options: InitCommandOptions, io?: RunIo) => Promise<RunBootstrapResult>;
+	onInit?: (options: InitCommandOptions, io?: RunIo) => Promise<unknown>;
 	onContextClear?: (options: ContextClearCommandOptions, io?: RunIo) => Promise<void>;
 	onContextRefresh?: (io?: RunIo) => Promise<void>;
 	/** Review and run the self-upgrade lifecycle after explicit operator consent. */
@@ -739,46 +737,16 @@ export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps)
 				return;
 			}
 			activeContextInit = true;
-			const written: string[] = [];
-			const initIo: RunIo = {
-				stdout: (text) => written.push(text),
-				stderr: (text) => appendCommandNotice("warn", text),
-			};
+			// The operation's result card carries what init wrote and warned about,
+			// so this call asks for no output channel of its own.
 			void Promise.resolve()
-				.then(() => onInit(options, initIo))
-				.then((result) => {
-					const gitignoreChange = /^ {2}\.gitignore: (?:added|updated) /u;
-					const gitignoreNote = written.some((text) => gitignoreChange.test(text)) ? " Updated .gitignore." : "";
-					appendCommandNotice(
-						result.summary.action === "previewed" ? "info" : "success",
-						formatContextInitSummary(result) + gitignoreNote,
-					);
-					const { conflictCount, rejectedCount } = result.summary.adoption;
-					if (conflictCount > 0 || rejectedCount > 0) {
-						const issues = [
-							...(conflictCount > 0 ? [`${conflictCount} conflict${conflictCount === 1 ? "" : "s"} detected`] : []),
-							...(rejectedCount > 0 ? [`${rejectedCount} source${rejectedCount === 1 ? "" : "s"} rejected`] : []),
-						];
-						appendCommandNotice("warn", `Context imports: ${issues.join("; ")}.`);
-					}
-					if (result.preload.mode === "partial" || result.preload.mode === "synopsis") {
-						appendCommandNotice("warn", `Project instructions: ${result.preload.label}`);
-					}
-					for (const text of written) {
-						if (
-							!text.startsWith("clio-coder context init ") &&
-							!text.startsWith("  project instructions:") &&
-							!gitignoreChange.test(text)
-						)
-							deps.io.stdout(text);
-					}
+				.then(() => onInit(options))
+				.then(() => {
 					if (!options.preview) deps.dismissContextBootstrapNotices();
 					deps.refreshFooter();
 				})
 				.catch((err) => {
-					for (const text of written) deps.io.stdout(text);
-					const msg = err instanceof Error ? err.message : String(err);
-					appendCommandNotice("error", `[/context init] ${msg}`);
+					appendCommandNotice("error", `[/context init] ${err instanceof Error ? err.message : String(err)}`);
 				})
 				.finally(() => {
 					activeContextInit = false;
@@ -797,7 +765,15 @@ export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps)
 					runContextRecall: (ref: string) => {
 						const session = deps.session;
 						if (!session) return;
+						// The operation's result card states a failed recall, so the error
+						// notice below only covers a run that never reported one.
+						let reported = false;
 						const outcome = runOperatorRecall(ref, {
+							getSessionId: () => session.current()?.id ?? null,
+							onActivity: (event) => {
+								if (event.operation?.outcome !== undefined) reported = true;
+								deps.bus.emit(BusChannels.ContextActivity, event);
+							},
 							hasSession: () => session.current() !== null,
 							readEntries: () => {
 								const sessionId = deps.chat.getSessionId();
@@ -812,7 +788,7 @@ export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps)
 							...(deps.now ? { now: () => (deps.now?.() ?? new Date()).getTime() } : {}),
 						});
 						if (!outcome.ok) {
-							appendCommandNotice("error", outcome.message);
+							if (!reported) appendCommandNotice("error", outcome.message);
 							return;
 						}
 						appendCommandNotice("success", outcome.headline);
@@ -830,7 +806,7 @@ export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps)
 				return;
 			}
 			void deps
-				.onContextRefresh(deps.io)
+				.onContextRefresh()
 				.catch((err) => {
 					const msg = err instanceof Error ? err.message : String(err);
 					deps.io.stderr(`[/context refresh] ${msg}\n`);

@@ -14,6 +14,7 @@
  */
 
 import { existsSync } from "node:fs";
+import { CONTEXT_OPERATION_CUSTOM_TYPE, readContextOperation } from "../core/context-operation.js";
 import { isSkillSurfaceChange, SKILL_SURFACE_ENTRY } from "../core/skill-activation.js";
 import { foldWorkingSet } from "../domains/context/working-set/fold.js";
 import type {
@@ -61,8 +62,10 @@ import { readWorkerReceiptFactsForReplay } from "../session-control/worker-recei
 import { toolResultPresentationText } from "../tools/result-disposition.js";
 import type { ChatPanel, ReplayedRunFacts } from "./chat-panel.js";
 import { OPERATOR_COMMAND_ENTRY, renderOperatorCommandRows } from "./command-output.js";
+import { showsContextResult } from "./context-operation-view.js";
 import { renderBranchSummaryEntry } from "./renderers/branch-summary.js";
 import { renderCompactionSummaryEntry } from "./renderers/compaction-summary.js";
+import { renderContextOperationResult } from "./renderers/context-operation.js";
 import { type NoticeMark, renderNoticeRow } from "./renderers/notice.js";
 import { renderRetryStatus } from "./renderers/retry-status.js";
 import { renderSkillSurfaceRow } from "./renderers/skill-rows.js";
@@ -497,6 +500,11 @@ function renderRetryStatusEntry(
  * the entry to be seen.
  */
 function rendersCustomEntry(entry: CustomEntry): boolean {
+	if (entry.customType === CONTEXT_OPERATION_CUSTOM_TYPE) {
+		// The live card and the resumed one follow one policy, so a resume never shows a block the session did not.
+		const operation = readContextOperation(entry.data);
+		return operation !== null && showsContextResult(operation);
+	}
 	if (entry.display === false) return false;
 	if (entry.customType === "retryStatus") return true;
 	if (entry.customType === SKILL_SURFACE_ENTRY) return isSkillSurfaceChange(entry.data) && entry.data.state !== "loaded";
@@ -513,6 +521,10 @@ function renderCustomEntry(
 	unbounded: boolean,
 	terminalRows: number,
 ): string[] {
+	if (entry.customType === CONTEXT_OPERATION_CUSTOM_TYPE) {
+		const operation = readContextOperation(entry.data);
+		return operation ? renderContextOperationResult(operation, width) : [];
+	}
 	if (entry.customType === "retryStatus") return renderRetryStatusEntry(entry, width, detail, unbounded, terminalRows);
 	if (entry.customType === SKILL_SURFACE_ENTRY && isSkillSurfaceChange(entry.data)) {
 		return renderSkillSurfaceRow(entry.data, width);

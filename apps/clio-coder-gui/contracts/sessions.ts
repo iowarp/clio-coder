@@ -1,5 +1,6 @@
 import { type Static, Type } from "typebox";
 import { Id, Problem } from "./common.js";
+import { ContextActivity, ContextOperationStatus } from "./context-work.js";
 import { FleetItem, HealthItem } from "./fleet-events.js";
 import { Permission } from "./permissions.js";
 import { SessionConfig } from "./session-config.js";
@@ -200,6 +201,7 @@ export const SessionSnapshot = Type.Object(
 		label: nullableString,
 		config: Type.Optional(SessionConfig),
 		telemetry: Type.Optional(SessionTelemetry),
+		contextWork: Type.Optional(ContextOperationStatus),
 		permissions: Type.Array(Permission, { maxItems: 32 }),
 		fleet: Type.Array(FleetItem, { maxItems: 128 }),
 		// Session health, bounded far tighter than the fleet feed: a context
@@ -218,6 +220,8 @@ const permissionPayload = Type.Object({ ...base, permission: Permission }, close
 const fleetPayload = Type.Object({ ...base, item: FleetItem }, closed);
 const healthPayload = Type.Object({ ...base, item: HealthItem }, closed);
 export const SessionDeltas = {
+	"context.activity": Type.Object({ ...base, activity: ContextActivity }, closed),
+	"context.status": Type.Object({ ...base, status: ContextOperationStatus }, closed),
 	"session.telemetry": Type.Object({ ...base, telemetry: SessionTelemetry }, closed),
 	"turn.started": Type.Object({ ...base, turn: Turn }, closed),
 	/** A queued turn got its slot and its request went to the agent. */
@@ -278,6 +282,7 @@ export const ACP_EVENT_KINDS = [
 	"dispatch.failed",
 	"accountability.evidenceReady",
 	"compaction.end",
+	"context.activity",
 	"context.warning",
 	"safety.toolBudgetExceeded",
 	"provider.health",

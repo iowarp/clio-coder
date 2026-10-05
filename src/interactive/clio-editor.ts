@@ -434,12 +434,18 @@ export class ClioEditor extends Editor {
 			truncateToWidth(nickname, Math.max(4, Math.min(24, Math.floor(width / 3))), GLYPH.ellipsis, false),
 		);
 		const label = [lead, identity, activity].filter(Boolean).join(" ");
-		const suffix = [
-			hiddenLineCount > 0 ? theme.fg("positionCount", `${GLYPH.up}${hiddenLineCount}`) : "",
-			mode === "STEER" || (mode === "FOLLOW-UP" && text.length > 0) ? theme.fg("draftState", mode) : "",
-		]
-			.filter(Boolean)
-			.join(theme.fg("border", " · "));
+		const position = hiddenLineCount > 0 ? theme.fg("positionCount", `${GLYPH.up}${hiddenLineCount}`) : "";
+		const draftLabel = mode === "STEER" || (mode === "FOLLOW-UP" && text.length > 0) ? theme.fg("draftState", mode) : "";
+		const join = (parts: readonly string[]): string => parts.filter(Boolean).join(theme.fg("border", " · "));
+		let suffix = join([position, draftLabel]);
+		// A draft typed while Clio holds a consumed prompt is accepted and sent in
+		// order once preparation or compaction ends, so the rail says what Enter
+		// does. The mode's own words outrank it on a narrow rail.
+		if ((mode === "PREPARING" || mode === "COMPACTING") && text.length > 0) {
+			const held = join([position, theme.fg("draftState", "HOLD")]);
+			const room = this.railLabelRoom(width) - (rail.yolo ? 7 : 0);
+			if (visibleWidth(label) + visibleWidth(held) + 3 <= room) suffix = held;
+		}
 		return this.topRail(width, theme, rail, label, suffix);
 	}
 

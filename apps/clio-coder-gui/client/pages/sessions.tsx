@@ -10,7 +10,9 @@ import { SESSION_CACHES, sessionBuffer } from "../api/sessions.js";
 import { ApprovalBanner, pendingPermission } from "../chat/Approval.js";
 import { ChatTurnView } from "../chat/ChatTurn.js";
 import { Composer, fillComposer } from "../chat/Composer.js";
+import { ContextWorkCard } from "../chat/ContextWorkCard.js";
 import { STARTER_PROMPTS, TRUNCATION_NOTE } from "../chat/chat-turn.js";
+import { contextWorkView } from "../chat/context-work-model.js";
 import { LiveWorkers, workerCount } from "../chat/FleetStrip.js";
 import { foldFleetRuns, isLiveRun } from "../chat/fleet-facts.js";
 import type { HealthRow } from "../chat/health.js";
@@ -206,6 +208,12 @@ function SessionView({ client, id }: { client: Client; id: string }) {
 	const closeSession = useCallback(() => close.mutate(), [close.mutate]);
 	const renameTask = useRenameTask(client);
 	const [renaming, setRenaming] = useState(false);
+	const [dismissedContext, setDismissedContext] = useState<string | null>(null);
+	const cancelContext = useMutation({
+		mutationFn: (operationId: string) =>
+			client.call(routes.cancelSessionContext, { params: { id }, query: {}, body: { operationId } }),
+		onSettled: () => void queries.invalidateQueries({ queryKey: ["session-context-work", id] }),
+	});
 	const scroll = useRef<HTMLDivElement | null>(null);
 	const previousTurns = useRef<readonly ChatTurn[]>([]);
 	const snapshot = session.data;
@@ -231,7 +239,11 @@ function SessionView({ client, id }: { client: Client; id: string }) {
 	const health = useMemo(() => summarizeHealth(snapshot?.health ?? []), [snapshot?.health]);
 
 	const running = snapshot?.turns.at(-1)?.status === "running";
-	const now = useSecond(running || (snapshot?.permissions.some((item) => item.status === "pending") ?? false));
+	const contextActivity = snapshot?.contextWork?.active;
+	const contextRunning = snapshot?.state === "open" && !!contextActivity;
+	const now = useSecond(
+		running || contextRunning || (snapshot?.permissions.some((item) => item.status === "pending") ?? false),
+	);
 	// A deep link starts without a cached snapshot. Attach the observer only once
 	// the transcript element exists; a ref becoming non-null does not rerun an effect.
 	const follow = useFollowLatest(scroll, snapshot !== undefined, snapshot?.timeline, running);
@@ -311,30 +323,36 @@ function SessionView({ client, id }: { client: Client; id: string }) {
 	const elapsedMs = running && turn?.startedAt && now > 0 ? Math.max(0, now - Date.parse(turn.startedAt)) : 0;
 	// Sub-second figures ("0ms") say nothing; the chip shows time once it is a whole second.
 	const elapsed = elapsedMs >= 1000 ? formatDuration(elapsedMs) : null;
-	const canClose = snapshot.state === "open" && !running;
+	const canClose = snapshot.state === "open" && !running && !contextRunning;
+	const contextOperation = contextActivity?.operation ?? snapshot.contextWork?.latest;
+	const contextView = contextOperation
+		? contextWorkView(contextOperation, contextActivity ?? undefined, now, snapshot.state === "open")
+		: null;
 	const paneOpen = pane.open;
 	const chip: { tone: "working" | "approval" | "failed" | "quiet"; label: string } | null = pending
 		? { tone: "approval", label: "Needs your approval" }
-		: running && snapshot.state === "open"
-			? turn?.queued
-				? { tone: "quiet", label: "Waiting for a slot" }
-				: {
-						tone: "working",
-						label: [liveWorkers > 0 ? `Waiting on ${workerCount(liveWorkers)}` : "Working", elapsed ?? null]
-							.filter(Boolean)
-							.join(" · "),
-					}
-			: snapshot.state === "starting"
-				? { tone: "working", label: "Starting" }
-				: snapshot.state === "parked"
-					? { tone: "quiet", label: "Paused" }
-					: snapshot.state === "closed"
-						? { tone: "quiet", label: "Closed" }
-						: snapshot.state === "unknown" || snapshot.state === "failed"
-							? { tone: "failed", label: "Unavailable" }
-							: turn?.status === "failed"
-								? { tone: "failed", label: "Last turn failed" }
-								: null;
+		: contextRunning && contextView
+			? { tone: "working", label: contextView.title }
+			: running && snapshot.state === "open"
+				? turn?.queued
+					? { tone: "quiet", label: "Waiting for a slot" }
+					: {
+							tone: "working",
+							label: [liveWorkers > 0 ? `Waiting on ${workerCount(liveWorkers)}` : "Working", elapsed ?? null]
+								.filter(Boolean)
+								.join(" · "),
+						}
+				: snapshot.state === "starting"
+					? { tone: "working", label: "Starting" }
+					: snapshot.state === "parked"
+						? { tone: "quiet", label: "Paused" }
+						: snapshot.state === "closed"
+							? { tone: "quiet", label: "Closed" }
+							: snapshot.state === "unknown" || snapshot.state === "failed"
+								? { tone: "failed", label: "Unavailable" }
+								: turn?.status === "failed"
+									? { tone: "failed", label: "Last turn failed" }
+									: null;
 	const memoryMark = memoryGuardianMark(
 		snapshot.telemetry?.memory,
 		snapshot.state !== "parked" &&
@@ -512,6 +530,18 @@ function SessionView({ client, id }: { client: Client; id: string }) {
 					</div>
 					<div className="conversation__dock">
 						{close.error ? <p role="alert">{close.error.message}</p> : null}
+						{contextView && (contextView.live || contextView.id !== dismissedContext) ? (
+							<ContextWorkCard
+								view={contextView}
+								compact
+								cancelling={cancelContext.isPending}
+								cancelLabel={running ? "Stop task and context work" : "Stop context work"}
+								{...(contextView.live
+									? { onCancel: () => cancelContext.mutate(contextView.id) }
+									: { onDismiss: () => setDismissedContext(contextView.id) })}
+							/>
+						) : null}
+						{cancelContext.error ? <p role="alert">{cancelContext.error.message}</p> : null}
 						<Composer
 							client={client}
 							sessionId={snapshot.id}
@@ -519,6 +549,7 @@ function SessionView({ client, id }: { client: Client; id: string }) {
 							sessionState={snapshot.state}
 							initialFocus={snapshot.timeline.length === 0}
 							runningTurnId={turn?.status === "running" ? turn.id : null}
+							contextRunning={contextRunning}
 							route={route}
 						/>
 					</div>
