@@ -1,4 +1,4 @@
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { memo, useId } from "react";
 import type { AgentCapabilities } from "../../contracts/capabilities.js";
 import { routes } from "../../contracts/routes.js";
@@ -6,6 +6,7 @@ import type { SessionWorkspace } from "../../contracts/session-telemetry.js";
 import type { Client } from "../api/client.js";
 import { ContextControls } from "./ContextControls.js";
 import { ContextWorkCard } from "./ContextWorkCard.js";
+import { useStopContext } from "./context-command.js";
 import { contextView, contextWorkspaceFacts } from "./context-model.js";
 import { contextWorkView } from "./context-work-model.js";
 import { contextMeter, contextSegments } from "./overview-model.js";
@@ -48,10 +49,7 @@ export const ContextPanel = memo(function ContextPanel({
 	const work = useContextWork(client, sessionId) ?? status.data;
 	const operation = work?.active?.operation ?? work?.latest;
 	const operationView = operation ? contextWorkView(operation, work?.active ?? undefined, nowMs, sessionOpen) : null;
-	const cancel = useMutation({
-		mutationFn: (operationId: string) =>
-			client.call(routes.cancelSessionContext, { params: { id: sessionId }, query: {}, body: { operationId } }),
-	});
+	const stop = useStopContext(client, sessionId);
 	const view = ledger.data ? contextView(ledger.data) : null;
 	const meter = ledger.data ? contextMeter(ledger.data) : null;
 	const segments = ledger.data ? contextSegments(ledger.data) : [];
@@ -59,15 +57,16 @@ export const ContextPanel = memo(function ContextPanel({
 		<div className="pane-drill drill context-panel">
 			{operationView ? (
 				<ContextWorkCard
+					key={operationView.id}
 					view={operationView}
-					cancelling={cancel.isPending}
+					cancelling={stop.stopping === operationView.id}
 					cancelLabel={running ? "Stop task and context work" : "Stop context work"}
-					{...(operationView.live ? { onCancel: () => cancel.mutate(operationView.id) } : {})}
+					{...(operationView.live ? { onCancel: () => stop.stop(operationView.id) } : {})}
 				/>
 			) : null}
-			{status.error || cancel.error ? (
+			{status.error || stop.error ? (
 				<p role="alert" className="drill__note drill__note--error">
-					{status.error?.message ?? cancel.error?.message}
+					{status.error?.message ?? stop.error?.message}
 				</p>
 			) : null}
 			{sessionOpen && capabilities?.commands ? (

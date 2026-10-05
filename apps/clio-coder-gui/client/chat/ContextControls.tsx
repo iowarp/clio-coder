@@ -4,6 +4,8 @@ import { routes } from "../../contracts/routes.js";
 import type { CommandRequest } from "../../contracts/steering.js";
 import type { Client } from "../api/client.js";
 import type { CommandFields } from "./command-model.js";
+import { contextBaseline, invokeContextCommand } from "./context-command.js";
+import { commandPresentation } from "./context-command-model.js";
 import {
 	CONTEXT_FIELD_LABELS,
 	CONTEXT_FLAG_LABELS,
@@ -43,7 +45,7 @@ export function ContextControls({
 	const args = command?.args.subcommands?.[action];
 	const run = useMutation({
 		mutationFn: (request: CommandRequest) =>
-			client.call(routes.invokeSessionCommand, { params: { id: sessionId }, query: {}, body: request }),
+			invokeContextCommand({ client, queries, sessionId, request, baseline: contextBaseline(queries, sessionId) }),
 		onSettled: () => {
 			onSettled();
 			for (const key of ["session-context", "session-usage", "session-artifacts", "session-board", "session-tree"])
@@ -217,9 +219,10 @@ export function ContextControls({
 						{run.isPending ? "Running…" : "Run action"}
 					</button>
 					{busy ? <p className="drill__note">Wait for the current work to finish before changing context.</p> : null}
-					{run.data?.lines.length ? (
+					{/* The operation card above reports what a context operation did; only output nothing else reports stays here. */}
+					{run.data?.result.lines.length && commandPresentation(run.data.result, run.data.owner).lines ? (
 						<p className="drill__note" role="status">
-							{run.data.lines.join("\n")}
+							{run.data.result.lines.join("\n")}
 						</p>
 					) : null}
 				</form>

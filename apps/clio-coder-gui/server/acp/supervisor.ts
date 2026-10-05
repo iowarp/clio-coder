@@ -1377,7 +1377,17 @@ export class Supervisor {
 		const operation = this.snapshot(id).contextWork?.active?.operation;
 		if (!operation || operation.id !== operationId)
 			throw new AppProblem("conflict", "That context operation is no longer active.");
-		await this.cancelEntry(entry);
+		const response = (await entry.client.request(
+			"session/cancel",
+			{
+				sessionId: entry.id,
+				_meta: { "clio-coder/context": { operationId } },
+			},
+			2000,
+		)) as { _meta?: { "clio-coder/context"?: { operationId?: unknown; cancelled?: unknown } } };
+		const acknowledgement = response?._meta?.["clio-coder/context"];
+		if (acknowledgement?.operationId !== operationId || acknowledgement.cancelled !== true)
+			throw new AppProblem("conflict", "That context operation is no longer active.");
 		return {};
 	}
 	private fleeting(id: string) {

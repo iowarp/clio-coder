@@ -55,3 +55,14 @@ export function clearOperationFacts(result: RunContextClearResult): ContextOpera
 			: []),
 	];
 }
+
+/** Cancellation can stop a later phase after an earlier transaction committed. */
+export class ContextOperationAbortError extends Error {
+	override readonly name = "AbortError";
+	constructor(
+		message: string,
+		readonly facts: readonly ContextOperationFact[],
+	) {
+		super(message);
+	}
+}

@@ -1,10 +1,9 @@
-import { boundedExternalDiagnostic } from "../../core/external-diagnostic.js";
-import { CONTEXT_OPERATION_CUSTOM_TYPE, createContextOperation } from "../../core/context-operation.js";
-import { bootstrapOperationFacts, clearOperationFacts, refreshOperationFacts } from "./operation-result.js";
 import { existsSync } from "node:fs";
 import { isAbsolute, join, relative, resolve } from "node:path";
 import { BusChannels, type ContextActivityPayload } from "../../core/bus-events.js";
+import { CONTEXT_OPERATION_CUSTOM_TYPE, createContextOperation } from "../../core/context-operation.js";
 import type { DomainBundle, DomainContext, DomainExtension } from "../../core/domain-loader.js";
+import { boundedExternalDiagnostic } from "../../core/external-diagnostic.js";
 import { clioDataDir, clioStateDir } from "../../core/xdg.js";
 import { loadMemoryRecordsSync } from "../memory/index.js";
 import { describeValidationContract, loadValidationContract } from "../safety/index.js";
@@ -20,6 +19,12 @@ import { loadProjectClioMd } from "./clio-md.js";
 import { codewikiPath } from "./codewiki/artifact.js";
 import { coordinateCodewikiExclusive, coordinateCodewikiWrite, drainCodewikiWrites } from "./codewiki/coordinator.js";
 import type { ContextContract, ContextState } from "./contract.js";
+import {
+	bootstrapOperationFacts,
+	ContextOperationAbortError,
+	clearOperationFacts,
+	refreshOperationFacts,
+} from "./operation-result.js";
 import { renderPromptContext } from "./prompt-context.js";
 import { runContextRefresh } from "./refresh.js";
 import { type ClioProjectState, readClioState, writeClioState } from "./state.js";
@@ -320,12 +325,17 @@ export function createContextBundle(
 		}
 	}
 
-	let activeOperation: string | null = null;
-	function beginOperation(kind: "context-init" | "context-clear" | "context-refresh", cwd: string) {
+	let activeOperation: { id: string; sessionId: string | null; cwd: string; controller: AbortController } | null = null;
+	function beginOperation(
+		kind: "context-init" | "context-clear" | "context-refresh",
+		cwd: string,
+		signal?: AbortSignal,
+	) {
 		if (activeOperation !== null) throw new Error("Another project context operation is still running.");
 		const session = _context.getContract<SessionContract>("session");
 		if (session && !session.current()) session.create({ cwd });
 		const sessionId = session?.current()?.id ?? null;
+		const controller = new AbortController();
 		const operation = createContextOperation(
 			{ kind, cwd, sessionId, origin: "operator", reason: "operator command" },
 			(event) => {
@@ -350,17 +360,28 @@ export function createContextBundle(
 				}
 			},
 		);
-		activeOperation = operation.operation.id;
+		activeOperation = { id: operation.operation.id, sessionId, cwd: resolve(cwd), controller };
 		operation.start(
 			kind === "context-init" ? "scan" : kind === "context-refresh" ? "codewiki" : "state",
 			"Preparing project context",
 		);
-		return operation;
+		return { ...operation, signal: signal ? AbortSignal.any([signal, controller.signal]) : controller.signal };
 	}
 
 	const contract: ContextContract = {
+		cancelOperation(sessionId, cwd, operationId) {
+			if (
+				!activeOperation ||
+				activeOperation.sessionId !== sessionId ||
+				activeOperation.cwd !== resolve(cwd) ||
+				(operationId !== undefined && activeOperation.id !== operationId)
+			)
+				return false;
+			activeOperation.controller.abort();
+			return true;
+		},
 		async runBootstrap(input) {
-			const operation = beginOperation("context-init", input?.cwd ?? process.cwd());
+			const operation = beginOperation("context-init", input?.cwd ?? process.cwd(), input?.signal);
 			const warnings: string[] = [];
 			const io = {
 				stdout: (text: string) => input?.io?.stdout(text),
@@ -376,7 +397,7 @@ export function createContextBundle(
 			try {
 				const result = await withPromptSourceBoundary(
 					input?.cwd ?? process.cwd(),
-					() => runBootstrap({ ...input, io, onProgress: emitProgress }),
+					() => runBootstrap({ ...input, signal: operation.signal, io, onProgress: emitProgress }),
 					(result) => result.summary.action !== "previewed",
 				);
 				const cwd = input?.cwd ?? process.cwd();
@@ -396,7 +417,18 @@ export function createContextBundle(
 				operation.finish(
 					err instanceof Error && err.name === "AbortError" ? "cancelled" : "failed",
 					err instanceof Error ? err.message : String(err),
-					{ warnings: warnings.slice(0, 8) },
+					{
+						warnings: warnings.slice(0, 8),
+						...(err instanceof ContextOperationAbortError
+							? {
+									facts: err.facts,
+									warnings: [
+										...warnings,
+										...(err.facts.length ? ["Earlier committed context changes were retained."] : []),
+									].slice(0, 8),
+								}
+							: {}),
+					},
 				);
 				emitProgress({
 					phase: "done",
@@ -408,7 +440,7 @@ export function createContextBundle(
 			}
 		},
 		async runContextClear(input) {
-			const operation = beginOperation("context-clear", input?.cwd ?? process.cwd());
+			const operation = beginOperation("context-clear", input?.cwd ?? process.cwd(), input?.signal);
 			const warnings: string[] = [];
 			const io = {
 				stdout: (text: string) => input?.io?.stdout(text),
@@ -424,7 +456,7 @@ export function createContextBundle(
 			try {
 				const result = await withPromptSourceBoundary(
 					input?.cwd ?? process.cwd(),
-					() => runContextClear({ ...input, io }),
+					() => runContextClear({ ...input, signal: operation.signal, io }),
 					(result) => result.action === "cleared",
 				);
 				const cwd = input?.cwd ?? process.cwd();
@@ -448,7 +480,18 @@ export function createContextBundle(
 				operation.finish(
 					err instanceof Error && err.name === "AbortError" ? "cancelled" : "failed",
 					err instanceof Error ? err.message : String(err),
-					{ warnings: warnings.slice(0, 8) },
+					{
+						warnings: warnings.slice(0, 8),
+						...(err instanceof ContextOperationAbortError
+							? {
+									facts: err.facts,
+									warnings: [
+										...warnings,
+										...(err.facts.length ? ["Earlier committed context changes were retained."] : []),
+									].slice(0, 8),
+								}
+							: {}),
+					},
 				);
 				emitProgress({
 					phase: "done",
@@ -460,7 +503,7 @@ export function createContextBundle(
 			}
 		},
 		async runContextRefresh(input) {
-			const operation = beginOperation("context-refresh", input?.cwd ?? process.cwd());
+			const operation = beginOperation("context-refresh", input?.cwd ?? process.cwd(), input?.signal);
 			const warnings: string[] = [];
 			const io = {
 				stdout: (text: string) => input?.io?.stdout(text),
@@ -479,6 +522,7 @@ export function createContextBundle(
 					async () =>
 						runContextRefresh({
 							...input,
+							signal: operation.signal,
 							io,
 							...(input?.wiki ? { decisions: input.decisions ?? (await currentDecisions(_context)) } : {}),
 							onProgress: emitProgress,
@@ -501,7 +545,18 @@ export function createContextBundle(
 				operation.finish(
 					err instanceof Error && err.name === "AbortError" ? "cancelled" : "failed",
 					err instanceof Error ? err.message : String(err),
-					{ warnings: warnings.slice(0, 8) },
+					{
+						warnings: warnings.slice(0, 8),
+						...(err instanceof ContextOperationAbortError
+							? {
+									facts: err.facts,
+									warnings: [
+										...warnings,
+										...(err.facts.length ? ["Earlier committed context changes were retained."] : []),
+									].slice(0, 8),
+								}
+							: {}),
+					},
 				);
 				emitProgress({
 					phase: "done",

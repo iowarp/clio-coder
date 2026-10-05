@@ -9,9 +9,10 @@ import type { ConnectionState } from "../api/events.js";
 import { SESSION_CACHES, sessionBuffer } from "../api/sessions.js";
 import { ApprovalBanner, pendingPermission } from "../chat/Approval.js";
 import { ChatTurnView } from "../chat/ChatTurn.js";
-import { Composer, fillComposer } from "../chat/Composer.js";
+import { Composer, fillComposer, focusComposer } from "../chat/Composer.js";
 import { ContextWorkCard } from "../chat/ContextWorkCard.js";
 import { STARTER_PROMPTS, TRUNCATION_NOTE } from "../chat/chat-turn.js";
+import { useContextOperationRef, useStopContext } from "../chat/context-command.js";
 import { contextWorkView } from "../chat/context-work-model.js";
 import { LiveWorkers, workerCount } from "../chat/FleetStrip.js";
 import { foldFleetRuns, isLiveRun } from "../chat/fleet-facts.js";
@@ -209,11 +210,7 @@ function SessionView({ client, id }: { client: Client; id: string }) {
 	const renameTask = useRenameTask(client);
 	const [renaming, setRenaming] = useState(false);
 	const [dismissedContext, setDismissedContext] = useState<string | null>(null);
-	const cancelContext = useMutation({
-		mutationFn: (operationId: string) =>
-			client.call(routes.cancelSessionContext, { params: { id }, query: {}, body: { operationId } }),
-		onSettled: () => void queries.invalidateQueries({ queryKey: ["session-context-work", id] }),
-	});
+	const stopContext = useStopContext(client, id);
 	const scroll = useRef<HTMLDivElement | null>(null);
 	const previousTurns = useRef<readonly ChatTurn[]>([]);
 	const snapshot = session.data;
@@ -241,6 +238,7 @@ function SessionView({ client, id }: { client: Client; id: string }) {
 	const running = snapshot?.turns.at(-1)?.status === "running";
 	const contextActivity = snapshot?.contextWork?.active;
 	const contextRunning = snapshot?.state === "open" && !!contextActivity;
+	const contextOperationRef = useContextOperationRef(snapshot?.contextWork);
 	const now = useSecond(
 		running || contextRunning || (snapshot?.permissions.some((item) => item.status === "pending") ?? false),
 	);
@@ -532,16 +530,23 @@ function SessionView({ client, id }: { client: Client; id: string }) {
 						{close.error ? <p role="alert">{close.error.message}</p> : null}
 						{contextView && (contextView.live || contextView.id !== dismissedContext) ? (
 							<ContextWorkCard
+								key={contextView.id}
 								view={contextView}
 								compact
-								cancelling={cancelContext.isPending}
+								cancelling={stopContext.stopping === contextView.id}
 								cancelLabel={running ? "Stop task and context work" : "Stop context work"}
 								{...(contextView.live
-									? { onCancel: () => cancelContext.mutate(contextView.id) }
-									: { onDismiss: () => setDismissedContext(contextView.id) })}
+									? { onCancel: () => stopContext.stop(contextView.id) }
+									: {
+											onDismiss: (keyboard: boolean) => {
+												setDismissedContext(contextView.id);
+												// The card holding focus is leaving; the composer is where the keyboard goes next.
+												if (keyboard) focusComposer(snapshot.id);
+											},
+										})}
 							/>
 						) : null}
-						{cancelContext.error ? <p role="alert">{cancelContext.error.message}</p> : null}
+						{stopContext.error ? <p role="alert">{stopContext.error.message}</p> : null}
 						<Composer
 							client={client}
 							sessionId={snapshot.id}
@@ -550,6 +555,7 @@ function SessionView({ client, id }: { client: Client; id: string }) {
 							initialFocus={snapshot.timeline.length === 0}
 							runningTurnId={turn?.status === "running" ? turn.id : null}
 							contextRunning={contextRunning}
+							contextOperation={contextOperationRef}
 							route={route}
 						/>
 					</div>

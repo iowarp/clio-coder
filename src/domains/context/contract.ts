@@ -43,6 +43,8 @@ export interface ContextState {
 }
 
 export interface ContextContract extends DomainContract {
+	/** Cancel only the active operation owned by this session and workspace. */
+	cancelOperation?(sessionId: string, cwd: string, operationId?: string): boolean;
 	runBootstrap(input?: RunBootstrapInput): Promise<RunBootstrapResult>;
 	runContextClear(input?: RunContextClearInput): Promise<RunContextClearResult>;
 	/**

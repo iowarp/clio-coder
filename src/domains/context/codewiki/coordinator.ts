@@ -66,10 +66,12 @@ function byReference(request: CodewikiBuildWorkerRequest, held: Codewiki | null)
 async function executeInWorker(
 	request: CodewikiBuildWorkerRequest,
 	onProgress?: (progress: CodewikiBuildProgress) => void,
+	signal?: AbortSignal,
 ): Promise<CodewikiBuildWorkerOutcome> {
 	// Do not inherit test-runner/application `--import` hooks. In particular,
 	// `--import tsx` would be re-resolved from a hermetic fixture cwd before the
 	// source bootstrap can install its absolute loader.
+	signal?.throwIfAborted();
 	const worker = new Worker(buildWorkerUrl(), { workerData: request, execArgv: [] });
 	let exited = false;
 	const exit = new Promise<void>((resolve) => {
@@ -80,6 +82,7 @@ async function executeInWorker(
 	});
 	let timer: NodeJS.Timeout | undefined;
 	let lastProgress: CodewikiBuildProgress | undefined;
+	let onAbort: (() => void) | undefined;
 	try {
 		return await new Promise<CodewikiBuildWorkerOutcome>((resolve, reject) => {
 			let settled = false;
@@ -89,6 +92,13 @@ async function executeInWorker(
 				if (timer) clearTimeout(timer);
 				callback();
 			};
+			onAbort = () =>
+				finish(() => reject(signal?.reason ?? new DOMException("Context operation cancelled", "AbortError")));
+			signal?.addEventListener("abort", onAbort, { once: true });
+			if (signal?.aborted) {
+				onAbort();
+				return;
+			}
 			timer = setTimeout(() => {
 				const detail = lastProgress
 					? ` during ${lastProgress.stage}${lastProgress.path ? `; last reported file: ${lastProgress.path}` : ""}`
@@ -97,6 +107,7 @@ async function executeInWorker(
 			}, BUILD_TIMEOUT_MS);
 			timer.unref();
 			worker.on("message", (message: CodewikiBuildWorkerMessage) => {
+				if (settled) return;
 				if ("progress" in message) {
 					lastProgress = message.progress;
 					onProgress?.(message.progress);
@@ -121,6 +132,8 @@ async function executeInWorker(
 			});
 		});
 	} finally {
+		if (onAbort) signal?.removeEventListener("abort", onAbort);
+		if (signal?.aborted && !exited) await worker.terminate().catch(() => undefined);
 		if (timer) clearTimeout(timer);
 		if (!exited) {
 			await Promise.race([
@@ -135,10 +148,17 @@ async function executeInWorker(
 	}
 }
 
-function enqueueWorkspace<T>(cwd: string, task: () => Promise<T>): Promise<T> {
+function enqueueWorkspace<T>(cwd: string, task: () => Promise<T>, signal?: AbortSignal): Promise<T> {
 	const key = legacyCodewikiPath(cwd);
 	const previous = workspaceTails.get(key) ?? Promise.resolve();
-	const result = previous.catch(() => undefined).then(task);
+	let entered = false;
+	const result = previous
+		.catch(() => undefined)
+		.then(() => {
+			entered = true;
+			signal?.throwIfAborted();
+			return task();
+		});
 	const tail = result.then(
 		() => undefined,
 		() => undefined,
@@ -147,7 +167,15 @@ function enqueueWorkspace<T>(cwd: string, task: () => Promise<T>): Promise<T> {
 	void tail.finally(() => {
 		if (workspaceTails.get(key) === tail) workspaceTails.delete(key);
 	});
-	return result;
+	if (!signal) return result;
+	return new Promise<T>((resolve, reject) => {
+		const abort = () => {
+			if (!entered) reject(signal.reason);
+		};
+		signal.addEventListener("abort", abort, { once: true });
+		if (signal.aborted) abort();
+		void result.then(resolve, reject).finally(() => signal.removeEventListener("abort", abort));
+	});
 }
 
 export interface CodewikiCoordinatedResult {
@@ -157,6 +185,7 @@ export interface CodewikiCoordinatedResult {
 }
 
 export interface CodewikiCoordinateOptions {
+	signal?: AbortSignal;
 	onProgress?: (progress: CodewikiBuildProgress) => void;
 	/** Never create an artifact merely because a background session happened to start. */
 	requireExisting?: boolean;
@@ -183,38 +212,70 @@ export function coordinateCodewikiWrite(
 	options: CodewikiCoordinateOptions = {},
 ): Promise<CodewikiCoordinatedResult | null> {
 	const workspace = resolve(cwd);
+	options.signal?.throwIfAborted();
 	options.onProgress?.({ stage: "queue" });
-	return enqueueWorkspace(workspace, () => {
-		// Taking the lease creates the lock's parent, so a project that was never
-		// indexed gained an empty `.clio-coder/` from every successful write: the
-		// incremental refresh is contractually a no-op there, and it was
-		// materializing state before it could say so (issue #248). The check runs
-		// inside the queue, so a writer that built the codewiki ahead of this task
-		// has already finished and this one sees it. The recheck under the lock
-		// stays, and is what still decides the race.
-		if (options.requireExisting && !existsSync(codewikiPath(workspace))) return Promise.resolve(null);
-		return withStateFileLock(legacyCodewikiPath(workspace), async () => {
-			if (options.requireExisting && !existsSync(codewikiPath(workspace))) return null;
-			const current = options.readCurrent?.(workspace) ?? readCodewiki(workspace);
-			const request = await select(current, workspace);
-			if (!request) return null;
-			const outcome = await executeInWorker(byReference({ ...request, cwd: workspace }, current), options.onProgress);
-			const codewiki = outcome.codewiki ?? current;
-			if (!codewiki) throw new Error("codewiki reconciliation returned no artifact");
-			const worker: CodewikiBuildWorkerResult = { codewiki, fingerprint: outcome.fingerprint, changed: outcome.changed };
-			await options.beforeCommit?.(worker, workspace);
-			const wrote = worker.changed || !existsSync(codemapPath(workspace));
-			if (wrote) writeCodewiki(workspace, worker.codewiki);
-			await options.afterCommit?.(worker, workspace);
-			return { codewiki: !worker.changed && current ? current : worker.codewiki, worker, wrote };
-		});
-	});
+	return enqueueWorkspace(
+		workspace,
+		() => {
+			// Taking the lease creates the lock's parent, so a project that was never
+			// indexed gained an empty `.clio-coder/` from every successful write: the
+			// incremental refresh is contractually a no-op there, and it was
+			// materializing state before it could say so (issue #248). The check runs
+			// inside the queue, so a writer that built the codewiki ahead of this task
+			// has already finished and this one sees it. The recheck under the lock
+			// stays, and is what still decides the race.
+			if (options.requireExisting && !existsSync(codewikiPath(workspace))) return Promise.resolve(null);
+			return withStateFileLock(
+				legacyCodewikiPath(workspace),
+				async () => {
+					if (options.requireExisting && !existsSync(codewikiPath(workspace))) return null;
+					const current = options.readCurrent?.(workspace) ?? readCodewiki(workspace);
+					options.signal?.throwIfAborted();
+					const request = await select(current, workspace);
+					if (!request) return null;
+					const outcome = await executeInWorker(
+						byReference({ ...request, cwd: workspace }, current),
+						options.onProgress,
+						options.signal,
+					);
+					const codewiki = outcome.codewiki ?? current;
+					if (!codewiki) throw new Error("codewiki reconciliation returned no artifact");
+					const worker: CodewikiBuildWorkerResult = { codewiki, fingerprint: outcome.fingerprint, changed: outcome.changed };
+					options.signal?.throwIfAborted();
+					await options.beforeCommit?.(worker, workspace);
+					options.signal?.throwIfAborted();
+					const wrote = worker.changed || !existsSync(codemapPath(workspace));
+					if (wrote) writeCodewiki(workspace, worker.codewiki);
+					await options.afterCommit?.(worker, workspace);
+					return { codewiki: !worker.changed && current ? current : worker.codewiki, worker, wrote };
+				},
+				options.signal ? { signal: options.signal } : {},
+			);
+		},
+		options.signal,
+	);
 }
 
 /** Serialize a non-build artifact transaction such as reset with every writer. */
-export function coordinateCodewikiExclusive<T>(cwd: string, task: (workspace: string) => T | Promise<T>): Promise<T> {
+export function coordinateCodewikiExclusive<T>(
+	cwd: string,
+	task: (workspace: string) => T | Promise<T>,
+	signal?: AbortSignal,
+): Promise<T> {
 	const workspace = resolve(cwd);
-	return enqueueWorkspace(workspace, () => withStateFileLock(legacyCodewikiPath(workspace), () => task(workspace)));
+	return enqueueWorkspace(
+		workspace,
+		() =>
+			withStateFileLock(
+				legacyCodewikiPath(workspace),
+				() => {
+					signal?.throwIfAborted();
+					return task(workspace);
+				},
+				signal ? { signal } : {},
+			),
+		signal,
+	);
 }
 
 /** Reconcile a read tool's private snapshot without a writer lease or workspace mutation. */
@@ -232,8 +293,9 @@ export async function buildCodewikiCandidate(
 	cwd: string,
 	language: Codewiki["language"],
 	onProgress?: (progress: CodewikiBuildProgress) => void,
+	signal?: AbortSignal,
 ): Promise<CodewikiBuildWorkerResult> {
-	const outcome = await executeInWorker({ kind: "build", cwd: resolve(cwd), language }, onProgress);
+	const outcome = await executeInWorker({ kind: "build", cwd: resolve(cwd), language }, onProgress, signal);
 	if (!outcome.codewiki) throw new Error("codewiki build returned no artifact");
 	return { codewiki: outcome.codewiki, fingerprint: outcome.fingerprint, changed: outcome.changed };
 }

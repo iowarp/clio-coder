@@ -4492,6 +4492,12 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 						}
 					: {}),
 				contextLedger: () => chat.contextLedger(),
+				...(contextDomain
+					? {
+							cancelContextOperation: (sessionId: string, cwd: string, operationId?: string) =>
+								contextDomain.cancelOperation?.(sessionId, cwd, operationId) ?? false,
+						}
+					: {}),
 				// The plan rows the standard `plan` update carries, and the Git facts
 				// the terminal footer shows, pushed instead of polled.
 				plan: () => taskBoard.snapshot(),

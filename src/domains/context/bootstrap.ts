@@ -4,6 +4,7 @@ import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "no
 import { dirname, join, parse, relative, resolve } from "node:path";
 import type { ContextActivityPayload } from "../../core/bus-events.js";
 import { readCiRunCommands } from "../../core/ci-commands.js";
+import type { ContextOperationFact } from "../../core/context-operation.js";
 import { runCommandVector } from "../../core/safe-exec.js";
 import { safeResourceWrite } from "../../core/safe-resource-write.js";
 import { createTomlFileReader, type TomlFileReader, tomlTableAt } from "../../core/toml.js";
@@ -44,6 +45,7 @@ import { collectEnforcementInventory, type EnforcementInventory } from "./enforc
 import type { Fingerprint } from "./fingerprint.js";
 import { fitGeneratedHandbook, handbookBlocks, normalizeHandbookRule } from "./handbook-budget.js";
 import { instructionUnits } from "./instruction-units.js";
+import { ContextOperationAbortError } from "./operation-result.js";
 import { packageManager } from "./package-manager.js";
 import { indexProgressSink } from "./progress.js";
 import { type ProjectMetadata, readProjectMetadata } from "./project-metadata.js";
@@ -148,6 +150,7 @@ export interface BootstrapFallbackResult {
 }
 
 export interface RunBootstrapInput {
+	signal?: AbortSignal;
 	cwd?: string;
 	io?: BootstrapIo;
 	modelId?: string;
@@ -1398,6 +1401,7 @@ async function ensureGitignore(cwd: string, input: RunBootstrapInput): Promise<"
 		return "updated";
 	}
 	const confirmed = input.confirmGitignore ? await input.confirmGitignore() : false;
+	input.signal?.throwIfAborted();
 	if (!confirmed) {
 		// The remedy is one flag away and the warning used to name neither it
 		// nor the line, leaving the operator to guess the pattern Clio writes.
@@ -1607,6 +1611,21 @@ function summarizeAdoption(
 }
 
 export async function runBootstrap(input: RunBootstrapInput = {}): Promise<RunBootstrapResult> {
+	const committed: ContextOperationFact[] = [];
+	try {
+		return await runBootstrapWork(input, committed);
+	} catch (error) {
+		if (error instanceof Error && error.name === "AbortError")
+			throw new ContextOperationAbortError(error.message, committed);
+		throw error;
+	}
+}
+
+async function runBootstrapWork(
+	input: RunBootstrapInput,
+	committed: ContextOperationFact[],
+): Promise<RunBootstrapResult> {
+	input.signal?.throwIfAborted();
 	const cwd = input.cwd ?? process.cwd();
 	const tomlFiles = createTomlFileReader(cwd);
 	const projectType = detectProjectType(cwd);
@@ -1641,7 +1660,7 @@ export async function runBootstrap(input: RunBootstrapInput = {}): Promise<RunBo
 	let codewiki: Codewiki;
 	let codewikiFingerprint: Fingerprint;
 	if (input.preview === true) {
-		const candidate = await buildCodewikiCandidate(cwd, projectType, indexProgressSink(input.onProgress));
+		const candidate = await buildCodewikiCandidate(cwd, projectType, indexProgressSink(input.onProgress), input.signal);
 		codewiki = candidate.codewiki;
 		codewikiFingerprint = candidate.fingerprint;
 	} else {
@@ -1656,11 +1675,15 @@ export async function runBootstrap(input: RunBootstrapInput = {}): Promise<RunBo
 			}),
 			{
 				onProgress: indexProgressSink(input.onProgress),
+				...(input.signal ? { signal: input.signal } : {}),
 				beforeCommit: async (_result, workspace) => {
 					gitignoreChange = await ensureGitignore(workspace, input);
+					if (gitignoreChange) committed.push({ kind: gitignoreChange, unit: "paths", count: 1, paths: [".gitignore"] });
 				},
-				afterCommit: ({ codewiki: committed, fingerprint }, workspace) =>
-					persistCodewikiForGeneration(workspace, projectType, indexedAt, committed, fingerprint),
+				afterCommit: ({ codewiki: indexed, fingerprint }, workspace) => {
+					persistCodewikiForGeneration(workspace, projectType, indexedAt, indexed, fingerprint);
+					committed.push({ kind: "indexed", unit: "source-files", count: indexedSourceFileCount(indexed) });
+				},
 			},
 		);
 		if (!coordinated) throw new Error("codewiki bootstrap transaction did not commit");
@@ -1675,6 +1698,7 @@ export async function runBootstrap(input: RunBootstrapInput = {}): Promise<RunBo
 		current: codewikiEntryCount,
 		total: codewikiEntryCount,
 	});
+	input.signal?.throwIfAborted();
 	const hadClioMd = existsSync(join(cwd, "CLIO-CODER.md"));
 	const originalClioMdText = readExistingClioMdText(cwd);
 	const useExistingClioMdAsSource = hadClioMd && input.rewriteClioMd !== true;
@@ -1784,7 +1808,9 @@ export async function runBootstrap(input: RunBootstrapInput = {}): Promise<RunBo
 				return `The draft had ${rules.length} rules; none survived grounding (${reason}). Write the invariants, change recipes and test rules supported by the original evidence brief, each citing its file in backticks. Return the complete handbook JSON.`;
 			},
 		};
+		input.signal?.throwIfAborted();
 		output = await (input.generate ?? heuristicBootstrapOutput)(generateInput);
+		input.signal?.throwIfAborted();
 		generation = reportedGeneration ?? generation;
 		let retainedModelSections = 0;
 		output = stabilizeGeneratedOutput(
@@ -1871,21 +1897,25 @@ export async function runBootstrap(input: RunBootstrapInput = {}): Promise<RunBo
 		status: "started",
 		message: hadClioMd ? "preserving CLIO-CODER.md" : "writing CLIO-CODER.md",
 	});
-	const action = await coordinateCodewikiExclusive(cwd, (): RunBootstrapSummary["action"] => {
-		const wouldPublish =
-			!hadClioMd || (replaceClioMd && generation.mode !== "existing") || (input.adopt && existingParsed);
-		const sourceChanged = hadClioMd !== existsSync(clioMdPath) || originalClioMdText !== readExistingClioMdText(cwd);
-		if (shouldPropose || (wouldPublish && sourceChanged)) {
-			proposalPath = writeClioMdProposal(cwd, now, output, generation, originalClioMdText);
-			if (sourceChanged)
-				warn(input.io, "CLIO-CODER.md changed during initialization; the generated draft was saved as a proposal.\n");
-			return "proposed";
-		} else if (wouldPublish) {
-			clioMdPath = writeClioMdFile(cwd, output);
-			return hadClioMd ? "refreshed" : "wrote";
-		}
-		return "preserved";
-	});
+	const action = await coordinateCodewikiExclusive(
+		cwd,
+		(): RunBootstrapSummary["action"] => {
+			const wouldPublish =
+				!hadClioMd || (replaceClioMd && generation.mode !== "existing") || (input.adopt && existingParsed);
+			const sourceChanged = hadClioMd !== existsSync(clioMdPath) || originalClioMdText !== readExistingClioMdText(cwd);
+			if (shouldPropose || (wouldPublish && sourceChanged)) {
+				proposalPath = writeClioMdProposal(cwd, now, output, generation, originalClioMdText);
+				if (sourceChanged)
+					warn(input.io, "CLIO-CODER.md changed during initialization; the generated draft was saved as a proposal.\n");
+				return "proposed";
+			} else if (wouldPublish) {
+				clioMdPath = writeClioMdFile(cwd, output);
+				return hadClioMd ? "refreshed" : "wrote";
+			}
+			return "preserved";
+		},
+		input.signal,
+	);
 	progress(input, {
 		phase: "clio-md",
 		status: "completed",

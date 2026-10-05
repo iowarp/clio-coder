@@ -1,10 +1,10 @@
+import type { ContextActivityPayload } from "../../core/bus-events.js";
+import type { ContextOperationStatus } from "../../core/context-operation.js";
 import {
 	ACP_CONTEXT_STATUS_METHOD,
 	CONTEXT_OPERATION_CUSTOM_TYPE,
 	readContextOperation,
 } from "../../core/context-operation.js";
-import type { ContextOperationStatus } from "../../core/context-operation.js";
-import type { ContextActivityPayload } from "../../core/bus-events.js";
 import {
 	ACP_DISPATCH_STEER_METHOD,
 	ACP_EGGS_META_KEY,
@@ -463,6 +463,8 @@ export interface ClioAcpServerOptions {
 	 * Absent means the method is not announced and refuses.
 	 */
 	contextLedger?: () => ContextLedger;
+	/** Ownership-checked cancellation of project context work, distinct from chat reduction. */
+	cancelContextOperation?: (sessionId: string, cwd: string, operationId?: string) => boolean;
 	/**
 	 * The session's task-board plan, re-read after every settled tool call so a
 	 * change reaches the client as the standard `plan` update. Absent means no
@@ -5657,23 +5659,55 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 		}
 	});
 
-	const cancelSession = (session: AcpServerSession, reason: string): void => {
+	const cancelSession = (session: AcpServerSession, reason: string, operationId?: string): boolean => {
+		if (operationId !== undefined) {
+			if (session.id !== boundSessionId) return false;
+			const operation = contextActivity?.operation;
+			if (
+				!operation ||
+				operation.id !== operationId ||
+				operation.sessionId !== session.id ||
+				operation.cwd !== canonicalCwd ||
+				operation.outcome !== undefined
+			)
+				return false;
+			if (
+				operation.kind === "context-init" ||
+				operation.kind === "context-refresh" ||
+				operation.kind === "context-clear"
+			) {
+				if (options.cancelContextOperation?.(session.id, canonicalCwd, operationId) !== true) return false;
+			} else if (operation.kind !== "compaction" && operation.kind !== "context-recover") return false;
+		} else if (session.id === boundSessionId) options.cancelContextOperation?.(session.id, canonicalCwd);
 		// A shell line never runs beside a prompt, so this stops whichever of the two is running.
 		if (activeShell?.sessionId === session.id) activeShell.abort.abort();
 		if (activeSessionId === session.id || activeSessionId === null) permission.cancelPending(reason);
 		if ((activeSessionId ?? boundSessionId) === session.id) options.interviews?.cancel();
 		if (!session.activePrompt) {
-			if (contextCommandInFlight !== null && session.id === boundSessionId) options.chat.cancel();
-			return;
+			if ((contextCommandInFlight !== null || operationId !== undefined) && session.id === boundSessionId)
+				options.chat.cancel();
+			return true;
 		}
 		session.activePrompt.cancelled = true;
 		options.chat.cancel();
+		return true;
 	};
 
-	const cancel = (params: unknown): Record<string, never> => {
+	const contextCancellationId = (params: unknown): string | undefined => {
+		if (!isRecord(params) || params._meta === undefined) return undefined;
+		if (!isRecord(params._meta))
+			throw new AcpRequestError(-32602, "cancel metadata must be an object", { code: "invalid_params" });
+		if (!Object.hasOwn(params._meta, ACP_CONTEXT_META_KEY)) return undefined;
+		const context = params._meta[ACP_CONTEXT_META_KEY];
+		if (!isRecord(context))
+			throw new AcpRequestError(-32602, "context cancellation requires operationId", { code: "invalid_params" });
+		return requireBoundedClientString(context.operationId, "operationId", 128);
+	};
+	const cancel = (params: unknown): Record<string, unknown> => {
 		requireInitialized();
-		cancelSession(getSession(params), "prompt cancelled");
-		return {};
+		const operationId = contextCancellationId(params);
+		const cancelled = cancelSession(getSession(params), "prompt cancelled", operationId);
+		return operationId === undefined ? {} : { _meta: { [ACP_CONTEXT_META_KEY]: { operationId, cancelled } } };
 	};
 	options.transport.onRequest("session/cancel", cancel);
 	options.transport.onNotification("session/cancel", (params) => {
@@ -5682,7 +5716,13 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 		if (!handshake.initialized) return;
 		const id = isRecord(params) && typeof params.sessionId === "string" ? params.sessionId : null;
 		const session = id === null ? undefined : sessions.get(id);
-		if (session) cancelSession(session, "prompt cancelled");
+		if (session) {
+			try {
+				cancelSession(session, "prompt cancelled", contextCancellationId(params));
+			} catch {
+				/* Malformed scoped notifications have no reply channel and must never become generic cancels. */
+			}
+		}
 	});
 
 	/**

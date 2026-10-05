@@ -18,6 +18,7 @@ import { wikiCompleteness, wikiStaleness } from "./wiki/staleness.js";
  */
 
 export interface RunContextRefreshInput {
+	signal?: AbortSignal;
 	decisions?: ReadonlyArray<DecisionLedgerEntry>;
 	cwd?: string;
 	io?: BootstrapIo;
@@ -64,6 +65,7 @@ function incompleteWikiHint(cwd: string): string | undefined {
 }
 
 export async function runContextRefresh(input: RunContextRefreshInput = {}): Promise<RunContextRefreshResult> {
+	input.signal?.throwIfAborted();
 	const cwd = input.cwd ?? process.cwd();
 	const now = input.now ?? (() => new Date());
 	const prev = readClioState(cwd);
@@ -90,6 +92,7 @@ export async function runContextRefresh(input: RunContextRefreshInput = {}): Pro
 		}),
 		{
 			onProgress: indexProgressSink(input.onProgress),
+			...(input.signal ? { signal: input.signal } : {}),
 			afterCommit: (result, workspace) => {
 				fingerprint = result.fingerprint;
 				clioMd = tryReadClioMd(workspace)?.ok ? "unchanged" : "absent";

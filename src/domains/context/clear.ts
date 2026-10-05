@@ -5,6 +5,7 @@ import type { BootstrapIo } from "./bootstrap.js";
 import { coordinateCodewikiExclusive } from "./codewiki/coordinator.js";
 
 export interface RunContextClearInput {
+	signal?: AbortSignal;
 	cwd?: string;
 	io?: BootstrapIo;
 	all?: boolean;
@@ -59,8 +60,10 @@ function removeIfPresent(cwd: string, relPath: string, removed: string[]): void 
 }
 
 export async function runContextClear(input: RunContextClearInput = {}): Promise<RunContextClearResult> {
+	input.signal?.throwIfAborted();
 	const cwd = input.cwd ?? process.cwd();
 	const confirmed = await input.confirmContext?.();
+	input.signal?.throwIfAborted();
 	if (confirmed !== true) {
 		out(input.io, "clio-coder context reset cancelled; no files removed.\n");
 		return {
@@ -73,18 +76,22 @@ export async function runContextClear(input: RunContextClearInput = {}): Promise
 
 	// Operator input must not hold the index lease or follow a partial deletion.
 	const removeHandbook = input.all === true && (await input.confirmAll?.()) === true;
-	const { removed, preserved } = await coordinateCodewikiExclusive(cwd, (workspace) => {
-		const removed: string[] = [];
-		for (const relPath of ACCUMULATED_CONTEXT_PATHS) removeIfPresent(workspace, relPath, removed);
+	const { removed, preserved } = await coordinateCodewikiExclusive(
+		cwd,
+		(workspace) => {
+			const removed: string[] = [];
+			for (const relPath of ACCUMULATED_CONTEXT_PATHS) removeIfPresent(workspace, relPath, removed);
 
-		const preserved = [...PRESERVED_CONTEXT_PATHS];
-		if (removeHandbook) {
-			removeIfPresent(workspace, "CLIO-CODER.md", removed);
-			const index = preserved.indexOf("CLIO-CODER.md");
-			if (index !== -1) preserved.splice(index, 1);
-		}
-		return { removed, preserved };
-	});
+			const preserved = [...PRESERVED_CONTEXT_PATHS];
+			if (removeHandbook) {
+				removeIfPresent(workspace, "CLIO-CODER.md", removed);
+				const index = preserved.indexOf("CLIO-CODER.md");
+				if (index !== -1) preserved.splice(index, 1);
+			}
+			return { removed, preserved };
+		},
+		input.signal,
+	);
 
 	out(
 		input.io,

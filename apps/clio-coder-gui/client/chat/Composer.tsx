@@ -58,6 +58,9 @@ import {
 	submitIntent,
 	submitLabel,
 } from "./composer-model.js";
+import { contextBaseline, invokeContextCommand } from "./context-command.js";
+import type { ContextOperationRef } from "./context-command-model.js";
+import { commandPresentation, contextCommandKind, startedByCommand } from "./context-command-model.js";
 import { foldFleetRuns, isLiveRun, steerOutcome } from "./fleet-facts.js";
 import { SuggestionPalette, type SuggestionRow, suggestionOptionId } from "./MentionPalette.js";
 import {
@@ -107,10 +110,15 @@ function saveAttachment(item: Attachment): void {
 	if (item.kind === "file") setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
+/** Put the caret in this session's composer, for a control that is leaving the page with focus. */
+export function focusComposer(sessionId: string): void {
+	focusHandlers.get(sessionId)?.();
+}
+
 /** Fill the composer for this session and put the caret in it. Used by Try again and the starters. */
 export function fillComposer(sessionId: string, text: string): void {
 	draftStore(sessionId).write(text);
-	focusHandlers.get(sessionId)?.();
+	focusComposer(sessionId);
 }
 
 export interface ComposerProps {
@@ -123,6 +131,8 @@ export interface ComposerProps {
 	/** The id of the turn running right now, or null when none is. */
 	readonly runningTurnId: string | null;
 	readonly contextRunning?: boolean;
+	/** The session's latest context operation, so a context command does not repeat the card that reports it. */
+	readonly contextOperation?: ContextOperationRef | null;
 	/** Where the next request goes. Memoize it: a new object on every render re-renders the field. */
 	readonly route: RouteFacts;
 }
@@ -135,6 +145,7 @@ export const Composer = memo(function Composer({
 	initialFocus,
 	runningTurnId,
 	contextRunning = false,
+	contextOperation = null,
 	route,
 }: ComposerProps) {
 	countRender("composer");
@@ -385,8 +396,18 @@ export const Composer = memo(function Composer({
 		onSuccess: () => void queries.invalidateQueries({ queryKey: ["session", sessionId] }),
 	});
 	const command = useMutation({
-		mutationFn: ({ request, key }: { request: CommandRequest; key: string; description: string; sent: string | null }) =>
-			client.call(routes.invokeSessionCommand, { ...params, body: request }, key),
+		mutationFn: ({
+			request,
+			key,
+			baseline,
+		}: {
+			request: CommandRequest;
+			key: string;
+			description: string;
+			sent: string | null;
+			/** The context operation on record when the command was sent, so the one it opens can be told apart. */
+			baseline: string | null;
+		}) => invokeContextCommand({ client, queries, sessionId, request, baseline, key }),
 		onSuccess: (_result, submitted) => {
 			// A typed line is cleared once it ran, and only if it was not edited in the meantime.
 			if (submitted.sent !== null && store.snapshot().text === submitted.sent) store.clear();
@@ -398,8 +419,21 @@ export const Composer = memo(function Composer({
 	const runCommand = (plan: { request: CommandRequest; description: string }, sent: string | null) => {
 		if (command.isPending || contextRunning) return;
 		setSlashError(null);
-		command.mutate({ request: plan.request, key: crypto.randomUUID(), description: plan.description, sent });
+		command.mutate({
+			request: plan.request,
+			key: crypto.randomUUID(),
+			description: plan.description,
+			sent,
+			baseline: contextBaseline(queries, sessionId),
+		});
 	};
+	// A context command's operation card reports its progress and result. The command line steps aside for
+	// it, and only for it: a refusal before any operation began has no card and keeps its own output.
+	const commandKind = command.variables ? contextCommandKind(command.variables.request) : null;
+	const cardRunsCommand =
+		command.variables !== undefined &&
+		startedByCommand(commandKind, sessionId, command.variables.baseline, contextOperation) !== null;
+	const commandShown = command.data ? commandPresentation(command.data.result, command.data.owner) : null;
 	const placeCaret = (at: number | null) =>
 		requestAnimationFrame(() => {
 			const element = field.current;
@@ -1240,7 +1274,7 @@ export const Composer = memo(function Composer({
 						{slash.message}
 					</p>
 				) : null}
-				{command.isPending ? (
+				{command.isPending && !cardRunsCommand ? (
 					<p className="composer__notice" role="status">
 						<ClioPulse size={PULSE_SIZE.row} />
 						Running <code>{command.variables?.description}</code>…
@@ -1252,29 +1286,33 @@ export const Composer = memo(function Composer({
 						{command.error.message}
 					</p>
 				) : null}
-				{command.data ? (
+				{command.data &&
+				commandShown &&
+				(commandShown.status || (commandShown.lines && command.data.result.lines.length > 0)) ? (
 					<div className="slash-result" role="status">
 						<p className="slash-result__head">
-							<StatusMark
-								tone={
-									command.data.level === "error"
-										? "fail"
-										: command.data.level === "warn"
-											? "warn"
-											: command.data.level === "success"
-												? "success"
-												: "neutral"
-								}
-								label={`Command ${command.data.level}`}
-							/>
+							{commandShown.status ? (
+								<StatusMark
+									tone={
+										command.data.result.level === "error"
+											? "fail"
+											: command.data.result.level === "warn"
+												? "warn"
+												: command.data.result.level === "success"
+													? "success"
+													: "neutral"
+									}
+									label={`Command ${command.data.result.level}`}
+								/>
+							) : null}
 							<code>{command.variables?.description}</code>
 							<button type="button" className="composer__secondary" onClick={() => command.reset()}>
 								Dismiss
 							</button>
 						</p>
-						{command.data.lines.length ? (
+						{command.data.result.lines.length ? (
 							// biome-ignore lint/a11y/noNoninteractiveTabindex: the bounded result can scroll with keyboard arrows.
-							<pre tabIndex={0}>{command.data.lines.join("\n")}</pre>
+							<pre tabIndex={0}>{command.data.result.lines.join("\n")}</pre>
 						) : (
 							<p>Clio Coder returned no lines. Check the conversation for any ongoing work.</p>
 						)}
