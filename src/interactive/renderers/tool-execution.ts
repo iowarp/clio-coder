@@ -95,7 +95,7 @@ const STATUS_ERROR_GLYPH = GLYPH.error;
 // Hoisted rail prefixes. `indentAndWrap` would otherwise allocate two fresh
 // styled strings per rendered line; by precomputing the structural and error variants
 // once at module scope, repeated rendering of long result blocks stays cheap.
-const RAIL_NORMAL = `${CONTENT_INDENT}${theme.fg("gutter", "│ ")}`;
+const RAIL_NORMAL = () => `${CONTENT_INDENT}${theme.fg("gutter", "│ ")}`;
 const RAIL_ERROR = `${CONTENT_INDENT}${red("│ ")}`;
 
 export interface ToolExecutionStart {
@@ -1248,12 +1248,12 @@ function wrapHanging(line: string, width: number): string[] {
 /**
  * Apply the body rail to a line and wrap it. The rail (`│ `) is quiet by
  * default and red on error so the tool block reads as a single visual unit
- * even when its result spans many lines. Uses the hoisted `RAIL_NORMAL` /
+ * even when its result spans many lines. Uses the hoisted `RAIL_NORMAL()` /
  * `RAIL_ERROR` constants so we do not allocate a fresh styled prefix per
  * wrapped line.
  */
 function indentAndWrap(line: string, width: number, isError: boolean): string[] {
-	const rail = isError ? RAIL_ERROR : RAIL_NORMAL;
+	const rail = isError ? RAIL_ERROR : RAIL_NORMAL();
 	const bodyWidth = Math.max(1, width - BODY_INDENT_VISIBLE_WIDTH);
 	const out: string[] = [];
 	for (const wrapped of wrap(line, bodyWidth)) {
@@ -1448,7 +1448,7 @@ function truncateRowsMiddle(rows: ReadonlyArray<string>, rowLimit: number, isErr
 	if (rows.length <= rowLimit) return [...rows];
 	if (rowLimit <= 1)
 		return [
-			`${isError ? RAIL_ERROR : RAIL_NORMAL}${theme.fg("foldedHint", `${GLYPH.ellipsis} ${rows.length} lines hidden`)}`,
+			`${isError ? RAIL_ERROR : RAIL_NORMAL()}${theme.fg("foldedHint", `${GLYPH.ellipsis} ${rows.length} lines hidden`)}`,
 		];
 	const available = rowLimit - 1;
 	const head = Math.floor(available / 2);
@@ -1456,7 +1456,7 @@ function truncateRowsMiddle(rows: ReadonlyArray<string>, rowLimit: number, isErr
 	const hidden = Math.max(0, rows.length - head - tail);
 	return [
 		...rows.slice(0, head),
-		`${isError ? RAIL_ERROR : RAIL_NORMAL}${theme.fg("foldedHint", `${GLYPH.ellipsis} ${hidden} lines hidden`)}`,
+		`${isError ? RAIL_ERROR : RAIL_NORMAL()}${theme.fg("foldedHint", `${GLYPH.ellipsis} ${hidden} lines hidden`)}`,
 		...rows.slice(-tail),
 	];
 }
@@ -1521,7 +1521,7 @@ function changeStat(result: unknown): { added: number; removed: number } | null 
 
 function renderMutationDiffBlock(diff: string, width: number, color: boolean): string[] {
 	const bodyWidth = Math.max(1, width - BODY_INDENT_VISIBLE_WIDTH);
-	return renderDiffLines(diff, bodyWidth, { color }).map((line) => `${RAIL_NORMAL}${line}`);
+	return renderDiffLines(diff, bodyWidth, { color }).map((line) => `${RAIL_NORMAL()}${line}`);
 }
 
 interface BashArgs {
@@ -2058,7 +2058,7 @@ function livePayloadFact(payload: LivePayload, view: LiveToolView): string | und
  * rows before.
  */
 function livePayloadRows(payload: LivePayload, view: LiveToolView, limit: number, width: number): string[] {
-	const rail = { rail: RAIL_NORMAL, railWidth: BODY_INDENT_VISIBLE_WIDTH };
+	const rail = { rail: RAIL_NORMAL(), railWidth: BODY_INDENT_VISIBLE_WIDTH };
 	if (payload.tool === "write") {
 		return payload.content === undefined ? [] : view.tail("content", payload.path).rows(limit, width, rail);
 	}
@@ -2145,7 +2145,7 @@ export function renderToolPreview(
 					previewBudget(detail.diffRows, options.terminalRows),
 					width,
 					false,
-					RAIL_NORMAL,
+					RAIL_NORMAL(),
 					BODY_INDENT_VISIBLE_WIDTH,
 				),
 			);
@@ -2159,7 +2159,7 @@ export function renderToolPreview(
 		if (output !== null) {
 			rows.push(
 				...view.outputRows(output.text, limit, width, {
-					rail: RAIL_NORMAL,
+					rail: RAIL_NORMAL(),
 					railWidth: BODY_INDENT_VISIBLE_WIDTH,
 					...(output.truncatedTotal !== undefined ? { truncatedTotal: output.truncatedTotal } : {}),
 				}),
@@ -2178,7 +2178,7 @@ export function renderToolPreview(
 		for (const line of [surface, skill.description]) {
 			if (line === null || line.length === 0) continue;
 			rows.push(
-				`${RAIL_NORMAL}${theme.fg("body", truncateToWidth(sanitizeCallTargetText(line), Math.max(1, width - BODY_INDENT_VISIBLE_WIDTH), GLYPH.ellipsis))}`,
+				`${RAIL_NORMAL()}${theme.fg("body", truncateToWidth(sanitizeCallTargetText(line), Math.max(1, width - BODY_INDENT_VISIBLE_WIDTH), GLYPH.ellipsis))}`,
 			);
 		}
 	}
@@ -2202,7 +2202,7 @@ export function renderToolPreview(
 				previewBudget(detail.invocationRows, options.terminalRows),
 				width,
 				false,
-				RAIL_NORMAL,
+				RAIL_NORMAL(),
 				BODY_INDENT_VISIBLE_WIDTH,
 			),
 		);
@@ -2216,7 +2216,7 @@ export function renderToolPreview(
 				previewBudget(detail.diffRows, options.terminalRows),
 				width,
 				false,
-				RAIL_NORMAL,
+				RAIL_NORMAL(),
 				BODY_INDENT_VISIBLE_WIDTH,
 			),
 		);
@@ -2263,7 +2263,7 @@ export function renderToolPreview(
 					limit,
 					width,
 					command || !finished,
-					failure ? RAIL_ERROR : RAIL_NORMAL,
+					failure ? RAIL_ERROR : RAIL_NORMAL(),
 					BODY_INDENT_VISIBLE_WIDTH,
 				),
 			);
@@ -2273,7 +2273,7 @@ export function renderToolPreview(
 		if (notes.length > 0) {
 			const more = notes.length > 1 ? ` · +${notes.length - 1} more` : "";
 			rows.push(
-				`${failure ? RAIL_ERROR : RAIL_NORMAL}${toolMeta(truncateToWidth(sanitizeCallTargetText(`note to model · ${operatorNoteText(notes[0] ?? "")}`), Math.max(1, width - BODY_INDENT_VISIBLE_WIDTH - more.length), GLYPH.ellipsis))}${toolMeta(more)}`,
+				`${failure ? RAIL_ERROR : RAIL_NORMAL()}${toolMeta(truncateToWidth(sanitizeCallTargetText(`note to model · ${operatorNoteText(notes[0] ?? "")}`), Math.max(1, width - BODY_INDENT_VISIBLE_WIDTH - more.length), GLYPH.ellipsis))}${toolMeta(more)}`,
 			);
 		}
 	}
@@ -2435,7 +2435,7 @@ function renderChainPreview(
 ): string[] {
 	const finished = "result" in call ? call : undefined;
 	const failure = finished?.isError === true || finished?.outcome !== undefined;
-	const rail = failure ? RAIL_ERROR : RAIL_NORMAL;
+	const rail = failure ? RAIL_ERROR : RAIL_NORMAL();
 	const rows = previewActionRows(call, width);
 	if (detail.style === "compact" && (finished === undefined || (!failure && finished.operatorGrant === undefined)))
 		return rows;
@@ -2504,7 +2504,7 @@ function renderChainExecution(finished: ToolExecutionFinished, width: number, op
  * gap around the rest.
  */
 export function hasToolBody(lines: readonly string[]): boolean {
-	return lines.some((line) => line.startsWith(RAIL_NORMAL) || line.startsWith(RAIL_ERROR));
+	return lines.some((line) => line.startsWith(RAIL_NORMAL()) || line.startsWith(RAIL_ERROR));
 }
 
 /** Which Compact fold a settled call can join: explorations, knowledge lookups, or changes. */
@@ -2586,6 +2586,6 @@ export function renderFoldedGroup(
 	const body = indentAndWrap(joinFacts(targets, toolMeta), width, false);
 	return [
 		...wrapHanging(head, width),
-		...previewRows(body, maxRows, width, false, RAIL_NORMAL, BODY_INDENT_VISIBLE_WIDTH),
+		...previewRows(body, maxRows, width, false, RAIL_NORMAL(), BODY_INDENT_VISIBLE_WIDTH),
 	];
 }

@@ -20,6 +20,7 @@ import { sanitizeMultilineDisplayText } from "../../domains/safety/call-target.j
 import { redactSecretString } from "../../domains/safety/redaction.js";
 import { truncateToWidth } from "../../engine/tui.js";
 import { clioTheme, GLYPH } from "../theme/index.js";
+import { skinEpoch } from "../theme/tokens.js";
 import { type CodeInkCarry, type CodeInkLexer, codeInkLangForPath, codeInkLexer } from "./code-ink.js";
 
 /** Lines above the window that redaction reads, so a flag on one line still hides its value on the next. */
@@ -96,9 +97,9 @@ export class LiveTextTail {
 	 */
 	rows(rows: number, width: number, options: LiveRowsOptions): string[] {
 		if (rows <= 0) return [];
-		const key = `${this.text.length}:${rows}:${width}:${options.sign ?? ""}:${options.railWidth}`;
+		const key = `${skinEpoch()}:${this.text.length}:${rows}:${width}:${options.sign ?? ""}:${options.railWidth}`;
 		if (this.memo?.key === key) return this.memo.rows;
-		const style = `${width}:${options.sign ?? ""}:${options.railWidth}`;
+		const style = `${skinEpoch()}:${width}:${options.sign ?? ""}:${options.railWidth}`;
 		if (this.paintedStyle !== style) {
 			this.painted.clear();
 			this.paintedStyle = style;
@@ -211,7 +212,7 @@ export class LiveToolView {
 	}
 
 	outputRows(text: string, rows: number, width: number, options: LiveRowsOptions & LiveOutputOptions): string[] {
-		const key = `${rows}:${width}:${options.railWidth}:${options.truncatedTotal ?? ""}`;
+		const key = `${skinEpoch()}:${rows}:${width}:${options.railWidth}:${options.truncatedTotal ?? ""}`;
 		if (this.output?.text === text && this.output.key === key) return this.output.rows;
 		const out = liveOutputRows(text, rows, width, options);
 		this.output = { text, key, rows: out };

@@ -2,6 +2,7 @@ import type { Component, ScrollViewScrollbar, TUI, TuiMode } from "../engine/tui
 import { Container, ScrollView, TuiAltScreen, VStack } from "../engine/tui.js";
 import type { ChatPanelRegions } from "./chat-panel.js";
 import { clioTheme, GLYPH } from "./theme/index.js";
+import { skinEpoch } from "./theme/tokens.js";
 
 /** A transcript that can hand over its settled prefix and live tail separately. */
 export interface TranscriptComponent extends Component {
@@ -41,9 +42,15 @@ export interface FullscreenLayout {
  */
 function separatedTranscript(chat: TranscriptComponent): Component {
 	let source: unknown;
+	let renderedSkinEpoch = skinEpoch();
 	let separated: string[] = [];
 	return {
 		render(width: number): string[] {
+			if (renderedSkinEpoch !== skinEpoch()) {
+				renderedSkinEpoch = skinEpoch();
+				source = undefined;
+				chat.invalidate();
+			}
 			const regions = chat.renderRegions?.(width);
 			if (regions !== undefined) {
 				// One exact-size copy of the frame, straight from the panel's two
@@ -132,10 +139,15 @@ class RegularRoot implements Component {
 	 */
 	private heldPrefix: readonly string[] | null = null;
 	private heldPrefixAt = -1;
+	private renderedSkinEpoch = skinEpoch();
 
 	constructor(private readonly parts: LayoutParts) {}
 
 	render(width: number): string[] {
+		if (this.renderedSkinEpoch !== skinEpoch()) {
+			this.renderedSkinEpoch = skinEpoch();
+			this.invalidate();
+		}
 		const out = this.out;
 		let row = 0;
 		const write = (lines: readonly string[]): void => {

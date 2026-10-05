@@ -29,6 +29,7 @@ import {
 	withThemeContext,
 } from "./theme/index.js";
 import { modelNickname, type TargetIdentity } from "./theme/labels.js";
+import { skinEpoch } from "./theme/tokens.js";
 import { createComposerSurfacePainter } from "./theme/yolo-surface.js";
 
 /**
@@ -262,6 +263,7 @@ export class ClioEditor extends Editor {
 	private bracketedPasteActive = false;
 	private revision = 0;
 	private railAnimationTime = 0;
+	private renderedSkinEpoch = skinEpoch();
 	private readonly surfacePainters = new Map<string, (line: string) => string>();
 	private renderedBottomRail = "";
 	private renderedTopHidden = 0;
@@ -730,6 +732,11 @@ export class ClioEditor extends Editor {
 	}
 
 	override render(width: number): string[] {
+		if (this.renderedSkinEpoch !== skinEpoch()) {
+			this.renderedSkinEpoch = skinEpoch();
+			this.surfacePainters.clear();
+			this.invalidate();
+		}
 		return withThemeContext(
 			{ surface: "composer", mode: this.chrome.getAutonomy?.() === "yolo" ? "yolo" : "normal" },
 			() => this.renderSurface(width),

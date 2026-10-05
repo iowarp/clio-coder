@@ -13,6 +13,7 @@ import {
 import { localKey } from "../keyboard-owner.js";
 import { buildHint, FILTER_HINT, type HintEntry, type OverlayEscVerb, showClioOverlayFrame } from "../overlay-frame.js";
 import { clioTheme, GLYPH, listGroupHeader, markdownTheme, rule, selectListTheme } from "../theme/index.js";
+import { skinEpoch } from "../theme/tokens.js";
 
 /**
  * Row width at and below which a list draws `narrowLabel`. It is the content
@@ -147,7 +148,7 @@ export class ListOverlayView implements Component {
 	 */
 	private filterMemo: { query: string; items: ReadonlyArray<ListOverlayItem> } | null = null;
 	/** Detail pane memo: one Markdown render per (item, width), not per frame. */
-	private detailMemo: { item: ListOverlayItem; width: number; lines: string[] } | null = null;
+	private detailMemo: { item: ListOverlayItem; width: number; epoch: number; lines: string[] } | null = null;
 	/** Rendered-frame memo keyed on every render input, for frame-cache identity. */
 	private renderMemo: { key: string; lines: string[] } | null = null;
 	/** Bumped on every keystroke routed into the filter input; part of the memo key. */
@@ -601,13 +602,18 @@ export class ListOverlayView implements Component {
 			return [];
 		}
 		let mdLines: string[];
-		if (this.detailMemo && this.detailMemo.item === selectedItem && this.detailMemo.width === width) {
+		if (
+			this.detailMemo &&
+			this.detailMemo.item === selectedItem &&
+			this.detailMemo.width === width &&
+			this.detailMemo.epoch === skinEpoch()
+		) {
 			mdLines = this.detailMemo.lines;
 		} else {
 			const detailLines = selectedItem.detail(width);
 			const md = new Markdown(detailLines.join("\n"), 0, 0, markdownTheme(clioTheme()));
 			mdLines = md.render(width);
-			this.detailMemo = { item: selectedItem, width, lines: mdLines };
+			this.detailMemo = { item: selectedItem, width, epoch: skinEpoch(), lines: mdLines };
 		}
 
 		const maxScrollOffset = Math.max(0, mdLines.length - height);
@@ -646,6 +652,7 @@ export class ListOverlayView implements Component {
 		// Frame memo: identical inputs return the identical array, which lets the
 		// overlay frame's childLines identity cache short-circuit the whole frame.
 		const memoKey = [
+			skinEpoch(),
 			width,
 			this.viewportRows,
 			this.filterText,

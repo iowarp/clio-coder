@@ -1,6 +1,14 @@
 import { extractAnsiCode } from "../../engine/tui.js";
 import { padAnsi } from "./rules.js";
-import { type ClioTheme, projectsYolo, type SemanticRole, SGR_RESET, sgrResetsForeground } from "./tokens.js";
+import {
+	type ClioTheme,
+	projectsYolo,
+	type SemanticRole,
+	SGR_RESET,
+	sgrResetsForeground,
+	skinEpoch,
+	withThemeContext,
+} from "./tokens.js";
 
 /** Preserve explicit selection/diff backgrounds and their own text colors. */
 function inlineBackgroundAfter(code: string, previous: boolean): boolean {
@@ -25,11 +33,21 @@ export function createComposerSurfacePainter(
 	width: number,
 	baseRole: SemanticRole = "inputText",
 ): (line: string) => string {
-	const background = projectsYolo(theme.context) ? theme.bg("composerSurface", "").replace(SGR_RESET, "") : "";
-	const foreground = theme.fgSequence(baseRole);
-	if (!foreground && !background) return (line) => line;
+	const context = theme.context;
+	let background = "";
+	let foreground = "";
+	let paintedEpoch = -1;
 	const rows = new Map<string, string>();
 	return (line: string): string => {
+		if (paintedEpoch !== skinEpoch()) {
+			paintedEpoch = skinEpoch();
+			rows.clear();
+			withThemeContext(context, () => {
+				background = projectsYolo(context) ? theme.bg("composerSurface", "").replace(SGR_RESET, "") : "";
+				foreground = theme.fgSequence(baseRole);
+			});
+		}
+		if (!foreground && !background) return line;
 		const cached = rows.get(line);
 		if (cached !== undefined) return cached;
 		const fitted = padAnsi(line, width);

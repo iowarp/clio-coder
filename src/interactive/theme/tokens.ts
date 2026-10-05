@@ -28,6 +28,24 @@ interface TokenColor {
 	xterm: number;
 }
 const PALETTES = new Map<ThemeBackground | null, Record<PaletteColor, TokenColor>>();
+let overrides: Record<string, { dark: string; light: string }> | undefined;
+let epoch = 0;
+export function skinEpoch(): number {
+	return epoch;
+}
+export function setPaletteSkin(palette: typeof overrides): void {
+	overrides =
+		palette === undefined
+			? undefined
+			: Object.fromEntries(Object.entries(palette).map(([name, pair]) => [name, { ...pair }]));
+	PALETTES.clear();
+	epoch += 1;
+}
+function rgbXterm(rgb: readonly number[]): number {
+	const cube = (channel: number): number => Math.round((channel / 255) * 5);
+	return 16 + 36 * cube(rgb[0] ?? 0) + 6 * cube(rgb[1] ?? 0) + cube(rgb[2] ?? 0);
+}
+
 /** Any SGR sequence; built from the escape code so the source carries no control character. */
 const SGR_SEQUENCE = new RegExp(`${String.fromCharCode(27)}\\[[\\d;]*m`, "gu");
 function palette(background: ThemeBackground | null): Record<PaletteColor, TokenColor> {
@@ -35,14 +53,23 @@ function palette(background: ThemeBackground | null): Record<PaletteColor, Token
 	if (colors === undefined) {
 		colors = Object.fromEntries(
 			(Object.keys(TERMINAL_PALETTE) as PaletteColor[]).map((name): [PaletteColor, TokenColor] => {
-				const [hex, xterm] = paletteProjection(name, background);
+				const override = overrides?.[name]?.[background ?? "dark"];
+				const [hex, xterm] = override === undefined ? paletteProjection(name, background) : [override, 0];
 				const rgb = [1, 3, 5].map((at) => Number.parseInt(hex.slice(at, at + 2), 16)) as [number, number, number];
-				return [name, { rgb, xterm }];
+				return [name, { rgb, xterm: override === undefined ? xterm : rgbXterm(rgb) }];
 			}),
 		) as Record<PaletteColor, TokenColor>;
 		PALETTES.set(background, colors);
 	}
 	return colors;
+}
+
+/** Brand ramps read the same active palette as semantic painting. */
+export function paletteRgb(
+	color: PaletteColor,
+	background: ThemeBackground | null = terminalBackground(),
+): readonly [number, number, number] {
+	return palette(background)[color].rgb;
 }
 
 // A synchronous render scope also reaches theme callbacks made when a selector
@@ -131,12 +158,10 @@ export function createClioTheme(
 	const truecolor = options.truecolor ?? detectTruecolor();
 	const color = options.color ?? !colorDisabled();
 	const background = options.background === undefined ? terminalBackground() : options.background;
-	const colors = palette(background);
-	const surfaceColors = palette(background ?? "dark");
 	const context = () => options.context ?? renderContext;
 	const colorFor = (token: ClioToken, state?: RoleState): TokenColor => {
 		const scope = context();
-		return (projectsYolo(scope) ? surfaceColors : colors)[tokenStyle(token, scope, state).color];
+		return palette(projectsYolo(scope) ? (background ?? "dark") : background)[tokenStyle(token, scope, state).color];
 	};
 	const paint = (text: string, mods: PaintMods): string => {
 		const codes: string[] = [];
@@ -193,6 +218,5 @@ export function paintHex(text: string, hex: string, options: { truecolor?: boole
 	const green = Number.parseInt(match[2] ?? "0", 16);
 	const blue = Number.parseInt(match[3] ?? "0", 16);
 	if (truecolor) return `\u001b[38;2;${red};${green};${blue}m${text}${SGR_RESET}`;
-	const cube = (channel: number): number => Math.round((channel / 255) * 5);
-	return `\u001b[38;5;${16 + 36 * cube(red) + 6 * cube(green) + cube(blue)}m${text}${SGR_RESET}`;
+	return `\u001b[38;5;${rgbXterm([red, green, blue])}m${text}${SGR_RESET}`;
 }

@@ -8,6 +8,7 @@ import type { ContextActivitySnapshot } from "./context-activity.js";
 import type { DispatchBoardRow } from "./dispatch-board.js";
 import { formatTaskIslandLines, TASK_ISLAND_WIDTH } from "./dispatch-board.js";
 import { clioTheme, frame, GLYPH } from "./theme/index.js";
+import { skinEpoch } from "./theme/tokens.js";
 
 const TASK_ISLAND_MIN_COLUMNS = 80;
 const TASK_ISLAND_MIN_ROWS = 18;
@@ -79,7 +80,17 @@ export function createInteractiveTickers(deps: InteractiveTickersDeps): Interact
 	const clearScheduledInterval =
 		deps.clearScheduledInterval ??
 		((handle: InteractiveTickerHandle) => clearInterval(handle as ReturnType<typeof setInterval>));
-	const taskIsland = new Text("", 0, 0);
+	const taskIsland = new (class extends Text {
+		private renderedSkinEpoch = skinEpoch();
+		override render(width: number): string[] {
+			if (this.renderedSkinEpoch !== skinEpoch()) {
+				this.renderedSkinEpoch = skinEpoch();
+				const board = deps.getTaskBoard?.();
+				this.setText(board ? formatTaskBoardIslandLines(board).join("\n") : "");
+			}
+			return super.render(width);
+		}
+	})("", 0, 0);
 	const taskIslandWidth = formatTaskIslandLines([]).reduce((max, line) => Math.max(max, visibleWidth(line)), 0);
 	const taskIslandHandle = deps.tui.showOverlay(taskIsland, {
 		anchor: "top-right",

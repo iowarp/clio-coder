@@ -14,6 +14,7 @@ import { clockLocal } from "./format-time.js";
 import { showClioOverlayFrame } from "./overlay-frame.js";
 import { type ListOverlayItem, ListOverlayView } from "./overlays/list-overlay.js";
 import { clioTheme, fitUnits, rule } from "./theme/index.js";
+import { skinEpoch } from "./theme/tokens.js";
 
 const DEFAULT_CONTENT_WIDTH = 96;
 const REFRESH_MS = 1_000;
@@ -292,7 +293,7 @@ export class MemoryOverlayView implements Component {
 	private sync(): TaskMemoryOperatorStatus {
 		const status = this.getStatus();
 		const records = this.getRecords();
-		const signature = memorySignature(status, records);
+		const signature = `${skinEpoch()}|${memorySignature(status, records)}`;
 		if (signature !== this.signature) {
 			this.signature = signature;
 			this.list.setItems(buildMemoryOverlayItems(status, records));

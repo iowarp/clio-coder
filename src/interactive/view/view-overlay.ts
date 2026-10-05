@@ -16,6 +16,7 @@ import { clockLocal } from "../format-time.js";
 import { localKey } from "../keyboard-owner.js";
 import { buildHint, fitRows, selectionMark, showClioOverlayFrame } from "../overlay-frame.js";
 import { clioTheme, GLYPH, markdownTheme, padAnsi } from "../theme/index.js";
+import { skinEpoch } from "../theme/tokens.js";
 
 export const VIEW_OVERLAY_WIDTH = "100%";
 export const VIEW_OVERLAY_MAX_HEIGHT = "100%";
@@ -77,8 +78,10 @@ interface LoadedContent {
 	render?: (width: number) => string[];
 	error?: string;
 	renderWidth?: number;
+	renderEpoch?: number;
 	renderedLines?: string[];
 	renderingWidth?: number;
+	renderingEpoch?: number;
 }
 
 export interface ViewOverlayOptions {
@@ -560,15 +563,19 @@ export class ViewOverlayView implements Component {
 
 	/** Lay out selected content after the paint call, including on resize. */
 	private queueContentRender(content: LoadedContent, width: number): void {
-		if (content.status !== "loaded" || content.renderingWidth === width) return;
+		const epoch = skinEpoch();
+		if (content.status !== "loaded" || (content.renderingWidth === width && content.renderingEpoch === epoch)) return;
 		content.renderingWidth = width;
+		content.renderingEpoch = epoch;
 		const token = this.loadToken;
 		void Promise.resolve()
 			.then(() => {
 				if (
 					token !== this.loadToken ||
 					(this.content !== content && this.content?.details !== content) ||
-					content.renderingWidth !== width
+					content.renderingWidth !== width ||
+					content.renderingEpoch !== epoch ||
+					skinEpoch() !== epoch
 				)
 					return;
 				const rows =
@@ -578,6 +585,7 @@ export class ViewOverlayView implements Component {
 							? new Markdown(content.lines.join("\n"), 0, 0, markdownTheme(clioTheme())).render(width)
 							: content.lines.flatMap((line) => wrapTextWithAnsi(line, Math.max(1, width)));
 				content.renderWidth = width;
+				content.renderEpoch = epoch;
 				content.renderedLines = rows;
 				this.options.requestRender?.();
 			})
@@ -585,7 +593,9 @@ export class ViewOverlayView implements Component {
 				if (
 					token !== this.loadToken ||
 					(this.content !== content && this.content?.details !== content) ||
-					content.renderingWidth !== width
+					content.renderingWidth !== width ||
+					content.renderingEpoch !== epoch ||
+					skinEpoch() !== epoch
 				)
 					return;
 				const message = err instanceof Error ? err.message : String(err);
@@ -616,12 +626,14 @@ export class ViewOverlayView implements Component {
 			].flatMap((line) => wrapTextWithAnsi(viewArtifactDisplayText(line), Math.max(1, width)));
 			const content = this.content?.details;
 			if (content) {
-				if (content.renderWidth !== width) this.queueContentRender(content, width);
+				if (content.renderWidth !== width || content.renderEpoch !== skinEpoch()) this.queueContentRender(content, width);
 				else content.renderingWidth = width;
 				return [
 					...metadata,
 					"",
-					...(content.renderWidth === width ? (content.renderedLines ?? []) : ["Laying out details…"]),
+					...(content.renderWidth === width && content.renderEpoch === skinEpoch()
+						? (content.renderedLines ?? [])
+						: ["Laying out details…"]),
 				];
 			}
 			return metadata;
@@ -629,7 +641,7 @@ export class ViewOverlayView implements Component {
 		const content = this.content;
 		if (!content) return [];
 		if (content.status !== "loaded") return content.lines.flatMap((line) => wrapTextWithAnsi(line, Math.max(1, width)));
-		if (content.renderedLines && content.renderWidth === width) {
+		if (content.renderedLines && content.renderWidth === width && content.renderEpoch === skinEpoch()) {
 			content.renderingWidth = width;
 			return content.renderedLines;
 		}
@@ -747,7 +759,9 @@ export class ViewOverlayView implements Component {
 		this.lastContentBodyHeight = Math.max(1, bodyHeight);
 		const body = this.renderedContentLines(width);
 		const visibleContent = this.showProvenance ? this.content?.details : this.content;
-		const layoutPending = visibleContent?.status === "loaded" && visibleContent.renderWidth !== width;
+		const layoutPending =
+			visibleContent?.status === "loaded" &&
+			(visibleContent.renderWidth !== width || visibleContent.renderEpoch !== skinEpoch());
 		const maxOffset = Math.max(0, body.length - Math.max(1, bodyHeight));
 		if (!layoutPending && this.contentScrollOffset > maxOffset) this.contentScrollOffset = maxOffset;
 		const visible = body
@@ -859,7 +873,11 @@ export class ViewOverlayView implements Component {
 	private handleContentInput(data: string): boolean {
 		const bodyHeight = this.lastContentBodyHeight;
 		const visibleContent = this.showProvenance ? this.content?.details : this.content;
-		if (visibleContent?.status === "loaded" && visibleContent.renderWidth !== this.lastContentWidth) return true;
+		if (
+			visibleContent?.status === "loaded" &&
+			(visibleContent.renderWidth !== this.lastContentWidth || visibleContent.renderEpoch !== skinEpoch())
+		)
+			return true;
 		const total = this.renderedContentLines(this.lastContentWidth).length;
 		let action: ViewScrollAction | null = null;
 		if (matchesKey(data, "up") || data === "k") action = "line-up";

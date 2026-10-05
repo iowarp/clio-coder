@@ -22,6 +22,7 @@ import {
 	selectListTheme,
 	withThemeContext,
 } from "./theme/index.js";
+import { skinEpoch } from "./theme/tokens.js";
 
 export const DEFAULT_SELECT_THEME: SelectListTheme = selectListTheme(clioTheme());
 
@@ -395,6 +396,12 @@ export class ClioOverlayFrame implements Component {
 	 * composites this overlay.
 	 */
 	private rowBudget = 0;
+	private renderedSkinEpoch = skinEpoch();
+	private syncSkin(): void {
+		if (this.renderedSkinEpoch === skinEpoch()) return;
+		this.renderedSkinEpoch = skinEpoch();
+		this.invalidate();
+	}
 
 	/**
 	 * Last rendered box, keyed by everything that shapes it. `childLines` is
@@ -441,6 +448,7 @@ export class ClioOverlayFrame implements Component {
 	}
 
 	render(width: number): string[] {
+		this.syncSkin();
 		const boxWidth = Math.max(5, Math.min(this.boxWidth > 0 ? this.boxWidth : width, width));
 		const contentWidth = Math.max(1, boxWidth - 4);
 		if (isRowBudgeted(this.child)) this.child.setBodyRows(this.rowBudget > 0 ? Math.max(1, this.rowBudget - 2) : 0);
@@ -503,6 +511,7 @@ export class ClioOverlayFrame implements Component {
 	private cachedDock: { contentWidth: number; bodyRows: number; childLines: string[]; lines: string[] } | undefined;
 
 	renderDockBody(contentWidth: number, bodyRows: number): string[] {
+		this.syncSkin();
 		const context = clioTheme().context;
 		const key = `${context.surface}:${context.mode}`;
 		if (this.dockContext !== key) {

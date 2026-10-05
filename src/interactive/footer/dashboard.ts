@@ -21,6 +21,7 @@ import { formatKeyLabel } from "../keybinding-manager.js";
 import type { AgentStatus, TurnSummary } from "../status/index.js";
 import { resolveFooterVerb, spinnerFrame } from "../status/index.js";
 import { animationStep, clioTheme, collapseHomePath, formatTargetLabel } from "../theme/index.js";
+import { skinEpoch } from "../theme/tokens.js";
 import { createDemoHints } from "./demo-hints.js";
 import type { Notification, NotificationCenter } from "./notifications.js";
 import { formatNotificationPanel } from "./notifications.js";
@@ -183,6 +184,7 @@ class FooterText extends Text {
 	private composedWidth: number | null = null;
 	private composedRows: number | null = null;
 	private composedText = "";
+	private composedEpoch = -1;
 	private readonly compose: (width: number) => string;
 
 	constructor(
@@ -195,6 +197,7 @@ class FooterText extends Text {
 
 	composeAt(width: number): void {
 		this.composedWidth = width;
+		this.composedEpoch = skinEpoch();
 		this.composedRows = this.getRows();
 		const text = this.compose(width);
 		if (text === this.composedText) return;
@@ -203,7 +206,8 @@ class FooterText extends Text {
 	}
 
 	override render(width: number): string[] {
-		if (width !== this.composedWidth || this.getRows() !== this.composedRows) this.composeAt(width);
+		if (this.composedEpoch !== skinEpoch() || width !== this.composedWidth || this.getRows() !== this.composedRows)
+			this.composeAt(width);
 		return super.render(width);
 	}
 }

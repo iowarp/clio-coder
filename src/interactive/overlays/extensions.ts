@@ -23,21 +23,23 @@ export function openExtensionsOverlay(tui: TUI, ctx: SlashCommandContext, onClos
 							: `shadowed:${ext.overriddenBy ?? "higher"}`;
 
 		const runtime = ctx.operatorExtensions?.entries().find((entry) => entry.id === ext.id && entry.scope === ext.scope);
-		let meta = ext.runtime ? `${state}; runtime ${runtime?.state ?? "not started"}` : state;
-		if (state === "eligible") {
-			meta = clioTheme().fg("success", meta);
-		} else if (state === "disabled") {
-			meta = clioTheme().fg("disabledOption", "disabled");
-		} else {
-			meta = clioTheme().fg("warning", state);
-		}
+		const meta = (): string => {
+			const text = ext.runtime ? `${state}; runtime ${runtime?.state ?? "not started"}` : state;
+			return state === "eligible"
+				? clioTheme().fg("success", text)
+				: state === "disabled"
+					? clioTheme().fg("disabledOption", "disabled")
+					: clioTheme().fg("warning", state);
+		};
 
 		const label = `${ext.id.padEnd(22)} ${ext.scope.padEnd(7)} ${ext.description}`;
 
 		return {
 			id: ext.id,
 			label,
-			meta,
+			get meta() {
+				return meta();
+			},
 			group: "Harness extensions",
 			detail: () => {
 				const lines = [

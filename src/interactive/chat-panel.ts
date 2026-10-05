@@ -69,6 +69,7 @@ import {
 	SGR_ITALIC,
 	SGR_RESET,
 } from "./theme/index.js";
+import { skinEpoch } from "./theme/tokens.js";
 import { type TranscriptDetailPolicy, transcriptDetail } from "./transcript-detail.js";
 
 // Every fenced code block, top level or nested in a list or quote, reaches the
@@ -106,9 +107,9 @@ const OSC133_PROMPT_START = "\x1b]133;A\x07";
 
 // Transcript ownership, reading hierarchy, and outcome sequences share the theme resolver.
 const RESET = SGR_RESET;
-const SECONDARY = fgSequence("annotation");
-const TEAL = fgSequence("guidance");
-const REASON_INK = fgSequence("gutter");
+const SECONDARY = () => fgSequence("annotation");
+const TEAL = () => fgSequence("guidance");
+const REASON_INK = () => fgSequence("gutter");
 const RED_CRIT = fgSequence("error");
 const GREEN_OK = fgSequence("success");
 const AMBER_WARN = fgSequence("warning");
@@ -187,7 +188,7 @@ type TextSegment = {
 	/** Cached prose policy for live, replayed and rewritten model output. */
 	prose?: AssistantProseProjection;
 	/** The segment's stock Markdown component and the source it last rendered. */
-	markdown?: { view: Markdown; source: string };
+	markdown?: { view: Markdown; source: string; epoch: number };
 	/**
 	 * Live denoising state while a diffusion model streams whole frames. The
 	 * text before `settled` agreed between the last two frames and is shown as
@@ -715,13 +716,13 @@ function renderDiffusionFrameLines(seg: TextSegment, settled: number, width: num
 	const headLines = head.split("\n");
 	const tailLines = tail.split("\n");
 	// The line the boundary falls on carries both tones.
-	const joinLine = `${headLines[headLines.length - 1] ?? ""}${tail.length > 0 ? `${SECONDARY}${tailLines[0] ?? ""}${SGR_RESET}` : ""}`;
+	const joinLine = `${headLines[headLines.length - 1] ?? ""}${tail.length > 0 ? `${SECONDARY()}${tailLines[0] ?? ""}${SGR_RESET}` : ""}`;
 	for (let i = 0; i < headLines.length - 1; i += 1) {
 		for (const line of wrapTextWithAnsi(headLines[i] ?? "", width)) lines.push(line);
 	}
 	for (const line of wrapTextWithAnsi(joinLine, width)) lines.push(line);
 	for (let i = 1; i < tailLines.length; i += 1) {
-		for (const line of wrapTextWithAnsi(`${SECONDARY}${tailLines[i] ?? ""}${SGR_RESET}`, width)) lines.push(line);
+		for (const line of wrapTextWithAnsi(`${SECONDARY()}${tailLines[i] ?? ""}${SGR_RESET}`, width)) lines.push(line);
 	}
 	return lines.map((line) => clioTheme().base("assistantProse", line));
 }
@@ -812,7 +813,8 @@ function renderTextSegmentLines(seg: TextSegment, width: number, bareFences: boo
 	}
 	seg.prose ??= new AssistantProseProjection();
 	const prose = seg.prose.project(seg.text, seg.finalized);
-	if (seg.markdown === undefined) seg.markdown = { view: chatMarkdown(prose, bareFences), source: prose };
+	if (seg.markdown === undefined || seg.markdown.epoch !== skinEpoch())
+		seg.markdown = { view: chatMarkdown(prose, bareFences), source: prose, epoch: skinEpoch() };
 	else if (seg.markdown.source !== prose) {
 		seg.markdown.view.setText(prose);
 		seg.markdown.source = prose;
@@ -847,20 +849,20 @@ function renderErrorSegmentLines(seg: ErrorSegment, width: number, unbounded: bo
 	return out;
 }
 
-const CLIO_PREFIX = `${TEAL}${AGENT_GLYPH}${RESET} `;
+const CLIO_PREFIX = () => `${TEAL()}${AGENT_GLYPH}${RESET} `;
 const CLIO_PREFIX_ERROR = `${RED_CRIT}${AGENT_GLYPH}${RESET} `;
 /**
  * Operator prompts wear the accent bar on every row and bold text, so the
  * operator's words are never the same weight as the agent prose beneath them.
  */
-const USER_PREFIX = `${TEAL}${USER_BAR}${RESET} `;
+const USER_PREFIX = () => `${TEAL()}${USER_BAR}${RESET} `;
 /**
  * A prompt Clio has taken but not yet committed. The bar is dim rather than
  * teal, the text is not bold, and the row says so, because the transcript used
  * to paint an uncommitted prompt exactly like a durable user turn while the
  * ledger still had no entry for it (issue #251).
  */
-const USER_PREFIX_PENDING = `${SECONDARY}${USER_BAR}${RESET} `;
+const USER_PREFIX_PENDING = () => `${SECONDARY()}${USER_BAR}${RESET} `;
 /**
  * The uncommitted-row tails, stored as plain text so their width can be spent
  * against the row's budget before the dim codes go on. Both begin with the
@@ -899,10 +901,10 @@ function appendUserRowTail(rendered: string[], tail: string, width: number): voi
 	const last = rendered.length - 1;
 	const lastLine = rendered[last];
 	if (lastLine !== undefined && visibleWidth(lastLine) + tail.length <= width) {
-		rendered[last] = `${lastLine}${SECONDARY}${tail}${RESET}`;
+		rendered[last] = `${lastLine}${SECONDARY()}${tail}${RESET}`;
 		return;
 	}
-	rendered.push(`${USER_PREFIX_PENDING}${dimLine(tail.trimStart(), Math.max(1, width - PROSE_GUTTER_WIDTH))}`);
+	rendered.push(`${USER_PREFIX_PENDING()}${dimLine(tail.trimStart(), Math.max(1, width - PROSE_GUTTER_WIDTH))}`);
 }
 
 /**
@@ -915,7 +917,7 @@ const SKILL_INVOCATION = /^\/skill\s+\S+/u;
 function renderUserLines(text: string, width: number, status: UserTurnStatus): string[] {
 	const contentWidth = Math.max(1, width - PROSE_GUTTER_WIDTH);
 	const committed = status === "committed";
-	const prefix = committed ? USER_PREFIX : USER_PREFIX_PENDING;
+	const prefix = committed ? USER_PREFIX() : USER_PREFIX_PENDING();
 	const rendered: string[] = [];
 	const sourceLines = text.split("\n");
 	// A `/skill <name>` prompt leads with the command in the slash-command
@@ -942,7 +944,7 @@ function renderUserLines(text: string, width: number, status: UserTurnStatus): s
  */
 const THINKING_HIDDEN_LABEL = "Thinking · /view";
 function dimLine(text: string, width: number): string {
-	return `${SECONDARY}${truncateToWidth(text, Math.max(1, width), GLYPH.ellipsis, false)}${RESET}`;
+	return `${SECONDARY()}${truncateToWidth(text, Math.max(1, width), GLYPH.ellipsis, false)}${RESET}`;
 }
 
 /**
@@ -951,7 +953,7 @@ function dimLine(text: string, width: number): string {
  * gutter rail, so reasoning never reads as tool output. Readable secondary
  * text and italics distinguish the excerpt from the answer.
  */
-const REASON_RAIL = `${REASON_INK}│${RESET} `;
+const REASON_RAIL = () => `${REASON_INK()}│${RESET} `;
 
 /**
  * A closed thinking stretch's folded marker, in place in the segment order. The
@@ -965,7 +967,7 @@ function renderSettledThinkingMarker(view: ReasoningUsageView, width: number): s
 		view.provenance === "unmeasured" || view.tokens <= 0
 			? null
 			: `${view.provenance === "provider" ? "" : "≈"}${compactReasoningTokens(view.tokens)} tokens`;
-	return `${REASON_RAIL}${dimLine(
+	return `${REASON_RAIL()}${dimLine(
 		count === null ? THINKING_HIDDEN_LABEL : `${THINKING_HIDDEN_LABEL} · ${count}`,
 		Math.max(1, width - PROSE_GUTTER_WIDTH),
 	)}`;
@@ -999,9 +1001,9 @@ function renderThinkingRail(thinking: string, width: number, limit: number, unbo
 	// A bounded excerpt spends no rows on paragraph breaks; /view keeps them.
 	const wrapped = wrapTextWithAnsi(text, Math.max(1, width - PROSE_GUTTER_WIDTH));
 	const rows = (unbounded ? wrapped : wrapped.filter((row) => row.trim().length > 0)).map(
-		(row) => `${REASON_RAIL}${SGR_ITALIC}${clioTheme().fg("reasoningExcerpt", row)}${RESET}`,
+		(row) => `${REASON_RAIL()}${SGR_ITALIC}${clioTheme().fg("reasoningExcerpt", row)}${RESET}`,
 	);
-	return unbounded ? rows : previewRows(rows, limit, width, true, REASON_RAIL, PROSE_GUTTER_WIDTH);
+	return unbounded ? rows : previewRows(rows, limit, width, true, REASON_RAIL(), PROSE_GUTTER_WIDTH);
 }
 
 /**
@@ -1052,7 +1054,7 @@ function renderTurnUsageLine(
 		if (prewarm.length > 0) facts.push(`prewarm ${prewarm.join(", ")}`);
 	}
 	return hangProseLines(
-		wrapTextWithAnsi(`${SECONDARY}${joinFacts(facts)}${RESET}`, Math.max(1, width - PROSE_GUTTER_WIDTH)).map(
+		wrapTextWithAnsi(`${SECONDARY()}${joinFacts(facts)}${RESET}`, Math.max(1, width - PROSE_GUTTER_WIDTH)).map(
 			releaseSpaces,
 		),
 		glyph,
@@ -1067,7 +1069,7 @@ function renderTurnUsageLine(
 function receiptGlyph(outcome: string): string {
 	if (outcome === "Done") return `${GREEN_OK}${GLYPH.ok}${RESET} `;
 	if (outcome === "Failed") return `${RED_CRIT}${GLYPH.error}${RESET} `;
-	if (outcome === "Cancelled") return `${SECONDARY}${GLYPH.cancelled}${RESET} `;
+	if (outcome === "Cancelled") return `${SECONDARY()}${GLYPH.cancelled}${RESET} `;
 	return `${AMBER_WARN}${GLYPH.warn}${RESET} `;
 }
 
@@ -1353,7 +1355,7 @@ function renderEntryLines(
 			flushReasoning("words");
 			blocks.push({ kind: "tool", lines: renderSkillSuggestionRow(split.suggestion, width), body: false });
 			const answerLines = renderTextSegmentLines(split.answer, proseWidth, bareFences);
-			if (answerLines.length > 0) blocks.push({ kind: "prose", lines: hangProseLines(answerLines, CLIO_PREFIX) });
+			if (answerLines.length > 0) blocks.push({ kind: "prose", lines: hangProseLines(answerLines, CLIO_PREFIX()) });
 			continue;
 		}
 		const suggestionOnly = seg.kind === "text" ? findSkillSuggestionLine(seg) : null;
@@ -1379,7 +1381,7 @@ function renderEntryLines(
 			blocks.push({ kind: "error", lines: hangProseLines(rendered, CLIO_PREFIX_ERROR) });
 			continue;
 		}
-		blocks.push({ kind: "prose", lines: hangProseLines(rendered, CLIO_PREFIX) });
+		blocks.push({ kind: "prose", lines: hangProseLines(rendered, CLIO_PREFIX()) });
 	}
 	// Reasoning at the tail is either still streaming or the turn's last word.
 	flushReasoning("words");
@@ -1477,6 +1479,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 			: { siblings: siblings.map((sibling) => sibling.state), showGroupHeader: siblings[0] === entry };
 	};
 	let dirty = true;
+	let renderedSkinEpoch = skinEpoch();
 	let runStartedAt: number | undefined;
 	/** Why the current run's prompt cache may be cold, from the chat loop's cache notice. */
 	let runColdReasons: ReadonlyArray<string> = [];
@@ -1582,6 +1585,12 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 		entryRenderCache.clear();
 		frozen = null;
 		if (prerender !== null) prerender.next = 0;
+	};
+	const syncSkin = (): void => {
+		if (renderedSkinEpoch === skinEpoch()) return;
+		renderedSkinEpoch = skinEpoch();
+		clearRenderCaches();
+		dirty = true;
 	};
 	/**
 	 * A mutation is about to land on the tail entry without an explicit
@@ -1913,6 +1922,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 	 * for the whole frame.
 	 */
 	const renderFrame = (width: number): { prefix: readonly string[]; tail: string[] } => {
+		syncSkin();
 		const startedAt = performance.now();
 		const detail = currentDetail();
 		const terminalRows = options.getTerminalRows?.() ?? 40;
@@ -2032,6 +2042,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 	};
 
 	const prerenderStep = (): boolean => {
+		syncSkin();
 		const job = prerender;
 		if (job === null) {
 			prerenderScheduled = false;

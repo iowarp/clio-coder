@@ -430,6 +430,9 @@ function push(
 	set.items.push({
 		id,
 		...item,
+		get meta() {
+			return item.meta ?? "";
+		},
 		label:
 			subject.kind === "notice"
 				? clioTheme().fg("warning", sanitizeCallTargetText(item.label))
@@ -542,11 +545,13 @@ export function buildLibraryRows(options: LibraryRowOptions): LibraryRowSet {
 			const actions = libraryRowActions(subject, view);
 			push(set, view, `mem:${owner.ref}@${owner.scope}#${member.kind}:${member.name}`, subject, {
 				label: member.name,
-				meta: metaOf([
-					member.kind,
-					() => (member.valid ? theme.fg("success", "valid") : theme.fg("error", "invalid")),
-					member.componentId ? `component ${member.componentId}` : undefined,
-				]),
+				get meta() {
+					return metaOf([
+						member.kind,
+						() => (member.valid ? theme.fg("success", "valid") : theme.fg("error", "invalid")),
+						member.componentId ? `component ${member.componentId}` : undefined,
+					]);
+				},
 				group: LIBRARY_GROUP_MEMBERS,
 				detail: () => memberDetail(subject, actions),
 			});
@@ -558,7 +563,9 @@ export function buildLibraryRows(options: LibraryRowOptions): LibraryRowSet {
 			};
 			push(set, view, `note:ancillary:${item.kind}:${item.id}`, subject, {
 				label: `${item.kind}: ${item.id}`,
-				meta: theme.fg("annotation", "companion file"),
+				get meta() {
+					return theme.fg("annotation", "companion file");
+				},
 				group: LIBRARY_GROUP_NOTICES,
 				detail: () => [`# ${item.id}`, `**Declared as:** ${item.kind}`, `**Path:** \`${item.path}\``, "", subject.message],
 			});
@@ -568,7 +575,9 @@ export function buildLibraryRows(options: LibraryRowOptions): LibraryRowSet {
 			const subject: LibraryRowSubject = { kind: "notice", message: diagnostic };
 			push(set, view, `note:member-diag:${set.notices}`, subject, {
 				label: `${theme.fg("warning", GLYPH.warnInline)} ${diagnostic}`,
-				meta: theme.fg("annotation", "inspection"),
+				get meta() {
+					return theme.fg("annotation", "inspection");
+				},
 				group: LIBRARY_GROUP_NOTICES,
 				detail: () => ["# Inspection diagnostic", diagnostic],
 			});
@@ -582,12 +591,14 @@ export function buildLibraryRows(options: LibraryRowOptions): LibraryRowSet {
 			const hints = (record.provides ?? []).filter((hint) => view.category === "plugin" || hint.kind === view.category);
 			push(set, view, `pkg:${record.ref}`, subject, {
 				label: record.kind !== view.category ? `${record.name} [${record.kind}]` : record.name,
-				meta: metaOf([
-					here ? `${here.scope} ${here.state}` : `not installed (${view.scope})`,
-					hints.length > 0 ? `${hints.length} ${view.category === "plugin" ? "recipe" : view.category} hints` : undefined,
-					libraryOriginLabel(record.origin),
-					record.version ? `v${record.version}` : undefined,
-				]),
+				get meta() {
+					return metaOf([
+						here ? `${here.scope} ${here.state}` : `not installed (${view.scope})`,
+						hints.length > 0 ? `${hints.length} ${view.category === "plugin" ? "recipe" : view.category} hints` : undefined,
+						libraryOriginLabel(record.origin),
+						record.version ? `v${record.version}` : undefined,
+					]);
+				},
 				group:
 					record.kind !== view.category
 						? "Provider packages"
@@ -603,12 +614,14 @@ export function buildLibraryRows(options: LibraryRowOptions): LibraryRowSet {
 			const actions = libraryRowActions(subject, view);
 			push(set, view, `copy:${copy.ref}@${copy.scope}`, subject, {
 				label: copy.name,
-				meta: metaOf([
-					copy.scope,
-					() => copyStateWord(copy),
-					libraryOriginLabel(copy.origin),
-					copy.trust === "foreign" ? () => theme.fg("warning", "foreign") : undefined,
-				]),
+				get meta() {
+					return metaOf([
+						copy.scope,
+						() => copyStateWord(copy),
+						libraryOriginLabel(copy.origin),
+						copy.trust === "foreign" ? () => theme.fg("warning", "foreign") : undefined,
+					]);
+				},
 				group: LIBRARY_GROUP_INSTALLED,
 				detail: () => copyDetail(copy, view, actions),
 			});
@@ -618,11 +631,13 @@ export function buildLibraryRows(options: LibraryRowOptions): LibraryRowSet {
 			const actions = libraryRowActions(subject, view);
 			push(set, view, `res:${resource.key}`, subject, {
 				label: resource.name,
-				meta: metaOf([
-					() => availabilityWord(resource),
-					resource.owner ? resource.owner.ref : resource.source.class,
-					libraryOriginLabel(resource.origin),
-				]),
+				get meta() {
+					return metaOf([
+						() => availabilityWord(resource),
+						resource.owner ? resource.owner.ref : resource.source.class,
+						libraryOriginLabel(resource.origin),
+					]);
+				},
 				group: resource.owner ? LIBRARY_GROUP_INSTALLED : LIBRARY_GROUP_UNMANAGED,
 				detail: () => resourceDetail(resource, actions),
 			});
@@ -637,7 +652,9 @@ export function buildLibraryRows(options: LibraryRowOptions): LibraryRowSet {
 		const subject: LibraryRowSubject = { kind: "notice", message };
 		push(set, view, `note:${set.notices}`, subject, {
 			label: `${theme.fg("warning", GLYPH.warnInline)} ${message}`,
-			meta: theme.fg("annotation", "library"),
+			get meta() {
+				return theme.fg("annotation", "library");
+			},
 			group: LIBRARY_GROUP_NOTICES,
 			detail: () => [
 				"# Library notice",
