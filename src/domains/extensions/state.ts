@@ -190,6 +190,7 @@ function installedFromRoot(
 		description: manifest?.description ?? "Installed extension has an invalid manifest.",
 		...(manifest?.capabilities ? { capabilities: manifest.capabilities } : {}),
 		...(manifest?.runtime ? { runtime: manifest.runtime } : {}),
+		...(manifest?.runtimeV2 ? { runtimeV2: manifest.runtimeV2 } : {}),
 		scope,
 		rootPath: root,
 		manifestPath: candidate.manifestPath ?? root,

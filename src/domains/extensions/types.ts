@@ -1,3 +1,5 @@
+import type { ExtensionRuntimeDeclarationV2 } from "./manifest-v2.js";
+
 export type ExtensionScope = "user" | "project";
 
 export interface ExtensionRuntimeDeclaration {
@@ -30,6 +32,8 @@ export interface ExtensionCapabilities {
  */
 export interface ClioExtensionManifest {
 	runtime?: ExtensionRuntimeDeclaration;
+	/** An `api: 2` runtime block. Held apart from `runtime` so api 1 readers never see a shape they cannot run. */
+	runtimeV2?: ExtensionRuntimeDeclarationV2;
 	id: string;
 	name: string;
 	version: string;
@@ -60,6 +64,7 @@ export interface ExtensionProvenance {
 
 export interface InstalledExtension {
 	runtime?: ExtensionRuntimeDeclaration;
+	runtimeV2?: ExtensionRuntimeDeclarationV2;
 	id: string;
 	name: string;
 	version: string;

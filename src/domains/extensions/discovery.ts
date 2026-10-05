@@ -4,6 +4,7 @@ import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { parseExtensionCapabilities, resolveExtensionEntrypoint } from "./command-schema.js";
 import { evaluateClioCompatibility } from "./compatibility.js";
 import { parseExtensionRuntime } from "./runtime-schema.js";
+import { parseExtensionRuntimeV2 } from "./runtime-schema-v2.js";
 import type { ClioExtensionManifest, ExtensionCandidate, ExtensionDiagnostic } from "./types.js";
 
 const MANIFEST_NAMES = ["clio-coder-extension.yaml", "clio-coder-extension.yml", "clio-coder-extension.json"] as const;
@@ -100,9 +101,11 @@ export function parseExtensionManifest(
 	if (!description) diagnostics.push({ type: "error", message: "description is required", path: manifestPath });
 	let capabilities: ClioExtensionManifest["capabilities"];
 	let runtime: ClioExtensionManifest["runtime"];
+	let runtimeV2: ClioExtensionManifest["runtimeV2"];
 	if (value.runtime !== undefined) {
 		try {
-			runtime = parseExtensionRuntime(value.runtime);
+			if ((value.runtime as { api?: unknown } | null)?.api === 2) runtimeV2 = parseExtensionRuntimeV2(value.runtime);
+			else runtime = parseExtensionRuntime(value.runtime);
 		} catch (error) {
 			diagnostics.push({
 				type: "error",
@@ -158,6 +161,7 @@ export function parseExtensionManifest(
 	}
 	const manifest: ClioExtensionManifest = { id, name, version, description };
 	if (runtime) manifest.runtime = runtime;
+	if (runtimeV2) manifest.runtimeV2 = runtimeV2;
 	if (capabilities) manifest.capabilities = capabilities;
 	if (compatibility && Object.keys(compatibility).length > 0) manifest.compatibility = compatibility;
 	const clioRange = manifest.compatibility?.clio;
@@ -207,6 +211,32 @@ export function loadManifestFromRoot(root: string): ExtensionCandidate {
 					path: manifestPath,
 				});
 			}
+		}
+		const runtimeV2 = parsed.manifest?.runtimeV2;
+		if (runtimeV2) {
+			const files = [runtimeV2.entrypoint, ...runtimeV2.workspaces.flatMap((workspace) => workspace.skin ?? [])];
+			for (const file of files) {
+				try {
+					const resolved = resolveExtensionEntrypoint(root, file);
+					// A skin is data; reading it here keeps a broken one out of an install without running anything.
+					if (file !== runtimeV2.entrypoint) {
+						const skin: unknown = JSON.parse(readFileSync(resolved, "utf8"));
+						if (skin === null || typeof skin !== "object" || Array.isArray(skin)) throw new Error("skin must be an object");
+					}
+				} catch (error) {
+					parsed.diagnostics.push({
+						type: "error",
+						message: `runtime: ${file}: ${error instanceof Error ? error.message : String(error)}`,
+						path: manifestPath,
+					});
+				}
+			}
+			parsed.diagnostics.push({
+				type: "warning",
+				message:
+					"runtime api 2 is validated but not started by this build; its commands, hooks and workspaces are inactive",
+				path: manifestPath,
+			});
 		}
 		for (const tool of parsed.manifest?.capabilities?.tools ?? []) {
 			try {
