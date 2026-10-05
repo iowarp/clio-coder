@@ -380,8 +380,23 @@ const TOOL_METADATA: Readonly<Record<string, ToolMetadata>> = {
 		// everything else about routing.
 		costLatency: "agent",
 	},
+	[ToolNames.Job]: {
+		objective: "Create and control bounded interval jobs owned by this conversation.",
+		discoveryHint:
+			"Repeat an explicit main prompt or poll literal command argv. Bare finite main repetition defaults to five starts. Each occurrence rechecks current authority; command predicates match complete stdout JSON only. Use monitor with job_id or scope=jobs for status and settlement. Workers, cron and event triggers are unavailable.",
+		examples: [
+			{
+				goal: "Repeat a bounded check in this conversation",
+				args: { action: "create", runner: "main", every_ms: 60_000, prompt: "Check the current task status.", count: 5 },
+			},
+		],
+		uiLabel: "Job",
+		retrySafety: "not_retry_safe",
+		resultSizePolicy: summaryPolicy("Use monitor(job_id=...) for current state and bounded occurrence evidence."),
+		costLatency: "local_fast",
+	},
 	[ToolNames.Monitor]: {
-		objective: "Inspect dispatched runs: state, recent events, receipts.",
+		objective: "Inspect dispatched runs and conversation-owned jobs: state and settled evidence.",
 		discoveryHint:
 			"Inspect existing worker activity. Use observed run IDs with status, receipt, or collect after describing those modes. Collect completed detached work before claiming it is integrated. Empty history means no recorded runs; do not dispatch a new worker merely to inspect history.",
 		examples: [

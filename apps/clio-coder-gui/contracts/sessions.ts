@@ -5,7 +5,7 @@ import { FleetItem, HealthItem } from "./fleet-events.js";
 import { Permission } from "./permissions.js";
 import { SessionConfig } from "./session-config.js";
 import { SessionTelemetry } from "./session-telemetry.js";
-import { AcpTurnMetaSchema, AcpUsageMetaSchema } from "./wire.js";
+import { ACP_MAX_JOBS, AcpJob, AcpTurnMetaSchema, AcpUsageMetaSchema } from "./wire.js";
 
 const closed = { additionalProperties: false };
 const string = Type.String();
@@ -207,6 +207,8 @@ export const SessionSnapshot = Type.Object(
 		// Session health, bounded far tighter than the fleet feed: a context
 		// meter and a footer status read the newest of each kind, not a history.
 		health: Type.Array(HealthItem, { maxItems: 32 }),
+		/** The session's recurring jobs, one entry per job at its newest revision; absent from an engine with none. */
+		jobs: Type.Optional(Type.Array(AcpJob, { maxItems: ACP_MAX_JOBS })),
 	},
 	closed,
 );
@@ -258,6 +260,10 @@ export const SessionDeltas = {
 	"health.toolBudget": healthPayload,
 	"health.provider": healthPayload,
 	"health.scopeNotice": healthPayload,
+	/** One job at a new revision; an equal or older revision than the held one changes nothing. */
+	"job.changed": Type.Object({ ...base, job: AcpJob }, closed),
+	/** The engine's list after a bind or resume, folded into the held set by revision. */
+	"job.listed": Type.Object({ ...base, jobs: Type.Array(AcpJob, { maxItems: ACP_MAX_JOBS }) }, closed),
 	"session.labelled": Type.Object({ ...base, label: nullableString }, closed),
 	"session.configured": Type.Object({ ...base, config: SessionConfig }, closed),
 	"session.changed": Type.Object({ ...base, state: SessionState, recoveredOrphan: Type.Boolean() }, closed),
@@ -287,4 +293,5 @@ export const ACP_EVENT_KINDS = [
 	"safety.toolBudgetExceeded",
 	"provider.health",
 	"dispatch.scopeNotice",
+	"job.changed",
 ] as const;

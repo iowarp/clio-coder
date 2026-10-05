@@ -22,13 +22,14 @@ import type { DispatchSchemaComposition } from "./dispatch-schema.js";
 import { coordinatorDispatchParameters } from "./dispatch-schema.js";
 import { createMcpCapabilitySource, type McpCapabilitySource } from "./gateway/index.js";
 import { registerHarnessExtensionTools } from "./harness-extensions.js";
+import type { JobOperations } from "./job-types.js";
 import { lazyTool } from "./lazy-tool.js";
 import { createLedgerTool } from "./ledger.js";
 import { createMemoryRecallTool, type MemoryRecallDeps } from "./memory-recall.js";
 import { monitorToolSurface } from "./monitor-surface.js";
 import { musicToolSurface } from "./music-surface.js";
 import { panesToolSurface } from "./panes-surface.js";
-import type { RegistryDeps, ToolRegistry } from "./registry.js";
+import type { RegistryDeps, ToolRegistry, ToolSpec } from "./registry.js";
 import { createSelfCompactTool, type RequestSelfCompact } from "./self-compact.js";
 import { steerToolSurface } from "./steer-surface.js";
 import { coordinatorToolPlacement } from "./surface.js";
@@ -41,6 +42,8 @@ export interface ToolBootstrapDeps extends Omit<CoreToolBootstrapDeps, "mcpCapab
 	memoryRecall?: MemoryRecallDeps;
 	captureWorkerContext?: () => WorkerContextSnapshot | null;
 	dispatch?: DispatchContract;
+	jobTool?: ToolSpec;
+	jobs?: JobOperations;
 	bus?: SafeEventBus;
 	termination?: Pick<ReturnType<typeof getTerminationCoordinator>, "onTerminate">;
 	getAgentCatalog?: () => string;
@@ -127,6 +130,16 @@ export function registerAllTools(registry: ToolRegistry, deps: ToolBootstrapDeps
 		registry.register(
 			builtin(createMemoryRecallTool(deps.memoryRecall), { path: "src/tools/memory-recall.ts", scope: "core" }),
 		);
+	if (deps.jobTool) registry.register(builtin(deps.jobTool, { path: "src/tools/job.ts", scope: "core" }));
+	if (deps.jobs && !deps.dispatch) {
+		const jobs = deps.jobs;
+		registry.register(
+			builtin(
+				lazyTool(monitorToolSurface, async () => (await import("./monitor-jobs.js")).createJobMonitorTool(jobs)),
+				{ path: "src/tools/monitor-jobs.ts", scope: "core" },
+			),
+		);
+	}
 	if (deps.dispatch) {
 		const dispatch = deps.dispatch;
 		if (deps.agentLedger === undefined) {
@@ -175,7 +188,11 @@ export function registerAllTools(registry: ToolRegistry, deps: ToolBootstrapDeps
 		registry.register({
 			...builtin(
 				lazyTool(monitorToolSurface, async () =>
-					(await import("./monitor.js")).createMonitorTool({ dispatch, runEvents: dispatchRunEvents }),
+					(await import("./monitor.js")).createMonitorTool({
+						dispatch,
+						runEvents: dispatchRunEvents,
+						...(deps.jobs ? { jobs: deps.jobs } : {}),
+					}),
 				),
 				{
 					path: "src/tools/monitor.ts",

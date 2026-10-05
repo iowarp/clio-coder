@@ -42,6 +42,7 @@ export const ToolNames = {
 	RunScript: "run_script",
 	// ORCHESTRATE
 	Dispatch: "dispatch",
+	Job: "job",
 	Monitor: "monitor",
 	Steer: "steer",
 	Tasks: "tasks",

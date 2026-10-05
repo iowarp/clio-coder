@@ -10,4 +10,8 @@ export const SchedulingDomainModule: DomainModule = {
 export type { BudgetVerdict } from "./budget.js";
 export { SESSION_COST_CEILING_EXIT_CODE, SESSION_COST_CEILING_REASON, SessionCostCeilingError } from "./budget.js";
 export type { SchedulingContract } from "./contract.js";
+export { createJobController } from "./job-controller.js";
+export { jobHasUnresolvedCleanup, jobIsComplete, matchesJobPredicate, normalizeJobSpec } from "./job-model.js";
+export { createJobStore } from "./job-store.js";
+export type * from "./job-types.js";
 export { SchedulingManifest } from "./manifest.js";

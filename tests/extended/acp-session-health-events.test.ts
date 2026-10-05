@@ -74,10 +74,11 @@ async function openSession(kinds: ReadonlyArray<string>) {
 }
 
 describe("contracts/acp forwards the four session-health kinds", () => {
-	it("announces all twelve kinds and keeps each one the engine's own bus channel name", async () => {
+	it("announces all fourteen kinds and keeps each one the engine's own bus channel name", async () => {
 		const { peer, served, init } = await openSession(HEALTH_KINDS);
 		const announced = init.agentCapabilities._meta["clio-coder/events"]?.kinds ?? [];
-		strictEqual(announced.length, 12);
+		strictEqual(announced.length, 14);
+		ok(announced.includes("job.changed"));
 		for (const kind of HEALTH_KINDS) ok(announced.includes(kind), `${kind} is not announced`);
 		// The bus channel table is the vocabulary; a renamed kind would hide the
 		// producer from anyone grepping a captured frame.

@@ -74,6 +74,7 @@ export const TOOL_PLACEMENT: Readonly<Record<BuiltinToolName, ToolPlacement>> = 
 	[ToolNames.Verify]: "direct",
 	[ToolNames.RunScript]: "direct",
 	[ToolNames.Dispatch]: "direct",
+	[ToolNames.Job]: "gateway",
 	[ToolNames.Monitor]: "direct",
 	[ToolNames.Steer]: "direct",
 	[ToolNames.Tasks]: "direct",

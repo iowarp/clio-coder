@@ -5,11 +5,14 @@ import {
 	CONTEXT_OPERATION_CUSTOM_TYPE,
 	readContextOperation,
 } from "../../core/context-operation.js";
+import type { JobRecord } from "../../core/job-types.js";
 import {
 	ACP_DISPATCH_STEER_METHOD,
 	ACP_EGGS_META_KEY,
 	ACP_EVENT_NOTIFICATION,
 	ACP_EVENTS_META_KEY,
+	ACP_JOBS_LIST_METHOD,
+	ACP_JOBS_META_KEY,
 	ACP_MAX_MODEL_ID_BYTES,
 	ACP_MAX_TARGET_ID_BYTES,
 	ACP_MAX_TARGETS,
@@ -83,6 +86,7 @@ import {
 	decisionActionClass,
 	decisionFactsForPermission,
 } from "../../domains/safety/decision-presentation.js";
+import { jobIsComplete } from "../../domains/scheduling/index.js";
 import type { ContextLedger } from "../../domains/session/context-ledger.js";
 import type { SessionContract, SessionMeta } from "../../domains/session/contract.js";
 import type { BashExecutionEntry, MessageEntry, SessionEntry } from "../../domains/session/entries.js";
@@ -97,6 +101,12 @@ import {
 	restoreSession as restoreControlledSession,
 	selectModel,
 } from "../../session-control/index.js";
+import type {
+	MachineTurnProjectionAdmission,
+	MachineTurnProjectionHost,
+	MachineTurnProjectionRequest,
+} from "../../session-control/job-turn-types.js";
+import { tokenizeLoopLine } from "../../session-control/loop-command.js";
 import { type AskUserHandler, askUserExposure } from "../../tools/ask-user.js";
 import type { McpCapabilitySource, McpClientServerSpec } from "../../tools/gateway/mcp-capabilities.js";
 import { gatewayChainPlan } from "../../tools/gateway-display.js";
@@ -173,6 +183,7 @@ import type {
 	AcpHandoffPrepareResult,
 	AcpInitializeResponse,
 	AcpInterruptResult,
+	AcpJob,
 	AcpMemoryProposeResult,
 	AcpPromptResponse,
 	AcpQueueClearResult,
@@ -212,6 +223,7 @@ import {
 	ACP_INTERVIEW_REQUEST_METHOD,
 	ACP_INTERVIEWS_META_KEY,
 	ACP_MAX_CHUNK_BYTES,
+	ACP_MAX_JOBS,
 	ACP_MAX_RAW_DIFF_BYTES,
 	ACP_MAX_RAW_RECORD_BYTES,
 	ACP_MAX_STRING_BYTES,
@@ -321,6 +333,13 @@ export interface AcpServerChat {
 	submit(text: string, options?: unknown): Promise<void>;
 	/** Wait for a command's host-injected turn while the ACP prompt owns its subscription. */
 	whenSettled?(): Promise<void>;
+	/**
+	 * A scheduled main turn has no `session/prompt` to own its frames. The chat loop asks the bound
+	 * host for a projection before it prepares such a turn, so the server must be bound before any
+	 * job can run. The returned function unbinds; once unbound the loop refuses scheduled turns
+	 * instead of running them where no client can see them (#411).
+	 */
+	bindMachineTurnProjection?(host: MachineTurnProjectionHost): () => void;
 	cancel(): void;
 	onEvent(handler: (event: AcpServerEvent) => void): () => void;
 	isStreaming(): boolean;
@@ -638,6 +657,11 @@ interface ActivePrompt {
 	continuation: Promise<void> | null;
 	/** False once the request stopped waiting on runs; a send-now then has nothing to ride. */
 	acceptsContinuation: boolean;
+	/**
+	 * Set on a scheduled main turn, which no `session/prompt` brackets. The first frame it sends
+	 * opens the client's turn through `job.changed`, and releasing the lease closes it (#411).
+	 */
+	scheduled?: { readonly jobId: string; opened: boolean; open(): void };
 }
 
 /**
@@ -946,6 +970,7 @@ const ACP_FORWARDABLE_EVENT_KINDS = [
 	"safety.toolBudgetExceeded",
 	"provider.health",
 	"dispatch.scopeNotice",
+	"job.changed",
 ] as const;
 
 type AcpForwardableEventKind = (typeof ACP_FORWARDABLE_EVENT_KINDS)[number];
@@ -1471,6 +1496,7 @@ function sendUpdate(
 	meta: Record<string, unknown> = ORCHESTRATOR_UPDATE_META,
 ): void {
 	const params: AcpSessionUpdateParams = { sessionId, update, _meta: meta };
+	if (active.scheduled !== undefined && !active.scheduled.opened) active.scheduled.open();
 	active.updatesSent += 1;
 	transport.notify("session/update", params);
 }
@@ -1858,6 +1884,61 @@ function safeStoredIdentifier(value: unknown, maxBytes: number): string | null {
 		return null;
 	}
 	return value;
+}
+
+/** Bounds on one `job.changed` frame's prose. The exact prompt and argv never cross; a preview does. */
+const ACP_MAX_JOB_PREVIEW_BYTES = 160;
+const ACP_MAX_JOB_EVIDENCE_BYTES = 256;
+
+/**
+ * The wire projection of one canonical job record, for `_clio-coder/jobs/list` and
+ * the opt-in `job.changed` stream. Every figure is the record's own: counts, the
+ * next due time and the deadline are not derived here, cost stays null when the
+ * record says it is unknown, and a job with no recorded run reports no last
+ * outcome. A client must be able to draw the same truth the terminal prints.
+ */
+function jobEventPayload(job: JobRecord, complete: boolean, turn: boolean): AcpJob | null {
+	const jobId = safeStoredIdentifier(job.id, ACP_MAX_DISPATCH_ID_BYTES);
+	if (jobId === null) return null;
+	const runner = job.spec.runner;
+	const last = job.history[job.history.length - 1]?.evidence ?? null;
+	const count = (value: number | null): number | null =>
+		value !== null && Number.isSafeInteger(value) && value >= 0 ? value : null;
+	return {
+		jobId,
+		revision: count(job.revision),
+		state: job.state,
+		reason: job.reason,
+		runner: runner.kind,
+		taskPreview: safeStoredString(
+			runner.kind === "main" ? runner.prompt : runner.argv.join(" "),
+			ACP_MAX_JOB_PREVIEW_BYTES,
+		).trim(),
+		intervalMs: count(job.spec.intervalMs),
+		count: count(job.spec.count),
+		starts: count(job.starts),
+		settled: count(job.settled),
+		timeoutMs: count(job.spec.timeoutMs),
+		nextDueAt: count(job.nextDueAt),
+		deadlineAt: count(job.spec.deadlineAt),
+		cancelRequested: job.cancelRequested,
+		running: job.active !== null,
+		turn,
+		pendingReason: job.pendingReason === null ? null : safeStoredString(job.pendingReason, ACP_MAX_JOB_EVIDENCE_BYTES),
+		consecutiveFailures: count(job.consecutiveFailures),
+		last:
+			last === null
+				? null
+				: {
+						outcome: last.outcome,
+						summary: safeStoredString(last.summary, ACP_MAX_JOB_EVIDENCE_BYTES),
+						truncated: last.truncated,
+					},
+		delivery: job.delivery === null ? null : { kind: job.delivery.kind, state: job.delivery.state },
+		costUsd: job.costUsd !== null && Number.isFinite(job.costUsd) && job.costUsd >= 0 ? job.costUsd : null,
+		saved: job.persistenceError === null,
+		complete,
+	};
 }
 
 /**
@@ -3047,6 +3128,8 @@ export interface AcpHandshakeFeatures {
 	contextLedger?: boolean;
 	/** Whether `_clio-coder/artifacts/list` and `/read` answer; absent reads as false. */
 	artifacts?: boolean;
+	/** Whether `_clio-coder/jobs/list` answers; absent reads as false. */
+	jobs?: boolean;
 	/** Whether the extension list and reload methods answer; absent reads as false. */
 	extensions?: boolean;
 	/** Whether `_clio-coder/library/reload` answers; absent reads as false. */
@@ -3402,6 +3485,9 @@ export function createAcpHandshake(features: AcpHandshakeFeatures): AcpHandshake
 									},
 								}
 							: {}),
+						...(features.jobs
+							? { [ACP_JOBS_META_KEY]: { version: 1, list: ACP_JOBS_LIST_METHOD, event: "job.changed" } }
+							: {}),
 						...(features.artifacts
 							? {
 									[ACP_ARTIFACTS_META_KEY]: {
@@ -3525,6 +3611,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 			fleet: options.fleet !== undefined,
 			contextLedger: options.contextLedger !== undefined,
 			artifacts: options.artifacts !== undefined,
+			jobs: options.commands?.jobs !== undefined,
 			extensions: options.extensions !== undefined,
 			libraryReload: options.libraryReload !== undefined,
 			aside: options.aside !== undefined,
@@ -3556,6 +3643,14 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 	 */
 	let boundSessionId: string | null = null;
 	let activePromptState: ActivePrompt | null = null;
+	/**
+	 * The prompt state a scheduled main turn holds while it runs. Token-owned: only the lease's own
+	 * release clears it, and only while it is still the holder, so a stale release never touches a
+	 * successor turn (#411).
+	 */
+	let machineLease: { readonly jobId: string; readonly active: ActivePrompt } | null = null;
+	/** The newest record seen per job, so a turn bracket reuses the controller's own figures. Bounded. */
+	const lastJobs = new Map<string, JobRecord>();
 	let sessionCreated = false;
 	/** The one document awaiting review, keyed by the id its client holds. */
 	let pendingHandoff: { handoffId: string; sessionId: string; draft: AcpHandoffDraft } | null = null;
@@ -4001,10 +4096,44 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 			}),
 		);
 	}
+	/** True only while this job's scheduled turn has sent its first frame and not yet released. */
+	const jobTurnOpen = (jobId: string): boolean =>
+		machineLease !== null && machineLease.jobId === jobId && machineLease.active.scheduled?.opened === true;
+	/** Sends one job's canonical record. */
+	const forwardJob = (job: JobRecord, complete: boolean): void => {
+		const projected = jobEventPayload(job, complete, jobTurnOpen(job.id));
+		if (projected === null) return;
+		forwardEvent("job.changed", null, complete, projected);
+	};
+	/** Re-sends the held record to open or close the turn bracket; the controller's own change follows when it commits. */
+	const forwardJobTurn = (jobId: string): void => {
+		const job = lastJobs.get(jobId) ?? options.commands?.jobs?.().find((candidate) => candidate.id === jobId);
+		if (job !== undefined) forwardJob(job, jobIsComplete(job));
+	};
+	if (options.bus !== undefined) {
+		unsubscribeEvents.push(
+			options.bus.on(BusChannels.JobChanged, (payload) => {
+				// A job belongs to the session and workspace that created it. The bus is
+				// process-wide, so a frame for any other owner is not this client's.
+				const owner = payload.job?.owner;
+				if (owner === undefined || owner.sessionId !== (activeSessionId ?? boundSessionId) || owner.cwd !== canonicalCwd) {
+					return;
+				}
+				lastJobs.delete(payload.job.id);
+				lastJobs.set(payload.job.id, payload.job);
+				for (const oldest of lastJobs.keys()) {
+					if (lastJobs.size <= ACP_MAX_JOBS * 2) break;
+					lastJobs.delete(oldest);
+				}
+				forwardJob(payload.job, payload.complete === true);
+			}),
+		);
+	}
 	const unsubscribeEventStream = (): void => {
 		for (const unsubscribe of unsubscribeEvents) unsubscribe();
 		unsubscribeEvents.length = 0;
 		dispatchProgress.clear();
+		lastJobs.clear();
 	};
 	// The chat loop reports every enqueue, hand-over, edit and drain, mid-turn
 	// or not. A client that opted in replaces its queue rows with each list
@@ -4610,6 +4739,33 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 		}
 		getSession(request);
 		return projectSessionBoard(options.board());
+	});
+
+	// The jobs the bound session owns now. Events carry only changes, so a client that binds or
+	// resumes reads this once and folds `job.changed` after it.
+	options.transport.onRequest(ACP_JOBS_LIST_METHOD, (params) => {
+		requireInitialized();
+		const request = assertParamKeys(params, new Set(["sessionId"]));
+		const listJobs = options.commands?.jobs;
+		if (listJobs === undefined) {
+			throw new AcpRequestError(-32601, "method not found", { code: "method_not_found" });
+		}
+		const session = getSession(request);
+		if (session.id !== boundSessionId) {
+			throw new AcpRequestError(-32002, "session is not the bound session", { code: "session_not_bound" });
+		}
+		// Live jobs first, then the newest finished ones, so the cap drops history rather than work in flight.
+		const ranked = [...listJobs()].sort(
+			(left, right) =>
+				Number(right.state !== "terminal") - Number(left.state !== "terminal") || right.updatedAt - left.updatedAt,
+		);
+		const jobs: AcpJob[] = [];
+		for (const job of ranked) {
+			if (jobs.length >= ACP_MAX_JOBS) break;
+			const projected = jobEventPayload(job, jobIsComplete(job), jobTurnOpen(job.id));
+			if (projected !== null) jobs.push(projected);
+		}
+		return { jobs };
 	});
 
 	const requireBranches = () => {
@@ -5534,19 +5690,24 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 		if (options.commands === undefined) {
 			throw new AcpRequestError(-32601, "method not found", { code: "method_not_found" });
 		}
+		// Jobs belong to the one session this process hosts. The generic path forwards only command and
+		// argv, so the requested identity is checked here, before anything is created, listed or stopped.
+		if (request.command === "loop" && session.id !== boundSessionId) {
+			throw new AcpRequestError(-32002, "session is not the bound session", { code: "session_not_bound" });
+		}
 		// Four of the thirteen put a user turn into the session. Doing that while
 		// a prompt is in flight is the steering path, not the submit path: the
 		// turn already running owns the stopReason, and a second unrequested
 		// submission folds content into it that the client never asked for. Those
 		// four are refused here and the client is told to use
 		// `_clio-coder/session/steer` instead; the other nine are unaffected.
-		if (session.activePrompt !== null && options.commands.injectsUserTurn(request.command)) {
+		if (session.activePrompt !== null && options.commands.injectsUserTurn(request.command, request.argv)) {
 			throw new AcpRequestError(-32602, "this command submits a user turn and a prompt is active", {
 				code: "prompt_active",
 				reason: "steer-instead",
 			});
 		}
-		if (activeShell !== null && options.commands.injectsUserTurn(request.command)) {
+		if (activeShell !== null && options.commands.injectsUserTurn(request.command, request.argv)) {
 			throw new AcpRequestError(-32602, "this command submits a user turn and a shell line is running", {
 				code: "shell_active",
 			});
@@ -5741,6 +5902,10 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 		}
 		if (session.activePrompt.cancelled) {
 			return "this prompt is cancelled and its queues are being cleared; prompt again once it returns";
+		}
+		// A steer the engine never drains is resubmitted as a fresh turn, and a scheduled turn has no request to carry that one home.
+		if (session.activePrompt.scheduled !== undefined) {
+			return "a scheduled job turn is running; cancel it, or prompt once it finishes";
 		}
 		if (!options.chat.isStreaming()) {
 			return "the run is not streaming, so the engine has no slot to drain this steer into";
@@ -6156,6 +6321,124 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 		return close;
 	});
 
+	/** Streams a turn's chat events as frames. A prompt and a scheduled main turn share it, so neither forks the projection. */
+	const attachTurnObserver = (sessionId: string, active: ActivePrompt): (() => void) => {
+		const onTurnEvent = (event: AcpServerEvent) => {
+			handleChatEvent(event, options.transport, sessionId, active, canonicalCwd, options.diagnostics, () => {
+				permission.cancelPending("tool call limit exceeded");
+				options.toolRegistry?.cancelParkedCalls("tool call limit exceeded");
+				options.chat.cancel();
+			});
+			observeTelemetry(telemetry, event, active);
+		};
+		const unsubscribeChat = options.chat.onEvent(onTurnEvent);
+		const unsubscribeHost = options.hostToolEvents?.onEvent(onTurnEvent);
+		return () => {
+			unsubscribeChat();
+			unsubscribeHost?.();
+		};
+	};
+
+	/**
+	 * A scheduled main turn has no `session/prompt` request to own its frames, its approvals or its
+	 * end. The chat loop asks here, synchronously, before it prepares one, and gets the same prompt
+	 * state a prompt installs (`ActivePrompt`, the chat observer, the permission binding) or a
+	 * deferral it reports back to the job controller. Nothing here runs a turn or answers a request:
+	 * the bracket the client sees is `job.changed` with `turn` true from the first frame to the release.
+	 * Every check is the same one that refuses a second prompt, so a lease and an operator turn can
+	 * never hold the state together, and a release clears only what its own lease installed (#411).
+	 */
+	const acquireMachineTurn = (request: MachineTurnProjectionRequest): MachineTurnProjectionAdmission => {
+		const deferred = (reason: string): MachineTurnProjectionAdmission => ({ status: "deferred", reason });
+		const session = boundSessionId === null ? undefined : sessions.get(boundSessionId);
+		const jobId = safeStoredIdentifier(request.jobId, ACP_MAX_DISPATCH_ID_BYTES);
+		if (!handshake.initialized || session === undefined || jobId === null) {
+			return deferred("This ACP connection has no bound session to show a scheduled turn in.");
+		}
+		if (
+			request.sessionId !== session.id ||
+			request.cwd !== canonicalCwd ||
+			options.session === undefined ||
+			options.session.current()?.id !== session.id
+		) {
+			return deferred("The scheduled turn's session or workspace is not the one this client is bound to.");
+		}
+		if (request.signal.aborted) return deferred("The occurrence was canceled before its turn could be shown.");
+		if (
+			machineLease !== null ||
+			session.activePrompt !== null ||
+			activePromptState !== null ||
+			contextCommandInFlight !== null ||
+			activeShell !== null ||
+			handoffPreparing ||
+			options.chat.isStreaming()
+		) {
+			return deferred("The conversation is busy; the job keeps its pending delivery.");
+		}
+		const active = createActivePromptState({ enabled: handshake.toolProgressEnabled, now });
+		// A queue send-now would resubmit through this lease and strand the successor with no observer.
+		active.acceptsContinuation = false;
+		const scheduled: NonNullable<ActivePrompt["scheduled"]> = {
+			jobId,
+			opened: false,
+			open: () => {
+				scheduled.opened = true;
+				forwardJobTurn(jobId);
+			},
+		};
+		active.scheduled = scheduled;
+		const lease = { jobId, active };
+		machineLease = lease;
+		session.activePrompt = active;
+		activePromptState = active;
+		activeSessionId = session.id;
+		// A reviewed document describes the conversation as it stood; a scheduled turn moves it too.
+		pendingHandoff = null;
+		promptSerial++;
+		let settle: () => void = () => {};
+		const settled = new Promise<void>((resolveSettled) => {
+			settle = resolveSettled;
+		});
+		promptSettled = settled;
+		options.onActiveSessionAutonomyChange?.(session.autonomy);
+		telemetry.turnStarted(active.usage);
+		const detach = attachTurnObserver(session.id, active);
+		let released = false;
+		return {
+			status: "ready",
+			release: () => {
+				if (released) return;
+				released = true;
+				active.acceptsContinuation = false;
+				detach();
+				if (request.signal.aborted) active.cancelled = true;
+				settleOpenToolCalls(
+					options.transport,
+					session.id,
+					active,
+					active.permissionExpired ? "permission approval expired" : active.cancelled ? "cancelled" : "turn ended",
+				);
+				// The last meter frame precedes the bracket that closes the turn; the state stays held until it lands.
+				void telemetry
+					.turnSettled()
+					.catch(() => options.diagnostics?.("a scheduled turn's final telemetry frame failed"))
+					.then(() => {
+						if (machineLease === lease) machineLease = null;
+						if (session.activePrompt === active) session.activePrompt = null;
+						if (activePromptState === active) activePromptState = null;
+						if (activeSessionId === session.id && activePromptState === null) {
+							activeSessionId = null;
+							options.onActiveSessionAutonomyChange?.(null);
+						}
+						if (promptSettled === settled) promptSettled = null;
+						if (scheduled.opened) forwardJobTurn(jobId);
+						settle();
+					});
+			},
+		};
+	};
+	const unbindMachineTurns = options.chat.bindMachineTurnProjection?.({ acquire: acquireMachineTurn });
+
 	options.transport.onRequest("session/prompt", async (params): Promise<AcpPromptResponse> => {
 		requireInitialized();
 		requireAuthenticated();
@@ -6178,6 +6461,10 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 		// A line that names an admitted command is invoked below; anything else
 		// that looks like one is screened before it can reach the model.
 		const typed = /^\/([a-z][a-z0-9_-]*)(?:\s|$)/u.exec(text.trim())?.[1];
+		// Before the resume below: a job line for any other session must not move this process's current session first.
+		if (typed === "loop" && session.id !== boundSessionId) {
+			throw new AcpRequestError(-32002, "session is not the bound session", { code: "session_not_bound" });
+		}
 		const screened =
 			text.length === 0 || (typed !== undefined && availableCommands().some((entry) => entry.name === typed))
 				? undefined
@@ -6213,20 +6500,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 		});
 		options.onActiveSessionAutonomyChange?.(session.autonomy);
 		telemetry.turnStarted(active.usage);
-		const onTurnEvent = (event: AcpServerEvent) => {
-			handleChatEvent(event, options.transport, session.id, active, canonicalCwd, options.diagnostics, () => {
-				permission.cancelPending("tool call limit exceeded");
-				options.toolRegistry?.cancelParkedCalls("tool call limit exceeded");
-				options.chat.cancel();
-			});
-			observeTelemetry(telemetry, event, active);
-		};
-		const unsubscribeChat = options.chat.onEvent(onTurnEvent);
-		const unsubscribeHost = options.hostToolEvents?.onEvent(onTurnEvent);
-		const unsubscribe = () => {
-			unsubscribeChat();
-			unsubscribeHost?.();
-		};
+		const unsubscribe = attachTurnObserver(session.id, active);
 		try {
 			const trimmed = text.trim();
 			const commandMatch = /^\/([a-z][a-z0-9_-]*)(?:\s+([\s\S]*))?$/u.exec(trimmed);
@@ -6240,9 +6514,15 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 				resources.names.length === 0 &&
 				availableCommands().some((entry) => entry.name === command)
 			) {
-				const argv = commandMatch?.[2]?.trim().split(/\s+/u) ?? [];
+				let argv = commandMatch?.[2]?.trim().split(/\s+/u) ?? [];
+				if (command === "loop") {
+					// A whitespace split would cut a quoted task or program argument into words and keep the quotes.
+					const words = tokenizeLoopLine(commandMatch?.[2] ?? "");
+					if ("error" in words) throw new AcpRequestError(-32602, words.error, { code: "invalid_params" });
+					argv = words.tokens;
+				}
 				const result = await options.commands?.invoke({ command, argv });
-				if (options.commands?.injectsUserTurn(command)) await options.chat.whenSettled?.();
+				if (options.commands?.injectsUserTurn(command, argv)) await options.chat.whenSettled?.();
 				if (result !== undefined)
 					sendTextChunks(
 						options.transport,
@@ -6251,7 +6531,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 						"agent_message_chunk",
 						`${active.sentAssistantChars > 0 ? "\n\n" : ""}${result.lines.join("\n")}`,
 					);
-				if (result?.level === "error" && options.commands?.injectsUserTurn(command)) {
+				if (result?.level === "error" && options.commands?.injectsUserTurn(command, argv)) {
 					active.errored = true;
 					active.errorMessage = result.lines.join("\n");
 				}
@@ -6376,6 +6656,8 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 		options.transport.onClose(() => {
 			telemetry.dispose();
 			detachInterviews?.();
+			// Unbound first: a scheduled turn must be refused, never run where no client can see it.
+			unbindMachineTurns?.();
 			permission.unregister();
 			unsubscribeEventStream();
 			permission.cancelPending("ACP transport closed");

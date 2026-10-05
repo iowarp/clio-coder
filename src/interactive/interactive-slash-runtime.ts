@@ -45,6 +45,7 @@ import {
 } from "../session-control/slash-commands.js";
 import type { WorkerEntryState } from "../session-control/worker-stream.js";
 import type { AskUserHandler } from "../tools/ask-user.js";
+import type { JobOperations } from "../tools/job-types.js";
 import { type ChatPanel, createChatPanel } from "./chat-panel.js";
 import { rehydrateChatPanelFromTurns } from "./chat-renderer.js";
 import { runCompactWithNotice } from "./command-fallbacks.js";
@@ -186,6 +187,8 @@ export interface InteractiveSlashRuntimeDeps {
 	panes?: PanesOperations;
 	/** The music pane behind `/music`. Absent when the session started without panes. */
 	music?: MusicOperations;
+	/** The shared job control behind `/loop`. Absent where no session-owned job host exists. */
+	jobs?: JobOperations;
 	openModel: () => void;
 	/**
 	 * Ask where a resolved `/model <pattern>` swap lands before anything applies.
@@ -546,6 +549,7 @@ export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps)
 		openView: deps.openView,
 		...(deps.panes ? { panes: deps.panes } : {}),
 		...(deps.music ? { music: deps.music } : {}),
+		...(deps.jobs ? { jobs: deps.jobs } : {}),
 		setThinkingLevel: (level) => {
 			const settings = deps.getSettings?.();
 			if (!settings || !deps.onSetThinkingLevel) return { status: "unavailable" };

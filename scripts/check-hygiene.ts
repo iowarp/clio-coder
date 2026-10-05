@@ -32,6 +32,7 @@ import type { DispatchContract } from "../src/domains/dispatch/contract.js";
 import type { MusicOperations } from "../src/domains/mux/music-operations.js";
 import type { PanesOperations } from "../src/domains/mux/operations.js";
 import { loadFragments } from "../src/domains/prompts/fragment-loader.js";
+import type { JobController } from "../src/domains/scheduling/job-types.js";
 import { listDocsCorpus, slugify } from "../src/tools/context/docs-engine.js";
 import { runBoundaryCheck } from "../tests/boundaries/check-boundaries.js";
 import { configurationReferenceMembership } from "./configuration-reference.js";
@@ -1844,6 +1845,7 @@ const TOOL_CONTRACT_TESTS: Readonly<Record<BuiltinToolName, readonly string[]>> 
 	[ToolNames.Verify]: ["tests/contracts/verify-numeric.test.ts"],
 	[ToolNames.RunScript]: ["tests/contracts/run-script.test.ts"],
 	[ToolNames.Dispatch]: ["tests/contracts/dispatch-admission.test.ts"],
+	[ToolNames.Job]: ["tests/contracts/job-tool.test.ts"],
 	[ToolNames.Monitor]: ["tests/contracts/monitor-steer-tools.test.ts"],
 	[ToolNames.Steer]: ["tests/contracts/monitor-steer-tools.test.ts"],
 	[ToolNames.Tasks]: ["tests/contracts/task-proposal-scope.test.ts"],
@@ -1883,10 +1885,11 @@ const RETRIEVE_SWITCHES = ["CLIO_CODER_DISABLE_RETRIEVE_TOOLS", "CLIO_CODER_NO_N
  * duration so a hermetic shell still sees the whole builtin surface.
  */
 async function registeredToolSources(): Promise<Map<string, string>> {
-	const [{ createRegistry }, { registerAllTools }, { createWorkerSafety }] = await Promise.all([
+	const [{ createRegistry }, { registerAllTools }, { createWorkerSafety }, { createJobTool }] = await Promise.all([
 		import("../src/tools/registry.js"),
 		import("../src/tools/bootstrap.js"),
 		import("../src/engine/worker-tools.js"),
+		import("../src/tools/job.js"),
 	]);
 	const saved = RETRIEVE_SWITCHES.map((key) => [key, process.env[key]] as const);
 	for (const key of RETRIEVE_SWITCHES) delete process.env[key];
@@ -1900,6 +1903,13 @@ async function registeredToolSources(): Promise<Map<string, string>> {
 			askUser: async () => ({ answers: [] }),
 			requestSelfCompact: async () => "",
 			memoryRecall: { bank: () => null, records: () => [], eligibility: () => ({}) },
+			jobTool: createJobTool({
+				controller: {} as JobController,
+				registry,
+				owner: () => null,
+				constraints: () => undefined,
+				hostRefusal: () => "The coverage registry never executes jobs.",
+			}).spec,
 			includeLedgerTools: true,
 			consult: { systemOne: { run: async () => null } },
 			visionSidecar: {

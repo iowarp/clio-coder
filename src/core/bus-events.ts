@@ -1,4 +1,5 @@
 import type { ContextOperation } from "./context-operation.js";
+import type { JobChangedPayload } from "./job-types.js";
 /**
  * Canonical channel names and payload contracts for the Clio event bus.
  *
@@ -33,6 +34,7 @@ import type { SkillActivation } from "./skill-activation.js";
 import type { TerminationPhase } from "./termination.js";
 
 export const BusChannels = {
+	JobChanged: "job.changed",
 	EggsChanged: "session.eggsChanged",
 	SessionStart: "session.start",
 	SessionEnd: "session.end",
@@ -887,6 +889,7 @@ export type EmptyPayload = Record<string, never>;
  * policy.
  */
 export type BusPayloadMap = {
+	[BusChannels.JobChanged]: JobChangedPayload;
 	[BusChannels.EggsChanged]: { sessionId: string | null; active: readonly string[] };
 	[BusChannels.SessionStart]: SessionStartPayload;
 	[BusChannels.SessionEnd]: SessionEndPayload;

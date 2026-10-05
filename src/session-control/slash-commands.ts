@@ -48,6 +48,7 @@ import type { UserTaskAcceptance } from "../domains/user-tasks/acceptance.js";
 import { formatUserTaskHandoff } from "../domains/user-tasks/handoff.js";
 import type { UserTask } from "../domains/user-tasks/store.js";
 import type { ExtensionReloadOutcome } from "../entry/extension-reload.js";
+import type { JobOperations } from "../tools/job-types.js";
 import type { ToolProfileName } from "../tools/profiles.js";
 import { isToolProfileName, TOOL_PROFILE_NAMES } from "../tools/profiles.js";
 import type { CouncilCommandOptions, CouncilRosters } from "./council.js";
@@ -60,6 +61,14 @@ import {
 	resolveCouncilRoster,
 } from "./council.js";
 import { parseDraftArgs } from "./drafts.js";
+import {
+	LOOP_NO_HOST_NOTICE,
+	LOOP_OBSERVE_VERBS,
+	LOOP_SUBCOMMAND_DESCRIPTIONS,
+	type LoopCommand,
+	parseLoopLine,
+	runLoopCommand,
+} from "./loop-command.js";
 import type { NoticeLevel } from "./notice-source.js";
 import type { OracleDigestSources } from "./oracle.js";
 import { formatOracleAnswer, ORACLE_AGENT_ID, ORACLE_TASK, packOracleDigest } from "./oracle.js";
@@ -182,6 +191,8 @@ type SlashCommandVariant =
 	| { kind: "fleet-run"; name: string; vars: Record<string, string> }
 	| { kind: "fleet-run-usage"; reason?: string }
 	| { kind: "fleet" }
+	/** `/loop`: a bounded recurring job, or one of its control verbs. The words are parsed by loop-command.ts. */
+	| { kind: "loop"; command: LoopCommand }
 	| { kind: "agents"; connect?: boolean }
 	| { kind: "usage" }
 	| { kind: "context-view" }
@@ -854,6 +865,8 @@ export interface SessionCommandContext {
 	panes?: PanesOperations;
 	/** The music pane. Absent when the session started without panes. */
 	music?: MusicOperations;
+	/** The shared job control behind `/loop`. Absent where no session-owned job host exists. */
+	jobs?: JobOperations;
 	/** Serialize a local async command so the next admitted slash command observes its committed state. */
 	runLocalOperation?: (operation: () => Promise<void>) => void;
 	/**
@@ -945,6 +958,8 @@ export interface CommandAcpAdmission {
 	subcommands?: ReadonlyArray<string>;
 	streams?: "dispatch";
 	injectsUserTurn?: true;
+	/** First arguments that do not submit a turn, so an active prompt does not refuse them. */
+	injectsUserTurnExcept?: ReadonlyArray<string>;
 	promptTurn?: true;
 	promptTurnSubcommands?: ReadonlyArray<string>;
 }
@@ -1850,6 +1865,62 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 				ctx.render?.();
 			})();
 			ctx.holdReplyFor?.(operation);
+		},
+	},
+	{
+		name: "loop",
+		// Its jobs fire user turns later, outside any prompt, which is what this marker tells a client.
+		// Listing and controlling jobs submits nothing, so those verbs stay available while a prompt runs.
+		acp: { injectsUserTurn: true, injectsUserTurnExcept: LOOP_OBSERVE_VERBS },
+		description: "Run a bounded recurring job: a main-context task or a typed command",
+		group: "Work",
+		kinds: ["loop"],
+		args: {
+			flags: [
+				{ name: "--count", takesValue: true, valueName: "runs" },
+				{ name: "--for", takesValue: true, valueName: "duration" },
+				{ name: "--timeout", takesValue: true, valueName: "duration" },
+				{ name: "--until", takesValue: true, valueName: "json.path == value" },
+				{ name: "--on-match", takesValue: true, values: ["notice", "main_turn"] },
+				{ name: "--follow-up", takesValue: true, valueName: "text" },
+				{ name: "--command", takesValue: true, valueName: "program [args...]" },
+			],
+			positionals: [
+				{ name: "every", required: false },
+				{ name: "task", required: false, rest: true },
+			],
+			subcommands: {
+				list: {},
+				status: { positionals: [{ name: "id", required: false }] },
+				pause: { positionals: [{ name: "id", required: true }] },
+				resume: { positionals: [{ name: "id", required: true }] },
+				stop: { positionals: [{ name: "id", required: true }] },
+				cancel: { positionals: [{ name: "id", required: true }] },
+			},
+		},
+		subcommandDescriptions: LOOP_SUBCOMMAND_DESCRIPTIONS,
+		match(text) {
+			if (!/^\/loop(?:\s|$)/u.test(text)) return null;
+			const parsed = parseLoopLine(text.slice("/loop".length));
+			return parsed.ok
+				? { kind: "loop", command: parsed.command }
+				: { kind: "usage-error", command: "loop", reason: parsed.reason };
+		},
+		handle(command, ctx) {
+			if (command.kind !== "loop") return;
+			if (ctx.jobs === undefined) {
+				ctx.notice("warn", LOOP_NO_HOST_NOTICE);
+				return "rejected";
+			}
+			const output = (lines: ReadonlyArray<string>) => ctx.io.stdout(`${lines.join("\n")}\n`);
+			const run = () => runLoopCommand(command.command, { jobs: ctx.jobs, notice: ctx.notice, output, now: Date.now });
+			// The reply waits for acceptance where the host answers when the work ends (ACP); the
+			// terminal queues it behind earlier local operations so `/loop list` sees a just-made job.
+			if (ctx.holdReplyFor) {
+				ctx.holdReplyFor(run());
+				return;
+			}
+			(ctx.runLocalOperation ?? ((operation: () => Promise<void>) => void operation()))(run);
 		},
 	},
 	{

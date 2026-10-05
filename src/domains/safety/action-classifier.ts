@@ -181,6 +181,7 @@ function baseClassify(tool: string): ActionClass | null {
 		case ToolNames.RunScript:
 			return "execute";
 		case ToolNames.Dispatch:
+		case ToolNames.Job:
 		case ToolNames.Steer:
 			return "dispatch";
 		default:

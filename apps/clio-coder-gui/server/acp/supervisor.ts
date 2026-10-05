@@ -85,7 +85,9 @@ import {
 	ACP_HANDOFF_CANCEL_METHOD,
 	ACP_HANDOFF_COMMIT_METHOD,
 	ACP_HANDOFF_PREPARE_METHOD,
+	ACP_JOBS_LIST_METHOD,
 	ACP_LIBRARY_RELOAD_METHOD,
+	ACP_MAX_JOBS,
 	ACP_MEMORY_PROPOSE_METHOD,
 	ACP_NOTICE_META_KEY,
 	ACP_QUEUE_CHANGED_NOTIFICATION,
@@ -106,6 +108,8 @@ import {
 	ACP_TARGETS_PROBE_METHOD,
 	ACP_TRUNCATED_META_KEY,
 	ACP_USAGE_READ_METHOD,
+	type AcpJob,
+	AcpJobList,
 	AcpTargetList,
 	type AcpAutonomyLevelSchema as AutonomyLevel,
 	AcpSafeSettings as SafeSettings,
@@ -120,6 +124,7 @@ import { type ChildRow, ChildrenFile } from "./children-file.js";
 import { AcpClient, acpProblem, record } from "./client.js";
 import { fleetEvent } from "./fleet-events.js";
 import { Interviews } from "./interviews.js";
+import { JOB_QUIET_MS, jobChangeIsStructural, scheduledTurnPrompt } from "./jobs.js";
 import { Permissions, type PermissionTimers } from "./permissions.js";
 import { projectConfigOptions } from "./session-config.js";
 import { sessionResultTelemetry, sessionUpdateTelemetry } from "./telemetry.js";
@@ -173,11 +178,19 @@ type Entry = {
 	resuming?: boolean;
 	/** Retired for idleness: the snapshot stays and reads `parked` once the child is gone. */
 	parking?: boolean;
+	/** The job whose scheduled turn is this entry's open turn. No `session/prompt` brackets it; `job.changed` does. */
+	scheduled?: string;
+	/** Job changes held back because they only moved a counter or a clock, newest per job, and when each job last published. */
+	jobPending?: Map<string, AcpJob>;
+	jobPublished?: Map<string, number>;
+	jobTimer?: ReturnType<typeof setTimeout>;
 };
 /** A branch change reads and replays a whole session, which a long one makes slow. */
 const BRANCH_TIMEOUT_MS = 60_000;
 /** Four parallel drafts on a slow local target plus a judgment; past this the round is treated as lost. */
 const ASIDE_TIMEOUT_MS = 15 * 60_000;
+/** The `/loop` flags this app's command form cannot submit as a single token. */
+const LOOP_FLAGS_NOT_SUBMITTABLE = new Set(["--until", "--on-match", "--follow-up", "--command"]);
 /** Longest a command reply may take; see invokeCommand. */
 const COMMAND_TIMEOUT_MS = 10 * 60_000;
 /** How long a task with no turn and no window showing it keeps its agent process. */
@@ -245,6 +258,7 @@ export class Supervisor {
 			!entry.rebase &&
 			!entry.drafting &&
 			entry.client.pending === 0 &&
+			!this.liveJobs(entry.id) &&
 			entry.client.capabilities.loadSession &&
 			!this.configuring.has(entry.id) &&
 			this.snapshots.get(entry.id)?.state === "open"
@@ -550,6 +564,10 @@ export class Supervisor {
 						});
 						return;
 					}
+					if (projected.type === "job.changed") {
+						this.jobChanged(owned, projected.job);
+						return;
+					}
 					if (projected.type === null) {
 						console.error(`[clio-coder:gui] dropped an unrecognized _clio-coder/event kind on session ${owned.id}`);
 						return;
@@ -598,6 +616,7 @@ export class Supervisor {
 			entry.activeAt = performance.now();
 			this.state(boundId, "open");
 			if (entry.client.capabilities.context?.status === ACP_CONTEXT_STATUS_METHOD) await this.contextStatus(boundId);
+			await this.seedJobs(boundId);
 			return this.get(boundId);
 		} catch (error) {
 			if (entry) await this.retire(entry);
@@ -720,6 +739,7 @@ export class Supervisor {
 			},
 		});
 		entry.turnId = null;
+		delete entry.scheduled;
 		entry.activeAt = performance.now();
 		const queued = entry.queued;
 		if (queued) {
@@ -730,6 +750,79 @@ export class Supervisor {
 		}
 		// Whatever ended this turn freed its slot.
 		this.admit();
+	}
+	/**
+	 * A scheduled main turn streams `session/update` frames with no `session/prompt` around them. The
+	 * engine opens its bracket with `job.changed` carrying `turn`, before the first frame, and closes it
+	 * the same way after the last, so this entry's turn follows that flag. The job itself then enters the
+	 * projection, held back when it only moved a counter or a clock.
+	 */
+	private jobChanged(entry: Entry, job: AcpJob) {
+		if (job.turn && entry.turnId === null && entry.scheduled === undefined && entry.replay === null) {
+			entry.scheduled = job.jobId;
+			entry.activeAt = performance.now();
+			this.begin(entry, scheduledTurnPrompt(job), "live");
+		} else if (!job.turn && entry.scheduled === job.jobId) {
+			this.finish(entry, "end_turn", null, null, new Date().toISOString());
+		}
+		const held = this.snapshots.get(entry.id)?.jobs?.find((row) => row.jobId === job.jobId);
+		const now = performance.now();
+		const due = (entry.jobPublished?.get(job.jobId) ?? Number.NEGATIVE_INFINITY) + JOB_QUIET_MS;
+		if (jobChangeIsStructural(held, job) || now >= due) {
+			entry.jobPending?.delete(job.jobId);
+			this.publishJob(entry, job, now);
+			return;
+		}
+		const pending = entry.jobPending ?? new Map<string, AcpJob>();
+		pending.set(job.jobId, job);
+		entry.jobPending = pending;
+		if (entry.jobTimer === undefined) {
+			entry.jobTimer = setTimeout(() => this.flushJobs(entry), Math.max(1, due - now));
+			entry.jobTimer.unref();
+		}
+	}
+	private publishJob(entry: Entry, job: AcpJob, now: number) {
+		const published = entry.jobPublished ?? new Map<string, number>();
+		entry.jobPublished = published;
+		published.set(job.jobId, now);
+		if (published.size > ACP_MAX_JOBS * 2) published.delete(published.keys().next().value as string);
+		this.publish({ type: "job.changed", payload: { resource: entry.id, revision: this.revision(entry.id), job } });
+	}
+	private flushJobs(entry: Entry) {
+		delete entry.jobTimer;
+		const pending = [...(entry.jobPending?.values() ?? [])];
+		entry.jobPending?.clear();
+		if (entry.closing || !this.snapshots.has(entry.id)) return;
+		const now = performance.now();
+		for (const job of pending) this.publishJob(entry, job, now);
+	}
+	/** The engine's own list after a bind or resume; events carry only what changes after it. Best effort, since the strip is auxiliary. */
+	private async seedJobs(id: string) {
+		const entry = this.entries.get(id);
+		if (entry?.client.capabilities.jobs?.list !== ACP_JOBS_LIST_METHOD) return;
+		try {
+			const list = await this.projected(id, ACP_JOBS_LIST_METHOD, { sessionId: id }, AcpJobList);
+			this.publish({ type: "job.listed", payload: { resource: id, revision: this.revision(id), jobs: list.jobs } });
+		} catch (error) {
+			console.error(
+				`[clio-coder:gui] session ${id} could not list its jobs: ${error instanceof Error ? error.message : String(error)}`,
+			);
+		}
+	}
+	/** A job that is running, due again or being delivered lives in this child process, which parking would end. */
+	private liveJobs(id: string) {
+		return (
+			this.snapshots
+				.get(id)
+				?.jobs?.some(
+					(job) =>
+						job.state === "active" ||
+						(job.state === "terminal" && !job.complete) ||
+						job.running ||
+						job.turn ||
+						job.cancelRequested,
+				) === true
+		);
 	}
 	private failTurn(entry: Entry, problem: AppProblem) {
 		this.finish(entry, "failed", null, problem.problem, new Date().toISOString());
@@ -1467,11 +1560,31 @@ export class Supervisor {
 		this.boardWrites(id, "proposeMemory");
 		return this.projected(id, ACP_MEMORY_PROPOSE_METHOD, { sessionId: id, ...body }, MemoryProposed);
 	}
-	commands(id: string) {
+	async commands(id: string) {
 		const entry = this.active(id);
 		if (!entry.client.capabilities.commands)
 			throw new AppProblem("conflict", "This Clio build exposes no operator commands.");
-		return this.projected(id, ACP_COMMANDS_LIST_METHOD, {}, CommandCatalog);
+		const catalog = await this.projected(id, ACP_COMMANDS_LIST_METHOD, {}, CommandCatalog);
+		// The command form submits single-token flags and one text field. A predicate, a program and its
+		// arguments, or a follow-up task need more than that, so they are not offered rather than offered and refused.
+		return {
+			...catalog,
+			commands: catalog.commands.map((row) =>
+				row.name === "loop"
+					? {
+							...row,
+							summary: "Run a bounded recurring main-context task, or list and control its jobs",
+							usage: "/loop <every> [--count <runs>] [--for <duration>] [--timeout <duration>] <task>",
+							args: {
+								...row.args,
+								...(row.args.flags !== undefined
+									? { flags: row.args.flags.filter((flag) => !LOOP_FLAGS_NOT_SUBMITTABLE.has(flag.name)) }
+									: {}),
+							},
+						}
+					: row,
+			),
+		};
 	}
 	async invokeCommand(id: string, body: Static<typeof CommandRequest>) {
 		const entry = this.active(id);
@@ -1482,7 +1595,8 @@ export class Supervisor {
 		// A command, or one of its subcommands, whose work belongs to a conversation turn is sent as one.
 		const subcommand = body.argv?.[0];
 		if (
-			(command?.injectsUserTurn && (body.command !== "tasks" || subcommand === "hand")) ||
+			// `/loop` submits nothing now: its turns come later through `job.changed`, and stopping one must work mid-turn.
+			(command?.injectsUserTurn && body.command !== "loop" && (body.command !== "tasks" || subcommand === "hand")) ||
 			command?.promptTurn ||
 			(subcommand !== undefined && command?.promptTurnSubcommands?.includes(subcommand))
 		) {
@@ -1652,6 +1766,7 @@ export class Supervisor {
 	}
 	private async retireEntry(entry: Entry) {
 		entry.closing = true;
+		clearTimeout(entry.jobTimer);
 		try {
 			if (
 				(entry.turnId || entry.contextCommand || this.snapshot(entry.id).contextWork?.active) &&

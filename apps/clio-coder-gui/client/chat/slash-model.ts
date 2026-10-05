@@ -293,6 +293,18 @@ function tokens(text: string): { value: string; start: number }[] {
 }
 
 /**
+ * `/loop` sends its task as one typed argv element, so a task the operator wrapped whole in one pair of quotes
+ * is the words inside them, as the terminal's tokenizer reads it. Anything else, including a quote or a backslash
+ * inside the pair, is left as typed and the grammar check refuses it with its usual message.
+ */
+function unquotedTask(text: string): string {
+	const quote = text[0];
+	if ((quote !== '"' && quote !== "'") || text.length < 3 || text.at(-1) !== quote) return text;
+	const inner = text.slice(1, -1);
+	return inner.includes(quote) || inner.includes("\\") || inner.trim() === "" ? text : inner;
+}
+
+/**
  * Parses `/name args` against the catalog grammar into the form fields the command panel collects,
  * then validates them with the same `planCommand`, so a typed line and a filled form are held to one
  * rule. Returns null when the line names no catalog command; it is then a prompt or a template.
@@ -342,7 +354,8 @@ export function parseSlashLine(text: string, catalog: CommandCatalog | undefined
 		if (!positional)
 			return invalid(`/${command.name} takes no more arguments after ${words[index - 1]?.value ?? "its name"}.`);
 		if (positional.rest) {
-			fields[`pos:${position}`] = rest.slice(word.start).trim();
+			const text = rest.slice(word.start).trim();
+			fields[`pos:${position}`] = command.name === "loop" ? unquotedTask(text) : text;
 			position += 1;
 			break;
 		}

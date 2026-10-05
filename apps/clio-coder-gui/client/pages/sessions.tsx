@@ -19,6 +19,7 @@ import { foldFleetRuns, isLiveRun } from "../chat/fleet-facts.js";
 import type { HealthRow } from "../chat/health.js";
 import { summarizeHealth } from "../chat/health.js";
 import { Interview } from "../chat/Interview.js";
+import { LiveJobs } from "../chat/JobStrip.js";
 import { PaneContext, type PaneTarget } from "../chat/pane-context.js";
 import { usePaneState } from "../chat/pane-state.js";
 import { routeFacts } from "../chat/route.js";
@@ -518,6 +519,7 @@ function SessionView({ client, id }: { client: Client; id: string }) {
 								sessionOpen={snapshot.state === "open"}
 								fleet={snapshot.fleet}
 							/>
+							<LiveJobs client={client} sessionId={snapshot.id} sessionOpen={snapshot.state === "open"} jobs={snapshot.jobs} />
 							{turns.length === 0 ? <EmptyTranscript sessionId={snapshot.id} /> : null}
 						</div>
 					</div>

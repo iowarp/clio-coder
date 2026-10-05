@@ -11,7 +11,7 @@ import {
 	type HealthItem,
 } from "../../contracts/fleet-events.js";
 import { ReceiptFacts } from "../../contracts/receipt-facts.js";
-import { ACP_RECEIPT_META_KEY } from "../../contracts/wire.js";
+import { ACP_RECEIPT_META_KEY, AcpJob } from "../../contracts/wire.js";
 import { AppProblem } from "../services/problem.js";
 import { record } from "./client.js";
 import { projectTelemetryValue } from "./telemetry.js";
@@ -20,6 +20,7 @@ const HEALTH = new Set<string>(HEALTH_EVENT_TYPES);
 
 export type AcpEvent =
 	| { type: "context.activity"; activity: Static<typeof ContextActivity>; sequence: number }
+	| { type: "job.changed"; job: AcpJob; sequence: number }
 	| { type: (typeof ACP_TO_WEB_EVENT)[keyof typeof ACP_TO_WEB_EVENT]; item: FleetItem | HealthItem; sequence: number }
 	| { type: null; item: null; sequence: number };
 
@@ -53,6 +54,13 @@ export function fleetEvent(value: unknown, sessionId: string, previousSequence: 
 		if (!Value.Check(ContextActivity, activity) || !activity.operation || activity.operation.sessionId !== sessionId)
 			throw new AppProblem("upstream_acp", "ACP context activity does not identify the bound session.");
 		return { type: "context.activity", activity, sequence };
+	}
+	if (kind === "job.changed") {
+		// The engine builds this payload against the same schema; a record that fails it is a broken peer.
+		const job = Value.Clean(AcpJob, structuredClone(event.payload));
+		if (!Value.Check(AcpJob, job))
+			throw new AppProblem("upstream_acp", "ACP job does not match its public projection contract.");
+		return { type: "job.changed", job, sequence };
 	}
 	if (!Object.hasOwn(ACP_TO_WEB_EVENT, kind)) return { type: null, item: null, sequence };
 	const type = ACP_TO_WEB_EVENT[kind as keyof typeof ACP_TO_WEB_EVENT];

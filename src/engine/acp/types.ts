@@ -121,6 +121,8 @@ export const ACP_HANDOFF_META_KEY = "clio-coder/handoff";
 export const ACP_HANDOFF_PREPARE_METHOD = "_clio-coder/session/handoff/prepare";
 export const ACP_HANDOFF_COMMIT_METHOD = "_clio-coder/session/handoff/commit";
 export const ACP_HANDOFF_CANCEL_METHOD = "_clio-coder/session/handoff/cancel";
+export const ACP_JOBS_META_KEY = "clio-coder/jobs";
+export const ACP_JOBS_LIST_METHOD = "_clio-coder/jobs/list";
 export const ACP_FLEET_META_KEY = "clio-coder/fleet";
 export const ACP_FLEET_PREVIEW_METHOD = "_clio-coder/fleet/preview";
 export const ACP_FLEET_RUN_METHOD = "_clio-coder/fleet/run";
@@ -516,6 +518,104 @@ export const AcpFleetCapability = Type.Object(
 	closed,
 );
 export type AcpFleetCapability = Static<typeof AcpFleetCapability>;
+/**
+ * The session's recurring jobs: `list` answers the current set, and `job.changed`
+ * under `clio-coder/events` carries each later change. Neither replaces the other:
+ * a client lists after it binds or resumes, then folds the events.
+ */
+export const AcpJobsCapability = Type.Object(
+	{ version: Type.Literal(1), list: wireMethod, event: Type.Literal("job.changed") },
+	closed,
+);
+export type AcpJobsCapability = Static<typeof AcpJobsCapability>;
+const jobIdentifier = Type.String({ maxLength: 128 });
+const jobCount = Type.Union([Type.Integer({ minimum: 0 }), Type.Null()]);
+const jobTime = Type.Union([Type.Integer({ minimum: 0 }), Type.Null()]);
+/**
+ * One job as `_clio-coder/jobs/list` and `job.changed` carry it. Every figure is
+ * the canonical record's own, bounded for the wire: counts, `nextDueAt` and
+ * `deadlineAt` are never derived by a client, `costUsd` is null when the record
+ * says pricing is unknown, and `last` is absent until a run settled. The exact
+ * prompt and argv never cross; `taskPreview` is a bounded prefix. `revision` is
+ * the record's own and rises with every committed change, so a client replaces a
+ * job only by an equal or newer one. `turn` is true while a scheduled main turn
+ * of this job streams `session/update` frames, which is the only bracket those
+ * frames have because no `session/prompt` owns them.
+ */
+export const AcpJob = Type.Object(
+	{
+		jobId: jobIdentifier,
+		revision: jobCount,
+		state: Type.Union([Type.Literal("active"), Type.Literal("paused"), Type.Literal("terminal")]),
+		reason: Type.Union([
+			Type.Literal("count"),
+			Type.Literal("condition"),
+			Type.Literal("stopped"),
+			Type.Literal("canceled"),
+			Type.Literal("deadline"),
+			Type.Literal("failure"),
+			Type.Null(),
+		]),
+		runner: Type.Union([Type.Literal("main"), Type.Literal("command")]),
+		taskPreview: Type.String({ maxLength: 192 }),
+		intervalMs: jobCount,
+		count: jobCount,
+		starts: jobCount,
+		settled: jobCount,
+		timeoutMs: jobCount,
+		nextDueAt: jobTime,
+		deadlineAt: jobTime,
+		cancelRequested: Type.Boolean(),
+		running: Type.Boolean(),
+		turn: Type.Boolean(),
+		pendingReason: Type.Union([Type.String({ maxLength: 320 }), Type.Null()]),
+		consecutiveFailures: jobCount,
+		last: Type.Union([
+			Type.Object(
+				{
+					outcome: Type.Union([
+						Type.Literal("succeeded"),
+						Type.Literal("failed"),
+						Type.Literal("noop"),
+						Type.Literal("canceled"),
+						Type.Literal("timed_out"),
+						Type.Literal("interrupted"),
+					]),
+					summary: Type.String({ maxLength: 320 }),
+					truncated: Type.Boolean(),
+				},
+				closed,
+			),
+			Type.Null(),
+		]),
+		delivery: Type.Union([
+			Type.Object(
+				{
+					kind: Type.Union([Type.Literal("notice"), Type.Literal("main_turn")]),
+					state: Type.Union([
+						Type.Literal("pending"),
+						Type.Literal("running"),
+						Type.Literal("delivered"),
+						Type.Literal("dropped"),
+						Type.Literal("failed"),
+					]),
+				},
+				closed,
+			),
+			Type.Null(),
+		]),
+		costUsd: Type.Union([Type.Number({ minimum: 0 }), Type.Null()]),
+		saved: Type.Boolean(),
+		/** False while polling may have ended but an analysis delivery, cancel or cleanup is unresolved. */
+		complete: Type.Boolean(),
+	},
+	closed,
+);
+export type AcpJob = Static<typeof AcpJob>;
+/** The most jobs one list or one client's view carries. */
+export const ACP_MAX_JOBS = 32;
+export const AcpJobList = Type.Object({ jobs: Type.Array(AcpJob, { maxItems: ACP_MAX_JOBS }) }, closed);
+export type AcpJobList = Static<typeof AcpJobList>;
 export const AcpContextCapability = Type.Object({ version: Type.Literal(1), ledger: wireMethod }, closed);
 export type AcpContextCapability = Static<typeof AcpContextCapability>;
 export const AcpArtifactsCapability = Type.Object(
@@ -607,6 +707,7 @@ export interface AcpAgentCapabilitiesMeta {
 	[ACP_CONTEXT_META_KEY]?: AcpContextCapability;
 	[ACP_ARTIFACTS_META_KEY]?: AcpWire<AcpArtifactsCapability>;
 	[ACP_FLEET_META_KEY]?: AcpFleetCapability;
+	[ACP_JOBS_META_KEY]?: AcpJobsCapability;
 	[ACP_HANDOFF_META_KEY]?: AcpHandoffCapability;
 	[ACP_SHELL_META_KEY]?: AcpShellCapability;
 	[ACP_QUEUE_META_KEY]?: AcpWire<AcpQueueCapability>;

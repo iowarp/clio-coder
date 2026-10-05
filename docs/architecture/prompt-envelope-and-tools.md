@@ -146,9 +146,9 @@ The worker compiler runs after target capability and tool-profile admission. Can
 
 Project context, memory, bounded dispatch briefing, pipeline input, the assigned task, and the per-run safety-posture reminder remain dynamic user messages. A briefing is a separately delimited message labeled as untrusted task context/data; it is never concatenated into the task or stable system prompt. Dynamic ordering is project, safety, memory, briefing, then pipeline input, with pipeline input last. These messages do not affect the stable composition hash. Persona, effective autonomy, target tool capability, or final toolkit changes do affect it.
 
-## Eight planes, thirty-five builtin tools
+## Eight planes, thirty-seven builtin tools
 
-The canonical builtin catalog contains 35 tools organized in eight planes. A
+The canonical builtin catalog contains 37 tools organized in eight planes. A
 particular session or worker receives the subset whose dependencies and policy
 allow it to register. The policy table records each tool's plane, action class, size posture, and concurrency rule; tools within a plane can differ.
 [policy.ts](../../src/tools/policy.ts) asserts these invariants at bootstrap, so drift between
@@ -166,12 +166,12 @@ it on a registry the test builds.
 
 | Plane | Tools | Action class | Concurrency |
 | --- | --- | --- | --- |
-| OBSERVE | `read`, `grep`, `find`, `ls`, `code_nav`, `context`, `credential_present`, `clio_docs`, `clio_library`, `data`, `vision` | read | parallel |
+| OBSERVE | `read`, `grep`, `find`, `ls`, `code_nav`, `context`, `credential_present`, `clio_docs`, `clio_library`, `data`, `vision`, `memory_recall` | read | parallel |
 | OBSERVE | `evidence` | read | sequential |
 | MUTATE | `write`, `edit` | write | sequential |
 | EXECUTE | `bash`, `verify`, `run_script` | execute | sequential |
 | EXECUTE | `git` | read | sequential |
-| ORCHESTRATE | `dispatch`, `steer` | dispatch | sequential |
+| ORCHESTRATE | `dispatch`, `steer`, `job` | dispatch | sequential |
 | ORCHESTRATE | `monitor` | read | parallel |
 | ORCHESTRATE | `tasks` | read | sequential |
 | ORCHESTRATE | `ledger` | read | sequential |

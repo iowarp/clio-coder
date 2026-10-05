@@ -19,7 +19,9 @@ import {
 import { COST_NOT_MEASURED, costAggregateForAmount, formatCostAggregate } from "../domains/observability/index.js";
 import type { DispatchRunEventRegistry } from "./dispatch.js";
 import { grantRequestLines, pendingRequestsFor, requestsAwaitingMain } from "./grant-request-text.js";
+import type { JobOperations } from "./job-types.js";
 import { collectDetachedBatch, collectRuns, durableRunEvidence } from "./monitor-collect.js";
+import { listJobMonitor, runJobMonitor } from "./monitor-jobs.js";
 import { monitorToolSurface } from "./monitor-surface.js";
 import type { ToolInvokeOptions, ToolResult, ToolSpec } from "./registry.js";
 import { truncateUtf8 } from "./truncate-utf8.js";
@@ -66,6 +68,7 @@ const COLLECT_POLL_MS = 1_000;
 export interface MonitorToolDeps {
 	dispatch: DispatchContract;
 	runEvents?: Pick<DispatchRunEventRegistry, "eventTail">;
+	jobs?: JobOperations;
 }
 
 function runLine(run: RunEnvelope): string {
@@ -593,6 +596,8 @@ export function createMonitorTool(deps: MonitorToolDeps): ToolSpec {
 	return {
 		...monitorToolSurface,
 		async run(args, options): Promise<ToolResult> {
+			const jobResult = await runJobMonitor(deps.jobs, args, options);
+			if (jobResult !== null) return jobResult;
 			const explicitRunId = typeof args.run_id === "string" ? args.run_id.trim() : "";
 			const rawRunIds = Array.isArray(args.run_ids) ? args.run_ids : null;
 			const singletonRunId = rawRunIds?.length === 1 && typeof rawRunIds[0] === "string" ? rawRunIds[0].trim() : "";
@@ -612,7 +617,14 @@ export function createMonitorTool(deps: MonitorToolDeps): ToolSpec {
 					message: `monitor: mode must be status, peek, receipt, list, wait, collect, or tools; got '${mode}'`,
 				};
 			}
-			if (mode === "list") return listRuns(deps, options);
+			if (mode === "list") {
+				const runs = listRuns(deps, options);
+				if (!deps.jobs || runs.kind === "error") return runs;
+				const jobs = listJobMonitor(deps.jobs);
+				return jobs.kind === "error"
+					? runs
+					: { kind: "ok", output: `${runs.output}\n\n${jobs.output}`, details: { ...runs.details, ...jobs.details } };
+			}
 			if (mode === "collect") {
 				const batchId = typeof args.batch_id === "string" ? args.batch_id.trim() : "";
 				const runIds = rawRunIds

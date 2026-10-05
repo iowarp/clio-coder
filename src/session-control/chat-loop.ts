@@ -1,8 +1,14 @@
-import { CONTEXT_OPERATION_CUSTOM_TYPE, createContextOperation } from "../core/context-operation.js";
 import { randomUUID } from "node:crypto";
+import { CONTEXT_OPERATION_CUSTOM_TYPE, createContextOperation } from "../core/context-operation.js";
 import { createConversationEggs } from "../domains/session/easter-eggs.js";
 import type { TurnControlRecord, TurnOutcomeRecord } from "../domains/turn-control/index.js";
 import type { AskUserHandler } from "../tools/ask-user.js";
+import type {
+	MachineTurnProjectionAdmission,
+	MachineTurnProjectionHost,
+	MachineTurnRequest,
+	MachineTurnResult,
+} from "./job-turn-types.js";
 import type { TurnControlRunner } from "./turn-control-runner.js";
 
 export { runOutOfTurnRound } from "./side-question.js";
@@ -39,7 +45,7 @@ import { ContinuityController } from "./continuity-controller.js";
  */
 
 import { AsyncLocalStorage } from "node:async_hooks";
-import { readFileSync } from "node:fs";
+import { readFileSync, realpathSync } from "node:fs";
 import { join } from "node:path";
 import { BusChannels, type RunAbortSource } from "../core/bus-events.js";
 import type { ClioSettings } from "../core/config.js";
@@ -47,6 +53,7 @@ import { formatFooterTokens } from "../core/display-units.js";
 import type { SafeEventBus } from "../core/event-bus.js";
 import {
 	armedSkillSurface,
+	evaluateSkillToolSurface,
 	type PendingSkillRequest,
 	type PendingSkillToolPolicy,
 	SKILL_SURFACE_ENTRY,
@@ -125,6 +132,7 @@ import {
 	noticeMessage,
 	OPERATOR_CANCEL_REASON,
 	pendingSkillRequestPreamble,
+	sumRunUsage,
 	toolSignatureFromState,
 } from "./chat-loop-messages.js";
 import { normalizeRetrySettings } from "./chat-loop-policy.js";
@@ -473,6 +481,12 @@ export type ChatLoopEvent = (
 ) & { modelTimeMs?: number };
 
 export interface ChatSubmitOptions {
+	/** Host-only fresh delivery. Its text never enters steering/editor queues (#411). */
+	machineTurn?: {
+		preparationToken: object;
+		onStarting(): boolean;
+		onSettled(result: MachineTurnResult): void;
+	};
 	/** Explicit host-owned task scope; never parsed from the prompt text. */
 	constraints?: TurnConstraints;
 	/** Presentation only; never part of the model message or persisted text. */
@@ -604,7 +618,13 @@ export interface ChatLoop {
 	activeEggs?(): readonly string[];
 	eggsCommand?(action: "status" | "off", id?: string): string;
 	submit(text: string, options?: ChatSubmitOptions): Promise<void>;
+	submitMachineTurn?(request: MachineTurnRequest): Promise<MachineTurnResult>;
+	/** Bound attended hosts project this ordinary turn through their existing lifecycle (#411). */
+	bindMachineTurnProjection?(host: MachineTurnProjectionHost): () => void;
+	machineTurnAvailable?(): boolean;
 	currentTurnConstraints?(): TurnConstraints | undefined;
+	/** Effective creating/current task and skill ceiling for session-owned jobs (#411). */
+	jobConstraints?(): TurnConstraints | undefined;
 	steer(text: string): boolean;
 	queueFollowUp(text: string, display?: { text: string; note?: string }, origin?: string): boolean;
 	/** The queued entries still in Clio's hands, in delivery order. */
@@ -1677,6 +1697,13 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 	// which is the run an interrupt has to wait out.
 	let activeSubmit: Promise<void> = Promise.resolve();
 	let priorSubmit: Promise<void> = Promise.resolve();
+	let machineTurnOwner: object | null = null;
+	let machineTurnRunning: object | null = null;
+	let pendingMachineCancellation: object | null = null;
+	let machinePreparation: { token: object; runtime: AgentRuntime | null } | null = null;
+	let machineProjectionBinding: { host: MachineTurnProjectionHost } | null = null;
+	let machineProjectionRequired = false;
+	let machineHostDisposed = false;
 
 	const interruptRefusalReason = (): string | null => {
 		if (deps.hasAttachedDispatch?.() === true) {
@@ -2247,6 +2274,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			const submittedAt = performance.now();
 			let interrupted = false;
 			if (state.streaming) {
+				if (options.machineTurn !== undefined) return;
 				let mode: SteeringMode = options.origin !== undefined ? "end-of-turn" : (options.steering ?? DEFAULT_STEERING_MODE);
 				let front = options.queueFront === true;
 				const trimmed = text.trim();
@@ -2352,6 +2380,8 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				emitAdmissionNotice(notConfiguredNotice(deps.getSettings().chat), nullRuntimeAdmissionReason());
 				return;
 			}
+			if (options.machineTurn?.preparationToken === machinePreparation?.token && machinePreparation !== null)
+				machinePreparation.runtime = agentRuntime;
 			const operatorText = text;
 			let sidecarObservation: string | null = null;
 			const routeAcceptsImages = acceptsImageInput({
@@ -2706,6 +2736,10 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 
 			if (!admissionCurrent()) return;
 
+			if (options.machineTurn !== undefined) {
+				if (!options.machineTurn.onStarting() || !admissionCurrent() || state.streaming) return;
+			}
+
 			// 5. Append the user turn, then stamp and persist the snapshot.
 			// PendingSkillRequest is intent only; SkillActivation ledger entries
 			// are recorded on skill-load success.
@@ -2820,6 +2854,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				});
 				if (retired.length < prior.length) replaceEngineMessages(agentRuntime.agent, retired);
 			}
+			const machineMessageStart = agentRuntime.agent.state.messages.length;
 			const priorPendingSkillPolicy = state.currentPendingSkillPolicy;
 			const priorAskUserPolicy = state.currentAskUserPolicy;
 			state.currentPendingSkillPolicy = pendingSkillPolicy;
@@ -3058,18 +3093,43 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				state.currentPendingSkillPolicy = priorPendingSkillPolicy;
 				state.currentAskUserPolicy = priorAskUserPolicy;
 				armSkillSurface(pendingSkillPolicy, skillsLoadedBeforeTurn);
-				state.activeUserTurnId = null;
 				// Safety net for thrown paths where agent_end never delivered;
 				// no-op when the agent_end flush already ran.
 				context.flushReconciledSnapshot();
 				persistence.deferTraceClose(false);
 				// Runs on every exit path (normal settle, catch-arm returns) so
 				// a steer the engine never drained still reaches the model.
-				if (!(await queues.resubmitStranded())) await queues.resubmitRequestContinuation();
+				if (options.machineTurn !== undefined) {
+					const messages = agentRuntime.agent.state.messages.slice(machineMessageStart);
+					const finalMessage = [...messages].reverse().find((message) => message.role === "assistant");
+					const failure = detectTerminalFailureFromState(agentRuntime.agent);
+					const usage = sumRunUsage(messages);
+					options.machineTurn.onSettled({
+						status:
+							!admissionCurrent() || canceled || interviewDismissed
+								? "canceled"
+								: failure || !finalMessage
+									? "failed"
+									: "succeeded",
+						turnId: userTurnId,
+						...(failure ? { reason: failure.errorMessage } : {}),
+						...(finalMessage ? { text: extractText(finalMessage) } : {}),
+						usage: {
+							tokens: usage.tokens,
+							costUsd: usage.hadUsage && agentRuntime.runtimeResolution.costProvenance !== "unknown" ? usage.costUsd : null,
+						},
+					});
+				}
+				state.activeUserTurnId = null;
+				if (options.machineTurn === undefined && !(await queues.resubmitStranded()))
+					await queues.resubmitRequestContinuation();
 			}
 		},
 
 		cancel(options?: ChatCancelOptions): void {
+			const machineCancellation = pendingMachineCancellation;
+			pendingMachineCancellation = null;
+			const preserveQueue = machineCancellation !== null && machineCancellation === machineTurnRunning;
 			continuity.cancel();
 			pendingPreTurnRead?.abort();
 			pendingVisionSidecar?.abort();
@@ -3080,8 +3140,9 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			// Settle the queue before the abort settles the in-flight prompt: a
 			// cancelled run must not deliver queued messages on its own. An
 			// interrupt holds them for the prompt it is about to send; any other
-			// cancel drops them (Esc already returned them to the editor).
-			queues.onRunCancelled({ hold: options?.reason === INTERRUPT_CANCEL_REASON });
+			// cancel drops them (Esc already returned them to the editor). A job
+			// cancellation preserves successors for its ordinary settlement path (#411).
+			queues.onRunCancelled({ hold: options?.reason === INTERRUPT_CANCEL_REASON, preserve: preserveQueue });
 			const requestedReason = options?.reason?.trim();
 			if (wasStreaming) {
 				// Keep immediate feedback in the footer. A transcript notice here
@@ -3153,6 +3214,19 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 
 		contextUsage: () => context.contextUsage(),
 		currentTurnConstraints: () => state.currentTurnConstraints,
+		jobConstraints: () => {
+			const constraints = state.currentTurnConstraints;
+			const policy = state.currentPendingSkillPolicy ?? state.activeSkillSurface;
+			if (!policy) return snapshotTurnConstraints(constraints);
+			const allowedTools = (deps.toolRegistry?.listAll() ?? [])
+				.map((tool) => tool.name)
+				.filter(
+					(name) =>
+						evaluateSkillToolSurface(policy, name) === null &&
+						(constraints?.allowedTools === undefined || constraints.allowedTools.includes(name)),
+				);
+			return snapshotTurnConstraints({ ...constraints, allowedTools });
+		},
 		liveSystemPrompt: () => context.liveSystemPrompt(),
 		contextLedger: () => context.contextLedger(),
 		liveBudget: () => context.liveBudget(),
@@ -3220,6 +3294,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		},
 
 		dispose(): void {
+			machineHostDisposed = true;
 			sessionResetListeners.clear();
 			unsubscribeEggSession?.();
 			eggs.reset();
@@ -3484,11 +3559,14 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 	const submitInner = api.submit.bind(api);
 	const submitTracked: ChatLoop["submit"] = (text, options) => {
 		priorSubmit = activeSubmit;
+		const preparationToken = options?.machineTurn?.preparationToken;
+		machinePreparation = preparationToken === undefined ? null : { token: preparationToken, runtime: null };
 		// The flag brackets the whole submit, including the early returns an
 		// admission failure takes, so a refused turn does not leave the pre-warm
 		// believing a turn is still running.
 		turnActive = true;
 		const run = submitInner(text, options).finally(() => {
+			if (machinePreparation?.token === preparationToken) machinePreparation = null;
 			turnActive = false;
 			try {
 				const counts = deps.onTurnSettled?.();
@@ -3575,5 +3653,155 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		return run.finally(leaveOnce);
 	};
 
+	api.bindMachineTurnProjection = (host) => {
+		const binding = { host };
+		machineProjectionRequired = true;
+		machineProjectionBinding = binding;
+		return () => {
+			if (machineProjectionBinding === binding) machineProjectionBinding = null;
+		};
+	};
+	api.machineTurnAvailable = () =>
+		!machineHostDisposed &&
+		(!machineProjectionRequired || machineProjectionBinding !== null) &&
+		machineTurnOwner === null &&
+		!state.streaming &&
+		preparingSubmits === 0 &&
+		!turnActive &&
+		!state.currentAskUserPolicy?.inFlight &&
+		deps.toolRegistry?.hasParkedCalls() !== true &&
+		queues.entries().length === 0;
+	api.submitMachineTurn = async (request) => {
+		const refused = (reason: string): MachineTurnResult => ({ status: "refused", turnId: null, reason });
+		if (machineProjectionRequired && machineProjectionBinding === null)
+			return refused(
+				"The attended turn projection is detached; delivery remains with its job controller until the host is available.",
+			);
+		if (!api.machineTurnAvailable?.())
+			return refused("The main conversation is busy; delivery remains with its job controller.");
+		const current = (): boolean =>
+			!machineHostDisposed &&
+			!request.signal.aborted &&
+			request.sessionId === api.getSessionId() &&
+			request.isAdmissionCurrent();
+		if (!current()) return refused("The job's originating session or generation is no longer current.");
+		const token = {};
+		machineTurnOwner = token;
+		let settled: MachineTurnResult | null = null;
+		let ownedUserTurnId: string | null = null;
+		let ownedRuntime: AgentRuntime | null = null;
+		let projectionLease: Extract<MachineTurnProjectionAdmission, { status: "ready" }> | null = null;
+		const cancel = (): void => {
+			if (
+				machineTurnOwner === token &&
+				machinePreparation?.token === token &&
+				!state.streaming &&
+				state.activeUserTurnId === null
+			) {
+				// This preparation still owns the FIFO slot; cancel its ports without aborting a successor runtime (#411).
+				pendingPreTurnRead?.abort();
+				pendingVisionSidecar?.abort();
+				pendingCompactionPaint?.abort();
+				if (machinePreparation.runtime !== null && state.runtime === machinePreparation.runtime) context.cancelCompaction();
+				return;
+			}
+			if (
+				machineTurnRunning === token &&
+				ownedUserTurnId !== null &&
+				state.activeUserTurnId === ownedUserTurnId &&
+				state.runtime === ownedRuntime &&
+				request.sessionId === api.getSessionId()
+			) {
+				pendingMachineCancellation = token;
+				try {
+					api.cancel({ reason: "Scheduled job occurrence canceled.", auditReason: "job occurrence canceled" });
+				} finally {
+					pendingMachineCancellation = null;
+				}
+			}
+		};
+		request.signal.addEventListener("abort", cancel, { once: true });
+		try {
+			const binding = machineProjectionBinding;
+			if (binding !== null) {
+				const meta = deps.session?.current();
+				if (!meta || meta.id !== request.sessionId)
+					return refused("The projection's conversation is no longer bound to this machine turn.");
+				const projection = binding.host.acquire({
+					jobId: request.jobId,
+					executionId: request.executionId,
+					text: request.text,
+					origin: request.origin,
+					sessionId: request.sessionId,
+					cwd: realpathSync(meta.cwd),
+					signal: request.signal,
+				});
+				if (projection.status === "deferred") return refused(projection.reason);
+				projectionLease = projection;
+				if (!current() || machineProjectionBinding !== binding)
+					return refused("The attended projection host changed during machine-turn admission.");
+			}
+			await api.submit(request.text, {
+				origin: request.origin,
+				...(request.constraints === undefined ? {} : { constraints: request.constraints }),
+				isAdmissionCurrent: current,
+				machineTurn: {
+					preparationToken: token,
+					onStarting: request.onStarting,
+					onSettled: (result) => {
+						settled = result;
+						if (machineTurnRunning === token) machineTurnRunning = null;
+					},
+				},
+				onAdmitted: () => {
+					if (machinePreparation?.token === token) machinePreparation = null;
+					machineTurnRunning = token;
+					ownedUserTurnId = state.activeUserTurnId;
+					ownedRuntime = state.runtime;
+					emit({
+						type: "queued_user_turn",
+						text: request.text,
+						kind: "follow-up",
+						display: { text: request.text, note: `Scheduled loop · ${request.jobId}` },
+					});
+					if (request.signal.aborted) cancel();
+				},
+			});
+			return (
+				settled ??
+				refused(
+					request.signal.aborted
+						? "Scheduled delivery canceled before execution."
+						: "The fresh turn was refused during ordinary admission.",
+				)
+			);
+		} catch (error) {
+			return {
+				status: request.signal.aborted ? "canceled" : "failed",
+				turnId: null,
+				reason: error instanceof Error ? error.message : String(error),
+			};
+		} finally {
+			request.signal.removeEventListener("abort", cancel);
+			if (machineTurnRunning === token) machineTurnRunning = null;
+			try {
+				projectionLease?.release();
+			} catch (error) {
+				emitNotice(
+					`Machine turn projection release failed: ${error instanceof Error ? error.message : String(error)}`,
+					"error",
+				);
+			}
+			if (machineTurnOwner === token) machineTurnOwner = null;
+			// Successor prompts have their own lifetime and must never extend this occurrence (#411).
+			if (settled !== null && !machineHostDisposed)
+				void queues
+					.resubmitStranded()
+					.then(async (submitted) => {
+						if (!submitted) await queues.resubmitRequestContinuation();
+					})
+					.catch((error: unknown) => emitNotice(error instanceof Error ? error.message : String(error), "error"));
+		}
+	};
 	return api;
 }

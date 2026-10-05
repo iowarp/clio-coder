@@ -36,6 +36,7 @@ import type { UserTasksStore } from "../domains/user-tasks/store.js";
 import { setDiffusionFramesEnabled } from "../engine/apis/diffusion-frames.js";
 import { createAgentProgress } from "../engine/tui.js";
 import type { ChatLoop, ChatLoopEvent } from "../session-control/chat-loop.js";
+import { reportLoopChanges } from "../session-control/loop-command.js";
 import type {
 	ContextClearCommandOptions,
 	InitCommandOptions,
@@ -46,6 +47,7 @@ import type {
 import { recordStartupDiagnostic } from "../session-control/startup-diagnostics.js";
 import { readWorkerReceiptFacts } from "../session-control/worker-receipts.js";
 import type { AskUserHandler } from "../tools/ask-user.js";
+import type { JobOperations } from "../tools/job-types.js";
 import type { ToolRegistry } from "../tools/registry.js";
 import type { ApplicationController } from "./application-controller.js";
 import { warmTranscriptRender } from "./chat-panel.js";
@@ -160,6 +162,12 @@ export interface InteractiveDeps {
 	panes?: PanesOperations;
 	/** The music pane behind `/music` and its leader key. Absent without panes. */
 	music?: MusicOperations;
+	/**
+	 * The shared job control behind `/loop`, from the composition root that owns
+	 * the session. Absent where no session-owned job host exists, which `/loop`
+	 * says instead of scheduling anything.
+	 */
+	jobs?: JobOperations;
 	/**
 	 * Factory seam for the dispatch-to-pane bridge, so a contract test can drive
 	 * it without a TUI. Production leaves it unset and gets `createMuxBridge`.
@@ -791,6 +799,11 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 			chatRenderer.mutate(() => chatPanel.appendReplayBlock(renderBlock), "bus-notice"),
 		requestRender: () => {},
 	};
+	// Job transitions (a pause, an ended job, a matched condition) reach the transcript
+	// once each; a command's own result is reported by the command, never again here.
+	const loopJobs = deps.jobs
+		? reportLoopChanges(deps.jobs, ({ level, text }) => appendNotice(level, text, busNoticeSink))
+		: undefined;
 	const eventProjection = createInteractiveEventProjection({
 		bus: deps.bus,
 		chat: deps.chat,
@@ -998,6 +1011,7 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 		openView: (filter) => openViewOverlayState(filter),
 		...(deps.panes ? { panes: deps.panes } : {}),
 		...(deps.music ? { music: deps.music } : {}),
+		...(loopJobs ? { jobs: loopJobs.jobs } : {}),
 		openModel: () => openModelOverlayState(),
 		openModelScope: (ref) => openModelScopeState(ref),
 		openConfigure: () => overlayLifecycle.openConfigureState(),
@@ -1610,6 +1624,7 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 				for (const unsubscribe of operatorSubscriptions) unsubscribe();
 				void operatorExtensions?.dispose();
 				detachMusicDockKey?.();
+				loopJobs?.dispose();
 				detachYaziBridge?.();
 				yaziBridge?.dispose();
 				detachWorkersDockKey?.();

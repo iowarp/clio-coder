@@ -151,10 +151,10 @@ export interface TurnQueues {
 	/**
 	 * The run was cancelled. Messages the engine was handed but never injected
 	 * come back to the head of the queue. An interrupt holds the queue for the
-	 * prompt that follows; any other cancel drops it, exactly as before, so a
-	 * cancelled run never delivers or resubmits queued messages on its own.
+	 * prompt that follows; a job cancellation preserves entries without holding
+	 * them for an interrupt. Other cancels drop the queue, as Esc expects.
 	 */
-	onRunCancelled(options: { hold: boolean }): void;
+	onRunCancelled(options: { hold: boolean; preserve?: boolean }): void;
 	/** True (and consumed) when the loop already persisted this exact user text. */
 	consumePersistedEcho(text: string): boolean;
 	markPersistedUserEcho(text: string, prompt: () => Promise<void>): Promise<void>;
@@ -354,10 +354,10 @@ export function createTurnQueues(deps: TurnQueuesDeps): TurnQueues {
 		flushOnNextPrompt() {
 			flushNext = true;
 		},
-		onRunCancelled({ hold }) {
+		onRunCancelled({ hold, preserve = false }) {
 			const changed = inFlight.length > 0 || queue.length > 0;
 			queue.unshift(...inFlight.splice(0, inFlight.length));
-			if (!hold) {
+			if (!hold && !preserve) {
 				const dropped = queue.splice(0, queue.length);
 				removed(
 					dropped.filter((entry) => !fromMachine(entry)),
@@ -365,7 +365,8 @@ export function createTurnQueues(deps: TurnQueuesDeps): TurnQueues {
 				);
 				retire(dropped.filter(fromMachine), "the run was cancelled");
 			}
-			held = hold && queue.length > 0;
+			// Job preservation must not clear an interrupt that already owns the queue (#411).
+			if (!preserve || hold) held = hold && queue.length > 0;
 			state.runtime?.agent.clearAllQueues();
 			if (changed) emitQueueUpdate();
 		},

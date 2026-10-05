@@ -5,6 +5,7 @@ import {
 	AcpCommandsCapability as CommandsCapability,
 	AcpDecisionCapability as DecisionCapability,
 	AcpEventsCapability as EventsCapability,
+	AcpJobsCapability as JobsCapability,
 	AcpQueueCapability as QueueCapability,
 	AcpShellCapability as ShellCapability,
 	AcpSteeringCapability as SteeringCapability,
@@ -15,6 +16,7 @@ export {
 	CommandsCapability,
 	DecisionCapability,
 	EventsCapability,
+	JobsCapability,
 	QueueCapability,
 	ShellCapability,
 	SteeringCapability,
@@ -79,6 +81,8 @@ export const AgentCapabilities = Type.Object(
 		handoff: Type.Optional(HandoffCapability),
 		/** Preview a fleet contract and start only the approved plan. */
 		fleet: Type.Optional(FleetCapability),
+		/** The session's recurring jobs: a list to seed from, then `job.changed` events. */
+		jobs: Type.Optional(JobsCapability),
 		/** The context window accounting, read for the Context view. */
 		context: Type.Optional(ContextCapability),
 		artifacts: Type.Optional(ArtifactsCapability),

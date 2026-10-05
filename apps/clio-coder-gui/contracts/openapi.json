@@ -11308,6 +11308,25 @@
 											},
 											"additionalProperties": false
 										},
+										"jobs": {
+											"type": "object",
+											"required": ["version", "list", "event"],
+											"properties": {
+												"version": {
+													"type": "number",
+													"const": 1
+												},
+												"list": {
+													"type": "string",
+													"maxLength": 128
+												},
+												"event": {
+													"type": "string",
+													"const": "job.changed"
+												}
+											},
+											"additionalProperties": false
+										},
 										"context": {
 											"type": "object",
 											"required": ["version", "ledger"],
@@ -23847,6 +23866,343 @@
 												"additionalProperties": false
 											},
 											"maxItems": 32
+										},
+										"jobs": {
+											"type": "array",
+											"items": {
+												"type": "object",
+												"required": [
+													"jobId",
+													"revision",
+													"state",
+													"reason",
+													"runner",
+													"taskPreview",
+													"intervalMs",
+													"count",
+													"starts",
+													"settled",
+													"timeoutMs",
+													"nextDueAt",
+													"deadlineAt",
+													"cancelRequested",
+													"running",
+													"turn",
+													"pendingReason",
+													"consecutiveFailures",
+													"last",
+													"delivery",
+													"costUsd",
+													"saved",
+													"complete"
+												],
+												"properties": {
+													"jobId": {
+														"type": "string",
+														"maxLength": 128
+													},
+													"revision": {
+														"anyOf": [
+															{
+																"type": "integer",
+																"minimum": 0
+															},
+															{
+																"type": "null"
+															}
+														]
+													},
+													"state": {
+														"anyOf": [
+															{
+																"type": "string",
+																"const": "active"
+															},
+															{
+																"type": "string",
+																"const": "paused"
+															},
+															{
+																"type": "string",
+																"const": "terminal"
+															}
+														]
+													},
+													"reason": {
+														"anyOf": [
+															{
+																"type": "string",
+																"const": "count"
+															},
+															{
+																"type": "string",
+																"const": "condition"
+															},
+															{
+																"type": "string",
+																"const": "stopped"
+															},
+															{
+																"type": "string",
+																"const": "canceled"
+															},
+															{
+																"type": "string",
+																"const": "deadline"
+															},
+															{
+																"type": "string",
+																"const": "failure"
+															},
+															{
+																"type": "null"
+															}
+														]
+													},
+													"runner": {
+														"anyOf": [
+															{
+																"type": "string",
+																"const": "main"
+															},
+															{
+																"type": "string",
+																"const": "command"
+															}
+														]
+													},
+													"taskPreview": {
+														"type": "string",
+														"maxLength": 192
+													},
+													"intervalMs": {
+														"anyOf": [
+															{
+																"type": "integer",
+																"minimum": 0
+															},
+															{
+																"type": "null"
+															}
+														]
+													},
+													"count": {
+														"anyOf": [
+															{
+																"type": "integer",
+																"minimum": 0
+															},
+															{
+																"type": "null"
+															}
+														]
+													},
+													"starts": {
+														"anyOf": [
+															{
+																"type": "integer",
+																"minimum": 0
+															},
+															{
+																"type": "null"
+															}
+														]
+													},
+													"settled": {
+														"anyOf": [
+															{
+																"type": "integer",
+																"minimum": 0
+															},
+															{
+																"type": "null"
+															}
+														]
+													},
+													"timeoutMs": {
+														"anyOf": [
+															{
+																"type": "integer",
+																"minimum": 0
+															},
+															{
+																"type": "null"
+															}
+														]
+													},
+													"nextDueAt": {
+														"anyOf": [
+															{
+																"type": "integer",
+																"minimum": 0
+															},
+															{
+																"type": "null"
+															}
+														]
+													},
+													"deadlineAt": {
+														"anyOf": [
+															{
+																"type": "integer",
+																"minimum": 0
+															},
+															{
+																"type": "null"
+															}
+														]
+													},
+													"cancelRequested": {
+														"type": "boolean"
+													},
+													"running": {
+														"type": "boolean"
+													},
+													"turn": {
+														"type": "boolean"
+													},
+													"pendingReason": {
+														"anyOf": [
+															{
+																"type": "string",
+																"maxLength": 320
+															},
+															{
+																"type": "null"
+															}
+														]
+													},
+													"consecutiveFailures": {
+														"anyOf": [
+															{
+																"type": "integer",
+																"minimum": 0
+															},
+															{
+																"type": "null"
+															}
+														]
+													},
+													"last": {
+														"anyOf": [
+															{
+																"type": "object",
+																"required": ["outcome", "summary", "truncated"],
+																"properties": {
+																	"outcome": {
+																		"anyOf": [
+																			{
+																				"type": "string",
+																				"const": "succeeded"
+																			},
+																			{
+																				"type": "string",
+																				"const": "failed"
+																			},
+																			{
+																				"type": "string",
+																				"const": "noop"
+																			},
+																			{
+																				"type": "string",
+																				"const": "canceled"
+																			},
+																			{
+																				"type": "string",
+																				"const": "timed_out"
+																			},
+																			{
+																				"type": "string",
+																				"const": "interrupted"
+																			}
+																		]
+																	},
+																	"summary": {
+																		"type": "string",
+																		"maxLength": 320
+																	},
+																	"truncated": {
+																		"type": "boolean"
+																	}
+																},
+																"additionalProperties": false
+															},
+															{
+																"type": "null"
+															}
+														]
+													},
+													"delivery": {
+														"anyOf": [
+															{
+																"type": "object",
+																"required": ["kind", "state"],
+																"properties": {
+																	"kind": {
+																		"anyOf": [
+																			{
+																				"type": "string",
+																				"const": "notice"
+																			},
+																			{
+																				"type": "string",
+																				"const": "main_turn"
+																			}
+																		]
+																	},
+																	"state": {
+																		"anyOf": [
+																			{
+																				"type": "string",
+																				"const": "pending"
+																			},
+																			{
+																				"type": "string",
+																				"const": "running"
+																			},
+																			{
+																				"type": "string",
+																				"const": "delivered"
+																			},
+																			{
+																				"type": "string",
+																				"const": "dropped"
+																			},
+																			{
+																				"type": "string",
+																				"const": "failed"
+																			}
+																		]
+																	}
+																},
+																"additionalProperties": false
+															},
+															{
+																"type": "null"
+															}
+														]
+													},
+													"costUsd": {
+														"anyOf": [
+															{
+																"type": "number",
+																"minimum": 0
+															},
+															{
+																"type": "null"
+															}
+														]
+													},
+													"saved": {
+														"type": "boolean"
+													},
+													"complete": {
+														"type": "boolean"
+													}
+												},
+												"additionalProperties": false
+											},
+											"maxItems": 32
 										}
 									},
 									"additionalProperties": false
@@ -28428,6 +28784,343 @@
 												"additionalProperties": false
 											},
 											"maxItems": 32
+										},
+										"jobs": {
+											"type": "array",
+											"items": {
+												"type": "object",
+												"required": [
+													"jobId",
+													"revision",
+													"state",
+													"reason",
+													"runner",
+													"taskPreview",
+													"intervalMs",
+													"count",
+													"starts",
+													"settled",
+													"timeoutMs",
+													"nextDueAt",
+													"deadlineAt",
+													"cancelRequested",
+													"running",
+													"turn",
+													"pendingReason",
+													"consecutiveFailures",
+													"last",
+													"delivery",
+													"costUsd",
+													"saved",
+													"complete"
+												],
+												"properties": {
+													"jobId": {
+														"type": "string",
+														"maxLength": 128
+													},
+													"revision": {
+														"anyOf": [
+															{
+																"type": "integer",
+																"minimum": 0
+															},
+															{
+																"type": "null"
+															}
+														]
+													},
+													"state": {
+														"anyOf": [
+															{
+																"type": "string",
+																"const": "active"
+															},
+															{
+																"type": "string",
+																"const": "paused"
+															},
+															{
+																"type": "string",
+																"const": "terminal"
+															}
+														]
+													},
+													"reason": {
+														"anyOf": [
+															{
+																"type": "string",
+																"const": "count"
+															},
+															{
+																"type": "string",
+																"const": "condition"
+															},
+															{
+																"type": "string",
+																"const": "stopped"
+															},
+															{
+																"type": "string",
+																"const": "canceled"
+															},
+															{
+																"type": "string",
+																"const": "deadline"
+															},
+															{
+																"type": "string",
+																"const": "failure"
+															},
+															{
+																"type": "null"
+															}
+														]
+													},
+													"runner": {
+														"anyOf": [
+															{
+																"type": "string",
+																"const": "main"
+															},
+															{
+																"type": "string",
+																"const": "command"
+															}
+														]
+													},
+													"taskPreview": {
+														"type": "string",
+														"maxLength": 192
+													},
+													"intervalMs": {
+														"anyOf": [
+															{
+																"type": "integer",
+																"minimum": 0
+															},
+															{
+																"type": "null"
+															}
+														]
+													},
+													"count": {
+														"anyOf": [
+															{
+																"type": "integer",
+																"minimum": 0
+															},
+															{
+																"type": "null"
+															}
+														]
+													},
+													"starts": {
+														"anyOf": [
+															{
+																"type": "integer",
+																"minimum": 0
+															},
+															{
+																"type": "null"
+															}
+														]
+													},
+													"settled": {
+														"anyOf": [
+															{
+																"type": "integer",
+																"minimum": 0
+															},
+															{
+																"type": "null"
+															}
+														]
+													},
+													"timeoutMs": {
+														"anyOf": [
+															{
+																"type": "integer",
+																"minimum": 0
+															},
+															{
+																"type": "null"
+															}
+														]
+													},
+													"nextDueAt": {
+														"anyOf": [
+															{
+																"type": "integer",
+																"minimum": 0
+															},
+															{
+																"type": "null"
+															}
+														]
+													},
+													"deadlineAt": {
+														"anyOf": [
+															{
+																"type": "integer",
+																"minimum": 0
+															},
+															{
+																"type": "null"
+															}
+														]
+													},
+													"cancelRequested": {
+														"type": "boolean"
+													},
+													"running": {
+														"type": "boolean"
+													},
+													"turn": {
+														"type": "boolean"
+													},
+													"pendingReason": {
+														"anyOf": [
+															{
+																"type": "string",
+																"maxLength": 320
+															},
+															{
+																"type": "null"
+															}
+														]
+													},
+													"consecutiveFailures": {
+														"anyOf": [
+															{
+																"type": "integer",
+																"minimum": 0
+															},
+															{
+																"type": "null"
+															}
+														]
+													},
+													"last": {
+														"anyOf": [
+															{
+																"type": "object",
+																"required": ["outcome", "summary", "truncated"],
+																"properties": {
+																	"outcome": {
+																		"anyOf": [
+																			{
+																				"type": "string",
+																				"const": "succeeded"
+																			},
+																			{
+																				"type": "string",
+																				"const": "failed"
+																			},
+																			{
+																				"type": "string",
+																				"const": "noop"
+																			},
+																			{
+																				"type": "string",
+																				"const": "canceled"
+																			},
+																			{
+																				"type": "string",
+																				"const": "timed_out"
+																			},
+																			{
+																				"type": "string",
+																				"const": "interrupted"
+																			}
+																		]
+																	},
+																	"summary": {
+																		"type": "string",
+																		"maxLength": 320
+																	},
+																	"truncated": {
+																		"type": "boolean"
+																	}
+																},
+																"additionalProperties": false
+															},
+															{
+																"type": "null"
+															}
+														]
+													},
+													"delivery": {
+														"anyOf": [
+															{
+																"type": "object",
+																"required": ["kind", "state"],
+																"properties": {
+																	"kind": {
+																		"anyOf": [
+																			{
+																				"type": "string",
+																				"const": "notice"
+																			},
+																			{
+																				"type": "string",
+																				"const": "main_turn"
+																			}
+																		]
+																	},
+																	"state": {
+																		"anyOf": [
+																			{
+																				"type": "string",
+																				"const": "pending"
+																			},
+																			{
+																				"type": "string",
+																				"const": "running"
+																			},
+																			{
+																				"type": "string",
+																				"const": "delivered"
+																			},
+																			{
+																				"type": "string",
+																				"const": "dropped"
+																			},
+																			{
+																				"type": "string",
+																				"const": "failed"
+																			}
+																		]
+																	}
+																},
+																"additionalProperties": false
+															},
+															{
+																"type": "null"
+															}
+														]
+													},
+													"costUsd": {
+														"anyOf": [
+															{
+																"type": "number",
+																"minimum": 0
+															},
+															{
+																"type": "null"
+															}
+														]
+													},
+													"saved": {
+														"type": "boolean"
+													},
+													"complete": {
+														"type": "boolean"
+													}
+												},
+												"additionalProperties": false
+											},
+											"maxItems": 32
 										}
 									},
 									"additionalProperties": false
@@ -31594,6 +32287,343 @@
 												"additionalProperties": false
 											},
 											"maxItems": 32
+										},
+										"jobs": {
+											"type": "array",
+											"items": {
+												"type": "object",
+												"required": [
+													"jobId",
+													"revision",
+													"state",
+													"reason",
+													"runner",
+													"taskPreview",
+													"intervalMs",
+													"count",
+													"starts",
+													"settled",
+													"timeoutMs",
+													"nextDueAt",
+													"deadlineAt",
+													"cancelRequested",
+													"running",
+													"turn",
+													"pendingReason",
+													"consecutiveFailures",
+													"last",
+													"delivery",
+													"costUsd",
+													"saved",
+													"complete"
+												],
+												"properties": {
+													"jobId": {
+														"type": "string",
+														"maxLength": 128
+													},
+													"revision": {
+														"anyOf": [
+															{
+																"type": "integer",
+																"minimum": 0
+															},
+															{
+																"type": "null"
+															}
+														]
+													},
+													"state": {
+														"anyOf": [
+															{
+																"type": "string",
+																"const": "active"
+															},
+															{
+																"type": "string",
+																"const": "paused"
+															},
+															{
+																"type": "string",
+																"const": "terminal"
+															}
+														]
+													},
+													"reason": {
+														"anyOf": [
+															{
+																"type": "string",
+																"const": "count"
+															},
+															{
+																"type": "string",
+																"const": "condition"
+															},
+															{
+																"type": "string",
+																"const": "stopped"
+															},
+															{
+																"type": "string",
+																"const": "canceled"
+															},
+															{
+																"type": "string",
+																"const": "deadline"
+															},
+															{
+																"type": "string",
+																"const": "failure"
+															},
+															{
+																"type": "null"
+															}
+														]
+													},
+													"runner": {
+														"anyOf": [
+															{
+																"type": "string",
+																"const": "main"
+															},
+															{
+																"type": "string",
+																"const": "command"
+															}
+														]
+													},
+													"taskPreview": {
+														"type": "string",
+														"maxLength": 192
+													},
+													"intervalMs": {
+														"anyOf": [
+															{
+																"type": "integer",
+																"minimum": 0
+															},
+															{
+																"type": "null"
+															}
+														]
+													},
+													"count": {
+														"anyOf": [
+															{
+																"type": "integer",
+																"minimum": 0
+															},
+															{
+																"type": "null"
+															}
+														]
+													},
+													"starts": {
+														"anyOf": [
+															{
+																"type": "integer",
+																"minimum": 0
+															},
+															{
+																"type": "null"
+															}
+														]
+													},
+													"settled": {
+														"anyOf": [
+															{
+																"type": "integer",
+																"minimum": 0
+															},
+															{
+																"type": "null"
+															}
+														]
+													},
+													"timeoutMs": {
+														"anyOf": [
+															{
+																"type": "integer",
+																"minimum": 0
+															},
+															{
+																"type": "null"
+															}
+														]
+													},
+													"nextDueAt": {
+														"anyOf": [
+															{
+																"type": "integer",
+																"minimum": 0
+															},
+															{
+																"type": "null"
+															}
+														]
+													},
+													"deadlineAt": {
+														"anyOf": [
+															{
+																"type": "integer",
+																"minimum": 0
+															},
+															{
+																"type": "null"
+															}
+														]
+													},
+													"cancelRequested": {
+														"type": "boolean"
+													},
+													"running": {
+														"type": "boolean"
+													},
+													"turn": {
+														"type": "boolean"
+													},
+													"pendingReason": {
+														"anyOf": [
+															{
+																"type": "string",
+																"maxLength": 320
+															},
+															{
+																"type": "null"
+															}
+														]
+													},
+													"consecutiveFailures": {
+														"anyOf": [
+															{
+																"type": "integer",
+																"minimum": 0
+															},
+															{
+																"type": "null"
+															}
+														]
+													},
+													"last": {
+														"anyOf": [
+															{
+																"type": "object",
+																"required": ["outcome", "summary", "truncated"],
+																"properties": {
+																	"outcome": {
+																		"anyOf": [
+																			{
+																				"type": "string",
+																				"const": "succeeded"
+																			},
+																			{
+																				"type": "string",
+																				"const": "failed"
+																			},
+																			{
+																				"type": "string",
+																				"const": "noop"
+																			},
+																			{
+																				"type": "string",
+																				"const": "canceled"
+																			},
+																			{
+																				"type": "string",
+																				"const": "timed_out"
+																			},
+																			{
+																				"type": "string",
+																				"const": "interrupted"
+																			}
+																		]
+																	},
+																	"summary": {
+																		"type": "string",
+																		"maxLength": 320
+																	},
+																	"truncated": {
+																		"type": "boolean"
+																	}
+																},
+																"additionalProperties": false
+															},
+															{
+																"type": "null"
+															}
+														]
+													},
+													"delivery": {
+														"anyOf": [
+															{
+																"type": "object",
+																"required": ["kind", "state"],
+																"properties": {
+																	"kind": {
+																		"anyOf": [
+																			{
+																				"type": "string",
+																				"const": "notice"
+																			},
+																			{
+																				"type": "string",
+																				"const": "main_turn"
+																			}
+																		]
+																	},
+																	"state": {
+																		"anyOf": [
+																			{
+																				"type": "string",
+																				"const": "pending"
+																			},
+																			{
+																				"type": "string",
+																				"const": "running"
+																			},
+																			{
+																				"type": "string",
+																				"const": "delivered"
+																			},
+																			{
+																				"type": "string",
+																				"const": "dropped"
+																			},
+																			{
+																				"type": "string",
+																				"const": "failed"
+																			}
+																		]
+																	}
+																},
+																"additionalProperties": false
+															},
+															{
+																"type": "null"
+															}
+														]
+													},
+													"costUsd": {
+														"anyOf": [
+															{
+																"type": "number",
+																"minimum": 0
+															},
+															{
+																"type": "null"
+															}
+														]
+													},
+													"saved": {
+														"type": "boolean"
+													},
+													"complete": {
+														"type": "boolean"
+													}
+												},
+												"additionalProperties": false
+											},
+											"maxItems": 32
 										}
 									},
 									"additionalProperties": false
@@ -34719,6 +35749,343 @@
 																	"additionalProperties": false
 																}
 															]
+														}
+													},
+													"additionalProperties": false
+												},
+												"maxItems": 32
+											},
+											"jobs": {
+												"type": "array",
+												"items": {
+													"type": "object",
+													"required": [
+														"jobId",
+														"revision",
+														"state",
+														"reason",
+														"runner",
+														"taskPreview",
+														"intervalMs",
+														"count",
+														"starts",
+														"settled",
+														"timeoutMs",
+														"nextDueAt",
+														"deadlineAt",
+														"cancelRequested",
+														"running",
+														"turn",
+														"pendingReason",
+														"consecutiveFailures",
+														"last",
+														"delivery",
+														"costUsd",
+														"saved",
+														"complete"
+													],
+													"properties": {
+														"jobId": {
+															"type": "string",
+															"maxLength": 128
+														},
+														"revision": {
+															"anyOf": [
+																{
+																	"type": "integer",
+																	"minimum": 0
+																},
+																{
+																	"type": "null"
+																}
+															]
+														},
+														"state": {
+															"anyOf": [
+																{
+																	"type": "string",
+																	"const": "active"
+																},
+																{
+																	"type": "string",
+																	"const": "paused"
+																},
+																{
+																	"type": "string",
+																	"const": "terminal"
+																}
+															]
+														},
+														"reason": {
+															"anyOf": [
+																{
+																	"type": "string",
+																	"const": "count"
+																},
+																{
+																	"type": "string",
+																	"const": "condition"
+																},
+																{
+																	"type": "string",
+																	"const": "stopped"
+																},
+																{
+																	"type": "string",
+																	"const": "canceled"
+																},
+																{
+																	"type": "string",
+																	"const": "deadline"
+																},
+																{
+																	"type": "string",
+																	"const": "failure"
+																},
+																{
+																	"type": "null"
+																}
+															]
+														},
+														"runner": {
+															"anyOf": [
+																{
+																	"type": "string",
+																	"const": "main"
+																},
+																{
+																	"type": "string",
+																	"const": "command"
+																}
+															]
+														},
+														"taskPreview": {
+															"type": "string",
+															"maxLength": 192
+														},
+														"intervalMs": {
+															"anyOf": [
+																{
+																	"type": "integer",
+																	"minimum": 0
+																},
+																{
+																	"type": "null"
+																}
+															]
+														},
+														"count": {
+															"anyOf": [
+																{
+																	"type": "integer",
+																	"minimum": 0
+																},
+																{
+																	"type": "null"
+																}
+															]
+														},
+														"starts": {
+															"anyOf": [
+																{
+																	"type": "integer",
+																	"minimum": 0
+																},
+																{
+																	"type": "null"
+																}
+															]
+														},
+														"settled": {
+															"anyOf": [
+																{
+																	"type": "integer",
+																	"minimum": 0
+																},
+																{
+																	"type": "null"
+																}
+															]
+														},
+														"timeoutMs": {
+															"anyOf": [
+																{
+																	"type": "integer",
+																	"minimum": 0
+																},
+																{
+																	"type": "null"
+																}
+															]
+														},
+														"nextDueAt": {
+															"anyOf": [
+																{
+																	"type": "integer",
+																	"minimum": 0
+																},
+																{
+																	"type": "null"
+																}
+															]
+														},
+														"deadlineAt": {
+															"anyOf": [
+																{
+																	"type": "integer",
+																	"minimum": 0
+																},
+																{
+																	"type": "null"
+																}
+															]
+														},
+														"cancelRequested": {
+															"type": "boolean"
+														},
+														"running": {
+															"type": "boolean"
+														},
+														"turn": {
+															"type": "boolean"
+														},
+														"pendingReason": {
+															"anyOf": [
+																{
+																	"type": "string",
+																	"maxLength": 320
+																},
+																{
+																	"type": "null"
+																}
+															]
+														},
+														"consecutiveFailures": {
+															"anyOf": [
+																{
+																	"type": "integer",
+																	"minimum": 0
+																},
+																{
+																	"type": "null"
+																}
+															]
+														},
+														"last": {
+															"anyOf": [
+																{
+																	"type": "object",
+																	"required": ["outcome", "summary", "truncated"],
+																	"properties": {
+																		"outcome": {
+																			"anyOf": [
+																				{
+																					"type": "string",
+																					"const": "succeeded"
+																				},
+																				{
+																					"type": "string",
+																					"const": "failed"
+																				},
+																				{
+																					"type": "string",
+																					"const": "noop"
+																				},
+																				{
+																					"type": "string",
+																					"const": "canceled"
+																				},
+																				{
+																					"type": "string",
+																					"const": "timed_out"
+																				},
+																				{
+																					"type": "string",
+																					"const": "interrupted"
+																				}
+																			]
+																		},
+																		"summary": {
+																			"type": "string",
+																			"maxLength": 320
+																		},
+																		"truncated": {
+																			"type": "boolean"
+																		}
+																	},
+																	"additionalProperties": false
+																},
+																{
+																	"type": "null"
+																}
+															]
+														},
+														"delivery": {
+															"anyOf": [
+																{
+																	"type": "object",
+																	"required": ["kind", "state"],
+																	"properties": {
+																		"kind": {
+																			"anyOf": [
+																				{
+																					"type": "string",
+																					"const": "notice"
+																				},
+																				{
+																					"type": "string",
+																					"const": "main_turn"
+																				}
+																			]
+																		},
+																		"state": {
+																			"anyOf": [
+																				{
+																					"type": "string",
+																					"const": "pending"
+																				},
+																				{
+																					"type": "string",
+																					"const": "running"
+																				},
+																				{
+																					"type": "string",
+																					"const": "delivered"
+																				},
+																				{
+																					"type": "string",
+																					"const": "dropped"
+																				},
+																				{
+																					"type": "string",
+																					"const": "failed"
+																				}
+																			]
+																		}
+																	},
+																	"additionalProperties": false
+																},
+																{
+																	"type": "null"
+																}
+															]
+														},
+														"costUsd": {
+															"anyOf": [
+																{
+																	"type": "number",
+																	"minimum": 0
+																},
+																{
+																	"type": "null"
+																}
+															]
+														},
+														"saved": {
+															"type": "boolean"
+														},
+														"complete": {
+															"type": "boolean"
 														}
 													},
 													"additionalProperties": false
@@ -38096,6 +39463,343 @@
 																"additionalProperties": false
 															}
 														]
+													}
+												},
+												"additionalProperties": false
+											},
+											"maxItems": 32
+										},
+										"jobs": {
+											"type": "array",
+											"items": {
+												"type": "object",
+												"required": [
+													"jobId",
+													"revision",
+													"state",
+													"reason",
+													"runner",
+													"taskPreview",
+													"intervalMs",
+													"count",
+													"starts",
+													"settled",
+													"timeoutMs",
+													"nextDueAt",
+													"deadlineAt",
+													"cancelRequested",
+													"running",
+													"turn",
+													"pendingReason",
+													"consecutiveFailures",
+													"last",
+													"delivery",
+													"costUsd",
+													"saved",
+													"complete"
+												],
+												"properties": {
+													"jobId": {
+														"type": "string",
+														"maxLength": 128
+													},
+													"revision": {
+														"anyOf": [
+															{
+																"type": "integer",
+																"minimum": 0
+															},
+															{
+																"type": "null"
+															}
+														]
+													},
+													"state": {
+														"anyOf": [
+															{
+																"type": "string",
+																"const": "active"
+															},
+															{
+																"type": "string",
+																"const": "paused"
+															},
+															{
+																"type": "string",
+																"const": "terminal"
+															}
+														]
+													},
+													"reason": {
+														"anyOf": [
+															{
+																"type": "string",
+																"const": "count"
+															},
+															{
+																"type": "string",
+																"const": "condition"
+															},
+															{
+																"type": "string",
+																"const": "stopped"
+															},
+															{
+																"type": "string",
+																"const": "canceled"
+															},
+															{
+																"type": "string",
+																"const": "deadline"
+															},
+															{
+																"type": "string",
+																"const": "failure"
+															},
+															{
+																"type": "null"
+															}
+														]
+													},
+													"runner": {
+														"anyOf": [
+															{
+																"type": "string",
+																"const": "main"
+															},
+															{
+																"type": "string",
+																"const": "command"
+															}
+														]
+													},
+													"taskPreview": {
+														"type": "string",
+														"maxLength": 192
+													},
+													"intervalMs": {
+														"anyOf": [
+															{
+																"type": "integer",
+																"minimum": 0
+															},
+															{
+																"type": "null"
+															}
+														]
+													},
+													"count": {
+														"anyOf": [
+															{
+																"type": "integer",
+																"minimum": 0
+															},
+															{
+																"type": "null"
+															}
+														]
+													},
+													"starts": {
+														"anyOf": [
+															{
+																"type": "integer",
+																"minimum": 0
+															},
+															{
+																"type": "null"
+															}
+														]
+													},
+													"settled": {
+														"anyOf": [
+															{
+																"type": "integer",
+																"minimum": 0
+															},
+															{
+																"type": "null"
+															}
+														]
+													},
+													"timeoutMs": {
+														"anyOf": [
+															{
+																"type": "integer",
+																"minimum": 0
+															},
+															{
+																"type": "null"
+															}
+														]
+													},
+													"nextDueAt": {
+														"anyOf": [
+															{
+																"type": "integer",
+																"minimum": 0
+															},
+															{
+																"type": "null"
+															}
+														]
+													},
+													"deadlineAt": {
+														"anyOf": [
+															{
+																"type": "integer",
+																"minimum": 0
+															},
+															{
+																"type": "null"
+															}
+														]
+													},
+													"cancelRequested": {
+														"type": "boolean"
+													},
+													"running": {
+														"type": "boolean"
+													},
+													"turn": {
+														"type": "boolean"
+													},
+													"pendingReason": {
+														"anyOf": [
+															{
+																"type": "string",
+																"maxLength": 320
+															},
+															{
+																"type": "null"
+															}
+														]
+													},
+													"consecutiveFailures": {
+														"anyOf": [
+															{
+																"type": "integer",
+																"minimum": 0
+															},
+															{
+																"type": "null"
+															}
+														]
+													},
+													"last": {
+														"anyOf": [
+															{
+																"type": "object",
+																"required": ["outcome", "summary", "truncated"],
+																"properties": {
+																	"outcome": {
+																		"anyOf": [
+																			{
+																				"type": "string",
+																				"const": "succeeded"
+																			},
+																			{
+																				"type": "string",
+																				"const": "failed"
+																			},
+																			{
+																				"type": "string",
+																				"const": "noop"
+																			},
+																			{
+																				"type": "string",
+																				"const": "canceled"
+																			},
+																			{
+																				"type": "string",
+																				"const": "timed_out"
+																			},
+																			{
+																				"type": "string",
+																				"const": "interrupted"
+																			}
+																		]
+																	},
+																	"summary": {
+																		"type": "string",
+																		"maxLength": 320
+																	},
+																	"truncated": {
+																		"type": "boolean"
+																	}
+																},
+																"additionalProperties": false
+															},
+															{
+																"type": "null"
+															}
+														]
+													},
+													"delivery": {
+														"anyOf": [
+															{
+																"type": "object",
+																"required": ["kind", "state"],
+																"properties": {
+																	"kind": {
+																		"anyOf": [
+																			{
+																				"type": "string",
+																				"const": "notice"
+																			},
+																			{
+																				"type": "string",
+																				"const": "main_turn"
+																			}
+																		]
+																	},
+																	"state": {
+																		"anyOf": [
+																			{
+																				"type": "string",
+																				"const": "pending"
+																			},
+																			{
+																				"type": "string",
+																				"const": "running"
+																			},
+																			{
+																				"type": "string",
+																				"const": "delivered"
+																			},
+																			{
+																				"type": "string",
+																				"const": "dropped"
+																			},
+																			{
+																				"type": "string",
+																				"const": "failed"
+																			}
+																		]
+																	}
+																},
+																"additionalProperties": false
+															},
+															{
+																"type": "null"
+															}
+														]
+													},
+													"costUsd": {
+														"anyOf": [
+															{
+																"type": "number",
+																"minimum": 0
+															},
+															{
+																"type": "null"
+															}
+														]
+													},
+													"saved": {
+														"type": "boolean"
+													},
+													"complete": {
+														"type": "boolean"
 													}
 												},
 												"additionalProperties": false
@@ -54365,6 +56069,756 @@
 											}
 										},
 										"additionalProperties": false
+									}
+								},
+								"additionalProperties": false
+							}
+						}
+					},
+					{
+						"type": "object",
+						"required": ["v", "epoch", "seq", "at", "type", "payload"],
+						"properties": {
+							"v": {
+								"type": "number",
+								"const": 1
+							},
+							"epoch": {
+								"type": "string",
+								"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+							},
+							"seq": {
+								"type": "integer",
+								"minimum": 0
+							},
+							"at": {
+								"type": "string"
+							},
+							"type": {
+								"type": "string",
+								"const": "job.changed"
+							},
+							"payload": {
+								"type": "object",
+								"required": ["resource", "revision", "job"],
+								"properties": {
+									"resource": {
+										"type": "string",
+										"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+									},
+									"revision": {
+										"type": "integer",
+										"minimum": 1
+									},
+									"job": {
+										"type": "object",
+										"required": [
+											"jobId",
+											"revision",
+											"state",
+											"reason",
+											"runner",
+											"taskPreview",
+											"intervalMs",
+											"count",
+											"starts",
+											"settled",
+											"timeoutMs",
+											"nextDueAt",
+											"deadlineAt",
+											"cancelRequested",
+											"running",
+											"turn",
+											"pendingReason",
+											"consecutiveFailures",
+											"last",
+											"delivery",
+											"costUsd",
+											"saved",
+											"complete"
+										],
+										"properties": {
+											"jobId": {
+												"type": "string",
+												"maxLength": 128
+											},
+											"revision": {
+												"anyOf": [
+													{
+														"type": "integer",
+														"minimum": 0
+													},
+													{
+														"type": "null"
+													}
+												]
+											},
+											"state": {
+												"anyOf": [
+													{
+														"type": "string",
+														"const": "active"
+													},
+													{
+														"type": "string",
+														"const": "paused"
+													},
+													{
+														"type": "string",
+														"const": "terminal"
+													}
+												]
+											},
+											"reason": {
+												"anyOf": [
+													{
+														"type": "string",
+														"const": "count"
+													},
+													{
+														"type": "string",
+														"const": "condition"
+													},
+													{
+														"type": "string",
+														"const": "stopped"
+													},
+													{
+														"type": "string",
+														"const": "canceled"
+													},
+													{
+														"type": "string",
+														"const": "deadline"
+													},
+													{
+														"type": "string",
+														"const": "failure"
+													},
+													{
+														"type": "null"
+													}
+												]
+											},
+											"runner": {
+												"anyOf": [
+													{
+														"type": "string",
+														"const": "main"
+													},
+													{
+														"type": "string",
+														"const": "command"
+													}
+												]
+											},
+											"taskPreview": {
+												"type": "string",
+												"maxLength": 192
+											},
+											"intervalMs": {
+												"anyOf": [
+													{
+														"type": "integer",
+														"minimum": 0
+													},
+													{
+														"type": "null"
+													}
+												]
+											},
+											"count": {
+												"anyOf": [
+													{
+														"type": "integer",
+														"minimum": 0
+													},
+													{
+														"type": "null"
+													}
+												]
+											},
+											"starts": {
+												"anyOf": [
+													{
+														"type": "integer",
+														"minimum": 0
+													},
+													{
+														"type": "null"
+													}
+												]
+											},
+											"settled": {
+												"anyOf": [
+													{
+														"type": "integer",
+														"minimum": 0
+													},
+													{
+														"type": "null"
+													}
+												]
+											},
+											"timeoutMs": {
+												"anyOf": [
+													{
+														"type": "integer",
+														"minimum": 0
+													},
+													{
+														"type": "null"
+													}
+												]
+											},
+											"nextDueAt": {
+												"anyOf": [
+													{
+														"type": "integer",
+														"minimum": 0
+													},
+													{
+														"type": "null"
+													}
+												]
+											},
+											"deadlineAt": {
+												"anyOf": [
+													{
+														"type": "integer",
+														"minimum": 0
+													},
+													{
+														"type": "null"
+													}
+												]
+											},
+											"cancelRequested": {
+												"type": "boolean"
+											},
+											"running": {
+												"type": "boolean"
+											},
+											"turn": {
+												"type": "boolean"
+											},
+											"pendingReason": {
+												"anyOf": [
+													{
+														"type": "string",
+														"maxLength": 320
+													},
+													{
+														"type": "null"
+													}
+												]
+											},
+											"consecutiveFailures": {
+												"anyOf": [
+													{
+														"type": "integer",
+														"minimum": 0
+													},
+													{
+														"type": "null"
+													}
+												]
+											},
+											"last": {
+												"anyOf": [
+													{
+														"type": "object",
+														"required": ["outcome", "summary", "truncated"],
+														"properties": {
+															"outcome": {
+																"anyOf": [
+																	{
+																		"type": "string",
+																		"const": "succeeded"
+																	},
+																	{
+																		"type": "string",
+																		"const": "failed"
+																	},
+																	{
+																		"type": "string",
+																		"const": "noop"
+																	},
+																	{
+																		"type": "string",
+																		"const": "canceled"
+																	},
+																	{
+																		"type": "string",
+																		"const": "timed_out"
+																	},
+																	{
+																		"type": "string",
+																		"const": "interrupted"
+																	}
+																]
+															},
+															"summary": {
+																"type": "string",
+																"maxLength": 320
+															},
+															"truncated": {
+																"type": "boolean"
+															}
+														},
+														"additionalProperties": false
+													},
+													{
+														"type": "null"
+													}
+												]
+											},
+											"delivery": {
+												"anyOf": [
+													{
+														"type": "object",
+														"required": ["kind", "state"],
+														"properties": {
+															"kind": {
+																"anyOf": [
+																	{
+																		"type": "string",
+																		"const": "notice"
+																	},
+																	{
+																		"type": "string",
+																		"const": "main_turn"
+																	}
+																]
+															},
+															"state": {
+																"anyOf": [
+																	{
+																		"type": "string",
+																		"const": "pending"
+																	},
+																	{
+																		"type": "string",
+																		"const": "running"
+																	},
+																	{
+																		"type": "string",
+																		"const": "delivered"
+																	},
+																	{
+																		"type": "string",
+																		"const": "dropped"
+																	},
+																	{
+																		"type": "string",
+																		"const": "failed"
+																	}
+																]
+															}
+														},
+														"additionalProperties": false
+													},
+													{
+														"type": "null"
+													}
+												]
+											},
+											"costUsd": {
+												"anyOf": [
+													{
+														"type": "number",
+														"minimum": 0
+													},
+													{
+														"type": "null"
+													}
+												]
+											},
+											"saved": {
+												"type": "boolean"
+											},
+											"complete": {
+												"type": "boolean"
+											}
+										},
+										"additionalProperties": false
+									}
+								},
+								"additionalProperties": false
+							}
+						}
+					},
+					{
+						"type": "object",
+						"required": ["v", "epoch", "seq", "at", "type", "payload"],
+						"properties": {
+							"v": {
+								"type": "number",
+								"const": 1
+							},
+							"epoch": {
+								"type": "string",
+								"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+							},
+							"seq": {
+								"type": "integer",
+								"minimum": 0
+							},
+							"at": {
+								"type": "string"
+							},
+							"type": {
+								"type": "string",
+								"const": "job.listed"
+							},
+							"payload": {
+								"type": "object",
+								"required": ["resource", "revision", "jobs"],
+								"properties": {
+									"resource": {
+										"type": "string",
+										"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+									},
+									"revision": {
+										"type": "integer",
+										"minimum": 1
+									},
+									"jobs": {
+										"type": "array",
+										"items": {
+											"type": "object",
+											"required": [
+												"jobId",
+												"revision",
+												"state",
+												"reason",
+												"runner",
+												"taskPreview",
+												"intervalMs",
+												"count",
+												"starts",
+												"settled",
+												"timeoutMs",
+												"nextDueAt",
+												"deadlineAt",
+												"cancelRequested",
+												"running",
+												"turn",
+												"pendingReason",
+												"consecutiveFailures",
+												"last",
+												"delivery",
+												"costUsd",
+												"saved",
+												"complete"
+											],
+											"properties": {
+												"jobId": {
+													"type": "string",
+													"maxLength": 128
+												},
+												"revision": {
+													"anyOf": [
+														{
+															"type": "integer",
+															"minimum": 0
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"state": {
+													"anyOf": [
+														{
+															"type": "string",
+															"const": "active"
+														},
+														{
+															"type": "string",
+															"const": "paused"
+														},
+														{
+															"type": "string",
+															"const": "terminal"
+														}
+													]
+												},
+												"reason": {
+													"anyOf": [
+														{
+															"type": "string",
+															"const": "count"
+														},
+														{
+															"type": "string",
+															"const": "condition"
+														},
+														{
+															"type": "string",
+															"const": "stopped"
+														},
+														{
+															"type": "string",
+															"const": "canceled"
+														},
+														{
+															"type": "string",
+															"const": "deadline"
+														},
+														{
+															"type": "string",
+															"const": "failure"
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"runner": {
+													"anyOf": [
+														{
+															"type": "string",
+															"const": "main"
+														},
+														{
+															"type": "string",
+															"const": "command"
+														}
+													]
+												},
+												"taskPreview": {
+													"type": "string",
+													"maxLength": 192
+												},
+												"intervalMs": {
+													"anyOf": [
+														{
+															"type": "integer",
+															"minimum": 0
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"count": {
+													"anyOf": [
+														{
+															"type": "integer",
+															"minimum": 0
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"starts": {
+													"anyOf": [
+														{
+															"type": "integer",
+															"minimum": 0
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"settled": {
+													"anyOf": [
+														{
+															"type": "integer",
+															"minimum": 0
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"timeoutMs": {
+													"anyOf": [
+														{
+															"type": "integer",
+															"minimum": 0
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"nextDueAt": {
+													"anyOf": [
+														{
+															"type": "integer",
+															"minimum": 0
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"deadlineAt": {
+													"anyOf": [
+														{
+															"type": "integer",
+															"minimum": 0
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"cancelRequested": {
+													"type": "boolean"
+												},
+												"running": {
+													"type": "boolean"
+												},
+												"turn": {
+													"type": "boolean"
+												},
+												"pendingReason": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 320
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"consecutiveFailures": {
+													"anyOf": [
+														{
+															"type": "integer",
+															"minimum": 0
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"last": {
+													"anyOf": [
+														{
+															"type": "object",
+															"required": ["outcome", "summary", "truncated"],
+															"properties": {
+																"outcome": {
+																	"anyOf": [
+																		{
+																			"type": "string",
+																			"const": "succeeded"
+																		},
+																		{
+																			"type": "string",
+																			"const": "failed"
+																		},
+																		{
+																			"type": "string",
+																			"const": "noop"
+																		},
+																		{
+																			"type": "string",
+																			"const": "canceled"
+																		},
+																		{
+																			"type": "string",
+																			"const": "timed_out"
+																		},
+																		{
+																			"type": "string",
+																			"const": "interrupted"
+																		}
+																	]
+																},
+																"summary": {
+																	"type": "string",
+																	"maxLength": 320
+																},
+																"truncated": {
+																	"type": "boolean"
+																}
+															},
+															"additionalProperties": false
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"delivery": {
+													"anyOf": [
+														{
+															"type": "object",
+															"required": ["kind", "state"],
+															"properties": {
+																"kind": {
+																	"anyOf": [
+																		{
+																			"type": "string",
+																			"const": "notice"
+																		},
+																		{
+																			"type": "string",
+																			"const": "main_turn"
+																		}
+																	]
+																},
+																"state": {
+																	"anyOf": [
+																		{
+																			"type": "string",
+																			"const": "pending"
+																		},
+																		{
+																			"type": "string",
+																			"const": "running"
+																		},
+																		{
+																			"type": "string",
+																			"const": "delivered"
+																		},
+																		{
+																			"type": "string",
+																			"const": "dropped"
+																		},
+																		{
+																			"type": "string",
+																			"const": "failed"
+																		}
+																	]
+																}
+															},
+															"additionalProperties": false
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"costUsd": {
+													"anyOf": [
+														{
+															"type": "number",
+															"minimum": 0
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"saved": {
+													"type": "boolean"
+												},
+												"complete": {
+													"type": "boolean"
+												}
+											},
+											"additionalProperties": false
+										},
+										"maxItems": 32
 									}
 								},
 								"additionalProperties": false

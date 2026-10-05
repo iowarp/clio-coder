@@ -302,6 +302,7 @@ import type { BootOptions } from "./boot-options.js";
 import { readCompactionSystemPrompt } from "./compaction-prompt.js";
 import { createExtensionReloadCoordinator } from "./extension-reload.js";
 import { createFlowLedger, FLOW_RESTRICTION_ENTRY_TYPE } from "./flow-ledger.js";
+import { createJobHost } from "./job-host.js";
 import { resolvePanesEnablement } from "./panes-activation.js";
 import { reloadPluginResourcesAndNotify } from "./plugin-reload.js";
 import { createDecisionUsageTally, createSystemOneHost, createSystemOneRequestAdmission } from "./system-one-host.js";
@@ -3073,7 +3074,30 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	bus.on(BusChannels.SessionResumed, () => systemOneHost.forgetOperatorTexts());
 	bus.on(BusChannels.SessionTurnSwitched, () => systemOneHost.forgetOperatorTexts());
 	const visionSidecar = createVisionSidecar({ getSettings: () => getCurrentSettings(), providers });
+	const jobHost = createJobHost({
+		registry: toolRegistry,
+		bus,
+		...(session ? { session } : {}),
+		cwd: process.cwd(),
+		attended: options.headless === undefined,
+		safety,
+		autonomy: resolveEffectiveAutonomy,
+		createSession: () => {
+			const settings = getCurrentSettings();
+			session?.create({
+				cwd: process.cwd(),
+				...(settings.chat.target ? { target: settings.chat.target } : {}),
+				...(settings.chat.model ? { model: settings.chat.model } : {}),
+			});
+		},
+		notice: (text) => {
+			if (deferredWatchdogNoticeSink) deferredWatchdogNoticeSink(text);
+			else bootStderr(`${text}\n`);
+		},
+	});
 	const toolBootstrap = registerAllTools(toolRegistry, {
+		jobTool: jobHost.tool,
+		jobs: jobHost.operations,
 		flow: {
 			carried: () => flowLedger.current(),
 			refusal: () => flowLedger.refusal(),
@@ -3892,6 +3916,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	// The guardian works during a turn only through endpoint admission and
 	// reads history shallowly while one streams, so it needs the live answer.
 	isChatStreaming = () => chat.isStreaming();
+	jobHost.attachChat(chat);
 	memoryGuardian.wake("ready");
 
 	// Coordinated shutdown (SIGINT/SIGTERM, TUI quit) must abort any in-flight
@@ -3900,6 +3925,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	// detached process group. Without this, a headless SIGINT exited the CLI
 	// while a running tool's children survived as orphans of init.
 	termination.onDrain(async () => {
+		await jobHost.close();
 		chat.dispose();
 		// The abort fans out to running tools, but their results still land and
 		// persist through the aborted run's subscribers. Domains (the session
@@ -4295,6 +4321,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 				...(dispatch && providers
 					? {
 							commands: acpCommandControl({
+								jobs: jobHost.operations,
 								dispatch,
 								bus,
 								providers,
@@ -4627,6 +4654,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			// and the session writer stops in result.stop() below. Awaiting
 			// settlement here makes a session append after session stop impossible
 			// by ordering rather than by timing.
+			await jobHost.close();
 			await chat.whenSettled();
 			chat.dispose();
 			await dispatch.drain();
@@ -4749,6 +4777,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	termination.onTerminate(() => unsubscribeDashboardPlugins());
 	const { startInteractive } = await import("../interactive/index.js");
 	await startInteractive({
+		jobs: jobHost.operations,
 		getConnections: () => ({
 			mcp: toolBootstrap.mcpCapabilities?.connectedIds({ readyOnly: true }) ?? [],
 			plugins: dashboardPlugins,

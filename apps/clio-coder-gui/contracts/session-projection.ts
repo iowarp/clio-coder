@@ -1,4 +1,5 @@
 import type { SessionDelta, SessionSnapshot, TimelineItem } from "./sessions.js";
+import { ACP_MAX_JOBS, type AcpJob } from "./wire.js";
 
 const encoder = new TextEncoder();
 const MARKER = "\n[… stream truncated …]";
@@ -56,6 +57,34 @@ function timelineBytes(timeline: readonly TimelineItem[]) {
 	for (const item of timeline) bytes += itemCost(item).json;
 	totals.set(timeline, bytes);
 	return bytes;
+}
+
+const jobRank = (job: AcpJob): number => job.revision ?? -1;
+/**
+ * Folds one job into a session's set, keyed by job id and ordered by arrival. An equal revision replaces
+ * (the turn bracket re-sends a held record), an older one is ignored, and the set stays inside the wire
+ * cap by dropping the oldest finished job first. A job that is still live is never the one dropped for
+ * history, because the strip would then stop showing work that is running.
+ */
+export function mergeJob(jobs: readonly AcpJob[], incoming: AcpJob): readonly AcpJob[] {
+	const index = jobs.findIndex((job) => job.jobId === incoming.jobId);
+	if (index >= 0) {
+		const held = jobs[index];
+		if (held === undefined || jobRank(incoming) < jobRank(held)) return jobs;
+		return jobs.map((job, at) => (at === index ? incoming : job));
+	}
+	const next = [...jobs, incoming];
+	if (next.length <= ACP_MAX_JOBS) return next;
+	const finished = next.findIndex((job) => job.state === "terminal" && job.complete);
+	return finished >= 0 ? next.filter((_, at) => at !== finished) : next.slice(-ACP_MAX_JOBS);
+}
+/**
+ * The engine's list after a bind or resume, folded job by job. It never removes a held job: an event
+ * that raced the list may carry a job the list was drawn before, and the revision rule already keeps
+ * whichever copy is newer.
+ */
+export function mergeJobList(held: readonly AcpJob[], listed: readonly AcpJob[]): readonly AcpJob[] {
+	return listed.reduce(mergeJob, held);
 }
 
 export function emptySession(id: string, workspaceId: string): SessionSnapshot {
@@ -205,6 +234,10 @@ export function applySessionDelta(current: SessionSnapshot, event: SessionDelta)
 		case "health.provider":
 		case "health.scopeNotice":
 			return { ...state, health: [...state.health, event.payload.item].slice(-32) };
+		case "job.changed":
+			return { ...state, jobs: [...mergeJob(state.jobs ?? [], event.payload.job)] };
+		case "job.listed":
+			return { ...state, jobs: [...mergeJobList(state.jobs ?? [], event.payload.jobs)] };
 		case "session.changed":
 			return { ...state, state: event.payload.state, recoveredOrphan: event.payload.recoveredOrphan };
 		case "session.configured":

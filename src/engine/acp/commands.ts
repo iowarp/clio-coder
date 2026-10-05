@@ -30,7 +30,9 @@ export type {
  * admission and turn/stream behavior. This adapter projects that metadata and
  * supplies the host's operations and output sink.
  */
+import type { JobRecord } from "../../core/job-types.js";
 import type { PendingSkillRequest } from "../../core/skill-activation.js";
+import { parseLoopArgv } from "../../session-control/loop-command.js";
 import type { NoticeLevel } from "../../session-control/notice-source.js";
 import type { SlashCommand, SlashCommandContext, SlashCommandKind } from "../../session-control/slash-commands.js";
 import {
@@ -104,6 +106,12 @@ export interface AcpCommandRule {
 	 */
 	injectsUserTurn?: true;
 	/**
+	 * First arguments of an {@link injectsUserTurn} command that submit nothing.
+	 * `/loop` fires turns later, but listing and stopping its jobs must stay
+	 * available while a prompt runs: a runaway loop is stopped mid-turn.
+	 */
+	injectsUserTurnExcept?: ReadonlyArray<string>;
+	/**
 	 * The command's work runs as a conversation turn: the tool calls it makes on
 	 * the operator's behalf, and the approvals they park, belong to a
 	 * `session/prompt` the client can see. `/council` is one because a council
@@ -137,6 +145,7 @@ const COMMAND_REQUIREMENTS: Record<string, ReadonlyArray<keyof AcpCommandHost>> 
 	tasks: ["userTasks", "submitTurn"],
 	memory: ["seedTaskMemory"],
 	export: ["exportTranscript"],
+	loop: ["jobs"],
 };
 const CONTEXT_REQUIREMENTS: Record<string, keyof AcpCommandHost> = {
 	compact: "runCompact",
@@ -319,6 +328,7 @@ export type AcpCommandHost = Pick<SlashCommandContext, "dispatch" | "bus" | "pro
 			| "getDecisionBoard"
 			| "importShareArchive"
 			| "isTurnInFlight"
+			| "jobs"
 			| "listWorkerRuns"
 			| "oracleBriefing"
 			| "getWorkerRosters"
@@ -399,22 +409,47 @@ function invalid(reason: string, message: string): AcpRequestError {
  * therefore refused rather than escaped, and whitespace is admitted only in the
  * final element, which is the one that can be rest text.
  */
-function joinArgv(command: string, argv: ReadonlyArray<string>): string {
+// biome-ignore lint/suspicious/noControlCharactersInRegex: a control character in a command line is the refusal.
+const ARGV_CONTROL = /[\u0000-\u001f\u007f]/u;
+// biome-ignore lint/suspicious/noControlCharactersInRegex: a control character in a command line is the refusal.
+const ARGV_CONTROL_OR_QUOTE = /[\u0000-\u001f\u007f"']/u;
+
+function checkArgv(argv: ReadonlyArray<string>, typed: boolean): void {
 	if (argv.length > ACP_MAX_COMMAND_ARGV) throw invalid("argv_too_long", "too many command arguments");
 	for (const [index, value] of argv.entries()) {
 		if (typeof value !== "string") throw invalid("argv_invalid", "command arguments must be strings");
 		if (Buffer.byteLength(value, "utf8") > ACP_MAX_COMMAND_ARGV_BYTES) {
 			throw invalid("argv_too_long", "a command argument is too long");
 		}
-		// biome-ignore lint/suspicious/noControlCharactersInRegex: a control character in a command line is the refusal.
-		if (/[\u0000-\u001f\u007f"']/u.test(value)) {
+		if (typed) {
+			if (ARGV_CONTROL.test(value)) throw invalid("argv_invalid", "a command argument contains a control character");
+			continue;
+		}
+		if (ARGV_CONTROL_OR_QUOTE.test(value)) {
 			throw invalid("argv_invalid", "a command argument contains a quote or control character");
 		}
 		if (index < argv.length - 1 && /\s/u.test(value)) {
 			throw invalid("argv_invalid", "only the last command argument may contain whitespace");
 		}
 	}
+}
+
+function joinArgv(command: string, argv: ReadonlyArray<string>): string {
+	checkArgv(argv, false);
 	return argv.length === 0 ? `/${command}` : `/${command} ${argv.join(" ")}`;
+}
+
+/**
+ * `/loop` takes its words as typed argv instead of a rebuilt line: a task, a
+ * predicate or a program argument keeps its spaces and quotes as one element,
+ * which the joined line could neither carry nor distinguish from two words.
+ */
+function parseLoopRequest(argv: ReadonlyArray<string>): SlashCommand {
+	checkArgv(argv, true);
+	const loop = parseLoopArgv(argv);
+	return loop.ok
+		? { kind: "loop", command: loop.command }
+		: { kind: "usage-error", command: "loop", reason: loop.reason };
 }
 
 /** The parse must land on a kind the allowlisted entry itself declares, or on that entry's usage error. */
@@ -457,8 +492,7 @@ export function invokeAcpCommand(
 		throw invalid("not_wired", "skill expansion is not wired in this session");
 	}
 
-	const line = joinArgv(rule.name, argv);
-	const parsed = parseSlashCommand(line);
+	const parsed = rule.name === "loop" ? parseLoopRequest(argv) : parseSlashCommand(joinArgv(rule.name, argv));
 	if (!parsedBelongsTo(parsed, rule.name, entry.kinds)) {
 		throw invalid("command_not_exposed", "command is not exposed over ACP");
 	}
@@ -597,6 +631,7 @@ function sessionCommandContext(
 		...(host.runDoctor ? { runDoctor: host.runDoctor } : {}),
 		...(host.oracleBriefing ? { oracleBriefing: host.oracleBriefing } : {}),
 		...(host.isTurnInFlight ? { isTurnInFlight: host.isTurnInFlight } : {}),
+		...(host.jobs ? { jobs: host.jobs } : {}),
 		...(host.getWorkerRosters ? { getWorkerRosters: host.getWorkerRosters } : {}),
 		...(host.runCouncilDispatch ? { runCouncilDispatch: host.runCouncilDispatch } : {}),
 		...(runContextRecall
@@ -707,7 +742,7 @@ export interface AcpCommandControl {
 	/** Refusals throw {@link AcpRequestError} with the reason already attached. */
 	invoke(request: { command: unknown; argv: unknown }): AcpCommandResult | Promise<AcpCommandResult>;
 	/** True when this command name submits a user turn, which a live prompt owns. */
-	injectsUserTurn(command: unknown): boolean;
+	injectsUserTurn(command: unknown, argv?: unknown): boolean;
 	/** True when this command, or its subcommand in `argv[0]`, must run inside a `session/prompt` turn; absent reads as false. */
 	promptTurn?(command: unknown, argv?: unknown): boolean;
 	/** Announced verbatim under `clio-coder/commands`. */
@@ -716,6 +751,8 @@ export interface AcpCommandControl {
 	screenPrompt?(text: string): AcpPromptLineVerdict;
 	/** Names of the loaded prompt templates; read per call because a library reload changes them. */
 	promptNames?(): string[];
+	/** The jobs the bound session owns now. Present only when the host has a job control. */
+	jobs?(): ReadonlyArray<JobRecord>;
 }
 
 const MAX_PROMPT_NAMES = 256;
@@ -775,7 +812,13 @@ export function acpCommandControl(host: AcpCommandHost): AcpCommandControl {
 				throw invalid("subcommand_not_exposed", "subcommand is not available in this host");
 			return invokeAcpCommand(request, host);
 		},
-		injectsUserTurn: (command) => typeof command === "string" && RULE_BY_NAME.get(command)?.injectsUserTurn === true,
+		injectsUserTurn: (command, argv) => {
+			if (typeof command !== "string") return false;
+			const rule = RULE_BY_NAME.get(command);
+			if (rule?.injectsUserTurn !== true) return false;
+			const first = Array.isArray(argv) ? argv[0] : undefined;
+			return !(typeof first === "string" && rule.injectsUserTurnExcept?.includes(first) === true);
+		},
 		promptTurn: (command, argv) => {
 			if (typeof command !== "string") return false;
 			const rule = RULE_BY_NAME.get(command);
@@ -785,6 +828,7 @@ export function acpCommandControl(host: AcpCommandHost): AcpCommandControl {
 		},
 		capability: { ...ACP_COMMANDS_CAPABILITY, count: availableRules(host).length },
 		screenPrompt: (text) => screenAcpPromptLine(text, host),
+		...(host.jobs ? { jobs: () => host.jobs?.list() ?? [] } : {}),
 		...(host.listPromptNames
 			? {
 					promptNames: () =>

@@ -60,6 +60,7 @@ export const TOOL_PLANES: Readonly<Record<BuiltinToolName, PlaneExpectation>> = 
 	// itself to a bash command for the policy engine; execute class, sequential.
 	[ToolNames.RunScript]: { plane: "execute", actionClass: "execute", executionMode: "sequential" },
 	[ToolNames.Dispatch]: { plane: "orchestrate", actionClass: "dispatch", executionMode: "sequential" },
+	[ToolNames.Job]: { plane: "orchestrate", actionClass: "dispatch", executionMode: "sequential" },
 	// monitor never mutates a run, so it stays read class and parallel.
 	[ToolNames.Monitor]: { plane: "orchestrate", actionClass: "read", executionMode: "parallel" },
 	[ToolNames.Steer]: { plane: "orchestrate", actionClass: "dispatch", executionMode: "sequential" },
@@ -215,6 +216,8 @@ export function validateBuiltinToolPolicy(
 	const required = new Set<ToolName>(Object.values(ToolNames));
 	// The native interactive host alone supplies the durable continuity port.
 	required.delete(ToolNames.SelfCompact);
+	// Only an attended parent host supplies the job controller (#411).
+	required.delete(ToolNames.Job);
 	for (const tool of [...required]) {
 		if (!includeSessionTools && SESSION_BOUND_TOOLS.has(tool)) required.delete(tool);
 		if (!includeDispatchTools && DISPATCH_BOUND_TOOLS.has(tool)) required.delete(tool);
