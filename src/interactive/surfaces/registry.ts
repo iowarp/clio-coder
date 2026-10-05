@@ -53,7 +53,7 @@ export interface WorkspaceSurfaces {
 	active(): ActiveExtensionWorkspace | null;
 	/** The banner part: the workspace header while one is active, the host banner otherwise. */
 	banner(host: Component): Component;
-	/** A band above the steering queue; empty unless the workspace places its board there. */
+	/** Workspace board followed by owner-labelled ambient bands above the steering queue. */
 	readonly board: Component;
 	/** First segment of the composer's top rail, or null to keep the host's model nickname. */
 	rail(width: number): string | null;
@@ -153,10 +153,21 @@ export function createWorkspaceSurfaces(deps: WorkspaceSurfaceDeps): WorkspaceSu
 
 	const board: Component = {
 		render(width) {
-			const active = takes("board");
-			if (active?.board !== "band") return [];
-			const view = regionView(active, "board");
-			return view ? memo("board", String(width), () => draw(view, width, BOARD_ROWS)) : [];
+			return memo("board", String(width), () => {
+				const active = takes("board");
+				const view = active?.board === "band" ? regionView(active, "board") : undefined;
+				const lines = view ? draw(view, width, BOARD_ROWS) : [];
+				for (const id of deps.model.ids().sort()) {
+					const band = deps.model.entry(id)?.band;
+					if (!band) continue;
+					const owner = clioTheme().fg("sectionHeading", `${id} · `);
+					const rows = draw(band, Math.max(1, width - visibleWidth(owner)), 3);
+					lines.push(
+						...rows.map((row, index) => truncateToWidth(`${index === 0 ? owner : "  "}${row}`, width, GLYPH.ellipsis, false)),
+					);
+				}
+				return lines;
+			});
 		},
 		invalidate: () => cache.delete("board"),
 	};

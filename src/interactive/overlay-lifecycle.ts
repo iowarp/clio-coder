@@ -80,6 +80,7 @@ function interopProposalsFor(
 }
 
 export interface OverlayLifecycleRuntimeDeps {
+	onOverlayClosed?: () => void;
 	app: OverlayLifecycleApplicationDeps;
 	getQuotaSnapshots?: () => ReadonlyArray<import("../domains/quota/types.js").UsageSnapshot>;
 	getDispatchRows?: () => ReadonlyArray<import("./dispatch-board.js").DispatchBoardRow>;
@@ -147,6 +148,7 @@ export interface OverlayLifecycleRuntimeDeps {
 }
 
 export interface OverlayLifecycleController {
+	openExtensionViewPanelState: import("./overlay-resource-openers.js").OverlayResourceOpeners["openExtensionViewPanelState"];
 	openExtensionPanelState: import("./overlay-resource-openers.js").OverlayResourceOpeners["openExtensionPanelState"];
 	getState(): OverlayState;
 	closeOverlay(): void;
@@ -268,8 +270,12 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 		onPermissionOverlayClosed: () => {
 			permissionBody = null;
 			overlayPermission?.onPermissionOverlayClosed();
+			deps.onOverlayClosed?.();
 		},
-		onOverlayClosed: () => overlayPermission?.retryPending(),
+		onOverlayClosed: () => {
+			overlayPermission?.retryPending();
+			deps.onOverlayClosed?.();
+		},
 	});
 	const closeOverlay = overlayTransitions.close;
 
@@ -616,6 +622,7 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 		openSkillsHubState: overlayResourceOpeners.openSkillsHubState,
 		openExtensionsOverlayState: overlayResourceOpeners.openExtensionsOverlayState,
 		openExtensionPanelState: overlayResourceOpeners.openExtensionPanelState,
+		openExtensionViewPanelState: overlayResourceOpeners.openExtensionViewPanelState,
 		openInteropOverlayState: overlayResourceOpeners.openInteropOverlayState,
 		toggleDispatchBoardOverlay,
 		openQueueNavigatorState,

@@ -6,6 +6,7 @@ import type { ClioEditor } from "./clio-editor.js";
 import type { ClioKeybindingManager } from "./keybinding-manager.js";
 import type { OverlayTransitions } from "./overlay-transitions.js";
 import { openExtensionPanel } from "./overlays/extension-panel.js";
+import { openExtensionViewPanel } from "./overlays/extension-view-panel.js";
 import { openExtensionsOverlay } from "./overlays/extensions.js";
 import { openHelpOverlay } from "./overlays/help-reference.js";
 import { openInteropOverlay } from "./overlays/interop.js";
@@ -30,6 +31,10 @@ export interface OverlayResourceOpenersDeps {
 
 export interface OverlayResourceOpeners {
 	openExtensionPanelState(owner: string, panel: ExtensionPanel, valid: () => boolean): boolean;
+	openExtensionViewPanelState(
+		owner: string,
+		deps: Omit<Parameters<typeof openExtensionViewPanel>[2], "close"> & { onClosed(): void },
+	): boolean;
 	openHelpOverlayState(query?: string): void;
 	openSkillsHubState(request?: LibraryBrowseRequest | LibraryEntryKind): void;
 	openExtensionsOverlayState(): void;
@@ -121,6 +126,23 @@ export function createOverlayResourceOpeners(deps: OverlayResourceOpenersDeps): 
 			if (deps.transitions.state !== "closed") return false;
 			deps.transitions.state = "extensions";
 			deps.transitions.handle = openExtensionPanel(deps.tui, owner, panel, valid, deps.closeOverlay);
+			deps.tui.requestRender();
+			return true;
+		},
+		openExtensionViewPanelState(owner, panelDeps) {
+			if (deps.transitions.state !== "closed") return false;
+			deps.transitions.state = "extensions";
+			const handle = openExtensionViewPanel(deps.tui, owner, { ...panelDeps, close: deps.closeOverlay });
+			let closed = false;
+			deps.transitions.handle = {
+				...handle,
+				hide() {
+					if (closed) return;
+					closed = true;
+					handle.hide();
+					panelDeps.onClosed();
+				},
+			};
 			deps.tui.requestRender();
 			return true;
 		},

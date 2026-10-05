@@ -79,6 +79,8 @@ import { renderContextOperationResult } from "./renderers/context-operation.js";
 import { settleChatBeforeSessionSwitch } from "./session-switch-settlement.js";
 import { createSessionTranscript } from "./session-transcript.js";
 import { processAutoPacingAllowed } from "./stream-pacing-policy.js";
+import { createAmbientSurfaces, hasExtensionDrawing } from "./surfaces/ambient.js";
+import { createExtensionDockHost } from "./surfaces/extension-dock.js";
 import { createWorkspaceSurfaces, WORKSPACE_LEAVE_KEY } from "./surfaces/registry.js";
 import type { BootInteractivity, TerminalLease } from "./terminal-lease.js";
 import type { createWatchPaneController } from "./watch-pane.js";
@@ -606,6 +608,28 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 				},
 			})
 		: undefined;
+	const ambientSurfaces = operatorExtensions
+		? createAmbientSurfaces({
+				operator: operatorExtensions,
+				tui,
+				dock: createExtensionDockHost({
+					mux: deps.mux ?? null,
+					stateDir: deps.stateDir,
+					sessionId: () => deps.session?.current()?.id ?? deps.getSessionId?.() ?? null,
+					log: (message) => notify("warning", message, "operator-extensions:dock"),
+				}),
+				overlay: () => overlayLifecycle,
+				notice: (notice) => notifications.add(notice),
+				appendCard: (render) => chatRenderer.mutate(() => chatPanel.appendReplayBlock(render), "extension-card"),
+				showText: (owner, text) =>
+					slashRuntime.context.showReference?.({ command: owner, source: "operator extension", text }),
+				fill: (text) => editor.setLiteralText(text),
+				submit: (text) => {
+					editor.setLiteralText(text);
+					editor.onSubmit?.(text);
+				},
+			})
+		: undefined;
 	const presentation = createInteractivePresentation({
 		bus: deps.bus,
 		getLifecycleHint: () => updateMonitor?.text() ?? null,
@@ -907,9 +931,9 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 					?.entries()
 					.some((entry) => entry.id === id && entry.state === "ready" && entry.generation === generation) ?? false;
 			if (!valid()) return;
-			// The api 2 picture lives in the surface model; until its renderers land the text fallback is shown.
+			// Surface events and persistent entries already draw api 2 results.
 			if (output.api === 2) {
-				if (output.text)
+				if (output.text && !hasExtensionDrawing(output))
 					slashRuntime.context.showReference?.({ command: invocation, source: "operator extension", text: output.text });
 				return;
 			}
@@ -1168,6 +1192,7 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 		resetTranscript();
 	};
 	overlayLifecycle = createOverlayLifecycle({
+		onOverlayClosed: () => ambientSurfaces?.refresh(),
 		getQuotaSnapshots: presentation.getQuotaSnapshots,
 		getDispatchRows: () => dispatchBoardStore.rows(),
 		app: { ...deps, ...settingActions },
@@ -1648,6 +1673,7 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 				updateAbort.abort();
 				clearTimeout(operatorTimer);
 				for (const unsubscribe of operatorSubscriptions) unsubscribe();
+				void ambientSurfaces?.dispose();
 				void operatorExtensions?.dispose();
 				detachMusicDockKey?.();
 				detachYaziBridge?.();
@@ -1761,6 +1787,7 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 			deps.runtimeHooks?.bind(null);
 			await operatorExtensions?.dispose();
 			workspaceSurfaces?.dispose();
+			await ambientSurfaces?.dispose();
 		},
 		{ timeoutMs: 6500 },
 	);
