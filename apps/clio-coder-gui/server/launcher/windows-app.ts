@@ -175,8 +175,9 @@ $manifestId=$url.GetLeftPart([UriPartial]::Authority)+'/'
 $sha=[Security.Cryptography.SHA256]::Create()
 try { $digest=$sha.ComputeHash($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes($manifestId))) } finally { $sha.Dispose() }
 $pwaId=-join ($digest[0..15] | ForEach-Object { [char](97+($_ -shr 4)); [char](97+($_ -band 15)) })
-$pwaShortcut=Join-Path $profile ('Default\Web Applications\_crx_'+$pwaId+'\Clio Coder.lnk')
-$installed=Test-Path -LiteralPath $pwaShortcut
+# The browser's OS integration icon exists even when an older Clio shortcut keeps its name.
+$pwaIcon=Join-Path $profile ('Default\Web Applications\_crx_'+$pwaId+'\Clio Coder.ico')
+$installed=Test-Path -LiteralPath $pwaIcon
 $mode=if($installed) { 'pwa' } else { 'app' }
 $name=[IO.Path]::GetFileName($browser)
 function AppWindows {
