@@ -16,7 +16,11 @@ import type {
 	InterviewNext,
 } from "./public-api-v2.js";
 import type { OutputOrigin } from "./runtime-output-v2.js";
-import { ExtensionRequestTimeout, ExtensionRuntimeProcessV2 } from "./runtime-process-v2.js";
+import {
+	type ExtensionKeyValueHost,
+	ExtensionRequestTimeout,
+	ExtensionRuntimeProcessV2,
+} from "./runtime-process-v2.js";
 import { RUNTIME_LIMITS } from "./runtime-schema.js";
 import { RUNTIME_V2_LIMITS } from "./runtime-schema-v2.js";
 import { createExtensionKeyValueHost, extensionDataPaths } from "./runtime-state.js";
@@ -134,6 +138,8 @@ export class OperatorExtensionRuntimeV2 {
 	/** Host-driven schedules; a runtime never keeps its own timers or watches. */
 	private ticks = new Map<ExtensionRuntimeProcessV2, ReturnType<typeof setInterval>>();
 	private watches = new Map<ExtensionRuntimeProcessV2, ExtensionGlobWatch>();
+	/** The last state host per extension, so state kept before a session existed follows into the first one. */
+	private stateHosts = new Map<string, { sessionId: string | null; host: ExtensionKeyValueHost }>();
 	private operatorRequests = new Set<AbortController>();
 	private retired = new Set<Promise<void>>();
 	private generation = 0;
@@ -239,11 +245,19 @@ export class OperatorExtensionRuntimeV2 {
 	}
 	private spawn(entry: ApiV2Extension, context: RuntimeContext, generation: number): ExtensionRuntimeProcessV2 {
 		const paths = extensionDataPaths((this.options.stateDir ?? clioStateDir)(), entry.id, context.sessionId);
+		const keyValue = createExtensionKeyValueHost(paths);
+		// The TUI has no session id until its first turn. What an extension kept
+		// in memory before then belongs to the session that turn creates.
+		const previous = this.stateHosts.get(entry.id);
+		if (previous?.sessionId === null && context.sessionId !== null)
+			for (const key of previous.host.keys("state"))
+				if (keyValue.get("state", key).version === 0) keyValue.set("state", key, previous.host.get("state", key).value);
+		this.stateHosts.set(entry.id, { sessionId: context.sessionId, host: keyValue });
 		const created: { process?: ExtensionRuntimeProcessV2 } = {};
 		created.process = new ExtensionRuntimeProcessV2(entry, {
 			snapshot: { ...context, generation, activeWorkspace: this.workspaceFor(entry.id) },
 			options: Object.fromEntries(entry.runtimeV2.config.map((field) => [field.key, field.default])),
-			keyValue: createExtensionKeyValueHost(paths),
+			keyValue,
 			storeDir: paths.storeDir,
 			onState: () => {
 				if (created.process && this.processes.get(entry.id) === created.process) this.changed();
