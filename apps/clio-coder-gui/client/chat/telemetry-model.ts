@@ -34,7 +34,10 @@ export interface MemoryGuardianMark {
  * guardian works or cannot, and only for a live session: a parked, closed or
  * unreachable one keeps no indicator from before it stopped.
  */
-export function memoryGuardianMark(memory: MemoryGuardian | undefined, sessionLive: boolean): MemoryGuardianMark | null {
+export function memoryGuardianMark(
+	memory: MemoryGuardian | undefined,
+	sessionLive: boolean,
+): MemoryGuardianMark | null {
 	if (!sessionLive || memory === undefined) return null;
 	switch (memory.state) {
 		case "reviewing":
