@@ -20,6 +20,7 @@ import { ExtensionRequestTimeout, ExtensionRuntimeProcessV2 } from "./runtime-pr
 import { RUNTIME_LIMITS } from "./runtime-schema.js";
 import { RUNTIME_V2_LIMITS } from "./runtime-schema-v2.js";
 import { createExtensionKeyValueHost, extensionDataPaths } from "./runtime-state.js";
+import { type ExtensionGlobWatch, watchExtensionGlobs } from "./runtime-watch.js";
 import { validateSkin } from "./skin-schema.js";
 import { listInstalledExtensions } from "./state.js";
 import { type ActiveExtensionWorkspace, ExtensionSurfaceModel } from "./surface-model.js";
@@ -84,6 +85,30 @@ function subscribes(process: ExtensionRuntimeProcessV2, event: ExtensionObservat
 		: (process.declaration.events as readonly string[]).includes(event);
 }
 
+/**
+ * The observation as one extension may see it: content fields cross only for
+ * the access classes its manifest declares. Metadata always crosses.
+ */
+function visibleTo(event: ExtensionObservationV2, access: ReadonlyArray<string>): ExtensionObservationV2 {
+	if (event.event === "turn_start" && event.text !== undefined && !access.includes("prompt")) {
+		const { text: _text, ...rest } = event;
+		return rest;
+	}
+	if (event.event === "turn_end" && event.text !== undefined && !access.includes("assistant-text")) {
+		const { text: _text, ...rest } = event;
+		return rest;
+	}
+	if (event.event === "tool_end") {
+		const { args, result, ...rest } = event;
+		return {
+			...rest,
+			...(args !== undefined && access.includes("tool-args") ? { args } : {}),
+			...(result !== undefined && access.includes("tool-results") ? { result } : {}),
+		};
+	}
+	return event;
+}
+
 interface ObservationQueue {
 	events: ExtensionObservationV2[];
 	draining: boolean;
@@ -106,6 +131,9 @@ export class OperatorExtensionRuntimeV2 {
 	private inventory: InstalledExtension[] = [];
 	private failures = new Map<string, string>();
 	private queues = new Map<ExtensionRuntimeProcessV2, ObservationQueue>();
+	/** Host-driven schedules; a runtime never keeps its own timers or watches. */
+	private ticks = new Map<ExtensionRuntimeProcessV2, ReturnType<typeof setInterval>>();
+	private watches = new Map<ExtensionRuntimeProcessV2, ExtensionGlobWatch>();
 	private operatorRequests = new Set<AbortController>();
 	private retired = new Set<Promise<void>>();
 	private generation = 0;
@@ -194,6 +222,7 @@ export class OperatorExtensionRuntimeV2 {
 		return `operator runtime limit is ${RUNTIME_V2_LIMITS.processes} across api 1 and api 2; disable another runtime and reload`;
 	}
 	private retire(process: ExtensionRuntimeProcessV2, reason: string): void {
+		this.disarm(process);
 		this.queues.delete(process);
 		const task = process.dispose(reason);
 		this.retired.add(task);
@@ -374,6 +403,7 @@ export class OperatorExtensionRuntimeV2 {
 			if (this.closed || lifetime !== this.lifetime || key !== contextKey(this.context()))
 				throw new Error("session or workspace changed during runtime activation");
 			if (context.mode === "interactive") {
+				for (const process of staged.values()) if (this.current(process)) this.arm(process, context.workspace);
 				this.observe({ event: "session_open", reason });
 				const active = this.surface.activeWorkspace;
 				if (active) this.observeOne(active.extensionId, { event: "workspace_enter", workspace: active.workspaceId });
@@ -696,8 +726,41 @@ export class OperatorExtensionRuntimeV2 {
 		const process = this.processes.get(extensionId);
 		if (process) this.enqueue(process, event);
 	}
-	private enqueue(process: ExtensionRuntimeProcessV2, event: ExtensionObservationV2): void {
-		if (process.state !== "ready" || !subscribes(process, event.event)) return;
+	/**
+	 * Ticks and file watches are driven here. A tick is skipped while the
+	 * runtime is still working through earlier observations, so a slow handler
+	 * sees at most one pending tick rather than a backlog.
+	 */
+	private arm(process: ExtensionRuntimeProcessV2, workspace: string): void {
+		const declared = process.declaration;
+		if (declared.tickMs !== undefined && !this.ticks.has(process)) {
+			const intervalMs = declared.tickMs;
+			const timer = setInterval(() => {
+				if (!this.current(process)) return;
+				const queue = this.queues.get(process);
+				if (queue && (queue.draining || queue.events.some((event) => event.event === "tick"))) return;
+				this.enqueue(process, { event: "tick", intervalMs });
+			}, intervalMs);
+			timer.unref();
+			this.ticks.set(process, timer);
+		}
+		if (declared.watch.length > 0 && declared.events.includes("fs_changed") && !this.watches.has(process))
+			this.watches.set(
+				process,
+				watchExtensionGlobs(workspace, declared.watch, (paths) => this.enqueue(process, { event: "fs_changed", paths })),
+			);
+	}
+	private disarm(process: ExtensionRuntimeProcessV2): void {
+		const timer = this.ticks.get(process);
+		if (timer) clearInterval(timer);
+		this.ticks.delete(process);
+		this.watches.get(process)?.close();
+		this.watches.delete(process);
+	}
+
+	private enqueue(process: ExtensionRuntimeProcessV2, observed: ExtensionObservationV2): void {
+		if (process.state !== "ready" || !subscribes(process, observed.event)) return;
+		const event = visibleTo(observed, process.declaration.access);
 		let queue = this.queues.get(process);
 		if (!queue) {
 			queue = { events: [], draining: false };

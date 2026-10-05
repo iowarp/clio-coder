@@ -11,6 +11,7 @@ import type { AgentsContract } from "../domains/agents/contract.js";
 import type { ClioKeybinding } from "../domains/config/keybindings.js";
 import type { ContextState } from "../domains/context/index.js";
 import type { DispatchContract, RouteBreakerView } from "../domains/dispatch/contract.js";
+import { createTurnObservations, subscribeExtensionObservations } from "../domains/extensions/bus-observations.js";
 import type { ExtensionsContract } from "../domains/extensions/index.js";
 import { OperatorExtensions } from "../domains/extensions/operator-extensions.js";
 import type { ExtensionRuntimeHookBridge } from "../domains/extensions/runtime-hook-bridge.js";
@@ -582,6 +583,9 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 				},
 			})
 		: undefined;
+	const turnObservations = operatorExtensions
+		? createTurnObservations((observation) => operatorExtensions.observeV2(observation))
+		: undefined;
 	if (operatorExtensions)
 		deps.runtimeHooks?.bind({
 			hook: (extensionId, event, timeoutMs, signal) => operatorExtensions.hook(extensionId, event, timeoutMs, signal),
@@ -864,10 +868,18 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 		isAskUserWaiting: () => overlayLifecycle.isAskUserWaiting(),
 		closeAskUserSession: () => overlayLifecycle.closeAskUserSession(),
 		resetAskUserCancellation: () => overlayLifecycle.resetAskUserCancellation(),
-		recordToolStart: (toolName, toolCallId) => presentation.recordToolStart(toolCallId, toolName),
-		recordToolEnd: (_toolName, toolCallId, isError, truncated) =>
-			presentation.recordToolEnd({ toolCallId, isError, truncated }),
-		setLastTurnSummary: (summary) => presentation.setLastTurnSummary(summary),
+		recordToolStart: (toolName, toolCallId) => {
+			presentation.recordToolStart(toolCallId, toolName);
+			turnObservations?.toolStart(toolCallId);
+		},
+		recordToolEnd: (toolName, toolCallId, isError, truncated) => {
+			presentation.recordToolEnd({ toolCallId, isError, truncated });
+			turnObservations?.toolEnd(toolName, toolCallId, isError);
+		},
+		setLastTurnSummary: (summary) => {
+			presentation.setLastTurnSummary(summary);
+			if (summary) turnObservations?.turnEnd(summary);
+		},
 		startTerminalProgress: () => agentProgress.start(),
 		stopTerminalProgress: () => agentProgress.stop(),
 		onTurnEnded: () => {
@@ -1768,7 +1780,9 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 				BusChannels.SessionParked,
 				BusChannels.SessionResumed,
 				BusChannels.SessionTurnSwitched,
-			].map((channel) => deps.bus.on(channel, () => operatorExtensions.invalidateContext()))
+			]
+				.map((channel) => deps.bus.on(channel, () => operatorExtensions.invalidateContext()))
+				.concat(subscribeExtensionObservations(deps.bus, (observation) => operatorExtensions.observeV2(observation)))
 		: [];
 	scheduleOperatorMaintenance = () => {
 		clearTimeout(operatorTimer);
