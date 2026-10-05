@@ -32,6 +32,8 @@ export interface ActiveExtensionWorkspace {
 	/** The host parts this workspace takes while it is active. */
 	regions: ReadonlyArray<WorkspaceRegion | "islands">;
 	board: "band" | "island";
+	/** Leader menu entries live while the workspace is active, each pressing an action. */
+	keys: ReadonlyArray<{ key: string; action: string; label: string }>;
 }
 
 /** One-shot requests a renderer acts on once. Persistent content is read from the entries. */
@@ -144,6 +146,7 @@ export class ExtensionSurfaceModel {
 							title: declared.title,
 							regions: [...declared.regions],
 							board: declared.board ?? "band",
+							keys: (declared.keys ?? []).map((binding) => ({ ...binding })),
 						},
 						events,
 					);

@@ -65,6 +65,7 @@ import { createProcessInteractiveShell, getActiveRenderTrace } from "./interacti
 import { createInteractiveSlashRuntime, resolveAvailableThinkingLevels } from "./interactive-slash-runtime.js";
 import { createInteractiveSubscriptions } from "./interactive-subscriptions.js";
 import { createInteractiveTickers } from "./interactive-tickers.js";
+import { formatKeyLabel } from "./keybinding-manager.js";
 import { returnToLiveEdge } from "./layout.js";
 import type { createMuxBridge } from "./mux-bridge.js";
 import { createOverlayLifecycle, type OverlayLifecycleController } from "./overlay-lifecycle.js";
@@ -77,7 +78,7 @@ import { renderContextOperationResult } from "./renderers/context-operation.js";
 import { settleChatBeforeSessionSwitch } from "./session-switch-settlement.js";
 import { createSessionTranscript } from "./session-transcript.js";
 import { processAutoPacingAllowed } from "./stream-pacing-policy.js";
-import { createWorkspaceSurfaces } from "./surfaces/registry.js";
+import { createWorkspaceSurfaces, WORKSPACE_LEAVE_KEY } from "./surfaces/registry.js";
 import type { BootInteractivity, TerminalLease } from "./terminal-lease.js";
 import type { createWatchPaneController } from "./watch-pane.js";
 import { WORKER_SETTLED_ENTRY } from "./worker-replay.js";
@@ -581,8 +582,20 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 				model: operatorExtensions.surface,
 				tui,
 				skinFor: (active) => operatorExtensions.skinFor(active.extensionId, active.workspaceId),
-				leaveHint: () => "/workspace off",
+				// Read at render time only while a workspace is active, after the presentation exists.
+				leaveHint: () => {
+					const leader = keybindings.getKeys("clio-coder.leader")[0];
+					return leader ? `${formatKeyLabel(leader, "")} ${WORKSPACE_LEAVE_KEY} or /workspace off` : "/workspace off";
+				},
 				isOverlayOpen: () => (overlayLifecycle?.getState() ?? "closed") !== "closed",
+				press: (extensionId, action) => {
+					void operatorExtensions
+						.action(extensionId, { id: action, source: "leader" })
+						.catch((error) => notify("warning", `${extensionId}: ${error instanceof Error ? error.message : String(error)}`));
+				},
+				leave: () => {
+					operatorExtensions.leaveWorkspace();
+				},
 			})
 		: undefined;
 	const presentation = createInteractivePresentation({
@@ -1496,6 +1509,7 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 
 	applicationController = createInteractiveInputRuntime({
 		tui,
+		...(workspaceSurfaces ? { extraLeaderTargets: () => workspaceSurfaces.leaderTargets() } : {}),
 		scrollFooter: (delta) => footer.scroll(delta),
 		hasQueuedMessages: () => {
 			const queue = deps.chat.queuedMessages();

@@ -63,6 +63,8 @@ export interface InteractiveInputRuntimeDeps {
 		onReload?(listener: () => void): () => void;
 	};
 	dispatchAction: (id: ClioKeybinding, deps: InteractiveInputKeyActionDeps) => boolean;
+	/** Leader entries the host adds that are not keybindings, such as an active workspace's keys. */
+	extraLeaderTargets?: () => ReadonlyArray<{ key: string; label: string; run: () => void }>;
 	actions: {
 		canExit(): boolean;
 		cycleOutputStyle(): void;
@@ -237,14 +239,24 @@ export function createInteractiveInputRuntime(deps: InteractiveInputRuntimeDeps)
 							(id === "tui.editor.undo" &&
 								(owner().keyboardScope === "edit" || deps.overlay.getState() === "permission-confirm")),
 					);
-		return filtered.map((entry) => ({
-			...entry,
-			label: deps.keybindings.getDescription?.(entry.id) ?? entry.id,
-			...(entry.id === "clio-coder.thinking.cycle" &&
-			deps.actions.availableThinkingLevels().every((level) => level === "off")
-				? { disabledReason: "This model supports only off" }
-				: {}),
-		}));
+		const builtins = filtered.map((entry): LeaderTarget => {
+			if (entry.id === undefined) return entry;
+			return {
+				...entry,
+				label: deps.keybindings.getDescription?.(entry.id) ?? entry.id,
+				...(entry.id === "clio-coder.thinking.cycle" &&
+				deps.actions.availableThinkingLevels().every((level) => level === "off")
+					? { disabledReason: "This model supports only off" }
+					: {}),
+			};
+		});
+		if (search() || deps.overlay.getState() !== "closed") return builtins;
+		// Host entries join only while the composer has the keyboard; a built-in suffix always wins.
+		const taken = new Set(builtins.map((entry) => entry.key).filter(Boolean));
+		const extra = (deps.extraLeaderTargets?.() ?? []).map(
+			(entry): LeaderTarget => (taken.has(entry.key) ? { ...entry, disabledReason: "key taken by Clio" } : entry),
+		);
+		return [...builtins, ...extra];
 	};
 	const quickHelp = deps.tui ? createQuickHelp(deps.tui, deps.keybindings) : undefined;
 	const menu = deps.tui

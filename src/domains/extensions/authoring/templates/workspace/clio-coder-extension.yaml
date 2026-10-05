@@ -16,4 +16,4 @@ runtime:
       board: band
       skin: skins/workspace.json
       keys:
-        - { key: n, action: next, label: Refresh the board }
+        - { key: f, action: next, label: Refresh the board }

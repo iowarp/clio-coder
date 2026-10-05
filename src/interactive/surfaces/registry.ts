@@ -34,7 +34,13 @@ export interface WorkspaceSurfaceDeps {
 	leaveHint(): string;
 	/** Host overlays own the screen; the floating stack hides under them like the task island. */
 	isOverlayOpen(): boolean;
+	/** A workspace key was pressed through the leader menu. */
+	press(extensionId: string, action: string): void;
+	leave(): void;
 }
+
+/** The leader suffix that leaves an active workspace; built-in suffixes never use it. */
+export const WORKSPACE_LEAVE_KEY = "b";
 
 /**
  * The terminal side of the extension surface model: everything an active
@@ -57,6 +63,8 @@ export interface WorkspaceSurfaces {
 	statusFacts(width: number): string[];
 	/** True while the workspace's islands hold the top-right corner. */
 	yieldsTaskIsland(): boolean;
+	/** The active workspace's leader entries: its declared keys, then how to leave. */
+	leaderTargets(): Array<{ key: string; label: string; run: () => void }>;
 	/** Re-evaluate the floating stack; called on model change and by the host's island tick. */
 	refresh(): void;
 	dispose(): void;
@@ -216,6 +224,20 @@ export function createWorkspaceSurfaces(deps: WorkspaceSurfaceDeps): WorkspaceSu
 		yieldsTaskIsland() {
 			const active = deps.model.activeWorkspace;
 			return active !== null && (active.regions.includes("islands") || active.board === "island");
+		},
+		leaderTargets() {
+			const active = deps.model.activeWorkspace;
+			if (!active) return [];
+			return [
+				...active.keys
+					.filter((binding) => binding.key !== WORKSPACE_LEAVE_KEY)
+					.map((binding) => ({
+						key: binding.key,
+						label: `${active.title}: ${binding.label}`,
+						run: () => deps.press(active.extensionId, binding.action),
+					})),
+				{ key: WORKSPACE_LEAVE_KEY, label: `Leave ${active.title}`, run: () => deps.leave() },
+			];
 		},
 		refresh,
 		dispose() {
