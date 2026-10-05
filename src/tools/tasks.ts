@@ -53,7 +53,11 @@ function waitingTrailer(tasks: ReadonlyArray<UserTask>): string[] {
 		);
 }
 
-function renderTaskBoardText(board: TaskBoardSnapshot, userTasks: ReadonlyArray<UserTask> = []): string {
+function renderTaskBoardText(
+	board: TaskBoardSnapshot,
+	userTasks: ReadonlyArray<UserTask> = [],
+	showNext = false,
+): string {
 	const counts = taskBoardCounts(board);
 	const lines: string[] = [`board "${board.title}" ${counts.completed}/${counts.total} done`];
 	for (const task of board.tasks) {
@@ -96,10 +100,11 @@ function renderTaskBoardText(board: TaskBoardSnapshot, userTasks: ReadonlyArray<
 			}
 		}
 	}
-	if (counts.open > 0 && counts.active === 0) {
+	if (showNext && counts.open > 0) {
 		lines.push(
-			`next: start only an authorized task with action="start" before working it; ` +
-				`block proposed implementation with a note naming the pending operator decision, or drop it, and wait`,
+			`next: carry out only operator-authorized work; use action="start" before working a pending task. ` +
+				`An explicit request to start a demo or inspection authorizes read-only work within that request's scope without another approval. ` +
+				`Block only tasks that propose unrequested file changes or await a real operator decision, naming that decision; continue other authorized tasks.`,
 		);
 	}
 	lines.push(...waitingTrailer(userTasks));
@@ -193,6 +198,8 @@ export function createTasksTool(deps: TasksToolDeps): ToolSpec {
 			"For operator handoff, pick the intended uN before work and use its linked tN; CLI hand alone does not pick it. Never pick unrelated tasks. " +
 			"Before claiming completion, list: the linked row must be completed and the operator task done on the same session/board link; report IDs and states. " +
 			"Work that did not happen is blocked or dropped, never done. A self-created plan is not operator authorization. " +
+			"When the operator explicitly asks to start a demo or inspection, perform read-only work within that request's scope without asking again; " +
+			"block only unrequested file changes or individual tasks awaiting a real operator decision, and continue authorized tasks. " +
 			"For proposal-only work, plan/add with initialStatus=blocked and note naming the pending operator decision; " +
 			"wait for an explicit operator go-ahead before start or implementation. A skill-install choice does not grant that go-ahead.",
 		parameters: Type.Object({
@@ -341,7 +348,10 @@ export function createTasksTool(deps: TasksToolDeps): ToolSpec {
 				}
 			}
 			const noteLines = result.notes.map((note) => `note: ${note}`);
-			const output = [...noteLines, renderTaskBoardText(result.board, userTasks)].join("\n");
+			const output = [
+				...noteLines,
+				renderTaskBoardText(result.board, userTasks, typedAction === "plan" || typedAction === "start"),
+			].join("\n");
 			return { kind: "ok", output, details: boardDetails(typedAction, result.board) };
 		},
 	};

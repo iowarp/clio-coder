@@ -37,8 +37,10 @@ export function buildOpenTasksMessage(board: TaskBoardSnapshot): string {
 		`[Clio Coder] Task board "${board.title}" still has ${open.length} of ${counts.total} task(s) open:\n` +
 		`${rows.join("\n")}\n` +
 		`Continue only work already authorized by the operator. This reminder and a self-created plan are not authorization ` +
-		`to implement a proposal. If implementation awaits an operator decision, use tasks action="block" with a note ` +
-		`naming that pending operator decision, or action="drop"; then wait for an explicit operator go-ahead. ` +
+		`to implement a proposal. An explicit request to start a demo or inspection authorizes read-only work within that request's scope; ` +
+		`start and perform that work without asking again. For unrequested file changes or a task awaiting a real operator decision, ` +
+		`use tasks action="block" with a note naming that pending operator decision, or action="drop". ` +
+		`Wait for an explicit operator go-ahead only on those tasks, and continue other authorized work. ` +
 		`A skill-install choice does not authorize implementation. Otherwise record the honest state on the board: ` +
 		`tasks action="done" with an evidence note, action="block" with a reason, or action="drop". ` +
 		`Do not end the turn with a stale board.`

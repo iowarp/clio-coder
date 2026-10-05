@@ -186,7 +186,7 @@ function projectHint(
 	owner: LibraryPackageRecord,
 	copiesCapped: boolean,
 ): Record<string, unknown> {
-	const installed = owner.copies.map((copy) => ({ scope: copy.scope, state: copy.state }));
+	const installed = owner.copies.map(projectInstalledCopy);
 	return {
 		row: "hint",
 		kind,
@@ -200,6 +200,16 @@ function projectHint(
 	};
 }
 
+function projectInstalledCopy(copy: LibraryPackageRecord["copies"][number]): Record<string, unknown> {
+	return {
+		scope: copy.scope,
+		state: copy.state,
+		...(copy.state === "untrusted"
+			? { remedy: "The operator must run clio-coder config trust plugins, then /library reload." }
+			: {}),
+	};
+}
+
 /**
  * Package rows are install targets. `provides` is a bounded hint list generated
  * from validated payloads: it names what the package would contribute, never
@@ -209,7 +219,7 @@ function projectHint(
 function projectPackage(record: LibraryPackageRecord, copiesCapped: boolean): Record<string, unknown> {
 	const provides = record.provides ?? [];
 	const shownProvides = provides.slice(0, MAX_PROVIDES);
-	const installed = record.copies.map((copy) => ({ scope: copy.scope, state: copy.state }));
+	const installed = record.copies.map(projectInstalledCopy);
 	return {
 		row: "package",
 		kind: record.kind,

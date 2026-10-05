@@ -47,6 +47,7 @@ export const MARKETPLACE_OFFER_REGISTRATION_ID = "observer.marketplace-offer";
 
 export interface MarketplaceOfferInstallResult {
 	path: string;
+	warnings?: ReadonlyArray<string>;
 	/** The source the skill was fetched from; retained with the installation result for provenance. */
 	sourceUrl: string;
 	/** Normalized content hash of what was written; the integrity record the consent overlay would have shown. */
@@ -280,10 +281,12 @@ export function createMarketplaceOfferRegistration(deps: MarketplaceOfferDeps): 
 				return [
 					{
 						kind: "annotate_tool_result",
-						severity: "info",
+						severity: result.warnings?.length ? "warn" : "info",
 						message:
 							`[Marketplace] Installed skill "${offer.entry.name}" (${scope} scope) to ${result.path}. ` +
-							`It is installed but not active; the operator activates it with /skill ${offer.entry.name}.`,
+							(result.warnings?.length
+								? result.warnings.join(" ")
+								: `It is installed but not active; the operator activates it with /skill ${offer.entry.name}.`),
 					},
 				];
 			} catch (error) {

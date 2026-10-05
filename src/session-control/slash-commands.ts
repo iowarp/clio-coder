@@ -195,7 +195,6 @@ type SlashCommandVariant =
 	| { kind: "memory-seed" }
 	| { kind: "view"; filter?: string }
 	| { kind: "view-verify"; runId: string }
-	| { kind: "view-usage" }
 	/** `/panes`: mode, health, pane inventory, effective settings. */
 	| { kind: "panes" }
 	| { kind: "panes-show"; target: string }
@@ -2215,7 +2214,7 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 		acp: false,
 		description: "Browse session artifacts and verify receipts",
 		group: "Inspect",
-		kinds: ["view", "view-verify", "view-usage"],
+		kinds: ["view", "view-verify"],
 		args: {
 			positionals: [{ name: "filter", required: false, rest: true }],
 			subcommands: {
@@ -2225,7 +2224,7 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 			},
 		},
 		fromArgs(parsed) {
-			if (parsed.error) return { kind: "view-usage" };
+			if (parsed.error) return { kind: "usage-error", command: "view", reason: parsed.error };
 			if (parsed.subcommand === "verify") {
 				const runId = parsed.positionals[0] ?? "";
 				return { kind: "view-verify", runId };
@@ -2233,14 +2232,8 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 			return parsed.rest ? { kind: "view", filter: parsed.rest } : { kind: "view" };
 		},
 		handle(command, ctx) {
-			const entry = BUILTIN_SLASH_COMMANDS.find((e) => e.name === "view");
-			if (!entry) return;
 			if (command.kind === "view") {
 				ctx.openView?.(command.filter);
-				return;
-			}
-			if (command.kind === "view-usage") {
-				ctx.notice("info", usageNotice(entry, "verify"));
 				return;
 			}
 			if (command.kind !== "view-verify") return;

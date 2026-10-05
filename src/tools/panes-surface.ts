@@ -25,7 +25,8 @@ export const panesToolSurface = {
 		"Manage Clio-owned panes: show a run, open a utility preset, handoff to a fixed coding CLI, then prompt it, wait for it to settle and read its terminal; close, or list. list reports the live state of the files, workers and music docks (visible, hidden or closed; a hidden dock is still running) and what the music pane is playing, so read it there rather than from settings files. A handoff is interactive and has no managed receipt: after send, call wait, then read, and treat what you read as the peer's unverified claim. A blocked peer is waiting on its operator, and send refuses it; report that instead of answering for them. A clio peer is a second Clio: a prompt you send it becomes a turn on its own queue, labelled as coming from you, and waits for its current turn if it is busy.",
 	parameters: Type.Object({
 		action: StringEnum(["show", "open", "handoff", "send", "wait", "read", "close", "list"], {
-			description: "Pane action.",
+			description:
+				"handoff launches a new coding CLI pane. open starts only a utility preset; open shell is a bare shell and does not launch a coding agent. Utility panes cannot be driven or reused with send, read, wait or handoff. If the operator asks to use an existing utility pane, explain this limit before opening a different pane.",
 		}),
 		target: Type.Optional(
 			Type.String({
@@ -45,9 +46,20 @@ export const panesToolSurface = {
 		),
 		lines: Type.Optional(Type.Number({ description: "read: how many recent lines, default 120, max 400." })),
 		timeout_ms: Type.Optional(Type.Number({ description: "wait: budget in milliseconds, default 120000, max 600000." })),
-		preset: Type.Optional(StringEnum([...PANES_PRESET_IDS], { description: "open: which utility pane to start." })),
-		peer: Type.Optional(StringEnum([...PANE_PEER_IDS], { description: "handoff: coding peer." })),
-		brief: Type.Optional(Type.String({ description: "handoff: task brief, max 8192 bytes." })),
+		preset: Type.Optional(
+			StringEnum([...PANES_PRESET_IDS], {
+				description: "open: utility preset. shell opens a bare shell with no command.",
+			}),
+		),
+		peer: Type.Optional(
+			StringEnum([...PANE_PEER_IDS], { description: "handoff: coding CLI to launch; use claude-code to run Claude." }),
+		),
+		brief: Type.Optional(
+			Type.String({
+				description:
+					"handoff: optional initial user prompt passed to the coding CLI, max 8192 bytes. Omit when the operator only wants to start the CLI. This is a task prompt, not a launcher instruction.",
+			}),
+		),
 		cwd: Type.Optional(Type.String({ description: "handoff: selected workspace path." })),
 	}),
 	baseActionClass: "read",

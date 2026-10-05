@@ -2,6 +2,9 @@ import path from "node:path";
 import { listInstalledPlugins, pluginSnapshotFor, readPluginInstallRecord } from "../../plugins/index.js";
 import type { Skill } from "./loader.js";
 
+export const PROJECT_SKILL_TRUST_REMEDY =
+	"The operator must review and approve project plugins with clio-coder config trust plugins, then run /library reload. Do not ask for another activation choice or retry loading before trust is approved.";
+
 /** Disk installation state, separate from the running session's resource snapshot. */
 export function installedSkillPackages(skills: ReadonlyArray<Skill>, cwd: string, trustImports = false) {
 	const snapshot = pluginSnapshotFor(cwd);
@@ -45,7 +48,15 @@ export function installedSkillPackages(skills: ReadonlyArray<Skill>, cwd: string
 												: "pending reload; run /library reload";
 			const record = readPluginInstallRecord(pkg.id, { cwd, scope: pkg.scope });
 			const origin = typeof record?.origin === "object" ? record.origin.kind : (record?.origin ?? "local");
-			return { name: pkg.id, names, scope: pkg.scope, state, origin, path: pkg.rootPath };
+			return {
+				name: pkg.id,
+				names,
+				scope: pkg.scope,
+				state,
+				origin,
+				path: pkg.rootPath,
+				...(pkg.trustBlocked ? { remedy: PROJECT_SKILL_TRUST_REMEDY } : {}),
+			};
 		});
 }
 

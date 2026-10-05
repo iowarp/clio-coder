@@ -52,7 +52,14 @@ export type LibraryOrigin =
  * nothing about whether every recipe inside parsed or is trusted; that is the
  * resource row's availability.
  */
-export type LibraryCopyState = "loadable" | "disabled" | "shadowed" | "invalid" | "incompatible" | "damaged";
+export type LibraryCopyState =
+	| "loadable"
+	| "disabled"
+	| "shadowed"
+	| "invalid"
+	| "incompatible"
+	| "damaged"
+	| "untrusted";
 
 export interface LibraryCopy {
 	ref: LibraryRequirementRef;
@@ -403,7 +410,7 @@ export function libraryCopyState(plugin: InstalledPlugin): LibraryCopyState {
 	if (!plugin.valid) return "invalid";
 	if (!plugin.enabled) return "disabled";
 	// A project copy awaiting workspace trust is blocked, not shadowed by another copy.
-	if (plugin.trustBlocked) return "invalid";
+	if (plugin.trustBlocked) return "untrusted";
 	if (!plugin.effective) return "shadowed";
 	return "invalid";
 }

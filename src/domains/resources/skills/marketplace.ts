@@ -1,9 +1,15 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { resolvePackageRoot } from "../../../core/package-root.js";
+import {
+	approveFirstProjectInstall,
+	projectPackagesHaveNoState,
+	projectPackagesTrusted,
+} from "../../../core/workspace-trust.js";
 import { clioConfigDir } from "../../../core/xdg.js";
 import { pluginResourcePath, readPluginManifest } from "../../plugins/index.js";
 import { discoverLibrary, installLibraryPlan, planLibraryInstall, resolveLibraryPackage } from "../library.js";
+import { PROJECT_SKILL_TRUST_REMEDY } from "./availability.js";
 import type { InstallSkillInput, InstallSkillResult, SkillInstallShaping } from "./install.js";
 import { loadSkills, type Skill } from "./loader.js";
 
@@ -344,26 +350,30 @@ export function marketplaceInstallShaping(skill: MarketplaceSkill): SkillInstall
 /** Skill-offer adapter: resolve a package and commit through the shared library engine. */
 export function installSkill(input: InstallSkillInput): InstallSkillResult {
 	const source = input.source.trim();
+	const cwd = input.cwd ?? process.cwd();
+	const scope = input.scope ?? "user";
 	if (input.overlay || input.exclude?.length || input.configDir)
 		throw new Error("package installs use the prepared manifest tree and the active Clio profile");
 	const entry = resolveLibraryPackage(source, input.cwd ? { cwd: input.cwd } : {});
 	if (entry.kind !== "skill") throw new Error(`expected a skill package, found ${entry.kind}:${entry.name}`);
 	if (input.name && input.name !== entry.name) throw new Error("package identities cannot be renamed at install");
 	const plan = planLibraryInstall(entry, {
-		...(input.cwd ? { cwd: input.cwd } : {}),
-		scope: input.scope ?? "user",
+		cwd,
+		scope,
 		force: input.force ?? false,
 	});
+	const firstProjectInstall = scope === "project" && projectPackagesHaveNoState(cwd, "plugins");
 	installLibraryPlan(plan);
 	const candidate = readPluginManifest(plan.path);
 	const component = candidate.manifest?.clio.components.find((item) => item.kind === "skill");
 	if (!component) throw new Error("installed skill package has no skill component");
+	if (firstProjectInstall) approveFirstProjectInstall(cwd, "plugins");
 	return {
 		name: entry.name,
-		scope: input.scope ?? "user",
+		scope,
 		path: pluginResourcePath(plan.path, component.path),
 		sourceUrl: entry.sourceUrl,
 		installedHash: plan.sha256,
-		warnings: [],
+		warnings: scope === "project" && !projectPackagesTrusted(cwd, "plugins") ? [PROJECT_SKILL_TRUST_REMEDY] : [],
 	};
 }

@@ -41,6 +41,8 @@ export function copyState(state: string): { label: string; tone: StatusTone } {
 			return { label: "Shadowed", tone: "neutral" };
 		case "invalid":
 			return { label: "Invalid", tone: "fail" };
+		case "untrusted":
+			return { label: "Requires trust", tone: "warn" };
 		case "incompatible":
 			return { label: "Incompatible", tone: "fail" };
 		case "damaged":

@@ -510,7 +510,7 @@ function blockUntrustedProjectPlugins(entries: ReadonlyArray<InstalledPlugin>, c
 			entry.diagnostics.push({
 				type: "warning",
 				message:
-					"project plugins are not trusted for this workspace and are not loaded; review with clio-coder config trust plugins",
+					"project plugins are not trusted for this workspace and are not loaded; review with clio-coder config trust plugins, then run /library reload",
 				path: pluginStatePath("project", cwd),
 			});
 		}

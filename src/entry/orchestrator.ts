@@ -2595,7 +2595,12 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 				listMarketplaceEntries: () => discoverMarketplaceSkills({ cwd: process.cwd() }).skills,
 				installEntry: (entry, scope) => {
 					const installed = installSkill({ source: `skill:${entry.name}`, scope, name: entry.name, cwd: process.cwd() });
-					return { path: installed.path, sourceUrl: installed.sourceUrl, installedHash: installed.installedHash };
+					return {
+						path: installed.path,
+						sourceUrl: installed.sourceUrl,
+						installedHash: installed.installedHash,
+						warnings: installed.warnings,
+					};
 				},
 			}),
 		);
@@ -4005,7 +4010,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		const useModel = options.heuristic !== true && options.preview !== true;
 		const bootstrapOptions = bootstrapInputFromInitOptions(options);
 		if (!contextDomain) throw new Error("context domain unavailable");
-		await contextDomain.runBootstrap({
+		return contextDomain.runBootstrap({
 			cwd: process.cwd(),
 			...(runIo ? { io: runIo } : {}),
 			confirmGitignore: () => true,

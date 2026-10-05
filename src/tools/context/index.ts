@@ -620,7 +620,7 @@ function runSkillsScope(
 			).find((pkg) => pkg.names.includes(name));
 			if (installed && installed.state !== "ready")
 				return skillRefusal(
-					`context: skill "${name}" is installed in ${installed.scope} scope but ${installed.state}. Inspect it in /library; do not reinstall it.`,
+					`context: skill "${name}" is installed in ${installed.scope} scope but ${installed.state}. ${installed.remedy ?? "Inspect it in /library; do not reinstall it."}`,
 					{ name, kind: "not-ready", scope: installed.scope, state: installed.state },
 				);
 		}

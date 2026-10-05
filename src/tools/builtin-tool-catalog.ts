@@ -416,7 +416,11 @@ const TOOL_METADATA: Readonly<Record<string, ToolMetadata>> = {
 		},
 		costLatency: "local_fast",
 		promptHint:
-			'When the operator asks to see a dispatched agent ("show me the tester"), call panes(action="show", target=<agent id>).',
+			'When the operator asks to see a dispatched agent ("show me the tester"), call panes(action="show", target=<agent id>). ' +
+			'When asked to open a pane and run Claude, use panes(action="handoff", peer="claude-code") and omit brief unless a task was supplied. ' +
+			'brief is the CLI initial user prompt, not instructions for starting it. open with preset="shell" opens a bare utility shell. ' +
+			"Only handoff panes support send/read/wait; utility panes cannot be driven or reused through this tool. " +
+			"If asked to use an existing utility pane, explain that limit before opening a different handoff pane; do not claim it was reused.",
 	},
 	[ToolNames.Music]: {
 		// Empty on purpose: a non-empty objective lands in the prompt's capability

@@ -9,7 +9,7 @@ import { getTerminationCoordinator } from "../core/termination.js";
 import { clioStateDir } from "../core/xdg.js";
 import type { AgentsContract } from "../domains/agents/contract.js";
 import type { ClioKeybinding } from "../domains/config/keybindings.js";
-import type { ContextState } from "../domains/context/index.js";
+import type { ContextState, RunBootstrapResult } from "../domains/context/index.js";
 import type { DispatchContract, RouteBreakerView } from "../domains/dispatch/contract.js";
 import type { ExtensionsContract } from "../domains/extensions/index.js";
 import { OperatorExtensionRuntime } from "../domains/extensions/operator-runtime.js";
@@ -273,7 +273,7 @@ export interface InteractiveDeps {
 	onCompact?: (instructions: string | undefined) => Promise<void>;
 	onRecoverHandoff?: (handoffId: string, action: "reduce" | "deliver") => Promise<void>;
 	/** Run /context init for the current working directory. */
-	onInit?: (options: InitCommandOptions, io?: RunIo) => Promise<void>;
+	onInit?: (options: InitCommandOptions, io?: RunIo) => Promise<RunBootstrapResult>;
 	/** Run /context reset for the current working directory. */
 	onContextClear?: (options: ContextClearCommandOptions, io?: RunIo) => Promise<void>;
 	/** Run /context refresh: re-index codewiki and refresh .clio-coder state without touching CLIO-CODER.md. */
