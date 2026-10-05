@@ -51,3 +51,7 @@ export interface ExtensionApi {
 	onDispose(handler: (reason: string) => void | Promise<void>): void;
 }
 export type ExtensionFactory = (api: ExtensionApi) => void | Promise<void>;
+
+export type * from "./manifest-v2.js";
+export type * from "./public-api-v2.js";
+export type * from "./view.js";
