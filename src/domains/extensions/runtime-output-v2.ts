@@ -1,3 +1,4 @@
+import { validateInterview, validateInterviewStep } from "./interview-schema.js";
 import type { ExtensionRuntimeDeclarationV2, ExtensionSlot } from "./manifest-v2.js";
 import type { ExtensionStatus } from "./public-api.js";
 import type {
@@ -7,6 +8,8 @@ import type {
 	ExtensionHookResult,
 	ExtensionOutputV2,
 	ExtensionToolResult,
+	Interview,
+	InterviewNext,
 	WorkspaceRegion,
 } from "./public-api-v2.js";
 import { extensionPlainText } from "./runtime-schema.js";
@@ -71,6 +74,13 @@ function bounded(value: unknown, what: string, maxBytes: number): void {
 function tone(value: unknown, what: string): (typeof TONES)[number] {
 	if (!TONES.includes(value as (typeof TONES)[number])) throw new Error(`${what} must be one of ${TONES.join(", ")}`);
 	return value as (typeof TONES)[number];
+}
+
+function interview(value: unknown, declaration: ExtensionRuntimeDeclarationV2): Interview {
+	needs(declaration, "interview");
+	const checked = validateInterview(value);
+	if (!checked.ok) throw new Error(`interview${checked.path} ${checked.reason}`);
+	return checked.interview;
 }
 
 /** Fields any handler may return. `raw` is already known to be a closed object. */
@@ -174,8 +184,10 @@ export function parseExtensionOutputV2(
 				? { fill: text(prompt.fill, "prompt.fill", RUNTIME_V2_LIMITS.promptChars) }
 				: { submit: text(prompt.submit, "prompt.submit", RUNTIME_V2_LIMITS.promptChars) };
 	}
-	// Interview steps are validated by the interview schema, which lands with the adapter lane.
-	if (raw.interview !== undefined) throw new Error("interviews are not available in this build");
+	if (raw.interview !== undefined) {
+		if (!operator) throw new Error("only a command, an action or a tool may start an interview");
+		output.interview = interview(raw.interview, declaration);
+	}
 	return output;
 }
 
@@ -315,6 +327,21 @@ export function parseExtensionToolResult(
 		needs(declaration, "card");
 		result.card = view(raw.card, "card");
 	}
-	if (raw.interview !== undefined) throw new Error("interviews are not available in this build");
+	if (raw.interview !== undefined) result.interview = interview(raw.interview, declaration);
 	return result;
+}
+
+/** An interview handler either asks the next step or finishes with what a command could return. */
+export function parseInterviewNext(value: unknown, declaration: ExtensionRuntimeDeclarationV2): InterviewNext {
+	bounded(value, "interview answer", RUNTIME_V2_LIMITS.outputBytes);
+	if ((value as { done?: unknown } | null)?.done === true) {
+		const { done: _done, ...rest } = value as Record<string, unknown>;
+		return { done: true, ...parseExtensionOutputV2(rest, declaration, "action") };
+	}
+	const raw = record(value, "interview answer", ["step", "total"]);
+	const checked = validateInterviewStep(raw.step);
+	if (!checked.ok) throw new Error(`interview step${checked.path} ${checked.reason}`);
+	if (raw.total !== undefined && (!Number.isInteger(raw.total) || Number(raw.total) < 1 || Number(raw.total) > 99))
+		throw new Error("interview total must be 1-99");
+	return { step: checked.step, ...(raw.total !== undefined ? { total: Number(raw.total) } : {}) };
 }

@@ -175,6 +175,11 @@ export interface ExtensionIsland {
 	view: View;
 }
 
+/**
+ * `initial` is a draft the operator still has to submit; it never answers a
+ * question by itself. Option values and labels are unique within a question,
+ * because the overlay reports a selection by its label.
+ */
 export interface InterviewQuestion {
 	id: string;
 	label: string;
@@ -187,6 +192,7 @@ export interface InterviewQuestion {
 export interface InterviewStep {
 	key: string;
 	title?: string;
+	/** Context shown above the questions. Display only: its actions are not pressable here. */
 	intro?: View;
 	questions: InterviewQuestion[];
 }
@@ -204,6 +210,7 @@ export interface InterviewAnswer {
 	id: string;
 	step: string;
 	answers: Record<string, string | string[]>;
+	/** `back` is reserved: the overlay cannot return to a resolved step yet, so the host never sends it. */
 	nav: "next" | "back" | "cancel";
 	/** Set with `nav: "cancel"` when no operator could answer. */
 	reason?: "operator" | "headless" | "preempted";

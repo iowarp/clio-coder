@@ -18,12 +18,15 @@ import type {
 	ExtensionRuntimeSnapshotV2,
 	ExtensionToolResult,
 	ExtensionUiAction,
+	InterviewAnswer,
+	InterviewNext,
 } from "./public-api-v2.js";
 import {
 	type OutputOrigin,
 	parseExtensionHookResult,
 	parseExtensionOutputV2,
 	parseExtensionToolResult,
+	parseInterviewNext,
 } from "./runtime-output-v2.js";
 import type { RuntimeProcessState } from "./runtime-process.js";
 import { extensionPlainText, RUNTIME_LIMITS } from "./runtime-schema.js";
@@ -485,6 +488,14 @@ export class ExtensionRuntimeProcessV2 {
 			{ kind: "action", name: event.id, event },
 			RUNTIME_V2_LIMITS.observationMs,
 			this.output("action"),
+		);
+	}
+	/** One step of an interview this runtime started; the operator may take as long as they need, the handler may not. */
+	interview(answer: InterviewAnswer): Promise<InterviewNext> {
+		if (!this.interviews.includes(answer.id))
+			return Promise.reject(new Error(`runtime registered no interview '${answer.id}'`));
+		return this.request({ kind: "interview", name: answer.id, event: answer }, RUNTIME_V2_LIMITS.observationMs, (value) =>
+			parseInterviewNext(value, this.declaration),
 		);
 	}
 	dispose(reason = "disposed"): Promise<void> {
