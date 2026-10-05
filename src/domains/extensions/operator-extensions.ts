@@ -5,9 +5,10 @@ import {
 	type OperatorRuntimeEntry,
 	type OperatorRuntimeOptions,
 } from "./operator-runtime.js";
-import { OperatorExtensionRuntimeV2 } from "./operator-runtime-v2.js";
+import { type ExtensionHookOutcome, OperatorExtensionRuntimeV2 } from "./operator-runtime-v2.js";
 import type { ExtensionObservation, ExtensionOutput } from "./public-api.js";
 import type {
+	ExtensionHookEvent,
 	ExtensionObservationV2,
 	ExtensionOutputV2,
 	ExtensionSkin,
@@ -163,6 +164,14 @@ export class OperatorExtensions {
 	}
 	closePanel(extensionId: string): void {
 		this.v2.closePanel(extensionId);
+	}
+	hook(
+		extensionId: string,
+		event: ExtensionHookEvent,
+		timeoutMs: number,
+		signal?: AbortSignal,
+	): Promise<ExtensionHookOutcome> {
+		return this.v2.hook(extensionId, event, timeoutMs, signal);
 	}
 	skinFor(extensionId: string, workspaceId: string): ExtensionSkin | null {
 		return this.v2.skinFor(extensionId, workspaceId);

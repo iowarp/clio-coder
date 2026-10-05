@@ -743,6 +743,9 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 		options?: ToolInvokeOptions,
 	): Promise<RegistryVerdict> => {
 		let resultDisposition = spec.metadata?.resultDisposition;
+		/** When the body started, so an awaited after_tool hook learns how long it ran. */
+		let bodyStartedAt: number | undefined;
+		const bodyMs = (): number => (bodyStartedAt === undefined ? 0 : Math.round(performance.now() - bodyStartedAt));
 		try {
 			// Explicit information-flow violations are final at every autonomy
 			// level, including yolo, and are decided before any hook can run the
@@ -761,8 +764,15 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 			// registrations; the first block_tool effect decides the verdict. Keep
 			// this gate inside the admission cleanup boundary: dispatch may already
 			// own a provisional reservation by the time a guard blocks execution.
-			const beforeEffects = runToolHook("before_tool", spec, call, decision, options);
-			const block = firstBlockToolEffect(beforeEffects);
+			let beforeEffects = runToolHook("before_tool", spec, call, decision, options);
+			let block = firstBlockToolEffect(beforeEffects);
+			// Extension runtime hooks are awaited only when one matches this tool,
+			// so a call nothing gates takes no extra turn of the event loop.
+			if (!block && deps.middleware?.hasToolAsyncHook?.("before_tool", spec.name)) {
+				const awaited = await runAwaitedToolHook("before_tool", spec, call, decision, options, beforeEffects);
+				beforeEffects = [...beforeEffects, ...awaited];
+				block = firstBlockToolEffect(awaited);
+			}
 			if (block) {
 				const verdict = guardBlockedVerdict(decision, call.tool, block.reason);
 				recordRegistryDisposition(call, verdict.decision, "blocked", {
@@ -787,6 +797,7 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 				// before the body runs, so a link swapped in afterwards cannot
 				// unlabel it and so the label exists before any screening.
 				const ruleRestrictions = deps.safety.policy?.flowRestrictionsFor?.(call) ?? null;
+				bodyStartedAt = performance.now();
 				const result = await spec.run(preparedArgs, {
 					...callerOptions,
 					...(allowsObservationPath ? { allowsObservationPath } : {}),
@@ -834,7 +845,13 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 				const labeled = withFlowRestrictions(result, sourceRestrictions);
 				observeExternalResult(spec, call, labeled, options, carriedForScreen);
 				const digest = toolResultDigestFor(spec, labeled, resultDisposition, options);
-				const afterEffects = runToolHook("after_tool", spec, call, decision, options, labeled, digest);
+				const syncAfter = runToolHook("after_tool", spec, call, decision, options, labeled, digest);
+				const afterEffects = deps.middleware?.hasToolAsyncHook?.("after_tool", spec.name)
+					? [
+							...syncAfter,
+							...(await runAwaitedToolHook("after_tool", spec, call, decision, options, syncAfter, labeled, digest, bodyMs())),
+						]
+					: syncAfter;
 				const finalResult = shapeToolResult(
 					spec,
 					applyToolResultEffects(labeled, [...beforeEffects, ...afterEffects], labeled !== result),
@@ -861,7 +878,13 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 				}
 				const result: ToolResult = withFlowRestrictions({ kind: "error", message }, thrownRestrictions);
 				const digest = toolResultDigestFor(spec, result, resultDisposition, options);
-				const afterEffects = runToolHook("after_tool", spec, call, decision, options, result, digest);
+				const syncAfter = runToolHook("after_tool", spec, call, decision, options, result, digest);
+				const afterEffects = deps.middleware?.hasToolAsyncHook?.("after_tool", spec.name)
+					? [
+							...syncAfter,
+							...(await runAwaitedToolHook("after_tool", spec, call, decision, options, syncAfter, result, digest, bodyMs())),
+						]
+					: syncAfter;
 				return {
 					kind: "ok",
 					result: shapeToolResult(
@@ -905,6 +928,50 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 		} catch {
 			// A provider-routing sink is advisory to this call. It may narrow the
 			// next request, but it must never throw through tool admission.
+		}
+		return effects;
+	};
+
+	/**
+	 * The awaited phase for extension runtime hooks. Its effects follow the
+	 * synchronous ones and pass through the same sinks; a failure here is the
+	 * hook's own policy, decided inside the registration, never a throw.
+	 */
+	const runAwaitedToolHook = async (
+		hook: "before_tool" | "after_tool",
+		spec: ToolSpec,
+		call: ClassifierCall,
+		decision: SafetyDecision,
+		options: ToolInvokeOptions | undefined,
+		priorEffects: ReadonlyArray<MiddlewareEffect>,
+		result?: ToolResult,
+		resultDigest?: ToolResultDigest,
+		durationMs?: number,
+	): Promise<ReadonlyArray<MiddlewareEffect>> => {
+		if (!deps.middleware?.runToolAsyncHook) return [];
+		const built = buildToolHookInput(
+			hook,
+			spec,
+			call,
+			decision,
+			"operating",
+			options,
+			result,
+			resultDigest,
+			deps.flow?.carried() ?? null,
+		);
+		const input = durationMs === undefined ? built : { ...built, metadata: { ...built.metadata, durationMs } };
+		let effects: ReadonlyArray<MiddlewareEffect>;
+		try {
+			effects = (await deps.middleware.runToolAsyncHook(input, priorEffects)).effects;
+		} catch {
+			// Registrations isolate their own failures; anything escaping is a runtime bug and changes no call.
+			return [];
+		}
+		try {
+			deps.onMiddlewareEffects?.(effects, input);
+		} catch {
+			// Advisory sink, as in the synchronous phase.
 		}
 		return effects;
 	};

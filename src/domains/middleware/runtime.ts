@@ -62,6 +62,13 @@ export interface MiddlewareHookRegistration {
 		input: MiddlewareHookInput,
 		context?: MiddlewareHookEvaluationContext,
 	): Promise<ReadonlyArray<MiddlewareEffect>>;
+	/**
+	 * The async phase also runs at before_tool and after_tool, awaited by the
+	 * tool registry. Only extension runtime hooks set it; every other async
+	 * phase stays at turn boundaries, so a tool call awaits nothing unless one
+	 * of these matches.
+	 */
+	awaitedAtTools?: true;
 }
 
 /**
@@ -260,13 +267,16 @@ export async function runMiddlewareAsyncRegistrations(
 	input: MiddlewareHookInput,
 	registrations: ReadonlyArray<MiddlewareHookRegistration>,
 	priorEffects: ReadonlyArray<MiddlewareEffect> = [],
-	options: Pick<RunMiddlewareRegistrationsOptions, "onDiagnostic"> = {},
+	options: Pick<RunMiddlewareRegistrationsOptions, "onDiagnostic"> & {
+		include?: (registration: MiddlewareHookRegistration) => boolean;
+	} = {},
 ): Promise<MiddlewareHookResult> {
 	const onDiagnostic = options.onDiagnostic ?? writeMiddlewareDiagnosticToStderr;
 	const effects: MiddlewareEffect[] = [];
 	const ruleIds: string[] = [];
 	for (const registration of registrations) {
 		if (registration.evaluateAsync === undefined || !registration.hooks.includes(input.hook)) continue;
+		if (options.include && !options.include(registration)) continue;
 		if (registration.toolNames !== undefined) {
 			if (input.toolName === undefined || !registration.toolNames.includes(input.toolName)) continue;
 		}

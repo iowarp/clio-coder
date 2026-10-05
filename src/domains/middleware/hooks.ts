@@ -401,9 +401,11 @@ export interface HookReceipt {
 	sourcePath: string;
 	hash: string;
 	hook: MiddlewareHook;
-	kind: UserHookKind;
-	outcome: UserHookOutcome;
+	/** `runtime` is an extension runtime hook; it never comes from a hooks.yaml file. */
+	kind: UserHookKind | "runtime";
+	outcome: UserHookOutcome | "runtime-ok" | "runtime-failed" | "runtime-timeout";
 	effectKinds?: string[];
+	durationMs?: number;
 	exitCode?: number;
 	outputChars?: number;
 	toolName?: string;

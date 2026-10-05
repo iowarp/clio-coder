@@ -76,7 +76,11 @@ import {
 } from "../domains/dispatch/index.js";
 import { configureRunEventJournal } from "../domains/dispatch/run-event-journal.js";
 import { normalizeYoloGateOutcome } from "../domains/dispatch/yolo-ids.js";
-import { type ExtensionsContract, ExtensionsDomainModule } from "../domains/extensions/index.js";
+import {
+	createExtensionRuntimeHookBridge,
+	type ExtensionsContract,
+	ExtensionsDomainModule,
+} from "../domains/extensions/index.js";
 import { type InteropContract, InteropDomainModule } from "../domains/interop/index.js";
 import { describeUpgradeNotice, ensureClioState, takeUpgradeNotice } from "../domains/lifecycle/index.js";
 import { createHistoryReviewSource } from "../domains/memory/history-review.js";
@@ -2469,9 +2473,12 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	let bootHookNotices = true;
 	const reloadPlugins = () =>
 		reloadPluginResourcesAndNotify(process.cwd(), (event) => bus.emit(BusChannels.PluginsReloaded, event));
+	// Only the TUI hosts api 2 runtimes today, so only it registers their hooks.
+	const runtimeHooks = interactive ? createExtensionRuntimeHookBridge() : undefined;
 	const extensionReload = createExtensionReloadCoordinator({
 		extensions,
 		middleware,
+		...(runtimeHooks ? { runtimeHooks } : {}),
 		cwd: () => process.cwd(),
 		recordReceipt: (receipt) => hookReceiptLog.record(receipt),
 		report: (line) => {
@@ -4781,6 +4788,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		...(initialNotices.length > 0 ? { initialNotices } : {}),
 		...(resources ? { resources } : {}),
 		...(extensions ? { extensions } : {}),
+		...(runtimeHooks ? { runtimeHooks } : {}),
 		reloadExtensions: () => extensionReload.reload(),
 		reloadPlugins,
 		...(interop ? { interop } : {}),

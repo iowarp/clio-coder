@@ -5,6 +5,8 @@ import { type ExtensionCommandRow, extensionInvocation, resolveExtensionCommands
 import type { OperatorReloadResult, OperatorRuntimeEntry } from "./operator-runtime.js";
 import type { ExtensionRuntimeSnapshot } from "./public-api.js";
 import type {
+	ExtensionEffect,
+	ExtensionHookEvent,
 	ExtensionObservationEventV2,
 	ExtensionObservationV2,
 	ExtensionOutputV2,
@@ -14,7 +16,7 @@ import type {
 	InterviewNext,
 } from "./public-api-v2.js";
 import type { OutputOrigin } from "./runtime-output-v2.js";
-import { ExtensionRuntimeProcessV2 } from "./runtime-process-v2.js";
+import { ExtensionRequestTimeout, ExtensionRuntimeProcessV2 } from "./runtime-process-v2.js";
 import { RUNTIME_LIMITS } from "./runtime-schema.js";
 import { RUNTIME_V2_LIMITS } from "./runtime-schema-v2.js";
 import { createExtensionKeyValueHost, extensionDataPaths } from "./runtime-state.js";
@@ -24,6 +26,12 @@ import { type ActiveExtensionWorkspace, ExtensionSurfaceModel } from "./surface-
 import { type InstalledExtension, isLoadableExtension, type LoadableExtension } from "./types.js";
 
 type RuntimeContext = Omit<ExtensionRuntimeSnapshot, "generation">;
+
+/** How one awaited hook ended. The registration that asked decides what a miss or a failure costs. */
+export type ExtensionHookOutcome =
+	| { kind: "ok"; effects: ExtensionEffect[] }
+	| { kind: "timeout" }
+	| { kind: "error"; message: string };
 type ReloadReason = "startup" | "reload" | "session-change";
 
 export interface OperatorRuntimeV2Options {
@@ -591,6 +599,30 @@ export class OperatorExtensionRuntimeV2 {
 		const process = this.processes.get(extensionId);
 		if (!process || !this.current(process)) throw new Error(`extension ${extensionId} has no running runtime`);
 		return process.extension as ApiV2Extension;
+	}
+
+	/**
+	 * One awaited hook. Its `ui` is applied like an observation's; its effects
+	 * go back to the middleware registration that asked. A runtime that is not
+	 * running is an error outcome, so a gate declared `onError: block` stays shut.
+	 */
+	async hook(
+		extensionId: string,
+		event: ExtensionHookEvent,
+		timeoutMs: number,
+		signal?: AbortSignal,
+	): Promise<ExtensionHookOutcome> {
+		const process = this.processes.get(extensionId);
+		if (!process || !this.current(process)) return { kind: "error", message: "runtime is not running" };
+		const lifetime = this.lifetime;
+		try {
+			const result = await process.hook(event, timeoutMs, signal);
+			if (result.ui && lifetime === this.lifetime) this.apply(process, result.ui, "observation");
+			return { kind: "ok", effects: result.effects ?? [] };
+		} catch (error) {
+			if (error instanceof ExtensionRequestTimeout) return { kind: "timeout" };
+			return { kind: "error", message: message(error) };
+		}
 	}
 
 	/** The operator left the workspace (`/workspace off`, the leader key). */

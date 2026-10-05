@@ -31,6 +31,7 @@ import path from "node:path";
 import type {
 	ExtensionReloadCommitted,
 	ExtensionReloadRejection,
+	ExtensionRuntimeHookBridge,
 	ExtensionSnapshotDiagnostics,
 	ExtensionsContract,
 } from "../domains/extensions/index.js";
@@ -45,6 +46,7 @@ import {
 	type UserHookCommandRunner,
 } from "../domains/middleware/index.js";
 import { capturedHookSourcesFor } from "./extension-hook-sources.js";
+import { buildExtensionRuntimeHookRegistrations } from "./extension-runtime-hooks.js";
 
 export interface ExtensionReloadHookSummary {
 	/** Registrations published for the owner in this generation. */
@@ -81,6 +83,12 @@ export interface ExtensionReloadCoordinatorDeps {
 	report: (line: string) => void;
 	/** Called once per published generation, after both references are live. */
 	onCommitted?: (event: ExtensionGenerationCommitted) => void;
+	/**
+	 * Present only where a surface hosts api 2 runtimes. Their declared hooks
+	 * then publish with each generation; elsewhere they are not registered, so
+	 * a gate never fails closed for want of a runtime that was never started.
+	 */
+	runtimeHooks?: ExtensionRuntimeHookBridge;
 }
 
 export interface ExtensionReloadCoordinator {
@@ -237,11 +245,18 @@ export function createExtensionReloadCoordinator(deps: ExtensionReloadCoordinato
 					),
 				});
 			}
-			const preparedReplacement = deps.middleware.prepareRegistrationReplacement(
-				"user-hooks",
-				candidate.generation,
-				built.registrations,
-			);
+			const runtimeRegistrations =
+				deps.runtimeHooks === undefined
+					? []
+					: buildExtensionRuntimeHookRegistrations(candidate.snapshot.packages, deps.runtimeHooks, {
+							generation: candidate.generation,
+							recordReceipt: deps.recordReceipt,
+							...(deps.now !== undefined ? { now: deps.now } : {}),
+						});
+			const preparedReplacement = deps.middleware.prepareRegistrationReplacement("user-hooks", candidate.generation, [
+				...built.registrations,
+				...runtimeRegistrations,
+			]);
 			if (preparedReplacement.status === "rejected") {
 				candidate.discard();
 				return rejected({

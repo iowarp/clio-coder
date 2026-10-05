@@ -13,6 +13,13 @@ export interface MiddlewareContract {
 		input: MiddlewareHookInput,
 		priorEffects?: ReadonlyArray<MiddlewareEffect>,
 	): Promise<MiddlewareHookResult>;
+	/** Synchronous: whether any registration awaited at tools matches this call. */
+	hasToolAsyncHook?(hook: "before_tool" | "after_tool", toolName: string): boolean;
+	/** The awaited tool phase: only registrations that set `awaitedAtTools`. */
+	runToolAsyncHook?(
+		input: MiddlewareHookInput,
+		priorEffects?: ReadonlyArray<MiddlewareEffect>,
+	): Promise<MiddlewareHookResult>;
 	snapshot(): MiddlewareSnapshot;
 	/**
 	 * Append a coded hook registration after every existing rule and

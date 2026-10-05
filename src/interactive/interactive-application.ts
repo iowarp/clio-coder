@@ -13,6 +13,7 @@ import type { ContextState } from "../domains/context/index.js";
 import type { DispatchContract, RouteBreakerView } from "../domains/dispatch/contract.js";
 import type { ExtensionsContract } from "../domains/extensions/index.js";
 import { OperatorExtensions } from "../domains/extensions/operator-extensions.js";
+import type { ExtensionRuntimeHookBridge } from "../domains/extensions/runtime-hook-bridge.js";
 import type { InteropContract } from "../domains/interop/index.js";
 import type { TaskMemoryOperatorStatus } from "../domains/memory/index.js";
 import { openDetachedBatchViews } from "../domains/middleware/index.js";
@@ -146,6 +147,8 @@ export interface InteractiveDeps {
 	extensions?: ExtensionsContract;
 	/** `/extensions reload` seam; the composition root supplies the coordinator. */
 	reloadExtensions?: SlashCommandContext["reloadExtensions"];
+	/** Where api 2 hook registrations reach the runtimes this surface owns. */
+	runtimeHooks?: ExtensionRuntimeHookBridge;
 	reloadPlugins?: SlashCommandContext["reloadPlugins"];
 	interop?: InteropContract;
 	share?: ShareContract;
@@ -577,6 +580,11 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 				},
 			})
 		: undefined;
+	if (operatorExtensions)
+		deps.runtimeHooks?.bind({
+			hook: (extensionId, event, timeoutMs, signal) => operatorExtensions.hook(extensionId, event, timeoutMs, signal),
+			notify: (message) => notify("warning", message, "operator-extensions:hook"),
+		});
 	const workspaceSurfaces = operatorExtensions
 		? createWorkspaceSurfaces({
 				model: operatorExtensions.surface,
@@ -1750,6 +1758,7 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 		async () => {
 			clearTimeout(operatorTimer);
 			for (const unsubscribe of operatorSubscriptions) unsubscribe();
+			deps.runtimeHooks?.bind(null);
 			await operatorExtensions?.dispose();
 			workspaceSurfaces?.dispose();
 		},
