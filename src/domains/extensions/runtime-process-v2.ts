@@ -302,13 +302,19 @@ export class ExtensionRuntimeProcessV2 {
 			if (!(scope === "state" ? this.declaration.state.session : this.declaration.state.store))
 				throw new Error(`runtime did not declare ${scope}`);
 			const host = this.options.keyValue;
-			if (verb === "keys") return reply({ value: host.keys(scope) });
+			if (verb === "keys") {
+				reply({ value: host.keys(scope) });
+				return;
+			}
 			if (typeof m.key !== "string" || m.key.length === 0 || m.key.length > 200) throw new Error("invalid key");
-			if (verb === "get") return reply({ value: host.get(scope, m.key) });
-			if (verb === "delete") return reply({ value: (host.delete(scope, m.key), null) });
-			if (verb !== "set") throw new Error("unsupported host call");
-			if (m.ifVersion !== undefined && !Number.isInteger(m.ifVersion)) throw new Error("invalid version");
-			reply({ value: host.set(scope, m.key, m.value, m.ifVersion as number | undefined) });
+			if (verb === "get") reply({ value: host.get(scope, m.key) });
+			else if (verb === "delete") {
+				host.delete(scope, m.key);
+				reply({ value: null });
+			} else if (verb === "set") {
+				if (m.ifVersion !== undefined && !Number.isInteger(m.ifVersion)) throw new Error("invalid version");
+				reply({ value: host.set(scope, m.key, m.value, m.ifVersion as number | undefined) });
+			} else throw new Error("unsupported host call");
 		} catch (error) {
 			reply({ error: extensionPlainText(error instanceof Error ? error.message : String(error)).slice(0, 512) });
 		}
@@ -373,7 +379,10 @@ export class ExtensionRuntimeProcessV2 {
 				return;
 			}
 			if (this.state !== "ready") throw new Error("unexpected runtime IPC message");
-			if (m.kind === "call") return this.serveCall(m);
+			if (m.kind === "call") {
+				this.serveCall(m);
+				return;
+			}
 			if (m.kind !== "result" && m.kind !== "error") throw new Error("unexpected runtime IPC message");
 			// A reply without its outstanding request has no authority: it was cancelled or timed out.
 			const pending = this.settle(m.id);
