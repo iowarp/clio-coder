@@ -3,8 +3,8 @@
  *
  * A dock is a pane in a fixed position relative to Clio's anchor pane with a
  * target share of the anchor's axis, a minimum size in cells, and a managed
- * lifecycle. Three slots exist: `workers` to the right of the anchor, and
- * `files` and `music` below it. Ad-hoc utility panes are not docks and are never touched
+ * lifecycle. Four slots exist: `workers` to the right of the anchor, and
+ * `files`, `music` and `extension` below it. Ad-hoc utility panes are not docks and are never touched
  * here.
  *
  * The controller owns geometry only. Ownership stays in the pane registry,
@@ -41,7 +41,7 @@ import {
 } from "./types.js";
 
 /** The managed dock positions. */
-export type DockSlot = "workers" | "files" | "music";
+export type DockSlot = "workers" | "files" | "music" | "extension";
 
 export interface DockSpec {
 	slot: DockSlot;
@@ -62,6 +62,8 @@ export const DOCK_SPECS: Readonly<Record<DockSlot, DockSpec>> = {
 	// task, then the model, never the state or clock), which is half of an
 	// 80-column terminal.
 	workers: { slot: "workers", direction: "right", defaultShare: 0.34, minCells: 40 },
+	// Views need rows; splitting down preserves the workers dock to the right.
+	extension: { slot: "extension", direction: "down", defaultShare: 0.3, minCells: 12 },
 	files: { slot: "files", direction: "down", defaultShare: 0.3, minCells: 12 },
 	// cliamp draws its spectrum only from 16 inner rows up (40x10 drops it), and
 	// herdr's border takes two more. The tiny default share means the floor

@@ -1,9 +1,10 @@
 import { closeSync, type FSWatcher, mkdirSync, openSync, readSync, statSync, watch, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
+import { StringDecoder } from "node:string_decoder";
 
 /** Backstop for filesystems that deliver no change events; the watcher is the fast path. */
 const TAP_FILE_POLL_MS = 250;
-/** A tap is one short word. A longer line is someone else's write and is skipped whole. */
+/** Legacy taps are short words; structured consumers opt into a larger line bound. */
 const TAP_LINE_MAX = 64;
 
 export interface TapFileWatcher {
@@ -19,11 +20,13 @@ export interface TapFileWatcher {
  * which drops taps a dead session left behind. Change events make a tap
  * arrive in milliseconds; a slow interval catches the rest.
  */
-export function watchTapFile(path: string, onTap: (line: string) => void): TapFileWatcher {
+export function watchTapFile(path: string, onTap: (line: string) => void, maxLine = TAP_LINE_MAX): TapFileWatcher {
 	mkdirSync(dirname(path), { recursive: true });
 	writeFileSync(path, "");
 	let offset = 0;
+	let decoder = new StringDecoder("utf8");
 	let partial = "";
+	let discarding = false;
 	let stopped = false;
 	let interval: NodeJS.Timeout | null = null;
 	let watcher: FSWatcher | null = null;
@@ -34,7 +37,9 @@ export function watchTapFile(path: string, onTap: (line: string) => void): TapFi
 		if (size === undefined) return;
 		if (size < offset) {
 			offset = 0;
+			decoder = new StringDecoder("utf8");
 			partial = "";
+			discarding = false;
 		}
 		const remaining = size - offset;
 		if (remaining <= 0) return;
@@ -47,12 +52,20 @@ export function watchTapFile(path: string, onTap: (line: string) => void): TapFi
 			closeSync(fd);
 		}
 		offset += read;
-		const lines = (partial + bytes.subarray(0, read).toString("utf8")).split("\n");
+		const lines = (partial + decoder.write(bytes.subarray(0, read))).split("\n");
 		partial = lines.pop() ?? "";
-		if (partial.length > TAP_LINE_MAX) partial = "";
+		if (discarding && lines.length > 0) {
+			lines.shift();
+			discarding = false;
+		}
+		if (partial.length > maxLine || discarding) {
+			partial = "";
+			discarding = true;
+		}
 		for (const line of lines) {
+			if (line.length > maxLine) continue;
 			const tap = line.trim();
-			if (tap.length > 0 && tap.length <= TAP_LINE_MAX) onTap(tap);
+			if (tap.length > 0 && tap.length <= maxLine) onTap(tap);
 		}
 	};
 

@@ -308,7 +308,7 @@ export function createPanesRuntime(deps: PanesRuntimeDeps): PanesOperations {
 		async docks(): Promise<ReadonlyArray<PanesDockReport>> {
 			const settings = deps.getSettings();
 			const reports: PanesDockReport[] = [];
-			for (const slot of ["files", "workers", "music"] as const) {
+			for (const slot of ["files", "workers", "music", "extension"] as const) {
 				const state = deps.mux.dockVisibility(slot);
 				let detail: string | undefined;
 				if (slot === "music") {

@@ -20,6 +20,7 @@ const HELP = `clio-coder extensions <command>
 Manage Clio extension packages.
 
 Commands:
+  clio-coder extensions view --watch <frame-file> [--dock-taps <tap-file>]
   clio-coder extensions list [--all] [--json] [--user|--project]
   clio-coder extensions discover <path> [--json]
   clio-coder extensions run <id> <command> [--json] -- [arguments]
@@ -133,6 +134,9 @@ function printList(items: ReadonlyArray<InstalledExtension>): void {
 }
 
 export function runExtensionsCommand(argv: ReadonlyArray<string>): number | Promise<number> {
+	if (argv[0] === "view") {
+		return viewCommand(argv.slice(1));
+	}
 	let parsed: Parsed;
 	try {
 		parsed = parse(argv);
@@ -296,4 +300,9 @@ async function runOperatorCommand(parsed: Parsed): Promise<number> {
 		process.off("SIGTERM", cancel);
 		await runtime.dispose();
 	}
+}
+
+async function viewCommand(argv: ReadonlyArray<string>): Promise<number> {
+	const { runExtensionsView } = await import("./extensions-view.js");
+	return runExtensionsView(argv);
 }

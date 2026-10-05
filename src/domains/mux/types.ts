@@ -265,12 +265,12 @@ export interface MuxSelfReport {
 }
 
 /**
- * Why Clio created a pane. `watch` is the workers-view watch pane; everything
- * else (presets, operator argv, the yazi companion) is `utility`. The purpose
+ * Why Clio created a pane. `watch` is the workers viewer, `extension` is the
+ * host-rendered extension viewer; everything else (presets, operator argv, the yazi companion) is `utility`. The purpose
  * doubles as the pane's `role` metadata token so a restarted session can adopt
- * a surviving watch pane by scanning one snapshot.
+ * a surviving viewer pane by scanning one snapshot.
  */
-export type MuxPanePurpose = "watch" | "utility";
+export type MuxPanePurpose = "watch" | "utility" | "extension";
 
 /** One pane Clio created and therefore may act on. */
 export interface MuxPaneRecord {
@@ -278,6 +278,8 @@ export interface MuxPaneRecord {
 	purpose: MuxPanePurpose;
 	label: string;
 	openedAt: number;
+	/** Opaque identity of a dock viewer's files, retained across restart adoption. */
+	dockKey?: string;
 	/**
 	 * True when the record was adopted from a snapshot at boot rather than
 	 * created in this process, so a resumed session reuses the pane it found
