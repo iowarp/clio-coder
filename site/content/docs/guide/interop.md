@@ -4,7 +4,7 @@ Use supported agent connections and editor integrations.
 
 ## Bring an installed coding agent
 
-Clio can dispatch a focused task to a configured coding peer or open an interactive handoff pane. Install and authenticate that peer's own CLI first, then inspect what Clio can use:
+Clio Coder can dispatch a focused task to a configured coding peer or open an interactive handoff pane. Install and authenticate that peer's own CLI first, then inspect what Clio can use:
 
 ```sh
 clio-coder interop inspect --json
@@ -33,4 +33,4 @@ Open `/library`, then use its local-agent discovery action. Inspect the proposed
 clio-coder acp --cwd /path/to/project
 ```
 
-This serves Clio over stdio for an ACP frontend, with session listing, resume, modes, and model options. Consult the full guide for peer-specific setup, permission limits, and installing Clio's portable library in other agents.
+This serves Clio Coder over stdio for an ACP frontend, with session listing, resume, modes, and model options. Consult the full guide for peer-specific setup, permission limits, and installing Clio Coder's portable library in other agents.

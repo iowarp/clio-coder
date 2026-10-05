@@ -22,7 +22,7 @@ The table lists every leaf in `DEFAULT_SETTINGS` in schema order, with its compi
 | --- | --- |
 | hot reload | A live reader observes the value without rebuilding runtime state. |
 | next turn | The next request, dispatch, or explicit open observes the value. Work already running keeps the value it started with. |
-| restart required | Process or pane-host setup must be rebuilt, so the value applies to a new Clio session. A path the classifier does not list falls here. |
+| restart required | Process or pane-host setup must be rebuilt, so the value applies to a new Clio Coder session. A path the classifier does not list falls here. |
 
 Routing defaults are a separate rule. `chat.target`, `chat.model`, `chat.thinkingLevel`, `chat.modelPicker.cycleSet`, `fleet.default.target`, `.model` and `.thinkingLevel`, and `context.memory.target` and `.model` seed a session's own routing when it starts. A later write from another process updates the saved default but never redirects a running session; see [live routing vs saved defaults](configuration-and-targets.md#live-routing-vs-saved-defaults).
 
@@ -141,14 +141,14 @@ Default chat settings control interactive conversation routing, reasoning effort
 | `integrations.externalAgents.entries` | `[]` | List of ACP peers: `id`, `command`, `args`, `cwd?`, `env?`, `connectTimeoutMs?`, `turnTimeoutMs?`, `stallTimeoutMs?`, `toolGovernance?`, `trustedUnmediated?`, `projectContext?` (`none` or `bounded`). | next turn |
 | `integrations.externalAgents.defaults.connectTimeoutMs` | `30000` | Integer at least 1. | next turn |
 | `integrations.externalAgents.defaults.turnTimeoutMs` | `0` | Integer at least 0. `0` sets no elapsed deadline. | next turn |
-| `integrations.externalAgents.defaults.permissionTimeoutMs` | `120000` | Integer at least 1. Bounds Clio's own ACP server permission requests. | next turn |
+| `integrations.externalAgents.defaults.permissionTimeoutMs` | `120000` | Integer at least 1. Bounds Clio Coder's own ACP server permission requests. | next turn |
 | `integrations.externalAgents.defaults.toolGovernance` | `"clio-coder-policy"` | `clio-coder-policy`, `agent-managed` or `deny-all`. | next turn |
 | `integrations.runtimePlugins` | `[]` | Package names of runtime plugins loaded at startup. | restart required |
 | `integrations.library.catalog` | `null` | Absolute catalog path, or `null` for the one in the config directory. | next turn |
 | `integrations.library.remote` | `null` | Git remote URL the catalog syncs with, or `null` for a local library. | next turn |
-| `integrations.library.confirmedRemote` | `null` | The remote the operator approved. Written by Clio, read-only in the UI. | next turn |
+| `integrations.library.confirmedRemote` | `null` | The remote the operator approved. Written by Clio Coder, read-only in the UI. | next turn |
 | `integrations.library.sync` | `false` | Boolean. Whether library sync and push may contact the remote. | next turn |
-| `integrations.git.commitAttribution` | `true` | Boolean. Evidence-backed role trailers on commits created through Clio. | hot reload |
+| `integrations.git.commitAttribution` | `true` | Boolean. Evidence-backed role trailers on commits created through Clio Coder. | hot reload |
 | `integrations.music.enabled` | `false` | Boolean. Allows `/music` to open cliamp in a Herdr dock. Needs Herdr panes and cliamp. | hot reload |
 | `integrations.music.station` | `"http://radio.cliamp.stream/lofi/stream"` | Non-empty string, a stream URL or a station name. What `/music on` plays. | hot reload |
 | `integrations.music.agentControl` | `false` | Boolean. Registers the `music` tool at startup so the model can drive the pane; off, the tool does not exist and costs no prompt bytes. | restart required |
@@ -172,7 +172,7 @@ These schema keys are absent from `DEFAULT_SETTINGS` because an unset value sele
 | Precedence, low to high | Use |
 | --- | --- |
 | Compiled defaults | Baseline values in [`src/core/defaults.ts`](../../src/core/defaults.ts). |
-| User `settings.yaml` | Personal defaults under the resolved Clio config directory. |
+| User `settings.yaml` | Personal defaults under the resolved Clio Coder config directory. |
 | .clio-coder/settings.yaml | Shared project defaults. Credential-bearing keys are ignored. |
 | .clio-coder/settings.local.yaml | Untracked project overrides. Credential-bearing keys are ignored. |
 | Session controls | `/settings`, `/model`, and `/thinking` change the active session where supported. `/config` runs the configure flow and applies the saved routing to the session. |
@@ -340,7 +340,7 @@ Inside `fleet.nodes`, the key `clioEntry` is renamed `clioCoderEntry`. A file th
 | `background.thinkingLevel` | Proactive memory always resolves thinking off. |
 | `theme` | The only registered theme was not read by runtime rendering. |
 | `compaction.excludeLastTurns` and `context.compaction.excludeLastTurns` | Only the temporary legacy mask used it. Use `context.workingSet.protectLastTurns`. |
-| `delegation.agents[].permissionTimeoutMs` and `integrations.externalAgents.entries[].permissionTimeoutMs` | A delegated agent's permission ask is decided at once and never waits for the operator. `integrations.externalAgents.defaults.permissionTimeoutMs` still bounds Clio's own ACP server. |
+| `delegation.agents[].permissionTimeoutMs` and `integrations.externalAgents.entries[].permissionTimeoutMs` | A delegated agent's permission ask is decided at once and never waits for the operator. `integrations.externalAgents.defaults.permissionTimeoutMs` still bounds Clio Coder's own ACP server. |
 | `delegation.agents[].labels` and `integrations.externalAgents.entries[].labels` | Nothing read or displayed external agent labels. |
 | `fleet.decisionProfiles` | System One replaced decision profiles. Bind an engine under `systemOne.engines` and `systemOne.sites`. An empty `{}` is accepted silently. |
 | `turnControl.interpretation` | The `systemOne.sites.turn` site reads the request, and nothing falls back to the main model. |
@@ -391,11 +391,11 @@ Only user declarations may set `actionClass`; project declarations receive their
 
 Trust and declaration loading are implemented in [`src/domains/gateway/mcp/trust.ts`](../../src/domains/gateway/mcp/trust.ts). The model-facing discovery and call contract is in [gateway tool usage](tool-usage.md).
 
-## Let Clio propose settings changes
+## Let Clio Coder propose settings changes
 
 In an interactive `default` or `yolo` session, ask Clio to change a chat model, fleet route, or profile. Clio can discover `configure_clio` through the gateway and preview one saved setting change. The tool accepts only these paths: `chat.target`, `chat.model`, `chat.thinkingLevel`, `chat.modelPicker.*`, `fleet.default.*`, `fleet.profiles`, `fleet.agentProfiles`, `fleet.concurrency`, `fleet.limits.*`, and `context.memory.target` and `.model`. Any other path is refused and points at `/settings` or `configure`.
 
-Applying behaves by path. In `default`, applying a chat or memory setting requests an **Apply** or **Cancel** decision from the host UI; in `yolo`, the exact preview applies directly. A persistent fleet routing change (`fleet.default`, `fleet.profiles`, `fleet.agentProfiles`) always asks the operator to approve the exact preview, at every autonomy level, and the preview names the alternative for a one-off run: pin the dispatch call's `target` and `model` instead of saving routing. Applying checks that the saved value still matches the preview; a proposal expires after 10 minutes, and expired or stale proposals need a fresh preview. The tool excludes credentials, connection definitions, and `safety.autonomy`. The running session keeps its current routing, so exit and start a new Clio session to use a newly saved route. There is no `/reload` command. Other settings take effect as the save result says: live settings pick up automatically, next-turn settings apply to the next request or dispatch, and restart-required settings need a new session.
+Applying behaves by path. In `default`, applying a chat or memory setting requests an **Apply** or **Cancel** decision from the host UI; in `yolo`, the exact preview applies directly. A persistent fleet routing change (`fleet.default`, `fleet.profiles`, `fleet.agentProfiles`) always asks the operator to approve the exact preview, at every autonomy level, and the preview names the alternative for a one-off run: pin the dispatch call's `target` and `model` instead of saving routing. Applying checks that the saved value still matches the preview; a proposal expires after 10 minutes, and expired or stale proposals need a fresh preview. The tool excludes credentials, connection definitions, and `safety.autonomy`. The running session keeps its current routing, so exit and start a new Clio Coder session to use a newly saved route. There is no `/reload` command. Other settings take effect as the save result says: live settings pick up automatically, next-turn settings apply to the next request or dispatch, and restart-required settings need a new session.
 
 `safety.autonomy` accepts only **default** and **yolo**. Set it in user `settings.yaml` or through an operator surface: `/settings`, `clio-coder configure`, `--autonomy`, or a session control in ACP or the GUI. A project layer may only tighten the user level; Clio ignores a looser project value and reports a layer issue. `configure_clio` cannot change it. An explicit v1 upgrade resets every other v1 autonomy value to `default` and records the reset in the migration report.
 

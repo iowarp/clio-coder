@@ -7,7 +7,7 @@ This guide describes v0.6.0. Library recipes and executable harness extensions h
 ::: diagram library-flow
 :::
 
-## Browse what ships with Clio
+## Browse what ships with Clio Coder
 
 Open `/library` in the terminal or press Alt+L. On the desktop alpha, the Library page lists the catalog with an **Installed only** filter. In the terminal, **Browse** shows available content and **Installed** manages your copies.
 
@@ -36,7 +36,7 @@ Check the destination, dependencies, scope, and package pin. The `--json` form c
 clio-coder library install skill:tdd --project
 ```
 
-The first project install in a workspace is yours, so Clio approves the project's packages for that workspace. After that, a changed project package set, including one that arrives with a clone or a pull, is listed but not loaded until you review it with `clio-coder config trust plugins` and approve the digest it prints.
+The first project install in a workspace is yours, so Clio Coder approves the project's packages for that workspace. After that, a changed project package set, including one that arrives with a clone or a pull, is listed but not loaded until you review it with `clio-coder config trust plugins` and approve the digest it prints.
 
 ### Load it for one concrete task
 
@@ -67,7 +67,7 @@ Scope helps reproducibility: another person can see which procedures belong to t
 
 ## Use plugins for related resources
 
-A Library plugin groups related skills, prompts, agents, fleets, and supporting files. The catalog ships with Clio, but its content is not installed automatically.
+A Library plugin groups related skills, prompts, agents, fleets, and supporting files. The catalog ships with Clio Coder, but its content is not installed automatically.
 
 ```sh
 clio-coder library list --kind plugin
@@ -91,7 +91,7 @@ After changes made by another process, `/library reload` refreshes recipes and `
 
 ## Know when you need an extension
 
-Library plugins provide portable recipes. Executable harness extensions add runtime tools, hooks, or interface behavior through `clio-coder extensions`, and adding tool schemas requires a new session; reloading recipes does not change them. Project extensions follow the same trust rule through `clio-coder config trust extensions`, and Clio names any it ignored when a session starts.
+Library plugins provide portable recipes. Executable harness extensions add runtime tools, hooks, or interface behavior through `clio-coder extensions`, and adding tool schemas requires a new session; reloading recipes does not change them. Project extensions follow the same trust rule through `clio-coder config trust extensions`, and Clio Coder names any it ignored when a session starts.
 
 ::: limits
 - Choose the least extensive mechanism that supplies the task.
@@ -101,7 +101,7 @@ Library plugins provide portable recipes. Executable harness extensions add runt
 :::
 
 ::: next
-- [Your first session with Clio](/tutorials/first-session.html)
+- [Your first session with Clio Coder](/tutorials/first-session.html)
 - [Library guide](/docs/guide/resource-library.html)
 - [Plugin guide](/docs/guide/plugins.html)
 :::

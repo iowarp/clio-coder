@@ -388,7 +388,7 @@ clio-coder evolve manifest summarize <path>
 | `changes[].predictedFixes`, `validationPlan` | String arrays. |
 | `changes[].expectedBudgetImpact` | Optional; `risk` is `lower`, `same` or `higher`, with optional finite `tokenDelta` and `wallTimeDeltaMs`. |
 
-Nothing enforces a manifest at edit time. The self-edit gate that would require a validated manifest before Clio edits her own high-authority paths is designed but not built; `src/domains/evolution/SELF_EDIT_GATE.md` records why it is deferred.
+Nothing enforces a manifest at edit time. The self-edit gate that would require a validated manifest before Clio Coder edits its own high-authority paths is designed but not built; `src/domains/evolution/SELF_EDIT_GATE.md` records why it is deferred.
 
 ---
 

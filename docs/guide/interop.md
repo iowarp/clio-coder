@@ -2,7 +2,7 @@
 
 `detectInteropAgents` in [detect.ts](../../src/domains/interop/detect.ts) discovers local agents. The [library architecture](../architecture/library.md) explains package trust.
 
-Clio can delegate a task to an installed coding agent, discover resources held
+Clio Coder can delegate a task to an installed coding agent, discover resources held
 by Claude Code, Codex, Antigravity CLI, GitHub Copilot CLI, and OpenCode, and
 adopt safe text resources into its library after approval. The canonical
 `library/` sources this repository ships are also installable by Claude Code
@@ -13,9 +13,9 @@ capabilities.
 
 ## Delegate work to an installed coding agent
 
-Depending on the peer, Clio can run a named task through an Agent Client
+Depending on the peer, Clio Coder can run a named task through an Agent Client
 Protocol (ACP) connection or a managed headless CLI target, or open an
-interactive Herdr pane. Clio remains the main conversation and records a run
+interactive Herdr pane. Clio Coder remains the main conversation and records a run
 and receipt for ACP and headless dispatch. A pane is an interactive handoff
 and has no managed result or receipt. External peers
 are selected explicitly; Clio does not silently switch agents or modes.
@@ -41,7 +41,7 @@ for those versions Clio adds `-e builtin:llama.cpp`, detected once per binary fr
 `pi --version`. A failed or unrecognized probe keeps the base flags and never
 blocks the run.
 
-Clio serves an ACP frontend of her own through `clio-coder acp`. The wire
+Clio also serves ACP frontends through `clio-coder acp`. The wire
 contract, workspace pinning, MCP server pass-through, and the rules for attended
 clients live in the [ACP architecture](../architecture/acp.md); a frontend that
 advertises neither attended opt-in keeps the unattended behavior, where
@@ -51,7 +51,7 @@ advertises neither attended opt-in keeps the unattended behavior, where
 Install and authenticate the peer's own CLI first. Run
 `clio-coder interop inspect --json` or open `/interop` to see the installed binary, configured
 target, ACP adapter, and available commands. `clio-coder configure --interop`
-can add an ACP peer recipe; a headless mode needs a Clio target using the runtime
+can add an ACP peer recipe; a headless mode needs a Clio Coder target using the runtime
 in the table. For example, these entries in `~/.config/clio-coder/settings.yaml`
 make an installed OpenCode available in both managed modes:
 
@@ -73,7 +73,7 @@ Keep the rest of your settings when adding these entries. If OpenCode's provider
 uses an environment credential such as `apiKey: "{env:LAB_GATEWAY_KEY}"` in its
 user `opencode.json` or `opencode.jsonc`, the headless connector passes that
 named variable to OpenCode when it is set. For ACP, add
-`env: { LAB_GATEWAY_KEY: "{env:LAB_GATEWAY_KEY}" }` to that peer entry. Clio
+`env: { LAB_GATEWAY_KEY: "{env:LAB_GATEWAY_KEY}" }` to that peer entry. Clio Coder
 resolves the reference at launch; the key value does not enter settings or the
 receipt. Unrelated environment secrets stay out of headless CLI children by
 default.
@@ -95,7 +95,7 @@ dispatched runs. Use the existing Git workflow to inspect and merge a
 preserved branch, and use `/share` when the main agent should read a managed
 result.
 
-Clio-managed peer dispatches run at default permissions, even when the main
+Clio Coder-managed peer dispatches run at default permissions, even when the main
 session uses yolo. Use `/run --read-only` for a headless target or
 `/delegate --read-only` for an ACP peer to deny writes on that run. Headless
 Codex uses `--sandbox read-only` or `workspace-write`; Claude Code uses
@@ -109,7 +109,7 @@ waiting for an operator. A peer configured with
 tools, needs `trustedUnmediated: true` in user settings, and cannot accept a
 read-only delegation. Delegation and pane handoff are also refused when the
 session carries context restricted by an information-flow rule, because the
-peer's own model requests are not admitted by Clio; see
+peer's own model requests are not admitted by Clio Coder; see
 [information flow](information-flow.md).
 
 ### Peer modes and their status
@@ -140,27 +140,27 @@ recipe are unchanged.
 ### Claude Agent SDK runtime
 
 The `claude-sdk` target runtime runs Claude through the Claude Agent SDK
-`query()` inside a Clio worker. It is a dispatch target, not an interop peer,
+`query()` inside a Clio Coder worker. It is a dispatch target, not an interop peer,
 and it is separate from the `claude-code` runtime above, which spawns
 `claude -p`. Neither the `claude-code` runtime nor the ACP bridge loads the SDK
-package from Clio's package root.
+package from Clio Coder's package root.
 
 The Claude Agent SDK package (`@anthropic-ai/claude-agent-sdk`, pinned 0.3.186,
-about 224 MB) is an optional dependency that the Clio installers skip unless
+about 224 MB) is an optional dependency that the Clio Coder installers skip unless
 `--include-claude-sdk` (`-IncludeClaudeSdk` on Windows) is passed. A plain npm,
 pnpm, or bun install fetches it unless optional dependencies were omitted. Boot,
 `doctor`, and every other runtime work without it, because the module loads only
 when a `claude-sdk` run starts. On an install without it, the first dispatch to a
 `claude-sdk` target, and `clio-coder configure` when it adds one, asks once
-whether to install the package into Clio's own package root, defaulting to
+whether to install the package into Clio Coder's own package root, defaulting to
 `Not now`. The run or command instead fails with `CLAUDE_AGENT_SDK_UNAVAILABLE`
 and prints the package-manager command to run when nobody can answer (a headless
-run), when Clio was not installed by the installer scripts, or when the operator
-declines. A decline holds until Clio restarts. [Installation and lifecycle](installation-and-lifecycle.md)
+run), when Clio Coder was not installed by the installer scripts, or when the operator
+declines. A decline holds until Clio Coder restarts. [Installation and lifecycle](installation-and-lifecycle.md)
 holds the flags, the exact commands, and the decision rules.
 
 [sdk-runtime.ts](../../src/engine/claude/sdk-runtime.ts) mediates every SDK tool
-call through Clio's shared admission evaluator, through both the `canUseTool`
+call through Clio Coder's shared admission evaluator, through both the `canUseTool`
 callback and a `PreToolUse` hook. The run uses `permissionMode: "default"`, reads
 no user Claude settings (`settingSources: []`), and persists no Claude session.
 A call cannot be parked for a later decision, so an escalation posture collapses
@@ -208,7 +208,7 @@ marketplace entry supplies the name, description, version, category and license
 it shows. `claude plugin validate . --strict` passes on the generated file, so no
 entry needs `strict: false` and no package needs a second `.claude-plugin/plugin.json`.
 
-Materio's Clio-native agents, prompts and fleets sit at declared resource paths
+Materio's Clio Coder-native agents, prompts and fleets sit at declared resource paths
 that no peer host scans. They travel with the installed bytes and are never
 presented as Claude-native components. `claude plugin details materio` reports
 `Skills (6)` and `Agents (0)`.
@@ -219,14 +219,14 @@ A library package is published only when a host would load a real skill surface
 from it, and only when it carries nothing that host default-scans into a native
 component. Claude Code scans a plugin root for `agents/`, `commands/`, `hooks/`,
 `output-styles/` and `.mcp.json` without being asked, so a package that keeps
-Clio agent recipes in a top-level `agents/` directory would have them shown as
+Clio Coder agent recipes in a top-level `agents/` directory would have them shown as
 native Claude agents. The generator excludes packages with those conflicting roots, and
 `pnpm run library:pin` prints the reason.
 
 Those packages remain valid first-class library packages, and agent-, prompt- and
 fleet-only packages are normal contributions. They simply have no peer-host
 projection. An author who wants one package to serve both audiences declares its
-Clio resource roots at paths no host scans, for example `"agents": "native/agents"`,
+Clio Coder resource roots at paths no host scans, for example `"agents": "native/agents"`,
 and keeps a `skills/` directory or root `SKILL.md` for the portable surface.
 
 ## Outbound: Use this library from Codex
@@ -327,7 +327,7 @@ kind, or option exits 2, and an unknown inventory exits 1.
 The plan lists each source, destination, digest, and reason for installing or
 skipping it. Its SHA-256 identifies the reviewed projection; the library engine
 also records its standard full-tree integrity pin when publishing the package.
-`--dry-run` prints the plan and writes nothing. Otherwise Clio asks
+`--dry-run` prints the plan and writes nothing. Otherwise Clio Coder asks
 for approval in a terminal. Without a terminal, the plan remains unexecuted
 unless `--yes` was supplied. Declining installs nothing. Installation rechecks
 the source against the reviewed content; a changed source requires a new plan.
@@ -337,8 +337,8 @@ plan may report successful packages alongside failures, and any diagnostic exits
 | Resource | Adoption behavior |
 | --- | --- |
 | Skill | Text-only skill directory, with required name and description, packaged through the library engine. Executable, non-text, or symbolic-link companions cause a skip. Foreign audit stamps are not retained. |
-| Prompt or command | Markdown body becomes a Clio prompt. Host execution settings and other frontmatter are omitted; the description and argument hint are retained. |
-| Agent or subagent | Markdown persona or TOML `developer_instructions` becomes a Clio recipe limited to read, grep, find, and ls. Host tools, model, permissions, hooks, and skill bindings are omitted and the plan says so. |
+| Prompt or command | Markdown body becomes a Clio Coder prompt. Host execution settings and other frontmatter are omitted; the description and argument hint are retained. |
+| Agent or subagent | Markdown persona or TOML `developer_instructions` becomes a Clio Coder recipe limited to read, grep, find, and ls. Host tools, model, permissions, hooks, and skill bindings are omitted and the plan says so. |
 | Plugin | Accepts a valid portable root `plugin.json`, or a supported `.claude-plugin/plugin.json` / `.codex-plugin/plugin.json` package. Clio adopts a data-only projection of its skills, prompts, agents, and text references. Host extension metadata, hooks, MCP, scripts, tools, fleets, and non-text files are omitted. Dependencies on removed components cause a skip. Package `requires` declarations are preserved; required packages must already be installed, active, and valid in the destination scope. Missing requirements are named in the plan, checked again after approval, and never imported automatically. |
 | Hook, MCP server, executable module, output style | Listed as not adoptable, with a reason. Nothing is registered or executed. |
 
@@ -377,7 +377,7 @@ clio-coder library import https://github.com/owner/repo/tree/main/plugins/thing 
 clio-coder library import ./vendor/some-plugin --format claude --yes
 ```
 
-In an active session, `/library import <path-or-url>` stages and reviews that exact foreign package in the Library. When installing a Claude Code plugin or Codex package, Clio parses the vendor manifest (e.g. `.claude-plugin/plugin.json`) and presents an interactive review before any managed installation or workspace mutation occurs (staging writes temporary inspection files prior to acceptance). The review details four facets:
+In an active session, `/library import <path-or-url>` stages and reviews that exact foreign package in the Library. When installing a Claude Code plugin or Codex package, Clio Coder parses the vendor manifest (e.g. `.claude-plugin/plugin.json`) and presents an interactive review before any managed installation or workspace mutation occurs (staging writes temporary inspection files prior to acceptance). The review details four facets:
 1. **Source and provenance**: the verified package source path or repository tree URL, the format (`claude-code` or `codex`), and the transport.
 2. **Projected declarative resources**: text skills (with markdown instructions), commands (converted into prompts), and basic agent personas become native library recipes.
 3. **Foreign trust tier**: the package is marked `trust: "foreign"`. Foreign package skills and prompts remain untrusted and withheld from model turns, at project scope and at user scope alike, until `integrations.projectResources.trustProjectImports` (`skills.trustProjectCompatRoots`) is enabled. Bound agent recipes require all referenced skills to be trusted.

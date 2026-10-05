@@ -49,7 +49,7 @@ In headless execution (`clio-coder run`):
 
 1. **Standard Output (`stdout`)**: Reserved strictly for the final answer, deliverable artifact content, or machine-readable JSON streams.
 2. **Standard Error (`stderr`)**: Reserved for progress notifications, permission denial advisories, telemetry warnings, and error diagnostics.
-3. **Headless Permission Denials**: When a tool requires permission that cannot be granted in headless mode, Clio emits `HEADLESS_PERMISSION_DENIED_REASON`:
+3. **Headless Permission Denials**: When a tool requires permission that cannot be granted in headless mode, Clio Coder emits `HEADLESS_PERMISSION_DENIED_REASON`:
    ```text
    clio-coder run cannot confirm permission requests; rerun interactively to approve this action.
    ```
@@ -99,7 +99,7 @@ The limits of the contract:
 
 ## 4. Machine-Readable Output Formats (`--json` & `--json-events`)
 
-Many Clio CLI subcommands provide structured JSON output for integration with scripts, CI pipelines, and external orchestrators.
+Many Clio Coder CLI subcommands provide structured JSON output for integration with scripts, CI pipelines, and external orchestrators.
 
 ### Subcommand JSON Summary
 

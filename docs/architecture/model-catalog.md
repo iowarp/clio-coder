@@ -2,12 +2,12 @@
 
 The [configuration guide](../guide/configuration-and-targets.md) explains model and target selection.
 
-Clio treats a selectable model as the intersection of these sources:
+Clio Coder treats a selectable model as the intersection of these sources:
 
 1. **Configured targets** in `settings.yaml` (`targets[]`, `defaultModel`, and optional `wireModels`).
 2. **Live runtime probes** (`probe()` / `probeModels()`), which discover models that appeared after Clio started.
 3. **Model profiles** from [`models/profiles.yaml`](../../models/profiles.yaml) and the operator's `<configDir>/model-profiles.yaml`. A profile supplies a model's capability flags, declared context and output maxima, thinking mechanism and recommended output budget. Loading and validation are in [`model-profiles.ts`](../../src/domains/providers/model-profiles.ts), and the match and precedence rules are in [model profiles](../guide/configuration-and-targets.md#model-profiles).
-4. **The sampling catalog**, Clio's bundled YAML under `src/domains/providers/models/**` plus user and project overlays. It supplies per-mode sampling presets and the family id, nothing else.
+4. **The sampling catalog**, Clio Coder's bundled YAML under `src/domains/providers/models/**` plus user and project overlays. It supplies per-mode sampling presets and the family id, nothing else.
 5. **The Pi model catalog**, which supplies cloud model rows, their context windows (as labeled estimates) and their rate estimates.
 
 A target's cost is not a catalog fact. Pricing is declared per target and is never per model; see [pricing and cost provenance](../guide/configuration-and-targets.md#pricing-and-cost-provenance) for the resolution order that falls back to a Pi catalog estimate.
@@ -57,7 +57,7 @@ When authoring a profile or field note, identify the exact model, artifact, quan
 
 Engine-visible sampling lives in the catalog under `quirks.sampling`, with thinking mechanism and budgets under the profile's `behavior.thinking`.
 
-Clio sends `quirks.sampling.thinking` on every request whose turn reasons and `quirks.sampling.instruct` on every other one, on OpenAI-compatible, LiteLLM and native Ollama runtimes. A family with only `instruct` sends it in both modes. A server's sampler preset applies only to a request that carries no sampler, so it is the fallback for other clients and never the setting for a Clio turn. The sampler travels as `temperature` plus top-level body fields: `top_p`, `top_k`, `min_p`, `presence_penalty`, `frequency_penalty` and `repeat_penalty`, which is spelled `repetition_penalty` for `vllm` and `sglang`. A request-level `samplingParams` key wins per key. The one-run flags (`--temperature`, `--top-p`, `--top-k`, `--min-p`) override both profiles. The packaged Qwen3.8-27B and Qwen3.5-4B entries carry separate thinking and instruct presets from their upstream cards. Finetune-specific presets belong in a local catalog overlay; Clio does not infer a base model's sampler for an unrecognized finetune.
+Clio Coder sends `quirks.sampling.thinking` on every request whose turn reasons and `quirks.sampling.instruct` on every other one, on OpenAI-compatible, LiteLLM and native Ollama runtimes. A family with only `instruct` sends it in both modes. A server's sampler preset applies only to a request that carries no sampler, so it is the fallback for other clients and never the setting for a Clio Coder turn. The sampler travels as `temperature` plus top-level body fields: `top_p`, `top_k`, `min_p`, `presence_penalty`, `frequency_penalty` and `repeat_penalty`, which is spelled `repetition_penalty` for `vllm` and `sglang`. A request-level `samplingParams` key wins per key. The one-run flags (`--temperature`, `--top-p`, `--top-k`, `--min-p`) override both profiles. The packaged Qwen3.8-27B and Qwen3.5-4B entries carry separate thinking and instruct presets from their upstream cards. Finetune-specific presets belong in a local catalog overlay; Clio does not infer a base model's sampler for an unrecognized finetune.
 
 Bundled entries under `src/domains/providers/models/**/*.yaml` describe curated model families. LM Studio (`lmstudio`) routing and capability reporting use the HTTP adapter.
 
@@ -67,7 +67,7 @@ Use a catalog overlay when a local endpoint needs a sampling preset for a model 
 
 Overlay roots are loaded in this order, with later roots winning equally specific `matchPatterns`:
 
-1. Bundled Clio catalog: `src/domains/providers/models/**` or packaged `dist/providers-models`.
+1. Bundled Clio Coder catalog: `src/domains/providers/models/**` or packaged `dist/providers-models`.
 2. User overlay: `$CLIO_CODER_CONFIG_DIR/model-catalog.d` or the platform config equivalent.
 3. Project overlay: `.clio-coder/model-catalog.d` under the current working directory.
 4. Extra overlay roots from `CLIO_CODER_MODEL_CATALOG_DIRS`, separated by the platform path delimiter.
@@ -136,7 +136,7 @@ Use this shape when testing a subscription model, homelab GPU target, research-l
 
 ### Outcome
 - Status: candidate | verified | limited | avoid
-- Recommended Clio runtime:
+- Recommended Clio Coder runtime:
 - Required profile fields:
 - Known failures:
 - Additional configurations to evaluate:
@@ -144,13 +144,13 @@ Use this shape when testing a subscription model, homelab GPU target, research-l
 
 ## Reasoning Controls and Thinking Replay Semantics
 
-Clio evaluates thinking mechanisms per model target and manages live reasoning streams. The mechanism for a model is the `behavior.thinking.mechanism` of its profile, one of `none`, `effort-levels`, `budget-tokens`, `on-off` or `always-on`; [the provider adapter cookbook](provider-adapter-cookbook.md) defines each. The shipped interactive default is `chat.thinkingLevel: low`. The independent fleet worker default remains `fleet.default.thinkingLevel: off`; an explicit target, profile, roster member, command option, or in-session selection can override the applicable setting.
+Clio Coder evaluates thinking mechanisms per model target and manages live reasoning streams. The mechanism for a model is the `behavior.thinking.mechanism` of its profile, one of `none`, `effort-levels`, `budget-tokens`, `on-off` or `always-on`; [the provider adapter cookbook](provider-adapter-cookbook.md) defines each. The shipped interactive default is `chat.thinkingLevel: low`. The independent fleet worker default remains `fleet.default.thinkingLevel: off`; an explicit target, profile, roster member, command option, or in-session selection can override the applicable setting.
 
 - **Ollama (`ollama`, native API):** Ollama uses native `think` request controls and the response's `message.thinking` field. Reasoning increments stream through the native thinking channel.
 - **LM Studio (`lmstudio`):** Chat uses the OpenAI-compatible `/v1/chat/completions` surface, including its `reasoning` stream field. Clio controls thinking only with `reasoning_effort` and never sends `chat_template_kwargs` to LM Studio. See <https://lmstudio.ai/docs/developer/openai-compat/chat-completions>.
 - **LiteLLM (`litellm`):** This is a gateway runtime, not an `openai-compat` alias. Authenticated `/v1/models` controls selectable aliases; `/v1/model/info` (or `/model/info`) enriches exact matches. Restricted detail or public liveness access does not invalidate a successful listing. An explicitly empty listing stays empty, and detail-only aliases are unverified hints. Clio records the physical deployment reported by `x-litellm-*` response headers. Deterministic gateways should publish one `node/model` name per deployment; genuine multi-deployment aliases expose only the capabilities guaranteed by every route and use the smallest unanimously published context and output limits. Defaults stay conservative when metadata is absent: tools, vision, reasoning, and structured output are not inferred. Explicitly advertised schema support uses standard `json_schema` on the wire. Gateway requests use no hidden OpenAI SDK retries. Stable session ids, request tags, optional request-level timeouts, and observed server retry and fallback headers remain supported. Without an `lmstudio.load` profile, residency is observe-only because the gateway owns loading and eviction behind the route; with one, the rules in [LM Studio load profile](../guide/configuration-and-targets.md#lm-studio-load-profile) apply to a route that declares a single LM Studio deployment.
 - **OpenAI Completions (`openai-completions`):** The OpenAI-compatible completions provider preserves thinking blocks within assistant messages. Where thinking is enabled and the provider supports thinking signatures (`reasoning_content`, `reasoning`, `reasoning_text`), it preserves thinking blocks across turns.
-- **Anthropic (`anthropic`, `anthropic-max`):** Pi's `streamSimple` assembles the thinking request. Clio removes thinking and effort only on forced-tool rounds for Claude models that accept forced choice.
+- **Anthropic (`anthropic`, `anthropic-max`):** Pi's `streamSimple` assembles the thinking request. Clio Coder removes thinking and effort only on forced-tool rounds for Claude models that accept forced choice.
 - **Reasoning-never models (`thinking.mechanism: none`):** Clio sends no thinking fields or parameters, replays no thinking blocks, surfaces no thinking events to the TUI, and does not preserve or log reasoning token usage in metrics.
 
 ### Output token limit interruption during reasoning and thinking replay
@@ -190,12 +190,12 @@ Subscription models are registered and managed as standard HTTP/cloud targets, e
 ### LM Studio Host and Instance Resolution
 
 LM Studio lists downloadable model keys alongside loaded model instances, and instances hosted on a peer target also appear in discovery. To prevent duplicate instance loading:
-- Clio resolves a requested model id against the target host's currently loaded instances.
+- Clio Coder resolves a requested model id against the target host's currently loaded instances.
 - Bare keys that already have a resident instance are never sent as raw keys, which avoids duplicate GPU allocations.
 - Resolution prefers the instance named by the target's `defaultModel`, then an instance that no other configured LM Studio host also reports.
 - An instance that another target also reports is a peer projection and is noted as `also loaded on <targets>`.
-- Unloaded keys can trigger the server's just-in-time load policy. Explicit REST loading requires a lifecycle other than `user-managed` and configured load options; `user-managed` never grants Clio explicit load or unload authority.
-- Only recognized resource-capacity errors permit fallback eviction of Clio-owned instances. Invalid options and authentication errors do not; a failed replacement triggers a bounded restoration attempt.
+- Unloaded keys can trigger the server's just-in-time load policy. Explicit REST loading requires a lifecycle other than `user-managed` and configured load options; `user-managed` never grants Clio Coder explicit load or unload authority.
+- Only recognized resource-capacity errors permit fallback eviction of Clio Coder-owned instances. Invalid options and authentication errors do not; a failed replacement triggers a bounded restoration attempt.
 
 ### llama.cpp Residency and Sleep Handling
 
@@ -225,5 +225,5 @@ Interactive `/model` search applies fuzzy matching across provider-qualified sea
 2. Add or update an entry in `<configDir>/model-profiles.yaml` with capabilities, thinking behavior and a recommended output budget, and add a catalog overlay for sampling when the model needs a preset.
 3. Add focused unit/integration coverage when behavior changes engine routing.
 4. Refresh `/model` with `R` and verify the selected row reports the expected source and capabilities.
-5. Promote the cleaned profile into the packaged `models/profiles.yaml` only when the model family is ready to bless for Clio users.
+5. Promote the cleaned profile into the packaged `models/profiles.yaml` only when the model family is ready to bless for Clio Coder users.
 6. Promote the cleaned field note into a cookbook, guideline, or community blog post.

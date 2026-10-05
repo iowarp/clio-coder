@@ -14,7 +14,7 @@ It checks the installation, configured connections, model-list evidence, local w
 | --- | --- |
 | OK | The check passed |
 | INFO | A fact that usually needs no action, such as an HPC compiler that is not on `PATH` |
-| WARN | Worth attention; Clio can still work |
+| WARN | Worth attention; Clio Coder can still work |
 | !! | A broken requirement; doctor exits with an error |
 
 A live model list, a cached list, and a provider catalog are distinct evidence. A reachable endpoint does not establish that a model will answer well or call tools. The capacity row reports CPUs and available memory; it does not measure GPU memory or model fit.

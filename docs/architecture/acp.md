@@ -1,18 +1,18 @@
 # Agent Client Protocol (ACP) Server
 
-Clio serves the Agent Client Protocol over stdio with `clio-coder acp`, and she acts as an ACP client when she delegates to an external peer. This page defines the transport, capability negotiation, session and prompt lifecycle, extension methods, permission mediation, bounds, and error taxonomy of both directions. The [coding agent interoperability guide](../guide/interop.md) covers the operator workflow for external agents. The desktop GUI is an ACP client of this server, described in the [GUI guide](../guide/gui.md).
+Clio Coder serves the Agent Client Protocol over stdio with `clio-coder acp` and acts as an ACP client when delegating to an external peer. This page defines the transport, capability negotiation, session and prompt lifecycle, extension methods, permission mediation, bounds, and error taxonomy of both directions. The [coding agent interoperability guide](../guide/interop.md) covers the operator workflow for external agents. The desktop GUI is an ACP client of this server, described in the [GUI guide](../guide/gui.md).
 
 Source: `src/engine/acp/`, `src/cli/acp.ts`, `assets/acp-registry/`.
 
 ## Overview
 
-The server speaks ACP v1 (schema v1.23.0) as newline-delimited JSON-RPC 2.0 over stdin and stdout (`src/engine/acp/transport.ts`). `initialize` always answers `protocolVersion: 1`; it does not reject a client that asks for another version. External IDEs, editors such as Zed, and orchestration engines drive Clio sessions through it.
+The server speaks ACP v1 (schema v1.23.0) as newline-delimited JSON-RPC 2.0 over stdin and stdout (`src/engine/acp/transport.ts`). `initialize` always answers `protocolVersion: 1`; it does not reject a client that asks for another version. External IDEs, editors such as Zed, and orchestration engines drive Clio Coder sessions through it.
 
 ```mermaid
 graph LR
-    client[External ACP Client] <-->|JSON-RPC 2.0 / stdio| server[Clio ACP Server]
+    client[External ACP Client] <-->|JSON-RPC 2.0 / stdio| server[Clio Coder ACP Server]
     server --> mediator[Tool Mediator & Safety Net]
-    mediator --> engine[Clio Execution Engine]
+    mediator --> engine[Clio Coder Execution Engine]
     mediator --> session[Session Ledger v6]
 ```
 
@@ -25,9 +25,9 @@ clio-coder acp auth login
 
 `clio-coder --acp [options]` is an exact alias: the global parser rewrites `--acp` into the `acp` command and passes every later argument to the same option parser, stdout guard, and boot path. Global boot flags go before it. `acp` honors `--api-key KEY`, `--no-context-files` (`-nc`), `--no-skills`, and `--skill PATH`. `--with-panes` and `--no-panes` are refused. An unknown option or an invalid value prints the usage text and exits 2. `--help` prints it and exits 0.
 
-- `--cwd PATH`: pins the workspace. The path is resolved and canonicalized with `fs.realpath`, so a symlinked root, a trailing slash, and a `/.` suffix all name the same workspace. Clio enters it before she reads settings, builds project context, or opens a session ledger. A path that does not exist or cannot be entered exits 2 without starting the server. Every session request must then name that root.
+- `--cwd PATH`: pins the workspace. The path is resolved and canonicalized with `fs.realpath`, so a symlinked root, a trailing slash, and a `/.` suffix all name the same workspace. Clio Coder enters it before reading settings, building project context, or opening a session ledger. A path that does not exist or cannot be entered exits 2 without starting the server. Every session request must then name that root.
 - `--permission-timeout MS`: the server-side ceiling for one mediated permission request, a whole number from 1 through `2147483647` milliseconds. Other values are refused before the protocol server starts. It overrides `integrations.externalAgents.defaults.permissionTimeoutMs` for this server only, which defaults to `DEFAULT_DELEGATION_PERMISSION_TIMEOUT_MS = 120000` (`src/core/defaults.ts`). The same ceiling bounds one interview round and one forwarded worker ask. If the timer wins on a main-agent request, the approval expires, the active turn is aborted, every parked call for that turn is settled only so execution can unwind, and `session/prompt` fails with `permission_expired`. Expiry is audited as `expired`, never as a human denial, and no denial result reaches a continuing model loop. A client may enforce a shorter policy by sending `session/cancel`.
-- `acp auth login`: opens Clio's interactive Quick Connect flow (`configure --quick`). It is the process a terminal authentication method launches; it does not serve the protocol.
+- `acp auth login`: opens Clio Coder's interactive Quick Connect flow (`configure --quick`). It is the process a terminal authentication method launches; it does not serve the protocol.
 
 With or without `--cwd`, the server opens the stdio transport and answers `initialize`, `authenticate`, and `logout` before it loads a workspace. The answer to `initialize` is what an [attended client](#attended-clients) advertises, so the boot that follows builds its tool surface from it. Without `--cwd`, the first `session/new`, `session/load`, or `session/resume` selects its absolute existing `cwd`. A first `session/list` with a `cwd` filter selects that directory, and one without a filter selects the launch directory. Any other workspace-dependent session or `_clio-coder/*` method called first also selects the launch directory. The selected root is canonicalized, entered, and held for the process lifetime. Requests that arrive during boot wait for project trust, settings, context, hooks, and tools to load. A later request naming another canonical root fails with `-32602` `session_cwd_mismatch`, and the message names the bound root.
 
@@ -49,7 +49,7 @@ Framing rules:
 | `sessionCapabilities` | `{close: {}, list: {}, delete: {}, resume: {}}` |
 | `auth` | `{logout: {}}` |
 
-Every Clio extension is namespaced under `agentCapabilities._meta`, so a strict generic ACP v1 client can use session discovery, modes, and configuration options without reading Clio metadata. The shipped composition (`src/cli/acp.ts`) wires every dependency, so it advertises all of the keys below. A narrower embedded or test composition omits the key whose dependency is absent, and a flag never claims a method the composition cannot serve.
+Every Clio Coder extension is namespaced under `agentCapabilities._meta`, so a strict generic ACP v1 client can use session discovery, modes, and configuration options without reading Clio Coder metadata. The shipped composition (`src/cli/acp.ts`) wires every dependency, so it advertises all of the keys below. A narrower embedded or test composition omits the key whose dependency is absent, and a flag never claims a method the composition cannot serve.
 
 | Key | Payload | Present when |
 | --- | --- | --- |
@@ -98,7 +98,7 @@ A client opts into optional behavior under `initialize.params.clientCapabilities
 
 Before it admits a prompt, the server checks that the selected target has usable credentials through the provider auth contract, without resolving or echoing a secret. A desktop service does not inherit a terminal's API keys: save one with `clio-coder auth login <target>`, then reopen the session on a fresh server process, because a running server does not reread the credential store. A missing credential fails the prompt with `-32000` `prompt_not_admitted` and reason `authentication-required`.
 
-Clio does not call `fs/*` or `terminal/*` on a client. Her tools run inside the Clio process, so `clientCapabilities.fs` and `clientCapabilities.terminal` are ignored.
+Clio does not call `fs/*` or `terminal/*` on a client. Tools run inside the Clio Coder process, so `clientCapabilities.fs` and `clientCapabilities.terminal` are ignored.
 
 ## Method surface
 
@@ -156,7 +156,7 @@ Methods that take a session carry `sessionId`. Unknown keys, and values outside 
 
 ## Safe wire profile
 
-This section states what the server guarantees on the wire. It is the contract any strict client can hold Clio to.
+This section states what the server guarantees on the wire. It is the contract any strict client can hold Clio Coder to.
 
 ### Error envelope
 
@@ -202,7 +202,7 @@ At most one `session/new`, `session/load`, or `session/resume` is hosted at a ti
 
 ### Workspace pinning
 
-The three openers require a non-blank absolute `cwd` naming an existing directory. A relative path or an unusable directory fails `-32602`. The first valid request binds the process before any workspace graph loads unless `--cwd` already bound it. Clio never changes directories after the graph loads.
+The three openers require a non-blank absolute `cwd` naming an existing directory. A relative path or an unusable directory fails `-32602`. The first valid request binds the process before any workspace graph loads unless `--cwd` already bound it. Clio Coder never changes directories after the graph loads.
 
 Workspace authority is the exact canonical bound directory, never the enclosing Git root. Git probes treat an ignored nested scratch directory as non-Git. An unignored monorepo subdirectory may inherit repository-level branch, upstream, and remote facts, but dirty status and recent commits are scoped to the workspace path and no parent path is returned.
 
@@ -283,11 +283,11 @@ Three frames are pushed on change and never on a timer (`src/engine/acp/live-tel
 
 **`plan`**: sent after a tool call settles or a turn settles, only when the task board differs from the last plan sent. ACP plan status has no blocked or dropped state, so a `blocked` task goes out as `pending`, a `cancelled` task is omitted, and every entry has `medium` priority because the board has none. Each entry's `_meta["clio-coder/plan"]` holds `{id, status, origin, reason}` with the real status. The plan's own `_meta["clio-coder/plan"]` holds `{version: 1, boardId, title, cancelled, truncated}`. At most 100 entries are sent, and text is cut at 1 KiB.
 
-**Workspace**: `_meta["clio-coder/workspace"] = {version: 1, cwd, isGit, branch, dirty, ahead, behind, remoteUrl, projectType, capturedAt}` rides the session opener responses. After any tool whose kind is not `read`, `search`, or `fetch` settles, Clio re-probes the Git facts off the loop with at most one probe in flight, and when the facts differ (ignoring `capturedAt`) she sends a `session_info_update` carrying the same key. `remoteUrl` has any userinfo removed, fields are null when unknown, and the prompt response waits at most 2 seconds for a probe in flight.
+**Workspace**: `_meta["clio-coder/workspace"] = {version: 1, cwd, isGit, branch, dirty, ahead, behind, remoteUrl, projectType, capturedAt}` rides the session opener responses. After any tool whose kind is not `read`, `search`, or `fetch` settles, Clio re-probes the Git facts off the loop with at most one probe in flight. A change in those facts (ignoring `capturedAt`) triggers a `session_info_update` carrying the same key. `remoteUrl` has any userinfo removed, fields are null when unknown, and the prompt response waits at most 2 seconds for a probe in flight.
 
 ### Trust notice
 
-Clio withholds authority from project files the operator never approved. The settings, hooks, safety, extension and plugin loaders drop an untrusted or changed `.clio-coder/` file quietly, so a client whose project-level model "does not work" needs the reason at session start. Each opener response carries `_meta["clio-coder/trust"] = {ignored: [...]}`. An entry is `{surface, file, verdict, fix}`: `surface` is `settings`, `hooks`, `safety`, `extensions`, or `plugins`; `file` is the project file, which for `extensions` and `plugins` is the install state `.clio-coder/extensions/state.json` or `.clio-coder/plugins/state.json`; `verdict` is `untrusted` or `changed`; `fix` is `clio-coder config trust <surface>`. An entry exists only for a file that is present, so a workspace with no install state reports nothing for that surface, and a surface that is approved or inherited from a Clio task worktree's origin reports nothing. The list is empty when nothing was ignored. The report is advisory, and a capture failure never fails the opener. The `clio-coder/trust` capability names the five surfaces and the three methods that report them (`src/engine/acp/trust-notice.ts`).
+Clio withholds authority from project files the operator never approved. The settings, hooks, safety, extension and plugin loaders drop an untrusted or changed `.clio-coder/` file quietly, so a client whose project-level model "does not work" needs the reason at session start. Each opener response carries `_meta["clio-coder/trust"] = {ignored: [...]}`. An entry is `{surface, file, verdict, fix}`: `surface` is `settings`, `hooks`, `safety`, `extensions`, or `plugins`; `file` is the project file, which for `extensions` and `plugins` is the install state `.clio-coder/extensions/state.json` or `.clio-coder/plugins/state.json`; `verdict` is `untrusted` or `changed`; `fix` is `clio-coder config trust <surface>`. An entry exists only for a file that is present, so a workspace with no install state reports nothing for that surface, and a surface that is approved or inherited from a Clio Coder task worktree's origin reports nothing. The list is empty when nothing was ignored. The report is advisory, and a capture failure never fails the opener. The `clio-coder/trust` capability names the five surfaces and the three methods that report them (`src/engine/acp/trust-notice.ts`).
 
 ### Safe settings and targets
 
@@ -413,7 +413,7 @@ Every frame the server writes is bounded (`src/engine/acp/types.ts`, `src/engine
 - Every string inside `rawInput` and `rawOutput` is truncated at 4 KiB with the same marker, with one path-aware exception: `rawOutput.result.details.diff` is bounded at 28 KiB (`ACP_MAX_RAW_RECORD_BYTES` minus one generic string budget). A top-level `diff`, an array member, and every sibling string stay at 4 KiB. The walk stops at depth 8 and replaces anything deeper with `"[depth]"`. If the bounded record still serializes past 32 KiB it becomes `{"truncated": true, "bytes": <length of the record before bounding>}`.
 - Every `toolCallId` is at most 128 bytes. An engine id that is longer, missing, or already claimed this turn travels under a per-turn `clio-coder-tool-<n>` alias, and the same alias serves the call's `tool_call`, `tool_call_update`, and permission request. Identity runs one way: an engine id that starts a second call mints a fresh alias, and an end names only its own engine id's calls. An end for an id the turn never started is dropped and reported on stderr instead of borrowing another call's id. An end with no engine id binds to the most recently opened call still running, then to the most recently emitted call of the turn. Every wire id receives exactly one terminal update, and a duplicate or late end is dropped. Nothing on the end path mints an id, so an update never announces a call the client never saw start.
 - `locations` carries the resolved absolute path for the path-bearing tools (`read`, `write`, `edit`, `ls`, `grep`, `find`) when the arguments name one, at most 4 KiB and deliberately not realpath'ed, since an `edit` or `write` target may not exist yet. The field is omitted rather than sent as `null` or `[]`. The permission request reuses the exact bounded snapshot.
-- A live prompt emits at most 128 `tool_call` starts. The 129th start emits no call, cancels the turn, suppresses later chat events, fails every open call, and resolves `session/prompt` with `max_turn_requests`. Clio's configurable execution guard is a separate engine policy.
+- A live prompt emits at most 128 `tool_call` starts. The 129th start emits no call, cancels the turn, suppresses later chat events, fails every open call, and resolves `session/prompt` with `max_turn_requests`. Clio Coder's configurable execution guard is a separate engine policy.
 
 ### Admission failure
 
@@ -427,14 +427,14 @@ A person is at the other end of an ACP connection only when the client says so a
 
 | Opt-in | What it turns on |
 | --- | --- |
-| `clio-coder/interviews` | The `ask_user` tool, the interview guidance in the session prompt, and harness cards such as the task-worktree merge card. Clio echoes `{version: 1, request, cancel}` under `agentCapabilities._meta` when she accepted the opt-in, and only when the payload's `request` is exactly `_clio-coder/interview/request`. |
+| `clio-coder/interviews` | The `ask_user` tool, the interview guidance in the session prompt, and harness cards such as the task-worktree merge card. After accepting the opt-in, Clio echoes `{version: 1, request, cancel}` under `agentCapabilities._meta` only when the payload's `request` is exactly `_clio-coder/interview/request`. |
 | `clio-coder/workerPermissions` | A dispatched worker's permission ask is sent as `session/request_permission`. Accepted only when `withdraw` is exactly `_clio-coder/permission/withdraw`. |
 
 **Interviews.** A round is the server-to-client request `_clio-coder/interview/request` with `{sessionId, interviewId, questions}`. It carries one to four questions, each `{question, header?, options?, multi_select?}` with at most 16 options. Question text is cut to 8192 characters, a header to 128, an option label to 512, and a description to 2048, after control characters are stripped. The reply is `{answers: [{question, answer, options?, value?}], cancelled?}`. The server checks it against the questions offered: one answer per question in order, each `question` equal to the offered text, a non-empty `answer` of at most 16384 characters, no `cancelled` other than `false`, and any `options` limited to offered labels, one unless the question is `multi_select`, with an `answer` that joins the chosen labels and any typed `value` with `; `. A cancelled reply, a request the client refuses, a reply that fails these checks, a wait that outlives `--permission-timeout`, and a turn abort all read as the operator's cancel. A turn abort and a session close cancel a round still waiting, and each sends `_clio-coder/interview/cancel` with `{sessionId, interviewId}`.
 
 **Worker permission asks.** A worker ask that needs a person (`escalation: true` on the bus: an ask under `fleet.permissions.mode: escalate`, an operator-authority rail, or an ask the main agent forwarded below `yolo`) goes out as `session/request_permission`. It is bound to the session that owns the active turn, and an ask from any other session is ignored. It binds to the open tool call that spawned the run, else the newest open tool call, and retries the binding every 200 ms until the ask's own window closes, because the model is often between calls when a worker asks. The window is the ask's `timeoutMs` capped by `--permission-timeout`, and it covers the wait for the client's answer. If no tool call opens in that window the ask stays with the worker's timeout fallback and nothing is denied in the operator's name. An answer that is not one of the three offered options, or that arrives after the window closed, is withdrawn rather than read as a denial. The ask shares the one outstanding-request queue with main-agent asks. `allow-once` approves the worker, the other two offered options deny it, and `reject-and-stop` also cancels the active turn.
 
-The request's `_meta` carries `clio-coder/decision` with `origin: {kind: "worker", agentId, runId}` and `clio-coder/workerAsk` holding `{version: 1, requestId, requestedBy, agentId, approvalAuthority?, forwardedByMain, fallback, timeoutMs?}`. `approvalAuthority` is `operator` for a rail only a person clears and `main` for an ordinary ask. Only identifiers and enums appear, so no worker prose reaches it. When the worker settles the ask first (it timed out, its run ended, or its owner revoked it), or the server stops waiting, she sends the notification `_clio-coder/permission/withdraw` with `{sessionId, requestId}`, because the wire cannot cancel one request and a card left on screen would make the client refuse the next approval as a second pending one.
+The request's `_meta` carries `clio-coder/decision` with `origin: {kind: "worker", agentId, runId}` and `clio-coder/workerAsk` holding `{version: 1, requestId, requestedBy, agentId, approvalAuthority?, forwardedByMain, fallback, timeoutMs?}`. `approvalAuthority` is `operator` for a rail only a person clears and `main` for an ordinary ask. Only identifiers and enums appear, so no worker prose reaches it. When the worker settles the ask first (it timed out, its run ended, or its owner revoked it), or the server stops waiting, Clio sends the notification `_clio-coder/permission/withdraw` with `{sessionId, requestId}`, because the wire cannot cancel one request and a card left on screen would make the client refuse the next approval as a second pending one.
 
 ### Permission requests
 
@@ -492,13 +492,13 @@ Per-message `_meta` keys, beyond the capability keys above. The pushed telemetry
 
 ## Tool presentation and outbound delegation governance
 
-The hosted server presents ordinary Clio tool-registry activity to its client. Separately, when Clio delegates to an external ACP peer, she mediates that peer's permission requests before they can affect the workspace.
+The hosted server presents ordinary Clio Coder tool-registry activity to its client. Separately, when Clio delegates to an external ACP peer, it mediates that peer's permission requests before they can affect the workspace.
 
 ### Canonical tool mapping
 
-The hosted server maps Clio tool names onto the closed ACP `ToolKind` enum (`src/engine/acp/server.ts`). The kind follows the capability a gateway call reaches.
+The hosted server maps Clio Coder tool names onto the closed ACP `ToolKind` enum (`src/engine/acp/server.ts`). The kind follows the capability a gateway call reaches.
 
-| Clio tool | ACP `ToolKind` |
+| Clio Coder tool | ACP `ToolKind` |
 | :--- | :--- |
 | `read`, `ls`, `context`, `monitor` | `read` |
 | `write`, `edit`, `artifact` | `edit` |
@@ -519,7 +519,7 @@ An approved call is answered with the peer's `allow_once` option only. Clio neve
 
 `toolGovernance` has three values: `clio-coder-policy` (the default), `deny-all`, and `agent-managed`. `agent-managed` hands the decision to the peer. It is an explicit operator opt-in, requires `trustedUnmediated: true` on the entry (honored only in user settings, never project settings), and cannot enforce `--read-only`, so admission refuses that combination before it starts the peer.
 
-As a client, Clio advertises no client capability in `initialize` (`clientCapabilities: {}`) because she serves no `fs/*` or `terminal/*` method. Her one request handler is `session/request_permission`, and her one notification handler is `session/update`. She sends a single text block per `session/prompt` and `mcpServers: []` on `session/new`. When a delegation names a model, Clio picks it from the peer's first `select` config option in category `model` and sets it with `session/set_config_option`. A thinking level uses the first option in category `thought_level`, or is folded into the model id as `model[level]` when the peer has no such option. A peer without the option cannot take a named model, and the delegation fails before the prompt. If the peer's response reports another current model, the delegation fails. The receipt's `delegation.selectedModelId` records the value Clio selected, or the option's current value when no model was named.
+As a client, Clio advertises no client capability in `initialize` (`clientCapabilities: {}`) because it serves no `fs/*` or `terminal/*` method. The only request handler is `session/request_permission`, and the only notification handler is `session/update`. Clio sends a single text block per `session/prompt` and `mcpServers: []` on `session/new`. When a delegation names a model, Clio picks it from the peer's first `select` config option in category `model` and sets it with `session/set_config_option`. A thinking level uses the first option in category `thought_level`, or is folded into the model id as `model[level]` when the peer has no such option. A peer without the option cannot take a named model, and the delegation fails before the prompt. If the peer's response reports another current model, the delegation fails. The receipt's `delegation.selectedModelId` records the value Clio selected, or the option's current value when no model was named.
 
 Limits and timing for an outbound run:
 
@@ -533,23 +533,23 @@ This outbound path is distinct from the hosted server's permission bridge. The h
 ## Security and boundary guarantees
 
 1. **Autonomy snapshotting.** Autonomy is snapshotted at `session/new`, `session/load`, or `session/resume`. A later global configuration change does not alter the bound remote session's security policy. Only an explicit idle `session/set_mode` or `session/set_config_option` changes its next prompt.
-2. **Metadata namespacing.** Clio extensions travel only in namespaced `_meta` fields (`clio-coder/...`), so strict clients such as Zed's serde deserializers never meet an unmapped top-level key.
-3. **No external outcome overrides.** An external ACP process cannot self-assert a terminal outcome code. `worker_final_output_missing`, for one, is enforced at Clio's trusted finalization seam.
+2. **Metadata namespacing.** Clio Coder extensions travel only in namespaced `_meta` fields (`clio-coder/...`), so strict clients such as Zed's serde deserializers never meet an unmapped top-level key.
+3. **No external outcome overrides.** An external ACP process cannot self-assert a terminal outcome code. `worker_final_output_missing`, for one, is enforced at Clio Coder's trusted finalization seam.
 4. **Closed projections.** Settings, targets, board, tree, ledger, usage, extensions, artifacts, and fleet views are projections with fixed shapes and byte limits. Paths, provider text, credentials, and prompts stay host-side.
 
 ## Delegation peers in the transcript
 
-In the other direction Clio is an ACP client. `/delegate <agent-id> <task>` and any dispatch to an agent id configured under `integrations.externalAgents.entries` run the task on an external peer such as `claude-code`, `codex`, or `opencode`. Clio provides pinned outbound ACP bridge recipes for Claude Code (`@zed-industries/claude-code-acp`) and Codex (`@agentclientprotocol/codex-acp`) and uses OpenCode's native `opencode acp`. The Antigravity CLI and Pi integrations have no built-in ACP recipe. Their managed headless runtimes and Herdr pane handoffs are described in the [interoperability guide](../guide/interop.md#delegate-work-to-an-installed-coding-agent).
+In the other direction Clio Coder is an ACP client. `/delegate <agent-id> <task>` and any dispatch to an agent id configured under `integrations.externalAgents.entries` run the task on an external peer such as `claude-code`, `codex`, or `opencode`. Clio Coder provides pinned outbound ACP bridge recipes for Claude Code (`@zed-industries/claude-code-acp`) and Codex (`@agentclientprotocol/codex-acp`) and uses OpenCode's native `opencode acp`. The Antigravity CLI and Pi integrations have no built-in ACP recipe. Their managed headless runtimes and Herdr pane handoffs are described in the [interoperability guide](../guide/interop.md#delegate-work-to-an-installed-coding-agent).
 
-A delegated peer is a worker like any other on screen. The adapter maps the peer's `agent_message_chunk` and thought chunks onto the same dispatch event stream a local Clio worker publishes, so the peer's answer renders as the same attributed block with the same fold behavior, the same `--share` and `/share` path into the main agent's context, and the same replay from a sealed receipt. A peer's `plan` update surfaces as a plan event. There is no ACP-specific UI path.
+A delegated peer is a worker like any other on screen. The adapter maps the peer's `agent_message_chunk` and thought chunks onto the same dispatch event stream a local Clio Coder worker publishes, so the peer's answer renders as the same attributed block with the same fold behavior, the same `--share` and `/share` path into the main agent's context, and the same replay from a sealed receipt. A peer's `plan` update surfaces as a plan event. There is no ACP-specific UI path.
 
-The header is where the difference shows. A local Clio worker names the target and model it ran on. A peer runs behind someone else's process and identifies the protocol used to reach it, so its header carries `(acp)` in place of a route, for example `◇ codex (acp) · run 7hq2ab` for an operator-started run. Its header ends with the outcome and the elapsed time, and its metrics row lists `tokens processed` and `tool calls` from the receipt the same way a local worker's does.
+The header is where the difference shows. A local Clio Coder worker names the target and model it ran on. A peer runs behind someone else's process and identifies the protocol used to reach it, so its header carries `(acp)` in place of a route, for example `◇ codex (acp) · run 7hq2ab` for an operator-started run. Its header ends with the outcome and the elapsed time, and its metrics row lists `tokens processed` and `tool calls` from the receipt the same way a local worker's does.
 
-ACP delegation receipts preserve peer-reported token totals, including explicit zero usage, and supported cost provenance without double-counting. A peer total is used when supplied; otherwise the four billed components (input, output, cache read, cache write) determine the total, and reasoning tokens are not added because a peer counts them inside output. Cost arrives as `costUsd` in Clio metadata or `cost.total` on legacy usage, never both. Unknown cost is not evidence of free execution.
+ACP delegation receipts preserve peer-reported token totals, including explicit zero usage, and supported cost provenance without double-counting. A peer total is used when supplied; otherwise the four billed components (input, output, cache read, cache write) determine the total, and reasoning tokens are not added because a peer counts them inside output. Cost arrives as `costUsd` in Clio Coder metadata or `cost.total` on legacy usage, never both. Unknown cost is not evidence of free execution.
 
 ### Typed intent on a delegated dispatch
 
-A dispatch to a delegation agent accepts typed intent and renders the declared scope into the plan approval artifact, so an operator sees what the peer was told to work on before it starts. The declaration grants nothing on this transport. The peer runs its own tool surface and Clio mediates no per-tool call, so a resolved write boundary would be a claim nothing enforces and is refused outright. Declare `read_roots` and `relevant_paths` to bound what the peer is asked to look at. For an ACP edit, use a Clio task worktree when Git isolation helps, then inspect the recorded branch and diff. The worktree does not confine the peer's other filesystem tools, and Clio's ACP permission policy covers only requests the peer reports. The compatibility rules and reason codes are the same as for any other producer; see [dispatch-typed-intent.md](dispatch-typed-intent.md).
+A dispatch to a delegation agent accepts typed intent and renders the declared scope into the plan approval artifact, so an operator sees what the peer was told to work on before it starts. The declaration grants nothing on this transport. The peer runs its own tool surface and Clio mediates no per-tool call, so a resolved write boundary would be a claim nothing enforces and is refused outright. Declare `read_roots` and `relevant_paths` to bound what the peer is asked to look at. For an ACP edit, use a Clio Coder task worktree when Git isolation helps, then inspect the recorded branch and diff. The worktree does not confine the peer's other filesystem tools, and Clio Coder's ACP permission policy covers only requests the peer reports. The compatibility rules and reason codes are the same as for any other producer; see [dispatch-typed-intent.md](dispatch-typed-intent.md).
 
 ## Client-side error taxonomy
 

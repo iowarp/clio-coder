@@ -53,14 +53,14 @@ Dispatched workers are non-interactive. Coordination between the orchestrator an
 
 ### 2.1 Worker Output Lanes
 
-Clio divides worker output into two isolated streams to protect control signals from bulk data starvation:
+Clio Coder divides worker output into two isolated streams to protect control signals from bulk data starvation:
 
 1. **Bulk Lane (`stdout`)**:
-   Streams turn execution events as single-line NDJSON objects, capped by `WORKER_BULK_FRAME_MAX_BYTES` (4 MiB). To prevent quadratic payload explosion during streaming, `projectWorkerEventForStdout` ([event-projection.ts](../../src/worker/event-projection.ts)) slims `message_update` events by stripping cumulative message snapshots before emission. The lane carries two families of frames. The agent loop's own events pass through unchanged: `agent_start`, `turn_start`, `message_start`, `message_update`, `message_end`, `tool_execution_start`, `tool_execution_update`, `tool_execution_end`, `turn_end`, and `agent_end`. The Clio events below ride beside them ([worker-events.ts](../../src/engine/worker-events.ts)):
+   Streams turn execution events as single-line NDJSON objects, capped by `WORKER_BULK_FRAME_MAX_BYTES` (4 MiB). To prevent quadratic payload explosion during streaming, `projectWorkerEventForStdout` ([event-projection.ts](../../src/worker/event-projection.ts)) slims `message_update` events by stripping cumulative message snapshots before emission. The lane carries two families of frames. The agent loop's own events pass through unchanged: `agent_start`, `turn_start`, `message_start`, `message_update`, `message_end`, `tool_execution_start`, `tool_execution_update`, `tool_execution_end`, `turn_end`, and `agent_end`. The Clio Coder events below ride beside them ([worker-events.ts](../../src/engine/worker-events.ts)):
 
    | Event | Payload |
    | --- | --- |
-   | `clio_coder_tool_start`, `clio_coder_tool_finish` | The Clio telemetry for one call. A start carries the tool, the call id, and a wall-clock anchor. A finish carries the tool, the call id, `durationMs`, the `outcome`, the safety `decision` (`allowed`, `blocked`, `permission_requested`), and the action class, rule, and reason behind a block. Receipts fold them into tool stats and safety decisions. |
+   | `clio_coder_tool_start`, `clio_coder_tool_finish` | The Clio Coder telemetry for one call. A start carries the tool, the call id, and a wall-clock anchor. A finish carries the tool, the call id, `durationMs`, the `outcome`, the safety `decision` (`allowed`, `blocked`, `permission_requested`), and the action class, rule, and reason behind a block. Receipts fold them into tool stats and safety decisions. |
    | `clio_coder_permission_escalated` | A parked call under the `escalate` posture: `requestId`, `tool`, `summary`, a sanitized `target` preview, optional `consequence` lines, the asking `axis`, the safety `decision` (`actionClass`, `reasons`, `reasonCode`, `ruleId`, `policySource`), `timeoutMs`, and for main-routed asks `authority` and `argDigest`. |
    | `clio_coder_permission_resolved` | How a permission-requiring call resolved: `tool`, `actionClass`, `mode` (`deny`, `fail`, `escalate`), `reason`, and optional `source` (`operator`, `timeout`, `policy`, `remembered`, `main`, `binding`), `requestId`, `decision` (`approved` or `denied`), and `authority`. |
    | `clio_coder_permission_grant_execution` | Whether a call a live grant released ran: `requestId`, `tool`, `phase` (`start`, `end`, `not_executed`), and `outcome` or `detail`. A worker that dies between `start` and `end` leaves the outcome unknown. |
@@ -218,7 +218,7 @@ runs on the `claude-code` runtime keep retries because the peer cannot mutate
 the workspace. The `codex-cli`, `pi-cli`, `opencode-cli`, and `antigravity`
 runtimes declare a one-shot external agent loop and never retry automatically,
 even when read-only. Every other subprocess run and every ACP delegation run
-fails closed on retry, because Clio cannot prove the failed attempt left the
+fails closed on retry, because Clio Coder cannot prove the failed attempt left the
 workspace unchanged and no isolated retry workspaces exist.
 
 Failover modes are:
@@ -485,4 +485,4 @@ Verify entry resolution for Python projects and the changed-test runners a fleet
 
 ## Antigravity conversation identity
 
-Antigravity resumes a conversation only when a caller explicitly supplies its conversation ID through the worker runtime. The dispatch tool exposes no resume argument. A nonempty ID must be at most 4096 UTF-8 bytes and contain no Unicode control characters; it is passed as a literal `--conversation` argument. Clio requires the first init conversation ID to match the requested ID and fails the run if agy starts a different conversation. An absent or empty ID starts fresh. Antigravity runs are never retried automatically.
+Antigravity resumes a conversation only when a caller explicitly supplies its conversation ID through the worker runtime. The dispatch tool exposes no resume argument. A nonempty ID must be at most 4096 UTF-8 bytes and contain no Unicode control characters; it is passed as a literal `--conversation` argument. Clio Coder requires the first init conversation ID to match the requested ID and fails the run if agy starts a different conversation. An absent or empty ID starts fresh. Antigravity runs are never retried automatically.

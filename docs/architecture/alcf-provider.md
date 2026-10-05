@@ -2,15 +2,15 @@
 
 The [configuration guide](../guide/configuration-and-targets.md) walks through choosing an ALCF target.
 
-Clio can use Argonne's ALCF inference gateway as an OpenAI-compatible target backed by Globus OAuth. The runtime id is `alcf` (tier `cloud`, API family `openai-completions`, auth `oauth`); each configured target points at one gateway cluster URL, such as Sophia or Metis.
+Clio Coder can use Argonne's ALCF inference gateway as an OpenAI-compatible target backed by Globus OAuth. The runtime id is `alcf` (tier `cloud`, API family `openai-completions`, auth `oauth`); each configured target points at one gateway cluster URL, such as Sophia or Metis.
 
 ## Login
 
 The login flow is SSH-friendly and needs no localhost callback. `clio-coder auth login alcf` prints a Globus authorize URL and asks you to paste back the displayed authorization code. A full redirect URL, a `code=` query string or the bare code are all accepted.
 
-[`alcf-oauth.ts`](../../src/engine/alcf-oauth.ts) implements the Globus native-app PKCE flow with the `S256` challenge, `access_type=offline` and a `session_required_single_domain` of `anl.gov,alcf.anl.gov`. The token response must carry a gateway grant and a refresh token, or the login fails. Clio treats the access token as expired five minutes before the server's expiry. The refresh is a Globus `refresh_token` grant that keeps the previous refresh token when the response omits a new one.
+[`alcf-oauth.ts`](../../src/engine/alcf-oauth.ts) implements the Globus native-app PKCE flow with the `S256` challenge, `access_type=offline` and a `session_required_single_domain` of `anl.gov,alcf.anl.gov`. The token response must carry a gateway grant and a refresh token, or the login fails. Clio Coder treats the access token as expired five minutes before the server's expiry. The refresh is a Globus `refresh_token` grant that keeps the previous refresh token when the response omits a new one.
 
-The credential is stored under the provider id `alcf` in `credentials.yaml` in the config directory, mode `0600`, through `openAuthStorage()`. Storage and refresh are Clio's own, the same path every OAuth runtime uses, as described in [auth](../guide/configuration-and-targets.md#auth).
+The credential is stored under the provider id `alcf` in `credentials.yaml` in the config directory, mode `0600`, through `openAuthStorage()`. Storage and refresh are Clio Coder's own, the same path every OAuth runtime uses, as described in [auth](../guide/configuration-and-targets.md#auth).
 
 ## Configure
 
@@ -40,7 +40,7 @@ clio-coder configure \
   --max-tokens 4096
 ```
 
-Sophia uses the `vllm` framework in the URL and serves `openai/`-prefixed model ids. Metis uses `api` and serves bare model ids. The runtime reads the cluster from the `/resource_server/<cluster>/` segment of the URL and picks the framework from it: `api` for `metis`, `vllm` for every other cluster. Clio sends the configured wire model id literally and does not rewrite it.
+Sophia uses the `vllm` framework in the URL and serves `openai/`-prefixed model ids. Metis uses `api` and serves bare model ids. The runtime reads the cluster from the `/resource_server/<cluster>/` segment of the URL and picks the framework from it: `api` for `metis`, `vllm` for every other cluster. Clio Coder sends the configured wire model id literally and does not rewrite it.
 
 Set a target as the chat default when you are ready:
 
@@ -74,7 +74,7 @@ ALCF reports no per-token price. A target's cost provenance is `unknown` until i
 The runtime uses these components:
 
 - [alcf-oauth.ts](../../src/engine/alcf-oauth.ts) implements the Globus PKCE paste-code OAuth flow.
-- [oauth.ts](../../src/engine/oauth.ts) registers the Clio-owned OAuth provider through the engine boundary, next to the Pi-provided Anthropic, OpenAI Codex and GitHub Copilot flows.
+- [oauth.ts](../../src/engine/oauth.ts) registers the Clio Coder-owned OAuth provider through the engine boundary, next to the Pi-provided Anthropic, OpenAI Codex and GitHub Copilot flows.
 - [alcf.ts](../../src/domains/providers/runtimes/cloud/alcf.ts) implements Sophia and Metis discovery and reuses the generic OpenAI-compatible chat synthesis.
 - `ProbeContext.authToken` carries a resolved stored, API or OAuth bearer into live probes.
 - ALCF rejects non-standard `chat_template_kwargs` request fields. The runtime marks synthesized models with `clioCoder.chatTemplateKwargsUnsupported`, and the OpenAI-compatible engine adapter reads that marker and omits the family-derived `chat_template_kwargs`. The accepted top-level `reasoning_effort` is independent of the marker.

@@ -1,6 +1,6 @@
 # Observability
 
-Clio records what a session and its workers did in a small set of local, durable files, and exposes them through the `/view` artifact viewer, the `clio-coder` inspection commands, ACP, and the graphical application. Every store below is a local file. No settings key named for telemetry exists. The one outbound read in this area is the subscription quota request each connected provider answers ([Subscription Quota](#subscription-quota)).
+Clio Coder records what a session and its workers did in a small set of local, durable files, and exposes them through the `/view` artifact viewer, the `clio-coder` inspection commands, ACP, and the graphical application. Every store below is a local file. No settings key named for telemetry exists. The one outbound read in this area is the subscription quota request each connected provider answers ([Subscription Quota](#subscription-quota)).
 
 | Store | Path | Written by | Read by |
 | --- | --- | --- | --- |
@@ -21,7 +21,7 @@ Clio records what a session and its workers did in a small set of local, durable
 
 ## The /view artifact viewer
 
-`/view` is the interactive artifact viewer for a Clio session. It keeps the live transcript compact while preserving a full inspection path for durable artifacts, task ledgers, and successful workspace outputs.
+`/view` is the interactive artifact viewer for a Clio Coder session. It keeps the live transcript compact while preserving a full inspection path for durable artifacts, task ledgers, and successful workspace outputs.
 
 ```text
 /view
@@ -42,7 +42,7 @@ The filter splits on whitespace and requires every token to match, case-insensit
 
 ## Trace retention and state usage
 
-The SQLite trace mirror at `<state-dir>/trace.sqlite` is disposable and bounded. By default Clio retains terminal runs for 30 days and limits the allocated database to 128 MiB, whichever limit is reached first, and `clio-coder trace prune` applies the policy on demand. The policy, its two environment variables, and the pruning algorithm are in [Trace Store](trace-store.md#retention-and-pruning).
+The SQLite trace mirror at `<state-dir>/trace.sqlite` is disposable and bounded. By default Clio Coder retains terminal runs for 30 days and limits the allocated database to 128 MiB, whichever limit is reached first, and `clio-coder trace prune` applies the policy on demand. The policy, its two environment variables, and the pruning algorithm are in [Trace Store](trace-store.md#retention-and-pruning).
 
 `clio-coder doctor` includes a `state storage` row with the recursive byte total for the state directory and the largest top-level contributor. For example:
 
@@ -78,7 +78,7 @@ The builder runs `buildEvidence({ dataDir, stateDir, runId })` to read the state
 
 After building the forensic bundle, the domain appends a metadata row to the sidecar index file located at `<stateDir>/evidence-index.json`. The file is kept as a JSON array acting as a bounded ring (capped at 1000 rows, `MAX_EVIDENCE_INDEX_ROWS`). A row for an existing `runId` replaces the old one and moves to the tail. Reads are tolerant: a missing or malformed file reads as empty and malformed rows are dropped.
 
-To prevent concurrent Clio processes from corrupting the index, writes are queued within the process and serialize across processes using the shared state-file locking mechanism.
+To prevent concurrent Clio Coder processes from corrupting the index, writes are queued within the process and serialize across processes using the shared state-file locking mechanism.
 
 An `EvidenceIndexRow` has the following schema. `succeeded`, `completionEvidenceWarning`, and `ungroundedClaims` are absent on historical rows.
 
@@ -100,7 +100,7 @@ An `EvidenceIndexRow` has the following schema. `succeeded`, `completionEvidence
 
 ## Cost and Pricing
 
-Every cost figure Clio shows is an amount plus a provenance. The amount is token counts times per-million-token rates. The provenance says where the rates came from, and it is one of `known`, `known_free`, `estimated`, or `unknown` (`CostProvenance` in [cost-provenance.ts](../../src/domains/providers/types/cost-provenance.ts)). A missing provenance reads as `unknown`, never as free.
+Every cost figure Clio Coder shows is an amount plus a provenance. The amount is token counts times per-million-token rates. The provenance says where the rates came from, and it is one of `known`, `known_free`, `estimated`, or `unknown` (`CostProvenance` in [cost-provenance.ts](../../src/domains/providers/types/cost-provenance.ts)). A missing provenance reads as `unknown`, never as free.
 
 ### Declaring and resolving a price
 
@@ -133,7 +133,7 @@ The session cost ceiling `safety.limits.sessionCostUsd` (default 5) checks the t
 
 ## Provider-Reported Model Id
 
-The model that answered a call is a fact the provider reports. It is not inferred from the route Clio dispatched on. Every model call carries a `responseModelIdObservation` ([response-model-id.ts](../../src/core/response-model-id.ts)) in one of four states.
+The model that answered a call is a fact the provider reports. It is not inferred from the route Clio Coder dispatched on. Every model call carries a `responseModelIdObservation` ([response-model-id.ts](../../src/core/response-model-id.ts)) in one of four states.
 
 | State | Meaning |
 | --- | --- |
@@ -155,7 +155,7 @@ Usage accounting attributes a call to the reported model when the state is `repo
 
 ## Cross-Session Usage Facts
 
-Everything in this section describes what Clio recorded. Subscription quota is a separate source with separate meaning, described in [Subscription Quota](#subscription-quota). The `/usage` overlay shows both and keeps them in separate views, because a session's recorded tokens cannot be converted into a percentage of a provider's plan. See [commands-and-modes.md](../guide/commands-and-modes.md) for the overlay.
+Everything in this section describes what Clio Coder recorded. Subscription quota is a separate source with separate meaning, described in [Subscription Quota](#subscription-quota). The `/usage` overlay shows both and keeps them in separate views, because a session's recorded tokens cannot be converted into a percentage of a provider's plan. See [commands-and-modes.md](../guide/commands-and-modes.md) for the overlay.
 
 ```text
 clio-coder usage report [--repo <path>] [--days <n>] [--json]
@@ -251,17 +251,17 @@ A failed or empty summary produces no checkpoint. Required failed-compaction usa
 
 `src/domains/quota/` reads what each connected provider account reports about its own rate-limit windows and credits. The figures are account-wide and shared across your sessions and devices. Nothing in that domain enters the cost ledger, the evidence spine, or the trace store. The `/usage` overlay and the footer present it; [commands-and-modes.md](../guide/commands-and-modes.md) describes those views.
 
-- **Providers.** Adapters exist for Anthropic Max, Claude Code, Codex, and Antigravity ([registry.ts](../../src/domains/quota/registry.ts)). Registry order is display order. The Anthropic Max adapter reads Clio's own stored login. The Claude Code, Codex, and Antigravity adapters read those CLIs' own credential files and never write them. A configured `local-native` target adds a local-inference line.
+- **Providers.** Adapters exist for Anthropic Max, Claude Code, Codex, and Antigravity ([registry.ts](../../src/domains/quota/registry.ts)). Registry order is display order. The Anthropic Max adapter reads Clio Coder's own stored login. The Claude Code, Codex, and Antigravity adapters read those CLIs' own credential files and never write them. A configured `local-native` target adds a local-inference line.
 - **Network.** An adapter reads its account's stored credential without writing or refreshing it, and asks that provider's usage endpoint. This is the only observability read that leaves the machine.
 - **Snapshot.** A `UsageSnapshot` carries a status (`ok`, `no_credentials`, `expired`, `error`, `loading`), windows with `usedPct` and `resetsAt`, optional credits and plan, and a `stale` flag.
 - **Refresh.** Reads are lazy. There is no background timer. A surface asks, and the service serves a cached snapshot or spends one read per provider, concurrently, so a slow provider does not hold up the others. The in-memory cache holds a good snapshot for five minutes (`DEFAULT_QUOTA_CACHE_TTL_MS`). A failed read falls back to the last good snapshot marked `stale`. A provider with no credentials contributes no row.
-- **Account isolation.** Adapters select connected accounts from the resolved Clio home and the sibling CLI homes. When the Clio home is relocated, the Claude Code, Codex, and Antigravity adapters are included only if `CLAUDE_CONFIG_DIR`, `CODEX_HOME`, or `ANTIGRAVITY_HOME` is set, so a relocated test home never reads the operator's real accounts.
+- **Account isolation.** Adapters select connected accounts from the resolved Clio Coder home and the sibling CLI homes. When the Clio Coder home is relocated, the Claude Code, Codex, and Antigravity adapters are included only if `CLAUDE_CONFIG_DIR`, `CODEX_HOME`, or `ANTIGRAVITY_HOME` is set, so a relocated test home never reads the operator's real accounts.
 
 ---
 
 ## Artifact Categories and Path Layouts
 
-Clio resolves directories under platform-specific XDG defaults (on Linux, these default to `~/.config/clio-coder/`, `~/.local/share/clio-coder/`, and `~/.local/state/clio-coder/`). `/view` lists thirteen categories in this order.
+Clio Coder resolves directories under platform-specific XDG defaults (on Linux, these default to `~/.config/clio-coder/`, `~/.local/share/clio-coder/`, and `~/.local/state/clio-coder/`). `/view` lists thirteen categories in this order.
 
 | Category | Description | Backing Path |
 | --- | --- | --- |
@@ -333,7 +333,7 @@ Pressing `v` on a selected receipt or running `/view verify <runId>` performs cr
 A receipt carries optional provenance and context blocks that answer "what happened" for a chained (pipeline), composed (persona override), escalated, briefed, steered, council, or external run. Those optional blocks remain absent when unused. Current receipts carry strict integrity v20 and an explicit `outcomeCode: null` when no classified deterministic failure occurred. Automation consumers must treat the optional blocks below as absent by default and `outcomeCode` as nullable. Lower receipt versions are retired, while malformed, unversioned, and future versions are invalid.
 
 Receipt integrity verification and evidence verification are independent.
-`receipt_integrity=verified/v20/sha256` means Clio called the receipt verifier
+`receipt_integrity=verified/v20/sha256` means Clio Coder called the receipt verifier
 against the ledger envelope; merely finding an embedded digest is not enough.
 `evidence_verification=<verified|unverified|not_applicable|unknown>/<basis>`
 describes validation evidence inside that verified receipt. Likewise,
@@ -393,7 +393,7 @@ The base provenance sets, steering, routing, quality, worker identity, result-co
 
 A refused pairing of a read-only recipe with a write task never becomes a run, so `capabilityMismatch` appears only on a run that was admitted with the mismatch flagged.
 
-Only Clio-owned native/SSH worker wrappers and the Claude SDK path may transport worker-authored outcome events. ACP and black-box subprocess output cannot self-assert an outcome code; Clio may still assign `worker_final_output_missing` at its trusted finalization seam.
+Only Clio Coder-owned native/SSH worker wrappers and the Claude SDK path may transport worker-authored outcome events. ACP and black-box subprocess output cannot self-assert an outcome code; Clio may still assign `worker_final_output_missing` at its trusted finalization seam.
 
 The escalation counters appear together and only when `escalationRequested` is present (at least one escalation occurred), so a deny-all or non-escalating run keeps its `safety.decisions` block unchanged.
 
@@ -455,7 +455,7 @@ A clean interactive exit prints a branded session summary according to `interfac
 
 ## Diagnostic Tracing Toggles
 
-No settings key controls whether Clio records observability data. The trace mirror, receipts, ledgers, and audit rows are always written. The mirror is skipped only in the short-lived internal generators for wiki and bootstrap output, and its retention is bounded by two environment variables ([Trace Store](trace-store.md#retention-and-pruning)). The settings that shape what is recorded are `targets[].pricing` (cost), `safety.limits.sessionCostUsd` (spend ceiling), and `interface.exitSummary` (the exit report).
+No settings key controls whether Clio Coder records observability data. The trace mirror, receipts, ledgers, and audit rows are always written. The mirror is skipped only in the short-lived internal generators for wiki and bootstrap output, and its retention is bounded by two environment variables ([Trace Store](trace-store.md#retention-and-pruning)). The settings that shape what is recorded are `targets[].pricing` (cost), `safety.limits.sessionCostUsd` (spend ceiling), and `interface.exitSummary` (the exit report).
 
 Debug traces are opt-in environment variables, documented with their values in [environment-variables.md](../guide/environment-variables.md):
 

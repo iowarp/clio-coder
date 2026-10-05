@@ -19,7 +19,7 @@ Start Herdr, open a pane in your project, then run:
 clio-coder --with-panes
 ```
 
-The option joins the current Herdr session. It does not create a pane host from a plain terminal. For the files pane, also enable it in your Clio settings:
+The option joins the current Herdr session. It does not create a pane host from a plain terminal. For the files pane, also enable it in your Clio Coder settings:
 
 ```yaml
 interface:
@@ -33,7 +33,7 @@ Check `clio-coder doctor` if the host or files engine is unavailable.
 
 ## Use the files pane
 
-`/files` or **Alt+E** opens the file browser and gives it keyboard focus. Select a file and press **Ctrl+Y** to insert it as an `@file` mention and return focus to Clio. `/files` or Alt+E then hides the pane: the browser keeps running and keeps its directory. Press the key twice quickly, or run `/files close`, to end it.
+`/files` or **Alt+E** opens the file browser and gives it keyboard focus. Select a file and press **Ctrl+Y** to insert it as an `@file` mention and return focus to Clio Coder. `/files` or Alt+E then hides the pane: the browser keeps running and keeps its directory. Press the key twice quickly, or run `/files close`, to end it.
 
 ## Docks hide instead of closing
 

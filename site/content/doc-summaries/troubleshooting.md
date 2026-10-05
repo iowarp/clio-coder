@@ -13,7 +13,7 @@ For slow first responses from a local model, check the server's load state and c
 
 ## Settings fail to load
 
-Clio uses a strict version-2 settings schema. Invalid or retired keys produce a diagnostic naming the path. `clio-coder upgrade` applies the registered migration and preserves the original version-1 settings as a backup. Plain `clio-coder doctor` previews the fix for a retired value, and `doctor --fix` applies it.
+Clio Coder uses a strict version-2 settings schema. Invalid or retired keys produce a diagnostic naming the path. `clio-coder upgrade` applies the registered migration and preserves the original version-1 settings as a backup. Plain `clio-coder doctor` previews the fix for a retired value, and `doctor --fix` applies it.
 
 Use [Configuration essentials](/docs/guide/configuration-reference.html) to find the settings layers and the full reference.
 
@@ -21,10 +21,10 @@ Use [Configuration essentials](/docs/guide/configuration-reference.html) to find
 
 Open **Ctrl+G** and choose the corresponding menu action. A terminal or multiplexer may intercept Alt shortcuts. **Ctrl+J** is the portable newline; `/help` shows your effective bindings.
 
-If a files or companion pane is unavailable, check that Clio is running inside a reachable Herdr session and that the requested tools are installed. See [files and terminal panes](/docs/guide/panes-and-files.html).
+If a files or companion pane is unavailable, check that Clio Coder is running inside a reachable Herdr session and that the requested tools are installed. See [files and terminal panes](/docs/guide/panes-and-files.html).
 
 ## Work stopped or a check failed
 
-Read the recorded command and output in the desktop's **Artifacts** card or terminal `/view`. A failed test can point to a useful next task; ask Clio to explain the failure before changing the test's acceptance criteria.
+Read the recorded command and output in the desktop's **Artifacts** card or terminal `/view`. A failed test can point to a useful next task; ask Clio Coder to explain the failure before changing the test's acceptance criteria.
 
 For an interrupted context handoff, inspect `/context` and follow [save and resume work](/docs/guide/context-continuity.html). Include the installed version and relevant doctor findings when reporting a persistent issue; keep credentials and private project content out of public reports.

@@ -1,4 +1,4 @@
-Your conversation can stay on your laptop while a worker runs tools on another machine. Register an SSH node, install the exact Clio build if needed, verify its project and model route, then choose where the first bounded task runs.
+Your conversation can stay on your laptop while a worker runs tools on another machine. Register an SSH node, install the exact Clio Coder build if needed, verify its project and model route, then choose where the first bounded task runs.
 
 ::: note Version scope
 This guide describes the v0.6.0 fleet. Remote workers use your existing SSH access. They do not grant access to institutional systems or replace their scheduler and data rules.
@@ -49,11 +49,11 @@ clio-coder fleet nodes add travel-node --host travel-node.example-tailnet.ts.net
 
 Discovery is opt-in. It reads `tailscale status --json` when the CLI is installed and signed in, lists MagicDNS names and IP addresses, and leaves the selection to you. The TUI's **Discover with Tailscale** lets you pick an endpoint and name the node. A discovered peer has no proven SSH access, runtime or project readiness. You can add an SSH host directly without Tailscale.
 
-The endpoint can matter substantially. In one measurement on this project's development network, a 4 MiB SSH transfer ran at about **173 MiB/s over LAN and 1.4 MiB/s over Tailscale**. SSH setup and existing connection multiplexing affect those numbers; measure your own route. Clio uses the host you configure and does not automatically switch between addresses.
+The endpoint can matter substantially. In one measurement on this project's development network, a 4 MiB SSH transfer ran at about **173 MiB/s over LAN and 1.4 MiB/s over Tailscale**. SSH setup and existing connection multiplexing affect those numbers; measure your own route. Clio Coder uses the host you configure and does not automatically switch between addresses.
 
 ## Install the exact client build
 
-If the node lacks a matching Clio runtime, preview a user-level install:
+If the node lacks a matching Clio Coder runtime, preview a user-level install:
 
 ```sh
 clio-coder fleet nodes install build-node
@@ -65,15 +65,15 @@ Review the package size, digest and destination. Then execute it:
 clio-coder fleet nodes install build-node --yes
 ```
 
-Clio packs the build the client actually runs, transfers it over SSH, checks its SHA-256 digest, and installs it under the node's `~/.local/share/clio-coder/workers/<digest>/`. The install uses the node's existing Node.js and npm, verifies the version and updates the saved worker entry. The installer does not require sudo or modify services or shell profiles. Optional SDK dependencies are omitted.
+Clio Coder packs the build the client actually runs, transfers it over SSH, checks its SHA-256 digest, and installs it under the node's `~/.local/share/clio-coder/workers/<digest>/`. The install uses the node's existing Node.js and npm, verifies the version and updates the saved worker entry. The installer does not require sudo or modify services or shell profiles. Optional SDK dependencies are omitted.
 
-You can also manage Clio yourself, for example with the standard installer on a cluster login node, whose private Node.js is not on `PATH`. The default invocation is `clio-coder worker`. A custom `--entry` needs an explicit `--version-command` that reports its Clio version; it cannot skip version verification.
+You can also manage Clio Coder yourself, for example with the standard installer on a cluster login node, whose private Node.js is not on `PATH`. The default invocation is `clio-coder worker`. A custom `--entry` needs an explicit `--version-command` that reports its Clio Coder version; it cannot skip version verification.
 
 ## Prepare and verify the project
 
 Choose one supported arrangement:
 
-| Arrangement | What Clio verifies | Available work |
+| Arrangement | What Clio Coder verifies | Available work |
 | --- | --- | --- |
 | Shared storage at the same absolute path | A transient client-side file challenge is visible from the node. | Read-only and mutating workers use that storage. |
 | Independent checkout at the same absolute path | Both trees are clean, have the same Git HEAD and matching root history. | Read-only work; mutations through an isolated task worktree and SSH commit return. |
@@ -113,7 +113,7 @@ Install the new exact client build when needed, then repeat the recorded test fr
 
 ## Choose the first worker
 
-Keep the first task read-only and familiar. For example, ask Clio:
+Keep the first task read-only and familiar. For example, ask Clio Coder:
 
 ```text
 Use a read-only Scout to inspect the README and explain this project's test command.
@@ -128,7 +128,7 @@ Remote workers retain default worker authority even when the coordinator uses yo
 
 ## Return edits from an independent checkout
 
-An editing dispatch to an independent node checkout must use `worktree: true`. Ask Clio to use an isolated task worktree, name the files the worker may change and declare the host checks you want before application.
+An editing dispatch to an independent node checkout must use `worktree: true`. Ask Clio Coder to use an isolated task worktree, name the files the worker may change and declare the host checks you want before application.
 
 Clio creates a matching branch and worktree on the node at the approved baseline. After the worker exits, Clio commits its edits there, fetches the branch through the existing SSH connection and checks the returned baseline and permitted paths.
 
@@ -140,17 +140,17 @@ Transfer, verification and application failures preserve the node branch for rec
 
 Open **Workers** with Alt+W to see queued, active, failed and completed work with its actual node. Inside Herdr with panes on, the same key opens a [live dashboard](/experimental/panes-and-docks.html) beside the conversation. Review the worker result, receipt and project changes. The CLI's `clio-coder fleet status` and `clio-coder fleet view <runId>` expose durable results from another terminal.
 
-SSH nodes and delegated peers are separate execution paths. A delegated peer is not an SSH machine whose resources or project access Clio has verified.
+SSH nodes and delegated peers are separate execution paths. A delegated peer is not an SSH machine whose resources or project access Clio Coder has verified.
 
 ::: limits
-- SSH access, exact Clio version and the same absolute project path remain prerequisites.
+- SSH access, exact Clio Coder version and the same absolute project path remain prerequisites.
 - Project dependencies and datasets need your own staging; there is no arbitrary repository sync or path mapping.
 - Independent-checkout edits require isolated task worktrees and the existing verification and application gates.
 - Institutional access rules and schedulers still govern where work may run.
 :::
 
 ::: next
-- [Your first session with Clio](/tutorials/first-session.html)
+- [Your first session with Clio Coder](/tutorials/first-session.html)
 - [Fleet guide](/docs/guide/fleet-dispatch.html)
-- [Install Clio](/#start)
+- [Install Clio Coder](/#start)
 :::

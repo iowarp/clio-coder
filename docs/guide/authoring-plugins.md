@@ -1,6 +1,6 @@
 # Authoring a portable agent plugin
 
-`isPluginId` in [discovery.ts](../../src/domains/plugins/discovery.ts) validates package identifiers. An agent plugin packages a workflow and its supporting resources as one versioned installation. Its canonical identity is the [Agent Plugins 1.0.0 manifest](https://agent-plugins.org/schemas/1.0.0/plugin.schema.json). Clio keeps the complete package together, verifies its full-tree digest, and discovers the resources supported by the current runtime. This page owns the manifest fields. Package invariants are in [library architecture](../architecture/library.md) and operator commands are in [library packages](resource-library.md).
+`isPluginId` in [discovery.ts](../../src/domains/plugins/discovery.ts) validates package identifiers. An agent plugin packages a workflow and its supporting resources as one versioned installation. Its canonical identity is the [Agent Plugins 1.0.0 manifest](https://agent-plugins.org/schemas/1.0.0/plugin.schema.json). Clio Coder keeps the complete package together, verifies its full-tree digest, and discovers the resources supported by the current runtime. This page owns the manifest fields. Package invariants are in [library architecture](../architecture/library.md) and operator commands are in [library packages](resource-library.md).
 
 The minimal package has a root `plugin.json` and an immediate child skill directory:
 
@@ -33,20 +33,20 @@ The root schema permits exactly these keys, and any other key is a validation er
 | `description`, `homepage`, `repository`, `license` | Optional strings. |
 | `author` | Optional object with string `name`, `email` and `url`. |
 | `keywords` | Optional array of strings. |
-| `extensions` | Optional map of namespaced objects. Clio reads only `ai.iowarp.clio`. |
+| `extensions` | Optional map of namespaced objects. Clio Coder reads only `ai.iowarp.clio`. |
 
-A root `state.json` is rejected, and `plugin.json` must be a regular file at the package root. A root `mcp.json` is preserved and reported as a warning, because this Clio version does not execute MCP servers.
+A root `state.json` is rejected, and `plugin.json` must be a regular file at the package root. A root `mcp.json` is preserved and reported as a warning, because this Clio Coder version does not execute MCP servers.
 
-## Native Clio components
+## Native Clio Coder components
 
-`extensions["ai.iowarp.clio"]` holds optional Clio metadata inside the portable manifest. A plugin containing `skills/<name>/SKILL.md` needs only the root identity fields above: Clio discovers the conventional `skills/` directory. A standalone skill package with a root `SKILL.md` declares `kind: "skill"`, `resources.skills: "."` and its one public skill component through the extension; the supplied skill template demonstrates that form. Clio prompts, strict agent recipes, fleets and explicit component graphs also use this metadata. The key does not select a directory: its `resources` map names the paths the package actually uses.
+`extensions["ai.iowarp.clio"]` holds optional Clio Coder metadata inside the portable manifest. A plugin containing `skills/<name>/SKILL.md` needs only the root identity fields above: Clio discovers the conventional `skills/` directory. A standalone skill package with a root `SKILL.md` declares `kind: "skill"`, `resources.skills: "."` and its one public skill component through the extension; the supplied skill template demonstrates that form. Clio Coder prompts, strict agent recipes, fleets and explicit component graphs also use this metadata. The key does not select a directory: its `resources` map names the paths the package actually uses.
 
 | Field | Rule |
 | --- | --- |
 | `manifestVersion` | Must be `1` whenever the object is present. |
 | `kind` | `plugin` (default), `skill`, `agent`, `prompt` or `fleet`. |
 | `requires` | Package dependencies as `kind:name` references (see [Package dependencies](#package-dependencies)). |
-| `compatibility.clio` | Optional SemVer range. Install and load refuse a package whose range excludes the running Clio. |
+| `compatibility.clio` | Optional SemVer range. Install and load refuse a package whose range excludes the running Clio Coder. |
 | `resources` | Map from `skills`, `prompts`, `agents` or `fleets` to a relative directory inside the package. |
 | `components` | Up to 1024 component declarations (see [Components and references](#components-and-references)). |
 | `evals` | Retired. A manifest that still declares it keeps loading and Clio ignores the value. The key is accepted until the v0.7.0 compatibility window. |
@@ -115,7 +115,7 @@ A `plugin` may bundle many public resources. Every other kind is a single-resour
 
 Component kinds are `skill`, `prompt`, `agent`, `fleet`, `script`, `resource`, and `tool`. A component has a stable `kind:id` identity (id: lowercase letters, digits, dots, underscores and hyphens, at most 80 characters), one contained file path, and optional `requires` references to other components in the same bundle. A skill points to its `SKILL.md`. Dependencies must exist and form an acyclic graph. Native discoverable components (`skill`, `prompt`, `agent`, `fleet`) must live beneath their declared resource root, and agent and fleet files must sit directly in that root because nested ones cannot be discovered. Component metadata records relationships; it does not execute scripts or register tool implementations.
 
-Clio text can refer to `${pluginRoot}/assets/methods.md` or `${component:resource:methods}`. Prompts, agent bodies, and skills recognize prose markers with portable, space-free slash suffixes. For a filename containing spaces or Unicode, declare a component and refer to its `kind:id`. The referenced target must exist within the declaring package. Fleet argument paths use a separate complete-path parser: the reference must occupy the whole argument, and containment is checked after expanding the entire suffix, including spaces and Unicode. A reference embedded in an option such as `--file=${pluginRoot}/data.csv` is rejected; pass the path as its own argument. These are Clio reference forms; peer exports translate instructions and paths for their native host. Portable skill text should use relative file references where practical.
+Clio Coder text can refer to `${pluginRoot}/assets/methods.md` or `${component:resource:methods}`. Prompts, agent bodies, and skills recognize prose markers with portable, space-free slash suffixes. For a filename containing spaces or Unicode, declare a component and refer to its `kind:id`. The referenced target must exist within the declaring package. Fleet argument paths use a separate complete-path parser: the reference must occupy the whole argument, and containment is checked after expanding the entire suffix, including spaces and Unicode. A reference embedded in an option such as `--file=${pluginRoot}/data.csv` is rejected; pass the path as its own argument. These are Clio Coder reference forms; peer exports translate instructions and paths for their native host. Portable skill text should use relative file references where practical.
 
 Prompt names follow their path beneath the prompts root, with directory separators written as colons. The example exposes `/lab-research:start`. Give agent and fleet filenames a package prefix to keep their registered identities unambiguous. Agent recipes retain the strict version 1 contract, including required and optional tool lists, custom audience, budget, and result contract. A plugin's recipes may bind skills from their own package, and a bound skill must be trusted and live inside that package. Workers have no `ask_user`; interviews belong to the orchestrator.
 
@@ -142,7 +142,7 @@ clio-coder library inspect ./lab-research --json
 
 ## Host projections and runtime capabilities
 
-Agent Plugins 1.0.0 standardizes skills and MCP declarations. Clio currently consumes portable skills and its native manifest extension; it preserves MCP files but does not execute MCP servers. Claude Code and Gemini have their own native manifests and component formats. A package exporter must translate those formats and report which features are native, adapted as instructions, or unavailable. An exported skill workflow does not establish that a peer host executes Clio fleets.
+Agent Plugins 1.0.0 standardizes skills and MCP declarations. Clio Coder currently consumes portable skills and its native manifest extension; it preserves MCP files but does not execute MCP servers. Claude Code and Gemini have their own native manifests and component formats. A package exporter must translate those formats and report which features are native, adapted as instructions, or unavailable. An exported skill workflow does not establish that a peer host executes Clio Coder fleets.
 
 The bundled `materio` plugin includes a Python exporter, `library/plugins/materio/assets/scripts/project_plugin.py`, for Codex, Claude Code and Gemini. See its package README for commands and capability reports. It also provides a complete worked example of explicit component relationships and shared domain references.
 
@@ -151,9 +151,9 @@ Two layouts need no exporter at all, because Claude Code and Codex load them dir
 - A standalone skill package with a root `SKILL.md`, no `skills/` directory and no top-level `skills` manifest field. Claude Code loads it as a single-skill plugin and takes the invocation name from the `SKILL.md` frontmatter. Codex finds the same directory under any of its skills roots.
 - A bundle with a real `skills/` directory. Both hosts publish exactly those skills.
 
-What a peer host does *not* load matters just as much. Claude Code scans a plugin root for `agents/`, `commands/`, `hooks/`, `output-styles/` and `.mcp.json` with no manifest asking it to. A Clio strict-v1 recipe sitting in a top-level `agents/` directory is therefore picked up and shown as a native Claude agent, tools, model and budget fields included, none of which that host honors. Clio `prompts/` and `fleets/` are inert to it.
+What a peer host does *not* load matters just as much. Claude Code scans a plugin root for `agents/`, `commands/`, `hooks/`, `output-styles/` and `.mcp.json` with no manifest asking it to. A Clio Coder strict-v1 recipe sitting in a top-level `agents/` directory is therefore picked up and shown as a native Claude agent, tools, model and budget fields included, none of which that host honors. Clio Coder `prompts/` and `fleets/` are inert to it.
 
-That leaves a real choice when a package should serve both audiences. Ordinary top-level `agents/` and `prompts/` directories are the recommended Clio layout and stay a valid first-class library package; the repository marketplace simply does not publish such a package, and `pnpm run library:pin` prints the reason. To publish it as well, declare its Clio resource roots at paths no peer host scans, for example `"agents": "native/agents"` in the manifest's `resources` map, and put the recipes there. The bundled `materio` package does this with its own historical directory name.
+That leaves a real choice when a package should serve both audiences. Ordinary top-level `agents/` and `prompts/` directories are the recommended Clio Coder layout and stay a valid first-class library package; the repository marketplace simply does not publish such a package, and `pnpm run library:pin` prints the reason. To publish it as well, declare its Clio Coder resource roots at paths no peer host scans, for example `"agents": "native/agents"` in the manifest's `resources` map, and put the recipes there. The bundled `materio` package does this with its own historical directory name.
 
 Keep the skill surface intact when you edit a package: adding a `skills/` directory to a standalone skill silently stops its root `SKILL.md` from loading. [library-portability.test.ts](../../tests/extended/library-portability.test.ts) asserts all of this for every curated package. See [coding agent interoperability](interop.md) for the exact install commands.
 

@@ -11,7 +11,7 @@ curl -fsSL https://coder.iowarp.ai/install.sh | sh
 
 The installer brings its own Node.js 24 and needs no root, including on x64 HPC login nodes with glibc 2.17 or newer. It checks the Node download against its published SHA-256 checksums, and their OpenPGP signature when `gpg` is installed. It installs under `~/.local/share/clio-coder-install` on Linux or `~/Library/Application Support/clio-coder/install` on macOS, and writes the launcher `~/.local/bin/clio-coder`.
 
-On Linux, an install run from a terminal ends by offering the desktop app, which starts at login and appears in your app menu. The optional Claude Agent SDK, about 224 MB, is skipped; Clio offers to fetch it the first time you need it.
+On Linux, an install run from a terminal ends by offering the desktop app, which starts at login and appears in your app menu. The optional Claude Agent SDK, about 224 MB, is skipped; Clio Coder offers to fetch it the first time you need it.
 
 Pass options after `sh -s --`. For example, `--modify-path` adds the launcher directory to your shell profile, `--gui` sets up the desktop app without asking, and `--include-claude-sdk` installs the SDK now:
 
@@ -104,13 +104,15 @@ Interactive sessions show a quiet footer hint when a newer release exists, and `
 | npm | `clio-coder upgrade` | `npm uninstall -g @iowarp/clio-coder` |
 | bun | `bun add -g @iowarp/clio-coder@latest`, then `clio-coder upgrade --post-install` | `bun remove -g @iowarp/clio-coder` |
 
-The installer keeps the previous version. `clio-coder upgrade --rollback` makes it current again. An install made with an exact `--version` stays pinned to that version until you run the installer with `--version latest`. If an upgrade is refused over a setting the installed version cannot repair, the installer prints the new version's own `doctor --fix` command to run. The 0.6.1 upgrade, rollback and uninstall were checked on WSL and native Windows, and were not checked by hand on macOS.
+The installer keeps the previous version. `clio-coder upgrade --rollback` makes it current again. An install made with an exact `--version` stays pinned to that version until you run the installer with `--version latest`.
+
+If an upgrade is refused over a setting the installed version cannot repair, the installer prints the new version's own `doctor --fix` command to run. The 0.6.1 upgrade, rollback and uninstall were checked on WSL and native Windows, and were not checked by hand on macOS.
 
 `clio-coder uninstall` removes your settings, credentials, sessions and caches, and the desktop app's background service, so it previews what it will delete and asks first. Add `--keep-config` to keep settings and credentials, or `--dry-run` to only look. Removing the program with npm or bun keeps those files. Project `.clio-coder/` directories are never removed.
 
 If coder.iowarp.ai is unreachable, the latest GitHub release carries the same script from 0.6.0 on, at `https://github.com/iowarp/clio-coder/releases/latest/download/install.sh`.
 
-## Give Clio a useful first task
+## Give Clio Coder a useful first task
 
 Start with a request that lets you assess its understanding of your project:
 

@@ -58,7 +58,7 @@ Each candidate gets a row with a probability bar. The judge's choice is marked *
 :::
 
 ::: result Without a judge
-With no `drafts` binding, the candidates still appear and the view says they were not judged. The ranking is a model's opinion about text. It did not run your tests.
+With no `drafts` binding, the candidates still appear and the view says they were not judged. The ranking is a model's assessment of the text. It did not run your tests.
 :::
 
 ## Choose an engine

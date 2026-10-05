@@ -17,11 +17,11 @@ An interactive start needs a TTY (the CLI sets `CLIO_CODER_INTERACTIVE=1` when s
 
 ### Stage 0 import budget
 
-Stage 0 draws before the application loads, so its static module closure is kept small. `tests/contracts/instant-shell-import-graph.test.ts` walks the built chunk that contains `src/interactive/terminal-lease.ts` and fails when that closure exceeds 32 chunks, 1,400,000 total bytes or 350,000 Clio source bytes. It needs a full build. Rule 6 of `tests/boundaries/check-boundaries.ts` stops a second importer from splitting that chunk. Modules the first frame needs, such as the welcome, the composer and the context rail, therefore stay leaves that do not import the footer dashboard, task, dispatch or worker modules.
+Stage 0 draws before the application loads, so its static module closure is kept small. `tests/contracts/instant-shell-import-graph.test.ts` walks the built chunk that contains `src/interactive/terminal-lease.ts` and fails when that closure exceeds 32 chunks, 1,400,000 total bytes or 350,000 Clio Coder source bytes. It needs a full build. Rule 6 of `tests/boundaries/check-boundaries.ts` stops a second importer from splitting that chunk. Modules the first frame needs, such as the welcome, the composer and the context rail, therefore stay leaves that do not import the footer dashboard, task, dispatch or worker modules.
 
 ### Compile cache
 
-The interactive session, `clio-coder run` and `clio-coder acp` enable Node's module compile cache under Clio's cache directory once it exists ([compile-cache.ts](../../src/core/compile-cache.ts)). Read-only commands such as `paths` and bare `doctor` never enable it, so they write nothing to a home Clio has not set up. `NODE_DISABLE_COMPILE_CACHE` turns it off.
+The interactive session, `clio-coder run` and `clio-coder acp` enable Node's module compile cache under Clio Coder's cache directory once it exists ([compile-cache.ts](../../src/core/compile-cache.ts)). Read-only commands such as `paths` and bare `doctor` never enable it, so they write nothing to a home Clio has not set up. `NODE_DISABLE_COMPILE_CACHE` turns it off.
 
 ## Presentation modes
 

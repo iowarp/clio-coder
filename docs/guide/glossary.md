@@ -79,7 +79,7 @@ This document defines the core architectural concepts and terminology used throu
 - **Owning Type**: `WorkerEntryState` in [worker-stream.ts](../../src/session-control/worker-stream.ts).
 
 ### 19. Origin Glyphs (`◇`/`◆`)
-- **Definition**: Transcript and fleet board indicators that identify who requested a run. The glyph `◇` marks operator-typed runs, `◆` marks model-requested dispatches, and a dim dot marks internal Clio runs and harness-started runs. Transcript worker entries admit only user and agent origins; internal and harness runs can appear on dispatch surfaces but never become transcript worker entries.
+- **Definition**: Transcript and fleet board indicators that identify who requested a run. The glyph `◇` marks operator-typed runs, `◆` marks model-requested dispatches, and a dim dot marks internal Clio Coder runs and harness-started runs. Transcript worker entries admit only user and agent origins; internal and harness runs can appear on dispatch surfaces but never become transcript worker entries.
 - **Owning Types**: `WorkerRunOrigin` in [entries.ts](../../src/domains/session/entries.ts) for transcript entries; `DispatchRequestOrigin` in [types.ts](../../src/domains/dispatch/types.ts) for user, agent, internal, and harness dispatches.
 
 ### 20. Share Note
@@ -111,7 +111,7 @@ This document defines the core architectural concepts and terminology used throu
 - **Owning Type**: `PromptTemplateRoot` in [loader.ts](../../src/domains/resources/prompts/loader.ts).
 
 ### 27. Compat Root
-- **Definition**: A compatibility directory for prompts or skills discovered from foreign agent installations, ranked below native Clio resource roots.
+- **Definition**: A compatibility directory for prompts or skills discovered from foreign agent installations, ranked below native Clio Coder resource roots.
 - **Owning Type**: `ResourceSourceInfo` in [collision.ts](../../src/domains/resources/collision.ts).
 
 ### 28. Trust Gate
@@ -203,11 +203,11 @@ This document defines the core architectural concepts and terminology used throu
 - **Owning Type**: `TRUST_STATE_WORDS` in [trust-projection.ts](../../src/domains/evidence/trust-projection.ts).
 
 ### 50. Commonly Confused Trust States
-- **Definition**: `sealed` is not `grounded`: a receipt can authenticate perfectly and describe a run that validated nothing. `grounded` is not `independently reviewed`: a host check is Clio observing the run's own declared command, not a second agent judging the result. A `host checks verified` unit on the board is folded into validation grounding and is never independent review. `mediated` and `enforced` are one state under two names, the receipt grade and the canonical id. `not_requested` is not a trust state at all; a run with no host check reads `no validation observed`. `completion unevidenced` (a mutation finished with no validation at the completion boundary) is distinct from `no validation observed` (no validation was linked anywhere in the run): the first is the finish contract's observation, the second the evidence linker's.
+- **Definition**: `sealed` is not `grounded`: a receipt can authenticate perfectly and describe a run that validated nothing. `grounded` is not `independently reviewed`: a host check is Clio Coder observing the run's own declared command, not a second agent judging the result. A `host checks verified` unit on the board is folded into validation grounding and is never independent review. `mediated` and `enforced` are one state under two names, the receipt grade and the canonical id. `not_requested` is not a trust state at all; a run with no host check reads `no validation observed`. `completion unevidenced` (a mutation finished with no validation at the completion boundary) is distinct from `no validation observed` (no validation was linked anywhere in the run): the first is the finish contract's observation, the second the evidence linker's.
 - **Owning Type**: `TRUST_STATE_WORDS` and `trustVerdict` in [trust-projection.ts](../../src/domains/evidence/trust-projection.ts); the axis states in `TRUST_STATUS_STATES` in [trust-status.ts](../../src/domains/evidence/trust-status.ts).
 
 ### 51. System One
-- **Definition**: An optional fast decision model that answers calibrated, typed questions (`noul`, `choice`, `score`) about one bounded, redacted state at a fixed decision site. Clio's policy reads the probabilities to add a hint, an extra confirmation, a banner, a ranking or a prewarm. It never answers the operator and never removes friction. The shipped fitted cuts are built for one hosted engine build, and Laya is the diffusion-model engine planned for the same wire. System One is experimental. Configured under `systemOne`; see [System One](system-one.md).
+- **Definition**: An optional fast decision model that answers calibrated, typed questions (`noul`, `choice`, `score`) about one bounded, redacted state at a fixed decision site. Clio Coder's policy reads the probabilities to add a hint, an extra confirmation, a banner, a ranking or a prewarm. It never answers the operator and never removes friction. The shipped fitted cuts are built for one hosted engine build, and Laya is the diffusion-model engine planned for the same wire. System One is experimental. Configured under `systemOne`; see [System One](system-one.md).
 - **Owning Type**: `SystemOne` in [types.ts](../../src/domains/system-one/types.ts); built by `createSystemOne` in [factory.ts](../../src/domains/system-one/factory.ts).
 
 ### 52. Decision Site
@@ -269,3 +269,6 @@ This document defines the core architectural concepts and terminology used throu
 ### 66. Receipt Facts
 - **Definition**: The compact terminal facts of a finished run, read back from its sealed receipt: outcome and outcome code, exit code, token and tool counts, duration, changed paths, placement, result contract and the authenticated trust status. One module produces them for the TUI worker block (live and replayed) and for ACP terminal fleet frames, so every surface draws the same numbers from the same bytes. A missing or corrupt receipt reads as `receipt unavailable` and never fails a render.
 - **Owning Type**: `RunReceiptSummary` and `RunReceiptFacts` in [receipt-facts.ts](../../src/domains/dispatch/receipt-facts.ts).
+
+### 67. Clio Coder
+- **Definition**: Clio Coder is named for Kleio, the Greek muse of history, a female figure in myth; the software is referred to by name and has no gender.

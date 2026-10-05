@@ -76,7 +76,7 @@ Settings lets you choose the memory route, including **Rules only** when you do 
 :::
 
 ::: next
-- [Your first session with Clio](/tutorials/first-session.html)
+- [Your first session with Clio Coder](/tutorials/first-session.html)
 - [Continuity guide](/docs/guide/context-continuity.html)
 - [Resource Library](/docs/guide/resource-library.html)
 :::

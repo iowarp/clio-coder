@@ -118,7 +118,7 @@ every installed version.
 ## Using a Node you already have
 
 If the site provides Node 22.19 or newer somewhere other than the default `PATH`,
-for example a module whose `node` you cannot put first, point Clio at it:
+for example a module whose `node` you cannot put first, point Clio Coder at it:
 
 ```bash
 export CLIO_CODER_NODE=/path/to/node22/bin/node

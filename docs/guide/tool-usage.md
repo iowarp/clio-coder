@@ -25,7 +25,7 @@ Tool registration and argument normalization are owned by [agent-tools.ts](../..
 
 ## gateway: discover and call secondary capabilities
 
-Main Clio sessions attach a small basic surface: `read`, `bash`, `edit`,
+Main Clio Coder sessions attach a small basic surface: `read`, `bash`, `edit`,
 `write`, `verify`, `ask_user` and `gateway`, plus `dispatch` when delegation is
 wired. The gateway supplies every other capability on demand. Workers keep their admitted recipe surfaces, including direct
 execution and observation tools. Ordinary dispatch has a compact attached
@@ -96,7 +96,7 @@ scheduling, then each settled step's raw output under
 result stops scheduling new work. In-flight reads finish. Do not repeat completed
 writes when continuing. Skill instructions and operator answers return to the
 model before dependent work. If a read reveals an unforeseen interview need,
-Clio first reasons from the evidence and formulates the interview; the chain
+Clio Coder first reasons from the evidence and formulates the interview; the chain
 executor does not invent questions. `self_compact` is a standalone gateway call,
 never a chain step or a sibling in a tool batch.
 
@@ -661,7 +661,7 @@ The argv each op runs:
 - `add`: `git add -- <paths>` with literal pathspecs.
 - `commit`: `git commit -m <message>`.
 
-Every op runs with no system git config, no terminal prompt, no editor, no pager and no fsmonitor. The inspection ops also skip external diff and text-conversion helpers and optional index writes. A mutation runs repository hooks from the hooks directory resolved at call time and pinned for that command. A commit leaves signing off unless the operator's own configuration requires signed commits, and a missing author identity falls back to a Clio commit identity.
+Every op runs with no system git config, no terminal prompt, no editor, no pager and no fsmonitor. The inspection ops also skip external diff and text-conversion helpers and optional index writes. A mutation runs repository hooks from the hooks directory resolved at call time and pinned for that command. A commit leaves signing off unless the operator's own configuration requires signed commits, and a missing author identity falls back to a Clio Coder commit identity.
 
 `add` and `commit` use the Git classifier's task-mutation class. Whether they ask is decided by admission, not by this tool: a worker whose permit grants `git: worktree` and that owns an attested task worktree runs them without asking, and every other caller is subject to the ordinary approval flow. See [the safety model](../architecture/safety-model.md) and [Fleet dispatch](fleet-dispatch.md).
 
@@ -855,7 +855,7 @@ Arguments:
 
 `action="guide"` injects the message through the dispatch contract's stdin steer channel; an HTTP or SDK worker sees it as a user message at its next turn boundary. The worker acknowledges only after its runtime accepts the guidance. Single-shot subprocess runtimes (Claude CLI and Antigravity) and ACP delegation do not expose live input and return the contract's structured unsupported-steering error.
 
-`action="cancel"` aborts a non-terminal run; the run finalizes with `outcome=canceled` and its receipt records the cancellation. A run that already finished (completed, failed, interrupted, stale, or dead) errors with its state, since there is nothing to cancel. `run_id` may also be a detached assignment id: cancelling a running assignment aborts its current attempt and starts no further attempt. A run or assignment that another Clio process is running is refused with that process's pid, so steer or cancel it from that session.
+`action="cancel"` aborts a non-terminal run; the run finalizes with `outcome=canceled` and its receipt records the cancellation. A run that already finished (completed, failed, interrupted, stale, or dead) errors with its state, since there is nothing to cancel. `run_id` may also be a detached assignment id: cancelling a running assignment aborts its current attempt and starts no further attempt. A run or assignment that another Clio Coder process is running is refused with that process's pid, so steer or cancel it from that session.
 
 `action="approve"` and `action="deny"` answer one worker permission request that was raised to the main agent. The request id is looked up in the dispatch domain's grant broker, never trusted from the arguments, and the request must belong to this session and the named run. A deny always settles the request, and the worker continues without that call. An approve is admitted as the main agent's own call. At `yolo`, it is granted when the worker's effect is inside the worker's permit, inside the operator's delegation ceiling for the turn, and admitted at `yolo`; the worker still re-admits the call under its unchanged permit. Below `yolo`, an attended session forwards the approval to the operator, who decides with the main agent's request as provenance, and a headless run denies it at once. A request marked operator authority is never main-grantable. One approval runs that one call once; an identical later call asks again.
 
@@ -948,7 +948,7 @@ Arguments:
 
 - `action` (required). `show`, `open`, `handoff`, `close`, or `list`.
 - `target` (show or close). For `show`, an agent id or run-id prefix. For
-  `close`, a Clio-owned pane id, label, agent id, or `all`.
+  `close`, a Clio Coder-owned pane id, label, agent id, or `all`.
 - `preset` (open). One of `files`, `logs`, or `shell`. Opening a preset whose pane is already open focuses that pane instead of splitting again. Opening `files` while the files pane is hidden shows it and focuses it.
 - `peer` (handoff, required). One of `claude-code`, `codex`, `opencode`, `antigravity`, or `pi`.
 - `brief` (handoff). Task brief, at most 8192 bytes.
@@ -956,7 +956,7 @@ Arguments:
 
 `show` takes the workers dock over for a live dispatched run without moving the keyboard. `open` accepts only the
 fixed preset enum. Arbitrary argv is operator-only through `/panes open` and is
-rejected by the model tool. `handoff` opens the named coding CLI interactively in a Clio-owned pane. It produces no managed run and no receipt. `close` can remove only panes Clio owns, and it ends a dock's process whether the dock is visible or hidden. `list`
+rejected by the model tool. `handoff` opens the named coding CLI interactively in a Clio Coder-owned pane. It produces no managed run and no receipt. `close` can remove only panes Clio owns, and it ends a dock's process whether the dock is visible or hidden. `list`
 reports mux health, notification policy, the state of the files, workers and music docks, and the current inventory. Each dock reads `visible`, `hidden` (parked and still running) or `closed`, and the music dock adds what it is playing (`playing <title>` or `paused`). The model reads dock state there rather than from settings files, and `list` reports it whether or not `integrations.music.agentControl` is on. The tool has no action that hides a dock.
 
 ```text
@@ -968,7 +968,7 @@ panes(action="close", target="all")
 
 ## evidence: inspect canonical evidence and trust status
 
-Reads evidence bundles as JSON. Source: [evidence.ts](../../src/tools/evidence.ts). Read class; sequential, because `run` mode may materialize a bundle under Clio's data directory. It shares the inventory and trust projections behind `clio-coder evidence inventory` and `clio-coder evidence inspect`, so the model and the operator read the same record.
+Reads evidence bundles as JSON. Source: [evidence.ts](../../src/tools/evidence.ts). Read class; sequential, because `run` mode may materialize a bundle under Clio Coder's data directory. It shares the inventory and trust projections behind `clio-coder evidence inventory` and `clio-coder evidence inspect`, so the model and the operator read the same record.
 
 Arguments:
 
@@ -1014,7 +1014,7 @@ Arguments:
 - `rationale` (required). Why the choice won, at most 1024 bytes.
 - `label` (optional). Short title, at most 128 bytes.
 
-The call appends one `decisionLedger` entry with `origin: "agent"` and returns the decision ref `<interviewId>/<key>`. A repeat key supersedes the earlier agent decision with the new rationale as its correction; an operator decision with the same key is never overwritten and the call fails. Dispatch seals every active ref onto the run request, envelope, and receipt, and Clio-controlled commits carry one `Clio-Decision:` trailer per ref.
+The call appends one `decisionLedger` entry with `origin: "agent"` and returns the decision ref `<interviewId>/<key>`. A repeat key supersedes the earlier agent decision with the new rationale as its correction; an operator decision with the same key is never overwritten and the call fails. Dispatch seals every active ref onto the run request, envelope, and receipt, and Clio Coder-controlled commits carry one `Clio-Decision:` trailer per ref.
 
 ```text
 decide(key="cache-key-shape", value="capability tuple", alternatives=["node id"], rationale="matches the existing buckets and survives fleet changes", label="Cache key")
@@ -1083,7 +1083,7 @@ gateway(op="call", capability="artifact", args={kind: "review", content: "# Revi
 
 `configure_clio` is available only at `default` and `yolo`, and a value is at most 8192 bytes. `preview` returns the changed values and a `proposalId`. Each changed leaf is one `path: old → new` line, an object value is compared key by key, and the preview shows at most 20 lines of 160 characters with `… N more changed values` after them. The Apply card and the transcript row name the setting and leave out the value text the model composed. One proposal is pending per session, it expires after 10 minutes, and `apply` fails when the saved value changed since the preview. At `default`, `apply` asks the operator to approve the exact preview. At `yolo`, `apply` saves it directly, with one exception: persistent fleet routing (`fleet.default`, `fleet.profiles`, `fleet.agentProfiles`) parks on the registry's confirmation rail at every autonomy level, so the operator approves the exact preview even at `yolo`. A one-off run belongs on dispatch's `target` and `model` fields instead. For agent model bindings, preview and apply `fleet.profiles` first, then `fleet.agentProfiles`, each as a complete JSON map. The tool refuses `safety.autonomy`, credentials and arbitrary paths, because only the operator changes autonomy, through `/settings`, `clio-coder configure` or `--autonomy`. Project-scope saves use the operator's `/settings` UI.
 
-A saved `apply` reports when the change takes effect, by the setting's effect timing. Routing paths keep the session's current routing, so exit and start a new Clio session to use them. A live setting is picked up automatically once the settings watcher reads the save. A next-turn setting applies to the next request or dispatch, and running workers keep their settings. A restart-required setting needs a new session. There is no `/reload` command.
+A saved `apply` reports when the change takes effect, by the setting's effect timing. Routing paths keep the session's current routing, so exit and start a new Clio Coder session to use them. A live setting is picked up automatically once the settings watcher reads the save. A next-turn setting applies to the next request or dispatch, and running workers keep their settings. A restart-required setting needs a new session. There is no `/reload` command.
 
 ```text
 gateway(op="call", capability="configure_clio", args={action: "preview", path: "chat.thinkingLevel", value: "high"})
@@ -1092,7 +1092,7 @@ gateway(op="call", capability="configure_clio", args={action: "apply", proposalI
 
 ## music: control the focus-radio pane
 
-`music(action)` drives the focus-radio player in Clio's own dock pane. Source: [music.ts](../../src/tools/music.ts), [music-surface.ts](../../src/tools/music-surface.ts). Read class; sequential. `action` is required and is one of `on` (play, opening or revealing the pane first), `pause` (silence the stream and keep the pane), `off` (stop and close it), `next` (skip to the next station) or `status` (report what is playing or paused). Showing and hiding the pane stay with the operator. The result is one line, and a refusal or failure comes back as an error naming the reason.
+`music(action)` drives the focus-radio player in Clio Coder's own dock pane. Source: [music.ts](../../src/tools/music.ts), [music-surface.ts](../../src/tools/music-surface.ts). Read class; sequential. `action` is required and is one of `on` (play, opening or revealing the pane first), `pause` (silence the stream and keep the pane), `off` (stop and close it), `next` (skip to the next station) or `status` (report what is playing or paused). Showing and hiding the pane stay with the operator. The result is one line, and a refusal or failure comes back as an error naming the reason.
 
 The tool registers only when `integrations.music.agentControl` is on, cliamp resolves and the pane mux is live, which also requires `integrations.music.enabled`. A session where it could only refuse carries no schema for it. No prompt fragment says when to play music; that is the operator's call in project instructions. The operator's own door is the `/music` command. Setup, stations and the player are in [Music](music.md).
 

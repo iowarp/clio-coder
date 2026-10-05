@@ -1,6 +1,6 @@
 # Working Set
 
-The working set is the part of the session ledger the model actually receives on the next request. When context pressure crosses `context.compaction.threshold`, Clio narrows that view before it considers summarizing anything: selected tool-result bodies and closed-turn thinking blocks stop being replayed, and a one-line marker takes each body's place. Nothing is deleted. The ledger keeps every byte the tools produced, the transcript keeps showing them, and the model can ask for any evicted body back by ref.
+The working set is the part of the session ledger the model actually receives on the next request. When context pressure crosses `context.compaction.threshold`, Clio Coder narrows that view before it considers summarizing anything: selected tool-result bodies and closed-turn thinking blocks stop being replayed, and a one-line marker takes each body's place. Nothing is deleted. The ledger keeps every byte the tools produced, the transcript keeps showing them, and the model can ask for any evicted body back by ref.
 
 Source of truth is `src/domains/context/working-set/` (`contract.ts`, `fold.ts`, `project.ts`, `marker.ts`, `protect.ts`, `payload.ts`, `path-index.ts`, `engine.ts`, `recall.ts`, `policies/`), the ledger records in [entries.ts](../../src/domains/session/entries.ts), and the compaction stage in [turn-context.ts](../../src/session-control/turn-context.ts) (`runAutoCompact`).
 
@@ -165,7 +165,7 @@ Exact recall by ref works for persisted tool results hidden by eviction or summa
 
 Errors distinguish malformed refs, off-branch refs, visible results, unavailable bodies and a path with no evicted read.
 
-Recoverable recall error messages end with the refs that can be recalled on the active path (tool results only, up to eight, then a count). `invalid_ref` reports only the malformed value. Clio deliberately lists valid refs instead of guessing a nearest ref, because similar time-ordered identifiers can name unrelated results.
+Recoverable recall error messages end with the refs that can be recalled on the active path (tool results only, up to eight, then a count). `invalid_ref` reports only the malformed value. Clio Coder deliberately lists valid refs instead of guessing a nearest ref, because similar time-ordered identifiers can name unrelated results.
 
 An LLM summary preserves discovery across its cut. The checkpoint carries a bounded `<recallable-refs>` preview for tool results hidden by compaction, including results that were never explicitly evicted, and points to omitted-ref discovery for the complete paginated inventory. Results after the cut retain their ordinary markers. Exact recall returns historical persisted content; reading the path again returns its current filesystem contents.
 
@@ -179,7 +179,7 @@ That also makes recall the churn signal. `churn = recalls / itemsEvicted` over t
 
 The procedural replay retains recorded `contextRecall` events and their result provenance, but does not synthesize churn from path reuse. Its reference graph distinguishes genuine rereads from rereads after a rewrite, counts listing discovery only at the first subsequent read, and treats identical calls as coverage, while a real `contextRecall` is an explicit model choice of one ref. A later reread already returns current content at the tail, so also injecting the old body would duplicate data and misread stale or superseded observations as recall demand. Replay reports `recallTokens` as a one-time demand bound per evicted item and waits for explicit `contextRecall` records before reporting recall count, churn, or tail growth.
 
-An offloaded result returns its pointer, never the file. The model gets the same `full: <path>` promise the original tool result ended with and reads it with `read` when it wants it.
+An offloaded result returns its pointer, never the file. The model receives the same `full: <path>` pointer the original tool result ended with and retrieves the file with `read` when needed.
 
 The entry points differ in where the body lands:
 
@@ -233,7 +233,7 @@ Dispatched workers do not fold this layer's ledger entries and have no profile b
 
 ## See also
 
-- `clio-coder context replay --sessions <path>...` replays Clio ledgers, and `--synthetic <ids>` replays the seeded procedural corpora, through the same fold, projection, and policy code with `none`, `random`, and `oracle` controls; `clio-coder context working-set --session <id|path>` prints one session's fold and path index. Both are described in [Commands and modes](../guide/commands-and-modes.md). Reports include per-reason items and tokens, events and checkpoints per trace, modeled cache-miss cost, and overflow reductions. With `--profile data-analysis` or `--profile web-design`, a profile section lists effective settings and pairs every policy/budget row with a default-profile run over the same loaded corpus. JSON schema `clio-coder-context-replay-v3` contains the same profile fields and baseline results. Copy a changing session corpus before comparing runs.
+- `clio-coder context replay --sessions <path>...` replays Clio Coder ledgers, and `--synthetic <ids>` replays the seeded procedural corpora, through the same fold, projection, and policy code with `none`, `random`, and `oracle` controls; `clio-coder context working-set --session <id|path>` prints one session's fold and path index. Both are described in [Commands and modes](../guide/commands-and-modes.md). Reports include per-reason items and tokens, events and checkpoints per trace, modeled cache-miss cost, and overflow reductions. With `--profile data-analysis` or `--profile web-design`, a profile section lists effective settings and pairs every policy/budget row with a default-profile run over the same loaded corpus. JSON schema `clio-coder-context-replay-v3` contains the same profile fields and baseline results. Copy a changing session corpus before comparing runs.
 - [context-engine.md](context-engine.md) for context window resolution, token accounting, and how this stage sits ahead of summary compaction.
 - [session-lifecycle.md](session-lifecycle.md) for the ledger format, active-path lineage, and branching.
 - [glossary.md](../guide/glossary.md) for the one-line definitions of these terms.

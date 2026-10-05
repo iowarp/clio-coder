@@ -2,9 +2,9 @@
 
 `contextUsageSnapshot` in [context-accounting.ts](../../src/domains/session/context-accounting.ts) computes the active budget. The [context continuity guide](../guide/context-continuity.md) explains operator recovery.
 
-Clio manages two complementary layers of context: the active working set compiled for the language model on every turn, and the persistent project knowledge used to navigate and ground repository work.
+Clio Coder manages two complementary layers of context: the active working set compiled for the language model on every turn, and the persistent project knowledge used to navigate and ground repository work.
 
-The core thesis of Clio's context architecture is that **context management must be deterministic, reversible, and source-grounded**. Rather than treating conversation history as an unbounded append-only log that periodically collapses into lossy prose summaries, Clio employs an active working-set model with deterministic token accounting, reversible observation eviction, prefix-stabilized prompt caching, and dual-layer repository indexing.
+The core thesis of Clio Coder's context architecture is that **context management must be deterministic, reversible, and source-grounded**. Rather than treating conversation history as an unbounded append-only log that periodically collapses into lossy prose summaries, Clio employs an active working-set model with deterministic token accounting, reversible observation eviction, prefix-stabilized prompt caching, and dual-layer repository indexing.
 
 **Start with `/context`.** It shows the active model window, current token occupancy, project handbook guidance, and live prompt-cache reuse measurements.
 
@@ -16,7 +16,7 @@ The core thesis of Clio's context architecture is that **context management must
 | --- | --- | --- |
 | Inspect active token budget & pressure | `/context` or `context(scope="budget")` | Detailed token breakdown, reserve buffers, pressure phase, and cache measurements. |
 | Summarize older history now | `/context compact [instructions]` or `/compact [instructions]` | An LLM summary handoff. It skips working-set eviction. Instructions bind the summarizer. |
-| Let the assistant hand off to herself | `self_compact` | An exact assistant-authored note, then eviction down to fit and a summary only if still over budget. An unknown window summarizes directly. |
+| Let the assistant preserve a handoff note | `self_compact` | An exact assistant-authored note, then eviction down to fit and a summary only if still over budget. An unknown window summarizes directly. |
 | Prune past observations reversibly | Automatic at `context.compaction.threshold` | No operator command evicts. Eviction is a projection and is undone per result by recall. |
 | Recover an interrupted compaction | `/context recover <handoffId> <reduce\|deliver>` | Branch-bound transaction recovery with preserved continuity identity. |
 | Inspect an evicted tool observation | `/context recall <ref>` | Shows the original body in the transcript; model recall uses the context tool. |
@@ -33,7 +33,7 @@ The `context` tool accepts the scopes `workspace`, `settings`, `skills`, `recall
 
 ## Context Window Resolution
 
-The effective context window ($W$) is the boundary Clio uses for token budgeting and compaction scheduling. It can be smaller than a provider's advertised ceiling, particularly when a local server (Ollama, llama.cpp, LM Studio) loads a model with a constrained context. `resolveContextWindowDetails` in [runtime-resolution.ts](../../src/domains/providers/runtime-resolution.ts) picks it and records the answering layer as `contextWindowSource`, one of `catalog`, `probe`, `loaded`, `target-override`, `model-hint`, `descriptor-default`, or `unknown`.
+The effective context window ($W$) is the boundary Clio Coder uses for token budgeting and compaction scheduling. It can be smaller than a provider's advertised ceiling, particularly when a local server (Ollama, llama.cpp, LM Studio) loads a model with a constrained context. `resolveContextWindowDetails` in [runtime-resolution.ts](../../src/domains/providers/runtime-resolution.ts) picks it and records the answering layer as `contextWindowSource`, one of `catalog`, `probe`, `loaded`, `target-override`, `model-hint`, `descriptor-default`, or `unknown`.
 
 Resolution takes the first applicable layer, most authoritative first:
 
@@ -62,7 +62,7 @@ A request is admitted only when its estimated input plus its output reservation 
 
 ## Token Accounting & Ledger Snapshots
 
-Clio estimates prompt size locally, then reconciles the estimate with provider-reported usage when it arrives.
+Clio Coder estimates prompt size locally, then reconciles the estimate with provider-reported usage when it arrives.
 
 - **Pre-call estimate**: characters divided by four, with 4,800 characters per image, 16 tokens of framing per message, and JSON length for tool arguments and schemas. `estimatedTokens` on a snapshot keeps this figure.
 - **Post-call reconciliation**: `reconcileSnapshot` in [context-accounting.ts](../../src/domains/session/context-accounting.ts) folds the provider's prompt token count (cached tokens included) into the snapshot, sets `reconciledTokens`, and records `divergenceRatio = reconciledTokens / estimatedTokens`. A ratio above 1 means the estimator under-counted.
@@ -126,7 +126,7 @@ Profiles add numeric-output or edited-component pins to structural policies. See
 
 ### 3. LLM Summary Handoff (Last Resort)
 
-When working-set eviction cannot reclaim sufficient space, or an operator runs `/context compact`, Clio summarizes the older conversation using the current model or the dedicated route configured under `context.compaction.model`. The summary captures objectives, constraints, modified files, decisions, and next steps. It persists as a `compactionSummary` ledger entry carrying the trigger (`auto`, `force` or `overflow`), the figures before and after, and the first kept turn. Earlier turns leave active model context and remain in the session ledger and `/view transcript`.
+When working-set eviction cannot reclaim sufficient space, or an operator runs `/context compact`, Clio Coder summarizes the older conversation using the current model or the dedicated route configured under `context.compaction.model`. The summary captures objectives, constraints, modified files, decisions, and next steps. It persists as a `compactionSummary` ledger entry carrying the trigger (`auto`, `force` or `overflow`), the figures before and after, and the first kept turn. Earlier turns leave active model context and remain in the session ledger and `/view transcript`.
 
 The summarizer is configured by `context.compaction.model` (a unique `target/model` reference, blank for the chat route) and `context.compaction.systemPrompt` (a file replacing the built-in instructions). It runs with thinking off, its output is capped at 8,192 tokens, and a checkpoint that would not shrink the context is discarded while its usage stays recorded. `/compact` instructions, operator notes, the failure pause, the notices and the route-source line that survives a summary are specified in [Context continuity and recovery](../guide/context-continuity.md).
 
@@ -143,7 +143,7 @@ Assistant-directed handoffs have a unique `handoffId` bound to the branch and du
 
 ## Prefix caching and cache observations
 
-Clio arranges stable prompt sections before turn-specific inputs so providers that cache a prefix can reuse it: Anthropic cache retention, Codex prompt-cache keys, and llama.cpp slot reuse (`cache_prompt`). Provider policy and slot residency decide whether a stable prefix is actually reused.
+Clio Coder arranges stable prompt sections before turn-specific inputs so providers that cache a prefix can reuse it: Anthropic cache retention, Codex prompt-cache keys, and llama.cpp slot reuse (`cache_prompt`). Provider policy and slot residency decide whether a stable prefix is actually reused.
 
 ### Prompt Layering Hierarchy
 Prompt sections have different update boundaries:
@@ -198,7 +198,7 @@ Project-level context is authored in Markdown and discovered hierarchically, fro
 
 ## Codemap and architecture wiki
 
-Clio maintains two distinct repository knowledge layers:
+Clio Coder maintains two distinct repository knowledge layers:
 
 ```
 Repository Source Code
@@ -231,7 +231,7 @@ Repository Source Code
 - **Dependencies**: Explicit import specifiers and internal module references.
 - **Fast Navigation**: Powers the `code_nav` tool (modes `symbol`, `path`, `entries`, `outline`, `deps`, `dependents`, `wiki` and `project`), allowing the agent to locate symbols and callers without running full repository text searches.
 
-`clio-coder context map [--out <path>] [--json]` builds or reconciles the index with current files and writes a standalone HTML codebase map without a model call or renderer installation. The overview shows up to eight areas with inferred responsibility headings. Expand an area to inspect symbols, local source lines, directional imports, and external import names. Static imports are observed evidence, not runtime calls. All local locations describe the working tree at generation time. Remote links pin a Git revision only when clean status, indexed hashes, Git blobs, workspace root and a GitHub origin agree. The default artifact is `.clio-coder/artifacts/maps/<repo>.html`; `--out` honors an explicit HTML destination and `--json` prints a receipt including bytes and SHA-256. Output destinations must use `.html` or `.htm`. Use `/skill map-codebase` for Clio to explain and refine the map using code navigation and source reading.
+`clio-coder context map [--out <path>] [--json]` builds or reconciles the index with current files and writes a standalone HTML codebase map without a model call or renderer installation. The overview shows up to eight areas with inferred responsibility headings. Expand an area to inspect symbols, local source lines, directional imports, and external import names. Static imports are observed evidence, not runtime calls. All local locations describe the working tree at generation time. Remote links pin a Git revision only when clean status, indexed hashes, Git blobs, workspace root and a GitHub origin agree. The default artifact is `.clio-coder/artifacts/maps/<repo>.html`; `--out` honors an explicit HTML destination and `--json` prints a receipt including bytes and SHA-256. Output destinations must use `.html` or `.htm`. Use `/skill map-codebase` for Clio Coder to explain and refine the map using code navigation and source reading.
 
 `code_nav` results also take part in the working set. A path-keyed call is evicted once the file changes, and an identical rerun supersedes the earlier one, see [Working Set](context-working-set.md).
 

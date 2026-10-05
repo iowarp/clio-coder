@@ -31,7 +31,7 @@ The wizard shows these providers after you choose the route. A subscription-back
 ## Connect one model
 
 ::: steps
-### Install Clio
+### Install Clio Coder
 
 ```sh
 curl -fsSL https://coder.iowarp.ai/install.sh | sh
@@ -86,18 +86,18 @@ A worker running on your machine against a remote model server is still a local 
 
 ## Choose capabilities deliberately
 
-Clio supports more than one kind of model interaction. Its Inception runtime serves [Mercury diffusion language models](/experimental/diffusion-models.html) as chat models with tool calling. Optional, experimental [System One engines](/experimental/system-one-decisions.html) answer typed questions at fixed decision sites. Neither replaces a chat model or is required to get started.
+Clio Coder supports more than one kind of model interaction. Its Inception runtime serves [Mercury diffusion language models](/experimental/diffusion-models.html) as chat models with tool calling. Optional, experimental [System One engines](/experimental/system-one-decisions.html) answer typed questions at fixed decision sites. Neither replaces a chat model or is required to get started.
 
 Vision support depends on the model and the route. A model advertised as multimodal is not enough if the bridge does not carry images: the managed Codex, Pi, OpenCode, Claude Code, and Antigravity CLI bridges are text-only. Check what the route accepts before attaching a screenshot.
 
 ::: limits Know where information goes
 - Clio runs locally, but a configured cloud model receives the input sent to that provider.
 - Local inference keeps inference on the selected server; tools, peers, plugins, and commands can still make network requests.
-- Clio is Apache 2.0 software. Inference hardware, provider usage, and subscriptions can still cost money.
+- Clio Coder is Apache 2.0 software. Inference hardware, provider usage, and subscriptions can still cost money.
 :::
 
 ::: next
-- [Your first session with Clio](/tutorials/first-session.html)
+- [Your first session with Clio Coder](/tutorials/first-session.html)
 - [Connection guide](/docs/guide/configuration-and-targets.html)
-- [Install Clio](/#start)
+- [Install Clio Coder](/#start)
 :::

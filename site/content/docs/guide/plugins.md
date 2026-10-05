@@ -1,6 +1,6 @@
 # Install plugins
 
-Add reusable resources to your Clio installation.
+Add reusable resources to your Clio Coder installation.
 
 ## Install a bundle of resources
 
@@ -12,7 +12,7 @@ clio-coder library install plugin:materio --dry-run
 clio-coder library install plugin:materio
 ```
 
-The catalog ships with Clio, but its content is not installed automatically. Add `--project` to keep a package in the current workspace; otherwise installation uses user scope.
+The catalog ships with Clio Coder, but its content is not installed automatically. Add `--project` to keep a package in the current workspace; otherwise installation uses user scope.
 
 Project packages load only in a workspace you have approved. Your own first project install approves it. After that, a change to the project's package set, including one that arrives with a clone or a pull, stays listed but unloaded until you review it with `clio-coder config trust plugins` and run the approval command it prints.
 

@@ -2,7 +2,7 @@
 
 `runDoctorCommand` in [doctor.ts](../../src/cli/doctor.ts) runs the CLI checks. The [safety model](../architecture/safety-model.md) explains command authority.
 
-`clio-coder doctor` diagnoses a Clio install and the workspace it runs in. It
+`clio-coder doctor` diagnoses a Clio Coder install and the workspace it runs in. It
 reads, performs passive endpoint probes, and reports; plain `doctor` writes
 nothing and sends no model generation request. This page covers what the checks
 are, the deep checks, the in-session `/doctor`, and how to read the rows.
@@ -39,7 +39,7 @@ Each row has a level:
 | --- | --- | --- | --- |
 | `ok` | `OK` | Healthy. | No |
 | `info` | `INFO` | A fact that needs no action, such as an optional tool that is not installed. | No |
-| `warn` | `WARN` | Worth attention; Clio still works. | No |
+| `warn` | `WARN` | Worth attention; Clio Coder still works. | No |
 | `error` | `!!` | Broken. | Yes: doctor exits 1 |
 
 Doctor exits 0 when no row is an error. See
@@ -93,7 +93,7 @@ The core rows read as follows.
 | `target <id>` | `WARN` when an OpenAI-compatible or Anthropic-compatible target answers like a native LM Studio or Ollama server, with the `clio-coder targets convert` command. `!!` when the target names an unknown runtime. |
 | `cache <id>` | `WARN` prompt-cache advisories from a target's passive check. |
 
-On a home Clio has never written to, plain `doctor` prints a `chat` warning explaining that no model target is configured and an `installation` warning row (`not set up yet`) and exits 0. It creates nothing. `doctor --fix` creates the directories without choosing a model.
+On a home Clio Coder has never written to, plain `doctor` prints a `chat` warning explaining that no model target is configured and an `installation` warning row (`not set up yet`) and exits 0. It creates nothing. `doctor --fix` creates the directories without choosing a model.
 
 Other rows appear when they apply: `validation contract` (valid, absent, Markdown-only or invalid; an invalid contract is an error and a valid one raises the rigor default to high), `interop <agent>` rows for detected external agents, `fleet node <id>` rows from the SSH preflight, `panes ...` rows, `external tool <id>` rows, and the `naming immutable history`, `naming git refs` and `naming worktree markers` rows. The naming rows count released `clio` identifiers retained in sessions, receipts, traces and evidence, `clio/task/*` and `clio/compete/*` git refs, and legacy worktree markers. They warn while any remain, are read-only even under `--fix`, and repair nothing.
 
@@ -108,7 +108,7 @@ where the tool resolves, with a `PATH` copy winning when it meets the pin's mini
 | --- | --- |
 | `PATH <path> (<version>, pin <pin>)` | A copy on `PATH` met the minimum and is used. |
 | `vendored <path> (<pin>)` | The copy `clio-coder tools install <id>` downloaded is used. When a `PATH` copy was rejected the detail names it, its version and the floor it missed. |
-| ``vendored <versions> is superseded by the <pin> pin (update with `clio-coder tools install <id>`)`` | A Clio upgrade moved the pin and only older vendored versions remain on disk, so nothing resolves. A rejected `PATH` copy is named in the same detail. |
+| ``vendored <versions> is superseded by the <pin> pin (update with `clio-coder tools install <id>`)`` | A Clio Coder upgrade moved the pin and only older vendored versions remain on disk, so nothing resolves. A rejected `PATH` copy is named in the same detail. |
 | `PATH copy <path> is <version>, below the <floor> floor, and nothing is vendored (install with ...)` | A `PATH` copy is too old and there is no vendored copy. |
 | ``not found (install with `clio-coder tools install <id>`)`` | Nothing resolves. |
 | `not installed and no pinned asset for this platform (<platform>)` | The pin has no download for this machine. |

@@ -10,7 +10,7 @@ Use `/tree` to inspect terminal conversation branches and `/fork` to branch from
 
 ## Keep long work focused
 
-Open `/context` to inspect context usage, output reservation, remaining headroom, and any pending handoff. Clio compacts a long native session automatically when context use crosses its configured threshold, or you can request a focused summary:
+Open `/context` to inspect context usage, output reservation, remaining headroom, and any pending handoff. Clio Coder compacts a long native session automatically when context use crosses its configured threshold, or you can request a focused summary:
 
 ```text
 /context compact Keep the objective, decisions, changed files, test results, and remaining work.

@@ -5,7 +5,7 @@
 Clio Coder reaches Slurm through the Slurm MCP server that
 [clio-kit](https://github.com/iowarp/clio-kit) ships, over the same local stdio
 MCP gateway every other MCP server uses. There is no Slurm transport inside
-Clio and no `srun` or `sbatch` worker tier: the agent submits, polls, and
+Clio Coder and no `srun` or `sbatch` worker tier: the agent submits, polls, and
 cancels jobs by calling five gateway capabilities, and the scheduler does the
 rest. Fleet nodes are SSH hosts and do not submit through Slurm; see
 [HPC clusters](hpc-clusters.md) for cluster hosts.
@@ -67,7 +67,7 @@ repository ships no copy of the server's schema, so a `describe` call is the
 authority for the installed clio-kit version.
 
 The server also exposes its older tool names (`submit_slurm_job`,
-`check_job_status`, and so on). Prefer the five above. Clio classifies the
+`check_job_status`, and so on). Prefer the five above. Clio Coder classifies the
 older names the same way, as listed below.
 
 ## How autonomy treats them
@@ -78,8 +78,8 @@ annotations never choose either. A user-scope declaration without an
 `actionClass` gets the class `unknown`, and `unknown` asks for one-shot approval
 in `default`, runs in `yolo`, and is denied on read-only dispatched runs.
 
-For a server declared with the id `slurm`, Clio classifies the tools by name
-before she consults that default, unless `toolActionClasses` names the tool:
+For a server declared with the id `slurm`, Clio Coder classifies tools by name
+before applying that default, unless `toolActionClasses` names the tool:
 
 | Tools | Class | Behavior |
 | --- | --- | --- |

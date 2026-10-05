@@ -39,7 +39,7 @@ Scout routing is advisory. After nine or more read-only exploration calls in
 one model round with no successful Scout dispatch in the user turn, middleware
 adds one model-only reminder at the end of the turn, at most once per user turn
 ([dispatch-nudge.ts](../../src/domains/middleware/dispatch-nudge.ts)). The reminder costs no extra model round and the operator
-does not see it. Direct reads remain allowed, and Clio does not rewrite a broad
+does not see it. Direct reads remain allowed, and Clio Coder does not rewrite a broad
 request into a Scout run. A second rail adds one advisory transcript line when a
 final reply claims a worker or Scout result and no dispatch ran in the turn.
 
@@ -119,7 +119,7 @@ Reaching the advisory ceiling ends tool use on a native worker. A worker with de
 tools (`write` and `edit`) fails with `worker_tool_call_cap_exhausted`; a reporting
 worker seals its synthesis (see [Failure semantics](#failure-semantics)). Subprocess
 runtimes (Claude Code, Antigravity and the Codex, OpenCode and Pi CLIs) and ACP delegation peers run an opaque loop, so
-their envelope is classified `external-one-shot`: Clio enforces one launch, the
+their envelope is classified `external-one-shot`: Clio Coder enforces one launch, the
 deadline, an output cap, cancellation and result-contract validation, and records the
 per-tool numbers as unobserved and not enforced.
 
@@ -248,7 +248,7 @@ profile pins or a standing preference must be cleared first.
 
 ### Exact client installation
 
-The node needs Node.js >=22.19 and npm on its noninteractive SSH PATH. Clio can
+The node needs Node.js >=22.19 and npm on its noninteractive SSH PATH. Clio Coder can
 install the exact package this client runs at user level:
 
 ```sh
@@ -259,7 +259,7 @@ clio-coder fleet nodes install node-a --yes    # execute the reviewed operation
 The preview names the version, SHA-256, transfer size and private destination
 under `~/.local/share/clio-coder/workers/<digest>/`. Execution packs the actual
 client package, transfers it over SSH, checks the digest, installs npm
-dependencies without optional SDKs, verifies the Clio version, then saves the
+dependencies without optional SDKs, verifies the Clio Coder version, then saves the
 worker entry. It uses no sudo, system packages, service changes or shell profile
 edits. Build a source checkout before packing it. Installation changes the
 connection identity, so record preflight again afterwards.
@@ -275,7 +275,7 @@ clio-coder fleet nodes add custom --host custom-host \
   --version-command '/home/me/.local/bin/clio-coder --version'
 ```
 
-The probe must report exactly the client's Clio version. Project compilers,
+The probe must report exactly the client's Clio Coder version. Project compilers,
 dependencies and datasets remain the operator's responsibility.
 
 ### LAN endpoints and optional Tailscale discovery
@@ -321,7 +321,7 @@ baseline before dispatching against it again.
 ## Doctor preflight
 
 A remote node needs a passing recorded check for the current project before
-admission. The connection probes observe batch-mode SSH, the exact Clio version,
+admission. The connection probes observe batch-mode SSH, the exact Clio Coder version,
 the project path and writable state storage (or a writable existing ancestor).
 The probe reads the remote state directory from `XDG_STATE_HOME`, so per-node
 `CLIO_CODER_*` directory overrides are unsupported. Project verification then
@@ -376,7 +376,7 @@ Placement and admission are separate, deterministic authorities:
    stale-preflight or incompatible choices fail closed; they never silently
    fall back. Existing approved route envelopes remain authoritative.
 2. Registration alone never moves unpinned work. When a verified node suits
-   substantial authorized work and no preference or pin exists, Clio asks once
+   substantial authorized work and no preference or pin exists, Clio Coder asks once
    with `ask_user`, offering local and suitable exact node ids with reasons.
    The harness remembers the selection for that session. Headless runs never
    ask and use explicit pins or configured preferences.
@@ -442,7 +442,7 @@ pool is the cap, so a small orchestrator host never shrinks work placed on SSH
 nodes. Host facts are sampled at most every 30
 seconds. Each sample records the host facts and active local worker count together.
 The sampler adds back the estimated memory of those workers, avoiding a capacity
-reduction caused solely by Clio's own workers while still observing changes in
+reduction caused solely by Clio Coder's own workers while still observing changes in
 host pressure. Calls inside the sampling interval reuse that same paired sample.
 
 When a host input binds the limit, the `/settings` fleet row for `local` shows
@@ -569,7 +569,7 @@ token.
 
 ### Checkout writer lease
 
-A `workspace-edit` recipe in a Git checkout acquires a process-owned lease under the Clio state
+A `workspace-edit` recipe in a Git checkout acquires a process-owned lease under the Clio Coder state
 directory before it runs. Its key is the canonical checkout path (the source checkout
 for a `worktree: true` writer), and its record contains the
 owner pid, process birth token, and acquisition time. A live sibling process
@@ -628,7 +628,7 @@ branch, and the detail names the `git merge` that applies it.
 A merge-mode run whose host verification rejected the tree fails with
 `host_verification_rejected` and keeps its branch with the work committed. The detail
 names the `git merge` that applies it. That detail, the receipt's evidence line for the
-check, and the merge card all say whether Clio ran the failing check on the task base. Only
+check, and the merge card all say whether Clio Coder ran the failing check on the task base. Only
 a quick command check is replayed, once, inside a bubblewrap sandbox over a throwaway
 archive of the base: one that took under two seconds, with a timeout capped at five seconds.
 When the task worktree has `node_modules` and its `package.json` and lockfiles match the base,
@@ -701,7 +701,7 @@ Compete candidates always stay under the project root.
 
 Each task worktree is claimed by `.clio-coder/worktrees/<runId>.task-owner.json`,
 which always stays under the project root and records the working tree's path,
-the branch, the base commit, the apply mode, and a lease on the Clio process
+the branch, the base commit, the apply mode, and a lease on the Clio Coder process
 that created it (host, PID, and a PID-reuse-resistant start identity). A run that
 ends and keeps its worktree marks the claim `settled`.
 
@@ -743,7 +743,7 @@ left at its base. Git hooks are disabled (`core.hooksPath=/dev/null`) for these
 branch operations on the node and for the local import.
 
 The coordinator fetches the branch through the configured SSH host, user, port
-and identity into the private local ref `refs/clio-coder/remote/<runId>`. Before importing, she checks that the
+and identity into the private local ref `refs/clio-coder/remote/<runId>`. Before importing, the coordinator checks that the
 fetched commit is exactly the returned commit, descends from the approved
 baseline without merge commits, touches only permitted paths and changes no
 protected artifacts. The owned local task tree must still be clean on its
@@ -1024,7 +1024,7 @@ contract. The seated agent, its persona, and its read-only tool profile are
 unchanged, so any recipe can be voted with.
 
 The verdict is a single line of at most 64 bytes and is lower-cased before the
-tally, so members who reach the same conclusion land on the same key. The
+tally, so members that reach the same conclusion land on the same key. The
 reasoning belongs in `text`, which is what the council report shows as the
 member's answer.
 
@@ -1145,8 +1145,8 @@ Write boundary enforcement is detect-and-rollback, never OS or filesystem sandbo
 6. Content source: Rollback restores content strictly from what git already has in the pinned baseline commit (`snapshot.head`). If a path was already dirty when the step snapshot was captured, its prior content is not stored in git, so in-place restoration cannot be guaranteed. The working tree is left as the step made it, and the status settles as `rollback-incomplete`.
 7. Violation handling: Any attributed unauthorized change fails the step with the typed reason `writes_boundary_violation`.
 8. Window attribution: Enforcement evaluates scheduling windows (`wave-<n>` or `revalidate-<stepId>-<n>`). A wave window cannot combine steps with overlapping declared boundaries or multiple concurrent step writers, ensuring single-step attribution.
-9. Ignored paths and state subtraction: Enforcement evaluates paths reported by git status, which never lists a git-ignored path. A declared `writes` entry the repository ignores is therefore refused before anything runs, by `fleet validate`, by `fleet run` preflight, and by the `/fleet run` preview, with a diagnostic naming the entry and the ignoring rule (for example `'work/' is ignored by .gitignore:1:work/`). Silently certifying such a window as clean is not an option, because nothing about it was observed. The Clio state directory (`.clio-coder/` or `clioStateDir()`) is subtracted from status checks so orchestrator receipts, code step log artifacts, and boundary verdicts do not trigger false violations.
-10. Durable records: Verdicts are serialized as JSON records at `write-boundaries/<rootId>/<window>.json` under the Clio state directory, carrying the baseline HEAD commit, checked paths, violations, unattributed concurrent changes, the attribution completeness flag and downgrade causes, rollback actions, status, and SHA-256 digest.
+9. Ignored paths and state subtraction: Enforcement evaluates paths reported by git status, which never lists a git-ignored path. A declared `writes` entry the repository ignores is therefore refused before anything runs, by `fleet validate`, by `fleet run` preflight, and by the `/fleet run` preview, with a diagnostic naming the entry and the ignoring rule (for example `'work/' is ignored by .gitignore:1:work/`). Silently certifying such a window as clean is not an option, because nothing about it was observed. The Clio Coder state directory (`.clio-coder/` or `clioStateDir()`) is subtracted from status checks so orchestrator receipts, code step log artifacts, and boundary verdicts do not trigger false violations.
+10. Durable records: Verdicts are serialized as JSON records at `write-boundaries/<rootId>/<window>.json` under the Clio Coder state directory, carrying the baseline HEAD commit, checked paths, violations, unattributed concurrent changes, the attribution completeness flag and downgrade causes, rollback actions, status, and SHA-256 digest.
 
 ### Bounded check/repair loops
 
@@ -1326,7 +1326,7 @@ which carries every attempt's frames in order, separated by a synthetic
 Manual `target`, `model`, or `node` pins default to exact failover (`none`): a
 retry may repeat the tuple but cannot silently move away from it. `approved`
 failover moves only within the ordered `allowedCandidates` envelope of exact
-agent/target/model/node tuples that the approved plan lists; Clio enumerates the
+agent/target/model/node tuples that the approved plan lists; Clio Coder enumerates the
 envelope and a model cannot send one. `automatic`
 failover lets typed infrastructure failures exclude only the failed route
 part. For example, an SSH channel failure can move the node while retaining the
@@ -1493,7 +1493,7 @@ policy all consume that same final classification.
 
 Receipt integrity, host verification, and evidence verification are separate axes. Integrity says
 that the sealed receipt matches its ledger envelope; evidence verification
-reports whether Clio observed an applicable validation tool (or marks the
+reports whether Clio Coder observed an applicable validation tool (or marks the
 basis unknown/not applicable). A read-only Scout can therefore report `receipt_integrity=verified/v20/sha256` alongside
 `evidence_verification=not_applicable/read-only-agent`. Host verification is
 rendered independently as `host_verification=verified|rejected|skipped|not_implicated|not_requested`.
@@ -1558,7 +1558,7 @@ hard block.
 - Every run carries the origin that asked for it. The board and the transcript
   worker block mark it with a glyph: `◇` for a run the operator started with `/run`
   or `/delegate`, `◆` for one the model started by calling a dispatch tool, and
-  a quiet `·` on the board for the runs Clio starts for herself (transcript helper
+  a quiet `·` on the board for Clio Coder's internal helper runs (transcript helper
   rows use `↳`). A running `◇` on the board is therefore the operator's own work.
   The footer shows the live worker count (`N workers`) and the Activity quadrant a
   `fleet <summary>` such as `fleet 2 active 1 done`; neither splits by origin.
@@ -1602,7 +1602,7 @@ hard block.
   steers the selected run, and `x` cancels it.
 - `Enter` on a live run takes the [workers dock](#workers-dock-and-dashboard)
   over for that run when a pane host is present. It opens the dock or shows a parked one,
-  and leaves the keyboard in Clio. Moving the cursor retargets an existing dock to the
+  and leaves the keyboard in Clio Coder. Moving the cursor retargets an existing dock to the
   selected live run and never opens one. Without a pane host, and for a finished run,
   `Enter` toggles the inline worker detail: the phase, the running call
   with a redacted action descriptor (`bash running npm test`), the bounded tail of the
@@ -1679,7 +1679,7 @@ hard block.
 
 ### Workers dock and dashboard
 
-A `--with-panes` session ([Panes and the Files Pane](panes-and-files.md)) can keep a workers dock beside Clio's own pane. The dock runs the workers dashboard: a board of this session's workers and a live takeover of one. The operator opens it. A dispatch starting, detaching or failing never opens a pane ([pane-policy.ts](../../src/interactive/pane-policy.ts)). `interface.panes.layout` set to `workers` or `cockpit` opens the dock at boot, on the board.
+A `--with-panes` session ([Panes and the Files Pane](panes-and-files.md)) can keep a workers dock beside Clio Coder's own pane. The dock runs the workers dashboard: a board of this session's workers and a live takeover of one. The operator opens it. A dispatch starting, detaching or failing never opens a pane ([pane-policy.ts](../../src/interactive/pane-policy.ts)). `interface.panes.layout` set to `workers` or `cockpit` opens the dock at boot, on the board.
 
 #### Workers key
 
@@ -1692,26 +1692,26 @@ A `--with-panes` session ([Panes and the Files Pane](panes-and-files.md)) can ke
 | Dock visible | Parks it. The dashboard keeps running with its state. |
 | No pane host | Opens or closes the Fleet Runs board overlay. |
 
-A second tap within 400 ms of the first closes the dock and ends the dashboard process. A single tap has no added delay. Pressed inside the dock, `Alt+W` reaches Clio through the tap file, so the same key parks the dock, returns the keyboard to Clio and counts toward the double tap. `q` inside the dock also parks it and returns the keyboard, without arming the double tap. While the Fleet Runs board is open, `Alt+W` closes it.
+A second tap within 400 ms of the first closes the dock and ends the dashboard process. A single tap has no added delay. Pressed inside the dock, `Alt+W` reaches Clio Coder through the tap file, so the same key parks the dock, returns the keyboard to Clio Coder and counts toward the double tap. `q` inside the dock also parks it and returns the keyboard, without arming the double tap. While the Fleet Runs board is open, `Alt+W` closes it.
 
-The dock splits to the right of Clio's pane and takes `interface.panes.workers.ratio` of the width (default `0.34`, range `0.05` to `0.5`) but never fewer than 40 columns, which is half of an 80-column terminal. A session pane too narrow for 40 columns at half its width refuses the dock with `the workers dock needs 40 cells and at most half of <n> is available`.
+The dock splits to the right of Clio Coder's pane and takes `interface.panes.workers.ratio` of the width (default `0.34`, range `0.05` to `0.5`) but never fewer than 40 columns, which is half of an 80-column terminal. A session pane too narrow for 40 columns at half its width refuses the dock with `the workers dock needs 40 cells and at most half of <n> is available`.
 
 #### Process and request files
 
 The pane runs this install's own CLI: `clio-coder fleet view --watch <state>/watch-selection --dock-taps <state>/watch-dock-taps`, with the config, data, state and cache directories pinned on argv. The dashboard reads durable state only: the run ledger (`runs.json`), each run's [event journal](../architecture/worker-dispatch-mechanics.md#run-event-journal), the sealed receipt and, for a fleet step, the fleet run record. It shares nothing with the orchestrator's memory, runs over SSH, and works from a second terminal. It polls every 250 ms.
 
-Two small files carry everything between Clio and the dashboard, one pair per state root:
+Two small files carry everything between Clio Coder and the dashboard, one pair per state root:
 
 | File | Direction | Content |
 | --- | --- | --- |
-| `<state>/watch-selection` | Clio to dashboard | Replaced atomically. Line 1 is the run id a takeover is requested for (blank asks for the board), followed by `seq=`, `session=` and `since=` lines. `seq` changes on every request, so asking for the same run twice still takes the dock over. `session` and `since` scope the board to this session. |
-| `<state>/watch-dock-taps` | Dashboard to Clio | One word per appended line: `hide` for `q`, `key` for `Alt+W`. Clio empties it when a session starts. |
+| `<state>/watch-selection` | Clio Coder to dashboard | Replaced atomically. Line 1 is the run id a takeover is requested for (blank asks for the board), followed by `seq=`, `session=` and `since=` lines. `seq` changes on every request, so asking for the same run twice still takes the dock over. `session` and `since` scope the board to this session. |
+| `<state>/watch-dock-taps` | Dashboard to Clio Coder | One word per appended line: `hide` for `q`, `key` for `Alt+W`. Clio empties it when a session starts. |
 
 Run by hand without `--dock-taps`, `q` quits the dashboard. Without a TTY, `fleet view --watch` prints the selected run's snapshot, or a note that no worker is selected, and exits 0.
 
 #### Board
 
-The board has one card per worker of this Clio session: runs stamped with the session's id, plus runs with no session stamp that started after this Clio booted. Started by hand with no request, it lists every run in the inspection scope (this project, or all projects with `--all`). A failed attempt that a retry or failover attempt replaced gives way to the replacement's card, which carries `↻<n>`. Live runs (queued, running, stale) come first, newest start first. A `finished` group follows with up to 24 runs, newest end first.
+The board has one card per worker of this Clio Coder session: runs stamped with the session's id, plus runs with no session stamp that started after this Clio Coder booted. Started by hand with no request, it lists every run in the inspection scope (this project, or all projects with `--all`). A failed attempt that a retry or failover attempt replaced gives way to the replacement's card, which carries `↻<n>`. Live runs (queued, running, stale) come first, newest start first. A `finished` group follows with up to 24 runs, newest end first.
 
 A card has three rows:
 
@@ -1726,7 +1726,7 @@ A narrow dock sheds the task first, then the model, then cost and route. The sta
 | `↑` `↓`, `k` `j` | Select the previous or next card. |
 | `g`, `G` | First or last card. |
 | `Enter`, `l`, `→` | Take the dock over for the selected card. |
-| `q` | Park the dock and return the keyboard to Clio. |
+| `q` | Park the dock and return the keyboard to Clio Coder. |
 | `Alt+W` | The workers key: park the dock, or close it on a double tap. |
 | `Ctrl+C` | End the dashboard and its pane. |
 
@@ -1752,7 +1752,7 @@ A finished worker adds a receipt section under the stream: the verdict row, a sp
 | `G` | Follow the newest line. Scrolling to the bottom does the same. |
 | `q`, `Alt+W`, `Ctrl+C` | As on the board. |
 
-A takeover follows work forward. When the run it shows finishes and a retry of it, or the next step of the same fleet run, starts, the takeover moves to that run (a live one first, otherwise the newest started). A takeover Clio requested by name follows even when the run had already finished. A finished card opened with `Enter` is inspected and stays. While a followed run has finished and its fleet is still running, the stream ends with `waiting for the fleet's next step`.
+A takeover follows work forward. When the run it shows finishes and a retry of it, or the next step of the same fleet run, starts, the takeover moves to that run (a live one first, otherwise the newest started). A takeover Clio Coder requested by name follows even when the run had already finished. A finished card opened with `Enter` is inspected and stays. While a followed run has finished and its fleet is still running, the stream ends with `waiting for the fleet's next step`.
 
 #### Dock requests
 
@@ -1788,7 +1788,7 @@ When the receipt authenticates, the snapshot adds three lines after `evidence`:
 | `cost` | `$<usd to four decimals>` and the receipt's `costProvenance`, or `not recorded` and `provenance not recorded`. |
 | `settled` | The receipt's label from `routeSettledLabel`, the value route history stores ([Route history and settled labels](#route-history-and-settled-labels)). |
 
-A receipt that fails authentication prints `RECEIPT INTEGRITY FAILED` and its reason on the `evidence` line, and none of these three lines. The route a run was dispatched on is configuration. Only the provider's report says which model answered, so `not observed` means Clio captured no report for that call. It never means the requested model served it.
+A receipt that fails authentication prints `RECEIPT INTEGRITY FAILED` and its reason on the `evidence` line, and none of these three lines. The route a run was dispatched on is configuration. Only the provider's report says which model answered, so `not observed` means Clio Coder captured no report for that call. It never means the requested model served it.
 
 Calls over the `openai-codex-responses`, `openai-responses` and `azure-openai-responses` APIs read `response.model` from the provider's lifecycle events ([responses-model-id.ts](../../src/engine/apis/responses-model-id.ts)). A response that names a model records `responseModelIdObservation: reported` with that id, a response object without one records `not-reported`, and a call that produced no response object records `not-observed`. The observation is stored per call in session usage and in the receipt's `upstreamResponses`.
 
@@ -1796,11 +1796,11 @@ Calls over the `openai-codex-responses`, `openai-responses` and `azure-openai-re
 
 ## Route observer
 
-The route observer records what the joint route resolver decided against what happened for every dispatch. It never selects a route, because selection belongs to the resolver. It appends one JSON line per decision (`kind: "decision"`) or outcome (`kind: "outcome"`) to `<state>/route-decisions/observations.jsonl` and rotates the file to `observations.jsonl.1` at 1 MiB. The records measure route regret, constraint validity, prediction calibration, and outcome. An outcome line also carries the receipt's `settled` label (see [Route history and settled labels](#route-history-and-settled-labels)). The records do not measure whether Clio dispatched the agent the caller asked for, because that is true by construction.
+The route observer records what the joint route resolver decided against what happened for every dispatch. It never selects a route, because selection belongs to the resolver. It appends one JSON line per decision (`kind: "decision"`) or outcome (`kind: "outcome"`) to `<state>/route-decisions/observations.jsonl` and rotates the file to `observations.jsonl.1` at 1 MiB. The records measure route regret, constraint validity, prediction calibration, and outcome. An outcome line also carries the receipt's `settled` label (see [Route history and settled labels](#route-history-and-settled-labels)). The records do not measure whether Clio Coder dispatched the agent the caller asked for, because that is true by construction.
 
 ## Speculative worker prewarm
 
-`fleet.speculativeDispatch` (default `false`, experimental) lets Clio start a worker process before the model asks for it. The System One `turn` site predicts which recipe the main agent is about to dispatch. When its fitted prewarm cut fires, Clio spawns that worker and holds it at "waiting for spec" while the main model generates. See [System One](system-one.md) for the `turn` site.
+`fleet.speculativeDispatch` (default `false`, experimental) lets Clio Coder start a worker process before the model asks for it. The System One `turn` site predicts which recipe the main agent is about to dispatch. When its fitted prewarm cut fires, Clio spawns that worker and holds it at "waiting for spec" while the main model generates. See [System One](system-one.md) for the `turn` site.
 
 A dispatch adopts a held process only when its agent, target, wire model, runtime, and working directory all match the prediction. Anything else runs on an ordinary cold spawn, and the held process is killed when the turn settles. At most two held processes exist at once. They take no capacity lease, so they never take a slot from a real dispatch.
 
@@ -1816,7 +1816,7 @@ with `residency: manage` in its fleet entry. An explicit target
 `lifecycle: user-managed` remains authoritative even on a managing node.
 
 A model the router tags as pinned (`pinned:true` or `role:scout`) is never
-evicted once resident, so Clio refuses to load it by evicting a resident that
+evicted once resident, so Clio Coder refuses to load it by evicting a resident that
 settings still reference by role; on a one-slot router such an override
 declines with a `will-not-fit` notice instead of stranding the configured model.
 
@@ -1831,7 +1831,7 @@ commands. Live fleet execution requires an operator.
 
 ## Bounded result delivery
 
-Recipes whose result contract is `mutation-report` (Coder, Documenter, Tester and git-master) return a structured report. Explicit recipe
+Recipes whose result contract is `mutation-report` (`coder`, `documenter`, `tester` and `git-master`) return a structured report. Explicit recipe
 selections remain in force. For a read-only explanation, its `summary` carries
 the requested explanation and citations, with `mutatedPaths` empty.
 

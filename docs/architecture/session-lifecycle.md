@@ -62,7 +62,7 @@ payloads on compaction summaries; version 6 adds eviction reasons, the `reread`
 recall trigger, and optional evicted-body content hashes.
 
 A missing format or a version below 3 is refused with guidance to remove the
-incompatible session directory. Versions above 6 require a newer Clio. Older
+incompatible session directory. Versions above 6 require a newer Clio Coder. Older
 binaries may refuse a session after its metadata is restamped; upgrade clients
 before reopening shared sessions.
 
@@ -236,7 +236,7 @@ When an operator issues `/new`, `/resume`, `/tree`, or `/fork` during streaming,
 | `clio-coder run --session <id>`, `clio-coder run --continue` | Headless resume. `--continue` takes the most recent session for the working directory. A session that cannot be resumed fails the run with exit code 2 instead of answering without its history. The two flags together, or either with `--agent`, are usage errors. Neither uses the picker filter. |
 | `clio-coder --resume`, `--continue`, `-r`, `-c` | Refused as unknown global options with exit code 2 (#191) by `src/cli/argv.ts`. The error names `/resume` inside the app. Sessions resume from inside the app, or through `run` for headless work. |
 
-On a clean interactive exit Clio prints a session summary whose last line is `To resume: clio-coder, then /resume <sessionId>`. `interface.exitSummary` (`full`, `brief`, `off`; default `full`) sets its size, and `off` prints only the resume line. A session with no model turn prints nothing. The snapshot is kept by [exit-summary-collector.ts](../../src/interactive/exit-summary-collector.ts) and formatted by [exit-summary.ts](../../src/interactive/exit-summary.ts); the key is listed in [Commands and modes](../guide/commands-and-modes.md).
+On a clean interactive exit Clio Coder prints a session summary whose last line is `To resume: clio-coder, then /resume <sessionId>`. `interface.exitSummary` (`full`, `brief`, `off`; default `full`) sets its size, and `off` prints only the resume line. A session with no model turn prints nothing. The snapshot is kept by [exit-summary-collector.ts](../../src/interactive/exit-summary-collector.ts) and formatted by [exit-summary.ts](../../src/interactive/exit-summary.ts); the key is listed in [Commands and modes](../guide/commands-and-modes.md).
 
 When resuming a session via `/resume` or a headless `clio-coder run --session <id>` / `--continue`:
 1. `src/domains/session/manager.ts:resumeSessionState` loads `meta.json` and runs migrations.
@@ -261,7 +261,7 @@ When resumed or forked session history is replayed to the model, compaction summ
 
 ## How new sessions, resume and fork differ in history and workspace
 
-Clio provides distinct lifecycle operations for managing conversation continuity, history lineage, and workspace directories:
+Clio Coder provides distinct lifecycle operations for managing conversation continuity, history lineage, and workspace directories:
 
 | Operation | Session ID & Ledger | History Lineage | Workspace (`cwd`) Behavior |
 | --- | --- | --- | --- |
@@ -274,7 +274,7 @@ Clio provides distinct lifecycle operations for managing conversation continuity
 
 ## 6. Session Export
 
-`/export` replays the active branch through the same transcript projection used by the live TUI and `/resume`. With no path, it writes `.clio-coder/exports/<sessionId>-<local-date>.html`. The HTML document is self-contained, carries the active Clio theme through converted ANSI styles, renders tool calls as semantic tool rows, references no external assets, and is capped at 2 MiB. If the transcript exceeds that limit, the export ends at a complete rendered row and states that later rows were omitted.
+`/export` replays the active branch through the same transcript projection used by the live TUI and `/resume`. With no path, it writes `.clio-coder/exports/<sessionId>-<local-date>.html`. The HTML document is self-contained, carries the active Clio Coder theme through converted ANSI styles, renders tool calls as semantic tool rows, references no external assets, and is capped at 2 MiB. If the transcript exceeds that limit, the export ends at a complete rendered row and states that later rows were omitted.
 
 An explicit path ending in `.md` keeps the plain Markdown form: a heading, UTC export instant, and a terminal-control-free fenced transcript. Export never changes the ledger or the active tree pin. Both formats follow the pinned active leaf and omit abandoned sibling turns.
 

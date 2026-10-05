@@ -1,6 +1,6 @@
 # Graphical Application
 
-The graphical application is a browser interface to the same Clio runtime the terminal uses. It is an Agent Client Protocol (ACP) client served by a small local HTTP server. The terminal interface, `clio-coder run` and the graphical application share one configuration, one credential store and one session ledger, and the application lists every project the terminal has worked in.
+The graphical application is a browser interface to the same Clio Coder runtime the terminal uses. It is an Agent Client Protocol (ACP) client served by a small local HTTP server. The terminal interface, `clio-coder run` and the graphical application share one configuration, one credential store and one session ledger, and the application lists every project the terminal has worked in.
 
 `clio-coder dev` and `clio-coder --help --all` list the command as the opt-in alpha graphical application; it also resolves without the `dev` prefix. The terminal interface stays the primary surface. Source lives in `apps/clio-coder-gui/`; the CLI entry is `src/cli/gui.ts`.
 
@@ -26,10 +26,10 @@ clio-coder gui launcher install|status|uninstall
 
 A bare `clio-coder gui` picks between two kinds of server:
 
-- **The background app**, when this installation has one installed (Linux only). `gui` starts the service if it is stopped, waits for it to answer (up to 15 seconds), prints the launch link, opens the app when a browser opens (under WSL an app window that is already open is focused and, when `--path` names a page, shown that page, see [One app window](#one-app-window)) and returns the terminal. If the running app reports a different Clio version and is idle, `gui` restarts it first. If the app is busy, `gui` prints a line naming both versions and the command that restarts it.
+- **The background app**, when this installation has one installed (Linux only). `gui` starts the service if it is stopped, waits for it to answer (up to 15 seconds), prints the launch link, opens the app when a browser opens (under WSL an app window that is already open is focused and, when `--path` names a page, shown that page, see [One app window](#one-app-window)) and returns the terminal. If the running app reports a different Clio Coder version and is idle, `gui` restarts it first. If the app is busy, `gui` prints a line naming both versions and the command that restarts it.
 - **A private server** for this terminal. It listens on `127.0.0.1` on a free port, prints its launch link on stdout and runs until Ctrl+C. SIGINT and SIGTERM close the server, stop every owned ACP child and exit.
 
-`gui` falls back to a private server with a printed reason when the background app's files cannot be verified, when the background app belongs to another Clio installation, or when the service manager will not start it. It changes nothing in those cases.
+`gui` falls back to a private server with a printed reason when the background app's files cannot be verified, when the background app belongs to another Clio Coder installation, or when the service manager will not start it. It changes nothing in those cases.
 
 ### Flags
 
@@ -70,16 +70,16 @@ The background app listens on its configured port, `127.0.0.1:4343` by default, 
 
 ### Files `gui background install` writes
 
-All service files live in `<state>/gui/background/` unless `--directory` says otherwise. `<state>` is Clio's state root: `$XDG_STATE_HOME/clio-coder`, or `~/.local/state/clio-coder` when that variable is unset, on Linux. The directory must be canonical, owned by the user and mode 0700.
+All service files live in `<state>/gui/background/` unless `--directory` says otherwise. `<state>` is Clio Coder's state root: `$XDG_STATE_HOME/clio-coder`, or `~/.local/state/clio-coder` when that variable is unset, on Linux. The directory must be canonical, owned by the user and mode 0700.
 
 | File | Content |
 | --- | --- |
-| `server.json` | Mode 0600. Port, a 43-character random launch token, Clio's four directory roots, the package root, the `PATH` at install time, the Node and entry paths, and the desktop prefix. |
+| `server.json` | Mode 0600. Port, a 43-character random launch token, Clio Coder's four directory roots, the package root, the `PATH` at install time, the Node and entry paths, and the desktop prefix. |
 | `clio-coder-gui-<12 hex>.service` | The systemd user unit. The hex is the first 12 characters of the SHA-256 of the directory path. |
 | `owner.json` | Ownership record holding hashes of the config and unit. Every later command verifies it and refuses to touch files that do not match. |
 | `windows.json` | Present only under WSL. Records the Windows shortcut paths and hashes. |
 
-The unit runs `<node> [--import <tsx loader>] <entry> --persistent <server.json>` with `Restart=on-failure`, `RestartSec=1`, `KillMode=control-group`, `TimeoutStopSec=15`, `UMask=0077` and `WantedBy=default.target`. It is activated with `systemctl --user enable --now -- <unit file>`. The service environment comes from `server.json`: the install-time `PATH`, `CLIO_CODER_PACKAGE_ROOT`, and `CLIO_CODER_CONFIG_DIR`, `CLIO_CODER_DATA_DIR`, `CLIO_CODER_STATE_DIR` and `CLIO_CODER_CACHE_DIR` pinned to the roots at install time. Sessions started from the background app therefore use Clio's saved credentials. A provider key that exists only in a terminal environment is not visible to them, so `install` ends with a reminder to run `clio-coder auth login <target>`.
+The unit runs `<node> [--import <tsx loader>] <entry> --persistent <server.json>` with `Restart=on-failure`, `RestartSec=1`, `KillMode=control-group`, `TimeoutStopSec=15`, `UMask=0077` and `WantedBy=default.target`. It is activated with `systemctl --user enable --now -- <unit file>`. The service environment comes from `server.json`: the install-time `PATH`, `CLIO_CODER_PACKAGE_ROOT`, and `CLIO_CODER_CONFIG_DIR`, `CLIO_CODER_DATA_DIR`, `CLIO_CODER_STATE_DIR` and `CLIO_CODER_CACHE_DIR` pinned to the roots at install time. Sessions started from the background app therefore use Clio Coder's saved credentials. A provider key that exists only in a terminal environment is not visible to them, so `install` ends with a reminder to run `clio-coder auth login <target>`.
 
 Reinstalling from the same installation (another version of the same native install counts) with moved Node or entry paths rewrites the config and unit and reloads systemd. Reinstalling with a different port or desktop prefix, or from another installation, fails until `uninstall` has run.
 
@@ -89,15 +89,15 @@ Every upgrade of a native install lands in a new `<install root>/versions/<versi
 
 ### Desktop entry
 
-After the service is ready, `install` writes `$XDG_DATA_HOME/applications/io.iowarp.ClioCoder.desktop` (`~/.local/share/applications/` when `XDG_DATA_HOME` is unset or relative) and an ownership record `io.iowarp.ClioCoder.desktop.owner.json` beside it with mode 0600. The entry's `Exec` runs `<node> [--import <loader>] <entry> background open --directory <dir>`. `--prefix` replaces the data directory. An existing entry that is not Clio's is never replaced.
+After the service is ready, `install` writes `$XDG_DATA_HOME/applications/io.iowarp.ClioCoder.desktop` (`~/.local/share/applications/` when `XDG_DATA_HOME` is unset or relative) and an ownership record `io.iowarp.ClioCoder.desktop.owner.json` beside it with mode 0600. The entry's `Exec` runs `<node> [--import <loader>] <entry> background open --directory <dir>`. `--prefix` replaces the data directory. An existing entry that is not Clio Coder's is never replaced.
 
 ### WSL shortcuts
 
-Under WSL with Windows interop, `install` also creates `Clio Coder.lnk` in the Windows Start Menu Programs folder and `Clio Coder (background).lnk` in the Windows Startup folder, plus a `clio-coder.ico` under `%LOCALAPPDATA%\clio-coder\gui\`. The Start Menu shortcut wakes WSL, runs `background open`, starts the service and opens the app, or focuses its window when one is open (see [One app window](#one-app-window)). The Startup shortcut runs `background start`, which only wakes WSL and starts the service. A shortcut that already exists and is not Clio's is left alone. A failure here is reported in the install output and does not fail the install.
+Under WSL with Windows interop, `install` also creates `Clio Coder.lnk` in the Windows Start Menu Programs folder and `Clio Coder (background).lnk` in the Windows Startup folder, plus a `clio-coder.ico` under `%LOCALAPPDATA%\clio-coder\gui\`. The Start Menu shortcut wakes WSL, runs `background open`, starts the service and opens the app, or focuses its window when one is open (see [One app window](#one-app-window)). The Startup shortcut runs `background start`, which only wakes WSL and starts the service. A shortcut that already exists and is not Clio Coder's is left alone. A failure here is reported in the install output and does not fail the install.
 
 ## Standalone desktop launcher
 
-`clio-coder gui launcher install|status|uninstall [--prefix DIR]` manages the same `.desktop` entry without a background service. The entry's `Exec` runs a private server with `--open --idle-exit 60000`, so the server stops once it has been idle for a minute. Output is JSON. `status` reports `absent`, `installed`, `unavailable` (launch paths no longer exist) or `conflict` (the entry is not Clio's), and `conflict` or `unavailable` exits 1. Launchers are Linux only.
+`clio-coder gui launcher install|status|uninstall [--prefix DIR]` manages the same `.desktop` entry without a background service. The entry's `Exec` runs a private server with `--open --idle-exit 60000`, so the server stops once it has been idle for a minute. Output is JSON. `status` reports `absent`, `installed`, `unavailable` (launch paths no longer exist) or `conflict` (the entry is not Clio Coder's), and `conflict` or `unavailable` exits 1. Launchers are Linux only.
 
 ## One app window
 
@@ -169,7 +169,7 @@ A new task's child may report a health fact, such as a local model server that i
 
 A completed install ends with `Run: clio-coder` and `Desktop app: clio-coder gui`, and so does `scripts/install-local.sh`. `scripts/install.ps1` has no GUI option and prints the same line, because native Windows has no background service. `scripts/install.cmd` only downloads and runs `install.ps1`.
 
-`clio-coder upgrade` runs `gui background restart --if-idle` after replacing the package when `<state>/gui/background/owner.json` exists, and a busy app stays on its old version until `clio-coder gui background restart`. The post-install step of an installer upgrade only prints that command. `clio-coder uninstall` removes the verified service and the desktop entry. `clio-coder reset --state` and `reset --all` remove the verified service with the desktop entry it owns, leave any standalone launcher alone and list `Removed Background service`. A build without the application bundle cannot verify ownership. `uninstall` reports the files as skipped, leaves them and keeps `<state>/gui`. `reset` stops with exit code 1 and preserves Clio state.
+`clio-coder upgrade` runs `gui background restart --if-idle` after replacing the package when `<state>/gui/background/owner.json` exists, and a busy app stays on its old version until `clio-coder gui background restart`. The post-install step of an installer upgrade only prints that command. `clio-coder uninstall` removes the verified service and the desktop entry. `clio-coder reset --state` and `reset --all` remove the verified service with the desktop entry it owns, leave any standalone launcher alone and list `Removed Background service`. A build without the application bundle cannot verify ownership. `uninstall` reports the files as skipped, leaves them and keeps `<state>/gui`. `reset` stops with exit code 1 and preserves Clio Coder state.
 
 ## Address, token and request checks
 
@@ -195,10 +195,10 @@ The server binds `127.0.0.1` only; there is no host option.
 - It runs no generic command. The CLI children it starts come from a closed table in `apps/clio-coder-gui/server/cli-commands.ts`: `agents --json`, `verifiers inspect --json`, `usage report --repo <workspace> --days 30 --json`, `evidence build --run <id>`, `fleet verify <id> --json`, `targets` list, probe, use and remove, `models --json --offline`, and `targets profile list|bindings --json`. Arguments are validated identifiers, never free text, and children are spawned without a shell.
 - It makes no outbound network request of its own. Each server isolate replaces `fetch` with a function that throws. Only the pinned toolchain downloader keeps network access.
 - It serves no file outside the built client directory, resolved through `realpath`.
-- It does not serve documentation. The Help dialog links to the public site and names the installed `docs/` directory, and Clio retrieves those pages with `clio_docs`.
+- It does not serve documentation. The Help dialog links to the public site and names the installed `docs/` directory, and Clio Coder retrieves those pages with `clio_docs`.
 - It never answers an approval for the person. See [Permissions and approvals](#permissions-and-approvals).
 
-## How the server reaches the Clio runtime
+## How the server reaches the Clio Coder runtime
 
 The server keeps three channels to the runtime, and every one passes through a small number of files.
 
@@ -212,9 +212,9 @@ The ACP child reports its capabilities in `initialize`, and the client enables a
 
 | What | Where |
 | --- | --- |
-| Conversations and their ledger | Clio's normal session ledger in the state root, shared with the terminal. |
+| Conversations and their ledger | Clio Coder's normal session ledger in the state root, shared with the terminal. |
 | Settings the application writes | The user layer of `settings.yaml` in the config root. Project and command-line values outrank it, and the page says so on an overridden control. |
-| Provider credentials | Clio's credential store, written by `clio-coder auth login` and by the setup wizard's `configure` child. The application keeps no separate copy. |
+| Provider credentials | Clio Coder's credential store, written by `clio-coder auth login` and by the setup wizard's `configure` child. The application keeps no separate copy. |
 | Recent workspaces | `<state>/gui/workspaces.json`, at most 40 entries, merged with the ledger's project list. A directory that no longer exists keeps its record and stops being offered until it returns. |
 | ACP child ownership | `<state>/gui/children.json` plus `children.locks/` and `workspaces.locks/`. Each row holds the owner process and the child's PID and birth token. At start the server reaps children whose owner died and recovers their ledgers. |
 | Background app | `<state>/gui/background/`, listed above. |
@@ -246,7 +246,7 @@ The footer holds a System link to `/system`, a light and dark switch and the Set
 - **New task** (`Ctrl/Cmd+Shift+O`) starts a task in the current workspace, or returns to that workspace's untouched draft instead of starting a second child. **Open workspace** (`Ctrl/Cmd+O`) opens a path box that completes `~`, drive and WSL spellings as you type, or the operating system's folder dialog (the Windows dialog under WSL and on Windows, `zenity` or `kdialog` on Linux, `osascript` on macOS). **Library** opens the Library page.
 - **Workspaces**, with a search button for the command palette. Workspaces appear current first, then most recently opened; ten show before `Show N more workspaces`. A workspace row toggles its task list, shows the path on hover and carries a `+` button, `New task in <name>`. The current workspace starts expanded. Each workspace lists six tasks before `Show N more`. A row shows a state mark (working pulse, approval dot, failed dot), the title, which is the task's label or its first request, and a compact age. A waiting turn shows `Waiting for a slot` and a paused task shows `Paused` in place of the age.
 - A row menu offers Rename (also F2 in the top bar), `Open in new window`, and Close task for an open or paused task (disabled while it works) or Delete for a saved one after a `Delete for good?` confirmation. Opening a saved row loads its ledger into a fresh session.
-- A closed task stays in the rail, on the `All tasks` page and in the palette's task list as its saved row, and reopens from that row. A task closed before Clio answered has no saved row and leaves the list, because the ledger lists a session only when it records an assistant reply or a tool call.
+- A closed task stays in the rail, on the `All tasks` page and in the palette's task list as its saved row, and reopens from that row. A task closed before Clio Coder answered has no saved row and leaves the list, because the ledger lists a session only when it records an assistant reply or a tool call.
 
 #### Settings panel
 
@@ -276,7 +276,7 @@ From left to right: the sidebar toggle and New task button (shown while the rail
 | Spend | Token count, and cost when the figure is priced. Opens Usage and quota. |
 | Changes | Added and removed line counts of applied edits. Opens the Changes view. |
 
-The last button shows or hides the right sidebar (`Ctrl/Cmd+Shift+\`). The ring and spend update while a turn runs, from the telemetry described under [Live telemetry](#live-telemetry), and from Clio's settled accounting after it ends.
+The last button shows or hides the right sidebar (`Ctrl/Cmd+Shift+\`). The ring and spend update while a turn runs, from the telemetry described under [Live telemetry](#live-telemetry), and from Clio Coder's settled accounting after it ends.
 
 ### Session column
 
@@ -288,9 +288,9 @@ The right sidebar of a task, headed `Session`, is one column of sections read to
 | App activity | Counts across every workspace this server holds, read as `N working · N queued`, with `· N need approval` added when any wait. `working` includes tasks that are starting, `queued` means waiting for a slot, and the counts include this task. A parked task is not counted. Each other active task is a link to it by title, with its workspace and its state beside it (`Working`, `Starting`, `Waiting for a slot` or `Needs your approval`). With none, the section reads `This is the only active session.` or `No work is running or queued.` | none |
 | Workspace | The session's working directory, then its Git branch (or `Detached HEAD`), `Uncommitted changes`, `Clean working tree` or `Working tree not reported`, and the ahead and behind counts; `No Git repository` otherwise. Shown once the session has reported a workspace. | none |
 | Model | The route the next turn will use (target, model, thinking level) with its health word: Healthy, Not checked, Degraded, Unavailable, Checking. | Opens the composer's route picker, or the saved route page. |
-| Context | A stacked meter of what fills the window, its percent and a legend. `estimated` appears until the provider reports usage. | Context window: Clio's context ledger by category and the window. |
+| Context | A stacked meter of what fills the window, its percent and a legend. `estimated` appears until the provider reports usage. | Context window: Clio Coder's context ledger by category and the window. |
 | Usage | Two figures. `Tokens` is a compact count with the full count on hover. `Cost` carries `~` when estimated and `+` when some calls are unpriced, reads `$0.00` for a free provider and reads `Unpriced` when no cost is known. `Nothing used yet.` appears before any usage. | Usage and quota: spend per provider and model, and each provider's cached quota report. |
-| Plan | The plan steps with a done count, plus counts of the person's tasks and active decisions. | Tasks and decisions: the board. The person's tasks change through the same `tasks` command family the terminal uses. The plan is read-only. Superseding a decision sends a correction to Clio as the person's own request. |
+| Plan | The plan steps with a done count, plus counts of the person's tasks and active decisions. | Tasks and decisions: the board. The person's tasks change through the same `tasks` command family the terminal uses. The plan is read-only. Superseding a decision sends a correction to Clio Coder as the person's own request. |
 | Artifacts | One line naming receipts, outputs and session records. Shown when the child announces artifacts. | Artifacts: see [Artifacts](#artifacts). |
 | Changes | Files changed and waiting-for-approval counts with a diffstat. | Changes: every file the task edited with the diff of each call, then other paths its tools touched. |
 | Branches | Fork points in the session tree. Shown when the child announces branch support. | Continue from an earlier turn, or fork a new conversation from it. Files in the project are not rewound. |
@@ -359,7 +359,7 @@ A draft whose first character is `/` and that has one line opens the slash palet
 | Library | Tabs for Catalog, Agents, Skills, Prompts, Fleets, Extensions and Verifiers. The Catalog tab reviews a library plan and applies it through the ops thread. |
 | Skills (`/skills`) | The skills available in the current project, with a search box and a link to the Library for installing or removing packages. The rail has no link to it; the command palette lists it as `Skills`. The Library page has its own Skills tab. |
 | Toolchain | Pinned external tools, how each resolves (PATH or the vendored copy), and install and remove operations with progress. |
-| System | Installation findings, Clio folders, and detected coding agents under Interop with accept and decline decisions. |
+| System | Installation findings, Clio Coder folders, and detected coding agents under Interop with accept and decline decisions. |
 | Usage | The 30-day usage report: spend, token composition, origins, models, skills and suggestions. |
 | Traces, Fleet, Evidence | Run history from the trace store, saved fleet executions, dispatches and receipts, and evidence bundles with findings and provenance. |
 
@@ -369,9 +369,9 @@ Settings pages write only the user layer, through the same validated writer as `
 
 An approval is the child's `session/request_permission` request, shown as a card pinned above the transcript. The card does not trap focus; the person can keep reading while it waits. The server holds one pending permission per session and checks it against the active tool call before showing it. A request that does not match an in-progress tool call and a pair of one-time choices is refused, fails the turn and retires that session's child.
 
-- **Choices.** `Allow once` and `Reject`, which tells Clio no and lets the turn continue. A third choice, `Reject and stop the turn`, appears only when Clio offered an option with the id `reject-and-stop`; it also denies every other parked request and ends the turn. There is no allow-always choice on the wire.
-- **What the card states.** The facts Clio classified and bounded upstream under `_meta["clio-coder/decision"]`: tier and label, who requested it, authorization, consequence and reversibility sentences, action class, affected scope, the target, and for a shell command up to nine plain-language steps. No model-authored prose reaches the card. A request without those facts shows `Unclassified`. A plan-scale dispatch lists each run's agent, task and placement with the plan hash, cost ceiling and deadline from `clio-coder/dispatchPlan`. A worker's escalation, forwarded when the client opted into `clio-coder/workerPermissions`, names the worker, the approval authority (`main` or `operator`), the timeout and the fallback from `clio-coder/workerAsk`, and the card retires when Clio sends `_clio-coder/permission/withdraw`.
-- **Clock.** The card escalates after 45 seconds (`APPROVAL WAITING, ESCALATED`, with an assertive announcement) and the request expires after 600 seconds. On expiry the server cancels the turn and resolves the parked request as cancelled. Clio is not told no. The child's own `--permission-timeout` is 605000 ms, so the application's budget always fires first.
+- **Choices.** `Allow once` and `Reject`, which tells Clio Coder no and lets the turn continue. A third choice, `Reject and stop the turn`, appears only when Clio Coder offered an option with the id `reject-and-stop`; it also denies every other parked request and ends the turn. There is no allow-always choice on the wire.
+- **What the card states.** The facts Clio Coder classified and bounded upstream under `_meta["clio-coder/decision"]`: tier and label, who requested it, authorization, consequence and reversibility sentences, action class, affected scope, the target, and for a shell command up to nine plain-language steps. No model-authored prose reaches the card. A request without those facts shows `Unclassified`. A plan-scale dispatch lists each run's agent, task and placement with the plan hash, cost ceiling and deadline from `clio-coder/dispatchPlan`. A worker's escalation, forwarded when the client opted into `clio-coder/workerPermissions`, names the worker, the approval authority (`main` or `operator`), the timeout and the fallback from `clio-coder/workerAsk`, and the card retires when Clio sends `_clio-coder/permission/withdraw`.
+- **Clock.** The card escalates after 45 seconds (`APPROVAL WAITING, ESCALATED`, with an assertive announcement) and the request expires after 600 seconds. On expiry the server cancels the turn and resolves the parked request as cancelled. Clio Coder is not told no. The child's own `--permission-timeout` is 605000 ms, so the application's budget always fires first.
 - **Keyboard and signals.** `Alt+A` allows once and `Alt+R` rejects, from anywhere while an approval waits and no dialog is open. A pending approval sets a marker in the tab title and the task's rail row, and a turn that ends or is cancelled withdraws the card.
 - **Working freedom.** The control beside the composer sets the task's autonomy through `session/set_mode`. `Ask first` is `default`: reads, edits and recognized commands run, and unrecognized shell commands, plan-scale dispatch and anything that publishes outside the project wait. `Run without asking` is `yolo`: nothing waits. Choosing it needs a second, confirming press, lasts until the task closes or is parked, and is disabled while a turn runs. A task that resumes from parking starts at the `safety.autonomy` setting.
 - **Interviews.** When Clio calls `ask_user`, the application shows the questions as a card and returns the reviewed answers with `Ctrl/Cmd+Enter`. A turn abort, a session switch or a close cancels a round that is still waiting.

@@ -12,7 +12,7 @@ Configure and desktop Settings share eight sections: Connections, Chat, Fleet, C
 
 | Layer | File or scope |
 | --- | --- |
-| User defaults | `settings.yaml` in Clio's configuration directory |
+| User defaults | `settings.yaml` in Clio Coder's configuration directory |
 | Shared project settings | `.clio-coder/settings.yaml` |
 | Local project settings | `.clio-coder/settings.local.yaml` |
 | Active session | The session/project/global choices offered by supported terminal controls |
@@ -29,6 +29,6 @@ Saved routes seed a new session. A settings write from another process does not 
 
 ## Look up an exact key
 
-The full reference covers supported settings keys, defaults, CLI flags, project file ownership, and MCP trust. Use **Read the full guide** above or ask Clio to retrieve the relevant bundled documentation before editing YAML.
+The full reference covers supported settings keys, defaults, CLI flags, project file ownership, and MCP trust. Use **Read the full guide** above or ask Clio Coder to retrieve the relevant bundled documentation before editing YAML.
 
 Settings validation is strict. For an older installation, `clio-coder upgrade` applies the registered migration and preserves a version-1 backup. For connection and installation diagnostics, use [doctor](/docs/guide/doctor.html).

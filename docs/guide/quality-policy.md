@@ -1,6 +1,6 @@
 # Project quality policies
 
-A project quality policy tells Clio which declared checks a change requires.
+A project quality policy tells Clio Coder which declared checks a change requires.
 It can use the project's existing linters, type checkers, tests, numerical
 comparisons, or performance checks. Clio supplies the completion assessment
 and verification provenance; the repository owns the standards and commands.
@@ -42,7 +42,7 @@ rejected. Every matching rule applies; a change to the policy itself activates
 every rule in the current policy.
 
 `inputs` adds files whose contents affect the result. It defaults to `paths`.
-Clio fingerprints Git-enumerated files matching either `paths` or `inputs`, so
+Clio Coder fingerprints Git-enumerated files matching either `paths` or `inputs`, so
 an explicit `inputs` list cannot exclude covered, enumerated source. A covered
 mutation absent from that inventory is unavailable, never certified as fresh.
 Include tests, compiler configuration,
@@ -68,7 +68,7 @@ Call `verify()` to see the existing checks and the quality requirements.
 The structured listing includes `details.qualityPolicy` with the rules and
 the SHA-256 digest of the policy bytes.
 
-For a policy check, Clio captures source and declaration fingerprints before
+For a policy check, Clio Coder captures source and declaration fingerprints before
 and after execution. The result includes `details.quality` with `stable`, a
 versioned `snapshot`, and an `error` when snapshotting was unavailable. A
 command that modifies its own scoped inputs does not get a stable snapshot;
@@ -78,7 +78,7 @@ At completion, Clio compares the latest paired verification receipt for each
 required check in the current turn with a fresh snapshot. A later failed run
 supersedes an earlier pass. Source edits, additions, deletions, policy edits,
 and changes to the check declaration invalidate an old result, including
-changes made outside Clio's tools.
+changes made outside Clio Coder's tools.
 
 The assessment and completion audit record contain one structured finding
 per applicable rule/check:
@@ -138,7 +138,7 @@ Snapshots currently require Git and a workspace that is the repository root.
 They include Git-tracked and nonignored untracked files; ignored untracked
 files are not fingerprinted. A covered mutation to such a file makes its
 requirement unavailable even when a recorded snapshot otherwise matches.
-Clio does not scan ignored dependency or build trees to establish coverage.
+Clio Coder does not scan ignored dependency or build trees to establish coverage.
 External datasets, installed dependencies,
 environment variables, tool binaries, and services are not captured. A
 lockfile fingerprint records dependency intent, not the installed environment.

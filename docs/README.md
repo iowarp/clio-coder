@@ -17,10 +17,10 @@ docs/
 └── wiki/            Generated development reference, v0.1
 ```
 
-Clio reads the authored Markdown in this directory directly from her installed
+Clio reads the authored Markdown in this directory directly from its installed
 package. The website serves a generated snapshot of the guides listed in
 `site/public-docs.json` (a source-checkout file), so a guide that is not listed
-there is bundled with Clio and absent from the website. The
+there is bundled with Clio Coder and absent from the website. The
 [GitHub Wiki](https://github.com/iowarp/clio-coder/wiki) is a developing source
 reference with independent v0.1 versioning. Use the architecture guides and
 current source for implementation decisions.
@@ -29,10 +29,10 @@ current source for implementation decisions.
 
 | Goal | Guide |
 | --- | --- |
-| Install Clio and connect the first model | [Installation and Lifecycle](guide/installation-and-lifecycle.md) → [Configuration and Targets](guide/configuration-and-targets.md) |
+| Install Clio Coder and connect the first model | [Installation and Lifecycle](guide/installation-and-lifecycle.md) → [Configuration and Targets](guide/configuration-and-targets.md) |
 | Install on an HPC cluster: no root, old glibc, proxies, airgapped mirrors | [HPC clusters](guide/hpc-clusters.md) |
 | Learn the interactive session and CLI | [Commands and Modes](guide/commands-and-modes.md) |
-| Understand what Clio may read, change, or execute | [Safety Model](architecture/safety-model.md) |
+| Understand what Clio Coder may read, change, or execute | [Safety Model](architecture/safety-model.md) |
 | Diagnose a problem by its exact message | [Troubleshooting](guide/troubleshooting.md) |
 | Run the read-only install check: core install, targets, HPC toolchain, task worktrees, Slurm MCP and System One rows, and the deep checks | [Doctor](guide/doctor.md) |
 | Place a decision engine at System One sites (turn hints, the tool-call gate, relevance ranking, consult, drafts), then calibrate it and run it in shadow mode | [System One](guide/system-one.md) |
@@ -40,7 +40,7 @@ current source for implementation decisions.
 
 A minimal first run needs a model to talk to: a local app such as Ollama or LM
 Studio, a lab gateway, an AI subscription, or a cloud API. Guided setup starts
-from those recognizable choices, fills in Clio's internal connection name,
+from those recognizable choices, fills in Clio Coder's internal connection name,
 checks the endpoint when possible, and offers the models it can discover. The
 endpoint shortcut is available for operators who already know a server URL.
 
@@ -62,7 +62,7 @@ Use `clio-coder --help` for the installed command surface and `/help` inside an
 interactive session. `clio-coder doctor` is a read-only installation check;
 `doctor --fix` performs only the repairs it reports.
 
-## Using Clio day to day
+## Using Clio Coder day to day
 
 | Topic | Guide |
 | --- | --- |
@@ -137,7 +137,7 @@ reference data, and review define the acceptance criteria for a change.
 | --- | --- |
 | Source layout, compile-time boundaries, domain loading, and runtime flow | [Architecture](architecture/architecture.md) |
 | Package identity, envelope, integrity, install state, dependency rule, trust by origin, and the shared inventory | [Library Architecture](architecture/library.md) |
-| Pi framework boundary and Clio-owned policy | [Pi Boundary](architecture/pi-boundary.md) |
+| Pi framework boundary and Clio Coder-owned policy | [Pi Boundary](architecture/pi-boundary.md) |
 | Clock, duration, timestamp, and ordering conventions | [Time Conventions](architecture/time-conventions.md) |
 | Boot sequence, startup presentation modes, and how to benchmark boot on a machine | [TUI Boot Performance](architecture/tui-boot-performance.md) |
 | Core terms mapped to source concepts | [Glossary](guide/glossary.md) |
@@ -169,7 +169,7 @@ audit.
 
 ## Where Clio finds these docs when it is running in someone else's project
 
-Clio's documentation ships with Clio, not with your workspace. Everything below
+Clio Coder's documentation ships with the software, not with your workspace. Everything below
 resolves from the installed package root, never from the directory you launched
 in. The root is `CLIO_CODER_PACKAGE_ROOT` when that variable is set, and
 otherwise the nearest directory holding a `package.json` above the running code
@@ -185,7 +185,7 @@ because `package.json` ships `docs/**/*.md` and leaves out `docs/wiki/**`.
 checkout therefore also indexes the generated `docs/wiki/**` pages: the engine
 has no wiki exclusion, and `scripts/check-hygiene.ts` requires every Markdown
 file under `docs/` except `docs/html` to appear in the listing. A search returns
-sections, one per heading, ranked by BM25 over headings and bodies with Clio
+sections, one per heading, ranked by BM25 over headings and bodies with Clio Coder
 vocabulary aliases and phrase boosts. The index is deterministic and needs no
 network or embedding service.
 
@@ -204,7 +204,7 @@ and line range, and `read.args`: the absolute `path`, `offset`, `limit` and
 `line_numbers` that read exactly that section. Pass `read.args` to `read` as
 given. This is the step that matters when the workspace is someone else's
 repository: reading `docs/architecture/safety-model.md` as a plain relative path
-reads *that project's* `docs/`, if it has one. Clio's own system prompt names the
+reads *that project's* `docs/`, if it has one. Clio Coder's own system prompt names the
 installed documentation directory as `{CLIO_DOCS_PATH}`, substituted as
 `join(packageRoot, "docs")` ([compiler.ts](../src/domains/prompts/compiler.ts)).
 To resolve a `file` by hand, resolve it against the **package root**, which is

@@ -1,6 +1,6 @@
 # Project context: codemap, orientation, status, and guidance
 
-Clio keeps structural navigation separate from authored guidance, current work evidence, and deeper explanations. An ordinary session gets a small orientation and retrieval pointers. It does not preload the structural index or the generated wiki bodies.
+Clio Coder keeps structural navigation separate from authored guidance, current work evidence, and deeper explanations. An ordinary session gets a small orientation and retrieval pointers. It does not preload the structural index or the generated wiki bodies.
 
 | Artifact | Owner and purpose | Creation and updates | Model surface and failure behavior |
 | --- | --- | --- | --- |
@@ -13,9 +13,9 @@ Clio keeps structural navigation separate from authored guidance, current work e
 | `.clio-coder/proposals/`, `.clio-coder/handoffs/` | Ignored handbook drafts from `context init --propose`, and task-memory handoff exports | Explicit commands | Not injected. `context reset` removes both; see [Proactive memory](../guide/proactive-memory.md) for handoff exports. |
 | `.clio-coder/wiki/**/*.md`, `meta.json`, plan/checkpoint | Deeper, model-generated explanations grounded in declared source inputs | Explicit wiki generation/update; per-page dispatch, validation and staged publication | A small checkpoint hint in prompts; `code_nav mode=wiki` resolves pages and checks freshness. Existing Markdown can await successful validation. Coverage without generation evidence is unknown. |
 | `docs/wiki/` and its publishing workflow | Generated repository documentation published to the GitHub Wiki by maintainers | Explicit export/publishing workflow | Not part of the npm package and independent of the workspace's live `.clio-coder/wiki`. Plan completion is recorded by the wiki checkpoint, independently of exported file presence. |
-| Packaged `docs/**/*.md` | Clio product reference and browser documentation | Release packaging | Editors and the offline `clio_docs` retrieval capability read these. They describe Clio, not the current project's status. |
-| Packaged `src/**` | Runtime-loaded prompt fragments, provider/resources data, extension runtime/API, and source for Clio's own navigation | Release packaging | The fragment loader loads Markdown from `src/domains/prompts/fragments`; bundled navigation points to shipped source that `read` can open. Removing all source would break these consumers. |
-| `dist/assets/codemap.json` | Clio's own deterministic, packed-file structural map | Build after the executable/assets are built; file membership comes from `npm pack --dry-run` | `code_nav source=clio` resolves shipped files against the installed package root. This is separate from the current workspace map and state. |
+| Packaged `docs/**/*.md` | Clio Coder product reference and browser documentation | Release packaging | Editors and the offline `clio_docs` retrieval capability read these. They describe Clio Coder, not the current project's status. |
+| Packaged `src/**` | Runtime-loaded prompt fragments, provider/resources data, extension runtime/API, and source for Clio Coder's own navigation | Release packaging | The fragment loader loads Markdown from `src/domains/prompts/fragments`; bundled navigation points to shipped source that `read` can open. Removing all source would break these consumers. |
+| `dist/assets/codemap.json` | Clio Coder's own deterministic, packed-file structural map | Build after the executable/assets are built; file membership comes from `npm pack --dry-run` | `code_nav source=clio` resolves shipped files against the installed package root. This is separate from the current workspace map and state. |
 
 ## Storage and presentation
 
@@ -55,7 +55,7 @@ code_nav({mode:"dependents",query:"src/solver.ts"})
 code_nav({mode:"wiki",query:"architecture"})
 ```
 
-`source=clio` is for navigating the installed Clio implementation. `mode=project` and `mode=wiki` describe the workspace and are unavailable with `source=clio`; use the product docs capability for Clio documentation.
+`source=clio` is for navigating the installed Clio Coder implementation. `mode=project` and `mode=wiki` describe the workspace and are unavailable with `source=clio`; use the product docs capability for Clio Coder documentation.
 
 Bounded workers receive up to 2,400 characters of complete codemap/orientation/wiki support fragments, independently of whether a handbook is present. Their existing handbook policy and omission notices remain separate. Receipt provenance includes the orientation message. A worker's task worktree supplies structural/status facts; a source-checkout handbook fallback does not substitute the source checkout's map or status. Workers configured with project-context tier `none` retain that policy.
 

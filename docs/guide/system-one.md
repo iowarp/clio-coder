@@ -1,10 +1,10 @@
 # System One
 
-System One is an experimental decision layer. Clio asks a fast decision model calibrated questions at fixed decision sites. The model reads a bounded, redacted state about one object (the operator's request, a proposed tool call, a tool result, a finished turn, a catalog) and returns probabilities, which Clio's policy may turn into hints, a ranking, advice or preparation. System One never answers the operator, never edits anything and never removes friction that Clio's own safety rules impose.
+System One is an experimental decision layer. Clio Coder asks a fast decision model calibrated questions at fixed decision sites. The model reads a bounded, redacted state about one object (the operator's request, a proposed tool call, a tool result, a finished turn, a catalog) and returns probabilities, which Clio Coder's policy may turn into hints, a ranking, advice or preparation. System One never answers the operator, never edits anything and never removes friction that Clio Coder's own safety rules impose.
 
 Experimental means that its sites, settings keys and shipped cuts may change between releases. Every surface that shows System One says so: the comment above `systemOne` in the settings file, the `/settings` rows, the GUI's settings group, doctor, the `systemone` CLI help and the approval-card advisory.
 
-It is off until you bind an engine to a site. With nothing bound Clio behaves exactly as she does without System One. Nothing waits on a decision engine, fitted or not: turn start, tool admission, tool-result delivery, turn settlement and prompt composition never await an answer. Each call runs detached, and its answer is used only if it is already available when a reader looks; otherwise it is only recorded. Every failure of a bound engine (timeout, refusal, unusable reply) leaves the unbound behavior in place. The design contract is in [System One Architecture](../architecture/system-one.md).
+It is off until you bind an engine to a site. With nothing bound, Clio Coder's behavior is unchanged. Nothing waits on a decision engine, fitted or not: turn start, tool admission, tool-result delivery, turn settlement and prompt composition never await an answer. Each call runs detached, and its answer is used only if it is already available when a reader looks; otherwise it is only recorded. Every failure of a bound engine (timeout, refusal, unusable reply) leaves the unbound behavior in place. The design contract is in [System One Architecture](../architecture/system-one.md).
 
 ## The ladder
 
@@ -21,7 +21,7 @@ A tier 2 model costs no hosted API fee, but it still uses your hardware, and a d
 
 ### Tier 2 placements, measured
 
-These are research measurements of one checkpoint, the Strands Decider 2B (`strands-decider-2B-hobson-v19`), on one Strix Halo laptop (Ryzen AI Max+ PRO 395, Radeon 8060S iGPU, XDNA2 NPU, 128 GB of unified memory) with Gemma-4-26B resident on the iGPU throughout. Decisions made while Gemma was generating were not measured. They come from a research harness outside this repository, and Clio ships none of these servers and no command that reproduces them. The numbers describe that machine and those inputs. They are not a benchmark.
+These are research measurements of one checkpoint, the Strands Decider 2B (`strands-decider-2B-hobson-v19`), on one Strix Halo laptop (Ryzen AI Max+ PRO 395, Radeon 8060S iGPU, XDNA2 NPU, 128 GB of unified memory) with Gemma-4-26B resident on the iGPU throughout. Decisions made while Gemma was generating were not measured. They come from a research harness outside this repository, and Clio Coder ships none of these servers and no command that reproduces them. The numbers describe that machine and those inputs. They are not a benchmark.
 
 | Placement | Server | Short state p50 | 1,000-token state p50 | Memory |
 | --- | --- | --- | --- | --- |
@@ -31,7 +31,7 @@ These are research measurements of one checkpoint, the Strands Decider 2B (`stra
 
 Each row is one question (a yes/no, a three-way choice and a three-level score) after two warm-up calls, 20 samples per cell. The short state is 74 to 86 tokens with its question. On the NPU most of a short call is the engine's fixed prefill cost (prefill p50 467 to 484 ms), and the engine answers one question per prefill, so a request with six questions costs six prefills. Against the CPU PyTorch reference, the Q4_K NPU build picked the same top answer for 32 of 33 questions, with a largest probability difference per question of 0.037 at the median and 0.096 at worst.
 
-Through Clio's `systemone` runtime to the iGPU service, a `turn` request with eight questions took 2,250 ms at p50, and every `turn` sample missed that site's 600 ms deadline, so leave `turn` unbound on these placements. The `consult`, `toolCall`, `toolResult` and `turnEnd` sites finished inside their deadlines on every sample.
+Through Clio Coder's `systemone` runtime to the iGPU service, a `turn` request with eight questions took 2,250 ms at p50, and every `turn` sample missed that site's 600 ms deadline, so leave `turn` unbound on these placements. The `consult`, `toolCall`, `toolResult` and `turnEnd` sites finished inside their deadlines on every sample.
 
 Each placement reports its own build (the iGPU service reports `...-pytorch2.9.1-rocm7.2.1-bf16`, the NPU server `...-merged-q4k-flm-xdna2`), and cuts are keyed by build. A cut fitted on one placement therefore never applies to another, which is right: Q4_K weights on the NPU do not produce the bf16 numbers.
 
@@ -103,7 +103,7 @@ Then run `clio-coder doctor` and read the `system one (experimental)` rows, or r
 
 ## Placing engines
 
-Clio does not schedule a decision engine and has no placement setting. The server you run owns its device; Clio sees a URL, a window, a profile and the build the server reports. Placement is therefore a choice you make when you start each server, and naming each target after its placement (`decider-npu`) is what makes the doctor rows read as a map of the machine.
+Clio Coder does not schedule a decision engine and has no placement setting. The server you run owns its device; Clio sees a URL, a window, a profile and the build the server reports. Placement is therefore a choice you make when you start each server, and naming each target after its placement (`decider-npu`) is what makes the doctor rows read as a map of the machine.
 
 The rule is to put each model on a processor nothing else is using. A turn makes many closed decisions, each one a forward pass of a small model; the chat model makes the open-ended ones. Running both on one accelerator makes them queue behind each other, while a second accelerator that would otherwise sit idle runs the decisions for free.
 
@@ -113,7 +113,7 @@ A Strix Halo machine has three processors on one package: the integrated GPU, th
 
 - **iGPU: the chat model.** It needs the bandwidth and the large matrix units. Gemma-4-26B held about 27 GiB of committed GPU memory while the deciders above ran beside it.
 - **NPU: the decider.** It is idle while the iGPU generates. It runs the Strands Decider 2B at about half a second per question, so bind it to sites whose deadlines allow that: `toolResult` (1500 ms), `consult` (3000 ms), `turnEnd` and the approval-card advisory (5000 ms). Leave `turn` (600 ms) unbound on it. Two engine processes serialize on the NPU, so run one decision server there. The research server answers one question per prefill, so the six `turnEnd` questions took 3.6 to 5.0 s; nothing waits on `turnEnd`, so give that binding a longer `timeoutMs` rather than let a reading time out at the 5000 ms default.
-- **CPU: Julia-1, or nothing.** The CPU suits a small encoder such as Julia-1 (144M parameters, 550 MiB in float32), or the rules-only tier of [Proactive Memory](proactive-memory.md), which makes no model calls. The 2B decider on the CPU took 7.8 to 8.4 s at 1,000 tokens, past every site deadline. Julia-1 reads options of at most 48 tokens. Clio counts them with Julia-1's own tokenizer, which she downloads once from the model's repository (about 34 MB, pinned by revision and hash) into her cache when a `julia-1` engine is bound. Until that file is cached, or offline, Clio proves option length by bytes instead and abstains on most sites. With it cached, Julia-1 answers `turn`, `toolCall`, `turnEnd` and `consult`. Clio estimates a state at one token per four characters, so a `toolResult` state beyond roughly 3,400 characters exceeds a 1,024-token window and is skipped before sending. `clio-coder doctor` says which mode an engine is in.
+- **CPU: Julia-1, or nothing.** The CPU suits a small encoder such as Julia-1 (144M parameters, 550 MiB in float32), or the rules-only tier of [Proactive Memory](proactive-memory.md), which makes no model calls. The 2B decider on the CPU took 7.8 to 8.4 s at 1,000 tokens, past every site deadline. Julia-1 reads options of at most 48 tokens. When a `julia-1` engine is bound, Clio downloads Julia-1's tokenizer once from the model's repository (about 34 MB, pinned by revision and hash), stores it in its cache, and uses it to count the option tokens. Until that file is cached, or offline, Clio proves option length by bytes instead and abstains on most sites. With it cached, Julia-1 answers `turn`, `toolCall`, `turnEnd` and `consult`. Clio estimates a state at one token per four characters, so a `toolResult` state beyond roughly 3,400 characters exceeds a 1,024-token window and is skipped before sending. `clio-coder doctor` says which mode an engine is in.
 - **When latency matters more than isolation,** the decider on the iGPU is about four times faster than on the NPU for short states and twice as fast at 1,000 tokens, and it stayed resident beside Gemma-4-26B. It then shares the iGPU with the chat model, so a decision and a generation can wait for each other.
 
 One configuration with all three placements:
@@ -165,7 +165,7 @@ The NPU numbers above come from a research harness that drives the FastFlowLM en
 
 ### Other machines
 
-The same placement logic applies wherever a machine has an accelerator the chat model leaves idle: Apple's Neural Engine beside the GPU that serves the chat model, or a phone's NPU beside its CPU. Nothing in Clio is specific to AMD; what is missing is a server that runs a decision model on that accelerator and answers `POST /v1/systemone`. Once one exists, it is a target with a URL, a window and a profile like any other.
+The same placement logic applies wherever a machine has an accelerator the chat model leaves idle: Apple's Neural Engine beside the GPU that serves the chat model, or a phone's NPU beside its CPU. Nothing in Clio Coder is specific to AMD; what is missing is a server that runs a decision model on that accelerator and answers `POST /v1/systemone`. Once one exists, it is a target with a URL, a window and a profile like any other.
 
 ## What System One is not
 
@@ -204,11 +204,11 @@ The terminal `/settings` overlay lists the site bindings and the dataset keys un
 
 ## Engines
 
-An engine answers typed questions for a state. Clio builds one engine per configured name and rebuilds it only when its own configuration changes. The mechanics of each kind are in [Engines](../architecture/system-one.md#engines) on the architecture page.
+An engine answers typed questions for a state. Clio Coder builds one engine per configured name and rebuilds it only when its own configuration changes. The mechanics of each kind are in [Engines](../architecture/system-one.md#engines) on the architecture page.
 
 ### Engine kind `systemone`
 
-The target's runtime must implement typed decisions: `typesafe-jev` (a hosted decision engine, default model `jev-latest`, credential `TYPESAFE_API_KEY`) or `systemone` (a self-hosted server, with a default 480-token window that `capabilities.contextWindow` raises). Answers are calibrated probabilities, and the engine's `profile` decides which questions it is sent. The answering build is the model name the server reports, for example `jev-1.13.0`, and every cut is keyed by it. Clio's shipped cuts are fitted for the hosted engine's `jev-1.13.0` build. Any other build on the same wire, including a self-hosted one, is validated the same way, by fitting cuts on that exact build. Binding a chat-only runtime with `kind: systemone` is reported as a problem by doctor.
+The target's runtime must implement typed decisions: `typesafe-jev` (a hosted decision engine, default model `jev-latest`, credential `TYPESAFE_API_KEY`) or `systemone` (a self-hosted server, with a default 480-token window that `capabilities.contextWindow` raises). Answers are calibrated probabilities, and the engine's `profile` decides which questions it is sent. The answering build is the model name the server reports, for example `jev-1.13.0`, and every cut is keyed by it. Clio Coder's shipped cuts are fitted for the hosted engine's `jev-1.13.0` build. Any other build on the same wire, including a self-hosted one, is validated the same way, by fitting cuts on that exact build. Binding a chat-only runtime with `kind: systemone` is reported as a problem by doctor.
 
 ### Engine kind `llm`
 
@@ -253,7 +253,7 @@ The site rates the blast radius of a call on a four-rung ladder (`contained`, `l
 
 ### `toolResult`: reading external content for the record
 
-Only results from `web_fetch`, `web_read` and MCP tools are read. They carry third parties' text. Clio's own listings, recipes and worker reports are written to direct an agent and are never sent. The result reaches the agent at once and unchanged, labeled only by the deterministic marker scan and the tool's own untrusted-content banner. The site reads it detached for instructions aimed at an agent and its reading is recorded. It adds no banner, so a late reading can never label content the agent has already read. A result that carries an information-flow restriction is not sent to an engine whose destination that restriction does not allow.
+Only results from `web_fetch`, `web_read` and MCP tools are read. They carry third parties' text. Clio Coder's own listings, recipes and worker reports are written to direct an agent and are never sent. The result reaches the agent at once and unchanged, labeled only by the deterministic marker scan and the tool's own untrusted-content banner. The site reads it detached for instructions aimed at an agent and its reading is recorded. It adds no banner, so a late reading can never label content the agent has already read. A result that carries an information-flow restriction is not sent to an engine whose destination that restriction does not allow.
 
 ### `turnEnd`: recorded readings of the finished turn
 
@@ -273,7 +273,7 @@ A listing never waits for this site. The ranker answers from rankings that have 
 
 ### `consult`: the agent asks directly
 
-When the `consult` site is bound at startup, the main agent gets a `consult` tool, behind the gateway. It sends one to four typed questions (`yesNo`, `pick`, `rate`) about a small `state` (at most 2 KB as JSON) and up to eight workspace `paths` (the first 6,000 characters of each, secrets redacted, under the same containment and protected-path rules as `read`; a file that fails a check is skipped and named with its reason). A question is at most 400 characters, and a `pick` or `rate` takes 2 to 8 options or rungs of at most 200 characters each. It returns the probability distribution per question, the answering build, the engine and the latency, never a chosen option. The tool waits for its answer up to the deadline, because the agent chose to ask, and when no answer arrives it says so and tells the agent to proceed on its own judgment. At most three calls per turn. Workers never get it. Consult has no cut, so an unfitted build answers exactly as a fitted one. Evidence files carry their information-flow restrictions into the check. Because the tool set is built at startup, binding or unbinding `systemOne.sites.consult` needs a restart.
+When the `consult` site is bound at startup, the main agent gets a `consult` tool, behind the gateway. It sends one to four typed questions (`yesNo`, `pick`, `rate`) about a small `state` (at most 2 KB as JSON) and up to eight workspace `paths` (the first 6,000 characters of each, secrets redacted, under the same containment and protected-path rules as `read`; a file that fails a check is skipped and named with its reason). A question is at most 400 characters, and a `pick` or `rate` takes 2 to 8 options or rungs of at most 200 characters each. It returns the probability distribution per question, the answering build, the engine and the latency, never a chosen option. The tool waits for its answer up to the deadline, because the agent chose to ask, and when no answer arrives it says so and tells the agent to proceed with its own assessment. At most three calls per turn. Workers never get it. Consult has no cut, so an unfitted build answers exactly as a fitted one. Evidence files carry their information-flow restrictions into the check. Because the tool set is built at startup, binding or unbinding `systemOne.sites.consult` needs a restart.
 
 ### `drafts`: judging `/draft`
 
@@ -281,7 +281,7 @@ When the `consult` site is bound at startup, the main agent gets a `consult` too
 
 ## Calibration and shadow mode
 
-A probability means something only for the build that produced it. Clio therefore keys every cut by the answering build, extended with the renderer and site version for profiles that use a bounded renderer. The rule and the shipped table are in [Calibration](../architecture/system-one.md#calibration-cuts-belong-to-a-threshold-identity) on the architecture page.
+A probability means something only for the build that produced it. Clio Coder therefore keys every cut by the answering build, extended with the renderer and site version for profiles that use a bounded renderer. The rule and the shipped table are in [Calibration](../architecture/system-one.md#calibration-cuts-belong-to-a-threshold-identity) on the architecture page.
 
 - **Fitted cuts** ship for the `jev-1.13.0` build only. LLM engines and other builds have none until a run fits them.
 - **`systemOne.cuts` overrides.** Add cuts for a build the table lacks, or replace one. Keys are `<site>.<key>` and values are between 0.01 and 0.99. The operator's value wins over the table. For the legacy wire and for LLM engines the map key is the build string. For `julia-1` and the `gliner2.5-*` profiles it is the threshold identity, `<build>+<renderer>@<site version>`, which the ledger's per-engine route records show.
@@ -300,7 +300,7 @@ Cuts are measured with `scripts/decision-probe.ts` against a labeled fixture und
 
 ## Privacy
 
-State is redacted in the process, before it is built into a request. The runner scrubs every state with Clio's secret filters before any engine sees it, so a hosted decision engine or LLM API receives redacted text and the records start from that same redacted text. Tool arguments are never sent to the `toolCall` site, only the card's allowlisted one-line target. A hosted engine still receives the operator's request text and bounded tool output, so bind a hosted engine only to targets you would send that text to. A local server keeps everything on the machine.
+State is redacted in the process, before it is built into a request. The runner scrubs every state with Clio Coder's secret filters before any engine sees it, so a hosted decision engine or LLM API receives redacted text and the records start from that same redacted text. Tool arguments are never sent to the `toolCall` site, only the card's allowlisted one-line target. A hosted engine still receives the operator's request text and bounded tool output, so bind a hosted engine only to targets you would send that text to. A local server keeps everything on the machine.
 
 Every engine request is also checked against the information-flow restrictions its evidence carries. A source rule whose recipients do not include the engine's target refuses the request, the call ends as `flow-denied`, and nothing is sent. See [Information flow](information-flow.md).
 

@@ -2,7 +2,7 @@
 
 The [component and middleware architecture](../architecture/middleware-and-components.md) explains discovery and hook boundaries.
 
-Harness extensions add executable capabilities to Clio: model-callable command tools, operator-side slash commands with status and panels, and hook declarations. A domain workflow that combines prompts, agents, skills, fleets, and reference files is a plugin, installed with `clio-coder library install <path>`; see [plugins.md](plugins.md). Installing or browsing a plugin never registers harness tools, hooks, operator commands, or UI. A plugin may carry scripts that a skill or fleet runs explicitly, and those stay ordinary files under normal tool safety.
+Harness extensions add executable capabilities to Clio Coder: model-callable command tools, operator-side slash commands with status and panels, and hook declarations. A domain workflow that combines prompts, agents, skills, fleets, and reference files is a plugin, installed with `clio-coder library install <path>`; see [plugins.md](plugins.md). Installing or browsing a plugin never registers harness tools, hooks, operator commands, or UI. A plugin may carry scripts that a skill or fleet runs explicitly, and those stay ordinary files under normal tool safety.
 
 An extension declares its capabilities in `clio-coder-extension.yaml`, `.yml`, or `.json`. Clio discovers and validates declarations without importing or executing package code. Command tools become available in a new session after installation. Native workers can use a tool when their admitted recipe includes its qualified name; narrower profiles such as `minimal-local` exclude extension commands.
 
@@ -24,7 +24,7 @@ An extension root contains one manifest, found in the order `clio-coder-extensio
 
 `capabilities` is optional, so a package whose only contribution is a root `hooks.yaml` is a valid harness extension with no command tools. A manifest naming `resources`, `prompts`, `skills`, `agents`, or `fleets` is invalid, and the diagnostic points at `clio-coder library install <path>`.
 
-Installation refuses a package whose `compatibility.clio` range excludes the running Clio version, naming the extension, its range, and the running version. Clio repeats the check whenever it loads installed extensions, so a package that becomes incompatible after a Clio upgrade stays visible in `extensions list` with its diagnostic and contributes no command tools or hooks. An incompatible project package does not hide a compatible user package with the same ID. A manifest without `compatibility.clio` is unrestricted.
+Installation refuses a package whose `compatibility.clio` range excludes the running Clio Coder version, naming the extension, its range, and the running version. Clio repeats the check whenever it loads installed extensions, so a package that becomes incompatible after a Clio Coder upgrade stays visible in `extensions list` with its diagnostic and contributes no command tools or hooks. An incompatible project package does not hide a compatible user package with the same ID. A manifest without `compatibility.clio` is unrestricted.
 
 ### Install locations and precedence
 
@@ -64,7 +64,7 @@ Create a directory containing this `clio-coder-extension.yaml`:
 id: local-analysis
 name: Local Analysis
 version: 1.0.0
-description: Local analysis capabilities for Clio.
+description: Local analysis capabilities for Clio Coder.
 compatibility:
   clio: ">=0.4.7"
 capabilities:
@@ -97,7 +97,7 @@ console.log(JSON.stringify({
 }));
 ```
 
-Install the directory and start a new Clio session:
+Install the directory and start a new Clio Coder session:
 
 ```bash
 clio-coder extensions install /path/to/local-analysis --user
@@ -109,7 +109,7 @@ Command tools sit behind the gateway. The model finds and calls this one with `g
 
 ## Command contract
 
-Each tool declares `name`, `description`, `runtime`, `entrypoint`, and `inputSchema`, and may declare `timeoutMs` and `maxOutputBytes`. Supported runtimes are `node` and `python3`. Clio runs `node -- <entrypoint> <json>` with its current Node executable, and `python3 -I <entrypoint> <json>`, where `-I` isolates interpreter configuration. Entrypoints are ordinary files inside the installed package; symlinks (in the entrypoint or any parent), hard links, absolute paths, and parent traversal are refused. Helper files remain covered by the full package digest.
+Each tool declares `name`, `description`, `runtime`, `entrypoint`, and `inputSchema`, and may declare `timeoutMs` and `maxOutputBytes`. Supported runtimes are `node` and `python3`. Clio Coder runs `node -- <entrypoint> <json>` with its current Node executable, and `python3 -I <entrypoint> <json>`, where `-I` isolates interpreter configuration. Entrypoints are ordinary files inside the installed package; symlinks (in the entrypoint or any parent), hard links, absolute paths, and parent traversal are refused. Helper files remain covered by the full package digest.
 
 Clio passes the validated JSON object as one argument and runs a fixed argument vector with no shell. The child runs in the workspace directory. Standard output must contain exactly one JSON value. Use standard error for diagnostics. Nonzero exits, invalid JSON, cancellation, timeout, and exceeded output limits return tool errors with execution metadata and package provenance.
 
@@ -125,7 +125,7 @@ Command tools, operator runtimes, and hook commands are installed programs with 
 
 | Surface | Gate |
 | --- | --- |
-| Command tool | Every model-visible command tool is an execution action and runs sequentially. Packages cannot declare themselves read-only. The registry evaluates both the qualified capability call and its fixed executable command through Clio's safety policy, autonomy, approval, and middleware rules. A read-only dispatch restriction blocks commands, and workers with explicit write confinement cannot execute an unconfined extension command. The child receives Clio's allowlisted tool environment, which excludes provider credentials and interpreter injection variables. |
+| Command tool | Every model-visible command tool is an execution action and runs sequentially. Packages cannot declare themselves read-only. The registry evaluates both the qualified capability call and its fixed executable command through Clio Coder's safety policy, autonomy, approval, and middleware rules. A read-only dispatch restriction blocks commands, and workers with explicit write confinement cannot execute an unconfined extension command. The child receives Clio Coder's allowlisted tool environment, which excludes provider credentials and interpreter injection variables. |
 | Operator runtime | Runs with your user account's authority, independently of model-tool autonomy, in a disposable Node child. It starts only in an interactive session or through `extensions run`, never in `clio-coder run`, ACP sessions, or native workers. |
 | Hook declaration | Hooks can add middleware effects, including a request to block a tool call, but cannot grant what the safety policy denies. A command hook runs an argv without a shell under a timeout. |
 | Installation | A package is admitted only when its tree matches the digest recorded in `state.json`. A project package is admitted only while the operator has also approved the project's `.clio-coder/extensions/state.json` for the workspace (`clio-coder config trust extensions`), because the digest proves integrity and not consent. A user package needs no workspace approval. |
@@ -136,13 +136,13 @@ Installation does not bypass command approval. The model cannot administer exten
 
 Installation records the SHA-256 digest of the entire package tree in `extensions/state.json` beside the installed packages. The digest frames every entry in sorted relative-path order by kind (file, directory, or link), path, and bytes, so file names, empty directories, symlink targets, and contents are all bound. Symlinks must resolve inside the package, and hard-linked files, special files, and a symlinked package root are refused. Plugins use the same digest function.
 
-Each invocation rechecks the effective installed package, enabled state, canonical root, and digest. Disabling, removing, replacing, or modifying a package revokes existing tool calls. An install record without a digest, a drifted tree, a missing record, and a corrupt state file all fail closed: the package stays visible and inactive, and its diagnostic says to reinstall with `--force`. Listing extensions, booting Clio, inspection, and plain doctor runs never rewrite install state.
+Each invocation rechecks the effective installed package, enabled state, canonical root, and digest. Disabling, removing, replacing, or modifying a package revokes existing tool calls. An install record without a digest, a drifted tree, a missing record, and a corrupt state file all fail closed: the package stays visible and inactive, and its diagnostic says to reinstall with `--force`. Listing extensions, booting Clio Coder, inspection, and plain doctor runs never rewrite install state.
 
 If extension state is corrupt or absent, a normal reinstall refuses it. `extensions install <valid-source> --force` backs up corrupt state, preserves the previous package bytes in a hidden backup directory beside the package, then installs and records the verified replacement. With valid state, a forced replacement discards the previous tree without a backup. `extensions remove <id>` can also remove an unverifiable package from the load path while preserving its bytes and any corrupt state in the paths the command prints. These recovery backups are not treated as installed packages.
 
 ## Hook declarations
 
-A package root may contain `hooks.yaml`, either a list of declarations or a map with a `hooks` list. Clio captures the file's bytes during install-digest verification and parses the captured bytes, so a file rewritten after verification is never reopened. Hooks are best-effort: a malformed declaration is rejected with a diagnostic and never aborts a turn.
+A package root may contain `hooks.yaml`, either a list of declarations or a map with a `hooks` list. Clio Coder captures the file's bytes during install-digest verification and parses the captured bytes, so a file rewritten after verification is never reopened. Hooks are best-effort: a malformed declaration is rejected with a diagnostic and never aborts a turn.
 
 ```yaml
 - id: units-reminder
@@ -194,7 +194,7 @@ The command reports the new generation, which packages were added (`+`), removed
 
 Reloading an unchanged tree still publishes a new generation with the same content digest; content identity is the digest, not the generation number. Installs, enables, disables, and removes performed by `clio-coder extensions` in another process are invisible to a running session until the operator reloads or restarts. There is no filesystem watcher, so a CLI mutation never becomes an implicit mid-turn hook change.
 
-Model-visible command-tool schemas are frozen when a session registry is created. A reload never changes a live model's tool surface, and adding, modifying, or removing a tool requires restarting Clio. A new native worker builds its own verified registry, and external command-line worker runtimes do not gain Clio command tools. Plugin resources have their own generation and their own `/library reload`.
+Model-visible command-tool schemas are frozen when a session registry is created. A reload never changes a live model's tool surface, and adding, modifying, or removing a tool requires restarting Clio Coder. A new native worker builds its own verified registry, and external command-line worker runtimes do not gain Clio Coder command tools. Plugin resources have their own generation and their own `/library reload`.
 
 ## Operator commands, status, and panels
 
@@ -226,7 +226,7 @@ lifecycle isolation, not an operating-system sandbox.
 ```
 
 Only `.mjs` entrypoints are supported (at most 240 characters). Ship JavaScript and contained assets;
-author TypeScript with your own build if desired. Clio never installs
+author TypeScript with your own build if desired. Clio Coder never installs
 dependencies or runs package lifecycle scripts. Each runtime loads from a
 private copy whose complete digest matches the reviewed installation. Contained
 relative helpers and assets are copied and refreshed too. Mutable external

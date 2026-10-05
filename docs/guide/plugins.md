@@ -1,6 +1,6 @@
 # Portable plugins and the library
 
-A plugin is a complete, versioned bundle of skills and supporting files. The portable root `plugin.json` follows [Agent Plugins 1.0.0](https://agent-plugins.org/). Clio reads native prompts, agent recipes, and fleets from its namespaced manifest extension, `extensions["ai.iowarp.clio"]`. Installing a bundle keeps those resources and their references together and pins the whole tree by SHA-256.
+A plugin is a complete, versioned bundle of skills and supporting files. The portable root `plugin.json` follows [Agent Plugins 1.0.0](https://agent-plugins.org/). Clio Coder reads native prompts, agent recipes, and fleets from its namespaced manifest extension, `extensions["ai.iowarp.clio"]`. Installing a bundle keeps those resources and their references together and pins the whole tree by SHA-256.
 
 This page is the concept map. Each contract is stated once, in the page named in the last table. A library plugin is unrelated to `integrations.runtimePlugins`, which lists pi-ai compatibility plugins loaded by the engine; see [pi-boundary.md](../architecture/pi-boundary.md).
 

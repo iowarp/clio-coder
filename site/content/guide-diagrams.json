@@ -5,10 +5,10 @@
 		"model-placement": {
 			"type": "flow",
 			"title": "Where each part runs",
-			"caption": "Clio, its tools, and inference can run in different places. Choosing a remote model does not move your files or tools there.",
+			"caption": "Clio Coder, its tools, and inference can run in different places. Choosing a remote model does not move your files or tools there.",
 			"sources": ["https://github.com/iowarp/clio-coder/blob/v0.5.7/docs/guide/configuration-and-targets.md"],
 			"stages": [
-				{ "place": "Your computer", "label": "Clio and its tools", "body": "The session, repository tools, and approvals run where you start Clio." },
+				{ "place": "Your computer", "label": "Clio Coder and its tools", "body": "The session, repository tools, and approvals run where you start Clio Coder." },
 				{ "via": "model requests", "place": "The route you choose", "label": "Inference", "body": "A local app, a model server, a subscription, or a provider API." },
 				{ "via": "delegated work", "place": "Where a worker runs", "label": "Worker tools", "body": "On this computer by default, or on an SSH node you configure." }
 			]
@@ -43,7 +43,7 @@
 			"caption": "Installing a package makes it available; a task loads what it needs. Neither step grants extra authority.",
 			"sources": ["https://github.com/iowarp/clio-coder/blob/v0.5.7/docs/guide/resource-library.md", "https://github.com/iowarp/clio-coder/blob/v0.5.7/docs/guide/plugins.md"],
 			"stages": [
-				{ "place": "/library or Alt+L", "label": "Browse", "body": "Catalog content that ships with Clio; nothing is installed yet." },
+				{ "place": "/library or Alt+L", "label": "Browse", "body": "Catalog content that ships with Clio Coder; nothing is installed yet." },
 				{ "via": "--dry-run", "place": "Install review", "label": "Preview", "body": "Destination, dependencies, scope, and the package pin." },
 				{ "via": "install", "place": "Project or user scope", "label": "Pinned copy", "body": "Drifted content is blocked from loading." },
 				{ "via": "/skill", "place": "One conversation", "label": "Loaded for a task", "body": "Recipes load on demand." }

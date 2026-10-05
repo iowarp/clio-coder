@@ -1,6 +1,6 @@
 # Prompt Compilation
 
-Clio compiles every system prompt from typed inputs and disk fragments. The pure compiler is [compiler.ts](../../src/domains/prompts/compiler.ts). The prompts domain in [extension.ts](../../src/domains/prompts/extension.ts) owns the per-session source snapshots and the dynamic sections that surround the compiled fragments. The fragment files live under `src/domains/prompts/fragments/`. No natural-language parser decides what renders: every condition is a typed input, a registered tool name or a host-supplied turn constraint.
+Clio Coder compiles every system prompt from typed inputs and disk fragments. The pure compiler is [compiler.ts](../../src/domains/prompts/compiler.ts). The prompts domain in [extension.ts](../../src/domains/prompts/extension.ts) owns the per-session source snapshots and the dynamic sections that surround the compiled fragments. The fragment files live under `src/domains/prompts/fragments/`. No natural-language parser decides what renders: every condition is a typed input, a registered tool name or a host-supplied turn constraint.
 
 This page owns which fragments each prompt carries and how they are selected. The cache identity, section order and tool delivery around the compiled text are in [Prompt Envelope and Tools](prompt-envelope-and-tools.md).
 
@@ -67,10 +67,10 @@ These seven fragments render only when `headless` is unset. A headless run never
 
 | Fragment | Section | What it carries | Condition beyond attended |
 | --- | --- | --- | --- |
-| `identity.clio-attended` | identity | How Clio converses with an operator: answer first, register matching, the in-chat "Remember: <value>" rule, and the rule that she cannot see how her reply renders. | The identity is `identity.clio`. |
-| `identity.self-awareness-attended` | harness-awareness | How she answers questions about herself from the bundled docs and source, including `code_nav(source="clio")`. | `identity.self-awareness` rendered. |
-| `identity.docs-routing` | harness-awareness | Routes questions about Clio through `gateway(op="call", capability="clio_docs")`, plus the `clio_library` sentence when that capability is admitted. | `identity.self-awareness` rendered, provider tool support is not explicitly false, `gateway` is on the surface, `clio_docs` is a registered builtin, and the turn constraints admit `clio_docs`. |
-| `identity.settings-routing` | harness-awareness | Routes questions about Clio's settings to `context(scope="settings")`, written in its gateway call form, and states how a setting change is made. | `identity.self-awareness` rendered and `context` is reachable, directly or through an admitted gateway. |
+| `identity.clio-attended` | identity | Guidance for replies to the operator: answer first, register matching, the in-chat "Remember: <value>" rule, and the rule that Clio Coder cannot inspect how its replies render. | The identity is `identity.clio`. |
+| `identity.self-awareness-attended` | harness-awareness | How Clio answers questions about the software from the bundled docs and source, including `code_nav(source="clio")`. | `identity.self-awareness` rendered. |
+| `identity.docs-routing` | harness-awareness | Routes questions about Clio Coder through `gateway(op="call", capability="clio_docs")`, plus the `clio_library` sentence when that capability is admitted. | `identity.self-awareness` rendered, provider tool support is not explicitly false, `gateway` is on the surface, `clio_docs` is a registered builtin, and the turn constraints admit `clio_docs`. |
+| `identity.settings-routing` | harness-awareness | Routes questions about Clio Coder's settings to `context(scope="settings")`, written in its gateway call form, and states how a setting change is made. | `identity.self-awareness` rendered and `context` is reachable, directly or through an admitted gateway. |
 | `operating.contract-attended` | operating-contract | Asking before acting on a path outside the workspace, and the rule that a repeated operator request after settled dispatches is not a loop block. | None. |
 | `operating.user-control` | operating-contract | Operator agency and understanding: state assumptions in time to steer, explain outcomes in proportion, do not present untested results as validated conclusions. | None. |
 | `operating.skill-installs` | skills | Skill installation etiquette: install only when requested or approved, honor a marketplace reminder's interview options, do not bypass integrity checks. | `operating.discovered-skills` rendered. |
@@ -85,7 +85,7 @@ Demo guidance is appended to the operating contract only for the TUI, when `inte
 
 These fragments are not attended-only. Their tiers are in the inventory above.
 
-- `identity.clio` holds Clio's identity, the rule that claims about the workspace come from files or tools, and the two-state turn ending: done with no closing offer, or waiting on a decision only the operator can make.
+- `identity.clio` holds Clio Coder's identity, the rule that claims about the workspace come from files or tools, and the two-state turn ending: done with no closing offer, or waiting on a decision only the operator can make.
 - `operating.contract` is the constitutional posture shared by all three tiers: plain prose, honoring no-tools and no-delegation instructions, batching independent reads, treating safety policy as authoritative, and recording consequential design choices before implementing.
 - `operating.steering` tells the model that a user message arriving between tool results steers the current run, and that a later message wins over an earlier one.
 - `operating.coordinator` routes intent and delegation. An exact operator assignment goes into `task` verbatim without the delegation wording around it. When the operator names a target or model for one dispatch, the coordinator pins it with dispatch's `target` and `model` fields and never edits routing settings for a one-off request. Without an OS sandbox, workers confined by `write_roots` cannot run `bash` or `verify`.
@@ -117,7 +117,7 @@ Other differences from the attended tier:
 - The `ask_user` turn-ending contract never renders, because no operator can answer an interview.
 - No `Routes:` line appears in the runtime block, because the orchestrator passes route sources to attended sessions only.
 - The orchestrator does not register the first-turn skills reminder, which is a user-message hook. A headless run gets its skills rule from `operating.discovered-skills` alone (`src/entry/orchestrator.ts`).
-- On Clio's own repository the self-development note tells the run that `clio-coder-dev` and `clio-coder-test` are not loaded. See [Self-development skills](#self-development-skills).
+- On Clio Coder's own repository the self-development note tells the run that `clio-coder-dev` and `clio-coder-test` are not loaded. See [Self-development skills](#self-development-skills).
 
 ## Worker prompt
 
@@ -148,7 +148,7 @@ A worker never receives `operating.coordinator`, `operating.fleet`, `operating.d
 
 ## Self-development skills
 
-When the session's working directory is inside Clio's own source tree, the prompts extension adds the dynamic fragment `context.clio-repo-awareness` and, when skills are usable and the turn mode is not `proposal`, `context.self-development-skills`.
+When the session's working directory is inside Clio Coder's own source tree, the prompts extension adds the dynamic fragment `context.clio-repo-awareness` and, when skills are usable and the turn mode is not `proposal`, `context.self-development-skills`.
 
 - Attended sessions are told to load `clio-coder-dev` once they have read the code and are about to make the first edit, and `clio-coder-test` once the change exists and they are choosing validation. Each loads at its step, never both up front, because a loaded skill is resent on every later request.
 - Headless runs are told that conventions, test conventions included, come from the code and neighboring tests, and that the two skills are not loaded. They stay discoverable in the catalog.
@@ -189,7 +189,7 @@ The compiled prompt has fixed sections in this order: identity, operating-contra
 | `runtime` | Provider, model, the `Routes:` line, the context window, thinking guidance. | session | Recomputed on every compile. |
 | `context.workspace-root` | Absolute workspace root, local OS account, hostname, and session-start facts. | session | Snapshot. |
 | `context.fleet` | Observed SSH node readiness and capacity. | turn | Rendered only when `fleet.nodes` is non-empty and `dispatch` is attached. It is absent from the layer table, so it counts as turn, and its hash is part of `inputEpoch()`. |
-| `context.clio-repo-awareness` | The note that the workspace is Clio's own source tree. | session | Snapshot. |
+| `context.clio-repo-awareness` | The note that the workspace is Clio Coder's own source tree. | session | Snapshot. |
 | `context.self-development-skills` | The skill-loading note above. | session | Built per compile from session inputs. |
 | `context.catalogs` | Installed skills, agents and fleets by name and a short purpose, plus user-scope MCP server ids. Each list is capped at 60 entries. | session | Snapshot. Grants nothing. |
 | `context.project-rules` | Unconditional `.clio-coder/rules` plus path-scoped rules matching the working context. | turn | Rules load into the snapshot. Selection re-runs against the working-context paths. |

@@ -4,7 +4,7 @@ Assign focused tasks and combine workers into a workflow.
 
 ## Delegate a focused task
 
-A worker handles a bounded task while Clio keeps the main conversation. Start with an explicit goal, files it may change, and the checks it should report.
+A worker handles a bounded task while Clio Coder keeps the main conversation. Start with an explicit goal, files it may change, and the checks it should report.
 
 ```sh
 clio-coder agents
@@ -36,6 +36,10 @@ clio-coder fleet list
 clio-coder fleet status
 ```
 
-Fleet recipes combine workers into workflows such as a review gate, competing solutions, or a council. Inspect the recipe and approval preview before starting one. Remote native workers use SSH and need the same Clio version and the project at the same absolute path on each node. Add a node with `clio-coder fleet nodes add`, or in the terminal under `/settings fleet`. A node receives work only after `clio-coder fleet nodes test <id> --record` passes for this project; the record lasts one day. Adding a node moves nothing by itself: unpinned work stays local.
+Fleet recipes combine workers into workflows such as a review gate, competing solutions, or a council. Inspect the recipe and approval preview before starting one.
+
+Remote native workers use SSH and need the same Clio Coder version and the project at the same absolute path on each node. Add a node with `clio-coder fleet nodes add`, or in the terminal under `/settings fleet`.
+
+A node receives work only after `clio-coder fleet nodes test <id> --record` passes for this project; the record lasts one day. Adding a node moves nothing by itself: unpinned work stays local.
 
 Start locally with one worker. Use the full guide for remote-node configuration, capacity, recipe contracts, and failure recovery.

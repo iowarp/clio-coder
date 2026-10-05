@@ -63,14 +63,14 @@ rules:
 `allowLimitations: false` means a reported limitation does not satisfy the rule.
 :::
 
-Clio does not write this policy for you. Review it as a repository contract: a command that passes a narrow subset of tests should not satisfy a policy that requires the full declared test check.
+Clio Coder does not write this policy for you. Review it as a repository contract: a command that passes a narrow subset of tests should not satisfy a policy that requires the full declared test check.
 
 ## Inspect freshness after editing
 
 ::: diagram check-freshness
 :::
 
-Clio compares source, check-declaration, and policy fingerprints. A passing check becomes stale after relevant inputs change, and a later failure supersedes an earlier pass of the same check.
+Clio Coder compares source, check-declaration, and policy fingerprints. A passing check becomes stale after relevant inputs change, and a later failure supersedes an earlier pass of the same check.
 
 This matters during an iterative fix. The agent might run a test, make another edit, and then summarize the earlier success. The current assessment should describe the work that exists now, not the best result observed along the way.
 
@@ -95,7 +95,7 @@ The actual check, its result, and any missing evidence. A receipt is an inspecta
 :::
 
 ::: next
-- [A numerical change, checked with Clio](/tutorials/temperature-calibration.html)
+- [A numerical change, checked with Clio Coder](/tutorials/temperature-calibration.html)
 - [Quality policy guide](/docs/guide/quality-policy.html)
-- [Install Clio](/#start)
+- [Install Clio Coder](/#start)
 :::

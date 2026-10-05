@@ -96,7 +96,7 @@ Markdown stays the source. A line `::: name arguments` opens a guide block and
 | `::: note Label` | Version scope or what a result establishes |
 | `::: needs` | The "Before you start" checklist |
 | `::: steps` | An ordered procedure; each `###` heading is one numbered step |
-| `::: prompt Label` | A request to type into Clio, with a copy control |
+| `::: prompt Label` | A request to type into Clio Coder, with a copy control |
 | `::: result Label` | What the reader should see, and what it does not prove |
 | `::: limits Label` | Boundaries of the workflow |
 | `::: compare` | A table whose first column names the rows |

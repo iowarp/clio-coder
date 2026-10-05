@@ -14,7 +14,7 @@ clio-coder paths --json
 
 | Variable | Purpose |
 | --- | --- |
-| `CLIO_CODER_HOME` | Set a shared root for Clio's directories |
+| `CLIO_CODER_HOME` | Set a shared root for Clio Coder's directories |
 | `CLIO_CODER_CONFIG_DIR` | Override the configuration directory |
 | `CLIO_CODER_DATA_DIR` | Override the data directory |
 | `CLIO_CODER_STATE_DIR` | Override the state directory |
@@ -26,7 +26,7 @@ Individual directory overrides take precedence over the shared root. Separate st
 
 ## Credentials and terminal behavior
 
-Supported providers can read their conventional credential variables, such as `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, or `OPENROUTER_API_KEY`, when that provider is selected. Prefer Clio's managed authentication flow for normal interactive setup, and keep secrets out of project settings and transcripts.
+Supported providers can read their conventional credential variables, such as `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, or `OPENROUTER_API_KEY`, when that provider is selected. Prefer Clio Coder's managed authentication flow for normal interactive setup, and keep secrets out of project settings and transcripts.
 
 `VISUAL` and `EDITOR` select an external editor, with `VISUAL` taking precedence. Terminal variables such as `TERM` and `COLORTERM` describe the environment; they do not grant tool permissions.
 

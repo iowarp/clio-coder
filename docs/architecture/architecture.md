@@ -156,7 +156,7 @@ System One at `src/domains/system-one/` is the only decision layer. The provider
 
 ## Session Routing vs. Persisted Settings
 
-Clio maintains an explicit distinction between persisted user settings (`settings.yaml`) and session-local routing state ([session-routing.ts](../../src/core/session-routing.ts)).
+Clio Coder maintains an explicit distinction between persisted user settings (`settings.yaml`) and session-local routing state ([session-routing.ts](../../src/core/session-routing.ts)).
 
 1. **Decoupled Overlays**: Turn-level selections (such as active target, model override, thinking level, and scoped models cycled via explicit model-cycle keys) apply dynamically through `applySessionRouting` without mutating `settings.yaml`.
 2. **Lifecycle Flow**:
@@ -204,7 +204,7 @@ The codemap keeps its boot-time read surface separate from its build graph:
   run a codemap scan or an uninterruptible parser call on its render/input loop.
 - `coordinator.ts` owns production commits. One FIFO per workspace establishes
   generation order inside a process, and `withStateFileLock` extends that order
-  across Clio processes. Each transaction rereads the artifact after acquiring
+  across Clio Coder processes. Each transaction rereads the artifact after acquiring
   the lease, publishes atomically, and updates freshness state before releasing
   ownership.
 
@@ -272,7 +272,7 @@ and [dispatch.ts](../../src/tools/dispatch.ts) owns a separate cached dynamic im
 
 The enforced import rules below are complemented by the maintained
 [Pi SDK boundary table](pi-boundary.md), which records the semantic owner of
-each overlapping helper and the Clio deltas that must survive an SDK upgrade.
+each overlapping helper and the Clio Coder deltas that must survive an SDK upgrade.
 
 Seven rules apply. Rules 1, 3, 4, 5, and 7 hold for every import form, type-only and dynamic included. Rule 2 and rule 6 treat a type-only import differently from a value import, because a type-only import erases at compile time. A dynamic `import()` always counts as a value import.
 
@@ -280,7 +280,7 @@ Seven rules apply. Rules 1, 3, 4, 5, and 7 hold for every import form, type-only
 
 Only files under `src/engine/**` may import `@earendil-works/pi-*` packages, including subpaths such as `@earendil-works/pi-ai/compat`. No file outside `src/engine/**` may import those packages at all, value or type-only. Domain modules import erased engine shapes (`EngineModel`, `Api`, `Model`) directly from [types.ts](../../src/engine/types.ts).
 
-Why: provider SDKs and pi-ai engine values must remain swappable behind one engine boundary. Domains and presentation layers operate against Clio contracts rather than vendor or runtime implementations. [api-registry.ts](../../src/engine/api-registry.ts) dispatches by API through Pi's public lazy factories, supplies environment API keys, and lets Clio's local-runtime adapters override API families. Clio owns credential storage and the locked OAuth refresh lifecycle, delegating provider flows through [oauth.ts](../../src/engine/oauth.ts). The only `pi-ai/compat` edge is dynamic: when `integrations.runtimePlugins` is configured, Clio joins Pi's process-global registry before an out-of-tree runtime evaluates and mirrors its overrides so plugins retain registry identity and last-writer-wins order. No configured plugin means no compatibility aggregate. The per-helper ownership, including the tool truncation, prompt-argument, and replay helpers derived from Pi sources, is in [pi-boundary.md](pi-boundary.md).
+Why: provider SDKs and pi-ai engine values must remain swappable behind one engine boundary. Domains and presentation layers operate against Clio Coder contracts rather than vendor or runtime implementations. [api-registry.ts](../../src/engine/api-registry.ts) dispatches by API through Pi's public lazy factories, supplies environment API keys, and lets Clio Coder's local-runtime adapters override API families. Clio Coder owns credential storage and the locked OAuth refresh lifecycle, delegating provider flows through [oauth.ts](../../src/engine/oauth.ts). The only `pi-ai/compat` edge is dynamic: when `integrations.runtimePlugins` is configured, Clio Coder joins Pi's process-global registry before an out-of-tree runtime evaluates and mirrors its overrides so plugins retain registry identity and last-writer-wins order. No configured plugin means no compatibility aggregate. The per-helper ownership, including the tool truncation, prompt-argument, and replay helpers derived from Pi sources, is in [pi-boundary.md](pi-boundary.md).
 
 ### Rule 2: Workers do not value-import domains except runtime rehydration
 
@@ -308,7 +308,7 @@ Turn modules and state machine files in the chat loop (`src/interactive/turn-*.t
 
 The instant shell's Stage 0 owner is `src/interactive/terminal-lease.ts`. Its static value-import closure is what a cold `clio-coder` start pays before it can draw anything. Value importers outside that computed closure and outside the `src/interactive/**` and `src/engine/**` trees may enter those two protected trees only through a module declared in `STAGE0_SEAMS` in `tests/boundaries/check-boundaries.ts`. Every `src/cli/**` import into the protected trees needs a declaration, type-only included. Each declaration carries a reason. A declared seam may not lead back into the Stage 0 closure unless the existing composition-root overlap is explicitly recorded in its `allowStage0OverlapFrom` list, and every such entry names `src/entry/orchestrator.ts`.
 
-The rule exists because a second, disjoint reacher into a module in the closure makes esbuild split that module out of the chunk it shared with its neighbours. [instant-shell-import-graph.test.ts](../../tests/contracts/instant-shell-import-graph.test.ts) walks the built chunk that contains the Stage 0 owner and holds its static closure to 32 chunks, 1,400,000 total bytes, and 350,000 Clio source bytes. That test fails only after a full build, so the lint-time rule is the early warning.
+The rule exists because a second, disjoint reacher into a module in the closure makes esbuild split that module out of the chunk it shared with its neighbours. [instant-shell-import-graph.test.ts](../../tests/contracts/instant-shell-import-graph.test.ts) walks the built chunk that contains the Stage 0 owner and holds its static closure to 32 chunks, 1,400,000 total bytes, and 350,000 Clio Coder source bytes. That test fails only after a full build, so the lint-time rule is the early warning.
 
 ### Rule 7: `turn-control` is pure
 
@@ -369,7 +369,7 @@ Core data paths:
 
 ## Event and audit model
 
-Clio uses in-process event buses for status and audit surfaces, but safety is not delegated to events. The hard gate lives in code:
+Clio Coder uses in-process event buses for status and audit surfaces, but safety is not delegated to events. The hard gate lives in code:
 
 - Provider capability resolution decides whether tool schemas are sent at all. A tool-capable session gets the complete registry as one deterministic surface, with each tool placed `direct` (schema attached to every request) or behind the `gateway` tool (found and called on demand). Placement changes what the model sees and never what a call is allowed to do ([surface.ts](../../src/tools/surface.ts)).
 - [policy-engine.ts](../../src/domains/safety/policy-engine.ts) evaluates damage-control rules, project policy, Bash default-deny, and path policy. Contract step write boundaries are detect-and-rollback mechanisms (change tracking and rollbacks) with no OS-level confinement. The policy engine blocks writes outside dispatch `write_roots`, and the worker OS sandbox (`safety.sandbox`) binds a sandboxed worker's `bash` and `verify` writes to those roots.
@@ -378,7 +378,7 @@ Clio uses in-process event buses for status and audit surfaces, but safety is no
 
 ## Interactive render transactions
 
-The interactive shell owns one concrete pi-tui renderer. Clio's instrumented
+The interactive shell owns one concrete pi-tui renderer. Clio Coder's instrumented
 subclasses bracket the renderer's protected `doRender()` seam, so one render
 transaction receives one `frameId` even when regular-screen cursor/IME work
 issues several terminal writes. Protocol, startup, and shutdown writes outside

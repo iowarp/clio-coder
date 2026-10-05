@@ -1,6 +1,6 @@
 # Information flow
 
-Information flow keeps named content, such as files under `secrets/`, away from destinations the operator did not choose. Clio labels content when a source rule matches and checks its restrictions before bytes leave for a model or a mediated outbound tool. A refusal holds at `yolo` as well as `default`. With no source rules and no carried restrictions, ordinary behavior is unchanged.
+Information flow keeps named content, such as files under `secrets/`, away from destinations the operator did not choose. Clio Coder labels content when a source rule matches and checks its restrictions before bytes leave for a model or a mediated outbound tool. A refusal holds at `yolo` as well as `default`. With no source rules and no carried restrictions, ordinary behavior is unchanged.
 
 This controls where observed content may go. The [safety model](../architecture/safety-model.md) still decides whether a read or tool call may run; allowing a recipient does not grant access to a protected file.
 
@@ -35,7 +35,7 @@ informationFlow:
       recipients: ["group:private-models"]
 ```
 
-Configure a target named `local` with that runtime and endpoint, review and approve this policy, then restart Clio. A permitted read of `secrets/notes.txt` labels the session with `secrets-local`. Subsequent model requests may reach the pinned `local` target; switching to a cloud target refuses the next request before it sends. Locality is not inferred from the address: the operator's pin supplies the approval. If several rules label the session, every rule must allow the destination.
+Configure a target named `local` with that runtime and endpoint, review and approve this policy, then restart Clio Coder. A permitted read of `secrets/notes.txt` labels the session with `secrets-local`. Subsequent model requests may reach the pinned `local` target; switching to a cloud target refuses the next request before it sends. Locality is not inferred from the address: the operator's pin supplies the approval. If several rules label the session, every rule must allow the destination.
 
 The [configuration reference](configuration-reference.md) lists the project files and their schema sources.
 
@@ -58,7 +58,7 @@ An unapproved edit can only forbid more. The last approved snapshot retains its 
 
 Path-taking read-class tools such as `read`, `ls`, `grep`, `find` and `data` label matching sources. Directory-walking tools also label sources below the directory they walk. Named tool sources label that tool's results. Bash calls and operator `!` commands label source paths they name, directory operands and glob prefixes that may walk a source. Inlined `@file` references label the referenced content too.
 
-Shell observation is conservative: `git add .`, `find .` and `cat *.md` can label context when a source lies below the command's working directory, even if the output contains no source bytes. Clio does not provide full shell coverage. Reads hidden in scripts, variables, command substitution, relative paths after `cd`, and searches with no path operand such as `rg x` are not reliably observed.
+Shell observation is conservative: `git add .`, `find .` and `cat *.md` can label context when a source lies below the command's working directory, even if the output contains no source bytes. Clio Coder does not provide full shell coverage. Reads hidden in scripts, variables, command substitution, relative paths after `cd`, and searches with no path operand such as `rg x` are not reliably observed.
 
 Labels are session provenance, not per-token tracking. They travel through summaries, compaction, resume, branches and worker results; removing a visible message does not clear them. The session keeps one durable union of restrictions as `clio_coder_flow_restriction` custom entries in its ledger, so the model cannot erase it. A worker's labels enter the parent before derived output. A label absorbed before a session exists is retained, and outbound transfer is refused until it can be persisted.
 
@@ -68,7 +68,7 @@ Every send that carries session context is judged against the labels the session
 
 ## Workers and other agents
 
-Native HTTP workers carry the approved source rules and the restrictions their inherited context holds, and admit each model request, so they can read a source on an allowed target and refuse a later request to a disallowed one. Claude Code, Codex and other CLI or SDK runtimes cannot admit their own model requests through Clio. She refuses their launch whenever any source rule, approved or unapproved, does not allow their pinned target, even before the parent has read a source. Ordinary tool mediation in an SDK does not supply this model-request boundary.
+Native HTTP workers carry the approved source rules and the restrictions their inherited context holds, and admit each model request, so they can read a source on an allowed target and refuse a later request to a disallowed one. Claude Code, Codex and other CLI or SDK runtimes cannot admit their own model requests through Clio Coder. Clio Coder refuses their launch whenever any source rule, approved or unapproved, does not allow their pinned target, even before the parent has read a source. Ordinary tool mediation in an SDK does not supply this model-request boundary.
 
 ACP agents and pane peers have no pinned model destination that Clio can approve for this purpose, so source rules refuse those delegations or content handoffs. A worker that hits this boundary ends with `information_flow_blocked`; dispatch never retries or fails over that outcome. See [exit codes and output](exit-codes-and-output.md).
 

@@ -3,7 +3,7 @@
 This guide provides concrete, actionable remediation procedures for
 operational errors, permission denials, target connection failures, and system
 diagnostics in the current source tree. Each quoted message exists in source;
-`<angle brackets>` mark values Clio fills in.
+`<angle brackets>` mark values Clio Coder fills in.
 
 ---
 
@@ -11,7 +11,7 @@ diagnostics in the current source tree. Each quoted message exists in source;
 
 | User-Facing Error / Notice | Cause | Actionable Remediation |
 | :--- | :--- | :--- |
-| `clio-coder requires Node.js >=22.19.0; this is <version>.` | The Node on `PATH` is older than the floor. The package's `clio-coder` command checks before it loads anything else. | Install with the managed runtime: `curl -fsSL https://coder.iowarp.ai/install.sh \| sh`. Or point Clio at a newer Node with `CLIO_CODER_NODE=/path/to/node/bin/node`. See [HPC clusters](hpc-clusters.md). |
+| `clio-coder requires Node.js >=22.19.0; this is <version>.` | The Node on `PATH` is older than the floor. The package's `clio-coder` command checks before it loads anything else. | Install with the managed runtime: `curl -fsSL https://coder.iowarp.ai/install.sh \| sh`. Or point Clio Coder at a newer Node with `CLIO_CODER_NODE=/path/to/node/bin/node`. See [HPC clusters](hpc-clusters.md). |
 | `No model target is configured.` followed by ``Starting `clio-coder configure`.`` Variants: `Target '<id>' has no chat model configured.`, `Target '<id>' runs on '<runtime>', which cannot drive the main agent.`, `No usable default target is configured.` | A bare `clio-coder` found no usable chat route and detected none. | Finish the configure flow it starts, or run `clio-coder targets use <id> --model <model>`. A returning user with a detectable route is not sent here: Clio prints `Chat: <runtime> / <model> from <source>. Change it with /config.` and starts chat. See [configuration and targets](configuration-and-targets.md). |
 | ``configuration cancelled; no target saved. Run `clio-coder configure` when you are ready.`` | Setup was left before any target was saved. The command exits 130. | Run `clio-coder configure` again. |
 | `[install] error: do not run this installer with sudo; it installs into your home directory.` | `install.sh` was started under `sudo` with `SUDO_USER` set. | Rerun the same command without `sudo`. `CLIO_CODER_INSTALL_ALLOW_SUDO=1` installs for root on purpose. |
@@ -51,7 +51,7 @@ diagnostics in the current source tree. Each quoted message exists in source;
 | `Another native session (pid <N>) is still running; close it before uninstalling` | `uninstall` found a live session of the same installer install. | Close that session and rerun. |
 | `Native installation is locked; retry after the installer exits` | The install root's lock is held. | Wait, or remove a stale `.install-lock` as in the installer row above. |
 | `Reset stopped; Clio state was preserved.` or `Could not stop the graphical installation; Clio state was preserved.` | An owned background app could not be verified or stopped. | Run `clio-coder gui background uninstall && clio-coder gui launcher uninstall` from a build that includes the app, then retry. |
-| `Background service belongs to another installation; Clio state was left unchanged.` (`reset` or `uninstall`, exit 1) | The background app was installed by a different Clio installation. An earlier version of this same installer install does not count as different. | Run `reset` or `uninstall` from the installation that owns the app, or remove the app with that installation's `clio-coder gui background uninstall`. |
+| `Background service belongs to another installation; Clio state was left unchanged.` (`reset` or `uninstall`, exit 1) | The background app was installed by a different Clio Coder installation. An earlier version of this same installer install does not count as different. | Run `reset` or `uninstall` from the installation that owns the app, or remove the app with that installation's `clio-coder gui background uninstall`. |
 | `<N> path(s) could not be removed:` | A partial delete: some paths resisted. | Fix the permission or close the holding process, then run the printed command again. It resumes. |
 
 ## Claude Agent SDK
@@ -63,7 +63,7 @@ diagnostics in the current source tree. Each quoted message exists in source;
 
 ## Project files ignored for lack of trust
 
-Project settings, hooks, safety policy, extensions and plugins carry authority, so Clio loads them only after the operator approved their exact bytes. For extensions and plugins the approved file is the project's install state, `.clio-coder/extensions/state.json` or `.clio-coder/plugins/state.json`. Until then the files are ignored and the session starts without them, and the project's packages of that kind stay unloaded while user-scope packages load normally.
+Project settings, hooks, safety policy, extensions and plugins carry authority, so Clio Coder loads them only after the operator approved their exact bytes. For extensions and plugins the approved file is the project's install state, `.clio-coder/extensions/state.json` or `.clio-coder/plugins/state.json`. Until then the files are ignored and the session starts without them, and the project's packages of that kind stay unloaded while user-scope packages load normally.
 
 | User-Facing Error / Notice | Cause | Actionable Remediation |
 | :--- | :--- | :--- |
@@ -130,7 +130,7 @@ ACP clients receive the ignored files in `_meta["clio-coder/trust"]` on `session
 | :--- | :--- | :--- |
 | `no trace database yet at <path>` | The trace mirror database has not been initialized because no interactive sessions or dispatches have executed yet. | Execute a turn or dispatch a task. In SQLite trace commands, this notice is informational (exit code `0`). |
 | `trace database not found: <path>` | An explicit `--db <path>` flag was provided pointing to a nonexistent database file (exit 1). | Verify the database path or omit `--db` to use the default state directory database (`<stateDir>/trace.sqlite`); the next line prints that default path. |
-| `Node.js ExperimentalWarning: SQLite is an experimental feature` | Node.js emitted an experimental feature warning for `node:sqlite`. | Clio suppresses this one warning with a scoped filter when it loads the trace database. The filter stands down when Node runs with `--trace-warnings`, so that flag makes the warning visible again. |
+| `Node.js ExperimentalWarning: SQLite is an experimental feature` | Node.js emitted an experimental feature warning for `node:sqlite`. | Clio Coder suppresses this one warning with a scoped filter when it loads the trace database. The filter stands down when Node runs with `--trace-warnings`, so that flag makes the warning visible again. |
 | `session has no recorded cwd`, `session cwd <path> is missing`, or `session cwd <path> is not a directory` (the `cwd-fallback` overlay on `/resume`) | The session recorded in `meta.json` points to a workspace directory that has been deleted, unmounted, or renamed. | Choose **Continue** to use the terminal's current directory, or **Cancel** to return to the previous session. |
 | `LM Studio instance '<id>' is also loaded on <peers>; a request may be served by that LM Link peer, and the footer and usage ledger name the id that answered when it differs.` | The model is resident on this server and on an LM Link peer. | Informational. The footer and the usage ledger name the instance that answered when it differs. Verify loaded instances with `clio-coder targets --probe`. |
 | `LM Studio resolved '<model>' to loaded instance '<instance>' on target '<id>'.` | A bare model key matched a loaded instance, so Clio reuses it instead of loading another. | Informational. |
@@ -146,7 +146,7 @@ provider cache usage, compiled-prompt reuse, and any backend prefill timing.
 Available fields depend on the serving runtime. A backend that omits cache-read
 telemetry is shown without that observation.
 
-When Clio records a cause for a cold prefix, `/context` names it, for example:
+When Clio Coder records a cause for a cold prefix, `/context` names it, for example:
 
 ```text
 last cache-affecting events: working-set eviction (reuse measured separately)
@@ -175,7 +175,7 @@ If the compiled prompt was reused but the backend reports a cold prefix, check:
   discard resident cache state.
 - **Other traffic on the endpoint.** Workers, another session, or another client
   can use the same cache slots. `clio-coder targets --probe` reports available
-  slot information; fleet settings show Clio's active endpoint allocations.
+  slot information; fleet settings show Clio Coder's active endpoint allocations.
 - **Model residency.** Switching a router to another model can replace the
   previous model's cache state.
 - **Prompt identity.** Compare `promptHash` and `toolSignature` in
@@ -199,7 +199,7 @@ it according to the server's memory capacity and concurrent workload.
 When an interactive session stops responding to typing, the question worth
 answering before anything else is which half of the input pipeline stopped: the
 stdin reader that hands bytes to the application, or the renderer that turns
-them into a frame on stdout. Clio keeps that evidence without being asked. Every
+them into a frame on stdout. Clio Coder keeps that evidence without being asked. Every
 interactive process holds a bounded in-memory ring of the last 256 input-ingress
 records and the last 256 committed frames, and writes it out when the process
 receives `SIGTERM`, which is the signal a `kill` of the stuck pane sends.

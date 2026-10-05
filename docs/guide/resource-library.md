@@ -1,6 +1,6 @@
 # Library packages
 
-The **library** is Clio's collection of installable **packages**. Each package has one kind: `plugin`, `skill`, `agent`, `prompt`, or `fleet`. Every kind uses a root `plugin.json`, an explicit Semantic Version, a full-tree SHA-256 pin, and the same installation state. A plugin bundles several resources; each other kind exposes one public resource and may include supporting files. This page owns the operator commands. Package invariants are in the [library architecture](../architecture/library.md) and manifest fields are in [authoring-plugins.md](authoring-plugins.md).
+The **library** is Clio Coder's collection of installable **packages**. Each package has one kind: `plugin`, `skill`, `agent`, `prompt`, or `fleet`. Every kind uses a root `plugin.json`, an explicit Semantic Version, a full-tree SHA-256 pin, and the same installation state. A plugin bundles several resources; each other kind exposes one public resource and may include supporting files. This page owns the operator commands. Package invariants are in the [library architecture](../architecture/library.md) and manifest fields are in [authoring-plugins.md](authoring-plugins.md).
 
 Bundled packages are available on a fresh installation, but none are installed automatically. Built-in runtime tools and helper recipes remain available independently of optional library packages.
 
@@ -84,7 +84,7 @@ The operator's first project install approves itself. When the workspace has no 
 
 A package from one of those paths, installed into a project that has no plugin state, is blocked until `clio-coder config trust plugins` approves it.
 
-A task worktree that Clio created for a dispatched worker inherits its origin workspace's approval while its `.clio-coder/plugins/state.json` is byte-identical to the origin's approved file. A hand-made `git worktree`, a worktree whose state differs, and a worktree whose origin approval is revoked or changed do not inherit. The inheritance rules are in the safety model.
+A task worktree that Clio Coder created for a dispatched worker inherits its origin workspace's approval while its `.clio-coder/plugins/state.json` is byte-identical to the origin's approved file. A hand-made `git worktree`, a worktree whose state differs, and a worktree whose origin approval is revoked or changed do not inherit. The inheritance rules are in the safety model.
 
 ## Lifecycle
 
@@ -106,7 +106,7 @@ A foreign package (installed by `interop adopt` or `library import`) cannot be u
 
 ## Import
 
-`library import <path|github-tree-url>` reviews a portable, Claude Code, or Codex plugin from a directory or a `https://github.com/owner/repo/tree/ref/path` URL. A root `plugin.json` imports as data only. A `.claude-plugin/plugin.json` or `.codex-plugin/plugin.json` package is normalized into a portable Clio package: skills keep their text and frontmatter names, command Markdown becomes prompt recipes, and Claude agents become read-only Clio agents. Hooks, MCP, LSP, scripts, and host settings are reported and never activated, and source files are never changed. `--format claude|codex` disambiguates a source that carries both hidden manifests. Import defaults to user scope.
+`library import <path|github-tree-url>` reviews a portable, Claude Code, or Codex plugin from a directory or a `https://github.com/owner/repo/tree/ref/path` URL. A root `plugin.json` imports as data only. A `.claude-plugin/plugin.json` or `.codex-plugin/plugin.json` package is normalized into a portable Clio Coder package: skills keep their text and frontmatter names, command Markdown becomes prompt recipes, and Claude agents become read-only Clio Coder agents. Hooks, MCP, LSP, scripts, and host settings are reported and never activated, and source files are never changed. `--format claude|codex` disambiguates a source that carries both hidden manifests. Import defaults to user scope.
 
 The command prints the review and then asks `Import this plan? [y/N]` on a terminal. `--yes` approves without asking, and without a terminal or approval nothing is installed. A plan is blocked when requirements are unmet or the package ID already exists in that scope. Apply refuses when the source or the normalized content changed after review. The result reports publication, validation of the installed recipes, and the trust gate as separate facts: the package is installed with `trust: foreign` and an `import` origin, and the gate `integrations.projectResources.trustProjectImports` decides whether its skills and prompts load. Exit 0 requires a published, valid package with no diagnostics. In a session, `/library import <path-or-url>` opens the same review.
 
@@ -114,9 +114,9 @@ An import never approves workspace trust, including the first import into a work
 
 ## One index format
 
-The bundled index is `library/registry.yaml`. Clio also reads the user index selected by `integrations.library.catalog` (default `<configDir>/library.yaml`) and the project `.clio-coder/library.yaml`. Project rows override user and bundled rows with the same typed reference; `--from <index>` has highest priority. Installed packages that no index lists still appear, with an unknown origin.
+The bundled index is `library/registry.yaml`. Clio Coder also reads the user index selected by `integrations.library.catalog` (default `<configDir>/library.yaml`) and the project `.clio-coder/library.yaml`. Project rows override user and bundled rows with the same typed reference; `--from <index>` has highest priority. Installed packages that no index lists still appear, with an unknown origin.
 
-Clio Coder ships the index together with its curated `library/skills/` packages and `library/plugins/` bundles in the npm package. Bundled sources resolve relative to the installed index, so they remain available from any working directory without a GitHub fetch. Built-in subagent recipes ship separately under `src/domains/agents/builtins/`; installed plugins can contribute additional recipes and bound skills. The manifest's `ai.iowarp.clio` extension key identifies Clio-specific declarations inside a package, not a marketplace address. How the bundled index is generated is in [skills-marketplace.md](skills-marketplace.md#registry-and-pins).
+Clio Coder ships the index together with its curated `library/skills/` packages and `library/plugins/` bundles in the npm package. Bundled sources resolve relative to the installed index, so they remain available from any working directory without a GitHub fetch. Built-in subagent recipes ship separately under `src/domains/agents/builtins/`; installed plugins can contribute additional recipes and bound skills. The manifest's `ai.iowarp.clio` extension key identifies Clio Coder-specific declarations inside a package, not a marketplace address. How the bundled index is generated is in [skills-marketplace.md](skills-marketplace.md#registry-and-pins).
 
 ```yaml
 entries:
@@ -193,7 +193,7 @@ clio-coder library recipes --source core --all
 
 `library skills [--all] [--json]` lists runtime skills, including unmanaged files, with scope, source, trust, and invocation mode; `--all` includes untrusted and manual-only skills. `library inventory --json` is the fixed, body-free skills wire contract (version 1, at most 64 skills) that GUI hosts read. `clio-coder agents [--json] [--all]` lists user-visible agent specs from built-in, plugin, user, and project recipes. `library validate <path>` validates an unmanaged draft or a complete package candidate.
 
-Clio reads the same inventory through `gateway(op="call", capability="clio_library", args={})`. That capability is a read: bounded `kind`, `query` and `ref` selection with `limit`/`offset` pages, tagged rows for loaded resources, catalog hints and install targets, and no activation, installation, registration or pin write anywhere in it. Skill activation stays under `context(scope="skills")` and `/skill <name>`. A hint row names its installable owner and that member's availability and never carries an invocation, because nothing has loaded it. Internal and shadow agents, untrusted resources and instruction bodies are not in the model's view at all, and a worker run has no library projection of its own. See [tool usage](tool-usage.md) for the argument surface and the row shapes.
+Clio Coder reads the same inventory through `gateway(op="call", capability="clio_library", args={})`. That capability is a read: bounded `kind`, `query` and `ref` selection with `limit`/`offset` pages, tagged rows for loaded resources, catalog hints and install targets, and no activation, installation, registration or pin write anywhere in it. Skill activation stays under `context(scope="skills")` and `/skill <name>`. A hint row names its installable owner and that member's availability and never carries an invocation, because nothing has loaded it. Internal and shadow agents, untrusted resources and instruction bodies are not in the model's view at all, and a worker run has no library projection of its own. See [tool usage](tool-usage.md) for the argument surface and the row shapes.
 
 ## Retired surfaces
 

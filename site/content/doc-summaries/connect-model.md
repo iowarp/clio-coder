@@ -3,7 +3,7 @@
 Run `clio-coder configure`, or choose **Guided setup** in the desktop alpha. Pick the source you recognize: an app on this computer, a model server, an AI subscription, or a provider account/API.
 
 1. Choose the app or provider. Enter a key or complete browser sign-in when required.
-2. Confirm the endpoint if the provider uses one. Clio checks reachability and the model catalog where supported.
+2. Confirm the endpoint if the provider uses one. Clio Coder checks reachability and the model catalog where supported.
 3. Select a model from the available list. For a local server with no models, load one and choose **Check again**.
 4. Review the connection evidence, then save. The first connection supplies the chat and worker defaults.
 

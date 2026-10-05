@@ -21,7 +21,7 @@ Source of truth:
 
 Every model runtime (e.g., Local Native, Cloud HTTP, Subprocess) implements the `RuntimeDescriptor` interface defined in [runtime-descriptor.ts](../../src/domains/providers/types/runtime-descriptor.ts). The registry rejects a descriptor that lacks a non-empty `id` and `displayName`, a `kind` of `http`, `sdk` or `subprocess`, an `apiFamily`, an `auth` from the list below, a `defaultCapabilities` object or a `synthesizeModel` function, and rejects a `probe`, `probeModels`, `complete`, `infill`, `embed` or `rerank` that is present but not a function. An `id` or alias that is already registered is a conflict.
 
-Three descriptor fields carry behavior beyond the template. `tier` decides how a target's cost is labeled: a `local-native` runtime prices as free and a `protocol` runtime never does, as [pricing and cost provenance](../guide/configuration-and-targets.md#pricing-and-cost-provenance) describes. `enforcement` declares what Clio can guarantee for a worker on a runtime that is not `http`; a non-HTTP runtime that declares nothing is treated as unmediated and refused write-capable work unless the operator sets `trustedUnmediated`. `gatewayUrl` marks a remote gateway whose URL the operator must supply, so configure offers no localhost default.
+Three descriptor fields carry behavior beyond the template. `tier` decides how a target's cost is labeled: a `local-native` runtime prices as free and a `protocol` runtime never does, as [pricing and cost provenance](../guide/configuration-and-targets.md#pricing-and-cost-provenance) describes. `enforcement` declares what Clio Coder can guarantee for a worker on a runtime that is not `http`; a non-HTTP runtime that declares nothing is treated as unmediated and refused write-capable work unless the operator sets `trustedUnmediated`. `gatewayUrl` marks a remote gateway whose URL the operator must supply, so configure offers no localhost default.
 
 Here is a template for a new runtime plugin:
 
@@ -71,13 +71,13 @@ export const myCustomRuntime: RuntimeDescriptor = {
 
 ## 2. Probing Mechanisms
 
-Probes discover the current state of a target inference server when Clio starts,
+Probes discover the current state of a target inference server when Clio Coder starts,
 when `/settings` opens, and when `/model` or `clio-coder targets --probe` refreshes.
 
 ### 2.1 Endpoint Probing (`probe`)
 The `probe` method passively validates endpoint reachability and collects metadata. It must not submit inference or use a model-specific endpoint that can start a worker. Keep generating qualification explicit:
 
-* **Inputs:** `TargetDescriptor` (which holds target `url`, optional `auth` metadata, and connection metadata) and `ProbeContext` (which provides timeout signals, credential-presence keys, and an optional resolved `authToken`). Request paths that resolve OAuth through `providers.auth.resolveForTarget` must pass `{ signal }`; Pi's `AuthOperationOptions` keeps cancellation attached while Clio waits for or mutates its credential store.
+* **Inputs:** `TargetDescriptor` (which holds target `url`, optional `auth` metadata, and connection metadata) and `ProbeContext` (which provides timeout signals, credential-presence keys, and an optional resolved `authToken`). Request paths that resolve OAuth through `providers.auth.resolveForTarget` must pass `{ signal }`; Pi's `AuthOperationOptions` keeps cancellation attached while Clio Coder waits for or mutates its credential store.
 * **Return Value:** A `ProbeResult` indicating (among other optional fields such as `latencyMs`, `error`, `authFailed`, `failureKind`, `modelLabels`, `modelCapabilities`, `cacheAdvisories` and `surfaces`):
   * `ok`: True if reachable.
   * `serverVersion`: String identifier of the backend (e.g. `"Ollama/0.1.48"`).
@@ -130,7 +130,7 @@ The `synthesizeModel` method acts as the factory that creates the `pi-ai` compat
   ```
 * **Tasks:**
   1. Combine target, catalog, probe, and capability metadata into a `pi-ai` model descriptor.
-  2. Select the API family, endpoint, pricing, token limits, and Clio runtime metadata required by the streaming adapter.
+  2. Select the API family, endpoint, pricing, token limits, and Clio Coder runtime metadata required by the streaming adapter.
   3. Leave secrets and request-time authentication to `providers.auth.resolveForTarget` at the call site. Optional FIM support belongs to the descriptor's separate `infill` method rather than to prompt binding in `synthesizeModel`.
 
 
@@ -140,7 +140,7 @@ When a model family requires response parsing or sentinel stripping before the p
 
 ### 3.2 OpenAI-compatible sampling and vLLM budgets
 
-Sampling catalog entries keep Clio's per-mode sampler in `quirks.sampling`, using the typed names
+Sampling catalog entries keep Clio Coder's per-mode sampler in `quirks.sampling`, using the typed names
 `temperature`, `topP`, `topK`, `minP`, `presencePenalty`, `frequencyPenalty`, and
 `repeatPenalty`. The OpenAI-completions engine adapter translates those names once and passes the
 result through Pi's `StreamOptions.samplingParams`; it does not patch sampler fields into the final
@@ -159,23 +159,23 @@ Local OpenAI-compatible model synthesis also declares
 of a complete stream when a local server omits `finish_reason`, instead of turning an otherwise
 valid answer into a provider error. Explicit finish reasons remain authoritative when supplied.
 
-Anthropic thinking is assembled by Pi, not by Clio. Pi's `streamSimple` maps the agent's thinking
+Anthropic thinking is assembled by Pi, not by Clio Coder. Pi's `streamSimple` maps the agent's thinking
 level onto `thinking.type: "adaptive"` plus `output_config.effort` (read from the model's
 `thinkingLevelMap` and `compat.forceAdaptiveThinking`) or onto a bounded `budget_tokens` for
-budget-based models. Clio's request controls in `src/engine/provider-payload.ts` remove thinking
+budget-based models. Clio Coder's request controls in `src/engine/provider-payload.ts` remove thinking
 and effort only on forced-tool rounds for Claude models that accept forced choice. Models that
 reject forced choice keep thinking and use automatic tool selection. OpenAI Responses, Azure
-Responses and Codex use Pi's stock `reasoning.summary: "auto"`; Clio does not override it.
+Responses and Codex use Pi's stock `reasoning.summary: "auto"`; Clio Coder does not override it.
 [thinking-off-wire.test.ts](../../tests/extended/thinking-off-wire.test.ts) locks the local LM Studio and
 llama.cpp controls used when thinking is off. Anthropic request assembly is
-inherited from the pinned Pi dependency, and no Clio test reconstructs Pi's whole adaptive or
+inherited from the pinned Pi dependency, and no Clio Coder test reconstructs Pi's whole adaptive or
 budget payload.
 
 ### 3.3 Thinking controls through LiteLLM
 
 Dedicated memory and compaction roles, and native worker admission, read a cold LiteLLM target's metadata before they synthesize the model. The read disables reasoning probes and runs no extra inference request, and each selected target owns its probe state even when two targets share a gateway URL. Worker preparation is bounded by the admission deadline and tool cancellation, and a failed preparation cannot launch a late worker ([`worker-model-metadata.ts`](../../src/domains/dispatch/worker-model-metadata.ts), [`background-model-metadata.ts`](../../src/entry/background-model-metadata.ts)). A successful probe that reports an unknown or mixed declaration stays unknown and is not probed repeatedly for a better answer.
 
-A gateway alias is not an upstream runtime identity. Clio consumes the optional `model_info.runtime` deployment declaration from LiteLLM's `/v1/model/info` only when every deployment of the alias names the same recognized control runtime: `lm-studio` or `llama.cpp`. Missing, unknown, or mixed declarations produce no runtime-specific control hint. The probe-only `thinkingControlRuntime` capability travels through the existing main, background and worker model capability path; `runtimeId`, authentication and the gateway URL stay LiteLLM. Clio never infers the declaration from ports or model names. It loads or unloads an upstream model only under the [LM Studio load profile](../guide/configuration-and-targets.md#lm-studio-load-profile) rules, on a route with exactly one deployment that declares `lm-studio`.
+A gateway alias is not an upstream runtime identity. Clio consumes the optional `model_info.runtime` deployment declaration from LiteLLM's `/v1/model/info` only when every deployment of the alias names the same recognized control runtime: `lm-studio` or `llama.cpp`. Missing, unknown, or mixed declarations produce no runtime-specific control hint. The probe-only `thinkingControlRuntime` capability travels through the existing main, background and worker model capability path; `runtimeId`, authentication and the gateway URL stay LiteLLM. Clio Coder never infers the declaration from ports or model names. It loads or unloads an upstream model only under the [LM Studio load profile](../guide/configuration-and-targets.md#lm-studio-load-profile) rules, on a route with exactly one deployment that declares `lm-studio`.
 
 The model's profile still determines whether thinking is switchable and which active levels exist. A declared LM Studio route receives `reasoning_effort: "none"` for an effective off choice; a llama.cpp route uses its template switch. LiteLLM's generic OpenAI adapter may silently filter a resolved effort for local model names, so Clio adds `allowed_openai_params: ["reasoning_effort"]` only when it sends that model and runtime's resolved `reasoning_effort`; unrelated parameters and unknown off mechanisms are not newly allowed. This is a request control and not a change to gateway configuration. See [LiteLLM parameter forwarding](https://docs.litellm.ai/docs/completion/drop_params).
 
@@ -185,7 +185,7 @@ Gateway aliases need declared upstream capabilities to select the appropriate th
 
 ## 4. Configuring Reasoning & Thinking Formats
 
-Clio supports diverse thinking mechanisms. If your model family uses a custom format, map it to one of the following mechanisms in the model's profile, as `behavior.thinking.mechanism` in [`models/profiles.yaml`](../../models/profiles.yaml) or in the operator's `<configDir>/model-profiles.yaml` ([profile rules](../guide/configuration-and-targets.md#model-profiles)). The same block carries `effortByLevel` for `effort-levels`, `budgetByLevel` for `budget-tokens`, a short `guidance` text rendered into the runtime prompt block, and optional `chatTemplateKwargs`.
+Clio Coder supports diverse thinking mechanisms. If your model family uses a custom format, map it to one of the following mechanisms in the model's profile, as `behavior.thinking.mechanism` in [`models/profiles.yaml`](../../models/profiles.yaml) or in the operator's `<configDir>/model-profiles.yaml` ([profile rules](../guide/configuration-and-targets.md#model-profiles)). The same block carries `effortByLevel` for `effort-levels`, `budgetByLevel` for `budget-tokens`, a short `guidance` text rendered into the runtime prompt block, and optional `chatTemplateKwargs`.
 
 | Mechanism | Behavior |
 | --- | --- |
@@ -199,7 +199,7 @@ Wire formats such as `anthropic-extended`, `qwen-chat-template`, and `deepseek-r
 
 ---
 
-## 5. Adding the Adapter to Clio
+## 5. Adding the Adapter to Clio Coder
 
 Once your runtime adapter descriptor is implemented:
 
@@ -217,10 +217,10 @@ const BUILTIN_RUNTIMES: ReadonlyArray<RuntimeDescriptor> = [
 Add a matching row to `BUILTIN_RUNTIME_BOOT_MANIFEST` in [boot-manifest.ts](../../src/domains/providers/runtimes/boot-manifest.ts). That data-only projection (`id`, `aliases`, `kind`, `tier`, `auth`, `credentialsEnvVar`, `oauthProviderId`) lets the first interactive frame classify the saved chat target without importing every descriptor, and a contract test compares it with the canonical descriptors. A user-facing runtime may add a one-line summary to `SUMMARY_BY_RUNTIME_ID` in [support.ts](../../src/domains/providers/support.ts); without one the wizard shows the descriptor's `displayName`. A runtime whose models Clio should offer in a stable order sets `knownModels`, and one with a curated chat choice sets `defaultModel`.
 
 ### 5.2 Dynamic Plugin Loading
-Clio's `RuntimeRegistry` can load custom runtimes dynamically at startup:
-* **Directories:** Place compiled JavaScript files (`.js`) inside the `runtimes/` folder of Clio's config directory (`~/.config/clio-coder/runtimes/` by default; `CLIO_CODER_HOME` and `CLIO_CODER_CONFIG_DIR` move it). Each file's default export must be a valid descriptor.
+Clio Coder's `RuntimeRegistry` can load custom runtimes dynamically at startup:
+* **Directories:** Place compiled JavaScript files (`.js`) inside the `runtimes/` folder of Clio Coder's config directory (`~/.config/clio-coder/runtimes/` by default; `CLIO_CODER_HOME` and `CLIO_CODER_CONFIG_DIR` move it). Each file's default export must be a valid descriptor.
 * **Package exports:** Publish an npm package that exports a `clioRuntimes` array containing your runtime descriptors, then list the package name under `integrations.runtimePlugins` in your configuration settings. That setting needs a restart.
 
-Before it imports the first plugin file or package, Clio activates a lazy bridge to Pi's compat provider registry, so plugin code can register an API provider. The bridge is never loaded when no plugin file exists and `integrations.runtimePlugins` is empty.
+Before it imports the first plugin file or package, Clio Coder activates a lazy bridge to Pi's compat provider registry, so plugin code can register an API provider. The bridge is never loaded when no plugin file exists and `integrations.runtimePlugins` is empty.
 
 Invalid descriptors, import failures and id conflicts are written to stderr as `[providers]` diagnostics and never stop startup. A plugin runtime is not in the boot manifest, and `classifyDefaultTarget` reads only that manifest, so a saved chat target on a plugin runtime classifies as `ineligible-runtime` at interactive startup.

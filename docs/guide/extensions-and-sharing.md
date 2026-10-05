@@ -26,7 +26,7 @@ The skill precedence, lowest to highest, is:
 
 | Precedence | Scope | Source | Root |
 | --- | --- | --- | --- |
-| 9 | project | clio (self-development) | `library/skills/meta/clio-coder-dev` and `clio-coder-test`, only inside Clio's own repository and only when no installed package owns the name |
+| 9 | project | clio (self-development) | `library/skills/meta/clio-coder-dev` and `clio-coder-test`, only inside Clio Coder's own repository and only when no installed package owns the name |
 | 10 | package | plugin | enabled plugin resource roots |
 | 20 | user | agents / claude / codex / copilot / opencode | `~/.agents/skills`, `~/.claude/skills`, `~/.codex/skills`, `~/.copilot/skills`, `~/.config/opencode/skills` |
 | 30 | user | clio | `<configDir>/skills` |
@@ -34,16 +34,16 @@ The skill precedence, lowest to highest, is:
 | 50 | project | clio | `.clio-coder/skills` |
 | 60 | cli | path | `--skill <path>` explicit paths |
 
-Inside Clio's own repository, attended sessions are told to load `clio-coder-dev` before the first edit and `clio-coder-test` when choosing validation ([extension.ts](../../src/domains/prompts/extension.ts)). Headless runs are told to take conventions from the code and neighboring tests and not to load either, and both skills stay discoverable.
+Inside Clio Coder's own repository, attended sessions are told to load `clio-coder-dev` before the first edit and `clio-coder-test` when choosing validation ([extension.ts](../../src/domains/prompts/extension.ts)). Headless runs are told to take conventions from the code and neighboring tests and not to load either, and both skills stay discoverable.
 
-Clio-native roots intentionally outrank shared compatibility roots at the same scope, so `.clio-coder/skills` overrides a project `.codex/skills` skill of the same name, and `<configDir>/skills` overrides `~/.agents/skills`. Project roots may not leave the workspace and user roots may not leave the home directory through a symlink; an escaping skill is skipped with a warning.
+Clio Coder-native roots intentionally outrank shared compatibility roots at the same scope, so `.clio-coder/skills` overrides a project `.codex/skills` skill of the same name, and `<configDir>/skills` overrides `~/.agents/skills`. Project roots may not leave the workspace and user roots may not leave the home directory through a symlink; an escaping skill is skipped with a warning.
 
 ### Skill collision resolution
 
 Candidate resolution for skills is implemented in [loader.ts](../../src/domains/resources/skills/loader.ts). `compareSkillCandidates` orders competing candidates for one name and for one canonical file, and the last one wins:
 
 1. **Trust first.** A trusted candidate beats an untrusted one. An untrusted project compatibility copy (an unvetted `.claude/skills/my-skill` or `.agents/skills/my-skill`) therefore cannot win a collision against an admitted native skill and then disappear at model visibility time.
-2. **Ownership.** A skill from a plugin, a Clio root, or an explicit path outranks a loose compatibility discovery, so an imported copy that still awaits trust owns its name over a loose file.
+2. **Ownership.** A skill from a plugin, a Clio Coder root, or an explicit path outranks a loose compatibility discovery, so an imported copy that still awaits trust owns its name over a loose file.
 3. **Precedence tier**, from the table above.
 4. **Registry agent order** for compatibility roots in the same tier: the earlier agent in the interop registry (claude, codex, opencode, copilot, agents) wins, so a skill symlinked into two foreign roots resolves to the same winner on every machine.
 5. **File path**, as the final tie-break.
@@ -83,7 +83,7 @@ Use in the TUI:
 
 Arguments follow Pi 1.0 semantics: bash-style quoting splits the text after the command into positional arguments, and the placeholders `$1`, `$@`, `$ARGUMENTS`, `${N:-default}`, `${@:N}`, and `${@:N:L}` expand in one pass. Bare `$ARGUMENTS` inserts the raw payload byte for byte. The placeholder contract is in [prompt-envelope-and-tools.md](../architecture/prompt-envelope-and-tools.md).
 
-Frontmatter fields are `description`, `argument-hint` (or `argumentHint`), and `display-only` (or `displayOnly`). Templates without frontmatter are accepted; Clio derives a fallback description from the first non-empty line. Invalid frontmatter degrades to a warning rather than failing the whole load. A template whose package reference cannot resolve, or whose file cannot be read, still loads with an empty body and a reason, so invoking it reports the reason instead of "not a command".
+Frontmatter fields are `description`, `argument-hint` (or `argumentHint`), and `display-only` (or `displayOnly`). Templates without frontmatter are accepted; Clio Coder derives a fallback description from the first non-empty line. Invalid frontmatter degrades to a warning rather than failing the whole load. A template whose package reference cannot resolve, or whose file cannot be read, still loads with an empty body and a reason, so invoking it reports the reason instead of "not a command".
 
 ### Display-only templates
 
@@ -107,7 +107,7 @@ Submitting `/pkg:help` renders the template locally as an operator card in the t
 
 ### Foreign prompt roots
 
-Claude, Codex, and OpenCode prompt folders are discovered at user and project scope, but their loose templates cannot expand. Explicitly adopt them with `clio-coder interop adopt <host>` or import a package with `clio-coder library import <path>`. Imported foreign prompts additionally require `integrations.projectResources.trustProjectImports: true`. Clio's own prompt roots remain usable. Discovery-only templates cannot shadow a trusted Clio template and send nothing to the model.
+Claude, Codex, and OpenCode prompt folders are discovered at user and project scope, but their loose templates cannot expand. Explicitly adopt them with `clio-coder interop adopt <host>` or import a package with `clio-coder library import <path>`. Imported foreign prompts additionally require `integrations.projectResources.trustProjectImports: true`. Clio Coder's own prompt roots remain usable. Discovery-only templates cannot shadow a trusted Clio Coder template and send nothing to the model.
 
 ---
 
@@ -147,20 +147,20 @@ Every activation records a session ledger entry with the skill name, file path, 
 
 ### Naming and validation
 
-The canonical invocation name is the frontmatter `name` when present, otherwise the directory or file subject. When `name` differs from the path subject Clio records a warning and keeps the frontmatter name, which lets shared cross-agent skill folders load without renaming. Names should be at most 64 characters of lowercase letters, numbers, and single hyphens that neither start nor end the name. A description should be at most 1024 characters. Format violations warn but do not block loading. A `SKILL.md` over 50 KiB loads with a warning, but activation delivers at most 50 KiB.
+The canonical invocation name is the frontmatter `name` when present, otherwise the directory or file subject. When `name` differs from the path subject Clio Coder records a warning and keeps the frontmatter name, which lets shared cross-agent skill folders load without renaming. Names should be at most 64 characters of lowercase letters, numbers, and single hyphens that neither start nor end the name. A description should be at most 1024 characters. Format violations warn but do not block loading. A `SKILL.md` over 50 KiB loads with a warning, but activation delivers at most 50 KiB.
 
 Recognized frontmatter fields:
 
 - `name`, `description`: core identity.
 - `disable-model-invocation: true`: hides the skill from the model-visible catalog while keeping it loadable by `/skill <name>`.
-- `allowed-tools`, `disallowed-tools`: a comma-separated string or a YAML list. Tool names are matched case-insensitively against Clio's tools. A name Clio does not have is a warning, and an `allowed-tools` list naming no Clio tool narrows nothing. Loading narrows the tool surface and never grants a tool the host would refuse. Spell the names in Clio's lowercase form (`read`, `grep`): Claude Code reads `allowed-tools` as a pre-approval grant, so a capitalized `Bash` in a skill that another host loads would auto-approve that tool there. Curated library skills are checked for the lowercase spelling.
+- `allowed-tools`, `disallowed-tools`: a comma-separated string or a YAML list. Tool names are matched case-insensitively against Clio Coder's tools. A name Clio Coder does not have is a warning, and an `allowed-tools` list naming no Clio Coder tool narrows nothing. Loading narrows the tool surface and never grants a tool the host would refuse. Spell the names in Clio Coder's lowercase form (`read`, `grep`): Claude Code reads `allowed-tools` as a pre-approval grant, so a capitalized `Bash` in a skill that another host loads would auto-approve that tool there. Curated library skills are checked for the lowercase spelling.
 - `requires: [skill:<name>]`: typed dependency. A name that resolves to no loaded skill is a warning.
 - `license`, `version`, `compatibility`, and other non-core keys: captured as skill metadata and surfaced when the skill loads through `context`. A nested `clio-coder:` block lands in `metadata.clioCoder`.
 - `source-url`, `registry-id`, `registry-url`, `installed-at`, `updated-at`, `installed-hash`, `audit` (`pass`, `warn`, `fail`, `unknown`), `installed-by`: captured as install provenance when present, nested under `clio-coder:` or flat.
 
 ### Trust and compatibility roots
 
-Shared and other-agent user and project roots are discovery-only. Explicitly import the desired resources into Clio, then review and enable `integrations.projectResources.trustProjectImports` (legacy control id `skills.trustProjectCompatRoots`) to use imported foreign packages. The setting applies to imported packages at either scope, despite its historical name. It never imports or activates loose `.claude`, `.agents`, `.codex`, or other compatibility roots. Clio-native roots and trusted library packages remain usable. Imported foreign packages record `trust: "foreign"` at either scope; a project resource adopted into user scope keeps foreign trust. Workspace trust is a separate gate: a package installed at project scope, foreign or not, loads only while the operator has approved the project's plugin state with `clio-coder config trust plugins`, and an import or adoption never approves it.
+Shared and other-agent user and project roots are discovery-only. Explicitly import the desired resources into Clio Coder, then review and enable `integrations.projectResources.trustProjectImports` (legacy control id `skills.trustProjectCompatRoots`) to use imported foreign packages. The setting applies to imported packages at either scope, despite its historical name. It never imports or activates loose `.claude`, `.agents`, `.codex`, or other compatibility roots. Clio Coder-native roots and trusted library packages remain usable. Imported foreign packages record `trust: "foreign"` at either scope; a project resource adopted into user scope keeps foreign trust. Workspace trust is a separate gate: a package installed at project scope, foreign or not, loads only while the operator has approved the project's plugin state with `clio-coder config trust plugins`, and an import or adoption never approves it.
 
 Model visibility is `trusted && !disable-model-invocation`. Only visible skills appear in `context(scope="skills")` or are eligible for model invocation. `disable-model-invocation: true` keeps a skill in the catalog for manual `/skill` use while withholding it from the model. A named load of an untrusted, not-imported, or manual-only skill reports that specific restriction instead of calling the skill unknown.
 
@@ -176,23 +176,23 @@ The interactive session and `clio-coder run` accept `--no-skills` to disable dis
 
 ### Agent Skills compatibility
 
-Clio is local-first. Skills run from disk and no chat turn depends on network access. Because the compatibility roots above use the standard `SKILL.md` shape, skills installed by the Skills.sh CLI for other agents are usable directly:
+Clio Coder is local-first. Skills run from disk and no chat turn depends on network access. Because the compatibility roots above use the standard `SKILL.md` shape, skills installed by the Skills.sh CLI for other agents are usable directly:
 
 ```text
 npx skills add <skill> -a codex   # installs into ~/.codex/skills
 ```
 
-Clio does not call Skills.sh during startup or prompt assembly, and does not emit her own telemetry. If you run `npx skills`, its telemetry follows that CLI and can be disabled with `DISABLE_TELEMETRY=1`. Skills.sh remote search and audit are unavailable. Clio's own package discovery and installation go through the library: bare names and `kind:name` references resolve through the library index, and local paths require a valid package containing a root `plugin.json`. Raw or unindexed GitHub URLs cannot be installed directly; remote package installation requires an index entry with version and full-tree SHA-256 pin.
+Clio does not call Skills.sh during startup or prompt assembly and emits no telemetry of its own. If you run `npx skills`, its telemetry follows that CLI and can be disabled with `DISABLE_TELEMETRY=1`. Skills.sh remote search and audit are unavailable. Clio Coder's own package discovery and installation go through the library: bare names and `kind:name` references resolve through the library index, and local paths require a valid package containing a root `plugin.json`. Raw or unindexed GitHub URLs cannot be installed directly; remote package installation requires an index entry with version and full-tree SHA-256 pin.
 
 ### Prompt envelope and safety
 
-Skill bodies never enter the prompt uninvited. The model discovers skills only through `context(scope="skills")`, and a body loads only when the pending-skill policy authorizes that name for the turn, which requires an explicit operator invocation such as `/skill <name>` or, where the autonomy level allows it, a model activation of a trusted installed skill. Skills are prompt resources, not execution grants: any script a skill references still runs through normal Clio tools and safety gates, and a loaded skill's `allowed-tools` declaration narrows the tool surface at admission (reason code `skill_surface`) without ever granting anything the host would refuse.
+Skill bodies never enter the prompt uninvited. The model discovers skills only through `context(scope="skills")`, and a body loads only when the pending-skill policy authorizes that name for the turn, which requires an explicit operator invocation such as `/skill <name>` or, where the autonomy level allows it, a model activation of a trusted installed skill. Skills are prompt resources, not execution grants: any script a skill references still runs through normal Clio Coder tools and safety gates, and a loaded skill's `allowed-tools` declaration narrows the tool surface at admission (reason code `skill_surface`) without ever granting anything the host would refuse.
 
 ---
 
 ## Share archives
 
-Share archives are single JSON files for moving loose project and user Clio resources between machines or collaborators. They carry the files under the prompt, skill, agent, fleet, and extension roots, project context files, and a settings fragment. Packages installed through `clio-coder library` live under `plugins/` and are not exported; distribute those through their source directory or a library index.
+Share archives are single JSON files for moving loose project and user Clio Coder resources between machines or collaborators. They carry the files under the prompt, skill, agent, fleet, and extension roots, project context files, and a settings fragment. Packages installed through `clio-coder library` live under `plugins/` and are not exported; distribute those through their source directory or a library index.
 
 ```json
 {
@@ -208,7 +208,7 @@ Share archives are single JSON files for moving loose project and user Clio reso
 }
 ```
 
-Every file entry carries its type, scope, archive path, relative path, size, and base64 data, and its SHA-256 is checked on import. Readers continue to accept the released legacy identities `clio-share-archive`, `clio.share.v1`, and `clioVersion`, then normalize them to the canonical shape. New exports use only the `clio-coder` names above. Import warns when the archive's major or minor version differs from the running Clio.
+Every file entry carries its type, scope, archive path, relative path, size, and base64 data, and its SHA-256 is checked on import. Readers continue to accept the released legacy identities `clio-share-archive`, `clio.share.v1`, and `clioVersion`, then normalize them to the canonical shape. New exports use only the `clio-coder` names above. Import warns when the archive's major or minor version differs from the running Clio Coder.
 
 ### Export
 

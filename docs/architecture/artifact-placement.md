@@ -1,6 +1,6 @@
 # Artifact Placement
 
-Every file Clio generates has one home, decided by who reads it. The rule that
+Every file Clio Coder generates has one home, decided by who reads it. The rule that
 follows from that: **the repo working tree holds files a human asked for.**
 Anything Clio produced on its own initiative lands in the project-local
 `.clio-coder/` directory or under the XDG directories, never beside your source.
@@ -112,7 +112,7 @@ problem.
 | `protected-artifact-pending/<key>/` | Write-ahead records for pending protected artifacts |
 | `workspace-trust/` | Per-workspace trust records |
 | `systemone/` | The System One decision dataset |
-| `cliamp/` | The `/music` player home: `config.toml`, `themes/clio.toml`, `playlists/clio.toml`, `plugins/clio-dock.lua`, `plugins/.trust.json`, `dock-taps`, and cliamp's own socket, log and history files. Clio rewrites its generated files on each open, and never reads or writes the operator's own `~/.config/cliamp`. |
+| `cliamp/` | The `/music` player home: `config.toml`, `themes/clio.toml`, `playlists/clio.toml`, `plugins/clio-dock.lua`, `plugins/.trust.json`, `dock-taps`, and cliamp's own socket, log and history files. Clio Coder rewrites its generated files on each open, and never reads or writes the operator's own `~/.config/cliamp`. |
 | `gui/` | Graphical application state: `workspaces.json`, `children.json` with `<name>.locks/` directories, and `background/` (`server.json`, `owner.json` and the generated `clio-coder-gui-<id>.service` unit) |
 | `install.json`, `migrations.json`, `migration-reports/` | Install metadata and applied migration ids |
 | `settings-shortcuts.json`, `recent-models.json`, `harness-profile.json`, `interop.json`, `hook-receipts.json`, `endpoint-slots.json` | Small per-machine stores |
@@ -132,7 +132,7 @@ back from `receipts/` and `runs.json` and have no file of their own.
 | `yazi/profile/` | The managed file-browser profile for the files pane |
 | `system-one/julia-1-<revision>/tokenizer.json` | The Julia-1 tokenizer, downloaded when a `julia-1` engine is bound |
 | `update-<fingerprint>.json` | Update-check state |
-| `fleet-install-*` | Temporary directories while a fleet node installs Clio |
+| `fleet-install-*` | Temporary directories while a fleet node installs Clio Coder |
 
 ## The project `.clio-coder/` directory
 

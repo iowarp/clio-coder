@@ -2,7 +2,7 @@
 
 The [tool usage guide](../guide/tool-usage.md) explains how to inspect evidence from a run.
 
-Clio's trace database is a disposable, queryable SQLite mirror of dispatch activity and of the operator's own interactive turns. Receipts, session ledgers, gate artifacts, and evidence remain the source of truth. Removing `<state-dir>/trace.sqlite` loses no authoritative run data. There is no replay or backfill path: a deleted database starts empty and records only runs and turns that start afterward.
+Clio Coder's trace database is a disposable, queryable SQLite mirror of dispatch activity and of the operator's own interactive turns. Receipts, session ledgers, gate artifacts, and evidence remain the source of truth. Removing `<state-dir>/trace.sqlite` loses no authoritative run data. There is no replay or backfill path: a deleted database starts empty and records only runs and turns that start afterward.
 
 The store lives in `src/domains/observability/trace-store.ts`. The observability domain owns the long-lived writer. `clio-coder trace` ([trace.ts](../../src/cli/trace.ts)) and the graphical application read through `TraceReader`, and `trace prune` is the one CLI path that opens a writer, to apply retention.
 
@@ -23,7 +23,7 @@ The module loads `node:sqlite` lazily, on first use. Node's `ExperimentalWarning
 
 ## Tables
 
-The six Clio trace tables are `runs`, `phases`, `events`, `gate_results`, `agent_sessions`, and `processes`. The `meta` table carries the schema version.
+The six Clio Coder trace tables are `runs`, `phases`, `events`, `gate_results`, `agent_sessions`, and `processes`. The `meta` table carries the schema version.
 
 | Table | Columns |
 | --- | --- |
@@ -78,7 +78,7 @@ Other forwarded worker progress events keep their source type after replacing ch
 
 Only `tool_call` is a span: it has both `started_at` and `ended_at`. All other event types are point events with `ended_at IS NULL`. A real tool call is folded into one row keyed by its worker tool-call id (`<runId>:tool:<toolCallId>`). Its payload carries the readable tool name (`tool`), `tool_call_id`, `args`, `result_snippet`, `ok`, `duration_ms`, and `agent`. A call made through the gateway is named for the capability it ran and carries `via: "gateway"`. The settled steps of a gateway chain are child `tool_call` spans under the chain's span, each with `parent_tool_call_id` and no duration of its own.
 
-A call can be announced by two producers under one id. The engine's `tool_execution_start` and `tool_execution_end` frames (native and ACP workers) carry the arguments and the result at the top level. Clio's `clio_coder_tool_start` and `clio_coder_tool_finish` frames (native, ACP and claude-sdk workers) nest their facts under `payload`, and only the finish carries a measured `durationMs`. The mirror merges both into the one row. The first observed start anchors `started_at`, the engine frames supply the name, arguments and result, the Clio finish supplies `duration_ms`, and `ended_at` is `started_at` plus that duration. A claude-sdk worker, which emits only the Clio frames, gets a row with its duration and no arguments. A call no producer timed keeps a null `duration_ms` and the mirror's own end stamp.
+A call can be announced by two producers under one id. The engine's `tool_execution_start` and `tool_execution_end` frames (native and ACP workers) carry the arguments and the result at the top level. Clio Coder's `clio_coder_tool_start` and `clio_coder_tool_finish` frames (native, ACP and claude-sdk workers) nest their facts under `payload`, and only the finish carries a measured `durationMs`. The mirror merges both into the one row. The first observed start anchors `started_at`, the engine frames supply the name, arguments and result, the Clio Coder finish supplies `duration_ms`, and `ended_at` is `started_at` plus that duration. A claude-sdk worker, which emits only the Clio Coder frames, gets a row with its duration and no arguments. A call no producer timed keeps a null `duration_ms` and the mirror's own end stamp.
 
 ### Bounds and redaction
 
@@ -121,7 +121,7 @@ A write, open, or schema failure emits one `[clio-coder:trace]` warning and degr
 
 ## Retention and pruning
 
-By default Clio retains terminal runs for 30 days and limits the allocated database to 128 MiB (134,217,728 bytes), whichever limit is reached first. `DEFAULT_TRACE_RETENTION_POLICY` holds both values. The policy runs after each dispatched run or interactive turn becomes terminal. It deletes a run as one unit across `runs`, `phases`, `events`, `gate_results`, `agent_sessions`, and `processes`, plus the legacy `envelopes` table when an older database still has it. A `queued` or `running` run is never a candidate, even when its start time is older than the age cutoff or its rows put the store over the byte limit.
+By default Clio Coder retains terminal runs for 30 days and limits the allocated database to 128 MiB (134,217,728 bytes), whichever limit is reached first. `DEFAULT_TRACE_RETENTION_POLICY` holds both values. The policy runs after each dispatched run or interactive turn becomes terminal. It deletes a run as one unit across `runs`, `phases`, `events`, `gate_results`, `agent_sessions`, and `processes`, plus the legacy `envelopes` table when an older database still has it. A `queued` or `running` run is never a candidate, even when its start time is older than the age cutoff or its rows put the store over the byte limit.
 
 Two environment variables configure the automatic policy:
 
