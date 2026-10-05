@@ -318,7 +318,7 @@ export async function installWindowsLauncher(directory: string, launch: LaunchPa
 	return { status: "installed" as const, files: files.map((file) => file.path) };
 }
 
-/** One managed profile avoids a second browser-installed application identity. */
+/** The managed profile hosts the installed PWA; the shortcut still starts and verifies its local server. */
 export async function openManagedWindowsApp(url: string, directory: string): Promise<boolean> {
 	if (!isWsl()) return false;
 	const manifest = await readManifest(directory);
@@ -366,6 +366,7 @@ export async function uninstallWindowsLauncher(directory: string) {
 		);
 		await rm(join(base, "browser"), { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
 		await rm(join(base, "last-link"), { force: true });
+		await rm(join(base, "last-window-mode"), { force: true });
 	}
 	for (const file of manifest.files)
 		await unlink(file.path).catch((error: NodeJS.ErrnoException) => {

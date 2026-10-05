@@ -170,6 +170,14 @@ $browser=@(
 if (-not $browser) { throw 'Clio Coder needs Chrome or Edge to open its desktop window.' }
 $url=[Uri]$env:CLIO_WIN_URL
 if ($url.Scheme -ne 'http' -or $url.Host -ne '127.0.0.1') { throw 'Clio Coder refused a non-local desktop address.' }
+# Chromium derives its installed app id by hashing the stable manifest identity twice.
+$manifestId=$url.GetLeftPart([UriPartial]::Authority)+'/'
+$sha=[Security.Cryptography.SHA256]::Create()
+try { $digest=$sha.ComputeHash($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes($manifestId))) } finally { $sha.Dispose() }
+$pwaId=-join ($digest[0..15] | ForEach-Object { [char](97+($_ -shr 4)); [char](97+($_ -band 15)) })
+$pwaShortcut=Join-Path $profile ('Default\Web Applications\_crx_'+$pwaId+'\Clio Coder.lnk')
+$installed=Test-Path -LiteralPath $pwaShortcut
+$mode=if($installed) { 'pwa' } else { 'app' }
 $name=[IO.Path]::GetFileName($browser)
 function AppWindows {
  $found=@()
@@ -178,7 +186,9 @@ function AppWindows {
 }
 $existing=@(AppWindows)
 $link=Join-Path $PSScriptRoot 'last-link'
-if($existing.Count -gt 0 -and (Test-Path -LiteralPath $link) -and [IO.File]::ReadAllText($link) -eq $url.AbsoluteUri) {
+$modeFile=Join-Path $PSScriptRoot 'last-window-mode'
+$sameMode=(Test-Path -LiteralPath $modeFile) -and [IO.File]::ReadAllText($modeFile) -eq $mode
+if($sameMode -and $existing.Count -gt 0 -and (Test-Path -LiteralPath $link) -and [IO.File]::ReadAllText($link) -eq $url.AbsoluteUri) {
  [ClioIdentity]::Focus($existing[0]); return
 }
 if($existing.Count -gt 0) {
@@ -187,7 +197,12 @@ if($existing.Count -gt 0) {
  for($i=0; $i -lt 30 -and @(AppWindows).Count -gt 0; $i++) { Start-Sleep -Milliseconds 200 }
  if(@(AppWindows).Count -gt 0) { throw 'Close the previous Clio Coder window, then reopen the app to reconnect.' }
 }
-$arguments='"--user-data-dir=' + $profile + '" --no-first-run --no-default-browser-check --disable-background-mode "--app=' + $url.AbsoluteUri + '"'
+$arguments='"--user-data-dir=' + $profile + '" --no-first-run --no-default-browser-check --disable-background-mode'
+if($installed) {
+ $arguments += ' --profile-directory=Default --app-id='+$pwaId+' "--app-launch-url-for-shortcuts-menu-item='+$url.AbsoluteUri+'"'
+} else {
+ $arguments += ' "--app='+$url.AbsoluteUri+'"'
+}
 Start-Process -FilePath $browser -ArgumentList $arguments
 $window=[IntPtr]::Zero
 $name=[IO.Path]::GetFileName($browser)
@@ -203,6 +218,7 @@ $relaunch='C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe -NoP -W Hid
 $id=[IO.File]::ReadAllText((Join-Path $PSScriptRoot 'app-id')).Trim()
 foreach($p in (Get-CimInstance Win32_Process -Filter ("name='" + $name + "'") | Where-Object { [ClioIdentity]::UsesProfile($_.CommandLine,$profile) -and -not $_.CommandLine.Contains('--type=') })) { foreach($w in [ClioIdentity]::Windows($p.ProcessId)) { [ClioIdentity]::SetWindow($w,$id,$relaunch,((Join-Path $PSScriptRoot 'clio-coder.ico') + ',0')) } }
 [IO.File]::WriteAllText($link,$url.AbsoluteUri)
+[IO.File]::WriteAllText($modeFile,$mode)
 } finally { if($acquired) { $mutex.ReleaseMutex() }; $mutex.Dispose() }
 
 `;

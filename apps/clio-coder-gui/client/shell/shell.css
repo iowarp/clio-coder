@@ -1192,3 +1192,43 @@ button.wb-chip:hover:not(:disabled) {
 	background: var(--paper);
 	color: var(--ink);
 }
+
+/* The browser supplies caption-button geometry; normal browser tabs keep their existing layout. */
+.window-titlebar {
+	display: none;
+}
+@media (display-mode: window-controls-overlay) {
+	:root {
+		--window-titlebar-height: env(titlebar-area-height, 32px);
+	}
+	body {
+		padding-top: var(--window-titlebar-height);
+	}
+	.wb {
+		height: calc(100dvh - var(--window-titlebar-height));
+	}
+	.wizard {
+		min-height: calc(100dvh - var(--window-titlebar-height));
+	}
+	.pane__dialog {
+		height: calc(100dvh - var(--space-4) - var(--window-titlebar-height));
+		margin-top: calc(var(--space-2) + var(--window-titlebar-height));
+	}
+	.window-titlebar {
+		position: fixed;
+		z-index: 10;
+		top: env(titlebar-area-y, 0px);
+		left: env(titlebar-area-x, 0px);
+		width: env(titlebar-area-width, 100%);
+		height: var(--window-titlebar-height);
+		display: flex;
+		align-items: center;
+		padding-inline: var(--space-4);
+		background: var(--paper);
+		color: var(--ink-muted);
+		font: 500 var(--text-instrument) / 1 var(--font-ui);
+		user-select: none;
+		app-region: drag;
+		-webkit-app-region: drag;
+	}
+}

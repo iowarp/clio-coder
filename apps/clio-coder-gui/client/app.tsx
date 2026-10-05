@@ -24,6 +24,7 @@ import { isHeld, isSettingsPath, sessionIdFromPath, taskRows } from "./shell/she
 import { TaskSidebar } from "./shell/TaskSidebar.js";
 import { rememberedWorkspace, rememberWorkspace, useTaskActions } from "./shell/tasks.js";
 import { useApplyTheme } from "./shell/theme.js";
+import { WindowTitlebar } from "./shell/WindowTitlebar.js";
 import { launchedPath, openAppWindow, whenFocused } from "./shell/windows.js";
 import type { WizardExit } from "./wizard/Wizard.js";
 import type { WizardMode } from "./wizard/wizard-model.js";
@@ -364,6 +365,7 @@ export function App({ client }: { client: Client }) {
 	if (wizardMode !== null && authed && meta.data?.apiVersion === API_VERSION)
 		return (
 			<>
+				<WindowTitlebar />
 				{pendingNotice}
 				<Suspense
 					fallback={
@@ -392,6 +394,7 @@ export function App({ client }: { client: Client }) {
 			data-aside={docked && mode === "work" && authed && asideExpanded ? "expanded" : "collapsed"}
 			data-mode={mode}
 		>
+			<WindowTitlebar />
 			<RouteFocus />
 			<PwaBoot enabled={meta.data?.pwa ?? false} token={client.token} />
 			<a className="skip-link" href="#main">

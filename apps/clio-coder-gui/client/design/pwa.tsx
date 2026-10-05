@@ -30,7 +30,11 @@ const read = () => state;
 /** Mounted once by the shell: install prompt capture, token memory, offline recovery and cross-tab sign-out. */
 export function PwaBoot({ enabled, token }: { enabled: boolean; token: string }) {
 	useEffect(() => {
-		update({ installed: window.matchMedia("(display-mode: standalone)").matches });
+		update({
+			installed:
+				window.matchMedia("(display-mode: standalone)").matches ||
+				window.matchMedia("(display-mode: window-controls-overlay)").matches,
+		});
 		const ready = (event: Event) => {
 			event.preventDefault();
 			update({ prompt: event as InstallPrompt });
@@ -93,10 +97,28 @@ export function AppPreferencesPanel({
 		<div className="pwa-controls">
 			<p className="app-version">{version ? `Version ${version}` : "Connecting to Clio…"}</p>
 			{desktopManaged ? (
-				<p>
-					Clio Coder is installed in the Windows Start Menu. Open it there or run <code>clio-coder gui</code>. You can pin
-					its window to the taskbar.
-				</p>
+				<>
+					<p>
+						Open Clio Coder from the Windows Start Menu or run <code>clio-coder gui</code>. You can pin its window to the
+						taskbar.
+					</p>
+					{pwa.prompt ? (
+						<button
+							type="button"
+							onClick={() => {
+								const prompt = pwa.prompt;
+								if (!prompt) return;
+								void prompt.prompt().catch(() => setNote("Use your browser’s Install app command, then reopen Clio Coder."));
+							}}
+						>
+							Install integrated app window
+						</button>
+					) : null}
+					<p>
+						The installed app supports an integrated title bar. Use its Hide title bar control once; Windows keeps minimize,
+						maximize and close. Reopening from the Start Menu keeps that choice.
+					</p>
+				</>
 			) : enabled ? (
 				<>
 					<p>Keep Clio Coder beside your other apps. It uses the same projects and tasks as this browser.</p>
