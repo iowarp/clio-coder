@@ -544,13 +544,23 @@ function sessionCommandContext(
 	pending: Promise<void>[],
 ): SlashCommandContext {
 	const submitTurn = host.submitTurn;
+	// A context operation the operator stopped settles its own canonical
+	// `cancelled` operation, so the reply says the same instead of a failure.
+	// Only the error's own name counts; other operations keep failed/error.
+	const reportFailure = (label: string, error: unknown, cancellable: boolean): void => {
+		if (cancellable && error instanceof Error && error.name === "AbortError") {
+			notice("warn", `${label} cancelled`);
+			return;
+		}
+		notice("error", `${label} failed: ${error instanceof Error ? error.message : String(error)}`);
+	};
 	// Runs a host operation and, when it answers later, holds the reply for it.
-	const awaited = (label: string, run: () => unknown): void => {
+	const awaited = (label: string, run: () => unknown, cancellable = false): void => {
 		let result: unknown;
 		try {
 			result = run();
 		} catch (error) {
-			notice("error", `${label} failed: ${error instanceof Error ? error.message : String(error)}`);
+			reportFailure(label, error, cancellable);
 			return;
 		}
 		// A host that finished at once answers at once; its report is the result too.
@@ -565,7 +575,7 @@ function sessionCommandContext(
 					if (isHostReport(report)) notice(report.level, report.text);
 				},
 				(error: unknown) => {
-					notice("error", `${label} failed: ${error instanceof Error ? error.message : String(error)}`);
+					reportFailure(label, error, cancellable);
 				},
 			),
 		);
@@ -590,9 +600,11 @@ function sessionCommandContext(
 		...(host.getWorkerRosters ? { getWorkerRosters: host.getWorkerRosters } : {}),
 		...(host.runCouncilDispatch ? { runCouncilDispatch: host.runCouncilDispatch } : {}),
 		...(runContextRecall
-			? { runContextRecall: (ref: string) => awaited("context recall", () => runContextRecall(ref)) }
+			? { runContextRecall: (ref: string) => awaited("context recall", () => runContextRecall(ref), true) }
 			: {}),
-		...(runContextRefresh ? { runContextRefresh: () => awaited("context refresh", () => runContextRefresh()) } : {}),
+		...(runContextRefresh
+			? { runContextRefresh: () => awaited("context refresh", () => runContextRefresh(), true) }
+			: {}),
 		...(host.runLocalOperation ? { runLocalOperation: host.runLocalOperation } : {}),
 		// The reply waits for a command's own long work, so `/oracle` answers with
 		// what it did and a prompt-turn command ends after the note it submits.
@@ -613,7 +625,7 @@ function sessionCommandContext(
 				notice("error", "context init is not wired in this session");
 				return;
 			}
-			awaited("context init", () => runInit(options));
+			awaited("context init", () => runInit(options), true);
 		},
 		runContextClear: (options) => {
 			const runContextClear = host.runContextClear;
@@ -631,13 +643,13 @@ function sessionCommandContext(
 				);
 				return;
 			}
-			awaited("context reset", () => runContextClear(options));
+			awaited("context reset", () => runContextClear(options), true);
 		},
 		...(host.runHandoffRecovery
 			? {
 					runHandoffRecovery: (handoffId: string, action: "reduce" | "deliver") => {
 						const recover = host.runHandoffRecovery;
-						if (recover) awaited("context recover", () => recover(handoffId, action));
+						if (recover) awaited("context recover", () => recover(handoffId, action), true);
 					},
 				}
 			: {}),
@@ -647,7 +659,7 @@ function sessionCommandContext(
 				notice("error", "context compact is not wired in this session");
 				return;
 			}
-			awaited("context compact", () => runCompact(instructions));
+			awaited("context compact", () => runCompact(instructions), true);
 		},
 		exportTranscript: (path) => {
 			const exportTranscript = host.exportTranscript;
