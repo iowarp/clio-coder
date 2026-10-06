@@ -24,6 +24,7 @@ const KIND_DIRS = [
 	{ dirName: "prompts", expectedKind: "prompt" },
 	{ dirName: "fleets", expectedKind: "fleet" },
 	{ dirName: "plugins", expectedKind: "plugin" },
+	{ dirName: "extensions", expectedKind: "extension" },
 ] as const;
 
 interface PackageTarget {
@@ -33,7 +34,7 @@ interface PackageTarget {
 
 const packages: PackageTarget[] = [];
 function collect(directory: string, expectedKind: string): void {
-	if (existsSync(path.join(directory, "plugin.json"))) {
+	if (existsSync(path.join(directory, "plugin.json")) || existsSync(path.join(directory, "clio-coder-extension.yaml"))) {
 		packages.push({ directory, expectedKind });
 		return;
 	}

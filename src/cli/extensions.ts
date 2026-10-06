@@ -123,10 +123,11 @@ function printList(items: ReadonlyArray<InstalledExtension>): void {
 	}
 	process.stdout.write(
 		`${formatColumns([
-			["id", "scope", "state", "version", "tools", "description"],
+			["id", "scope", "package", "state", "version", "tools", "description"],
 			...items.map((extension) => [
 				extension.id,
 				extension.scope,
+				extension.bundle ? `bundle:${extension.bundle.pluginId}` : "standalone",
 				stateLabel(extension),
 				extension.version,
 				toolSummary(extension),

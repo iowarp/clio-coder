@@ -19,6 +19,7 @@ export {
 } from "./discovery.js";
 export { withPluginDiscoveryPass } from "./discovery-pass.js";
 export { pluginContentDigest, pluginContentDigestWithCapture } from "./integrity.js";
+export { pluginPromptNames } from "./prompt-names.js";
 export {
 	buildPluginSnapshot,
 	clearPluginSnapshots,

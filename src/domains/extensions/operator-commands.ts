@@ -6,6 +6,8 @@ export interface ExtensionCommandRow {
 	description: string;
 	generation: number;
 	available: boolean;
+	/** A validated bundle alias may own the prompt spelling while its runtime is available. */
+	replaces?: "prompt";
 	reason?: string;
 }
 export function extensionInvocation(id: string, command: string): string {
@@ -22,7 +24,7 @@ export function resolveExtensionCommands(
 ): ExtensionCommandRow[] {
 	const prompts = new Set(promptNames.map((name) => name.toLowerCase()));
 	return rows.map((row) =>
-		prompts.has(row.invocation.toLowerCase())
+		prompts.has(row.invocation.toLowerCase()) && row.replaces !== "prompt"
 			? { ...row, available: false, reason: "invocation belongs to an existing prompt template" }
 			: row,
 	);

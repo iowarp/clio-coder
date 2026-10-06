@@ -94,7 +94,7 @@ function providedResources(value: unknown, name: string, diagnostics: string[]):
 		const item = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : undefined;
 		if (
 			!item ||
-			!isLibraryResourceKind(item.kind) ||
+			!(isLibraryResourceKind(item.kind) || item.kind === "extension") ||
 			typeof item.name !== "string" ||
 			item.name.length > LIBRARY_PROVIDES_LIMITS.name ||
 			!PROVIDED_NAME.test(item.name) ||

@@ -496,7 +496,7 @@ export class OperatorExtensionRuntimeV2 {
 		const rows = this.inventory
 			.filter((entry) => entry.effective && entry.runtimeV2)
 			.flatMap((entry) =>
-				(entry.runtimeV2?.commands ?? []).map((command) => {
+				(entry.runtimeV2?.commands ?? []).flatMap((command) => {
 					const process = this.processes.get(entry.id);
 					const failure = this.failures.get(entry.id) ?? process?.failure;
 					const available =
@@ -512,7 +512,7 @@ export class OperatorExtensionRuntimeV2 {
 								: this.reloading
 									? "runtime reload in progress"
 									: "runtime not ready; reload extensions"));
-					return {
+					const row: ExtensionCommandRow = {
 						origin: "extension" as const,
 						invocation: extensionInvocation(entry.id, command.name),
 						extensionId: entry.id,
@@ -522,6 +522,9 @@ export class OperatorExtensionRuntimeV2 {
 						available,
 						...(reason ? { reason } : {}),
 					};
+					return entry.bundle && command.replaces === "prompt"
+						? [row, { ...row, invocation: `${entry.bundle.pluginId}:${command.name}`, replaces: "prompt" as const }]
+						: [row];
 				}),
 			);
 		return resolveExtensionCommands(rows, promptNames);

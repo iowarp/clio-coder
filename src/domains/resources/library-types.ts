@@ -1,15 +1,25 @@
 /** A library distributes packages; kind describes the package's public contents. */
-export type LibraryEntryKind = "skill" | "agent" | "prompt" | "fleet" | "plugin";
+export type LibraryEntryKind = "skill" | "agent" | "prompt" | "fleet" | "plugin" | "extension";
 export type LibraryRequirementRef = `${LibraryEntryKind}:${string}`;
 
-export const LIBRARY_KINDS: readonly LibraryEntryKind[] = ["plugin", "skill", "agent", "prompt", "fleet"];
+/** Existing plugin-backed package formats. A standalone extension has its own manifest and writer. */
+export const LIBRARY_KINDS: readonly Exclude<LibraryEntryKind, "extension">[] = [
+	"plugin",
+	"skill",
+	"agent",
+	"prompt",
+	"fleet",
+];
 
 export function isLibraryKind(value: unknown): value is LibraryEntryKind {
-	return typeof value === "string" && LIBRARY_KINDS.includes(value as LibraryEntryKind);
+	return (
+		value === "extension" ||
+		(typeof value === "string" && LIBRARY_KINDS.includes(value as Exclude<LibraryEntryKind, "extension">))
+	);
 }
 
 /** The four recipe kinds. A plugin owns recipes; it is never a fifth invocable kind. */
-export type LibraryResourceKind = Exclude<LibraryEntryKind, "plugin">;
+export type LibraryResourceKind = Exclude<LibraryEntryKind, "plugin" | "extension">;
 
 export const LIBRARY_RESOURCE_KINDS: readonly LibraryResourceKind[] = ["skill", "agent", "prompt", "fleet"];
 
@@ -23,7 +33,7 @@ export function isLibraryResourceKind(value: unknown): value is LibraryResourceK
  * hint supports discovery only: it never proves the package installs or loads.
  */
 export interface LibraryProvidedResource {
-	kind: LibraryResourceKind;
+	kind: LibraryResourceKind | "extension";
 	name: string;
 	description?: string;
 }

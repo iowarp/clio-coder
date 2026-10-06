@@ -1,6 +1,7 @@
 import { type Dirent, existsSync, readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
 import path from "node:path";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
+import { pluginPromptNames, readPluginManifest } from "../plugins/index.js";
 import { parseExtensionCapabilities, resolveExtensionEntrypoint } from "./command-schema.js";
 import { evaluateClioCompatibility } from "./compatibility.js";
 import { parseExtensionRuntime } from "./runtime-schema.js";
@@ -214,6 +215,44 @@ export function loadManifestFromRoot(root: string): ExtensionCandidate {
 			}
 		}
 		const runtimeV2 = parsed.manifest?.runtimeV2;
+		let bundle: ExtensionCandidate["bundle"];
+		if (existsSync(path.join(root, "plugin.json"))) {
+			const plugin = readPluginManifest(root);
+			if (!plugin.valid || !plugin.manifest || (plugin.manifest.clio.kind ?? "plugin") !== "plugin")
+				parsed.diagnostics.push({
+					type: "error",
+					message: "a bundle needs a valid plugin.json of kind plugin",
+					path: manifestPath,
+				});
+			else {
+				bundle = { pluginId: plugin.manifest.name };
+				if (parsed.manifest?.id !== plugin.manifest.name)
+					parsed.diagnostics.push({
+						type: "error",
+						message: `bundle extension id must equal plugin name '${plugin.manifest.name}'`,
+						path: manifestPath,
+					});
+				if (!runtimeV2 || path.basename(manifestPath) !== "clio-coder-extension.yaml")
+					parsed.diagnostics.push({
+						type: "error",
+						message: "a bundle requires clio-coder-extension.yaml with runtime.api: 2",
+						path: manifestPath,
+					});
+				const prompts = new Set(pluginPromptNames(root, plugin.manifest));
+				for (const command of runtimeV2?.commands ?? [])
+					if (command.replaces === "prompt" && !prompts.has(`${plugin.manifest.name}:${command.name}`))
+						parsed.diagnostics.push({
+							type: "error",
+							message: `replaces: prompt requires this plugin to provide /${plugin.manifest.name}:${command.name}`,
+							path: manifestPath,
+						});
+			}
+		} else if (runtimeV2?.commands.some((command) => command.replaces === "prompt"))
+			parsed.diagnostics.push({
+				type: "error",
+				message: "replaces: prompt is legal only in a plugin bundle",
+				path: manifestPath,
+			});
 		if (runtimeV2) {
 			const files = [
 				{ file: runtimeV2.entrypoint, isSkin: false },
@@ -251,6 +290,7 @@ export function loadManifestFromRoot(root: string): ExtensionCandidate {
 		return {
 			path: root,
 			manifestPath,
+			...(bundle ? { bundle } : {}),
 			...(parsed.manifest ? { manifest: parsed.manifest } : {}),
 			valid: parsed.manifest !== undefined && !parsed.diagnostics.some((diag) => diag.type === "error"),
 			diagnostics: parsed.diagnostics,

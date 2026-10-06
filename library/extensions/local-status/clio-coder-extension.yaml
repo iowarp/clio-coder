@@ -1,0 +1,13 @@
+id: local-status
+name: Local status
+version: 0.1.0
+description: A small local status command and ambient status example.
+runtime:
+  api: 2
+  entrypoint: runtime/extension.ts
+  commands:
+    - name: status
+      description: Show the current workspace locally.
+  events: [session_open]
+  ui: [status]
+  permissions: { fs: { read: [], write: [] }, exec: false, net: false }

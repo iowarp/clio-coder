@@ -12,10 +12,10 @@ import type { AgentAudience } from "../agents/spec.js";
 import { INTEROP_AGENT_KINDS } from "../interop/registry.js";
 import { bundledLibraryIndexPath, parsePluginGithubSource } from "../plugins/catalog.js";
 import { withPluginDiscoveryPass } from "../plugins/index.js";
-import { listInstalledPlugins, readPluginInstallRecord } from "../plugins/state.js";
 import type { InstalledPlugin, PluginInstallRecord, PluginScope } from "../plugins/types.js";
 import type { ResourceDiagnostic } from "./collision.js";
 import { discoverLibrary } from "./library.js";
+import { listInstalledLibraryPackages as listInstalledPlugins, readLibraryInstallRecord } from "./library-packages.js";
 import type {
 	LibraryEntryKind,
 	LibraryPackageEntry,
@@ -417,7 +417,7 @@ export function libraryCopyState(plugin: InstalledPlugin): LibraryCopyState {
 
 function safeInstallRecord(plugin: InstalledPlugin, cwd: string): PluginInstallRecord | undefined {
 	try {
-		return readPluginInstallRecord(plugin.id, { cwd, scope: plugin.scope });
+		return readLibraryInstallRecord(plugin.id, { cwd, scope: plugin.scope }, plugin.kind);
 	} catch {
 		return undefined;
 	}

@@ -9,25 +9,22 @@ import { randomBytes } from "node:crypto";
 import { existsSync } from "node:fs";
 import path from "node:path";
 import { approveFirstProjectInstall, projectPackagesHaveNoState } from "../../core/workspace-trust.js";
+import { disableExtension, enableExtension, removeExtension } from "../extensions/index.js";
 import type { LibraryImportApplyResult, LibraryImportPlan } from "../interop/import.js";
 import {
 	disablePlugin,
 	enablePlugin,
 	type InstalledPlugin,
-	listInstalledPlugins,
 	newlyBrokenDependents,
-	observePluginCopy,
 	type PluginDependentBreak,
 	type PluginDiagnostic,
 	type PluginExpectedCopy,
 	type PluginMutationResult,
 	type PluginScope,
 	PluginWriterRefusal,
-	pluginBaseDir,
 	pluginContentDigest,
 	readPluginInstallRecord,
 	removePlugin,
-	withPluginScopeLock,
 } from "../plugins/index.js";
 import {
 	classifyLibraryRequirements,
@@ -42,6 +39,13 @@ import {
 	resolveLibraryPackage,
 } from "./library.js";
 import { type LibraryCopyState, libraryCopyState, readLibraryInventory } from "./library-inventory.js";
+import {
+	libraryPackageBaseDir,
+	listInstalledLibraryPackages as listInstalledPlugins,
+	observeLibraryCopy,
+	readLibraryInstallRecord,
+	withLibraryScopeLock,
+} from "./library-packages.js";
 import {
 	isLibraryKind,
 	type LibraryEntryKind,
@@ -196,9 +200,15 @@ function copyOf(
 	);
 }
 
-function observe(cwd: string, scope: PluginScope, id: string, diagnostics: string[]): LibraryExpectedCopy | undefined {
+function observe(
+	cwd: string,
+	scope: PluginScope,
+	id: string,
+	diagnostics: string[],
+	kind: LibraryEntryKind,
+): LibraryExpectedCopy | undefined {
 	try {
-		return observePluginCopy(scope, id, cwd);
+		return observeLibraryCopy(scope, id, cwd, kind);
 	} catch (error) {
 		diagnostics.push(`state for ${scope}:${id} unreadable: ${error instanceof Error ? error.message : String(error)}`);
 		return undefined;
@@ -219,13 +229,13 @@ function expectedFor(
 ): LibraryExpectedCopy[] {
 	const wanted = new Map<string, { scope: PluginScope; id: string }>();
 	wanted.set(`${identity.scope}:${identity.name}`, { scope: identity.scope, id: identity.name });
-	if (existsSync(pluginBaseDir(peerOf(identity.scope), cwd)))
+	if (existsSync(libraryPackageBaseDir(identity.kind, peerOf(identity.scope), cwd)))
 		wanted.set(`${peerOf(identity.scope)}:${identity.name}`, { scope: peerOf(identity.scope), id: identity.name });
 	for (const item of consulted) wanted.set(`${item.scope}:${item.id}`, item);
 	for (const item of earlier) wanted.delete(`${item.scope}:${item.name}`);
 	const out: LibraryExpectedCopy[] = [];
 	for (const item of wanted.values()) {
-		const fact = observe(cwd, item.scope, item.id, diagnostics);
+		const fact = observe(cwd, item.scope, item.id, diagnostics, identity.kind);
 		if (fact) out.push(fact);
 	}
 	return out;
@@ -255,7 +265,9 @@ function contentOf(root: string): NonNullable<LibraryPlanStep["content"]> {
 	return {
 		valid: result.valid,
 		resources: result.validation.resources
-			.filter((item): item is typeof item & { kind: LibraryResourceKind } => item.kind !== "plugin")
+			.filter((item): item is typeof item & { kind: LibraryResourceKind } =>
+				["skill", "agent", "prompt", "fleet"].includes(item.kind),
+			)
 			.map((item) => ({ kind: item.kind, name: item.name, valid: item.valid })),
 		diagnostics: [...result.diagnostics.map((d) => d.message), ...result.validation.diagnostics.map((d) => d.message)],
 	};
@@ -336,7 +348,7 @@ export function planLibraryLifecycle(request: LibraryLifecycleRequest): LibraryL
 				steps.push({
 					operation: "install",
 					identity,
-					destination: path.join(pluginBaseDir(scope, cwd), entry.name),
+					destination: path.join(libraryPackageBaseDir(entry.kind, scope, cwd), entry.name),
 					source: { sourceUrl: entry.sourceUrl, sha256: entry.sha256 ?? "", staged: false },
 					expected: [],
 					dependencies,
@@ -408,7 +420,7 @@ export function planLibraryLifecycle(request: LibraryLifecycleRequest): LibraryL
 				steps.push({
 					operation: "update",
 					identity: target,
-					destination: path.join(pluginBaseDir(identity.scope, cwd), identity.name),
+					destination: path.join(libraryPackageBaseDir(identity.kind, identity.scope, cwd), identity.name),
 					expected: [],
 					dependencies,
 					dependents: { newlyBroken: [], preexisting: [] },
@@ -527,11 +539,11 @@ export function verifyLibraryStep(
 ): LibraryStepVerification {
 	const entries = listInstalledPlugins(cwd, { all: true });
 	const copy = copyOf(entries, identity);
-	const root = path.join(pluginBaseDir(identity.scope, cwd), identity.name);
+	const root = path.join(libraryPackageBaseDir(identity.kind, identity.scope, cwd), identity.name);
 	let record: LibraryStepVerification["record"] = "absent";
 	let recordedDigest: string | undefined;
 	try {
-		const saved = readPluginInstallRecord(identity.name, { cwd, scope: identity.scope });
+		const saved = readLibraryInstallRecord(identity.name, { cwd, scope: identity.scope }, identity.kind);
 		record = saved ? "recorded" : "absent";
 		recordedDigest = saved?.contentDigest;
 	} catch {
@@ -618,6 +630,23 @@ function writerError(diagnostics: PluginDiagnostic[]): PluginDiagnostic | undefi
 
 function runWriter(plan: LibraryLifecyclePlan, step: LibraryPlanStep): PluginMutationResult {
 	const { identity } = step;
+	if (identity.kind === "extension")
+		return withLibraryScopeLock("extension", identity.scope, plan.cwd, () => {
+			for (const expected of step.expected) {
+				const observed = observeLibraryCopy(expected.scope, expected.id, plan.cwd, "extension");
+				if (JSON.stringify(expected) !== JSON.stringify(observed))
+					throw new PluginWriterRefusal("stale_plan", "extension copy changed since library review");
+			}
+			if (step.operation === "install" || step.operation === "update") {
+				const source = staged.get(plan.id)?.get(stepKey(identity));
+				if (!source) throw new Error("extension install source was released");
+				return commitLibraryInstallPlan(source);
+			}
+			const options = { cwd: plan.cwd, scope: identity.scope };
+			if (step.operation === "enable") return enableExtension(identity.name, options);
+			if (step.operation === "disable") return disableExtension(identity.name, options);
+			return removeExtension(identity.name, options);
+		});
 	const scoped = { cwd: plan.cwd, scope: identity.scope, expect: { copies: step.expected } };
 	if (step.operation === "install" || step.operation === "update") {
 		const stagedPlan = staged.get(plan.id)?.get(stepKey(identity));
@@ -632,10 +661,14 @@ function runWriter(plan: LibraryLifecyclePlan, step: LibraryPlanStep): PluginMut
 
 function applyStep(plan: LibraryLifecyclePlan, step: LibraryPlanStep): LibraryStepOutcome {
 	const peer = peerOf(step.identity.scope);
-	const holdPeer = step.expected.some((fact) => fact.scope === peer) && existsSync(pluginBaseDir(peer, plan.cwd));
+	const holdPeer =
+		step.expected.some((fact) => fact.scope === peer) &&
+		existsSync(libraryPackageBaseDir(step.identity.kind, peer, plan.cwd));
 	let result: PluginMutationResult;
 	try {
-		result = holdPeer ? withPluginScopeLock(peer, plan.cwd, () => runWriter(plan, step)) : runWriter(plan, step);
+		result = holdPeer
+			? withLibraryScopeLock(step.identity.kind, peer, plan.cwd, () => runWriter(plan, step))
+			: runWriter(plan, step);
 	} catch (error: unknown) {
 		if (error instanceof PluginWriterRefusal) {
 			const outcome = failed(step, error.code === "dependents" ? "refused" : error.code, error.message);
@@ -716,9 +749,14 @@ export function applyLibraryLifecycle(
 				outcomes.push(step.refusal ? failed(step, "refused", step.refusal) : { ...unattempted(step) });
 			return summarize(plan, false, outcomes, { status: "not-applicable", reason: "plan refused; nothing committed" });
 		}
+		const firstExtensionInstall =
+			plan.steps.some(
+				(step) => step.operation === "install" && step.identity.scope === "project" && step.identity.kind === "extension",
+			) && projectPackagesHaveNoState(plan.cwd, "extensions");
 		const firstProjectInstall =
-			plan.steps.some((step) => step.operation === "install" && step.identity.scope === "project") &&
-			projectPackagesHaveNoState(plan.cwd, "plugins");
+			plan.steps.some(
+				(step) => step.operation === "install" && step.identity.scope === "project" && step.identity.kind !== "extension",
+			) && projectPackagesHaveNoState(plan.cwd, "plugins");
 		let aborted = false;
 		for (const step of plan.steps) {
 			if (aborted) {
@@ -731,6 +769,17 @@ export function applyLibraryLifecycle(
 			// later steps must not build on a copy whose state cannot be proven.
 			if (outcome.status !== "committed" || outcome.error) aborted = true;
 		}
+		if (
+			firstExtensionInstall &&
+			outcomes.some(
+				(item) =>
+					item.status === "committed" &&
+					item.operation === "install" &&
+					item.identity.scope === "project" &&
+					item.identity.kind === "extension",
+			)
+		)
+			approveFirstProjectInstall(plan.cwd, "extensions");
 		// The operator's own first project install creates the project's plugin
 		// state, which is theirs to approve (workspace trust).
 		if (

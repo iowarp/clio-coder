@@ -63,6 +63,8 @@ export interface ExtensionProvenance {
 }
 
 export interface InstalledExtension {
+	/** The plugin owns this facet’s one installed tree and lifecycle. */
+	bundle?: { pluginId: string };
 	runtime?: ExtensionRuntimeDeclaration;
 	runtimeV2?: ExtensionRuntimeDeclarationV2;
 	id: string;
@@ -98,6 +100,7 @@ export function isLoadableExtension(entry: InstalledExtension): entry is Loadabl
 }
 
 export interface ExtensionCandidate {
+	bundle?: { pluginId: string };
 	path: string;
 	manifestPath?: string;
 	manifest?: ClioExtensionManifest;
@@ -189,6 +192,10 @@ export interface ExtensionListOptions {
 
 export interface ExtensionInstallOptions extends ExtensionListOptions {
 	force?: boolean;
+	/** Optional library pin, rechecked against the staged tree by the canonical writer. */
+	expectedDigest?: string;
+	expectedId?: string;
+	expectedVersion?: string;
 }
 
 export interface ExtensionInstallResult {

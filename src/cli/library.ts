@@ -1,12 +1,7 @@
 import { existsSync, statSync } from "node:fs";
 import path from "node:path";
 import { pluginLocalPath } from "../domains/plugins/catalog.js";
-import {
-	listInstalledPlugins,
-	type PluginScope,
-	readPluginManifest,
-	reloadPluginResources,
-} from "../domains/plugins/index.js";
+import { type PluginScope, reloadPluginResources } from "../domains/plugins/index.js";
 import {
 	confirmLibraryRemote,
 	libraryEntryDrift,
@@ -33,12 +28,16 @@ import {
 	type LibraryResourceSourceClass,
 	readLibraryInventory,
 } from "../domains/resources/library-inventory.js";
+import {
+	listInstalledLibraryPackages as listInstalledPlugins,
+	readLibraryManifest as readPluginManifest,
+} from "../domains/resources/library-packages.js";
 import { isLibraryKind, isLibraryResourceKind, type LibraryEntryKind } from "../domains/resources/library-types.js";
 import { printError, printOk } from "./shared.js";
 
 const HELP = `clio-coder library <command>
 
-One library of packages: plugin, skill, agent, prompt, fleet.
+One library of packages: plugin, extension, skill, agent, prompt, fleet.
 
 Commands:
   clio-coder library list [--kind <kind>] [--user|--project] [--json]
@@ -135,7 +134,7 @@ function parse(args: ReadonlyArray<string>): Parsed {
 		else if (arg === "--with-requirements") out.withRequirements = true;
 		else if (arg === "--kind") {
 			const value = args[++i];
-			if (!isLibraryKind(value)) throw new Error("--kind requires plugin, skill, agent, prompt, or fleet");
+			if (!isLibraryKind(value)) throw new Error("--kind requires plugin, extension, skill, agent, prompt, or fleet");
 			out.kind = value;
 		} else if (arg === "--source") {
 			const value = args[++i];

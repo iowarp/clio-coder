@@ -3024,7 +3024,12 @@ export function dispatchSlashCommand(command: SlashCommand, ctx: SlashCommandCon
 		// that matched no command: `/name` is how every other agent invokes the
 		// commands sitting in the roots Clio reads, and answering "not a command"
 		// for one that is loaded made the whole foreign prompt surface unreachable.
-		const expansion = ctx.expandPromptTemplate?.(command.text);
+		const runtime = ctx.operatorExtensions;
+		const promptNames = (ctx.listPrompts?.().items ?? []).map((prompt) => prompt.name);
+		const replacement = runtime
+			?.commands(promptNames)
+			.find((row) => row.invocation === command.token && row.replaces === "prompt" && row.available);
+		const expansion = replacement ? undefined : ctx.expandPromptTemplate?.(command.text);
 		if (expansion?.expanded === true) {
 			ctx.submitChat(command.text);
 			return "accepted";
@@ -3046,7 +3051,7 @@ export function dispatchSlashCommand(command: SlashCommand, ctx: SlashCommandCon
 		// A template that exists and refused is not a typo. Its reason reaches the
 		// operator and nothing reaches the model.
 		const refusal = expansion?.expanded === false ? expansion.refusal : undefined;
-		if (!refusal && isExtensionCommandToken(command.token) && ctx.operatorExtensions) {
+		if (!refusal && (isExtensionCommandToken(command.token) || replacement) && ctx.operatorExtensions) {
 			const runtime = ctx.operatorExtensions;
 			const promptNames = (ctx.listPrompts?.().items ?? []).map((prompt) => prompt.name);
 			const row = runtime.commands(promptNames).find((row) => row.invocation === command.token);
@@ -3067,6 +3072,17 @@ export function dispatchSlashCommand(command: SlashCommand, ctx: SlashCommandCon
 					if (ctx.showExtensionOutput) ctx.showExtensionOutput(command.token, output);
 					else ctx.io.stdout(`${output.text}\n`);
 				} catch (error) {
+					// A deferred runtime can become unavailable while starting on first use.
+					// Re-enter ordinary prompt dispatch only after the manager withdraws the alias.
+					if (
+						replacement &&
+						!runtime
+							.commands((ctx.listPrompts?.().items ?? []).map((prompt) => prompt.name))
+							.some((row) => row.invocation === command.token && row.available)
+					) {
+						dispatchSlashCommand(command, ctx);
+						return;
+					}
 					ctx.notice("error", `${command.token}: ${error instanceof Error ? error.message : String(error)}`);
 				}
 			});

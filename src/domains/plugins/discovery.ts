@@ -126,7 +126,8 @@ function clioConfiguration(value: unknown, root: string): ClioPluginConfiguratio
 	);
 	if (value !== undefined && raw.manifestVersion !== 1) throw new Error("Clio plugin manifestVersion must be 1");
 	const kind = raw.kind ?? "plugin";
-	if (!isLibraryKind(kind)) throw new Error("package kind must be plugin, skill, agent, prompt, or fleet");
+	if (!isLibraryKind(kind) || kind === "extension")
+		throw new Error("package kind must be plugin, skill, agent, prompt, or fleet");
 	if (
 		raw.requires !== undefined &&
 		(!Array.isArray(raw.requires) ||

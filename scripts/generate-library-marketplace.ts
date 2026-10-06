@@ -209,6 +209,14 @@ export function renderLibraryMarketplace(options: GenerateMarketplaceOptions = {
 	const entries: MarketplaceEntry[] = [];
 	const excluded: Exclusion[] = [];
 	for (const entry of registry) {
+		if (entry.kind === "extension") {
+			excluded.push({
+				name: entry.name,
+				sourceUrl: entry.sourceUrl,
+				reason: "standalone Clio runtime extension; no portable plugin facet",
+			});
+			continue;
+		}
 		if (/^(?:[a-z][a-z0-9+.-]*:\/\/|git@)/i.test(entry.sourceUrl)) {
 			excluded.push({
 				name: entry.name,

@@ -381,6 +381,16 @@ entries:
           when the issue does not name the code, fixes test-first, and
           self-reviews against the acceptance criteria, leaving a verified
           uncommitted change. Not for filing; use file-ticket. Not for commi"
+  - kind: extension
+    name: local-status
+    description: A small local status command and ambient status example.
+    version: 0.1.0
+    sourceUrl: extensions/local-status
+    sha256: 36f22c5f3f822059a565a55a3cecefab08ccc95ed6c672227eb04f92e18fcf99
+    provides:
+      - kind: extension
+        name: local-status
+        description: A small local status command and ambient status example.
   - kind: skill
     name: map-codebase
     description: Interactive codebase maps from verified repository structure,

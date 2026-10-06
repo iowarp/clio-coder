@@ -4,6 +4,7 @@ import path from "node:path";
 import { safeResourceWrite } from "../../core/safe-resource-write.js";
 import { projectPackagesTrusted } from "../../core/workspace-trust.js";
 import { clioConfigDir } from "../../core/xdg.js";
+import { type InstalledPlugin, listInstalledPlugins, readPluginManifest } from "../plugins/index.js";
 import { evaluateClioCompatibility } from "./compatibility.js";
 import { isRecord, loadManifestFromRoot, trimString } from "./discovery.js";
 import { extensionContentDigest, extensionContentDigestWithCapture } from "./integrity.js";
@@ -27,6 +28,8 @@ type StateReadResult =
 
 export interface InstalledExtensionRecord {
 	entry: InstalledExtension;
+	/** A facet of a shadowed plugin cannot compete independently of its owner. */
+	eligible?: boolean;
 	/** Exact file bytes captured by the stable tree-digest read. */
 	captured?: ReadonlyMap<string, Buffer>;
 }
@@ -97,6 +100,19 @@ function readState(scope: ExtensionScope, cwd = process.cwd()): StateReadResult 
 			message: error instanceof Error ? error.message : String(error),
 		};
 	}
+}
+
+export function readExtensionInstallRecord(
+	id: string,
+	options: ExtensionListOptions = {},
+): ExtensionState["installed"][string] | undefined {
+	const cwd = options.cwd ?? process.cwd();
+	const read = (scope: ExtensionScope) => {
+		const result = readState(scope, cwd);
+		if (result.status === "corrupt") throw new Error(`extension install state is corrupt: ${result.message}`);
+		return result.state.installed[id];
+	};
+	return options.scope ? read(options.scope) : (read("project") ?? read("user"));
 }
 
 function writeState(scope: ExtensionScope, state: ExtensionState, cwd = process.cwd()): void {
@@ -220,6 +236,68 @@ function listScope(scope: ExtensionScope, cwd = process.cwd()): InstalledExtensi
 	return out;
 }
 
+function bundleRecord(plugin: InstalledPlugin): InstalledExtensionRecord | null {
+	const manifestFile = path.join(plugin.rootPath, "clio-coder-extension.yaml");
+	if (!existsSync(manifestFile)) return null;
+	const candidate = loadManifestFromRoot(plugin.rootPath);
+	const manifest = candidate.manifest;
+	const diagnostics = [...plugin.diagnostics, ...candidate.diagnostics];
+	let captured: ReadonlyMap<string, Buffer> | undefined;
+	let provenance: InstalledExtension["provenance"];
+	if (plugin.provenance) {
+		try {
+			const read = extensionContentDigestWithCapture(plugin.rootPath, {
+				capture: ["clio-coder-extension.yaml", "hooks.yaml"],
+			});
+			if (read.digest !== plugin.provenance.contentDigest)
+				throw new Error("bundle content changed after plugin verification");
+			captured = read.captured;
+			const bytes = captured.get("clio-coder-extension.yaml");
+			if (bytes)
+				provenance = {
+					...plugin.provenance,
+					id: manifest?.id ?? plugin.id,
+					manifestDigest: createHash("sha256").update(bytes).digest("hex"),
+				};
+		} catch (error) {
+			diagnostics.push({ type: "error", message: String(error), path: plugin.rootPath });
+		}
+	}
+	const entry: InstalledExtension = {
+		bundle: { pluginId: plugin.id },
+		id: manifest?.id ?? plugin.id,
+		name: manifest?.name ?? plugin.name,
+		version: manifest?.version ?? plugin.version,
+		description: manifest?.description ?? plugin.description,
+		...(manifest?.capabilities ? { capabilities: manifest.capabilities } : {}),
+		...(manifest?.runtimeV2 ? { runtimeV2: manifest.runtimeV2 } : {}),
+		scope: plugin.scope,
+		rootPath: plugin.rootPath,
+		manifestPath: manifestFile,
+		enabled: plugin.enabled,
+		valid: plugin.valid && candidate.valid && provenance !== undefined,
+		compatible:
+			plugin.compatible &&
+			(manifest?.compatibility?.clio === undefined || evaluateClioCompatibility(manifest.compatibility.clio).satisfied),
+		effective: false,
+		loadable: false,
+		...(plugin.trustBlocked ? { trustBlocked: true } : {}),
+		...(provenance ? { provenance } : {}),
+		...(plugin.observedContentDigest ? { observedContentDigest: plugin.observedContentDigest } : {}),
+		diagnostics,
+	};
+	return { entry, eligible: plugin.effective, ...(captured ? { captured } : {}) };
+}
+
+function bundleRefusal(id: string, operation: "install" | "enable" | "disable" | "remove"): ExtensionDiagnostic[] {
+	return [
+		{
+			type: "error",
+			message: `extension ${id} is a plugin bundle; use clio-coder ${operation === "install" ? "library install <bundle-path>" : `library ${operation} plugin:${id}`} to manage its single install`,
+		},
+	];
+}
+
 export function listInstalledExtensions(cwd = process.cwd(), options: ExtensionListOptions = {}): InstalledExtension[] {
 	return listInstalledExtensionRecords(cwd, options).map((record) => record.entry);
 }
@@ -231,7 +309,7 @@ export function listInstalledExtensions(cwd = process.cwd(), options: ExtensionL
  * nor shadow a user copy, and user-scoped extensions are unaffected.
  */
 function blockUntrustedProjectExtensions(records: ReadonlyArray<InstalledExtensionRecord>, cwd: string): void {
-	const project = records.filter((record) => record.entry.scope === "project");
+	const project = records.filter((record) => record.entry.scope === "project" && !record.entry.bundle);
 	if (project.length === 0 || projectPackagesTrusted(cwd, "extensions")) return;
 	for (const { entry } of project) {
 		entry.trustBlocked = true;
@@ -252,6 +330,10 @@ export function listInstalledExtensionRecords(
 ): InstalledExtensionRecord[] {
 	const scopes: ExtensionScope[] = options.scope ? [options.scope] : ["user", "project"];
 	const records = scopes.flatMap((scope) => listScope(scope, cwd));
+	for (const plugin of listInstalledPlugins(cwd, { ...(options.scope ? { scope: options.scope } : {}), all: true })) {
+		const facet = bundleRecord(plugin);
+		if (facet) records.push(facet);
+	}
 	blockUntrustedProjectExtensions(records, cwd);
 	const byId = new Map<string, InstalledExtensionRecord[]>();
 	for (const record of records) {
@@ -262,8 +344,14 @@ export function listInstalledExtensionRecords(
 	}
 	for (const group of byId.values()) {
 		const winner = group
-			.filter((record) => record.entry.valid && record.entry.compatible && !record.entry.trustBlocked)
-			.sort((a, b) => scopeRank(a.entry.scope) - scopeRank(b.entry.scope))
+			.filter(
+				(record) =>
+					record.eligible !== false && record.entry.valid && record.entry.compatible && !record.entry.trustBlocked,
+			)
+			.sort(
+				(a, b) =>
+					scopeRank(a.entry.scope) - scopeRank(b.entry.scope) || Number(!!a.entry.bundle) - Number(!!b.entry.bundle),
+			)
 			.at(-1);
 		for (const record of group) {
 			const entry = record.entry;
@@ -299,8 +387,17 @@ export function installExtension(sourcePath: string, options: ExtensionInstallOp
 	const scope = options.scope ?? "user";
 	const cwd = options.cwd ?? process.cwd();
 	const source = path.resolve(sourcePath);
+	if (existsSync(path.join(source, "plugin.json")))
+		return { diagnostics: bundleRefusal(readPluginManifest(source).manifest?.name ?? path.basename(source), "install") };
 	const candidate = loadManifestFromRoot(source);
 	if (!candidate.manifest || !candidate.valid) return { diagnostics: candidate.diagnostics };
+	if (
+		(options.expectedId !== undefined && options.expectedId !== candidate.manifest.id) ||
+		(options.expectedVersion !== undefined && options.expectedVersion !== candidate.manifest.version)
+	)
+		return {
+			diagnostics: [{ type: "error", message: "extension source does not match the pinned identity or version" }],
+		};
 	const targetRoot = path.join(extensionBaseDir(scope, cwd), candidate.manifest.id);
 	if (existsSync(targetRoot)) {
 		if (!options.force) {
@@ -357,6 +454,8 @@ export function installExtension(sourcePath: string, options: ExtensionInstallOp
 			throw new Error(`staged extension id changed from ${candidate.manifest.id} to ${stagedCandidate.manifest.id}`);
 		}
 		const contentDigest = extensionContentDigest(stagingRoot);
+		if (options.expectedDigest !== undefined && contentDigest !== options.expectedDigest)
+			throw new Error("extension source does not match the pinned full-tree digest");
 		if (existsSync(targetRoot)) {
 			renameSync(targetRoot, backupRoot);
 			movedExisting = true;
@@ -429,6 +528,7 @@ function mutateEnabled(id: string, enabled: boolean, options: ExtensionListOptio
 	if (!target) {
 		return { diagnostics: [{ type: "error", message: `extension ${id} is not installed` }] };
 	}
+	if (target.bundle) return { diagnostics: bundleRefusal(target.bundle.pluginId, enabled ? "enable" : "disable") };
 	const stateResult = readState(target.scope, cwd);
 	if (stateResult.status !== "valid") {
 		return {
@@ -466,6 +566,7 @@ export function removeExtension(id: string, options: ExtensionListOptions = {}):
 	if (!target) {
 		return { diagnostics: [{ type: "error", message: `extension ${id} is not installed` }] };
 	}
+	if (target.bundle) return { diagnostics: bundleRefusal(target.bundle.pluginId, "remove") };
 	const stateResult = readState(target.scope, cwd);
 	if (stateResult.status !== "valid") {
 		const filePath = statePath(target.scope, cwd);

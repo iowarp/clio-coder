@@ -5,8 +5,10 @@ import { parseFrontmatter } from "../agents/frontmatter.js";
 import { recipeIdFromPath } from "../agents/recipe.js";
 import { parseAgentRecipeSchema } from "../agents/recipe-schema.js";
 import { assertAgentSpecPolicy, normalizeAgentSpec } from "../agents/spec.js";
-import { pluginResourcePath, readPluginManifest } from "../plugins/discovery.js";
+import { loadManifestFromRoot } from "../extensions/index.js";
+import { pluginResourcePath } from "../plugins/discovery.js";
 import type { PluginCandidate } from "../plugins/types.js";
+import { readLibraryManifest } from "./library-packages.js";
 import { resolvePackageReferences } from "./package-references.js";
 import { loadPromptTemplates, type PromptTemplateRoot } from "./prompts/loader.js";
 import { loadSkills, type Skill, type SkillRoot, skillCatalogValidity } from "./skills/loader.js";
@@ -67,7 +69,7 @@ export function validateLibraryPackage(
 	_options: { cwd?: string } = {},
 ): LibraryPackageValidationResult {
 	const resolved = path.resolve(packageRoot);
-	const candidate = readPluginManifest(resolved);
+	const candidate = readLibraryManifest(resolved);
 
 	if (!candidate.valid || !candidate.manifest) {
 		const manifestErrors: LibraryValidationDiagnostic[] = candidate.diagnostics.map((diag) => ({
@@ -97,6 +99,27 @@ export function validateLibraryPackage(
 	const contentDiagnostics: LibraryValidationDiagnostic[] = [];
 	const resources: LibraryResourceValidationRecord[] = [];
 	const prerequisites: LibraryValidationPrerequisite[] = [];
+
+	if (packageKind === "extension" || existsSync(path.join(resolved, "clio-coder-extension.yaml"))) {
+		const facet = loadManifestFromRoot(resolved);
+		for (const diagnostic of facet.diagnostics)
+			contentDiagnostics.push({
+				severity: diagnostic.type === "error" ? "error" : "warning",
+				code: "ERR_EXTENSION",
+				message: diagnostic.message,
+				path: diagnostic.path,
+				kind: "extension",
+			});
+		if (facet.manifest)
+			resources.push({
+				kind: "extension",
+				name: facet.manifest.id,
+				path: path.relative(resolved, facet.manifestPath ?? resolved),
+				description: facet.manifest.description,
+				valid: facet.valid,
+				diagnostics: [],
+			});
+	}
 
 	// ---------------------------------------------------------------------------
 	// 1. Skills

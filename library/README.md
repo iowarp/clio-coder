@@ -12,7 +12,8 @@ The library organizes shareable packages by kind into dedicated directories:
 | **Agent** | `library/agents/` | A worker recipe: role, tools, budget, and result contract | `/run <agent-id> <task>` or dispatch |
 | **Prompt** | `library/prompts/` | Reusable task text and parameterized instructions | `/<derived-prompt-name> [arguments]` |
 | **Fleet** | `library/fleets/` | An executable multi-agent coordination recipe | `/fleet run <name>` or preview |
-| **Plugin** | `library/plugins/` | A cohesive bundle of resources released together | Inspect contents, invoke member recipes |
+| **Plugin** | `library/plugins/` | Resources released together, optionally with a Clio runtime facet | Inspect contents, invoke member recipes |
+| **Extension** | `library/extensions/` | A standalone Clio runtime package | `/ext:<id>:<command>` or `clio-coder extensions run <id> <command>` |
 
 ## Browsing and Managing Packages
 
@@ -24,6 +25,7 @@ clio-coder library search <query>
 # Install packages
 clio-coder library install skill:<name> --project
 clio-coder library install plugin:materio --project
+clio-coder library install extension:local-status --user
 
 # Inspect installed packages
 clio-coder library skills --all --json
@@ -58,7 +60,7 @@ A package is published there only when a peer host would load a real skill surfa
 
 ## Authoring Templates
 
-Working, valid authoring templates for all five package kinds live in `library/_authoring/templates/`:
+Working, valid authoring templates for the five plugin-backed package kinds live in `library/_authoring/templates/`:
 
 - `library/_authoring/templates/skill/`: Single skill package with house metadata and triggers.
 - `library/_authoring/templates/agent/`: Standalone agent recipe with strict v1 format, custom audience, and `skills: []`.
@@ -70,12 +72,23 @@ Templates are authoring reference models; they live outside the five catalog kin
 
 ## Contributing Packages
 
-Every native installable package carries a portable `plugin.json` manifest.
+Plugin-backed packages carry a portable `plugin.json` manifest. Standalone
+extensions carry `clio-coder-extension.yaml` and install through the extension
+writer when selected as `kind: extension` in the library.
 The optional `extensions["ai.iowarp.clio"]` metadata declares a Clio-specific
 kind, resource paths and components; conventional plugin packages can expose
 `skills/` without it. The key is metadata inside the interoperable manifest,
 and does not name a marketplace service or require a directory. Supported
 foreign plugin manifests enter through the separate reviewed import route.
+
+A bundle keeps its portable `plugin.json` and adds `clio-coder-extension.yaml`
+with `runtime.api: 2` at the same root. The extension ID must match the plugin
+name. The plugin installer publishes one copy under one full-tree digest, and
+`library enable|disable|remove plugin:<name>` manages both facets. Other hosts
+can continue loading the plugin without reading the Clio manifest. A bundle
+command may declare `replaces: prompt` only for its own `/<plugin>:<command>`
+prompt; Clio runs the runtime while available and retains the portable prompt
+as its fallback.
 
 1. **Choose package kind**: Decide whether your contribution is a single-kind package (`skill`, `agent`, `prompt`, `fleet`) exposing exactly one public recipe, or a composite `plugin` bundle combining multiple resources.
 2. **Copy authoring template**: Copy from `library/_authoring/templates/<kind>/` into your authoring tree.

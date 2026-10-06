@@ -74,7 +74,7 @@ export function buildRegistryRow(
 	// ids or display titles. Ancillary scripts/resources stay manifest metadata.
 	const provides: LibraryProvidedResource[] = result.validation.resources
 		.flatMap((resource) =>
-			isLibraryResourceKind(resource.kind) && resource.valid
+			(isLibraryResourceKind(resource.kind) || resource.kind === "extension") && resource.valid
 				? [
 						{
 							kind: resource.kind,
