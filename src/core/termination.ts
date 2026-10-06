@@ -18,12 +18,13 @@
  */
 
 import { wrapTextWithAnsi } from "../engine/text-wrap.js";
+import { clampTimerDelayMs } from "./timers.js";
 import { BusChannels } from "./bus-events.js";
 import { getSharedBus } from "./shared-bus.js";
 
 export type TerminationPhase = "idle" | "draining" | "terminating" | "persisting" | "exiting";
 
-type Hook = () => void | Promise<void>;
+export type Hook = (signal: AbortSignal) => void | Promise<void>;
 interface RegisteredHook {
 	run: Hook;
 	/** Internal allowance for an owned resource with a longer escalation window. */
@@ -76,27 +77,42 @@ export function resolveShutdownHookBudgetMs(): number {
  * and reported via `onError` so a rejecting hook cannot propagate past the
  * shutdown coordinator.
  */
+export class ShutdownBudgetExceeded extends Error {
+	constructor(public readonly budgetMs: number) {
+		super(`Shutdown budget exceeded after ${budgetMs}ms`);
+		this.name = "ShutdownBudgetExceeded";
+	}
+}
+
 export async function runWithBudget(
-	op: () => void | Promise<void>,
+	op: Hook,
 	budgetMs: number,
 	onError?: (err: unknown) => void,
+	parentSignal?: AbortSignal,
 ): Promise<boolean> {
+	const controller = new AbortController();
+	const forwardAbort = (): void => controller.abort(parentSignal?.reason);
+	if (parentSignal?.aborted) forwardAbort();
+	else parentSignal?.addEventListener("abort", forwardAbort, { once: true });
 	let timer: NodeJS.Timeout | undefined;
 	const timeout = new Promise<"timeout">((resolve) => {
-		timer = setTimeout(() => resolve("timeout"), budgetMs);
+		timer = setTimeout(() => {
+			controller.abort(new ShutdownBudgetExceeded(budgetMs));
+			resolve("timeout");
+		}, clampTimerDelayMs(budgetMs));
 	});
 	try {
 		const done = Promise.resolve()
-			.then(() => op())
+			.then(() => op(controller.signal))
 			.then(() => "done" as const)
 			.catch((err) => {
 				onError?.(err);
 				return "done" as const;
 			});
-		const outcome = await Promise.race([done, timeout]);
-		return outcome === "done";
+		return (await Promise.race([done, timeout])) === "done";
 	} finally {
 		if (timer) clearTimeout(timer);
+		parentSignal?.removeEventListener("abort", forwardAbort);
 	}
 }
 

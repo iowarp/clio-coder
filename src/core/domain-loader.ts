@@ -29,7 +29,7 @@ export interface DomainManifest {
  */
 export interface DomainExtension {
 	start(): Promise<void> | void;
-	stop?(): Promise<void> | void;
+	stop?(signal: AbortSignal): Promise<void> | void;
 }
 
 /**
