@@ -1,6 +1,14 @@
-import { type ChildProcessByStdio, spawn } from "node:child_process";
+import { spawn } from "node:child_process";
+import type { ChildProcess, ChildProcessByStdio } from "node:child_process";
 import type { Readable } from "node:stream";
 
+import {
+	createProcessGroupCleanup,
+	SAFE_EXEC_GROUP_TEARDOWN_BOUND_MS,
+	SAFE_EXEC_PIPE_DRAIN_BOUND_MS,
+} from "../core/safe-exec.js";
+import type { ProcessGroupCleanupStatus } from "../core/safe-exec.js";
+import { clampTimerDelayMs } from "../core/timers.js";
 import { boundedExternalDiagnostic } from "../core/external-diagnostic.js";
 
 export type SubprocessWithStdio = ChildProcessByStdio<null, Readable, Readable>;
@@ -76,59 +84,147 @@ export async function readStderr(child: { stderr: Readable }): Promise<string> {
 	return boundedExternalDiagnostic(tail.toString("utf8"));
 }
 
+export const EXTERNAL_PROCESS_KILL_GRACE_MS = 1500;
+
+export interface ProcessTreeOutcome extends ProcessGroupCleanupStatus {
+	exitCode: number;
+	pipeDrainIncomplete: boolean;
+}
+
 export interface ProcessTreeTerminator {
+	readonly completed: Promise<ProcessTreeOutcome>;
 	terminate(): void;
 	cleanup(): void;
 }
 
-/** POSIX process groups or Windows taskkill trees, with a direct-child fallback. */
+type OwnedChild = {
+	pid?: number | undefined;
+	exitCode: number | null;
+	kill(signal?: NodeJS.Signals): boolean;
+	stdout?: Readable;
+	stderr?: Readable;
+	once?: ChildProcess["once"];
+	off?: ChildProcess["off"];
+	unref?(): void;
+};
+
+/** POSIX ownership ends only after group cleanup and bounded pipe draining. */
 export function createProcessTreeTerminator(
-	child: { pid?: number | undefined; exitCode: number | null; kill(signal?: NodeJS.Signals): boolean },
-	graceMs = 1500,
+	child: OwnedChild,
+	graceMs = EXTERNAL_PROCESS_KILL_GRACE_MS,
 	options: { platform?: NodeJS.Platform; spawn?: typeof spawn } = {},
 ): ProcessTreeTerminator {
 	const platform = options.platform ?? process.platform;
 	const spawnKiller = options.spawn ?? spawn;
 	let sent = false;
-	let timer: ReturnType<typeof setTimeout> | null = null;
-	const signal = (name: NodeJS.Signals): void => {
+	let finished = false;
+	let closed = false;
+	let exitCode = 1;
+	let pipeDrainIncomplete = false;
+	let drainTimer: ReturnType<typeof setTimeout> | undefined;
+	let windowsTimer: ReturnType<typeof setTimeout> | undefined;
+	let windowsBoundTimer: ReturnType<typeof setTimeout> | undefined;
+	let status: ProcessGroupCleanupStatus | null = null;
+	let resolveCompleted!: (outcome: ProcessTreeOutcome) => void;
+	const completed = new Promise<ProcessTreeOutcome>((resolve) => { resolveCompleted = resolve; });
+	const finish = (): void => {
+		if (finished || status === null || (!closed && !pipeDrainIncomplete && !status.incomplete)) return;
+		finished = true;
+		if (drainTimer) clearTimeout(drainTimer);
+		if (windowsTimer) clearTimeout(windowsTimer);
+		if (windowsBoundTimer) clearTimeout(windowsBoundTimer);
+		child.off?.("exit", onExit);
+		child.off?.("close", onClose);
+		child.off?.("error", onError);
+		child.stdout?.destroy();
+		child.stderr?.destroy();
+		child.unref?.();
+		resolveCompleted({ ...status, exitCode, pipeDrainIncomplete });
+	};
+	const probe = (): boolean => {
+		if (!child.pid) return child.exitCode === null;
+		try { process.kill(-child.pid, 0); return true; }
+		catch (error) { return (error as NodeJS.ErrnoException).code !== "ESRCH"; }
+	};
+	const signal = (name: NodeJS.Signals): boolean => {
 		if (child.pid && platform !== "win32") {
-			try {
-				process.kill(-child.pid, name);
-				return;
-			} catch {
-				// The child may not have established its group yet.
-			}
+			try { process.kill(-child.pid, name); return true; }
+			catch (error) { return (error as NodeJS.ErrnoException).code !== "ESRCH"; }
 		}
 		if (platform === "win32" && child.pid !== undefined && Number.isSafeInteger(child.pid) && child.pid > 0) {
 			const args = ["/PID", String(child.pid), "/T", ...(name === "SIGKILL" ? ["/F"] : [])];
 			const killer = spawnKiller("taskkill.exe", args, { stdio: "ignore", windowsHide: true });
 			killer.once("error", () => {
-				if (child.exitCode === null) child.kill(name);
+				if (!finished && child.exitCode === null) child.kill(name);
 			});
-			return;
+			return true;
 		}
-		if (child.exitCode !== null) return;
-		child.kill(name);
+		return child.exitCode === null && child.kill(name);
 	};
+	const group = platform === "win32" ? null : createProcessGroupCleanup({
+		graceMs: clampTimerDelayMs(graceMs),
+		probe,
+		signal,
+		onDone: (outcome) => { status = outcome; finish(); },
+	});
+	const onExit = (code: number | null): void => {
+		exitCode = code ?? 1;
+		drainTimer = setTimeout(() => {
+			pipeDrainIncomplete = Boolean(
+				(child.stdout && !child.stdout.readableEnded) || (child.stderr && !child.stderr.readableEnded),
+			);
+			child.stdout?.destroy();
+			child.stderr?.destroy();
+			finish();
+		}, SAFE_EXEC_PIPE_DRAIN_BOUND_MS);
+		if (group) group.leaderExited();
+	};
+	const onClose = (code: number | null): void => {
+		closed = true;
+		exitCode = code ?? exitCode;
+		if (!group) {
+			if (windowsTimer) { clearTimeout(windowsTimer); windowsTimer = undefined; signal("SIGKILL"); }
+			status = { descendantsCleaned: sent, incomplete: false };
+		}
+		finish();
+	};
+	const onError = (): void => {
+		if (child.pid) { terminate(); return; }
+		group?.dispose();
+		closed = true;
+		status = { descendantsCleaned: false, incomplete: false };
+		finish();
+	};
+	const terminate = (): void => {
+		if (finished || sent) return;
+		sent = true;
+		if (group) { group.kill(); return; }
+		signal("SIGTERM");
+		windowsTimer = setTimeout(() => {
+			windowsTimer = undefined;
+			signal("SIGKILL");
+			windowsBoundTimer = setTimeout(() => {
+				status = { descendantsCleaned: sent, incomplete: !closed };
+				finish();
+			}, SAFE_EXEC_GROUP_TEARDOWN_BOUND_MS);
+		}, clampTimerDelayMs(graceMs));
+	};
+	child.once?.("exit", onExit);
+	child.once?.("close", onClose);
+	child.once?.("error", onError);
 	return {
-		terminate() {
-			if (sent) return;
-			sent = true;
-			signal("SIGTERM");
-			timer = setTimeout(() => {
-				timer = null;
-				signal("SIGKILL");
-			}, graceMs);
-		},
+		completed,
+		terminate,
 		cleanup() {
-			if (timer) {
-				clearTimeout(timer);
-				timer = null;
-				// A closed leader can leave descendants with independent stdio.
-				// Finish the requested cancellation before releasing its escalation.
+			if (group) return;
+			// Windows callers retain the taskkill force path when closing early.
+			if (windowsTimer) {
+				clearTimeout(windowsTimer);
+				windowsTimer = undefined;
 				signal("SIGKILL");
 			}
+			if (drainTimer) clearTimeout(drainTimer);
+			if (windowsBoundTimer) clearTimeout(windowsBoundTimer);
 		},
 	};
 }

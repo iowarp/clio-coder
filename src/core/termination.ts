@@ -123,6 +123,7 @@ class TerminationCoordinator {
 	private readonly persistHooks: RegisteredHook[] = [];
 	private exitCode = 0;
 	private started = false;
+	private shutdownPromise: Promise<void> | undefined;
 	private drained = false;
 	private readonly pendingNotices: string[] = [];
 	private signalHandler: ((signal: NodeJS.Signals) => void) | null = null;
@@ -157,8 +158,16 @@ class TerminationCoordinator {
 		this.exitHandoff = handoff;
 	}
 
-	async shutdown(code = 0): Promise<void> {
-		if (this.started) return;
+	shutdown(code = 0): Promise<void> {
+		if (this.shutdownPromise) return this.shutdownPromise;
+		let resolve!: () => void;
+		let reject!: (error: unknown) => void;
+		this.shutdownPromise = new Promise<void>((done, failed) => { resolve = done; reject = failed; });
+		void this.performShutdown(code).then(resolve, reject);
+		return this.shutdownPromise;
+	}
+
+	private async performShutdown(code: number): Promise<void> {
 		this.started = true;
 		this.exitCode = code;
 		const bus = getSharedBus();
