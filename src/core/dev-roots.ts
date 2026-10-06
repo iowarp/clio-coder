@@ -28,6 +28,28 @@ interface DevRootFile {
 /** Identifies this process's session for the life of the process, so a restart is a new owner. */
 const OWNER = randomUUID();
 
+/** The session this process acts for: itself, until a dispatched worker adopts the session that spawned it. */
+let actingFor: string = OWNER;
+
+/**
+ * The token a session hands its own workers on the worker spec, so they count
+ * as the owner of its dev roots. It travels only on that spec: never in an
+ * environment, a prompt, a log or a file other than the registry.
+ */
+export function devRootOwnerForWorkers(): string {
+	return OWNER;
+}
+
+/**
+ * A worker acts for the session that dispatched it. Only the question "does
+ * another session hold this folder" changes; registering and releasing still
+ * use this process's own owner, so a worker can never claim or release a root
+ * as its dispatcher.
+ */
+export function adoptDevRootOwner(owner: string): void {
+	actingFor = owner;
+}
+
 function registryPath(): string {
 	return path.join(clioStateDir(), "extension-dev-roots.json");
 }
@@ -110,13 +132,13 @@ export function releaseDevRoots(root?: string): void {
 	});
 }
 
-/** Every folder a live session other than this one holds. Never throws: an unreadable registry holds nothing. */
+/** Every folder a live session other than the one this process acts for holds. Never throws: an unreadable registry holds nothing. */
 export function devRootsHeldByOthers(): Array<{ root: string; holder: DevRootRecord }> {
 	try {
 		const file = registryPath();
 		if (!existsSync(file)) return [];
 		return Object.entries(liveRoots(readRegistry(file)))
-			.filter(([, record]) => record.owner !== OWNER)
+			.filter(([, record]) => record.owner !== actingFor)
 			.map(([root, holder]) => ({ root, holder }));
 	} catch {
 		// The state directory could not be resolved; nothing is registered that this process can see.

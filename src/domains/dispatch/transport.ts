@@ -120,8 +120,10 @@ export function resolveSshTargetLifecycle(
 }
 
 function workerSpecForSshNode(node: SshNodeEndpoint, spec: WorkerSpec): WorkerSpec {
+	// A dev-root owner token means nothing on another host's registry and must not leave this machine.
+	const { devRootOwner: _local, ...portable } = spec;
 	return {
-		...spec,
+		...portable,
 		target: {
 			...spec.target,
 			lifecycle: resolveSshTargetLifecycle(node.residency, spec.target.lifecycle),

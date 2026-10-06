@@ -174,6 +174,12 @@ interface WorkerSpecFields {
 	/** Effective commit-attribution setting inherited from the dispatching session. */
 	gitCommitAttribution?: boolean;
 	/**
+	 * The dispatching session's dev-root owner token, so this worker counts as the
+	 * owner of the dev extension folders that session registered. Secret: read once
+	 * by the worker entry, and never put in an environment, a prompt or a file.
+	 */
+	devRootOwner?: string;
+	/**
 	 * Dispatch-time tool profile that narrowed `allowedTools`. Carried so
 	 * black-box external CLI runtimes that cannot mediate per-tool calls can
 	 * refuse a narrowing profile. Undefined or "full-agent" imposes no
@@ -980,6 +986,9 @@ export function parseWorkerSpec(value: unknown): WorkerSpec {
 	}
 	if (spec.gitCommitAttribution !== undefined && typeof spec.gitCommitAttribution !== "boolean") {
 		throw new Error("WorkerSpec.gitCommitAttribution must be a boolean");
+	}
+	if (spec.devRootOwner !== undefined && !/^[0-9a-f-]{36}$/.test(String(spec.devRootOwner))) {
+		throw new Error("WorkerSpec.devRootOwner must be a UUID");
 	}
 	readOptionalEnum(spec, "toolProfile", "WorkerSpec", TOOL_PROFILE_NAMES);
 	readOptionalEnum(spec, "product", "WorkerSpec", WORKER_PRODUCTS);
