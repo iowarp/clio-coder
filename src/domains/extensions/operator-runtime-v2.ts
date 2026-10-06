@@ -16,6 +16,7 @@ import type {
 	ExtensionObservationEventV2,
 	ExtensionObservationV2,
 	ExtensionOutputV2,
+	ExtensionRuntimeSnapshotV2,
 	ExtensionSkin,
 	ExtensionToolResult,
 	ExtensionUiAction,
@@ -76,6 +77,9 @@ const OBSERVATION_BACKLOG = 64;
 
 function identity(entry: InstalledExtension): string {
 	return `${entry.id}:${entry.scope}:${entry.provenance?.canonicalRoot}:${entry.provenance?.contentDigest}`;
+}
+function servedPlugin(entry: InstalledExtension): ExtensionRuntimeSnapshotV2["plugin"] {
+	return entry.plugin && entry.pluginSource ? { id: entry.plugin, prompts: entry.pluginPrompts ?? [] } : null;
 }
 function contextKey(context: RuntimeContext): string {
 	return JSON.stringify(context);
@@ -329,7 +333,7 @@ export class OperatorExtensionRuntimeV2 {
 				: null;
 		const created: { process?: ExtensionRuntimeProcessV2 } = {};
 		created.process = new ExtensionRuntimeProcessV2(entry, {
-			snapshot: { ...context, generation, activeWorkspace },
+			snapshot: { ...context, generation, activeWorkspace, plugin: servedPlugin(entry) },
 			options: Object.fromEntries(entry.runtimeV2.config.map((field) => [field.key, field.default])),
 			keyValue,
 			storeDir: paths.storeDir,
@@ -370,6 +374,7 @@ export class OperatorExtensionRuntimeV2 {
 			context = "unavailable";
 			list = [];
 		}
+		const previous = this.inventory;
 		this.inventory = list;
 		if (adopts) {
 			this.queued = true;
@@ -381,14 +386,33 @@ export class OperatorExtensionRuntimeV2 {
 		}
 		const admitted = new Set(list.filter(isApiV2).map(identity));
 		for (const [id, process] of this.processes) {
-			if (admitted.has(identity(process.extension))) continue;
+			if (admitted.has(identity(process.extension))) {
+				const entry = list.find((candidate) => candidate.id === id && isApiV2(candidate));
+				const before = previous.find((candidate) => candidate.id === id && isApiV2(candidate));
+				if (entry && JSON.stringify(servedPlugin(entry)) !== JSON.stringify(before ? servedPlugin(before) : null)) {
+					process.updateSnapshot({
+						...this.context(),
+						generation: this.generation,
+						activeWorkspace: this.workspaceFor(id),
+						plugin: servedPlugin(entry),
+					});
+					this.changed();
+				}
+				continue;
+			}
 			this.processes.delete(id);
 			this.failures.set(id, "installation disabled, removed, replaced, or changed; reload after reviewed installation");
 			this.retire(process, "installation-revoked");
 			if (this.surface.activeWorkspace?.extensionId === id) this.leaveWorkspace();
 			this.changed();
 		}
-		for (const [id, entry] of this.deferred) if (!admitted.has(identity(entry))) this.deferred.delete(id);
+		for (const [id, entry] of this.deferred) {
+			if (!admitted.has(identity(entry))) this.deferred.delete(id);
+			else {
+				const current = list.find((candidate): candidate is ApiV2Extension => candidate.id === id && isApiV2(candidate));
+				if (current) this.deferred.set(id, current);
+			}
+		}
 		if (this.queued && !this.busy && this.options.isIdle()) void this.reload("session-change");
 	}
 
@@ -512,7 +536,12 @@ export class OperatorExtensionRuntimeV2 {
 				throw new Error("session or workspace changed during runtime activation");
 			if (context.mode === "interactive") {
 				for (const [id, process] of staged)
-					process.updateSnapshot({ ...context, generation: next, activeWorkspace: this.workspaceFor(id) });
+					process.updateSnapshot({
+						...context,
+						generation: next,
+						activeWorkspace: this.workspaceFor(id),
+						plugin: servedPlugin(current.find((entry) => entry.id === id && isApiV2(entry)) ?? process.extension),
+					});
 				for (const process of staged.values()) if (this.current(process)) this.arm(process, context.workspace);
 				this.observe({ event: "session_open", reason });
 				const active = this.surface.activeWorkspace;
@@ -875,9 +904,14 @@ export class OperatorExtensionRuntimeV2 {
 		const context = this.context();
 		for (const id of new Set([before?.extensionId, after?.extensionId])) {
 			if (id === undefined) continue;
-			this.processes
-				.get(id)
-				?.updateSnapshot({ ...context, generation: this.generation, activeWorkspace: this.workspaceFor(id) });
+			const process = this.processes.get(id);
+			if (process)
+				process.updateSnapshot({
+					...context,
+					generation: this.generation,
+					activeWorkspace: this.workspaceFor(id),
+					plugin: servedPlugin(this.inventory.find((entry) => entry.id === id && isApiV2(entry)) ?? process.extension),
+				});
 		}
 		if (before) this.observeOne(before.extensionId, { event: "workspace_leave", workspace: before.workspaceId });
 		if (after) this.observeOne(after.extensionId, { event: "workspace_enter", workspace: after.workspaceId });

@@ -77,6 +77,7 @@ export async function validateExtensionPackage(root: string): Promise<ExtensionV
 				generation: 1,
 				mode: "headless",
 				activeWorkspace: null,
+				plugin: null,
 			},
 			options: Object.fromEntries(declaration.config.map((field) => [field.key, field.default])),
 			keyValue: createMemoryExtensionKeyValueHost(),

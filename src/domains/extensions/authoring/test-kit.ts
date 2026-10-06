@@ -47,6 +47,7 @@ export async function createExtensionTestHost(
 		values[key] = value;
 	}
 	const snapshot = {
+		plugin: wire(options.plugin ?? null),
 		workspace: realpathSync(options.workspace ?? canonical),
 		sessionId: options.sessionId === undefined ? "test-session" : options.sessionId,
 		generation: 1,

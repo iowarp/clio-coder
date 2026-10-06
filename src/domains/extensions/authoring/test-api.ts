@@ -4,6 +4,7 @@ import type {
 	ExtensionKeyValue,
 	ExtensionObservationV2,
 	ExtensionOutputV2,
+	ExtensionRuntimeSnapshotV2,
 	ExtensionToolResult,
 	InterviewAnswer,
 	InterviewNext,
@@ -26,6 +27,7 @@ export interface ExtensionTestHost {
 }
 
 export interface ExtensionTestOptions {
+	plugin?: ExtensionRuntimeSnapshotV2["plugin"];
 	options?: Record<string, string | number | boolean>;
 	sessionId?: string | null;
 	workspace?: string;
