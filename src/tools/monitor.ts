@@ -90,20 +90,20 @@ function observeDispatchChanges(dispatch: DispatchContract): {
 	}
 	return {
 		revision: () => revision,
-		async wait(observed, timeoutMs, signal) {
-			if (observed !== revision || signal?.aborted) return;
-			const waitingAt = performance.now();
-			const Effect = await import("effect/Effect");
-			if (observed !== revision || signal?.aborted) return;
-			const remainingMs = timeoutMs - (performance.now() - waitingAt);
-			if (remainingMs <= 0) return;
-			const changed = Effect.ensuring(Effect.callback<void>((resume) => {
-				wake = () => resume(Effect.void);
-				if (observed !== revision) wake();
-			}), Effect.sync(() => {
-				wake = null;
-			}));
-			await Effect.runPromiseExit(Effect.raceFirst(changed, Effect.sleep(remainingMs)), { signal });
+		wait(observed, timeoutMs, signal) {
+			if (observed !== revision || signal?.aborted) return Promise.resolve();
+			return new Promise<void>((resolve) => {
+				const finish = (): void => {
+					clearTimeout(timer);
+					signal?.removeEventListener("abort", finish);
+					wake = null;
+					resolve();
+				};
+				const timer = setTimeout(finish, timeoutMs);
+				wake = finish;
+				signal?.addEventListener("abort", finish, { once: true });
+				if (observed !== revision || signal?.aborted) finish();
+			});
 		},
 		dispose() {
 			for (const unsubscribe of unsubscribes.splice(0)) unsubscribe();
