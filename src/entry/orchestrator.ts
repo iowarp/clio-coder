@@ -1889,10 +1889,18 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 				// The awaited drain hook reports this same rejection.
 			});
 		});
-		termination.onDrain(async () => {
-			unsubscribeDispatchShutdown?.();
-			await beginDispatchDrain();
-		});
+		termination.onDrain(
+			async () => {
+				unsubscribeDispatchShutdown?.();
+				await beginDispatchDrain();
+			},
+			{
+				timeoutMs: Math.min(
+					2 ** 31 - 1,
+					(dispatch.drainAllowanceMs?.() ?? 0) + resolveShutdownHookBudgetMs(),
+				),
+			},
+		);
 	}
 	// The loader caps each domain separately. The outer hook must allow the
 	// whole sequence to finish, including cleanup after a timed-out domain.
