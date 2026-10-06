@@ -1,4 +1,5 @@
 import { createHash, randomBytes } from "node:crypto";
+import { isDeepStrictEqual } from "node:util";
 import type { TSchema } from "typebox";
 import { Value } from "typebox/value";
 import { isWorkerToolCallCapExceededReason } from "../core/guardrails.js";
@@ -274,6 +275,12 @@ export interface RegistryDeps {
 	 * through this registry on the resulting call.
 	 */
 	onMiddlewareEffects?: (effects: ReadonlyArray<MiddlewareEffect>, input: MiddlewareHookInput) => void;
+	/**
+	 * Applies the protect_path effects an awaited extension hook returned, which
+	 * reach the protected-artifacts guard only through the synchronous chain that
+	 * already ran. Returns why the call still in flight must now be refused, else null.
+	 */
+	absorbAwaitedEffects?: (effects: ReadonlyArray<MiddlewareEffect>, input: MiddlewareHookInput) => string | null;
 	/**
 	 * Live autonomy level (sd-01 §2.2). Read per admission so hot-reloaded
 	 * settings apply to the next call. The orchestrator wires this to current
@@ -781,16 +788,19 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 					const rewritten = admitRewrite(spec, call, rewrite, options);
 					if ("refusal" in rewritten) block = { kind: "block_tool", reason: rewritten.refusal, severity: "hard-block" };
 					else {
-						call = rewritten.call;
-						decision = rewritten.decision;
-						beforeEffects = [
-							...beforeEffects,
-							{
-								kind: "annotate_tool_result",
-								message: `${spec.name} input rewritten by extension ${rewrite.source}: ${rewrite.reason}`,
-								severity: "info",
-							},
-						];
+						block = await judgeRewrite(spec, call, rewritten, rewrite.source, options, beforeEffects);
+						if (block === null) {
+							call = rewritten.call;
+							decision = rewritten.decision;
+							beforeEffects = [
+								...beforeEffects,
+								{
+									kind: "annotate_tool_result",
+									message: `${spec.name} input rewritten by extension ${rewrite.source}: ${rewrite.reason}`,
+									severity: "info",
+								},
+							];
+						}
 					}
 				}
 			}
@@ -964,12 +974,13 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 		call: ClassifierCall,
 		rewrite: Extract<MiddlewareEffect, { kind: "rewrite_tool_input" }>,
 		options: ToolInvokeOptions | undefined,
-	): { call: ClassifierCall; decision: SafetyDecision } | { refusal: string } => {
+	): { call: ClassifierCall; admitted: ClassifierCall; decision: SafetyDecision } | { refusal: string } => {
 		if (!Value.Check(spec.parameters, rewrite.args))
 			return { refusal: `extension ${rewrite.source} rewrote ${spec.name} input that does not match its schema` };
 		const next: ClassifierCall = { ...call, args: rewrite.args };
-		const outcome = admit(prepareAdmissionCall(spec, next), undefined, options);
-		if (outcome.kind === "execute") return { call: next, decision: outcome.decision };
+		const admitted = prepareAdmissionCall(spec, next);
+		const outcome = admit(admitted, undefined, options);
+		if (outcome.kind === "execute") return { call: next, admitted, decision: outcome.decision };
 		const why =
 			outcome.kind === "park"
 				? "would need operator approval"
@@ -977,6 +988,41 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 					? outcome.verdict.reason
 					: "is not admitted";
 		return { refusal: `extension ${rewrite.source} rewrote ${spec.name} input into a call that ${why}` };
+	};
+
+	/**
+	 * The guards and extension gates judged the arguments the model sent, and a
+	 * rewrite changes what runs. The call that would run goes through the same
+	 * chain, so a rewrite cannot reach what a guard would have refused (a
+	 * protected path, a repeat). A rewrite that restates the arguments is not
+	 * judged twice, which keeps one call from being counted twice. A rewrite
+	 * returned by this second awaited pass is not applied, so rewrites do not chain.
+	 */
+	const judgeRewrite = async (
+		spec: ToolSpec,
+		original: ClassifierCall,
+		rewritten: { admitted: ClassifierCall; decision: SafetyDecision },
+		source: string,
+		options: ToolInvokeOptions | undefined,
+		priorEffects: ReadonlyArray<MiddlewareEffect>,
+	): Promise<Extract<MiddlewareEffect, { kind: "block_tool" }> | null> => {
+		if (isDeepStrictEqual(original.args ?? {}, rewritten.admitted.args ?? {})) return null;
+		const sync = runToolHook("before_tool", spec, rewritten.admitted, rewritten.decision, options);
+		let block = firstBlockToolEffect(sync);
+		if (!block && deps.middleware?.hasAwaitedHook?.("before_tool", spec.name)) {
+			const awaited = await runAwaitedToolHook("before_tool", spec, rewritten.admitted, rewritten.decision, options, [
+				...priorEffects,
+				...sync,
+			]);
+			block = firstBlockToolEffect(awaited);
+		}
+		return block === null
+			? null
+			: {
+					kind: "block_tool",
+					reason: `extension ${source} rewrote ${spec.name} input into a call that is blocked: ${block.reason}`,
+					severity: "hard-block",
+				};
 	};
 
 	/**
@@ -1020,7 +1066,23 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 		} catch {
 			// Advisory sink, as in the synchronous phase.
 		}
-		return effects;
+		if (!deps.absorbAwaitedEffects) return effects;
+		try {
+			const refusal = deps.absorbAwaitedEffects(effects, input);
+			return refusal === null ? effects : [...effects, { kind: "block_tool", reason: refusal, severity: "hard-block" }];
+		} catch (err) {
+			// A protection that cannot be recorded must not let the call through.
+			return hook === "before_tool"
+				? [
+						...effects,
+						{
+							kind: "block_tool",
+							reason: `protected artifact state could not be updated: ${err instanceof Error ? err.message : String(err)}`,
+							severity: "hard-block",
+						},
+					]
+				: effects;
+		}
 	};
 
 	/**

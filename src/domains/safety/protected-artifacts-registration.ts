@@ -11,12 +11,7 @@
  * evaluation, preserving the registry's former post-hooks recheck semantics.
  */
 
-import type {
-	MiddlewareEffect,
-	MiddlewareHookEvaluationContext,
-	MiddlewareHookInput,
-	MiddlewareHookRegistration,
-} from "../middleware/index.js";
+import type { MiddlewareEffect, MiddlewareHookInput, MiddlewareHookRegistration } from "../middleware/index.js";
 import { classify } from "./action-classifier.js";
 import {
 	type ProtectedArtifact,
@@ -48,6 +43,12 @@ export interface ProtectedArtifactsRegistration extends MiddlewareHookRegistrati
 	replaceState(state: ProtectedArtifactState): void;
 	/** Preserve last-known state and fail closed after a persistence/reload fault. */
 	markDegraded(reason: string): void;
+	/**
+	 * Apply the protect_path effects an awaited extension hook returned. They
+	 * arrive after this guard's own before_tool step, so the call in flight is
+	 * judged again here: the reason to block it, or null.
+	 */
+	absorbAwaited(input: MiddlewareHookInput, effects: ReadonlyArray<MiddlewareEffect>): string | null;
 }
 
 export type ProtectedArtifactsHealth = { kind: "healthy" } | { kind: "degraded"; reason: string; since: string };
@@ -85,8 +86,8 @@ export function createProtectedArtifactsRegistration(
 		}
 	};
 
-	const absorb = (input: MiddlewareHookInput, context: MiddlewareHookEvaluationContext | undefined): void => {
-		for (const effect of context?.priorEffects ?? []) {
+	const absorb = (input: MiddlewareHookInput, effects: ReadonlyArray<MiddlewareEffect>): void => {
+		for (const effect of effects) {
 			if (effect.kind !== "protect_path") continue;
 			const artifact = artifactFromEffect(effect, input);
 			state = protectArtifact(state, artifact);
@@ -121,8 +122,12 @@ export function createProtectedArtifactsRegistration(
 			health = { kind: "healthy" };
 		},
 		markDegraded,
+		absorbAwaited(input, effects) {
+			absorb(input, effects);
+			return input.hook === "before_tool" ? blockReason(input) : null;
+		},
 		evaluate(input, context): ReadonlyArray<MiddlewareEffect> {
-			absorb(input, context);
+			absorb(input, context?.priorEffects ?? []);
 			if (input.hook !== "before_tool") return [];
 			const reason = blockReason(input);
 			if (reason === null) return [];

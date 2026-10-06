@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { registerDevRoot, releaseDevRoots } from "../../core/dev-roots.js";
 import { recordPackageActivity } from "../../core/package-activity.js";
+import { projectPackagesTrusted } from "../../core/workspace-trust.js";
 import { extensionIdentity } from "./activity.js";
 import { evaluateClioCompatibility } from "./compatibility.js";
 import { findExtensionManifestPath, loadManifestFromRoot } from "./discovery.js";
@@ -103,17 +104,39 @@ export class ExtensionDevScope implements ExtensionSessionOverlay {
 
 	constructor(private readonly cwd: () => string) {}
 
-	/** Folders under the workspace's dev directory that hold a manifest. */
+	/**
+	 * Folders under the workspace's dev directory that hold a manifest. A cloned
+	 * repository can ship one, so they are claimed only in a workspace whose
+	 * project extensions the operator approved; `add` stays the explicit path.
+	 */
 	discover(): string[] {
-		const base = path.join(this.cwd(), DEV_EXTENSIONS_DIR);
+		if (!projectPackagesTrusted(this.cwd(), "extensions")) return [];
 		const found: string[] = [];
+		for (const root of this.devFolders()) {
+			if (this.roots.has(root)) continue;
+			if (this.claim(root) !== null) continue;
+			found.push(root);
+		}
+		return found;
+	}
+
+	/** Dev folders `discover` skips because the workspace's project extensions are not approved. */
+	withheld(): string[] {
+		return projectPackagesTrusted(this.cwd(), "extensions")
+			? []
+			: this.devFolders().filter((root) => !this.roots.has(root));
+	}
+
+	private devFolders(): string[] {
+		const base = path.join(this.cwd(), DEV_EXTENSIONS_DIR);
 		let names: string[];
 		try {
 			names = readdirSync(base).sort();
 		} catch {
 			// No dev directory yet; the model or the operator may create one later.
-			return found;
+			return [];
 		}
+		const folders: string[] = [];
 		for (const name of names) {
 			const root = path.join(base, name);
 			if (name.startsWith(".") || findExtensionManifestPath(root) === null) continue;
@@ -123,11 +146,9 @@ export class ExtensionDevScope implements ExtensionSessionOverlay {
 				// Removed between listing and stat.
 				continue;
 			}
-			if (this.roots.has(root)) continue;
-			if (this.claim(root) !== null) continue;
-			found.push(root);
+			folders.push(root);
 		}
-		return found;
+		return folders;
 	}
 
 	/**

@@ -2694,6 +2694,8 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		safety,
 		middleware,
 		onMiddlewareEffects: (effects) => middlewareToolChoice.apply(effects),
+		// Awaited extension hooks return after the guard's own before_tool step.
+		absorbAwaitedEffects: (effects, input) => protectedArtifactsGuard.absorbAwaited(input, effects),
 		autonomy: resolveEffectiveAutonomy,
 		// System One reads what the deterministic checks cannot: content other people
 		// wrote, and an unrecognized command that yolo would run unread. Both are read
