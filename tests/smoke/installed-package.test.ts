@@ -929,7 +929,7 @@ describe("smoke/installed package", { concurrency: false }, () => {
 				authored.entries.map((entry) => `${entry.kind}:${entry.name}`).sort(),
 				"the installed marketplace must expose every bundled package",
 			);
-			strictEqual(authored.entries.length, 35, "catalog contains 34 bundled packages and one remote package");
+			strictEqual(authored.entries.length, 38, "catalog contains 37 bundled packages and one remote package");
 
 			const standaloneSkill = authored.entries.find((entry) => entry.kind === "skill");
 			ok(standaloneSkill);
@@ -941,14 +941,17 @@ describe("smoke/installed package", { concurrency: false }, () => {
 					continue;
 				}
 				const packedSource = resolve(packageRoot, "library", entry.sourceUrl);
-				strictEqual(discovered.entries.find((item) => item.name === entry.name)?.sourceUrl, packedSource);
+				strictEqual(
+					discovered.entries.find((item) => item.kind === entry.kind && item.name === entry.name)?.sourceUrl,
+					packedSource,
+				);
 				strictEqual(
 					relative(packageRoot, packedSource).split(sep)[0],
 					"library",
 					`package source ${packedSource} must resolve strictly beneath installed package library/`,
 				);
 				strictEqual(pluginContentDigest(packedSource), entry.sha256, `packed integrity: ${entry.name}`);
-				if (entry !== standaloneSkill && entry.name !== "materio") continue;
+				if (entry !== standaloneSkill && !(entry.kind === "plugin" && entry.name === "materio")) continue;
 				const installed = (await libraryJson(["library", "install", `${entry.kind}:${entry.name}`, "--project"])) as {
 					path: string;
 					sha256: string;
