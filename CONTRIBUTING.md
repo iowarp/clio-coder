@@ -204,9 +204,9 @@ App a release-promotion bypass. Preserve `ci (22)` and `ci (24)` as required
 checks; those results already passed on the source commit being promoted.
 Never grant an App blanket bypass of published-tag immutability.
 
-Workflow changes can be committed and rehearsed on `v062` without publishing
-0.6.2. Continue development there; decide its product scope and version metadata
-when the owner asks to cut it.
+Workflow changes can be committed and rehearsed on the version branch without
+publishing. Decide the next release's product scope and version metadata when the
+owner asks to cut it.
 
 ## README contract
 
