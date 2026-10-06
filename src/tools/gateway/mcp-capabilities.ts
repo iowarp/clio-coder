@@ -492,8 +492,9 @@ export function createMcpCapabilitySource(options: McpCapabilitySourceOptions): 
 		const controller = new AbortController();
 		const { declaration } = state;
 		// PERF W3: reserve ownership before the lazy import, so close can fence acquisition.
-		const loaded = import("../../domains/gateway/mcp/connection-lifecycle.js").then(({ createMcpConnection }) =>
-			createMcpConnection({
+		const loaded = (async () => {
+			const { createMcpConnection } = await import("../../domains/gateway/mcp/connection-lifecycle.js");
+			return createMcpConnection({
 				signal: controller.signal,
 				acquire: () => clientFactory(
 					{
@@ -520,8 +521,8 @@ export function createMcpCapabilitySource(options: McpCapabilitySourceOptions): 
 					state.client = client;
 					installExitHook();
 				},
-			}),
-		);
+			});
+		})();
 		let closing: Promise<McpTeardownOutcome> | null = null;
 		const close = (): Promise<McpTeardownOutcome> => {
 			controller.abort();
@@ -551,6 +552,7 @@ export function createMcpCapabilitySource(options: McpCapabilitySourceOptions): 
 						state.unregistrable.push(tool.name);
 						continue;
 					}
+					if (closed || controller.signal.aborted || state.client !== client || state.failure !== null) return;
 					registry.register(makeSpec(state, tool, name));
 					state.registered.push(name);
 				}
