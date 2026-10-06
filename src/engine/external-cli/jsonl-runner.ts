@@ -87,7 +87,7 @@ export function startJsonlCliRun(
 	emit: WorkerEventEmit,
 	dependencies: JsonlCliDependencies = {},
 ): WorkerRunHandle {
-	input.signal?.throwIfAborted();
+	if (input.signal?.aborted === true) throw input.signal.reason;
 	const sourceEnv = dependencies.environment ?? process.env;
 	const cwd = resolveSafeCwd(input.cwd, dependencies.workspaceRoot ?? process.cwd());
 	const configDir = connector.configDirEnv ? sourceEnv[connector.configDirEnv] : undefined;

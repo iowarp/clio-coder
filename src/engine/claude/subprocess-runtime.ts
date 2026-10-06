@@ -265,7 +265,7 @@ export function startClaudeCodeWorkerRun(
 	emit: WorkerEventEmit,
 	dependencies: ClaudeRuntimeDependencies = {},
 ): WorkerRunHandle {
-	input.signal?.throwIfAborted();
+	if (input.signal?.aborted === true) throw input.signal.reason;
 	const sourceEnv = dependencies.environment ?? process.env;
 	const args = buildClaudeCodeArgs(input);
 	const prompt = buildClaudeCodePrompt(input);

@@ -206,7 +206,7 @@ export function startCodexCliWorkerRun(
 	emit: WorkerEventEmit,
 	dependencies: CodexRuntimeDependencies = {},
 ): WorkerRunHandle {
-	input.signal?.throwIfAborted();
+	if (input.signal?.aborted === true) throw input.signal.reason;
 	const sourceEnv = dependencies.environment ?? process.env;
 	const args = buildCodexExecArgs(input);
 	const prompt = buildCodexExecPrompt(input);

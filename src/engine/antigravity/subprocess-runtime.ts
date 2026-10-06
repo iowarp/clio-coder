@@ -365,7 +365,7 @@ export function startAntigravityWorkerRun(
 	emit: WorkerEventEmit,
 	dependencies: AntigravityRuntimeDependencies = {},
 ): WorkerRunHandle {
-	input.signal?.throwIfAborted();
+	if (input.signal?.aborted === true) throw input.signal.reason;
 	const sourceEnv = dependencies.environment ?? process.env;
 	const args = buildAgyArgs(input);
 	const stdinLine = buildAgyStdinLine(input);
