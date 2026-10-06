@@ -161,6 +161,14 @@ export function readPluginCatalog(file: string, diagnostics: string[]): LibraryP
 				return [];
 			}
 			const provides = providedResources(item.provides, item.name, diagnostics);
+			if (
+				item.plugin !== undefined &&
+				(item.kind !== "extension" || typeof item.plugin !== "string" || !isPluginId(item.plugin))
+			) {
+				diagnostics.push(`library index plugin ignored (only an extension names a plugin it serves): ${item.name}`);
+			}
+			const serves =
+				item.kind === "extension" && typeof item.plugin === "string" && isPluginId(item.plugin) ? item.plugin : undefined;
 			return [
 				{
 					kind: item.kind,
@@ -178,6 +186,7 @@ export function readPluginCatalog(file: string, diagnostics: string[]): LibraryP
 						? { triggers: item.triggers.filter((value): value is string => typeof value === "string") }
 						: {}),
 					...(Array.isArray(item.requires) ? { requires: item.requires as LibraryRequirementRef[] } : {}),
+					...(serves ? { plugin: serves } : {}),
 					...(provides ? { provides } : {}),
 					index: path.resolve(file),
 				},

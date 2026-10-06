@@ -6,7 +6,7 @@ import { runCommandVector, type SafeCommandResult } from "../../core/safe-exec.j
 import { safeResourceWrite } from "../../core/safe-resource-write.js";
 import { withStateFileLockSync } from "../../core/state-file-lock.js";
 import { clioConfigDir } from "../../core/xdg.js";
-import { installExtension } from "../extensions/index.js";
+import { installExtension, loadManifestFromRoot } from "../extensions/index.js";
 import {
 	bundledPluginCatalog,
 	fetchPluginSource,
@@ -107,6 +107,7 @@ export function discoverLibrary(options: { catalog?: string; cwd?: string } = {}
 			description: plugin.description,
 			sourceUrl: record?.source ?? plugin.rootPath,
 			origin: "installed",
+			...(plugin.plugin ? { plugin: plugin.plugin } : {}),
 		});
 	}
 	const refusals: Record<string, string> = {};
@@ -208,6 +209,7 @@ export function registerLibraryPackage(
 	const candidate = validateLibraryPackage(local);
 	if (!candidate.valid || !candidate.manifest || !candidate.contentDigest) throw new Error(validationReasons(candidate));
 	const manifest = candidate.manifest;
+	const serves = manifest.clio.kind === "extension" ? loadManifestFromRoot(local).manifest?.plugin : undefined;
 	const entry: LibraryEntry = {
 		kind: manifest.clio.kind ?? "plugin",
 		name: manifest.name,
@@ -217,6 +219,7 @@ export function registerLibraryPackage(
 		sourceUrl: local,
 		origin: "index",
 		...(manifest.clio.requires ? { requires: manifest.clio.requires } : {}),
+		...(serves ? { plugin: serves } : {}),
 	};
 	const file =
 		options.scope === "project" ? path.join(options.cwd ?? process.cwd(), ".clio-coder", "library.yaml") : catalogPath();
@@ -466,10 +469,13 @@ export function resolveLibraryPackage(
 	if (existsSync(local)) {
 		const candidate = validateLibraryPackage(local);
 		if (!candidate.valid || !candidate.manifest) throw new Error(`invalid plugin: ${validationReasons(candidate)}`);
+		const serves =
+			candidate.manifest.clio.kind === "extension" ? loadManifestFromRoot(local).manifest?.plugin : undefined;
 		return {
 			kind: candidate.manifest.clio.kind ?? "plugin",
 			name: candidate.manifest.name,
 			...(candidate.manifest.clio.requires ? { requires: candidate.manifest.clio.requires } : {}),
+			...(serves ? { plugin: serves } : {}),
 			description: candidate.manifest.description ?? "",
 			...(candidate.manifest.version ? { version: candidate.manifest.version } : {}),
 			sourceUrl: local,

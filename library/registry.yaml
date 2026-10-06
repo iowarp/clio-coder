@@ -562,6 +562,7 @@ entries:
     version: 0.2.0
     sourceUrl: extensions/materio
     sha256: 95dbbce9fde341e995d57eec47e1f458bfbb3cd34dd2a46eae68c7af0e2e2b05
+    plugin: materio
     provides:
       - kind: extension
         name: materio

@@ -15,6 +15,7 @@
 import { ENVELOPE_SEAT_BELT, envelopeLines } from "../../domains/extensions/envelope-review.js";
 import type { LibraryImportApplyResult, LibraryImportPlan } from "../../domains/interop/index.js";
 import {
+	describeLibraryPair,
 	type LibraryApplyResult,
 	type LibraryLifecyclePlan,
 	type LibraryPlanStep,
@@ -77,6 +78,10 @@ function reviewRows(step: LibraryPlanStep, review: LibraryStepReview | undefined
 		if (review.envelopeDigest)
 			rows.push(...wrap(theme.fg("annotation", `envelope sha256 ${review.envelopeDigest}`), width));
 	}
+	for (const pair of review.pairs)
+		rows.push(
+			...wrap(theme.fg("info", describeLibraryPair({ kind: step.identity.kind, name: step.identity.name }, pair)), width),
+		);
 	return rows;
 }
 

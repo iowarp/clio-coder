@@ -13,6 +13,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { parse } from "yaml";
+import { loadManifestFromRoot } from "../src/domains/extensions/index.js";
 import { fetchPluginSource, type PluginSource, parsePluginGithubSource } from "../src/domains/plugins/catalog.js";
 import {
 	isLibraryResourceKind,
@@ -88,6 +89,8 @@ export function buildRegistryRow(
 		)
 		.sort((a, b) => a.kind.localeCompare(b.kind) || a.name.localeCompare(b.name))
 		.slice(0, LIBRARY_PROVIDES_LIMITS.entries);
+	// An extension row names the plugin it serves, so a plugin and its extension pair without reading package trees.
+	const serves = manifest.clio.kind === "extension" ? loadManifestFromRoot(root).manifest?.plugin : undefined;
 	return {
 		kind: manifest.clio.kind ?? "plugin",
 		name: manifest.name,
@@ -99,6 +102,7 @@ export function buildRegistryRow(
 		sourceUrl,
 		sha256: result.contentDigest,
 		...(manifest.clio.requires ? { requires: manifest.clio.requires } : {}),
+		...(serves ? { plugin: serves } : {}),
 		...(provides.length ? { provides } : {}),
 	};
 }

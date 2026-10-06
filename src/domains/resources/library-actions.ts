@@ -52,6 +52,7 @@ import {
 	readLibraryInstallRecord,
 	withLibraryScopeLock,
 } from "./library-packages.js";
+import { type LibraryPair, readLibraryPairs } from "./library-pairing.js";
 import {
 	isLibraryKind,
 	type LibraryEntryKind,
@@ -118,6 +119,8 @@ export interface LibraryStepReview {
 	envelopeDigest?: string;
 	/** Update only: what reaches further than the installed copy; empty means no more than it. */
 	growth?: string[];
+	/** The other half of a plugin and extension pair, so the review can say what installing one leaves out. */
+	pairs: LibraryPair[];
 }
 
 export interface LibraryLifecyclePlan {
@@ -127,7 +130,7 @@ export interface LibraryLifecyclePlan {
 	cwd: string;
 	request: LibraryLifecycleRequest;
 	steps: LibraryPlanStep[];
-	/** One entry per step that has an envelope to report; absent on a plan built before this field. */
+	/** One entry per step that has an envelope or a pair to report; absent on a plan built before this field. */
 	reviews?: LibraryStepReview[];
 	applicable: boolean;
 	diagnostics: string[];
@@ -544,23 +547,35 @@ export function planLibraryLifecycle(request: LibraryLifecycleRequest): LibraryL
 		cwd,
 		request,
 		steps,
-		reviews: reviewSteps(id, steps, entries, diagnostics),
+		reviews: reviewSteps(id, cwd, steps, entries, request.catalog, diagnostics),
 		applicable: steps.every((step) => !step.refusal),
 		diagnostics,
 	};
 }
 
 /**
- * The envelope an extension step would install, read from the staged manifest.
- * Reading never runs the package, and a failed read only drops the review,
- * never the plan.
+ * The envelope an extension step would install and the pair it belongs to,
+ * read from the staged manifest and the catalog. Reading never runs the
+ * package, and a failed read only drops the review, never the plan.
  */
 function reviewSteps(
 	planId: string,
+	cwd: string,
 	steps: ReadonlyArray<LibraryPlanStep>,
 	installed: ReadonlyArray<InstalledPlugin>,
+	catalog: string | undefined,
 	diagnostics: string[],
 ): LibraryStepReview[] {
+	let pairs: ReturnType<typeof readLibraryPairs> | undefined;
+	if (steps.some((step) => step.identity.kind === "plugin" || step.identity.kind === "extension")) {
+		try {
+			pairs = readLibraryPairs({ cwd, ...(catalog ? { catalog } : {}) });
+		} catch (error) {
+			diagnostics.push(
+				`plugin and extension pairing unavailable: ${error instanceof Error ? error.message : String(error)}`,
+			);
+		}
+	}
 	const reviews: LibraryStepReview[] = [];
 	for (const step of steps) {
 		const { identity } = step;
@@ -577,7 +592,8 @@ function reviewSteps(
 				);
 			}
 		}
-		if (!envelope) continue;
+		const own = pairs?.get(identity.ref) ?? [];
+		if (!envelope && own.length === 0) continue;
 		reviews.push({
 			ref: identity.ref,
 			scope: identity.scope,
@@ -588,6 +604,7 @@ function reviewSteps(
 						...(envelope.growth ? { growth: envelope.growth } : {}),
 					}
 				: {}),
+			pairs: own,
 		});
 	}
 	return reviews;

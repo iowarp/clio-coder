@@ -50,6 +50,8 @@ export interface LibraryPackageEntry {
 	sha256?: string;
 	origin: "catalog" | "index" | "installed";
 	requires?: LibraryRequirementRef[];
+	/** Extension rows only: the one plugin this extension serves, so a plugin and its extension pair without reading package trees. */
+	plugin?: string;
 	category?: string;
 	audit?: "pass" | "warn" | "fail" | "unknown";
 	triggers?: string[];

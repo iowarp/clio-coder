@@ -8,16 +8,18 @@
  */
 
 import type { PluginScope } from "../../domains/plugins/types.js";
-import type {
-	LibraryCopy,
-	LibraryCopyInspection,
-	LibraryEntryKind,
-	LibraryInventory,
-	LibraryOrigin,
-	LibraryPackageRecord,
-	LibraryProvidedResource,
-	LibraryResource,
-	LibraryResourceKind,
+import {
+	describeLibraryPair,
+	type LibraryCopy,
+	type LibraryCopyInspection,
+	type LibraryEntryKind,
+	type LibraryInventory,
+	type LibraryOrigin,
+	type LibraryPackageRecord,
+	type LibraryPairs,
+	type LibraryProvidedResource,
+	type LibraryResource,
+	type LibraryResourceKind,
 } from "../../domains/resources/index.js";
 import { sanitizeCallTargetText, sanitizeMultilineDisplayText } from "../../domains/safety/call-target.js";
 import { clioTheme, GLYPH } from "../theme/index.js";
@@ -283,7 +285,22 @@ function metaOf(parts: ReadonlyArray<string | (() => string) | undefined>): stri
 		.join(" · ");
 }
 
-function packageDetail(record: LibraryPackageRecord, view: LibraryView, actions: LibraryRowActions): string[] {
+/** One line per partner of a plugin or extension, or none when the package has no pair. */
+function pairLines(
+	subject: { kind: LibraryEntryKind; name: string; ref: string },
+	pairs: LibraryPairs | undefined,
+): string[] {
+	return (pairs?.get(subject.ref as `${LibraryEntryKind}:${string}`) ?? []).map(
+		(pair) => `**${pair.role === "extension" ? "Extension" : "Plugin"}:** ${describeLibraryPair(subject, pair)}`,
+	);
+}
+
+function packageDetail(
+	record: LibraryPackageRecord,
+	view: LibraryView,
+	actions: LibraryRowActions,
+	pairs: LibraryPairs | undefined,
+): string[] {
 	const provider = record.kind !== view.category;
 	const hints = (record.provides ?? []).filter((hint) => view.category === "plugin" || hint.kind === view.category);
 	const lines = [
@@ -311,6 +328,7 @@ function packageDetail(record: LibraryPackageRecord, view: LibraryView, actions:
 	);
 	lines.push(`**Selected scope:** ${view.scope}`);
 	if (record.requires?.length) lines.push(`**Requires:** ${record.requires.join(", ")}`);
+	lines.push(...pairLines(record, pairs));
 	if (view.category !== "plugin" && (record.provides?.length ?? 0) > hints.length)
 		lines.push("Other recipe kinds are listed in the Plugins category.");
 	if (record.provides === undefined && record.copies.length === 0)
@@ -320,7 +338,12 @@ function packageDetail(record: LibraryPackageRecord, view: LibraryView, actions:
 	return lines;
 }
 
-function copyDetail(copy: LibraryCopy, view: LibraryView, actions: LibraryRowActions): string[] {
+function copyDetail(
+	copy: LibraryCopy,
+	view: LibraryView,
+	actions: LibraryRowActions,
+	pairs: LibraryPairs | undefined,
+): string[] {
 	const lines = [
 		`# ${copy.name}`,
 		`**Kind:** ${copy.kind}`,
@@ -347,6 +370,7 @@ function copyDetail(copy: LibraryCopy, view: LibraryView, actions: LibraryRowAct
 		);
 	if (copy.installedAt) lines.push(`**Installed:** ${copy.installedAt}`);
 	lines.push(`**Selected scope:** ${view.scope}`);
+	lines.push(...pairLines(copy, pairs));
 	for (const diagnostic of copy.diagnostics) lines.push(`**Diagnostic:** ${diagnostic}`);
 	for (const reason of actions.reasons) lines.push(`**Note:** ${reason}`);
 	lines.push("", "Press Enter to list this package's members.");
@@ -521,6 +545,8 @@ export interface LibraryRowOptions {
 	inspection?: LibraryCopyInspection | undefined;
 	/** A one-line problem the last read hit, drawn as a notice row rather than swallowed. */
 	failure?: string | undefined;
+	/** Plugin and extension partners by ref; absent means no pairing is shown. */
+	pairs?: LibraryPairs | undefined;
 }
 
 /**
@@ -605,7 +631,7 @@ export function buildLibraryRows(options: LibraryRowOptions): LibraryRowSet {
 						: record.copies.length > 0
 							? LIBRARY_GROUP_INSTALLED
 							: LIBRARY_GROUP_AVAILABLE,
-				detail: () => packageDetail(record, view, actions),
+				detail: () => packageDetail(record, view, actions, options.pairs),
 			});
 		}
 	} else {
@@ -623,7 +649,7 @@ export function buildLibraryRows(options: LibraryRowOptions): LibraryRowSet {
 					]);
 				},
 				group: LIBRARY_GROUP_INSTALLED,
-				detail: () => copyDetail(copy, view, actions),
+				detail: () => copyDetail(copy, view, actions, options.pairs),
 			});
 		}
 		for (const resource of inventory.resources) {

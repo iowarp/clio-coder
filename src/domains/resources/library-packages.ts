@@ -46,8 +46,11 @@ export function readLibraryManifest(root: string): PluginCandidate {
 		...(candidate.valid ? { contentDigest: pluginContentDigest(root) } : {}),
 	};
 }
+/** An installed package as the library lists it; an extension copy also names the plugin it serves. */
+export type LibraryInstalledPackage = InstalledPlugin & { plugin?: string };
+
 /** The library lists installed packages; a dev package is a session overlay and never one of them. */
-export function extensionLibraryCopy(entry: InstalledExtension): InstalledPlugin {
+export function extensionLibraryCopy(entry: InstalledExtension): LibraryInstalledPackage {
 	if (entry.scope === "dev") throw new Error(`dev extension ${entry.id} is not a library package`);
 	const { provenance, overriddenBy, ...rest } = entry;
 	return {
@@ -61,7 +64,10 @@ export function extensionLibraryCopy(entry: InstalledExtension): InstalledPlugin
 		trust: "trusted",
 	};
 }
-export function listInstalledLibraryPackages(cwd = process.cwd(), options: PluginListOptions = {}): InstalledPlugin[] {
+export function listInstalledLibraryPackages(
+	cwd = process.cwd(),
+	options: PluginListOptions = {},
+): LibraryInstalledPackage[] {
 	return [
 		...listInstalledPlugins(cwd, options),
 		...listInstalledExtensions(cwd, options)

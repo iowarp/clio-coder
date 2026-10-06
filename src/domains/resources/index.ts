@@ -86,6 +86,13 @@ export {
 	readLibraryInventory,
 } from "./library-inventory.js";
 export {
+	describeLibraryPair,
+	type LibraryPair,
+	type LibraryPairs,
+	libraryPairsFrom,
+	readLibraryPairs,
+} from "./library-pairing.js";
+export {
 	isLibraryResourceKind,
 	LIBRARY_RESOURCE_KINDS,
 	type LibraryProvidedResource,

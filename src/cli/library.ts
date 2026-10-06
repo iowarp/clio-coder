@@ -33,6 +33,7 @@ import {
 	listInstalledLibraryPackages as listInstalledPlugins,
 	readLibraryManifest as readPluginManifest,
 } from "../domains/resources/library-packages.js";
+import { describeLibraryPair } from "../domains/resources/library-pairing.js";
 import { isLibraryKind, isLibraryResourceKind, type LibraryEntryKind } from "../domains/resources/library-types.js";
 import { printError, printOk } from "./shared.js";
 
@@ -205,7 +206,7 @@ function lifecycleJson(
 }
 
 /**
- * What each reviewed step would be allowed to do, printed
+ * What each reviewed step would be allowed to do and how it pairs, printed
  * before anything is committed so a plain run and a dry run show the same plan.
  */
 function printStepReviews(plan: LibraryLifecyclePlan): void {
@@ -224,6 +225,10 @@ function printStepReviews(plan: LibraryLifecyclePlan): void {
 			process.stdout.write(`  ${ENVELOPE_SEAT_BELT}\n`);
 			if (review.envelopeDigest) process.stdout.write(`  envelope sha256 ${review.envelopeDigest}\n`);
 		}
+		for (const pair of review.pairs)
+			process.stdout.write(
+				`${review.ref} (${review.scope}): ${describeLibraryPair({ kind: step.identity.kind, name: step.identity.name }, pair)}\n`,
+			);
 	}
 }
 
