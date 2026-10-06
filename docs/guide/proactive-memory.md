@@ -5,16 +5,20 @@ The [evidence and memory contract](../architecture/evidence-and-memory.md) expla
 After a durable context reduction, restoration uses a commit-scoped offer: stale content jobs and buffered reminders lose authority, known usage remains attributed, and restoration is consumed only after an admitted installation. See [Context continuity and recovery](context-continuity.md) for the lifecycle and its limits.
 
 Clio Coder's proactive task memory records requirements, environment facts, failed
-attempts, and diagnoses in bounded session banks. Rules and an optional model
-step select visible reminders at tool or turn boundaries. The design follows
+attempts, and diagnoses in bounded session banks. Rules and a model step select
+visible reminders at tool or turn boundaries. The design follows
 Wu et al., *Remember When It Matters: Proactive Memory Agent for Long-Horizon
 Agents* (2026), adapted to Clio Coder's middleware and model routing.
 
-The rules-only tier is enabled by default and makes no model calls. An LLM memory
-tier is opt-in through the independent `context.memory.target` and
-`context.memory.model` route. The action agent's system prompt and tool surface
-do not change, and disabling `context.memory.enabled` removes observation, bank
-writes, model resolution, reminders, handoff offers, and handoff seeding.
+The rules tier is always part of memory and makes no model calls. The LLM memory
+tier runs on the independent `context.memory.target` and `context.memory.model`
+route when both are set. When neither is set, it runs on the active chat route
+(`chat.target` and `chat.model`), so a default installation with a chat route
+spends model calls on memory. Memory stays in the rules tier only when no route
+resolves, for example when no chat route is configured. The action agent's system
+prompt and tool surface do not change, and disabling `context.memory.enabled`
+removes observation, bank writes, model resolution, reminders, handoff offers,
+and handoff seeding.
 
 ## Inspect or configure memory
 
@@ -36,8 +40,8 @@ flowchart LR
   T[tool and lifecycle hooks] --> R[memory intervention registration]
   R --> B[session task bank]
   R --> D{trigger boundary}
-  D -->|rules only| S[deterministic policy]
-  D -->|background configured| L[two-phase local model policy]
+  D -->|no model route resolves| S[deterministic policy]
+  D -->|memory route or active chat route| L[two-phase model policy]
   S --> V[visible advisory reminder]
   L --> V
   V --> U[next tool-batch or prompt boundary and session ledger]
@@ -160,7 +164,7 @@ All keys live under `context.memory` in `settings.yaml` (`src/core/defaults.ts`,
 | Key | Default | Minimum | Effect |
 | --- | --- | --- | --- |
 | `context.memory.enabled` | `true` | | Enables observation, task bank writes, and reminder injection. `false` is the kill switch for the whole plane. |
-| `context.memory.target` | `null` | | Target for the optional background model tier. A value that names no configured target resets to `null`. |
+| `context.memory.target` | `null` | | Target for a dedicated background model route. A value that names no configured target resets to `null`. With `target` and `model` both unset, the model tier runs on the active chat route. |
 | `context.memory.model` | `null` | | Wire model on that target. Cleared when `target` is unset; defaults to the target's `defaultModel` when `target` is set and `model` is not. |
 | `context.memory.cadenceToolCalls` | `10` | `2` | Minimum completed-tool interval between background interventions. |
 | `context.memory.trajectorySteps` | `8` | `1` | Completed tool-trajectory window analyzed during background evaluation. |
@@ -297,9 +301,11 @@ restoration belong to the rules tier and need no model.
 ## Cost and defaults
 
 The rules tier is enabled by `context.memory.enabled` and makes no model calls.
-The LLM tier is opt-in through `context.memory.target` and
-`context.memory.model`; an unset background role does not resolve a client.
-Its default timeout is `context.memory.timeoutMs: 60000`.
+The LLM tier resolves its route from `context.memory.target` and
+`context.memory.model`. With both unset it follows the live chat route: each
+step uses whatever `chat.target` and `chat.model` are at that moment, so memory
+tokens are billed to the chat model by default. The rules tier answers alone when
+no chat route is configured. Its default timeout is `context.memory.timeoutMs: 60000`.
 
 Each model step contributes a cost entry under `background-memory`, shown as
 `memory steps` in `/usage`, and a durable token-usage and cost row in
@@ -313,9 +319,10 @@ gateway URL alone does not imply one request slot or one physical server.
 
 ### Dedicated routing, chat fallback and endpoint capacity
 
-Clio Coder prefers the explicitly configured memory target and model, uses the active
-chat route when that one is known unavailable, and skips the step entirely when
-the endpoint has no request capacity left.
+Clio Coder uses the explicitly configured memory target and model when both are
+set. With neither set, it uses the active chat route. When an explicit route is
+known unavailable, it uses the active chat route for that step. A step is skipped
+entirely when the endpoint has no request capacity left.
 
 <details>
 <summary>Exactly which failures permit a chat attempt, and how capacity is counted</summary>
@@ -328,8 +335,11 @@ information-flow refusal of the dedicated destination, permits one chat attempt
 within the original remaining deadline. It does not retry after a
 timeout, cancellation, session/branch switch, malformed envelope, or a model's
 explicit silence. The fallback never falls back again. Both routes unavailable
-produce a visible `client_error` outcome. An unset memory role remains rules-only;
-chat fallback does not enable model-based memory by default.
+produce a visible `client_error` outcome. A memory role with no target and model
+is not a fallback case: it uses the active chat route directly, with no second
+route behind it, so an unreachable chat route records `client_error` for the step
+and the rules tier keeps working. An explicit route that equals the chat route
+has no distinct fallback either.
 
 An information-flow refusal means restricted context cannot reach the selected
 background model. The step records `information_flow_blocked`, the telemetry row
@@ -384,9 +394,10 @@ upstream thinking-off mode, so an off request resolves to low effort. The parser
 discards reasoning blocks and keeps the envelope; the output budget allows room
 for a reasoning preamble.
 
-No memory model is selected by default. The role uses the same target machinery
-as chat and workers, so its model can be local, remote, or shared with chat when
-request capacity permits. Local co-residency requires the models, KV caches, and
+No dedicated memory model is selected by default, so memory uses the chat model.
+Set `context.memory.target` and `context.memory.model` to move it to a smaller
+model. The role uses the same target machinery as chat and workers, so its model
+can be local, remote, or shared with chat when request capacity permits. Local co-residency requires the models, KV caches, and
 parallel slots to fit available memory.
 
 ## Operator setup
@@ -405,8 +416,11 @@ context:
     timeoutMs: 60000
 ```
 
-With `context.memory.target` and `context.memory.model` unset, Clio Coder stays in the
-zero-cost rules tier.
+With `context.memory.target` and `context.memory.model` unset, the model tier runs on
+the active chat route. `/memory` shows `Memory route:` with `chat route (no memory
+model set)` and the target and model in use, and the route line in the system
+prompt reads `memory =chat (no memory model set)`. Set `context.memory.enabled:
+false` for no memory model calls at all.
 
 `/memory` shows the current tier, last decision, approved durable lessons, the
 live bank, and a bounded history of the last twenty memory steps with their
@@ -480,8 +494,9 @@ bounds the visible reminder and ordinary completion budget but does not change
 the background model's strict output grammar.
 
 For an immediate kill switch, set `context.memory.enabled` to `false` in
-`/settings`. Removing the background target instead returns to rules-only
-operation while leaving deterministic protection active.
+`/settings`. Removing the background target instead returns the role to the active
+chat route and keeps the model tier running; choosing **Chat route (no memory model
+set)** in the Memory connection picker does the same.
 
 ## Where what the tier writes ends up
 
