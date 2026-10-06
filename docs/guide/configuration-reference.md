@@ -127,7 +127,7 @@ Default chat settings control interactive conversation routing, reasoning effort
 | `interface.fullscreenScrollbar` | `"auto"` | `hidden`, `auto` or `always`. | restart required |
 | `interface.smoothStreaming` | `"auto"` | `off`, `auto` or `on`. Presentation-only pacing of streamed text and thinking. | hot reload |
 | `interface.desktopNotifications` | `false` | Boolean. Content-free alerts when a turn ends, a detached batch settles or an approval parks. Interactive TTY sessions only. | next turn |
-| `interface.panes.enabled` | `"off"` | `auto`, `embedded` or `off`. `auto` uses a detected pane host. `embedded` is accepted and degrades to no panes until private-session hosting ships (planned, not available). | restart required |
+| `interface.panes.enabled` | `"embedded"` | `auto`, `embedded` or `off`. `embedded` lets bare `clio-coder` open a workspace in a pane host after one remembered question, and joins a host it is started inside. `auto` uses a detected pane host and never starts one. `off` never detects or opens a pane. | restart required |
 | `interface.panes.notifications` | `"failures"` | `failures`, `all` or `off`. Which run states raise a pane-host toast. | hot reload |
 | `interface.panes.layout` | `"off"` | `off`, `workers` or `cockpit`. Panes composed at interactive boot. | restart required |
 | `interface.panes.workers.ratio` | `0.34` | Number from 0.05 to 0.5. Share of the width the workers dock takes. | hot reload |
