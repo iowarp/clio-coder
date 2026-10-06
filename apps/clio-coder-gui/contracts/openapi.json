@@ -17842,7 +17842,7 @@
 												},
 												"budget": {
 													"type": "object",
-													"required": ["ceilingUsd", "currentUsd", "contractUsd"],
+													"required": ["ceilingUsd", "currentUsd", "playbookUsd"],
 													"properties": {
 														"ceilingUsd": {
 															"type": "number",
@@ -17852,7 +17852,7 @@
 															"type": "number",
 															"minimum": 0
 														},
-														"contractUsd": {
+														"playbookUsd": {
 															"anyOf": [
 																{
 																	"type": "number",

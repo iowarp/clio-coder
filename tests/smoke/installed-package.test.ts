@@ -23,7 +23,7 @@ import { parse as parseYaml } from "yaml";
 import { checkInstalledBrowser } from "../../apps/clio-coder-gui/tests/harness/installed-browser.js";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { resetXdgCache } from "../../src/core/xdg.js";
-import { listFleetContracts } from "../../src/domains/agents/fleet-contract.js";
+import { listPlaybooks } from "../../src/domains/agents/playbook.js";
 import { type AgentRecipeDiagnostic, loadRecipesFromDir } from "../../src/domains/agents/registry.js";
 import { pluginContentDigest } from "../../src/domains/plugins/index.js";
 import { clearPluginSnapshots } from "../../src/domains/plugins/resources.js";
@@ -994,14 +994,14 @@ describe("smoke/installed package", { concurrency: false }, () => {
 					ok(!prompt.content.includes("${component:"), `unresolved component ref in ${prompt.name}`);
 				}
 
-				const fleetListings = listFleetContracts(libraryProject);
+				const fleetListings = listPlaybooks(libraryProject);
 				const materioFleet = fleetListings.find(
 					(fleet) => fleet.source === "plugin" && fleet.name === "materio-execute-task",
 				);
-				ok(materioFleet, "Materio fleet contract must be discovered through listFleetContracts");
+				ok(materioFleet, "Materio playbook must be discovered through listPlaybooks");
 				strictEqual(materioFleet.error, null, materioFleet.error ?? undefined);
-				ok(materioFleet.contract, "fleet contract must be parsed");
-				strictEqual(materioFleet.contract.steps.length, 2, "Materio fleet must define 2 steps");
+				ok(materioFleet.playbook, "playbook must be parsed");
+				strictEqual(materioFleet.playbook.steps.length, 2, "Materio playbook must define 2 steps");
 			});
 
 			const lazyChunks = emittedFilesContaining(packageRoot, TREE_SITTER_MARKER);
@@ -1025,7 +1025,7 @@ describe("smoke/installed package", { concurrency: false }, () => {
 			ok(codewiki.symbols.some((symbol) => symbol.name === "installedLazySymbol"));
 			// Operator examples and the plain-JS bootstrap coexist with the installed
 			// recipe library in the same foreign project, outside the source checkout.
-			const recipesBeforeExtension = (await libraryJson(["library", "recipes", "materio"])) as { resources: unknown[] };
+			const recipesBeforeExtension = (await libraryJson(["library", "components", "materio"])) as { resources: unknown[] };
 			strictEqual(recipesBeforeExtension.resources.length, 30);
 			const extensionInstall = await run(
 				bin,
@@ -1120,7 +1120,7 @@ describe("smoke/installed package", { concurrency: false }, () => {
 			);
 			const measurementRun = await run(measurementProbe, [workerChunk], libraryProject, libraryEnv);
 			strictEqual(measurementRun.code, 0, measurementRun.stderr);
-			const recipesAfterExtension = (await libraryJson(["library", "recipes", "materio"])) as { resources: unknown[] };
+			const recipesAfterExtension = (await libraryJson(["library", "components", "materio"])) as { resources: unknown[] };
 			// Observation timestamps vary; recipe identity, ownership and availability do not.
 			deepStrictEqual(recipesAfterExtension.resources, recipesBeforeExtension.resources);
 			const publicTypes = JSON.parse(readFileSync(join(packageRoot, "package.json"), "utf8")).exports["./extensions"]

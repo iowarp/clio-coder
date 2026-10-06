@@ -63,7 +63,8 @@ Usage:
   clio-coder uninstall            remove all Clio Coder state; --remove-binary also unlinks the launcher
   clio-coder upgrade              upgrade Clio Coder and run pending migrations
   clio-coder agents               list discovered agent recipes
-  clio-coder fleet nodes|new|validate|graph|commands|run|status|view|verify|drain|resume  fleet authoring, execution, status, verification, and admission control
+  clio-coder playbook list|new|validate|graph|commands  list, author, validate, and graph playbooks
+  clio-coder fleet nodes|run|status|view|verify|drain|resume  run playbooks on the fleet, status, verification, and admission control
   clio-coder evidence             build, list, or inspect evidence artifacts
   clio-coder memory               list, propose, promote, approve, reject, or prune memory
   clio-coder usage report         cross-session usage facts and opportunities (experimental)
@@ -319,6 +320,7 @@ const COMMAND_HANDLERS = new Map<string, CommandHandler>([
 				? (await import("./fleet-nodes.js")).runFleetNodes(subArgs.slice(1))
 				: (await import("./fleet.js")).runFleetCommand(subArgs),
 	],
+	["playbook", async (subArgs) => (await import("./playbook.js")).runPlaybookCommand(subArgs)],
 	["library", async (subArgs) => (await import("./library.js")).runLibraryCommand(subArgs)],
 	["tasks", async (subArgs) => (await import("./tasks.js")).runTasksCommand(subArgs)],
 	["mcp", async (subArgs) => (await import("./mcp.js")).runMcpCommand(subArgs)],

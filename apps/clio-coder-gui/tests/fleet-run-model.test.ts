@@ -17,7 +17,7 @@ test("a compiled plan reads as waves of steps with placement, scope and declared
 		planHash: "b".repeat(64),
 		stepCount: 2,
 		truncated: false,
-		budget: { ceilingUsd: 5, currentUsd: 0.25, contractUsd: 1 },
+		budget: { ceilingUsd: 5, currentUsd: 0.25, playbookUsd: 1 },
 		waves: [
 			{
 				index: 0,

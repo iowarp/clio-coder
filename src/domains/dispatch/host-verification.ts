@@ -9,7 +9,7 @@ import { buildSandboxInvocation } from "../../core/sandbox/invocation.js";
 import { withStateFileLockSync } from "../../core/state-file-lock.js";
 import { clioStateDir } from "../../core/xdg.js";
 import { JUDGED_CHECK_MAX_OUTPUT_BYTES, judgeNumericTexts, judgePerfTexts } from "../../tools/verify/scripts.js";
-import { FLEET_COMMAND_BASE_ENV, type FleetCommand } from "../agents/fleet-commands.js";
+import { PLAYBOOK_COMMAND_BASE_ENV, type PlaybookCommand } from "../agents/playbook-commands.js";
 import { CODE_STEP_CAPTURE_MAX_BYTES, runCodeStep } from "./code-step.js";
 import type { DispatchRequest } from "./contract.js";
 import { hostCheckBaseNote } from "./host-verification-note.js";
@@ -119,8 +119,8 @@ function storeMemoEntry(stateDir: string, entry: MemoEntry): void {
 	});
 }
 
-function memoKey(command: FleetCommand, judgment: string, fingerprint: string, env: NodeJS.ProcessEnv): string {
-	const names = [...FLEET_COMMAND_BASE_ENV, ...command.env];
+function memoKey(command: PlaybookCommand, judgment: string, fingerprint: string, env: NodeJS.ProcessEnv): string {
+	const names = [...PLAYBOOK_COMMAND_BASE_ENV, ...command.env];
 	const values = Object.fromEntries(names.map((name) => [name, env[name] ?? null]));
 	return sha256(JSON.stringify({ fingerprint, judgment, env: values }));
 }
@@ -262,7 +262,7 @@ export async function compareHostVerificationBase(input: {
 				sandbox.executable,
 			);
 			const env = Object.fromEntries(
-				FLEET_COMMAND_BASE_ENV.flatMap((name) => {
+				PLAYBOOK_COMMAND_BASE_ENV.flatMap((name) => {
 					const value = (input.env ?? process.env)[name];
 					return value === undefined ? [] : [[name, value]];
 				}),
@@ -379,7 +379,7 @@ async function runResolvedCheck(input: {
 	onDiagnostic?: (error: unknown) => void;
 }): Promise<{ check: RunHostVerificationCheck; outputExcerpt: string }> {
 	const resolvedCheck = input.resolvedCheck;
-	const command: FleetCommand = {
+	const command: PlaybookCommand = {
 		id: resolvedCheck.check,
 		argv: [...resolvedCheck.argv],
 		cwd: "",

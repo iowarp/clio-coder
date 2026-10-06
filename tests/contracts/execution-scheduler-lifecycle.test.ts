@@ -1,7 +1,7 @@
 import { deepStrictEqual, ok, rejects, strictEqual } from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { afterEach, beforeEach, describe, it } from "node:test";
-import { parseFleetContract } from "../../src/domains/agents/fleet-contract.js";
+import { parsePlaybook } from "../../src/domains/agents/playbook.js";
 import { readAgentLedger } from "../../src/domains/dispatch/agent-ledger-store.js";
 import type { ExecutionPlanAgentStep } from "../../src/domains/dispatch/execution-plan.js";
 import { compileExecutionPlan } from "../../src/domains/dispatch/execution-plan.js";
@@ -416,9 +416,9 @@ describe("execution scheduler lifecycle", () => {
 
 	it("hands a build-test repair both the failed check and the previous attempt's report", async () => {
 		const path = new URL("../../src/domains/agents/playbooks/build-test.md", import.meta.url);
-		const contract = parseFleetContract(readFileSync(path, "utf8"), path.pathname);
+		const playbook = parsePlaybook(readFileSync(path, "utf8"), path.pathname);
 		const p = compileFleetExecutionPlan({
-			contract,
+			playbook,
 			task: "Fix the parser",
 			resolveAgent: () => ({
 				requestedAuthority: "workspace-edit",

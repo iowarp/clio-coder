@@ -5,7 +5,7 @@ export { FleetCapability };
 import type { Static } from "typebox";
 import { Type } from "typebox";
 
-// `_clio-coder/fleet/preview` and `/run`: the terminal's `/fleet run <name>` approval. A preview
+// `_clio-coder/fleet/preview` and `/run`: the terminal's `/fleet run <playbook>` approval. A preview
 // compiles and dispatches nothing; a run starts only the plan whose hash was approved. The agent
 // bounds a preview at 64 steps, a field at 512 bytes and diagnostics at 32 lines of 1 KiB.
 const closed = { additionalProperties: false };

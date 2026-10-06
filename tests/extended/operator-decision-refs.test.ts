@@ -143,7 +143,7 @@ describe("active decisions on actual operator dispatch paths", () => {
 							},
 							loadFleetSources: () => ({
 								commands: null,
-								contract: {
+								playbook: {
 									version: 3,
 									name: "decision-fixture",
 									description: "Decision provenance regression",

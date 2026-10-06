@@ -1491,7 +1491,7 @@ export class Supervisor {
 	}
 	fleetPreview(id: string, body: Static<typeof FleetPreviewRequest>) {
 		this.fleeting(id);
-		// Compiling reads the contract, the agents and every route; a large fleet is not instant.
+		// Compiling reads the playbook, the agents and every route; a large fleet is not instant.
 		return this.projected(id, ACP_FLEET_PREVIEW_METHOD, { sessionId: id, ...body }, FleetPreview, BRANCH_TIMEOUT_MS);
 	}
 	fleetRun(id: string, body: Static<typeof FleetRunRequest>) {

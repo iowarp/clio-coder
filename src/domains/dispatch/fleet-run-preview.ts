@@ -1,5 +1,5 @@
 /**
- * What `/fleet run <name>` will do, projected before anything dispatches.
+ * What `/fleet run <playbook>` will do, projected before anything dispatches.
  *
  * The projection is the compiled plan and nothing else. It calls the same
  * loader, the same graph and command validation, the same plan compiler, and
@@ -17,16 +17,16 @@
 
 import { createHash } from "node:crypto";
 import {
-	FLEET_COMMANDS_REMEDY,
-	type FleetCommandRegistry,
-	FleetCommandRegistryMissingError,
-	type FleetContract,
-	fleetStepBoundaries,
-	loadFleetCommands,
-	loadFleetContract,
-	renderFleetPrompt,
-	validateFleetCommands,
-	validateFleetGraph,
+	loadPlaybook,
+	loadPlaybookCommands,
+	PLAYBOOK_COMMANDS_REMEDY,
+	type Playbook,
+	type PlaybookCommandRegistry,
+	PlaybookCommandRegistryMissingError,
+	playbookStepBoundaries,
+	renderPlaybookPrompt,
+	validatePlaybookCommands,
+	validatePlaybookGraph,
 } from "../agents/index.js";
 import { type AgentSpec, agentSpecFingerprint } from "../agents/spec.js";
 import { foregroundStreamUsage } from "../providers/index.js";
@@ -74,8 +74,8 @@ export interface FleetRunPreviewBudget {
 	/** Session ceiling this run is admitted under. */
 	ceilingUsd: number;
 	currentUsd: number;
-	/** The contract's own declared ceiling, or null when it declares none. */
-	contractUsd: number | null;
+	/** The playbook's own declared ceiling, or null when it declares none. */
+	playbookUsd: number | null;
 }
 
 export interface FleetRunPreview {
@@ -88,8 +88,8 @@ export interface FleetRunPreview {
 	budget: FleetRunPreviewBudget;
 	/** The compiled plan itself, so an accepted preview dispatches what was shown. */
 	plan: ExecutionPlan;
-	contract: FleetContract;
-	commands: FleetCommandRegistry | null;
+	playbook: Playbook;
+	commands: PlaybookCommandRegistry | null;
 	/** Rendered prompt body every agent node carries as its task. */
 	task: string;
 }
@@ -119,18 +119,18 @@ export interface FleetRunPreviewInput {
 		target?: string;
 		profile?: string;
 	}) => FleetRunPreviewRoute | null;
-	/** Contract and registry loaders, overridable so tests project a fixture. */
-	load?: (workspaceRoot: string, name: string) => { contract: FleetContract; commands: FleetCommandRegistry | null };
+	/** Playbook and registry loaders, overridable so tests project a fixture. */
+	load?: (workspaceRoot: string, name: string) => { playbook: Playbook; commands: PlaybookCommandRegistry | null };
 }
 
 function defaultLoad(
 	workspaceRoot: string,
 	name: string,
-): { contract: FleetContract; commands: FleetCommandRegistry | null } {
-	const contract = loadFleetContract(workspaceRoot, name);
-	// loadFleetContract already refused any unregistered command id; this read
+): { playbook: Playbook; commands: PlaybookCommandRegistry | null } {
+	const playbook = loadPlaybook(workspaceRoot, name);
+	// loadPlaybook already refused any unregistered command id; this read
 	// is the binding the runner executes.
-	return { contract, commands: loadFleetCommands(workspaceRoot) };
+	return { playbook, commands: loadPlaybookCommands(workspaceRoot) };
 }
 
 /** The footer's dollar format, restated so a diagnostic reads the same wherever it is shown. */
@@ -141,28 +141,28 @@ function formatUsd(value: number): string {
 }
 
 function describeError(error: unknown): string {
-	if (error instanceof FleetCommandRegistryMissingError) return `${error.message}\n${FLEET_COMMANDS_REMEDY}`;
+	if (error instanceof PlaybookCommandRegistryMissingError) return `${error.message}\n${PLAYBOOK_COMMANDS_REMEDY}`;
 	return error instanceof Error ? error.message : String(error);
 }
 
-/** The contract position a compiled node came from; a loop half keeps its position id. */
+/** The playbook position a compiled node came from; a loop half keeps its position id. */
 function positionId(step: ExecutionPlanStep): string {
 	return step.loop === undefined ? step.id : `${step.loop.loopId}.${step.loop.role}`;
 }
 
 /**
  * Compile the plan and project it into waves. Returns diagnostics instead of
- * throwing: an operator meets a broken contract in the overlay, with every
+ * throwing: an operator meets a broken playbook in the overlay, with every
  * reason it cannot run, and no accept key.
  */
 export function compileFleetRunPreview(input: FleetRunPreviewInput): FleetRunPreviewResult {
 	const diagnostics: string[] = [];
 	const fail = (): FleetRunPreviewResult => ({ ok: false, name: input.name, diagnostics });
 
-	let contract: FleetContract;
-	let commands: FleetCommandRegistry | null;
+	let playbook: Playbook;
+	let commands: PlaybookCommandRegistry | null;
 	try {
-		({ contract, commands } = (input.load ?? defaultLoad)(input.workspaceRoot, input.name));
+		({ playbook, commands } = (input.load ?? defaultLoad)(input.workspaceRoot, input.name));
 	} catch (error) {
 		diagnostics.push(describeError(error));
 		return fail();
@@ -170,9 +170,9 @@ export function compileFleetRunPreview(input: FleetRunPreviewInput): FleetRunPre
 
 	let task: string;
 	try {
-		validateFleetGraph(contract);
-		validateFleetCommands(contract, commands);
-		task = renderFleetPrompt(contract.body, input.vars);
+		validatePlaybookGraph(playbook);
+		validatePlaybookCommands(playbook, commands);
+		task = renderPlaybookPrompt(playbook.body, input.vars);
 	} catch (error) {
 		diagnostics.push(describeError(error));
 		return fail();
@@ -184,7 +184,7 @@ export function compileFleetRunPreview(input: FleetRunPreviewInput): FleetRunPre
 		plan = compileFleetExecutionPlan({
 			commands,
 			vars: input.vars,
-			contract,
+			playbook,
 			task,
 			resolveAgent(context) {
 				const spec = input.getAgentSpec(context.agentId);
@@ -268,22 +268,22 @@ export function compileFleetRunPreview(input: FleetRunPreviewInput): FleetRunPre
 	const budget: FleetRunPreviewBudget = {
 		ceilingUsd: input.budget?.ceilingUsd ?? 0,
 		currentUsd: input.budget?.currentUsd ?? 0,
-		contractUsd: contract.budgetUsd,
+		playbookUsd: playbook.budgetUsd,
 	};
 	if (input.budget) {
 		if (input.budget.verdict === "over" || input.budget.verdict === "at") {
 			diagnostics.push(`budget ceiling crossed: ${formatUsd(budget.currentUsd)} / ${formatUsd(budget.ceilingUsd)}`);
-		} else if (contract.budgetUsd !== null && budget.ceilingUsd > 0) {
+		} else if (playbook.budgetUsd !== null && budget.ceilingUsd > 0) {
 			const remaining = budget.ceilingUsd - budget.currentUsd;
-			if (contract.budgetUsd > remaining) {
+			if (playbook.budgetUsd > remaining) {
 				diagnostics.push(
-					`fleet budget $${contract.budgetUsd.toFixed(2)} exceeds remaining session budget $${remaining.toFixed(2)}`,
+					`fleet budget $${playbook.budgetUsd.toFixed(2)} exceeds remaining session budget $${remaining.toFixed(2)}`,
 				);
 			}
 		}
 	}
 
-	const boundaries = new Map(fleetStepBoundaries(contract).map((entry) => [entry.id, entry.writes]));
+	const boundaries = new Map(playbookStepBoundaries(playbook).map((entry) => [entry.id, entry.writes]));
 	const byId = new Map(plan.steps.map((step) => [step.id, step]));
 	const waves: FleetRunPreviewWave[] = plan.waves.map((wave, index) => ({
 		index,
@@ -345,13 +345,13 @@ export function compileFleetRunPreview(input: FleetRunPreviewInput): FleetRunPre
 	return {
 		ok: true,
 		preview: {
-			name: contract.name,
+			name: playbook.name,
 			vars: { ...input.vars },
 			planHash,
 			waves,
 			budget,
 			plan,
-			contract,
+			playbook,
 			commands,
 			task,
 		},

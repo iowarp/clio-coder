@@ -1,11 +1,11 @@
-// What a fleet contract preview says, before any of it is drawn: the variables a person typed, and
+// What a playbook preview says, before any of it is drawn: the variables a person typed, and
 // the compiled plan as waves of steps. Pure, so parsing and wording are testable without a DOM.
 
 import type { FleetPreview, FleetStep } from "../../contracts/fleet-run.js";
 
 const VAR_NAME = /^[A-Za-z_][A-Za-z0-9_.-]{0,63}$/;
 
-/** `name=value` per line, as `/fleet run <name> key=value` takes them. Blank lines are ignored. */
+/** `name=value` per line, as `/fleet run <playbook> key=value` takes them. Blank lines are ignored. */
 export function parseFleetVars(text: string): { vars: Record<string, string> } | { error: string } {
 	const vars: Record<string, string> = {};
 	for (const raw of text.split("\n")) {
@@ -57,16 +57,16 @@ function describeStep(step: FleetStep): FleetStepRow {
 }
 
 export function fleetPlanView(preview: Extract<FleetPreview, { status: "ready" }>) {
-	const { ceilingUsd, currentUsd, contractUsd } = preview.budget;
+	const { ceilingUsd, currentUsd, playbookUsd } = preview.budget;
 	return {
 		heading: `${preview.stepCount} ${preview.stepCount === 1 ? "step" : "steps"} in ${preview.waves.length} ${preview.waves.length === 1 ? "wave" : "waves"}`,
 		waves: preview.waves.map((wave) => ({ label: `Wave ${wave.index + 1}`, rows: wave.steps.map(describeStep) })),
 		budget:
 			ceilingUsd > 0
-				? `$${currentUsd.toFixed(2)} of this session's $${ceilingUsd.toFixed(2)} ceiling is spent${contractUsd === null ? "" : `; the contract asks for up to $${contractUsd.toFixed(2)}`}.`
-				: contractUsd === null
-					? "No budget ceiling is set for this session or the contract."
-					: `The contract asks for up to $${contractUsd.toFixed(2)}; this session has no ceiling.`,
+				? `$${currentUsd.toFixed(2)} of this session's $${ceilingUsd.toFixed(2)} ceiling is spent${playbookUsd === null ? "" : `; the playbook asks for up to $${playbookUsd.toFixed(2)}`}.`
+				: playbookUsd === null
+					? "No budget ceiling is set for this session or the playbook."
+					: `The playbook asks for up to $${playbookUsd.toFixed(2)}; this session has no ceiling.`,
 		hash: { short: preview.planHash.slice(0, 12), full: preview.planHash },
 		truncated: preview.truncated,
 	};

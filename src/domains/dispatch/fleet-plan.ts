@@ -1,7 +1,7 @@
-import type { FleetCommandRegistry } from "../agents/fleet-commands.js";
-import { resolveFleetCommandArgs } from "../agents/fleet-commands.js";
+import type { PlaybookCommandRegistry } from "../agents/playbook-commands.js";
+import { resolvePlaybookCommandArgs } from "../agents/playbook-commands.js";
 /**
- * Fleet contract to execution plan.
+ * Playbook to execution plan.
  *
  * Bounded loops are unrolled here, at compile time, into statically declared
  * conditional nodes: `maxAttempts` verifications and one fewer repair, chained
@@ -17,14 +17,14 @@ import { resolveFleetCommandArgs } from "../agents/fleet-commands.js";
  * the property fleet admission exists to deny.
  */
 
-import type { FleetContract, FleetContractStep, FleetStepScope } from "../agents/fleet-contract.js";
+import type { Playbook, PlaybookStep, PlaybookStepScope } from "../agents/playbook.js";
 import {
-	fleetCodeSteps,
-	fleetLoopCheckStepId,
-	fleetLoopRepairStepId,
-	fleetStepWriteBoundary,
-	validateFleetCommands,
-} from "../agents/fleet-contract.js";
+	playbookCodeSteps,
+	playbookLoopCheckStepId,
+	playbookLoopRepairStepId,
+	playbookStepWriteBoundary,
+	validatePlaybookCommands,
+} from "../agents/playbook.js";
 import type { ResultContract } from "../agents/result-contract.js";
 import type { AgentAutomationAuthority } from "../agents/spec.js";
 import type { ExecutionPlan, ExecutionPlanLoop, ExecutionPlanStepInput } from "./execution-plan.js";
@@ -56,9 +56,9 @@ export interface FleetPlanAgentResolution {
 }
 
 export interface CompileFleetPlanInput {
-	commands?: FleetCommandRegistry | null;
+	commands?: PlaybookCommandRegistry | null;
 	vars?: Readonly<Record<string, string>>;
-	contract: FleetContract;
+	playbook: Playbook;
 	/**
 	 * Rendered prompt body. It describes the whole chain, so every agent node
 	 * carries it, followed by that node's own answer directive: the nodes hold
@@ -94,15 +94,15 @@ function expandCommitSources(
 	});
 }
 
-function declaredLoops(steps: ReadonlyArray<FleetContractStep>): Map<string, ExecutionPlanLoop> {
+function declaredLoops(steps: ReadonlyArray<PlaybookStep>): Map<string, ExecutionPlanLoop> {
 	const loops = new Map<string, ExecutionPlanLoop>();
 	for (const step of steps) {
 		if (step.kind !== "loop") continue;
 		const checkStepIds: string[] = [];
 		const repairStepIds: string[] = [];
 		for (let attempt = 1; attempt <= step.maxAttempts; attempt++) {
-			checkStepIds.push(fleetLoopCheckStepId(step.id, attempt));
-			if (attempt < step.maxAttempts) repairStepIds.push(fleetLoopRepairStepId(step.id, attempt));
+			checkStepIds.push(playbookLoopCheckStepId(step.id, attempt));
+			if (attempt < step.maxAttempts) repairStepIds.push(playbookLoopRepairStepId(step.id, attempt));
 		}
 		loops.set(step.id, {
 			id: step.id,
@@ -120,17 +120,17 @@ function declaredLoops(steps: ReadonlyArray<FleetContractStep>): Map<string, Exe
  * the changed-test checks resolved from the implementer's mutation paths.
  */
 function loopCheckCommandNote(
-	contract: FleetContract,
-	commands: FleetCommandRegistry | null | undefined,
+	playbook: Playbook,
+	commands: PlaybookCommandRegistry | null | undefined,
 	vars: Readonly<Record<string, string>>,
 ): string {
 	if (!commands) return "";
 	const lines: string[] = [];
-	for (const step of contract.steps) {
+	for (const step of playbook.steps) {
 		if (step.kind !== "loop" || step.check.kind !== "code") continue;
 		const command = commands.commands.get(step.check.command);
 		if (command === undefined) continue;
-		const argv = [...command.argv, ...resolveFleetCommandArgs(step.check.args ?? [], vars)];
+		const argv = [...command.argv, ...resolvePlaybookCommandArgs(step.check.args ?? [], vars)];
 		lines.push(
 			`Check step \`${step.id}\` runs the registered \`${command.id}\` command as ${JSON.stringify(argv)} in \`${command.cwd}\`.`,
 		);
@@ -139,13 +139,13 @@ function loopCheckCommandNote(
 }
 
 export function compileFleetExecutionPlan(input: CompileFleetPlanInput): ExecutionPlan {
-	const { contract, resolveAgent } = input;
-	if (input.commands !== undefined) validateFleetCommands(contract, input.commands, input.vars ?? {});
-	else if (fleetCodeSteps(contract).some((step) => (step.args?.length ?? 0) > 0))
+	const { playbook, resolveAgent } = input;
+	if (input.commands !== undefined) validatePlaybookCommands(playbook, input.commands, input.vars ?? {});
+	else if (playbookCodeSteps(playbook).some((step) => (step.args?.length ?? 0) > 0))
 		throw new Error("fleet code args: admission requires the operator command registry");
-	const checkNote = loopCheckCommandNote(contract, input.commands, input.vars ?? {});
+	const checkNote = loopCheckCommandNote(playbook, input.commands, input.vars ?? {});
 	const task = checkNote.length > 0 ? `${input.task}\n\n${checkNote}` : input.task;
-	const loops = declaredLoops(contract.steps);
+	const loops = declaredLoops(playbook.steps);
 	const steps: ExecutionPlanStepInput[] = [];
 
 	/**
@@ -154,8 +154,8 @@ export function compileFleetExecutionPlan(input: CompileFleetPlanInput): Executi
 	 * declaration: the bound changes how many times work may be retried, never
 	 * what it may touch.
 	 */
-	const boundary = (scope: FleetStepScope, writes: ReadonlyArray<string> | undefined): { writes?: string[] } => {
-		const resolved = fleetStepWriteBoundary(contract.version, scope, writes);
+	const boundary = (scope: PlaybookStepScope, writes: ReadonlyArray<string> | undefined): { writes?: string[] } => {
+		const resolved = playbookStepWriteBoundary(playbook.version, scope, writes);
 		return resolved === undefined ? {} : { writes: [...resolved] };
 	};
 
@@ -193,7 +193,7 @@ export function compileFleetExecutionPlan(input: CompileFleetPlanInput): Executi
 		...(value.profile !== undefined ? { profile: value.profile } : {}),
 	});
 
-	for (const step of contract.steps) {
+	for (const step of playbook.steps) {
 		const dependencies = expandDependencies(step.dependencies, loops);
 		if (step.kind === "agent") {
 			steps.push(
@@ -234,7 +234,7 @@ export function compileFleetExecutionPlan(input: CompileFleetPlanInput): Executi
 				kind: "code",
 				id: step.id,
 				commandId: step.command,
-				...(step.args ? { args: resolveFleetCommandArgs(step.args, input.vars) } : {}),
+				...(step.args ? { args: resolvePlaybookCommandArgs(step.args, input.vars) } : {}),
 				scope: step.scope,
 				dependencies,
 				...boundary(step.scope, step.writes),
@@ -254,7 +254,7 @@ export function compileFleetExecutionPlan(input: CompileFleetPlanInput): Executi
 					kind: "code",
 					id: checkId,
 					commandId: step.check.command,
-					...(step.check.args ? { args: resolveFleetCommandArgs(step.check.args, input.vars) } : {}),
+					...(step.check.args ? { args: resolvePlaybookCommandArgs(step.check.args, input.vars) } : {}),
 					scope: step.check.scope,
 					dependencies: checkDependencies,
 					...boundary(step.check.scope, step.check.writes),
@@ -265,7 +265,7 @@ export function compileFleetExecutionPlan(input: CompileFleetPlanInput): Executi
 				});
 			} else if (step.check.kind === "gate") {
 				const gateId = step.check.gate;
-				const gate = contract.steps.find((candidate) => candidate.id === gateId);
+				const gate = playbook.steps.find((candidate) => candidate.id === gateId);
 				if (gate?.kind !== "gate") throw new Error(`fleet plan: gate '${gateId}' failed to resolve`);
 				steps.push({
 					kind: "code",
@@ -311,9 +311,9 @@ export function compileFleetExecutionPlan(input: CompileFleetPlanInput): Executi
 	return compileExecutionPlan({
 		topology: "fleet",
 		rootTask: input.task,
-		maxWorkers: contract.maxWorkers,
-		...(contract.writers === 1 ? { writers: 1 as const } : {}),
-		onFailure: contract.onFailure,
+		maxWorkers: playbook.maxWorkers,
+		...(playbook.writers === 1 ? { writers: 1 as const } : {}),
+		onFailure: playbook.onFailure,
 		steps,
 		loops: [...loops.values()],
 	});

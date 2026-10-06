@@ -8,53 +8,52 @@ export const AgentsDomainModule: DomainModule = {
 };
 
 export type { AgentsContract } from "./contract.js";
-export type { FleetCommand, FleetCommandRegistry } from "./fleet-commands.js";
-export {
-	FLEET_COMMAND_BASE_ENV,
-	FLEET_COMMAND_DEFAULT_TIMEOUT_MS,
-	fleetCommandsPath,
-	legacyPlaybookDirs,
-	loadFleetCommands,
-	parseFleetCommands,
-} from "./fleet-commands.js";
-export type {
-	FleetContract,
-	FleetContractAgentStep,
-	FleetContractCodeStep,
-	FleetContractGateStep,
-	FleetContractListing,
-	FleetContractLoopCheck,
-	FleetContractLoopRepair,
-	FleetContractLoopStep,
-	FleetContractPlanStep,
-	FleetContractSource,
-	FleetContractStep,
-	FleetContractVersion,
-	FleetOnFailure,
-	FleetStepBoundary,
-	FleetStepScope,
-} from "./fleet-contract.js";
-export {
-	FLEET_COMMANDS_REMEDY,
-	FLEET_COMMANDS_REPO_PATH,
-	FLEET_DYNAMIC_STEP_VERSION,
-	FLEET_LOOP_MAX_ATTEMPTS,
-	FLEET_WRITE_BOUNDARY_VERSION,
-	FleetCommandRegistryMissingError,
-	fleetCodeSteps,
-	fleetLoopCheckStepId,
-	fleetLoopRepairStepId,
-	fleetStepAncestors,
-	fleetStepBoundaries,
-	fleetStepWriteBoundary,
-	listFleetContracts,
-	loadFleetContract,
-	parseFleetContract,
-	renderFleetPrompt,
-	validateFleetCommands,
-	validateFleetGraph,
-} from "./fleet-contract.js";
 export { AgentsManifest } from "./manifest.js";
+export type {
+	Playbook,
+	PlaybookAgentStep,
+	PlaybookCodeStep,
+	PlaybookGateStep,
+	PlaybookListing,
+	PlaybookLoopCheck,
+	PlaybookLoopRepair,
+	PlaybookLoopStep,
+	PlaybookOnFailure,
+	PlaybookPlanStep,
+	PlaybookSource,
+	PlaybookStep,
+	PlaybookStepBoundary,
+	PlaybookStepScope,
+	PlaybookVersion,
+} from "./playbook.js";
+export {
+	listPlaybooks,
+	loadPlaybook,
+	PLAYBOOK_COMMANDS_REMEDY,
+	PLAYBOOK_COMMANDS_REPO_PATH,
+	PLAYBOOK_DYNAMIC_STEP_VERSION,
+	PLAYBOOK_LOOP_MAX_ATTEMPTS,
+	PLAYBOOK_WRITE_BOUNDARY_VERSION,
+	PlaybookCommandRegistryMissingError,
+	parsePlaybook,
+	playbookCodeSteps,
+	playbookLoopCheckStepId,
+	playbookLoopRepairStepId,
+	playbookStepAncestors,
+	playbookStepBoundaries,
+	playbookStepWriteBoundary,
+	renderPlaybookPrompt,
+	validatePlaybookCommands,
+	validatePlaybookGraph,
+} from "./playbook.js";
+export type { PlaybookCommand, PlaybookCommandRegistry } from "./playbook-commands.js";
+export {
+	loadPlaybookCommands,
+	PLAYBOOK_COMMAND_BASE_ENV,
+	PLAYBOOK_COMMAND_DEFAULT_TIMEOUT_MS,
+	parsePlaybookCommands,
+	playbookCommandsPath,
+} from "./playbook-commands.js";
 export type {
 	AgentBudget,
 	AgentRecipe,

@@ -1,5 +1,5 @@
 /**
- * `/fleet run <name>` approval: the whole plan, before anything dispatches.
+ * `/fleet run <playbook>` approval: the whole plan, before anything dispatches.
  *
  * The operator reads the compiled plan here and decides. Enter accepts and the
  * run starts; Esc cancels and nothing is dispatched, nothing is written, and no
@@ -81,13 +81,13 @@ function formatFleetRunPreviewStep(step: FleetRunPreviewStep): string {
 }
 
 export function formatBudgetLine(preview: FleetRunPreview): string {
-	const contract =
-		preview.budget.contractUsd === null
-			? "contract declares no ceiling"
-			: `contract ceiling $${preview.budget.contractUsd.toFixed(2)}`;
+	const playbook =
+		preview.budget.playbookUsd === null
+			? "playbook declares no ceiling"
+			: `playbook ceiling $${preview.budget.playbookUsd.toFixed(2)}`;
 	const ceiling =
 		preview.budget.ceilingUsd === 0 ? "no session ceiling" : `$${preview.budget.ceilingUsd.toFixed(2)} session ceiling`;
-	return `budget: admitted under ${ceiling}, ${formatUsd(preview.budget.currentUsd)} spent, ${contract}`;
+	return `budget: admitted under ${ceiling}, ${formatUsd(preview.budget.currentUsd)} spent, ${playbook}`;
 }
 
 /**

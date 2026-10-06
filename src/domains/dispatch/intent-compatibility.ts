@@ -248,7 +248,7 @@ export function dispatchIntentRefusals(
 /**
  * Whether a narrowed intent stays inside the intent it narrows.
  *
- * Batch tasks, agent profiles, and fleet contracts may all restate scope more
+ * Batch tasks, agent profiles, and playbooks may all restate scope more
  * tightly than the call that contains them. Narrowing is monotonic: a per-task
  * declaration may shrink the ceiling and may never reach outside it. Read scope
  * is checked against reads plus writes because a declared write root is

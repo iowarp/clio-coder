@@ -372,7 +372,7 @@ const replayPath = (leaf) => {
 	}
 	return turn;
 };
-// One fleet contract, "survey": two agent steps in two waves. Its hash covers the vars, as the
+// One playbook, "survey": two agent steps in two waves. Its hash covers the vars, as the
 // real plan's does through the rendered task, so a changed variable is a changed plan.
 const fleetHash = (vars) =>
 	createHash("sha256")
@@ -383,7 +383,7 @@ const fleetPreview = (name, vars) =>
 		? {
 				status: "refused",
 				name,
-				diagnostics: [`fleet contract not found: .clio-coder/fleets/${name}.md (and no builtin named '${name}')`],
+				diagnostics: [`playbook not found: .clio-coder/playbooks/${name}.md (and no builtin named '${name}')`],
 			}
 		: {
 				status: "ready",
@@ -418,7 +418,7 @@ const fleetPreview = (name, vars) =>
 						],
 					},
 				],
-				budget: { ceilingUsd: 5, currentUsd: 0.25, contractUsd: 1 },
+				budget: { ceilingUsd: 5, currentUsd: 0.25, playbookUsd: 1 },
 				truncated: false,
 			};
 // The /handoff lifecycle a real agent runs through its shared service: a draft is

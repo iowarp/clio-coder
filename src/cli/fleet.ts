@@ -1,11 +1,7 @@
 /**
  * `clio-coder fleet` operator surface.
  *
- *   clio-coder fleet list                      enumerate playbooks with validity
- *   clio-coder fleet new <name> --from <name>  copy a shipped playbook into the project
- *   clio-coder fleet validate|graph <name>     inspect a playbook without executing it
- *   clio-coder fleet commands init             draft a repository command registry
- *   clio-coder fleet run <name> --var k=v ...  preflight + execute a playbook
+ *   clio-coder fleet run <playbook> --var k=v ...  preflight + execute a playbook
  *   clio-coder fleet status [--json] [--all]   runtime snapshot from the durable ledger
  *   clio-coder fleet inspect --json [--all]    bounded recent run and journal projection
  *   clio-coder fleet decisions --json [--all]  bounded sealed review and compete gate verdicts
@@ -14,7 +10,7 @@
  *   clio-coder fleet cancel <runId>             cancel one run from any terminal
  *
  * Playbooks are repo-owned policy (.clio-coder/playbooks/<name>.md); the fleet
- * runs them. Preflight fails with zero side effects: nothing is dispatched until the contract
+ * runs them. Preflight fails with zero side effects: nothing is dispatched until the playbook
  * parses, every agent resolves, every step scope passes the orchestrator
  * subset check, and the budget gate is open.
  */
@@ -28,17 +24,13 @@ import { clioStateDir } from "../core/xdg.js";
 import type { AgentsContract } from "../domains/agents/contract.js";
 import {
 	AgentsDomainModule,
-	FLEET_COMMANDS_REMEDY,
-	FLEET_COMMANDS_REPO_PATH,
-	type FleetCommandRegistry,
-	FleetCommandRegistryMissingError,
-	type FleetContract,
-	type FleetContractListing,
-	type FleetContractStep,
-	listFleetContracts,
-	loadFleetCommands,
-	loadFleetContract,
-	renderFleetPrompt,
+	loadPlaybook,
+	loadPlaybookCommands,
+	PLAYBOOK_COMMANDS_REMEDY,
+	type Playbook,
+	type PlaybookCommandRegistry,
+	PlaybookCommandRegistryMissingError,
+	renderPlaybookPrompt,
 } from "../domains/agents/index.js";
 import type { ConfigContract } from "../domains/config/contract.js";
 import { ConfigDomainModule } from "../domains/config/index.js";
@@ -95,14 +87,10 @@ import { fleetInspectionScope } from "./fleet-project-scope.js";
 const HELP = `clio-coder fleet <subcommand>
 
 Run repo-owned playbooks on the fleet, and inspect the dispatch status surface.
+Author and check playbooks with clio-coder playbook.
 
 Subcommands:
   nodes add|list|remove|test     manage SSH worker nodes and project verification
-  list                          list builtin, plugin, user and project playbooks with validation status
-  new <name> --from <builtin>   copy the build-review, build-test, or sdlc playbook into .clio-coder/playbooks/
-  validate <name> [--json]      run a playbook's execution preflight without side effects
-  graph <name> [--json]         print a playbook's compiled waves, loops, scopes, and write boundaries
-  commands init                 draft a commented playbook command registry from declared project entries
   run <name> [--var k=v ...]    preflight and execute a playbook
        [--resume <runId>]        replay a completed prefix from a prior run of the same plan
        [--json]                 emit step receipts as JSON
@@ -173,66 +161,6 @@ function newFleetRootId(): string {
 }
 
 // ---------------------------------------------------------------------------
-// list
-// ---------------------------------------------------------------------------
-
-function renderStep(step: FleetContractStep): string {
-	if (step.kind === "code") return `code:${step.command}[${step.scope}]`;
-	if (step.kind === "agent") return `${step.agent}[${step.scope}]`;
-	if (step.kind === "gate") return `gate:${step.path}[${step.run}]`;
-	if (step.kind === "plan") {
-		return `plan:${step.agent}[${step.roster.join(",")}; max ${step.maxTasks}]`;
-	}
-	const check =
-		step.check.kind === "code"
-			? `code:${step.check.command}`
-			: step.check.kind === "gate"
-				? `gate:${step.check.gate}`
-				: step.check.agent;
-	return `loop:${step.id}(${check} -> ${step.repair.agent} x${step.maxAttempts})`;
-}
-
-function listingLine(entry: FleetContractListing, state: string, detail: string): string {
-	return `${entry.name}  ${entry.source}  ${state.padEnd(7)}  ${detail}\n`;
-}
-
-function runList(args: ReadonlyArray<string>): number {
-	// `list` took no arguments and silently ignored whatever followed it, so
-	// `fleet list --bogus` exited 0 with the normal table and `fleet list --json`
-	// printed the human one. Its siblings status, drain, and resume all reject an
-	// unrecognised flag, and so do `agents` and `models`.
-	const unknown = args[0];
-	if (unknown !== undefined) return fail(`list: unknown flag: ${unknown}`);
-	const listings = listFleetContracts(process.cwd());
-	if (listings.length === 0) {
-		process.stdout.write("no playbooks found (.clio-coder/playbooks/*.md)\n");
-		return 0;
-	}
-	for (const entry of listings) {
-		if (entry.contract !== null) {
-			const steps = entry.contract.steps.map(renderStep).join(" -> ");
-			process.stdout.write(listingLine(entry, "valid", steps));
-			if (entry.contract.description.length > 0) {
-				process.stdout.write(`  ${entry.contract.description}\n`);
-			}
-			continue;
-		}
-		// A shipped fleet whose only gap is a registry this repo has never written
-		// is unfinished setup, not a broken contract. Both stay unrunnable; only
-		// one of them is fixed by writing a file, so only one is told to.
-		if (entry.needsCommands !== null) {
-			process.stdout.write(
-				listingLine(entry, "setup", `needs ${FLEET_COMMANDS_REPO_PATH} declaring ${entry.needsCommands.join(", ")}`),
-			);
-			process.stdout.write(`  ${FLEET_COMMANDS_REMEDY}\n`);
-			continue;
-		}
-		process.stdout.write(listingLine(entry, "invalid", entry.error ?? "unknown error"));
-	}
-	return 0;
-}
-
-// ---------------------------------------------------------------------------
 // run
 // ---------------------------------------------------------------------------
 
@@ -243,12 +171,10 @@ interface FleetPreflightDeps {
 	settings: Readonly<ClioSettings>;
 }
 
-/** Every agent a contract dispatches, including both halves of every loop. */
-function contractAgents(
-	contract: FleetContract,
-): Array<{ id: string; agent: string; scope: "readonly" | "workspace" }> {
+/** Every agent a playbook dispatches, including both halves of every loop. */
+function playbookAgents(playbook: Playbook): Array<{ id: string; agent: string; scope: "readonly" | "workspace" }> {
 	const agents: Array<{ id: string; agent: string; scope: "readonly" | "workspace" }> = [];
-	for (const step of contract.steps) {
+	for (const step of playbook.steps) {
 		if (step.kind === "agent") {
 			agents.push({ id: step.id, agent: step.agent, scope: step.scope });
 		} else if (step.kind === "gate") {
@@ -276,7 +202,7 @@ function contractAgents(
 	return agents;
 }
 
-function preflightFleet(contract: FleetContract, deps: FleetPreflightDeps): string | null {
+function preflightPlaybook(playbook: Playbook, deps: FleetPreflightDeps): string | null {
 	const targets = new Set(deps.settings.targets.map((target) => target.id));
 	const profiles = new Set(Object.keys(deps.settings.fleet?.profiles ?? {}));
 	const checkRoute = (id: string, route: { target?: string; profile?: string }): string | null => {
@@ -288,7 +214,7 @@ function preflightFleet(contract: FleetContract, deps: FleetPreflightDeps): stri
 		}
 		return null;
 	};
-	for (const step of contract.steps) {
+	for (const step of playbook.steps) {
 		if (step.kind === "agent" || step.kind === "gate" || step.kind === "plan") {
 			const error = checkRoute(step.id, step);
 			if (error !== null) return error;
@@ -301,7 +227,7 @@ function preflightFleet(contract: FleetContract, deps: FleetPreflightDeps): stri
 		const error = checkRoute(`${step.id}.repair`, step.repair);
 		if (error !== null) return error;
 	}
-	for (const step of contractAgents(contract)) {
+	for (const step of playbookAgents(playbook)) {
 		if (!deps.agents.get(step.agent)) {
 			return `unknown agent '${step.agent}' (step '${step.id}' must name a recipe from 'clio-coder agents')`;
 		}
@@ -315,10 +241,10 @@ function preflightFleet(contract: FleetContract, deps: FleetPreflightDeps): stri
 		if (budget.verdict === "over" || budget.verdict === "at") {
 			return `budget ceiling crossed: $${budget.currentUsd.toFixed(4)} / $${budget.ceilingUsd.toFixed(4)}`;
 		}
-		if (contract.budgetUsd !== null && budget.ceilingUsd > 0) {
+		if (playbook.budgetUsd !== null && budget.ceilingUsd > 0) {
 			const remaining = budget.ceilingUsd - budget.currentUsd;
-			if (contract.budgetUsd > remaining) {
-				return `fleet budget $${contract.budgetUsd.toFixed(2)} exceeds remaining session budget $${remaining.toFixed(2)}`;
+			if (playbook.budgetUsd > remaining) {
+				return `fleet budget $${playbook.budgetUsd.toFixed(2)} exceeds remaining session budget $${remaining.toFixed(2)}`;
 			}
 		}
 	}
@@ -328,9 +254,9 @@ function preflightFleet(contract: FleetContract, deps: FleetPreflightDeps): stri
 async function runFleet(args: ReadonlyArray<string>): Promise<number> {
 	const { vars, rest, error } = parseVars(args);
 	if (error !== undefined) return fail(error);
-	// A positional scan, so an option value is never read as the contract name
-	// (`--resume <runId> <name>` used to run a contract named after the run id)
-	// and an unknown flag is refused instead of running the contract anyway.
+	// A positional scan, so an option value is never read as the playbook name
+	// (`--resume <runId> <name>` used to run a playbook named after the run id)
+	// and an unknown flag is refused instead of running the playbook anyway.
 	let json = false;
 	let resumeId: string | undefined;
 	let name: string | undefined;
@@ -347,19 +273,19 @@ async function runFleet(args: ReadonlyArray<string>): Promise<number> {
 		else name ??= arg;
 	}
 	if (!name) {
-		return fail("usage: clio-coder fleet run <name> [--var key=value ...] [--resume <runId>] [--json]");
+		return fail("usage: clio-coder fleet run <playbook> [--var key=value ...] [--resume <runId>] [--json]");
 	}
 
-	let contract: FleetContract;
+	let playbook: Playbook;
 	let prompt: string;
-	let commands: FleetCommandRegistry | null;
+	let commands: PlaybookCommandRegistry | null;
 	try {
-		contract = loadFleetContract(process.cwd(), name);
-		prompt = renderFleetPrompt(contract.body, vars);
-		commands = loadFleetCommands(process.cwd());
+		playbook = loadPlaybook(process.cwd(), name);
+		prompt = renderPlaybookPrompt(playbook.body, vars);
+		commands = loadPlaybookCommands(process.cwd());
 	} catch (err) {
-		if (err instanceof FleetCommandRegistryMissingError) {
-			process.stderr.write(`clio-coder fleet: ${err.message}\n  ${FLEET_COMMANDS_REMEDY}\n`);
+		if (err instanceof PlaybookCommandRegistryMissingError) {
+			process.stderr.write(`clio-coder fleet: ${err.message}\n  ${PLAYBOOK_COMMANDS_REMEDY}\n`);
 			return 2;
 		}
 		return fail(err instanceof Error ? err.message : String(err));
@@ -398,7 +324,7 @@ async function runFleet(args: ReadonlyArray<string>): Promise<number> {
 	// settings.yaml from the dispatch event path.
 	configureRunEventJournal(fleetSettings.fleet.history.journal);
 	const roleFacts = agentRoleFactsResolver((id) => agents.getSpec(id));
-	const preflightError = preflightFleet(contract, {
+	const preflightError = preflightPlaybook(playbook, {
 		agents,
 		safety,
 		scheduling,
@@ -415,7 +341,7 @@ async function runFleet(args: ReadonlyArray<string>): Promise<number> {
 		plan = compileFleetExecutionPlan({
 			commands,
 			...(vars ? { vars } : {}),
-			contract,
+			playbook,
 			task: prompt,
 			resolveAgent(context) {
 				const spec = agents.getSpec(context.agentId);
@@ -489,7 +415,7 @@ async function runFleet(args: ReadonlyArray<string>): Promise<number> {
 			await loaded.stop();
 			return refuse(`resume run '${resumeId}' was not found in the durable fleet ledger`);
 		}
-		const planned = planFleetResume(record, plan, contract, vars);
+		const planned = planFleetResume(record, plan, playbook, vars);
 		if (!planned.ok) {
 			if (planned.reason === "fleet-name") {
 				await loaded.stop();
@@ -514,13 +440,13 @@ async function runFleet(args: ReadonlyArray<string>): Promise<number> {
 	}
 
 	process.stderr.write(
-		`fleet ${contract.name}: root=${fleetRootId} plan=${plan.hash} steps=${plan.steps.length} loops=${plan.loops.length}\n`,
+		`fleet ${playbook.name}: root=${fleetRootId} plan=${plan.hash} steps=${plan.steps.length} loops=${plan.loops.length}\n`,
 	);
 	let outcome: FleetRunOutcome;
 	try {
 		outcome = await executeFleetRun({
 			plan,
-			contractName: contract.name,
+			playbookName: playbook.name,
 			commands,
 			workspaceRoot: process.cwd(),
 			fleetRootId,
@@ -586,7 +512,7 @@ async function runFleet(args: ReadonlyArray<string>): Promise<number> {
 	if (json) {
 		process.stdout.write(
 			`${JSON.stringify({
-				fleet: contract.name,
+				fleet: playbook.name,
 				rootId: fleetRootId,
 				planHash: plan.hash,
 				loops: outcome.result.loops,
@@ -599,7 +525,7 @@ async function runFleet(args: ReadonlyArray<string>): Promise<number> {
 		);
 	} else {
 		process.stdout.write(
-			`fleet ${contract.name}: ${outcome.succeededStepCount}/${outcome.requiredStepCount} steps succeeded, ${outcome.resolvedLoopCount}/${outcome.result.loops.length} loops resolved, total cost ${renderCostAggregate(outcome.totalCost)}\n`,
+			`fleet ${playbook.name}: ${outcome.succeededStepCount}/${outcome.requiredStepCount} steps succeeded, ${outcome.resolvedLoopCount}/${outcome.result.loops.length} loops resolved, total cost ${renderCostAggregate(outcome.totalCost)}\n`,
 		);
 		for (const loop of outcome.result.loops) {
 			process.stdout.write(
@@ -841,9 +767,8 @@ export async function runFleetCommand(args: ReadonlyArray<string>): Promise<numb
 	}
 	// Asking for help is not a usage error, and it is not an argument either.
 	// `status|drain|resume --help` answered `unknown flag: --help` on stderr with
-	// status 2, `run --help` answered its usage the same way, and `list --help`
-	// ignored the flag and listed the contracts. Anywhere on the line it is a
-	// question, answered here before any subcommand executes.
+	// status 2, and `run --help` answered its usage the same way. Anywhere on the
+	// line it is a question, answered here before any subcommand executes.
 	if (sub === "help" || args.includes("--help") || args.includes("-h")) {
 		process.stdout.write(HELP);
 		return 0;
@@ -853,16 +778,6 @@ export async function runFleetCommand(args: ReadonlyArray<string>): Promise<numb
 		return 2;
 	}
 	switch (sub) {
-		case "list":
-			return runList(args.slice(1));
-		case "new":
-			return (await import("./fleet-new.js")).runFleetNew(args.slice(1));
-		case "validate":
-			return (await import("./fleet-validate.js")).runFleetValidate(args.slice(1));
-		case "graph":
-			return (await import("./fleet-graph.js")).runFleetGraph(args.slice(1));
-		case "commands":
-			return (await import("./fleet-commands.js")).runFleetCommands(args.slice(1));
 		case "run":
 			return runFleet(args.slice(1));
 		case "status":

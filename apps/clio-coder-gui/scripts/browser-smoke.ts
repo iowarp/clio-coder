@@ -1251,10 +1251,10 @@ try {
 				"closing a slash dialog did not return focus to the composer",
 			);
 		}
-		// A fleet contract: preview compiles and starts nothing; the run starts the plan shown.
-		const fleetDialog = await slashAction("fleet run", "Run a fleet contract");
+		// A playbook: preview compiles and starts nothing; the run starts the plan shown.
+		const fleetDialog = await slashAction("fleet run", "Run a playbook");
 		const fleetPanel = fleetDialog;
-		await fleetPanel.getByLabel("Contract name", { exact: true }).fill("survey");
+		await fleetPanel.getByLabel("Playbook name", { exact: true }).fill("survey");
 		await fleetPanel.getByLabel("Variables, one name=value per line", { exact: true }).fill("site=plot-7");
 		await fleetPanel.getByRole("button", { name: "Preview the plan", exact: true }).click();
 		await fleetPanel.getByRole("heading", { name: "Fleet survey: 2 steps in 2 waves", exact: true }).waitFor();

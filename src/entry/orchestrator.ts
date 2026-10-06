@@ -4296,7 +4296,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 										// first step answers the request with why, as the terminal's notice does.
 										void executeFleetRun({
 											plan: preview.plan,
-											contractName: preview.name,
+											playbookName: preview.name,
 											commands: preview.commands,
 											workspaceRoot: process.cwd(),
 											fleetRootId,

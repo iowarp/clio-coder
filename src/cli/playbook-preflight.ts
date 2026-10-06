@@ -1,10 +1,10 @@
 import { readSettings } from "../core/config.js";
 import {
-	type FleetCommandRegistry,
-	type FleetContract,
-	loadFleetCommands,
-	loadFleetContract,
-	renderFleetPrompt,
+	loadPlaybook,
+	loadPlaybookCommands,
+	type Playbook,
+	type PlaybookCommandRegistry,
+	renderPlaybookPrompt,
 } from "../domains/agents/index.js";
 import { discoverAgentRecipes } from "../domains/agents/registry.js";
 import { type AgentSpec, normalizeAgentSpec } from "../domains/agents/spec.js";
@@ -12,9 +12,9 @@ import type { ExecutionPlan } from "../domains/dispatch/execution-plan.js";
 import { requestExecutionRole, withAttemptRole } from "../domains/dispatch/execution-role.js";
 import { compileFleetExecutionPlan } from "../domains/dispatch/fleet-plan.js";
 
-export interface FleetPreflightResult {
-	contract: FleetContract;
-	commands: FleetCommandRegistry | null;
+export interface PlaybookPreflightResult {
+	playbook: Playbook;
+	commands: PlaybookCommandRegistry | null;
 	plan: ExecutionPlan;
 	checks: ReadonlyArray<{ check: "parse" | "graph" | "commands" | "agents" | "plan"; summary: string }>;
 }
@@ -23,18 +23,18 @@ function discoverSpecs(cwd: string): AgentSpec[] {
 	return discoverAgentRecipes(cwd).map(normalizeAgentSpec);
 }
 
-export function inspectFleet(name: string, vars?: Readonly<Record<string, string>>): FleetPreflightResult {
+export function inspectPlaybook(name: string, vars?: Readonly<Record<string, string>>): PlaybookPreflightResult {
 	const cwd = process.cwd();
-	const contract = loadFleetContract(cwd, name);
-	const commands = loadFleetCommands(cwd);
-	const prompt = vars === undefined ? contract.body : renderFleetPrompt(contract.body, vars);
+	const playbook = loadPlaybook(cwd, name);
+	const commands = loadPlaybookCommands(cwd);
+	const prompt = vars === undefined ? playbook.body : renderPlaybookPrompt(playbook.body, vars);
 	const specs = discoverSpecs(cwd);
 	const byId = new Map(specs.map((spec) => [spec.id, spec]));
 	const resolved = new Set<string>();
 	const settings = readSettings();
 	const targetIds = new Set(settings.targets.map((target) => target.id));
 	const profileIds = new Set(Object.keys(settings.fleet?.profiles ?? {}));
-	for (const step of contract.steps) {
+	for (const step of playbook.steps) {
 		const positions =
 			step.kind === "loop"
 				? [
@@ -56,7 +56,7 @@ export function inspectFleet(name: string, vars?: Readonly<Record<string, string
 	const plan = compileFleetExecutionPlan({
 		commands,
 		...(vars ? { vars } : {}),
-		contract,
+		playbook,
 		task: prompt,
 		resolveAgent(context) {
 			const spec = byId.get(context.agentId);
@@ -66,7 +66,7 @@ export function inspectFleet(name: string, vars?: Readonly<Record<string, string
 				);
 			}
 			if (spec.capabilityClass === "orchestration" || spec.capabilityClass === "internal") {
-				throw new Error(`fleet step '${context.stepId}' has no automatable agent authority`);
+				throw new Error(`playbook step '${context.stepId}' has no automatable agent authority`);
 			}
 			resolved.add(spec.id);
 			const role = requestExecutionRole({
@@ -99,12 +99,12 @@ export function inspectFleet(name: string, vars?: Readonly<Record<string, string
 		},
 	});
 	return {
-		contract,
+		playbook,
 		commands,
 		plan,
 		checks: [
-			{ check: "parse", summary: `parsed playbook version ${contract.version}` },
-			{ check: "graph", summary: `validated ${contract.steps.length} declared steps` },
+			{ check: "parse", summary: `parsed playbook version ${playbook.version}` },
+			{ check: "graph", summary: `validated ${playbook.steps.length} declared steps` },
 			{ check: "commands", summary: `validated ${plan.steps.filter((step) => step.kind === "code").length} code steps` },
 			{ check: "agents", summary: `resolved ${resolved.size} agents` },
 			{ check: "plan", summary: `compiled ${plan.steps.length} plan steps with hash ${plan.hash}` },

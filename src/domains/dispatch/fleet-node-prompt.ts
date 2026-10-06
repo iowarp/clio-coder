@@ -1,7 +1,7 @@
 /**
  * What one fleet node is told about its own answer.
  *
- * A fleet contract renders a single prompt body and the plan compiler gives it
+ * A playbook renders a single prompt body and the plan compiler gives it
  * to every agent node, because the body describes the whole chain and each node
  * does one part of it. That is fine for the work description and wrong for the
  * answer: nodes in the same chain hold different result contracts, so a body

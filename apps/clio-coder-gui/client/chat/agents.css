@@ -1,5 +1,5 @@
 /* The task pane's Agents drill: a stat line, the run tree under the main conversation, engine
-   notices, and the fleet contract form. It speaks the Session column's language (client/chat/pane.css):
+   notices, and the playbook form. It speaks the Session column's language (client/chat/pane.css):
    the rail's muted labels, groups set apart by space, no boxed cards. Mono is kept for what is exact:
    agent ids, run ids and figures. Colour comes from client/design/tokens.css. */
 
@@ -416,7 +416,7 @@ code.agents-mono {
 	color: var(--ink-subtle);
 }
 
-/* The fleet contract form folds shut under its eyebrow; open, it is a calm inline form. */
+/* The playbook form folds shut under its eyebrow; open, it is a calm inline form. */
 .fleet-run-panel > summary {
 	display: flex;
 	align-items: center;
