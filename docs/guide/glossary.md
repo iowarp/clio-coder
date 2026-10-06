@@ -43,7 +43,7 @@ This document defines the core architectural concepts and terminology used throu
 - **Owning Type**: `GateDecisionArtifact` in [gate-decisions.ts](../../src/domains/dispatch/gate-decisions.ts).
 
 ### 10. Recipe
-- **Definition**: A versioned Markdown document declaring an agent's static persona, tool profile, execution capability class, cost ceilings, and result contracts.
+- **Definition**: A versioned Markdown document declaring an agent's static persona, tool profile, execution capability class, cost ceilings, and result contracts. Recipe is the code name of an agent definition. User-facing text says agent, and never uses recipe as a word for skills, prompts, agents and playbooks together; the word for that set is component.
 - **Owning Type**: `AgentRecipe` in [recipe-schema.ts](../../src/domains/agents/recipe-schema.ts).
 
 ### 11. Worker
@@ -119,8 +119,8 @@ This document defines the core architectural concepts and terminology used throu
 - **Owning Type**: `PromptTemplate` in [loader.ts](../../src/domains/resources/prompts/loader.ts).
 
 ### 29. Fleet
-- **Definition**: The set of addressable nodes Clio may place work on, `local` plus every configured SSH host, together with their capacity accounting. `fleet` is also the topology of a plan compiled from a fleet contract.
-- **Owning Types**: `FleetNodeSnapshot` in [cluster.ts](../../src/domains/scheduling/cluster.ts) for capacity; `FleetContract` in [fleet-contract.ts](../../src/domains/agents/fleet-contract.ts) for the declared multi-step workflow.
+- **Definition**: The set of addressable nodes Clio may place work on, `local` plus every configured SSH host, together with their capacity accounting. `fleet` is also the topology of a plan compiled from a playbook. The fleet is the coordinator and its workers; a playbook is what the fleet runs.
+- **Owning Types**: `FleetNodeSnapshot` in [cluster.ts](../../src/domains/scheduling/cluster.ts) for capacity; `Playbook` for the declared multi-step workflow (see Playbook below).
 
 ### 30. Dispatch
 - **Definition**: Sending one unit of work to a worker: the domain that resolves recipe, target, model, and node, admits the request against authority, spawns the worker, and seals the receipt. It is the `dispatch` tool, the `/run` slash command, and `src/domains/dispatch/`.
@@ -272,3 +272,24 @@ This document defines the core architectural concepts and terminology used throu
 
 ### 67. Clio Coder
 - **Definition**: Clio Coder is named for Kleio, the Greek muse of history, a female figure in myth; the software is referred to by name and has no gender.
+
+### 68. Plugin
+- **Definition**: An Agent Plugin: a package with a root `plugin.json` that carries content only (skills, MCP servers, agents, prompt templates, playbooks and hooks). Content specific to Clio lives under the Clio namespace, `extensions["ai.iowarp.clio"]` in `plugin.json` and the `ai.iowarp.clio/` directory. Installing a plugin never runs code inside Clio. A plugin is a different package from an extension, and the two never share a manifest, digest or consent.
+- **Owning Type**: `PluginManifest` in [types.ts](../../src/domains/plugins/types.ts).
+
+### 69. Extension
+- **Definition**: Clio code in its own process, declared in `clio-coder-extension.yaml` with runtime api 2: hooks, runtime tools named `extension_<id>__<tool>`, commands `/ext:<id>:<name>`, workspaces and skins, and interviews. The operator reviews its capability envelope before install and update, and the recorded envelope digest must match when it is applied and loaded. A runtime child runs under the OS sandbox when one exists. See [Extensions](harness-extensions.md).
+- **Owning Type**: `ExtensionRuntimeDeclarationV2` in [manifest-v2.ts](../../src/domains/extensions/manifest-v2.ts).
+
+### 70. Pairing
+- **Definition**: The link from an extension to the one plugin it serves, written `plugin: <name>` in the extension manifest. Only a paired extension may answer that plugin's prompts (`replaces: prompt`), and only while the plugin is installed and enabled. The runtime reports the plugin through `snapshot.plugin`. The plugin keeps a working fallback when the extension is absent.
+
+### 71. Library
+- **Definition**: The curated collection of installable packages in `library/` with its pinned index. `clio-coder library install plugin:<name>` or `extension:<name>` installs one, `/library` browses it (including an Extensions tab), and `clio-coder library components` lists the components that installed and core packages provide, by kind.
+
+### 72. Playbook
+- **Definition**: A declared multi-step coordination workflow that the fleet runs, replacing what fleet contracts were called before 0.6.2. Its kind is `playbook`, a plugin carries playbooks under the resource key `playbooks`, and the directories are `playbooks/` in the library, the config directory, `.clio-coder/` and the builtins. `clio-coder playbook new|validate|graph|list|commands` authors and checks them, and `clio-coder fleet run <playbook>` or `/fleet run <playbook>` runs one. `clio-coder upgrade` converts an existing installation once.
+- **Owning Type**: `Playbook` in the agents domain.
+
+### 73. Component
+- **Definition**: One discoverable unit a package or Clio itself provides: a skill, an agent, a prompt template or a playbook. A plugin may also carry MCP servers and hooks. A package holds components, and `clio-coder library components` reads them with their owner, origin and invocation.
