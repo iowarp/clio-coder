@@ -24,6 +24,8 @@ export type OperatorCommandOutput = (ExtensionOutput & { api: 1 }) | (ExtensionO
 
 export interface OperatorExtensionsOptions extends OperatorRuntimeOptions {
 	stateDir?: () => string;
+	/** False for an extension the operator muted; see `OperatorRuntimeV2Options.admits`. */
+	admits?: (extensionId: string) => boolean;
 	surface?: ExtensionSurfaceModel;
 }
 
@@ -51,7 +53,7 @@ export class OperatorExtensions {
 		const forward = (result: OperatorReloadResult, reason: ReloadReason): void => {
 			if (this.combining === 0) options.onReload?.(result, reason);
 		};
-		const { stateDir, surface, onReload: _onReload, frozenTools, commitHooks, ...shared } = options;
+		const { stateDir, surface, admits, onReload: _onReload, frozenTools, commitHooks, ...shared } = options;
 		this.v1 = new OperatorExtensionRuntime({
 			...shared,
 			...(frozenTools ? { frozenTools } : {}),
@@ -62,6 +64,7 @@ export class OperatorExtensions {
 			...shared,
 			...(stateDir ? { stateDir } : {}),
 			...(surface ? { surface } : {}),
+			...(admits ? { admits } : {}),
 			reserved: () =>
 				this.v1
 					.entries()
@@ -174,8 +177,8 @@ export class OperatorExtensions {
 	action(extensionId: string, event: ExtensionUiAction): Promise<ExtensionOutputV2> {
 		return this.v2.action(extensionId, event);
 	}
-	interview(extensionId: string, answer: InterviewAnswer): Promise<InterviewNext> {
-		return this.v2.interview(extensionId, answer);
+	interview(extensionId: string, answer: InterviewAnswer, signal?: AbortSignal): Promise<InterviewNext> {
+		return this.v2.interview(extensionId, answer, signal);
 	}
 	leaveWorkspace(): boolean {
 		return this.v2.leaveWorkspace();

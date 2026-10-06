@@ -60,7 +60,7 @@ import { createDispatchSteering } from "./dispatch-steering.js";
 import { createEditorSubmitController, EDITOR_BASH_SHUTDOWN_MS } from "./editor-submit.js";
 import { renderExitSummary } from "./exit-summary.js";
 import { createExitSummaryCollector } from "./exit-summary-collector.js";
-import { createExtensionDevSession } from "./extension-dev-session.js";
+import { createExtensionDevSession, type ExtensionDevSession } from "./extension-dev-session.js";
 import { createInteractiveDesktopNotifications } from "./footer/notifications.js";
 import { createInteractiveEventProjection } from "./interactive-event-projection.js";
 import { createInteractiveInputRuntime } from "./interactive-input-runtime.js";
@@ -584,6 +584,8 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 				onDiagnostic: (message) => {
 					if (!deps.reloadClasses?.captureIssue(message)) notify("warning", message, "operator-extensions:observation");
 				},
+				// A mute fences the runtime at once; the reload that unloads it waits for idle.
+				admits: (extensionId): boolean => devSession?.isMuted(extensionId) !== true,
 				onReload: (result, reason) => {
 					if (deps.reloadClasses?.active) return;
 					if (result.status === "deferred") return;
@@ -599,7 +601,7 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 		: undefined;
 	// The dev scope is a terminal concept: only this surface sets the overlay,
 	// so headless runs, ACP and workers never load a package under development.
-	const devSession =
+	const devSession: ExtensionDevSession | undefined =
 		operatorExtensions && deps.extensions
 			? createExtensionDevSession({
 					extensions: deps.extensions,
@@ -627,7 +629,8 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 					{ ask: (questions, options) => overlayLifecycle.openAskUserOverlayState(questions, options) },
 					interview,
 					{ extensionId, title: extensionId },
-					(answer) => operatorExtensions.interview(extensionId, answer),
+					// The closing cancel still reaches the handler after an abort.
+					(answer) => operatorExtensions.interview(extensionId, answer, answer.nav === "cancel" ? undefined : signal),
 					signal,
 				),
 		});

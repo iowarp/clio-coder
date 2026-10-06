@@ -152,6 +152,8 @@ export async function runExtensionInterview(
 			if (signal?.aborted) return await interrupted("interview aborted");
 			if (answer.nav === "cancel") return await cancel(answer, answer.reason);
 			const next = await onAnswer(answer);
+			// Cancelled while the handler ran: the caller is told it did not finish.
+			if (signal?.aborted) return await interrupted("interview aborted");
 			if ("done" in next && next.done === true) {
 				const { done: _done, ...output } = next;
 				return { outcome: "done", output };

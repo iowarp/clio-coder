@@ -32,6 +32,14 @@ export interface DevExtensionStatus {
 	state: DevExtensionState;
 	muted: boolean;
 	diagnostics: string[];
+	/** Why the last save was not loaded; the previous valid copy is still the one loaded. */
+	failure?: string;
+}
+
+/** What one refresh did: ids whose loaded copy changed, and saves kept out because they did not build. */
+export interface DevRefresh {
+	changed: string[];
+	failed: Array<{ id: string; message: string }>;
 }
 
 interface DevCopy {
@@ -84,6 +92,8 @@ export class ExtensionDevScope implements ExtensionSessionOverlay {
 	private readonly declined = new Map<string, string>();
 	private readonly mutedIds = new Set<string>();
 	private readonly retired = new Set<string>();
+	/** The source digest of a save that did not build, so the same bytes are not tried and reported twice. */
+	private readonly failed = new Map<string, { digest: string; message: string }>();
 
 	constructor(private readonly cwd: () => string) {}
 
@@ -130,9 +140,19 @@ export class ExtensionDevScope implements ExtensionSessionOverlay {
 	 * Copy every folder whose tree changed since its last copy. Returns the
 	 * ids whose copy changed, so the caller reloads only when something did.
 	 */
-	refresh(): string[] {
+	refresh(): DevRefresh {
 		const changed: string[] = [];
+		const failures: DevRefresh["failed"] = [];
 		const seen = new Set<string>();
+		// A save that does not build keeps the previous valid copy loaded, as
+		// any failed generation keeps the one before it (SPEC 4.9).
+		const keep = (source: string, before: DevCopy, digest: string, problem: string): void => {
+			const id = before.record.entry.id;
+			seen.add(id);
+			if (this.failed.get(source)?.digest === digest) return;
+			this.failed.set(source, { digest, message: problem });
+			failures.push({ id, message: problem });
+		};
 		for (const source of this.roots) {
 			if (!existsSync(source)) {
 				const gone = this.copies.get(source);
@@ -149,14 +169,23 @@ export class ExtensionDevScope implements ExtensionSessionOverlay {
 			try {
 				sourceDigest = extensionContentDigestWithCapture(source).digest;
 			} catch (error) {
+				const problem = `dev folder could not be read: ${message(error)}`;
+				if (before?.record.entry.valid) {
+					keep(source, before, `unreadable:${problem}`, problem);
+					continue;
+				}
 				const record = invalid(source, before?.record.entry.id ?? path.basename(source), [
-					{ type: "error", message: `dev folder could not be read: ${message(error)}`, path: source },
+					{ type: "error", message: problem, path: source },
 				]);
 				this.replace(source, { source, sourceDigest: "", copyRoot: "", record, envelope: null });
 				changed.push(record.entry.id);
 				continue;
 			}
 			if (before?.sourceDigest === sourceDigest) {
+				seen.add(before.record.entry.id);
+				continue;
+			}
+			if (before?.record.entry.valid && this.failed.get(source)?.digest === sourceDigest) {
 				seen.add(before.record.entry.id);
 				continue;
 			}
@@ -169,12 +198,20 @@ export class ExtensionDevScope implements ExtensionSessionOverlay {
 					path: source,
 				});
 			}
+			if (!next.record.entry.valid && before?.record.entry.valid) {
+				if (next.copyRoot) this.retire(next.copyRoot);
+				const problem =
+					next.record.entry.diagnostics.find((diagnostic) => diagnostic.type === "error")?.message ?? "invalid package";
+				keep(source, before, sourceDigest, problem);
+				continue;
+			}
 			seen.add(next.record.entry.id);
+			this.failed.delete(source);
 			this.replace(source, next);
 			changed.push(next.record.entry.id);
 		}
 		this.applyConsent();
-		return changed;
+		return { changed, failed: failures };
 	}
 
 	private replace(source: string, next: DevCopy): void {
@@ -360,6 +397,7 @@ export class ExtensionDevScope implements ExtensionSessionOverlay {
 							: "pending",
 				muted: this.mutedIds.has(entry.id),
 				diagnostics: entry.diagnostics.map((diagnostic) => diagnostic.message),
+				...(this.failed.has(copy.source) ? { failure: this.failed.get(copy.source)?.message ?? "" } : {}),
 			};
 		});
 	}

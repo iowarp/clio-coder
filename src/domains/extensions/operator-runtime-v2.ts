@@ -55,6 +55,14 @@ export interface OperatorRuntimeV2Options {
 	onReload?: (result: OperatorReloadResult, reason: ReloadReason) => void;
 	/** Explicit headless invocation starts only its selected owner. */
 	onlyId?: string;
+	/**
+	 * False for an extension the operator muted. Checked at every entry point,
+	 * so a mute takes effect at once while the reload that unloads it waits for
+	 * idle: commands, actions, interviews and tools refuse, observations are
+	 * dropped, and a hook answers with no effects, since an unloaded gate is
+	 * gone rather than failing.
+	 */
+	admits?: (extensionId: string) => boolean;
 }
 
 /** Observations a slow runtime may fall behind by before the oldest is dropped. */
@@ -547,7 +555,9 @@ export class OperatorExtensionRuntimeV2 {
 				(entry.runtimeV2?.commands ?? []).flatMap((command) => {
 					const process = this.processes.get(entry.id);
 					const failure = this.failures.get(entry.id) ?? process?.failure;
+					const muted = this.fenced(entry.id);
 					const available =
+						!muted &&
 						entry.loadable &&
 						!this.reloading &&
 						failure === undefined &&
@@ -555,11 +565,13 @@ export class OperatorExtensionRuntimeV2 {
 					const reason = available
 						? undefined
 						: (failure ??
-							(!entry.loadable
-								? "installation is not enabled and eligible"
-								: this.reloading
-									? "runtime reload in progress"
-									: "runtime not ready; reload extensions"));
+							(muted
+								? `muted for this session; /extensions unmute ${entry.id} restores it`
+								: !entry.loadable
+									? "installation is not enabled and eligible"
+									: this.reloading
+										? "runtime reload in progress"
+										: "runtime not ready; reload extensions"));
 					const row: ExtensionCommandRow = {
 						origin: "extension" as const,
 						invocation: extensionInvocation(entry.id, command.name),
@@ -654,6 +666,7 @@ export class OperatorExtensionRuntimeV2 {
 		if (Buffer.byteLength(args) > RUNTIME_LIMITS.argumentBytes) throw new Error("extension arguments exceed 16 KiB");
 		const row = this.commands(promptNames).find((candidate) => candidate.invocation === invocation);
 		if (!row?.available) throw new Error(row?.reason ?? `/${invocation} is not an available extension command`);
+		this.refuseFenced(row.extensionId);
 		const entry = this.inventory.find(
 			(candidate): candidate is ApiV2Extension => isApiV2(candidate) && candidate.id === row.extensionId,
 		);
@@ -677,17 +690,22 @@ export class OperatorExtensionRuntimeV2 {
 		);
 	}
 
-	/** One answered step of an interview this extension started. */
-	async interview(extensionId: string, answer: InterviewAnswer): Promise<InterviewNext> {
+	/**
+	 * One answered step of an interview this extension started. The signal
+	 * reaches the handler as its own, so a parked tool call that is cancelled
+	 * while the handler runs is seen there too.
+	 */
+	async interview(extensionId: string, answer: InterviewAnswer, signal?: AbortSignal): Promise<InterviewNext> {
 		const entry = this.runningEntry(extensionId);
 		return this.operator(
 			entry,
-			(process) => process.interview(answer),
+			(process, abort) => process.interview(answer, abort),
 			(process, next) => {
 				if (!("done" in next)) return;
 				const { done: _done, ...output } = next;
 				this.apply(process, output, "action");
 			},
+			signal,
 		);
 	}
 
@@ -698,6 +716,7 @@ export class OperatorExtensionRuntimeV2 {
 	 * goes back to the caller, which parks the call on it.
 	 */
 	async tool(extensionId: string, name: string, input: unknown, signal?: AbortSignal): Promise<ExtensionToolResult> {
+		this.refuseFenced(extensionId);
 		const process = this.processes.get(extensionId);
 		if (!process || !this.current(process)) throw new Error(`extension ${extensionId} has no running runtime`);
 		const result = await process.tool(name, input, signal);
@@ -705,7 +724,15 @@ export class OperatorExtensionRuntimeV2 {
 		return result;
 	}
 
+	private fenced(extensionId: string): boolean {
+		return this.options.admits?.(extensionId) === false;
+	}
+	private refuseFenced(extensionId: string): void {
+		if (this.fenced(extensionId)) throw new Error(`extension ${extensionId} is muted for this session`);
+	}
+
 	private runningEntry(extensionId: string): ApiV2Extension {
+		this.refuseFenced(extensionId);
 		const process = this.processes.get(extensionId);
 		if (!process || !this.current(process)) throw new Error(`extension ${extensionId} has no running runtime`);
 		return process.extension as ApiV2Extension;
@@ -722,6 +749,7 @@ export class OperatorExtensionRuntimeV2 {
 		timeoutMs: number,
 		signal?: AbortSignal,
 	): Promise<ExtensionHookOutcome> {
+		if (this.fenced(extensionId)) return { kind: "ok", effects: [] };
 		const process = this.processes.get(extensionId);
 		if (!process || !this.current(process)) return { kind: "error", message: "runtime is not running" };
 		const lifetime = this.lifetime;
@@ -855,7 +883,7 @@ export class OperatorExtensionRuntimeV2 {
 	}
 
 	private enqueue(process: ExtensionRuntimeProcessV2, observed: ExtensionObservationV2): void {
-		if (process.state !== "ready" || !subscribes(process, observed.event)) return;
+		if (process.state !== "ready" || !subscribes(process, observed.event) || this.fenced(process.extension.id)) return;
 		const event = visibleTo(observed, process.declaration.access);
 		let queue = this.queues.get(process);
 		if (!queue) {

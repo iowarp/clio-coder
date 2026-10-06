@@ -496,11 +496,14 @@ export class ExtensionRuntimeProcessV2 {
 		);
 	}
 	/** One step of an interview this runtime started; the operator may take as long as they need, the handler may not. */
-	interview(answer: InterviewAnswer): Promise<InterviewNext> {
+	interview(answer: InterviewAnswer, signal?: AbortSignal): Promise<InterviewNext> {
 		if (!this.interviews.includes(answer.id))
 			return Promise.reject(new Error(`runtime registered no interview '${answer.id}'`));
-		return this.request({ kind: "interview", name: answer.id, event: answer }, RUNTIME_V2_LIMITS.observationMs, (value) =>
-			parseInterviewNext(value, this.declaration),
+		return this.request(
+			{ kind: "interview", name: answer.id, event: answer },
+			RUNTIME_V2_LIMITS.observationMs,
+			(value) => parseInterviewNext(value, this.declaration),
+			signal,
 		);
 	}
 	dispose(reason = "disposed"): Promise<void> {

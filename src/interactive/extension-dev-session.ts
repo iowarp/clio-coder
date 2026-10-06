@@ -35,6 +35,8 @@ export interface ExtensionDevSession {
 	/** An idle boundary may have arrived: a turn ended or an overlay closed. */
 	poke(): void;
 	command(action: ExtensionDevAction, argument: string | undefined): void;
+	/** Whether the operator muted this extension for the session. */
+	isMuted(extensionId: string): boolean;
 	dispose(): void;
 }
 
@@ -108,15 +110,23 @@ export function createExtensionDevSession(deps: ExtensionDevSessionDeps): Extens
 	 * One non-recursive watch per directory. Node's recursive watch on Linux
 	 * stops reporting a file once a save replaces it by rename, which is how
 	 * editors and Clio's own writes save; a directory watch sees the rename.
-	 * Each change rescans, so a new subdirectory is watched from then on.
+	 * Each change rescans, so a new subdirectory is watched from then on. Until
+	 * the dev directory exists, its nearest existing ancestor is watched alone,
+	 * so creating it later is noticed without watching the whole workspace.
 	 */
 	const ensureWatchers = (): void => {
-		const base = path.join(deps.cwd(), DEV_EXTENSIONS_DIR);
+		const cwd = deps.cwd();
+		const base = path.join(cwd, DEV_EXTENSIONS_DIR);
 		const pending = [
 			...(existsSync(base) ? [base] : []),
 			...scope.sources().filter((source) => path.relative(base, source).startsWith("..")),
 		];
 		const wanted = new Set<string>();
+		if (!existsSync(base)) {
+			let anchor = path.dirname(base);
+			while (!existsSync(anchor) && anchor !== cwd && path.dirname(anchor) !== anchor) anchor = path.dirname(anchor);
+			if (existsSync(anchor)) wanted.add(anchor);
+		}
 		while (pending.length > 0 && wanted.size < DEV_WATCH_DIRECTORY_CAP) {
 			const directory = pending.shift() as string;
 			if (wanted.has(directory)) continue;
@@ -195,9 +205,14 @@ export function createExtensionDevSession(deps: ExtensionDevSessionDeps): Extens
 			try {
 				scope.discover();
 				ensureWatchers();
-				const copied = scope.refresh();
+				const refreshed = scope.refresh();
+				for (const failure of refreshed.failed)
+					deps.notify(
+						"warning",
+						`Dev extension ${failure.id}: the last save was not loaded (${failure.message}); the previous version keeps running.`,
+					);
 				const approved = await askConsent();
-				if (!disposed && (copied.length > 0 || approved)) await deps.operator.reload("reload");
+				if (!disposed && (refreshed.changed.length > 0 || approved)) await deps.operator.reload("reload");
 			} catch (error) {
 				deps.notify("error", `Dev extensions: ${error instanceof Error ? error.message : String(error)}`);
 			} finally {
@@ -227,6 +242,7 @@ export function createExtensionDevSession(deps: ExtensionDevSessionDeps): Extens
 			}
 		},
 		poke,
+		isMuted: (extensionId) => scope.isMuted(extensionId),
 		command(action, argument) {
 			const id = argument?.trim();
 			if (action === "dev") {
@@ -247,7 +263,7 @@ export function createExtensionDevSession(deps: ExtensionDevSessionDeps): Extens
 							: rows
 									.map(
 										(row) =>
-											`${row.id}: ${row.state}${row.muted ? ", muted" : ""} (${row.source})${row.diagnostics.length > 0 ? `; ${row.diagnostics[0]}` : ""}`,
+											`${row.id}: ${row.state}${row.muted ? ", muted" : ""} (${row.source})${row.failure ? `; last save not loaded: ${row.failure}` : row.diagnostics.length > 0 ? `; ${row.diagnostics[0]}` : ""}`,
 									)
 									.join("\n"),
 					);
