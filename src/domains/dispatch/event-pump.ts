@@ -59,7 +59,16 @@ export function startDispatchEventPump(
 	options: StartDispatchEventPumpOptions = {},
 ): DispatchEventPump {
 	const limit = options.limit ?? EVENT_TEE_LIMIT;
-	const pending: unknown[] = [...(options.prelude ?? [])];
+	const pending = new Map<number, unknown>();
+	let readIndex = 0;
+	let writeIndex = 0;
+	for (const event of options.prelude ?? []) pending.set(writeIndex++, event);
+	const shiftPending = (): unknown => {
+		const value = pending.get(readIndex);
+		pending.delete(readIndex++);
+		if (pending.size === 0) readIndex = writeIndex = 0;
+		return value;
+	};
 	const waiters: Array<(result: IteratorResult<unknown>) => void> = [];
 	let finished = false;
 	let abandoned = false;
@@ -72,9 +81,9 @@ export function startDispatchEventPump(
 			waiter({ value, done: false });
 			return;
 		}
-		pending.push(value);
-		while (pending.length > limit) {
-			pending.shift();
+		pending.set(writeIndex++, value);
+		while (pending.size > limit) {
+			shiftPending();
 			dropped += 1;
 		}
 	};
@@ -114,8 +123,8 @@ export function startDispatchEventPump(
 
 	const events: AsyncIterableIterator<unknown> = {
 		next(): Promise<IteratorResult<unknown>> {
-			if (pending.length > 0) {
-				return Promise.resolve({ value: pending.shift(), done: false });
+			if (pending.size > 0) {
+				return Promise.resolve({ value: shiftPending(), done: false });
 			}
 			if (finished || abandoned) return Promise.resolve({ value: undefined, done: true });
 			return new Promise<IteratorResult<unknown>>((resolve) => {
@@ -124,7 +133,8 @@ export function startDispatchEventPump(
 		},
 		return(): Promise<IteratorResult<unknown>> {
 			abandoned = true;
-			pending.length = 0;
+			pending.clear();
+			readIndex = writeIndex = 0;
 			while (waiters.length > 0) {
 				waiters.shift()?.({ value: undefined, done: true });
 			}

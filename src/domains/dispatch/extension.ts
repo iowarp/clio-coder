@@ -3834,6 +3834,8 @@ export function createDispatchBundle(
 	});
 	const assignmentWrites = new Set<Promise<unknown>>();
 	let draining = false;
+	let drainPromise: Promise<void> | null = null;
+	let stopPromise: Promise<void> | null = null;
 
 	/** Session-scope totals for the operator snapshot; finalized runs only. */
 	const finalizedTotals = { inputTokens: 0, outputTokens: 0, totalTokens: 0, costUsd: 0, runtimeSeconds: 0 };
@@ -9027,29 +9029,28 @@ export function createDispatchBundle(
 			startHeartbeatWatchdog();
 			probeEndpointsAtDefaultBound();
 		},
-		async stop() {
-			heldWorkers?.releaseAll("session end");
-			// Shutdown is process-local. The durable machine-wide drain belongs to
-			// the operator: setting it here would deny admission in every sibling
-			// Clio process, and a crash before the clearing write would wedge the
-			// machine.
-			draining = true;
-			capacityAdmission.drain();
-			settleQueuedAssignmentsForShutdown();
-			stopHeartbeatWatchdog();
-			await drain();
-			capacityAdmission.stop();
-			for (const ownerId of ownedReservations) rollbackDispatchReservation(ownerId, now());
-			ownedReservations.clear();
-			publishedPathScopeRoots.clear();
-			await Promise.allSettled([...assignmentWrites]);
-			await liveLedgerWrite;
-			// After drain(), so the last run's terminal line is written before the
-			// bridge stops listening.
-			journalBridge?.stop();
-			journalBridge = null;
-			for (const unsubscribe of grantUnsubscribes.splice(0)) unsubscribe();
-			grantBroker.dispose();
+		stop() {
+			if (stopPromise !== null) return stopPromise;
+			stopPromise = (async () => {
+				// Shutdown is process-local. The durable machine-wide drain belongs to
+				// the operator: setting it here would deny admission in every sibling
+				// Clio process, and a crash before the clearing write would wedge the
+				// machine.
+				await drain();
+				capacityAdmission.stop();
+				for (const ownerId of ownedReservations) rollbackDispatchReservation(ownerId, now());
+				ownedReservations.clear();
+				publishedPathScopeRoots.clear();
+				await Promise.allSettled([...assignmentWrites]);
+				await liveLedgerWrite;
+				// After drain(), so the last run's terminal line is written before the
+				// bridge stops listening.
+				journalBridge?.stop();
+				journalBridge = null;
+				for (const unsubscribe of grantUnsubscribes.splice(0)) unsubscribe();
+				grantBroker.dispose();
+			})();
+			return stopPromise;
 		},
 	};
 
@@ -9194,24 +9195,34 @@ export function createDispatchBundle(
 		retryReasons.clear();
 	}
 
-	async function drain(): Promise<void> {
+	function drain(): Promise<void> {
+		if (drainPromise !== null) return drainPromise;
 		draining = true;
-		settleQueuedAssignmentsForShutdown();
-		const runs = Array.from(active.values());
-		for (const run of runs) {
-			emitRunAborted(run, "dispatch_drain");
-			run.aborted = true;
-			grantBroker.revokeRun(run.runId, "the owning session is shutting down");
-			try {
-				run.abort();
-			} catch {
-				// best-effort; promise still resolves on child close
+		capacityAdmission.drain();
+		heldWorkers?.releaseAll("session end");
+		stopHeartbeatWatchdog();
+		drainPromise = (async () => {
+			settleQueuedAssignmentsForShutdown();
+			const runs = Array.from(active.values());
+			for (const run of runs) {
+				emitRunAborted(run, "dispatch_drain");
+				run.aborted = true;
+				grantBroker.revokeRun(run.runId, "the owning session is shutting down");
+				try {
+					run.abort();
+				} catch {
+					// best-effort; promise still resolves on child close
+				}
 			}
-		}
-		await Promise.allSettled(runs.map((r) => r.finalPromise));
-		await Promise.allSettled([...assignmentWrites]);
-		await liveLedgerWrite;
-		if (ledger) await ledger.persist();
+			await Promise.allSettled(runs.map((r) => r.finalPromise));
+			while (memberWork.size > 0) {
+				await Promise.allSettled([...memberWork.values()].flatMap((work) => [...work]));
+			}
+			await Promise.allSettled([...assignmentWrites]);
+			await liveLedgerWrite;
+			if (ledger) await ledger.persist();
+		})();
+		return drainPromise;
 	}
 
 	function assignmentRootFor(id: string): string {
