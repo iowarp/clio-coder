@@ -2,6 +2,14 @@ import type { ExtensionRuntimeDeclarationV2 } from "./manifest-v2.js";
 
 export type ExtensionScope = "user" | "project";
 
+/**
+ * Where a loaded package came from. `dev` is a folder the operator develops
+ * in: loaded by the terminal for one session after the operator approves its
+ * capability envelope, from a private copy taken at each reload, and never
+ * written to install state.
+ */
+export type ExtensionLoadScope = ExtensionScope | "dev";
+
 export interface ExtensionRuntimeDeclaration {
 	api: 1;
 	entrypoint: string;
@@ -51,7 +59,7 @@ export interface ExtensionDiagnostic {
 
 export interface ExtensionProvenance {
 	id: string;
-	scope: ExtensionScope;
+	scope: ExtensionLoadScope;
 	/** Path recorded in install state, when known. */
 	sourcePath?: string;
 	/** Canonical filesystem identity of the installed package root. */
@@ -72,7 +80,7 @@ export interface InstalledExtension {
 	version: string;
 	description: string;
 	capabilities?: ExtensionCapabilities;
-	scope: ExtensionScope;
+	scope: ExtensionLoadScope;
 	rootPath: string;
 	manifestPath: string;
 	enabled: boolean;
@@ -83,13 +91,19 @@ export interface InstalledExtension {
 	effective: boolean;
 	/** Set on a project copy in a workspace whose project extensions the operator has not approved. */
 	trustBlocked?: true;
+	/** A dev package whose capability envelope the operator has not approved this session. */
+	consentPending?: true;
+	/** Unloaded for this session by `/extensions mute`; install state is untouched. */
+	muted?: true;
+	/** For a dev package, the folder the operator develops in; `rootPath` is the private copy. */
+	devSource?: string;
 	/** The single admission decision for extension-owned tools and hooks. */
 	loadable: boolean;
 	/** Present exactly when the installed tree and manifest bytes were reverified. */
 	provenance?: ExtensionProvenance;
 	/** Digest observed while checking installed content on this load. */
 	observedContentDigest?: string;
-	overriddenBy?: ExtensionScope;
+	overriddenBy?: ExtensionLoadScope;
 	diagnostics: ExtensionDiagnostic[];
 }
 

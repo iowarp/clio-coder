@@ -1,8 +1,10 @@
+import type { ExtensionLoadScope } from "./types.js";
+
 export interface ExtensionCommandRow {
 	origin: "extension";
 	invocation: string;
 	extensionId: string;
-	scope: "user" | "project";
+	scope: ExtensionLoadScope;
 	description: string;
 	generation: number;
 	available: boolean;

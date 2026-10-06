@@ -145,7 +145,9 @@ type SlashCommandVariant =
 			kind: "resources";
 			family?: "extensions" | "plugins";
 			tab?: LibraryEntryKind;
-			action?: "reload";
+			action?: "reload" | "dev" | "mute" | "unmute";
+			/** The folder or extension id a dev, mute or unmute action names. */
+			target?: string;
 			/** A package ref or resource key the browser selects on open. */
 			focus?: string;
 			/** An operation to review on that row. Nothing is written before the review. */
@@ -669,6 +671,8 @@ export interface SessionCommandContext {
 		outputLabel(): string;
 	};
 	operatorExtensions?: OperatorExtensions;
+	/** The terminal's dev scope: `/extensions dev [folder]`, `mute <id>`, `unmute <id>`. */
+	extensionDev?: (action: "dev" | "mute" | "unmute", argument: string | undefined) => void;
 	showExtensionOutput?: (invocation: string, output: OperatorCommandOutput) => void;
 	io: RunIo;
 	notice: (level: NoticeLevel, text: string) => void;
@@ -1331,7 +1335,10 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 			}
 			if (command.family === "extensions") {
 				if (command.action === "reload") reloadExtensionsCommand(ctx);
-				else ctx.openExtensions?.();
+				else if (command.action !== undefined) {
+					if (ctx.extensionDev) ctx.extensionDev(command.action, command.target);
+					else ctx.notice("warn", "extensions: dev and mute are available in the terminal only");
+				} else ctx.openExtensions?.();
 				return;
 			}
 			ctx.openSkillsHub?.({
@@ -1448,21 +1455,34 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	{
 		name: "extensions",
 		acp: false,
-		description: "Inspect harness extensions or reload their commands, hooks and operator UI",
+		description: "Inspect harness extensions, reload them, or manage dev and muted ones for this session",
 		group: "Inspect",
 		// Harness navigation uses the shared overlay dispatcher, independently of recipe reload.
 		kinds: [],
-		args: { positionals: [{ name: "action", required: false, values: ["reload"] }] },
+		args: {
+			positionals: [
+				{ name: "action", required: false, values: ["reload", "dev", "mute", "unmute"] },
+				{ name: "target", required: false, rest: true },
+			],
+		},
 		fromArgs(parsed) {
 			if (parsed.error) return { kind: "usage-error", command: "extensions", reason: parsed.error };
-			if (parsed.positionals[0] && parsed.positionals[0] !== "reload")
-				return { kind: "usage-error", command: "extensions", reason: "extensions accepts only reload" };
-			return { kind: "resources", family: "extensions", ...(parsed.positionals[0] ? { action: "reload" as const } : {}) };
+			const action = parsed.positionals[0];
+			const target = (parsed.rest ?? parsed.positionals[1])?.trim();
+			if (action === undefined) return { kind: "resources", family: "extensions" };
+			if (action !== "reload" && action !== "dev" && action !== "mute" && action !== "unmute")
+				return { kind: "usage-error", command: "extensions", reason: "extensions accepts reload, dev, mute or unmute" };
+			if (action === "reload" && target)
+				return { kind: "usage-error", command: "extensions", reason: "extensions reload takes no argument" };
+			return { kind: "resources", family: "extensions", action, ...(target ? { target } : {}) };
 		},
 		handle(command, ctx) {
 			if (command.kind !== "resources" || command.family !== "extensions") return;
 			if (command.action === "reload") reloadExtensionsCommand(ctx);
-			else ctx.openExtensions?.();
+			else if (command.action !== undefined) {
+				if (ctx.extensionDev) ctx.extensionDev(command.action, command.target);
+				else ctx.notice("warn", "extensions: dev and mute are available in the terminal only");
+			} else ctx.openExtensions?.();
 		},
 	},
 	{

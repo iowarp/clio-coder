@@ -96,6 +96,7 @@ export interface InteractiveSlashRuntimeDeps {
 	recordFeature?: (feature: string) => void;
 	keyboardActions?: SlashCommandContext["keyboardActions"];
 	operatorExtensions?: SlashCommandContext["operatorExtensions"];
+	extensionDev?: SlashCommandContext["extensionDev"];
 	showExtensionOutput?: SlashCommandContext["showExtensionOutput"];
 	io: RunIo;
 	bus: SafeEventBus;
@@ -508,6 +509,7 @@ export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps)
 		listExtensions: () => deps.extensions?.list(cwd(), { all: true }) ?? [],
 		...(deps.keyboardActions ? { keyboardActions: deps.keyboardActions } : {}),
 		...(deps.operatorExtensions ? { operatorExtensions: deps.operatorExtensions } : {}),
+		...(deps.extensionDev ? { extensionDev: deps.extensionDev } : {}),
 		...(deps.showExtensionOutput ? { showExtensionOutput: deps.showExtensionOutput } : {}),
 		listAgents: () => deps.agents?.listSpecs().filter((spec) => spec.audience !== "internal") ?? [],
 		...archiveCommandHost(deps.share),

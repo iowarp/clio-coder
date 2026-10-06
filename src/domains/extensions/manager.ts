@@ -23,6 +23,7 @@ export type {
 	ExtensionInstallOptions,
 	ExtensionInstallResult,
 	ExtensionListOptions,
+	ExtensionLoadScope,
 	ExtensionMutationResult,
 	ExtensionProvenance,
 	ExtensionReloadCandidate,

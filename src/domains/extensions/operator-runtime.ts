@@ -13,6 +13,7 @@ import { ExtensionRuntimeProcess, type RuntimeProcessState } from "./runtime-pro
 import { RUNTIME_LIMITS } from "./runtime-schema.js";
 import { listInstalledExtensions } from "./state.js";
 import {
+	type ExtensionLoadScope,
 	type ExtensionProvenance,
 	type InstalledExtension,
 	isLoadableExtension,
@@ -21,7 +22,7 @@ import {
 
 export interface OperatorRuntimeEntry {
 	id: string;
-	scope: "user" | "project";
+	scope: ExtensionLoadScope;
 	generation: number;
 	state: RuntimeProcessState | "inactive";
 	/** Verified owner of this instance, not a subsequent installed-inventory observation. */

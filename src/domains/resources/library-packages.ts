@@ -46,14 +46,26 @@ export function readLibraryManifest(root: string): PluginCandidate {
 		...(candidate.valid ? { contentDigest: pluginContentDigest(root) } : {}),
 	};
 }
+/** The library lists installed packages; a dev package is a session overlay and never one of them. */
 export function extensionLibraryCopy(entry: InstalledExtension): InstalledPlugin {
-	return { ...entry, kind: "extension", resources: {}, manifest: extensionManifest(entry), trust: "trusted" };
+	if (entry.scope === "dev") throw new Error(`dev extension ${entry.id} is not a library package`);
+	const { provenance, overriddenBy, ...rest } = entry;
+	return {
+		...rest,
+		scope: entry.scope,
+		...(provenance ? { provenance: { ...provenance, scope: entry.scope } } : {}),
+		...(overriddenBy !== undefined && overriddenBy !== "dev" ? { overriddenBy } : {}),
+		kind: "extension",
+		resources: {},
+		manifest: extensionManifest(entry),
+		trust: "trusted",
+	};
 }
 export function listInstalledLibraryPackages(cwd = process.cwd(), options: PluginListOptions = {}): InstalledPlugin[] {
 	return [
 		...listInstalledPlugins(cwd, options),
 		...listInstalledExtensions(cwd, options)
-			.filter((entry) => !entry.bundle)
+			.filter((entry) => !entry.bundle && entry.scope !== "dev")
 			.map(extensionLibraryCopy),
 	];
 }

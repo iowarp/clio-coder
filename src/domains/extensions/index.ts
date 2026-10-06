@@ -9,6 +9,12 @@ export const ExtensionsDomainModule: DomainModule<ExtensionsContract> = {
 };
 
 export type { ExtensionsContract } from "./contract.js";
+export {
+	DEV_EXTENSIONS_DIR,
+	type DevConsentRequest,
+	type DevExtensionStatus,
+	ExtensionDevScope,
+} from "./dev-scope.js";
 export { loadManifestFromRoot } from "./discovery.js";
 export {
 	type ClioExtensionManifest,
@@ -20,6 +26,7 @@ export {
 	type ExtensionInstallOptions,
 	type ExtensionInstallResult,
 	type ExtensionListOptions,
+	type ExtensionLoadScope,
 	type ExtensionMutationResult,
 	type ExtensionProvenance,
 	type ExtensionReloadCandidate,
@@ -62,5 +69,5 @@ export {
 	EXTENSION_SNAPSHOT_DIAGNOSTIC_PER_PACKAGE_CAP,
 } from "./snapshot.js";
 
-export { extensionBaseDir, readExtensionInstallRecord } from "./state.js";
+export { type ExtensionSessionOverlay, extensionBaseDir, readExtensionInstallRecord } from "./state.js";
 export type { ExtensionCapabilities, ExtensionCommandTool } from "./types.js";

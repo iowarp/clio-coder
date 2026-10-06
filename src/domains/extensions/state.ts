@@ -13,6 +13,7 @@ import type {
 	ExtensionInstallOptions,
 	ExtensionInstallResult,
 	ExtensionListOptions,
+	ExtensionLoadScope,
 	ExtensionMutationResult,
 	ExtensionScope,
 	ExtensionState,
@@ -59,8 +60,9 @@ function preserveFile(filePath: string, label: string): string | undefined {
 	return backupPath;
 }
 
-export function scopeRank(scope: ExtensionScope): number {
-	return scope === "project" ? 2 : 1;
+/** A dev package outranks both installed scopes for the session it is loaded in. */
+export function scopeRank(scope: ExtensionLoadScope): number {
+	return scope === "dev" ? 3 : scope === "project" ? 2 : 1;
 }
 
 function readState(scope: ExtensionScope, cwd = process.cwd()): StateReadResult {
@@ -298,8 +300,12 @@ function bundleRefusal(id: string, operation: "install" | "enable" | "disable" |
 	];
 }
 
-export function listInstalledExtensions(cwd = process.cwd(), options: ExtensionListOptions = {}): InstalledExtension[] {
-	return listInstalledExtensionRecords(cwd, options).map((record) => record.entry);
+export function listInstalledExtensions(
+	cwd = process.cwd(),
+	options: ExtensionListOptions = {},
+	overlay?: ExtensionSessionOverlay,
+): InstalledExtension[] {
+	return listInstalledExtensionRecords(cwd, options, overlay).map((record) => record.entry);
 }
 
 /**
@@ -324,9 +330,19 @@ function blockUntrustedProjectExtensions(records: ReadonlyArray<InstalledExtensi
 	}
 }
 
+/**
+ * Session-only additions the terminal applies on top of install state: dev
+ * packages and muted ids. Nothing here is ever persisted.
+ */
+export interface ExtensionSessionOverlay {
+	devRecords(): InstalledExtensionRecord[];
+	muted(): ReadonlySet<string>;
+}
+
 export function listInstalledExtensionRecords(
 	cwd = process.cwd(),
 	options: ExtensionListOptions = {},
+	overlay?: ExtensionSessionOverlay,
 ): InstalledExtensionRecord[] {
 	const scopes: ExtensionScope[] = options.scope ? [options.scope] : ["user", "project"];
 	const records = scopes.flatMap((scope) => listScope(scope, cwd));
@@ -335,6 +351,7 @@ export function listInstalledExtensionRecords(
 		if (facet) records.push(facet);
 	}
 	blockUntrustedProjectExtensions(records, cwd);
+	if (overlay && options.scope === undefined) records.push(...overlay.devRecords());
 	const byId = new Map<string, InstalledExtensionRecord[]>();
 	for (const record of records) {
 		const entry = record.entry;
@@ -346,18 +363,24 @@ export function listInstalledExtensionRecords(
 		const winner = group
 			.filter(
 				(record) =>
-					record.eligible !== false && record.entry.valid && record.entry.compatible && !record.entry.trustBlocked,
+					record.eligible !== false &&
+					record.entry.valid &&
+					record.entry.compatible &&
+					!record.entry.trustBlocked &&
+					!record.entry.consentPending,
 			)
 			.sort(
 				(a, b) =>
 					scopeRank(a.entry.scope) - scopeRank(b.entry.scope) || Number(!!a.entry.bundle) - Number(!!b.entry.bundle),
 			)
 			.at(-1);
+		const muted = overlay?.muted().has(group[0]?.entry.id ?? "") === true;
 		for (const record of group) {
 			const entry = record.entry;
 			entry.effective = record === winner;
-			entry.loadable = entry.valid && entry.compatible && entry.enabled && entry.effective;
-			if (entry.valid && entry.compatible && !entry.trustBlocked && !entry.effective && winner) {
+			entry.loadable = entry.valid && entry.compatible && entry.enabled && entry.effective && !muted;
+			if (muted && entry.effective) entry.muted = true;
+			if (entry.valid && entry.compatible && !entry.trustBlocked && !entry.consentPending && !entry.effective && winner) {
 				entry.overriddenBy = winner.entry.scope;
 			}
 		}
@@ -367,7 +390,9 @@ export function listInstalledExtensionRecords(
 	const all =
 		options.all === true
 			? records
-			: records.filter(({ entry }) => entry.effective || entry.trustBlocked || !entry.valid || !entry.compatible);
+			: records.filter(
+					({ entry }) => entry.effective || entry.trustBlocked || entry.consentPending || !entry.valid || !entry.compatible,
+				);
 	return all.sort((a, b) => {
 		const id = a.entry.id.localeCompare(b.entry.id);
 		if (id !== 0) return id;
@@ -375,9 +400,12 @@ export function listInstalledExtensionRecords(
 	});
 }
 
-function findInstalled(id: string, cwd: string, scope?: ExtensionScope): InstalledExtension | null {
+type InstalledInScope = InstalledExtension & { scope: ExtensionScope };
+
+/** Install state never holds a dev package; this module's listing has no session overlay. */
+function findInstalled(id: string, cwd: string, scope?: ExtensionScope): InstalledInScope | null {
 	const entries = listInstalledExtensions(cwd, { ...(scope ? { scope } : {}), all: true }).filter(
-		(entry) => entry.id === id,
+		(entry): entry is InstalledInScope => entry.id === id && entry.scope !== "dev",
 	);
 	if (entries.length === 0) return null;
 	return [...entries].sort((a, b) => scopeRank(a.scope) - scopeRank(b.scope)).at(-1) ?? null;

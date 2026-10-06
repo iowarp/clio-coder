@@ -59,6 +59,7 @@ import { createDispatchSteering } from "./dispatch-steering.js";
 import { createEditorSubmitController, EDITOR_BASH_SHUTDOWN_MS } from "./editor-submit.js";
 import { renderExitSummary } from "./exit-summary.js";
 import { createExitSummaryCollector } from "./exit-summary-collector.js";
+import { createExtensionDevSession } from "./extension-dev-session.js";
 import { createInteractiveDesktopNotifications } from "./footer/notifications.js";
 import { createInteractiveEventProjection } from "./interactive-event-projection.js";
 import { createInteractiveInputRuntime } from "./interactive-input-runtime.js";
@@ -586,6 +587,23 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 	const turnObservations = operatorExtensions
 		? createTurnObservations((observation) => operatorExtensions.observeV2(observation))
 		: undefined;
+	// The dev scope is a terminal concept: only this surface sets the overlay,
+	// so headless runs, ACP and workers never load a package under development.
+	const devSession =
+		operatorExtensions && deps.extensions
+			? createExtensionDevSession({
+					extensions: deps.extensions,
+					operator: operatorExtensions,
+					cwd: () => process.cwd(),
+					isIdle: () =>
+						!deps.chat.isStreaming() &&
+						deps.chat.turnPreparation().phase === "idle" &&
+						(overlayLifecycle?.getState() ?? "closed") === "closed" &&
+						!editorSubmit?.hasActiveEditorBash(),
+					ask: (questions, options) => overlayLifecycle.openTransientAskUserOverlayState(questions, options),
+					notify: (level, text) => notify(level, text, "operator-extensions:dev"),
+				})
+			: undefined;
 	if (operatorExtensions)
 		deps.runtimeHooks?.bind({
 			hook: (extensionId, event, timeoutMs, signal) => operatorExtensions.hook(extensionId, event, timeoutMs, signal),
@@ -886,6 +904,7 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 		onTurnEnded: () => {
 			desktopNotifications.turnEnded();
 			operatorExtensions?.observe({ event: "turn_end", reason: "completed" });
+			devSession?.poke();
 		},
 		refreshLiveWorkspaceGit,
 		refreshFooter: () => {
@@ -936,6 +955,7 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 			outputLabel: () => keybindings.actionLabel("clio-coder.output.cycle"),
 		},
 		...(operatorExtensions ? { operatorExtensions } : {}),
+		...(devSession ? { extensionDev: devSession.command } : {}),
 		showExtensionOutput: (invocation, output) => {
 			const id = invocation.split(":")[1];
 			const generation = operatorExtensions?.entries().find((entry) => entry.id === id)?.generation;
@@ -1687,6 +1707,7 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 				clearTimeout(operatorTimer);
 				for (const unsubscribe of operatorSubscriptions) unsubscribe();
 				void ambientSurfaces?.dispose();
+				devSession?.dispose();
 				void operatorExtensions?.dispose();
 				detachMusicDockKey?.();
 				detachYaziBridge?.();
@@ -1800,6 +1821,7 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 			clearTimeout(operatorTimer);
 			for (const unsubscribe of operatorSubscriptions) unsubscribe();
 			deps.runtimeHooks?.bind(null);
+			devSession?.dispose();
 			await operatorExtensions?.dispose();
 			workspaceSurfaces?.dispose();
 			await ambientSurfaces?.dispose();
@@ -1908,7 +1930,10 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 		// A shell that reports no frames still reloads.
 		if (operatorExtensions)
 			setImmediate(() => {
-				if (!startupAbort.signal.aborted) void operatorExtensions.reload("startup");
+				if (startupAbort.signal.aborted) return;
+				// Dev copies are taken before the startup reload lists packages.
+				devSession?.start();
+				void operatorExtensions.reload("startup");
 			});
 		if (frame === null) return;
 		// Docks are prepared hidden only now that the first frame is out: pane
