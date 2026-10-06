@@ -9273,7 +9273,19 @@ export function createDispatchBundle(
 			await Promise.allSettled([...assignmentWrites]);
 			await liveLedgerWrite;
 			if (ledger) await ledger.persist();
-		})().then(resolveDrain, rejectDrain);
+		})().then(
+			// Concurrent callers share one drain; a call after it settled runs
+			// again, so a ledger change made since then is still persisted. The
+			// slot clears before waiters resume so their next call starts fresh.
+			() => {
+				drainPromise = null;
+				resolveDrain();
+			},
+			(error: unknown) => {
+				drainPromise = null;
+				rejectDrain(error);
+			},
+		);
 		return drainPromise;
 	}
 
