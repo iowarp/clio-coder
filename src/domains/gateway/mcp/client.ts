@@ -16,7 +16,8 @@
  * been called.
  */
 
-import { type ChildProcess, spawn } from "node:child_process";
+import type { ChildProcess } from "node:child_process";
+import { spawn } from "node:child_process";
 import { realpathSync, statSync } from "node:fs";
 import path from "node:path";
 import { performance } from "node:perf_hooks";
@@ -27,12 +28,12 @@ import {
 	DEFAULT_MAX_LINE_BYTES,
 	encodeJsonRpcMessage,
 	JSON_RPC_METHOD_NOT_FOUND,
-	type JsonRpcId,
-	type JsonRpcMessage,
 	MCP_PROTOCOL_VERSION,
 	McpError,
 	structuredContentJson,
 } from "./protocol.js";
+
+import type { JsonRpcId, JsonRpcMessage } from "./protocol.js";
 
 export const MCP_CLIENT_NAME = "clio-coder";
 export const DEFAULT_MCP_CLIENT_VERSION = "0.5.1";
@@ -148,8 +149,8 @@ export interface McpCallToolOptions {
 export interface McpClient {
 	readonly id: string;
 	readonly pid: number | undefined;
-	initialize(): Promise<McpServerInfo>;
-	listTools(): Promise<McpToolListing>;
+	initialize(signal?: AbortSignal): Promise<McpServerInfo>;
+	listTools(signal?: AbortSignal): Promise<McpToolListing>;
 	callTool(name: string, args: Record<string, unknown>, options?: McpCallToolOptions): Promise<McpToolCallResult>;
 	/** Resolves with the teardown outcome; an incomplete teardown is flagged there and in state(), not thrown. */
 	close(): Promise<McpTeardownOutcome>;
@@ -167,6 +168,7 @@ export interface McpClient {
 
 interface PendingRequest {
 	method: string;
+	sent: boolean;
 	resolve(value: unknown): void;
 	reject(error: McpError): void;
 }
@@ -433,6 +435,7 @@ export function createMcpStdioClient(spec: McpServerSpec, options: McpClientOpti
 	const fail = (error: McpError): void => {
 		if (status === "closed" || status === "failed") return;
 		status = "failed";
+		options.signal?.removeEventListener("abort", onParentAbort);
 		failure = error;
 		rejectAllPending(error);
 	};
@@ -549,6 +552,10 @@ export function createMcpStdioClient(spec: McpServerSpec, options: McpClientOpti
 			if (!stdin || stdin.destroyed || !stdin.writable) {
 				entry.onError?.(new Error("server stdin is not writable"));
 				continue;
+			}
+			if (entry.requestId !== null) {
+				const request = pending.get(entry.requestId);
+				if (request !== undefined) request.sent = true;
 			}
 			const accepted = stdin.write(entry.payload, (error) => {
 				if (error) entry.onError?.(error);
@@ -737,15 +744,28 @@ export function createMcpStdioClient(spec: McpServerSpec, options: McpClientOpti
 				signal?.removeEventListener("abort", onAbort);
 				finish();
 			};
-			const onAbort = (): void => settle(() => reject(new McpError("aborted", `${method} aborted`)));
+			const cancel = (error: McpError): void => {
+				const entry = pending.get(id);
+				if (entry === undefined) return;
+				const stopServer = method === "tools/call" && entry.sent;
+				settle(() => {
+					if (stopServer) {
+						// PERF W3: a sent call owns server work until group teardown settles.
+						fail(error);
+						void close().then(() => reject(error));
+					} else reject(error);
+				});
+			};
+			const onAbort = (): void => cancel(new McpError("aborted", `${method} aborted`));
 			pending.set(id, {
 				method,
+				sent: false,
 				resolve: (value) => settle(() => resolve(value)),
 				reject: (error) => settle(() => reject(error)),
 			});
 			if (timeoutMs > 0) {
 				timer = setTimeout(
-					() => settle(() => reject(new McpError("timeout", `${method} timed out after ${timeoutMs}ms`))),
+					() => cancel(new McpError("timeout", `${method} timed out after ${timeoutMs}ms`)),
 					timeoutMs,
 				);
 			}
@@ -770,7 +790,30 @@ export function createMcpStdioClient(spec: McpServerSpec, options: McpClientOpti
 			// An overloaded queue already failed the client, which rejected this request with the cause.
 		});
 
-	const initialize = (): Promise<McpServerInfo> => {
+	const withDiscoverySignal = async <T>(signal: AbortSignal | undefined, run: () => Promise<T>): Promise<T> => {
+		const onAbort = (): void => {
+			fail(new McpError("aborted", "MCP discovery aborted"));
+			void close();
+		};
+		if (signal?.aborted) onAbort();
+		signal?.addEventListener("abort", onAbort, { once: true });
+		try {
+			if (signal?.aborted) throw closedError();
+			const result = await run();
+			if (signal?.aborted) throw closedError();
+			return result;
+		} catch (error) {
+			if (signal?.aborted) await close();
+			throw error;
+		} finally {
+			signal?.removeEventListener("abort", onAbort);
+		}
+	};
+
+	const initialize = (signal?: AbortSignal): Promise<McpServerInfo> =>
+		withDiscoverySignal(signal, () => initializeOnce(signal));
+
+	const initializeOnce = (signal?: AbortSignal): Promise<McpServerInfo> => {
 		if (status === "closed" || status === "failed") return Promise.reject(closedError());
 		if (initializePromise !== null) return initializePromise;
 		initializePromise = (async () => {
@@ -794,6 +837,7 @@ export function createMcpStdioClient(spec: McpServerSpec, options: McpClientOpti
 						clientInfo: { name: MCP_CLIENT_NAME, version: clientVersion },
 					},
 					initializeTimeoutMs,
+					signal,
 				);
 			} catch (error) {
 				const cause = error instanceof McpError ? error : new McpError("protocol", errorMessage(error));
@@ -815,19 +859,19 @@ export function createMcpStdioClient(spec: McpServerSpec, options: McpClientOpti
 		return initializePromise;
 	};
 
-	const ensureReady = async (): Promise<void> => {
+	const ensureReady = async (signal?: AbortSignal): Promise<void> => {
 		if (status === "ready") return;
-		await initialize();
+		await initialize(signal);
 	};
 
-	const listTools = async (): Promise<McpToolListing> => {
-		await ensureReady();
+	const listTools = (signal?: AbortSignal): Promise<McpToolListing> => withDiscoverySignal(signal, async () => {
+		await ensureReady(signal);
 		const tools: McpToolDescriptor[] = [];
 		let cursor: string | undefined;
 		let pages = 0;
 		for (;;) {
 			pages += 1;
-			const result = await request("tools/list", cursor === undefined ? {} : { cursor }, requestTimeoutMs);
+			const result = await request("tools/list", cursor === undefined ? {} : { cursor }, requestTimeoutMs, signal);
 			if (!isRecord(result) || !Array.isArray(result.tools)) {
 				throw new McpError("protocol", "tools/list result lacks a tools array");
 			}
@@ -842,14 +886,15 @@ export function createMcpStdioClient(spec: McpServerSpec, options: McpClientOpti
 			if (tools.length >= MCP_TOOL_LIST_CAP || pages >= MCP_TOOL_LIST_PAGE_CAP) return { tools, truncated: true };
 			cursor = next;
 		}
-	};
+	});
 
 	const callTool = async (
 		name: string,
 		args: Record<string, unknown>,
 		callOptions: McpCallToolOptions = {},
 	): Promise<McpToolCallResult> => {
-		await ensureReady();
+		if (callOptions.signal?.aborted) throw new McpError("aborted", "tools/call aborted before it was sent");
+		await ensureReady(callOptions.signal);
 		const timeoutMs = clampTimerDelayMs(callOptions.timeoutMs ?? requestTimeoutMs);
 		const result = await request("tools/call", { name, arguments: args }, timeoutMs, callOptions.signal);
 		const parsed = parseToolCallResult(result, maxResultTextBytes);
@@ -867,6 +912,7 @@ export function createMcpStdioClient(spec: McpServerSpec, options: McpClientOpti
 		if (closePromise !== null) return closePromise;
 		closePromise = (async () => {
 			closing = true;
+			options.signal?.removeEventListener("abort", onParentAbort);
 			if (status !== "failed") status = "closed";
 			rejectAllPending(closedError());
 			outbound.length = 0;
@@ -887,9 +933,11 @@ export function createMcpStdioClient(spec: McpServerSpec, options: McpClientOpti
 		return closePromise;
 	};
 
+	const onParentAbort = (): void => { void close(); };
+
 	if (options.signal !== undefined) {
 		if (options.signal.aborted) void close();
-		else options.signal.addEventListener("abort", () => void close(), { once: true });
+		else options.signal.addEventListener("abort", onParentAbort, { once: true });
 	}
 
 	return {

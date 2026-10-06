@@ -525,6 +525,7 @@ export function createMcpCapabilitySource(options: McpCapabilitySourceOptions): 
 				installExitHook();
 				await client.initialize();
 				const listing = await client.listTools();
+				if (closed || state.closing !== null || state.client !== client || state.failure !== null) return;
 				state.tools = listing.tools;
 				state.truncated = listing.truncated;
 				// An abort that landed while the listing was in flight already set
