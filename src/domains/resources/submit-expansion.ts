@@ -61,11 +61,12 @@ export async function expandSubmitText(
 		pendingSkillRequests: [],
 	};
 	const promptExpansion = resources?.expandPromptTemplate(parsed.text, cwd);
-	if (promptExpansion?.expanded && promptExpansion.template.sourceInfo.owner)
+	const promptOwner = promptExpansion?.expanded ? promptExpansion.template.sourceInfo?.owner : undefined;
+	if (promptExpansion?.expanded && promptOwner)
 		recordPackageActivity({
 			type: PLUGIN_RESOURCE_USE,
 			kind: "prompt",
-			owner: promptExpansion.template.sourceInfo.owner,
+			owner: promptOwner,
 			outcome: "expanded",
 			details: { name: promptExpansion.template.name },
 		});
