@@ -216,6 +216,7 @@ import {
 	registerAssignment,
 	renameStoredAssignment,
 	settleStoredAssignment,
+	subscribeStoredAssignments,
 	timeoutStoredAssignment,
 } from "./assignment-store.js";
 import {
@@ -9415,6 +9416,25 @@ export function createDispatchBundle(
 		listRuns(status) {
 			const l = requireLedger();
 			return status ? l.list({ status }) : l.list();
+		},
+		subscribeChanges(listener) {
+			const unsubscribes = [
+				context.bus.on(BusChannels.DispatchEnqueued, listener),
+				context.bus.on(BusChannels.DispatchStarted, listener),
+				context.bus.on(BusChannels.DispatchCompleted, listener),
+				context.bus.on(BusChannels.DispatchFailed, listener),
+				context.bus.on(BusChannels.PermissionRequested, listener),
+				context.bus.on(BusChannels.PermissionResolved, listener),
+			];
+			try {
+				unsubscribes.push(subscribeStoredAssignments(listener));
+			} catch (error) {
+				for (const unsubscribe of unsubscribes) unsubscribe();
+				throw error;
+			}
+			return () => {
+				for (const unsubscribe of unsubscribes.splice(0)) unsubscribe();
+			};
 		},
 		getRun(runId) {
 			if (!ledger) return null;
