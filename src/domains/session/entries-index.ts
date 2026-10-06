@@ -1,7 +1,7 @@
 import { readFileSync, statSync } from "node:fs";
 import type { BigIntStats } from "node:fs";
 import type { SessionAppendObservation } from "../../engine/session.js";
-import { readSessionFileEntriesRange } from "../../engine/session.js";
+import { isSessionJsonlHeader, readSessionFileEntriesRange } from "../../engine/session.js";
 import { collectSessionEntries } from "./compaction/session-entries.js";
 import type { SessionEntry } from "./entries.js";
 
@@ -74,15 +74,13 @@ export class SessionEntriesIndex {
 			this.stat = null;
 			return this.read();
 		}
-		const parsed = collectSessionEntries(range.entries.filter((entry) =>
-			!(typeof entry === "object" && entry !== null && "type" in entry && entry.type === "session"),
-		), this.path);
+		const parsed = collectSessionEntries(range.entries.filter((entry) => !isSessionJsonlHeader(entry)), this.path);
 		for (const entry of parsed) freezeJson(entry);
 		const prefix = append ? this.entries.slice(0, this.completeEntries) : [];
 		this.entries = prefix.concat(parsed);
 		// A header consumes an engine entry but does not appear in the domain list.
-		const finalEntryCount = range.entries.length - range.completeEntries;
-		this.completeEntries = this.entries.length - finalEntryCount;
+		this.completeEntries = prefix.length + range.entries.slice(0, range.completeEntries)
+			.filter((entry) => !isSessionJsonlHeader(entry)).length;
 		const rangeOffset = append ? this.offset : 0;
 		if (!append) this.chunks = [];
 		const completeBytes = range.nextOffset - rangeOffset;

@@ -477,7 +477,7 @@ function isOptionalString(value: unknown): boolean {
 	return value === undefined || typeof value === "string";
 }
 
-function isSessionJsonlHeader(value: unknown): value is ClioSessionJsonlHeader {
+export function isSessionJsonlHeader(value: unknown): value is ClioSessionJsonlHeader {
 	if (!value || typeof value !== "object") return false;
 	const v = value as Record<string, unknown>;
 	return (
