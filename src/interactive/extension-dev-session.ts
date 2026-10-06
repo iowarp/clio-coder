@@ -229,17 +229,19 @@ export function createExtensionDevSession(deps: ExtensionDevSessionDeps): Extens
 				} else {
 					scope.reconsider();
 					const rows = scope.status();
-					deps.notify(
-						"info",
+					const withheld = scope.withheld();
+					const lines =
 						rows.length === 0
-							? `No dev extensions. Put a package under ${DEV_EXTENSIONS_DIR}/<id>/ or run /extensions dev <folder>.`
-							: rows
-									.map(
-										(row) =>
-											`${row.id}: ${row.state}${row.muted ? ", muted" : ""} (${row.source})${row.failure ? `; last save not loaded: ${row.failure}` : row.diagnostics.length > 0 ? `; ${row.diagnostics[0]}` : ""}`,
-									)
-									.join("\n"),
-					);
+							? [`No dev extensions. Put a package under ${DEV_EXTENSIONS_DIR}/<id>/ or run /extensions dev <folder>.`]
+							: rows.map(
+									(row) =>
+										`${row.id}: ${row.state}${row.muted ? ", muted" : ""} (${row.source})${row.failure ? `; last save not loaded: ${row.failure}` : row.diagnostics.length > 0 ? `; ${row.diagnostics[0]}` : ""}`,
+								);
+					if (withheld.length > 0)
+						lines.push(
+							`Not loaded automatically, because this workspace's project extensions are not approved: ${withheld.map((root) => path.relative(deps.cwd(), root)).join(", ")}. Review one, then run /extensions dev <folder>.`,
+						);
+					deps.notify("info", lines.join("\n"));
 				}
 				reloadNow();
 				return;
