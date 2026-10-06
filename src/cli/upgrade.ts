@@ -260,12 +260,6 @@ async function runInstallerUpgrade(opts: UpgradeOptions, installation: Installat
 				"--no-post-install",
 			];
 	const env: NodeJS.ProcessEnv = { ...process.env };
-	if (
-		opts.channelExplicit &&
-		opts.channel === "latest" &&
-		(parseReleaseVersion(getVersionInfo().clio)?.pre.length ?? 0) > 0
-	)
-		env.CLIO_CODER_CHANNEL_NOTICE = "1";
 	if (record.versionPin && !opts.channelExplicit) args.push(windows ? "-Version" : "--version", record.versionPin);
 	if (record.autoUpdate === false) args.push(windows ? "-NoAutoUpdate" : "--no-auto-update");
 	if (opts.refreshRuntime) {

@@ -357,12 +357,7 @@ async function main() {
 	pruneVersions(root);
 	const fromVersion = old ? packageVersion(old.current) : "";
 	const toVersion = packageVersion(current);
-	if (
-		channel === "latest" &&
-		/^\d+\.\d+\.\d+-/.test(fromVersion) &&
-		/^\d+\.\d+\.\d+$/.test(toVersion) &&
-		process.env.CLIO_CODER_CHANNEL_NOTICE !== "1"
-	) {
+	if (channel === "latest" && /^\d+\.\d+\.\d+-/.test(fromVersion) && /^\d+\.\d+\.\d+$/.test(toVersion)) {
 		const state =
 			process.env.CLIO_CODER_STATE_DIR ||
 			(process.env.CLIO_CODER_HOME

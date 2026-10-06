@@ -86,7 +86,7 @@ The 0.6.1 installer was checked by hand on one x64 host with PowerShell 5.1
 (install, repair, rollback and uninstall); 0.6.0's installer fails there, so
 install 0.6.1 or newer. Interactive terminal use there remains best effort.
 
-### Try a pre-release
+**Try a pre-release.**
 
 `beta` follows release candidates (`X.Y.Z-rc.N`); `dev` follows version-branch
 snapshots (`X.Y.Z-snapshot.<UTC yyyymmddHHMM>.g<sha7>`). Both also follow newer
