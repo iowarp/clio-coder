@@ -1,3 +1,4 @@
+import type { InstalledExtension } from "../../domains/extensions/index.js";
 import type { OverlayHandle, TUI } from "../../engine/tui.js";
 import type { SlashCommandContext } from "../../session-control/slash-commands.js";
 import { clioTheme } from "../theme/index.js";
@@ -6,6 +7,25 @@ import { type ListOverlayItem, openListOverlay } from "./list-overlay.js";
 /** @internal exported for contract tests */
 export const EXTENSIONS_EMPTY =
 	"no extensions installed. install one with `clio-coder extensions install <path>`, then `clio-coder extensions list` shows what it contributed.";
+
+/**
+ * Whether this extension's takeover of its plugin's prompts is live, and if
+ * not, why. The plugin is a separate package: a takeover answers `/<plugin>:*`
+ * only while the plugin is in effect and this extension is running.
+ */
+function pluginPairing(ext: InstalledExtension, state: string): string {
+	const plugin = ext.plugin as string;
+	const takes = (ext.runtimeV2?.commands ?? [])
+		.filter((command) => command.replaces === "prompt" && ext.pluginPrompts?.includes(`${plugin}:${command.name}`))
+		.map((command) => `/${plugin}:${command.name}`);
+	if (state === "muted")
+		return `serves ${plugin}. Muted for this session, so ${plugin}'s own prompts answer /${plugin}:* until /extensions unmute ${ext.id}.`;
+	if (takes.length > 0)
+		return `serves ${plugin}, which is installed and in effect. This extension answers ${takes.join(", ")} locally; its other commands run as /ext:${ext.id}:*.`;
+	if ((ext.pluginPrompts?.length ?? 0) > 0)
+		return `serves ${plugin}, which is installed and in effect, and declares no takeover of its prompts. Its commands run as /ext:${ext.id}:*.`;
+	return `serves ${plugin}, which is not in effect (not installed, disabled or shadowed). No /${plugin}:* prompt is taken over, and this extension's commands run as /ext:${ext.id}:*.`;
+}
 
 export function openExtensionsOverlay(tui: TUI, ctx: SlashCommandContext, onClose: () => void): OverlayHandle {
 	const list = ctx.listExtensions?.() ?? [];
@@ -18,9 +38,13 @@ export function openExtensionsOverlay(tui: TUI, ctx: SlashCommandContext, onClos
 					? "disabled"
 					: ext.trustBlocked
 						? "untrusted"
-						: ext.loadable
-							? "eligible"
-							: `shadowed:${ext.overriddenBy ?? "higher"}`;
+						: ext.muted
+							? "muted"
+							: ext.consentPending
+								? "awaiting consent"
+								: ext.loadable
+									? "eligible"
+									: `shadowed:${ext.overriddenBy ?? "higher"}`;
 
 		const runtime = ctx.operatorExtensions?.entries().find((entry) => entry.id === ext.id && entry.scope === ext.scope);
 		const meta = (): string => {
@@ -49,6 +73,7 @@ export function openExtensionsOverlay(tui: TUI, ctx: SlashCommandContext, onClos
 					`**Description:** ${ext.description}`,
 					`**State:** ${state}`,
 				];
+				if (ext.plugin) lines.push(`**Plugin:** ${pluginPairing(ext, state)}`);
 				if (ext.runtime || ext.runtimeV2) {
 					lines.push(
 						`**Operator runtime:** ${runtime?.state ?? "not started"}; generation ${runtime?.generation ?? 0}`,
