@@ -460,10 +460,11 @@ export class ExtensionRuntimeProcessV2 {
 				kind: message.kind,
 				resolve: (output) => {
 					// A handler that answers outside its contract fails that answer, not the runtime.
+					// The parse error echoes keys and kinds the extension chose, so it is cleaned like the child's own errors.
 					try {
 						resolve(parse(output));
 					} catch (error) {
-						reject(error instanceof Error ? error : new Error(String(error)));
+						reject(new Error(extensionPlainText(error instanceof Error ? error.message : String(error)).slice(0, 512)));
 					}
 				},
 				reject,
