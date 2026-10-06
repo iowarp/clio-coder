@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
+import { startedUnderClioAgent } from "./agent-environment.js";
 import { writeDiagnostic } from "./diagnostics.js";
 import { safeResourceWrite } from "./safe-resource-write.js";
 import { withStateFileLockSync } from "./state-file-lock.js";
@@ -74,7 +75,7 @@ export function recordLifecycleReceipt(
 		operation: context.operation ?? input.operation,
 		operationId: context.operationId ?? randomUUID(),
 		at: new Date().toISOString(),
-		actor: context.actor ?? (process.env.AI_AGENT === "clio-coder" ? "model-confirmed" : "operator"),
+		actor: context.actor ?? (startedUnderClioAgent() ? "model-confirmed" : "operator"),
 	};
 	try {
 		withStateFileLockSync(
