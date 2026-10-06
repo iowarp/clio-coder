@@ -87,6 +87,8 @@ export interface DeleteSessionOptions {
 
 export interface SessionContract {
 	current(): SessionMeta | null;
+	/** Immutable entries from the current ledger, reconciled with external writes. */
+	readEntries(): ReadonlyArray<SessionEntry>;
 	/** Create a new session for the given cwd. */
 	create(input?: { cwd?: string; model?: string; target?: string }): SessionMeta;
 	/** Append a turn to the current session. */
