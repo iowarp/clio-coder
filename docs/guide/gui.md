@@ -294,7 +294,7 @@ The right sidebar of a task, headed `Session`, is one column of sections read to
 | Artifacts | One line naming receipts, outputs and session records. Shown when the child announces artifacts. | Artifacts: see [Artifacts](#artifacts). |
 | Changes | Files changed and waiting-for-approval counts with a diffstat. | Changes: every file the task edited with the diff of each call, then other paths its tools touched. |
 | Branches | Fork points in the session tree. Shown when the child announces branch support. | Continue from an earlier turn, or fork a new conversation from it. Files in the project are not rewound. |
-| Agents | Live and total dispatched workers. Shown when workers exist or fleets can start. | The worker tree with run identifiers, the receipt line of each settled worker, the dispatch record, and a collapsed form that previews and runs a fleet contract. |
+| Agents | Live and total dispatched workers. Shown when workers exist or fleets can start. | The worker tree with run identifiers, the receipt line of each settled worker, the dispatch record, and a collapsed form that previews and runs a playbook. |
 | Evidence | Receipts of dispatched runs (the latest six), and sealed evidence bundles, each with First pass or Retried and links to the evidence and run pages. Shown when a receipt or evidence exists. | none |
 
 ### Live telemetry
@@ -356,7 +356,7 @@ A draft whose first character is `/` and that has one line opens the slash palet
 | Safety | The registry's permission, limit and spending controls, including `safety.autonomy`, which sets the default for new tasks. A task that is already open keeps the level it was bound to until it is parked, and a task that resumes starts from the setting. |
 | Context and memory | Compaction and memory controls. |
 | All settings | Every other registry control with search, an Effective values view (what is in force and which layer set it) and a Sources and timing view. Every control shows its source layer and when a change takes effect: applies now, next request or next session. |
-| Library | Tabs for Catalog, Agents, Skills, Prompts, Fleets, Extensions and Verifiers. The Catalog tab reviews a library plan and applies it through the ops thread. |
+| Library | Tabs for Catalog, Agents, Skills, Prompts, Playbooks, Extensions and Verifiers. The Catalog tab reviews a library plan and applies it through the ops thread. The Extensions tab lists installed extensions, which are Clio code and not plugins, with their admission state. |
 | Skills (`/skills`) | The skills available in the current project, with a search box and a link to the Library for installing or removing packages. The rail has no link to it; the command palette lists it as `Skills`. The Library page has its own Skills tab. |
 | Toolchain | Pinned external tools, how each resolves (PATH or the vendored copy), and install and remove operations with progress. |
 | System | Installation findings, Clio Coder folders, and detected coding agents under Interop with accept and decline decisions. |

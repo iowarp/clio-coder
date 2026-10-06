@@ -33,14 +33,14 @@ System One is not a loaded domain. The orchestrator builds it with `createSystem
 
 | Domain | Primary source | Public surface |
 | --- | --- | --- |
-| agents | `src/domains/agents/**` | Built-in, plugin, user, and project agent recipes, fleet contracts, and result contracts. |
+| agents | `src/domains/agents/**` | Built-in, plugin, user, and project agent recipes, playbooks, and result contracts. |
 | components | `src/domains/components/**` | Component snapshots, diffs, and classification. |
 | config | `src/domains/config/**`, [config.ts](../../src/core/config.ts) | `settings.yaml`, keybindings, effect-timing classification, hot reload. |
 | context | `src/domains/context/**` | Layered `CLIO-CODER.md` and subtree `CLIO-CODER.override.md` guidance, codemap indexer, working set, bootstrap, repository context. |
 | dispatch | `src/domains/dispatch/**` | Fleet-agent jobs, run ledger, receipts, route policy and history, worker spawning, admission. |
 | evidence | `src/domains/evidence/**` | Forensic evidence bundles, failure attribution, trust projection. |
 | evolution | `src/domains/evolution/**` | Authority-tiered self-edit change manifests and their validation. |
-| extensions | `src/domains/extensions/**` | Extension discovery, packaging, and lifecycle. |
+| extensions | `src/domains/extensions/**` | Extension packages, which are Clio code in their own process: discovery, capability envelope review, runtime api 2, and lifecycle. |
 | gateway | `src/domains/gateway/mcp/**` | The local stdio MCP client, strict configuration loading, and explicit trust. |
 | interop | `src/domains/interop/**` | The agent-kind registry, bounded detection of other coding agents, and consent to wire one as a delegation peer. |
 | lifecycle | `src/domains/lifecycle/**` | Doctor diagnostics, upgrade mechanics, migrations, Claude Agent SDK install, uninstallation. |
@@ -48,7 +48,7 @@ System One is not a loaded domain. The orchestrator builds it with `createSystem
 | middleware | `src/domains/middleware/**` | Declarative and programmatic lifecycle hooks and budgets. |
 | mux | `src/domains/mux/**` | Optional interactive pane-host integration: Herdr guest mode, the Yazi file pane, and the cliamp music dock. |
 | observability | `src/domains/observability/**` | Cost tracker, projection snapshot, SQLite trace mirror, evidence index, out-of-turn usage store. See [Observability](observability.md) and [Trace Store](trace-store.md). |
-| plugins | `src/domains/plugins/**` | Plugin discovery, catalog, and lifecycle. |
+| plugins | `src/domains/plugins/**` | Plugin packages, which are Agent Plugins carrying content only: discovery, catalog, and lifecycle. Installing one never runs code. |
 | prompts | `src/domains/prompts/**` | Prompt fragments, system prompt compiler, template hashing. |
 | providers | `src/domains/providers/**` | Target-first runtime registry, model probing, credentials, pricing resolution. |
 | quota | `src/domains/quota/**` | Read-only subscription and credit readings from connected provider accounts, cached and normalized for the usage surfaces. |
@@ -372,7 +372,7 @@ Core data paths:
 Clio Coder uses in-process event buses for status and audit surfaces, but safety is not delegated to events. The hard gate lives in code:
 
 - Provider capability resolution decides whether tool schemas are sent at all. A tool-capable session gets the complete registry as one deterministic surface, with each tool placed `direct` (schema attached to every request) or behind the `gateway` tool (found and called on demand). Placement changes what the model sees and never what a call is allowed to do ([surface.ts](../../src/tools/surface.ts)).
-- [policy-engine.ts](../../src/domains/safety/policy-engine.ts) evaluates damage-control rules, project policy, Bash default-deny, and path policy. Contract step write boundaries are detect-and-rollback mechanisms (change tracking and rollbacks) with no OS-level confinement. The policy engine blocks writes outside dispatch `write_roots`, and the worker OS sandbox (`safety.sandbox`) binds a sandboxed worker's `bash` and `verify` writes to those roots.
+- [policy-engine.ts](../../src/domains/safety/policy-engine.ts) evaluates damage-control rules, project policy, Bash default-deny, and path policy. Playbook step write boundaries are detect-and-rollback mechanisms (change tracking and rollbacks) with no OS-level confinement. The policy engine blocks writes outside dispatch `write_roots`, and the worker OS sandbox (`safety.sandbox`) binds a sandboxed worker's `bash` and `verify` writes to those roots.
 - [registry.ts](../../src/tools/registry.ts) is the admission point for every tool invocation.
 - [receipt-integrity.ts](../../src/domains/dispatch/receipt-integrity.ts) and related dispatch files persist receipts used by evidence and cost surfaces.
 

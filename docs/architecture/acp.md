@@ -146,7 +146,7 @@ Anything not listed returns `-32601` `method_not_found`. Methods answer after `i
 | `_clio-coder/extensions/list`, `reload` | client to server | Lists the running session's extensions and reloads them. |
 | `_clio-coder/library/reload` | client to server | Runs `/library reload`. |
 | `_clio-coder/artifacts/list`, `read` | client to server | Lists and pages the `/view` artifacts. See [Artifacts](#artifacts). |
-| `_clio-coder/fleet/preview`, `run` | client to server | Compiles a fleet contract; starts it only when the fresh plan hash equals the approved hash. |
+| `_clio-coder/fleet/preview`, `run` | client to server | Compiles a playbook; starts it only when the fresh plan hash equals the approved hash. |
 | `_clio-coder/event` | server to client | Versioned extension events, only for kinds the client opted into. |
 | `_clio-coder/interview/request` | server to client | An `ask_user` round for an attended client. |
 | `_clio-coder/interview/cancel` | server to client | Notification retiring a round still waiting. |

@@ -1,8 +1,12 @@
 # Local scientific extensions
 
-These installable examples use the harness extension lifecycle, separately from
-library recipes. They require a Clio build containing operator runtime API v1.
-The examples require Clio Coder 0.5.0 or later; their manifests enforce that minimum.
+These installable examples are extensions: Clio code in its own process, declared
+in `clio-coder-extension.yaml` or `.json`. They are separate from plugins, which
+carry content only, and from the components (skills, agents, prompt templates and
+playbooks) that `clio-coder library components` lists. `lab-status` is an
+operator runtime api 1 example, `measurements` is a command-tool package, and
+`git-pulse` and `peer-guard` use runtime api 2. Each manifest enforces its
+minimum Clio Coder version.
 
 From the repository root:
 
@@ -46,8 +50,8 @@ Start a new session. The admitted model tool is
 example**, with mean 2 and sample standard deviation 1. A one-value input returns
 `null` for sample standard deviation. Numeric overflow errors instead of
 reporting null or invented valid measurements. Execution still passes the tool
-registry's safety, autonomy and approval rules. Native worker recipes must
-explicitly admit the qualified tool. Installing a runtime never adds tools to
+registry's safety, autonomy and approval rules. Native worker agent definitions
+must explicitly admit the qualified tool. Installing a runtime never adds tools to
 existing model schemas.
 
 Update source, reinstall with `--force`, then reload operator runtimes at idle.
@@ -61,8 +65,12 @@ clio-coder extensions remove lab-status --project
 
 Do not edit installed package bytes in place. Whole-tree digest drift revokes
 calls; mixed tool/UI packages need a new session even when only UI bytes change.
-Installed runtime code has your account's filesystem/network authority. A child
-process gives bounded teardown and fresh module caches, not an OS sandbox.
+Installed api 1 runtime code and command tools have your account's
+filesystem/network authority. A child process gives bounded teardown and fresh
+module caches, not an OS sandbox. An api 2 runtime reviewed through its
+capability envelope also runs under the OS sandbox when one exists (bubblewrap on
+Linux), with its network following the manifest; `/extensions` shows the
+confinement line.
 
 ## Git pulse (api 2)
 
@@ -88,8 +96,11 @@ explain this requirement and leave the store unchanged.
 Errors/timeouts pass: this is cooperative coordination, not protection from
 scripts, other mutation tools or sessions using a different state home.
 
-Both new examples require operator runtime api 2. Validate and run their public
-package tests before the operator approves a dev envelope or installs them:
+Both examples require operator runtime api 2, so the operator reviews each
+capability envelope before an install, an update or a dev load, and the recorded
+envelope digest must match when the package loads. Validate and run their public
+package tests first. Both commands start the package's own code, so a model shell
+call that runs them asks the operator:
 
 ```bash
 clio-coder extensions validate examples/extensions/git-pulse

@@ -24,7 +24,7 @@ The table lists every leaf in `DEFAULT_SETTINGS` in schema order, with its compi
 | next turn | The next request, dispatch, or explicit open observes the value. Work already running keeps the value it started with. |
 | restart required | Process or pane-host setup must be rebuilt, so the value applies to a new Clio Coder session. A path the classifier does not list falls here. |
 
-Routing defaults are a separate rule. `chat.target`, `chat.model`, `chat.thinkingLevel`, `chat.modelPicker.cycleSet`, `fleet.default.target`, `.model` and `.thinkingLevel`, and `context.memory.target` and `.model` seed a session's own routing when it starts. A later write from another process updates the saved default but never redirects a running session; see [live routing vs saved defaults](configuration-and-targets.md#live-routing-vs-saved-defaults).
+Routing defaults are a separate rule. `chat.target`, `chat.model`, `chat.thinkingLevel`, `chat.modelPicker.cycleSet`, `fleet.default.target`, `.model` and `.thinkingLevel`, and `context.memory.target` and `.model` seed a session's own routing when it starts. A memory route with both unset is not a seed: it follows the live chat route. A later write from another process updates the saved default but never redirects a running session; see [live routing vs saved defaults](configuration-and-targets.md#live-routing-vs-saved-defaults).
 
 ### Chat settings
 
@@ -98,8 +98,8 @@ Default chat settings control interactive conversation routing, reasoning effort
 | `context.workingSet.rearmFraction` | `0.1` | Number from 0 up to but not including 1. Growth, as a fraction of the window, required before another automatic cleanup; `0` disables the band. | next turn |
 | `context.compaction.auto` | `true` | Boolean. Off still allows `/context compact` and overflow recovery. | next turn |
 | `context.compaction.threshold` | `0.8` | Number from 0 to 1. Context pressure at which compaction acts. | next turn |
-| `context.memory.enabled` | `true` | Boolean. Task memory updates. | next turn |
-| `context.memory.target` | `null` | Target id for model-backed memory; `null` is rules only. | next turn |
+| `context.memory.enabled` | `true` | Boolean. Task memory updates. `false` turns proactive memory off, including its model calls. | next turn |
+| `context.memory.target` | `null` | Target id for a dedicated memory route. With `target` and `model` both `null`, the memory tier runs on the active chat route (`chat.target` and `chat.model`) and its calls are billed to the chat model. An explicit route wins. | next turn |
 | `context.memory.model` | `null` | Wire model id; cleared when `target` is `null`, otherwise defaults to the target's `defaultModel`. | next turn |
 | `context.memory.cadenceToolCalls` | `10` | Integer at least 2. Most tool calls between memory updates. | next turn |
 | `context.memory.trajectorySteps` | `8` | Integer at least 1. Recent steps considered. | next turn |
@@ -190,7 +190,7 @@ The schema, validation, migration paths, and user settings path are in [`src/cor
 | CLI flags and accepted values | [`src/cli/args.ts`](../../src/cli/args.ts), then `clio-coder <command> --help` |
 | Environment variables | [Environment variable reference](environment-variables.md) and their cited read sites |
 | Built-in tool arguments | [`src/tools/`](../../src/tools/registry.ts) and [Tool usage](tool-usage.md) |
-| Agent recipe frontmatter | [`src/domains/agents/recipe-schema.ts`](../../src/domains/agents/recipe-schema.ts) |
+| Agent definition frontmatter | [`src/domains/agents/recipe-schema.ts`](../../src/domains/agents/recipe-schema.ts) |
 | Prompt fragment metadata | [`src/domains/prompts/`](../../src/domains/prompts/compiler.ts) |
 | Model facts per model | [`models/profiles.yaml`](../../models/profiles.yaml) and [`src/domains/providers/model-profiles.ts`](../../src/domains/providers/model-profiles.ts) |
 | Sampling presets and family notes | [`src/domains/providers/models/local-models/`](../../src/domains/providers/models/local-models/clio-coder-local-coding-targets.yaml) |
@@ -368,7 +368,7 @@ Project configuration lives under `.clio-coder/`. The owning loader or validator
 | `verifiers.yaml` | Declared verification checks; [catalog.ts](../../src/tools/verify/catalog.ts) |
 | `hooks.yaml`, `hooks.local.yaml` | Project and local middleware hooks; [hooks-io.ts](../../src/domains/middleware/hooks-io.ts) |
 | `profile.yaml` | Project operator profile; [operator-profile.ts](../../src/domains/context/operator-profile.ts) |
-| `agents/`, `fleets/` | Agent recipes and fleet contracts; `src/domains/agents/` |
+| `agents/`, `playbooks/` | Agents and playbooks; `src/domains/agents/` |
 | `prompts/`, `skills/` | Prompt templates and skills; `src/domains/resources/` |
 | `rules/` | Path-scoped project rules; [project-rules.ts](../../src/domains/context/project-rules.ts) |
 | `model-catalog.d/` | Project overlay of sampling presets and family notes; see [local catalog overlays](../architecture/model-catalog.md#local-catalog-overlays) |

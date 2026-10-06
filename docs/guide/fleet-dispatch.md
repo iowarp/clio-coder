@@ -18,7 +18,7 @@ Source of truth: `src/domains/dispatch/`, [cluster.ts](../../src/domains/schedul
 | Understand how work is placed and admitted | [Placement and process-safe admission](#placement-and-process-safe-admission) |
 | Choose which target and model a worker uses | [Worker routing](#worker-routing-profiles-agent-bindings-and-per-call-pins) |
 | Choose a review, compete, or council shape | [Topologies](#topologies) |
-| Write or run a repo-owned fleet contract | [Shipped fleets and contract versions](#shipped-fleets-and-contract-versions), [Fleet authoring](#fleet-authoring) |
+| Write or run a repo-owned playbook | [Shipped playbooks and playbook versions](#shipped-playbooks-and-playbook-versions), [Playbook authoring](#playbook-authoring) |
 | Know what happens when a route fails | [Failure semantics](#failure-semantics), [Assignments, attempts, and failover](#assignments-attempts-and-failover) |
 | Watch, cancel, or inspect running work | [Operator visibility](#operator-visibility), [Workers dock and dashboard](#workers-dock-and-dashboard), [Inspect fleet runs from the CLI](#inspect-fleet-runs-from-the-cli) |
 | Read what a run proved | [Receipts](#receipts) |
@@ -558,8 +558,8 @@ A `readOnly` dispatch restriction denies mutation and outside reads; reviewers a
 A parallel dispatch may declare `writers: 1`. One is the only accepted value, the
 mode must be parallel, and omission retains ordinary parallel admission. Through the
 dispatch tool every recipe that is not read-only counts as a writer: writers start
-one at a time in request order while read-only recipes run concurrently. A fleet
-contract declares the same token as `writers: 1` (version 5). There the scheduler
+one at a time in request order while read-only recipes run concurrently. A
+playbook declares the same token as `writers: 1` (version 5). There the scheduler
 admits at most one write-scope step at a time: an agent step with a nonempty
 `writes` allowlist is a writer, as is a workspace-scope step that may mutate
 the checkout. Read-scope steps and agent steps with `writes: []` remain
@@ -580,12 +580,12 @@ runs never acquire it.
 
 ### Declared step scope
 
-In a version 4 or newer fleet contract, a step's `writes:` declaration is enforced
+In a version 4 or newer playbook, a step's `writes:` declaration is enforced
 afterwards by the write-boundary enforcer (see
-[Per-step write boundaries](#per-step-write-boundaries-contract-v4)); declared commands run on the host
+[Per-step write boundaries](#per-step-write-boundaries-playbook-v4)); declared commands run on the host
 outside the worker sandbox, so nothing confines them ahead of the check. The same
 declaration also compiles into the step's typed dispatch intent as
-`relevant_paths`, never as `write_roots`. A contract older than version 4 and every
+`relevant_paths`, never as `write_roots`. A playbook older than version 4 and every
 readonly step declare no scope. The producer table and the refusal
 reason codes are in [dispatch-typed-intent.md](../architecture/dispatch-typed-intent.md).
 
@@ -1077,58 +1077,64 @@ The registry boundary is resolved dispatch plan v3. `deadlineMs` is required:
 a fleet plan carries a positive integer or `null` and a non-fleet plan carries
 explicit `null`. Other versions and missing fields are rejected.
 
-### Shipped fleets and contract versions
+### Shipped playbooks and playbook versions
 
-Fleet contracts load from four sources, lowest precedence first: the builtin fleets under `src/domains/agents/fleets/` (`build-test`, `build-review`, `sdlc`), fleets shipped by enabled plugins, `<configDir>/fleets/<name>.md` for the user, and `.clio-coder/fleets/<name>.md` for the project. A file in a later source shadows a file of the same name in an earlier one, and `clio-coder fleet list` shows each contract's source. The three builtins are version 3 contracts. `build-test` needs the registry command `test`, `sdlc` needs `test` and `commit`, and `build-review` needs none. A repository that has not yet declared the commands sees those fleets as `setup` in `fleet list` and cannot run them.
+The fleet is the coordinator and its workers; a playbook is what the fleet runs. Playbooks load from four sources, lowest precedence first: the builtin playbooks shipped in the package (`build-test`, `build-review`, `sdlc`), playbooks shipped by enabled plugins under their `playbooks/` directory, `<configDir>/playbooks/<name>.md` for the user, and `.clio-coder/playbooks/<name>.md` for the project. A file in a later source shadows a file of the same name in an earlier one, and `clio-coder playbook list` shows each playbook's source. The three builtins are version 3 playbooks. `build-test` needs the registry command `test`, `sdlc` needs `test` and `commit`, and `build-review` needs none. A repository that has not yet declared the commands sees those playbooks as `setup` in `playbook list` and cannot run them.
 
-A contract is a Markdown file. Its YAML front matter holds these keys. Its body is a template: every `{{name}}` must resolve from a `--var name=value`, and an unresolved name fails the run. The shipped contracts use `{{task}}`, so a run passes `--var task="..."`.
+Clio reads only the `playbooks/` directories. A pre-0.6.2 installation that still has `fleets/` is converted once by `clio-coder upgrade` and by the first open of a workspace; see [Converting an older installation](#converting-an-older-installation).
+
+A playbook is a Markdown file. Its YAML front matter holds these keys. Its body is a template: every `{{name}}` must resolve from a `--var name=value`, and an unresolved name fails the run. The shipped playbooks use `{{task}}`, so a run passes `--var task="..."`.
 
 | Key | Meaning |
 | --- | --- |
 | `version` | Schema version, 1 through 5. |
-| `name` | Contract name; `fleet new` rewrites it to the new file stem. |
-| `description` | Optional text shown by `fleet list`. |
+| `name` | Playbook name; `playbook new` rewrites it to the new file stem. |
+| `description` | Optional text shown by `playbook list`. |
 | `steps` | Non-empty list of steps. |
 | `maxWorkers` | Integer of at least 1: how many agent steps of this plan may run at once. |
-| `budgetUsd` | Optional positive number. `fleet run` refuses a contract whose budget exceeds the remaining session budget. With `safety.limits.sessionCostUsd: 0` there is no session ceiling, so the check is skipped. |
+| `budgetUsd` | Optional positive number. `fleet run` refuses a playbook whose budget exceeds the remaining session budget. With `safety.limits.sessionCostUsd: 0` there is no session ceiling, so the check is skipped. |
 | `onFailure` | `stop` cancels the remaining steps after a failure; `continue` lets independent steps finish. |
 | `writers` | Version 5 only. The literal `1` serializes write steps (see [Single-writer token](#single-writer-token)). |
 
-Fleet contracts support schema versions 1 through 5:
+Playbooks support schema versions 1 through 5:
 - Version 1: Supports agent steps only.
 - Version 2: Introduces deterministic code steps.
 - Version 3: Adds bounded check/repair loops and commit steps with `commitFrom` message sources.
-- Version 4 (`FLEET_WRITE_BOUNDARY_VERSION = 4`): Introduces per-step declared write boundaries (`writes`) and orchestrator post-step enforcement.
-- Version 5 (`FLEET_DYNAMIC_STEP_VERSION = 5`): Adds plan steps, executable gate steps, per-step target or worker-profile defaults, and the optional single-writer declaration.
+- Version 4 (`PLAYBOOK_WRITE_BOUNDARY_VERSION = 4`): Introduces per-step declared write boundaries (`writes`) and orchestrator post-step enforcement.
+- Version 5 (`PLAYBOOK_DYNAMIC_STEP_VERSION = 5`): Adds plan steps, executable gate steps, per-step target or worker-profile defaults, and the optional single-writer declaration.
 
-#### Contract v5: plan, gate, and per-step target
+#### Playbook v5: plan, gate, and per-step target
 
-A version 5 agent step, including an agent loop check or repair, may declare either `target: <targetId>` or `profile: <fleet.profiles key>`. It may never declare both. Fleet preflight resolves these values through the same worker routing used by `/run --target` and `/run --agent-profile`. An unknown value refuses before approval and names the target or profile. Versions 1 through 4 continue to refuse both fields.
+A version 5 agent step, including an agent loop check or repair, may declare either `target: <targetId>` or `profile: <fleet.profiles key>`. It may never declare both. Playbook preflight resolves these values through the same worker routing used by `/run --target` and `/run --agent-profile`. An unknown value refuses before approval and names the target or profile. Versions 1 through 4 continue to refuse both fields.
 
-A `kind: gate` step asks its validator agent to write exactly one repository-relative `path`. The contract derives the step's write boundary from that path, so a separate `writes` property is refused. Its `run` property names a command whose argv contains one whole-token `{{path}}` placeholder. After the agent writes the executable acceptance check, the coordinator runs it without a shell against the otherwise untouched tree. A red result admits the gate. A green result refuses the run as `gate_not_discriminating`. The fleet ledger records `gatePathHash`, the SHA-256 of the gate file's content. A loop may use `check: {kind: gate, gate: <stepId>}`. Only the bounded output lines beginning with `FAIL` cross that failed check edge into the repair agent.
+A `kind: gate` step asks its validator agent to write exactly one repository-relative `path`. The playbook derives the step's write boundary from that path, so a separate `writes` property is refused. Its `run` property names a command whose argv contains one whole-token `{{path}}` placeholder. After the agent writes the executable acceptance check, the coordinator runs it without a shell against the otherwise untouched tree. A red result admits the gate. A green result refuses the run as `gate_not_discriminating`. The fleet ledger records `gatePathHash`, the SHA-256 of the gate file's content. A loop may use `check: {kind: gate, gate: <stepId>}`. Only the bounded output lines beginning with `FAIL` cross that failed check edge into the repair agent.
 
-A `kind: plan` step defaults to the builtin `architect`. It declares `roster` (1 to 16 agents), `maxTasks` from 1 through 16, an optional `proposals: true`, its own scope and write boundary, and an optional target or profile default. The architect returns a `delegation-plan` object whose tasks contain `id`, `agent`, `description`, `depends_on`, `writes`, and an optional `mode` of `sequential` or `parallel`. The coordinator admits only roster agents, unique and acyclic task ids, resolvable dependencies, at most the declared task count, and task writes contained by the plan step boundary. Successful tasks carry lineage to the plan step and inherit its target or profile. A contract with `writers: 1` serializes write tasks through the existing single-writer token.
+A `kind: plan` step defaults to the builtin `architect`. It declares `roster` (1 to 16 agents), `maxTasks` from 1 through 16, an optional `proposals: true`, its own scope and write boundary, and an optional target or profile default. The architect returns a `delegation-plan` object whose tasks contain `id`, `agent`, `description`, `depends_on`, `writes`, and an optional `mode` of `sequential` or `parallel`. The coordinator admits only roster agents, unique and acyclic task ids, resolvable dependencies, at most the declared task count, and task writes contained by the plan step boundary. Successful tasks carry lineage to the plan step and inherit its target or profile. A playbook with `writers: 1` serializes write tasks through the existing single-writer token.
 
-When `proposals: true`, every roster member first runs with a read-only dispatch restriction against the same task. Their answers reach the architect as labelled, bounded briefing data. Proposal runs are reserved with the rest of the plan and run in parallel, up to the lower of the contract's `maxWorkers` and the configured worker capacity. Proposal agents do not choose targets for generated work. The plan step's contract default remains authoritative for every admitted task. A plan step is never replayed by `--resume`, because the tasks it generates splice into the plan at run time.
+When `proposals: true`, every roster member first runs with a read-only dispatch restriction against the same task. Their answers reach the architect as labelled, bounded briefing data. Proposal runs are reserved with the rest of the plan and run in parallel, up to the lower of the playbook's `maxWorkers` and the configured worker capacity. Proposal agents do not choose targets for generated work. The plan step's playbook default remains authoritative for every admitted task. A plan step is never replayed by `--resume`, because the tasks it generates splice into the plan at run time.
 
-### Fleet authoring
+### Playbook authoring
 
-The fleet CLI provides these authoring and inspection operations ([fleet.ts](../../src/cli/fleet.ts)). Usage errors exit 2, as does an authoring command that finds its destination already present. A refused or invalid contract and a run that does not end clean exit 1.
+`clio-coder playbook` authors and checks playbooks and `clio-coder fleet run` runs them. Usage errors exit 2, as does an authoring command that finds its destination already present. A refused or invalid playbook and a run that does not end clean exit 1. The first `playbook` or `fleet run` command in a workspace that still has `.clio-coder/fleets/` converts it once and prints one notice on stderr.
 
-- `clio-coder fleet list` lists every contract with its source, a state of `valid`, `setup` or `invalid`, and the rendered steps. It takes no flags. `setup` means the contract needs registry commands this repository has not declared, and the line carries the remedy.
-- `clio-coder fleet new <name> --from <builtin>` copies one of `build-review`, `build-test`, or `sdlc` into `.clio-coder/fleets/<name>.md`. The command requires a safe file stem (lowercase letters, digits, `.`, `_` and `-`, starting and ending with a letter or digit) and refuses to replace an existing contract.
-- `clio-coder fleet validate <name> [--json]` parses the contract, validates its graph and command bindings, resolves every agent, target and profile, compiles the execution plan, and checks the declared write boundaries against `.gitignore`. It prints one line per check (`parse`, `graph`, `commands`, `agents`, `plan`), exits 1 with the diagnostics when the contract is invalid, and creates no state directory, ledger row, reservation, worker, or receipt. `--json` emits `{valid, fleet, checks, planHash}` or `{valid: false, fleet, diagnostics}`.
-- `clio-coder fleet graph <name> [--json]` renders the compiled waves with each step kind, agent or command, target or profile, scope, and write boundary. Gate and plan steps show their path, command, roster and task limit. Bounded loops also show their check and repair nodes beneath the loop identifier.
-- `clio-coder fleet commands init` discovers declared package scripts, just recipes, Makefile targets, and supported `pyproject.toml` script and tool entries. It writes a fully commented `.clio-coder/fleets/commands.yaml` draft. Uncommenting an entry confirms its exact argument vector, and an existing registry is never replaced.
-- `clio-coder fleet run <name> [--var key=value ...] [--resume <runId>] [--json]` runs a contract. Preflight resolves every agent, target and profile, requires each step scope to fit inside the orchestrator scope, checks that the session budget is open and can hold `budgetUsd` (a session ceiling of `0` is always open and holds any `budgetUsd`), binds routes, and checks the write boundaries; a preflight failure exits 2 before anything dispatches. The run prints `fleet <name>: root=fleet-<hex> plan=<hash> steps=<n> loops=<m>` on stderr, one line per settled step (`--json` prints receipts and code reports as JSON lines), and a summary with each loop's terminal reason, staleness re-runs, steps that need an operator decision, and write-boundary violations. Exit code 0 means every required step succeeded, no step was skipped, and every loop resolved; any other finished run exits 1, and an error thrown by the scheduler exits 2 like a preflight failure. `fleet view <fleetRootId>` lists the steps and the run id of each.
+- `clio-coder playbook list` lists every playbook with its source, a state of `valid`, `setup` or `invalid`, and the rendered steps. It takes no flags. `setup` means the playbook needs registry commands this repository has not declared, and the line carries the remedy.
+- `clio-coder playbook new <name> --from <builtin>` copies one of `build-review`, `build-test`, or `sdlc` into `.clio-coder/playbooks/<name>.md`. The command requires a safe file stem (lowercase letters, digits, `.`, `_` and `-`, starting and ending with a letter or digit) and refuses to replace an existing playbook.
+- `clio-coder playbook validate <name> [--json]` parses the playbook, validates its graph and command bindings, resolves every agent, target and profile, compiles the execution plan, and checks the declared write boundaries against `.gitignore`. It prints one line per check (`parse`, `graph`, `commands`, `agents`, `plan`), exits 1 with the diagnostics when the playbook is invalid, and creates no state directory, ledger row, reservation, worker, or receipt. `--json` emits `{valid, playbook, checks, planHash}` or `{valid: false, playbook, diagnostics}`.
+- `clio-coder playbook graph <name> [--json]` renders the compiled waves with each step kind, agent or command, target or profile, scope, and write boundary. Gate and plan steps show their path, command, roster and task limit. Bounded loops also show their check and repair nodes beneath the loop identifier. `--json` emits `{playbook, planHash, waves, loops}`.
+- `clio-coder playbook commands init` discovers declared package scripts, just recipes, Makefile targets, and supported `pyproject.toml` script and tool entries. It writes a fully commented `.clio-coder/playbooks/commands.yaml` draft. Uncommenting an entry confirms its exact argument vector, and an existing registry is never replaced.
+- `clio-coder fleet run <name> [--var key=value ...] [--resume <runId>] [--json]` runs a playbook ([fleet.ts](../../src/cli/fleet.ts)). Preflight resolves every agent, target and profile, requires each step scope to fit inside the orchestrator scope, checks that the session budget is open and can hold `budgetUsd` (a session ceiling of `0` is always open and holds any `budgetUsd`), binds routes, and checks the write boundaries; a preflight failure exits 2 before anything dispatches. The run prints `fleet <name>: root=fleet-<hex> plan=<hash> steps=<n> loops=<m>` on stderr, one line per settled step (`--json` prints receipts and code reports as JSON lines), and a summary with each loop's terminal reason, staleness re-runs, steps that need an operator decision, and write-boundary violations. Exit code 0 means every required step succeeded, no step was skipped, and every loop resolved; any other finished run exits 1, and an error thrown by the scheduler exits 2 like a preflight failure. `fleet view <fleetRootId>` lists the steps and the run id of each.
 
-Run resumption is separate from `clio-coder fleet resume`, which reopens dispatch admission after an operator drain. A resumable fleet run records its contract name, rendered plan hash, ordered step identifiers, variables, and receipt references in the durable fleet ledger under the state directory. Runs started from the TUI through `/fleet run` use the same durable record and can be resumed by the authoring CLI. `--resume` starts a new fleet run after replaying the longest successful, integrity-valid prefix of the named prior run, in declared step order. The new run records the prior fleet run as its resume parent. Replayed steps are reported as `replayed`, retain their original receipt or code-report references, and do not create new receipts.
+Run resumption is separate from `clio-coder fleet resume`, which reopens dispatch admission after an operator drain. A resumable fleet run records its playbook name, rendered plan hash, ordered step identifiers, variables, and receipt references in the durable fleet ledger under the state directory. Runs started from the TUI through `/fleet run` use the same durable record and can be resumed with `fleet run --resume`. `--resume` starts a new fleet run after replaying the longest successful, integrity-valid prefix of the named prior run, in declared step order. The new run records the prior fleet run as its resume parent. Replayed steps are reported as `replayed`, retain their original receipt or code-report references, and do not create new receipts.
 
-The current contract must compile to the same plan hash. A mismatch refuses before execution and prints the changed positions in the ordered step list. The prior run must belong to the same fleet name, and the variables must exactly match the original run. A different value, an added value, or an omitted value is refused even when the resulting task text would otherwise be similar. An unknown run id is refused as not found in the durable fleet ledger.
+The current playbook must compile to the same plan hash. A mismatch refuses before execution and prints the changed positions in the ordered step list. The prior run must belong to the same playbook name, and the variables must exactly match the original run. A different value, an added value, or an omitted value is refused even when the resulting task text would otherwise be similar. An unknown run id is refused as not found in the durable fleet ledger.
 
-### Per-step write boundaries (Contract v4)
+#### Converting an older installation
 
-Contract v4 gives every step a write boundary through the `writes` allowlist property. A `workspace` step must declare a non-empty allowlist. A `readonly` step is the empty allowlist and is refused if it declares `writes`.
+Clio reads no `fleets/` directory and accepts no alias. Before 0.6.2 the same files were called fleet contracts and lived under `fleets/`. `clio-coder upgrade` runs a dated migration for the user home that merges `<configDir>/fleets` into `<configDir>/playbooks` without overwriting. A name present in both places stays in the old directory, which is then moved aside with a dated suffix. A workspace's `.clio-coder/` converts the first time Clio opens it, with one notice that lists what changed and what still needs the operator. A third-party plugin that still declares `resources.fleets`, the `fleet` kind or a `fleet:` requirement stays installed but does not load. The report names the fix, which is for its author to rename `resources.fleets` to `resources.playbooks`, its `fleets` directory to `playbooks`, and fleet kinds and requirements to `playbook`. Nothing in the conversion deletes operator data.
+
+### Per-step write boundaries (Playbook v4)
+
+Playbook v4 gives every step a write boundary through the `writes` allowlist property. A `workspace` step must declare a non-empty allowlist. A `readonly` step is the empty allowlist and is refused if it declares `writes`.
 
 The grammar for declared write boundary entries requires repository-relative POSIX paths:
 - Trailing `/` indicates a directory subtree allowlist.
@@ -1145,12 +1151,12 @@ Write boundary enforcement is detect-and-rollback, never OS or filesystem sandbo
 6. Content source: Rollback restores content strictly from what git already has in the pinned baseline commit (`snapshot.head`). If a path was already dirty when the step snapshot was captured, its prior content is not stored in git, so in-place restoration cannot be guaranteed. The working tree is left as the step made it, and the status settles as `rollback-incomplete`.
 7. Violation handling: Any attributed unauthorized change fails the step with the typed reason `writes_boundary_violation`.
 8. Window attribution: Enforcement evaluates scheduling windows (`wave-<n>` or `revalidate-<stepId>-<n>`). A wave window cannot combine steps with overlapping declared boundaries or multiple concurrent step writers, ensuring single-step attribution.
-9. Ignored paths and state subtraction: Enforcement evaluates paths reported by git status, which never lists a git-ignored path. A declared `writes` entry the repository ignores is therefore refused before anything runs, by `fleet validate`, by `fleet run` preflight, and by the `/fleet run` preview, with a diagnostic naming the entry and the ignoring rule (for example `'work/' is ignored by .gitignore:1:work/`). Silently certifying such a window as clean is not an option, because nothing about it was observed. The Clio Coder state directory (`.clio-coder/` or `clioStateDir()`) is subtracted from status checks so orchestrator receipts, code step log artifacts, and boundary verdicts do not trigger false violations.
+9. Ignored paths and state subtraction: Enforcement evaluates paths reported by git status, which never lists a git-ignored path. A declared `writes` entry the repository ignores is therefore refused before anything runs, by `playbook validate`, by `fleet run` preflight, and by the `/fleet run` preview, with a diagnostic naming the entry and the ignoring rule (for example `'work/' is ignored by .gitignore:1:work/`). Silently certifying such a window as clean is not an option, because nothing about it was observed. The Clio Coder state directory (`.clio-coder/` or `clioStateDir()`) is subtracted from status checks so orchestrator receipts, code step log artifacts, and boundary verdicts do not trigger false violations.
 10. Durable records: Verdicts are serialized as JSON records at `write-boundaries/<rootId>/<window>.json` under the Clio Coder state directory, carrying the baseline HEAD commit, checked paths, violations, unattributed concurrent changes, the attribution completeness flag and downgrade causes, rollback actions, status, and SHA-256 digest.
 
 ### Bounded check/repair loops
 
-Contract versions 3 through 5 support declared check/repair loops (`kind: loop`). A loop declares `id`, `maxAttempts` (an integer between 1 and `FLEET_LOOP_MAX_ATTEMPTS = 5`), `check` (a code command or agent reviewer), and `repair` (an agent coder).
+Playbook versions 3 through 5 support declared check/repair loops (`kind: loop`). A loop declares `id`, `maxAttempts` (an integer between 1 and `PLAYBOOK_LOOP_MAX_ATTEMPTS = 5`), `check` (a code command or agent reviewer), and `repair` (an agent coder).
 
 At plan compilation, the orchestrator unrolls each loop statically into a deterministic hashed DAG containing `maxAttempts` verification check steps (`<loopId>.check.<n>`) and `maxAttempts - 1` repair steps (`<loopId>.repair.<n>`).
 - Receipt per attempt: Every attempt in an unrolled loop executes as an independent plan node and produces its own receipt.
@@ -1167,24 +1173,24 @@ At plan compilation, the orchestrator unrolls each loop statically into a determ
 
 When a loop's check is a code step and not a version 5 `gate` check, the registered command is not the only thing it runs. The check collects the paths that its workspace ancestors changed: each ancestor's mutation-report `mutatedPaths` plus the changed paths its task worktree or checkout recorded, for ancestors whose receipts passed integrity ([fleet-run.ts](../../src/domains/dispatch/fleet-run.ts), [code-step.ts](../../src/domains/dispatch/code-step.ts)). It keeps the paths that look like test files, resolves a runner for each through the project's own declarations ([test-files.ts](../../src/tools/verify/test-files.ts)), and runs those after the registered command. A failure of any of them fails the check and feeds the repair loop, so a reproduction test the builder adds gates the result even when the registered command names only existing test files. Each extra command appears as a `changed tests (<check id>)` entry on the step's report, with its own exit code and duration.
 
-The recognized runners are `node --test`, `tsx --test`, jest, vitest, pytest, unittest, `go test` and `cargo test`. A changed test with no recognizable runner yields a note on the report, and only the registered command runs for it. A loop whose check is a version 5 `gate` step runs only that acceptance command, and a code step outside a loop check runs its registered command alone. The `build-test` contract and the check note tell the builder the exact argument vector the check step runs.
+The recognized runners are `node --test`, `tsx --test`, jest, vitest, pytest, unittest, `go test` and `cargo test`. A changed test with no recognizable runner yields a note on the report, and only the registered command runs for it. A loop whose check is a version 5 `gate` step runs only that acceptance command, and a code step outside a loop check runs its registered command alone. The `build-test` playbook and the check note tell the builder the exact argument vector the check step runs.
 
 #### Step handoffs and retries
 
-A step receives its predecessors' final outputs as labelled data, never as instructions: at most 16 predecessors and 12,000 bytes in total ([execution-handoff.ts](../../src/domains/dispatch/execution-handoff.ts)). The budget is shared max-min fairly, so short outputs keep every byte. An output over its share keeps its head and tail around a marker `[clio: N of M bytes omitted ...]` that names the run whose full output the coordinator retains, and the worker is told the output is an excerpt. A loop repair receives the check's findings in place of the raw check transcript. Plan compilation refuses a step with more than 16 predecessors, so `fleet validate` reports it.
+A step receives its predecessors' final outputs as labelled data, never as instructions: at most 16 predecessors and 12,000 bytes in total ([execution-handoff.ts](../../src/domains/dispatch/execution-handoff.ts)). The budget is shared max-min fairly, so short outputs keep every byte. An output over its share keeps its head and tail around a marker `[clio: N of M bytes omitted ...]` that names the run whose full output the coordinator retains, and the worker is told the output is an excerpt. A loop repair receives the check's findings in place of the raw check transcript. Plan compilation refuses a step with more than 16 predecessors, so `playbook validate` reports it.
 
 A fleet step settles on the final attempt of its retry chain: a step that fails and then recovers on a retry counts as succeeded, its dependents run, and every attempt's cost counts once in the run total. Each step, including each loop repair, has its own retry allowance under `fleet.retry.maxRetries`.
 
 ### Deterministic code steps
 
 Deterministic code steps (`kind: code`) execute known commands directly as subprocesses rather than calling an agent model.
-- Registry binding: The `command` property must reference a command ID declared in `.clio-coder/fleets/commands.yaml`. Invocation strings are never generated from model output.
-- Execution environment: Code steps run unattended with arguments bound from the command registry, fixed working directory, closed environment allowlist (`FLEET_COMMAND_BASE_ENV` plus declared command env), bounded timeout (`timeoutMs`), byte-capped output capture (`CODE_STEP_CAPTURE_MAX_BYTES` = 1 MiB log artifact, `CODE_STEP_EXCERPT_MAX_BYTES` = 8,000-byte excerpt), no stdin pipe, no permission prompt, and no shell interpreter.
-- Missing registry diagnostic: If a contract declares code steps but `.clio-coder/fleets/commands.yaml` is missing in the repository, `clio-coder fleet list` reports the fleet status as `setup` and provides the remedy: `needs .clio-coder/fleets/commands.yaml declaring <id>; declare each id there under commands: with an argv list; see bundled docs/guide/fleet-dispatch.md for the schema`.
+- Registry binding: The `command` property must reference a command ID declared in `.clio-coder/playbooks/commands.yaml`. Invocation strings are never generated from model output.
+- Execution environment: Code steps run unattended with arguments bound from the command registry, fixed working directory, closed environment allowlist (`PLAYBOOK_COMMAND_BASE_ENV` plus declared command env), bounded timeout (`timeoutMs`), byte-capped output capture (`CODE_STEP_CAPTURE_MAX_BYTES` = 1 MiB log artifact, `CODE_STEP_EXCERPT_MAX_BYTES` = 8,000-byte excerpt), no stdin pipe, no permission prompt, and no shell interpreter.
+- Missing registry diagnostic: If a playbook declares code steps but `.clio-coder/playbooks/commands.yaml` is missing in the repository, `clio-coder playbook list` reports the playbook state as `setup` and provides the remedy: ``needs .clio-coder/playbooks/commands.yaml declaring <id>; declare each id there under `commands:` with an `argv` list; see bundled `docs/guide/fleet-dispatch.md` for the schema``.
 - Commit message sources: A code step with `commitFrom` populates its `commitMessage` placeholder from the output of preceding agent steps.
 - Cost and route: Code steps run no model. Their cost is recorded as `known_free`, an observed zero, and they produce a code-step record rather than a receipt, route decision, or quality label.
 
-#### Command Registry Schema (`.clio-coder/fleets/commands.yaml`)
+#### Command Registry Schema (`.clio-coder/playbooks/commands.yaml`)
 
 The repository command registry binds command IDs to exact argument vectors:
 
@@ -1211,18 +1217,18 @@ commands:
 
 The `commands` map needs at least one entry. A command id matches `[a-z0-9][a-z0-9._-]{0,63}`. Each command entry supports:
 - `argv` (required): Array of command arguments starting with the binary name (no shell strings).
-- `argumentSlots` (optional): Operator-declared positional data slots, each with a unique `name` (letters, digits, `_` and `-`, starting with a letter, at most 64 characters) and required `maxLength` (1 to 8192). At most 64 slots. Omission forbids appended fleet arguments; declared slots are all required.
+- `argumentSlots` (optional): Operator-declared positional data slots, each with a unique `name` (letters, digits, `_` and `-`, starting with a letter, at most 64 characters) and required `maxLength` (1 to 8192). At most 64 slots. Omission forbids appended playbook arguments; declared slots are all required.
 - `cwd` (optional): Repository-relative working directory (defaults to repository root).
 - `timeoutMs` (optional): Per-step execution timeout in milliseconds (defaults to 600,000 ms; bounds: 1,000 to 3,600,000 ms).
-- `env` (optional): Array of extra environment variable names (uppercase letters, digits and `_`) to pass through on top of `FLEET_COMMAND_BASE_ENV` (`PATH`, `HOME`, `LANG`, `LC_ALL`, `TZ`, `TMPDIR`).
+- `env` (optional): Array of extra environment variable names (uppercase letters, digits and `_`) to pass through on top of `PLAYBOOK_COMMAND_BASE_ENV` (`PATH`, `HOME`, `LANG`, `LC_ALL`, `TZ`, `TMPDIR`).
 - `description` (optional): Human-readable description.
 
 The whole-token `{{commitMessage}}` substitution is available to commit steps. The whole-token `{{path}}` substitution is available to version 5 gate commands. Each substitution becomes exactly one argv element and never passes through a shell.
 
-A fleet may supply per-task data only when the operator explicitly declares slots in the repository registry. Keep the executable, script path, and fixed flags in `argv`; the fleet cannot replace them. Use a fixed `--` separator where the registered program supports it. For example:
+A playbook may supply per-task data only when the operator explicitly declares slots in the repository registry. Keep the executable, script path, and fixed flags in `argv`; the playbook cannot replace them. Use a fixed `--` separator where the registered program supports it. For example:
 
 ```yaml
-# .clio-coder/fleets/commands.yaml, owned by the operator
+# .clio-coder/playbooks/commands.yaml, owned by the operator
 version: 1
 commands:
   check-materials-task:
@@ -1233,7 +1239,7 @@ commands:
 ```
 
 ```yaml
-# One code step in a version 2 or newer fleet
+# One code step in a version 2 or newer playbook
 kind: code
 id: check-task
 command: check-materials-task
@@ -1636,7 +1642,7 @@ hard block.
   SSH add and optional Tailscale discovery, and node rows with readiness and capacity.
   Open an SSH row for evidence, timestamps, a recorded test, installation preview or
   removal. Agent bindings are the **Agent routes** in `/settings agents`.
-- `/fleet run <name> [--var k=v ...]` compiles the contract's plan and opens
+- `/fleet run <playbook> [--var k=v ...]` compiles the playbook's plan and opens
   the approval overlay before anything dispatches. The overlay lists the steps
   grouped by wave, and for each step its kind, its agent and resolved target
   (or its command id and the exact argv from `commands.yaml` for a code step),
@@ -1645,7 +1651,7 @@ hard block.
   when `safety.limits.sessionCostUsd` is `0`). Enter dispatches the plan through the same
   path `clio-coder fleet run` uses, so admission, autonomy, receipts, and the
   durable ledger are identical. Esc cancels with nothing dispatched and nothing
-  written. A contract that fails preflight opens the same overlay with its
+  written. A playbook that fails preflight opens the same overlay with its
   diagnostics and no accept key. A turn in flight refuses the command with a
   notice rather than queueing it: an approved plan describes the workspace as
   it stands.
@@ -1822,9 +1828,9 @@ declines with a `will-not-fit` notice instead of stranding the configured model.
 
 ## Manual fleet verification
 
-Use `clio-coder fleet validate <name>` and `clio-coder fleet graph <name>` for
-model-free contract checks. An operator with configured targets can then run
-the contract explicitly with `clio-coder fleet run <name>` and retain its
+Use `clio-coder playbook validate <name>` and `clio-coder playbook graph <name>` for
+model-free playbook checks. An operator with configured targets can then run
+the playbook explicitly with `clio-coder fleet run <name>` and retain its
 receipts; `clio-coder fleet verify <runId> --json` re-authenticates a sealed receipt
 afterwards. [Topologies](#topologies) explains reviewer gates and verification
 commands. Live fleet execution requires an operator.

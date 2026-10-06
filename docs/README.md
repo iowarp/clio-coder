@@ -78,10 +78,10 @@ interactive session. `clio-coder doctor` is a read-only installation check;
 | Proactive task memory, interventions, and handoffs | [Proactive Memory](guide/proactive-memory.md) |
 | Skills as library packages: operator ownership of installed skills, library keys, matching and authoring, and publishing | [Skills Marketplace](guide/skills-marketplace.md) |
 | Resource roots and precedence, prompt templates, skill loading, and share archives | [Prompts, Skills, and Share Archives](guide/extensions-and-sharing.md) |
-| The `library` command family for packages of every kind: browse, install, update, pin and drift, scope and workspace state, index format, registering and publishing, and the shared inventory | [Resource Library](guide/resource-library.md) |
-| Package kinds, how plugins differ from harness extensions, and where each library contract lives | [Plugins](guide/plugins.md) |
+| The `library` command family for packages of every kind: browse, install, update, pin and drift, extension review, lifecycle receipts, scope and workspace state, index format, registering and publishing, and the shared component inventory | [Resource Library](guide/resource-library.md) |
+| Package kinds, how plugins differ from extensions and how the two pair, and where each library contract lives | [Plugins](guide/plugins.md) |
 | Package manifests and component references | [Authoring Plugins](guide/authoring-plugins.md) |
-| Executable harness capabilities | [Harness Extensions](guide/harness-extensions.md) |
+| Extensions: Clio code in its own process, capability envelope, sandbox, hooks, runtime tools, commands, workspaces, and lifecycle | [Extensions](guide/harness-extensions.md) |
 | TUI layout, responsive behavior, colors, and interaction rules | [TUI Design](architecture/tui-design.md) |
 | Terminal panes beside a session and the files pane: install, keys, settings, doctor, troubleshooting | [Panes and the Files Pane](guide/panes-and-files.md) |
 | Focus radio in a Herdr dock: `/music`, cliamp install, the `integrations.music.*` settings, and the opt-in `music` tool | [Music Pane](guide/music.md) |
@@ -108,8 +108,8 @@ reference data, and review define the acceptance criteria for a change.
 
 | Topic | Guide |
 | --- | --- |
-| Built-in worker recipes, discovery, frontmatter, and admission | [Built-in Agents](guide/built-in-agents.md) |
-| Local and multi-node fleet execution, placement, gates, and receipts | [Fleet Dispatch](guide/fleet-dispatch.md) |
+| Built-in worker agents, discovery, frontmatter, and admission | [Built-in Agents](guide/built-in-agents.md) |
+| Playbooks, local and multi-node fleet execution, placement, gates, and receipts | [Fleet Dispatch](guide/fleet-dispatch.md) |
 | Capacity leases, heartbeats, locks, and node drain control | [Capacity and Scheduling](architecture/capacity-and-scheduling.md) |
 | Worker process protocol, watchdogs, exit mapping, the refusal limit and denial format, failure classification and retries, and route history labels | [Worker Dispatch Mechanics](architecture/worker-dispatch-mechanics.md) |
 | Worker context inheritance, fork, and splice modes | [Worker Context](architecture/worker-context.md) |

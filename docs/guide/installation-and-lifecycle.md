@@ -309,10 +309,10 @@ The tables above cover the per-user roots. A repository Clio works in also grows
 | `.clio-coder/hooks.yaml`, `.clio-coder/hooks.local.yaml` | Operator input | Project-declared hooks. | Yes. | Kept |
 | `.clio-coder/rules/**/*.md` | Operator input | Path-scoped project rules injected into the prompt. | Yes. | Kept |
 | `.clio-coder/profile.yaml` | Operator input | Operator profile; closed enums and bounded path lists. | Yes. | Kept |
-| `.clio-coder/fleets/*.md`, `.clio-coder/fleets/commands.yaml` | Overlay | Fleet contracts and their command registry. Adds to the fleets shipped under `src/domains/agents/fleets/`. | Yes; shipped fleets remain. | Kept |
+| `.clio-coder/playbooks/*.md`, `.clio-coder/playbooks/commands.yaml` | Overlay | Playbooks the fleet runs and their command registry. Adds to the builtin playbooks that ship in the package. A workspace that still has `.clio-coder/fleets/` is converted once, the first time Clio opens it. | Yes; builtin playbooks remain. | Kept |
 | `.clio-coder/agents/*.md` | Overlay | Project agent recipes. Composes with shipped builtins and the user's `~/.config/clio-coder/agents`; a project recipe reusing a builtin id is **ignored**, not applied, with a note on stderr. | Yes; shipped agents remain. | Kept, and named |
 | `.clio-coder/skills/**` | Overlay | Loose project skills placed here by the operator, trusted as repository-local. Library installations use the managed package store below. | Yes; loose skills must be restored by the operator. | Kept, and named |
-| `.clio-coder/plugins/<name>/`, `.clio-coder/plugins/state.json` | Operator input | Complete installed library packages of all five kinds and their scoped state. `clio-coder library install skill:<name> --project` installs here. They load only while the state file is approved: the operator's first project install approves it, and later changes need `clio-coder config trust plugins` ([resource-library.md](resource-library.md)). The bundled `library/` remains the catalog source. | Use `clio-coder library remove <kind>:<name> --project` to keep package state consistent. | Kept, not named |
+| `.clio-coder/plugins/<name>/`, `.clio-coder/plugins/state.json` | Operator input | Installed plugin, skill, agent, prompt and playbook packages and their scoped state. `clio-coder library install skill:<name> --project` installs here. They load only while the state file is approved: the operator's first project install approves it, and later changes need `clio-coder config trust plugins` ([resource-library.md](resource-library.md)). The bundled `library/` remains the catalog source. | Use `clio-coder library remove <kind>:<name> --project` to keep package state consistent. | Kept, not named |
 | `CLIO-CODER.md` (repository root) | Runtime state | The generated project handbook. Human-reviewable, but written by `context init`. | Yes; regenerate with `clio-coder context init`. | Kept unless `--all` |
 | `.clio-coder/codemap.json` | Runtime state | Structural index, schema v5. | Yes; rebuilt by `clio-coder context index`. | **Removed** |
 | `.clio-coder/state.json` | Runtime state | Index fingerprint and freshness stamps. | Yes; forces a rebuild. | **Removed** |
@@ -326,8 +326,8 @@ The tables above cover the per-user roots. A repository Clio works in also grows
 user configuration directory, not in any repository.
 
 None of `.clio-coder/` is published by Clio Coder's own package. The directories Clio ships
-(`src/domains/agents/builtins/`, `src/domains/agents/fleets/`, the whole `library/` catalog
-with its registry, recipe packages and skill provenance records, `src/domains/prompts/fragments/`,
+(`src/domains/agents/builtins/`, the builtin playbooks, the whole `library/` catalog
+with its registry, packages and skill provenance records, `src/domains/prompts/fragments/`,
 `src/domains/providers/models/`) are read from the installed package root; the `.clio-coder/`
 entries above compose with them and never replace them on disk. Builtin agent recipes bind
 skills straight out of the package catalog; the operator's own session reaches the same
@@ -452,7 +452,7 @@ Runs a series of health sweeps across the environment:
 *   *Recovery:* Run `clio-coder doctor --fix` to create missing directories and templates, repair credential and settings permissions, refresh install metadata, and record fleet preflight results. Settings are always validated against the current schema. `--fix` rewrites retired enum values and YAML 1.1 booleans in place, but it does not remove retired keys or migrate an older settings file. Run `clio-coder upgrade` for registered lifecycle migrations, including removal of the retired `panes.agents` and `panes.keepFailed` keys; paths with no registered migration still require deliberate editing. The rows, levels and exit codes are in [Doctor](doctor.md).
 
 ### B. Upgrades (`clio-coder upgrade`)
-Refreshes state metadata and applies pending lifecycle migrations, which may update settings, state, or extension data.
+Refreshes state metadata and applies pending lifecycle migrations, which may update settings, state, or extension data. The dated migration `2026-10-06-playbooks-and-packages` converts the user home once: `<configDir>/fleets` merges into `<configDir>/playbooks` without overwriting, plugin install records and the user Library index rename the fleet kind to playbook, a Library plugin the current layout cannot read (for example a single plugin that carried an extension manifest) is replaced with the Library copy that ships inside Clio, and an api 2 extension installed before capability envelopes were bound is reinstalled from the Library or named with the command that reinstalls it. A workspace's `.clio-coder/` converts the first time Clio opens it, with one notice. Third-party plugins that still declare `fleets` stay installed but do not load, and the report names the fix for their author. Nothing in the conversion deletes operator data, and each package it writes leaves a Library receipt with actor `upgrade`.
 ```bash
 clio-coder upgrade [--dry-run] [--channel=<latest|beta|dev>] [--skip-migrations] [--refresh-runtime] [--restart] [--json]
 clio-coder upgrade --post-install [--dry-run] [--skip-migrations] [--channel=<latest|beta|dev>]

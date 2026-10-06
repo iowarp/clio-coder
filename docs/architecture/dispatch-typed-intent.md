@@ -11,7 +11,7 @@ reason codes an operator or integrator can branch on, and describes the legacy
 inference fallback.
 
 Related pages: [tool-usage.md](../guide/tool-usage.md) for the `dispatch` tool arguments,
-[fleet-dispatch.md](../guide/fleet-dispatch.md) for fleet contracts,
+[fleet-dispatch.md](../guide/fleet-dispatch.md) for playbooks,
 [artifact-versions.md](artifact-versions.md) for the serialization registry, and
 [safety-model.md](safety-model.md) for how a resolved write boundary is enforced.
 
@@ -177,8 +177,8 @@ inference path, whose malformed-path errors remain terminal.
 | **`dispatch` review gate, reviewer** | `src/tools/dispatch-admission.ts` | None on the request. `expected_outputs` and `verification` reach the reviewer as rendered *requirements*, never as evidence | Legacy inference over the reviewer's own task | Legacy inference errors only |
 | **`dispatch` `apply_winner`** | `src/tools/dispatch-admission.ts` | Not applicable. Branch application runs no worker | Not applicable | Branch-shape refusals only |
 | **`from_scout` continuation** | [dispatch-scout-admission.ts](../../src/tools/dispatch-scout-admission.ts) | None for operator-approved and yolo continuations. A harness read-only orientation continuation declares an empty intent, so it has no scope paths | Legacy inference per step | Legacy inference errors only |
-| **Fleet contract agent step (v4+ `writes:`)** | [fleet-run.ts](../../src/domains/dispatch/fleet-run.ts) | Declared. The contract's `writes:` compiles to `relevant_paths` | Legacy inference for pre-v4 contracts and readonly steps | All codes |
-| **Fleet contract gate / plan step** | `src/domains/dispatch/fleet-run.ts` | Declared, same path (`writes` is the gate path or the plan step's boundary) | Legacy inference when undeclared | All codes |
+| **Playbook agent step (v4+ `writes:`)** | [fleet-run.ts](../../src/domains/dispatch/fleet-run.ts) | Declared. The playbook's `writes:` compiles to `relevant_paths` | Legacy inference for pre-v4 playbooks and readonly steps | All codes |
+| **Playbook gate / plan step** | `src/domains/dispatch/fleet-run.ts` | Declared, same path (`writes` is the gate path or the plan step's boundary) | Legacy inference when undeclared | All codes |
 | **Fleet delegation-plan spliced step** | `src/domains/dispatch/fleet-run.ts` | Declared from the validated plan task's `writes` | Legacy inference when the task declares none | All codes |
 | **Fleet code step** | [code-step.ts](../../src/domains/dispatch/code-step.ts) | Not applicable. Runs a declared command, not a worker | Not applicable | Not applicable |
 | **ACP delegation target** | [extension.ts](../../src/domains/dispatch/extension.ts) | Accepted and carried into the plan, but the external agent runs its own tool surface | Legacy inference | All codes, plus a hard refusal of any resolved `writeRoots` on this transport |
@@ -205,7 +205,7 @@ only malformed or absolute prose-path inference can refuse it.
 | **Dispatch plan approval text and hash** | Rendered, hashed | `intent_sha256` for a declared task; the full inferred scope table for a legacy task | Not persisted across versions. The hash binds the exact rendering an operator approved. |
 | **Worker Spec** | `8` | **No.** Carries the *resolved* `writeRoots`, not the declaration | Fail-closed preflight rejection. Deliberate: a worker receives an enforced boundary, never a statement of intent it could reinterpret. |
 | **Execution Plan** | `4` | **No.** Carries per-step `writes` | Preflight rejects unsupported plan versions. Intent is built from `writes` at request construction, so the plan hash is unchanged by this. |
-| **Fleet Contract** | `1..5` | **No.** v4+ carries per-step `writes:` | Reader refuses contracts whose version features it does not support. A pre-v4 contract declares nothing and stays on inference. |
+| **Playbook** | `1..5` | **No.** v4+ carries per-step `writes:` | Reader refuses playbooks whose version features it does not support. A pre-v4 playbook declares nothing and stays on inference. |
 | **Fleet Run Record** | `1` | **No** | Resume refuses a changed plan hash. Adding intent to steps does not change the hash, so existing records stay resumable. |
 | **Durable Assignment Store** | `1` | **No** | Unsupported or unreadable store reads as empty. |
 | **Detached Batch Store** | `1` | **No** | Unsupported version reads as empty. |
@@ -327,9 +327,9 @@ selects the project rules that apply to those trees and pins the worker's
 context, which is what stops an applicable rule from being missed because the
 task text happened not to spell a path.
 
-### 6.4 Fleet contract
+### 6.4 Playbook
 
-A fleet contract declares scope in its own artifact; no `intent` key is written
+A playbook declares scope in its own artifact; no `intent` key is written
 by hand.
 
 ```yaml
@@ -344,7 +344,7 @@ steps:
 ```
 
 `writes:` is compiled into the step's typed intent as `relevant_paths`, so the
-contract's declaration selects project rules and compiles worker context. The
+playbook's declaration selects project rules and compiles worker context. The
 declaration keeps being *enforced* by the fleet write-boundary enforcer after
 the step, which is why it is not restated as `write_roots`: that would mint a
 second grant, enforced at the per-tool worker seam, which refuses outright on
@@ -352,7 +352,7 @@ the subprocess and ACP runtimes a fleet may legitimately route a step to.
 
 ### 6.5 In-process callers
 
-Harness extensions have no dispatch API, so they cannot build a request. Code
+Extensions have no dispatch API, so they cannot build a request. Code
 inside the runtime that holds repository-relative paths builds intent through
 the domain rather than assembling the normalized object by hand. The fleet
 runner, `context wiki` and `context init` do:

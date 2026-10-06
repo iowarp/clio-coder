@@ -36,7 +36,7 @@ Recipe IDs are derived from filenames (e.g., `architect.md` -> `architect`). Onl
 *   **Namespace**: Native recipes and ACP delegation agents share one id namespace. A delegation entry in `integrations.externalAgents.entries` whose id equals a native recipe id fails agent startup.
 *   **Quarantine and diagnostics**: A plugin, user, or project recipe that fails parsing or policy validation is quarantined, not loaded. Discovery records at most 256 diagnostics of kind `quarantine`, `ignored`, or `overridden`, each with the file path and reason.
 *   **Timing**: Recipes are discovered when the agents domain starts and again when a plugin resource reload commits a changed plugin generation.
-*   **Fleet Contracts**: Shipped builtin fleet contracts (`build-test`, `build-review`, `sdlc`) live under `src/domains/agents/fleets/*.md`. Enabled-plugin contracts load next, user contracts at `<configDir>/fleets/<name>.md` load after them, and project contracts at `.clio-coder/fleets/<name>.md` take highest precedence. The parser accepts contract versions 1 through 5. Version 4 introduces enforced per-step `writes` boundaries; version 5 adds plan and gate steps, per-step target or profile routes, and the `writers: 1` single-writer declaration. Deterministic code steps reference commands declared in `.clio-coder/fleets/commands.yaml`.
+*   **Playbooks**: The fleet runs playbooks. Shipped builtin playbooks (`build-test`, `build-review`, `sdlc`) ship inside the package. Enabled-plugin playbooks load next, user playbooks at `<configDir>/playbooks/<name>.md` load after them, and project playbooks at `.clio-coder/playbooks/<name>.md` take highest precedence. Clio reads no `fleets/` directory; `clio-coder upgrade` converts an older one once. The parser accepts playbook versions 1 through 5. Version 4 introduces enforced per-step `writes` boundaries; version 5 adds plan and gate steps, per-step target or profile routes, and the `writers: 1` single-writer declaration. Deterministic code steps reference commands declared in `.clio-coder/playbooks/commands.yaml`.
 
 ---
 
@@ -74,7 +74,7 @@ Internal orchestration helpers and internal process agents. They are hidden from
 
 `scout` declares `product: orientation`, which makes `code_nav` a delivery tool for its reserve window.
 
-The builtin `architect` also serves as the default author for a version 5 fleet `plan` step. In that role it returns the coordinator-owned `delegation-plan` result shape instead of writing its ordinary plan artifact. It may name only agents from the contract roster. The coordinator supplies the plan step's target or profile to every admitted task.
+The builtin `architect` also serves as the default author for a version 5 playbook `plan` step. In that role it returns the coordinator-owned `delegation-plan` result shape instead of writing its ordinary plan artifact. It may name only agents from the playbook's roster. The coordinator supplies the plan step's target or profile to every admitted task.
 
 `scout` is bound by a live-grounding contract: its whole final response is one `scout-report` object whose findings each carry the `claim` it observed and the `path:line` that grounds it, and wiki or index content is orientation only, never citable as evidence. A finding that omits `path` and `line` is accepted as an ungrounded lead and never as evidence. The recipe budget of 18 calls, 4 of them reserved for citation reads, is an advisory plan stated in the persona. A native scout run is read-only research, which enters a tool-free synthesis phase after at most 36 observed calls (see [Budget semantics](#budget-semantics)). Tool calls issued together in one model round count as one round against the synthesis backstop, so a wide parallel batch cannot consume it as separate violations. Dispatch labels its answer `reconnaissance output (advisory leads, not validation evidence):`.
 
@@ -287,7 +287,7 @@ messages, in the order a worker reads them, each present only when it applies:
 - **Memory** (when the request carries an approved memory section).
 - **Agent ledger** (when the dispatch unit has more than one concurrent peer): the shared board of path claims, findings, and reviews, capped at 4,000 characters and labeled as untrusted peer data.
 - **Briefing**: the dispatching agent's briefing, inside `<<<DISPATCH-BRIEFING ... DISPATCH-BRIEFING>>>` and labeled as untrusted context data.
-- **Predecessor handoffs** (fleet steps with declared dependencies): each predecessor's output inside `<<<PREDECESSOR ... >>>` markers, labeled as data.
+- **Predecessor handoffs** (playbook steps with declared dependencies): each predecessor's output inside `<<<PREDECESSOR ... >>>` markers, labeled as data.
 - **Pipeline input** (`pipeline`-mode steps after the first): the previous
   step's final assistant output, threaded as data inside a fixed
   `<<<PIPELINE-INPUT ... PIPELINE-INPUT>>>` delimiter and labeled as input,

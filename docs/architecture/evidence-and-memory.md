@@ -94,7 +94,7 @@ Readers open the named core files above. Bundles built by older releases may hol
 | File | Purpose |
 | --- | --- |
 | `overview.json` | Stable summary (`version: 1`): source, runs, sessions, statuses, tasks, models, totals, tags, redaction count, resolved decisions and file list. |
-| `transcript.md` | Human-readable run or session transcript. |
+| `transcript.md` | Human-readable run or session transcript. A skill activation names its owning plugin (`owner=<id>@<version> digest=<digest>`) when a plugin supplied the skill. |
 | `tool-events.jsonl` | Tool summaries from session entries, audit rows, or receipts. |
 | `receipt.json` | Receipt bundle (`{ version: 1, receipts: [...] }`); only receipts that pass integrity verification contribute verified fields. |
 | `gate-decisions.json` | Integrity-verified review verdicts, compete winner selections, and winner confirmations discovered from linked receipt ids. |
@@ -471,7 +471,7 @@ action acknowledges the broader applicability. A successful action writes an
 unapproved record and names the separate `memory approve` command required to
 make it injectable.
 
-A model-tier reminder that reaches the operator also proposes the entries it cited, automatically, as repository-scoped unapproved records. Those cite `session:<sessionId>`; a record promoted from the overlay or a handoff cites `session-<sessionId>`, the ID shape of the session evidence bundle. See [Where what the tier writes ends up](../guide/proactive-memory.md#where-what-the-tier-writes-ends-up).
+A model-tier reminder that reaches the operator also proposes the entries it cited, automatically, as repository-scoped unapproved records. Those cite `session:<sessionId>`; a record promoted from the overlay or a handoff cites `session-<sessionId>`, the ID shape of the session evidence bundle. See [Where what the tier writes ends up](../guide/proactive-memory.md#where-what-the-tier-writes-ends-up). The model tier runs on the active chat route unless `context.memory.target` and `context.memory.model` name a dedicated route, so these reminders and proposals need no extra configuration. `context.memory.enabled: false` stops them.
 
 The CLI consumes a version 2 `clio-coder-task-memory` handoff snapshot of at most
 1,000,000 bytes. Omitting `--entry` proposes every knowledge and procedural

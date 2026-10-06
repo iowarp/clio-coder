@@ -76,7 +76,7 @@ problem.
 | `settings.yaml` | Saved settings |
 | `credentials.yaml` | Credentials managed by `clio-coder auth`, mode `0600` |
 | `profile.yaml` | Operator profile, overridden field by field by the project `.clio-coder/profile.yaml` |
-| `agents/`, `skills/`, `prompts/`, `fleets/`, `extensions/`, `runtimes/` | User-tier resources of each kind |
+| `agents/`, `skills/`, `prompts/`, `playbooks/`, `extensions/`, `runtimes/` | User-tier resources of each kind |
 | `plugins/` | Library package state (`state.json`) and one directory per installed package |
 | `library.yaml`, `skill-marketplace.json`, `skill-promotion-declines.json` | Library catalog, marketplace registry and declined skill promotions |
 | `mcp.yaml`, `mcp-trust.json` | User MCP servers and the trust records for project-declared servers |
@@ -145,7 +145,7 @@ authored files there, which the operator writes and may commit deliberately:
 | `safety.yaml` | Project safety policy |
 | `rules/` | Path-scoped project rules |
 | `profile.yaml` | Project operator profile |
-| `agents/`, `skills/`, `prompts/`, `fleets/`, `extensions/`, `plugins/` | Project-tier resources; `fleets/commands.yaml` holds fleet commands |
+| `agents/`, `skills/`, `prompts/`, `playbooks/`, `extensions/`, `plugins/` | Project-tier resources; `playbooks/commands.yaml` holds the playbook command registry |
 | `library.yaml` | Project library catalog |
 | `hooks.yaml`, `hooks.local.yaml` | Project hooks and their local counterpart |
 | `mcp.yaml` | Project MCP servers, which need an explicit trust record |
@@ -215,7 +215,7 @@ Git does not descend into an excluded parent. Force-add an intentional asset,
 for example:
 
 ```bash
-git add -f .clio-coder/fleets/build-review.md
+git add -f .clio-coder/playbooks/build-review.md
 git add -f .clio-coder/rules/backend.md
 git add -f .clio-coder/safety.yaml
 ```
