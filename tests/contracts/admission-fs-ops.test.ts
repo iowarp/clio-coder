@@ -21,7 +21,9 @@ const { invokeRegisteredTool } = await import("../../src/tools/agent-tools.js");
  * worker registry at default. Every target and root is still resolved at
  * admission, but each component once: a walk repeated inside the same call
  * raises these and fails here. Each call runs on a fresh scratch root after
- * one warmup call, so caches a first call fills are not counted.
+ * one warmup call, so caches a first call fills are not counted. The one
+ * existsSync is the dev-root registry presence check every mutation admission
+ * makes for a folder another live session holds.
  */
 const ANCHOR = "<<E0:admission>>";
 const LINE = "the quick brown fox jumps over the lazy dog, ";
@@ -31,7 +33,7 @@ const CASES = [
 	{
 		id: "edit of a 1 KB file near its head",
 		tool: ToolNames.Edit,
-		expected: 40,
+		expected: 41,
 		seed: (root: string) => writeFileSync(join(root, "data", "target.txt"), `${ANCHOR}${KB_TEXT}`),
 		args: { path: "data/target.txt", edits: [{ oldText: ANCHOR, newText: "<<R0:admission>>" }] },
 		check: (root: string) => readFileSync(join(root, "data", "target.txt"), "utf8").startsWith("<<R0:admission>>"),
@@ -39,7 +41,7 @@ const CASES = [
 	{
 		id: "write creating a 1 KB file in an existing directory",
 		tool: ToolNames.Write,
-		expected: 48,
+		expected: 49,
 		seed: () => {},
 		args: { path: "data/new.txt", content: KB_TEXT },
 		check: (root: string) => readFileSync(join(root, "data", "new.txt"), "utf8") === KB_TEXT,
