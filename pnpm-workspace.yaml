@@ -21,5 +21,9 @@ overrides:
   # Transitive via @modelcontextprotocol/sdk; moderate advisories fixed in these releases.
   fast-uri@<3.1.8: "3.1.8"
   ip-address@<10.7.1: "10.7.2"
+  # GHSA-6qxp-vccf-f47h (high): the peer that @google/genai and the Claude Agent SDK resolve.
+  "@modelcontextprotocol/sdk@<1.31.0": "1.32.1"
+  # GHSA-jqcg-44mw-7w3h (critical): reached through the MCP SDK's express.
+  proxy-addr@<2.0.8: "2.0.8"
 patchedDependencies:
   '@earendil-works/pi-tui@1.0.0': patches/@earendil-works__pi-tui@1.0.0.patch
