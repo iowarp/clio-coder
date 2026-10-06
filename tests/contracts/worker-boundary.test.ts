@@ -1,6 +1,8 @@
 import { deepStrictEqual, ok, strictEqual, throws } from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { describe, it } from "node:test";
+import { BusChannels } from "../../src/core/bus-events.js";
+import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { parseAgentRecipeSchema } from "../../src/domains/agents/recipe-schema.js";
 import { parseCodeReport } from "../../src/domains/agents/result-contract.js";
 import { normalizeAgentSpec, resolveAgentToolCompatibility } from "../../src/domains/agents/spec.js";
@@ -10,6 +12,7 @@ import {
 	createBoundedEventQueue,
 	verifyWorkerAttestation,
 } from "../../src/domains/dispatch/worker-protocol.js";
+import type { SpawnedWorker, SpawnedWorkerResult } from "../../src/domains/dispatch/worker-spawn.js";
 import { mergeCapabilities } from "../../src/domains/providers/capabilities.js";
 import { EMPTY_CAPABILITIES } from "../../src/domains/providers/types/capability-flags.js";
 import type { SafetyDecision } from "../../src/domains/safety/contract.js";
@@ -24,6 +27,9 @@ import {
 	workerSpecDigest,
 } from "../../src/worker/protocol.js";
 import { createOrderedSteerHandler } from "../../src/worker/stdin-demux.js";
+import { makeDispatchBundle } from "../harness/dispatch.js";
+import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
+import { isolateClioEnv } from "../harness/scratch-env.js";
 
 function recipe() {
 	return parseAgentRecipeSchema({
@@ -186,6 +192,90 @@ describe("worker boundary", () => {
 		queue.push({ type: "message_update", delta: "new" });
 		deepStrictEqual(queue.shift(), { type: "message_end", message: { content: "sealed result" } });
 		strictEqual(queue.stats().droppedDisplayFrames, 1);
+	});
+
+	it("drain seals once after process cleanup and retains terminal frames under display backpressure", async (context) => {
+		const scratch = await isolateClioEnv("clio-coder-worker-boundary-");
+		context.mock.timers.enable({ apis: ["setInterval"] });
+		let finishCleanup!: (result: SpawnedWorkerResult) => void;
+		const cleanup = new Promise<SpawnedWorkerResult>((resolve) => {
+			finishCleanup = resolve;
+		});
+		let finishEvents!: () => void;
+		const eventsDone = new Promise<void>((resolve) => {
+			finishEvents = resolve;
+		});
+		const queue = createBoundedEventQueue(2);
+		const output = JSON.stringify({ confirmedFacts: [], missingEvidence: [], nextInspections: [] });
+		queue.push({ type: "message_end", message: { role: "assistant", stopReason: "stop", content: output } });
+		for (let i = 0; i < 32; i++) queue.push({ type: "message_update", delta: `display ${i}` });
+		queue.push({ type: "agent_end" });
+		const settings = structuredClone(DEFAULT_SETTINGS);
+		settings.fleet.retry.maxRetries = 0;
+		const ctx = dispatchStubContext({ settings });
+		let aborts = 0;
+		let seals = 0;
+		let reentrantDrain: Promise<void> | undefined;
+		const unsubscribe = ctx.bus.on(BusChannels.DispatchFailed, () => {
+			seals += 1;
+		});
+		const bundle = makeDispatchBundle(ctx, {
+			spawnWorker: (): SpawnedWorker => ({
+				pid: null,
+				promise: cleanup,
+				heartbeatAt: { current: Date.now(), monotonic: performance.now() },
+				abort() {
+					aborts += 1;
+					reentrantDrain = bundle.contract.drain();
+				},
+				events: (async function* () {
+					while (queue.size > 0) yield queue.shift();
+					finishEvents();
+				})(),
+			}),
+		});
+		try {
+			await bundle.extension.start();
+			const run = await bundle.contract.dispatch({
+				agentId: "scout",
+				executionRole: "researcher",
+				task: "Inspect isolated evidence.",
+				cwd: scratch.dir,
+				requestOrigin: "internal",
+				resultContractOverride: { kind: "provenance-report" },
+			});
+			await eventsDone;
+			const drain = bundle.contract.drain();
+			strictEqual(bundle.contract.drain(), drain);
+			strictEqual(reentrantDrain, drain);
+			let drained = false;
+			void drain.then(() => {
+				drained = true;
+			});
+			await Promise.resolve();
+			deepStrictEqual({ aborts, seals, drained }, { aborts: 1, seals: 0, drained: false });
+			ok(queue.stats().droppedDisplayFrames > 0);
+			finishCleanup({
+				exitCode: null,
+				signal: "SIGTERM",
+				processCleanup: { descendantsCleaned: true, incomplete: false, pipeDrainIncomplete: false },
+			});
+			await drain;
+			const receipt = await run.finalPromise;
+			strictEqual(receipt.output?.text, output);
+			strictEqual(receipt.outcome, "canceled");
+			const frames: unknown[] = [];
+			for await (const frame of run.events) frames.push(frame);
+			ok(frames.some((frame) => (frame as { type?: string }).type === "message_end"));
+			ok(frames.some((frame) => (frame as { type?: string }).type === "agent_end"));
+			await bundle.contract.drain();
+			deepStrictEqual({ aborts, seals, drained }, { aborts: 1, seals: 1, drained: true });
+		} finally {
+			finishCleanup({ exitCode: null, signal: "SIGTERM" });
+			await bundle.extension.stop?.();
+			unsubscribe();
+			scratch.restore();
+		}
 	});
 
 	it("serializes live steering and acknowledges exact accepted sequences", async () => {
