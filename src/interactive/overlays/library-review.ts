@@ -31,7 +31,7 @@ import {
 	type TUI,
 	wrapTextWithAnsi,
 } from "../../engine/tui.js";
-import { buildResponsiveHint, FocusBox, showClioOverlayFrame } from "../overlay-frame.js";
+import { buildResponsiveHint, FocusBox, type RowBudgetedBody, showClioOverlayFrame } from "../overlay-frame.js";
 import { clioTheme, rule } from "../theme/index.js";
 
 const MIN_WIDTH = 48;
@@ -425,9 +425,19 @@ class LibraryReviewBody implements Component {
 		this.scroll = 0;
 	}
 
+	/** Rows the frame leaves for the body, or zero until it has said. */
+	private bodyRows = 0;
+
+	setBodyRows(rows: number): void {
+		this.bodyRows = rows;
+	}
+
 	render(width: number): string[] {
 		const body = this.outcome ? this.outcome() : this.review(width, this.detail);
-		this.rows = Math.max(4, (process.stdout.rows || 30) - 10);
+		// The frame cuts a body taller than its budget and hides the keys that apply the plan, so the body
+		// windows itself to the budget and keeps one row for the pager.
+		const budget = this.bodyRows > 0 ? this.bodyRows : Math.max(4, (process.stdout.rows || 30) - 10);
+		this.rows = body.length > budget ? Math.max(3, budget - 1) : budget;
 		this.maxScroll = Math.max(0, body.length - this.rows);
 		this.scroll = Math.min(this.scroll, this.maxScroll);
 		const shown = body.slice(this.scroll, this.scroll + this.rows);
@@ -436,6 +446,20 @@ class LibraryReviewBody implements Component {
 	}
 
 	invalidate(): void {}
+}
+
+/** The frame budgets rows through its direct child, which here is the input-routing box around the body. */
+class ReviewFocusBox extends FocusBox implements RowBudgetedBody {
+	constructor(
+		private readonly windowed: LibraryReviewBody,
+		options: ConstructorParameters<typeof FocusBox>[1],
+	) {
+		super(windowed, options);
+	}
+
+	setBodyRows(rows: number): void {
+		this.windowed.setBodyRows(rows);
+	}
 }
 
 interface ReviewOverlaySpec {
@@ -463,7 +487,7 @@ function openReviewOverlay(tui: TUI, spec: ReviewOverlaySpec): OverlayHandle {
 		spec.onCancel();
 	};
 
-	const focus = new FocusBox(body, {
+	const focus = new ReviewFocusBox(body, {
 		// Keys are matched by name rather than by raw bytes: under the kitty
 		// keyboard protocol Esc arrives as CSI 27 u, and a byte comparison left
 		// this overlay unanswerable.
