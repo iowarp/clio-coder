@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { stringify } from "yaml";
-
+import { readLifecycleReceipts } from "../../src/core/library-receipts.js";
 import { resetXdgCache } from "../../src/core/xdg.js";
 import { extensionBaseDir, listInstalledExtensions } from "../../src/domains/extensions/index.js";
 import { applyLibraryImport, planLibraryImport } from "../../src/domains/interop/import.js";
@@ -142,6 +142,38 @@ function cli(args: string[]): { code: number; json: Record<string, unknown> } {
 }
 
 describe("library lifecycle plans", () => {
+	it("lifecycle receipts retain committed identity", () => {
+		const name = "telemetry-lifecycle";
+		const first = source({ name, version: "1.0.0" });
+		catalog([first]);
+		const before = readLifecycleReceipts(name).length;
+		const dry = planLibraryLifecycle({ operation: "install", ref: `plugin:${name}`, scope: "user", cwd: root });
+		applyLibraryLifecycle(dry, { dryRun: true });
+		equal(readLifecycleReceipts(name).length, before);
+		install(`plugin:${name}`);
+		const installed = readLifecycleReceipts(name).at(-1);
+		ok(installed);
+		equal(installed.operation, "install");
+		equal(installed.version, "1.0.0");
+		equal(installed.contentDigest, pluginContentDigest(first));
+		equal(installed.source, first);
+		equal(installed.actor, "operator");
+		ok(!Number.isNaN(Date.parse(installed.at)));
+		const second = source({ name, version: "2.0.0" });
+		catalog([second]);
+		const update = planLibraryLifecycle({ operation: "update", ref: `plugin:${name}`, scope: "user", cwd: root });
+		applyLibraryLifecycle(update, { refresh: () => ({ status: "failed", error: "fixture refresh refused" }) });
+		equal(readLifecycleReceipts(name).at(-1)?.operation, "update");
+		equal(readLifecycleReceipts(name).at(-1)?.version, "2.0.0");
+		removePlugin(name, { cwd: root, scope: "user", lifecycle: { actor: "model-confirmed" } });
+		const removed = readLifecycleReceipts(name).at(-1);
+		equal(removed?.operation, "remove");
+		equal(removed?.contentDigest, pluginContentDigest(second));
+		equal(removed?.version, "2.0.0");
+		equal(removed?.actor, "model-confirmed");
+		removePlugin(name, { cwd: root, scope: "user" });
+		equal(readLifecycleReceipts(name).at(-1)?.operationId, removed?.operationId);
+	});
 	beforeEach(() => {
 		root = mkdtempSync(path.join(tmpdir(), "clio-coder-library-lifecycle-"));
 		previousConfig = process.env.CLIO_CODER_CONFIG_DIR;

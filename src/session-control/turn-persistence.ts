@@ -7,6 +7,7 @@
 
 import type { BackendCompletionTimings } from "../core/cache-telemetry.js";
 import type { ClioSettings } from "../core/config.js";
+import type { PackageIdentity } from "../core/package-identity.js";
 import type { MiddlewareToolChoiceControl } from "../domains/middleware/index.js";
 import type { ObservabilityContract } from "../domains/observability/contract.js";
 import type { SessionTurnUsage } from "../domains/observability/trace-store.js";
@@ -21,6 +22,7 @@ import {
 	chainStepToolCallId,
 	type DisplayToolCall,
 	displayToolCall,
+	gatewayChainPlan,
 	gatewayChainSteps,
 	VIA_GATEWAY,
 } from "../tools/gateway-display.js";
@@ -44,6 +46,7 @@ import type { RetryStatusPayload } from "./turn-recovery.js";
 import type { AgentRuntime, ChatLoopTarget, ChatTurnState } from "./turn-state.js";
 
 export interface TurnPersistenceDeps {
+	getToolOwner?: (name: string) => PackageIdentity | undefined;
 	state: ChatTurnState;
 	session?: SessionContract | undefined;
 	readSessionEntries?: (() => ReadonlyArray<SessionEntry>) | undefined;
@@ -149,6 +152,7 @@ export interface TurnTraceEventInput {
 export function createTurnPersistence(deps: TurnPersistenceDeps): TurnPersistence {
 	const { state } = deps;
 	const persistedAssistantMessages = new WeakSet<object>();
+	const toolOwners = new Map<string, PackageIdentity>();
 
 	// --- ledger appends -------------------------------------------------------
 	// Every turn this loop writes parents onto `state.lastTurnId`, the loop's own
@@ -214,6 +218,7 @@ export function createTurnPersistence(deps: TurnPersistenceDeps): TurnPersistenc
 		traceUsage = null;
 		traceToolStarts.clear();
 		shownToolCalls.clear();
+		toolOwners.clear();
 	};
 
 	const startTracedTurn = (userTurnId: string, prompt: string, submitted?: AgentRuntime): void => {
@@ -428,18 +433,25 @@ export function createTurnPersistence(deps: TurnPersistenceDeps): TurnPersistenc
 
 		appendToolCallTurn(event): void {
 			if (!deps.session) return;
+			const shown = displayToolCall(event.toolName, event.args);
+			const owner = deps.getToolOwner?.(shown.toolName);
+			if (owner) toolOwners.set(event.toolCallId, owner);
+			for (const step of gatewayChainPlan(event.toolName, event.args)) {
+				const stepOwner = deps.getToolOwner?.(step.capability);
+				if (stepOwner) toolOwners.set(chainStepToolCallId(event.toolCallId, step.id), stepOwner);
+			}
 			const turn = appendTurn(deps.session, {
 				kind: "tool_call",
 				payload: {
 					toolCallId: event.toolCallId,
 					name: event.toolName,
 					args: event.args,
+					...(owner ? { owner } : {}),
 				},
 			});
 			state.lastTurnId = turn.id;
 			const startedAt = traceNow();
 			traceToolStarts.set(event.toolCallId, startedAt);
-			const shown = displayToolCall(event.toolName, event.args);
 			shownToolCalls.set(event.toolCallId, shown);
 			traceEvent({
 				eventId: `tool:${event.toolCallId}`,
@@ -449,6 +461,7 @@ export function createTurnPersistence(deps: TurnPersistenceDeps): TurnPersistenc
 					tool: shown.toolName,
 					tool_call_id: event.toolCallId,
 					args: shown.viaGateway ? (shown.args ?? {}) : event.args,
+					...(owner ? { owner } : {}),
 					...(shown.viaGateway ? { via: VIA_GATEWAY } : {}),
 				},
 				startedAt,
@@ -457,12 +470,15 @@ export function createTurnPersistence(deps: TurnPersistenceDeps): TurnPersistenc
 
 		appendToolResultTurn(event): void {
 			if (!deps.session) return;
+			const owner = toolOwners.get(event.toolCallId);
+			toolOwners.delete(event.toolCallId);
 			const payload: Record<string, unknown> = {
 				toolCallId: event.toolCallId,
 				toolName: event.toolName,
 				result: event.result,
 				isError: event.isError,
 				resultSummary: event.resultSummary ?? toolResultSummary(event.result),
+				...(owner ? { owner } : {}),
 			};
 			if (event.durationMs !== undefined) payload.durationMs = event.durationMs;
 			// The admission verdict, so a resumed session and an exported
@@ -498,6 +514,7 @@ export function createTurnPersistence(deps: TurnPersistenceDeps): TurnPersistenc
 					ok: event.isError !== true && event.outcome !== "error" && event.outcome !== "blocked",
 					duration_ms: event.durationMs ?? null,
 					result_summary: payload.resultSummary,
+					...(owner ? { owner } : {}),
 					outcome: event.outcome ?? null,
 					block_reason: event.blockReason ?? null,
 				},
@@ -509,6 +526,8 @@ export function createTurnPersistence(deps: TurnPersistenceDeps): TurnPersistenc
 			const steps = gatewayChainSteps(event.toolName, event.result);
 			for (const step of steps) {
 				const stepCallId = chainStepToolCallId(event.toolCallId, step.id);
+				const stepOwner = toolOwners.get(stepCallId);
+				toolOwners.delete(stepCallId);
 				traceEvent({
 					eventId: `tool:${stepCallId}`,
 					type: "tool_call",
@@ -519,6 +538,7 @@ export function createTurnPersistence(deps: TurnPersistenceDeps): TurnPersistenc
 						parent_tool_call_id: event.toolCallId,
 						via: VIA_GATEWAY,
 						args: step.args,
+						...(stepOwner ? { owner: stepOwner } : {}),
 						ok: !step.isError && step.outcome !== "blocked",
 						outcome: step.outcome ?? null,
 						block_reason: step.blockReason ?? null,

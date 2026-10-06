@@ -20,6 +20,7 @@ import type {
 	DispatchStartedPayload,
 } from "../../core/bus-events.js";
 import { normalizeClioCoderEventType } from "../../core/naming-events.js";
+import type { PackageActivity } from "../../core/package-activity.js";
 import { processAlive, processBirthToken } from "../../core/process-identity.js";
 import { chainStepToolCallId, displayToolCall, gatewayChainSteps, VIA_GATEWAY } from "../../tools/gateway-display.js";
 import { createRedactionTally, redactSecretsText, secretRedactingReplacer } from "../evidence/redact.js";
@@ -979,6 +980,36 @@ export class TraceStore {
 		this.finishSessionTurn(input);
 	}
 
+	recordPackageActivity(activity: PackageActivity): void {
+		const candidate = activity.runId ?? (activity.turnId ? `session:${activity.turnId}` : "");
+		const existing = candidate ? this.db.prepare("SELECT run_id FROM runs WHERE run_id = ?").get(candidate) : undefined;
+		const runId = existing ? candidate : `session-activity:${activity.sessionId}`;
+		if (!existing) {
+			this.db
+				.prepare(
+					"INSERT INTO runs (run_id, assignment_id, status, agent, target, model, runtime, started_at, ended_at, source) VALUES (?, 'session', 'success', 'package activity', '', '', 'host', ?, ?, 'session') ON CONFLICT(run_id) DO UPDATE SET ended_at=excluded.ended_at",
+				)
+				.run(runId, activity.at, activity.at);
+			this.db
+				.prepare(
+					"INSERT INTO phases (phase_id, run_id, seq, name, kind, owner, status, started_at, ended_at) VALUES (?, ?, 0, 'package activity', 'session', 'host', 'success', ?, ?) ON CONFLICT(phase_id) DO UPDATE SET ended_at=excluded.ended_at",
+				)
+				.run(runId, runId, activity.at, activity.at);
+		}
+		const phase = this.db.prepare("SELECT phase_id FROM phases WHERE run_id = ? ORDER BY seq DESC LIMIT 1").get(runId) as
+			| { phase_id: string }
+			| undefined;
+		this.insertEvent({
+			eventId: activity.eventId,
+			runId,
+			phaseId: phase?.phase_id ?? runId,
+			type: activity.type,
+			name: `${activity.owner.id}@${activity.owner.version}/${activity.kind}`,
+			payload: activity,
+			startedAt: activity.at,
+		});
+	}
+
 	private startSessionTurn(input: SessionTurnStart): void {
 		this.transaction(() => {
 			this.db
@@ -1308,6 +1339,7 @@ export class TraceReader {
 }
 
 export interface DispatchTraceMirror {
+	enqueuePackageActivity?(activity: PackageActivity): void;
 	enqueue(channel: string, payload: unknown): void;
 	/**
 	 * Mirror one fact about the operator's own turn. Queued on the same chain as
@@ -1424,6 +1456,9 @@ export function createDispatchTraceMirror(
 			// record itself rather than display detail, so none of it is eligible
 			// for the progress drop the queue limit applies to dispatch chatter.
 			schedule(() => getStore().recordSessionTurn(trace));
+		},
+		enqueuePackageActivity(activity): void {
+			schedule(() => getStore().recordPackageActivity(activity));
 		},
 		async flush(): Promise<void> {
 			await chain;

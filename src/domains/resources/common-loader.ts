@@ -6,6 +6,7 @@ import { committedPluginResourceRoots, enabledPluginResourceRoots, type PluginRe
 import type { ResourceDiagnostic, ResourceScope, ResourceSourceInfo } from "./collision.js";
 
 export interface ResourceRoot {
+	owner?: import("../../core/package-identity.js").PackageIdentity;
 	path: string;
 	/** Package root for safely resolving package-relative prompt references. */
 	rootPath?: string;
@@ -63,6 +64,7 @@ export function defaultScopedResourceRoots(
 			source: root.source,
 			precedence: COMPAT_RESOURCE_PRECEDENCE.package,
 			trusted: root.trust !== "foreign",
+			...(root.owner ? { owner: root.owner } : {}),
 		})),
 		{
 			path: path.join(clioConfigDir(), kind),
@@ -84,6 +86,7 @@ export function sourceInfoForRoot(root: ResourceRoot, filePath: string): Resourc
 		path: filePath,
 		scope: root.scope,
 		...(root.source ? { source: root.source } : {}),
+		...(root.owner ? { owner: root.owner } : {}),
 		...(root.precedence !== undefined ? { precedence: root.precedence } : {}),
 	};
 }

@@ -1564,6 +1564,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 	});
 
 	const persistence = createTurnPersistence({
+		getToolOwner: (name) => deps.toolRegistry?.get(name as import("../core/tool-names.js").ToolName)?.sourceInfo?.owner,
 		state,
 		session: deps.session,
 		readSessionEntries: deps.readSessionEntries,

@@ -5,6 +5,9 @@ import { dirname, join, resolve } from "node:path";
 import { it } from "node:test";
 import { BusChannels, type PluginsReloadedPayload } from "../../src/core/bus-events.js";
 import { createSafeEventBus } from "../../src/core/event-bus.js";
+import type { PackageActivity } from "../../src/core/package-activity.js";
+import { bindPackageActivitySink, PLUGIN_RESOURCE_USE } from "../../src/core/package-activity.js";
+import { skillActivationFromToolDetails } from "../../src/core/skill-activation.js";
 import { createAgentsBundle } from "../../src/domains/agents/extension.js";
 import { listFleetContracts, loadFleetContract } from "../../src/domains/agents/fleet-contract.js";
 import { discoverAgentRecipes } from "../../src/domains/agents/registry.js";
@@ -14,9 +17,11 @@ import {
 	listInstalledPlugins,
 	reloadPluginResources,
 } from "../../src/domains/plugins/index.js";
+import type { ResourcesContract } from "../../src/domains/resources/contract.js";
 import { resolvePackageReferences } from "../../src/domains/resources/package-references.js";
-import { loadPromptTemplates } from "../../src/domains/resources/prompts/loader.js";
+import { expandPromptTemplateInput, loadPromptTemplates } from "../../src/domains/resources/prompts/loader.js";
 import { loadSkills } from "../../src/domains/resources/skills/loader.js";
+import { expandSubmitText } from "../../src/domains/resources/submit-expansion.js";
 import { reloadPluginResourcesAndNotify } from "../../src/entry/plugin-reload.js";
 import { trustProjectPackages } from "../harness/project-trust.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
@@ -119,6 +124,51 @@ function promptPlugin(root: string, namespace: string, body: string): void {
 		}),
 	);
 }
+
+it("plugin resources retain their owner", async () => {
+	const env = await isolateClioEnv("clio-coder-plugin-owner-");
+	const activity: PackageActivity[] = [];
+	const unbind = bindPackageActivitySink((row) => {
+		activity.push(row);
+		return true;
+	});
+	try {
+		const cwd = join(env.dir, "workspace");
+		mkdirSync(cwd);
+		const source = join(env.dir, "source");
+		fixture(source);
+		const installed = installPlugin(source, { cwd, scope: "user" }).plugin;
+		ok(installed?.loadable);
+		const skill = loadSkills({ cwd, home: env.dir }).items.find((item) => item.name === "fixture-research");
+		ok(skill);
+		const owner = skill.sourceInfo.owner;
+		ok(owner);
+		strictEqual(owner.id, installed.id);
+		strictEqual(owner.version, installed.version);
+		strictEqual(owner.digest, installed.provenance?.contentDigest);
+		const activation = skillActivationFromToolDetails({ ...skill, sourceInfo: skill.sourceInfo }, "owner-turn");
+		ok(activation);
+		deepStrictEqual(activation.owner, owner);
+		const prompts = loadPromptTemplates({ cwd });
+		const resources = {
+			parsePendingSkillRequests: (text: string) => ({ text, pendingSkillRequests: [] }),
+			expandPromptTemplate: (text: string) => expandPromptTemplateInput(text, prompts),
+		} as unknown as ResourcesContract;
+		await expandSubmitText("/materio:help", resources, cwd);
+		const used = activity.find((row) => row.type === PLUGIN_RESOURCE_USE && row.kind === "prompt");
+		ok(used);
+		deepStrictEqual(used.owner, owner);
+		disablePlugin(installed.id, { cwd, scope: "user" });
+		deepStrictEqual(activation.owner, owner, "history retains the admitted owner after disable");
+		strictEqual(
+			loadSkills({ cwd, home: env.dir }).items.some((item) => item.name === skill.name),
+			false,
+		);
+	} finally {
+		unbind();
+		env.restore();
+	}
+});
 
 it("loads installed plugin prompts, bound skills, recipes and fleets with contained references and stable names", async () => {
 	const env = await isolateClioEnv("clio-coder-plugin-quote'-load-");

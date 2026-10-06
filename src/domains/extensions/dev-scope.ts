@@ -3,12 +3,15 @@ import { cpSync, existsSync, mkdtempSync, readdirSync, realpathSync, rmSync, sta
 import os from "node:os";
 import path from "node:path";
 import { registerDevRoot, releaseDevRoots } from "../../core/dev-roots.js";
+import { recordPackageActivity } from "../../core/package-activity.js";
+import { extensionIdentity } from "./activity.js";
 import { evaluateClioCompatibility } from "./compatibility.js";
 import { findExtensionManifestPath, loadManifestFromRoot } from "./discovery.js";
 import { extensionContentDigestWithCapture } from "./integrity.js";
 import type { ExtensionCapabilityEnvelope } from "./manifest-v2.js";
 import { capabilityEnvelope, envelopeDigest, envelopeGrowth } from "./runtime-schema-v2.js";
 import type { ExtensionSessionOverlay, InstalledExtensionRecord } from "./state.js";
+import { listInstalledExtensions } from "./state.js";
 import type { ExtensionDiagnostic, InstalledExtension } from "./types.js";
 
 /** Where Clio looks for packages under development, relative to the workspace. */
@@ -378,11 +381,13 @@ export class ExtensionDevScope implements ExtensionSessionOverlay {
 		this.approved.set(id, copy.envelope);
 		this.declined.delete(id);
 		this.applyConsent();
+		this.activity(id, "dev_consent");
 		return true;
 	}
 
 	decline(id: string, digest: string): void {
 		this.declined.set(id, digest);
+		this.activity(id, "dev_decline");
 	}
 
 	/** Ask again for every declined package. */
@@ -391,11 +396,24 @@ export class ExtensionDevScope implements ExtensionSessionOverlay {
 	}
 
 	mute(id: string): void {
+		if (!this.mutedIds.has(id)) this.activity(id, "mute");
 		this.mutedIds.add(id);
 	}
 
 	unmute(id: string): boolean {
-		return this.mutedIds.delete(id);
+		const changed = this.mutedIds.delete(id);
+		if (changed) this.activity(id, "unmute");
+		return changed;
+	}
+	private activity(id: string, kind: string): void {
+		try {
+			const entry =
+				[...this.copies.values()].find((copy) => copy.record.entry.id === id)?.record.entry ??
+				listInstalledExtensions(this.cwd(), { all: true }).find((entry) => entry.id === id);
+			if (entry) recordPackageActivity({ kind, owner: extensionIdentity(entry), outcome: "operator" });
+		} catch {
+			// Activity cannot change the operator's session-only consent or mute decision.
+		}
 	}
 
 	isMuted(id: string): boolean {

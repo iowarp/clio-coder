@@ -13,6 +13,8 @@ export {
 } from "./operator-commands.js";
 
 import { realpathSync } from "node:fs";
+import { recordPackageActivity } from "../../core/package-activity.js";
+import { extensionIdentity } from "./activity.js";
 import type { ExtensionObservation, ExtensionOutput, ExtensionRuntimeSnapshot, ExtensionStatus } from "./public-api.js";
 import { ExtensionRuntimeProcess, type RuntimeProcessState } from "./runtime-process.js";
 import type { ExtensionSandboxReport } from "./runtime-sandbox.js";
@@ -144,6 +146,12 @@ export class OperatorExtensionRuntime {
 		}
 	}
 	private retire(process: ExtensionRuntimeProcess, reason: string): void {
+		recordPackageActivity({
+			kind: "runtime_retire",
+			owner: extensionIdentity(process.extension),
+			outcome: reason,
+			details: { generation: process.snapshot.generation },
+		});
 		this.statuses.delete(process.extension.id);
 		const task = process.dispose(reason);
 		this.retired.add(task);
@@ -254,7 +262,25 @@ export class OperatorExtensionRuntime {
 			await Promise.all(
 				eligible.slice(0, RUNTIME_LIMITS.processes).map(async (entry) => {
 					try {
+						let reportedState = "";
 						const process = new ExtensionRuntimeProcess(entry, { ...context, generation: next }, () => {
+							if (process.state !== reportedState) {
+								reportedState = process.state;
+								if (process.state === "ready")
+									recordPackageActivity({
+										kind: "runtime_start",
+										owner: extensionIdentity(entry),
+										outcome: "ready",
+										details: { generation: next },
+									});
+								if (process.failure)
+									recordPackageActivity({
+										kind: "runtime_failure",
+										owner: extensionIdentity(entry),
+										outcome: "error",
+										details: { generation: next, reason: process.failure },
+									});
+							}
 							if (this.processes.get(entry.id)?.state !== "ready") this.statuses.delete(entry.id);
 							this.changed();
 						});
@@ -328,6 +354,21 @@ export class OperatorExtensionRuntime {
 			this.options.onReload?.(result, reason);
 		} catch {
 			/* Reporting follows settlement. */
+		}
+		for (const entry of this.inventory.filter((entry) => entry.runtime !== undefined)) {
+			if (failures.has(entry.id))
+				recordPackageActivity({
+					kind: "runtime_failure",
+					owner: extensionIdentity(entry),
+					outcome: "error",
+					details: { generation: result.generation, reason: failures.get(entry.id) },
+				});
+			recordPackageActivity({
+				kind: "runtime_reload",
+				owner: extensionIdentity(entry),
+				outcome: result.status,
+				details: { generation: result.generation, reason, failure: failures.get(entry.id) ?? null },
+			});
 		}
 		return result;
 	}
@@ -406,18 +447,32 @@ export class OperatorExtensionRuntime {
 		const command = process?.declaration.commands.find((command) => command.name === name);
 		if (!process || !command) throw new Error("extension command unavailable");
 		const context = contextIdentity(this.context());
-		const output = await process.request({ kind: "command", name, args }, command.timeoutMs, signal);
-		this.reconcile();
-		if (
-			this.closed ||
-			signal?.aborted ||
-			context !== contextIdentity(this.context()) ||
-			this.processes.get(row.extensionId) !== process ||
-			process.state !== "ready"
-		)
-			throw new Error("extension result belongs to a revoked runtime or session");
-		this.applyOutput(process, output);
-		return output;
+		const owner = extensionIdentity(process.extension);
+		const details = { invocation, plugin: process.extension.plugin ?? null, takeover: row.replaces === "prompt" };
+		recordPackageActivity({ kind: "command", owner, outcome: "started", details });
+		try {
+			const output = await process.request({ kind: "command", name, args }, command.timeoutMs, signal);
+			this.reconcile();
+			if (
+				this.closed ||
+				signal?.aborted ||
+				context !== contextIdentity(this.context()) ||
+				this.processes.get(row.extensionId) !== process ||
+				process.state !== "ready"
+			)
+				throw new Error("extension result belongs to a revoked runtime or session");
+			this.applyOutput(process, output);
+			recordPackageActivity({ kind: "command", owner, outcome: "ok", details });
+			return output;
+		} catch (error) {
+			recordPackageActivity({
+				kind: "command",
+				owner,
+				outcome: "error",
+				details: { ...details, reason: error instanceof Error ? error.message : String(error) },
+			});
+			throw error;
+		}
 	}
 	private applyOutput(process: ExtensionRuntimeProcess, output: ExtensionOutput): void {
 		if (this.processes.get(process.extension.id) !== process || process.state !== "ready") return;

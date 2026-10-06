@@ -37,6 +37,13 @@ export function buildPluginSnapshot(cwd = process.cwd(), snapshotGeneration = 0)
 			const relative = item.resources[kind];
 			if (!relative) continue;
 			resourceRoots[kind].push({
+				owner: {
+					kind: item.kind ?? "plugin",
+					id: item.id,
+					version: item.version,
+					digest: item.provenance.contentDigest,
+					scope: item.scope,
+				},
 				id: item.id,
 				scope: item.scope,
 				path: pluginResourcePath(item.rootPath, relative, item.kind === "skill" && relative === "."),

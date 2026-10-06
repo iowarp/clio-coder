@@ -139,6 +139,7 @@ export interface ExtensionCandidate {
 }
 
 export interface ExtensionHookSource {
+	version?: string;
 	provenance: ExtensionProvenance;
 	/** SHA-256 of the captured hooks.yaml bytes. */
 	declarationsDigest: string;
@@ -215,6 +216,7 @@ export interface ExtensionReloadCommitted {
 export type ExtensionReloadResult = ExtensionReloadCommitted | ExtensionReloadRejection;
 
 export interface ExtensionListOptions {
+	lifecycle?: import("../../core/library-receipts.js").LifecycleContext;
 	scope?: ExtensionScope;
 	cwd?: string;
 	all?: boolean;

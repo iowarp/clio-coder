@@ -93,6 +93,7 @@ export function resolveToolPromptHint(
 }
 
 export interface ToolSourceInfo {
+	owner?: import("../core/package-identity.js").PackageIdentity;
 	path: string;
 	scope: ToolSourceScope;
 	/** Verified installed capability identity, when this is a harness extension tool. */

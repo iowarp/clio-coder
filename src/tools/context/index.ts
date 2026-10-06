@@ -718,6 +718,7 @@ function runSkillsScope(
 			source: skill.source,
 			sourceOrigin: skillSourceOrigin(skill),
 			sourceInfo: skill.sourceInfo,
+			...(skill.sourceInfo.owner ? { owner: skill.sourceInfo.owner } : {}),
 			scope: skill.scope,
 			disableModelInvocation: skill.disableModelInvocation,
 			...(skill.allowedTools ? { allowedTools: skill.allowedTools } : {}),

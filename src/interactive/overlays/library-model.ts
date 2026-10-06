@@ -2,11 +2,12 @@
  * The Library browser's projection: one inventory read becomes the rows, the
  * status line and the detail panes the operator actually sees.
  *
- * Everything here is pure. The overlay owns the keyboard, the lifecycle port
+ * The overlay owns the keyboard, the lifecycle port
  * owns the writes, and this module owns what is true on screen, so the wording
  * of an origin label or a disabled reason is testable without a terminal.
  */
 
+import { readLifecycleReceipts } from "../../core/library-receipts.js";
 import type { PluginScope } from "../../domains/plugins/types.js";
 import {
 	describeLibraryPair,
@@ -295,6 +296,15 @@ function pairLines(
 	);
 }
 
+function lastReceiptLine(id: string, scope: string, kind: string): string[] {
+	const receipt = readLifecycleReceipts(id, scope, kind).at(-1);
+	return receipt
+		? [
+				`**Last lifecycle:** ${receipt.operation} ${receipt.at} by ${receipt.actor}; ${receipt.id}@${receipt.version ?? "unversioned"}; digest ${receipt.contentDigest ?? "unavailable"}; operation ${receipt.operationId}`,
+			]
+		: [];
+}
+
 function packageDetail(
 	record: LibraryPackageRecord,
 	view: LibraryView,
@@ -317,6 +327,7 @@ function packageDetail(
 		`**Origin:** ${libraryOriginLabel(record.origin)}`,
 	];
 	const detail = libraryOriginDetail(record.origin);
+	lines.push(...lastReceiptLine(record.name, view.scope, record.kind));
 	if (detail) lines.push(`**Source:** \`${detail}\``);
 	lines.push(`**Format:** ${libraryFormatLabel(record.format)}`);
 	if (record.version) lines.push(`**Version:** ${record.version}`);
@@ -354,6 +365,7 @@ function copyDetail(
 		`**Origin:** ${libraryOriginLabel(copy.origin)}`,
 	];
 	const detail = libraryOriginDetail(copy.origin);
+	lines.push(...lastReceiptLine(copy.name, copy.scope, copy.kind));
 	if (detail) lines.push(`**Source:** \`${detail}\``);
 	lines.push(`**Format:** ${libraryFormatLabel(copy.format)}`);
 	lines.push(`**Root:** \`${copy.root}\``);

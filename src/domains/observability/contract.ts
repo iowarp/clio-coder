@@ -182,6 +182,7 @@ export interface ObservabilityContract extends ObservabilityRunProjection {
 	 * interrupting chat.
 	 */
 	recordSessionTurn(trace: SessionTurnTrace): void;
+	recordPackageActivity?(activity: import("../../core/package-activity.js").PackageActivity): void;
 	/**
 	 * Current product-facing projection. Cheap to call: it folds in-memory state
 	 * (active runs, bounded terminal history/notices, session cost/tokens and the

@@ -8,6 +8,7 @@
 import { homedir } from "node:os";
 import path from "node:path";
 import { expandInlineFileReferencesAsync } from "../../core/file-references.js";
+import { PLUGIN_RESOURCE_USE, recordPackageActivity } from "../../core/package-activity.js";
 import type { PendingSkillRequest } from "../../core/skill-activation.js";
 import type { ImageContent } from "../../engine/types.js";
 import type { ResourcesContract } from "./contract.js";
@@ -60,6 +61,14 @@ export async function expandSubmitText(
 		pendingSkillRequests: [],
 	};
 	const promptExpansion = resources?.expandPromptTemplate(parsed.text, cwd);
+	if (promptExpansion?.expanded && promptExpansion.template.sourceInfo.owner)
+		recordPackageActivity({
+			type: PLUGIN_RESOURCE_USE,
+			kind: "prompt",
+			owner: promptExpansion.template.sourceInfo.owner,
+			outcome: "expanded",
+			details: { name: promptExpansion.template.name },
+		});
 	const promptText = promptExpansion?.expanded ? promptExpansion.text : parsed.text;
 	const fileExpansion = await expandInlineFileReferencesAsync(promptText, {
 		cwd,
