@@ -8,27 +8,15 @@ research state helpers, interview ownership, readback, and optional recording.
 </clio_execution>
 
 <clio_dispatch>
-Select the named recipe with dispatch({agent:"materio-...", task:"assignment with
-full context and exact permitted outputs", intent:{write_roots:["exact/output"]}}).
-Replace the illustrative recipe/path with those stated in this command. Use the
-registered dispatch fields shown here.
-Read the recipe's bound skill references and inline required templates, domain
-sections, answers and selected state into the worker task. Each dispatch starts
-fresh: re-dispatch with the full original context, prior candidates/outputs and
-the new selection, corrections, revisions or resume answer. Use monitor if the
-returned run is still active. Do not infer a resumed transcript from a run ID.
-Honor admission refusals instead of broadening write scope.
-
-Agent returns are mutation-report JSON. Route on the beginning of summary using
-the status branches below. For checkpoints, distinguish
-`needs_input: checkpoint:decision`, `needs_input: checkpoint:human-action`, and `needs_input: checkpoint:human-verify`;
-ask the exact question(s), collect the answer and re-dispatch. No new top-level
-status fields are allowed. A conforming JSON result is not proof of completion.
-After EVERY dispatch that wrote, use ls and read on every reported output and on
-the command's required files, including loop_back and partial checkpoint returns.
-Verify nonempty content and the promised changes before presenting success or
-continuing; re-dispatch with any missing/incorrect file named. Treat actual failed
-validation or execution as failure even when summary claims completion.
+Dispatch the named recipe with full current state, bound skills/references, every
+answer and exact approved output roots. Each re-dispatch needs full original
+context plus revisions; use monitor for active runs and honor admission refusals.
+Workers return mutation-report JSON. Route summary prefixes, distinguishing
+needs_input checkpoints decision, human-action and human-verify. Collect the exact
+researcher answer before re-dispatching; no worker can approve its own output.
+After every writing return (including loop_back and partial checkpoints), read all
+reported and required files and verify meaningful promised changes. Name missing
+files in a fresh bounded dispatch. A failed receipt overrides claimed completion.
 </clio_dispatch>
 
 <execution_context>
@@ -149,7 +137,9 @@ Use dispatch with `agent: "materio-literature-reviewer"` and a task containing t
   - header: "Prompt Needs Revision"
   - question: "The literature shows: [finding].\n\nSuggested revisions:\n1. [narrowed]\n2. [adjacent gap]\n3. [replication/extension]\n\nHow do you want to proceed?"
   - options: "Narrow to suggestion 1" | "Narrow to suggestion 2" | "Narrow to suggestion 3" | "Proceed with the current prompt anyway"
-- If a suggestion is chosen: update the Selected Prompt and Key Decisions in RESEARCH.md and STATE.md, note the revision reason, then run the keyword gate above. If the change is larger than a rewording, recommend re-running `/materio:identify-research` with the new framing.
+- If a suggestion is chosen: update the Selected Prompt and Key Decisions in RESEARCH.md, then call
+  `gateway({op:"call",capability:"extension_materio__record_decision",args:{decision:<chosen prompt>,rationale:<revision reason>,scope:"research"}})`
+  to append the decision to STATE.md; then run the keyword gate above. If the change is larger than a rewording, recommend re-running `/materio:identify-research` with the new framing.
 
 **`needs_input: checkpoint:decision`, `needs_input: checkpoint:human-action`, or `needs_input: checkpoint:human-verify`:**
 - Present the question to the user, collect the answer via ask_user, re-dispatch the agent.
@@ -199,3 +189,5 @@ Citations: [N verified, N marked unverified]
 - [ ] Loop-back handled if the prompt needs revision
 - [ ] LITERATURE.md verified on disk; commit only if commit_research is true
 </success_criteria>
+
+If runtime is unavailable, append the researcher-approved decision and rationale to STATE.md manually and read it back.

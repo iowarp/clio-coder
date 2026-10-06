@@ -12,6 +12,54 @@ runtime:
     - { name: help, description: Show Materio commands and bench controls., replaces: prompt }
     - { name: checkpoint, description: "Save, list or confirm restoring research snapshots.", replaces: prompt }
     - { name: cost, description: Show reported tokens and declared cost by research step. }
+  tools:
+    - name: complete_task
+      description: Complete an active task only after summary readback and researcher acceptance of current guardrails.
+      actionClass: execute
+      inputSchema:
+        type: object
+        additionalProperties: false
+        required: [task]
+        properties:
+          task: { type: string, pattern: "^[0-9]+$" }
+          summary: { type: string, minLength: 1, maxLength: 32000 }
+    - name: set_task_status
+      description: Change a task status with dependency and transition checks, updating WORKFLOW.md and STATE.md.
+      actionClass: execute
+      inputSchema:
+        type: object
+        additionalProperties: false
+        required: [task, status]
+        properties:
+          task: { type: string, pattern: "^[0-9]+$" }
+          status: { type: string, enum: [pending, in-progress, checkpoint, paused, blocked, complete] }
+    - name: record_decision
+      description: Append a decision and rationale to STATE.md Decisions Made while preserving existing decisions.
+      actionClass: execute
+      inputSchema:
+        type: object
+        additionalProperties: false
+        required: [decision, rationale]
+        properties:
+          decision: { type: string, minLength: 1, maxLength: 32000 }
+          rationale: { type: string, minLength: 1, maxLength: 32000 }
+          scope: { type: string, minLength: 1, maxLength: 32000 }
+    - name: interview
+      description: Own researcher form steps and publish confirmed research, lab, workflow or data files; findings reviews preserve guardrails.
+      actionClass: execute
+      inputSchema:
+        type: object
+        additionalProperties: false
+        required: [form]
+        properties:
+          form: { type: string, enum: [identify-research, define-virtual-lab, define-research-tasks, upload-data, findings] }
+          stage: { type: string, enum: [collect, select, assumptions, confirm] }
+          task: { type: string, pattern: "^[0-9]+$" }
+          context: { type: string, minLength: 1, maxLength: 32000 }
+          draft: { type: string, minLength: 1, maxLength: 32000 }
+          candidates: { type: array, minItems: 3, maxItems: 3, items: { type: string, minLength: 1, maxLength: 8000 } }
+          templates: { type: array, minItems: 1, maxItems: 8, items: { type: string, minLength: 1, maxLength: 8000 } }
+          files: { type: array, minItems: 1, maxItems: 20, uniqueItems: true, items: { type: string, minLength: 1, maxLength: 4096 } }
   events: [session_open, turn_start, turn_end, tool_end, dispatch_started, dispatch_completed, dispatch_failed, fs_changed, workspace_enter]
   watch: [".research/**"]
   hooks:
@@ -31,7 +79,7 @@ runtime:
         - { key: h, action: help, label: Help with the lab bench }
   access: [prompt, tool-args]
   permissions:
-    fs: { read: [".research"], write: [".research"] }
+    fs: { read: ["."], write: [".research"] }
     exec: true
     net: false
   state: { session: true, store: true }
