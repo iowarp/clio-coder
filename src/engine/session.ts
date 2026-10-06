@@ -731,7 +731,7 @@ function createWriter(
 	headerOptions: { parentSession?: string; parentTurnId?: string } = {},
 ): ClioSessionWriter {
 	const paths = sessionPaths(meta);
-	const tree: SessionTreeNode[] = [...initialTree];
+	const tree: SessionTreeNode[] = initialTree.map((node) => ({ ...node }));
 	const fileEntries = ensureSessionHeader(meta, initialFileEntries, headerOptions);
 	let closed = false;
 	let appendFd: number | null = null;
@@ -739,6 +739,43 @@ function createWriter(
 	// Descriptor cleanup must not discard accepted bytes or rollback changes
 	// still owed to the next debounce, checkpoint, flush, or close.
 	let pendingFsync = false;
+	let lastFsyncStat: BigIntStats | null = null;
+	let treeDirty = true;
+	let treeStat: BigIntStats | null = null;
+	// A resumed tree can lag the ledger; only the canonical recovered bytes
+	// justify treating it as already persisted (CLIO-UPGRADES-PERF).
+	try {
+		const fd = openSync(paths.tree, "r");
+		try {
+			const observed = fstatSync(fd, { bigint: true });
+			if (readFileSync(fd, "utf8") === JSON.stringify(tree, null, 2)) {
+				treeDirty = false;
+				treeStat = observed;
+			}
+		} finally {
+			closeSync(fd);
+		}
+	} catch {
+		// Missing or unreadable tree state remains pending; persistence retries it.
+	}
+
+	function sameFileSnapshot(a: BigIntStats | null, b: BigIntStats): boolean {
+		return a !== null && a.dev === b.dev && a.ino === b.ino &&
+			a.size === b.size && a.mtimeNs === b.mtimeNs && a.ctimeNs === b.ctimeNs;
+	}
+
+	function persistPendingTree(): void {
+		if (!treeDirty && treeStat !== null) {
+			try {
+				if (sameFileSnapshot(treeStat, statSync(paths.tree, { bigint: true }))) return;
+			} catch {
+				// Restore the canonical tree if its persisted artifact disappeared.
+			}
+		}
+		atomicWrite(paths.tree, JSON.stringify(tree, null, 2));
+		treeStat = statSync(paths.tree, { bigint: true });
+		treeDirty = false;
+	}
 
 	// One-time normalization for resumes of pre-header files: rewrite once so
 	// fd-appended lines land after a header. Disk and memory match from here on.
@@ -780,7 +817,12 @@ function createWriter(
 
 	function flushPendingAppends(): void {
 		if (appendFd !== null) {
+			const observed = fstatSync(appendFd, { bigint: true });
+			// The descriptor may also have received a peer's append. Metadata
+			// detects that obligation even when our own pending flag is clear.
+			if (!pendingFsync && sameFileSnapshot(lastFsyncStat, observed)) return;
 			fsyncSync(appendFd);
+			lastFsyncStat = observed;
 			pendingFsync = false;
 			return;
 		}
@@ -849,6 +891,7 @@ function createWriter(
 			const record = recordFromTurn(turn);
 			appendLine(record);
 			fileEntries.push(record);
+			treeDirty = true;
 			tree.push({
 				id: turn.id,
 				parentId: turn.parentId,
@@ -860,7 +903,10 @@ function createWriter(
 			if (closed) throw new Error("session writer closed");
 			const observation = appendLine(entry);
 			fileEntries.push(entry);
-			if (opts?.treeNode) tree.push(opts.treeNode);
+			if (opts?.treeNode) {
+				tree.push({ ...opts.treeNode });
+				treeDirty = true;
+			}
 			opts?.onAppend?.(observation);
 		},
 		replaceEntries(entries: ReadonlyArray<unknown>): void {
@@ -876,6 +922,7 @@ function createWriter(
 			fileEntries.push(...nextEntries);
 			const recoveredTree = treeFromFileEntries(nextEntries);
 			if (recoveredTree.length > 0) {
+				treeDirty = true;
 				tree.length = 0;
 				tree.push(...recoveredTree);
 			}
@@ -888,7 +935,7 @@ function createWriter(
 			// state root would be undone here. Fsyncing the held fd first is safe
 			// either way: it writes into an unlinked inode and creates nothing.
 			if (stateRootRemoved()) return;
-			atomicWrite(paths.tree, JSON.stringify(tree, null, 2));
+			persistPendingTree();
 		},
 		flushAppends(): void {
 			flushPendingAppends();
@@ -900,7 +947,7 @@ function createWriter(
 			// root must not get tree.json and meta.json written back into it.
 			closed = true;
 			if (stateRootRemoved()) return;
-			atomicWrite(paths.tree, JSON.stringify(tree, null, 2));
+			persistPendingTree();
 			const ended: ClioSessionMeta = { ...meta, endedAt: new Date().toISOString() };
 			atomicWrite(paths.meta, JSON.stringify(ended, null, 2));
 			meta.endedAt = ended.endedAt;
