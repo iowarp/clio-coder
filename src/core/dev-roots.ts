@@ -28,10 +28,6 @@ interface DevRootFile {
 /** Identifies this process's session for the life of the process, so a restart is a new owner. */
 const OWNER = randomUUID();
 
-export function devRootOwner(): string {
-	return OWNER;
-}
-
 function registryPath(): string {
 	return path.join(clioStateDir(), "extension-dev-roots.json");
 }
