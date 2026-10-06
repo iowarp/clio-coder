@@ -29,7 +29,8 @@ export interface DomainManifest {
  */
 export interface DomainExtension {
 	start(): Promise<void> | void;
-	stop?(signal: AbortSignal): Promise<void> | void;
+	/** The loader passes its stop signal; a direct caller with nothing to cancel may omit it. */
+	stop?(signal?: AbortSignal): Promise<void> | void;
 }
 
 /**
