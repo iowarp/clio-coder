@@ -15,7 +15,11 @@ import {
 	readInstallerRecord,
 } from "../domains/lifecycle/install-method.js";
 import { listMigrations, readMigrationManifestResult, runPending } from "../domains/lifecycle/migrations/index.js";
-import { compareReleaseVersions, fetchReleaseVersion } from "../domains/lifecycle/release-version.js";
+import {
+	compareReleaseVersions,
+	fetchReleaseVersion,
+	parseReleaseVersion,
+} from "../domains/lifecycle/release-version.js";
 import { readStateInfo } from "../domains/lifecycle/state.js";
 import { getVersionInfo } from "../domains/lifecycle/version.js";
 import { createLifecyclePresenter, shortenPath } from "./lifecycle-presenter.js";
@@ -59,6 +63,7 @@ const RELAUNCH_PREVIEW =
 interface UpgradeOptions {
 	dryRun: boolean;
 	channel: Channel;
+	channelExplicit: boolean;
 	skipMigrations: boolean;
 	help: boolean;
 	postInstall: boolean;
@@ -77,6 +82,7 @@ interface UpgradeOptions {
 function parseUpgradeArgs(argv: ReadonlyArray<string>): UpgradeOptions {
 	let dryRun = false;
 	let channel: Channel = "latest";
+	let channelExplicit = false;
 	let skipMigrations = false;
 	let help = false;
 	let postInstall = false;
@@ -103,9 +109,12 @@ function parseUpgradeArgs(argv: ReadonlyArray<string>): UpgradeOptions {
 		else if (arg === "--restart") restart = true;
 		else if (arg === "--refresh-runtime") refreshRuntime = true;
 		else if (arg === "--rollback") rollback = true;
-		else if (arg.startsWith("--channel=")) channel = toChannel(arg.slice("--channel=".length));
-		else if (arg === "--channel") {
+		else if (arg.startsWith("--channel=")) {
+			channel = toChannel(arg.slice("--channel=".length));
+			channelExplicit = true;
+		} else if (arg === "--channel") {
 			channel = toChannel(argv[i + 1]);
+			channelExplicit = true;
 			i += 1;
 		} else throw new Error(`unknown upgrade argument: ${arg}`);
 	}
@@ -113,7 +122,18 @@ function parseUpgradeArgs(argv: ReadonlyArray<string>): UpgradeOptions {
 		throw new Error("--restart cannot be combined with --json or --post-install");
 	if (rollback && (postInstall || refreshRuntime || restart))
 		throw new Error("--rollback cannot combine with --post-install, --refresh-runtime or --restart");
-	return { dryRun, channel, skipMigrations, help, postInstall, json, restart, refreshRuntime, rollback };
+	return {
+		dryRun,
+		channel,
+		channelExplicit,
+		skipMigrations,
+		help,
+		postInstall,
+		json,
+		restart,
+		refreshRuntime,
+		rollback,
+	};
 }
 
 /**
@@ -190,15 +210,17 @@ function nodeFor(installation: Installation): string {
 }
 
 async function runNpmInstall(channel: Channel, installation: Installation): Promise<void> {
+	const version = channel === "latest" ? "latest" : await fetchReleaseVersion(channel);
+	if (version === null) throw new Error(`Cannot resolve the ${channel} channel; retry when the registry is reachable`);
 	const npmCli = join(
 		dirname(process.execPath),
 		process.platform === "win32" ? "node_modules/npm/bin/npm-cli.js" : "../lib/node_modules/npm/bin/npm-cli.js",
 	);
 	if (process.platform === "win32" && existsSync(npmCli))
-		await runChild(process.execPath, [npmCli, ...npmInstallArgs(installation, channel)], "npm install");
+		await runChild(process.execPath, [npmCli, ...npmInstallArgs(installation, version)], "npm install");
 	else if (process.platform === "win32")
 		throw new Error("Cannot locate npm-cli.js beside Node; use npm install -g from your terminal");
-	else await runChild("npm", npmInstallArgs(installation, channel), "npm install");
+	else await runChild("npm", npmInstallArgs(installation, version), "npm install");
 }
 
 /**
@@ -238,7 +260,13 @@ async function runInstallerUpgrade(opts: UpgradeOptions, installation: Installat
 				"--no-post-install",
 			];
 	const env: NodeJS.ProcessEnv = { ...process.env };
-	if (record.versionPin) args.push(windows ? "-Version" : "--version", record.versionPin);
+	if (
+		opts.channelExplicit &&
+		opts.channel === "latest" &&
+		(parseReleaseVersion(getVersionInfo().clio)?.pre.length ?? 0) > 0
+	)
+		env.CLIO_CODER_CHANNEL_NOTICE = "1";
+	if (record.versionPin && !opts.channelExplicit) args.push(windows ? "-Version" : "--version", record.versionPin);
 	if (record.autoUpdate === false) args.push(windows ? "-NoAutoUpdate" : "--no-auto-update");
 	if (opts.refreshRuntime) {
 		delete env.CLIO_CODER_NODE_VERSION;
@@ -460,6 +488,9 @@ export async function runUpgradeCommand(
 				: method === "installer"
 					? "installer"
 					: method;
+	if (!opts.channelExplicit && installation.installer && CHANNELS.includes(installation.installer.channel as Channel))
+		opts.channel = installation.installer.channel as Channel;
+
 	const updateCommand = installationCommand(installation, "upgrade", opts.channel);
 	const sourceAdvice = () => presenter.commandAdvice(SOURCE_UPGRADE_LEAD, updateCommand);
 	const backgroundOwner = join(stateDir, "gui/background/owner.json");
@@ -512,7 +543,7 @@ export async function runUpgradeCommand(
 
 	// An exact --version or --package install is pinned: upgrade holds it at the pin
 	// and says how to release it, instead of reporting the pin as a registry answer.
-	const pin = opts.postInstall ? null : installation.installer?.versionPin || null;
+	const pin = opts.postInstall || opts.channelExplicit ? null : installation.installer?.versionPin || null;
 	const lookup: RegistryLookup = opts.postInstall
 		? { asked: false, reason: "post-install checks" }
 		: pin
@@ -574,9 +605,35 @@ export async function runUpgradeCommand(
 	// the operator asked for. A lookup that was never owed for a checkout or
 	// post-install checks leaves the recorded state version to decide.
 	const comparison = availableVersion === null ? null : compareReleaseVersions(availableVersion, before);
-	const versionIsCurrent = (lookup.asked ? comparison !== null && comparison <= 0 : true) && recorded === before;
+	const leavingPrerelease =
+		opts.channelExplicit &&
+		opts.channel === "latest" &&
+		pin === null &&
+		!opts.postInstall &&
+		(parseReleaseVersion(before)?.pre.length ?? 0) > 0 &&
+		availableVersion !== null &&
+		parseReleaseVersion(availableVersion)?.pre.length === 0 &&
+		comparison !== 0;
+	const channelSelectionNeeded =
+		opts.channelExplicit &&
+		method === "installer" &&
+		comparison === 0 &&
+		(installation.installer?.channel !== opts.channel || Boolean(installation.installer?.versionPin));
+	const versionIsCurrent =
+		!leavingPrerelease &&
+		!channelSelectionNeeded &&
+		(lookup.asked ? comparison !== null && comparison <= 0 : true) &&
+		recorded === before;
 	const hasPendingMigrations = pendingMigrationIds.length > 0;
-	if (comparison !== null && comparison < 0)
+	if (leavingPrerelease) {
+		const dated = manifestRead.manifest.applied.filter((id) => /^\d{4}-\d{2}-\d{2}-/.test(id));
+		presenter.note(
+			`Leaving the pre-release channel: installing stable ${availableVersion} from ${before}.` +
+				(dated.length > 0
+					? ` This home has dated lifecycle migrations (${dated.join(", ")}); switching binaries does not undo them. Use clio-coder upgrade --rollback to return to the previous binary.`
+					: ""),
+		);
+	} else if (comparison !== null && comparison < 0)
 		presenter.note(`Installed ${before} is newer than ${opts.channel} (${availableVersion}); keeping it.`);
 
 	if (!opts.postInstall && versionIsCurrent && !hasPendingMigrations) {
@@ -589,7 +646,8 @@ export async function runUpgradeCommand(
 
 	if (opts.dryRun) {
 		if (method === "source" && !opts.postInstall) sourceAdvice();
-		else if (!opts.postInstall && (comparison === null || comparison > 0)) presenter.note(`Would run: ${updateCommand}`);
+		else if (!opts.postInstall && (comparison === null || comparison > 0 || leavingPrerelease || channelSelectionNeeded))
+			presenter.note(`Would run: ${updateCommand}`);
 		if (opts.skipMigrations) presenter.note("Would skip migrations (--skip-migrations).");
 		else if (pendingMigrationIds.length === 0) presenter.note("No pending migrations.");
 		else {
@@ -611,7 +669,7 @@ export async function runUpgradeCommand(
 		presenter.note("Running post-install checks with the active clio-coder binary.");
 	} else if (method === "source") {
 		presenter.note("Source checkout: no npm install to run.");
-	} else if (comparison === null || comparison > 0) {
+	} else if (comparison === null || comparison > 0 || leavingPrerelease || channelSelectionNeeded) {
 		try {
 			presenter.note(`Installing with: ${updateCommand}`);
 			if (method === "installer") activeInstallation = await deps.runInstallerUpgrade(opts, installation);

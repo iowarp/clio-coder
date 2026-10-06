@@ -6,7 +6,7 @@ import { withStateFileLock } from "../../core/state-file-lock.js";
 import type { Installation } from "./install-method.js";
 import { installerPackageRoot, readInstallerRecord } from "./install-method.js";
 import { runNativeBackgroundUpdate } from "./native-update.js";
-import { compareReleaseVersions, fetchReleaseVersion, parseReleaseVersion } from "./release-version.js";
+import { compareReleaseVersions, fetchTagVersion, parseReleaseVersion, releaseChannelTags } from "./release-version.js";
 
 export const UPDATE_CHECK_INTERVAL_MS = 24 * 60 * 60_000;
 export const UPDATE_NOTICE_INTERVAL_MS = 7 * UPDATE_CHECK_INTERVAL_MS;
@@ -110,9 +110,11 @@ export function createUpdateCheck(options: UpdateCheckOptions) {
 		if (native?.versionPin) return null;
 		const tags: ReleaseTag[] =
 			native && ["latest", "beta", "dev"].includes(native.channel)
-				? [native.channel as ReleaseTag]
+				? (releaseChannelTags(native.channel) as ReleaseTag[])
 				: running.pre.length > 0
-					? ["latest", "beta"]
+					? runningVersion.includes("-snapshot.")
+						? ["latest", "beta", "dev"]
+						: ["latest", "beta"]
 					: ["latest"];
 		const track = tags.join("+");
 		// A cache written for another track is stale: an rc that became stable must
@@ -126,7 +128,7 @@ export function createUpdateCheck(options: UpdateCheckOptions) {
 				async () => {
 					const current = await readCache();
 					if (fresh(current)) return current;
-					const fetchVersion = options.fetchVersion ?? fetchReleaseVersion;
+					const fetchVersion = options.fetchVersion ?? fetchTagVersion;
 					const found = await Promise.all(tags.map(async (tag) => ({ tag, version: await fetchVersion(tag, signal) })));
 					signal.throwIfAborted();
 					// Newest by SemVer precedence; `latest` is listed first and wins a tie.
@@ -153,15 +155,16 @@ export function createUpdateCheck(options: UpdateCheckOptions) {
 			);
 		}
 		if (typeof cache.available !== "string" || compareReleaseVersions(cache.available, runningVersion) !== 1) return null;
-		// `/upgrade` and a bare `clio-coder upgrade` install `latest`; a newer beta
-		// needs the channel named, or the command would not install what was announced.
-		const beta = cache.availableTag === "beta";
+		// Name the selected prerelease channel when offering its newest version,
+		// including a stable fallback, so the next upgrade keeps following it.
+		const channel = native?.channel ?? (runningVersion.includes("-snapshot.") ? "dev" : cache.availableTag);
+		const channelFlag = channel && channel !== "latest" ? ` --channel=${channel}` : "";
 		const action =
 			installation.kind === "npm" || installation.kind === "installer"
-				? beta
-					? "clio-coder upgrade --channel=beta to install"
+				? channelFlag
+					? `clio-coder upgrade${channelFlag} to install`
 					: "/upgrade to review"
-				: `clio-coder upgrade${beta ? " --channel=beta" : ""} for update steps`;
+				: `clio-coder upgrade${channelFlag} for update steps`;
 		return {
 			kind: "available",
 			key: `available:${runningVersion}:${cache.available}`,

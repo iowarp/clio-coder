@@ -80,6 +80,8 @@ function Install-ClioCoder {
 		$spec = $v
 	}
 
+	if ($spec -in @("latest", "beta", "dev")) { $Options.Channel = $spec }
+
 	$arch = if ($env:PROCESSOR_ARCHITEW6432) { $env:PROCESSOR_ARCHITEW6432 } else { $env:PROCESSOR_ARCHITECTURE }
 	$build = switch ($arch) {
 		"AMD64" { "win-x64" }
@@ -132,10 +134,6 @@ function Install-ClioCoder {
 		& $old.node $helper rollback $installRoot
 		if ($LASTEXITCODE -ne 0) { Fail "rollback failed; active install preserved" }
 		return
-	}
-	if (-not $Options.Version -and -not $Options.Package -and (Test-Path -LiteralPath $manifestFile)) {
-		$policy = Get-Content -LiteralPath $manifestFile -Raw | ConvertFrom-Json
-		if ($policy.versionPin) { $Options.Version = [string]$policy.versionPin; $installSpec = "$PackageName@$($policy.versionPin)" }
 	}
 	$owner = Join-Path $installRoot ".installer-owner"
 	if (-not (Test-Path -LiteralPath (Join-Path $installRoot "install.json")) -and -not (Test-Path -LiteralPath $owner)) {
@@ -228,6 +226,19 @@ function Install-ClioCoder {
 		$manifestPath = Join-Path $installRoot "install.json"
 		$old = if (Test-Path -LiteralPath $manifestPath) { Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json } else { $null }
 		$previous = if ($old -and $old.current -and (Test-Path -LiteralPath $old.current)) { $old.current } else { "" }
+		if (-not $Options.Package -and $spec -in @("latest", "beta", "dev")) {
+			$tagsFile = Join-Path $work "dist-tags.json"
+			$tags = & $node $npmCli view $PackageName dist-tags --json
+			if ($LASTEXITCODE -ne 0) { Fail "cannot resolve the $spec channel from the registry" }
+			[IO.File]::WriteAllText($tagsFile, ($tags -join "`n"))
+			$resolve = 'const fs=require("node:fs"),semver=require(process.argv[1]+"/node_modules/semver");const tags=JSON.parse(fs.readFileSync(process.argv[2],"utf8")),c=process.argv[3];const tracks=c==="dev"?["dev","beta","latest"]:c==="beta"?["beta","latest"]:["latest"];const versions=tracks.map(t=>tags[t]).filter(v=>semver.valid(v));if(!versions.length)process.exit(1);process.stdout.write(versions.sort(semver.rcompare)[0]);'
+			$resolverFile = Join-Path $work "resolve-channel.cjs"
+			[IO.File]::WriteAllText($resolverFile, $resolve)
+			$resolved = & $node $resolverFile (Join-Path $runtimeDir "node_modules\npm") $tagsFile $spec
+			if ($LASTEXITCODE -ne 0) { Fail "no published version on $spec or its stable fallback" }
+			$installSpec = "$PackageName@$resolved"
+			Say "resolved $spec to $resolved"
+		}
 		$staging = Join-Path $installRoot "versions\.staging-$PID"
 		New-Item -ItemType Directory -Force -Path (Join-Path $staging "lib") | Out-Null
 		$npmCli = Join-Path $runtimeDir "node_modules\npm\bin\npm-cli.js"

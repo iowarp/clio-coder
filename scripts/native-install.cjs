@@ -355,6 +355,39 @@ async function main() {
 	if (process.platform === "win32" && /[%\r\n"]/u.test([node, old?.launcherNode, old?.node, root, launcher].join("")))
 		throw new Error("Windows installer paths cannot contain percent, newline or quote characters");
 	pruneVersions(root);
+	const fromVersion = old ? packageVersion(old.current) : "";
+	const toVersion = packageVersion(current);
+	if (
+		channel === "latest" &&
+		/^\d+\.\d+\.\d+-/.test(fromVersion) &&
+		/^\d+\.\d+\.\d+$/.test(toVersion) &&
+		process.env.CLIO_CODER_CHANNEL_NOTICE !== "1"
+	) {
+		const state =
+			process.env.CLIO_CODER_STATE_DIR ||
+			(process.env.CLIO_CODER_HOME
+				? path.join(process.env.CLIO_CODER_HOME, "state")
+				: process.platform === "win32"
+					? path.join(process.env.LOCALAPPDATA || path.join(os.homedir(), "AppData/Local"), "clio-coder/state")
+					: process.platform === "darwin"
+						? path.join(os.homedir(), "Library/Application Support/clio-coder/state")
+						: path.join(process.env.XDG_STATE_HOME || path.join(os.homedir(), ".local/state"), "clio-coder"));
+		let dated = [];
+		try {
+			dated = JSON.parse(fs.readFileSync(path.join(state, "migrations.json"), "utf8")).applied.filter((id) =>
+				/^\d{4}-\d{2}-\d{2}-/.test(id),
+			);
+		} catch {
+			/* An absent or unreadable manifest is checked by post-install. */
+		}
+		process.stdout.write(
+			`[install] Leaving the pre-release channel: installing stable ${toVersion} from ${fromVersion}.` +
+				(dated.length
+					? ` This home has dated lifecycle migrations (${dated.join(", ")}); switching binaries does not undo them. Use clio-coder upgrade --rollback to return to the previous binary.`
+					: "") +
+				"\n",
+		);
+	}
 	check(node, current, postInstall === "1");
 	// Activation has one commit point: launchers read this manifest on each invocation.
 	const helper = fs.readFileSync(__filename, "utf8");

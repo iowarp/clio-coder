@@ -39,7 +39,7 @@ export function compareReleaseVersions(left: string, right: string): number | nu
 	return 0;
 }
 
-export async function fetchReleaseVersion(channel: string, signal?: AbortSignal): Promise<string | null> {
+export async function fetchTagVersion(channel: string, signal?: AbortSignal): Promise<string | null> {
 	if (!["latest", "beta", "dev"].includes(channel)) return null;
 	try {
 		const timeout = AbortSignal.timeout(2500);
@@ -53,4 +53,23 @@ export async function fetchReleaseVersion(channel: string, signal?: AbortSignal)
 	} catch {
 		return null;
 	}
+}
+
+/** A channel also follows more stable channels, even before npm's tags are forwarded. */
+export function releaseChannelTags(channel: string): string[] {
+	return channel === "latest"
+		? ["latest"]
+		: channel === "beta"
+			? ["latest", "beta"]
+			: channel === "dev"
+				? ["latest", "beta", "dev"]
+				: [];
+}
+
+export async function fetchReleaseVersion(channel: string, signal?: AbortSignal): Promise<string | null> {
+	const versions = await Promise.all(releaseChannelTags(channel).map((tag) => fetchTagVersion(tag, signal)));
+	let newest: string | null = null;
+	for (const version of versions)
+		if (version !== null && (newest === null || compareReleaseVersions(version, newest) === 1)) newest = version;
+	return newest;
 }

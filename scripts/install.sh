@@ -859,10 +859,6 @@ main() {
 	check_writable_dir "bin dir" "$bin_dir" "--bin-dir or CLIO_CODER_BIN_DIR"
 	check_existing_launcher
 	acquire_install_lock
-	if [ -z "$version_spec" ] && [ -z "$package_file" ]; then
-		recorded_pin="$(manifest_field versionPin)"
-		if [ -n "$recorded_pin" ]; then version_spec="$(validate_version "$recorded_pin")"; spec="$PACKAGE@$version_spec"; fi
-	fi
 	if [ ! -f "$install_root/install.json" ] && [ ! -f "$install_root/.installer-owner" ]; then
 		[ ! -e "$install_root/runtime" ] && [ ! -e "$install_root/versions" ] || fail "refusing to claim existing runtime/versions directories without installer ownership"
 	fi
@@ -895,6 +891,24 @@ main() {
 
 	npm_cli="$runtime_dir/lib/node_modules/npm/bin/npm-cli.js"
 	[ -f "$npm_cli" ] || fail "the Node runtime at $runtime_dir has no bundled npm"
+	# Use npm's bundled SemVer implementation after provisioning Node, before
+	# downloading a package. Missing prerelease tags still fall back to latest.
+	if [ -z "$package_file" ]; then
+		case "$version" in
+			latest | beta | dev)
+				PATH="$runtime_dir/bin:$PATH" "$node_bin" "$npm_cli" view "$PACKAGE" dist-tags --json >"$work/dist-tags.json" </dev/null || fail "cannot resolve the $channel channel from the registry"
+				resolved="$("$node_bin" -e '
+const fs=require("node:fs"), semver=require(process.argv[1]+"/node_modules/semver");
+const tags=JSON.parse(fs.readFileSync(process.argv[2],"utf8")), channel=process.argv[3];
+const tracks=channel==="dev"?["dev","beta","latest"]:channel==="beta"?["beta","latest"]:["latest"];
+const versions=tracks.map(tag=>tags[tag]).filter(v=>semver.valid(v));
+if(!versions.length)process.exit(1);process.stdout.write(versions.sort(semver.rcompare)[0]);
+' "$runtime_dir/lib/node_modules/npm" "$work/dist-tags.json" "$version")" || fail "no published version on $channel or its stable fallback"
+				spec="$PACKAGE@$resolved"
+				log "resolved $channel to $resolved"
+				;;
+		esac
+	fi
 	# All versions remain available to sessions that still lazily import their old code.
 	previous="$(manifest_field current)"
 	{ [ -n "$previous" ] && [ -d "$previous" ]; } || previous=""

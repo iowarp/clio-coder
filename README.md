@@ -86,6 +86,38 @@ The 0.6.1 installer was checked by hand on one x64 host with PowerShell 5.1
 (install, repair, rollback and uninstall); 0.6.0's installer fails there, so
 install 0.6.1 or newer. Interactive terminal use there remains best effort.
 
+### Try a pre-release
+
+`beta` follows release candidates (`X.Y.Z-rc.N`); `dev` follows version-branch
+snapshots (`X.Y.Z-snapshot.<UTC yyyymmddHHMM>.g<sha7>`). Both also follow newer
+stable releases, so a channel keeps moving when its pre-release becomes stable.
+
+```bash
+curl -fsSL https://coder.iowarp.ai/install.sh | sh -s -- --channel beta
+# Use --channel dev for snapshots.
+npm install -g @iowarp/clio-coder@beta
+npm install -g @iowarp/clio-coder@dev
+bun add -g @iowarp/clio-coder@beta
+bun add -g @iowarp/clio-coder@dev
+clio-coder upgrade --channel beta
+clio-coder upgrade --channel dev
+```
+
+In PowerShell:
+
+```powershell
+& ([scriptblock]::Create((irm https://coder.iowarp.ai/install.ps1))) -Channel beta
+# Use -Channel dev for snapshots.
+```
+
+Return to stable with `clio-coder upgrade --channel latest`, or rerun the
+installer with `--channel latest` (`-Channel latest` in PowerShell). This installs
+stable even when its version is lower than the pre-release. The notice names any
+recorded dated lifecycle migrations; changing the binary does not undo them.
+For a managed install, `clio-coder upgrade --rollback` restores the previous
+binary and disables background updates. Global npm or Bun users can reinstall
+`@iowarp/clio-coder@latest` with their package manager.
+
 **First run.**
 
 1. Run `clio-coder` in your project. On a new machine it starts setup: choose

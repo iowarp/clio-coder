@@ -20,7 +20,8 @@ interface BuildProvenance {
 
 /**
  * A `-dev` prerelease is a development tree that has no published artifact.
- * Other prereleases (`-rc.1`) are published under the `beta` dist-tag and are real releases.
+ * Release candidates (`-rc.1`) use `beta`; snapshots (`-snapshot.<UTC minute>.g<sha7>`)
+ * use `dev`. Both are published artifacts and display their exact package version.
  */
 export function isDevVersion(version: string): boolean {
 	return /^\d+\.\d+\.\d+-dev(?:[.+]|$)/.test(version);
