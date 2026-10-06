@@ -13,7 +13,7 @@ export function bindSessionPackageActivity(session: SessionContract, observabili
 			parentTurnId: activity.turnId ?? null,
 			timestamp: activity.at,
 			data: attributed,
-			display: true,
+			display: false,
 		});
 		observability.recordPackageActivity?.(attributed);
 		return true;
