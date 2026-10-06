@@ -415,7 +415,7 @@ describe("execution scheduler lifecycle", () => {
 	});
 
 	it("hands a build-test repair both the failed check and the previous attempt's report", async () => {
-		const path = new URL("../../src/domains/agents/fleets/build-test.md", import.meta.url);
+		const path = new URL("../../src/domains/agents/playbooks/build-test.md", import.meta.url);
 		const contract = parseFleetContract(readFileSync(path, "utf8"), path.pathname);
 		const p = compileFleetExecutionPlan({
 			contract,

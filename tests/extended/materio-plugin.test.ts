@@ -41,7 +41,7 @@ describe("materio plugin", () => {
 		for (const component of candidate.manifest.clio.components) {
 			counts[component.kind] = (counts[component.kind] ?? 0) + 1;
 		}
-		deepStrictEqual(counts, { resource: 25, script: 5, skill: 6, agent: 6, prompt: 17, fleet: 1 });
+		deepStrictEqual(counts, { resource: 25, script: 5, skill: 6, agent: 6, prompt: 17, playbook: 1 });
 		const project = scratch();
 		const result = installPlugin(source, {
 			cwd: project,
@@ -98,7 +98,7 @@ describe("materio plugin", () => {
 		const verifier = recipes.find((recipe) => recipe.id === "materio-task-verifier");
 		strictEqual(verifier?.capabilityClass, "read-only");
 		ok(verifier?.tools.every((tool) => !["write", "edit", "bash", "ask_user"].includes(tool)));
-		const fleetPath = path.join(root, "ai.iowarp.clio/fleets/materio-execute-task.md");
+		const fleetPath = path.join(root, "ai.iowarp.clio/playbooks/materio-execute-task.md");
 		const fleet = parseFleetContract(readFileSync(fleetPath, "utf8"), fleetPath);
 		strictEqual(fleet.steps.length, 2);
 		const executorStep = fleet.steps[0];

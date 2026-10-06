@@ -631,7 +631,7 @@ describe("library browser behavior", () => {
 		equal(state.inventoryReads, 1);
 		deepStrictEqual(
 			state.options.tabs?.map((tab) => tab.id),
-			["skill", "agent", "prompt", "fleet", "plugin"],
+			["skill", "agent", "prompt", "playbook", "plugin"],
 		);
 	});
 
@@ -703,12 +703,12 @@ describe("library browser behavior", () => {
 
 	it("sends a fleet's use to the run approval preview rather than the composer", () => {
 		const state = harness({
-			initialTab: "fleet",
+			initialTab: "playbook",
 			inventory: inventory({
 				resources: [
 					resource({
-						key: "fleet:release@plugin:user:materio#fleets/release.yaml",
-						kind: "fleet",
+						key: "playbook:release@plugin:user:materio#playbooks/release.yaml",
+						kind: "playbook",
 						name: "release",
 						invocation: "clio-coder fleet run release",
 					}),

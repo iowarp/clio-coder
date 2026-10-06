@@ -186,7 +186,7 @@ describe("library import of foreign plugin packages", () => {
 				["skill", 6],
 				["agent", 6],
 				["prompt", 17],
-				["fleet", 1],
+				["playbook", 1],
 			] as const) {
 				strictEqual(recipes.filter((item) => item.kind === kind).length, count);
 			}

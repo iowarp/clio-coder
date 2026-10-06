@@ -50,7 +50,7 @@ describe("finish contract: the limitation receipt replaces the prose regex", () 
 		for (const path of [
 			".clio-coder/settings.yaml",
 			".clio-coder/settings.local.yaml",
-			".clio-coder/fleets/review-sol.md",
+			".clio-coder/playbooks/review-sol.md",
 		]) {
 			const entries = [
 				userMessage("user-1"),
@@ -60,7 +60,7 @@ describe("finish contract: the limitation receipt replaces the prose regex", () 
 			strictEqual(assessFinishContract({ sessionEntries: entries }).kind, "ok");
 			strictEqual(assessFinishContract({ sessionEntries: [...entries, ...mutationWindow().slice(1)] }).kind, "engage");
 		}
-		for (const path of [".clio-coder/scripts/check.ts", ".clio-coder/fleets/../../src/thing.ts"]) {
+		for (const path of [".clio-coder/scripts/check.ts", ".clio-coder/playbooks/../../src/thing.ts"]) {
 			strictEqual(
 				assessFinishContract({
 					sessionEntries: [
