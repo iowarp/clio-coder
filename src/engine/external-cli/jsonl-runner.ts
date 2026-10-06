@@ -167,18 +167,19 @@ export function startJsonlCliRun(
 	const append = (delta: string): void => {
 		if (!delta) return;
 		const deltaBytes = Buffer.byteLength(delta, "utf8");
-		if (responseBytes + deltaBytes > MAX_RESPONSE_BYTES) {
+		const previousTail = state.text.charCodeAt(state.text.length - 1);
+		const nextHead = delta.charCodeAt(0);
+		// A split surrogate replaces two three-byte replacements with one four-byte code point.
+		const joinsSurrogates = previousTail >= 0xd800 && previousTail <= 0xdbff && nextHead >= 0xdc00 && nextHead <= 0xdfff;
+		const nextResponseBytes = responseBytes + deltaBytes - (joinsSurrogates ? 2 : 0);
+		if (nextResponseBytes > MAX_RESPONSE_BYTES) {
 			throw new Error(`${connector.label} response exceeded ${MAX_RESPONSE_BYTES} bytes`);
 		}
 		if (!messageStarted) {
 			messageStarted = true;
 			emit({ type: "message_start", message: message(0, "") } as AgentEvent);
 		}
-		const previousTail = state.text.charCodeAt(state.text.length - 1);
-		const nextHead = delta.charCodeAt(0);
-		// A split surrogate replaces two three-byte replacements with one four-byte code point.
-		const joinsSurrogates = previousTail >= 0xd800 && previousTail <= 0xdbff && nextHead >= 0xdc00 && nextHead <= 0xdfff;
-		responseBytes += deltaBytes - (joinsSurrogates ? 2 : 0);
+		responseBytes = nextResponseBytes;
 		state.text += delta;
 		emit({ type: "message_update", assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta } } as AgentEvent);
 	};
