@@ -456,6 +456,8 @@ export function envelopeGrowth(approved: ExtensionCapabilityEnvelope, next: Exte
 	push("new commands", added(approved.commands, next.commands));
 	push("new events", added(approved.events, next.events));
 	if (next.tickMs !== undefined && approved.tickMs === undefined) growth.push("a timer");
+	else if (next.tickMs !== undefined && approved.tickMs !== undefined && next.tickMs < approved.tickMs)
+		growth.push(`a faster timer (${next.tickMs / 1000}s, approved ${approved.tickMs / 1000}s)`);
 	push("new watched paths", added(approved.watch, next.watch));
 	for (const hook of next.hooks) {
 		if (hookCovered(approved.hooks, hook)) continue;

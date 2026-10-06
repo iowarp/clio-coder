@@ -245,10 +245,14 @@ export class OperatorExtensionRuntimeV2 {
 	}
 	private spawn(entry: ApiV2Extension, context: RuntimeContext, generation: number): ExtensionRuntimeProcessV2 {
 		const paths = extensionDataPaths((this.options.stateDir ?? clioStateDir)(), entry.id, context.sessionId);
-		const keyValue = createExtensionKeyValueHost(paths);
 		// The TUI has no session id until its first turn. What an extension kept
-		// in memory before then belongs to the session that turn creates.
+		// in memory before then survives a reload in the meantime, and belongs to
+		// the session that turn creates.
 		const previous = this.stateHosts.get(entry.id);
+		const keyValue =
+			previous !== undefined && previous.sessionId === null && context.sessionId === null
+				? previous.host
+				: createExtensionKeyValueHost(paths);
 		if (previous?.sessionId === null && context.sessionId !== null)
 			for (const key of previous.host.keys("state"))
 				if (keyValue.get("state", key).version === 0) keyValue.set("state", key, previous.host.get("state", key).value);
