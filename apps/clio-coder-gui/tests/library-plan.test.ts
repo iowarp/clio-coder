@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
+	componentSentence,
 	copyOperations,
 	copyState,
 	diskSentence,
@@ -13,7 +14,6 @@ import {
 	type Package,
 	type Plan,
 	type PlanStep,
-	componentSentence,
 	stepTitle,
 } from "../client/pages/library-plan.js";
 
