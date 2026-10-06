@@ -57,7 +57,7 @@ export interface LoadResult {
 	loaded: ReadonlyArray<string>;
 	failed: ReadonlyArray<{ name: string; error: unknown }>;
 	getContract<T extends DomainContract = DomainContract>(name: string): T | undefined;
-	stop(): Promise<void>;
+	stop(signal?: AbortSignal): Promise<void>;
 }
 
 export interface LoadDomainsOptions {
@@ -89,18 +89,23 @@ export async function loadDomains(
 		},
 	};
 
-	const stopAll = async (): Promise<void> => {
+	const stopAll = async (signal?: AbortSignal): Promise<void> => {
 		const debug = process.env.CLIO_CODER_DEBUG_SHUTDOWN === "1";
 		const budgetMs = resolveShutdownHookBudgetMs();
 		for (const [name, ext] of [...extensions].reverse()) {
 			if (!ext.stop) continue;
 			const stopFn = ext.stop.bind(ext);
 			const t0 = debug ? process.hrtime.bigint() : 0n;
-			const completed = await runWithBudget(stopFn, budgetMs, (err) => {
-				const message = err instanceof Error ? err.message : String(err);
-				writeShutdownNotice(`[clio-coder:domain-loader] ${name}.stop() failed: ${message}`);
-				if (debug && err instanceof Error && err.stack) process.stderr.write(`${err.stack}\n`);
-			});
+			const completed = await runWithBudget(
+				stopFn,
+				budgetMs,
+				(err) => {
+					const message = err instanceof Error ? err.message : String(err);
+					writeShutdownNotice(`[clio-coder:domain-loader] ${name}.stop() failed: ${message}`);
+					if (debug && err instanceof Error && err.stack) process.stderr.write(`${err.stack}\n`);
+				},
+				signal,
+			);
 			if (!completed) {
 				writeShutdownNotice(`[clio-coder:domain-loader] ${name}.stop() exceeded ${budgetMs}ms budget; abandoning`);
 			}
@@ -115,7 +120,7 @@ export async function loadDomains(
 		contracts.clear();
 	};
 	let stopping: Promise<void> | undefined;
-	const stop = (): Promise<void> => (stopping ??= stopAll());
+	const stop = (signal?: AbortSignal): Promise<void> => (stopping ??= stopAll(signal));
 
 	for (const name of order) {
 		const mod = modules.find((m) => m.manifest.name === name);
