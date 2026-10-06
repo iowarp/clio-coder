@@ -1,10 +1,9 @@
-import { execFileSync } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import path from "node:path";
 import { parse as parseYaml } from "yaml";
 import { resolvePackageRoot } from "../../core/package-root.js";
-import { buildSafeToolEnv } from "../../core/safe-exec.js";
+import { runStagingCommandSync } from "../../core/safe-exec.js";
 import { isSemanticVersion } from "../extensions/compatibility.js";
 import {
 	isLibraryKind,
@@ -52,14 +51,13 @@ export function fetchPluginSource(source: string, cwd = process.cwd()): PluginSo
 	const temp = mkdtempSync(path.join(tmpdir(), "clio-coder-plugin-"));
 	const cleanup = (): void => rmSync(temp, { recursive: true, force: true });
 	try {
-		execFileSync(
+		runStagingCommandSync(
 			"git",
 			["-c", "core.hooksPath=/dev/null", "clone", "--depth", "1", "--branch", remote.ref, "--", remote.url, temp],
 			{
-				stdio: "pipe",
-				timeout: 120_000,
-				maxBuffer: 1_000_000,
-				env: buildSafeToolEnv({ GIT_TERMINAL_PROMPT: "0", GIT_CONFIG_NOSYSTEM: "1" }),
+				timeoutMs: 120_000,
+				maxOutputBytes: 1_000_000,
+				env: { GIT_TERMINAL_PROMPT: "0", GIT_CONFIG_NOSYSTEM: "1" },
 			},
 		);
 		const root = path.join(temp, remote.subdir);

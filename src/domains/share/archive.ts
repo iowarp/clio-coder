@@ -31,6 +31,7 @@ import {
 	parseFleetContract,
 } from "../agents/index.js";
 import { loadManifestFromRoot } from "../extensions/discovery.js";
+import { envelopeReviewLines, reviewExtensionEnvelope } from "../extensions/envelope-review.js";
 import { extensionContentDigest } from "../extensions/integrity.js";
 import { extensionBaseDir, installExtension, listInstalledExtensions } from "../extensions/state.js";
 import type { ExtensionScope } from "../extensions/types.js";
@@ -501,6 +502,8 @@ interface ShareImportPreparedExtensionPackage {
 	scope: ExtensionScope;
 	files: Array<{ relativePath: string; buffer: Buffer }>;
 	contentDigest: string;
+	/** Digest of the capability envelope shown in the plan, or null for a package that declares none. */
+	envelopeDigest: string | null;
 	install: boolean;
 }
 
@@ -705,7 +708,10 @@ function prepareExtensionPackages(
 	options: ShareImportOptions,
 ): { packages: ShareImportPreparedExtensionPackage[]; diagnostics: ShareDiagnostic[] } {
 	const diagnostics: ShareDiagnostic[] = [];
-	const grouped = new Map<string, Omit<ShareImportPreparedExtensionPackage, "contentDigest" | "install">>();
+	const grouped = new Map<
+		string,
+		Omit<ShareImportPreparedExtensionPackage, "contentDigest" | "envelopeDigest" | "install">
+	>();
 	for (const target of targets) {
 		if (target.entry.type !== "extension") continue;
 		const segments = relativePathSegments(target.entry.relativePath);
@@ -733,7 +739,7 @@ function prepareExtensionPackages(
 	const packages: ShareImportPreparedExtensionPackage[] = [];
 	for (const group of [...grouped.values()].sort((a, b) => `${a.scope}/${a.id}`.localeCompare(`${b.scope}/${b.id}`))) {
 		try {
-			const contentDigest = withStagedExtensionPackage(group, (root) => {
+			const reviewed = withStagedExtensionPackage(group, (root) => {
 				const candidate = loadManifestFromRoot(root);
 				if (!candidate.valid || !candidate.manifest) {
 					throw new Error(candidate.diagnostics.map((diagnostic) => diagnostic.message).join("; ") || "manifest is invalid");
@@ -741,8 +747,9 @@ function prepareExtensionPackages(
 				if (candidate.manifest.id !== group.id) {
 					throw new Error(`manifest id ${candidate.manifest.id} does not match archive package ${group.id}`);
 				}
-				return extensionContentDigest(root);
+				return { contentDigest: extensionContentDigest(root), review: reviewExtensionEnvelope(root) };
 			});
+			const { contentDigest } = reviewed;
 			const cwd = path.resolve(options.cwd ?? process.cwd());
 			const targetRoot = path.join(extensionBaseDir(group.scope, cwd), group.id);
 			const existing = listInstalledExtensions(cwd, { scope: group.scope, all: true }).find(
@@ -759,7 +766,17 @@ function prepareExtensionPackages(
 					path: targetRoot,
 				});
 			}
-			packages.push({ ...group, contentDigest, install: !alreadyVerified });
+			// What the package may do is part of what this import installs, so the plan says it
+			// and the install applies only that envelope.
+			if (!alreadyVerified && reviewed.review)
+				for (const line of envelopeReviewLines(reviewed.review))
+					diagnostics.push({ type: "warning", message: `extension ${group.id} would be allowed to: ${line}` });
+			packages.push({
+				...group,
+				contentDigest,
+				envelopeDigest: reviewed.review?.digest ?? null,
+				install: !alreadyVerified,
+			});
 		} catch (error) {
 			diagnostics.push({
 				type: "error",
@@ -929,6 +946,7 @@ export function importShareArchive(filePath: string, options: ShareImportOptions
 				installExtension(root, {
 					cwd,
 					scope: extensionPackage.scope,
+					expectedEnvelopeDigest: extensionPackage.envelopeDigest,
 					// The staging directory is removed on return; the record keeps the archive it came from.
 					source: path.resolve(filePath),
 					...(options.force !== undefined ? { force: options.force } : {}),
