@@ -26,12 +26,13 @@ import { type ConsultDeps, createConsultTool } from "./consult.js";
 import { contextToolSurface } from "./context/surface.js";
 import { credentialPresentTool } from "./credential-present.js";
 import { createDecideTool } from "./decide.js";
-import { editTool } from "./edit.js";
+import { editToolSurface } from "./edit-surface.js";
 import { evidenceTool } from "./evidence.js";
 import { findTool } from "./find.js";
 import { clioDocsToolSurface, clioLibraryToolSurface } from "./gateway/clio-context-surface.js";
 import { dataToolSurface, prepareDataAdmissionArguments } from "./gateway/data-surface.js";
-import { capabilityRankerFrom, createGatewayTool, type McpCapabilitySource } from "./gateway/index.js";
+import type { McpCapabilitySource } from "./gateway/mcp-capabilities.js";
+import { gatewayToolSurface, prepareGatewayArguments } from "./gateway/surface.js";
 import { grepTool } from "./grep.js";
 import { lazyTool } from "./lazy-tool.js";
 import { createLedgerTool } from "./ledger.js";
@@ -131,7 +132,10 @@ export function registerCoreTools(registry: ToolRegistry, deps: CoreToolBootstra
 		...builtin(writeTool, { path: "src/tools/write.ts", scope: "core" }),
 	});
 	registry.register({
-		...builtin(editTool, { path: "src/tools/edit.ts", scope: "core" }),
+		...builtin(lazyTool(editToolSurface, async () => (await import("./edit.js")).editTool), {
+			path: "src/tools/edit.ts",
+			scope: "core",
+		}),
 	});
 	registry.register({
 		...builtin(bashTool, { path: "src/tools/bash.ts", scope: "core" }),
@@ -318,12 +322,16 @@ export function registerCoreTools(registry: ToolRegistry, deps: CoreToolBootstra
 	}
 	// The gateway itself: direct, one fixed schema, reaching every
 	// gateway-placed spec above through the registry's own admission.
+	const { mcpCapabilities, rankRelevance, onCapabilityCalled } = deps;
 	const gateway = builtin(
-		createGatewayTool({
-			registry,
-			...(deps.mcpCapabilities ? { mcp: deps.mcpCapabilities } : {}),
-			...(deps.rankRelevance ? { rankCapabilities: capabilityRankerFrom(deps.rankRelevance) } : {}),
-			...(deps.onCapabilityCalled ? { onCapabilityCalled: deps.onCapabilityCalled } : {}),
+		lazyTool({ ...gatewayToolSurface, prepareArguments: prepareGatewayArguments }, async () => {
+			const { createGatewayTool, capabilityRankerFrom } = await import("./gateway/index.js");
+			return createGatewayTool({
+				registry,
+				...(mcpCapabilities ? { mcp: mcpCapabilities } : {}),
+				...(rankRelevance ? { rankCapabilities: capabilityRankerFrom(rankRelevance) } : {}),
+				...(onCapabilityCalled ? { onCapabilityCalled } : {}),
+			});
 		}),
 		{
 			path: "src/tools/gateway/index.ts",
