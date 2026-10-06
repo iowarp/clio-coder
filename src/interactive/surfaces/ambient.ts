@@ -46,6 +46,12 @@ interface AmbientDeps {
 export interface AmbientSurfaces {
 	/** Retry a request parked behind a host modal; overlay close calls this after permissions get first refusal. */
 	refresh(): void;
+	/**
+	 * Open a workspace region in the pressable panel, so its rows and cards can
+	 * be selected and pressed; a press reaches the extension as an action from
+	 * that region. False when a host overlay holds the screen.
+	 */
+	focusRegion(owner: string, title: string, view: () => View | undefined, source: "board"): boolean;
 	dispose(): Promise<void>;
 }
 
@@ -76,7 +82,7 @@ export function createAmbientSurfaces(deps: AmbientDeps): AmbientSurfaces {
 		owner: string,
 		action: string,
 		key: string | undefined,
-		source: "panel" | "dock",
+		source: "panel" | "dock" | "board",
 	): Promise<void> => {
 		try {
 			fallback(owner, await deps.operator.action(owner, { id: action, ...(key === undefined ? {} : { key }), source }));
@@ -233,6 +239,24 @@ export function createAmbientSurfaces(deps: AmbientDeps): AmbientSurfaces {
 	});
 	return {
 		refresh,
+		focusRegion(owner, title, view, source) {
+			if (disposed || deps.overlay().getState() !== "closed" || view() === undefined) return false;
+			let panel: ExtensionPanelV2 | undefined;
+			deps.overlay().openExtensionViewPanelState(owner, {
+				// The region keeps updating while it is open, as the workspace draws it.
+				panel: () => {
+					const current = view();
+					if (current === undefined) return undefined;
+					if (panel?.view !== current) panel = { title, view: current };
+					return panel;
+				},
+				press: (target) => press(owner, target.action, target.key, source),
+				onClosed() {
+					refresh();
+				},
+			});
+			return true;
+		},
 		async dispose() {
 			if (disposed) return;
 			disposed = true;

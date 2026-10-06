@@ -643,6 +643,10 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 				leave: () => {
 					operatorExtensions.leaveWorkspace();
 				},
+				focusBoard: (extensionId, title, view) => {
+					if (!ambientSurfaces?.focusRegion(extensionId, title, view, "board"))
+						notify("info", "Close the open panel first; the board opens over the composer.");
+				},
 			})
 		: undefined;
 	const ambientSurfaces = operatorExtensions

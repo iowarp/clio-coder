@@ -42,11 +42,15 @@ export interface WorkspaceSurfaceDeps {
 	rowsAboveComposer?(): number | null;
 	/** A workspace key was pressed through the leader menu. */
 	press(extensionId: string, action: string): void;
+	/** Open the board in the pressable panel; absent where no such panel exists. */
+	focusBoard?(extensionId: string, title: string, view: () => View | undefined): void;
 	leave(): void;
 }
 
 /** The leader suffix that leaves an active workspace; built-in suffixes never use it. */
 export const WORKSPACE_LEAVE_KEY = "b";
+/** The leader suffix that opens the workspace board for selecting and pressing its cards and rows. */
+export const WORKSPACE_FOCUS_KEY = "j";
 
 /**
  * The terminal side of the extension surface model: everything an active
@@ -74,6 +78,14 @@ export interface WorkspaceSurfaces {
 	/** Re-evaluate the floating stack; called on model change and by the host's island tick. */
 	refresh(): void;
 	dispose(): void;
+}
+
+/** Whether a view names an action a row, card or node press would send. */
+function pressable(view: View | undefined): boolean {
+	if (view === undefined) return false;
+	if ((view.t === "board" || view.t === "table" || view.t === "list" || view.t === "tree") && view.action) return true;
+	if (view.t === "actions") return view.items.length > 0;
+	return view.t === "box" && view.children.some(pressable);
 }
 
 export function createWorkspaceSurfaces(deps: WorkspaceSurfaceDeps): WorkspaceSurfaces {
@@ -258,12 +270,25 @@ export function createWorkspaceSurfaces(deps: WorkspaceSurfaceDeps): WorkspaceSu
 			if (!active) return [];
 			return [
 				...active.keys
-					.filter((binding) => binding.key !== WORKSPACE_LEAVE_KEY)
+					.filter((binding) => binding.key !== WORKSPACE_LEAVE_KEY && binding.key !== WORKSPACE_FOCUS_KEY)
 					.map((binding) => ({
 						key: binding.key,
 						label: `${active.title}: ${binding.label}`,
 						run: () => deps.press(active.extensionId, binding.action),
 					})),
+				...(deps.focusBoard && active.regions.includes("board") && pressable(regionView(active, "board"))
+					? [
+							{
+								key: WORKSPACE_FOCUS_KEY,
+								label: `${active.title}: select a card on the board`,
+								run: () =>
+									deps.focusBoard?.(active.extensionId, active.title, () => {
+										const current = deps.model.activeWorkspace;
+										return current?.extensionId === active.extensionId ? regionView(current, "board") : undefined;
+									}),
+							},
+						]
+					: []),
 				{ key: WORKSPACE_LEAVE_KEY, label: `Leave ${active.title}`, run: () => deps.leave() },
 			];
 		},
