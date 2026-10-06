@@ -1140,7 +1140,7 @@ function createSessionRereadPort(session: SessionContract, bus: SafeEventBus): R
 		sessionId: () => session.current()?.id ?? null,
 		readEntries: () => {
 			const meta = session.current();
-			return meta ? readSessionEntriesForCompact(meta.id) : [];
+			return meta ? session.readEntries() : [];
 		},
 		activeLeafTurnId: () => {
 			const meta = session.current();
@@ -1178,7 +1178,7 @@ function protectedArtifactStateForCurrentSession(
 	const meta = session.current();
 	if (!meta) return { artifacts: [] };
 	reconcilePendingProtectedArtifacts(session);
-	return protectedArtifactStateFromSessionEntries(readSessionEntriesForCompact(meta.id));
+	return protectedArtifactStateFromSessionEntries(session.readEntries());
 }
 
 function appendProtectedArtifactRegistryEvent(
@@ -1280,7 +1280,7 @@ async function runCompactionFlow(
 	const activeLeafTurnId = session.tree(meta.id).leafId ?? undefined;
 	const isOriginCurrent = () =>
 		session.current()?.id === meta.id && (session.tree(meta.id).leafId ?? undefined) === activeLeafTurnId;
-	const entries = filterEntriesToActivePath(readSessionEntriesForCompact(meta.id), activeLeafTurnId);
+	const entries = filterEntriesToActivePath(session.readEntries(), activeLeafTurnId);
 	if (entries.length === 0) return null;
 	// Folded over the full applicable ledger before this compaction cuts it, so
 	// the carry written below reflects every durable transition, including ones
@@ -1407,7 +1407,7 @@ async function runCompactionFlow(
 	// is re-derived: `result` indexes the entry array the cut was computed
 	// against, which must not move under it.
 	const settledContinuity = resolveContinuityProjection({
-		entries: filterEntriesToActivePath(readSessionEntriesForCompact(meta.id), activeLeafTurnId),
+		entries: filterEntriesToActivePath(session.readEntries(), activeLeafTurnId),
 		sessionId: meta.id,
 		...(meta.parentSessionId && meta.parentTurnId
 			? { fork: { parentSessionId: meta.parentSessionId, parentTurnId: meta.parentTurnId } }
@@ -2859,9 +2859,9 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		getSessionId: () => session?.current()?.id ?? null,
 		readEntries: () => {
 			const meta = session?.current();
-			if (!meta) return [];
+			if (!session || !meta) return [];
 			const leafTurnId = session?.tree(meta.id).leafId ?? undefined;
-			return filterEntriesToActivePath(readSessionEntriesForCompact(meta.id), leafTurnId);
+			return filterEntriesToActivePath(session.readEntries(), leafTurnId);
 		},
 		appendEntry: (entry) => {
 			session?.appendEntry(entry);
@@ -2874,9 +2874,9 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		getSessionId: () => session?.current()?.id ?? null,
 		readEntries: () => {
 			const meta = session?.current();
-			if (!meta) return [];
+			if (!session || !meta) return [];
 			const leafTurnId = session?.tree(meta.id).leafId ?? undefined;
-			return filterEntriesToActivePath(readSessionEntriesForCompact(meta.id), leafTurnId);
+			return filterEntriesToActivePath(session.readEntries(), leafTurnId);
 		},
 		getActiveLeafTurnId: () => {
 			const meta = session?.current();
@@ -3301,9 +3301,9 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 					visionSidecar,
 					getRecentVisionImages: () => {
 						const meta = session?.current();
-						if (!meta) return [];
+						if (!session || !meta) return [];
 						const leaf = session?.tree(meta.id).leafId ?? undefined;
-						return latestUserImages(readSessionEntriesForCompact(meta.id), leaf);
+						return latestUserImages(session.readEntries(), leaf);
 					},
 				}
 			: {}),
@@ -3374,7 +3374,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 					session,
 					readSessionEntries: () => {
 						const meta = session.current();
-						return meta ? readSessionEntriesForCompact(meta.id) : [];
+						return meta ? session.readEntries() : [];
 					},
 					onContextRecalled: (payload) => bus.emit(BusChannels.ContextRecalled, payload),
 					readRecall: createSessionRereadPort(session, bus),
@@ -3658,7 +3658,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		if (!session || !meta) return null;
 		let recorded: ReturnType<typeof resumedSessionRoute>;
 		try {
-			recorded = resumedSessionRoute(meta, readSessionEntriesForCompact(meta.id));
+			recorded = resumedSessionRoute(meta, session.readEntries());
 		} catch {
 			// An unreadable ledger has no route to offer; the session keeps the
 			// current one, which is what resume did before it looked.
@@ -3744,7 +3744,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		const meta = session.current();
 		if (!meta) return [];
 		reconcilePendingProtectedArtifacts(session);
-		return readSessionEntriesForCompact(meta.id);
+		return session.readEntries();
 	};
 
 	const turnOutcomeCollector = createTurnOutcomeCollector();
