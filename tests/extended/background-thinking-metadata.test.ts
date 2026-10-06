@@ -11,7 +11,7 @@ import { canonicalEndpointKey, registerForegroundStream } from "../../src/domain
 import { createProvidersBundle } from "../../src/domains/providers/extension.js";
 import litellm from "../../src/domains/providers/runtimes/protocol/litellm.js";
 import type { SessionContract } from "../../src/domains/session/contract.js";
-import { appendEntry, appendTurn, startSession } from "../../src/domains/session/manager.js";
+import { appendEntry, appendTurn, readCurrentEntries, startSession } from "../../src/domains/session/manager.js";
 import {
 	createBackgroundMemoryModelClient,
 	createBackgroundMemoryRouting,
@@ -82,6 +82,7 @@ for (const role of ["memory", "compaction"] as const) {
 					current: () => state.meta,
 					tree: () => ({ leafId: leaf }),
 					appendEntry: (entry: Parameters<typeof appendEntry>[1]) => appendEntry(state, entry),
+					readEntries: () => readCurrentEntries(state),
 				} as unknown as SessionContract;
 				ok(await createProductionAutoCompact(session, () => f.settings, f.providers)());
 			}
@@ -210,6 +211,7 @@ test("compaction rechecks its origin after cold metadata preparation before spen
 			current: () => current,
 			tree: () => ({ leafId: leaf }),
 			appendEntry: (entry: Parameters<typeof appendEntry>[1]) => appendEntry(state, entry),
+			readEntries: () => readCurrentEntries(state),
 		} as unknown as SessionContract;
 		const result = createProductionAutoCompact(session, () => f.settings, f.providers)();
 		await started;

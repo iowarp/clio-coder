@@ -29,7 +29,7 @@ import { collectSessionEntries } from "../../src/domains/session/compaction/sess
 import { type ContextSnapshot, snapshotInputTokens } from "../../src/domains/session/context-accounting.js";
 import type { SessionContract } from "../../src/domains/session/contract.js";
 import type { SessionEntry } from "../../src/domains/session/entries.js";
-import { appendEntry, appendTurn, startSession } from "../../src/domains/session/manager.js";
+import { appendEntry, appendTurn, readCurrentEntries, startSession } from "../../src/domains/session/manager.js";
 import { ledgerUsageCalls } from "../../src/domains/session/usage.js";
 import { serveClioAcpAgent } from "../../src/engine/acp/server.js";
 import type { AcpJsonRpcPeerTransport } from "../../src/engine/acp/transport.js";
@@ -168,6 +168,7 @@ describe("production compaction controls", () => {
 			current: () => state.meta,
 			tree: () => ({ leafId: leaf }),
 			appendEntry: (entry: Parameters<typeof appendEntry>[1]) => appendEntry(state, entry),
+			readEntries: () => readCurrentEntries(state),
 		} as unknown as SessionContract;
 		const calls: Array<{
 			model: string;
