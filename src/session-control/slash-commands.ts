@@ -2114,10 +2114,10 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	{
 		name: "fleet",
 		acp: false,
-		description: "Show live fleet runs, or preview and run a fleet contract",
+		description: "Show live fleet runs, or preview and run a playbook",
 		group: "Work",
 		kinds: ["fleet", "fleet-run", "fleet-run-usage"],
-		subcommandDescriptions: { run: "Preview and run a repo-owned fleet contract" },
+		subcommandDescriptions: { run: "Preview and run a repo-owned playbook" },
 		args: {
 			subcommands: {
 				run: {

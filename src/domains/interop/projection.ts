@@ -95,7 +95,11 @@ export function tree(root: string, dataOnly = false, omitted: string[] = []): Re
 		for (const name of readdirSync(dir).sort()) {
 			const file = path.join(dir, name);
 			const relative = path.relative(root, file).split(path.sep).join("/");
-			if (dataOnly && relative.split("/").some((part) => FORBIDDEN_PARTS.has(part) || part === "fleets")) {
+			// A data-only projection omits playbooks; `fleets` is their pre-D9 directory name (legacy read, one release).
+			if (
+				dataOnly &&
+				relative.split("/").some((part) => FORBIDDEN_PARTS.has(part) || part === "playbooks" || part === "fleets")
+			) {
 				let isDirectory = false;
 				try {
 					isDirectory = lstatSync(file).isDirectory();

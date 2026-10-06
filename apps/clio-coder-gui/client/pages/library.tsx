@@ -11,7 +11,7 @@ import { LibraryCatalog } from "./library-catalog.js";
 import { type Agent, agentCard, matchesQuery, type Resource, skillCard, tabAfterKey } from "./library-model.js";
 import { useWorkspaceSelection, WorkspacePicker } from "./settings.js";
 
-const collections = ["Catalog", "Agents", "Skills", "Prompts", "Fleets", "Extensions", "Verifiers"] as const;
+const collections = ["Catalog", "Agents", "Skills", "Prompts", "Playbooks", "Extensions", "Verifiers"] as const;
 type Collection = (typeof collections)[number];
 type Entry = {
 	id: string;
@@ -100,7 +100,7 @@ const purpose: Record<Collection, string> = {
 	Agents: "Specialists Clio can assign work to. Their specifications describe the tools, skills and limits they use.",
 	Skills: "Reusable instructions that guide Clio through a task.",
 	Prompts: "Saved starting points for conversations and common tasks.",
-	Fleets: "Saved workflows that coordinate several steps or specialists.",
+	Playbooks: "Saved workflows the fleet runs, coordinating several steps or specialists.",
 	Extensions: "Installed packages that add executable capabilities. Admission state shows whether Clio can load them.",
 	Verifiers: "Checks Clio discovered for this workspace. Viewing this list does not run them.",
 };
@@ -169,7 +169,7 @@ export function LibraryPage({
 		enabled: !!id,
 		queryFn: () => client.call(routes.libraryVerifiers, { ...emptyInput, params: { id } }),
 	});
-	const resourceEntries = (kind: "skill" | "prompt" | "fleet"): Entry[] =>
+	const resourceEntries = (kind: "skill" | "prompt" | "playbook"): Entry[] =>
 		(inventory.data?.resources ?? [])
 			.filter((row) => row.kind === kind)
 			.map((row) => ({
@@ -191,7 +191,7 @@ export function LibraryPage({
 		})),
 		Skills: resourceEntries("skill"),
 		Prompts: resourceEntries("prompt"),
-		Fleets: resourceEntries("fleet"),
+		Playbooks: resourceEntries("playbook"),
 		Extensions: (extensions.data?.extensions ?? []).map((row) => ({
 			id: `${row.id}:${row.scope}`,
 			name: row.name,

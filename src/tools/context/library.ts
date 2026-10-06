@@ -26,7 +26,7 @@ import { byteLength } from "../truncate-utf8.js";
  * target itself.
  *
  * The inventory module is reached by dynamic import so scope=workspace,
- * scope=docs and scope=skills never pay for agent, prompt and fleet discovery.
+ * scope=docs and scope=skills never pay for agent, prompt and playbook discovery.
  * Only the types cross statically, and those are erased.
  */
 
@@ -44,7 +44,7 @@ const MAX_INVOCATION = 200;
 /** How much of an echoed argument comes back in the payload header. */
 const MAX_ECHO = 120;
 
-export type LibraryRowKind = "skill" | "agent" | "prompt" | "fleet" | "plugin";
+export type LibraryRowKind = "skill" | "agent" | "prompt" | "playbook" | "plugin";
 
 export interface LibraryScopeDeps {
 	getCwd(): string;

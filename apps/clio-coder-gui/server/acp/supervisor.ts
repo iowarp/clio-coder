@@ -1393,7 +1393,7 @@ export class Supervisor {
 	private fleeting(id: string) {
 		const entry = this.active(id);
 		if (!entry.client.capabilities.fleet)
-			throw new AppProblem("conflict", "This Clio Coder build cannot preview or start a fleet contract.");
+			throw new AppProblem("conflict", "This Clio Coder build cannot preview or start a playbook.");
 		return entry;
 	}
 	fleetPreview(id: string, body: Static<typeof FleetPreviewRequest>) {

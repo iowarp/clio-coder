@@ -18,7 +18,7 @@ import { safeResourceWrite } from "../../core/safe-resource-write.js";
 import { projectPackagesTrusted } from "../../core/workspace-trust.js";
 import { clioConfigDir } from "../../core/xdg.js";
 import { evaluateClioCompatibility } from "../extensions/compatibility.js";
-import { isLibraryKind, type LibraryRequirementRef } from "../resources/library-types.js";
+import { isLibraryKind, type LibraryRequirementRef, readLegacyLibraryKind } from "../resources/library-types.js";
 import { isPluginId, pluginPathContained, readPluginManifest } from "./discovery.js";
 import { passPluginCandidate } from "./discovery-pass.js";
 import { pluginContentDigest } from "./integrity.js";
@@ -94,6 +94,9 @@ function readState(scope: PluginScope, cwd: string): { state: PluginState; bytes
 			throw new Error(`invalid plugin install record: ${id}`);
 		if (entry.origin !== undefined && typeof entry.origin !== "string" && !validOrigin(entry.origin))
 			throw new Error(`invalid plugin origin: ${id}`);
+		// D9 legacy read: a record installed before the rename says kind `fleet`.
+		// The next write of this state file records `playbook`.
+		if (entry.kind !== undefined) entry.kind = readLegacyLibraryKind(entry.kind);
 		if (entry.kind !== undefined && !isLibraryKind(entry.kind)) throw new Error(`invalid package kind: ${id}`);
 		if (entry.trust !== undefined && entry.trust !== "trusted" && entry.trust !== "foreign")
 			throw new Error(`invalid package trust: ${id}`);

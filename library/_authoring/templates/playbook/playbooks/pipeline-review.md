@@ -26,6 +26,6 @@ Review the scientific pipeline specified at: {{pipeline}}.
 
 ## Prerequisites & Environment Requirements
 
-- **Core Agents**: This fleet coordinates the built-in `scout` and `verifier` recipes provided by Clio (`src/domains/agents/builtins/`).
+- **Core Agents**: This playbook coordinates the built-in `scout` and `verifier` recipes provided by Clio (`src/domains/agents/builtins/`).
 - **Configuration**: Requires a configured read-only model target with context support.
 - **Variables**: The caller must supply the `{{pipeline}}` variable naming the pipeline configuration or script path (e.g. `--var pipeline=configs/pipeline.yaml`).

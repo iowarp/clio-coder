@@ -93,7 +93,7 @@ const DIALOG_COPY: Readonly<Record<SlashAction, { title: string; eyebrow: string
 	btw: { title: "Side question", eyebrow: "/btw" },
 	draft: { title: "Drafts", eyebrow: "/draft" },
 	extensions: { title: "Extensions", eyebrow: "/extensions" },
-	"fleet-run": { title: "Run a fleet contract", eyebrow: "/fleet run" },
+	"fleet-run": { title: "Run a playbook", eyebrow: "/fleet run" },
 };
 
 /**

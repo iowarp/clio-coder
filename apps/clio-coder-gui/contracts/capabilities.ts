@@ -77,7 +77,7 @@ export const AgentCapabilities = Type.Object(
 		branches: Type.Optional(BranchesCapability),
 		/** Draw up, review and commit a handoff to a new session. */
 		handoff: Type.Optional(HandoffCapability),
-		/** Preview a fleet contract and start only the approved plan. */
+		/** Preview a playbook and start only the approved plan. */
 		fleet: Type.Optional(FleetCapability),
 		/** The context window accounting, read for the Context view. */
 		context: Type.Optional(ContextCapability),

@@ -115,7 +115,7 @@ export function createPromptsBundle(
 			// dispatch({list:true}) remains the authoritative roster.
 		}
 		try {
-			// A fleet needing an unregistered command is setup the operator owes, not a runnable fleet.
+			// A playbook needing an unregistered command is setup the operator owes, not a runnable playbook.
 			snapshot.fleets = listFleetContracts(cwd).flatMap((listing) =>
 				listing.contract === null ? [] : [{ name: listing.name, purpose: listing.contract.description }],
 			);
@@ -622,7 +622,7 @@ function catalogFragments(catalogs: CatalogSnapshot, inputs: SessionPromptInputs
 	}
 	if (catalogs.fleets.length > 0) {
 		sections.push(
-			"Fleets (multi-step contracts; the operator starts one with /fleet run <name>, so suggest it rather than dispatching its steps yourself):",
+			"Playbooks (multi-step contracts the fleet runs; the operator starts one with /fleet run <name>, so suggest it rather than dispatching its steps yourself):",
 			...catalogLines(catalogs.fleets),
 		);
 	}

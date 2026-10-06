@@ -12,7 +12,7 @@ export type Outcome = Applied["outcomes"][number];
 export type Operation = Plan["operation"];
 export type Scope = "user" | "project";
 
-export const PACKAGE_KINDS = ["skill", "agent", "prompt", "fleet", "plugin"] as const;
+export const PACKAGE_KINDS = ["skill", "agent", "prompt", "playbook", "plugin"] as const;
 const VERB: Record<Operation, string> = {
 	install: "Install",
 	update: "Update",

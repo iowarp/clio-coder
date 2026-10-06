@@ -23,7 +23,7 @@ const KIND_DIRS = [
 	{ dirName: "skills", expectedKind: "skill" },
 	{ dirName: "agents", expectedKind: "agent" },
 	{ dirName: "prompts", expectedKind: "prompt" },
-	{ dirName: "fleets", expectedKind: "fleet" },
+	{ dirName: "playbooks", expectedKind: "playbook" },
 	{ dirName: "plugins", expectedKind: "plugin" },
 	{ dirName: "extensions", expectedKind: "extension" },
 ] as const;

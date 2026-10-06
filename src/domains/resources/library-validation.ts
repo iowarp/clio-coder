@@ -381,11 +381,11 @@ export function validateLibraryPackage(
 	}
 
 	// ---------------------------------------------------------------------------
-	// 4. Fleets
+	// 4. Playbooks
 	// ---------------------------------------------------------------------------
-	if (declaredResources.fleets !== undefined) {
+	if (declaredResources.playbooks !== undefined) {
 		try {
-			const fleetsDir = pluginResourcePath(resolved, declaredResources.fleets);
+			const fleetsDir = pluginResourcePath(resolved, declaredResources.playbooks);
 			let fleetEntries: import("node:fs").Dirent[] = [];
 			try {
 				fleetEntries = readdirSync(fleetsDir, { withFileTypes: true });
@@ -393,9 +393,9 @@ export function validateLibraryPackage(
 				contentDiagnostics.push({
 					severity: "error",
 					code: "ERR_FLEET",
-					message: `cannot read fleets directory: ${err instanceof Error ? err.message : String(err)}`,
+					message: `cannot read playbooks directory: ${err instanceof Error ? err.message : String(err)}`,
 					path: fleetsDir,
-					kind: "fleet",
+					kind: "playbook",
 				});
 			}
 
@@ -420,7 +420,7 @@ export function validateLibraryPackage(
 								type: "command",
 								identifier: step.command,
 								sourcePath: filepath,
-								description: `fleet step '${step.id}' requires command '${step.command}'`,
+								description: `playbook step '${step.id}' requires command '${step.command}'`,
 							});
 						} else if (step.kind === "agent") {
 							const isLocal = resources.some((r) => r.kind === "agent" && r.name === step.agent);
@@ -429,7 +429,7 @@ export function validateLibraryPackage(
 									type: "agent",
 									identifier: step.agent,
 									sourcePath: filepath,
-									description: `fleet step '${step.id}' requires agent '${step.agent}'`,
+									description: `playbook step '${step.id}' requires agent '${step.agent}'`,
 								});
 							}
 						} else if (step.kind === "plan") {
@@ -439,7 +439,7 @@ export function validateLibraryPackage(
 									type: "agent",
 									identifier: step.agent,
 									sourcePath: filepath,
-									description: `fleet plan step '${step.id}' requires agent '${step.agent}'`,
+									description: `playbook plan step '${step.id}' requires agent '${step.agent}'`,
 								});
 							}
 							for (const rosterAgent of step.roster) {
@@ -449,7 +449,7 @@ export function validateLibraryPackage(
 										type: "agent",
 										identifier: rosterAgent,
 										sourcePath: filepath,
-										description: `fleet plan step '${step.id}' roster requires agent '${rosterAgent}'`,
+										description: `playbook plan step '${step.id}' roster requires agent '${rosterAgent}'`,
 									});
 								}
 							}
@@ -460,7 +460,7 @@ export function validateLibraryPackage(
 									type: "agent",
 									identifier: step.agent,
 									sourcePath: filepath,
-									description: `fleet gate step '${step.id}' requires agent '${step.agent}'`,
+									description: `playbook gate step '${step.id}' requires agent '${step.agent}'`,
 								});
 							}
 						} else if (step.kind === "loop") {
@@ -469,7 +469,7 @@ export function validateLibraryPackage(
 									type: "command",
 									identifier: step.check.command,
 									sourcePath: filepath,
-									description: `fleet loop step '${step.id}' check requires command '${step.check.command}'`,
+									description: `playbook loop step '${step.id}' check requires command '${step.check.command}'`,
 								});
 							} else if (step.check.kind === "agent") {
 								const checkAgent = step.check.agent;
@@ -479,7 +479,7 @@ export function validateLibraryPackage(
 										type: "agent",
 										identifier: checkAgent,
 										sourcePath: filepath,
-										description: `fleet loop step '${step.id}' check requires agent '${checkAgent}'`,
+										description: `playbook loop step '${step.id}' check requires agent '${checkAgent}'`,
 									});
 								}
 							}
@@ -490,7 +490,7 @@ export function validateLibraryPackage(
 									type: "agent",
 									identifier: step.repair.agent,
 									sourcePath: filepath,
-									description: `fleet loop step '${step.id}' repair requires agent '${step.repair.agent}'`,
+									description: `playbook loop step '${step.id}' repair requires agent '${step.repair.agent}'`,
 								});
 							}
 						}
@@ -502,13 +502,13 @@ export function validateLibraryPackage(
 						code: parseRefErrorCode(message, "ERR_FLEET"),
 						message,
 						path: filepath,
-						kind: "fleet",
+						kind: "playbook",
 					});
 				}
 
 				for (const d of fleetDiags) contentDiagnostics.push(d);
 				resources.push({
-					kind: "fleet",
+					kind: "playbook",
 					name: publicName,
 					path: relPath,
 					...(fleetDescription !== undefined ? { description: fleetDescription } : {}),
@@ -521,8 +521,8 @@ export function validateLibraryPackage(
 				severity: "error",
 				code: "ERR_FLEET",
 				message: err instanceof Error ? err.message : String(err),
-				path: path.join(resolved, declaredResources.fleets),
-				kind: "fleet",
+				path: path.join(resolved, declaredResources.playbooks),
+				kind: "playbook",
 			});
 		}
 	}
@@ -549,7 +549,7 @@ export function validateLibraryPackage(
 
 		const normalizedCompPath = normalizePathRel(resolved, fullCompPath);
 
-		if (["agent", "fleet", "skill", "prompt"].includes(comp.kind)) {
+		if (["agent", "playbook", "skill", "prompt"].includes(comp.kind)) {
 			if (comp.kind === "agent") {
 				const agentsDir = declaredResources.agents ? pluginResourcePath(resolved, declaredResources.agents) : null;
 				if (agentsDir && path.dirname(fullCompPath) !== agentsDir) {
@@ -562,16 +562,16 @@ export function validateLibraryPackage(
 						kind: "agent",
 					});
 				}
-			} else if (comp.kind === "fleet") {
-				const fleetsDir = declaredResources.fleets ? pluginResourcePath(resolved, declaredResources.fleets) : null;
+			} else if (comp.kind === "playbook") {
+				const fleetsDir = declaredResources.playbooks ? pluginResourcePath(resolved, declaredResources.playbooks) : null;
 				if (fleetsDir && path.dirname(fullCompPath) !== fleetsDir) {
 					contentDiagnostics.push({
 						severity: "error",
 						code: "ERR_COMPONENT",
-						message: `component fleet:${comp.id} at ${comp.path} is nested and cannot be discovered by runtime loader`,
+						message: `component playbook:${comp.id} at ${comp.path} is nested and cannot be discovered by runtime loader`,
 						path: fullCompPath,
 						componentRef,
-						kind: "fleet",
+						kind: "playbook",
 					});
 				}
 			}

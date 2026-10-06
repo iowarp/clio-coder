@@ -29,7 +29,7 @@ export function buildPluginSnapshot(cwd = process.cwd(), snapshotGeneration = 0)
 		skills: [],
 		prompts: [],
 		agents: [],
-		fleets: [],
+		playbooks: [],
 	};
 	for (const item of packages) {
 		if (!item.loadable || !item.provenance) continue;

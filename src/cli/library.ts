@@ -39,12 +39,12 @@ import { printError, printOk } from "./shared.js";
 
 const HELP = `clio-coder library <command>
 
-One library of packages: plugin, extension, skill, agent, prompt, fleet.
+One library of packages: plugin, extension, skill, agent, prompt, playbook.
 
 Commands:
   clio-coder library list [--kind <kind>] [--user|--project] [--json]
   clio-coder library search [query] [--kind <kind>] [--json]
-  clio-coder library recipes [query] [--kind skill|agent|prompt|fleet] [--source core|package|user|project|compat] [--all] [--json]
+  clio-coder library recipes [query] [--kind skill|agent|prompt|playbook] [--source core|package|user|project|compat] [--all] [--json]
   clio-coder library register <path> [--user|--project] [--force] [--json]
   clio-coder library inspect <path|kind:name|name> [--user|--project] [--json]
   clio-coder library install <path|kind:name|name> [--user|--project] [--force] [--with-requirements] [--dry-run] [--json]
@@ -136,7 +136,7 @@ function parse(args: ReadonlyArray<string>): Parsed {
 		else if (arg === "--with-requirements") out.withRequirements = true;
 		else if (arg === "--kind") {
 			const value = args[++i];
-			if (!isLibraryKind(value)) throw new Error("--kind requires plugin, extension, skill, agent, prompt, or fleet");
+			if (!isLibraryKind(value)) throw new Error("--kind requires plugin, extension, skill, agent, prompt, or playbook");
 			out.kind = value;
 		} else if (arg === "--source") {
 			const value = args[++i];
@@ -287,7 +287,7 @@ export async function runLibraryCommand(
 		}
 		if (parsed.command === "recipes") {
 			if (parsed.kind && !isLibraryResourceKind(parsed.kind))
-				throw new Error("library recipes --kind requires skill, agent, prompt, or fleet");
+				throw new Error("library recipes --kind requires skill, agent, prompt, or playbook");
 			const inventory = readLibraryInventory({
 				cwd: options.cwd,
 				include: { packages: false, copies: false },

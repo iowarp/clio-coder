@@ -26,6 +26,7 @@ import { clioConfigDir, resolveClioDirs } from "../../core/xdg.js";
 import { parseFrontmatter } from "../agents/frontmatter.js";
 import {
 	assertAgentSpecPolicy,
+	legacyPlaybookDirs,
 	normalizeAgentSpec,
 	parseAgentRecipeSchema,
 	parseFleetContract,
@@ -338,9 +339,24 @@ export function createShareArchive(options: ShareExportOptions = {}): ClioShareA
 		}
 	}
 	if (includes.includeFleets) {
+		// Playbooks keep the v1 entry type `fleet` and `<scope>/fleets/` archive
+		// paths, so a release from before D9 can still import the archive.
 		for (const scope of scopes) {
-			const root = scope === "user" ? path.join(clioConfigDir(), "fleets") : path.join(cwd, ".clio-coder", "fleets");
-			addTree(files, "fleet", scope, root, `${scope}/fleets`);
+			const root = scope === "user" ? path.join(clioConfigDir(), "playbooks") : path.join(cwd, ".clio-coder", "playbooks");
+			const exported = new Set<string>();
+			addTree(files, "fleet", scope, root, `${scope}/fleets`, (relativePath) => {
+				exported.add(relativePath);
+				return true;
+			});
+			// D9 legacy read: a playbook left in `fleets/` is exported unless `playbooks/` shadows it.
+			addTree(
+				files,
+				"fleet",
+				scope,
+				legacyPlaybookDirs(cwd)[scope],
+				`${scope}/fleets`,
+				(relativePath) => !exported.has(relativePath),
+			);
 		}
 	}
 	if (includes.includeExtensions) {
@@ -521,7 +537,7 @@ function targetRootForFile(entry: ShareArchiveFile, options: ShareImportOptions)
 		case "agent":
 			return { root: path.join(config, "agents"), containmentRoot: config, scope: "user" };
 		case "fleet":
-			return { root: path.join(config, "fleets"), containmentRoot: config, scope: "user" };
+			return { root: path.join(config, "playbooks"), containmentRoot: config, scope: "user" };
 		case "extension":
 			return scope === "user"
 				? { root: path.join(config, "extensions"), containmentRoot: config, scope }

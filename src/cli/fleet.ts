@@ -1,11 +1,11 @@
 /**
  * `clio-coder fleet` operator surface.
  *
- *   clio-coder fleet list                      enumerate .clio-coder/fleets/*.md with validity
- *   clio-coder fleet new <name> --from <name>  copy a shipped contract into the project
- *   clio-coder fleet validate|graph <name>     inspect a contract without executing it
+ *   clio-coder fleet list                      enumerate playbooks with validity
+ *   clio-coder fleet new <name> --from <name>  copy a shipped playbook into the project
+ *   clio-coder fleet validate|graph <name>     inspect a playbook without executing it
  *   clio-coder fleet commands init             draft a repository command registry
- *   clio-coder fleet run <name> --var k=v ...  preflight + execute a fleet contract
+ *   clio-coder fleet run <name> --var k=v ...  preflight + execute a playbook
  *   clio-coder fleet status [--json] [--all]   runtime snapshot from the durable ledger
  *   clio-coder fleet inspect --json [--all]    bounded recent run and journal projection
  *   clio-coder fleet decisions --json [--all]  bounded sealed review and compete gate verdicts
@@ -13,8 +13,8 @@
  *   clio-coder fleet drain|resume [--json]      close or reopen durable dispatch admission
  *   clio-coder fleet cancel <runId>             cancel one run from any terminal
  *
- * Fleet contracts are repo-owned policy (.clio-coder/fleets/<name>.md). Preflight
- * fails with zero side effects: nothing is dispatched until the contract
+ * Playbooks are repo-owned policy (.clio-coder/playbooks/<name>.md); the fleet
+ * runs them. Preflight fails with zero side effects: nothing is dispatched until the contract
  * parses, every agent resolves, every step scope passes the orchestrator
  * subset check, and the budget gate is open.
  */
@@ -94,16 +94,16 @@ import { fleetInspectionScope } from "./fleet-project-scope.js";
 
 const HELP = `clio-coder fleet <subcommand>
 
-Repo-owned fleet contracts and the dispatch status surface.
+Run repo-owned playbooks on the fleet, and inspect the dispatch status surface.
 
 Subcommands:
   nodes add|list|remove|test     manage SSH worker nodes and project verification
-  list                          list .clio-coder/fleets/*.md contracts with validation status
-  new <name> --from <builtin>   copy build-review, build-test, or sdlc into this repository
-  validate <name> [--json]      run the fleet execution preflight without side effects
-  graph <name> [--json]         print compiled waves, loops, scopes, and write boundaries
-  commands init                 draft a commented command registry from declared project entries
-  run <name> [--var k=v ...]    preflight and execute a fleet contract
+  list                          list builtin, plugin, user and project playbooks with validation status
+  new <name> --from <builtin>   copy the build-review, build-test, or sdlc playbook into .clio-coder/playbooks/
+  validate <name> [--json]      run a playbook's execution preflight without side effects
+  graph <name> [--json]         print a playbook's compiled waves, loops, scopes, and write boundaries
+  commands init                 draft a commented playbook command registry from declared project entries
+  run <name> [--var k=v ...]    preflight and execute a playbook
        [--resume <runId>]        replay a completed prefix from a prior run of the same plan
        [--json]                 emit step receipts as JSON
   status [--json] [--all]       show running, retrying, and total dispatch state
@@ -205,7 +205,7 @@ function runList(args: ReadonlyArray<string>): number {
 	if (unknown !== undefined) return fail(`list: unknown flag: ${unknown}`);
 	const listings = listFleetContracts(process.cwd());
 	if (listings.length === 0) {
-		process.stdout.write("no fleet contracts found (.clio-coder/fleets/*.md)\n");
+		process.stdout.write("no playbooks found (.clio-coder/playbooks/*.md)\n");
 		return 0;
 	}
 	for (const entry of listings) {

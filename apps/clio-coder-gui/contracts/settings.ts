@@ -44,7 +44,7 @@ export const ConfigCategory = Type.Union([
 	Type.Literal("skill-root"),
 	Type.Literal("prompt-root"),
 	Type.Literal("agent-root"),
-	Type.Literal("fleet-root"),
+	Type.Literal("playbook-root"),
 	Type.Literal("safety"),
 	Type.Literal("memory"),
 ]);

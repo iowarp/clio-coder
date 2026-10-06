@@ -21,7 +21,12 @@ import { loadSkills, type Skill } from "./loader.js";
 
 export type MarketplaceSkillOrigin = "catalog" | "index";
 
-import type { LibraryEntryKind, LibraryRequirementRef } from "../library-types.js";
+import {
+	type LibraryEntryKind,
+	type LibraryRequirementRef,
+	readLegacyLibraryKind,
+	readLegacyLibraryRef,
+} from "../library-types.js";
 
 export type { LibraryEntryKind, LibraryRequirementRef } from "../library-types.js";
 
@@ -159,7 +164,10 @@ function parseMarketplaceIndex(indexPath: string, diagnostics: string[] = []): M
 			const audit = indexAudit(record.audit);
 			const category = optionalString(record.category);
 			const triggers = optionalTriggerList(record.triggers);
-			if (record.kind !== undefined && !["skill", "agent", "prompt", "fleet"].includes(String(record.kind))) {
+			// D9 legacy read: an index entry written before the rename says kind `fleet`
+			// and `fleet:<name>` requirements; both are read as the playbook names.
+			const indexKind = readLegacyLibraryKind(record.kind);
+			if (indexKind !== undefined && !["skill", "agent", "prompt", "playbook"].includes(String(indexKind))) {
 				diagnostics.push(`skill marketplace index entry has unsupported kind: ${skill.name}`);
 				return [];
 			}
@@ -171,9 +179,11 @@ function parseMarketplaceIndex(indexPath: string, diagnostics: string[] = []): M
 				return [];
 			}
 			const kind: LibraryEntryKind =
-				record.kind === "agent" || record.kind === "prompt" || record.kind === "fleet" ? record.kind : "skill";
+				indexKind === "agent" || indexKind === "prompt" || indexKind === "playbook" ? indexKind : "skill";
 			const requires = Array.isArray(record.requires)
-				? record.requires.filter((entry): entry is LibraryRequirementRef => typeof entry === "string")
+				? record.requires
+						.map(readLegacyLibraryRef)
+						.filter((entry): entry is LibraryRequirementRef => typeof entry === "string")
 				: undefined;
 			const overlay = optionalString(record.overlay);
 			if (overlay && (path.isAbsolute(overlay) || overlay.split("/").includes(".."))) {

@@ -76,7 +76,7 @@ export interface LibraryOverlayDeps {
 	/** A path or URL to import, from `/library import <path-or-url>`. */
 	importSource?: string;
 	cwd?: string;
-	/** Opens the `/fleet run` approval preview for an installed fleet. */
+	/** Opens the `/fleet run` approval preview for an installed playbook. */
 	openFleetRun?: (name: string) => void;
 	/** Opens the local-agent discovery and adoption surface. Never called on open. */
 	openImport?: () => void;
@@ -408,7 +408,7 @@ export function openLibraryOverlay(tui: TUI, deps: LibraryOverlayDeps): OverlayH
 		});
 	};
 
-	/** Fill the composer, or open the surface a fleet's use actually leads to. */
+	/** Fill the composer, or open the surface a playbook's use actually leads to. */
 	const use = (item: ListOverlayItem | undefined): void => {
 		const subject = selected(item);
 		if (!subject) return;
@@ -421,7 +421,7 @@ export function openLibraryOverlay(tui: TUI, deps: LibraryOverlayDeps): OverlayH
 			deps.notice("warn", actions.reasons[0] ?? `${subject.resource.name} is not usable in this state.`);
 			return;
 		}
-		if (subject.resource.kind === "fleet") {
+		if (subject.resource.kind === "playbook") {
 			deps.openFleetRun?.(subject.resource.name);
 			return;
 		}

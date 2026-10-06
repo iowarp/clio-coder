@@ -13,6 +13,8 @@ import {
 	type LibraryPackageEntry,
 	type LibraryProvidedResource,
 	type LibraryRequirementRef,
+	readLegacyLibraryKind,
+	readLegacyLibraryRef,
 } from "../resources/library-types.js";
 import { isPluginId } from "./discovery.js";
 
@@ -116,6 +118,27 @@ function providedResources(value: unknown, name: string, diagnostics: string[]):
 	return hints;
 }
 
+/**
+ * D9 legacy read, kept for one release: an index row or provides hint written
+ * before the rename says kind `fleet` and requirement `fleet:<name>`.
+ */
+function readLegacyIndexRow(row: Record<string, unknown>): Record<string, unknown> {
+	return {
+		...row,
+		kind: readLegacyLibraryKind(row.kind),
+		...(Array.isArray(row.requires) ? { requires: row.requires.map(readLegacyLibraryRef) } : {}),
+		...(Array.isArray(row.provides)
+			? {
+					provides: row.provides.map((hint: unknown) =>
+						hint && typeof hint === "object"
+							? { ...hint, kind: readLegacyLibraryKind((hint as Record<string, unknown>).kind) }
+							: hint,
+					),
+				}
+			: {}),
+	};
+}
+
 export function readPluginCatalog(file: string, diagnostics: string[]): LibraryPackageEntry[] {
 	if (!existsSync(file)) return [];
 	try {
@@ -131,7 +154,7 @@ export function readPluginCatalog(file: string, diagnostics: string[]): LibraryP
 				diagnostics.push(`library index entry malformed: ${file}`);
 				return [];
 			}
-			const item = row as Record<string, unknown>;
+			const item = readLegacyIndexRow(row as Record<string, unknown>);
 			if (
 				!isLibraryKind(item.kind) ||
 				typeof item.name !== "string" ||

@@ -138,7 +138,7 @@ export function libraryUseInvocation(kind: LibraryResourceKind, name: string): s
 	if (kind === "skill") return `/skill ${name} `;
 	if (kind === "agent") return `/run ${name} `;
 	if (kind === "prompt") return `/${name} `;
-	// A fleet's use is its `/fleet run` approval preview, not composer text.
+	// A playbook's use is its `/fleet run` approval preview, not composer text.
 	return null;
 }
 

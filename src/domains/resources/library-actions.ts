@@ -58,6 +58,7 @@ import {
 	type LibraryEntryKind,
 	type LibraryRequirementRef,
 	type LibraryResourceKind,
+	readLegacyLibraryKind,
 } from "./library-types.js";
 import { validateLibraryPackage } from "./library-validation.js";
 
@@ -291,7 +292,7 @@ function contentOf(root: string): NonNullable<LibraryPlanStep["content"]> {
 		valid: result.valid,
 		resources: result.validation.resources
 			.filter((item): item is typeof item & { kind: LibraryResourceKind } =>
-				["skill", "agent", "prompt", "fleet"].includes(item.kind),
+				["skill", "agent", "prompt", "playbook"].includes(item.kind),
 			)
 			.map((item) => ({ kind: item.kind, name: item.name, valid: item.valid })),
 		diagnostics: [...result.diagnostics.map((d) => d.message), ...result.validation.diagnostics.map((d) => d.message)],
@@ -642,7 +643,7 @@ export function verifyLibraryStep(
 	}
 	const kinds = new Set<LibraryResourceKind>();
 	for (const kind of Object.keys(copy?.resources ?? {}))
-		if (kind === "skills" || kind === "agents" || kind === "prompts" || kind === "fleets")
+		if (kind === "skills" || kind === "agents" || kind === "prompts" || kind === "playbooks")
 			kinds.add(kind.slice(0, -1) as LibraryResourceKind);
 	const resources: LibraryStepVerification["resources"] = [];
 	if (copy && kinds.size) {
@@ -930,7 +931,8 @@ function importedKind(plan: LibraryImportPlan, result: LibraryImportApplyResult,
 	try {
 		const manifest = plan.files?.["plugin.json"];
 		const parsed = manifest ? (JSON.parse(manifest) as { extensions?: Record<string, { kind?: unknown }> }) : undefined;
-		const kind = parsed?.extensions?.["ai.iowarp.clio"]?.kind;
+		// D9 legacy read: reviewed bytes written before the rename say kind `fleet`.
+		const kind = readLegacyLibraryKind(parsed?.extensions?.["ai.iowarp.clio"]?.kind);
 		if (isLibraryKind(kind)) return kind;
 	} catch {
 		// Unreadable review bytes: portable default.

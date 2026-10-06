@@ -352,7 +352,7 @@ const EMPTY_BOARD = [
 	"",
 	"Dispatch one from Clio:",
 	"  /run <agent> <task>    one worker on a task",
-	"  /fleet run <name>      a fleet contract",
+	"  /fleet run <name>      a playbook",
 	"  or ask Clio to delegate the work.",
 	"",
 	"Cards appear here as workers start.",

@@ -110,7 +110,7 @@ export interface LibraryResource {
 	/** `${kind}:${name}@${sourceId}#${relativePath}`; two same-name files under one root stay distinct. */
 	key: string;
 	kind: LibraryResourceKind;
-	/** Actual runtime name: skill frontmatter name, agent file id, prompt path with colons, fleet contract name. */
+	/** Actual runtime name: skill frontmatter name, agent file id, prompt path with colons, playbook name. */
 	name: string;
 	description: string;
 	invocation?: string;
@@ -649,8 +649,8 @@ function fromFleet(listing: ReturnType<typeof listFleetContracts>[number], index
 			: "invalid";
 	const reason = listing.error ?? undefined;
 	return {
-		key: libraryResourceKey("fleet", name, sourceId, keyPath(index.anchors, sourceId, listing.path, owner)),
-		kind: "fleet",
+		key: libraryResourceKey("playbook", name, sourceId, keyPath(index.anchors, sourceId, listing.path, owner)),
+		kind: "playbook",
 		name,
 		description: clip(listing.contract?.description ?? ""),
 		...(availability === "available" ? { invocation: `/fleet run ${name}` } : {}),
@@ -811,7 +811,7 @@ function trustSetting(explicit: boolean | undefined): boolean {
 }
 
 function sortResources(items: LibraryResource[]): LibraryResource[] {
-	const order: Record<LibraryResourceKind, number> = { skill: 0, agent: 1, prompt: 2, fleet: 3 };
+	const order: Record<LibraryResourceKind, number> = { skill: 0, agent: 1, prompt: 2, playbook: 3 };
 	return items.sort(
 		(a, b) =>
 			order[a.kind] - order[b.kind] ||
@@ -954,11 +954,11 @@ function readLibraryInventoryInPass(options: LibraryInventoryOptions): LibraryIn
 			for (const diagnostic of agentDiagnostics) agentRows.push(fromAgentDiagnostic(diagnostic, index));
 		}
 		const fleetRows: LibraryResource[] = [];
-		if (wants("fleet")) {
+		if (wants("playbook")) {
 			try {
 				for (const listing of listFleetContracts(cwd)) fleetRows.push(fromFleet(listing, index));
 			} catch (error) {
-				note(`fleet: discovery failed: ${error instanceof Error ? error.message : String(error)}`);
+				note(`playbook: discovery failed: ${error instanceof Error ? error.message : String(error)}`);
 			}
 		}
 		// Audience and selection are applied per row while collecting, so the cap

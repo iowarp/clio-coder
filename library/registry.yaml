@@ -440,7 +440,7 @@ entries:
       lab feasibility, task execution and verified paper handoff."
     version: 0.2.0
     sourceUrl: plugins/materio
-    sha256: 88420372c7c11e2e9258dc953cc51a6d7d69b7bb403d6e5cb8078af13b9cdc21
+    sha256: 0133b54ca82c764b8f32eb10e8a63cf74015d0197dad584418f8bdcdfe16652a
     provides:
       - kind: agent
         name: materio-lab-definer
@@ -466,7 +466,7 @@ entries:
         name: materio-workflow-planner
         description: Build a resource-aware dependency plan with researcher assumptions
           and tagged defaults.
-      - kind: fleet
+      - kind: playbook
         name: materio-execute-task
         description: Execute one pre-approved research task and independently inspect
           its output files.
@@ -1028,11 +1028,11 @@ entries:
           prose or the explicitly requested scaffold. Preserve the author’s
           epistemic authority, make only supported claims, and leave an
           auditable account of what was produced and what remains unresol
-      - kind: fleet
+      - kind: playbook
         name: wtfp-draft-review
         description: Draft one approved section and independently review its argument
           and evidence.
-      - kind: fleet
+      - kind: playbook
         name: wtfp-plan-section
         description: Create and independently check one evidence-grounded section plan.
       - kind: prompt

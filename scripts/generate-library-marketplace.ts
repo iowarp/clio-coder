@@ -77,10 +77,10 @@ interface PortableManifest {
  * Clio strict-v1 recipe: `claude plugin details` reported `Agents (1)
  * data-curator`, and `claude plugin validate --strict` did not object.
  *
- * The library accepts agent-, prompt- and fleet-only packages and its composite
+ * The library accepts agent-, prompt- and playbook-only packages and its composite
  * template uses ordinary top-level `agents/` and `prompts/` directories. Those
  * are first-class library packages; they simply have no vendor projection here.
- * Clio `prompts/` and `fleets/` are inert to Claude Code, but a root `agents/`
+ * Clio `prompts/` and `playbooks/` are inert to Claude Code, but a root `agents/`
  * would silently present a Clio agent recipe as a native Claude agent, with
  * tools, model and budget fields the host never honors. A package like that is
  * not publishable, and saying so is the point: the alternative is a claimed

@@ -147,7 +147,7 @@ export function preparePortablePackage(root: string): PreparedAdoption {
 		version: manifest.version ?? "0.0.0",
 		files,
 		note:
-			"Data-only portable projection; hooks, MCP, scripts, tools, fleets and host settings are skipped. References to omitted files are unavailable.",
+			"Data-only portable projection; hooks, MCP, scripts, tools, playbooks and host settings are skipped. References to omitted files are unavailable.",
 		omitted,
 		requirements: [...(manifest.clio.requires ?? [])],
 		format: "portable",

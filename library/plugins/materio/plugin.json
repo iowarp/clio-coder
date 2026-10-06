@@ -18,7 +18,7 @@
 				"skills": "skills",
 				"prompts": "ai.iowarp.clio/prompts",
 				"agents": "ai.iowarp.clio/agents",
-				"fleets": "ai.iowarp.clio/fleets"
+				"playbooks": "ai.iowarp.clio/playbooks"
 			},
 			"components": [
 				{
@@ -471,9 +471,9 @@
 					"requires": ["resource:clio-execution", "resource:research-policy"]
 				},
 				{
-					"kind": "fleet",
+					"kind": "playbook",
 					"id": "execute-task",
-					"path": "ai.iowarp.clio/fleets/materio-execute-task.md",
+					"path": "ai.iowarp.clio/playbooks/materio-execute-task.md",
 					"requires": ["agent:task-executor", "agent:task-verifier"]
 				},
 				{
@@ -494,7 +494,7 @@
 			"clio": {
 				"prompts": 17,
 				"agents": 6,
-				"fleets": 1,
+				"playbooks": 1,
 				"mode": "native resource graph"
 			},
 			"codex": {

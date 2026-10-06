@@ -1,6 +1,6 @@
 export type PluginScope = "user" | "project";
-export type PluginResourceKind = "skills" | "prompts" | "agents" | "fleets";
-export type PluginComponentKind = "prompt" | "agent" | "skill" | "fleet" | "script" | "resource" | "tool";
+export type PluginResourceKind = "skills" | "prompts" | "agents" | "playbooks";
+export type PluginComponentKind = "prompt" | "agent" | "skill" | "playbook" | "script" | "resource" | "tool";
 export type PluginResources = Partial<Record<PluginResourceKind, string>>;
 
 export interface PluginDiagnostic {

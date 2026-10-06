@@ -128,7 +128,7 @@ export function discoverLibrary(options: { catalog?: string; cwd?: string } = {}
 	};
 }
 
-const REQUIREMENT_PATTERN = /^(skill|agent|prompt|fleet|plugin|extension):([A-Za-z0-9][A-Za-z0-9._-]*)$/;
+const REQUIREMENT_PATTERN = /^(skill|agent|prompt|playbook|plugin|extension):([A-Za-z0-9][A-Za-z0-9._-]*)$/;
 
 export function resolveLibraryRequirements(entry: LibraryEntry, catalog: ReadonlyArray<LibraryEntry>): LibraryEntry[] {
 	const byRef = new Map(catalog.map((item) => [libraryEntryRef(item), item]));

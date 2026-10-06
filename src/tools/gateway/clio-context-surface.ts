@@ -24,11 +24,11 @@ export const clioDocsToolSurface = {
 export const clioLibraryToolSurface = {
 	name: ToolNames.ClioLibrary,
 	description:
-		"Read the recipe catalog: discovered and installed skills, agents, prompts, and fleets with their owner and invocation, plus installable packages. Body-free rows, bounded pages; activates and installs nothing. Unavailable inside a worker.",
+		"Read the recipe catalog: discovered and installed skills, agents, prompts, and playbooks with their owner and invocation, plus installable packages. Body-free rows, bounded pages; activates and installs nothing. Unavailable inside a worker.",
 	parameters: Type.Object({
 		query: Type.Optional(Type.String({ description: "Name, owner, or description terms." })),
 		kind: Type.Optional(
-			StringEnum(["skill", "agent", "prompt", "fleet", "plugin"], {
+			StringEnum(["skill", "agent", "prompt", "playbook", "plugin"], {
 				description: "One recipe kind, or plugin for installable package rows.",
 			}),
 		),
