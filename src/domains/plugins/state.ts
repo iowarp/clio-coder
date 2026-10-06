@@ -19,7 +19,7 @@ import { safeResourceWrite } from "../../core/safe-resource-write.js";
 import { projectPackagesTrusted } from "../../core/workspace-trust.js";
 import { clioConfigDir } from "../../core/xdg.js";
 import { evaluateClioCompatibility } from "../extensions/compatibility.js";
-import { isLibraryKind, type LibraryRequirementRef } from "../resources/library-types.js";
+import { isLibraryKind, type LibraryEntryKind, type LibraryRequirementRef } from "../resources/library-types.js";
 import { isPluginId, pluginPathContained, readPluginManifest } from "./discovery.js";
 import { passPluginCandidate } from "./discovery-pass.js";
 import { pluginContentDigest } from "./integrity.js";
@@ -293,14 +293,30 @@ function assertExpectedState(expect: PluginExpectedState | undefined, cwd: strin
 }
 
 /**
+ * Plugin-format packages share one directory per scope, so their ids compete.
+ * A standalone extension lives in its own directory and never competes with a
+ * plugin of the same name (the shipped Materio pair).
+ */
+function packageNamespace(kind: LibraryEntryKind | undefined): "extension" | "plugin" {
+	return kind === "extension" ? "extension" : "plugin";
+}
+
+/**
  * The one precedence rule: valid, compatible copies compete and project wins.
  * A project copy the operator has not approved sits out, so it neither loads
- * nor shadows a user copy.
+ * nor shadows a user copy. Copies compete only inside their own namespace.
  */
 export function resolvePluginPrecedence(entries: InstalledPlugin[]): void {
 	for (const entry of entries) {
 		const winner = entries
-			.filter((peer) => peer.id === entry.id && peer.valid && peer.compatible && !peer.trustBlocked)
+			.filter(
+				(peer) =>
+					peer.id === entry.id &&
+					packageNamespace(peer.kind) === packageNamespace(entry.kind) &&
+					peer.valid &&
+					peer.compatible &&
+					!peer.trustBlocked,
+			)
 			.sort((a, b) => Number(a.scope === "project") - Number(b.scope === "project"))
 			.at(-1);
 		entry.effective = entry === winner;
@@ -329,25 +345,28 @@ function unmetRequirementsOf(entry: InstalledPlugin, entries: ReadonlyArray<Inst
  */
 export function newlyBrokenDependents(
 	entries: ReadonlyArray<InstalledPlugin>,
-	mutation: { scope: PluginScope; id: string; operation: "disable" | "remove" },
+	mutation: { scope: PluginScope; id: string; operation: "disable" | "remove"; kind?: LibraryEntryKind },
 ): { newlyBroken: PluginDependentBreak[]; preexisting: PluginDependentBreak[]; effectiveAfter?: InstalledPlugin } {
+	const namespace = packageNamespace(mutation.kind);
+	const sameSlot = (entry: InstalledPlugin): boolean =>
+		entry.id === mutation.id && entry.scope === mutation.scope && packageNamespace(entry.kind) === namespace;
 	const before = entries.map((entry) => ({ ...entry }));
 	resolvePluginPrecedence(before);
 	const after = before
-		.filter((entry) => !(mutation.operation === "remove" && entry.id === mutation.id && entry.scope === mutation.scope))
+		.filter((entry) => !(mutation.operation === "remove" && sameSlot(entry)))
 		.map((entry) => ({
 			...entry,
-			enabled:
-				mutation.operation === "disable" && entry.id === mutation.id && entry.scope === mutation.scope
-					? false
-					: entry.enabled,
+			enabled: mutation.operation === "disable" && sameSlot(entry) ? false : entry.enabled,
 		}));
 	resolvePluginPrecedence(after);
 	const newlyBroken: PluginDependentBreak[] = [];
 	const preexisting: PluginDependentBreak[] = [];
 	for (const entry of before) {
-		if (entry.id === mutation.id && entry.scope === mutation.scope) continue;
-		const later = after.find((peer) => peer.id === entry.id && peer.scope === entry.scope);
+		if (sameSlot(entry)) continue;
+		const later = after.find(
+			(peer) =>
+				peer.id === entry.id && peer.scope === entry.scope && packageNamespace(peer.kind) === packageNamespace(entry.kind),
+		);
 		if (!later?.loadable) continue;
 		const missingBefore = entry.loadable ? unmetRequirementsOf(entry, before) : [];
 		const missingAfter = unmetRequirementsOf(later, after);
@@ -356,7 +375,9 @@ export function newlyBrokenDependents(
 		if (fresh.length) newlyBroken.push({ ref, scope: entry.scope, missing: fresh });
 		else if (missingAfter.length) preexisting.push({ ref, scope: entry.scope, missing: missingAfter });
 	}
-	const effectiveAfter = after.find((entry) => entry.id === mutation.id && entry.effective);
+	const effectiveAfter = after.find(
+		(entry) => entry.id === mutation.id && packageNamespace(entry.kind) === namespace && entry.effective,
+	);
 	return { newlyBroken, preexisting, ...(effectiveAfter ? { effectiveAfter } : {}) };
 }
 

@@ -15,7 +15,13 @@ import { withPluginDiscoveryPass } from "../plugins/index.js";
 import type { InstalledPlugin, PluginInstallRecord, PluginScope } from "../plugins/types.js";
 import type { ResourceDiagnostic } from "./collision.js";
 import { discoverLibrary } from "./library.js";
-import { listInstalledLibraryPackages as listInstalledPlugins, readLibraryInstallRecord } from "./library-packages.js";
+import {
+	installedCopiesNamed,
+	libraryCopySourceId,
+	libraryNamespace,
+	listInstalledLibraryPackages as listInstalledPlugins,
+	readLibraryInstallRecord,
+} from "./library-packages.js";
 import type {
 	LibraryComponentKind,
 	LibraryEntryKind,
@@ -458,7 +464,7 @@ function projectCopy(plugin: InstalledPlugin, cwd: string): LibraryCopy {
 // ---------------------------------------------------------------------------
 
 interface OwnerIndex {
-	/** `plugin:<scope>:<id>` → copy */
+	/** `plugin:<scope>:<id>` for plugin-format packages, `extension:<scope>:<id>` for extensions → copy */
 	bySourceId: Map<string, LibraryCopy>;
 	/** canonical root → copy, for readers that only expose a file path */
 	roots: Array<{ root: string; copy: LibraryCopy }>;
@@ -469,7 +475,7 @@ function ownerIndex(copies: ReadonlyArray<LibraryCopy>, anchors: KeyAnchors): Ow
 	const bySourceId = new Map<string, LibraryCopy>();
 	const roots: OwnerIndex["roots"] = [];
 	for (const copy of copies) {
-		bySourceId.set(`plugin:${copy.scope}:${copy.name}`, copy);
+		bySourceId.set(libraryCopySourceId(copy), copy);
 		roots.push({ root: canonical(copy.root), copy });
 	}
 	// Longest root first so a nested package root wins containment.
@@ -588,7 +594,7 @@ function agentSourceId(
 	if (recipe.source === "user") return { sourceId: "config" };
 	if (recipe.source === "project") return { sourceId: "project" };
 	const owner = ownerByPath(index, recipe.filepath);
-	return owner ? { sourceId: `plugin:${owner.scope}:${owner.name}`, owner } : { sourceId: "plugin:unknown" };
+	return owner ? { sourceId: libraryCopySourceId(owner), owner } : { sourceId: "plugin:unknown" };
 }
 
 function agentScope(source: AgentRecipe["source"]): "package" | "user" | "project" {
@@ -678,7 +684,7 @@ function fromCollisionLoser(
 	if (winners.some((item) => item.path === collision.loserPath)) return undefined;
 	const scope = collision.loserScope === "cli" ? "user" : collision.loserScope;
 	const owner = scope === "package" ? ownerByPath(index, collision.loserPath) : undefined;
-	const sourceId = owner ? `plugin:${owner.scope}:${owner.name}` : sourceIdFor(collision.loserPath, scope);
+	const sourceId = owner ? libraryCopySourceId(owner) : sourceIdFor(collision.loserPath, scope);
 	return {
 		key: libraryComponentKey(
 			kind,
@@ -765,7 +771,8 @@ function packageMatches(record: LibraryPackageRecord, options: LibraryInventoryO
 		// An exact key names one file under one source. Only its owner answers;
 		// hints in other packages never match a key that already has an owner.
 		const key = selection.resourceKey;
-		if (!key.sourceId.startsWith("plugin:") || key.sourceId.split(":")[2] !== record.name) return false;
+		const [namespace, , owner] = key.sourceId.split(":");
+		if (namespace !== libraryNamespace(record.kind) || owner !== record.name) return false;
 	}
 	if (options.kinds?.length) {
 		const kinds = options.kinds;
@@ -777,7 +784,7 @@ function packageMatches(record: LibraryPackageRecord, options: LibraryInventoryO
 function copyMatches(copy: LibraryCopy, options: LibraryInventoryOptions, selection: Selection): boolean {
 	if (selection.packageRef && copy.ref !== selection.packageRef) return false;
 	if (selection.name && copy.name !== selection.name) return false;
-	if (selection.resourceKey && selection.resourceKey.sourceId !== `plugin:${copy.scope}:${copy.name}`) return false;
+	if (selection.resourceKey && selection.resourceKey.sourceId !== libraryCopySourceId(copy)) return false;
 	if (options.kinds?.length && !options.kinds.includes(copy.kind)) return false;
 	return true;
 }
@@ -1029,11 +1036,10 @@ export function inspectLibraryCopy(
 ): LibraryCopyInspection {
 	const cwd = path.resolve(options.cwd ?? process.cwd());
 	// Resolve precedence across both scopes before selecting the copy to inspect.
-	const candidates = listInstalledPlugins(cwd, { all: true })
-		.filter((item) => !options.scope || item.scope === options.scope)
-		.filter((item) => (ref.includes(":") ? `${item.kind ?? "plugin"}:${item.id}` === ref : item.id === ref))
-		.sort((a, b) => Number(b.scope === "project") - Number(a.scope === "project"));
-	const plugin = candidates[0];
+	const plugin = installedCopiesNamed(
+		listInstalledPlugins(cwd, { all: true }).filter((item) => !options.scope || item.scope === options.scope),
+		ref,
+	)[0];
 	if (!plugin) throw new Error(`package not installed: ${ref}`);
 	const copy = projectCopy(plugin, cwd);
 	if (!existsSync(plugin.rootPath))

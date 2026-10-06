@@ -46,6 +46,7 @@ import {
 } from "./library.js";
 import { type LibraryCopyState, libraryCopyState, readLibraryInventory } from "./library-inventory.js";
 import {
+	libraryNamespace,
 	libraryPackageBaseDir,
 	listInstalledLibraryPackages as listInstalledPlugins,
 	observeLibraryCopy,
@@ -163,13 +164,32 @@ export interface LibraryStepOutcome {
 	};
 }
 
+/**
+ * What happened to the running extensions after a change that reached them.
+ * Extension runtimes and their hooks restart through a reload that waits for an
+ * idle session, so a refresh can only say that it began or that it is queued.
+ */
+export type LibraryExtensionRefresh = "reloading" | "queued" | "unavailable";
+
 export type LibraryRefreshResult =
-	| { status: "refreshed"; generation: number; changed: boolean }
+	| { status: "refreshed"; generation: number; changed: boolean; extensions?: LibraryExtensionRefresh }
 	| { status: "failed"; error: string }
 	| { status: "not-applicable"; reason: string };
 
+/** What the committed steps touched, so a host reloads only what the change reaches. */
+export interface LibraryRefreshTouch {
+	extensions: boolean;
+}
+
 /** Provided by the active host. Must never re-run a lifecycle write. */
-export type LibraryRefreshHost = (cwd: string) => LibraryRefreshResult;
+export type LibraryRefreshHost = (cwd: string, touched?: LibraryRefreshTouch) => LibraryRefreshResult;
+
+/** Whether a committed step changed an installed extension. */
+export function libraryRefreshTouch(outcomes: ReadonlyArray<LibraryStepOutcome>): LibraryRefreshTouch {
+	return {
+		extensions: outcomes.some((item) => item.status === "committed" && item.identity.kind === "extension"),
+	};
+}
 
 export interface LibraryApplyResult {
 	planId: string;
@@ -225,6 +245,15 @@ function copyOf(
 	);
 }
 
+/**
+ * Whether a copy competes for the identity's name. A plugin and the extension
+ * that serves it share a name and never compete (the shipped Materio pair), so
+ * the peer, winner and survivor of a step are always read within one namespace.
+ */
+function competes(item: Pick<InstalledPlugin, "id" | "kind">, identity: LibraryPackageIdentity): boolean {
+	return item.id === identity.name && libraryNamespace(item.kind) === libraryNamespace(identity.kind);
+}
+
 function observe(
 	cwd: string,
 	scope: PluginScope,
@@ -268,7 +297,7 @@ function expectedFor(
 
 function stateAfterInstall(entries: ReadonlyArray<InstalledPlugin>, identity: LibraryPackageIdentity) {
 	const peer = entries.find(
-		(item) => item.id === identity.name && item.scope === peerOf(identity.scope) && item.valid && item.compatible,
+		(item) => competes(item, identity) && item.scope === peerOf(identity.scope) && item.valid && item.compatible,
 	);
 	if (identity.scope === "user" && peer) {
 		return {
@@ -494,6 +523,7 @@ export function planLibraryLifecycle(request: LibraryLifecycleRequest): LibraryL
 					scope: identity.scope,
 					id: identity.name,
 					operation: request.operation,
+					kind: identity.kind,
 				});
 				dependents = { newlyBroken: projection.newlyBroken, preexisting: projection.preexisting };
 				if (projection.newlyBroken.length)
@@ -507,7 +537,7 @@ export function planLibraryLifecycle(request: LibraryLifecycleRequest): LibraryL
 				if (request.operation === "disable")
 					fallbackNote =
 						survivor && survivor.scope === identity.scope
-							? survivor.overriddenBy || entries.some((item) => item.id === identity.name && item.scope !== identity.scope)
+							? survivor.overriddenBy || entries.some((item) => competes(item, identity) && item.scope !== identity.scope)
 								? `the disabled ${identity.scope} copy still shadows the ${peerOf(identity.scope)} copy; removal would reveal it`
 								: "no other copy exists; nothing falls back"
 							: "another copy is already effective";
@@ -661,7 +691,7 @@ export function verifyLibraryStep(
 					...(resource.reason ? { reason: resource.reason } : {}),
 				});
 	}
-	const effective = entries.find((item) => item.id === identity.name && item.effective);
+	const effective = entries.find((item) => competes(item, identity) && item.effective);
 	return {
 		evidence,
 		tree,
@@ -881,7 +911,7 @@ export function applyLibraryLifecycle(
 	}
 	const committed = outcomes.filter((item) => item.status === "committed");
 	const refresh = committed.length
-		? retryLibraryRefresh(plan.cwd, options.refresh)
+		? retryLibraryRefresh(plan.cwd, options.refresh, libraryRefreshTouch(outcomes))
 		: ({ status: "not-applicable", reason: "nothing committed" } as const);
 	if (refresh.status === "refreshed")
 		for (const outcome of committed)
@@ -907,14 +937,20 @@ function summarize(
 }
 
 /** Refresh only. Never reinstalls or removes; safe after a partial batch or a failed refresh. */
-export function retryLibraryRefresh(cwd: string, refresh?: LibraryRefreshHost): LibraryRefreshResult {
+export function retryLibraryRefresh(
+	cwd: string,
+	refresh?: LibraryRefreshHost,
+	touched: LibraryRefreshTouch = { extensions: false },
+): LibraryRefreshResult {
 	if (!refresh)
 		return {
 			status: "not-applicable",
-			reason: "no active session in this process; use /library reload in the running TUI",
+			reason: touched.extensions
+				? "no active session in this process; run /reload in the running TUI to load the extension and its hooks"
+				: "no active session in this process; use /library reload in the running TUI",
 		};
 	try {
-		return refresh(cwd);
+		return refresh(cwd, touched);
 	} catch (error) {
 		return { status: "failed", error: error instanceof Error ? error.message : String(error) };
 	}

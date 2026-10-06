@@ -30,6 +30,7 @@ import {
 	readLibraryInventory,
 } from "../domains/resources/library-inventory.js";
 import {
+	installedCopiesNamed,
 	listInstalledLibraryPackages as listInstalledPlugins,
 	readLibraryManifest as readPluginManifest,
 } from "../domains/resources/library-packages.js";
@@ -200,7 +201,7 @@ function lifecycleJson(
 	const plugin =
 		last?.status === "committed"
 			? listInstalledPlugins(plan.cwd, { scope: last.identity.scope, all: true }).find(
-					(item) => item.id === last.identity.name,
+					(item) => item.id === last.identity.name && (item.kind ?? "plugin") === last.identity.kind,
 				)
 			: undefined;
 	return { ...base, ...(plugin ? { plugin } : {}), diagnostics: last?.diagnostics ?? [] };
@@ -436,11 +437,10 @@ export async function runLibraryCommand(
 			// Precedence is a cross-scope fact: list both scopes first, then narrow
 			// to the requested scope, so a user copy shadowed by a project copy never
 			// reads as effective.
-			const copies = listInstalledPlugins(options.cwd, { all: true })
-				.filter((item) => !parsed.scope || item.scope === parsed.scope)
-				.filter((item) => (ref.includes(":") ? `${item.kind ?? "plugin"}:${item.id}` === ref : item.id === ref))
-				.sort((a, b) => Number(b.scope === "project") - Number(a.scope === "project"));
-			const installed = copies[0];
+			const installed = installedCopiesNamed(
+				listInstalledPlugins(options.cwd, { all: true }).filter((item) => !parsed.scope || item.scope === parsed.scope),
+				ref,
+			)[0];
 			if (installed) {
 				// Existing fields stay as they are; `library` is the additive deeper read.
 				emit({ ...installed, library: inspectLibraryCopy(ref, { ...options, scope: installed.scope }) });
@@ -514,7 +514,9 @@ export async function runLibraryCommand(
 					const refresh = apply.refresh;
 					process.stderr.write(
 						refresh.status === "not-applicable"
-							? "A running session picks this up after /library reload.\n"
+							? apply.outcomes.some((item) => item.status === "committed" && item.identity.kind === "extension")
+								? "A running session loads this extension and its hooks after /reload.\n"
+								: "A running session picks this up after /library reload.\n"
 							: refresh.status === "failed"
 								? `session refresh failed: ${refresh.error}\n`
 								: `session resources refreshed (generation ${refresh.generation})\n`,

@@ -79,6 +79,10 @@ export class OperatorExtensions {
 	get busy(): boolean {
 		return this.v1.busy || this.v2.busy;
 	}
+	/** Whether a reload would start now; when false it queues until the session and operator commands are idle. */
+	get canReloadNow(): boolean {
+		return !this.busy && this.options.isIdle();
+	}
 	get maintenanceDelayMs(): number | null {
 		if (this.queuedReload) return 250;
 		const delays = [this.v1.maintenanceDelayMs, this.v2.maintenanceDelayMs].filter((delay) => delay !== null);
@@ -100,7 +104,7 @@ export class OperatorExtensions {
 	/** api 1 first: it commits the paired hook generation, and its runtimes claim the shared cap first. */
 	async reload(reason: ReloadReason = "reload"): Promise<OperatorReloadResult> {
 		// Do not commit api 1/hooks while an api 2 command still owns its generation.
-		if (this.busy || !this.options.isIdle()) {
+		if (!this.canReloadNow) {
 			this.queuedReload = true;
 			this.options.onChange?.();
 			return {
