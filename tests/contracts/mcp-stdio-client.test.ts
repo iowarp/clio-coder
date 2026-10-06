@@ -1,4 +1,5 @@
 import { deepStrictEqual, match, ok, strictEqual, throws } from "node:assert/strict";
+import { getEventListeners } from "node:events";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -367,31 +368,36 @@ describe("mcp stdio client", () => {
 		}
 	});
 
-	it("times out one request without killing the server", async () => {
+	it("times out a sent call only after ending owned server work", async () => {
 		const c = client();
-		await rejectsWithCode(c.callTool("sleep", { ms: 500 }, { timeoutMs: 50 }), "timeout", /timed out after 50ms/);
-		strictEqual(c.state().status, "ready");
-		strictEqual((await c.callTool("echo", { after: "timeout" })).text, JSON.stringify({ after: "timeout" }));
+		const error = await rejectsWithCode(
+			c.callTool("sleep", { ms: 500 }, { timeoutMs: 50 }),
+			"timeout",
+			/timed out after 50ms/,
+		);
+		strictEqual(c.state().status, "failed");
+		deepStrictEqual(c.state().teardown, { complete: true });
+		strictEqual(processAlive(c.pid), false);
+		strictEqual(await rejectsWithCode(c.callTool("echo", {}), "timeout"), error);
 	});
 
-	it("aborts a request the server is already working on and leaves the server running", async () => {
-		const c = client();
+	it("cancelled sent call ends owned server work", async () => {
+		const c = client("ignore-sigterm");
 		await c.initialize();
-		const controller = new AbortController();
-		const call = c.callTool("sleep", { ms: 300 }, { signal: controller.signal });
-		await waitFor(() => c.stderrTail().includes("sleep start"), 1_500);
-		controller.abort();
-		await rejectsWithCode(call, "aborted", /tools\/call aborted$/);
-		strictEqual(c.state().status, "ready");
 		const early = new AbortController();
 		early.abort();
 		await rejectsWithCode(c.callTool("echo", {}, { signal: early.signal }), "aborted", /before it was sent/);
 		strictEqual((await c.callTool("echo", { ok: true })).isError, false);
-		// The late answer to the aborted request arrives and is dropped without effect.
-		await new Promise((settle) => setTimeout(settle, 350));
-		strictEqual(c.state().status, "ready");
-		strictEqual(c.notificationCount(), 0);
-		strictEqual((await c.callTool("echo", { still: "fine" })).text, JSON.stringify({ still: "fine" }));
+		const { pid: descendant } = await spawnDescendant(c, false);
+		const controller = new AbortController();
+		const call = c.callTool("sleep", { ms: 5_000 }, { signal: controller.signal });
+		await waitFor(() => c.stderrTail().includes("sleep start"));
+		controller.abort();
+		await rejectsWithCode(call, "aborted", /tools\/call aborted$/);
+		deepStrictEqual(c.state().teardown, { complete: true });
+		strictEqual(c.state().status, "failed");
+		strictEqual(processAlive(c.pid), false, "the server is gone before cancellation settles");
+		strictEqual(processAlive(descendant), false, "owned descendant work is gone before cancellation settles");
 	});
 
 	it("answers server-initiated requests with method-not-found and counts notifications", async () => {
@@ -591,6 +597,15 @@ describe("mcp stdio client", () => {
 		await c.initialize();
 		deepStrictEqual(await c.close(), { complete: true });
 		deepStrictEqual(await recordGroupSignals(async () => c.killOwnedOnExit()), []);
+	});
+
+	it("normal close removes parent listener", async () => {
+		const controller = new AbortController();
+		const c = client("normal", { signal: controller.signal });
+		await c.initialize();
+		strictEqual(getEventListeners(controller.signal, "abort").length, 1);
+		deepStrictEqual(await c.close(), { complete: true });
+		strictEqual(getEventListeners(controller.signal, "abort").length, 0);
 	});
 
 	it("close ends the process group, rejects pending calls, and is idempotent", async () => {

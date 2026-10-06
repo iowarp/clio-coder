@@ -35,6 +35,12 @@ import {
 	workerCompileCacheEnvironment,
 } from "../../core/compile-cache.js";
 import { resolvePackageRoot } from "../../core/package-root.js";
+import type { ProcessGroupCleanupStatus } from "../../core/safe-exec.js";
+import {
+	createProcessGroupCleanup,
+	SAFE_EXEC_GROUP_TEARDOWN_BOUND_MS,
+	SAFE_EXEC_PIPE_DRAIN_BOUND_MS,
+} from "../../core/safe-exec.js";
 import type { WorkerSpec } from "../../worker/spec-contract.js";
 import type { HeartbeatStamp } from "./heartbeat.js";
 import {
@@ -58,6 +64,10 @@ import {
 export type { WorkerSpec } from "../../worker/spec-contract.js";
 export { WorkerChannelFailure } from "./worker-protocol.js";
 
+export interface WorkerProcessCleanup extends ProcessGroupCleanupStatus {
+	pipeDrainIncomplete: boolean;
+}
+
 export interface SpawnedWorkerResult {
 	exitCode: number | null;
 	signal: NodeJS.Signals | null;
@@ -71,6 +81,8 @@ export interface SpawnedWorkerResult {
 	 * node rather than to the target or the model.
 	 */
 	channelFailure?: WorkerChannelFailure["operation"];
+	/** Local process ownership outcome; an SSH child cannot attest remote cleanup. */
+	processCleanup?: WorkerProcessCleanup;
 }
 
 export interface SpawnedWorker {
@@ -174,6 +186,9 @@ export interface WorkerProcessOptions {
  * initiated cancel with output flush) pass `shutdownGraceMs` explicitly.
  */
 const DEFAULT_SHUTDOWN_GRACE_MS = 500;
+/** Existing escalation and pipe bounds, conservatively allowed in sequence. */
+export const WORKER_PROCESS_CLEANUP_BOUND_MS =
+	DEFAULT_SHUTDOWN_GRACE_MS + SAFE_EXEC_GROUP_TEARDOWN_BOUND_MS + SAFE_EXEC_PIPE_DRAIN_BOUND_MS;
 /**
  * How long bulk output may precede the announce. The two lanes are separate
  * pipes with no ordering guarantee, so a frame arriving first proves nothing;
@@ -319,7 +334,7 @@ function attachWorkerChannel(
 		// A peer that did not prove the approved route identity must not execute.
 		// Terminate the whole group authoritatively rather than offering a
 		// catchable grace signal.
-		signalProcessGroup(child, "SIGKILL");
+		forceOwnedKill();
 	}
 
 	child.once("error", (err) => {
@@ -330,7 +345,7 @@ function attachWorkerChannel(
 		// says why the worker never started was missing from the sealed receipt.
 		appendStderr(`[worker] spawn error: ${message}\n`);
 		push({ type: "spawn_error", error: message });
-		signalProcessGroup(child, "SIGKILL");
+		forceOwnedKill();
 	});
 
 	if (pid !== null && child.stdin) {
@@ -528,61 +543,132 @@ function attachWorkerChannel(
 
 	let settled = false;
 	let abortStarted = false;
-	let killTimer: ReturnType<typeof setTimeout> | null = null;
-	let pendingClose: (() => void) | null = null;
-
-	// The leader may exit while a same-group descendant has closed all inherited
-	// pipes. Neither exit nor close proves that cancellation reached the group.
-	function hasOwnedProcesses(): boolean {
-		if (pid === null) return false;
-		if (process.platform !== "win32") {
-			try {
-				process.kill(-pid, 0);
-				return true;
-			} catch (error) {
-				if ((error as NodeJS.ErrnoException).code === "EPERM") return true;
-			}
-		}
-		return isAlive();
-	}
-
+	let closed = false;
+	let leaderExit: { code: number | null; signal: NodeJS.Signals | null } | null = null;
+	let cleanupStatus: ProcessGroupCleanupStatus | null = null;
+	let pipeDrainIncomplete = false;
+	let pipeDrainFinished = false;
+	let drainTimer: ReturnType<typeof setTimeout> | null = null;
+	let resolveResult!: (result: SpawnedWorkerResult) => void;
 	const promise = new Promise<SpawnedWorkerResult>((resolve) => {
-		child.on("close", (code, signal) => {
-			const finish = (): void => {
-				if (settled) return;
-				settled = true;
-				try {
-					child.stdin?.end();
-				} catch {
-					// stdin may already be closed.
-				}
-				end();
-				if (sawSpawnError) {
-					resolve({ exitCode: null, signal: null, ...diagnostics() });
-					return;
-				}
-				if (!announceAccepted && !announceFailed) {
-					announceFailed = true;
-					appendStderr("[worker] Missing worker attestation: peer exited before announcing its route identity\n");
-				}
-				if (announceFailed) {
-					resolve({ exitCode: code !== null && code !== 0 ? code : 1, signal: signal ?? null, ...diagnostics() });
-					return;
-				}
-				resolve({ exitCode: code ?? 0, signal: signal ?? null, ...diagnostics() });
-			};
-			if (killTimer !== null && hasOwnedProcesses()) {
-				pendingClose = finish;
-				return;
-			}
-			if (killTimer !== null) clearTimeout(killTimer);
-			killTimer = null;
-			finish();
-		});
+		resolveResult = resolve;
 	});
 
 	function isAlive(): boolean {
 		return child.exitCode === null && child.signalCode === null;
+	}
+
+	function hasOwnedProcesses(): boolean {
+		if (pid === null) return false;
+		if (process.platform === "win32") return isAlive();
+		try {
+			process.kill(-pid, 0);
+			return true;
+		} catch (error) {
+			return (error as NodeJS.ErrnoException).code !== "ESRCH";
+		}
+	}
+
+	function signalOwnedProcesses(signal: NodeJS.Signals): boolean {
+		let delivered: boolean;
+		if (pid !== null && process.platform !== "win32") {
+			try {
+				process.kill(-pid, signal);
+				delivered = true;
+			} catch (error) {
+				return (error as NodeJS.ErrnoException).code !== "ESRCH";
+			}
+		} else {
+			delivered = isAlive() && child.kill(signal);
+		}
+		if (delivered && signal === "SIGKILL" && abortStarted) {
+			try {
+				opts?.onForcedKill?.();
+			} catch {
+				// Remote fallback remains best-effort; local cleanup proves nothing remote.
+			}
+		}
+		return delivered;
+	}
+
+	function finish(): void {
+		if (settled || cleanupStatus === null || (!closed && !pipeDrainFinished)) return;
+		settled = true;
+		if (drainTimer !== null) clearTimeout(drainTimer);
+		if (attestationGraceTimer !== null) clearTimeout(attestationGraceTimer);
+		drainTimer = attestationGraceTimer = null;
+		try {
+			child.stdin?.end();
+		} catch {
+			// stdin may already be closed.
+		}
+		child.stdout?.destroy();
+		child.stderr?.destroy();
+		child.unref();
+		end();
+		if (!sawSpawnError && !announceAccepted && !announceFailed) {
+			announceFailed = true;
+			appendStderr("[worker] Missing worker attestation: peer exited before announcing its route identity\n");
+		}
+		const code = leaderExit?.code ?? child.exitCode;
+		const signal = leaderExit?.signal ?? child.signalCode;
+		let exitCode: number | null = code ?? 0;
+		if (sawSpawnError || (cleanupStatus.incomplete && leaderExit === null)) exitCode = null;
+		else if (announceFailed) exitCode = code !== null && code !== 0 ? code : 1;
+		resolveResult({
+			exitCode,
+			signal: sawSpawnError ? null : signal,
+			...diagnostics(),
+			processCleanup: { ...cleanupStatus, pipeDrainIncomplete },
+		});
+	}
+
+	function boundPipeDrain(): void {
+		if (closed || drainTimer !== null) return;
+		drainTimer = setTimeout(() => {
+			drainTimer = null;
+			pipeDrainFinished = true;
+			pipeDrainIncomplete = Boolean(
+				(child.stdout && !child.stdout.readableEnded) || (child.stderr && !child.stderr.readableEnded),
+			);
+			child.stdout?.destroy();
+			child.stderr?.destroy();
+			finish();
+		}, SAFE_EXEC_PIPE_DRAIN_BOUND_MS);
+	}
+
+	const processOwner = createProcessGroupCleanup({
+		graceMs: shutdownGraceMs,
+		probe: hasOwnedProcesses,
+		signal: signalOwnedProcesses,
+		onDone(status) {
+			cleanupStatus = status;
+			boundPipeDrain();
+			finish();
+		},
+	});
+	child.once("exit", (code, signal) => {
+		leaderExit = { code, signal };
+		boundPipeDrain();
+		processOwner.leaderExited();
+		finish();
+	});
+	child.once("close", (code, signal) => {
+		closed = true;
+		leaderExit ??= { code, signal };
+		if (pid === null) {
+			processOwner.dispose();
+			cleanupStatus = { descendantsCleaned: false, incomplete: false };
+		} else {
+			processOwner.leaderExited();
+		}
+		finish();
+	});
+
+	function forceOwnedKill(): void {
+		if (processOwner.done) return;
+		if (hasOwnedProcesses()) signalOwnedProcesses("SIGKILL");
+		processOwner.kill();
 	}
 
 	/**
@@ -635,30 +721,14 @@ function attachWorkerChannel(
 	};
 
 	const abort = (): void => {
-		if (settled || abortStarted || !hasOwnedProcesses()) return;
+		if (settled || abortStarted || processOwner.done) return;
 		abortStarted = true;
 		try {
 			child.stdin?.end();
 		} catch {
-			// process may already be closing
+			// The control lane may already be closing.
 		}
-		signalProcessGroup(child, "SIGTERM");
-		killTimer = setTimeout(() => {
-			killTimer = null;
-			if (hasOwnedProcesses()) {
-				signalProcessGroup(child, "SIGKILL");
-				try {
-					opts?.onForcedKill?.();
-				} catch {
-					// fallback is best-effort; the local channel is already dead
-				}
-			}
-			const finish = pendingClose;
-			pendingClose = null;
-			finish?.();
-		}, shutdownGraceMs);
-		// Keep this timer referenced: callers await settlement before process exit,
-		// even when the leader and every inherited pipe have already closed.
+		processOwner.kill();
 	};
 
 	return {

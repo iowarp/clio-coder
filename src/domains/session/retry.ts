@@ -12,7 +12,7 @@
  *   1. Declares the RetrySettings shape and sensible defaults.
  *   2. Routes generic provider classification through pi-ai 0.87.1's
  *      `isRetryableAssistantError`, retaining only Clio's local-model delta.
- *   3. Computes the backoff delay for a given attempt (`computeRetryDelayMs`)
+ *   3. Computes the backoff delay for a given attempt (`recoveryRetryDelayMs`)
  *      with the cap the settings declare; callers schedule the wait.
  *   4. Provides `createRetryCountdown` so the TUI can show seconds remaining
  *      and cancel a pending retry on `Esc` without coupling to a specific
@@ -28,7 +28,8 @@
 
 import { performance } from "node:perf_hooks";
 import type { RetrySettings } from "../../core/defaults.js";
-import { engineRetryDelayMs, isEngineRetryableAssistantError } from "../../engine/ai.js";
+import { isLiteLLMConnectionFailure } from "../../core/gateway-routing.js";
+import { engineRetryDelayMs, isEngineContextOverflow, isEngineRetryableAssistantError } from "../../engine/ai.js";
 
 export type { RetrySettings } from "../../core/defaults.js";
 
@@ -91,24 +92,66 @@ export function isRetryableErrorMessage(errorMessage: string | null | undefined)
 	return isEngineRetryableAssistantError(errorMessage) || MODEL_LOADING_PATTERN.test(errorMessage);
 }
 
+export type RecoveryFailureKind =
+	| "cancelled"
+	| "context-overflow"
+	| "connection"
+	| "model-loading"
+	| "transient-provider"
+	| "terminal-provider";
+
+export type RecoveryFailure = {
+	[Kind in RecoveryFailureKind]: {
+		kind: Kind;
+		message: string;
+		cause?: unknown;
+		status?: unknown;
+	};
+}[RecoveryFailureKind];
+
+export interface RecoveryFailureInput {
+	message: string;
+	runtimeId: string;
+	cancelled?: boolean;
+	contextOverflow?: boolean;
+	hasAttemptOutput?: boolean;
+	cause?: unknown;
+	status?: unknown;
+}
+
+/** Preserve route policy at the recovery boundary, before any backoff decision. */
+export function classifyRecoveryFailure(input: RecoveryFailureInput): RecoveryFailure {
+	let kind: RecoveryFailureKind;
+	if (input.cancelled) kind = "cancelled";
+	else if (input.contextOverflow ?? isEngineContextOverflow(input.message)) kind = "context-overflow";
+	else if (input.runtimeId === "litellm") {
+		kind = !input.hasAttemptOutput && isLiteLLMConnectionFailure(input.message) ? "connection" : "terminal-provider";
+	} else if (isModelLoadingErrorMessage(input.message)) kind = "model-loading";
+	else kind = isEngineRetryableAssistantError(input.message) ? "transient-provider" : "terminal-provider";
+	return {
+		kind,
+		message: input.message,
+		...(input.cause !== undefined ? { cause: input.cause } : {}),
+		...(input.status !== undefined ? { status: input.status } : {}),
+	};
+}
+
+export function isRetryableRecoveryFailure(failure: RecoveryFailure): boolean {
+	return failure.kind === "connection" || failure.kind === "model-loading" || failure.kind === "transient-provider";
+}
+
 /**
  * Compute the delay before attempt `attempt` (1-indexed). Matches pi-mono's
  * formula `baseDelayMs * 2 ** (attempt - 1)`, then clamps to `maxDelayMs` so
  * the 4th retry never stalls for minutes. Attempt < 1 is normalized to 1 so
  * callers that miscount still get a sane first delay.
+ * A model load keeps the loading floor, still capped by `maxDelayMs`.
  */
-export function computeRetryDelayMs(
-	attempt: number,
-	settings: RetrySettings = DEFAULT_RETRY_SETTINGS,
-	errorMessage?: string | null,
-): number {
-	const safeAttempt = Math.max(1, Math.floor(attempt));
-	const base = engineRetryDelayMs(settings.baseDelayMs, settings.maxDelayMs, safeAttempt);
-	// A model load does not finish faster because the retry schedule was
-	// written for a rate limit. `maxDelayMs` still caps it, so an operator who
-	// wants short waits keeps them.
-	if (!isModelLoadingErrorMessage(errorMessage)) return base;
-	return Math.min(Math.max(base, MODEL_LOADING_MIN_DELAY_MS), settings.maxDelayMs);
+export function recoveryRetryDelayMs(attempt: number, settings: RetrySettings, failure: RecoveryFailure): number {
+	const base = engineRetryDelayMs(settings.baseDelayMs, settings.maxDelayMs, Math.max(1, Math.floor(attempt)));
+	return failure.kind === "model-loading"
+		? Math.min(Math.max(base, MODEL_LOADING_MIN_DELAY_MS), settings.maxDelayMs)
+		: base;
 }
 
 /**
@@ -129,7 +172,7 @@ interface RetryCountdownOptions {
 	attempt: number;
 	/** Upper bound displayed alongside `attempt`. */
 	maxAttempts: number;
-	/** Total wait in milliseconds. Callers usually pass `computeRetryDelayMs(attempt, settings)`. */
+	/** Total wait in milliseconds. Callers usually pass `recoveryRetryDelayMs(attempt, settings, failure)`. */
 	delayMs: number;
 	/** Fires on every tick with the latest state so the TUI can redraw. */
 	onTick: (state: RetryCountdownState) => void;
@@ -204,7 +247,7 @@ export function createRetryCountdown(options: RetryCountdownOptions): RetryCount
 		}
 		state.seconds = Math.max(0, Math.ceil(remaining / 1000));
 		emit();
-		timer = setTimer(schedule, 1000);
+		timer = setTimer(schedule, Math.min(remaining, 1000));
 	};
 
 	schedule();

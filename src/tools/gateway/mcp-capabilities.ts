@@ -1,20 +1,23 @@
 import type { TSchema } from "typebox";
-import { type DynamicToolName, mcpToolName } from "../../core/tool-names.js";
+import type { DynamicToolName } from "../../core/tool-names.js";
+import { mcpToolName } from "../../core/tool-names.js";
+import type {
+	McpCatalogIdentity,
+	McpClient,
+	McpClientOptions,
+	McpServerCatalog,
+	McpServerSpec,
+	McpTeardownOutcome,
+	McpToolCallResult,
+	McpToolDescriptor,
+	McpToolListing,
+	McpTrustActionClass,
+	ResolvedMcpServer,
+} from "../../domains/gateway/mcp/index.js";
 import {
 	canonicalProjectRoot,
 	createMcpStdioClient,
-	type McpCatalogIdentity,
-	type McpClient,
-	type McpClientOptions,
 	McpError,
-	type McpServerCatalog,
-	type McpServerSpec,
-	type McpTeardownOutcome,
-	type McpToolCallResult,
-	type McpToolDescriptor,
-	type McpToolListing,
-	type McpTrustActionClass,
-	type ResolvedMcpServer,
 	readMcpServerCatalog,
 	resolveMcpServers,
 	writeMcpServerCatalog,
@@ -242,11 +245,15 @@ export interface McpCloseReport {
 	incomplete: Array<{ id: string; pgid: number; boundMs: number }>;
 }
 
+interface OwnedConnection {
+	ready: Promise<void>;
+	close(): Promise<McpTeardownOutcome>;
+}
+
 interface ServerState {
 	declaration: GatewayMcpServer;
 	client: McpClient | null;
-	connecting: Promise<void> | null;
-	closing: Promise<McpTeardownOutcome> | null;
+	connection: OwnedConnection | null;
 	tools: McpToolDescriptor[];
 	truncated: boolean;
 	registered: DynamicToolName[];
@@ -335,22 +342,7 @@ export function createMcpCapabilitySource(options: McpCapabilitySourceOptions): 
 		process.once("exit", killLaunchedOnExit);
 	};
 
-	const closeClient = (state: ServerState): Promise<McpTeardownOutcome> | undefined => {
-		if (state.closing !== null) return state.closing;
-		const client = state.client;
-		if (client === null) return undefined;
-		state.closing = client.close().then((outcome) => {
-			teardowns.push({ id: state.declaration.id, outcome });
-			state.client = null;
-			if (!outcome.complete) {
-				process.stderr.write(
-					`[gateway] mcp server ${state.declaration.id}: process group ${outcome.pgid} survived SIGKILL for ${outcome.boundMs}ms; recorded, not signalled again\n`,
-				);
-			}
-			return outcome;
-		});
-		return state.closing;
-	};
+	const closeClient = (state: ServerState): Promise<McpTeardownOutcome> | undefined => state.connection?.close();
 
 	const resolveStates = (): Map<string, ServerState> => {
 		if (states !== null) return states;
@@ -368,8 +360,7 @@ export function createMcpCapabilitySource(options: McpCapabilitySourceOptions): 
 				{
 					declaration,
 					client: null,
-					connecting: null,
-					closing: null,
+					connection: null,
 					tools: [],
 					truncated: false,
 					registered: [],
@@ -477,8 +468,9 @@ export function createMcpCapabilitySource(options: McpCapabilitySourceOptions): 
 					const images = imageBlocks(result);
 					return { kind: "ok", output: result.text, details, ...(images.length > 0 ? { images } : {}) };
 				} catch (error) {
-					if (error instanceof McpError && (error.code === "closed" || error.code === "spawn")) {
+					if (client.state().status === "failed" || client.state().status === "closed") {
 						state.failure = errorMessage(error);
+						await closeClient(state);
 					}
 					return { kind: "error", message: `${name}: ${errorMessage(error)}` };
 				}
@@ -496,75 +488,102 @@ export function createMcpCapabilitySource(options: McpCapabilitySourceOptions): 
 		return spec;
 	};
 
-	const connect = async (state: ServerState): Promise<void> => {
-		if (state.connecting !== null) return state.connecting;
-		if (closed || state.client !== null || state.failure !== null) return;
-		if (state.declaration.trust.status !== "trusted") return;
-		state.connecting = (async () => {
-			const { declaration } = state;
-			let client: McpClient | null = null;
+	const startConnection = (state: ServerState): OwnedConnection => {
+		const controller = new AbortController();
+		const { declaration } = state;
+		// PERF W3: reserve ownership before the lazy import, so close can fence acquisition.
+		const loaded = (async () => {
+			const { createMcpConnection } = await import("../../domains/gateway/mcp/connection-lifecycle.js");
+			return createMcpConnection({
+				signal: controller.signal,
+				acquire: () =>
+					clientFactory(
+						{
+							id: declaration.id,
+							command: declaration.command,
+							args: declaration.args,
+							cwd: declaration.cwd,
+							env: declaration.env,
+						},
+						{
+							workspaceRoot: declaration.cwdRoot,
+							onFailure: (error) => {
+								state.failure ??= errorMessage(error);
+								void closeClient(state);
+							},
+							...(declaration.timeoutMs !== null
+								? { requestTimeoutMs: declaration.timeoutMs }
+								: options.requestTimeoutMs !== undefined
+									? { requestTimeoutMs: options.requestTimeoutMs }
+									: {}),
+						},
+					),
+				onAcquired: (client) => {
+					state.client = client;
+					installExitHook();
+				},
+			});
+		})();
+		let closing: Promise<McpTeardownOutcome> | null = null;
+		const close = (): Promise<McpTeardownOutcome> => {
+			controller.abort();
+			closing ??= loaded
+				.then((connection) => connection.close())
+				.then((outcome) => {
+					teardowns.push({ id: declaration.id, outcome });
+					state.client = null;
+					if (!outcome.complete) {
+						process.stderr.write(
+							`[gateway] mcp server ${declaration.id}: process group ${outcome.pgid} survived SIGKILL for ${outcome.boundMs}ms; recorded, not signalled again\n`,
+						);
+					}
+					return outcome;
+				});
+			return closing;
+		};
+		const ready = (async () => {
 			try {
-				client = clientFactory(
-					{
-						id: declaration.id,
-						command: declaration.command,
-						args: declaration.args,
-						cwd: declaration.cwd,
-						env: declaration.env,
-					},
-					{
-						workspaceRoot: declaration.cwdRoot,
-						...(declaration.timeoutMs !== null
-							? { requestTimeoutMs: declaration.timeoutMs }
-							: options.requestTimeoutMs !== undefined
-								? { requestTimeoutMs: options.requestTimeoutMs }
-								: {}),
-					},
-				);
-				state.client = client;
-				installExitHook();
-				await client.initialize();
-				const listing = await client.listTools();
+				const connection = await loaded;
+				const { client, listing } = await connection.ready;
+				if (closed || controller.signal.aborted || state.client !== client || state.failure !== null) return;
 				state.tools = listing.tools;
 				state.truncated = listing.truncated;
-				// An abort that landed while the listing was in flight already set
-				// the failure and closed the client. Publishing here would persist
-				// a catalog from discovery that did not complete.
-				if (state.failure === null) publishCatalog(state, listing);
+				publishCatalog(state, listing);
 				for (const tool of listing.tools) {
 					const name = mcpToolName(declaration.id, tool.name);
 					if (name === null || ownerOf(name) !== state || registry.get(name) !== undefined) {
 						state.unregistrable.push(tool.name);
 						continue;
 					}
+					if (closed || controller.signal.aborted || state.client !== client || state.failure !== null) return;
 					registry.register(makeSpec(state, tool, name));
 					state.registered.push(name);
 				}
 			} catch (error) {
-				state.failure = errorMessage(error);
-				await closeClient(state);
-			} finally {
-				state.connecting = null;
+				state.failure ??= errorMessage(error);
+				await close();
 			}
 		})();
-		return state.connecting;
+		return { ready, close };
 	};
 
-	// Discovery owns the pending handshake and pagination. Cancellation closes
-	// that shared connection; other waiters observe its failed state as well.
 	const discover = async (state: ServerState, signal?: AbortSignal): Promise<void> => {
 		const aborted = () => new McpError("aborted", "MCP discovery aborted");
 		if (signal?.aborted) throw aborted();
-		let cleanup: Promise<McpTeardownOutcome> | undefined;
+		if (closed || state.failure !== null || state.declaration.trust.status !== "trusted") return;
+		state.connection ??= startConnection(state);
+		const connection = state.connection;
 		const onAbort = (): void => {
 			state.failure = errorMessage(aborted());
-			cleanup = closeClient(state);
+			void connection.close();
 		};
 		signal?.addEventListener("abort", onAbort, { once: true });
 		try {
-			await connect(state);
-			await cleanup;
-			if (signal?.aborted) throw aborted();
+			await connection.ready;
+			if (signal?.aborted) {
+				await connection.close();
+				throw aborted();
+			}
 		} finally {
 			signal?.removeEventListener("abort", onAbort);
 		}
@@ -631,7 +650,7 @@ export function createMcpCapabilitySource(options: McpCapabilitySourceOptions): 
 	 * Every capability a server's metadata records, live or cached. A cached
 	 * name goes through the same ownership rule a live one does, so a tool whose
 	 * composed name belongs to a longer-named server is dropped here exactly as
-	 * `connect()` drops it, and cache load order can never decide routing.
+	 * discovery drops it, and cache load order can never decide routing.
 	 */
 	const entriesFor = (state: ServerState): McpCatalogEntry[] => {
 		const { declaration } = state;
@@ -696,8 +715,7 @@ export function createMcpCapabilitySource(options: McpCapabilitySourceOptions): 
 				const state: ServerState = {
 					declaration,
 					client: null,
-					connecting: null,
-					closing: null,
+					connection: null,
 					tools: [],
 					truncated: false,
 					registered: [],
@@ -715,7 +733,7 @@ export function createMcpCapabilitySource(options: McpCapabilitySourceOptions): 
 			const all = states;
 			const clients = [...all.values()].filter((state) => state.declaration.scope === "client");
 			await Promise.all(clients.map(closeClient));
-			await Promise.all(clients.map((state) => state.connecting));
+			await Promise.all(clients.map((state) => state.connection?.ready));
 			for (const state of clients) {
 				for (const name of state.registered) registry.unregister?.(name);
 				all.delete(state.declaration.id);
@@ -894,7 +912,7 @@ export function createMcpCapabilitySource(options: McpCapabilitySourceOptions): 
 			closePromise = (async () => {
 				const all = [...(states?.values() ?? [])];
 				await Promise.all(all.map(closeClient));
-				await Promise.all(all.map((state) => state.connecting));
+				await Promise.all(all.map((state) => state.connection?.ready));
 				const report: McpCloseReport = { incomplete: [] };
 				for (const { id, outcome } of teardowns) {
 					if (!outcome.complete) report.incomplete.push({ id, pgid: outcome.pgid, boundMs: outcome.boundMs });

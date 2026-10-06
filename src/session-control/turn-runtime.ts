@@ -142,6 +142,7 @@ export type AssistantDeltaEvent =
 	  };
 
 export interface TurnRuntimeDeps {
+	turnIdentity?: () => unknown;
 	interactiveGuidance?: boolean;
 	state: ChatTurnState;
 	/** Capabilities behind the attached gateway, for the streaming tool-prose cutoff. */
@@ -196,6 +197,7 @@ export interface TurnRuntime {
 	ensureRuntime(options?: { silent?: boolean }): AgentRuntime | null;
 	ensureLiveCapabilitiesForSelectedModel(options?: { silent?: boolean }): Promise<void>;
 	dispose(): void;
+	cancelRunWatchdog(): void;
 	cleanupSessionResources(sessionId: string | undefined): void;
 	/**
 	 * Install on the session tool surface so admission verdicts reach the panel.
@@ -327,6 +329,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 	const TARGET_PROBE_POLL_MS = 5_000;
 	let lastTargetProbe: { key: string; at: number } | null = null;
 	let disposed = false;
+	let clearCurrentWatchdog: () => void = () => {};
 	const targetProbesInFlight = new Map<string, Promise<void>>();
 	const ensureLiveCapabilitiesForSelectedModel = async (options?: { silent?: boolean }): Promise<void> => {
 		if (disposed) return;
@@ -582,6 +585,9 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 		let apiCallStartedAt: number | null = null;
 		let apiCallFirstDeltaAt: number | null = null;
 		let unsettledSpendUsd = 0;
+		clearCurrentWatchdog();
+		let runIdentity = deps.turnIdentity?.();
+		const currentRun = (): boolean => runIdentity === deps.turnIdentity?.();
 		const handle = deps.createAgent({
 			transcriptStreamFn: (currentModel, currentContext, options) => {
 				const middlewareChoice = middlewareToolChoice.current();
@@ -625,7 +631,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 			},
 			beforeStreamRequest: async ({ context: request, options: streamOptions }) => {
 				setGlobalDefaultMaxOutputTokens(deps.getSettings().chat.maxOutputTokens);
-				if (state.activeInterruptReason !== null || state.runtime !== localRuntime) {
+				if (!currentRun() || state.activeInterruptReason !== null || state.runtime !== localRuntime) {
 					return { block: true, reason: "Request ownership changed before invocation." };
 				}
 				const flowViolation =
@@ -696,6 +702,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 					target.runtime,
 					signal ? { signal } : undefined,
 				);
+				if (!currentRun() || signal?.aborted) throw new Error("Request ownership changed while resolving authentication.");
 				return resolved.apiKey;
 			},
 		});
@@ -751,7 +758,9 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 			clearTimeout(stallTimer);
 			stallTimer = null;
 		};
+		clearCurrentWatchdog = clearStallTimer;
 		const armStallTimer = (delayMs: number): void => {
+			if (disposed || !currentRun() || localRuntime.agent.signal?.aborted) return;
 			stallTimer = setTimeout(
 				() => {
 					stallTimer = null;
@@ -791,15 +800,17 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 		handle.agent.prepareNextTurnWithContext = async (_completed, signal?: AbortSignal) => {
 			stallSuspendDepth += 1;
 			try {
-				if (signal?.aborted || state.activeInterruptReason !== null) return undefined;
+				if (!currentRun() || signal?.aborted || state.activeInterruptReason !== null) return undefined;
 				if (deps.hasQueuedSteering?.()) await deps.continuity?.pause();
 				const handoffChanged = (await deps.continuity?.settle(signal)) ?? false;
+				if (!currentRun() || signal?.aborted || state.activeInterruptReason !== null) return undefined;
 				const continued = await deliverInRunContinuation(signal);
 				const contextChanged =
 					(await middleware.prepareToolContinuation(localRuntime, signal)) || handoffChanged || continued;
 				const update = await context.postToolContinuationGuard(localRuntime, signal, contextChanged);
+				if (!currentRun() || signal?.aborted || state.activeInterruptReason !== null) return undefined;
 				const restored = context.installMemoryRestoration(localRuntime);
-				if (signal?.aborted || state.activeInterruptReason !== null) return undefined;
+				if (!currentRun() || signal?.aborted || state.activeInterruptReason !== null) return undefined;
 				// Preparation can be long (compaction). A message typed during it is
 				// handed over now so Pi's poll right after this hook takes it.
 				deps.queueHandOver?.afterPrepareNextTurn();
@@ -859,7 +870,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 				stallSuspendDepth -= 1;
 				lastActivityAt = performance.now();
 			}
-			if (!state.pendingRequestContinuation || state.activeInterruptReason !== null) return undefined;
+			if (!currentRun() || !state.pendingRequestContinuation || state.activeInterruptReason !== null) return undefined;
 			if (turn.message.stopReason === "error" || turn.message.stopReason === "aborted") return undefined;
 			state.pendingRequestContinuation = false;
 			state.pendingInRunContinuation = true;
@@ -882,6 +893,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 			} catch {
 				// Collection is best effort; the continuation reminder still goes out.
 			}
+			if (!currentRun() || signal?.aborted || state.activeInterruptReason !== null) return false;
 			middleware.fireTurnStart(localRuntime, "", 0, true);
 			const content = [block, middleware.flushPendingReminders()]
 				.filter((part): part is string => part !== null && part.length > 0)
@@ -916,6 +928,11 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 		const interruptedUsageByMessage = new WeakMap<object, Record<string, unknown>>();
 
 		handle.agent.subscribe(async (event) => {
+			if (event.type === "agent_start") runIdentity = deps.turnIdentity?.();
+			if (!currentRun()) {
+				clearStallTimer();
+				return;
+			}
 			// Every span below is measured on the monotonic frame, so an NTP
 			// correction mid-turn cannot corrupt a tool duration or a TTFT.
 			const eventClock = performance.now();
@@ -1212,6 +1229,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 				const correlationId = event.type === "message_end" ? handle.requestCorrelationId(event.message) : undefined;
 				const persistedId = persistence.appendAssistantTurn(enrichedEvent.message, timing, correlationId);
 				await deps.continuity?.response(persistedId, correlationId);
+				if (!currentRun()) return;
 				if (isAssistant) apiCallStartedAt = null;
 				const usage = (enrichedEvent.message as { usage?: Usage }).usage;
 				if (isAssistant && usage && typeof usage === "object" && runFirstCallVerdict === null) {
@@ -1245,6 +1263,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 			if (enrichedEvent.type === "agent_end") {
 				await deps.continuity?.pause();
 				clearStallTimer();
+				if (!currentRun()) return;
 				const terminal = pendingTerminalToolResult;
 				pendingTerminalToolResult = null;
 				if (terminal) {
@@ -1277,8 +1296,10 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 		ensureLiveCapabilitiesForSelectedModel,
 		dispose: () => {
 			disposed = true;
+			clearCurrentWatchdog();
 			clearInterval(selectedRoutePoll);
 		},
+		cancelRunWatchdog: () => clearCurrentWatchdog(),
 		cleanupSessionResources,
 		toolTelemetry,
 	};

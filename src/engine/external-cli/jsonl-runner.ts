@@ -1,9 +1,15 @@
-import { type ChildProcessByStdio, spawn } from "node:child_process";
+import type { ChildProcessByStdio } from "node:child_process";
+import { spawn } from "node:child_process";
 import type { Readable, Writable } from "node:stream";
 
 import { boundedExternalDiagnostic } from "../../core/external-diagnostic.js";
 import { buildSafeToolEnv, resolveSafeCwd } from "../../core/safe-exec.js";
-import { createProcessTreeTerminator, readBoundedLines, readStderr, waitForClose } from "../external-subprocess.js";
+import {
+	createProcessTreeTerminator,
+	EXTERNAL_PROCESS_KILL_GRACE_MS,
+	readBoundedLines,
+	readStderr,
+} from "../external-subprocess.js";
 import type { AgentEvent, AgentMessage, Usage } from "../types.js";
 import type { WorkerEventEmit, WorkerRunHandle, WorkerRunInput, WorkerRunResult } from "../worker-runtime.js";
 
@@ -81,6 +87,7 @@ export function startJsonlCliRun(
 	emit: WorkerEventEmit,
 	dependencies: JsonlCliDependencies = {},
 ): WorkerRunHandle {
+	if (input.signal?.aborted === true) throw input.signal.reason;
 	const sourceEnv = dependencies.environment ?? process.env;
 	const cwd = resolveSafeCwd(input.cwd, dependencies.workspaceRoot ?? process.cwd());
 	const configDir = connector.configDirEnv ? sourceEnv[connector.configDirEnv] : undefined;
@@ -107,11 +114,12 @@ export function startJsonlCliRun(
 		terminal: false,
 		error: "",
 	};
+	let responseBytes = 0;
 	let messageStarted = false;
 	let aborted = false;
 	let settled = false;
 	let transportError = "";
-	const terminator = createProcessTreeTerminator(child, dependencies.killGraceMs ?? 1500);
+	const terminator = createProcessTreeTerminator(child, dependencies.killGraceMs ?? EXTERNAL_PROCESS_KILL_GRACE_MS);
 	const abort = (): void => {
 		if (settled) return;
 		aborted = true;
@@ -120,16 +128,18 @@ export function startJsonlCliRun(
 	const onAbort = (): void => abort();
 	if (input.signal?.aborted) abort();
 	else input.signal?.addEventListener("abort", onAbort, { once: true });
-	child.once("error", (cause) => {
+	const onChildError = (cause: Error): void => {
 		transportError ||=
 			(cause as NodeJS.ErrnoException).code === "ENOENT"
 				? `${connector.label} (${connector.binary}) is not installed or not on PATH.`
 				: boundedExternalDiagnostic(cause.message);
-	});
-	child.stdin.on("error", (cause) => {
+	};
+	const onStdinError = (cause: Error): void => {
 		if (!aborted)
 			transportError ||= boundedExternalDiagnostic(`could not send task to ${connector.label}: ${cause.message}`);
-	});
+	};
+	child.once("error", onChildError);
+	child.stdin.on("error", onStdinError);
 	child.stdin.end(connector.prompt(input));
 
 	const message = (exitCode: number, diagnostic: string): AgentMessage & { role: "assistant" } => {
@@ -156,20 +166,27 @@ export function startJsonlCliRun(
 	};
 	const append = (delta: string): void => {
 		if (!delta) return;
-		if (Buffer.byteLength(state.text, "utf8") + Buffer.byteLength(delta, "utf8") > MAX_RESPONSE_BYTES) {
+		const deltaBytes = Buffer.byteLength(delta, "utf8");
+		const previousTail = state.text.charCodeAt(state.text.length - 1);
+		const nextHead = delta.charCodeAt(0);
+		// A split surrogate replaces two three-byte replacements with one four-byte code point.
+		const joinsSurrogates = previousTail >= 0xd800 && previousTail <= 0xdbff && nextHead >= 0xdc00 && nextHead <= 0xdfff;
+		const nextResponseBytes = responseBytes + deltaBytes - (joinsSurrogates ? 2 : 0);
+		if (nextResponseBytes > MAX_RESPONSE_BYTES) {
 			throw new Error(`${connector.label} response exceeded ${MAX_RESPONSE_BYTES} bytes`);
 		}
 		if (!messageStarted) {
 			messageStarted = true;
 			emit({ type: "message_start", message: message(0, "") } as AgentEvent);
 		}
+		responseBytes = nextResponseBytes;
 		state.text += delta;
 		emit({ type: "message_update", assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta } } as AgentEvent);
 	};
 	const promise = (async (): Promise<WorkerRunResult> => {
 		emit({ type: "agent_start" } as AgentEvent);
 		try {
-			const stderrPromise = readStderr(child);
+			const stderrPromise = readStderr(child).catch(() => "");
 			const stdoutPromise = (async () => {
 				for await (const bounded of readBoundedLines(child.stdout, {
 					maxLineBytes: MAX_LINE_BYTES,
@@ -193,12 +210,15 @@ export function startJsonlCliRun(
 				transportError ||= boundedExternalDiagnostic(cause instanceof Error ? cause.message : String(cause));
 				terminator.terminate();
 			});
-			const exitCode = await waitForClose(child);
+			const outcome = await terminator.completed;
+			const exitCode = outcome.exitCode;
 			await stdoutPromise;
-			const stderr = await stderrPromise.catch(() => "");
+			const stderr = await stderrPromise;
 			const diagnostic = aborted
 				? `${connector.label} run was cancelled`
 				: transportError ||
+					(outcome.incomplete ? `${connector.label} process group cleanup incomplete` : "") ||
+					(outcome.pipeDrainIncomplete ? `${connector.label} output pipe draining incomplete` : "") ||
 					state.error ||
 					(connector.requireTerminalEvent && !state.terminal
 						? `${connector.label} ended without a terminal JSONL event`
@@ -218,6 +238,8 @@ export function startJsonlCliRun(
 			settled = true;
 			terminator.cleanup();
 			input.signal?.removeEventListener("abort", onAbort);
+			child.off("error", onChildError);
+			child.stdin.off("error", onStdinError);
 		}
 	})();
 	return { promise, abort };

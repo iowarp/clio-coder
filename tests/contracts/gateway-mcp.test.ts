@@ -7,11 +7,14 @@ import { join, resolve } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { type ToolName, ToolNames } from "../../src/core/tool-names.js";
 import {
+	canonicalProjectRoot,
 	createMcpStdioClient,
 	type McpClient,
+	resolveMcpServers,
 	trustMcpServer,
 	untrustMcpServer,
 } from "../../src/domains/gateway/mcp/index.js";
+import { mcpCatalogPath } from "../../src/domains/gateway/mcp/metadata-cache.js";
 import type { AutonomyLevel } from "../../src/domains/safety/autonomy.js";
 import { createWorkerSafety } from "../../src/engine/worker-tools.js";
 import { resolveAgentTools } from "../../src/tools/agent-tools.js";
@@ -73,7 +76,12 @@ interface Wired {
 	parks: string[];
 }
 
-function wire(scene: Scenario, level: AutonomyLevel = "yolo", readOnly = false): Wired {
+function wire(
+	scene: Scenario,
+	level: AutonomyLevel = "yolo",
+	readOnly = false,
+	wrapClient?: (client: McpClient) => McpClient,
+): Wired {
 	const clients: McpClient[] = [];
 	const parks: string[] = [];
 	const registry = createRegistry({
@@ -89,7 +97,7 @@ function wire(scene: Scenario, level: AutonomyLevel = "yolo", readOnly = false):
 		clientFactory: (spec, options) => {
 			const client = createMcpStdioClient(spec, { ...options, initializeTimeoutMs: 5_000, killGraceMs: 200 });
 			clients.push(client);
-			return client;
+			return wrapClient?.(client) ?? client;
 		},
 	});
 	registerCoreTools(registry, { mcpCapabilities: source });
@@ -520,6 +528,61 @@ describe("gateway MCP capabilities", () => {
 		strictEqual(processAlive(clients[0]?.pid), false);
 		deepStrictEqual(source.connectedIds(), []);
 		strictEqual(source.teardownReports().length, 1);
+	});
+
+	it("close during final discovery page publishes no tools/catalog", async () => {
+		const scene = scenario();
+		ok(trustMcpServer({ cwd: scene.project, configDir: scene.configDir, id: "fake", actionClass: "read" }).ok);
+		let reachedFinalPage!: () => void;
+		let releaseFinalPage!: () => void;
+		const finalPage = new Promise<void>((resolve) => {
+			reachedFinalPage = resolve;
+		});
+		const released = new Promise<void>((resolve) => {
+			releaseFinalPage = resolve;
+		});
+		const { source, registry, clients } = wire(scene, "yolo", false, (client) => ({
+			...client,
+			get pid() {
+				return client.pid;
+			},
+			async listTools(signal) {
+				const listing = await client.listTools(signal);
+				strictEqual(listing.tools.length, 14);
+				reachedFinalPage();
+				await released;
+				return listing;
+			},
+		}));
+		open.push(source);
+		const declaration = resolveMcpServers({ cwd: scene.project, configDir: scene.configDir }).servers.find(
+			(entry) => entry.id === "fake",
+		);
+		ok(declaration);
+		const catalogPath = mcpCatalogPath({
+			projectRoot: canonicalProjectRoot(scene.project),
+			scope: declaration.scope,
+			declarationPath: declaration.path,
+			serverId: declaration.id,
+			digest: declaration.digest,
+			cwd: declaration.cwd,
+		});
+		strictEqual(existsSync(catalogPath), false);
+		const discovering = source.list();
+		try {
+			await finalPage;
+			const closing = source.close();
+			releaseFinalPage();
+			await discovering;
+			deepStrictEqual(await closing, { incomplete: [] });
+			ok(!registry.listRegistered().some((name) => name.startsWith("mcp_")));
+			deepStrictEqual(source.catalog().entries, []);
+			strictEqual(existsSync(catalogPath), false, "the closed discovery wrote no durable catalog");
+			strictEqual(processAlive(clients[0]?.pid), false);
+		} finally {
+			releaseFinalPage();
+			await discovering;
+		}
 	});
 
 	it("never launches an untrusted server, lists it with the trust remedy, and launches a trusted one on a scoped refresh", async () => {

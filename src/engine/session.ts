@@ -24,6 +24,7 @@ import { readPiMonoVersion } from "./pi-mono-names.js";
  */
 
 import { createHash, randomBytes } from "node:crypto";
+import type { BigIntStats } from "node:fs";
 import {
 	closeSync,
 	existsSync,
@@ -120,6 +121,11 @@ export interface ClioSessionFile {
 	meta: string;
 }
 
+export interface SessionAppendObservation {
+	before: BigIntStats;
+	after: BigIntStats;
+}
+
 export interface ClioSessionWriter {
 	/** Write an ordinary turn as a structured message entry and add its tree node. */
 	append(turn: ClioTurnRecord): void;
@@ -127,7 +133,10 @@ export interface ClioSessionWriter {
 	 * Write a pre-composed structured session entry as a JSON line. Callers
 	 * supply `treeNode` when the entry must project into the turn tree.
 	 */
-	appendEntry(entry: unknown, opts?: { treeNode?: SessionTreeNode }): void;
+	appendEntry(
+		entry: unknown,
+		opts?: { treeNode?: SessionTreeNode; onAppend?: (observation: SessionAppendObservation) => void },
+	): void;
 	/** Atomically replace current.jsonl entries while preserving the session header. */
 	replaceEntries(entries: ReadonlyArray<unknown>): void;
 	persistTree(): Promise<void>;
@@ -307,20 +316,41 @@ function parseSessionJsonlLine(
 	}
 }
 
-export function readSessionFileEntries(path: string, options: SessionJsonlReadOptions = {}): unknown[] {
+export interface SessionJsonlRange {
+	entries: unknown[];
+	completeEntries: number;
+	nextOffset: number;
+	nextLineNumber: number;
+	stat: BigIntStats | null;
+	bytes: Buffer;
+}
+
+/** Keep incomplete final records outside the committed cursor so later appends reparse them. */
+export function readSessionFileEntriesRange(
+	path: string,
+	offset = 0,
+	lineNumber = 0,
+	options: SessionJsonlReadOptions & { retainBytes?: boolean } = {},
+): SessionJsonlRange {
 	const readPath = recoverJsonlTargetIfMissing(path);
-	if (readPath === null) return [];
+	if (readPath === null)
+		return { entries: [], completeEntries: 0, nextOffset: 0, nextLineNumber: 0, stat: null, bytes: Buffer.alloc(0) };
 	const entries: unknown[] = [];
+	const chunks: Buffer[] = [];
 	const warn = options.onWarning ?? defaultSessionJsonlWarning;
 	const fd = openSync(readPath, "r");
 	const buffer = Buffer.allocUnsafe(SESSION_JSONL_READ_CHUNK_BYTES);
 	const decoder = new StringDecoder("utf8");
 	let pending = "";
-	let lineNumber = 0;
+	let position = offset;
+	let nextOffset = offset;
 	try {
-		for (;;) {
-			const bytesRead = readSync(fd, buffer, 0, buffer.length, null);
+		const stat = fstatSync(fd, { bigint: true });
+		const size = Number(stat.size);
+		while (position < size) {
+			const bytesRead = readSync(fd, buffer, 0, Math.min(buffer.length, size - position), position);
 			if (bytesRead === 0) break;
+			if (options.retainBytes !== false) chunks.push(Buffer.from(buffer.subarray(0, bytesRead)));
 			pending += decoder.write(buffer.subarray(0, bytesRead));
 			for (;;) {
 				const newlineIndex = pending.indexOf("\n");
@@ -330,16 +360,21 @@ export function readSessionFileEntries(path: string, options: SessionJsonlReadOp
 				lineNumber += 1;
 				parseSessionJsonlLine(line, lineNumber, readPath, entries, warn);
 			}
+			const lastNewline = buffer.subarray(0, bytesRead).lastIndexOf(0x0a);
+			if (lastNewline >= 0) nextOffset = position + lastNewline + 1;
+			position += bytesRead;
 		}
 		pending += decoder.end();
-		if (pending.length > 0) {
-			lineNumber += 1;
-			parseSessionJsonlLine(pending, lineNumber, readPath, entries, warn);
-		}
+		const completeEntries = entries.length;
+		if (pending.length > 0) parseSessionJsonlLine(pending, lineNumber + 1, readPath, entries, warn);
+		return { entries, completeEntries, nextOffset, nextLineNumber: lineNumber, stat, bytes: Buffer.concat(chunks) };
 	} finally {
 		closeSync(fd);
 	}
-	return entries;
+}
+
+export function readSessionFileEntries(path: string, options: SessionJsonlReadOptions = {}): unknown[] {
+	return readSessionFileEntriesRange(path, 0, 0, { ...options, retainBytes: false }).entries;
 }
 
 export interface SessionTailReadResult {
@@ -446,7 +481,7 @@ function isOptionalString(value: unknown): boolean {
 	return value === undefined || typeof value === "string";
 }
 
-function isSessionJsonlHeader(value: unknown): value is ClioSessionJsonlHeader {
+export function isSessionJsonlHeader(value: unknown): value is ClioSessionJsonlHeader {
 	if (!value || typeof value !== "object") return false;
 	const v = value as Record<string, unknown>;
 	return (
@@ -700,7 +735,7 @@ function createWriter(
 	headerOptions: { parentSession?: string; parentTurnId?: string } = {},
 ): ClioSessionWriter {
 	const paths = sessionPaths(meta);
-	const tree: SessionTreeNode[] = [...initialTree];
+	const tree: SessionTreeNode[] = initialTree.map((node) => ({ ...node }));
 	const fileEntries = ensureSessionHeader(meta, initialFileEntries, headerOptions);
 	let closed = false;
 	let appendFd: number | null = null;
@@ -708,6 +743,49 @@ function createWriter(
 	// Descriptor cleanup must not discard accepted bytes or rollback changes
 	// still owed to the next debounce, checkpoint, flush, or close.
 	let pendingFsync = false;
+	let lastFsyncStat: BigIntStats | null = null;
+	let treeDirty = true;
+	let treeStat: BigIntStats | null = null;
+	// A resumed tree can lag the ledger; only the canonical recovered bytes
+	// justify treating it as already persisted (CLIO-UPGRADES-PERF).
+	try {
+		const fd = openSync(paths.tree, "r");
+		try {
+			const observed = fstatSync(fd, { bigint: true });
+			if (readFileSync(fd, "utf8") === JSON.stringify(tree, null, 2)) {
+				treeDirty = false;
+				treeStat = observed;
+			}
+		} finally {
+			closeSync(fd);
+		}
+	} catch {
+		// Missing or unreadable tree state remains pending; persistence retries it.
+	}
+
+	function sameFileSnapshot(a: BigIntStats | null, b: BigIntStats): boolean {
+		return (
+			a !== null &&
+			a.dev === b.dev &&
+			a.ino === b.ino &&
+			a.size === b.size &&
+			a.mtimeNs === b.mtimeNs &&
+			a.ctimeNs === b.ctimeNs
+		);
+	}
+
+	function persistPendingTree(): void {
+		if (!treeDirty && treeStat !== null) {
+			try {
+				if (sameFileSnapshot(treeStat, statSync(paths.tree, { bigint: true }))) return;
+			} catch {
+				// Restore the canonical tree if its persisted artifact disappeared.
+			}
+		}
+		atomicWrite(paths.tree, JSON.stringify(tree, null, 2));
+		treeStat = statSync(paths.tree, { bigint: true });
+		treeDirty = false;
+	}
 
 	// One-time normalization for resumes of pre-header files: rewrite once so
 	// fd-appended lines land after a header. Disk and memory match from here on.
@@ -716,7 +794,12 @@ function createWriter(
 	}
 
 	function openAppendFd(): number {
-		if (appendFd !== null) return appendFd;
+		if (appendFd !== null) {
+			const held = fstatSync(appendFd, { bigint: true });
+			const current = statSync(paths.current, { bigint: true });
+			if (held.dev === current.dev && held.ino === current.ino) return appendFd;
+			closeAppendFd({ flush: true });
+		}
 		const tornTail = !endsWithNewline(paths.current);
 		appendFd = openSync(paths.current, "a");
 		// Terminating the fragment keeps the reader's torn-tail behavior:
@@ -744,7 +827,12 @@ function createWriter(
 
 	function flushPendingAppends(): void {
 		if (appendFd !== null) {
+			const observed = fstatSync(appendFd, { bigint: true });
+			// The descriptor may also have received a peer's append. Metadata
+			// detects that obligation even when our own pending flag is clear.
+			if (!pendingFsync && sameFileSnapshot(lastFsyncStat, observed)) return;
 			fsyncSync(appendFd);
+			lastFsyncStat = observed;
 			pendingFsync = false;
 			return;
 		}
@@ -780,15 +868,18 @@ function createWriter(
 		closeSync(fd);
 	}
 
-	function appendLine(entry: unknown): void {
+	function appendLine(entry: unknown): SessionAppendObservation {
 		const serialized = JSON.stringify(entry);
 		if (serialized === undefined) {
 			throw new Error("session JSONL entry is not serializable");
 		}
+		let observation: SessionAppendObservation;
 		try {
 			const fd = openAppendFd();
+			const before = fstatSync(fd, { bigint: true });
 			pendingFsync = true;
 			appendAll(fd, Buffer.from(`${serialized}\n`, "utf8"));
+			observation = { before, after: fstatSync(fd, { bigint: true }) };
 		} catch (error) {
 			// Reopening rechecks the tail even if rollback itself failed.
 			try {
@@ -801,6 +892,7 @@ function createWriter(
 			throw error;
 		}
 		scheduleFsync();
+		return observation;
 	}
 
 	return {
@@ -809,6 +901,7 @@ function createWriter(
 			const record = recordFromTurn(turn);
 			appendLine(record);
 			fileEntries.push(record);
+			treeDirty = true;
 			tree.push({
 				id: turn.id,
 				parentId: turn.parentId,
@@ -816,11 +909,18 @@ function createWriter(
 				kind: turn.kind,
 			});
 		},
-		appendEntry(entry: unknown, opts?: { treeNode?: SessionTreeNode }): void {
+		appendEntry(
+			entry: unknown,
+			opts?: { treeNode?: SessionTreeNode; onAppend?: (observation: SessionAppendObservation) => void },
+		): void {
 			if (closed) throw new Error("session writer closed");
-			appendLine(entry);
+			const observation = appendLine(entry);
 			fileEntries.push(entry);
-			if (opts?.treeNode) tree.push(opts.treeNode);
+			if (opts?.treeNode) {
+				tree.push({ ...opts.treeNode });
+				treeDirty = true;
+			}
+			opts?.onAppend?.(observation);
 		},
 		replaceEntries(entries: ReadonlyArray<unknown>): void {
 			if (closed) throw new Error("session writer closed");
@@ -835,6 +935,7 @@ function createWriter(
 			fileEntries.push(...nextEntries);
 			const recoveredTree = treeFromFileEntries(nextEntries);
 			if (recoveredTree.length > 0) {
+				treeDirty = true;
 				tree.length = 0;
 				tree.push(...recoveredTree);
 			}
@@ -847,7 +948,7 @@ function createWriter(
 			// state root would be undone here. Fsyncing the held fd first is safe
 			// either way: it writes into an unlinked inode and creates nothing.
 			if (stateRootRemoved()) return;
-			atomicWrite(paths.tree, JSON.stringify(tree, null, 2));
+			persistPendingTree();
 		},
 		flushAppends(): void {
 			flushPendingAppends();
@@ -859,7 +960,7 @@ function createWriter(
 			// root must not get tree.json and meta.json written back into it.
 			closed = true;
 			if (stateRootRemoved()) return;
-			atomicWrite(paths.tree, JSON.stringify(tree, null, 2));
+			persistPendingTree();
 			const ended: ClioSessionMeta = { ...meta, endedAt: new Date().toISOString() };
 			atomicWrite(paths.meta, JSON.stringify(ended, null, 2));
 			meta.endedAt = ended.endedAt;

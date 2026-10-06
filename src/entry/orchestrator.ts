@@ -25,6 +25,11 @@ import { armRestartHandoff } from "../core/restart-handoff.js";
 import { consumeRestartIntent } from "../core/restart-intent.js";
 import { type RouteProvenance, resolveRouteProvenance } from "../core/route-provenance.js";
 import {
+	SAFE_EXEC_DEFAULT_KILL_GRACE_MS,
+	SAFE_EXEC_GROUP_TEARDOWN_BOUND_MS,
+	SAFE_EXEC_PIPE_DRAIN_BOUND_MS,
+} from "../core/safe-exec.js";
+import {
 	applyOverrides,
 	applyRoutingPatch,
 	applySessionRouting,
@@ -1135,7 +1140,7 @@ function createSessionRereadPort(session: SessionContract, bus: SafeEventBus): R
 		sessionId: () => session.current()?.id ?? null,
 		readEntries: () => {
 			const meta = session.current();
-			return meta ? readSessionEntriesForCompact(meta.id) : [];
+			return meta ? session.readEntries() : [];
 		},
 		activeLeafTurnId: () => {
 			const meta = session.current();
@@ -1173,7 +1178,7 @@ function protectedArtifactStateForCurrentSession(
 	const meta = session.current();
 	if (!meta) return { artifacts: [] };
 	reconcilePendingProtectedArtifacts(session);
-	return protectedArtifactStateFromSessionEntries(readSessionEntriesForCompact(meta.id));
+	return protectedArtifactStateFromSessionEntries(session.readEntries());
 }
 
 function appendProtectedArtifactRegistryEvent(
@@ -1275,7 +1280,7 @@ async function runCompactionFlow(
 	const activeLeafTurnId = session.tree(meta.id).leafId ?? undefined;
 	const isOriginCurrent = () =>
 		session.current()?.id === meta.id && (session.tree(meta.id).leafId ?? undefined) === activeLeafTurnId;
-	const entries = filterEntriesToActivePath(readSessionEntriesForCompact(meta.id), activeLeafTurnId);
+	const entries = filterEntriesToActivePath(session.readEntries(), activeLeafTurnId);
 	if (entries.length === 0) return null;
 	// Folded over the full applicable ledger before this compaction cuts it, so
 	// the carry written below reflects every durable transition, including ones
@@ -1402,7 +1407,7 @@ async function runCompactionFlow(
 	// is re-derived: `result` indexes the entry array the cut was computed
 	// against, which must not move under it.
 	const settledContinuity = resolveContinuityProjection({
-		entries: filterEntriesToActivePath(readSessionEntriesForCompact(meta.id), activeLeafTurnId),
+		entries: filterEntriesToActivePath(session.readEntries(), activeLeafTurnId),
 		sessionId: meta.id,
 		...(meta.parentSessionId && meta.parentTurnId
 			? { fork: { parentSessionId: meta.parentSessionId, parentTurnId: meta.parentTurnId } }
@@ -1874,14 +1879,29 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	const dispatch = withDispatchMemory(result.getContract<DispatchContract>("dispatch"), () =>
 		effectiveSettingsForDispatch?.(),
 	);
+	let unsubscribeDispatchShutdown: (() => void) | undefined;
 	if (dispatch) {
-		termination.onDrain(async () => {
-			await dispatch.drain();
+		let dispatchDrain: Promise<void> | undefined;
+		const beginDispatchDrain = (): Promise<void> => (dispatchDrain ??= dispatch.drain());
+		unsubscribeDispatchShutdown = bus.on(BusChannels.ShutdownRequested, () => {
+			// Admission closes before sequential drain hooks can wait on another resource.
+			void beginDispatchDrain().catch(() => {
+				// The awaited drain hook reports this same rejection.
+			});
 		});
+		termination.onDrain(
+			async () => {
+				unsubscribeDispatchShutdown?.();
+				await beginDispatchDrain();
+			},
+			{
+				timeoutMs: Math.min(2 ** 31 - 1, (dispatch.drainAllowanceMs?.() ?? 0) + resolveShutdownHookBudgetMs()),
+			},
+		);
 	}
 	// The loader caps each domain separately. The outer hook must allow the
 	// whole sequence to finish, including cleanup after a timed-out domain.
-	termination.onPersist(() => result.stop(), {
+	termination.onPersist((signal) => result.stop(signal), {
 		timeoutMs: Math.min(2 ** 31 - 1, (result.loaded.length + 1) * resolveShutdownHookBudgetMs()),
 	});
 
@@ -2844,9 +2864,9 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		getSessionId: () => session?.current()?.id ?? null,
 		readEntries: () => {
 			const meta = session?.current();
-			if (!meta) return [];
+			if (!session || !meta) return [];
 			const leafTurnId = session?.tree(meta.id).leafId ?? undefined;
-			return filterEntriesToActivePath(readSessionEntriesForCompact(meta.id), leafTurnId);
+			return filterEntriesToActivePath(session.readEntries(), leafTurnId);
 		},
 		appendEntry: (entry) => {
 			session?.appendEntry(entry);
@@ -2859,9 +2879,9 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		getSessionId: () => session?.current()?.id ?? null,
 		readEntries: () => {
 			const meta = session?.current();
-			if (!meta) return [];
+			if (!session || !meta) return [];
 			const leafTurnId = session?.tree(meta.id).leafId ?? undefined;
-			return filterEntriesToActivePath(readSessionEntriesForCompact(meta.id), leafTurnId);
+			return filterEntriesToActivePath(session.readEntries(), leafTurnId);
 		},
 		getActiveLeafTurnId: () => {
 			const meta = session?.current();
@@ -3286,9 +3306,9 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 					visionSidecar,
 					getRecentVisionImages: () => {
 						const meta = session?.current();
-						if (!meta) return [];
+						if (!session || !meta) return [];
 						const leaf = session?.tree(meta.id).leafId ?? undefined;
-						return latestUserImages(readSessionEntriesForCompact(meta.id), leaf);
+						return latestUserImages(session.readEntries(), leaf);
 					},
 				}
 			: {}),
@@ -3359,7 +3379,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 					session,
 					readSessionEntries: () => {
 						const meta = session.current();
-						return meta ? readSessionEntriesForCompact(meta.id) : [];
+						return meta ? session.readEntries() : [];
 					},
 					onContextRecalled: (payload) => bus.emit(BusChannels.ContextRecalled, payload),
 					readRecall: createSessionRereadPort(session, bus),
@@ -3643,7 +3663,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		if (!session || !meta) return null;
 		let recorded: ReturnType<typeof resumedSessionRoute>;
 		try {
-			recorded = resumedSessionRoute(meta, readSessionEntriesForCompact(meta.id));
+			recorded = resumedSessionRoute(meta, session.readEntries());
 		} catch {
 			// An unreadable ledger has no route to offer; the session keeps the
 			// current one, which is what resume did before it looked.
@@ -3729,7 +3749,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		const meta = session.current();
 		if (!meta) return [];
 		reconcilePendingProtectedArtifacts(session);
-		return readSessionEntriesForCompact(meta.id);
+		return session.readEntries();
 	};
 
 	const turnOutcomeCollector = createTurnOutcomeCollector();
@@ -4120,21 +4140,39 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	jobHost.attachChat(chat);
 	memoryGuardian.wake("ready");
 
-	// Coordinated shutdown (SIGINT/SIGTERM, TUI quit) must abort any in-flight
-	// turn before domains stop. The agent abort fans out to every running
-	// tool's AbortSignal, and bash-exec answers it by signalling the tool's
-	// detached process group. Without this, a headless SIGINT exited the CLI
-	// while a running tool's children survived as orphans of init.
-	termination.onDrain(async () => {
-		await jobHost.close();
+	// Stop preparation and tool admission synchronously at the shutdown edge;
+	// settlement still owns terminal events and accepted session appends.
+	let chatSettlement: Promise<void> | undefined;
+	const beginChatSettlement = (): Promise<void> => {
+		if (chatSettlement) return chatSettlement;
 		chat.dispose();
-		// The abort fans out to running tools, but their results still land and
-		// persist through the aborted run's subscribers. Domains (the session
-		// writer among them) stop in the persist phase, strictly after drain, so
-		// awaiting settlement here makes a session append after session stop
-		// impossible by ordering.
-		await chat.whenSettled();
+		chatSettlement = (async () => {
+			await jobHost.close();
+			await chat.whenSettled();
+		})();
+		return chatSettlement;
+	};
+	const unsubscribeChatShutdown = bus.on(BusChannels.ShutdownRequested, () => {
+		void beginChatSettlement().catch(() => {
+			// The awaited drain hook reports this same rejection.
+		});
 	});
+	// Safe-exec has the longest local tool grace; external CLI grace is shorter.
+	const chatShutdownAllowanceMs =
+		SAFE_EXEC_DEFAULT_KILL_GRACE_MS +
+		SAFE_EXEC_GROUP_TEARDOWN_BOUND_MS +
+		SAFE_EXEC_PIPE_DRAIN_BOUND_MS +
+		resolveShutdownHookBudgetMs();
+	termination.onDrain(
+		async () => {
+			unsubscribeChatShutdown();
+			// Tool cleanup precedes terminal accounting and accepted writes; the
+			// extra hook allowance covers settlement before domain persistence closes.
+			await beginChatSettlement();
+		},
+		{ timeoutMs: chatShutdownAllowanceMs },
+	);
+
 	// System One rows reach the ledger at turn boundaries, so whatever was recorded
 	// since the last settle (a /draft judgment, an answer that arrived after its
 	// deadline) is still pending here and would die with the process. Registered
@@ -4853,9 +4891,9 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			// and the session writer stops in result.stop() below. Awaiting
 			// settlement here makes a session append after session stop impossible
 			// by ordering rather than by timing.
-			await jobHost.close();
-			await chat.whenSettled();
-			chat.dispose();
+			await beginChatSettlement();
+			unsubscribeChatShutdown();
+			unsubscribeDispatchShutdown?.();
 			await dispatch.drain();
 			await toolBootstrap.close();
 			// A client that closes the session ends ACP here, outside the

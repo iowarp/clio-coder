@@ -6,9 +6,36 @@ import type { Metafile } from "esbuild";
 
 const root = resolve(import.meta.dirname, "../..");
 const buildDirectory = process.env.CLIO_TEST_BUILD_DIR ?? "dist";
+// The 0.6.2 sprint measured Effect at 55-117 ms per cold first use and cut it.
+// An externalized import evades a byte count, so both input and external paths
+// are checked for every eagerly loaded chunk.
+const effectPackage = /(?:^effect(?:\/|$)|node_modules\/(?:.*\/)?effect(?:\/|$))/u;
+
+function readMetafile(): Metafile {
+	return JSON.parse(readFileSync(resolve(root, buildDirectory, "metafile-esm.json"), "utf8")) as Metafile;
+}
+
+function assertNoEffect(metadata: Metafile, entry: string, label: string): void {
+	const seen = new Set<string>();
+	const visit = (name: string): void => {
+		if (seen.has(name)) return;
+		const output = metadata.outputs[name];
+		ok(output, `missing static output: ${name}`);
+		seen.add(name);
+		for (const source of Object.keys(output.inputs)) {
+			ok(!effectPackage.test(source), `${label} bundles Effect: ${source}`);
+		}
+		for (const dependency of output.imports) {
+			if (dependency.kind === "dynamic-import") continue;
+			if (dependency.external) ok(!effectPackage.test(dependency.path), `${label} imports Effect: ${dependency.path}`);
+			else visit(dependency.path);
+		}
+	};
+	visit(entry);
+}
 
 test("production Stage 0 static closure stays within its measured bundle budget", () => {
-	const metadata = JSON.parse(readFileSync(resolve(root, buildDirectory, "metafile-esm.json"), "utf8")) as Metafile;
+	const metadata = readMetafile();
 	const owners = Object.entries(metadata.outputs).filter(
 		([, output]) => "src/interactive/terminal-lease.ts" in output.inputs,
 	);
@@ -36,6 +63,7 @@ test("production Stage 0 static closure stays within its measured bundle budget"
 		}
 	};
 	visit(owner[0]);
+	assertNoEffect(metadata, owner[0], "Stage 0");
 	let totalBytes = 0;
 	let clioBytes = 0;
 	const forbidden =
@@ -61,4 +89,13 @@ test("production Stage 0 static closure stays within its measured bundle budget"
 	ok(closure.size <= 32, `Stage 0 chunks: ${closure.size} > 32`);
 	ok(totalBytes <= 1_400_000, `Stage 0 bytes: ${totalBytes} > 1,400,000`);
 	ok(clioBytes <= 350_000, `Stage 0 Clio source bytes: ${clioBytes} > 350,000`);
+});
+
+test("CLI entry static closure loads no Effect", () => {
+	const metadata = readMetafile();
+	const entries = Object.entries(metadata.outputs).filter(([, output]) => output.entryPoint === "src/cli/index.ts");
+	strictEqual(entries.length, 1, "build with pnpm build before checking the CLI artifact");
+	const entry = entries[0];
+	ok(entry);
+	assertNoEffect(metadata, entry[0], "CLI entry");
 });

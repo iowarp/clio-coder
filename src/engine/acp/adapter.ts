@@ -23,7 +23,7 @@ import { ACP_SESSION_META_KEY, ACP_USAGE_META_KEY } from "./types.js";
 
 type AcpRunEvent = AgentEvent | ClioWorkerEvent;
 
-const DEFAULT_CANCEL_GRACE_MS = 1_000;
+export const DEFAULT_CANCEL_GRACE_MS = 1_000;
 
 export interface AcpDelegationRunInput {
 	agent: DelegationAgentConfig;

@@ -449,6 +449,9 @@ export interface DispatchContract {
 	/** List runs from the ledger. Machine-wide: filter through ownership before surfacing rows. */
 	listRuns(status?: RunStatus): ReadonlyArray<RunEnvelope>;
 
+	/** Run/assignment state changes; subscribe before reading, and unsubscribe after observation. */
+	subscribeChanges?(listener: () => void): () => void;
+
 	/** Get a specific immutable attempt envelope. */
 	getRun(runId: string): RunEnvelope | null;
 
@@ -553,6 +556,9 @@ export interface DispatchContract {
 	 * or closed with a nonzero failure count. Never claims a probe.
 	 */
 	routeBreakers?(): ReadonlyArray<RouteBreakerView>;
+
+	/** Local cleanup and event-drain allowance; accepted durable writes follow settlement. */
+	drainAllowanceMs?(): number;
 
 	/** Drain active runs on shutdown (SIGTERM + grace + SIGKILL). */
 	drain(): Promise<void>;

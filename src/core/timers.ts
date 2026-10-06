@@ -10,8 +10,23 @@ export function clampTimerDelayMs(value: number): number {
 	return value >= MAX_TIMER_DELAY_MS ? MAX_TIMER_DELAY_MS : Math.floor(value);
 }
 
-export function sleep(ms: number): Promise<void> {
-	return new Promise((resolve) => setTimeout(resolve, ms));
+export function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+	return new Promise((resolve, reject) => {
+		if (signal?.aborted) {
+			reject(signal.reason);
+			return;
+		}
+		const onAbort = (): void => {
+			clearTimeout(timer);
+			signal?.removeEventListener("abort", onAbort);
+			reject(signal?.reason);
+		};
+		const timer = setTimeout(() => {
+			signal?.removeEventListener("abort", onAbort);
+			resolve();
+		}, clampTimerDelayMs(ms));
+		signal?.addEventListener("abort", onAbort, { once: true });
+	});
 }
 
 /**

@@ -1,10 +1,16 @@
-import { type ChildProcessByStdio, spawn } from "node:child_process";
+import type { ChildProcessByStdio } from "node:child_process";
+import { spawn } from "node:child_process";
 import type { Readable, Writable } from "node:stream";
 
 import { boundedExternalDiagnostic } from "../../core/external-diagnostic.js";
 import { buildSafeToolEnv, resolveSafeCwd } from "../../core/safe-exec.js";
 import { assertToolProfileEnforceable } from "../../tools/profiles.js";
-import { createProcessTreeTerminator, readBoundedLines, readStderr, waitForClose } from "../external-subprocess.js";
+import {
+	createProcessTreeTerminator,
+	EXTERNAL_PROCESS_KILL_GRACE_MS,
+	readBoundedLines,
+	readStderr,
+} from "../external-subprocess.js";
 import type { AgentEvent, AgentMessage, Usage } from "../types.js";
 import type { WorkerEventEmit, WorkerRunHandle, WorkerRunInput, WorkerRunResult } from "../worker-runtime.js";
 
@@ -359,6 +365,7 @@ export function startAntigravityWorkerRun(
 	emit: WorkerEventEmit,
 	dependencies: AntigravityRuntimeDependencies = {},
 ): WorkerRunHandle {
+	if (input.signal?.aborted === true) throw input.signal.reason;
 	const sourceEnv = dependencies.environment ?? process.env;
 	const args = buildAgyArgs(input);
 	const stdinLine = buildAgyStdinLine(input);
@@ -381,41 +388,50 @@ export function startAntigravityWorkerRun(
 		protocolDiagnostics: [],
 	};
 	let aborted = false;
+	let settled = false;
 	let spawnError = "";
 	let streamError = "";
-	const terminator = createProcessTreeTerminator(child, dependencies.killGraceMs ?? 1500);
+	const terminator = createProcessTreeTerminator(child, dependencies.killGraceMs ?? EXTERNAL_PROCESS_KILL_GRACE_MS);
 	const abort = (): void => {
-		if (child.exitCode !== null) return;
+		if (settled) return;
 		aborted = true;
 		terminator.terminate();
 	};
 	const onAbort = (): void => abort();
 	if (input.signal?.aborted) abort();
 	else input.signal?.addEventListener("abort", onAbort, { once: true });
-	child.once("error", (cause) => {
+	const onChildError = (cause: Error): void => {
 		spawnError =
 			(cause as NodeJS.ErrnoException).code === "ENOENT"
 				? "Antigravity CLI (`agy`) is not installed or not on PATH."
 				: boundedExternalDiagnostic(cause.message);
-	});
-	child.stdin.on("error", (cause) => {
+	};
+	const onStdinError = (cause: Error): void => {
 		if (!aborted) spawnError ||= boundedExternalDiagnostic(`could not send work order to Antigravity: ${cause.message}`);
-	});
+	};
+	child.once("error", onChildError);
+	child.stdin.on("error", onStdinError);
 	child.stdin.end(stdinLine);
 
 	const promise = (async (): Promise<WorkerRunResult> => {
 		emit({ type: "agent_start" } as AgentEvent);
 		try {
-			const stderrPromise = readStderr(child);
+			const stderrPromise = readStderr(child).catch((cause) =>
+				boundedExternalDiagnostic(cause instanceof Error ? cause.message : String(cause)),
+			);
 			const stdoutPromise = readStream(child, emit, streamState, input.sessionId).catch((cause) => {
 				streamError = boundedExternalDiagnostic(cause instanceof Error ? cause.message : String(cause));
 				terminator.terminate();
 			});
-			const exitCode = await waitForClose(child);
+			const outcome = await terminator.completed;
+			const exitCode = outcome.exitCode;
 			await stdoutPromise;
-			const stderr = await stderrPromise.catch((cause) =>
-				boundedExternalDiagnostic(cause instanceof Error ? cause.message : String(cause)),
-			);
+			const stderr = await stderrPromise;
+			streamError ||= outcome.incomplete
+				? "Antigravity CLI process group cleanup incomplete"
+				: outcome.pipeDrainIncomplete
+					? "Antigravity CLI output pipe draining incomplete"
+					: "";
 			let terminalResponse = "";
 			try {
 				terminalResponse = boundedProviderField(streamState.result?.response, "response");
@@ -455,8 +471,11 @@ export function startAntigravityWorkerRun(
 			}
 			return { messages, exitCode: finalMessage.stopReason === "stop" ? 0 : 1 };
 		} finally {
+			settled = true;
 			terminator.cleanup();
 			input.signal?.removeEventListener("abort", onAbort);
+			child.off("error", onChildError);
+			child.stdin.off("error", onStdinError);
 		}
 	})();
 

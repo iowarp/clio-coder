@@ -1,8 +1,17 @@
 import { deepStrictEqual, rejects, strictEqual } from "node:assert/strict";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { test } from "node:test";
 import { BusChannels } from "../../src/core/bus-events.js";
 import { type DomainContext, type DomainModule, loadDomains } from "../../src/core/domain-loader.js";
+import { safeResourceWrite } from "../../src/core/safe-resource-write.js";
 import { getSharedBus } from "../../src/core/shared-bus.js";
+import {
+	getTerminationCoordinator,
+	resolveShutdownHookBudgetMs,
+	ShutdownBudgetExceeded,
+} from "../../src/core/termination.js";
 
 test("failed domain startup releases its listeners and earlier dependencies in reverse order", async () => {
 	const bus = getSharedBus();
@@ -165,4 +174,92 @@ test("a cancelled load stops the started domains and propagates the cancellation
 	deepStrictEqual(stopped, ["second", "first"], "started domains stop in reverse order");
 	deepStrictEqual(failedEvents, [], "a cancellation is not a domain failure");
 	deepStrictEqual(diagnostics, []);
+});
+
+test("budget expiry aborts the stop signal and does not rerun the domain stop", async (t) => {
+	t.mock.timers.enable({ apis: ["setTimeout"] });
+	let started!: (signal: AbortSignal) => void;
+	const stopStarted = new Promise<AbortSignal>((resolve) => {
+		started = resolve;
+	});
+	let stops = 0;
+	const loaded = await loadDomains([
+		{
+			manifest: { name: "pending", dependsOn: [] },
+			createExtension: () => ({
+				contract: {},
+				extension: {
+					start() {},
+					stop(signal) {
+						stops += 1;
+						started(signal);
+						return new Promise<void>(() => {});
+					},
+				},
+			}),
+		},
+	]);
+	const stopping = loaded.stop();
+	const signal = await stopStarted;
+	strictEqual(signal.aborted, false);
+	t.mock.timers.tick(resolveShutdownHookBudgetMs());
+	await stopping;
+	strictEqual(signal.aborted, true);
+	strictEqual(signal.reason instanceof ShutdownBudgetExceeded, true);
+	await loaded.stop();
+	strictEqual(stops, 1);
+});
+
+test("accepted persistence runs after observed resource settlement", async (t) => {
+	t.mock.timers.enable({ apis: ["setTimeout"] });
+	const root = mkdtempSync(join(tmpdir(), "clio-domain-persist-"));
+	const path = join(root, "accepted.json");
+	const order: string[] = [];
+	let release!: () => void;
+	const settled = new Promise<void>((resolve) => {
+		release = resolve;
+	});
+	let started!: () => void;
+	const stopStarted = new Promise<void>((resolve) => {
+		started = resolve;
+	});
+	const loaded = await loadDomains([
+		{
+			manifest: { name: "resource", dependsOn: [] },
+			createExtension: () => ({
+				contract: {},
+				extension: {
+					start() {},
+					async stop() {
+						order.push("stop");
+						started();
+						await settled;
+						order.push("settled");
+					},
+				},
+			}),
+		},
+	]);
+	const termination = getTerminationCoordinator();
+	t.mock.method(process, "exit", (_code?: string | number | null): never => {
+		order.push("exit");
+		return undefined as never;
+	});
+	termination.onTerminate((signal) => loaded.stop(signal));
+	termination.onPersist(() => {
+		order.push("persist");
+		safeResourceWrite(path, JSON.stringify({ accepted: true }));
+	});
+	try {
+		const shutdown = termination.shutdown();
+		await stopStarted;
+		deepStrictEqual(order, ["stop"]);
+		release();
+		await shutdown;
+		deepStrictEqual(order, ["stop", "settled", "persist", "exit"]);
+		deepStrictEqual(JSON.parse(readFileSync(path, "utf8")), { accepted: true });
+	} finally {
+		release();
+		rmSync(root, { recursive: true, force: true });
+	}
 });

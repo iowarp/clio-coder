@@ -14,6 +14,7 @@ import {
 import { collectSessionEntries } from "./compaction/session-entries.js";
 import type { SessionEntryInput, SessionMeta, TurnInput } from "./contract.js";
 import { isSessionEntry, type SessionEntry } from "./entries.js";
+import { SessionEntriesIndex } from "./entries-index.js";
 import { runMigrations } from "./migrations/index.js";
 
 /**
@@ -26,6 +27,7 @@ import { runMigrations } from "./migrations/index.js";
 export interface SessionManagerState {
 	meta: SessionMeta;
 	writer: ClioSessionWriter;
+	entriesIndex?: SessionEntriesIndex;
 }
 
 /**
@@ -105,7 +107,9 @@ export function appendTurn(state: SessionManagerState, input: TurnInput): ClioTu
 		role: record.kind,
 		payload: record.payload,
 	};
+	const index = currentEntriesIndex(state);
 	state.writer.appendEntry(entry, {
+		onAppend: (observation) => index.noteAppend(observation),
 		treeNode: {
 			id: record.id,
 			parentId: record.parentId,
@@ -113,6 +117,7 @@ export function appendTurn(state: SessionManagerState, input: TurnInput): ClioTu
 			kind: record.kind,
 		},
 	});
+	index.refreshAfterWrite();
 	return record;
 }
 
@@ -129,7 +134,9 @@ export function appendEntry(state: SessionManagerState, input: SessionEntryInput
 	// shape is preserved because `input` is SessionEntryInput (distributed).
 	const entry = { ...input, turnId, timestamp } as SessionEntry;
 	if (!isSessionEntry(entry)) throw new Error(`session.appendEntry: invalid ${String(input.kind)} entry`);
-	state.writer.appendEntry(entry);
+	const index = currentEntriesIndex(state);
+	state.writer.appendEntry(entry, { onAppend: (observation) => index.noteAppend(observation) });
+	index.refreshAfterWrite();
 	return entry;
 }
 
@@ -138,4 +145,14 @@ export function replaceEntries(state: SessionManagerState, entries: ReadonlyArra
 		if (!isSessionEntry(entry)) throw new Error("session.replaceEntries: invalid entry");
 	}
 	state.writer.replaceEntries(entries);
+	currentEntriesIndex(state).refreshAfterWrite();
+}
+
+function currentEntriesIndex(state: SessionManagerState): SessionEntriesIndex {
+	state.entriesIndex ??= new SessionEntriesIndex(sessionPaths(state.meta).current);
+	return state.entriesIndex;
+}
+
+export function readCurrentEntries(state: SessionManagerState): ReadonlyArray<SessionEntry> {
+	return currentEntriesIndex(state).read();
 }
