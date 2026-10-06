@@ -6,8 +6,10 @@ import { ApiProblem, type Client } from "../api/client.js";
 import { reportProblem } from "../design/notifications.js";
 import { StatusMark } from "../design/status.js";
 import { Dialog } from "../interaction/Dialog.js";
+import { desktopManaged, TERMINAL_NOTE, terminalSteps } from "./library-extension-model.js";
 import {
 	type Applied,
+	componentSentence,
 	copyOperations,
 	copyState,
 	diskSentence,
@@ -21,7 +23,6 @@ import {
 	PACKAGE_KINDS,
 	type Package,
 	type Plan,
-	componentSentence,
 	type Scope,
 	scopeCopy,
 	stepTitle,
@@ -524,22 +525,36 @@ export function LibraryCatalog({
 											<span>
 												{scopeCopy(scope)} <StatusMark tone={state.tone} label={state.label} />
 											</span>
-											<span className="library-copy__actions">
-												{copyOperations(String(copy.state)).map((operation) => (
-													<button
-														type="button"
-														key={operation}
-														aria-label={`${verb(operation)} the ${scope} copy of ${pkg.ref}`}
-														onClick={() => review({ operation, ref: pkg.ref, scope })}
-													>
-														{verb(operation)}
-													</button>
-												))}
-											</span>
+											{desktopManaged(pkg) && (
+												<span className="library-copy__actions">
+													{copyOperations(String(copy.state)).map((operation) => (
+														<button
+															type="button"
+															key={operation}
+															aria-label={`${verb(operation)} the ${scope} copy of ${pkg.ref}`}
+															onClick={() => review({ operation, ref: pkg.ref, scope })}
+														>
+															{verb(operation)}
+														</button>
+													))}
+												</span>
+											)}
 										</div>
 									);
 								})}
-								{pkg.catalogOrigin !== "installed" && (
+								{!desktopManaged(pkg) && (
+									<div className="library-terminal">
+										<p className="panel-note">{TERMINAL_NOTE}</p>
+										<ul>
+											{terminalSteps(pkg).map((step) => (
+												<li key={step.command}>
+													{step.label}: <code>{step.command}</code>
+												</li>
+											))}
+										</ul>
+									</div>
+								)}
+								{desktopManaged(pkg) && pkg.catalogOrigin !== "installed" && (
 									<span className="library-copy__actions">
 										{missingScopes(pkg).map((scope) => (
 											<button
@@ -597,9 +612,11 @@ export function LibraryCatalog({
 										</div>
 									)}
 								</dl>
-								<p className="panel-note">
-									Choose a destination to review the exact files, dependencies and effects before applying a change.
-								</p>
+								{desktopManaged(pkg) && (
+									<p className="panel-note">
+										Choose a destination to review the exact files, dependencies and effects before applying a change.
+									</p>
+								)}
 							</div>
 						)}
 					</li>
