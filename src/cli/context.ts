@@ -1,10 +1,10 @@
 import { join, resolve } from "node:path";
+import { formatContextOperationResult } from "../core/context-operation.js";
+import { refreshOperationFacts } from "../domains/context/operation-result.js";
 import type { BootstrapGenerationState } from "../domains/context/state.js";
 import type { RunWikiGenerateResult } from "../domains/context/wiki/generate.js";
 import type { WikiMeta } from "../domains/context/wiki/meta.js";
 import { MAX_PAGE_ATTEMPTS } from "../domains/context/wiki/plan-store.js";
-import { refreshOperationFacts } from "../domains/context/operation-result.js";
-import { formatContextOperationResult } from "../core/context-operation.js";
 import { createContextCliOperation, createContextCliProgress } from "./context-progress.js";
 
 const HELP = `Usage:

@@ -1,4 +1,3 @@
-import { CONTEXT_OPERATION_CUSTOM_TYPE, readContextOperation } from "../../src/core/context-operation.js";
 import { deepStrictEqual, doesNotMatch, match, ok, rejects, strictEqual } from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -7,6 +6,7 @@ import { afterEach, beforeEach, describe, it } from "node:test";
 import { createAssistantMessageEventStream } from "@earendil-works/pi-ai";
 import type { FauxResponseFactory } from "@earendil-works/pi-ai/providers/faux";
 import { BusChannels, type ContextActivityPayload, type ContextPrunedPayload } from "../../src/core/bus-events.js";
+import { CONTEXT_OPERATION_CUSTOM_TYPE, readContextOperation } from "../../src/core/context-operation.js";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { createSafeEventBus } from "../../src/core/event-bus.js";
 import { clioStateDir } from "../../src/core/xdg.js";

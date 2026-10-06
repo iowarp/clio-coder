@@ -1,5 +1,5 @@
-import { CONTEXT_OPERATION_CUSTOM_TYPE, createContextOperation } from "../../../core/context-operation.js";
 import type { ContextActivityPayload } from "../../../core/bus-events.js";
+import { CONTEXT_OPERATION_CUSTOM_TYPE, createContextOperation } from "../../../core/context-operation.js";
 /**
  * `/context recall <ref>`: the operator's half of working-set recall.
  *

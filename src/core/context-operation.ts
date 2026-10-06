@@ -1,7 +1,7 @@
-import { boundedExternalDiagnostic } from "./external-diagnostic.js";
 import { randomUUID } from "node:crypto";
 import { resolve } from "node:path";
 import type { ContextActivityKind, ContextActivityPayload, ContextActivityPhase } from "./bus-events.js";
+import { boundedExternalDiagnostic } from "./external-diagnostic.js";
 
 export type ContextOperationOutcome = "completed" | "previewed" | "unchanged" | "cancelled" | "failed";
 export interface ContextOperationFact {

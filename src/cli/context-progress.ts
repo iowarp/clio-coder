@@ -1,6 +1,6 @@
-import { createContextOperation } from "../core/context-operation.js";
-import type { ContextActivityKind } from "../core/bus-events.js";
 import { stripVTControlCharacters } from "node:util";
+import type { ContextActivityKind } from "../core/bus-events.js";
+import { createContextOperation } from "../core/context-operation.js";
 import type { BootstrapProgressEvent } from "../domains/context/index.js";
 
 function plain(value: string): string {

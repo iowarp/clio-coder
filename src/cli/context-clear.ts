@@ -1,10 +1,9 @@
-import { clearOperationFacts } from "../domains/context/operation-result.js";
-import { formatContextOperationResult } from "../core/context-operation.js";
-import { createContextCliOperation } from "./context-progress.js";
 import { stdin as input, stdout as output } from "node:process";
 import { createInterface } from "node:readline/promises";
-
+import { formatContextOperationResult } from "../core/context-operation.js";
 import { runContextClear } from "../domains/context/index.js";
+import { clearOperationFacts } from "../domains/context/operation-result.js";
+import { createContextCliOperation } from "./context-progress.js";
 
 const HELP = `Usage:
   clio-coder context reset [--all] [--yes]

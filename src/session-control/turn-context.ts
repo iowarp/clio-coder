@@ -1,10 +1,10 @@
-import { CONTEXT_OPERATION_CUSTOM_TYPE, createContextOperation } from "../core/context-operation.js";
-import type { ContextOperationFact } from "../core/context-operation.js";
-import { contextOperationAwareness } from "./context-operation-awareness.js";
 import { assistantOutputChars } from "../core/assistant-output.js";
+import type { ContextOperationFact } from "../core/context-operation.js";
+import { CONTEXT_OPERATION_CUSTOM_TYPE, createContextOperation } from "../core/context-operation.js";
 import type { SuccessfulMemoryContextCommit } from "../domains/memory/commit-state.js";
 import type { MemoryInterventionRegistration } from "../domains/middleware/memory-intervention.js";
 import { replaceEngineMessages, setEngineSystemPrompt } from "../engine/agent.js";
+import { contextOperationAwareness } from "./context-operation-awareness.js";
 import type { ContinuityReductionHooks } from "./continuity-controller.js";
 /**
  * Turn context ownership: the session-prompt compile cache, context-snapshot

@@ -1,6 +1,6 @@
-import { formatContextOperationResult } from "../core/context-operation.js";
 import { stdin as input, stdout as output } from "node:process";
 import { createInterface } from "node:readline/promises";
+import { formatContextOperationResult } from "../core/context-operation.js";
 import { runBootstrap } from "../domains/context/index.js";
 import {
 	bootstrapInputFromInitOptions,
@@ -8,9 +8,9 @@ import {
 	type ContextInitOptions,
 	validateInitOptions,
 } from "../domains/context/init-options.js";
+import { bootstrapOperationFacts } from "../domains/context/operation-result.js";
 import { type ThinkingLevel, VALID_THINKING_LEVELS } from "../domains/providers/index.js";
 import { modelBootstrapGenerate } from "./bootstrap-generate.js";
-import { bootstrapOperationFacts } from "../domains/context/operation-result.js";
 import { createContextCliOperation, createContextCliProgress } from "./context-progress.js";
 
 const HELP = `Usage:
