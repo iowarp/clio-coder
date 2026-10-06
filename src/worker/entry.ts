@@ -294,23 +294,32 @@ async function main(): Promise<number> {
 	// and bound the exit so no worker is ever stranded on a remote node. The
 	// timer is unref'd: it cannot keep an otherwise-finished process alive,
 	// but it fires if a hung run is still holding the event loop.
-	demux.onChannelClose(() => {
-		process.stderr.write("[worker] control channel closed; aborting run\n");
-		emitControlFrame({ kind: "cancel_ack", at: Date.now() });
-		handle.abort();
-		const forceExit = setTimeout(() => process.exit(1), CHANNEL_CLOSE_EXIT_GRACE_MS);
-		forceExit.unref?.();
-	});
-	const onSignal = () => {
+	let abortStarted = false;
+	let runSettled = false;
+	let forceExit: ReturnType<typeof setTimeout> | null = null;
+	const abortOnce = (): void => {
+		if (abortStarted || runSettled) return;
+		abortStarted = true;
 		emitControlFrame({ kind: "cancel_ack", at: Date.now() });
 		handle.abort();
 	};
+	demux.onChannelClose(() => {
+		if (runSettled) return;
+		process.stderr.write("[worker] control channel closed; aborting run\n");
+		abortOnce();
+		if (forceExit !== null) return;
+		forceExit = setTimeout(() => process.exit(1), CHANNEL_CLOSE_EXIT_GRACE_MS);
+		forceExit.unref?.();
+	});
+	const onSignal = abortOnce;
 	process.on("SIGINT", onSignal);
 	process.on("SIGTERM", onSignal);
 	try {
 		const result = await handle.promise;
 		return result.exitCode;
 	} finally {
+		runSettled = true;
+		if (forceExit !== null) clearTimeout(forceExit);
 		stopHeartbeat();
 		process.off("SIGINT", onSignal);
 		process.off("SIGTERM", onSignal);

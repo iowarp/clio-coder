@@ -216,6 +216,7 @@ import {
 	registerAssignment,
 	renameStoredAssignment,
 	settleStoredAssignment,
+	subscribeStoredAssignments,
 	timeoutStoredAssignment,
 } from "./assignment-store.js";
 import {
@@ -3834,6 +3835,10 @@ export function createDispatchBundle(
 	});
 	const assignmentWrites = new Set<Promise<unknown>>();
 	let draining = false;
+	const drainController = new AbortController();
+	const dispatching = new Set<Promise<unknown>>();
+	let drainPromise: Promise<void> | null = null;
+	let stopPromise: Promise<void> | null = null;
 
 	/** Session-scope totals for the operator snapshot; finalized runs only. */
 	const finalizedTotals = { inputTokens: 0, outputTokens: 0, totalTokens: 0, costUsd: 0, runtimeSeconds: 0 };
@@ -6499,6 +6504,7 @@ export function createDispatchBundle(
 			const adopted = held?.adopt(spec, spawnOptions) ?? null;
 			adoptedHeldWorker = adopted !== null;
 			if (remoteReturn) await prepareFleetChangeReturn(remoteReturn.node, remoteReturn.worktree);
+			preparation?.signal?.throwIfAborted();
 			worker = adopted ?? (placement?.spawn ?? spawnWorker)(spec, spawnOptions);
 		} catch (error) {
 			leaseSlot.release();
@@ -8195,7 +8201,27 @@ export function createDispatchBundle(
 		});
 	}
 
-	async function dispatch(
+	function dispatch(
+		req: DispatchRequest,
+		observer?: DispatchAdmissionObserver,
+		preparation?: DispatchPreparationOptions,
+		settlement?: BatchVerificationGate,
+	): ReturnType<typeof dispatchRequest> {
+		if (draining) return Promise.reject(new AdmissionCanceledError());
+		const operation = dispatchRequest(req, observer, {
+			...preparation,
+			signal: preparation?.signal
+				? AbortSignal.any([preparation.signal, drainController.signal])
+				: drainController.signal,
+		}, settlement);
+		dispatching.add(operation);
+		operation.finally(() => dispatching.delete(operation)).catch(() => {
+			// The original admission promise retains its error for the caller.
+		});
+		return operation;
+	}
+
+	async function dispatchRequest(
 		req: DispatchRequest,
 		observer?: DispatchAdmissionObserver,
 		preparation?: DispatchPreparationOptions,
@@ -9027,29 +9053,34 @@ export function createDispatchBundle(
 			startHeartbeatWatchdog();
 			probeEndpointsAtDefaultBound();
 		},
-		async stop() {
-			heldWorkers?.releaseAll("session end");
-			// Shutdown is process-local. The durable machine-wide drain belongs to
-			// the operator: setting it here would deny admission in every sibling
-			// Clio process, and a crash before the clearing write would wedge the
-			// machine.
-			draining = true;
-			capacityAdmission.drain();
-			settleQueuedAssignmentsForShutdown();
-			stopHeartbeatWatchdog();
-			await drain();
-			capacityAdmission.stop();
-			for (const ownerId of ownedReservations) rollbackDispatchReservation(ownerId, now());
-			ownedReservations.clear();
-			publishedPathScopeRoots.clear();
-			await Promise.allSettled([...assignmentWrites]);
-			await liveLedgerWrite;
-			// After drain(), so the last run's terminal line is written before the
-			// bridge stops listening.
-			journalBridge?.stop();
-			journalBridge = null;
-			for (const unsubscribe of grantUnsubscribes.splice(0)) unsubscribe();
-			grantBroker.dispose();
+		stop() {
+			if (stopPromise !== null) return stopPromise;
+			let resolveStop!: () => void;
+			let rejectStop!: (error: unknown) => void;
+			stopPromise = new Promise<void>((resolve, reject) => {
+				resolveStop = resolve;
+				rejectStop = reject;
+			});
+			void (async () => {
+				// Shutdown is process-local. The durable machine-wide drain belongs to
+				// the operator: setting it here would deny admission in every sibling
+				// Clio process, and a crash before the clearing write would wedge the
+				// machine.
+				await drain();
+				capacityAdmission.stop();
+				for (const ownerId of ownedReservations) rollbackDispatchReservation(ownerId, now());
+				ownedReservations.clear();
+				publishedPathScopeRoots.clear();
+				await Promise.allSettled([...assignmentWrites]);
+				await liveLedgerWrite;
+				// After drain(), so the last run's terminal line is written before the
+				// bridge stops listening.
+				journalBridge?.stop();
+				journalBridge = null;
+				for (const unsubscribe of grantUnsubscribes.splice(0)) unsubscribe();
+				grantBroker.dispose();
+			})().then(resolveStop, rejectStop);
+			return stopPromise;
 		},
 	};
 
@@ -9194,24 +9225,46 @@ export function createDispatchBundle(
 		retryReasons.clear();
 	}
 
-	async function drain(): Promise<void> {
+	function drain(): Promise<void> {
+		if (drainPromise !== null) return drainPromise;
+		let resolveDrain!: () => void;
+		let rejectDrain!: (error: unknown) => void;
+		drainPromise = new Promise<void>((resolve, reject) => {
+			resolveDrain = resolve;
+			rejectDrain = reject;
+		});
 		draining = true;
-		settleQueuedAssignmentsForShutdown();
-		const runs = Array.from(active.values());
-		for (const run of runs) {
-			emitRunAborted(run, "dispatch_drain");
-			run.aborted = true;
-			grantBroker.revokeRun(run.runId, "the owning session is shutting down");
-			try {
-				run.abort();
-			} catch {
-				// best-effort; promise still resolves on child close
+		drainController.abort(new AdmissionCanceledError());
+		capacityAdmission.drain();
+		heldWorkers?.releaseAll("session end");
+		stopHeartbeatWatchdog();
+		void (async () => {
+			settleQueuedAssignmentsForShutdown();
+			const canceled = new Set<string>();
+			while (active.size > 0 || dispatching.size > 0) {
+				const runs = Array.from(active.values());
+				for (const run of runs) {
+					if (canceled.has(run.runId)) continue;
+					canceled.add(run.runId);
+					emitRunAborted(run, "dispatch_drain");
+					run.aborted = true;
+					grantBroker.revokeRun(run.runId, "the owning session is shutting down");
+					try {
+						run.abort();
+					} catch {
+						// Await finalization even when the runtime's abort throws.
+					}
+				}
+				await Promise.allSettled([...dispatching, ...runs.map((run) => run.finalPromise)]);
 			}
-		}
-		await Promise.allSettled(runs.map((r) => r.finalPromise));
-		await Promise.allSettled([...assignmentWrites]);
-		await liveLedgerWrite;
-		if (ledger) await ledger.persist();
+			while (memberWork.size > 0) {
+				await Promise.allSettled([...memberWork.values()].flatMap((work) => [...work]));
+			}
+			await Promise.allSettled([...assignmentWrites]);
+			await liveLedgerWrite;
+			if (ledger) await ledger.persist();
+		})().then(resolveDrain, rejectDrain);
+		return drainPromise;
 	}
 
 	function assignmentRootFor(id: string): string {
@@ -9404,6 +9457,25 @@ export function createDispatchBundle(
 		listRuns(status) {
 			const l = requireLedger();
 			return status ? l.list({ status }) : l.list();
+		},
+		subscribeChanges(listener) {
+			const unsubscribes = [
+				context.bus.on(BusChannels.DispatchEnqueued, listener),
+				context.bus.on(BusChannels.DispatchStarted, listener),
+				context.bus.on(BusChannels.DispatchCompleted, listener),
+				context.bus.on(BusChannels.DispatchFailed, listener),
+				context.bus.on(BusChannels.PermissionRequested, listener),
+				context.bus.on(BusChannels.PermissionResolved, listener),
+			];
+			try {
+				unsubscribes.push(subscribeStoredAssignments(listener));
+			} catch (error) {
+				for (const unsubscribe of unsubscribes) unsubscribe();
+				throw error;
+			}
+			return () => {
+				for (const unsubscribe of unsubscribes.splice(0)) unsubscribe();
+			};
 		},
 		getRun(runId) {
 			if (!ledger) return null;
