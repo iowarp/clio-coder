@@ -3835,6 +3835,8 @@ export function createDispatchBundle(
 	});
 	const assignmentWrites = new Set<Promise<unknown>>();
 	let draining = false;
+	const drainController = new AbortController();
+	const dispatching = new Set<Promise<unknown>>();
 	let drainPromise: Promise<void> | null = null;
 	let stopPromise: Promise<void> | null = null;
 
@@ -6502,6 +6504,7 @@ export function createDispatchBundle(
 			const adopted = held?.adopt(spec, spawnOptions) ?? null;
 			adoptedHeldWorker = adopted !== null;
 			if (remoteReturn) await prepareFleetChangeReturn(remoteReturn.node, remoteReturn.worktree);
+			preparation?.signal?.throwIfAborted();
 			worker = adopted ?? (placement?.spawn ?? spawnWorker)(spec, spawnOptions);
 		} catch (error) {
 			leaseSlot.release();
@@ -8198,7 +8201,27 @@ export function createDispatchBundle(
 		});
 	}
 
-	async function dispatch(
+	function dispatch(
+		req: DispatchRequest,
+		observer?: DispatchAdmissionObserver,
+		preparation?: DispatchPreparationOptions,
+		settlement?: BatchVerificationGate,
+	): ReturnType<typeof dispatchRequest> {
+		if (draining) return Promise.reject(new AdmissionCanceledError());
+		const operation = dispatchRequest(req, observer, {
+			...preparation,
+			signal: preparation?.signal
+				? AbortSignal.any([preparation.signal, drainController.signal])
+				: drainController.signal,
+		}, settlement);
+		dispatching.add(operation);
+		operation.finally(() => dispatching.delete(operation)).catch(() => {
+			// The original admission promise retains its error for the caller.
+		});
+		return operation;
+	}
+
+	async function dispatchRequest(
 		req: DispatchRequest,
 		observer?: DispatchAdmissionObserver,
 		preparation?: DispatchPreparationOptions,
@@ -9032,7 +9055,13 @@ export function createDispatchBundle(
 		},
 		stop() {
 			if (stopPromise !== null) return stopPromise;
-			stopPromise = (async () => {
+			let resolveStop!: () => void;
+			let rejectStop!: (error: unknown) => void;
+			stopPromise = new Promise<void>((resolve, reject) => {
+				resolveStop = resolve;
+				rejectStop = reject;
+			});
+			void (async () => {
 				// Shutdown is process-local. The durable machine-wide drain belongs to
 				// the operator: setting it here would deny admission in every sibling
 				// Clio process, and a crash before the clearing write would wedge the
@@ -9050,7 +9079,7 @@ export function createDispatchBundle(
 				journalBridge = null;
 				for (const unsubscribe of grantUnsubscribes.splice(0)) unsubscribe();
 				grantBroker.dispose();
-			})();
+			})().then(resolveStop, rejectStop);
 			return stopPromise;
 		},
 	};
@@ -9198,31 +9227,43 @@ export function createDispatchBundle(
 
 	function drain(): Promise<void> {
 		if (drainPromise !== null) return drainPromise;
+		let resolveDrain!: () => void;
+		let rejectDrain!: (error: unknown) => void;
+		drainPromise = new Promise<void>((resolve, reject) => {
+			resolveDrain = resolve;
+			rejectDrain = reject;
+		});
 		draining = true;
+		drainController.abort(new AdmissionCanceledError());
 		capacityAdmission.drain();
 		heldWorkers?.releaseAll("session end");
 		stopHeartbeatWatchdog();
-		drainPromise = (async () => {
+		void (async () => {
 			settleQueuedAssignmentsForShutdown();
-			const runs = Array.from(active.values());
-			for (const run of runs) {
-				emitRunAborted(run, "dispatch_drain");
-				run.aborted = true;
-				grantBroker.revokeRun(run.runId, "the owning session is shutting down");
-				try {
-					run.abort();
-				} catch {
-					// best-effort; promise still resolves on child close
+			const canceled = new Set<string>();
+			while (active.size > 0 || dispatching.size > 0) {
+				const runs = Array.from(active.values());
+				for (const run of runs) {
+					if (canceled.has(run.runId)) continue;
+					canceled.add(run.runId);
+					emitRunAborted(run, "dispatch_drain");
+					run.aborted = true;
+					grantBroker.revokeRun(run.runId, "the owning session is shutting down");
+					try {
+						run.abort();
+					} catch {
+						// Await finalization even when the runtime's abort throws.
+					}
 				}
+				await Promise.allSettled([...dispatching, ...runs.map((run) => run.finalPromise)]);
 			}
-			await Promise.allSettled(runs.map((r) => r.finalPromise));
 			while (memberWork.size > 0) {
 				await Promise.allSettled([...memberWork.values()].flatMap((work) => [...work]));
 			}
 			await Promise.allSettled([...assignmentWrites]);
 			await liveLedgerWrite;
 			if (ledger) await ledger.persist();
-		})();
+		})().then(resolveDrain, rejectDrain);
 		return drainPromise;
 	}
 
