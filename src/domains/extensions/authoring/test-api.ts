@@ -17,6 +17,8 @@ export interface ExtensionTestHost {
 	tool(name: string, input: unknown): Promise<ExtensionToolResult>;
 	action(id: string, key?: string): Promise<ExtensionOutputV2>;
 	interview(answer: InterviewAnswer): Promise<InterviewNext>;
+	/** Leaves the active workspace as the operator does: the snapshot clears, then `workspace_leave` is delivered. */
+	leave(): Promise<ExtensionOutputV2 | undefined>;
 	tick(): Promise<ExtensionOutputV2 | undefined>;
 	readonly state: ExtensionKeyValue;
 	readonly store: ExtensionKeyValue;
