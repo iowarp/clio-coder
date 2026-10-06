@@ -20,6 +20,11 @@ import { setCommitDecisionRefsProvider, setGitCommitAttributionEnabled } from ".
 import { configureGuardrails, guardrailValuesFromSettings } from "../core/guardrails.js";
 import { HEADLESS_PERMISSION_DENIED_REASON } from "../core/headless-permission.js";
 import { flushPackageActivities, recordPackageActivity } from "../core/package-activity.js";
+import {
+	SAFE_EXEC_DEFAULT_KILL_GRACE_MS,
+	SAFE_EXEC_GROUP_TEARDOWN_BOUND_MS,
+	SAFE_EXEC_PIPE_DRAIN_BOUND_MS,
+} from "../core/safe-exec.js";
 import { protectedResidencyModels } from "../core/residency-protection.js";
 import { armRestartHandoff } from "../core/restart-handoff.js";
 import { consumeRestartIntent } from "../core/restart-intent.js";
@@ -1874,14 +1879,24 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	const dispatch = withDispatchMemory(result.getContract<DispatchContract>("dispatch"), () =>
 		effectiveSettingsForDispatch?.(),
 	);
+	let unsubscribeDispatchShutdown: (() => void) | undefined;
 	if (dispatch) {
+		let dispatchDrain: Promise<void> | undefined;
+		const beginDispatchDrain = (): Promise<void> => (dispatchDrain ??= dispatch.drain());
+		unsubscribeDispatchShutdown = bus.on(BusChannels.ShutdownRequested, () => {
+			// Admission closes before sequential drain hooks can wait on another resource.
+			void beginDispatchDrain().catch(() => {
+				// The awaited drain hook reports this same rejection.
+			});
+		});
 		termination.onDrain(async () => {
-			await dispatch.drain();
+			unsubscribeDispatchShutdown?.();
+			await beginDispatchDrain();
 		});
 	}
 	// The loader caps each domain separately. The outer hook must allow the
 	// whole sequence to finish, including cleanup after a timed-out domain.
-	termination.onPersist(() => result.stop(), {
+	termination.onPersist((signal) => result.stop(signal), {
 		timeoutMs: Math.min(2 ** 31 - 1, (result.loaded.length + 1) * resolveShutdownHookBudgetMs()),
 	});
 
@@ -4120,21 +4135,39 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	jobHost.attachChat(chat);
 	memoryGuardian.wake("ready");
 
-	// Coordinated shutdown (SIGINT/SIGTERM, TUI quit) must abort any in-flight
-	// turn before domains stop. The agent abort fans out to every running
-	// tool's AbortSignal, and bash-exec answers it by signalling the tool's
-	// detached process group. Without this, a headless SIGINT exited the CLI
-	// while a running tool's children survived as orphans of init.
-	termination.onDrain(async () => {
-		await jobHost.close();
+	// Stop preparation and tool admission synchronously at the shutdown edge;
+	// settlement still owns terminal events and accepted session appends.
+	let chatSettlement: Promise<void> | undefined;
+	const beginChatSettlement = (): Promise<void> => {
+		if (chatSettlement) return chatSettlement;
 		chat.dispose();
-		// The abort fans out to running tools, but their results still land and
-		// persist through the aborted run's subscribers. Domains (the session
-		// writer among them) stop in the persist phase, strictly after drain, so
-		// awaiting settlement here makes a session append after session stop
-		// impossible by ordering.
-		await chat.whenSettled();
+		chatSettlement = (async () => {
+			await jobHost.close();
+			await chat.whenSettled();
+		})();
+		return chatSettlement;
+	};
+	const unsubscribeChatShutdown = bus.on(BusChannels.ShutdownRequested, () => {
+		void beginChatSettlement().catch(() => {
+			// The awaited drain hook reports this same rejection.
+		});
 	});
+	// Safe-exec has the longest local tool grace; external CLI grace is shorter.
+	const chatShutdownAllowanceMs =
+		SAFE_EXEC_DEFAULT_KILL_GRACE_MS +
+		SAFE_EXEC_GROUP_TEARDOWN_BOUND_MS +
+		SAFE_EXEC_PIPE_DRAIN_BOUND_MS +
+		resolveShutdownHookBudgetMs();
+	termination.onDrain(
+		async () => {
+			unsubscribeChatShutdown();
+			// Tool cleanup precedes terminal accounting and accepted writes; the
+			// extra hook allowance covers settlement before domain persistence closes.
+			await beginChatSettlement();
+		},
+		{ timeoutMs: chatShutdownAllowanceMs },
+	);
+
 	// System One rows reach the ledger at turn boundaries, so whatever was recorded
 	// since the last settle (a /draft judgment, an answer that arrived after its
 	// deadline) is still pending here and would die with the process. Registered
@@ -4853,9 +4886,9 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			// and the session writer stops in result.stop() below. Awaiting
 			// settlement here makes a session append after session stop impossible
 			// by ordering rather than by timing.
-			await jobHost.close();
-			await chat.whenSettled();
-			chat.dispose();
+			await beginChatSettlement();
+			unsubscribeChatShutdown();
+			unsubscribeDispatchShutdown?.();
 			await dispatch.drain();
 			await toolBootstrap.close();
 			// A client that closes the session ends ACP here, outside the
