@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { type Dirent, readdirSync, readFileSync, statSync } from "node:fs";
+import { type Dirent, lstatSync, readdirSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import { artifactDefaultPath } from "../../core/artifact-paths.js";
 import { probeToolEnv } from "../../core/bash-exec.js";
@@ -316,11 +316,20 @@ function matchesRepositoryCommand(command: string): boolean {
  * decision. It rides the decision's reasons so the approval overlay, the audit
  * record, and any surface that renders them all say the same thing: an agent
  * that hits this rail should learn the form that passes instead of retrying the
- * same shape. A headless run still answers the resulting ask with its own
- * denial sentence, which does not carry these reasons.
+ * same shape. A headless denial carries only the first reason after the
+ * cause, cut at 240 characters, so the note naming the refused step goes
+ * ahead of this hint and the hint stays under that cut.
  */
 const BASH_RECOGNIZED_FORM_HINT =
-	"Recognized forms run without asking: read-only inspection (cat, head, tail, grep, rg, find, ls, wc, sed -n, git log and the like) on workspace paths, joined by &&, ||, ; or | and redirected only to /dev/null, and && chains of recognized steps, with cwd passed as the cwd argument instead of a leading cd.";
+	"Runs without asking: cat, head, tail, grep, rg, find, ls, wc, sed -n and git inspection on workspace paths, joined by &&, ||, ; or |, redirected only to /dev/null, with cwd as the cwd argument.";
+
+/**
+ * A step quoted for a refusal note. Headless guidance keeps 240 characters,
+ * and a long step would leave no room for the reason that follows it.
+ */
+function quotedStep(step: string): string {
+	return `\`${step.length > 80 ? `${step.slice(0, 77)}...` : step}\``;
+}
 
 /**
  * ripgrep reads extra options from the file `RIPGREP_CONFIG_PATH` names, and
@@ -852,6 +861,7 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 					memo: walkMemo,
 					readable: (target) => evaluatePathPolicy(zeroAccessPolicy, "read", target, callCwd, walkMemo).kind === "allow",
 					walkBudget: { remaining: RG_WALK_BUDGET },
+					notes: [],
 				});
 				// A typed verifier still runs through the same command safety scan.
 				// Unrecognized checks are left to the autonomy mapping: default asks,
@@ -1134,6 +1144,13 @@ function evaluateBashPolicy(
 			ruleId: "bash-hidden-content",
 			reasons: [
 				"shell variables, unparsed shell scripts, or interpreter source hide paths from the safety scan and require one-shot confirmation",
+				// A loop over files was the common case in recorded Opus runs; one
+				// command over literal operands does the same without the variable.
+				...(/\bfor\s+[A-Za-z_]\w*\s+in\b/u.test(command)
+					? [
+							"Instead of a loop variable, pass the files as literal operands: `tail -n +1 a.js b.js` prints a header before each file.",
+						]
+					: []),
 			],
 			policySource: "builtin-command-allowlist",
 			execRecognition: "unrecognized",
@@ -1275,6 +1292,7 @@ function evaluateBashPolicy(
 			reasons: [
 				"shell operators defeat per-command recognition; the autonomy level decides admission",
 				...rgConfigReasons(recognitionCommand),
+				...readScope.notes.slice(0, 1),
 				BASH_RECOGNIZED_FORM_HINT,
 				...scriptSegments.map((part) => projectScriptPreview(part, callCwd)),
 			],
@@ -1315,6 +1333,7 @@ function evaluateBashPolicy(
 		reasons: [
 			"bash command is outside the no-prompt set; the autonomy level decides admission",
 			...rgConfigReasons(recognitionCommand),
+			...readScope.notes.slice(0, 1),
 			BASH_RECOGNIZED_FORM_HINT,
 		],
 		policySource: "builtin-command-allowlist",
@@ -1488,6 +1507,12 @@ interface ReadScopeInputs {
 	readable(target: string): boolean;
 	/** Directory entries rg recognition may still visit in this one evaluation, across every operand and chain step. */
 	walkBudget: { remaining: number };
+	/**
+	 * Why recognition refused a step, in the order it found them. The first one
+	 * leads the guidance an unrecognized decision carries, so a headless denial
+	 * names the step to change instead of only the generic recognized forms.
+	 */
+	notes: string[];
 }
 
 interface ChainRecognition {
@@ -1931,6 +1956,148 @@ function recursesDirectories(args: ReadonlyArray<string>): boolean {
 	return false;
 }
 
+/**
+ * A recursive grep walks exactly as rg does, so it is held to the same proof
+ * rg got in 63d15ea8e: every operand is an existing regular file or a
+ * directory {@link directoryHoldsNoProtectedFile} proves cannot reach a
+ * zero-access file. GNU grep -r follows no symlink below the command line,
+ * which matches that walk; -R follows them all, so it is never recognized.
+ * The pattern must sit where {@link searchPatternIndex} places it with
+ * certainty, and with no operand grep -r searches the working directory.
+ * Words after the pattern that start with `-` are options, since GNU grep
+ * permutes its arguments; an option value spelled as a separate word reads as
+ * an operand here, fails the walk check, and costs only an ask.
+ */
+function grepWalkStaysReadable(
+	command: string,
+	args: ReadonlyArray<string>,
+	cwd: string,
+	readScope: ReadScopeInputs,
+): boolean {
+	for (const arg of args) {
+		if (arg === "--") break;
+		if (abbreviatesLongOption(arg, "--dereference-recursive")) return false;
+		if (/^-[^-]/u.test(arg) && arg.slice(1).includes("R")) return false;
+	}
+	const patternAt = searchPatternIndex(command, args);
+	if (patternAt === null) return false;
+	const operands: string[] = [];
+	let optionsEnded = args.slice(0, patternAt).includes("--");
+	for (const arg of args.slice(patternAt + 1)) {
+		if (!optionsEnded && arg === "--") {
+			optionsEnded = true;
+			continue;
+		}
+		if (!optionsEnded && arg.startsWith("-")) {
+			if (arg === "-") return false;
+			continue;
+		}
+		operands.push(arg);
+	}
+	return (operands.length === 0 ? ["."] : operands).every((operand) => {
+		try {
+			const target = path.resolve(cwd, operand);
+			const stats = statSync(target);
+			return stats.isFile() || (stats.isDirectory() && directoryHoldsNoProtectedFile(target, readScope));
+		} catch {
+			// A path that cannot be stat'ed is not an existing file or directory.
+			return false;
+		}
+	});
+}
+
+/**
+ * The words bash passes for one shell word whose only expansion is `*` or `?`,
+ * or null when the expansion cannot be bounded. The matcher is deliberately
+ * wider than bash's defaults: `*` and `?` also match a leading dot and ignore
+ * case, so an inherited `dotglob`, `GLOBIGNORE` or `nocaseglob` can only
+ * narrow what bash passes, and every candidate here is held to the operand
+ * checks. A glob component that starts with a literal dot is refused because
+ * `.*` matches `..` in older bash. `**` (globstar), brackets, braces, tilde,
+ * extglob, quoting escapes and variables are refused rather than modeled.
+ * Directory listings draw on the evaluation's shared walk budget.
+ */
+function expandOperandGlob(raw: string, cwd: string, readScope: ReadScopeInputs): string[] | null {
+	const chars: Array<{ char: string; glob: boolean }> = [];
+	let quote: "'" | '"' | null = null;
+	for (const char of raw) {
+		if (quote !== null) {
+			if (char === quote) quote = null;
+			else if (quote === '"' && "$`\\".includes(char)) return null;
+			else chars.push({ char, glob: false });
+			continue;
+		}
+		if (char === "'" || char === '"') {
+			quote = char;
+			continue;
+		}
+		if ("\\$`~{}[]()!@+".includes(char)) return null;
+		chars.push({ char, glob: char === "*" || char === "?" });
+	}
+	if (quote !== null) return null;
+	const components: Array<Array<{ char: string; glob: boolean }>> = [[]];
+	for (const entry of chars) {
+		if (entry.char === "/" && !entry.glob) components.push([]);
+		else components.at(-1)?.push(entry);
+	}
+	const absolute = components[0]?.length === 0 && components.length > 1;
+	if (absolute) components.shift();
+	// An empty component (`a//b`, a trailing `/`) changes what bash matches; refuse it.
+	if (components.some((component) => component.length === 0)) return null;
+	let candidates: string[] = [absolute ? "/" : ""];
+	for (const [index, component] of components.entries()) {
+		const text = component.map((entry) => entry.char).join("");
+		const join = (base: string, name: string): string =>
+			base === "" ? name : base.endsWith("/") ? `${base}${name}` : `${base}/${name}`;
+		if (!component.some((entry) => entry.glob)) {
+			candidates = candidates.map((base) => join(base, text));
+			continue;
+		}
+		if (component[0]?.char === ".") return null;
+		if (component.some((entry, at) => entry.char === "*" && entry.glob && component[at + 1]?.char === "*")) return null;
+		const pattern = new RegExp(
+			`^${component
+				.map((entry) =>
+					entry.glob ? (entry.char === "*" ? "[^/]*" : "[^/]") : entry.char.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&"),
+				)
+				.join("")}$`,
+			"iu",
+		);
+		const last = index === components.length - 1;
+		const next: string[] = [];
+		for (const base of candidates) {
+			let entries: Dirent[];
+			try {
+				entries = readdirSync(path.resolve(cwd, base === "" ? "." : base), { withFileTypes: true });
+			} catch {
+				// bash matches nothing in a directory it cannot list.
+				continue;
+			}
+			for (const entry of entries) {
+				readScope.walkBudget.remaining -= 1;
+				if (readScope.walkBudget.remaining < 0) return null;
+				if (!pattern.test(entry.name)) continue;
+				const candidate = join(base, entry.name);
+				if (!last && !entry.isDirectory()) {
+					if (!entry.isSymbolicLink()) continue;
+					try {
+						if (!statSync(path.resolve(cwd, candidate)).isDirectory()) continue;
+					} catch {
+						// A dangling link is no directory for bash to descend into.
+						continue;
+					}
+				}
+				next.push(candidate);
+			}
+		}
+		candidates = next;
+	}
+	// A literal component after a glob matches only when the path exists.
+	return candidates.filter(
+		(candidate) => lstatSync(path.resolve(cwd, candidate), { throwIfNoEntry: false }) !== undefined,
+	);
+}
+
 function refusedOption(arg: string, refused: ReadonlyArray<string>, valueLetters = ""): boolean {
 	// The flags of a short cluster end at its first value-taking letter; what
 	// follows is that option's value, not more flags.
@@ -1971,13 +2138,45 @@ function readOnlyInspectionRule(
 	/** The join in front of this segment is `|`, so its stdin is the previous command's output. */
 	piped = false,
 ): string | null {
-	const [command, ...args] = words.map((word) => word.value);
-	if (command === undefined) return null;
+	const [commandWord, ...argWords] = words;
+	const command = commandWord?.value;
+	if (commandWord === undefined || command === undefined) return null;
+	const refuse = (note: string): null => {
+		readScope.notes.push(`${quotedStep(words.map((word) => word.value).join(" "))}: ${note}`);
+		return null;
+	};
 	// The operand check below sees the literal word; the shell sees what the
-	// word expands to. Any expansion the scanner does not perform hides the
-	// real path, so a word carrying one is never recognized.
-	if (words.some((word) => hasUnquotedExpansion(source.slice(word.start, word.end)))) return null;
-	if (GREP_FAMILY.has(command) && recursesDirectories(args)) return null;
+	// word expands to. A `*` or `?` glob is expanded here the way bash would
+	// expand it, and the checks then judge every match. Any other expansion
+	// hides the real path, so a word carrying one is never recognized.
+	if (hasUnquotedExpansion(source.slice(commandWord.start, commandWord.end))) return null;
+	const args: string[] = [];
+	for (const word of argWords) {
+		const raw = source.slice(word.start, word.end);
+		if (!hasUnquotedExpansion(raw)) {
+			args.push(word.value);
+			continue;
+		}
+		const matches = expandOperandGlob(raw, cwd, readScope);
+		if (matches === null)
+			return refuse(`glob \`${raw}\` is not checked (only * and ?, not after a leading dot); name the files`);
+		// bash passes an unmatched glob through as written. Under an inherited
+		// nullglob the word disappears instead, which only narrows a read: the
+		// walk proofs of rg and grep -r require every operand to exist, so the
+		// literal word already fails them, and every other inspector given no
+		// operand reads stdin or lists names in the working directory.
+		if (matches.length === 0) {
+			args.push(word.value);
+			continue;
+		}
+		if (matches.some((match) => !readScope.readable(path.resolve(cwd, match))))
+			return refuse(`\`${raw}\` matches a zero-access file`);
+		// Glob matches can become options or search patterns and skip the operand loop.
+		// Prove containment before that classification, including names after `--`.
+		if (matches.some((match) => !operandStaysInWorkspace(match, cwd, workspaceRoot, readScope)))
+			return refuse(`\`${raw}\` matches a path outside the workspace`);
+		args.push(...matches);
+	}
 	if (command === "rg" && rgConfigRefusal() !== null) return null;
 	if (command === "sed") {
 		if (!args.includes("-n")) return null;
@@ -2009,7 +2208,12 @@ function readOnlyInspectionRule(
 		if (!operandStaysInWorkspace(arg, cwd, workspaceRoot, readScope) || spacedPathOperand(arg)) return null;
 	}
 	// Last, so no directory is walked for an operand the workspace hold refuses.
-	if (command === "rg" && !rgSearchStaysReadable(args, cwd, piped, readScope)) return null;
+	if (command === "rg" && !rgSearchStaysReadable(args, cwd, piped, readScope))
+		return refuse("rg reaches a zero-access file or too many entries");
+	if (GREP_FAMILY.has(command) && recursesDirectories(args) && !grepWalkStaysReadable(command, args, cwd, readScope))
+		return refuse(
+			"recursive grep reaches a zero-access file or too many entries, or uses -R; name the files or use the grep tool",
+		);
 	return `builtin:read-only:${command}`;
 }
 
@@ -2077,7 +2281,12 @@ function recognizeCommandChain(
 			continue;
 		}
 		const target = tokens[index + 1];
-		if (target === undefined || target.operator || !isDiscardRedirection(token.value, target.value)) return null;
+		if (target === undefined || target.operator || !isDiscardRedirection(token.value, target.value)) {
+			readScope.notes.push(
+				`redirection \`${token.value}${target === undefined ? "" : ` ${target.value}`}\` is recognized only to /dev/null or between descriptors`,
+			);
+			return null;
+		}
 		// An adjacent unquoted number is the redirection's descriptor, not an argument.
 		const previous = current.at(-1);
 		if (previous !== undefined && previous.end === token.start && !previous.quoted && /^\d+$/u.test(previous.value))
@@ -2085,7 +2294,12 @@ function recognizeCommandChain(
 		index += 1;
 	}
 	segments.push(current);
-	if (segments.length > CHAIN_MAX_SEGMENTS) return null;
+	if (segments.length > CHAIN_MAX_SEGMENTS) {
+		readScope.notes.push(
+			`the command has ${segments.length} steps and at most ${CHAIN_MAX_SEGMENTS} are recognized in one call; split it or pass several files to one cat`,
+		);
+		return null;
+	}
 	// A lone command keeps its standalone rules; this path adds only what the
 	// compound or a discard redirection needs, plus read-only inspection.
 	if (segments.length < 2 && tokens.every((token) => !token.operator)) {
@@ -2179,6 +2393,7 @@ function recognizeCommandChain(
 			ruleIds.push(inspection);
 			continue;
 		}
+		if (readScope.notes.length === 0) readScope.notes.push(`${quotedStep(rendered)} is not a recognized read-only step`);
 		return null;
 	}
 	return { ruleIds, requiresConfirmation, requiresAutonomyApproval, scriptPreviews };

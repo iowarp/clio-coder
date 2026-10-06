@@ -1231,8 +1231,8 @@ describe("safety gate boundary", () => {
 			"cat .e{n,n}v",
 			"cat <(touch pwn)",
 			"echo hi | cat >(touch x)",
-			"grep -r API_KEY .",
-			"grep -rn API_KEY .",
+			"cat **/*.js",
+			"grep -Rn x src",
 			"grep -d recurse API_KEY .",
 			"grep --directories=recurse x .",
 			"sort --out=o.txt a.txt",
@@ -1340,11 +1340,39 @@ describe("safety gate boundary", () => {
 		strictEqual(recognition("rg x src"), "recognized");
 		strictEqual(recognition("rg x certs"), "unrecognized", "a nested *.pem is a zero-access file");
 		strictEqual(recognition("rg x ."), "unrecognized", "the walk from the root reaches certs/deep/server.pem");
+		// grep -r walks the same way and takes the same proof.
+		strictEqual(recognition("grep -rn x src"), "recognized");
+		strictEqual(recognition("grep -rn x certs"), "unrecognized");
+		strictEqual(recognition("grep -r API_KEY ."), "unrecognized");
+		strictEqual(recognition("grep -r API_KEY"), "unrecognized", "no operand searches the working directory");
 		// The bare kubeconfig entry protects the workspace root's own file.
 		rmSync(join(scratch, "certs"), { recursive: true });
 		strictEqual(recognition("rg x ."), "recognized");
+		strictEqual(recognition("grep -rn API_KEY ."), "recognized");
 		writeFileSync(join(scratch, "kubeconfig"), "k\n");
 		strictEqual(recognition("rg x ."), "unrecognized", "the root kubeconfig is zero-access");
+	});
+
+	it("recognizes a * or ? glob only when every match passes the operand checks", () => {
+		writeInspectionFixture();
+		const policy = engine();
+		const recognition = (command: string) => policy.evaluate({ tool: ToolNames.Bash, args: { command } }).execRecognition;
+		strictEqual(recognition("cat src/*.js"), "recognized");
+		strictEqual(recognition("ls src && grep -n TODO s?c/*.js"), "recognized");
+		writeFileSync(join(scratch, ".env"), "SECRET=1\n");
+		strictEqual(recognition("cat *"), "unrecognized", "an inherited dotglob would pass .env");
+		rmSync(join(scratch, ".env"));
+		symlinkSync("/etc/hostname", join(scratch, "src", "host.js"));
+		strictEqual(recognition("cat src/*.js"), "unrecognized", "a match links out of the workspace");
+		rmSync(join(scratch, "src", "host.js"));
+		writeFileSync(join(scratch, "-ordinary.txt"), "x\n");
+		strictEqual(recognition("cat -- -*"), "recognized", "ordinary option-looking names stay readable");
+		rmSync(join(scratch, "-ordinary.txt"));
+		symlinkSync("/etc/hostname", join(scratch, "-outside"));
+		strictEqual(recognition("cat -- -*"), "unrecognized", "every match needs a workspace check before option parsing");
+		rmSync(join(scratch, "-outside"));
+		writeFileSync(join(scratch, "--files0-from=a.txt"), "");
+		strictEqual(recognition("wc *"), "unrecognized", "a matched file name is judged as the option it becomes");
 	});
 
 	it("asks for rg while the tool environment names a ripgrep config", () => {
