@@ -243,7 +243,21 @@ function loadProject(workspace: string): Project {
 		checkpoint: checkpoints.at(-1) ?? "none",
 	};
 }
-function nextAction(project: Project): { label: string; command: string } {
+function researchCommand(ctx: ExtensionContextV2, name: string, args = ""): string | null {
+	const prompt = `materio:${name}`;
+	return ctx.snapshot.plugin?.id === "materio" && ctx.snapshot.plugin.prompts.includes(prompt)
+		? `/${prompt}${args ? ` ${args}` : ""}`
+		: null;
+}
+function localCommand(ctx: ExtensionContextV2, name: string): string {
+	return researchCommand(ctx, name) ?? `/ext:materio:${name}`;
+}
+function researchStep(ctx: ExtensionContextV2, name: string, args = ""): string {
+	return (
+		researchCommand(ctx, name, args) ?? `The ${name} step needs the Materio plugin installed and enabled with that prompt`
+	);
+}
+function nextAction(project: Project, ctx: ExtensionContextV2): { label: string; command: string | null } {
 	const commands = {
 		identify: "identify-research",
 		literature: "literature-review",
@@ -252,14 +266,15 @@ function nextAction(project: Project): { label: string; command: string } {
 	};
 	if (project.phase in commands) {
 		const command = commands[project.phase as keyof typeof commands];
-		return { label: `Next: ${project.phase}`, command: `/materio:${command}` };
+		return { label: `Next: ${researchStep(ctx, command)}`, command: researchCommand(ctx, command) };
 	}
 	const held = project.tasks.find((task) => task.status === "checkpoint");
-	if (held) return { label: `Review Task ${held.id} before continuing`, command: `/ext:materio:status ${held.id}` };
+	if (held)
+		return { label: `Review Task ${held.id} before continuing`, command: `${localCommand(ctx, "status")} ${held.id}` };
 	if (project.phase === "paper")
 		return {
-			label: "Research ready for a reviewed WTF-P handoff",
-			command: `/wtfp:new-paper Materio handoff: ${project.prompt} Materials: .research/RESEARCH.md, LITERATURE.md, VIRTUAL-LAB.md, WORKFLOW.md and tasks/. ${project.tasks.length} tasks complete; inspect actual artifacts, keep prepared work distinct from executed results, and preserve author approval gates.`,
+			label: "Research ready for a reviewed handoff if the WTF-P plugin is installed and enabled",
+			command: `If the WTF-P plugin is installed and enabled, use /wtfp:new-paper with this Materio handoff: ${project.prompt} Materials: .research/RESEARCH.md, LITERATURE.md, VIRTUAL-LAB.md, WORKFLOW.md and tasks/. ${project.tasks.length} tasks complete; inspect actual artifacts, keep prepared work distinct from executed results, and preserve author approval gates.`,
 		};
 	const ready = project.tasks.find(
 		(task) =>
@@ -270,10 +285,10 @@ function nextAction(project: Project): { label: string; command: string } {
 	);
 	return ready
 		? {
-				label: `${ready.status === "running" ? "Continue" : "Execute"} Task ${ready.id}: ${ready.name}`,
-				command: `/materio:execute-task ${ready.id}`,
+				label: `${ready.status === "running" ? "Continue" : "Execute"} Task ${ready.id}: ${ready.name}. ${researchStep(ctx, "execute-task", ready.id)}`,
+				command: researchCommand(ctx, "execute-task", ready.id),
 			}
-		: { label: "Dependencies need attention; inspect the workflow", command: "/materio:progress" };
+		: { label: "Dependencies need attention; inspect the workflow", command: localCommand(ctx, "progress") };
 }
 
 interface StepUsage {
@@ -1177,7 +1192,7 @@ async function answerForm(answer: InterviewAnswer, ctx: ExtensionContextV2): Pro
 		});
 		return {
 			done: true,
-			text: `Saved and read back .research/${file} and .research/STATE.md. ${await optionalRecord(ctx, [file, "STATE.md"])} Next: ${form === "identify-research" ? "/materio:literature-review" : form === "define-virtual-lab" ? "/materio:define-research-tasks" : "/materio:execute-task"}.`,
+			text: `Saved and read back .research/${file} and .research/STATE.md. ${await optionalRecord(ctx, [file, "STATE.md"])} Next: ${researchStep(ctx, form === "identify-research" ? "literature-review" : form === "define-virtual-lab" ? "define-research-tasks" : "execute-task")}.`,
 		};
 	}
 	const files = session.input.files as string[];
@@ -1272,7 +1287,7 @@ async function bench(ctx: ExtensionContextV2, message?: string): Promise<Extensi
 	const usage = await ledger(ctx);
 	const runs = (await ctx.state.get<Runs>("runs")).value ?? {};
 	const done = project.tasks.filter((task) => task.status === "complete").length;
-	const next = nextAction(project);
+	const next = nextAction(project, ctx);
 	const activePhase = PHASES.indexOf(project.phase);
 	const newest =
 		project.findings.filter((item) => !item.reviewed || item.decision === "fix").at(-1) ?? project.findings.at(-1);
@@ -1353,7 +1368,7 @@ async function bench(ctx: ExtensionContextV2, message?: string): Promise<Extensi
 		...(message ? { card: { t: "text" as const, text: message.slice(0, 2000), wrap: "wrap" as const } } : {}),
 		text:
 			message ??
-			`Materio ► ${done}/${project.tasks.length} tasks ◆ ${project.phase} ► ${project.domain}\n${project.prompt}\n${project.tasks.map((task) => `${task.id}: ${task.name} [${task.status}] deps ${task.dependencies.join(",") || "none"}${task.gap ? " · LAB GAP" : ""}`).join("\n")}\nNext: ${next.command}\n${total.calls ? usageText(total) : "No usage recorded."}`,
+			`Materio ► ${done}/${project.tasks.length} tasks ◆ ${project.phase} ► ${project.domain}\n${project.prompt}\n${project.tasks.map((task) => `${task.id}: ${task.name} [${task.status}] deps ${task.dependencies.join(",") || "none"}${task.gap ? " · LAB GAP" : ""}`).join("\n")}\nNext: ${next.command ?? next.label}\n${total.calls ? usageText(total) : "No usage recorded."}`,
 		status: {
 			text: `${done}/${project.tasks.length} tasks · ${project.phase} · ${Object.keys(runs).length} agents`,
 			tone: "neutral",
@@ -1421,7 +1436,9 @@ const AGENT_STEPS: Record<string, string> = {
 	"materio-task-executor": "execute-task",
 	"materio-task-verifier": "execute-task",
 };
-const HELP = `Materio lab bench\nEnter: /ext:materio:lab · leave: host leader b or /workspace off\nLocal, no model: /materio:status [task], /materio:progress, /materio:help, /materio:checkpoint save [label]|list|restore <archive>, /ext:materio:cost\nReview: select a task card, leader v, or /materio:status <task>. Recheck existing task outputs: /materio:status check <task>.\nLeader suffixes: f fill next action · c checkpoint · v verify findings · d dollars/tokens · h help\nResearch prompts: identify-research → literature-review → define-virtual-lab → define-research-tasks → execute-task [N|all] → wtfp.\nTasks: add-task, remove-task [N], archive-task [N]; data: upload-data; control: pause-research, resume-research, settings.\nCheckers are advisory, citations stay offline/unverified, and prepared artifacts are not executed scientific results.`;
+function help(ctx: ExtensionContextV2): string {
+	return `Materio lab bench\nEnter: /ext:materio:lab · leave: host leader b or /workspace off\nLocal, no model: ${localCommand(ctx, "status")} [task], ${localCommand(ctx, "progress")}, ${localCommand(ctx, "help")}, ${localCommand(ctx, "checkpoint")} save [label]|list|restore <archive>, /ext:materio:cost\nReview: select a task card, leader v, or ${localCommand(ctx, "status")} <task>. Recheck existing task outputs: ${localCommand(ctx, "status")} check <task>.\nLeader suffixes: f fill next action · c checkpoint · v verify findings · d dollars/tokens · h help\nResearch steps need the Materio plugin installed and enabled with the corresponding prompt: identify-research → literature-review → define-virtual-lab → define-research-tasks → execute-task [N|all] → wtfp.\nPlugin operations: add-task, remove-task [N], archive-task [N]; data: upload-data; control: pause-research, resume-research, settings.\nCheckers are advisory, citations stay offline/unverified, and prepared artifacts are not executed scientific results.`;
+}
 interface PendingDispatch {
 	agentId: string;
 	task: string | null;
@@ -1446,7 +1463,10 @@ async function review(ctx: ExtensionContextV2, requested?: string): Promise<Exte
 		? project.findings.find((item) => item.task === taskId(requested))
 		: (project.findings.filter((item) => !item.reviewed || item.decision === "fix").at(-1) ?? project.findings.at(-1));
 	if (!finding)
-		return bench(ctx, "No recorded findings for this task. Use /materio:status check <task> to inspect its artifacts.");
+		return bench(
+			ctx,
+			`No recorded findings for this task. Use ${localCommand(ctx, "status")} check <task> to inspect its artifacts.`,
+		);
 	await ctx.state.set(`review:${finding.task}`, { runId: finding.runId, at: finding.at });
 	return {
 		...(await bench(ctx, `Review advisory findings for Task ${finding.task}.`)),
@@ -1566,7 +1586,7 @@ async function observe(event: ExtensionObservationV2, ctx: ExtensionContextV2): 
 				...(await bench(ctx, "")),
 				card: {
 					t: "text",
-					text: `Executor ${event.runId}: no exact task write root observed; guardrails were not assigned by guess. Recheck using /materio:status check <task>.`,
+					text: `Executor ${event.runId}: no exact task write root observed; guardrails were not assigned by guess. Recheck using ${localCommand(ctx, "status")} check <task>.`,
 					tone: "warning",
 				},
 			};
@@ -1619,7 +1639,7 @@ export default function extension(api: ExtensionApiV2): void {
 		}),
 	);
 	api.handle("progress", (_args, ctx) => serial(() => localBench(ctx)));
-	api.handle("help", (_args, ctx) => serial(() => bench(ctx, HELP)));
+	api.handle("help", (_args, ctx) => serial(() => bench(ctx, help(ctx))));
 	api.handle("cost", (_args, ctx) => serial(() => cost(ctx)));
 	api.handle("checkpoint", (args, ctx) => serial(() => checkpointCommand(args, ctx)));
 	for (const event of [
@@ -1655,10 +1675,13 @@ export default function extension(api: ExtensionApiV2): void {
 		}),
 	);
 	api.action("next", (_event, ctx) =>
-		serial(async () => ({
-			...(await bench(ctx, "Next research action filled; review it before submitting.")),
-			prompt: { fill: nextAction(loadProject(ctx.snapshot.workspace)).command },
-		})),
+		serial(async () => {
+			const next = nextAction(loadProject(ctx.snapshot.workspace), ctx);
+			return {
+				...(await bench(ctx, next.command ? "Next research action filled; review it before submitting." : next.label)),
+				...(next.command ? { prompt: { fill: next.command } } : {}),
+			};
+		}),
 	);
 	api.action("task", (event, ctx) =>
 		serial(async () => {
@@ -1670,16 +1693,20 @@ export default function extension(api: ExtensionApiV2): void {
 				ctx,
 				`Task ${id}: ${task.name}\n${taskBlock(readResearch(ctx.snapshot.workspace, "WORKFLOW.md"), id)}`,
 			);
+			const command =
+				task.status === "checkpoint" ? `${localCommand(ctx, "status")} ${id}` : researchCommand(ctx, "execute-task", id);
 			return {
 				...output,
-				prompt: { fill: task.status === "checkpoint" ? `/materio:status ${id}` : `/materio:execute-task ${id}` },
+				...(command
+					? { prompt: { fill: command } }
+					: { text: `${output.text}\n${researchStep(ctx, "execute-task", id)}.` }),
 			};
 		}),
 	);
 	api.action("findings", (event, ctx) => serial(() => review(ctx, event.key)));
 	api.action("checkpoint", (_event, ctx) => serial(() => checkpointCommand("save bench", ctx)));
 	api.action("cost", (_event, ctx) => serial(() => cost(ctx)));
-	api.action("help", (_event, ctx) => serial(() => bench(ctx, HELP)));
+	api.action("help", (_event, ctx) => serial(() => bench(ctx, help(ctx))));
 	api.interview(
 		"findings",
 		(answer, ctx): Promise<InterviewNext> =>
@@ -1699,7 +1726,7 @@ export default function extension(api: ExtensionApiV2): void {
 						done: true,
 						...(await bench(
 							ctx,
-							`Task ${id} artifacts changed since checks; run /materio:status check ${id} and review again.`,
+							`Task ${id} artifacts changed since checks; run ${localCommand(ctx, "status")} check ${id} and review again.`,
 						)),
 					};
 				const decision = answer.answers.decision;
@@ -1716,19 +1743,24 @@ export default function extension(api: ExtensionApiV2): void {
 					`# Researcher review · Task ${id}\n\nDecision: ${decision}\nRecorded: ${new Date().toISOString()}\nRun: ${finding.runId}\n\n${finding.note}\n\nAdvisory checks only; citations remain unverified offline. Prepared outputs do not establish scientific validation.\n`,
 				);
 				await ctx.state.set(`findings:${id}`, finding);
+				const fixCommand = researchCommand(
+					ctx,
+					"execute-task",
+					`${id} Address the recorded findings in .research/tasks/task-${id}/MATERIO-REVIEW.md.`,
+				);
 				let text =
 					decision === "fix"
-						? `Task ${id} stays at checkpoint; executor command filled for your review.`
+						? `Task ${id} stays at checkpoint; ${fixCommand ? "executor command filled for your review" : researchStep(ctx, "execute-task", id)}.`
 						: await completeReviewedTask(ctx, finding);
 				if (decision === "accept" && !finding.readback)
 					text = `Task ${id} stays at checkpoint: summary readback failed. ${text}`;
 				return {
 					done: true,
 					...(await bench(ctx, text)),
-					...(decision === "fix"
+					...(decision === "fix" && fixCommand
 						? {
 								prompt: {
-									fill: `/materio:execute-task ${id} Address the recorded findings in .research/tasks/task-${id}/MATERIO-REVIEW.md.`,
+									fill: fixCommand,
 								},
 							}
 						: {}),
