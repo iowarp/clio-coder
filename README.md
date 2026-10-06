@@ -78,8 +78,10 @@ Native Windows support is best effort. In PowerShell, run
 `curl.exe -fsSL https://coder.iowarp.ai/install.cmd -o install.cmd && install.cmd && del install.cmd`.
 Both install under `%LOCALAPPDATA%\clio-coder\install` with the launcher
 `%USERPROFILE%\.local\bin\clio-coder.cmd`, need no administrator rights, and add
-the launcher directory to your user `PATH` only with `-AddToPath`. CI builds and
-boots the binary on Windows and tests selected subprocess contracts, but the native Windows installed-package flow is not CI-verified.
+the launcher directory to your user `PATH` unless you pass `-NoModifyPath`. The
+optional platform job of release qualification boots the packed candidate on
+Windows, but the installers and the native Windows installed-package flow are
+not CI-verified.
 The 0.6.1 installer was checked by hand on one x64 host with PowerShell 5.1
 (install, repair, rollback and uninstall); 0.6.0's installer fails there, so
 install 0.6.1 or newer. Interactive terminal use there remains best effort.
