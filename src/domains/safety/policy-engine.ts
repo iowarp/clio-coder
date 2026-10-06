@@ -2171,6 +2171,10 @@ function readOnlyInspectionRule(
 		}
 		if (matches.some((match) => !readScope.readable(path.resolve(cwd, match))))
 			return refuse(`\`${raw}\` matches a zero-access file`);
+		// Glob matches can become options or search patterns and skip the operand loop.
+		// Prove containment before that classification, including names after `--`.
+		if (matches.some((match) => !operandStaysInWorkspace(match, cwd, workspaceRoot, readScope)))
+			return refuse(`\`${raw}\` matches a path outside the workspace`);
 		args.push(...matches);
 	}
 	if (command === "rg" && rgConfigRefusal() !== null) return null;

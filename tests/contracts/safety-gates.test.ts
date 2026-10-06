@@ -1365,6 +1365,12 @@ describe("safety gate boundary", () => {
 		symlinkSync("/etc/hostname", join(scratch, "src", "host.js"));
 		strictEqual(recognition("cat src/*.js"), "unrecognized", "a match links out of the workspace");
 		rmSync(join(scratch, "src", "host.js"));
+		writeFileSync(join(scratch, "-ordinary.txt"), "x\n");
+		strictEqual(recognition("cat -- -*"), "recognized", "ordinary option-looking names stay readable");
+		rmSync(join(scratch, "-ordinary.txt"));
+		symlinkSync("/etc/hostname", join(scratch, "-outside"));
+		strictEqual(recognition("cat -- -*"), "unrecognized", "every match needs a workspace check before option parsing");
+		rmSync(join(scratch, "-outside"));
 		writeFileSync(join(scratch, "--files0-from=a.txt"), "");
 		strictEqual(recognition("wc *"), "unrecognized", "a matched file name is judged as the option it becomes");
 	});
