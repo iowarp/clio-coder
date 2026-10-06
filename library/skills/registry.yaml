@@ -71,6 +71,10 @@ skills:
     path: meta/credentials
     version: 0.2.1
     sha256: 8250f6bba439997176e2b7430b45d5231afdcf638d5787838d9d943b69a6ad9e
+  - name: extension-authoring
+    path: meta/extension-authoring
+    version: 0.1.0
+    sha256: 1ce85a55b0c609ecf195f81d6eda7de1a577a69bf71c42b54f208906e24079f2
   - name: find-skills
     path: meta/find-skills
     version: 0.2.2

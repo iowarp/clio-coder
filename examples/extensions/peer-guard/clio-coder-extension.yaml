@@ -1,0 +1,19 @@
+id: peer-guard
+name: Peer guard
+version: 0.1.0
+description: Advisory cross-session leases for workspace files before Clio write and edit calls.
+runtime:
+  api: 2
+  entrypoint: runtime/extension.ts
+  commands:
+    - { name: claim, description: Claim a workspace path for this session or renew its lease. }
+    - { name: release, description: Release this session's claim on a workspace path. }
+    - { name: claims, description: List active claims across sessions as a table. }
+  hooks:
+    - { on: before_tool, tools: [write, edit], timeoutMs: 250, onTimeout: pass, onError: pass }
+  access: [tool-args]
+  ui: [card]
+  permissions: { fs: { read: [workspace], write: [] }, exec: false, net: false }
+  state: { session: true, store: true }
+  config:
+    - { key: claimMinutes, type: number, default: 10, description: Lease age in minutes; runtime accepts 0.1 to 1440. }

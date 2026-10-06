@@ -311,6 +311,27 @@ entries:
           verdict conditions locked into the validation contract before any
           measurement. Not for diagnosing a stalled bug; use scien"
   - kind: skill
+    name: extension-authoring
+    description: Builds, tests, and debugs Clio Coder api 2 extensions with declared
+      capabilities and host-rendered views. Not for instruction-only skills; use
+      skill-authoring.
+    category: meta
+    audit: pass
+    triggers:
+      - build a Clio extension
+      - add an extension hook
+      - create an extension workspace
+      - debug extension reload
+    version: 0.1.0
+    sourceUrl: skills/meta/extension-authoring
+    sha256: b560852c2daf407d8721207c963db569060ce19b6d2509780c63c817b0526bec
+    provides:
+      - kind: skill
+        name: extension-authoring
+        description: Builds, tests, and debugs Clio Coder api 2 extensions with declared
+          capabilities and host-rendered views. Not for instruction-only skills;
+          use skill-authoring.
+  - kind: skill
     name: file-ticket
     description: "Turns something noticed mid-session into a tracker issue: captures
       evidence, dedups against existing issues, composes a labeled issue with
