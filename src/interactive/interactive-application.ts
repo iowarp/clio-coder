@@ -83,6 +83,7 @@ import { createSessionTranscript } from "./session-transcript.js";
 import { processAutoPacingAllowed } from "./stream-pacing-policy.js";
 import { createAmbientSurfaces, hasExtensionDrawing } from "./surfaces/ambient.js";
 import { createExtensionDockHost } from "./surfaces/extension-dock.js";
+import { runParkedInterview } from "./surfaces/interview.js";
 import { createWorkspaceSurfaces, WORKSPACE_LEAVE_KEY } from "./surfaces/registry.js";
 import type { BootInteractivity, TerminalLease } from "./terminal-lease.js";
 import type { createWatchPaneController } from "./watch-pane.js";
@@ -609,6 +610,17 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 			hook: (extensionId, event, timeoutMs, signal) => operatorExtensions.hook(extensionId, event, timeoutMs, signal),
 			notify: (message) => notify("warning", message, "operator-extensions:hook"),
 			observeTurnStart: (text) => turnObservations?.turnStart(text),
+			tool: (extensionId, name, input, signal) => operatorExtensions.tool(extensionId, name, input, signal),
+			// A tool's interview is asked like the model's own question, so a
+			// permission card preempts it and it resumes afterwards.
+			interview: (extensionId, interview, signal) =>
+				runParkedInterview(
+					{ ask: (questions, options) => overlayLifecycle.openAskUserOverlayState(questions, options) },
+					interview,
+					{ extensionId, title: extensionId },
+					(answer) => operatorExtensions.interview(extensionId, answer),
+					signal,
+				),
 		});
 	const workspaceSurfaces = operatorExtensions
 		? createWorkspaceSurfaces({

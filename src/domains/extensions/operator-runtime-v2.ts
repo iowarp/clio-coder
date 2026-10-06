@@ -11,6 +11,7 @@ import type {
 	ExtensionObservationV2,
 	ExtensionOutputV2,
 	ExtensionSkin,
+	ExtensionToolResult,
 	ExtensionUiAction,
 	InterviewAnswer,
 	InterviewNext,
@@ -646,6 +647,20 @@ export class OperatorExtensionRuntimeV2 {
 				this.apply(process, output, "action");
 			},
 		);
+	}
+
+	/**
+	 * One call to a gateway tool this extension serves. It runs during a turn,
+	 * so unlike a command it needs no idle session, only the current runtime;
+	 * a card it returns is drawn for the operator, and an interview it asks for
+	 * goes back to the caller, which parks the call on it.
+	 */
+	async tool(extensionId: string, name: string, input: unknown, signal?: AbortSignal): Promise<ExtensionToolResult> {
+		const process = this.processes.get(extensionId);
+		if (!process || !this.current(process)) throw new Error(`extension ${extensionId} has no running runtime`);
+		const result = await process.tool(name, input, signal);
+		if (result.card) this.apply(process, { card: result.card }, "tool");
+		return result;
 	}
 
 	private runningEntry(extensionId: string): ApiV2Extension {

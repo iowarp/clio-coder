@@ -12,6 +12,7 @@ import type {
 	ExtensionObservationV2,
 	ExtensionOutputV2,
 	ExtensionSkin,
+	ExtensionToolResult,
 	ExtensionUiAction,
 	InterviewAnswer,
 	InterviewNext,
@@ -172,6 +173,9 @@ export class OperatorExtensions {
 		signal?: AbortSignal,
 	): Promise<ExtensionHookOutcome> {
 		return this.v2.hook(extensionId, event, timeoutMs, signal);
+	}
+	tool(extensionId: string, name: string, input: unknown, signal?: AbortSignal): Promise<ExtensionToolResult> {
+		return this.v2.tool(extensionId, name, input, signal);
 	}
 	skinFor(extensionId: string, workspaceId: string): ExtensionSkin | null {
 		return this.v2.skinFor(extensionId, workspaceId);

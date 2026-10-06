@@ -59,6 +59,7 @@ export {
 	createExtensionRuntimeHookBridge,
 	type ExtensionRuntimeHookBridge,
 	type ExtensionRuntimeHookExecutor,
+	type ParkedInterviewResult,
 } from "./runtime-hook-bridge.js";
 export { capabilityEnvelope, envelopeDigest } from "./runtime-schema-v2.js";
 export {

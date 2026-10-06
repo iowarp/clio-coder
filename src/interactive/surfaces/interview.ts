@@ -6,6 +6,7 @@ import type {
 	InterviewNext,
 	InterviewStep,
 } from "../../domains/extensions/public-api-v2.js";
+import type { ParkedInterviewResult } from "../../domains/extensions/runtime-hook-bridge.js";
 import type { AskUserHandler, AskUserQuestion, AskUserResult } from "../../tools/ask-user.js";
 import type { ToolInvokeOptions } from "../../tools/registry.js";
 import { createHarnessHold } from "../../tools/registry.js";
@@ -167,4 +168,34 @@ export async function runExtensionInterview(
 	} finally {
 		hold.release();
 	}
+}
+
+/**
+ * An interview a tool call asked for. The call stays parked on it, and what
+ * the operator answered, step by step, becomes the tool's result; only the
+ * operator's answers are recorded, never anything inferred from prose.
+ */
+export async function runParkedInterview(
+	deps: ExtensionInterviewDeps,
+	interview: Interview,
+	owner: { extensionId: string; title: string },
+	onAnswer: (answer: InterviewAnswer) => Promise<InterviewNext>,
+	signal?: AbortSignal,
+): Promise<ParkedInterviewResult> {
+	const answers: ParkedInterviewResult["answers"] = {};
+	const result = await runExtensionInterview(
+		deps,
+		interview,
+		owner,
+		(answer) => {
+			if (answer.nav === "next") answers[answer.step] = answer.answers;
+			return onAnswer(answer);
+		},
+		signal,
+	);
+	return {
+		outcome: result.outcome,
+		answers,
+		text: result.output?.text ?? result.reason ?? (result.outcome === "cancelled" ? "cancelled by the operator" : ""),
+	};
 }

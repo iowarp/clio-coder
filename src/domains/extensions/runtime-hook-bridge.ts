@@ -1,5 +1,13 @@
 import type { ExtensionHookOutcome } from "./operator-runtime-v2.js";
-import type { ExtensionHookEvent } from "./public-api-v2.js";
+import type { ExtensionHookEvent, ExtensionToolResult, Interview } from "./public-api-v2.js";
+
+/** What the operator answered in an interview a tool call asked for, step by step. */
+export interface ParkedInterviewResult {
+	outcome: "done" | "cancelled";
+	answers: Record<string, Record<string, string | string[]>>;
+	/** The extension's closing text when it finished, or why the interview ended. */
+	text: string;
+}
 
 /** What the surface that owns api 2 runtimes offers the middleware registrations of their hooks. */
 export interface ExtensionRuntimeHookExecutor {
@@ -13,6 +21,10 @@ export interface ExtensionRuntimeHookExecutor {
 	notify(message: string): void;
 	/** A prompt passed the prompt gate and starts a turn; delivered as the `turn_start` observation. */
 	observeTurnStart?(text: string): void;
+	/** One call to a tool a running runtime serves. */
+	tool?(extensionId: string, name: string, input: unknown, signal?: AbortSignal): Promise<ExtensionToolResult>;
+	/** Run an interview a tool call asked for; the call stays parked until the operator finishes or cancels. */
+	interview?(extensionId: string, interview: Interview, signal?: AbortSignal): Promise<ParkedInterviewResult>;
 }
 
 /**

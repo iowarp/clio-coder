@@ -3208,6 +3208,10 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 					: {}),
 		}),
 	});
+	// Runtime tools are served only where runtimes run, after the core and
+	// command tools hold their names; the gateway keeps the provider schema set
+	// unchanged as each generation swaps them.
+	if (runtimeHooks) extensionReload.attachRuntimeTools(toolRegistry);
 
 	const getTaskMemorySeedOffer = (): { source: string; count: number } | null => {
 		return taskMemoryHandoffSeedOffer(process.cwd(), getCurrentSettings().context.memory.enabled);
