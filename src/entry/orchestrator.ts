@@ -21,6 +21,8 @@ import { configureGuardrails, guardrailValuesFromSettings } from "../core/guardr
 import { HEADLESS_PERMISSION_DENIED_REASON } from "../core/headless-permission.js";
 import { flushPackageActivities, recordPackageActivity } from "../core/package-activity.js";
 import { protectedResidencyModels } from "../core/residency-protection.js";
+import { armRestartHandoff } from "../core/restart-handoff.js";
+import { consumeRestartIntent } from "../core/restart-intent.js";
 import { type RouteProvenance, resolveRouteProvenance } from "../core/route-provenance.js";
 import {
 	applyOverrides,
@@ -299,8 +301,6 @@ import {
 	buildModelReplayAgentMessagesFromTurns,
 	continuityContextFromSession,
 } from "../session-control/model-session-replay.js";
-import { armRestartHandoff } from "../session-control/restart-handoff.js";
-import { consumeRestartIntent } from "../session-control/restart-intent.js";
 import { createTurnOutcomeCollector } from "../session-control/turn-outcome-collector.js";
 import { effectiveToolNames } from "../tools/agent-tools.js";
 import { surfaceSpecPlacement } from "../tools/surface.js";

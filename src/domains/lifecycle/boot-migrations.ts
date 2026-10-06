@@ -14,7 +14,7 @@ import { REGISTERED_MIGRATION_IDS } from "./migrations/registry-ids.js";
  */
 let notices: string[] = [];
 
-export function describeMigrationReport(id: string, report: MigrationReport): string {
+function describeMigrationReport(id: string, report: MigrationReport): string {
 	const parts = [`Applied migration ${id}.`, ...report.changed];
 	if (report.attention.length > 0) parts.push(`Needs you: ${report.attention.join(" ")}`);
 	return parts.join(" ");

@@ -7,7 +7,7 @@ export interface SessionWorkspace {
 	workspaceId: string;
 }
 
-export function workspaceSessionPath(stateDir: string, sessionId: string): string {
+function workspaceSessionPath(stateDir: string, sessionId: string): string {
 	return join(stateDir, "extension-workspaces", `${encodeURIComponent(sessionId)}.json`);
 }
 

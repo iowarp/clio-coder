@@ -30,7 +30,7 @@ function packages(entries: ReadonlyArray<InstalledExtension | InstalledPlugin>):
 	);
 }
 
-export function inventoryChanges(
+function inventoryChanges(
 	before: Inventory,
 	after: Inventory,
 ): Record<"added" | "removed" | "modified" | "unchanged", string[]> {

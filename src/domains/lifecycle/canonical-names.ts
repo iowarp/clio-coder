@@ -46,7 +46,7 @@ const UPGRADE: LifecycleContext = { actor: "upgrade" };
 const PLUGIN_NAMESPACE = "ai.iowarp.clio";
 const WORKSPACE_MARKER_LIMIT = 512;
 
-export function emptyReport(): ConversionReport {
+function emptyReport(): ConversionReport {
 	return { changed: [], attention: [] };
 }
 

@@ -1,8 +1,8 @@
 import { spawn } from "node:child_process";
 import { rmSync } from "node:fs";
-import { markRestartHandoff } from "../core/restart-status.js";
-import type { getTerminationCoordinator } from "../core/termination.js";
 import { restartIntentPath } from "./restart-intent.js";
+import { markRestartHandoff } from "./restart-status.js";
+import type { getTerminationCoordinator } from "./termination.js";
 
 /** Keep the shell's foreground job alive while the restarted child owns the terminal. */
 export function armRestartHandoff(stateDir: string, termination: ReturnType<typeof getTerminationCoordinator>): void {

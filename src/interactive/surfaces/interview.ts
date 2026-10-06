@@ -12,7 +12,7 @@ import type { ToolInvokeOptions } from "../../tools/registry.js";
 import { createHarnessHold } from "../../tools/registry.js";
 import { renderView } from "./view-renderer.js";
 
-export function stepToQuestions(step: InterviewStep): AskUserQuestion[] {
+function stepToQuestions(step: InterviewStep): AskUserQuestion[] {
 	return step.questions.map((question) => {
 		const initial = typeof question.initial === "string" ? question.initial : question.initial?.[0];
 		const preferred = question.options?.findIndex((option) => option.value === initial) ?? -1;
@@ -33,7 +33,7 @@ export function stepToQuestions(step: InterviewStep): AskUserQuestion[] {
 	});
 }
 
-export function resultToAnswer(interview: Interview, step: InterviewStep, result: AskUserResult): InterviewAnswer {
+function resultToAnswer(interview: Interview, step: InterviewStep, result: AskUserResult): InterviewAnswer {
 	const base = { id: interview.id, step: step.key };
 	if (result.cancelled || result.unavailable)
 		return {
