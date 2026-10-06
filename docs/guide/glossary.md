@@ -274,7 +274,7 @@ This document defines the core architectural concepts and terminology used throu
 - **Definition**: Clio Coder is named for Kleio, the Greek muse of history, a female figure in myth; the software is referred to by name and has no gender.
 
 ### 68. Plugin
-- **Definition**: An Agent Plugin: a package with a root `plugin.json` that carries content only (skills, MCP servers, agents, prompt templates, playbooks and hooks). Content specific to Clio lives under the Clio namespace, `extensions["ai.iowarp.clio"]` in `plugin.json` and the `ai.iowarp.clio/` directory. Installing a plugin never runs code inside Clio. A plugin is a different package from an extension, and the two never share a manifest, digest or consent.
+- **Definition**: An Agent Plugin: a package with a root `plugin.json` that carries content only (skills, agents, prompt templates and playbooks). Content specific to Clio lives under the Clio namespace, `extensions["ai.iowarp.clio"]` in `plugin.json` and the `ai.iowarp.clio/` directory. Installing a plugin never runs code inside Clio. A plugin is a different package from an extension, and the two never share a manifest, digest or consent.
 - **Owning Type**: `PluginManifest` in [types.ts](../../src/domains/plugins/types.ts).
 
 ### 69. Extension
@@ -292,4 +292,4 @@ This document defines the core architectural concepts and terminology used throu
 - **Owning Type**: `Playbook` in the agents domain.
 
 ### 73. Component
-- **Definition**: One discoverable unit a package or Clio itself provides: a skill, an agent, a prompt template or a playbook. A plugin may also carry MCP servers and hooks. A package holds components, and `clio-coder library components` reads them with their owner, origin and invocation.
+- **Definition**: One discoverable unit a package or Clio itself provides: a skill, an agent, a prompt template or a playbook. A package holds components, and `clio-coder library components` reads them with their owner, origin and invocation.
