@@ -15,6 +15,9 @@
 
 import { existsSync } from "node:fs";
 import { CONTEXT_OPERATION_CUSTOM_TYPE, readContextOperation } from "../core/context-operation.js";
+import type { PackageActivity } from "../core/package-activity.js";
+import { EXTENSION_ACTIVITY, PLUGIN_RESOURCE_USE, packageActivityText } from "../core/package-activity.js";
+import { isPackageIdentity } from "../core/package-identity.js";
 import { isSkillSurfaceChange, SKILL_SURFACE_ENTRY } from "../core/skill-activation.js";
 import { foldWorkingSet } from "../domains/context/working-set/fold.js";
 import type {
@@ -524,6 +527,12 @@ function renderCustomEntry(
 	if (entry.customType === CONTEXT_OPERATION_CUSTOM_TYPE) {
 		const operation = readContextOperation(entry.data);
 		return operation ? renderContextOperationResult(operation, width) : [];
+	}
+	if (entry.customType === EXTENSION_ACTIVITY || entry.customType === PLUGIN_RESOURCE_USE) {
+		const activity = entry.data as PackageActivity | null;
+		return activity && isPackageIdentity(activity.owner) && typeof activity.kind === "string"
+			? renderNoticeRow(packageActivityText(activity), "info", width)
+			: [];
 	}
 	if (entry.customType === "retryStatus") return renderRetryStatusEntry(entry, width, detail, unbounded, terminalRows);
 	if (entry.customType === SKILL_SURFACE_ENTRY && isSkillSurfaceChange(entry.data)) {

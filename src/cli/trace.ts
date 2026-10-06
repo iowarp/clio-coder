@@ -332,7 +332,16 @@ async function tail(reader: TraceReader, runId: string, follow: boolean): Promis
 function formatEvent(row: TraceEventRow): string {
 	const duration =
 		row.ended_at === null ? "" : ` ${Math.max(0, Date.parse(row.ended_at) - Date.parse(row.started_at))}ms`;
-	return `${row.rowid.toString().padStart(6)} ${row.started_at} ${row.type.padEnd(18)} ${row.name}${duration}`;
+	let attribution = "";
+	try {
+		const payload = row.payload_json ? JSON.parse(row.payload_json) : null;
+		if (payload?.owner && typeof payload.owner.id === "string")
+			attribution += ` owner=${payload.owner.id}@${payload.owner.version} digest=${payload.owner.digest}`;
+		if (typeof payload?.outcome === "string") attribution += ` outcome=${payload.outcome}`;
+	} catch {
+		// A malformed legacy payload does not hide its event row.
+	}
+	return `${row.rowid.toString().padStart(6)} ${row.started_at} ${row.type.padEnd(18)} ${row.name}${duration}${attribution}`;
 }
 
 function printRuns(rows: TraceRunRow[]): void {

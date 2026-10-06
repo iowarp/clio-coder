@@ -1,3 +1,6 @@
+import { readLifecycleReceipts } from "../../core/library-receipts.js";
+import { packageActivityText, recentPackageActivity } from "../../core/package-activity.js";
+import { extensionIdentity } from "../../domains/extensions/activity.js";
 import type { InstalledExtension } from "../../domains/extensions/index.js";
 import { promptRefs } from "../../domains/extensions/operator-commands.js";
 import type { OverlayHandle, TUI } from "../../engine/tui.js";
@@ -87,6 +90,16 @@ export function openExtensionsOverlay(tui: TUI, ctx: SlashCommandContext, onClos
 					`**State:** ${state}`,
 				];
 				if (ext.plugin) lines.push(`**Plugin:** ${pluginPairing(ext, state)}`);
+				const envelopeDigest = extensionIdentity(ext).envelopeDigest;
+				if (envelopeDigest) lines.push(`**Envelope digest:** ${envelopeDigest}`);
+				const receipt = readLifecycleReceipts(ext.id, ext.scope, "extension").at(-1);
+				if (receipt)
+					lines.push(
+						`**Last lifecycle:** ${receipt.operation} ${receipt.at} by ${receipt.actor}; ${receipt.id}@${receipt.version}; digest ${receipt.contentDigest}; operation ${receipt.operationId}`,
+					);
+				const activity = recentPackageActivity(ext.id);
+				if (activity.length)
+					lines.push("**Recent activity:**", ...activity.map((row) => `${row.at} ${packageActivityText(row)}`));
 				if (ext.runtime || ext.runtimeV2) {
 					lines.push(`**Operator runtime:** ${runtime?.state ?? "not started"}; generation ${runtime?.generation ?? 0}`);
 					if (ext.runtimeV2) lines.push(`**Confinement:** ${confinement(ext.runtimeV2.permissions.net, runtime?.sandbox)}`);

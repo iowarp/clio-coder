@@ -1374,7 +1374,7 @@ function renderSessionTranscriptEntry(linked: LinkedSessionEntry, calls: Readonl
 		const activation = entry.activation;
 		const turn = activation.turnId === undefined ? "" : ` turn=${activation.turnId}`;
 		return [
-			`${prefix} skillActivation ${activation.name} source=${activation.source} hash=${activation.hash} triggeredBy=${activation.triggeredBy}${turn} path=${activation.filePath}`,
+			`${prefix} skillActivation ${activation.name} source=${activation.source}${activation.owner ? ` owner=${activation.owner.id}@${activation.owner.version} digest=${activation.owner.digest}` : ""} hash=${activation.hash} triggeredBy=${activation.triggeredBy}${turn} path=${activation.filePath}`,
 		];
 	}
 	if (entry.kind === "taskLedger") {
