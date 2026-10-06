@@ -100,7 +100,7 @@ test("runtime manifest validates declarations and contained entrypoints without 
 	const f = await fixture(t, 'throw new Error("discovery executed code")');
 	ok(loadManifestFromRoot(f.source).valid);
 	for (const bad of [
-		{ api: 2 },
+		{ api: 3 },
 		{ surprise: true },
 		{ entrypoint: "extension.ts" },
 		{ commands: [{ name: "inspect", description: "x", timeoutMs: 0 }] },
