@@ -364,7 +364,7 @@ targets:
 		if (process.platform !== "win32") strictEqual(statSync(manifest).mode & 0o777, 0o600);
 	});
 
-	it("converts a legacy home once: playbooks, the old Materio bundle, an unbound extension, with upgrade receipts", async () => {
+	it("converts a legacy home once: playbooks and the old Materio bundle, never installing an extension", async () => {
 		const config = join(scratch.dir, "config");
 		const write = (file: string, text: string): void => {
 			mkdirSync(dirname(file), { recursive: true });
@@ -456,29 +456,35 @@ targets:
 			"the colliding copy is moved aside, not deleted",
 		);
 		ok(text.includes("dup"), text);
-		// The bundle is now the plugin alone, and the extension is its own package with a bound envelope.
+		// The bundle is now the plugin alone. No extension is installed or reinstalled; each is named with the reviewed install.
 		ok(!existsSync(join(config, "plugins", "materio", "clio-coder-extension.yaml")));
 		ok(existsSync(join(config, "plugins", "materio", "ai.iowarp.clio", "playbooks")));
+		ok(!existsSync(join(config, "extensions", "materio")), "extension:materio is not installed by the upgrade");
 		const extensionState = JSON.parse(readFileSync(join(config, "extensions", "state.json"), "utf8"));
-		ok(extensionState.installed.materio?.envelopeDigest, "extension:materio is installed with its envelope bound");
-		ok(extensionState.installed["local-status"]?.envelopeDigest, "the unbound Library extension is reinstalled");
+		strictEqual(extensionState.installed.materio, undefined);
+		strictEqual(
+			extensionState.installed["local-status"].envelopeDigest,
+			undefined,
+			"an unbound extension is not reinstalled",
+		);
+		ok(
+			report.attention.some((line) => line.includes("clio-coder library install extension:materio --user")),
+			text,
+		);
+		ok(
+			report.attention.some((line) => line.includes("clio-coder library install extension:local-status --user --force")),
+			text,
+		);
 		// The third-party plugin stays in place and is named with the fix.
 		ok(existsSync(join(thirdParty, "fleets", "x.md")));
 		ok(
 			report.attention.some((line) => line.includes("lab-pack") && line.includes("older Clio")),
 			text,
 		);
-		// Every package the conversion installed or replaced is an upgrade receipt.
+		// The plugin replacement is an upgrade receipt; no extension receipt is written.
 		const upgraded = readLifecycleReceipts().filter((row) => row.actor === "upgrade");
-		for (const [kind, id] of [
-			["plugin", "materio"],
-			["extension", "materio"],
-			["extension", "local-status"],
-		] as const)
-			ok(
-				upgraded.some((row) => row.kind === kind && row.id === id),
-				`${kind}:${id} has an upgrade receipt`,
-			);
+		ok(upgraded.some((row) => row.kind === "plugin" && row.id === "materio" && row.operation === "update"));
+		strictEqual(readLifecycleReceipts(undefined, undefined, "extension").length, 0, "no extension receipt");
 		// A second run does nothing: the migration is recorded, and converting again changes nothing.
 		const snapshot = readFileSync(join(config, "plugins", "state.json"), "utf8");
 		deepStrictEqual((await runPending(stateDir)).applied, []);

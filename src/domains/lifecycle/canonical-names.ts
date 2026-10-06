@@ -9,7 +9,8 @@
  * installed and is named in the report with the exact fix. A package the
  * conversion replaces keeps any copy the operator had edited, because the
  * package writers retain a backup of bytes that differ from their install
- * record.
+ * record. No extension is ever installed here; each one is named with the
+ * command that installs it with the operator's review.
  */
 
 import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync } from "node:fs";
@@ -20,13 +21,7 @@ import type { LifecycleContext } from "../../core/library-receipts.js";
 import { safeResourceWrite } from "../../core/safe-resource-write.js";
 import { withStateFileLockSync } from "../../core/state-file-lock.js";
 import { clioConfigDir, clioStateDir } from "../../core/xdg.js";
-import {
-	capabilityEnvelope,
-	disableExtension,
-	envelopeDigest,
-	extensionBaseDir,
-	loadManifestFromRoot,
-} from "../extensions/index.js";
+import { capabilityEnvelope, envelopeDigest, extensionBaseDir, loadManifestFromRoot } from "../extensions/index.js";
 import { bundledPluginCatalog } from "../plugins/catalog.js";
 import { pluginBaseDir, pluginStatePath, withPluginScopeLock } from "../plugins/index.js";
 import { olderClioDeclaration, olderClioMessage, WTFP_PLUGIN_NAME } from "../plugins/older-clio.js";
@@ -314,27 +309,13 @@ function convertPlugins(ctx: PackageScope): void {
 			);
 		if (!bundle) continue;
 		// The old bundle was one package; the Library now ships the plugin and its extension separately.
+		// The upgrade never installs the extension: the operator reviews its capability envelope first.
 		const serving = ctx.library.find((candidate) => candidate.kind === "extension" && candidate.plugin === id);
-		if (!serving) {
-			ctx.report.attention.push(
-				`${ctx.scope} plugin ${id} was a bundle with a runtime, and the Library has no extension that serves it, so the runtime is gone; install one with: clio-coder extensions install <extension path> --${ctx.scope}`,
-			);
-			continue;
-		}
-		const installed = replaceFromLibrary(ctx, serving);
-		if (!installed.ok) {
-			ctx.report.attention.push(
-				`${ctx.scope} extension:${serving.name} could not be installed (${installed.reason}); install it with: clio-coder library install extension:${serving.name} --${ctx.scope}`,
-			);
-			continue;
-		}
-		ctx.report.changed.push(
-			`Installed ${ctx.scope} extension:${serving.name}@${serving.version ?? "current"} from the Library. Its capability envelope is bound to that copy; review it with /extensions.`,
+		ctx.report.attention.push(
+			serving
+				? `${ctx.scope} plugin ${id} was a bundle with a runtime, which is now a separate extension that needs your review of what it may do. Install it with: clio-coder library install extension:${serving.name} --${ctx.scope}${disabled.has(id) ? ", then disable it, as the bundle was" : ""}`
+				: `${ctx.scope} plugin ${id} was a bundle with a runtime, and the Library has no extension that serves it, so the runtime is gone; install one with: clio-coder extensions install <extension path> --${ctx.scope}`,
 		);
-		if (disabled.has(id)) {
-			disableExtension(serving.name, { cwd: ctx.cwd, scope: ctx.scope, lifecycle: UPGRADE });
-			ctx.report.changed.push(`Kept extension:${serving.name} disabled, as the bundle was.`);
-		}
 	}
 }
 
@@ -343,7 +324,6 @@ function convertExtensions(ctx: PackageScope): void {
 	const base = extensionBaseDir(ctx.scope, ctx.cwd);
 	const state = readJson(path.join(base, "state.json"));
 	if (!state || !record(state.installed)) return;
-	const disabled = new Set(Array.isArray(state.disabled) ? state.disabled.map(String) : []);
 	for (const [id, saved] of Object.entries(state.installed)) {
 		const root = path.join(base, id);
 		if (!existsSync(root) || !record(saved)) continue;
@@ -351,27 +331,16 @@ function convertExtensions(ctx: PackageScope): void {
 		if (!manifest?.runtimeV2) continue;
 		const current = envelopeDigest(capabilityEnvelope(manifest.runtimeV2, manifest.plugin));
 		if (saved.envelopeDigest === current) continue;
+		// The upgrade never installs or reinstalls an extension: the operator reviews its capability envelope first.
 		const entry = libraryEntry(ctx.library, "extension", id);
-		if (!replaceableFromLibrary(saved, entry)) {
-			const source = typeof saved.source === "string" ? saved.source : "<its source directory>";
-			ctx.report.attention.push(
-				`${ctx.scope} extension ${id}@${manifest.version} was installed before capability envelopes were bound, so it does not load. Reinstall it and review what it may do: clio-coder extensions install ${source} --${ctx.scope} --force`,
-			);
-			continue;
-		}
-		const replaced = replaceFromLibrary(ctx, entry);
-		if (!replaced.ok) {
-			ctx.report.attention.push(
-				`${ctx.scope} extension:${id}@${manifest.version} could not be reinstalled from the Library (${replaced.reason}); it does not load. Retry with: clio-coder library install extension:${id} --${ctx.scope} --force`,
-			);
-			continue;
-		}
-		ctx.report.changed.push(
-			`Reinstalled ${ctx.scope} extension:${id}@${manifest.version} from the Library with its capability envelope bound; review it with /extensions.`,
+		const source = typeof saved.source === "string" ? saved.source : "<its source directory>";
+		ctx.report.attention.push(
+			`${ctx.scope} extension ${id}@${manifest.version} was installed before capability envelopes were bound, so it does not load until you review what it may do. Reinstall it with: ${
+				replaceableFromLibrary(saved, entry)
+					? `clio-coder library install extension:${id} --${ctx.scope} --force`
+					: `clio-coder extensions install ${source} --${ctx.scope} --force`
+			}`,
 		);
-		if (replaced.backup)
-			ctx.report.changed.push(`Kept your edited copy of extension ${id} at ${shown(replaced.backup)}.`);
-		if (disabled.has(id)) disableExtension(id, { cwd: ctx.cwd, scope: ctx.scope, lifecycle: UPGRADE });
 	}
 }
 

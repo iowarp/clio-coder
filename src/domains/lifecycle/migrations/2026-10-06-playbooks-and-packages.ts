@@ -4,12 +4,14 @@ import type { Migration, MigrationReport } from "./index.js";
  * Fleet contracts became playbooks, and a plugin and its extension became two
  * packages. This converts the user home once: `<configDir>/fleets` merges into
  * `<configDir>/playbooks`, plugin install records drop the fleet kind, Library
- * installs the new layout cannot read are replaced with the current Library
- * copies (the old Materio bundle becomes `plugin:materio` plus
- * `extension:materio`), api 2 extensions installed before the envelope binding
- * are reinstalled from the Library or named with the command that reinstalls
- * them, and third-party plugins that still declare fleets stay installed and are
- * named with the fix. Each install the conversion makes is a lifecycle receipt
+ * plugins the new layout cannot read are replaced with the current Library copy
+ * (the old Materio bundle becomes `plugin:materio`), and third-party plugins
+ * that still declare fleets stay installed and are named with the fix. It never
+ * installs or reinstalls an extension, because the operator reviews an
+ * extension's capability envelope before it is installed and boot runs this
+ * with no operator present. A bundle's runtime and an api 2 extension installed
+ * before the envelope binding are each named with the command that installs it
+ * with review. Each plugin install the conversion makes is a lifecycle receipt
  * with actor `upgrade`. A workspace's `.clio-coder/` converts the first time
  * Clio opens it (`convertWorkspaceOnce`).
  *
