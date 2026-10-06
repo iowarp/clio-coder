@@ -8,8 +8,8 @@ sources:
   - "src/domains/agents/recipe-schema.ts"
   - "src/domains/agents/registry.ts"
   - "src/domains/agents/result-contract.ts"
-  - "src/domains/agents/fleet-contract.ts"
-  - "src/domains/agents/fleet-commands.ts"
+  - "src/domains/agents/playbook.ts"
+  - "src/domains/agents/playbook-commands.ts"
   - "src/domains/agents/catalog.ts"
   - "src/domains/agents/extension.ts"
   - "src/domains/agents/write-boundary.ts"
@@ -68,7 +68,7 @@ The domain owns three distinct artifacts, each with its own strict schema:
 - **Result contracts** (`src/domains/agents/result-contract.ts`). A discriminated union of terminal shapes — `scout-report`, `verifier-report`, `mutation-report`, `code-report`, `council-report`, `artifact-report`, `oracle-report`, and others — that a worker's final text must conform to. Each kind has a strict validator, a quality label (`pass` / `fail` / `unmeasured`), and a repair shape quoted to the model verbatim.
 - **Fleet contracts** (`.clio-coder/fleets/*.md`). A versioned Markdown file with a typed DAG of `agent`, `code`, `loop`, `gate`, and `plan` steps, a strict `{{var}}` prompt template, and a write-boundary policy. The fleet is the repository's work policy, kept in-repo and strictly validated.
 
-The domain also exposes a **catalog** (`src/domains/agents/catalog.ts`) that renders the current spec set into a compact fleet prompt section for the orchestrator's system prompt, and a **command registry** (`src/domains/agents/fleet-commands.ts`) that maps code-step command ids to operator-owned `argv` lists, so a model can never invent a shell invocation.
+The domain also exposes a **catalog** (`src/domains/agents/catalog.ts`) that renders the current spec set into a compact fleet prompt section for the orchestrator's system prompt, and a **command registry** (`src/domains/agents/playbook-commands.ts`) that maps code-step command ids to operator-owned `argv` lists, so a model can never invent a shell invocation.
 
 ## What owns it
 
@@ -126,7 +126,7 @@ The `ResultContractFilesystem` interface (`readFile`, optional `pathExists`, opt
 
 ### Fleet contracts
 
-`src/domains/agents/fleet-contract.ts` defines:
+`src/domains/agents/playbook.ts` defines:
 
 - `FleetContract` with `version: 1|2|3|4|5`, `steps`, `maxWorkers`, `budgetUsd`, `onFailure`, optional `writers: 1`, `body`, and `path`.
 - `FleetContractStep`: a discriminated union of `agent`, `code`, `loop`, `gate`, and `plan` steps.
@@ -140,7 +140,7 @@ The `ResultContractFilesystem` interface (`readFile`, optional `pathExists`, opt
 - `renderFleetPrompt(body, vars)`: strict `{{var}}` rendering; every placeholder must resolve or the run fails before any dispatch.
 - `loadFleetContract(cwd, name)` / `listFleetContracts(cwd)`: discovery from builtin, plugin, user, and project roots, with project files shadowing builtins of the same name.
 
-`src/domains/agents/fleet-commands.ts` defines the `FleetCommandRegistry` and:
+`src/domains/agents/playbook-commands.ts` defines the `FleetCommandRegistry` and:
 
 - `parseFleetCommands(raw, sourcePath)`: validates the YAML registry against a TypeBox schema.
 - `loadFleetCommands(cwd)`: returns the registry or `null` when the repo declares none; `null` is a distinct answer from an empty registry.
@@ -178,7 +178,7 @@ The flow from a user's `dispatch` tool call to a worker run is:
 
 ### Fleet contract to plan execution
 
-`listFleetContracts(cwd)` discovers fleet contracts from builtin (`src/domains/agents/fleets/*.md`), plugin, user (`~/.config/clio-coder/fleets/*.md`), and project (`.clio-coder/fleets/*.md`) roots. Project files shadow builtins of the same name. Each contract is parsed by `parseFleetContract`, which:
+`listFleetContracts(cwd)` discovers fleet contracts from builtin (`src/domains/agents/playbooks/*.md`), plugin, user (`~/.config/clio-coder/fleets/*.md`), and project (`.clio-coder/fleets/*.md`) roots. Project files shadow builtins of the same name. Each contract is parsed by `parseFleetContract`, which:
 
 - Reads the version literal and selects the matching TypeBox schema.
 - Runs `assertNoWritesBefore` (version < 4), `assertNoV5FieldsBefore` (version < 5), and `assertNoGateWrites` (version >= 5) to refuse newer keys in older contracts.
@@ -286,4 +286,4 @@ This test runs a live Scout worker run with `resultContract: {kind: "scout-repor
 
 - **The `fleetStepBoundaries` function expands loops into their check/repair halves.** A loop's check is named `<loop>.check` and its repair is named `<loop>.repair`. A gate step inside a loop is named `<loop>.check` and has scope `workspace` with the gate's path as its write boundary. Do not rename these ids without updating the dispatch extension's plan-node lookup.
 
-<!-- clio-coder:wiki unresolved sources: src/domains/agents/builtins/*.md, src/domains/agents/fleets/*.md, src/domains/agents/builtins/<id>.md -->
+<!-- clio-coder:wiki unresolved sources: src/domains/agents/builtins/*.md, src/domains/agents/playbooks/*.md, src/domains/agents/builtins/<id>.md -->
