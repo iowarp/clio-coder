@@ -1,28 +1,160 @@
 #!/usr/bin/env node
 import { createHash } from "node:crypto";
-import { appendFileSync, existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
+import {
+	appendFileSync,
+	existsSync,
+	mkdtempSync,
+	mkdirSync,
+	readdirSync,
+	readFileSync,
+	rmSync,
+	statSync,
+	writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { git, installers, root, run, verifyCandidate } from "./release-candidate.mjs";
-import { releaseVersionErrors } from "./release-version-policy.mjs";
+import { DEV_VERSION, publishTagErrors, releaseVersionErrors, snapshotVersion } from "./release-version-policy.mjs";
 
 const repository = "iowarp/clio-coder";
-export function publicationPlan(receipt, branch) {
+export function publicationPlan(receipt, branch, mode = "release") {
 	if (!/^v\d{3}$/u.test(branch)) throw new Error("Public releases must come from a version branch such as v062.");
-	const channel = receipt.version.includes("-") ? "beta" : "latest";
+	const channel = mode === "dev" ? "dev" : receipt.version.includes("-") ? "beta" : "latest";
+	const errors = publishTagErrors({ version: receipt.version, tag: channel });
+	if (errors.length) throw new Error(errors.join("\n"));
 	return {
 		commit: receipt.commit,
 		version: receipt.version,
 		branch,
 		channel,
-		tag: `v${receipt.version}`,
+		tag: mode === "dev" ? null : `v${receipt.version}`,
 		package: `${receipt.name}@${receipt.version}`,
 		tarball: basename(receipt.tarball),
 		sha256: receipt.files[basename(receipt.tarball)],
 		websiteSha256: receipt.files["website.tgz"],
 	};
+}
+
+/** Stamp only version metadata. All qualified runtime and resource bytes are preserved. */
+export function snapshotPayload(receipt, directory) {
+	const timestamp = git("show", "-s", "--format=%cI", receipt.commit);
+	const version = snapshotVersion(receipt.version, receipt.commit, timestamp);
+	const scratch = mkdtempSync(join(tmpdir(), "clio-snapshot-"));
+	const inventory = (base) =>
+		Object.fromEntries(
+			readdirSync(base, { recursive: true })
+				.sort()
+				.map((path) => {
+					const file = join(base, path),
+						stat = statSync(file);
+					return [
+						path,
+						{
+							mode: stat.mode & 0o777,
+							digest: stat.isDirectory() ? "directory" : createHash("sha256").update(readFileSync(file)).digest("hex"),
+						},
+					];
+				}),
+		);
+	try {
+		const entries = run("tar", ["-tzf", receipt.tarball], { encoding: "utf8", stdio: "pipe" }).trim().split("\n");
+		const types = run("tar", ["-tvzf", receipt.tarball], { encoding: "utf8", stdio: "pipe" }).trim().split("\n");
+		if (
+			entries.some((path) => !path.startsWith("package/") || path.split("/").includes("..") || path.includes("\\")) ||
+			types.some((line) => !["-", "d"].includes(line[0]))
+		)
+			throw new Error("Unsafe snapshot source archive.");
+		run("tar", ["-xzf", receipt.tarball, "-C", scratch]);
+		const before = inventory(join(scratch, "package"));
+		for (const path of ["package.json", "assets/acp-registry/agent.json"]) {
+			const file = join(scratch, "package", path);
+			const original = JSON.parse(readFileSync(file, "utf8"));
+			if (original.version !== receipt.version) throw new Error(`Qualified version differs: ${path}`);
+			writeFileSync(file, `${JSON.stringify({ ...original, version }, null, "\t")}\n`);
+		}
+		const expected = inventory(join(scratch, "package"));
+		for (const path of Object.keys(before))
+			if (
+				!["package.json", "assets/acp-registry/agent.json"].includes(path) &&
+				JSON.stringify(before[path]) !== JSON.stringify(expected[path])
+			)
+				throw new Error(`Unqualified snapshot change: ${path}`);
+		const output = join(directory, "dev-snapshot");
+		mkdirSync(output, { recursive: true });
+		const tarball = join(output, `iowarp-clio-coder-${version}.tgz`);
+		run("tar", [
+			"--sort=name",
+			`--mtime=@${Math.floor(new Date(timestamp).getTime() / 1000)}`,
+			"--owner=0",
+			"--group=0",
+			"--numeric-owner",
+			"-czf",
+			tarball,
+			"-C",
+			scratch,
+			"package",
+		]);
+		const check = join(scratch, "verify");
+		mkdirSync(check);
+		run("tar", ["-xzf", tarball, "-C", check]);
+		if (JSON.stringify(inventory(join(check, "package"))) !== JSON.stringify(expected))
+			throw new Error("Snapshot archive differs from the verified version stamp.");
+		const checksum = createHash("sha256").update(readFileSync(tarball)).digest("hex");
+		return { ...receipt, version, tarball, files: { ...receipt.files, [basename(tarball)]: checksum } };
+	} finally {
+		rmSync(scratch, { recursive: true, force: true });
+	}
+}
+
+function releaseMode(receipt, rehearse = false) {
+	const mode =
+		process.env.CLIO_CODER_RELEASE_MODE ?? (rehearse && DEV_VERSION.test(receipt.version) ? "dev" : "release");
+	if (!["release", "dev"].includes(mode)) throw new Error("Release mode must be release or dev.");
+	return mode;
+}
+
+function payload(receipt, directory, mode) {
+	return mode === "dev" ? snapshotPayload(receipt, directory) : receipt;
+}
+
+/** Strict SemVer ordering for npm dist-tag forwarding; build metadata is ignored. */
+export function compareVersions(left, right) {
+	const parse = (value) =>
+		/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-([\da-zA-Z-]+(?:\.[\da-zA-Z-]+)*))?(?:\+[\da-zA-Z.-]+)?$/.exec(value);
+	const a = parse(left),
+		b = parse(right);
+	if (!a || !b) throw new Error("Invalid registry version for tag forwarding.");
+	for (let i = 1; i <= 3; i++) if (Number(a[i]) !== Number(b[i])) return Math.sign(Number(a[i]) - Number(b[i]));
+	const x = a[4]?.split(".") ?? [],
+		y = b[4]?.split(".") ?? [];
+	if (!x.length || !y.length) return x.length === y.length ? 0 : x.length ? -1 : 1;
+	for (let i = 0; i < Math.max(x.length, y.length); i++) {
+		const l = x[i],
+			r = y[i];
+		if (l === r) continue;
+		if (l === undefined || r === undefined) return l === undefined ? -1 : 1;
+		const ln = /^\d+$/.test(l),
+			rn = /^\d+$/.test(r);
+		if (ln && rn) return l.length === r.length ? (l < r ? -1 : 1) : l.length < r.length ? -1 : 1;
+		if (ln !== rn) return ln ? -1 : 1;
+		return l < r ? -1 : 1;
+	}
+	return 0;
+}
+
+export function forwardedTags(tags, version, channel) {
+	const follow = channel === "latest" ? ["beta", "dev"] : channel === "beta" ? ["dev"] : [];
+	return follow.filter((tag) => !tags[tag] || compareVersions(tags[tag], version) < 0);
+}
+
+async function registryTags(name) {
+	const response = await fetch(`https://registry.npmjs.org/-/package/${encodeURIComponent(name)}/dist-tags`, {
+		signal: AbortSignal.timeout(30_000),
+	});
+	if (!response.ok) throw new Error(`npm dist-tags returned HTTP ${response.status}`);
+	return response.json();
 }
 
 export function api(path, method = "GET", body) {
@@ -58,8 +190,10 @@ export function verifyQualificationRecord(record, jobs, commit, inProgress = fal
 }
 
 export async function rehearseBytes(directory, commit, branch) {
-	const receipt = verifyCandidate(directory, commit);
-	const plan = publicationPlan(receipt, branch);
+	const qualified = verifyCandidate(directory, commit);
+	const mode = releaseMode(qualified, true);
+	const receipt = payload(qualified, directory, mode);
+	const plan = publicationPlan(receipt, branch, mode);
 	let dryRun;
 	try {
 		dryRun = JSON.parse(
@@ -88,7 +222,7 @@ export async function rehearseBytes(directory, commit, branch) {
 		throw new Error("npm dry-run differs from the qualified archive.");
 	verifyCandidate(directory, commit);
 	console.log(
-		`Publication payload verified: ${plan.package}, ${plan.tag}, five GitHub assets, prepared website. npm authorization remains unverified until a real publish.`,
+		`Publication payload verified: ${plan.package}, ${plan.tag ?? "no git tag"}, ${plan.channel === "dev" ? "verified snapshot stamp; no GitHub release or site publish" : "five GitHub assets, prepared website"}. npm authorization remains unverified until a real publish.`,
 	);
 	return plan;
 }
@@ -160,30 +294,32 @@ export async function preflight(directory, commit, runId, branch, rehearse = fal
 		Object.values(results.counts).reduce((sum, count) => sum + count, 0) !== results.total
 	)
 		throw new Error("Test results do not describe this candidate or exceed the test budget.");
-	const plan = publicationPlan(receipt, branch);
-	requireFastForward(commit);
+	const mode = releaseMode(receipt, rehearse);
+	const publishedReceipt = payload(receipt, directory, mode);
+	const plan = publicationPlan(publishedReceipt, branch, mode);
+	if (mode === "release") requireFastForward(commit);
 	if (!rehearse) {
 		const changelog = run("tar", ["-xzOf", receipt.tarball, "package/CHANGELOG.md"], { encoding: "utf8", stdio: "pipe" });
-		const errors = releaseVersionErrors({ version: receipt.version, changelog, releaseContext: true });
+		const errors = releaseVersionErrors({ version: publishedReceipt.version, changelog, releaseContext: true });
 		const section = changelog.split(/^## /mu)[1];
 		if (!section?.slice(section.indexOf("\n") + 1).trim()) errors.push("Release notes must not be empty.");
 		const site = JSON.parse(readFileSync(join(root, "site/product.json"), "utf8"));
-		if (site.version !== receipt.version || site.publishedVersion !== receipt.version)
+		if (plan.channel === "latest" && (site.version !== receipt.version || site.publishedVersion !== receipt.version))
 			errors.push("Set site/product.json version and publishedVersion to the final release version before qualification.");
 		if (errors.length) throw new Error(errors.join("\n"));
 		const remote = git("ls-remote", "--heads", "origin", `refs/heads/${branch}`).split(/\s/u)[0];
 		if (remote !== commit) throw new Error("Version branch moved; prepare a release from its current head.");
-		const tag = tagCommit(plan.tag);
+		const tag = plan.tag === null ? null : tagCommit(plan.tag);
 		if (tag !== null && tag !== commit) throw new Error("Existing release tag points to another commit.");
-		const published = await registryVersion(receipt.name, receipt.version);
-		if (published) requireIntegrity(published, receipt);
-		else if (tag !== null || existingRelease(plan.tag))
+		const published = await registryVersion(publishedReceipt.name, publishedReceipt.version);
+		if (published) requireIntegrity(published, publishedReceipt);
+		else if (tag !== null || (plan.tag !== null && existingRelease(plan.tag)))
 			throw new Error("An existing GitHub release has no matching npm version; resolve it explicitly.");
 	}
-	const summary = `Clio Coder ${plan.version}\nSource: ${commit}\nQualification: https://github.com/${repository}/actions/runs/${runId}\nPackage: ${plan.tarball}\nSHA-256: ${plan.sha256}\nTests: ${results.total} plus runtime/platform boot checks\n\nApproval authorizes npm publication, GitHub release/tag creation, main fast-forward, gh-pages deployment, and version-branch cleanup.\n`;
+	const summary = `Clio Coder ${plan.version}\nSource: ${commit}\nQualification: https://github.com/${repository}/actions/runs/${runId}\nPackage: ${plan.tarball}\nSHA-256: ${plan.sha256}\nTests: ${results.total} plus runtime/platform boot checks\n\n${plan.channel === "dev" ? "Approval authorizes provenance-backed npm dev publication of the verified version stamp only; no git tag, GitHub release, website or branch writes." : plan.channel === "beta" ? "Approval authorizes npm beta publication, dev tag forwarding where lower, and GitHub prerelease/tag creation." : "Approval authorizes npm publication, beta/dev tag forwarding where lower, GitHub release/tag creation, main fast-forward, gh-pages deployment, and version-branch cleanup."}\n`;
 	console.log(summary);
 	if (process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMMARY, summary);
-	return { receipt, plan };
+	return { receipt: publishedReceipt, plan };
 }
 
 function verifyAssets(release, receipt) {
@@ -237,10 +373,9 @@ async function verifyPublic(receipt, plan) {
 	const published = await registryVersion(receipt.name, receipt.version);
 	if (!published) throw new Error("Published npm version is missing.");
 	requireIntegrity(published, receipt);
-	const tags = await fetch(`https://registry.npmjs.org/-/package/${encodeURIComponent(receipt.name)}/dist-tags`, {
-		signal: AbortSignal.timeout(30_000),
-	}).then((response) => response.json());
+	const tags = await registryTags(receipt.name);
 	if (tags[plan.channel] !== receipt.version) throw new Error(`npm ${plan.channel} points to another version.`);
+	if (plan.channel === "dev") return;
 	const release = existingRelease(plan.tag);
 	if (!release || release.draft || tagCommit(plan.tag) !== receipt.commit)
 		throw new Error("GitHub release/tag is not public at the qualified commit.");
@@ -288,6 +423,14 @@ export async function publish(directory, commit, runId, branch) {
 	const onNpm = await registryVersion(receipt.name, receipt.version);
 	if (!onNpm) throw new Error("npm publication is not visible yet; resume the release job.");
 	requireIntegrity(onNpm, receipt);
+	const tags = await registryTags(receipt.name);
+	for (const tag of forwardedTags(tags, receipt.version, plan.channel))
+		run("npm", ["dist-tag", "add", `${receipt.name}@${receipt.version}`, tag]);
+	if (plan.channel === "dev") {
+		await verifyPublic(receipt, plan);
+		console.log(`SNAPSHOT_COMPLETE ${receipt.version} ${commit}`);
+		return;
+	}
 	let release = existingRelease(plan.tag);
 	if (!release) {
 		run("gh", [
@@ -351,11 +494,23 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
 				directory: { type: "string" },
 				sha: { type: "string" },
 				run: { type: "string" },
+				mode: { type: "string" },
 				branch: { type: "string" },
 			},
 			allowPositionals: true,
 		});
 		const directory = resolve(values.directory ?? "");
+		if (values.mode) process.env.CLIO_CODER_RELEASE_MODE = values.mode;
+		if (positionals[0] === "plan" || positionals[0] === "verify-bytes") {
+			if (!values.sha || !values.branch) throw new Error("Supply --sha and --branch.");
+			if (positionals[0] === "verify-bytes") await rehearseBytes(directory, values.sha, values.branch);
+			else {
+				const candidate = verifyCandidate(directory, values.sha);
+				const mode = releaseMode(candidate, true);
+				console.log(JSON.stringify(publicationPlan(payload(candidate, directory, mode), values.branch, mode), null, 2));
+			}
+			process.exit(0);
+		}
 		if (!values.sha || !values.run || !values.branch) throw new Error("Supply --sha, --run, and --branch.");
 		if (positionals[0] === "publish") await publish(directory, values.sha, values.run, values.branch);
 		else if (positionals[0] === "verify") await preflight(directory, values.sha, values.run, values.branch);

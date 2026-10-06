@@ -1,5 +1,5 @@
 /** `0.6.0-dev` and `0.6.0-dev.N` are checkout versions with no published artifact. Mirrors src/core/build-info.ts. */
-const DEV_VERSION = /^\d+\.\d+\.\d+-dev(?:[.+]|$)/;
+export const DEV_VERSION = /^\d+\.\d+\.\d+-dev(?:[.+]|$)/;
 
 /**
  * Validate the relationship between package.json and the first release section
@@ -26,6 +26,7 @@ export function releaseVersionErrors({ version, changelog, releaseContext }) {
 
 	const named = heading.slice(3).split(" - ")[0].trim();
 	if (named === "Unreleased") {
+		if (SNAPSHOT_VERSION.test(version)) return errors;
 		if (!releaseContext) return errors;
 		return [
 			`CHANGELOG.md still opens with '## Unreleased'; retitle that section '## ${version} - <date>' before publishing`,
@@ -52,27 +53,46 @@ export function releaseVersionErrors({ version, changelog, releaseContext }) {
  */
 export function readmeInstallVersion({ version, changelog }) {
 	const headings = changelog.split(/\r?\n/).filter((line) => line.startsWith("## "));
-	if (headings[0]?.trim() !== "## Unreleased") return version;
-	for (const heading of headings.slice(1)) {
+	if (headings[0]?.trim() !== "## Unreleased" && !RC_VERSION.test(version) && !SNAPSHOT_VERSION.test(version))
+		return version;
+	for (const heading of headings) {
 		const released = /^## (\d+\.\d+\.\d+) - \d{4}-\d{2}-\d{2}$/.exec(heading.trim());
 		if (released?.[1] !== undefined) return released[1];
 	}
 	throw new Error("local development install instructions need a dated stable release in CHANGELOG.md");
 }
 
-/**
- * Pre-releases ship under the `beta` dist-tag only. A bare `npm publish` of an
- * rc would move `latest`, and every stable install would be offered the rc.
- * npm exports `--tag` to lifecycle scripts as `npm_config_tag`.
- * @param {{ version: unknown, tag: unknown }} input
- * @returns {string[]}
- */
+/** Published channel versions; checkout -dev versions never enter npm. */
+export const RC_VERSION = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)-rc\.(0|[1-9]\d*)$/;
+export const SNAPSHOT_VERSION = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)-snapshot\.([0-9]{12})\.g[a-f0-9]{7}$/;
+
 export function publishTagErrors({ version, tag }) {
-	if (typeof version === "string" && DEV_VERSION.test(version))
+	if (typeof version !== "string") return ["package.json has no version"];
+	if (DEV_VERSION.test(version))
 		return [`package.json version ${version} is a development version and is never published, under any dist-tag`];
-	if (typeof version !== "string" || !/^\d+\.\d+\.\d+-/.test(version) || tag === "beta") return [];
-	const seen = typeof tag === "string" && tag.length > 0 ? `'${tag}'` : "unset";
+	const required = RC_VERSION.test(version)
+		? "beta"
+		: SNAPSHOT_VERSION.test(version)
+			? "dev"
+			: /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.test(version)
+				? "latest"
+				: null;
+	if (required === null)
+		return [
+			`Unsupported published version ${version}; use a stable, -rc.N or -snapshot.<UTC yyyymmddHHMM>.g<sha7> version`,
+		];
+	// npm's default publish tag is latest, including when the env variable is absent.
+	if ((tag || "latest") === required) return [];
 	return [
-		`package.json version ${version} is a pre-release; publish it with 'npm publish --tag beta' (npm_config_tag is ${seen})`,
+		`package.json version ${version} must publish with 'npm publish --tag ${required}' (npm_config_tag is ${tag || "unset"})`,
 	];
+}
+
+/** The commit's UTC minute makes retries publish the same snapshot version and bytes. */
+export function snapshotVersion(version, commit, timestamp) {
+	if (!/^\d+\.\d+\.\d+-dev$/.test(version) || !/^[a-f0-9]{40}$/.test(commit))
+		throw new Error("Dev snapshots require an X.Y.Z-dev version and an exact source commit.");
+	const date = new Date(timestamp);
+	if (!Number.isFinite(date.getTime())) throw new Error("Invalid snapshot commit timestamp.");
+	return `${version.slice(0, -4)}-snapshot.${date.toISOString().slice(0, 16).replace(/[-T:]/g, "")}.g${commit.slice(0, 7)}`;
 }

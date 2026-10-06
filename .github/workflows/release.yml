@@ -11,6 +11,14 @@ on:
         description: Successful ci.yml run that owns the candidate artifact
         required: true
         type: string
+      mode:
+        description: Stable/rc release, or a deterministic dev snapshot of the qualified branch head
+        required: true
+        default: release
+        type: choice
+        options:
+          - release
+          - dev
 
 permissions:
   contents: read
@@ -50,6 +58,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           CANDIDATE_SHA: ${{ inputs.sha }}
           QUALIFICATION_RUN: ${{ inputs.qualification_run }}
+          CLIO_CODER_RELEASE_MODE: ${{ inputs.mode }}
         run: node scripts/release-publish.mjs verify --directory "$RUNNER_TEMP/candidate" --sha "$CANDIDATE_SHA" --run "$QUALIFICATION_RUN" --branch "$GITHUB_REF_NAME"
 
   release:
@@ -81,6 +90,7 @@ jobs:
       # The App's pushes trigger the existing gh-pages deployment. GITHUB_TOKEN
       # pushes would leave Pages stale, and cannot bypass protected release refs.
       - uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        if: ${{ inputs.mode != 'dev' }}
         id: publisher
         with:
           app-id: ${{ vars.RELEASE_APP_ID }}
@@ -92,10 +102,11 @@ jobs:
           permission-actions: read
       - name: Publish the qualified bytes and finish the release
         env:
-          GH_TOKEN: ${{ steps.publisher.outputs.token }}
+          GH_TOKEN: ${{ steps.publisher.outputs.token || github.token }}
           RELEASE_APP_SLUG: ${{ steps.publisher.outputs.app-slug }}
           CANDIDATE_SHA: ${{ inputs.sha }}
           QUALIFICATION_RUN: ${{ inputs.qualification_run }}
+          CLIO_CODER_RELEASE_MODE: ${{ inputs.mode }}
         run: |
           export GIT_CONFIG_COUNT=1
           export GIT_CONFIG_KEY_0=http.https://github.com/.extraheader

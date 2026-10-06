@@ -168,14 +168,14 @@ checkVersionCoherence();
 function checkVersionCoherence() {
 	let version;
 	try {
-		version = JSON.parse(readFileSync(join(root, "package.json"), "utf8")).version;
+		version = JSON.parse(readFileSync(join(packageRoot, "package.json"), "utf8")).version;
 	} catch (error) {
 		errors.push(`unable to read package.json version: ${error instanceof Error ? error.message : String(error)}`);
 		return;
 	}
 	let changelog;
 	try {
-		const registry = JSON.parse(readFileSync(join(root, "assets/acp-registry/agent.json"), "utf8"));
+		const registry = JSON.parse(readFileSync(join(packageRoot, "assets/acp-registry/agent.json"), "utf8"));
 		if (registry.version !== version) {
 			errors.push(`ACP registry version ${registry.version} does not match package.json version ${version}`);
 		}
@@ -183,7 +183,7 @@ function checkVersionCoherence() {
 		errors.push(`unable to read ACP registry manifest: ${error instanceof Error ? error.message : String(error)}`);
 	}
 	try {
-		changelog = readFileSync(join(root, "CHANGELOG.md"), "utf8");
+		changelog = readFileSync(join(packageRoot, "CHANGELOG.md"), "utf8");
 	} catch (error) {
 		errors.push(`unable to read CHANGELOG.md: ${error instanceof Error ? error.message : String(error)}`);
 		return;
@@ -335,7 +335,7 @@ function checkShippedAdvisories() {
 				importers: { ".": lockfile.importers["."] },
 			}),
 		);
-		writeFileSync(join(auditRoot, "package.json"), readFileSync(join(root, "package.json")));
+		writeFileSync(join(auditRoot, "package.json"), readFileSync(join(packageRoot, "package.json")));
 		let raw;
 		try {
 			raw = execFileSync("pnpm", [`--config.lockfile-dir=${auditRoot}`, "audit", "--prod", "--json"], {
