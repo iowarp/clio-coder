@@ -477,14 +477,26 @@ export function convertWorkspaceOnce(workspace: string): ConversionReport | null
 			`The conversion of this workspace could not be recorded (${message(error)}), so Clio checks it again next time.`,
 		);
 	}
+	const relative = (line: string): string =>
+		line
+			.split(`${shown(root)}${path.sep}`)
+			.join("")
+			.split(`${root}${path.sep}`)
+			.join("");
+	report.changed = report.changed.map(relative);
+	report.attention = report.attention.map(relative);
 	return report.changed.length === 0 && report.attention.length === 0 ? null : report;
 }
 
-/** One line for the TUI notice: what changed, then what still needs the operator. */
+/**
+ * One notice: what changed, then what still needs the operator. The footer
+ * classifies a plain string by its text, and "changed" makes it a sticky warning
+ * that stays until read instead of fading with advisory hints.
+ */
 export function describeConversion(report: ConversionReport, subject: string): string {
 	const parts: string[] = [];
 	if (report.changed.length > 0)
-		parts.push(`clio-coder converted ${subject} to the playbooks layout. ${report.changed.join(" ")}`);
-	if (report.attention.length > 0) parts.push(`Needs you: ${report.attention.join(" ")}`);
+		parts.push(`clio-coder changed ${subject} to the playbooks layout. ${report.changed.join(" ")}`);
+	if (report.attention.length > 0) parts.push(`Left unchanged, needs you: ${report.attention.join(" ")}`);
 	return parts.join(" ");
 }

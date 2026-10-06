@@ -15,8 +15,9 @@ import { REGISTERED_MIGRATION_IDS } from "./migrations/registry-ids.js";
 let notices: string[] = [];
 
 function describeMigrationReport(id: string, report: MigrationReport): string {
-	const parts = [`Applied migration ${id}.`, ...report.changed];
-	if (report.attention.length > 0) parts.push(`Needs you: ${report.attention.join(" ")}`);
+	// "changed" keeps the footer notice until it is read; see describeConversion.
+	const parts = [`Applied migration ${id}; changed:`, ...report.changed];
+	if (report.attention.length > 0) parts.push(`Left unchanged, needs you: ${report.attention.join(" ")}`);
 	return parts.join(" ");
 }
 

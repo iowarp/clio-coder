@@ -513,7 +513,7 @@ async function runFleet(args: ReadonlyArray<string>): Promise<number> {
 	if (json) {
 		process.stdout.write(
 			`${JSON.stringify({
-				fleet: playbook.name,
+				playbook: playbook.name,
 				rootId: fleetRootId,
 				planHash: plan.hash,
 				loops: outcome.result.loops,
