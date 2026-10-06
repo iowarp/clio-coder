@@ -15,6 +15,7 @@ export {
 import { realpathSync } from "node:fs";
 import type { ExtensionObservation, ExtensionOutput, ExtensionRuntimeSnapshot, ExtensionStatus } from "./public-api.js";
 import { ExtensionRuntimeProcess, type RuntimeProcessState } from "./runtime-process.js";
+import type { ExtensionSandboxReport } from "./runtime-sandbox.js";
 import { RUNTIME_LIMITS } from "./runtime-schema.js";
 import { listInstalledExtensions } from "./state.js";
 import {
@@ -34,6 +35,8 @@ export interface OperatorRuntimeEntry {
 	provenance?: ExtensionProvenance;
 	reason?: string;
 	status?: ExtensionStatus;
+	/** What confines this runtime beyond its Node flags; present while a v2 runtime is running. */
+	sandbox?: ExtensionSandboxReport;
 	/** Actual schema admission is still owned by the session/worker registry. */
 	newSessionReasons: string[];
 	toolEvidence: "frozen-registry" | "runtime-startup-observation";

@@ -668,7 +668,7 @@ export class OperatorExtensionRuntimeV2 {
 					scope: entry.scope,
 					generation: this.generation,
 					state: current?.state ?? "inactive",
-					...(current ? { provenance: current.extension.provenance } : {}),
+					...(current ? { provenance: current.extension.provenance, sandbox: current.sandbox } : {}),
 					...(reason ? { reason } : {}),
 					...(status ? { status } : {}),
 					newSessionReasons: [],

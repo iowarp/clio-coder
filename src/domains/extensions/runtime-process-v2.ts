@@ -1,4 +1,4 @@
-import { type ChildProcess, fork } from "node:child_process";
+import { type ChildProcess, spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { cpSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import os from "node:os";
@@ -29,6 +29,7 @@ import {
 	parseInterviewNext,
 } from "./runtime-output-v2.js";
 import type { RuntimeProcessState } from "./runtime-process.js";
+import { assertDeclaredWriteRoots, type ExtensionSandboxReport, planExtensionLaunch } from "./runtime-sandbox.js";
 import { extensionPlainText, RUNTIME_LIMITS } from "./runtime-schema.js";
 import { RUNTIME_V2_LIMITS } from "./runtime-schema-v2.js";
 import type { LoadableExtension } from "./types.js";
@@ -72,22 +73,25 @@ const directory = (root: string): string => (root.endsWith(path.sep) ? root : `$
  * Node permission flags for one runtime, built from what its manifest
  * declares. This is a seat belt against mistakes in code the operator asked
  * for, not a boundary against a hostile package: a package that may run
- * programs can do anything those programs can, and network access is not
- * restricted here at all.
+ * programs can do anything those programs can. Sockets and writes by such
+ * programs are confined only by the OS sandbox `planExtensionLaunch` applies.
+ * The store files directory is reachable only when `fs.write` names `store`;
+ * the host key/value store is a separate service and needs no file access.
  */
 export function runtimePermissionArgs(declaration: ExtensionRuntimeDeclarationV2, roots: RuntimeRoots): string[] {
+	const storeFiles = declaration.permissions.fs.write.includes("store");
 	const read = new Set([
 		roots.bootstrap,
 		path.join(path.dirname(roots.bootstrap), "runtime-registration.mjs"),
 		directory(roots.packageCopy),
-		directory(roots.storeDir),
+		...(storeFiles ? [directory(roots.storeDir)] : []),
 	]);
 	for (const entry of declaration.permissions.fs.read) {
 		if (entry === "workspace") read.add(directory(roots.workspace));
 		else if (entry === "home") read.add(directory(roots.home));
 		else read.add(directory(path.isAbsolute(entry) ? entry : path.join(roots.workspace, entry)));
 	}
-	const write = new Set([directory(roots.storeDir)]);
+	const write = new Set<string>(storeFiles ? [directory(roots.storeDir)] : []);
 	for (const entry of declaration.permissions.fs.write)
 		if (entry !== "store") write.add(directory(path.join(roots.workspace, entry)));
 	return [
@@ -124,8 +128,8 @@ export class ExtensionRuntimeProcessV2 {
 	readonly declaration: ExtensionRuntimeDeclarationV2;
 	readonly copyRoot: string;
 	readonly startedAt = performance.now();
-	/** Node cannot restrict sockets here, so a `net: false` declaration is recorded as unenforced. */
-	readonly netEnforced = false;
+	/** What wraps the child beyond the Node flags, for `/extensions`. Set once the launch is planned. */
+	readonly sandbox: ExtensionSandboxReport;
 	state: RuntimeProcessState = "staging";
 	failure: string | undefined;
 	readyMs = 0;
@@ -156,6 +160,8 @@ export class ExtensionRuntimeProcessV2 {
 		this.copyRoot = temporary;
 		const copy = path.join(temporary, "package");
 		try {
+			// A declared write root may not reach Clio's own installed resources, state, trust or policy.
+			assertDeclaredWriteRoots(this.declaration, options.snapshot.workspace);
 			cpSync(extension.provenance.canonicalRoot, copy, { recursive: true, dereference: false, verbatimSymlinks: true });
 			const manifestName = path.basename(extension.manifestPath);
 			const verified = extensionContentDigestWithCapture(copy, { capture: [manifestName] });
@@ -189,16 +195,25 @@ export class ExtensionRuntimeProcessV2 {
 		// A rejected stage is reported through `failure`; a caller that never awaits it must not crash the host.
 		this.staged.catch(() => {});
 		const bootstrap = path.join(resolvePackageRoot(), "src/domains/extensions/runtime-child-v2.mjs");
-		// The parent never forwards child stdout/stderr to a terminal or protocol stream.
-		this.child = fork(bootstrap, [], {
-			cwd: options.snapshot.workspace,
-			execArgv: runtimePermissionArgs(this.declaration, {
+		const launch = planExtensionLaunch({
+			declaration: this.declaration,
+			roots: { workspace: options.snapshot.workspace, packageCopy: copy, storeDir: options.storeDir, bootstrap },
+			argv: [
+				process.execPath,
+				...runtimePermissionArgs(this.declaration, {
+					bootstrap,
+					packageCopy: copy,
+					workspace: options.snapshot.workspace,
+					storeDir: options.storeDir,
+					home: os.homedir(),
+				}),
 				bootstrap,
-				packageCopy: copy,
-				workspace: options.snapshot.workspace,
-				storeDir: options.storeDir,
-				home: os.homedir(),
-			}),
+			],
+		});
+		this.sandbox = launch.report;
+		// The parent never forwards child stdout/stderr to a terminal or protocol stream.
+		this.child = spawn(launch.file, launch.args, {
+			cwd: options.snapshot.workspace,
 			env: buildSafeToolEnv(),
 			detached: process.platform !== "win32",
 			stdio: ["ignore", "pipe", "pipe", "ipc"],
@@ -234,6 +249,10 @@ export class ExtensionRuntimeProcessV2 {
 			snapshot: options.snapshot,
 			options: options.options,
 		});
+	}
+	/** True when a declared `net: false` is refused by the OS and not merely recorded. */
+	get netEnforced(): boolean {
+		return this.sandbox.network === "blocked";
 	}
 	get pid(): number | undefined {
 		return this.child.pid;

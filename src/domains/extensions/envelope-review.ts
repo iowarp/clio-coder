@@ -24,6 +24,11 @@ export function envelopeLines(envelope: ExtensionCapabilityEnvelope): string[] {
 	const lines = [
 		`Commands: ${list(envelope.commands)}`,
 		...(envelope.takesOver ? [`Takes over prompts: ${list(envelope.takesOver.map((name) => `/${name}`))}`] : []),
+		...(envelope.state
+			? [
+					`Kept by the host: ${list([...(envelope.state.session ? ["session state"] : []), ...(envelope.state.store ? ["cross-session store"] : [])])}`,
+				]
+			: []),
 		`Events: ${list([...envelope.events, ...(envelope.tickMs !== undefined ? [`tick ${envelope.tickMs / 1000}s`] : [])])}`,
 		`Hooks: ${list(hooks)}`,
 		`Tools: ${list(envelope.tools.map((tool) => `${tool.name} (${tool.actionClass})`))}`,

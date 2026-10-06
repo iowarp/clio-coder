@@ -11,7 +11,7 @@ import { createMemoryExtensionKeyValueHost } from "../runtime-state.js";
 import type { ExtensionDiagnostic, LoadableExtension } from "../types.js";
 
 const EXECUTION_NOTICE =
-	"Registration check executes the package's startup code in a private copy under its declared Node permissions. Permissions are a seat belt, not a sandbox; network restrictions are not enforced. No activation or handler invocation occurs.";
+	"Registration check executes the package's startup code in a private copy under its declared Node permissions, inside the OS sandbox when one is available (network blocked unless declared). Permissions are a seat belt, not a boundary against hostile code. No activation or handler invocation occurs.";
 
 export interface ExtensionValidationReport {
 	path: string;

@@ -28,6 +28,18 @@ function pluginPairing(ext: InstalledExtension, state: string): string {
 	return `serves ${plugin}, which is not in effect (not installed, disabled or shadowed). No /${plugin}:* prompt is taken over, and this extension's commands run as /ext:${ext.id}:*.`;
 }
 
+/** What the OS sandbox does for a runtime, or what it would do, in one line. */
+function confinement(
+	net: boolean,
+	sandbox: { backend: string | null; network: "blocked" | "allowed" | "unenforced"; reason?: string } | undefined,
+): string {
+	if (sandbox === undefined)
+		return `not started; it runs in an OS sandbox when one is available, with the network ${net ? "open as declared" : "blocked as declared"}`;
+	if (sandbox.backend === null)
+		return `no OS sandbox (${sandbox.reason ?? "unavailable"}); Node flags only, so ${net ? "the network is open as declared" : "the declared network ban is not enforced"}`;
+	return `${sandbox.backend} OS sandbox; network ${sandbox.network === "blocked" ? "blocked (enforced)" : "open as declared"}; secrets masked and Clio-managed paths read-only`;
+}
+
 export function openExtensionsOverlay(tui: TUI, ctx: SlashCommandContext, onClose: () => void): OverlayHandle {
 	const list = ctx.listExtensions?.() ?? [];
 	const items: ListOverlayItem[] = list.map((ext) => {
@@ -79,9 +91,10 @@ export function openExtensionsOverlay(tui: TUI, ctx: SlashCommandContext, onClos
 					lines.push(
 						`**Operator runtime:** ${runtime?.state ?? "not started"}; generation ${runtime?.generation ?? 0}`,
 						ext.runtimeV2
-							? "Runtime code executes on interactive startup/reload after installation, under Node permissions built from its manifest. Those are a seat belt, not a sandbox: network is not restricted, and a package allowed to run programs gives them your account's authority."
+							? "Runtime code executes on interactive startup/reload after installation, under Node permissions built from its manifest. Those are a seat belt, not a boundary: a package allowed to run programs gives them your account's authority except where the OS sandbox below confines them."
 							: "Runtime code executes on interactive startup/reload after installation. It has your user account's authority; it is not an OS sandbox.",
 					);
+					if (ext.runtimeV2) lines.push(`**Confinement:** ${confinement(ext.runtimeV2.permissions.net, runtime?.sandbox)}`);
 					if (runtime?.reason) lines.push(runtime.reason);
 					if (runtime?.status) lines.push(`**Status:** ${runtime.status.text}`);
 					for (const command of ctx.operatorExtensions

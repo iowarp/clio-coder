@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { cpSync, existsSync, mkdtempSync, readdirSync, realpathSync, rmSync, statSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { registerDevRoot, releaseDevRoots } from "../../core/dev-roots.js";
 import { evaluateClioCompatibility } from "./compatibility.js";
 import { findExtensionManifestPath, loadManifestFromRoot } from "./discovery.js";
 import { extensionContentDigestWithCapture } from "./integrity.js";
@@ -87,6 +88,8 @@ function invalid(source: string, id: string, diagnostics: ExtensionDiagnostic[])
  */
 export class ExtensionDevScope implements ExtensionSessionOverlay {
 	private readonly roots = new Set<string>();
+	/** Folders another live session registered first, with the sentence that says so. */
+	private readonly refused = new Map<string, string>();
 	private readonly copies = new Map<string, DevCopy>();
 	private readonly approved = new Map<string, ExtensionCapabilityEnvelope>();
 	private readonly declined = new Map<string, string>();
@@ -117,10 +120,28 @@ export class ExtensionDevScope implements ExtensionSessionOverlay {
 				// Removed between listing and stat.
 				continue;
 			}
-			if (!this.roots.has(root)) found.push(root);
-			this.roots.add(root);
+			if (this.roots.has(root)) continue;
+			if (this.claim(root) !== null) continue;
+			found.push(root);
 		}
 		return found;
+	}
+
+	/**
+	 * Register a folder for this session before it is loaded or watched. A folder
+	 * another live session holds is not loaded here and its model may not write
+	 * it; the session that registered it first keeps it until that process exits.
+	 */
+	private claim(root: string): string | null {
+		const registered = registerDevRoot(root);
+		if (registered.ok) {
+			this.refused.delete(root);
+			this.roots.add(root);
+			return null;
+		}
+		const problem = `${root} is registered to another session (pid ${registered.heldBy.pid}); one session at a time develops a folder`;
+		this.refused.set(root, problem);
+		return problem;
 	}
 
 	/** A folder the operator names. Returns the problem, or null once it is a dev root. */
@@ -128,8 +149,7 @@ export class ExtensionDevScope implements ExtensionSessionOverlay {
 		const root = path.resolve(this.cwd(), folder);
 		if (!existsSync(root)) return `${root} does not exist`;
 		if (findExtensionManifestPath(root) === null) return `${root} has no clio-coder-extension.yaml`;
-		this.roots.add(root);
-		return null;
+		return this.roots.has(root) ? null : this.claim(root);
 	}
 
 	sources(): string[] {
@@ -162,6 +182,7 @@ export class ExtensionDevScope implements ExtensionSessionOverlay {
 					changed.push(gone.record.entry.id);
 				}
 				this.roots.delete(source);
+				releaseDevRoots(source);
 				continue;
 			}
 			const before = this.copies.get(source);
@@ -382,6 +403,19 @@ export class ExtensionDevScope implements ExtensionSessionOverlay {
 	}
 
 	status(): DevExtensionStatus[] {
+		const refused = [...this.refused].map(
+			([source, problem]): DevExtensionStatus => ({
+				id: path.basename(source),
+				source,
+				state: "invalid",
+				muted: false,
+				diagnostics: [problem],
+			}),
+		);
+		return [...refused, ...this.copyStatus()];
+	}
+
+	private copyStatus(): DevExtensionStatus[] {
 		return [...this.copies.values()].map((copy) => {
 			const entry = copy.record.entry;
 			const digest = copy.envelope ? envelopeDigest(copy.envelope) : "";
@@ -416,6 +450,7 @@ export class ExtensionDevScope implements ExtensionSessionOverlay {
 	}
 
 	dispose(): void {
+		releaseDevRoots();
 		for (const copy of this.copies.values()) if (copy.copyRoot) this.retired.add(copy.copyRoot);
 		this.copies.clear();
 		for (const old of this.retired) {

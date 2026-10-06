@@ -288,9 +288,18 @@ function parsePermissions(value: unknown): ExtensionPermissionsDeclaration {
 		const root = text(entry, path, 240);
 		return root.startsWith("/") ? root : containedPath(root, path);
 	});
-	const write = list(fs.write, "runtime.permissions.fs.write", RUNTIME_V2_LIMITS.fsEntries).map((entry, index) =>
-		entry === "store" ? "store" : containedPath(entry, `runtime.permissions.fs.write[${index}]`),
-	);
+	const write = list(fs.write, "runtime.permissions.fs.write", RUNTIME_V2_LIMITS.fsEntries).map((entry, index) => {
+		if (entry === "store") return "store";
+		const path = `runtime.permissions.fs.write[${index}]`;
+		const root = containedPath(entry, path);
+		// The workspace root holds `.clio-coder`, and `.clio-coder` holds the installed
+		// resources, state and policy that only the operator changes. The launcher also
+		// checks the resolved path, which catches a link to either.
+		const first = root.split("/").find((segment) => segment !== ".");
+		if (first === undefined || first === ".clio-coder")
+			fail(path, "must not name the workspace root or Clio-managed .clio-coder state");
+		return root;
+	});
 	if (new Set(read).size !== read.length || new Set(write).size !== write.length)
 		fail("runtime.permissions.fs", "lists a root twice");
 	return {
@@ -407,6 +416,7 @@ export function capabilityEnvelope(
 	return {
 		commands: declaration.commands.map((command) => command.name),
 		...(takesOver.length > 0 ? { takesOver } : {}),
+		...(declaration.state.session || declaration.state.store ? { state: declaration.state } : {}),
 		events: declaration.events,
 		...(declaration.tickMs !== undefined ? { tickMs: declaration.tickMs } : {}),
 		watch: declaration.watch,
@@ -469,6 +479,10 @@ export function envelopeGrowth(approved: ExtensionCapabilityEnvelope, next: Exte
 	};
 	push("new commands", added(approved.commands, next.commands));
 	push("takes over prompts", added(approved.takesOver ?? [], next.takesOver ?? []));
+	push(
+		"keeps host state",
+		(["session", "store"] as const).filter((kind) => next.state?.[kind] === true && approved.state?.[kind] !== true),
+	);
 	push("new events", added(approved.events, next.events));
 	if (next.tickMs !== undefined && approved.tickMs === undefined) growth.push("a timer");
 	else if (next.tickMs !== undefined && approved.tickMs !== undefined && next.tickMs < approved.tickMs)

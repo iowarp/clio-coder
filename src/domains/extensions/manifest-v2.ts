@@ -101,6 +101,11 @@ export type ExtensionCapabilityEnvelope = Pick<
 	commands: string[];
 	/** `<plugin>:<command>` prompt names the package's commands take over; absent when none. */
 	takesOver?: string[];
+	/**
+	 * Host-held state the package keeps: per-session values and the cross-session
+	 * store. Absent when it keeps neither, which keeps those digests stable.
+	 */
+	state?: ExtensionRuntimeDeclarationV2["state"];
 	tools: Array<Pick<ExtensionRuntimeToolDeclaration, "name" | "actionClass">>;
 	workspaces: Array<Pick<ExtensionWorkspaceDeclaration, "id" | "regions" | "board" | "keys">>;
 };

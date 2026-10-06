@@ -79,7 +79,12 @@ import { ROUTING_PIN_HINT } from "./routing-settings.js";
 import { getCachedDefaultRulePacks, type PackId, type RulePacks } from "./rule-pack-loader.js";
 import { clioCredentialStorePaths } from "./secret-paths.js";
 import type { MutationCandidate } from "./skill-authority.js";
-import { activeClioSkillRoots, mutationCandidates, skillMutationReason } from "./skill-authority.js";
+import {
+	activeClioSkillRoots,
+	foreignDevRootReason,
+	mutationCandidates,
+	skillMutationReason,
+} from "./skill-authority.js";
 
 import { gateProjectSafetyPolicy, workspaceTrustDirectory } from "./workspace-trust.js";
 
@@ -687,6 +692,15 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 					ruleId: "skill-authority",
 					reasonCode: "skill-authority",
 					reasons: [skillReason],
+					policySource: "builtin-classifier",
+				});
+			}
+			const devRootReason = foreignDevRootReason(candidates, walkMemo);
+			if (devRootReason !== null) {
+				return blockDecision(base, {
+					ruleId: "dev-root-owned",
+					reasonCode: "dev-root-owned",
+					reasons: [devRootReason],
 					policySource: "builtin-classifier",
 				});
 			}
