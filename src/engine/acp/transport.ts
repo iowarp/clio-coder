@@ -29,6 +29,9 @@ import type { AcpJsonRpcFailure, AcpJsonRpcMessage, AcpJsonRpcSuccess } from "./
  */
 export const ACP_MAX_INPUT_LINE_BYTES = 1024 * 1024;
 
+export const DEFAULT_TERMINATION_GRACE_MS = 500;
+export const DEFAULT_TERMINATION_WAIT_MS = 2_000;
+
 /**
  * Cheap guard before the O(n) byte measurement. UTF-8 never spends more than
  * three bytes on one UTF-16 code unit (a surrogate pair is two units and four
@@ -211,8 +214,8 @@ class StdioJsonRpcTransport implements AcpJsonRpcTransport {
 	private readonly stderrHandlers = new Set<StderrHandler>();
 
 	constructor(command: string, args: string[], options: StdioTransportOptions = {}) {
-		this.terminationGraceMs = boundedMilliseconds(options.terminationGraceMs, 500);
-		this.terminationWaitMs = boundedMilliseconds(options.terminationWaitMs, 2_000);
+		this.terminationGraceMs = boundedMilliseconds(options.terminationGraceMs, DEFAULT_TERMINATION_GRACE_MS);
+		this.terminationWaitMs = boundedMilliseconds(options.terminationWaitMs, DEFAULT_TERMINATION_WAIT_MS);
 		this.childClosePromise = new Promise((resolve) => {
 			this.resolveChildClose = resolve;
 		});

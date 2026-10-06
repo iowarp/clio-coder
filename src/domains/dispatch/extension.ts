@@ -64,7 +64,9 @@ import {
 	type AcpDelegationRunHandle,
 	type AcpDelegationRunInput,
 	startAcpDelegationRun,
+	DEFAULT_CANCEL_GRACE_MS,
 } from "../../engine/acp/adapter.js";
+import { DEFAULT_TERMINATION_GRACE_MS, DEFAULT_TERMINATION_WAIT_MS } from "../../engine/acp/transport.js";
 import { engineRetryDelayMs } from "../../engine/ai.js";
 import { isClaudeCanonicalTool } from "../../engine/claude/tool-safety.js";
 import { WORKER_RUNTIME_MEDIATES_CLIO_DISPATCH } from "../../engine/worker-runtime-capabilities.js";
@@ -426,6 +428,7 @@ import {
 	type SpawnedWorkerResult,
 	spawnHeldNativeWorker,
 	spawnNativeWorker,
+	WORKER_PROCESS_CLEANUP_BOUND_MS,
 	type SpawnOptions as WorkerSpawnOptions,
 	type WorkerSpec,
 } from "./worker-spawn.js";
@@ -9424,6 +9427,10 @@ export function createDispatchBundle(
 	}
 
 	const contract: DispatchContract = {
+		drainAllowanceMs: () => Math.max(
+			WORKER_PROCESS_CLEANUP_BOUND_MS,
+			DEFAULT_CANCEL_GRACE_MS + DEFAULT_TERMINATION_GRACE_MS + DEFAULT_TERMINATION_WAIT_MS,
+		) + DISPATCH_DRAIN_GRACE_MS,
 		publishesProgress: true,
 		ownsProgressBus: (bus) => bus === context.bus,
 		preview,
