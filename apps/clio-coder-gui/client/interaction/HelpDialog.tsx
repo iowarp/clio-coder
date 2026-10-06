@@ -1,105 +1,176 @@
-// The searchable reference surface. The body owns only the filter; focus, Escape and focus return
-// belong to the dialog wrapper, which is why the body renders identically with no client and no
-// session and can be exercised on its own.
-
-import { useId, useState } from "react";
+import type { RefObject } from "react";
+import { useId, useRef, useState } from "react";
+import { Icon } from "../design/icons.js";
 import { Dialog } from "./Dialog.js";
-import { searchHelp } from "./help-reference.js";
+import type { HelpView } from "./help-model.js";
+import { HELP_VIEWS, helpContent } from "./help-model.js";
+import type { HelpMatch } from "./help-reference.js";
+import type { Keybinding } from "./keybindings.js";
+import { formatKeybinding } from "./keybindings.js";
 import { PUBLIC_HELP } from "./public-help.js";
-import "./interaction.css";
+import "./help.css";
 
-export function HelpReferenceBody({ bundledDocsPath }: { bundledDocsPath?: string | undefined }) {
+function ShortcutKeys({ binding }: { binding: Keybinding }) {
+	const chord = formatKeybinding(binding);
+	return (
+		<span className="help-keys" role="img" aria-label={chord}>
+			{chord.split(" + ").map((key) => (
+				<kbd key={key}>{key.replace("Ctrl or Cmd", "Ctrl/Cmd")}</kbd>
+			))}
+		</span>
+	);
+}
+
+function HelpEntries({ match, bundledDocsPath }: { match: HelpMatch; bundledDocsPath?: string | undefined }) {
+	return (
+		<dl className="help-entries">
+			{match.entries.map((entry) => (
+				<div key={entry.term}>
+					<dt>{entry.term}</dt>
+					<dd>
+						<p>{entry.meaning}</p>
+						{match.section.id === "documentation" ? (
+							entry.term === "Public documentation" ? (
+								<a href={PUBLIC_HELP} target="_blank" rel="noopener noreferrer" referrerPolicy="no-referrer">
+									Open public documentation ↗
+								</a>
+							) : (
+								<p className="help-docs-path">
+									<span>Installed location</span>
+									<code>{bundledDocsPath ?? "docs/ in the Clio Coder package"}</code>
+								</p>
+							)
+						) : null}
+					</dd>
+				</div>
+			))}
+		</dl>
+	);
+}
+
+export function HelpReferenceBody({
+	bundledDocsPath,
+	searchRef,
+}: {
+	bundledDocsPath?: string | undefined;
+	searchRef?: RefObject<HTMLInputElement | null>;
+}) {
 	const [query, setQuery] = useState("");
+	const [view, setView] = useState<HelpView>("shortcuts");
 	const inputId = useId();
-	const matches = searchHelp(query);
-	const entryCount = matches.reduce((total, match) => total + match.entries.length, 0);
+	const contentId = useId();
+	const content = helpContent(query, view);
 	return (
 		<div className="help-reference">
-			<section aria-label="Documentation">
-				<h3>Documentation</h3>
-				<p>
-					<a href={PUBLIC_HELP} target="_blank" rel="noopener noreferrer" referrerPolicy="no-referrer">
-						Open public documentation ↗
-					</a>
-				</p>
-				<p>
-					The installed Markdown reference is available offline
-					{bundledDocsPath ? (
-						<>
-							{" "}
-							at <code>{bundledDocsPath}</code>
-						</>
-					) : (
-						" in the package’s docs/ directory"
-					)}
-					. Ask Clio to retrieve it with the <code>clio_docs</code> capability, or read the bundled files with your editor.
-				</p>
-			</section>
-			<div className="help-reference__query">
-				<label htmlFor={inputId}>Filter this reference</label>
-				<div className="filter__field">
-					<span aria-hidden="true">⌕</span>
+			<div className="help-toolbar">
+				<label className="sr-only" htmlFor={inputId}>
+					Search shortcuts and help
+				</label>
+				<div className="help-search">
+					<Icon name="search" />
 					<input
+						ref={searchRef}
 						id={inputId}
 						type="search"
 						value={query}
 						onChange={(event) => setQuery(event.target.value)}
-						placeholder="A view, a key, or a word the app uses"
+						placeholder="Search actions, keys or help…"
 						autoComplete="off"
+						aria-controls={contentId}
 					/>
 					{query.length > 0 ? (
-						<button type="button" onClick={() => setQuery("")} aria-label="Clear reference filter">
-							×
+						<button
+							type="button"
+							onClick={() => {
+								setQuery("");
+								searchRef?.current?.focus();
+							}}
+							aria-label="Clear search"
+						>
+							<Icon name="close" />
 						</button>
 					) : null}
 				</div>
-				{/* status, never assertive: the count must not interrupt the operator mid-word. */}
-				<small role="status">
-					{query.trim().length === 0
-						? "The whole reference"
-						: matches.length === 0
-							? "Nothing in the reference matches."
-							: `${entryCount} matching ${entryCount === 1 ? "entry" : "entries"} in ${matches.length} ${
-									matches.length === 1 ? "section" : "sections"
-								}`}
-				</small>
-			</div>
-			{matches.length === 0 ? (
-				<p className="help-reference__empty">
-					Nothing in the reference matches. Try a view name, a key such as Alt, or a word such as receipt.
-				</p>
-			) : (
-				<div className="help-reference__sections">
-					{matches.map(({ section, entries }) => (
-						<section
-							key={section.id}
-							className={`help-reference__section${section.reserved === undefined ? "" : " is-reserved"}`}
-							aria-labelledby={`help-${section.id}`}
+				<nav className="help-nav" aria-label="Help topics">
+					{HELP_VIEWS.map((item) => (
+						<button
+							key={item.id}
+							type="button"
+							aria-pressed={!content.searching && view === item.id}
+							aria-controls={contentId}
+							onClick={() => {
+								setQuery("");
+								setView(item.id);
+							}}
 						>
-							<div className="help-reference__heading">
-								<h3 id={`help-${section.id}`}>{section.title}</h3>
-								<p>{section.lede}</p>
-							</div>
-							{section.reserved === undefined ? null : (
-								<p className="help-reference__reserved">
-									<span className="eyebrow">NOT IN THIS BUILD</span>
-									{section.reserved}
-								</p>
-							)}
-							{entries.length > 0 ? (
-								<dl className="help-reference__entries">
-									{entries.map((entry) => (
-										<div key={entry.term}>
-											<dt>{section.id === "keyboard" ? <kbd>{entry.term}</kbd> : entry.term}</dt>
-											<dd>{entry.meaning}</dd>
+							{item.title}
+						</button>
+					))}
+				</nav>
+			</div>
+			<section
+				className="help-content"
+				id={contentId}
+				key={content.searching ? "search" : view}
+				// biome-ignore lint/a11y/noNoninteractiveTabindex: keyboard users need to focus this region to scroll inside the dialog trap.
+				tabIndex={0}
+				aria-label="Help content"
+			>
+				<p className="help-context" role="status">
+					{content.searching
+						? `${content.count} ${content.count === 1 ? "result" : "results"} across shortcuts and help`
+						: view === "shortcuts"
+							? "Ctrl on Windows / Linux · Cmd on Mac. Tab moves between controls."
+							: view === "guide"
+								? "A quick guide to working with Clio."
+								: "Read online or use the reference installed on this machine."}
+				</p>
+				{content.searching && content.count === 0 ? (
+					<div className="help-empty">
+						<h3>No matches</h3>
+						<p>Try an action like “send”, a chord like “Ctrl+K”, or a topic like “autonomy”.</p>
+					</div>
+				) : null}
+				{content.shortcuts.length > 0 ? (
+					<div className="help-shortcuts">
+						{content.shortcuts.map((group) => (
+							<section key={group.id} aria-label={group.title}>
+								<h3>{group.title}</h3>
+								<dl>
+									{group.bindings.map((binding) => (
+										<div className="help-shortcut" key={binding.id}>
+											<dt>
+												{binding.action}
+												<span>{binding.where}</span>
+											</dt>
+											<dd>
+												<ShortcutKeys binding={binding} />
+											</dd>
 										</div>
 									))}
 								</dl>
-							) : null}
-						</section>
-					))}
+							</section>
+						))}
+					</div>
+				) : null}
+				<div className="help-topics">
+					{content.sections.map((match) =>
+						content.searching || match.section.id === "documentation" ? (
+							<section className="help-topic" key={match.section.id} aria-label={match.section.title}>
+								<h3>{match.section.title}</h3>
+								<p>{match.section.lede}</p>
+								<HelpEntries match={match} bundledDocsPath={bundledDocsPath} />
+							</section>
+						) : (
+							<details className="help-topic" key={match.section.id}>
+								<summary tabIndex={0}>{match.section.title}</summary>
+								<p>{match.section.lede}</p>
+								<HelpEntries match={match} bundledDocsPath={bundledDocsPath} />
+							</details>
+						),
+					)}
 				</div>
-			)}
+			</section>
 		</div>
 	);
 }
@@ -113,10 +184,18 @@ export function HelpDialog({
 	onClose: () => void;
 	bundledDocsPath?: string | undefined;
 }) {
+	const searchRef = useRef<HTMLInputElement>(null);
 	if (!open) return null;
 	return (
-		<Dialog title="How this app works" eyebrow="KEYBOARD AND VOCABULARY REFERENCE" size="wide" onClose={onClose}>
-			<HelpReferenceBody bundledDocsPath={bundledDocsPath} />
+		<Dialog
+			title="Shortcuts & help"
+			eyebrow="CLIO CODER"
+			size="wide"
+			className="help-dialog"
+			initialFocus={searchRef}
+			onClose={onClose}
+		>
+			<HelpReferenceBody bundledDocsPath={bundledDocsPath} searchRef={searchRef} />
 		</Dialog>
 	);
 }

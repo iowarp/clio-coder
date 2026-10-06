@@ -1,0 +1,255 @@
+/* The body portal inherits the resolved theme from :root. Keep help's type and surfaces explicit
+   so page-level article defaults do not turn this compact reference into a document. */
+.dialog-backdrop:has(.help-dialog) {
+	top: var(--window-titlebar-height, 0px);
+	padding: var(--space-5);
+}
+.help-dialog {
+	width: min(1040px, 100%);
+	height: min(780px, calc(100dvh - var(--window-titlebar-height, 0px) - 40px));
+	max-height: none;
+	font-size: var(--text-meta);
+	line-height: var(--leading-body);
+}
+.help-dialog .dialog__header {
+	padding: var(--space-5) var(--space-6) var(--space-4);
+	align-items: center;
+}
+.help-dialog .dialog__header h2 {
+	font-size: var(--text-h3);
+	font-weight: 500;
+	letter-spacing: -0.02em;
+}
+.help-dialog .dialog__header .eyebrow {
+	margin: 0 0 var(--space-1);
+	font-size: var(--text-instrument);
+}
+.help-dialog .dialog__body {
+	padding: 0;
+	overflow: hidden;
+	min-height: 0;
+}
+.help-reference {
+	height: 100%;
+	display: grid;
+	grid-template-rows: auto minmax(0, 1fr);
+}
+.help-toolbar {
+	padding: var(--space-4) var(--space-6) 0;
+	border-bottom: 1px solid var(--line);
+	background: var(--raised);
+}
+.help-search {
+	display: flex;
+	align-items: center;
+	gap: var(--space-2);
+	padding-inline: var(--space-3);
+	border: 1px solid var(--line-strong);
+	border-radius: var(--radius-sm);
+	background: var(--well);
+	color: var(--ink-muted);
+}
+.help-search:focus-within {
+	outline: 2px solid var(--focus);
+	outline-offset: 2px;
+}
+.help-search input {
+	min-height: 44px;
+	padding: var(--space-2) 0;
+	border: 0;
+	background: transparent;
+	color: var(--ink);
+	font-size: var(--text-meta);
+}
+.help-search input::placeholder {
+	color: var(--ink-muted);
+	opacity: 1;
+}
+.help-search input:focus-visible {
+	outline: none;
+	box-shadow: none;
+}
+.help-search input::-webkit-search-cancel-button {
+	-webkit-appearance: none;
+}
+.help-search button {
+	border: 0;
+	padding: var(--space-1);
+	min-height: 32px;
+	color: var(--ink-muted);
+}
+.help-nav {
+	display: flex;
+	gap: var(--space-5);
+	margin-top: var(--space-3);
+}
+.help-nav button {
+	min-height: 44px;
+	padding: var(--space-2) 0;
+	border: 0;
+	border-bottom: 2px solid transparent;
+	border-radius: 0;
+	color: var(--ink-muted);
+	font-size: var(--text-meta);
+}
+.help-nav button[aria-pressed="true"] {
+	border-bottom-color: var(--accent);
+	color: var(--ink);
+}
+.help-content {
+	min-height: 0;
+	overflow: auto;
+	overscroll-behavior: contain;
+	scrollbar-gutter: stable;
+	padding: var(--space-4) var(--space-6) var(--space-6);
+}
+.help-context {
+	margin: 0 0 var(--space-5);
+	color: var(--ink-muted);
+	font-size: var(--text-exact);
+}
+.help-shortcuts {
+	display: grid;
+	grid-template-columns: repeat(2, minmax(0, 1fr));
+	gap: var(--space-6) var(--space-8);
+}
+.help-shortcuts h3,
+.help-topic h3,
+.help-empty h3 {
+	margin: 0 0 var(--space-2);
+	color: var(--ink);
+	font-size: var(--text-meta);
+	font-weight: 600;
+}
+.help-shortcuts dl {
+	margin: 0;
+}
+.help-shortcut {
+	display: grid;
+	grid-template-columns: minmax(0, 1fr) auto;
+	gap: var(--space-3);
+	align-items: start;
+	padding: var(--space-3) 0;
+	border-top: 1px solid var(--line);
+}
+.help-shortcut dt {
+	font-weight: 400;
+	line-height: var(--leading-tight);
+}
+.help-shortcut dt span {
+	display: block;
+	margin-top: var(--space-1);
+	color: var(--ink-muted);
+	font-size: var(--text-instrument);
+	line-height: var(--leading-body);
+}
+.help-shortcut dd {
+	margin: 0;
+}
+.help-keys {
+	display: flex;
+	flex-wrap: wrap;
+	justify-content: flex-end;
+	gap: var(--space-1);
+}
+.help-keys kbd {
+	padding: 2px 5px;
+	min-width: 25px;
+	border: 1px solid var(--line-strong);
+	border-bottom-width: 2px;
+	border-radius: var(--radius-sm);
+	background: var(--well);
+	color: var(--ink);
+	font: 400 var(--text-instrument) / 1.4 var(--font-mono);
+	text-align: center;
+	white-space: nowrap;
+}
+.help-topics {
+	display: grid;
+	gap: var(--space-3);
+}
+.help-shortcuts + .help-topics:not(:empty) {
+	margin-top: var(--space-6);
+}
+.help-topic {
+	margin: 0;
+	padding: var(--space-4);
+	border: 1px solid var(--line);
+	border-radius: var(--radius-sm);
+	font-size: var(--text-meta);
+	color: var(--ink-muted);
+}
+.help-topic summary {
+	color: var(--ink);
+	font-weight: 500;
+}
+.help-topic > p,
+.help-empty p {
+	margin: var(--space-2) 0 0;
+	color: var(--ink-muted);
+}
+.help-entries {
+	margin: var(--space-4) 0 0;
+}
+.help-entries > div + div {
+	margin-top: var(--space-4);
+	padding-top: var(--space-4);
+	border-top: 1px solid var(--line);
+}
+.help-entries dt {
+	color: var(--ink);
+	font-weight: 500;
+}
+.help-entries dd {
+	margin: var(--space-1) 0 0;
+}
+.help-entries p {
+	margin: 0;
+}
+.help-entries a {
+	display: inline-block;
+	padding-block: var(--space-2);
+	color: var(--accent);
+	text-underline-offset: 3px;
+}
+.help-entries .help-docs-path {
+	display: grid;
+	gap: var(--space-1);
+	margin-top: var(--space-3);
+	font-size: var(--text-exact);
+	overflow-wrap: anywhere;
+}
+.help-docs-path code {
+	font-size: inherit;
+}
+@media (max-width: 820px) {
+	.help-shortcuts {
+		grid-template-columns: minmax(0, 1fr);
+	}
+}
+@media (max-width: 480px) {
+	.dialog-backdrop:has(.help-dialog) {
+		padding: var(--space-2);
+	}
+	.help-dialog {
+		height: calc(100dvh - var(--window-titlebar-height, 0px) - 16px);
+	}
+	.help-dialog .dialog__header,
+	.help-toolbar,
+	.help-content {
+		padding-inline: var(--space-4);
+	}
+	.help-nav {
+		gap: var(--space-4);
+	}
+	.help-nav button {
+		font-size: var(--text-exact);
+	}
+	.help-shortcut {
+		grid-template-columns: minmax(0, 1fr);
+		gap: var(--space-2);
+	}
+	.help-keys {
+		justify-content: flex-start;
+	}
+}

@@ -11,6 +11,7 @@ type NavPath = (typeof navigation)[number]["path"] | "/" | "/sessions";
 export interface HelpEntry {
 	readonly term: string;
 	readonly meaning: string;
+	readonly bindingId?: string;
 }
 
 export interface HelpSection {
@@ -31,46 +32,40 @@ export interface HelpMatch {
 export const VIEW_GUIDE: Readonly<Record<NavPath, { title: string; meaning: string }>> = {
 	"/": {
 		title: "New task",
-		meaning:
-			"A blank task. Choose a workspace, describe what you want, and Clio Coder starts working. Nothing runs until you send the first message.",
+		meaning: "Choose a workspace and describe a task. Clio starts when you send your first message.",
 	},
 	"/sessions": {
 		title: "Tasks",
 		meaning:
-			"Each task is one conversation in one workspace, listed in the sidebar with its status. A task shows your requests and Clio Coder's responses as prose, with the tools it ran folded into one activity line, and a pane for progress, changes, files and the commands it ran.",
+			"Your conversations, grouped by workspace. Open a task to read messages, inspect tool activity, and see progress, changes, files and commands.",
 	},
 	"/traces": {
 		title: "Traces",
-		meaning:
-			"The same record as the conversation, one card per protocol item, with provenance, exact keys, and the token fields.",
+		meaning: "The detailed conversation record, including individual events, their sources and token counts.",
 	},
 	"/toolchain": {
 		title: "Toolchain",
-		meaning: "The tools Clio Coder can reach on this machine, their versions, and the trust each one carries.",
+		meaning: "Tools available on this machine, their versions and trust status.",
 	},
 	"/settings": {
 		title: "Settings",
-		meaning:
-			"The configuration Clio Coder is actually using for this project, where each value came from, and when a change takes effect.",
+		meaning: "Current project settings, where each value comes from and when changes take effect.",
 	},
 	"/fleet": {
 		title: "Fleet",
-		meaning:
-			"Recent durable runs across the installation: their event spines, receipt trust, fleet lineage, gate verdicts, and evidence bundles.",
+		meaning: "Saved runs across this installation, including events, related workers, check results and evidence.",
 	},
 	"/evidence": {
 		title: "Evidence",
-		meaning: "Sealed records of durable work, with the trust check that says whether the bytes still authenticate.",
+		meaning: "Sealed work records and checks that verify they have not changed.",
 	},
 	"/library": {
 		title: "Library",
-		meaning:
-			"Agents, skills, library resources, extensions, and verification checks Clio Coder can see, with their trust and scope.",
+		meaning: "Available agents, skills, resources, extensions and checks, with their trust and scope.",
 	},
 	"/system": {
 		title: "System",
-		meaning:
-			"An installation-wide, manually refreshed snapshot of Clio Coder's worker admission state and aggregate totals. It is not a project view.",
+		meaning: "A snapshot of worker capacity and totals across the installation. Refresh it manually for an update.",
 	},
 };
 
@@ -80,101 +75,112 @@ const VIEW_ENTRIES: readonly HelpEntry[] = Object.values(VIEW_GUIDE).map((view) 
 }));
 
 const KEYBOARD_ENTRIES: readonly HelpEntry[] = KEYBINDING_ORDER.map((binding) => ({
+	bindingId: binding.id,
 	term: formatKeybinding(binding),
 	meaning: `${binding.action}. ${binding.where}.`,
 }));
 
 export const HELP_SECTIONS: readonly HelpSection[] = [
 	{
+		id: "documentation",
+		title: "Documentation",
+		lede: "Guides online and an offline reference included with your installation.",
+		entries: [
+			{ term: "Public documentation", meaning: "Read the Clio Coder guides on the web." },
+			{
+				term: "Installed reference",
+				meaning:
+					"The bundled Markdown docs are available offline. Ask Clio to look up a guide with clio_docs, or open the files in your editor.",
+			},
+		],
+	},
+	{
 		id: "views",
 		title: "Views",
-		lede: "What each view in the navigation shows, and which ones read the whole installation rather than this project.",
+		lede: "Find your way around the app.",
 		entries: VIEW_ENTRIES,
 	},
 	{
 		id: "keyboard",
 		title: "Keyboard",
-		lede: "Every shortcut the app binds. Everything else is reachable with Tab, Enter, and Space.",
+		lede: "App shortcuts. Use Tab to move between controls, then Enter or Space to activate them.",
 		entries: KEYBOARD_ENTRIES,
 	},
 	{
 		id: "working-freedom",
-		title: "Working freedom",
+		title: "Autonomy",
 		lede:
-			"Autonomy is the freedom Clio Coder has to act without asking. The bound session keeps the level Clio Coder says it is enforcing; the settings value reaches the next session.",
+			"Autonomy controls when Clio asks before acting. The current session keeps its reported level; a settings change applies to the next session.",
 		entries: [
 			{
 				term: "default",
 				meaning:
-					"Reads, edits, and recognised commands run. Unrecognised shell commands, plan-scale dispatch, and anything that publishes outside the project wait for your approval.",
+					"Clio can read, edit and run recognised commands. Unrecognised shell commands, dispatching a full plan and publishing outside the project require approval.",
 			},
 			{
 				term: "yolo",
 				meaning:
-					"Ordinary approval stops are skipped. Damage-control rules can still ask or block, and hard path protections remain active.",
+					"Clio skips ordinary approval prompts. Safety rules can still ask or block an action, and protected paths remain protected.",
 			},
 		],
 	},
 	{
 		id: "vocabulary",
 		title: "Vocabulary",
-		lede: "Precise Clio Coder terms are kept where changing them would hide scope.",
+		lede: "Words you may see while working.",
 		entries: [
-			{ term: "Target", meaning: "The configured service or runtime Clio Coder routes a turn through." },
-			{ term: "Model", meaning: "The model the target serves for that turn." },
-			{ term: "Session", meaning: "One conversation Clio Coder keeps and can resume. A project may have many." },
-			{ term: "Turn", meaning: "One request and everything Clio Coder did in response to it." },
+			{ term: "Target", meaning: "A configured service or runtime that handles a turn." },
+			{ term: "Model", meaning: "The AI model a target uses for that turn." },
+			{ term: "Session", meaning: "A saved conversation you can resume. A project can have many sessions." },
+			{ term: "Turn", meaning: "One request and everything Clio does in response." },
 			{
 				term: "Evidence",
-				meaning: "The tools, approvals, outcomes, and receipts that show what happened, as distinct from prose about it.",
+				meaning: "Tool activity, approvals, results and receipts that record what happened.",
 			},
 			{
 				term: "Receipt",
-				meaning:
-					"A sealed record of a durable run. Verified means Clio Coder re-read the bytes and they still authenticate.",
+				meaning: "A sealed record of a saved run. Verified means Clio checked the record and it still authenticates.",
 			},
 			{
 				term: "Truncated",
-				meaning:
-					"Clio Coder or the app cut a list at a bound. What is shown is real; what is not shown is not claimed absent.",
+				meaning: "Only part of a list is shown. More items may exist beyond the display limit.",
 			},
 			{
 				term: "Host-only",
 				meaning:
-					"A fact that stays on this machine's host process by design, such as an event payload or a command line. It is named, never quoted.",
+					"Data kept in the local host process, such as an event payload or command line. The app names it without displaying its contents.",
 			},
-			{ term: "Reported", meaning: "Clio Coder supplied the fact; the app did not measure it." },
-			{ term: "Observed", meaning: "The app saw the fact itself, on the live channel or in its own boundary." },
-			{ term: "Status: queued", meaning: "Clio Coder has accepted the item and has not started it." },
-			{ term: "Status: active", meaning: "The item is running right now." },
-			{ term: "Status: waiting", meaning: "The item is waiting on you, usually an approval." },
-			{ term: "Status: complete", meaning: "Clio Coder reported the item finished." },
-			{ term: "Status: canceled", meaning: "The item was stopped before it finished. A stop is not a failure." },
-			{ term: "Status: failed", meaning: "Clio Coder reported the item failed." },
+			{ term: "Reported", meaning: "Supplied by Clio, rather than measured by the app." },
+			{ term: "Observed", meaning: "Seen directly by the app." },
+			{ term: "Status: queued", meaning: "Accepted, but not started." },
+			{ term: "Status: active", meaning: "Running now." },
+			{ term: "Status: waiting", meaning: "Waiting for you, usually for approval." },
+			{ term: "Status: complete", meaning: "Clio reported that the work finished." },
+			{ term: "Status: canceled", meaning: "Stopped before finishing. This does not mean the work failed." },
+			{ term: "Status: failed", meaning: "Clio reported that the work failed." },
 			{
 				term: "Status: replayed",
-				meaning: "Clio Coder replayed this item from an earlier turn of the same session. It was not observed live.",
+				meaning: "Restored from an earlier turn in this session, rather than observed live.",
 			},
 		],
 	},
 	{
 		id: "boundaries",
 		title: "Boundaries",
-		lede: "Three assurances the app makes on every screen.",
+		lede: "What the app reads and controls.",
 		entries: [
 			{
 				term: "Inspections are read-only",
-				meaning:
-					"Every inspection runs the same fixed command with no arguments from the browser and changes nothing in Clio Coder.",
+				meaning: "Inspections use fixed commands, accept no browser-supplied arguments and do not change Clio.",
 			},
 			{
 				term: "Project work is project-scoped",
 				meaning:
-					"Files, sessions, and configuration are read and changed inside the project you opened, through Clio Coder. Runs, System, the recovery check, and the toolchain and agent inventories are installation-wide reads, and each says so in its header.",
+					"Files, sessions and configuration belong to the open project. Runs, System, recovery checks, and tool and agent inventories read across the installation; their headers identify that scope.",
 			},
 			{
 				term: "Control is local",
-				meaning: "The host listens only on this machine and every request carries a token issued at start.",
+				meaning: "The host listens only on this machine. Requests use an access token issued when it starts.",
 			},
 		],
 	},
@@ -185,7 +191,7 @@ export const HELP_SECTIONS: readonly HelpSection[] = [
 		entries: [
 			{
 				term: "/help",
-				meaning: "In a terminal, /help lists Clio Coder's own commands. Those commands are not part of this app.",
+				meaning: "In the terminal, /help lists Clio Coder commands. The app has its own controls and shortcuts.",
 			},
 		],
 	},
@@ -193,23 +199,29 @@ export const HELP_SECTIONS: readonly HelpSection[] = [
 		id: INTERVIEW_KEYBINDING_NAMESPACE,
 		title: "Interviews",
 		lede:
-			"When the runtime supports interviews over ACP, Clio Coder opens a structured round of questions during a turn. Interview answers never use the Alt+A or Alt+R approval shortcuts.",
+			"Clio may ask a round of questions during a turn when the connected runtime supports interviews. Answering an interview is separate from approving an action.",
 		entries: [
 			{
 				term: "Review, then submit",
 				meaning:
-					"Choose options or write an answer for each question, review the whole round, then submit. Nothing is selected for you. Ctrl or Cmd + Enter submits only from the review screen.",
+					"Choose or write each answer, review the round, then submit. Nothing is selected for you. The submit shortcut works only on the review screen.",
 			},
 			{
 				term: "Cancel interview",
-				meaning: "A cancellation supplies no answers. The runtime must end the interview without treating it as approval.",
+				meaning: "Canceling sends no answers and does not approve an action.",
 			},
 		],
 	},
 ];
 
 function normalise(text: string): string {
-	return text.toLocaleLowerCase("en-US");
+	return text
+		.toLocaleLowerCase("en-US")
+		.replace(/ctrl\/cmd/gu, "ctrl or cmd")
+		.replace(/⌘|\bcommand\b/gu, "cmd")
+		.replace(/⌃|\bcontrol\b/gu, "ctrl")
+		.replace(/\bescape\b/gu, "esc")
+		.replace(/[+]/gu, " ");
 }
 
 /**
@@ -227,8 +239,10 @@ export function searchHelp(query: string): readonly HelpMatch[] {
 		const heading = normalise(`${section.title} ${section.lede} ${section.reserved ?? ""}`);
 		const headingHit = words.every((word) => heading.includes(word));
 		const entries = section.entries.filter((entry) => {
-			const text = normalise(`${entry.term} ${entry.meaning}`);
-			return words.every((word) => text.includes(word));
+			const text = normalise(`${section.title} ${entry.term} ${entry.meaning}`);
+			// A single key is a whole token: K must not match every entry via “Keyboard”.
+			const tokens = text.split(/\s+/u);
+			return words.every((word) => (word.length === 1 ? tokens.includes(word) : text.includes(word)));
 		});
 		if (headingHit) matches.push({ section, entries: entries.length > 0 ? entries : section.entries });
 		else if (entries.length > 0) matches.push({ section, entries });

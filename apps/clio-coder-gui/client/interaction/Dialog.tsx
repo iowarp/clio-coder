@@ -1,7 +1,8 @@
 // The modal dialog and its slide-in drawer sibling. Both claim a keyboard layer, trap Tab, close on
 // the declared Escape binding and restore focus to whatever opened them.
 
-import { type ReactNode, type RefObject, useId, useRef } from "react";
+import type { ReactNode, RefObject } from "react";
+import { useId, useRef } from "react";
 import { createPortal } from "react-dom";
 import { Icon } from "../design/icons.js";
 import "./interaction.css";
@@ -14,6 +15,7 @@ export function Dialog({
 	children,
 	onClose,
 	size = "default",
+	className = "",
 	initialFocus,
 }: {
 	title: string;
@@ -21,6 +23,7 @@ export function Dialog({
 	children: ReactNode;
 	onClose: () => void;
 	size?: "default" | "wide";
+	className?: string;
 	/** Where focus lands on open. The close button is first in the DOM, which is rarely the answer. */
 	initialFocus?: RefObject<HTMLElement | null>;
 }) {
@@ -43,7 +46,7 @@ export function Dialog({
 			}}
 		>
 			<div
-				className={`dialog dialog--${size}`}
+				className={`dialog dialog--${size} ${className}`}
 				role="dialog"
 				aria-modal="true"
 				aria-labelledby={headingId}
