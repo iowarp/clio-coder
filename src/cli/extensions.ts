@@ -1,5 +1,6 @@
 import { resolve } from "node:path";
 import { approveFirstProjectInstall, projectPackagesHaveNoState } from "../core/workspace-trust.js";
+import { envelopeReviewLines, reviewExtensionEnvelope } from "../domains/extensions/envelope-review.js";
 import {
 	disableExtension,
 	discoverExtensionPackages,
@@ -200,10 +201,27 @@ export function runExtensionsCommand(argv: ReadonlyArray<string>): number | Prom
 				return 2;
 			}
 			const firstProjectInstall = parsed.scope === "project" && projectPackagesHaveNoState(process.cwd(), "extensions");
+			// Read from the manifest before the commit, so the operator sees what the package may do
+			// ahead of the write. A package with no api 2 runtime has no envelope to show.
+			const review = (() => {
+				try {
+					return reviewExtensionEnvelope(resolve(root));
+				} catch {
+					// An unreadable manifest is reported by the install itself.
+					return null;
+				}
+			})();
+			if (review && !parsed.json) {
+				process.stdout.write(`${review.id} ${review.version} would be allowed to:\n`);
+				for (const line of envelopeReviewLines(review)) process.stdout.write(`  ${line}\n`);
+			}
 			const result = installExtension(resolve(root), { ...scopeOptions, force: parsed.force });
 			const approved =
 				firstProjectInstall && result.extension !== undefined && approveFirstProjectInstall(process.cwd(), "extensions");
-			if (parsed.json) process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+			if (parsed.json)
+				process.stdout.write(
+					`${JSON.stringify(review ? { ...result, envelope: review.envelope, envelopeDigest: review.digest } : result, null, 2)}\n`,
+				);
 			else {
 				printDiagnostics(result.diagnostics);
 				if (result.extension) {

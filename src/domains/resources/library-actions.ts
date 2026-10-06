@@ -9,7 +9,13 @@ import { randomBytes } from "node:crypto";
 import { existsSync } from "node:fs";
 import path from "node:path";
 import { approveFirstProjectInstall, projectPackagesHaveNoState } from "../../core/workspace-trust.js";
-import { disableExtension, enableExtension, removeExtension } from "../extensions/index.js";
+import {
+	disableExtension,
+	type ExtensionCapabilityEnvelope,
+	enableExtension,
+	removeExtension,
+	reviewExtensionEnvelope,
+} from "../extensions/index.js";
 import type { LibraryImportApplyResult, LibraryImportPlan } from "../interop/import.js";
 import {
 	disablePlugin,
@@ -100,6 +106,20 @@ export interface LibraryPlanStep {
 	refusal?: string;
 }
 
+/**
+ * What a reviewed step adds beyond the copy it changes. Held beside the steps
+ * rather than inside them so existing consumers of a step keep their shape.
+ */
+export interface LibraryStepReview {
+	ref: LibraryRequirementRef;
+	scope: PluginScope;
+	/** Extension install or update only: what the staged copy may do, read from its manifest alone. */
+	envelope?: ExtensionCapabilityEnvelope;
+	envelopeDigest?: string;
+	/** Update only: what reaches further than the installed copy; empty means no more than it. */
+	growth?: string[];
+}
+
 export interface LibraryLifecyclePlan {
 	version: 1;
 	id: string;
@@ -107,6 +127,8 @@ export interface LibraryLifecyclePlan {
 	cwd: string;
 	request: LibraryLifecycleRequest;
 	steps: LibraryPlanStep[];
+	/** One entry per step that has an envelope to report; absent on a plan built before this field. */
+	reviews?: LibraryStepReview[];
 	applicable: boolean;
 	diagnostics: string[];
 }
@@ -522,9 +544,53 @@ export function planLibraryLifecycle(request: LibraryLifecycleRequest): LibraryL
 		cwd,
 		request,
 		steps,
+		reviews: reviewSteps(id, steps, entries, diagnostics),
 		applicable: steps.every((step) => !step.refusal),
 		diagnostics,
 	};
+}
+
+/**
+ * The envelope an extension step would install, read from the staged manifest.
+ * Reading never runs the package, and a failed read only drops the review,
+ * never the plan.
+ */
+function reviewSteps(
+	planId: string,
+	steps: ReadonlyArray<LibraryPlanStep>,
+	installed: ReadonlyArray<InstalledPlugin>,
+	diagnostics: string[],
+): LibraryStepReview[] {
+	const reviews: LibraryStepReview[] = [];
+	for (const step of steps) {
+		const { identity } = step;
+		let envelope: ReturnType<typeof reviewExtensionEnvelope> = null;
+		const writes = !step.refusal && (step.operation === "install" || step.operation === "update");
+		if (writes && identity.kind === "extension") {
+			const sourceRoot = staged.get(planId)?.get(stepKey(identity))?.sourceRoot;
+			const installedRoot = step.operation === "update" ? copyOf(installed, identity)?.rootPath : undefined;
+			try {
+				if (sourceRoot) envelope = reviewExtensionEnvelope(sourceRoot, installedRoot);
+			} catch (error) {
+				diagnostics.push(
+					`${identity.ref} capability envelope unreadable: ${error instanceof Error ? error.message : String(error)}`,
+				);
+			}
+		}
+		if (!envelope) continue;
+		reviews.push({
+			ref: identity.ref,
+			scope: identity.scope,
+			...(envelope
+				? {
+						envelope: envelope.envelope,
+						envelopeDigest: envelope.digest,
+						...(envelope.growth ? { growth: envelope.growth } : {}),
+					}
+				: {}),
+		});
+	}
+	return reviews;
 }
 
 // ---------------------------------------------------------------------------

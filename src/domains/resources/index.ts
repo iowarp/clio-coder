@@ -54,6 +54,7 @@ export {
 	type LibraryRefreshHost,
 	type LibraryRefreshResult,
 	type LibraryStepOutcome,
+	type LibraryStepReview,
 	type LibraryStepStatus,
 	type LibraryStepVerification,
 	libraryImportOutcome,

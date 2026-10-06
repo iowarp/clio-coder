@@ -1,5 +1,6 @@
 import { existsSync, statSync } from "node:fs";
 import path from "node:path";
+import { ENVELOPE_SEAT_BELT, envelopeLines } from "../domains/extensions/envelope-review.js";
 import { pluginLocalPath } from "../domains/plugins/catalog.js";
 import { type PluginScope, reloadPluginResources } from "../domains/plugins/index.js";
 import {
@@ -201,6 +202,29 @@ function lifecycleJson(
 				)
 			: undefined;
 	return { ...base, ...(plugin ? { plugin } : {}), diagnostics: last?.diagnostics ?? [] };
+}
+
+/**
+ * What each reviewed step would be allowed to do, printed
+ * before anything is committed so a plain run and a dry run show the same plan.
+ */
+function printStepReviews(plan: LibraryLifecyclePlan): void {
+	for (const review of plan.reviews ?? []) {
+		const step = plan.steps.find((item) => item.identity.ref === review.ref && item.identity.scope === review.scope);
+		if (!step) continue;
+		if (review.envelope) {
+			process.stdout.write(`${review.ref} (${review.scope}) would be allowed to:\n`);
+			if (review.growth !== undefined)
+				process.stdout.write(
+					review.growth.length === 0
+						? "  reaches no further than the installed copy\n"
+						: `  reaches further than the installed copy: ${review.growth.join("; ")}\n`,
+				);
+			for (const line of envelopeLines(review.envelope)) process.stdout.write(`  ${line}\n`);
+			process.stdout.write(`  ${ENVELOPE_SEAT_BELT}\n`);
+			if (review.envelopeDigest) process.stdout.write(`  envelope sha256 ${review.envelopeDigest}\n`);
+		}
+	}
 }
 
 /** One drift line per package; a changed copy also names both digests. */
@@ -453,6 +477,7 @@ export async function runLibraryCommand(
 				force: parsed.force,
 				withRequirements: parsed.withRequirements,
 			});
+			if (!parsed.json) printStepReviews(plan);
 			const apply = applyLibraryLifecycle(plan, { dryRun: parsed.dryRun });
 			const ok = apply.failed === 0 && (apply.dryRun || plan.applicable);
 			if (parsed.json) emit(lifecycleJson(operation, plan, apply, ok));

@@ -17,6 +17,13 @@ export {
 } from "./dev-scope.js";
 export { loadManifestFromRoot } from "./discovery.js";
 export {
+	ENVELOPE_SEAT_BELT,
+	type ExtensionEnvelopeReview,
+	envelopeLines,
+	envelopeReviewLines,
+	reviewExtensionEnvelope,
+} from "./envelope-review.js";
+export {
 	type ClioExtensionManifest,
 	disableExtension,
 	discoverExtensionPackages,
@@ -52,7 +59,7 @@ export {
 	removeExtension,
 } from "./manager.js";
 export { ExtensionsManifest } from "./manifest.js";
-export type { ExtensionHookDeclaration } from "./manifest-v2.js";
+export type { ExtensionCapabilityEnvelope, ExtensionHookDeclaration } from "./manifest-v2.js";
 export type { ExtensionHookOutcome } from "./operator-runtime-v2.js";
 export type { ExtensionContentAccess, ExtensionEffect, ExtensionHookEvent } from "./public-api-v2.js";
 export {
@@ -61,7 +68,7 @@ export {
 	type ExtensionRuntimeHookExecutor,
 	type ParkedInterviewResult,
 } from "./runtime-hook-bridge.js";
-export { capabilityEnvelope, envelopeDigest } from "./runtime-schema-v2.js";
+export { capabilityEnvelope, envelopeDigest, envelopeGrowth } from "./runtime-schema-v2.js";
 export {
 	buildExtensionSnapshot,
 	diffExtensionSnapshots,

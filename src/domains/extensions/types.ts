@@ -238,5 +238,14 @@ export interface ExtensionMutationResult {
 export interface ExtensionState {
 	version: 1;
 	disabled: string[];
-	installed: Record<string, { installedAt: string; source?: string; contentDigest?: string }>;
+	installed: Record<
+		string,
+		{
+			installedAt: string;
+			source?: string;
+			contentDigest?: string;
+			/** Digest of the capability envelope the operator reviewed at install; absent for api 1 and older records. */
+			envelopeDigest?: string;
+		}
+	>;
 }

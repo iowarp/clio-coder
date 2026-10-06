@@ -8,6 +8,7 @@ import { type InstalledPlugin, listInstalledPlugins, pluginPromptNames } from ".
 import { evaluateClioCompatibility } from "./compatibility.js";
 import { isRecord, loadManifestFromRoot, trimString } from "./discovery.js";
 import { extensionContentDigest, extensionContentDigestWithCapture } from "./integrity.js";
+import { capabilityEnvelope, envelopeDigest as envelopeDigestOf } from "./runtime-schema-v2.js";
 import type {
 	ExtensionDiagnostic,
 	ExtensionInstallOptions,
@@ -86,10 +87,15 @@ function readState(scope: ExtensionScope, cwd = process.cwd()): StateReadResult 
 			if (raw.contentDigest !== undefined && (!contentDigest || !/^[a-f0-9]{64}$/u.test(contentDigest))) {
 				throw new Error(`state.installed.${id}.contentDigest must be a SHA-256 digest`);
 			}
+			const envelopeDigest = raw.envelopeDigest === undefined ? undefined : trimString(raw.envelopeDigest);
+			if (raw.envelopeDigest !== undefined && (!envelopeDigest || !/^[a-f0-9]{64}$/u.test(envelopeDigest))) {
+				throw new Error(`state.installed.${id}.envelopeDigest must be a SHA-256 digest`);
+			}
 			installed[id] = {
 				installedAt,
 				...(source ? { source } : {}),
 				...(contentDigest ? { contentDigest } : {}),
+				...(envelopeDigest ? { envelopeDigest } : {}),
 			};
 		}
 		return { status: "valid", state: { version: 1, disabled: [...parsed.disabled], installed } };
@@ -438,10 +444,15 @@ export function installExtension(sourcePath: string, options: ExtensionInstallOp
 		}
 		renameSync(stagingRoot, targetRoot);
 		installedReplacement = true;
+		// The staged manifest is the one whose bytes were just digested, so the envelope recorded is the one installed.
+		const stagedRuntime = stagedCandidate.manifest.runtimeV2;
 		state.installed[candidate.manifest.id] = {
 			installedAt: new Date().toISOString(),
 			source,
 			contentDigest,
+			...(stagedRuntime
+				? { envelopeDigest: envelopeDigestOf(capabilityEnvelope(stagedRuntime, stagedCandidate.manifest.plugin)) }
+				: {}),
 		};
 		state.disabled = state.disabled.filter((entry) => entry !== candidate.manifest?.id);
 		writeState(scope, state, cwd);

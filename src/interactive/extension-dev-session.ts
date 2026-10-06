@@ -2,7 +2,7 @@ import { existsSync, type FSWatcher, readdirSync, watch } from "node:fs";
 import path from "node:path";
 import type { ExtensionsContract } from "../domains/extensions/contract.js";
 import { DEV_EXTENSIONS_DIR, type DevConsentRequest, ExtensionDevScope } from "../domains/extensions/dev-scope.js";
-import type { ExtensionCapabilityEnvelope } from "../domains/extensions/manifest-v2.js";
+import { ENVELOPE_SEAT_BELT, envelopeLines } from "../domains/extensions/envelope-review.js";
 import type { OperatorExtensions } from "../domains/extensions/operator-extensions.js";
 import type { AskUserHandler } from "../tools/ask-user.js";
 
@@ -40,34 +40,6 @@ export interface ExtensionDevSession {
 	dispose(): void;
 }
 
-function envelopeLines(envelope: ExtensionCapabilityEnvelope): string[] {
-	const list = (items: readonly string[]): string => (items.length > 0 ? items.join(", ") : "none");
-	const hooks = envelope.hooks.map((hook) => {
-		const tools = hook.tools ? ` on ${hook.tools.join(", ")}` : "";
-		const gate = hook.onTimeout === "block" || hook.onError === "block" ? ", can refuse" : "";
-		return `${hook.on}${tools} (${hook.timeoutMs} ms${gate})`;
-	});
-	const lines = [
-		`Commands: ${list(envelope.commands)}`,
-		...(envelope.takesOver ? [`Takes over prompts: ${list(envelope.takesOver.map((name) => `/${name}`))}`] : []),
-		`Events: ${list([...envelope.events, ...(envelope.tickMs !== undefined ? [`tick ${envelope.tickMs / 1000}s`] : [])])}`,
-		`Hooks: ${list(hooks)}`,
-		`Tools: ${list(envelope.tools.map((tool) => `${tool.name} (${tool.actionClass})`))}`,
-		`Interface: ${list(envelope.ui)}`,
-	];
-	if (envelope.workspaces.length > 0)
-		lines.push(
-			`Workspaces: ${envelope.workspaces.map((workspace) => `${workspace.id} (${workspace.regions.join(", ")})`).join("; ")}`,
-		);
-	if (envelope.watch.length > 0) lines.push(`Watches: ${envelope.watch.join(", ")}`);
-	lines.push(
-		`Content it may read: ${list(envelope.access)}`,
-		`Files: read ${list(envelope.permissions.fs.read)}; write ${list(envelope.permissions.fs.write)}`,
-		`Programs: ${envelope.permissions.exec ? "may run programs" : "none"}; network: ${envelope.permissions.net ? "may use the network" : "none"}`,
-	);
-	return lines;
-}
-
 function consentQuestion(request: DevConsentRequest): string {
 	const intro =
 		request.growth === null
@@ -78,7 +50,7 @@ function consentQuestion(request: DevConsentRequest): string {
 		`Folder: ${request.source}`,
 		...envelopeLines(request.envelope).map((line) => `  ${line}`),
 		"Approval lasts for this session. A later save that stays within it reloads without asking.",
-		"Node's permission flags are a seat belt against mistakes, not a boundary against hostile code.",
+		ENVELOPE_SEAT_BELT,
 	].join("\n");
 }
 

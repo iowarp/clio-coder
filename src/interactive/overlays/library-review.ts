@@ -12,13 +12,15 @@
  * testable without a terminal.
  */
 
+import { ENVELOPE_SEAT_BELT, envelopeLines } from "../../domains/extensions/envelope-review.js";
 import type { LibraryImportApplyResult, LibraryImportPlan } from "../../domains/interop/index.js";
-import type {
-	LibraryApplyResult,
-	LibraryLifecyclePlan,
-	LibraryPlanStep,
-	LibraryRefreshResult,
-	LibraryStepOutcome,
+import {
+	type LibraryApplyResult,
+	type LibraryLifecyclePlan,
+	type LibraryPlanStep,
+	type LibraryRefreshResult,
+	type LibraryStepOutcome,
+	type LibraryStepReview,
 } from "../../domains/resources/index.js";
 import {
 	type Component,
@@ -44,6 +46,38 @@ function wrap(text: string, width: number): string[] {
 
 function stepHeadline(step: LibraryPlanStep): string {
 	return `${step.operation} ${step.identity.ref} in ${step.identity.scope} scope`;
+}
+
+/**
+ * What an extension step would be allowed to do, then the other half of its
+ * plugin pairing. The envelope comes from the staged manifest, so it is shown
+ * before anything is written; on an update, what grew leads, because the
+ * operator already accepted the rest.
+ */
+function reviewRows(step: LibraryPlanStep, review: LibraryStepReview | undefined, width: number): string[] {
+	if (!review) return [];
+	const theme = clioTheme();
+	const rows: string[] = [];
+	if (review.envelope) {
+		rows.push(...wrap(theme.fg("attention", `${step.identity.ref} would be allowed to:`), width));
+		if (review.growth !== undefined)
+			rows.push(
+				...wrap(
+					theme.fg(
+						review.growth.length === 0 ? "success" : "warning",
+						review.growth.length === 0
+							? "reaches no further than the installed copy"
+							: `reaches further than the installed copy: ${review.growth.join("; ")}`,
+					),
+					width,
+				),
+			);
+		for (const line of envelopeLines(review.envelope)) rows.push(...wrap(theme.fg("annotation", `  ${line}`), width));
+		rows.push(...wrap(theme.fg("annotation", ENVELOPE_SEAT_BELT), width));
+		if (review.envelopeDigest)
+			rows.push(...wrap(theme.fg("annotation", `envelope sha256 ${review.envelopeDigest}`), width));
+	}
+	return rows;
 }
 
 /**
@@ -122,6 +156,13 @@ export function formatLibraryPlanReview(
 			);
 		rows.push(...wrap(theme.fg("annotation", step.fallbackNote), width));
 		rows.push(...wrap(theme.fg("annotation", step.recovery), width));
+		rows.push(
+			...reviewRows(
+				step,
+				plan.reviews?.find((item) => item.ref === step.identity.ref && item.scope === step.identity.scope),
+				width,
+			),
+		);
 		if (options.detail) {
 			rows.push(...wrap(theme.fg("annotation", `destination ${step.destination}`), width));
 			if (step.source)
