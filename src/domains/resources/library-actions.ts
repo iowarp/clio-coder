@@ -164,13 +164,32 @@ export interface LibraryStepOutcome {
 	};
 }
 
+/**
+ * What happened to the running extensions after a change that reached them.
+ * Extension runtimes and their hooks restart through a reload that waits for an
+ * idle session, so a refresh can only say that it began or that it is queued.
+ */
+export type LibraryExtensionRefresh = "reloading" | "queued" | "unavailable";
+
 export type LibraryRefreshResult =
-	| { status: "refreshed"; generation: number; changed: boolean }
+	| { status: "refreshed"; generation: number; changed: boolean; extensions?: LibraryExtensionRefresh }
 	| { status: "failed"; error: string }
 	| { status: "not-applicable"; reason: string };
 
+/** What the committed steps touched, so a host reloads only what the change reaches. */
+export interface LibraryRefreshTouch {
+	extensions: boolean;
+}
+
 /** Provided by the active host. Must never re-run a lifecycle write. */
-export type LibraryRefreshHost = (cwd: string) => LibraryRefreshResult;
+export type LibraryRefreshHost = (cwd: string, touched?: LibraryRefreshTouch) => LibraryRefreshResult;
+
+/** Whether a committed step changed an installed extension. */
+export function libraryRefreshTouch(outcomes: ReadonlyArray<LibraryStepOutcome>): LibraryRefreshTouch {
+	return {
+		extensions: outcomes.some((item) => item.status === "committed" && item.identity.kind === "extension"),
+	};
+}
 
 export interface LibraryApplyResult {
 	planId: string;
@@ -487,7 +506,7 @@ export function planLibraryLifecycle(request: LibraryLifecycleRequest): LibraryL
 						refusal += `. Inspect local changes first; to replace from the recorded source and preserve changed files in a recovery backup, run clio-coder library update ${identity.ref} --${copy.scope} --force`;
 				} else if (missing.length)
 					refusal = `library_requirement_missing: ${missing.join(", ")}; install or enable those first`;
-				const winner = entries.find((item) => competes(item, identity) && item.effective);
+				const winner = entries.find((item) => item.id === identity.name && item.effective);
 				effectiveAfter = winner
 					? {
 							scope: winner.scope,
@@ -892,7 +911,7 @@ export function applyLibraryLifecycle(
 	}
 	const committed = outcomes.filter((item) => item.status === "committed");
 	const refresh = committed.length
-		? retryLibraryRefresh(plan.cwd, options.refresh)
+		? retryLibraryRefresh(plan.cwd, options.refresh, libraryRefreshTouch(outcomes))
 		: ({ status: "not-applicable", reason: "nothing committed" } as const);
 	if (refresh.status === "refreshed")
 		for (const outcome of committed)
@@ -918,14 +937,20 @@ function summarize(
 }
 
 /** Refresh only. Never reinstalls or removes; safe after a partial batch or a failed refresh. */
-export function retryLibraryRefresh(cwd: string, refresh?: LibraryRefreshHost): LibraryRefreshResult {
+export function retryLibraryRefresh(
+	cwd: string,
+	refresh?: LibraryRefreshHost,
+	touched: LibraryRefreshTouch = { extensions: false },
+): LibraryRefreshResult {
 	if (!refresh)
 		return {
 			status: "not-applicable",
-			reason: "no active session in this process; use /library reload in the running TUI",
+			reason: touched.extensions
+				? "no active session in this process; run /reload in the running TUI to load the extension and its hooks"
+				: "no active session in this process; use /library reload in the running TUI",
 		};
 	try {
-		return refresh(cwd);
+		return refresh(cwd, touched);
 	} catch (error) {
 		return { status: "failed", error: error instanceof Error ? error.message : String(error) };
 	}

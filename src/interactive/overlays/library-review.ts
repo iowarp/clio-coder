@@ -197,13 +197,31 @@ export function formatLibraryPlanReview(
 	return rows;
 }
 
+/** What the extension reload did, in the words of what the operator will see next. */
+const EXTENSION_REFRESH_TEXT = {
+	reloading: "extension runtimes and hooks are reloading; the result follows as a notice",
+	queued:
+		"extension runtimes and hooks reload once this Library closes and the session is idle; the result follows as a notice, and until then extensions stay as they were loaded",
+	unavailable:
+		"extension runtimes and hooks were not reloaded because this session has no extension host; restart to load them",
+} as const;
+
+/** The refresh as one clause for a notice: the status, plus what happened to extensions when one changed. */
+export function libraryRefreshSummary(refresh: LibraryRefreshResult): string {
+	if (refresh.status !== "refreshed" || !refresh.extensions) return refresh.status;
+	return `refreshed, extensions ${refresh.extensions === "unavailable" ? "not reloaded" : refresh.extensions}`;
+}
+
 function refreshLine(refresh: LibraryRefreshResult): string {
 	const theme = clioTheme();
-	if (refresh.status === "refreshed")
+	if (refresh.status === "refreshed") {
+		const resources = `session resources refreshed (generation ${refresh.generation}${refresh.changed ? ", changed" : ", unchanged"})`;
+		if (!refresh.extensions) return theme.fg("success", resources);
 		return theme.fg(
-			"success",
-			`session resources refreshed (generation ${refresh.generation}${refresh.changed ? ", changed" : ", unchanged"})`,
+			refresh.extensions === "unavailable" ? "warning" : "success",
+			`${resources}; ${EXTENSION_REFRESH_TEXT[refresh.extensions]}`,
 		);
+	}
 	if (refresh.status === "failed")
 		return theme.fg("error", `session refresh failed: ${refresh.error}; press R to retry`);
 	return theme.fg("annotation", `session refresh not applicable: ${refresh.reason}`);

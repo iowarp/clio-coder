@@ -26,6 +26,7 @@ import {
 	inspectLibraryCopy,
 	type LibraryPairs,
 	libraryImportOutcome,
+	libraryRefreshTouch,
 	readLibraryInventory,
 	readLibraryPairs,
 } from "../../domains/resources/index.js";
@@ -44,7 +45,7 @@ import {
 	libraryUseInvocation,
 	selectForCategory,
 } from "./library-model.js";
-import { openLibraryImportOverlay, openLibraryReviewOverlay } from "./library-review.js";
+import { libraryRefreshSummary, openLibraryImportOverlay, openLibraryReviewOverlay } from "./library-review.js";
 import { isLibraryTab, LIBRARY_TABS } from "./library-tabs.js";
 import { type ListOverlayHandle, type ListOverlayItem, type ListOverlayTab, openListOverlay } from "./list-overlay.js";
 
@@ -331,7 +332,7 @@ export function openLibraryOverlay(tui: TUI, deps: LibraryOverlayDeps): OverlayH
 				const level: NoticeLevel = result.failed > 0 ? "error" : result.committed > 0 ? "success" : "info";
 				deps.notice(
 					level,
-					`${ref}: ${result.committed} committed, ${result.failed} failed, ${result.unattempted} unattempted; session refresh ${result.refresh.status}.`,
+					`${ref}: ${result.committed} committed, ${result.failed} failed, ${result.unattempted} unattempted; session refresh ${libraryRefreshSummary(result.refresh)}.`,
 				);
 				// A partial batch still redraws: the writes that landed are real.
 				if (result.committed > 0) redraw(selectionId);
@@ -380,7 +381,7 @@ export function openLibraryOverlay(tui: TUI, deps: LibraryOverlayDeps): OverlayH
 					failed: outcome.status === "failed" ? 1 : 0,
 					unattempted: outcome.status === "unattempted" ? 1 : 0,
 					refresh: committed
-						? deps.lifecycle.retryRefresh(cwd)
+						? deps.lifecycle.retryRefresh(cwd, libraryRefreshTouch([outcome]))
 						: { status: "not-applicable", reason: "nothing was imported" },
 				};
 			},
@@ -400,7 +401,7 @@ export function openLibraryOverlay(tui: TUI, deps: LibraryOverlayDeps): OverlayH
 				restore();
 				deps.notice(
 					result.failed > 0 ? "error" : "success",
-					`import ${source}: ${result.committed} committed, ${result.failed} failed; session refresh ${result.refresh.status}.`,
+					`import ${source}: ${result.committed} committed, ${result.failed} failed; session refresh ${libraryRefreshSummary(result.refresh)}.`,
 				);
 				if (result.committed > 0) redraw();
 				review.hide();

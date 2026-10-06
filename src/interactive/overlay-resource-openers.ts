@@ -12,7 +12,7 @@ import { openExtensionsOverlay } from "./overlays/extensions.js";
 import { openHelpOverlay } from "./overlays/help-reference.js";
 import { openInteropOverlay } from "./overlays/interop.js";
 import { openLibraryOverlay } from "./overlays/library.js";
-import { createLibraryLifecycle, libraryRefreshHost } from "./overlays/library-lifecycle.js";
+import { createLibraryLifecycle, type LibrarySessionReload, libraryRefreshHost } from "./overlays/library-lifecycle.js";
 
 export type { LibraryBrowseRequest as LibraryOpenRequest } from "../session-control/slash-commands.js";
 
@@ -42,10 +42,30 @@ export interface OverlayResourceOpeners {
 	openInteropOverlayState(): void;
 }
 
-/** The session's own resource reload, or nothing when this host has none wired. */
-function reloadResources(ctx: SlashCommandContext): (() => { generation: number }) | undefined {
+/**
+ * The session's own reloads, or nothing for a seam this host has not wired.
+ * An extension change reaches the running session only through the operator
+ * reload, which restarts runtimes and republishes hooks and waits for an idle
+ * session; the Library overlay is open, so it normally queues until it closes.
+ */
+function sessionReload(ctx: SlashCommandContext): LibrarySessionReload {
 	const reload = ctx.reloadPlugins;
-	return reload ? () => reload() : undefined;
+	const operator = ctx.operatorExtensions;
+	return {
+		...(reload ? { resources: () => reload() } : {}),
+		...(operator
+			? {
+					extensions: () => {
+						const queued = !operator.canReloadNow;
+						// The settled result is reported by the operator host's own reload notice.
+						operator.reload().catch((error: unknown) => {
+							ctx.notice("warn", `extensions: reload failed: ${error instanceof Error ? error.message : String(error)}`);
+						});
+						return queued ? "queued" : "reloading";
+					},
+				}
+			: {}),
+	};
 }
 
 export function createOverlayResourceOpeners(deps: OverlayResourceOpenersDeps): OverlayResourceOpeners {
@@ -86,10 +106,11 @@ export function createOverlayResourceOpeners(deps: OverlayResourceOpenersDeps): 
 			...(open.intent ? { intent: open.intent } : {}),
 			...(open.importSource ? { importSource: open.importSource } : {}),
 			...(open.scope ? { initialScope: open.scope } : {}),
-			// The session's own resource reload is the refresh a committed change
-			// asks for. It is reported separately from the write and can be retried
-			// on its own, so a refresh failure never restates a successful install.
-			lifecycle: createLibraryLifecycle(libraryRefreshHost(reloadResources(ctx))),
+			// The session's own reload is the refresh a committed change asks for:
+			// plugin resources always, extensions when one changed. It is reported
+			// separately from the write and can be retried on its own, so a refresh
+			// failure never restates a successful install.
+			lifecycle: createLibraryLifecycle(libraryRefreshHost(sessionReload(ctx))),
 			// A fleet's `use` is its approval preview, which is a surface of its own.
 			// The Library closes first so the preview owns the overlay slot, exactly
 			// as `/fleet run <playbook>` typed into the composer would.

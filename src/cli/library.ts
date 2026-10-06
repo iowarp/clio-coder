@@ -514,7 +514,9 @@ export async function runLibraryCommand(
 					const refresh = apply.refresh;
 					process.stderr.write(
 						refresh.status === "not-applicable"
-							? "A running session picks this up after /library reload.\n"
+							? apply.outcomes.some((item) => item.status === "committed" && item.identity.kind === "extension")
+								? "A running session loads this extension and its hooks after /reload.\n"
+								: "A running session picks this up after /library reload.\n"
 							: refresh.status === "failed"
 								? `session refresh failed: ${refresh.error}\n`
 								: `session resources refreshed (generation ${refresh.generation})\n`,
