@@ -387,7 +387,9 @@ export class OperatorExtensionRuntimeV2 {
 				this.queued = true;
 				throw new Error("session became busy while staging; reload queued until idle");
 			}
-			const sameSession = this.sessionId === context.sessionId;
+			// The TUI has no session id until its first turn, and that turn's session
+			// inherits what was open before it, as its state does (spawn).
+			const sameSession = this.sessionId === context.sessionId || (this.sessionId === null && context.sessionId !== null);
 			this.generation = next;
 			this.sessionId = context.sessionId;
 			this.activeContext = key;

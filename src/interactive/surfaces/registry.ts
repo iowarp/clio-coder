@@ -34,6 +34,12 @@ export interface WorkspaceSurfaceDeps {
 	leaveHint(): string;
 	/** Host overlays own the screen; the floating stack hides under them like the task island. */
 	isOverlayOpen(): boolean;
+	/**
+	 * Screen rows above the composer in the last frame. The stack is placed by
+	 * screen row from the top, so on a short frame it stops above the composer
+	 * rail (4.6.7) and drops the islands that do not fit whole.
+	 */
+	rowsAboveComposer?(): number | null;
 	/** A workspace key was pressed through the leader menu. */
 	press(extensionId: string, action: string): void;
 	leave(): void;
@@ -92,40 +98,51 @@ export function createWorkspaceSurfaces(deps: WorkspaceSurfaceDeps): WorkspaceSu
 	const draw = (view: View, width: number, rows: number): string[] =>
 		renderView(view, Math.max(1, width), { maxRows: rows }).lines;
 
-	const islandLines = (): string[] => {
+	/** One row of top margin and one clear row above the composer rail, from the last frame. */
+	const islandBudget = (): number => {
+		const above = deps.rowsAboveComposer?.() ?? null;
+		return above === null ? ISLAND_STACK_ROWS : Math.max(0, Math.min(ISLAND_STACK_ROWS, above - 2));
+	};
+	const islandLines = (budget: number): string[] => {
 		const active = deps.model.activeWorkspace;
 		if (!active) return [];
-		return memo("islands", "", () => {
+		return memo("islands", String(budget), () => {
 			const theme = clioTheme();
 			const inner = WORKSPACE_ISLAND_WIDTH - 4;
 			const out: string[] = [];
+			const push = (lines: string[]): boolean => {
+				if (out.length + lines.length > budget) return false;
+				out.push(...lines);
+				return true;
+			};
 			const board =
 				active.board === "island" && active.regions.includes("board") ? regionView(active, "board") : undefined;
-			if (board) out.push(...frame(theme, active.title, draw(board, inner, ISLAND_BODY_ROWS), WORKSPACE_ISLAND_WIDTH));
+			if (board) push(frame(theme, active.title, draw(board, inner, ISLAND_BODY_ROWS), WORKSPACE_ISLAND_WIDTH));
 			if (active.regions.includes("islands"))
 				for (const island of deps.model.entry(active.extensionId)?.islands ?? []) {
-					if (out.length >= ISLAND_STACK_ROWS) break;
-					out.push(
-						...frame(
-							theme,
-							island.title,
-							draw(island.view, inner, ISLAND_BODY_ROWS),
-							WORKSPACE_ISLAND_WIDTH,
-							island.meta ? { rightMeta: island.meta } : {},
-						),
+					const lines = frame(
+						theme,
+						island.title,
+						draw(island.view, inner, ISLAND_BODY_ROWS),
+						WORKSPACE_ISLAND_WIDTH,
+						island.meta ? { rightMeta: island.meta } : {},
 					);
+					if (!push(lines)) break;
 				}
-			return out.slice(0, ISLAND_STACK_ROWS);
+			return out;
 		});
 	};
 	const islandComponent: Component = {
-		render: () => islandLines(),
+		render: () => islandLines(islandBudget()),
 		invalidate: () => cache.delete("islands"),
 	};
 	let islandHandle: OverlayHandle | undefined;
 	let islandHidden = true;
 	const refresh = (): void => {
-		const hidden = islandLines().length === 0;
+		// Whether there is a stack at all, not whether the last frame had room
+		// for it: the budget is applied at each render, so a frame that grows
+		// shows what a short one could not.
+		const hidden = islandLines(ISLAND_STACK_ROWS).length === 0;
 		if (!islandHandle && !hidden)
 			islandHandle = deps.tui.showOverlay(islandComponent, {
 				anchor: "top-right",

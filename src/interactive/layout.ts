@@ -21,10 +21,35 @@ export interface LayoutParts {
 	footer: Component;
 }
 
+/**
+ * Where the composer sat in the last frame. Overlays are placed by screen
+ * row, so a floating stack anchored at the top reads this to end above the
+ * composer's top rail instead of painting over it on a short frame.
+ */
+export interface ComposerPlacement {
+	/** Screen rows above the composer at this terminal height, or null before the first frame. */
+	rowsAbove(termRows: number): number | null;
+}
+
 export interface LayoutOptions {
 	mode?: TuiMode;
 	fullscreenScrollbar?: ScrollViewScrollbar;
 	onTranscript?: (view: ScrollView) => void;
+	onComposerPlacement?: (placement: ComposerPlacement) => void;
+}
+
+/** The same component, reporting how many rows it rendered. */
+function measured(component: Component, record: (rows: number) => void): Component {
+	return {
+		render(width: number): string[] {
+			const lines = component.render(width);
+			record(lines.length);
+			return lines;
+		},
+		invalidate(): void {
+			component.invalidate();
+		},
+	};
 }
 
 export interface FullscreenLayout {
@@ -112,8 +137,25 @@ function buildFullscreenLayout(parts: LayoutParts, options: LayoutOptions = {}):
 	if (parts.pending) dock.addChild(parts.pending, { shrink: 1, minSize: 0 });
 	if (parts.fleet) dock.addChild(parts.fleet, { shrink: 1, minSize: 0 });
 	if (parts.contextProgress) dock.addChild(parts.contextProgress, { shrink: 1, minSize: 0 });
-	dock.addChild(parts.editor, { shrink: 1, minSize: 3 });
-	dock.addChild(parts.footer, { shrink: 1, minSize: 1 });
+	// The dock sits on the bottom edge, so the composer starts where the
+	// editor and footer heights, measured each frame, leave off.
+	let editorRows = -1;
+	let footerRows = -1;
+	const editor = options.onComposerPlacement
+		? measured(parts.editor, (rows) => {
+				editorRows = rows;
+			})
+		: parts.editor;
+	const footer = options.onComposerPlacement
+		? measured(parts.footer, (rows) => {
+				footerRows = rows;
+			})
+		: parts.footer;
+	options.onComposerPlacement?.({
+		rowsAbove: (termRows) => (editorRows < 0 || footerRows < 0 ? null : Math.max(0, termRows - editorRows - footerRows)),
+	});
+	dock.addChild(editor, { shrink: 1, minSize: 3 });
+	dock.addChild(footer, { shrink: 1, minSize: 1 });
 	const root = new VStack();
 	root.addChild(transcript, { basis: 0, grow: 1, shrink: 1, minSize: 1 });
 	root.addChild(dock, { basis: "auto", grow: 0, shrink: 1, minSize: 1 });
@@ -143,8 +185,17 @@ class RegularRoot implements Component {
 	private heldPrefix: readonly string[] | null = null;
 	private heldPrefixAt = -1;
 	private renderedSkinEpoch = skinEpoch();
+	/** Rows of the last frame and the row its composer started at; -1 before the first. */
+	private frameRows = -1;
+	private composerRow = -1;
 
 	constructor(private readonly parts: LayoutParts) {}
+
+	/** Content shorter than the screen starts at its top row; a taller frame scrolls, keeping its bottom. */
+	readonly placement: ComposerPlacement = {
+		rowsAbove: (termRows) =>
+			this.frameRows < 0 ? null : Math.max(0, this.composerRow - Math.max(0, this.frameRows - termRows)),
+	};
 
 	render(width: number): string[] {
 		if (this.renderedSkinEpoch !== skinEpoch()) {
@@ -186,9 +237,11 @@ class RegularRoot implements Component {
 		if (this.parts.pending) write(this.parts.pending.render(width));
 		if (this.parts.fleet) write(this.parts.fleet.render(width));
 		if (this.parts.contextProgress) write(this.parts.contextProgress.render(width));
+		this.composerRow = row;
 		write(this.parts.editor.render(width));
 		write(this.parts.footer.render(width));
 		out.length = row;
+		this.frameRows = row;
 		return out;
 	}
 
@@ -207,7 +260,9 @@ class RegularRoot implements Component {
 
 export function buildLayout(parts: LayoutParts, options: LayoutOptions = {}): Component {
 	if (options.mode === "fullscreen") return buildFullscreenLayout(parts, options).root;
-	return new RegularRoot(parts);
+	const root = new RegularRoot(parts);
+	options.onComposerPlacement?.(root.placement);
+	return root;
 }
 
 /**

@@ -621,6 +621,8 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 					return leader ? `${formatKeyLabel(leader, "")} ${WORKSPACE_LEAVE_KEY} or /workspace off` : "/workspace off";
 				},
 				isOverlayOpen: () => (overlayLifecycle?.getState() ?? "closed") !== "closed",
+				// Read at render time, after the presentation exists.
+				rowsAboveComposer: () => presentation.composerRowsAbove(terminal.rows),
 				press: (extensionId, action) => {
 					void operatorExtensions
 						.action(extensionId, { id: action, source: "leader" })
