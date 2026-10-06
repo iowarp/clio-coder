@@ -53,8 +53,10 @@ export function readClioVersionLabel(): string {
  * Version used to test extension and plugin ranges. SemVer ranges exclude every
  * prerelease unless the range names one, so `>=0.5.0` would reject `0.6.0-dev`
  * and mark every extension incompatible with the tree that is meant to run them.
- * A dev tree is judged as the release it is becoming.
+ * A dev tree, a release candidate and a dev-channel snapshot are each judged as
+ * the release they are becoming, so `0.6.2-rc.1` runs packages that need `>=0.6.2`.
  */
+const PRERELEASE_OF_RELEASE = /^(\d+\.\d+\.\d+)-(?:dev|rc|snapshot)(?:[.+]|$)/;
 export function compatibilityVersion(version: string): string {
-	return isDevVersion(version) ? (version.split("-")[0] ?? version) : version;
+	return PRERELEASE_OF_RELEASE.exec(version)?.[1] ?? version;
 }
