@@ -65,7 +65,10 @@ const USAGE = {
 
 test("lab uses research state, dependency order, role labels, local actions and watch updates", async () => {
 	const workspace = project();
-	const host = await createExtensionTestHost(ROOT, { workspace });
+	const host = await createExtensionTestHost(ROOT, {
+		workspace,
+		plugin: { id: "materio", prompts: ["materio:execute-task"] },
+	});
 	try {
 		const output = await host.command("lab");
 		assert.deepEqual(output.workspace, { enter: "lab" });
@@ -86,6 +89,84 @@ test("lab uses research state, dependency order, role labels, local actions and 
 		assert.match(JSON.stringify((await host.command("status")).card), /1\/5 tasks/);
 		assert.match((await host.command("progress")).text, /Materio ► 1\/5 tasks/);
 		assert.match(JSON.stringify((await host.action("next")).prompt), /execute-task 02/);
+	} finally {
+		await host.dispose();
+		rmSync(workspace, { recursive: true, force: true });
+	}
+});
+
+test("without its plugin the bench names local commands and explains unavailable research steps", async () => {
+	const workspace = project();
+	const host = await createExtensionTestHost(ROOT, { workspace, plugin: null });
+	try {
+		const refused = await host.tool("record_decision", {
+			decision: "Choose a model",
+			rationale: "Research identity is missing",
+		});
+		assert.equal(refused.isError, true);
+		assert.match(
+			refused.text,
+			/STATE.md is missing.*extension_materio__interview.*identify-research.*confirmation.*\/ext:materio:help/,
+		);
+		assert.doesNotMatch(refused.text, /\/materio:/);
+		for (const command of ["lab", "status", "progress", "help", "cost"]) {
+			const output = await host.command(command);
+			assert.doesNotMatch(JSON.stringify(output), /\/materio:/);
+		}
+		assert.match((await host.command("help")).text, /\/ext:materio:status/);
+		for (const action of ["next", "task"]) {
+			const output = await host.action(action, "02");
+			assert.doesNotMatch(JSON.stringify(output), /\/materio:/);
+			assert.equal(output.prompt, undefined);
+			assert.match(output.text, /needs the Materio plugin/);
+		}
+		const noFindings = await host.action("findings", "02");
+		assert.match(noFindings.text, /\/ext:materio:status check/);
+		assert.doesNotMatch(JSON.stringify(noFindings), /\/materio:/);
+		const finding = await host.command("status", "check 03");
+		assert.doesNotMatch(JSON.stringify(finding), /\/materio:/);
+		assert.match(JSON.stringify((await host.action("task", "03")).prompt), /\/ext:materio:status 03/);
+		await host.action("findings", "03");
+		const fix = await host.interview({
+			id: "findings",
+			step: "task-03",
+			nav: "next",
+			answers: { decision: "fix", note: "Repair the prepared artifacts" },
+		});
+		assert.doesNotMatch(JSON.stringify(fix), /\/materio:/);
+		assert.equal("prompt" in fix ? fix.prompt : undefined, undefined);
+		assert.match("text" in fix ? fix.text : "", /needs the Materio plugin/);
+		for (const file of ["WORKFLOW.md", "VIRTUAL-LAB.md", "LITERATURE.md", "RESEARCH.md"]) {
+			rmSync(path.join(workspace, ".research", file));
+			const output = await host.action("next");
+			assert.equal(output.prompt, undefined);
+			assert.match(output.text, /needs the Materio plugin/);
+			assert.doesNotMatch(JSON.stringify(output), /\/materio:/);
+		}
+		const partial = await createExtensionTestHost(ROOT, {
+			workspace,
+			plugin: { id: "materio", prompts: ["materio:status"] },
+		});
+		try {
+			assert.equal((await partial.action("next")).prompt, undefined);
+			assert.match((await partial.command("help")).text, /\/materio:status.*\/ext:materio:progress/);
+		} finally {
+			await partial.dispose();
+		}
+		const paired = await createExtensionTestHost(ROOT, {
+			workspace,
+			plugin: { id: "materio", prompts: ["materio:identify-research"] },
+		});
+		try {
+			const refused = await paired.tool("record_decision", {
+				decision: "Choose a model",
+				rationale: "Research identity is missing",
+			});
+			assert.equal(refused.isError, true);
+			assert.match(refused.text, /Run \/materio:identify-research.*confirm.*create it/);
+		} finally {
+			await paired.dispose();
+		}
 	} finally {
 		await host.dispose();
 		rmSync(workspace, { recursive: true, force: true });
@@ -172,7 +253,11 @@ test("executor guardrails hold the exact task until an interview records the res
 
 test("missing summary and edited completion stay held; fix fills an executor prompt; unknown runs warn", async () => {
 	const workspace = project();
-	const host = await createExtensionTestHost(ROOT, { workspace, options: { autoCheckpoint: false } });
+	const host = await createExtensionTestHost(ROOT, {
+		workspace,
+		plugin: { id: "materio", prompts: ["materio:execute-task"] },
+		options: { autoCheckpoint: false },
+	});
 	try {
 		rmSync(path.join(workspace, ".research/tasks/task-03/task-03-SUMMARY.md"));
 		const result = await host.command("status", "check 03");
@@ -254,7 +339,10 @@ test("all-complete tasks offer a bounded, honest WTF-P brief; archived tasks do 
 		try {
 			assert.match((await host.command("progress")).text, /5\/5 tasks ◆ paper/);
 			const handoff = (await host.action("next")).prompt;
-			assert.match(handoff && "fill" in handoff ? handoff.fill : "", /^\/wtfp:new-paper Materio handoff:/);
+			assert.match(
+				handoff && "fill" in handoff ? handoff.fill : "",
+				/^If the WTF-P plugin is installed and enabled, use \/wtfp:new-paper/,
+			);
 			assert.match(JSON.stringify(handoff), /prepared work distinct/);
 		} finally {
 			await host.dispose();

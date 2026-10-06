@@ -36,6 +36,8 @@ export type ExtensionContentAccess = "prompt" | "tool-args" | "tool-results" | "
 export type WorkspaceRegion = "header" | "board" | "rail" | "footer";
 
 export interface ExtensionRuntimeSnapshotV2 extends ExtensionRuntimeSnapshot {
+	/** Served plugin in effect in this workspace; prompt names use `<plugin>:<name>`. */
+	plugin: { id: string; prompts: readonly string[] } | null;
 	/** Id of this extension's workspace that holds the screen, or null. `workspace` stays the project directory. */
 	activeWorkspace: string | null;
 }

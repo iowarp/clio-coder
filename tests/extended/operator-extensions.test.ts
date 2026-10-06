@@ -25,7 +25,7 @@ import {
 	removeExtension,
 } from "../../src/domains/extensions/state.js";
 import { isLoadableExtension } from "../../src/domains/extensions/types.js";
-import { installPlugin } from "../../src/domains/plugins/state.js";
+import { disablePlugin, enablePlugin, installPlugin, removePlugin } from "../../src/domains/plugins/state.js";
 import { expandPromptTemplateInput, loadPromptTemplates } from "../../src/domains/resources/prompts/loader.js";
 import { createWorkerSafety, createWorkerToolRegistry } from "../../src/engine/worker-tools.js";
 import { ExtensionPanelView } from "../../src/interactive/overlays/extension-panel.js";
@@ -760,6 +760,57 @@ test("empty startup reload reports structured readiness and its origin to the UI
 	} finally {
 		await runtime.dispose();
 	}
+});
+
+test("a running extension snapshot follows its served plugin's installation, enable and disable", async (t) => {
+	const env = await isolateClioEnv("clio-coder-served-plugin-test-");
+	const cwd = path.join(env.dir, "workspace");
+	const source = path.join(env.dir, "source");
+	mkdirSync(cwd);
+	mkdirSync(source);
+	writeFileSync(
+		path.join(source, "clio-coder-extension.json"),
+		JSON.stringify({
+			id: "lab_status.v1",
+			name: "Lab status",
+			version: "1.0.0",
+			description: "Synthetic served plugin fixture",
+			plugin: "materio",
+			runtime: { ...declaration, api: 2 },
+		}),
+	);
+	writeFileSync(path.join(source, "extension.mjs"), normal);
+	ok(installExtension(source, { cwd, scope: "user" }).extension);
+	const runtime = new OperatorExtensions({
+		context: () => ({ workspace: cwd, sessionId: null, mode: "interactive" }),
+		isIdle: () => true,
+		stateDir: () => path.join(env.dir, "state"),
+	});
+	t.after(async () => {
+		await runtime.dispose();
+		env.restore();
+	});
+	equal((await runtime.reload("startup")).status, "committed");
+	const inspect = async () => JSON.parse((await runtime.invoke("ext:lab_status.v1:inspect", "")).text);
+	deepStrictEqual((await inspect()).snapshot.plugin, null);
+	ok(installPlugin(path.resolve(import.meta.dirname, "../../library/plugins/materio"), { cwd, scope: "user" }).plugin);
+	const enabled = await inspect();
+	equal(enabled.n, 2, "plugin changes update the existing child");
+	deepStrictEqual(enabled.snapshot.plugin, {
+		id: "materio",
+		prompts: listInstalledExtensions(cwd).find((entry) => entry.id === "lab_status.v1")?.pluginPrompts,
+	});
+	ok(enabled.snapshot.plugin.prompts.includes("materio:identify-research"));
+	disablePlugin("materio", { cwd, scope: "user" });
+	const disabled = await inspect();
+	equal(disabled.n, 3);
+	equal(disabled.snapshot.plugin, null);
+	enablePlugin("materio", { cwd, scope: "user" });
+	deepStrictEqual((await inspect()).snapshot.plugin, enabled.snapshot.plugin);
+	equal((await runtime.reload()).status, "committed");
+	deepStrictEqual((await inspect()).snapshot.plugin, enabled.snapshot.plugin);
+	removePlugin("materio", { cwd, scope: "user" });
+	equal((await inspect()).snapshot.plugin, null);
 });
 
 test("a served plugin's prompt is a plain prompt until its extension is installed and in effect", async (t) => {
