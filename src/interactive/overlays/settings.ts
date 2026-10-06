@@ -34,7 +34,7 @@ import {
 	DEFAULT_SETTINGS,
 	THINKING_LEVELS,
 } from "../../core/defaults.js";
-import { getAtPath, isRoutingPath } from "../../core/session-routing.js";
+import { getAtPath, isRoutingPath, resolveMemoryRoute } from "../../core/session-routing.js";
 import type {
 	SettingsAreaId as SettingsSectionId,
 	SettingsAreaName as SettingsSectionName,
@@ -438,13 +438,14 @@ function selectOptionalBackgroundTargetSubmenu(providers: ProvidersContract): Se
 	return (currentValue: string, done: (val?: string) => void) => {
 		const statuses = providers.list();
 		const items = [
-			{ value: "(unset)", label: "Rules only" },
+			{ value: "(unset)", label: "Chat route (no memory model set)" },
 			...statuses.map((status) => ({
 				value: status.target.id,
 				label: `${status.target.id} (${status.target.url ?? "no url"})`,
 			})),
 		];
-		const note = "Unset keeps the zero-cost rules-only tier.";
+		const note =
+			"Unset uses the active chat route because no memory model is set. Turn proactive memory off to disable it.";
 		return selectListSubmenu("Select memory connection", items, note)(currentValue, done);
 	};
 }
@@ -1360,10 +1361,12 @@ export function buildSettingItems(
 		: editTextSubmenu("Type model name");
 	const backgroundTargetSubmenu = options?.providers
 		? selectOptionalBackgroundTargetSubmenu(options.providers)
-		: editTextSubmenu("Memory connection id", "Leave blank for rules-only memory.");
+		: editTextSubmenu("Memory connection id", "Leave memory connection and model blank to use the chat route.");
 	const backgroundModelSubmenu = options?.providers
 		? selectModelSubmenu(options.providers, () => live().context.memory.target ?? undefined)
 		: editTextSubmenu("Type memory model name");
+	const memoryRoute = resolveMemoryRoute(settings);
+	const memoryRouteNote = memoryRoute.source === "chat" ? "Chat route (no memory model set): " : "";
 	// Both are optional in the settings type, so the row falls back to the
 	// shipped value rather than rendering a blank for a key that is in force.
 	const escalation = settings.fleet.permissions.escalation ?? SHIPPED_ESCALATION;
@@ -1414,16 +1417,20 @@ export function buildSettingItems(
 			editValue: settings.chat.model ?? "",
 			affordance: options?.providers ? "opens picker" : "free text",
 		}),
-		settingItem("background.target", settings.context.memory.target ?? "Rules only", {
+		settingItem("background.target", `${memoryRouteNote}${memoryRoute.target ?? "(unset)"}`, {
 			submenu: backgroundTargetSubmenu,
 			editValue: settings.context.memory.target ?? "",
 			affordance: options?.providers ? "opens picker" : "free text",
 		}),
-		settingItem("background.model", settings.context.memory.model ?? "(connection default)", {
-			submenu: backgroundModelSubmenu,
-			editValue: settings.context.memory.model ?? "",
-			affordance: options?.providers ? "opens picker" : "free text",
-		}),
+		settingItem(
+			"background.model",
+			memoryRoute.model ?? (memoryRoute.source === "chat" ? "(unset)" : "(connection default)"),
+			{
+				submenu: backgroundModelSubmenu,
+				editValue: settings.context.memory.model ?? "",
+				affordance: options?.providers ? "opens picker" : "free text",
+			},
+		),
 		settingItem("memory.intervention.enabled", String(settings.context.memory.enabled), {
 			values: ["true", "false"],
 		}),

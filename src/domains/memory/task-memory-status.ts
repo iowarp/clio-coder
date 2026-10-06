@@ -1,3 +1,4 @@
+import type { EffectiveMemoryRoute } from "../../core/session-routing.js";
 import type { TaskMemorySnapshot } from "./task-bank.js";
 import type { TaskMemoryPolicyDecision, TaskMemoryPolicyReason } from "./task-memory-policy.js";
 import type { TaskMemorySpendSummary } from "./task-memory-spend.js";
@@ -34,6 +35,7 @@ export type TaskMemoryGuardianState = "off" | "idle" | "reviewing" | "waiting-ca
 export interface TaskMemoryOperatorStatus {
 	enabled: boolean;
 	tier: TaskMemoryTier;
+	route?: EffectiveMemoryRoute;
 	size: number;
 	lastDecision: TaskMemoryPolicyDecision | null;
 	bank: TaskMemorySnapshot;

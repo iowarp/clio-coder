@@ -215,7 +215,7 @@ export interface MemoryInterventionDeps {
 	maxTokens?: number;
 	timeoutMs?: number;
 	everyNTools?: number;
-	/** Lazily resolves the explicitly configured background role. Null means rules-only. */
+	/** Lazily resolves the dedicated memory route or the active chat route. Null means rules-only. */
 	getModelClient?: () => TaskMemoryModelClient | null;
 	/** One alternative route after a client error; never used after timeout, cancellation or model output. */
 	getFallbackModelClient?: () => TaskMemoryModelClient | null;
