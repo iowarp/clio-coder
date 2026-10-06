@@ -1408,7 +1408,11 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		// from starting; it simply stays silent.
 	}
 
+	let submitOwner: AbortController | null = null;
+	let submitGeneration = 0;
+	let disposed = false;
 	const context = createTurnContext({
+		turnSignal: () => submitOwner?.signal,
 		interactiveGuidance: deps.interactiveGuidance === true,
 		operatorInterviews: deps.operatorInterviews === true,
 		headless: deps.headless === true,
@@ -1581,9 +1585,6 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 	const outcomeCollector = deps.turnOutcomeCollector ?? createTurnOutcomeCollector();
 	if (deps.turnOutcomeCollector === undefined) deps.middleware?.registerHook(outcomeCollector);
 
-	let submitOwner: AbortController | null = null;
-	let submitGeneration = 0;
-	let disposed = false;
 	const recovery = createTurnRecovery({
 		turnSignal: () => submitOwner?.signal,
 		turnIdentity: () => submitGeneration,
@@ -1615,6 +1616,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 	};
 
 	const turnRuntime = createTurnRuntime({
+		turnIdentity: () => submitGeneration,
 		interactiveGuidance: deps.interactiveGuidance === true,
 		state,
 		gatewayCapabilityNames: () => deps.toolRegistry?.listGateway().map((spec) => spec.name) ?? [],
@@ -1645,9 +1647,12 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		prepareInRunContinuation: async (signal) => {
 			const userTurnId = state.activeUserTurnId;
 			if (!deps.turnControl || userTurnId === null) return null;
+			const identity = submitGeneration;
+			const ownerSignal = submitOwner?.signal;
 			const controllerAbort = new AbortController();
 			const forward = () => controllerAbort.abort();
 			signal?.addEventListener("abort", forward, { once: true });
+			if (signal?.aborted || ownerSignal?.aborted) controllerAbort.abort();
 			try {
 				const result = await deps.turnControl.run({
 					operatorText: "",
@@ -1655,6 +1660,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 					userTurnId,
 					signal: controllerAbort.signal,
 				});
+				if (controllerAbort.signal.aborted || ownerSignal?.aborted || identity !== submitGeneration) return null;
 				outcomeCollector.recordControl(result.record);
 				if (deps.session?.current()) {
 					try {
@@ -1722,6 +1728,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 	// which is the run an interrupt has to wait out.
 	let activeSubmit: Promise<void> = Promise.resolve();
 	let priorSubmit: Promise<void> = Promise.resolve();
+	let sessionResetSettlement: Promise<void> = Promise.resolve();
 	let machineTurnOwner: object | null = null;
 	let machineTurnRunning: object | null = null;
 	let pendingMachineCancellation: object | null = null;
@@ -2393,6 +2400,8 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			submitOwner?.abort();
 			submitOwner = owner;
 			try {
+				await sessionResetSettlement;
+				if (!admissionCurrent()) return;
 				state.currentTurnConstraints =
 					options.requestContinuation === true ? state.currentTurnConstraints : snapshotTurnConstraints(options.constraints);
 				const previousRunSnapshot = state.lastRunSnapshot;
@@ -3202,6 +3211,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			pendingMachineCancellation = null;
 			const preserveQueue = machineCancellation !== null && machineCancellation === machineTurnRunning;
 			submitOwner?.abort();
+			turnRuntime.cancelRunWatchdog();
 			continuity.cancel();
 			pendingPreTurnRead?.abort();
 			pendingVisionSidecar?.abort();
@@ -3316,6 +3326,9 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		resetForSession(leafTurnId: string | null, replayMessages?: ReadonlyArray<AgentMessage>): void {
 			submitOwner?.abort();
 			submitGeneration += 1;
+			turnRuntime.cancelRunWatchdog();
+			sessionResetSettlement = activeSubmit;
+			state.streaming = false;
 			pendingPreTurnRead?.abort();
 			context.cancelCompaction();
 			for (const listener of sessionResetListeners) {
