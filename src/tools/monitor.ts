@@ -1,5 +1,4 @@
 import { readFileSync } from "node:fs";
-import { sleep } from "../core/timers.js";
 import {
 	formatBudgetPolicy,
 	formatBudgetReasons,
@@ -53,7 +52,6 @@ import { truncateUtf8 } from "./truncate-utf8.js";
 const LIST_LIMIT = 20;
 const PEEK_MAX_BYTES = 8 * 1024;
 const RECEIPT_MAX_BYTES = 14 * 1024;
-const WAIT_POLL_MS = 250;
 const WAIT_DEFAULT_TIMEOUT_MS = 60_000;
 const WAIT_MAX_TIMEOUT_MS = 10 * 60_000;
 /**
@@ -63,12 +61,55 @@ const WAIT_MAX_TIMEOUT_MS = 10 * 60_000;
  * (D3). Blocking turns each poll into real elapsed time.
  */
 const COLLECT_DEFAULT_TIMEOUT_MS = 30_000;
-const COLLECT_POLL_MS = 1_000;
 
 export interface MonitorToolDeps {
 	dispatch: DispatchContract;
 	runEvents?: Pick<DispatchRunEventRegistry, "eventTail">;
 	jobs?: JobOperations;
+}
+
+/** A revision fence retains changes that land while a durable snapshot is being read. */
+function observeDispatchChanges(dispatch: DispatchContract): {
+	revision(): number;
+	wait(revision: number, timeoutMs: number, signal: AbortSignal | undefined): Promise<void>;
+	dispose(): void;
+} {
+	let revision = 0;
+	let wake: (() => void) | null = null;
+	const changed = (): void => {
+		revision += 1;
+		wake?.();
+	};
+	const unsubscribes: Array<() => void> = [];
+	try {
+		if (dispatch.subscribeChanges) unsubscribes.push(dispatch.subscribeChanges(changed));
+		if (dispatch.grants) unsubscribes.push(dispatch.grants.onPending(changed));
+	} catch (error) {
+		for (const unsubscribe of unsubscribes) unsubscribe();
+		throw error;
+	}
+	return {
+		revision: () => revision,
+		wait(observed, timeoutMs, signal) {
+			if (observed !== revision || signal?.aborted) return Promise.resolve();
+			return new Promise<void>((resolve) => {
+				const finish = (): void => {
+					clearTimeout(timer);
+					signal?.removeEventListener("abort", finish);
+					wake = null;
+					resolve();
+				};
+				const timer = setTimeout(finish, timeoutMs);
+				wake = finish;
+				signal?.addEventListener("abort", finish, { once: true });
+				if (observed !== revision || signal?.aborted) finish();
+			});
+		},
+		dispose() {
+			for (const unsubscribe of unsubscribes.splice(0)) unsubscribe();
+			wake?.();
+		},
+	};
 }
 
 function runLine(run: RunEnvelope): string {
@@ -472,64 +513,72 @@ async function runWait(
 	signal: AbortSignal | undefined,
 	ownership: DispatchOwnership,
 ): Promise<ToolResult> {
-	const startedAt = performance.now();
-	let run = deps.dispatch.getRun(runId);
-	if (!run) return { kind: "error", message: `monitor: unknown run '${runId}'` };
-	const unseen = unseenRunError(ownership, runId, run);
-	if (unseen !== null) return unseen;
-	let assignment = deps.dispatch.assignments?.getStored(runId) ?? null;
-	const rootRunId = assignment?.assignmentId ?? runId;
-	while (assignment?.status === "running" || (assignment === null && !isTerminalRunEnvelope(run))) {
-		if (signal?.aborted) return { kind: "error", message: "monitor: wait aborted" };
-		const elapsed = Math.round(performance.now() - startedAt);
-		// Waiting on a run whose worker waits on this caller would only run the
-		// request out, so the wait stops and says what to answer (Phase D).
-		const awaiting = requestsAwaitingMain(deps.dispatch, [runId, rootRunId, run.id]);
-		if (awaiting.length > 0) {
-			return {
-				kind: "ok",
-				output: [
-					`wait stopped after ${elapsed}ms: run ${runId} is waiting for your permission decision and keeps running.`,
-					...awaiting.flatMap((view) => grantRequestLines(view)),
-				].join("\n"),
-				details: {
-					mode: "wait",
-					runId,
-					timedOut: false,
-					permissionPending: true,
-					state: assignment?.status ?? run.status,
-					waitedMs: elapsed,
-					pendingPermissions: awaiting.map((view) => ({ ...view })),
-				},
-			};
+	const changes = observeDispatchChanges(deps.dispatch);
+	try {
+		const startedAt = performance.now();
+		let revision = changes.revision();
+		let run = deps.dispatch.getRun(runId);
+		if (!run) return { kind: "error", message: `monitor: unknown run '${runId}'` };
+		const unseen = unseenRunError(ownership, runId, run);
+		if (unseen !== null) return unseen;
+		let assignment = deps.dispatch.assignments?.getStored(runId) ?? null;
+		const rootRunId = assignment?.assignmentId ?? runId;
+		while (assignment?.status === "running" || (assignment === null && !isTerminalRunEnvelope(run))) {
+			if (signal?.aborted) return { kind: "error", message: "monitor: wait aborted" };
+			const elapsed = Math.round(performance.now() - startedAt);
+			// Waiting on a run whose worker waits on this caller would only run the
+			// request out, so the wait stops and says what to answer (Phase D).
+			const awaiting = requestsAwaitingMain(deps.dispatch, [runId, rootRunId, run.id]);
+			if (awaiting.length > 0) {
+				return {
+					kind: "ok",
+					output: [
+						`wait stopped after ${elapsed}ms: run ${runId} is waiting for your permission decision and keeps running.`,
+						...awaiting.flatMap((view) => grantRequestLines(view)),
+					].join("\n"),
+					details: {
+						mode: "wait",
+						runId,
+						timedOut: false,
+						permissionPending: true,
+						state: assignment?.status ?? run.status,
+						waitedMs: elapsed,
+						pendingPermissions: awaiting.map((view) => ({ ...view })),
+					},
+				};
+			}
+			if (elapsed >= timeoutMs) {
+				return {
+					kind: "ok",
+					output: `wait timed out after ${timeoutMs}ms: ${assignment ? "assignment" : "run"} ${runId} is still ${assignment?.status ?? run.status} and keeps running normally. Wait again or collect later. Only steer(action="cancel") if the result is no longer needed — cancelling discards its work.`,
+					details: {
+						mode: "wait",
+						runId,
+						timedOut: true,
+						state: assignment?.status ?? run.status,
+						waitedMs: elapsed,
+					},
+				};
+			}
+			await changes.wait(revision, timeoutMs - elapsed, signal);
+			if (signal?.aborted) return { kind: "error", message: "monitor: wait aborted" };
+			revision = changes.revision();
+			assignment = deps.dispatch.assignments?.getStored(rootRunId) ?? null;
+			const resolvedRunId = assignment?.terminalRunId ?? runId;
+			run = deps.dispatch.getRun(resolvedRunId) ?? run;
+			if (!run) return { kind: "error", message: `monitor: run '${runId}' disappeared from the ledger while waiting` };
 		}
-		if (elapsed >= timeoutMs) {
-			return {
-				kind: "ok",
-				output: `wait timed out after ${timeoutMs}ms: ${assignment ? "assignment" : "run"} ${runId} is still ${assignment?.status ?? run.status} and keeps running normally. Wait again or collect later. Only steer(action="cancel") if the result is no longer needed — cancelling discards its work.`,
-				details: {
-					mode: "wait",
-					runId,
-					timedOut: true,
-					state: assignment?.status ?? run.status,
-					waitedMs: elapsed,
-				},
-			};
-		}
-		await sleep(Math.min(WAIT_POLL_MS, timeoutMs - elapsed));
-		assignment = deps.dispatch.assignments?.getStored(rootRunId) ?? null;
-		const resolvedRunId = assignment?.terminalRunId ?? runId;
-		run = deps.dispatch.getRun(resolvedRunId) ?? run;
-		if (!run) return { kind: "error", message: `monitor: run '${runId}' disappeared from the ledger while waiting` };
+		const status = runStatus(deps, runId, ownership);
+		if (status.kind !== "ok") return status;
+		const waitedMs = Math.round(performance.now() - startedAt);
+		return {
+			kind: "ok",
+			output: `wait complete after ${waitedMs}ms:\n${status.output}`,
+			details: { ...status.details, mode: "wait", timedOut: false, waitedMs },
+		};
+	} finally {
+		changes.dispose();
 	}
-	const status = runStatus(deps, runId, ownership);
-	if (status.kind !== "ok") return status;
-	const waitedMs = Math.round(performance.now() - startedAt);
-	return {
-		kind: "ok",
-		output: `wait complete after ${waitedMs}ms:\n${status.output}`,
-		details: { ...status.details, mode: "wait", timedOut: false, waitedMs },
-	};
 }
 
 function boundedTimeout(raw: unknown, fallback: number): number {
@@ -546,50 +595,58 @@ async function runCollect(
 	signal: AbortSignal | undefined,
 	ownership: DispatchOwnership,
 ): Promise<ToolResult> {
-	const startedAt = performance.now();
-	const collectOnce = () =>
-		batchId.length > 0 ? collectDetachedBatch(deps, batchId, ownership) : collectRuns(deps, batchId, runIds, ownership);
-	let result = await collectOnce();
-	while (result.kind === "ok" && result.details?.complete === false) {
-		if (signal?.aborted) return { kind: "error", message: "monitor: collect aborted" };
-		const elapsed = Math.round(performance.now() - startedAt);
-		const pendingRunIds = Array.isArray(result.details?.pendingRunIds)
-			? result.details.pendingRunIds.filter((entry): entry is string => typeof entry === "string")
-			: [];
-		const awaiting = requestsAwaitingMain(deps.dispatch, pendingRunIds);
-		if (awaiting.length > 0) {
-			return {
-				...result,
-				output: [
-					result.output,
-					"",
-					"A worker in this batch is waiting for your permission decision; collect stopped so you can answer it:",
-					...awaiting.flatMap((view) => grantRequestLines(view)),
-				].join("\n"),
-				details: {
-					...result.details,
-					timedOut: false,
-					permissionPending: true,
-					waitedMs: elapsed,
-					pendingPermissions: awaiting.map((view) => ({ ...view })),
-				},
-			};
+	const changes = observeDispatchChanges(deps.dispatch);
+	try {
+		const startedAt = performance.now();
+		const collectOnce = () =>
+			batchId.length > 0 ? collectDetachedBatch(deps, batchId, ownership) : collectRuns(deps, batchId, runIds, ownership);
+		let revision = changes.revision();
+		let result = await collectOnce();
+		while (result.kind === "ok" && result.details?.complete === false) {
+			if (signal?.aborted) return { kind: "error", message: "monitor: collect aborted" };
+			const elapsed = Math.round(performance.now() - startedAt);
+			const pendingRunIds = Array.isArray(result.details?.pendingRunIds)
+				? result.details.pendingRunIds.filter((entry): entry is string => typeof entry === "string")
+				: [];
+			const awaiting = requestsAwaitingMain(deps.dispatch, pendingRunIds);
+			if (awaiting.length > 0) {
+				return {
+					...result,
+					output: [
+						result.output,
+						"",
+						"A worker in this batch is waiting for your permission decision; collect stopped so you can answer it:",
+						...awaiting.flatMap((view) => grantRequestLines(view)),
+					].join("\n"),
+					details: {
+						...result.details,
+						timedOut: false,
+						permissionPending: true,
+						waitedMs: elapsed,
+						pendingPermissions: awaiting.map((view) => ({ ...view })),
+					},
+				};
+			}
+			if (elapsed >= timeoutMs) {
+				return {
+					...result,
+					output: `${result.output}\n\ncollect waited ${elapsed}ms; the runs keep running normally.`,
+					details: { ...result.details, timedOut: true, waitedMs: elapsed },
+				};
+			}
+			await changes.wait(revision, timeoutMs - elapsed, signal);
+			if (signal?.aborted) return { kind: "error", message: "monitor: collect aborted" };
+			revision = changes.revision();
+			result = await collectOnce();
 		}
-		if (elapsed >= timeoutMs) {
-			return {
-				...result,
-				output: `${result.output}\n\ncollect waited ${elapsed}ms; the runs keep running normally.`,
-				details: { ...result.details, timedOut: true, waitedMs: elapsed },
-			};
-		}
-		await sleep(Math.min(COLLECT_POLL_MS, timeoutMs - elapsed));
-		result = await collectOnce();
+		if (result.kind !== "ok") return result;
+		return {
+			...result,
+			details: { ...result.details, timedOut: false, waitedMs: Math.round(performance.now() - startedAt) },
+		};
+	} finally {
+		changes.dispose();
 	}
-	if (result.kind !== "ok") return result;
-	return {
-		...result,
-		details: { ...result.details, timedOut: false, waitedMs: Math.round(performance.now() - startedAt) },
-	};
 }
 
 export function createMonitorTool(deps: MonitorToolDeps): ToolSpec {

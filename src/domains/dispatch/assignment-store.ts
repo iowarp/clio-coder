@@ -3,7 +3,7 @@
  * ledger in `assignments.json`; immutable attempt evidence remains in receipts.
  */
 
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, watch } from "node:fs";
 import { join } from "node:path";
 import { BIRTH_TOKEN_SOURCE_AVAILABLE, processAlive, processBirthToken } from "../../core/process-identity.js";
 import { withStateFileLock } from "../../core/state-file-lock.js";
@@ -166,6 +166,20 @@ async function updateRecord(
 		writeStore(records);
 	});
 	return copyRecord(result);
+}
+
+/** Directory observation survives atomic replacement of the durable assignment file. */
+export function subscribeStoredAssignments(listener: () => void): () => void {
+	const watcher = watch(clioStateDir(), { persistent: false }, (_event, filename) => {
+		if (filename === null || filename === "assignments.json") listener();
+	});
+	// An unavailable filesystem watch ends observation at the caller's existing
+	// timeout; wake once so it can still inspect the last durable state.
+	watcher.on("error", () => {
+		watcher.close();
+		listener();
+	});
+	return () => watcher.close();
 }
 
 export function getStoredAssignment(assignmentId: string): DurableAssignmentRecord | null {

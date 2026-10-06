@@ -251,16 +251,28 @@ export function registerAllTools(registry: ToolRegistry, deps: ToolBootstrapDeps
 	// Every MCP client the gateway launched closes with the session: a
 	// detached server must not outlive the process that trusted it.
 	let closePromise: Promise<void> | undefined;
+	const disposeCloseListeners: (() => void)[] = [];
+	let disposeTerminateHook: (() => void) | undefined;
 	const close = (): Promise<void> => {
-		closePromise ??= Promise.resolve(mcpCapabilities?.close()).then(() => undefined);
+		if (closePromise === undefined) {
+			for (const dispose of disposeCloseListeners.splice(0)) dispose();
+			closePromise = Promise.resolve(mcpCapabilities?.close()).then(() => undefined).finally(() => {
+				// PERF W3: early ShutdownRequested keeps the awaited hook until teardown settles.
+				disposeTerminateHook?.();
+				disposeTerminateHook = undefined;
+			});
+		}
 		return closePromise;
 	};
 	if (mcpCapabilities) {
-		deps.termination?.onTerminate(close, { timeoutMs: DEFAULT_KILL_GRACE_MS + DEFAULT_TEARDOWN_BOUND_MS + 1_000 });
+		const disposeTerminate = deps.termination?.onTerminate(close, {
+			timeoutMs: DEFAULT_KILL_GRACE_MS + DEFAULT_TEARDOWN_BOUND_MS + 1_000,
+		});
+		if (typeof disposeTerminate === "function") disposeTerminateHook = disposeTerminate;
 	}
 	if (mcpCapabilities && deps.bus) {
-		deps.bus.on(BusChannels.SessionEnd, () => void close());
-		deps.bus.on(BusChannels.ShutdownRequested, () => void close());
+		disposeCloseListeners.push(deps.bus.on(BusChannels.SessionEnd, close));
+		disposeCloseListeners.push(deps.bus.on(BusChannels.ShutdownRequested, close));
 	}
 	return { mcpCapabilities, close };
 }

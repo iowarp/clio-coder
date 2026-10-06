@@ -18,12 +18,13 @@
  */
 
 import { wrapTextWithAnsi } from "../engine/text-wrap.js";
+import { clampTimerDelayMs } from "./timers.js";
 import { BusChannels } from "./bus-events.js";
 import { getSharedBus } from "./shared-bus.js";
 
 export type TerminationPhase = "idle" | "draining" | "terminating" | "persisting" | "exiting";
 
-type Hook = () => void | Promise<void>;
+export type Hook = (signal: AbortSignal) => void | Promise<void>;
 interface RegisteredHook {
 	run: Hook;
 	/** Internal allowance for an owned resource with a longer escalation window. */
@@ -76,27 +77,42 @@ export function resolveShutdownHookBudgetMs(): number {
  * and reported via `onError` so a rejecting hook cannot propagate past the
  * shutdown coordinator.
  */
+export class ShutdownBudgetExceeded extends Error {
+	constructor(public readonly budgetMs: number) {
+		super(`Shutdown budget exceeded after ${budgetMs}ms`);
+		this.name = "ShutdownBudgetExceeded";
+	}
+}
+
 export async function runWithBudget(
-	op: () => void | Promise<void>,
+	op: Hook,
 	budgetMs: number,
 	onError?: (err: unknown) => void,
+	parentSignal?: AbortSignal,
 ): Promise<boolean> {
+	const controller = new AbortController();
+	const forwardAbort = (): void => controller.abort(parentSignal?.reason);
+	if (parentSignal?.aborted) forwardAbort();
+	else parentSignal?.addEventListener("abort", forwardAbort, { once: true });
 	let timer: NodeJS.Timeout | undefined;
 	const timeout = new Promise<"timeout">((resolve) => {
-		timer = setTimeout(() => resolve("timeout"), budgetMs);
+		timer = setTimeout(() => {
+			controller.abort(new ShutdownBudgetExceeded(budgetMs));
+			resolve("timeout");
+		}, clampTimerDelayMs(budgetMs));
 	});
 	try {
 		const done = Promise.resolve()
-			.then(() => op())
+			.then(() => op(controller.signal))
 			.then(() => "done" as const)
 			.catch((err) => {
 				onError?.(err);
 				return "done" as const;
 			});
-		const outcome = await Promise.race([done, timeout]);
-		return outcome === "done";
+		return (await Promise.race([done, timeout])) === "done";
 	} finally {
 		if (timer) clearTimeout(timer);
+		parentSignal?.removeEventListener("abort", forwardAbort);
 	}
 }
 
@@ -107,6 +123,7 @@ class TerminationCoordinator {
 	private readonly persistHooks: RegisteredHook[] = [];
 	private exitCode = 0;
 	private started = false;
+	private shutdownPromise: Promise<void> | undefined;
 	private drained = false;
 	private readonly pendingNotices: string[] = [];
 	private signalHandler: ((signal: NodeJS.Signals) => void) | null = null;
@@ -128,8 +145,13 @@ class TerminationCoordinator {
 	onDrain(hook: Hook, options?: { timeoutMs: number }): void {
 		this.drainHooks.push(registeredHook(hook, options));
 	}
-	onTerminate(hook: Hook, options?: { timeoutMs: number }): void {
-		this.terminateHooks.push(registeredHook(hook, options));
+	onTerminate(hook: Hook, options?: { timeoutMs: number }): () => void {
+		const registration = registeredHook(hook, options);
+		this.terminateHooks.push(registration);
+		return () => {
+			const index = this.terminateHooks.indexOf(registration);
+			if (index !== -1) this.terminateHooks.splice(index, 1);
+		};
 	}
 	onPersist(hook: Hook, options?: { timeoutMs: number }): void {
 		this.persistHooks.push(registeredHook(hook, options));
@@ -141,8 +163,16 @@ class TerminationCoordinator {
 		this.exitHandoff = handoff;
 	}
 
-	async shutdown(code = 0): Promise<void> {
-		if (this.started) return;
+	shutdown(code = 0): Promise<void> {
+		if (this.shutdownPromise) return this.shutdownPromise;
+		let resolve!: () => void;
+		let reject!: (error: unknown) => void;
+		this.shutdownPromise = new Promise<void>((done, failed) => { resolve = done; reject = failed; });
+		void this.performShutdown(code).then(resolve, reject);
+		return this.shutdownPromise;
+	}
+
+	private async performShutdown(code: number): Promise<void> {
 		this.started = true;
 		this.exitCode = code;
 		const bus = getSharedBus();
@@ -200,8 +230,10 @@ class TerminationCoordinator {
 		defaultBudgetMs: number,
 		log: (msg: string) => void,
 	): Promise<void> {
-		for (let i = 0; i < hooks.length; i++) {
-			const hook = hooks[i];
+		// A cleanup can unregister itself without shifting the remaining phase work.
+		const snapshot = [...hooks];
+		for (let i = 0; i < snapshot.length; i++) {
+			const hook = snapshot[i];
 			if (!hook) continue;
 			const budgetMs = hook.timeoutMs ?? defaultBudgetMs;
 			const t0 = process.hrtime.bigint();
