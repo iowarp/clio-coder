@@ -5,12 +5,13 @@
 // a crashed boot are both legible to `ps`, `pgrep -f`, and htop.
 process.title = "clio-coder";
 
-import { AI_AGENT_NAME } from "../core/agent-environment.js";
+import { markClioAgentProcess } from "../core/agent-environment.js";
 
 // Pi and other agent-aware developer tools use this generic marker to
 // attribute subprocess activity without knowing Clio-specific variables.
 // Set it unconditionally so every child inherits the actual spawning agent.
-process.env.AI_AGENT = AI_AGENT_NAME;
+// The inherited value is kept for lifecycle receipts before it is overwritten.
+markClioAgentProcess();
 
 // Only argument parsing and boot tracing load statically. Every subcommand is
 // imported dynamically through the command registry (see `dispatch`), so a bare `clio`
