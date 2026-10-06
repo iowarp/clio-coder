@@ -192,6 +192,7 @@ test("budget expiry aborts the stop signal and does not rerun the domain stop", 
 					start() {},
 					stop(signal) {
 						stops += 1;
+						if (!signal) throw new Error("the loader passes its stop signal");
 						started(signal);
 						return new Promise<void>(() => {});
 					},

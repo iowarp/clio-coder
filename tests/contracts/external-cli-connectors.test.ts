@@ -417,7 +417,7 @@ describe("Clio external CLI connectors", { skip: process.platform === "win32" },
 		});
 		let descendants = true;
 		const signals: unknown[] = [];
-		t.mock.method(process, "kill", (pid, signal) => {
+		t.mock.method(process, "kill", (pid: number, signal?: NodeJS.Signals | number) => {
 			equal(pid, -child.pid);
 			if (!descendants) throw Object.assign(new Error("group gone"), { code: "ESRCH" });
 			if (signal !== 0) signals.push(signal);

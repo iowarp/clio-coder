@@ -239,7 +239,7 @@ test("Stop fences deferred preparation and compaction before model calls or late
 										entered.resolve();
 										return prepared.promise;
 									},
-								} as PromptsContract,
+								} as unknown as PromptsContract,
 							}
 						: {
 								autoCompact: async (_instructions, _trigger, budget) => {
