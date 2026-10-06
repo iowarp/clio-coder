@@ -958,9 +958,9 @@ entries:
   - kind: plugin
     name: wtfp
     description: Portable, evidence-grounded academic research and writing workflows.
-    version: 0.7.4
-    sourceUrl: https://github.com/akougkas/wtf-p/tree/v0.7.4/vendors/plugin
-    sha256: 24e4f6ab0868f1c1e84156771c6fc63bc1b99f52a6886de229b065e21f526997
+    version: 0.8.0
+    sourceUrl: https://github.com/akougkas/wtf-p/tree/v0.8.0/vendors/plugin
+    sha256: 34728ec86a48a6f488a2048a502544b722d82a47e5094fff0dd66f78f457e0aa
     provides:
       - kind: agent
         name: wtfp-argument-verifier
