@@ -1,6 +1,6 @@
 # Prompts, skills, and share archives
 
-Clio Coder has two package systems. A plugin is a domain bundle of prompts, skills, agent recipes, fleet contracts, scripts, and reference files, installed with `clio-coder library install <path>`. A harness extension is executable runtime capability (command tools, operator commands, and hook declarations), installed with `clio-coder extensions install <path>`. Only plugins contribute resources. See [plugins.md](plugins.md) for the concept map and [harness-extensions.md](harness-extensions.md) for the extension contract.
+Clio Coder has two package systems. A plugin is an Agent Plugin, content only: prompts, skills, agents, playbooks, scripts, and reference files, installed with `clio-coder library install plugin:<name>` or from a path, and never running code inside Clio Coder. An extension is Clio code in its own process (hooks, runtime tools, commands, workspaces, interviews), installed with `clio-coder library install extension:<name>` or `clio-coder extensions install <path>` after the operator reviews its capability envelope. Only plugins contribute resources. An extension may name the one plugin it serves with `plugin: <name>`. See [plugins.md](plugins.md) for the concept map and [harness-extensions.md](harness-extensions.md) for the extension contract.
 
 This page covers how prompt templates and skills are discovered, ranked, trusted, and invoked, and how share archives move user and project resources between machines.
 
@@ -192,7 +192,7 @@ Skill bodies never enter the prompt uninvited. The model discovers skills only t
 
 ## Share archives
 
-Share archives are single JSON files for moving loose project and user Clio Coder resources between machines or collaborators. They carry the files under the prompt, skill, agent, fleet, and extension roots, project context files, and a settings fragment. Packages installed through `clio-coder library` live under `plugins/` and are not exported; distribute those through their source directory or a library index.
+Share archives are single JSON files for moving loose project and user Clio Coder resources between machines or collaborators. They carry the files under the prompt, skill, agent, playbook, and extension roots, project context files, and a settings fragment. Packages installed through `clio-coder library` live under `plugins/` and are not exported; distribute those through their source directory or a library index.
 
 ```json
 {
@@ -229,9 +229,9 @@ Options:
 | `--prompts` | Include prompt templates. |
 | `--skills` | Include skills. |
 | `--settings` | Include non-secret settings fragment. |
-| `--extensions` | Include harness extension bundle files, excluding `state.json` files and hidden backup directories. |
-| `--agents` | Include agent recipe files. |
-| `--fleets` | Include fleet contract files. |
+| `--extensions` | Include extension package files, excluding `state.json` files and hidden backup directories. |
+| `--agents` | Include agent files. |
+| `--playbooks` | Include playbook files. |
 | `--all` | Include every supported resource class. |
 | `--dry-run` | List the entries the archive would hold and write nothing. |
 | `--json` | Print the archive, or with `--dry-run` its manifest, as JSON. |
@@ -248,11 +248,13 @@ clio-coder share import project.clio-coder-share.json --dry-run
 clio-coder share import project.clio-coder-share.json --force
 ```
 
-`share import` also accepts `--user` or `--project` to force prompt, skill, and extension entries into one destination scope; otherwise each entry keeps its archived scope. Agent, fleet, and settings entries always import into the user config directory, and project context files into the working directory. Dry-run imports produce a plan and report conflicts without writing. Without `--force`, conflicting destination files block writes. With `--force`, conflicting files are overwritten, keeping a backup, and supported settings-fragment keys are merged into the current settings file. Every target path must stay inside its import root, including through symbolic links, or the whole import is refused before any write.
+`share import` also accepts `--user` or `--project` to force prompt, skill, and extension entries into one destination scope; otherwise each entry keeps its archived scope. Agent, playbook, and settings entries always import into the user config directory, and project context files into the working directory. Dry-run imports produce a plan and report conflicts without writing. Without `--force`, conflicting destination files block writes. With `--force`, conflicting files are overwritten, keeping a backup, and supported settings-fragment keys are merged into the current settings file. Every target path must stay inside its import root, including through symbolic links, or the whole import is refused before any write.
 
-Extension entries are grouped into complete packages, staged, strictly validated, and passed through the canonical extension installer. A successful import therefore records the installed content digest before the package can contribute resources. A destination tree is skipped only when it already matches a verified install record; an unrecorded, drifted, or corrupt destination requires `--force`, which uses the same backup-preserving recovery contract as `extensions install --force`. Invalid archived packages fail preflight before destination writes. An import never approves workspace trust. When it writes `.clio-coder/extensions/state.json` at project scope, including the workspace's first such file, the project's extensions stay blocked until `clio-coder config trust extensions` approves the new bytes. Only `clio-coder extensions install <path> --project` approves a workspace's first project extension install (see [Harness extensions](harness-extensions.md)).
+Extension entries are grouped into complete packages, staged, strictly validated, and passed through the canonical extension installer. The plan shows each package's capability envelope, and the install applies only that envelope: the digest recorded with the install must match the envelope the plan showed. A successful import therefore records the installed content digest and the envelope digest before the package can contribute resources. Every imported entry leaves a bounded lifecycle receipt with the operation `share-import`, the archive as its source, and the content digest. A destination tree is skipped only when it already matches a verified install record; an unrecorded, drifted, or corrupt destination requires `--force`, which uses the same backup-preserving recovery contract as `extensions install --force`. Invalid archived packages fail preflight before destination writes. An import never approves workspace trust. When it writes `.clio-coder/extensions/state.json` at project scope, including the workspace's first such file, the project's extensions stay blocked until `clio-coder config trust extensions` approves the new bytes. Only `clio-coder extensions install <path> --project` approves a workspace's first project extension install (see [Extensions](harness-extensions.md)).
 
-Archives accept `agent` and `fleet` file entry types alongside prompts and skills. Agent entries must pass the recipe parser and policy checks. Fleet entries must pass `parseFleetContract` before any write. Dry-run plans report both types by kind. Share commands exit 0 on success, 1 when the plan carries an error or conflict diagnostic, and 2 for a usage error.
+Archives accept `agent` and `playbook` file entry types alongside prompts and skills. Agent entries must pass the agent parser and policy checks. Playbook entries must pass the playbook parser before any write. An archive exported by an older Clio that says entry type `fleet` reads as a `playbook` entry; new archives write only `playbook`. Dry-run plans report both types by kind.
+
+When the model runs `clio-coder share import` without `--dry-run`, `clio-coder extensions test` or `clio-coder extensions validate` through its shell, the call asks for one-shot operator confirmation in `default`, because an import installs packages from an archive the model may have written and the other two run a package's own code. `extensions install` stays blocked for the model at every autonomy level. The dispositions are in [skills-marketplace.md](skills-marketplace.md#operator-ownership-of-installed-skills). Share commands exit 0 on success, 1 when the plan carries an error or conflict diagnostic, and 2 for a usage error.
 
 ### Aliases and session commands
 
