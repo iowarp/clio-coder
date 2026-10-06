@@ -45,6 +45,7 @@ export class OperatorExtensions {
 	readonly v2: OperatorExtensionRuntimeV2;
 	/** While above zero, a manager's own reload report is folded into the combined one. */
 	private combining = 0;
+	private queuedReload = false;
 
 	constructor(private readonly options: OperatorExtensionsOptions) {
 		const forward = (result: OperatorReloadResult, reason: ReloadReason): void => {
@@ -76,20 +77,36 @@ export class OperatorExtensions {
 		return this.v1.busy || this.v2.busy;
 	}
 	get maintenanceDelayMs(): number | null {
+		if (this.queuedReload) return 250;
 		const delays = [this.v1.maintenanceDelayMs, this.v2.maintenanceDelayMs].filter((delay) => delay !== null);
 		return delays.length > 0 ? Math.min(...delays) : null;
 	}
 	maintenance(): void {
+		if (this.queuedReload && !this.busy && this.options.isIdle()) {
+			void this.reload();
+			return;
+		}
 		this.v1.maintenance();
 		this.v2.maintenance();
 	}
-	invalidateContext(): void {
+	invalidateContext(restoreWorkspace = false): void {
 		this.v1.invalidateContext();
-		this.v2.invalidateContext();
+		this.v2.invalidateContext(restoreWorkspace);
 	}
 
 	/** api 1 first: it commits the paired hook generation, and its runtimes claim the shared cap first. */
 	async reload(reason: ReloadReason = "reload"): Promise<OperatorReloadResult> {
+		// Do not commit api 1/hooks while an api 2 command still owns its generation.
+		if (this.busy || !this.options.isIdle()) {
+			this.queuedReload = true;
+			this.options.onChange?.();
+			return {
+				status: "deferred",
+				generation: this.v1.entries()[0]?.generation ?? 0,
+				message: "extension reload deferred until the session and operator commands are idle",
+			};
+		}
+		this.queuedReload = false;
 		this.combining++;
 		let results: [OperatorReloadResult, OperatorReloadResult];
 		try {

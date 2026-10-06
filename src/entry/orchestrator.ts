@@ -155,7 +155,7 @@ import { recordFailedCompactionCalls } from "../domains/observability/compaction
 import { aggregateCostEntries } from "../domains/observability/cost-rows.js";
 import type { ObservabilityContract } from "../domains/observability/index.js";
 import { ObservabilityDomainModule } from "../domains/observability/index.js";
-import { PluginsDomainModule, pluginSnapshotFor } from "../domains/plugins/index.js";
+import { committedPluginSnapshot, PluginsDomainModule, pluginSnapshotFor } from "../domains/plugins/index.js";
 import type { PromptsContract } from "../domains/prompts/contract.js";
 import { createPromptsDomainModule } from "../domains/prompts/index.js";
 import { credentialsPresent } from "../domains/providers/credentials.js";
@@ -297,6 +297,8 @@ import {
 	buildModelReplayAgentMessagesFromTurns,
 	continuityContextFromSession,
 } from "../session-control/model-session-replay.js";
+import { armRestartHandoff } from "../session-control/restart-handoff.js";
+import { consumeRestartIntent } from "../session-control/restart-intent.js";
 import { createTurnOutcomeCollector } from "../session-control/turn-outcome-collector.js";
 import { effectiveToolNames } from "../tools/agent-tools.js";
 import { surfaceSpecPlacement } from "../tools/surface.js";
@@ -308,6 +310,7 @@ import { createExtensionReloadCoordinator } from "./extension-reload.js";
 import { createFlowLedger, FLOW_RESTRICTION_ENTRY_TYPE } from "./flow-ledger.js";
 import { resolvePanesEnablement } from "./panes-activation.js";
 import { reloadPluginResourcesAndNotify } from "./plugin-reload.js";
+import { createReloadClasses } from "./reload-classes.js";
 import { createDecisionUsageTally, createSystemOneHost, createSystemOneRequestAdmission } from "./system-one-host.js";
 import { bindTaskMemoryLifecycle, captureTaskMemoryUsage } from "./task-memory-lifecycle.js";
 
@@ -1906,7 +1909,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			else resolvedResumeId = latest.id;
 		}
 	}
-	const resumeId = resolvedResumeId;
+	const resumeId = resolvedResumeId ?? (interactive ? consumeRestartIntent(clioStateDir(), process.cwd()) : undefined);
 	let resumedSessionAtBoot = false;
 	if (resumeId && session && headlessResumeFailure === null) {
 		try {
@@ -2473,6 +2476,14 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	let bootHookNotices = true;
 	const reloadPlugins = () =>
 		reloadPluginResourcesAndNotify(process.cwd(), (event) => bus.emit(BusChannels.PluginsReloaded, event));
+	const reloadClasses = createReloadClasses({
+		config,
+		bus,
+		cwd: () => process.cwd(),
+		library: () => committedPluginSnapshot(process.cwd()),
+		reloadLibrary: reloadPlugins,
+		extensions: () => extensions?.snapshot()?.packages ?? [],
+	});
 	// Only the TUI hosts api 2 runtimes today, so only it registers their hooks.
 	const runtimeHooks = interactive ? createExtensionRuntimeHookBridge() : undefined;
 	const extensionReload = createExtensionReloadCoordinator({
@@ -2482,12 +2493,13 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		cwd: () => process.cwd(),
 		recordReceipt: (receipt) => hookReceiptLog.record(receipt),
 		report: (line) => {
+			if (reloadClasses.captureIssue(line)) return;
 			if (!interactive) process.stderr.write(`${line}\n`);
 			else if (bootHookNotices) initialNotices.push(line);
 			else bus.emit(BusChannels.ExtensionsLoadIssue, { message: line });
 		},
 		onCommitted: () => {
-			reloadPlugins();
+			if (!reloadClasses.active) reloadPlugins();
 		},
 	});
 	await bootPhaseBoundary?.();
@@ -4812,8 +4824,14 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		...(resources ? { resources } : {}),
 		...(extensions ? { extensions } : {}),
 		...(runtimeHooks ? { runtimeHooks } : {}),
-		reloadExtensions: () => extensionReload.reload(),
+		reloadExtensions: () => {
+			const outcome = extensionReload.reload();
+			for (const issue of outcome.diagnostics.entries) reloadClasses.captureIssue(`${issue.type}: ${issue.message}`);
+			return outcome;
+		},
 		reloadPlugins,
+		reloadClasses,
+		armRestartHandoff: () => armRestartHandoff(clioStateDir(), termination),
 		...(interop ? { interop } : {}),
 		...(share ? { share } : {}),
 		...(mux ? { mux } : {}),

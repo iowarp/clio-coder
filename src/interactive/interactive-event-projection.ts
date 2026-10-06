@@ -44,6 +44,7 @@ export interface InteractiveEventProjectionDeps {
 	};
 	initialNotices?: ReadonlyArray<string>;
 	getSettings?: () => Readonly<ClioSettings>;
+	isReloadReporting?: () => boolean;
 	getTerminalColumns: () => number;
 	now?: () => number;
 	/** Canonical synchronous ingress hook, before any projection branch consumes the event. */
@@ -335,7 +336,9 @@ export function createInteractiveEventProjection(deps: InteractiveEventProjectio
 			const event = payload as { diff?: { nextTurn?: string[] }; settings?: Readonly<ClioSettings> } | null | undefined;
 			const effective = deps.getSettings?.();
 			if (!effective || !event?.settings || !Array.isArray(event.diff?.nextTurn)) return;
-			for (const notice of routingChangeNotices(event.diff.nextTurn, event.settings, effective, { commandHints: true })) {
+			for (const notice of deps.isReloadReporting?.()
+				? []
+				: routingChangeNotices(event.diff.nextTurn, event.settings, effective, { commandHints: true })) {
 				deps.notify(
 					notice.level,
 					notice.text,
@@ -351,6 +354,7 @@ export function createInteractiveEventProjection(deps: InteractiveEventProjectio
 			deps.refreshSettingsOverlay();
 		}),
 		deps.bus.on(BusChannels.ConfigReloadFailed, (payload) => {
+			if (deps.isReloadReporting?.()) return;
 			const event = payload as ConfigReloadFailedPayload | null | undefined;
 			if (!event || typeof event !== "object" || !("message" in event)) return;
 			// The domain already folded this to one line with a remedy; the frame
@@ -364,6 +368,7 @@ export function createInteractiveEventProjection(deps: InteractiveEventProjectio
 			deps.requestRender();
 		}),
 		deps.bus.on(BusChannels.ConfigRestartRequired, (payload) => {
+			if (deps.isReloadReporting?.()) return;
 			const text = restartRequiredNotice(payload);
 			if (text === null) return;
 			deps.notify("warning", text, "config:restart-required");

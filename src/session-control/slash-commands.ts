@@ -63,6 +63,7 @@ import type { NoticeLevel } from "./notice-source.js";
 import type { OracleDigestSources } from "./oracle.js";
 import { formatOracleAnswer, ORACLE_AGENT_ID, ORACLE_TASK, packOracleDigest } from "./oracle.js";
 import { promptSourceLabel } from "./prompt-source-label.js";
+import type { ReloadTarget } from "./reload-report.js";
 import type { CommandArgsSpec, CommandPositionalSpec, ParsedArgs } from "./slash-spec.js";
 import { matchFromSpec, usageLine } from "./slash-spec.js";
 import type { WorkerShareFacts } from "./worker-share.js";
@@ -134,6 +135,8 @@ type SlashCommandVariant =
 	| { kind: "upgrade" }
 	| { kind: "config" }
 	| { kind: "quit" }
+	| { kind: "reload"; target: ReloadTarget }
+	| { kind: "restart" }
 	| { kind: "help"; query?: string }
 	| { kind: "init"; options: InitCommandOptions }
 	| { kind: "context-clear"; options: ContextClearCommandOptions }
@@ -704,6 +707,8 @@ export interface SessionCommandContext {
 	listWorkerRuns?: () => ReadonlyArray<WorkerEntryState>;
 	/** Fire-and-forget shutdown. Handler must not await. */
 	shutdown?: () => void;
+	reloadClasses?: (target: ReloadTarget) => void;
+	restart?: () => void;
 	runInit: (options: InitCommandOptions) => void;
 	/** Write the current session transcript (all tool segments expanded, ANSI-stripped) to a Markdown file. */
 	exportTranscript: (path?: string) => void;
@@ -1144,6 +1149,44 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 				return "rejected";
 			}
 			ctx.keyboardActions.dismiss(command.all);
+		},
+	},
+	{
+		name: "reload",
+		acp: false,
+		description: "Reload settings, library resources and extension runtimes with one report",
+		group: "Session",
+		kinds: ["reload"],
+		args: { positionals: [{ name: "target", required: false, values: ["settings", "library", "extensions", "all"] }] },
+		fromArgs(parsed) {
+			if (parsed.error) return { kind: "usage-error", command: "reload", reason: parsed.error };
+			const target = parsed.positionals[0] ?? "all";
+			if (target !== "settings" && target !== "library" && target !== "extensions" && target !== "all")
+				return { kind: "usage-error", command: "reload", reason: "Choose settings, library, extensions or all" };
+			return { kind: "reload", target };
+		},
+		handle(command, ctx) {
+			if (!ctx.reloadClasses) {
+				ctx.notice("warn", "/reload is available only in an interactive terminal.");
+				return;
+			}
+			if (command.kind === "reload") ctx.reloadClasses(command.target);
+		},
+	},
+	{
+		name: "restart",
+		acp: false,
+		description: "Save and restart into this session and workspace",
+		group: "Session",
+		kinds: ["restart"],
+		args: {},
+		fromArgs: fromArgsOrUsage("restart", { kind: "restart" }),
+		handle(_command, ctx) {
+			if (!ctx.restart) {
+				ctx.notice("warn", "/restart is available only in an interactive terminal.");
+				return;
+			}
+			ctx.restart();
 		},
 	},
 	{

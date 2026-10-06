@@ -38,6 +38,7 @@ import type { UserTasksStore } from "../domains/user-tasks/store.js";
 import { setDiffusionFramesEnabled } from "../engine/apis/diffusion-frames.js";
 import { createAgentProgress } from "../engine/tui.js";
 import type { ChatLoop, ChatLoopEvent } from "../session-control/chat-loop.js";
+import type { ReloadClassesController } from "../session-control/reload-report.js";
 import type {
 	ContextClearCommandOptions,
 	InitCommandOptions,
@@ -64,6 +65,8 @@ import { createInteractiveDesktopNotifications } from "./footer/notifications.js
 import { createInteractiveEventProjection } from "./interactive-event-projection.js";
 import { createInteractiveInputRuntime } from "./interactive-input-runtime.js";
 import { createInteractivePresentation } from "./interactive-presentation.js";
+import { appendReloadReport, createInteractiveReload } from "./interactive-reload.js";
+import { createInteractiveRestart, interactiveRestartBusyReason } from "./interactive-restart.js";
 import { createProcessInteractiveShell, getActiveRenderTrace } from "./interactive-shell.js";
 import { createInteractiveSlashRuntime, resolveAvailableThinkingLevels } from "./interactive-slash-runtime.js";
 import { createInteractiveSubscriptions } from "./interactive-subscriptions.js";
@@ -78,6 +81,7 @@ import { describePanesLeftBehind } from "./panes-runtime.js";
 import type { createPeerInbox } from "./peer-inbox.js";
 import { writeInputWedgeDump } from "./render-trace.js";
 import { renderContextOperationResult } from "./renderers/context-operation.js";
+import { hydrateResumedSessionPresentation } from "./resumed-session-presentation.js";
 import { settleChatBeforeSessionSwitch } from "./session-switch-settlement.js";
 import { createSessionTranscript } from "./session-transcript.js";
 import { processAutoPacingAllowed } from "./stream-pacing-policy.js";
@@ -155,6 +159,8 @@ export interface InteractiveDeps {
 	/** Where api 2 hook registrations reach the runtimes this surface owns. */
 	runtimeHooks?: ExtensionRuntimeHookBridge;
 	reloadPlugins?: SlashCommandContext["reloadPlugins"];
+	reloadClasses?: ReloadClassesController;
+	armRestartHandoff?: () => void;
 	interop?: InteropContract;
 	share?: ShareContract;
 	/**
@@ -575,8 +581,11 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 								.flatMap((tool) => (tool.sourceInfo?.extension ? [tool.sourceInfo.extension] : [])),
 						}
 					: {}),
-				onDiagnostic: (message) => notify("warning", message, "operator-extensions:observation"),
+				onDiagnostic: (message) => {
+					if (!deps.reloadClasses?.captureIssue(message)) notify("warning", message, "operator-extensions:observation");
+				},
 				onReload: (result, reason) => {
+					if (deps.reloadClasses?.active) return;
 					if (result.status === "deferred") return;
 					const failed = result.status === "rejected" || result.degraded === undefined;
 					const degraded = (result.degraded ?? 0) > 0;
@@ -742,6 +751,8 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 		chatRenderer,
 		io,
 	} = presentation;
+	if (deps.startsResumed && deps.session)
+		hydrateResumedSessionPresentation(deps.session, chatPanel, readStructuredEntries, presentation.setLastTurnSummary);
 	// Every operator entry point reports the effective state after a successful
 	// change. One observer keeps shortcuts, slash commands, and forms consistent.
 	const withSettingFeedback =
@@ -889,6 +900,7 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 		requestRender: () => {},
 	};
 	const eventProjection = createInteractiveEventProjection({
+		isReloadReporting: () => deps.reloadClasses?.active === true,
 		bus: deps.bus,
 		chat: deps.chat,
 		status: statusController,
@@ -1044,6 +1056,29 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 		...(deps.onContextRefresh ? { onContextRefresh: deps.onContextRefresh } : {}),
 		stateDir: deps.stateDir,
 		shutdown: () => applicationController.shutdown(),
+		reloadClasses: createInteractiveReload(
+			deps.reloadClasses,
+			operatorExtensions,
+			(level, text) => slashRuntime.notice(level, text),
+			(report) => appendReloadReport(report, busNoticeSink),
+		),
+		restart: createInteractiveRestart({
+			...(deps.session ? { session: deps.session } : {}),
+			stateDir: deps.stateDir,
+			busyReason: () =>
+				interactiveRestartBusyReason({
+					chat: deps.chat,
+					dispatch: deps.dispatch,
+					operator: operatorExtensions,
+					editorBash: editorSubmit.hasActiveEditorBash(),
+					reloading: deps.reloadClasses?.active === true,
+					shuttingDown: shutdownArmed || getTerminationCoordinator().getPhase() !== "idle",
+				}),
+			settle: () => deps.chat.whenSettled(),
+			armHandoff: () => deps.armRestartHandoff?.(),
+			shutdown: () => applicationController.shutdown(),
+			notify,
+		}),
 		startUpgrade: () => {
 			// Keep package-manager and lifecycle code out of boot. The footer does
 			// no more than point at /upgrade; this graph loads only after the operator
@@ -1773,6 +1808,9 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 			try {
 				if (dumpInputWedgeOnTerminate) process.off("SIGTERM", dumpInputWedgeOnTerminate);
 				await operatorExtensions?.dispose();
+				// Finish terminal release before the exit handoff can start another reader.
+				if (lease) await lease.close();
+				else await shell.settle();
 				await deps.onShutdown();
 			} finally {
 				if (lease) await lease.close();
@@ -1821,7 +1859,9 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 				BusChannels.SessionResumed,
 				BusChannels.SessionTurnSwitched,
 			]
-				.map((channel) => deps.bus.on(channel, () => operatorExtensions.invalidateContext()))
+				.map((channel) =>
+					deps.bus.on(channel, () => operatorExtensions.invalidateContext(channel === BusChannels.SessionResumed)),
+				)
 				.concat(subscribeExtensionObservations(deps.bus, (observation) => operatorExtensions.observeV2(observation)))
 		: [];
 	scheduleOperatorMaintenance = () => {

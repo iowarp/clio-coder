@@ -30,6 +30,7 @@ import { validateSkin } from "./skin-schema.js";
 import { listInstalledExtensions } from "./state.js";
 import { type ActiveExtensionWorkspace, ExtensionSurfaceModel } from "./surface-model.js";
 import { type InstalledExtension, isLoadableExtension, type LoadableExtension } from "./types.js";
+import { readSessionWorkspace, writeSessionWorkspace } from "./workspace-session.js";
 
 type RuntimeContext = Omit<ExtensionRuntimeSnapshot, "generation">;
 
@@ -148,6 +149,7 @@ export class OperatorExtensionRuntimeV2 {
 	private activeContext: string | undefined;
 	/** Session the committed generation belongs to; a workspace survives a reload only within it. */
 	private sessionId: string | null | undefined;
+	private restoreWorkspace = false;
 	private closed = false;
 	private reloading = false;
 	private queued = false;
@@ -246,6 +248,9 @@ export class OperatorExtensionRuntimeV2 {
 	}
 	private spawn(entry: ApiV2Extension, context: RuntimeContext, generation: number): ExtensionRuntimeProcessV2 {
 		const paths = extensionDataPaths((this.options.stateDir ?? clioStateDir)(), entry.id, context.sessionId);
+		const inheritsWorkspace =
+			!this.restoreWorkspace &&
+			(this.sessionId === context.sessionId || (this.sessionId === null && context.sessionId !== null));
 		// The TUI has no session id until its first turn. What an extension kept
 		// in memory before then survives a reload in the meantime, and belongs to
 		// the session that turn creates.
@@ -254,13 +259,23 @@ export class OperatorExtensionRuntimeV2 {
 			previous !== undefined && previous.sessionId === null && context.sessionId === null
 				? previous.host
 				: createExtensionKeyValueHost(paths);
-		if (previous?.sessionId === null && context.sessionId !== null)
+		if (previous?.sessionId === null && context.sessionId !== null && inheritsWorkspace)
 			for (const key of previous.host.keys("state"))
 				if (keyValue.get("state", key).version === 0) keyValue.set("state", key, previous.host.get("state", key).value);
 		this.stateHosts.set(entry.id, { sessionId: context.sessionId, host: keyValue });
+		const saved =
+			!inheritsWorkspace && context.sessionId !== null
+				? readSessionWorkspace((this.options.stateDir ?? clioStateDir)(), context.sessionId)
+				: null;
+		const activeWorkspace = inheritsWorkspace
+			? this.workspaceFor(entry.id)
+			: saved?.extensionId === entry.id &&
+					entry.runtimeV2.workspaces.some((workspace) => workspace.id === saved.workspaceId)
+				? saved.workspaceId
+				: null;
 		const created: { process?: ExtensionRuntimeProcessV2 } = {};
 		created.process = new ExtensionRuntimeProcessV2(entry, {
-			snapshot: { ...context, generation, activeWorkspace: this.workspaceFor(entry.id) },
+			snapshot: { ...context, generation, activeWorkspace },
 			options: Object.fromEntries(entry.runtimeV2.config.map((field) => [field.key, field.default])),
 			keyValue,
 			storeDir: paths.storeDir,
@@ -275,7 +290,8 @@ export class OperatorExtensionRuntimeV2 {
 	}
 
 	/** Synchronous fence for resume, fork and branch switch, including same-session leaf changes. */
-	invalidateContext(): void {
+	invalidateContext(restoreWorkspace = false): void {
+		if (restoreWorkspace) this.restoreWorkspace = true;
 		if (this.closed || (!this.processes.size && !this.deferred.size && !this.reloading && !this.queued)) return;
 		this.lifetime++;
 		this.retireAll("session-change");
@@ -308,7 +324,7 @@ export class OperatorExtensionRuntimeV2 {
 			this.processes.delete(id);
 			this.failures.set(id, "installation disabled, removed, replaced, or changed; reload after reviewed installation");
 			this.retire(process, "installation-revoked");
-			if (this.surface.activeWorkspace?.extensionId === id) this.surface.leaveWorkspace();
+			if (this.surface.activeWorkspace?.extensionId === id) this.leaveWorkspace();
 			this.changed();
 		}
 		for (const [id, entry] of this.deferred) if (!admitted.has(identity(entry))) this.deferred.delete(id);
@@ -394,7 +410,9 @@ export class OperatorExtensionRuntimeV2 {
 			}
 			// The TUI has no session id until its first turn, and that turn's session
 			// inherits what was open before it, as its state does (spawn).
-			const sameSession = this.sessionId === context.sessionId || (this.sessionId === null && context.sessionId !== null);
+			const sameSession =
+				!this.restoreWorkspace &&
+				(this.sessionId === context.sessionId || (this.sessionId === null && context.sessionId !== null));
 			this.generation = next;
 			this.sessionId = context.sessionId;
 			this.activeContext = key;
@@ -411,6 +429,14 @@ export class OperatorExtensionRuntimeV2 {
 							entry.runtimeV2.workspaces.some((workspace) => workspace.id === active.workspaceId),
 					),
 			);
+			if (!sameSession && context.sessionId !== null) {
+				const saved = readSessionWorkspace((this.options.stateDir ?? clioStateDir)(), context.sessionId);
+				const owner = eligible.find((entry) => entry.id === saved?.extensionId);
+				if (saved && owner?.runtimeV2.workspaces.some((workspace) => workspace.id === saved.workspaceId))
+					this.surface.apply(owner.id, { workspace: { enter: saved.workspaceId } }, "command", owner.runtimeV2.workspaces);
+			}
+			if (sameSession) this.persistWorkspace();
+			this.restoreWorkspace = false;
 			await Promise.all(
 				[...staged].map(async ([id, process]) => {
 					if (failures.has(id)) return;
@@ -424,6 +450,8 @@ export class OperatorExtensionRuntimeV2 {
 			if (this.closed || lifetime !== this.lifetime || key !== contextKey(this.context()))
 				throw new Error("session or workspace changed during runtime activation");
 			if (context.mode === "interactive") {
+				for (const [id, process] of staged)
+					process.updateSnapshot({ ...context, generation: next, activeWorkspace: this.workspaceFor(id) });
 				for (const process of staged.values()) if (this.current(process)) this.arm(process, context.workspace);
 				this.observe({ event: "session_open", reason });
 				const active = this.surface.activeWorkspace;
@@ -740,6 +768,7 @@ export class OperatorExtensionRuntimeV2 {
 	}
 	/** Tell the runtimes involved; each reads `activeWorkspace` from its next snapshot. */
 	private workspaceMoved(before: ActiveExtensionWorkspace | null, after: ActiveExtensionWorkspace | null): void {
+		this.persistWorkspace();
 		const context = this.context();
 		for (const id of new Set([before?.extensionId, after?.extensionId])) {
 			if (id === undefined) continue;
@@ -749,6 +778,21 @@ export class OperatorExtensionRuntimeV2 {
 		}
 		if (before) this.observeOne(before.extensionId, { event: "workspace_leave", workspace: before.workspaceId });
 		if (after) this.observeOne(after.extensionId, { event: "workspace_enter", workspace: after.workspaceId });
+	}
+
+	private persistWorkspace(): void {
+		const sessionId = this.context().sessionId;
+		if (sessionId === null) return;
+		const active = this.surface.activeWorkspace;
+		try {
+			writeSessionWorkspace(
+				(this.options.stateDir ?? clioStateDir)(),
+				sessionId,
+				active ? { extensionId: active.extensionId, workspaceId: active.workspaceId } : null,
+			);
+		} catch (error) {
+			this.report(`Workspace selection could not be saved: ${message(error)}`);
+		}
 	}
 
 	/**
