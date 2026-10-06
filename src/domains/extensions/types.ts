@@ -215,6 +215,7 @@ export interface ExtensionReloadCommitted {
 export type ExtensionReloadResult = ExtensionReloadCommitted | ExtensionReloadRejection;
 
 export interface ExtensionListOptions {
+	lifecycle?: import("../../core/library-receipts.js").LifecycleContext;
 	scope?: ExtensionScope;
 	cwd?: string;
 	all?: boolean;

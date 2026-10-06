@@ -15,6 +15,7 @@ import path from "node:path";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { type ClioSettings, readSettings, settingsPath, updateSettings, validateSettings } from "../../core/config.js";
 import { DEFAULT_SETTINGS } from "../../core/defaults.js";
+import { recordLifecycleReceipt } from "../../core/library-receipts.js";
 import { readClioVersion } from "../../core/package-root.js";
 import {
 	type SafeResourceWriteResult,
@@ -944,6 +945,7 @@ export function importShareArchive(filePath: string, options: ShareImportOptions
 			failed = path.join(extensionBaseDir(extensionPackage.scope, cwd), extensionPackage.id);
 			const result = withStagedExtensionPackage(extensionPackage, (root) =>
 				installExtension(root, {
+					lifecycle: { operation: "share-import", source: path.resolve(filePath) },
 					cwd,
 					scope: extensionPackage.scope,
 					expectedEnvelopeDigest: extensionPackage.envelopeDigest,
@@ -991,6 +993,16 @@ export function importShareArchive(filePath: string, options: ShareImportOptions
 					backup: action.action === "overwrite",
 				}),
 			);
+			recordLifecycleReceipt({
+				operation: "share-import",
+				kind: targetInfo.entry.type === "fleet" ? "playbook" : targetInfo.entry.type,
+				id: targetInfo.entry.relativePath,
+				version: null,
+				contentDigest: sha256(targetInfo.buffer),
+				envelopeDigest: null,
+				scope: targetInfo.scope,
+				source: path.resolve(filePath),
+			});
 			failed = undefined;
 		}
 		return publicImportPlan(prepared, backups.length > 0 ? { written, backups } : undefined);

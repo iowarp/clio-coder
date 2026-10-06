@@ -2,11 +2,12 @@ import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { stringify as stringifyYaml } from "yaml";
 import { readSettings, updateSettings } from "../../core/config.js";
+import { recordLifecycleReceipt } from "../../core/library-receipts.js";
 import { runCommandVector, type SafeCommandResult } from "../../core/safe-exec.js";
 import { safeResourceWrite } from "../../core/safe-resource-write.js";
 import { withStateFileLockSync } from "../../core/state-file-lock.js";
 import { clioConfigDir } from "../../core/xdg.js";
-import { installExtension, loadManifestFromRoot } from "../extensions/index.js";
+import { installExtension, loadManifestFromRoot, reviewExtensionEnvelope } from "../extensions/index.js";
 import {
 	bundledPluginCatalog,
 	fetchPluginSource,
@@ -244,6 +245,16 @@ export function registerLibraryPackage(
 		safeResourceWrite(file, stringifyYaml({ entries: next.map(({ origin: _origin, index: _index, ...item }) => item) }), {
 			encoding: "utf8",
 		});
+	});
+	recordLifecycleReceipt({
+		operation: "register",
+		kind: entry.kind,
+		id: entry.name,
+		version: entry.version ?? null,
+		contentDigest: entry.sha256 ?? null,
+		envelopeDigest: entry.kind === "extension" ? (reviewExtensionEnvelope(local)?.digest ?? null) : null,
+		scope: options.scope ?? "user",
+		source: local,
 	});
 	return entry;
 }

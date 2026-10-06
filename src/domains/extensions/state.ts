@@ -11,6 +11,7 @@ import {
 	rmSync,
 } from "node:fs";
 import path from "node:path";
+import { recordLifecycleReceipt } from "../../core/library-receipts.js";
 import { canonicalizeExistingPath } from "../../core/path-canonical.js";
 import { safeResourceWrite } from "../../core/safe-resource-write.js";
 import { projectPackagesTrusted } from "../../core/workspace-trust.js";
@@ -666,6 +667,19 @@ export function installExtension(sourcePath: string, options: ExtensionInstallOp
 		diagnostics.push({ type: "warning", message: "corrupt extension install state was preserved", path: stateBackup });
 	}
 	const installed = findInstalled(manifest.id, cwd, scope);
+	recordLifecycleReceipt(
+		{
+			operation: previousDigest ? "update" : "install",
+			kind: "extension",
+			id: manifest.id,
+			version: manifest.version,
+			contentDigest: sourceDigest,
+			envelopeDigest: envelope ?? null,
+			scope,
+			source: options.source ?? source,
+		},
+		options.lifecycle,
+	);
 	return {
 		...(installed ? { extension: installed } : {}),
 		...(stateBackup || packageBackup
@@ -711,6 +725,19 @@ function mutateEnabled(id: string, enabled: boolean, options: ExtensionListOptio
 	else if (!state.disabled.includes(id)) state.disabled.push(id);
 	writeState(target.scope, state, cwd);
 	const extension = findInstalled(id, cwd, target.scope) ?? undefined;
+	recordLifecycleReceipt(
+		{
+			operation: enabled ? "enable" : "disable",
+			kind: "extension",
+			id,
+			version: target.version,
+			contentDigest: state.installed[id]?.contentDigest ?? null,
+			envelopeDigest: state.installed[id]?.envelopeDigest ?? null,
+			scope: target.scope,
+			source: state.installed[id]?.source ?? target.rootPath,
+		},
+		options.lifecycle,
+	);
 	return { ...(extension ? { extension } : {}), diagnostics: [] };
 }
 
@@ -736,6 +763,16 @@ export function removeExtension(id: string, options: ExtensionListOptions = {}):
 		};
 	}
 	const stateResult = readState(target.scope, cwd);
+	const receiptIdentity = {
+		operation: "remove" as const,
+		kind: "extension",
+		id,
+		version: target.version,
+		contentDigest: stateResult.state.installed[id]?.contentDigest ?? target.provenance?.contentDigest ?? null,
+		envelopeDigest: stateResult.state.installed[id]?.envelopeDigest ?? null,
+		scope: target.scope,
+		source: stateResult.state.installed[id]?.source ?? target.rootPath,
+	};
 	if (stateResult.status !== "valid") {
 		const filePath = statePath(target.scope, cwd);
 		const packageBackup = packageRecoveryPath(target.rootPath, "removed-unverifiable");
@@ -759,6 +796,7 @@ export function removeExtension(id: string, options: ExtensionListOptions = {}):
 			if (stateBackup) {
 				diagnostics.push({ type: "warning", message: "corrupt extension install state was preserved", path: stateBackup });
 			}
+			recordLifecycleReceipt(receiptIdentity, options.lifecycle);
 			return {
 				removed: { id, scope: target.scope, path: target.rootPath },
 				recovery: { ...(stateBackup ? { stateBackup } : {}), packageBackup },
@@ -805,6 +843,7 @@ export function removeExtension(id: string, options: ExtensionListOptions = {}):
 			],
 		};
 	}
+	recordLifecycleReceipt(receiptIdentity, options.lifecycle);
 	return {
 		removed: { id, scope: target.scope, path: target.rootPath },
 		...(packageBackup ? { recovery: { packageBackup } } : {}),

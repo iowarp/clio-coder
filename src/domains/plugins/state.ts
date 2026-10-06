@@ -13,6 +13,7 @@ import {
 	rmSync,
 } from "node:fs";
 import path from "node:path";
+import { recordLifecycleReceipt } from "../../core/library-receipts.js";
 import { canonicalizeExistingPath } from "../../core/path-canonical.js";
 import { safeResourceWrite } from "../../core/safe-resource-write.js";
 import { projectPackagesTrusted } from "../../core/workspace-trust.js";
@@ -672,6 +673,19 @@ export function installPlugin(sourcePath: string, options: PluginInstallOptions 
 			throw error;
 		}
 		if (moved && !preserveBackup) preserveBackup = retainRecovery(backup, previousDigest);
+		recordLifecycleReceipt(
+			{
+				operation: previouslyInstalled ? "update" : "install",
+				kind: manifest.clio.kind ?? "plugin",
+				id: manifest.name,
+				version: manifest.version ?? null,
+				contentDigest: digest,
+				envelopeDigest: null,
+				scope,
+				source: state.installed[manifest.name]?.source ?? source,
+			},
+			options.lifecycle,
+		);
 		const plugin = listInstalledPlugins(cwd, { scope, all: true }).find((entry) => entry.id === manifest.name);
 		return {
 			...(plugin ? { plugin } : {}),
@@ -726,6 +740,19 @@ function setEnabled(id: string, enabled: boolean, options: PluginMutationOptions
 		if (!enabled) state.disabled.push(id);
 		writeState(scope, cwd, state, bytes);
 		const updated = listInstalledPlugins(cwd, { scope, all: true }).find((entry) => entry.id === id);
+		recordLifecycleReceipt(
+			{
+				operation: enabled ? "enable" : "disable",
+				kind: plugin.kind ?? "plugin",
+				id,
+				version: plugin.version,
+				contentDigest: state.installed[id]?.contentDigest ?? null,
+				envelopeDigest: null,
+				scope,
+				source: state.installed[id]?.source ?? plugin.rootPath,
+			},
+			options.lifecycle,
+		);
 		return { ...(updated ? { plugin: updated } : {}), diagnostics: [] };
 	});
 }
@@ -746,6 +773,16 @@ export function removePlugin(id: string, options: PluginMutationOptions = {}): P
 		assertExpectedState(options.expect, cwd);
 		const target = path.join(pluginBaseDir(scope, cwd), id);
 		const previousDigest = state.installed[id]?.contentDigest;
+		const receiptIdentity = {
+			operation: "remove" as const,
+			kind: state.installed[id]?.kind ?? "plugin",
+			id,
+			version: readPluginManifest(target).manifest?.version ?? null,
+			contentDigest: previousDigest ?? null,
+			envelopeDigest: null,
+			scope,
+			source: state.installed[id]?.source ?? target,
+		};
 		if (!existsSync(target) && !state.installed[id]) throw new Error(`plugin ${id} is not installed`);
 		refuseBrokenDependents(cwd, { scope, id, operation: "remove" });
 		const backup = uniqueSibling(target, "removed");
@@ -768,6 +805,7 @@ export function removePlugin(id: string, options: PluginMutationOptions = {}): P
 			throw error;
 		}
 		if (moved && !preserve) preserve = retainRecovery(backup, previousDigest);
+		recordLifecycleReceipt(receiptIdentity, options.lifecycle);
 		return {
 			removed: { id, scope, path: target },
 			...(preserve ? { recovery: { packageBackup: backup } } : {}),

@@ -217,6 +217,7 @@ export function applyLibraryImport(
 		if (!candidate.valid || !candidate.contentDigest)
 			throw new Error(candidate.diagnostics.map((d) => d.message).join("; "));
 		const installed = installInteropPackage({
+			lifecycle: { operation: "import", source: plan.source.input },
 			sourcePath: staging,
 			kind: candidate.manifest?.clio.kind ?? "plugin",
 			trust: "foreign",

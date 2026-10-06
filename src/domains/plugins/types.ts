@@ -1,3 +1,6 @@
+import type { LifecycleContext } from "../../core/library-receipts.js";
+import type { PackageIdentity } from "../../core/package-identity.js";
+
 export type PluginScope = "user" | "project";
 export type PluginResourceKind = "skills" | "prompts" | "agents" | "playbooks";
 export type PluginComponentKind = "prompt" | "agent" | "skill" | "playbook" | "script" | "resource" | "tool";
@@ -142,6 +145,7 @@ export interface InstalledPlugin {
 }
 
 export interface PluginResourceRoot {
+	owner?: PackageIdentity;
 	id: string;
 	scope: PluginScope;
 	path: string;
@@ -159,6 +163,7 @@ export interface PluginListOptions {
 }
 
 export interface PluginMutationOptions extends PluginListOptions {
+	lifecycle?: LifecycleContext;
 	expect?: PluginExpectedState;
 }
 
