@@ -440,7 +440,7 @@ entries:
       lab feasibility, task execution and verified paper handoff."
     version: 0.2.0
     sourceUrl: plugins/materio
-    sha256: a2f6d2da141e13b77b5a630e5b437df7bc8eec1e7c095be7c55e04498da6ef84
+    sha256: b13d844666768c1879a3e7f72e321ad04994a7d897c1cbf78d05bc0b34ab01d6
     provides:
       - kind: agent
         name: materio-lab-definer
@@ -561,7 +561,7 @@ entries:
       advisory guardrails.
     version: 0.2.0
     sourceUrl: extensions/materio
-    sha256: 60410298119a92d9ce9a39424b83a718fc9d69994d609ce0c54a2d0028ae896a
+    sha256: 36a8681cd33cecc53f80ac4d354062c03fcdc7d8f615e95bc9c8b5164ca42399
     plugin: materio
     provides:
       - kind: extension
