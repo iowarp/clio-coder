@@ -9,9 +9,9 @@
  * Opening a workspace is never automatic the first time. The operator is asked
  * once, whether the pane host is already installed or would have to be
  * downloaded, and the answer is remembered. It is remembered in Clio's state
- * directory, not in settings.yaml: the settings file is the operator's own, an
- * `off` written there is never rewritten, and an operator who has `off` gets
- * the same single invitation and nothing more if they decline it.
+ * directory, not in settings.yaml: the settings file is the operator's own and
+ * an `off` written there is never rewritten. An `off` is an answer, so a home
+ * that carries it is never invited; only a home without the key is asked.
  *
  * The pane host is found before it is fetched. A copy the operator already has
  * on PATH is used when it clears the registry floor, then the pinned copy the
@@ -39,9 +39,8 @@ function workspaceIneligibility(input: WorkspaceEligibilityInput): string | null
 	if (input.options.headless || input.options.acp) return "not an interactive session";
 	if (input.options.panes === "without") return "--no-panes";
 	// `auto` is a chosen meaning, "join a pane host, never start one", so it is
-	// neither opened nor invited. `off` is not opened either, but it is what
-	// every settings file written before workspaces existed says, so it gets
-	// the one invitation.
+	// neither opened nor invited. `off` is decided by workspaceOutcome: never
+	// invited, and opened only after an explicit `panes workspace on`.
 	if (input.setting === "auto") return "interface.panes.enabled is auto";
 	if (!input.stdinIsTTY || !input.stdoutIsTTY) return "not a terminal";
 	if (input.env.TERM === "dumb") return "TERM is dumb";

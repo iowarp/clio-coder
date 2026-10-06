@@ -81,7 +81,8 @@ export type WorkspaceOutcome =
  * exclusions (`--no-panes`, no terminal, already inside a pane host or tmux,
  * Windows) that always mean the plain terminal.
  *
- * `off` in settings and a yes can disagree, and which one is later decides. A
+ * `off` in settings with no remembered answer never asks. `off` in settings and a yes
+ * can disagree, and which one is later decides. A
  * yes given while the setting was `embedded` is overruled by the operator
  * turning the setting off afterwards. A yes given while the setting was already
  * `off`, at the invitation or with `panes workspace on`, is the later word and
@@ -95,8 +96,18 @@ export function workspaceOutcome(setting: string, consent: WorkspaceConsent | nu
 				"interface.panes.enabled is auto: Clio joins a pane host it is started inside and never starts one, whatever is remembered here",
 		};
 	}
-	if (consent === null)
+	if (consent === null) {
+		// An `off` in the operator's settings is an answer already. The invitation is for homes that never
+		// said, which read `embedded` from the default.
+		if (setting === "off") {
+			return {
+				kind: "plain",
+				reason:
+					"interface.panes.enabled is off, so Clio never invites; `clio-coder panes workspace on` or setting it to embedded turns workspaces on",
+			};
+		}
 		return { kind: "ask", reason: "no answer is remembered, so the next interactive launch asks once" };
+	}
 	if (consent.decision === "declined") {
 		return { kind: "plain", reason: "you declined; `clio-coder panes workspace on` turns workspaces on" };
 	}
