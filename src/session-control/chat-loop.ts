@@ -1,5 +1,5 @@
-import { CONTEXT_OPERATION_CUSTOM_TYPE, createContextOperation } from "../core/context-operation.js";
 import { randomUUID } from "node:crypto";
+import { CONTEXT_OPERATION_CUSTOM_TYPE, createContextOperation } from "../core/context-operation.js";
 import { createConversationEggs } from "../domains/session/easter-eggs.js";
 import type { TurnControlRecord, TurnOutcomeRecord } from "../domains/turn-control/index.js";
 import type { AskUserHandler } from "../tools/ask-user.js";
@@ -1544,6 +1544,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 	});
 
 	const persistence = createTurnPersistence({
+		getToolOwner: (name) => deps.toolRegistry?.get(name as import("../core/tool-names.js").ToolName)?.sourceInfo?.owner,
 		state,
 		session: deps.session,
 		readSessionEntries: deps.readSessionEntries,

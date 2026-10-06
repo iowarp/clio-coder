@@ -215,6 +215,8 @@ export function registerLibraryPackage(
 	const candidate = validateLibraryPackage(local);
 	if (!candidate.valid || !candidate.manifest || !candidate.contentDigest) throw new Error(validationReasons(candidate));
 	const manifest = candidate.manifest;
+	const receiptEnvelopeDigest =
+		manifest.clio.kind === "extension" ? (reviewExtensionEnvelope(local)?.digest ?? null) : null;
 	const serves = manifest.clio.kind === "extension" ? loadManifestFromRoot(local).manifest?.plugin : undefined;
 	const entry: LibraryEntry = {
 		kind: manifest.clio.kind ?? "plugin",
@@ -252,7 +254,7 @@ export function registerLibraryPackage(
 		id: entry.name,
 		version: entry.version ?? null,
 		contentDigest: entry.sha256 ?? null,
-		envelopeDigest: entry.kind === "extension" ? (reviewExtensionEnvelope(local)?.digest ?? null) : null,
+		envelopeDigest: receiptEnvelopeDigest,
 		scope: options.scope ?? "user",
 		source: local,
 	});

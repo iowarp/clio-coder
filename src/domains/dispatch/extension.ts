@@ -1,5 +1,6 @@
 import { writeDiagnostic } from "../../core/diagnostics.js";
 import { boundedExternalDiagnostic } from "../../core/external-diagnostic.js";
+import { PLUGIN_RESOURCE_USE, recordPackageActivity } from "../../core/package-activity.js";
 import { readPiMonoVersion } from "../../engine/pi-mono-names.js";
 import { parseWorkerContextSeed } from "../../worker/context-seed.js";
 import { WORKER_STDIN_FRAME_MAX_BYTES } from "../../worker/protocol.js";
@@ -6964,6 +6965,18 @@ export function createDispatchBundle(
 				recordToolFinish(toolStats, { ...event.payload, tool });
 				if (isSkillActivation(event.payload.skillActivation)) {
 					skillActivations.push(event.payload.skillActivation);
+					const activation = event.payload.skillActivation;
+					if (activation.owner)
+						recordPackageActivity({
+							type: PLUGIN_RESOURCE_USE,
+							kind: "skill",
+							owner: activation.owner,
+							...((activation.runId ?? runIdForPermissionAudit)
+								? { runId: activation.runId ?? (runIdForPermissionAudit as string) }
+								: {}),
+							outcome: "loaded",
+							details: { name: activation.name, hash: activation.hash },
+						});
 				}
 				if (event.payload.decision === "allowed") safetyDecisionCounts.allowed += 1;
 				else if (event.payload.decision === "blocked") safetyDecisionCounts.blocked += 1;

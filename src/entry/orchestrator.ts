@@ -19,6 +19,7 @@ import { detectSupportedImageMimeType, expandInlineFileReferencesAsync } from ".
 import { setCommitDecisionRefsProvider, setGitCommitAttributionEnabled } from "../core/git-commit-attribution.js";
 import { configureGuardrails, guardrailValuesFromSettings } from "../core/guardrails.js";
 import { HEADLESS_PERMISSION_DENIED_REASON } from "../core/headless-permission.js";
+import { flushPackageActivities, recordPackageActivity } from "../core/package-activity.js";
 import { protectedResidencyModels } from "../core/residency-protection.js";
 import { type RouteProvenance, resolveRouteProvenance } from "../core/route-provenance.js";
 import {
@@ -308,6 +309,7 @@ import type { BootOptions } from "./boot-options.js";
 import { readCompactionSystemPrompt } from "./compaction-prompt.js";
 import { createExtensionReloadCoordinator } from "./extension-reload.js";
 import { createFlowLedger, FLOW_RESTRICTION_ENTRY_TYPE } from "./flow-ledger.js";
+import { bindSessionPackageActivity } from "./package-activity.js";
 import { resolvePanesEnablement } from "./panes-activation.js";
 import { reloadPluginResourcesAndNotify } from "./plugin-reload.js";
 import { createReloadClasses } from "./reload-classes.js";
@@ -1891,6 +1893,11 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		return { exitCode: 1, bootTimeMs: timer.snapshot().totalMs };
 	}
 
+	if (session) {
+		const unbindActivity = bindSessionPackageActivity(session, observability);
+		termination.onDrain(unbindActivity);
+		termination.onDrain(bus.on(BusChannels.SessionResumed, () => flushPackageActivities()));
+	}
 	// A headless `--session`/`--continue` resolves here, where the session
 	// domain exists. It is a hard requirement rather than a hint: a caller that
 	// asked to continue a conversation must not receive an answer written
@@ -2491,7 +2498,30 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		middleware,
 		...(runtimeHooks ? { runtimeHooks } : {}),
 		cwd: () => process.cwd(),
-		recordReceipt: (receipt) => hookReceiptLog.record(receipt),
+		recordReceipt: (receipt) => {
+			const sessionId = session?.current()?.id;
+			const attributed = { ...receipt, ...(sessionId ? { sessionId } : {}) };
+			hookReceiptLog.record(attributed);
+			if (receipt.extension)
+				recordPackageActivity({
+					kind: `hook:${receipt.hook}`,
+					at: new Date(receipt.at).toISOString(),
+					owner: {
+						kind: "extension",
+						id: receipt.extension.id,
+						version: receipt.extensionVersion ?? "",
+						digest: receipt.extension.contentDigest,
+						scope: receipt.extension.scope,
+					},
+					outcome: receipt.outcome,
+					...(receipt.turnId ? { turnId: receipt.turnId } : {}),
+					details: {
+						effectKinds: receipt.effectKinds ?? [],
+						generation: receipt.extension.generation,
+						durationMs: receipt.durationMs ?? null,
+					},
+				});
+		},
 		report: (line) => {
 			if (reloadClasses.captureIssue(line)) return;
 			if (!interactive) process.stderr.write(`${line}\n`);
@@ -4720,6 +4750,14 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 				pendingSkillRequests: [],
 			};
 			const promptExpansion = resources?.expandPromptTemplate(parsedSkillRequest.text, process.cwd());
+			if (promptExpansion?.expanded && promptExpansion.template.sourceInfo.owner)
+				recordPackageActivity({
+					type: "clio_coder_plugin_resource_use",
+					kind: "prompt",
+					owner: promptExpansion.template.sourceInfo.owner,
+					outcome: "expanded",
+					details: { name: promptExpansion.template.name },
+				});
 			// A prompt named as `/name` is a request for that template. When the
 			// template refuses, the run says why and stops; sending the literal
 			// `/name` on to the model spends a turn answering a command it cannot

@@ -139,6 +139,7 @@ export interface ExtensionCandidate {
 }
 
 export interface ExtensionHookSource {
+	version?: string;
 	provenance: ExtensionProvenance;
 	/** SHA-256 of the captured hooks.yaml bytes. */
 	declarationsDigest: string;

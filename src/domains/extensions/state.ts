@@ -669,7 +669,7 @@ export function installExtension(sourcePath: string, options: ExtensionInstallOp
 	const installed = findInstalled(manifest.id, cwd, scope);
 	recordLifecycleReceipt(
 		{
-			operation: previousDigest ? "update" : "install",
+			operation: movedExisting ? "update" : "install",
 			kind: "extension",
 			id: manifest.id,
 			version: manifest.version,

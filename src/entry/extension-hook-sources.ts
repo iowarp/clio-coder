@@ -13,6 +13,7 @@ export function capturedHookSourcesFor(
 		generation: snapshot.generation,
 		sources: snapshot.hookSources.map((source) => ({
 			provenance: {
+				...(source.version !== undefined ? { version: source.version } : {}),
 				id: source.provenance.id,
 				scope: source.provenance.scope,
 				...(source.provenance.sourcePath !== undefined ? { sourcePath: source.provenance.sourcePath } : {}),

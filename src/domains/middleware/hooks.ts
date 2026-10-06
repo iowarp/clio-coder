@@ -90,6 +90,7 @@ export const USER_HOOK_PROMPT_MAX_CHARS = 2_000;
  * data; it neither reads packages nor knows how the digests were produced.
  */
 export interface UserHookPackageProvenance {
+	version?: string;
 	id: string;
 	/** Install scope label of the package (for example "user" or "project"). */
 	scope: string;
@@ -396,6 +397,9 @@ export interface HookReceiptExtension {
 }
 
 export interface HookReceipt {
+	extensionVersion?: string;
+	sessionId?: string;
+	turnId?: string;
 	at: number;
 	hookId: string;
 	origin: UserHookOrigin;
@@ -463,7 +467,11 @@ export function userHookToRegistration(
 	// by a registration from an older generation names that generation even
 	// after a newer one is active.
 	const extension = hook.source.extension === undefined ? undefined : receiptExtension(hook.source.extension);
-	const baseReceipt = (input: { toolName?: string }): Omit<HookReceipt, "outcome"> => ({
+	const baseReceipt = (input: {
+		toolName?: string;
+		sessionId?: string;
+		turnId?: string;
+	}): Omit<HookReceipt, "outcome"> => ({
 		at: now(),
 		hookId: hook.id,
 		origin: hook.source.origin,
@@ -472,7 +480,12 @@ export function userHookToRegistration(
 		hook: hook.on,
 		kind: hook.spec.kind,
 		...(extension !== undefined ? { extension: { ...extension } } : {}),
+		...(hook.source.extension?.provenance.version !== undefined
+			? { extensionVersion: hook.source.extension.provenance.version }
+			: {}),
 		...(input.toolName !== undefined ? { toolName: input.toolName } : {}),
+		...(input.sessionId !== undefined ? { sessionId: input.sessionId } : {}),
+		...(input.turnId !== undefined ? { turnId: input.turnId } : {}),
 	});
 	const registration: MiddlewareHookRegistration = {
 		id: hook.id,

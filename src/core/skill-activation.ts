@@ -1,3 +1,5 @@
+import { isPackageIdentity } from "./package-identity.js";
+
 export type SkillActivationTrigger = "slash-command" | "tool";
 export type PendingSkillRequestSource = "slash-command" | "selector" | "marketplace" | "recipe";
 
@@ -340,6 +342,7 @@ export function agentSkillToolPolicy(
 }
 
 export interface SkillActivation {
+	owner?: import("./package-identity.js").PackageIdentity;
 	name: string;
 	filePath: string;
 	hash: string;
@@ -361,12 +364,13 @@ export interface SkillActivation {
 }
 
 export interface SkillActivationSource {
+	owner?: import("./package-identity.js").PackageIdentity;
 	name: string;
 	filePath: string;
 	hash: string;
 	source: string;
 	sourceOrigin?: string;
-	sourceInfo?: { source?: string };
+	sourceInfo?: { source?: string; owner?: import("./package-identity.js").PackageIdentity };
 }
 
 function trimmedString(value: unknown): string | null {
@@ -379,6 +383,7 @@ function skillActivationFromSource(
 	turnId?: string,
 ): SkillActivation {
 	const sourceOrigin = trimmedString(source.sourceOrigin) ?? trimmedString(source.sourceInfo?.source);
+	const owner = source.owner ?? source.sourceInfo?.owner;
 	return {
 		name: source.name,
 		filePath: source.filePath,
@@ -386,6 +391,7 @@ function skillActivationFromSource(
 		source: source.source,
 		...(sourceOrigin ? { sourceOrigin } : {}),
 		triggeredBy,
+		...(owner ? { owner } : {}),
 		...(turnId ? { turnId } : {}),
 	};
 }
@@ -405,6 +411,8 @@ export function skillActivationFromToolDetails(details: unknown, turnId?: string
 		turnId,
 	);
 	if (record.drift === "match" || record.drift === "mismatch") activation.drift = record.drift;
+	const owner = record.owner ?? (record.sourceInfo as SkillActivationSource["sourceInfo"])?.owner;
+	if (isPackageIdentity(owner)) activation.owner = owner;
 	if (record.activation === "recipe" || record.activation === "model" || record.activation === "operator") {
 		activation.requestSource = record.activation;
 	}
@@ -420,6 +428,7 @@ export function isSkillActivation(value: unknown): value is SkillActivation {
 		typeof record.hash === "string" &&
 		typeof record.source === "string" &&
 		(record.sourceOrigin === undefined || typeof record.sourceOrigin === "string") &&
+		(record.owner === undefined || isPackageIdentity(record.owner)) &&
 		(record.requestSource === undefined ||
 			record.requestSource === "recipe" ||
 			record.requestSource === "model" ||

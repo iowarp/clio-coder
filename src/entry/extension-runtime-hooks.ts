@@ -160,6 +160,7 @@ function createRuntimeHookRunner(
 	const provenance = entry.provenance;
 	let streak = 0;
 	let disabled = false;
+	let turnId: string | null = null;
 	const reported = new Set<string>();
 	const notify = (reason: string): void => {
 		if (reported.has(reason)) return;
@@ -176,6 +177,7 @@ function createRuntimeHookRunner(
 	};
 	return {
 		async run(event) {
+			turnId = "turnId" in event ? event.turnId : null;
 			if (disabled) return failed("is disabled after repeated missed deadlines", hook.onTimeout, "runtime-timeout");
 			const executor = bridge.current();
 			if (executor === null) return failed("has no running runtime", hook.onError, "runtime-failed");
@@ -194,12 +196,14 @@ function createRuntimeHookRunner(
 			try {
 				options.recordReceipt({
 					at: now(),
+					...(turnId ? { turnId } : {}),
 					hookId: id,
 					origin: "extension",
 					sourcePath: entry.manifestPath,
 					hash: digest,
 					hook: point,
 					kind: "runtime",
+					extensionVersion: entry.version,
 					outcome: verdict.kind === "ok" ? "runtime-ok" : verdict.outcome,
 					durationMs: Math.round(performance.now() - startedAt),
 					...(effectKinds.length > 0 ? { effectKinds: [...effectKinds] } : {}),

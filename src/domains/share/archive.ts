@@ -985,6 +985,16 @@ export function importShareArchive(filePath: string, options: ShareImportOptions
 			if (targetInfo.entry.type === "settings") {
 				const path = mergeSettingsFragment(targetInfo.buffer);
 				if (!written.includes(path)) written.push(path);
+				recordLifecycleReceipt({
+					operation: "share-import",
+					kind: "settings",
+					id: targetInfo.entry.relativePath,
+					version: null,
+					contentDigest: sha256(targetInfo.buffer),
+					envelopeDigest: null,
+					scope: targetInfo.scope,
+					source: filePath,
+				});
 				failed = undefined;
 				continue;
 			}

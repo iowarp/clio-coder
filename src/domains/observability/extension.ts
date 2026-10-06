@@ -250,6 +250,9 @@ export function createObservabilityBundle(
 		recordSessionTurn(sessionTurn) {
 			trace.enqueueSessionTurn(sessionTurn);
 		},
+		recordPackageActivity(activity) {
+			trace.enqueuePackageActivity?.(activity);
+		},
 		recordTokenThroughput(snapshot) {
 			latestThroughput = snapshot;
 			projection.refresh();

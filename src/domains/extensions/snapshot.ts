@@ -89,6 +89,7 @@ export function buildExtensionSnapshot(input: BuildExtensionSnapshotInput): Exte
 					parseError = error instanceof Error ? error.message : String(error);
 				}
 				hookSources.push({
+					version: entry.version,
 					provenance: entry.provenance,
 					declarationsDigest: hooksDigest,
 					declarations,

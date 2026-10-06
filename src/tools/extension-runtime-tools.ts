@@ -1,6 +1,7 @@
 import type { TSchema } from "typebox";
 import { Value } from "typebox/value";
 import type { DynamicToolName } from "../core/tool-names.js";
+import { extensionIdentity } from "../domains/extensions/activity.js";
 import { extensionToolName } from "../domains/extensions/command-schema.js";
 import type { ExtensionRuntimeHookBridge } from "../domains/extensions/runtime-hook-bridge.js";
 import { type InstalledExtension, isLoadableExtension } from "../domains/extensions/types.js";
@@ -33,6 +34,7 @@ export function buildExtensionRuntimeToolSpecs(
 	for (const entry of packages) {
 		if (!isLoadableExtension(entry) || entry.runtimeV2 === undefined) continue;
 		const extensionId = entry.id;
+		const owner = extensionIdentity(entry);
 		for (const tool of entry.runtimeV2.tools) {
 			const name = extensionToolName(extensionId, tool.name) as DynamicToolName;
 			specs.push({
@@ -42,7 +44,7 @@ export function buildExtensionRuntimeToolSpecs(
 				baseActionClass: tool.actionClass,
 				executionMode: "sequential",
 				placement: "gateway",
-				sourceInfo: { path: entry.manifestPath, scope: "domain", extension: entry.provenance },
+				sourceInfo: { path: entry.manifestPath, scope: "domain", extension: entry.provenance, owner },
 				metadata: {
 					objective: tool.description,
 					uiLabel: `${extensionId}/${tool.name}`,
@@ -52,25 +54,35 @@ export function buildExtensionRuntimeToolSpecs(
 				},
 				async run(args, options): Promise<ToolResult> {
 					if (!Value.Check(tool.inputSchema as TSchema, args))
-						return { kind: "error", message: `${name}: input does not match its declared JSON schema` };
+						return { kind: "error", message: `${name}: input does not match its declared JSON schema`, details: { owner } };
 					const executor = bridge.current();
-					if (!executor?.tool) return { kind: "error", message: `${name}: the ${extensionId} runtime is not running` };
+					if (!executor?.tool)
+						return { kind: "error", message: `${name}: the ${extensionId} runtime is not running`, details: { owner } };
 					try {
 						const result = await executor.tool(extensionId, tool.name, args, options?.signal);
 						if (result.interview) {
-							if (!executor.interview) return { kind: "error", message: `${name}: no operator can answer an interview here` };
+							if (!executor.interview)
+								return { kind: "error", message: `${name}: no operator can answer an interview here`, details: { owner } };
 							const parked = await executor.interview(extensionId, result.interview, options?.signal);
 							const output = bounded(
 								JSON.stringify({ interview: parked.outcome, answers: parked.answers, text: parked.text }),
 							);
-							return parked.outcome === "done" ? { kind: "ok", output } : { kind: "error", message: output };
+							return parked.outcome === "done"
+								? { kind: "ok", output, details: { owner } }
+								: { kind: "error", message: output, details: { owner } };
 						}
 						const output = bounded(
 							result.data === undefined ? result.text : `${result.text}\n${JSON.stringify(result.data)}`,
 						);
-						return result.isError === true ? { kind: "error", message: output } : { kind: "ok", output };
+						return result.isError === true
+							? { kind: "error", message: output, details: { owner } }
+							: { kind: "ok", output, details: { owner } };
 					} catch (error) {
-						return { kind: "error", message: `${name}: ${error instanceof Error ? error.message : String(error)}` };
+						return {
+							kind: "error",
+							message: `${name}: ${error instanceof Error ? error.message : String(error)}`,
+							details: { owner },
+						};
 					}
 				},
 			});

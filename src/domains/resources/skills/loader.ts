@@ -118,6 +118,7 @@ export interface Skill {
 }
 
 export interface SkillRoot {
+	owner?: import("../../../core/package-identity.js").PackageIdentity;
 	rootPath?: string;
 	plugin?: boolean;
 	path: string;
@@ -287,6 +288,7 @@ export function defaultSkillRoots(input: LoadSkillsInput = {}): SkillRoot[] {
 			plugin: true,
 			containment: root.rootPath,
 			origin: root.source,
+			...(root.owner ? { owner: root.owner } : {}),
 			precedence: SKILL_PRECEDENCE.package,
 			trusted: root.trust !== "foreign" || trustProject,
 		});
@@ -690,6 +692,7 @@ function loadSkillFile(
 		path: filePath,
 		scope,
 		...(root.origin ? { source: root.origin } : {}),
+		...(root.owner ? { owner: root.owner } : {}),
 	};
 	const provenance = extractProvenance(parsed.frontmatter);
 	const allowedTools = declaredToolSurface(parsed.frontmatter, "allowed-tools", filePath, diagnostics);
@@ -836,6 +839,7 @@ function loadExplicitSkillPath(
 			? {
 					...(owner.rootPath ? { rootPath: owner.rootPath, containment: owner.rootPath } : {}),
 					...(owner.plugin !== undefined ? { plugin: owner.plugin } : {}),
+					...(owner.owner ? { owner: owner.owner } : {}),
 					trusted: owner.trusted,
 				}
 			: {}),

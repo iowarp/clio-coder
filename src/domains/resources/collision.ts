@@ -1,6 +1,7 @@
 export type ResourceScope = "package" | "user" | "project" | "cli";
 
 export interface ResourceSourceInfo {
+	owner?: import("../../core/package-identity.js").PackageIdentity;
 	path: string;
 	scope: ResourceScope;
 	source?: string;

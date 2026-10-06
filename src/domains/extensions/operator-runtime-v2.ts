@@ -1,6 +1,8 @@
 import { readFileSync, realpathSync } from "node:fs";
 import path from "node:path";
+import { recordPackageActivity } from "../../core/package-activity.js";
 import { clioStateDir } from "../../core/xdg.js";
+import { extensionIdentity } from "./activity.js";
 import {
 	type ExtensionCommandRow,
 	extensionInvocation,
@@ -183,12 +185,21 @@ interface ObservationQueue {
  * native workers or model tool bootstrap.
  */
 export class OperatorExtensionRuntimeV2 {
+	private activity(entry: InstalledExtension, kind: string, outcome?: string, details?: Record<string, unknown>): void {
+		recordPackageActivity({
+			owner: extensionIdentity(entry),
+			kind,
+			...(outcome ? { outcome } : {}),
+			...(details ? { details } : {}),
+		});
+	}
 	readonly surface: ExtensionSurfaceModel;
 	private processes = new Map<string, ExtensionRuntimeProcessV2>();
 	/** Eligible this generation and not yet started. */
 	private deferred = new Map<string, ApiV2Extension>();
 	private starting = new Map<string, Promise<ExtensionRuntimeProcessV2>>();
 	private inventory: InstalledExtension[] = [];
+	private workspaceEntry: InstalledExtension | undefined;
 	private failures = new Map<string, string>();
 	private queues = new Map<ExtensionRuntimeProcessV2, ObservationQueue>();
 	/** Host-driven schedules; a runtime never keeps its own timers or watches. */
@@ -285,6 +296,7 @@ export class OperatorExtensionRuntimeV2 {
 		return `operator runtime limit is ${RUNTIME_V2_LIMITS.processes} across api 1 and api 2; disable another runtime and reload`;
 	}
 	private retire(process: ExtensionRuntimeProcessV2, reason: string): void {
+		this.activity(process.extension, "runtime_retire", reason, { generation: this.generation });
 		this.disarm(process);
 		this.queues.delete(process);
 		const task = process.dispose(reason);
@@ -328,12 +340,19 @@ export class OperatorExtensionRuntimeV2 {
 				? saved.workspaceId
 				: null;
 		const created: { process?: ExtensionRuntimeProcessV2 } = {};
+		let reportedState = "";
 		created.process = new ExtensionRuntimeProcessV2(entry, {
 			snapshot: { ...context, generation, activeWorkspace },
 			options: Object.fromEntries(entry.runtimeV2.config.map((field) => [field.key, field.default])),
 			keyValue,
 			storeDir: paths.storeDir,
 			onState: () => {
+				const runtime = created.process;
+				if (runtime && runtime.state !== reportedState) {
+					reportedState = runtime.state;
+					if (runtime.state === "ready") this.activity(entry, "runtime_start", "ready", { generation });
+					if (runtime.failure) this.activity(entry, "runtime_failure", "error", { generation, reason: runtime.failure });
+				}
 				if (created.process && this.processes.get(entry.id) === created.process) this.changed();
 			},
 		});
@@ -481,6 +500,7 @@ export class OperatorExtensionRuntimeV2 {
 			this.deferred = deferred;
 			this.failures = failures;
 			// The picture is rebuilt by the new generation; a workspace stays only while its owner can still hold it.
+			const beforeWorkspace = this.surface.activeWorkspace;
 			this.surface.reset(
 				(active) =>
 					sameSession &&
@@ -496,6 +516,8 @@ export class OperatorExtensionRuntimeV2 {
 				if (saved && owner?.runtimeV2.workspaces.some((workspace) => workspace.id === saved.workspaceId))
 					this.surface.apply(owner.id, { workspace: { enter: saved.workspaceId } }, "command", owner.runtimeV2.workspaces);
 			}
+			if (beforeWorkspace !== this.surface.activeWorkspace)
+				this.recordWorkspaceChange(beforeWorkspace, this.surface.activeWorkspace);
 			if (sameSession) this.persistWorkspace();
 			this.restoreWorkspace = false;
 			await Promise.all(
@@ -552,6 +574,11 @@ export class OperatorExtensionRuntimeV2 {
 			this.options.onReload?.(result, reason);
 		} catch {
 			/* Reporting follows settlement. */
+		}
+		for (const entry of this.inventory.filter(isApiV2)) {
+			if (failures.has(entry.id))
+				this.activity(entry, "runtime_failure", "error", { generation: result.generation, reason: failures.get(entry.id) });
+			this.activity(entry, "runtime_reload", result.status, { generation: result.generation, reason });
 		}
 		return result;
 	}
@@ -733,12 +760,21 @@ export class OperatorExtensionRuntimeV2 {
 		);
 		if (!entry) throw new Error("extension command unavailable");
 		const name = invocation.slice(invocation.lastIndexOf(":") + 1);
-		return this.operator(
-			entry,
-			(process, abort) => process.command(name, args, abort),
-			(process, output) => this.apply(process, output, "command"),
-			signal,
-		);
+		const details = { invocation, plugin: entry.plugin ?? null, takeover: row.replaces === "prompt" };
+		this.activity(entry, "command", "started", details);
+		try {
+			const output = await this.operator(
+				entry,
+				(process, abort) => process.command(name, args, abort),
+				(process, output) => this.apply(process, output, "command"),
+				signal,
+			);
+			this.activity(entry, "command", "ok", details);
+			return output;
+		} catch (error) {
+			this.activity(entry, "command", "error", { ...details, reason: message(error) });
+			throw error;
+		}
 	}
 
 	/** A press on something this extension drew. */
@@ -881,6 +917,14 @@ export class OperatorExtensionRuntimeV2 {
 		}
 		if (before) this.observeOne(before.extensionId, { event: "workspace_leave", workspace: before.workspaceId });
 		if (after) this.observeOne(after.extensionId, { event: "workspace_enter", workspace: after.workspaceId });
+		this.recordWorkspaceChange(before, after);
+	}
+	private recordWorkspaceChange(before: ActiveExtensionWorkspace | null, after: ActiveExtensionWorkspace | null): void {
+		const previous = this.workspaceEntry ?? this.inventory.find((entry) => entry.id === before?.extensionId);
+		if (before && previous) this.activity(previous, "workspace_leave", "ok", { workspace: before.workspaceId });
+		this.workspaceEntry = this.inventory.find((entry) => entry.id === after?.extensionId);
+		if (after && this.workspaceEntry)
+			this.activity(this.workspaceEntry, "workspace_enter", "ok", { workspace: after.workspaceId });
 	}
 
 	/** Save which workspace is open under the session, for a restart that must come back to it. */
@@ -994,6 +1038,7 @@ export class OperatorExtensionRuntimeV2 {
 		await this.reloadTask;
 		await Promise.allSettled([...this.starting.values()]);
 		await Promise.all(this.retired);
+		if (this.surface.activeWorkspace) this.recordWorkspaceChange(this.surface.activeWorkspace, null);
 		this.surface.reset(() => false);
 	}
 }

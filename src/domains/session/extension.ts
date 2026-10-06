@@ -4,6 +4,7 @@ import {
 	type SessionResumeVia as ResumeVia,
 } from "../../core/bus-events.js";
 import type { DomainBundle, DomainContext, DomainExtension } from "../../core/domain-loader.js";
+import { flushPackageActivities, PLUGIN_RESOURCE_USE, recordPackageActivity } from "../../core/package-activity.js";
 import { performCheckpoint } from "./checkpoint.js";
 import type { DeleteSessionOptions, SessionContract, SessionEntryInput, SessionMeta, TurnInput } from "./contract.js";
 import type { LabelEntry, SessionEntry, SessionInfoEntry } from "./entries.js";
@@ -176,6 +177,7 @@ export function createSessionBundle(context: DomainContext): DomainBundle<Sessio
 			persistSessionMeta(next);
 			state = next;
 			currentTurnId = null;
+			flushPackageActivities();
 			return next.meta;
 		},
 		append(turn: TurnInput) {
@@ -222,6 +224,16 @@ export function createSessionBundle(context: DomainContext): DomainBundle<Sessio
 			const existing = state.meta.skillActivations ?? [];
 			state.meta.skillActivations = [...existing, activation];
 			persistSessionMeta(state);
+			if (activation.owner)
+				recordPackageActivity({
+					type: PLUGIN_RESOURCE_USE,
+					kind: "skill",
+					owner: activation.owner,
+					...(activation.turnId ? { turnId: activation.turnId } : {}),
+					...(activation.runId ? { runId: activation.runId } : {}),
+					details: { name: activation.name, hash: activation.hash },
+					outcome: "loaded",
+				});
 			return activation;
 		},
 		async checkpoint(reason) {

@@ -3,11 +3,14 @@ import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node
 import path from "node:path";
 import { type TestContext, test } from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
+import type { PackageActivity } from "../../src/core/package-activity.js";
+import { bindPackageActivitySink, flushPackageActivities } from "../../src/core/package-activity.js";
 import type { DynamicToolName } from "../../src/core/tool-names.js";
 import { loadManifestFromRoot, parseExtensionManifest } from "../../src/domains/extensions/discovery.js";
 import { promptRefs } from "../../src/domains/extensions/operator-commands.js";
 import { OperatorExtensions } from "../../src/domains/extensions/operator-extensions.js";
 import { OperatorExtensionRuntime, resolveExtensionCommands } from "../../src/domains/extensions/operator-runtime.js";
+import { createExtensionRuntimeHookBridge } from "../../src/domains/extensions/runtime-hook-bridge.js";
 import { ExtensionRuntimeProcess } from "../../src/domains/extensions/runtime-process.js";
 import {
 	extensionPlainText,
@@ -22,6 +25,7 @@ import {
 	removeExtension,
 } from "../../src/domains/extensions/state.js";
 import { isLoadableExtension } from "../../src/domains/extensions/types.js";
+import { TraceReader, TraceStore } from "../../src/domains/observability/trace-store.js";
 import { installPlugin } from "../../src/domains/plugins/state.js";
 import { expandPromptTemplateInput, loadPromptTemplates } from "../../src/domains/resources/prompts/loader.js";
 import { createWorkerSafety, createWorkerToolRegistry } from "../../src/engine/worker-tools.js";
@@ -32,6 +36,7 @@ import {
 	parseSlashCommand,
 	type SlashCommandContext,
 } from "../../src/session-control/slash-commands.js";
+import { buildExtensionRuntimeToolSpecs } from "../../src/tools/extension-runtime-tools.js";
 import { registerHarnessExtensionTools } from "../../src/tools/harness-extensions.js";
 import { createRegistry } from "../../src/tools/registry.js";
 import { trustProjectPackages } from "../harness/project-trust.js";
@@ -44,6 +49,61 @@ const declaration = {
 	events: [],
 	ui: ["status", "panel"],
 };
+
+test("runtime activity retains admitted extension identity", async (t) => {
+	const env = await isolateClioEnv("clio-coder-runtime-identity-");
+	const cwd = path.join(env.dir, "workspace");
+	mkdirSync(cwd);
+	const installed = installExtension(path.resolve("library/extensions/materio"), { cwd, scope: "user" });
+	ok(installed.extension?.loadable);
+	const entry = installed.extension;
+	const runtime = new OperatorExtensions({
+		context: () => ({ workspace: cwd, sessionId: "identity-session", mode: "interactive" }),
+		isIdle: () => true,
+	});
+	const db = path.join(env.dir, "trace.sqlite");
+	const store = new TraceStore(db);
+	const activity: PackageActivity[] = [];
+	let sessionReady = false;
+	const unbind = bindPackageActivitySink((row) => {
+		if (!sessionReady) return false;
+		activity.push(row);
+		store.recordPackageActivity({ ...row, sessionId: "identity-session" });
+		return true;
+	});
+	t.after(async () => {
+		await runtime.dispose();
+		unbind();
+		store.close();
+		env.restore();
+	});
+	equal((await runtime.reload("startup")).status, "committed");
+	equal(activity.length, 0, "startup waits for a session");
+	sessionReady = true;
+	flushPackageActivities();
+	ok(activity.some((row) => row.kind === "runtime_start" && row.owner.id === entry.id));
+	const bridge = createExtensionRuntimeHookBridge();
+	bridge.bind({ hook: (...args) => runtime.hook(...args), tool: (...args) => runtime.tool(...args), notify: () => {} });
+	const spec = buildExtensionRuntimeToolSpecs([entry], bridge).find((tool) => tool.name.endsWith("__record_decision"));
+	ok(spec);
+	const result = await spec.run({ decision: "Retain identity", rationale: "Telemetry probe" });
+	equal(result.kind, "error", "the fixture has no research state");
+	deepStrictEqual(result.details?.owner, spec.sourceInfo?.owner);
+	equal(spec.sourceInfo?.owner?.version, entry.version);
+	equal(spec.sourceInfo?.owner?.digest, entry.provenance?.contentDigest);
+	disableExtension(entry.id, { cwd, scope: "user" });
+	await runtime.reload();
+	const retired = activity.find((row) => row.kind === "runtime_retire" && row.owner.id === entry.id);
+	ok(retired);
+	deepStrictEqual(retired.owner, spec.sourceInfo?.owner);
+	const reader = new TraceReader(db);
+	try {
+		const rows = reader.events("session-activity:identity-session");
+		ok(rows.some((row) => JSON.parse(row.payload_json ?? "{}").owner?.digest === entry.provenance?.contentDigest));
+	} finally {
+		reader.close();
+	}
+});
 const normal =
 	'export default api => { let n=0; api.handle("inspect", (args,ctx) => ({text:JSON.stringify({args,n:++n,snapshot:ctx.snapshot,secret:process.env.CLIO_CODER_TEST_SECRET??null}),status:{text:"SYNTHETIC fixture ready"}})); };';
 /** Install into the project and approve it as `config trust extensions` would, returning the entry as it now lists. */

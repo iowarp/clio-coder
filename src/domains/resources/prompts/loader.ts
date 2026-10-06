@@ -46,6 +46,7 @@ export interface PromptTemplate {
 }
 
 export interface PromptTemplateRoot {
+	owner?: import("../../../core/package-identity.js").PackageIdentity;
 	plugin?: boolean;
 	path: string;
 	/** Present only for an installed plugin resource root. */
