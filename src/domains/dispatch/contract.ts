@@ -557,6 +557,9 @@ export interface DispatchContract {
 	 */
 	routeBreakers?(): ReadonlyArray<RouteBreakerView>;
 
+	/** Local cleanup and event-drain allowance; accepted durable writes follow settlement. */
+	drainAllowanceMs?(): number;
+
 	/** Drain active runs on shutdown (SIGTERM + grace + SIGKILL). */
 	drain(): Promise<void>;
 }
