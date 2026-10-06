@@ -1,10 +1,9 @@
-import { execFileSync } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import path from "node:path";
 import { parse as parseYaml } from "yaml";
 import { resolvePackageRoot } from "../../core/package-root.js";
-import { buildSafeToolEnv } from "../../core/safe-exec.js";
+import { runStagingCommandSync } from "../../core/safe-exec.js";
 import { isSemanticVersion } from "../extensions/compatibility.js";
 import {
 	isLibraryKind,
@@ -13,6 +12,8 @@ import {
 	type LibraryPackageEntry,
 	type LibraryProvidedResource,
 	type LibraryRequirementRef,
+	readLegacyLibraryKind,
+	readLegacyLibraryRef,
 } from "../resources/library-types.js";
 import { isPluginId } from "./discovery.js";
 
@@ -50,14 +51,13 @@ export function fetchPluginSource(source: string, cwd = process.cwd()): PluginSo
 	const temp = mkdtempSync(path.join(tmpdir(), "clio-coder-plugin-"));
 	const cleanup = (): void => rmSync(temp, { recursive: true, force: true });
 	try {
-		execFileSync(
+		runStagingCommandSync(
 			"git",
 			["-c", "core.hooksPath=/dev/null", "clone", "--depth", "1", "--branch", remote.ref, "--", remote.url, temp],
 			{
-				stdio: "pipe",
-				timeout: 120_000,
-				maxBuffer: 1_000_000,
-				env: buildSafeToolEnv({ GIT_TERMINAL_PROMPT: "0", GIT_CONFIG_NOSYSTEM: "1" }),
+				timeoutMs: 120_000,
+				maxOutputBytes: 1_000_000,
+				env: { GIT_TERMINAL_PROMPT: "0", GIT_CONFIG_NOSYSTEM: "1" },
 			},
 		);
 		const root = path.join(temp, remote.subdir);
@@ -94,7 +94,7 @@ function providedResources(value: unknown, name: string, diagnostics: string[]):
 		const item = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : undefined;
 		if (
 			!item ||
-			!isLibraryResourceKind(item.kind) ||
+			!(isLibraryResourceKind(item.kind) || item.kind === "extension") ||
 			typeof item.name !== "string" ||
 			item.name.length > LIBRARY_PROVIDES_LIMITS.name ||
 			!PROVIDED_NAME.test(item.name) ||
@@ -116,6 +116,27 @@ function providedResources(value: unknown, name: string, diagnostics: string[]):
 	return hints;
 }
 
+/**
+ * D9 legacy read, kept for one release: an index row or provides hint written
+ * before the rename says kind `fleet` and requirement `fleet:<name>`.
+ */
+function readLegacyIndexRow(row: Record<string, unknown>): Record<string, unknown> {
+	return {
+		...row,
+		kind: readLegacyLibraryKind(row.kind),
+		...(Array.isArray(row.requires) ? { requires: row.requires.map(readLegacyLibraryRef) } : {}),
+		...(Array.isArray(row.provides)
+			? {
+					provides: row.provides.map((hint: unknown) =>
+						hint && typeof hint === "object"
+							? { ...hint, kind: readLegacyLibraryKind((hint as Record<string, unknown>).kind) }
+							: hint,
+					),
+				}
+			: {}),
+	};
+}
+
 export function readPluginCatalog(file: string, diagnostics: string[]): LibraryPackageEntry[] {
 	if (!existsSync(file)) return [];
 	try {
@@ -131,7 +152,7 @@ export function readPluginCatalog(file: string, diagnostics: string[]): LibraryP
 				diagnostics.push(`library index entry malformed: ${file}`);
 				return [];
 			}
-			const item = row as Record<string, unknown>;
+			const item = readLegacyIndexRow(row as Record<string, unknown>);
 			if (
 				!isLibraryKind(item.kind) ||
 				typeof item.name !== "string" ||
@@ -161,6 +182,14 @@ export function readPluginCatalog(file: string, diagnostics: string[]): LibraryP
 				return [];
 			}
 			const provides = providedResources(item.provides, item.name, diagnostics);
+			if (
+				item.plugin !== undefined &&
+				(item.kind !== "extension" || typeof item.plugin !== "string" || !isPluginId(item.plugin))
+			) {
+				diagnostics.push(`library index plugin ignored (only an extension names a plugin it serves): ${item.name}`);
+			}
+			const serves =
+				item.kind === "extension" && typeof item.plugin === "string" && isPluginId(item.plugin) ? item.plugin : undefined;
 			return [
 				{
 					kind: item.kind,
@@ -178,6 +207,7 @@ export function readPluginCatalog(file: string, diagnostics: string[]): LibraryP
 						? { triggers: item.triggers.filter((value): value is string => typeof value === "string") }
 						: {}),
 					...(Array.isArray(item.requires) ? { requires: item.requires as LibraryRequirementRef[] } : {}),
+					...(serves ? { plugin: serves } : {}),
 					...(provides ? { provides } : {}),
 					index: path.resolve(file),
 				},

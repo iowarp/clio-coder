@@ -1,0 +1,16 @@
+id: __EXTENSION_ID__
+name: __EXTENSION_ID__
+version: 0.1.0
+description: A tool extension for Clio Coder.
+runtime:
+  api: 2
+  entrypoint: runtime/extension.ts
+  tools:
+    - name: describe
+      description: Return a greeting as text and structured data.
+      actionClass: read
+      inputSchema:
+        type: object
+        properties: { name: { type: string } }
+        required: [name]
+        additionalProperties: false

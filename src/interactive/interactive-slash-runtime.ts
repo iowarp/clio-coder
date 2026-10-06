@@ -97,6 +97,7 @@ export interface InteractiveSlashRuntimeDeps {
 	recordFeature?: (feature: string) => void;
 	keyboardActions?: SlashCommandContext["keyboardActions"];
 	operatorExtensions?: SlashCommandContext["operatorExtensions"];
+	extensionDev?: SlashCommandContext["extensionDev"];
 	showExtensionOutput?: SlashCommandContext["showExtensionOutput"];
 	io: RunIo;
 	bus: SafeEventBus;
@@ -109,6 +110,8 @@ export interface InteractiveSlashRuntimeDeps {
 	extensions?: SlashExtensions;
 	reloadExtensions?: SlashCommandContext["reloadExtensions"];
 	reloadPlugins?: SlashCommandContext["reloadPlugins"];
+	reloadClasses?: SlashCommandContext["reloadClasses"];
+	restart?: SlashCommandContext["restart"];
 	interop?: SlashCommandContext["interop"];
 	agents?: SlashAgents;
 	share?: SlashShare;
@@ -511,6 +514,7 @@ export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps)
 		listExtensions: () => deps.extensions?.list(cwd(), { all: true }) ?? [],
 		...(deps.keyboardActions ? { keyboardActions: deps.keyboardActions } : {}),
 		...(deps.operatorExtensions ? { operatorExtensions: deps.operatorExtensions } : {}),
+		...(deps.extensionDev ? { extensionDev: deps.extensionDev } : {}),
 		...(deps.showExtensionOutput ? { showExtensionOutput: deps.showExtensionOutput } : {}),
 		listAgents: () => deps.agents?.listSpecs().filter((spec) => spec.audience !== "internal") ?? [],
 		...archiveCommandHost(deps.share),
@@ -635,6 +639,8 @@ export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps)
 		openExtensions: deps.openExtensions,
 		...(deps.reloadExtensions ? { reloadExtensions: deps.reloadExtensions } : {}),
 		...(deps.reloadPlugins ? { reloadPlugins: deps.reloadPlugins } : {}),
+		...(deps.reloadClasses ? { reloadClasses: deps.reloadClasses } : {}),
+		...(deps.restart ? { restart: deps.restart } : {}),
 		...(deps.openInterop ? { openInterop: deps.openInterop } : {}),
 		...(deps.interop ? { interop: deps.interop } : {}),
 		setEditorText: (text) => {

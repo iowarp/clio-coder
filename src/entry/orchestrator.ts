@@ -33,6 +33,7 @@ import {
 	mergeRoutingPatchIntoSettings,
 	planResumedRouting,
 	type RoutingPatch,
+	resolveMemoryRoute,
 	restoreRoutingFields,
 	routingChangeNotices,
 	routingPatchForId,
@@ -76,7 +77,11 @@ import {
 } from "../domains/dispatch/index.js";
 import { configureRunEventJournal } from "../domains/dispatch/run-event-journal.js";
 import { normalizeYoloGateOutcome } from "../domains/dispatch/yolo-ids.js";
-import { type ExtensionsContract, ExtensionsDomainModule } from "../domains/extensions/index.js";
+import {
+	createExtensionRuntimeHookBridge,
+	type ExtensionsContract,
+	ExtensionsDomainModule,
+} from "../domains/extensions/index.js";
 import { type InteropContract, InteropDomainModule } from "../domains/interop/index.js";
 import { describeUpgradeNotice, ensureClioState, takeUpgradeNotice } from "../domains/lifecycle/index.js";
 import { createHistoryReviewSource } from "../domains/memory/history-review.js";
@@ -151,7 +156,7 @@ import { recordFailedCompactionCalls } from "../domains/observability/compaction
 import { aggregateCostEntries } from "../domains/observability/cost-rows.js";
 import type { ObservabilityContract } from "../domains/observability/index.js";
 import { ObservabilityDomainModule } from "../domains/observability/index.js";
-import { PluginsDomainModule, pluginSnapshotFor } from "../domains/plugins/index.js";
+import { committedPluginSnapshot, PluginsDomainModule, pluginSnapshotFor } from "../domains/plugins/index.js";
 import type { PromptsContract } from "../domains/prompts/contract.js";
 import { createPromptsDomainModule } from "../domains/prompts/index.js";
 import { credentialsPresent } from "../domains/providers/credentials.js";
@@ -293,6 +298,8 @@ import {
 	buildModelReplayAgentMessagesFromTurns,
 	continuityContextFromSession,
 } from "../session-control/model-session-replay.js";
+import { armRestartHandoff } from "../session-control/restart-handoff.js";
+import { consumeRestartIntent } from "../session-control/restart-intent.js";
 import { createTurnOutcomeCollector } from "../session-control/turn-outcome-collector.js";
 import { effectiveToolNames } from "../tools/agent-tools.js";
 import { surfaceSpecPlacement } from "../tools/surface.js";
@@ -305,6 +312,7 @@ import { createFlowLedger, FLOW_RESTRICTION_ENTRY_TYPE } from "./flow-ledger.js"
 import { createJobHost } from "./job-host.js";
 import { resolvePanesEnablement } from "./panes-activation.js";
 import { reloadPluginResourcesAndNotify } from "./plugin-reload.js";
+import { createReloadClasses } from "./reload-classes.js";
 import { createDecisionUsageTally, createSystemOneHost, createSystemOneRequestAdmission } from "./system-one-host.js";
 import { bindTaskMemoryLifecycle, captureTaskMemoryUsage } from "./task-memory-lifecycle.js";
 
@@ -500,7 +508,7 @@ const LOCAL_API_KEY_FALLBACK = "clio-coder-local-target";
  */
 interface BackgroundMemoryRoute {
 	client: TaskMemoryModelClient;
-	selection: "dedicated" | "chat-fallback";
+	selection: "dedicated" | "chat-default" | "chat-fallback";
 	fallbackReason?: string;
 	targetId: string;
 	wireModelId: string;
@@ -522,9 +530,24 @@ export function createBackgroundMemoryModelClient(
 	fallbackOnly = false,
 	admitModelFlow?: AdmitBackgroundModelFlow,
 ): BackgroundMemoryRoute | null {
-	const configuredTarget = settings.context.memory.target?.trim();
-	const configuredModel = settings.context.memory.model?.trim();
+	if (!settings.context.memory.enabled) return null;
+	const memoryRoute = resolveMemoryRoute(settings);
+	const configuredTarget = memoryRoute.target?.trim();
+	const configuredModel = memoryRoute.model?.trim();
 	if (!configuredTarget || !configuredModel) return null;
+	if (memoryRoute.source === "chat") {
+		if (fallbackOnly) return null;
+		return prepareBackgroundMemoryRoute(
+			providers,
+			configuredTarget,
+			configuredModel,
+			timeoutMs,
+			bus,
+			"chat-default",
+			settings.targets,
+			admitModelFlow,
+		);
+	}
 	const chatTarget = settings.chat.target?.trim();
 	const chatModel = settings.chat.model?.trim();
 	const sameRoute = configuredTarget === chatTarget && configuredModel === chatModel;
@@ -1903,7 +1926,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			else resolvedResumeId = latest.id;
 		}
 	}
-	const resumeId = resolvedResumeId;
+	const resumeId = resolvedResumeId ?? (interactive ? consumeRestartIntent(clioStateDir(), process.cwd()) : undefined);
 	let resumedSessionAtBoot = false;
 	if (resumeId && session && headlessResumeFailure === null) {
 		try {
@@ -2384,13 +2407,14 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			})
 			.catch(reportMemoryStoreFailure("history lessons not recorded"));
 	};
-	const memoryRouteConfigured = (): boolean => {
-		const memory = effectiveSettingsForDispatch?.().context.memory ?? memorySettings;
-		return memory.enabled && Boolean(memory.target?.trim()) && Boolean(memory.model?.trim());
+	const memoryRouteAvailable = (): boolean => {
+		const settings = effectiveSettingsForDispatch?.() ?? config?.get() ?? readSettings();
+		const route = resolveMemoryRoute(settings);
+		return settings.context.memory.enabled && Boolean(route.target?.trim()) && Boolean(route.model?.trim());
 	};
 	memoryGuardian = createMemoryGuardian({
 		// A headless run exits after its turn, so there is no idle time to use.
-		enabled: () => options.headless === undefined && memoryRouteConfigured(),
+		enabled: () => options.headless === undefined && memoryRouteAvailable(),
 		isForegroundActive: () => isChatStreaming(),
 		live: memoryIntervention,
 		scopeKey: () => `${session?.current()?.id ?? ""}\u0000${memoryWorkspaceRoot()}`,
@@ -2470,18 +2494,30 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	let bootHookNotices = true;
 	const reloadPlugins = () =>
 		reloadPluginResourcesAndNotify(process.cwd(), (event) => bus.emit(BusChannels.PluginsReloaded, event));
+	const reloadClasses = createReloadClasses({
+		config,
+		bus,
+		cwd: () => process.cwd(),
+		library: () => committedPluginSnapshot(process.cwd()),
+		reloadLibrary: reloadPlugins,
+		extensions: () => extensions?.snapshot()?.packages ?? [],
+	});
+	// Only the TUI hosts api 2 runtimes today, so only it registers their hooks.
+	const runtimeHooks = interactive ? createExtensionRuntimeHookBridge() : undefined;
 	const extensionReload = createExtensionReloadCoordinator({
 		extensions,
 		middleware,
+		...(runtimeHooks ? { runtimeHooks } : {}),
 		cwd: () => process.cwd(),
 		recordReceipt: (receipt) => hookReceiptLog.record(receipt),
 		report: (line) => {
+			if (reloadClasses.captureIssue(line)) return;
 			if (!interactive) process.stderr.write(`${line}\n`);
 			else if (bootHookNotices) initialNotices.push(line);
 			else bus.emit(BusChannels.ExtensionsLoadIssue, { message: line });
 		},
 		onCommitted: () => {
-			reloadPlugins();
+			if (!reloadClasses.active) reloadPlugins();
 		},
 	});
 	await bootPhaseBoundary?.();
@@ -3225,6 +3261,10 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 					: {}),
 		}),
 	});
+	// Runtime tools are served only where runtimes run, after the core and
+	// command tools hold their names; the gateway keeps the provider schema set
+	// unchanged as each generation swaps them.
+	if (runtimeHooks) extensionReload.attachRuntimeTools(toolRegistry);
 
 	const getTaskMemorySeedOffer = (): { source: string; count: number } | null => {
 		return taskMemoryHandoffSeedOffer(process.cwd(), getCurrentSettings().context.memory.enabled);
@@ -3798,6 +3838,25 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		getAutonomy: resolveEffectiveAutonomy,
 		providers,
 		middleware,
+		// Prompt hooks run only where runtime hooks do. The turn_start
+		// observation rides the same seam, so it names the line the operator
+		// typed (or a hook's rewrite of it), never an expanded template body.
+		...(runtimeHooks
+			? {
+					promptSubmit: async ({ typed, text }: { typed: string; text: string }) => {
+						const gate = extensionReload.promptGate();
+						const verdict =
+							gate !== null && gate.size > 0
+								? await gate.run(typed, typed === text)
+								: { kind: "pass" as const, text: typed, notices: [] };
+						const executor = runtimeHooks.current();
+						for (const notice of verdict.notices) executor?.notify(notice);
+						if (verdict.kind === "block") return { kind: "block" as const, reason: verdict.reason };
+						executor?.observeTurnStart?.(verdict.text);
+						return { kind: "pass" as const, text: verdict.text === typed ? text : verdict.text };
+					},
+				}
+			: {}),
 		middlewareToolChoice,
 		protectedArtifacts: {
 			replace: (state) => protectedArtifactsGuard.replaceState(state),
@@ -4009,10 +4068,8 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		}
 	}
 
-	// A configured memory model runs the LLM tier; otherwise the rules tier answers.
 	const taskMemoryTier = (): "llm" | "rules" => {
-		const memory = getCurrentSettings().context.memory;
-		return memory.target && memory.model ? "llm" : "rules";
+		return memoryRouteAvailable() ? "llm" : "rules";
 	};
 
 	// One context-init runner for the TUI and ACP hosts.
@@ -4810,8 +4867,15 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		...(initialNotices.length > 0 ? { initialNotices } : {}),
 		...(resources ? { resources } : {}),
 		...(extensions ? { extensions } : {}),
-		reloadExtensions: () => extensionReload.reload(),
+		...(runtimeHooks ? { runtimeHooks } : {}),
+		reloadExtensions: () => {
+			const outcome = extensionReload.reload();
+			for (const issue of outcome.diagnostics.entries) reloadClasses.captureIssue(`${issue.type}: ${issue.message}`);
+			return outcome;
+		},
 		reloadPlugins,
+		reloadClasses,
+		armRestartHandoff: () => armRestartHandoff(clioStateDir(), termination),
 		...(interop ? { interop } : {}),
 		...(share ? { share } : {}),
 		...(mux ? { mux } : {}),
@@ -4844,6 +4908,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			return {
 				enabled: settings.context.memory.enabled,
 				tier: taskMemoryTier(),
+				route: resolveMemoryRoute(settings),
 				size: taskMemoryBankSize(bank),
 				bank,
 				...projectTaskMemoryActivity(

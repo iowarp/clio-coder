@@ -33,6 +33,21 @@ export interface SessionRoutingState {
 	scope: string[];
 }
 
+export interface EffectiveMemoryRoute {
+	target: string | null;
+	model: string | null;
+	source: "dedicated" | "chat";
+}
+
+/** Keep an unset memory route live-bound to chat rather than pinning its boot-time model. */
+export function resolveMemoryRoute(settings: Readonly<ClioSettings>): EffectiveMemoryRoute {
+	const target = settings.context.memory.target?.trim() || null;
+	const model = settings.context.memory.model?.trim() || null;
+	return target === null && model === null
+		? { target: settings.chat.target, model: settings.chat.model, source: "chat" }
+		: { target, model, source: "dedicated" };
+}
+
 /**
  * Partial routing update. Only the fields present are applied to the session
  * state and written through to saved settings, so a Shift+Tab in one session

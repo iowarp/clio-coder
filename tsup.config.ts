@@ -80,6 +80,7 @@ function vendorGrammars(): void {
 
 const entries = {
 	"cli/index": "src/cli/index.ts",
+	"extensions/testing": "src/domains/extensions/authoring/test-kit.ts",
 	"gui/server": "apps/clio-coder-gui/server/main.ts",
 	"gui/reads-worker": "apps/clio-coder-gui/server/worker/reads-main.ts",
 	"gui/ops-worker": "apps/clio-coder-gui/server/worker/ops-main.ts",

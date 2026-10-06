@@ -2,7 +2,7 @@
 
 This tree contains reviewed skill instructions and authoring evidence. Complete
 packages participate in the same [library](../../docs/guide/resource-library.md) as
-plugins, agents, prompts and fleets. Bundling a package does not activate it.
+plugins, agents, prompts and playbooks. Bundling a package does not activate it.
 Inside a detected Clio source checkout, the two self-development skills described
 below are also available directly from their authoring directories.
 

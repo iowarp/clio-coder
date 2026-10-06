@@ -1,4 +1,9 @@
-import { type ExtensionCommandRow, extensionInvocation, resolveExtensionCommands } from "./operator-commands.js";
+import {
+	type ExtensionCommandRow,
+	extensionInvocation,
+	type PromptRef,
+	resolveExtensionCommands,
+} from "./operator-commands.js";
 
 export {
 	type ExtensionCommandRow,
@@ -10,9 +15,11 @@ export {
 import { realpathSync } from "node:fs";
 import type { ExtensionObservation, ExtensionOutput, ExtensionRuntimeSnapshot, ExtensionStatus } from "./public-api.js";
 import { ExtensionRuntimeProcess, type RuntimeProcessState } from "./runtime-process.js";
+import type { ExtensionSandboxReport } from "./runtime-sandbox.js";
 import { RUNTIME_LIMITS } from "./runtime-schema.js";
 import { listInstalledExtensions } from "./state.js";
 import {
+	type ExtensionLoadScope,
 	type ExtensionProvenance,
 	type InstalledExtension,
 	isLoadableExtension,
@@ -21,13 +28,15 @@ import {
 
 export interface OperatorRuntimeEntry {
 	id: string;
-	scope: "user" | "project";
+	scope: ExtensionLoadScope;
 	generation: number;
 	state: RuntimeProcessState | "inactive";
 	/** Verified owner of this instance, not a subsequent installed-inventory observation. */
 	provenance?: ExtensionProvenance;
 	reason?: string;
 	status?: ExtensionStatus;
+	/** What confines this runtime beyond its Node flags; present while a v2 runtime is running. */
+	sandbox?: ExtensionSandboxReport;
 	/** Actual schema admission is still owned by the session/worker registry. */
 	newSessionReasons: string[];
 	toolEvidence: "frozen-registry" | "runtime-startup-observation";
@@ -322,7 +331,7 @@ export class OperatorExtensionRuntime {
 		}
 		return result;
 	}
-	commands(promptNames: readonly string[] = []): ExtensionCommandRow[] {
+	commands(promptNames: ReadonlyArray<string | PromptRef> = []): ExtensionCommandRow[] {
 		const rows = this.inventory
 			.filter((entry) => entry.effective && entry.runtime)
 			.flatMap((entry) =>
@@ -383,7 +392,7 @@ export class OperatorExtensionRuntime {
 	async invoke(
 		invocation: string,
 		args: string,
-		promptNames: readonly string[] = [],
+		promptNames: ReadonlyArray<string | PromptRef> = [],
 		signal?: AbortSignal,
 	): Promise<ExtensionOutput> {
 		this.reconcile();

@@ -1,10 +1,15 @@
 import { deepStrictEqual, equal, match, ok, rejects, throws } from "node:assert/strict";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { createServer } from "node:http";
+import type { AddressInfo } from "node:net";
 import path from "node:path";
 import { type TestContext, test } from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
+import { sandboxAvailability } from "../../src/core/sandbox/availability.js";
 import type { DynamicToolName } from "../../src/core/tool-names.js";
 import { loadManifestFromRoot, parseExtensionManifest } from "../../src/domains/extensions/discovery.js";
+import { extensionInvocation, promptRefs } from "../../src/domains/extensions/operator-commands.js";
+import { OperatorExtensions } from "../../src/domains/extensions/operator-extensions.js";
 import { OperatorExtensionRuntime, resolveExtensionCommands } from "../../src/domains/extensions/operator-runtime.js";
 import { ExtensionRuntimeProcess } from "../../src/domains/extensions/runtime-process.js";
 import {
@@ -20,6 +25,8 @@ import {
 	removeExtension,
 } from "../../src/domains/extensions/state.js";
 import { isLoadableExtension } from "../../src/domains/extensions/types.js";
+import { installPlugin } from "../../src/domains/plugins/state.js";
+import { expandPromptTemplateInput, loadPromptTemplates } from "../../src/domains/resources/prompts/loader.js";
 import { createWorkerSafety, createWorkerToolRegistry } from "../../src/engine/worker-tools.js";
 import { ExtensionPanelView } from "../../src/interactive/overlays/extension-panel.js";
 import { createSlashCommandAutocompleteProvider } from "../../src/interactive/slash-autocomplete.js";
@@ -100,7 +107,7 @@ test("runtime manifest validates declarations and contained entrypoints without 
 	const f = await fixture(t, 'throw new Error("discovery executed code")');
 	ok(loadManifestFromRoot(f.source).valid);
 	for (const bad of [
-		{ api: 2 },
+		{ api: 3 },
 		{ surprise: true },
 		{ entrypoint: "extension.ts" },
 		{ commands: [{ name: "inspect", description: "x", timeoutMs: 0 }] },
@@ -493,7 +500,8 @@ test("completion and dispatch preserve display-only prompt ownership at the same
 	const f = await fixture(t);
 	await f.runtime.reload();
 	const invocation = "ext:lab_status.v1:inspect";
-	let promptNames: Array<{ name: string; description: string; displayOnly: boolean }> = [];
+	let promptNames: Array<{ name: string; description: string; displayOnly: boolean; sourceInfo: { source: string } }> =
+		[];
 	const provider = createSlashCommandAutocompleteProvider({
 		fdPath: null,
 		extensionCommands: () => f.runtime.commands(),
@@ -502,7 +510,9 @@ test("completion and dispatch preserve display-only prompt ownership at the same
 	const line = "/ext:lab";
 	const suggestions = () => provider.getSuggestions([line], 0, line.length, { signal: new AbortController().signal });
 	equal((await suggestions())?.items[0]?.value, invocation);
-	promptNames = [{ name: invocation, description: "Legacy reference", displayOnly: true }];
+	promptNames = [
+		{ name: invocation, description: "Legacy reference", displayOnly: true, sourceInfo: { source: "project" } },
+	];
 	const collided = await suggestions();
 	equal(collided?.items.length, 1);
 	match(String(collided?.items[0]?.description), /reference/);
@@ -750,4 +760,111 @@ test("empty startup reload reports structured readiness and its origin to the UI
 	} finally {
 		await runtime.dispose();
 	}
+});
+
+test("a served plugin's prompt is a plain prompt until its extension is installed and in effect", async (t) => {
+	const env = await isolateClioEnv("clio-coder-takeover-test-");
+	const cwd = path.join(env.dir, "workspace");
+	mkdirSync(cwd);
+	const library = path.resolve(import.meta.dirname, "../../library");
+	ok(installPlugin(path.join(library, "plugins/materio"), { cwd, scope: "user" }).plugin);
+	const prompts = () => loadPromptTemplates({ cwd });
+	let turns = 0;
+	const shown: string[] = [];
+	const ctx = {
+		get operatorExtensions() {
+			return runtime;
+		},
+		listPrompts: () => ({ items: prompts().items, diagnostics: [] }),
+		expandPromptTemplate: (text: string) => expandPromptTemplateInput(text, prompts()),
+		submitChat: () => {
+			turns++;
+		},
+		runLocalOperation: (operation: () => Promise<void>) => void operation(),
+		showExtensionOutput: (command: string) => shown.push(command),
+		render: () => {},
+		notice: () => {},
+	} as unknown as SlashCommandContext;
+	const runtime = new OperatorExtensions({
+		context: () => ({ workspace: cwd, sessionId: null, mode: "interactive" }),
+		isIdle: () => true,
+		list: (root) => listInstalledExtensions(root, { all: true }),
+		stateDir: () => path.join(env.dir, "state"),
+	});
+	t.after(async () => {
+		await runtime.dispose();
+		env.restore();
+	});
+	const names = () => promptRefs(prompts().items);
+	ok(
+		names().some((prompt) => prompt.name === "materio:status"),
+		"the plugin alone provides the prompt",
+	);
+
+	// Plugin alone: no runtime exists, and the name expands as an ordinary prompt template.
+	equal((await runtime.reload("startup")).status, "committed");
+	deepStrictEqual(runtime.entries(), []);
+	deepStrictEqual(runtime.commands(names()), []);
+	equal(dispatchSlashCommand(parseSlashCommand("/materio:status"), ctx), "accepted");
+	equal(turns, 1);
+	deepStrictEqual(shown, []);
+
+	// With its extension installed and running, the same name routes to the runtime command.
+	ok(installExtension(path.join(library, "extensions/materio"), { cwd, scope: "user" }).extension);
+	equal((await runtime.reload()).status, "committed");
+	equal(runtime.entries().find((entry) => entry.id === "materio")?.state, "ready");
+	const takeover = runtime.commands(names()).find((row) => row.invocation === "materio:status");
+	ok(takeover?.available && takeover.replaces === "prompt", JSON.stringify(takeover));
+	equal(dispatchSlashCommand(parseSlashCommand("/materio:status"), ctx), "accepted");
+	for (let waited = 0; shown.length === 0 && waited < 10_000; waited += 50) await delay(50);
+	equal(turns, 1, "the takeover must not also send the prompt to the model");
+	deepStrictEqual(shown, ["materio:status"]);
+});
+
+test("a net:false runtime cannot reach loopback, reports its backend, and gets exactly its declared write root", {
+	skip: !sandboxAvailability().available,
+}, async (t) => {
+	let hits = 0;
+	const server = createServer((_request, response) => {
+		hits++;
+		response.end("reached");
+	});
+	await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+	t.after(() => new Promise<void>((resolve) => server.close(() => resolve())));
+	const { port } = server.address() as AddressInfo;
+	const script = [
+		'import { spawnSync } from "node:child_process";',
+		"export default api => {",
+		'  api.handle("probe", async () => {',
+		`    const loopback = await fetch("http://127.0.0.1:${port}/").then(() => "reached", () => "refused");`,
+		'    const beside = spawnSync("sh", ["-c", "echo x > beside.txt"]).status === 0;',
+		'    const inside = spawnSync("sh", ["-c", "echo x > .research/inside.txt"]).status === 0;',
+		"    return { text: JSON.stringify({ loopback, beside, inside }) };",
+		"  });",
+		"};",
+	].join("\n");
+	const f = await fixture(t, script, {
+		api: 2,
+		commands: [{ name: "probe", description: "Probe the sandbox", timeoutMs: 10_000 }],
+		ui: [],
+		permissions: { fs: { read: [], write: [".research"] }, exec: true, net: false },
+	});
+	const runtime = new OperatorExtensions({
+		context: () => ({ workspace: f.cwd, sessionId: null, mode: "interactive" }),
+		isIdle: () => true,
+		list: (root) => listInstalledExtensions(root, { all: true }),
+		stateDir: () => path.join(f.env.dir, "state"),
+	});
+	t.after(() => runtime.dispose());
+	equal((await runtime.reload("startup")).status, "committed");
+	equal(existsSync(path.join(f.cwd, ".research")), false);
+	const output = await runtime.invoke(extensionInvocation("lab_status.v1", "probe"), "");
+	deepStrictEqual(JSON.parse(String(output.text)), { loopback: "refused", beside: false, inside: true });
+	equal(hits, 0);
+	ok(existsSync(path.join(f.cwd, ".research", "inside.txt")));
+	equal(existsSync(path.join(f.cwd, "beside.txt")), false);
+	deepStrictEqual(runtime.entries().find((entry) => entry.id === "lab_status.v1")?.sandbox, {
+		backend: sandboxAvailability().backend,
+		network: "blocked",
+	});
 });

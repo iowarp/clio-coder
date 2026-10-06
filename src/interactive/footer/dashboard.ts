@@ -21,6 +21,7 @@ import { formatKeyLabel } from "../keybinding-manager.js";
 import type { AgentStatus, TurnSummary } from "../status/index.js";
 import { resolveFooterVerb, spinnerFrame } from "../status/index.js";
 import { animationStep, clioTheme, collapseHomePath, formatTargetLabel } from "../theme/index.js";
+import { skinEpoch } from "../theme/tokens.js";
 import { createDemoHints } from "./demo-hints.js";
 import type { Notification, NotificationCenter } from "./notifications.js";
 import { formatNotificationPanel } from "./notifications.js";
@@ -55,6 +56,10 @@ export interface FooterDashboardDeps {
 	getQuotaSnapshots?: () => ReadonlyArray<UsageSnapshot>;
 	getConnections?: () => { mcp: string[]; plugins: string[] };
 	getExtensionStatus?: () => ReadonlyArray<string>;
+	/** Owner-labelled, pre-styled extension status facts for the compact second line. */
+	getExtensionFacts?: (width: number) => ReadonlyArray<string>;
+	/** The active extension workspace's footer line, with how to leave it. */
+	getWorkspaceLine?: (width: number) => string | null;
 	getLifecycleHint?: () => string | null;
 	providers: ProvidersContract;
 	getSettings?: () => Readonly<ClioSettings>;
@@ -98,6 +103,8 @@ export interface FooterDashboardDeps {
 }
 
 export interface FooterDashboardRenderState {
+	/** Extension status facts that join the compact second line. */
+	extensionFacts?: ReadonlyArray<string>;
 	quota?: ReadonlyArray<UsageSnapshot>;
 	quotaRoute?: Pick<DispatchBoardRow, "runtimeId" | "wireModelId" | "node">;
 	demoHint?: string | null;
@@ -183,6 +190,7 @@ class FooterText extends Text {
 	private composedWidth: number | null = null;
 	private composedRows: number | null = null;
 	private composedText = "";
+	private composedEpoch = -1;
 	private readonly compose: (width: number) => string;
 
 	constructor(
@@ -195,6 +203,7 @@ class FooterText extends Text {
 
 	composeAt(width: number): void {
 		this.composedWidth = width;
+		this.composedEpoch = skinEpoch();
 		this.composedRows = this.getRows();
 		const text = this.compose(width);
 		if (text === this.composedText) return;
@@ -203,7 +212,8 @@ class FooterText extends Text {
 	}
 
 	override render(width: number): string[] {
-		if (width !== this.composedWidth || this.getRows() !== this.composedRows) this.composeAt(width);
+		if (this.composedEpoch !== skinEpoch() || width !== this.composedWidth || this.getRows() !== this.composedRows)
+			this.composeAt(width);
 		return super.render(width);
 	}
 }
@@ -244,6 +254,7 @@ export function buildFooterDashboard(deps: FooterDashboardDeps): FooterDashboard
 
 		const wireModelId = settings?.chat?.model ?? current?.target.defaultModel ?? null;
 		return {
+			...(deps.getExtensionFacts ? { extensionFacts: deps.getExtensionFacts(width) } : {}),
 			resources: machine.snapshot(),
 			quota: deps.getQuotaSnapshots?.() ?? [],
 			...(current?.runtime && wireModelId
@@ -366,8 +377,10 @@ export function buildFooterDashboard(deps: FooterDashboardDeps): FooterDashboard
 			dashboardMode === "expanded" && contributed.length
 				? [fitDashboardLine(`Extensions: ${contributed.join(" | ")}`, width)]
 				: [];
+		const workspace = deps.getWorkspaceLine?.(width);
+		const workspaceLine = workspace ? [fitDashboardLine(workspace, width)] : [];
 		// Keep the highest-priority notice readable in full; the dismiss hint exposes the next.
-		const supplementary = [...extensionLine, ...lifecycleLine, ...notices];
+		const supplementary = [...workspaceLine, ...extensionLine, ...lifecycleLine, ...notices];
 		const grid =
 			dashboardMode === "expanded"
 				? dashboardPageViewport(

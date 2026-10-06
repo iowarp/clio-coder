@@ -1,9 +1,9 @@
 /**
- * Repo-owned deterministic command registry for fleet code steps.
+ * Repo-owned deterministic command registry for playbook code steps.
  *
  * A code step names a command id; it never authors a shell string. The binding
- * from id to argv lives in the repository at `.clio-coder/fleets/commands.yaml`,
- * beside the fleet contracts that reference it. Two properties follow:
+ * from id to argv lives in the repository at `.clio-coder/playbooks/commands.yaml`,
+ * beside the playbooks that reference it. Two properties follow:
  *
  *   - A model cannot invent an invocation. The worst a contract can do is name
  *     an id, and an unknown id fails contract validation before any dispatch.
@@ -24,6 +24,7 @@ import { isAbsolute, join, normalize } from "node:path";
 import { Type } from "typebox";
 import { Value } from "typebox/value";
 import yaml from "yaml";
+import { clioConfigDir } from "../../core/xdg.js";
 
 /** Upper bound on any single deterministic step, generous enough for a full suite. */
 const FLEET_COMMAND_MAX_TIMEOUT_MS = 3_600_000;
@@ -100,7 +101,19 @@ const COMMAND_ID_RE = /^[a-z0-9][a-z0-9._-]{0,63}$/u;
 const ENV_NAME_RE = /^[A-Z_][A-Z0-9_]*$/u;
 
 export function fleetCommandsPath(cwd: string): string {
-	return join(cwd, ".clio-coder", "fleets", "commands.yaml");
+	return join(cwd, ".clio-coder", "playbooks", "commands.yaml");
+}
+
+/**
+ * D9 legacy read, kept for one release: user and project playbooks and the
+ * command registry lived in `fleets/` before the rename. Each legacy directory
+ * is read just below the `playbooks/` directory of its own scope, so a
+ * same-named file in the new directory shadows the legacy one. Writers use
+ * only `playbooks/`. Kept in this leaf module so inspection can import it
+ * without the contract parser.
+ */
+export function legacyPlaybookDirs(cwd: string): { user: string; project: string } {
+	return { user: join(clioConfigDir(), "fleets"), project: join(cwd, ".clio-coder", "fleets") };
 }
 
 function firstSchemaError(value: unknown): string | null {
@@ -184,8 +197,10 @@ export function parseFleetCommands(raw: string, sourcePath: string): FleetComman
  * only for contracts that actually contain a code step.
  */
 export function loadFleetCommands(cwd: string): FleetCommandRegistry | null {
-	const path = fleetCommandsPath(cwd);
-	if (!existsSync(path)) return null;
+	const path = [fleetCommandsPath(cwd), join(legacyPlaybookDirs(cwd).project, "commands.yaml")].find((candidate) =>
+		existsSync(candidate),
+	);
+	if (path === undefined) return null;
 	return parseFleetCommands(readFileSync(path, "utf8"), path);
 }
 

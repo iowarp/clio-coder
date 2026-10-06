@@ -86,10 +86,8 @@ export const FleetRunPanel = memo(function FleetRunPanel({
 	const view = ready ? fleetPlanView(ready) : null;
 	const content = (
 		<>
-			{!sessionOpen ? <p className="agents-note">This task is not open. Open it to run a fleet contract.</p> : null}
-			{sessionOpen && !supported ? (
-				<p className="agents-note">This Clio Coder session cannot preview fleet contracts.</p>
-			) : null}
+			{!sessionOpen ? <p className="agents-note">This task is not open. Open it to run a playbook.</p> : null}
+			{sessionOpen && !supported ? <p className="agents-note">This Clio Coder session cannot preview playbooks.</p> : null}
 			{sessionOpen && supported ? (
 				<form
 					className="agents-form"
@@ -102,8 +100,8 @@ export const FleetRunPanel = memo(function FleetRunPanel({
 					}}
 				>
 					<p className="agents-note">
-						A named plan in this project's <code className="agents-mono">.clio-coder/fleets</code>. Previewing compiles it and
-						starts nothing.
+						A named plan in this project's <code className="agents-mono">.clio-coder/playbooks</code>. Previewing compiles it
+						and starts nothing.
 					</p>
 					<label htmlFor={`${fieldId}-name`}>Contract name</label>
 					<input
@@ -218,7 +216,7 @@ export const FleetRunPanel = memo(function FleetRunPanel({
 	return (
 		<details className="agents-section fleet-run-panel">
 			<summary>
-				<h3 className="agents-eyebrow">Run a fleet contract</h3>
+				<h3 className="agents-eyebrow">Run a playbook</h3>
 				<Icon name="chevronDown" />
 			</summary>
 			{content}

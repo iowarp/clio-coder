@@ -58,20 +58,20 @@ export async function assignTarget(io: RouteSelectionIo, role: "chat" | "fleet" 
 				target.defaultModel ?? "no default model"
 			}`,
 	);
-	const rulesOnly = "Rules only · no background model call";
+	const chatRoute = "Chat route · no memory model set";
 	const currentChoice =
 		role === "memory" && !currentTarget
-			? rulesOnly
+			? chatRoute
 			: (targetChoices[targets.findIndex((target) => target.id === currentTarget)] ?? targetChoices[0] ?? "");
 	const choice = await io.rl.choose(
 		`${label} connection`,
-		role === "memory" ? [rulesOnly, ...targetChoices] : targetChoices,
+		role === "memory" ? [chatRoute, ...targetChoices] : targetChoices,
 		currentChoice,
 		true,
 	);
-	if (choice === rulesOnly) {
+	if (choice === chatRoute) {
 		saveRoute("memory", null, null);
-		io.ok("Proactive memory set to rules only; it will not make a background model call");
+		io.ok("Proactive memory uses the chat route because no memory model is set");
 		return;
 	}
 	const target = targets[targetChoices.indexOf(choice)];

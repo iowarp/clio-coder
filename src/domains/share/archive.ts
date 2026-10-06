@@ -6,7 +6,6 @@ import {
 	mkdtempSync,
 	readdirSync,
 	readFileSync,
-	realpathSync,
 	rmSync,
 	type Stats,
 	statSync,
@@ -26,11 +25,13 @@ import { clioConfigDir, resolveClioDirs } from "../../core/xdg.js";
 import { parseFrontmatter } from "../agents/frontmatter.js";
 import {
 	assertAgentSpecPolicy,
+	legacyPlaybookDirs,
 	normalizeAgentSpec,
 	parseAgentRecipeSchema,
 	parseFleetContract,
 } from "../agents/index.js";
 import { loadManifestFromRoot } from "../extensions/discovery.js";
+import { envelopeReviewLines, reviewExtensionEnvelope } from "../extensions/envelope-review.js";
 import { extensionContentDigest } from "../extensions/integrity.js";
 import { extensionBaseDir, installExtension, listInstalledExtensions } from "../extensions/state.js";
 import type { ExtensionScope } from "../extensions/types.js";
@@ -338,9 +339,24 @@ export function createShareArchive(options: ShareExportOptions = {}): ClioShareA
 		}
 	}
 	if (includes.includeFleets) {
+		// Playbooks keep the v1 entry type `fleet` and `<scope>/fleets/` archive
+		// paths, so a release from before D9 can still import the archive.
 		for (const scope of scopes) {
-			const root = scope === "user" ? path.join(clioConfigDir(), "fleets") : path.join(cwd, ".clio-coder", "fleets");
-			addTree(files, "fleet", scope, root, `${scope}/fleets`);
+			const root = scope === "user" ? path.join(clioConfigDir(), "playbooks") : path.join(cwd, ".clio-coder", "playbooks");
+			const exported = new Set<string>();
+			addTree(files, "fleet", scope, root, `${scope}/fleets`, (relativePath) => {
+				exported.add(relativePath);
+				return true;
+			});
+			// D9 legacy read: a playbook left in `fleets/` is exported unless `playbooks/` shadows it.
+			addTree(
+				files,
+				"fleet",
+				scope,
+				legacyPlaybookDirs(cwd)[scope],
+				`${scope}/fleets`,
+				(relativePath) => !exported.has(relativePath),
+			);
 		}
 	}
 	if (includes.includeExtensions) {
@@ -467,6 +483,8 @@ interface ShareImportTargetRoot {
 interface ShareImportPreparedTarget {
 	entry: ShareArchiveFile;
 	target: string;
+	/** Directory whose descendants may not be symbolic links on the way to `target`. */
+	containmentRoot: string;
 	scope: ShareScope;
 	buffer: Buffer;
 }
@@ -484,6 +502,8 @@ interface ShareImportPreparedExtensionPackage {
 	scope: ExtensionScope;
 	files: Array<{ relativePath: string; buffer: Buffer }>;
 	contentDigest: string;
+	/** Digest of the capability envelope shown in the plan, or null for a package that declares none. */
+	envelopeDigest: string | null;
 	install: boolean;
 }
 
@@ -521,7 +541,7 @@ function targetRootForFile(entry: ShareArchiveFile, options: ShareImportOptions)
 		case "agent":
 			return { root: path.join(config, "agents"), containmentRoot: config, scope: "user" };
 		case "fleet":
-			return { root: path.join(config, "fleets"), containmentRoot: config, scope: "user" };
+			return { root: path.join(config, "playbooks"), containmentRoot: config, scope: "user" };
 		case "extension":
 			return scope === "user"
 				? { root: path.join(config, "extensions"), containmentRoot: config, scope }
@@ -536,64 +556,60 @@ function isInsideOrEqual(candidate: string, root: string): boolean {
 	return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
 }
 
-function lstatExists(candidate: string): boolean {
-	try {
-		lstatSync(candidate);
-		return true;
-	} catch (err) {
-		if (isErrorWithCode(err) && (err.code === "ENOENT" || err.code === "ENOTDIR")) return false;
-		throw err;
-	}
-}
-
-function nearestExistingPath(candidate: string): string | null {
-	let current = path.resolve(candidate);
-	while (!lstatExists(current)) {
-		const parent = path.dirname(current);
-		if (parent === current) return null;
-		current = parent;
-	}
-	return current;
-}
-
 function pathDiagnostic(entry: ShareArchiveFile): string {
 	return `${entry.archivePath} -> ${entry.relativePath}`;
 }
 
+/**
+ * Physical containment for one entry. Every component between the containment
+ * root and the target must be a real directory or file, so an entry cannot be
+ * redirected into another resource kind or into operator state by a link that
+ * already sits inside the config directory or the workspace. The containment
+ * root itself may be a link (a dotfile-managed config directory).
+ */
 function validateRealPathContainment(
 	entry: ShareArchiveFile,
 	target: string,
 	containmentRoot: string,
 ): ShareDiagnostic | null {
-	const rootAnchor = nearestExistingPath(containmentRoot);
-	const targetAnchor = nearestExistingPath(lstatExists(target) ? target : path.dirname(target));
-	if (!rootAnchor || !targetAnchor) {
-		return {
-			type: "error",
-			message: `share archive target could not be resolved safely: ${pathDiagnostic(entry)}`,
-			path: entry.relativePath,
-		};
-	}
-	let realRoot: string;
-	let realTarget: string;
-	try {
-		realRoot = realpathSync(rootAnchor);
-		realTarget = realpathSync(targetAnchor);
-	} catch {
-		return {
-			type: "error",
-			message: `share archive target could not be resolved safely: ${pathDiagnostic(entry)}`,
-			path: entry.relativePath,
-		};
-	}
-	if (!isInsideOrEqual(realTarget, realRoot)) {
+	const unresolved: ShareDiagnostic = {
+		type: "error",
+		message: `share archive target could not be resolved safely: ${pathDiagnostic(entry)}`,
+		path: entry.relativePath,
+	};
+	const relative = path.relative(containmentRoot, target);
+	if (relative.length === 0 || relative.startsWith("..") || path.isAbsolute(relative)) {
 		return {
 			type: "error",
 			message: `share archive target escapes import root: ${pathDiagnostic(entry)}`,
 			path: entry.relativePath,
 		};
 	}
+	let current = containmentRoot;
+	for (const segment of relative.split(path.sep)) {
+		current = path.join(current, segment);
+		let stat: Stats;
+		try {
+			stat = lstatSync(current);
+		} catch (err) {
+			if (isErrorWithCode(err) && (err.code === "ENOENT" || err.code === "ENOTDIR")) return null;
+			return unresolved;
+		}
+		if (stat.isSymbolicLink()) {
+			return {
+				type: "error",
+				message: `share archive target passes through a symbolic link: ${pathDiagnostic(entry)}`,
+				path: entry.relativePath,
+			};
+		}
+		if (current !== target && !stat.isDirectory()) return unresolved;
+	}
 	return null;
+}
+
+/** Names that one portable file system would store as a single file. */
+function portableTargetKey(target: string): string {
+	return target.normalize("NFC").toLowerCase();
 }
 
 function resolveImportTarget(
@@ -608,6 +624,18 @@ function resolveImportTarget(
 			path: entry.relativePath,
 		};
 	}
+	// A context entry names one of the instruction files the exporter writes; the
+	// workspace root would otherwise accept `.git/config` or `.clio-coder/` state.
+	if (
+		entry.type === "project-context" &&
+		(segments.length !== 1 || !(PROJECT_CONTEXT_FILES as ReadonlyArray<string>).includes(segments[0] ?? ""))
+	) {
+		return {
+			type: "error",
+			message: `share archive context entry is not an instruction file: ${pathDiagnostic(entry)}`,
+			path: entry.relativePath,
+		};
+	}
 	const targetRoot = targetRootForFile(entry, options);
 	const target = entry.type === "settings" ? settingsFilePath() : path.resolve(targetRoot.root, ...segments);
 	if (!isInsideOrEqual(target, targetRoot.root)) {
@@ -619,7 +647,13 @@ function resolveImportTarget(
 	}
 	const realPathDiagnostic = validateRealPathContainment(entry, target, targetRoot.containmentRoot);
 	if (realPathDiagnostic) return realPathDiagnostic;
-	return { entry, target, scope: targetRoot.scope, buffer: decodeArchiveFile(entry) };
+	return {
+		entry,
+		target,
+		containmentRoot: targetRoot.containmentRoot,
+		scope: targetRoot.scope,
+		buffer: decodeArchiveFile(entry),
+	};
 }
 
 function preflightImportTargets(
@@ -628,12 +662,26 @@ function preflightImportTargets(
 ): { targets: ShareImportPreparedTarget[]; diagnostics: ShareDiagnostic[] } {
 	const targets: ShareImportPreparedTarget[] = [];
 	const diagnostics: ShareDiagnostic[] = [];
+	const claimed = new Map<string, ShareArchiveFile>();
 	for (const entry of archive.files) {
 		const resolved = resolveImportTarget(entry, options);
 		if ("type" in resolved) {
 			diagnostics.push(resolved);
 			continue;
 		}
+		// Two entries that land on one file, or on names a case-folding or
+		// normalizing file system would merge, make the result depend on write order.
+		const key = portableTargetKey(resolved.target);
+		const earlier = claimed.get(key);
+		if (earlier !== undefined) {
+			diagnostics.push({
+				type: "error",
+				message: `share archive entries share one target: ${pathDiagnostic(earlier)} and ${pathDiagnostic(entry)}`,
+				path: entry.relativePath,
+			});
+			continue;
+		}
+		claimed.set(key, entry);
 		targets.push(resolved);
 	}
 	if (diagnostics.length > 0) return { targets: [], diagnostics };
@@ -660,7 +708,10 @@ function prepareExtensionPackages(
 	options: ShareImportOptions,
 ): { packages: ShareImportPreparedExtensionPackage[]; diagnostics: ShareDiagnostic[] } {
 	const diagnostics: ShareDiagnostic[] = [];
-	const grouped = new Map<string, Omit<ShareImportPreparedExtensionPackage, "contentDigest" | "install">>();
+	const grouped = new Map<
+		string,
+		Omit<ShareImportPreparedExtensionPackage, "contentDigest" | "envelopeDigest" | "install">
+	>();
 	for (const target of targets) {
 		if (target.entry.type !== "extension") continue;
 		const segments = relativePathSegments(target.entry.relativePath);
@@ -688,7 +739,7 @@ function prepareExtensionPackages(
 	const packages: ShareImportPreparedExtensionPackage[] = [];
 	for (const group of [...grouped.values()].sort((a, b) => `${a.scope}/${a.id}`.localeCompare(`${b.scope}/${b.id}`))) {
 		try {
-			const contentDigest = withStagedExtensionPackage(group, (root) => {
+			const reviewed = withStagedExtensionPackage(group, (root) => {
 				const candidate = loadManifestFromRoot(root);
 				if (!candidate.valid || !candidate.manifest) {
 					throw new Error(candidate.diagnostics.map((diagnostic) => diagnostic.message).join("; ") || "manifest is invalid");
@@ -696,8 +747,9 @@ function prepareExtensionPackages(
 				if (candidate.manifest.id !== group.id) {
 					throw new Error(`manifest id ${candidate.manifest.id} does not match archive package ${group.id}`);
 				}
-				return extensionContentDigest(root);
+				return { contentDigest: extensionContentDigest(root), review: reviewExtensionEnvelope(root) };
 			});
+			const { contentDigest } = reviewed;
 			const cwd = path.resolve(options.cwd ?? process.cwd());
 			const targetRoot = path.join(extensionBaseDir(group.scope, cwd), group.id);
 			const existing = listInstalledExtensions(cwd, { scope: group.scope, all: true }).find(
@@ -714,7 +766,17 @@ function prepareExtensionPackages(
 					path: targetRoot,
 				});
 			}
-			packages.push({ ...group, contentDigest, install: !alreadyVerified });
+			// What the package may do is part of what this import installs, so the plan says it
+			// and the install applies only that envelope.
+			if (!alreadyVerified && reviewed.review)
+				for (const line of envelopeReviewLines(reviewed.review))
+					diagnostics.push({ type: "warning", message: `extension ${group.id} would be allowed to: ${line}` });
+			packages.push({
+				...group,
+				contentDigest,
+				envelopeDigest: reviewed.review?.digest ?? null,
+				install: !alreadyVerified,
+			});
 		} catch (error) {
 			diagnostics.push({
 				type: "error",
@@ -884,6 +946,9 @@ export function importShareArchive(filePath: string, options: ShareImportOptions
 				installExtension(root, {
 					cwd,
 					scope: extensionPackage.scope,
+					expectedEnvelopeDigest: extensionPackage.envelopeDigest,
+					// The staging directory is removed on return; the record keeps the archive it came from.
+					source: path.resolve(filePath),
 					...(options.force !== undefined ? { force: options.force } : {}),
 				}),
 			);
@@ -912,6 +977,9 @@ export function importShareArchive(filePath: string, options: ShareImportOptions
 			const action = prepared.actions[index];
 			if (!targetInfo || !action || action.action === "skip" || targetInfo.entry.type === "extension") continue;
 			failed = targetInfo.target;
+			// The plan was built before any write; a link planted since then must not redirect this one.
+			const moved = validateRealPathContainment(targetInfo.entry, targetInfo.target, targetInfo.containmentRoot);
+			if (moved) throw new Error(moved.message);
 			if (targetInfo.entry.type === "settings") {
 				const path = mergeSettingsFragment(targetInfo.buffer);
 				if (!written.includes(path)) written.push(path);

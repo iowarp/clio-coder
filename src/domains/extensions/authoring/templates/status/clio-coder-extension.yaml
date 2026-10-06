@@ -1,0 +1,12 @@
+id: __EXTENSION_ID__
+name: __EXTENSION_ID__
+version: 0.1.0
+description: A status extension for Clio Coder.
+runtime:
+  api: 2
+  entrypoint: runtime/extension.ts
+  commands:
+    - { name: status, description: Show the pulse count for this session. }
+  events: [session_open, { tick: 5s }]
+  ui: [status, band]
+  state: { session: true, store: false }

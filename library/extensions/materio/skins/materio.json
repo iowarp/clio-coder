@@ -1,0 +1,37 @@
+{
+	"palette": {
+		"cyanFocal": {
+			"dark": "#f2b441",
+			"light": "#805000"
+		}
+	},
+	"glyphs": {
+		"brand": "\u25c8"
+	},
+	"agents": {
+		"materio-research-explorer": {
+			"label": "Research scout",
+			"glyph": "\u25c7"
+		},
+		"materio-literature-reviewer": {
+			"label": "Literature desk",
+			"glyph": "\u224b"
+		},
+		"materio-lab-definer": {
+			"label": "Lab engineer",
+			"glyph": "\u2697"
+		},
+		"materio-workflow-planner": {
+			"label": "Experiment planner",
+			"glyph": "\u2318"
+		},
+		"materio-task-executor": {
+			"label": "Task executor",
+			"glyph": "\u2699"
+		},
+		"materio-task-verifier": {
+			"label": "Artifact reviewer",
+			"glyph": "\u25ce"
+		}
+	}
+}

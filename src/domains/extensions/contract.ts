@@ -5,6 +5,7 @@ import type {
 	ExtensionSnapshot,
 	InstalledExtension,
 } from "./manager.js";
+import type { ExtensionSessionOverlay } from "./state.js";
 
 export interface ExtensionsContract extends DomainContract {
 	list(cwd?: string, options?: ExtensionListOptions): InstalledExtension[];
@@ -19,4 +20,10 @@ export interface ExtensionsContract extends DomainContract {
 	 * composition root publishes the boot generation together with its hooks.
 	 */
 	prepareReload(): ExtensionReloadPrepareResult;
+	/**
+	 * Dev packages and muted ids the terminal adds for its session. Both
+	 * `list` and the next generation's build read it; only the terminal sets
+	 * one, so headless runs, ACP sessions and workers never load a dev package.
+	 */
+	setSessionOverlay(overlay: ExtensionSessionOverlay | null): void;
 }

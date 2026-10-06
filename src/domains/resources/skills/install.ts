@@ -1,4 +1,3 @@
-import { execFileSync } from "node:child_process";
 import {
 	cpSync,
 	existsSync,
@@ -12,6 +11,7 @@ import {
 } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import path from "node:path";
+import { runStagingCommandSync } from "../../../core/safe-exec.js";
 import { fsyncDirectory } from "../../../core/safe-resource-write.js";
 import { clioConfigDir } from "../../../core/xdg.js";
 import { frontmatterRegion, normalizedSkillHash, stripProvenanceLines } from "./content-hash.js";
@@ -204,10 +204,11 @@ function fetchSource(spec: SkillSourceSpec): FetchedSource {
 	const tmp = mkdtempSync(path.join(tmpdir(), "clio-coder-skill-"));
 	const cleanup = (): void => rmSync(tmp, { recursive: true, force: true });
 	try {
-		execFileSync("git", ["clone", "--depth", "1", "--branch", spec.branch, spec.cloneUrl, tmp], {
-			stdio: "pipe",
-			timeout: CLONE_TIMEOUT_MS,
-		});
+		runStagingCommandSync(
+			"git",
+			["-c", "core.hooksPath=/dev/null", "clone", "--depth", "1", "--branch", spec.branch, "--", spec.cloneUrl, tmp],
+			{ timeoutMs: CLONE_TIMEOUT_MS, env: { GIT_TERMINAL_PROMPT: "0", GIT_CONFIG_NOSYSTEM: "1" } },
+		);
 		const target = path.join(tmp, spec.filePath);
 		// A clone that succeeded but has no skill at that path is the common
 		// failure for a published index whose entries moved, or that names a

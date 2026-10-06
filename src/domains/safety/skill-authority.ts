@@ -1,5 +1,6 @@
 import { homedir } from "node:os";
 import path from "node:path";
+import { devRootsHeldByOthers } from "../../core/dev-roots.js";
 import { canonicalizeExistingPath, canonicalizeRawPath, type PathWalkMemo } from "../../core/path-canonical.js";
 import { clioConfigDir } from "../../core/xdg.js";
 import { isSameOrDescendant, type PathPolicyOperation } from "./path-policy.js";
@@ -81,6 +82,32 @@ export function skillMutationReason(
 						(candidate.operation === "delete" && isSameOrDescendant(boundary, location))
 					) {
 						return `active resource tree ${root} is operator-owned; draft changes outside installed resource roots and use the operator install or update interface`;
+					}
+				}
+			}
+		}
+	}
+	return null;
+}
+
+/**
+ * Dev extension folders another live session registered. The session that
+ * registered a folder authors it; this one's model may not change it, whatever
+ * the folder is named or where the operator pointed the session at it.
+ */
+export function foreignDevRootReason(candidates: ReadonlyArray<MutationCandidate>, memo: PathWalkMemo): string | null {
+	const held = devRootsHeldByOthers();
+	if (held.length === 0) return null;
+	for (const candidate of candidates) {
+		for (const { root, holder } of held) {
+			const boundaries = [root, canonicalizeExistingPath(root, memo)];
+			for (const boundary of boundaries) {
+				for (const location of [candidate.lexical, candidate.resolved]) {
+					if (
+						isSameOrDescendant(location, boundary) ||
+						(candidate.operation === "delete" && isSameOrDescendant(boundary, location))
+					) {
+						return `dev extension folder ${root} is registered to another session (pid ${holder.pid}); only that session develops it`;
 					}
 				}
 			}

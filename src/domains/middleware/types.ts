@@ -75,7 +75,18 @@ export type MiddlewareEffect =
 	 * it and never adds it to model context. `key` names the source so a
 	 * surface can replace or rate-limit repeats.
 	 */
-	| { kind: "notify_operator"; message: string; key: string };
+	| { kind: "notify_operator"; message: string; key: string }
+	/**
+	 * Replacement arguments for the call about to run. Only an extension
+	 * runtime hook emits it, in the awaited before_tool phase, and it is not
+	 * one of the kinds a hooks file may declare. The registry checks the
+	 * replacement against the tool's schema and admits it again before using
+	 * it, so a rewrite can narrow or redirect a call and never widen it.
+	 */
+	| { kind: "rewrite_tool_input"; args: Record<string, unknown>; reason: string; source: string };
+
+/** What a hooks file or a builtin rule may declare: every effect but a rewrite. */
+export type DeclarableMiddlewareEffect = Exclude<MiddlewareEffect, { kind: "rewrite_tool_input" }>;
 
 export type MiddlewareRuleSource = "builtin";
 

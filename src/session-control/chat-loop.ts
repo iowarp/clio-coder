@@ -480,6 +480,15 @@ export type ChatLoopEvent = (
 	| { type: "speculative_dispatch"; counts: SpeculativeDispatchCounts }
 ) & { modelTimeMs?: number };
 
+export interface PromptSubmitInput {
+	/** What the operator typed: the template invocation when one expanded. */
+	typed: string;
+	/** What the model would receive. */
+	text: string;
+}
+
+export type PromptSubmitVerdict = { kind: "pass"; text: string } | { kind: "block"; reason: string };
+
 export interface ChatSubmitOptions {
 	/** Host-only fresh delivery. Its text never enters steering/editor queues (#411). */
 	machineTurn?: {
@@ -891,6 +900,14 @@ export interface CreateChatLoopDeps {
 	 * minimal.
 	 */
 	middleware?: MiddlewareContract;
+	/**
+	 * The awaited prompt_submit gate of extension runtime hooks, present only
+	 * where a surface hosts their runtimes. It runs once per submission that
+	 * starts a fresh turn, sees the line the operator typed rather than an
+	 * expanded template body, and may refuse the turn or, when nothing
+	 * expanded the line, rewrite it.
+	 */
+	promptSubmit?: (input: PromptSubmitInput) => Promise<PromptSubmitVerdict>;
 	/**
 	 * Shared next-round provider routing. The registry applies effects emitted
 	 * by before_tool/after_tool; the chat loop applies turn hooks and consumes
@@ -2382,6 +2399,21 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			}
 			if (options.machineTurn?.preparationToken === machinePreparation?.token && machinePreparation !== null)
 				machinePreparation.runtime = agentRuntime;
+			if (deps.promptSubmit && options.requestContinuation !== true) {
+				const verdict = await deps.promptSubmit({ typed: options.display?.text ?? text, text });
+				if (!admissionCurrent()) return;
+				if (verdict.kind === "block") {
+					emit({
+						type: "notice",
+						level: "warning",
+						surface: "transcript",
+						text: verdict.reason,
+						admission: { reason: "prompt-blocked" },
+					});
+					return;
+				}
+				text = verdict.text;
+			}
 			const operatorText = text;
 			let sidecarObservation: string | null = null;
 			const routeAcceptsImages = acceptsImageInput({
@@ -2603,6 +2635,10 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			// the user message: persisted in the ledger, no hidden prompt
 			// machinery.
 			middleware.fireTurnStart(agentRuntime, text, pendingSkillRequests.length, options.requestContinuation === true);
+			if (options.requestContinuation !== true) {
+				await middleware.awaitTurnStart(agentRuntime, text, pendingSkillRequests.length);
+				if (!admissionCurrent()) return;
+			}
 			const reminderProjection = middleware.takePendingReminderProjection();
 			// Pending skill requests are plain visible text in the user message
 			// itself: persisted in the ledger, no hidden prompt machinery.

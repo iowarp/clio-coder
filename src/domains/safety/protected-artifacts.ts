@@ -885,6 +885,9 @@ export function extractCommandDeleteTargets(command: string): string[] {
 
 /** Recognizable operator CLI installation paths invoked through a model shell.
  * This is command inspection, not confinement of arbitrary scripts or aliases.
+ * `excludeLibrary` keeps only the hard-blocked verbs. Without it the result also
+ * covers the verbs that ask the operator under the default posture: the Library,
+ * a share import and the extension authoring verbs that execute package code.
  */
 export function invokesClioSkillMutation(command: string, excludeLibrary = false): boolean {
 	for (const segment of expandedShellSegments(command)) {
@@ -917,16 +920,19 @@ export function invokesClioSkillMutation(command: string, excludeLibrary = false
 			args = args.slice(flag === "--skill" || flag === "--api-key" ? 2 : 1);
 		}
 		if (rootHelp) continue;
+		// `clio-coder import` is the alias of `clio-coder share import`.
+		if (args[0] === "import") args = ["share", ...args];
 		if (
 			args[0] !== "skills" &&
 			args[0] !== "library" &&
 			args[0] !== "plugins" &&
 			args[0] !== "extensions" &&
-			args[0] !== "interop"
+			args[0] !== "interop" &&
+			args[0] !== "share"
 		)
 			continue;
 		if (excludeLibrary && args[0] === "library") continue;
-		if (resourceCliMutatesSkills(args[0], args.slice(1))) return true;
+		if (resourceCliMutatesSkills(args[0], args.slice(1), !excludeLibrary)) return true;
 	}
 	return false;
 }
@@ -963,15 +969,18 @@ function homeExpanded(token: ShellToken, home: string | undefined): string {
 }
 
 function resourceCliMutatesSkills(
-	resource: "skills" | "library" | "plugins" | "extensions" | "interop",
+	resource: "skills" | "library" | "plugins" | "extensions" | "interop" | "share",
 	args: ReadonlyArray<string>,
+	confirmable: boolean,
 ): boolean {
 	// Both resource parsers accept flags before the verb. Consume their value
 	// options so a catalog path called --yes or --help is not treated as a flag.
 	const valueOptions =
 		resource === "skills"
 			? ["--name", "--category", "--scenario", "--target", "--workspace", "--timeout"]
-			: ["--kind", "--from"];
+			: resource === "share"
+				? ["--out"]
+				: ["--kind", "--from"];
 	let verb: string | undefined;
 	let confirmed = false;
 	let dryRun = false;
@@ -988,8 +997,15 @@ function resourceCliMutatesSkills(
 		if (!arg.startsWith("-")) verb ??= arg;
 	}
 	if (resource === "skills") return verb === "install" || verb === "update" || verb === "sync";
-	if (resource === "plugins" || resource === "extensions")
-		return ["install", "update", "remove", "enable", "disable", "pin"].includes(verb ?? "");
+	// A share import installs packages and writes resources from an archive the
+	// model may have authored; its dry run only plans.
+	if (resource === "share") return confirmable && verb === "import" && !dryRun;
+	if (resource === "plugins" || resource === "extensions") {
+		if (["install", "update", "remove", "enable", "disable", "pin"].includes(verb ?? "")) return true;
+		// Both authoring verbs run package code (startup registration, `*.test.ts`),
+		// so they need the operator the way an install does.
+		return resource === "extensions" && confirmable && (verb === "test" || verb === "validate");
+	}
 	if (resource === "interop") return verb === "adopt" && confirmed && !dryRun;
 	// A package of any kind may carry skills or require a skill dependency.
 	// A dry run builds the plan and writes nothing, so it never needs a confirmation.

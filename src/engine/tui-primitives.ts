@@ -22,6 +22,8 @@ export {
 	isKeyRelease,
 	matchesKey,
 	ProcessTerminal,
+	parseKey,
+	sliceByColumn,
 	TuiAltScreen,
 	truncateToWidth,
 	visibleWidth,

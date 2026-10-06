@@ -14,6 +14,7 @@ import { clockLocal } from "./format-time.js";
 import { showClioOverlayFrame } from "./overlay-frame.js";
 import { type ListOverlayItem, ListOverlayView } from "./overlays/list-overlay.js";
 import { clioTheme, fitUnits, rule } from "./theme/index.js";
+import { skinEpoch } from "./theme/tokens.js";
 
 const DEFAULT_CONTENT_WIDTH = 96;
 const REFRESH_MS = 1_000;
@@ -259,16 +260,30 @@ export class MemoryOverlayView implements Component {
 	render(width: number): string[] {
 		const status = this.sync();
 		const statusLine = formatMemoryStatusLine(status, width);
+		const routeLine = status.route
+			? fitUnits(
+					clioTheme(),
+					"",
+					[
+						clioTheme().fg(
+							"annotation",
+							`Memory route: ${status.route.source === "chat" ? "chat route (no memory model set) · " : ""}${status.route.target ?? "(unset)"}/${status.route.model ?? "(unset)"}`,
+						),
+					],
+					width,
+				)
+			: null;
 		const promotionLine =
 			this.promotionMessage === null
 				? null
 				: fitUnits(clioTheme(), "", [clioTheme().fg(this.promotionMessage.token, this.promotionMessage.text)], width);
-		const statusKey = promotionLine === null ? statusLine : `${statusLine}\n${promotionLine}`;
+		const statusKey = [statusLine, routeLine, promotionLine].filter((line) => line !== null).join("\n");
 		const listLines = this.list.render(width);
 		const memo = this.renderMemo;
 		if (memo && memo.width === width && memo.status === statusKey && memo.listLines === listLines) return memo.lines;
 		const lines = [
 			statusLine,
+			...(routeLine === null ? [] : [routeLine]),
 			...(promotionLine === null ? [] : [promotionLine]),
 			rule(clioTheme(), width),
 			...listLines,
@@ -292,7 +307,7 @@ export class MemoryOverlayView implements Component {
 	private sync(): TaskMemoryOperatorStatus {
 		const status = this.getStatus();
 		const records = this.getRecords();
-		const signature = memorySignature(status, records);
+		const signature = `${skinEpoch()}|${memorySignature(status, records)}`;
 		if (signature !== this.signature) {
 			this.signature = signature;
 			this.list.setItems(buildMemoryOverlayItems(status, records));

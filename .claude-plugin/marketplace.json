@@ -111,6 +111,14 @@
 			"license": "Apache-2.0"
 		},
 		{
+			"name": "extension-authoring",
+			"source": "./library/skills/meta/extension-authoring",
+			"description": "Builds, tests, and debugs Clio Coder api 2 extensions with declared capabilities and host-rendered views. Not for instruction-only skills; use skill-authoring.",
+			"version": "0.1.0",
+			"category": "meta",
+			"license": "Apache-2.0"
+		},
+		{
 			"name": "file-ticket",
 			"source": "./library/skills/git/file-ticket",
 			"description": "Turns something noticed mid-session into a tracker issue: captures evidence, dedups against existing issues, composes a labeled issue with acceptance criteria, confirms, and creates it via gh. Not for batch ticket creation from a PRD; use backlog. Not for diagnosing an existing issue; use fix-issue.",
@@ -146,7 +154,7 @@
 			"name": "materio",
 			"source": "./library/plugins/materio",
 			"description": "Materio: materials research interviews, supplied-corpus synthesis, lab feasibility, task execution and verified paper handoff.",
-			"version": "0.1.0",
+			"version": "0.2.0",
 			"author": {
 				"name": "IOWarp; domain workflow adapted from Daisy Quach"
 			}

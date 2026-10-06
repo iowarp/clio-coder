@@ -102,7 +102,9 @@ function buildItems(deps: InteropOverlayDeps): ListOverlayItem[] {
 	const items: ListOverlayItem[] = deps.proposals().map((proposal) => ({
 		id: proposal.kind,
 		label: `${proposal.entry.id.padEnd(16)}${[proposal.entry.command, ...proposal.entry.args].join(" ")}`,
-		meta: theme.fg("warning", "not configured"),
+		get meta() {
+			return theme.fg("warning", "not configured");
+		},
 		group: GROUP_DETECTED,
 		detail: () => [...planLines(proposal), ...modeLines(proposal.kind)],
 	}));
@@ -113,7 +115,9 @@ function buildItems(deps: InteropOverlayDeps): ListOverlayItem[] {
 		items.push({
 			id: `peer:${record.kind}`,
 			label: `${kind.label.padEnd(16)}${record.version ?? record.binary ?? "version unknown"}`,
-			meta: theme.fg("annotation", record.presence),
+			get meta() {
+				return theme.fg("annotation", record.presence);
+			},
 			group: GROUP_DETECTED,
 			detail: () => [
 				`# ${kind.label}`,
@@ -127,7 +131,9 @@ function buildItems(deps: InteropOverlayDeps): ListOverlayItem[] {
 		items.push({
 			id: `configured:${agent.id}`,
 			label: `${agent.id.padEnd(16)}${command}`,
-			meta: theme.fg("success", "connected"),
+			get meta() {
+				return theme.fg("success", "connected");
+			},
 			group: GROUP_CONFIGURED,
 			detail: () => [`# ${agent.id}`, `**ACP command:** \`${command}\``, ...modeLines(agent.id as InteropAgentId)],
 		});
@@ -137,7 +143,9 @@ function buildItems(deps: InteropOverlayDeps): ListOverlayItem[] {
 		items.push({
 			id: `declined:${agent.kind}`,
 			label: `${agent.kind.padEnd(16)}${agent.binary ?? agent.installDir ?? ""}`,
-			meta: theme.fg("annotation", `declined ${agent.decidedAt ?? ""}`.trim()),
+			get meta() {
+				return theme.fg("annotation", `declined ${agent.decidedAt ?? ""}`.trim());
+			},
 			group: GROUP_DECLINED,
 			detail: () => [`# ${agent.kind}`, "Declined. Clio proposes it again when its binary version or path changes."],
 		});

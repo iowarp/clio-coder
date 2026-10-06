@@ -11,8 +11,10 @@ import type { AgentsContract } from "../domains/agents/contract.js";
 import type { ClioKeybinding } from "../domains/config/keybindings.js";
 import type { ContextState } from "../domains/context/index.js";
 import type { DispatchContract, RouteBreakerView } from "../domains/dispatch/contract.js";
+import { createTurnObservations, subscribeExtensionObservations } from "../domains/extensions/bus-observations.js";
 import type { ExtensionsContract } from "../domains/extensions/index.js";
-import { OperatorExtensionRuntime } from "../domains/extensions/operator-runtime.js";
+import { OperatorExtensions } from "../domains/extensions/operator-extensions.js";
+import type { ExtensionRuntimeHookBridge } from "../domains/extensions/runtime-hook-bridge.js";
 import type { InteropContract } from "../domains/interop/index.js";
 import type { TaskMemoryOperatorStatus } from "../domains/memory/index.js";
 import { openDetachedBatchViews } from "../domains/middleware/index.js";
@@ -37,6 +39,7 @@ import { setDiffusionFramesEnabled } from "../engine/apis/diffusion-frames.js";
 import { createAgentProgress } from "../engine/tui.js";
 import type { ChatLoop, ChatLoopEvent } from "../session-control/chat-loop.js";
 import { reportLoopChanges } from "../session-control/loop-command.js";
+import type { ReloadClassesController } from "../session-control/reload-report.js";
 import type {
 	ContextClearCommandOptions,
 	InitCommandOptions,
@@ -59,14 +62,18 @@ import { createDispatchSteering } from "./dispatch-steering.js";
 import { createEditorSubmitController, EDITOR_BASH_SHUTDOWN_MS } from "./editor-submit.js";
 import { renderExitSummary } from "./exit-summary.js";
 import { createExitSummaryCollector } from "./exit-summary-collector.js";
+import { createExtensionDevSession, type ExtensionDevSession } from "./extension-dev-session.js";
 import { createInteractiveDesktopNotifications } from "./footer/notifications.js";
 import { createInteractiveEventProjection } from "./interactive-event-projection.js";
 import { createInteractiveInputRuntime } from "./interactive-input-runtime.js";
 import { createInteractivePresentation } from "./interactive-presentation.js";
+import { appendReloadReport, createInteractiveReload } from "./interactive-reload.js";
+import { createInteractiveRestart, interactiveRestartBusyReason } from "./interactive-restart.js";
 import { createProcessInteractiveShell, getActiveRenderTrace } from "./interactive-shell.js";
 import { createInteractiveSlashRuntime, resolveAvailableThinkingLevels } from "./interactive-slash-runtime.js";
 import { createInteractiveSubscriptions } from "./interactive-subscriptions.js";
 import { createInteractiveTickers } from "./interactive-tickers.js";
+import { formatKeyLabel } from "./keybinding-manager.js";
 import { returnToLiveEdge } from "./layout.js";
 import type { createMuxBridge } from "./mux-bridge.js";
 import { createOverlayLifecycle, type OverlayLifecycleController } from "./overlay-lifecycle.js";
@@ -76,9 +83,14 @@ import { describePanesLeftBehind } from "./panes-runtime.js";
 import type { createPeerInbox } from "./peer-inbox.js";
 import { writeInputWedgeDump } from "./render-trace.js";
 import { renderContextOperationResult } from "./renderers/context-operation.js";
+import { hydrateResumedSessionPresentation } from "./resumed-session-presentation.js";
 import { settleChatBeforeSessionSwitch } from "./session-switch-settlement.js";
 import { createSessionTranscript } from "./session-transcript.js";
 import { processAutoPacingAllowed } from "./stream-pacing-policy.js";
+import { createAmbientSurfaces, hasExtensionDrawing } from "./surfaces/ambient.js";
+import { createExtensionDockHost } from "./surfaces/extension-dock.js";
+import { runParkedInterview } from "./surfaces/interview.js";
+import { createWorkspaceSurfaces, WORKSPACE_LEAVE_KEY } from "./surfaces/registry.js";
 import type { BootInteractivity, TerminalLease } from "./terminal-lease.js";
 import type { createWatchPaneController } from "./watch-pane.js";
 import { WORKER_SETTLED_ENTRY } from "./worker-replay.js";
@@ -146,7 +158,11 @@ export interface InteractiveDeps {
 	extensions?: ExtensionsContract;
 	/** `/extensions reload` seam; the composition root supplies the coordinator. */
 	reloadExtensions?: SlashCommandContext["reloadExtensions"];
+	/** Where api 2 hook registrations reach the runtimes this surface owns. */
+	runtimeHooks?: ExtensionRuntimeHookBridge;
 	reloadPlugins?: SlashCommandContext["reloadPlugins"];
+	reloadClasses?: ReloadClassesController;
+	armRestartHandoff?: () => void;
 	interop?: InteropContract;
 	share?: ShareContract;
 	/**
@@ -552,7 +568,7 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 	let operatorTimer: ReturnType<typeof setTimeout> | undefined;
 	let operatorPanelValid: (() => boolean) | undefined;
 	const operatorExtensions = deps.extensions
-		? new OperatorExtensionRuntime({
+		? new OperatorExtensions({
 				context: () => ({
 					workspace: process.cwd(),
 					sessionId: deps.session?.current()?.id ?? deps.getSessionId?.() ?? null,
@@ -573,8 +589,13 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 								.flatMap((tool) => (tool.sourceInfo?.extension ? [tool.sourceInfo.extension] : [])),
 						}
 					: {}),
-				onDiagnostic: (message) => notify("warning", message, "operator-extensions:observation"),
+				onDiagnostic: (message) => {
+					if (!deps.reloadClasses?.captureIssue(message)) notify("warning", message, "operator-extensions:observation");
+				},
+				// A mute fences the runtime at once; the reload that unloads it waits for idle.
+				admits: (extensionId): boolean => devSession?.isMuted(extensionId) !== true,
 				onReload: (result, reason) => {
+					if (deps.reloadClasses?.active) return;
 					if (result.status === "deferred") return;
 					const failed = result.status === "rejected" || result.degraded === undefined;
 					const degraded = (result.degraded ?? 0) > 0;
@@ -583,11 +604,99 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 				},
 			})
 		: undefined;
+	const turnObservations = operatorExtensions
+		? createTurnObservations((observation) => operatorExtensions.observeV2(observation))
+		: undefined;
+	// The dev scope is a terminal concept: only this surface sets the overlay,
+	// so headless runs, ACP and workers never load a package under development.
+	const devSession: ExtensionDevSession | undefined =
+		operatorExtensions && deps.extensions
+			? createExtensionDevSession({
+					extensions: deps.extensions,
+					operator: operatorExtensions,
+					cwd: () => process.cwd(),
+					isIdle: () =>
+						!deps.chat.isStreaming() &&
+						deps.chat.turnPreparation().phase === "idle" &&
+						(overlayLifecycle?.getState() ?? "closed") === "closed" &&
+						!editorSubmit?.hasActiveEditorBash(),
+					ask: (questions, options) => overlayLifecycle.openTransientAskUserOverlayState(questions, options),
+					notify: (level, text) => notify(level, text, "operator-extensions:dev"),
+				})
+			: undefined;
+	if (operatorExtensions)
+		deps.runtimeHooks?.bind({
+			hook: (extensionId, event, timeoutMs, signal) => operatorExtensions.hook(extensionId, event, timeoutMs, signal),
+			notify: (message) => notify("warning", message, "operator-extensions:hook"),
+			observeTurnStart: (text) => turnObservations?.turnStart(text),
+			tool: (extensionId, name, input, signal) => operatorExtensions.tool(extensionId, name, input, signal),
+			// A tool's interview is asked like the model's own question, so a
+			// permission card preempts it and it resumes afterwards.
+			interview: (extensionId, interview, signal) =>
+				runParkedInterview(
+					{ ask: (questions, options) => overlayLifecycle.openAskUserOverlayState(questions, options) },
+					interview,
+					{ extensionId, title: extensionId },
+					// The closing cancel still reaches the handler after an abort.
+					(answer) => operatorExtensions.interview(extensionId, answer, answer.nav === "cancel" ? undefined : signal),
+					signal,
+				),
+		});
+	const workspaceSurfaces = operatorExtensions
+		? createWorkspaceSurfaces({
+				model: operatorExtensions.surface,
+				tui,
+				skinFor: (active) => operatorExtensions.skinFor(active.extensionId, active.workspaceId),
+				// Read at render time only while a workspace is active, after the presentation exists.
+				leaveHint: () => {
+					const leader = keybindings.getKeys("clio-coder.leader")[0];
+					return leader ? `${formatKeyLabel(leader, "")} ${WORKSPACE_LEAVE_KEY} or /workspace off` : "/workspace off";
+				},
+				isOverlayOpen: () => (overlayLifecycle?.getState() ?? "closed") !== "closed",
+				// Read at render time, after the presentation exists.
+				rowsAboveComposer: () => presentation.composerRowsAbove(terminal.rows),
+				press: (extensionId, action) => {
+					void operatorExtensions
+						.action(extensionId, { id: action, source: "leader" })
+						.catch((error) => notify("warning", `${extensionId}: ${error instanceof Error ? error.message : String(error)}`));
+				},
+				leave: () => {
+					operatorExtensions.leaveWorkspace();
+				},
+				focusBoard: (extensionId, title, view) => {
+					if (!ambientSurfaces?.focusRegion(extensionId, title, view, "board"))
+						notify("info", "Close the open panel first; the board opens over the composer.");
+				},
+			})
+		: undefined;
+	const ambientSurfaces = operatorExtensions
+		? createAmbientSurfaces({
+				operator: operatorExtensions,
+				tui,
+				dock: createExtensionDockHost({
+					mux: deps.mux ?? null,
+					stateDir: deps.stateDir,
+					sessionId: () => deps.session?.current()?.id ?? deps.getSessionId?.() ?? null,
+					log: (message) => notify("warning", message, "operator-extensions:dock"),
+				}),
+				overlay: () => overlayLifecycle,
+				notice: (notice) => notifications.add(notice),
+				appendCard: (render) => chatRenderer.mutate(() => chatPanel.appendReplayBlock(render), "extension-card"),
+				showText: (owner, text) =>
+					slashRuntime.context.showReference?.({ command: owner, source: "operator extension", text }),
+				fill: (text) => editor.setLiteralText(text),
+				submit: (text) => {
+					editor.setLiteralText(text);
+					editor.onSubmit?.(text);
+				},
+			})
+		: undefined;
 	const presentation = createInteractivePresentation({
 		bus: deps.bus,
 		getLifecycleHint: () => updateMonitor?.text() ?? null,
 		getLeaderArmed: () => leaderArmed,
 		extensionCommands: () => operatorExtensions?.commands() ?? [],
+		...(workspaceSurfaces ? { workspaceSurfaces } : {}),
 		getExtensionStatus: () =>
 			overlayLifecycle?.getState() === "permission-confirm"
 				? []
@@ -653,6 +762,8 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 		chatRenderer,
 		io,
 	} = presentation;
+	if (deps.startsResumed && deps.session)
+		hydrateResumedSessionPresentation(deps.session, chatPanel, readStructuredEntries, presentation.setLastTurnSummary);
 	// Every operator entry point reports the effective state after a successful
 	// change. One observer keeps shortcuts, slash commands, and forms consistent.
 	const withSettingFeedback =
@@ -805,6 +916,7 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 		? reportLoopChanges(deps.jobs, ({ level, text }) => appendNotice(level, text, busNoticeSink))
 		: undefined;
 	const eventProjection = createInteractiveEventProjection({
+		isReloadReporting: () => deps.reloadClasses?.active === true,
 		bus: deps.bus,
 		chat: deps.chat,
 		status: statusController,
@@ -821,15 +933,24 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 		isAskUserWaiting: () => overlayLifecycle.isAskUserWaiting(),
 		closeAskUserSession: () => overlayLifecycle.closeAskUserSession(),
 		resetAskUserCancellation: () => overlayLifecycle.resetAskUserCancellation(),
-		recordToolStart: (toolName, toolCallId) => presentation.recordToolStart(toolCallId, toolName),
-		recordToolEnd: (_toolName, toolCallId, isError, truncated) =>
-			presentation.recordToolEnd({ toolCallId, isError, truncated }),
-		setLastTurnSummary: (summary) => presentation.setLastTurnSummary(summary),
+		recordToolStart: (toolName, toolCallId) => {
+			presentation.recordToolStart(toolCallId, toolName);
+			turnObservations?.toolStart(toolCallId);
+		},
+		recordToolEnd: (toolName, toolCallId, isError, truncated) => {
+			presentation.recordToolEnd({ toolCallId, isError, truncated });
+			turnObservations?.toolEnd(toolName, toolCallId, isError);
+		},
+		setLastTurnSummary: (summary) => {
+			presentation.setLastTurnSummary(summary);
+			if (summary) turnObservations?.turnEnd(summary);
+		},
 		startTerminalProgress: () => agentProgress.start(),
 		stopTerminalProgress: () => agentProgress.stop(),
 		onTurnEnded: () => {
 			desktopNotifications.turnEnded();
 			operatorExtensions?.observe({ event: "turn_end", reason: "completed" });
+			devSession?.poke();
 		},
 		refreshLiveWorkspaceGit,
 		refreshFooter: () => {
@@ -880,14 +1001,21 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 			outputLabel: () => keybindings.actionLabel("clio-coder.output.cycle"),
 		},
 		...(operatorExtensions ? { operatorExtensions } : {}),
+		...(devSession ? { extensionDev: devSession.command } : {}),
 		showExtensionOutput: (invocation, output) => {
-			const generation = operatorExtensions?.activeGeneration;
 			const id = invocation.split(":")[1];
+			const generation = operatorExtensions?.entries().find((entry) => entry.id === id)?.generation;
 			const valid = () =>
 				operatorExtensions
 					?.entries()
 					.some((entry) => entry.id === id && entry.state === "ready" && entry.generation === generation) ?? false;
 			if (!valid()) return;
+			// Surface events and persistent entries already draw api 2 results.
+			if (output.api === 2) {
+				if (output.text && !hasExtensionDrawing(output))
+					slashRuntime.context.showReference?.({ command: invocation, source: "operator extension", text: output.text });
+				return;
+			}
 			if (
 				output.panel &&
 				!deps.chat.isStreaming() &&
@@ -944,6 +1072,30 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 		...(deps.onContextRefresh ? { onContextRefresh: deps.onContextRefresh } : {}),
 		stateDir: deps.stateDir,
 		shutdown: () => applicationController.shutdown(),
+		reloadClasses: createInteractiveReload(
+			deps.reloadClasses,
+			operatorExtensions,
+			(level, text) => slashRuntime.notice(level, text),
+			(report) => appendReloadReport(report, busNoticeSink),
+		),
+		restart: createInteractiveRestart({
+			...(deps.session ? { session: deps.session } : {}),
+			stateDir: deps.stateDir,
+			saveWorkspace: () => operatorExtensions?.saveWorkspace(),
+			busyReason: () =>
+				interactiveRestartBusyReason({
+					chat: deps.chat,
+					dispatch: deps.dispatch,
+					operator: operatorExtensions,
+					editorBash: editorSubmit.hasActiveEditorBash(),
+					reloading: deps.reloadClasses?.active === true,
+					shuttingDown: shutdownArmed || getTerminationCoordinator().getPhase() !== "idle",
+				}),
+			settle: () => deps.chat.whenSettled(),
+			armHandoff: () => deps.armRestartHandoff?.(),
+			shutdown: () => applicationController.shutdown(),
+			notify,
+		}),
 		startUpgrade: () => {
 			// Keep package-manager and lifecycle code out of boot. The footer does
 			// no more than point at /upgrade; this graph loads only after the operator
@@ -1112,6 +1264,7 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 		contextActivityStore,
 		getOverlayState: () => overlayLifecycle?.getState() ?? "closed",
 		isFooterExpanded: () => footer.isExpanded(),
+		...(workspaceSurfaces ? { isTaskIslandYielded: () => workspaceSurfaces.yieldsTaskIsland() } : {}),
 		...(deps.getTaskBoard ? { getTaskBoard: deps.getTaskBoard } : {}),
 	});
 	/**
@@ -1143,6 +1296,7 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 		resetTranscript();
 	};
 	overlayLifecycle = createOverlayLifecycle({
+		onOverlayClosed: () => ambientSurfaces?.refresh(),
 		getQuotaSnapshots: presentation.getQuotaSnapshots,
 		getDispatchRows: () => dispatchBoardStore.rows(),
 		app: { ...deps, ...settingActions },
@@ -1492,6 +1646,7 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 
 	applicationController = createInteractiveInputRuntime({
 		tui,
+		...(workspaceSurfaces ? { extraLeaderTargets: () => workspaceSurfaces.leaderTargets() } : {}),
 		scrollFooter: (delta) => footer.scroll(delta),
 		hasQueuedMessages: () => {
 			const queue = deps.chat.queuedMessages();
@@ -1622,6 +1777,8 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 				updateAbort.abort();
 				clearTimeout(operatorTimer);
 				for (const unsubscribe of operatorSubscriptions) unsubscribe();
+				void ambientSurfaces?.dispose();
+				devSession?.dispose();
 				void operatorExtensions?.dispose();
 				detachMusicDockKey?.();
 				loopJobs?.dispose();
@@ -1670,6 +1827,9 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 			try {
 				if (dumpInputWedgeOnTerminate) process.off("SIGTERM", dumpInputWedgeOnTerminate);
 				await operatorExtensions?.dispose();
+				// Finish terminal release before the exit handoff can start another reader.
+				if (lease) await lease.close();
+				else await shell.settle();
 				await deps.onShutdown();
 			} finally {
 				if (lease) await lease.close();
@@ -1717,7 +1877,11 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 				BusChannels.SessionParked,
 				BusChannels.SessionResumed,
 				BusChannels.SessionTurnSwitched,
-			].map((channel) => deps.bus.on(channel, () => operatorExtensions.invalidateContext()))
+			]
+				.map((channel) =>
+					deps.bus.on(channel, () => operatorExtensions.invalidateContext(channel === BusChannels.SessionResumed)),
+				)
+				.concat(subscribeExtensionObservations(deps.bus, (observation) => operatorExtensions.observeV2(observation)))
 		: [];
 	scheduleOperatorMaintenance = () => {
 		clearTimeout(operatorTimer);
@@ -1733,7 +1897,11 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 		async () => {
 			clearTimeout(operatorTimer);
 			for (const unsubscribe of operatorSubscriptions) unsubscribe();
+			deps.runtimeHooks?.bind(null);
+			devSession?.dispose();
 			await operatorExtensions?.dispose();
+			workspaceSurfaces?.dispose();
+			await ambientSurfaces?.dispose();
 		},
 		{ timeoutMs: 6500 },
 	);
@@ -1839,7 +2007,10 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 		// A shell that reports no frames still reloads.
 		if (operatorExtensions)
 			setImmediate(() => {
-				if (!startupAbort.signal.aborted) void operatorExtensions.reload("startup");
+				if (startupAbort.signal.aborted) return;
+				// Dev copies are taken before the startup reload lists packages.
+				devSession?.start();
+				void operatorExtensions.reload("startup");
 			});
 		if (frame === null) return;
 		// Docks are prepared hidden only now that the first frame is out: pane

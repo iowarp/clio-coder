@@ -17,7 +17,7 @@ import { isolateClioEnv } from "../harness/scratch-env.js";
 
 const REPO_ROOT = resolve(import.meta.dirname, "../..");
 const TEMPLATES_DIR = join(REPO_ROOT, "library", "_authoring", "templates");
-const TEMPLATE_KINDS = ["skill", "agent", "fleet", "prompt", "plugin"] as const;
+const TEMPLATE_KINDS = ["skill", "agent", "playbook", "prompt", "plugin"] as const;
 
 function computeDirectoryFingerprint(dir: string): Record<string, string> {
 	const result: Record<string, string> = {};
@@ -75,11 +75,11 @@ describe("library package authoring templates", () => {
 		ok(parsedAgent.budget !== undefined);
 
 		// 3. Fleet template
-		const fleetRoot = join(TEMPLATES_DIR, "fleet");
+		const fleetRoot = join(TEMPLATES_DIR, "playbook");
 		const fleetManifest = readPluginManifest(fleetRoot);
 		ok(fleetManifest.valid, `fleet manifest should be valid: ${JSON.stringify(fleetManifest.diagnostics)}`);
-		equal(fleetManifest.manifest?.clio.kind, "fleet");
-		const fleetPath = join(fleetRoot, "fleets", "pipeline-review.md");
+		equal(fleetManifest.manifest?.clio.kind, "playbook");
+		const fleetPath = join(fleetRoot, "playbooks", "pipeline-review.md");
 		ok(existsSync(fleetPath), "pipeline-review.md must exist");
 		const parsedFleet = parseFleetContract(readFileSync(fleetPath, "utf8"), fleetPath);
 		equal(parsedFleet.name, "pipeline-review");
@@ -139,7 +139,7 @@ describe("library package authoring templates", () => {
 		}
 
 		// Fleet template surfaces external agent prerequisites
-		const fleetVal = validateLibraryPackage(join(TEMPLATES_DIR, "fleet"));
+		const fleetVal = validateLibraryPackage(join(TEMPLATES_DIR, "playbook"));
 		const agentPrereqs = fleetVal.validation.prerequisites.filter((p) => p.type === "agent");
 		ok(agentPrereqs.some((p) => p.identifier === "scout"));
 		ok(agentPrereqs.some((p) => p.identifier === "verifier"));
@@ -190,7 +190,7 @@ describe("library package authoring templates", () => {
 		const env = await isolateClioEnv("val-bad-fleet-");
 		try {
 			const pkgDir = join(env.dir, "bad-fleet-pkg");
-			mkdirSync(join(pkgDir, "fleets"), { recursive: true });
+			mkdirSync(join(pkgDir, "playbooks"), { recursive: true });
 			writeFileSync(
 				join(pkgDir, "plugin.json"),
 				JSON.stringify({
@@ -201,15 +201,15 @@ describe("library package authoring templates", () => {
 					extensions: {
 						"ai.iowarp.clio": {
 							manifestVersion: 1,
-							kind: "fleet",
-							resources: { fleets: "fleets" },
-							components: [{ kind: "fleet", id: "cyclic-fleet", path: "fleets/cyclic-fleet.md" }],
+							kind: "playbook",
+							resources: { playbooks: "playbooks" },
+							components: [{ kind: "playbook", id: "cyclic-fleet", path: "playbooks/cyclic-fleet.md" }],
 						},
 					},
 				}),
 			);
 			writeFileSync(
-				join(pkgDir, "fleets", "cyclic-fleet.md"),
+				join(pkgDir, "playbooks", "cyclic-fleet.md"),
 				`---
 version: 1
 name: cyclic-fleet
@@ -422,8 +422,8 @@ Check \${pluginRoot}/assets/nonexistent-file.txt
 			...readdirSync(join(libraryDir, "agents"))
 				.map((d) => join(libraryDir, "agents", d))
 				.filter(isDir),
-			...readdirSync(join(libraryDir, "fleets"))
-				.map((d) => join(libraryDir, "fleets", d))
+			...readdirSync(join(libraryDir, "playbooks"))
+				.map((d) => join(libraryDir, "playbooks", d))
 				.filter(isDir),
 			...readdirSync(join(libraryDir, "plugins"))
 				.map((d) => join(libraryDir, "plugins", d))
@@ -441,7 +441,7 @@ Check \${pluginRoot}/assets/nonexistent-file.txt
 				),
 		];
 
-		equal(packagePaths.length, 34, `expected 34 curated library packages, found ${packagePaths.length}`);
+		equal(packagePaths.length, 35, `expected 35 curated library packages, found ${packagePaths.length}`);
 
 		// Ensure Materio is explicitly included and verified
 		const materioPath = join(libraryDir, "plugins", "materio");
@@ -472,9 +472,10 @@ Check \${pluginRoot}/assets/nonexistent-file.txt
 			entries: Array<{ name: string; sourceUrl: string }>;
 		};
 
-		// 35 = 34 locally scanned packages + 1 blessed remote package (wtfp), which
-		// has no local directory under library/ and so is never in packagePaths.
-		equal(libraryRegistry.entries.length, 35, "library registry must contain exactly 35 packages");
+		// 38 = 37 locally scanned packages (34 skills, the Materio plugin, and the
+		// Materio and local-status extensions) + 1 blessed remote package (wtfp),
+		// which has no local directory under library/ and so is never in packagePaths.
+		equal(libraryRegistry.entries.length, 38, "library registry must contain exactly 38 packages");
 
 		// None of the entries should reference _authoring or templates
 		for (const entry of libraryRegistry.entries) {
@@ -503,7 +504,7 @@ Check \${pluginRoot}/assets/nonexistent-file.txt
 			skills: Array<{ name: string; path: string }>;
 		};
 
-		equal(skillsRegistry.skills.length, 33, "skills registry must contain exactly 33 skills");
+		equal(skillsRegistry.skills.length, 34, "skills registry must contain exactly 34 skills");
 
 		for (const skill of skillsRegistry.skills) {
 			ok(
@@ -523,7 +524,7 @@ Check \${pluginRoot}/assets/nonexistent-file.txt
 			const pkgDir = join(env.dir, "divergent-pkg");
 			mkdirSync(join(pkgDir, "agents"), { recursive: true });
 			mkdirSync(join(pkgDir, "prompts", "curate"), { recursive: true });
-			mkdirSync(join(pkgDir, "fleets"), { recursive: true });
+			mkdirSync(join(pkgDir, "playbooks"), { recursive: true });
 			mkdirSync(join(pkgDir, "skills", "validator-tool"), { recursive: true });
 			mkdirSync(join(pkgDir, "assets"), { recursive: true });
 
@@ -573,7 +574,7 @@ Inspect dataset using $ARGUMENTS
 			);
 
 			writeFileSync(
-				join(pkgDir, "fleets", "workflow.md"),
+				join(pkgDir, "playbooks", "workflow.md"),
 				`---
 version: 1
 name: dataset-curation-workflow
@@ -609,7 +610,7 @@ Run curation on {{datasetPath}}.
 								skills: "skills",
 								agents: "agents",
 								prompts: "prompts",
-								fleets: "fleets",
+								playbooks: "playbooks",
 							},
 							components: [
 								{
@@ -636,9 +637,9 @@ Run curation on {{datasetPath}}.
 									requires: ["agent:agent-comp-id"],
 								},
 								{
-									kind: "fleet",
+									kind: "playbook",
 									id: "fleet-comp-id",
-									path: "fleets/workflow.md",
+									path: "playbooks/workflow.md",
 									requires: ["agent:agent-comp-id"],
 								},
 							],
@@ -669,10 +670,10 @@ Run curation on {{datasetPath}}.
 			equal(promptRec.componentRef, "prompt:prompt-comp-id");
 			equal(promptRec.valid, true);
 
-			const fleetRec = res.validation.resources.find((r) => r.kind === "fleet");
+			const fleetRec = res.validation.resources.find((r) => r.kind === "playbook");
 			ok(fleetRec, "fleet resource must be recorded");
 			equal(fleetRec.name, "dataset-curation-workflow"); // contract.name
-			equal(fleetRec.componentRef, "fleet:fleet-comp-id");
+			equal(fleetRec.componentRef, "playbook:fleet-comp-id");
 			equal(fleetRec.valid, true);
 
 			const skillRec = res.validation.resources.find((r) => r.kind === "skill");

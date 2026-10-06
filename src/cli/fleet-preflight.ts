@@ -103,7 +103,7 @@ export function inspectFleet(name: string, vars?: Readonly<Record<string, string
 		commands,
 		plan,
 		checks: [
-			{ check: "parse", summary: `parsed contract version ${contract.version}` },
+			{ check: "parse", summary: `parsed playbook version ${contract.version}` },
 			{ check: "graph", summary: `validated ${contract.steps.length} declared steps` },
 			{ check: "commands", summary: `validated ${plan.steps.filter((step) => step.kind === "code").length} code steps` },
 			{ check: "agents", summary: `resolved ${resolved.size} agents` },

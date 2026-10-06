@@ -30,7 +30,7 @@ function skill(root: string, dir: string, name: string, description = `Fixture $
 	write(root, `${dir}/SKILL.md`, `---\nname: ${name}\ndescription: ${description}\n---\nBody of ${name}.\n`);
 }
 
-/** A small plugin with one skill, one prompt, one fleet; agents are optional. */
+/** A small plugin with one skill, one prompt, one playbook; agents are optional. */
 function fixture(root: string, name: string, options: { duplicateSkill?: boolean; brokenPrompt?: boolean } = {}): void {
 	skill(root, "skills/alpha", `${name}-alpha`);
 	if (options.duplicateSkill) skill(root, "skills/beta", `${name}-alpha`, "Second file claiming the same name");
@@ -42,7 +42,7 @@ function fixture(root: string, name: string, options: { duplicateSkill?: boolean
 	);
 	write(
 		root,
-		`fleets/${name}-review.md`,
+		`playbooks/${name}-review.md`,
 		`---\nversion: 1\nname: ${name}-review\ndescription: ${name} review\nsteps:\n  - id: review\n    agent: coder\n    scope: readonly\n    dependencies: []\nmaxWorkers: 1\nonFailure: stop\n---\nReview.\n`,
 	);
 	write(
@@ -56,7 +56,7 @@ function fixture(root: string, name: string, options: { duplicateSkill?: boolean
 			extensions: {
 				"ai.iowarp.clio": {
 					manifestVersion: 1,
-					resources: { skills: "skills", prompts: "prompts", fleets: "fleets" },
+					resources: { skills: "skills", prompts: "prompts", playbooks: "playbooks" },
 					components: [],
 				},
 			},
@@ -91,7 +91,7 @@ function cli(env: { dir: string }, cwd: string, args: string[]): { code: number;
 }
 
 describe("library inventory", () => {
-	it("reports Materio's actual 6 skills, 6 agents, 17 prompts and 1 fleet with owner, runtime names and bundled origin", async () => {
+	it("reports Materio's actual 6 skills, 6 agents, 17 prompts and 1 playbook with owner, runtime names and bundled origin", async () => {
 		const env = await isolateClioEnv("clio-coder-inventory-materio-");
 		try {
 			const cwd = join(env.dir, "workspace");
@@ -105,7 +105,7 @@ describe("library inventory", () => {
 
 			const inventory = readLibraryInventory({ cwd, home: env.dir });
 			const owned = byOwner(inventory.resources, "plugin:materio");
-			deepStrictEqual(counts(owned), { skill: 6, agent: 6, prompt: 17, fleet: 1 });
+			deepStrictEqual(counts(owned), { skill: 6, agent: 6, prompt: 17, playbook: 1 });
 			for (const item of owned) {
 				strictEqual(item.owner?.scope, "user");
 				strictEqual(item.availability, "available", `${item.key}: ${item.reason ?? ""}`);
@@ -140,7 +140,7 @@ describe("library inventory", () => {
 				owned.find((item) => item.kind === "prompt" && item.name === "materio:help")?.invocation,
 				"/materio:help",
 			);
-			strictEqual(owned.find((item) => item.kind === "fleet")?.name, "materio-execute-task");
+			strictEqual(owned.find((item) => item.kind === "playbook")?.name, "materio-execute-task");
 			strictEqual(owned.find((item) => item.kind === "agent")?.invocation, 'dispatch(agent="materio-lab-definer")');
 
 			const copy = inventory.copies.find((item) => item.ref === "plugin:materio");
@@ -154,7 +154,7 @@ describe("library inventory", () => {
 			ok(record);
 			strictEqual(record.origin.kind, "bundled");
 			deepStrictEqual(record.copies, [{ scope: "user", state: "loadable" }]);
-			deepStrictEqual(counts(record.provides as LibraryResource[]), { skill: 6, agent: 6, prompt: 17, fleet: 1 });
+			deepStrictEqual(counts(record.provides as LibraryResource[]), { skill: 6, agent: 6, prompt: 17, playbook: 1 });
 			deepStrictEqual(
 				(record.provides ?? []).filter((hint) => hint.kind === "agent").map((hint) => hint.name),
 				owned
@@ -332,7 +332,7 @@ describe("library inventory", () => {
 			]);
 			for (const copy of inventory.copies) deepStrictEqual(copy.origin, { kind: "local", path: source });
 			const owned = byOwner(inventory.resources, "plugin:twin");
-			deepStrictEqual(counts(owned), { skill: 1, prompt: 1, fleet: 1 });
+			deepStrictEqual(counts(owned), { skill: 1, prompt: 1, playbook: 1 });
 			ok(owned.every((item) => item.owner?.scope === "project"));
 			const userInspection = inspectLibraryCopy("plugin:twin", { cwd, scope: "user" });
 			strictEqual(userInspection.copy.effective, false);
@@ -360,7 +360,7 @@ describe("library inventory", () => {
 				[
 					["skill", "twin-alpha", true],
 					["prompt", "twin:help", true],
-					["fleet", "twin-review", true],
+					["playbook", "twin-review", true],
 				],
 			);
 
@@ -453,7 +453,7 @@ describe("library inventory", () => {
 			strictEqual(bad?.source.class, "project");
 			ok(bad?.reason);
 
-			const fleets = inventory.resources.filter((item) => item.kind === "fleet" && item.source.class === "core");
+			const fleets = inventory.resources.filter((item) => item.kind === "playbook" && item.source.class === "core");
 			ok(fleets.some((item) => item.availability === "unavailable" && item.reason));
 			ok(inventory.resources.every((item) => item.diagnostics.length <= 8));
 		} finally {
@@ -658,7 +658,7 @@ describe("library inventory", () => {
 				"no package descriptions leak into recipe rows",
 			);
 
-			const search = cli(env, cwd, ["search", "materio-execute-task", "--kind", "fleet", "--json"]);
+			const search = cli(env, cwd, ["search", "materio-execute-task", "--kind", "playbook", "--json"]);
 			strictEqual(search.code, 0, search.stderr);
 			const found = (search.json as { entries: Array<Record<string, unknown>> }).entries;
 			deepStrictEqual(

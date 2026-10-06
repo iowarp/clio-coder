@@ -26,7 +26,7 @@ test("all library collections agree with the canonical CLI in the same scratch h
 		const extensions = await json(await h.request(`${base}/extensions`), LibraryExtensions);
 		const verifiers = await json(await h.request(`${base}/verifiers`), LibraryVerifiers);
 		const oracle = await libraryOracle(h.home.path, h.home.env);
-		for (const kind of ["skill", "prompt", "fleet", "agent"]) {
+		for (const kind of ["skill", "prompt", "playbook", "agent"]) {
 			const actual = inventory.resources.filter((row) => row.kind === kind);
 			assert.ok(actual.length > 0, `${kind} collection is seeded`);
 			assert.deepEqual(

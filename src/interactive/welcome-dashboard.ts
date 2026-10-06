@@ -17,6 +17,7 @@ import {
 	innerDivider,
 	padAnsi,
 } from "./theme/index.js";
+import { skinEpoch } from "./theme/tokens.js";
 import {
 	paintWelcomeRowWordmark,
 	paintWelcomeWordmark,
@@ -390,7 +391,7 @@ const WELCOME_HINTS: ReadonlyArray<{
 		title: "Make Clio yours",
 		commands: [
 			["/model", "Choose a model and target"],
-			["/library", "Browse skills and extensions"],
+			["/library", "Browse plugins and extensions"],
 			["/help", "Explore commands and shortcuts"],
 		],
 		keys: [
@@ -688,7 +689,7 @@ export class WelcomeDashboard implements WelcomeDashboardComponent {
 			mode === "launchpad" && width >= WELCOME_HINT_MIN_WIDTH
 				? WELCOME_HINTS[hintPage]?.keys.map(([action]) => this.deps.getKeyLabel?.(action)).join("|")
 				: "";
-		const signature = `${mode}\0${statsSignature(stats)}\0${hintPage}\0${shortcutSignature}`;
+		const signature = `${skinEpoch()}\0${mode}\0${statsSignature(stats)}\0${hintPage}\0${shortcutSignature}`;
 		const cached = this.cachedRender;
 		if (cached !== null && cached.width === width && cached.signature === signature) return cached.lines;
 		const lines = buildWelcomeDashboardLines(stats, this.version, width, mode, hintPage, this.deps.getKeyLabel);
@@ -875,12 +876,12 @@ export function createBootWelcome(
 		targets: "",
 		fleet: "",
 	};
-	let cached: { width: number; lines: string[] } | null = null;
+	let cached: { width: number; epoch: number; lines: string[] } | null = null;
 	return {
 		render: (width) => {
-			if (cached?.width === width) return cached.lines;
+			if (cached?.width === width && cached.epoch === skinEpoch()) return cached.lines;
 			const lines = buildWelcomeDashboardLines(stats, version, width, mode, 0, getKeyLabel);
-			cached = { width, lines };
+			cached = { width, epoch: skinEpoch(), lines };
 			return lines;
 		},
 		invalidate: () => {

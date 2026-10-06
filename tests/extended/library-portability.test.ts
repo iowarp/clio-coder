@@ -92,7 +92,7 @@ describe("the portable inclusion rule", () => {
 		const root = fixtureRoot("native-only", [
 			{ name: "agent-only", template: "agent" },
 			{ name: "prompt-only", template: "prompt" },
-			{ name: "fleet-only", template: "fleet" },
+			{ name: "fleet-only", template: "playbook" },
 		]);
 		const result = renderLibraryMarketplace({ root });
 		deepStrictEqual(result.errors, []);

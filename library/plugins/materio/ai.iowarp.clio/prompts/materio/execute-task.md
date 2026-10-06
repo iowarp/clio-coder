@@ -3,290 +3,73 @@ description: "Execute a specific research task or the entire workflow"
 argument-hint: "[task number N, or 'all' for full workflow]"
 ---
 
-<clio_execution>
-Read ${component:resource:clio-execution} before acting. It defines argument parsing,
-research state helpers, interview ownership, readback, and optional recording.
-</clio_execution>
+Read ${component:resource:research-policy}. Use gateway to describe and call
+`extension_materio__interview`, `extension_materio__set_task_status`,
+`extension_materio__complete_task`, and `extension_materio__record_decision`.
+Use `gateway({op:"call",capability:"extension_materio__interview",args:{...}})`
+for the forms below. The parked result contains `interview`, step-keyed `answers`,
+and closing `text`. Cancellation, revision, stale files or errors never authorize
+continuation; use the actual answers, never infer consent from prose.
+Runtime instructions here supersede the manual state/interview steps in
+${component:resource:clio-execution}. Runtime tools own publication, readback,
+task directories, checkpoints after accepted findings, and optional named-file
+recording. Never grant a worker write access to WORKFLOW.md or STATE.md.
 
-<clio_dispatch>
-Select the named recipe with dispatch({agent:"materio-...", task:"assignment with
-full context and exact permitted outputs", intent:{write_roots:["exact/output"]}}).
-Replace the illustrative recipe/path with those stated in this command. Use the
-registered dispatch fields shown here.
-Read the recipe's bound skill references and inline required templates, domain
-sections, answers and selected state into the worker task. Each dispatch starts
-fresh: re-dispatch with the full original context, prior candidates/outputs and
-the new selection, corrections, revisions or resume answer. Use monitor if the
-returned run is still active. Do not infer a resumed transcript from a run ID.
-Honor admission refusals instead of broadening write scope.
+Read ${component:resource:clio-execution} for dispatch and evidence contracts.
+Target: $ARGUMENTS (positive task number, all, or next dependency-ready task).
+Inspect .research/data/ and DATA-INDEX.md first, then WORKFLOW/STATE, RESEARCH,
+LITERATURE, VIRTUAL-LAB and effective config. Honor web_search=false; fetch only
+specific researcher-provided URLs when authorized and available. Record corpus
+coverage and unreadable formats; Clio has no general web search capability.
 
-Agent returns are mutation-report JSON. Route on the beginning of summary using
-the status branches below. For checkpoints, distinguish
-`needs_input: checkpoint:decision`, `needs_input: checkpoint:human-action`, and `needs_input: checkpoint:human-verify`;
-ask the exact question(s), collect the answer and re-dispatch. No new top-level
-status fields are allowed. A conforming JSON result is not proof of completion.
-After EVERY dispatch that wrote, use ls and read on every reported output and on
-the command's required files, including loop_back and partial checkpoint returns.
-Verify nonempty content and the promised changes before presenting success or
-continuing; re-dispatch with any missing/incorrect file named. Treat actual failed
-validation or execution as failure even when summary claims completion.
-</clio_dispatch>
+Resolve an omitted target or all via the research-state next-task helper; use
+actual dependency-ready IDs and at least two-digit task directories. Never
+invent an ID or execute with unmet dependencies. Show the full task, assumptions
+(including unconfirmed defaults), inputs, outputs and missing lab resources.
+Call interview `{form:"define-research-tasks",stage:"confirm",draft:<current complete workflow>,context:<selected task, execution confirmation, assumptions and missing data>}`
+to collect proceed/revision answers. Handle corrections with a revised workflow
+confirmation before executing; missing data goes to upload-data. Record scientific
+decisions with record_decision. Never promote a cancelled or revised form to proceed.
+Call set_task_status `{task:<id>,status:"in-progress"}` before dispatch; refusal
+stops this task. Writing tasks stop and bridge to `/materio:wtfp` instead.
 
-<execution_context>
-@.research/WORKFLOW.md
-@.research/RESEARCH.md
-@.research/LITERATURE.md
-@.research/STATE.md
-@.research/config.json
-</execution_context>
+Use direct dispatch without git when necessary. The optional v4 fleet requires an
+existing Git worktree; never initialize git or weaken a write boundary to enable it.
+Dispatch materio-task-executor with full approved task, research, literature,
+relevant virtual-lab rows, dependency summaries, supplied data descriptions/paths,
+web_allowed, provided_urls and exact output_dir. Grant only
+`.research/tasks/task-NN/`, plus LITERATURE.md for an approved literature update.
+Use monitor if active and full fresh context on every re-dispatch; honor admission.
 
-<objective>
-Execute a specific research task (or the full workflow sequentially) by spawning the task executor with the task's type and context. Verifies outputs on disk, runs advisory guardrails, updates task status, and creates outputs in .research/tasks/task-NN/.
+Route types honestly: experimental prepares protocols/templates/checklists;
+computational prepares input/submission/analysis code and README; data-analysis
+requires registered data; analytical prepares derivation/validation plan;
+literature uses supplied corpus first. Preparation is not executed science.
 
-**Orchestrator role:** Resolve target task, check dependencies, gate-confirm assumptions, spawn materio-task-executor with full task context, verify outputs exist, run guardrails and surface findings, update WORKFLOW.md and STATE.md, checkpoint, record.
+On task_complete, read every reported output and task-NN-SUMMARY.md; all must be
+nonempty. Re-dispatch for missing/incorrect artifacts. Dispatch materio-task-verifier
+separately read-only, with approved assumptions, dependencies, actual inventory and
+summary. Preserve grounding diagnostics; rejected receipts remain incomplete.
+Resolve every decision, human-action or human-verify checkpoint through the
+researcher and re-dispatch with the exact answer and full original context.
+On task_blocked show its blocker and offer upload-data, revised assumptions,
+the blocking task, or skipping; never silently claim completion.
 
-**Why subagent:** Each task type (literature, computational, data-analysis, experimental-protocol) requires different reasoning depth. Fresh context per task = focused execution. The executor never asks the researcher anything; checkpoints come back here.
-</objective>
+Call complete_task `{task:<id>,summary:<honest prepared/executed distinction>}`.
+It checks summary readback and current findings; unanswered findings refuse it.
+Call interview `{form:"findings",task:<id>}` for the researcher's decision.
+For fix, re-dispatch with MATERIO-REVIEW.md, inspect outputs and recheck using
+`/materio:status check <id>` before reopening findings. Accepted exceptions remain
+advisory and citations remain offline/unverified. Then retry complete_task;
+never write WORKFLOW/STATE yourself or bypass the refusal with set_task_status.
+A changed LITERATURE.md outside the task directory still needs its separate
+citation check and researcher gate from literature-review; runtime checks cover
+the selected task artifacts. The runtime records accepted completion and checkpoint.
 
-<context>
-Target: $ARGUMENTS (task number, or "all")
-</context>
+Show actual evidence separately: artifact inspection and verifier receipt;
+prepared scripts/protocols; exact executed commands and exits (or none); advisory
+findings/coverage/warnings; scientific validation not performed by this workflow.
+For all, continue in dependency order only after accepted completion; stop at
+blocked/checkpoint returns and the first writing task. Offer progress or next task.
 
-<process>
-
-Worker write scope: the selected .research/tasks/task-NN/; include .research/LITERATURE.md only for an approved literature update.
-
-
-The optional v4 fleet requires an existing Git worktree for its write boundary.
-Check that prerequisite read-only if considering the fleet. In a fresh research
-folder use direct dispatch: run the registered task-executor with only the exact
-selected task output grant, then run the registered read-only task-verifier with
-no write grant. Do not initialize git or weaken a boundary to enable the fleet.
-The direct path below remains available without a repository.
-
-## 1. Inspect Supplied Materials First
-
-Use ls on `.research/data/` and read `.research/DATA-INDEX.md` before other
-research inputs. For literature tasks, inspect these registered materials before
-fetching anything. Clio has no web search tool: build literature work from
-supplied materials plus specific researcher-provided URLs. Request URLs with the
-task confirmation if more coverage is needed. Honor web_search false by staying
-with supplied materials and record coverage in Sources Reviewed in each summary
-and any LITERATURE.md update.
-
-### Validate Environment
-
-```bash
-test -f .research/WORKFLOW.md || echo "ERROR: No WORKFLOW.md. Run /materio:define-research-tasks first."
-cat .research/WORKFLOW.md
-cat .research/STATE.md 2>/dev/null
-cat .research/DATA-INDEX.md 2>/dev/null
-python3 "${component:script:research-state}" config
-```
-
-## 2. Resolve Target Task
-
-**If $ARGUMENTS is empty:** Run `python3 "${component:script:research-state}" next-task`.
-Use its actual dependency-ready pending/in-progress task ID in workflow order.
-If id is null, show the blocked dependencies or that no pending task is ready;
-do not invent a task number. Preserve the task confirmation and assumption gate.
-
-**If $ARGUMENTS = "all":** Resolve the next eligible task with the same next-task helper after each completed task; preserve all interview/checkpoint gates.
-
-**If $ARGUMENTS = number:** Find that specific task. Verify status and dependencies.
-
-Always derive the two-digit form and the output directory:
-```bash
-# Bind N to the validated decimal task number in this call.
-NN=$(printf '%02d' "$((10#$N))"); OUT=".research/tasks/task-$NN"; echo "$OUT"
-# Validate the actual active workflow IDs before creating their directories.
-python3 "${component:script:research-state}" task-dirs
-```
-
-**Dependency check:** If the target task has `Dependencies: Task XX`, verify Task XX is `☑ complete`. If not:
-- Warn the user: "Task [N] depends on Task [XX] which is not complete."
-- Ask via ask_user: proceed anyway, or execute Task XX first?
-
-## 3. Show Task Summary
-
-Display the target task entry from WORKFLOW.md:
-```
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
- Task [NN]: [name]
- Type:     [literature | computational | experimental | data-analysis | analytical | writing]
- Inputs:   [what's needed]
- Outputs:  [what this produces]
- Assumptions: [list]
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-```
-
-## 4. Gate Check; Confirm Before Executing
-
-Use ask_user:
-- header: "Execute Task [NN]: [name]"
-- question: "Ready to execute this task?\n\n**Assumptions being made:**\n[list assumptions, marking any planner defaults not yet confirmed]\n\n**Expected output:**\n[expected outputs]\n\nAny assumptions wrong or missing data?"
-- options: "Proceed" | "Update assumptions first" | "I need to upload data first; /materio:upload-data" | "Skip this task"
-
-If assumptions are updated, write them back to the task entry in WORKFLOW.md before spawning.
-
-## 5. Handle Task Type Routing
-
-**If type = `writing`:**
-- Tell user: "This task involves writing. Use `/materio:wtfp` to bridge into wtf-p for paper writing."
-- Exit gracefully.
-
-**If type = `experimental`:** protocol-generation mode → protocol document + data recording template + checklist
-
-**If type = `literature`:** supplied-corpus and provided-URL review mode → summary + BibTeX + LITERATURE.md updates; supplied materials first, provided-URL fetching only if allowed
-
-**If type = `computational`:** script-generation mode → input files + submission script + analysis script + README
-
-**If type = `data-analysis`:** check for registered data in DATA-INDEX.md and `.research/data/`; if none, stop and offer `/materio:upload-data` → analysis code + results summary + figure descriptions
-
-**If type = `analytical`:** theoretical mode → derivation, validation, optional implementation
-
-## 6. Spawn materio-task-executor Agent
-
-```
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
- Materio ► EXECUTING TASK [NN]
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-```
-
-Use dispatch with `agent: "materio-task-executor"` and a task containing the assignment and full context. The prompt carries:
-- `<task>`; full task entry from WORKFLOW.md (with any updated assumptions)
-- `<research>`; full RESEARCH.md
-- `<literature>`; relevant LITERATURE.md sections
-- `<virtual_lab>`; the relevant equipment and software rows from VIRTUAL-LAB.md, if it exists
-- `<prior_outputs>`; outputs from dependency tasks (paths and SUMMARY.md contents)
-- `<data_files>`; DATA-INDEX.md entries and paths under `.research/data/`
-- `<web_allowed>`; true only when config permits URL fetching and web_fetch is available
-- `<provided_urls>`; the researcher's specific URLs, or none
-- `<output_dir>`; `.research/tasks/task-[NN]/`
-
-## 7. Handle Executor Return
-
-**`task_complete:`:**
-
-1. Use ls and read on every reported output and task-NN-SUMMARY.md. Verify outputs on disk. Self-report is not completion:
-   ```bash
-   ls -la .research/tasks/task-[NN]/
-   test -s .research/tasks/task-[NN]/task-[NN]-SUMMARY.md && echo "SUMMARY OK" || echo "ERROR: no summary"
-   ```
-   Every file the executor listed under Outputs must exist and be non-empty. If any is missing, re-dispatch the agent naming the missing file; do not mark the task complete.
-
-1b. Dispatch `materio-task-verifier` separately with the approved
-   task entry, assumptions, dependency context, actual output inventory and summary.
-   Its recipe is read-only; grant no write roots. Inspect its receipt and resolve
-   any decision, human-action, or human-verify checkpoint with the researcher.
-   Treat read/ls findings as artifact review, not command-backed scientific
-   validation. Preserve host grounding diagnostics and stop on a rejected receipt
-   without claiming completion; the advisory commands below have separate evidence.
-
-2. Advisory guardrails. Run what applies, read the findings and exit status, and surface them; nothing here deletes or rewrites on its own. Record a skipped check if a script or python3 is missing.
-   Use bash to collect only existing files and keep stderr visible. The scripts
-   accept files, not directory arguments; never mistake a skipped file for a
-   successful scan. All findings remain advisory. Run these shell blocks only
-   after deriving OUT as the selected task directory:
-   ```bash
-   if command -v python3 >/dev/null 2>&1; then
-     shopt -s nullglob globstar
-     physics_files=("$OUT"/**/*.md)
-     citation_files=("$OUT"/**/*.bib "$OUT"/**/*summary*.md "$OUT"/**/*SUMMARY*.md)
-     script_files=("$OUT"/**/*.py "$OUT"/**/*.sh)
-     citation_flags=()
-     [ "$(python3 "${component:script:research-state}" config --key web_search)" = true ] || citation_flags=(--offline)
-     if ((${#physics_files[@]})); then
-       if python3 "${pluginRoot}/assets/scripts/check_physics.py" "${physics_files[@]}"; then echo "CHECK EXIT: 0"; else echo "CHECK EXIT: $? (findings or incomplete coverage)"; fi
-     else echo "CHECK SKIPPED: no applicable files"; fi
-     if ((${#citation_files[@]})); then
-       if python3 "${pluginRoot}/assets/scripts/verify_citations.py" "${citation_flags[@]}" "${citation_files[@]}"; then echo "CHECK EXIT: 0"; else echo "CHECK EXIT: $? (findings or incomplete coverage)"; fi
-     else echo "CHECK SKIPPED: no applicable files"; fi
-     if ((${#script_files[@]})); then
-       if python3 "${pluginRoot}/assets/scripts/check_scripts.py" "${script_files[@]}"; then echo "CHECK EXIT: 0"; else echo "CHECK EXIT: $? (findings or incomplete coverage)"; fi
-     else echo "CHECK SKIPPED: no applicable files"; fi
-   fi
-   ```
-   Include any other actual reference-list files in citation_files after reading
-   them. If a literature task updated `.research/LITERATURE.md`, read it back and
-   include it in citation_files too. A nonzero checker exit records findings;
-   it never authorizes deletion, edits or an automatic task rejection.
-   If any finding is **IMPOSSIBLE** (physics), **NOT_FOUND** / **MISMATCH** (citations), or **WILL NOT RUN** (scripts): show the findings to the researcher and ask via ask_user:
-   - header: "Guardrail Findings; Task [NN]"
-   - question: "[N] findings:\n\n1. [file:line] [finding] → [suggested fix or closest Crossref match]\n2. ...\n\nHow should I handle them?"
-   - options: "Fix them; resume the executor" | "They're fine; note and continue" | "I'll decide per finding"
-   Re-dispatch the executor with the accepted fixes when asked, then read all changed files back and rerun the applicable advisory checks before completing. Warnings (IMPLAUSIBLE, UNVERIFIABLE, SUSPECT) are listed in the completion output and noted in the task SUMMARY, not gated.
-
-3. After the researcher has resolved every gated finding and the outputs have been read back, mark task as `☑ complete` in WORKFLOW.md. Update STATE.md: current task = next pending, last completed = [NN].
-
-4. Checkpoint if `auto_checkpoint` is true (default):
-   ```bash
-   if [ "$(python3 "${component:script:research-state}" config --key auto_checkpoint)" = true ]; then
-  python3 "${component:script:research-state}" checkpoint save after-task-NN
-fi
-   ```
-
-5. Optional git record:
-   ```bash
-   python3 "${component:script:research-state}" record --message "research(task-[NN]): [task name]; complete" --files "${CHANGED_FILES[@]}"
-   ```
-
-**`needs_input: checkpoint:decision`, `needs_input: checkpoint:human-action`, or `needs_input: checkpoint:human-verify`:**
-- Present what's needed (data, decision, domain knowledge) via ask_user
-- Re-dispatch the executor with a `<resume>` block containing the answer (or re-spawn with the full context plus `<resume>`)
-
-**`task_blocked:`:**
-- Show blocker clearly
-- Offer via ask_user: upload missing data, revise assumptions, execute the blocking task first, or skip this task
-
-**If $ARGUMENTS = "all":** After each task completes, loop to the next pending task. Stop the loop at any needs_input: checkpoint or task_blocked: return and at the first `writing` task.
-
-</process>
-
-<offer_next>
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
- Materio ► TASK [NN] COMPLETE ✓
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-Task:    [NN]; [name]
-Status:  [N]/[total] tasks complete
-
-Evidence ladder (report each rung with its actual value; never promote a rung):
-  Artifacts inspected:     [N] files under .research/tasks/task-[NN]/ read back; verifier
-                           receipt [task_complete | task_blocked | checkpoint] (read/ls only)
-  Prepared, not executed:  [list scripts, input decks, submission files, proposed experiments]
-  Executed computation:    [none | the exact commands the researcher or orchestrator actually
-                           ran in this session, with exit status and output paths]
-  Advisory checks:         physics [exit N | skipped], citations [exit N | skipped, offline?],
-                           scripts [exit N | skipped]; [N] findings resolved, [N] warnings noted
-  Scientific validation:   not performed by this workflow; the researcher owns physical,
-                           statistical and experimental validation of these outputs
-
-───────────────────────────────────────────
-
-## ▶ Next Up
-
-**Execute the next dependency-ready task**
-`/materio:execute-task `
-
-**Or check progress**
-`/materio:progress`
-
-<sub>Each dispatch starts with fresh worker context.</sub>
-
-───────────────────────────────────────────
-
-</offer_next>
-
-<success_criteria>
-- [ ] Target task resolved (from argument or next pending); at least two-digit directory used
-- [ ] Dependency check completed
-- [ ] Gate confirmation always shown with assumptions listed
-- [ ] Task type correctly routed; web availability passed explicitly
-- [ ] Outputs read back on disk with ls and test -s before marking complete
-- [ ] Completion output states the evidence ladder honestly: inspected, prepared, executed, advisory, validation not performed
-- [ ] Guardrail findings surfaced to the researcher; nothing auto-removed
-- [ ] WORKFLOW.md and STATE.md updated
-- [ ] Checkpoint saved if auto_checkpoint; commit only if commit_research is true
-</success_criteria>
+If runtime is unavailable, follow ${pluginRoot}/assets/actions/execute-task.md manually with researcher gates and file readback.

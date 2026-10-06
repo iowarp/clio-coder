@@ -11,6 +11,32 @@ seventeen prompts, six agent recipes, and execute/verify fleet live under
 `ai.iowarp.clio/` and are declared in a closed component graph. Shared references,
 templates, and Python helpers live under `assets/`.
 
+## Clio lab bench
+
+Materio is also an API 2 bundle: the library installs its portable plugin and
+runtime once, with one tree digest. Enter the bench with `/ext:materio:lab` or
+the host workspace menu; leave with the host leader's `b` or `/workspace off`.
+The amber phase strip, task board, agent/findings islands, rail and footer come
+from `.research/` and repaint after edits. Free leader suffixes are `f` (fill next
+action), `c` (checkpoint), `v` (findings), `d` (cost/tokens), and `h` (help).
+
+`/materio:status`, `/materio:progress`, `/materio:help`, and every
+`/materio:checkpoint` argument run locally, with the original prompts retained
+for hosts without the runtime. `/ext:materio:cost` reports declared prices and
+reported tokens; unknown pricing stays unknown. Status also accepts `check N`
+to recheck task artifacts and `N` to open their findings interview.
+
+The runtime observes dispatch write roots to associate an executor run with its
+exact task. It inspects summaries and runs the three existing Python helpers;
+citations are always offline because the runtime declares no network use.
+Findings hold tasks at checkpoint until researcher review, and changed artifacts
+require another check. A missing summary remains a warning and blocks completion.
+The `autoCheckpoint` extension option defaults to true and snapshots a task after
+readback and accepted review. Restore asks for confirmation and snapshots current
+state before applying the validated archive. No generated experiment or analysis
+script is executed by this runtime. The existing prompts remain phase 1 content;
+the runtime adds no research interviews or scientific claims to them.
+
 ## Clio workflow
 
 Install the whole package with `clio-coder library install ./library/plugins/materio --project`

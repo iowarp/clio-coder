@@ -1,0 +1,17 @@
+id: __EXTENSION_ID__
+name: __EXTENSION_ID__
+version: 0.1.0
+description: A hook extension for Clio Coder.
+runtime:
+  api: 2
+  entrypoint: runtime/extension.ts
+  commands:
+    - { name: protect, description: Protect a path against write and edit calls. }
+  hooks:
+    - on: before_tool
+      tools: [write, edit]
+      timeoutMs: 250
+      onTimeout: block
+      onError: block
+  access: [tool-args]
+  state: { session: false, store: true }

@@ -2,65 +2,30 @@
 description: "Add a new task to the research workflow"
 ---
 
-<clio_execution>
-Read ${component:resource:clio-execution} before acting. It defines argument parsing,
-research state helpers, interview ownership, readback, and optional recording.
-</clio_execution>
+Read ${component:resource:research-policy}. Use gateway to describe and call
+`extension_materio__interview`, `extension_materio__set_task_status`,
+`extension_materio__complete_task`, and `extension_materio__record_decision`.
+Use `gateway({op:"call",capability:"extension_materio__interview",args:{...}})`
+for the forms below. The parked result contains `interview`, step-keyed `answers`,
+and closing `text`. Cancellation, revision, stale files or errors never authorize
+continuation; use the actual answers, never infer consent from prose.
+Runtime instructions here supersede the manual state/interview steps in
+${component:resource:clio-execution}. Runtime tools own publication, readback,
+task directories, checkpoints after accepted findings, and optional named-file
+recording. Never grant a worker write access to WORKFLOW.md or STATE.md.
 
-<execution_context>
-@.research/WORKFLOW.md
-</execution_context>
+Read current WORKFLOW/STATE and show active tasks. Call the define-research-tasks
+collection form with the existing task list in context and a template description
+for keeping the current workflow and adding the researcher's new step. Use its
+customization/scope answers for the task name, type, description, inputs, outputs,
+position and dependencies; request any missing facts in another collection form.
+Allocate a stable ID with the research-state next-task-id helper (above active,
+archived and on-disk IDs). Draft the new complete workflow without changing any
+existing IDs or statuses. Collect its task-type assumptions with the assumptions
+stage, retaining planner defaults as pending confirmation.
+Call interview `{form:"define-research-tasks",stage:"confirm",draft:<complete revised workflow>,context:<new task, assumptions, position and dependencies>}`.
+Handle revisions before claiming success. The runtime validates the plan, creates
+the new task directory, saves WORKFLOW/STATE and reads both back. Record the
+addition decision and rationale with record_decision.
 
-<objective>
-Add a new task to WORKFLOW.md through a short interview. Inserts at the end or at a specified position.
-</objective>
-
-<context>
-No arguments.
-</context>
-
-<process>
-
-## 1. Read Current Workflow
-
-```bash
-test -f .research/WORKFLOW.md || echo "ERROR: No WORKFLOW.md. Run /materio:define-research-tasks first."
-cat .research/WORKFLOW.md
-```
-
-Count current tasks and show the list.
-
-## 2. Gather Task Details
-
-Use ask_user:
-- header: "Add Task"
-- question: "Define the new task:\n1. **Name**: Short descriptive name\n2. **Type**: literature | experimental | computational | data-analysis | analytical | writing\n3. **Description**: What needs to be done?\n4. **Inputs**: What data or prior task output does this need?\n5. **Expected output**: What will this task produce?\n6. **Position**: After which task? (default: end of list)\n7. **Dependencies**: Which tasks must complete first?"
-- options: "Provided all details" | "Guide me through each field"
-
-## 3. Generate New Task Entry
-
-Run `python3 "${component:script:research-state}" next-task-id` to allocate a stable ID above active, archived, and on-disk IDs. Insert the entry at the chosen presentation position without renumbering any existing task, directory, output, or dependency. IDs use at least two digits (Task 07, Task 12). Interview the new task assumptions using the task-type guidance before finalizing its entry.
-
-Write the new task block into WORKFLOW.md at the correct position.
-
-## 4. Create Task Directory
-
-```bash
-mkdir -p ".research/tasks/task-$(printf '%02d' "$((10#$N))")"
-```
-
-## 5. Record
-
-Only if `commit_research` is true in `.research/config.json`:
-```bash
-python3 "${component:script:research-state}" record --message "research: add task [NN]; [task name]" --files "${CHANGED_FILES[@]}"
-```
-
-</process>
-
-<success_criteria>
-- [ ] New task has all required fields
-- [ ] Task identity is unique and stable; numbering gaps are allowed
-- [ ] Task directory created
-- [ ] WORKFLOW.md updated; committed only if commit_research is true
-</success_criteria>
+If runtime is unavailable, follow ${pluginRoot}/assets/actions/add-task.md manually with researcher gates and file readback.

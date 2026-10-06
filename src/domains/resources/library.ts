@@ -6,6 +6,7 @@ import { runCommandVector, type SafeCommandResult } from "../../core/safe-exec.j
 import { safeResourceWrite } from "../../core/safe-resource-write.js";
 import { withStateFileLockSync } from "../../core/state-file-lock.js";
 import { clioConfigDir } from "../../core/xdg.js";
+import { installExtension, loadManifestFromRoot } from "../extensions/index.js";
 import {
 	bundledPluginCatalog,
 	fetchPluginSource,
@@ -16,18 +17,30 @@ import {
 } from "../plugins/catalog.js";
 import {
 	installPlugin,
-	listInstalledPlugins,
 	type PluginExpectedState,
 	type PluginMutationResult,
 	type PluginScope,
-	pluginBaseDir,
 	pluginContentDigest,
-	readPluginInstallRecord,
-	readPluginManifest,
 } from "../plugins/index.js";
+import {
+	extensionLibraryCopy,
+	libraryPackageBaseDir,
+	listInstalledLibraryPackages as listInstalledPlugins,
+	readLibraryInstallRecord,
+} from "./library-packages.js";
 import type { LibraryPackageEntry, LibraryRequirementRef } from "./library-types.js";
+import { type LibraryPackageValidationResult, validateLibraryPackage } from "./library-validation.js";
 
 export type LibraryEntry = LibraryPackageEntry;
+
+function validationReasons(candidate: LibraryPackageValidationResult): string {
+	return [
+		...new Set([
+			...candidate.diagnostics.map((item) => item.message),
+			...candidate.validation.diagnostics.map((item) => item.message),
+		]),
+	].join("; ");
+}
 
 export interface LibraryDiscoveryResult {
 	entries: LibraryEntry[];
@@ -45,9 +58,14 @@ function parseCatalog(filePath: string, diagnostics: string[]): LibraryEntry[] {
 }
 
 /** Discovery retains damaged copies even when their provenance record cannot be read. */
-function displayInstallRecord(id: string, options: LibraryScopeOptions, diagnostics: string[]) {
+function displayInstallRecord(
+	id: string,
+	options: LibraryScopeOptions,
+	diagnostics: string[],
+	kind?: LibraryEntry["kind"],
+) {
 	try {
-		return readPluginInstallRecord(id, options);
+		return readLibraryInstallRecord(id, options, kind);
 	} catch (error) {
 		const message = `package state unavailable (${options.scope}:${id}): ${error instanceof Error ? error.message : String(error)}`;
 		if (!diagnostics.includes(message)) diagnostics.push(message);
@@ -80,6 +98,7 @@ export function discoverLibrary(options: { catalog?: string; cwd?: string } = {}
 			plugin.id,
 			{ ...(options.cwd ? { cwd: options.cwd } : {}), scope: plugin.scope },
 			diagnostics,
+			plugin.kind,
 		);
 		byRef.set(ref, {
 			kind: plugin.kind ?? "plugin",
@@ -88,6 +107,7 @@ export function discoverLibrary(options: { catalog?: string; cwd?: string } = {}
 			description: plugin.description,
 			sourceUrl: record?.source ?? plugin.rootPath,
 			origin: "installed",
+			...(plugin.plugin ? { plugin: plugin.plugin } : {}),
 		});
 	}
 	const refusals: Record<string, string> = {};
@@ -108,7 +128,7 @@ export function discoverLibrary(options: { catalog?: string; cwd?: string } = {}
 	};
 }
 
-const REQUIREMENT_PATTERN = /^(skill|agent|prompt|fleet|plugin):([A-Za-z0-9][A-Za-z0-9._-]*)$/;
+const REQUIREMENT_PATTERN = /^(skill|agent|prompt|playbook|plugin|extension):([A-Za-z0-9][A-Za-z0-9._-]*)$/;
 
 export function resolveLibraryRequirements(entry: LibraryEntry, catalog: ReadonlyArray<LibraryEntry>): LibraryEntry[] {
 	const byRef = new Map(catalog.map((item) => [libraryEntryRef(item), item]));
@@ -149,6 +169,11 @@ export interface LibraryInstallPlan {
 	expectedInstalledDigest?: string;
 	/** Reviewed facts rechecked inside the writer's lock. */
 	expect?: PluginExpectedState;
+	/**
+	 * Extension only: the capability envelope digest the operator reviewed, or `null`
+	 * when the reviewed package declared none. The writer refuses any other envelope.
+	 */
+	expectedEnvelopeDigest?: string | null;
 }
 
 export interface LibraryScopeOptions {
@@ -166,7 +191,7 @@ export function resolveInstalledLibraryEntry(
 		.sort((a, b) => Number(b.scope === "project") - Number(a.scope === "project"));
 	const item = copies[0];
 	if (!item) throw new Error(`package not installed: ${ref}`);
-	const saved = readPluginInstallRecord(item.id, { ...options, scope: item.scope });
+	const saved = readLibraryInstallRecord(item.id, { ...options, scope: item.scope }, item.kind);
 	return {
 		scope: item.scope,
 		kind: item.kind ?? "plugin",
@@ -186,10 +211,10 @@ export function registerLibraryPackage(
 ): LibraryEntry {
 	const local = pluginLocalPath(source, options.cwd);
 	if (!existsSync(local)) throw new Error(`no package directory at ${local}`);
-	const candidate = readPluginManifest(local);
-	if (!candidate.valid || !candidate.manifest || !candidate.contentDigest)
-		throw new Error(candidate.diagnostics.map((item) => item.message).join("; "));
+	const candidate = validateLibraryPackage(local);
+	if (!candidate.valid || !candidate.manifest || !candidate.contentDigest) throw new Error(validationReasons(candidate));
 	const manifest = candidate.manifest;
+	const serves = manifest.clio.kind === "extension" ? loadManifestFromRoot(local).manifest?.plugin : undefined;
 	const entry: LibraryEntry = {
 		kind: manifest.clio.kind ?? "plugin",
 		name: manifest.name,
@@ -199,6 +224,7 @@ export function registerLibraryPackage(
 		sourceUrl: local,
 		origin: "index",
 		...(manifest.clio.requires ? { requires: manifest.clio.requires } : {}),
+		...(serves ? { plugin: serves } : {}),
 	};
 	const file =
 		options.scope === "project" ? path.join(options.cwd ?? process.cwd(), ".clio-coder", "library.yaml") : catalogPath();
@@ -234,7 +260,7 @@ export function libraryWorkspace(options: LibraryScopeOptions & { catalog?: stri
 				.filter((item) => item.id === entry.name && (item.kind ?? "plugin") === entry.kind)
 				.map((item) => ({
 					...item,
-					origin: displayInstallRecord(item.id, { ...options, scope: item.scope }, discovery.diagnostics)?.origin,
+					origin: displayInstallRecord(item.id, { ...options, scope: item.scope }, discovery.diagnostics, item.kind)?.origin,
 				})),
 		})),
 	};
@@ -256,7 +282,7 @@ export function libraryInstallPath(
 	if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(entry.name)) throw new Error(`invalid library entry name: ${entry.name}`);
 	return (
 		installedPlugin(entry, options)?.rootPath ??
-		path.join(pluginBaseDir(options.scope ?? "user", options.cwd ?? process.cwd()), entry.name)
+		path.join(libraryPackageBaseDir(entry.kind, options.scope ?? "user", options.cwd ?? process.cwd()), entry.name)
 	);
 }
 
@@ -290,7 +316,7 @@ export function libraryEntryPin(
 ): { sha256: string; sourceUrl: string } | undefined {
 	const plugin = installedPlugin(entry, options);
 	if (!plugin) return undefined;
-	const record = displayInstallRecord(entry.name, { ...options, scope: plugin.scope }, []);
+	const record = displayInstallRecord(entry.name, { ...options, scope: plugin.scope }, [], entry.kind);
 	return record ? { sha256: record.contentDigest, sourceUrl: record.source } : undefined;
 }
 
@@ -326,9 +352,8 @@ export function planLibraryInstall(
 ): LibraryInstallPlan {
 	const fetched = fetchPluginSource(entry.sourceUrl, options.cwd);
 	try {
-		const candidate = readPluginManifest(fetched.root);
-		if (!candidate.valid || !candidate.manifest)
-			throw new Error(`invalid plugin: ${candidate.diagnostics.map((item) => item.message).join("; ")}`);
+		const candidate = validateLibraryPackage(fetched.root);
+		if (!candidate.valid || !candidate.manifest) throw new Error(`invalid plugin: ${validationReasons(candidate)}`);
 		if ((candidate.manifest.clio.kind ?? "plugin") !== entry.kind)
 			throw new Error(`package kind mismatch: expected ${entry.kind}`);
 		if (candidate.manifest.name !== entry.name)
@@ -344,7 +369,10 @@ export function planLibraryInstall(
 		if (entry.sha256 && sha256 !== entry.sha256) throw new Error(`plugin_pin_mismatch: ${entry.name}`);
 		return {
 			entry: { ...entry, ...(candidate.manifest.version ? { version: candidate.manifest.version } : {}) },
-			path: path.join(pluginBaseDir(options.scope ?? "user", options.cwd ?? process.cwd()), entry.name),
+			path: path.join(
+				libraryPackageBaseDir(entry.kind, options.scope ?? "user", options.cwd ?? process.cwd()),
+				entry.name,
+			),
 			sha256,
 			sourceRoot: fetched.root,
 			cleanup: fetched.cleanup,
@@ -390,6 +418,29 @@ export function commitLibraryInstallPlan(plan: LibraryInstallPlan): PluginMutati
 					],
 				}
 			: undefined);
+	if (plan.entry.kind === "extension") {
+		const result = installExtension(plan.sourceRoot, {
+			...(plan.cwd ? { cwd: plan.cwd } : {}),
+			scope: plan.scope ?? "user",
+			force: plan.force ?? false,
+			expectedDigest: plan.sha256,
+			expectedId: plan.entry.name,
+			...(plan.entry.version ? { expectedVersion: plan.entry.version } : {}),
+			...(plan.expectedEnvelopeDigest !== undefined ? { expectedEnvelopeDigest: plan.expectedEnvelopeDigest } : {}),
+			// The staged root is a working copy; the record keeps the catalog or local source an update resolves.
+			source: plan.entry.sourceUrl,
+			origin: {
+				kind:
+					plan.entry.origin === "catalog" || plan.entry.origin === "index"
+						? "catalog"
+						: parsePluginGithubSource(plan.entry.sourceUrl)
+							? "github"
+							: "local",
+				source: plan.entry.sourceUrl,
+			},
+		});
+		return { ...result, ...(result.extension ? { plugin: extensionLibraryCopy(result.extension) } : {}) };
+	}
 	return installPlugin(plan.sourceRoot, {
 		...(plan.cwd ? { cwd: plan.cwd } : {}),
 		scope: plan.scope ?? "user",
@@ -433,13 +484,15 @@ export function resolveLibraryPackage(
 ): PluginCatalogEntry {
 	const local = pluginLocalPath(source, options.cwd);
 	if (existsSync(local)) {
-		const candidate = readPluginManifest(local);
-		if (!candidate.valid || !candidate.manifest)
-			throw new Error(`invalid plugin: ${candidate.diagnostics.map((item) => item.message).join("; ")}`);
+		const candidate = validateLibraryPackage(local);
+		if (!candidate.valid || !candidate.manifest) throw new Error(`invalid plugin: ${validationReasons(candidate)}`);
+		const serves =
+			candidate.manifest.clio.kind === "extension" ? loadManifestFromRoot(local).manifest?.plugin : undefined;
 		return {
 			kind: candidate.manifest.clio.kind ?? "plugin",
 			name: candidate.manifest.name,
 			...(candidate.manifest.clio.requires ? { requires: candidate.manifest.clio.requires } : {}),
+			...(serves ? { plugin: serves } : {}),
 			description: candidate.manifest.description ?? "",
 			...(candidate.manifest.version ? { version: candidate.manifest.version } : {}),
 			sourceUrl: local,
@@ -469,7 +522,7 @@ export function planLibraryUpdate(
 	const pin = libraryEntryPin(identity, { ...options, scope: plugin.scope });
 	if (!options.force && pin && pluginContentDigest(plugin.rootPath) !== pin.sha256)
 		throw new Error(`plugin_local_changes: ${id}; use --force to replace local changes`);
-	const record = readPluginInstallRecord(identity.name, { ...options, scope: plugin.scope });
+	const record = readLibraryInstallRecord(identity.name, { ...options, scope: plugin.scope }, identity.kind);
 	if (typeof record?.origin === "object" && record.origin.kind === "interop")
 		throw new Error("interop packages require a new reviewed adoption; remove the installed copy and adopt it again");
 	const catalogOrigin = record?.origin && typeof record.origin === "object" && record.origin.kind === "catalog";

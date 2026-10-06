@@ -1,4 +1,4 @@
-import { type Component, type OverlayHandle, type TUI, truncateToWidth } from "../engine/tui.js";
+import { type Component, type Keybinding, type OverlayHandle, type TUI, truncateToWidth } from "../engine/tui.js";
 import { dockBodyRows } from "./dock.js";
 import type { LeaderKeyState, LeaderTarget } from "./leader-key.js";
 import {
@@ -11,7 +11,7 @@ import {
 import { clioTheme, GLYPH } from "./theme/index.js";
 
 /** Noncapturing presentation: controller retains the underlying cancellation owner. */
-export function createLeaderMenu(tui: TUI, scope: () => string, keyLabel: (id: LeaderTarget["id"]) => string) {
+export function createLeaderMenu(tui: TUI, scope: () => string, keyLabel: (id: Keybinding) => string) {
 	let handle: OverlayHandle | null = null;
 	let state: LeaderKeyState = { status: "idle" };
 	let targets: ReadonlyArray<LeaderTarget> = [];
@@ -26,14 +26,15 @@ export function createLeaderMenu(tui: TUI, scope: () => string, keyLabel: (id: L
 				`${scope()} · letters select actions · close, then /help for commands`,
 				...targets.slice(start, end).map((entry, index) => {
 					const focused = start + index === selected;
-					const label = entry.label ?? entry.id;
+					const label = entry.label ?? entry.id ?? "";
 					const reason = entry.disabledReason ? theme.fg("annotation", ` (${entry.disabledReason})`) : "";
 					// The selection rule: cursor and label in accent, nothing else recolored.
 					// An unbound key is a blank, because `·` is the internal-run mark in a
 					// board's first column and this is a first column.
 					const mark = selectionMark(focused);
 					const name = selectionLabel(focused, label);
-					return `${mark} ${entry.key || " "}  ${name}  ${theme.fg("annotation", keyLabel(entry.id))}${reason}`;
+					const binding = entry.id === undefined ? "" : keyLabel(entry.id);
+					return `${mark} ${entry.key || " "}  ${name}  ${theme.fg("annotation", binding)}${reason}`;
 				}),
 				`${targets.length ? `${selected + 1}/${targets.length}` : "No actions in this scope"}${state.notice ? ` · ${state.notice}` : ""}`,
 			].map((line) => truncateToWidth(line, width, GLYPH.ellipsis));

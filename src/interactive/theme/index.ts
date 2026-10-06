@@ -13,4 +13,5 @@ export * from "./glyphs.js";
 export * from "./labels.js";
 export * from "./rules.js";
 export * from "./segments.js";
+export { applySkin } from "./skin.js";
 export * from "./tokens.js";

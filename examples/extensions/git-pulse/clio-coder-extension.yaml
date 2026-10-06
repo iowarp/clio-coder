@@ -1,0 +1,14 @@
+id: git-pulse
+name: Git pulse
+version: 0.1.0
+description: Local Git branch, dirty paths and upstream divergence refreshed by ticks and watches.
+runtime:
+  api: 2
+  entrypoint: runtime/extension.ts
+  commands:
+    - { name: pulse, description: Inspect the current local Git snapshot. }
+  events: [session_open, fs_changed, { tick: 5s }]
+  watch: [".git/HEAD", ".git/index"]
+  ui: [status, band, card]
+  permissions: { fs: { read: [workspace], write: [] }, exec: true, net: false }
+  state: { session: true, store: false }

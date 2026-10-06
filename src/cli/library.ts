@@ -1,12 +1,8 @@
 import { existsSync, statSync } from "node:fs";
 import path from "node:path";
+import { ENVELOPE_SEAT_BELT, envelopeLines } from "../domains/extensions/envelope-review.js";
 import { pluginLocalPath } from "../domains/plugins/catalog.js";
-import {
-	listInstalledPlugins,
-	type PluginScope,
-	readPluginManifest,
-	reloadPluginResources,
-} from "../domains/plugins/index.js";
+import { type PluginScope, reloadPluginResources } from "../domains/plugins/index.js";
 import {
 	confirmLibraryRemote,
 	libraryEntryDrift,
@@ -33,17 +29,22 @@ import {
 	type LibraryResourceSourceClass,
 	readLibraryInventory,
 } from "../domains/resources/library-inventory.js";
+import {
+	listInstalledLibraryPackages as listInstalledPlugins,
+	readLibraryManifest as readPluginManifest,
+} from "../domains/resources/library-packages.js";
+import { describeLibraryPair } from "../domains/resources/library-pairing.js";
 import { isLibraryKind, isLibraryResourceKind, type LibraryEntryKind } from "../domains/resources/library-types.js";
 import { printError, printOk } from "./shared.js";
 
 const HELP = `clio-coder library <command>
 
-One library of packages: plugin, skill, agent, prompt, fleet.
+One library of packages: plugin, extension, skill, agent, prompt, playbook.
 
 Commands:
   clio-coder library list [--kind <kind>] [--user|--project] [--json]
   clio-coder library search [query] [--kind <kind>] [--json]
-  clio-coder library recipes [query] [--kind skill|agent|prompt|fleet] [--source core|package|user|project|compat] [--all] [--json]
+  clio-coder library recipes [query] [--kind skill|agent|prompt|playbook] [--source core|package|user|project|compat] [--all] [--json]
   clio-coder library register <path> [--user|--project] [--force] [--json]
   clio-coder library inspect <path|kind:name|name> [--user|--project] [--json]
   clio-coder library install <path|kind:name|name> [--user|--project] [--force] [--with-requirements] [--dry-run] [--json]
@@ -73,7 +74,7 @@ Import reviews a portable, Claude Code or Codex plugin from a path or GitHub
 tree URL, normalizes supported recipes into a foreign-trust package, and never
 activates hooks, MCP, LSP or scripts.
 List and search are package-oriented; --kind and a query also match the
-recipes a bundle provides, returning the owning package as the install target.
+resources a plugin provides, returning the owning package as the install target.
 Recipes is the versioned, body-free read of actual discovered recipes across
 core, installed packages and loose user/project files, with owner, origin,
 availability and invocation; --all adds internal diagnostic agents. Nothing in
@@ -135,7 +136,7 @@ function parse(args: ReadonlyArray<string>): Parsed {
 		else if (arg === "--with-requirements") out.withRequirements = true;
 		else if (arg === "--kind") {
 			const value = args[++i];
-			if (!isLibraryKind(value)) throw new Error("--kind requires plugin, skill, agent, prompt, or fleet");
+			if (!isLibraryKind(value)) throw new Error("--kind requires plugin, extension, skill, agent, prompt, or playbook");
 			out.kind = value;
 		} else if (arg === "--source") {
 			const value = args[++i];
@@ -204,6 +205,33 @@ function lifecycleJson(
 	return { ...base, ...(plugin ? { plugin } : {}), diagnostics: last?.diagnostics ?? [] };
 }
 
+/**
+ * What each reviewed step would be allowed to do and how it pairs, printed
+ * before anything is committed so a plain run and a dry run show the same plan.
+ */
+function printStepReviews(plan: LibraryLifecyclePlan): void {
+	for (const review of plan.reviews ?? []) {
+		const step = plan.steps.find((item) => item.identity.ref === review.ref && item.identity.scope === review.scope);
+		if (!step) continue;
+		if (review.envelope) {
+			process.stdout.write(`${review.ref} (${review.scope}) would be allowed to:\n`);
+			if (review.growth !== undefined)
+				process.stdout.write(
+					review.growth.length === 0
+						? "  reaches no further than the installed copy\n"
+						: `  reaches further than the installed copy: ${review.growth.join("; ")}\n`,
+				);
+			for (const line of envelopeLines(review.envelope)) process.stdout.write(`  ${line}\n`);
+			process.stdout.write(`  ${ENVELOPE_SEAT_BELT}\n`);
+			if (review.envelopeDigest) process.stdout.write(`  envelope sha256 ${review.envelopeDigest}\n`);
+		}
+		for (const pair of review.pairs)
+			process.stdout.write(
+				`${review.ref} (${review.scope}): ${describeLibraryPair({ kind: step.identity.kind, name: step.identity.name }, pair)}\n`,
+			);
+	}
+}
+
 /** One drift line per package; a changed copy also names both digests. */
 function printDrift(
 	where: string,
@@ -259,7 +287,7 @@ export async function runLibraryCommand(
 		}
 		if (parsed.command === "recipes") {
 			if (parsed.kind && !isLibraryResourceKind(parsed.kind))
-				throw new Error("library recipes --kind requires skill, agent, prompt, or fleet");
+				throw new Error("library recipes --kind requires skill, agent, prompt, or playbook");
 			const inventory = readLibraryInventory({
 				cwd: options.cwd,
 				include: { packages: false, copies: false },
@@ -454,6 +482,7 @@ export async function runLibraryCommand(
 				force: parsed.force,
 				withRequirements: parsed.withRequirements,
 			});
+			if (!parsed.json) printStepReviews(plan);
 			const apply = applyLibraryLifecycle(plan, { dryRun: parsed.dryRun });
 			const ok = apply.failed === 0 && (apply.dryRun || plan.applicable);
 			if (parsed.json) emit(lifecycleJson(operation, plan, apply, ok));

@@ -13,6 +13,7 @@ export {
 	FLEET_COMMAND_BASE_ENV,
 	FLEET_COMMAND_DEFAULT_TIMEOUT_MS,
 	fleetCommandsPath,
+	legacyPlaybookDirs,
 	loadFleetCommands,
 	parseFleetCommands,
 } from "./fleet-commands.js";

@@ -7,15 +7,15 @@
 	"extensions": {
 		"ai.iowarp.clio": {
 			"manifestVersion": 1,
-			"kind": "fleet",
+			"kind": "playbook",
 			"resources": {
-				"fleets": "fleets"
+				"playbooks": "playbooks"
 			},
 			"components": [
 				{
-					"kind": "fleet",
+					"kind": "playbook",
 					"id": "pipeline-review",
-					"path": "fleets/pipeline-review.md"
+					"path": "playbooks/pipeline-review.md"
 				}
 			]
 		}

@@ -73,7 +73,7 @@ export function resolvePanesPresetId(value: string): PanesPresetId | null {
 export interface PanesInventoryEntry {
 	paneId: string;
 	tabId: string;
-	purpose: "watch" | "utility";
+	purpose: "watch" | "utility" | "extension";
 	label: string;
 	adopted: boolean;
 	/** An open operation admitted locally but not yet reconciled into the mux registry. */
@@ -97,7 +97,7 @@ export interface PanesEffectiveSettings {
 
 /** One managed dock's live geometry, flattened for `/panes` status. */
 export interface PanesDockStatus {
-	slot: "workers" | "files" | "music";
+	slot: "workers" | "files" | "music" | "extension";
 	paneId: string;
 	/** Share of the axis the dock currently targets, 0..0.5. */
 	targetShare: number;
@@ -111,7 +111,7 @@ export interface PanesDockStatus {
  * settings files cannot give, such as what the music pane is playing.
  */
 export interface PanesDockReport {
-	slot: "workers" | "files" | "music";
+	slot: "workers" | "files" | "music" | "extension";
 	state: "visible" | "hidden" | "closed";
 	detail?: string;
 }

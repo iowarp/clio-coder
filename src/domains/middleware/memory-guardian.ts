@@ -99,7 +99,7 @@ export interface MemoryGuardianClient {
 }
 
 export interface MemoryGuardianDeps {
-	/** Memory on and a model tier configured. False parks the guardian in `off`. */
+	/** Memory on and a dedicated or active chat route set. False parks the guardian in `off`. */
 	enabled(): boolean;
 	/** True while the visible turn is streaming. */
 	isForegroundActive(): boolean;

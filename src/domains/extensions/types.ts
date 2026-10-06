@@ -1,4 +1,14 @@
+import type { ExtensionRuntimeDeclarationV2 } from "./manifest-v2.js";
+
 export type ExtensionScope = "user" | "project";
+
+/**
+ * Where a loaded package came from. `dev` is a folder the operator develops
+ * in: loaded by the terminal for one session after the operator approves its
+ * capability envelope, from a private copy taken at each reload, and never
+ * written to install state.
+ */
+export type ExtensionLoadScope = ExtensionScope | "dev";
 
 export interface ExtensionRuntimeDeclaration {
 	api: 1;
@@ -30,6 +40,8 @@ export interface ExtensionCapabilities {
  */
 export interface ClioExtensionManifest {
 	runtime?: ExtensionRuntimeDeclaration;
+	/** An `api: 2` runtime block. Held apart from `runtime` so api 1 readers never see a shape they cannot run. */
+	runtimeV2?: ExtensionRuntimeDeclarationV2;
 	id: string;
 	name: string;
 	version: string;
@@ -37,6 +49,12 @@ export interface ClioExtensionManifest {
 	/** Absent for a package whose only capability is its `hooks.yaml`. */
 	capabilities?: ExtensionCapabilities;
 	compatibility?: { clio?: string };
+	/**
+	 * The one plugin this extension serves. Plugin and extension stay separate
+	 * packages; the link only lets a `replaces: prompt` command take over that
+	 * plugin's prompt of the same name while the plugin is in effect.
+	 */
+	plugin?: string;
 }
 
 export interface ExtensionDiagnostic {
@@ -47,7 +65,7 @@ export interface ExtensionDiagnostic {
 
 export interface ExtensionProvenance {
 	id: string;
-	scope: ExtensionScope;
+	scope: ExtensionLoadScope;
 	/** Path recorded in install state, when known. */
 	sourcePath?: string;
 	/** Canonical filesystem identity of the installed package root. */
@@ -59,13 +77,27 @@ export interface ExtensionProvenance {
 }
 
 export interface InstalledExtension {
+	/** The plugin this extension serves; a separate package with its own install and lifecycle. */
+	plugin?: string;
+	/**
+	 * Prompt names the served plugin provides while it is installed and in
+	 * effect; the only names a `replaces: prompt` command may take over.
+	 */
+	pluginPrompts?: readonly string[];
+	/**
+	 * Source label (`plugin:<scope>:<id>`) the served plugin's prompts carry while
+	 * it is loadable. A takeover applies only when the prompt that wins a name
+	 * has this source, so an operator or project prompt of that name keeps it.
+	 */
+	pluginSource?: string;
 	runtime?: ExtensionRuntimeDeclaration;
+	runtimeV2?: ExtensionRuntimeDeclarationV2;
 	id: string;
 	name: string;
 	version: string;
 	description: string;
 	capabilities?: ExtensionCapabilities;
-	scope: ExtensionScope;
+	scope: ExtensionLoadScope;
 	rootPath: string;
 	manifestPath: string;
 	enabled: boolean;
@@ -76,13 +108,19 @@ export interface InstalledExtension {
 	effective: boolean;
 	/** Set on a project copy in a workspace whose project extensions the operator has not approved. */
 	trustBlocked?: true;
+	/** A dev package whose capability envelope the operator has not approved this session. */
+	consentPending?: true;
+	/** Unloaded for this session by `/extensions mute`; install state is untouched. */
+	muted?: true;
+	/** For a dev package, the folder the operator develops in; `rootPath` is the private copy. */
+	devSource?: string;
 	/** The single admission decision for extension-owned tools and hooks. */
 	loadable: boolean;
 	/** Present exactly when the installed tree and manifest bytes were reverified. */
 	provenance?: ExtensionProvenance;
 	/** Digest observed while checking installed content on this load. */
 	observedContentDigest?: string;
-	overriddenBy?: ExtensionScope;
+	overriddenBy?: ExtensionLoadScope;
 	diagnostics: ExtensionDiagnostic[];
 }
 
@@ -182,8 +220,27 @@ export interface ExtensionListOptions {
 	all?: boolean;
 }
 
+/** Where an installed extension came from, kept so a later update resolves the durable source and not a staging path. */
+export interface ExtensionOrigin {
+	kind: "local" | "catalog" | "github";
+	source: string;
+}
+
 export interface ExtensionInstallOptions extends ExtensionListOptions {
 	force?: boolean;
+	/** Optional library pin, rechecked against the staged tree by the canonical writer. */
+	expectedDigest?: string;
+	expectedId?: string;
+	expectedVersion?: string;
+	/**
+	 * The capability envelope the operator reviewed. A digest binds the install to
+	 * exactly that envelope; `null` says the reviewed package declared none. Absent
+	 * means the caller reviewed nothing to bind.
+	 */
+	expectedEnvelopeDigest?: string | null;
+	/** Durable source recorded in install state when the staged `sourcePath` is only a working copy. */
+	source?: string;
+	origin?: ExtensionOrigin;
 }
 
 export interface ExtensionInstallResult {
@@ -202,5 +259,15 @@ export interface ExtensionMutationResult {
 export interface ExtensionState {
 	version: 1;
 	disabled: string[];
-	installed: Record<string, { installedAt: string; source?: string; contentDigest?: string }>;
+	installed: Record<
+		string,
+		{
+			installedAt: string;
+			source?: string;
+			origin?: ExtensionOrigin;
+			contentDigest?: string;
+			/** Digest of the capability envelope the operator reviewed at install; absent for api 1 and older records. */
+			envelopeDigest?: string;
+		}
+	>;
 }

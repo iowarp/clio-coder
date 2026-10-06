@@ -1,0 +1,19 @@
+id: __EXTENSION_ID__
+name: __EXTENSION_ID__
+version: 0.1.0
+description: A workspace extension for Clio Coder.
+runtime:
+  api: 2
+  entrypoint: runtime/extension.ts
+  commands:
+    - { name: enter, description: Enter the task workspace. }
+    - { name: leave, description: Leave the task workspace. }
+  events: [turn_end]
+  workspaces:
+    - id: desk
+      title: Task desk
+      regions: [header, board, footer]
+      board: band
+      skin: skins/workspace.json
+      keys:
+        - { key: f, action: next, label: Refresh the board }

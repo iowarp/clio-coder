@@ -24,6 +24,7 @@ import { createHash } from "node:crypto";
 import { isAbsolute, resolve } from "node:path";
 import type { MiddlewareHookRegistration } from "./runtime.js";
 import {
+	type DeclarableMiddlewareEffect,
 	isMiddlewareHook,
 	isMiddlewareReminderSeverity,
 	MIDDLEWARE_HOOKS,
@@ -143,7 +144,7 @@ export interface NormalizedPromptHook {
 
 export interface NormalizedEffectHook {
 	kind: "effect";
-	effect: MiddlewareEffect;
+	effect: DeclarableMiddlewareEffect;
 }
 
 export type NormalizedUserHookSpec = NormalizedCommandHook | NormalizedPromptHook | NormalizedEffectHook;
@@ -400,10 +401,13 @@ export interface HookReceipt {
 	origin: UserHookOrigin;
 	sourcePath: string;
 	hash: string;
-	hook: MiddlewareHook;
-	kind: UserHookKind;
-	outcome: UserHookOutcome;
+	/** `prompt_submit` is an extension runtime point with no middleware hook of its own. */
+	hook: MiddlewareHook | "prompt_submit";
+	/** `runtime` is an extension runtime hook; it never comes from a hooks.yaml file. */
+	kind: UserHookKind | "runtime";
+	outcome: UserHookOutcome | "runtime-ok" | "runtime-failed" | "runtime-timeout";
 	effectKinds?: string[];
+	durationMs?: number;
 	exitCode?: number;
 	outputChars?: number;
 	toolName?: string;

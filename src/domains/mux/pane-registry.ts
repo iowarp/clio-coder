@@ -78,13 +78,14 @@ export function createPaneRegistry(): MuxPaneRegistry {
 /** Convenience for building a registry entry from a freshly created pane. */
 export function paneRecord(
 	ref: MuxPaneRef,
-	fields: { purpose: MuxPanePurpose; label: string; openedAt: number; adopted?: boolean },
+	fields: { purpose: MuxPanePurpose; label: string; openedAt: number; adopted?: boolean; dockKey?: string },
 ): MuxPaneRecord {
 	return {
 		ref,
 		purpose: fields.purpose,
 		label: fields.label,
 		openedAt: fields.openedAt,
+		...(fields.dockKey === undefined ? {} : { dockKey: fields.dockKey }),
 		...(fields.adopted === true ? { adopted: true } : {}),
 	};
 }

@@ -2,63 +2,23 @@
 description: "Resume research from a paused state; shows current position and suggests next action"
 ---
 
-<clio_execution>
-Read ${component:resource:clio-execution} before acting. It defines argument parsing,
-research state helpers, interview ownership, readback, and optional recording.
-</clio_execution>
+Read ${component:resource:research-policy}. Use gateway to describe and call
+`extension_materio__interview`, `extension_materio__set_task_status`,
+`extension_materio__complete_task`, and `extension_materio__record_decision`.
+Use `gateway({op:"call",capability:"extension_materio__interview",args:{...}})`
+for the forms below. The parked result contains `interview`, step-keyed `answers`,
+and closing `text`. Cancellation, revision, stale files or errors never authorize
+continuation; use the actual answers, never infer consent from prose.
+Runtime instructions here supersede the manual state/interview steps in
+${component:resource:clio-execution}. Runtime tools own publication, readback,
+task directories, checkpoints after accepted findings, and optional named-file
+recording. Never grant a worker write access to WORKFLOW.md or STATE.md.
 
-<objective>
-Load research state and resume from the last paused or in-progress task. Equivalent to /wtfp:progress but triggers active resumption.
-</objective>
+Read STATE.md, WORKFLOW.md and partial artifacts. Prefer the paused task, otherwise
+the first dependency-ready pending task. Show the saved research prompt, full task,
+continuation and actual timestamp. Call set_task_status
+`{task:<id>,status:"in-progress"}`; dependencies or unanswered findings may refuse.
+After success offer `/materio:execute-task <id>` or progress; no task means show
+why nothing can resume. STATE updates and optional recording belong to the tool.
 
-<process>
-
-## 1. Read State
-
-```bash
-cat .research/STATE.md 2>/dev/null
-cat .research/WORKFLOW.md 2>/dev/null
-```
-
-## 2. Find Paused or Next Pending Task
-
-Look for tasks with status `☐ paused` first, then `☐ pending`.
-
-Change `☐ paused` back to `☑ in-progress` if found.
-
-## 3. Show Resumption Context
-
-Display:
-```
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
- Materio ► RESUMING RESEARCH
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-Research:   [prompt]
-Resuming:   Task [N]; [name]
-Last saved: [timestamp from STATE.md]
-
-Task context:
-[full task block from WORKFLOW.md]
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-```
-
-## 4. Update STATE.md
-
-Set status = "active", record the resume timestamp. Only if `commit_research` is true in `.research/config.json`:
-```bash
-python3 "${component:script:research-state}" record --message "research: resume at task [N]; [task name]" --files "${CHANGED_FILES[@]}"
-```
-
-## 5. Offer Next Action
-
-Suggest: `/materio:execute-task [N]` to continue, or `/materio:progress` for full overview.
-
-</process>
-
-<success_criteria>
-- [ ] Paused task identified and status restored to in-progress
-- [ ] Full task context shown to orient the user
-- [ ] STATE.md updated
-- [ ] Next command clearly offered
-</success_criteria>
+If runtime is unavailable, follow ${pluginRoot}/assets/actions/resume-research.md manually with researcher gates and file readback.

@@ -16,6 +16,7 @@ process.title = "clio-coder-worker";
 
 import { AI_AGENT_NAME } from "../core/agent-environment.js";
 import { deleteInjectedCompileCacheFrom } from "../core/compile-cache.js";
+import { adoptDevRootOwner } from "../core/dev-roots.js";
 import {
 	setGitCommitAttributionEnabled,
 	withManagedGitCommitAttributionEnvironment,
@@ -156,6 +157,8 @@ async function main(): Promise<number> {
 	// Every child this worker spawns through bash-exec or safe-exec runs under
 	// the dispatch-chosen OS sandbox from here on (decision Q8).
 	configureWorkerProcessSandbox(spec.sandbox);
+	// The dispatching session's own workers may write its dev extension folders; another session's may not.
+	if (spec.devRootOwner !== undefined) adoptDevRootOwner(spec.devRootOwner);
 	const attribution = withManagedGitCommitAttributionEnvironment(process.env, {
 		cwd: process.cwd(),
 		enabled: attributionEnabled,

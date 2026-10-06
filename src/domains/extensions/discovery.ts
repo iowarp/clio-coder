@@ -1,13 +1,25 @@
 import { type Dirent, existsSync, readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
 import path from "node:path";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
+import { isPluginId } from "../plugins/index.js";
 import { parseExtensionCapabilities, resolveExtensionEntrypoint } from "./command-schema.js";
 import { evaluateClioCompatibility } from "./compatibility.js";
 import { parseExtensionRuntime } from "./runtime-schema.js";
+import { parseExtensionRuntimeV2 } from "./runtime-schema-v2.js";
+import { validateSkin } from "./skin-schema.js";
 import type { ClioExtensionManifest, ExtensionCandidate, ExtensionDiagnostic } from "./types.js";
 
 const MANIFEST_NAMES = ["clio-coder-extension.yaml", "clio-coder-extension.yml", "clio-coder-extension.json"] as const;
-const MANIFEST_KEYS = new Set(["id", "name", "version", "description", "compatibility", "capabilities", "runtime"]);
+const MANIFEST_KEYS = new Set([
+	"id",
+	"name",
+	"version",
+	"description",
+	"compatibility",
+	"capabilities",
+	"runtime",
+	"plugin",
+]);
 const COMPATIBILITY_KEYS = new Set(["clio"]);
 /**
  * Keys a domain package used to declare here. They are named so the refusal
@@ -68,7 +80,7 @@ function rejectManifestKeys(
 		diagnostics.push({
 			type: "error",
 			message: PLUGIN_OWNED_KEYS.has(key)
-				? `harness extensions cannot declare '${key}'; ${PLUGIN_GUIDANCE}`
+				? `extensions cannot declare '${key}'; ${PLUGIN_GUIDANCE}`
 				: `unknown manifest key '${key}'`,
 			path: manifestPath,
 		});
@@ -98,11 +110,20 @@ export function parseExtensionManifest(
 	}
 	if (!version) diagnostics.push({ type: "error", message: "version is required", path: manifestPath });
 	if (!description) diagnostics.push({ type: "error", message: "description is required", path: manifestPath });
+	const plugin = trimString(value.plugin);
+	if (value.plugin !== undefined && (plugin === undefined || !isPluginId(plugin)))
+		diagnostics.push({
+			type: "error",
+			message: "plugin must name the plugin this extension serves, as a plugin id",
+			path: manifestPath,
+		});
 	let capabilities: ClioExtensionManifest["capabilities"];
 	let runtime: ClioExtensionManifest["runtime"];
+	let runtimeV2: ClioExtensionManifest["runtimeV2"];
 	if (value.runtime !== undefined) {
 		try {
-			runtime = parseExtensionRuntime(value.runtime);
+			if ((value.runtime as { api?: unknown } | null)?.api === 2) runtimeV2 = parseExtensionRuntimeV2(value.runtime);
+			else runtime = parseExtensionRuntime(value.runtime);
 		} catch (error) {
 			diagnostics.push({
 				type: "error",
@@ -158,8 +179,16 @@ export function parseExtensionManifest(
 	}
 	const manifest: ClioExtensionManifest = { id, name, version, description };
 	if (runtime) manifest.runtime = runtime;
+	if (runtimeV2) manifest.runtimeV2 = runtimeV2;
 	if (capabilities) manifest.capabilities = capabilities;
 	if (compatibility && Object.keys(compatibility).length > 0) manifest.compatibility = compatibility;
+	if (plugin) manifest.plugin = plugin;
+	if (!plugin && runtimeV2?.commands.some((command) => command.replaces === "prompt"))
+		diagnostics.push({
+			type: "error",
+			message: "replaces: prompt needs plugin: <name>, the plugin whose prompt the command takes over",
+			path: manifestPath,
+		});
 	const clioRange = manifest.compatibility?.clio;
 	if (clioRange !== undefined) {
 		const evaluation = evaluateClioCompatibility(clioRange);
@@ -206,6 +235,39 @@ export function loadManifestFromRoot(root: string): ExtensionCandidate {
 					message: `runtime: ${error instanceof Error ? error.message : String(error)}`,
 					path: manifestPath,
 				});
+			}
+		}
+		const runtimeV2 = parsed.manifest?.runtimeV2;
+		// A plugin and an extension are separate packages, each with its own
+		// manifest, digest and consent; one root never serves as both.
+		if (existsSync(path.join(root, "plugin.json")))
+			parsed.diagnostics.push({
+				type: "error",
+				message:
+					"an extension root cannot hold plugin.json; publish the plugin and the extension as separate packages and name the plugin with plugin: <name>",
+				path: manifestPath,
+			});
+		if (runtimeV2) {
+			const files = [
+				{ file: runtimeV2.entrypoint, isSkin: false },
+				...runtimeV2.workspaces.flatMap((workspace) => (workspace.skin ? [{ file: workspace.skin, isSkin: true }] : [])),
+			];
+			for (const { file, isSkin } of files) {
+				try {
+					const resolved = resolveExtensionEntrypoint(root, file);
+					// A skin is data; reading it here keeps a broken one out of an install without running anything.
+					if (isSkin) {
+						const skin: unknown = JSON.parse(readFileSync(resolved, "utf8"));
+						const validation = validateSkin(skin);
+						if (!validation.ok) throw new Error(`skin ${validation.path}: ${validation.reason}`);
+					}
+				} catch (error) {
+					parsed.diagnostics.push({
+						type: "error",
+						message: `runtime: ${file}: ${error instanceof Error ? error.message : String(error)}`,
+						path: manifestPath,
+					});
+				}
 			}
 		}
 		for (const tool of parsed.manifest?.capabilities?.tools ?? []) {

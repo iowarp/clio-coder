@@ -82,6 +82,22 @@ export function createMiddlewareBundle(options: MiddlewareBundleOptions = {}): D
 				...(diagnosticSink !== undefined ? { onDiagnostic: diagnosticSink } : {}),
 			});
 		},
+		hasAwaitedHook(hook, toolName) {
+			return table
+				.list()
+				.some(
+					(registration) =>
+						registration.awaited === true &&
+						registration.hooks.includes(hook) &&
+						(registration.toolNames === undefined || (toolName !== undefined && registration.toolNames.includes(toolName))),
+				);
+		},
+		runAwaitedHook(input, priorEffects = []) {
+			return runMiddlewareAsyncRegistrations(input, table.list(), priorEffects, {
+				include: (registration) => registration.awaited === true,
+				...(diagnosticSink !== undefined ? { onDiagnostic: diagnosticSink } : {}),
+			});
+		},
 		snapshot() {
 			return createMiddlewareSnapshot(ruleDefinitions.map((definition) => definition.rule));
 		},

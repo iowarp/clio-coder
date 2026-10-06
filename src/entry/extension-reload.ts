@@ -28,11 +28,14 @@
 
 import { realpathSync } from "node:fs";
 import path from "node:path";
+import type { ToolName } from "../core/tool-names.js";
 import type {
 	ExtensionReloadCommitted,
 	ExtensionReloadRejection,
+	ExtensionRuntimeHookBridge,
 	ExtensionSnapshotDiagnostics,
 	ExtensionsContract,
+	InstalledExtension,
 } from "../domains/extensions/index.js";
 import { EXTENSION_SNAPSHOT_DIAGNOSTIC_MESSAGE_CAP } from "../domains/extensions/index.js";
 import {
@@ -44,7 +47,14 @@ import {
 	type MiddlewareRegistrationConflict,
 	type UserHookCommandRunner,
 } from "../domains/middleware/index.js";
+import { buildExtensionRuntimeToolSpecs } from "../tools/extension-runtime-tools.js";
+import type { ToolRegistry } from "../tools/registry.js";
 import { capturedHookSourcesFor } from "./extension-hook-sources.js";
+import {
+	buildExtensionPromptGate,
+	buildExtensionRuntimeHookRegistrations,
+	type ExtensionPromptGate,
+} from "./extension-runtime-hooks.js";
 
 export interface ExtensionReloadHookSummary {
 	/** Registrations published for the owner in this generation. */
@@ -81,6 +91,12 @@ export interface ExtensionReloadCoordinatorDeps {
 	report: (line: string) => void;
 	/** Called once per published generation, after both references are live. */
 	onCommitted?: (event: ExtensionGenerationCommitted) => void;
+	/**
+	 * Present only where a surface hosts api 2 runtimes. Their declared hooks
+	 * then publish with each generation; elsewhere they are not registered, so
+	 * a gate never fails closed for want of a runtime that was never started.
+	 */
+	runtimeHooks?: ExtensionRuntimeHookBridge;
 }
 
 export interface ExtensionReloadCoordinator {
@@ -92,6 +108,14 @@ export interface ExtensionReloadCoordinator {
 	applyBoot(): ExtensionReloadOutcome;
 	/** Operator or programmatic reload. Synchronous and never throws. */
 	reload(): ExtensionReloadOutcome;
+	/** The prompt_submit hooks of the published generation; null before one exists or without runtime hooks. */
+	promptGate(): ExtensionPromptGate | null;
+	/**
+	 * Serve runtime tools from this registry: the published generation's now,
+	 * and each later generation's when it commits. Only where runtime hooks
+	 * exist, since only there is a runtime to answer a call.
+	 */
+	attachRuntimeTools(registry: Pick<ToolRegistry, "register" | "unregister" | "get">): void;
 }
 
 /** Cap on issue lines carried in one outcome so an operator surface stays bounded. */
@@ -126,6 +150,27 @@ function issueLines(
 
 export function createExtensionReloadCoordinator(deps: ExtensionReloadCoordinatorDeps): ExtensionReloadCoordinator {
 	let inFlight = false;
+	let promptGate: ExtensionPromptGate | null = null;
+	let publishedPackages: ReadonlyArray<InstalledExtension> = [];
+	let toolRegistry: Pick<ToolRegistry, "register" | "unregister" | "get"> | null = null;
+	let registeredTools: ToolName[] = [];
+
+	/** Swap the gateway's runtime tools for the published generation's; a taken name is reported, never replaced. */
+	const publishRuntimeTools = (): string[] => {
+		if (toolRegistry === null || deps.runtimeHooks === undefined) return [];
+		for (const name of registeredTools) toolRegistry.unregister?.(name);
+		registeredTools = [];
+		const lines: string[] = [];
+		for (const spec of buildExtensionRuntimeToolSpecs(publishedPackages, deps.runtimeHooks)) {
+			if (toolRegistry.get(spec.name)) {
+				lines.push(`[clio-coder:extensions] runtime tool ${spec.name} is not registered: the name is taken`);
+				continue;
+			}
+			toolRegistry.register(spec);
+			registeredTools.push(spec.name);
+		}
+		return lines;
+	};
 
 	const build = (workspace: string, captured: CapturedHookSourceSet | null): BuildUserHookRegistrationsResult =>
 		buildUserHookRegistrations({
@@ -237,11 +282,23 @@ export function createExtensionReloadCoordinator(deps: ExtensionReloadCoordinato
 					),
 				});
 			}
-			const preparedReplacement = deps.middleware.prepareRegistrationReplacement(
-				"user-hooks",
-				candidate.generation,
-				built.registrations,
-			);
+			const runtimeHookOptions = {
+				generation: candidate.generation,
+				recordReceipt: deps.recordReceipt,
+				...(deps.now !== undefined ? { now: deps.now } : {}),
+			};
+			const runtimeRegistrations =
+				deps.runtimeHooks === undefined
+					? []
+					: buildExtensionRuntimeHookRegistrations(candidate.snapshot.packages, deps.runtimeHooks, runtimeHookOptions);
+			const nextPromptGate =
+				deps.runtimeHooks === undefined
+					? null
+					: buildExtensionPromptGate(candidate.snapshot.packages, deps.runtimeHooks, runtimeHookOptions);
+			const preparedReplacement = deps.middleware.prepareRegistrationReplacement("user-hooks", candidate.generation, [
+				...built.registrations,
+				...runtimeRegistrations,
+			]);
 			if (preparedReplacement.status === "rejected") {
 				candidate.discard();
 				return rejected({
@@ -268,9 +325,11 @@ export function createExtensionReloadCoordinator(deps: ExtensionReloadCoordinato
 			}
 			candidate.publish();
 			replacement.publish();
+			promptGate = nextPromptGate;
+			publishedPackages = candidate.snapshot.packages;
 			// Both references are live. Observers may run from here on.
 			replacement.emitConflicts();
-			const lines = issueLines(built, replacement.dropped);
+			const lines = [...issueLines(built, replacement.dropped), ...publishRuntimeTools()];
 			try {
 				deps.onCommitted?.({
 					generation: candidate.generation,
@@ -314,5 +373,10 @@ export function createExtensionReloadCoordinator(deps: ExtensionReloadCoordinato
 	return {
 		applyBoot: () => run(true),
 		reload: () => run(false),
+		promptGate: () => promptGate,
+		attachRuntimeTools(registry) {
+			toolRegistry = registry;
+			emitLines(publishRuntimeTools());
+		},
 	};
 }

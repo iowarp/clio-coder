@@ -51,13 +51,14 @@ import { getActiveRenderTrace } from "./interactive-shell.js";
 import type { InteractiveNoticeLevel } from "./interactive-subscriptions.js";
 import type { ClioKeybindingManager } from "./keybinding-manager.js";
 import { createKeybindingManager, formatKeyLabel } from "./keybinding-manager.js";
-import { buildLayout, preserveTranscriptScroll } from "./layout.js";
+import { buildLayout, type ComposerPlacement, preserveTranscriptScroll } from "./layout.js";
 import type { SessionTranscript } from "./session-transcript.js";
 import { createSlashCommandAutocompleteProvider } from "./slash-autocomplete.js";
 import type { StatusController, TurnSummary } from "./status/index.js";
 import { createStatusController } from "./status/index.js";
 import type { SmoothStreamingMode } from "./stream-pacer.js";
 import { processAutoPacingAllowed } from "./stream-pacing-policy.js";
+import type { WorkspaceSurfaces } from "./surfaces/registry.js";
 import { ATTENTION_STEP_MS } from "./theme/glyphs.js";
 import type { WelcomeDashboardComponent } from "./welcome-dashboard.js";
 import { createWelcomeDashboard } from "./welcome-dashboard.js";
@@ -93,6 +94,8 @@ export interface InteractivePresentationDeps {
 	getConnections?: () => { mcp: string[]; plugins: string[] };
 	extensionCommands?: import("./slash-autocomplete.js").SlashAutocompleteOptions["extensionCommands"];
 	getExtensionStatus?: () => ReadonlyArray<string>;
+	/** What an active extension workspace draws in place of the host's parts. */
+	workspaceSurfaces?: WorkspaceSurfaces;
 	getLifecycleHint?: () => string | null;
 	bus: SafeEventBus;
 	providers: ProvidersContract;
@@ -156,6 +159,8 @@ export interface PresentationToolEnd {
 }
 
 export interface InteractivePresentation {
+	/** Screen rows above the composer in the last frame, for overlays that must stay clear of it. */
+	composerRowsAbove(termRows: number): number | null;
 	keybindings: ClioKeybindingManager;
 	banner: WelcomeDashboardComponent;
 	chatPanel: ChatPanel;
@@ -456,6 +461,12 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 		getWorkspaceSnapshot: getLiveWorkspaceSnapshot,
 		getExtensionStats,
 		...(deps.getExtensionStatus ? { getExtensionStatus: deps.getExtensionStatus } : {}),
+		...(deps.workspaceSurfaces
+			? {
+					getExtensionFacts: (width: number) => deps.workspaceSurfaces?.statusFacts(width) ?? [],
+					getWorkspaceLine: (width: number) => deps.workspaceSurfaces?.footerLine(width) ?? null,
+				}
+			: {}),
 		...(deps.getLifecycleHint ? { getLifecycleHint: deps.getLifecycleHint } : {}),
 		getSessionInfo: () => {
 			const meta = deps.session?.current();
@@ -489,6 +500,9 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 			const status = footerDeps.getAgentStatus?.() ?? statusController.current();
 			return status.phase === "idle" ? null : composerPhasePresentation(status, width, Date.now());
 		},
+		...(deps.workspaceSurfaces
+			? { getWorkspaceRail: (width: number) => deps.workspaceSurfaces?.rail(width) ?? null }
+			: {}),
 		getContextUsage: () => {
 			const usage = deps.chat.contextUsage();
 			return {
@@ -670,10 +684,12 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 			}
 		: followUpQueuePanel;
 	let transcriptView: ScrollView | undefined;
+	let composerPlacement: ComposerPlacement | undefined;
 	const root = factories.buildLayout(
 		{
-			banner,
+			banner: deps.workspaceSurfaces ? deps.workspaceSurfaces.banner(banner) : banner,
 			chat: chatPanel,
+			...(deps.workspaceSurfaces ? { workspace: deps.workspaceSurfaces.board } : {}),
 			pending,
 			fleet: createFleetDock({
 				getRows: () => dispatchBoardStore.activeRows(),
@@ -695,6 +711,9 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 			fullscreenScrollbar: settings.interface?.fullscreenScrollbar ?? "auto",
 			onTranscript: (view) => {
 				transcriptView = view;
+			},
+			onComposerPlacement: (placement) => {
+				composerPlacement = placement;
 			},
 		},
 	);
@@ -773,6 +792,7 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 		statusController.dispose();
 	};
 	return {
+		composerRowsAbove: (termRows) => composerPlacement?.rowsAbove(termRows) ?? null,
 		keybindings,
 		banner,
 		chatPanel,

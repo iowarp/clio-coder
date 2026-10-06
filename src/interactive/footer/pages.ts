@@ -394,6 +394,7 @@ export function renderCompactDashboard(state: FooterDashboardRenderState, width:
 					weekly.label,
 				)
 			: "",
+		...(state.extensionFacts ?? []),
 	]
 		.filter(Boolean)
 		.join(separator);

@@ -76,7 +76,7 @@ describe("/extensions reload", () => {
 			true,
 		);
 		const spec = BUILTIN_SLASH_COMMANDS.find((entry) => entry.name === "extensions");
-		deepStrictEqual(spec?.args?.positionals?.[0]?.values, ["reload"]);
+		deepStrictEqual(spec?.args?.positionals?.[0]?.values, ["reload", "dev", "mute", "unmute"]);
 	});
 
 	it("runs the coordinator, reports the outcome, and reopens the overlay only on commit", () => {

@@ -660,7 +660,7 @@ export const routes = {
 		params: operationParams,
 		body: FleetPreviewRequest,
 		response: FleetPreview,
-		summary: "Compile a fleet contract for review; nothing is dispatched",
+		summary: "Compile a playbook for review; nothing is dispatched",
 	}),
 	startFleetRun: defineRoute({
 		...post,
@@ -669,7 +669,7 @@ export const routes = {
 		params: operationParams,
 		body: FleetRunRequest,
 		response: FleetRunResult,
-		summary: "Start a fleet contract only when its plan still hashes to the approved one",
+		summary: "Start a playbook only when its plan still hashes to the approved one",
 	}),
 	prepareHandoff: defineRoute({
 		...post,

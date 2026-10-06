@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, it } from "node:test";
 import { stringify } from "yaml";
 
 import { resetXdgCache } from "../../src/core/xdg.js";
+import { extensionBaseDir, listInstalledExtensions } from "../../src/domains/extensions/index.js";
 import { applyLibraryImport, planLibraryImport } from "../../src/domains/interop/import.js";
 import {
 	disablePlugin,
@@ -503,6 +504,61 @@ describe("library lifecycle plans", () => {
 		equal(repaired.code, 0, JSON.stringify(repaired.json));
 		ok(copy("user", "repair")?.loadable);
 		ok(JSON.stringify(repaired.json).includes("backup"));
+	});
+
+	it("applies only the reviewed extension envelope and loads only a copy whose recorded envelope matches", () => {
+		const location = path.join(root, "sources", "gamma-1.0.0");
+		mkdirSync(location, { recursive: true });
+		writeFileSync(
+			path.join(location, "clio-coder-extension.json"),
+			JSON.stringify({
+				id: "gamma",
+				name: "gamma",
+				version: "1.0.0",
+				description: "Lifecycle extension",
+				runtime: { api: 2, entrypoint: "main.mjs", commands: [{ name: "check", description: "Check" }] },
+			}),
+		);
+		writeFileSync(
+			path.join(location, "main.mjs"),
+			'export default function (api) { api.handle("check", () => ({ text: "ok" })); }\n',
+		);
+		writeFileSync(
+			path.join(root, "config", "library.yaml"),
+			stringify({
+				entries: [
+					{
+						kind: "extension",
+						name: "gamma",
+						version: "1.0.0",
+						description: "Lifecycle extension",
+						sourceUrl: location,
+						sha256: pluginContentDigest(location),
+					},
+				],
+			}),
+		);
+		const plan = planLibraryLifecycle({ operation: "install", ref: "extension:gamma", scope: "user", cwd: root });
+		const review = plan.reviews?.find((item) => item.ref === "extension:gamma");
+		ok(review?.envelopeDigest);
+		review.envelopeDigest = "0".repeat(64);
+		const refused = applyLibraryLifecycle(plan);
+		equal(refused.outcomes[0]?.status, "failed");
+		match(String(refused.outcomes[0]?.error?.message), /envelope differs from the one reviewed/);
+		equal(listInstalledExtensions(root, { scope: "user", all: true }).length, 0);
+
+		install("extension:gamma");
+		const loadable = () =>
+			listInstalledExtensions(root, { scope: "user", all: true }).find((item) => item.id === "gamma")?.loadable;
+		equal(loadable(), true);
+		const stateFile = path.join(extensionBaseDir("user", root), "state.json");
+		const state = JSON.parse(readFileSync(stateFile, "utf8"));
+		state.installed.gamma.envelopeDigest = "1".repeat(64);
+		writeFileSync(stateFile, JSON.stringify(state));
+		equal(loadable(), false, "a differing recorded envelope");
+		delete state.installed.gamma.envelopeDigest;
+		writeFileSync(stateFile, JSON.stringify(state));
+		equal(loadable(), false, "a missing recorded envelope");
 	});
 
 	it("exposes plans and outcomes through the CLI with additive JSON and dry-run for every mutation", () => {

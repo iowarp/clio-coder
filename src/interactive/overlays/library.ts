@@ -22,7 +22,13 @@ import type {
 	LibraryInventory,
 	LibraryInventoryOptions,
 } from "../../domains/resources/index.js";
-import { inspectLibraryCopy, libraryImportOutcome, readLibraryInventory } from "../../domains/resources/index.js";
+import {
+	inspectLibraryCopy,
+	type LibraryPairs,
+	libraryImportOutcome,
+	readLibraryInventory,
+	readLibraryPairs,
+} from "../../domains/resources/index.js";
 import type { OverlayHandle, TUI } from "../../engine/tui.js";
 import type { NoticeLevel } from "../command-output.js";
 import type { LibraryLifecyclePlan, LibraryLifecyclePort, LibraryOperation } from "./library-lifecycle.js";
@@ -70,12 +76,14 @@ export interface LibraryOverlayDeps {
 	/** A path or URL to import, from `/library import <path-or-url>`. */
 	importSource?: string;
 	cwd?: string;
-	/** Opens the `/fleet run` approval preview for an installed fleet. */
+	/** Opens the `/fleet run` approval preview for an installed playbook. */
 	openFleetRun?: (name: string) => void;
 	/** Opens the local-agent discovery and adoption surface. Never called on open. */
 	openImport?: () => void;
 	/** Injectable for tests; defaults to the shared inventory read. */
 	readInventory?: (options: LibraryInventoryOptions) => LibraryInventory;
+	/** Injectable for tests; defaults to the catalog and install pairing of plugins with their extensions. */
+	readPairs?: (options: { cwd: string }) => LibraryPairs;
 	/** Injectable for tests; defaults to the shared explicit copy inspection. */
 	inspectCopy?: (ref: string, options: { cwd?: string; scope?: PluginScope }) => LibraryCopyInspection;
 	/** Injectable for tests; defaults to the framed review overlay. */
@@ -119,6 +127,7 @@ export function openLibraryOverlay(tui: TUI, deps: LibraryOverlayDeps): OverlayH
 	const cwd = deps.cwd ?? process.cwd();
 	const read = deps.readInventory ?? readLibraryInventory;
 	const inspect = deps.inspectCopy ?? inspectLibraryCopy;
+	const readPairs = deps.readPairs ?? readLibraryPairs;
 	const openReview = deps.openReview ?? openLibraryReviewOverlay;
 	const columns = deps.columns ?? (() => (typeof process.stdout.columns === "number" ? process.stdout.columns : 100));
 
@@ -149,6 +158,7 @@ export function openLibraryOverlay(tui: TUI, deps: LibraryOverlayDeps): OverlayH
 	 * instead of five.
 	 */
 	let inventoryCache: LibraryInventory | null = null;
+	let pairsCache: LibraryPairs | null | undefined;
 	let inspectionCache: { ref: string; scope?: PluginScope; inspection: LibraryCopyInspection } | null = null;
 	let failure: string | undefined;
 	const inventory = (): LibraryInventory => {
@@ -172,8 +182,20 @@ export function openLibraryOverlay(tui: TUI, deps: LibraryOverlayDeps): OverlayH
 		}
 		return inventoryCache;
 	};
+	/** Pairing is a hint beside the inventory; a read that fails shows no pairing rather than failing the list. */
+	const pairs = (): LibraryPairs | undefined => {
+		if (pairsCache === undefined) {
+			try {
+				pairsCache = readPairs({ cwd });
+			} catch {
+				pairsCache = null;
+			}
+		}
+		return pairsCache ?? undefined;
+	};
 	const invalidate = (): void => {
 		inventoryCache = null;
+		pairsCache = undefined;
 		inspectionCache = null;
 	};
 
@@ -200,6 +222,7 @@ export function openLibraryOverlay(tui: TUI, deps: LibraryOverlayDeps): OverlayH
 		const set = buildLibraryRows({
 			inventory: selectForCategory(inventory(), scoped),
 			view: scoped,
+			pairs: pairs(),
 			...(scoped.category === view.category && view.member ? { inspection: inspection() } : {}),
 			...(failure ? { failure } : {}),
 		});
@@ -385,7 +408,7 @@ export function openLibraryOverlay(tui: TUI, deps: LibraryOverlayDeps): OverlayH
 		});
 	};
 
-	/** Fill the composer, or open the surface a fleet's use actually leads to. */
+	/** Fill the composer, or open the surface a playbook's use actually leads to. */
 	const use = (item: ListOverlayItem | undefined): void => {
 		const subject = selected(item);
 		if (!subject) return;
@@ -398,7 +421,7 @@ export function openLibraryOverlay(tui: TUI, deps: LibraryOverlayDeps): OverlayH
 			deps.notice("warn", actions.reasons[0] ?? `${subject.resource.name} is not usable in this state.`);
 			return;
 		}
-		if (subject.resource.kind === "fleet") {
+		if (subject.resource.kind === "playbook") {
 			deps.openFleetRun?.(subject.resource.name);
 			return;
 		}

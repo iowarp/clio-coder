@@ -50,6 +50,10 @@
 		"./package.json": "./package.json",
 		"./extensions": {
 			"types": "./src/domains/extensions/public-api.ts"
+		},
+		"./extensions/testing": {
+			"types": "./src/domains/extensions/authoring/test-api.ts",
+			"import": "./dist/extensions/testing.js"
 		}
 	},
 	"files": [

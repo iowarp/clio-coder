@@ -12,13 +12,16 @@
  * testable without a terminal.
  */
 
+import { ENVELOPE_SEAT_BELT, envelopeLines } from "../../domains/extensions/envelope-review.js";
 import type { LibraryImportApplyResult, LibraryImportPlan } from "../../domains/interop/index.js";
-import type {
-	LibraryApplyResult,
-	LibraryLifecyclePlan,
-	LibraryPlanStep,
-	LibraryRefreshResult,
-	LibraryStepOutcome,
+import {
+	describeLibraryPair,
+	type LibraryApplyResult,
+	type LibraryLifecyclePlan,
+	type LibraryPlanStep,
+	type LibraryRefreshResult,
+	type LibraryStepOutcome,
+	type LibraryStepReview,
 } from "../../domains/resources/index.js";
 import {
 	type Component,
@@ -28,7 +31,7 @@ import {
 	type TUI,
 	wrapTextWithAnsi,
 } from "../../engine/tui.js";
-import { buildResponsiveHint, FocusBox, showClioOverlayFrame } from "../overlay-frame.js";
+import { buildResponsiveHint, FocusBox, type RowBudgetedBody, showClioOverlayFrame } from "../overlay-frame.js";
 import { clioTheme, rule } from "../theme/index.js";
 
 const MIN_WIDTH = 48;
@@ -44,6 +47,42 @@ function wrap(text: string, width: number): string[] {
 
 function stepHeadline(step: LibraryPlanStep): string {
 	return `${step.operation} ${step.identity.ref} in ${step.identity.scope} scope`;
+}
+
+/**
+ * What an extension step would be allowed to do, then the other half of its
+ * plugin pairing. The envelope comes from the staged manifest, so it is shown
+ * before anything is written; on an update, what grew leads, because the
+ * operator already accepted the rest.
+ */
+function reviewRows(step: LibraryPlanStep, review: LibraryStepReview | undefined, width: number): string[] {
+	if (!review) return [];
+	const theme = clioTheme();
+	const rows: string[] = [];
+	if (review.envelope) {
+		rows.push(...wrap(theme.fg("attention", `${step.identity.ref} would be allowed to:`), width));
+		if (review.growth !== undefined)
+			rows.push(
+				...wrap(
+					theme.fg(
+						review.growth.length === 0 ? "success" : "warning",
+						review.growth.length === 0
+							? "reaches no further than the installed copy"
+							: `reaches further than the installed copy: ${review.growth.join("; ")}`,
+					),
+					width,
+				),
+			);
+		for (const line of envelopeLines(review.envelope)) rows.push(...wrap(theme.fg("annotation", `  ${line}`), width));
+		rows.push(...wrap(theme.fg("annotation", ENVELOPE_SEAT_BELT), width));
+		if (review.envelopeDigest)
+			rows.push(...wrap(theme.fg("annotation", `envelope sha256 ${review.envelopeDigest}`), width));
+	}
+	for (const pair of review.pairs)
+		rows.push(
+			...wrap(theme.fg("info", describeLibraryPair({ kind: step.identity.kind, name: step.identity.name }, pair)), width),
+		);
+	return rows;
 }
 
 /**
@@ -122,6 +161,13 @@ export function formatLibraryPlanReview(
 			);
 		rows.push(...wrap(theme.fg("annotation", step.fallbackNote), width));
 		rows.push(...wrap(theme.fg("annotation", step.recovery), width));
+		rows.push(
+			...reviewRows(
+				step,
+				plan.reviews?.find((item) => item.ref === step.identity.ref && item.scope === step.identity.scope),
+				width,
+			),
+		);
 		if (options.detail) {
 			rows.push(...wrap(theme.fg("annotation", `destination ${step.destination}`), width));
 			if (step.source)
@@ -379,9 +425,19 @@ class LibraryReviewBody implements Component {
 		this.scroll = 0;
 	}
 
+	/** Rows the frame leaves for the body, or zero until it has said. */
+	private bodyRows = 0;
+
+	setBodyRows(rows: number): void {
+		this.bodyRows = rows;
+	}
+
 	render(width: number): string[] {
 		const body = this.outcome ? this.outcome() : this.review(width, this.detail);
-		this.rows = Math.max(4, (process.stdout.rows || 30) - 10);
+		// The frame cuts a body taller than its budget and hides the keys that apply the plan, so the body
+		// windows itself to the budget and keeps one row for the pager.
+		const budget = this.bodyRows > 0 ? this.bodyRows : Math.max(4, (process.stdout.rows || 30) - 10);
+		this.rows = body.length > budget ? Math.max(3, budget - 1) : budget;
 		this.maxScroll = Math.max(0, body.length - this.rows);
 		this.scroll = Math.min(this.scroll, this.maxScroll);
 		const shown = body.slice(this.scroll, this.scroll + this.rows);
@@ -390,6 +446,20 @@ class LibraryReviewBody implements Component {
 	}
 
 	invalidate(): void {}
+}
+
+/** The frame budgets rows through its direct child, which here is the input-routing box around the body. */
+class ReviewFocusBox extends FocusBox implements RowBudgetedBody {
+	constructor(
+		private readonly windowed: LibraryReviewBody,
+		options: ConstructorParameters<typeof FocusBox>[1],
+	) {
+		super(windowed, options);
+	}
+
+	setBodyRows(rows: number): void {
+		this.windowed.setBodyRows(rows);
+	}
 }
 
 interface ReviewOverlaySpec {
@@ -417,7 +487,7 @@ function openReviewOverlay(tui: TUI, spec: ReviewOverlaySpec): OverlayHandle {
 		spec.onCancel();
 	};
 
-	const focus = new FocusBox(body, {
+	const focus = new ReviewFocusBox(body, {
 		// Keys are matched by name rather than by raw bytes: under the kitty
 		// keyboard protocol Esc arrives as CSI 27 u, and a byte comparison left
 		// this overlay unanswerable.

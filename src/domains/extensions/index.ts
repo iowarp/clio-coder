@@ -10,6 +10,20 @@ export const ExtensionsDomainModule: DomainModule<ExtensionsContract> = {
 
 export type { ExtensionsContract } from "./contract.js";
 export {
+	DEV_EXTENSIONS_DIR,
+	type DevConsentRequest,
+	type DevExtensionStatus,
+	ExtensionDevScope,
+} from "./dev-scope.js";
+export { loadManifestFromRoot } from "./discovery.js";
+export {
+	ENVELOPE_SEAT_BELT,
+	type ExtensionEnvelopeReview,
+	envelopeLines,
+	envelopeReviewLines,
+	reviewExtensionEnvelope,
+} from "./envelope-review.js";
+export {
 	type ClioExtensionManifest,
 	disableExtension,
 	discoverExtensionPackages,
@@ -19,6 +33,7 @@ export {
 	type ExtensionInstallOptions,
 	type ExtensionInstallResult,
 	type ExtensionListOptions,
+	type ExtensionLoadScope,
 	type ExtensionMutationResult,
 	type ExtensionProvenance,
 	type ExtensionReloadCandidate,
@@ -44,6 +59,16 @@ export {
 	removeExtension,
 } from "./manager.js";
 export { ExtensionsManifest } from "./manifest.js";
+export type { ExtensionCapabilityEnvelope, ExtensionHookDeclaration } from "./manifest-v2.js";
+export type { ExtensionHookOutcome } from "./operator-runtime-v2.js";
+export type { ExtensionContentAccess, ExtensionEffect, ExtensionHookEvent } from "./public-api-v2.js";
+export {
+	createExtensionRuntimeHookBridge,
+	type ExtensionRuntimeHookBridge,
+	type ExtensionRuntimeHookExecutor,
+	type ParkedInterviewResult,
+} from "./runtime-hook-bridge.js";
+export { capabilityEnvelope, envelopeDigest, envelopeGrowth } from "./runtime-schema-v2.js";
 export {
 	buildExtensionSnapshot,
 	diffExtensionSnapshots,
@@ -51,4 +76,6 @@ export {
 	EXTENSION_SNAPSHOT_DIAGNOSTIC_MESSAGE_CAP,
 	EXTENSION_SNAPSHOT_DIAGNOSTIC_PER_PACKAGE_CAP,
 } from "./snapshot.js";
+
+export { type ExtensionSessionOverlay, extensionBaseDir, readExtensionInstallRecord } from "./state.js";
 export type { ExtensionCapabilities, ExtensionCommandTool } from "./types.js";

@@ -33,6 +33,7 @@ import { performance } from "node:perf_hooks";
 import { BusChannels, type DispatchCompletedPayload, type DispatchRunIdentity } from "../../core/bus-events.js";
 import { taskCommitSubject } from "../../core/commit-message.js";
 import { DEFAULT_SETTINGS } from "../../core/defaults.js";
+import { devRootOwnerForWorkers } from "../../core/dev-roots.js";
 import type { DomainBundle, DomainContext, DomainExtension } from "../../core/domain-loader.js";
 import { gatewayRoutingObservationFromRecord } from "../../core/gateway-routing.js";
 import { GUARDRAIL_DEFAULTS, resolveGuardrail } from "../../core/guardrails.js";
@@ -2774,6 +2775,8 @@ function buildDispatchWorkerSpec(input: DispatchWorkerSpecInput, config?: Config
 		spec.trustProjectCompatRoots = settings.integrations.projectResources.trustProjectImports === true;
 	}
 	spec.gitCommitAttribution = settings?.integrations.git.commitAttribution ?? true;
+	// This session's workers count as the owner of its dev extension folders; another session's do not.
+	spec.devRootOwner = devRootOwnerForWorkers();
 	// Non-stall posture (Symphony §10.5): a dispatched worker has no operator
 	// to answer a permission prompt by default, so the resolution policy ships
 	// with the spec and the worker enforces it within bounded time. Under the

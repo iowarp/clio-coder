@@ -2288,7 +2288,7 @@
 															},
 															{
 																"type": "string",
-																"const": "fleet"
+																"const": "playbook"
 															}
 														]
 													},
@@ -2538,7 +2538,7 @@
 									},
 									"ref": {
 										"type": "string",
-										"pattern": "^(skill|agent|prompt|fleet|plugin):[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+										"pattern": "^(skill|agent|prompt|playbook|plugin):[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
 									},
 									"scope": {
 										"anyOf": [
@@ -9958,7 +9958,7 @@
 													},
 													{
 														"type": "string",
-														"const": "fleet-root"
+														"const": "playbook-root"
 													},
 													{
 														"type": "string",
@@ -10017,7 +10017,7 @@
 															},
 															{
 																"type": "string",
-																"const": "fleet-root"
+																"const": "playbook-root"
 															},
 															{
 																"type": "string",
@@ -17591,7 +17591,7 @@
 		"/api/sessions/{id}/fleet/preview": {
 			"post": {
 				"operationId": "previewFleetRun",
-				"summary": "Compile a fleet contract for review; nothing is dispatched",
+				"summary": "Compile a playbook for review; nothing is dispatched",
 				"security": [
 					{
 						"bearer": []
@@ -17989,7 +17989,7 @@
 		"/api/sessions/{id}/fleet/run": {
 			"post": {
 				"operationId": "startFleetRun",
-				"summary": "Start a fleet contract only when its plan still hashes to the approved one",
+				"summary": "Start a playbook only when its plan still hashes to the approved one",
 				"security": [
 					{
 						"bearer": []

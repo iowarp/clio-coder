@@ -151,8 +151,8 @@ const ACTIONS: readonly ActionSpec[] = [
 	{
 		action: "fleet-run",
 		name: "fleet run",
-		title: "Run a fleet contract",
-		summary: "Preview a fleet contract and start the approved plan",
+		title: "Run a playbook",
+		summary: "Preview a playbook and start the approved plan",
 		supported: (capabilities) => !!capabilities.fleet,
 	},
 ];

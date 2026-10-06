@@ -1,6 +1,5 @@
 import { terminalBackground } from "../core/terminal-background.js";
-import { paletteProjection } from "../core/theme-token-hex.js";
-import { type ClioTheme, paintHex } from "./theme/tokens.js";
+import { type ClioTheme, paintHex, paletteRgb } from "./theme/tokens.js";
 
 /** Five-row shaded block lettering inspired by Gemini CLI's welcome wordmark. */
 const LETTERS: Record<string, readonly string[]> = {
@@ -46,9 +45,8 @@ export const WELCOME_WORDMARK_ROW: readonly string[] = Array.from({ length: 5 },
 export function paintWelcomeRowWordmark(theme: ClioTheme): string[] {
 	if (theme.fgSequence("wordmark") === "") return [...WELCOME_WORDMARK_ROW];
 	const background = terminalBackground();
-	const channels = (hex: string) => [1, 3, 5].map((at) => Number.parseInt(hex.slice(at, at + 2), 16));
-	const start = channels(paletteProjection("cyanFocal", background)[0]);
-	const end = channels(paletteProjection("orangeFocal", background)[0]);
+	const start = paletteRgb("cyanFocal", background);
+	const end = paletteRgb("orangeFocal", background);
 	const options = { truecolor: theme.truecolor, color: true };
 	return WELCOME_WORDMARK_ROW.map((line) =>
 		[...line]
@@ -72,9 +70,8 @@ export function paintWelcomeRowWordmark(theme: ClioTheme): string[] {
 export function paintWelcomeWordmark(lines: readonly string[], theme: ClioTheme): string[] {
 	if (theme.fgSequence("wordmark") === "") return [...lines];
 	const background = terminalBackground();
-	const channels = (hex: string) => [1, 3, 5].map((at) => Number.parseInt(hex.slice(at, at + 2), 16));
-	const start = channels(paletteProjection("cyanFocal", background)[0]);
-	const end = channels(paletteProjection("orangeFocal", background)[0]);
+	const start = paletteRgb("cyanFocal", background);
+	const end = paletteRgb("orangeFocal", background);
 	const options = { truecolor: theme.truecolor, color: true };
 	// RGB interpolation keeps the complementary brand colors on a quiet neutral
 	// bridge instead of swinging through unrelated green or magenta hues.

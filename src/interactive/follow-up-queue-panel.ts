@@ -3,6 +3,7 @@ import { truncateToWidth } from "../engine/tui.js";
 import type { QueuedChatMessage } from "../session-control/chat-loop.js";
 import { formatQueueAge, queueEntryMarks, queueSlotWord } from "./overlays/queue-navigator.js";
 import { clioTheme, frame, GLYPH } from "./theme/index.js";
+import { skinEpoch } from "./theme/tokens.js";
 
 export interface FollowUpQueuePanel extends Component {
 	setMessages(messages: ReadonlyArray<QueuedChatMessage>): void;
@@ -24,7 +25,7 @@ export function createFollowUpQueuePanel(options: FollowUpQueuePanelOptions = {}
 	let cachedLines: string[] = [];
 
 	const render = (width: number): string[] => {
-		const key = [options.getDequeueKey?.(), options.getNavigateKey?.(), options.getSendNowKey?.()].join("|");
+		const key = [skinEpoch(), options.getDequeueKey?.(), options.getNavigateKey?.(), options.getSendNowKey?.()].join("|");
 		if (!dirty && cachedWidth === width && cachedKey === key) return cachedLines;
 		if (messages.length === 0) {
 			cachedLines = [];

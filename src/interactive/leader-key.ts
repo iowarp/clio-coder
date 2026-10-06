@@ -1,11 +1,12 @@
 import { decodePrintableKey, isKeyRelease, isKeyRepeat, type Keybinding, matchesKey } from "../engine/tui.js";
 
-export interface LeaderTarget {
-	key: string;
-	id: Keybinding;
-	label?: string;
-	disabledReason?: string;
-}
+/**
+ * A leader entry is a keybinding, or an entry the host adds for something
+ * that is not one, such as an extension workspace's keys, which runs itself.
+ */
+export type LeaderTarget =
+	| { key: string; id: Keybinding; label?: string; disabledReason?: string; run?: undefined }
+	| { key: string; id?: undefined; label: string; disabledReason?: string; run: () => void };
 export type LeaderKeyState = { status: "idle" } | { status: "pending"; selected: number; notice?: string };
 export const IDLE_LEADER_STATE: LeaderKeyState = { status: "idle" };
 export interface LeaderKeyRouteDeps {
@@ -51,7 +52,8 @@ export function routeLeaderKey(data: string, state: LeaderKeyState, deps: Leader
 			);
 	if (!target) return { state: { ...state, notice: "No action for this key" }, consumed: true };
 	if (target.disabledReason) return { state: { ...state, notice: target.disabledReason }, consumed: true };
-	deps.dispatchAction(target.id);
+	if (target.run) target.run();
+	else deps.dispatchAction(target.id);
 	return { state: IDLE_LEADER_STATE, consumed: true };
 }
 

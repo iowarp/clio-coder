@@ -62,6 +62,14 @@ export interface MiddlewareHookRegistration {
 		input: MiddlewareHookInput,
 		context?: MiddlewareHookEvaluationContext,
 	): Promise<ReadonlyArray<MiddlewareEffect>>;
+	/**
+	 * The async phase also runs at before_tool and after_tool, awaited by the
+	 * tool registry, and at turn_start, awaited by the turn middleware. Only
+	 * extension runtime hooks set it; every other async phase stays at
+	 * turn_end, so a tool call or a turn start awaits nothing unless one of
+	 * these matches.
+	 */
+	awaited?: true;
 }
 
 /**
@@ -260,13 +268,16 @@ export async function runMiddlewareAsyncRegistrations(
 	input: MiddlewareHookInput,
 	registrations: ReadonlyArray<MiddlewareHookRegistration>,
 	priorEffects: ReadonlyArray<MiddlewareEffect> = [],
-	options: Pick<RunMiddlewareRegistrationsOptions, "onDiagnostic"> = {},
+	options: Pick<RunMiddlewareRegistrationsOptions, "onDiagnostic"> & {
+		include?: (registration: MiddlewareHookRegistration) => boolean;
+	} = {},
 ): Promise<MiddlewareHookResult> {
 	const onDiagnostic = options.onDiagnostic ?? writeMiddlewareDiagnosticToStderr;
 	const effects: MiddlewareEffect[] = [];
 	const ruleIds: string[] = [];
 	for (const registration of registrations) {
 		if (registration.evaluateAsync === undefined || !registration.hooks.includes(input.hook)) continue;
+		if (options.include && !options.include(registration)) continue;
 		if (registration.toolNames !== undefined) {
 			if (input.toolName === undefined || !registration.toolNames.includes(input.toolName)) continue;
 		}
@@ -307,7 +318,7 @@ function evaluateRuleDefinition(definition: MiddlewareRuleDefinition, input: Mid
 		if (!definition.toolNames.includes(input.toolName)) return [];
 	}
 	if (definition.predicate !== undefined && !definition.predicate(input)) return [];
-	const declaredKinds = new Set(rule.effectKinds);
+	const declaredKinds = new Set<string>(rule.effectKinds);
 	const emitted: MiddlewareEffect[] = [];
 	for (const effect of definition.effects) {
 		if (!declaredKinds.has(effect.kind)) continue;
@@ -318,6 +329,13 @@ function evaluateRuleDefinition(definition: MiddlewareRuleDefinition, input: Mid
 
 export function cloneMiddlewareEffect(effect: MiddlewareEffect): MiddlewareEffect {
 	switch (effect.kind) {
+		case "rewrite_tool_input":
+			return {
+				kind: "rewrite_tool_input",
+				args: structuredClone(effect.args),
+				reason: effect.reason,
+				source: effect.source,
+			};
 		case "inject_reminder": {
 			const cloned: MiddlewareEffect = { kind: "inject_reminder", message: effect.message };
 			if (effect.severity !== undefined) cloned.severity = effect.severity;

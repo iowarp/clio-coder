@@ -120,6 +120,19 @@ function readStableDirectory(
 		throw new Error(`extension directory escapes the extension root: ${directoryPath}`);
 	}
 	const entries = readdirSync(directoryPath).sort();
+	// A case-folding or normalizing file system stores two such names as one file, so the
+	// tree would mean different bytes on another machine than the digest recorded here.
+	const folded = new Map<string, string>();
+	for (const entry of entries) {
+		const key = entry.normalize("NFC").toLowerCase();
+		const earlier = folded.get(key);
+		if (earlier !== undefined) {
+			throw new Error(
+				`extension directory names collide on a portable file system: ${earlier} and ${entry} in ${directoryPath}`,
+			);
+		}
+		folded.set(key, entry);
+	}
 	assertStableDirectory(directoryPath, inspected, canonicalDirectory, canonicalRoot);
 	return { canonicalDirectory, entries };
 }

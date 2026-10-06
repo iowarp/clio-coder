@@ -32,7 +32,11 @@ export const CATEGORY_PRESENTATION: Record<Category, { short: string; label: str
 		description: "Locations Clio Coder searches for saved prompts.",
 	},
 	"agent-root": { short: "AGT", label: "Agent roots", description: "Agent recipe sources visible to this project." },
-	"fleet-root": { short: "FLT", label: "Fleet roots", description: "Locations Clio Coder searches for saved fleets." },
+	"playbook-root": {
+		short: "PLB",
+		label: "Playbook roots",
+		description: "Locations Clio Coder searches for saved playbooks.",
+	},
 	safety: { short: "SAFE", label: "Safety", description: "Effective working-freedom and safety facts." },
 	memory: { short: "MEM", label: "Memory", description: "The durable memory surface Clio Coder can consult." },
 };

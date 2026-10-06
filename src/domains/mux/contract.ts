@@ -81,6 +81,8 @@ export interface MuxOpenUtilityPaneRequest {
 	/** Operator-facing pane title. Omitted when the caller wants the shell default. */
 	title?: string;
 	purpose?: MuxPanePurpose;
+	/** Opaque file identity (at most 80 characters), persisted for dock adoption. */
+	dockKey?: string;
 	direction?: "right" | "down";
 	env?: Readonly<Record<string, string>>;
 	/**
@@ -127,6 +129,8 @@ export interface MuxContract extends DomainContract {
 	openUtilityPane(request: MuxOpenUtilityPaneRequest): Promise<MuxPaneRef | null>;
 	/** Close one Clio-created pane by pane id. Refuses a pane Clio did not create. */
 	closePane(paneId: string): Promise<boolean>;
+	/** Current pane width from mux geometry; null when it cannot be read. */
+	paneWidth(paneId: string): Promise<number | null>;
 	/** The recent terminal text of one Clio-created pane, or null when it cannot be read. */
 	readPane(paneId: string, lines: number): Promise<{ text: string; truncated: boolean } | null>;
 	/**
@@ -461,7 +465,14 @@ export function createMuxRuntime(options: MuxRuntimeOptions): MuxRuntime {
 						ref = { paneId: pane.paneId, tabId: pane.tabId, workspaceId: pane.workspaceId };
 					}
 					const purpose = request.purpose ?? "utility";
-					registry.record(paneRecord(ref, { purpose, label: request.label, openedAt: now() }));
+					registry.record(
+						paneRecord(ref, {
+							purpose,
+							label: request.label,
+							openedAt: now(),
+							...(request.dockKey === undefined ? {} : { dockKey: request.dockKey }),
+						}),
+					);
 					const title = request.title;
 					const titleSupported = title !== undefined && muxSupportsMethod(detection.server, "pane.rename");
 					if (titleSupported) {
@@ -478,6 +489,7 @@ export function createMuxRuntime(options: MuxRuntimeOptions): MuxRuntime {
 						ref.paneId,
 						{
 							role: token(purpose),
+							...(request.dockKey === undefined ? {} : { dock_key: token(request.dockKey) }),
 							// The pid lets a later session tell a parked orphan from a live session's dock.
 							...(request.dock ? { dock: token(request.dock.slot), pid: token(String(process.pid)) } : {}),
 						},
@@ -521,6 +533,18 @@ export function createMuxRuntime(options: MuxRuntimeOptions): MuxRuntime {
 		// The methods below are how the model drives a peer it handed off to.
 		// They carry the same ownership rule as `closePane`: a pane the registry
 		// does not hold is never read from or typed into.
+		async paneWidth(paneId: string): Promise<number | null> {
+			if (!registry.owns(paneId)) return null;
+			return await attempt(
+				"paneWidth",
+				async (live) => {
+					const geometry = await live.paneLayout(paneId);
+					return geometry.panes.find((pane) => pane.paneId === paneId)?.rect.width ?? null;
+				},
+				null,
+			);
+		},
+
 		async readPane(paneId: string, lines: number): Promise<{ text: string; truncated: boolean } | null> {
 			if (!registry.owns(paneId)) return null;
 			return await attempt(
@@ -603,7 +627,13 @@ export function createMuxRuntime(options: MuxRuntimeOptions): MuxRuntime {
 						if (detection.self.workspaceId !== null && pane.workspaceId !== detection.self.workspaceId) continue;
 						const ref: MuxPaneRef = { paneId: pane.paneId, tabId: pane.tabId, workspaceId: pane.workspaceId };
 						registry.record(
-							paneRecord(ref, { purpose: request.purpose, label: request.label, openedAt: now(), adopted: true }),
+							paneRecord(ref, {
+								purpose: request.purpose,
+								label: request.label,
+								openedAt: now(),
+								adopted: true,
+								...(pane.tokens.dock_key ? { dockKey: pane.tokens.dock_key } : {}),
+							}),
 						);
 						// Crash recovery for a dock: the surviving pane takes the slot back so
 						// geometry management resumes instead of a second dock opening.

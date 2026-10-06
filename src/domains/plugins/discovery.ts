@@ -2,7 +2,12 @@ import { createHash } from "node:crypto";
 import { existsSync, lstatSync, readdirSync, realpathSync, statSync } from "node:fs";
 import path from "node:path";
 import { evaluateClioCompatibility, isSemanticVersion } from "../extensions/compatibility.js";
-import { isLibraryKind, type LibraryRequirementRef } from "../resources/library-types.js";
+import {
+	isLibraryKind,
+	type LibraryRequirementRef,
+	readLegacyLibraryKind,
+	readLegacyLibraryRef,
+} from "../resources/library-types.js";
 import { pluginContentDigestWithCapture } from "./integrity.js";
 import type {
 	ClioPluginConfiguration,
@@ -17,8 +22,8 @@ import type {
 
 export const PLUGIN_SCHEMA = "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json";
 export const PLUGIN_EXTENSION_KEY = "ai.iowarp.clio";
-export const PLUGIN_RESOURCE_KINDS: readonly PluginResourceKind[] = ["skills", "prompts", "agents", "fleets"];
-const COMPONENT_KINDS = new Set(["prompt", "agent", "skill", "fleet", "script", "resource", "tool"]);
+export const PLUGIN_RESOURCE_KINDS: readonly PluginResourceKind[] = ["skills", "prompts", "agents", "playbooks"];
+const COMPONENT_KINDS = new Set(["prompt", "agent", "skill", "playbook", "script", "resource", "tool"]);
 const ROOT_KEYS = new Set([
 	"$schema",
 	"name",
@@ -113,9 +118,38 @@ function components(value: unknown, root: string): PluginComponent[] {
 	return [...refs.values()];
 }
 
+/**
+ * D9 legacy read, kept for one release: a namespace written before fleet
+ * contracts became playbooks says `resources.fleets`, package or component kind
+ * `fleet` and `fleet:<name>` requirements, and WTF-P 0.7.4 is pinned remotely
+ * that way. Read those as the playbook names on a copy, so the manifest digest
+ * still covers the exact bytes on disk. Delete this with the other D9 reads.
+ */
+function readLegacyFleetNames(raw: Record<string, unknown>): Record<string, unknown> {
+	const value: Record<string, unknown> = { ...raw };
+	if (value.kind !== undefined) value.kind = readLegacyLibraryKind(value.kind);
+	if (Array.isArray(value.requires)) value.requires = value.requires.map(readLegacyLibraryRef);
+	if (record(value.resources) && "fleets" in value.resources) {
+		const { fleets, ...resources } = value.resources;
+		if ("playbooks" in resources) throw new Error("resources may declare playbooks or its legacy name fleets, not both");
+		value.resources = { ...resources, playbooks: fleets };
+	}
+	if (Array.isArray(value.components))
+		value.components = value.components.map((item: unknown) =>
+			record(item)
+				? {
+						...item,
+						kind: readLegacyLibraryKind(item.kind),
+						...(Array.isArray(item.requires) ? { requires: item.requires.map(readLegacyLibraryRef) } : {}),
+					}
+				: item,
+		);
+	return value;
+}
+
 function clioConfiguration(value: unknown, root: string): ClioPluginConfiguration {
 	if (value !== undefined && !record(value)) throw new Error(`${PLUGIN_EXTENSION_KEY} must be an object`);
-	const raw = value ?? {};
+	const raw = readLegacyFleetNames(value ?? {});
 	// `evals` is retired: an installed manifest that still declares package
 	// suites keeps loading and the value is ignored. The key leaves this set in
 	// the v0.7.0 compatibility window.
@@ -126,12 +160,13 @@ function clioConfiguration(value: unknown, root: string): ClioPluginConfiguratio
 	);
 	if (value !== undefined && raw.manifestVersion !== 1) throw new Error("Clio plugin manifestVersion must be 1");
 	const kind = raw.kind ?? "plugin";
-	if (!isLibraryKind(kind)) throw new Error("package kind must be plugin, skill, agent, prompt, or fleet");
+	if (!isLibraryKind(kind) || kind === "extension")
+		throw new Error("package kind must be plugin, skill, agent, prompt, or playbook");
 	if (
 		raw.requires !== undefined &&
 		(!Array.isArray(raw.requires) ||
 			raw.requires.some(
-				(ref) => typeof ref !== "string" || !/^(plugin|skill|agent|prompt|fleet):[a-z0-9][a-z0-9.-]*$/.test(ref),
+				(ref) => typeof ref !== "string" || !/^(plugin|skill|agent|prompt|playbook):[a-z0-9][a-z0-9.-]*$/.test(ref),
 			))
 	)
 		throw new Error("package requires must contain kind:name references");
@@ -173,7 +208,7 @@ function clioConfiguration(value: unknown, root: string): ClioPluginConfiguratio
 		prompt: "prompts",
 		agent: "agents",
 		skill: "skills",
-		fleet: "fleets",
+		playbook: "playbooks",
 	};
 	for (const item of inventory) {
 		const resourceKind = componentRoots[item.kind];
@@ -189,7 +224,7 @@ function clioConfiguration(value: unknown, root: string): ClioPluginConfiguratio
 			throw new Error(`component ${item.kind}:${item.id} is outside its declared resource root`);
 	}
 	if (kind !== "plugin") {
-		const publicItems = inventory.filter((item) => ["prompt", "agent", "skill", "fleet"].includes(item.kind));
+		const publicItems = inventory.filter((item) => ["prompt", "agent", "skill", "playbook"].includes(item.kind));
 		if (publicItems.length !== 1 || publicItems[0]?.kind !== kind)
 			throw new Error(`a ${kind} package must declare exactly one public ${kind} component`);
 		if (Object.keys(resources).some((resource) => resource !== `${kind}s`))

@@ -36,6 +36,14 @@ export interface ViewerCommandOptions {
 
 /** The argv the workers dock executes: the dashboard, following a selection file. */
 export function watchViewerCommand(selectionPath: string, options: ViewerCommandOptions = {}): ReadonlyArray<string> {
+	return viewerCommand("fleet", selectionPath, options);
+}
+
+function viewerCommand(
+	command: "fleet" | "extensions",
+	frameFile: string,
+	options: ViewerCommandOptions,
+): ReadonlyArray<string> {
 	const layout =
 		options.dirs === undefined
 			? []
@@ -52,11 +60,16 @@ export function watchViewerCommand(selectionPath: string, options: ViewerCommand
 	return [
 		options.execPath ?? process.execPath,
 		options.entryPath ?? clioCliEntryPath(),
-		"fleet",
+		command,
 		"view",
 		...layout,
 		"--watch",
-		selectionPath,
+		frameFile,
 		...(options.tapPath === undefined ? [] : ["--dock-taps", options.tapPath]),
 	];
+}
+
+/** The host-rendered extension dock, pinned to this installation and layout. */
+export function extensionViewerCommand(frameFile: string, options: ViewerCommandOptions = {}): ReadonlyArray<string> {
+	return viewerCommand("extensions", frameFile, options);
 }

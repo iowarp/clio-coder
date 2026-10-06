@@ -19,7 +19,7 @@ const verb = (text: string): string => functionText(theme, "skill", text);
 const command = (text: string): string => theme.fg("guidance", text);
 const skillNames = (names: ReadonlyArray<string>): string =>
 	names.map((name) => theme.fg("skillIdentity", sanitizeCallTargetText(name))).join(meta(", "));
-const MARK = theme.fg("toolGlyph", `${GLYPH.classKnowledge} `);
+const MARK = () => theme.fg("toolGlyph", `${GLYPH.classKnowledge} `);
 
 /** A row too long for the terminal hangs its continuation in the content column. */
 function hanging(line: string, width: number): string[] {
@@ -34,10 +34,10 @@ function hanging(line: string, width: number): string[] {
  */
 export function renderSkillSurfaceRow(change: SkillSurfaceChange, width: number): string[] {
 	if (change.state === "loaded") return [];
-	if (change.state === "cleared") return hanging(`${MARK}${meta("skill surface")} ${verb("cleared")}`, width);
+	if (change.state === "cleared") return hanging(`${MARK()}${meta("skill surface")} ${verb("cleared")}`, width);
 	if (change.state === "replaced") {
 		return hanging(
-			`${MARK}${skillNames(change.previous)} ${verb("replaced")} ${meta("by")} ${skillNames(change.names)}`,
+			`${MARK()}${skillNames(change.previous)} ${verb("replaced")} ${meta("by")} ${skillNames(change.names)}`,
 			width,
 		);
 	}
@@ -49,7 +49,7 @@ export function renderSkillSurfaceRow(change: SkillSurfaceChange, width: number)
 				: null;
 	const facts = tools === null ? "" : `${meta(" · ")}${meta(sanitizeCallTargetText(tools))}`;
 	return hanging(
-		`${MARK}${skillNames(change.names)} ${verb("armed")}${facts}${meta(" · ")}${command("/skill off")}`,
+		`${MARK()}${skillNames(change.names)} ${verb("armed")}${facts}${meta(" · ")}${command("/skill off")}`,
 		width,
 	);
 }
@@ -63,6 +63,6 @@ const SUGGESTED_SKILL = /\/skill\s+(\S+)/u;
  */
 export function renderSkillSuggestionRow(line: string, width: number): string[] {
 	const name = SUGGESTED_SKILL.exec(line)?.[1];
-	if (name === undefined) return hanging(`${MARK}${theme.fg("body", sanitizeCallTargetText(line))}`, width);
-	return hanging(`${MARK}${verb("suggests")} ${command(`/skill ${sanitizeCallTargetText(name)}`)}`, width);
+	if (name === undefined) return hanging(`${MARK()}${theme.fg("body", sanitizeCallTargetText(line))}`, width);
+	return hanging(`${MARK()}${verb("suggests")} ${command(`/skill ${sanitizeCallTargetText(name)}`)}`, width);
 }

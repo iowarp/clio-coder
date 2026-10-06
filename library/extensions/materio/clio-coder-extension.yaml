@@ -1,0 +1,88 @@
+id: materio
+name: Materio
+version: 0.2.0
+description: Materials research lab bench with local commands, usage and advisory guardrails.
+plugin: materio
+runtime:
+  api: 2
+  entrypoint: runtime/extension.ts
+  commands:
+    - { name: lab, description: Enter the Materio lab bench. }
+    - { name: status, description: Inspect research identity and task status., replaces: prompt }
+    - { name: progress, description: Show progress and the next research action., replaces: prompt }
+    - { name: help, description: Show Materio commands and bench controls., replaces: prompt }
+    - { name: checkpoint, description: "Save, list or confirm restoring research snapshots.", replaces: prompt }
+    - { name: cost, description: Show reported tokens and declared cost by research step. }
+  tools:
+    - name: complete_task
+      description: Complete an active task only after summary readback and researcher acceptance of current guardrails.
+      actionClass: execute
+      inputSchema:
+        type: object
+        additionalProperties: false
+        required: [task]
+        properties:
+          task: { type: string, pattern: "^[0-9]+$" }
+          summary: { type: string, minLength: 1, maxLength: 32000 }
+    - name: set_task_status
+      description: Change a task status with dependency and transition checks, updating WORKFLOW.md and STATE.md.
+      actionClass: execute
+      inputSchema:
+        type: object
+        additionalProperties: false
+        required: [task, status]
+        properties:
+          task: { type: string, pattern: "^[0-9]+$" }
+          status: { type: string, enum: [pending, in-progress, checkpoint, paused, blocked, complete] }
+    - name: record_decision
+      description: Append a decision and rationale to STATE.md Decisions Made while preserving existing decisions.
+      actionClass: execute
+      inputSchema:
+        type: object
+        additionalProperties: false
+        required: [decision, rationale]
+        properties:
+          decision: { type: string, minLength: 1, maxLength: 32000 }
+          rationale: { type: string, minLength: 1, maxLength: 32000 }
+          scope: { type: string, minLength: 1, maxLength: 32000 }
+    - name: interview
+      description: Own researcher form steps and publish confirmed research, lab, workflow or data files; findings reviews preserve guardrails.
+      actionClass: execute
+      inputSchema:
+        type: object
+        additionalProperties: false
+        required: [form]
+        properties:
+          form: { type: string, enum: [identify-research, define-virtual-lab, define-research-tasks, upload-data, findings] }
+          stage: { type: string, enum: [collect, select, assumptions, confirm] }
+          task: { type: string, pattern: "^[0-9]+$" }
+          context: { type: string, minLength: 1, maxLength: 32000 }
+          draft: { type: string, minLength: 1, maxLength: 32000 }
+          candidates: { type: array, minItems: 3, maxItems: 3, items: { type: string, minLength: 1, maxLength: 8000 } }
+          templates: { type: array, minItems: 1, maxItems: 8, items: { type: string, minLength: 1, maxLength: 8000 } }
+          files: { type: array, minItems: 1, maxItems: 20, uniqueItems: true, items: { type: string, minLength: 1, maxLength: 4096 } }
+  events: [session_open, turn_start, turn_end, tool_end, dispatch_started, dispatch_completed, dispatch_failed, fs_changed, workspace_enter]
+  watch: [".research/**"]
+  hooks:
+    - { on: before_tool, tools: [dispatch], timeoutMs: 1000, onTimeout: pass, onError: pass }
+  ui: [status, band, card, toast, interview]
+  workspaces:
+    - id: lab
+      title: Materio lab bench
+      regions: [header, board, islands, rail, footer]
+      board: band
+      skin: skins/materio.json
+      keys:
+        - { key: f, action: next, label: Fill the next research action }
+        - { key: c, action: checkpoint, label: Save a research checkpoint }
+        - { key: v, action: findings, label: Verify task findings }
+        - { key: d, action: cost, label: Display step costs }
+        - { key: h, action: help, label: Help with the lab bench }
+  access: [prompt, tool-args]
+  permissions:
+    fs: { read: ["."], write: [".research"] }
+    exec: true
+    net: false
+  state: { session: true, store: true }
+  config:
+    - { key: autoCheckpoint, type: boolean, default: true, description: Save a research snapshot after a task passes readback and review. }

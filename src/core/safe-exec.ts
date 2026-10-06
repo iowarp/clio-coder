@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import path from "node:path";
 import { performance } from "node:perf_hooks";
 import { AI_AGENT_NAME } from "./agent-environment.js";
@@ -701,6 +701,73 @@ export function runCommandVector(
 			child.stdin.end(options.input);
 		}
 	});
+}
+
+export interface StagingCommandOptions {
+	cwd?: string;
+	/** Added to the safe environment; the caller names only what the command needs. */
+	env?: Record<string, string>;
+	timeoutMs: number;
+	maxOutputBytes?: number;
+}
+
+/**
+ * Run one fixed-argv command whose output a plan needs before it can return,
+ * such as the Git clone that stages a package source. It keeps what
+ * `runCommandVector` guarantees: the safe environment, the worker sandbox when
+ * one is configured, a timeout and a bounded buffer, and a process group of its
+ * own that is signalled after the leader ends so a clone's helpers do not
+ * outlive it. A synchronous call cannot take an abort signal, so the timeout is
+ * its only cancellation bound. Throws with the command's own stderr on failure.
+ */
+export function runStagingCommandSync(
+	file: string,
+	args: ReadonlyArray<string>,
+	options: StagingCommandOptions,
+): string {
+	const cwd = resolveSafeCwd(options.cwd);
+	const sandbox = planSandboxedSpawn({ argv: [file, ...args] }, cwd);
+	if (sandbox.kind === "refused") throw new Error(sandbox.message);
+	// `detached` makes the child lead its own process group; Node honors it for spawnSync
+	// although its typings omit it, so the options travel as a variable.
+	const spawnOptions = {
+		cwd,
+		env: buildSafeToolEnv(options.env),
+		detached: process.platform !== "win32",
+		stdio: ["ignore", "pipe", "pipe"] as ["ignore", "pipe", "pipe"],
+		encoding: "utf8" as const,
+		timeout: clampTimerDelayMs(options.timeoutMs),
+		killSignal: "SIGKILL" as const,
+		maxBuffer: options.maxOutputBytes ?? SAFE_EXEC_DEFAULT_MAX_OUTPUT_BYTES,
+	};
+	const result = spawnSync(
+		sandbox.kind === "sandboxed" ? sandbox.file : file,
+		sandbox.kind === "sandboxed" ? sandbox.args : [...args],
+		spawnOptions,
+	);
+	// The leader is reaped, so what is left in its group is only what it started.
+	if (result.pid !== undefined && process.platform !== "win32") {
+		try {
+			process.kill(-result.pid, 0);
+			process.kill(-result.pid, "SIGKILL");
+		} catch {
+			// ESRCH: the group is empty, which is the outcome this sweep wants.
+		}
+	}
+	if (result.error !== undefined) {
+		const reason =
+			(result.error as NodeJS.ErrnoException).code === "ETIMEDOUT"
+				? `timed out after ${options.timeoutMs} ms`
+				: result.error.message;
+		throw new Error(`${file} ${args[0] ?? ""} failed: ${reason}`);
+	}
+	if (result.status !== 0) {
+		const detail = (result.stderr ?? "").trim().split("\n").slice(-3).join(" ");
+		throw new Error(
+			`${file} ${args[0] ?? ""} failed${detail ? `: ${detail}` : ` with ${result.status ?? result.signal}`}`,
+		);
+	}
+	return result.stdout ?? "";
 }
 
 export function combineSafeOutput(result: Pick<SafeCommandResult, "stdout" | "stderr">): string {

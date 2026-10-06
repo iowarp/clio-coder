@@ -51,12 +51,12 @@ function fixture(root: string): void {
 	);
 	write(
 		root,
-		"ai.iowarp.clio/fleets/materio-review.md",
+		"ai.iowarp.clio/playbooks/materio-review.md",
 		"---\nversion: 1\nname: materio-review\ndescription: Fixture review\nsteps:\n  - id: research\n    agent: materio-researcher\n    scope: readonly\n    dependencies: []\nmaxWorkers: 1\nonFailure: stop\n---\nRead ${component:resource:reference}\n",
 	);
 	write(
 		root,
-		"ai.iowarp.clio/fleets/materio-code.md",
+		"ai.iowarp.clio/playbooks/materio-code.md",
 		`---
 version: 2
 name: materio-code
@@ -89,7 +89,7 @@ Verify supplied evidence.
 						skills: "skills",
 						prompts: "ai.iowarp.clio/prompts",
 						agents: "ai.iowarp.clio/agents",
-						fleets: "ai.iowarp.clio/fleets",
+						playbooks: "ai.iowarp.clio/playbooks",
 					},
 					components: [{ kind: "resource", id: "reference", path: "assets/reference.txt" }],
 				},
@@ -153,11 +153,48 @@ it("loads installed plugin prompts, bound skills, recipes and fleets with contai
 		strictEqual(listFleetContracts(cwd).find((item) => item.name === fleet.name)?.source, "plugin");
 		write(
 			cwd,
-			".clio-coder/fleets/commands.yaml",
+			".clio-coder/playbooks/commands.yaml",
 			"version: 1\ncommands: {verify: {argv: [echo], argumentSlots: [{name: evidencePath, maxLength: 4096}]}}\n",
 		);
 		const code = loadFleetContract(cwd, "materio-code").steps[0];
 		deepStrictEqual(code?.kind === "code" ? code.args : undefined, [join(root, "assets/reference.txt")]);
+	} finally {
+		env.restore();
+	}
+});
+
+it("loads a playbook from a plugin manifest that still uses the legacy fleets key (D9)", async () => {
+	const env = await isolateClioEnv("clio-coder-plugin-legacy-fleets-");
+	try {
+		const cwd = join(env.dir, "workspace");
+		mkdirSync(cwd);
+		const source = join(env.dir, "source");
+		write(
+			source,
+			"fleets/legacy-review.md",
+			"---\nversion: 1\nname: legacy-review\ndescription: Legacy key fixture\nsteps:\n  - id: review\n    agent: verifier\n    scope: readonly\n    dependencies: []\nmaxWorkers: 1\nonFailure: stop\n---\nReview.\n",
+		);
+		write(
+			source,
+			"plugin.json",
+			JSON.stringify({
+				$schema: "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+				name: "legacy-fleets",
+				version: "1.0.0",
+				description: "Manifest written before fleet contracts became playbooks",
+				extensions: {
+					"ai.iowarp.clio": {
+						manifestVersion: 1,
+						resources: { fleets: "fleets" },
+						components: [{ kind: "fleet", id: "legacy-review", path: "fleets/legacy-review.md" }],
+					},
+				},
+			}),
+		);
+		const installed = installPlugin(source, { cwd, scope: "user" });
+		ok(installed.plugin?.loadable, JSON.stringify(installed.diagnostics));
+		deepStrictEqual(installed.plugin.resources, { playbooks: "fleets" });
+		strictEqual(listFleetContracts(cwd).find((item) => item.name === "legacy-review")?.source, "plugin");
 	} finally {
 		env.restore();
 	}

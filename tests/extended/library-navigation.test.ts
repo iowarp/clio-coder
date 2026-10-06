@@ -76,7 +76,7 @@ it("help and completions expose only the canonical browsing routes", async () =>
 });
 
 it("routes typed package operations to their category and preserves an explicit scope", () => {
-	for (const tab of ["skill", "agent", "prompt", "fleet", "plugin"]) {
+	for (const tab of ["skill", "agent", "prompt", "playbook", "plugin"]) {
 		for (const operation of ["inspect", "install", "remove"]) {
 			const request = {
 				tab,

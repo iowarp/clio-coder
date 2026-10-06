@@ -1,3 +1,4 @@
+import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { stringify } from "yaml";
@@ -22,8 +23,9 @@ const KIND_DIRS = [
 	{ dirName: "skills", expectedKind: "skill" },
 	{ dirName: "agents", expectedKind: "agent" },
 	{ dirName: "prompts", expectedKind: "prompt" },
-	{ dirName: "fleets", expectedKind: "fleet" },
+	{ dirName: "playbooks", expectedKind: "playbook" },
 	{ dirName: "plugins", expectedKind: "plugin" },
+	{ dirName: "extensions", expectedKind: "extension" },
 ] as const;
 
 interface PackageTarget {
@@ -33,7 +35,7 @@ interface PackageTarget {
 
 const packages: PackageTarget[] = [];
 function collect(directory: string, expectedKind: string): void {
-	if (existsSync(path.join(directory, "plugin.json"))) {
+	if (existsSync(path.join(directory, "plugin.json")) || existsSync(path.join(directory, "clio-coder-extension.yaml"))) {
 		packages.push({ directory, expectedKind });
 		return;
 	}
@@ -62,6 +64,44 @@ if (existsSync(templatesDir)) {
 }
 
 const validationErrors: string[] = [];
+
+// A digest covers the whole tree, so a file or an empty directory git ignores
+// (a test run's __pycache__, an editor backup) would pin bytes no clean clone
+// has, and the package would then fail verification on every install. Every
+// entry of every package goes to `git check-ignore` as raw NUL-separated
+// paths, so quoting and empty directories cannot hide one; tracked files are
+// never reported.
+function packageEntries(directory: string): string[] {
+	return readdirSync(directory, { recursive: true, withFileTypes: true }).map((entry) =>
+		path.relative(root, path.join(entry.parentPath, entry.name)),
+	);
+}
+const packagePaths = packages.flatMap((target) => packageEntries(target.directory));
+const probe = spawnSync("git", ["check-ignore", "-z", "--stdin"], {
+	cwd: root,
+	input: `${packagePaths.join("\0")}\0`,
+	encoding: "utf8",
+	maxBuffer: 64 * 1024 * 1024,
+});
+// Exit 1 means nothing matched; anything else but 0 means git could not answer
+// (no checkout), and pinning then proceeds as it did before this check.
+const ignoredPaths =
+	probe.status === 0
+		? probe.stdout
+				.split("\0")
+				.filter(Boolean)
+				.map((file) => path.join(root, file))
+		: [];
+for (const target of packages) {
+	const inside = ignoredPaths.filter((file) => file.startsWith(`${target.directory}${path.sep}`));
+	if (inside.length > 0)
+		validationErrors.push(
+			`${path.relative(root, target.directory)}: holds files git ignores (${inside
+				.slice(0, 3)
+				.map((file) => path.relative(target.directory, file))
+				.join(", ")}); remove them and pin again, or the digest will not match a clean clone`,
+		);
+}
 
 // Validate all curated packages
 const validatedPackages: {
@@ -137,8 +177,11 @@ const localEntries: RegistryRow[] = validatedPackages.map(({ directory, expected
 	if (actualKind !== expectedKind) {
 		throw new Error(`${directory}: package kind "${actualKind}" does not match kind directory "${expectedKind}"`);
 	}
-	if (names.has(result.manifest.name)) throw new Error(`duplicate library package identity: ${result.manifest.name}`);
-	names.add(result.manifest.name);
+	// Plugin-backed kinds share one install directory per scope and extensions
+	// have their own, so a plugin and the extension serving it may share a name.
+	const identity = `${expectedKind === "extension" ? "extension" : "plugin"}:${result.manifest.name}`;
+	if (names.has(identity)) throw new Error(`duplicate library package identity: ${identity}`);
+	names.add(identity);
 	const sourceUrl = path.relative(path.dirname(destination), directory).split(path.sep).join("/");
 	return buildRegistryRow(directory, result, sourceUrl, path.basename(path.dirname(directory)));
 });

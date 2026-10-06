@@ -130,7 +130,7 @@ describe("clio_library (the former context library scope)", () => {
 		const skills = ownedBy(rows, "plugin:materio", "skill");
 		const agents = ownedBy(rows, "plugin:materio", "agent");
 		const prompts = ownedBy(rows, "plugin:materio", "prompt");
-		const fleets = ownedBy(rows, "plugin:materio", "fleet");
+		const fleets = ownedBy(rows, "plugin:materio", "playbook");
 		strictEqual(skills.length, 6, skills.map((row) => row.name).join(", "));
 		strictEqual(agents.length, 6, agents.map((row) => row.name).join(", "));
 		strictEqual(prompts.length, 17, prompts.map((row) => row.name).join(", "));
@@ -249,9 +249,9 @@ describe("clio_library (the former context library scope)", () => {
 		);
 		strictEqual(installedCopy.state, "loadable");
 
-		const recipes = await collect(project, { kind: "fleet" });
+		const recipes = await collect(project, { kind: "playbook" });
 		ok(
-			recipes.some((row) => row.row === "resource" && row.kind === "fleet"),
+			recipes.some((row) => row.row === "resource" && row.kind === "playbook"),
 			"a recipe-kind query must return the actual fleet resources",
 		);
 	});

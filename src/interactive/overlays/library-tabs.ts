@@ -7,8 +7,9 @@ export const LIBRARY_TABS: ReadonlyArray<{ id: LibraryEntryKind; label: string }
 	{ id: "skill", label: "Skills" },
 	{ id: "agent", label: "Agents" },
 	{ id: "prompt", label: "Prompts" },
-	{ id: "fleet", label: "Fleets" },
+	{ id: "playbook", label: "Playbooks" },
 	{ id: "plugin", label: "Plugins" },
+	{ id: "extension", label: "Extensions" },
 ];
 
 export function isLibraryTab(value: string): value is LibraryEntryKind {

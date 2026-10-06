@@ -21,9 +21,8 @@ import type { RunReceipt } from "../domains/dispatch/types.js";
 import type { JobThinkingLevel } from "../domains/dispatch/validation.js";
 import type { ReceiptIntegrityOutcome } from "../domains/evidence/trust-status.js";
 import type { InstalledExtension } from "../domains/extensions/index.js";
-import { isExtensionCommandToken } from "../domains/extensions/operator-commands.js";
-import type { OperatorExtensionRuntime } from "../domains/extensions/operator-runtime.js";
-import type { ExtensionOutput } from "../domains/extensions/public-api.js";
+import { isExtensionCommandToken, promptRefs } from "../domains/extensions/operator-commands.js";
+import type { OperatorCommandOutput, OperatorExtensions } from "../domains/extensions/operator-extensions.js";
 import type { InteropAgentId, InteropProposal, InteropReport } from "../domains/interop/index.js";
 import { isInteropHeadlessRuntime } from "../domains/interop/peer-modes.js";
 import type { DoctorFinding } from "../domains/lifecycle/doctor.js";
@@ -73,6 +72,7 @@ import type { NoticeLevel } from "./notice-source.js";
 import type { OracleDigestSources } from "./oracle.js";
 import { formatOracleAnswer, ORACLE_AGENT_ID, ORACLE_TASK, packOracleDigest } from "./oracle.js";
 import { promptSourceLabel } from "./prompt-source-label.js";
+import type { ReloadTarget } from "./reload-report.js";
 import type { CommandArgsSpec, CommandPositionalSpec, ParsedArgs } from "./slash-spec.js";
 import { matchFromSpec, usageLine } from "./slash-spec.js";
 import type { WorkerShareFacts } from "./worker-share.js";
@@ -144,6 +144,8 @@ type SlashCommandVariant =
 	| { kind: "upgrade" }
 	| { kind: "config" }
 	| { kind: "quit" }
+	| { kind: "reload"; target: ReloadTarget }
+	| { kind: "restart" }
 	| { kind: "help"; query?: string }
 	| { kind: "init"; options: InitCommandOptions }
 	| { kind: "context-clear"; options: ContextClearCommandOptions }
@@ -155,7 +157,9 @@ type SlashCommandVariant =
 			kind: "resources";
 			family?: "extensions" | "plugins";
 			tab?: LibraryEntryKind;
-			action?: "reload";
+			action?: "reload" | "dev" | "mute" | "unmute";
+			/** The folder or extension id a dev, mute or unmute action names. */
+			target?: string;
 			/** A package ref or resource key the browser selects on open. */
 			focus?: string;
 			/** An operation to review on that row. Nothing is written before the review. */
@@ -195,6 +199,7 @@ type SlashCommandVariant =
 	| { kind: "loop"; command: LoopCommand }
 	| { kind: "agents"; connect?: boolean }
 	| { kind: "usage" }
+	| { kind: "workspace"; action: "off" | "status" }
 	| { kind: "context-view" }
 	| { kind: "tasks" }
 	| { kind: "decisions" }
@@ -679,8 +684,10 @@ export interface SessionCommandContext {
 		dismiss(all: boolean): void;
 		outputLabel(): string;
 	};
-	operatorExtensions?: OperatorExtensionRuntime;
-	showExtensionOutput?: (invocation: string, output: ExtensionOutput) => void;
+	operatorExtensions?: OperatorExtensions;
+	/** The terminal's dev scope: `/extensions dev [folder]`, `mute <id>`, `unmute <id>`. */
+	extensionDev?: (action: "dev" | "mute" | "unmute", argument: string | undefined) => void;
+	showExtensionOutput?: (invocation: string, output: OperatorCommandOutput) => void;
 	io: RunIo;
 	notice: (level: NoticeLevel, text: string) => void;
 	dispatch: DispatchContract;
@@ -711,6 +718,8 @@ export interface SessionCommandContext {
 	listWorkerRuns?: () => ReadonlyArray<WorkerEntryState>;
 	/** Fire-and-forget shutdown. Handler must not await. */
 	shutdown?: () => void;
+	reloadClasses?: (target: ReloadTarget) => void;
+	restart?: () => void;
 	runInit: (options: InitCommandOptions) => void;
 	/** Write the current session transcript (all tool segments expanded, ANSI-stripped) to a Markdown file. */
 	exportTranscript: (path?: string) => void;
@@ -1158,6 +1167,44 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 		},
 	},
 	{
+		name: "reload",
+		acp: false,
+		description: "Reload settings, library resources and extension runtimes with one report",
+		group: "Session",
+		kinds: ["reload"],
+		args: { positionals: [{ name: "target", required: false, values: ["settings", "library", "extensions", "all"] }] },
+		fromArgs(parsed) {
+			if (parsed.error) return { kind: "usage-error", command: "reload", reason: parsed.error };
+			const target = parsed.positionals[0] ?? "all";
+			if (target !== "settings" && target !== "library" && target !== "extensions" && target !== "all")
+				return { kind: "usage-error", command: "reload", reason: "Choose settings, library, extensions or all" };
+			return { kind: "reload", target };
+		},
+		handle(command, ctx) {
+			if (!ctx.reloadClasses) {
+				ctx.notice("warn", "/reload is available only in an interactive terminal.");
+				return;
+			}
+			if (command.kind === "reload") ctx.reloadClasses(command.target);
+		},
+	},
+	{
+		name: "restart",
+		acp: false,
+		description: "Save and restart into this session and workspace",
+		group: "Session",
+		kinds: ["restart"],
+		args: {},
+		fromArgs: fromArgsOrUsage("restart", { kind: "restart" }),
+		handle(_command, ctx) {
+			if (!ctx.restart) {
+				ctx.notice("warn", "/restart is available only in an interactive terminal.");
+				return;
+			}
+			ctx.restart();
+		},
+	},
+	{
 		name: "quit",
 		acp: false,
 		description: "Exit Clio Coder",
@@ -1228,7 +1275,7 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	{
 		name: "library",
 		acp: false,
-		description: "Browse recipes, or review a package install, removal or reload",
+		description: "Browse and install plugins and extensions, or review an install, removal or reload",
 		group: "Inspect",
 		kinds: ["resources"],
 		// The same verbs as `clio-coder library`; each opens the review that command would apply.
@@ -1346,7 +1393,10 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 			}
 			if (command.family === "extensions") {
 				if (command.action === "reload") reloadExtensionsCommand(ctx);
-				else ctx.openExtensions?.();
+				else if (command.action !== undefined) {
+					if (ctx.extensionDev) ctx.extensionDev(command.action, command.target);
+					else ctx.notice("warn", "extensions: dev and mute are available in the terminal only");
+				} else ctx.openExtensions?.();
 				return;
 			}
 			ctx.openSkillsHub?.({
@@ -1463,21 +1513,64 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	{
 		name: "extensions",
 		acp: false,
-		description: "Inspect harness extensions or reload their commands, hooks and operator UI",
+		description: "Inspect extensions, reload them, or manage dev and muted ones for this session",
 		group: "Inspect",
 		// Harness navigation uses the shared overlay dispatcher, independently of recipe reload.
 		kinds: [],
-		args: { positionals: [{ name: "action", required: false, values: ["reload"] }] },
+		args: {
+			positionals: [
+				{ name: "action", required: false, values: ["reload", "dev", "mute", "unmute"] },
+				{ name: "target", required: false, rest: true },
+			],
+		},
 		fromArgs(parsed) {
 			if (parsed.error) return { kind: "usage-error", command: "extensions", reason: parsed.error };
-			if (parsed.positionals[0] && parsed.positionals[0] !== "reload")
-				return { kind: "usage-error", command: "extensions", reason: "extensions accepts only reload" };
-			return { kind: "resources", family: "extensions", ...(parsed.positionals[0] ? { action: "reload" as const } : {}) };
+			const action = parsed.positionals[0];
+			const target = (parsed.rest ?? parsed.positionals[1])?.trim();
+			if (action === undefined) return { kind: "resources", family: "extensions" };
+			if (action !== "reload" && action !== "dev" && action !== "mute" && action !== "unmute")
+				return { kind: "usage-error", command: "extensions", reason: "extensions accepts reload, dev, mute or unmute" };
+			if (action === "reload" && target)
+				return { kind: "usage-error", command: "extensions", reason: "extensions reload takes no argument" };
+			return { kind: "resources", family: "extensions", action, ...(target ? { target } : {}) };
 		},
 		handle(command, ctx) {
 			if (command.kind !== "resources" || command.family !== "extensions") return;
 			if (command.action === "reload") reloadExtensionsCommand(ctx);
-			else ctx.openExtensions?.();
+			else if (command.action !== undefined) {
+				if (ctx.extensionDev) ctx.extensionDev(command.action, command.target);
+				else ctx.notice("warn", "extensions: dev and mute are available in the terminal only");
+			} else ctx.openExtensions?.();
+		},
+	},
+	{
+		name: "workspace",
+		acp: false,
+		description: "Show or leave the active extension workspace",
+		group: "Inspect",
+		kinds: ["workspace"],
+		args: { positionals: [{ name: "action", required: false, values: ["off"] }] },
+		fromArgs(parsed) {
+			if (parsed.error) return { kind: "usage-error", command: "workspace", reason: parsed.error };
+			const action = parsed.positionals[0];
+			if (action !== undefined && action !== "off")
+				return { kind: "usage-error", command: "workspace", reason: "workspace accepts only off" };
+			return { kind: "workspace", action: action === "off" ? "off" : "status" };
+		},
+		handle(command, ctx) {
+			if (command.kind !== "workspace") return;
+			const runtime = ctx.operatorExtensions;
+			const active = runtime?.surface.activeWorkspace ?? null;
+			if (command.action === "off") {
+				if (!runtime?.leaveWorkspace()) ctx.notice("info", "No extension workspace is active");
+			} else
+				ctx.notice(
+					"info",
+					active
+						? `Workspace ${active.title} from ${active.extensionId} is active; /workspace off leaves it`
+						: "No extension workspace is active",
+				);
+			ctx.render?.();
 		},
 	},
 	{
@@ -1950,7 +2043,7 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 				return {
 					kind: "usage-error",
 					command: "agents",
-					reason: "Use /agents to browse recipes, or /interop to inspect another local agent's resources",
+					reason: "Use /agents to browse agents, or /interop to inspect another local agent's resources",
 				};
 			return { kind: "resources", tab: "agent" };
 		},
@@ -2092,10 +2185,10 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	{
 		name: "fleet",
 		acp: false,
-		description: "Show live fleet runs, or preview and run a fleet contract",
+		description: "Show live fleet runs, or preview and run a playbook",
 		group: "Work",
 		kinds: ["fleet", "fleet-run", "fleet-run-usage"],
-		subcommandDescriptions: { run: "Preview and run a repo-owned fleet contract" },
+		subcommandDescriptions: { run: "Preview and run a repo-owned playbook" },
 		args: {
 			subcommands: {
 				run: {
@@ -3023,7 +3116,7 @@ export function parseSlashCommand(input: string): SlashCommand {
 		return {
 			kind: "usage-error",
 			command: retiredLibrary[1] ?? "library",
-			reason: "Use /library to browse and manage recipes; use /extensions for harness extensions",
+			reason: "Use /library to browse and install plugins and extensions; use /extensions to control the running ones",
 		};
 	}
 	if (/^\/output(?:\s|$)/u.test(trimmed)) {
@@ -3065,7 +3158,24 @@ export function dispatchSlashCommand(command: SlashCommand, ctx: SlashCommandCon
 		// that matched no command: `/name` is how every other agent invokes the
 		// commands sitting in the roots Clio reads, and answering "not a command"
 		// for one that is loaded made the whole foreign prompt surface unreachable.
-		const expansion = ctx.expandPromptTemplate?.(command.text);
+		const runtime = ctx.operatorExtensions;
+		const promptNames = promptRefs(ctx.listPrompts?.().items ?? []);
+		const takeovers = (runtime?.commands(promptNames) ?? []).filter(
+			(row) => row.invocation === command.token && row.replaces === "prompt",
+		);
+		const replacement = takeovers.find((row) => row.available);
+		// A takeover whose runtime is only restarting is not an absent extension: handing its prompt
+		// to the model would answer with a model turn the operator did not ask for. Refuse and keep the draft.
+		const settling = takeovers.find((row) => !row.available && row.transient === true);
+		if (settling) {
+			ctx.notice(
+				"warn",
+				`/${command.token}: ${settling.reason ?? "extension runtime is restarting"}; send it again in a moment`,
+			);
+			ctx.render?.();
+			return "rejected";
+		}
+		const expansion = replacement ? undefined : ctx.expandPromptTemplate?.(command.text);
 		if (expansion?.expanded === true) {
 			ctx.submitChat(command.text);
 			return "accepted";
@@ -3087,9 +3197,9 @@ export function dispatchSlashCommand(command: SlashCommand, ctx: SlashCommandCon
 		// A template that exists and refused is not a typo. Its reason reaches the
 		// operator and nothing reaches the model.
 		const refusal = expansion?.expanded === false ? expansion.refusal : undefined;
-		if (!refusal && isExtensionCommandToken(command.token) && ctx.operatorExtensions) {
+		if (!refusal && (isExtensionCommandToken(command.token) || replacement) && ctx.operatorExtensions) {
 			const runtime = ctx.operatorExtensions;
-			const promptNames = (ctx.listPrompts?.().items ?? []).map((prompt) => prompt.name);
+			const promptNames = promptRefs(ctx.listPrompts?.().items ?? []);
 			const row = runtime.commands(promptNames).find((row) => row.invocation === command.token);
 			if (!row?.available) {
 				ctx.notice("error", row?.reason ?? `/${command.token} is not an available extension command`);
@@ -3100,14 +3210,21 @@ export function dispatchSlashCommand(command: SlashCommand, ctx: SlashCommandCon
 			const runLocal = ctx.runLocalOperation ?? ((operation: () => Promise<void>) => void operation());
 			runLocal(async () => {
 				try {
-					const output = await runtime.invoke(
-						command.token,
-						args,
-						(ctx.listPrompts?.().items ?? []).map((prompt) => prompt.name),
-					);
+					const output = await runtime.invoke(command.token, args, promptRefs(ctx.listPrompts?.().items ?? []));
 					if (ctx.showExtensionOutput) ctx.showExtensionOutput(command.token, output);
 					else ctx.io.stdout(`${output.text}\n`);
 				} catch (error) {
+					// A deferred runtime can become unavailable while starting on first use.
+					// Re-enter ordinary prompt dispatch only after the manager withdraws the alias.
+					if (
+						replacement &&
+						!runtime
+							.commands(promptRefs(ctx.listPrompts?.().items ?? []))
+							.some((row) => row.invocation === command.token && row.available)
+					) {
+						dispatchSlashCommand(command, ctx);
+						return;
+					}
 					ctx.notice("error", `${command.token}: ${error instanceof Error ? error.message : String(error)}`);
 				}
 			});
@@ -3170,6 +3287,7 @@ const COMMAND_ORDER = [
 	"skills",
 	"prompts",
 	"extensions",
+	"workspace",
 	"help",
 	"model",
 	"thinking",

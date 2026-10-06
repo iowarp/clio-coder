@@ -1,6 +1,7 @@
 import { type Component, Input, type OverlayHandle, Text, type TUI, visibleWidth } from "../../engine/tui.js";
 import { buildHint, FocusBox, fitRow, showClioOverlayFrame } from "../overlay-frame.js";
 import { clioTheme, GLYPH, screenTitle } from "../theme/index.js";
+import { skinEpoch } from "../theme/tokens.js";
 
 export const AUTH_DIALOG_WIDTH = 88;
 const KEY_WIDTH = 10;
@@ -91,6 +92,7 @@ function createAuthDialogController(
 	controller: AuthDialogHandle["controller"];
 	getHint: () => string;
 } {
+	let renderedSkinEpoch = skinEpoch();
 	const titleView = new Text("");
 	const bodyView = new Text("");
 	const promptView = new Text("");
@@ -106,8 +108,15 @@ function createAuthDialogController(
 	let rejecter: ((error: Error) => void) | undefined;
 	let currentHint = buildHint([]);
 
-	titleView.setText(screenTitle(clioTheme(), title));
-	const box = new FocusBox([], {
+	const box = new (class extends FocusBox {
+		override render(width: number): string[] {
+			if (renderedSkinEpoch !== skinEpoch()) {
+				renderedSkinEpoch = skinEpoch();
+				rebuild();
+			}
+			return super.render(width);
+		}
+	})([], {
 		onInput: (data) => {
 			if (promptLabel) input.handleInput(data);
 		},
@@ -142,6 +151,7 @@ function createAuthDialogController(
 	};
 
 	function rebuild(): void {
+		titleView.setText(screenTitle(clioTheme(), title));
 		box.clear();
 		box.addChild(titleView);
 		bodyView.setText(lines.map(formatAuthBodyLine).join("\n"));

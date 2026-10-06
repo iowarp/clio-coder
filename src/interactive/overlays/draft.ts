@@ -1,3 +1,4 @@
+import { skinEpoch } from "../theme/tokens.js";
 /**
  * `/draft` overlay: the candidates as they denoise, then the judge's pick.
  *
@@ -155,14 +156,14 @@ function dimLines(text: string, width: number): string[] {
  * overlay on every key, and parsing and highlighting a long draft each time
  * would make the arrows lag.
  */
-const renderedDrafts = new WeakMap<DraftCandidatePhase, { width: number; lines: string[] }>();
+const renderedDrafts = new WeakMap<DraftCandidatePhase, { width: number; epoch: number; lines: string[] }>();
 
 function markdownLines(phase: Extract<DraftCandidatePhase, { kind: "drafted" }>, width: number): string[] {
 	const cached = renderedDrafts.get(phase);
-	if (cached && cached.width === width) return cached.lines;
+	if (cached && cached.width === width && cached.epoch === skinEpoch()) return cached.lines;
 	const theme = markdownTheme(clioTheme(), (code, lang) => codeInk(lang, code.split("\n")));
 	const lines = new Markdown(phase.text.trim(), 0, 0, theme).render(width).map((line) => line.trimEnd());
-	renderedDrafts.set(phase, { width, lines });
+	renderedDrafts.set(phase, { width, epoch: skinEpoch(), lines });
 	return lines;
 }
 

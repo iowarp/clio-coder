@@ -566,17 +566,29 @@ class ClioAutocompleteProvider implements AutocompleteProvider {
 			// One listing serves both the template rows and the extension-command
 			// shadowing check; each listing of plugin prompts costs a plugin walk.
 			const templates = this.promptTemplates();
-			items.push(
-				...this.promptCommandItems(templates, prefix, new Set(refs.map((ref) => ref.name.toLowerCase())), {
-					start: context.commandStart,
-					end: context.commandEnd,
-				}),
-			);
 			const promptNames = templates.map((prompt) => prompt.name);
-			for (const row of resolveExtensionCommands(this.extensionCommands(), promptNames)) {
+			const extensionRows = resolveExtensionCommands(this.extensionCommands(), promptNames);
+			const replacements = new Set(
+				extensionRows
+					.filter((row) => row.replaces === "prompt" && row.available)
+					.map((row) => row.invocation.toLowerCase()),
+			);
+			items.push(
+				...this.promptCommandItems(
+					templates.filter((template) => !replacements.has(template.name.toLowerCase())),
+					prefix,
+					new Set(refs.map((ref) => ref.name.toLowerCase())),
+					{
+						start: context.commandStart,
+						end: context.commandEnd,
+					},
+				),
+			);
+			for (const row of extensionRows) {
 				if (
 					!row.invocation.toLowerCase().startsWith(prefix.toLowerCase()) ||
-					promptNames.some((name) => name.toLowerCase() === row.invocation.toLowerCase())
+					(row.replaces === "prompt" && !row.available) ||
+					(row.replaces !== "prompt" && promptNames.some((name) => name.toLowerCase() === row.invocation.toLowerCase()))
 				)
 					continue;
 				items.push({

@@ -8,6 +8,7 @@ import {
 	EXTENSION_SNAPSHOT_DIAGNOSTIC_MESSAGE_CAP,
 } from "./snapshot.js";
 import { bindExtensionSnapshotStore, createExtensionSnapshotStore } from "./snapshot-store.js";
+import { type ExtensionSessionOverlay, listInstalledExtensionRecords } from "./state.js";
 import type {
 	ExtensionReloadCandidate,
 	ExtensionReloadRejection,
@@ -36,12 +37,14 @@ export function createExtensionsBundle(
 ): DomainBundle<ExtensionsContract> {
 	const store = createExtensionSnapshotStore();
 	const cwd = options.cwd ?? (() => process.cwd());
+	let overlay: ExtensionSessionOverlay | undefined;
 	const build = (generation: number) =>
 		buildExtensionSnapshot({
 			cwd: cwd(),
 			generation,
 			...(options.now !== undefined ? { now: options.now } : {}),
-			...(options.listRecords !== undefined ? { listRecords: options.listRecords } : {}),
+			listRecords:
+				options.listRecords ?? ((root, listOptions) => listInstalledExtensionRecords(root, listOptions, overlay)),
 		});
 	/**
 	 * The single prepared-but-unpublished candidate. Holding it here is what
@@ -75,7 +78,10 @@ export function createExtensionsBundle(
 	};
 	const contract: ExtensionsContract = {
 		list(cwd, options = {}) {
-			return listInstalledExtensions(cwd, options);
+			return listInstalledExtensions(cwd, options, overlay);
+		},
+		setSessionOverlay(next) {
+			overlay = next ?? undefined;
 		},
 		snapshot() {
 			return store.current();

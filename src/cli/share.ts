@@ -17,7 +17,7 @@ const HELP = `clio-coder share <command>
 Export and import portable Clio project/resource archives.
 
 Commands:
-  clio-coder share export --out <path> [--project|--user|--both] [--context] [--prompts] [--skills] [--agents] [--fleets] [--settings] [--extensions] [--all] [--dry-run] [--json]
+  clio-coder share export --out <path> [--project|--user|--both] [--context] [--prompts] [--skills] [--agents] [--playbooks] [--settings] [--extensions] [--all] [--dry-run] [--json]
   clio-coder share import <path> [--dry-run] [--force] [--project|--user] [--json]
   clio-coder share inspect <path> [--json]
 
@@ -105,6 +105,8 @@ function parse(argv: ReadonlyArray<string>): Parsed | null {
 			case "--agents":
 				out.includeAgents = true;
 				break;
+			case "--playbooks":
+			// D9 legacy read: `--fleets` selected playbooks before the rename.
 			case "--fleets":
 				out.includeFleets = true;
 				break;
@@ -145,6 +147,7 @@ const EXPORT_INCLUDE_FLAGS = [
 	"--prompts",
 	"--skills",
 	"--agents",
+	"--playbooks",
 	"--fleets",
 	"--settings",
 	"--extensions",

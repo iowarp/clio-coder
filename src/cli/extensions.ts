@@ -1,5 +1,6 @@
 import { resolve } from "node:path";
 import { approveFirstProjectInstall, projectPackagesHaveNoState } from "../core/workspace-trust.js";
+import { envelopeReviewLines, reviewExtensionEnvelope } from "../domains/extensions/envelope-review.js";
 import {
 	disableExtension,
 	discoverExtensionPackages,
@@ -11,7 +12,8 @@ import {
 	listInstalledExtensions,
 	removeExtension,
 } from "../domains/extensions/index.js";
-import { extensionInvocation, OperatorExtensionRuntime } from "../domains/extensions/operator-runtime.js";
+import { OperatorExtensions } from "../domains/extensions/operator-extensions.js";
+import { extensionInvocation } from "../domains/extensions/operator-runtime.js";
 import { formatColumns, printError, printOk } from "./shared.js";
 
 const HELP = `clio-coder extensions <command>
@@ -19,6 +21,10 @@ const HELP = `clio-coder extensions <command>
 Manage Clio extension packages.
 
 Commands:
+  clio-coder extensions init <id> [--template status|hook|panel|tool|workspace] [--dir <path>]
+  clio-coder extensions validate <path> [--json]
+  clio-coder extensions test <path>
+  clio-coder extensions view --watch <frame-file> [--dock-taps <tap-file>]
   clio-coder extensions list [--all] [--json] [--user|--project]
   clio-coder extensions discover <path> [--json]
   clio-coder extensions run <id> <command> [--json] -- [arguments]
@@ -118,10 +124,11 @@ function printList(items: ReadonlyArray<InstalledExtension>): void {
 	}
 	process.stdout.write(
 		`${formatColumns([
-			["id", "scope", "state", "version", "tools", "description"],
+			["id", "scope", "plugin", "state", "version", "tools", "description"],
 			...items.map((extension) => [
 				extension.id,
 				extension.scope,
+				extension.plugin ?? "-",
 				stateLabel(extension),
 				extension.version,
 				toolSummary(extension),
@@ -132,6 +139,10 @@ function printList(items: ReadonlyArray<InstalledExtension>): void {
 }
 
 export function runExtensionsCommand(argv: ReadonlyArray<string>): number | Promise<number> {
+	if (argv[0] === "view") {
+		return viewCommand(argv.slice(1));
+	}
+	if (argv[0] === "init" || argv[0] === "validate" || argv[0] === "test") return authoringCommand(argv);
 	let parsed: Parsed;
 	try {
 		parsed = parse(argv);
@@ -190,10 +201,32 @@ export function runExtensionsCommand(argv: ReadonlyArray<string>): number | Prom
 				return 2;
 			}
 			const firstProjectInstall = parsed.scope === "project" && projectPackagesHaveNoState(process.cwd(), "extensions");
-			const result = installExtension(resolve(root), { ...scopeOptions, force: parsed.force });
+			// Read from the manifest before the commit, so the operator sees what the package may do
+			// ahead of the write. A package with no api 2 runtime has no envelope to show.
+			const review = (() => {
+				try {
+					return reviewExtensionEnvelope(resolve(root));
+				} catch {
+					// An unreadable manifest is reported by the install itself.
+					return null;
+				}
+			})();
+			if (review && !parsed.json) {
+				process.stdout.write(`${review.id} ${review.version} would be allowed to:\n`);
+				for (const line of envelopeReviewLines(review)) process.stdout.write(`  ${line}\n`);
+			}
+			// The install applies the envelope just shown, or none when the package declares none.
+			const result = installExtension(resolve(root), {
+				...scopeOptions,
+				force: parsed.force,
+				expectedEnvelopeDigest: review?.digest ?? null,
+			});
 			const approved =
 				firstProjectInstall && result.extension !== undefined && approveFirstProjectInstall(process.cwd(), "extensions");
-			if (parsed.json) process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+			if (parsed.json)
+				process.stdout.write(
+					`${JSON.stringify(review ? { ...result, envelope: review.envelope, envelopeDigest: review.digest } : result, null, 2)}\n`,
+				);
 			else {
 				printDiagnostics(result.diagnostics);
 				if (result.extension) {
@@ -255,11 +288,11 @@ async function runOperatorCommand(parsed: Parsed): Promise<number> {
 	const selected = listInstalledExtensions(process.cwd(), { all: true }).find(
 		(entry) => entry.id === id && entry.loadable,
 	);
-	if (!selected?.runtime?.commands.some((entry) => entry.name === command)) {
+	if (!(selected?.runtime ?? selected?.runtimeV2)?.commands.some((entry) => entry.name === command)) {
 		printError(`extension ${id} has no eligible operator command '${command}'`);
 		return 1;
 	}
-	const runtime = new OperatorExtensionRuntime({
+	const runtime = new OperatorExtensions({
 		context: () => ({ workspace: process.cwd(), sessionId: null, mode: "headless" }),
 		isIdle: () => true,
 		onlyId: id,
@@ -275,12 +308,16 @@ async function runOperatorCommand(parsed: Parsed): Promise<number> {
 		const reload = await runtime.reload("startup");
 		if (reload.status !== "committed") throw new Error(reload.message);
 		const provenance = runtime.entries().find((entry) => entry.id === id && entry.state === "ready")?.provenance;
-		const output = await runtime.invoke(extensionInvocation(id, command), args.join(" "), [], controller.signal);
+		const { api: _api, ...output } = await runtime.invoke(
+			extensionInvocation(id, command),
+			args.join(" "),
+			[],
+			controller.signal,
+		);
 		if (!provenance) throw new Error("extension result has no activated provenance");
+		const generation = runtime.entries().find((entry) => entry.id === id)?.generation ?? reload.generation;
 		if (parsed.json)
-			process.stdout.write(
-				`${JSON.stringify({ extensionId: id, command, generation: reload.generation, provenance, output })}\n`,
-			);
+			process.stdout.write(`${JSON.stringify({ extensionId: id, command, generation, provenance, output })}\n`);
 		else process.stdout.write(`${output.text}\n`);
 		return 0;
 	} catch (error) {
@@ -291,4 +328,14 @@ async function runOperatorCommand(parsed: Parsed): Promise<number> {
 		process.off("SIGTERM", cancel);
 		await runtime.dispose();
 	}
+}
+
+async function viewCommand(argv: ReadonlyArray<string>): Promise<number> {
+	const { runExtensionsView } = await import("./extensions-view.js");
+	return runExtensionsView(argv);
+}
+
+async function authoringCommand(argv: ReadonlyArray<string>): Promise<number> {
+	const { runExtensionsAuthoring } = await import("./extensions-authoring.js");
+	return runExtensionsAuthoring(argv);
 }

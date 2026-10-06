@@ -242,6 +242,7 @@ export function createOverlayAskUserLifecycle(deps: OverlayAskUserLifecycleDeps)
 		try {
 			return await activeSession.ask(questions, invokeOptions?.decisionPresentation, {
 				inputGuardMs: HARNESS_INPUT_GUARD_MS,
+				...(invokeOptions?.harnessInterview === undefined ? {} : { harnessInterview: invokeOptions.harnessInterview }),
 			});
 		} finally {
 			signal?.removeEventListener("abort", onAbort);

@@ -1,5 +1,6 @@
 import { formatBootTrace } from "../core/boot-trace.js";
 import { initializeClioHome } from "../core/init.js";
+import { isRestartHandoff } from "../core/restart-status.js";
 import { readLayeredSettings, readStrictLayeredSettings } from "../core/settings-layers.js";
 import type { BootOptions } from "../entry/boot-options.js";
 import { classifyDefaultTarget, describeKeptChatRoute, describeVerdict, homeIsReturning } from "./default-target.js";
@@ -105,7 +106,7 @@ export async function runClioCommand(
 		if (hostedInWorkspace()) {
 			clearWorkspaceExit();
 			process.once("exit", (code) => {
-				if (code === 0) markWorkspaceExit();
+				if (code === 0 && !isRestartHandoff()) markWorkspaceExit();
 			});
 		}
 	}

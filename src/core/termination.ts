@@ -110,6 +110,7 @@ class TerminationCoordinator {
 	private drained = false;
 	private readonly pendingNotices: string[] = [];
 	private signalHandler: ((signal: NodeJS.Signals) => void) | null = null;
+	private exitHandoff: (() => Promise<number>) | undefined;
 
 	getPhase(): TerminationPhase {
 		return this.phase;
@@ -132,6 +133,12 @@ class TerminationCoordinator {
 	}
 	onPersist(hook: Hook, options?: { timeoutMs: number }): void {
 		this.persistHooks.push(registeredHook(hook, options));
+	}
+
+	/** A foreground guardian runs after bounded resource teardown, for the child's lifetime. */
+	setExitHandoff(handoff: () => Promise<number>): void {
+		if (this.started || this.exitHandoff) throw new Error("shutdown handoff is already armed or started");
+		this.exitHandoff = handoff;
 	}
 
 	async shutdown(code = 0): Promise<void> {
@@ -171,6 +178,18 @@ class TerminationCoordinator {
 
 		this.phase = "exiting";
 		bus.emit(BusChannels.SessionEnd, { exitCode: this.exitCode });
+		if (this.exitHandoff) {
+			// The restarted child owns interactive signals. The handoff supplies the
+			// guardian's forwarding handlers after these shutdown handlers retire.
+			if (this.signalHandler)
+				for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"] as const) process.off(signal, this.signalHandler);
+			try {
+				this.exitCode = await this.exitHandoff();
+			} catch (error) {
+				writeShutdownNotice(`Shutdown handoff failed: ${error instanceof Error ? error.message : String(error)}`);
+				this.exitCode = 1;
+			}
+		}
 		log("process.exit");
 		process.exit(this.exitCode);
 	}

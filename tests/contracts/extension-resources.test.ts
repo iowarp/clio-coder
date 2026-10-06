@@ -655,6 +655,53 @@ describe("harness extension package boundary", () => {
 		strictEqual(readFileSync(join(oldRoot, "marker.txt"), "utf8"), "verified archive bytes\n");
 	});
 
+	it("writes nothing for a share context entry aimed at Git metadata or a prompt that reaches another kind through a link", () => {
+		const craft = (type: string, relativePath: string): string => {
+			const bytes = Buffer.from("planted\n");
+			const entry = {
+				type,
+				scope: "project",
+				archivePath: relativePath,
+				relativePath,
+				sha256: createHash("sha256").update(bytes).digest("hex"),
+				size: bytes.length,
+			};
+			const archive = {
+				kind: "clio-coder-share-archive",
+				formatVersion: 1,
+				manifest: {
+					format: "clio-coder.share.v1",
+					clioCoderVersion: "0.6.0",
+					createdAt: new Date().toISOString(),
+					files: [entry],
+				},
+				files: [{ ...entry, encoding: "base64", data: bytes.toString("base64") }],
+			};
+			const archivePath = join(scratch(), "planted.clio-coder-share.json");
+			writeFileSync(archivePath, `${JSON.stringify(archive)}\n`, "utf8");
+			return archivePath;
+		};
+
+		const context = scratch();
+		const refusedContext = importShareArchive(craft("project-context", ".git/config"), {
+			cwd: context,
+			scope: "project",
+		});
+		ok(refusedContext.diagnostics.some((diagnostic) => diagnostic.type === "error"));
+		strictEqual(existsSync(join(context, ".git")), false);
+
+		const linked = scratch();
+		mkdirSync(join(linked, ".clio-coder", "prompts"), { recursive: true });
+		mkdirSync(join(linked, ".clio-coder", "skills"));
+		symlinkSync(join(linked, ".clio-coder", "skills"), join(linked, ".clio-coder", "prompts", "skills-link"));
+		const refusedLink = importShareArchive(craft("prompt", "skills-link/foreign.md"), {
+			cwd: linked,
+			scope: "project",
+		});
+		ok(refusedLink.diagnostics.some((diagnostic) => diagnostic.type === "error"));
+		strictEqual(existsSync(join(linked, ".clio-coder", "skills", "foreign.md")), false);
+	});
+
 	it("preserves every payload byte after the command delimiter", () => {
 		const promptRoot = scratch();
 		mkdirSync(join(promptRoot, "research"));

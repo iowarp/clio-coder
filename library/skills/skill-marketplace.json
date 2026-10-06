@@ -239,6 +239,20 @@
 			"category": "meta"
 		},
 		{
+			"name": "extension-authoring",
+			"description": "Builds, tests, and debugs Clio Coder api 2 extensions with declared capabilities and host-rendered views. Not for instruction-only skills; use skill-authoring.",
+			"triggers": [
+				"build a Clio extension",
+				"add an extension hook",
+				"create an extension workspace",
+				"debug extension reload"
+			],
+			"sourceUrl": "https://github.com/iowarp/clio-coder/tree/main/library/skills/meta/extension-authoring",
+			"version": "0.1.0",
+			"audit": "pass",
+			"category": "meta"
+		},
+		{
 			"name": "find-skills",
 			"description": "Finds published skills and prepares their Library installation for the operator when the user asks whether a capability exists as a skill. Not for authoring a new skill; use skill-authoring.",
 			"triggers": [

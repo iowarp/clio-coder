@@ -186,7 +186,7 @@ const TOOL_METADATA: Readonly<Record<string, ToolMetadata>> = {
 		costLatency: "local_fast",
 	},
 	[ToolNames.ClioLibrary]: {
-		objective: "Read the recipe catalog: installed skills, agents, prompts, fleets, and installable packages.",
+		objective: "Read the recipe catalog: installed skills, agents, prompts, playbooks, and installable packages.",
 		discoveryHint:
 			'Catalog of reusable workflows and specialists: args={query:"<task>"}. Read readiness and copy the exact returned invocation. An empty search says nothing about other queries; try a shorter task keyword before declaring nothing available. Discovery does not activate a skill or install a package.',
 		examples: [

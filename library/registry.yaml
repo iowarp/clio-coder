@@ -311,6 +311,27 @@ entries:
           verdict conditions locked into the validation contract before any
           measurement. Not for diagnosing a stalled bug; use scien"
   - kind: skill
+    name: extension-authoring
+    description: Builds, tests, and debugs Clio Coder api 2 extensions with declared
+      capabilities and host-rendered views. Not for instruction-only skills; use
+      skill-authoring.
+    category: meta
+    audit: pass
+    triggers:
+      - build a Clio extension
+      - add an extension hook
+      - create an extension workspace
+      - debug extension reload
+    version: 0.1.0
+    sourceUrl: skills/meta/extension-authoring
+    sha256: b560852c2daf407d8721207c963db569060ce19b6d2509780c63c817b0526bec
+    provides:
+      - kind: skill
+        name: extension-authoring
+        description: Builds, tests, and debugs Clio Coder api 2 extensions with declared
+          capabilities and host-rendered views. Not for instruction-only skills;
+          use skill-authoring.
+  - kind: skill
     name: file-ticket
     description: "Turns something noticed mid-session into a tracker issue: captures
       evidence, dedups against existing issues, composes a labeled issue with
@@ -381,6 +402,16 @@ entries:
           when the issue does not name the code, fixes test-first, and
           self-reviews against the acceptance criteria, leaving a verified
           uncommitted change. Not for filing; use file-ticket. Not for commi"
+  - kind: extension
+    name: local-status
+    description: A small local status command and ambient status example.
+    version: 0.1.0
+    sourceUrl: extensions/local-status
+    sha256: 36f22c5f3f822059a565a55a3cecefab08ccc95ed6c672227eb04f92e18fcf99
+    provides:
+      - kind: extension
+        name: local-status
+        description: A small local status command and ambient status example.
   - kind: skill
     name: map-codebase
     description: Interactive codebase maps from verified repository structure,
@@ -407,9 +438,9 @@ entries:
     name: materio
     description: "Materio: materials research interviews, supplied-corpus synthesis,
       lab feasibility, task execution and verified paper handoff."
-    version: 0.1.0
+    version: 0.2.0
     sourceUrl: plugins/materio
-    sha256: 73e31326ad2d008563f2d184709109e056b63a6336ba94793710e348bee78e4a
+    sha256: 0133b54ca82c764b8f32eb10e8a63cf74015d0197dad584418f8bdcdfe16652a
     provides:
       - kind: agent
         name: materio-lab-definer
@@ -435,7 +466,7 @@ entries:
         name: materio-workflow-planner
         description: Build a resource-aware dependency plan with researcher assumptions
           and tagged defaults.
-      - kind: fleet
+      - kind: playbook
         name: materio-execute-task
         description: Execute one pre-approved research task and independently inspect
           its output files.
@@ -524,6 +555,19 @@ entries:
         name: materio-workflow-planner
         description: Build a resource-aware dependency plan with researcher assumptions
           and tagged defaults.
+  - kind: extension
+    name: materio
+    description: Materials research lab bench with local commands, usage and
+      advisory guardrails.
+    version: 0.2.0
+    sourceUrl: extensions/materio
+    sha256: 95dbbce9fde341e995d57eec47e1f458bfbb3cd34dd2a46eae68c7af0e2e2b05
+    plugin: materio
+    provides:
+      - kind: extension
+        name: materio
+        description: Materials research lab bench with local commands, usage and
+          advisory guardrails.
   - kind: skill
     name: plan-interview
     description: Stress-tests a plan, design, or idea through a phased
@@ -984,11 +1028,11 @@ entries:
           prose or the explicitly requested scaffold. Preserve the author’s
           epistemic authority, make only supported claims, and leave an
           auditable account of what was produced and what remains unresol
-      - kind: fleet
+      - kind: playbook
         name: wtfp-draft-review
         description: Draft one approved section and independently review its argument
           and evidence.
-      - kind: fleet
+      - kind: playbook
         name: wtfp-plan-section
         description: Create and independently check one evidence-grounded section plan.
       - kind: prompt

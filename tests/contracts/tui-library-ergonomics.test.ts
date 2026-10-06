@@ -18,7 +18,7 @@ import { clioTheme, createClioTheme } from "../../src/interactive/theme/index.js
 import { libraryApplyFixture, libraryPlanFixture } from "../harness/library-plan-fixture.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
 
-function recipe(kind: "agent" | "fleet", name: string): LibraryResource {
+function recipe(kind: "agent" | "playbook", name: string): LibraryResource {
 	return {
 		key: `${kind}:${name}`,
 		kind,
@@ -52,13 +52,13 @@ function inventory(): LibraryInventory {
 				catalogOrigin: "catalog",
 				provides: [
 					{ kind: "agent", name: "lab-agent" },
-					{ kind: "fleet", name: "lab-fleet" },
+					{ kind: "playbook", name: "lab-playbook" },
 					{ kind: "skill", name: "lab-skill" },
 				],
 			},
 		],
 		copies: [],
-		resources: [recipe("agent", "debugger"), recipe("fleet", "review")],
+		resources: [recipe("agent", "debugger"), recipe("playbook", "review")],
 		diagnostics: Array.from({ length: 8 }, (_, index) => `skill diagnostic ${index}`),
 		truncated: { packages: false, copies: false, resources: false },
 	};
@@ -138,8 +138,8 @@ function browser(category: LibraryEntryKind, data = inventory()) {
 	};
 }
 
-it("separates eight diagnostic notices from package counts across Plugins, Agents and Fleets", () => {
-	for (const category of ["plugin", "agent", "fleet"] as const) {
+it("separates eight diagnostic notices from package counts across Plugins, Agents and Playbooks", () => {
+	for (const category of ["plugin", "agent", "playbook"] as const) {
 		const state = browser(category);
 		const text = plain(state.view.render(88).join("\n"));
 		match(text, /1 package/);
@@ -160,7 +160,7 @@ it("separates eight diagnostic notices from package counts across Plugins, Agent
 });
 
 it("identifies provider packages and limits their catalog hints to the selected recipe kind", () => {
-	for (const category of ["agent", "fleet"] as const) {
+	for (const category of ["agent", "playbook"] as const) {
 		const view = { category, mode: "browse" as const, scope: "user" as const };
 		const rows = buildLibraryRows({ view, inventory: selectForCategory(inventory(), view) });
 		const item = rows.items[0];
@@ -179,7 +179,7 @@ it("identifies provider packages and limits their catalog hints to the selected 
 });
 
 it("opens a useful inspector at 40, 60, 92 and 140 columns without render-time reads", () => {
-	for (const category of ["plugin", "agent", "fleet"] as const) {
+	for (const category of ["plugin", "agent", "playbook"] as const) {
 		const state = browser(category);
 		const frame = new ClioOverlayFrame(
 			state.view,
@@ -370,7 +370,7 @@ it("qualifies notice return guidance while retaining search-first keyboard prece
 });
 
 it("uses package and entry footer units with singular/plural forms across recipe categories", () => {
-	for (const category of ["agent", "fleet"] as const) {
+	for (const category of ["agent", "playbook"] as const) {
 		for (const count of [0, 1, 2]) {
 			const data = inventory();
 			const provider = data.packages[0];

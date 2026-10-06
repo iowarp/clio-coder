@@ -1,10 +1,11 @@
 import { enabledPluginResourceRoots } from "../plugins/index.js";
 import { resolvePackagePathReference, resolvePackageReferences } from "../resources/package-references.js";
 /**
- * Repo-owned fleet contracts (Symphony P5: work policy lives in the repo,
- * versioned and strictly validated).
+ * Repo-owned playbooks (Symphony P5: work policy lives in the repo, versioned
+ * and strictly validated). A playbook is what the fleet runs; this module and
+ * its types keep the older "fleet contract" name.
  *
- * A fleet contract is a Markdown file at `.clio-coder/fleets/<name>.md` with typed
+ * A playbook is a Markdown file at `.clio-coder/playbooks/<name>.md` with typed
  * YAML front matter and a prompt-template body. Discovery is project-scope
  * only: no precedence tiers, no global fallbacks. The body uses strict
  * `{{var}}` rendering: every placeholder must resolve from operator-supplied
@@ -20,6 +21,7 @@ import { resolvePackageRoot } from "../../core/package-root.js";
 import { clioConfigDir } from "../../core/xdg.js";
 import {
 	type FleetCommandRegistry,
+	legacyPlaybookDirs,
 	loadFleetCommands,
 	resolveFleetCommandArgs,
 	validateFleetCommandArgs,
@@ -419,7 +421,7 @@ function firstSchemaError(frontmatter: Record<string, unknown>, version: FleetCo
 }
 
 function fleetsDir(cwd: string): string {
-	return join(cwd, ".clio-coder", "fleets");
+	return join(cwd, ".clio-coder", "playbooks");
 }
 
 type RawStep = {
@@ -590,7 +592,7 @@ function occupiedIds(contract: Pick<FleetContract, "steps">): Map<string, string
 export function validateFleetGraph(contract: Pick<FleetContract, "steps" | "path">): void {
 	const declared = new Set<string>();
 	for (const step of contract.steps) {
-		if (declared.has(step.id)) throw new Error(`fleet contract ${contract.path}: duplicate step id '${step.id}'`);
+		if (declared.has(step.id)) throw new Error(`playbook ${contract.path}: duplicate step id '${step.id}'`);
 		declared.add(step.id);
 	}
 	const owners = new Map<string, string>();
@@ -599,9 +601,7 @@ export function validateFleetGraph(contract: Pick<FleetContract, "steps" | "path
 		for (const [generated, owner] of occupiedIds({ steps: [step] })) {
 			if (generated === step.id) continue;
 			if (declared.has(generated)) {
-				throw new Error(
-					`fleet contract ${contract.path}: step id '${generated}' collides with an id loop '${owner}' generates`,
-				);
+				throw new Error(`playbook ${contract.path}: step id '${generated}' collides with an id loop '${owner}' generates`);
 			}
 			owners.set(generated, owner);
 		}
@@ -611,13 +611,13 @@ export function validateFleetGraph(contract: Pick<FleetContract, "steps" | "path
 			const gateId = step.check.gate;
 			const gate = contract.steps.find((candidate) => candidate.id === gateId);
 			if (gate?.kind !== "gate") {
-				throw new Error(`fleet contract ${contract.path}: loop '${step.id}' names unknown gate '${gateId}'`);
+				throw new Error(`playbook ${contract.path}: loop '${step.id}' names unknown gate '${gateId}'`);
 			}
 		}
 		for (const dependency of step.dependencies) {
-			if (dependency === step.id) throw new Error(`fleet contract ${contract.path}: step '${step.id}' depends on itself`);
+			if (dependency === step.id) throw new Error(`playbook ${contract.path}: step '${step.id}' depends on itself`);
 			if (!declared.has(dependency)) {
-				throw new Error(`fleet contract ${contract.path}: step '${step.id}' has unknown dependency '${dependency}'`);
+				throw new Error(`playbook ${contract.path}: step '${step.id}' has unknown dependency '${dependency}'`);
 			}
 		}
 	}
@@ -630,7 +630,7 @@ export function validateFleetGraph(contract: Pick<FleetContract, "steps" | "path
 			(step) => remaining.has(step.id) && step.dependencies.every((dependency) => settled.has(dependency)),
 		);
 		if (ready.length === 0) {
-			throw new Error(`fleet contract ${contract.path}: dependency cycle among steps ${[...remaining].sort().join(", ")}`);
+			throw new Error(`playbook ${contract.path}: dependency cycle among steps ${[...remaining].sort().join(", ")}`);
 		}
 		for (const step of ready) {
 			remaining.delete(step.id);
@@ -643,16 +643,16 @@ export function validateFleetGraph(contract: Pick<FleetContract, "steps" | "path
 		for (const source of step.commitFrom) {
 			const target = contract.steps.find((candidate) => candidate.id === source);
 			if (target === undefined) {
-				throw new Error(`fleet contract ${contract.path}: commit step '${step.id}' names unknown source '${source}'`);
+				throw new Error(`playbook ${contract.path}: commit step '${step.id}' names unknown source '${source}'`);
 			}
 			if (target.kind === "code") {
 				throw new Error(
-					`fleet contract ${contract.path}: commit step '${step.id}' source '${source}' is a code step and authors no commit message`,
+					`playbook ${contract.path}: commit step '${step.id}' source '${source}' is a code step and authors no commit message`,
 				);
 			}
 			if (!(ancestors.get(step.id)?.has(source) ?? false)) {
 				throw new Error(
-					`fleet contract ${contract.path}: commit step '${step.id}' must depend on its message source '${source}'`,
+					`playbook ${contract.path}: commit step '${step.id}' must depend on its message source '${source}'`,
 				);
 			}
 		}
@@ -723,7 +723,7 @@ function validateWriteBoundaries(contract: Pick<FleetContract, "steps" | "versio
 	for (const position of fleetStepBoundaries(contract)) {
 		if (position.scope === "workspace" && (position.writes?.length ?? 0) === 0) {
 			throw new Error(
-				`fleet contract ${contract.path}: step '${position.id}' has scope 'workspace' and must declare a non-empty 'writes' allowlist at version ${FLEET_WRITE_BOUNDARY_VERSION}`,
+				`playbook ${contract.path}: step '${position.id}' has scope 'workspace' and must declare a non-empty 'writes' allowlist at version ${FLEET_WRITE_BOUNDARY_VERSION}`,
 			);
 		}
 	}
@@ -742,7 +742,7 @@ function validateWriteBoundaries(contract: Pick<FleetContract, "steps" | "versio
 		for (const position of declared) {
 			if (position.scope === "readonly" && position.writes !== undefined) {
 				throw new Error(
-					`fleet contract ${contract.path}: step '${position.id}' is 'readonly', which is the empty allowlist; remove its 'writes' or give it scope 'workspace'`,
+					`playbook ${contract.path}: step '${position.id}' is 'readonly', which is the empty allowlist; remove its 'writes' or give it scope 'workspace'`,
 				);
 			}
 		}
@@ -779,14 +779,14 @@ export function parseFleetContract(raw: string, sourcePath: string): FleetContra
 	const { frontmatter, body } = parseFrontmatter(raw, sourcePath);
 	const version = contractVersion(frontmatter);
 	if (version === null) {
-		throw new Error(`fleet contract ${sourcePath}: version must be 1, 2, 3, 4, or 5`);
+		throw new Error(`playbook ${sourcePath}: version must be 1, 2, 3, 4, or 5`);
 	}
 	if (version < FLEET_WRITE_BOUNDARY_VERSION) assertNoWritesBefore(frontmatter, sourcePath, version);
 	if (version < FLEET_DYNAMIC_STEP_VERSION) assertNoV5FieldsBefore(frontmatter, sourcePath, version);
 	if (version >= FLEET_DYNAMIC_STEP_VERSION) assertNoGateWrites(frontmatter, sourcePath);
 	const schemaError = firstSchemaError(frontmatter, version);
 	if (schemaError !== null) {
-		throw new Error(`fleet contract ${sourcePath}: ${schemaError}`);
+		throw new Error(`playbook ${sourcePath}: ${schemaError}`);
 	}
 	const fm = frontmatter as {
 		version: FleetContractVersion;
@@ -799,11 +799,11 @@ export function parseFleetContract(raw: string, sourcePath: string): FleetContra
 		writers?: 1;
 	};
 	if (fm.budgetUsd !== undefined && !(fm.budgetUsd > 0)) {
-		throw new Error(`fleet contract ${sourcePath}: budgetUsd must be a positive number`);
+		throw new Error(`playbook ${sourcePath}: budgetUsd must be a positive number`);
 	}
 	const trimmedBody = body.trim();
 	if (trimmedBody.length === 0) {
-		throw new Error(`fleet contract ${sourcePath}: prompt body is empty`);
+		throw new Error(`playbook ${sourcePath}: prompt body is empty`);
 	}
 	const contract: FleetContract = {
 		version,
@@ -827,13 +827,13 @@ function validateV5Declarations(contract: FleetContract): void {
 	if (contract.version < FLEET_DYNAMIC_STEP_VERSION) return;
 	const route = (id: string, value: { target?: string; profile?: string }): void => {
 		if (value.target !== undefined && value.profile !== undefined) {
-			throw new Error(`fleet contract ${contract.path}: step '${id}' may declare target or profile, never both`);
+			throw new Error(`playbook ${contract.path}: step '${id}' may declare target or profile, never both`);
 		}
 	};
 	for (const step of contract.steps) {
 		if (step.kind === "agent" || step.kind === "plan" || step.kind === "gate") route(step.id, step);
 		if (step.kind === "plan" && new Set(step.roster).size !== step.roster.length) {
-			throw new Error(`fleet contract ${contract.path}: plan step '${step.id}' roster contains duplicate agents`);
+			throw new Error(`playbook ${contract.path}: plan step '${step.id}' roster contains duplicate agents`);
 		}
 		if (step.kind === "gate") {
 			let normalized: ReadonlyArray<string>;
@@ -841,13 +841,11 @@ function validateV5Declarations(contract: FleetContract): void {
 				normalized = normalizeWriteBoundary([step.path]);
 			} catch (error) {
 				throw new Error(
-					`fleet contract ${contract.path}: gate '${step.id}' path is invalid: ${error instanceof Error ? error.message : String(error)}`,
+					`playbook ${contract.path}: gate '${step.id}' path is invalid: ${error instanceof Error ? error.message : String(error)}`,
 				);
 			}
 			if (normalized[0] !== step.path.replaceAll("\\", "/")) {
-				throw new Error(
-					`fleet contract ${contract.path}: gate '${step.id}' path must be normalized and repository-relative`,
-				);
+				throw new Error(`playbook ${contract.path}: gate '${step.id}' path must be normalized and repository-relative`);
 			}
 		}
 		if (step.kind !== "loop") continue;
@@ -869,7 +867,7 @@ function assertNoWritesBefore(frontmatter: Record<string, unknown>, sourcePath: 
 		const raw = step as Record<string, unknown>;
 		if (declaresWrites(raw) || declaresWrites(raw.check) || declaresWrites(raw.repair)) {
 			throw new Error(
-				`fleet contract ${sourcePath}: 'writes' requires contract version ${FLEET_WRITE_BOUNDARY_VERSION}; this contract declares version ${version}, where the declaration would not be enforced`,
+				`playbook ${sourcePath}: 'writes' requires contract version ${FLEET_WRITE_BOUNDARY_VERSION}; this contract declares version ${version}, where the declaration would not be enforced`,
 			);
 		}
 	}
@@ -881,7 +879,7 @@ function assertNoGateWrites(frontmatter: Record<string, unknown>, sourcePath: st
 		const step = value as Record<string, unknown>;
 		if (step.kind !== "gate" || typeof step.id !== "string" || step.id.length === 0 || !("writes" in step)) continue;
 		throw new Error(
-			`fleet contract ${sourcePath}: gate step '${step.id}' must not declare 'writes'; its write boundary is derived from 'path'`,
+			`playbook ${sourcePath}: gate step '${step.id}' must not declare 'writes'; its write boundary is derived from 'path'`,
 		);
 	}
 }
@@ -890,7 +888,7 @@ function assertNoV5FieldsBefore(frontmatter: Record<string, unknown>, sourcePath
 	const forbidden = ["target", "profile"] as const;
 	if ("writers" in frontmatter) {
 		throw new Error(
-			`fleet contract ${sourcePath}: 'writers' requires contract version ${FLEET_DYNAMIC_STEP_VERSION}; this contract declares version ${version}`,
+			`playbook ${sourcePath}: 'writers' requires contract version ${FLEET_DYNAMIC_STEP_VERSION}; this contract declares version ${version}`,
 		);
 	}
 	for (const value of Array.isArray(frontmatter.steps) ? frontmatter.steps : []) {
@@ -898,7 +896,7 @@ function assertNoV5FieldsBefore(frontmatter: Record<string, unknown>, sourcePath
 		const step = value as Record<string, unknown>;
 		if (step.kind === "plan" || step.kind === "gate") {
 			throw new Error(
-				`fleet contract ${sourcePath}: kind '${String(step.kind)}' requires contract version ${FLEET_DYNAMIC_STEP_VERSION}; this contract declares version ${version}`,
+				`playbook ${sourcePath}: kind '${String(step.kind)}' requires contract version ${FLEET_DYNAMIC_STEP_VERSION}; this contract declares version ${version}`,
 			);
 		}
 		for (const candidate of [step, step.check, step.repair]) {
@@ -906,7 +904,7 @@ function assertNoV5FieldsBefore(frontmatter: Record<string, unknown>, sourcePath
 			for (const field of forbidden) {
 				if (field in candidate) {
 					throw new Error(
-						`fleet contract ${sourcePath}: '${field}' requires contract version ${FLEET_DYNAMIC_STEP_VERSION}; this contract declares version ${version}`,
+						`playbook ${sourcePath}: '${field}' requires contract version ${FLEET_DYNAMIC_STEP_VERSION}; this contract declares version ${version}`,
 					);
 				}
 			}
@@ -940,7 +938,7 @@ export function fleetCodeSteps(
 }
 
 /** Where a repo declares what its fleet command ids run, relative to its root. */
-export const FLEET_COMMANDS_REPO_PATH = ".clio-coder/fleets/commands.yaml";
+export const FLEET_COMMANDS_REPO_PATH = ".clio-coder/playbooks/commands.yaml";
 
 /** How to produce that file, for the surfaces that report it missing by name. */
 export const FLEET_COMMANDS_REMEDY =
@@ -958,7 +956,7 @@ export class FleetCommandRegistryMissingError extends Error {
 		readonly commands: ReadonlyArray<string>,
 	) {
 		super(
-			`fleet contract ${contractPath}: code steps require a command registry at ${FLEET_COMMANDS_REPO_PATH} declaring ${commands.join(", ")}`,
+			`playbook ${contractPath}: code steps require a command registry at ${FLEET_COMMANDS_REPO_PATH} declaring ${commands.join(", ")}`,
 		);
 		this.name = "FleetCommandRegistryMissingError";
 	}
@@ -986,7 +984,7 @@ export function validateFleetCommands(
 		if (!command) {
 			const known = [...registry.commands.keys()].sort().join(", ");
 			throw new Error(
-				`fleet contract ${contract.path}: step '${step.id}' names unknown command '${step.command}' (registered: ${known || "none"})`,
+				`playbook ${contract.path}: step '${step.id}' names unknown command '${step.command}' (registered: ${known || "none"})`,
 			);
 		}
 		const args = vars === undefined ? (step.args ?? []) : resolveFleetCommandArgs(step.args ?? [], vars);
@@ -995,13 +993,13 @@ export function validateFleetCommands(
 }
 
 /**
- * Where the shipped SDLC chains live. Builtin fleets are packaged beside the
+ * Where the shipped SDLC chains live. Builtin playbooks are packaged beside the
  * builtin recipes they reference, and a project file of the same name shadows
- * one: a repo that wants a different `sdlc` writes `.clio-coder/fleets/sdlc.md` and
- * gets it, with no precedence surprises beyond that single rule.
+ * one: a repo that wants a different `sdlc` writes `.clio-coder/playbooks/sdlc.md`
+ * and gets it, with no precedence surprises beyond that single rule.
  */
 function builtinFleetsDir(): string {
-	return join(resolvePackageRoot(), "src", "domains", "agents", "fleets");
+	return join(resolvePackageRoot(), "src", "domains", "agents", "playbooks");
 }
 
 export function resolveFleetReferences(
@@ -1028,12 +1026,16 @@ export function resolveFleetReferences(
 }
 
 function fleetSources(cwd: string): ReadonlyArray<{ dir: string; source: FleetContractSource; rootPath?: string }> {
+	// D9 legacy read: each pre-rename `fleets/` directory sits just below its scope's `playbooks/`.
+	const legacy = legacyPlaybookDirs(cwd);
 	return [
 		{ dir: builtinFleetsDir(), source: "builtin" },
-		...enabledPluginResourceRoots("fleets", cwd)
+		...enabledPluginResourceRoots("playbooks", cwd)
 			.sort((left, right) => left.source.localeCompare(right.source))
 			.map((root) => ({ dir: root.path, rootPath: root.rootPath, source: "plugin" as const })),
-		{ dir: join(clioConfigDir(), "fleets"), source: "user" },
+		{ dir: legacy.user, source: "user" },
+		{ dir: join(clioConfigDir(), "playbooks"), source: "user" },
+		{ dir: legacy.project, source: "project" },
 		{ dir: fleetsDir(cwd), source: "project" },
 	];
 }
@@ -1053,7 +1055,7 @@ function fleetContractPath(
 export function loadFleetContract(cwd: string, name: string): FleetContract {
 	const located = fleetContractPath(cwd, name);
 	if (located === null) {
-		throw new Error(`fleet contract not found: ${join(fleetsDir(cwd), `${name}.md`)} (and no builtin named '${name}')`);
+		throw new Error(`playbook not found: ${join(fleetsDir(cwd), `${name}.md`)} (and no builtin named '${name}')`);
 	}
 	const contract = resolveFleetReferences(parseFleetContract(readFileSync(located.path, "utf8"), located.path), located);
 	validateFleetCommands(contract, loadFleetCommands(cwd));
@@ -1072,8 +1074,8 @@ function listDirectory(dir: string): string[] {
 }
 
 /**
- * Enumerate the builtin fleets plus every `.clio-coder/fleets/*.md`, project files
- * shadowing builtins of the same name. Invalid files are listed with their
+ * Enumerate the builtin playbooks plus every plugin, user and project one, later
+ * sources shadowing earlier ones of the same name. Invalid files are listed with their
  * error, never hidden: an operator must see exactly what is invalid, and a
  * builtin that needs a command this repo has not registered is exactly that.
  */
@@ -1134,7 +1136,7 @@ export function renderFleetPrompt(body: string, vars: Readonly<Record<string, st
 		return value;
 	});
 	if (missing.size > 0) {
-		throw new Error(`fleet prompt: unresolved template variables: ${[...missing].join(", ")} (pass --var name=value)`);
+		throw new Error(`playbook prompt: unresolved template variables: ${[...missing].join(", ")} (pass --var name=value)`);
 	}
 	return rendered;
 }

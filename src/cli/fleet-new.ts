@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { resolvePackageRoot } from "../core/package-root.js";
+import { legacyPlaybookDirs } from "../domains/agents/fleet-commands.js";
 
 const BUILTINS = ["build-review", "build-test", "sdlc"] as const;
 const SAFE_STEM = /^[a-z0-9](?:[a-z0-9._-]*[a-z0-9])?$/u;
@@ -22,11 +23,14 @@ export function runFleetNew(args: ReadonlyArray<string>): number {
 	const unknown = args.find((arg) => !expected.has(arg));
 	if (unknown !== undefined) return usage(`unknown argument: ${unknown}`);
 	if (!(BUILTINS as ReadonlyArray<string>).includes(builtin)) {
-		return usage(`unknown builtin '${builtin}'. Known builtins: ${known}`);
+		return usage(`unknown builtin playbook '${builtin}'. Known builtin playbooks: ${known}`);
 	}
-	const destination = join(process.cwd(), ".clio-coder", "fleets", `${name}.md`);
+	const destination = join(process.cwd(), ".clio-coder", "playbooks", `${name}.md`);
 	if (existsSync(destination)) return usage(`destination already exists: ${destination}`);
-	const source = join(resolvePackageRoot(), "src", "domains", "agents", "fleets", `${builtin}.md`);
+	// D9 legacy read: a same-named playbook still in `fleets/` would be shadowed without notice.
+	const legacy = join(legacyPlaybookDirs(process.cwd()).project, `${name}.md`);
+	if (existsSync(legacy)) return usage(`a legacy playbook with this name exists: ${legacy}`);
+	const source = join(resolvePackageRoot(), "src", "domains", "agents", "playbooks", `${builtin}.md`);
 	mkdirSync(dirname(destination), { recursive: true });
 	const sourceText = readFileSync(source, "utf8");
 	const renamed = sourceText.replace(/^name:\s*[^\n]+$/mu, `name: ${name}`);

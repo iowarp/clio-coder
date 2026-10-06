@@ -16,6 +16,7 @@ import {
 } from "./context-meter.js";
 import { buildHint, showClioOverlayFrame } from "./overlay-frame.js";
 import { abbreviateModelId, type ClioToken, clioTheme, formatContextPercent } from "./theme/index.js";
+import { skinEpoch } from "./theme/tokens.js";
 
 const DEFAULT_CONTENT_WIDTH = 68;
 
@@ -332,10 +333,12 @@ export function openContextOverlay(
 		}
 		return lines.join("\n");
 	};
+	let renderedSkinEpoch = skinEpoch();
 	const text = new Text(render(), 0, 0);
 	const body = {
 		render(width: number): string[] {
-			if (width !== contentWidth) {
+			if (width !== contentWidth || renderedSkinEpoch !== skinEpoch()) {
+				renderedSkinEpoch = skinEpoch();
 				contentWidth = width;
 				text.setText(render());
 			}

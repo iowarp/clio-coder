@@ -63,3 +63,41 @@ Do not edit installed package bytes in place. Whole-tree digest drift revokes
 calls; mixed tool/UI packages need a new session even when only UI bytes change.
 Installed runtime code has your account's filesystem/network authority. A child
 process gives bounded teardown and fresh module caches, not an OS sandbox.
+
+## Git pulse (api 2)
+
+`git-pulse/` keeps an owner-labelled status line and band with branch, dirty-path
+count and local upstream ahead/behind. It watches `.git/HEAD` and `.git/index`,
+polls every five seconds for working-file changes, and retains its last snapshot
+in session state. `/ext:git-pulse:pulse` refreshes and opens a card. No upstream is
+reported explicitly; Git failures produce unavailable facts, never a fake clean
+repository. It invokes only Git with fixed argv and no shell, fetch or push;
+`exec: true` nevertheless grants general child-process authority, not a Git-only
+allowlist. Workspace reads are declared; network and direct writes are disabled.
+
+## Peer guard (api 2)
+
+`peer-guard/` provides `/ext:peer-guard:claim <path>`, `release <path>` and a
+`claims` table. Its awaited write/edit hook blocks exact canonical workspace
+paths claimed by a different owner within ten minutes; `claimMinutes` is the
+manifest default and can be varied in test fixtures. The shared store is scoped
+to this extension and Clio state home. Claims use compare-and-set updates,
+resolve existing symlink parents, expire on read, and can be renewed or released
+by their owner. Claims require an established Clio session: before the first turn, commands
+explain this requirement and leave the store unchanged.
+Errors/timeouts pass: this is cooperative coordination, not protection from
+scripts, other mutation tools or sessions using a different state home.
+
+Both new examples require operator runtime api 2. Validate and run their public
+package tests before the operator approves a dev envelope or installs them:
+
+```bash
+clio-coder extensions validate examples/extensions/git-pulse
+clio-coder extensions test examples/extensions/git-pulse
+clio-coder extensions validate examples/extensions/peer-guard
+clio-coder extensions test examples/extensions/peer-guard
+```
+
+For iteration, copy an example to `.clio-coder/dev/extensions/<id>/` and start the
+TUI there, or use `/extensions dev <folder>`. Saves reload at idle after consent;
+`/extensions mute <id>` and `unmute` remove/restore its session runtime.
