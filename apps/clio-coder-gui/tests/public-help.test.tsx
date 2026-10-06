@@ -5,6 +5,7 @@ import { test } from "node:test";
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { navigation } from "../client/design/navigation.js";
+import { helpContent } from "../client/interaction/help-model.js";
 import { PUBLIC_GUIDES, PUBLIC_HELP, publicHelpUrl } from "../client/interaction/public-help.js";
 import { harness } from "./harness/app.js";
 
@@ -12,7 +13,7 @@ import { harness } from "./harness/app.js";
 register(
 	`data:text/javascript,${encodeURIComponent('export async function load(url, context, next) { return url.endsWith(".css") ? { format: "module", source: "", shortCircuit: true } : next(url, context); }')}`,
 );
-const { HelpReferenceBody } = await import("../client/interaction/HelpDialog.js");
+const { HelpReferenceBody, HelpEntries } = await import("../client/interaction/HelpDialog.js");
 
 test("Help projects only the canonical public allowlist and never forwards private launch data", async () => {
 	const catalog = JSON.parse(await readFile(new URL("../../../site/public-docs.json", import.meta.url), "utf8")) as {
@@ -39,8 +40,14 @@ test("Help projects only the canonical public allowlist and never forwards priva
 	assert.ok(navigation.every((entry) => entry.path !== ("/docs" as string)));
 });
 
-test("Help identifies installed offline retrieval without adding a reader", () => {
-	const html = renderToStaticMarkup(<HelpReferenceBody bundledDocsPath="/installed/clio/docs" />);
+test("Help opens with shortcuts and keeps offline retrieval in the Documentation view", () => {
+	const opening = renderToStaticMarkup(<HelpReferenceBody bundledDocsPath="/installed/clio/docs" />);
+	assert.match(opening, /aria-pressed="true"[^>]*>Shortcuts/u);
+	assert.match(opening, /aria-label="Ctrl or Cmd \+ K"/u);
+	assert.doesNotMatch(opening, /\/installed\/clio\/docs|clio_docs/u);
+	const documentation = helpContent("", "documentation").sections.find((match) => match.section.id === "documentation");
+	assert.ok(documentation);
+	const html = renderToStaticMarkup(<HelpEntries match={documentation} bundledDocsPath="/installed/clio/docs" />);
 	assert.match(html, /href="https:\/\/coder\.iowarp\.ai\/docs\.html"/u);
 	assert.match(html, /rel="noopener noreferrer"/u);
 	assert.match(html, /referrerPolicy="no-referrer"/iu);

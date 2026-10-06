@@ -373,7 +373,10 @@ try {
 		};
 		await openInspectors("evidence-detail");
 		await page.keyboard.press("Control+/");
-		await page.getByRole("heading", { name: "How this app works", exact: true }).waitFor();
+		await page.getByRole("heading", { name: "Shortcuts & help", exact: true }).waitFor();
+		await page.getByRole("searchbox", { name: "Search shortcuts and help", exact: true }).waitFor();
+		assert.equal(await page.getByRole("link", { name: "Open public documentation ↗", exact: true }).count(), 0);
+		await page.getByRole("button", { name: "Documentation", exact: true }).click();
 		const publicHelp = page.getByRole("link", { name: "Open public documentation ↗", exact: true });
 		assert.equal(await publicHelp.getAttribute("href"), "https://coder.iowarp.ai/docs.html");
 		assert.equal(await publicHelp.getAttribute("referrerpolicy"), "no-referrer");

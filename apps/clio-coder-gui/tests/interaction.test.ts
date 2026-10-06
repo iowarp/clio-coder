@@ -115,7 +115,7 @@ test("the reference covers every route and prints the keyboard table verbatim", 
 	assert.ok(interview);
 	assert.equal(interview.reserved, undefined);
 	assert.ok(interview.entries.length > 0, "the implemented interview flow has actionable help");
-	assert.match(interview.lede, /never use the Alt\+A or Alt\+R approval shortcuts/);
+	assert.match(interview.lede, /separate from approving an action/);
 });
 
 test("help search matches every word across any field and reports nothing as nothing", () => {

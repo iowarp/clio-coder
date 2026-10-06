@@ -21,7 +21,7 @@ function ShortcutKeys({ binding }: { binding: Keybinding }) {
 	);
 }
 
-function HelpEntries({ match, bundledDocsPath }: { match: HelpMatch; bundledDocsPath?: string | undefined }) {
+export function HelpEntries({ match, bundledDocsPath }: { match: HelpMatch; bundledDocsPath?: string | undefined }) {
 	return (
 		<dl className="help-entries">
 			{match.entries.map((entry) => (

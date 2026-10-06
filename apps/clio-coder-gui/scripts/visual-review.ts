@@ -162,7 +162,7 @@ if (values.serve) {
 			}
 			if (want("help")) {
 				await page.keyboard.press("Control+/");
-				await page.getByRole("heading", { name: "How this app works", exact: true }).waitFor();
+				await page.getByRole("heading", { name: "Shortcuts & help", exact: true }).waitFor();
 				await shot("help");
 				await page.keyboard.press("Escape");
 			}
