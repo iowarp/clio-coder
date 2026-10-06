@@ -452,7 +452,7 @@ describe("library import of foreign plugin packages", () => {
 		file("empty/plugin.json", JSON.stringify({ $schema: PLUGIN_SCHEMA, name: "empty", version: "1.0.0" }));
 		const empty = planLibraryImport(path.join(vendor, "empty"), { cwd });
 		strictEqual(empty.action, "blocked");
-		ok(empty.reasons.some((reason) => reason.includes("no supported data-only recipes")));
+		ok(empty.reasons.some((reason) => reason.includes("no supported data-only components")));
 		releaseLibraryImport(empty);
 	});
 

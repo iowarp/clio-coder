@@ -171,7 +171,7 @@ export interface InteractiveSlashRuntimeDeps {
 	openDraft: (request: string, count: number) => void;
 	/** Run one `/handoff <goal>`: extract, review, and seed a successor session. */
 	startHandoff: (goal: string) => void;
-	/** Run one `/fleet run <name>`: approval preview first, dispatch only on accept. */
+	/** Run one `/fleet run <playbook>`: approval preview first, dispatch only on accept. */
 	startFleetRun?: (name: string, vars: Readonly<Record<string, string>>) => void;
 	/**
 	 * Run one `/council <task>`: the prepared dispatch-tool arguments go through

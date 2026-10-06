@@ -349,7 +349,7 @@ describe("contracts/skills catalog through the context tool", () => {
 		ok(loaded.kind === "ok", JSON.stringify(loaded));
 		ok(loaded.output.includes(`catalog sha256=${expected}`));
 		ok(loaded.output.includes(`installed normalized sha256=${installed.normalizedHash}`));
-		ok(loaded.output.includes(`clio-coder library recipes ${name} --kind skill --json`));
+		ok(loaded.output.includes(`clio-coder library components ${name} --kind skill --json`));
 		ok(loaded.output.includes("clio-coder library update <owner-ref> --dry-run --json"));
 		strictEqual(loaded.details?.driftExpectedHash, expected);
 		strictEqual(loaded.details?.driftInstalledHash, installed.normalizedHash);

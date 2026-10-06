@@ -11,6 +11,8 @@ import { readLifecycleReceipts } from "../../core/library-receipts.js";
 import type { PluginScope } from "../../domains/plugins/types.js";
 import {
 	describeLibraryPair,
+	type LibraryComponent,
+	type LibraryComponentKind,
 	type LibraryCopy,
 	type LibraryCopyInspection,
 	type LibraryEntryKind,
@@ -19,14 +21,12 @@ import {
 	type LibraryPackageRecord,
 	type LibraryPairs,
 	type LibraryProvidedResource,
-	type LibraryResource,
-	type LibraryResourceKind,
 } from "../../domains/resources/index.js";
 import { sanitizeCallTargetText, sanitizeMultilineDisplayText } from "../../domains/safety/call-target.js";
 import { clioTheme, GLYPH } from "../theme/index.js";
 import type { ListOverlayItem } from "./list-overlay.js";
 
-/** Browse lists install targets; Installed lists the copies and recipes that exist here. */
+/** Browse lists install targets; Installed lists the copies and components that exist here. */
 export type LibraryMode = "browse" | "installed";
 
 export interface LibraryView {
@@ -41,7 +41,7 @@ export interface LibraryView {
 export type LibraryRowSubject =
 	| { kind: "package"; record: LibraryPackageRecord }
 	| { kind: "copy"; copy: LibraryCopy }
-	| { kind: "recipe"; resource: LibraryResource }
+	| { kind: "component"; resource: LibraryComponent }
 	| { kind: "member"; owner: LibraryCopy; member: LibraryCopyInspection["resources"][number] }
 	| { kind: "hint"; record: LibraryPackageRecord; hint: LibraryProvidedResource }
 	| { kind: "notice"; message: string };
@@ -134,8 +134,8 @@ export function libraryStatusLine(
 	return parts.join(theme.fg("border", " │ "));
 }
 
-/** The composer text a `use` on this recipe writes, or null when its use is another surface. */
-export function libraryUseInvocation(kind: LibraryResourceKind, name: string): string | null {
+/** The composer text a `use` on this component writes, or null when its use is another surface. */
+export function libraryUseInvocation(kind: LibraryComponentKind, name: string): string | null {
 	if (kind === "skill") return `/skill ${name} `;
 	if (kind === "agent") return `/run ${name} `;
 	if (kind === "prompt") return `/${name} `;
@@ -162,8 +162,8 @@ function ownerScopeOf(record: LibraryPackageRecord, scope: PluginScope): { scope
 /**
  * A row's available actions, computed from the same records the row printed.
  *
- * Nothing here guesses. A core or loose recipe is not a package, so it offers
- * no package lifecycle at all and says so; an unavailable recipe offers no
+ * Nothing here guesses. A core or loose component is not a package, so it offers
+ * no package lifecycle at all and says so; an unavailable component offers no
  * `use`, because the invocation would fail; and a package with no copy in the
  * selected scope offers install rather than update.
  */
@@ -246,7 +246,7 @@ export function libraryRowActions(subject: LibraryRowSubject, view: LibraryView)
 	if (!owner)
 		reasons.push(
 			resource.source.class === "core"
-				? "Core recipes ship with Clio-Coder and have no package to install, update or remove."
+				? "Core components ship with Clio-Coder and have no package to install, update or remove."
 				: "This file was found directly in a resource root, not installed as a package, so package lifecycle does not apply.",
 		);
 	const selected = owner?.scope === view.scope;
@@ -270,7 +270,7 @@ function copyStateWord(copy: LibraryCopy): string {
 	return theme.fg("error", sanitizeCallTargetText(copy.state));
 }
 
-function availabilityWord(resource: LibraryResource): string {
+function availabilityWord(resource: LibraryComponent): string {
 	const theme = clioTheme();
 	if (resource.availability === "available") return theme.fg("success", "available");
 	if (resource.availability === "untrusted") return theme.fg("warning", "untrusted");
@@ -315,10 +315,10 @@ function packageDetail(
 	const hints = (record.provides ?? []).filter((hint) => view.category === "plugin" || hint.kind === view.category);
 	const lines = [
 		`# ${record.name}`,
-		`**Kind:** ${record.kind}${provider ? ` provider package for ${view.category} recipes` : " package"}`,
+		`**Kind:** ${record.kind}${provider ? ` provider package for ${view.category} components` : " package"}`,
 		`**Actions (${view.scope}):** ${libraryActionSummary(actions)}`,
-		"b shows loaded recipes in Installed. Tab toggles detail; PgUp/PgDn scroll.",
-		...(provider ? ["Catalog hints describe potential recipes, not loaded resources."] : []),
+		"b shows loaded components in Installed. Tab toggles detail; PgUp/PgDn scroll.",
+		...(provider ? ["Catalog hints describe potential components, not loaded components."] : []),
 		...(hints.length
 			? [
 					`**Catalog hints (${view.category === "plugin" ? "all kinds" : view.category}):** ${hints.map((hint) => `${hint.kind}:${hint.name}`).join(", ")}`,
@@ -341,7 +341,7 @@ function packageDetail(
 	if (record.requires?.length) lines.push(`**Requires:** ${record.requires.join(", ")}`);
 	lines.push(...pairLines(record, pairs));
 	if (view.category !== "plugin" && (record.provides?.length ?? 0) > hints.length)
-		lines.push("Other recipe kinds are listed in the Plugins category.");
+		lines.push("Other component kinds are listed in the Plugins category.");
 	if (record.provides === undefined && record.copies.length === 0)
 		lines.push("**Contents:** unknown until this package is inspected or installed.");
 	for (const reason of actions.reasons) lines.push(`**Note:** ${reason}`);
@@ -389,7 +389,7 @@ function copyDetail(
 	return lines;
 }
 
-function resourceDetail(resource: LibraryResource, actions: LibraryRowActions): string[] {
+function resourceDetail(resource: LibraryComponent, actions: LibraryRowActions): string[] {
 	const lines = [
 		`# ${resource.name}`,
 		`**Kind:** ${resource.kind}`,
@@ -502,7 +502,7 @@ export function libraryTruncationNotice(inventory: LibraryInventory): string | u
 	const capped = [
 		inventory.truncated.packages ? "catalog packages" : undefined,
 		inventory.truncated.copies ? "installed copies" : undefined,
-		inventory.truncated.resources ? "recipes" : undefined,
+		inventory.truncated.resources ? "components" : undefined,
 	].filter((part): part is string => part !== undefined);
 	if (capped.length === 0) return undefined;
 	return `Incomplete results: ${capped.join(", ")} were capped, so an absent row does not prove a package is not installed. Narrow with / search, switch category, or run clio-coder library inspect <ref>.`;
@@ -518,10 +518,10 @@ export function libraryTruncationNotice(inventory: LibraryInventory): string | u
  *
  * Browse keeps a package whose own kind matches or whose catalog hints mention
  * the category, so a bundle that contains the skill someone is looking for is
- * findable before it is installed. Installed keeps the category's recipes, plus
+ * findable before it is installed. Installed keeps the category's components, plus
  * the copies of that package kind that produced no loadable resource, so a
  * damaged package stays reachable for repair instead of vanishing with the
- * recipes it failed to provide.
+ * components it failed to provide.
  */
 export function selectForCategory(inventory: LibraryInventory, view: LibraryView): LibraryInventory {
 	if (view.mode === "browse")
@@ -597,7 +597,7 @@ export function buildLibraryRows(options: LibraryRowOptions): LibraryRowSet {
 		for (const item of options.inspection.ancillary) {
 			const subject: LibraryRowSubject = {
 				kind: "notice",
-				message: `${item.kind} ${item.id} is declared package metadata, not a recipe. It runs only on an explicit request.`,
+				message: `${item.kind} ${item.id} is declared package metadata, not a component. It runs only on an explicit request.`,
 			};
 			push(set, view, `note:ancillary:${item.kind}:${item.id}`, subject, {
 				label: `${item.kind}: ${item.id}`,
@@ -632,7 +632,9 @@ export function buildLibraryRows(options: LibraryRowOptions): LibraryRowSet {
 				get meta() {
 					return metaOf([
 						here ? `${here.scope} ${here.state}` : `not installed (${view.scope})`,
-						hints.length > 0 ? `${hints.length} ${view.category === "plugin" ? "recipe" : view.category} hints` : undefined,
+						hints.length > 0
+							? `${hints.length} ${view.category === "plugin" ? "component" : view.category} hints`
+							: undefined,
 						libraryOriginLabel(record.origin),
 						record.version ? `v${record.version}` : undefined,
 					]);
@@ -665,7 +667,7 @@ export function buildLibraryRows(options: LibraryRowOptions): LibraryRowSet {
 			});
 		}
 		for (const resource of inventory.resources) {
-			const subject: LibraryRowSubject = { kind: "recipe", resource };
+			const subject: LibraryRowSubject = { kind: "component", resource };
 			const actions = libraryRowActions(subject, view);
 			push(set, view, `res:${resource.key}`, subject, {
 				label: resource.name,

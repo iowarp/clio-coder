@@ -2,10 +2,10 @@ import { deepStrictEqual, equal, match, ok } from "node:assert/strict";
 import { it } from "node:test";
 import { stripVTControlCharacters as plain } from "node:util";
 import type {
+	LibraryComponent,
 	LibraryCopy,
 	LibraryEntryKind,
 	LibraryInventory,
-	LibraryResource,
 } from "../../src/domains/resources/index.js";
 import { readLibraryInventory } from "../../src/domains/resources/index.js";
 import type { TUI } from "../../src/engine/tui.js";
@@ -18,12 +18,12 @@ import { clioTheme, createClioTheme } from "../../src/interactive/theme/index.js
 import { libraryApplyFixture, libraryPlanFixture } from "../harness/library-plan-fixture.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
 
-function recipe(kind: "agent" | "playbook", name: string): LibraryResource {
+function component(kind: "agent" | "playbook", name: string): LibraryComponent {
 	return {
 		key: `${kind}:${name}`,
 		kind,
 		name,
-		description: "A loaded core recipe.",
+		description: "A loaded core component.",
 		path: `/core/${name}`,
 		source: { class: "core", id: "core", scope: "user" },
 		origin: { kind: "core" },
@@ -58,7 +58,7 @@ function inventory(): LibraryInventory {
 			},
 		],
 		copies: [],
-		resources: [recipe("agent", "debugger"), recipe("playbook", "review")],
+		resources: [component("agent", "debugger"), component("playbook", "review")],
 		diagnostics: Array.from({ length: 8 }, (_, index) => `skill diagnostic ${index}`),
 		truncated: { packages: false, copies: false, resources: false },
 	};
@@ -159,7 +159,7 @@ it("separates eight diagnostic notices from package counts across Plugins, Agent
 	}
 });
 
-it("identifies provider packages and limits their catalog hints to the selected recipe kind", () => {
+it("identifies provider packages and limits their catalog hints to the selected component kind", () => {
 	for (const category of ["agent", "playbook"] as const) {
 		const view = { category, mode: "browse" as const, scope: "user" as const };
 		const rows = buildLibraryRows({ view, inventory: selectForCategory(inventory(), view) });
@@ -171,8 +171,8 @@ it("identifies provider packages and limits their catalog hints to the selected 
 		match(detail, new RegExp(`plugin provider package for ${category}`));
 		match(detail, new RegExp(`lab-${category}`));
 		ok(!detail.includes("lab-skill"));
-		match(detail, /not loaded resources/);
-		match(detail, /b shows loaded recipes/);
+		match(detail, /not loaded components/);
+		match(detail, /b shows loaded components/);
 		match(detail, /i review install/);
 		ok(!detail.includes("Enter members"));
 	}
@@ -263,7 +263,7 @@ it("finds core agents through the real inventory in Installed without broadening
 
 it("returns from notices to the exact resource selection, filter and browse focus at 40 columns", () => {
 	const data = inventory();
-	data.resources.push(recipe("agent", "debugger-two"));
+	data.resources.push(component("agent", "debugger-two"));
 	const state = browser("agent", data);
 	state.view.handleInput("b");
 	state.view.handleInput("/");
@@ -303,7 +303,7 @@ it("preserves semantic colors while stripping external controls before metadata 
 	] as const) {
 		data.resources = [
 			{
-				...recipe("agent", "debugger"),
+				...component("agent", "debugger"),
 				availability,
 				origin: { kind: "imported", agent: hostile, path: "/fixture" },
 				owner: { ref: `plugin:${hostile}`, scope: "user" },
@@ -369,7 +369,7 @@ it("qualifies notice return guidance while retaining search-first keyboard prece
 	equal(state.view, parent);
 });
 
-it("uses package and entry footer units with singular/plural forms across recipe categories", () => {
+it("uses package and entry footer units with singular/plural forms across component categories", () => {
 	for (const category of ["agent", "playbook"] as const) {
 		for (const count of [0, 1, 2]) {
 			const data = inventory();
@@ -380,7 +380,7 @@ it("uses package and entry footer units with singular/plural forms across recipe
 				ref: `plugin:provider-${index}` as const,
 				name: `provider-${index}`,
 			}));
-			data.resources = Array.from({ length: count }, (_, index) => recipe(category, `recipe-${index}`));
+			data.resources = Array.from({ length: count }, (_, index) => component(category, `component-${index}`));
 			const state = browser(category, data);
 			match(plain(state.view.getHint()), new RegExp(`tab · ${count} ${count === 1 ? "package" : "packages"}`));
 			ok(!plain(state.view.getHint()).includes(`1 ${category}s`));

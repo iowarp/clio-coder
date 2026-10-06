@@ -24,7 +24,7 @@ for (const columns of [80, 120, 160])
 			name: "fixture",
 			planHash: "a".repeat(64),
 			waves: [{ index: 0, steps: [{ kind: "code", stepId: "check", commandId: "check", scope: "readonly", argv }] }],
-			budget: { contractUsd: null, ceilingUsd: 2, currentUsd: 0 },
+			budget: { playbookUsd: null, ceilingUsd: 2, currentUsd: 0 },
 		} as unknown as FleetRunPreview;
 		const seen: string[] = [];
 		for (let scroll = 0; scroll < 250; scroll += 10)

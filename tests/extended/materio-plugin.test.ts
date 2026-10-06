@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
-import { parseFleetContract } from "../../src/domains/agents/fleet-contract.js";
+import { parsePlaybook } from "../../src/domains/agents/playbook.js";
 import { type AgentRecipeDiagnostic, loadRecipesFromDir } from "../../src/domains/agents/registry.js";
 import { normalizeAgentSpec, resolveAgentToolCompatibility } from "../../src/domains/agents/spec.js";
 import {
@@ -99,7 +99,7 @@ describe("materio plugin", () => {
 		strictEqual(verifier?.capabilityClass, "read-only");
 		ok(verifier?.tools.every((tool) => !["write", "edit", "bash", "ask_user"].includes(tool)));
 		const fleetPath = path.join(root, "ai.iowarp.clio/playbooks/materio-execute-task.md");
-		const fleet = parseFleetContract(readFileSync(fleetPath, "utf8"), fleetPath);
+		const fleet = parsePlaybook(readFileSync(fleetPath, "utf8"), fleetPath);
 		strictEqual(fleet.steps.length, 2);
 		const executorStep = fleet.steps[0];
 		const verifierStep = fleet.steps[1];

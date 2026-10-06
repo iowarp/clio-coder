@@ -25,8 +25,8 @@ import {
 } from "../domains/resources/library-actions.js";
 import {
 	inspectLibraryCopy,
+	type LibraryComponentSourceClass,
 	type LibraryOrigin,
-	type LibraryResourceSourceClass,
 	readLibraryInventory,
 } from "../domains/resources/library-inventory.js";
 import {
@@ -34,7 +34,7 @@ import {
 	readLibraryManifest as readPluginManifest,
 } from "../domains/resources/library-packages.js";
 import { describeLibraryPair } from "../domains/resources/library-pairing.js";
-import { isLibraryKind, isLibraryResourceKind, type LibraryEntryKind } from "../domains/resources/library-types.js";
+import { isLibraryComponentKind, isLibraryKind, type LibraryEntryKind } from "../domains/resources/library-types.js";
 import { printError, printOk } from "./shared.js";
 
 const HELP = `clio-coder library <command>
@@ -44,7 +44,7 @@ One library of packages: plugin, extension, skill, agent, prompt, playbook.
 Commands:
   clio-coder library list [--kind <kind>] [--user|--project] [--json]
   clio-coder library search [query] [--kind <kind>] [--json]
-  clio-coder library recipes [query] [--kind skill|agent|prompt|playbook] [--source core|package|user|project|compat] [--all] [--json]
+  clio-coder library components [query] [--kind skill|agent|prompt|playbook] [--source core|package|user|project|compat] [--all] [--json]
   clio-coder library register <path> [--user|--project] [--force] [--json]
   clio-coder library inspect <path|kind:name|name> [--user|--project] [--json]
   clio-coder library install <path|kind:name|name> [--user|--project] [--force] [--with-requirements] [--dry-run] [--json]
@@ -68,17 +68,18 @@ copy when present; an explicit scope selects exactly that copy. List includes
 both scopes and all installed states. --from <index.yaml> selects an index.
 Every mutation builds one reviewed plan, rechecks it inside the package lock,
 refuses to break enabled dependents, and reports per-package outcomes with disk,
-recipe-admission and host-refresh facts separately; --dry-run prints the plan
+component-admission and host-refresh facts separately; --dry-run prints the plan
 and writes nothing. A CLI never refreshes a running session.
 Import reviews a portable, Claude Code or Codex plugin from a path or GitHub
-tree URL, normalizes supported recipes into a foreign-trust package, and never
+tree URL, normalizes supported components into a foreign-trust package, and never
 activates hooks, MCP, LSP or scripts.
 List and search are package-oriented; --kind and a query also match the
 resources a plugin provides, returning the owning package as the install target.
-Recipes is the versioned, body-free read of actual discovered recipes across
-core, installed packages and loose user/project files, with owner, origin,
-availability and invocation; --all adds internal diagnostic agents. Nothing in
-these reads fetches a remote source or activates a recipe.
+Components is the versioned, body-free read of actual discovered skills, agents,
+prompts and playbooks across core, installed packages and loose user/project
+files, with owner, origin, availability and invocation; --all adds internal
+diagnostic agents. Nothing in these reads fetches a remote source or activates
+a component.
 Skills lists discovered runtime skills, including unmanaged local files.
 Inventory is the fixed, body-free skill read for GUI hosts.
 `;
@@ -105,7 +106,7 @@ interface Parsed {
 	positional: string[];
 	scope?: PluginScope;
 	kind?: LibraryEntryKind;
-	source?: LibraryResourceSourceClass;
+	source?: LibraryComponentSourceClass;
 	from?: string;
 	all: boolean;
 	force: boolean;
@@ -142,7 +143,7 @@ function parse(args: ReadonlyArray<string>): Parsed {
 			const value = args[++i];
 			if (!value || !["core", "package", "user", "project", "compat"].includes(value))
 				throw new Error("--source requires core, package, user, project, or compat");
-			out.source = value as LibraryResourceSourceClass;
+			out.source = value as LibraryComponentSourceClass;
 		} else if (arg === "--from") {
 			const value = args[++i];
 			if (!value || value.startsWith("-")) throw new Error("--from requires an index path");
@@ -285,9 +286,9 @@ export async function runLibraryCommand(
 				...(parsed.json ? ["--json"] : []),
 			]);
 		}
-		if (parsed.command === "recipes") {
-			if (parsed.kind && !isLibraryResourceKind(parsed.kind))
-				throw new Error("library recipes --kind requires skill, agent, prompt, or playbook");
+		if (parsed.command === "components") {
+			if (parsed.kind && !isLibraryComponentKind(parsed.kind))
+				throw new Error("library components --kind requires skill, agent, prompt, or playbook");
 			const inventory = readLibraryInventory({
 				cwd: options.cwd,
 				include: { packages: false, copies: false },
@@ -306,14 +307,15 @@ export async function runLibraryCommand(
 						`${resource.kind}\t${resource.name}\t${owner}\t${originLabel(resource.origin)}\t${resource.availability}\t${resource.invocation ?? ""}\n`,
 					);
 				}
-				if (inventory.truncated.resources) process.stderr.write("recipe list truncated; narrow with --kind or a query\n");
+				if (inventory.truncated.resources)
+					process.stderr.write("component list truncated; narrow with --kind or a query\n");
 				for (const diagnostic of inventory.diagnostics) process.stderr.write(`${diagnostic}\n`);
 			}
 			return 0;
 		}
 		if (parsed.command === "list" || parsed.command === "search") {
 			if (parsed.command === "list" && parsed.positional.length) throw new Error("library list takes no arguments");
-			if (parsed.source) throw new Error("--source applies to library recipes");
+			if (parsed.source) throw new Error("--source applies to library components");
 			const discovery = libraryWorkspace(options);
 			const query = parsed.positional.join(" ");
 			const inventory = readLibraryInventory({

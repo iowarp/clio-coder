@@ -92,7 +92,7 @@ export function createOverlayResourceOpeners(deps: OverlayResourceOpenersDeps): 
 			lifecycle: createLibraryLifecycle(libraryRefreshHost(reloadResources(ctx))),
 			// A fleet's `use` is its approval preview, which is a surface of its own.
 			// The Library closes first so the preview owns the overlay slot, exactly
-			// as `/fleet run <name>` typed into the composer would.
+			// as `/fleet run <playbook>` typed into the composer would.
 			openFleetRun: (name) => {
 				deps.closeOverlay();
 				deps.getSlashContext().startFleetRun?.(name, {});

@@ -5,7 +5,7 @@ const closed = { additionalProperties: false };
 const record = Type.Record(Type.String(), Type.Unknown());
 const strings = Type.Array(Type.String());
 const nullable = Type.Union([Type.String(), Type.Null()]);
-export const LibraryResource = Type.Object(
+export const LibraryComponent = Type.Object(
 	{
 		key: Type.String(),
 		kind: Type.Union([Type.Literal("agent"), Type.Literal("skill"), Type.Literal("prompt"), Type.Literal("playbook")]),
@@ -54,7 +54,7 @@ export const LibraryInventory = Type.Object(
 			),
 		),
 		copies: Type.Array(record),
-		resources: Type.Array(LibraryResource),
+		resources: Type.Array(LibraryComponent),
 		diagnostics: strings,
 		truncated: Type.Object({ packages: Type.Boolean(), copies: Type.Boolean(), resources: Type.Boolean() }, closed),
 	},

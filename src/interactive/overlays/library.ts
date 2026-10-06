@@ -1,5 +1,5 @@
 /**
- * The Library: one full-screen browser over every recipe and package this
+ * The Library: one full-screen browser over every component and package this
  * machine can see.
  *
  * Five categories, two modes and one selected scope. Browse lists install
@@ -54,10 +54,10 @@ export const LIBRARY_TITLE = "Library";
 
 /** @internal exported for contract tests */
 export const LIBRARY_EMPTY_BROWSE =
-	"No packages of this kind in the index. Browse counts packages, not runnable recipes. Press b for loaded recipes in Installed. Register one with clio-coder library register <path>, or press o to import from another local agent.";
+	"No packages of this kind in the index. Browse counts packages, not runnable components. Press b for loaded components in Installed. Register one with clio-coder library register <path>, or press o to import from another local agent.";
 /** @internal exported for contract tests */
 export const LIBRARY_EMPTY_INSTALLED =
-	"No entries of this kind are listed by the Library inventory. Action scope selects a package destination, not which recipes can run. Press b for installable packages.";
+	"No entries of this kind are listed by the Library inventory. Action scope selects a package destination, not which components can run. Press b for installable packages.";
 
 export interface LibraryOverlayDeps {
 	/** The package lifecycle. Plans are reviewed before anything is written. */
@@ -110,14 +110,14 @@ function requestRefFor(subject: LibraryRowSubject): { ref: string; reason?: stri
 	if (subject.kind === "package" || subject.kind === "hint") return { ref: subject.record.ref };
 	if (subject.kind === "copy") return { ref: subject.copy.ref };
 	if (subject.kind === "member") return { ref: subject.owner.ref };
-	if (subject.kind === "recipe")
+	if (subject.kind === "component")
 		return subject.resource.owner
 			? { ref: subject.resource.owner.ref }
 			: {
 					ref: "",
 					reason:
 						subject.resource.source.class === "core"
-							? `${subject.resource.name} is a core recipe and has no package to manage.`
+							? `${subject.resource.name} is a core component and has no package to manage.`
 							: `${subject.resource.name} was found directly in a resource root, so there is no package to manage.`,
 				};
 	return { ref: "", reason: "This row is a notice, not a package." };
@@ -412,8 +412,8 @@ export function openLibraryOverlay(tui: TUI, deps: LibraryOverlayDeps): OverlayH
 	const use = (item: ListOverlayItem | undefined): void => {
 		const subject = selected(item);
 		if (!subject) return;
-		if (subject.kind !== "recipe") {
-			deps.notice("info", "Only a loaded recipe has a use action; press Enter to open a package's members.");
+		if (subject.kind !== "component") {
+			deps.notice("info", "Only a loaded component has a use action; press Enter to open a package's members.");
 			return;
 		}
 		const actions = libraryRowActions(subject, view);
@@ -604,7 +604,7 @@ export function openLibraryOverlay(tui: TUI, deps: LibraryOverlayDeps): OverlayH
 						? subject.copy.enabled
 						: subject?.kind === "member"
 							? subject.owner.enabled
-							: subject?.kind === "recipe"
+							: subject?.kind === "component"
 								? true
 								: undefined;
 				manage(enabled === false ? "enable" : "disable", item);
@@ -634,7 +634,7 @@ export function openLibraryOverlay(tui: TUI, deps: LibraryOverlayDeps): OverlayH
 		}
 		if (!deps.focus) return;
 		const target = [...rowSet.subjects.entries()].find(([id, subject]) => {
-			if (subject.kind === "recipe") return subject.resource.key === deps.focus || subject.resource.name === deps.focus;
+			if (subject.kind === "component") return subject.resource.key === deps.focus || subject.resource.name === deps.focus;
 			if (subject.kind === "package") return subject.record.ref === deps.focus || subject.record.name === deps.focus;
 			if (subject.kind === "copy") return subject.copy.ref === deps.focus || subject.copy.name === deps.focus;
 			return id === deps.focus;

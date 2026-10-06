@@ -455,7 +455,7 @@ printf '%s\\n' 'clio-coder-preflight/1' 'cwd=ok' 'clioCoder=${readClioVersion()}
 			budget: {
 				ceilingUsd: 5,
 				currentUsd: 1.25,
-				contractUsd: 2,
+				playbookUsd: 2,
 			},
 		};
 		strictEqual(
@@ -466,7 +466,7 @@ printf '%s\\n' 'clio-coder-preflight/1' 'cwd=ok' 'clioCoder=${readClioVersion()}
 			budget: {
 				ceilingUsd: 5,
 				currentUsd: 0.0034,
-				contractUsd: null,
+				playbookUsd: null,
 			},
 		};
 		strictEqual(
@@ -477,7 +477,7 @@ printf '%s\\n' 'clio-coder-preflight/1' 'cwd=ok' 'clioCoder=${readClioVersion()}
 			budget: {
 				ceilingUsd: 5,
 				currentUsd: 0,
-				contractUsd: 1,
+				playbookUsd: 1,
 			},
 		};
 		strictEqual(

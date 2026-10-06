@@ -21,7 +21,7 @@ import {
 	PACKAGE_KINDS,
 	type Package,
 	type Plan,
-	recipeSentence,
+	componentSentence,
 	type Scope,
 	scopeCopy,
 	stepTitle,
@@ -84,7 +84,7 @@ function PlanReview({ plan }: { plan: Plan }) {
 										? step.content.resources
 												.map((item) => `${item.kind} ${item.name}${item.valid ? "" : " (invalid)"}`)
 												.join(", ")
-										: "No recipes"}
+										: "No components"}
 									{!step.content.valid && <small>The package did not validate.</small>}
 								</dd>
 							</div>
@@ -164,8 +164,8 @@ function Outcomes({ applied }: { applied: Applied }) {
 										<dd>{diskSentence(outcome)}</dd>
 									</div>
 									<div>
-										<dt>Recipes</dt>
-										<dd>{recipeSentence(outcome)}</dd>
+										<dt>Components</dt>
+										<dd>{componentSentence(outcome)}</dd>
 									</div>
 									{outcome.recovery?.packageBackup && (
 										<div>
@@ -585,7 +585,7 @@ export function LibraryCatalog({
 										<dd>
 											{pkg.provides?.length
 												? pkg.provides.map((item) => `${String(item.kind)} ${String(item.name)}`).join(", ")
-												: "No recipes declared in the catalog"}
+												: "No components declared in the catalog"}
 										</dd>
 									</div>
 									{pkg.sha256 && (

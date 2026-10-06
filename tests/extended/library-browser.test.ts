@@ -5,12 +5,12 @@ import type { LibraryImportPlan } from "../../src/domains/interop/index.js";
 import type { PluginScope } from "../../src/domains/plugins/types.js";
 import type {
 	LibraryApplyResult,
+	LibraryComponent,
 	LibraryCopy,
 	LibraryCopyInspection,
 	LibraryInventory,
 	LibraryPackageRecord,
 	LibraryRefreshResult,
-	LibraryResource,
 } from "../../src/domains/resources/index.js";
 import type { OverlayHandle, TUI } from "../../src/engine/tui.js";
 import { openLibraryOverlay } from "../../src/interactive/overlays/library.js";
@@ -74,7 +74,7 @@ function copy(overrides: Partial<LibraryCopy> = {}): LibraryCopy {
 	};
 }
 
-function resource(overrides: Partial<LibraryResource> = {}): LibraryResource {
+function resource(overrides: Partial<LibraryComponent> = {}): LibraryComponent {
 	return {
 		key: "skill:materio-lab@plugin:user:materio#skills/lab/SKILL.md",
 		kind: "skill",
@@ -92,10 +92,10 @@ function resource(overrides: Partial<LibraryResource> = {}): LibraryResource {
 	};
 }
 
-/** A recipe found directly in a resource root: no owning package, no invocation when it cannot run. */
-function unowned(overrides: Partial<LibraryResource> = {}): LibraryResource {
+/** A component found directly in a resource root: no owning package, no invocation when it cannot run. */
+function unowned(overrides: Partial<LibraryComponent> = {}): LibraryComponent {
 	const { owner: _owner, invocation: _invocation, ...rest } = resource(overrides);
-	return { ...rest, ...overrides } as LibraryResource;
+	return { ...rest, ...overrides } as LibraryComponent;
 }
 
 function inventory(overrides: Partial<LibraryInventory> = {}): LibraryInventory {
@@ -156,10 +156,10 @@ describe("library browser projection", () => {
 		match(plain(libraryStatusLine(BROWSE, counts, 120)), /User/);
 	});
 
-	it("offers no package lifecycle on core and loose recipes, and says why", () => {
+	it("offers no package lifecycle on core and loose components, and says why", () => {
 		const core = libraryRowActions(
 			{
-				kind: "recipe",
+				kind: "component",
 				resource: unowned({
 					key: "agent:scout@core#builtins/scout.md",
 					kind: "agent",
@@ -175,11 +175,11 @@ describe("library browser projection", () => {
 			{ install: false, remove: false, update: false, enable: false },
 		);
 		equal(core.use, true);
-		match(core.reasons.join(" "), /Core recipes ship with Clio-Coder/);
+		match(core.reasons.join(" "), /Core components ship with Clio-Coder/);
 
 		const loose = libraryRowActions(
 			{
-				kind: "recipe",
+				kind: "component",
 				resource: unowned({
 					key: "skill:draft@project#.clio-coder/skills/draft/SKILL.md",
 					source: { class: "project", id: "project", scope: "project" },
@@ -192,10 +192,10 @@ describe("library browser projection", () => {
 		match(loose.reasons.join(" "), /not installed as a package/);
 	});
 
-	it("gives an unavailable recipe no use action and states the reason", () => {
+	it("gives an unavailable component no use action and states the reason", () => {
 		const actions = libraryRowActions(
 			{
-				kind: "recipe",
+				kind: "component",
 				resource: unowned({ availability: "unavailable", reason: "its bound skill failed to load" }),
 			},
 			{ ...BROWSE, category: "skill", mode: "installed" },
@@ -228,7 +228,7 @@ describe("library browser projection", () => {
 		ok(rows.items.some((item) => plain(item.label).includes("does not prove")));
 	});
 
-	it("separates Browse install targets from Installed copies and recipes", () => {
+	it("separates Browse install targets from Installed copies and components", () => {
 		const browse = buildLibraryRows({ inventory: selectForCategory(inventory(), BROWSE), view: BROWSE });
 		deepStrictEqual(
 			browse.items.map((item) => item.id),
@@ -251,7 +251,7 @@ describe("library browser projection", () => {
 		);
 	});
 
-	it("finds a bundle in a recipe category through its catalog hints, without calling it loaded", () => {
+	it("finds a plugin in a component category through its catalog hints, without calling it loaded", () => {
 		const view: LibraryView = { category: "skill", mode: "browse", scope: "user" };
 		const rows = buildLibraryRows({ inventory: selectForCategory(inventory(), view), view });
 		equal(rows.items.length, 1);
@@ -260,7 +260,7 @@ describe("library browser projection", () => {
 		equal(rows.items[0]?.id, "pkg:plugin:materio");
 	});
 
-	it("keeps a damaged copy of a recipe package reachable in its own category", () => {
+	it("keeps a damaged copy of a component package reachable in its own category", () => {
 		const view: LibraryView = { category: "skill", mode: "installed", scope: "user" };
 		const damaged = inventory({
 			copies: [copy({ ref: "skill:ship", kind: "skill", name: "ship", state: "damaged", loadable: false })],
@@ -626,12 +626,12 @@ function harness(
 }
 
 describe("library browser behavior", () => {
-	it("reads the inventory once and projects it across the five categories", () => {
+	it("reads the inventory once and projects it across the six categories", () => {
 		const state = harness();
 		equal(state.inventoryReads, 1);
 		deepStrictEqual(
 			state.options.tabs?.map((tab) => tab.id),
-			["skill", "agent", "prompt", "playbook", "plugin"],
+			["skill", "agent", "prompt", "playbook", "plugin", "extension"],
 		);
 	});
 
@@ -682,12 +682,12 @@ describe("library browser behavior", () => {
 		equal(state.applied, 0);
 	});
 
-	it("fills the composer from a usable recipe and refuses an unusable one", () => {
+	it("fills the composer from a usable component and refuses an unusable one", () => {
 		const usable = harness({ initialTab: "skill" });
 		usable.options.globalActions?.b?.();
 		usable.press("v");
 		deepStrictEqual(usable.editor, ["/skill materio-lab "]);
-		equal(usable.closed, 1, "using a recipe closes the browser onto the composer");
+		equal(usable.closed, 1, "using a component closes the browser onto the composer");
 
 		const blocked = harness({
 			initialTab: "skill",
@@ -804,8 +804,10 @@ describe("library browser behavior", () => {
 		match(plain(view.render(120).join("\n")), /materio/);
 		equal(view.activeTab()?.id, "plugin");
 
-		// Right wraps from Plugins to Skills. The rows, the status row and the
-		// subjects the action keys read must all describe Skills afterwards.
+		// Right moves from Plugins to Extensions and wraps to Skills. The rows, the
+		// status row and the subjects the action keys read must all describe Skills afterwards.
+		view.handleInput("\u001b[C");
+		equal(view.activeTab()?.id, "extension");
 		view.handleInput("\u001b[C");
 		equal(view.activeTab()?.id, "skill");
 		state.options.globalActions?.b?.();
@@ -819,6 +821,7 @@ describe("library browser behavior", () => {
 
 		const after = harness({ initialTab: "plugin" });
 		const afterView = after.mount();
+		afterView.handleInput("\u001b[C");
 		afterView.handleInput("\u001b[C");
 		after.options.globalActions?.b?.();
 		after.press("r", after.rows("skill")[0]?.id, "skill");
