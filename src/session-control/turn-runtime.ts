@@ -20,8 +20,10 @@ import type { MiddlewareToolChoiceControl } from "../domains/middleware/index.js
 import type { ObservabilityContract } from "../domains/observability/contract.js";
 import {
 	applyModelCapabilityPatch,
+	canonicalEndpointKey,
 	modelResidencyForStatus,
 	type ProvidersContract,
+	recordEndpointThroughput,
 	refineRuntimeTargetWithModelHints,
 	resolveRuntimeTarget,
 	runtimeResolutionWarningsBesideThinkingNotice,
@@ -1217,6 +1219,14 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 					const cacheRead = typeof usage.cacheRead === "number" ? usage.cacheRead : 0;
 					const backendTimings = (enrichedEvent.message as { backendTimings?: BackendCompletionTimings }).backendTimings;
 					runFirstCallVerdict = backendCacheVerdict(input, cacheRead, backendTimings, usage.cacheReadReported);
+				}
+				// The background memory budget sizes a local step's deadline from the
+				// speed this endpoint measured on the operator's own turns.
+				if (isAssistant) {
+					recordEndpointThroughput(
+						canonicalEndpointKey(localRuntime.runtimeResolution.target),
+						(enrichedEvent.message as { backendTimings?: BackendCompletionTimings }).backendTimings,
+					);
 				}
 				if (usage) {
 					context.reconcileUsage(usage);

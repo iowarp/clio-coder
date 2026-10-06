@@ -87,6 +87,8 @@ import {
 } from "../domains/extensions/index.js";
 import { type InteropContract, InteropDomainModule } from "../domains/interop/index.js";
 import { describeUpgradeNotice, ensureClioState, takeUpgradeNotice } from "../domains/lifecycle/index.js";
+import type { BackgroundRouteFacts } from "../domains/memory/background-budget.js";
+import { decideBackgroundStep } from "../domains/memory/background-budget.js";
 import { createHistoryReviewSource } from "../domains/memory/history-review.js";
 import {
 	buildDispatchMemorySection,
@@ -118,7 +120,11 @@ import {
 	saveTaskBankSnapshot,
 } from "../domains/memory/task-bank-store.js";
 import type { TaskMemoryModelRequest } from "../domains/memory/task-memory-policy.js";
-import { TaskMemoryInformationFlowBlockedError } from "../domains/memory/task-memory-policy.js";
+import {
+	TaskMemoryBudgetSkipError,
+	TaskMemoryEndpointBusyError,
+	TaskMemoryInformationFlowBlockedError,
+} from "../domains/memory/task-memory-policy.js";
 import { createHistoryReviewActivity, projectTaskMemoryActivity } from "../domains/memory/task-memory-status.js";
 import { createCapabilityGate } from "../domains/middleware/capability-gate.js";
 import { createDecisionHintsRegistration } from "../domains/middleware/decision-hints.js";
@@ -162,6 +168,7 @@ import { ObservabilityDomainModule } from "../domains/observability/index.js";
 import { committedPluginSnapshot, PluginsDomainModule, pluginSnapshotFor } from "../domains/plugins/index.js";
 import type { PromptsContract } from "../domains/prompts/contract.js";
 import { createPromptsDomainModule } from "../domains/prompts/index.js";
+import { resolveEffectivePricing } from "../domains/providers/catalog.js";
 import { credentialsPresent } from "../domains/providers/credentials.js";
 import type { CostProvenance, ProvidersContract, TargetDescriptor, ThinkingLevel } from "../domains/providers/index.js";
 import {
@@ -170,10 +177,12 @@ import {
 	backgroundMemoryAdmissionLimit,
 	canonicalEndpointKey,
 	createProvidersDomainModule,
+	endpointThroughput,
 	firstRuntimeResolutionError,
 	isOrchestratorEligibleRuntime,
 	normalizeCostProvenance,
 	probeCapabilitiesForModel,
+	recordEndpointThroughput,
 	refineRuntimeTargetWithModelHints,
 	registerForegroundStream,
 	resolveEndpointCapacities,
@@ -190,6 +199,8 @@ import { getRuntimeRegistry } from "../domains/providers/registry.js";
 import { resolveModelReference } from "../domains/providers/resolver.js";
 import { registerBuiltinRuntimes } from "../domains/providers/runtimes/builtins.js";
 import { createVisionSidecar } from "../domains/providers/vision-sidecar.js";
+import { observedQuota } from "../domains/quota/observed.js";
+import { quotaProviderIdForRuntime } from "../domains/quota/registry.js";
 import {
 	createResourcesDomainModule,
 	discoverMarketplaceSkills,
@@ -228,6 +239,7 @@ import type { CompactionCallObservation } from "../domains/session/compaction/co
 import { type CompactInput, type CompactResult, compact } from "../domains/session/compaction/compact.js";
 import { collectSessionEntries } from "../domains/session/compaction/session-entries.js";
 import { estimateTokens } from "../domains/session/compaction/tokens.js";
+import { ceilChars } from "../domains/session/context-accounting.js";
 import { continuityPayloadFromFold } from "../domains/session/continuity/carry.js";
 import { continuityProjectionTokens, resolveContinuityProjection } from "../domains/session/continuity/projection.js";
 import type { SessionContract, SessionMeta } from "../domains/session/contract.js";
@@ -518,6 +530,28 @@ interface BackgroundMemoryRoute {
 	modelMaxTokens(configuredMaxTokens: number): number;
 }
 
+/**
+ * What the background budget reads beside the route itself. Settings are the
+ * snapshot the route was resolved from; spend is read when a step asks.
+ */
+interface BackgroundBudgetInputs {
+	settings: Readonly<ClioSettings>;
+	/** Priced session spend; absent where no session ledger exists, which reads as none. */
+	sessionSpendUsd?: () => number;
+}
+
+function backgroundRouteFacts(
+	refined: ReturnType<typeof prepareBackgroundMemoryModel>["refined"],
+): BackgroundRouteFacts {
+	const pricing = resolveEffectivePricing(refined.target, refined.runtime, refined.wireModelId);
+	return {
+		provenance: pricing.provenance,
+		rates: pricing.rates,
+		runtime: refined.runtime,
+		quotaProviderId: quotaProviderIdForRuntime(refined.runtimeId),
+	};
+}
+
 type AdmitBackgroundModelFlow = (destination: {
 	targetId: string;
 	runtimeId: string;
@@ -531,8 +565,10 @@ export function createBackgroundMemoryModelClient(
 	bus: Pick<SafeEventBus, "emit"> | null,
 	fallbackOnly = false,
 	admitModelFlow?: AdmitBackgroundModelFlow,
+	sessionSpendUsd?: () => number,
 ): BackgroundMemoryRoute | null {
 	if (!settings.context.memory.enabled) return null;
+	const budget: BackgroundBudgetInputs = { settings, ...(sessionSpendUsd === undefined ? {} : { sessionSpendUsd }) };
 	const memoryRoute = resolveMemoryRoute(settings);
 	const configuredTarget = memoryRoute.target?.trim();
 	const configuredModel = memoryRoute.model?.trim();
@@ -548,6 +584,7 @@ export function createBackgroundMemoryModelClient(
 			"chat-default",
 			settings.targets,
 			admitModelFlow,
+			budget,
 		);
 	}
 	const chatTarget = settings.chat.target?.trim();
@@ -566,6 +603,7 @@ export function createBackgroundMemoryModelClient(
 				"dedicated",
 				settings.targets,
 				admitModelFlow,
+				budget,
 			);
 		} catch (error) {
 			fallbackReason = `configured route unavailable: ${memoryRouteFailureCause(error)}`;
@@ -586,6 +624,7 @@ export function createBackgroundMemoryModelClient(
 				"chat-fallback",
 				settings.targets,
 				admitModelFlow,
+				budget,
 			),
 			fallbackReason,
 		};
@@ -712,10 +751,12 @@ function prepareBackgroundMemoryRoute(
 	selection: BackgroundMemoryRoute["selection"],
 	targets: ReadonlyArray<TargetDescriptor>,
 	admitModelFlow?: AdmitBackgroundModelFlow,
+	budget?: BackgroundBudgetInputs,
 ): BackgroundMemoryRoute {
 	const initial = prepareBackgroundMemoryModel(providers, targetId, wireModelId);
 	const { refined } = initial;
 	const endpointKey = canonicalEndpointKey(refined.target);
+	const routeFacts = backgroundRouteFacts(refined);
 	return {
 		selection,
 		targetId,
@@ -735,6 +776,35 @@ function prepareBackgroundMemoryRoute(
 			// holds endpoint capacity while it is out and publishes the cache
 			// disturbance even when a timeout means the usage sink never sees it.
 			complete: async (request) => {
+				// Decided before the metadata probe, auth or any byte leaves, so a
+				// skipped step costs nothing; the next cadence tick decides again.
+				const nowMs = Date.now();
+				const throughput = endpointThroughput(endpointKey);
+				const decision = decideBackgroundStep({
+					route: routeFacts,
+					inputTokens: ceilChars(request.systemPrompt.length + request.userPrompt.length),
+					maxOutputTokens: budget?.settings.context.memory.maxOutputTokens ?? request.maxTokens,
+					timeoutCapMs: timeoutMs,
+					nowMs,
+					session: {
+						spendUsd: budget?.sessionSpendUsd?.() ?? 0,
+						ceilingUsd: budget?.settings.safety.limits.sessionCostUsd ?? 0,
+					},
+					quota: routeFacts.quotaProviderId === null ? null : observedQuota(routeFacts.quotaProviderId, nowMs),
+					endpoint: {
+						occupied: endpointKey === null ? 0 : (endpointCapacityUsage()[endpointKey] ?? 0),
+						admissionLimit:
+							endpointKey === null ? Number.POSITIVE_INFINITY : memoryAdmissionLimitFor(providers, endpointKey, targets),
+						prefillTokensPerSecond: throughput?.prefillTokensPerSecond ?? null,
+						generationTokensPerSecond: throughput?.generationTokensPerSecond ?? null,
+					},
+				});
+				if (!decision.admit) {
+					if (decision.reason === "endpoint_busy") {
+						throw new TaskMemoryEndpointBusyError("endpoint occupancy exhausts the background memory slot bound");
+					}
+					throw new TaskMemoryBudgetSkipError(decision.reason, decision.resumeAt);
+				}
 				await prepareBackgroundModelMetadata(providers, targetId, request.signal);
 				const { model, refined } = prepareBackgroundMemoryModel(providers, targetId, wireModelId);
 				if (refined.runtimeId !== initial.refined.runtimeId || canonicalEndpointKey(refined.target) !== endpointKey) {
@@ -785,7 +855,7 @@ function prepareBackgroundMemoryRoute(
 							// blocks, and the memory output budget leaves room for the preamble.
 							thinkingLevel: "off",
 							signal: request.signal,
-							timeoutMs,
+							timeoutMs: decision.timeoutMs,
 							onUsage: (observation) => {
 								observedUsage = mapUsage(observation);
 								request.onUsage?.(observedUsage);
@@ -793,6 +863,7 @@ function prepareBackgroundMemoryRoute(
 							...(apiKey === undefined ? {} : { apiKey }),
 							...(refined.target.auth?.headers ? { headers: refined.target.auth.headers } : {}),
 						});
+						recordEndpointThroughput(endpointKey, completion.backend);
 						// The step is billed here whatever the policy later decides about the
 						// answer. A model that read a trajectory and chose silence spent the
 						// same prefill as one that produced a reminder.
@@ -829,6 +900,8 @@ export function createBackgroundMemoryRouting(
 	admitModelFlow?: AdmitBackgroundModelFlow,
 	/** False for a second routing instance whose fallback the first already announces. */
 	announceFallback = true,
+	/** Priced session spend the metered budget adds a step's projected cost to. */
+	sessionSpendUsd?: () => number,
 ) {
 	let route: BackgroundMemoryRoute | null = null;
 	let snapshot: Readonly<ClioSettings> | undefined;
@@ -869,6 +942,7 @@ export function createBackgroundMemoryRouting(
 							bus,
 							false,
 							admitModelFlow,
+							sessionSpendUsd,
 						);
 			noteFallback();
 			clientFailure = null;
@@ -896,6 +970,7 @@ export function createBackgroundMemoryRouting(
 				bus,
 				true,
 				admitModelFlow,
+				sessionSpendUsd,
 			);
 			if (route && clientFailure) route.fallbackReason = `configured route client error: ${clientFailure}`;
 			noteFallback();
@@ -2117,6 +2192,10 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	 * endpoint slot and publishes the disturbance; it sees the timed-out and
 	 * thrown steps that report no usage. Late reported usage still reaches this sink.
 	 */
+	// The spend the scheduling gate admits paid requests against, so a memory
+	// step's projected cost meets the same ceiling chat and dispatch do.
+	const backgroundSessionSpendUsd = (): number =>
+		result.getContract<SchedulingContract>("scheduling")?.preflight().currentUsd ?? observability?.sessionCost() ?? 0;
 	const captureBackgroundMemoryUsage = () => {
 		const meta = session?.current() ?? null;
 		return captureTaskMemoryUsage({
@@ -2365,7 +2444,14 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 				timeoutMs: memory.timeoutMs,
 			};
 		},
-		...createBackgroundMemoryRouting(providers, () => effectiveSettingsForDispatch?.(), bus, admitMemoryFlow),
+		...createBackgroundMemoryRouting(
+			providers,
+			() => effectiveSettingsForDispatch?.(),
+			bus,
+			admitMemoryFlow,
+			true,
+			backgroundSessionSpendUsd,
+		),
 		captureStepUsage: captureBackgroundMemoryUsage,
 		onInjectedEntries: (entries) => proposeInjectedMemoryEntries(entries),
 		onDeliveryOutcomes: settleMemoryDeliveries,
@@ -2447,7 +2533,14 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 				cwd: memoryWorkspaceRoot(),
 				currentSessionId: session?.current()?.id ?? null,
 			}),
-		client: createBackgroundMemoryRouting(providers, () => effectiveSettingsForDispatch?.(), bus, admitMemoryFlow, false),
+		client: createBackgroundMemoryRouting(
+			providers,
+			() => effectiveSettingsForDispatch?.(),
+			bus,
+			admitMemoryFlow,
+			false,
+			backgroundSessionSpendUsd,
+		),
 		settings: () => {
 			const memory = effectiveSettingsForDispatch?.().context.memory ?? memorySettings;
 			return { maxTokens: memory.maxOutputTokens, timeoutMs: memory.timeoutMs };

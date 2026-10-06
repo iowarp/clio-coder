@@ -5,6 +5,7 @@ import {
 	formatPct,
 	primaryWindow,
 	severityForPct,
+	windowAtWarning,
 	windowSeverity,
 } from "../domains/quota/presentation.js";
 import type { UsageSnapshot } from "../domains/quota/types.js";
@@ -83,7 +84,7 @@ export function renderQuotaAccounts(
 		if (options.compact) {
 			const window = primaryWindow(account);
 			const ordered =
-				window && ["warning", "critical"].includes(windowSeverity(window))
+				window && windowAtWarning(window)
 					? [window, ...account.windows.filter((item) => item !== window)]
 					: account.windows;
 			const windows = ordered

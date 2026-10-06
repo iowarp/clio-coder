@@ -1,4 +1,6 @@
 import type { EffectiveMemoryRoute } from "../../core/session-routing.js";
+import type { BackgroundSkipReason } from "./background-budget.js";
+import { BACKGROUND_SKIP_REASONS } from "./background-budget.js";
 import type { TaskMemorySnapshot } from "./task-bank.js";
 import type { TaskMemoryPolicyDecision, TaskMemoryPolicyReason } from "./task-memory-policy.js";
 import type { TaskMemorySpendSummary } from "./task-memory-spend.js";
@@ -26,6 +28,15 @@ export interface TaskMemoryActivityEvent {
 	citedEntries: number;
 	bankWrites: number;
 	latencyMs: number;
+	/** When a budget skip expects room again. */
+	resumeAt?: string;
+}
+
+/** The newest step the background budget refused, as `/memory` shows it. */
+export interface TaskMemoryBudgetSkip {
+	at: string;
+	reason: BackgroundSkipReason;
+	resumeAt?: string;
 }
 
 /** What the always-on memory guardian is doing; one value every operator surface projects. */
@@ -45,6 +56,8 @@ export interface TaskMemoryOperatorStatus {
 	stepInFlight: boolean;
 	/** Guardian state; absent on a surface that does not run the guardian. */
 	guardian?: TaskMemoryGuardianState;
+	/** Newest budget skip among the recent steps, or null when none of them was skipped. */
+	lastSkip?: TaskMemoryBudgetSkip | null;
 	/**
 	 * Lifetime llm-tier spend and hit rate folded from the telemetry ledger. Null
 	 * on a surface that does not read the ledger, which is every surface that
@@ -84,6 +97,7 @@ function taskMemoryActivityFromStep(step: TaskMemoryTelemetryStep, at: string): 
 			0,
 		),
 		latencyMs: step.latencyMs,
+		...(step.resumeAt === undefined ? {} : { resumeAt: step.resumeAt }),
 	};
 }
 
@@ -140,11 +154,21 @@ export function projectTaskMemoryActivity(
 	boundary: { activity: ReadonlyArray<TaskMemoryActivityEvent>; lastDecision: TaskMemoryPolicyDecision | null },
 	reviews: ReadonlyArray<TaskMemoryActivityEvent>,
 	limit: number,
-): Pick<TaskMemoryOperatorStatus, "activity" | "lastDecision"> {
+): Pick<TaskMemoryOperatorStatus, "activity" | "lastDecision" | "lastSkip"> {
 	const merged = [...boundary.activity, ...reviews].sort((a, b) => b.at.localeCompare(a.at));
 	const decided = merged.find((event) => event.decision !== "dropped");
+	const activity = merged.slice(0, limit);
+	const skipped = activity.find((event) => BACKGROUND_SKIP_REASONS.has(event.reason as BackgroundSkipReason));
 	return {
-		activity: merged.slice(0, limit),
+		activity,
+		lastSkip:
+			skipped === undefined
+				? null
+				: {
+						at: skipped.at,
+						reason: skipped.reason as BackgroundSkipReason,
+						...(skipped.resumeAt === undefined ? {} : { resumeAt: skipped.resumeAt }),
+					},
 		lastDecision:
 			decided !== undefined && decided.decision !== "dropped" && reviews.includes(decided)
 				? decided.decision

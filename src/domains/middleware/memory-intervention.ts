@@ -10,6 +10,8 @@ import {
 	type ToolResultDigest,
 } from "../../tools/result-disposition.js";
 import { gatewayChainReceipts } from "../../tools/surface.js";
+import type { BackgroundSkipReason } from "../memory/background-budget.js";
+import { BACKGROUND_SKIP_REASONS } from "../memory/background-budget.js";
 import {
 	type MemoryCommitScope,
 	MemoryCommitState,
@@ -90,6 +92,16 @@ export type MemoryInterventionTriggerReason =
 
 /** Reasons a step yielded to occupancy; its triggers stay pending and it runs again when the endpoint has room. */
 const YIELDED_REASONS: ReadonlySet<TaskMemoryPolicyReason> = new Set(["endpoint_busy", "endpoint_preempted"]);
+
+/**
+ * The background budget refused the step before it sent anything (spend,
+ * quota or time). Its triggers are not re-armed: the next cadence tick decides
+ * again, so a refused step is never retried in a loop.
+ */
+function budgetSkipped(reason: TaskMemoryPolicyReason): boolean {
+	return !YIELDED_REASONS.has(reason) && BACKGROUND_SKIP_REASONS.has(reason as BackgroundSkipReason);
+}
+
 /** Reasons that mean the model tier cannot run right now; deterministic rules keep working. */
 const UNAVAILABLE_REASONS: ReadonlySet<TaskMemoryPolicyReason> = new Set([
 	"no_client",
@@ -106,6 +118,8 @@ export type MemoryStepLaunchOutcome =
 	| "yielded"
 	/** The model tier cannot run; rules keep working. */
 	| "unavailable"
+	/** The background budget refused the step; the next cadence tick decides again. */
+	| "skipped"
 	/** Nothing to do, or the scope changed under the step. */
 	| "none";
 /**
@@ -181,6 +195,10 @@ const UNANSWERED_REASONS: ReadonlySet<TaskMemoryPolicyReason> = new Set([
 	"timed_out",
 	"endpoint_busy",
 	"endpoint_preempted",
+	"cost_ceiling",
+	"quota_window",
+	"quota_retry",
+	"time_budget",
 	"client_error",
 	"information_flow_blocked",
 	"no_client",
@@ -434,6 +452,9 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 	// The last launch found the model tier unavailable. Mid-turn boundaries keep
 	// their triggers pending; a turn end or the guardian's recovery wake retries.
 	let lastLaunchUnavailable = false;
+	// The budget refused the last launch. The guardian's idle wake must not ask
+	// again before the next turn boundary, or a refused step would loop.
+	let lastLaunchSkipped = false;
 	let consecutiveErrors = 0;
 	let lastPromptedBoundary: string | null = null;
 	let lastInjectedMessage: string | null = null;
@@ -497,6 +518,7 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 		hooks: ["before_tool", "after_tool", "turn_start", "turn_end", "on_compaction"],
 		evaluate(input): ReadonlyArray<MiddlewareEffect> {
 			observeSession(input);
+			if (input.hook === "turn_end" || input.hook === "turn_start") lastLaunchSkipped = false;
 			if (input.hook === "turn_end") notifyTurnBoundary("end");
 			else if (input.hook === "turn_start" && input.metadata?.requestContinuation !== true) notifyTurnBoundary("start");
 			if (disposed || !settings().enabled) return NO_EFFECTS;
@@ -647,6 +669,9 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 		async runIdleStep(): Promise<MemoryStepLaunchOutcome> {
 			if (disposed || !settings().enabled || promptedStepInFlight) return "none";
 			if (deps.deliversDeferredReminders === false) return "none";
+			// Checked before arming `idle_review`, which would otherwise wait for the
+			// next tool boundary and run a lesson pass mid-turn.
+			if (lastLaunchSkipped) return "skipped";
 			if (pendingTriggers.size === 0) {
 				if (!idleLessonWorth()) return "none";
 				pendingTriggers.add("idle_review");
@@ -699,6 +724,21 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 		})
 			.then((result) => {
 				if (!contentCurrent()) return;
+				if (budgetSkipped(result.reason)) {
+					// Nothing was reviewed. The lesson counters come back so the next turn
+					// end still covers this work; the triggers and the interval count do
+					// not, so the cadence decides again instead of every tool step.
+					if (consolidates) {
+						toolsSinceLessonPass += priorToolsSinceLessonPass;
+						shellStepsSinceLessonPass += priorShellStepsSinceLessonPass;
+					}
+					lastLaunchYielded = false;
+					lastLaunchUnavailable = false;
+					lastLaunchSkipped = true;
+					outcome = "skipped";
+					return;
+				}
+				lastLaunchSkipped = false;
 				const yielded = YIELDED_REASONS.has(result.reason);
 				const unavailable = UNAVAILABLE_REASONS.has(result.reason);
 				if (yielded || unavailable) {
@@ -837,6 +877,7 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 		shellStepsSinceLessonPass = 0;
 		lastLaunchYielded = false;
 		lastLaunchUnavailable = false;
+		lastLaunchSkipped = false;
 		consecutiveErrors = 0;
 		lastPromptedBoundary = null;
 		lastInjectedMessage = null;
@@ -1024,7 +1065,7 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 				});
 		}
 		if (!isCurrent()) return { ...promptedResult, reminder: null, effects: NO_EFFECTS };
-		if (YIELDED_REASONS.has(promptedResult.reason)) telemetryDecision = "dropped";
+		if (YIELDED_REASONS.has(promptedResult.reason) || budgetSkipped(promptedResult.reason)) telemetryDecision = "dropped";
 		if (tier === "llm" && promptedResult.decision === "timeout") consecutiveLlmTimeouts += 1;
 		else if (tier === "llm" && telemetryDecision !== "dropped") consecutiveLlmTimeouts = 0;
 		lastDecision = promptedResult.decision;
@@ -1055,6 +1096,7 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 				bankOperations: promptedResult.bankOperations,
 				droppedOperations: promptedResult.droppedOperations,
 				...(promptedResult.refusalReason === undefined ? {} : { refusalReason: promptedResult.refusalReason }),
+				...(promptedResult.resumeAt === undefined ? {} : { resumeAt: promptedResult.resumeAt }),
 			},
 			attemptRoute,
 		);
@@ -1084,7 +1126,7 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 		inputTokens: number,
 		outputTokens: number,
 		started: bigint,
-		operations: { bankOperations: number; droppedOperations: number; refusalReason?: string } = {
+		operations: { bankOperations: number; droppedOperations: number; refusalReason?: string; resumeAt?: string } = {
 			bankOperations: 0,
 			droppedOperations: 0,
 		},
@@ -1109,6 +1151,7 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 				outputTokens,
 				latencyMs,
 				...(route === undefined ? {} : { route }),
+				...(operations.resumeAt === undefined ? {} : { resumeAt: operations.resumeAt }),
 			});
 		} catch {
 			// Observability must never steer or block the memory policy.
@@ -1122,6 +1165,7 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 			citedEntries,
 			bankWrites: countBankWrites(bankDelta),
 			latencyMs,
+			...(operations.resumeAt === undefined ? {} : { resumeAt: operations.resumeAt }),
 		};
 		activity.unshift(event);
 		if (activity.length > MEMORY_INTERVENTION_ACTIVITY_LIMIT) activity.length = MEMORY_INTERVENTION_ACTIVITY_LIMIT;

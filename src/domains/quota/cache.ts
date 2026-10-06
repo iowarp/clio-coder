@@ -7,6 +7,7 @@
  * memory for this slice; persisting it across sessions is a later concern.
  */
 
+import { noteQuotaRead } from "./observed.js";
 import type { QuotaProvider, UsageSnapshot } from "./types.js";
 
 export const DEFAULT_QUOTA_CACHE_TTL_MS = 5 * 60_000;
@@ -60,6 +61,7 @@ export function createQuotaCache(options: QuotaCacheOptions = {}): QuotaCache {
 
 		write(snapshot) {
 			entries.set(snapshot.providerId, { snapshot, storedAtMs: now() });
+			noteQuotaRead(snapshot, ttlMs, now());
 		},
 
 		clear(providerId) {
@@ -72,6 +74,7 @@ export function createQuotaCache(options: QuotaCacheOptions = {}): QuotaCache {
 			if (fresh(cached) && cached !== undefined) return cached.snapshot;
 
 			const snapshot = await provider.fetch();
+			noteQuotaRead(snapshot, ttlMs, now());
 			if (snapshot.status === "ok") {
 				entries.set(provider.id, { snapshot, storedAtMs: now() });
 				return snapshot;

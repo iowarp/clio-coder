@@ -378,6 +378,36 @@ actually evicted the chat prefix.
 
 </details>
 
+## Background budget
+
+Every model step is admitted against what its route costs before any request
+leaves the process, so a skipped step costs nothing. Clio derives the route's
+kind from its resolved pricing and runtime; there is no setting for it.
+
+- **Metered** routes have a nonzero declared or catalog price. A step runs only
+  while session spend plus its projected cost (estimated prompt tokens at the
+  input rate plus `context.memory.maxOutputTokens` at the output rate) stays
+  below `safety.limits.sessionCostUsd`, where `0` means no ceiling. Otherwise it
+  is skipped with `cost_ceiling`.
+- **Quota** routes bill a subscription Clio reads usage for (Codex, Anthropic
+  OAuth, Claude Code, Antigravity). A step is skipped with `quota_window` while
+  the binding window is at or past the warning level `/usage` draws, and with
+  `quota_retry` while the usage endpoint's 429 retry interval runs. Clio never
+  fetches usage for this, and a missing or stale reading admits the step.
+- **Local** (`known_free`) and **unpriced** routes, such as a LiteLLM proxy
+  without declared `pricing`, have no dollar limit. The endpoint is the budget:
+  a step takes a free slot or is skipped with `endpoint_busy`, and a foreground
+  request still preempts it. Once the endpoint has reported prefill and
+  generation speed, the step's deadline is the time it needs for its prompt plus
+  `context.memory.maxOutputTokens`. When that exceeds `context.memory.timeoutMs`
+  the step is skipped with `time_budget`. With no measurement yet the deadline
+  is `context.memory.timeoutMs`.
+
+A skipped step is recorded in `steps.jsonl` as `dropped` with its reason, plus
+`resumeAt` when Clio knows when room returns (a window reset or a retry instant).
+`/memory` shows the newest skip and that time. A skipped step is not retried;
+the next cadence tick or turn end decides again.
+
 ## Choosing a background model
 
 Memory reads a trajectory and writes a bounded envelope. A small model can reduce
