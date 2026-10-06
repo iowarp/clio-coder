@@ -77,6 +77,8 @@ export interface McpClientOptions {
 	killGraceMs?: number;
 	/** Wait for the group to disappear after SIGKILL before the teardown is reported incomplete. */
 	teardownBoundMs?: number;
+	/** Notify the connection owner of the first transport failure, including an idle server exit. */
+	onFailure?: (error: McpError) => void;
 	/** Aborting this signal closes the client. */
 	signal?: AbortSignal;
 }
@@ -438,6 +440,7 @@ export function createMcpStdioClient(spec: McpServerSpec, options: McpClientOpti
 		options.signal?.removeEventListener("abort", onParentAbort);
 		failure = error;
 		rejectAllPending(error);
+		options.onFailure?.(error);
 	};
 
 	/** The group id may be signalled only while the group is known to be ours (see GroupPhase). */
