@@ -261,7 +261,7 @@ export interface ChatNoticeEvent {
 	/**
 	 * Present only on the transcript notice that closes a turn the operator
 	 * cancelled. The level stays `warning` for headless and protocol surfaces;
-	 * the TUI transcript marks it cancelled, as the footer verb does (BT-013).
+	 * the TUI transcript marks it cancelled, as the footer verb does.
 	 */
 	operatorCancel?: true;
 	/**
