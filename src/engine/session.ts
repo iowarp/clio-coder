@@ -41,6 +41,7 @@ import {
 	unlinkSync,
 	writeSync,
 } from "node:fs";
+import type { BigIntStats } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { StringDecoder } from "node:string_decoder";
 import { normalizeClioCoderEventTree } from "../core/naming-events.js";
@@ -120,6 +121,11 @@ export interface ClioSessionFile {
 	meta: string;
 }
 
+export interface SessionAppendObservation {
+	before: BigIntStats;
+	after: BigIntStats;
+}
+
 export interface ClioSessionWriter {
 	/** Write an ordinary turn as a structured message entry and add its tree node. */
 	append(turn: ClioTurnRecord): void;
@@ -127,7 +133,7 @@ export interface ClioSessionWriter {
 	 * Write a pre-composed structured session entry as a JSON line. Callers
 	 * supply `treeNode` when the entry must project into the turn tree.
 	 */
-	appendEntry(entry: unknown, opts?: { treeNode?: SessionTreeNode }): void;
+	appendEntry(entry: unknown, opts?: { treeNode?: SessionTreeNode; onAppend?: (observation: SessionAppendObservation) => void }): void;
 	/** Atomically replace current.jsonl entries while preserving the session header. */
 	replaceEntries(entries: ReadonlyArray<unknown>): void;
 	persistTree(): Promise<void>;
@@ -307,20 +313,40 @@ function parseSessionJsonlLine(
 	}
 }
 
-export function readSessionFileEntries(path: string, options: SessionJsonlReadOptions = {}): unknown[] {
+export interface SessionJsonlRange {
+	entries: unknown[];
+	completeEntries: number;
+	nextOffset: number;
+	nextLineNumber: number;
+	stat: BigIntStats | null;
+	bytes: Buffer;
+}
+
+/** Keep incomplete final records outside the committed cursor so later appends reparse them. */
+export function readSessionFileEntriesRange(
+	path: string,
+	offset = 0,
+	lineNumber = 0,
+	options: SessionJsonlReadOptions & { retainBytes?: boolean } = {},
+): SessionJsonlRange {
 	const readPath = recoverJsonlTargetIfMissing(path);
-	if (readPath === null) return [];
+	if (readPath === null) return { entries: [], completeEntries: 0, nextOffset: 0, nextLineNumber: 0, stat: null, bytes: Buffer.alloc(0) };
 	const entries: unknown[] = [];
+	const chunks: Buffer[] = [];
 	const warn = options.onWarning ?? defaultSessionJsonlWarning;
 	const fd = openSync(readPath, "r");
 	const buffer = Buffer.allocUnsafe(SESSION_JSONL_READ_CHUNK_BYTES);
 	const decoder = new StringDecoder("utf8");
 	let pending = "";
-	let lineNumber = 0;
+	let position = offset;
+	let nextOffset = offset;
 	try {
-		for (;;) {
-			const bytesRead = readSync(fd, buffer, 0, buffer.length, null);
+		const stat = fstatSync(fd, { bigint: true });
+		const size = Number(stat.size);
+		while (position < size) {
+			const bytesRead = readSync(fd, buffer, 0, Math.min(buffer.length, size - position), position);
 			if (bytesRead === 0) break;
+			if (options.retainBytes !== false) chunks.push(Buffer.from(buffer.subarray(0, bytesRead)));
 			pending += decoder.write(buffer.subarray(0, bytesRead));
 			for (;;) {
 				const newlineIndex = pending.indexOf("\n");
@@ -330,16 +356,21 @@ export function readSessionFileEntries(path: string, options: SessionJsonlReadOp
 				lineNumber += 1;
 				parseSessionJsonlLine(line, lineNumber, readPath, entries, warn);
 			}
+			const lastNewline = buffer.subarray(0, bytesRead).lastIndexOf(0x0a);
+			if (lastNewline >= 0) nextOffset = position + lastNewline + 1;
+			position += bytesRead;
 		}
 		pending += decoder.end();
-		if (pending.length > 0) {
-			lineNumber += 1;
-			parseSessionJsonlLine(pending, lineNumber, readPath, entries, warn);
-		}
+		const completeEntries = entries.length;
+		if (pending.length > 0) parseSessionJsonlLine(pending, lineNumber + 1, readPath, entries, warn);
+		return { entries, completeEntries, nextOffset, nextLineNumber: lineNumber, stat, bytes: Buffer.concat(chunks) };
 	} finally {
 		closeSync(fd);
 	}
-	return entries;
+}
+
+export function readSessionFileEntries(path: string, options: SessionJsonlReadOptions = {}): unknown[] {
+	return readSessionFileEntriesRange(path, 0, 0, { ...options, retainBytes: false }).entries;
 }
 
 export interface SessionTailReadResult {
@@ -446,7 +477,7 @@ function isOptionalString(value: unknown): boolean {
 	return value === undefined || typeof value === "string";
 }
 
-function isSessionJsonlHeader(value: unknown): value is ClioSessionJsonlHeader {
+export function isSessionJsonlHeader(value: unknown): value is ClioSessionJsonlHeader {
 	if (!value || typeof value !== "object") return false;
 	const v = value as Record<string, unknown>;
 	return (
@@ -716,7 +747,12 @@ function createWriter(
 	}
 
 	function openAppendFd(): number {
-		if (appendFd !== null) return appendFd;
+		if (appendFd !== null) {
+			const held = fstatSync(appendFd, { bigint: true });
+			const current = statSync(paths.current, { bigint: true });
+			if (held.dev === current.dev && held.ino === current.ino) return appendFd;
+			closeAppendFd({ flush: true });
+		}
 		const tornTail = !endsWithNewline(paths.current);
 		appendFd = openSync(paths.current, "a");
 		// Terminating the fragment keeps the reader's torn-tail behavior:
@@ -780,15 +816,18 @@ function createWriter(
 		closeSync(fd);
 	}
 
-	function appendLine(entry: unknown): void {
+	function appendLine(entry: unknown): SessionAppendObservation {
 		const serialized = JSON.stringify(entry);
 		if (serialized === undefined) {
 			throw new Error("session JSONL entry is not serializable");
 		}
+		let observation: SessionAppendObservation;
 		try {
 			const fd = openAppendFd();
+			const before = fstatSync(fd, { bigint: true });
 			pendingFsync = true;
 			appendAll(fd, Buffer.from(`${serialized}\n`, "utf8"));
+			observation = { before, after: fstatSync(fd, { bigint: true }) };
 		} catch (error) {
 			// Reopening rechecks the tail even if rollback itself failed.
 			try {
@@ -801,6 +840,7 @@ function createWriter(
 			throw error;
 		}
 		scheduleFsync();
+		return observation;
 	}
 
 	return {
@@ -816,11 +856,12 @@ function createWriter(
 				kind: turn.kind,
 			});
 		},
-		appendEntry(entry: unknown, opts?: { treeNode?: SessionTreeNode }): void {
+		appendEntry(entry: unknown, opts?: { treeNode?: SessionTreeNode; onAppend?: (observation: SessionAppendObservation) => void }): void {
 			if (closed) throw new Error("session writer closed");
-			appendLine(entry);
+			const observation = appendLine(entry);
 			fileEntries.push(entry);
 			if (opts?.treeNode) tree.push(opts.treeNode);
+			opts?.onAppend?.(observation);
 		},
 		replaceEntries(entries: ReadonlyArray<unknown>): void {
 			if (closed) throw new Error("session writer closed");

@@ -28,7 +28,8 @@
 
 import { performance } from "node:perf_hooks";
 import type { RetrySettings } from "../../core/defaults.js";
-import { engineRetryDelayMs, isEngineRetryableAssistantError } from "../../engine/ai.js";
+import { isLiteLLMConnectionFailure } from "../../core/gateway-routing.js";
+import { engineRetryDelayMs, isEngineContextOverflow, isEngineRetryableAssistantError } from "../../engine/ai.js";
 
 export type { RetrySettings } from "../../core/defaults.js";
 
@@ -109,6 +110,59 @@ export function computeRetryDelayMs(
 	// wants short waits keeps them.
 	if (!isModelLoadingErrorMessage(errorMessage)) return base;
 	return Math.min(Math.max(base, MODEL_LOADING_MIN_DELAY_MS), settings.maxDelayMs);
+}
+
+export type RecoveryFailureKind =
+	| "cancelled"
+	| "context-overflow"
+	| "connection"
+	| "model-loading"
+	| "transient-provider"
+	| "terminal-provider";
+
+export type RecoveryFailure = {
+	[Kind in RecoveryFailureKind]: {
+		kind: Kind;
+		message: string;
+		cause?: unknown;
+		status?: unknown;
+	};
+}[RecoveryFailureKind];
+
+export interface RecoveryFailureInput {
+	message: string;
+	runtimeId: string;
+	cancelled?: boolean;
+	contextOverflow?: boolean;
+	hasAttemptOutput?: boolean;
+	cause?: unknown;
+	status?: unknown;
+}
+
+/** Preserve route policy at the recovery boundary, before any backoff decision. */
+export function classifyRecoveryFailure(input: RecoveryFailureInput): RecoveryFailure {
+	let kind: RecoveryFailureKind;
+	if (input.cancelled) kind = "cancelled";
+	else if (input.contextOverflow ?? isEngineContextOverflow(input.message)) kind = "context-overflow";
+	else if (input.runtimeId === "litellm") {
+		kind = !input.hasAttemptOutput && isLiteLLMConnectionFailure(input.message) ? "connection" : "terminal-provider";
+	} else if (isModelLoadingErrorMessage(input.message)) kind = "model-loading";
+	else kind = isEngineRetryableAssistantError(input.message) ? "transient-provider" : "terminal-provider";
+	return {
+		kind,
+		message: input.message,
+		...(input.cause !== undefined ? { cause: input.cause } : {}),
+		...(input.status !== undefined ? { status: input.status } : {}),
+	};
+}
+
+export function isRetryableRecoveryFailure(failure: RecoveryFailure): boolean {
+	return failure.kind === "connection" || failure.kind === "model-loading" || failure.kind === "transient-provider";
+}
+
+export function recoveryRetryDelayMs(attempt: number, settings: RetrySettings, failure: RecoveryFailure): number {
+	const base = engineRetryDelayMs(settings.baseDelayMs, settings.maxDelayMs, Math.max(1, Math.floor(attempt)));
+	return failure.kind === "model-loading" ? Math.min(Math.max(base, MODEL_LOADING_MIN_DELAY_MS), settings.maxDelayMs) : base;
 }
 
 /**
@@ -204,7 +258,7 @@ export function createRetryCountdown(options: RetryCountdownOptions): RetryCount
 		}
 		state.seconds = Math.max(0, Math.ceil(remaining / 1000));
 		emit();
-		timer = setTimer(schedule, 1000);
+		timer = setTimer(schedule, Math.min(remaining, 1000));
 	};
 
 	schedule();

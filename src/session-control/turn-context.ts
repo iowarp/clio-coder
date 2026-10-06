@@ -129,6 +129,7 @@ import type { AgentRuntime, ChatTurnState } from "./turn-state.js";
 const AUTO_COMPACT_FAILURE_LIMIT = 3;
 
 export interface TurnContextDeps {
+	turnSignal?: () => AbortSignal | undefined;
 	memoryCommitBridge?: MemoryInterventionRegistration | undefined;
 	interactiveGuidance?: boolean;
 	/** An ACP client that advertised interviews: ask_user guidance without the TUI-only demo tips. */
@@ -418,6 +419,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 	const { state, middleware } = deps;
 	const compactionTrigger = new AutoCompactionTrigger<CompactResult | null>();
 	let compactionController: AbortController | null = null;
+	let disposed = false;
 
 	let currentContextSnapshot: ContextSnapshot | null = null;
 	/**
@@ -2020,6 +2022,10 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		 * "promptRecompiled" ledger entry (written once the session exists).
 		 */
 		async ensureSessionPrompt(agentRuntime: AgentRuntime): Promise<CompiledSessionPrompt | null> {
+			const signal = deps.turnSignal?.();
+			const originNavigation = navigationEpoch;
+			const current = (): boolean => !disposed && !signal?.aborted && originNavigation === navigationEpoch;
+			if (!current()) return null;
 			if (!deps.prompts) return null;
 			const settings = deps.getSettings();
 			const autonomy = settings.safety.autonomy ?? "default";
@@ -2120,6 +2126,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 						// A ranking that cannot be produced leaves memory in its base order.
 						relevance = undefined;
 					}
+					if (!current()) return null;
 					const memorySection = deps.getMemorySection({
 						...memoryRequest,
 						...(relevance === undefined ? {} : { precomputedRelevance: relevance }),
@@ -2159,6 +2166,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 					workingContextPaths: [...sessionWorkingContextPaths],
 					...(sessionStartedAt ? { sessionStartedAt } : {}),
 				});
+				if (!current()) return null;
 				const compiledAt = new Date().toISOString();
 				const previousHash = sessionPromptHash ?? lastRecordedPromptHash();
 				const changed = agentRuntime.agent.state.systemPrompt !== result.systemPrompt;
@@ -2207,6 +2215,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 				sessionPromptKey = key;
 				return result;
 			} catch (err) {
+				if (!current()) return null;
 				deps.emitNotice(
 					`[Clio Coder] prompt compile failed; using fallback identity: ${err instanceof Error ? err.message : String(err)}`,
 				);
@@ -2508,6 +2517,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		},
 
 		dispose(): void {
+			disposed = true;
 			compactionController?.abort();
 			for (const unsubscribe of unsubscribeColdReasonSources) unsubscribe?.();
 		},

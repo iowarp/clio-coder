@@ -6,23 +6,22 @@
  * terminal failure.
  */
 
-import { isLiteLLMConnectionFailure } from "../core/gateway-routing.js";
 import type { toContextOverflowError } from "../domains/providers/errors.js";
 import {
-	computeRetryDelayMs,
+	classifyRecoveryFailure,
+	recoveryRetryDelayMs,
 	createRetryCountdown,
-	isRetryableErrorMessage,
-	type RetryCountdownHandle,
-	type RetrySettings,
+	isRetryableRecoveryFailure,
 } from "../domains/session/retry.js";
+import type { RecoveryFailure, RetryCountdownHandle, RetrySettings } from "../domains/session/retry.js";
 import type { AgentMessage, ImageContent, MutableAgentState } from "../engine/types.js";
 import {
 	detectOverflowFromState,
 	detectTerminalFailureFromState,
 	isEmptyAbortedAssistantMessage,
 	pruneFailedAssistantFromContext,
-	type TerminalAssistantFailure,
 } from "./chat-loop-messages.js";
+import type { TerminalAssistantFailure } from "./chat-loop-messages.js";
 import type { TurnContext } from "./turn-context.js";
 import type { TurnPersistence } from "./turn-persistence.js";
 import type { AgentRuntime, ChatTurnState } from "./turn-state.js";
@@ -44,6 +43,8 @@ export interface RetryStatusEvent {
 }
 
 export interface TurnRecoveryDeps {
+	turnSignal?: () => AbortSignal | undefined;
+	turnIdentity?: () => unknown;
 	state: ChatTurnState;
 	persistence: TurnPersistence;
 	context: TurnContext;
@@ -65,6 +66,8 @@ export interface TurnRecovery {
 		agentRuntime: AgentRuntime,
 		text: string,
 		initialFailure: TerminalAssistantFailure,
+		attemptMessages?: ReadonlyArray<AgentMessage>,
+		classification?: RecoveryFailure,
 	): Promise<boolean>;
 	ensureFailureVisibleAndPersisted(failure: TerminalAssistantFailure): void;
 	cancelRetryCountdown(): void;
@@ -116,6 +119,18 @@ export function rewriteStallAbortMessage(
 	return true;
 }
 
+export function recoveryAttemptHasOutput(messages: ReadonlyArray<AgentMessage>): boolean {
+	return messages.some((message) => {
+		if (message.role === "toolResult") return true;
+		if (message.role !== "assistant") return false;
+		return message.content.some((block) =>
+			block.type === "toolCall" ||
+			(block.type === "text" && block.text.length > 0) ||
+			(block.type === "thinking" && block.thinking.length > 0),
+		);
+	});
+}
+
 export function createTurnRecovery(deps: TurnRecoveryDeps): TurnRecovery {
 	const { state, persistence, context } = deps;
 	let retryCountdown: RetryCountdownHandle | null = null;
@@ -141,7 +156,14 @@ export function createTurnRecovery(deps: TurnRecoveryDeps): TurnRecovery {
 	};
 
 	const waitForRetryCountdown = async (status: RetryStatusPayload): Promise<"done" | "cancelled"> => {
+		const signal = deps.turnSignal?.();
+		if (signal?.aborted) return "cancelled";
 		return new Promise((resolve) => {
+			const onAbort = (): void => { currentHandle?.cancel(); };
+			const finish = (result: "done" | "cancelled"): void => {
+				signal?.removeEventListener("abort", onAbort);
+				resolve(result);
+			};
 			let settled = false;
 			let currentHandle: RetryCountdownHandle | null = null;
 			const handle = createRetryCountdown({
@@ -158,16 +180,20 @@ export function createTurnRecovery(deps: TurnRecoveryDeps): TurnRecovery {
 				onDone: () => {
 					settled = true;
 					if (retryCountdown === currentHandle) retryCountdown = null;
-					resolve("done");
+					finish("done");
 				},
 				onCancel: () => {
 					settled = true;
 					if (retryCountdown === currentHandle) retryCountdown = null;
-					resolve("cancelled");
+					finish("cancelled");
 				},
 			});
 			currentHandle = handle;
 			retryCountdown = settled ? null : handle;
+			if (!settled) {
+				signal?.addEventListener("abort", onAbort, { once: true });
+				if (signal?.aborted) handle.cancel();
+			}
 		});
 	};
 
@@ -185,6 +211,10 @@ export function createTurnRecovery(deps: TurnRecoveryDeps): TurnRecovery {
 		overflow: NonNullable<ReturnType<typeof toContextOverflowError>>,
 		images?: ReadonlyArray<ImageContent>,
 	): Promise<void> => {
+		const signal = deps.turnSignal?.();
+		const identity = deps.turnIdentity?.();
+		const cancelled = (): boolean => signal?.aborted === true || identity !== deps.turnIdentity?.();
+		if (cancelled()) return;
 		const windowUnknown = agentRuntime.runtimeResolution.contextWindowDetails.effectiveContextWindow <= 0;
 		deps.emitNotice(
 			windowUnknown
@@ -198,10 +228,12 @@ export function createTurnRecovery(deps: TurnRecoveryDeps): TurnRecovery {
 			mutableState.errorMessage = undefined;
 			compacted = await context.runAutoCompact(agentRuntime, true, undefined, "overflow");
 		} catch (compactErr) {
+			if (cancelled()) return;
 			deps.emitNotice(
 				`[Clio Coder] compact-on-overflow failed: ${compactErr instanceof Error ? compactErr.message : String(compactErr)}`,
 			);
 		}
+		if (cancelled()) return;
 		if (!compacted) {
 			deps.emitNotice(
 				`[Clio Coder] context overflow could not be compacted: ${overflow.message}. Use /context compact or reduce the request.`,
@@ -209,12 +241,14 @@ export function createTurnRecovery(deps: TurnRecoveryDeps): TurnRecovery {
 			return;
 		}
 		try {
-			await deps.markPersistedUserEcho(text, () => agentRuntime.agent.prompt(text, images ? [...images] : undefined));
+			await deps.markPersistedUserEcho(text, () => cancelled() ? Promise.resolve() : agentRuntime.agent.prompt(text, images ? [...images] : undefined));
+			if (cancelled()) return;
 			const stillOverflowed = detectOverflowFromState(agentRuntime.agent);
 			if (stillOverflowed) {
 				deps.emitNotice(`[Clio Coder] context overflow persisted after compaction: ${stillOverflowed.message}`);
 			}
 		} catch (retryErr) {
+			if (cancelled()) return;
 			deps.emitNotice(
 				`[Clio Coder] context overflow persisted after compaction: ${retryErr instanceof Error ? retryErr.message : String(retryErr)}`,
 			);
@@ -225,19 +259,31 @@ export function createTurnRecovery(deps: TurnRecoveryDeps): TurnRecovery {
 		agentRuntime: AgentRuntime,
 		text: string,
 		initialFailure: TerminalAssistantFailure,
+		attemptMessages?: ReadonlyArray<AgentMessage>,
+		classification?: RecoveryFailure,
 	): Promise<boolean> => {
+		const signal = deps.turnSignal?.();
+		const identity = deps.turnIdentity?.();
+		const cancelled = (): boolean => signal?.aborted === true || identity !== deps.turnIdentity?.();
+		if (cancelled()) return true;
 		// Retry only a client connection failure before output on this exact
 		// route. Keep HTTP gateway/backend failures terminal and never substitute
 		// a model. The SDK itself still performs no hidden gateway retries.
-		const canRetry = (message: string): boolean =>
-			agentRuntime.runtimeId === "litellm" ? isLiteLLMConnectionFailure(message) : isRetryableErrorMessage(message);
-		if (agentRuntime.runtimeId === "litellm" && !canRetry(initialFailure.errorMessage)) {
+		const classify = (failure: TerminalAssistantFailure, messages: ReadonlyArray<AgentMessage>): RecoveryFailure =>
+			classifyRecoveryFailure({
+				message: failure.errorMessage,
+				runtimeId: agentRuntime.runtimeId,
+				cancelled: cancelled() || state.activeInterruptReason !== null || failure.stopReason === "aborted",
+				hasAttemptOutput: recoveryAttemptHasOutput(messages),
+			});
+		let classified = classification ?? classify(initialFailure, attemptMessages ?? (initialFailure.message ? [initialFailure.message] : []));
+		if (agentRuntime.runtimeId === "litellm" && !isRetryableRecoveryFailure(classified)) {
 			ensureFailureVisibleAndPersisted(initialFailure);
 			return true;
 		}
 		const settings = deps.retrySettings();
 		if (!settings.enabled || settings.maxRetries <= 0) return false;
-		if (initialFailure.stopReason === "aborted" || !canRetry(initialFailure.errorMessage)) return false;
+		if (!isRetryableRecoveryFailure(classified)) return false;
 
 		let failure = initialFailure;
 		for (let attempt = 1; attempt <= settings.maxRetries; attempt += 1) {
@@ -248,12 +294,13 @@ export function createTurnRecovery(deps: TurnRecoveryDeps): TurnRecovery {
 				phase: "scheduled",
 				attempt,
 				maxAttempts: settings.maxRetries,
-				delayMs: computeRetryDelayMs(attempt, settings, failure.errorMessage),
+				delayMs: recoveryRetryDelayMs(attempt, settings, classified),
 				errorMessage: failure.errorMessage,
 			};
 			recordRetryStatus(scheduled);
 			const countdown = await waitForRetryCountdown(scheduled);
-			if (countdown === "cancelled") {
+			if (identity !== deps.turnIdentity?.()) return true;
+			if (countdown === "cancelled" || cancelled()) {
 				recordRetryStatus({
 					phase: "cancelled",
 					attempt,
@@ -274,11 +321,21 @@ export function createTurnRecovery(deps: TurnRecoveryDeps): TurnRecovery {
 				false,
 			);
 
+			if (cancelled()) return true;
+			const attemptStart = agentRuntime.agent.state.messages.length;
 			try {
 				await agentRuntime.agent.continue();
 			} catch (err) {
+				if (cancelled()) return true;
 				const message = err instanceof Error ? err.message : String(err);
-				if (!canRetry(message) || attempt >= settings.maxRetries) {
+				classified = classifyRecoveryFailure({
+					message,
+					runtimeId: agentRuntime.runtimeId,
+					hasAttemptOutput: recoveryAttemptHasOutput(agentRuntime.agent.state.messages.slice(attemptStart)),
+					cause: err,
+					...(typeof err === "object" && err !== null && "status" in err ? { status: err.status } : {}),
+				});
+				if (!isRetryableRecoveryFailure(classified) || attempt >= settings.maxRetries) {
 					recordRetryStatus({
 						phase: "exhausted",
 						attempt,
@@ -294,6 +351,7 @@ export function createTurnRecovery(deps: TurnRecoveryDeps): TurnRecovery {
 				continue;
 			}
 
+			if (cancelled()) return true;
 			const overflow = detectOverflowFromState(agentRuntime.agent);
 			if (overflow) {
 				await runCompactAndRetry(agentRuntime, text, overflow);
@@ -314,7 +372,8 @@ export function createTurnRecovery(deps: TurnRecoveryDeps): TurnRecovery {
 			// watchdog's abort as an operator cancel and stop one rung in.
 			const nextFailure = reclassifyStallAbort(state, settled);
 			ensureFailureVisibleAndPersisted(nextFailure);
-			if (nextFailure.stopReason === "aborted" || !canRetry(nextFailure.errorMessage)) {
+			classified = classify(nextFailure, agentRuntime.agent.state.messages.slice(attemptStart));
+			if (!isRetryableRecoveryFailure(classified)) {
 				pruneFailedAssistantFromContext(agentRuntime.agent);
 				return true;
 			}
