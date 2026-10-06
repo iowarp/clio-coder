@@ -590,6 +590,7 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 		deps.runtimeHooks?.bind({
 			hook: (extensionId, event, timeoutMs, signal) => operatorExtensions.hook(extensionId, event, timeoutMs, signal),
 			notify: (message) => notify("warning", message, "operator-extensions:hook"),
+			observeTurnStart: (text) => turnObservations?.turnStart(text),
 		});
 	const workspaceSurfaces = operatorExtensions
 		? createWorkspaceSurfaces({

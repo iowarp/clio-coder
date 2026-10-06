@@ -66,6 +66,8 @@ export interface ObservedTurnSummary {
  * the turn's position in this session, since the summary carries none.
  */
 export function createTurnObservations(observe: (observation: ExtensionObservationV2) => void): {
+	/** The access filter strips `text` for an extension that did not declare `prompt`. */
+	turnStart(text: string): void;
 	toolStart(toolCallId: string): void;
 	toolEnd(toolName: string, toolCallId: string, isError: boolean): void;
 	turnEnd(summary: ObservedTurnSummary): void;
@@ -80,6 +82,9 @@ export function createTurnObservations(observe: (observation: ExtensionObservati
 		}
 	};
 	return {
+		turnStart(text) {
+			send({ event: "turn_start", turnId: `turn-${turn + 1}`, text });
+		},
 		toolStart(toolCallId) {
 			started.set(toolCallId, performance.now());
 		},

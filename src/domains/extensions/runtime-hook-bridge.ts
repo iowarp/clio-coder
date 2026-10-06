@@ -11,6 +11,8 @@ export interface ExtensionRuntimeHookExecutor {
 	): Promise<ExtensionHookOutcome>;
 	/** One operator notice naming the extension, the event and the reason. */
 	notify(message: string): void;
+	/** A prompt passed the prompt gate and starts a turn; delivered as the `turn_start` observation. */
+	observeTurnStart?(text: string): void;
 }
 
 /**

@@ -401,7 +401,8 @@ export interface HookReceipt {
 	origin: UserHookOrigin;
 	sourcePath: string;
 	hash: string;
-	hook: MiddlewareHook;
+	/** `prompt_submit` is an extension runtime point with no middleware hook of its own. */
+	hook: MiddlewareHook | "prompt_submit";
 	/** `runtime` is an extension runtime hook; it never comes from a hooks.yaml file. */
 	kind: UserHookKind | "runtime";
 	outcome: UserHookOutcome | "runtime-ok" | "runtime-failed" | "runtime-timeout";

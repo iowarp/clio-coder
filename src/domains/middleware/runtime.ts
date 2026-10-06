@@ -64,11 +64,12 @@ export interface MiddlewareHookRegistration {
 	): Promise<ReadonlyArray<MiddlewareEffect>>;
 	/**
 	 * The async phase also runs at before_tool and after_tool, awaited by the
-	 * tool registry. Only extension runtime hooks set it; every other async
-	 * phase stays at turn boundaries, so a tool call awaits nothing unless one
-	 * of these matches.
+	 * tool registry, and at turn_start, awaited by the turn middleware. Only
+	 * extension runtime hooks set it; every other async phase stays at
+	 * turn_end, so a tool call or a turn start awaits nothing unless one of
+	 * these matches.
 	 */
-	awaitedAtTools?: true;
+	awaited?: true;
 }
 
 /**

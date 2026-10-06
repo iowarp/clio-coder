@@ -56,6 +56,12 @@ export interface TurnMiddleware {
 		pendingSkillRequestCount?: number,
 		requestContinuation?: boolean,
 	): void;
+	/**
+	 * The awaited turn_start phase for extension runtime hooks, run after
+	 * `fireTurnStart` and before the pending reminders are taken. It awaits
+	 * nothing unless an awaited registration matches turn_start.
+	 */
+	awaitTurnStart(agentRuntime: AgentRuntime, promptText: string, pendingSkillRequestCount?: number): Promise<void>;
 	fireTurnEnd(
 		agentRuntime: AgentRuntime,
 		messages: ReadonlyArray<AgentMessage>,
@@ -283,6 +289,46 @@ export function createTurnMiddleware(deps: TurnMiddlewareDeps): TurnMiddleware {
 		return null;
 	};
 
+	const turnStartInput = (
+		agentRuntime: AgentRuntime,
+		promptText: string,
+		pendingSkillRequestCount: number,
+		requestContinuation: boolean,
+	): MiddlewareHookInput => {
+		const sessionId = deps.session?.current()?.id;
+		return {
+			hook: "turn_start",
+			...(sessionId ? { sessionId } : {}),
+			modelId: agentRuntime.wireModelId,
+			// The raw user text so the skills reminder can tell a substantive task
+			// turn from a bare greeting; the runtime caps it on clone.
+			text: promptText.slice(0, MIDDLEWARE_HOOK_TEXT_MAX_CHARS),
+			metadata: {
+				promptChars: promptText.length,
+				queued: false,
+				requestContinuation,
+				turnMode: state.currentTurnConstraints?.mode ?? "",
+				activeToolNames: toolNamesFromAgentState(agentRuntime.agent.state.tools).join(","),
+				activeCapabilityNames: activeCapabilityNames(agentRuntime),
+				// First-substantive-turn signal for once-per-session reminders:
+				// a fresh session's opening turn has an empty conversation.
+				conversationMessages: agentRuntime.agent.state.messages.filter((message) => message.role !== "system").length,
+				pendingSkillRequests: pendingSkillRequestCount,
+			},
+		};
+	};
+
+	const applyTurnStartEffects = (effects: ReadonlyArray<MiddlewareEffect>): void => {
+		middlewareToolChoice.apply(effects);
+		for (const effect of effects) {
+			if (effect.kind === "inject_reminder") {
+				bufferReminder(effect.message, effect.severity ?? "info");
+			} else if (effect.kind === "notify_operator") {
+				notifyOperator(effect.message, effect.key);
+			}
+		}
+	};
+
 	return {
 		async prepareToolContinuation(agentRuntime, signal): Promise<boolean> {
 			const sessionId = deps.session?.current()?.id;
@@ -320,38 +366,21 @@ export function createTurnMiddleware(deps: TurnMiddlewareDeps): TurnMiddleware {
 		},
 
 		fireTurnStart(agentRuntime, promptText, pendingSkillRequestCount = 0, requestContinuation = false): void {
-			const sessionId = deps.session?.current()?.id;
-			const input: MiddlewareHookInput = {
-				hook: "turn_start",
-				...(sessionId ? { sessionId } : {}),
-				modelId: agentRuntime.wireModelId,
-				// The raw user text so the skills reminder can tell a substantive task
-				// turn from a bare greeting; the runtime caps it on clone.
-				text: promptText.slice(0, MIDDLEWARE_HOOK_TEXT_MAX_CHARS),
-				metadata: {
-					promptChars: promptText.length,
-					queued: false,
-					requestContinuation,
-					turnMode: state.currentTurnConstraints?.mode ?? "",
-					activeToolNames: toolNamesFromAgentState(agentRuntime.agent.state.tools).join(","),
-					activeCapabilityNames: activeCapabilityNames(agentRuntime),
-					// First-substantive-turn signal for once-per-session reminders:
-					// a fresh session's opening turn has an empty conversation.
-					conversationMessages: agentRuntime.agent.state.messages.filter((message) => message.role !== "system").length,
-					pendingSkillRequests: pendingSkillRequestCount,
-				},
-			};
+			const input = turnStartInput(agentRuntime, promptText, pendingSkillRequestCount, requestContinuation);
 			// The skills reminder and the marketplace offer each list installed
 			// skills on a session's first substantive turn. One discovery pass
 			// verifies every plugin tree once for all turn_start registrations.
-			const effects = withPluginDiscoveryPass(() => runMiddlewareTurnHook(input));
-			middlewareToolChoice.apply(effects);
-			for (const effect of effects) {
-				if (effect.kind === "inject_reminder") {
-					bufferReminder(effect.message, effect.severity ?? "info");
-				} else if (effect.kind === "notify_operator") {
-					notifyOperator(effect.message, effect.key);
-				}
+			applyTurnStartEffects(withPluginDiscoveryPass(() => runMiddlewareTurnHook(input)));
+		},
+
+		async awaitTurnStart(agentRuntime, promptText, pendingSkillRequestCount = 0): Promise<void> {
+			if (!deps.middleware?.hasAwaitedHook?.("turn_start") || !deps.middleware.runAwaitedHook) return;
+			const input = turnStartInput(agentRuntime, promptText, pendingSkillRequestCount, false);
+			try {
+				applyTurnStartEffects((await deps.middleware.runAwaitedHook(input)).effects);
+			} catch {
+				// Registrations isolate their own failures; anything escaping is a
+				// runtime bug and must not stop the turn.
 			}
 		},
 

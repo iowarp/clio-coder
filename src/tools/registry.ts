@@ -771,7 +771,7 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 			let block = firstBlockToolEffect(beforeEffects);
 			// Extension runtime hooks are awaited only when one matches this tool,
 			// so a call nothing gates takes no extra turn of the event loop.
-			if (!block && deps.middleware?.hasToolAsyncHook?.("before_tool", spec.name)) {
+			if (!block && deps.middleware?.hasAwaitedHook?.("before_tool", spec.name)) {
 				const awaited = await runAwaitedToolHook("before_tool", spec, call, decision, options, beforeEffects);
 				beforeEffects = [...beforeEffects, ...awaited];
 				block = firstBlockToolEffect(awaited);
@@ -866,7 +866,7 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 				observeExternalResult(spec, call, labeled, options, carriedForScreen);
 				const digest = toolResultDigestFor(spec, labeled, resultDisposition, options);
 				const syncAfter = runToolHook("after_tool", spec, call, decision, options, labeled, digest);
-				const afterEffects = deps.middleware?.hasToolAsyncHook?.("after_tool", spec.name)
+				const afterEffects = deps.middleware?.hasAwaitedHook?.("after_tool", spec.name)
 					? [
 							...syncAfter,
 							...(await runAwaitedToolHook("after_tool", spec, call, decision, options, syncAfter, labeled, digest, bodyMs())),
@@ -899,7 +899,7 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 				const result: ToolResult = withFlowRestrictions({ kind: "error", message }, thrownRestrictions);
 				const digest = toolResultDigestFor(spec, result, resultDisposition, options);
 				const syncAfter = runToolHook("after_tool", spec, call, decision, options, result, digest);
-				const afterEffects = deps.middleware?.hasToolAsyncHook?.("after_tool", spec.name)
+				const afterEffects = deps.middleware?.hasAwaitedHook?.("after_tool", spec.name)
 					? [
 							...syncAfter,
 							...(await runAwaitedToolHook("after_tool", spec, call, decision, options, syncAfter, result, digest, bodyMs())),
@@ -994,7 +994,7 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 		resultDigest?: ToolResultDigest,
 		durationMs?: number,
 	): Promise<ReadonlyArray<MiddlewareEffect>> => {
-		if (!deps.middleware?.runToolAsyncHook) return [];
+		if (!deps.middleware?.runAwaitedHook) return [];
 		const built = buildToolHookInput(
 			hook,
 			spec,
@@ -1009,7 +1009,7 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 		const input = durationMs === undefined ? built : { ...built, metadata: { ...built.metadata, durationMs } };
 		let effects: ReadonlyArray<MiddlewareEffect>;
 		try {
-			effects = (await deps.middleware.runToolAsyncHook(input, priorEffects)).effects;
+			effects = (await deps.middleware.runAwaitedHook(input, priorEffects)).effects;
 		} catch {
 			// Registrations isolate their own failures; anything escaping is a runtime bug and changes no call.
 			return [];

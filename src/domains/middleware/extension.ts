@@ -82,19 +82,19 @@ export function createMiddlewareBundle(options: MiddlewareBundleOptions = {}): D
 				...(diagnosticSink !== undefined ? { onDiagnostic: diagnosticSink } : {}),
 			});
 		},
-		hasToolAsyncHook(hook, toolName) {
+		hasAwaitedHook(hook, toolName) {
 			return table
 				.list()
 				.some(
 					(registration) =>
-						registration.awaitedAtTools === true &&
+						registration.awaited === true &&
 						registration.hooks.includes(hook) &&
-						(registration.toolNames === undefined || registration.toolNames.includes(toolName)),
+						(registration.toolNames === undefined || (toolName !== undefined && registration.toolNames.includes(toolName))),
 				);
 		},
-		runToolAsyncHook(input, priorEffects = []) {
+		runAwaitedHook(input, priorEffects = []) {
 			return runMiddlewareAsyncRegistrations(input, table.list(), priorEffects, {
-				include: (registration) => registration.awaitedAtTools === true,
+				include: (registration) => registration.awaited === true,
 				...(diagnosticSink !== undefined ? { onDiagnostic: diagnosticSink } : {}),
 			});
 		},

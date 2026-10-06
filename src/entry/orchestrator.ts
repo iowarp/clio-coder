@@ -3781,6 +3781,25 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		getAutonomy: resolveEffectiveAutonomy,
 		providers,
 		middleware,
+		// Prompt hooks run only where runtime hooks do. The turn_start
+		// observation rides the same seam, so it names the line the operator
+		// typed (or a hook's rewrite of it), never an expanded template body.
+		...(runtimeHooks
+			? {
+					promptSubmit: async ({ typed, text }: { typed: string; text: string }) => {
+						const gate = extensionReload.promptGate();
+						const verdict =
+							gate !== null && gate.size > 0
+								? await gate.run(typed, typed === text)
+								: { kind: "pass" as const, text: typed, notices: [] };
+						const executor = runtimeHooks.current();
+						for (const notice of verdict.notices) executor?.notify(notice);
+						if (verdict.kind === "block") return { kind: "block" as const, reason: verdict.reason };
+						executor?.observeTurnStart?.(verdict.text);
+						return { kind: "pass" as const, text: verdict.text === typed ? text : verdict.text };
+					},
+				}
+			: {}),
 		middlewareToolChoice,
 		protectedArtifacts: {
 			replace: (state) => protectedArtifactsGuard.replaceState(state),

@@ -46,7 +46,11 @@ import {
 	type UserHookCommandRunner,
 } from "../domains/middleware/index.js";
 import { capturedHookSourcesFor } from "./extension-hook-sources.js";
-import { buildExtensionRuntimeHookRegistrations } from "./extension-runtime-hooks.js";
+import {
+	buildExtensionPromptGate,
+	buildExtensionRuntimeHookRegistrations,
+	type ExtensionPromptGate,
+} from "./extension-runtime-hooks.js";
 
 export interface ExtensionReloadHookSummary {
 	/** Registrations published for the owner in this generation. */
@@ -100,6 +104,8 @@ export interface ExtensionReloadCoordinator {
 	applyBoot(): ExtensionReloadOutcome;
 	/** Operator or programmatic reload. Synchronous and never throws. */
 	reload(): ExtensionReloadOutcome;
+	/** The prompt_submit hooks of the published generation; null before one exists or without runtime hooks. */
+	promptGate(): ExtensionPromptGate | null;
 }
 
 /** Cap on issue lines carried in one outcome so an operator surface stays bounded. */
@@ -134,6 +140,7 @@ function issueLines(
 
 export function createExtensionReloadCoordinator(deps: ExtensionReloadCoordinatorDeps): ExtensionReloadCoordinator {
 	let inFlight = false;
+	let promptGate: ExtensionPromptGate | null = null;
 
 	const build = (workspace: string, captured: CapturedHookSourceSet | null): BuildUserHookRegistrationsResult =>
 		buildUserHookRegistrations({
@@ -245,14 +252,19 @@ export function createExtensionReloadCoordinator(deps: ExtensionReloadCoordinato
 					),
 				});
 			}
+			const runtimeHookOptions = {
+				generation: candidate.generation,
+				recordReceipt: deps.recordReceipt,
+				...(deps.now !== undefined ? { now: deps.now } : {}),
+			};
 			const runtimeRegistrations =
 				deps.runtimeHooks === undefined
 					? []
-					: buildExtensionRuntimeHookRegistrations(candidate.snapshot.packages, deps.runtimeHooks, {
-							generation: candidate.generation,
-							recordReceipt: deps.recordReceipt,
-							...(deps.now !== undefined ? { now: deps.now } : {}),
-						});
+					: buildExtensionRuntimeHookRegistrations(candidate.snapshot.packages, deps.runtimeHooks, runtimeHookOptions);
+			const nextPromptGate =
+				deps.runtimeHooks === undefined
+					? null
+					: buildExtensionPromptGate(candidate.snapshot.packages, deps.runtimeHooks, runtimeHookOptions);
 			const preparedReplacement = deps.middleware.prepareRegistrationReplacement("user-hooks", candidate.generation, [
 				...built.registrations,
 				...runtimeRegistrations,
@@ -283,6 +295,7 @@ export function createExtensionReloadCoordinator(deps: ExtensionReloadCoordinato
 			}
 			candidate.publish();
 			replacement.publish();
+			promptGate = nextPromptGate;
 			// Both references are live. Observers may run from here on.
 			replacement.emitConflicts();
 			const lines = issueLines(built, replacement.dropped);
@@ -329,5 +342,6 @@ export function createExtensionReloadCoordinator(deps: ExtensionReloadCoordinato
 	return {
 		applyBoot: () => run(true),
 		reload: () => run(false),
+		promptGate: () => promptGate,
 	};
 }

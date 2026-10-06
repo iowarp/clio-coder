@@ -8,6 +8,7 @@ import {
 	envelopeDigest,
 	type InstalledExtension,
 	isLoadableExtension,
+	type LoadableExtension,
 } from "../domains/extensions/index.js";
 import type {
 	HookReceipt,
@@ -62,7 +63,7 @@ function middlewareEffect(effect: ExtensionEffect, extensionId: string): Middlew
 				...(effect.note !== undefined ? { note: effect.note } : {}),
 			};
 		default:
-			// Prompt gates belong to prompt submission, which has no middleware point yet.
+			// Prompt effects never reach the middleware: buildExtensionPromptGate applies them.
 			return null;
 	}
 }
@@ -129,117 +130,242 @@ function closedGate(point: ToolOrTurnPoint, extensionId: string, reason: string)
 	return [];
 }
 
+type RuntimeHookPoint = ToolOrTurnPoint | "prompt_submit";
+
+type RunnerVerdict =
+	| { kind: "ok"; effects: ExtensionEffect[] }
+	| { kind: "failed"; reason: string; policy: "pass" | "block"; outcome: HookReceipt["outcome"] };
+
+interface RuntimeHookRunner {
+	run(event: ExtensionHookEvent, toolName?: string): Promise<RunnerVerdict>;
+	/** Receipt for a finished run, with the effects the host will apply. */
+	settle(verdict: RunnerVerdict, startedAt: number, effectKinds: ReadonlyArray<string>, toolName?: string): void;
+}
+
 /**
- * One owned middleware registration per declared api 2 hook, published with
- * the extension generation through the reload coordinator. Each runs only in
- * the awaited phase: at tool points through the registry, at turn points
- * through the turn middleware. Prompt-submit hooks are not wired yet.
+ * The deadline, failure policy, streak and receipt of one declared hook. A
+ * runner lives for one generation: a reload builds new runners, so a hook
+ * disabled after repeated missed deadlines comes back with the next build.
+ */
+function createRuntimeHookRunner(
+	entry: LoadableExtension,
+	hook: ExtensionHookDeclaration,
+	point: RuntimeHookPoint,
+	id: string,
+	digest: string,
+	bridge: ExtensionRuntimeHookBridge,
+	options: ExtensionRuntimeHookOptions,
+): RuntimeHookRunner {
+	const now = options.now ?? Date.now;
+	const provenance = entry.provenance;
+	let streak = 0;
+	let disabled = false;
+	const reported = new Set<string>();
+	const notify = (reason: string): void => {
+		if (reported.has(reason)) return;
+		reported.add(reason);
+		try {
+			bridge.current()?.notify(`extension ${entry.id}: ${point} hook ${reason}`);
+		} catch {
+			// A notice sink has no authority over the call.
+		}
+	};
+	const failed = (reason: string, policy: "pass" | "block", outcome: HookReceipt["outcome"]): RunnerVerdict => {
+		notify(policy === "block" ? `${reason}; it fails closed` : `${reason}; skipped`);
+		return { kind: "failed", reason, policy, outcome };
+	};
+	return {
+		async run(event) {
+			if (disabled) return failed("is disabled after repeated missed deadlines", hook.onTimeout, "runtime-timeout");
+			const executor = bridge.current();
+			if (executor === null) return failed("has no running runtime", hook.onError, "runtime-failed");
+			const outcome = await executor.hook(entry.id, event, hook.timeoutMs);
+			if (outcome.kind === "timeout") {
+				streak += 1;
+				if (streak >= TIMEOUT_STREAK_LIMIT) disabled = true;
+				return failed(`missed its ${hook.timeoutMs} ms deadline`, hook.onTimeout, "runtime-timeout");
+			}
+			streak = 0;
+			if (outcome.kind === "error") return failed(`failed: ${outcome.message}`, hook.onError, "runtime-failed");
+			reported.clear();
+			return { kind: "ok", effects: outcome.effects };
+		},
+		settle(verdict, startedAt, effectKinds, toolName) {
+			try {
+				options.recordReceipt({
+					at: now(),
+					hookId: id,
+					origin: "extension",
+					sourcePath: entry.manifestPath,
+					hash: digest,
+					hook: point,
+					kind: "runtime",
+					outcome: verdict.kind === "ok" ? "runtime-ok" : verdict.outcome,
+					durationMs: Math.round(performance.now() - startedAt),
+					...(effectKinds.length > 0 ? { effectKinds: [...effectKinds] } : {}),
+					...(toolName !== undefined ? { toolName } : {}),
+					extension: {
+						id: entry.id,
+						scope: entry.scope,
+						canonicalRoot: provenance.canonicalRoot,
+						manifestDigest: provenance.manifestDigest,
+						contentDigest: provenance.contentDigest,
+						declarationsDigest: digest,
+						generation: options.generation,
+					},
+				});
+			} catch {
+				// Receipts are observability; a failed write changes no call.
+			}
+		},
+	};
+}
+
+function eachRuntimeHook(
+	packages: ReadonlyArray<InstalledExtension>,
+	visit: (entry: LoadableExtension, hook: ExtensionHookDeclaration, index: number, digest: string) => void,
+): void {
+	for (const entry of packages) {
+		if (!isLoadableExtension(entry) || entry.runtimeV2 === undefined) continue;
+		const digest = envelopeDigest(capabilityEnvelope(entry.runtimeV2));
+		entry.runtimeV2.hooks.forEach((hook: ExtensionHookDeclaration, index) => {
+			visit(entry, hook, index, digest);
+		});
+	}
+}
+
+/**
+ * One owned middleware registration per declared api 2 tool or turn hook,
+ * published with the extension generation through the reload coordinator.
+ * Each runs only in the awaited phase: at tool points through the registry,
+ * at turn points through the turn middleware. Prompt-submit hooks run through
+ * `buildExtensionPromptGate` instead, because no middleware point carries the
+ * prompt before a turn exists.
  */
 export function buildExtensionRuntimeHookRegistrations(
 	packages: ReadonlyArray<InstalledExtension>,
 	bridge: ExtensionRuntimeHookBridge,
 	options: ExtensionRuntimeHookOptions,
 ): MiddlewareHookRegistration[] {
-	const now = options.now ?? Date.now;
 	const registrations: MiddlewareHookRegistration[] = [];
-	for (const entry of packages) {
-		if (!isLoadableExtension(entry) || entry.runtimeV2 === undefined) continue;
-		const declared = entry.runtimeV2;
-		const provenance = entry.provenance;
-		const digest = envelopeDigest(capabilityEnvelope(declared));
-		declared.hooks.forEach((hook: ExtensionHookDeclaration, index) => {
-			if (hook.on === "prompt_submit") return;
-			const point: ToolOrTurnPoint = hook.on;
-			const id = `extension:${entry.id}:${point}:${index}`;
-			let streak = 0;
-			let disabled = false;
-			const reported = new Set<string>();
-			const notify = (reason: string): void => {
-				if (reported.has(reason)) return;
-				reported.add(reason);
-				try {
-					bridge.current()?.notify(`extension ${entry.id}: ${point} hook ${reason}`);
-				} catch {
-					// A notice sink has no authority over the call.
-				}
-			};
-			const receipt = (
-				input: MiddlewareHookInput,
-				outcome: HookReceipt["outcome"],
-				startedAt: number,
-				effects: ReadonlyArray<MiddlewareEffect>,
-			): void => {
-				try {
-					options.recordReceipt({
-						at: now(),
-						hookId: id,
-						origin: "extension",
-						sourcePath: entry.manifestPath,
-						hash: digest,
-						hook: point,
-						kind: "runtime",
-						outcome,
-						durationMs: Math.round(performance.now() - startedAt),
-						...(effects.length > 0 ? { effectKinds: effects.map((effect) => effect.kind) } : {}),
-						...(input.toolName !== undefined ? { toolName: input.toolName } : {}),
-						extension: {
-							id: entry.id,
-							scope: entry.scope,
-							canonicalRoot: provenance.canonicalRoot,
-							manifestDigest: provenance.manifestDigest,
-							contentDigest: provenance.contentDigest,
-							declarationsDigest: digest,
-							generation: options.generation,
-						},
-					});
-				} catch {
-					// Receipts are observability; a failed write changes no call.
-				}
-			};
-			const fail = (
-				input: MiddlewareHookInput,
-				startedAt: number,
-				reason: string,
-				policy: "pass" | "block",
-				outcome: HookReceipt["outcome"],
-			): MiddlewareEffect[] => {
-				const effects = policy === "block" ? closedGate(point, entry.id, reason) : [];
-				notify(policy === "block" ? `${reason}; it fails closed` : `${reason}; skipped`);
-				receipt(input, outcome, startedAt, effects);
+	eachRuntimeHook(packages, (entry, hook, index, digest) => {
+		if (hook.on === "prompt_submit") return;
+		const point: ToolOrTurnPoint = hook.on;
+		const access = entry.runtimeV2?.access ?? [];
+		const id = `extension:${entry.id}:${point}:${index}`;
+		const runner = createRuntimeHookRunner(entry, hook, point, id, digest, bridge, options);
+		registrations.push({
+			id,
+			description: `${entry.id} runtime ${point} hook`,
+			hooks: [point],
+			...(hook.tools !== undefined ? { toolNames: [...hook.tools] } : {}),
+			awaited: true,
+			evaluate: () => [],
+			async evaluateAsync(input) {
+				const startedAt = performance.now();
+				const verdict = await runner.run(hookEvent(point, input, access), input.toolName);
+				const effects =
+					verdict.kind === "ok"
+						? verdict.effects.flatMap((effect) => {
+								const mapped = middlewareEffect(effect, entry.id);
+								return mapped === null ? [] : [mapped];
+							})
+						: verdict.policy === "block"
+							? closedGate(point, entry.id, verdict.reason)
+							: [];
+				runner.settle(
+					verdict,
+					startedAt,
+					effects.map((effect) => effect.kind),
+					input.toolName,
+				);
 				return effects;
-			};
-			registrations.push({
-				id,
-				description: `${entry.id} runtime ${point} hook`,
-				hooks: [point],
-				...(hook.tools !== undefined ? { toolNames: [...hook.tools] } : {}),
-				awaitedAtTools: true,
-				evaluate: () => [],
-				async evaluateAsync(input) {
-					const startedAt = performance.now();
-					if (disabled)
-						return fail(input, startedAt, "is disabled after repeated missed deadlines", hook.onTimeout, "runtime-timeout");
-					const executor = bridge.current();
-					if (executor === null) return fail(input, startedAt, "has no running runtime", hook.onError, "runtime-failed");
-					const outcome = await executor.hook(entry.id, hookEvent(point, input, declared.access), hook.timeoutMs);
-					if (outcome.kind === "timeout") {
-						streak += 1;
-						if (streak >= TIMEOUT_STREAK_LIMIT) disabled = true;
-						return fail(input, startedAt, `missed its ${hook.timeoutMs} ms deadline`, hook.onTimeout, "runtime-timeout");
-					}
-					streak = 0;
-					if (outcome.kind === "error")
-						return fail(input, startedAt, `failed: ${outcome.message}`, hook.onError, "runtime-failed");
-					reported.clear();
-					const effects = outcome.effects.flatMap((effect) => {
-						const mapped = middlewareEffect(effect, entry.id);
-						return mapped === null ? [] : [mapped];
-					});
-					receipt(input, "runtime-ok", startedAt, effects);
-					return effects;
-				},
-			});
+			},
 		});
-	}
+	});
 	return registrations;
+}
+
+export type ExtensionPromptGateVerdict =
+	| { kind: "pass"; text: string; notices: string[] }
+	| { kind: "block"; reason: string; notices: string[] };
+
+/** The prompt_submit hooks of one generation, run in package order. */
+export interface ExtensionPromptGate {
+	readonly size: number;
+	/**
+	 * `typed` is the line the operator typed; `rewritable` says whether the
+	 * model would receive exactly that line. A rewrite of a line a template
+	 * expanded is refused with a notice, since the body is not the line.
+	 */
+	run(typed: string, rewritable: boolean): Promise<ExtensionPromptGateVerdict>;
+}
+
+/**
+ * The prompt gate for one extension generation. Each hook sees the prompt as
+ * the previous hook left it (with `access: [prompt]`; otherwise metadata
+ * only), the first block refuses the turn, and a hook whose failure policy is
+ * `block` refuses it when the hook fails.
+ */
+export function buildExtensionPromptGate(
+	packages: ReadonlyArray<InstalledExtension>,
+	bridge: ExtensionRuntimeHookBridge,
+	options: ExtensionRuntimeHookOptions,
+): ExtensionPromptGate {
+	const runners: Array<{
+		extensionId: string;
+		access: ReadonlyArray<ExtensionContentAccess>;
+		runner: RuntimeHookRunner;
+	}> = [];
+	eachRuntimeHook(packages, (entry, hook, index, digest) => {
+		if (hook.on !== "prompt_submit") return;
+		const id = `extension:${entry.id}:prompt_submit:${index}`;
+		runners.push({
+			extensionId: entry.id,
+			access: entry.runtimeV2?.access ?? [],
+			runner: createRuntimeHookRunner(entry, hook, "prompt_submit", id, digest, bridge, options),
+		});
+	});
+	return {
+		size: runners.length,
+		async run(typed, rewritable) {
+			let text = typed;
+			const notices: string[] = [];
+			for (const { extensionId, access, runner } of runners) {
+				const startedAt = performance.now();
+				const verdict = await runner.run({ point: "prompt_submit", ...(access.includes("prompt") ? { text } : {}) });
+				if (verdict.kind === "failed") {
+					runner.settle(verdict, startedAt, verdict.policy === "block" ? ["block_prompt"] : []);
+					if (verdict.policy === "block")
+						return {
+							kind: "block",
+							reason: `extension ${extensionId} prompt_submit hook ${verdict.reason}; the gate fails closed`,
+							notices,
+						};
+					continue;
+				}
+				const applied: string[] = [];
+				for (const effect of verdict.effects) {
+					if (effect.kind === "block_prompt") {
+						runner.settle(verdict, startedAt, [...applied, "block_prompt"]);
+						return { kind: "block", reason: `${extensionId}: ${effect.reason}`, notices };
+					}
+					if (effect.kind === "rewrite_prompt") {
+						if (!rewritable) {
+							notices.push(`${extensionId}: a prompt template's body cannot be rewritten; it was sent unchanged`);
+							continue;
+						}
+						text = effect.text;
+						applied.push("rewrite_prompt");
+						notices.push(`${extensionId} rewrote the prompt: ${effect.reason}`);
+					} else if (effect.kind === "notify_operator") {
+						applied.push("notify_operator");
+						notices.push(`${extensionId}: ${effect.message}`);
+					}
+				}
+				runner.settle(verdict, startedAt, applied);
+			}
+			return { kind: "pass", text, notices };
+		},
+	};
 }
