@@ -14,7 +14,7 @@
       "Confirm the installation",
       "Open a project",
       "Update, roll back and remove",
-      "Give Clio a useful first task",
+      "Give Clio Coder a useful first task",
       "Keep going",
       "When you need more detail"
     ],
@@ -24,7 +24,7 @@
     "path": "guide/hpc-clusters.md",
     "title": "Install on a cluster",
     "group": "Start",
-    "excerpt": "Install Clio on a login node with an old glibc, a proxy, or no internet.",
+    "excerpt": "Install Clio Coder on a login node with an old glibc, a proxy, or no internet.",
     "headings": [
       "Install without root",
       "Old glibc, proxies, and quotas",
@@ -61,7 +61,7 @@
     "path": "guide/tool-usage.md",
     "title": "Tools and permissions",
     "group": "Everyday use",
-    "excerpt": "Read, search, edit, and run commands with Clio's repository tools.",
+    "excerpt": "Read, search, edit, and run commands with Clio Coder's repository tools.",
     "headings": [
       "Ask for a bounded change",
       "Understand permission requests",
@@ -109,7 +109,7 @@
   {
     "path": "guide/fleet-dispatch.md",
     "title": "Workers and fleets",
-    "group": "Extend Clio",
+    "group": "Extend Clio Coder",
     "excerpt": "Assign focused tasks and combine workers into a workflow.",
     "headings": [
       "Delegate a focused task",
@@ -122,7 +122,7 @@
   {
     "path": "guide/resource-library.md",
     "title": "Skills and resources",
-    "group": "Extend Clio",
+    "group": "Extend Clio Coder",
     "excerpt": "Browse and use skills, prompts, agents, fleets, and plugins.",
     "headings": [
       "Find a useful skill",
@@ -134,8 +134,8 @@
   {
     "path": "guide/plugins.md",
     "title": "Install plugins",
-    "group": "Extend Clio",
-    "excerpt": "Add reusable resources to your Clio installation.",
+    "group": "Extend Clio Coder",
+    "excerpt": "Add reusable resources to your Clio Coder installation.",
     "headings": [
       "Install a bundle of resources",
       "Keep the installed copy under control",
@@ -146,7 +146,7 @@
   {
     "path": "guide/interop.md",
     "title": "Editors and other agents",
-    "group": "Extend Clio",
+    "group": "Extend Clio Coder",
     "excerpt": "Use supported agent connections and editor integrations.",
     "headings": [
       "Bring an installed coding agent",
@@ -158,8 +158,8 @@
   {
     "path": "guide/slurm.md",
     "title": "Slurm workflows",
-    "group": "Extend Clio",
-    "excerpt": "Connect Clio to supported Slurm tools for cluster work.",
+    "group": "Extend Clio Coder",
+    "excerpt": "Connect Clio Coder to supported Slurm tools for cluster work.",
     "headings": [
       "Work with a scheduler",
       "Use a job workflow",
@@ -198,7 +198,7 @@
     "group": "Everyday use",
     "excerpt": "Choose the declared checks a change requires and inspect verification freshness.",
     "headings": [
-      "Tell Clio what “checked” means in your project",
+      "Tell Clio Coder what “checked” means in your project",
       "Run the declared checks",
       "Review freshness"
     ],

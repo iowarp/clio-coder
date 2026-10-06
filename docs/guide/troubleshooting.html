@@ -25,7 +25,7 @@
 <a href="/docs/guide/panes-and-files.html">Files and terminal panes</a>
 <a href="/docs/guide/gui.html">The desktop app</a>
 <a href="/docs/guide/quality-policy.html">Require project checks</a></details>
-<details class="doc-nav-group"><summary>Extend Clio</summary><a href="/docs/guide/fleet-dispatch.html">Workers and fleets</a>
+<details class="doc-nav-group"><summary>Extend Clio Coder</summary><a href="/docs/guide/fleet-dispatch.html">Workers and fleets</a>
 <a href="/docs/guide/resource-library.html">Skills and resources</a>
 <a href="/docs/guide/plugins.html">Install plugins</a>
 <a href="/docs/guide/interop.html">Editors and other agents</a>
@@ -46,13 +46,13 @@ clio-coder targets --probe</code></pre></div>
 <p>Check that the selected endpoint is reachable, required credentials are present, and the model is loaded. A local server with an empty model list usually needs a model loaded before setup can finish. In <strong>Connections</strong>, reopen Guided setup or repair the saved connection.</p>
 <p>For slow first responses from a local model, check the server&#39;s load state and capacity. Live tool-use behavior can be investigated with <code>clio-coder doctor --deep</code>; it makes generation requests.</p>
 <h2 id="settings-fail-to-load">Settings fail to load</h2>
-<p>Clio uses a strict version-2 settings schema. Invalid or retired keys produce a diagnostic naming the path. <code>clio-coder upgrade</code> applies the registered migration and preserves the original version-1 settings as a backup. Plain <code>clio-coder doctor</code> previews the fix for a retired value, and <code>doctor --fix</code> applies it.</p>
+<p>Clio Coder uses a strict version-2 settings schema. Invalid or retired keys produce a diagnostic naming the path. <code>clio-coder upgrade</code> applies the registered migration and preserves the original version-1 settings as a backup. Plain <code>clio-coder doctor</code> previews the fix for a retired value, and <code>doctor --fix</code> applies it.</p>
 <p>Use <a href="/docs/guide/configuration-reference.html">Configuration essentials</a> to find the settings layers and the full reference.</p>
 <h2 id="a-terminal-shortcut-does-not-arrive">A terminal shortcut does not arrive</h2>
 <p>Open <strong>Ctrl+G</strong> and choose the corresponding menu action. A terminal or multiplexer may intercept Alt shortcuts. <strong>Ctrl+J</strong> is the portable newline; <code>/help</code> shows your effective bindings.</p>
-<p>If a files or companion pane is unavailable, check that Clio is running inside a reachable Herdr session and that the requested tools are installed. See <a href="/docs/guide/panes-and-files.html">files and terminal panes</a>.</p>
+<p>If a files or companion pane is unavailable, check that Clio Coder is running inside a reachable Herdr session and that the requested tools are installed. See <a href="/docs/guide/panes-and-files.html">files and terminal panes</a>.</p>
 <h2 id="work-stopped-or-a-check-failed">Work stopped or a check failed</h2>
-<p>Read the recorded command and output in the desktop&#39;s <strong>Artifacts</strong> card or terminal <code>/view</code>. A failed test can point to a useful next task; ask Clio to explain the failure before changing the test&#39;s acceptance criteria.</p>
+<p>Read the recorded command and output in the desktop&#39;s <strong>Artifacts</strong> card or terminal <code>/view</code>. A failed test can point to a useful next task; ask Clio Coder to explain the failure before changing the test&#39;s acceptance criteria.</p>
 <p>For an interrupted context handoff, inspect <code>/context</code> and follow <a href="/docs/guide/context-continuity.html">save and resume work</a>. Include the installed version and relevant doctor findings when reporting a persistent issue; keep credentials and private project content out of public reports.</p>
 </div><div class="doc-end"><a id="doc-snapshot-source" href="https://github.com/iowarp/clio-coder/tree/v0.6.1" data-source-version="0.6.1" data-source-ref="v0.6.1" data-source-commit="eb11be1857846bbd2234b60524f346e6d9ef7d6c">Guide to v0.6.1</a><a href="https://github.com/iowarp/clio-coder/issues">Suggest an improvement <span class="arrow arrow-diagonal" aria-hidden="true">↗</span></a></div></article>
   <aside class="docs-toc" aria-label="On this page"><h2>On this page</h2><a href="#a-connection-is-unavailable">A connection is unavailable</a>

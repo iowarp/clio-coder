@@ -25,7 +25,7 @@
 <a href="/docs/guide/panes-and-files.html" aria-current="page">Files and terminal panes</a>
 <a href="/docs/guide/gui.html">The desktop app</a>
 <a href="/docs/guide/quality-policy.html">Require project checks</a></details>
-<details class="doc-nav-group"><summary>Extend Clio</summary><a href="/docs/guide/fleet-dispatch.html">Workers and fleets</a>
+<details class="doc-nav-group"><summary>Extend Clio Coder</summary><a href="/docs/guide/fleet-dispatch.html">Workers and fleets</a>
 <a href="/docs/guide/resource-library.html">Skills and resources</a>
 <a href="/docs/guide/plugins.html">Install plugins</a>
 <a href="/docs/guide/interop.html">Editors and other agents</a>
@@ -45,7 +45,7 @@
 clio-coder tools install yazi</code></pre></div>
 <p>Start Herdr, open a pane in your project, then run:</p>
 <div class="code-block"><p class="code-label eyebrow">Shell</p><pre tabindex="0" aria-label="Code example 2"><code class="language-sh">clio-coder --with-panes</code></pre></div>
-<p>The option joins the current Herdr session. It does not create a pane host from a plain terminal. For the files pane, also enable it in your Clio settings:</p>
+<p>The option joins the current Herdr session. It does not create a pane host from a plain terminal. For the files pane, also enable it in your Clio Coder settings:</p>
 <div class="code-block"><p class="code-label eyebrow">YAML</p><pre tabindex="0" aria-label="Code example 3"><code class="language-yaml">interface:
   panes:
     enabled: auto
@@ -53,7 +53,7 @@ clio-coder tools install yazi</code></pre></div>
       enabled: true</code></pre></div>
 <p>Check <code>clio-coder doctor</code> if the host or files engine is unavailable.</p>
 <h2 id="use-the-files-pane">Use the files pane</h2>
-<p><code>/files</code> or <strong>Alt+E</strong> opens the file browser and gives it keyboard focus. Select a file and press <strong>Ctrl+Y</strong> to insert it as an <code>@file</code> mention and return focus to Clio. <code>/files</code> or Alt+E then hides the pane: the browser keeps running and keeps its directory. Press the key twice quickly, or run <code>/files close</code>, to end it.</p>
+<p><code>/files</code> or <strong>Alt+E</strong> opens the file browser and gives it keyboard focus. Select a file and press <strong>Ctrl+Y</strong> to insert it as an <code>@file</code> mention and return focus to Clio Coder. <code>/files</code> or Alt+E then hides the pane: the browser keeps running and keeps its directory. Press the key twice quickly, or run <code>/files close</code>, to end it.</p>
 <h2 id="docks-hide-instead-of-closing">Docks hide instead of closing</h2>
 <p>The files, workers, and music panes are docks with fixed places. <strong>Alt+E</strong>, <strong>Alt+W</strong>, and <strong>Alt+A</strong> show or hide them, and a second press within a moment closes one. Alt+W opens a dashboard with a card for each worker in the session; Enter follows one worker&#39;s live stream.</p>
 <p><code>/music</code> plays focus radio through cliamp in a thin dock once <code>integrations.music.enabled</code> is on and <code>clio-coder tools install cliamp</code> has run. <code>/music pause</code>, <code>/music next</code>, <code>/music station &lt;name or url&gt;</code>, and <code>/music off</code> control it.</p>

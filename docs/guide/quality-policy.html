@@ -25,7 +25,7 @@
 <a href="/docs/guide/panes-and-files.html">Files and terminal panes</a>
 <a href="/docs/guide/gui.html">The desktop app</a>
 <a href="/docs/guide/quality-policy.html" aria-current="page">Require project checks</a></details>
-<details class="doc-nav-group"><summary>Extend Clio</summary><a href="/docs/guide/fleet-dispatch.html">Workers and fleets</a>
+<details class="doc-nav-group"><summary>Extend Clio Coder</summary><a href="/docs/guide/fleet-dispatch.html">Workers and fleets</a>
 <a href="/docs/guide/resource-library.html">Skills and resources</a>
 <a href="/docs/guide/plugins.html">Install plugins</a>
 <a href="/docs/guide/interop.html">Editors and other agents</a>
@@ -34,11 +34,11 @@
 <a href="/docs/guide/troubleshooting.html">Troubleshooting</a>
 <a href="/docs/guide/configuration-reference.html">Configuration essentials</a>
 <a href="/docs/guide/environment-variables.html">Environment essentials</a></details></div></div></details></aside>
-  <article class="doc-article"><div class="doc-toolbar"><p id="doc-path">Require project checks</p><a id="doc-github" href="https://github.com/iowarp/clio-coder/blob/v0.6.1/docs/guide/quality-policy.md">Read the full guide <span class="arrow arrow-diagonal" aria-hidden="true">↗</span></a></div><div class="doc" id="doc" data-doc="guide/quality-policy.md"><details class="doc-toc-mobile"><summary>On this page</summary><a href="#tell-clio-what-checked-means-in-your-project">Tell Clio what “checked” means in your project</a>
+  <article class="doc-article"><div class="doc-toolbar"><p id="doc-path">Require project checks</p><a id="doc-github" href="https://github.com/iowarp/clio-coder/blob/v0.6.1/docs/guide/quality-policy.md">Read the full guide <span class="arrow arrow-diagonal" aria-hidden="true">↗</span></a></div><div class="doc" id="doc" data-doc="guide/quality-policy.md"><details class="doc-toc-mobile"><summary>On this page</summary><a href="#tell-clio-coder-what-checked-means-in-your-project">Tell Clio Coder what “checked” means in your project</a>
 <a href="#run-the-declared-checks">Run the declared checks</a>
 <a href="#review-freshness">Review freshness</a></details><h1 id="require-project-checks">Require project checks</h1>
 <p>Choose the declared checks a change requires and inspect verification freshness.</p>
-<h2 id="tell-clio-what-checked-means-in-your-project">Tell Clio what “checked” means in your project</h2>
+<h2 id="tell-clio-coder-what-checked-means-in-your-project">Tell Clio Coder what “checked” means in your project</h2>
 <p>A quality policy names the declared checks required when particular files change. Your repository supplies the standards; Clio records verification and assesses whether the results still match the current inputs.</p>
 <p>At a Git workspace root, create <code>.clio-coder/quality.yaml</code>:</p>
 <div class="code-block"><p class="code-label eyebrow">YAML</p><pre tabindex="0" aria-label="Code example 1"><code class="language-yaml">version: 1
@@ -50,15 +50,15 @@ rules:
     allowLimitations: false</code></pre></div>
 <p>This example assumes the root <code>package.json</code> declares a <code>test</code> script. Adapt the paths, lockfile, and check IDs to your project. Include configuration, fixtures, and helper files that affect the result. Clio does not create or modify this policy automatically.</p>
 <h2 id="run-the-declared-checks">Run the declared checks</h2>
-<p>Ask Clio to discover verification checks, then run each required ID through <code>verify</code> without argument or working-directory overrides. For a subproject, declare a root script or a verifier-catalog entry with its working directory.</p>
+<p>Ask Clio Coder to discover verification checks, then run each required ID through <code>verify</code> without argument or working-directory overrides. For a subproject, declare a root script or a verifier-catalog entry with its working directory.</p>
 <p>The policy names existing checks; it cannot introduce shell commands or bypass approval. A narrowed test run or an unrelated passing command cannot satisfy a required full check.</p>
 <h2 id="review-freshness">Review freshness</h2>
-<p>Clio compares source, check-declaration, and policy fingerprints. Edits after a passing run can make the result <strong>stale</strong>; a later failing run supersedes an earlier pass. Missing or unavailable evidence remains unverified.</p>
+<p>Clio Coder compares source, check-declaration, and policy fingerprints. Edits after a passing run can make the result <strong>stale</strong>; a later failing run supersedes an earlier pass. Missing or unavailable evidence remains unverified.</p>
 <p>A valid policy selects high rigor by default, which requests continuation for outstanding checks when recovery is possible. Setting <code>CLIO_CODER_RIGOR=normal</code> makes the assessment advisory. Neither mode grants additional execution authority.</p>
 <p>Snapshots need Git and a workspace at the repository root. They cover tracked and nonignored untracked source, not external datasets, installed dependencies, or running services. Use domain-specific checks for those requirements. The full guide explains bounded snapshots and permitted limitations.</p>
 <p>Try <a href="/tutorials/temperature-calibration.html">the calibration example</a> to see a declared check and its actual result.</p>
 </div><div class="doc-end"><a id="doc-snapshot-source" href="https://github.com/iowarp/clio-coder/tree/v0.6.1" data-source-version="0.6.1" data-source-ref="v0.6.1" data-source-commit="eb11be1857846bbd2234b60524f346e6d9ef7d6c">Guide to v0.6.1</a><a href="https://github.com/iowarp/clio-coder/issues">Suggest an improvement <span class="arrow arrow-diagonal" aria-hidden="true">↗</span></a></div></article>
-  <aside class="docs-toc" aria-label="On this page"><h2>On this page</h2><a href="#tell-clio-what-checked-means-in-your-project">Tell Clio what “checked” means in your project</a>
+  <aside class="docs-toc" aria-label="On this page"><h2>On this page</h2><a href="#tell-clio-coder-what-checked-means-in-your-project">Tell Clio Coder what “checked” means in your project</a>
 <a href="#run-the-declared-checks">Run the declared checks</a>
 <a href="#review-freshness">Review freshness</a></aside>
 </main><footer class="colophon page">

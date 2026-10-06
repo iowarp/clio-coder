@@ -25,7 +25,7 @@
 <a href="/docs/guide/panes-and-files.html">Files and terminal panes</a>
 <a href="/docs/guide/gui.html">The desktop app</a>
 <a href="/docs/guide/quality-policy.html">Require project checks</a></details>
-<details class="doc-nav-group" open><summary>Extend Clio</summary><a href="/docs/guide/fleet-dispatch.html" aria-current="page">Workers and fleets</a>
+<details class="doc-nav-group" open><summary>Extend Clio Coder</summary><a href="/docs/guide/fleet-dispatch.html" aria-current="page">Workers and fleets</a>
 <a href="/docs/guide/resource-library.html">Skills and resources</a>
 <a href="/docs/guide/plugins.html">Install plugins</a>
 <a href="/docs/guide/interop.html">Editors and other agents</a>
@@ -40,7 +40,7 @@
 <a href="#compose-a-fleet-when-you-need-one">Compose a fleet when you need one</a></details><h1 id="workers-and-fleets">Workers and fleets</h1>
 <p>Assign focused tasks and combine workers into a workflow.</p>
 <h2 id="delegate-a-focused-task">Delegate a focused task</h2>
-<p>A worker handles a bounded task while Clio keeps the main conversation. Start with an explicit goal, files it may change, and the checks it should report.</p>
+<p>A worker handles a bounded task while Clio Coder keeps the main conversation. Start with an explicit goal, files it may change, and the checks it should report.</p>
 <div class="code-block"><p class="code-label eyebrow">Shell</p><pre tabindex="0" aria-label="Code example 1"><code class="language-sh">clio-coder agents
 clio-coder run &quot;Inspect the parser&#39;s test coverage and report gaps. Do not edit files.&quot; --agent verifier</code></pre></div>
 <p>Use an agent ID from your installed catalog. In the terminal, <code>/run</code> starts a worker; <code>/delegate</code> selects a configured ACP peer. <strong>Fleet</strong> in Settings chooses worker defaults without changing the chat model.</p>
@@ -54,7 +54,9 @@ clio-coder run &quot;Inspect the parser&#39;s test coverage and report gaps. Do 
 <h2 id="compose-a-fleet-when-you-need-one">Compose a fleet when you need one</h2>
 <div class="code-block"><p class="code-label eyebrow">Shell</p><pre tabindex="0" aria-label="Code example 3"><code class="language-sh">clio-coder fleet list
 clio-coder fleet status</code></pre></div>
-<p>Fleet recipes combine workers into workflows such as a review gate, competing solutions, or a council. Inspect the recipe and approval preview before starting one. Remote native workers use SSH and need the same Clio version and the project at the same absolute path on each node. Add a node with <code>clio-coder fleet nodes add</code>, or in the terminal under <code>/settings fleet</code>. A node receives work only after <code>clio-coder fleet nodes test &lt;id&gt; --record</code> passes for this project; the record lasts one day. Adding a node moves nothing by itself: unpinned work stays local.</p>
+<p>Fleet recipes combine workers into workflows such as a review gate, competing solutions, or a council. Inspect the recipe and approval preview before starting one.</p>
+<p>Remote native workers use SSH and need the same Clio Coder version and the project at the same absolute path on each node. Add a node with <code>clio-coder fleet nodes add</code>, or in the terminal under <code>/settings fleet</code>.</p>
+<p>A node receives work only after <code>clio-coder fleet nodes test &lt;id&gt; --record</code> passes for this project; the record lasts one day. Adding a node moves nothing by itself: unpinned work stays local.</p>
 <p>Start locally with one worker. Use the full guide for remote-node configuration, capacity, recipe contracts, and failure recovery.</p>
 </div><div class="doc-end"><a id="doc-snapshot-source" href="https://github.com/iowarp/clio-coder/tree/v0.6.1" data-source-version="0.6.1" data-source-ref="v0.6.1" data-source-commit="eb11be1857846bbd2234b60524f346e6d9ef7d6c">Guide to v0.6.1</a><a href="https://github.com/iowarp/clio-coder/issues">Suggest an improvement <span class="arrow arrow-diagonal" aria-hidden="true">↗</span></a></div></article>
   <aside class="docs-toc" aria-label="On this page"><h2>On this page</h2><a href="#delegate-a-focused-task">Delegate a focused task</a>

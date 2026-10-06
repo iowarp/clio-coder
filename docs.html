@@ -25,7 +25,7 @@
 <a href="/docs/guide/panes-and-files.html">Files and terminal panes</a>
 <a href="/docs/guide/gui.html">The desktop app</a>
 <a href="/docs/guide/quality-policy.html">Require project checks</a></details>
-<details class="doc-nav-group"><summary>Extend Clio</summary><a href="/docs/guide/fleet-dispatch.html">Workers and fleets</a>
+<details class="doc-nav-group"><summary>Extend Clio Coder</summary><a href="/docs/guide/fleet-dispatch.html">Workers and fleets</a>
 <a href="/docs/guide/resource-library.html">Skills and resources</a>
 <a href="/docs/guide/plugins.html">Install plugins</a>
 <a href="/docs/guide/interop.html">Editors and other agents</a>
@@ -38,7 +38,7 @@
 <a href="#confirm-the-installation">Confirm the installation</a>
 <a href="#open-a-project">Open a project</a>
 <a href="#update-roll-back-and-remove">Update, roll back and remove</a>
-<a href="#give-clio-a-useful-first-task">Give Clio a useful first task</a>
+<a href="#give-clio-coder-a-useful-first-task">Give Clio Coder a useful first task</a>
 <a href="#keep-going">Keep going</a>
 <a href="#when-you-need-more-detail">When you need more detail</a></details><h1 id="install-clio-coder">Install Clio Coder</h1>
 <p>Install, update, and launch Clio Coder on your machine.</p>
@@ -47,7 +47,7 @@
 <div class="tab-set" data-tabs="Install method"><div class="tab-panel" id="tab-macos-linux-and-wsl" data-tab="macOS, Linux and WSL"><h3 class="tab-label" id="macos-linux-and-wsl">macOS, Linux and WSL</h3>
 <div class="code-block"><p class="code-label eyebrow">Shell</p><pre tabindex="0" aria-label="Code example 1"><code class="language-sh">curl -fsSL https://coder.iowarp.ai/install.sh | sh</code></pre></div>
 <p>The installer brings its own Node.js 24 and needs no root, including on x64 HPC login nodes with glibc 2.17 or newer. It checks the Node download against its published SHA-256 checksums, and their OpenPGP signature when <code>gpg</code> is installed. It installs under <code>~/.local/share/clio-coder-install</code> on Linux or <code>~/Library/Application Support/clio-coder/install</code> on macOS, and writes the launcher <code>~/.local/bin/clio-coder</code>.</p>
-<p>On Linux, an install run from a terminal ends by offering the desktop app, which starts at login and appears in your app menu. The optional Claude Agent SDK, about 224 MB, is skipped; Clio offers to fetch it the first time you need it.</p>
+<p>On Linux, an install run from a terminal ends by offering the desktop app, which starts at login and appears in your app menu. The optional Claude Agent SDK, about 224 MB, is skipped; Clio Coder offers to fetch it the first time you need it.</p>
 <p>Pass options after <code>sh -s --</code>. For example, <code>--modify-path</code> adds the launcher directory to your shell profile, <code>--gui</code> sets up the desktop app without asking, and <code>--include-claude-sdk</code> installs the SDK now:</p>
 <div class="code-block"><p class="code-label eyebrow">Shell</p><pre tabindex="0" aria-label="Code example 2"><code class="language-sh">curl -fsSL https://coder.iowarp.ai/install.sh | sh -s -- --modify-path</code></pre></div>
 <p>On a cluster, read <a href="/docs/guide/hpc-clusters.html">Install on a cluster</a>.</p>
@@ -106,10 +106,11 @@ clio-coder</code></pre></div>
 <td><code>bun remove -g @iowarp/clio-coder</code></td>
 </tr>
 </tbody></table></div>
-<p>The installer keeps the previous version. <code>clio-coder upgrade --rollback</code> makes it current again. An install made with an exact <code>--version</code> stays pinned to that version until you run the installer with <code>--version latest</code>. If an upgrade is refused over a setting the installed version cannot repair, the installer prints the new version&#39;s own <code>doctor --fix</code> command to run. The 0.6.1 upgrade, rollback and uninstall were checked on WSL and native Windows, and were not checked by hand on macOS.</p>
+<p>The installer keeps the previous version. <code>clio-coder upgrade --rollback</code> makes it current again. An install made with an exact <code>--version</code> stays pinned to that version until you run the installer with <code>--version latest</code>.</p>
+<p>If an upgrade is refused over a setting the installed version cannot repair, the installer prints the new version&#39;s own <code>doctor --fix</code> command to run. The 0.6.1 upgrade, rollback and uninstall were checked on WSL and native Windows, and were not checked by hand on macOS.</p>
 <p><code>clio-coder uninstall</code> removes your settings, credentials, sessions and caches, and the desktop app&#39;s background service, so it previews what it will delete and asks first. Add <code>--keep-config</code> to keep settings and credentials, or <code>--dry-run</code> to only look. Removing the program with npm or bun keeps those files. Project <code>.clio-coder/</code> directories are never removed.</p>
 <p>If coder.iowarp.ai is unreachable, the latest GitHub release carries the same script from 0.6.0 on, at <code>https://github.com/iowarp/clio-coder/releases/latest/download/install.sh</code>.</p>
-<h2 id="give-clio-a-useful-first-task">Give Clio a useful first task</h2>
+<h2 id="give-clio-coder-a-useful-first-task">Give Clio Coder a useful first task</h2>
 <p>Start with a request that lets you assess its understanding of your project:</p>
 <blockquote>
 <p>Explain how this repository builds and runs its tests. Identify the main entry points and suggest one verification task. Do not change files yet.</p>
@@ -130,7 +131,7 @@ clio-coder</code></pre></div>
 <a href="#confirm-the-installation">Confirm the installation</a>
 <a href="#open-a-project">Open a project</a>
 <a href="#update-roll-back-and-remove">Update, roll back and remove</a>
-<a href="#give-clio-a-useful-first-task">Give Clio a useful first task</a>
+<a href="#give-clio-coder-a-useful-first-task">Give Clio Coder a useful first task</a>
 <a href="#keep-going">Keep going</a>
 <a href="#when-you-need-more-detail">When you need more detail</a></aside>
 </main><footer class="colophon page">
