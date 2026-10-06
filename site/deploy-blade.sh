@@ -15,7 +15,13 @@ fi
 clio_site_revision=$(git -C "$repo_dir" rev-parse HEAD)
 node "$site_dir/deployment-check.mjs"
 python3 "$site_dir/sync-docs.py" --check
-git -C "$repo_dir" archive --format=tar HEAD site | tar -xf - -C "$clio_site_scratch"
+git -C "$repo_dir" archive --format=tar "$clio_site_revision" site | tar -xf - -C "$clio_site_scratch"
+mkdir -p "$clio_site_scratch/site/installer-assets"
+for name in install.sh install.ps1 install.cmd; do
+  source="scripts/installer-bootstrap/$name"
+  if [[ "$name" == install.cmd ]]; then source="scripts/$name"; fi
+  git -C "$repo_dir" show "$clio_site_revision:$source" > "$clio_site_scratch/site/installer-assets/$name"
+done
 node "$clio_site_scratch/site/build.mjs" --out "$clio_site_scratch/public" --revision "$clio_site_revision"
 python3 "$clio_site_scratch/site/check.py" "$clio_site_scratch/public"
 

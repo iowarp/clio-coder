@@ -681,9 +681,13 @@ console.log(
 );
 
 // Stable bootstraps follow released assets even while the rest of the site awaits a redeploy.
+// Deploy snapshots carry these inputs inside the site's Docker build context.
+const stagedInstallers = (await readdir(root)).includes("installer-assets");
 for (const name of ["install.sh", "install.ps1", "install.cmd"])
 	await cp(
-		join(root, "..", "scripts", ...(name === "install.cmd" ? [] : ["installer-bootstrap"]), name),
+		stagedInstallers
+			? join(root, "installer-assets", name)
+			: join(root, "..", "scripts", ...(name === "install.cmd" ? [] : ["installer-bootstrap"]), name),
 		join(out, name),
 	);
 await writeFile(join(out, "CNAME"), `${new URL(product.origin).hostname}\n`);
