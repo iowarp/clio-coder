@@ -145,8 +145,13 @@ class TerminationCoordinator {
 	onDrain(hook: Hook, options?: { timeoutMs: number }): void {
 		this.drainHooks.push(registeredHook(hook, options));
 	}
-	onTerminate(hook: Hook, options?: { timeoutMs: number }): void {
-		this.terminateHooks.push(registeredHook(hook, options));
+	onTerminate(hook: Hook, options?: { timeoutMs: number }): () => void {
+		const registration = registeredHook(hook, options);
+		this.terminateHooks.push(registration);
+		return () => {
+			const index = this.terminateHooks.indexOf(registration);
+			if (index !== -1) this.terminateHooks.splice(index, 1);
+		};
 	}
 	onPersist(hook: Hook, options?: { timeoutMs: number }): void {
 		this.persistHooks.push(registeredHook(hook, options));
@@ -225,8 +230,10 @@ class TerminationCoordinator {
 		defaultBudgetMs: number,
 		log: (msg: string) => void,
 	): Promise<void> {
-		for (let i = 0; i < hooks.length; i++) {
-			const hook = hooks[i];
+		// A cleanup can unregister itself without shifting the remaining phase work.
+		const snapshot = [...hooks];
+		for (let i = 0; i < snapshot.length; i++) {
+			const hook = snapshot[i];
 			if (!hook) continue;
 			const budgetMs = hook.timeoutMs ?? defaultBudgetMs;
 			const t0 = process.hrtime.bigint();
