@@ -266,7 +266,7 @@ test("native background policy respects channel, pin, opt-out and manager owners
 			assert.deepEqual(channels, []);
 		} else {
 			assert.ok(notice);
-			assert.deepEqual(channels, policy === "manager" ? ["latest"] : ["beta"]);
+			assert.deepEqual(channels, policy === "manager" ? ["latest"] : ["latest", "beta"]);
 			assert.equal(await check.claim(notice, () => false, signal), false);
 			assert.equal(updates, 0);
 			assert.equal(await check.claim(notice, () => true, signal), true);

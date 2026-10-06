@@ -27,7 +27,7 @@ import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { shippedAdvisoryFindings } from "./release-audit.mjs";
-import { releaseVersionErrors } from "./release-version-policy.mjs";
+import { releaseVersionErrors, SNAPSHOT_VERSION } from "./release-version-policy.mjs";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 const { values } = parseArgs({ options: { tarball: { type: "string" }, report: { type: "string" } } });
@@ -168,22 +168,28 @@ checkVersionCoherence();
 function checkVersionCoherence() {
 	let version;
 	try {
-		version = JSON.parse(readFileSync(join(root, "package.json"), "utf8")).version;
+		version = JSON.parse(readFileSync(join(packageRoot, "package.json"), "utf8")).version;
 	} catch (error) {
 		errors.push(`unable to read package.json version: ${error instanceof Error ? error.message : String(error)}`);
 		return;
 	}
 	let changelog;
 	try {
+		// ACP discovery metadata is checkout-only; it does not ship in the archive.
 		const registry = JSON.parse(readFileSync(join(root, "assets/acp-registry/agent.json"), "utf8"));
-		if (registry.version !== version) {
-			errors.push(`ACP registry version ${registry.version} does not match package.json version ${version}`);
+		const sourceVersion = JSON.parse(readFileSync(join(root, "package.json"), "utf8")).version;
+		const stampedSnapshot =
+			typeof version === "string" && SNAPSHOT_VERSION.test(version) && sourceVersion === `${version.split("-")[0]}-dev`;
+		if (packageRoot !== root && version !== sourceVersion && !stampedSnapshot)
+			errors.push(`Packed version ${version} differs from source version ${sourceVersion}`);
+		if (registry.version !== sourceVersion) {
+			errors.push(`ACP registry version ${registry.version} does not match package.json version ${sourceVersion}`);
 		}
 	} catch (error) {
 		errors.push(`unable to read ACP registry manifest: ${error instanceof Error ? error.message : String(error)}`);
 	}
 	try {
-		changelog = readFileSync(join(root, "CHANGELOG.md"), "utf8");
+		changelog = readFileSync(join(packageRoot, "CHANGELOG.md"), "utf8");
 	} catch (error) {
 		errors.push(`unable to read CHANGELOG.md: ${error instanceof Error ? error.message : String(error)}`);
 		return;
@@ -335,7 +341,7 @@ function checkShippedAdvisories() {
 				importers: { ".": lockfile.importers["."] },
 			}),
 		);
-		writeFileSync(join(auditRoot, "package.json"), readFileSync(join(root, "package.json")));
+		writeFileSync(join(auditRoot, "package.json"), readFileSync(join(packageRoot, "package.json")));
 		let raw;
 		try {
 			raw = execFileSync("pnpm", [`--config.lockfile-dir=${auditRoot}`, "audit", "--prod", "--json"], {

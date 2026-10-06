@@ -34,6 +34,67 @@ version. The banner, `--version`, `clio-coder doctor` and the ACP handshake all 
 label, and extension version ranges are checked against the version without `-dev`, the release the
 development tree is becoming.
 
+### Try a pre-release
+
+The `latest` channel contains stable releases. `beta` contains release candidates
+such as `0.6.2-rc.1`; `dev` contains version-branch snapshots such as
+`0.6.2-snapshot.202610061230.g0123abc`. A snapshot's UTC minute is the source
+commit's timestamp, so retrying publication uses the same version and bytes.
+Checkout versions ending in `-dev` remain unpublished and display as unreleased.
+Snapshots display their exact published version in `--version`, doctor and update notices.
+
+```bash
+curl -fsSL https://coder.iowarp.ai/install.sh | sh -s -- --channel beta
+curl -fsSL https://coder.iowarp.ai/install.sh | sh -s -- --channel dev
+npm install -g @iowarp/clio-coder@beta
+npm install -g @iowarp/clio-coder@dev
+bun add -g @iowarp/clio-coder@beta
+bun add -g @iowarp/clio-coder@dev
+clio-coder upgrade --channel beta
+clio-coder upgrade --channel dev
+```
+
+```powershell
+& ([scriptblock]::Create((irm https://coder.iowarp.ai/install.ps1))) -Channel beta
+& ([scriptblock]::Create((irm https://coder.iowarp.ai/install.ps1))) -Channel dev
+```
+
+Upgrade and both installers resolve `beta` to the newest of `beta` and `latest`,
+and `dev` to the newest of `dev`, `beta` and `latest`, by SemVer precedence. Missing
+pre-release tags fall back to stable. npm and Bun use their selected dist-tag;
+publication forwards those tags to stable when they point lower. A bare upgrade
+follows the managed installation's recorded channel, or uses `latest` for a
+package-manager installation.
+
+Return to stable with `clio-coder upgrade --channel latest`,
+`curl -fsSL https://coder.iowarp.ai/install.sh | sh -s -- --channel latest`, or:
+
+```powershell
+& ([scriptblock]::Create((irm https://coder.iowarp.ai/install.ps1))) -Channel latest
+```
+
+An explicit channel selection clears an installer's version pin. Returning from
+a pre-release installs stable even if its version is lower, with one notice.
+If the home has recorded dated lifecycle migrations, the notice lists them:
+changing the binary does not reverse them. Managed installs retain the previous
+binary for `clio-coder upgrade --rollback`; rollback turns background updates off.
+Global npm/Bun users reinstall `@iowarp/clio-coder@latest` with their package manager.
+
+### Upgrading an older native installation
+
+Native installer installations from 0.6.0 and 0.6.1 upgrade in place when the
+hosted installer is rerun. The installer retains config, credentials, sessions
+and state, writes channel metadata, and runs pending post-install migrations
+once. It follows `latest` unless a channel, exact version or local package is
+supplied. A plain installer rerun follows the channel even if the previous
+install was pinned; a bare CLI upgrade still honors a pin until an explicit
+channel is selected.
+
+Upgrading older 0.3.x through 0.5.x layouts and adopting npm/Bun global
+installations into the native layout are unsupported. Users of those layouts
+remove Clio Coder and reinstall; the hosted installer has no conversion path
+for them.
+
 ### The installer layout
 
 | Path (Linux default) | Contents |
