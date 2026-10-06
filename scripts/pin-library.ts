@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { stringify } from "yaml";
@@ -63,6 +64,32 @@ if (existsSync(templatesDir)) {
 }
 
 const validationErrors: string[] = [];
+
+// A digest covers the whole tree, so a file git ignores (a test run's
+// __pycache__, an editor backup) would pin bytes no clean clone has, and the
+// package would then fail verification on every install. Refuse instead.
+let ignoredPaths: string[] = [];
+try {
+	ignoredPaths = execFileSync("git", ["status", "--porcelain", "--ignored", "--untracked-files=all", "--", "library"], {
+		cwd: root,
+		encoding: "utf8",
+	})
+		.split("\n")
+		.filter((line) => line.startsWith("!! "))
+		.map((line) => path.join(root, line.slice(3)));
+} catch {
+	// Outside a git checkout there is nothing to compare against; pin as before.
+}
+for (const target of packages) {
+	const inside = ignoredPaths.filter((file) => file.startsWith(`${target.directory}${path.sep}`));
+	if (inside.length > 0)
+		validationErrors.push(
+			`${path.relative(root, target.directory)}: holds files git ignores (${inside
+				.slice(0, 3)
+				.map((file) => path.relative(target.directory, file))
+				.join(", ")}); remove them and pin again, or the digest will not match a clean clone`,
+		);
+}
 
 // Validate all curated packages
 const validatedPackages: {
