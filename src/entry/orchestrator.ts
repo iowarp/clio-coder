@@ -2499,7 +2499,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		...(runtimeHooks ? { runtimeHooks } : {}),
 		cwd: () => process.cwd(),
 		recordReceipt: (receipt) => {
-			const sessionId = session?.current()?.id;
+			const sessionId = receipt.sessionId ?? session?.current()?.id;
 			const attributed = { ...receipt, ...(sessionId ? { sessionId } : {}) };
 			hookReceiptLog.record(attributed);
 			if (receipt.extension)
@@ -2514,6 +2514,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 						scope: receipt.extension.scope,
 					},
 					outcome: receipt.outcome,
+					...(sessionId ? { sessionId } : {}),
 					...(receipt.turnId ? { turnId: receipt.turnId } : {}),
 					details: {
 						effectKinds: receipt.effectKinds ?? [],

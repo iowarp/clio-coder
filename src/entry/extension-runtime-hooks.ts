@@ -139,7 +139,13 @@ type RunnerVerdict =
 interface RuntimeHookRunner {
 	run(event: ExtensionHookEvent, toolName?: string): Promise<RunnerVerdict>;
 	/** Receipt for a finished run, with the effects the host will apply. */
-	settle(verdict: RunnerVerdict, startedAt: number, effectKinds: ReadonlyArray<string>, toolName?: string): void;
+	settle(
+		verdict: RunnerVerdict,
+		startedAt: number,
+		effectKinds: ReadonlyArray<string>,
+		toolName?: string,
+		sessionId?: string,
+	): void;
 }
 
 /**
@@ -192,7 +198,7 @@ function createRuntimeHookRunner(
 			reported.clear();
 			return { kind: "ok", effects: outcome.effects };
 		},
-		settle(verdict, startedAt, effectKinds, toolName) {
+		settle(verdict, startedAt, effectKinds, toolName, sessionId) {
 			try {
 				options.recordReceipt({
 					at: now(),
@@ -204,6 +210,7 @@ function createRuntimeHookRunner(
 					hook: point,
 					kind: "runtime",
 					extensionVersion: entry.version,
+					...(sessionId ? { sessionId } : {}),
 					outcome: verdict.kind === "ok" ? "runtime-ok" : verdict.outcome,
 					durationMs: Math.round(performance.now() - startedAt),
 					...(effectKinds.length > 0 ? { effectKinds: [...effectKinds] } : {}),
@@ -282,6 +289,7 @@ export function buildExtensionRuntimeHookRegistrations(
 					startedAt,
 					effects.map((effect) => effect.kind),
 					input.toolName,
+					input.sessionId,
 				);
 				return effects;
 			},

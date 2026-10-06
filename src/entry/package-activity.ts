@@ -6,7 +6,7 @@ export function bindSessionPackageActivity(session: SessionContract, observabili
 	return bindPackageActivitySink((activity) => {
 		const current = session.current();
 		if (!current) return false;
-		const attributed = { ...activity, sessionId: current.id };
+		const attributed = { ...activity, sessionId: activity.sessionId ?? current.id };
 		session.appendEntry({
 			kind: "custom",
 			customType: activity.type,
