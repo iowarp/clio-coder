@@ -229,18 +229,3 @@ export function createProcessTreeTerminator(
 	};
 }
 
-export function waitForClose(child: {
-	once(event: "error", listener: (err: Error) => void): unknown;
-	once(event: "close", listener: (code: number | null) => void): unknown;
-}): Promise<number> {
-	return new Promise((resolve) => {
-		let settled = false;
-		const finish = (code: number): void => {
-			if (settled) return;
-			settled = true;
-			resolve(code);
-		};
-		child.once("error", () => finish(1));
-		child.once("close", (code: number | null) => finish(code ?? 1));
-	});
-}
