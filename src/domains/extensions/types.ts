@@ -84,6 +84,12 @@ export interface InstalledExtension {
 	 * effect; the only names a `replaces: prompt` command may take over.
 	 */
 	pluginPrompts?: readonly string[];
+	/**
+	 * Source label (`plugin:<scope>:<id>`) the served plugin's prompts carry while
+	 * it is loadable. A takeover applies only when the prompt that wins a name
+	 * has this source, so an operator or project prompt of that name keeps it.
+	 */
+	pluginSource?: string;
 	runtime?: ExtensionRuntimeDeclaration;
 	runtimeV2?: ExtensionRuntimeDeclarationV2;
 	id: string;
@@ -214,12 +220,27 @@ export interface ExtensionListOptions {
 	all?: boolean;
 }
 
+/** Where an installed extension came from, kept so a later update resolves the durable source and not a staging path. */
+export interface ExtensionOrigin {
+	kind: "local" | "catalog" | "github";
+	source: string;
+}
+
 export interface ExtensionInstallOptions extends ExtensionListOptions {
 	force?: boolean;
 	/** Optional library pin, rechecked against the staged tree by the canonical writer. */
 	expectedDigest?: string;
 	expectedId?: string;
 	expectedVersion?: string;
+	/**
+	 * The capability envelope the operator reviewed. A digest binds the install to
+	 * exactly that envelope; `null` says the reviewed package declared none. Absent
+	 * means the caller reviewed nothing to bind.
+	 */
+	expectedEnvelopeDigest?: string | null;
+	/** Durable source recorded in install state when the staged `sourcePath` is only a working copy. */
+	source?: string;
+	origin?: ExtensionOrigin;
 }
 
 export interface ExtensionInstallResult {
@@ -243,6 +264,7 @@ export interface ExtensionState {
 		{
 			installedAt: string;
 			source?: string;
+			origin?: ExtensionOrigin;
 			contentDigest?: string;
 			/** Digest of the capability envelope the operator reviewed at install; absent for api 1 and older records. */
 			envelopeDigest?: string;

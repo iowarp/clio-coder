@@ -1,3 +1,4 @@
+import { promptRefs } from "../domains/extensions/operator-commands.js";
 import type { ExtensionPanel } from "../domains/extensions/public-api.js";
 import type { LibraryEntryKind, ResourcesContract } from "../domains/resources/index.js";
 import type { TUI } from "../engine/tui.js";
@@ -62,9 +63,7 @@ export function createOverlayResourceOpeners(deps: OverlayResourceOpenersDeps): 
 			deps.keybindings,
 			deps.closeOverlay,
 			query,
-			ctx.operatorExtensions?.commands(
-				(ctx.listPromptsForDisplay ?? ctx.listPrompts)?.().items.map((prompt) => prompt.name) ?? [],
-			),
+			ctx.operatorExtensions?.commands(promptRefs((ctx.listPromptsForDisplay ?? ctx.listPrompts)?.().items ?? [])),
 		);
 		deps.tui.requestRender();
 	};

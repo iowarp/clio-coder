@@ -1,7 +1,13 @@
 import { readFileSync, realpathSync } from "node:fs";
 import path from "node:path";
 import { clioStateDir } from "../../core/xdg.js";
-import { type ExtensionCommandRow, extensionInvocation, resolveExtensionCommands } from "./operator-commands.js";
+import {
+	type ExtensionCommandRow,
+	extensionInvocation,
+	type PromptRef,
+	promptRefName,
+	resolveExtensionCommands,
+} from "./operator-commands.js";
 import type { OperatorReloadResult, OperatorRuntimeEntry } from "./operator-runtime.js";
 import type { ExtensionRuntimeSnapshot } from "./public-api.js";
 import type {
@@ -586,7 +592,7 @@ export class OperatorExtensionRuntimeV2 {
 		return task;
 	}
 
-	commands(promptNames: readonly string[] = []): ExtensionCommandRow[] {
+	commands(promptNames: ReadonlyArray<string | PromptRef> = []): ExtensionCommandRow[] {
 		const rows = this.inventory
 			.filter((entry) => entry.effective && entry.runtimeV2)
 			.flatMap((entry) =>
@@ -624,13 +630,20 @@ export class OperatorExtensionRuntimeV2 {
 							? { transient: true as const }
 							: {}),
 					};
-					// A takeover needs the served plugin in effect and its prompt still listed;
-					// otherwise the plain prompt (or nothing) answers that name.
+					// A takeover needs the served plugin in effect and the prompt that wins the name to
+					// be that plugin's own. An operator or project prompt of the same name keeps the
+					// name, and a bare name carries no owner to compare.
 					const alias = entry.plugin ? `${entry.plugin}:${command.name}` : undefined;
+					const winner =
+						alias === undefined
+							? undefined
+							: promptNames.find((ref) => promptRefName(ref).toLowerCase() === alias.toLowerCase());
 					return alias &&
 						command.replaces === "prompt" &&
 						entry.pluginPrompts?.includes(alias) &&
-						promptNames.some((name) => name.toLowerCase() === alias.toLowerCase())
+						typeof winner === "object" &&
+						winner.source !== undefined &&
+						winner.source === entry.pluginSource
 						? [row, { ...row, invocation: alias, replaces: "prompt" as const }]
 						: [row];
 				}),
@@ -705,7 +718,7 @@ export class OperatorExtensionRuntimeV2 {
 	async invoke(
 		invocation: string,
 		args: string,
-		promptNames: readonly string[] = [],
+		promptNames: ReadonlyArray<string | PromptRef> = [],
 		signal?: AbortSignal,
 	): Promise<ExtensionOutputV2> {
 		this.reconcile();

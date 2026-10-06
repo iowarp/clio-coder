@@ -1,4 +1,5 @@
 import type { InstalledExtension } from "../../domains/extensions/index.js";
+import { promptRefs } from "../../domains/extensions/operator-commands.js";
 import type { OverlayHandle, TUI } from "../../engine/tui.js";
 import type { SlashCommandContext } from "../../session-control/slash-commands.js";
 import { clioTheme } from "../theme/index.js";
@@ -84,7 +85,7 @@ export function openExtensionsOverlay(tui: TUI, ctx: SlashCommandContext, onClos
 					if (runtime?.reason) lines.push(runtime.reason);
 					if (runtime?.status) lines.push(`**Status:** ${runtime.status.text}`);
 					for (const command of ctx.operatorExtensions
-						?.commands((ctx.listPromptsForDisplay ?? ctx.listPrompts)?.().items.map((prompt) => prompt.name) ?? [])
+						?.commands(promptRefs((ctx.listPromptsForDisplay ?? ctx.listPrompts)?.().items ?? []))
 						.filter((row) => row.extensionId === ext.id) ?? [])
 						lines.push(`/${command.invocation}: ${command.description} (${command.available ? "ready" : command.reason})`);
 				}

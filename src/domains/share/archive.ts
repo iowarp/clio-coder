@@ -929,6 +929,8 @@ export function importShareArchive(filePath: string, options: ShareImportOptions
 				installExtension(root, {
 					cwd,
 					scope: extensionPackage.scope,
+					// The staging directory is removed on return; the record keeps the archive it came from.
+					source: path.resolve(filePath),
 					...(options.force !== undefined ? { force: options.force } : {}),
 				}),
 			);

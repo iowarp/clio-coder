@@ -215,7 +215,12 @@ export function runExtensionsCommand(argv: ReadonlyArray<string>): number | Prom
 				process.stdout.write(`${review.id} ${review.version} would be allowed to:\n`);
 				for (const line of envelopeReviewLines(review)) process.stdout.write(`  ${line}\n`);
 			}
-			const result = installExtension(resolve(root), { ...scopeOptions, force: parsed.force });
+			// The install applies the envelope just shown, or none when the package declares none.
+			const result = installExtension(resolve(root), {
+				...scopeOptions,
+				force: parsed.force,
+				expectedEnvelopeDigest: review?.digest ?? null,
+			});
 			const approved =
 				firstProjectInstall && result.extension !== undefined && approveFirstProjectInstall(process.cwd(), "extensions");
 			if (parsed.json)

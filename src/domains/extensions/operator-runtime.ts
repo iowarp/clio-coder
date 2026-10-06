@@ -1,4 +1,9 @@
-import { type ExtensionCommandRow, extensionInvocation, resolveExtensionCommands } from "./operator-commands.js";
+import {
+	type ExtensionCommandRow,
+	extensionInvocation,
+	type PromptRef,
+	resolveExtensionCommands,
+} from "./operator-commands.js";
 
 export {
 	type ExtensionCommandRow,
@@ -323,7 +328,7 @@ export class OperatorExtensionRuntime {
 		}
 		return result;
 	}
-	commands(promptNames: readonly string[] = []): ExtensionCommandRow[] {
+	commands(promptNames: ReadonlyArray<string | PromptRef> = []): ExtensionCommandRow[] {
 		const rows = this.inventory
 			.filter((entry) => entry.effective && entry.runtime)
 			.flatMap((entry) =>
@@ -384,7 +389,7 @@ export class OperatorExtensionRuntime {
 	async invoke(
 		invocation: string,
 		args: string,
-		promptNames: readonly string[] = [],
+		promptNames: ReadonlyArray<string | PromptRef> = [],
 		signal?: AbortSignal,
 	): Promise<ExtensionOutput> {
 		this.reconcile();

@@ -90,6 +90,7 @@ export function readLibraryInstallRecord(
 				kind: "extension",
 				installedAt: saved.installedAt,
 				source: saved.source ?? "",
+				...(saved.origin ? { origin: saved.origin } : {}),
 				contentDigest: saved.contentDigest,
 			}
 		: undefined;

@@ -5,6 +5,7 @@ import { type TestContext, test } from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
 import type { DynamicToolName } from "../../src/core/tool-names.js";
 import { loadManifestFromRoot, parseExtensionManifest } from "../../src/domains/extensions/discovery.js";
+import { promptRefs } from "../../src/domains/extensions/operator-commands.js";
 import { OperatorExtensions } from "../../src/domains/extensions/operator-extensions.js";
 import { OperatorExtensionRuntime, resolveExtensionCommands } from "../../src/domains/extensions/operator-runtime.js";
 import { ExtensionRuntimeProcess } from "../../src/domains/extensions/runtime-process.js";
@@ -496,7 +497,8 @@ test("completion and dispatch preserve display-only prompt ownership at the same
 	const f = await fixture(t);
 	await f.runtime.reload();
 	const invocation = "ext:lab_status.v1:inspect";
-	let promptNames: Array<{ name: string; description: string; displayOnly: boolean }> = [];
+	let promptNames: Array<{ name: string; description: string; displayOnly: boolean; sourceInfo: { source: string } }> =
+		[];
 	const provider = createSlashCommandAutocompleteProvider({
 		fdPath: null,
 		extensionCommands: () => f.runtime.commands(),
@@ -505,7 +507,9 @@ test("completion and dispatch preserve display-only prompt ownership at the same
 	const line = "/ext:lab";
 	const suggestions = () => provider.getSuggestions([line], 0, line.length, { signal: new AbortController().signal });
 	equal((await suggestions())?.items[0]?.value, invocation);
-	promptNames = [{ name: invocation, description: "Legacy reference", displayOnly: true }];
+	promptNames = [
+		{ name: invocation, description: "Legacy reference", displayOnly: true, sourceInfo: { source: "project" } },
+	];
 	const collided = await suggestions();
 	equal(collided?.items.length, 1);
 	match(String(collided?.items[0]?.description), /reference/);
@@ -788,8 +792,11 @@ test("a served plugin's prompt is a plain prompt until its extension is installe
 		await runtime.dispose();
 		env.restore();
 	});
-	const names = () => prompts().items.map((prompt) => prompt.name);
-	ok(names().includes("materio:status"), "the plugin alone provides the prompt");
+	const names = () => promptRefs(prompts().items);
+	ok(
+		names().some((prompt) => prompt.name === "materio:status"),
+		"the plugin alone provides the prompt",
+	);
 
 	// Plugin alone: no runtime exists, and the name expands as an ordinary prompt template.
 	equal((await runtime.reload("startup")).status, "committed");

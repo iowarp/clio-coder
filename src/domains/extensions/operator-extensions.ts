@@ -1,4 +1,4 @@
-import type { ExtensionCommandRow } from "./operator-commands.js";
+import type { ExtensionCommandRow, PromptRef } from "./operator-commands.js";
 import {
 	OperatorExtensionRuntime,
 	type OperatorReloadResult,
@@ -148,7 +148,7 @@ export class OperatorExtensions {
 		};
 	}
 
-	commands(promptNames: readonly string[] = []): ExtensionCommandRow[] {
+	commands(promptNames: ReadonlyArray<string | PromptRef> = []): ExtensionCommandRow[] {
 		return [...this.v1.commands(promptNames), ...this.v2.commands(promptNames)];
 	}
 	/** One row per installed package; an api 2 package is reported by the api 2 manager only. */
@@ -160,7 +160,7 @@ export class OperatorExtensions {
 	async invoke(
 		invocation: string,
 		args: string,
-		promptNames: readonly string[] = [],
+		promptNames: ReadonlyArray<string | PromptRef> = [],
 		signal?: AbortSignal,
 	): Promise<OperatorCommandOutput> {
 		if (this.v2.commands(promptNames).some((row) => row.invocation === invocation))

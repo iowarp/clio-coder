@@ -21,7 +21,7 @@ import type { RunReceipt } from "../domains/dispatch/types.js";
 import type { JobThinkingLevel } from "../domains/dispatch/validation.js";
 import type { ReceiptIntegrityOutcome } from "../domains/evidence/trust-status.js";
 import type { InstalledExtension } from "../domains/extensions/index.js";
-import { isExtensionCommandToken } from "../domains/extensions/operator-commands.js";
+import { isExtensionCommandToken, promptRefs } from "../domains/extensions/operator-commands.js";
 import type { OperatorCommandOutput, OperatorExtensions } from "../domains/extensions/operator-extensions.js";
 import type { InteropAgentId, InteropProposal, InteropReport } from "../domains/interop/index.js";
 import { isInteropHeadlessRuntime } from "../domains/interop/peer-modes.js";
@@ -3088,7 +3088,7 @@ export function dispatchSlashCommand(command: SlashCommand, ctx: SlashCommandCon
 		// commands sitting in the roots Clio reads, and answering "not a command"
 		// for one that is loaded made the whole foreign prompt surface unreachable.
 		const runtime = ctx.operatorExtensions;
-		const promptNames = (ctx.listPrompts?.().items ?? []).map((prompt) => prompt.name);
+		const promptNames = promptRefs(ctx.listPrompts?.().items ?? []);
 		const takeovers = (runtime?.commands(promptNames) ?? []).filter(
 			(row) => row.invocation === command.token && row.replaces === "prompt",
 		);
@@ -3128,7 +3128,7 @@ export function dispatchSlashCommand(command: SlashCommand, ctx: SlashCommandCon
 		const refusal = expansion?.expanded === false ? expansion.refusal : undefined;
 		if (!refusal && (isExtensionCommandToken(command.token) || replacement) && ctx.operatorExtensions) {
 			const runtime = ctx.operatorExtensions;
-			const promptNames = (ctx.listPrompts?.().items ?? []).map((prompt) => prompt.name);
+			const promptNames = promptRefs(ctx.listPrompts?.().items ?? []);
 			const row = runtime.commands(promptNames).find((row) => row.invocation === command.token);
 			if (!row?.available) {
 				ctx.notice("error", row?.reason ?? `/${command.token} is not an available extension command`);
@@ -3139,11 +3139,7 @@ export function dispatchSlashCommand(command: SlashCommand, ctx: SlashCommandCon
 			const runLocal = ctx.runLocalOperation ?? ((operation: () => Promise<void>) => void operation());
 			runLocal(async () => {
 				try {
-					const output = await runtime.invoke(
-						command.token,
-						args,
-						(ctx.listPrompts?.().items ?? []).map((prompt) => prompt.name),
-					);
+					const output = await runtime.invoke(command.token, args, promptRefs(ctx.listPrompts?.().items ?? []));
 					if (ctx.showExtensionOutput) ctx.showExtensionOutput(command.token, output);
 					else ctx.io.stdout(`${output.text}\n`);
 				} catch (error) {
@@ -3152,7 +3148,7 @@ export function dispatchSlashCommand(command: SlashCommand, ctx: SlashCommandCon
 					if (
 						replacement &&
 						!runtime
-							.commands((ctx.listPrompts?.().items ?? []).map((prompt) => prompt.name))
+							.commands(promptRefs(ctx.listPrompts?.().items ?? []))
 							.some((row) => row.invocation === command.token && row.available)
 					) {
 						dispatchSlashCommand(command, ctx);

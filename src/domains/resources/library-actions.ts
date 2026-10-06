@@ -724,6 +724,9 @@ function runWriter(plan: LibraryLifecyclePlan, step: LibraryPlanStep): PluginMut
 			if (step.operation === "install" || step.operation === "update") {
 				const source = staged.get(plan.id)?.get(stepKey(identity));
 				if (!source) throw new Error("extension install source was released");
+				// Apply only the envelope the operator reviewed; a review that could not be read leaves none to match.
+				const review = plan.reviews?.find((item) => item.ref === identity.ref && item.scope === identity.scope);
+				source.expectedEnvelopeDigest = review?.envelopeDigest ?? null;
 				return commitLibraryInstallPlan(source);
 			}
 			const options = { cwd: plan.cwd, scope: identity.scope };

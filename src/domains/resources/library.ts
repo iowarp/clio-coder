@@ -169,6 +169,11 @@ export interface LibraryInstallPlan {
 	expectedInstalledDigest?: string;
 	/** Reviewed facts rechecked inside the writer's lock. */
 	expect?: PluginExpectedState;
+	/**
+	 * Extension only: the capability envelope digest the operator reviewed, or `null`
+	 * when the reviewed package declared none. The writer refuses any other envelope.
+	 */
+	expectedEnvelopeDigest?: string | null;
 }
 
 export interface LibraryScopeOptions {
@@ -421,6 +426,18 @@ export function commitLibraryInstallPlan(plan: LibraryInstallPlan): PluginMutati
 			expectedDigest: plan.sha256,
 			expectedId: plan.entry.name,
 			...(plan.entry.version ? { expectedVersion: plan.entry.version } : {}),
+			...(plan.expectedEnvelopeDigest !== undefined ? { expectedEnvelopeDigest: plan.expectedEnvelopeDigest } : {}),
+			// The staged root is a working copy; the record keeps the catalog or local source an update resolves.
+			source: plan.entry.sourceUrl,
+			origin: {
+				kind:
+					plan.entry.origin === "catalog" || plan.entry.origin === "index"
+						? "catalog"
+						: parsePluginGithubSource(plan.entry.sourceUrl)
+							? "github"
+							: "local",
+				source: plan.entry.sourceUrl,
+			},
 		});
 		return { ...result, ...(result.extension ? { plugin: extensionLibraryCopy(result.extension) } : {}) };
 	}
