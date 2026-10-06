@@ -156,6 +156,7 @@ Every name in `ToolNames` ([tool-names.ts](../../src/core/tool-names.ts)) has on
 | `clio_docs` | gateway | gateway | observe | read | parallel |
 | `clio_library` | gateway | gateway | observe | read | parallel |
 | `data` | gateway | gateway | observe | read | parallel |
+| `memory_recall` | gateway | gateway | observe | read | parallel |
 | `write` | direct | direct | mutate | write | sequential |
 | `edit` | direct | direct | mutate | write | sequential |
 | `bash` | direct | direct | execute | execute | sequential |
@@ -163,6 +164,7 @@ Every name in `ToolNames` ([tool-names.ts](../../src/core/tool-names.ts)) has on
 | `verify` | direct | direct | execute | execute | sequential |
 | `run_script` | direct | gateway | execute | execute | sequential |
 | `dispatch` | direct | direct | orchestrate | dispatch | sequential |
+| `job` | gateway | gateway | orchestrate | dispatch | sequential |
 | `monitor` | direct | gateway | orchestrate | read | parallel |
 | `steer` | direct | gateway | orchestrate | dispatch | sequential |
 | `tasks` | direct | gateway | orchestrate | read | sequential |
@@ -180,7 +182,7 @@ Every name in `ToolNames` ([tool-names.ts](../../src/core/tool-names.ts)) has on
 | `artifact` | gateway | gateway | artifact | write | sequential |
 | `gateway` | direct | direct | gateway | read; the inner call keeps its class | sequential |
 
-There are 35 tools in eight planes. The action class is the tool's base class; admission still judges the effect of a particular call, so `bash`, `run_script`, `verify` and `git` mutations are classified by the command they would run. See [the safety model](../architecture/safety-model.md) for autonomy, and [Prompt Envelope and Tools](../architecture/prompt-envelope-and-tools.md) for why a tool sits in its plane.
+There are 37 tools in eight planes. The action class is the tool's base class; admission still judges the effect of a particular call, so `bash`, `run_script`, `verify` and `git` mutations are classified by the command they would run. See [the safety model](../architecture/safety-model.md) for autonomy, and [Prompt Envelope and Tools](../architecture/prompt-envelope-and-tools.md) for why a tool sits in its plane.
 
 ## Observation envelope: truncation notices, offload, next hints, and the turn budget
 
@@ -1083,7 +1085,7 @@ gateway(op="call", capability="artifact", args={kind: "review", content: "# Revi
 
 `configure_clio` is available only at `default` and `yolo`, and a value is at most 8192 bytes. `preview` returns the changed values and a `proposalId`. Each changed leaf is one `path: old → new` line, an object value is compared key by key, and the preview shows at most 20 lines of 160 characters with `… N more changed values` after them. The Apply card and the transcript row name the setting and leave out the value text the model composed. One proposal is pending per session, it expires after 10 minutes, and `apply` fails when the saved value changed since the preview. At `default`, `apply` asks the operator to approve the exact preview. At `yolo`, `apply` saves it directly, with one exception: persistent fleet routing (`fleet.default`, `fleet.profiles`, `fleet.agentProfiles`) parks on the registry's confirmation rail at every autonomy level, so the operator approves the exact preview even at `yolo`. A one-off run belongs on dispatch's `target` and `model` fields instead. For agent model bindings, preview and apply `fleet.profiles` first, then `fleet.agentProfiles`, each as a complete JSON map. The tool refuses `safety.autonomy`, credentials and arbitrary paths, because only the operator changes autonomy, through `/settings`, `clio-coder configure` or `--autonomy`. Project-scope saves use the operator's `/settings` UI.
 
-A saved `apply` reports when the change takes effect, by the setting's effect timing. Routing paths keep the session's current routing, so exit and start a new Clio Coder session to use them. A live setting is picked up automatically once the settings watcher reads the save. A next-turn setting applies to the next request or dispatch, and running workers keep their settings. A restart-required setting needs a new session. There is no `/reload` command.
+A saved `apply` reports when the change takes effect, by the setting's effect timing. Routing paths keep the session's current routing, so run `/restart` (it saves and restarts into this session and workspace) or start a new Clio Coder session to use them. A live setting is picked up automatically once the settings watcher reads the save. A next-turn setting applies to the next request or dispatch, and running workers keep their settings. A restart-required setting needs a new session. `/reload [settings|library|extensions|all]` re-reads those resources and reports what changed and what still needs a new session.
 
 ```text
 gateway(op="call", capability="configure_clio", args={action: "preview", path: "chat.thinkingLevel", value: "high"})
