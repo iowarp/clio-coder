@@ -634,6 +634,7 @@ describe("skill tool surface lifetime", () => {
 					strictEqual("configDir" in input, false);
 					installs += 1;
 					available = true;
+					return { name: "interview", scope: mode, path: "SKILL.md", sourceUrl: "interview", installedHash: "test", warnings: [] };
 				},
 				resources: {
 					reload: async () => {
