@@ -89,7 +89,7 @@ Options:
   --no-workspace        Skip the workspace pane host (herdr). Default: use a herdr
                         already on PATH, otherwise download Clio Coder's pinned
                         copy, and download nothing after you declined the
-                        workspace. Env: CLIO_CODER_INSTALL_WORKSPACE=0
+                        workspace or set panes off. Env: CLIO_CODER_INSTALL_WORKSPACE=0
   --force               Replace a clio-coder launcher this installer did not write.
   --dry-run             Print the plan; download and change nothing.
   -h, --help            Show this help.
@@ -633,15 +633,15 @@ offer_gui() {
 
 # The workspace is what bare `clio-coder` opens: the session beside terminal panes, hosted by
 # a pinned herdr. A herdr already on PATH at a usable version is used as it is and nothing is
-# downloaded, and nothing is downloaded after the operator declined the workspace, so an update
-# never reverses that answer. A failure here never fails the install: Clio asks again on first
+# downloaded, and nothing is downloaded after the operator declined the workspace or set
+# interface.panes.enabled to off, so an update never reverses that answer. A failure here never fails the install: Clio asks again on first
 # launch, and runs in the plain terminal without it.
 provision_workspace() {
 	[ "$install_workspace" != 0 ] || return 0
 	case "$(uname -s 2>/dev/null)" in Linux | Darwin) ;; *) return 0 ;; esac
 	if "$node_bin" "$entry" panes install --if-missing </dev/null >"$work/workspace.out" 2>&1; then
-		if grep -q 'workspace declined earlier' "$work/workspace.out"; then
-			log "workspace skipped: you declined it earlier; run: clio-coder panes workspace on"
+		if grep -q 'workspace not downloaded' "$work/workspace.out"; then
+			log "workspace skipped: you declined it or interface.panes.enabled is off; run: clio-coder panes workspace on"
 		else
 			ok "workspace ready: $(grep -E 'installed herdr|already resolves' "$work/workspace.out" | tail -n 1 | sed 's/^ok: //')"
 		fi
