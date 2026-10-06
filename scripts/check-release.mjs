@@ -27,7 +27,7 @@ import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { shippedAdvisoryFindings } from "./release-audit.mjs";
-import { releaseVersionErrors } from "./release-version-policy.mjs";
+import { releaseVersionErrors, SNAPSHOT_VERSION } from "./release-version-policy.mjs";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 const { values } = parseArgs({ options: { tarball: { type: "string" }, report: { type: "string" } } });
@@ -175,9 +175,15 @@ function checkVersionCoherence() {
 	}
 	let changelog;
 	try {
-		const registry = JSON.parse(readFileSync(join(packageRoot, "assets/acp-registry/agent.json"), "utf8"));
-		if (registry.version !== version) {
-			errors.push(`ACP registry version ${registry.version} does not match package.json version ${version}`);
+		// ACP discovery metadata is checkout-only; it does not ship in the archive.
+		const registry = JSON.parse(readFileSync(join(root, "assets/acp-registry/agent.json"), "utf8"));
+		const sourceVersion = JSON.parse(readFileSync(join(root, "package.json"), "utf8")).version;
+		const stampedSnapshot =
+			typeof version === "string" && SNAPSHOT_VERSION.test(version) && sourceVersion === `${version.split("-")[0]}-dev`;
+		if (packageRoot !== root && version !== sourceVersion && !stampedSnapshot)
+			errors.push(`Packed version ${version} differs from source version ${sourceVersion}`);
+		if (registry.version !== sourceVersion) {
+			errors.push(`ACP registry version ${registry.version} does not match package.json version ${sourceVersion}`);
 		}
 	} catch (error) {
 		errors.push(`unable to read ACP registry manifest: ${error instanceof Error ? error.message : String(error)}`);

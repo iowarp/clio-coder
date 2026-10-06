@@ -3,8 +3,8 @@ import { createHash } from "node:crypto";
 import {
 	appendFileSync,
 	existsSync,
-	mkdtempSync,
 	mkdirSync,
+	mkdtempSync,
 	readdirSync,
 	readFileSync,
 	rmSync,
@@ -68,7 +68,7 @@ export function snapshotPayload(receipt, directory) {
 			throw new Error("Unsafe snapshot source archive.");
 		run("tar", ["-xzf", receipt.tarball, "-C", scratch]);
 		const before = inventory(join(scratch, "package"));
-		for (const path of ["package.json", "assets/acp-registry/agent.json"]) {
+		for (const path of ["package.json"]) {
 			const file = join(scratch, "package", path);
 			const original = JSON.parse(readFileSync(file, "utf8"));
 			if (original.version !== receipt.version) throw new Error(`Qualified version differs: ${path}`);
@@ -76,14 +76,19 @@ export function snapshotPayload(receipt, directory) {
 		}
 		const expected = inventory(join(scratch, "package"));
 		for (const path of Object.keys(before))
-			if (
-				!["package.json", "assets/acp-registry/agent.json"].includes(path) &&
-				JSON.stringify(before[path]) !== JSON.stringify(expected[path])
-			)
+			if (!["package.json"].includes(path) && JSON.stringify(before[path]) !== JSON.stringify(expected[path]))
 				throw new Error(`Unqualified snapshot change: ${path}`);
 		const output = join(directory, "dev-snapshot");
 		mkdirSync(output, { recursive: true });
 		const tarball = join(output, `iowarp-clio-coder-${version}.tgz`);
+		const fileList = join(scratch, "files.txt");
+		writeFileSync(
+			fileList,
+			`${Object.keys(expected)
+				.filter((path) => expected[path].digest !== "directory")
+				.map((path) => `package/${path}`)
+				.join("\n")}\n`,
+		);
 		run("tar", [
 			"--sort=name",
 			`--mtime=@${Math.floor(new Date(timestamp).getTime() / 1000)}`,
@@ -94,7 +99,9 @@ export function snapshotPayload(receipt, directory) {
 			tarball,
 			"-C",
 			scratch,
-			"package",
+			"--no-recursion",
+			"-T",
+			fileList,
 		]);
 		const check = join(scratch, "verify");
 		mkdirSync(check);
@@ -213,6 +220,7 @@ export async function rehearseBytes(directory, commit, branch) {
 			`npm dry-run correctly refuses the already published ${receipt.version}; no version bump or public write was made.`,
 		);
 	}
+	if (dryRun) dryRun = dryRun[receipt.name] ?? dryRun;
 	if (
 		dryRun &&
 		(dryRun.name !== receipt.name ||
