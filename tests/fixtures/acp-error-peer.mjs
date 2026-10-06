@@ -2,7 +2,8 @@ import { createInterface } from "node:readline";
 
 const mode = process.argv[2];
 const thoughtOption = mode === "thought-option" || mode === "thought-refuse";
-const modelPin = mode === "model-pin" || mode === "model-variants" || thoughtOption;
+const targetFirst = mode === "target-first";
+const modelPin = mode === "model-pin" || mode === "model-variants" || targetFirst || thoughtOption;
 const legacyModels = mode === "legacy-models";
 let selectedModel = thoughtOption ? "gpt-6-astra" : "gpt-6-astra[medium]";
 let selectedThought = "medium";
@@ -30,7 +31,7 @@ function configOptions() {
 				...(mode === "model-variants" ? [modelValue("gpt-6-luna[high]")] : []),
 			];
 	const model = {
-		id: "peer-model",
+		id: targetFirst ? "model" : "peer-model",
 		name: "Model",
 		category: "model",
 		type: "select",
@@ -48,6 +49,20 @@ function configOptions() {
 				currentValue: selectedThought,
 				options: [{ group: "effort", name: "Effort", options: [modelValue("medium"), modelValue("high")] }],
 			},
+		];
+	}
+	// A 0.6.2 Clio peer announced its `target` option in category `model` ahead of `model`.
+	if (targetFirst) {
+		return [
+			{
+				id: "target",
+				name: "Target",
+				category: "model",
+				type: "select",
+				currentValue: "local",
+				options: [modelValue("local")],
+			},
+			model,
 		];
 	}
 	return mode === "model-variants"

@@ -4327,7 +4327,10 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 			optionsList.push({
 				id: "target",
 				name: "Target",
-				category: "model",
+				// Custom categories start with an underscore. Keeping `model` for the model
+				// option alone stops a peer that takes the first model-category option from
+				// choosing a target as the model.
+				category: "_target",
 				type: "select",
 				currentValue: session.target,
 				options: options.providers

@@ -140,11 +140,18 @@ interface PeerSelectOption {
 }
 
 /**
- * The first `select` config option in a category. ACP v1 uses session config
- * options for model and thinking level; their values may be grouped.
+ * The `select` config option in a category, preferring the one whose id is
+ * `preferId` and otherwise the first. ACP v1 uses session config options for
+ * model and thinking level; their values may be grouped. A 0.6.2 Clio peer
+ * announced its `target` option in the `model` category ahead of `model`.
  */
-function peerSelectOption(configOptions: unknown, category: "model" | "thought_level"): PeerSelectOption | null {
+function peerSelectOption(
+	configOptions: unknown,
+	category: "model" | "thought_level",
+	preferId?: string,
+): PeerSelectOption | null {
 	if (!Array.isArray(configOptions)) return null;
+	let first: PeerSelectOption | null = null;
 	for (const option of configOptions) {
 		if (!isRecord(option) || option.category !== category || option.type !== "select") continue;
 		if (typeof option.id !== "string" || option.id.length === 0) continue;
@@ -158,9 +165,15 @@ function peerSelectOption(configOptions: unknown, category: "model" | "thought_l
 				}
 			}
 		}
-		return { id: option.id, currentValue: typeof option.currentValue === "string" ? option.currentValue : null, values };
+		const parsed = {
+			id: option.id,
+			currentValue: typeof option.currentValue === "string" ? option.currentValue : null,
+			values,
+		};
+		if (option.id === preferId) return parsed;
+		first ??= parsed;
 	}
-	return null;
+	return first;
 }
 
 function flattenPrompt(input: AcpDelegationRunInput): string {
@@ -404,7 +417,7 @@ export function startAcpDelegationRun(input: AcpDelegationRunInput): AcpDelegati
 			sessionId = sessionIdFrom(session);
 			if (!sessionId) throw new Error("ACP session/new response did not include sessionId");
 			const configOptions = isRecord(session) ? session.configOptions : undefined;
-			const modelOption = peerSelectOption(configOptions, "model");
+			const modelOption = peerSelectOption(configOptions, "model", "model");
 			const thoughtOption = peerSelectOption(configOptions, "thought_level");
 			if (input.model !== undefined) {
 				const ids = modelOption?.values ?? [];
@@ -438,7 +451,11 @@ export function startAcpDelegationRun(input: AcpDelegationRunInput): AcpDelegati
 					);
 					// The response carries the complete option state; a peer that
 					// kept another model must not be recorded as running this one.
-					const applied = peerSelectOption(isRecord(updated) ? updated.configOptions : undefined, "model")?.currentValue;
+					const applied = peerSelectOption(
+						isRecord(updated) ? updated.configOptions : undefined,
+						"model",
+						"model",
+					)?.currentValue;
 					if (typeof applied === "string" && applied !== selected) {
 						throw new Error(`ACP peer kept model '${applied}' after Clio selected '${selected}'`);
 					}

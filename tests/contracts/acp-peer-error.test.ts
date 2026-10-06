@@ -272,6 +272,24 @@ test("ACP adapter fails a prompt response missing stopReason", async () => {
 	strictEqual(result.failureMessage, "ACP prompt response missing stopReason");
 });
 
+test("ACP adapter selects the option whose id is model when a target option shares its category", async () => {
+	const cwd = process.cwd();
+	const result = await startAcpDelegationRun({
+		agent: {
+			id: "target-first-fixture",
+			command: process.execPath,
+			args: [fileURLToPath(new URL("../fixtures/acp-error-peer.mjs", import.meta.url)), "target-first"],
+			connectTimeoutMs: 5_000,
+		},
+		task: "report version",
+		model: "gpt-6-luna",
+		cwd,
+		safety: createWorkerSafety({ cwd }),
+	}).promise;
+	strictEqual(result.exitCode, 0, result.failureMessage);
+	strictEqual(result.delegation.selectedModelId, "gpt-6-luna[medium]");
+});
+
 test("ACP adapter fails an unavailable explicit model before prompting", async () => {
 	const cwd = process.cwd();
 	const run = startAcpDelegationRun({
