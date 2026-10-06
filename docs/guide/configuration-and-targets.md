@@ -23,7 +23,7 @@ User settings are stored at `<configDir>/settings.yaml`. Project layers are `.cl
 
 ## First-run flow
 
-For terminal setup, run `clio-coder configure` or start `clio-coder` in a new home. An existing home whose chat route is missing or unusable first tries [chat route detection](#chat-route-detection) and starts configure only when nothing is detected. For browser setup, run `clio-coder gui --open` and use **Guided setup** on the home page; a prior configure run is optional. Both presentations run the same connection wizard. Choose **Guided setup** and then the source you recognize: an app on this computer, a model server, an AI subscription, or a provider account/API. Clio Coder chooses a unique internal connection id, fills known local addresses, and lists the relevant providers. An installed coding agent is a separate worker-only choice when adding another connection.
+For terminal setup, run `clio-coder configure` or start `clio-coder` in a new home. An existing home with no chat route first tries [chat route detection](#chat-route-detection) and starts configure only when nothing is detected. A saved chat route that cannot be used is kept, and startup says what to fix. For browser setup, run `clio-coder gui --open` and use **Guided setup** on the home page; a prior configure run is optional. Both presentations run the same connection wizard. Choose **Guided setup** and then the source you recognize: an app on this computer, a model server, an AI subscription, or a provider account/API. Clio Coder chooses a unique internal connection id, fills known local addresses, and lists the relevant providers. An installed coding agent is a separate worker-only choice when adding another connection.
 
 1. Choose the provider or app. Provide a key or complete browser sign-in only when required.
 2. Confirm the server address when that provider has one. Clio performs a passive reachability and model-catalog probe when the runtime supports it; this sends no generation request.
@@ -31,7 +31,7 @@ For terminal setup, run `clio-coder configure` or start `clio-coder` in a new ho
 4. Review the evidence. The screen distinguishes reachable, live model discovery, catalog/cache fallback, and facts not checked. The compact summary keeps Save, Back, and Cancel visible on a short terminal. **Connection and machine details** shows usable CPUs, available memory, and automatic local-worker sizing. Clio states that GPU/VRAM, model fit, answer quality, and tool use were not tested.
 5. Save. The first connection becomes the chat and fleet model; shipped defaults handle the remaining settings.
 
-When a home has no usable chat route, the first screen of the terminal wizard lists the routes Clio detected before the source categories. Each reads `Use <runtime> / <model>` with the evidence it came from. Choosing one skips the provider, address and credential steps and goes to review, or to the model step when the detection carried no model. The detection rules are in [Chat route detection](#chat-route-detection).
+When a home has no chat route, the first screen of the terminal wizard lists the routes Clio detected before the source categories. Each reads `Use <runtime> / <model>` with the evidence it came from. Choosing one skips the provider, address and credential steps and goes to review, or to the model step when the detection carried no model. The detection rules are in [Chat route detection](#chat-route-detection).
 
 `clio-coder configure --quick` retains the URL-first shortcut. It identifies compatible local runtimes where possible, requires live model discovery, and is intended for users who already know the endpoint.
 
@@ -43,9 +43,11 @@ A bare `clio-coder` start in an interactive terminal checks the saved chat route
 
 | Home state | Verdict | What the start does |
 | --- | --- | --- |
-| New: none of the config, data or state directories existed | not usable | Skips detection and runs `clio-coder configure`, whose wizard lists detected routes first. |
+| New: the config directory has no `settings.yaml` | not usable | Skips detection and runs `clio-coder configure`, whose wizard lists detected routes first. |
 | Existing | `usable` | Boots with the saved route. |
-| Existing | any other verdict | Runs detection. The first detected route that carries a model is used and the start continues without configure. With none, configure runs as for a new home. |
+| Existing | `no-target`: no chat route is saved, or the saved one names a target that no longer exists | Runs detection. The first detected route that carries a model is used and the start continues without configure. With none, configure runs as for a new home. |
+| Existing | `missing-credential` | Opens with the saved route and prints `Chat: <target> / <model> is unavailable: <what is missing>. Your saved chat route is kept; fix the connection with /config.` No other target is used. |
+| Existing | `no-model` or `ineligible-runtime` | Prints what is wrong, then `` Your saved chat route is kept and no other target is used. Run `clio-coder configure` to fix it. ``, and exits 2. |
 
 [`detectChatRoutes`](../../src/cli/detect-chat-routes.ts) considers only HTTP runtimes that offer chat and can drive the main agent. It collects routes in this order, and the startup path takes the first one that has a model:
 
@@ -56,7 +58,7 @@ A bare `clio-coder` start in an interactive terminal checks the saved chat route
 
 The curated model of a route found through steps 1 to 3 is the runtime's `defaultModel`, which is `gpt-6-luna` for `openai` and `openai-codex`, or the first id of a model list the runtime owns, such as `mercury-2.5` for `inception`. A runtime whose models come only from the Pi catalog, such as `anthropic`, has no curated model because catalog order is alphabetical and recommends nothing. Its route is listed in the wizard as `Use <runtime> / choose model` and skipped by the startup pick.
 
-[`useDetectedChatRoute`](../../src/cli/detect-chat-routes.ts) applies the pick and prints `Chat: <runtime> / <model> from <source>. Change it with /config.` It writes the target and the chat route to the user `settings.yaml` only when no chat route exists: `chat.target` is empty in memory and absent from the saved file. A saved `chat.target` is the user's choice even when it cannot be used now, because its credential is missing, it has no model, its runtime cannot drive the main agent, or it names a target that is no longer configured. In those cases the detected route applies to this session alone, the saved route stays as written, and the notice adds `Session only; saved chat route unchanged.` A configured route is never overwritten.
+[`useDetectedChatRoute`](../../src/cli/detect-chat-routes.ts) applies the pick and prints `Chat: <runtime> / <model> from <source>. Change it with /config.` It writes the target and the chat route to the user `settings.yaml` only when no chat route exists: `chat.target` is empty in memory and absent from the saved file. A saved `chat.target` is the user's choice even when it cannot be used now, so a missing credential, a missing model or a runtime that cannot drive the main agent never starts detection (see the table above). The one saved value that does reach detection is a `chat.target` naming a target that is no longer configured, because settings normalization clears it to empty. The detected route then applies to this session alone, the saved value stays as written, and the notice adds `Session only; saved chat route unchanged.` A configured route is never overwritten. Detection skips the target dedicated to background memory, by id or by URL, because nobody chose it as a chat route.
 
 ## Advanced settings
 

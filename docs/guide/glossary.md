@@ -251,7 +251,7 @@ This document defines the core architectural concepts and terminology used throu
 - **Owning Type**: `CostProvenance` in [cost-provenance.ts](../../src/domains/providers/types/cost-provenance.ts); resolved by `resolveEffectivePricing` in [catalog.ts](../../src/domains/providers/catalog.ts).
 
 ### 62. Chat Route
-- **Definition**: The target, model and thinking level that answer the operator, saved as `chat.target`, `chat.model` and `chat.thinkingLevel`. A session owns its live copy. When an existing home's chat route is missing or unusable, startup detects a replacement from configured targets, environment keys, stored logins and loopback servers and saves it only when no chat route exists. See [chat route detection](configuration-and-targets.md#chat-route-detection).
+- **Definition**: The target, model and thinking level that answer the operator, saved as `chat.target`, `chat.model` and `chat.thinkingLevel`. A session owns its live copy. When an existing home has no chat route, startup detects one from configured targets, environment keys, stored logins and loopback servers and saves it only when no chat route exists. A saved route that cannot be used is kept: a missing credential opens the session unavailable, and a target with no model or a runtime that cannot drive the main agent exits 2. See [chat route detection](configuration-and-targets.md#chat-route-detection).
 - **Owning Type**: `DetectedChatRoute` in [detect-chat-routes.ts](../../src/cli/detect-chat-routes.ts); the verdict is `DefaultTargetVerdict` in [default-target.ts](../../src/cli/default-target.ts).
 
 ### 63. Route Provenance

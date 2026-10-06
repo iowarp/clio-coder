@@ -226,11 +226,14 @@ would break `integrations.runtimePlugins`, so it stays.
 
 ### Claude Agent SDK external
 
-`@anthropic-ai/claude-agent-sdk` is an `optionalDependencies` entry, not a Pi
+`@anthropic-ai/claude-agent-sdk` is a development dependency, not a Pi
 package, and `tsup.config.ts` lists it in `external` (with `node:sqlite`).
-`tsup` externalizes `dependencies` by default but not optional ones, so without the
-entry esbuild would bundle the 224 MB package into `dist/` and make it a hard
-requirement. Staying external keeps the lazy `await import()` in
+`tsup` externalizes `dependencies` by default but not development ones, so without
+the entry esbuild would bundle the 224 MB package into `dist/` and make it a hard
+requirement. The published package does not carry it. Clio Coder provisions it as
+a separate per-user component and resolves it through
+[claude-sdk-install.ts](../../src/domains/lifecycle/claude-sdk-install.ts). Staying
+external keeps the lazy `await import()` in
 [sdk-module.ts](../../src/engine/claude/sdk-module.ts) a real runtime import; the
 install and first-use behavior are in
 [the interoperability guide](../guide/interop.md#claude-agent-sdk-runtime).

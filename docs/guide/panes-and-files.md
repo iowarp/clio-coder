@@ -7,10 +7,12 @@ beside a Clio Coder session: what to install, how a session joins its pane
 host, the commands and keys, the settings that govern them, what `doctor`
 says at each stage, and how to resolve a missing dependency or unavailable pane host.
 
-Panes are optional. A session without them behaves exactly as before, and
-nothing on a startup path downloads, probes a socket, or writes a file unless
-panes were asked for. Only the interactive session activates panes. `clio-coder run`,
-`clio-coder acp` and dispatched workers never load the pane layer.
+Panes are optional. A session without them behaves exactly as before. The
+first bare `clio-coder` in an interactive terminal asks once whether to open a
+workspace, and nothing is downloaded or opened before you answer yes. A session
+started outside herdr probes no socket. Only the interactive session activates
+panes. `clio-coder run`, `clio-coder acp` and dispatched workers never load the
+pane layer.
 
 ## What you get
 
@@ -85,24 +87,41 @@ The vendored programs live under the data root (`clio-coder paths`), so
 
 ## Turn panes on
 
-Two switches, both off by default:
+`interface.panes.enabled` defaults to `embedded`. Bare `clio-coder` in an
+interactive terminal then opens a workspace: Clio starts herdr, runs the session
+in one of its panes and hands the terminal back when you quit. Each project gets
+its own workspace. The first launch asks once whether to open it, and when no
+usable herdr is on `PATH` or installed, the same question says it will download
+Clio Coder's pinned copy. Nothing is downloaded before you answer yes. The
+answer is remembered in Clio's state directory and never written to
+`settings.yaml`. `clio-coder panes workspace on|off|ask|status` changes or shows
+it, and `clio-coder panes install` installs herdr ahead of time.
+
+| `interface.panes.enabled` | Meaning |
+| --- | --- |
+| `embedded` (default) | Bare `clio-coder` opens a workspace after the one question. Started inside a herdr pane, Clio joins that host as a guest. |
+| `auto` | Join a pane host only when started inside one. Clio never starts one and never asks, whatever answer is remembered. |
+| `off` | Never detect or open a pane. |
+
+A launch stays in the plain terminal, without asking, for `--no-panes`, `run`,
+`acp`, a non-terminal stdin or stdout, `TERM=dumb`, a session already inside
+herdr, tmux, zellij or screen, and Windows. A plain session loads no pane code.
+The files pane is a separate switch, off by default:
 
 ```yaml
 interface:
   panes:
-    enabled: auto      # detect a herdr session and join it as a guest
+    enabled: embedded  # default; auto joins a host only, off disables panes
     files:
       enabled: true    # allow the files pane
 ```
 
-Or, for one session, start Clio Coder with `clio-coder --with-panes` from a pane
-inside herdr; the flag beats the setting in both directions
-(`--no-panes` turns them off, and the last of the two on a command line wins). Both flags apply only to the interactive session;
-given before a subcommand such as `run` they are refused with exit 2.
-`interface.panes.enabled: embedded` is accepted but not implemented: it
-resolves to no panes, prints a `panes refused` warning on stderr at boot, and makes doctor's `panes mode` row warn. The `/settings` picker offers only Off and Automatic.
-`--with-panes` overrides `embedded` with `auto`. The rung is resolved once at boot, so a change to
-`interface.panes.enabled` takes effect at the next start.
+For one session, `clio-coder --with-panes` from a pane inside herdr overrides
+the setting with `auto`, and `--no-panes` turns panes off; the last of the two
+on a command line wins. Both flags apply only to the interactive session; given
+before a subcommand such as `run` they are refused with exit 2. The `/settings`
+picker offers Embedded, Automatic and Off. The setting is resolved once at boot,
+so a change to `interface.panes.enabled` takes effect at the next start.
 
 Guest mode needs three things, checked in this order: `HERDR_ENV=1` in the
 environment (herdr sets it in every pane it opens), a herdr socket that
@@ -137,7 +156,7 @@ The plain report folds quiet `naming` rows into one summary row; `--verbose` and
 A missing herdr or yazi is a WARN only while panes (and, for yazi, the files pane) are enabled. Otherwise
 the row reads `experimental integration disabled by settings`, and `files pane profile` reads `disabled by settings`.
 A missing croc or cliamp is always INFO. With `interface.panes.enabled: off`, doctor prints only `panes mode: off by choice` and the `panes layout`
-row, and does not advertise setup work. When a host answers, `panes protocol` reads `server <version>, protocol <n>; Clio's optional methods need 17 (satisfied)`. Below 17, toasts and agent focus fall back, and docks open as plain splits that cannot be hidden.
+row, and does not advertise setup work. With `embedded` in a plain terminal, `panes mode` reads `workspace (panes.enabled=embedded); this command is not running inside one` and does not probe a socket. When a host answers, `panes protocol` reads `server <version>, protocol <n>; Clio's optional methods need 17 (satisfied)`. Below 17, toasts and agent focus fall back, and docks open as plain splits that cannot be hidden.
 The `panes journal dir` row warns when `<state>/runs` is absent or not writable, because `fleet view` then has no transcript to follow. The `naming panes` row warns about panes that carry only the legacy
 `clio_owner=clio:mux` token or the stale `clio watch` title; quit and cleanup recognize both token schemes.
 
@@ -260,7 +279,7 @@ A divider you drag in herdr becomes the dock's new target share, and a dock you 
 
 | Key | Default | What it controls |
 | --- | --- | --- |
-| `interface.panes.enabled` | `off` | `auto` joins a detected herdr session; `off` skips detection; `embedded` is accepted but not implemented and resolves to no panes, while `--with-panes` overrides it with `auto`. Takes effect at the next start. |
+| `interface.panes.enabled` | `embedded` | `embedded` opens a workspace from bare `clio-coder` after one remembered question, and joins a pane host it is started inside; `auto` joins a detected herdr session and never starts one; `off` skips detection. `--with-panes` overrides it with `auto` for one session. Takes effect at the next start. |
 | `interface.panes.files.enabled` | `false` | Whether `/files`, its key, `/panes open files`, and the `panes` tool may open the files pane. Refused with the key's name otherwise. |
 | `interface.panes.files.mode` | `companion` | `companion` keeps the pane open across picks; `chooser` closes it after one selection. |
 | `interface.panes.files.profile` | `managed` | `managed` runs the engine on Clio Coder's generated, themed profile; `user` runs it on the operator's own configuration, in which case picks use the one-shot chooser. |
@@ -306,7 +325,8 @@ deletes it; the next open rebuilds it.
 
 **`panes are inactive: this session started without them`** on `/panes`, or
 **`the files pane is inactive: this session started without panes`** on `/files`: the session booted without the panes extension. Restart with
-`clio-coder --with-panes` or set `interface.panes.enabled: auto`.
+`clio-coder --with-panes` from a herdr pane, or accept the workspace with
+`clio-coder panes workspace on` and start bare `clio-coder` in a plain terminal.
 
 **`the pane layer is not available in this session: HERDR_ENV is not 1 …`**
 on `/panes open logs` or `shell`: Clio Coder has panes enabled but is not running

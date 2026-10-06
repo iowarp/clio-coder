@@ -47,9 +47,9 @@ development tree is becoming.
 
 The install root sits beside the data root rather than inside it, so
 `clio-coder reset` and `uninstall --keep-config` never delete the Node that runs
-them. A version takes about 460 MB with the optional Claude Agent SDK, roughly half
-of it the SDK binary; the Node runtime adds about 210 MB. The installer refuses to
-start with under 750000 KB (about 732 MB) free at the install root.
+them. The Node runtime adds about 210 MB to a version, and the optional Claude Agent SDK
+component adds about 224 MB under the data root when it is provisioned. The installer
+refuses to start with under 750000 KB (about 732 MB) free at the install root.
 
 Repository development uses pnpm 10.34.5 and `pnpm-lock.yaml`. Registry
 consumers install the built package and do not need the repository toolchain.
@@ -73,7 +73,7 @@ and exit status 1, as does every other installer failure. `--help` exits 0.
 | `--refresh-runtime` | none | Download Node again even when the wanted one is already present. |
 | `--install-dir <dir>` | `CLIO_CODER_INSTALL_DIR` | The install root. Defaults: `$XDG_DATA_HOME/clio-coder-install` on Linux, `~/Library/Application Support/clio-coder/install` on macOS, `$CLIO_CODER_HOME/install` when `CLIO_CODER_HOME` is set. |
 | `--bin-dir <dir>` | `CLIO_CODER_BIN_DIR` | Where the `clio-coder` launcher goes. Default `~/.local/bin`. |
-| `--include-claude-sdk` | none | Install the optional Claude Agent SDK, about 224 MB. See [Lean install](#lean-install-the-claude-agent-sdk). |
+| `--include-claude-sdk` | none | Provision the optional Claude Agent SDK component, about 224 MB, with `clio-coder tools install claude-sdk` after the package installs. See [Lean install](#lean-install-the-claude-agent-sdk). |
 | `--omit-optional` | none | Accepted for compatibility. Skipping the SDK is already the default, so it changes nothing. |
 | `--modify-path` | `CLIO_CODER_MODIFY_PATH=1` | Append a `PATH` line for the bin dir to the shell startup file: `~/.zshrc` (or `$ZDOTDIR/.zshrc`) for zsh, `~/.bashrc` for bash, `$XDG_CONFIG_HOME/fish/config.fish` (default `~/.config/fish/config.fish`) with `fish_add_path` for fish, `~/.profile` otherwise. The line carries the marker `# added by clio-coder install.sh`, so a rerun does not add it twice. |
 | `--no-modify-path` | none | Leave startup files unchanged. This is the default; the installer prints the line to add instead. |
@@ -83,12 +83,13 @@ and exit status 1, as does every other installer failure. `--help` exits 0.
 | `--no-post-install` | none | Skip the `clio-coder upgrade --post-install` run after installing. |
 | `--gui` | `CLIO_CODER_INSTALL_GUI=1` | Install the desktop app without asking. See [Desktop app offer](#desktop-app-offer-linux-and-wsl). |
 | `--no-gui` | `CLIO_CODER_INSTALL_GUI=0` | Skip the desktop app. |
+| `--no-workspace` | `CLIO_CODER_INSTALL_WORKSPACE=0` | Skip the workspace pane host. By default the installer runs `clio-coder panes install --if-missing`: a herdr already on `PATH` at a usable version is used as it is, otherwise Clio Coder's pinned copy is downloaded. A failure there never fails the install; Clio Coder offers the workspace again on first launch, or run `clio-coder panes install`. The setup runs on Linux and macOS only. |
 | `--force`, `-f` | none | Replace a `clio-coder` launcher this installer did not write, including a symlink that points outside the install. A symlink into an npm install of Clio Coder is replaced without it, with a warning. |
 | `--dry-run` | none | Print the platform, Node build, package, install root and launcher, then what would run. Nothing is downloaded or changed. |
 | `-h`, `--help` | none | Print the usage text. |
 
 `install.ps1` takes PowerShell parameters with the same meanings. It has no GUI
-parameter, no unofficial Node mirror and no forced Node build.
+parameter, no workspace parameter, no unofficial Node mirror and no forced Node build.
 
 | Parameter | Environment | Effect |
 | --- | --- | --- |
@@ -99,10 +100,10 @@ parameter, no unofficial Node mirror and no forced Node build.
 | `-NodeZip` | `CLIO_CODER_NODE_TARBALL` | A local `node-v<ver>-win-<arch>.zip`, with `SHASUMS256.txt` beside it or named by `CLIO_CODER_NODE_SHASUMS`. |
 | `-InstallDir` | `CLIO_CODER_INSTALL_DIR` | The install root. Defaults: `$CLIO_CODER_HOME\install`, else `%LOCALAPPDATA%\clio-coder\install`. |
 | `-BinDir` | `CLIO_CODER_BIN_DIR` | Where `clio-coder.cmd` goes. Default `%USERPROFILE%\.local\bin`. |
-| `-IncludeClaudeSdk` | none | Install the optional Claude Agent SDK. |
+| `-IncludeClaudeSdk` | none | Provision the optional Claude Agent SDK component. |
 | `-OmitOptional` | none | Accepted and ignored. |
-| `-AddToPath` | `CLIO_CODER_MODIFY_PATH=1` | Append the bin dir to the user `PATH` registry value and to the current session. `-NoModifyPath` overrides both. |
-| `-NoModifyPath` | none | Leave `PATH` unchanged. The default, with a warning when the bin dir is not on `PATH`. |
+| `-AddToPath` | none | Accepted and redundant, because the installer already appends the bin dir to the user `PATH` registry value and to the current session. |
+| `-NoModifyPath` | `CLIO_CODER_MODIFY_PATH=0` | Leave `PATH` unchanged and print `PATH changes disabled; use the launcher commands below.` when the bin dir is not on `PATH`. |
 | `-AutoUpdate`, `-NoAutoUpdate` | `CLIO_CODER_AUTO_UPDATE` | As the `install.sh` flags. |
 | `-Rollback` | none | Point the launcher at the previous version. Without `install.json` a real run fails before creating anything with `no installer manifest at <root>\install.json; nothing to roll back`. With `-DryRun` it prints `would point <launcher> back at the previous version recorded in <root>\install.json` and changes nothing. |
 | `-NoPostInstall` | none | Skip `clio-coder upgrade --post-install`. |
@@ -129,6 +130,7 @@ inputs preserves the recorded choice.
 | `CLIO_CODER_VERSION`, `CLIO_CODER_CHANNEL`, `CLIO_CODER_PACKAGE`, `CLIO_CODER_NODE_VERSION`, `CLIO_CODER_NODE_TARBALL`, `CLIO_CODER_INSTALL_DIR`, `CLIO_CODER_BIN_DIR`, `CLIO_CODER_MODIFY_PATH`, `CLIO_CODER_AUTO_UPDATE` | `install.sh`, `install.ps1` | Defaults for the options in the tables above. A flag beats the variable. |
 | `CLIO_CODER_HOME` | `install.sh`, `install.ps1` | Selects `$CLIO_CODER_HOME/install` as the install root when no directory is given. |
 | `CLIO_CODER_INSTALL_GUI` | `install.sh` | `1` or `0`, as `--gui` and `--no-gui`; unset asks on a terminal. Any other value stops the run with `CLIO_CODER_INSTALL_GUI must be 1 or 0, got '<value>'`. |
+| `CLIO_CODER_INSTALL_WORKSPACE` | `install.sh` | `0` skips the workspace pane host, as `--no-workspace`. Unset or any other value sets it up. |
 | `CLIO_CODER_INSTALL_ALLOW_SUDO` | `install.sh` | Any non-empty value lets root install when `SUDO_USER` is set. Without it the installer refuses to run under `sudo`, because it installs into the invoking home directory. |
 | `CLIO_CODER_NODE_MIRROR` | both | Base URL, `https://` or `file://`, laid out like `https://nodejs.org/dist`. |
 | `CLIO_CODER_NODE_UNOFFICIAL_MIRROR` | `install.sh` | The same for `unofficial-builds.nodejs.org`. |
@@ -147,53 +149,61 @@ set `CLIO_CODER_BACKGROUND_UPDATE` and `CLIO_CODER_BACKGROUND_CURRENT`; see the
 
 ### Lean install: the Claude Agent SDK
 
-`@anthropic-ai/claude-agent-sdk` is an `optionalDependencies` entry pinned to
-`0.3.186`, not a hard dependency. Its platform package carries a proprietary
-binary of about 224 MB per platform, and only the `claude-sdk` runtime uses it.
-The installers skip it unless `--include-claude-sdk` (`-IncludeClaudeSdk`) is
-passed: they run the managed `npm install` with `--omit=optional`, or
-`--include=optional` when the flag is given. They install with a project-style
-`npm install --prefix` because npm 11's `npm install -g` ignores
-`--omit=optional`. Package-manager installs install optional dependencies as
-usual and so carry the SDK unless the operator omits it:
+`@anthropic-ai/claude-agent-sdk`, pinned to `0.3.186`, is not a dependency of the
+published package. The build keeps it as a development dependency for types, and
+`tsup` leaves it external. Its platform package carries a proprietary binary of
+about 224 MB, and only the `claude-sdk` runtime uses it, so Clio Coder provisions
+it as a separate per-user component in
+`<data>/components/claude-agent-sdk/0.3.186/`, where `<data>` is the data root
+`clio-coder paths` prints. Every install method works this way, and no
+package-manager flag changes it. The component sits outside every version's
+package root, so `upgrade` and background updates keep it. A Clio Coder version
+that pins another SDK version provisions that version in its own directory beside
+it.
 
-```bash
-pnpm add -g @iowarp/clio-coder --no-optional
-bun add -g @iowarp/clio-coder --omit=optional
-```
-
-Everything except the `claude-sdk` runtime works without the package: boot,
+Everything except the `claude-sdk` runtime works without the component: boot,
 `clio-coder doctor`, and every other target and worker runtime. Nothing fails at
-startup. The package is needed when a `claude-sdk` target is configured or a
+startup. `--include-claude-sdk` (`-IncludeClaudeSdk`) makes the installer run
+`clio-coder tools install claude-sdk` after the package installs, and a failure
+there fails the install with the previous launcher still active. Without the flag,
+the component is needed when a `claude-sdk` target is configured or a
 `claude-sdk` worker is dispatched, and at that moment
-[claude-sdk-install.ts](../../src/domains/lifecycle/claude-sdk-install.ts) checks
-that it resolves from the install's package root:
+[claude-sdk-install.ts](../../src/domains/lifecycle/claude-sdk-install.ts) looks
+for it in this order:
 
-- **Installer install with an operator who can answer.** The configure wizard, the
-  line-prompt target setup and an attended dispatch ask once:
-  `The Claude SDK runtime needs @anthropic-ai/claude-agent-sdk (about 224 MB). Install it now?`
+1. `CLIO_CODER_CLAUDE_SDK_DIR`, an absolute administrator-prepared prefix holding
+   `node_modules/@anthropic-ai/claude-agent-sdk`. It is never modified, and when
+   it is set nothing else is consulted.
+2. The per-user component above.
+3. A package-local copy, which is the development checkout or an install that
+   predates the component.
+
+When none resolves:
+
+- **An operator who can answer.** The configure wizard, the line-prompt target
+  setup and an attended dispatch ask once:
+  `The Claude SDK runtime needs a separate component. Install it now?`
   The wizard and a dispatch offer **Install now** and **Not now**, and the line prompt
-  takes yes or no; each defaults to declining. Accepting
-  runs the managed Node's bundled npm, `npm install --prefix <package root> --no-save --omit=dev --include=optional @anthropic-ai/claude-agent-sdk@0.3.186`,
-  inside the current version's package root with a 10 minute limit. These variables
-  pass through, in either case: `https_proxy`, `http_proxy`, `no_proxy`,
-  `npm_config_registry` and `NODE_EXTRA_CA_CERTS`. Parallel dispatches share one decision per
-  install root for the life of the process, including a decline or a failure.
-- **Any other case.** A package-manager or source install, a headless
-  `clio-coder run --agent`, and `clio-coder configure --runtime claude-sdk` with
-  flags have nobody to ask. The run or command fails with
-  `The Claude SDK runtime needs @anthropic-ai/claude-agent-sdk (about 224 MB). Run: <command>`
-  (error code `CLAUDE_AGENT_SDK_UNAVAILABLE`). The command matches the install:
-  the managed Node plus its bundled npm for an installer install,
-  `pnpm --dir <root> add --save-optional --prod ...` for pnpm and source
-  checkouts, `bun add --cwd <root> --optional --production ...` for Bun, and
-  `npm install --prefix <root> --no-save --omit=dev --include=optional ...`
-  otherwise.
+  takes yes or no; each defaults to declining. Accepting runs the Node that runs Clio
+  Coder with its paired npm, `npm install --prefix <staging> --save-exact --omit=dev --include=optional @anthropic-ai/claude-agent-sdk@0.3.186`,
+  in a staging directory beside the component with a 10 minute limit. Clio checks that
+  the package exports `query` and renames the staging directory into place. The
+  command inherits the environment, so `https_proxy`, `http_proxy`, `no_proxy`,
+  `npm_config_registry` and `NODE_EXTRA_CA_CERTS` apply. Parallel dispatches share one
+  decision per component directory for the life of the process, including a decline
+  or a failure.
+- **Any other case.** A headless `clio-coder run --agent`, `clio-coder configure --runtime claude-sdk`
+  with flags, and a declined offer have nobody to ask. The run or command fails with
+  `The Claude SDK runtime needs @anthropic-ai/claude-agent-sdk@0.3.186. Run: clio-coder tools install claude-sdk. This installs a separate component at <data>/components/claude-agent-sdk/0.3.186; it does not change Clio's installation.`
+  (error code `CLAUDE_AGENT_SDK_UNAVAILABLE`). When `CLIO_CODER_CLAUDE_SDK_DIR` is set
+  and holds no SDK, the message names that prefix instead.
 
-The SDK lands inside one version's package root. A version that `upgrade` or a
-background update installs later has no SDK until the first `claude-sdk` use asks
-again, because neither passes `--include-claude-sdk`. Run the installer with
-`--include-claude-sdk` to have it present when a version is installed.
+`clio-coder tools install claude-sdk` takes no extra arguments and no `--force`.
+It prints `Claude SDK component available at <path>`, or `{"id":"claude-sdk","path":"<path>"}`
+with `--json`, and does nothing when the component is already there. A managed install
+uses the npm paired with its own Node; an unmanaged Linux install may use an `npm` on
+`PATH`. Clio Coder never downloads Node or npm, so without one the command fails and
+names `CLIO_CODER_CLAUDE_SDK_DIR` as the other way in.
 
 ### Desktop app offer (Linux and WSL)
 
@@ -253,11 +263,14 @@ first launch. Neither installer asks you to configure delegation peers
 before your primary model is set up. Upgrading preserves settings and
 credentials; reinstalling the package alone does not reset them.
 
-A returning user whose home already exists but whose saved chat route is
-missing or unusable is not sent back through configure when a route can be
-detected; the contract is in [configuration and targets](configuration-and-targets.md),
-and the code is [detect-chat-routes.ts](../../src/cli/detect-chat-routes.ts). A new
-home starts `clio-coder configure`.
+A returning user whose home already exists but has no saved chat route is not
+sent back through configure when a route can be detected; the contract is in
+[configuration and targets](configuration-and-targets.md), and the code is
+[detect-chat-routes.ts](../../src/cli/detect-chat-routes.ts). A saved chat route
+that cannot be used is kept: with no model or a runtime that cannot drive the main
+agent, startup exits 2 and names `clio-coder configure`, and with a missing
+credential the session opens with that route unavailable. A new home starts
+`clio-coder configure`.
 
 ---
 
@@ -489,8 +502,8 @@ directory, a recorded version pin, `--no-auto-update` when background updates ar
 off, and `--no-post-install`, because `upgrade` runs the post-install checks
 itself through the new entry. It sets `CLIO_CODER_NODE_VERSION` to the recorded
 runtime unless `--refresh-runtime` is given. It does not pass
-`--include-claude-sdk`, so see [Lean install](#lean-install-the-claude-agent-sdk)
-for what that means for the SDK.
+`--include-claude-sdk`, and an SDK component already provisioned stays in place; see
+[Lean install](#lean-install-the-claude-agent-sdk).
 
 A version pin stays in force. An install made with an exact `--version` (or
 `-Version`, or a local `--package`) records that pin, and `upgrade` or a plain

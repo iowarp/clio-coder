@@ -146,18 +146,19 @@ and it is separate from the `claude-code` runtime above, which spawns
 package from Clio Coder's package root.
 
 The Claude Agent SDK package (`@anthropic-ai/claude-agent-sdk`, pinned 0.3.186,
-about 224 MB) is an optional dependency that the Clio Coder installers skip unless
-`--include-claude-sdk` (`-IncludeClaudeSdk` on Windows) is passed. A plain npm,
-pnpm, or bun install fetches it unless optional dependencies were omitted. Boot,
-`doctor`, and every other runtime work without it, because the module loads only
-when a `claude-sdk` run starts. On an install without it, the first dispatch to a
+about 224 MB) is not a dependency of Clio Coder's package. Every install method
+provisions it as a separate per-user component in
+`<data>/components/claude-agent-sdk/0.3.186/`: the installers do it only when
+`--include-claude-sdk` (`-IncludeClaudeSdk` on Windows) is passed, and
+`clio-coder tools install claude-sdk` does it at any time. Boot, `doctor`, and
+every other runtime work without it, because the module loads only when a
+`claude-sdk` run starts. Without the component, the first dispatch to a
 `claude-sdk` target, and `clio-coder configure` when it adds one, asks once
-whether to install the package into Clio Coder's own package root, defaulting to
-`Not now`. The run or command instead fails with `CLAUDE_AGENT_SDK_UNAVAILABLE`
-and prints the package-manager command to run when nobody can answer (a headless
-run), when Clio Coder was not installed by the installer scripts, or when the operator
-declines. A decline holds until Clio Coder restarts. [Installation and lifecycle](installation-and-lifecycle.md)
-holds the flags, the exact commands, and the decision rules.
+whether to install it, defaulting to `Not now`. The run or command instead fails
+with `CLAUDE_AGENT_SDK_UNAVAILABLE` and prints `clio-coder tools install claude-sdk`
+when nobody can answer (a headless run) or when the operator declines. A decline
+holds until Clio Coder restarts. [Installation and lifecycle](installation-and-lifecycle.md#lean-install-the-claude-agent-sdk)
+holds the lookup order, the exact commands, and the decision rules.
 
 [sdk-runtime.ts](../../src/engine/claude/sdk-runtime.ts) mediates every SDK tool
 call through Clio Coder's shared admission evaluator, through both the `canUseTool`

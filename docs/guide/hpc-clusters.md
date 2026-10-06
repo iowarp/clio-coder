@@ -37,12 +37,12 @@ newer glibc than its compute nodes run.
 
 Everything lands in your home directory: the runtime and package versions under
 `~/.local/share/clio-coder-install` (or `--install-dir`), and the launcher in
-`~/.local/bin`. A version takes about 460 MB with the Claude Agent SDK, roughly
-half of it the SDK binary; the installer skips the SDK unless `--include-claude-sdk`
-is passed, and Node adds about 210 MB. The installer refuses to start with under
-about 732 MB free at the install root. On a small home quota, put the install root
-on a project filesystem with `--install-dir /project/$USER/clio-coder` and keep the
-launcher in `~/.local/bin`. Compute nodes that mount the same home directory run
+`~/.local/bin`. Node adds about 210 MB to a version. The installer skips the
+Claude Agent SDK, about 224 MB, unless `--include-claude-sdk` is passed, and when it is
+provisioned it lands under the data root (`~/.local/share/clio-coder`), not under
+`--install-dir`. The installer refuses to start with under about 732 MB free at the
+install root. On a small home quota, put the install root on a project filesystem with
+`--install-dir /project/$USER/clio-coder` and keep the launcher in `~/.local/bin`. Compute nodes that mount the same home directory run
 the same launcher. `--dry-run` prints the plan without downloading anything. The
 full flag list is in [Installer options](installation-and-lifecycle.md).
 
