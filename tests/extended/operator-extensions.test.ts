@@ -1,11 +1,14 @@
 import { deepStrictEqual, equal, match, ok, rejects, throws } from "node:assert/strict";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { createServer } from "node:http";
+import type { AddressInfo } from "node:net";
 import path from "node:path";
 import { type TestContext, test } from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
+import { sandboxAvailability } from "../../src/core/sandbox/availability.js";
 import type { DynamicToolName } from "../../src/core/tool-names.js";
 import { loadManifestFromRoot, parseExtensionManifest } from "../../src/domains/extensions/discovery.js";
-import { promptRefs } from "../../src/domains/extensions/operator-commands.js";
+import { extensionInvocation, promptRefs } from "../../src/domains/extensions/operator-commands.js";
 import { OperatorExtensions } from "../../src/domains/extensions/operator-extensions.js";
 import { OperatorExtensionRuntime, resolveExtensionCommands } from "../../src/domains/extensions/operator-runtime.js";
 import { ExtensionRuntimeProcess } from "../../src/domains/extensions/runtime-process.js";
@@ -816,4 +819,52 @@ test("a served plugin's prompt is a plain prompt until its extension is installe
 	for (let waited = 0; shown.length === 0 && waited < 10_000; waited += 50) await delay(50);
 	equal(turns, 1, "the takeover must not also send the prompt to the model");
 	deepStrictEqual(shown, ["materio:status"]);
+});
+
+test("a net:false runtime cannot reach loopback, reports its backend, and gets exactly its declared write root", {
+	skip: !sandboxAvailability().available,
+}, async (t) => {
+	let hits = 0;
+	const server = createServer((_request, response) => {
+		hits++;
+		response.end("reached");
+	});
+	await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+	t.after(() => new Promise<void>((resolve) => server.close(() => resolve())));
+	const { port } = server.address() as AddressInfo;
+	const script = [
+		'import { spawnSync } from "node:child_process";',
+		"export default api => {",
+		'  api.handle("probe", async () => {',
+		`    const loopback = await fetch("http://127.0.0.1:${port}/").then(() => "reached", () => "refused");`,
+		'    const beside = spawnSync("sh", ["-c", "echo x > beside.txt"]).status === 0;',
+		'    const inside = spawnSync("sh", ["-c", "echo x > .research/inside.txt"]).status === 0;',
+		"    return { text: JSON.stringify({ loopback, beside, inside }) };",
+		"  });",
+		"};",
+	].join("\n");
+	const f = await fixture(t, script, {
+		api: 2,
+		commands: [{ name: "probe", description: "Probe the sandbox", timeoutMs: 10_000 }],
+		ui: [],
+		permissions: { fs: { read: [], write: [".research"] }, exec: true, net: false },
+	});
+	const runtime = new OperatorExtensions({
+		context: () => ({ workspace: f.cwd, sessionId: null, mode: "interactive" }),
+		isIdle: () => true,
+		list: (root) => listInstalledExtensions(root, { all: true }),
+		stateDir: () => path.join(f.env.dir, "state"),
+	});
+	t.after(() => runtime.dispose());
+	equal((await runtime.reload("startup")).status, "committed");
+	equal(existsSync(path.join(f.cwd, ".research")), false);
+	const output = await runtime.invoke(extensionInvocation("lab_status.v1", "probe"), "");
+	deepStrictEqual(JSON.parse(String(output.text)), { loopback: "refused", beside: false, inside: true });
+	equal(hits, 0);
+	ok(existsSync(path.join(f.cwd, ".research", "inside.txt")));
+	equal(existsSync(path.join(f.cwd, "beside.txt")), false);
+	deepStrictEqual(runtime.entries().find((entry) => entry.id === "lab_status.v1")?.sandbox, {
+		backend: sandboxAvailability().backend,
+		network: "blocked",
+	});
 });

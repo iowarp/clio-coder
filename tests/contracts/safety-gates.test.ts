@@ -945,6 +945,35 @@ describe("safety gate boundary", () => {
 		}
 	});
 
+	it("asks before a share import or package code runs, and keeps an extension install blocked", () => {
+		const policy = engine();
+		for (const command of [
+			"clio-coder share import ./archive.json",
+			"clio-coder import ./archive.json",
+			"clio-coder extensions test ./draft-extension",
+			"clio-coder extensions validate ./draft-extension",
+		]) {
+			const call = { tool: ToolNames.Bash, args: { command } };
+			const decision = policy.evaluate(call);
+			strictEqual(decision.kind, "ask", command);
+			strictEqual(decision.reasonCode, "library-confirm", command);
+			strictEqual(policy.evaluate(call, "confirmed").kind, "allow", command);
+		}
+		strictEqual(
+			policy.evaluate({ tool: ToolNames.Bash, args: { command: "clio-coder share import ./archive.json --dry-run" } })
+				.kind,
+			"allow",
+		);
+		strictEqual(
+			policy.evaluate({ tool: ToolNames.Bash, args: { command: "clio-coder extensions install ./draft-extension" } }).kind,
+			"block",
+		);
+		strictEqual(
+			policy.evaluate({ tool: ToolNames.Bash, args: { command: "clio-coder library install plugin:example" } }).kind,
+			"ask",
+		);
+	});
+
 	it("never lets a library command bypass direct instruction or credential protections", () => {
 		const policy = engine();
 		for (const command of [
