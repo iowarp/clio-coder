@@ -32,7 +32,7 @@ export async function validateExtensionPackage(root: string): Promise<ExtensionV
 	const path = resolve(root);
 	const candidate = loadManifestFromRoot(path);
 	const declaration = candidate.manifest?.runtimeV2;
-	const envelope = declaration ? capabilityEnvelope(declaration) : null;
+	const envelope = declaration ? capabilityEnvelope(declaration, candidate.manifest?.plugin) : null;
 	const report: ExtensionValidationReport = {
 		path,
 		valid: candidate.valid,

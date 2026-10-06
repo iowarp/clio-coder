@@ -1,7 +1,7 @@
 import { type Dirent, existsSync, readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
 import path from "node:path";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
-import { pluginPromptNames, readPluginManifest } from "../plugins/index.js";
+import { isPluginId } from "../plugins/index.js";
 import { parseExtensionCapabilities, resolveExtensionEntrypoint } from "./command-schema.js";
 import { evaluateClioCompatibility } from "./compatibility.js";
 import { parseExtensionRuntime } from "./runtime-schema.js";
@@ -10,7 +10,16 @@ import { validateSkin } from "./skin-schema.js";
 import type { ClioExtensionManifest, ExtensionCandidate, ExtensionDiagnostic } from "./types.js";
 
 const MANIFEST_NAMES = ["clio-coder-extension.yaml", "clio-coder-extension.yml", "clio-coder-extension.json"] as const;
-const MANIFEST_KEYS = new Set(["id", "name", "version", "description", "compatibility", "capabilities", "runtime"]);
+const MANIFEST_KEYS = new Set([
+	"id",
+	"name",
+	"version",
+	"description",
+	"compatibility",
+	"capabilities",
+	"runtime",
+	"plugin",
+]);
 const COMPATIBILITY_KEYS = new Set(["clio"]);
 /**
  * Keys a domain package used to declare here. They are named so the refusal
@@ -71,7 +80,7 @@ function rejectManifestKeys(
 		diagnostics.push({
 			type: "error",
 			message: PLUGIN_OWNED_KEYS.has(key)
-				? `harness extensions cannot declare '${key}'; ${PLUGIN_GUIDANCE}`
+				? `extensions cannot declare '${key}'; ${PLUGIN_GUIDANCE}`
 				: `unknown manifest key '${key}'`,
 			path: manifestPath,
 		});
@@ -101,6 +110,13 @@ export function parseExtensionManifest(
 	}
 	if (!version) diagnostics.push({ type: "error", message: "version is required", path: manifestPath });
 	if (!description) diagnostics.push({ type: "error", message: "description is required", path: manifestPath });
+	const plugin = trimString(value.plugin);
+	if (value.plugin !== undefined && (plugin === undefined || !isPluginId(plugin)))
+		diagnostics.push({
+			type: "error",
+			message: "plugin must name the plugin this extension serves, as a plugin id",
+			path: manifestPath,
+		});
 	let capabilities: ClioExtensionManifest["capabilities"];
 	let runtime: ClioExtensionManifest["runtime"];
 	let runtimeV2: ClioExtensionManifest["runtimeV2"];
@@ -166,6 +182,13 @@ export function parseExtensionManifest(
 	if (runtimeV2) manifest.runtimeV2 = runtimeV2;
 	if (capabilities) manifest.capabilities = capabilities;
 	if (compatibility && Object.keys(compatibility).length > 0) manifest.compatibility = compatibility;
+	if (plugin) manifest.plugin = plugin;
+	if (!plugin && runtimeV2?.commands.some((command) => command.replaces === "prompt"))
+		diagnostics.push({
+			type: "error",
+			message: "replaces: prompt needs plugin: <name>, the plugin whose prompt the command takes over",
+			path: manifestPath,
+		});
 	const clioRange = manifest.compatibility?.clio;
 	if (clioRange !== undefined) {
 		const evaluation = evaluateClioCompatibility(clioRange);
@@ -215,42 +238,13 @@ export function loadManifestFromRoot(root: string): ExtensionCandidate {
 			}
 		}
 		const runtimeV2 = parsed.manifest?.runtimeV2;
-		let bundle: ExtensionCandidate["bundle"];
-		if (existsSync(path.join(root, "plugin.json"))) {
-			const plugin = readPluginManifest(root);
-			if (!plugin.valid || !plugin.manifest || (plugin.manifest.clio.kind ?? "plugin") !== "plugin")
-				parsed.diagnostics.push({
-					type: "error",
-					message: "a bundle needs a valid plugin.json of kind plugin",
-					path: manifestPath,
-				});
-			else {
-				bundle = { pluginId: plugin.manifest.name };
-				if (parsed.manifest?.id !== plugin.manifest.name)
-					parsed.diagnostics.push({
-						type: "error",
-						message: `bundle extension id must equal plugin name '${plugin.manifest.name}'`,
-						path: manifestPath,
-					});
-				if (!runtimeV2 || path.basename(manifestPath) !== "clio-coder-extension.yaml")
-					parsed.diagnostics.push({
-						type: "error",
-						message: "a bundle requires clio-coder-extension.yaml with runtime.api: 2",
-						path: manifestPath,
-					});
-				const prompts = new Set(pluginPromptNames(root, plugin.manifest));
-				for (const command of runtimeV2?.commands ?? [])
-					if (command.replaces === "prompt" && !prompts.has(`${plugin.manifest.name}:${command.name}`))
-						parsed.diagnostics.push({
-							type: "error",
-							message: `replaces: prompt requires this plugin to provide /${plugin.manifest.name}:${command.name}`,
-							path: manifestPath,
-						});
-			}
-		} else if (runtimeV2?.commands.some((command) => command.replaces === "prompt"))
+		// A plugin and an extension are separate packages, each with its own
+		// manifest, digest and consent; one root never serves as both.
+		if (existsSync(path.join(root, "plugin.json")))
 			parsed.diagnostics.push({
 				type: "error",
-				message: "replaces: prompt is legal only in a plugin bundle",
+				message:
+					"an extension root cannot hold plugin.json; publish the plugin and the extension as separate packages and name the plugin with plugin: <name>",
 				path: manifestPath,
 			});
 		if (runtimeV2) {
@@ -290,7 +284,6 @@ export function loadManifestFromRoot(root: string): ExtensionCandidate {
 		return {
 			path: root,
 			manifestPath,
-			...(bundle ? { bundle } : {}),
 			...(parsed.manifest ? { manifest: parsed.manifest } : {}),
 			valid: parsed.manifest !== undefined && !parsed.diagnostics.some((diag) => diag.type === "error"),
 			diagnostics: parsed.diagnostics,

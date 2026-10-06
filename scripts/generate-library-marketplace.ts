@@ -213,7 +213,7 @@ export function renderLibraryMarketplace(options: GenerateMarketplaceOptions = {
 			excluded.push({
 				name: entry.name,
 				sourceUrl: entry.sourceUrl,
-				reason: "standalone Clio runtime extension; no portable plugin facet",
+				reason: "Clio extension, not an Agent Plugin; other hosts cannot load it",
 			});
 			continue;
 		}

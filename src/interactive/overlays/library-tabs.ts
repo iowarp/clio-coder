@@ -9,6 +9,7 @@ export const LIBRARY_TABS: ReadonlyArray<{ id: LibraryEntryKind; label: string }
 	{ id: "prompt", label: "Prompts" },
 	{ id: "fleet", label: "Fleets" },
 	{ id: "plugin", label: "Plugins" },
+	{ id: "extension", label: "Extensions" },
 ];
 
 export function isLibraryTab(value: string): value is LibraryEntryKind {

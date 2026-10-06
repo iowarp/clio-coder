@@ -1260,7 +1260,7 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	{
 		name: "library",
 		acp: false,
-		description: "Browse recipes, or review a package install, removal or reload",
+		description: "Browse and install plugins and extensions, or review an install, removal or reload",
 		group: "Inspect",
 		kinds: ["resources"],
 		// The same verbs as `clio-coder library`; each opens the review that command would apply.
@@ -1498,7 +1498,7 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	{
 		name: "extensions",
 		acp: false,
-		description: "Inspect harness extensions, reload them, or manage dev and muted ones for this session",
+		description: "Inspect extensions, reload them, or manage dev and muted ones for this session",
 		group: "Inspect",
 		// Harness navigation uses the shared overlay dispatcher, independently of recipe reload.
 		kinds: [],
@@ -1972,7 +1972,7 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 				return {
 					kind: "usage-error",
 					command: "agents",
-					reason: "Use /agents to browse recipes, or /interop to inspect another local agent's resources",
+					reason: "Use /agents to browse agents, or /interop to inspect another local agent's resources",
 				};
 			return { kind: "resources", tab: "agent" };
 		},
@@ -3045,7 +3045,7 @@ export function parseSlashCommand(input: string): SlashCommand {
 		return {
 			kind: "usage-error",
 			command: retiredLibrary[1] ?? "library",
-			reason: "Use /library to browse and manage recipes; use /extensions for harness extensions",
+			reason: "Use /library to browse and install plugins and extensions; use /extensions to control the running ones",
 		};
 	}
 	if (/^\/output(?:\s|$)/u.test(trimmed)) {

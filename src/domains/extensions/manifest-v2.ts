@@ -99,6 +99,8 @@ export type ExtensionCapabilityEnvelope = Pick<
 	"hooks" | "ui" | "watch" | "access" | "permissions" | "events" | "tickMs"
 > & {
 	commands: string[];
+	/** `<plugin>:<command>` prompt names the package's commands take over; absent when none. */
+	takesOver?: string[];
 	tools: Array<Pick<ExtensionRuntimeToolDeclaration, "name" | "actionClass">>;
 	workspaces: Array<Pick<ExtensionWorkspaceDeclaration, "id" | "regions" | "board" | "keys">>;
 };

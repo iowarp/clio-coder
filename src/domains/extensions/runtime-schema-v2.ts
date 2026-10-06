@@ -390,9 +390,23 @@ export function parseExtensionRuntimeV2(value: unknown): ExtensionRuntimeDeclara
 	return declaration;
 }
 
-export function capabilityEnvelope(declaration: ExtensionRuntimeDeclarationV2): ExtensionCapabilityEnvelope {
+/**
+ * `plugin` is the manifest's served plugin. A prompt takeover answers a name
+ * the operator reads as the plugin's own, so it is part of what they approve;
+ * the key is absent without one, which keeps existing digests stable.
+ */
+export function capabilityEnvelope(
+	declaration: ExtensionRuntimeDeclarationV2,
+	plugin?: string,
+): ExtensionCapabilityEnvelope {
+	const takesOver = plugin
+		? declaration.commands
+				.filter((command) => command.replaces === "prompt")
+				.map((command) => `${plugin}:${command.name}`)
+		: [];
 	return {
 		commands: declaration.commands.map((command) => command.name),
+		...(takesOver.length > 0 ? { takesOver } : {}),
 		events: declaration.events,
 		...(declaration.tickMs !== undefined ? { tickMs: declaration.tickMs } : {}),
 		watch: declaration.watch,
@@ -454,6 +468,7 @@ export function envelopeGrowth(approved: ExtensionCapabilityEnvelope, next: Exte
 		if (entries.length > 0) growth.push(`${label}: ${entries.join(", ")}`);
 	};
 	push("new commands", added(approved.commands, next.commands));
+	push("takes over prompts", added(approved.takesOver ?? [], next.takesOver ?? []));
 	push("new events", added(approved.events, next.events));
 	if (next.tickMs !== undefined && approved.tickMs === undefined) growth.push("a timer");
 	else if (next.tickMs !== undefined && approved.tickMs !== undefined && next.tickMs < approved.tickMs)

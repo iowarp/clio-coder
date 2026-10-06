@@ -60,7 +60,7 @@ function createCommandTool(extension: LoadableExtension, tool: ExtensionCommandT
 	const vector = commandVector(extension, tool);
 	return {
 		name,
-		description: `${tool.description}\nHarness extension ${extension.id}@${extension.version}; runs an installed command with JSON input and output.`,
+		description: `${tool.description}\nExtension ${extension.id}@${extension.version}; runs an installed command with JSON input and output.`,
 		parameters: tool.inputSchema as TSchema,
 		baseActionClass: "execute",
 		executionMode: "sequential",

@@ -8,7 +8,7 @@ export interface ExtensionCommandRow {
 	description: string;
 	generation: number;
 	available: boolean;
-	/** A validated bundle alias may own the prompt spelling while its runtime is available. */
+	/** The served plugin's prompt name, owned by this command while its runtime is available. */
 	replaces?: "prompt";
 	reason?: string;
 }

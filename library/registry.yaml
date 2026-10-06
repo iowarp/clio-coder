@@ -440,7 +440,7 @@ entries:
       lab feasibility, task execution and verified paper handoff."
     version: 0.2.0
     sourceUrl: plugins/materio
-    sha256: 403f927e84d823685994339501fe5a599fd6d1a15398be53016b631929575134
+    sha256: 88420372c7c11e2e9258dc953cc51a6d7d69b7bb403d6e5cb8078af13b9cdc21
     provides:
       - kind: agent
         name: materio-lab-definer
@@ -466,10 +466,6 @@ entries:
         name: materio-workflow-planner
         description: Build a resource-aware dependency plan with researcher assumptions
           and tagged defaults.
-      - kind: extension
-        name: materio
-        description: Materials research lab bench with local commands, usage and
-          advisory guardrails.
       - kind: fleet
         name: materio-execute-task
         description: Execute one pre-approved research task and independently inspect
@@ -559,6 +555,18 @@ entries:
         name: materio-workflow-planner
         description: Build a resource-aware dependency plan with researcher assumptions
           and tagged defaults.
+  - kind: extension
+    name: materio
+    description: Materials research lab bench with local commands, usage and
+      advisory guardrails.
+    version: 0.2.0
+    sourceUrl: extensions/materio
+    sha256: 95dbbce9fde341e995d57eec47e1f458bfbb3cd34dd2a46eae68c7af0e2e2b05
+    provides:
+      - kind: extension
+        name: materio
+        description: Materials research lab bench with local commands, usage and
+          advisory guardrails.
   - kind: skill
     name: plan-interview
     description: Stress-tests a plan, design, or idea through a phased

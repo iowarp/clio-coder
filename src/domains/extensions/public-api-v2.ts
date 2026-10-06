@@ -287,7 +287,7 @@ type MaybePromise<T> = T | Promise<T>;
 
 export interface ExtensionApiV2 {
 	readonly apiVersion: 2;
-	/** A slash command: `/ext:<id>:<name>`, or `/<plugin>:<name>` when a bundle declares `replaces: prompt`. */
+	/** A slash command: `/ext:<id>:<name>`, also `/<plugin>:<name>` with `replaces: prompt` while the served plugin is in effect. */
 	handle(name: string, handler: (args: string, context: ExtensionContextV2) => MaybePromise<ExtensionOutputV2>): void;
 	/** Passive observation. It cannot block or rewrite. */
 	on(

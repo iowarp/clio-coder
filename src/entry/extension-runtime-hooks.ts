@@ -227,7 +227,7 @@ function eachRuntimeHook(
 ): void {
 	for (const entry of packages) {
 		if (!isLoadableExtension(entry) || entry.runtimeV2 === undefined) continue;
-		const digest = envelopeDigest(capabilityEnvelope(entry.runtimeV2));
+		const digest = envelopeDigest(capabilityEnvelope(entry.runtimeV2, entry.plugin));
 		entry.runtimeV2.hooks.forEach((hook: ExtensionHookDeclaration, index) => {
 			visit(entry, hook, index, digest);
 		});

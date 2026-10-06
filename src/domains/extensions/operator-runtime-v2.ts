@@ -582,8 +582,14 @@ export class OperatorExtensionRuntimeV2 {
 						available,
 						...(reason ? { reason } : {}),
 					};
-					return entry.bundle && command.replaces === "prompt"
-						? [row, { ...row, invocation: `${entry.bundle.pluginId}:${command.name}`, replaces: "prompt" as const }]
+					// A takeover needs the served plugin in effect and its prompt still listed;
+					// otherwise the plain prompt (or nothing) answers that name.
+					const alias = entry.plugin ? `${entry.plugin}:${command.name}` : undefined;
+					return alias &&
+						command.replaces === "prompt" &&
+						entry.pluginPrompts?.includes(alias) &&
+						promptNames.some((name) => name.toLowerCase() === alias.toLowerCase())
+						? [row, { ...row, invocation: alias, replaces: "prompt" as const }]
 						: [row];
 				}),
 			);

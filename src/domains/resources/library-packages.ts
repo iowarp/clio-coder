@@ -65,7 +65,7 @@ export function listInstalledLibraryPackages(cwd = process.cwd(), options: Plugi
 	return [
 		...listInstalledPlugins(cwd, options),
 		...listInstalledExtensions(cwd, options)
-			.filter((entry) => !entry.bundle && entry.scope !== "dev")
+			.filter((entry) => entry.scope !== "dev")
 			.map(extensionLibraryCopy),
 	];
 }
@@ -97,7 +97,7 @@ export function observeLibraryCopy(
 	if (kind !== "extension") return observePluginCopy(scope, id, cwd);
 	const root = path.join(extensionBaseDir(scope, cwd), id);
 	const saved = readExtensionInstallRecord(id, { cwd, scope });
-	const copy = listInstalledExtensions(cwd, { scope, all: true }).find((entry) => entry.id === id && !entry.bundle);
+	const copy = listInstalledExtensions(cwd, { scope, all: true }).find((entry) => entry.id === id);
 	return {
 		scope,
 		id,

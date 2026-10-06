@@ -40,7 +40,7 @@ export function openExtensionsOverlay(tui: TUI, ctx: SlashCommandContext, onClos
 			get meta() {
 				return meta();
 			},
-			group: "Harness extensions",
+			group: "Extensions",
 			detail: () => {
 				const lines = [
 					`# Extension: ${ext.id}`,

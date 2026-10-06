@@ -177,8 +177,11 @@ const localEntries: RegistryRow[] = validatedPackages.map(({ directory, expected
 	if (actualKind !== expectedKind) {
 		throw new Error(`${directory}: package kind "${actualKind}" does not match kind directory "${expectedKind}"`);
 	}
-	if (names.has(result.manifest.name)) throw new Error(`duplicate library package identity: ${result.manifest.name}`);
-	names.add(result.manifest.name);
+	// Plugin-backed kinds share one install directory per scope and extensions
+	// have their own, so a plugin and the extension serving it may share a name.
+	const identity = `${expectedKind === "extension" ? "extension" : "plugin"}:${result.manifest.name}`;
+	if (names.has(identity)) throw new Error(`duplicate library package identity: ${identity}`);
+	names.add(identity);
 	const sourceUrl = path.relative(path.dirname(destination), directory).split(path.sep).join("/");
 	return buildRegistryRow(directory, result, sourceUrl, path.basename(path.dirname(directory)));
 });

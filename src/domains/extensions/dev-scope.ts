@@ -280,7 +280,7 @@ export class ExtensionDevScope implements ExtensionSessionOverlay {
 			diagnostics.push({ type: "error", message: "a dev package needs runtime.api: 2" });
 		const clioRange = manifest?.compatibility?.clio;
 		const entry: InstalledExtension = {
-			...(candidate.bundle ? { bundle: candidate.bundle } : {}),
+			...(manifest?.plugin ? { plugin: manifest.plugin } : {}),
 			...(manifest?.runtimeV2 ? { runtimeV2: manifest.runtimeV2 } : {}),
 			id: manifest?.id ?? fallbackId,
 			name: manifest?.name ?? fallbackId,
@@ -312,7 +312,7 @@ export class ExtensionDevScope implements ExtensionSessionOverlay {
 			sourceDigest,
 			copyRoot,
 			record: { entry, ...(manifestName && manifestBytes ? { captured: new Map([[manifestName, manifestBytes]]) } : {}) },
-			envelope: manifest?.runtimeV2 ? capabilityEnvelope(manifest.runtimeV2) : null,
+			envelope: manifest?.runtimeV2 ? capabilityEnvelope(manifest.runtimeV2, manifest.plugin) : null,
 		};
 	}
 

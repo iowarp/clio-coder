@@ -391,7 +391,7 @@ const WELCOME_HINTS: ReadonlyArray<{
 		title: "Make Clio yours",
 		commands: [
 			["/model", "Choose a model and target"],
-			["/library", "Browse skills and extensions"],
+			["/library", "Browse plugins and extensions"],
 			["/help", "Explore commands and shortcuts"],
 		],
 		keys: [

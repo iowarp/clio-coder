@@ -72,7 +72,7 @@ Import reviews a portable, Claude Code or Codex plugin from a path or GitHub
 tree URL, normalizes supported recipes into a foreign-trust package, and never
 activates hooks, MCP, LSP or scripts.
 List and search are package-oriented; --kind and a query also match the
-recipes a bundle provides, returning the owning package as the install target.
+resources a plugin provides, returning the owning package as the install target.
 Recipes is the versioned, body-free read of actual discovered recipes across
 core, installed packages and loose user/project files, with owner, origin,
 availability and invocation; --all adds internal diagnostic agents. Nothing in

@@ -49,6 +49,12 @@ export interface ClioExtensionManifest {
 	/** Absent for a package whose only capability is its `hooks.yaml`. */
 	capabilities?: ExtensionCapabilities;
 	compatibility?: { clio?: string };
+	/**
+	 * The one plugin this extension serves. Plugin and extension stay separate
+	 * packages; the link only lets a `replaces: prompt` command take over that
+	 * plugin's prompt of the same name while the plugin is in effect.
+	 */
+	plugin?: string;
 }
 
 export interface ExtensionDiagnostic {
@@ -71,8 +77,13 @@ export interface ExtensionProvenance {
 }
 
 export interface InstalledExtension {
-	/** The plugin owns this facet’s one installed tree and lifecycle. */
-	bundle?: { pluginId: string };
+	/** The plugin this extension serves; a separate package with its own install and lifecycle. */
+	plugin?: string;
+	/**
+	 * Prompt names the served plugin provides while it is installed and in
+	 * effect; the only names a `replaces: prompt` command may take over.
+	 */
+	pluginPrompts?: readonly string[];
 	runtime?: ExtensionRuntimeDeclaration;
 	runtimeV2?: ExtensionRuntimeDeclarationV2;
 	id: string;
@@ -114,7 +125,6 @@ export function isLoadableExtension(entry: InstalledExtension): entry is Loadabl
 }
 
 export interface ExtensionCandidate {
-	bundle?: { pluginId: string };
 	path: string;
 	manifestPath?: string;
 	manifest?: ClioExtensionManifest;
