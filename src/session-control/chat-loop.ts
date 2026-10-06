@@ -2768,10 +2768,12 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 							failure = error instanceof Error ? error.message : String(error);
 						})
 						.finally(endPreparationCompaction);
-					if (!admissionCurrent()) return;
+					if (generation !== submitGeneration || disposed) return;
 					// An operator cancel is not an admission failure: record it like the
 					// pre-admission cancels above and leave no window-exceeded notice.
-					if (canceled) {
+					// Stop aborts the submit owner too, so the owner check alone must
+					// not skip the reserved turn's outcome.
+					if (canceled || owner?.signal.aborted) {
 						await recordCanceledBeforeAdmission({
 							userTurnId: reservedUserTurnId,
 							continuation: options.requestContinuation === true,
@@ -2780,6 +2782,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 						});
 						return;
 					}
+					if (!admissionCurrent()) return;
 					submittedText = composeSubmittedText();
 					admission = context.refreshLiveBudget(submittedText);
 					if (
