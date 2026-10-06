@@ -7,21 +7,21 @@
  */
 
 import type { toContextOverflowError } from "../domains/providers/errors.js";
+import type { RecoveryFailure, RetryCountdownHandle, RetrySettings } from "../domains/session/retry.js";
 import {
 	classifyRecoveryFailure,
-	recoveryRetryDelayMs,
 	createRetryCountdown,
 	isRetryableRecoveryFailure,
+	recoveryRetryDelayMs,
 } from "../domains/session/retry.js";
-import type { RecoveryFailure, RetryCountdownHandle, RetrySettings } from "../domains/session/retry.js";
 import type { AgentMessage, ImageContent, MutableAgentState } from "../engine/types.js";
+import type { TerminalAssistantFailure } from "./chat-loop-messages.js";
 import {
 	detectOverflowFromState,
 	detectTerminalFailureFromState,
 	isEmptyAbortedAssistantMessage,
 	pruneFailedAssistantFromContext,
 } from "./chat-loop-messages.js";
-import type { TerminalAssistantFailure } from "./chat-loop-messages.js";
 import type { TurnContext } from "./turn-context.js";
 import type { TurnPersistence } from "./turn-persistence.js";
 import type { AgentRuntime, ChatTurnState } from "./turn-state.js";
@@ -123,10 +123,11 @@ export function recoveryAttemptHasOutput(messages: ReadonlyArray<AgentMessage>):
 	return messages.some((message) => {
 		if (message.role === "toolResult") return true;
 		if (message.role !== "assistant") return false;
-		return message.content.some((block) =>
-			block.type === "toolCall" ||
-			(block.type === "text" && block.text.length > 0) ||
-			(block.type === "thinking" && block.thinking.length > 0),
+		return message.content.some(
+			(block) =>
+				block.type === "toolCall" ||
+				(block.type === "text" && block.text.length > 0) ||
+				(block.type === "thinking" && block.thinking.length > 0),
 		);
 	});
 }
@@ -159,7 +160,9 @@ export function createTurnRecovery(deps: TurnRecoveryDeps): TurnRecovery {
 		const signal = deps.turnSignal?.();
 		if (signal?.aborted) return "cancelled";
 		return new Promise((resolve) => {
-			const onAbort = (): void => { currentHandle?.cancel(); };
+			const onAbort = (): void => {
+				currentHandle?.cancel();
+			};
 			const finish = (result: "done" | "cancelled"): void => {
 				signal?.removeEventListener("abort", onAbort);
 				resolve(result);
@@ -241,7 +244,9 @@ export function createTurnRecovery(deps: TurnRecoveryDeps): TurnRecovery {
 			return;
 		}
 		try {
-			await deps.markPersistedUserEcho(text, () => cancelled() ? Promise.resolve() : agentRuntime.agent.prompt(text, images ? [...images] : undefined));
+			await deps.markPersistedUserEcho(text, () =>
+				cancelled() ? Promise.resolve() : agentRuntime.agent.prompt(text, images ? [...images] : undefined),
+			);
 			if (cancelled()) return;
 			const stillOverflowed = detectOverflowFromState(agentRuntime.agent);
 			if (stillOverflowed) {
@@ -276,7 +281,9 @@ export function createTurnRecovery(deps: TurnRecoveryDeps): TurnRecovery {
 				cancelled: cancelled() || state.activeInterruptReason !== null || failure.stopReason === "aborted",
 				hasAttemptOutput: recoveryAttemptHasOutput(messages),
 			});
-		let classified = classification ?? classify(initialFailure, attemptMessages ?? (initialFailure.message ? [initialFailure.message] : []));
+		let classified =
+			classification ??
+			classify(initialFailure, attemptMessages ?? (initialFailure.message ? [initialFailure.message] : []));
 		if (agentRuntime.runtimeId === "litellm" && !isRetryableRecoveryFailure(classified)) {
 			ensureFailureVisibleAndPersisted(initialFailure);
 			return true;

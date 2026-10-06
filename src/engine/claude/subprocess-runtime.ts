@@ -1,5 +1,5 @@
-import { spawn } from "node:child_process";
 import type { ChildProcessByStdio } from "node:child_process";
+import { spawn } from "node:child_process";
 import type { Readable, Writable } from "node:stream";
 
 import { boundedExternalDiagnostic } from "../../core/external-diagnostic.js";
@@ -322,7 +322,9 @@ export function startClaudeCodeWorkerRun(
 			const stderr = await stderrPromise;
 			transportError ||= outcome.incomplete
 				? "Claude Code CLI process group cleanup incomplete"
-				: outcome.pipeDrainIncomplete ? "Claude Code CLI output pipe draining incomplete" : "";
+				: outcome.pipeDrainIncomplete
+					? "Claude Code CLI output pipe draining incomplete"
+					: "";
 			const finalText =
 				streamState.text ||
 				resultText(streamState.result) ||

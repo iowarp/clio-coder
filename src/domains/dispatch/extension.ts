@@ -63,8 +63,8 @@ import {
 import {
 	type AcpDelegationRunHandle,
 	type AcpDelegationRunInput,
-	startAcpDelegationRun,
 	DEFAULT_CANCEL_GRACE_MS,
+	startAcpDelegationRun,
 } from "../../engine/acp/adapter.js";
 import { DEFAULT_TERMINATION_GRACE_MS, DEFAULT_TERMINATION_WAIT_MS } from "../../engine/acp/transport.js";
 import { engineRetryDelayMs } from "../../engine/ai.js";
@@ -8211,16 +8211,23 @@ export function createDispatchBundle(
 		settlement?: BatchVerificationGate,
 	): ReturnType<typeof dispatchRequest> {
 		if (draining) return Promise.reject(new AdmissionCanceledError());
-		const operation = dispatchRequest(req, observer, {
-			...preparation,
-			signal: preparation?.signal
-				? AbortSignal.any([preparation.signal, drainController.signal])
-				: drainController.signal,
-		}, settlement);
+		const operation = dispatchRequest(
+			req,
+			observer,
+			{
+				...preparation,
+				signal: preparation?.signal
+					? AbortSignal.any([preparation.signal, drainController.signal])
+					: drainController.signal,
+			},
+			settlement,
+		);
 		dispatching.add(operation);
-		operation.finally(() => dispatching.delete(operation)).catch(() => {
-			// The original admission promise retains its error for the caller.
-		});
+		operation
+			.finally(() => dispatching.delete(operation))
+			.catch(() => {
+				// The original admission promise retains its error for the caller.
+			});
 		return operation;
 	}
 
@@ -9427,10 +9434,11 @@ export function createDispatchBundle(
 	}
 
 	const contract: DispatchContract = {
-		drainAllowanceMs: () => Math.max(
-			WORKER_PROCESS_CLEANUP_BOUND_MS,
-			DEFAULT_CANCEL_GRACE_MS + DEFAULT_TERMINATION_GRACE_MS + DEFAULT_TERMINATION_WAIT_MS,
-		) + DISPATCH_DRAIN_GRACE_MS,
+		drainAllowanceMs: () =>
+			Math.max(
+				WORKER_PROCESS_CLEANUP_BOUND_MS,
+				DEFAULT_CANCEL_GRACE_MS + DEFAULT_TERMINATION_GRACE_MS + DEFAULT_TERMINATION_WAIT_MS,
+			) + DISPATCH_DRAIN_GRACE_MS,
 		publishesProgress: true,
 		ownsProgressBus: (bus) => bus === context.bus,
 		preview,

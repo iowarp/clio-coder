@@ -1,14 +1,6 @@
 import type { TSchema } from "typebox";
 import type { DynamicToolName } from "../../core/tool-names.js";
 import { mcpToolName } from "../../core/tool-names.js";
-import {
-	canonicalProjectRoot,
-	createMcpStdioClient,
-	McpError,
-	readMcpServerCatalog,
-	resolveMcpServers,
-	writeMcpServerCatalog,
-} from "../../domains/gateway/mcp/index.js";
 import type {
 	McpCatalogIdentity,
 	McpClient,
@@ -21,6 +13,14 @@ import type {
 	McpToolListing,
 	McpTrustActionClass,
 	ResolvedMcpServer,
+} from "../../domains/gateway/mcp/index.js";
+import {
+	canonicalProjectRoot,
+	createMcpStdioClient,
+	McpError,
+	readMcpServerCatalog,
+	resolveMcpServers,
+	writeMcpServerCatalog,
 } from "../../domains/gateway/mcp/index.js";
 import type { ClassifierCall } from "../../domains/safety/action-classifier.js";
 import { mcpTransportIdentity } from "../../domains/safety/information-flow.js";
@@ -496,27 +496,28 @@ export function createMcpCapabilitySource(options: McpCapabilitySourceOptions): 
 			const { createMcpConnection } = await import("../../domains/gateway/mcp/connection-lifecycle.js");
 			return createMcpConnection({
 				signal: controller.signal,
-				acquire: () => clientFactory(
-					{
-						id: declaration.id,
-						command: declaration.command,
-						args: declaration.args,
-						cwd: declaration.cwd,
-						env: declaration.env,
-					},
-					{
-						workspaceRoot: declaration.cwdRoot,
-						onFailure: (error) => {
-							state.failure ??= errorMessage(error);
-							void closeClient(state);
+				acquire: () =>
+					clientFactory(
+						{
+							id: declaration.id,
+							command: declaration.command,
+							args: declaration.args,
+							cwd: declaration.cwd,
+							env: declaration.env,
 						},
-						...(declaration.timeoutMs !== null
-							? { requestTimeoutMs: declaration.timeoutMs }
-							: options.requestTimeoutMs !== undefined
-								? { requestTimeoutMs: options.requestTimeoutMs }
-								: {}),
-					},
-				),
+						{
+							workspaceRoot: declaration.cwdRoot,
+							onFailure: (error) => {
+								state.failure ??= errorMessage(error);
+								void closeClient(state);
+							},
+							...(declaration.timeoutMs !== null
+								? { requestTimeoutMs: declaration.timeoutMs }
+								: options.requestTimeoutMs !== undefined
+									? { requestTimeoutMs: options.requestTimeoutMs }
+									: {}),
+						},
+					),
 				onAcquired: (client) => {
 					state.client = client;
 					installExitHook();
@@ -526,16 +527,18 @@ export function createMcpCapabilitySource(options: McpCapabilitySourceOptions): 
 		let closing: Promise<McpTeardownOutcome> | null = null;
 		const close = (): Promise<McpTeardownOutcome> => {
 			controller.abort();
-			closing ??= loaded.then((connection) => connection.close()).then((outcome) => {
-				teardowns.push({ id: declaration.id, outcome });
-				state.client = null;
-				if (!outcome.complete) {
-					process.stderr.write(
-						`[gateway] mcp server ${declaration.id}: process group ${outcome.pgid} survived SIGKILL for ${outcome.boundMs}ms; recorded, not signalled again\n`,
-					);
-				}
-				return outcome;
-			});
+			closing ??= loaded
+				.then((connection) => connection.close())
+				.then((outcome) => {
+					teardowns.push({ id: declaration.id, outcome });
+					state.client = null;
+					if (!outcome.complete) {
+						process.stderr.write(
+							`[gateway] mcp server ${declaration.id}: process group ${outcome.pgid} survived SIGKILL for ${outcome.boundMs}ms; recorded, not signalled again\n`,
+						);
+					}
+					return outcome;
+				});
 			return closing;
 		};
 		const ready = (async () => {

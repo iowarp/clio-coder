@@ -259,6 +259,7 @@ export function attestedToolSignature(input: AttestedToolIdentityInput): string 
 		},
 		isSubset: (worker, orchestrator) => resolveSafety().isSubset(worker, orchestrator),
 		get policy() {
+			// biome-ignore lint/style/noNonNullAssertion: createWorkerSafety always sets policy; the optional member is the contract shape, not this value.
 			return resolveSafety().policy!;
 		},
 		get audit() {

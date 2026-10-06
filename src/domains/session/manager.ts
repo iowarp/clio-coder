@@ -149,7 +149,8 @@ export function replaceEntries(state: SessionManagerState, entries: ReadonlyArra
 }
 
 function currentEntriesIndex(state: SessionManagerState): SessionEntriesIndex {
-	return state.entriesIndex ??= new SessionEntriesIndex(sessionPaths(state.meta).current);
+	state.entriesIndex ??= new SessionEntriesIndex(sessionPaths(state.meta).current);
+	return state.entriesIndex;
 }
 
 export function readCurrentEntries(state: SessionManagerState): ReadonlyArray<SessionEntry> {

@@ -1,10 +1,10 @@
 import { deepStrictEqual, equal, match, ok, throws } from "node:assert/strict";
 import childProcess, { ChildProcess } from "node:child_process";
-import { syncBuiltinESMExports } from "node:module";
-import { PassThrough } from "node:stream";
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { syncBuiltinESMExports } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { PassThrough } from "node:stream";
 import { afterEach, describe, it } from "node:test";
 import { peerModeCapabilities } from "../../src/domains/interop/peer-modes.js";
 import { interopAgentKind } from "../../src/domains/interop/registry.js";
@@ -19,10 +19,10 @@ import {
 	startCodexCliWorkerRun,
 } from "../../src/engine/codex/subprocess-runtime.js";
 import { externalCliConnector } from "../../src/engine/external-cli/connectors.js";
-import { createProcessTreeTerminator } from "../../src/engine/external-subprocess.js";
 import { startJsonlCliRun } from "../../src/engine/external-cli/jsonl-runner.js";
 import { buildOpenCodeCliArgs, OPENCODE_CLI_CONNECTOR } from "../../src/engine/external-cli/opencode.js";
 import { buildPiCliArgs, PI_CLI_CONNECTOR } from "../../src/engine/external-cli/pi.js";
+import { createProcessTreeTerminator } from "../../src/engine/external-subprocess.js";
 import type { AgentMessage } from "../../src/engine/types.js";
 import type { WorkerRunInput } from "../../src/engine/worker-runtime.js";
 import { handleRun, parseSlashCommand } from "../../src/session-control/slash-commands.js";
@@ -391,9 +391,15 @@ describe("Clio external CLI connectors", { skip: process.platform === "win32" },
 		});
 		syncBuiltinESMExports();
 		try {
-			throws(() => startJsonlCliRun(PI_CLI_CONNECTOR,
-				input(process.cwd(), piCliRuntime, { signal: controller.signal }), () => undefined),
-				(error) => error === reason);
+			throws(
+				() =>
+					startJsonlCliRun(
+						PI_CLI_CONNECTOR,
+						input(process.cwd(), piCliRuntime, { signal: controller.signal }),
+						() => undefined,
+					),
+				(error) => error === reason,
+			);
 			equal(spawns, 0);
 		} finally {
 			spawn.mock.restore();
@@ -425,13 +431,18 @@ describe("Clio external CLI connectors", { skip: process.platform === "win32" },
 		});
 		const terminator = createProcessTreeTerminator(child, 25, { platform: "linux" });
 		let settled = false;
-		void terminator.completed.then(() => { settled = true; });
+		void terminator.completed.then(() => {
+			settled = true;
+		});
 		child.emit("exit", 0);
 		await Promise.resolve();
 		equal(settled, false, "leader exit alone leaves inherited pipes owned");
 		t.mock.timers.tick(50);
 		deepStrictEqual(await terminator.completed, {
-			exitCode: 0, descendantsCleaned: true, incomplete: false, pipeDrainIncomplete: false,
+			exitCode: 0,
+			descendantsCleaned: true,
+			incomplete: false,
+			pipeDrainIncomplete: false,
 		});
 		terminator.terminate();
 		terminator.cleanup();
@@ -451,12 +462,17 @@ describe("Clio external CLI connectors", { skip: process.platform === "win32" },
 		const prefix = Array.from({ length: 15 }, () => ({ type: "text", delta: "é", repeat: 128 * 1024 }));
 		for (const split of [false, true]) {
 			const tail = split ? ["\ud83d", "\ude00"] : ["😀"];
-			const lines = [...prefix, { type: "text", delta: "é", repeat: 128 * 1024 - 2 },
-				...tail.map((delta) => ({ type: "text", delta }))];
+			const lines = [
+				...prefix,
+				{ type: "text", delta: "é", repeat: 128 * 1024 - 2 },
+				...tail.map((delta) => ({ type: "text", delta })),
+			];
 			for (const overflow of [false, true]) {
 				const { root, binary } = scratch([...lines, ...(overflow ? [{ type: "text", delta: "x" }] : [])]);
-				const result = await startJsonlCliRun(connector, input(root, piCliRuntime), () => undefined,
-					{ binary, workspaceRoot: root }).promise;
+				const result = await startJsonlCliRun(connector, input(root, piCliRuntime), () => undefined, {
+					binary,
+					workspaceRoot: root,
+				}).promise;
 				const message = assistant(result.messages);
 				equal(result.exitCode, overflow ? 1 : 0, `split=${split}, overflow=${overflow}`);
 				if (overflow) match(message.errorMessage ?? "", /response exceeded 4194304 bytes/);

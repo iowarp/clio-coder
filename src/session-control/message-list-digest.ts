@@ -30,7 +30,7 @@ export function createMessageListDigests(messages: ReadonlyArray<AgentMessage>):
 				const paddedTail: Array<AgentMessage | null> = new Array(snapshot.length).fill(null);
 				for (let index = count; index < snapshot.length; index += 1) paddedTail[index] = snapshot[index] ?? null;
 				const tailLength = JSON.stringify(paddedTail).length - count * "null,".length;
-				json = fullJson.slice(0, fullJson.length - tailLength) + "]";
+				json = `${fullJson.slice(0, fullJson.length - tailLength)}]`;
 			} else {
 				json = JSON.stringify(snapshot.slice(0, count));
 			}

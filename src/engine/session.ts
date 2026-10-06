@@ -24,6 +24,7 @@ import { readPiMonoVersion } from "./pi-mono-names.js";
  */
 
 import { createHash, randomBytes } from "node:crypto";
+import type { BigIntStats } from "node:fs";
 import {
 	closeSync,
 	existsSync,
@@ -41,7 +42,6 @@ import {
 	unlinkSync,
 	writeSync,
 } from "node:fs";
-import type { BigIntStats } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { StringDecoder } from "node:string_decoder";
 import { normalizeClioCoderEventTree } from "../core/naming-events.js";
@@ -133,7 +133,10 @@ export interface ClioSessionWriter {
 	 * Write a pre-composed structured session entry as a JSON line. Callers
 	 * supply `treeNode` when the entry must project into the turn tree.
 	 */
-	appendEntry(entry: unknown, opts?: { treeNode?: SessionTreeNode; onAppend?: (observation: SessionAppendObservation) => void }): void;
+	appendEntry(
+		entry: unknown,
+		opts?: { treeNode?: SessionTreeNode; onAppend?: (observation: SessionAppendObservation) => void },
+	): void;
 	/** Atomically replace current.jsonl entries while preserving the session header. */
 	replaceEntries(entries: ReadonlyArray<unknown>): void;
 	persistTree(): Promise<void>;
@@ -330,7 +333,8 @@ export function readSessionFileEntriesRange(
 	options: SessionJsonlReadOptions & { retainBytes?: boolean } = {},
 ): SessionJsonlRange {
 	const readPath = recoverJsonlTargetIfMissing(path);
-	if (readPath === null) return { entries: [], completeEntries: 0, nextOffset: 0, nextLineNumber: 0, stat: null, bytes: Buffer.alloc(0) };
+	if (readPath === null)
+		return { entries: [], completeEntries: 0, nextOffset: 0, nextLineNumber: 0, stat: null, bytes: Buffer.alloc(0) };
 	const entries: unknown[] = [];
 	const chunks: Buffer[] = [];
 	const warn = options.onWarning ?? defaultSessionJsonlWarning;
@@ -760,8 +764,14 @@ function createWriter(
 	}
 
 	function sameFileSnapshot(a: BigIntStats | null, b: BigIntStats): boolean {
-		return a !== null && a.dev === b.dev && a.ino === b.ino &&
-			a.size === b.size && a.mtimeNs === b.mtimeNs && a.ctimeNs === b.ctimeNs;
+		return (
+			a !== null &&
+			a.dev === b.dev &&
+			a.ino === b.ino &&
+			a.size === b.size &&
+			a.mtimeNs === b.mtimeNs &&
+			a.ctimeNs === b.ctimeNs
+		);
 	}
 
 	function persistPendingTree(): void {
@@ -899,7 +909,10 @@ function createWriter(
 				kind: turn.kind,
 			});
 		},
-		appendEntry(entry: unknown, opts?: { treeNode?: SessionTreeNode; onAppend?: (observation: SessionAppendObservation) => void }): void {
+		appendEntry(
+			entry: unknown,
+			opts?: { treeNode?: SessionTreeNode; onAppend?: (observation: SessionAppendObservation) => void },
+		): void {
 			if (closed) throw new Error("session writer closed");
 			const observation = appendLine(entry);
 			fileEntries.push(entry);

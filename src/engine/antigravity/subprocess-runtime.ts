@@ -1,5 +1,5 @@
-import { spawn } from "node:child_process";
 import type { ChildProcessByStdio } from "node:child_process";
+import { spawn } from "node:child_process";
 import type { Readable, Writable } from "node:stream";
 
 import { boundedExternalDiagnostic } from "../../core/external-diagnostic.js";
@@ -429,7 +429,9 @@ export function startAntigravityWorkerRun(
 			const stderr = await stderrPromise;
 			streamError ||= outcome.incomplete
 				? "Antigravity CLI process group cleanup incomplete"
-				: outcome.pipeDrainIncomplete ? "Antigravity CLI output pipe draining incomplete" : "";
+				: outcome.pipeDrainIncomplete
+					? "Antigravity CLI output pipe draining incomplete"
+					: "";
 			let terminalResponse = "";
 			try {
 				terminalResponse = boundedProviderField(streamState.result?.response, "response");

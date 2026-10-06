@@ -12,7 +12,7 @@
  *   1. Declares the RetrySettings shape and sensible defaults.
  *   2. Routes generic provider classification through pi-ai 0.87.1's
  *      `isRetryableAssistantError`, retaining only Clio's local-model delta.
- *   3. Computes the backoff delay for a given attempt (`computeRetryDelayMs`)
+ *   3. Computes the backoff delay for a given attempt (`recoveryRetryDelayMs`)
  *      with the cap the settings declare; callers schedule the wait.
  *   4. Provides `createRetryCountdown` so the TUI can show seconds remaining
  *      and cancel a pending retry on `Esc` without coupling to a specific
@@ -92,26 +92,6 @@ export function isRetryableErrorMessage(errorMessage: string | null | undefined)
 	return isEngineRetryableAssistantError(errorMessage) || MODEL_LOADING_PATTERN.test(errorMessage);
 }
 
-/**
- * Compute the delay before attempt `attempt` (1-indexed). Matches pi-mono's
- * formula `baseDelayMs * 2 ** (attempt - 1)`, then clamps to `maxDelayMs` so
- * the 4th retry never stalls for minutes. Attempt < 1 is normalized to 1 so
- * callers that miscount still get a sane first delay.
- */
-export function computeRetryDelayMs(
-	attempt: number,
-	settings: RetrySettings = DEFAULT_RETRY_SETTINGS,
-	errorMessage?: string | null,
-): number {
-	const safeAttempt = Math.max(1, Math.floor(attempt));
-	const base = engineRetryDelayMs(settings.baseDelayMs, settings.maxDelayMs, safeAttempt);
-	// A model load does not finish faster because the retry schedule was
-	// written for a rate limit. `maxDelayMs` still caps it, so an operator who
-	// wants short waits keeps them.
-	if (!isModelLoadingErrorMessage(errorMessage)) return base;
-	return Math.min(Math.max(base, MODEL_LOADING_MIN_DELAY_MS), settings.maxDelayMs);
-}
-
 export type RecoveryFailureKind =
 	| "cancelled"
 	| "context-overflow"
@@ -160,9 +140,18 @@ export function isRetryableRecoveryFailure(failure: RecoveryFailure): boolean {
 	return failure.kind === "connection" || failure.kind === "model-loading" || failure.kind === "transient-provider";
 }
 
+/**
+ * Compute the delay before attempt `attempt` (1-indexed). Matches pi-mono's
+ * formula `baseDelayMs * 2 ** (attempt - 1)`, then clamps to `maxDelayMs` so
+ * the 4th retry never stalls for minutes. Attempt < 1 is normalized to 1 so
+ * callers that miscount still get a sane first delay.
+ * A model load keeps the loading floor, still capped by `maxDelayMs`.
+ */
 export function recoveryRetryDelayMs(attempt: number, settings: RetrySettings, failure: RecoveryFailure): number {
 	const base = engineRetryDelayMs(settings.baseDelayMs, settings.maxDelayMs, Math.max(1, Math.floor(attempt)));
-	return failure.kind === "model-loading" ? Math.min(Math.max(base, MODEL_LOADING_MIN_DELAY_MS), settings.maxDelayMs) : base;
+	return failure.kind === "model-loading"
+		? Math.min(Math.max(base, MODEL_LOADING_MIN_DELAY_MS), settings.maxDelayMs)
+		: base;
 }
 
 /**
@@ -183,7 +172,7 @@ interface RetryCountdownOptions {
 	attempt: number;
 	/** Upper bound displayed alongside `attempt`. */
 	maxAttempts: number;
-	/** Total wait in milliseconds. Callers usually pass `computeRetryDelayMs(attempt, settings)`. */
+	/** Total wait in milliseconds. Callers usually pass `recoveryRetryDelayMs(attempt, settings, failure)`. */
 	delayMs: number;
 	/** Fires on every tick with the latest state so the TUI can redraw. */
 	onTick: (state: RetryCountdownState) => void;

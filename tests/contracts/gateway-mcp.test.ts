@@ -9,8 +9,8 @@ import { type ToolName, ToolNames } from "../../src/core/tool-names.js";
 import {
 	canonicalProjectRoot,
 	createMcpStdioClient,
-	resolveMcpServers,
 	type McpClient,
+	resolveMcpServers,
 	trustMcpServer,
 	untrustMcpServer,
 } from "../../src/domains/gateway/mcp/index.js";

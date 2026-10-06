@@ -18,9 +18,9 @@
  */
 
 import { wrapTextWithAnsi } from "../engine/text-wrap.js";
-import { clampTimerDelayMs } from "./timers.js";
 import { BusChannels } from "./bus-events.js";
 import { getSharedBus } from "./shared-bus.js";
+import { clampTimerDelayMs } from "./timers.js";
 
 export type TerminationPhase = "idle" | "draining" | "terminating" | "persisting" | "exiting";
 
@@ -167,7 +167,10 @@ class TerminationCoordinator {
 		if (this.shutdownPromise) return this.shutdownPromise;
 		let resolve!: () => void;
 		let reject!: (error: unknown) => void;
-		this.shutdownPromise = new Promise<void>((done, failed) => { resolve = done; reject = failed; });
+		this.shutdownPromise = new Promise<void>((done, failed) => {
+			resolve = done;
+			reject = failed;
+		});
 		void this.performShutdown(code).then(resolve, reject);
 		return this.shutdownPromise;
 	}

@@ -35,12 +35,12 @@ import {
 	workerCompileCacheEnvironment,
 } from "../../core/compile-cache.js";
 import { resolvePackageRoot } from "../../core/package-root.js";
+import type { ProcessGroupCleanupStatus } from "../../core/safe-exec.js";
 import {
 	createProcessGroupCleanup,
 	SAFE_EXEC_GROUP_TEARDOWN_BOUND_MS,
 	SAFE_EXEC_PIPE_DRAIN_BOUND_MS,
 } from "../../core/safe-exec.js";
-import type { ProcessGroupCleanupStatus } from "../../core/safe-exec.js";
 import type { WorkerSpec } from "../../worker/spec-contract.js";
 import type { HeartbeatStamp } from "./heartbeat.js";
 import {

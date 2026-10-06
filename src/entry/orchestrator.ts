@@ -20,15 +20,15 @@ import { setCommitDecisionRefsProvider, setGitCommitAttributionEnabled } from ".
 import { configureGuardrails, guardrailValuesFromSettings } from "../core/guardrails.js";
 import { HEADLESS_PERMISSION_DENIED_REASON } from "../core/headless-permission.js";
 import { flushPackageActivities, recordPackageActivity } from "../core/package-activity.js";
+import { protectedResidencyModels } from "../core/residency-protection.js";
+import { armRestartHandoff } from "../core/restart-handoff.js";
+import { consumeRestartIntent } from "../core/restart-intent.js";
+import { type RouteProvenance, resolveRouteProvenance } from "../core/route-provenance.js";
 import {
 	SAFE_EXEC_DEFAULT_KILL_GRACE_MS,
 	SAFE_EXEC_GROUP_TEARDOWN_BOUND_MS,
 	SAFE_EXEC_PIPE_DRAIN_BOUND_MS,
 } from "../core/safe-exec.js";
-import { protectedResidencyModels } from "../core/residency-protection.js";
-import { armRestartHandoff } from "../core/restart-handoff.js";
-import { consumeRestartIntent } from "../core/restart-intent.js";
-import { type RouteProvenance, resolveRouteProvenance } from "../core/route-provenance.js";
 import {
 	applyOverrides,
 	applyRoutingPatch,
@@ -1895,10 +1895,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 				await beginDispatchDrain();
 			},
 			{
-				timeoutMs: Math.min(
-					2 ** 31 - 1,
-					(dispatch.drainAllowanceMs?.() ?? 0) + resolveShutdownHookBudgetMs(),
-				),
+				timeoutMs: Math.min(2 ** 31 - 1, (dispatch.drainAllowanceMs?.() ?? 0) + resolveShutdownHookBudgetMs()),
 			},
 		);
 	}

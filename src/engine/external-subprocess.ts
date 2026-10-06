@@ -1,15 +1,14 @@
-import { spawn } from "node:child_process";
 import type { ChildProcess, ChildProcessByStdio } from "node:child_process";
+import { spawn } from "node:child_process";
 import type { Readable } from "node:stream";
-
+import { boundedExternalDiagnostic } from "../core/external-diagnostic.js";
+import type { ProcessGroupCleanupStatus } from "../core/safe-exec.js";
 import {
 	createProcessGroupCleanup,
 	SAFE_EXEC_GROUP_TEARDOWN_BOUND_MS,
 	SAFE_EXEC_PIPE_DRAIN_BOUND_MS,
 } from "../core/safe-exec.js";
-import type { ProcessGroupCleanupStatus } from "../core/safe-exec.js";
 import { clampTimerDelayMs } from "../core/timers.js";
-import { boundedExternalDiagnostic } from "../core/external-diagnostic.js";
 
 export type SubprocessWithStdio = ChildProcessByStdio<null, Readable, Readable>;
 
@@ -126,7 +125,9 @@ export function createProcessTreeTerminator(
 	let windowsBoundTimer: ReturnType<typeof setTimeout> | undefined;
 	let status: ProcessGroupCleanupStatus | null = null;
 	let resolveCompleted!: (outcome: ProcessTreeOutcome) => void;
-	const completed = new Promise<ProcessTreeOutcome>((resolve) => { resolveCompleted = resolve; });
+	const completed = new Promise<ProcessTreeOutcome>((resolve) => {
+		resolveCompleted = resolve;
+	});
 	const finish = (): void => {
 		if (finished || status === null || (!closed && !pipeDrainIncomplete && !status.incomplete)) return;
 		finished = true;
@@ -143,13 +144,21 @@ export function createProcessTreeTerminator(
 	};
 	const probe = (): boolean => {
 		if (!child.pid) return child.exitCode === null;
-		try { process.kill(-child.pid, 0); return true; }
-		catch (error) { return (error as NodeJS.ErrnoException).code !== "ESRCH"; }
+		try {
+			process.kill(-child.pid, 0);
+			return true;
+		} catch (error) {
+			return (error as NodeJS.ErrnoException).code !== "ESRCH";
+		}
 	};
 	const signal = (name: NodeJS.Signals): boolean => {
 		if (child.pid && platform !== "win32") {
-			try { process.kill(-child.pid, name); return true; }
-			catch (error) { return (error as NodeJS.ErrnoException).code !== "ESRCH"; }
+			try {
+				process.kill(-child.pid, name);
+				return true;
+			} catch (error) {
+				return (error as NodeJS.ErrnoException).code !== "ESRCH";
+			}
 		}
 		if (platform === "win32" && child.pid !== undefined && Number.isSafeInteger(child.pid) && child.pid > 0) {
 			const args = ["/PID", String(child.pid), "/T", ...(name === "SIGKILL" ? ["/F"] : [])];
@@ -161,12 +170,18 @@ export function createProcessTreeTerminator(
 		}
 		return child.exitCode === null && child.kill(name);
 	};
-	const group = platform === "win32" ? null : createProcessGroupCleanup({
-		graceMs: clampTimerDelayMs(graceMs),
-		probe,
-		signal,
-		onDone: (outcome) => { status = outcome; finish(); },
-	});
+	const group =
+		platform === "win32"
+			? null
+			: createProcessGroupCleanup({
+					graceMs: clampTimerDelayMs(graceMs),
+					probe,
+					signal,
+					onDone: (outcome) => {
+						status = outcome;
+						finish();
+					},
+				});
 	const onExit = (code: number | null): void => {
 		exitCode = code ?? 1;
 		drainTimer = setTimeout(() => {
@@ -183,13 +198,20 @@ export function createProcessTreeTerminator(
 		closed = true;
 		exitCode = code ?? exitCode;
 		if (!group) {
-			if (windowsTimer) { clearTimeout(windowsTimer); windowsTimer = undefined; signal("SIGKILL"); }
+			if (windowsTimer) {
+				clearTimeout(windowsTimer);
+				windowsTimer = undefined;
+				signal("SIGKILL");
+			}
 			status = { descendantsCleaned: sent, incomplete: false };
 		}
 		finish();
 	};
 	const onError = (): void => {
-		if (child.pid) { terminate(); return; }
+		if (child.pid) {
+			terminate();
+			return;
+		}
 		group?.dispose();
 		closed = true;
 		status = { descendantsCleaned: false, incomplete: false };
@@ -198,7 +220,10 @@ export function createProcessTreeTerminator(
 	const terminate = (): void => {
 		if (finished || sent) return;
 		sent = true;
-		if (group) { group.kill(); return; }
+		if (group) {
+			group.kill();
+			return;
+		}
 		signal("SIGTERM");
 		windowsTimer = setTimeout(() => {
 			windowsTimer = undefined;
@@ -228,4 +253,3 @@ export function createProcessTreeTerminator(
 		},
 	};
 }
-

@@ -256,11 +256,13 @@ export function registerAllTools(registry: ToolRegistry, deps: ToolBootstrapDeps
 	const close = (): Promise<void> => {
 		if (closePromise === undefined) {
 			for (const dispose of disposeCloseListeners.splice(0)) dispose();
-			closePromise = Promise.resolve(mcpCapabilities?.close()).then(() => undefined).finally(() => {
-				// PERF W3: early ShutdownRequested keeps the awaited hook until teardown settles.
-				disposeTerminateHook?.();
-				disposeTerminateHook = undefined;
-			});
+			closePromise = Promise.resolve(mcpCapabilities?.close())
+				.then(() => undefined)
+				.finally(() => {
+					// PERF W3: early ShutdownRequested keeps the awaited hook until teardown settles.
+					disposeTerminateHook?.();
+					disposeTerminateHook = undefined;
+				});
 		}
 		return closePromise;
 	};

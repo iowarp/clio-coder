@@ -158,7 +158,7 @@ export function createSessionBundle(context: DomainContext): DomainBundle<Sessio
 
 	const contract: SessionContract = {
 		current: () => state?.meta ?? null,
-		readEntries: () => state ? readCurrentEntries(state) : [],
+		readEntries: () => (state ? readCurrentEntries(state) : []),
 		create(input) {
 			const cwd = input?.cwd ?? process.cwd();
 			const startInput: { cwd: string; model?: string | null; target?: string | null } = { cwd };

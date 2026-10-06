@@ -929,7 +929,10 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 
 		handle.agent.subscribe(async (event) => {
 			if (event.type === "agent_start") runIdentity = deps.turnIdentity?.();
-			if (!currentRun()) { clearStallTimer(); return; }
+			if (!currentRun()) {
+				clearStallTimer();
+				return;
+			}
 			// Every span below is measured on the monotonic frame, so an NTP
 			// correction mid-turn cannot corrupt a tool duration or a TTFT.
 			const eventClock = performance.now();

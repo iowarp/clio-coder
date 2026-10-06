@@ -4,10 +4,10 @@ import { CONTEXT_OPERATION_CUSTOM_TYPE, createContextOperation } from "../core/c
 import type { SuccessfulMemoryContextCommit } from "../domains/memory/commit-state.js";
 import type { MemoryInterventionRegistration } from "../domains/middleware/memory-intervention.js";
 import { replaceEngineMessages, setEngineSystemPrompt } from "../engine/agent.js";
-import { createMessageListDigests } from "./message-list-digest.js";
-import type { MessageListDigests } from "./message-list-digest.js";
 import { contextOperationAwareness } from "./context-operation-awareness.js";
 import type { ContinuityReductionHooks } from "./continuity-controller.js";
+import type { MessageListDigests } from "./message-list-digest.js";
+import { createMessageListDigests } from "./message-list-digest.js";
 /**
  * Turn context ownership: the session-prompt compile cache, context-snapshot
  * accounting, prompt-cache honesty, and compaction. `runAutoCompact` is the
@@ -790,7 +790,8 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 	const reconciledHistoryTokens = (agentRuntime: AgentRuntime, history?: MessageListDigests): number | null => {
 		const anchor = reconciledAnchor;
 		if (!anchor) return null;
-		const messages = history?.messages ?? agentRuntime.agent.state.messages.filter((message) => message.role !== "system");
+		const messages =
+			history?.messages ?? agentRuntime.agent.state.messages.filter((message) => message.role !== "system");
 		// The identity, route, and length checks are cheap and run first; `||`
 		// short-circuits, so the content digest is only computed for a prefix that
 		// still looks like the attested one. The digest covers the attested prefix
@@ -1031,9 +1032,8 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		const settings = deps.getSettings();
 		const agentRuntime = state.runtime;
 		const history = agentRuntime
-			? capturedHistory ?? createMessageListDigests(
-				agentRuntime.agent.state.messages.filter((message) => message.role !== "system"),
-			)
+			? (capturedHistory ??
+				createMessageListDigests(agentRuntime.agent.state.messages.filter((message) => message.role !== "system")))
 			: undefined;
 		const snapshot = currentContextSnapshot;
 		const promptFingerprint = agentRuntime

@@ -23,6 +23,7 @@ import path from "node:path";
 import { performance } from "node:perf_hooks";
 import { buildSafeToolEnv, resolveSafeCwd } from "../../../core/safe-exec.js";
 import { clampTimerDelayMs, sleep } from "../../../core/timers.js";
+import type { JsonRpcId, JsonRpcMessage } from "./protocol.js";
 import {
 	createLineFramer,
 	DEFAULT_MAX_LINE_BYTES,
@@ -32,8 +33,6 @@ import {
 	McpError,
 	structuredContentJson,
 } from "./protocol.js";
-
-import type { JsonRpcId, JsonRpcMessage } from "./protocol.js";
 
 export const MCP_CLIENT_NAME = "clio-coder";
 export const DEFAULT_MCP_CLIENT_VERSION = "0.5.1";
@@ -767,10 +766,7 @@ export function createMcpStdioClient(spec: McpServerSpec, options: McpClientOpti
 				reject: (error) => settle(() => reject(error)),
 			});
 			if (timeoutMs > 0) {
-				timer = setTimeout(
-					() => cancel(new McpError("timeout", `${method} timed out after ${timeoutMs}ms`)),
-					timeoutMs,
-				);
+				timer = setTimeout(() => cancel(new McpError("timeout", `${method} timed out after ${timeoutMs}ms`)), timeoutMs);
 			}
 			signal?.addEventListener("abort", onAbort, { once: true });
 			const outcome = enqueueOutbound(
@@ -867,29 +863,30 @@ export function createMcpStdioClient(spec: McpServerSpec, options: McpClientOpti
 		await initialize(signal);
 	};
 
-	const listTools = (signal?: AbortSignal): Promise<McpToolListing> => withDiscoverySignal(signal, async () => {
-		await ensureReady(signal);
-		const tools: McpToolDescriptor[] = [];
-		let cursor: string | undefined;
-		let pages = 0;
-		for (;;) {
-			pages += 1;
-			const result = await request("tools/list", cursor === undefined ? {} : { cursor }, requestTimeoutMs, signal);
-			if (!isRecord(result) || !Array.isArray(result.tools)) {
-				throw new McpError("protocol", "tools/list result lacks a tools array");
+	const listTools = (signal?: AbortSignal): Promise<McpToolListing> =>
+		withDiscoverySignal(signal, async () => {
+			await ensureReady(signal);
+			const tools: McpToolDescriptor[] = [];
+			let cursor: string | undefined;
+			let pages = 0;
+			for (;;) {
+				pages += 1;
+				const result = await request("tools/list", cursor === undefined ? {} : { cursor }, requestTimeoutMs, signal);
+				if (!isRecord(result) || !Array.isArray(result.tools)) {
+					throw new McpError("protocol", "tools/list result lacks a tools array");
+				}
+				for (const entry of result.tools) {
+					if (tools.length >= MCP_TOOL_LIST_CAP) return { tools, truncated: true };
+					const descriptor = parseToolDescriptor(entry);
+					if (descriptor instanceof McpError) throw descriptor;
+					tools.push(descriptor);
+				}
+				const next = typeof result.nextCursor === "string" && result.nextCursor.length > 0 ? result.nextCursor : undefined;
+				if (next === undefined) return { tools, truncated: false };
+				if (tools.length >= MCP_TOOL_LIST_CAP || pages >= MCP_TOOL_LIST_PAGE_CAP) return { tools, truncated: true };
+				cursor = next;
 			}
-			for (const entry of result.tools) {
-				if (tools.length >= MCP_TOOL_LIST_CAP) return { tools, truncated: true };
-				const descriptor = parseToolDescriptor(entry);
-				if (descriptor instanceof McpError) throw descriptor;
-				tools.push(descriptor);
-			}
-			const next = typeof result.nextCursor === "string" && result.nextCursor.length > 0 ? result.nextCursor : undefined;
-			if (next === undefined) return { tools, truncated: false };
-			if (tools.length >= MCP_TOOL_LIST_CAP || pages >= MCP_TOOL_LIST_PAGE_CAP) return { tools, truncated: true };
-			cursor = next;
-		}
-	});
+		});
 
 	const callTool = async (
 		name: string,
@@ -936,7 +933,9 @@ export function createMcpStdioClient(spec: McpServerSpec, options: McpClientOpti
 		return closePromise;
 	};
 
-	const onParentAbort = (): void => { void close(); };
+	const onParentAbort = (): void => {
+		void close();
+	};
 
 	if (options.signal !== undefined) {
 		if (options.signal.aborted) void close();

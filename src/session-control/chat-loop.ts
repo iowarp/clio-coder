@@ -106,8 +106,8 @@ import {
 } from "../domains/session/entries.js";
 import { operatorTextOfUserPayload } from "../domains/session/history.js";
 import { protectedArtifactStateFromSessionEntries } from "../domains/session/protected-artifacts.js";
-import { classifyRecoveryFailure, isRetryableRecoveryFailure } from "../domains/session/retry.js";
 import type { RetrySettings } from "../domains/session/retry.js";
+import { classifyRecoveryFailure, isRetryableRecoveryFailure } from "../domains/session/retry.js";
 import { filterEntriesToActivePath } from "../domains/session/tree/active-path.js";
 import type { TokenSplit } from "../domains/turn-control/index.js";
 import { reduceTurnOutcome } from "../domains/turn-control/index.js";
@@ -182,9 +182,9 @@ import {
 } from "./turn-queues.js";
 import {
 	createTurnRecovery,
-	recoveryAttemptHasOutput,
 	type RetryStatusEvent,
 	reclassifyStallAbort,
+	recoveryAttemptHasOutput,
 	rewriteStallAbortMessage,
 } from "./turn-recovery.js";
 import { type AssistantDeltaEvent, createTurnRuntime, TurnAdmissionError } from "./turn-runtime.js";
@@ -2970,7 +2970,12 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 							// watchdog's abort retries and an operator cancel still does not.
 							const failure = reclassifyStallAbort(state, settled);
 							recovery.ensureFailureVisibleAndPersisted(failure);
-							await recovery.runTransientRetryChain(agentRuntime, runtimePromptText, failure, agentRuntime.agent.state.messages.slice(machineMessageStart));
+							await recovery.runTransientRetryChain(
+								agentRuntime,
+								runtimePromptText,
+								failure,
+								agentRuntime.agent.state.messages.slice(machineMessageStart),
+							);
 						}
 					}
 				} catch (err) {
@@ -2997,11 +3002,17 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 								errorMessage: message,
 								timestamp: Date.now(),
 							} as AgentMessage;
-							await recovery.runTransientRetryChain(agentRuntime, runtimePromptText, {
-								stopReason: "error",
-								errorMessage: message,
-								message: failureMessage,
-							}, undefined, classification);
+							await recovery.runTransientRetryChain(
+								agentRuntime,
+								runtimePromptText,
+								{
+									stopReason: "error",
+									errorMessage: message,
+									message: failureMessage,
+								},
+								undefined,
+								classification,
+							);
 							return;
 						}
 						emitNotice(operatorFacingEngineError(message));
@@ -3015,6 +3026,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 					// still ended on the operator's say-so, which the outcome has to show.
 					const interviewDismissed = askUserPolicy?.status === "cancelled";
 					releaseForeground();
+					// biome-ignore lint/correctness/noUnsafeFinally: a superseded submit must not settle into the new generation; its error belongs to a turn nobody owns now.
 					if (generation !== submitGeneration) return;
 					if (askUserPolicy) {
 						try {
@@ -3032,6 +3044,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 							);
 						}
 					}
+					// biome-ignore lint/correctness/noUnsafeFinally: a superseded submit must not settle into the new generation; its error belongs to a turn nobody owns now.
 					if (generation !== submitGeneration) return;
 					state.streaming = false;
 					if (state.activeInterruptReason !== null) {
@@ -3097,7 +3110,8 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 							}
 							const workerRunIds = [...collected.dispatches.flatMap((item) => item.runIds), ...collected.harness.runIds];
 							const missingReceipts = canceled ? await awaitWorkerReceipts(workerRunIds, deps.outcomeDispatch) : [];
-						if (generation !== submitGeneration) return;
+							// biome-ignore lint/correctness/noUnsafeFinally: a superseded submit must not settle into the new generation; its error belongs to a turn nobody owns now.
+							if (generation !== submitGeneration) return;
 							const record = reduceTurnOutcome({
 								...collected,
 								turnId: userTurnId,
@@ -3198,7 +3212,12 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 						});
 					}
 					state.activeUserTurnId = null;
-					if (!disposed && generation === submitGeneration && options.machineTurn === undefined && !(await queues.resubmitStranded()))
+					if (
+						!disposed &&
+						generation === submitGeneration &&
+						options.machineTurn === undefined &&
+						!(await queues.resubmitStranded())
+					)
 						await queues.resubmitRequestContinuation();
 				}
 			} finally {
