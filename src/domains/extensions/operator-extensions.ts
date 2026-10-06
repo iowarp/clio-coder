@@ -180,6 +180,9 @@ export class OperatorExtensions {
 	interview(extensionId: string, answer: InterviewAnswer, signal?: AbortSignal): Promise<InterviewNext> {
 		return this.v2.interview(extensionId, answer, signal);
 	}
+	saveWorkspace(): void {
+		this.v2.saveWorkspace();
+	}
 	leaveWorkspace(): boolean {
 		return this.v2.leaveWorkspace();
 	}

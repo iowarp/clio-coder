@@ -7,6 +7,8 @@ import { writeRestartIntent } from "../session-control/restart-intent.js";
 export interface InteractiveRestartDeps {
 	session?: SessionContract;
 	stateDir: string;
+	/** Save what a restart must come back to besides the session, such as the open extension workspace. */
+	saveWorkspace?(): void;
 	busyReason(): string | null;
 	settle(): Promise<void>;
 	armHandoff(): void;
@@ -51,6 +53,7 @@ export function createInteractiveRestart(deps: InteractiveRestartDeps): () => vo
 			try {
 				await deps.settle();
 				await deps.session?.checkpoint("restart");
+				deps.saveWorkspace?.();
 				const changed = deps.busyReason();
 				if (changed || deps.session?.current()?.id !== sessionId) {
 					deps.notify("warning", `Restart refused: ${changed ?? "the session changed while it was being saved"}.`);

@@ -365,8 +365,11 @@ export class OperatorExtensionRuntimeV2 {
 			list = [];
 		}
 		this.inventory = list;
-		if (adopts) this.queued = true;
-		else if (this.activeContext !== undefined && context !== this.activeContext) {
+		if (adopts) {
+			this.queued = true;
+			// A workspace entered before the session existed belongs to it from now on.
+			this.persistWorkspace();
+		} else if (this.activeContext !== undefined && context !== this.activeContext) {
 			this.invalidateContext();
 			this.activeContext = context;
 		}
@@ -865,6 +868,11 @@ export class OperatorExtensionRuntimeV2 {
 		}
 		if (before) this.observeOne(before.extensionId, { event: "workspace_leave", workspace: before.workspaceId });
 		if (after) this.observeOne(after.extensionId, { event: "workspace_enter", workspace: after.workspaceId });
+	}
+
+	/** Save which workspace is open under the session, for a restart that must come back to it. */
+	saveWorkspace(): void {
+		if (!this.closed) this.persistWorkspace();
 	}
 
 	private persistWorkspace(): void {

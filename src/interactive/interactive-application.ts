@@ -1068,6 +1068,7 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 		restart: createInteractiveRestart({
 			...(deps.session ? { session: deps.session } : {}),
 			stateDir: deps.stateDir,
+			saveWorkspace: () => operatorExtensions?.saveWorkspace(),
 			busyReason: () =>
 				interactiveRestartBusyReason({
 					chat: deps.chat,
