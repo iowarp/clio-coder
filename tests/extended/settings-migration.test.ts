@@ -1,13 +1,16 @@
 import { deepStrictEqual, ok, rejects, strictEqual } from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 
 import { parse as parseYaml } from "yaml";
 import { namingHistoryFindings } from "../../src/cli/doctor-naming.js";
 import { readSettings, updateSettings, validateSettings } from "../../src/core/config.js";
 import { DEFAULT_SETTINGS, DEFAULT_SETTINGS_YAML } from "../../src/core/defaults.js";
+import { readLifecycleReceipts } from "../../src/core/library-receipts.js";
+import { extensionContentDigest } from "../../src/domains/extensions/integrity.js";
+import { convertWorkspaceOnce } from "../../src/domains/lifecycle/canonical-names.js";
 import { runDoctor } from "../../src/domains/lifecycle/doctor.js";
 import settingsV2, {
 	SETTINGS_V2_MIGRATION_ID,
@@ -19,9 +22,13 @@ import {
 	runPending,
 } from "../../src/domains/lifecycle/migrations/index.js";
 import { parseYaziEventLine, renderYaziKeymap } from "../../src/domains/mux/index.js";
+import { pluginContentDigest } from "../../src/domains/plugins/integrity.js";
 import { parseSessionEntries } from "../../src/domains/session/archive-readers.js";
 import { createShareArchive, planShareImport } from "../../src/domains/share/archive.js";
 import { type IsolatedClioEnv, isolateClioEnv } from "../harness/scratch-env.js";
+
+const PLAYBOOKS_MIGRATION_ID = "2026-10-06-playbooks-and-packages";
+const REPO = resolve(dirname(new URL(import.meta.url).pathname), "..", "..");
 
 describe("settings and migration boundary", () => {
 	let scratch: IsolatedClioEnv;
@@ -286,24 +293,26 @@ targets:
 	it("orders migrations before strict readers and records each migration once", async () => {
 		const ids = listMigrations().map((migration) => migration.id);
 		const retiredPanes = "2026-09-01-retire-panes-knobs";
-		deepStrictEqual(ids, [SETTINGS_V2_MIGRATION_ID, retiredPanes]);
+		deepStrictEqual(ids, [SETTINGS_V2_MIGRATION_ID, retiredPanes, PLAYBOOKS_MIGRATION_ID]);
 
 		writeFileSync(settingsFile, "version: 1\npanes: { agents: off, keepFailed: false }\n", "utf8");
 		const first = await runPending(stateDir);
 		ok(first.applied.includes(SETTINGS_V2_MIGRATION_ID));
 		ok(first.applied.includes(retiredPanes));
+		ok(first.applied.includes(PLAYBOOKS_MIGRATION_ID));
 		deepStrictEqual((await runPending(stateDir)).applied, []);
 	});
 
 	it("doctor distinguishes satisfied settings migrations from pending work without writing receipts", () => {
 		const manifest = join(stateDir, "migrations.json");
-		writeFileSync(manifest, '{"applied":[]}\n', "utf8");
+		const recorded = `{"applied":["${PLAYBOOKS_MIGRATION_ID}"]}\n`;
+		writeFileSync(manifest, recorded, "utf8");
 		writeFileSync(settingsFile, "version: 2\n", "utf8");
 		const current = runDoctor().find((finding) => finding.name === "lifecycle migrations");
 		strictEqual(current?.ok, true);
 		strictEqual(current?.level, undefined);
 		ok(current?.detail.includes("already satisfy 2 unrecorded"));
-		strictEqual(readFileSync(manifest, "utf8"), '{"applied":[]}\n');
+		strictEqual(readFileSync(manifest, "utf8"), recorded);
 		strictEqual(readFileSync(settingsFile, "utf8"), "version: 2\n");
 		for (const settings of ["version: 1\n", "version: 2\npanes: { agents: off }\n", "version: [\n"]) {
 			writeFileSync(settingsFile, settings, "utf8");
@@ -353,6 +362,167 @@ targets:
 		const manifest = join(stateDir, "migrations.json");
 		deepStrictEqual(JSON.parse(readFileSync(manifest, "utf8")), { applied: ["serialized"] });
 		if (process.platform !== "win32") strictEqual(statSync(manifest).mode & 0o777, 0o600);
+	});
+
+	it("converts a legacy home once: playbooks, the old Materio bundle, an unbound extension, with upgrade receipts", async () => {
+		const config = join(scratch.dir, "config");
+		const write = (file: string, text: string): void => {
+			mkdirSync(dirname(file), { recursive: true });
+			writeFileSync(file, text, "utf8");
+		};
+		const playbook = (name: string) =>
+			`---\nversion: 1\nname: ${name}\ndescription: fixture\nsteps:\n  - id: review\n    agent: verifier\n    scope: readonly\n    dependencies: []\nmaxWorkers: 1\nonFailure: stop\n---\nReview.\n`;
+		write(join(config, "fleets", "legacy-review.md"), playbook("legacy-review"));
+		write(join(config, "fleets", "dup.md"), playbook("dup-old"));
+		write(join(config, "playbooks", "dup.md"), playbook("dup-new"));
+
+		// The old Materio bundle: the plugin tree with the extension manifest and runtime at its root, as one install.
+		const bundle = join(config, "plugins", "materio");
+		cpSync(join(REPO, "library", "plugins", "materio"), bundle, { recursive: true });
+		cpSync(join(REPO, "library", "extensions", "materio"), bundle, { recursive: true });
+		const manifestFile = join(bundle, "plugin.json");
+		const manifest = JSON.parse(readFileSync(manifestFile, "utf8"));
+		const namespace = manifest.extensions["ai.iowarp.clio"];
+		namespace.resources = { fleets: "ai.iowarp.clio/fleets", skills: namespace.resources.skills };
+		writeFileSync(manifestFile, JSON.stringify(manifest, null, "\t"), "utf8");
+		// A third-party plugin that still declares fleets.
+		const thirdParty = join(config, "plugins", "lab-pack");
+		write(join(thirdParty, "fleets", "x.md"), playbook("x"));
+		write(
+			join(thirdParty, "plugin.json"),
+			JSON.stringify({
+				$schema: "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+				name: "lab-pack",
+				version: "1.0.0",
+				description: "built for an older Clio",
+				extensions: { "ai.iowarp.clio": { manifestVersion: 1, resources: { fleets: "fleets" }, components: [] } },
+			}),
+		);
+		const materioSource = join(REPO, "library", "plugins", "materio");
+		write(
+			join(config, "plugins", "state.json"),
+			JSON.stringify({
+				version: 1,
+				disabled: [],
+				installed: {
+					materio: {
+						kind: "plugin",
+						installedAt: "2026-10-01T00:00:00.000Z",
+						source: materioSource,
+						origin: { kind: "catalog", source: materioSource },
+						contentDigest: pluginContentDigest(bundle),
+						trust: "trusted",
+					},
+					"lab-pack": {
+						installedAt: "2026-10-01T00:00:00.000Z",
+						source: thirdParty,
+						origin: { kind: "local", source: thirdParty },
+						contentDigest: pluginContentDigest(thirdParty),
+						trust: "trusted",
+					},
+				},
+			}),
+		);
+		// An api 2 extension installed before the envelope binding: no recorded envelope digest.
+		const status = join(config, "extensions", "local-status");
+		const statusSource = join(REPO, "library", "extensions", "local-status");
+		cpSync(statusSource, status, { recursive: true });
+		write(
+			join(config, "extensions", "state.json"),
+			JSON.stringify({
+				version: 1,
+				disabled: [],
+				installed: {
+					"local-status": {
+						installedAt: "2026-10-01T00:00:00.000Z",
+						source: statusSource,
+						origin: { kind: "catalog", source: statusSource },
+						contentDigest: extensionContentDigest(status),
+					},
+				},
+			}),
+		);
+
+		const first = await runPending(stateDir);
+		ok(first.applied.includes(PLAYBOOKS_MIGRATION_ID));
+		const report = first.reports?.[PLAYBOOKS_MIGRATION_ID];
+		ok(report);
+		const text = [...report.changed, ...report.attention].join("\n");
+		ok(readFileSync(join(config, "playbooks", "legacy-review.md"), "utf8").includes("legacy-review"));
+		ok(readFileSync(join(config, "playbooks", "dup.md"), "utf8").includes("dup-new"), "a collision never overwrites");
+		ok(!existsSync(join(config, "fleets")), "the old directory is gone");
+		ok(
+			readdirSync(config).some((name) => name.startsWith("fleets.")),
+			"the colliding copy is moved aside, not deleted",
+		);
+		ok(text.includes("dup"), text);
+		// The bundle is now the plugin alone, and the extension is its own package with a bound envelope.
+		ok(!existsSync(join(config, "plugins", "materio", "clio-coder-extension.yaml")));
+		ok(existsSync(join(config, "plugins", "materio", "ai.iowarp.clio", "playbooks")));
+		const extensionState = JSON.parse(readFileSync(join(config, "extensions", "state.json"), "utf8"));
+		ok(extensionState.installed.materio?.envelopeDigest, "extension:materio is installed with its envelope bound");
+		ok(extensionState.installed["local-status"]?.envelopeDigest, "the unbound Library extension is reinstalled");
+		// The third-party plugin stays in place and is named with the fix.
+		ok(existsSync(join(thirdParty, "fleets", "x.md")));
+		ok(
+			report.attention.some((line) => line.includes("lab-pack") && line.includes("older Clio")),
+			text,
+		);
+		// Every package the conversion installed or replaced is an upgrade receipt.
+		const upgraded = readLifecycleReceipts().filter((row) => row.actor === "upgrade");
+		for (const [kind, id] of [
+			["plugin", "materio"],
+			["extension", "materio"],
+			["extension", "local-status"],
+		] as const)
+			ok(
+				upgraded.some((row) => row.kind === kind && row.id === id),
+				`${kind}:${id} has an upgrade receipt`,
+			);
+		// A second run does nothing: the migration is recorded, and converting again changes nothing.
+		const snapshot = readFileSync(join(config, "plugins", "state.json"), "utf8");
+		deepStrictEqual((await runPending(stateDir)).applied, []);
+		const { convertUserHome } = await import("../../src/domains/lifecycle/canonical-names.js");
+		deepStrictEqual(convertUserHome().changed, []);
+		strictEqual(readFileSync(join(config, "plugins", "state.json"), "utf8"), snapshot);
+	});
+
+	it("converts a workspace's .clio-coder once on first open", () => {
+		const workspace = join(scratch.dir, "workspace");
+		const project = join(workspace, ".clio-coder");
+		mkdirSync(join(project, "fleets"), { recursive: true });
+		writeFileSync(join(project, "fleets", "review.md"), "---\nversion: 1\nname: review\n---\nReview.\n", "utf8");
+		writeFileSync(join(project, "fleets", "commands.yaml"), "version: 1\ncommands: {}\n", "utf8");
+		mkdirSync(join(project, "plugins"), { recursive: true });
+		writeFileSync(
+			join(project, "plugins", "state.json"),
+			JSON.stringify({
+				version: 1,
+				disabled: [],
+				installed: {
+					"review-pack": {
+						kind: "fleet",
+						installedAt: "2026-10-01T00:00:00.000Z",
+						source: "/x",
+						contentDigest: "0".repeat(64),
+					},
+				},
+			}),
+			"utf8",
+		);
+		const first = convertWorkspaceOnce(workspace);
+		ok(first, "the first open converts");
+		ok(existsSync(join(project, "playbooks", "review.md")));
+		ok(existsSync(join(project, "playbooks", "commands.yaml")));
+		ok(!existsSync(join(project, "fleets")));
+		strictEqual(
+			JSON.parse(readFileSync(join(project, "plugins", "state.json"), "utf8")).installed["review-pack"].kind,
+			"playbook",
+		);
+		ok(first.changed.some((line) => line.includes("playbooks")));
+		strictEqual(convertWorkspaceOnce(workspace), null, "a converted workspace is not converted again");
+		mkdirSync(join(project, "fleets"), { recursive: true });
+		strictEqual(convertWorkspaceOnce(workspace), null, "the conversion runs once per workspace");
 	});
 
 	it("merges independent settings updates against the latest durable state", () => {

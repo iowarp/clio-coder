@@ -83,6 +83,7 @@ import type { SchedulingContract } from "../domains/scheduling/contract.js";
 import { SchedulingDomainModule } from "../domains/scheduling/index.js";
 import { SessionDomainModule } from "../domains/session/index.js";
 import { fleetInspectionScope } from "./fleet-project-scope.js";
+import { convertWorkspaceForCommand } from "./workspace-conversion.js";
 
 const HELP = `clio-coder fleet <subcommand>
 
@@ -779,6 +780,7 @@ export async function runFleetCommand(args: ReadonlyArray<string>): Promise<numb
 	}
 	switch (sub) {
 		case "run":
+			await convertWorkspaceForCommand();
 			return runFleet(args.slice(1));
 		case "status":
 			return runStatus(args.slice(1));

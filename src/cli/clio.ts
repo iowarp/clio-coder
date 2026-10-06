@@ -46,6 +46,8 @@ export async function runClioCommand(
 	if (terminalLeaseEligible(options)) {
 		const existingHome = homeIsReturning();
 		initializeClioHome();
+		// A background update leaves the previous release's state for this launch to convert, and the strict settings read below needs it converted.
+		await (await import("../domains/lifecycle/boot-migrations.js")).applyPendingMigrationsAtBoot();
 		// The user file remains a strict gate. Project layers retain their
 		// established best-effort diagnostics, but every subsequent boot phase
 		// consumes this same effective snapshot.

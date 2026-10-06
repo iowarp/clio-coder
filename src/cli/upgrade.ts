@@ -656,7 +656,13 @@ export async function runUpgradeCommand(
 		const applied = [...result.applied];
 		appliedCount = applied.length;
 		if (appliedCount === 0) presenter.note("No pending migrations.");
-		else for (const id of applied) presenter.completedStep(`Applied migration ${id}`);
+		else
+			for (const id of applied) {
+				presenter.completedStep(`Applied migration ${id}`);
+				const report = result.reports?.[id];
+				for (const line of report?.changed ?? []) presenter.substep(line);
+				for (const line of report?.attention ?? []) presenter.warn(line);
+			}
 	}
 
 	if (method === "source") {

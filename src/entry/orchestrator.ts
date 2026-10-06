@@ -1590,6 +1590,17 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	termination.installSignalHandlers();
 
 	ensureClioState();
+	const { applyPendingMigrationsAtBoot, takeBootMigrationNotices } = await import(
+		"../domains/lifecycle/boot-migrations.js"
+	);
+	await applyPendingMigrationsAtBoot();
+	const bootConversions = takeBootMigrationNotices();
+	{
+		// A workspace's `.clio-coder/` converts the first time Clio opens it, before any domain reads it.
+		const { convertWorkspaceOnce, describeConversion } = await import("../domains/lifecycle/canonical-names.js");
+		const converted = convertWorkspaceOnce(process.cwd());
+		if (converted) bootConversions.push(describeConversion(converted, "this workspace"));
+	}
 	// The leased TUI turns boot diagnostics into transcript notices. Without a
 	// lease (instant shell off) stderr would print before the first frame, so
 	// the interactive boot holds trust notices for the transcript instead (C-4).
@@ -1902,6 +1913,11 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	// the keyboard to tell, and the record is left unclaimed for the boot that does.
 	const upgrade = interactive ? takeUpgradeNotice() : null;
 	if (upgrade !== null) initialNotices.push(describeUpgradeNotice(upgrade));
+	// One notice per conversion; a surface with no operator at the keyboard gets it on stderr.
+	for (const conversion of bootConversions) {
+		if (interactive) initialNotices.push(conversion);
+		else bootStderr(`${conversion}\n`);
+	}
 	if (!providers || !dispatch || !observability || !safety || !middleware) {
 		bootStderr(
 			"Clio Coder: chat mode requires safety + middleware + providers + dispatch + observability contracts; aborting.\n",

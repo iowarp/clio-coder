@@ -36,11 +36,19 @@ import { safeResourceWrite } from "../../../core/safe-resource-write.js";
 import { withStateFileLock } from "../../../core/state-file-lock.js";
 import retirePanesKnobs from "./2026-09-01-retire-panes-knobs.js";
 import settingsV2 from "./2026-09-01-settings-v2.js";
+import playbooksAndPackages from "./2026-10-06-playbooks-and-packages.js";
 import { REGISTERED_MIGRATION_IDS } from "./registry-ids.js";
+
+/** What a migration tells the operator: what it changed, and what still needs them. */
+export interface MigrationReport {
+	changed: string[];
+	attention: string[];
+}
 
 export interface Migration {
 	id: string;
-	up(stateDir: string): Promise<void>;
+	// biome-ignore lint/suspicious/noConfusingVoidType: migrations that change nothing worth reporting return nothing.
+	up(stateDir: string): Promise<void | MigrationReport>;
 }
 
 export interface MigrationManifest {
@@ -54,6 +62,8 @@ export interface MigrationRunResult {
 	allApplied: string[];
 	/** full migration inventory ordered by id. */
 	available: string[];
+	/** reports from migrations that applied on this invocation, keyed by id. */
+	reports?: Record<string, MigrationReport>;
 }
 
 export interface MigrationManifestRead {
@@ -73,7 +83,7 @@ const MIGRATION_MANIFEST_MAX_BYTES = 1024 * 1024;
 // migrations (`2026-08-18-lmstudio-runtime-id`, `2026-09-18-ollama-runtime-id`)
 // were retired with the legacy naming layer. Homes that recorded their ids keep
 // them in the manifest; an id with no registered migration is inert.
-const REGISTRY: ReadonlyArray<Migration> = Object.freeze([settingsV2, retirePanesKnobs]);
+const REGISTRY: ReadonlyArray<Migration> = Object.freeze([settingsV2, retirePanesKnobs, playbooksAndPackages]);
 
 // A fresh home records REGISTERED_MIGRATION_IDS as already applied. An id
 // registered here but missing there would be recorded for no home, and one
@@ -148,6 +158,7 @@ export async function runPending(
 		if (read.problem !== null) throw new Error(read.problem);
 		const applied = new Set(read.manifest.applied);
 		const newlyApplied: string[] = [];
+		const reports: Record<string, MigrationReport> = {};
 		// The manifest is written after each `up()` rather than once at the end. A
 		// throw from a later migration used to discard the record of the earlier ones
 		// that had already succeeded, so they re-ran on the next upgrade against a
@@ -155,7 +166,8 @@ export async function runPending(
 		// module's contract states.
 		for (const migration of migrations) {
 			if (applied.has(migration.id)) continue;
-			await migration.up(stateDir);
+			const report = await migration.up(stateDir);
+			if (report) reports[migration.id] = report;
 			applied.add(migration.id);
 			newlyApplied.push(migration.id);
 			writeManifest(path, { applied: [...applied] });
@@ -169,6 +181,7 @@ export async function runPending(
 			applied: newlyApplied,
 			allApplied,
 			available: migrations.map((migration) => migration.id),
+			reports,
 		};
 	});
 }

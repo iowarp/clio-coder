@@ -2,7 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { stringify as stringifyYaml } from "yaml";
 import { readSettings, updateSettings } from "../../core/config.js";
-import { recordLifecycleReceipt } from "../../core/library-receipts.js";
+import { type LifecycleContext, recordLifecycleReceipt } from "../../core/library-receipts.js";
 import { runCommandVector, type SafeCommandResult } from "../../core/safe-exec.js";
 import { safeResourceWrite } from "../../core/safe-resource-write.js";
 import { withStateFileLockSync } from "../../core/state-file-lock.js";
@@ -167,6 +167,8 @@ export interface LibraryInstallPlan {
 	cwd?: string;
 	scope?: PluginScope;
 	force?: boolean;
+	/** Receipt attribution for installs the operator did not start, such as the upgrade conversion. */
+	lifecycle?: LifecycleContext;
 	expectedInstalledDigest?: string;
 	/** Reviewed facts rechecked inside the writer's lock. */
 	expect?: PluginExpectedState;
@@ -361,7 +363,7 @@ export function classifyLibraryRequirements(
 
 export function planLibraryInstall(
 	entry: LibraryEntry,
-	options: { cwd?: string; scope?: PluginScope; force?: boolean } = {},
+	options: { cwd?: string; scope?: PluginScope; force?: boolean; lifecycle?: LifecycleContext } = {},
 ): LibraryInstallPlan {
 	const fetched = fetchPluginSource(entry.sourceUrl, options.cwd);
 	try {
@@ -434,6 +436,7 @@ export function commitLibraryInstallPlan(plan: LibraryInstallPlan): PluginMutati
 	if (plan.entry.kind === "extension") {
 		const result = installExtension(plan.sourceRoot, {
 			...(plan.cwd ? { cwd: plan.cwd } : {}),
+			...(plan.lifecycle ? { lifecycle: plan.lifecycle } : {}),
 			scope: plan.scope ?? "user",
 			force: plan.force ?? false,
 			expectedDigest: plan.sha256,
@@ -456,6 +459,7 @@ export function commitLibraryInstallPlan(plan: LibraryInstallPlan): PluginMutati
 	}
 	return installPlugin(plan.sourceRoot, {
 		...(plan.cwd ? { cwd: plan.cwd } : {}),
+		...(plan.lifecycle ? { lifecycle: plan.lifecycle } : {}),
 		scope: plan.scope ?? "user",
 		force: plan.force ?? false,
 		expectedDigest: plan.sha256,
