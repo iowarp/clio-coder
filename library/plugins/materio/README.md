@@ -7,40 +7,37 @@ research system; this package separates domain knowledge from host capabilities.
 
 The root `plugin.json` follows Agent Plugins 1.0.0. Its six portable skills contain
 the domain workflow and link to seventeen complete action guides. Clio's native
-seventeen prompts, six agent recipes, and execute/verify fleet live under
+seventeen prompts, six agent recipes, and execute/verify playbook live under
 `ai.iowarp.clio/` and are declared in a closed component graph. Shared references,
 templates, and Python helpers live under `assets/`.
 
-## Clio lab bench
+## Plugin and optional extension
 
-Materio is also an API 2 bundle: the library installs its portable plugin and
-runtime once, with one tree digest. Enter the bench with `/ext:materio:lab` or
-the host workspace menu; leave with the host leader's `b` or `/workspace off`.
-The amber phase strip, task board, agent/findings islands, rail and footer come
-from `.research/` and repaint after edits. Free leader suffixes are `f` (fill next
-action), `c` (checkpoint), `v` (findings), `d` (cost/tokens), and `h` (help).
+This directory is the content-only Materio plugin. Installing it registers six
+skills, seventeen prompt templates, six agents and one playbook; it starts no
+extension runtime. Its helpers run only when a workflow explicitly invokes them
+through the host's tools.
 
-`/materio:status`, `/materio:progress`, `/materio:help`, and every
-`/materio:checkpoint` argument run locally, with the original prompts retained
-for hosts without the runtime. `/ext:materio:cost` reports declared prices and
-reported tokens; unknown pricing stays unknown. Status also accepts `check N`
-to recheck task artifacts and `N` to open their findings interview.
+The plugin works without the [Materio extension](../../extensions/materio/README.md).
+All seventeen `/materio:*` prompts remain ordinary model-driven workflows. The
+research prompts include a manual fallback using the supplied action guides,
+researcher questions and file readback when the runtime tools are unavailable.
+Status, progress, help and checkpoint also keep their prompt implementations.
 
-The runtime observes dispatch write roots to associate an executor run with its
-exact task. It inspects summaries and runs the three existing Python helpers;
-citations are always offline because the runtime declares no network use.
-Findings hold tasks at checkpoint until researcher review, and changed artifacts
-require another check. A missing summary remains a warning and blocks completion.
-The `autoCheckpoint` extension option defaults to true and snapshots a task after
-readback and accepted review. Restore asks for confirmation and snapshots current
-state before applying the validated archive. No generated experiment or analysis
-script is executed by this runtime. The existing prompts remain phase 1 content;
-the runtime adds no research interviews or scientific claims to them.
+The optional extension is a separate package with its own manifest, digest,
+install state and permission review. It serves `plugin: materio` and adds the
+terminal lab bench, local commands, researcher forms, artifact checks and usage
+tracking. When both packages are installed and enabled, its local status,
+progress, help and checkpoint commands take over the corresponding plugin
+prompts. Disabling or removing the extension restores those plain prompts;
+disabling or removing the plugin leaves the extension's `/ext:materio:*`
+commands available and turns off every prompt takeover.
 
 ## Clio workflow
 
-Install the whole package with `clio-coder library install ./library/plugins/materio --project`
-from the repository, then reload plugin resources or restart the session. An
+Install the plugin with `clio-coder library install plugin:materio --project`
+from the Library, then use `/library reload` or restart the session. To add the
+lab bench, separately install `extension:materio` and review its permissions. An
 installed copy is a pinned tree; editing this source does not update that copy.
 
 1. `/materio:identify-research` interviews domain, hypothesis,
@@ -70,9 +67,9 @@ complete context on redispatch. A headless action needs already-confirmed inputs
 and stops before an unanswered gated write. A generated protocol is prepared work;
 physical measurements and successful computation remain separate pending actions.
 
-The optional `materio-execute-task` fleet takes `task`,
+The optional `materio-execute-task` playbook takes `task`,
 `approval`, and `retrieval` variables. It runs the executor then the read-only
-verifier. The fleet's host write boundary is `.research/tasks/`; the selected
+verifier. The playbook's host write boundary is `.research/tasks/`; the selected
 subdirectory is also a caller instruction. The interactive action owns tighter
 dispatch grants, findings, state updates, and checkpoint decisions. Peer exports
 do not claim the same native fleet or write-boundary enforcement.
@@ -119,9 +116,9 @@ Codex can consume the root standard package through its portable skills. For a
 native Claude package or Gemini extension, generate a separate output tree:
 
 ```bash
-python3 assets/scripts/project_plugin.py --target claude --output /tmp/materials-claude
-python3 assets/scripts/project_plugin.py --target gemini --output /tmp/materials-gemini
-python3 assets/scripts/project_plugin.py --target codex --output /tmp/materials-codex
+python3 assets/scripts/project_plugin.py --target claude --output ./materials-claude
+python3 assets/scripts/project_plugin.py --target gemini --output ./materials-gemini
+python3 assets/scripts/project_plugin.py --target codex --output ./materials-codex
 ```
 
 Claude receives six skills, seventeen native command wrappers, and six native
@@ -148,7 +145,7 @@ Run the plugin's deterministic Python suite with:
 
 ```bash
 PYTHONDONTWRITEBYTECODE=1 python3 -B -m unittest discover -s library/plugins/materio/tests -v
-pnpm run test:file tests/contracts/materio-plugin.test.ts
+pnpm run test:file -- tests/extended/materio-plugin.test.ts
 ```
 
 The Python suite includes the upstream conservative checker regressions, balanced
