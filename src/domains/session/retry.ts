@@ -204,7 +204,7 @@ export function createRetryCountdown(options: RetryCountdownOptions): RetryCount
 		}
 		state.seconds = Math.max(0, Math.ceil(remaining / 1000));
 		emit();
-		timer = setTimer(schedule, 1000);
+		timer = setTimer(schedule, Math.min(remaining, 1000));
 	};
 
 	schedule();

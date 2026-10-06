@@ -1579,7 +1579,12 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 	const outcomeCollector = deps.turnOutcomeCollector ?? createTurnOutcomeCollector();
 	if (deps.turnOutcomeCollector === undefined) deps.middleware?.registerHook(outcomeCollector);
 
+	let submitOwner: AbortController | null = null;
+	let submitGeneration = 0;
+	let disposed = false;
 	const recovery = createTurnRecovery({
+		turnSignal: () => submitOwner?.signal,
+		turnIdentity: () => submitGeneration,
 		state,
 		persistence,
 		context,
@@ -2287,7 +2292,10 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		queuedMessages: () => queues.queuedMessages(),
 
 		async submit(text: string, options: ChatSubmitOptions = {}): Promise<void> {
-			const admissionCurrent = (): boolean => options.isAdmissionCurrent?.() !== false;
+			let owner: AbortController | null = null;
+			const generation = submitGeneration;
+			const admissionCurrent = (): boolean =>
+				!disposed && generation === submitGeneration && !owner?.signal.aborted && options.isAdmissionCurrent?.() !== false;
 			if (!admissionCurrent()) return;
 			const submittedAt = performance.now();
 			let interrupted = false;
@@ -2379,787 +2387,803 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				}
 			}
 
-			state.currentTurnConstraints =
-				options.requestContinuation === true ? state.currentTurnConstraints : snapshotTurnConstraints(options.constraints);
-			const previousRunSnapshot = state.lastRunSnapshot;
-			let agentRuntime: AgentRuntime | null;
+			owner = new AbortController();
+			submitOwner?.abort();
+			submitOwner = owner;
 			try {
-				await turnRuntime.ensureLiveCapabilitiesForSelectedModel();
-				if (!admissionCurrent()) return;
-				agentRuntime = turnRuntime.ensureRuntime();
-			} catch (err) {
-				emitAdmissionNotice(
-					err instanceof Error ? err.message : String(err),
-					err instanceof TurnAdmissionError ? err.reason : "admission-failed",
-				);
-				return;
-			}
-			if (!agentRuntime) {
-				emitAdmissionNotice(notConfiguredNotice(deps.getSettings().chat), nullRuntimeAdmissionReason());
-				return;
-			}
-			if (options.machineTurn?.preparationToken === machinePreparation?.token && machinePreparation !== null)
-				machinePreparation.runtime = agentRuntime;
-			if (deps.promptSubmit && options.requestContinuation !== true) {
-				const verdict = await deps.promptSubmit({ typed: options.display?.text ?? text, text });
-				if (!admissionCurrent()) return;
-				if (verdict.kind === "block") {
-					emit({
-						type: "notice",
-						level: "warning",
-						surface: "transcript",
-						text: verdict.reason,
-						admission: { reason: "prompt-blocked" },
-					});
-					return;
-				}
-				text = verdict.text;
-			}
-			const operatorText = text;
-			let sidecarObservation: string | null = null;
-			const routeAcceptsImages = acceptsImageInput({
-				runtimeId: agentRuntime.runtimeResolution.runtime.id,
-				vision: agentRuntime.runtimeResolution.capabilityDecisions.vision,
-			});
-			if (options.images?.length && !routeAcceptsImages) {
-				if (deps.visionSidecar?.configured()) {
-					const sidecar = deps.visionSidecar;
-					const controller = new AbortController();
-					pendingVisionSidecar = controller;
-					emitNotice(`[Clio Coder] Processing image with ${sidecar.label() ?? "vision sidecar"}...`);
-					try {
-						const question = operatorText.trim() || "Describe the attached image and any visible text.";
-						const analysis = await sidecar.analyze(options.images, question, controller.signal);
-						if (controller.signal.aborted || !admissionCurrent()) return;
-						sidecarObservation = visionObservationText(analysis);
-						text = [operatorText, sidecarObservation].filter(Boolean).join("\n\n");
-						emitNotice(`[Clio Coder] Image processed with ${analysis.model}.`);
-					} catch (err) {
-						if (controller.signal.aborted) {
-							emitAdmissionNotice("[Clio Coder] Image processing cancelled.", "vision-sidecar-cancelled");
-						} else {
-							const reason = err instanceof Error ? err.message : String(err);
-							emitAdmissionNotice(`[Clio Coder] Image processing failed: ${reason}`, "vision-sidecar-failed");
-						}
-						return;
-					} finally {
-						if (pendingVisionSidecar === controller) pendingVisionSidecar = null;
-					}
-				} else {
-					const route = agentRuntime.runtimeResolution;
-					const choices = visionModelOptions();
-					const alternatives = choices.length
-						? ` Known vision-capable models: ${choices.join(", ")}. Open /model to switch.`
-						: " No vision-capable models are known in the configured catalog.";
-					emit({
-						type: "notice",
-						level: "warning",
-						surface: "transcript",
-						text: `IMAGE_INPUT_UNSUPPORTED: ${route.targetId}/${route.wireModelId} cannot accept image input.${alternatives}`,
-						admission: { reason: "image-input-unsupported" },
-						source: "images",
-					});
-					return;
-				}
-			}
-			const historicalImages = countImageBlocks(agentRuntime.agent.state.messages);
-			if (!routeAcceptsImages && historicalImages > 0) {
-				const route = agentRuntime.runtimeResolution;
-				const key = `${route.targetId}/${route.wireModelId}:${historicalImages}`;
-				if (key !== lastHistoricalImageNoticeKey) {
-					lastHistoricalImageNoticeKey = key;
-					emitNotice(
-						`[Clio Coder] ${historicalImages} earlier image${historicalImages === 1 ? "" : "s"} omitted from requests to text-only ${route.targetId}/${route.wireModelId}. The original images remain in session history for a vision-capable model.`,
-						"warning",
-						undefined,
-						undefined,
-						"images",
-					);
-				}
-			} else {
-				lastHistoricalImageNoticeKey = null;
-			}
-
-			// 1. Accept the prompt: reset per-turn accounting, freeze the tool
-			// surface, fire turn_start, and assemble the submitted text.
-			state.turnToolCalls = 0;
-			state.turnToolNames = [];
-			state.turnSharedWorkerNote = isWorkerShareNote(text);
-			state.pendingInRunContinuation = false;
-			middlewareToolChoice.reset();
-			if (options.requestContinuation !== true) state.stalledTurnNudgeSpent = false;
-			const images = sidecarObservation === null && options.images?.length ? [...options.images] : undefined;
-			const pendingSkillRequests =
-				state.currentTurnConstraints?.skills === "disabled" ? [] : (options.pendingSkillRequests ?? []);
-			// Inlined @file content is part of this text, and the pre-turn decision or
-			// a preparation compaction can send it before the user turn is filed.
-			// A first turn has no session to hold the label yet, so it is recorded
-			// again once the turn below has created one.
-			const referencedPaths = options.workingContextPaths ?? [];
-			if (referencedPaths.length > 0) deps.labelReferencedPaths?.(referencedPaths);
-			context.addWorkingContextPaths(referencedPaths);
-			context.prepareMemoryTurn(agentRuntime, {
-				taskText: text,
-				continuation: options.requestContinuation === true,
-				images,
-			});
-			// The user turn id is fixed before anything is asked about the turn, so the
-			// pre-turn decision record, the ledger row and every outcome that follows
-			// carry the id the user turn will be filed under. A run that returns
-			// before admission leaves the id unused, which costs nothing.
-			const reservedUserTurnId = randomUUID();
-			let previous = "";
-			const messages = agentRuntime.agent.state.messages;
-			for (let index = messages.length - 1; index >= 0; index -= 1) {
-				if (messages[index]?.role === "assistant") {
-					previous = extractText(messages[index]);
-					break;
-				}
-			}
-			const operatorTurn = options.requestContinuation !== true;
-			if (operatorTurn && previousOperatorTurn !== null) {
-				// The operator's reply is the strongest signal of how the last turn
-				// landed: a correction, a thanks, a retry or silence all read differently.
-				const followed = previousOperatorTurn;
-				previousOperatorTurn = null;
+				state.currentTurnConstraints =
+					options.requestContinuation === true ? state.currentTurnConstraints : snapshotTurnConstraints(options.constraints);
+				const previousRunSnapshot = state.lastRunSnapshot;
+				let agentRuntime: AgentRuntime | null;
 				try {
-					deps.recordOutcome?.({
-						ref: followed.id,
-						source: "next-operator",
-						facts: { text: boundedCodePoints(operatorText, 300), gapMs: Math.round(submittedAt - followed.settledAt) },
-					});
-				} catch {
-					// Recording an outcome never costs the turn it describes.
-				}
-			}
-			// System One's reading of the request starts here and nothing waits for
-			// it: the hint registration, the controller and the prewarm use it only if
-			// it has landed by the time they read. A continuation turn carries a nudge
-			// rather than the operator's request, so a judgment about it would be a
-			// judgment about the nudge.
-			if (operatorTurn && deps.readTurn) {
-				// What the operator asked last turn, as typed. Without it a correction
-				// such as "actually drop X from that list" has nothing to correct, and
-				// it scored unknown at 0.22 on the assistant's reply alone. Read only
-				// when a call will be made, because it reparses the whole ledger from
-				// disk and an operator without System One must not pay for it.
-				const lastTurnId = state.lastTurnId ?? undefined;
-				const previousTask = (): string => {
-					const entries = filterEntriesToActivePath(deps.readSessionEntries?.() ?? [], lastTurnId);
-					for (let index = entries.length - 1; index >= 0; index -= 1) {
-						const entry = entries[index];
-						if (entry?.kind !== "message" || entry.role !== "user") continue;
-						if ((entry.payload as { synthetic?: unknown } | null)?.synthetic === true) continue;
-						return operatorTextOfUserPayload(entry.payload) ?? "";
-					}
-					return "";
-				};
-				try {
-					// The last assistant message is evidence for a short follow-up: "ok go
-					// ahead" is an action after a proposal and a pleasantry without one.
-					deps.readTurn({
-						userTurnId: reservedUserTurnId,
-						task: text,
-						request: options.display?.text ?? operatorText,
-						previous,
-						previousTask,
-					});
-				} catch {
-					// Every consumer degrades to what it did before the call existed.
-				}
-			}
-
-			let orientationBlock: string | null = null;
-			let turnControlRecord: TurnControlRecord | null = null;
-			if (deps.turnControl) {
-				const controllerAbort = new AbortController();
-				pendingPreTurnRead = controllerAbort;
-				setTurnPreparation("preparing");
-				try {
-					const result = await deps.turnControl.run({
-						operatorText: text,
-						continuation: options.requestContinuation === true,
-						userTurnId: reservedUserTurnId,
-						signal: controllerAbort.signal,
-					});
-					orientationBlock = result.block;
-					turnControlRecord = result.record;
-				} finally {
-					if (pendingPreTurnRead === controllerAbort) pendingPreTurnRead = null;
-				}
-				if (!admissionCurrent()) return;
-				if (controllerAbort.signal.aborted) {
-					await recordCanceledBeforeAdmission({
-						userTurnId: reservedUserTurnId,
-						continuation: options.requestContinuation === true,
-						control: turnControlRecord,
-						submittedAt,
-					});
-					return;
-				}
-			}
-			// A skill the operator activated narrows the tools for the workflow
-			// it started, and that workflow outlives the turn it began in. A
-			// fresh /skill this turn replaces the armed surface; otherwise the
-			// armed surface is what this turn runs under.
-			const pendingSkillPolicy = withModelSkillActivation(
-				createPendingSkillToolPolicy(pendingSkillRequests) ?? state.activeSkillSurface,
-				state.currentTurnConstraints?.skills !== "disabled" && modelMayActivateSkills(),
-			);
-			if (pendingSkillPolicy) {
-				pendingSkillPolicy.allowListAdvisory = (deps.getAutonomy?.() ?? deps.getSettings().safety.autonomy) === "yolo";
-			}
-			// What was already loaded when this turn started, so the settle-time
-			// notice names the skills this turn activated and not the ones a
-			// carried surface has been holding since an earlier message.
-			const skillsLoadedBeforeTurn = new Set(pendingSkillPolicy?.loadedSkillNames ?? []);
-			// Resolve the frozen session tool surface before turn_start so intent
-			// middleware sees the exact tools this request can actually call.
-			agentRuntime.agent.state.tools = resolveSessionTools(
-				agentRuntime,
-				deps.toolRegistry,
-				currentToolInvokeOptions,
-				turnRuntime.toolTelemetry,
-			);
-			const toolSignature = toolSignatureFromState(agentRuntime.agent.state.tools);
-			const askUserPolicy = createAskUserToolPolicy(
-				agentRuntime.agent.state.tools,
-				deps.toolRegistry,
-				state.currentTurnConstraints,
-			);
-			if (askUserPolicy) askUserPolicy.planOnly = isPlanOnlyRequest(text);
-			// turn_start: the prompt is accepted; registrations may inject
-			// context for this request. Accumulated reminders (turn_end
-			// advisories from the previous turn plus anything turn_start just
-			// emitted) flush into the request as one system-reminder block.
-			// Like the skill preamble below, the block is plain visible text in
-			// the user message: persisted in the ledger, no hidden prompt
-			// machinery.
-			middleware.fireTurnStart(agentRuntime, text, pendingSkillRequests.length, options.requestContinuation === true);
-			if (options.requestContinuation !== true) {
-				await middleware.awaitTurnStart(agentRuntime, text, pendingSkillRequests.length);
-				if (!admissionCurrent()) return;
-			}
-			const reminderProjection = middleware.takePendingReminderProjection();
-			// Pending skill requests are plain visible text in the user message
-			// itself: persisted in the ledger, no hidden prompt machinery.
-			const skillPreamble = pendingSkillRequestPreamble(pendingSkillRequests, agentRuntime.agent.state.tools);
-			let taskMemoryHandoffSource = "";
-			if (pendingSkillRequests.some((request) => request.name.trim() === "context-handoff")) {
-				try {
-					taskMemoryHandoffSource = deps.getTaskMemoryHandoffSource?.() ?? "";
-				} catch {
-					// Handoff export is supplemental; a snapshot failure must not block
-					// the explicitly requested skill turn.
-				}
-			}
-			const composeSubmittedText = () =>
-				[reminderProjection(), orientationBlock ?? "", skillPreamble, taskMemoryHandoffSource, text]
-					.filter((part) => part.length > 0)
-					.join("\n\n");
-			let submittedText = composeSubmittedText();
-
-			// 2. Pre-submit auto-compaction trigger
-			const forceNow = process.env.CLIO_CODER_FORCE_COMPACT === "1";
-			const paintCompaction = prepareCompactionPaint();
-			try {
-				setTurnPreparation("compacting");
-				await paintCompaction();
-				if (!admissionCurrent()) return;
-				await context.runAutoCompact(
-					agentRuntime,
-					forceNow,
-					undefined,
-					undefined,
-					submittedText,
-					pendingSkillPolicy,
-					undefined,
-					undefined,
-					options.requestContinuation !== true,
-				);
-			} catch (err) {
-				emitNotice(`[Clio Coder] auto-compaction failed: ${err instanceof Error ? err.message : String(err)}`);
-				if (err instanceof Error && err.name === "AbortError") {
-					await recordCanceledBeforeAdmission({
-						userTurnId: reservedUserTurnId,
-						continuation: options.requestContinuation === true,
-						control: turnControlRecord,
-						submittedAt,
-					});
-					return;
-				}
-			} finally {
-				endPreparationCompaction();
-			}
-
-			if (!admissionCurrent()) return;
-
-			// 3. Ensure the session prompt (compiles only on explicit events)
-			const compiledPrompt = await context.ensureSessionPrompt(agentRuntime);
-			if (!admissionCurrent()) return;
-			submittedText = composeSubmittedText();
-
-			// 4. Preflight overflow check, before the user turn is committed.
-			// A blocked request must not leave a dangling user entry that the
-			// next replay would treat as an unanswered turn.
-			const compactionThreshold = deps.getSettings().context.compaction?.threshold ?? null;
-			const captureTurnSnapshot = (turnId: string): ContextSnapshot =>
-				context.captureRuntimeContextSnapshot(agentRuntime, turnId, compactionThreshold, {
-					promptSegments: compiledPrompt
-						? compiledPrompt.sections.map((s) => ({ id: s.id, tokenEstimate: s.tokenEstimate }))
-						: undefined,
-					pendingUserInput: submittedText,
-					images,
-					promptHash: compiledPrompt?.systemPromptHash,
-					toolSignature,
-				});
-
-			let turnSnapshot = captureTurnSnapshot("pending");
-			let admission = context.refreshLiveBudget(submittedText);
-			if (
-				admission.effectiveWindow !== null &&
-				!requestFits(admission.inputTokens, admission.outputReserveTokens, admission.effectiveWindow)
-			) {
-				const paintOverflow = prepareCompactionPaint();
-				setTurnPreparation("compacting");
-				let failure: string | undefined;
-				let canceled = false;
-				await paintOverflow()
-					.then(() => {
-						if (!admissionCurrent()) return false;
-						return context.runAutoCompact(
-							agentRuntime,
-							true,
-							undefined,
-							"overflow",
-							submittedText,
-							pendingSkillPolicy,
-							undefined,
-							undefined,
-							options.requestContinuation !== true,
-						);
-					})
-					.catch((error: unknown) => {
-						canceled = error instanceof Error && error.name === "AbortError";
-						failure = error instanceof Error ? error.message : String(error);
-					})
-					.finally(endPreparationCompaction);
-				if (!admissionCurrent()) return;
-				// An operator cancel is not an admission failure: record it like the
-				// pre-admission cancels above and leave no window-exceeded notice.
-				if (canceled) {
-					await recordCanceledBeforeAdmission({
-						userTurnId: reservedUserTurnId,
-						continuation: options.requestContinuation === true,
-						control: turnControlRecord,
-						submittedAt,
-					});
-					return;
-				}
-				submittedText = composeSubmittedText();
-				admission = context.refreshLiveBudget(submittedText);
-				if (
-					admission.effectiveWindow !== null &&
-					!requestFits(admission.inputTokens, admission.outputReserveTokens, admission.effectiveWindow)
-				) {
+					await turnRuntime.ensureLiveCapabilitiesForSelectedModel();
+					if (!admissionCurrent()) return;
+					agentRuntime = turnRuntime.ensureRuntime();
+				} catch (err) {
 					emitAdmissionNotice(
-						`[Clio Coder] Request exceeds the available context window (input ${admission.inputTokens ?? "unknown"} + output ${admission.outputReserveTokens ?? "unknown"}, window ${admission.effectiveWindow ?? "unknown"}).${failure ? ` ${failure}` : ""} Trim the prompt or reduce active tools.`,
-						"context-window-exceeded",
+						err instanceof Error ? err.message : String(err),
+						err instanceof TurnAdmissionError ? err.reason : "admission-failed",
 					);
 					return;
 				}
-				turnSnapshot = captureTurnSnapshot("pending");
-			}
-
-			if (!admissionCurrent()) return;
-
-			if (options.machineTurn !== undefined) {
-				if (!options.machineTurn.onStarting() || !admissionCurrent() || state.streaming) return;
-			}
-
-			// 5. Append the user turn, then stamp and persist the snapshot.
-			// PendingSkillRequest is intent only; SkillActivation ledger entries
-			// are recorded on skill-load success.
-			const userTurnId = persistence.appendSubmittedUserTurn(
-				agentRuntime,
-				submittedText,
-				options.images?.length ? options.images : undefined,
-				options.requestContinuation === true,
-				operatorText,
-				options.display?.text,
-				reservedUserTurnId,
-				options.origin,
-			);
-			if (referencedPaths.length > 0) deps.labelReferencedPaths?.(referencedPaths);
-			const turnIndex = operatorTurnIndex(userTurnId ?? undefined);
-			// A continuation is a synthetic user turn, which the count skips.
-			if (options.requestContinuation !== true) operatorTurnsBefore = turnIndex + 1;
-			context.installMemoryRestoration(agentRuntime, submittedText);
-			context.commitMemoryTurn(agentRuntime);
-			// An interrupt was submitted while a run was active, so no caller drew
-			// it in the transcript; render it here, after the cancel notice and the
-			// cancelled run's leftovers, which is the order the ledger has.
-			if (interrupted)
-				emit({
-					type: "queued_user_turn",
-					text: operatorText,
-					kind: "interrupt",
-					...(options.display ? { display: options.display } : {}),
-				});
-			context.logPromptCompileIfPending();
-			if (deps.flushSystemOne && deps.session?.current()) {
-				try {
-					// The pre-turn decision and anything asked since the last turn settled
-					// (an approval card, a /draft judgment) land under the user turn just
-					// appended, so a record and its outcome share a ledger neighborhood.
-					deps.flushSystemOne();
-				} catch {
-					// Recording System One is best effort and never costs the turn.
-				}
-			}
-			if (turnControlRecord) {
-				outcomeCollector.recordControl(turnControlRecord);
-				if (deps.session?.current()) {
-					try {
-						deps.session.appendEntry({
-							kind: "custom",
-							customType: "turnControl",
-							parentTurnId: state.lastTurnId,
-							display: false,
-							data: turnControlRecord,
-						});
-					} catch {
-						/* S6: ledger recording is best effort and never costs the admitted turn. */
-					}
-				}
-			}
-			const previousThinkingLevel = previousRunSnapshot?.runtimeResolution?.effectiveThinkingLevel;
-			if (
-				previousThinkingLevel !== undefined &&
-				previousThinkingLevel !== agentRuntime.runtimeResolution.effectiveThinkingLevel
-			) {
-				context.noteColdReason("thinking_change");
-			}
-			if (typeof previousRunSnapshot?.toolSignature === "string" && previousRunSnapshot.toolSignature !== toolSignature) {
-				context.noteColdReason("tool_surface_change");
-			}
-			turnSnapshot = { ...turnSnapshot, turnId: userTurnId ?? "unknown" };
-			context.setCurrentSnapshot(turnSnapshot);
-			context.persistContextSnapshot(turnSnapshot);
-			const promptHash = compiledPrompt?.systemPromptHash ?? null;
-			state.lastRunSnapshot = {
-				targetId: agentRuntime.targetId,
-				targetUrl: agentRuntime.runtimeResolution.target.url ?? null,
-				runtimeId: agentRuntime.runtimeId,
-				runtimeKind: agentRuntime.runtimeResolution.runtimeKind,
-				wireModelId: agentRuntime.wireModelId,
-				autonomy: deps.getSettings().safety.autonomy,
-				costProvenance: agentRuntime.runtimeResolution.costProvenance,
-				compiledPromptHash: promptHash,
-				staticCompositionHash: promptHash,
-				promptSignature: promptHash,
-				toolSignature,
-				runtimeResolution: runtimeTargetSnapshot(agentRuntime.runtimeResolution),
-				sessionId: deps.session?.current()?.id ?? null,
-				cwd: process.cwd(),
-			};
-
-			agentRuntime.agent.maxRetryDelayMs = retrySettings().maxDelayMs;
-			state.toolProseAbortReason = null;
-			state.toolProseAssessedChars = 0;
-			state.activeInterruptReason = null;
-			state.interruptedAssistantMessage = null;
-			state.interruptedUsage = null;
-
-			// 6. Cache-disturbance honesty (T3.3)
-			context.consumeExpectedColdReasons(agentRuntime.runtimeId);
-
-			// 7. Run the prompt, then route the settled state through recovery.
-			state.streaming = true;
-			const endpointKey = canonicalEndpointKey(agentRuntime.runtimeResolution.target);
-			const releaseForeground = endpointKey === null ? () => {} : registerForegroundStream(endpointKey);
-			try {
-				options.onAdmitted?.();
-			} catch {
-				// Admission observers are bookkeeping only and cannot affect the turn.
-			}
-			const runtimePromptText = submittedText;
-			if (options.requestContinuation !== true && deps.readSessionEntries) {
-				const prior = agentRuntime.agent.state.messages;
-				const retired = retireActiveUserContextForNextOperator(prior, deps.readSessionEntries(), {
-					...(state.lastTurnId ? { activeLeafTurnId: state.lastTurnId } : {}),
-				});
-				if (retired.length < prior.length) replaceEngineMessages(agentRuntime.agent, retired);
-			}
-			const machineMessageStart = agentRuntime.agent.state.messages.length;
-			const priorPendingSkillPolicy = state.currentPendingSkillPolicy;
-			const priorAskUserPolicy = state.currentAskUserPolicy;
-			state.currentPendingSkillPolicy = pendingSkillPolicy;
-			state.currentAskUserPolicy = askUserPolicy;
-			try {
-				await queues.markPersistedUserEcho(runtimePromptText, () => {
-					// A flushed queue rides Pi's opening poll, so it lands with this
-					// prompt's first model call; a held queue waits for the first slot.
-					queues.handOverBeforePrompt(agentRuntime.agent);
-					return agentRuntime.agent.prompt(runtimePromptText, images);
-				});
-				if (
-					state.synthesisToolLock &&
-					state.activeInterruptReason === null &&
-					isLockedSynthesisFallbackOnly(agentRuntime.agent.state.messages.at(-1))
-				) {
-					// Deliver the pair atomically. The normal follow-up queue drains one
-					// message at a time; queuing these separately creates an extra round
-					// with an unanswered synthetic tool call.
-					emitNotice("[Clio Coder] Recovering a final answer once; tools remain disabled.");
-					const model = agentRuntime.agent.state.model;
-					await agentRuntime.agent.prompt([
-						...lockedSynthesisRepromptMessages(1, {
-							provider: model.provider,
-							api: model.api,
-							model: model.id,
-						}),
-					]);
-				}
-				// pi-agent-core does NOT throw on provider failures:
-				// it pushes an assistant message with stopReason="error" and
-				// errorMessage="<provider text>" onto state.messages, sets
-				// state.errorMessage, emits agent_end, and resolves normally.
-				// The overflow-recovery heuristic must inspect the state after
-				// a resolve, not only the catch arm.
-				const overflowPostResolve = detectOverflowFromState(agentRuntime.agent);
-				if (overflowPostResolve) {
-					await recovery.runCompactAndRetry(agentRuntime, runtimePromptText, overflowPostResolve, images);
-				} else {
-					const settled = detectTerminalFailureFromState(agentRuntime.agent);
-					if (settled) {
-						if (state.toolProseAbortReason && settled.message) {
-							(settled.message as { errorMessage?: string }).errorMessage = state.toolProseAbortReason;
-						}
-						// A stalled stream settles here, not in the catch arm: the engine's
-						// runWithLifecycle swallows the abort and resolves with an aborted
-						// assistant message. Reclassify before the ladder's gate so the
-						// watchdog's abort retries and an operator cancel still does not.
-						const failure = reclassifyStallAbort(state, settled);
-						recovery.ensureFailureVisibleAndPersisted(failure);
-						await recovery.runTransientRetryChain(agentRuntime, runtimePromptText, failure);
-					}
-				}
-			} catch (err) {
-				// Genuine throws (network, abort, pre-stream bugs) still land
-				// here. The heuristic is the same so a thrown overflow from
-				// an older pi-agent-core still routes through compact-retry.
-				const overflow = toContextOverflowError(err);
-				if (!overflow) {
-					const message = state.toolProseAbortReason ?? (err instanceof Error ? err.message : String(err));
-					if (isRetryableErrorMessage(message)) {
-						const failureMessage = {
-							role: "assistant",
-							content: [{ type: "text", text: "" }],
-							stopReason: "error",
-							errorMessage: message,
-							timestamp: Date.now(),
-						} as AgentMessage;
-						await recovery.runTransientRetryChain(agentRuntime, runtimePromptText, {
-							stopReason: "error",
-							errorMessage: message,
-							message: failureMessage,
-						});
-						return;
-					}
-					emitNotice(operatorFacingEngineError(message));
+				if (!agentRuntime) {
+					emitAdmissionNotice(notConfiguredNotice(deps.getSettings().chat), nullRuntimeAdmissionReason());
 					return;
 				}
-				await recovery.runCompactAndRetry(agentRuntime, runtimePromptText, overflow, images);
-			} finally {
-				const canceled = state.activeInterruptReason !== null && state.activeInterruptByOperator;
-				// Esc on an interview resolves it as cancelled and the tool ends the turn
-				// itself, so no interrupt is raised and `canceled` stays false. The turn
-				// still ended on the operator's say-so, which the outcome has to show.
-				const interviewDismissed = askUserPolicy?.status === "cancelled";
-				releaseForeground();
-				if (askUserPolicy) {
-					try {
-						await finalizeAskUserInterviewForHost(
-							askUserPolicy,
-							"turn_finished",
-							currentToolInvokeOptions(),
-							deps.onAskUserFinalized,
-						);
-					} catch (error) {
-						emitNotice(
-							`[Clio Coder] interview decisions could not be persisted: ${error instanceof Error ? error.message : String(error)}`,
-							"warning",
-							`decision-ledger:${askUserPolicy.id}`,
-						);
-					}
-				}
-				state.streaming = false;
-				if (state.activeInterruptReason !== null) {
-					const reason = state.activeInterruptReason;
-					state.activeInterruptReason = null;
-					// A partial response already closed with the cancellation reason.
-					// Only a hollow abort needs a synthetic assistant, after all tool
-					// results have landed. Publish its notice after settlement too, so
-					// it cannot split the entry the provider's message_end finalizes.
-					if (state.interruptedAssistantMessage === null) {
-						const closing = noticeMessage(reason);
-						if (state.interruptedUsage !== null) {
-							(closing as { usage?: unknown }).usage = state.interruptedUsage;
-						}
-						persistence.appendAssistantTurn(closing);
+				if (options.machineTurn?.preparationToken === machinePreparation?.token && machinePreparation !== null)
+					machinePreparation.runtime = agentRuntime;
+				if (deps.promptSubmit && options.requestContinuation !== true) {
+					const verdict = await deps.promptSubmit({ typed: options.display?.text ?? text, text });
+					if (!admissionCurrent()) return;
+					if (verdict.kind === "block") {
 						emit({
 							type: "notice",
 							level: "warning",
 							surface: "transcript",
-							text: reason,
-							key: "turn.interrupted",
-							...(state.activeInterruptByOperator ? { operatorCancel: true as const } : {}),
+							text: verdict.reason,
+							admission: { reason: "prompt-blocked" },
 						});
+						return;
 					}
-					state.interruptedAssistantMessage = null;
-					state.interruptedUsage = null;
+					text = verdict.text;
 				}
-				// A continuation writes its outcome too: the streak that gates the next
-				// turn's direction workflow resets on a turn that used a tool, and a
-				// continuation is exactly where an answered interview does. Without its
-				// row the streak stayed at the operator turn's value, in memory and on
-				// resume.
-				if (userTurnId !== null && deps.session?.current()) {
-					try {
-						const continuation = options.requestContinuation === true;
-						const collected = outcomeCollector.take(userTurnId);
-						const finalMessage = [...agentRuntime.agent.state.messages]
-							.reverse()
-							.find((message) => message.role === "assistant");
-						const finalEntry = deps.readSessionEntries?.().find((entry) => entry.turnId === state.lastTurnId);
-						const finalPayload =
-							finalEntry?.kind === "message" && finalEntry.role === "assistant"
-								? (finalEntry.payload as { text?: unknown; stopReason?: unknown })
-								: undefined;
-						const traced = persistence.lastTracedTurn();
-						const matchesTrace = traced?.runId === `session:${userTurnId}`;
-						const finalAssistantText =
-							typeof finalPayload?.text === "string" ? finalPayload.text : finalMessage ? extractText(finalMessage) : "";
-						// The turn-end site reads the message for the record only. A continuation
-						// is not the operator's request, so it is not asked, and a dismissed
-						// interview already says how the turn ended.
-						if (!canceled && !interviewDismissed && !continuation && deps.recordTurnEnd) {
-							try {
-								deps.recordTurnEnd({
-									userTurnId,
-									request: operatorText,
-									message: finalAssistantText,
-									toolNames: collected.toolNames,
-								});
-							} catch {
-								// Recording a reading never costs the turn it describes.
-							}
-						}
-						const workerRunIds = [...collected.dispatches.flatMap((item) => item.runIds), ...collected.harness.runIds];
-						const missingReceipts = canceled ? await awaitWorkerReceipts(workerRunIds, deps.outcomeDispatch) : [];
-						const record = reduceTurnOutcome({
-							...collected,
-							turnId: userTurnId,
-							turnIndex,
-							continuation,
-							finalAssistantText,
-							taskEstablished: deps.getTaskEstablished?.() ?? false,
-							canceled,
-							interviewDismissed,
-							tokens: {
-								coordinator: matchesTrace ? persistence.currentTurnUsage() : noOutcomeUsage(),
-								decisionModel: deps.getDecisionUsage?.(userTurnId) ?? noOutcomeUsage(),
-								workers: workerOutcomeUsage(workerRunIds, deps.outcomeDispatch),
-							},
-							stopReason:
-								typeof finalPayload?.stopReason === "string"
-									? finalPayload.stopReason
-									: typeof finalMessage?.stopReason === "string"
-										? finalMessage.stopReason
-										: canceled
-											? "aborted"
-											: "error",
-							durationMs: Math.max(0, performance.now() - submittedAt),
-						});
-						const outcomeParent = state.lastTurnId;
-						deps.session.appendEntry({
-							kind: "custom",
-							customType: "turnOutcome",
-							parentTurnId: outcomeParent,
-							display: false,
-							data: record,
-						});
-						outcomeCollector.seedClarificationStreak(record.conversation.clarificationStreak);
-						// The turn-end reading asked for a continuation, and every decision about
-						// the request carries the operator turn's id. A row filed under the
-						// continuation's own id would join no decision when the dataset exports.
-						const outcomeRef = continuation && previousOperatorTurn !== null ? previousOperatorTurn.id : userTurnId;
+				const operatorText = text;
+				let sidecarObservation: string | null = null;
+				const routeAcceptsImages = acceptsImageInput({
+					runtimeId: agentRuntime.runtimeResolution.runtime.id,
+					vision: agentRuntime.runtimeResolution.capabilityDecisions.vision,
+				});
+				if (options.images?.length && !routeAcceptsImages) {
+					if (deps.visionSidecar?.configured()) {
+						const sidecar = deps.visionSidecar;
+						const controller = owner;
+						pendingVisionSidecar = controller;
+						emitNotice(`[Clio Coder] Processing image with ${sidecar.label() ?? "vision sidecar"}...`);
 						try {
-							deps.recordOutcome?.({
-								ref: outcomeRef,
-								source: "turn",
-								facts: turnOutcomeFacts(record, {
-									continuation,
-									interviewDismissed,
-									skillsLoaded: [...(pendingSkillPolicy?.loadedSkillNames ?? [])].filter(
-										(name) => !skillsLoadedBeforeTurn.has(name),
-									),
-								}),
+							const question = operatorText.trim() || "Describe the attached image and any visible text.";
+							const analysis = await sidecar.analyze(options.images, question, controller.signal);
+							if (controller.signal.aborted || !admissionCurrent()) return;
+							sidecarObservation = visionObservationText(analysis);
+							text = [operatorText, sidecarObservation].filter(Boolean).join("\n\n");
+							emitNotice(`[Clio Coder] Image processed with ${analysis.model}.`);
+						} catch (err) {
+							if (controller.signal.aborted) {
+								emitAdmissionNotice("[Clio Coder] Image processing cancelled.", "vision-sidecar-cancelled");
+							} else {
+								const reason = err instanceof Error ? err.message : String(err);
+								emitAdmissionNotice(`[Clio Coder] Image processing failed: ${reason}`, "vision-sidecar-failed");
+							}
+							return;
+						} finally {
+							if (pendingVisionSidecar === controller) pendingVisionSidecar = null;
+						}
+					} else {
+						const route = agentRuntime.runtimeResolution;
+						const choices = visionModelOptions();
+						const alternatives = choices.length
+							? ` Known vision-capable models: ${choices.join(", ")}. Open /model to switch.`
+							: " No vision-capable models are known in the configured catalog.";
+						emit({
+							type: "notice",
+							level: "warning",
+							surface: "transcript",
+							text: `IMAGE_INPUT_UNSUPPORTED: ${route.targetId}/${route.wireModelId} cannot accept image input.${alternatives}`,
+							admission: { reason: "image-input-unsupported" },
+							source: "images",
+						});
+						return;
+					}
+				}
+				const historicalImages = countImageBlocks(agentRuntime.agent.state.messages);
+				if (!routeAcceptsImages && historicalImages > 0) {
+					const route = agentRuntime.runtimeResolution;
+					const key = `${route.targetId}/${route.wireModelId}:${historicalImages}`;
+					if (key !== lastHistoricalImageNoticeKey) {
+						lastHistoricalImageNoticeKey = key;
+						emitNotice(
+							`[Clio Coder] ${historicalImages} earlier image${historicalImages === 1 ? "" : "s"} omitted from requests to text-only ${route.targetId}/${route.wireModelId}. The original images remain in session history for a vision-capable model.`,
+							"warning",
+							undefined,
+							undefined,
+							"images",
+						);
+					}
+				} else {
+					lastHistoricalImageNoticeKey = null;
+				}
+
+				// 1. Accept the prompt: reset per-turn accounting, freeze the tool
+				// surface, fire turn_start, and assemble the submitted text.
+				state.turnToolCalls = 0;
+				state.turnToolNames = [];
+				state.turnSharedWorkerNote = isWorkerShareNote(text);
+				state.pendingInRunContinuation = false;
+				middlewareToolChoice.reset();
+				if (options.requestContinuation !== true) state.stalledTurnNudgeSpent = false;
+				const images = sidecarObservation === null && options.images?.length ? [...options.images] : undefined;
+				const pendingSkillRequests =
+					state.currentTurnConstraints?.skills === "disabled" ? [] : (options.pendingSkillRequests ?? []);
+				// Inlined @file content is part of this text, and the pre-turn decision or
+				// a preparation compaction can send it before the user turn is filed.
+				// A first turn has no session to hold the label yet, so it is recorded
+				// again once the turn below has created one.
+				const referencedPaths = options.workingContextPaths ?? [];
+				if (referencedPaths.length > 0) deps.labelReferencedPaths?.(referencedPaths);
+				context.addWorkingContextPaths(referencedPaths);
+				context.prepareMemoryTurn(agentRuntime, {
+					taskText: text,
+					continuation: options.requestContinuation === true,
+					images,
+				});
+				// The user turn id is fixed before anything is asked about the turn, so the
+				// pre-turn decision record, the ledger row and every outcome that follows
+				// carry the id the user turn will be filed under. A run that returns
+				// before admission leaves the id unused, which costs nothing.
+				const reservedUserTurnId = randomUUID();
+				let previous = "";
+				const messages = agentRuntime.agent.state.messages;
+				for (let index = messages.length - 1; index >= 0; index -= 1) {
+					if (messages[index]?.role === "assistant") {
+						previous = extractText(messages[index]);
+						break;
+					}
+				}
+				const operatorTurn = options.requestContinuation !== true;
+				if (operatorTurn && previousOperatorTurn !== null) {
+					// The operator's reply is the strongest signal of how the last turn
+					// landed: a correction, a thanks, a retry or silence all read differently.
+					const followed = previousOperatorTurn;
+					previousOperatorTurn = null;
+					try {
+						deps.recordOutcome?.({
+							ref: followed.id,
+							source: "next-operator",
+							facts: { text: boundedCodePoints(operatorText, 300), gapMs: Math.round(submittedAt - followed.settledAt) },
+						});
+					} catch {
+						// Recording an outcome never costs the turn it describes.
+					}
+				}
+				// System One's reading of the request starts here and nothing waits for
+				// it: the hint registration, the controller and the prewarm use it only if
+				// it has landed by the time they read. A continuation turn carries a nudge
+				// rather than the operator's request, so a judgment about it would be a
+				// judgment about the nudge.
+				if (operatorTurn && deps.readTurn) {
+					// What the operator asked last turn, as typed. Without it a correction
+					// such as "actually drop X from that list" has nothing to correct, and
+					// it scored unknown at 0.22 on the assistant's reply alone. Read only
+					// when a call will be made, because it reparses the whole ledger from
+					// disk and an operator without System One must not pay for it.
+					const lastTurnId = state.lastTurnId ?? undefined;
+					const previousTask = (): string => {
+						const entries = filterEntriesToActivePath(deps.readSessionEntries?.() ?? [], lastTurnId);
+						for (let index = entries.length - 1; index >= 0; index -= 1) {
+							const entry = entries[index];
+							if (entry?.kind !== "message" || entry.role !== "user") continue;
+							if ((entry.payload as { synthetic?: unknown } | null)?.synthetic === true) continue;
+							return operatorTextOfUserPayload(entry.payload) ?? "";
+						}
+						return "";
+					};
+					try {
+						// The last assistant message is evidence for a short follow-up: "ok go
+						// ahead" is an action after a proposal and a pleasantry without one.
+						deps.readTurn({
+							userTurnId: reservedUserTurnId,
+							task: text,
+							request: options.display?.text ?? operatorText,
+							previous,
+							previousTask,
+						});
+					} catch {
+						// Every consumer degrades to what it did before the call existed.
+					}
+				}
+
+				let orientationBlock: string | null = null;
+				let turnControlRecord: TurnControlRecord | null = null;
+				if (deps.turnControl) {
+					const controllerAbort = owner;
+					pendingPreTurnRead = controllerAbort;
+					setTurnPreparation("preparing");
+					try {
+						const result = await deps.turnControl.run({
+							operatorText: text,
+							continuation: options.requestContinuation === true,
+							userTurnId: reservedUserTurnId,
+							signal: controllerAbort.signal,
+						});
+						if (generation !== submitGeneration || disposed) return;
+						orientationBlock = result.block;
+						turnControlRecord = result.record;
+					} finally {
+						if (pendingPreTurnRead === controllerAbort) pendingPreTurnRead = null;
+					}
+					if (generation !== submitGeneration || disposed) return;
+					if (controllerAbort.signal.aborted) {
+						await recordCanceledBeforeAdmission({
+							userTurnId: reservedUserTurnId,
+							continuation: options.requestContinuation === true,
+							control: turnControlRecord,
+							submittedAt,
+						});
+						return;
+					}
+				}
+				// A skill the operator activated narrows the tools for the workflow
+				// it started, and that workflow outlives the turn it began in. A
+				// fresh /skill this turn replaces the armed surface; otherwise the
+				// armed surface is what this turn runs under.
+				const pendingSkillPolicy = withModelSkillActivation(
+					createPendingSkillToolPolicy(pendingSkillRequests) ?? state.activeSkillSurface,
+					state.currentTurnConstraints?.skills !== "disabled" && modelMayActivateSkills(),
+				);
+				if (pendingSkillPolicy) {
+					pendingSkillPolicy.allowListAdvisory = (deps.getAutonomy?.() ?? deps.getSettings().safety.autonomy) === "yolo";
+				}
+				// What was already loaded when this turn started, so the settle-time
+				// notice names the skills this turn activated and not the ones a
+				// carried surface has been holding since an earlier message.
+				const skillsLoadedBeforeTurn = new Set(pendingSkillPolicy?.loadedSkillNames ?? []);
+				// Resolve the frozen session tool surface before turn_start so intent
+				// middleware sees the exact tools this request can actually call.
+				agentRuntime.agent.state.tools = resolveSessionTools(
+					agentRuntime,
+					deps.toolRegistry,
+					currentToolInvokeOptions,
+					turnRuntime.toolTelemetry,
+				);
+				const toolSignature = toolSignatureFromState(agentRuntime.agent.state.tools);
+				const askUserPolicy = createAskUserToolPolicy(
+					agentRuntime.agent.state.tools,
+					deps.toolRegistry,
+					state.currentTurnConstraints,
+				);
+				if (askUserPolicy) askUserPolicy.planOnly = isPlanOnlyRequest(text);
+				// turn_start: the prompt is accepted; registrations may inject
+				// context for this request. Accumulated reminders (turn_end
+				// advisories from the previous turn plus anything turn_start just
+				// emitted) flush into the request as one system-reminder block.
+				// Like the skill preamble below, the block is plain visible text in
+				// the user message: persisted in the ledger, no hidden prompt
+				// machinery.
+				middleware.fireTurnStart(agentRuntime, text, pendingSkillRequests.length, options.requestContinuation === true);
+				if (options.requestContinuation !== true) {
+					await middleware.awaitTurnStart(agentRuntime, text, pendingSkillRequests.length);
+					if (!admissionCurrent()) return;
+				}
+				const reminderProjection = middleware.takePendingReminderProjection();
+				// Pending skill requests are plain visible text in the user message
+				// itself: persisted in the ledger, no hidden prompt machinery.
+				const skillPreamble = pendingSkillRequestPreamble(pendingSkillRequests, agentRuntime.agent.state.tools);
+				let taskMemoryHandoffSource = "";
+				if (pendingSkillRequests.some((request) => request.name.trim() === "context-handoff")) {
+					try {
+						taskMemoryHandoffSource = deps.getTaskMemoryHandoffSource?.() ?? "";
+					} catch {
+						// Handoff export is supplemental; a snapshot failure must not block
+						// the explicitly requested skill turn.
+					}
+				}
+				const composeSubmittedText = () =>
+					[reminderProjection(), orientationBlock ?? "", skillPreamble, taskMemoryHandoffSource, text]
+						.filter((part) => part.length > 0)
+						.join("\n\n");
+				let submittedText = composeSubmittedText();
+
+				// 2. Pre-submit auto-compaction trigger
+				const forceNow = process.env.CLIO_CODER_FORCE_COMPACT === "1";
+				const paintCompaction = prepareCompactionPaint();
+				try {
+					setTurnPreparation("compacting");
+					await paintCompaction();
+					if (!admissionCurrent()) return;
+					await context.runAutoCompact(
+						agentRuntime,
+						forceNow,
+						undefined,
+						undefined,
+						submittedText,
+						pendingSkillPolicy,
+						undefined,
+						undefined,
+						options.requestContinuation !== true,
+					);
+				} catch (err) {
+					emitNotice(`[Clio Coder] auto-compaction failed: ${err instanceof Error ? err.message : String(err)}`);
+					if (err instanceof Error && err.name === "AbortError") {
+						await recordCanceledBeforeAdmission({
+							userTurnId: reservedUserTurnId,
+							continuation: options.requestContinuation === true,
+							control: turnControlRecord,
+							submittedAt,
+						});
+						return;
+					}
+				} finally {
+					endPreparationCompaction();
+				}
+
+				if (!admissionCurrent()) return;
+
+				// 3. Ensure the session prompt (compiles only on explicit events)
+				const compiledPrompt = await context.ensureSessionPrompt(agentRuntime);
+				if (!admissionCurrent()) return;
+				submittedText = composeSubmittedText();
+
+				// 4. Preflight overflow check, before the user turn is committed.
+				// A blocked request must not leave a dangling user entry that the
+				// next replay would treat as an unanswered turn.
+				const compactionThreshold = deps.getSettings().context.compaction?.threshold ?? null;
+				const captureTurnSnapshot = (turnId: string): ContextSnapshot =>
+					context.captureRuntimeContextSnapshot(agentRuntime, turnId, compactionThreshold, {
+						promptSegments: compiledPrompt
+							? compiledPrompt.sections.map((s) => ({ id: s.id, tokenEstimate: s.tokenEstimate }))
+							: undefined,
+						pendingUserInput: submittedText,
+						images,
+						promptHash: compiledPrompt?.systemPromptHash,
+						toolSignature,
+					});
+
+				let turnSnapshot = captureTurnSnapshot("pending");
+				let admission = context.refreshLiveBudget(submittedText);
+				if (
+					admission.effectiveWindow !== null &&
+					!requestFits(admission.inputTokens, admission.outputReserveTokens, admission.effectiveWindow)
+				) {
+					const paintOverflow = prepareCompactionPaint();
+					setTurnPreparation("compacting");
+					let failure: string | undefined;
+					let canceled = false;
+					await paintOverflow()
+						.then(() => {
+							if (!admissionCurrent()) return false;
+							return context.runAutoCompact(
+								agentRuntime,
+								true,
+								undefined,
+								"overflow",
+								submittedText,
+								pendingSkillPolicy,
+								undefined,
+								undefined,
+								options.requestContinuation !== true,
+							);
+						})
+						.catch((error: unknown) => {
+							canceled = error instanceof Error && error.name === "AbortError";
+							failure = error instanceof Error ? error.message : String(error);
+						})
+						.finally(endPreparationCompaction);
+					if (!admissionCurrent()) return;
+					// An operator cancel is not an admission failure: record it like the
+					// pre-admission cancels above and leave no window-exceeded notice.
+					if (canceled) {
+						await recordCanceledBeforeAdmission({
+							userTurnId: reservedUserTurnId,
+							continuation: options.requestContinuation === true,
+							control: turnControlRecord,
+							submittedAt,
+						});
+						return;
+					}
+					submittedText = composeSubmittedText();
+					admission = context.refreshLiveBudget(submittedText);
+					if (
+						admission.effectiveWindow !== null &&
+						!requestFits(admission.inputTokens, admission.outputReserveTokens, admission.effectiveWindow)
+					) {
+						emitAdmissionNotice(
+							`[Clio Coder] Request exceeds the available context window (input ${admission.inputTokens ?? "unknown"} + output ${admission.outputReserveTokens ?? "unknown"}, window ${admission.effectiveWindow ?? "unknown"}).${failure ? ` ${failure}` : ""} Trim the prompt or reduce active tools.`,
+							"context-window-exceeded",
+						);
+						return;
+					}
+					turnSnapshot = captureTurnSnapshot("pending");
+				}
+
+				if (!admissionCurrent()) return;
+
+				if (options.machineTurn !== undefined) {
+					if (!options.machineTurn.onStarting() || !admissionCurrent() || state.streaming) return;
+				}
+
+				// 5. Append the user turn, then stamp and persist the snapshot.
+				// PendingSkillRequest is intent only; SkillActivation ledger entries
+				// are recorded on skill-load success.
+				const userTurnId = persistence.appendSubmittedUserTurn(
+					agentRuntime,
+					submittedText,
+					options.images?.length ? options.images : undefined,
+					options.requestContinuation === true,
+					operatorText,
+					options.display?.text,
+					reservedUserTurnId,
+					options.origin,
+				);
+				if (referencedPaths.length > 0) deps.labelReferencedPaths?.(referencedPaths);
+				const turnIndex = operatorTurnIndex(userTurnId ?? undefined);
+				// A continuation is a synthetic user turn, which the count skips.
+				if (options.requestContinuation !== true) operatorTurnsBefore = turnIndex + 1;
+				context.installMemoryRestoration(agentRuntime, submittedText);
+				context.commitMemoryTurn(agentRuntime);
+				// An interrupt was submitted while a run was active, so no caller drew
+				// it in the transcript; render it here, after the cancel notice and the
+				// cancelled run's leftovers, which is the order the ledger has.
+				if (interrupted)
+					emit({
+						type: "queued_user_turn",
+						text: operatorText,
+						kind: "interrupt",
+						...(options.display ? { display: options.display } : {}),
+					});
+				context.logPromptCompileIfPending();
+				if (deps.flushSystemOne && deps.session?.current()) {
+					try {
+						// The pre-turn decision and anything asked since the last turn settled
+						// (an approval card, a /draft judgment) land under the user turn just
+						// appended, so a record and its outcome share a ledger neighborhood.
+						deps.flushSystemOne();
+					} catch {
+						// Recording System One is best effort and never costs the turn.
+					}
+				}
+				if (turnControlRecord) {
+					outcomeCollector.recordControl(turnControlRecord);
+					if (deps.session?.current()) {
+						try {
+							deps.session.appendEntry({
+								kind: "custom",
+								customType: "turnControl",
+								parentTurnId: state.lastTurnId,
+								display: false,
+								data: turnControlRecord,
 							});
 						} catch {
-							// Recording an outcome never costs the turn it describes.
+							/* S6: ledger recording is best effort and never costs the admitted turn. */
 						}
-						amendLateWorkerTokens({
-							turnId: userTurnId,
-							ref: outcomeRef,
-							parentTurnId: outcomeParent,
-							runIds: workerRunIds,
-							missing: missingReceipts,
-						});
-						// A continuation extends the operator turn it followed, so the gap the
-						// next operator message reports runs from the end of the whole chain.
-						if (!continuation) previousOperatorTurn = { id: userTurnId, settledAt: performance.now() };
-						else if (previousOperatorTurn !== null) previousOperatorTurn.settledAt = performance.now();
-						if (matchesTrace && traced)
-							persistence.traceEventForRun(traced.runId, { type: "turn_outcome", name: "turn_outcome", payload: record });
-					} catch {
-						// Measurement must not change turn settlement when a ledger or receipt is unavailable.
 					}
 				}
-				state.currentPendingSkillPolicy = priorPendingSkillPolicy;
-				state.currentAskUserPolicy = priorAskUserPolicy;
-				armSkillSurface(pendingSkillPolicy, skillsLoadedBeforeTurn);
-				// Safety net for thrown paths where agent_end never delivered;
-				// no-op when the agent_end flush already ran.
-				context.flushReconciledSnapshot();
-				persistence.deferTraceClose(false);
-				// Runs on every exit path (normal settle, catch-arm returns) so
-				// a steer the engine never drained still reaches the model.
-				if (options.machineTurn !== undefined) {
-					const messages = agentRuntime.agent.state.messages.slice(machineMessageStart);
-					const finalMessage = [...messages].reverse().find((message) => message.role === "assistant");
-					const failure = detectTerminalFailureFromState(agentRuntime.agent);
-					const usage = sumRunUsage(messages);
-					options.machineTurn.onSettled({
-						status:
-							!admissionCurrent() || canceled || interviewDismissed
-								? "canceled"
-								: failure || !finalMessage
-									? "failed"
-									: "succeeded",
-						turnId: userTurnId,
-						...(failure ? { reason: failure.errorMessage } : {}),
-						...(finalMessage ? { text: extractText(finalMessage) } : {}),
-						usage: {
-							tokens: usage.tokens,
-							costUsd: usage.hadUsage && agentRuntime.runtimeResolution.costProvenance !== "unknown" ? usage.costUsd : null,
-						},
-					});
+				const previousThinkingLevel = previousRunSnapshot?.runtimeResolution?.effectiveThinkingLevel;
+				if (
+					previousThinkingLevel !== undefined &&
+					previousThinkingLevel !== agentRuntime.runtimeResolution.effectiveThinkingLevel
+				) {
+					context.noteColdReason("thinking_change");
 				}
-				state.activeUserTurnId = null;
-				if (options.machineTurn === undefined && !(await queues.resubmitStranded()))
-					await queues.resubmitRequestContinuation();
+				if (typeof previousRunSnapshot?.toolSignature === "string" && previousRunSnapshot.toolSignature !== toolSignature) {
+					context.noteColdReason("tool_surface_change");
+				}
+				turnSnapshot = { ...turnSnapshot, turnId: userTurnId ?? "unknown" };
+				context.setCurrentSnapshot(turnSnapshot);
+				context.persistContextSnapshot(turnSnapshot);
+				const promptHash = compiledPrompt?.systemPromptHash ?? null;
+				state.lastRunSnapshot = {
+					targetId: agentRuntime.targetId,
+					targetUrl: agentRuntime.runtimeResolution.target.url ?? null,
+					runtimeId: agentRuntime.runtimeId,
+					runtimeKind: agentRuntime.runtimeResolution.runtimeKind,
+					wireModelId: agentRuntime.wireModelId,
+					autonomy: deps.getSettings().safety.autonomy,
+					costProvenance: agentRuntime.runtimeResolution.costProvenance,
+					compiledPromptHash: promptHash,
+					staticCompositionHash: promptHash,
+					promptSignature: promptHash,
+					toolSignature,
+					runtimeResolution: runtimeTargetSnapshot(agentRuntime.runtimeResolution),
+					sessionId: deps.session?.current()?.id ?? null,
+					cwd: process.cwd(),
+				};
+
+				agentRuntime.agent.maxRetryDelayMs = retrySettings().maxDelayMs;
+				state.toolProseAbortReason = null;
+				state.toolProseAssessedChars = 0;
+				state.activeInterruptReason = null;
+				state.interruptedAssistantMessage = null;
+				state.interruptedUsage = null;
+
+				// 6. Cache-disturbance honesty (T3.3)
+				context.consumeExpectedColdReasons(agentRuntime.runtimeId);
+
+				// 7. Run the prompt, then route the settled state through recovery.
+				state.streaming = true;
+				const endpointKey = canonicalEndpointKey(agentRuntime.runtimeResolution.target);
+				const releaseForeground = endpointKey === null ? () => {} : registerForegroundStream(endpointKey);
+				try {
+					options.onAdmitted?.();
+				} catch {
+					// Admission observers are bookkeeping only and cannot affect the turn.
+				}
+				const runtimePromptText = submittedText;
+				if (options.requestContinuation !== true && deps.readSessionEntries) {
+					const prior = agentRuntime.agent.state.messages;
+					const retired = retireActiveUserContextForNextOperator(prior, deps.readSessionEntries(), {
+						...(state.lastTurnId ? { activeLeafTurnId: state.lastTurnId } : {}),
+					});
+					if (retired.length < prior.length) replaceEngineMessages(agentRuntime.agent, retired);
+				}
+				const machineMessageStart = agentRuntime.agent.state.messages.length;
+				const priorPendingSkillPolicy = state.currentPendingSkillPolicy;
+				const priorAskUserPolicy = state.currentAskUserPolicy;
+				state.currentPendingSkillPolicy = pendingSkillPolicy;
+				state.currentAskUserPolicy = askUserPolicy;
+				try {
+					if (!admissionCurrent()) return;
+					await queues.markPersistedUserEcho(runtimePromptText, () => {
+						if (!admissionCurrent()) return Promise.resolve();
+						// A flushed queue rides Pi's opening poll, so it lands with this
+						// prompt's first model call; a held queue waits for the first slot.
+						queues.handOverBeforePrompt(agentRuntime.agent);
+						return agentRuntime.agent.prompt(runtimePromptText, images);
+					});
+					if (
+						admissionCurrent() &&
+						state.synthesisToolLock &&
+						state.activeInterruptReason === null &&
+						isLockedSynthesisFallbackOnly(agentRuntime.agent.state.messages.at(-1))
+					) {
+						// Deliver the pair atomically. The normal follow-up queue drains one
+						// message at a time; queuing these separately creates an extra round
+						// with an unanswered synthetic tool call.
+						emitNotice("[Clio Coder] Recovering a final answer once; tools remain disabled.");
+						const model = agentRuntime.agent.state.model;
+						await agentRuntime.agent.prompt([
+							...lockedSynthesisRepromptMessages(1, {
+								provider: model.provider,
+								api: model.api,
+								model: model.id,
+							}),
+						]);
+					}
+					// pi-agent-core does NOT throw on provider failures:
+					// it pushes an assistant message with stopReason="error" and
+					// errorMessage="<provider text>" onto state.messages, sets
+					// state.errorMessage, emits agent_end, and resolves normally.
+					// The overflow-recovery heuristic must inspect the state after
+					// a resolve, not only the catch arm.
+					if (!admissionCurrent()) return;
+					const overflowPostResolve = detectOverflowFromState(agentRuntime.agent);
+					if (overflowPostResolve) {
+						await recovery.runCompactAndRetry(agentRuntime, runtimePromptText, overflowPostResolve, images);
+					} else {
+						const settled = detectTerminalFailureFromState(agentRuntime.agent);
+						if (settled) {
+							if (state.toolProseAbortReason && settled.message) {
+								(settled.message as { errorMessage?: string }).errorMessage = state.toolProseAbortReason;
+							}
+							// A stalled stream settles here, not in the catch arm: the engine's
+							// runWithLifecycle swallows the abort and resolves with an aborted
+							// assistant message. Reclassify before the ladder's gate so the
+							// watchdog's abort retries and an operator cancel still does not.
+							const failure = reclassifyStallAbort(state, settled);
+							recovery.ensureFailureVisibleAndPersisted(failure);
+							await recovery.runTransientRetryChain(agentRuntime, runtimePromptText, failure);
+						}
+					}
+				} catch (err) {
+					if (!admissionCurrent()) return;
+					// Genuine throws (network, abort, pre-stream bugs) still land
+					// here. The heuristic is the same so a thrown overflow from
+					// an older pi-agent-core still routes through compact-retry.
+					const overflow = toContextOverflowError(err);
+					if (!overflow) {
+						const message = state.toolProseAbortReason ?? (err instanceof Error ? err.message : String(err));
+						if (isRetryableErrorMessage(message)) {
+							const failureMessage = {
+								role: "assistant",
+								content: [{ type: "text", text: "" }],
+								stopReason: "error",
+								errorMessage: message,
+								timestamp: Date.now(),
+							} as AgentMessage;
+							await recovery.runTransientRetryChain(agentRuntime, runtimePromptText, {
+								stopReason: "error",
+								errorMessage: message,
+								message: failureMessage,
+							});
+							return;
+						}
+						emitNotice(operatorFacingEngineError(message));
+						return;
+					}
+					await recovery.runCompactAndRetry(agentRuntime, runtimePromptText, overflow, images);
+				} finally {
+					const canceled = state.activeInterruptReason !== null && state.activeInterruptByOperator;
+					// Esc on an interview resolves it as cancelled and the tool ends the turn
+					// itself, so no interrupt is raised and `canceled` stays false. The turn
+					// still ended on the operator's say-so, which the outcome has to show.
+					const interviewDismissed = askUserPolicy?.status === "cancelled";
+					releaseForeground();
+					if (generation !== submitGeneration) return;
+					if (askUserPolicy) {
+						try {
+							await finalizeAskUserInterviewForHost(
+								askUserPolicy,
+								"turn_finished",
+								currentToolInvokeOptions(),
+								deps.onAskUserFinalized,
+							);
+						} catch (error) {
+							emitNotice(
+								`[Clio Coder] interview decisions could not be persisted: ${error instanceof Error ? error.message : String(error)}`,
+								"warning",
+								`decision-ledger:${askUserPolicy.id}`,
+							);
+						}
+					}
+					if (generation !== submitGeneration) return;
+					state.streaming = false;
+					if (state.activeInterruptReason !== null) {
+						const reason = state.activeInterruptReason;
+						state.activeInterruptReason = null;
+						// A partial response already closed with the cancellation reason.
+						// Only a hollow abort needs a synthetic assistant, after all tool
+						// results have landed. Publish its notice after settlement too, so
+						// it cannot split the entry the provider's message_end finalizes.
+						if (state.interruptedAssistantMessage === null) {
+							const closing = noticeMessage(reason);
+							if (state.interruptedUsage !== null) {
+								(closing as { usage?: unknown }).usage = state.interruptedUsage;
+							}
+							persistence.appendAssistantTurn(closing);
+							emit({
+								type: "notice",
+								level: "warning",
+								surface: "transcript",
+								text: reason,
+								key: "turn.interrupted",
+								...(state.activeInterruptByOperator ? { operatorCancel: true as const } : {}),
+							});
+						}
+						state.interruptedAssistantMessage = null;
+						state.interruptedUsage = null;
+					}
+					// A continuation writes its outcome too: the streak that gates the next
+					// turn's direction workflow resets on a turn that used a tool, and a
+					// continuation is exactly where an answered interview does. Without its
+					// row the streak stayed at the operator turn's value, in memory and on
+					// resume.
+					if (userTurnId !== null && deps.session?.current()) {
+						try {
+							const continuation = options.requestContinuation === true;
+							const collected = outcomeCollector.take(userTurnId);
+							const finalMessage = [...agentRuntime.agent.state.messages]
+								.reverse()
+								.find((message) => message.role === "assistant");
+							const finalEntry = deps.readSessionEntries?.().find((entry) => entry.turnId === state.lastTurnId);
+							const finalPayload =
+								finalEntry?.kind === "message" && finalEntry.role === "assistant"
+									? (finalEntry.payload as { text?: unknown; stopReason?: unknown })
+									: undefined;
+							const traced = persistence.lastTracedTurn();
+							const matchesTrace = traced?.runId === `session:${userTurnId}`;
+							const finalAssistantText =
+								typeof finalPayload?.text === "string" ? finalPayload.text : finalMessage ? extractText(finalMessage) : "";
+							// The turn-end site reads the message for the record only. A continuation
+							// is not the operator's request, so it is not asked, and a dismissed
+							// interview already says how the turn ended.
+							if (!canceled && !interviewDismissed && !continuation && deps.recordTurnEnd) {
+								try {
+									deps.recordTurnEnd({
+										userTurnId,
+										request: operatorText,
+										message: finalAssistantText,
+										toolNames: collected.toolNames,
+									});
+								} catch {
+									// Recording a reading never costs the turn it describes.
+								}
+							}
+							const workerRunIds = [...collected.dispatches.flatMap((item) => item.runIds), ...collected.harness.runIds];
+							const missingReceipts = canceled ? await awaitWorkerReceipts(workerRunIds, deps.outcomeDispatch) : [];
+						if (generation !== submitGeneration) return;
+							const record = reduceTurnOutcome({
+								...collected,
+								turnId: userTurnId,
+								turnIndex,
+								continuation,
+								finalAssistantText,
+								taskEstablished: deps.getTaskEstablished?.() ?? false,
+								canceled,
+								interviewDismissed,
+								tokens: {
+									coordinator: matchesTrace ? persistence.currentTurnUsage() : noOutcomeUsage(),
+									decisionModel: deps.getDecisionUsage?.(userTurnId) ?? noOutcomeUsage(),
+									workers: workerOutcomeUsage(workerRunIds, deps.outcomeDispatch),
+								},
+								stopReason:
+									typeof finalPayload?.stopReason === "string"
+										? finalPayload.stopReason
+										: typeof finalMessage?.stopReason === "string"
+											? finalMessage.stopReason
+											: canceled
+												? "aborted"
+												: "error",
+								durationMs: Math.max(0, performance.now() - submittedAt),
+							});
+							const outcomeParent = state.lastTurnId;
+							deps.session.appendEntry({
+								kind: "custom",
+								customType: "turnOutcome",
+								parentTurnId: outcomeParent,
+								display: false,
+								data: record,
+							});
+							outcomeCollector.seedClarificationStreak(record.conversation.clarificationStreak);
+							// The turn-end reading asked for a continuation, and every decision about
+							// the request carries the operator turn's id. A row filed under the
+							// continuation's own id would join no decision when the dataset exports.
+							const outcomeRef = continuation && previousOperatorTurn !== null ? previousOperatorTurn.id : userTurnId;
+							try {
+								deps.recordOutcome?.({
+									ref: outcomeRef,
+									source: "turn",
+									facts: turnOutcomeFacts(record, {
+										continuation,
+										interviewDismissed,
+										skillsLoaded: [...(pendingSkillPolicy?.loadedSkillNames ?? [])].filter(
+											(name) => !skillsLoadedBeforeTurn.has(name),
+										),
+									}),
+								});
+							} catch {
+								// Recording an outcome never costs the turn it describes.
+							}
+							amendLateWorkerTokens({
+								turnId: userTurnId,
+								ref: outcomeRef,
+								parentTurnId: outcomeParent,
+								runIds: workerRunIds,
+								missing: missingReceipts,
+							});
+							// A continuation extends the operator turn it followed, so the gap the
+							// next operator message reports runs from the end of the whole chain.
+							if (!continuation) previousOperatorTurn = { id: userTurnId, settledAt: performance.now() };
+							else if (previousOperatorTurn !== null) previousOperatorTurn.settledAt = performance.now();
+							if (matchesTrace && traced)
+								persistence.traceEventForRun(traced.runId, { type: "turn_outcome", name: "turn_outcome", payload: record });
+						} catch {
+							// Measurement must not change turn settlement when a ledger or receipt is unavailable.
+						}
+					}
+					state.currentPendingSkillPolicy = priorPendingSkillPolicy;
+					state.currentAskUserPolicy = priorAskUserPolicy;
+					armSkillSurface(pendingSkillPolicy, skillsLoadedBeforeTurn);
+					// Safety net for thrown paths where agent_end never delivered;
+					// no-op when the agent_end flush already ran.
+					context.flushReconciledSnapshot();
+					persistence.deferTraceClose(false);
+					// Runs on every exit path (normal settle, catch-arm returns) so
+					// a steer the engine never drained still reaches the model.
+					if (options.machineTurn !== undefined) {
+						const messages = agentRuntime.agent.state.messages.slice(machineMessageStart);
+						const finalMessage = [...messages].reverse().find((message) => message.role === "assistant");
+						const failure = detectTerminalFailureFromState(agentRuntime.agent);
+						const usage = sumRunUsage(messages);
+						options.machineTurn.onSettled({
+							status:
+								!admissionCurrent() || canceled || interviewDismissed
+									? "canceled"
+									: failure || !finalMessage
+										? "failed"
+										: "succeeded",
+							turnId: userTurnId,
+							...(failure ? { reason: failure.errorMessage } : {}),
+							...(finalMessage ? { text: extractText(finalMessage) } : {}),
+							usage: {
+								tokens: usage.tokens,
+								costUsd: usage.hadUsage && agentRuntime.runtimeResolution.costProvenance !== "unknown" ? usage.costUsd : null,
+							},
+						});
+					}
+					state.activeUserTurnId = null;
+					if (!disposed && generation === submitGeneration && options.machineTurn === undefined && !(await queues.resubmitStranded()))
+						await queues.resubmitRequestContinuation();
+				}
+			} finally {
+				if (submitOwner === owner) submitOwner = null;
 			}
 		},
 
@@ -3167,6 +3191,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			const machineCancellation = pendingMachineCancellation;
 			pendingMachineCancellation = null;
 			const preserveQueue = machineCancellation !== null && machineCancellation === machineTurnRunning;
+			submitOwner?.abort();
 			continuity.cancel();
 			pendingPreTurnRead?.abort();
 			pendingVisionSidecar?.abort();
@@ -3279,6 +3304,10 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		},
 
 		resetForSession(leafTurnId: string | null, replayMessages?: ReadonlyArray<AgentMessage>): void {
+			submitOwner?.abort();
+			submitGeneration += 1;
+			pendingPreTurnRead?.abort();
+			context.cancelCompaction();
 			for (const listener of sessionResetListeners) {
 				try {
 					listener();
@@ -3331,6 +3360,9 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		},
 
 		dispose(): void {
+			disposed = true;
+			submitOwner?.abort();
+			pendingPreTurnRead?.abort();
 			machineHostDisposed = true;
 			sessionResetListeners.clear();
 			unsubscribeEggSession?.();
