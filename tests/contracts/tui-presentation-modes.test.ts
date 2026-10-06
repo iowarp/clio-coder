@@ -149,8 +149,8 @@ test("three-column welcome aligns field values, command descriptions, and bound 
 		};
 		strictEqual(column("/tmp/welcome-test"), column("Current"));
 		strictEqual(column("Claude"), column("Current"));
-		strictEqual(column("Choose a model"), column("Browse skills"));
-		strictEqual(column("Explore commands"), column("Browse skills"));
+		strictEqual(column("Choose a model"), column("Browse plugins"));
+		strictEqual(column("Explore commands"), column("Browse plugins"));
 		strictEqual(column("New line"), column("Model picker"));
 		strictEqual(column("Open your external"), column("Model picker"));
 		const local = lines.find((line) => line.includes("Local"));
