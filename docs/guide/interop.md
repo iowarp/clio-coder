@@ -195,20 +195,20 @@ claude plugin marketplace add "$(npm root -g)/@iowarp/clio-coder"
 ```
 
 The marketplace publishes 35 entries: the 34 curated skill packages and the
-`materio` bundle. What each entry becomes on the Claude Code side:
+`materio` plugin. What each entry becomes on the Claude Code side:
 
 | Source layout | What Claude Code loads |
 | --- | --- |
 | `library/skills/<category>/<name>/` with a root `SKILL.md` | One skill, named by the `SKILL.md` frontmatter, with its `references/` companions |
 | `library/plugins/materio/` with a `skills/` directory | Materio's six portable skills and nothing else |
 
-Nothing is converted and no recipe body is duplicated. The packages carry their
+Nothing is converted and no component body is duplicated. The packages carry their
 portable Agent Plugins `plugin.json`, which Claude Code does not read; the
 marketplace entry supplies the name, description, version, category and license
 it shows. `claude plugin validate . --strict` passes on the generated file, so no
 entry needs `strict: false` and no package needs a second `.claude-plugin/plugin.json`.
 
-Materio's Clio Coder-native agents, prompts and fleets sit at declared resource paths
+Materio's Clio Coder-native agents, prompts and playbooks sit at declared resource paths
 that no peer host scans. They travel with the installed bytes and are never
 presented as Claude-native components. `claude plugin details materio` reports
 `Skills (6)` and `Agents (0)`.
@@ -219,12 +219,12 @@ A library package is published only when a host would load a real skill surface
 from it, and only when it carries nothing that host default-scans into a native
 component. Claude Code scans a plugin root for `agents/`, `commands/`, `hooks/`,
 `output-styles/` and `.mcp.json` without being asked, so a package that keeps
-Clio Coder agent recipes in a top-level `agents/` directory would have them shown as
+Clio Coder agents in a top-level `agents/` directory would have them shown as
 native Claude agents. The generator excludes packages with those conflicting roots, and
 `pnpm run library:pin` prints the reason.
 
 Those packages remain valid first-class library packages, and agent-, prompt- and
-fleet-only packages are normal contributions. They simply have no peer-host
+playbook-only packages are normal contributions. They simply have no peer-host
 projection. An author who wants one package to serve both audiences declares its
 Clio Coder resource roots at paths no host scans, for example `"agents": "native/agents"`,
 and keeps a `skills/` directory or root `SKILL.md` for the portable surface.
@@ -338,8 +338,8 @@ plan may report successful packages alongside failures, and any diagnostic exits
 | --- | --- |
 | Skill | Text-only skill directory, with required name and description, packaged through the library engine. Executable, non-text, or symbolic-link companions cause a skip. Foreign audit stamps are not retained. |
 | Prompt or command | Markdown body becomes a Clio Coder prompt. Host execution settings and other frontmatter are omitted; the description and argument hint are retained. |
-| Agent or subagent | Markdown persona or TOML `developer_instructions` becomes a Clio Coder recipe limited to read, grep, find, and ls. Host tools, model, permissions, hooks, and skill bindings are omitted and the plan says so. |
-| Plugin | Accepts a valid portable root `plugin.json`, or a supported `.claude-plugin/plugin.json` / `.codex-plugin/plugin.json` package. Clio adopts a data-only projection of its skills, prompts, agents, and text references. Host extension metadata, hooks, MCP, scripts, tools, fleets, and non-text files are omitted. Dependencies on removed components cause a skip. Package `requires` declarations are preserved; required packages must already be installed, active, and valid in the destination scope. Missing requirements are named in the plan, checked again after approval, and never imported automatically. |
+| Agent or subagent | Markdown persona or TOML `developer_instructions` becomes a Clio Coder agent limited to read, grep, find, and ls. Host tools, model, permissions, hooks, and skill bindings are omitted and the plan says so. |
+| Plugin | Accepts a valid portable root `plugin.json`, or a supported `.claude-plugin/plugin.json` / `.codex-plugin/plugin.json` package. Clio adopts a data-only projection of its skills, prompts, agents, and text references. Host extension metadata, hooks, MCP, scripts, tools, playbooks, and non-text files are omitted. Dependencies on removed components cause a skip. Package `requires` declarations are preserved; required packages must already be installed, active, and valid in the destination scope. Missing requirements are named in the plan, checked again after approval, and never imported automatically. |
 | Hook, MCP server, executable module, output style | Listed as not adoptable, with a reason. Nothing is registered or executed. |
 
 A source tree is read to at most 12 directory levels, 2048 files, and 16 MiB of text; a larger tree is refused.
@@ -348,10 +348,19 @@ Claude-only and Codex-only plugin manifests use the same reviewed conversion as
 `library import`. Supported Claude commands become prompts, and Claude agent
 bindings are retained when their required skills convert in the same package.
 Unsupported companions and host features are listed in the plan. A portable
-package is refused when retained recipes require omitted files; for example,
-the WTF-P bundle requires action JSON files outside the supported text
-projection. Use ordinary `library install` for a reviewed portable package whose
-complete recipe assets are required, or import supported individual resources.
+package is refused when retained components require omitted files. Use ordinary
+`library install` for a reviewed portable package whose complete assets are
+required, or import supported individual resources.
+
+A WTF-P copy that Claude Code installed from before playbooks keeps the retired
+`fleets` layout in its Clio namespace. Clio does not adopt it. The plan marks the
+entry `skip` with the reason `built for an older Clio: wtfp declares
+resources.fleets, and playbooks replaced fleets; install the current WTF-P with
+`wtf-p install clio`, which installs the WTF-P plugin and its desk extension`,
+and nothing is written. Any other package that still declares `resources.fleets`,
+kind `fleet` or a `fleet:` requirement is refused the same way, with the fix for
+its author: rename `resources.fleets` to `resources.playbooks`, the `fleets`
+directory to `playbooks`, and fleet kinds and requirements to `playbook`.
 
 Installed packages retain `{kind: "interop", host, source}` provenance and
 `trust: "foreign"`, with the original absolute source path. Skill and prompt
@@ -377,11 +386,11 @@ clio-coder library import https://github.com/owner/repo/tree/main/plugins/thing 
 clio-coder library import ./vendor/some-plugin --format claude --yes
 ```
 
-In an active session, `/library import <path-or-url>` stages and reviews that exact foreign package in the Library. When installing a Claude Code plugin or Codex package, Clio Coder parses the vendor manifest (e.g. `.claude-plugin/plugin.json`) and presents an interactive review before any managed installation or workspace mutation occurs (staging writes temporary inspection files prior to acceptance). The review details four facets:
+In an active session, `/library import <path-or-url>` stages and reviews that exact foreign package in the Library. When installing a Claude Code plugin or Codex package, Clio Coder parses the vendor manifest (e.g. `.claude-plugin/plugin.json`) and presents an interactive review before any managed installation or workspace mutation occurs (staging writes temporary inspection files prior to acceptance). The review has four parts:
 1. **Source and provenance**: the verified package source path or repository tree URL, the format (`claude-code` or `codex`), and the transport.
-2. **Projected declarative resources**: text skills (with markdown instructions), commands (converted into prompts), and basic agent personas become native library recipes.
-3. **Foreign trust tier**: the package is marked `trust: "foreign"`. Foreign package skills and prompts remain untrusted and withheld from model turns, at project scope and at user scope alike, until `integrations.projectResources.trustProjectImports` (`skills.trustProjectCompatRoots`) is enabled. Bound agent recipes require all referenced skills to be trusted.
-4. **Unsupported and omitted components**: every executable foreign mechanism is omitted and listed in the review plan. That covers MCP servers (`.mcp.json`), lifecycle hooks (`hooks/`), shell scripts (`scripts/`), and daemon runners. They are never registered as harness tools or executed.
+2. **Projected declarative resources**: text skills (with markdown instructions), commands (converted into prompts), and basic agent personas become native library components.
+3. **Foreign trust tier**: the package is marked `trust: "foreign"`. Foreign package skills and prompts remain untrusted and withheld from model turns, at project scope and at user scope alike, until `integrations.projectResources.trustProjectImports` (`skills.trustProjectCompatRoots`) is enabled. Bound agents require all referenced skills to be trusted.
+4. **Unsupported and omitted components**: every executable foreign mechanism is omitted and listed in the review plan. That covers MCP servers (`.mcp.json`), lifecycle hooks (`hooks/`), shell scripts (`scripts/`), and daemon runners. They are never registered as tools or executed.
 
 Cancelling the review cleans up temporary staging files without modifying managed package state or workspace files. The Library's `o` key is the separate route into the local-agent discovery surface below, which starts from what an installed host already has rather than from a source you name.
 
@@ -393,7 +402,7 @@ required. A directory with none of the three is not importable.
 
 Publication, content validation and the project-import trust gate are reported
 separately. An enabled trust gate is a prerequisite for runtime admission, not
-a claim that every recipe is available.
+a claim that every component is available.
 
 The same review contract as adoption applies: `--dry-run` prints the projected
 plan and writes nothing, the plan names every converted resource, every
@@ -416,5 +425,5 @@ Select a host, press `p` for a project destination or `u` for user, and press `c
 to cycle the kind filter. Press `i` to review the full adoption plan, then `y`
 to approve it or `b` to return without installing. Escape closes the overlay.
 Connection remains a separate action: `a` connects a proposed peer and `d`
-declines it. `/agents` browses the library's own agent recipes and is a separate
+declines it. `/agents` browses the library's own agents and is a separate
 surface from this one.

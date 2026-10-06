@@ -11,6 +11,7 @@ Clio Coder records what a session and its workers did in a small set of local, d
 | Evidence bundles | `<dataDir>/evidence/<evidenceId>/` | observability domain on terminal dispatch events, `clio-coder evidence build` | `/view`, `clio-coder evidence` |
 | Evidence index | `<stateDir>/evidence-index.json` | observability domain | `/view` accountability, `clio-coder usage report` |
 | Out-of-turn usage | `<stateDir>/usage/out-of-turn.jsonl` | chat loop | `clio-coder usage report` |
+| Library receipts | `<stateDir>/library-receipts.json` | every Library lifecycle | `/library`, `/extensions`. See [Package receipts and activity](#package-receipts-and-activity). |
 | Session ledgers | `<stateDir>/sessions/<cwdHash>/<sessionId>/current.jsonl` | session domain | `/usage`, `/view`, `usage report`, `doctor` |
 | Prompt manifests | `<stateDir>/sessions/<cwdHash>/<sessionId>/prompt-manifest.jsonl` | session domain, at each prompt compile | `/view` |
 | Safety audit rows | `<stateDir>/audit/YYYY-MM-DD.jsonl` | safety domain | `/view`, `usage report` |
@@ -258,6 +259,23 @@ A failed or empty summary produces no checkpoint. Required failed-compaction usa
 - **Account isolation.** Adapters select connected accounts from the resolved Clio Coder home and the sibling CLI homes. When the Clio Coder home is relocated, the Claude Code, Codex, and Antigravity adapters are included only if `CLAUDE_CONFIG_DIR`, `CODEX_HOME`, or `ANTIGRAVITY_HOME` is set, so a relocated test home never reads the operator's real accounts.
 
 ---
+
+## Package receipts and activity
+
+Plugins and extensions leave two kinds of local record. Neither is sent anywhere.
+
+**Lifecycle receipts.** Each Library lifecycle (`install`, `update`, `enable`, `disable`, `remove`, `register`, `import`, `share-import`) appends one receipt to `<stateDir>/library-receipts.json`, written under a state-file lock after the change commits. A receipt holds `operationId`, `operation`, `kind`, `id`, `version`, `contentDigest`, `envelopeDigest` (set for an extension), `scope`, `source` (cut to 4096 characters), `at` and `actor`. `actor` is `operator`, `model-confirmed` when the model ran the command and the operator confirmed it, or `upgrade` for a change made by `clio-coder upgrade`. The store keeps the newest 512 receipts within 1 MiB and drops the oldest first. A receipt that cannot be saved writes one diagnostic line and never rolls back or blocks the lifecycle it describes. A damaged store reads as empty, so browsing and admission continue.
+
+**Activity.** An extension's runtime and commands, and a plugin's skills and prompts, emit bounded activity records that carry the owning package identity (`kind`, `id`, `version`, content `digest`, `scope`, and the extension's `envelopeDigest`). They are appended to the session ledger as custom entries, mirrored into the trace store as events of type `clio_coder_extension_activity` and `clio_coder_plugin_resource_use` ([package activity](trace-store.md#package-activity)), and rendered in the transcript as one notice row such as `<id>@<version> <kind>: <outcome> (<first 12 digest characters>)`. Extension kinds are `command`, `runtime_start`, `runtime_failure`, `runtime_reload`, `runtime_retire`, `workspace_enter` and `workspace_leave`. Plugin kinds are `skill` (loaded) and `prompt` (expanded). A tool call served by an extension's runtime tool carries the same `owner` in its ledger turn, trace event and result details.
+
+Where each is shown:
+
+| Surface | What it shows |
+| --- | --- |
+| `/extensions` | For the selected extension: the envelope digest, the `Last lifecycle:` receipt (operation, time, actor, id and version, digest, operation id), and up to the last 8 activity rows kept in memory for it, newest last. |
+| `/library` | The `Last lifecycle:` line for the selected package copy. |
+| `clio-coder trace tail <runId>` | `owner=<id>@<version> digest=<digest>` and `outcome=<outcome>` on any event row whose payload carries them. |
+| Evidence bundles | The rendered transcript names the owner on each skill activation (`owner=<id>@<version> digest=<digest>`) when a plugin supplied the skill. |
 
 ## Artifact Categories and Path Layouts
 
