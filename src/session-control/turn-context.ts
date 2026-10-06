@@ -4,6 +4,8 @@ import { CONTEXT_OPERATION_CUSTOM_TYPE, createContextOperation } from "../core/c
 import type { SuccessfulMemoryContextCommit } from "../domains/memory/commit-state.js";
 import type { MemoryInterventionRegistration } from "../domains/middleware/memory-intervention.js";
 import { replaceEngineMessages, setEngineSystemPrompt } from "../engine/agent.js";
+import { createMessageListDigests } from "./message-list-digest.js";
+import type { MessageListDigests } from "./message-list-digest.js";
 import { contextOperationAwareness } from "./context-operation-awareness.js";
 import type { ContinuityReductionHooks } from "./continuity-controller.js";
 /**
@@ -785,16 +787,16 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 	};
 
 	/** Price appended history separately so eviction can retain it without folding in static growth twice. */
-	const reconciledHistoryTokens = (agentRuntime: AgentRuntime): number | null => {
+	const reconciledHistoryTokens = (agentRuntime: AgentRuntime, history?: MessageListDigests): number | null => {
 		const anchor = reconciledAnchor;
 		if (!anchor) return null;
-		const messages = agentRuntime.agent.state.messages.filter((message) => message.role !== "system");
+		const messages = history?.messages ?? agentRuntime.agent.state.messages.filter((message) => message.role !== "system");
 		// The identity, route, and length checks are cheap and run first; `||`
 		// short-circuits, so the content digest is only computed for a prefix that
 		// still looks like the attested one. The digest covers the attested prefix
 		// and never the tail, so an append does not invalidate the anchor; the
-		// prefix itself is re-serialized and rehashed on every validation, which
-		// is the cost of detecting an in-place edit at all.
+		// prefix bytes are captured anew on every publication, sharing the full
+		// fingerprint serialization while still detecting every in-place edit.
 		if (
 			anchor.runtime !== agentRuntime ||
 			anchor.model !== agentRuntime.agent.state.model ||
@@ -804,7 +806,8 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			anchor.wireModelId !== agentRuntime.wireModelId ||
 			anchor.anchoredMessages.length > messages.length ||
 			anchor.anchoredMessages.some((message, index) => message !== messages[index]) ||
-			messageListDigest(messages.slice(0, anchor.anchoredMessages.length)) !== anchor.contentDigest
+			(history?.digest(anchor.anchoredMessages.length) ??
+				messageListDigest(messages.slice(0, anchor.anchoredMessages.length))) !== anchor.contentDigest
 		) {
 			reconciledAnchor = null;
 			return null;
@@ -823,16 +826,20 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		agentRuntime: AgentRuntime,
 		pendingUserText?: string,
 		replayMessages?: ReadonlyArray<AgentMessage>,
+		history?: MessageListDigests,
 	): LiveContextEstimate => {
 		const contextWindow = agentRuntime.runtimeResolution.contextWindowDetails.effectiveContextWindow;
 		const estimateInput = {
 			systemPrompt: agentRuntime.agent.state.systemPrompt,
-			messages: (replayMessages ?? agentRuntime.agent.state.messages).filter((message) => message.role !== "system"),
+			messages:
+				replayMessages === undefined && history
+					? history.messages
+					: (replayMessages ?? agentRuntime.agent.state.messages).filter((message) => message.role !== "system"),
 			tools: agentRuntime.agent.state.tools,
 			...(pendingUserText !== undefined ? { pendingUserText, pendingUserImages } : {}),
 		};
 		const breakdown = estimateAgentContextBreakdown(estimateInput);
-		const historyTokens = replayMessages === undefined ? reconciledHistoryTokens(agentRuntime) : null;
+		const historyTokens = replayMessages === undefined ? reconciledHistoryTokens(agentRuntime, history) : null;
 		const anchor = reconciledAnchor;
 		// Provider usage already includes the old system prompt and schemas.
 		// Price only positive growth, separately: shrinking one must not hide
@@ -878,6 +885,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		pendingUserText: string | undefined,
 		promptFingerprint: string | null,
 		toolSignature: string | null,
+		history?: MessageListDigests,
 	): string => {
 		const settings = deps.getSettings();
 		const eligibility = {
@@ -913,7 +921,8 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			toolSignature,
 			// Same serialization the anchor validates its attested prefix with, so
 			// the two cannot disagree about whether the conversation changed.
-			messageListDigest(agentRuntime.agent.state.messages.filter((message) => message.role !== "system")),
+			history?.digest() ??
+				messageListDigest(agentRuntime.agent.state.messages.filter((message) => message.role !== "system")),
 			pendingUserText ?? null,
 			pendingUserText === undefined ? null : pendingUserImages,
 			eligibility,
@@ -954,8 +963,9 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 	const liveRuntimeAccounting = (
 		agentRuntime: AgentRuntime,
 		pendingUserText: string | undefined,
+		history?: MessageListDigests,
 	): LiveBudgetAccounting => {
-		const estimate = liveContextEstimate(agentRuntime, pendingUserText);
+		const estimate = liveContextEstimate(agentRuntime, pendingUserText, undefined, history);
 		const details = agentRuntime.runtimeResolution.contextWindowDetails;
 		return {
 			targetId: agentRuntime.targetId,
@@ -1017,9 +1027,14 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 	 * Assemble one publication from the live runtime, or from the persisted
 	 * capture when this process has not built a runtime yet.
 	 */
-	const liveBudgetInput = (pendingUserText?: string): LiveBudgetInput => {
+	const liveBudgetInput = (pendingUserText?: string, capturedHistory?: MessageListDigests): LiveBudgetInput => {
 		const settings = deps.getSettings();
 		const agentRuntime = state.runtime;
+		const history = agentRuntime
+			? capturedHistory ?? createMessageListDigests(
+				agentRuntime.agent.state.messages.filter((message) => message.role !== "system"),
+			)
+			: undefined;
 		const snapshot = currentContextSnapshot;
 		const promptFingerprint = agentRuntime
 			? sha256Json(agentRuntime.agent.state.systemPrompt ?? null)
@@ -1032,6 +1047,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			pendingUserText,
 			promptFingerprint,
 			toolSignature,
+			history,
 		);
 		// Two independent existing settings, not one derived from the other: the
 		// reduce point is `context.compaction.threshold` and the working-set
@@ -1047,7 +1063,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		// the resolved anchor, cap, and reservation are part of that request even
 		// when not a byte of the conversation moved.
 		const accounting = agentRuntime
-			? liveRuntimeAccounting(agentRuntime, pendingUserText)
+			? liveRuntimeAccounting(agentRuntime, pendingUserText, history)
 			: historicalAccounting(snapshot, settings);
 		const reductionBasisKey = sha256Json([
 			"reduction-basis/1",
@@ -1091,8 +1107,8 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		};
 	};
 
-	const refreshLiveBudget = (pendingUserText?: string): LiveBudgetView =>
-		budgetProducer.publish(liveBudgetInput(pendingUserText));
+	const refreshLiveBudget = (pendingUserText?: string, history?: MessageListDigests): LiveBudgetView =>
+		budgetProducer.publish(liveBudgetInput(pendingUserText, history));
 
 	/**
 	 * A working-set projection removes tokens from messages the attestation
@@ -1959,15 +1975,18 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			// outside `input`, so the attested prompt is the three summed.
 			const promptTokens = (usage.input || 0) + (usage.cacheRead || 0) + (usage.cacheWrite || 0);
 			const runtime = state.runtime;
+			const history = runtime
+				? createMessageListDigests(runtime.agent.state.messages.filter((message) => message.role !== "system"))
+				: undefined;
 			if (promptTokens > 0 && runtime) {
 				const breakdown = estimateAgentContextBreakdown({ ...runtime.agent.state, messages: [] });
-				const anchoredMessages = [...runtime.agent.state.messages.filter((message) => message.role !== "system")];
+				const anchoredMessages = [...(history?.messages ?? [])];
 				// The output of this call is part of the next call's prompt for the
 				// same messages, which is why it is folded in here.
 				reconciledAnchor = {
 					tokens: promptTokens + (usage.output || 0),
 					anchoredMessages,
-					contentDigest: messageListDigest(anchoredMessages),
+					contentDigest: history?.digest() ?? messageListDigest(anchoredMessages),
 					runtime,
 					model: runtime.agent.state.model,
 					modelKey: anchorModelKey(runtime),
@@ -1981,7 +2000,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			if (!currentContextSnapshot) {
 				// The anchor still moved, and it is what the next request budgets
 				// against, so the view is republished with or without a snapshot.
-				refreshLiveBudget();
+				refreshLiveBudget(undefined, history);
 				return;
 			}
 			// Reconcile in memory on every API call so the live meters
@@ -2006,7 +2025,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			snapshotPersistPending = true;
 			// A reconcile moves the anchor and therefore the figure the next
 			// request budgets against, so it is a publication point of its own.
-			refreshLiveBudget();
+			refreshLiveBudget(undefined, history);
 		},
 
 		promptSideTokens(): number {
