@@ -40,6 +40,12 @@ function formatMemoryStatusLine(status: TaskMemoryOperatorStatus, contentWidth: 
 		theme.fg("fieldValue", `last ${status.lastDecision ?? "none"}`),
 	];
 	if (status.stepInFlight) units.push(theme.fg("activity", "step running"));
+	// A budget skip is never silent: the reason and when room returns sit in the
+	// header until a later step replaces it in the recent history.
+	if (status.lastSkip) {
+		const resume = status.lastSkip.resumeAt === undefined ? "" : ` until ${rowClock(status.lastSkip.resumeAt)}`;
+		units.push(theme.fg("warning", `skipped ${status.lastSkip.reason}${resume}`));
+	}
 	// Lifetime cost of the background plane, beside the state of the current
 	// session. The tier spent 137,205 tokens over 14 days on the operator's own
 	// machine before any surface said so (#229), and a hit rate is the one figure
@@ -135,6 +141,7 @@ function activityItems(events: ReadonlyArray<TaskMemoryActivityEvent>, group: st
 			`**Latency:** ${Math.round(event.latencyMs)}ms`,
 			`**Bank writes:** ${event.bankWrites}`,
 			`**Cited entries:** ${event.citedEntries}`,
+			...(event.resumeAt === undefined ? [] : [`**Resumes:** ${event.resumeAt}`]),
 		],
 	}));
 }
@@ -192,6 +199,7 @@ function memorySignature(status: TaskMemoryOperatorStatus, records: ReadonlyArra
 		String(status.size),
 		status.lastDecision ?? "none",
 		status.stepInFlight ? "running" : "idle",
+		`${status.lastSkip?.reason ?? ""}:${status.lastSkip?.resumeAt ?? ""}`,
 		`${status.spend?.llmSteps ?? 0}:${status.spend?.injections ?? 0}:${status.spend?.totalTokens ?? 0}`,
 	];
 	for (const record of records) parts.push(`r:${record.id}:${record.approved}:${record.rejectedAt ?? ""}`);

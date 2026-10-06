@@ -1,4 +1,14 @@
 export {
+	BACKGROUND_SKIP_REASONS,
+	type BackgroundRouteFacts,
+	type BackgroundRouteKind,
+	type BackgroundSkipReason,
+	type BackgroundStepDecision,
+	type BackgroundStepFacts,
+	backgroundRouteKind,
+	decideBackgroundStep,
+} from "./background-budget.js";
+export {
 	buildDispatchMemorySection,
 	DISPATCH_MEMORY_SCOPES,
 	type DispatchMemoryRoute,
@@ -142,6 +152,7 @@ export {
 export {
 	describeTaskMemoryActivity,
 	type TaskMemoryActivityEvent,
+	type TaskMemoryBudgetSkip,
 	type TaskMemoryGuardianState,
 	type TaskMemoryOperatorStatus,
 	type TaskMemoryTier,

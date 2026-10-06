@@ -20,6 +20,9 @@ import type { TaskMemoryPolicyDecision, TaskMemoryPolicyReason, TaskMemoryRoute 
  * a step actually ran on, after any fallback. Rows written before the pair
  * existed stay readable and parse without it. A rules-tier row never resolved a
  * route and omits both.
+ *
+ * `resumeAt` was added the same way: present only on a background budget skip
+ * that knows when room returns (a quota window reset or a 429 retry instant).
  */
 export const TASK_MEMORY_TELEMETRY_VERSION = 2;
 export const TASK_MEMORY_TELEMETRY_MAX_BYTES = 1024 * 1024;
@@ -85,6 +88,8 @@ export interface TaskMemoryTelemetryRecord {
 	/** Route the step ran on. Absent on rules-tier rows and on rows written before the field existed. */
 	targetId?: string;
 	modelId?: string;
+	/** ISO instant a budget skip expects room again. */
+	resumeAt?: string;
 }
 
 export interface TaskMemoryTelemetryStep {
@@ -102,6 +107,8 @@ export interface TaskMemoryTelemetryStep {
 	latencyMs: number;
 	/** Resolved route of the attempt, present only when a model client was resolved. */
 	route?: TaskMemoryRoute;
+	/** When a budget skip expects room again. */
+	resumeAt?: string;
 }
 
 export interface TaskMemoryTelemetrySink {
@@ -156,6 +163,7 @@ export function taskMemoryTelemetryRecord(step: TaskMemoryTelemetryStep, at: Dat
 		tokenCost: { input, output, total: input + output },
 		latencyMs: nonNegativeFinite(step.latencyMs),
 		...(step.route === undefined ? {} : { targetId: step.route.targetId, modelId: step.route.modelId }),
+		...(step.resumeAt === undefined ? {} : { resumeAt: step.resumeAt }),
 	};
 }
 
@@ -168,8 +176,9 @@ export function taskMemoryBankDelta(before: TaskMemorySnapshot, after: TaskMemor
 }
 
 export function parseTaskMemoryTelemetryRecord(value: unknown): TaskMemoryTelemetryRecord | null {
-	if (!isRecord(value) || !hasKeys(value, TELEMETRY_KEYS, [...ROUTE_KEYS, "refusalReason"])) return null;
+	if (!isRecord(value) || !hasKeys(value, TELEMETRY_KEYS, [...ROUTE_KEYS, "refusalReason", "resumeAt"])) return null;
 	if (value.refusalReason !== undefined && typeof value.refusalReason !== "string") return null;
+	if (value.resumeAt !== undefined && !validIsoTimestamp(value.resumeAt)) return null;
 	const route = parseRoute(value);
 	if (route === null) return null;
 	if (value.version !== TASK_MEMORY_TELEMETRY_VERSION || !validIsoTimestamp(value.at)) return null;
@@ -194,6 +203,7 @@ export function parseTaskMemoryTelemetryRecord(value: unknown): TaskMemoryTeleme
 		tokenCost,
 		latencyMs: value.latencyMs,
 		...route,
+		...(value.resumeAt === undefined ? {} : { resumeAt: value.resumeAt as string }),
 	};
 }
 
@@ -250,6 +260,10 @@ const REASONS = new Set<TaskMemoryPolicyReason>([
 	"timed_out",
 	"endpoint_busy",
 	"endpoint_preempted",
+	"cost_ceiling",
+	"quota_window",
+	"quota_retry",
+	"time_budget",
 	"client_error",
 	"information_flow_blocked",
 	"no_client",

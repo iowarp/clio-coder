@@ -7,6 +7,7 @@ import {
 	MEMORY_INTERVENTION_SYSTEM_PROMPT,
 } from "../prompts/memory-intervention.js";
 import type { CostProvenance } from "../providers/index.js";
+import type { BackgroundSkipReason } from "./background-budget.js";
 import {
 	renderTaskMemoryEntries,
 	TASK_MEMORY_CONTENT_MAX_CHARS,
@@ -50,6 +51,20 @@ export class TaskMemoryEndpointPreemptedError extends Error {}
 
 /** Restricted context cannot reach the selected background model. */
 export class TaskMemoryInformationFlowBlockedError extends Error {}
+
+/**
+ * The background budget refused the step before any request left the process
+ * (`decideBackgroundStep`). Occupancy refusals keep `TaskMemoryEndpointBusyError`,
+ * so they still yield and resume when the endpoint has room.
+ */
+export class TaskMemoryBudgetSkipError extends Error {
+	constructor(
+		readonly reason: Exclude<BackgroundSkipReason, "endpoint_busy">,
+		readonly resumeAt?: string,
+	) {
+		super(`background memory step skipped: ${reason}${resumeAt === undefined ? "" : ` until ${resumeAt}`}`);
+	}
+}
 
 export interface TaskMemoryModelRequest {
 	systemPrompt: string;
@@ -164,6 +179,14 @@ export type TaskMemoryPolicyReason =
 	| "endpoint_busy"
 	/** A foreground request preempted the step's endpoint slot; it runs again when there is room. */
 	| "endpoint_preempted"
+	/** Session spend plus this step's projected cost would reach `safety.limits.sessionCostUsd`. */
+	| "cost_ceiling"
+	/** The subscription window the route bills against is at or past its warning level. */
+	| "quota_window"
+	/** The provider's usage endpoint answered 429 and its retry interval has not passed. */
+	| "quota_retry"
+	/** The endpoint's measured speed cannot finish this step inside `context.memory.timeoutMs`. */
+	| "time_budget"
 	/** The model client threw: unreachable route, auth failure, malformed request. */
 	| "client_error"
 	/** Information-flow admission refused the request before inference. */
@@ -253,6 +276,8 @@ export interface TaskMemoryPolicyInput {
 export interface TaskMemoryPolicyResult {
 	/** Admission diagnostic, present only when information flow refused the request. */
 	refusalReason?: string;
+	/** When a budget skip expects room again: a quota window reset or a 429 retry instant. */
+	resumeAt?: string;
 	decision: TaskMemoryPolicyDecision;
 	reason: TaskMemoryPolicyReason;
 	bankOperations: number;
@@ -381,6 +406,7 @@ export async function runTaskMemoryPolicy(
 			outputTokens: parts.outputTokens ?? stepUsage?.output ?? 0,
 			usage: stepUsage,
 			...(parts.refusalReason === undefined ? {} : { refusalReason: parts.refusalReason }),
+			...(parts.resumeAt === undefined ? {} : { resumeAt: parts.resumeAt }),
 			...(parts.retiredLessonIds === undefined ? {} : { retiredLessonIds: parts.retiredLessonIds }),
 			presentedEntries,
 		};
@@ -518,6 +544,8 @@ export async function runTaskMemoryPolicy(
 	} catch (error) {
 		if (error instanceof TaskMemoryEndpointBusyError) return settle("silent", "endpoint_busy");
 		if (error instanceof TaskMemoryEndpointPreemptedError) return settle("silent", "endpoint_preempted");
+		if (error instanceof TaskMemoryBudgetSkipError)
+			return settle("silent", error.reason, error.resumeAt === undefined ? {} : { resumeAt: error.resumeAt });
 		clientError = errorMessage(error);
 		if (error instanceof TaskMemoryInformationFlowBlockedError)
 			return settle("silent", "information_flow_blocked", { refusalReason: clientError });

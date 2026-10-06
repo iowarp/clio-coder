@@ -12,42 +12,19 @@
  * than present one budget twice.
  */
 
+import type { QuotaSeverity } from "./severity.js";
+import { compareQuotaSeverity, primaryWindow, windowSeverity } from "./severity.js";
 import type { UsageSnapshot, UsageWindow } from "./types.js";
 
-/** How close a window is to its limit, in the absence of a provider word. */
-export type QuotaSeverity = "normal" | "caution" | "warning" | "critical";
-
-const SEVERITY_WORDS = new Set<QuotaSeverity>(["normal", "caution", "warning", "critical"]);
-
-/**
- * Thresholds for a window the provider did not classify.
- *
- * Anthropic sends its own `severity` and that is preferred; these bounds
- * exist for Codex and Antigravity, which send none.
- */
-export function severityForPct(usedPct: number): QuotaSeverity {
-	if (usedPct >= 95) return "critical";
-	if (usedPct >= 80) return "warning";
-	if (usedPct >= 60) return "caution";
-	return "normal";
-}
-
-/** A provider's own severity word when it sent a recognized one, else the threshold. */
-export function windowSeverity(window: UsageWindow): QuotaSeverity {
-	const reported = window.severity?.toLowerCase();
-	if (reported !== undefined && SEVERITY_WORDS.has(reported as QuotaSeverity)) {
-		return reported as QuotaSeverity;
-	}
-	return severityForPct(window.usedPct);
-}
+export type { QuotaSeverity } from "./severity.js";
+export { primaryWindow, QUOTA_SEVERITY_FLOORS, severityForPct, windowAtWarning, windowSeverity } from "./severity.js";
 
 /** The snapshot's worst severity, which is what a single indicator should show. */
 export function snapshotSeverity(snapshot: UsageSnapshot): QuotaSeverity {
-	const rank: QuotaSeverity[] = ["normal", "caution", "warning", "critical"];
 	let worst: QuotaSeverity = "normal";
 	for (const window of snapshot.windows) {
 		const severity = windowSeverity(window);
-		if (rank.indexOf(severity) > rank.indexOf(worst)) worst = severity;
+		if (compareQuotaSeverity(severity, worst) > 0) worst = severity;
 	}
 	return worst;
 }
@@ -55,21 +32,6 @@ export function snapshotSeverity(snapshot: UsageSnapshot): QuotaSeverity {
 /** Whole percent, so a footer never jitters on a fractional change. */
 export function formatPct(usedPct: number): string {
 	return `${Math.round(usedPct)}%`;
-}
-
-/** The window a compact indicator should show: the one closest to biting. */
-export function primaryWindow(snapshot: UsageSnapshot): UsageWindow | null {
-	let best: UsageWindow | null = null;
-	for (const window of snapshot.windows) {
-		const rank = { normal: 0, caution: 1, warning: 2, critical: 3 };
-		if (
-			best === null ||
-			rank[windowSeverity(window)] > rank[windowSeverity(best)] ||
-			(rank[windowSeverity(window)] === rank[windowSeverity(best)] && window.usedPct > best.usedPct)
-		)
-			best = window;
-	}
-	return best;
 }
 
 /** The named window when the provider reports one, for surfaces that want a fixed column. */

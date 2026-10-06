@@ -38,6 +38,8 @@
  */
 
 import { performance } from "node:perf_hooks";
+import type { BackgroundSkipReason } from "../memory/background-budget.js";
+import { BACKGROUND_SKIP_REASONS } from "../memory/background-budget.js";
 import type { HistoryReviewSlice, HistoryReviewSource } from "../memory/history-review.js";
 import { lessonEvidence } from "../memory/lesson-evidence.js";
 import type { TaskMemoryEntry } from "../memory/task-bank.js";
@@ -155,6 +157,8 @@ export function createMemoryGuardian(deps: MemoryGuardianDeps): MemoryGuardian {
 	let historyUnanswered = 0;
 	/** The model tier failed; stay parked until a turn or settings change says to look again. */
 	let parkedUnavailable = false;
+	/** The background budget refused a step; the next turn end or settings change decides again. */
+	let parkedBudget = false;
 	let source: HistoryReviewSource | null = null;
 	let sourceScope: string | null = null;
 
@@ -188,6 +192,7 @@ export function createMemoryGuardian(deps: MemoryGuardianDeps): MemoryGuardian {
 		source = null;
 		historyUnanswered = 0;
 		parkedUnavailable = false;
+		parkedBudget = false;
 		capacityRetryMs = CAPACITY_RETRY_MIN_MS;
 		discoveryMs = DISCOVERY_MIN_MS;
 		idleSinceMs = performance.now();
@@ -228,6 +233,10 @@ export function createMemoryGuardian(deps: MemoryGuardianDeps): MemoryGuardian {
 		}
 		if (parkedUnavailable) {
 			setState("unavailable");
+			return null;
+		}
+		if (parkedBudget) {
+			setState("idle");
 			return null;
 		}
 		const foreground = deps.isForegroundActive();
@@ -300,6 +309,13 @@ export function createMemoryGuardian(deps: MemoryGuardianDeps): MemoryGuardian {
 				parkedUnavailable = true;
 				setState("unavailable");
 				return null;
+			case "skipped":
+				// Never a retry timer: spend, a quota window or the endpoint's speed
+				// will not change on a backoff schedule, and the skip is already
+				// recorded with its reason.
+				parkedBudget = true;
+				setState("idle");
+				return null;
 			default:
 				capacityRetryMs = CAPACITY_RETRY_MIN_MS;
 				// More may be waiting; look again at once instead of on a timer.
@@ -359,6 +375,7 @@ export function createMemoryGuardian(deps: MemoryGuardianDeps): MemoryGuardian {
 		}
 		if (!isCurrent()) return "none";
 		if (result.reason === "endpoint_busy" || result.reason === "endpoint_preempted") return "yielded";
+		if (BACKGROUND_SKIP_REASONS.has(result.reason as BackgroundSkipReason)) return "skipped";
 		if (result.reason === "client_error" || result.reason === "information_flow_blocked" || result.reason === "no_client")
 			return "unavailable";
 		// A malformed envelope is a rejected answer, not a review: committing it
@@ -397,7 +414,10 @@ export function createMemoryGuardian(deps: MemoryGuardianDeps): MemoryGuardian {
 				triggerReasons: ["idle_review"],
 				tier: "llm",
 				bankDelta: taskMemoryBankDelta(EMPTY_SNAPSHOT, EMPTY_SNAPSHOT),
-				decision: result.reason === "endpoint_busy" || result.reason === "endpoint_preempted" ? "dropped" : result.decision,
+				decision:
+					result.reason === "endpoint_preempted" || BACKGROUND_SKIP_REASONS.has(result.reason as BackgroundSkipReason)
+						? "dropped"
+						: result.decision,
 				reason: result.reason,
 				bankOperations: result.bankOperations,
 				droppedOperations: result.droppedOperations,
@@ -406,6 +426,7 @@ export function createMemoryGuardian(deps: MemoryGuardianDeps): MemoryGuardian {
 				outputTokens: result.outputTokens,
 				latencyMs: Number(process.hrtime.bigint() - started) / 1_000_000,
 				...(client.route === undefined ? {} : { route: client.route }),
+				...(result.resumeAt === undefined ? {} : { resumeAt: result.resumeAt }),
 			});
 		} catch {
 			// Observability must never steer the guardian.
@@ -430,6 +451,7 @@ export function createMemoryGuardian(deps: MemoryGuardianDeps): MemoryGuardian {
 			}
 			if (reason === "turn-end" || reason === "settings") {
 				parkedUnavailable = false;
+				parkedBudget = false;
 				historyUnanswered = 0;
 				capacityRetryMs = CAPACITY_RETRY_MIN_MS;
 			}

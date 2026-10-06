@@ -63,6 +63,7 @@ export {
 	readDiscoveredEndpointSlots,
 	recordDiscoveredEndpointSlots,
 } from "./endpoint-slots-store.js";
+export { type EndpointThroughput, endpointThroughput, recordEndpointThroughput } from "./endpoint-throughput.js";
 export type { ProvidersBundleOptions } from "./extension.js";
 export { acceptsImageInput } from "./image-input.js";
 export { ProvidersManifest } from "./manifest.js";

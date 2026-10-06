@@ -3,6 +3,8 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, it } from "node:test";
+import type { BackgroundStepDecision, BackgroundStepFacts } from "../../src/domains/memory/background-budget.js";
+import { decideBackgroundStep } from "../../src/domains/memory/background-budget.js";
 import { evaluateMemoryGate, recordMemoryObservations } from "../../src/domains/memory/guardian-gate.js";
 import { approveMemoryRecord, canonicalMemoryRepositoryIdentity } from "../../src/domains/memory/operations.js";
 import { proposeMemoryPromotion } from "../../src/domains/memory/promotion.js";
@@ -127,5 +129,111 @@ describe("memory guardian gate", () => {
 		// A bank emptied by branch navigation retires the older snapshot instead of leaving it to be resumed.
 		strictEqual(saveTaskBankSnapshot(stateDir, "session-1", new TaskMemoryBank().snapshot()), false);
 		strictEqual(loadTaskBankSnapshot(stateDir, "session-1"), null);
+	});
+
+	it("decides a background step from what its route costs", () => {
+		const nowMs = Date.parse("2026-10-06T12:00:00.000Z");
+		const resetsAt = "2026-10-08T00:00:00.000Z";
+		const metered = {
+			provenance: "known",
+			rates: { input: 3, output: 15 },
+			runtime: { auth: "api-key", tier: "cloud" },
+			quotaProviderId: null,
+		} as const;
+		const quota = {
+			provenance: "estimated",
+			rates: { input: 3, output: 15 },
+			runtime: { auth: "oauth", tier: "cloud" },
+			quotaProviderId: "codex",
+		} as const;
+		const local = {
+			provenance: "known_free",
+			rates: { input: 0, output: 0 },
+			runtime: { auth: "api-key", tier: "local-native" },
+			quotaProviderId: null,
+		} as const;
+		const unpriced = {
+			provenance: "unknown",
+			rates: null,
+			runtime: { auth: "api-key", tier: "protocol" },
+			quotaProviderId: null,
+		} as const;
+		const window = (usedPct: number) => ({
+			snapshot: {
+				providerId: "codex",
+				displayName: "Codex",
+				status: "ok" as const,
+				windows: [{ key: "weekly", label: "Weekly", usedPct, resetsAt }],
+				fetchedAt: "2026-10-06T11:58:00.000Z",
+			},
+			stale: false,
+			retryUntil: null,
+		});
+		// 10k prompt tokens and 2k output: $0.06 at $3/$15 per million, and 10 s
+		// prefill plus 40 s generation at 1,000 and 50 tokens per second.
+		const base: BackgroundStepFacts = {
+			route: metered,
+			inputTokens: 10_000,
+			maxOutputTokens: 2_000,
+			timeoutCapMs: 60_000,
+			nowMs,
+			session: { spendUsd: 1, ceilingUsd: 5 },
+			quota: null,
+			endpoint: { occupied: 0, admissionLimit: 1, prefillTokensPerSecond: null, generationTokensPerSecond: null },
+		};
+		const measured = { occupied: 0, admissionLimit: 1, prefillTokensPerSecond: 1_000 };
+		const cases: ReadonlyArray<[string, Partial<BackgroundStepFacts>, BackgroundStepDecision]> = [
+			["metered under the ceiling", {}, { admit: true, kind: "metered", timeoutMs: 60_000 }],
+			[
+				"metered whose projected cost reaches the ceiling",
+				{ session: { spendUsd: 4.95, ceilingUsd: 5 } },
+				{ admit: false, kind: "metered", reason: "cost_ceiling" },
+			],
+			[
+				"metered with no ceiling",
+				{ session: { spendUsd: 400, ceilingUsd: 0 } },
+				{ admit: true, kind: "metered", timeoutMs: 60_000 },
+			],
+			["quota below warning", { route: quota, quota: window(79) }, { admit: true, kind: "quota", timeoutMs: 60_000 }],
+			[
+				"quota at warning",
+				{ route: quota, quota: window(80) },
+				{ admit: false, kind: "quota", reason: "quota_window", resumeAt: resetsAt },
+			],
+			[
+				"quota in a 429 retry window",
+				{ route: quota, quota: { ...window(10), retryUntil: "2026-10-06T12:05:00.000Z" } },
+				{ admit: false, kind: "quota", reason: "quota_retry", resumeAt: "2026-10-06T12:05:00.000Z" },
+			],
+			[
+				"quota with a stale reading",
+				{ route: quota, quota: { ...window(99), stale: true } },
+				{ admit: true, kind: "quota", timeoutMs: 60_000 },
+			],
+			["local without a measurement", { route: local }, { admit: true, kind: "local", timeoutMs: 60_000 }],
+			[
+				"local with a measurement",
+				{ route: local, endpoint: { ...measured, generationTokensPerSecond: 50 } },
+				{ admit: true, kind: "local", timeoutMs: 50_000 },
+			],
+			[
+				"local too slow to finish inside the cap",
+				{ route: local, endpoint: { ...measured, generationTokensPerSecond: 20 } },
+				{ admit: false, kind: "local", reason: "time_budget" },
+			],
+			[
+				"local endpoint with no free slot",
+				{ route: local, endpoint: { ...measured, occupied: 1, generationTokensPerSecond: 50 } },
+				{ admit: false, kind: "local", reason: "endpoint_busy" },
+			],
+			[
+				"unpriced proxy",
+				{ route: unpriced, session: { spendUsd: 400, ceilingUsd: 5 } },
+				{ admit: true, kind: "unpriced", timeoutMs: 60_000 },
+			],
+		];
+		for (const [label, facts, expected] of cases) {
+			deepStrictEqual(decideBackgroundStep({ ...base, ...facts }), expected, label);
+		}
 	});
 });
