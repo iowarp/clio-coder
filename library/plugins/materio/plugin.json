@@ -1,7 +1,7 @@
 {
 	"$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
 	"name": "materio",
-	"version": "0.1.0",
+	"version": "0.2.0",
 	"description": "Materio: materials research interviews, supplied-corpus synthesis, lab feasibility, task execution and verified paper handoff.",
 	"author": {
 		"name": "IOWarp; domain workflow adapted from Daisy Quach"

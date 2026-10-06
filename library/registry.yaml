@@ -417,9 +417,9 @@ entries:
     name: materio
     description: "Materio: materials research interviews, supplied-corpus synthesis,
       lab feasibility, task execution and verified paper handoff."
-    version: 0.1.0
+    version: 0.2.0
     sourceUrl: plugins/materio
-    sha256: 73e31326ad2d008563f2d184709109e056b63a6336ba94793710e348bee78e4a
+    sha256: cb3c5d2ffc3f3b463839c64a72930733c1743836b4951d3fd6239142b8c6910a
     provides:
       - kind: agent
         name: materio-lab-definer
@@ -445,6 +445,10 @@ entries:
         name: materio-workflow-planner
         description: Build a resource-aware dependency plan with researcher assumptions
           and tagged defaults.
+      - kind: extension
+        name: materio
+        description: Materials research lab bench with local commands, usage and
+          advisory guardrails.
       - kind: fleet
         name: materio-execute-task
         description: Execute one pre-approved research task and independently inspect

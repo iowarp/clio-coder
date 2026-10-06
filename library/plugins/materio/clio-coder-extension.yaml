@@ -1,0 +1,39 @@
+id: materio
+name: Materio
+version: 0.2.0
+description: Materials research lab bench with local commands, usage and advisory guardrails.
+runtime:
+  api: 2
+  entrypoint: runtime/extension.ts
+  commands:
+    - { name: lab, description: Enter the Materio lab bench. }
+    - { name: status, description: Inspect research identity and task status., replaces: prompt }
+    - { name: progress, description: Show progress and the next research action., replaces: prompt }
+    - { name: help, description: Show Materio commands and bench controls., replaces: prompt }
+    - { name: checkpoint, description: "Save, list or confirm restoring research snapshots.", replaces: prompt }
+    - { name: cost, description: Show reported tokens and declared cost by research step. }
+  events: [session_open, turn_start, turn_end, tool_end, dispatch_started, dispatch_completed, dispatch_failed, fs_changed, workspace_enter]
+  watch: [".research/**"]
+  hooks:
+    - { on: before_tool, tools: [dispatch], timeoutMs: 1000, onTimeout: pass, onError: pass }
+  ui: [status, band, card, toast, interview]
+  workspaces:
+    - id: lab
+      title: Materio lab bench
+      regions: [header, board, islands, rail, footer]
+      board: band
+      skin: skins/materio.json
+      keys:
+        - { key: f, action: next, label: Fill the next research action }
+        - { key: c, action: checkpoint, label: Save a research checkpoint }
+        - { key: v, action: findings, label: Verify task findings }
+        - { key: d, action: cost, label: Display step costs }
+        - { key: h, action: help, label: Help with the lab bench }
+  access: [prompt, tool-args]
+  permissions:
+    fs: { read: [".research"], write: [".research"] }
+    exec: true
+    net: false
+  state: { session: true, store: true }
+  config:
+    - { key: autoCheckpoint, type: boolean, default: true, description: Save a research snapshot after a task passes readback and review. }
