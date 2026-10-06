@@ -164,6 +164,52 @@ async function registryTags(name) {
 	return response.json();
 }
 
+/** npm publish keeps its exchanged credential in that subprocess's memory.
+ * Tag forwarding needs its own package-scoped exchange in the same trusted job;
+ * no stored npm token or auth file is introduced.
+ */
+async function forwardPublishedTags(receipt, plan) {
+	const tags = forwardedTags(await registryTags(receipt.name), receipt.version, plan.channel);
+	if (tags.length === 0) return;
+	const requestUrl = process.env.ACTIONS_ID_TOKEN_REQUEST_URL;
+	const requestToken = process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN;
+	if (!requestUrl || !requestToken)
+		throw new Error("Tag forwarding requires the release job's id-token: write permission.");
+	const url = new URL(requestUrl);
+	url.searchParams.set("audience", "npm:registry.npmjs.org");
+	const identityResponse = await fetch(url, {
+		headers: { Authorization: `Bearer ${requestToken}` },
+		signal: AbortSignal.timeout(30_000),
+	});
+	if (!identityResponse.ok) throw new Error(`GitHub OIDC request returned HTTP ${identityResponse.status}`);
+	const identity = await identityResponse.json();
+	if (typeof identity.value !== "string") throw new Error("GitHub OIDC response has no identity token.");
+	const exchangedResponse = await fetch(
+		`https://registry.npmjs.org/-/npm/v1/oidc/token/exchange/package/${encodeURIComponent(receipt.name)}`,
+		{
+			method: "POST",
+			headers: { Authorization: `Bearer ${identity.value}` },
+			signal: AbortSignal.timeout(30_000),
+		},
+	);
+	if (!exchangedResponse.ok) throw new Error(`npm trusted-publisher exchange returned HTTP ${exchangedResponse.status}`);
+	const exchanged = await exchangedResponse.json();
+	if (typeof exchanged.token !== "string") throw new Error("npm trusted-publisher exchange has no package credential.");
+	for (const tag of tags) {
+		const response = await fetch(
+			`https://registry.npmjs.org/-/package/${encodeURIComponent(receipt.name)}/dist-tags/${tag}`,
+			{
+				method: "PUT",
+				headers: { Authorization: `Bearer ${exchanged.token}`, "Content-Type": "application/json" },
+				body: JSON.stringify(receipt.version),
+				signal: AbortSignal.timeout(30_000),
+			},
+		);
+		if (!response.ok)
+			throw new Error(`npm ${tag} forwarding returned HTTP ${response.status}; resume publication without rebuilding.`);
+	}
+}
+
 export function api(path, method = "GET", body) {
 	return JSON.parse(
 		run("gh", ["api", path, "--method", method, ...(body === undefined ? [] : ["--input", "-"])], {
@@ -383,6 +429,8 @@ async function verifyPublic(receipt, plan) {
 	requireIntegrity(published, receipt);
 	const tags = await registryTags(receipt.name);
 	if (tags[plan.channel] !== receipt.version) throw new Error(`npm ${plan.channel} points to another version.`);
+	if (forwardedTags(tags, receipt.version, plan.channel).length > 0)
+		throw new Error("npm prerelease tags have not reached the published version.");
 	if (plan.channel === "dev") return;
 	const release = existingRelease(plan.tag);
 	if (!release || release.draft || tagCommit(plan.tag) !== receipt.commit)
@@ -431,9 +479,7 @@ export async function publish(directory, commit, runId, branch) {
 	const onNpm = await registryVersion(receipt.name, receipt.version);
 	if (!onNpm) throw new Error("npm publication is not visible yet; resume the release job.");
 	requireIntegrity(onNpm, receipt);
-	const tags = await registryTags(receipt.name);
-	for (const tag of forwardedTags(tags, receipt.version, plan.channel))
-		run("npm", ["dist-tag", "add", `${receipt.name}@${receipt.version}`, tag]);
+	await forwardPublishedTags(receipt, plan);
 	if (plan.channel === "dev") {
 		await verifyPublic(receipt, plan);
 		console.log(`SNAPSHOT_COMPLETE ${receipt.version} ${commit}`);
