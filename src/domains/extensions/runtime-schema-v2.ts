@@ -456,6 +456,20 @@ function added(approved: readonly string[], next: readonly string[]): string[] {
 	return next.filter((entry) => !approved.includes(entry));
 }
 
+/**
+ * What a hook can do to the call or the prompt in flight, for the consent card.
+ * Any before_tool hook may return block_tool and any prompt_submit hook
+ * block_prompt, whatever its failure policy; a rewrite also needs the content
+ * access that shows the extension the text it rewrites.
+ */
+export function hookPowers(hook: ExtensionHookDeclaration, access: readonly string[]): string[] {
+	if (hook.on === "before_tool")
+		return ["can refuse the call", ...(access.includes("tool-args") ? ["can rewrite its input"] : [])];
+	if (hook.on === "prompt_submit")
+		return ["can refuse the prompt", ...(access.includes("prompt") ? ["can rewrite it"] : [])];
+	return [];
+}
+
 function hookCovered(approved: readonly ExtensionHookDeclaration[], hook: ExtensionHookDeclaration): boolean {
 	return approved.some(
 		(prior) =>
@@ -491,8 +505,8 @@ export function envelopeGrowth(approved: ExtensionCapabilityEnvelope, next: Exte
 	for (const hook of next.hooks) {
 		if (hookCovered(approved.hooks, hook)) continue;
 		const scope = hook.tools ? ` on ${hook.tools.join(", ")}` : "";
-		const gate = hook.onTimeout === "block" || hook.onError === "block" ? ", can refuse the call" : "";
-		growth.push(`hook ${hook.on}${scope} (${hook.timeoutMs} ms${gate})`);
+		const powers = hookPowers(hook, next.access);
+		growth.push(`hook ${hook.on}${scope} (${[`${hook.timeoutMs} ms`, ...powers].join("; ")})`);
 	}
 	for (const tool of next.tools) {
 		const prior = approved.tools.find((entry) => entry.name === tool.name);
@@ -513,7 +527,13 @@ export function envelopeGrowth(approved: ExtensionCapabilityEnvelope, next: Exte
 		const nextKeys = (workspace.keys ?? []).map((binding) => `${binding.key}:${binding.action}`);
 		push(`workspace ${workspace.id} keys`, added(priorKeys, nextKeys));
 	}
-	push("content access", added(approved.access, next.access));
+	// Content access that lets a hook rewrite is wider than one that only reads it.
+	const rewrites = (kind: string): boolean =>
+		next.hooks.some((hook) => hookPowers(hook, [kind]).some((power) => power.startsWith("can rewrite")));
+	push(
+		"content access",
+		added(approved.access, next.access).map((kind) => (rewrites(kind) ? `${kind} (a hook can rewrite it)` : kind)),
+	);
 	push("read access", added(approved.permissions.fs.read, next.permissions.fs.read));
 	push("write access", added(approved.permissions.fs.write, next.permissions.fs.write));
 	if (next.permissions.exec && !approved.permissions.exec) growth.push("may run programs");

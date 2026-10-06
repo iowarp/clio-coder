@@ -6,7 +6,7 @@
  */
 import { loadManifestFromRoot } from "./discovery.js";
 import type { ExtensionCapabilityEnvelope } from "./manifest-v2.js";
-import { capabilityEnvelope, envelopeDigest, envelopeGrowth } from "./runtime-schema-v2.js";
+import { capabilityEnvelope, envelopeDigest, envelopeGrowth, hookPowers } from "./runtime-schema-v2.js";
 
 /** The honest limit of the process permission flags, said wherever consent is asked. */
 export const ENVELOPE_SEAT_BELT =
@@ -17,9 +17,8 @@ export function envelopeLines(envelope: ExtensionCapabilityEnvelope): string[] {
 	const list = (items: readonly string[]): string => (items.length > 0 ? items.join(", ") : "none");
 	const hooks = envelope.hooks.map((hook) => {
 		const tools = hook.tools ? ` on ${hook.tools.join(", ")}` : "";
-		const gate = hook.onTimeout === "block" || hook.onError === "block" ? ", can refuse" : "";
 		const failure = `on timeout ${hook.onTimeout}, on error ${hook.onError}`;
-		return `${hook.on}${tools} (${hook.timeoutMs} ms${gate}; ${failure})`;
+		return `${hook.on}${tools} (${[`${hook.timeoutMs} ms`, failure, ...hookPowers(hook, envelope.access)].join("; ")})`;
 	});
 	const lines = [
 		`Commands: ${list(envelope.commands)}`,
