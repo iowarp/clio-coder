@@ -204,8 +204,7 @@ async function tryForwardPublishedTags(receipt, tags) {
 				signal: AbortSignal.timeout(30_000),
 			},
 		);
-		if (!response.ok)
-			throw new Error(`npm ${tag} forwarding returned HTTP ${response.status}; resume publication without rebuilding.`);
+		if (!response.ok) throw new Error(`npm ${tag} forwarding returned HTTP ${response.status}`);
 	}
 }
 
