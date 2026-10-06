@@ -1696,6 +1696,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			operationCwd !== process.cwd()
 		)
 			throw new Error("Context ownership changed during compaction.");
+		summarySignal?.throwIfAborted();
 		if (result?.noGain) {
 			lastCompactionNoGain = true;
 			const message = "compaction would not reduce context; checkpoint discarded (usage recorded)";
