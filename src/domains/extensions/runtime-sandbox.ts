@@ -1,4 +1,4 @@
-import { existsSync } from "node:fs";
+import { lstatSync, mkdirSync } from "node:fs";
 import path from "node:path";
 import { canonicalizeExistingPath } from "../../core/path-canonical.js";
 import { sandboxAvailability } from "../../core/sandbox/availability.js";
@@ -54,12 +54,12 @@ function managedPaths(workspace: string): string[] {
 
 /**
  * Refuse a declared write root that reaches Clio's own installed resources,
- * state, trust or policy, by name, as a broad ancestor or through an alias.
+ * state, trust, policy or Git metadata, by name, as a broad ancestor or through an alias.
  * Roots resolve physically here, so a link inside the workspace cannot name
  * `.clio-coder` under another spelling, and a root that lands outside the
  * workspace is refused too.
  */
-export function assertDeclaredWriteRoots(declaration: ExtensionRuntimeDeclarationV2, workspace: string): void {
+function assertDeclaredWriteRoots(declaration: ExtensionRuntimeDeclarationV2, workspace: string): void {
 	const home = canonicalizeExistingPath(workspace);
 	const managed = managedPaths(home);
 	for (const entry of declaration.permissions.fs.write) {
@@ -68,15 +68,37 @@ export function assertDeclaredWriteRoots(declaration: ExtensionRuntimeDeclaratio
 		if (!contained(home, root)) throw new Error(`declared write root ${entry} resolves outside the workspace`);
 		const hit = managed.find((protectedPath) => contained(protectedPath, root) || contained(root, protectedPath));
 		if (hit) throw new Error(`declared write root ${entry} overlaps Clio-managed path ${hit}`);
+		// The sandbox keeps Git metadata read-only, and creating the root would plant a .git in a non-repository.
+		if (contained(path.join(home, ".git"), root)) throw new Error(`declared write root ${entry} is inside Git metadata`);
 	}
 }
 
-/** The directory an OS sandbox binds writable for one declared root: the root itself, or its nearest existing parent inside the workspace. */
-function bindableRoot(workspace: string, entry: string): string {
-	let candidate = path.join(workspace, entry);
-	while (!existsSync(candidate) && contained(workspace, path.dirname(candidate)) && candidate !== workspace)
-		candidate = path.dirname(candidate);
-	return candidate;
+/**
+ * Create the declared write roots that do not exist yet, so the OS sandbox binds
+ * exactly each declared directory and never a parent. This runs after
+ * `assertDeclaredWriteRoots`, one component at a time from the physical
+ * workspace, and refuses any component that is not a plain directory: a root
+ * never exists through a link, and a link cannot be swapped in underneath it.
+ */
+export function prepareDeclaredWriteRoots(declaration: ExtensionRuntimeDeclarationV2, workspace: string): void {
+	assertDeclaredWriteRoots(declaration, workspace);
+	const home = canonicalizeExistingPath(workspace);
+	for (const entry of declaration.permissions.fs.write) {
+		if (entry === "store") continue;
+		let current = home;
+		for (const segment of entry.split("/")) {
+			if (segment === ".") continue;
+			current = path.join(current, segment);
+			try {
+				mkdirSync(current);
+			} catch (error) {
+				// An existing component is checked below; any other failure leaves the root unusable.
+				if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+			}
+			if (!lstatSync(current).isDirectory())
+				throw new Error(`declared write root ${entry} passes through ${current}, which is not a plain directory`);
+		}
+	}
 }
 
 /**
@@ -110,8 +132,7 @@ export function planExtensionLaunch(input: {
 	const workspace = canonicalizeExistingPath(roots.workspace);
 	const writable = new Set<string>();
 	if (declaration.permissions.fs.write.includes("store")) writable.add(roots.storeDir);
-	for (const entry of declaration.permissions.fs.write)
-		if (entry !== "store") writable.add(bindableRoot(workspace, entry));
+	for (const entry of declaration.permissions.fs.write) if (entry !== "store") writable.add(path.join(workspace, entry));
 	let invocation: ReturnType<typeof composeWorkerSandboxInvocation>;
 	try {
 		invocation = composeWorkerSandboxInvocation(

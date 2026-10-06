@@ -29,7 +29,7 @@ import {
 	parseInterviewNext,
 } from "./runtime-output-v2.js";
 import type { RuntimeProcessState } from "./runtime-process.js";
-import { assertDeclaredWriteRoots, type ExtensionSandboxReport, planExtensionLaunch } from "./runtime-sandbox.js";
+import { type ExtensionSandboxReport, planExtensionLaunch, prepareDeclaredWriteRoots } from "./runtime-sandbox.js";
 import { extensionPlainText, RUNTIME_LIMITS } from "./runtime-schema.js";
 import { RUNTIME_V2_LIMITS } from "./runtime-schema-v2.js";
 import type { LoadableExtension } from "./types.js";
@@ -160,8 +160,9 @@ export class ExtensionRuntimeProcessV2 {
 		this.copyRoot = temporary;
 		const copy = path.join(temporary, "package");
 		try {
-			// A declared write root may not reach Clio's own installed resources, state, trust or policy.
-			assertDeclaredWriteRoots(this.declaration, options.snapshot.workspace);
+			// A declared write root may not reach Clio's own installed resources, state, trust or policy,
+			// and exists as a plain directory before launch so the sandbox binds exactly it.
+			prepareDeclaredWriteRoots(this.declaration, options.snapshot.workspace);
 			cpSync(extension.provenance.canonicalRoot, copy, { recursive: true, dereference: false, verbatimSymlinks: true });
 			const manifestName = path.basename(extension.manifestPath);
 			const verified = extensionContentDigestWithCapture(copy, { capture: [manifestName] });
