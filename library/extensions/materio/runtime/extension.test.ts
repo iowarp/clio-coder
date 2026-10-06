@@ -99,6 +99,16 @@ test("without its plugin the bench names local commands and explains unavailable
 	const workspace = project();
 	const host = await createExtensionTestHost(ROOT, { workspace, plugin: null });
 	try {
+		const refused = await host.tool("record_decision", {
+			decision: "Choose a model",
+			rationale: "Research identity is missing",
+		});
+		assert.equal(refused.isError, true);
+		assert.match(
+			refused.text,
+			/STATE.md is missing.*extension_materio__interview.*identify-research.*confirmation.*\/ext:materio:help/,
+		);
+		assert.doesNotMatch(refused.text, /\/materio:/);
 		for (const command of ["lab", "status", "progress", "help", "cost"]) {
 			const output = await host.command(command);
 			assert.doesNotMatch(JSON.stringify(output), /\/materio:/);
@@ -142,6 +152,20 @@ test("without its plugin the bench names local commands and explains unavailable
 			assert.match((await partial.command("help")).text, /\/materio:status.*\/ext:materio:progress/);
 		} finally {
 			await partial.dispose();
+		}
+		const paired = await createExtensionTestHost(ROOT, {
+			workspace,
+			plugin: { id: "materio", prompts: ["materio:identify-research"] },
+		});
+		try {
+			const refused = await paired.tool("record_decision", {
+				decision: "Choose a model",
+				rationale: "Research identity is missing",
+			});
+			assert.equal(refused.isError, true);
+			assert.match(refused.text, /Run \/materio:identify-research.*confirm.*create it/);
+		} finally {
+			await paired.dispose();
 		}
 	} finally {
 		await host.dispose();

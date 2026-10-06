@@ -725,7 +725,14 @@ async function runtimeTool(name: string, value: unknown, ctx: ExtensionContextV2
 			if (!taskBlock(workflow, id)) throw new Error(`Decision scope Task ${id} is not active.`);
 		}
 		let state = readResearch(ctx.snapshot.workspace, "STATE.md");
-		if (!state) throw new Error("STATE.md is missing; initialize research before recording decisions.");
+		if (!state) {
+			const command = researchCommand(ctx, "identify-research");
+			throw new Error(
+				command
+					? `.research/STATE.md is missing. Run ${command} and confirm the research identity to create it, then retry record_decision.`
+					: `.research/STATE.md is missing. ${researchStep(ctx, "identify-research")}. Ask Clio to call extension_materio__interview with form: "identify-research" and complete its confirmation to create the state, then retry record_decision. Use ${localCommand(ctx, "help")} for lab guidance.`,
+			);
+		}
 		if (!/^## Decisions Made\s*$/m.test(state)) state = `${state.trimEnd()}\n\n## Decisions Made\n`;
 		const entry = `\n### ${new Date().toISOString()} · ${scope.replace(/\n/g, " ")}\nDecision: ${decision}\nRationale: ${rationale}\n`;
 		state = state.replace(
