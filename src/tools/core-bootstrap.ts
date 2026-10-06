@@ -48,7 +48,7 @@ import { createTasksTool } from "./tasks.js";
 import { verifyToolSurface } from "./verify/surface.js";
 import { createVisionTool } from "./vision.js";
 import { webFetchToolSurface, webReadToolSurface } from "./web-fetch-surface.js";
-import { writeToolSurface } from "./write-surface.js";
+import { writeTool } from "./write.js";
 
 export interface CoreToolBootstrapDeps {
 	/** Native session accounting only. Worker registries do not inherit it. */
@@ -129,10 +129,7 @@ export function registerCoreTools(registry: ToolRegistry, deps: CoreToolBootstra
 		...builtin(createReadTool(deps.readRecall), { path: "src/tools/read.ts", scope: "core" }),
 	});
 	registry.register({
-		...builtin(lazyTool(writeToolSurface, async () => (await import("./write.js")).writeTool), {
-			path: "src/tools/write.ts",
-			scope: "core",
-		}),
+		...builtin(writeTool, { path: "src/tools/write.ts", scope: "core" }),
 	});
 	registry.register({
 		...builtin(lazyTool(editToolSurface, async () => (await import("./edit.js")).editTool), {
