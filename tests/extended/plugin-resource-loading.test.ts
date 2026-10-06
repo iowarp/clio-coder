@@ -9,7 +9,7 @@ import type { PackageActivity } from "../../src/core/package-activity.js";
 import { bindPackageActivitySink, PLUGIN_RESOURCE_USE } from "../../src/core/package-activity.js";
 import { skillActivationFromToolDetails } from "../../src/core/skill-activation.js";
 import { createAgentsBundle } from "../../src/domains/agents/extension.js";
-import { listFleetContracts, loadFleetContract } from "../../src/domains/agents/fleet-contract.js";
+import { listPlaybooks, loadPlaybook } from "../../src/domains/agents/playbook.js";
 import { discoverAgentRecipes } from "../../src/domains/agents/registry.js";
 import {
 	disablePlugin,
@@ -170,7 +170,7 @@ it("plugin resources retain their owner", async () => {
 	}
 });
 
-it("loads installed plugin prompts, bound skills, recipes and fleets with contained references and stable names", async () => {
+it("loads installed plugin prompts, bound skills, agents and playbooks with contained references and stable names", async () => {
 	const env = await isolateClioEnv("clio-coder-plugin-quote'-load-");
 	try {
 		const cwd = join(env.dir, "workspace");
@@ -198,53 +198,16 @@ it("loads installed plugin prompts, bound skills, recipes and fleets with contai
 		const bound = loadSkills({ cwd, disableDiscovery: true, explicitSkillPaths: recipe.boundSkillPaths });
 		ok(bound.items[0]);
 		ok(!bound.items[0].content.includes("${"));
-		const fleet = loadFleetContract(cwd, "materio-review");
+		const fleet = loadPlaybook(cwd, "materio-review");
 		ok(fleet.body.includes(join(root, "assets/reference.txt")));
-		strictEqual(listFleetContracts(cwd).find((item) => item.name === fleet.name)?.source, "plugin");
+		strictEqual(listPlaybooks(cwd).find((item) => item.name === fleet.name)?.source, "plugin");
 		write(
 			cwd,
 			".clio-coder/playbooks/commands.yaml",
 			"version: 1\ncommands: {verify: {argv: [echo], argumentSlots: [{name: evidencePath, maxLength: 4096}]}}\n",
 		);
-		const code = loadFleetContract(cwd, "materio-code").steps[0];
+		const code = loadPlaybook(cwd, "materio-code").steps[0];
 		deepStrictEqual(code?.kind === "code" ? code.args : undefined, [join(root, "assets/reference.txt")]);
-	} finally {
-		env.restore();
-	}
-});
-
-it("loads a playbook from a plugin manifest that still uses the legacy fleets key (D9)", async () => {
-	const env = await isolateClioEnv("clio-coder-plugin-legacy-fleets-");
-	try {
-		const cwd = join(env.dir, "workspace");
-		mkdirSync(cwd);
-		const source = join(env.dir, "source");
-		write(
-			source,
-			"fleets/legacy-review.md",
-			"---\nversion: 1\nname: legacy-review\ndescription: Legacy key fixture\nsteps:\n  - id: review\n    agent: verifier\n    scope: readonly\n    dependencies: []\nmaxWorkers: 1\nonFailure: stop\n---\nReview.\n",
-		);
-		write(
-			source,
-			"plugin.json",
-			JSON.stringify({
-				$schema: "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
-				name: "legacy-fleets",
-				version: "1.0.0",
-				description: "Manifest written before fleet contracts became playbooks",
-				extensions: {
-					"ai.iowarp.clio": {
-						manifestVersion: 1,
-						resources: { fleets: "fleets" },
-						components: [{ kind: "fleet", id: "legacy-review", path: "fleets/legacy-review.md" }],
-					},
-				},
-			}),
-		);
-		const installed = installPlugin(source, { cwd, scope: "user" });
-		ok(installed.plugin?.loadable, JSON.stringify(installed.diagnostics));
-		deepStrictEqual(installed.plugin.resources, { playbooks: "fleets" });
-		strictEqual(listFleetContracts(cwd).find((item) => item.name === "legacy-review")?.source, "plugin");
 	} finally {
 		env.restore();
 	}

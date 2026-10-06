@@ -80,7 +80,7 @@ describe("harness extension package boundary", () => {
 			version: "1.0.0",
 			description: "Domain workflow that belongs in a plugin.",
 		};
-		for (const key of ["resources", "prompts", "skills", "agents", "fleets"] as const) {
+		for (const key of ["resources", "prompts", "skills", "agents", "playbooks"] as const) {
 			const parsed = parseExtensionManifest({ ...base, [key]: "prompts" }, "/fixture/clio-coder-extension.yaml");
 			strictEqual(parsed.manifest, undefined);
 			ok(
@@ -88,7 +88,7 @@ describe("harness extension package boundary", () => {
 					(diagnostic) =>
 						diagnostic.type === "error" &&
 						diagnostic.message ===
-							`harness extensions cannot declare '${key}'; domain resources belong in a plugin: clio-coder library install <path>`,
+							`extensions cannot declare '${key}'; domain resources belong in a plugin: clio-coder library install <path>`,
 				),
 				`missing plugin guidance for ${key}`,
 			);

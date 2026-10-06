@@ -1,7 +1,7 @@
 /**
  * Shared per-resource projection for every inbound route: local-agent adoption
  * and explicit foreign package import both turn host text into the same Clio
- * recipe bytes through these helpers. Nothing here writes to a source tree.
+ * component bytes through these helpers. Nothing here writes to a source tree.
  */
 import { createHash } from "node:crypto";
 import { lstatSync, readdirSync, readFileSync, readlinkSync } from "node:fs";
@@ -95,11 +95,8 @@ export function tree(root: string, dataOnly = false, omitted: string[] = []): Re
 		for (const name of readdirSync(dir).sort()) {
 			const file = path.join(dir, name);
 			const relative = path.relative(root, file).split(path.sep).join("/");
-			// A data-only projection omits playbooks; `fleets` is their pre-D9 directory name (legacy read, one release).
-			if (
-				dataOnly &&
-				relative.split("/").some((part) => FORBIDDEN_PARTS.has(part) || part === "playbooks" || part === "fleets")
-			) {
+			// A data-only projection omits playbooks.
+			if (dataOnly && relative.split("/").some((part) => FORBIDDEN_PARTS.has(part) || part === "playbooks")) {
 				let isDirectory = false;
 				try {
 					isDirectory = lstatSync(file).isDirectory();
@@ -197,7 +194,7 @@ export interface ProjectedResource {
 	componentPath: string;
 	omittedFields: string[];
 	omittedFiles: string[];
-	/** Companion files the retained text refers to; the recipe is unavailable without them. */
+	/** Companion files the retained text refers to; the component is unavailable without them. */
 	requiredOmissions: string[];
 	/** Skill names the host bound to this resource; the caller decides whether they are satisfiable. */
 	bindings: string[];
@@ -336,7 +333,7 @@ export function projectAgent(input: {
 	};
 }
 
-/** Command markdown becomes a Clio prompt recipe; only description and argument hint survive. */
+/** Command markdown becomes a Clio prompt; only description and argument hint survive. */
 export function projectPrompt(input: { file: string; name: string; text?: string }): ProjectedResource {
 	if (input.text === undefined && (lstatSync(input.file).mode & 0o111) !== 0)
 		throw new Error("Executable files are not adoptable.");

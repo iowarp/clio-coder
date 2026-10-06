@@ -147,7 +147,7 @@ describe("interop discovery and adoption", () => {
 		strictEqual(plugin.marketplace, "market");
 		strictEqual(found.items.filter((item) => item.kind === "skill").length, 1);
 	});
-	it("converts Markdown and TOML agents into validated read-only Clio recipes", () => {
+	it("converts Markdown and TOML agents into validated read-only Clio agents", () => {
 		file(
 			".claude/agents/review.md",
 			"---\nname: review\ndescription: Read evidence\ntools: Bash,Write\nhooks: dangerous\n---\nReview the evidence.\n",
@@ -440,7 +440,7 @@ describe("interop discovery and adoption", () => {
 		const again = planInteropAdoption({ host: "claude-code", inventory: found, cwd });
 		ok(again.entries.every((entry) => entry.action === "skip"));
 	});
-	it("refuses the real WTF-P Claude portable bundle whose prompts need omitted JSON companions", {
+	it("labels the real WTF-P Claude bundle as built for an older Clio and names the canonical install", {
 		skip: existsSync(path.join(realWtfpBundle, "plugin.json"))
 			? false
 			: "Set WTFP_CLAUDE_BUNDLE to a generated Claude bundle to run this external integration contract.",
@@ -455,11 +455,10 @@ describe("interop discovery and adoption", () => {
 			items: [{ kind: "plugin", name: "wtfp", scope: "user", path: source, marketplace: "wtfp" }],
 		};
 		const plan = planInteropAdoption({ host: "claude-code", inventory: found, cwd, kind: "plugin" });
-		// The bundle's prompts resolve ${pluginRoot}/actions/*.json at run time; a data-only copy cannot claim they work.
+		// The Claude copy keeps the retired fleets layout; Clio does not adopt it and points to the canonical WTF-P install.
 		strictEqual(plan.entries[0]?.action, "skip");
-		ok(plan.entries[0]?.reason.includes("references omitted companions"), plan.entries[0]?.reason);
-		ok(plan.entries[0]?.reason.includes("actions/"), plan.entries[0]?.reason);
-		ok(plan.entries[0]?.reason.includes("library install"));
+		ok(plan.entries[0]?.reason.includes("built for an older Clio"), plan.entries[0]?.reason);
+		ok(plan.entries[0]?.reason.includes("wtf-p install clio"), plan.entries[0]?.reason);
 		deepStrictEqual(applyInteropAdoption(plan, true).installed, []);
 		strictEqual(listInstalledPlugins(cwd, { all: true }).length, 0);
 		strictEqual(readFileSync(path.join(source, "plugin.json"), "utf8"), before);

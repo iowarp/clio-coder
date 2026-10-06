@@ -43,7 +43,7 @@ interface Parsed {
 	includePrompts?: boolean;
 	includeSkills?: boolean;
 	includeAgents?: boolean;
-	includeFleets?: boolean;
+	includePlaybooks?: boolean;
 	includeSettings?: boolean;
 	includeExtensions?: boolean;
 }
@@ -106,9 +106,7 @@ function parse(argv: ReadonlyArray<string>): Parsed | null {
 				out.includeAgents = true;
 				break;
 			case "--playbooks":
-			// D9 legacy read: `--fleets` selected playbooks before the rename.
-			case "--fleets":
-				out.includeFleets = true;
+				out.includePlaybooks = true;
 				break;
 			case "--settings":
 				out.includeSettings = true;
@@ -121,7 +119,7 @@ function parse(argv: ReadonlyArray<string>): Parsed | null {
 				out.includePrompts = true;
 				out.includeSkills = true;
 				out.includeAgents = true;
-				out.includeFleets = true;
+				out.includePlaybooks = true;
 				out.includeSettings = true;
 				out.includeExtensions = true;
 				break;
@@ -148,7 +146,6 @@ const EXPORT_INCLUDE_FLAGS = [
 	"--skills",
 	"--agents",
 	"--playbooks",
-	"--fleets",
 	"--settings",
 	"--extensions",
 	"--all",
@@ -204,7 +201,7 @@ function exportOptions(parsed: Parsed): ShareExportOptions {
 		...(parsed.includePrompts !== undefined ? { includePrompts: parsed.includePrompts } : {}),
 		...(parsed.includeSkills !== undefined ? { includeSkills: parsed.includeSkills } : {}),
 		...(parsed.includeAgents !== undefined ? { includeAgents: parsed.includeAgents } : {}),
-		...(parsed.includeFleets !== undefined ? { includeFleets: parsed.includeFleets } : {}),
+		...(parsed.includePlaybooks !== undefined ? { includePlaybooks: parsed.includePlaybooks } : {}),
 		...(parsed.includeSettings !== undefined ? { includeSettings: parsed.includeSettings } : {}),
 		...(parsed.includeExtensions !== undefined ? { includeExtensions: parsed.includeExtensions } : {}),
 	};

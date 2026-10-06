@@ -24,13 +24,7 @@ import {
 } from "../../core/safe-resource-write.js";
 import { clioConfigDir, resolveClioDirs } from "../../core/xdg.js";
 import { parseFrontmatter } from "../agents/frontmatter.js";
-import {
-	assertAgentSpecPolicy,
-	legacyPlaybookDirs,
-	normalizeAgentSpec,
-	parseAgentRecipeSchema,
-	parseFleetContract,
-} from "../agents/index.js";
+import { assertAgentSpecPolicy, normalizeAgentSpec, parseAgentRecipeSchema, parsePlaybook } from "../agents/index.js";
 import { loadManifestFromRoot } from "../extensions/discovery.js";
 import { envelopeReviewLines, reviewExtensionEnvelope } from "../extensions/envelope-review.js";
 import { extensionContentDigest } from "../extensions/integrity.js";
@@ -39,7 +33,7 @@ import type { ExtensionScope } from "../extensions/types.js";
 import { migrateSettingsV1Document } from "../lifecycle/migrations/2026-09-01-settings-v2.js";
 
 export type ShareScope = "project" | "user";
-export type ShareEntryType = "project-context" | "prompt" | "skill" | "agent" | "fleet" | "settings" | "extension";
+export type ShareEntryType = "project-context" | "prompt" | "skill" | "agent" | "playbook" | "settings" | "extension";
 
 export interface ShareArchiveFile {
 	type: ShareEntryType;
@@ -88,7 +82,7 @@ export interface ShareExportOptions {
 	includePrompts?: boolean;
 	includeSkills?: boolean;
 	includeAgents?: boolean;
-	includeFleets?: boolean;
+	includePlaybooks?: boolean;
 	includeSettings?: boolean;
 	includeExtensions?: boolean;
 }
@@ -270,7 +264,7 @@ function defaultedIncludes(
 		| "includePrompts"
 		| "includeSkills"
 		| "includeAgents"
-		| "includeFleets"
+		| "includePlaybooks"
 		| "includeSettings"
 		| "includeExtensions"
 	>
@@ -283,7 +277,7 @@ function defaultedIncludes(
 		options.includePrompts !== undefined ||
 		options.includeSkills !== undefined ||
 		options.includeAgents !== undefined ||
-		options.includeFleets !== undefined ||
+		options.includePlaybooks !== undefined ||
 		options.includeSettings !== undefined ||
 		options.includeExtensions !== undefined;
 	return {
@@ -291,7 +285,7 @@ function defaultedIncludes(
 		includePrompts: hasExplicitInclude ? options.includePrompts === true : true,
 		includeSkills: hasExplicitInclude ? options.includeSkills === true : true,
 		includeAgents: hasExplicitInclude ? options.includeAgents === true : true,
-		includeFleets: hasExplicitInclude ? options.includeFleets === true : true,
+		includePlaybooks: hasExplicitInclude ? options.includePlaybooks === true : true,
 		includeSettings: hasExplicitInclude ? options.includeSettings === true : true,
 		includeExtensions: hasExplicitInclude ? options.includeExtensions === true : true,
 	};
@@ -339,25 +333,10 @@ export function createShareArchive(options: ShareExportOptions = {}): ClioShareA
 			addTree(files, "agent", scope, root, `${scope}/agents`);
 		}
 	}
-	if (includes.includeFleets) {
-		// Playbooks keep the v1 entry type `fleet` and `<scope>/fleets/` archive
-		// paths, so a release from before D9 can still import the archive.
+	if (includes.includePlaybooks) {
 		for (const scope of scopes) {
 			const root = scope === "user" ? path.join(clioConfigDir(), "playbooks") : path.join(cwd, ".clio-coder", "playbooks");
-			const exported = new Set<string>();
-			addTree(files, "fleet", scope, root, `${scope}/fleets`, (relativePath) => {
-				exported.add(relativePath);
-				return true;
-			});
-			// D9 legacy read: a playbook left in `fleets/` is exported unless `playbooks/` shadows it.
-			addTree(
-				files,
-				"fleet",
-				scope,
-				legacyPlaybookDirs(cwd)[scope],
-				`${scope}/fleets`,
-				(relativePath) => !exported.has(relativePath),
-			);
+			addTree(files, "playbook", scope, root, `${scope}/playbooks`);
 		}
 	}
 	if (includes.includeExtensions) {
@@ -437,12 +416,17 @@ function parseArchive(raw: unknown): ClioShareArchive {
 		},
 		files: raw.files as ShareArchiveFile[],
 	};
+	// A released archive is immutable history: one exported before playbooks says
+	// entry type `fleet`. It reads as `playbook`; new archives only write `playbook`.
+	for (const entry of [...(Array.isArray(raw.manifest.files) ? raw.manifest.files : []), ...archive.files]) {
+		if (isRecord(entry) && entry.type === "fleet") entry.type = "playbook";
+	}
 	const allowedTypes = new Set<ShareEntryType>([
 		"project-context",
 		"prompt",
 		"skill",
 		"agent",
-		"fleet",
+		"playbook",
 		"settings",
 		"extension",
 	]);
@@ -541,7 +525,7 @@ function targetRootForFile(entry: ShareArchiveFile, options: ShareImportOptions)
 				: { root: path.join(cwd, ".clio-coder", "skills"), containmentRoot: cwd, scope };
 		case "agent":
 			return { root: path.join(config, "agents"), containmentRoot: config, scope: "user" };
-		case "fleet":
+		case "playbook":
 			return { root: path.join(config, "playbooks"), containmentRoot: config, scope: "user" };
 		case "extension":
 			return scope === "user"
@@ -854,9 +838,9 @@ function prepareShareImport(filePath: string, options: ShareImportOptions = {}):
 	}
 	for (const targetInfo of preflight.targets) {
 		const { entry, target, scope, buffer } = targetInfo;
-		if (entry.type === "fleet") {
+		if (entry.type === "playbook") {
 			try {
-				parseFleetContract(buffer.toString("utf8"), target);
+				parsePlaybook(buffer.toString("utf8"), target);
 			} catch (error) {
 				diagnostics.push({ type: "error", message: error instanceof Error ? error.message : String(error), path: target });
 				continue;
@@ -1005,7 +989,7 @@ export function importShareArchive(filePath: string, options: ShareImportOptions
 			);
 			recordLifecycleReceipt({
 				operation: "share-import",
-				kind: targetInfo.entry.type === "fleet" ? "playbook" : targetInfo.entry.type,
+				kind: targetInfo.entry.type,
 				id: targetInfo.entry.relativePath,
 				version: null,
 				contentDigest: sha256(targetInfo.buffer),

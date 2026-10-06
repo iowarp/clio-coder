@@ -181,7 +181,7 @@ targets:
 			includePrompts: false,
 			includeSkills: false,
 			includeAgents: false,
-			includeFleets: false,
+			includePlaybooks: false,
 			includeSettings: false,
 			includeExtensions: false,
 		});

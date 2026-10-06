@@ -315,8 +315,7 @@ function isClioConfigurationPath(path: string, workspaceRoot: string | undefined
 	const root = resolve(workspaceRoot ?? ".");
 	const target = path === "~" || path.startsWith("~/") ? join(homedir(), path.slice(2)) : resolve(root, path);
 	const local = relative(root, target).split(sep).join("/");
-	// `fleets/` is the pre-D9 playbook directory, still read for one release.
-	return /^\.clio-coder\/(?:settings(?:\.local)?\.yaml|(?:playbooks|fleets)\/[^/]+\.md)$/u.test(local);
+	return /^\.clio-coder\/(?:settings(?:\.local)?\.yaml|playbooks\/[^/]+\.md)$/u.test(local);
 }
 
 /** Relative targets resolve against the workspace; `~` and absolute paths are judged where they land. */
