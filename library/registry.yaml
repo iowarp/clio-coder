@@ -371,7 +371,7 @@ entries:
       - search the skills marketplace
     version: 0.2.2
     sourceUrl: skills/meta/find-skills
-    sha256: 709a6a460f773d0a74329a617203c8121bcdbdbbff8c99f5cac0846b1237db81
+    sha256: 04048cf4b03d13a8c2e2e3f03b1becd4ba597fbfb4b1f8c32b10877d5259ea8f
     provides:
       - kind: skill
         name: find-skills
