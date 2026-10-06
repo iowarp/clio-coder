@@ -88,13 +88,13 @@ export function openExtensionsOverlay(tui: TUI, ctx: SlashCommandContext, onClos
 				];
 				if (ext.plugin) lines.push(`**Plugin:** ${pluginPairing(ext, state)}`);
 				if (ext.runtime || ext.runtimeV2) {
+					lines.push(`**Operator runtime:** ${runtime?.state ?? "not started"}; generation ${runtime?.generation ?? 0}`);
+					if (ext.runtimeV2) lines.push(`**Confinement:** ${confinement(ext.runtimeV2.permissions.net, runtime?.sandbox)}`);
 					lines.push(
-						`**Operator runtime:** ${runtime?.state ?? "not started"}; generation ${runtime?.generation ?? 0}`,
 						ext.runtimeV2
-							? "Runtime code executes on interactive startup/reload after installation, under Node permissions built from its manifest. Those are a seat belt, not a boundary: a package allowed to run programs gives them your account's authority except where the OS sandbox below confines them."
+							? "Runtime code executes on interactive startup/reload after installation, under Node permissions built from its manifest. Those are a seat belt, not a boundary: a package allowed to run programs has your account's authority except where the OS sandbox confines it."
 							: "Runtime code executes on interactive startup/reload after installation. It has your user account's authority; it is not an OS sandbox.",
 					);
-					if (ext.runtimeV2) lines.push(`**Confinement:** ${confinement(ext.runtimeV2.permissions.net, runtime?.sandbox)}`);
 					if (runtime?.reason) lines.push(runtime.reason);
 					if (runtime?.status) lines.push(`**Status:** ${runtime.status.text}`);
 					for (const command of ctx.operatorExtensions
